@@ -13,6 +13,7 @@ import {
 const BOT_TOKEN = process.env.BOT_TOKEN?.trim();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
 const WH_SECRET = process.env.WH_SECRET?.trim(); // برای اعتبارسنجی وبهوک
+const GOOGLE_DOCS_SCRIPT_URL = process.env.GOOGLE_DOCS_SCRIPT_URL?.trim();
 if (!BOT_TOKEN) { console.error('❌ BOT_TOKEN خالی است'); process.exit(1); }
 if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
 
@@ -63,7 +64,7 @@ function inc(key, date=todayPT()) {
 }
 
 /* ===== 3) Temporary store =====
-   step: 'await_process_type' | 'await_model' | 'ready'
+   step: 'await_process_type' | 'await_model' | 'await_output_format' | 'ready'
    processType: 'full' | 'clean' | 'summary'
    lastProcessType: آخرین حالت انتخاب شده برای استفاده مجدد
 */
@@ -107,11 +108,13 @@ If needed, optionally add a very short sub-point for each topic on the next line
 Focus on showing only the main topics clearly at first glance, without long explanations.`
 };  
 
-// Split long texts into Telegram-safe chunks (<= 4096 chars)
-function splitForTelegram(text, maxLen = 4096) {
+const TELEGRAM_MESSAGE_LIMIT = 4000; // کمی کمتر از محدودیت 4096 تلگرام برای پیشوندها
+
+// Split long texts into Telegram-safe chunks
+function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   if (!text) return [];
   const chunks = [];
-  let remaining = text;
+  let remaining = String(text);
   while (remaining.length > maxLen) {
     let cut = remaining.lastIndexOf('\n\n', maxLen);
     if (cut < 0) cut = remaining.lastIndexOf('\n', maxLen);
@@ -122,6 +125,29 @@ function splitForTelegram(text, maxLen = 4096) {
   }
   if (remaining.length) chunks.push(remaining);
   return chunks;
+}
+
+async function createGoogleDoc(title, content) {
+  if (!GOOGLE_DOCS_SCRIPT_URL) {
+    throw new Error('GOOGLE_DOCS_SCRIPT_URL is not configured');
+  }
+
+  const response = await fetch(GOOGLE_DOCS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google Docs proxy failed: ${response.status}`);
+  }
+
+  const result = await response.json();
+  if (!result.success || !result.url) {
+    throw new Error(result.error || 'Google Docs proxy did not return a document URL');
+  }
+
+  return result.url;
 }
 
 // Function to create process type keyboard
@@ -150,6 +176,53 @@ function createModelKeyboard(token) {
     [btnLite],
     [Markup.button.callback('🚫 منصرف شدم', `cancel:${token}`)],
   ]);
+}
+
+function createOutputFormatKeyboard(token) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📨 چند پیام جداگانه', `output:messages:${token}`)],
+    [Markup.button.callback('📄 فایل Google Docs', `output:gdocs:${token}`)],
+    [Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
+  ]);
+}
+
+function createContinueKeyboard(token) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        ...createProcessTypeKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
+        ...createModelKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
+        [[Markup.button.callback('🚫 پایان کار', `cancel:${token}`)]]
+      ]
+    }
+  };
+}
+
+async function sendContinueGuide(ctx, token) {
+  try {
+    await ctx.reply(
+      '✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.',
+      createContinueKeyboard(token)
+    );
+  } catch (err) {
+    console.error('❌ ERROR in sending guide message (non-critical):', err);
+  }
+}
+
+async function sendLongTextAsMessages(ctx, text) {
+  const parts = splitForTelegram(text);
+  if (parts.length === 0) {
+    await ctx.reply('متنی برنگشت.');
+    return;
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    const prefix = parts.length > 1 ? `📄 بخش ${i + 1} از ${parts.length}:\n\n` : '';
+    await ctx.reply(prefix + parts[i]);
+    if (i < parts.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
 }
 
 /* ===== 5) Bot logic ===== */
@@ -308,49 +381,91 @@ bot.on('callback_query', async (ctx) => {
 
       // پردازش نتیجه و ارسال (خارج از try-catch)
       const text = result.text?.trim() || 'متنی برنگشت.';
-      const parts = splitForTelegram(text, 4000);
-      
-      if (parts.length === 0) {
+      const parts = splitForTelegram(text);
+
+      if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
         try {
-          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, 'متنی برنگشت.');
+          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.');
         } catch {}
+
+        inc(key);
+
+        // session را پاک نکنیم - فقط وضعیت را به ready تغییر دهیم
+        session.step = 'ready';
+        session.processType = null; // برای کلیک بعدی reset کن
+
+        await sendContinueGuide(ctx, token);
       } else {
+        session.resultText = text;
+        session.step = 'await_output_format';
+
         try {
-          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0]);
+          await ctx.telegram.editMessageText(
+            waiting.chat.id,
+            waiting.message_id,
+            undefined,
+            `📏 خروجی طولانی است (${text.length.toLocaleString('fa-IR')} کاراکتر و ${parts.length.toLocaleString('fa-IR')} بخش تلگرامی).\n\nچطور میخوای دریافتش کنی؟`
+          );
         } catch {}
-        
-        for (let i = 1; i < parts.length; i++) {
+
+        await ctx.reply(
+          'یکی از گزینه‌های زیر رو انتخاب کن:',
+          createOutputFormatKeyboard(token)
+        );
+
+        inc(key);
+      }
+
+      return;
+    }
+
+    // Step 3: choose output format for long text
+    const o = data.match(/^output:(messages|gdocs):([a-z0-9]+)$/i);
+    if (o) {
+      const format = o[1];
+      const token = o[2];
+      const session = sessions.get(token);
+
+      if (!session?.resultText) {
+        return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      }
+
+      if (format === 'messages') {
+        await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
+        await sendLongTextAsMessages(ctx, session.resultText);
+        await ctx.reply('✅ تمام بخش‌ها ارسال شد.');
+      } else {
+        await ctx.answerCbQuery('در حال ساخت سند گوگل...');
+        const loadingMsg = await ctx.reply('📄 در حال ایجاد فایل Google Docs...');
+
+        try {
+          const title = `نسخه متنی صوت - ${new Date().toLocaleDateString('fa-IR')}`;
+          const docUrl = await createGoogleDoc(title, session.resultText);
+
+          await ctx.telegram.editMessageText(
+            loadingMsg.chat.id,
+            loadingMsg.message_id,
+            undefined,
+            `✅ سند Google Docs آماده شد!\n\n📄 ${title}\n🔗 لینک: ${docUrl}\n\n💡 لینک برای همه قابل مشاهده است.`
+          );
+        } catch (err) {
+          console.error('❌ ERROR in creating Google Docs:', err);
           try {
-            await ctx.reply(parts[i]);
+            await ctx.telegram.editMessageText(
+              loadingMsg.chat.id,
+              loadingMsg.message_id,
+              undefined,
+              '😕 خطا در ساخت Google Docs. خروجی را به صورت پیام‌های جداگانه می‌فرستم...'
+            );
           } catch {}
+
+          await sendLongTextAsMessages(ctx, session.resultText);
         }
       }
 
-      inc(key);
-      
-      // session را پاک نکنیم - فقط وضعیت را به ready تغییر دهیم
       session.step = 'ready';
-      session.processType = null; // برای کلیک بعدی reset کن
-      
-      // پیام راهنمایی برای ادامه استفاده (جدا و محافظت شده)
-      try {
-        await ctx.reply(
-          '✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.',
-          {
-            reply_markup: {
-              inline_keyboard: [
-                ...createProcessTypeKeyboard(token).reply_markup.inline_keyboard.slice(0, -1), // بدون دکمه منصرف شدم
-                ...createModelKeyboard(token).reply_markup.inline_keyboard.slice(0, -1), // بدون دکمه منصرف شدم
-                [[Markup.button.callback('🚫 پایان کار', `cancel:${token}`)]]
-              ]
-            }
-          }
-        );
-      } catch (err) {
-        console.error('❌ ERROR in sending guide message (non-critical):', err);
-        // این خطا مهم نیست - خروجی اصلی ارسال شده
-      }
-
+      session.processType = null;
+      await sendContinueGuide(ctx, token);
       return;
     }
 

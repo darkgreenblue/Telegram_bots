@@ -6,7 +6,7 @@
 
 ```bash
 cp .env.example .env
-# مقادیر BOT_TOKEN، GEMINI_API_KEY، WH_SECRET را در .env بگذارید
+# مقادیر BOT_TOKEN، GEMINI_API_KEY، WH_SECRET و در صورت نیاز GOOGLE_DOCS_SCRIPT_URL را در .env بگذارید
 
 npm install
 npm start
@@ -64,16 +64,44 @@ gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthen
 
 نام سرویس (`tg-voice2text`) یا منطقه را اگر خواستید عوض کنید.
 
-**متغیرهای محیط** را یا همان اول در کنسول Cloud Run برای سرویس ست کنید (`BOT_TOKEN`, `GEMINI_API_KEY`, `WH_SECRET`)، یا اگر `.env` دارید و مقادیر بدون کاراکتر مشکل‌ساز هستند، می‌توانید بعد از بارگذاری متغیرها در شل، همراه deploy بفرستید:
+**متغیرهای محیط** را یا همان اول در کنسول Cloud Run برای سرویس ست کنید (`BOT_TOKEN`, `GEMINI_API_KEY`, `WH_SECRET`, `GOOGLE_DOCS_SCRIPT_URL`)، یا اگر `.env` دارید و مقادیر بدون کاراکتر مشکل‌ساز هستند، می‌توانید بعد از بارگذاری متغیرها در شل، همراه deploy بفرستید:
 
 ```bash
 cd /Users/divar/Desktop/voicetotext
 set -a && source .env && set +a
 gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthenticated \
-  --set-env-vars="BOT_TOKEN=${BOT_TOKEN},GEMINI_API_KEY=${GEMINI_API_KEY},WH_SECRET=${WH_SECRET}"
+  --set-env-vars="BOT_TOKEN=${BOT_TOKEN},GEMINI_API_KEY=${GEMINI_API_KEY},WH_SECRET=${WH_SECRET},GOOGLE_DOCS_SCRIPT_URL=${GOOGLE_DOCS_SCRIPT_URL}"
 ```
 
 در پایان خروجی، **URL** سرویس را بردارید.
+
+### Google Docs برای خروجی‌های طولانی
+
+برای گزینهٔ «فایل Google Docs» یک Apps Script Web App بسازید که درخواست `POST` با بدنهٔ `{ "title": "...", "content": "..." }` بگیرد و پاسخ `{ "success": true, "url": "..." }` برگرداند. URL نهایی Web App را در `GOOGLE_DOCS_SCRIPT_URL` بگذارید.
+
+نمونهٔ کد Apps Script:
+
+```javascript
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const doc = DocumentApp.create(data.title || 'Voice transcript');
+    doc.getBody().setText(data.content || '');
+    doc.saveAndClose();
+
+    const file = DriveApp.getFileById(doc.getId());
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ success: true, url: doc.getUrl() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ success: false, error: String(err) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+```
 
 ### ۶) وبهوک تلگرام
 
