@@ -20,11 +20,11 @@ if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); proc
 /* ===== 1) Clients ===== */
 const bot = new Telegraf(BOT_TOKEN);
 
-// 🟢 تغییر اصلی اینجاست: اضافه کردن httpOptions برای هدایت به سرور گپ جی‌پی‌تی
 const ai = new GoogleGenAI({ 
   apiKey: GEMINI_API_KEY,
   httpOptions: {
-    baseUrl: 'https://api.gapgpt.app' // در صورت نیاز به CDN خارجی می‌توانید از 'https://api.gapapi.com' استفاده کنید
+    // نکته مهم: حتماً اسلش آخر را بگذارید یا طبق مستندات گپ جی‌پی‌تی عمل کنید
+    baseUrl: 'https://api.gapgpt.app' 
   }
 });
 
