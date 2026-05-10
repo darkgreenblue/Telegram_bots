@@ -1,0 +1,60 @@
+# فقط این دو حالت به Google Cloud Run دیپلوی می‌کند:
+# 1) push کردن تگ semver مثل v1.0.0 (توافق = زدن تگ روی commit درست)
+# 2) Run workflow دستی در GitHub با ورودی git_ref (مثلاً همان تگ بعد از توافق)
+name: Deploy to Cloud Run
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'تگ / شاخه / SHA برای checkout (مثلاً v1.2.0)'
+        required: true
+        type: string
+        default: 'main'
+
+concurrency:
+  group: deploy-cloud-run-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.git_ref || github.ref }}
+
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy (source → Cloud Run)
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WH_SECRET: ${{ secrets.WH_SECRET }}
+        run: |
+          set -euo pipefail
+          REGION="${GCP_REGION:-us-central1}"
+          SERVICE="${CLOUD_RUN_SERVICE:-tg-voice2text}"
+          echo "Deploying ref: $(git rev-parse --short HEAD) service=$SERVICE region=$REGION"
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$REGION" \
+            --allow-unauthenticated \
+            --quiet \
+            --set-env-vars="BOT_TOKEN=${BOT_TOKEN},GEMINI_API_KEY=${GEMINI_API_KEY},WH_SECRET=${WH_SECRET}"
