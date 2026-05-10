@@ -24,7 +24,7 @@ gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthen
 
 ## نکته
 
-فایل اصلی اپ به‌خاطر نام قبلی `voicetotext.py` است ولی محتوای آن **JavaScript** است؛ اسکریپت `start` همان را با `node` اجرا می‌کند.
+نقطهٔ ورود اپ **`index.js`** است (ماژول ES برای Node ۲۰).
 
 ## اتصال به GitHub
 
