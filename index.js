@@ -1,36 +1,30 @@
 // index.js — Telegram voice → choose process type → choose model → transcribe (Cloud Run / Webhook)
 import 'dotenv/config';
 import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import { Telegraf, Markup } from 'telegraf';
-import {
-  GoogleGenAI,
-  createUserContent,
-  createPartFromUri,
-} from '@google/genai';
+import OpenAI from 'openai';
 
 /* ===== 0) ENV ===== */
 const BOT_TOKEN = process.env.BOT_TOKEN?.trim();
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim(); // کلید گپ جی‌پی‌تی
 const WH_SECRET = process.env.WH_SECRET?.trim(); // برای اعتبارسنجی وبهوک
 const GOOGLE_DOCS_SCRIPT_URL = process.env.GOOGLE_DOCS_SCRIPT_URL?.trim();
+
 if (!BOT_TOKEN) { console.error('❌ BOT_TOKEN خالی است'); process.exit(1); }
 if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
 
 /* ===== 1) Clients ===== */
 const bot = new Telegraf(BOT_TOKEN);
 
-const ai = new GoogleGenAI({ 
+// کلاینت یکپارچه با استفاده از OpenAI SDK برای گپ جی‌پی‌تی
+const ai = new OpenAI({
   apiKey: GEMINI_API_KEY,
-  httpOptions: {
-    // نکته مهم: حتماً اسلش آخر را بگذارید یا طبق مستندات گپ جی‌پی‌تی عمل کنید
-    baseUrl: 'https://api.gapgpt.app' 
-  }
+  baseURL: 'https://api.gapgpt.app/v1'
 });
 
-/* ===== 2) Usage counters (daily by PT) =====
-   نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
-*/
+/* ===== 2) Usage counters (daily by PT) ===== */
 const PT_TZ = 'America/Los_Angeles';
 const USAGE_FILE = '/tmp/usage.json';
 const FREE_QUOTAS = { pro: 100, flash: 250, flashlite: 1000 };
@@ -44,10 +38,10 @@ function todayPT() {
   const d = parts.find(p=>p.type==='day').value;
   return `${y}-${m}-${d}`;
 }
-function atomicSave(path, data) {
-  const tmp = path + '.tmp';
+function atomicSave(filePath, data) {
+  const tmp = filePath + '.tmp';
   fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, path);
+  fs.renameSync(tmp, filePath);
 }
 function loadUsage() {
   try {
@@ -70,23 +64,23 @@ function inc(key, date=todayPT()) {
   atomicSave(USAGE_FILE, JSON.stringify(USAGE));
 }
 
-/* ===== 3) Temporary store =====
-   step: 'await_process_type' | 'await_model' | 'await_output_format' | 'ready'
-   processType: 'full' | 'clean' | 'summary'
-   lastProcessType: آخرین حالت انتخاب شده برای استفاده مجدد
-*/
-const sessions = new Map(); // به جای pending، sessions که طولانی‌مدت هستند
+/* ===== 3) Temporary store ===== */
+const sessions = new Map();
 function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 
-// cleanup sessions هر 2 ساعت (به جای 20 دقیقه)
+// cleanup sessions هر 2 ساعت
 setInterval(() => {
   const now = Date.now();
-  for (const [k,v] of sessions) {
-    if (now - v.createdAt > 2*60*60*1000) { // 2 ساعت
-      sessions.delete(k);
+  for (const [token, session] of sessions) {
+    if (now - session.createdAt > 2*60*60*1000) {
+      // پاک کردن فایل موقت از Cloud Run برای جلوگیری از پر شدن حافظه
+      if (session.filePath && fs.existsSync(session.filePath)) {
+        try { fs.unlinkSync(session.filePath); } catch(e){}
+      }
+      sessions.delete(token);
     }
   }
-}, 30*60*1000); // هر 30 دقیقه چک کن
+}, 30*60*1000); 
 
 /* ===== 4) Maps ===== */
 const MODEL_MAP = {
@@ -94,6 +88,7 @@ const MODEL_MAP = {
   flash: 'gemini-2.5-flash',
   flashlite: 'gemini-2.5-flash-lite',
 };
+
 const PROMPT_MAP = {
   full: `Transcribe the entire speech exactly as spoken, in the same language, with proper punctuation. 
 If there is more than one distinct speaker, identify them and assign labels as "شخص ۱", "شخص ۲", etc., consistently throughout the transcript. 
@@ -115,49 +110,37 @@ If needed, optionally add a very short sub-point for each topic on the next line
 Focus on showing only the main topics clearly at first glance, without long explanations.`
 };  
 
-const TELEGRAM_MESSAGE_LIMIT = 4000; // کمی کمتر از محدودیت 4096 تلگرام برای پیشوندها
+const TELEGRAM_MESSAGE_LIMIT = 4000;
 
-// Split long texts into Telegram-safe chunks
 function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   if (!text) return [];
   const chunks = [];
-  let remaining = String(text);
-  while (remaining.length > maxLen) {
-    let cut = remaining.lastIndexOf('\n\n', maxLen);
-    if (cut < 0) cut = remaining.lastIndexOf('\n', maxLen);
-    if (cut < 0) cut = remaining.lastIndexOf(' ', maxLen);
+  let remainingText = String(text);
+  while (remainingText.length > maxLen) {
+    let cut = remainingText.lastIndexOf('\n\n', maxLen);
+    if (cut < 0) cut = remainingText.lastIndexOf('\n', maxLen);
+    if (cut < 0) cut = remainingText.lastIndexOf(' ', maxLen);
     if (cut < 0) cut = maxLen;
-    chunks.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trimStart();
+    chunks.push(remainingText.slice(0, cut).trim());
+    remainingText = remainingText.slice(cut).trimStart();
   }
-  if (remaining.length) chunks.push(remaining);
+  if (remainingText.length) chunks.push(remainingText);
   return chunks;
 }
 
 async function createGoogleDoc(title, content) {
-  if (!GOOGLE_DOCS_SCRIPT_URL) {
-    throw new Error('GOOGLE_DOCS_SCRIPT_URL is not configured');
-  }
-
+  if (!GOOGLE_DOCS_SCRIPT_URL) throw new Error('GOOGLE_DOCS_SCRIPT_URL is not configured');
   const response = await fetch(GOOGLE_DOCS_SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, content }),
   });
-
-  if (!response.ok) {
-    throw new Error(`Google Docs proxy failed: ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`Google Docs proxy failed: ${response.status}`);
   const result = await response.json();
-  if (!result.success || !result.url) {
-    throw new Error(result.error || 'Google Docs proxy did not return a document URL');
-  }
-
+  if (!result.success || !result.url) throw new Error(result.error || 'No document URL returned');
   return result.url;
 }
 
-// Function to create process type keyboard
 function createProcessTypeKeyboard(token) {
   return Markup.inlineKeyboard([
     [Markup.button.callback('📝 متن کامل', `ptype:full:${token}`)],
@@ -167,22 +150,16 @@ function createProcessTypeKeyboard(token) {
   ]);
 }
 
-// Function to create model keyboard
 function createModelKeyboard(token) {
   const labelPro   = `Gemini Pro (${remaining('pro')})`;
   const labelFlash = `Gemini Flash (${remaining('flash')})`;
   const labelLite  = `Gemini Flash Lite (${remaining('flashlite')})`;
 
-  const btnPro   = remaining('pro')      > 0 ? Markup.button.callback(labelPro,   `model:pro:${token}`)      : Markup.button.callback('Gemini Pro — تکمیل',   `noop:${token}`);
-  const btnFlash = remaining('flash')    > 0 ? Markup.button.callback(labelFlash, `model:flash:${token}`)    : Markup.button.callback('Gemini Flash — تکمیل', `noop:${token}`);
-  const btnLite  = remaining('flashlite')> 0 ? Markup.button.callback(labelLite,  `model:flashlite:${token}`) : Markup.button.callback('Gemini Flash Lite — تکمیل', `noop:${token}`);
+  const btnPro   = remaining('pro') > 0 ? Markup.button.callback(labelPro, `model:pro:${token}`) : Markup.button.callback('Gemini Pro — تکمیل', `noop:${token}`);
+  const btnFlash = remaining('flash') > 0 ? Markup.button.callback(labelFlash, `model:flash:${token}`) : Markup.button.callback('Gemini Flash — تکمیل', `noop:${token}`);
+  const btnLite  = remaining('flashlite') > 0 ? Markup.button.callback(labelLite, `model:flashlite:${token}`) : Markup.button.callback('Gemini Flash Lite — تکمیل', `noop:${token}`);
 
-  return Markup.inlineKeyboard([
-    [btnPro],
-    [btnFlash],
-    [btnLite],
-    [Markup.button.callback('🚫 منصرف شدم', `cancel:${token}`)],
-  ]);
+  return Markup.inlineKeyboard([ [btnPro], [btnFlash], [btnLite], [Markup.button.callback('🚫 منصرف شدم', `cancel:${token}`)] ]);
 }
 
 function createOutputFormatKeyboard(token) {
@@ -207,28 +184,19 @@ function createContinueKeyboard(token) {
 
 async function sendContinueGuide(ctx, token) {
   try {
-    await ctx.reply(
-      '✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.',
-      createContinueKeyboard(token)
-    );
+    await ctx.reply('✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.', createContinueKeyboard(token));
   } catch (err) {
-    console.error('❌ ERROR in sending guide message (non-critical):', err);
+    console.error('❌ ERROR in sending guide message:', err);
   }
 }
 
 async function sendLongTextAsMessages(ctx, text) {
   const parts = splitForTelegram(text);
-  if (parts.length === 0) {
-    await ctx.reply('متنی برنگشت.');
-    return;
-  }
-
+  if (parts.length === 0) return ctx.reply('متنی برنگشت.');
   for (let i = 0; i < parts.length; i++) {
     const prefix = parts.length > 1 ? `📄 بخش ${i + 1} از ${parts.length}:\n\n` : '';
     await ctx.reply(prefix + parts[i]);
-    if (i < parts.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+    if (i < parts.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
 
@@ -238,10 +206,14 @@ bot.start((ctx) => ctx.reply('سلام! یک ویس بفرست. 🎤'));
 bot.on(['voice','audio'], async (ctx) => {
   const thinking = await ctx.reply('⏳ دریافت فایل...');
   try {
-    // قبل از هر چیز، sessions قبلی این کاربر را پاک می‌کنیم
     const userId = ctx.from.id;
+    
+    // پاک‌سازی سشن و فایل‌های قبلی همین کاربر
     for (const [token, session] of sessions) {
       if (session.userId === userId) {
+        if (session.filePath && fs.existsSync(session.filePath)) {
+          try { fs.unlinkSync(session.filePath); } catch(e){}
+        }
         sessions.delete(token);
       }
     }
@@ -254,40 +226,29 @@ bot.on(['voice','audio'], async (ctx) => {
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
 
-    // 2) Upload
-    let mimeType = 'audio/ogg';
-    if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
-    const blob = new Blob([buffer], { type: mimeType });
-    const displayName = msg.voice ? 'voice.ogg' : (msg.audio?.file_name || 'audio');
-    
-    // درخواست آپلود به صورت خودکار به گپ جی‌پی‌تی هدایت می‌شود
-    const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName } });
-    const uploaded = uploadedAny.file ?? uploadedAny;
-    if (!uploaded?.uri) throw new Error('No uploaded.uri');
-
-    // 3) Save session
+    // 2) Save to /tmp
     const token = makeToken();
+    const ext = msg.voice ? 'ogg' : 'mp3';
+    const filePath = path.join('/tmp', `${token}.${ext}`);
+    fs.writeFileSync(filePath, buffer);
+
+    // 3) Save session (No upload to GapGPT yet)
     sessions.set(token, {
       step: 'await_process_type',
-      uri: uploaded.uri,
-      mimeType: uploaded.mimeType || mimeType,
+      filePath: filePath,
+      rawText: null, // کش برای جلوگیری از اجرای مجدد Whisper
       chatId: thinking.chat.id,
       promptMsgId: thinking.message_id,
       userId: userId,
       createdAt: Date.now(),
-      lastProcessType: null, // آخرین حالت انتخاب شده
+      lastProcessType: null,
     });
 
     await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, 'چطور میخوای متن پردازش بشه؟');
-    await ctx.reply(
-      'یکی از حالت‌های زیر رو انتخاب کن:',
-      createProcessTypeKeyboard(token)
-    );
+    await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
   } catch (err) {
     console.error('❌ ERROR on voice:', err);
-    try {
-      await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, '😕 خطا در پردازش. دوباره امتحان کن.');
-    } catch {}
+    try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, '😕 خطا در پردازش. دوباره امتحان کن.'); } catch {}
   }
 });
 
@@ -304,63 +265,42 @@ bot.on('callback_query', async (ctx) => {
       try { await ctx.editMessageText('لغو شد ✅'); } catch {}
       if (session) {
         try { await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, 'لغو شد ✅'); } catch {}
+        if (session.filePath && fs.existsSync(session.filePath)) {
+          try { fs.unlinkSync(session.filePath); } catch(e){}
+        }
         sessions.delete(token);
       }
       return;
     }
 
-    // Noop when quota finished
-    if (/^noop:/.test(data)) {
-      return ctx.answerCbQuery('سهمیهٔ رایگان امروز این مدل تمام شده است.', { show_alert: true });
-    }
+    // Noop
+    if (/^noop:/.test(data)) return ctx.answerCbQuery('سهمیهٔ رایگان امروز این مدل تمام شده است.', { show_alert: true });
 
-    // Step 1: choose process type
+    // Step 1: process type
     const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
     if (p) {
-      const type = p[1];
-      const token = p[2];
-      const session = sessions.get(token);
-      if (!session) {
-        return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      }
-      
-      // ذخیره حالت انتخابی
+      const type = p[1], token = p[2], session = sessions.get(token);
+      if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       session.processType = type;
       session.lastProcessType = type;
       session.step = 'await_model';
-
       await ctx.answerCbQuery(`حالت "${type}" انتخاب شد`);
-      await ctx.reply(
-        'با کدوم مدل پردازش کنم؟',
-        createModelKeyboard(token)
-      );
+      await ctx.reply('با کدوم مدل پردازش کنم؟', createModelKeyboard(token));
       return;
     }
 
-    // Step 2: choose model
+    // Step 2: model
     const m = data.match(/^model:(pro|flash|flashlite):([a-z0-9]+)$/i);
     if (m) {
-      const key = m[1].toLowerCase();
-      const token = m[2];
-      const session = sessions.get(token);
-      if (!session) {
-        return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      }
-      if (remaining(key) <= 0) {
-        return ctx.answerCbQuery('سهمیهٔ امروز این مدل تمام شده است.', { show_alert: true });
-      }
+      const key = m[1].toLowerCase(), token = m[2], session = sessions.get(token);
+      if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (remaining(key) <= 0) return ctx.answerCbQuery('سهمیهٔ امروز تمام شده.', { show_alert: true });
 
-      // اگر processType تنظیم نشده، از آخرین استفاده کن
       let processType = session.processType || session.lastProcessType || 'full';
-      
-      // اگر هنوز هیچ processType ای نداریم، به مرحله انتخاب برگرد
       if (!processType) {
         session.step = 'await_process_type';
-        await ctx.answerCbQuery('لطفاً ابتدا حالت پردازش را انتخاب کنید.');
-        await ctx.reply(
-          'یکی از حالت‌های زیر رو انتخاب کن:',
-          createProcessTypeKeyboard(token)
-        );
+        await ctx.answerCbQuery('ابتدا حالت پردازش را انتخاب کنید.');
+        await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
         return;
       }
 
@@ -368,109 +308,83 @@ bot.on('callback_query', async (ctx) => {
       const prompt = PROMPT_MAP[processType] || PROMPT_MAP.full;
 
       await ctx.answerCbQuery(`مدل انتخابی: ${model}`);
-      const waiting = await ctx.reply('⏳ در حال پردازش...');
+      const waiting = await ctx.reply('⏳ در حال استخراج و پردازش...');
 
-      // درخواست تولید محتوا به صورت خودکار به گپ جی‌پی‌تی هدایت می‌شود
-      let result;
+      let text = 'متنی برنگشت.';
       try {
-        result = await ai.models.generateContent({
-          model,
-          contents: createUserContent([
-            createPartFromUri(session.uri, session.mimeType),
-            prompt,
-          ]),
+        // مرحله اول: تبدیل صوت به متن خام با Whisper (در صورت عدم وجود کش)
+        if (!session.rawText) {
+          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '⏳ در حال پیاده‌سازی صوت (Whisper)...');
+          const transcription = await ai.audio.transcriptions.create({
+            file: fs.createReadStream(session.filePath),
+            model: 'whisper-1',
+          });
+          session.rawText = transcription.text;
+        }
+
+        // مرحله دوم: اعمال دستورات با جمینای
+        await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '⏳ متن پیاده‌سازی شد. پردازش نهایی با Gemini...');
+        
+        const completion = await ai.chat.completions.create({
+          model: model,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `متن خام استخراج شده:\n\n${session.rawText}` }
+          ]
         });
+
+        text = completion.choices[0]?.message?.content?.trim() || 'متنی برنگشت.';
       } catch (err) {
         console.error('❌ ERROR in AI processing:', err);
-        try {
-          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '😕 خطا در پردازش هوش مصنوعی. دوباره امتحان کن.');
-        } catch {}
+        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '😕 خطا در ارتباط با هوش مصنوعی.'); } catch {}
         return;
       }
 
-      // پردازش نتیجه و ارسال
-      const text = result.text?.trim() || 'متنی برنگشت.';
       const parts = splitForTelegram(text);
-
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
-        try {
-          await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.');
-        } catch {}
-
+        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
         inc(key);
-
         session.step = 'ready';
         session.processType = null;
-
         await sendContinueGuide(ctx, token);
       } else {
         session.resultText = text;
         session.step = 'await_output_format';
-
         try {
           await ctx.telegram.editMessageText(
-            waiting.chat.id,
-            waiting.message_id,
-            undefined,
-            `📏 خروجی طولانی است (${text.length.toLocaleString('fa-IR')} کاراکتر و ${parts.length.toLocaleString('fa-IR')} بخش تلگرامی).\n\nچطور میخوای دریافتش کنی؟`
+            waiting.chat.id, waiting.message_id, undefined,
+            `📏 خروجی طولانی است (${text.length.toLocaleString('fa-IR')} کاراکتر).\n\nچطور دریافتش می‌کنی؟`
           );
         } catch {}
-
-        await ctx.reply(
-          'یکی از گزینه‌های زیر رو انتخاب کن:',
-          createOutputFormatKeyboard(token)
-        );
-
+        await ctx.reply('یکی از گزینه‌های زیر رو انتخاب کن:', createOutputFormatKeyboard(token));
         inc(key);
       }
-
       return;
     }
 
-    // Step 3: choose output format for long text
+    // Step 3: output format
     const o = data.match(/^output:(messages|gdocs):([a-z0-9]+)$/i);
     if (o) {
-      const format = o[1];
-      const token = o[2];
-      const session = sessions.get(token);
-
-      if (!session?.resultText) {
-        return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      }
+      const format = o[1], token = o[2], session = sessions.get(token);
+      if (!session?.resultText) return ctx.answerCbQuery('نامعتبر است.');
 
       if (format === 'messages') {
         await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
         await sendLongTextAsMessages(ctx, session.resultText);
         await ctx.reply('✅ تمام بخش‌ها ارسال شد.');
       } else {
-        await ctx.answerCbQuery('در حال ساخت سند گوگل...');
+        await ctx.answerCbQuery('در حال ساخت سند...');
         const loadingMsg = await ctx.reply('📄 در حال ایجاد فایل Google Docs...');
-
         try {
           const title = `نسخه متنی صوت - ${new Date().toLocaleDateString('fa-IR')}`;
           const docUrl = await createGoogleDoc(title, session.resultText);
-
-          await ctx.telegram.editMessageText(
-            loadingMsg.chat.id,
-            loadingMsg.message_id,
-            undefined,
-            `✅ سند Google Docs آماده شد!\n\n📄 ${title}\n🔗 لینک: ${docUrl}\n\n💡 لینک برای همه قابل مشاهده است.`
-          );
+          await ctx.telegram.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, undefined, `✅ سند Google Docs آماده شد!\n\n📄 ${title}\n🔗 لینک: ${docUrl}\n\n💡 لینک برای همه قابل مشاهده است.`);
         } catch (err) {
-          console.error('❌ ERROR in creating Google Docs:', err);
-          try {
-            await ctx.telegram.editMessageText(
-              loadingMsg.chat.id,
-              loadingMsg.message_id,
-              undefined,
-              '😕 خطا در ساخت Google Docs. خروجی را به صورت پیام‌های جداگانه می‌فرستم...'
-            );
-          } catch {}
-
+          console.error('❌ ERROR GDocs:', err);
+          try { await ctx.telegram.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, undefined, '😕 خطا در ساخت Google Docs. خروجی را در پیام جداگانه می‌فرستم...'); } catch {}
           await sendLongTextAsMessages(ctx, session.resultText);
         }
       }
-
       session.step = 'ready';
       session.processType = null;
       await sendContinueGuide(ctx, token);
@@ -483,16 +397,11 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-/* ===== 6) Express Webhook server (Cloud Run) ===== */
+/* ===== 6) Express Webhook server ===== */
 const app = express();
-
-// health
 app.get('/', (_req, res) => res.status(200).send('OK'));
-
-// raw body as JSON
 app.use(express.json({ limit: '10mb' }));
 
-// verify Telegram secret
 app.post('/webhook', (req, res, next) => {
   const token = req.get('X-Telegram-Bot-Api-Secret-Token');
   if (WH_SECRET && token !== WH_SECRET) {
@@ -503,6 +412,4 @@ app.post('/webhook', (req, res, next) => {
 }, bot.webhookCallback('/webhook'));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`✅ Webhook server listening on ${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Webhook server listening on ${PORT}`));
