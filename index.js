@@ -156,7 +156,7 @@ function createModelKeyboard(token) {
 bot.start((ctx) => ctx.reply('سلام! یک ویس بفرست. 🎤'));
 
 bot.on(['voice','audio'], async (ctx) => {
-  const thinking = await ctx.reply('⏳ دریافت فایییییل...');
+  const thinking = await ctx.reply('⏳ دریافت فایل...');
   try {
     // قبل از هر چیز، sessions قبلی این کاربر را پاک می‌کنیم
     const userId = ctx.from.id;
