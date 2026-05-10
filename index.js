@@ -3,7 +3,11 @@ import 'dotenv/config';
 import fs from 'fs';
 import express from 'express';
 import { Telegraf, Markup } from 'telegraf';
-import OpenAI from 'openai'; // جایگزین کتابخانه گوگل شد
+import {
+  GoogleGenAI,
+  createUserContent,
+  createPartFromUri,
+} from '@google/genai';
 
 /* ===== 0) ENV ===== */
 const BOT_TOKEN = process.env.BOT_TOKEN?.trim();
@@ -15,12 +19,7 @@ if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); proc
 
 /* ===== 1) Clients ===== */
 const bot = new Telegraf(BOT_TOKEN);
-
-// کلاینت OpenAI متصل به سرورهای گپ جی‌پی‌تی
-const ai = new OpenAI({ 
-  apiKey: GEMINI_API_KEY,
-  baseURL: 'https://api.gapgpt.app/v1'
-});
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 /* ===== 2) Usage counters (daily by PT) =====
    نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
@@ -240,7 +239,7 @@ bot.on(['voice','audio'], async (ctx) => {
       }
     }
 
-    // 1) Download from Telegram
+    // 1) Download
     const msg = ctx.message;
     const media = msg.voice || msg.audio;
     const fileUrl = await ctx.telegram.getFileLink(media.file_id);
@@ -248,28 +247,21 @@ bot.on(['voice','audio'], async (ctx) => {
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
 
-    // 2) Upload to GapGPT (using OpenAI protocol as per their docs)
-    const token = makeToken();
-    const ext = msg.voice ? 'ogg' : 'mp3';
-    const tmpPath = `/tmp/${token}.${ext}`;
-    
-    // فایل رو موقتاً توی Cloud Run ذخیره می‌کنیم تا بتونیم به عنوان stream بدیم به آپلودر
-    fs.writeFileSync(tmpPath, buffer);
-
-    const uploaded = await ai.files.create({
-      file: fs.createReadStream(tmpPath),
-      purpose: 'vision' // گپ جی‌پی‌تی از این purpose برای همه فایل‌های مدیای جمینای استفاده می‌کنه
-    });
-
-    // فایل آپلود شد، فایل محلی رو پاک می‌کنیم که رم کلاد ران اشغال نشه
-    fs.unlinkSync(tmpPath);
-
-    if (!uploaded?.id) throw new Error('No uploaded file ID received');
+    // 2) Upload
+    let mimeType = 'audio/ogg';
+    if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
+    const blob = new Blob([buffer], { type: mimeType });
+    const displayName = msg.voice ? 'voice.ogg' : (msg.audio?.file_name || 'audio');
+    const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName } });
+    const uploaded = uploadedAny.file ?? uploadedAny;
+    if (!uploaded?.uri) throw new Error('No uploaded.uri');
 
     // 3) Save session
+    const token = makeToken();
     sessions.set(token, {
       step: 'await_process_type',
-      fileId: uploaded.id, // آیدی فایلی که گپ جی‌پی‌تی داد رو ذخیره می‌کنیم
+      uri: uploaded.uri,
+      mimeType: uploaded.mimeType || mimeType,
       chatId: thinking.chat.id,
       promptMsgId: thinking.message_id,
       userId: userId,
@@ -369,23 +361,16 @@ bot.on('callback_query', async (ctx) => {
       await ctx.answerCbQuery(`مدل انتخابی: ${model}`);
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
-      // دقیقاً مطابق پروتکل OpenAI و مستندات گپ جی‌پی‌تی
-      let resultText;
+      // فقط تولید محتوا رو در try-catch قرار میدیم
+      let result;
       try {
-        const completion = await ai.chat.completions.create({
-          model: model,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                // ارسال آیدی فایلی که مرحله قبل آپلود کردیم
-                { type: "file_url", file_url: { url: `fileid://${session.fileId}` } }
-              ]
-            }
-          ]
+        result = await ai.models.generateContent({
+          model,
+          contents: createUserContent([
+            createPartFromUri(session.uri, session.mimeType),
+            prompt,
+          ]),
         });
-        resultText = completion.choices[0]?.message?.content?.trim() || 'متنی برنگشت.';
       } catch (err) {
         console.error('❌ ERROR in AI processing:', err);
         try {
@@ -394,8 +379,8 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
 
-      // پردازش نتیجه و ارسال
-      const text = resultText;
+      // پردازش نتیجه و ارسال (خارج از try-catch)
+      const text = result.text?.trim() || 'متنی برنگشت.';
       const parts = splitForTelegram(text);
 
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
