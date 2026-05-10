@@ -1,0 +1,17 @@
+{
+  "name": "tg-voice2text",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node voicetotext.py"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^2.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "telegraf": "^4.16.3"
+  }
+}
