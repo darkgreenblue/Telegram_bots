@@ -12,25 +12,80 @@ npm install
 npm start
 ```
 
-## دیپلوی روی Cloud Run
+## دیپلوی از ترمینال Cursor (فقط `gcloud`، بدون GitHub Actions)
 
-از ریشهٔ پروژه (با `gcloud` لاگین و پروژهٔ درست):
+### ۱) یک‌بار: نصب Google Cloud SDK روی مک
+
+**روش الف — Homebrew (ساده):**
 
 ```bash
+brew install --cask google-cloud-sdk
+```
+
+بعد ترمینال را ببندید و دوباره باز کنید (یا `exec $SHELL`) تا `gcloud` در `PATH` باشد.
+
+**روش ب — نصب‌کنندهٔ رسمی:**  
+[cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install) → macOS → دستورالعمل همان صفحه.
+
+### ۲) یک‌بار: لاگین و پروژه
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+`YOUR_PROJECT_ID` را از بالای [کنسول GCP](https://console.cloud.google.com) بردارید.
+
+### ۳) یک‌بار: APIهای لازم
+
+در کنسول: **APIs & Services → Library** و این‌ها را **Enable** کنید:
+
+- Cloud Run API  
+- Cloud Build API  
+- Artifact Registry API  
+
+### ۴) یک‌بار: Docker برای build از سورس
+
+`gcloud run deploy --source .` روی مک معمولاً به **Docker محلی** نیاز دارد. Docker Desktop را نصب کنید و یک‌بار اجرا کنید تا daemon بالا باشد.
+
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
+```
+
+### ۵) هر بار که کد نهایی شد — یک دستور دیپلوی
+
+از **ریشهٔ همین پروژه** (جایی که `Dockerfile` و `package.json` هست):
+
+```bash
+cd /Users/divar/Desktop/voicetotext
 gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthenticated
 ```
 
-متغیرهای محیط سرویس را در کنسول Cloud Run ست کنید (`BOT_TOKEN`, `GEMINI_API_KEY`, `WH_SECRET`) و وبهوک تلگرام را به `https://<آدرس-سرویس>/webhook` بزنید.
+نام سرویس (`tg-voice2text`) یا منطقه را اگر خواستید عوض کنید.
+
+**متغیرهای محیط** را یا همان اول در کنسول Cloud Run برای سرویس ست کنید (`BOT_TOKEN`, `GEMINI_API_KEY`, `WH_SECRET`)، یا اگر `.env` دارید و مقادیر بدون کاراکتر مشکل‌ساز هستند، می‌توانید بعد از بارگذاری متغیرها در شل، همراه deploy بفرستید:
+
+```bash
+cd /Users/divar/Desktop/voicetotext
+set -a && source .env && set +a
+gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthenticated \
+  --set-env-vars="BOT_TOKEN=${BOT_TOKEN},GEMINI_API_KEY=${GEMINI_API_KEY},WH_SECRET=${WH_SECRET}"
+```
+
+در پایان خروجی، **URL** سرویس را بردارید.
+
+### ۶) وبهوک تلگرام
+
+`https://<آدرس-سرویس>/webhook` را با `setWebhook` و `secret_token` برابر `WH_SECRET` ست کنید (مثل قبل).
+
+---
 
 ## نکته
 
 نقطهٔ ورود اپ **`index.js`** است (ماژول ES برای Node ۲۰).
 
-## اتصال به GitHub
-
-۱. در GitHub یک repository خالی بسازید (بدون تیک README اگر همین پوشه را push می‌کنید).
-
-۲. در ترمینال:
+## اتصال اختیاری به GitHub (فقط برای نگه‌داشتن کد)
 
 ```bash
 cd /Users/divar/Desktop/voicetotext
@@ -39,48 +94,4 @@ git branch -M main
 git push -u origin main
 ```
 
-برای push با SSH به‌جای HTTPS از آدرس `git@github.com:YOUR_USER/YOUR_REPO.git` استفاده کنید.
-
-## استقرار از Cursor فقط برای «نسخهٔ توافقی» (GitHub → Cloud Run)
-
-جریان: در Cursor کد را عوض می‌کنید → commit → وقتی همه توافق کردند **تگ semver** می‌زنید → push تگ → GitHub Actions همان commit را به Cloud Run می‌فرستد. push معمولی به `main` **به‌تنهایی** دیپلوی نمی‌کند.
-
-### یک‌بار در GitHub (Secrets / Variables)
-
-در repo: **Settings → Secrets and variables → Actions**
-
-**Secrets (ضروری):**
-
-| نام | مقدار |
-|-----|--------|
-| `GCP_SA_KEY` | JSON یک [Service Account](https://console.cloud.google.com/iam-admin/serviceaccounts) در پروژهٔ GCP با نقش‌های لازم برای `gcloud run deploy --source` (حداقل معمولاً: Cloud Run Admin، Cloud Build Editor، Service Account User؛ بسته به پروژه ممکن است Storage/Artifact هم لازم شود — اگر خطای permission گرفتید از متن خطا نقش اضافه کنید). کل فایل JSON را کپی کنید. |
-| `BOT_TOKEN` | توکن تلگرام |
-| `GEMINI_API_KEY` | کلید Gemini |
-| `WH_SECRET` | همان رشتهٔ وبهوک |
-
-**Variables (اختیاری):**
-
-| نام | پیش‌فرض در workflow |
-|-----|---------------------|
-| `GCP_REGION` | `us-central1` |
-| `CLOUD_RUN_SERVICE` | `tg-voice2text` |
-
-### در Cursor (بعد از توافق روی نسخه)
-
-```bash
-cd /Users/divar/Desktop/voicetotext
-git add -A && git commit -m "Release: توضیح کوتاه"
-git push origin main
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-با `git push origin v1.0.0` workflow **Deploy to Cloud Run** اجرا می‌شود و همان تگ روی Cloud Run می‌رود.
-
-### دیپلوی دستی بدون تگ جدید
-
-GitHub → **Actions** → **Deploy to Cloud Run** → **Run workflow** → در `git_ref` مثلاً `v1.0.0` یا یک **SHA** بگذارید.
-
-### وبهوک
-
-بعد از اولین deploy، URL سرویس را از خروجی Actions یا Cloud Run بردارید و وبهوک را به `/webhook` با `secret_token` برابر `WH_SECRET` ست کنید (مثل قبل).
+این بخش برای backup/همکاری است؛ دیپلوی مستقیم با همان `gcloud run deploy` بالا انجام می‌شود.
