@@ -19,7 +19,14 @@ if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); proc
 
 /* ===== 1) Clients ===== */
 const bot = new Telegraf(BOT_TOKEN);
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+// 🟢 تغییر اصلی اینجاست: اضافه کردن httpOptions برای هدایت به سرور گپ جی‌پی‌تی
+const ai = new GoogleGenAI({ 
+  apiKey: GEMINI_API_KEY,
+  httpOptions: {
+    baseUrl: 'https://api.gapgpt.app' // در صورت نیاز به CDN خارجی می‌توانید از 'https://api.gapapi.com' استفاده کنید
+  }
+});
 
 /* ===== 2) Usage counters (daily by PT) =====
    نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
@@ -252,6 +259,8 @@ bot.on(['voice','audio'], async (ctx) => {
     if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
     const blob = new Blob([buffer], { type: mimeType });
     const displayName = msg.voice ? 'voice.ogg' : (msg.audio?.file_name || 'audio');
+    
+    // درخواست آپلود به صورت خودکار به گپ جی‌پی‌تی هدایت می‌شود
     const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName } });
     const uploaded = uploadedAny.file ?? uploadedAny;
     if (!uploaded?.uri) throw new Error('No uploaded.uri');
@@ -361,7 +370,7 @@ bot.on('callback_query', async (ctx) => {
       await ctx.answerCbQuery(`مدل انتخابی: ${model}`);
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
-      // فقط تولید محتوا رو در try-catch قرار میدیم
+      // درخواست تولید محتوا به صورت خودکار به گپ جی‌پی‌تی هدایت می‌شود
       let result;
       try {
         result = await ai.models.generateContent({
@@ -379,7 +388,7 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
 
-      // پردازش نتیجه و ارسال (خارج از try-catch)
+      // پردازش نتیجه و ارسال
       const text = result.text?.trim() || 'متنی برنگشت.';
       const parts = splitForTelegram(text);
 
@@ -390,9 +399,8 @@ bot.on('callback_query', async (ctx) => {
 
         inc(key);
 
-        // session را پاک نکنیم - فقط وضعیت را به ready تغییر دهیم
         session.step = 'ready';
-        session.processType = null; // برای کلیک بعدی reset کن
+        session.processType = null;
 
         await sendContinueGuide(ctx, token);
       } else {
@@ -484,7 +492,7 @@ app.get('/', (_req, res) => res.status(200).send('OK'));
 // raw body as JSON
 app.use(express.json({ limit: '10mb' }));
 
-// verify Telegram secret (optional but recommended)
+// verify Telegram secret
 app.post('/webhook', (req, res, next) => {
   const token = req.get('X-Telegram-Bot-Api-Secret-Token');
   if (WH_SECRET && token !== WH_SECRET) {
