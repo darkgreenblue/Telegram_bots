@@ -25,3 +25,18 @@ gcloud run deploy tg-voice2text --source . --region us-central1 --allow-unauthen
 ## نکته
 
 فایل اصلی اپ به‌خاطر نام قبلی `voicetotext.py` است ولی محتوای آن **JavaScript** است؛ اسکریپت `start` همان را با `node` اجرا می‌کند.
+
+## اتصال به GitHub
+
+۱. در GitHub یک repository خالی بسازید (بدون تیک README اگر همین پوشه را push می‌کنید).
+
+۲. در ترمینال:
+
+```bash
+cd /Users/divar/Desktop/voicetotext
+git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
+git branch -M main
+git push -u origin main
+```
+
+برای push با SSH به‌جای HTTPS از آدرس `git@github.com:YOUR_USER/YOUR_REPO.git` استفاده کنید.
