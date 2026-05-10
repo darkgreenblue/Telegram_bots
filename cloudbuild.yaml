@@ -1,13 +1,11 @@
 steps:
-  # 1. Build the container image
+  # ... (مراحل قبلی بیلد و دیپلوی) ...
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/tg-voice2text', '.']
 
-  # 2. Push the image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/tg-voice2text']
 
-  # 3. Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -24,3 +22,6 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/tg-voice2text'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
