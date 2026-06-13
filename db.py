@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS dreams (
     transcript      TEXT,
     persona         TEXT,
     preview         TEXT,
+    depth           TEXT,
     interpretation  TEXT,
     image_prompt    TEXT,
     image_generated INTEGER NOT NULL DEFAULT 0,
@@ -106,6 +107,7 @@ async def _migrate_db() -> None:
         ("users", "language",         "TEXT"),
         ("users", "pending_dream_id", "INTEGER"),
         ("dreams", "preview", "TEXT"),
+        ("dreams", "depth", "TEXT"),
         ("dreams", "image_width", "INTEGER"),
         ("dreams", "image_height", "INTEGER"),
         ("dreams", "image_black_retries", "INTEGER"),
@@ -392,14 +394,14 @@ async def clear_pending(user_id: int):
 # ===================== رویاها =====================
 
 async def create_dream(user_id, transcript, persona, interpretation, image_prompt,
-                       is_free_trial=0, preview=None) -> int:
+                       is_free_trial=0, preview=None, depth=None) -> int:
     async with aiosqlite.connect(_path()) as db:
         cur = await db.execute(
             """INSERT INTO dreams
-               (user_id, transcript, persona, preview, interpretation, image_prompt,
+               (user_id, transcript, persona, preview, depth, interpretation, image_prompt,
                 is_free_trial, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, transcript, persona, preview, interpretation, image_prompt,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, transcript, persona, preview, depth, interpretation, image_prompt,
              is_free_trial, _now_iso()),
         )
         await db.commit()

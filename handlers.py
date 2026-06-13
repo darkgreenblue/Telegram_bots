@@ -569,8 +569,11 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
 
         if existing:
             # تعبیر قبلاً ساخته شده — هیچ ریکوئست LLMِ جدیدی زده نمی‌شود
-            full = existing["interpretation"]
-            teaser = ai.teaser_of(existing.get("preview") or "")
+            preview = existing.get("preview") or ""
+            # depth (بخشِ دومِ JSON) برای تحویلِ پریمیوم؛ اگر ردیفِ قدیمی بدونِ depth بود،
+            # به متنِ کامل برمی‌گردیم تا چیزی از دست نرود.
+            depth = existing.get("depth") or existing["interpretation"]
+            teaser = ai.teaser_of(preview)
             image_prompt = existing["image_prompt"]
             dream_id = existing["id"]
             image_url = existing["image_url"] if existing.get("image_generated") else None
@@ -633,12 +636,14 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
 
             # تعبیر موفق شد → فوراً ذخیره + ثبتِ پیوند، تا از این لحظه به بعد
             # هر شکست/ری‌استارتی بدون فراخوانی دوباره‌ی LLM قابل ادامه باشد.
-            full = ai.compose_full(result["preview"], result["depth"])
-            teaser = ai.teaser_of(result["preview"])
+            preview = result["preview"]
+            depth = result["depth"]
+            full = ai.compose_full(preview, depth)
+            teaser = ai.teaser_of(preview)
             image_prompt = result["image_prompt"]
             dream_id = await db.create_dream(
                 user_id, transcript, persona, full, image_prompt,
-                is_free_trial=1 if mode == "free" else 0, preview=result["preview"],
+                is_free_trial=1 if mode == "free" else 0, preview=preview, depth=depth,
             )
             await db.set_pending_dream_id(user_id, dream_id)
             image_url = None
@@ -666,7 +671,7 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
             if mode == "free":
                 await _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser)
             else:
-                await _deliver_paid(bale, chat_id, lang, persona, image_url, full)
+                await _deliver_paid(bale, chat_id, lang, image_url, preview, depth)
                 await db.mark_full_delivered(dream_id)
 
             await db.clear_pending(user_id)
@@ -752,12 +757,20 @@ async def _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser):
         await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
 
 
-async def _deliver_paid(bale, chat_id, lang, persona, image_url, full):
-    if image_url:
-        await bale.send_photo(chat_id, image_url, caption=C.persona_key(lang, persona, "image_caption"))
-        await bale.send_message(chat_id, full, parse_mode=None)
+async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
+    """تحویلِ پریمیوم برای مشترکِ فعال — دقیقاً مثلِ بارِ اول، فقط بدونِ دکمه‌ی «گشودن تعبیر کامل»:
+      عکس + کپشن = preview (خام، بدونِ «…»)، و سپس depth در یک پیامِ جدا.
+    عمداً preview را به depth نمی‌چسبانیم: اگر مدل preview را داخلِ depth تکرار کرده باشد،
+    دستِ‌کم در دو پیامِ جدا می‌افتد، نه چسبیده و دوباره در یک متن."""
+    if image_url and len(preview) <= _CAPTION_SAFE:
+        await bale.send_photo(chat_id, image_url, caption=preview)
+    elif image_url:
+        await bale.send_photo(chat_id, image_url)
+        await bale.send_message(chat_id, preview, parse_mode=None)
     else:
-        await bale.send_message(chat_id, C.get(lang, "image_failed") + "\n\n" + full, parse_mode=None)
+        await bale.send_message(chat_id, C.get(lang, "image_failed"), parse_mode=None)
+        await bale.send_message(chat_id, preview, parse_mode=None)
+    await bale.send_message(chat_id, depth, parse_mode=None)
 
 
 # ===================== پرداخت =====================
@@ -805,9 +818,11 @@ async def _cb_view_full(bale, cq_id, chat_id, user_id, dream_id):
         return
     status = db.subscription_status(user or {})
     if status["active"]:
-        full = dream["interpretation"]  # کاملِ ذخیره‌شده (preview+depth)
+        # کاربر preview را قبلاً در دموی رایگان دیده؛ حالا فقط ادامه (depth، بخشِ دومِ JSON)
+        # را می‌فرستیم تا preview دوباره (و احتمالاً تکراری) چسبانده نشود.
+        depth = dream.get("depth") or dream["interpretation"]
         await bale.answer_callback_query(cq_id)
-        await bale.send_message(chat_id, full, parse_mode=None)
+        await bale.send_message(chat_id, depth, parse_mode=None)
         await db.mark_full_delivered(dream_id)
     else:
         await bale.answer_callback_query(cq_id)

@@ -166,7 +166,7 @@ LOCALE = {
     },
 
     "voice_too_short": "Tu susurro fue breve, viajero 🌙 Cuéntame tu sueño un poco más para poder leerlo.",
-    "voice_too_long":  "Tu sueño es muy largo 🌌 Cuéntalo algo más conciso (menos de 15 minutos) para no perder nada.",
+    "voice_too_long":  "Tu sueño es muy largo 🌌 Cuéntalo algo más conciso (menos de 10 minutos) para no perder nada.",
     "text_too_short":  "Escribiste algo escueto ✍️ Dime un poco más para desvelar su secreto.",
 
     "confirm_voice": "Escuché la voz de tu sueño 🌙 ¿Tomo este para interpretarlo?",

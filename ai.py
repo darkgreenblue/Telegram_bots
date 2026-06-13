@@ -2,9 +2,10 @@
 
 معماری مدل‌ها (V2.3 — OpenRouter):
   خواب صوتی:   google/gemini-2.5-flash (OpenRouter، یک ریکوئست: صوت → JSON)
-               fallback: openai/whisper (OpenRouter STT) + deepseek/deepseek-v4-pro (OpenRouter LLM)
+               fallback: ffmpeg→mp3 + openai/gpt-4o-mini-transcribe (OpenRouter STT)
+                         + deepseek/deepseek-chat (OpenRouter LLM)
   خواب متنی:   google/gemini-2.5-flash (OpenRouter، متن → JSON)
-               fallback: deepseek/deepseek-v4-pro (OpenRouter)
+               fallback: deepseek/deepseek-chat (OpenRouter)
   تصویر:       gapgpt/z-image (GapGPT، URL مستقیم — دست نزن)
                fallback: غیرفعال (IMAGE_FALLBACK_MODEL خالی)
 
@@ -19,7 +20,9 @@ import io
 import os
 import base64
 import json
+import asyncio
 import logging
+import tempfile
 
 import aiohttp
 from openai import AsyncOpenAI
@@ -30,7 +33,7 @@ from config import (
     STT_FALLBACK_MODEL, LLM_FALLBACK_MODEL,
     IMAGE_MODEL, IMAGE_SIZE, IMAGE_BLACK_MAX_LUMA,
     IMAGE_ART_DIRECTION, IMAGE_SAFE_RETRY_NOTE,
-    PRIMARY_FORMAT_ATTEMPTS,
+    PRIMARY_FORMAT_ATTEMPTS, FORCE_FALLBACK_FOR_TEST,
     llm_model_for,
 )
 from prompts import build_system_prompt, build_user_prompt
@@ -200,16 +203,85 @@ def compose_full(preview: str, depth: str) -> str:
 
 # ===================== STT fallback (فقط در زنجیره‌ی fallback عمیق) =====================
 
-async def _stt_fallback(audio_path: str) -> str:
-    """تبدیل صوت به متن با whisper روی OpenRouter — فقط وقتی LLM روی صوت خطا داد."""
+async def _to_mp3(audio_path: str) -> tuple[str, bool]:
+    """تبدیلِ فایلِ صوتی به mp3 با ffmpeg.
+    gpt-4o-mini-transcribe فایلِ OGG/Opusِ تلگرام را اغلب رد می‌کند (مشکلِ هدرِ کدک)؛
+    پیش از رونویسی به mp3 تبدیل می‌کنیم. اگر از قبل mp3 بود، دست‌نخورده برمی‌گردد.
+    خروجی: (مسیرِ فایل، آیا فایلِ موقتِ تازه ساخته شد که باید حذف شود).
+    اگر ffmpeg نبود یا تبدیل شکست خورد، فایلِ اصلی برگردانده می‌شود (best-effort)."""
+    if os.path.splitext(audio_path)[1].lower() == ".mp3":
+        return audio_path, False
+    fd, out_path = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
     try:
-        with open(audio_path, "rb") as f:
-            resp = await _get_or_client().audio.transcriptions.create(
-                model=STT_FALLBACK_MODEL, file=f
-            )
-        return (resp.text or "").strip()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", audio_path, "-vn", "-acodec", "libmp3lame",
+            "-ar", "16000", "-ac", "1", out_path,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and os.path.getsize(out_path) > 0:
+            return out_path, True
+        log.warning("ffmpeg → mp3 failed (rc=%s): %s — using original file",
+                    proc.returncode, (stderr or b"").decode(errors="ignore")[-300:])
+    except FileNotFoundError:
+        log.warning("ffmpeg not installed — sending original audio to STT (may fail)")
+    except Exception as e:
+        log.warning("ffmpeg conversion error: %s — using original file", e)
+    if os.path.exists(out_path):
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+    return audio_path, False
+
+
+async def _stt_fallback(audio_path: str) -> str:
+    """تبدیل صوت به متن با gpt-4o-mini-transcribe روی OpenRouter — فقط وقتی LLM روی صوت
+    خطا داد. کارش فقط رونویسیِ عینِ صوت است. فایل ابتدا به mp3 تبدیل می‌شود (الزامِ مدل).
+
+    OpenRouter این مدل را روی endpoint استاندارد audio/transcriptions پشتیبانی می‌کند،
+    اما به‌جای multipart/form-data (که SDK پیش‌فرض می‌فرستد)، JSON با base64 می‌خواهد.
+    بنابراین مستقیم با aiohttp درخواست می‌زنیم."""
+    mp3_path, made_tmp = await _to_mp3(audio_path)
+    try:
+        with open(mp3_path, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode()
+        filename = os.path.basename(mp3_path)
+        connector = aiohttp.TCPConnector(ssl=False)
+        ext = os.path.splitext(mp3_path)[1].lstrip(".").lower() or "mp3"
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post(
+                f"{OPENROUTER_BASE_URL}/audio/transcriptions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": STT_FALLBACK_MODEL,
+                    "input_audio": {
+                        "data": audio_b64,
+                        "format": ext,
+                    },
+                },
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    raise AIError(
+                        f"STT fallback ({STT_FALLBACK_MODEL}) HTTP {resp.status}: {data}"
+                    )
+                return (data.get("text") or "").strip()
+    except AIError:
+        raise
     except Exception as e:
         raise AIError(f"STT fallback ({STT_FALLBACK_MODEL}) failed: {e}") from e
+    finally:
+        if made_tmp and os.path.exists(mp3_path):
+            try:
+                os.remove(mp3_path)
+            except OSError:
+                pass
 
 
 # ===================== تعبیر متنی — OpenRouter =====================
@@ -266,22 +338,24 @@ async def process_voice_dream(audio_path: str, lang: str, persona: str, profile:
     اگر هر دو خطا بدهند، AIError پرتاب می‌شود (pending_state مدیریت می‌کند)."""
     primary = llm_model_for(tier)  # google/gemini-2.5-flash
     profile = profile or {}
-    try:
-        return await _primary_with_format_retry(
-            lambda: _interpret_audio_once(audio_path, lang, persona, profile, primary),
-            label=f"audio:{primary}",
-        )
-    except Exception as e:
-        log.warning("primary audio LLM (%s) failed: %s — trying fallback %s",
-                    primary, e, LLM_FALLBACK_MODEL)
+    # تستِ موقت: مدلِ اصلی را رد کن و مستقیم برو سراغ مسیرِ فالبک.
+    if not FORCE_FALLBACK_FOR_TEST:
+        try:
+            return await _primary_with_format_retry(
+                lambda: _interpret_audio_once(audio_path, lang, persona, profile, primary),
+                label=f"audio:{primary}",
+            )
+        except Exception as e:
+            log.warning("primary audio LLM (%s) failed: %s — trying fallback %s",
+                        primary, e, LLM_FALLBACK_MODEL)
 
-    # fallback: whisper (OpenRouter STT) → transcript → deepseek (OpenRouter LLM)
+    # fallback: gpt-4o-mini-transcribe (OpenRouter STT) → transcript → deepseek (OpenRouter LLM)
     transcript = await _stt_fallback(audio_path)  # AIError اگر این هم بزند
     try:
         return await _interpret_text_once(transcript, lang, persona, profile, LLM_FALLBACK_MODEL)
     except Exception as e2:
         raise AIError(
-            f"audio fallback (whisper + {LLM_FALLBACK_MODEL}) failed: {e2}"
+            f"audio fallback ({STT_FALLBACK_MODEL} + {LLM_FALLBACK_MODEL}) failed: {e2}"
         ) from e2
 
 
@@ -292,17 +366,19 @@ async def interpret_dream(transcript: str, lang: str, persona: str, profile: dic
       fallback → deepseek (OpenRouter)"""
     primary = llm_model_for(tier)
     profile = profile or {}
-    try:
-        return await _primary_with_format_retry(
-            lambda: _interpret_text_once(transcript, lang, persona, profile, primary),
-            label=f"text:{primary}",
-        )
-    except Exception as e:
-        log.warning("primary text LLM (%s) failed: %s — fallback %s", primary, e, LLM_FALLBACK_MODEL)
+    # تستِ موقت: مدلِ اصلی را رد کن و مستقیم با deepseek (فالبک) تعبیر کن.
+    if not FORCE_FALLBACK_FOR_TEST:
         try:
-            return await _interpret_text_once(transcript, lang, persona, profile, LLM_FALLBACK_MODEL)
-        except Exception as e2:
-            raise AIError(f"interpretation failed: {e2}") from e2
+            return await _primary_with_format_retry(
+                lambda: _interpret_text_once(transcript, lang, persona, profile, primary),
+                label=f"text:{primary}",
+            )
+        except Exception as e:
+            log.warning("primary text LLM (%s) failed: %s — fallback %s", primary, e, LLM_FALLBACK_MODEL)
+    try:
+        return await _interpret_text_once(transcript, lang, persona, profile, LLM_FALLBACK_MODEL)
+    except Exception as e2:
+        raise AIError(f"interpretation failed: {e2}") from e2
 
 
 # ===================== تولید تصویر =====================

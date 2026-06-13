@@ -8,8 +8,11 @@
 ## پیش‌نیاز
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git
+sudo apt install -y python3 python3-venv python3-pip git ffmpeg
 ```
+> `ffmpeg` لازم است: در مسیرِ فالبکِ صوتی، فایلِ OGG/Opusِ تلگرام پیش از ارسال به
+> `gpt-4o-mini-transcribe` به mp3 تبدیل می‌شود (این مدل OGGِ تلگرام را اغلب رد می‌کند).
+> اگر ffmpeg نصب نباشد، تبدیل انجام نمی‌شود و رونویسیِ فالبک ممکن است شکست بخورد.
 
 ## استقرار
 ```bash

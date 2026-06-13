@@ -25,12 +25,12 @@
 ## قوانینِ جاریِ مهم (همیشه رعایت کن)
 1. **هر تغییرِ متنیِ رو‌به‌کاربر روی هر ۶ زبان اعمال می‌شود** (fa, en, ar, ru, es, pt) — بدونِ اینکه هر بار گفته شود.
 2. **تفاوت‌های مجاز بین زبان‌ها:** فقط (الف) سؤالِ اولِ آنبوردینگ + مدلِ پرسوناها، و (ب) روشِ پرداخت (فارسی→زرین‌پال/کیف‌پولِ بله، بقیه→Stars/Crypto). باقیِ لحن/برند/تجربه یکسان است.
-3. **پرسوناها در تعداد و مدل per-language فرق دارند — هرگز یکی‌شان نکن.** fa چهارتا (religious, traditional, mythological, psychological)؛ en سه‌تا (lucid, therapeutic, newage)؛ ar/ru/es/pt مخصوصِ بازارِ خودشان.
+3. **پرسوناها در تعداد و مدل per-language فرق دارند — هرگز یکی‌شان نکن.** fa سه‌تا (religious, traditional, psychological — پرسونای اسطوره‌ای حذف شد چون آسمان‌به‌ریسمان می‌بافت)؛ en سه‌تا (lucid, therapeutic, cayce — نیواِیجِ بی‌روش با Edgar Cayceِ روشمند جایگزین شد)؛ ar سه‌تا، ru چهارتا، es سه‌تا، pt سه‌تا — همه با روش‌شناسیِ واقعیِ تفسیرِ خواب، مخصوصِ بازارِ خودشان.
 4. **«ری استارت»:** فقط وقتی کاربر صراحتاً بگوید «ری استارت» → DB پاک شود. در غیر این صورت فقط ری‌لودِ کد.
 5. فلگ‌های تست در `config.py`: `SKIP_PAYMENT=True`، `SKIP_DAILY_LIMIT=True`، `REFERRAL_ENABLED=False` (رفرال موقتاً خاموش: دکمه‌ی دعوت پنهان، deeplinkِ `ref_` نادیده، پاداش غیرفعال).
 
 ## معماری مدل‌ها
-- **OpenRouter** (`https://openrouter.ai/api/v1`): همه‌ی LLM. اصلی `google/gemini-2.5-flash` (متن + صوتِ multimodal). فالبک `deepseek/deepseek-v4-pro`. STT فالبک `openai/whisper` (روی OpenRouter ۴۰۰ می‌دهد؛ به‌ندرت لازم می‌شود چون پارسرِ مقاوم داریم).
+- **OpenRouter** (`https://openrouter.ai/api/v1`): همه‌ی LLM. اصلی `google/gemini-2.5-flash` (متن + صوتِ multimodal). فالبک `deepseek/deepseek-chat` (نسخه‌ی غیرِ reasoning؛ `deepseek-v4-pro` کنار گذاشته شد چون حین «فکر کردن» ۷۷s+ طول می‌کشید و تایم‌اوت می‌خورد — chat در ~۱۷s جواب می‌دهد). STT فالبک `openai/gpt-4o-mini-transcribe` (ارزان‌تر از whisper که per-minute بود؛ فقط رونویسی؛ ~۲.۵s). توجه: در مسیرِ فالبکِ صوتی، فایل ابتدا با ffmpeg به mp3 تبدیل می‌شود (این مدل OGGِ تلگرام را اغلب رد می‌کند). `FORCE_FALLBACK_FOR_TEST` اکنون `False` است (تستِ فالبک تمام شد و تثبیت شد).
 - **GapGPT** (`https://api.gapgpt.app/v1`): **فقط تصویر**، مدل `gapgpt/z-image`. **هرگز به OpenRouter منتقل نکن.**
 - دو کلاینت در `ai.py`: `_gap_client` (تصویر)، `_or_client` (LLM/STT).
 
@@ -60,7 +60,7 @@
 - **پردازشِ خواب پس‌زمینه‌ای** (`asyncio.create_task`) تا یک خوابِ کند polling را بلاک نکند. قفلِ `_processing` ضدِ پردازشِ دوباره.
 - **Idempotency:** `users.pending_dream_id` ورودی را به تعبیرِ ساخته‌شده پیوند می‌دهد → resume بدونِ فراخوانیِ دوباره‌ی LLM. `dreams.preview` ذخیره می‌شود.
 - **مدتِ صوتِ بله به میلی‌ثانیه است** (تلگرام به ثانیه) — در `handlers` با `÷1000` نرمال می‌شود.
-- `MAX_VOICE_DURATION=900` ثانیه (۱۵ دقیقه)، هر دو پلتفرم.
+- `MAX_VOICE_DURATION=600` ثانیه (۱۰ دقیقه)، هر دو پلتفرم (کنترلِ هزینه).
 - **لاگِ ماندگار:** `logs/bot.log` (چرخشی ۵MB×۱۰). httpx روی WARNING.
 - پیوال (آخرین تغییر): متنِ «کلیدِ این دروازه» + دعوتِ همسفری، با اشاره به دو تعرفه‌ی به‌صرفه‌تر؛ **دکمه‌ها (۳ تعرفه با قیمت) دست‌نخورده‌اند** و قیمت فقط روی دکمه است.
 
@@ -68,7 +68,7 @@
 - پرداختِ واقعیِ زرین‌پال (فعلاً stub)
 - قیمت‌گذاریِ Telegram Stars / رمزارز
 - مدلِ فالبکِ تصویر (هنوز انتخاب نشده)
-- فالبکِ whisper روی OpenRouter (۴۰۰ — به‌ندرت لازم)
+- برگرداندنِ `FORCE_FALLBACK_FOR_TEST` به `False` بعد از پایانِ تستِ فالبک
 - پروفایلینگِ پویا per-dream (`profiling.merge_dream_signal` فعلاً no-op)
 
 ## ادامه در سیشنِ جدید

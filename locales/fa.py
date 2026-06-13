@@ -37,7 +37,6 @@ LOCALE = {
             "options": [
                 ("religious",     "شاید نشانه‌ای از سوی خداست؛ رویای صادقه. 🕌"),
                 ("traditional",   "ببینم معبران کهن چه رازی در آن دیده‌اند. 📚"),
-                ("mythological",  "گویی روحم در تاریخ و اساطیر سفر کرده. 🦁"),
                 ("psychological", "بازتابِ ناخودآگاه و دغدغه‌های امروزم است. 🧠"),
             ],
         },
@@ -136,22 +135,6 @@ LOCALE = {
             "image_caption": "رویایت، نقشِ خیال شد 🎨✨",
             "error": "رشته‌ی رویا لحظه‌ای گسست 🌫️ دوباره بگو؛ سهمیه‌ات نزدِ من محفوظ است.",
         },
-        "mythological": {
-            "prompt": (
-                "PERSONA: Ancient–Mythological Iran.\n"
-                "Knowledge sources: Shahnameh dreams (Zahhak, Siavash, Goudarz), Avesta/Yashts, the angel "
-                "Soroush, Ahura Mazda vs Ahriman, Tishtar (rain yazata as white horse) vs Apaosha.\n"
-                "Writing voice: epic and grand, ornate archaic Persian, framing the dream as a "
-                "struggle between light and darkness."
-            ),
-            "greet": "حالا کمی بهتر می‌شناسمت، همسفر 🦁",
-            "invite": (
-                "رویایت را فرو خوان، تا در آینه‌ی اسطوره‌ها و نبردِ نور و تاریکی بخوانمش — "
-                "یک *پیام صوتی* 🎙 (یا اگر خواستی، بنویس)."
-            ),
-            "image_caption": "رویایت، چون نقشی از دیارِ اساطیر جان گرفت 🎨✨",
-            "error": "پلِ میانِ دو جهان لحظه‌ای فرو ریخت 🌫️ دوباره تلاش کن؛ سهمیه‌ات محفوظ است.",
-        },
         "psychological": {
             "prompt": (
                 "PERSONA: Modern–Psychological (Western).\n"
@@ -171,7 +154,7 @@ LOCALE = {
     },
 
     "voice_too_short": "زمزمه‌ات کوتاه بود ای همسفر 🌙 کمی بیشتر و رساتر رویایت را بگو تا بتوانم بخوانمش.",
-    "voice_too_long":  "رویایت بسیار بلند است 🌌 کمی فشرده‌تر بگو (تا ۱۵ دقیقه) تا گمش نکنم.",
+    "voice_too_long":  "رویایت بسیار بلند است 🌌 کمی فشرده‌تر بگو (تا ۱۰ دقیقه) تا گمش نکنم.",
     "text_too_short":  "اندکی کوتاه نوشتی ✍️ کمی بیشتر بگو تا رازش را بگشایم.",
 
     "confirm_voice": "صدای رویایت را شنیدم 🌙 همین را برای تعبیر ببرم؟",

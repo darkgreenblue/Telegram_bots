@@ -74,13 +74,24 @@ LLM_MODEL           = "google/gemini-2.5-flash"
 PAID_TIER_LLM_MODEL = LLM_MODEL
 FREE_TIER_LLM_MODEL = LLM_MODEL
 
-# فالبک LLM: deepseek/deepseek-v4-pro از OpenRouter
-# زنجیره‌ی صوتی: gemini خطا داد → whisper-1 (STT) + deepseek (LLM)
+# فالبک LLM: deepseek/deepseek-chat از OpenRouter
+# زنجیره‌ی صوتی: gemini خطا داد → gpt-4o-mini-transcribe (STT) + deepseek (LLM)
 # زنجیره‌ی متنی: gemini خطا داد → deepseek (LLM)
-LLM_FALLBACK_MODEL  = "deepseek/deepseek-v4-pro"
+# نسخه‌ی غیرِ reasoning (سریع): deepseek-v4-pro حین «فکر کردن» ۷۷s+ طول می‌کشید و
+# تایم‌اوت می‌خورد. deepseek-chat مستقیم جواب می‌دهد (~۱۰–۳۰s) و روی بنچمارک‌ها با
+# gemini-flash رقابت می‌کند — برای فالبکِ نادر کاملاً کافی و قابل‌اعتماد است.
+LLM_FALLBACK_MODEL  = "deepseek/deepseek-chat"
 
-# فالبک STT: whisper-1 از OpenRouter (gemini خطا داد → whisper → deepseek)
-STT_FALLBACK_MODEL  = "openai/whisper"
+# فالبک STT: gpt-4o-mini-transcribe از OpenRouter (gemini خطا داد → STT → deepseek).
+# کارش فقط رونویسیِ عینِ صوت به متن است (بدون هیچ تغییری). جایگزینِ whisper شد چون
+# whisper بر اساسِ «دقیقه» قیمت می‌گیرد و گران بود؛ این مدل بر اساسِ توکن و ارزان‌تر است.
+# نکته: این مدل فایلِ OGG/Opusِ تلگرام را اغلب رد می‌کند؛ پیش از ارسال به mp3 تبدیل می‌شود.
+STT_FALLBACK_MODEL  = "openai/gpt-4o-mini-transcribe"
+
+# ⚠️ تستِ موقت: وقتی True باشد، مدلِ اصلی (gemini-2.5-flash) کنار گذاشته می‌شود و همه‌ی
+# خواب‌ها مستقیم از مسیرِ فالبک (STT+deepseek برای صوت، deepseek برای متن) می‌روند تا
+# بتوان فالبک را در ربات تست کرد. بعد از تست، این را False کن تا به حالتِ عادی برگردد.
+FORCE_FALLBACK_FOR_TEST = False
 
 # فالبک تصویر: فعلاً غیرفعال — مدل مناسبی پیدا نشده
 IMAGE_FALLBACK_MODEL = ""
@@ -94,7 +105,7 @@ PRIMARY_FORMAT_ATTEMPTS = 2
 # عبور از سقف = خطا → پیامِ خطا به کاربر + امکانِ بازتلاش (به‌جای انتظارِ بی‌پایان).
 FILE_API_TIMEOUT  = 30    # getFile (گرفتن مسیرِ فایلِ صوتی)
 DOWNLOAD_TIMEOUT  = 120   # دانلودِ فایلِ صوتی
-INTERPRET_TIMEOUT = 240   # فراخوانیِ LLM برای تعبیر (متن یا صوت تا ۱۵ دقیقه، شاملِ retry/fallback)
+INTERPRET_TIMEOUT = 240   # فراخوانیِ LLM برای تعبیر (متن یا صوت تا ۱۰ دقیقه، شاملِ retry/fallback)
 IMAGE_TIMEOUT     = 120   # تولیدِ تصویر (اختیاری — شکست یا تایم‌اوتش تعبیر را متوقف نمی‌کند)
 
 # --- لاگ‌گیریِ ماندگار ---
@@ -130,7 +141,7 @@ SKIP_DAILY_LIMIT = True   # برای تست: محدودیت «هر شب یک ر�
 
 # --- محدودیت‌ها ---
 MIN_VOICE_DURATION = 10      # ثانیه — کمتر از این «خیلی کوتاه»
-MAX_VOICE_DURATION = 900     # ثانیه — سقف ۱۵ دقیقه (هر دو پلتفرم)؛ بیشتر = «خیلی بلند»
+MAX_VOICE_DURATION = 600     # ثانیه — سقف ۱۰ دقیقه (هر دو پلتفرم)؛ بیشتر = «خیلی بلند» (کنترلِ هزینه)
 MIN_TEXT_CHARS     = 25      # حداقل کاراکتر ورودی متنی
 MAX_TEXT_CHARS     = 4096    # سقف پیام پیام‌رسان‌ها
 TEASER_MAX_CHARS   = 950     # هدف teaser — بلندتر از قبل ولی همچنان در کپشن عکس (سقف ~۱۰۲۴) جا می‌شود
