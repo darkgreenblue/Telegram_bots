@@ -571,8 +571,8 @@ bot.on(['voice', 'audio'], async (ctx) => {
     console.error('❌ ERROR on voice:', err);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
-      m = '😕 فایل برای دریافت خیلی بزرگ است.\n\n' +
-          'برای کوچک‌تر کردنش می‌توانی:\n' +
+      m = '😕 حجم فایل بیش از محدودیت ۲۰ مگابایت تلگرام است.\n\n' +
+          'پیشنهادات:\n' +
           '• فایل را به چند بخش کوتاه‌تر تقسیم کن\n' +
           '• فرمت را به mp3 تبدیل کن (مثلاً با اپ Audio Converter)\n' +
           '• بیت‌ریت را کاهش بده (۶۴kbps کافی است)\n' +

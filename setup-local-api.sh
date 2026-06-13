@@ -63,7 +63,7 @@ sudo docker run -d --name telegram-bot-api --restart unless-stopped \
   -e TELEGRAM_API_ID="${API_ID}" \
   -e TELEGRAM_API_HASH="${API_HASH}" \
   -v telegram-bot-api-data:/var/lib/telegram-bot-api \
-  aiogram/telegram-bot-api:latest &>/dev/null
+  aiogram/telegram-bot-api:latest --local &>/dev/null
 
 # 7) Point the bot at the local server
 if grep -q '^TELEGRAM_API_ROOT=' "$ENV_FILE"; then
