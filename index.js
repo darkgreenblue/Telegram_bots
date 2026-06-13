@@ -546,8 +546,13 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     const msg   = ctx.message;
     const media = msg.voice || msg.audio;
-    const fileUrl     = await ctx.telegram.getFileLink(media.file_id);
-    const res         = await fetch(fileUrl.href);
+
+    // دانلود دستی — از getFileLink استفاده نمی‌کنیم چون در Local API ممکن است
+    // file_path را به صورت مسیر مطلق سیستم‌فایل برگرداند و fetch نتواند آن را بخواند.
+    const fileInfo  = await ctx.telegram.getFile(media.file_id);
+    const apiRoot   = TELEGRAM_API_ROOT || 'https://api.telegram.org';
+    const downloadUrl = `${apiRoot}/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
+    const res         = await fetch(downloadUrl);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
