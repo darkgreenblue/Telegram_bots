@@ -1,62 +1,42 @@
-// index.js — Telegram voice → choose process type → choose model → transcribe (VPS / Long Polling)
+// index.js — Telegram voice → choose process type → transcribe (VPS / Long Polling)
 import 'dotenv/config';
-import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { Telegraf, Markup } from 'telegraf';
-import {
-  GoogleGenAI,
-  createUserContent,
-  createPartFromUri,
-} from '@google/genai';
+
+const execFileAsync = promisify(execFile);
 
 /* ===== 0) ENV ===== */
-const BOT_TOKEN            = process.env.BOT_TOKEN?.trim();
-const GEMINI_API_KEY       = process.env.GEMINI_API_KEY?.trim();
-const OPENROUTER_API_KEY   = process.env.OPENROUTER_API_KEY?.trim();
-if (!BOT_TOKEN)      { console.error('❌ BOT_TOKEN خالی است');      process.exit(1); }
-if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
+const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
+if (!BOT_TOKEN)          { console.error('❌ BOT_TOKEN خالی است');          process.exit(1); }
+if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-/* ===== 1) Clients ===== */
+const ALLOWED_USER_ID = 100257975;
+
+/* ===== 1) Client ===== */
 const bot = new Telegraf(BOT_TOKEN);
-const ai  = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-/* ===== 2) Usage counters (daily by PT) =====
-   نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
-*/
-const PT_TZ      = 'America/Los_Angeles';
-const USAGE_FILE = '/tmp/usage.json';
-const FREE_QUOTAS = { flash: 250, flashlite: 1000 };
+bot.use(async (ctx, next) => {
+  const uid = ctx.from?.id;
+  if (uid && uid !== ALLOWED_USER_ID) {
+    try {
+      if (ctx.callbackQuery) {
+        await ctx.answerCbQuery('🔒 این ربات شخصی است.', { show_alert: true });
+      } else {
+        await ctx.reply(
+          '🔒 این یک ربات شخصی است و امکان استفاده عمومی فعلاً وجود ندارد.\n\n' +
+          'برای دریافت شرایط استفاده به آیدی @alireza_oliya پیام دهید.'
+        );
+      }
+    } catch {}
+    return;
+  }
+  return next();
+});
 
-function todayPT() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: PT_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(new Date());
-  const y = parts.find(p=>p.type==='year').value;
-  const m = parts.find(p=>p.type==='month').value;
-  const d = parts.find(p=>p.type==='day').value;
-  return `${y}-${m}-${d}`;
-}
-function atomicSave(path, data) {
-  const tmp = path + '.tmp';
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, path);
-}
-function loadUsage() {
-  try {
-    const raw = fs.readFileSync(USAGE_FILE, 'utf8');
-    const u = JSON.parse(raw);
-    return u?.byDate ? u : { byDate: {} };
-  } catch { return { byDate: {} }; }
-}
-let USAGE = loadUsage();
-function used(key, date=todayPT())      { return USAGE.byDate?.[date]?.[key] || 0; }
-function remaining(key, date=todayPT()) { return Math.max(0, (FREE_QUOTAS[key] ?? 0) - used(key, date)); }
-function inc(key, date=todayPT()) {
-  if (!USAGE.byDate[date]) USAGE.byDate[date] = { flash: 0, flashlite: 0 };
-  USAGE.byDate[date][key] = (USAGE.byDate[date][key] || 0) + 1;
-  atomicSave(USAGE_FILE, JSON.stringify(USAGE));
-}
-
-/* ===== 3) Session store ===== */
+/* ===== 2) Session store ===== */
 const sessions = new Map();
 function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 
@@ -67,25 +47,21 @@ setInterval(() => {
   }
 }, 30*60*1000);
 
-/* ===== 4) Maps ===== */
-const MODEL_MAP = {
-  flash:     'gemini-2.5-flash',
-  flashlite: 'gemini-2.5-flash-lite',
-};
+/* ===== 3) Models ===== */
+const GEMINI_MODEL  = 'google/gemini-2.5-flash';
+const GPT_MODEL     = 'openai/gpt-audio-mini';
+const RETRIES       = 3;
+const RETRY_DELAY   = 10_000; // ۱۰ ثانیه
 
-const OPENROUTER_MODEL_MAP = {
-  flash:     'google/gemini-2.5-flash',
-  flashlite: 'google/gemini-2.5-flash-lite-preview',
-};
-
+/* ===== 4) Prompts ===== */
 const PROMPT_MAP = {
   full: `Transcribe the entire speech exactly as spoken, in the same language, with proper punctuation.
 
 Speaker detection rules (apply strictly):
 - If there is only ONE speaker: return the transcript as plain continuous text. Do NOT include any speaker labels, names, or identifiers whatsoever.
 - If there are MULTIPLE speakers:
-  - First check whether any speaker's name or identity is clearly inferable from the conversation itself (e.g., participants address each other by name). If so, use those real names as labels.
-  - If names cannot be determined from context, label speakers as "شخص ۱", "شخص ۲", etc.
+  - If any speaker's name is clearly inferable from the conversation (e.g., they address each other by name), use those real names as labels.
+  - Otherwise label speakers as "شخص ۱", "شخص ۲", etc.
   - Start a new line for each speaker change, with the label followed by a colon, then their speech.
 
 Do not add any commentary, notes, or text outside of the transcript itself.`,
@@ -95,8 +71,8 @@ Do not add any commentary, notes, or text outside of the transcript itself.`,
 Speaker detection rules (apply strictly):
 - If there is only ONE speaker: return the cleaned text as plain continuous prose. Do NOT include any speaker labels, names, or identifiers whatsoever.
 - If there are MULTIPLE speakers:
-  - First check whether any speaker's name or identity is clearly inferable from the conversation (e.g., they address each other by name). If so, use those real names as labels.
-  - If names cannot be determined from context, label speakers as "شخص ۱", "شخص ۲", etc.
+  - If any speaker's name is clearly inferable from the conversation, use those real names as labels.
+  - Otherwise label speakers as "شخص ۱", "شخص ۲", etc.
   - Start a new paragraph for each speaker change, with the label followed by a colon, then their cleaned speech.`,
 
   summary: `Analyze the speech and produce a very short bullet-point summary in the same language.
@@ -104,7 +80,7 @@ Speaker detection rules (apply strictly):
 Speaker detection rules (apply strictly):
 - If there is only ONE speaker: write the summary with no speaker references at all.
 - If there are MULTIPLE speakers:
-  - First check whether any speaker's name or identity is clearly inferable from the conversation. If so, use those real names.
+  - If any speaker's name is clearly inferable from the conversation, use those real names.
   - Otherwise label speakers as "شخص ۱", "شخص ۲", etc.
   - Mention the relevant speaker in parentheses after each topic point if applicable.
 
@@ -115,7 +91,53 @@ Format:
 - Keep it concise — main topics should be clear at first glance.`,
 };
 
+// پرامپت‌های مخصوص GPT — با تأکید صریح برای جلوگیری از روایت‌گری
+const PROMPT_MAP_GPT = {
+  full: `You are a pure transcription tool. Output ONLY the exact spoken words from this audio, nothing else.
+
+STRICT RULES — violating any of these is wrong:
+- Do NOT narrate, explain, or act as an assistant. Never say things like "The speaker says..." or "Here is the transcription:" or "باشه، من می‌خوام..."
+- Do NOT add any introduction, conclusion, or commentary.
+- Output starts immediately with the first spoken word.
+
+Speaker detection:
+- ONE speaker → plain text, no labels at all.
+- MULTIPLE speakers → if names are inferable from the conversation, use them; otherwise use "شخص ۱", "شخص ۲", etc. New line per speaker change with "Name: speech".
+
+Transcribe in the same language as spoken, with proper punctuation. Nothing beyond the transcript itself.`,
+
+  clean: `You are a pure transcription tool. Output ONLY the cleaned spoken content from this audio, nothing else.
+
+STRICT RULES — violating any of these is wrong:
+- Do NOT narrate, explain, or act as an assistant. Never say things like "The speaker says..." or "Here is the cleaned version:" or any meta-commentary.
+- Do NOT add any introduction, conclusion, or framing.
+- Output starts immediately with the first word of the cleaned speech.
+
+Task: Remove filler words, hesitations, and repetitions. Preserve all meaningful content and original tone.
+
+Speaker detection:
+- ONE speaker → plain prose, no labels at all.
+- MULTIPLE speakers → if names are inferable, use them; otherwise use "شخص ۱", "شخص ۲", etc. New paragraph per speaker change with "Name: speech".`,
+
+  summary: `You are a pure content analysis tool. Output ONLY the bullet-point summary of this audio, nothing else.
+
+STRICT RULES:
+- Do NOT narrate or act as an assistant. Do NOT say "The speaker discusses..." or "Here is a summary:".
+- Start your output immediately with "📌 محتوای این وویس:" — nothing before it.
+
+Format:
+- First line: "📌 محتوای این وویس:"
+- Then 3–5 topics, each starting with a relevant emoji (🔹, 🔸, 🟢, etc.) followed by the topic.
+- Optional sub-point on the next line starting with "   ↳" (one short sentence max).
+
+Speaker detection:
+- ONE speaker → no speaker references at all.
+- MULTIPLE speakers → if names are inferable, use them; otherwise "شخص ۱", "شخص ۲". Add speaker in parentheses after relevant topics.`,
+};
+
+/* ===== 5) Helpers ===== */
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   if (!text) return [];
@@ -133,94 +155,134 @@ function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   return chunks;
 }
 
-/* ===== 5) AI: retry + OpenRouter fallback ===== */
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function callGemini(modelKey, uri, mimeType, prompt) {
-  const result = await ai.models.generateContent({
-    model: MODEL_MAP[modelKey],
-    contents: createUserContent([
-      createPartFromUri(uri, mimeType),
-      prompt,
-    ]),
-  });
-  return result.text?.trim() || '';
+/* ===== 6) AI ===== */
+class CreditError extends Error {
+  constructor(msg) { super(msg); this.name = 'CreditError'; }
 }
 
-async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
-  if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY not set');
-  const model   = OPENROUTER_MODEL_MAP[modelKey] || OPENROUTER_MODEL_MAP.flash;
-  const dataUrl = `data:${mimeType};base64,${audioBuffer.toString('base64')}`;
+async function convertToMp3(buffer) {
+  const id      = Date.now();
+  const inPath  = `/tmp/voice_in_${id}.ogg`;
+  const outPath = `/tmp/voice_out_${id}.mp3`;
+  writeFileSync(inPath, buffer);
+  try {
+    await execFileAsync('ffmpeg', ['-y', '-i', inPath, '-ar', '16000', '-ac', '1', '-b:a', '64k', outPath]);
+    return readFileSync(outPath);
+  } finally {
+    try { unlinkSync(inPath);  } catch {}
+    try { unlinkSync(outPath); } catch {}
+  }
+}
+
+async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
+  let content;
+  if (/audio/i.test(model)) {
+    // OpenAI audio models: input_audio format
+    let format = 'mp3';
+    if (/wav/i.test(mimeType))           format = 'wav';
+    else if (/mp3|mpeg/i.test(mimeType)) format = 'mp3';
+    content = [
+      { type: 'text', text: prompt },
+      { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
+    ];
+  } else {
+    // Gemini: data URL
+    const dataUrl = `data:${mimeType};base64,${audioBuffer.toString('base64')}`;
+    content = [
+      { type: 'image_url', image_url: { url: dataUrl } },
+      { type: 'text', text: prompt },
+    ];
+  }
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: dataUrl } },
-          { type: 'text', text: prompt },
-        ],
-      }],
-    }),
+    headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
   });
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 300)}`);
+    if (res.status === 402 || /insufficient|credit|quota|payment/i.test(body))
+      throw new CreditError(body.slice(0, 200));
+    throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
 
   const data = await res.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function callWithRetryAndFallback(modelKey, session, prompt) {
-  const MAX_RETRIES  = 3;
-  const RETRY_DELAY  = 15_000;
+async function callAI(session, prompt, promptGpt) {
+  const { audioBuffer, mimeType } = session;
+  let lastErr = null;
 
-  let lastErr;
-  for (let i = 0; i < MAX_RETRIES; i++) {
+  // مرحله ۱: Gemini Flash — تا ۳ بار
+  for (let i = 0; i < RETRIES; i++) {
     if (i > 0) await sleep(RETRY_DELAY);
     try {
-      return await callGemini(modelKey, session.uri, session.mimeType, prompt);
+      const out = await callOpenRouter(GEMINI_MODEL, audioBuffer, mimeType, prompt);
+      if (out) return out;
     } catch (err) {
-      console.error(`❌ Gemini attempt ${i+1}/${MAX_RETRIES}:`, err.message);
+      if (err instanceof CreditError) throw err;
       lastErr = err;
+      console.error(`❌ Gemini attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
     }
   }
 
-  // سه بار شکست → OpenRouter
-  console.log('↪️ Switching to OpenRouter fallback...');
-  return await callOpenRouter(modelKey, session.audioBuffer, session.mimeType, prompt);
+  // مرحله ۲: GPT Audio Mini — تا ۳ بار (با تبدیل به mp3)
+  console.log('↪️ Gemini exhausted, switching to GPT fallback...');
+  let mp3Buffer;
+  try { mp3Buffer = await convertToMp3(audioBuffer); }
+  catch (e) {
+    console.error('❌ ffmpeg conversion failed:', e.message);
+    throw new Error(`تبدیل فایل صوتی ناموفق بود. ${lastErr?.message || ''}`);
+  }
+
+  for (let i = 0; i < RETRIES; i++) {
+    if (i > 0) await sleep(RETRY_DELAY);
+    try {
+      const out = await callOpenRouter(GPT_MODEL, mp3Buffer, 'audio/mpeg', promptGpt);
+      if (out) return out;
+    } catch (err) {
+      if (err instanceof CreditError) throw err;
+      lastErr = err;
+      console.error(`❌ GPT attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
+    }
+  }
+
+  // همه تلاش‌ها شکست خوردند
+  throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
 }
 
-/* ===== 6) Keyboards ===== */
+async function getOpenRouterBalance() {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/credits', {
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const total = data?.data?.total_credits;
+    const used  = data?.data?.total_usage;
+    if (typeof total !== 'number' || typeof used !== 'number') return null;
+    return total - used;
+  } catch { return null; }
+}
+
+async function maybeWarnLowBalance(ctx) {
+  const bal = await getOpenRouterBalance();
+  if (bal !== null && bal < 1) {
+    try {
+      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱ دلار است (حدود $${bal.toFixed(2)}). احتمال تمام شدن شارژ وجود دارد — لطفاً شارژ کنید.`);
+    } catch {}
+  }
+}
+
+/* ===== 7) Keyboards ===== */
 function createProcessTypeKeyboard(token) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('📝 متن کامل',        `ptype:full:${token}`)],
-    [Markup.button.callback('✂️ متن مفید',         `ptype:clean:${token}`)],
-    [Markup.button.callback('📌 خلاصه تیتر‌وار',  `ptype:summary:${token}`)],
-    [Markup.button.callback('🚫 منصرف شدم',        `cancel:${token}`)],
-  ]);
-}
-
-function createModelKeyboard(token) {
-  const btnFlash = remaining('flash') > 0
-    ? Markup.button.callback('Gemini Flash',      `model:flash:${token}`)
-    : Markup.button.callback('Gemini Flash — تکمیل', `noop:${token}`);
-  const btnLite  = remaining('flashlite') > 0
-    ? Markup.button.callback('Gemini Flash Lite', `model:flashlite:${token}`)
-    : Markup.button.callback('Gemini Flash Lite — تکمیل', `noop:${token}`);
-
-  return Markup.inlineKeyboard([
-    [btnFlash],
-    [btnLite],
-    [Markup.button.callback('🚫 منصرف شدم', `cancel:${token}`)],
+    [Markup.button.callback('📝 متن کامل',       `ptype:full:${token}`)],
+    [Markup.button.callback('✂️ متن مفید',        `ptype:clean:${token}`)],
+    [Markup.button.callback('📌 خلاصه تیتروار',  `ptype:summary:${token}`)],
+    [Markup.button.callback('🚫 منصرف شدم',       `cancel:${token}`)],
   ]);
 }
 
@@ -230,29 +292,6 @@ function createOutputFormatKeyboard(token) {
     [Markup.button.callback('📎 دانلود به صورت فایل', `output:file:${token}`)],
     [Markup.button.callback('🚫 انصراف',              `cancel:${token}`)],
   ]);
-}
-
-function createContinueKeyboard(token) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        ...createProcessTypeKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
-        ...createModelKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
-        [Markup.button.callback('🚫 پایان کار', `cancel:${token}`)],
-      ],
-    },
-  };
-}
-
-async function sendContinueGuide(ctx, token) {
-  try {
-    await ctx.reply(
-      '✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.',
-      createContinueKeyboard(token)
-    );
-  } catch (err) {
-    console.error('❌ sendContinueGuide (non-critical):', err);
-  }
 }
 
 async function sendLongTextAsMessages(ctx, text) {
@@ -272,13 +311,12 @@ async function sendTextAsFile(ctx, text) {
   });
 }
 
-/* ===== 7) Bot handlers ===== */
+/* ===== 8) Bot handlers ===== */
 bot.start((ctx) => ctx.reply('سلام! یک ویس بفرست. 🎤'));
 
 bot.on(['voice', 'audio'], async (ctx) => {
   const thinking = await ctx.reply('⏳ دریافت فایل...');
   try {
-    // sessions قبلی همین کاربر را پاک کن
     const userId = ctx.from.id;
     for (const [tk, s] of sessions) {
       if (s.userId === userId) sessions.delete(tk);
@@ -286,37 +324,30 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     const msg   = ctx.message;
     const media = msg.voice || msg.audio;
-    const fileUrl = await ctx.telegram.getFileLink(media.file_id);
-    const res     = await fetch(fileUrl.href);
+    const fileUrl     = await ctx.telegram.getFileLink(media.file_id);
+    const res         = await fetch(fileUrl.href);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
-    let mimeType    = 'audio/ogg';
+    let mimeType = 'audio/ogg';
     if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
-    const blob        = new Blob([audioBuffer], { type: mimeType });
-    const displayName = msg.voice ? 'voice.ogg' : (msg.audio?.file_name || 'audio');
-    const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName } });
-    const uploaded    = uploadedAny.file ?? uploadedAny;
-    if (!uploaded?.uri) throw new Error('No uploaded.uri');
 
     const token = makeToken();
     sessions.set(token, {
-      step:            'await_process_type',
-      uri:             uploaded.uri,
-      mimeType:        uploaded.mimeType || mimeType,
-      audioBuffer,                        // برای OpenRouter fallback
-      chatId:          thinking.chat.id,
-      promptMsgId:     thinking.message_id,
+      step:        'await_process_type',
+      mimeType,
+      audioBuffer,
+      chatId:      thinking.chat.id,
+      promptMsgId: thinking.message_id,
       userId,
-      createdAt:       Date.now(),
-      lastProcessType: null,
+      createdAt:   Date.now(),
     });
 
     await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, 'چطور میخوای متن پردازش بشه؟');
     await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
   } catch (err) {
     console.error('❌ ERROR on voice:', err);
-    try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, '😕 خطا در پردازش. دوباره امتحان کن.'); } catch {}
+    try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, '😕 خطا در دریافت فایل. دوباره امتحان کن.'); } catch {}
   }
 });
 
@@ -338,54 +369,33 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Noop (quota full)
-    if (/^noop:/.test(data)) {
-      return ctx.answerCbQuery('سهمیهٔ رایگان امروز این مدل تمام شده است.', { show_alert: true });
-    }
-
-    // Step 1: process type
+    // Process type → مستقیم شروع پردازش
     const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
     if (p) {
       const [, type, token] = p;
       const session = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
 
-      session.processType     = type;
-      session.lastProcessType = type;
-      session.step            = 'await_model';
+      const prompt    = PROMPT_MAP[type]     || PROMPT_MAP.full;
+      const promptGpt = PROMPT_MAP_GPT[type] || PROMPT_MAP_GPT.full;
 
-      await ctx.answerCbQuery(`حالت "${type}" انتخاب شد`);
-      await ctx.reply('با کدوم مدل پردازش کنم؟', createModelKeyboard(token));
-      return;
-    }
-
-    // Step 2: model
-    const m = data.match(/^model:(flash|flashlite):([a-z0-9]+)$/i);
-    if (m) {
-      const [, key, token] = m;
-      const modelKey = key.toLowerCase();
-      const session  = sessions.get(token);
-      if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      if (remaining(modelKey) <= 0) return ctx.answerCbQuery('سهمیهٔ امروز این مدل تمام شده است.', { show_alert: true });
-
-      const processType = session.processType || session.lastProcessType || 'full';
-      if (!processType) {
-        session.step = 'await_process_type';
-        await ctx.answerCbQuery('لطفاً ابتدا حالت پردازش را انتخاب کنید.');
-        await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
-        return;
-      }
-
-      const prompt  = PROMPT_MAP[processType] || PROMPT_MAP.full;
       await ctx.answerCbQuery('در حال پردازش...');
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
       let text;
       try {
-        text = await callWithRetryAndFallback(modelKey, session, prompt) || 'متنی برنگشت.';
+        text = await callAI(session, prompt, promptGpt) || 'متنی برنگشت.';
       } catch (err) {
         console.error('❌ All AI attempts failed:', err);
-        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '😕 خطا در پردازش هوش مصنوعی. دوباره امتحان کن.'); } catch {}
+        let errMsg = '😕 پردازش ناموفق بود. دوباره تلاش کن.';
+        if (err instanceof CreditError) {
+          errMsg = '💳 اعتبار OpenRouter تمام شده است. لطفاً حساب را شارژ کنید.';
+        } else if ((err.message||'').includes('ALL_FAILED')) {
+          errMsg = '😕 هر دو مدل (Gemini و GPT) پاسخ ندادند. احتمالاً مشکل موقت است — چند دقیقه دیگر دوباره امتحان کن.';
+        } else if ((err.message||'').includes('تبدیل فایل')) {
+          errMsg = '😕 خطا در تبدیل فایل صوتی. لطفاً مجدداً ویس بفرست.';
+        }
+        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
         return;
       }
 
@@ -393,13 +403,11 @@ bot.on('callback_query', async (ctx) => {
 
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
         try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
-        inc(modelKey);
-        session.step        = 'ready';
-        session.processType = null;
-        await sendContinueGuide(ctx, token);
+        session.step = 'ready';
+        await maybeWarnLowBalance(ctx);
       } else {
-        session.resultText  = text;
-        session.step        = 'await_output_format';
+        session.resultText = text;
+        session.step       = 'await_output_format';
         try {
           await ctx.telegram.editMessageText(
             waiting.chat.id, waiting.message_id, undefined,
@@ -407,12 +415,11 @@ bot.on('callback_query', async (ctx) => {
           );
         } catch {}
         await ctx.reply('یکی از گزینه‌های زیر رو انتخاب کن:', createOutputFormatKeyboard(token));
-        inc(modelKey);
       }
       return;
     }
 
-    // Step 3: output format for long text
+    // Output format for long text
     const o = data.match(/^output:(messages|file):([a-z0-9]+)$/i);
     if (o) {
       const [, format, token] = o;
@@ -433,9 +440,8 @@ bot.on('callback_query', async (ctx) => {
         }
       }
 
-      session.step        = 'ready';
-      session.processType = null;
-      await sendContinueGuide(ctx, token);
+      session.step = 'ready';
+      await maybeWarnLowBalance(ctx);
       return;
     }
 
@@ -445,7 +451,7 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-/* ===== 8) Launch (Long Polling) ===== */
+/* ===== 9) Launch (Long Polling) ===== */
 bot.launch()
   .then(() => console.log('✅ Bot started (long polling)'))
   .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
