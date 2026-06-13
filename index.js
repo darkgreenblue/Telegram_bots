@@ -1,7 +1,6 @@
-// index.js — Telegram voice → choose process type → choose model → transcribe (Cloud Run / Webhook)
+// index.js — Telegram voice → choose process type → choose model → transcribe (Long Polling)
 import 'dotenv/config';
 import fs from 'fs';
-import express from 'express';
 import { Telegraf, Markup } from 'telegraf';
 import {
   GoogleGenAI,
@@ -10,10 +9,9 @@ import {
 } from '@google/genai';
 
 /* ===== 0) ENV ===== */
-const BOT_TOKEN            = process.env.BOT_TOKEN?.trim();
-const GEMINI_API_KEY       = process.env.GEMINI_API_KEY?.trim();
-const WH_SECRET            = process.env.WH_SECRET?.trim();
-const OPENROUTER_API_KEY   = process.env.OPENROUTER_API_KEY?.trim();
+const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
+const GEMINI_API_KEY     = process.env.GEMINI_API_KEY?.trim();
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)      { console.error('❌ BOT_TOKEN خالی است');      process.exit(1); }
 if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
 
@@ -21,9 +19,7 @@ if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); proc
 const bot = new Telegraf(BOT_TOKEN);
 const ai  = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-/* ===== 2) Usage counters (daily by PT) =====
-   نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
-*/
+/* ===== 2) Usage counters (daily by PT) ===== */
 const PT_TZ      = 'America/Los_Angeles';
 const USAGE_FILE = '/tmp/usage.json';
 const FREE_QUOTAS = { flash: 250, flashlite: 1000 };
@@ -182,8 +178,8 @@ async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
 }
 
 async function callWithRetryAndFallback(modelKey, session, prompt) {
-  const MAX_RETRIES  = 3;
-  const RETRY_DELAY  = 15_000;
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 15_000;
 
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
@@ -196,7 +192,6 @@ async function callWithRetryAndFallback(modelKey, session, prompt) {
     }
   }
 
-  // سه بار شکست → OpenRouter
   console.log('↪️ Switching to OpenRouter fallback...');
   return await callOpenRouter(modelKey, session.audioBuffer, session.mimeType, prompt);
 }
@@ -204,10 +199,10 @@ async function callWithRetryAndFallback(modelKey, session, prompt) {
 /* ===== 6) Keyboards ===== */
 function createProcessTypeKeyboard(token) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('📝 متن کامل',        `ptype:full:${token}`)],
-    [Markup.button.callback('✂️ متن مفید',         `ptype:clean:${token}`)],
-    [Markup.button.callback('📌 خلاصه تیتر‌وار',  `ptype:summary:${token}`)],
-    [Markup.button.callback('🚫 منصرف شدم',        `cancel:${token}`)],
+    [Markup.button.callback('📝 متن کامل',       `ptype:full:${token}`)],
+    [Markup.button.callback('✂️ متن مفید',        `ptype:clean:${token}`)],
+    [Markup.button.callback('📌 خلاصه تیتر‌وار', `ptype:summary:${token}`)],
+    [Markup.button.callback('🚫 منصرف شدم',       `cancel:${token}`)],
   ]);
 }
 
@@ -280,7 +275,6 @@ bot.start((ctx) => ctx.reply('سلام! یک ویس بفرست. 🎤'));
 bot.on(['voice', 'audio'], async (ctx) => {
   const thinking = await ctx.reply('⏳ دریافت فایل...');
   try {
-    // sessions قبلی همین کاربر را پاک کن
     const userId = ctx.from.id;
     for (const [tk, s] of sessions) {
       if (s.userId === userId) sessions.delete(tk);
@@ -288,8 +282,8 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     const msg   = ctx.message;
     const media = msg.voice || msg.audio;
-    const fileUrl = await ctx.telegram.getFileLink(media.file_id);
-    const res     = await fetch(fileUrl.href);
+    const fileUrl    = await ctx.telegram.getFileLink(media.file_id);
+    const res        = await fetch(fileUrl.href);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
@@ -306,7 +300,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
       step:            'await_process_type',
       uri:             uploaded.uri,
       mimeType:        uploaded.mimeType || mimeType,
-      audioBuffer,                        // برای OpenRouter fallback
+      audioBuffer,
       chatId:          thinking.chat.id,
       promptMsgId:     thinking.message_id,
       userId,
@@ -326,7 +320,6 @@ bot.on('callback_query', async (ctx) => {
   try {
     const data = ctx.callbackQuery.data || '';
 
-    // Cancel
     const c = data.match(/^cancel:([a-z0-9]+)$/i);
     if (c) {
       const [, token] = c;
@@ -340,12 +333,10 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Noop (quota full)
     if (/^noop:/.test(data)) {
       return ctx.answerCbQuery('سهمیهٔ رایگان امروز این مدل تمام شده است.', { show_alert: true });
     }
 
-    // Step 1: process type
     const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
     if (p) {
       const [, type, token] = p;
@@ -361,7 +352,6 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Step 2: model
     const m = data.match(/^model:(flash|flashlite):([a-z0-9]+)$/i);
     if (m) {
       const [, key, token] = m;
@@ -414,7 +404,6 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Step 3: output format for long text
     const o = data.match(/^output:(messages|file):([a-z0-9]+)$/i);
     if (o) {
       const [, format, token] = o;
@@ -447,18 +436,10 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-/* ===== 8) Express Webhook server (Cloud Run) ===== */
-const app = express();
-app.get('/', (_req, res) => res.status(200).send('OK'));
-app.use(express.json({ limit: '10mb' }));
-app.post('/webhook', (req, res, next) => {
-  const token = req.get('X-Telegram-Bot-Api-Secret-Token');
-  if (WH_SECRET && token !== WH_SECRET) {
-    console.warn('❌ Invalid secret token');
-    return res.sendStatus(401);
-  }
-  return next();
-}, bot.webhookCallback('/webhook'));
+/* ===== 8) Launch (Long Polling) ===== */
+bot.launch()
+  .then(() => console.log('✅ Bot started (long polling)'))
+  .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`✅ Webhook server listening on ${PORT}`));
+process.once('SIGINT',  () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
