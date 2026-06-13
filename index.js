@@ -269,9 +269,9 @@ async function getOpenRouterBalance() {
 
 async function maybeWarnLowBalance(ctx) {
   const bal = await getOpenRouterBalance();
-  if (bal !== null && bal < 1) {
+  if (bal !== null && bal < 10) {
     try {
-      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱ دلار است (حدود $${bal.toFixed(2)}). احتمال تمام شدن شارژ وجود دارد — لطفاً شارژ کنید.`);
+      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱۰ دلار است (حدود $${bal.toFixed(2)}). احتمال تمام شدن شارژ وجود دارد — لطفاً شارژ کنید.`);
     } catch {}
   }
 }
