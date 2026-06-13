@@ -8,8 +8,30 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { console.error('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
+// فقط این کاربر اجازهٔ استفاده دارد
+const ALLOWED_USER_ID = 100257975;
+
 /* ===== 1) Client ===== */
 const bot = new Telegraf(BOT_TOKEN);
+
+// محدودسازی به یک کاربر مشخص
+bot.use(async (ctx, next) => {
+  const uid = ctx.from?.id;
+  if (uid && uid !== ALLOWED_USER_ID) {
+    try {
+      if (ctx.callbackQuery) {
+        await ctx.answerCbQuery('🔒 این ربات شخصی است.', { show_alert: true });
+      } else {
+        await ctx.reply(
+          '🔒 این یک ربات شخصی است و امکان استفاده عمومی فعلاً وجود ندارد.\n\n' +
+          'برای دریافت شرایط استفاده به آیدی @alireza_oliya پیام دهید.'
+        );
+      }
+    } catch {}
+    return; // ادامه نده
+  }
+  return next();
+});
 
 /* ===== 2) Session store ===== */
 const sessions = new Map();
@@ -86,10 +108,36 @@ function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
 /* ===== 5) AI via OpenRouter ===== */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
-  const model   = OPENROUTER_MODEL_MAP[modelKey] || OPENROUTER_MODEL_MAP.flash;
-  const dataUrl = `data:${mimeType};base64,${audioBuffer.toString('base64')}`;
+const PRIMARY_RETRIES = 3;
+const RETRY_DELAY     = 15_000;            // ۱۵ ثانیه بین تلاش‌ها
+const FALLBACK_MODEL  = 'openai/gpt-audio-mini';
 
+// خطای مربوط به تمام شدن اعتبار / محدودیت پرداخت
+class CreditError extends Error {
+  constructor(msg) { super(msg); this.name = 'CreditError'; }
+}
+
+function buildContent(model, audioBuffer, mimeType, prompt) {
+  // مدل‌های صوتی OpenAI از input_audio استفاده می‌کنند
+  if (/audio/i.test(model)) {
+    let format = 'mp3';
+    if (/ogg|opus/i.test(mimeType))      format = 'ogg';
+    else if (/wav/i.test(mimeType))      format = 'wav';
+    else if (/mp3|mpeg/i.test(mimeType)) format = 'mp3';
+    return [
+      { type: 'text', text: prompt },
+      { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
+    ];
+  }
+  // مدل‌های Gemini از طریق data URL
+  const dataUrl = `data:${mimeType};base64,${audioBuffer.toString('base64')}`;
+  return [
+    { type: 'image_url', image_url: { url: dataUrl } },
+    { type: 'text', text: prompt },
+  ];
+}
+
+async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -98,18 +146,16 @@ async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
     },
     body: JSON.stringify({
       model,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: dataUrl } },
-          { type: 'text', text: prompt },
-        ],
-      }],
+      messages: [{ role: 'user', content: buildContent(model, audioBuffer, mimeType, prompt) }],
     }),
   });
 
   if (!res.ok) {
     const body = await res.text();
+    // 402 = اعتبار ناکافی در OpenRouter
+    if (res.status === 402 || /insufficient|credit|quota|payment/i.test(body)) {
+      throw new CreditError(body.slice(0, 300));
+    }
     throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 300)}`);
   }
 
@@ -118,7 +164,57 @@ async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
 }
 
 async function callAI(modelKey, session, prompt) {
-  return await callOpenRouter(modelKey, session.audioBuffer, session.mimeType, prompt);
+  const primaryModel = OPENROUTER_MODEL_MAP[modelKey] || OPENROUTER_MODEL_MAP.flash;
+
+  // مدل اصلی: تا ۳ بار با فاصلهٔ ۱۵ ثانیه
+  for (let i = 0; i < PRIMARY_RETRIES; i++) {
+    if (i > 0) await sleep(RETRY_DELAY);
+    try {
+      const out = await callOpenRouter(primaryModel, session.audioBuffer, session.mimeType, prompt);
+      if (out) return out;
+      throw new Error('Empty response');
+    } catch (err) {
+      if (err instanceof CreditError) throw err; // شارژ تمام شده → retry بی‌فایده است
+      console.error(`❌ Primary (${primaryModel}) attempt ${i+1}/${PRIMARY_RETRIES}:`, (err.message||'').slice(0,150));
+    }
+  }
+
+  // فالبک: gpt-audio-mini فقط یک بار
+  console.log(`↪️ Fallback to ${FALLBACK_MODEL}...`);
+  try {
+    const out = await callOpenRouter(FALLBACK_MODEL, session.audioBuffer, session.mimeType, prompt);
+    if (out) return out;
+    throw new Error('Empty response');
+  } catch (err) {
+    if (err instanceof CreditError) throw err;
+    console.error(`❌ Fallback (${FALLBACK_MODEL}) failed:`, (err.message||'').slice(0,150));
+    throw new Error('ALL_FAILED');
+  }
+}
+
+// موجودی OpenRouter را برمی‌گرداند (دلار) یا null
+async function getOpenRouterBalance() {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/credits', {
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
+    });
+    if (!res.ok) return null;
+    const data  = await res.json();
+    const total = data?.data?.total_credits;
+    const used  = data?.data?.total_usage;
+    if (typeof total !== 'number' || typeof used !== 'number') return null;
+    return total - used;
+  } catch { return null; }
+}
+
+// اگر موجودی زیر ۱ دلار باشد هشدار می‌دهد
+async function maybeWarnLowBalance(ctx) {
+  const bal = await getOpenRouterBalance();
+  if (bal !== null && bal < 1) {
+    try {
+      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱ دلار است (حدود $${bal.toFixed(2)}). احتمال تمام شدن شارژ وجود دارد — لطفاً شارژ کنید.`);
+    } catch {}
+  }
 }
 
 /* ===== 6) Keyboards ===== */
@@ -225,8 +321,6 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Noop (quota full)
-
     // Step 1: process type
     const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
     if (p) {
@@ -268,7 +362,10 @@ bot.on('callback_query', async (ctx) => {
         text = await callAI(modelKey, session, prompt) || 'متنی برنگشت.';
       } catch (err) {
         console.error('❌ All AI attempts failed:', err);
-        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '😕 خطا در پردازش هوش مصنوعی. دوباره امتحان کن.'); } catch {}
+        const errMsg = err instanceof CreditError
+          ? '😕 اعتبار OpenRouter تمام شده یا به محدودیت پرداخت رسیده‌اید. لطفاً حساب OpenRouter را شارژ کنید.'
+          : '😕 خطا در پردازش هوش مصنوعی. دوباره امتحان کن.';
+        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
         return;
       }
 
@@ -279,6 +376,7 @@ bot.on('callback_query', async (ctx) => {
 
         session.step        = 'ready';
         session.processType = null;
+        await maybeWarnLowBalance(ctx);
       } else {
         session.resultText  = text;
         session.step        = 'await_output_format';
@@ -317,6 +415,7 @@ bot.on('callback_query', async (ctx) => {
 
       session.step        = 'ready';
       session.processType = null;
+      await maybeWarnLowBalance(ctx);
       return;
     }
 
