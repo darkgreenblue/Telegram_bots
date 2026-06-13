@@ -1,0 +1,830 @@
+"""روتینگ آپدیت‌ها و کل منطق تعامل (بله + تلگرام) — چندزبانه.
+
+جریان: [تلگرام] انتخاب زبان → آنبوردینگ ۵سؤالی → دریافت خواب → کارت تأیید →
+gate همسفری → خروجی «اول عکس، بعد تعبیر».
+بله فقط فارسی است (بدون انتخابگر زبان).
+"""
+import os
+import re
+import time
+import asyncio
+import logging
+import tempfile
+
+import db
+import ai
+import locales
+import payments
+import texts as C
+from bale import inline_keyboard, reply_keyboard
+from config import (
+    SUBSCRIPTIONS, SUBSCRIPTION_ORDER,
+    ADMIN_USER_ID, MIN_VOICE_DURATION, MAX_VOICE_DURATION,
+    MIN_TEXT_CHARS, MAX_TEXT_CHARS,
+    MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
+    DEFAULT_LANGUAGE, multilang_enabled, payment_methods_for, REFERRAL_ENABLED,
+    FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
+)
+
+log = logging.getLogger("handlers")
+
+# قفل ضد کلیک/پیام رگباری — کلید: (platform, user_id, scope)
+_processing: set = set()
+
+_REF_RE = re.compile(r"^ref_(\d+)$")
+_CAPTION_SAFE = 1000  # حاشیه‌ی امن زیر سقف ۱۰۲۴ کپشن
+
+# نگاشتِ معکوسِ متنِ دکمه‌های پایین → اکشن (در همه‌ی زبان‌ها، مقاوم به تغییر زبان)
+_KB_ACTION: dict = {}
+for _code in locales.LANG_ORDER:
+    _kb = locales.get(_code)["kb"]
+    _KB_ACTION[_kb["new_dream"]]    = "new_dream"
+    _KB_ACTION[_kb["subscription"]] = "subscription"
+    _KB_ACTION[_kb["persona"]]      = "persona"
+    _KB_ACTION[_kb["invite"]]       = "invite"
+    _KB_ACTION[_kb["language"]]     = "language"
+
+
+# ===================== کیبوردها =====================
+
+def _main_reply_kb(bale, lang):
+    # دکمه‌ی زبان فقط روی تلگرام (بله تک‌زبانه است)
+    return reply_keyboard(C.main_reply_rows(lang, include_language=multilang_enabled(bale.platform)))
+
+
+def _packages_inline(lang):
+    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}"}]
+            for t in SUBSCRIPTION_ORDER]
+    return inline_keyboard(rows)
+
+
+def _confirm_inline(lang):
+    return inline_keyboard([
+        [{"text": C.get(lang, "btn_confirm"), "callback_data": "confirm_dream"}],
+        [{"text": C.get(lang, "btn_cancel"),  "callback_data": "cancel_dream"}],
+    ])
+
+
+def _view_full_inline(lang, dream_id: int):
+    return inline_keyboard([[{"text": C.get(lang, "btn_view_full"),
+                              "callback_data": f"fullview:{dream_id}"}]])
+
+
+def _language_picker_kb():
+    return inline_keyboard(locales.language_picker_rows())
+
+
+# ===================== کمک‌ها =====================
+
+def _user_fields(obj: dict):
+    frm = obj.get("from") or {}
+    return frm.get("id"), frm.get("username"), frm.get("first_name")
+
+
+def _lock_key(bale, user_id, scope):
+    return (bale.platform, user_id, scope)
+
+
+async def _staged(coro, timeout: float, label: str, platform: str):
+    """اجرای یک مرحله با سقفِ زمانی + لاگِ شروع/پایان/تایم‌اوت با مدت‌زمان.
+    تایم‌اوت → asyncio.TimeoutError (که در except مرحله گرفته و به پیامِ خطا تبدیل می‌شود)."""
+    t0 = time.monotonic()
+    try:
+        res = await asyncio.wait_for(coro, timeout=timeout)
+        log.info("[%s] stage '%s' ✓ %.1fs", platform, label, time.monotonic() - t0)
+        return res
+    except asyncio.TimeoutError:
+        log.error("[%s] stage '%s' ✗ TIMEOUT after %ss", platform, label, timeout)
+        raise
+    except Exception as e:
+        log.warning("[%s] stage '%s' ✗ %.1fs: %s", platform, label, time.monotonic() - t0, e)
+        raise
+
+
+def _lang_of(user: dict, bale=None) -> str:
+    """زبانِ کاربر؛ بله همیشه فارسی."""
+    if bale is not None and not multilang_enabled(bale.platform):
+        return DEFAULT_LANGUAGE
+    return db.user_lang(user)
+
+
+async def _send_onboarding_step(bale, chat_id, lang, step):
+    """فرستادن سؤال آنبوردینگ به‌صورت پیام جدید (نقاط ورود)."""
+    text, rows = C.onboarding_message(lang, step)
+    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+
+
+async def _edit_onboarding_step(bale, chat_id, msg_id, lang, step):
+    """ادیتِ همان پیامِ پرسش به سؤالِ جدید (تا فضای چت اشغال نشود)."""
+    text, rows = C.onboarding_message(lang, step)
+    if msg_id:
+        await bale.edit_message_text(chat_id, msg_id, text, reply_markup=inline_keyboard(rows))
+    else:
+        await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+
+
+async def _send_welcome(bale, chat_id, lang):
+    """خوش‌آمد: عکس مسکات + کپشنِ معرفی + سؤال ۱."""
+    caption, rows = C.welcome_message(lang)
+    kb = inline_keyboard(rows)
+    res = await bale.send_asset(chat_id, MASCOT_WELCOME, caption=caption, reply_markup=kb)
+    if res is None:  # مسکات نبود → fallback متنی
+        await bale.send_message(chat_id, caption, reply_markup=kb)
+
+
+async def _send_paywall(bale, chat_id, lang, prefix=""):
+    """دعوت به همسفری: عکس مسکات + کپشن + دکمه‌های پلن."""
+    caption = C.paywall_full(lang, prefix)
+    kb = _packages_inline(lang)
+    res = await bale.send_asset(chat_id, MASCOT_INVITE, caption=caption, reply_markup=kb)
+    if res is None:
+        await bale.send_message(chat_id, caption, reply_markup=kb)
+
+
+async def _send_language_picker(bale, chat_id):
+    await bale.send_message(chat_id, locales.LANGUAGE_PICKER_TITLE,
+                            reply_markup=_language_picker_kb(), parse_mode=None)
+
+
+# روایت‌گرِ پس‌زمینه — یک پیامِ واحد که هر ~۴.۵ ثانیه ادیت می‌شود تا کاربر تنها نماند.
+async def _narrate(bale, chat_id, lang):
+    loc = locales.get(lang)
+    lines = loc["narration"]
+    patience = loc["narration_patience"]
+    n = len(lines)
+    msg_id = None
+    sent_once = False
+    i = 0
+    try:
+        while True:
+            text = lines[i] if i < n else patience[(i - n) % len(patience)]
+            try:
+                if not sent_once:
+                    res = await bale.send_message(chat_id, text)
+                    sent_once = True
+                    msg_id = (res or {}).get("message_id") if isinstance(res, dict) else None
+                elif msg_id is not None:
+                    await bale.edit_message_text(chat_id, msg_id, text)
+            except Exception:
+                pass
+            i += 1
+            await asyncio.sleep(NARRATE_INTERVAL)
+    except asyncio.CancelledError:
+        pass
+
+
+# ===================== دیسپچر =====================
+
+async def handle_update(bale, update: dict):
+    log.info("[%s] update %s keys=%s", bale.platform, update.get("update_id"),
+             [k for k in update if k != "update_id"])
+    if "callback_query" in update:
+        await _handle_callback(bale, update["callback_query"])
+        return
+    if "pre_checkout_query" in update:
+        await bale.answer_pre_checkout_query(update["pre_checkout_query"].get("id"), ok=True)
+        return
+    if "message" in update:
+        await _handle_message(bale, update["message"])
+
+
+# ===================== پیام‌ها =====================
+
+async def _handle_message(bale, msg: dict):
+    chat_id = (msg.get("chat") or {}).get("id")
+    user_id, username, first_name = _user_fields(msg)
+    if chat_id is None or user_id is None:
+        return
+
+    if "successful_payment" in msg:
+        sp = msg["successful_payment"]
+        await payments.apply_successful_payment(
+            bale, user_id, sp.get("invoice_payload", ""),
+            sp.get("telegram_payment_charge_id", ""),
+        )
+        await _try_resume_pending_dream(bale, chat_id, user_id)
+        return
+
+    user = await db.get_user(user_id)
+
+    # تلگرام: اگر زبان هنوز انتخاب نشده، تا قبل از هر چیز انتخابگر زبان
+    if user is not None and multilang_enabled(bale.platform) and not user.get("language"):
+        if not (msg.get("text", "").startswith("/start")):
+            await _send_language_picker(bale, chat_id)
+            return
+
+    if "voice" in msg:
+        await _handle_dream_input(bale, chat_id, user_id, "voice", voice=msg["voice"])
+        return
+
+    text = (msg.get("text") or "").strip()
+    if not text:
+        return
+
+    if text.startswith("/start"):
+        await _handle_start(bale, chat_id, user_id, username, first_name, text)
+        return
+    if text.startswith("/simulate_pay") and user_id == ADMIN_USER_ID:
+        await _handle_simulate_pay(bale, chat_id, user_id, text)
+        return
+
+    lang = _lang_of(user, bale)
+    action = _KB_ACTION.get(text)
+
+    # «خواب جدید» = ریست آگاهانه
+    if action == "new_dream":
+        await _send_new_dream_guide(bale, chat_id, user_id)
+        return
+
+    # دکمه‌ی زبان (فقط تلگرام)
+    if action == "language" and multilang_enabled(bale.platform):
+        await _send_language_picker(bale, chat_id)
+        return
+
+    # هر اکشن دیگری: اگر خوابِ ناتمامِ شکست‌خورده هست، اول بازتلاش
+    if (user or {}).get("pending_state") == "processing_failed":
+        handled = await _try_resume_pending_dream(bale, chat_id, user_id)
+        if handled:
+            return
+
+    if action == "subscription":
+        await _send_subscription_status(bale, chat_id, user_id)
+        return
+    if action == "persona":
+        ptext, rows = C.persona_change_message(lang)
+        await bale.send_message(chat_id, ptext, reply_markup=inline_keyboard(rows))
+        return
+    if action == "invite" and REFERRAL_ENABLED:
+        await bale.send_message(chat_id, C.invite_text(lang, bale.invite_link(user_id)))
+        return
+
+    # در غیر این صورت = خواب متنی
+    await _handle_dream_input(bale, chat_id, user_id, "text", text=text)
+
+
+async def _handle_start(bale, chat_id, user_id, username, first_name, text):
+    referred_by = None
+    if REFERRAL_ENABLED:                       # رفرال خاموش → deeplinkِ ref_ نادیده گرفته می‌شود
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2:
+            m = _REF_RE.match(parts[1].strip())
+            if m:
+                ref_id = int(m.group(1))
+                if ref_id != user_id:
+                    referred_by = ref_id
+
+    # بله → fa فوری؛ تلگرام → None (انتخابگر زبان)
+    init_lang = None if multilang_enabled(bale.platform) else DEFAULT_LANGUAGE
+    is_new, user = await db.get_or_create_user(
+        user_id, chat_id, username, first_name, referred_by=referred_by, language=init_lang
+    )
+
+    # تلگرام و زبان انتخاب‌نشده → انتخابگر زبان
+    if multilang_enabled(bale.platform) and not user.get("language"):
+        await _send_language_picker(bale, chat_id)
+        return
+
+    lang = _lang_of(user, bale)
+    if db.onboarding_done(user):
+        await bale.send_message(
+            chat_id,
+            C.get(lang, "returning_welcome") + "\n\n" + C.invite_line(lang, user["persona"]),
+            reply_markup=_main_reply_kb(bale, lang),
+        )
+    elif user["onboarding_step"] == 0:
+        await _send_welcome(bale, chat_id, lang)
+    else:
+        await _send_onboarding_step(bale, chat_id, lang, user["onboarding_step"])
+
+
+async def _send_new_dream_guide(bale, chat_id, user_id):
+    await db.clear_pending(user_id)
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    if not user or not db.onboarding_done(user):
+        step = (user or {}).get("onboarding_step", 0)
+        await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
+        await _send_onboarding_step(bale, chat_id, lang, step)
+        return
+    await bale.send_message(chat_id, C.new_dream_text(lang, user["persona"]),
+                            reply_markup=_main_reply_kb(bale, lang))
+
+
+async def _send_subscription_status(bale, chat_id, user_id):
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    status = db.subscription_status(user or {})
+    text = C.subscription_status_text(lang, status)
+    if status["active"]:
+        await bale.send_message(chat_id, text)
+    else:
+        await bale.send_message(chat_id, text, reply_markup=_packages_inline(lang))
+
+
+# ===================== دریافت خواب =====================
+
+async def _handle_dream_input(bale, chat_id, user_id, source, voice=None, text=None):
+    user = await db.get_user(user_id)
+    if not user:
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+    lang = _lang_of(user, bale)
+
+    # تلگرام بدون زبان → انتخابگر
+    if multilang_enabled(bale.platform) and not user.get("language"):
+        await _send_language_picker(bale, chat_id)
+        return
+
+    if not db.onboarding_done(user):
+        await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
+        await _send_onboarding_step(bale, chat_id, lang, user.get("onboarding_step", 0))
+        return
+
+    if source == "voice":
+        # بله مدتِ صوت را به «میلی‌ثانیه» گزارش می‌کند، تلگرام به «ثانیه». به ثانیه نرمال می‌کنیم.
+        dur = (voice or {}).get("duration", 0) or 0
+        if bale.platform == "bale":
+            dur = dur / 1000
+        if dur < MIN_VOICE_DURATION:
+            await bale.send_message(chat_id, C.get(lang, "voice_too_short"))
+            return
+        if dur > MAX_VOICE_DURATION:
+            await bale.send_message(chat_id, C.get(lang, "voice_too_long"))
+            return
+        payload = voice["file_id"]
+    else:
+        if len(text) < MIN_TEXT_CHARS:
+            await bale.send_message(chat_id, C.get(lang, "text_too_short"))
+            return
+        payload = text[:MAX_TEXT_CHARS]
+
+    await db.set_pending(user_id, source, payload)
+    confirm_text = C.get(lang, "confirm_voice") if source == "voice" else C.get(lang, "confirm_text")
+    await bale.send_message(chat_id, confirm_text, reply_markup=_confirm_inline(lang))
+
+
+# ===================== Callback =====================
+
+async def _handle_callback(bale, cq: dict):
+    cq_id = cq.get("id")
+    data = cq.get("data") or ""
+    user_id, _, _ = _user_fields(cq)
+    chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+    if chat_id is None:
+        chat_id = user_id
+    msg_id = (cq.get("message") or {}).get("message_id")
+
+    try:
+        if data.startswith("lang:"):
+            await _cb_set_language(bale, cq_id, chat_id, user_id, data.split(":", 1)[1])
+        elif data == "onb_start":
+            await _cb_onboarding_start(bale, cq_id, chat_id, user_id)
+        elif data.startswith("onb:"):
+            _, step, idx = data.split(":")
+            await _cb_onboarding_answer(bale, cq_id, chat_id, msg_id, user_id, int(step), int(idx))
+        elif data == "onb_prev":
+            await _cb_onboarding_prev(bale, cq_id, chat_id, msg_id, user_id)
+        elif data.startswith("pers:"):
+            await _cb_persona_change(bale, cq_id, chat_id, user_id, int(data.split(":", 1)[1]))
+        elif data == "confirm_dream":
+            await _cb_confirm_dream(bale, cq_id, chat_id, user_id)
+        elif data == "cancel_dream":
+            user = await db.get_user(user_id)
+            lang = _lang_of(user, bale)
+            await db.clear_pending(user_id)
+            await bale.answer_callback_query(cq_id)
+            await bale.send_message(chat_id, C.get(lang, "cancelled"))
+        elif data.startswith("buy:"):
+            await _cb_buy(bale, cq_id, chat_id, user_id, data.split(":", 1)[1])
+        elif data.startswith("paym:"):
+            _, method, tier = data.split(":")
+            await _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier)
+        elif data.startswith("fullview:"):
+            await _cb_view_full(bale, cq_id, chat_id, user_id, int(data.split(":", 1)[1]))
+        else:
+            await bale.answer_callback_query(cq_id)
+    except Exception as e:
+        log.exception("callback error: %s", e)
+        try:
+            await bale.answer_callback_query(cq_id)
+        except Exception:
+            pass
+
+
+async def _cb_set_language(bale, cq_id, chat_id, user_id, lang_code):
+    if not locales.is_supported(lang_code):
+        await bale.answer_callback_query(cq_id)
+        return
+    # کاربر باید وجود داشته باشد
+    user = await db.get_user(user_id)
+    if not user:
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+    await db.set_language(user_id, lang_code)
+    await bale.answer_callback_query(cq_id, text=locales.get(lang_code)["meta"]["name"])
+    # کیبوردِ پایین فوراً به زبان جدید عوض شود
+    await bale.send_message(chat_id, C.get(lang_code, "lang_changed"),
+                            reply_markup=_main_reply_kb(bale, lang_code))
+    await _send_welcome(bale, chat_id, lang_code)
+
+
+async def _cb_onboarding_start(bale, cq_id, chat_id, user_id):
+    """شروع آنبوردینگ: سؤال اول را بفرست."""
+    user = await db.get_user(user_id)
+    if not user:
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+    lang = _lang_of(user, bale)
+    await db.set_onboarding_step(user_id, 0)
+    await bale.answer_callback_query(cq_id)
+    await _send_onboarding_step(bale, chat_id, lang, 0)
+
+
+async def _cb_onboarding_answer(bale, cq_id, chat_id, msg_id, user_id, step, idx):
+    """پاسخ‌دادن به سؤال؛ همان پیام در جا به سؤالِ بعد ادیت می‌شود."""
+    user = await db.get_user(user_id)
+    if not user:
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+    lang = _lang_of(user, bale)
+    if step != user.get("onboarding_step", 0):
+        await bale.answer_callback_query(cq_id)
+        return
+    questions = locales.onboarding_questions(lang)
+    q = questions[step]
+    if idx < 0 or idx >= len(q["options"]):
+        await bale.answer_callback_query(cq_id)
+        return
+    val, label = q["options"][idx]
+    await db.save_onboarding_answer(user_id, step, q["key"], val, q.get("is_persona", False))
+    await bale.answer_callback_query(cq_id, text=label[:40])
+
+    total = len(questions)
+    if step + 1 < total:
+        # سؤالِ بعد روی همان پیام ادیت می‌شود
+        await _edit_onboarding_step(bale, chat_id, msg_id, lang, step + 1)
+    else:
+        # آنبوردینگ تمام: پیامِ آخرین پرسش را به خوش‌آمدِ پرسونا تبدیل کن،
+        # و دعوت به فرستادن رویا را با کیبوردِ اصلی به‌صورت پیام جدید بفرست.
+        user = await db.get_user(user_id)
+        persona = user["persona"]
+        if msg_id:
+            await bale.edit_message_text(chat_id, msg_id, C.persona_key(lang, persona, "greet"))
+        await bale.send_message(chat_id, C.persona_key(lang, persona, "invite"),
+                                reply_markup=_main_reply_kb(bale, lang))
+
+
+async def _cb_onboarding_prev(bale, cq_id, chat_id, msg_id, user_id):
+    """برگشت به سؤال قبل — روی همان پیام ادیت می‌شود."""
+    user = await db.get_user(user_id)
+    if not user:
+        await bale.answer_callback_query(cq_id)
+        return
+    lang = _lang_of(user, bale)
+    step = user.get("onboarding_step", 0)
+    if step <= 0:
+        await bale.answer_callback_query(cq_id)
+        return
+    prev_step = step - 1
+    await db.set_onboarding_step(user_id, prev_step)
+    await bale.answer_callback_query(cq_id)
+    await _edit_onboarding_step(bale, chat_id, msg_id, lang, prev_step)
+
+
+async def _cb_persona_change(bale, cq_id, chat_id, user_id, idx):
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    q = locales.onboarding_questions(lang)[0]
+    if idx < 0 or idx >= len(q["options"]):
+        await bale.answer_callback_query(cq_id)
+        return
+    val, label = q["options"][idx]
+    await db.set_persona(user_id, val)
+    await bale.answer_callback_query(cq_id, text=label[:40])
+    await bale.send_message(chat_id, C.ready_text(lang, val), reply_markup=_main_reply_kb(bale, lang))
+
+
+async def _cb_confirm_dream(bale, cq_id, chat_id, user_id):
+    pending = await db.get_pending(user_id)
+    if not pending:
+        await bale.answer_callback_query(cq_id)
+        return
+
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+
+    # --- eligibility gate ---
+    if not user.get("has_used_free_trial"):
+        mode = "free"
+    else:
+        status = db.subscription_status(user)
+        if status["active"]:
+            if not SKIP_DAILY_LIMIT and not await db.can_use_today(user_id):
+                await bale.answer_callback_query(cq_id)
+                await db.clear_pending(user_id)
+                await bale.send_message(chat_id, C.get(lang, "daily_limit"))
+                return
+            mode = "paid"
+        else:
+            await bale.answer_callback_query(cq_id)
+            await db.set_pending_state(user_id, "awaiting_payment", "paid")
+            await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+            return
+
+    lock = _lock_key(bale, user_id, "dream")
+    if lock in _processing:
+        await bale.answer_callback_query(cq_id, text=C.processing_busy(lang))
+        return
+    await bale.answer_callback_query(cq_id)
+
+    # پس‌زمینه: تا یک خوابِ کند/سنگین، polling کلِ پلتفرم را بلاک نکند.
+    # قفلِ _processing از پردازشِ هم‌زمانِ دوباره جلوگیری می‌کند.
+    asyncio.create_task(_process_dream(bale, chat_id, user_id, mode, pending))
+
+
+async def _process_dream(bale, chat_id, user_id, mode, pending):
+    """Pipeline اصلی: transcript → interpretation → image → delivery.
+    در صورت خطا، pending را حفظ می‌کند تا بعداً قابل بازتلاش باشد."""
+    lock = _lock_key(bale, user_id, "dream")
+    if lock in _processing:
+        return
+    _processing.add(lock)
+    log.info("[%s] _process_dream START user=%s mode=%s source=%s",
+             bale.platform, user_id, mode, (pending or {}).get("source"))
+
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    persona = (user or {}).get("persona") or locales.default_persona(lang)
+    profile = db.get_profile(user or {})
+
+    # --- idempotency: آیا برای همین ورودی قبلاً تعبیر ساخته‌ایم؟ ---
+    # اگر بله (تعبیر در DB هست ولی تحویل/عکس ناتمام ماند یا ربات ری‌استارت شد)،
+    # دیگر هرگز LLM را دوباره صدا نمی‌زنیم — مستقیم می‌رویم سراغ عکس/تحویل.
+    existing = None
+    edid = (user or {}).get("pending_dream_id")
+    if edid:
+        d = await db.get_dream(edid)
+        if d and d.get("interpretation"):
+            existing = d
+
+    narrator = asyncio.create_task(_narrate(bale, chat_id, lang))
+    try:
+        tier = "free" if mode == "free" else "paid"
+
+        if existing:
+            # تعبیر قبلاً ساخته شده — هیچ ریکوئست LLMِ جدیدی زده نمی‌شود
+            full = existing["interpretation"]
+            teaser = ai.teaser_of(existing.get("preview") or "")
+            image_prompt = existing["image_prompt"]
+            dream_id = existing["id"]
+            image_url = existing["image_url"] if existing.get("image_generated") else None
+        else:
+            # سهمیه فقط در نخستین تلاش مصرف می‌شود (resume دوباره مصرف نمی‌کند)
+            if mode == "free":
+                await db.mark_free_trial_used(user_id)
+            else:
+                await db.consume_daily(user_id)
+
+            async def _refund():
+                if mode == "free":
+                    await db.unmark_free_trial(user_id)
+                else:
+                    await db.refund_daily(user_id)
+
+            # --- تعبیر (گران‌ترین قدم) ---
+            if pending["source"] == "voice":
+                tmp_path = None
+                try:
+                    file_path = await _staged(
+                        bale.get_file_path(pending["payload"]),
+                        FILE_API_TIMEOUT, "getfile", bale.platform)
+                    ext = os.path.splitext(file_path)[1] or ".ogg"
+                    fd, tmp_path = tempfile.mkstemp(suffix=ext)
+                    os.close(fd)
+                    await _staged(
+                        bale.download_file(file_path, tmp_path),
+                        DOWNLOAD_TIMEOUT, "download", bale.platform)
+                    result = await _staged(
+                        ai.process_voice_dream(tmp_path, lang, persona, profile, tier),
+                        INTERPRET_TIMEOUT, "interpret-voice", bale.platform)
+                except Exception as e:
+                    log.warning("[%s] voice dream FAILED → notifying user: %s", bale.platform, e)
+                    narrator.cancel()
+                    await _refund()
+                    await db.set_pending_state(user_id, "processing_failed", mode)
+                    await bale.send_message(chat_id, C.persona_key(lang, persona, "error"))
+                    return
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                transcript = None
+            else:
+                transcript = pending["payload"]
+                try:
+                    result = await _staged(
+                        ai.interpret_dream(transcript, lang, persona, profile, tier),
+                        INTERPRET_TIMEOUT, "interpret-text", bale.platform)
+                except Exception as e:
+                    log.warning("[%s] text dream FAILED → notifying user: %s", bale.platform, e)
+                    narrator.cancel()
+                    await _refund()
+                    await db.set_pending_state(user_id, "processing_failed", mode)
+                    await bale.send_message(chat_id, C.persona_key(lang, persona, "error"))
+                    return
+
+            # تعبیر موفق شد → فوراً ذخیره + ثبتِ پیوند، تا از این لحظه به بعد
+            # هر شکست/ری‌استارتی بدون فراخوانی دوباره‌ی LLM قابل ادامه باشد.
+            full = ai.compose_full(result["preview"], result["depth"])
+            teaser = ai.teaser_of(result["preview"])
+            image_prompt = result["image_prompt"]
+            dream_id = await db.create_dream(
+                user_id, transcript, persona, full, image_prompt,
+                is_free_trial=1 if mode == "free" else 0, preview=result["preview"],
+            )
+            await db.set_pending_dream_id(user_id, dream_id)
+            image_url = None
+
+        # --- عکس و تحویل (بعد از این نقطه، هر خطایی resume می‌شود نه از نو) ---
+        try:
+            # عکس: اگر از قبل ساخته شده بازاستفاده، وگرنه از روی image_promptِ ذخیره‌شده بساز (بدون LLM)
+            if not image_url:
+                try:
+                    img = await _staged(
+                        ai.generate_image(image_prompt),
+                        IMAGE_TIMEOUT, "image", bale.platform)
+                    image_url = img["url"]
+                    await db.mark_image(
+                        dream_id, image_url,
+                        width=img.get("width"), height=img.get("height"),
+                        black_retries=img.get("black_retries", 0),
+                    )
+                except Exception as e:
+                    log.warning("[%s] image generation failed (continuing without image): %s",
+                                bale.platform, e)
+
+            narrator.cancel()
+
+            if mode == "free":
+                await _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser)
+            else:
+                await _deliver_paid(bale, chat_id, lang, persona, image_url, full)
+                await db.mark_full_delivered(dream_id)
+
+            await db.clear_pending(user_id)
+            log.info("[%s] _process_dream DONE user=%s dream=%s image=%s",
+                     bale.platform, user_id, dream_id, "yes" if image_url else "no")
+        except Exception as e:
+            # تعبیر سالم در DB مانده؛ resumeِ بعدی بدون LLM فقط عکس/تحویل را تکرار می‌کند.
+            log.warning("[%s] delivery failed (will resume without re-interpreting): %s",
+                        bale.platform, e)
+            await db.set_pending_state(user_id, "processing_failed", mode)
+
+    except Exception as e:
+        # هر خطای پیش‌بینی‌نشده‌ای: کاربر نباید بی‌خبر بماند.
+        log.exception("[%s] _process_dream UNEXPECTED error user=%s: %s", bale.platform, user_id, e)
+        try:
+            await db.set_pending_state(user_id, "processing_failed", mode)
+            await bale.send_message(chat_id, C.persona_key(lang, persona, "error"))
+        except Exception:
+            pass
+    finally:
+        narrator.cancel()
+        _processing.discard(lock)
+
+
+async def _try_resume_pending_dream(bale, chat_id, user_id) -> bool:
+    """بررسی و بازتلاش خوابِ ناتمام (در صورت وجود)."""
+    user = await db.get_user(user_id)
+    if not user:
+        return False
+    lang = _lang_of(user, bale)
+    pending_state = user.get("pending_state")
+    if not pending_state:
+        return False
+
+    pending = await db.get_pending(user_id)
+    mode = user.get("pending_mode") or "paid"
+
+    if pending_state == "processing_failed":
+        if not pending:
+            await db.clear_pending(user_id)
+            return False
+        if mode == "paid":
+            sub = db.subscription_status(user)
+            if not sub["active"]:
+                await db.set_pending_state(user_id, "awaiting_payment", mode)
+                await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+                return True
+            if not SKIP_DAILY_LIMIT and not await db.can_use_today(user_id):
+                await db.clear_pending(user_id)
+                await bale.send_message(chat_id, C.get(lang, "daily_limit"))
+                return True
+        lock = _lock_key(bale, user_id, "dream")
+        if lock not in _processing:
+            asyncio.create_task(_process_dream(bale, chat_id, user_id, mode, pending))
+        return True
+
+    if pending_state == "awaiting_payment":
+        if not pending:
+            await db.clear_pending(user_id)
+            return False
+        sub = db.subscription_status(user)
+        if sub["active"]:
+            lock = _lock_key(bale, user_id, "dream")
+            if lock not in _processing:
+                asyncio.create_task(_process_dream(bale, chat_id, user_id, mode, pending))
+            return True
+        else:
+            await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+            return True
+
+    return False
+
+
+async def _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser):
+    kb = _view_full_inline(lang, dream_id)
+    if image_url and len(teaser) <= _CAPTION_SAFE:
+        await bale.send_photo(chat_id, image_url, caption=teaser, reply_markup=kb)
+    elif image_url:
+        await bale.send_photo(chat_id, image_url)
+        await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
+    else:
+        await bale.send_message(chat_id, C.get(lang, "image_failed"), parse_mode=None)
+        await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
+
+
+async def _deliver_paid(bale, chat_id, lang, persona, image_url, full):
+    if image_url:
+        await bale.send_photo(chat_id, image_url, caption=C.persona_key(lang, persona, "image_caption"))
+        await bale.send_message(chat_id, full, parse_mode=None)
+    else:
+        await bale.send_message(chat_id, C.get(lang, "image_failed") + "\n\n" + full, parse_mode=None)
+
+
+# ===================== پرداخت =====================
+
+async def _cb_buy(bale, cq_id, chat_id, user_id, tier):
+    await bale.answer_callback_query(cq_id)
+    if tier not in SUBSCRIPTIONS:
+        return
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    methods = payment_methods_for(lang)
+
+    if "zarinpal" in methods:
+        # فارسی → زرین‌پال (در حالت تست SKIP_PAYMENT شبیه‌سازی)
+        if SKIP_PAYMENT:
+            await payments.simulate_purchase(bale, chat_id, user_id, tier)
+            await _try_resume_pending_dream(bale, chat_id, user_id)
+        else:
+            await payments.send_subscription_invoice(bale, chat_id, user_id, tier)
+        return
+
+    # بقیه‌ی زبان‌ها → انتخاب روش (Stars / Crypto)
+    rows = [[{"text": C.pay_method_button(lang, m), "callback_data": f"paym:{m}:{tier}"}]
+            for m in methods]
+    title = locales.get(lang)["tiers"].get(tier, tier)
+    text = f"*{title}*\n\n" + C.pay_choose_text(lang)
+    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+
+
+async def _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier):
+    await bale.answer_callback_query(cq_id)
+    if tier not in SUBSCRIPTIONS:
+        return
+    # حالت تست: هر کلیک = پرداخت‌شده فرض می‌شود
+    await payments.simulate_purchase(bale, chat_id, user_id, tier)
+    await _try_resume_pending_dream(bale, chat_id, user_id)
+
+
+async def _cb_view_full(bale, cq_id, chat_id, user_id, dream_id):
+    dream = await db.get_dream(dream_id)
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    if not dream or dream["user_id"] != user_id:
+        await bale.answer_callback_query(cq_id, text=C.dream_not_found(lang))
+        return
+    status = db.subscription_status(user or {})
+    if status["active"]:
+        full = dream["interpretation"]  # کاملِ ذخیره‌شده (preview+depth)
+        await bale.answer_callback_query(cq_id)
+        await bale.send_message(chat_id, full, parse_mode=None)
+        await db.mark_full_delivered(dream_id)
+    else:
+        await bale.answer_callback_query(cq_id)
+        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+
+
+# ===================== تست ادمین =====================
+
+async def _handle_simulate_pay(bale, chat_id, user_id, text):
+    parts = text.split()
+    tier = parts[1] if len(parts) > 1 else "week"
+    if tier not in SUBSCRIPTIONS:
+        await bale.send_message(chat_id, f"tier نامعتبر. یکی از: {', '.join(SUBSCRIPTIONS)}")
+        return
+    import uuid
+    payload = f"sub_{tier}_{uuid.uuid4().hex}"
+    await db.create_transaction(
+        user_id, tier, SUBSCRIPTIONS[tier]["days"], SUBSCRIPTIONS[tier]["rial"], payload
+    )
+    await payments.apply_successful_payment(bale, user_id, payload, charge_id="SIMULATED")

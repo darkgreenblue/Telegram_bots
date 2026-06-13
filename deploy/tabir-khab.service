@@ -1,0 +1,19 @@
+[Unit]
+Description=Tabir Khab — Grand Interpreter dream bot (Bale + Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tabir_khab
+# .env داخلِ همین پوشه با python-dotenv خوانده می‌شود (load_dotenv)
+ExecStart=/home/ubuntu/tabir_khab/.venv/bin/python bot.py
+Restart=always
+RestartSec=5
+# خروجی به journald (journalctl -u tabir-khab)؛ لاگِ فایلیِ خودِ برنامه در logs/bot.log
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
