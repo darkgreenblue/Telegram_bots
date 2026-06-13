@@ -368,6 +368,8 @@ async function splitAudioToMp3Chunks(buffer, segmentSec) {
   }
 }
 
+const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
+
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
   if (/audio/i.test(model)) {
@@ -385,25 +387,45 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       { type: 'text', text: prompt },
     ];
   }
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
-  });
-  if (!res.ok) throwForStatus(res.status, await res.text());
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throwForStatus(res.status, await res.text());
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function callOpenRouterText(model, prompt) {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
-  });
-  if (!res.ok) throwForStatus(res.status, await res.text());
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throwForStatus(res.status, await res.text());
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
@@ -975,6 +997,8 @@ bot.on('callback_query', async (ctx) => {
           errMsg = '⏳ سرویس موقتاً به محدودیت نرخ خورده است.\nچند دقیقه دیگر دوباره امتحان کن.';
         } else if (m.includes('تبدیل فایل')) {
           errMsg = '😕 خطا در تبدیل فایل صوتی. لطفاً مجدداً ویس بفرست.';
+        } else if (/TIMEOUT/.test(m)) {
+          errMsg = '⏱️ مدل در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
         } else if (m.includes('ALL_FAILED')) {
           errMsg = '😕 هیچ مدلی پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
         }
@@ -1048,9 +1072,15 @@ bot.on('callback_query', async (ctx) => {
 });
 
 /* ===== 9) Launch ===== */
-bot.launch()
-  .then(() => console.log('✅ Bot started (long polling)'))
-  .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
+function launch() {
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('✅ Bot started (long polling)'))
+    .catch(err => {
+      console.error('❌ Bot launch error, retrying in 5s:', err.message);
+      setTimeout(launch, 5000);
+    });
+}
+launch();
 
 process.once('SIGINT',  () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
