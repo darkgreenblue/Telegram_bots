@@ -1,7 +1,6 @@
-// index.js — Telegram voice → choose process type → choose model → transcribe (Cloud Run / Webhook)
+// index.js — Telegram voice → choose process type → choose model → transcribe (VPS / Long Polling)
 import 'dotenv/config';
 import fs from 'fs';
-import express from 'express';
 import { Telegraf, Markup } from 'telegraf';
 import {
   GoogleGenAI,
@@ -12,7 +11,6 @@ import {
 /* ===== 0) ENV ===== */
 const BOT_TOKEN            = process.env.BOT_TOKEN?.trim();
 const GEMINI_API_KEY       = process.env.GEMINI_API_KEY?.trim();
-const WH_SECRET            = process.env.WH_SECRET?.trim();
 const OPENROUTER_API_KEY   = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)      { console.error('❌ BOT_TOKEN خالی است');      process.exit(1); }
 if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
@@ -447,18 +445,10 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-/* ===== 8) Express Webhook server (Cloud Run) ===== */
-const app = express();
-app.get('/', (_req, res) => res.status(200).send('OK'));
-app.use(express.json({ limit: '10mb' }));
-app.post('/webhook', (req, res, next) => {
-  const token = req.get('X-Telegram-Bot-Api-Secret-Token');
-  if (WH_SECRET && token !== WH_SECRET) {
-    console.warn('❌ Invalid secret token');
-    return res.sendStatus(401);
-  }
-  return next();
-}, bot.webhookCallback('/webhook'));
+/* ===== 8) Launch (Long Polling) ===== */
+bot.launch()
+  .then(() => console.log('✅ Bot started (long polling)'))
+  .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`✅ Webhook server listening on ${PORT}`));
+process.once('SIGINT',  () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
