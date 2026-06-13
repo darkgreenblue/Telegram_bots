@@ -111,6 +111,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PRIMARY_RETRIES = 3;
 const RETRY_DELAY     = 15_000;            // ۱۵ ثانیه بین تلاش‌ها
 const FALLBACK_MODEL  = 'openai/gpt-audio-mini';
+const FORCE_FALLBACK  = process.env.FORCE_FALLBACK === '1'; // برای تست: مستقیم برو سراغ فالبک
 
 // خطای مربوط به تمام شدن اعتبار / محدودیت پرداخت
 class CreditError extends Error {
@@ -166,16 +167,18 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
 async function callAI(modelKey, session, prompt) {
   const primaryModel = OPENROUTER_MODEL_MAP[modelKey] || OPENROUTER_MODEL_MAP.flash;
 
-  // مدل اصلی: تا ۳ بار با فاصلهٔ ۱۵ ثانیه
-  for (let i = 0; i < PRIMARY_RETRIES; i++) {
-    if (i > 0) await sleep(RETRY_DELAY);
-    try {
-      const out = await callOpenRouter(primaryModel, session.audioBuffer, session.mimeType, prompt);
-      if (out) return out;
-      throw new Error('Empty response');
-    } catch (err) {
-      if (err instanceof CreditError) throw err; // شارژ تمام شده → retry بی‌فایده است
-      console.error(`❌ Primary (${primaryModel}) attempt ${i+1}/${PRIMARY_RETRIES}:`, (err.message||'').slice(0,150));
+  // مدل اصلی: تا ۳ بار با فاصلهٔ ۱۵ ثانیه (در حالت تست رد می‌شود)
+  if (!FORCE_FALLBACK) {
+    for (let i = 0; i < PRIMARY_RETRIES; i++) {
+      if (i > 0) await sleep(RETRY_DELAY);
+      try {
+        const out = await callOpenRouter(primaryModel, session.audioBuffer, session.mimeType, prompt);
+        if (out) return out;
+        throw new Error('Empty response');
+      } catch (err) {
+        if (err instanceof CreditError) throw err; // شارژ تمام شده → retry بی‌فایده است
+        console.error(`❌ Primary (${primaryModel}) attempt ${i+1}/${PRIMARY_RETRIES}:`, (err.message||'').slice(0,150));
+      }
     }
   }
 
