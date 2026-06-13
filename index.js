@@ -136,11 +136,16 @@ function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
 /* ===== 5) AI: retry + OpenRouter fallback ===== */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function callGemini(modelKey, uri, mimeType, prompt) {
+async function callGemini(modelKey, audioBuffer, mimeType, prompt) {
+  const blob        = new Blob([audioBuffer], { type: mimeType });
+  const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName: 'audio' } });
+  const uploaded    = uploadedAny.file ?? uploadedAny;
+  if (!uploaded?.uri) throw new Error('No uploaded.uri from Gemini');
+
   const result = await ai.models.generateContent({
     model: MODEL_MAP[modelKey],
     contents: createUserContent([
-      createPartFromUri(uri, mimeType),
+      createPartFromUri(uploaded.uri, mimeType),
       prompt,
     ]),
   });
@@ -187,7 +192,7 @@ async function callWithRetryAndFallback(modelKey, session, prompt) {
   for (let i = 0; i < MAX_RETRIES; i++) {
     if (i > 0) await sleep(RETRY_DELAY);
     try {
-      return await callGemini(modelKey, session.uri, session.mimeType, prompt);
+      return await callGemini(modelKey, session.audioBuffer, session.mimeType, prompt);
     } catch (err) {
       console.error(`❌ Gemini attempt ${i+1}/${MAX_RETRIES}:`, err.message);
       lastErr = err;
@@ -291,20 +296,14 @@ bot.on(['voice', 'audio'], async (ctx) => {
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
-    let mimeType    = 'audio/ogg';
+    let mimeType = 'audio/ogg';
     if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
-    const blob        = new Blob([audioBuffer], { type: mimeType });
-    const displayName = msg.voice ? 'voice.ogg' : (msg.audio?.file_name || 'audio');
-    const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName } });
-    const uploaded    = uploadedAny.file ?? uploadedAny;
-    if (!uploaded?.uri) throw new Error('No uploaded.uri');
 
     const token = makeToken();
     sessions.set(token, {
       step:            'await_process_type',
-      uri:             uploaded.uri,
-      mimeType:        uploaded.mimeType || mimeType,
-      audioBuffer,                        // برای OpenRouter fallback
+      mimeType,
+      audioBuffer,
       chatId:          thinking.chat.id,
       promptMsgId:     thinking.message_id,
       userId,
