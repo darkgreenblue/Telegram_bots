@@ -571,7 +571,12 @@ bot.on(['voice', 'audio'], async (ctx) => {
     console.error('❌ ERROR on voice:', err);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
-      m = '😕 این فایل برای دریافت از تلگرام خیلی بزرگ است.\nلطفاً آن را به چند بخش کوتاه‌تر تقسیم کن و جداگانه بفرست.';
+      m = '😕 فایل برای دریافت خیلی بزرگ است.\n\n' +
+          'برای کوچک‌تر کردنش می‌توانی:\n' +
+          '• فایل را به چند بخش کوتاه‌تر تقسیم کن\n' +
+          '• فرمت را به mp3 تبدیل کن (مثلاً با اپ Audio Converter)\n' +
+          '• بیت‌ریت را کاهش بده (۶۴kbps کافی است)\n' +
+          '• سرعت پخش را ۲x کن تا حجم نصف شود';
     }
     try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {}
   }
