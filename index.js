@@ -185,22 +185,31 @@ async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
 }
 
 async function callWithRetryAndFallback(modelKey, session, prompt) {
-  const MAX_RETRIES  = 3;
-  const RETRY_DELAY  = 15_000;
-
-  let lastErr;
-  for (let i = 0; i < MAX_RETRIES; i++) {
-    if (i > 0) await sleep(RETRY_DELAY);
+  // اگه Gemini فعال باشه، یه بار امتحان می‌کنیم
+  // خطاهای location block یا resource exhausted → بلافاصله به OpenRouter می‌ریم
+  if (GEMINI_API_KEY) {
     try {
       return await callGemini(modelKey, session.audioBuffer, session.mimeType, prompt);
     } catch (err) {
-      console.error(`❌ Gemini attempt ${i+1}/${MAX_RETRIES}:`, err.message);
-      lastErr = err;
+      const msg = err.message || '';
+      const isFatal = err.status === 400 || msg.includes('location') || msg.includes('FAILED_PRECONDITION');
+      console.error(`❌ Gemini failed${isFatal ? ' (fatal, skipping retries)' : ''}:`, msg.slice(0, 120));
+
+      if (!isFatal) {
+        // برای خطاهای موقت (429 rate limit و غیره): ۲ بار retry با ۱۵ ثانیه
+        for (let i = 0; i < 2; i++) {
+          await sleep(15_000);
+          try {
+            return await callGemini(modelKey, session.audioBuffer, session.mimeType, prompt);
+          } catch (e) {
+            console.error(`❌ Gemini retry ${i+1}/2:`, (e.message || '').slice(0, 120));
+          }
+        }
+      }
     }
   }
 
-  // سه بار شکست → OpenRouter
-  console.log('↪️ Switching to OpenRouter fallback...');
+  console.log('↪️ Switching to OpenRouter...');
   return await callOpenRouter(modelKey, session.audioBuffer, session.mimeType, prompt);
 }
 
