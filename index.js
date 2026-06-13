@@ -92,9 +92,9 @@ function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5
 
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
-  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true  },
-  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true  },
-  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false },
+  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
+  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
+  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
@@ -104,7 +104,13 @@ const RETRY_DELAY   = 10_000;
 function calcCost(durationSec, model) {
   const cfg = MODEL_CONFIG[model];
   if (!cfg || !durationSec) return 0;
-  return Math.ceil(durationSec / 60) * cfg.price;
+  return Math.round((durationSec / 60) * cfg.price);
+}
+
+function calcAdminCostUsd(durationSec, model) {
+  const cfg = MODEL_CONFIG[model];
+  if (!cfg || !durationSec) return null;
+  return `~$${((durationSec / 60) * cfg.usdPerMin).toFixed(4)}`;
 }
 
 /* ===== 3) Prompts ===== */
@@ -675,7 +681,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     if (balance < estimatedCost) {
       await ctx.reply(
         `👛 موجودی کافی نیست.\n\n` +
-        `💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})\n` +
+        `💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان\n` +
         `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
         Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
       );
@@ -714,9 +720,13 @@ bot.on(['voice', 'audio'], async (ctx) => {
       createdAt:   Date.now(),
     });
 
-    const costLine = estimatedCost
-      ? `\n💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})`
-      : '';
+    let costLine = '';
+    if (userId === ADMIN_ID) {
+      const usd = calcAdminCostUsd(tgDuration, userModel);
+      if (usd) costLine = `\n💰 هزینه تخمینی: ${usd}`;
+    } else if (estimatedCost) {
+      costLine = `\n💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان`;
+    }
 
     await ctx.telegram.editMessageText(
       thinking.chat.id, thinking.message_id, undefined,
@@ -929,7 +939,7 @@ bot.on('callback_query', async (ctx) => {
           await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
           await ctx.reply(
             `👛 موجودی کافی نیست.\n\n` +
-            `💰 هزینه: ${cost.toLocaleString('fa-IR')} تومان\n` +
+            `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
             `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
             Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
           );
