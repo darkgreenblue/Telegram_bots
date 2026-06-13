@@ -1,62 +1,17 @@
 // index.js — Telegram voice → choose process type → choose model → transcribe (VPS / Long Polling)
 import 'dotenv/config';
-import fs from 'fs';
 import { Telegraf, Markup } from 'telegraf';
-import {
-  GoogleGenAI,
-  createUserContent,
-  createPartFromUri,
-} from '@google/genai';
 
 /* ===== 0) ENV ===== */
-const BOT_TOKEN            = process.env.BOT_TOKEN?.trim();
-const GEMINI_API_KEY       = process.env.GEMINI_API_KEY?.trim();
-const OPENROUTER_API_KEY   = process.env.OPENROUTER_API_KEY?.trim();
-if (!BOT_TOKEN)      { console.error('❌ BOT_TOKEN خالی است');      process.exit(1); }
-if (!GEMINI_API_KEY) { console.error('❌ GEMINI_API_KEY خالی است'); process.exit(1); }
+const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
+if (!BOT_TOKEN)          { console.error('❌ BOT_TOKEN خالی است');          process.exit(1); }
+if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-/* ===== 1) Clients ===== */
+/* ===== 1) Client ===== */
 const bot = new Telegraf(BOT_TOKEN);
-const ai  = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-/* ===== 2) Usage counters (daily by PT) =====
-   نکته: در Cloud Run نوشتن فقط در /tmp مجاز و پایدار تا پایان کانتینر است.
-*/
-const PT_TZ      = 'America/Los_Angeles';
-const USAGE_FILE = '/tmp/usage.json';
-const FREE_QUOTAS = { flash: 250, flashlite: 1000 };
-
-function todayPT() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: PT_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(new Date());
-  const y = parts.find(p=>p.type==='year').value;
-  const m = parts.find(p=>p.type==='month').value;
-  const d = parts.find(p=>p.type==='day').value;
-  return `${y}-${m}-${d}`;
-}
-function atomicSave(path, data) {
-  const tmp = path + '.tmp';
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, path);
-}
-function loadUsage() {
-  try {
-    const raw = fs.readFileSync(USAGE_FILE, 'utf8');
-    const u = JSON.parse(raw);
-    return u?.byDate ? u : { byDate: {} };
-  } catch { return { byDate: {} }; }
-}
-let USAGE = loadUsage();
-function used(key, date=todayPT())      { return USAGE.byDate?.[date]?.[key] || 0; }
-function remaining(key, date=todayPT()) { return Math.max(0, (FREE_QUOTAS[key] ?? 0) - used(key, date)); }
-function inc(key, date=todayPT()) {
-  if (!USAGE.byDate[date]) USAGE.byDate[date] = { flash: 0, flashlite: 0 };
-  USAGE.byDate[date][key] = (USAGE.byDate[date][key] || 0) + 1;
-  atomicSave(USAGE_FILE, JSON.stringify(USAGE));
-}
-
-/* ===== 3) Session store ===== */
+/* ===== 2) Session store ===== */
 const sessions = new Map();
 function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 
@@ -68,11 +23,6 @@ setInterval(() => {
 }, 30*60*1000);
 
 /* ===== 4) Maps ===== */
-const MODEL_MAP = {
-  flash:     'gemini-2.5-flash',
-  flashlite: 'gemini-2.5-flash-lite',
-};
-
 const OPENROUTER_MODEL_MAP = {
   flash:     'google/gemini-2.5-flash',
   flashlite: 'google/gemini-2.5-flash-lite-preview',
@@ -133,27 +83,10 @@ function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   return chunks;
 }
 
-/* ===== 5) AI: retry + OpenRouter fallback ===== */
+/* ===== 5) AI via OpenRouter ===== */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function callGemini(modelKey, audioBuffer, mimeType, prompt) {
-  const blob        = new Blob([audioBuffer], { type: mimeType });
-  const uploadedAny = await ai.files.upload({ file: blob, config: { mimeType, displayName: 'audio' } });
-  const uploaded    = uploadedAny.file ?? uploadedAny;
-  if (!uploaded?.uri) throw new Error('No uploaded.uri from Gemini');
-
-  const result = await ai.models.generateContent({
-    model: MODEL_MAP[modelKey],
-    contents: createUserContent([
-      createPartFromUri(uploaded.uri, mimeType),
-      prompt,
-    ]),
-  });
-  return result.text?.trim() || '';
-}
-
 async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
-  if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY not set');
   const model   = OPENROUTER_MODEL_MAP[modelKey] || OPENROUTER_MODEL_MAP.flash;
   const dataUrl = `data:${mimeType};base64,${audioBuffer.toString('base64')}`;
 
@@ -184,32 +117,7 @@ async function callOpenRouter(modelKey, audioBuffer, mimeType, prompt) {
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function callWithRetryAndFallback(modelKey, session, prompt) {
-  // اگه Gemini فعال باشه، یه بار امتحان می‌کنیم
-  // خطاهای location block یا resource exhausted → بلافاصله به OpenRouter می‌ریم
-  if (GEMINI_API_KEY) {
-    try {
-      return await callGemini(modelKey, session.audioBuffer, session.mimeType, prompt);
-    } catch (err) {
-      const msg = err.message || '';
-      const isFatal = err.status === 400 || msg.includes('location') || msg.includes('FAILED_PRECONDITION');
-      console.error(`❌ Gemini failed${isFatal ? ' (fatal, skipping retries)' : ''}:`, msg.slice(0, 120));
-
-      if (!isFatal) {
-        // برای خطاهای موقت (429 rate limit و غیره): ۲ بار retry با ۱۵ ثانیه
-        for (let i = 0; i < 2; i++) {
-          await sleep(15_000);
-          try {
-            return await callGemini(modelKey, session.audioBuffer, session.mimeType, prompt);
-          } catch (e) {
-            console.error(`❌ Gemini retry ${i+1}/2:`, (e.message || '').slice(0, 120));
-          }
-        }
-      }
-    }
-  }
-
-  console.log('↪️ Switching to OpenRouter...');
+async function callAI(modelKey, session, prompt) {
   return await callOpenRouter(modelKey, session.audioBuffer, session.mimeType, prompt);
 }
 
@@ -224,17 +132,10 @@ function createProcessTypeKeyboard(token) {
 }
 
 function createModelKeyboard(token) {
-  const btnFlash = remaining('flash') > 0
-    ? Markup.button.callback('Gemini Flash',      `model:flash:${token}`)
-    : Markup.button.callback('Gemini Flash — تکمیل', `noop:${token}`);
-  const btnLite  = remaining('flashlite') > 0
-    ? Markup.button.callback('Gemini Flash Lite', `model:flashlite:${token}`)
-    : Markup.button.callback('Gemini Flash Lite — تکمیل', `noop:${token}`);
-
   return Markup.inlineKeyboard([
-    [btnFlash],
-    [btnLite],
-    [Markup.button.callback('🚫 منصرف شدم', `cancel:${token}`)],
+    [Markup.button.callback('Gemini Flash',      `model:flash:${token}`)],
+    [Markup.button.callback('Gemini Flash Lite', `model:flashlite:${token}`)],
+    [Markup.button.callback('🚫 منصرف شدم',      `cancel:${token}`)],
   ]);
 }
 
@@ -325,9 +226,6 @@ bot.on('callback_query', async (ctx) => {
     }
 
     // Noop (quota full)
-    if (/^noop:/.test(data)) {
-      return ctx.answerCbQuery('سهمیهٔ رایگان امروز این مدل تمام شده است.', { show_alert: true });
-    }
 
     // Step 1: process type
     const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
@@ -352,7 +250,6 @@ bot.on('callback_query', async (ctx) => {
       const modelKey = key.toLowerCase();
       const session  = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      if (remaining(modelKey) <= 0) return ctx.answerCbQuery('سهمیهٔ امروز این مدل تمام شده است.', { show_alert: true });
 
       const processType = session.processType || session.lastProcessType || 'full';
       if (!processType) {
@@ -368,7 +265,7 @@ bot.on('callback_query', async (ctx) => {
 
       let text;
       try {
-        text = await callWithRetryAndFallback(modelKey, session, prompt) || 'متنی برنگشت.';
+        text = await callAI(modelKey, session, prompt) || 'متنی برنگشت.';
       } catch (err) {
         console.error('❌ All AI attempts failed:', err);
         try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, '😕 خطا در پردازش هوش مصنوعی. دوباره امتحان کن.'); } catch {}
@@ -379,7 +276,7 @@ bot.on('callback_query', async (ctx) => {
 
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
         try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
-        inc(modelKey);
+
         session.step        = 'ready';
         session.processType = null;
       } else {
@@ -392,7 +289,7 @@ bot.on('callback_query', async (ctx) => {
           );
         } catch {}
         await ctx.reply('یکی از گزینه‌های زیر رو انتخاب کن:', createOutputFormatKeyboard(token));
-        inc(modelKey);
+
       }
       return;
     }
