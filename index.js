@@ -1,9 +1,10 @@
-// index.js — Telegram voice → choose process type → transcribe (VPS / Long Polling)
+// index.js — SaaS Telegram voice→text bot (multi-user, wallet, model selection)
 import 'dotenv/config';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
 import { Telegraf, Markup } from 'telegraf';
+import Database from 'better-sqlite3';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,47 +14,100 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { console.error('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const ALLOWED_USER_ID = 100257975;
+const ADMIN_ID     = 100257975;
+const CARD_NUMBER  = '6219861904145405';
+const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
+const MIN_RECHARGE = 100_000;  // تومان
+const WELCOME_GIFT = 5_000;   // تومان
 
-/* ===== 1) Client ===== */
-const bot = new Telegraf(BOT_TOKEN);
+/* ===== 1) Database ===== */
+mkdirSync('./data', { recursive: true });
+const db = new Database('./data/bot.db');
+db.pragma('journal_mode = WAL');
 
-bot.use(async (ctx, next) => {
-  const uid = ctx.from?.id;
-  if (uid && uid !== ALLOWED_USER_ID) {
-    try {
-      if (ctx.callbackQuery) {
-        await ctx.answerCbQuery('🔒 این ربات شخصی است.', { show_alert: true });
-      } else {
-        await ctx.reply(
-          '🔒 این یک ربات شخصی است و امکان استفاده عمومی فعلاً وجود ندارد.\n\n' +
-          'برای دریافت شرایط استفاده به آیدی @alireza_oliya پیام دهید.'
-        );
-      }
-    } catch {}
-    return;
-  }
-  return next();
-});
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    telegram_id INTEGER PRIMARY KEY,
+    name        TEXT    NOT NULL DEFAULT '',
+    username    TEXT    NOT NULL DEFAULT '',
+    balance     INTEGER NOT NULL DEFAULT 0,
+    model       TEXT    NOT NULL DEFAULT 'google/gemini-2.5-flash',
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_seen   INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE TABLE IF NOT EXISTS usage_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    model       TEXT    NOT NULL,
+    duration_sec REAL,
+    cost        INTEGER NOT NULL DEFAULT 0,
+    type        TEXT,
+    success     INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE TABLE IF NOT EXISTS payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    amount          INTEGER NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    receipt_file_id TEXT,
+    admin_message_id INTEGER,
+    created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+`);
 
-/* ===== 2) Session store ===== */
-const sessions = new Map();
-function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+const stmts = {
+  getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
+  insertUser:    db.prepare('INSERT OR IGNORE INTO users (telegram_id, name, username, balance) VALUES (?, ?, ?, ?)'),
+  touchUser:     db.prepare('UPDATE users SET name=?, username=?, last_seen=unixepoch() WHERE telegram_id=?'),
+  setModel:      db.prepare('UPDATE users SET model=? WHERE telegram_id=?'),
+  deduct:        db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ?'),
+  credit:        db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?'),
+  insertUsage:   db.prepare('INSERT INTO usage_log (user_id, model, duration_sec, cost, type, success) VALUES (?,?,?,?,?,?)'),
+  insertPayment: db.prepare('INSERT INTO payments (user_id, amount) VALUES (?,?)'),
+  getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
+  setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
+  setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // dashboard
+  dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
+  monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
+  totalRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved'"),
+  userCount:      db.prepare('SELECT COUNT(*) as c FROM users'),
+  voiceCount:     db.prepare("SELECT COUNT(*) as c FROM usage_log WHERE success=1"),
+  errorCount:     db.prepare("SELECT COUNT(*) as c FROM usage_log WHERE success=0"),
+};
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [k,v] of sessions) {
-    if (now - v.createdAt > 2*60*60*1000) sessions.delete(k);
-  }
-}, 30*60*1000);
+function upsertUser(telegramId, name, username) {
+  const before = stmts.getUser.get(telegramId);
+  stmts.insertUser.run(telegramId, name || '', username || '', WELCOME_GIFT);
+  stmts.touchUser.run(name || '', username || '', telegramId);
+  const user = stmts.getUser.get(telegramId);
+  return { user, isNew: !before };
+}
 
-/* ===== 3) Models ===== */
-const GEMINI_MODEL  = 'google/gemini-2.5-flash';
+function getUser(telegramId)  { return stmts.getUser.get(telegramId); }
+function getBalance(tid)      { return getUser(tid)?.balance ?? 0; }
+function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5-flash'; }
+
+/* ===== 2) Model config ===== */
+const MODEL_CONFIG = {
+  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true  },
+  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true  },
+  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false },
+};
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
 const RETRIES       = 3;
-const RETRY_DELAY   = 10_000; // ۱۰ ثانیه
+const RETRY_DELAY   = 10_000;
 
-/* ===== 4) Prompts ===== */
+function calcCost(durationSec, model) {
+  const cfg = MODEL_CONFIG[model];
+  if (!cfg || !durationSec) return 0;
+  return Math.ceil(durationSec / 60) * cfg.price;
+}
+
+/* ===== 3) Prompts ===== */
 const PROMPT_MAP = {
   full: `Transcribe the entire speech exactly as spoken, in the same language, with proper punctuation.
 
@@ -132,7 +186,6 @@ Output EXACTLY the following structure with these headers (omit a section only i
 Do NOT add any commentary or framing before "📋 صورت‌جلسه" or after the last section. Start your output immediately with "📋 صورت‌جلسه".`,
 };
 
-// پرامپت‌های مخصوص GPT — با تأکید صریح برای جلوگیری از روایت‌گری
 const PROMPT_MAP_GPT = {
   full: `You are a pure transcription tool. Output ONLY the exact spoken words from this audio, nothing else.
 
@@ -216,7 +269,7 @@ Use EXACTLY this structure (skip a section only if genuinely empty):
 • ریسک‌ها و نگرانی‌های مطرح‌شده (در صورت وجود)`,
 };
 
-/* ===== 5) Helpers ===== */
+/* ===== 4) Helpers ===== */
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -236,20 +289,18 @@ function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   return chunks;
 }
 
-/* ===== 6) AI ===== */
+/* ===== 5) AI ===== */
 class CreditError extends Error {
   constructor(msg) { super(msg); this.name = 'CreditError'; }
 }
 
-// تنظیمات تیکه‌تیکه کردن صوت طولانی
-const CHUNK_THRESHOLD_SEC = 20 * 60;        // بالاتر از ۲۰ دقیقه → تقسیم می‌شود
-const CHUNK_SEC           = 15 * 60;        // هر تیکه ۱۵ دقیقه (~۷مگ mp3)
-const SIZE_THRESHOLD      = 18 * 1024 * 1024; // اگر مدت نامشخص بود، مرز حجمی
-const TEXTPASS_MODEL      = GEMINI_MODEL;
+const CHUNK_THRESHOLD_SEC = 20 * 60;
+const CHUNK_SEC           = 15 * 60;
+const SIZE_THRESHOLD      = 18 * 1024 * 1024;
+const TEXTPASS_MODEL      = DEFAULT_MODEL;
 
 const toFa = n => String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
 
-// تبدیل خطای HTTP به خطای معنی‌دار (اعتبار / محدودیت نرخ / عمومی)
 function throwForStatus(status, body) {
   if (status === 402 || /insufficient|credit|quota|payment|balance/i.test(body))
     throw new CreditError(body.slice(0, 200));
@@ -272,7 +323,6 @@ async function convertToMp3(buffer) {
   }
 }
 
-// مدت صوت بر حسب ثانیه (با ffprobe). اگر نشد، null.
 async function getAudioDurationSec(buffer) {
   const id = Date.now();
   const p  = `/tmp/v_dur_${id}`;
@@ -288,7 +338,6 @@ async function getAudioDurationSec(buffer) {
   finally { try { unlinkSync(p); } catch {} }
 }
 
-// تقسیم صوت به تیکه‌های mp3 برابر segmentSec ثانیه
 async function splitAudioToMp3Chunks(buffer, segmentSec) {
   const id      = Date.now();
   const inPath  = `/tmp/v_in_${id}`;
@@ -313,7 +362,6 @@ async function splitAudioToMp3Chunks(buffer, segmentSec) {
   }
 }
 
-// فراخوانی مدل صوتی OpenRouter (Gemini با data URL، مدل‌های audio با input_audio)
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
   if (/audio/i.test(model)) {
@@ -331,19 +379,16 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       { type: 'text', text: prompt },
     ];
   }
-
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
   });
-
   if (!res.ok) throwForStatus(res.status, await res.text());
   const data = await res.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-// فراخوانی متنی OpenRouter (برای پاس نهایی روی متن پیاده‌شده)
 async function callOpenRouterText(model, prompt) {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -355,23 +400,23 @@ async function callOpenRouterText(model, prompt) {
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-// متن‌کردن یک تیکه صوت: ۳ بار Gemini، بعد ۳ بار GPT (با تبدیل به mp3 اگر لازم بود)
-async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt) {
+async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
   let lastErr = null;
-
   for (let i = 0; i < RETRIES; i++) {
     if (i > 0) await sleep(RETRY_DELAY);
     try {
-      const out = await callOpenRouter(GEMINI_MODEL, audioBuffer, mimeType, prompt);
+      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
       lastErr = err;
-      console.error(`❌ Gemini attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
+      console.error(`❌ ${primaryModel} attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
     }
   }
 
-  console.log('↪️ Gemini exhausted, switching to GPT fallback...');
+  if (!useFallback) throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
+
+  console.log('↪️ Primary exhausted, switching to GPT fallback...');
   let mp3Buffer;
   try {
     mp3Buffer = /mp3|mpeg|wav/i.test(mimeType) ? audioBuffer : await convertToMp3(audioBuffer);
@@ -391,11 +436,9 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt) {
       console.error(`❌ GPT attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
     }
   }
-
   throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
 }
 
-// پاس متنی نهایی روی متن کامل (برای clean/summary/meeting در صوت‌های طولانی)
 async function textPass(type, transcript) {
   const base = PROMPT_MAP[type] || PROMPT_MAP.summary;
   const prompt =
@@ -403,7 +446,6 @@ async function textPass(type, transcript) {
     `Treat this transcript as the "speech"/"audio" referred to in the task below. ` +
     `Apply the task using ONLY the transcript content; do not invent anything.\n\n` +
     `TASK:\n${base}\n\n--- TRANSCRIPT START ---\n${transcript}\n--- TRANSCRIPT END ---`;
-
   let lastErr = null;
   for (let i = 0; i < RETRIES; i++) {
     if (i > 0) await sleep(RETRY_DELAY);
@@ -419,9 +461,9 @@ async function textPass(type, transcript) {
   throw new Error(`TEXTPASS_FAILED:${lastErr?.message || 'unknown'}`);
 }
 
-// نقطه ورود اصلی: تصمیم بین مسیر کوتاه و مسیر تیکه‌تیکه
 async function callAI(session, type, onProgress) {
-  const { audioBuffer, mimeType } = session;
+  const { audioBuffer, mimeType, userModel } = session;
+  const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
   const prompt    = PROMPT_MAP[type]     || PROMPT_MAP.full;
   const promptGpt = PROMPT_MAP_GPT[type] || PROMPT_MAP_GPT.full;
 
@@ -429,31 +471,27 @@ async function callAI(session, type, onProgress) {
   const isLong = (durationSec && durationSec > CHUNK_THRESHOLD_SEC)
               || (!durationSec && audioBuffer.length > SIZE_THRESHOLD);
 
-  // مسیر کوتاه: یک‌جا
   if (!isLong) {
-    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt);
+    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
   }
 
-  // مسیر طولانی: تقسیم → متن هر تیکه → چسباندن
   if (onProgress) await onProgress('🔪 فایل طولانی است؛ در حال تقسیم به بخش‌های کوچک‌تر...');
   let chunks = [];
   try { chunks = await splitAudioToMp3Chunks(audioBuffer, CHUNK_SEC); }
   catch (e) { console.error('❌ split failed:', e.message); }
 
   if (chunks.length <= 1) {
-    // تقسیم نشد یا فقط یک تیکه شد → همان مسیر معمولی
-    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt);
+    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
   }
 
   const transcripts = [];
   for (let i = 0; i < chunks.length; i++) {
     if (onProgress) await onProgress(`🎧 در حال پردازش بخش ${toFa(i+1)} از ${toFa(chunks.length)}...`);
-    const part = await transcribeSingle(chunks[i], 'audio/mpeg', PROMPT_MAP.full, PROMPT_MAP_GPT.full);
+    const part = await transcribeSingle(chunks[i], 'audio/mpeg', PROMPT_MAP.full, PROMPT_MAP_GPT.full, userModel, modelCfg.fallback);
     transcripts.push(part || '');
   }
   const fullText = transcripts.join('\n').trim();
 
-  // متن کامل همینه؛ برای بقیه حالت‌ها یک پاس متنی نهایی می‌زنیم
   if (type === 'full') return fullText;
 
   if (onProgress) await onProgress('🧠 در حال جمع‌بندی نهایی...');
@@ -463,7 +501,6 @@ async function callAI(session, type, onProgress) {
   } catch (e) {
     console.error('❌ textPass failed:', e.message);
   }
-  // اگر جمع‌بندی نشد، حداقل متن کامل را تحویل بده
   return `⚠️ جمع‌بندی نهایی انجام نشد؛ متن کامل پیاده‌سازی‌شده در ادامه آمده است:\n\n${fullText}`;
 }
 
@@ -485,19 +522,41 @@ async function maybeWarnLowBalance(ctx) {
   const bal = await getOpenRouterBalance();
   if (bal !== null && bal < 1) {
     try {
-      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱ دلار است (حدود $${bal.toFixed(2)}). احتمال تمام شدن شارژ وجود دارد — لطفاً شارژ کنید.`);
+      await ctx.reply(`⚠️ شارژ OpenRouter زیر ۱ دلار است (حدود $${bal.toFixed(2)}). لطفاً حساب را شارژ کنید.`);
     } catch {}
   }
 }
 
+/* ===== 6) Bot & session ===== */
+const bot = new Telegraf(BOT_TOKEN);
+
+const sessions    = new Map(); // token → voice session
+const userStates  = new Map(); // userId → { step, paymentId }
+
+function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k,v] of sessions) {
+    if (now - v.createdAt > 2*60*60*1000) sessions.delete(k);
+  }
+}, 30*60*1000);
+
 /* ===== 7) Keyboards ===== */
+function mainKeyboard(userId) {
+  if (userId === ADMIN_ID) {
+    return Markup.keyboard([['🔄 تعویض پردازنده', '📊 داشبورد']]).resize();
+  }
+  return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
+}
+
 function createProcessTypeKeyboard(token) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('📝 متن کامل',       `ptype:full:${token}`)],
-    [Markup.button.callback('✂️ متن مفید',        `ptype:clean:${token}`)],
-    [Markup.button.callback('📌 خلاصه تیتروار',  `ptype:summary:${token}`)],
-    [Markup.button.callback('📋 صورت جلسه',       `ptype:meeting:${token}`)],
-    [Markup.button.callback('🚫 منصرف شدم',       `cancel:${token}`)],
+    [Markup.button.callback('📝 متن کامل',      `ptype:full:${token}`)],
+    [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
+    [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
+    [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
+    [Markup.button.callback('🚫 منصرف شدم',      `cancel:${token}`)],
   ]);
 }
 
@@ -526,13 +585,107 @@ async function sendTextAsFile(ctx, text) {
   });
 }
 
-/* ===== 8) Bot handlers ===== */
-bot.start((ctx) => ctx.reply('سلام! یک ویس بفرست. 🎤'));
+/* ===== 8) Handlers ===== */
+
+bot.start(async (ctx) => {
+  const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  const keyboard  = mainKeyboard(ctx.from.id);
+  if (isNew && ctx.from.id !== ADMIN_ID) {
+    await ctx.reply(
+      `🎉 خوش اومدی!\n\n` +
+      `این ربات وویس‌های تلگرامت رو با هوش مصنوعی به متن تبدیل می‌کنه.\n\n` +
+      `🎁 به عنوان هدیه خوش‌آمد، ${WELCOME_GIFT.toLocaleString('fa-IR')} تومان به کیف پولت شارژ شد!\n\n` +
+      `📋 راهنما:\n` +
+      `• یک ویس بفرست تا شروع کنیم 🎤\n` +
+      `• با دکمه «🔄 تعویض پردازنده» مدل هوش مصنوعی و نرخ پردازش رو انتخاب کن\n` +
+      `• با دکمه «👛 کیف پول» موجودیت رو ببین و شارژ کن`,
+      keyboard
+    );
+  } else {
+    await ctx.reply('سلام! یک ویس بفرست. 🎤', keyboard);
+  }
+});
+
+bot.hears('🔄 تعویض پردازنده', async (ctx) => {
+  upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  const currentModel = getUserModel(ctx.from.id);
+  const buttons = Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
+    const tick = id === currentModel ? '✅ ' : '';
+    return [Markup.button.callback(
+      `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
+      `setmodel:${id}`
+    )];
+  });
+  await ctx.reply(
+    '🔄 مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+    '⚡ Flash‑Lite — سریع‌ترین، ارزان‌ترین\n' +
+    '🔥 Flash — متعادل (پیش‌فرض)\n' +
+    '💎 Pro — دقیق‌ترین، بدون GPT fallback',
+    Markup.inlineKeyboard(buttons)
+  );
+});
+
+bot.hears('👛 کیف پول', async (ctx) => {
+  if (ctx.from.id === ADMIN_ID) return;
+  upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  const balance = getBalance(ctx.from.id);
+  await ctx.reply(
+    `👛 کیف پول شما\n\n` +
+    `💰 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+    Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
+  );
+});
+
+bot.hears('📊 داشبورد', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+  const d = {
+    users:   stmts.userCount.get().c,
+    voices:  stmts.voiceCount.get().c,
+    errors:  stmts.errorCount.get().c,
+    day:     stmts.dailyRevenue.get().s,
+    month:   stmts.monthlyRevenue.get().s,
+    total:   stmts.totalRevenue.get().s,
+  };
+  const orBal = await getOpenRouterBalance();
+  const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
+  await ctx.reply(
+    `📊 داشبورد مدیریت\n\n` +
+    `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
+    `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
+    `❌ خطاها: ${d.errors.toLocaleString('fa-IR')}\n\n` +
+    `💰 درآمد امروز: ${d.day.toLocaleString('fa-IR')} تومان\n` +
+    `💰 درآمد این ماه: ${d.month.toLocaleString('fa-IR')} تومان\n` +
+    `💰 کل درآمد: ${d.total.toLocaleString('fa-IR')} تومان\n\n` +
+    `🔋 موجودی OpenRouter: ${orStr}`
+  );
+});
 
 bot.on(['voice', 'audio'], async (ctx) => {
+  const userId = ctx.from.id;
+  upsertUser(userId, ctx.from.first_name, ctx.from.username);
+
+  const userModel  = getUserModel(userId);
+  const modelCfg   = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
+  const tgDuration = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
+  const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel) : null;
+
+  // Check balance before downloading (only non-admin)
+  if (userId !== ADMIN_ID && estimatedCost !== null && estimatedCost > 0) {
+    const balance = getBalance(userId);
+    if (balance < estimatedCost) {
+      await ctx.reply(
+        `👛 موجودی کافی نیست.\n\n` +
+        `💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})\n` +
+        `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+        Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
+      );
+      return;
+    }
+  }
+
   const thinking = await ctx.reply('⏳ دریافت فایل...');
   try {
-    const userId = ctx.from.id;
+    // Clear existing sessions for this user
     for (const [tk, s] of sessions) {
       if (s.userId === userId) sessions.delete(tk);
     }
@@ -553,13 +706,22 @@ bot.on(['voice', 'audio'], async (ctx) => {
       step:        'await_process_type',
       mimeType,
       audioBuffer,
+      durationSec: tgDuration || null,
+      userModel,
       chatId:      thinking.chat.id,
       promptMsgId: thinking.message_id,
       userId,
       createdAt:   Date.now(),
     });
 
-    await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, 'چطور میخوای متن پردازش بشه؟');
+    const costLine = estimatedCost
+      ? `\n💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})`
+      : '';
+
+    await ctx.telegram.editMessageText(
+      thinking.chat.id, thinking.message_id, undefined,
+      `چطور میخوای متن پردازش بشه؟${costLine}`
+    );
     await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
   } catch (err) {
     console.error('❌ ERROR on voice:', err);
@@ -576,35 +738,208 @@ bot.on(['voice', 'audio'], async (ctx) => {
   }
 });
 
+bot.on('photo', async (ctx) => {
+  const userId = ctx.from.id;
+  const state  = userStates.get(userId);
+  if (state?.step !== 'waiting_receipt') return;
+
+  const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+  const payment = stmts.getPayment.get(state.paymentId);
+  if (!payment || payment.status !== 'pending') return;
+
+  const user = getUser(userId);
+
+  const adminMsg = await ctx.telegram.sendPhoto(ADMIN_ID, fileId, {
+    caption:
+      `💳 درخواست شارژ جدید\n\n` +
+      `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'})\n` +
+      `🆔 آیدی: ${userId}\n` +
+      `💰 مبلغ: ${payment.amount.toLocaleString('fa-IR')} تومان\n` +
+      `🔢 پرداخت #${state.paymentId}`,
+    reply_markup: Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ تایید', `approve:${state.paymentId}`),
+        Markup.button.callback('❌ رد',    `reject:${state.paymentId}`),
+      ],
+    ]).reply_markup,
+  });
+
+  stmts.setPaymentReceipt.run(fileId, adminMsg.message_id, 'waiting_review', state.paymentId);
+  userStates.delete(userId);
+
+  await ctx.reply(
+    '✅ فیش دریافت شد و در انتظار تایید ادمین است.\n' +
+    'معمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.'
+  );
+});
+
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const state  = userStates.get(userId);
+  if (!state) return;
+
+  if (state.step === 'waiting_amount') {
+    const raw    = ctx.message.text.trim().replace(/[,،\s]/g, '');
+    const amount = parseInt(raw, 10);
+    if (isNaN(amount) || amount < MIN_RECHARGE) {
+      await ctx.reply(`❌ حداقل مبلغ شارژ ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان است.\nمبلغ معتبر وارد کن:`);
+      return;
+    }
+    const paymentId = Number(stmts.insertPayment.run(userId, amount).lastInsertRowid);
+    userStates.set(userId, { step: 'waiting_receipt', paymentId });
+    await ctx.reply(
+      `💳 برای شارژ ${amount.toLocaleString('fa-IR')} تومان، مبلغ را به کارت زیر واریز کن:\n\n` +
+      `\`${CARD_NUMBER}\`\n${CARD_OWNER}\n\n` +
+      `📸 بعد از واریز، تصویر فیش را در همین چت بفرست.\n` +
+      `⏰ مهلت ارسال: ۲۴ ساعت`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+});
+
 bot.on('callback_query', async (ctx) => {
   try {
     const data = ctx.callbackQuery.data || '';
 
-    // Cancel
+    // ── Cancel ──
     const c = data.match(/^cancel:([a-z0-9]+)$/i);
     if (c) {
-      const [, token] = c;
-      const session   = sessions.get(token);
+      const session = sessions.get(c[1]);
+      if (session?.step === 'processing') return ctx.answerCbQuery('در حال پردازش است، لطفاً صبر کن.', { show_alert: true });
       await ctx.answerCbQuery('لغو شد');
       try { await ctx.editMessageText('لغو شد ✅'); } catch {}
       if (session) {
         try { await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, 'لغو شد ✅'); } catch {}
-        sessions.delete(token);
+        sessions.delete(c[1]);
       }
       return;
     }
 
-    // Process type → مستقیم شروع پردازش
+    // ── Set model ──
+    const sm = data.match(/^setmodel:(.+)$/);
+    if (sm) {
+      const modelId = sm[1];
+      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
+      stmts.setModel.run(modelId, ctx.from.id);
+      const cfg = MODEL_CONFIG[modelId];
+      await ctx.answerCbQuery(`✅ مدل به ${cfg.label} تغییر یافت`);
+      try {
+        await ctx.editMessageText(
+          `✅ مدل انتخابی: ${cfg.label}\n💰 نرخ: ${cfg.price.toLocaleString('fa-IR')} تومان/دقیقه`
+        );
+      } catch {}
+      return;
+    }
+
+    // ── Recharge (start wallet top-up) ──
+    if (data === 'recharge') {
+      const userId = ctx.from.id;
+      if (userId === ADMIN_ID) return ctx.answerCbQuery();
+      userStates.set(userId, { step: 'waiting_amount' });
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        `💰 چه مبلغی می‌خوای شارژ کنی؟\n` +
+        `(حداقل ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان)\n\n` +
+        `مبلغ را به تومان بنویس:`
+      );
+      return;
+    }
+
+    // ── Admin: approve payment ──
+    const ap = data.match(/^approve:(\d+)$/);
+    if (ap) {
+      if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒');
+      const paymentId = parseInt(ap[1]);
+      const payment   = stmts.getPayment.get(paymentId);
+      if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
+
+      stmts.setPaymentStatus.run('approved', paymentId);
+      stmts.credit.run(payment.amount, payment.user_id);
+
+      await ctx.answerCbQuery('✅ تایید شد');
+      try {
+        await ctx.editMessageCaption(
+          `✅ تایید شد — ${payment.amount.toLocaleString('fa-IR')} تومان`,
+          { reply_markup: { inline_keyboard: [] } }
+        );
+      } catch {}
+
+      const newBalance = getBalance(payment.user_id);
+      try {
+        await ctx.telegram.sendMessage(
+          payment.user_id,
+          `✅ شارژ تایید شد!\n\n` +
+          `💰 ${payment.amount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n` +
+          `💳 موجودی جدید: ${newBalance.toLocaleString('fa-IR')} تومان`
+        );
+      } catch {}
+      return;
+    }
+
+    // ── Admin: reject payment ──
+    const rj = data.match(/^reject:(\d+)$/);
+    if (rj) {
+      if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒');
+      const paymentId = parseInt(rj[1]);
+      const payment   = stmts.getPayment.get(paymentId);
+      if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
+
+      stmts.setPaymentStatus.run('rejected', paymentId);
+
+      await ctx.answerCbQuery('❌ رد شد');
+      try {
+        await ctx.editMessageCaption(
+          `❌ رد شد — ${payment.amount.toLocaleString('fa-IR')} تومان`,
+          { reply_markup: { inline_keyboard: [] } }
+        );
+      } catch {}
+
+      try {
+        await ctx.telegram.sendMessage(
+          payment.user_id,
+          `❌ فیش پرداختت تایید نشد.\n\n` +
+          `اگر مشکلی هست به آیدی @alireza_oliya پیام بده.`
+        );
+      } catch {}
+      return;
+    }
+
+    // ── Process type ──
     const p = data.match(/^ptype:(full|clean|summary|meeting):([a-z0-9]+)$/i);
     if (p) {
       const [, type, token] = p;
       const session = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
+
+      // Lock immediately to prevent double-click
+      session.step = 'processing';
+      // Remove inline keyboard so no second click is possible
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+
+      const userId    = session.userId;
+      const userModel = session.userModel || getUserModel(userId);
+      const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
+
+      // Final balance check before processing (non-admin)
+      if (userId !== ADMIN_ID && session.durationSec) {
+        const cost    = calcCost(session.durationSec, userModel);
+        const balance = getBalance(userId);
+        if (balance < cost) {
+          await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
+          await ctx.reply(
+            `👛 موجودی کافی نیست.\n\n` +
+            `💰 هزینه: ${cost.toLocaleString('fa-IR')} تومان\n` +
+            `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+            Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
+          );
+          return;
+        }
+      }
 
       await ctx.answerCbQuery('در حال پردازش...');
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
-      // به‌روزرسانی پیام وضعیت در حین پردازش (مخصوص فایل‌های طولانی)
       let lastProgress = '';
       const onProgress = async (msg) => {
         if (msg === lastProgress) return;
@@ -613,27 +948,42 @@ bot.on('callback_query', async (ctx) => {
       };
 
       let text;
+      let success = false;
       try {
-        text = await callAI(session, type, onProgress) || 'متنی برنگشت.';
+        text    = await callAI(session, type, onProgress) || 'متنی برنگشت.';
+        success = true;
       } catch (err) {
         console.error('❌ All AI attempts failed:', err);
+        // Log failure (no cost)
+        stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 0);
+
         const m = err.message || '';
         let errMsg = '😕 پردازش ناموفق بود. دوباره تلاش کن.';
         if (err instanceof CreditError) {
           errMsg = '💳 اعتبار OpenRouter تمام شده است. لطفاً حساب را شارژ کنید.';
         } else if (/RATE_LIMIT/.test(m)) {
-          errMsg = '⏳ سرویس موقتاً به محدودیت نرخ (rate limit) خورده است.\nچند دقیقه دیگر دوباره امتحان کن.';
+          errMsg = '⏳ سرویس موقتاً به محدودیت نرخ خورده است.\nچند دقیقه دیگر دوباره امتحان کن.';
         } else if (m.includes('تبدیل فایل')) {
           errMsg = '😕 خطا در تبدیل فایل صوتی. لطفاً مجدداً ویس بفرست.';
         } else if (m.includes('ALL_FAILED')) {
-          errMsg = '😕 هر دو مدل (Gemini و GPT) پاسخ ندادند. احتمالاً مشکل موقت است — چند دقیقه دیگر دوباره امتحان کن.';
+          errMsg = '😕 هیچ مدلی پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
         }
         try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
         return;
       }
 
-      const parts = splitForTelegram(text);
+      // Deduct balance on success (non-admin)
+      if (success && userId !== ADMIN_ID && session.durationSec) {
+        const cost = calcCost(session.durationSec, userModel);
+        if (cost > 0) {
+          stmts.deduct.run(cost, userId);
+          stmts.insertUsage.run(userId, userModel, session.durationSec, cost, type, 1);
+        }
+      } else if (success) {
+        stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 1);
+      }
 
+      const parts = splitForTelegram(text);
       if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
         try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
         session.step = 'ready';
@@ -652,12 +1002,16 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // Output format for long text
+    // ── Output format ──
     const o = data.match(/^output:(messages|file):([a-z0-9]+)$/i);
     if (o) {
       const [, format, token] = o;
       const session = sessions.get(token);
       if (!session?.resultText) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.step !== 'await_output_format') return ctx.answerCbQuery('قبلاً پردازش شده.', { show_alert: true });
+
+      session.step = 'processing_output';
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
 
       if (format === 'messages') {
         await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
@@ -672,7 +1026,6 @@ bot.on('callback_query', async (ctx) => {
           await sendLongTextAsMessages(ctx, session.resultText);
         }
       }
-
       session.step = 'ready';
       await maybeWarnLowBalance(ctx);
       return;
@@ -684,7 +1037,7 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-/* ===== 9) Launch (Long Polling) ===== */
+/* ===== 9) Launch ===== */
 bot.launch()
   .then(() => console.log('✅ Bot started (long polling)'))
   .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
