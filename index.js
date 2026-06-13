@@ -556,7 +556,8 @@ async function maybeWarnLowBalance(ctx) {
 }
 
 /* ===== 6) Bot & session ===== */
-const bot = new Telegraf(BOT_TOKEN);
+// handlerTimeout: Infinity → پردازش فایل‌های طولانی (چند دقیقه‌ای) قطع نشود
+const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: Infinity });
 
 const sessions    = new Map(); // token → voice session
 const userStates  = new Map(); // userId → { step, paymentId }
