@@ -1,6 +1,11 @@
 // index.js — Telegram voice → choose process type → choose model → transcribe (VPS / Long Polling)
 import 'dotenv/config';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { Telegraf, Markup } from 'telegraf';
+
+const execFileAsync = promisify(execFile);
 
 /* ===== 0) ENV ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -118,6 +123,21 @@ class CreditError extends Error {
   constructor(msg) { super(msg); this.name = 'CreditError'; }
 }
 
+// تبدیل ogg/opus به mp3 با ffmpeg برای مدل‌هایی که ogg نمی‌پذیرند
+async function convertToMp3(buffer) {
+  const id    = Date.now();
+  const inPath  = `/tmp/voice_in_${id}.ogg`;
+  const outPath = `/tmp/voice_out_${id}.mp3`;
+  writeFileSync(inPath, buffer);
+  try {
+    await execFileAsync('ffmpeg', ['-y', '-i', inPath, '-ar', '16000', '-ac', '1', '-b:a', '64k', outPath]);
+    return readFileSync(outPath);
+  } finally {
+    try { unlinkSync(inPath);  } catch {}
+    try { unlinkSync(outPath); } catch {}
+  }
+}
+
 function buildContent(model, audioBuffer, mimeType, prompt) {
   // مدل‌های صوتی OpenAI از input_audio استفاده می‌کنند
   if (/audio/i.test(model)) {
@@ -182,10 +202,11 @@ async function callAI(modelKey, session, prompt) {
     }
   }
 
-  // فالبک: gpt-audio-mini فقط یک بار
+  // فالبک: gpt-audio-mini فقط یک بار (با تبدیل ogg→mp3)
   console.log(`↪️ Fallback to ${FALLBACK_MODEL}...`);
   try {
-    const out = await callOpenRouter(FALLBACK_MODEL, session.audioBuffer, session.mimeType, prompt);
+    const mp3Buffer = await convertToMp3(session.audioBuffer);
+    const out = await callOpenRouter(FALLBACK_MODEL, mp3Buffer, 'audio/mpeg', prompt);
     if (out) return out;
     throw new Error('Empty response');
   } catch (err) {
