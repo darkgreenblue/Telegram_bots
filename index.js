@@ -237,28 +237,6 @@ function createOutputFormatKeyboard(token) {
   ]);
 }
 
-function createContinueKeyboard(token) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        ...createProcessTypeKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
-        ...createModelKeyboard(token).reply_markup.inline_keyboard.slice(0, -1),
-        [Markup.button.callback('🚫 پایان کار', `cancel:${token}`)],
-      ],
-    },
-  };
-}
-
-async function sendContinueGuide(ctx, token) {
-  try {
-    await ctx.reply(
-      '✨ برای دریافت خروجی‌های مختلف از همین ویس، روی دکمه‌های بالا کلیک کن!\n🎤 برای ویس جدید، فایل صوتی بفرست.',
-      createContinueKeyboard(token)
-    );
-  } catch (err) {
-    console.error('❌ sendContinueGuide (non-critical):', err);
-  }
-}
 
 async function sendLongTextAsMessages(ctx, text) {
   const parts = splitForTelegram(text);
@@ -395,7 +373,6 @@ bot.on('callback_query', async (ctx) => {
         inc(modelKey);
         session.step        = 'ready';
         session.processType = null;
-        await sendContinueGuide(ctx, token);
       } else {
         session.resultText  = text;
         session.step        = 'await_output_format';
@@ -434,7 +411,6 @@ bot.on('callback_query', async (ctx) => {
 
       session.step        = 'ready';
       session.processType = null;
-      await sendContinueGuide(ctx, token);
       return;
     }
 
