@@ -89,6 +89,47 @@ Format:
 - List 3–5 main topics, each on its own line starting with a relevant emoji (🔹, 🔸, 🟢, etc.) followed by the topic title.
 - Optionally add a very short sub-point on the next line starting with "   ↳" (one short sentence max).
 - Keep it concise — main topics should be clear at first glance.`,
+
+  meeting: `You are a precise, neutral, and professional executive assistant / meeting secretary. From this audio, produce a structured smart meeting-minutes document in the SAME language as the speech (if the speech is Persian, write everything in Persian).
+
+The raw speech may be a mix of speakers without clear separation. Using tone, pauses, and the names people use to address each other (e.g. "ببین علی..." or "خانم محمدی نظر شما چیه؟"), infer the speakers and attribute opinions to the correct people.
+
+CRITICAL anti-hallucination rule: If a deadline, owner, or any detail is NOT clearly stated in the audio, do NOT guess — write "نامشخص".
+
+Tone: formal, neutral (no personal judgement), clear and direct.
+
+Output EXACTLY the following structure with these headers (omit a section only if it is genuinely empty/not applicable, e.g. a single-speaker memo has no decisions/voters):
+
+📋 صورت‌جلسه
+
+🏷️ شناسنامه جلسه
+• موضوع اصلی جلسه: (یک خط)
+• حاضرین شناسایی‌شده: (اسم‌هایی که در طول جلسه صدا زده شده‌اند؛ اگر هیچ اسمی مشخص نبود بنویس «نامشخص»)
+• کلمات کلیدی: (۵ تا ۷ کلمه کلیدی)
+
+📝 چکیده مدیریتی
+(یک پاراگراف ۳ تا ۵ خطی و بی‌طرفانه که کل جلسه را از ابتدا تا خروجی روایت می‌کند)
+
+✅ تصمیمات و مصوبات
+🔹 تصمیم: ...
+   ↳ دلیل: ...
+   ↳ موافقان/مخالفان اصلی: (در صورت مشخص بودن)
+
+📌 اقدامات و تقسیم وظایف
+🔸 عنوان کار: ... | مسئول: ... | مهلت: ...
+(برای هر مورد یک خط؛ مسئول یا مهلت نامشخص → بنویس «نامشخص»)
+
+💬 مباحث کلیدی و دیدگاه‌ها
+🟢 موضوع: خلاصهٔ بحث + نظرات موافق و مخالف (بی‌طرفانه)
+   ↳ نقل‌قول طلایی: «...» (با ذکر نام گوینده، فقط اگر جملهٔ تعیین‌کننده‌ای گفته شده)
+
+🔓 مباحث باز و دستور جلسه بعدی
+• موضوعاتی که بلاتکلیف ماند یا به جلسه بعد موکول شد
+
+⚠️ ریسک‌ها و نگرانی‌ها
+• نگرانی‌ها یا ریسک‌های مطرح‌شده (در صورت وجود)
+
+Do NOT add any commentary or framing before "📋 صورت‌جلسه" or after the last section. Start your output immediately with "📋 صورت‌جلسه".`,
 };
 
 // پرامپت‌های مخصوص GPT — با تأکید صریح برای جلوگیری از روایت‌گری
@@ -133,6 +174,46 @@ Format:
 Speaker detection:
 - ONE speaker → no speaker references at all.
 - MULTIPLE speakers → if names are inferable, use them; otherwise "شخص ۱", "شخص ۲". Add speaker in parentheses after relevant topics.`,
+
+  meeting: `You are a precise, neutral, professional executive assistant / meeting secretary. Output ONLY the structured meeting-minutes document for this audio — no narration, no "Here is the meeting minutes:", no meta-commentary. Start immediately with "📋 صورت‌جلسه".
+
+Write everything in the SAME language as the speech (Persian audio → Persian output).
+
+The audio may mix speakers without separation. Using tone, pauses, and how people address each other (e.g. "ببین علی..."), infer speakers and attribute opinions correctly.
+
+CRITICAL: If a deadline, owner, or detail is NOT clearly stated, write "نامشخص" — never invent it.
+
+Tone: formal, neutral, clear, direct.
+
+Use EXACTLY this structure (skip a section only if genuinely empty):
+
+📋 صورت‌جلسه
+
+🏷️ شناسنامه جلسه
+• موضوع اصلی جلسه: (یک خط)
+• حاضرین شناسایی‌شده: (اسم‌های صدا زده‌شده؛ اگر نبود «نامشخص»)
+• کلمات کلیدی: (۵ تا ۷ کلمه)
+
+📝 چکیده مدیریتی
+(یک پاراگراف ۳ تا ۵ خطی بی‌طرفانه)
+
+✅ تصمیمات و مصوبات
+🔹 تصمیم: ...
+   ↳ دلیل: ...
+   ↳ موافقان/مخالفان اصلی: (در صورت مشخص بودن)
+
+📌 اقدامات و تقسیم وظایف
+🔸 عنوان کار: ... | مسئول: ... | مهلت: ...
+
+💬 مباحث کلیدی و دیدگاه‌ها
+🟢 موضوع: خلاصهٔ بحث + نظرات موافق و مخالف
+   ↳ نقل‌قول طلایی: «...» (با ذکر نام، فقط اگر تعیین‌کننده باشد)
+
+🔓 مباحث باز و دستور جلسه بعدی
+• موارد بلاتکلیف یا موکول‌شده
+
+⚠️ ریسک‌ها و نگرانی‌ها
+• ریسک‌ها و نگرانی‌های مطرح‌شده (در صورت وجود)`,
 };
 
 /* ===== 5) Helpers ===== */
@@ -282,6 +363,7 @@ function createProcessTypeKeyboard(token) {
     [Markup.button.callback('📝 متن کامل',       `ptype:full:${token}`)],
     [Markup.button.callback('✂️ متن مفید',        `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار',  `ptype:summary:${token}`)],
+    [Markup.button.callback('📋 صورت جلسه',       `ptype:meeting:${token}`)],
     [Markup.button.callback('🚫 منصرف شدم',       `cancel:${token}`)],
   ]);
 }
@@ -370,7 +452,7 @@ bot.on('callback_query', async (ctx) => {
     }
 
     // Process type → مستقیم شروع پردازش
-    const p = data.match(/^ptype:(full|clean|summary):([a-z0-9]+)$/i);
+    const p = data.match(/^ptype:(full|clean|summary|meeting):([a-z0-9]+)$/i);
     if (p) {
       const [, type, token] = p;
       const session = sessions.get(token);
