@@ -2,3 +2,4 @@ aiohttp>=3.9
 aiosqlite>=0.20
 openai>=1.40
 python-dotenv>=1.0
+Pillow>=10.0
