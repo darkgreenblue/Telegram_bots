@@ -546,8 +546,13 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     const msg   = ctx.message;
     const media = msg.voice || msg.audio;
-    const fileUrl     = await ctx.telegram.getFileLink(media.file_id);
-    const res         = await fetch(fileUrl.href);
+
+    // دانلود دستی — از getFileLink استفاده نمی‌کنیم چون در Local API ممکن است
+    // file_path را به صورت مسیر مطلق سیستم‌فایل برگرداند و fetch نتواند آن را بخواند.
+    const fileInfo  = await ctx.telegram.getFile(media.file_id);
+    const apiRoot   = TELEGRAM_API_ROOT || 'https://api.telegram.org';
+    const downloadUrl = `${apiRoot}/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
+    const res         = await fetch(downloadUrl);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
@@ -571,8 +576,8 @@ bot.on(['voice', 'audio'], async (ctx) => {
     console.error('❌ ERROR on voice:', err);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
-      m = '😕 فایل برای دریافت خیلی بزرگ است.\n\n' +
-          'برای کوچک‌تر کردنش می‌توانی:\n' +
+      m = '😕 حجم فایل بیش از محدودیت ۲۰ مگابایت تلگرام است.\n\n' +
+          'پیشنهادات:\n' +
           '• فایل را به چند بخش کوتاه‌تر تقسیم کن\n' +
           '• فرمت را به mp3 تبدیل کن (مثلاً با اپ Audio Converter)\n' +
           '• بیت‌ریت را کاهش بده (۶۴kbps کافی است)\n' +
