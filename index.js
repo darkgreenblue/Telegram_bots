@@ -92,9 +92,9 @@ function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5
 
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
-  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true  },
-  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true  },
-  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false },
+  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
+  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
+  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
@@ -104,7 +104,13 @@ const RETRY_DELAY   = 10_000;
 function calcCost(durationSec, model) {
   const cfg = MODEL_CONFIG[model];
   if (!cfg || !durationSec) return 0;
-  return Math.ceil(durationSec / 60) * cfg.price;
+  return Math.round((durationSec / 60) * cfg.price);
+}
+
+function calcAdminCostUsd(durationSec, model) {
+  const cfg = MODEL_CONFIG[model];
+  if (!cfg || !durationSec) return null;
+  return `~$${((durationSec / 60) * cfg.usdPerMin).toFixed(4)}`;
 }
 
 /* ===== 3) Prompts ===== */
@@ -362,6 +368,8 @@ async function splitAudioToMp3Chunks(buffer, segmentSec) {
   }
 }
 
+const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
+
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
   if (/audio/i.test(model)) {
@@ -379,25 +387,45 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       { type: 'text', text: prompt },
     ];
   }
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
-  });
-  if (!res.ok) throwForStatus(res.status, await res.text());
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throwForStatus(res.status, await res.text());
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function callOpenRouterText(model, prompt) {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
-  });
-  if (!res.ok) throwForStatus(res.status, await res.text());
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throwForStatus(res.status, await res.text());
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
@@ -675,7 +703,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     if (balance < estimatedCost) {
       await ctx.reply(
         `👛 موجودی کافی نیست.\n\n` +
-        `💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})\n` +
+        `💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان\n` +
         `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
         Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
       );
@@ -714,9 +742,13 @@ bot.on(['voice', 'audio'], async (ctx) => {
       createdAt:   Date.now(),
     });
 
-    const costLine = estimatedCost
-      ? `\n💰 هزینه تخمینی: ${estimatedCost.toLocaleString('fa-IR')} تومان (${modelCfg.label})`
-      : '';
+    let costLine = '';
+    if (userId === ADMIN_ID) {
+      const usd = calcAdminCostUsd(tgDuration, userModel);
+      if (usd) costLine = `\n💰 هزینه تخمینی: ${usd}`;
+    } else if (estimatedCost) {
+      costLine = `\n💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان`;
+    }
 
     await ctx.telegram.editMessageText(
       thinking.chat.id, thinking.message_id, undefined,
@@ -929,7 +961,7 @@ bot.on('callback_query', async (ctx) => {
           await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
           await ctx.reply(
             `👛 موجودی کافی نیست.\n\n` +
-            `💰 هزینه: ${cost.toLocaleString('fa-IR')} تومان\n` +
+            `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
             `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
             Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]])
           );
@@ -965,6 +997,8 @@ bot.on('callback_query', async (ctx) => {
           errMsg = '⏳ سرویس موقتاً به محدودیت نرخ خورده است.\nچند دقیقه دیگر دوباره امتحان کن.';
         } else if (m.includes('تبدیل فایل')) {
           errMsg = '😕 خطا در تبدیل فایل صوتی. لطفاً مجدداً ویس بفرست.';
+        } else if (/TIMEOUT/.test(m)) {
+          errMsg = '⏱️ مدل در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
         } else if (m.includes('ALL_FAILED')) {
           errMsg = '😕 هیچ مدلی پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
         }
@@ -1038,9 +1072,15 @@ bot.on('callback_query', async (ctx) => {
 });
 
 /* ===== 9) Launch ===== */
-bot.launch()
-  .then(() => console.log('✅ Bot started (long polling)'))
-  .catch(err => { console.error('❌ Bot launch failed:', err); process.exit(1); });
+function launch() {
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('✅ Bot started (long polling)'))
+    .catch(err => {
+      console.error('❌ Bot launch error, retrying in 5s:', err.message);
+      setTimeout(launch, 5000);
+    });
+}
+launch();
 
 process.once('SIGINT',  () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
