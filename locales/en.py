@@ -213,7 +213,13 @@ LOCALE = {
         "For *{days} more days* we walk side by side ✨"
     ),
     "sub_inactive_head": "You are not yet my companion 🌙",
-    "need_subscription_prefix": "To unlock the full interpretation, you must become my companion 🌙",
+    "need_subscription_prefix": "To unlock the full interpretation, you need the key to this gate. 🗝️",
+    "paywall_offer": (
+        "Take my hand and journey with me into the depths of your nightly dreams:\n\n"
+        "🎁 1-month companionship 👈 50% better value\n"
+        "💎 3-month companionship 👈 70% better value\n"
+        "👇"
+    ),
     "paywall_intro": "Every journey needs provisions; choose one:",
 
     "invite_text_tmpl": (

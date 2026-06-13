@@ -215,7 +215,13 @@ LOCALE = {
         "Durante *{days} días* más caminamos juntos ✨"
     ),
     "sub_inactive_head": "Aún no eres mi compañero 🌙",
-    "need_subscription_prefix": "Para abrir la interpretación completa, debes hacerte mi compañero 🌙",
+    "need_subscription_prefix": "Para abrir la interpretación completa, necesitas la llave de esta puerta. 🗝️",
+    "paywall_offer": (
+        "Toma mi mano y viaja conmigo a las profundidades de tus sueños nocturnos:\n\n"
+        "🎁 Compañía de 1 mes 👈 50% más conveniente\n"
+        "💎 Compañía de 3 meses 👈 70% más conveniente\n"
+        "👇"
+    ),
     "paywall_intro": "Todo viaje necesita provisiones; elige una:",
 
     "invite_text_tmpl": (

@@ -153,27 +153,13 @@ def subscription_status_text(lang: str | None, status: dict) -> str:
 
 
 def paywall_body(lang: str | None) -> str:
-    loc = locales.get(lang)
-    tiers = loc["tiers"]
-    lines = [get(lang, "catchphrase"), "", get(lang, "paywall_intro"), ""]
-    is_fa = (lang or DEFAULT_LANGUAGE) == "fa"
-    for tier in SUBSCRIPTION_ORDER:
-        s = SUBSCRIPTIONS[tier]
-        emoji = _TIER_EMOJI.get(tier, "🌙")
-        title = tiers.get(tier, tier)
-        if is_fa:
-            line = f"{emoji} *{title}* — {fmt_toman(s['toman'])} تومان"
-            pct = savings_percent(tier)
-            if pct > 0:
-                line += f"  ({num(lang, pct)}٪ به‌صرفه‌تر ✨)"
-        else:
-            line = f"{emoji} *{title}*"
-        lines.append(line)
-    return "\n".join(lines)
+    """متنِ بازاریابیِ همسفری (بدونِ قیمت — قیمت‌ها روی خودِ دکمه‌ها هستند).
+    دکمه‌ها جداگانه با _packages_inline ساخته می‌شوند و دست‌نخورده‌اند."""
+    return get(lang, "paywall_offer")
 
 
 def paywall_full(lang: str | None, prefix: str = "") -> str:
-    head = (prefix.strip() + "\n\n") if prefix else ""
+    head = (prefix.strip() + "\n") if prefix else ""
     return head + paywall_body(lang)
 
 
