@@ -15,15 +15,8 @@ if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است
 
 const ALLOWED_USER_ID = 100257975;
 
-// اگر سرور محلی Bot API بالا باشد، آدرسش را اینجا می‌دهیم تا سقف دانلود از ۲۰مگ به ۲گیگ برسد.
-const TELEGRAM_API_ROOT = process.env.TELEGRAM_API_ROOT?.trim();
-
 /* ===== 1) Client ===== */
-const bot = new Telegraf(
-  BOT_TOKEN,
-  TELEGRAM_API_ROOT ? { telegram: { apiRoot: TELEGRAM_API_ROOT } } : undefined
-);
-if (TELEGRAM_API_ROOT) console.log(`🔗 Local Bot API server: ${TELEGRAM_API_ROOT}`);
+const bot = new Telegraf(BOT_TOKEN);
 
 bot.use(async (ctx, next) => {
   const uid = ctx.from?.id;
@@ -547,12 +540,8 @@ bot.on(['voice', 'audio'], async (ctx) => {
     const msg   = ctx.message;
     const media = msg.voice || msg.audio;
 
-    // دانلود دستی — از getFileLink استفاده نمی‌کنیم چون در Local API ممکن است
-    // file_path را به صورت مسیر مطلق سیستم‌فایل برگرداند و fetch نتواند آن را بخواند.
-    const fileInfo  = await ctx.telegram.getFile(media.file_id);
-    const apiRoot   = TELEGRAM_API_ROOT || 'https://api.telegram.org';
-    const downloadUrl = `${apiRoot}/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
-    const res         = await fetch(downloadUrl);
+    const fileUrl = await ctx.telegram.getFileLink(media.file_id);
+    const res     = await fetch(fileUrl.href);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
