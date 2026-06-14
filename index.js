@@ -99,10 +99,17 @@ const MODEL_CONFIG = {
   'google/gemini-2.5-flash':      { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
   'google/gemini-2.5-pro':        { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
   // مدل آزمایشی — هر وقت گفتی فقط همین یک خط را حذف کن
-  'xiaomi/mimo-v2.5':             { label: 'MiMo 2.5',    price: 500,  fallback: true,  usdPerMin: 0.0003 },
+  'xiaomi/mimo-v2.5':             { label: 'MiMo 2.5',    price: 500,  fallback: true,  usdPerMin: 0.0003, audioMode: 'input_audio' },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
+
+// نحوه ارسال صوت به هر مدل: 'input_audio' (نیازمند mp3/wav، مثل GPT و xiaomi) یا 'media' (data-URL، مثل Gemini)
+function modelAudioMode(model) {
+  if (MODEL_CONFIG[model]?.audioMode) return MODEL_CONFIG[model].audioMode;
+  if (/audio/i.test(model)) return 'input_audio'; // مثل openai/gpt-audio-mini
+  return 'media';
+}
 const RETRIES       = 3;
 const RETRY_DELAY   = 10_000;
 
@@ -358,7 +365,7 @@ const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل�
 
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
-  if (/audio/i.test(model)) {
+  if (modelAudioMode(model) === 'input_audio') {
     let format = 'mp3';
     if (/wav/i.test(mimeType))           format = 'wav';
     else if (/mp3|mpeg/i.test(mimeType)) format = 'mp3';
@@ -395,10 +402,23 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
 
 async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
   let lastErr = null;
+
+  // مدل‌های input_audio (مثل xiaomi) فقط mp3/wav می‌پذیرند؛ صوت ویس (ogg) را اول به mp3 تبدیل کن
+  let primaryBuffer = audioBuffer;
+  let primaryMime   = mimeType;
+  if (modelAudioMode(primaryModel) === 'input_audio' && !/mp3|mpeg|wav/i.test(mimeType)) {
+    try {
+      primaryBuffer = await convertToMp3(audioBuffer);
+      primaryMime   = 'audio/mpeg';
+    } catch (e) {
+      console.error('❌ mp3 convert (primary) failed:', e.message);
+    }
+  }
+
   for (let i = 0; i < RETRIES; i++) {
     if (i > 0) await sleep(RETRY_DELAY);
     try {
-      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt);
+      const out = await callOpenRouter(primaryModel, primaryBuffer, primaryMime, prompt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
