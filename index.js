@@ -8,11 +8,16 @@ import Database from 'better-sqlite3';
 
 const execFileAsync = promisify(execFile);
 
+/* ===== 0) Logger ===== */
+function ts() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
+function log(...a)    { console.log(`[${ts()}]`,   ...a); }
+function logErr(...a) { console.error(`[${ts()}]`, ...a); }
+
 /* ===== 0) ENV ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
-if (!BOT_TOKEN)          { console.error('❌ BOT_TOKEN خالی است');          process.exit(1); }
-if (!OPENROUTER_API_KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
+if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
+if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
 const ADMIN_ID     = 100257975;
 const CARD_NUMBER  = '6219861904145405';
@@ -352,9 +357,13 @@ async function convertToMp3(buffer) {
   const inPath  = `/tmp/voice_in_${id}`;
   const outPath = `/tmp/voice_out_${id}.mp3`;
   writeFileSync(inPath, buffer);
+  log(`🔄 ffmpeg: converting ${(buffer.length/1024).toFixed(0)}KB → mp3...`);
+  const t0 = Date.now();
   try {
     await execFileAsync('ffmpeg', ['-y', '-i', inPath, '-ar', '16000', '-ac', '1', '-b:a', '64k', outPath]);
-    return readFileSync(outPath);
+    const out = readFileSync(outPath);
+    log(`✅ ffmpeg: done in ${Date.now()-t0}ms, output ${(out.length/1024).toFixed(0)}KB`);
+    return out;
   } finally {
     try { unlinkSync(inPath);  } catch {}
     try { unlinkSync(outPath); } catch {}
@@ -382,6 +391,8 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  const t0 = Date.now();
+  log(`📡 API call → ${model} (${(audioBuffer.length/1024).toFixed(0)}KB audio)`);
   try {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -389,11 +400,20 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
       signal: ctrl.signal,
     });
-    if (!res.ok) throwForStatus(res.status, await res.text());
+    if (!res.ok) {
+      const body = await res.text();
+      logErr(`❌ API error ${res.status} from ${model} after ${Date.now()-t0}ms:`, body.slice(0,300));
+      throwForStatus(res.status, body);
+    }
     const data = await res.json();
-    return data.choices?.[0]?.message?.content?.trim() || '';
+    const text = data.choices?.[0]?.message?.content?.trim() || '';
+    log(`✅ API response ← ${model} in ${Date.now()-t0}ms, ${text.length} chars`);
+    return text;
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    if (err.name === 'AbortError') {
+      logErr(`⏱️ TIMEOUT: ${model} after ${Date.now()-t0}ms (${OR_TIMEOUT_MS/1000}s limit)`);
+      throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -411,42 +431,48 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
       primaryBuffer = await convertToMp3(audioBuffer);
       primaryMime   = 'audio/mpeg';
     } catch (e) {
-      console.error('❌ mp3 convert (primary) failed:', e.message);
+      logErr('❌ mp3 convert (primary) failed:', e.message);
     }
   }
 
   for (let i = 0; i < RETRIES; i++) {
-    if (i > 0) await sleep(RETRY_DELAY);
+    if (i > 0) {
+      log(`⏳ retry ${i+1}/${RETRIES} for ${primaryModel} in ${RETRY_DELAY/1000}s...`);
+      await sleep(RETRY_DELAY);
+    }
     try {
       const out = await callOpenRouter(primaryModel, primaryBuffer, primaryMime, prompt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
       lastErr = err;
-      console.error(`❌ ${primaryModel} attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
+      logErr(`❌ ${primaryModel} attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,200));
     }
   }
 
   if (!useFallback) throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
 
-  console.log('↪️ Primary exhausted, switching to GPT fallback...');
+  log('↪️ Primary exhausted, switching to GPT fallback...');
   let mp3Buffer;
   try {
     mp3Buffer = /mp3|mpeg|wav/i.test(mimeType) ? audioBuffer : await convertToMp3(audioBuffer);
   } catch (e) {
-    console.error('❌ ffmpeg conversion failed:', e.message);
+    logErr('❌ ffmpeg conversion failed:', e.message);
     throw new Error(`تبدیل فایل صوتی ناموفق بود. ${lastErr?.message || ''}`);
   }
 
   for (let i = 0; i < RETRIES; i++) {
-    if (i > 0) await sleep(RETRY_DELAY);
+    if (i > 0) {
+      log(`⏳ GPT retry ${i+1}/${RETRIES} in ${RETRY_DELAY/1000}s...`);
+      await sleep(RETRY_DELAY);
+    }
     try {
       const out = await callOpenRouter(GPT_MODEL, mp3Buffer, 'audio/mpeg', promptGpt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
       lastErr = err;
-      console.error(`❌ GPT attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
+      logErr(`❌ GPT attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,200));
     }
   }
   throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
@@ -696,6 +722,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
   const voiceMsgId = ctx.message.message_id;
   const tgDuration = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
   const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel) : null;
+  log(`🎤 voice recv  uid=${userId} (@${ctx.from.username||'—'}) dur=${tgDuration}s size=${media?.file_size ? (media.file_size/1024).toFixed(0)+'KB' : '?'} model=${userModel}`);
 
   // محدودیت تلگرام: فایل بزرگ‌تر از ۲۰MB اصلاً قابل دانلود توسط ربات نیست.
   // قبل از انتخاب حالت، همان لحظه اطلاع‌رسانی کن.
@@ -753,7 +780,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     // پیام دوم به پیام اولش («چطور میخوای…») ریپلای می‌شود
     await ctx.reply(MODE_SELECT_TEXT, { ...replyTo(thinking.message_id), ...createProcessTypeKeyboard(token) });
   } catch (err) {
-    console.error('❌ ERROR on voice:', err);
+    logErr(`❌ voice download error uid=${ctx.from.id}:`, err.message);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
       m = FILE_TOO_BIG_MSG;
@@ -1054,6 +1081,8 @@ bot.on('callback_query', async (ctx) => {
       }
       session.step = 'processing'; // قفل ضدّ دابل‌کلیک
       incJob(userId);              // رزرو اسلات پردازش هم‌زمان
+      const jobStart = Date.now();
+      log(`🚀 job start  uid=${userId} type=${type} model=${userModel} dur=${session.durationSec||'?'}s jobs=${jobCount(userId)}`);
 
       let waiting;
       try {
@@ -1071,7 +1100,7 @@ bot.on('callback_query', async (ctx) => {
         } catch {}
         waiting = await ctx.reply('⏳ در حال پردازش...', replyTo(session.voiceMsgId));
       } catch (e) {
-        console.error('❌ ptype prep error:', e);
+        logErr(`❌ ptype prep error uid=${userId}:`, e.message);
         decJob(userId);
         return;
       }
@@ -1083,7 +1112,7 @@ bot.on('callback_query', async (ctx) => {
           try {
             text = await callAI(session, type) || 'متنی برنگشت.';
           } catch (err) {
-            console.error('❌ All AI attempts failed:', err);
+            logErr(`❌ all AI failed  uid=${userId} model=${userModel} elapsed=${Date.now()-jobStart}ms:`, err.message);
             stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 0);
             const m = err.message || '';
             let errMsg = '😕 پردازش ناموفق بود. دوباره تلاش کن.';
@@ -1113,6 +1142,7 @@ bot.on('callback_query', async (ctx) => {
             stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 1);
           }
 
+          log(`✅ job done   uid=${userId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
           const parts = splitForTelegram(text);
           if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
@@ -1133,9 +1163,10 @@ bot.on('callback_query', async (ctx) => {
             await ctx.reply('یکی از گزینه‌های زیر رو انتخاب کن:', { ...replyTo(waiting.message_id), ...createOutputFormatKeyboard(token) });
           }
         } catch (e) {
-          console.error('❌ job pipeline error:', e);
+          logErr(`❌ job pipeline error uid=${userId}:`, e.message);
         } finally {
           decJob(userId);
+          log(`🏁 job freed  uid=${userId} remaining=${jobCount(userId)}`);
         }
       })();
       return;
@@ -1185,7 +1216,7 @@ bot.on('callback_query', async (ctx) => {
     }
 
   } catch (err) {
-    console.error('❌ ERROR in callback:', err);
+    logErr('❌ unhandled callback error:', err.message);
     try { await ctx.reply('😕 خطا رخ داد. دوباره تلاش کن.'); } catch {}
   }
 });
@@ -1193,9 +1224,9 @@ bot.on('callback_query', async (ctx) => {
 /* ===== 9) Launch ===== */
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => console.log('✅ Bot started (long polling)'))
+    .then(() => log('✅ Bot started (long polling)'))
     .catch(err => {
-      console.error('❌ Bot launch error, retrying in 5s:', err.message);
+      logErr('❌ Bot launch error, retrying in 5s:', err.message);
       setTimeout(launch, 5000);
     });
 }
