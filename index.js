@@ -57,6 +57,9 @@ db.exec(`
   );
 `);
 
+// Migration: Flash Lite از حالت preview خارج شده؛ شناسه‌ی قدیمی غلط را اصلاح کن
+db.prepare("UPDATE users SET model='google/gemini-2.5-flash-lite' WHERE model='google/gemini-2.5-flash-lite-preview'").run();
+
 const stmts = {
   getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
   insertUser:    db.prepare('INSERT OR IGNORE INTO users (telegram_id, name, username, balance) VALUES (?, ?, ?, ?)'),
@@ -92,9 +95,9 @@ function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5
 
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
-  'google/gemini-2.5-flash-lite-preview': { label: 'Flash Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
-  'google/gemini-2.5-flash':              { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
-  'google/gemini-2.5-pro':               { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
+  'google/gemini-2.5-flash-lite': { label: 'Flash Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
+  'google/gemini-2.5-flash':      { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
+  'google/gemini-2.5-pro':        { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
