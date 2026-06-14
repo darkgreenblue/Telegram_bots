@@ -578,6 +578,36 @@ setInterval(() => {
 }, 30*60*1000);
 
 /* ===== 7) Keyboards ===== */
+const MODE_SELECT_TEXT = 'یکی از حالت‌های زیر رو انتخاب کن:';
+
+const HELP_TEXT =
+  '💡 راهنمای حالت‌های پردازش\n\n' +
+  '📝 متن کامل\n' +
+  'گفتار عیناً و کلمه‌به‌کلمه پیاده می‌شه. اگه چند نفر صحبت کنن، گوینده‌ها از هم جدا و در صورت امکان با اسم مشخص می‌شن. مناسب وقتی می‌خوای هیچ جزئیاتی از دست نره.\n\n' +
+  '✂️ متن مفید\n' +
+  'متن تمیز و روان؛ کلمات اضافی، مکث‌ها، تکرارها و حاشیه‌ها حذف می‌شن ولی کل معنا و لحن حفظ می‌شه. مناسب برای خوندن سریع و راحت.\n\n' +
+  '📌 خلاصه تیتروار\n' +
+  'جمع‌بندی کوتاه و تیتروار از ۳ تا ۵ موضوع اصلی، هر کدوم با ایموجی. مناسب وقتی فقط می‌خوای سرفصل‌ها رو در یک نگاه ببینی.\n\n' +
+  '📋 صورت جلسه\n' +
+  'سند ساختاریافته‌ی جلسه: موضوع، حاضرین، چکیده مدیریتی، تصمیمات، تقسیم وظایف (با مسئول و مهلت)، مباحث کلیدی، موارد باز و ریسک‌ها. مناسب جلسات کاری.';
+
+// باکس نقل‌قول هزینه: اسم مدل (خط اول) + هزینه (خط دوم) — برای ادمین دلار، برای کاربر تومان
+function buildCostBlock(durationSec, model, isAdmin) {
+  const cfg = MODEL_CONFIG[model] || MODEL_CONFIG[DEFAULT_MODEL];
+  let costStr;
+  if (isAdmin) {
+    const usd = calcAdminCostUsd(durationSec, model);
+    if (!usd) return '';
+    costStr = `هزینه تخمینی: ${usd}`;
+  } else {
+    const c = calcCost(durationSec, model);
+    if (!c) return '';
+    costStr = `هزینه پردازش: ${c.toLocaleString('fa-IR')} تومان`;
+  }
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<blockquote>${esc(cfg.label)}\n${esc(costStr)}</blockquote>`;
+}
+
 function mainKeyboard(userId) {
   if (userId === ADMIN_ID) {
     return Markup.keyboard([['🔄 تعویض پردازنده', '📊 داشبورد']]).resize();
@@ -591,8 +621,27 @@ function createProcessTypeKeyboard(token) {
     [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
     [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
-    [Markup.button.callback('🔄 تعویض پردازنده', 'switchmodel'), Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
+    [Markup.button.callback('💡 راهنما', `help:${token}`), Markup.button.callback('🔄 تعویض پردازنده', `switchflow:${token}`)],
+    [Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
   ]);
+}
+
+// کیبورد راهنما: فقط دکمه بازگشت به مرحله انتخاب حالت
+function helpKeyboard(token) {
+  return Markup.inlineKeyboard([[Markup.button.callback('🔙 بازگشت', `back:${token}`)]]);
+}
+
+// کیبورد تعویض مدل در میانه فرآیند: مدل‌ها + بازگشت
+function inflowModelKeyboard(currentModel, token) {
+  const rows = Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
+    const tick = id === currentModel ? '✅ ' : '';
+    return [Markup.button.callback(
+      `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
+      `setmodelflow:${id}:${token}`
+    )];
+  });
+  rows.push([Markup.button.callback('🔙 بازگشت', `back:${token}`)]);
+  return Markup.inlineKeyboard(rows);
 }
 
 function createOutputFormatKeyboard(token) {
@@ -705,7 +754,6 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(userId, ctx.from.first_name, ctx.from.username);
 
   const userModel  = getUserModel(userId);
-  const modelCfg   = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
   const tgDuration = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
   const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel) : null;
 
@@ -754,20 +802,15 @@ bot.on(['voice', 'audio'], async (ctx) => {
       createdAt:   Date.now(),
     });
 
-    let costLine = '';
-    if (userId === ADMIN_ID) {
-      const usd = calcAdminCostUsd(tgDuration, userModel);
-      if (usd) costLine = `\n<blockquote>هزینه تخمینی: ${usd}</blockquote>`;
-    } else if (estimatedCost) {
-      costLine = `\n<blockquote>هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان</blockquote>`;
-    }
+    const costBlock = buildCostBlock(tgDuration, userModel, userId === ADMIN_ID);
+    const questionText = `چطور میخوای متن پردازش بشه؟${costBlock ? `\n\n${costBlock}` : ''}`;
 
     await ctx.telegram.editMessageText(
       thinking.chat.id, thinking.message_id, undefined,
-      `چطور میخوای متن پردازش بشه؟${costLine}`,
-      costLine ? { parse_mode: 'HTML' } : {}
+      questionText,
+      { parse_mode: 'HTML' }
     );
-    await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
+    await ctx.reply(MODE_SELECT_TEXT, createProcessTypeKeyboard(token));
   } catch (err) {
     console.error('❌ ERROR on voice:', err);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
@@ -876,26 +919,85 @@ bot.on('callback_query', async (ctx) => {
       const session = sessions.get(c[1]);
       if (session?.step === 'processing') return ctx.answerCbQuery('در حال پردازش است، لطفاً صبر کن.', { show_alert: true });
       await ctx.answerCbQuery('لغو شد');
-      try { await ctx.editMessageText('لغو شد ✅'); } catch {}
+      try { await ctx.editMessageText('🚫 لغو شد'); } catch {}
       if (session) {
-        try { await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, 'لغو شد ✅'); } catch {}
+        try { await ctx.telegram.deleteMessage(session.chatId, session.promptMsgId); } catch {}
         sessions.delete(c[1]);
       }
       return;
     }
 
-    // ── Switch model (from process-type keyboard) ──
-    if (data === 'switchmodel') {
-      upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-      const currentModel = getUserModel(ctx.from.id);
+    // ── Help (in-flow): edit the mode-select message to show the help guide ──
+    const hp = data.match(/^help:([a-z0-9]+)$/i);
+    if (hp) {
+      const token   = hp[1];
+      const session = sessions.get(token);
+      if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       await ctx.answerCbQuery();
-      await ctx.reply(
-        'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
-        'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
-        'Flash — متعادل (پیش‌فرض)\n' +
-        'Pro — دقیق‌ترین',
-        modelSelectionKeyboard(currentModel)
-      );
+      try { await ctx.editMessageText(HELP_TEXT, helpKeyboard(token)); } catch {}
+      return;
+    }
+
+    // ── Switch model (in-flow): edit message to model selection (with back) ──
+    const swf = data.match(/^switchflow:([a-z0-9]+)$/i);
+    if (swf) {
+      const token   = swf[1];
+      const session = sessions.get(token);
+      if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      const currentModel = session.userModel || getUserModel(session.userId);
+      await ctx.answerCbQuery();
+      try {
+        await ctx.editMessageText(
+          'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+          'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
+          'Flash — متعادل (پیش‌فرض)\n' +
+          'Pro — دقیق‌ترین',
+          inflowModelKeyboard(currentModel, token)
+        );
+      } catch {}
+      return;
+    }
+
+    // ── Back (in-flow): return exactly to the mode-select state ──
+    const bk = data.match(/^back:([a-z0-9]+)$/i);
+    if (bk) {
+      const token   = bk[1];
+      const session = sessions.get(token);
+      if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      await ctx.answerCbQuery();
+      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token)); } catch {}
+      return;
+    }
+
+    // ── Set model (in-flow): persist, refresh cost, return to mode-select, toast ──
+    const smf = data.match(/^setmodelflow:(.+):([a-z0-9]+)$/i);
+    if (smf) {
+      const modelId = smf[1];
+      const token   = smf[2];
+      const session = sessions.get(token);
+      if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
+
+      const cfg = MODEL_CONFIG[modelId];
+      stmts.setModel.run(modelId, session.userId);
+      session.userModel = modelId;
+
+      // Refresh the cost box in the first message (Message1)
+      const isAdmin   = session.userId === ADMIN_ID;
+      const costBlock = buildCostBlock(session.durationSec, modelId, isAdmin);
+      try {
+        await ctx.telegram.editMessageText(
+          session.chatId, session.promptMsgId, undefined,
+          `چطور میخوای متن پردازش بشه؟${costBlock ? `\n\n${costBlock}` : ''}`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+
+      // Return the second message back to mode-select
+      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token)); } catch {}
+
+      // Fading toast notification (display duration is fixed by Telegram, not adjustable)
+      await ctx.answerCbQuery(`مدل انتخابی: ${cfg.label} — نرخ ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`);
       return;
     }
 
@@ -986,17 +1088,12 @@ bot.on('callback_query', async (ctx) => {
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
 
-      // Lock immediately to prevent double-click
-      session.step = 'processing';
-      // Remove inline keyboard so no second click is possible
-      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
-
       const userId    = session.userId;
       const userModel = session.userModel || getUserModel(userId);
-      const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
+      const isAdmin   = userId === ADMIN_ID;
 
-      // Final balance check before processing (non-admin)
-      if (userId !== ADMIN_ID && session.durationSec) {
+      // Balance check BEFORE locking — keep the keyboard so user can switch model / recharge
+      if (!isAdmin && session.durationSec) {
         const cost    = calcCost(session.durationSec, userModel);
         const balance = getBalance(userId);
         if (balance < cost) {
@@ -1011,7 +1108,22 @@ bot.on('callback_query', async (ctx) => {
         }
       }
 
+      // Lock to prevent double-click
+      session.step = 'processing';
       await ctx.answerCbQuery('در حال پردازش...');
+
+      // Remove the mode-select message (with its buttons) entirely
+      try { await ctx.deleteMessage(); } catch {}
+      // Trim the first message down to just the cost box (a useful log), drop the question
+      const costBlock = buildCostBlock(session.durationSec, userModel, isAdmin);
+      try {
+        if (costBlock) {
+          await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, costBlock, { parse_mode: 'HTML' });
+        } else {
+          await ctx.telegram.deleteMessage(session.chatId, session.promptMsgId);
+        }
+      } catch {}
+
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
       let lastProgress = '';
@@ -1065,8 +1177,10 @@ bot.on('callback_query', async (ctx) => {
         session.step = 'ready';
         await maybeWarnLowBalance(ctx);
       } else {
-        session.resultText = text;
-        session.step       = 'await_output_format';
+        session.resultText      = text;
+        session.resultMsgChatId = waiting.chat.id;
+        session.resultMsgId     = waiting.message_id;
+        session.step            = 'await_output_format';
         try {
           await ctx.telegram.editMessageText(
             waiting.chat.id, waiting.message_id, undefined,
@@ -1087,12 +1201,16 @@ bot.on('callback_query', async (ctx) => {
       if (session.step !== 'await_output_format') return ctx.answerCbQuery('قبلاً پردازش شده.', { show_alert: true });
 
       session.step = 'processing_output';
-      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+
+      const charCount  = session.resultText.length.toLocaleString('fa-IR');
+      const methodName = format === 'messages' ? 'پیام‌های جداگانه' : 'فایل';
+
+      // Remove the format-select message (with its buttons) entirely
+      try { await ctx.deleteMessage(); } catch {}
 
       if (format === 'messages') {
         await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
         await sendLongTextAsMessages(ctx, session.resultText);
-        await ctx.reply('✅ تمام بخش‌ها ارسال شد.');
       } else {
         await ctx.answerCbQuery('در حال آماده‌سازی فایل...');
         try {
@@ -1102,6 +1220,15 @@ bot.on('callback_query', async (ctx) => {
           await sendLongTextAsMessages(ctx, session.resultText);
         }
       }
+
+      // Trim the "long output" message down to a concise delivered note
+      try {
+        await ctx.telegram.editMessageText(
+          session.resultMsgChatId, session.resultMsgId, undefined,
+          `${charCount} کاراکتر به روش ${methodName} تحویل داده شد.`
+        );
+      } catch {}
+
       session.step = 'ready';
       await maybeWarnLowBalance(ctx);
       return;
