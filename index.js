@@ -122,8 +122,11 @@ const stmts = {
   errorCount:     db.prepare("SELECT COUNT(*) as c FROM usage_log WHERE success=0"),
   // discount / whitelist
   isWhitelisted:         db.prepare('SELECT 1 FROM pro_whitelist WHERE user_id=?'),
-  setPaymentDiscount:    db.prepare('UPDATE payments SET discount_code_id=?, original_amount=?, amount=?, updated_at=unixepoch() WHERE id=?'),
+  // COALESCE: اگر قبلاً تخفیف خورده، original_amount دست‌نخورده می‌ماند تا با اعمال دوباره خراب نشود
+  setPaymentDiscount:    db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, ?), amount=?, updated_at=unixepoch() WHERE id=?'),
   clearPaymentDiscount:  db.prepare('UPDATE payments SET amount=original_amount, original_amount=NULL, discount_code_id=NULL, updated_at=unixepoch() WHERE id=?'),
+  // شمارش پرداخت‌های معلق/در-انتظار که همین کد را دارند تا سقف هر-کاربر با چند پرداخت هم‌زمان دور زده نشود
+  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
   getDiscountCode:       db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:       db.prepare('SELECT * FROM discount_codes WHERE id=?'),
   insertDiscountCode:    db.prepare('INSERT INTO discount_codes (code,discount_percent,max_discount_amount,expires_at,max_uses_per_user,allowed_segments,allowed_user_ids,created_by) VALUES (?,?,?,?,?,?,?,?)'),
@@ -761,7 +764,8 @@ function validateDiscount(code, userId, amount) {
   const dc = stmts.getDiscountCode.get(code.trim().toUpperCase());
   if (!dc) return { ok: false, err: '❌ کد تخفیف معتبر نیست.' };
   if (dc.expires_at && dc.expires_at < Date.now()/1000) return { ok: false, err: '❌ کد تخفیف منقضی شده است.' };
-  const uses = stmts.getUserDiscountUses.get(dc.id, userId).c;
+  // استفاده‌های ثبت‌شده + پرداخت‌های معلقی که همین کد را دارند (تا با چند پرداخت هم‌زمان سقف دور زده نشود)
+  const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
   if (uses >= dc.max_uses_per_user) return { ok: false, err: '❌ سقف استفاده از این کد را گذشته‌ای.' };
   const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments) : null;
   const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids) : null;
@@ -998,14 +1002,13 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
   ]]).reply_markup;
 
   let adminMsg;
-  // Send to all admins
+  // Send to all admins؛ message_id ذخیره‌شده مربوط به اولین ادمینی است که موفق ارسال شد (ادمین اصلی)
   for (const adminId of ADMIN_IDS) {
     try {
-      if (photoFileId) {
-        adminMsg = await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb });
-      } else {
-        adminMsg = await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
-      }
+      const sent = photoFileId
+        ? await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb })
+        : await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+      if (!adminMsg) adminMsg = sent;
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
@@ -1039,7 +1042,7 @@ bot.on('text', async (ctx) => {
           aState.partial.max_discount_amount = null;
         } else {
           const n = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''));
-          if (isNaN(n) || n < 0) { await ctx.reply('عدد معتبر وارد کن یا «نامحدود» بنویس:'); return; }
+          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) وارد کن یا «نامحدود» بنویس:'); return; }
           aState.partial.max_discount_amount = n;
         }
         aState.step = 'admin_dc_max_uses';
@@ -1384,6 +1387,8 @@ bot.on('callback_query', async (ctx) => {
       const paymentId = parseInt(da[1]);
       const payment = stmts.getPayment.get(paymentId);
       if (!payment || payment.user_id !== userId || payment.status !== 'pending') return ctx.answerCbQuery('پرداخت نامعتبر است.', { show_alert: true });
+      // جلوگیری از اعمال روی پرداختی که قبلاً تخفیف خورده (تخفیف روی تخفیف / خراب شدن مبلغ اصلی)
+      if (payment.discount_code_id) return ctx.answerCbQuery('برای این پرداخت قبلاً کد تخفیف ثبت شده. ابتدا حذفش کن.', { show_alert: true });
       userStates.set(userId, { step: 'waiting_discount_code', paymentId, invoiceMsgId: ctx.callbackQuery.message.message_id });
       await ctx.answerCbQuery('کد تخفیف خود را در این چت تایپ کنید:', { show_alert: true });
       return;
