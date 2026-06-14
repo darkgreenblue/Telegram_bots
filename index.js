@@ -280,6 +280,15 @@ Use EXACTLY this structure (skip a section only if genuinely empty):
 
 /* ===== 4) Helpers ===== */
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+// سقف دانلود فایل از Telegram Bot API برای ربات‌ها = ۲۰ مگابایت
+const TELEGRAM_MAX_DOWNLOAD  = 20 * 1024 * 1024;
+const FILE_TOO_BIG_MSG =
+  '😕 حجم فایل بیش از محدودیت ۲۰ مگابایت تلگرام است.\n\n' +
+  'پیشنهادات:\n' +
+  '• فایل را به چند بخش کوتاه‌تر تقسیم کن\n' +
+  '• فرمت را به mp3 تبدیل کن (مثلاً با اپ Audio Converter)\n' +
+  '• بیت‌ریت را کاهش بده (۶۴kbps کافی است)\n' +
+  '• سرعت پخش را ۲x کن تا حجم نصف شود';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function normalizeDigits(s) {
@@ -308,13 +317,6 @@ class CreditError extends Error {
   constructor(msg) { super(msg); this.name = 'CreditError'; }
 }
 
-const CHUNK_THRESHOLD_SEC = 20 * 60;
-const CHUNK_SEC           = 15 * 60;
-const SIZE_THRESHOLD      = 18 * 1024 * 1024;
-const TEXTPASS_MODEL      = DEFAULT_MODEL;
-
-const toFa = n => String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
-
 function throwForStatus(status, body) {
   if (status === 402 || /insufficient|credit|quota|payment|balance/i.test(body))
     throw new CreditError(body.slice(0, 200));
@@ -334,45 +336,6 @@ async function convertToMp3(buffer) {
   } finally {
     try { unlinkSync(inPath);  } catch {}
     try { unlinkSync(outPath); } catch {}
-  }
-}
-
-async function getAudioDurationSec(buffer) {
-  const id = Date.now();
-  const p  = `/tmp/v_dur_${id}`;
-  writeFileSync(p, buffer);
-  try {
-    const { stdout } = await execFileAsync('ffprobe', [
-      '-v', 'error', '-show_entries', 'format=duration',
-      '-of', 'default=noprint_wrappers=1:nokey=1', p,
-    ]);
-    const d = parseFloat((stdout || '').trim());
-    return Number.isFinite(d) ? d : null;
-  } catch { return null; }
-  finally { try { unlinkSync(p); } catch {} }
-}
-
-async function splitAudioToMp3Chunks(buffer, segmentSec) {
-  const id      = Date.now();
-  const inPath  = `/tmp/v_in_${id}`;
-  const pattern = `/tmp/v_seg_${id}_%03d.mp3`;
-  writeFileSync(inPath, buffer);
-  try {
-    await execFileAsync('ffmpeg', [
-      '-y', '-i', inPath, '-ar', '16000', '-ac', '1', '-b:a', '64k',
-      '-f', 'segment', '-segment_time', String(segmentSec), pattern,
-    ]);
-    const chunks = [];
-    for (let i = 0; ; i++) {
-      const p = `/tmp/v_seg_${id}_${String(i).padStart(3, '0')}.mp3`;
-      let buf;
-      try { buf = readFileSync(p); } catch { break; }
-      chunks.push(buf);
-      try { unlinkSync(p); } catch {}
-    }
-    return chunks;
-  } finally {
-    try { unlinkSync(inPath); } catch {}
   }
 }
 
@@ -402,27 +365,6 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throwForStatus(res.status, await res.text());
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content?.trim() || '';
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`TIMEOUT: مدل ${model} در ۱۰ دقیقه پاسخ نداد`);
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function callOpenRouterText(model, prompt) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
-  try {
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
       signal: ctrl.signal,
     });
     if (!res.ok) throwForStatus(res.status, await res.text());
@@ -475,69 +417,13 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
   throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
 }
 
-async function textPass(type, transcript) {
-  const base = PROMPT_MAP[type] || PROMPT_MAP.summary;
-  const prompt =
-    `You are given the RAW TEXT TRANSCRIPT of an audio recording (possibly long and multi-speaker). ` +
-    `Treat this transcript as the "speech"/"audio" referred to in the task below. ` +
-    `Apply the task using ONLY the transcript content; do not invent anything.\n\n` +
-    `TASK:\n${base}\n\n--- TRANSCRIPT START ---\n${transcript}\n--- TRANSCRIPT END ---`;
-  let lastErr = null;
-  for (let i = 0; i < RETRIES; i++) {
-    if (i > 0) await sleep(RETRY_DELAY);
-    try {
-      const out = await callOpenRouterText(TEXTPASS_MODEL, prompt);
-      if (out) return out;
-    } catch (err) {
-      if (err instanceof CreditError) throw err;
-      lastErr = err;
-      console.error(`❌ textPass attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,150));
-    }
-  }
-  throw new Error(`TEXTPASS_FAILED:${lastErr?.message || 'unknown'}`);
-}
-
-async function callAI(session, type, onProgress) {
+// کل فایل یک‌جا به مدل فرستاده می‌شود (بدون تقسیم). تبدیل فرمت فقط در مسیر fallback لازم است.
+async function callAI(session, type) {
   const { audioBuffer, mimeType, userModel } = session;
   const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
   const prompt    = PROMPT_MAP[type]     || PROMPT_MAP.full;
   const promptGpt = PROMPT_MAP_GPT[type] || PROMPT_MAP_GPT.full;
-
-  const durationSec = await getAudioDurationSec(audioBuffer);
-  const isLong = (durationSec && durationSec > CHUNK_THRESHOLD_SEC)
-              || (!durationSec && audioBuffer.length > SIZE_THRESHOLD);
-
-  if (!isLong) {
-    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
-  }
-
-  if (onProgress) await onProgress('🔪 فایل طولانی است؛ در حال تقسیم به بخش‌های کوچک‌تر...');
-  let chunks = [];
-  try { chunks = await splitAudioToMp3Chunks(audioBuffer, CHUNK_SEC); }
-  catch (e) { console.error('❌ split failed:', e.message); }
-
-  if (chunks.length <= 1) {
-    return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
-  }
-
-  const transcripts = [];
-  for (let i = 0; i < chunks.length; i++) {
-    if (onProgress) await onProgress(`🎧 در حال پردازش بخش ${toFa(i+1)} از ${toFa(chunks.length)}...`);
-    const part = await transcribeSingle(chunks[i], 'audio/mpeg', PROMPT_MAP.full, PROMPT_MAP_GPT.full, userModel, modelCfg.fallback);
-    transcripts.push(part || '');
-  }
-  const fullText = transcripts.join('\n').trim();
-
-  if (type === 'full') return fullText;
-
-  if (onProgress) await onProgress('🧠 در حال جمع‌بندی نهایی...');
-  try {
-    const out = await textPass(type, fullText);
-    if (out) return out;
-  } catch (e) {
-    console.error('❌ textPass failed:', e.message);
-  }
-  return `⚠️ جمع‌بندی نهایی انجام نشد؛ متن کامل پیاده‌سازی‌شده در ادامه آمده است:\n\n${fullText}`;
+  return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
 }
 
 async function getOpenRouterBalance() {
@@ -758,8 +644,16 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(userId, ctx.from.first_name, ctx.from.username);
 
   const userModel  = getUserModel(userId);
+  const media      = ctx.message.voice || ctx.message.audio;
   const tgDuration = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
   const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel) : null;
+
+  // محدودیت تلگرام: فایل بزرگ‌تر از ۲۰MB اصلاً قابل دانلود توسط ربات نیست.
+  // قبل از انتخاب حالت، همان لحظه اطلاع‌رسانی کن.
+  if (media?.file_size && media.file_size > TELEGRAM_MAX_DOWNLOAD) {
+    await ctx.reply(FILE_TOO_BIG_MSG);
+    return;
+  }
 
   // Check balance before downloading (only non-admin)
   if (userId !== ADMIN_ID && estimatedCost !== null && estimatedCost > 0) {
@@ -782,16 +676,13 @@ bot.on(['voice', 'audio'], async (ctx) => {
       if (s.userId === userId) sessions.delete(tk);
     }
 
-    const msg   = ctx.message;
-    const media = msg.voice || msg.audio;
-
     const fileUrl = await ctx.telegram.getFileLink(media.file_id);
     const res     = await fetch(fileUrl.href);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
     let mimeType = 'audio/ogg';
-    if (msg.audio?.mime_type) mimeType = msg.audio.mime_type;
+    if (ctx.message.audio?.mime_type) mimeType = ctx.message.audio.mime_type;
 
     const token = makeToken();
     sessions.set(token, {
@@ -819,12 +710,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     console.error('❌ ERROR on voice:', err);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
-      m = '😕 حجم فایل بیش از محدودیت ۲۰ مگابایت تلگرام است.\n\n' +
-          'پیشنهادات:\n' +
-          '• فایل را به چند بخش کوتاه‌تر تقسیم کن\n' +
-          '• فرمت را به mp3 تبدیل کن (مثلاً با اپ Audio Converter)\n' +
-          '• بیت‌ریت را کاهش بده (۶۴kbps کافی است)\n' +
-          '• سرعت پخش را ۲x کن تا حجم نصف شود';
+      m = FILE_TOO_BIG_MSG;
     }
     try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {}
   }
@@ -1130,17 +1016,10 @@ bot.on('callback_query', async (ctx) => {
 
       const waiting = await ctx.reply('⏳ در حال پردازش...');
 
-      let lastProgress = '';
-      const onProgress = async (msg) => {
-        if (msg === lastProgress) return;
-        lastProgress = msg;
-        try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, msg); } catch {}
-      };
-
       let text;
       let success = false;
       try {
-        text    = await callAI(session, type, onProgress) || 'متنی برنگشت.';
+        text    = await callAI(session, type) || 'متنی برنگشت.';
         success = true;
       } catch (err) {
         console.error('❌ All AI attempts failed:', err);
