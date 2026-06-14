@@ -591,7 +591,7 @@ function createProcessTypeKeyboard(token) {
     [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
     [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
-    [Markup.button.callback('🔄 تعویض پردازنده', 'switchmodel'), Markup.button.callback('انصراف', `cancel:${token}`)],
+    [Markup.button.callback('🔄 تعویض پردازنده', 'switchmodel'), Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
   ]);
 }
 
@@ -757,9 +757,9 @@ bot.on(['voice', 'audio'], async (ctx) => {
     let costLine = '';
     if (userId === ADMIN_ID) {
       const usd = calcAdminCostUsd(tgDuration, userModel);
-      if (usd) costLine = `\n<i>هزینه تخمینی: ${usd}</i>`;
+      if (usd) costLine = `\n<blockquote>هزینه تخمینی: ${usd}</blockquote>`;
     } else if (estimatedCost) {
-      costLine = `\n<i>هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان</i>`;
+      costLine = `\n<blockquote>هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان</blockquote>`;
     }
 
     await ctx.telegram.editMessageText(
@@ -796,6 +796,18 @@ bot.on('photo', async (ctx) => {
   userStates.delete(userId);
   await ctx.reply('✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
 });
+
+// ویرایش پیام درخواست شارژ نزد ادمین: عکس → caption، متن → text
+async function editAdminPaymentMsg(ctx, text) {
+  const isPhoto = !!ctx.callbackQuery?.message?.photo;
+  try {
+    if (isPhoto) {
+      await ctx.editMessageCaption(text, { reply_markup: { inline_keyboard: [] } });
+    } else {
+      await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
+    }
+  } catch {}
+}
 
 async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody) {
   const user    = getUser(userId);
@@ -929,12 +941,7 @@ bot.on('callback_query', async (ctx) => {
       stmts.credit.run(payment.amount, payment.user_id);
 
       await ctx.answerCbQuery('✅ تایید شد');
-      try {
-        await ctx.editMessageCaption(
-          `✅ تایید شد — ${payment.amount.toLocaleString('fa-IR')} تومان`,
-          { reply_markup: { inline_keyboard: [] } }
-        );
-      } catch {}
+      await editAdminPaymentMsg(ctx, `✅ تایید شد — ${payment.amount.toLocaleString('fa-IR')} تومان`);
 
       const newBalance = getBalance(payment.user_id);
       try {
@@ -959,12 +966,7 @@ bot.on('callback_query', async (ctx) => {
       stmts.setPaymentStatus.run('rejected', paymentId);
 
       await ctx.answerCbQuery('❌ رد شد');
-      try {
-        await ctx.editMessageCaption(
-          `❌ رد شد — ${payment.amount.toLocaleString('fa-IR')} تومان`,
-          { reply_markup: { inline_keyboard: [] } }
-        );
-      } catch {}
+      await editAdminPaymentMsg(ctx, `❌ رد شد — ${payment.amount.toLocaleString('fa-IR')} تومان`);
 
       try {
         await ctx.telegram.sendMessage(
