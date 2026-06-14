@@ -64,6 +64,8 @@ db.exec(`
 
 // Migration: Flash Lite از حالت preview خارج شده؛ شناسه‌ی قدیمی غلط را اصلاح کن
 db.prepare("UPDATE users SET model='google/gemini-2.5-flash-lite' WHERE model='google/gemini-2.5-flash-lite-preview'").run();
+// Migration: مدل آزمایشی حذف شده؛ کاربرانی که آن را انتخاب کرده بودند به پیش‌فرض برگردند
+db.prepare("UPDATE users SET model='google/gemini-2.5-flash' WHERE model='xiaomi/mimo-v2.5'").run();
 
 const stmts = {
   getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
@@ -103,20 +105,9 @@ const MODEL_CONFIG = {
   'google/gemini-2.5-flash-lite': { label: 'Flash Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
   'google/gemini-2.5-flash':      { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
   'google/gemini-2.5-pro':        { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
-  // مدل آزمایشی — هر وقت گفتی فقط همین یک خط را حذف کن
-  // params: ضد-تکرار، چون این مدل روی صوت طولانی فارسی به حلقه‌ی تکرار (repetition loop) می‌افتد
-  'xiaomi/mimo-v2.5':             { label: 'MiMo 2.5',    price: 500,  fallback: true,  usdPerMin: 0.0003, audioMode: 'input_audio',
-                                    params: { temperature: 0.3, repetition_penalty: 1.3, frequency_penalty: 0.6, presence_penalty: 0.3 } },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
-
-// نحوه ارسال صوت به هر مدل: 'input_audio' (نیازمند mp3/wav، مثل GPT و xiaomi) یا 'media' (data-URL، مثل Gemini)
-function modelAudioMode(model) {
-  if (MODEL_CONFIG[model]?.audioMode) return MODEL_CONFIG[model].audioMode;
-  if (/audio/i.test(model)) return 'input_audio'; // مثل openai/gpt-audio-mini
-  return 'media';
-}
 const RETRIES       = 3;
 const RETRY_DELAY   = 10_000;
 
@@ -373,32 +364,10 @@ async function convertToMp3(buffer) {
 }
 
 const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
-const OR_MAX_TOKENS = 16000;          // سقف خروجی — جلوی حلقه‌ی بی‌نهایت تکرار را می‌گیرد
-
-// خطای «خروجی خراب/تکراری»: باعث می‌شود مدل دوباره امتحان یا فالبک شود (نه اینکه آشغال تحویل دهد)
-class DegenerateError extends Error {
-  constructor(msg) { super(msg); this.name = 'DegenerateError'; }
-}
-
-// تشخیص خروجی degenerate: یک کلمه پشت‌سرهم چندین‌بار تکرار شده یا تنوع واژگان فوق‌العاده کم است
-function looksDegenerate(text) {
-  if (!text || text.length < 200) return false;
-  const words = text.trim().split(/\s+/);
-  if (words.length < 40) return false;
-  let run = 1, maxRun = 1;
-  for (let i = 1; i < words.length; i++) {
-    if (words[i] === words[i - 1] && words[i].length > 1) { run++; if (run > maxRun) maxRun = run; }
-    else run = 1;
-  }
-  if (maxRun >= 12) return true;                       // مثل «اتوماتیک اتوماتیک اتوماتیک…»
-  const uniqueRatio = new Set(words).size / words.length;
-  if (words.length > 120 && uniqueRatio < 0.12) return true; // متن طولانی با تنوع خیلی کم
-  return false;
-}
 
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
-  if (modelAudioMode(model) === 'input_audio') {
+  if (/audio/i.test(model)) {
     let format = 'mp3';
     if (/wav/i.test(mimeType))           format = 'wav';
     else if (/mp3|mpeg/i.test(mimeType)) format = 'mp3';
@@ -413,15 +382,6 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       { type: 'text', text: prompt },
     ];
   }
-  // پارامترهای پایه + پارامترهای اختصاصی هر مدل (مثل ضد-تکرار برای xiaomi)
-  const body = {
-    model,
-    messages: [{ role: 'user', content }],
-    max_tokens: OR_MAX_TOKENS,
-    temperature: 0.2,            // پیاده‌سازی دقیق و قطعی‌تر برای تبدیل صوت
-    ...(MODEL_CONFIG[model]?.params || {}),
-  };
-
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
   const t0 = Date.now();
@@ -430,7 +390,7 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
       signal: ctrl.signal,
     });
     if (!res.ok) {
@@ -444,14 +404,6 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
     const usage  = data.usage || {};
     const text   = choice?.message?.content?.trim() || '';
     log(`✅ API resp ← ${model} in ${Date.now()-t0}ms | finish=${finish} | tok(in/out)=${usage.prompt_tokens ?? '?'}/${usage.completion_tokens ?? '?'} | ${text.length} chars`);
-
-    // مدل توی حلقه‌ی تکرار گیر کرده یا به سقف توکن خورده → خروجی غیرقابل‌اعتماد است
-    if (/repetition|length/i.test(finish))
-      throw new DegenerateError(`${model} finish_reason=${finish}`);
-    if (looksDegenerate(text)) {
-      logErr(`⚠️ degenerate output from ${model} (تکرار بیش‌ازحد) — رد شد`);
-      throw new DegenerateError(`${model} repetitive output`);
-    }
     return text;
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -467,35 +419,18 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
 async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
   let lastErr = null;
 
-  // مدل‌های input_audio (مثل xiaomi) فقط mp3/wav می‌پذیرند؛ صوت ویس (ogg) را اول به mp3 تبدیل کن
-  let primaryBuffer = audioBuffer;
-  let primaryMime   = mimeType;
-  if (modelAudioMode(primaryModel) === 'input_audio' && !/mp3|mpeg|wav/i.test(mimeType)) {
-    try {
-      primaryBuffer = await convertToMp3(audioBuffer);
-      primaryMime   = 'audio/mpeg';
-    } catch (e) {
-      logErr('❌ mp3 convert (primary) failed:', e.message);
-    }
-  }
-
   for (let i = 0; i < RETRIES; i++) {
     if (i > 0) {
       log(`⏳ retry ${i+1}/${RETRIES} for ${primaryModel} in ${RETRY_DELAY/1000}s...`);
       await sleep(RETRY_DELAY);
     }
     try {
-      const out = await callOpenRouter(primaryModel, primaryBuffer, primaryMime, prompt);
+      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
       lastErr = err;
       logErr(`❌ ${primaryModel} attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,200));
-      // خروجی خراب با retis روی همان مدل دوباره خراب می‌شود → وقت/پول هدر نده، مستقیم برو فالبک
-      if (err instanceof DegenerateError) {
-        logErr(`↪️ ${primaryModel} degenerate — skipping remaining retries`);
-        break;
-      }
     }
   }
 
