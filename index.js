@@ -92,9 +92,9 @@ function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5
 
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
-  'google/gemini-2.5-flash-lite-preview': { label: '⚡ Flash‑Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
-  'google/gemini-2.5-flash':              { label: '🔥 Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
-  'google/gemini-2.5-pro':               { label: '💎 Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
+  'google/gemini-2.5-flash-lite-preview': { label: 'Flash Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
+  'google/gemini-2.5-flash':              { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
+  'google/gemini-2.5-pro':               { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
@@ -278,6 +278,11 @@ Use EXACTLY this structure (skip a section only if genuinely empty):
 /* ===== 4) Helpers ===== */
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function normalizeDigits(s) {
+  return s.replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
+          .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
+}
 
 function splitForTelegram(text, maxLen = TELEGRAM_MESSAGE_LIMIT) {
   if (!text) return [];
@@ -547,6 +552,7 @@ async function getOpenRouterBalance() {
 }
 
 async function maybeWarnLowBalance(ctx) {
+  if (ctx.from?.id !== ADMIN_ID) return;
   const bal = await getOpenRouterBalance();
   if (bal !== null && bal < 1) {
     try {
@@ -585,7 +591,7 @@ function createProcessTypeKeyboard(token) {
     [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
     [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
-    [Markup.button.callback('🚫 منصرف شدم',      `cancel:${token}`)],
+    [Markup.button.callback('🔄 تعویض پردازنده', 'switchmodel'), Markup.button.callback('انصراف', `cancel:${token}`)],
   ]);
 }
 
@@ -635,22 +641,27 @@ bot.start(async (ctx) => {
   }
 });
 
+function modelSelectionKeyboard(currentModel) {
+  return Markup.inlineKeyboard(
+    Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
+      const tick = id === currentModel ? '✅ ' : '';
+      return [Markup.button.callback(
+        `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
+        `setmodel:${id}`
+      )];
+    })
+  );
+}
+
 bot.hears('🔄 تعویض پردازنده', async (ctx) => {
   upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
   const currentModel = getUserModel(ctx.from.id);
-  const buttons = Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
-    const tick = id === currentModel ? '✅ ' : '';
-    return [Markup.button.callback(
-      `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
-      `setmodel:${id}`
-    )];
-  });
   await ctx.reply(
-    '🔄 مدل هوش مصنوعی رو انتخاب کن:\n\n' +
-    '⚡ Flash‑Lite — سریع‌ترین، ارزان‌ترین\n' +
-    '🔥 Flash — متعادل (پیش‌فرض)\n' +
-    '💎 Pro — دقیق‌ترین، بدون GPT fallback',
-    Markup.inlineKeyboard(buttons)
+    'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+    'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
+    'Flash — متعادل (پیش‌فرض)\n' +
+    'Pro — دقیق‌ترین',
+    modelSelectionKeyboard(currentModel)
   );
 });
 
@@ -746,14 +757,15 @@ bot.on(['voice', 'audio'], async (ctx) => {
     let costLine = '';
     if (userId === ADMIN_ID) {
       const usd = calcAdminCostUsd(tgDuration, userModel);
-      if (usd) costLine = `\n💰 هزینه تخمینی: ${usd}`;
+      if (usd) costLine = `\n<i>هزینه تخمینی: ${usd}</i>`;
     } else if (estimatedCost) {
-      costLine = `\n💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان`;
+      costLine = `\n<i>هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان</i>`;
     }
 
     await ctx.telegram.editMessageText(
       thinking.chat.id, thinking.message_id, undefined,
-      `چطور میخوای متن پردازش بشه؟${costLine}`
+      `چطور میخوای متن پردازش بشه؟${costLine}`,
+      costLine ? { parse_mode: 'HTML' } : {}
     );
     await ctx.reply('یکی از حالت‌های زیر رو انتخاب کن:', createProcessTypeKeyboard(token));
   } catch (err) {
@@ -780,31 +792,34 @@ bot.on('photo', async (ctx) => {
   const payment = stmts.getPayment.get(state.paymentId);
   if (!payment || payment.status !== 'pending') return;
 
-  const user = getUser(userId);
-
-  const adminMsg = await ctx.telegram.sendPhoto(ADMIN_ID, fileId, {
-    caption:
-      `💳 درخواست شارژ جدید\n\n` +
-      `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'})\n` +
-      `🆔 آیدی: ${userId}\n` +
-      `💰 مبلغ: ${payment.amount.toLocaleString('fa-IR')} تومان\n` +
-      `🔢 پرداخت #${state.paymentId}`,
-    reply_markup: Markup.inlineKeyboard([
-      [
-        Markup.button.callback('✅ تایید', `approve:${state.paymentId}`),
-        Markup.button.callback('❌ رد',    `reject:${state.paymentId}`),
-      ],
-    ]).reply_markup,
-  });
-
-  stmts.setPaymentReceipt.run(fileId, adminMsg.message_id, 'waiting_review', state.paymentId);
+  await sendReceiptToAdmin(ctx, userId, state.paymentId, fileId, null);
   userStates.delete(userId);
-
-  await ctx.reply(
-    '✅ فیش دریافت شد و در انتظار تایید ادمین است.\n' +
-    'معمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.'
-  );
+  await ctx.reply('✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
 });
+
+async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody) {
+  const user    = getUser(userId);
+  const payment = stmts.getPayment.get(paymentId);
+  const caption =
+    `💳 درخواست شارژ جدید\n\n` +
+    `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'})\n` +
+    `🆔 آیدی: ${userId}\n` +
+    `💰 مبلغ: ${payment.amount.toLocaleString('fa-IR')} تومان\n` +
+    `🔢 پرداخت #${paymentId}` +
+    (textBody ? `\n\n📋 فیش متنی:\n${textBody}` : '');
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback('✅ تایید', `approve:${paymentId}`),
+    Markup.button.callback('❌ رد',    `reject:${paymentId}`),
+  ]]).reply_markup;
+
+  let adminMsg;
+  if (photoFileId) {
+    adminMsg = await ctx.telegram.sendPhoto(ADMIN_ID, photoFileId, { caption, reply_markup: kb });
+  } else {
+    adminMsg = await ctx.telegram.sendMessage(ADMIN_ID, caption, { reply_markup: kb });
+  }
+  stmts.setPaymentReceipt.run(photoFileId || null, adminMsg.message_id, 'waiting_review', paymentId);
+}
 
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
@@ -812,7 +827,7 @@ bot.on('text', async (ctx) => {
   if (!state) return;
 
   if (state.step === 'waiting_amount') {
-    const raw    = ctx.message.text.trim().replace(/[,،\s]/g, '');
+    const raw    = normalizeDigits(ctx.message.text.trim()).replace(/[,،\s]/g, '');
     const amount = parseInt(raw, 10);
     if (isNaN(amount) || amount < MIN_RECHARGE) {
       await ctx.reply(`❌ حداقل مبلغ شارژ ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان است.\nمبلغ معتبر وارد کن:`);
@@ -823,10 +838,19 @@ bot.on('text', async (ctx) => {
     await ctx.reply(
       `💳 برای شارژ ${amount.toLocaleString('fa-IR')} تومان، مبلغ را به کارت زیر واریز کن:\n\n` +
       `\`${CARD_NUMBER}\`\n${CARD_OWNER}\n\n` +
-      `📸 بعد از واریز، تصویر فیش را در همین چت بفرست.\n` +
+      `بعد از واریز، تصویر فیش یا متن تأیید رو در همین چت بفرست.\n` +
       `⏰ مهلت ارسال: ۲۴ ساعت`,
       { parse_mode: 'Markdown' }
     );
+    return;
+  }
+
+  if (state.step === 'waiting_receipt') {
+    const payment = stmts.getPayment.get(state.paymentId);
+    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    await sendReceiptToAdmin(ctx, userId, state.paymentId, null, ctx.message.text);
+    userStates.delete(userId);
+    await ctx.reply('✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
   }
 });
 
@@ -845,6 +869,21 @@ bot.on('callback_query', async (ctx) => {
         try { await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, 'لغو شد ✅'); } catch {}
         sessions.delete(c[1]);
       }
+      return;
+    }
+
+    // ── Switch model (from process-type keyboard) ──
+    if (data === 'switchmodel') {
+      upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+      const currentModel = getUserModel(ctx.from.id);
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+        'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
+        'Flash — متعادل (پیش‌فرض)\n' +
+        'Pro — دقیق‌ترین',
+        modelSelectionKeyboard(currentModel)
+      );
       return;
     }
 
