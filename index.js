@@ -19,11 +19,13 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const ADMIN_ID     = 100257975;
+const ADMIN_IDS    = [100257975];
+function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
+
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
-const MIN_RECHARGE = 100_000;  // تومان
-const WELCOME_GIFT = 5_000;   // تومان
+const MIN_RECHARGE = 50_000;  // تومان
+const WELCOME_GIFT = 10_000;  // تومان
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -60,10 +62,44 @@ db.exec(`
     created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS discount_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    discount_percent INTEGER NOT NULL,
+    max_discount_amount INTEGER,
+    expires_at INTEGER,
+    max_uses_per_user INTEGER NOT NULL DEFAULT 1,
+    allowed_segments TEXT,
+    allowed_user_ids TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    total_uses INTEGER NOT NULL DEFAULT 0,
+    total_discounted_amount INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    created_by INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discount_uses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    payment_id INTEGER,
+    discount_amount INTEGER NOT NULL DEFAULT 0,
+    used_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE TABLE IF NOT EXISTS pro_whitelist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    added_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
 `);
 
 // Migration: Flash Lite از حالت preview خارج شده؛ شناسه‌ی قدیمی غلط را اصلاح کن
 db.prepare("UPDATE users SET model='google/gemini-2.5-flash-lite' WHERE model='google/gemini-2.5-flash-lite-preview'").run();
+// Migration: مدل آزمایشی حذف شده؛ کاربرانی که آن را انتخاب کرده بودند به پیش‌فرض برگردند
+db.prepare("UPDATE users SET model='google/gemini-2.5-flash' WHERE model='xiaomi/mimo-v2.5'").run();
+
+// Migrations for discount columns
+try { db.prepare('ALTER TABLE payments ADD COLUMN discount_code_id INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE payments ADD COLUMN original_amount INTEGER').run(); } catch {}
 
 const stmts = {
   getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
@@ -84,6 +120,28 @@ const stmts = {
   userCount:      db.prepare('SELECT COUNT(*) as c FROM users'),
   voiceCount:     db.prepare("SELECT COUNT(*) as c FROM usage_log WHERE success=1"),
   errorCount:     db.prepare("SELECT COUNT(*) as c FROM usage_log WHERE success=0"),
+  // discount / whitelist
+  isWhitelisted:         db.prepare('SELECT 1 FROM pro_whitelist WHERE user_id=?'),
+  // COALESCE: اگر قبلاً تخفیف خورده، original_amount دست‌نخورده می‌ماند تا با اعمال دوباره خراب نشود
+  setPaymentDiscount:    db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, ?), amount=?, updated_at=unixepoch() WHERE id=?'),
+  clearPaymentDiscount:  db.prepare('UPDATE payments SET amount=original_amount, original_amount=NULL, discount_code_id=NULL, updated_at=unixepoch() WHERE id=?'),
+  // شمارش پرداخت‌های معلق/در-انتظار که همین کد را دارند تا سقف هر-کاربر با چند پرداخت هم‌زمان دور زده نشود
+  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
+  getDiscountCode:       db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
+  getDiscountById:       db.prepare('SELECT * FROM discount_codes WHERE id=?'),
+  insertDiscountCode:    db.prepare('INSERT INTO discount_codes (code,discount_percent,max_discount_amount,expires_at,max_uses_per_user,allowed_segments,allowed_user_ids,created_by) VALUES (?,?,?,?,?,?,?,?)'),
+  toggleDiscountCode:    db.prepare('UPDATE discount_codes SET is_active=CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id=?'),
+  deleteDiscountCode:    db.prepare('DELETE FROM discount_codes WHERE id=?'),
+  incDiscountUses:       db.prepare('UPDATE discount_codes SET total_uses=total_uses+1, total_discounted_amount=total_discounted_amount+? WHERE id=?'),
+  insertDiscountUse:     db.prepare('INSERT INTO discount_uses (code_id,user_id,payment_id,discount_amount) VALUES (?,?,?,?)'),
+  getUserDiscountUses:   db.prepare('SELECT COUNT(*) as c FROM discount_uses WHERE code_id=? AND user_id=?'),
+  listDiscountCodes:     db.prepare('SELECT * FROM discount_codes ORDER BY created_at DESC LIMIT ? OFFSET ?'),
+  countDiscountCodes:    db.prepare('SELECT COUNT(*) as c FROM discount_codes'),
+  countActiveDiscountCodes: db.prepare('SELECT COUNT(*) as c FROM discount_codes WHERE is_active=1'),
+  sumDiscountStats:      db.prepare('SELECT COALESCE(SUM(total_uses),0) as uses, COALESCE(SUM(total_discounted_amount),0) as amt FROM discount_codes'),
+  getApprovedPaymentCount: db.prepare("SELECT COUNT(*) as c FROM payments WHERE user_id=? AND status='approved'"),
+  getLastUsage:          db.prepare('SELECT MAX(created_at) as t FROM usage_log WHERE user_id=? AND success=1'),
+  getUsageCount:         db.prepare('SELECT COUNT(*) as c FROM usage_log WHERE user_id=? AND success=1'),
 };
 
 function upsertUser(telegramId, name, username) {
@@ -96,40 +154,66 @@ function upsertUser(telegramId, name, username) {
 
 function getUser(telegramId)  { return stmts.getUser.get(telegramId); }
 function getBalance(tid)      { return getUser(tid)?.balance ?? 0; }
-function getUserModel(tid)    { return getUser(tid)?.model || 'google/gemini-2.5-flash'; }
 
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
-  'google/gemini-2.5-flash-lite': { label: 'Flash Lite', price: 500,  fallback: true,  usdPerMin: 0.0003 },
-  'google/gemini-2.5-flash':      { label: 'Flash',      price: 1000, fallback: true,  usdPerMin: 0.0007 },
-  'google/gemini-2.5-pro':        { label: 'Pro',         price: 2000, fallback: false, usdPerMin: 0.0040 },
-  // مدل آزمایشی — هر وقت گفتی فقط همین یک خط را حذف کن
-  // params: ضد-تکرار، چون این مدل روی صوت طولانی فارسی به حلقه‌ی تکرار (repetition loop) می‌افتد
-  'xiaomi/mimo-v2.5':             { label: 'MiMo 2.5',    price: 500,  fallback: true,  usdPerMin: 0.0003, audioMode: 'input_audio',
-                                    params: { temperature: 0.3, repetition_penalty: 1.3, frequency_penalty: 0.6, presence_penalty: 0.3 } },
+  'google/gemini-2.5-flash-lite': {
+    adminLabel: 'Flash Lite', label: 'مدل سبک',
+    adminPrice: 500, price: 300,
+    fallback: true, usdPerMin: 0.0003,
+  },
+  'google/gemini-2.5-flash': {
+    adminLabel: 'Flash', label: 'مدل حرفه‌ای',
+    adminPrice: 1000, price: 900,
+    fallback: true, usdPerMin: 0.0007,
+  },
+  'google/gemini-2.5-pro': {
+    adminLabel: 'Pro', label: 'Pro',
+    adminPrice: 2000, price: 3000,
+    fallback: false, usdPerMin: 0.0040,
+    whitelistOnly: true,
+  },
 };
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const GPT_MODEL     = 'openai/gpt-audio-mini';
-
-// نحوه ارسال صوت به هر مدل: 'input_audio' (نیازمند mp3/wav، مثل GPT و xiaomi) یا 'media' (data-URL، مثل Gemini)
-function modelAudioMode(model) {
-  if (MODEL_CONFIG[model]?.audioMode) return MODEL_CONFIG[model].audioMode;
-  if (/audio/i.test(model)) return 'input_audio'; // مثل openai/gpt-audio-mini
-  return 'media';
-}
 const RETRIES       = 3;
 const RETRY_DELAY   = 10_000;
 
-function calcCost(durationSec, model) {
+function isWhitelisted(uid) { return !!stmts.isWhitelisted.get(uid); }
+function getUserType(uid) {
+  if (isAdmin(uid)) return 'admin';
+  if (isWhitelisted(uid)) return 'whitelist';
+  return 'regular';
+}
+function getModelLabel(modelId, userType) {
+  const cfg = MODEL_CONFIG[modelId] || MODEL_CONFIG[DEFAULT_MODEL];
+  return (userType === 'admin' || userType === 'whitelist') ? cfg.adminLabel : cfg.label;
+}
+function getModelPrice(modelId, userType) {
+  const cfg = MODEL_CONFIG[modelId] || MODEL_CONFIG[DEFAULT_MODEL];
+  return userType === 'admin' ? cfg.adminPrice : cfg.price;
+}
+function getVisibleModels(userType) {
+  return Object.keys(MODEL_CONFIG).filter(id => userType !== 'regular' || !MODEL_CONFIG[id].whitelistOnly);
+}
+
+function calcCost(durationSec, model, userType = 'regular') {
   const cfg = MODEL_CONFIG[model];
   if (!cfg || !durationSec) return 0;
-  return Math.round((durationSec / 60) * cfg.price);
+  return Math.round((durationSec / 60) * getModelPrice(model, userType));
 }
 
 function calcAdminCostUsd(durationSec, model) {
   const cfg = MODEL_CONFIG[model];
   if (!cfg || !durationSec) return null;
   return `~$${((durationSec / 60) * cfg.usdPerMin).toFixed(4)}`;
+}
+
+function getUserModel(tid) {
+  const user = getUser(tid);
+  const model = user?.model || DEFAULT_MODEL;
+  if (getUserType(tid) === 'regular' && MODEL_CONFIG[model]?.whitelistOnly) return DEFAULT_MODEL;
+  return model;
 }
 
 /* ===== 3) Prompts ===== */
@@ -320,6 +404,8 @@ const FILE_TOO_BIG_MSG =
   '• سرعت پخش را ۲x کن تا حجم نصف شود';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+const PTYPE_LABELS = { full: 'متن کامل', clean: 'متن مفید', summary: 'خلاصه تیتروار', meeting: 'صورت جلسه' };
+
 function normalizeDigits(s) {
   return s.replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
           .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
@@ -373,32 +459,10 @@ async function convertToMp3(buffer) {
 }
 
 const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
-const OR_MAX_TOKENS = 16000;          // سقف خروجی — جلوی حلقه‌ی بی‌نهایت تکرار را می‌گیرد
-
-// خطای «خروجی خراب/تکراری»: باعث می‌شود مدل دوباره امتحان یا فالبک شود (نه اینکه آشغال تحویل دهد)
-class DegenerateError extends Error {
-  constructor(msg) { super(msg); this.name = 'DegenerateError'; }
-}
-
-// تشخیص خروجی degenerate: یک کلمه پشت‌سرهم چندین‌بار تکرار شده یا تنوع واژگان فوق‌العاده کم است
-function looksDegenerate(text) {
-  if (!text || text.length < 200) return false;
-  const words = text.trim().split(/\s+/);
-  if (words.length < 40) return false;
-  let run = 1, maxRun = 1;
-  for (let i = 1; i < words.length; i++) {
-    if (words[i] === words[i - 1] && words[i].length > 1) { run++; if (run > maxRun) maxRun = run; }
-    else run = 1;
-  }
-  if (maxRun >= 12) return true;                       // مثل «اتوماتیک اتوماتیک اتوماتیک…»
-  const uniqueRatio = new Set(words).size / words.length;
-  if (words.length > 120 && uniqueRatio < 0.12) return true; // متن طولانی با تنوع خیلی کم
-  return false;
-}
 
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   let content;
-  if (modelAudioMode(model) === 'input_audio') {
+  if (/audio/i.test(model)) {
     let format = 'mp3';
     if (/wav/i.test(mimeType))           format = 'wav';
     else if (/mp3|mpeg/i.test(mimeType)) format = 'mp3';
@@ -413,15 +477,6 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
       { type: 'text', text: prompt },
     ];
   }
-  // پارامترهای پایه + پارامترهای اختصاصی هر مدل (مثل ضد-تکرار برای xiaomi)
-  const body = {
-    model,
-    messages: [{ role: 'user', content }],
-    max_tokens: OR_MAX_TOKENS,
-    temperature: 0.2,            // پیاده‌سازی دقیق و قطعی‌تر برای تبدیل صوت
-    ...(MODEL_CONFIG[model]?.params || {}),
-  };
-
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
   const t0 = Date.now();
@@ -430,7 +485,7 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
       signal: ctrl.signal,
     });
     if (!res.ok) {
@@ -444,14 +499,6 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
     const usage  = data.usage || {};
     const text   = choice?.message?.content?.trim() || '';
     log(`✅ API resp ← ${model} in ${Date.now()-t0}ms | finish=${finish} | tok(in/out)=${usage.prompt_tokens ?? '?'}/${usage.completion_tokens ?? '?'} | ${text.length} chars`);
-
-    // مدل توی حلقه‌ی تکرار گیر کرده یا به سقف توکن خورده → خروجی غیرقابل‌اعتماد است
-    if (/repetition|length/i.test(finish))
-      throw new DegenerateError(`${model} finish_reason=${finish}`);
-    if (looksDegenerate(text)) {
-      logErr(`⚠️ degenerate output from ${model} (تکرار بیش‌ازحد) — رد شد`);
-      throw new DegenerateError(`${model} repetitive output`);
-    }
     return text;
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -467,35 +514,18 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
 async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
   let lastErr = null;
 
-  // مدل‌های input_audio (مثل xiaomi) فقط mp3/wav می‌پذیرند؛ صوت ویس (ogg) را اول به mp3 تبدیل کن
-  let primaryBuffer = audioBuffer;
-  let primaryMime   = mimeType;
-  if (modelAudioMode(primaryModel) === 'input_audio' && !/mp3|mpeg|wav/i.test(mimeType)) {
-    try {
-      primaryBuffer = await convertToMp3(audioBuffer);
-      primaryMime   = 'audio/mpeg';
-    } catch (e) {
-      logErr('❌ mp3 convert (primary) failed:', e.message);
-    }
-  }
-
   for (let i = 0; i < RETRIES; i++) {
     if (i > 0) {
       log(`⏳ retry ${i+1}/${RETRIES} for ${primaryModel} in ${RETRY_DELAY/1000}s...`);
       await sleep(RETRY_DELAY);
     }
     try {
-      const out = await callOpenRouter(primaryModel, primaryBuffer, primaryMime, prompt);
+      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
       lastErr = err;
       logErr(`❌ ${primaryModel} attempt ${i+1}/${RETRIES}:`, (err.message||'').slice(0,200));
-      // خروجی خراب با retis روی همان مدل دوباره خراب می‌شود → وقت/پول هدر نده، مستقیم برو فالبک
-      if (err instanceof DegenerateError) {
-        logErr(`↪️ ${primaryModel} degenerate — skipping remaining retries`);
-        break;
-      }
     }
   }
 
@@ -551,7 +581,7 @@ async function getOpenRouterBalance() {
 }
 
 async function maybeWarnLowBalance(ctx) {
-  if (ctx.from?.id !== ADMIN_ID) return;
+  if (!isAdmin(ctx.from?.id)) return;
   const bal = await getOpenRouterBalance();
   if (bal !== null && bal < 1) {
     try {
@@ -565,7 +595,8 @@ async function maybeWarnLowBalance(ctx) {
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: Infinity });
 
 const sessions    = new Map(); // token → voice session
-const userStates  = new Map(); // userId → { step, paymentId }
+const userStates  = new Map(); // userId → { step, paymentId, ... }
+const adminStates = new Map(); // adminId → { step, partial, ... }
 
 // پردازش هم‌زمان: حداکثر چند فایل صوتی به‌طور موازی برای هر کاربر
 const MAX_CONCURRENT_JOBS = 2;
@@ -600,25 +631,27 @@ const HELP_TEXT =
   '📋 صورت جلسه\n' +
   'سند ساختاریافته‌ی جلسه: موضوع، حاضرین، چکیده مدیریتی، تصمیمات، تقسیم وظایف (با مسئول و مهلت)، مباحث کلیدی، موارد باز و ریسک‌ها. مناسب جلسات کاری.';
 
-// باکس نقل‌قول هزینه: اسم مدل (خط اول) + هزینه (خط دوم) — برای ادمین دلار، برای کاربر تومان
-function buildCostBlock(durationSec, model, isAdmin) {
+// باکس نقل‌قول هزینه
+function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
   const cfg = MODEL_CONFIG[model] || MODEL_CONFIG[DEFAULT_MODEL];
+  const label = getModelLabel(model, userType);
   let costStr;
-  if (isAdmin) {
+  if (userType === 'admin') {
     const usd = calcAdminCostUsd(durationSec, model);
     if (!usd) return '';
     costStr = `هزینه تخمینی: ${usd}`;
   } else {
-    const c = calcCost(durationSec, model);
+    const c = calcCost(durationSec, model, userType);
     if (!c) return '';
     costStr = `هزینه پردازش: ${c.toLocaleString('fa-IR')} تومان`;
   }
-  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<blockquote>${esc(cfg.label)}\n${esc(costStr)}</blockquote>`;
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ptypeLine = ptypeLabel ? `${esc(ptypeLabel)}\n` : '';
+  return `<blockquote>${ptypeLine}${esc(label)}\n${esc(costStr)}</blockquote>`;
 }
 
 function mainKeyboard(userId) {
-  if (userId === ADMIN_ID) {
+  if (isAdmin(userId)) {
     return Markup.keyboard([['🔄 تعویض پردازنده', '📊 داشبورد']]).resize();
   }
   return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
@@ -641,16 +674,29 @@ function helpKeyboard(token) {
 }
 
 // کیبورد تعویض مدل در میانه فرآیند: مدل‌ها + بازگشت
-function inflowModelKeyboard(currentModel, token) {
-  const rows = Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
+function inflowModelKeyboard(currentModel, token, userType) {
+  const rows = getVisibleModels(userType).map(id => {
+    const lbl = getModelLabel(id, userType);
+    const prc = getModelPrice(id, userType);
     const tick = id === currentModel ? '✅ ' : '';
     return [Markup.button.callback(
-      `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
+      `${tick}${lbl} — ${prc.toLocaleString('fa-IR')} ت/دقیقه`,
       `setmodelflow:${id}:${token}`
     )];
   });
   rows.push([Markup.button.callback('🔙 بازگشت', `back:${token}`)]);
   return Markup.inlineKeyboard(rows);
+}
+
+function modelSelectionKeyboard(currentModel, userType) {
+  return Markup.inlineKeyboard(
+    getVisibleModels(userType).map(id => {
+      const lbl = getModelLabel(id, userType);
+      const prc = getModelPrice(id, userType);
+      const tick = id === currentModel ? '✅ ' : '';
+      return [Markup.button.callback(`${tick}${lbl} — ${prc.toLocaleString('fa-IR')} ت/دقیقه`, `setmodel:${id}`)];
+    })
+  );
 }
 
 function createOutputFormatKeyboard(token) {
@@ -678,12 +724,83 @@ async function sendTextAsFile(ctx, text, extra = {}) {
   }, extra);
 }
 
+/* ===== 7b) Discount helpers ===== */
+const SEGMENTS = {
+  all:          'همه کاربران',
+  new:          'کاربران جدید (۷ روز)',
+  no_balance:   'بدون موجودی',
+  inactive:     'غیرفعال (۳۰ روز)',
+  loyal:        'کاربران وفادار (۵+ شارژ)',
+  premium:      'کاربران پریمیوم',
+  first_charge: 'اولین شارژ',
+  high_usage:   'پرمصرف (۱۰+ وویس)',
+  low_balance:  'موجودی کم (<۵۰ هزار)',
+};
+
+function isUserInSegment(userId, seg) {
+  if (seg === 'all') return true;
+  const u = getUser(userId);
+  if (!u) return false;
+  const now = Date.now() / 1000;
+  if (seg === 'new') return (now - u.created_at) < 7 * 86400;
+  if (seg === 'no_balance') return u.balance === 0;
+  if (seg === 'inactive') { const t = stmts.getLastUsage.get(userId)?.t; return !t || (now - t) > 30 * 86400; }
+  if (seg === 'loyal') return stmts.getApprovedPaymentCount.get(userId).c >= 5;
+  if (seg === 'premium') return isWhitelisted(userId);
+  if (seg === 'first_charge') return stmts.getApprovedPaymentCount.get(userId).c === 0;
+  if (seg === 'high_usage') return stmts.getUsageCount.get(userId).c >= 10;
+  if (seg === 'low_balance') return u.balance > 0 && u.balance < 50_000;
+  return false;
+}
+
+function genDiscountCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return `DISC-${s}`;
+}
+
+function validateDiscount(code, userId, amount) {
+  const dc = stmts.getDiscountCode.get(code.trim().toUpperCase());
+  if (!dc) return { ok: false, err: '❌ کد تخفیف معتبر نیست.' };
+  if (dc.expires_at && dc.expires_at < Date.now()/1000) return { ok: false, err: '❌ کد تخفیف منقضی شده است.' };
+  // استفاده‌های ثبت‌شده + پرداخت‌های معلقی که همین کد را دارند (تا با چند پرداخت هم‌زمان سقف دور زده نشود)
+  const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
+  if (uses >= dc.max_uses_per_user) return { ok: false, err: '❌ سقف استفاده از این کد را گذشته‌ای.' };
+  const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments) : null;
+  const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids) : null;
+  if (segs || uids) {
+    let ok = segs?.some(s => isUserInSegment(userId, s));
+    if (!ok && uids) ok = uids.includes(userId);
+    if (!ok) return { ok: false, err: '❌ شما مجاز به استفاده از این کد نیستید.' };
+  }
+  let disc = Math.round(amount * dc.discount_percent / 100);
+  if (dc.max_discount_amount !== null && disc > dc.max_discount_amount) disc = dc.max_discount_amount;
+  return { ok: true, dc, discountAmount: disc, finalAmount: Math.max(0, amount - disc) };
+}
+
+function buildInvoiceText(amount, originalAmount, discountPercent) {
+  const cardLine = `\`${CARD_NUMBER}\`\n${CARD_OWNER}`;
+  if (originalAmount && discountPercent) {
+    return `💳 شارژ کیف پول\n\n` +
+      `مبلغ اصلی: ${originalAmount.toLocaleString('fa-IR')} تومان\n` +
+      `🎟️ تخفیف ${discountPercent}٪: −${(originalAmount - amount).toLocaleString('fa-IR')} تومان\n` +
+      `✅ مبلغ نهایی: *${amount.toLocaleString('fa-IR')} تومان*\n\n` +
+      `به کارت زیر واریز کن:\n${cardLine}\n\n` +
+      `بعد از واریز، تصویر فیش یا متن تأیید رو در همین چت بفرست.\n⏰ مهلت: ۲۴ ساعت`;
+  }
+  return `💳 شارژ کیف پول\n\n` +
+    `مبلغ: *${amount.toLocaleString('fa-IR')} تومان*\n\n` +
+    `به کارت زیر واریز کن:\n${cardLine}\n\n` +
+    `بعد از واریز، تصویر فیش یا متن تأیید رو در همین چت بفرست.\n⏰ مهلت: ۲۴ ساعت`;
+}
+
 /* ===== 8) Handlers ===== */
 
 bot.start(async (ctx) => {
   const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
   const keyboard  = mainKeyboard(ctx.from.id);
-  if (ctx.from.id === ADMIN_ID) {
+  if (isAdmin(ctx.from.id)) {
     await ctx.reply('سلام! یک ویس بفرست. 🎤', keyboard);
     return;
   }
@@ -703,32 +820,29 @@ bot.start(async (ctx) => {
   );
 });
 
-function modelSelectionKeyboard(currentModel) {
-  return Markup.inlineKeyboard(
-    Object.entries(MODEL_CONFIG).map(([id, cfg]) => {
-      const tick = id === currentModel ? '✅ ' : '';
-      return [Markup.button.callback(
-        `${tick}${cfg.label} — ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`,
-        `setmodel:${id}`
-      )];
-    })
-  );
-}
-
 bot.hears('🔄 تعویض پردازنده', async (ctx) => {
   upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-  const currentModel = getUserModel(ctx.from.id);
-  await ctx.reply(
-    'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
-    'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
-    'Flash — متعادل (پیش‌فرض)\n' +
-    'Pro — دقیق‌ترین',
-    modelSelectionKeyboard(currentModel)
-  );
+  const userId = ctx.from.id;
+  const userType = getUserType(userId);
+  const currentModel = getUserModel(userId);
+  let descText;
+  if (userType === 'admin' || userType === 'whitelist') {
+    descText =
+      'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+      'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
+      'Flash — متعادل (پیش‌فرض)\n' +
+      'Pro — دقیق‌ترین';
+  } else {
+    descText =
+      'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+      'مدل سبک — سریع‌ترین، ارزان‌ترین\n' +
+      'مدل حرفه‌ای — متعادل (پیش‌فرض)';
+  }
+  await ctx.reply(descText, modelSelectionKeyboard(currentModel, userType));
 });
 
 bot.hears('👛 کیف پول', async (ctx) => {
-  if (ctx.from.id === ADMIN_ID) return;
+  if (isAdmin(ctx.from.id)) return;
   upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
   const balance = getBalance(ctx.from.id);
   await ctx.reply(
@@ -739,7 +853,7 @@ bot.hears('👛 کیف پول', async (ctx) => {
 });
 
 bot.hears('📊 داشبورد', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
+  if (!isAdmin(ctx.from.id)) return;
   const d = {
     users:   stmts.userCount.get().c,
     voices:  stmts.voiceCount.get().c,
@@ -750,7 +864,7 @@ bot.hears('📊 داشبورد', async (ctx) => {
   };
   const orBal = await getOpenRouterBalance();
   const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
-  await ctx.reply(
+  const statsText =
     `📊 داشبورد مدیریت\n\n` +
     `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
     `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
@@ -758,30 +872,30 @@ bot.hears('📊 داشبورد', async (ctx) => {
     `💰 درآمد امروز: ${d.day.toLocaleString('fa-IR')} تومان\n` +
     `💰 درآمد این ماه: ${d.month.toLocaleString('fa-IR')} تومان\n` +
     `💰 کل درآمد: ${d.total.toLocaleString('fa-IR')} تومان\n\n` +
-    `🔋 موجودی OpenRouter: ${orStr}`
-  );
+    `🔋 موجودی OpenRouter: ${orStr}`;
+  await ctx.reply(statsText, Markup.inlineKeyboard([[Markup.button.callback('🎟️ کدهای تخفیف', 'admin:dc')]]));
 });
 
 bot.on(['voice', 'audio'], async (ctx) => {
   const userId = ctx.from.id;
   upsertUser(userId, ctx.from.first_name, ctx.from.username);
 
-  const userModel  = getUserModel(userId);
-  const media      = ctx.message.voice || ctx.message.audio;
-  const voiceMsgId = ctx.message.message_id;
-  const tgDuration = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
-  const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel) : null;
+  const userType    = getUserType(userId);
+  const userModel   = getUserModel(userId);
+  const media       = ctx.message.voice || ctx.message.audio;
+  const voiceMsgId  = ctx.message.message_id;
+  const tgDuration  = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
+  const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel, userType) : null;
   log(`🎤 voice recv  uid=${userId} (@${ctx.from.username||'—'}) dur=${tgDuration}s size=${media?.file_size ? (media.file_size/1024).toFixed(0)+'KB' : '?'} model=${userModel}`);
 
   // محدودیت تلگرام: فایل بزرگ‌تر از ۲۰MB اصلاً قابل دانلود توسط ربات نیست.
-  // قبل از انتخاب حالت، همان لحظه اطلاع‌رسانی کن.
   if (media?.file_size && media.file_size > TELEGRAM_MAX_DOWNLOAD) {
     await ctx.reply(FILE_TOO_BIG_MSG, replyTo(voiceMsgId));
     return;
   }
 
   // Check balance before downloading (only non-admin)
-  if (userId !== ADMIN_ID && estimatedCost !== null && estimatedCost > 0) {
+  if (!isAdmin(userId) && estimatedCost !== null && estimatedCost > 0) {
     const balance = getBalance(userId);
     if (balance < estimatedCost) {
       await ctx.reply(
@@ -818,7 +932,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
       createdAt:   Date.now(),
     });
 
-    const costBlock = buildCostBlock(tgDuration, userModel, userId === ADMIN_ID);
+    const costBlock = buildCostBlock(tgDuration, userModel, userType);
     const questionText = `چطور میخوای متن پردازش بشه؟${costBlock ? `\n\n${costBlock}` : ''}`;
 
     await ctx.telegram.editMessageText(
@@ -867,11 +981,19 @@ async function editAdminPaymentMsg(ctx, text) {
 async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody) {
   const user    = getUser(userId);
   const payment = stmts.getPayment.get(paymentId);
+  let amountLine = `💰 مبلغ: ${payment.amount.toLocaleString('fa-IR')} تومان`;
+  if (payment.original_amount) {
+    const dc = stmts.getDiscountById.get(payment.discount_code_id);
+    amountLine =
+      `💰 مبلغ اصلی: ${payment.original_amount.toLocaleString('fa-IR')} تومان\n` +
+      `🎟️ کد تخفیف: ${dc?.code || '?'}\n` +
+      `✅ مبلغ پرداختی: ${payment.amount.toLocaleString('fa-IR')} تومان`;
+  }
   const caption =
     `💳 درخواست شارژ جدید\n\n` +
     `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'})\n` +
     `🆔 آیدی: ${userId}\n` +
-    `💰 مبلغ: ${payment.amount.toLocaleString('fa-IR')} تومان\n` +
+    `${amountLine}\n` +
     `🔢 پرداخت #${paymentId}` +
     (textBody ? `\n\n📋 فیش متنی:\n${textBody}` : '');
   const kb = Markup.inlineKeyboard([[
@@ -880,17 +1002,114 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
   ]]).reply_markup;
 
   let adminMsg;
-  if (photoFileId) {
-    adminMsg = await ctx.telegram.sendPhoto(ADMIN_ID, photoFileId, { caption, reply_markup: kb });
-  } else {
-    adminMsg = await ctx.telegram.sendMessage(ADMIN_ID, caption, { reply_markup: kb });
+  // Send to all admins؛ message_id ذخیره‌شده مربوط به اولین ادمینی است که موفق ارسال شد (ادمین اصلی)
+  for (const adminId of ADMIN_IDS) {
+    try {
+      const sent = photoFileId
+        ? await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb })
+        : await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+      if (!adminMsg) adminMsg = sent;
+    } catch {}
   }
-  stmts.setPaymentReceipt.run(photoFileId || null, adminMsg.message_id, 'waiting_review', paymentId);
+  stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
 }
 
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
-  const state  = userStates.get(userId);
+
+  // Admin text steps take priority
+  if (isAdmin(userId)) {
+    const aState = adminStates.get(userId);
+    if (aState) {
+      const text = ctx.message.text.trim();
+
+      // Discount code creation wizard
+      if (aState.step === 'admin_dc_percent') {
+        const n = parseInt(normalizeDigits(text));
+        if (isNaN(n) || n < 1 || n > 100) {
+          await ctx.reply('عدد بین ۱ تا ۱۰۰ وارد کن:');
+          return;
+        }
+        aState.partial.discount_percent = n;
+        aState.step = 'admin_dc_max_amount';
+        adminStates.set(userId, aState);
+        await ctx.reply('حداکثر مبلغ تخفیف (تومان)، یا «نامحدود»:');
+        return;
+      }
+
+      if (aState.step === 'admin_dc_max_amount') {
+        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
+          aState.partial.max_discount_amount = null;
+        } else {
+          const n = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''));
+          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) وارد کن یا «نامحدود» بنویس:'); return; }
+          aState.partial.max_discount_amount = n;
+        }
+        aState.step = 'admin_dc_max_uses';
+        adminStates.set(userId, aState);
+        await ctx.reply('حداکثر دفعات استفاده هر کاربر، یا «نامحدود»:');
+        return;
+      }
+
+      if (aState.step === 'admin_dc_max_uses') {
+        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
+          aState.partial.max_uses_per_user = 999999;
+        } else {
+          const n = parseInt(normalizeDigits(text));
+          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) وارد کن یا «نامحدود» بنویس:'); return; }
+          aState.partial.max_uses_per_user = n;
+        }
+        aState.step = 'admin_dc_expires';
+        adminStates.set(userId, aState);
+        await ctx.reply('تعداد روزهای اعتبار، یا «نامحدود»:');
+        return;
+      }
+
+      if (aState.step === 'admin_dc_expires') {
+        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
+          aState.partial.expires_at = null;
+        } else {
+          const n = parseInt(normalizeDigits(text));
+          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر وارد کن یا «نامحدود» بنویس:'); return; }
+          aState.partial.expires_at = Math.floor(Date.now()/1000) + n * 86400;
+        }
+        aState.step = 'admin_dc_users';
+        adminStates.set(userId, aState);
+        await ctx.reply(
+          'چه کاربرانی مجاز به استفاده هستند؟',
+          Markup.inlineKeyboard([
+            [Markup.button.callback('همه کاربران', 'admin:dc:users:all')],
+            [Markup.button.callback('سگمنت‌های آماده', 'admin:dc:users:segments')],
+            [Markup.button.callback('کاربران خاص', 'admin:dc:users:specific')],
+          ])
+        );
+        return;
+      }
+
+      if (aState.step === 'admin_dc_user_ids') {
+        const parts = text.split(/[\s,،\n]+/).map(s => s.trim()).filter(Boolean);
+        const ids = parts.map(s => { const n = parseInt(s); return isNaN(n) ? null : n; }).filter(Boolean);
+        aState.partial.allowed_user_ids = ids.length > 0 ? ids : null;
+        aState.partial.allowed_segments = null;
+        aState.step = 'admin_dc_confirm';
+        adminStates.set(userId, aState);
+        await showDiscountConfirm(ctx, userId);
+        return;
+      }
+
+      if (aState.step === 'admin_dc_edit_percent') {
+        const n = parseInt(normalizeDigits(text));
+        if (isNaN(n) || n < 1 || n > 100) { await ctx.reply('عدد بین ۱ تا ۱۰۰ وارد کن:'); return; }
+        db.prepare('UPDATE discount_codes SET discount_percent=? WHERE id=?').run(n, aState.codeId);
+        adminStates.delete(userId);
+        await ctx.reply('✅ درصد تخفیف بروز شد.');
+        await showDiscountCodeView(ctx, aState.codeId);
+        return;
+      }
+    }
+  }
+
+  const state = userStates.get(userId);
   if (!state) return;
 
   if (state.step === 'waiting_amount') {
@@ -901,14 +1120,50 @@ bot.on('text', async (ctx) => {
       return;
     }
     const paymentId = Number(stmts.insertPayment.run(userId, amount).lastInsertRowid);
-    userStates.set(userId, { step: 'waiting_receipt', paymentId });
-    await ctx.reply(
-      `💳 برای شارژ ${amount.toLocaleString('fa-IR')} تومان، مبلغ را به کارت زیر واریز کن:\n\n` +
-      `\`${CARD_NUMBER}\`\n${CARD_OWNER}\n\n` +
-      `بعد از واریز، تصویر فیش یا متن تأیید رو در همین چت بفرست.\n` +
-      `⏰ مهلت ارسال: ۲۴ ساعت`,
-      { parse_mode: 'Markdown' }
+    const invoiceMsg = await ctx.reply(
+      buildInvoiceText(amount, null, null),
+      { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)]]) }
     );
+    userStates.set(userId, { step: 'waiting_receipt', paymentId, invoiceMsgId: invoiceMsg.message_id });
+    return;
+  }
+
+  if (state.step === 'waiting_discount_code') {
+    const payment = stmts.getPayment.get(state.paymentId);
+    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount);
+    if (!result.ok) {
+      await ctx.reply(result.err + '\nدوباره امتحان کن یا /start بزن.');
+      return;
+    }
+    stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
+    userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: state.invoiceMsgId, discountCodeId: result.dc.id });
+
+    if (result.dc.discount_percent === 100 || result.finalAmount === 0) {
+      // Auto-approve: 100% discount
+      stmts.setPaymentStatus.run('approved', state.paymentId);
+      stmts.credit.run(payment.amount, userId); // credit original amount
+      stmts.incDiscountUses.run(result.discountAmount, result.dc.id);
+      stmts.insertDiscountUse.run(result.dc.id, userId, state.paymentId, result.discountAmount);
+      userStates.delete(userId);
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, state.invoiceMsgId, undefined,
+          `✅ کد تخفیف ۱۰۰٪ اعمال شد!\n\nشارژ ${payment.amount.toLocaleString('fa-IR')} تومان به‌طور خودکار تایید شد.`,
+          { reply_markup: { inline_keyboard: [] } }
+        );
+      } catch {}
+      await ctx.reply(`✅ شارژ تایید شد!\n\n💰 ${payment.amount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n💳 موجودی جدید: ${getBalance(userId).toLocaleString('fa-IR')} تومان`);
+      return;
+    }
+
+    // Edit invoice to show discounted amount + "حذف کد تخفیف" button
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, state.invoiceMsgId, undefined,
+        buildInvoiceText(result.finalAmount, payment.amount, result.dc.discount_percent),
+        { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🗑️ حذف کد تخفیف', `disc_remove:${state.paymentId}`)]]).reply_markup }
+      );
+    } catch {}
+    await ctx.reply(`✅ کد تخفیف اعمال شد! ${result.dc.discount_percent}٪ تخفیف\nمبلغ نهایی: ${result.finalAmount.toLocaleString('fa-IR')} تومان\n\nحالا فیش واریز رو بفرست.`);
     return;
   }
 
@@ -921,9 +1176,79 @@ bot.on('text', async (ctx) => {
   }
 });
 
+/* ===== Admin discount code helper functions ===== */
+async function showDiscountConfirm(ctx, userId) {
+  const aState = adminStates.get(userId);
+  if (!aState) return;
+  const p = aState.partial;
+  const expiresStr = p.expires_at
+    ? `${Math.round((p.expires_at - Date.now()/1000) / 86400)} روز`
+    : 'بدون انقضا';
+  const usersStr = p.allowed_user_ids
+    ? `کاربران خاص: ${p.allowed_user_ids.join(', ')}`
+    : p.allowed_segments
+      ? `سگمنت‌ها: ${JSON.parse(p.allowed_segments).map(s => SEGMENTS[s] || s).join(', ')}`
+      : 'همه کاربران';
+  const summary =
+    `📋 خلاصه کد تخفیف:\n\n` +
+    `درصد تخفیف: ${p.discount_percent}%\n` +
+    `حداکثر مبلغ تخفیف: ${p.max_discount_amount !== null && p.max_discount_amount !== undefined ? p.max_discount_amount.toLocaleString('fa-IR') + ' تومان' : 'نامحدود'}\n` +
+    `حداکثر استفاده هر کاربر: ${p.max_uses_per_user === 999999 ? 'نامحدود' : p.max_uses_per_user}\n` +
+    `اعتبار: ${expiresStr}\n` +
+    `کاربران مجاز: ${usersStr}`;
+  await ctx.reply(summary, Markup.inlineKeyboard([
+    [Markup.button.callback('✅ ایجاد', 'admin:dc:save'), Markup.button.callback('❌ لغو', 'admin:dc:cancel')],
+  ]));
+}
+
+function buildSegmentKeyboard(selectedSegments = []) {
+  const segKeys = Object.keys(SEGMENTS);
+  const rows = [];
+  for (let i = 0; i < segKeys.length; i += 3) {
+    const row = segKeys.slice(i, i+3).map(k => {
+      const tick = selectedSegments.includes(k) ? '✅ ' : '';
+      return Markup.button.callback(`${tick}${SEGMENTS[k]}`, `admin:dc:seg:${k}`);
+    });
+    rows.push(row);
+  }
+  rows.push([Markup.button.callback('✅ تایید انتخاب‌ها', 'admin:dc:seg_confirm')]);
+  return Markup.inlineKeyboard(rows);
+}
+
+async function showDiscountCodeView(ctx, codeId) {
+  const dc = stmts.getDiscountById.get(codeId);
+  if (!dc) { await ctx.reply('کد تخفیف یافت نشد.'); return; }
+  const now = Date.now()/1000;
+  let expiresStr = 'بدون انقضا';
+  if (dc.expires_at) {
+    const diff = dc.expires_at - now;
+    if (diff <= 0) expiresStr = 'منقضی شده';
+    else expiresStr = `${Math.round(diff/86400)} روز دیگر`;
+  }
+  const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments).map(s => SEGMENTS[s] || s).join(', ') : null;
+  const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids).join(', ') : null;
+  const usersStr = segs || uids || 'همه کاربران';
+  const statusStr = dc.is_active ? '✅ فعال' : '❌ غیرفعال';
+  const text =
+    `🎟️ کد: ${dc.code}\n` +
+    `تخفیف: ${dc.discount_percent}%\n` +
+    `حداکثر مبلغ تخفیف: ${dc.max_discount_amount !== null ? dc.max_discount_amount.toLocaleString('fa-IR') + ' تومان' : 'نامحدود'}\n` +
+    `انقضا: ${expiresStr}\n` +
+    `حداکثر استفاده هر کاربر: ${dc.max_uses_per_user === 999999 ? 'نامحدود' : dc.max_uses_per_user}\n` +
+    `کاربران مجاز: ${usersStr}\n` +
+    `وضعیت: ${statusStr}\n` +
+    `کل استفاده: ${dc.total_uses} | کل تخفیف: ${dc.total_discounted_amount.toLocaleString('fa-IR')} تومان`;
+  await ctx.reply(text, Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ ویرایش درصد', `admin:dc:edit:${codeId}:percent`)],
+    [Markup.button.callback('🔄 تغییر وضعیت', `admin:dc:toggle:${codeId}`), Markup.button.callback('🗑️ حذف', `admin:dc:delete:${codeId}`)],
+    [Markup.button.callback('🔙 بازگشت', 'admin:dc:list:0')],
+  ]));
+}
+
 bot.on('callback_query', async (ctx) => {
   try {
     const data = ctx.callbackQuery.data || '';
+    const userId = ctx.from.id;
 
     // ── Cancel ──
     const c = data.match(/^cancel:([a-z0-9]+)$/i);
@@ -957,15 +1282,23 @@ bot.on('callback_query', async (ctx) => {
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       const currentModel = session.userModel || getUserModel(session.userId);
+      const uType = getUserType(session.userId);
       await ctx.answerCbQuery();
-      try {
-        await ctx.editMessageText(
+      let descText;
+      if (uType === 'admin' || uType === 'whitelist') {
+        descText =
           'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
           'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
           'Flash — متعادل (پیش‌فرض)\n' +
-          'Pro — دقیق‌ترین',
-          inflowModelKeyboard(currentModel, token)
-        );
+          'Pro — دقیق‌ترین';
+      } else {
+        descText =
+          'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+          'مدل سبک — سریع‌ترین، ارزان‌ترین\n' +
+          'مدل حرفه‌ای — متعادل (پیش‌فرض)';
+      }
+      try {
+        await ctx.editMessageText(descText, inflowModelKeyboard(currentModel, token, uType));
       } catch {}
       return;
     }
@@ -990,13 +1323,15 @@ bot.on('callback_query', async (ctx) => {
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
 
+      const uType = getUserType(session.userId);
+      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این مدل برای شما در دسترس نیست.', { show_alert: true });
+
       const cfg = MODEL_CONFIG[modelId];
       stmts.setModel.run(modelId, session.userId);
       session.userModel = modelId;
 
       // Refresh the cost box in the first message (Message1)
-      const isAdmin   = session.userId === ADMIN_ID;
-      const costBlock = buildCostBlock(session.durationSec, modelId, isAdmin);
+      const costBlock = buildCostBlock(session.durationSec, modelId, uType);
       try {
         await ctx.telegram.editMessageText(
           session.chatId, session.promptMsgId, undefined,
@@ -1008,8 +1343,9 @@ bot.on('callback_query', async (ctx) => {
       // Return the second message back to mode-select
       try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token)); } catch {}
 
-      // Fading toast notification (display duration is fixed by Telegram, not adjustable)
-      await ctx.answerCbQuery(`مدل انتخابی: ${cfg.label} — نرخ ${cfg.price.toLocaleString('fa-IR')} ت/دقیقه`);
+      const lbl = getModelLabel(modelId, uType);
+      const prc = getModelPrice(modelId, uType);
+      await ctx.answerCbQuery(`مدل انتخابی: ${lbl} — نرخ ${prc.toLocaleString('fa-IR')} ت/دقیقه`);
       return;
     }
 
@@ -1018,12 +1354,15 @@ bot.on('callback_query', async (ctx) => {
     if (sm) {
       const modelId = sm[1];
       if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
-      stmts.setModel.run(modelId, ctx.from.id);
-      const cfg = MODEL_CONFIG[modelId];
-      await ctx.answerCbQuery(`✅ مدل به ${cfg.label} تغییر یافت`);
+      const uType = getUserType(userId);
+      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این مدل برای شما در دسترس نیست.', { show_alert: true });
+      stmts.setModel.run(modelId, userId);
+      const lbl = getModelLabel(modelId, uType);
+      const prc = getModelPrice(modelId, uType);
+      await ctx.answerCbQuery(`✅ مدل به ${lbl} تغییر یافت`);
       try {
         await ctx.editMessageText(
-          `✅ مدل انتخابی: ${cfg.label}\n💰 نرخ: ${cfg.price.toLocaleString('fa-IR')} تومان/دقیقه`
+          `✅ مدل انتخابی: ${lbl}\n💰 نرخ: ${prc.toLocaleString('fa-IR')} تومان/دقیقه`
         );
       } catch {}
       return;
@@ -1031,8 +1370,7 @@ bot.on('callback_query', async (ctx) => {
 
     // ── Recharge (start wallet top-up) ──
     if (data === 'recharge') {
-      const userId = ctx.from.id;
-      if (userId === ADMIN_ID) return ctx.answerCbQuery();
+      if (isAdmin(userId)) return ctx.answerCbQuery();
       userStates.set(userId, { step: 'waiting_amount' });
       await ctx.answerCbQuery();
       await ctx.reply(
@@ -1043,26 +1381,67 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
+    // ── Discount apply ──
+    const da = data.match(/^disc_apply:(\d+)$/);
+    if (da) {
+      const paymentId = parseInt(da[1]);
+      const payment = stmts.getPayment.get(paymentId);
+      if (!payment || payment.user_id !== userId || payment.status !== 'pending') return ctx.answerCbQuery('پرداخت نامعتبر است.', { show_alert: true });
+      // جلوگیری از اعمال روی پرداختی که قبلاً تخفیف خورده (تخفیف روی تخفیف / خراب شدن مبلغ اصلی)
+      if (payment.discount_code_id) return ctx.answerCbQuery('برای این پرداخت قبلاً کد تخفیف ثبت شده. ابتدا حذفش کن.', { show_alert: true });
+      userStates.set(userId, { step: 'waiting_discount_code', paymentId, invoiceMsgId: ctx.callbackQuery.message.message_id });
+      await ctx.answerCbQuery('کد تخفیف خود را در این چت تایپ کنید:', { show_alert: true });
+      return;
+    }
+
+    // ── Discount remove ──
+    const dr = data.match(/^disc_remove:(\d+)$/);
+    if (dr) {
+      const paymentId = parseInt(dr[1]);
+      const payment = stmts.getPayment.get(paymentId);
+      if (!payment || payment.user_id !== userId || payment.status !== 'pending') return ctx.answerCbQuery('پرداخت نامعتبر است.', { show_alert: true });
+      stmts.clearPaymentDiscount.run(paymentId);
+      const updatedPayment = stmts.getPayment.get(paymentId);
+      const invoiceMsgId = ctx.callbackQuery.message.message_id;
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, invoiceMsgId, undefined,
+          buildInvoiceText(updatedPayment.amount, null, null),
+          { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)]]).reply_markup }
+        );
+      } catch {}
+      userStates.set(userId, { step: 'waiting_receipt', paymentId, invoiceMsgId });
+      await ctx.answerCbQuery('کد تخفیف حذف شد.');
+      return;
+    }
+
     // ── Admin: approve payment ──
     const ap = data.match(/^approve:(\d+)$/);
     if (ap) {
-      if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒');
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
       const paymentId = parseInt(ap[1]);
       const payment   = stmts.getPayment.get(paymentId);
       if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
 
+      const creditAmount = payment.original_amount || payment.amount;
       stmts.setPaymentStatus.run('approved', paymentId);
-      stmts.credit.run(payment.amount, payment.user_id);
+      stmts.credit.run(creditAmount, payment.user_id);
+
+      // If has discount, record use
+      if (payment.discount_code_id) {
+        const discAmt = (payment.original_amount || payment.amount) - payment.amount;
+        stmts.incDiscountUses.run(discAmt, payment.discount_code_id);
+        stmts.insertDiscountUse.run(payment.discount_code_id, payment.user_id, paymentId, discAmt);
+      }
 
       await ctx.answerCbQuery('✅ تایید شد');
-      await editAdminPaymentMsg(ctx, `✅ تایید شد — ${payment.amount.toLocaleString('fa-IR')} تومان`);
+      await editAdminPaymentMsg(ctx, `✅ تایید شد — ${creditAmount.toLocaleString('fa-IR')} تومان`);
 
       const newBalance = getBalance(payment.user_id);
       try {
         await ctx.telegram.sendMessage(
           payment.user_id,
           `✅ شارژ تایید شد!\n\n` +
-          `💰 ${payment.amount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n` +
+          `💰 ${creditAmount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n` +
           `💳 موجودی جدید: ${newBalance.toLocaleString('fa-IR')} تومان`
         );
       } catch {}
@@ -1072,7 +1451,7 @@ bot.on('callback_query', async (ctx) => {
     // ── Admin: reject payment ──
     const rj = data.match(/^reject:(\d+)$/);
     if (rj) {
-      if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('🔒');
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
       const paymentId = parseInt(rj[1]);
       const payment   = stmts.getPayment.get(paymentId);
       if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
@@ -1092,6 +1471,243 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
+    // ── Admin: discount code management ──
+    if (data === 'admin:dc') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const active = stmts.countActiveDiscountCodes.get().c;
+      const stats = stmts.sumDiscountStats.get();
+      const text =
+        `🎟️ مدیریت کدهای تخفیف\n\n` +
+        `کدهای فعال: ${active}\n` +
+        `کل استفاده: ${stats.uses} بار\n` +
+        `کل تخفیف داده‌شده: ${stats.amt.toLocaleString('fa-IR')} تومان`;
+      await ctx.answerCbQuery();
+      try {
+        await ctx.editMessageText(text, Markup.inlineKeyboard([
+          [Markup.button.callback('➕ کد جدید', 'admin:dc:create')],
+          [Markup.button.callback('📋 لیست کدها', 'admin:dc:list:0')],
+          [Markup.button.callback('🔙 بازگشت', 'admin:dc:back')],
+        ]));
+      } catch {}
+      return;
+    }
+
+    if (data === 'admin:dc:back') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      await ctx.answerCbQuery();
+      // Go back to dashboard
+      const d = {
+        users:   stmts.userCount.get().c,
+        voices:  stmts.voiceCount.get().c,
+        errors:  stmts.errorCount.get().c,
+        day:     stmts.dailyRevenue.get().s,
+        month:   stmts.monthlyRevenue.get().s,
+        total:   stmts.totalRevenue.get().s,
+      };
+      const orBal = await getOpenRouterBalance();
+      const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
+      const statsText =
+        `📊 داشبورد مدیریت\n\n` +
+        `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
+        `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
+        `❌ خطاها: ${d.errors.toLocaleString('fa-IR')}\n\n` +
+        `💰 درآمد امروز: ${d.day.toLocaleString('fa-IR')} تومان\n` +
+        `💰 درآمد این ماه: ${d.month.toLocaleString('fa-IR')} تومان\n` +
+        `💰 کل درآمد: ${d.total.toLocaleString('fa-IR')} تومان\n\n` +
+        `🔋 موجودی OpenRouter: ${orStr}`;
+      try { await ctx.editMessageText(statsText, Markup.inlineKeyboard([[Markup.button.callback('🎟️ کدهای تخفیف', 'admin:dc')]])); } catch {}
+      return;
+    }
+
+    const dcListM = data.match(/^admin:dc:list:(\d+)$/);
+    if (dcListM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      await ctx.answerCbQuery();
+      const page = parseInt(dcListM[1]);
+      const pageSize = 5;
+      const total = stmts.countDiscountCodes.get().c;
+      const codes = stmts.listDiscountCodes.all(pageSize, page * pageSize);
+      if (!codes || codes.length === 0) {
+        try {
+          await ctx.editMessageText('هیچ کد تخفیفی یافت نشد.', Markup.inlineKeyboard([
+            [Markup.button.callback('➕ کد جدید', 'admin:dc:create')],
+            [Markup.button.callback('🔙 بازگشت', 'admin:dc')],
+          ]));
+        } catch {}
+        return;
+      }
+      const rows = codes.map(dc => {
+        const statusIcon = dc.is_active ? '✅' : '❌';
+        return [Markup.button.callback(
+          `${dc.code} — ${dc.discount_percent}% — ${statusIcon}فعال — ${dc.total_uses} استفاده`,
+          `admin:dc:view:${dc.id}`
+        )];
+      });
+      const navRow = [];
+      if (page > 0) navRow.push(Markup.button.callback('⬅️ قبلی', `admin:dc:list:${page-1}`));
+      if ((page+1) * pageSize < total) navRow.push(Markup.button.callback('بعدی ➡️', `admin:dc:list:${page+1}`));
+      if (navRow.length) rows.push(navRow);
+      rows.push([Markup.button.callback('🔙 بازگشت', 'admin:dc')]);
+      try { await ctx.editMessageText(`📋 لیست کدهای تخفیف (${total} عدد):`, Markup.inlineKeyboard(rows)); } catch {}
+      return;
+    }
+
+    const dcViewM = data.match(/^admin:dc:view:(\d+)$/);
+    if (dcViewM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      await ctx.answerCbQuery();
+      await showDiscountCodeView(ctx, parseInt(dcViewM[1]));
+      return;
+    }
+
+    if (data === 'admin:dc:create') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      adminStates.set(userId, { step: 'admin_dc_percent', partial: {} });
+      await ctx.answerCbQuery();
+      await ctx.reply('درصد تخفیف را وارد کن (عدد بین ۱ تا ۱۰۰):');
+      return;
+    }
+
+    if (data === 'admin:dc:cancel') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      adminStates.delete(userId);
+      await ctx.answerCbQuery('لغو شد.');
+      try { await ctx.editMessageText('❌ ایجاد کد تخفیف لغو شد.'); } catch {}
+      return;
+    }
+
+    if (data === 'admin:dc:save') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const aState = adminStates.get(userId);
+      if (!aState || !aState.partial) return ctx.answerCbQuery('وضعیت نامعتبر.');
+      const p = aState.partial;
+      const code = genDiscountCode();
+      stmts.insertDiscountCode.run(
+        code,
+        p.discount_percent,
+        p.max_discount_amount ?? null,
+        p.expires_at ?? null,
+        p.max_uses_per_user ?? 1,
+        p.allowed_segments ?? null,
+        p.allowed_user_ids ? JSON.stringify(p.allowed_user_ids) : null,
+        userId
+      );
+      adminStates.delete(userId);
+      await ctx.answerCbQuery('✅ کد ایجاد شد');
+      try { await ctx.editMessageText(`✅ کد تخفیف ایجاد شد!\n\nکد: \`${code}\``, { parse_mode: 'Markdown' }); } catch {
+        await ctx.reply(`✅ کد تخفیف ایجاد شد!\n\nکد: \`${code}\``, { parse_mode: 'Markdown' });
+      }
+      return;
+    }
+
+    // Segment selection
+    const dcSegM = data.match(/^admin:dc:seg:(.+)$/);
+    if (dcSegM && dcSegM[1] !== 'confirm') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const segKey = dcSegM[1];
+      const aState = adminStates.get(userId);
+      if (!aState || aState.step !== 'admin_dc_segments') return ctx.answerCbQuery();
+      if (!aState.partial.selectedSegments) aState.partial.selectedSegments = [];
+      const idx = aState.partial.selectedSegments.indexOf(segKey);
+      if (idx >= 0) aState.partial.selectedSegments.splice(idx, 1);
+      else aState.partial.selectedSegments.push(segKey);
+      adminStates.set(userId, aState);
+      await ctx.answerCbQuery();
+      try { await ctx.editMessageText('سگمنت‌های مورد نظر را انتخاب کن:', buildSegmentKeyboard(aState.partial.selectedSegments)); } catch {}
+      return;
+    }
+
+    if (data === 'admin:dc:seg_confirm') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const aState = adminStates.get(userId);
+      if (!aState) return ctx.answerCbQuery();
+      const segs = aState.partial.selectedSegments || [];
+      aState.partial.allowed_segments = segs.length > 0 ? JSON.stringify(segs) : null;
+      aState.partial.allowed_user_ids = null;
+      aState.step = 'admin_dc_confirm';
+      adminStates.set(userId, aState);
+      await ctx.answerCbQuery();
+      await showDiscountConfirm(ctx, userId);
+      return;
+    }
+
+    // Admin discount users type selection
+    const dcUsersM = data.match(/^admin:dc:users:(all|segments|specific)$/);
+    if (dcUsersM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const type = dcUsersM[1];
+      const aState = adminStates.get(userId);
+      if (!aState) return ctx.answerCbQuery();
+      await ctx.answerCbQuery();
+      if (type === 'all') {
+        aState.partial.allowed_segments = null;
+        aState.partial.allowed_user_ids = null;
+        aState.step = 'admin_dc_confirm';
+        adminStates.set(userId, aState);
+        await showDiscountConfirm(ctx, userId);
+      } else if (type === 'segments') {
+        aState.step = 'admin_dc_segments';
+        aState.partial.selectedSegments = [];
+        adminStates.set(userId, aState);
+        await ctx.reply('سگمنت‌های مورد نظر را انتخاب کن:', buildSegmentKeyboard([]));
+      } else if (type === 'specific') {
+        aState.step = 'admin_dc_user_ids';
+        adminStates.set(userId, aState);
+        await ctx.reply('آیدی عددی کاربران را وارد کن (با فاصله یا خط جدید جدا کن):');
+      }
+      return;
+    }
+
+    // Toggle discount code
+    const dcToggleM = data.match(/^admin:dc:toggle:(\d+)$/);
+    if (dcToggleM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const codeId = parseInt(dcToggleM[1]);
+      stmts.toggleDiscountCode.run(codeId);
+      await ctx.answerCbQuery('وضعیت تغییر کرد.');
+      await showDiscountCodeView(ctx, codeId);
+      return;
+    }
+
+    // Delete discount code
+    const dcDeleteM = data.match(/^admin:dc:delete:(\d+)(?::confirm)?$/);
+    if (dcDeleteM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const codeId = parseInt(dcDeleteM[1]);
+      if (!data.includes(':confirm')) {
+        // First click: ask confirm
+        await ctx.answerCbQuery();
+        try {
+          await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+            [Markup.button.callback('⚠️ تایید حذف', `admin:dc:delete:${codeId}:confirm`)],
+            [Markup.button.callback('🔙 لغو', `admin:dc:view:${codeId}`)],
+          ]).reply_markup);
+        } catch {}
+        return;
+      }
+      // Confirmed delete
+      stmts.deleteDiscountCode.run(codeId);
+      await ctx.answerCbQuery('🗑️ حذف شد.');
+      try { await ctx.editMessageText('🗑️ کد تخفیف حذف شد.', Markup.inlineKeyboard([[Markup.button.callback('🔙 لیست کدها', 'admin:dc:list:0')]])); } catch {}
+      return;
+    }
+
+    // Edit discount code field
+    const dcEditM = data.match(/^admin:dc:edit:(\d+):(\w+)$/);
+    if (dcEditM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const codeId = parseInt(dcEditM[1]);
+      const field = dcEditM[2];
+      if (field === 'percent') {
+        adminStates.set(userId, { step: 'admin_dc_edit_percent', codeId });
+        await ctx.answerCbQuery();
+        await ctx.reply('درصد تخفیف جدید را وارد کن (۱ تا ۱۰۰):');
+      } else {
+        await ctx.answerCbQuery('فیلد پشتیبانی نمی‌شود.');
+      }
+      return;
+    }
+
     // ── Process type ──
     const p = data.match(/^ptype:(full|clean|summary|meeting):([a-z0-9]+)$/i);
     if (p) {
@@ -1100,14 +1716,14 @@ bot.on('callback_query', async (ctx) => {
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
 
-      const userId    = session.userId;
-      const userModel = session.userModel || getUserModel(userId);
-      const isAdmin   = userId === ADMIN_ID;
+      const sessUserId = session.userId;
+      const userModel  = session.userModel || getUserModel(sessUserId);
+      const uType      = getUserType(sessUserId);
 
       // Balance check BEFORE locking — keep the keyboard so user can switch model / recharge
-      if (!isAdmin && session.durationSec) {
-        const cost    = calcCost(session.durationSec, userModel);
-        const balance = getBalance(userId);
+      if (!isAdmin(sessUserId) && session.durationSec) {
+        const cost    = calcCost(session.durationSec, userModel, uType);
+        const balance = getBalance(sessUserId);
         if (balance < cost) {
           await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
           await ctx.reply(
@@ -1120,26 +1736,24 @@ bot.on('callback_query', async (ctx) => {
         }
       }
 
-      // Concurrency cap: keep the keyboard so the user can retry after one finishes.
-      // رزرو اسلات به‌صورت سنکرون (قبل از هر await) تا دو کلیک هم‌زمان از سقف عبور نکنند.
-      if (jobCount(userId) >= MAX_CONCURRENT_JOBS) {
+      // Concurrency cap
+      if (jobCount(sessUserId) >= MAX_CONCURRENT_JOBS) {
         return ctx.answerCbQuery(
           `ظرفیت پردازش هم‌زمان شما پر شده (${MAX_CONCURRENT_JOBS.toLocaleString('fa-IR')} فایل). لطفاً تا اتمام یکی صبر کنید.`,
           { show_alert: true }
         );
       }
-      session.step = 'processing'; // قفل ضدّ دابل‌کلیک
-      incJob(userId);              // رزرو اسلات پردازش هم‌زمان
+      session.step = 'processing';
+      incJob(sessUserId);
       const jobStart = Date.now();
-      log(`🚀 job start  uid=${userId} type=${type} model=${userModel} dur=${session.durationSec||'?'}s jobs=${jobCount(userId)}`);
+      log(`🚀 job start  uid=${sessUserId} type=${type} model=${userModel} dur=${session.durationSec||'?'}s jobs=${jobCount(sessUserId)}`);
 
       let waiting;
       try {
         await ctx.answerCbQuery('در حال پردازش...');
-        // Remove the mode-select message (with its buttons) entirely
         try { await ctx.deleteMessage(); } catch {}
-        // Trim the first message down to just the cost box (a useful log), drop the question
-        const costBlock = buildCostBlock(session.durationSec, userModel, isAdmin);
+        // Trim the first message to cost box with ptypeLabel
+        const costBlock = buildCostBlock(session.durationSec, userModel, uType, PTYPE_LABELS[type]);
         try {
           if (costBlock) {
             await ctx.telegram.editMessageText(session.chatId, session.promptMsgId, undefined, costBlock, { parse_mode: 'HTML' });
@@ -1149,20 +1763,20 @@ bot.on('callback_query', async (ctx) => {
         } catch {}
         waiting = await ctx.reply('⏳ در حال پردازش...', replyTo(session.voiceMsgId));
       } catch (e) {
-        logErr(`❌ ptype prep error uid=${userId}:`, e.message);
-        decJob(userId);
+        logErr(`❌ ptype prep error uid=${sessUserId}:`, e.message);
+        decJob(sessUserId);
         return;
       }
 
-      // Detach the heavy work so the long-polling loop stays free → چند فایل هم‌زمان پردازش می‌شوند
+      // Detach the heavy work
       (async () => {
         try {
           let text;
           try {
             text = await callAI(session, type) || 'متنی برنگشت.';
           } catch (err) {
-            logErr(`❌ all AI failed  uid=${userId} model=${userModel} elapsed=${Date.now()-jobStart}ms:`, err.message);
-            stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 0);
+            logErr(`❌ all AI failed  uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms:`, err.message);
+            stmts.insertUsage.run(sessUserId, userModel, session.durationSec || null, 0, type, 0);
             const m = err.message || '';
             let errMsg = '😕 پردازش ناموفق بود. دوباره تلاش کن.';
             if (err instanceof CreditError) {
@@ -1181,17 +1795,17 @@ bot.on('callback_query', async (ctx) => {
           }
 
           // Deduct balance on success (non-admin)
-          if (userId !== ADMIN_ID && session.durationSec) {
-            const cost = calcCost(session.durationSec, userModel);
+          if (!isAdmin(sessUserId) && session.durationSec) {
+            const cost = calcCost(session.durationSec, userModel, uType);
             if (cost > 0) {
-              stmts.deduct.run(cost, userId);
-              stmts.insertUsage.run(userId, userModel, session.durationSec, cost, type, 1);
+              stmts.deduct.run(cost, sessUserId);
+              stmts.insertUsage.run(sessUserId, userModel, session.durationSec, cost, type, 1);
             }
           } else {
-            stmts.insertUsage.run(userId, userModel, session.durationSec || null, 0, type, 1);
+            stmts.insertUsage.run(sessUserId, userModel, session.durationSec || null, 0, type, 1);
           }
 
-          log(`✅ job done   uid=${userId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
+          log(`✅ job done   uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
           const parts = splitForTelegram(text);
           if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
@@ -1208,14 +1822,13 @@ bot.on('callback_query', async (ctx) => {
                 `📏 خروجی طولانی است (${text.length.toLocaleString('fa-IR')} کاراکتر).\n\nچطور میخوای دریافتش کنی؟`
               );
             } catch {}
-            // پیام دوم به پیام «خروجی طولانی است…» ریپلای می‌شود
             await ctx.reply('یکی از گزینه‌های زیر رو انتخاب کن:', { ...replyTo(waiting.message_id), ...createOutputFormatKeyboard(token) });
           }
         } catch (e) {
-          logErr(`❌ job pipeline error uid=${userId}:`, e.message);
+          logErr(`❌ job pipeline error uid=${sessUserId}:`, e.message);
         } finally {
-          decJob(userId);
-          log(`🏁 job freed  uid=${userId} remaining=${jobCount(userId)}`);
+          decJob(sessUserId);
+          log(`🏁 job freed  uid=${sessUserId} remaining=${jobCount(sessUserId)}`);
         }
       })();
       return;
@@ -1234,7 +1847,6 @@ bot.on('callback_query', async (ctx) => {
       const charCount  = session.resultText.length.toLocaleString('fa-IR');
       const methodName = format === 'messages' ? 'پیام‌های جداگانه' : 'فایل';
 
-      // Remove the format-select message (with its buttons) entirely
       try { await ctx.deleteMessage(); } catch {}
 
       const rt = replyTo(session.voiceMsgId);
@@ -1251,7 +1863,6 @@ bot.on('callback_query', async (ctx) => {
         }
       }
 
-      // Trim the "long output" message down to a concise delivered note
       try {
         await ctx.telegram.editMessageText(
           session.resultMsgChatId, session.resultMsgId, undefined,
