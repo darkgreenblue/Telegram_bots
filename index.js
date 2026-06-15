@@ -158,12 +158,12 @@ function getBalance(tid)      { return getUser(tid)?.balance ?? 0; }
 /* ===== 2) Model config ===== */
 const MODEL_CONFIG = {
   'google/gemini-2.5-flash-lite': {
-    adminLabel: 'Flash Lite', label: 'مدل سبک',
+    adminLabel: 'Flash Lite', label: 'پردازنده سبک',
     adminPrice: 500, price: 300,
     fallback: true, usdPerMin: 0.0003,
   },
   'google/gemini-2.5-flash': {
-    adminLabel: 'Flash', label: 'مدل حرفه‌ای',
+    adminLabel: 'Flash', label: 'پردازنده حرفه‌ای',
     adminPrice: 1000, price: 900,
     fallback: true, usdPerMin: 0.0007,
   },
@@ -760,20 +760,30 @@ function genDiscountCode() {
   return `DISC-${s}`;
 }
 
-function validateDiscount(code, userId, amount) {
+// تطبیق کاربر با لیست کاربران مجاز: آیتم‌ها می‌توانند آیدی عددی یا یوزرنیم (رشته) باشند
+function matchesUserEntries(entries, userId, username) {
+  if (!entries) return false;
+  const uname = (username || '').toLowerCase();
+  return entries.some(e => {
+    if (typeof e === 'number') return e === userId;
+    return uname && String(e).toLowerCase() === uname;
+  });
+}
+
+function validateDiscount(code, userId, amount, username) {
   const dc = stmts.getDiscountCode.get(code.trim().toUpperCase());
   if (!dc) return { ok: false, err: '❌ کد تخفیف معتبر نیست.' };
   if (dc.expires_at && dc.expires_at < Date.now()/1000) return { ok: false, err: '❌ کد تخفیف منقضی شده است.' };
   // استفاده‌های ثبت‌شده + پرداخت‌های معلقی که همین کد را دارند (تا با چند پرداخت هم‌زمان سقف دور زده نشود)
   const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
   if (uses >= dc.max_uses_per_user) return { ok: false, err: '❌ سقف استفاده از این کد را گذشته‌ای.' };
+  // کاربران مجاز: اگر نه سگمنتی و نه کاربری تعیین شده باشد، کد برای هیچ‌کس فعال نیست
   const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments) : null;
   const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids) : null;
-  if (segs || uids) {
-    let ok = segs?.some(s => isUserInSegment(userId, s));
-    if (!ok && uids) ok = uids.includes(userId);
-    if (!ok) return { ok: false, err: '❌ شما مجاز به استفاده از این کد نیستید.' };
-  }
+  let allowed = false;
+  if (segs?.some(s => isUserInSegment(userId, s))) allowed = true;
+  if (!allowed && matchesUserEntries(uids, userId, username)) allowed = true;
+  if (!allowed) return { ok: false, err: '❌ شما مجاز به استفاده از این کد نیستید.' };
   let disc = Math.round(amount * dc.discount_percent / 100);
   if (dc.max_discount_amount !== null && disc > dc.max_discount_amount) disc = dc.max_discount_amount;
   return { ok: true, dc, discountAmount: disc, finalAmount: Math.max(0, amount - disc) };
@@ -814,7 +824,7 @@ bot.start(async (ctx) => {
     giftLine +
     `📋 راهنما:\n` +
     `• یک ویس بفرست تا شروع کنیم 🎤\n` +
-    `• با دکمه «🔄 تعویض پردازنده» مدل هوش مصنوعی و نرخ پردازش رو انتخاب کن\n` +
+    `• با دکمه «🔄 تعویض پردازنده» پردازنده هوش مصنوعی و نرخ پردازش رو انتخاب کن\n` +
     `• با دکمه «👛 کیف پول» موجودیت رو ببین و شارژ کن`,
     keyboard
   );
@@ -828,15 +838,15 @@ bot.hears('🔄 تعویض پردازنده', async (ctx) => {
   let descText;
   if (userType === 'admin' || userType === 'whitelist') {
     descText =
-      'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+      'پردازنده هوش مصنوعی رو انتخاب کن:\n\n' +
       'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
       'Flash — متعادل (پیش‌فرض)\n' +
       'Pro — دقیق‌ترین';
   } else {
     descText =
-      'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
-      'مدل سبک — سریع‌ترین، ارزان‌ترین\n' +
-      'مدل حرفه‌ای — متعادل (پیش‌فرض)';
+      'پردازنده هوش مصنوعی رو انتخاب کن:\n\n' +
+      'پردازنده سبک — سریع‌ترین، ارزان‌ترین\n' +
+      'پردازنده حرفه‌ای — متعادل (پیش‌فرض)';
   }
   await ctx.reply(descText, modelSelectionKeyboard(currentModel, userType));
 });
@@ -854,26 +864,8 @@ bot.hears('👛 کیف پول', async (ctx) => {
 
 bot.hears('📊 داشبورد', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
-  const d = {
-    users:   stmts.userCount.get().c,
-    voices:  stmts.voiceCount.get().c,
-    errors:  stmts.errorCount.get().c,
-    day:     stmts.dailyRevenue.get().s,
-    month:   stmts.monthlyRevenue.get().s,
-    total:   stmts.totalRevenue.get().s,
-  };
-  const orBal = await getOpenRouterBalance();
-  const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
-  const statsText =
-    `📊 داشبورد مدیریت\n\n` +
-    `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
-    `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
-    `❌ خطاها: ${d.errors.toLocaleString('fa-IR')}\n\n` +
-    `💰 درآمد امروز: ${d.day.toLocaleString('fa-IR')} تومان\n` +
-    `💰 درآمد این ماه: ${d.month.toLocaleString('fa-IR')} تومان\n` +
-    `💰 کل درآمد: ${d.total.toLocaleString('fa-IR')} تومان\n\n` +
-    `🔋 موجودی OpenRouter: ${orStr}`;
-  await ctx.reply(statsText, Markup.inlineKeyboard([[Markup.button.callback('🎟️ کدهای تخفیف', 'admin:dc')]]));
+  const v = await dashboardView();
+  await ctx.reply(v.text, v.kb);
 });
 
 bot.on(['voice', 'audio'], async (ctx) => {
@@ -1017,96 +1009,66 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Admin text steps take priority
+  // ── Admin: ورودی متنی فیلدهای پنل تخفیف (روی همان پیام پنل ادیت می‌شود) ──
   if (isAdmin(userId)) {
-    const aState = adminStates.get(userId);
-    if (aState) {
+    const a = adminStates.get(userId);
+    if (a && a.step) {
       const text = ctx.message.text.trim();
+      // پس از دریافت مقدار: پیام تایپ‌شده ادمین پاک و پنل به صفحه تنظیمات برمی‌گردد
+      const backToSettings = async () => {
+        a.step = null;
+        adminStates.set(userId, a);
+        try { await ctx.deleteMessage(); } catch {}
+        if (a.panel) await dcShowAt(a.panel.chatId, a.panel.msgId, dcSettingsView(userId));
+      };
 
-      // Discount code creation wizard
-      if (aState.step === 'admin_dc_percent') {
+      if (a.step === 'dc_in_percent') {
         const n = parseInt(normalizeDigits(text));
-        if (isNaN(n) || n < 1 || n > 100) {
-          await ctx.reply('عدد بین ۱ تا ۱۰۰ وارد کن:');
-          return;
-        }
-        aState.partial.discount_percent = n;
-        aState.step = 'admin_dc_max_amount';
-        adminStates.set(userId, aState);
-        await ctx.reply('حداکثر مبلغ تخفیف (تومان)، یا «نامحدود»:');
+        if (isNaN(n) || n < 1 || n > 100) { await ctx.reply('عدد بین ۱ تا ۱۰۰ بفرست:'); return; }
+        a.partial.discount_percent = n;
+        await backToSettings();
         return;
       }
-
-      if (aState.step === 'admin_dc_max_amount') {
-        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
-          aState.partial.max_discount_amount = null;
-        } else {
-          const n = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''));
-          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) وارد کن یا «نامحدود» بنویس:'); return; }
-          aState.partial.max_discount_amount = n;
-        }
-        aState.step = 'admin_dc_max_uses';
-        adminStates.set(userId, aState);
-        await ctx.reply('حداکثر دفعات استفاده هر کاربر، یا «نامحدود»:');
+      if (a.step === 'dc_in_maxamt') {
+        const n = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''));
+        if (isNaN(n) || n < 1) { await ctx.reply('یک مبلغ معتبر (تومان) بفرست:'); return; }
+        a.partial.max_discount_amount = n;
+        await backToSettings();
         return;
       }
-
-      if (aState.step === 'admin_dc_max_uses') {
-        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
-          aState.partial.max_uses_per_user = 999999;
-        } else {
-          const n = parseInt(normalizeDigits(text));
-          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) وارد کن یا «نامحدود» بنویس:'); return; }
-          aState.partial.max_uses_per_user = n;
-        }
-        aState.step = 'admin_dc_expires';
-        adminStates.set(userId, aState);
-        await ctx.reply('تعداد روزهای اعتبار، یا «نامحدود»:');
+      if (a.step === 'dc_in_uses') {
+        const n = parseInt(normalizeDigits(text));
+        if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر (حداقل ۱) بفرست:'); return; }
+        a.partial.max_uses_per_user = n;
+        await backToSettings();
         return;
       }
-
-      if (aState.step === 'admin_dc_expires') {
-        if (text === 'نامحدود' || text.toLowerCase() === 'unlimited') {
-          aState.partial.expires_at = null;
-        } else {
-          const n = parseInt(normalizeDigits(text));
-          if (isNaN(n) || n < 1) { await ctx.reply('عدد معتبر وارد کن یا «نامحدود» بنویس:'); return; }
-          aState.partial.expires_at = Math.floor(Date.now()/1000) + n * 86400;
-        }
-        aState.step = 'admin_dc_users';
-        adminStates.set(userId, aState);
-        await ctx.reply(
-          'چه کاربرانی مجاز به استفاده هستند؟',
-          Markup.inlineKeyboard([
-            [Markup.button.callback('همه کاربران', 'admin:dc:users:all')],
-            [Markup.button.callback('سگمنت‌های آماده', 'admin:dc:users:segments')],
-            [Markup.button.callback('کاربران خاص', 'admin:dc:users:specific')],
-          ])
-        );
+      if (a.step === 'dc_in_expiry') {
+        const n = parseInt(normalizeDigits(text));
+        if (isNaN(n) || n < 1) { await ctx.reply('تعداد روز معتبر بفرست:'); return; }
+        a.partial.expires_at = Math.floor(Date.now()/1000) + n * 86400;
+        await backToSettings();
         return;
       }
-
-      if (aState.step === 'admin_dc_user_ids') {
+      if (a.step === 'dc_in_users') {
         const parts = text.split(/[\s,،\n]+/).map(s => s.trim()).filter(Boolean);
-        const ids = parts.map(s => { const n = parseInt(s); return isNaN(n) ? null : n; }).filter(Boolean);
-        aState.partial.allowed_user_ids = ids.length > 0 ? ids : null;
-        aState.partial.allowed_segments = null;
-        aState.step = 'admin_dc_confirm';
-        adminStates.set(userId, aState);
-        await showDiscountConfirm(ctx, userId);
-        return;
-      }
-
-      if (aState.step === 'admin_dc_edit_percent') {
-        const n = parseInt(normalizeDigits(text));
-        if (isNaN(n) || n < 1 || n > 100) { await ctx.reply('عدد بین ۱ تا ۱۰۰ وارد کن:'); return; }
-        db.prepare('UPDATE discount_codes SET discount_percent=? WHERE id=?').run(n, aState.codeId);
-        adminStates.delete(userId);
-        await ctx.reply('✅ درصد تخفیف بروز شد.');
-        await showDiscountCodeView(ctx, aState.codeId);
+        const fresh = [];
+        for (const tok of parts) {
+          const cleaned = tok.replace(/^@/, '');
+          if (/^\d+$/.test(cleaned)) fresh.push(parseInt(cleaned));
+          else if (cleaned) fresh.push(cleaned.toLowerCase());
+        }
+        if (!fresh.length) { await ctx.reply('حداقل یک آیدی عددی یا یوزرنیم تلگرامی بفرست:'); return; }
+        // ادغام با موارد قبلی و حذف تکراری‌ها
+        const map = new Map();
+        for (const e of [...(a.partial.userEntries || []), ...fresh]) map.set(String(e).toLowerCase(), e);
+        a.partial.userEntries = [...map.values()];
+        await backToSettings();
         return;
       }
     }
+    // ادمین در حال کار با پنل است ولی منتظر ورودی متنی نیست → نادیده بگیر
+    if (a) return;
   }
 
   const state = userStates.get(userId);
@@ -1131,7 +1093,7 @@ bot.on('text', async (ctx) => {
   if (state.step === 'waiting_discount_code') {
     const payment = stmts.getPayment.get(state.paymentId);
     if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
-    const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount);
+    const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount, ctx.from.username);
     if (!result.ok) {
       await ctx.reply(result.err + '\nدوباره امتحان کن یا /start بزن.');
       return;
@@ -1176,73 +1138,240 @@ bot.on('text', async (ctx) => {
   }
 });
 
-/* ===== Admin discount code helper functions ===== */
-async function showDiscountConfirm(ctx, userId) {
-  const aState = adminStates.get(userId);
-  if (!aState) return;
-  const p = aState.partial;
-  const expiresStr = p.expires_at
-    ? `${Math.round((p.expires_at - Date.now()/1000) / 86400)} روز`
-    : 'بدون انقضا';
-  const usersStr = p.allowed_user_ids
-    ? `کاربران خاص: ${p.allowed_user_ids.join(', ')}`
-    : p.allowed_segments
-      ? `سگمنت‌ها: ${JSON.parse(p.allowed_segments).map(s => SEGMENTS[s] || s).join(', ')}`
-      : 'همه کاربران';
-  const summary =
-    `📋 خلاصه کد تخفیف:\n\n` +
-    `درصد تخفیف: ${p.discount_percent}%\n` +
-    `حداکثر مبلغ تخفیف: ${p.max_discount_amount !== null && p.max_discount_amount !== undefined ? p.max_discount_amount.toLocaleString('fa-IR') + ' تومان' : 'نامحدود'}\n` +
-    `حداکثر استفاده هر کاربر: ${p.max_uses_per_user === 999999 ? 'نامحدود' : p.max_uses_per_user}\n` +
-    `اعتبار: ${expiresStr}\n` +
-    `کاربران مجاز: ${usersStr}`;
-  await ctx.reply(summary, Markup.inlineKeyboard([
-    [Markup.button.callback('✅ ایجاد', 'admin:dc:save'), Markup.button.callback('❌ لغو', 'admin:dc:cancel')],
-  ]));
+/* ===== Admin discount panel (button-driven, in-place SPA) =====
+   کل سفر مدیریت تخفیف روی همان یک پیام ادیت می‌شود؛ هر صفحه دکمه بازگشت دارد. */
+const DC_PAGE_SIZE = 6;
+const B = (t, d) => Markup.button.callback(t, d);
+const fmtToman = n => `${Number(n).toLocaleString('fa-IR')} تومان`;
+
+function dcDaysLeft(expires_at) {
+  if (!expires_at) return null;
+  return Math.ceil((expires_at - Date.now()/1000) / 86400);
 }
 
-function buildSegmentKeyboard(selectedSegments = []) {
-  const segKeys = Object.keys(SEGMENTS);
-  const rows = [];
-  for (let i = 0; i < segKeys.length; i += 3) {
-    const row = segKeys.slice(i, i+3).map(k => {
-      const tick = selectedSegments.includes(k) ? '✅ ' : '';
-      return Markup.button.callback(`${tick}${SEGMENTS[k]}`, `admin:dc:seg:${k}`);
-    });
-    rows.push(row);
-  }
-  rows.push([Markup.button.callback('✅ تایید انتخاب‌ها', 'admin:dc:seg_confirm')]);
-  return Markup.inlineKeyboard(rows);
+// خلاصه کاربران مجاز برای نمایش (سگمنت‌ها + آیدی/یوزرنیم‌ها)
+function dcUsersSummary(segments, userEntries) {
+  const parts = [];
+  if (segments?.length)   parts.push(segments.map(s => SEGMENTS[s] || s).join('، '));
+  if (userEntries?.length) parts.push(userEntries.map(e => typeof e === 'number' ? String(e) : '@' + e).join('، '));
+  return parts.length ? parts.join(' + ') : null;
 }
 
-async function showDiscountCodeView(ctx, codeId) {
-  const dc = stmts.getDiscountById.get(codeId);
-  if (!dc) { await ctx.reply('کد تخفیف یافت نشد.'); return; }
-  const now = Date.now()/1000;
-  let expiresStr = 'بدون انقضا';
-  if (dc.expires_at) {
-    const diff = dc.expires_at - now;
-    if (diff <= 0) expiresStr = 'منقضی شده';
-    else expiresStr = `${Math.round(diff/86400)} روز دیگر`;
-  }
-  const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments).map(s => SEGMENTS[s] || s).join(', ') : null;
-  const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids).join(', ') : null;
-  const usersStr = segs || uids || 'همه کاربران';
-  const statusStr = dc.is_active ? '✅ فعال' : '❌ غیرفعال';
+// نمایش یک view (text + keyboard) با ادیت پیام جاری کال‌بک
+async function dcShow(ctx, view) {
+  if (!view) { try { await ctx.answerCbQuery('یافت نشد'); } catch {} return; }
+  const opts = { reply_markup: view.kb.reply_markup };
+  if (view.html) opts.parse_mode = 'HTML';
+  try { await ctx.editMessageText(view.text, opts); } catch {}
+}
+
+// نمایش یک view با ادیت پیامی مشخص (برای مسیر تایپ متن)
+async function dcShowAt(chatId, msgId, view) {
+  if (!view) return;
+  const opts = { reply_markup: view.kb.reply_markup };
+  if (view.html) opts.parse_mode = 'HTML';
+  try { await bot.telegram.editMessageText(chatId, msgId, undefined, view.text, opts); } catch {}
+}
+
+// ── Dashboard (مشترک بین دکمه «داشبورد» و بازگشت از پنل تخفیف) ──
+async function dashboardView() {
+  const d = {
+    users:  stmts.userCount.get().c,
+    voices: stmts.voiceCount.get().c,
+    errors: stmts.errorCount.get().c,
+    day:    stmts.dailyRevenue.get().s,
+    month:  stmts.monthlyRevenue.get().s,
+    total:  stmts.totalRevenue.get().s,
+  };
+  const orBal = await getOpenRouterBalance();
+  const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
   const text =
-    `🎟️ کد: ${dc.code}\n` +
-    `تخفیف: ${dc.discount_percent}%\n` +
-    `حداکثر مبلغ تخفیف: ${dc.max_discount_amount !== null ? dc.max_discount_amount.toLocaleString('fa-IR') + ' تومان' : 'نامحدود'}\n` +
-    `انقضا: ${expiresStr}\n` +
-    `حداکثر استفاده هر کاربر: ${dc.max_uses_per_user === 999999 ? 'نامحدود' : dc.max_uses_per_user}\n` +
-    `کاربران مجاز: ${usersStr}\n` +
-    `وضعیت: ${statusStr}\n` +
-    `کل استفاده: ${dc.total_uses} | کل تخفیف: ${dc.total_discounted_amount.toLocaleString('fa-IR')} تومان`;
-  await ctx.reply(text, Markup.inlineKeyboard([
-    [Markup.button.callback('✏️ ویرایش درصد', `admin:dc:edit:${codeId}:percent`)],
-    [Markup.button.callback('🔄 تغییر وضعیت', `admin:dc:toggle:${codeId}`), Markup.button.callback('🗑️ حذف', `admin:dc:delete:${codeId}`)],
-    [Markup.button.callback('🔙 بازگشت', 'admin:dc:list:0')],
-  ]));
+    `📊 داشبورد مدیریت\n\n` +
+    `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
+    `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
+    `❌ خطاها: ${d.errors.toLocaleString('fa-IR')}\n\n` +
+    `💰 درآمد امروز: ${fmtToman(d.day)}\n` +
+    `💰 درآمد این ماه: ${fmtToman(d.month)}\n` +
+    `💰 کل درآمد: ${fmtToman(d.total)}\n\n` +
+    `🔋 موجودی OpenRouter: ${orStr}`;
+  return { text, kb: Markup.inlineKeyboard([[B('🎟️ کدهای تخفیف', 'dc:panel')]]) };
+}
+
+// ── صفحه اصلی مدیریت تخفیف (آمار) ──
+function dcPanelView() {
+  const total  = stmts.countDiscountCodes.get().c;
+  const active = stmts.countActiveDiscountCodes.get().c;
+  const stats  = stmts.sumDiscountStats.get();
+  const text =
+    `🎟️ مدیریت کدهای تخفیف\n\n` +
+    `📦 کل کدها: ${total.toLocaleString('fa-IR')}\n` +
+    `🟢 فعال: ${active.toLocaleString('fa-IR')}\n` +
+    `🔴 غیرفعال: ${(total - active).toLocaleString('fa-IR')}\n` +
+    `🔁 کل استفاده: ${stats.uses.toLocaleString('fa-IR')} بار\n` +
+    `💸 کل تخفیف داده‌شده: ${fmtToman(stats.amt)}`;
+  return { text, kb: Markup.inlineKeyboard([
+    [B('➕ ایجاد کد تخفیف', 'dc:new')],
+    [B('📋 مشاهده کدها', 'dc:list:0')],
+    [B('🔙 بازگشت به داشبورد', 'dc:dash')],
+  ]) };
+}
+
+// ── لیست کدها (صفحه‌بندی‌شده) ──
+function dcListView(page) {
+  const total = stmts.countDiscountCodes.get().c;
+  if (!total) {
+    return { text: '📋 هنوز هیچ کد تخفیفی ساخته نشده.', kb: Markup.inlineKeyboard([
+      [B('➕ ایجاد کد تخفیف', 'dc:new')],
+      [B('🔙 بازگشت', 'dc:panel')],
+    ]) };
+  }
+  const pages = Math.max(1, Math.ceil(total / DC_PAGE_SIZE));
+  page = Math.max(0, Math.min(page, pages - 1));
+  const codes = stmts.listDiscountCodes.all(DC_PAGE_SIZE, page * DC_PAGE_SIZE);
+  const rows = codes.map(dc => {
+    const icon = dc.is_active ? '🟢' : '🔴';
+    return [B(`${icon} ${dc.code} • ${dc.discount_percent}٪ • ${dc.total_uses} استفاده`, `dc:view:${dc.id}`)];
+  });
+  const nav = [];
+  if (page > 0)         nav.push(B('⬅️ قبلی', `dc:list:${page-1}`));
+  if (page < pages - 1) nav.push(B('بعدی ➡️', `dc:list:${page+1}`));
+  if (nav.length) rows.push(nav);
+  rows.push([B('🔙 بازگشت', 'dc:panel')]);
+  return { text: `📋 کدهای تخفیف (صفحه ${(page+1).toLocaleString('fa-IR')} از ${pages.toLocaleString('fa-IR')})\n🟢 فعال • 🔴 غیرفعال`, kb: Markup.inlineKeyboard(rows) };
+}
+
+// ── جزئیات یک کد ──
+function dcCodeView(codeId) {
+  const dc = stmts.getDiscountById.get(codeId);
+  if (!dc) return null;
+  const dl = dcDaysLeft(dc.expires_at);
+  const expiresStr = !dc.expires_at ? 'نامحدود' : (dl <= 0 ? 'منقضی شده' : `${dl.toLocaleString('fa-IR')} روز دیگر`);
+  const segs = dc.allowed_segments ? JSON.parse(dc.allowed_segments) : null;
+  const uids = dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids) : null;
+  const usersStr = dcUsersSummary(segs, uids) || 'هیچ‌کس ⚠️';
+  const text =
+    `🎟️ کد: <code>${dc.code}</code>\n\n` +
+    `📊 درصد تخفیف: ${dc.discount_percent}٪\n` +
+    `💰 سقف مبلغ تخفیف: ${dc.max_discount_amount != null ? fmtToman(dc.max_discount_amount) : 'نامحدود'}\n` +
+    `🔁 دفعات هر کاربر: ${dc.max_uses_per_user >= 999999 ? 'نامحدود' : dc.max_uses_per_user.toLocaleString('fa-IR')}\n` +
+    `📅 اعتبار: ${expiresStr}\n` +
+    `👥 کاربران مجاز: ${usersStr}\n` +
+    `🚦 وضعیت: ${dc.is_active ? '🟢 فعال' : '🔴 غیرفعال'}\n\n` +
+    `📈 کل استفاده: ${dc.total_uses.toLocaleString('fa-IR')} بار\n` +
+    `💸 کل تخفیف داده‌شده: ${fmtToman(dc.total_discounted_amount)}`;
+  return { html: true, text, kb: Markup.inlineKeyboard([
+    [B('✏️ ویرایش', `dc:edit:${dc.id}`), B(dc.is_active ? '🔴 غیرفعال کن' : '🟢 فعال کن', `dc:toggle:${dc.id}`)],
+    [B('📤 پیام معرفی (فوروارد)', `dc:promo:${dc.id}`)],
+    [B('🗑️ حذف', `dc:del:${dc.id}`)],
+    [B('🔙 بازگشت به لیست', 'dc:list:0')],
+  ]) };
+}
+
+// ── صفحه تنظیمات (ساخت/ویرایش) از روی adminStates.partial ──
+function dcSettingsView(userId) {
+  const a = adminStates.get(userId);
+  if (!a) return null;
+  const p = a.partial;
+  const isEdit = a.mode === 'edit';
+  const dl = dcDaysLeft(p.expires_at);
+  const expiresStr = !p.expires_at ? 'نامحدود' : (dl <= 0 ? 'منقضی' : `${dl.toLocaleString('fa-IR')} روز`);
+  const usersStr   = dcUsersSummary(p.segments, p.userEntries) || 'هیچ‌کس ⚠️';
+  const percentStr = p.discount_percent ? `${p.discount_percent}٪` : 'تنظیم نشده ⚠️';
+  const head = isEdit ? `✏️ ویرایش کد ${a.code}` : '➕ ساخت کد تخفیف جدید';
+  const text =
+    `${head}\n\n` +
+    `📊 درصد تخفیف: ${percentStr}\n` +
+    `💰 سقف مبلغ تخفیف: ${p.max_discount_amount != null ? fmtToman(p.max_discount_amount) : 'نامحدود'}\n` +
+    `🔁 دفعات هر کاربر: ${p.max_uses_per_user >= 999999 ? 'نامحدود' : p.max_uses_per_user.toLocaleString('fa-IR')}\n` +
+    `📅 اعتبار: ${expiresStr}\n` +
+    `👥 کاربران مجاز: ${usersStr}\n\n` +
+    `روی هر مورد بزن تا تغییرش بدی.`;
+  const rows = [
+    [B('📊 درصد تخفیف', 'dc:fld:percent'), B('💰 سقف مبلغ', 'dc:fld:maxamt')],
+    [B('🔁 دفعات استفاده', 'dc:fld:uses'), B('📅 اعتبار', 'dc:fld:expiry')],
+    [B('👥 کاربران مجاز', 'dc:fld:users')],
+  ];
+  const ready = p.discount_percent >= 1 && p.discount_percent <= 100 && ((p.segments?.length) || (p.userEntries?.length));
+  if (ready) rows.push([B(isEdit ? '💾 ذخیره تغییرات' : '✅ ایجاد کد', 'dc:save')]);
+  else       rows.push([B('🔒 درصد و کاربران را کامل کن', 'dc:locked')]);
+  rows.push([B('🔙 بازگشت', isEdit ? `dc:view:${a.codeId}` : 'dc:panel')]);
+  return { text, kb: Markup.inlineKeyboard(rows) };
+}
+
+// ── صفحه‌های انتخاب مقدار هر فیلد ──
+function dcFieldMaxAmtView() {
+  return { text: '💰 سقف مبلغ تخفیف چقدر باشه؟\n\n(یعنی مقدار تخفیف از این بیشتر نشه)', kb: Markup.inlineKeyboard([
+    [B('♾️ نامحدود', 'dc:set:maxamt:unlim'), B('✏️ مبلغ دلخواه', 'dc:set:maxamt:custom')],
+    [B('🔙 بازگشت', 'dc:settings')],
+  ]) };
+}
+function dcFieldUsesView() {
+  return { text: '🔁 هر کاربر چند بار بتونه از این کد استفاده کنه؟', kb: Markup.inlineKeyboard([
+    [B('۱', 'dc:set:uses:1'), B('۲', 'dc:set:uses:2'), B('۳', 'dc:set:uses:3')],
+    [B('۵', 'dc:set:uses:5'), B('۱۰', 'dc:set:uses:10'), B('♾️ نامحدود', 'dc:set:uses:unlim')],
+    [B('✏️ عدد دلخواه', 'dc:set:uses:custom')],
+    [B('🔙 بازگشت', 'dc:settings')],
+  ]) };
+}
+function dcFieldExpiryView() {
+  return { text: '📅 کد تا چند روز معتبر باشه؟', kb: Markup.inlineKeyboard([
+    [B('۷ روز', 'dc:set:expiry:7'), B('۳۰ روز', 'dc:set:expiry:30'), B('۹۰ روز', 'dc:set:expiry:90')],
+    [B('♾️ نامحدود', 'dc:set:expiry:unlim'), B('✏️ دلخواه', 'dc:set:expiry:custom')],
+    [B('🔙 بازگشت', 'dc:settings')],
+  ]) };
+}
+function dcFieldUsersView(userId) {
+  const a = adminStates.get(userId);
+  const cur = dcUsersSummary(a?.partial?.segments, a?.partial?.userEntries) || 'هیچ‌کس';
+  return { text: `👥 چه کاربرانی مجاز به استفاده باشن؟\n\nفعلی: ${cur}`, kb: Markup.inlineKeyboard([
+    [B('🌐 همه کاربران', 'dc:users:all'), B('🎯 سگمنت‌ها', 'dc:users:seg')],
+    [B('👤 کاربران خاص', 'dc:users:specific')],
+    [B('🗑️ پاک کردن (هیچ‌کس)', 'dc:users:clear')],
+    [B('🔙 بازگشت', 'dc:settings')],
+  ]) };
+}
+function dcSegView(userId) {
+  const a = adminStates.get(userId);
+  const sel = a?.partial?.segments || [];
+  const segKeys = Object.keys(SEGMENTS).filter(k => k !== 'all'); // «همه» دکمه اختصاصی دارد
+  const rows = [];
+  for (let i = 0; i < segKeys.length; i += 2) {
+    rows.push(segKeys.slice(i, i+2).map(k => B(`${sel.includes(k) ? '✅ ' : ''}${SEGMENTS[k]}`, `dc:seg:${k}`)));
+  }
+  rows.push([B('✅ تایید انتخاب', 'dc:seg_done')]);
+  rows.push([B('🔙 بازگشت', 'dc:fld:users')]);
+  return { text: '🎯 سگمنت‌ها رو انتخاب کن (می‌تونی چندتا انتخاب کنی):', kb: Markup.inlineKeyboard(rows) };
+}
+
+// ── پیام معرفی تر و تمیز و قابل‌فوروارد برای کاربر ──
+function buildPromoMessage(dc) {
+  const dl = dcDaysLeft(dc.expires_at);
+  const lines = [
+    `🎁 کد تخفیف ویژه برای شما!`,
+    ``,
+    `🎟️ کد: \`${dc.code}\``,
+    `🔥 ${dc.discount_percent}٪ تخفیف روی شارژ کیف پول`,
+  ];
+  if (dc.max_discount_amount != null) lines.push(`💰 تا سقف ${fmtToman(dc.max_discount_amount)}`);
+  if (dc.expires_at && dl > 0)        lines.push(`📅 فقط تا ${dl.toLocaleString('fa-IR')} روز آینده`);
+  lines.push(``);
+  lines.push(`📌 نحوه استفاده:`);
+  lines.push(`موقع شارژ کیف پول، روی دکمه «🎟️ ثبت کد تخفیف» بزن و این کد رو وارد کن.`);
+  return lines.join('\n');
+}
+
+// ساخت کد یکتا با چند بار تلاش فقط در صورت برخورد با کد تکراری (UNIQUE)
+function createDiscountCode(p, segJson, usrJson, createdBy) {
+  for (let i = 0; i < 6; i++) {
+    const code = genDiscountCode();
+    try {
+      const info = stmts.insertDiscountCode.run(code, p.discount_percent, p.max_discount_amount, p.expires_at, p.max_uses_per_user, segJson, usrJson, createdBy);
+      return Number(info.lastInsertRowid);
+    } catch (e) {
+      const isCollision = e?.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE/i.test(e?.message || '');
+      if (!isCollision || i === 5) throw e; // خطاهای غیرِ تکراری فوراً پرتاب شوند
+    }
+  }
 }
 
 bot.on('callback_query', async (ctx) => {
@@ -1287,15 +1416,15 @@ bot.on('callback_query', async (ctx) => {
       let descText;
       if (uType === 'admin' || uType === 'whitelist') {
         descText =
-          'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
+          'پردازنده هوش مصنوعی رو انتخاب کن:\n\n' +
           'Flash Lite — سریع‌ترین، ارزان‌ترین\n' +
           'Flash — متعادل (پیش‌فرض)\n' +
           'Pro — دقیق‌ترین';
       } else {
         descText =
-          'مدل هوش مصنوعی رو انتخاب کن:\n\n' +
-          'مدل سبک — سریع‌ترین، ارزان‌ترین\n' +
-          'مدل حرفه‌ای — متعادل (پیش‌فرض)';
+          'پردازنده هوش مصنوعی رو انتخاب کن:\n\n' +
+          'پردازنده سبک — سریع‌ترین، ارزان‌ترین\n' +
+          'پردازنده حرفه‌ای — متعادل (پیش‌فرض)';
       }
       try {
         await ctx.editMessageText(descText, inflowModelKeyboard(currentModel, token, uType));
@@ -1321,10 +1450,10 @@ bot.on('callback_query', async (ctx) => {
       const token   = smf[2];
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
+      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('پردازنده نامعتبر');
 
       const uType = getUserType(session.userId);
-      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این مدل برای شما در دسترس نیست.', { show_alert: true });
+      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این پردازنده برای شما در دسترس نیست.', { show_alert: true });
 
       const cfg = MODEL_CONFIG[modelId];
       stmts.setModel.run(modelId, session.userId);
@@ -1345,7 +1474,7 @@ bot.on('callback_query', async (ctx) => {
 
       const lbl = getModelLabel(modelId, uType);
       const prc = getModelPrice(modelId, uType);
-      await ctx.answerCbQuery(`مدل انتخابی: ${lbl} — نرخ ${prc.toLocaleString('fa-IR')} ت/دقیقه`);
+      await ctx.answerCbQuery(`پردازنده انتخابی: ${lbl} — نرخ ${prc.toLocaleString('fa-IR')} ت/دقیقه`);
       return;
     }
 
@@ -1353,16 +1482,16 @@ bot.on('callback_query', async (ctx) => {
     const sm = data.match(/^setmodel:(.+)$/);
     if (sm) {
       const modelId = sm[1];
-      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('مدل نامعتبر');
+      if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('پردازنده نامعتبر');
       const uType = getUserType(userId);
-      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این مدل برای شما در دسترس نیست.', { show_alert: true });
+      if (uType === 'regular' && MODEL_CONFIG[modelId]?.whitelistOnly) return ctx.answerCbQuery('این پردازنده برای شما در دسترس نیست.', { show_alert: true });
       stmts.setModel.run(modelId, userId);
       const lbl = getModelLabel(modelId, uType);
       const prc = getModelPrice(modelId, uType);
-      await ctx.answerCbQuery(`✅ مدل به ${lbl} تغییر یافت`);
+      await ctx.answerCbQuery(`✅ پردازنده به ${lbl} تغییر یافت`);
       try {
         await ctx.editMessageText(
-          `✅ مدل انتخابی: ${lbl}\n💰 نرخ: ${prc.toLocaleString('fa-IR')} تومان/دقیقه`
+          `✅ پردازنده انتخابی: ${lbl}\n💰 نرخ: ${prc.toLocaleString('fa-IR')} تومان/دقیقه`
         );
       } catch {}
       return;
@@ -1471,240 +1600,318 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // ── Admin: discount code management ──
-    if (data === 'admin:dc') {
+    // ════════ Admin: discount panel (button-driven SPA) ════════
+
+    // بازگشت به داشبورد
+    if (data === 'dc:dash') {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const active = stmts.countActiveDiscountCodes.get().c;
-      const stats = stmts.sumDiscountStats.get();
-      const text =
-        `🎟️ مدیریت کدهای تخفیف\n\n` +
-        `کدهای فعال: ${active}\n` +
-        `کل استفاده: ${stats.uses} بار\n` +
-        `کل تخفیف داده‌شده: ${stats.amt.toLocaleString('fa-IR')} تومان`;
+      adminStates.delete(userId); // خروج از حالت ساخت/ویرایش
       await ctx.answerCbQuery();
-      try {
-        await ctx.editMessageText(text, Markup.inlineKeyboard([
-          [Markup.button.callback('➕ کد جدید', 'admin:dc:create')],
-          [Markup.button.callback('📋 لیست کدها', 'admin:dc:list:0')],
-          [Markup.button.callback('🔙 بازگشت', 'admin:dc:back')],
-        ]));
-      } catch {}
+      await dcShow(ctx, await dashboardView());
       return;
     }
 
-    if (data === 'admin:dc:back') {
+    // صفحه اصلی مدیریت تخفیف
+    if (data === 'dc:panel') {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      adminStates.delete(userId); // خروج از حالت ساخت/ویرایش
       await ctx.answerCbQuery();
-      // Go back to dashboard
-      const d = {
-        users:   stmts.userCount.get().c,
-        voices:  stmts.voiceCount.get().c,
-        errors:  stmts.errorCount.get().c,
-        day:     stmts.dailyRevenue.get().s,
-        month:   stmts.monthlyRevenue.get().s,
-        total:   stmts.totalRevenue.get().s,
-      };
-      const orBal = await getOpenRouterBalance();
-      const orStr = orBal !== null ? `$${orBal.toFixed(2)}` : '—';
-      const statsText =
-        `📊 داشبورد مدیریت\n\n` +
-        `👥 کاربران: ${d.users.toLocaleString('fa-IR')}\n` +
-        `🎤 وویس‌های موفق: ${d.voices.toLocaleString('fa-IR')}\n` +
-        `❌ خطاها: ${d.errors.toLocaleString('fa-IR')}\n\n` +
-        `💰 درآمد امروز: ${d.day.toLocaleString('fa-IR')} تومان\n` +
-        `💰 درآمد این ماه: ${d.month.toLocaleString('fa-IR')} تومان\n` +
-        `💰 کل درآمد: ${d.total.toLocaleString('fa-IR')} تومان\n\n` +
-        `🔋 موجودی OpenRouter: ${orStr}`;
-      try { await ctx.editMessageText(statsText, Markup.inlineKeyboard([[Markup.button.callback('🎟️ کدهای تخفیف', 'admin:dc')]])); } catch {}
+      await dcShow(ctx, dcPanelView());
       return;
     }
 
-    const dcListM = data.match(/^admin:dc:list:(\d+)$/);
+    // لیست کدها
+    const dcListM = data.match(/^dc:list:(\d+)$/);
     if (dcListM) {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      adminStates.delete(userId); // خروج از حالت ساخت/ویرایش
       await ctx.answerCbQuery();
-      const page = parseInt(dcListM[1]);
-      const pageSize = 5;
-      const total = stmts.countDiscountCodes.get().c;
-      const codes = stmts.listDiscountCodes.all(pageSize, page * pageSize);
-      if (!codes || codes.length === 0) {
-        try {
-          await ctx.editMessageText('هیچ کد تخفیفی یافت نشد.', Markup.inlineKeyboard([
-            [Markup.button.callback('➕ کد جدید', 'admin:dc:create')],
-            [Markup.button.callback('🔙 بازگشت', 'admin:dc')],
-          ]));
-        } catch {}
-        return;
-      }
-      const rows = codes.map(dc => {
-        const statusIcon = dc.is_active ? '✅' : '❌';
-        return [Markup.button.callback(
-          `${dc.code} — ${dc.discount_percent}% — ${statusIcon}فعال — ${dc.total_uses} استفاده`,
-          `admin:dc:view:${dc.id}`
-        )];
-      });
-      const navRow = [];
-      if (page > 0) navRow.push(Markup.button.callback('⬅️ قبلی', `admin:dc:list:${page-1}`));
-      if ((page+1) * pageSize < total) navRow.push(Markup.button.callback('بعدی ➡️', `admin:dc:list:${page+1}`));
-      if (navRow.length) rows.push(navRow);
-      rows.push([Markup.button.callback('🔙 بازگشت', 'admin:dc')]);
-      try { await ctx.editMessageText(`📋 لیست کدهای تخفیف (${total} عدد):`, Markup.inlineKeyboard(rows)); } catch {}
+      await dcShow(ctx, dcListView(parseInt(dcListM[1])));
       return;
     }
 
-    const dcViewM = data.match(/^admin:dc:view:(\d+)$/);
+    // جزئیات یک کد
+    const dcViewM = data.match(/^dc:view:(\d+)$/);
     if (dcViewM) {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      adminStates.delete(userId); // خروج از حالت ساخت/ویرایش در صورت وجود
       await ctx.answerCbQuery();
-      await showDiscountCodeView(ctx, parseInt(dcViewM[1]));
+      await dcShow(ctx, dcCodeView(parseInt(dcViewM[1])));
       return;
     }
 
-    if (data === 'admin:dc:create') {
+    // شروع ساخت کد جدید
+    if (data === 'dc:new') {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      adminStates.set(userId, { step: 'admin_dc_percent', partial: {} });
+      adminStates.set(userId, {
+        mode: 'create',
+        panel: { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id },
+        partial: { discount_percent: undefined, max_discount_amount: null, expires_at: null, max_uses_per_user: 1, segments: [], userEntries: [] },
+      });
       await ctx.answerCbQuery();
-      await ctx.reply('درصد تخفیف را وارد کن (عدد بین ۱ تا ۱۰۰):');
+      await dcShow(ctx, dcSettingsView(userId));
       return;
     }
 
-    if (data === 'admin:dc:cancel') {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      adminStates.delete(userId);
-      await ctx.answerCbQuery('لغو شد.');
-      try { await ctx.editMessageText('❌ ایجاد کد تخفیف لغو شد.'); } catch {}
-      return;
-    }
-
-    if (data === 'admin:dc:save') {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const aState = adminStates.get(userId);
-      if (!aState || !aState.partial) return ctx.answerCbQuery('وضعیت نامعتبر.');
-      const p = aState.partial;
-      const code = genDiscountCode();
-      stmts.insertDiscountCode.run(
-        code,
-        p.discount_percent,
-        p.max_discount_amount ?? null,
-        p.expires_at ?? null,
-        p.max_uses_per_user ?? 1,
-        p.allowed_segments ?? null,
-        p.allowed_user_ids ? JSON.stringify(p.allowed_user_ids) : null,
-        userId
-      );
-      adminStates.delete(userId);
-      await ctx.answerCbQuery('✅ کد ایجاد شد');
-      try { await ctx.editMessageText(`✅ کد تخفیف ایجاد شد!\n\nکد: \`${code}\``, { parse_mode: 'Markdown' }); } catch {
-        await ctx.reply(`✅ کد تخفیف ایجاد شد!\n\nکد: \`${code}\``, { parse_mode: 'Markdown' });
-      }
-      return;
-    }
-
-    // Segment selection
-    const dcSegM = data.match(/^admin:dc:seg:(.+)$/);
-    if (dcSegM && dcSegM[1] !== 'confirm') {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const segKey = dcSegM[1];
-      const aState = adminStates.get(userId);
-      if (!aState || aState.step !== 'admin_dc_segments') return ctx.answerCbQuery();
-      if (!aState.partial.selectedSegments) aState.partial.selectedSegments = [];
-      const idx = aState.partial.selectedSegments.indexOf(segKey);
-      if (idx >= 0) aState.partial.selectedSegments.splice(idx, 1);
-      else aState.partial.selectedSegments.push(segKey);
-      adminStates.set(userId, aState);
-      await ctx.answerCbQuery();
-      try { await ctx.editMessageText('سگمنت‌های مورد نظر را انتخاب کن:', buildSegmentKeyboard(aState.partial.selectedSegments)); } catch {}
-      return;
-    }
-
-    if (data === 'admin:dc:seg_confirm') {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const aState = adminStates.get(userId);
-      if (!aState) return ctx.answerCbQuery();
-      const segs = aState.partial.selectedSegments || [];
-      aState.partial.allowed_segments = segs.length > 0 ? JSON.stringify(segs) : null;
-      aState.partial.allowed_user_ids = null;
-      aState.step = 'admin_dc_confirm';
-      adminStates.set(userId, aState);
-      await ctx.answerCbQuery();
-      await showDiscountConfirm(ctx, userId);
-      return;
-    }
-
-    // Admin discount users type selection
-    const dcUsersM = data.match(/^admin:dc:users:(all|segments|specific)$/);
-    if (dcUsersM) {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const type = dcUsersM[1];
-      const aState = adminStates.get(userId);
-      if (!aState) return ctx.answerCbQuery();
-      await ctx.answerCbQuery();
-      if (type === 'all') {
-        aState.partial.allowed_segments = null;
-        aState.partial.allowed_user_ids = null;
-        aState.step = 'admin_dc_confirm';
-        adminStates.set(userId, aState);
-        await showDiscountConfirm(ctx, userId);
-      } else if (type === 'segments') {
-        aState.step = 'admin_dc_segments';
-        aState.partial.selectedSegments = [];
-        adminStates.set(userId, aState);
-        await ctx.reply('سگمنت‌های مورد نظر را انتخاب کن:', buildSegmentKeyboard([]));
-      } else if (type === 'specific') {
-        aState.step = 'admin_dc_user_ids';
-        adminStates.set(userId, aState);
-        await ctx.reply('آیدی عددی کاربران را وارد کن (با فاصله یا خط جدید جدا کن):');
-      }
-      return;
-    }
-
-    // Toggle discount code
-    const dcToggleM = data.match(/^admin:dc:toggle:(\d+)$/);
-    if (dcToggleM) {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const codeId = parseInt(dcToggleM[1]);
-      stmts.toggleDiscountCode.run(codeId);
-      await ctx.answerCbQuery('وضعیت تغییر کرد.');
-      await showDiscountCodeView(ctx, codeId);
-      return;
-    }
-
-    // Delete discount code
-    const dcDeleteM = data.match(/^admin:dc:delete:(\d+)(?::confirm)?$/);
-    if (dcDeleteM) {
-      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const codeId = parseInt(dcDeleteM[1]);
-      if (!data.includes(':confirm')) {
-        // First click: ask confirm
-        await ctx.answerCbQuery();
-        try {
-          await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
-            [Markup.button.callback('⚠️ تایید حذف', `admin:dc:delete:${codeId}:confirm`)],
-            [Markup.button.callback('🔙 لغو', `admin:dc:view:${codeId}`)],
-          ]).reply_markup);
-        } catch {}
-        return;
-      }
-      // Confirmed delete
-      stmts.deleteDiscountCode.run(codeId);
-      await ctx.answerCbQuery('🗑️ حذف شد.');
-      try { await ctx.editMessageText('🗑️ کد تخفیف حذف شد.', Markup.inlineKeyboard([[Markup.button.callback('🔙 لیست کدها', 'admin:dc:list:0')]])); } catch {}
-      return;
-    }
-
-    // Edit discount code field
-    const dcEditM = data.match(/^admin:dc:edit:(\d+):(\w+)$/);
+    // شروع ویرایش کد موجود
+    const dcEditM = data.match(/^dc:edit:(\d+)$/);
     if (dcEditM) {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
-      const codeId = parseInt(dcEditM[1]);
-      const field = dcEditM[2];
-      if (field === 'percent') {
-        adminStates.set(userId, { step: 'admin_dc_edit_percent', codeId });
+      const dc = stmts.getDiscountById.get(parseInt(dcEditM[1]));
+      if (!dc) return ctx.answerCbQuery('کد یافت نشد');
+      adminStates.set(userId, {
+        mode: 'edit', codeId: dc.id, code: dc.code,
+        panel: { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id },
+        partial: {
+          discount_percent: dc.discount_percent,
+          max_discount_amount: dc.max_discount_amount,
+          expires_at: dc.expires_at,
+          max_uses_per_user: dc.max_uses_per_user,
+          segments: dc.allowed_segments ? JSON.parse(dc.allowed_segments) : [],
+          userEntries: dc.allowed_user_ids ? JSON.parse(dc.allowed_user_ids) : [],
+        },
+      });
+      await ctx.answerCbQuery();
+      await dcShow(ctx, dcSettingsView(userId));
+      return;
+    }
+
+    // بازگشت به صفحه تنظیمات (و پاک‌کردن حالت انتظار ورودی متنی)
+    if (data === 'dc:settings') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      a.step = null; adminStates.set(userId, a);
+      await ctx.answerCbQuery();
+      await dcShow(ctx, dcSettingsView(userId));
+      return;
+    }
+
+    // دکمه قفل (هنوز آماده ساخت نیست)
+    if (data === 'dc:locked') {
+      return ctx.answerCbQuery('اول «درصد تخفیف» و «کاربران مجاز» رو تنظیم کن.', { show_alert: true });
+    }
+
+    // باز کردن صفحه انتخاب مقدار هر فیلد
+    const dcFldM = data.match(/^dc:fld:(percent|maxamt|uses|expiry|users)$/);
+    if (dcFldM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      const fld = dcFldM[1];
+      a.panel = { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id };
+      if (fld === 'percent') {
+        a.step = 'dc_in_percent'; adminStates.set(userId, a);
         await ctx.answerCbQuery();
-        await ctx.reply('درصد تخفیف جدید را وارد کن (۱ تا ۱۰۰):');
-      } else {
-        await ctx.answerCbQuery('فیلد پشتیبانی نمی‌شود.');
+        await dcShow(ctx, { text: '📊 درصد تخفیف را تایپ کن (عددی بین ۱ تا ۱۰۰):', kb: Markup.inlineKeyboard([[B('🔙 بازگشت', 'dc:settings')]]) });
+      } else if (fld === 'maxamt') {
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, dcFieldMaxAmtView());
+      } else if (fld === 'uses') {
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, dcFieldUsesView());
+      } else if (fld === 'expiry') {
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, dcFieldExpiryView());
+      } else if (fld === 'users') {
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, dcFieldUsersView(userId));
       }
+      return;
+    }
+
+    // تنظیم سقف مبلغ تخفیف
+    const dcMaxM = data.match(/^dc:set:maxamt:(unlim|custom)$/);
+    if (dcMaxM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      a.panel = { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id };
+      if (dcMaxM[1] === 'unlim') {
+        a.partial.max_discount_amount = null; a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery('✅ نامحدود شد');
+        await dcShow(ctx, dcSettingsView(userId));
+      } else {
+        a.step = 'dc_in_maxamt'; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, { text: '💰 سقف مبلغ تخفیف را به تومان تایپ کن:', kb: Markup.inlineKeyboard([[B('🔙 بازگشت', 'dc:settings')]]) });
+      }
+      return;
+    }
+
+    // تنظیم دفعات استفاده
+    const dcUsesM = data.match(/^dc:set:uses:(\d+|unlim|custom)$/);
+    if (dcUsesM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      a.panel = { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id };
+      const v = dcUsesM[1];
+      if (v === 'custom') {
+        a.step = 'dc_in_uses'; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, { text: '🔁 تعداد دفعات استفاده هر کاربر را تایپ کن:', kb: Markup.inlineKeyboard([[B('🔙 بازگشت', 'dc:settings')]]) });
+      } else {
+        a.partial.max_uses_per_user = v === 'unlim' ? 999999 : parseInt(v);
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery('✅ ثبت شد');
+        await dcShow(ctx, dcSettingsView(userId));
+      }
+      return;
+    }
+
+    // تنظیم اعتبار (روز)
+    const dcExpM = data.match(/^dc:set:expiry:(\d+|unlim|custom)$/);
+    if (dcExpM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      a.panel = { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id };
+      const v = dcExpM[1];
+      if (v === 'custom') {
+        a.step = 'dc_in_expiry'; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, { text: '📅 تعداد روزهای اعتبار را تایپ کن:', kb: Markup.inlineKeyboard([[B('🔙 بازگشت', 'dc:settings')]]) });
+      } else {
+        a.partial.expires_at = v === 'unlim' ? null : Math.floor(Date.now()/1000) + parseInt(v) * 86400;
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery('✅ ثبت شد');
+        await dcShow(ctx, dcSettingsView(userId));
+      }
+      return;
+    }
+
+    // انتخاب نوع کاربران مجاز
+    const dcUsrM = data.match(/^dc:users:(all|seg|specific|clear)$/);
+    if (dcUsrM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      a.panel = { chatId: ctx.chat.id, msgId: ctx.callbackQuery.message.message_id };
+      const t = dcUsrM[1];
+      if (t === 'all') {
+        a.partial.segments = ['all']; a.partial.userEntries = []; a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery('✅ همه کاربران');
+        await dcShow(ctx, dcSettingsView(userId));
+      } else if (t === 'clear') {
+        a.partial.segments = []; a.partial.userEntries = []; a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery('✅ پاک شد');
+        await dcShow(ctx, dcSettingsView(userId));
+      } else if (t === 'seg') {
+        // برای انتخاب سگمنت خاص، اگر «همه» قبلاً ست شده آن را کنار بگذار
+        if (a.partial.segments?.length === 1 && a.partial.segments[0] === 'all') a.partial.segments = [];
+        a.step = null; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, dcSegView(userId));
+      } else if (t === 'specific') {
+        a.step = 'dc_in_users'; adminStates.set(userId, a);
+        await ctx.answerCbQuery();
+        await dcShow(ctx, { text: '👤 آیدی عددی یا یوزرنیم تلگرامی کاربران را بفرست\n(با فاصله یا خط جدید جدا کن، مثل: 123456 یا @username):', kb: Markup.inlineKeyboard([[B('🔙 بازگشت', 'dc:settings')]]) });
+      }
+      return;
+    }
+
+    // تاگل سگمنت در حالت چندانتخابی
+    const dcSegM = data.match(/^dc:seg:(\w+)$/);
+    if (dcSegM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      const key = dcSegM[1];
+      if (!SEGMENTS[key]) return ctx.answerCbQuery('نامعتبر');
+      if (!a.partial.segments) a.partial.segments = [];
+      const i = a.partial.segments.indexOf(key);
+      if (i >= 0) a.partial.segments.splice(i, 1); else a.partial.segments.push(key);
+      adminStates.set(userId, a);
+      await ctx.answerCbQuery();
+      await dcShow(ctx, dcSegView(userId));
+      return;
+    }
+
+    // پایان انتخاب سگمنت → بازگشت به تنظیمات
+    if (data === 'dc:seg_done') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      await ctx.answerCbQuery('✅ ثبت شد');
+      await dcShow(ctx, dcSettingsView(userId));
+      return;
+    }
+
+    // ذخیره/ایجاد کد
+    if (data === 'dc:save') {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const a = adminStates.get(userId);
+      if (!a) return ctx.answerCbQuery('منقضی شده');
+      const p = a.partial;
+      const ready = p.discount_percent >= 1 && p.discount_percent <= 100 && ((p.segments?.length) || (p.userEntries?.length));
+      if (!ready) return ctx.answerCbQuery('اول درصد تخفیف و کاربران مجاز رو تنظیم کن.', { show_alert: true });
+      const segJson = p.segments?.length ? JSON.stringify(p.segments) : null;
+      const usrJson = p.userEntries?.length ? JSON.stringify(p.userEntries) : null;
+      if (a.mode === 'edit') {
+        db.prepare('UPDATE discount_codes SET discount_percent=?, max_discount_amount=?, expires_at=?, max_uses_per_user=?, allowed_segments=?, allowed_user_ids=? WHERE id=?')
+          .run(p.discount_percent, p.max_discount_amount, p.expires_at, p.max_uses_per_user, segJson, usrJson, a.codeId);
+        const id = a.codeId;
+        adminStates.delete(userId);
+        await ctx.answerCbQuery('✅ تغییرات ذخیره شد');
+        await dcShow(ctx, dcCodeView(id));
+      } else {
+        let id;
+        try { id = createDiscountCode(p, segJson, usrJson, userId); }
+        catch (e) { logErr('❌ create discount code:', e.message); return ctx.answerCbQuery('خطا در ساخت کد. دوباره تلاش کن.', { show_alert: true }); }
+        adminStates.delete(userId);
+        await ctx.answerCbQuery('✅ کد ساخته شد');
+        await dcShow(ctx, dcCodeView(id));
+        // پیام معرفی قابل‌فوروارد (ریپلای)
+        const dc = stmts.getDiscountById.get(id);
+        try { await ctx.reply(buildPromoMessage(dc), { parse_mode: 'Markdown' }); } catch {}
+      }
+      return;
+    }
+
+    // ارسال مجدد پیام معرفی
+    const dcPromoM = data.match(/^dc:promo:(\d+)$/);
+    if (dcPromoM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const dc = stmts.getDiscountById.get(parseInt(dcPromoM[1]));
+      if (!dc) return ctx.answerCbQuery('کد یافت نشد');
+      await ctx.answerCbQuery('پیام معرفی ارسال شد ⤵️');
+      try { await ctx.reply(buildPromoMessage(dc), { parse_mode: 'Markdown' }); } catch {}
+      return;
+    }
+
+    // تغییر وضعیت فعال/غیرفعال
+    const dcToggleM = data.match(/^dc:toggle:(\d+)$/);
+    if (dcToggleM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const id = parseInt(dcToggleM[1]);
+      stmts.toggleDiscountCode.run(id);
+      const dc = stmts.getDiscountById.get(id);
+      await ctx.answerCbQuery(dc?.is_active ? '🟢 فعال شد' : '🔴 غیرفعال شد');
+      await dcShow(ctx, dcCodeView(id));
+      return;
+    }
+
+    // حذف کد (با تایید)
+    const dcDelM = data.match(/^dc:del:(\d+)(:confirm)?$/);
+    if (dcDelM) {
+      if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
+      const id = parseInt(dcDelM[1]);
+      if (!dcDelM[2]) {
+        await ctx.answerCbQuery();
+        await dcShow(ctx, { text: '⚠️ مطمئنی این کد حذف بشه؟\nاین عمل برگشت‌ناپذیره.', kb: Markup.inlineKeyboard([
+          [B('🗑️ بله، حذف کن', `dc:del:${id}:confirm`)],
+          [B('🔙 انصراف', `dc:view:${id}`)],
+        ]) });
+        return;
+      }
+      stmts.deleteDiscountCode.run(id);
+      await ctx.answerCbQuery('🗑️ حذف شد');
+      await dcShow(ctx, dcListView(0));
       return;
     }
 
@@ -1786,9 +1993,9 @@ bot.on('callback_query', async (ctx) => {
             } else if (m.includes('تبدیل فایل')) {
               errMsg = '😕 خطا در تبدیل فایل صوتی. لطفاً مجدداً ویس بفرست.';
             } else if (/TIMEOUT/.test(m)) {
-              errMsg = '⏱️ مدل در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
+              errMsg = '⏱️ پردازنده در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
             } else if (m.includes('ALL_FAILED')) {
-              errMsg = '😕 هیچ مدلی پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
+              errMsg = '😕 هیچ پردازنده‌ای پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
             return;
