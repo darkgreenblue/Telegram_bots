@@ -18,9 +18,11 @@ const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
+const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
 
 const ADMIN_IDS    = [100257975];
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
+const OWNER_ID = 100257975; // فقط این کاربر — مستقل از سیستم ادمین
 
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
@@ -597,6 +599,7 @@ const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: Infinity });
 const sessions    = new Map(); // token → voice session
 const userStates  = new Map(); // userId → { step, paymentId, ... }
 const adminStates = new Map(); // adminId → { step, partial, ... }
+const notionStates = new Map(); // userId → { text, chatId, promptMsgId, navPath }
 
 // پردازش هم‌زمان: حداکثر چند فایل صوتی به‌طور موازی برای هر کاربر
 const MAX_CONCURRENT_JOBS = 2;
@@ -614,6 +617,9 @@ setInterval(() => {
   const now = Date.now();
   for (const [k,v] of sessions) {
     if (now - v.createdAt > 2*60*60*1000) sessions.delete(k);
+  }
+  for (const [k,v] of notionStates) {
+    if (now - v.createdAt > 60*60*1000) notionStates.delete(k);
   }
 }, 30*60*1000);
 
@@ -709,16 +715,18 @@ function createOutputFormatKeyboard(token) {
 
 async function sendLongTextAsMessages(ctx, text, extra = {}) {
   const parts = splitForTelegram(text);
-  if (!parts.length) { await ctx.reply('متنی برنگشت.', extra); return; }
+  if (!parts.length) { return ctx.reply('متنی برنگشت.', extra); }
+  let lastMsg;
   for (let i = 0; i < parts.length; i++) {
     const prefix = parts.length > 1 ? `📄 بخش ${i+1} از ${parts.length}:\n\n` : '';
-    await ctx.reply(prefix + parts[i], extra);
+    lastMsg = await ctx.reply(prefix + parts[i], extra);
     if (i < parts.length - 1) await sleep(500);
   }
+  return lastMsg;
 }
 
 async function sendTextAsFile(ctx, text, extra = {}) {
-  await ctx.replyWithDocument({
+  return ctx.replyWithDocument({
     source:   Buffer.from(text, 'utf-8'),
     filename: `transcript_${Date.now()}.txt`,
   }, extra);
@@ -803,6 +811,114 @@ function buildInvoiceText(amount, originalAmount, discountPercent) {
     `مبلغ: *${amount.toLocaleString('fa-IR')} تومان*\n\n` +
     `به کارت زیر واریز کن:\n${cardLine}\n\n` +
     `بعد از واریز، تصویر فیش یا متن تأیید رو در همین چت بفرست.\n⏰ مهلت: ۲۴ ساعت`;
+}
+
+/* ===== 7c) Notion helpers ===== */
+function id32(id) { return id.replace(/-/g, ''); }
+function id36(s) { return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`; }
+
+async function notionAPI(method, path, body) {
+  const res = await fetch(`https://api.notion.com/v1${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${NOTION_TOKEN}`,
+      'Notion-Version': '2022-06-28',
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.status);
+    throw new Error(`Notion ${res.status}: ${msg}`);
+  }
+  return res.json();
+}
+
+async function notionGetRootPages() {
+  const results = [];
+  let cursor;
+  do {
+    const res = await notionAPI('POST', '/search', {
+      filter: { value: 'page', property: 'object' },
+      page_size: 100,
+      ...(cursor ? { start_cursor: cursor } : {}),
+    });
+    results.push(...res.results);
+    cursor = res.has_more ? res.next_cursor : null;
+  } while (cursor);
+  const allIds = new Set(results.map(p => id32(p.id)));
+  return results.filter(p => {
+    if (p.parent?.type === 'workspace') return true;
+    if (p.parent?.type === 'page_id') return !allIds.has(id32(p.parent.page_id || ''));
+    return false;
+  });
+}
+
+async function notionGetChildPages(pageId) {
+  const res = await notionAPI('GET', `/blocks/${pageId}/children?page_size=100`);
+  return (res.results || [])
+    .filter(b => b.type === 'child_page')
+    .map(b => ({ id: b.id, title: b.child_page?.title || 'بدون عنوان' }));
+}
+
+function notionPageTitle(p) {
+  return p?.properties?.title?.title?.[0]?.plain_text
+      || p?.child_page?.title
+      || 'بدون عنوان';
+}
+
+function textToNotionBlocks(text) {
+  const blocks = [];
+  for (let i = 0; i < text.length && blocks.length < 100; i += 2000) {
+    blocks.push({
+      object: 'block', type: 'paragraph',
+      paragraph: { rich_text: [{ text: { content: text.slice(i, i + 2000) } }] },
+    });
+  }
+  return blocks;
+}
+
+async function notionCreatePage(parentId, title, content) {
+  return notionAPI('POST', '/pages', {
+    parent: { page_id: parentId },
+    properties: { title: { title: [{ text: { content: title } }] } },
+    children: textToNotionBlocks(content),
+  });
+}
+
+async function generateNotionTitle(text) {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [
+          { role: 'system', content: 'یک عنوان کوتاه و مناسب فارسی (حداکثر ۱۰ کلمه) برای متن زیر بساز. فقط عنوان را بنویس.' },
+          { role: 'user', content: text.slice(0, 2000) },
+        ],
+        max_tokens: 60,
+      }),
+    });
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || 'یادداشت جدید';
+  } catch {
+    return 'یادداشت جدید';
+  }
+}
+
+async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, text) {
+  if (userId !== OWNER_ID || !NOTION_TOKEN) return;
+  try {
+    const sentMsg = await telegram.sendMessage(chatId, '📤 می‌خوای به نوشن بفرستم؟', {
+      reply_to_message_id: replyToMsgId,
+      allow_sending_without_reply: true,
+      reply_markup: { inline_keyboard: [[{ text: '✅ بله بفرست', callback_data: 'ntn:start' }]] },
+    });
+    notionStates.set(userId, { text, chatId, promptMsgId: sentMsg.message_id, navPath: [], createdAt: Date.now() });
+  } catch (e) {
+    logErr('maybeSendNotionPrompt error:', e.message);
+  }
 }
 
 /* ===== 8) Handlers ===== */
@@ -2018,6 +2134,7 @@ bot.on('callback_query', async (ctx) => {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
             session.step = 'ready';
             await maybeWarnLowBalance(ctx);
+            await maybeSendNotionPrompt(ctx.telegram, sessUserId, waiting.chat.id, waiting.message_id, text);
           } else {
             session.resultText      = text;
             session.resultMsgChatId = waiting.chat.id;
@@ -2057,16 +2174,17 @@ bot.on('callback_query', async (ctx) => {
       try { await ctx.deleteMessage(); } catch {}
 
       const rt = replyTo(session.voiceMsgId);
+      let lastOutputMsg;
       if (format === 'messages') {
         await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
-        await sendLongTextAsMessages(ctx, session.resultText, rt);
+        lastOutputMsg = await sendLongTextAsMessages(ctx, session.resultText, rt);
       } else {
         await ctx.answerCbQuery('در حال آماده‌سازی فایل...');
         try {
-          await sendTextAsFile(ctx, session.resultText, rt);
+          lastOutputMsg = await sendTextAsFile(ctx, session.resultText, rt);
         } catch (err) {
           console.error('❌ sendTextAsFile error:', err);
-          await sendLongTextAsMessages(ctx, session.resultText, rt);
+          lastOutputMsg = await sendLongTextAsMessages(ctx, session.resultText, rt);
         }
       }
 
@@ -2079,7 +2197,113 @@ bot.on('callback_query', async (ctx) => {
 
       session.step = 'ready';
       await maybeWarnLowBalance(ctx);
+      if (lastOutputMsg) {
+        await maybeSendNotionPrompt(ctx.telegram, ctx.from.id, ctx.chat.id, lastOutputMsg.message_id, session.resultText);
+      }
       return;
+    }
+
+    // ── Notion ──
+    if (data.startsWith('ntn:')) {
+      const uid = ctx.from.id;
+      if (uid !== OWNER_ID) return ctx.answerCbQuery('دسترسی ندارید');
+      if (!NOTION_TOKEN) return ctx.answerCbQuery('⚠️ NOTION_TOKEN تنظیم نشده');
+
+      const state = notionStates.get(uid);
+      if (!state) return ctx.answerCbQuery('نشست منقضی شده — ویس جدید بفرست');
+
+      const editNotionMsg = async (text, keyboard) => {
+        try {
+          await ctx.telegram.editMessageText(state.chatId, state.promptMsgId, undefined, text, {
+            reply_markup: { inline_keyboard: keyboard },
+          });
+        } catch {}
+      };
+
+      if (data === 'ntn:start' || data === 'ntn:back') {
+        await ctx.answerCbQuery();
+        if (data === 'ntn:back') state.navPath.pop();
+
+        if (state.navPath.length === 0) {
+          let pages;
+          try { pages = await notionGetRootPages(); }
+          catch (e) { return editNotionMsg('❌ خطا در اتصال به نوشن: ' + e.message, []); }
+          if (!pages.length) return editNotionMsg('هیچ صفحه‌ای با Integration share نشده.', []);
+          await editNotionMsg(
+            'به کدوم بخش بفرستم؟',
+            pages.map(p => [{ text: '📂 ' + notionPageTitle(p), callback_data: 'ntn:nav:' + id32(p.id) }])
+          );
+        } else {
+          const cur = state.navPath[state.navPath.length - 1];
+          let children;
+          try { children = await notionGetChildPages(cur.id); }
+          catch (e) { return editNotionMsg('❌ خطا در دریافت زیرصفحه‌ها', []); }
+          await editNotionMsg(
+            state.navPath.map(n => n.title).join(' ▸ '),
+            [
+              [{ text: '📌 بفرست همین‌جا', callback_data: 'ntn:sel:' + id32(cur.id) }],
+              ...children.map(p => [{ text: '📂 ' + p.title, callback_data: 'ntn:nav:' + id32(p.id) }]),
+              [{ text: '◀️ بازگشت', callback_data: 'ntn:back' }],
+            ]
+          );
+        }
+        return;
+      }
+
+      if (data.startsWith('ntn:nav:')) {
+        await ctx.answerCbQuery();
+        const id32str = data.slice(8);
+        const pageId = id36(id32str);
+
+        let children;
+        try { children = await notionGetChildPages(pageId); }
+        catch (e) { return editNotionMsg('❌ خطا: ' + e.message, []); }
+
+        let pageTitle = 'صفحه';
+        try { pageTitle = notionPageTitle(await notionAPI('GET', `/pages/${pageId}`)); } catch {}
+
+        if (!children.length) {
+          // Leaf — auto-create
+          await editNotionMsg('⏳ در حال ارسال به نوشن...', []);
+          try {
+            const title = await generateNotionTitle(state.text);
+            await notionCreatePage(pageId, title, state.text);
+            await editNotionMsg(`✅ صفحه «${title}» در نوشن ساخته شد.`, []);
+            notionStates.delete(uid);
+          } catch (e) {
+            logErr('Notion create error:', e.message);
+            await editNotionMsg('❌ خطا در ارسال به نوشن: ' + e.message, []);
+          }
+          return;
+        }
+
+        state.navPath.push({ id: pageId, title: pageTitle });
+        await editNotionMsg(
+          state.navPath.map(n => n.title).join(' ▸ '),
+          [
+            [{ text: '📌 بفرست همین‌جا', callback_data: 'ntn:sel:' + id32str }],
+            ...children.map(p => [{ text: '📂 ' + p.title, callback_data: 'ntn:nav:' + id32(p.id) }]),
+            [{ text: '◀️ بازگشت', callback_data: 'ntn:back' }],
+          ]
+        );
+        return;
+      }
+
+      if (data.startsWith('ntn:sel:')) {
+        await ctx.answerCbQuery('در حال ارسال...');
+        const pageId = id36(data.slice(8));
+        await editNotionMsg('⏳ در حال ارسال به نوشن...', []);
+        try {
+          const title = await generateNotionTitle(state.text);
+          await notionCreatePage(pageId, title, state.text);
+          await editNotionMsg(`✅ صفحه «${title}» در نوشن ساخته شد.`, []);
+          notionStates.delete(uid);
+        } catch (e) {
+          logErr('Notion create error:', e.message);
+          await editNotionMsg('❌ خطا در ارسال به نوشن: ' + e.message, []);
+        }
+        return;
+      }
     }
 
   } catch (err) {
