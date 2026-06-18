@@ -252,6 +252,17 @@ class Bale:
                     f.write(chunk)
         return dest_path
 
+    async def download_url(self, url: str, dest_path: str):
+        """دانلودِ یک URLِ دلخواه (مثلِ عکسِ تولیدشده) به فایلِ محلی — برای آپلودِ مجدد
+        وقتی پیام‌رسان نمی‌تواند خودش URL را بکشد."""
+        async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            if resp.status != 200:
+                raise BaleError(f"download_url failed: HTTP {resp.status}")
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(8192):
+                    f.write(chunk)
+        return dest_path
+
     # --- پرداخت ---
 
     async def send_invoice(self, chat_id, title, description, payload, provider_token,

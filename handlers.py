@@ -790,16 +790,51 @@ async def _try_resume_pending_dream(bale, chat_id, user_id) -> bool:
     return False
 
 
+async def _send_photo_robust(bale, chat_id, image_url, caption=None, reply_markup=None) -> bool:
+    """ارسالِ عکس با مقاومت — تا یک خطای ارسالِ عکس کلِ تحویل را نشکند:
+      ۱) اول با URL (سریع، بدونِ آپلود).
+      ۲) اگر پیام‌رسان نتوانست URL را بکشد (مثلاً «wrong type of the web page content»)،
+         عکس را خودمان دانلود و به‌صورتِ فایل آپلود می‌کنیم.
+    True اگر موفق شد؛ False اگر هر دو شکست خوردند (caller متن را بدونِ عکس می‌فرستد)."""
+    if not image_url:
+        return False
+    try:
+        await bale.send_photo(chat_id, image_url, caption=caption,
+                              reply_markup=reply_markup, parse_mode=None)
+        return True
+    except Exception as e:
+        log.warning("[%s] sendPhoto by URL failed (%s) — trying download+upload", bale.platform, e)
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        await bale.download_url(image_url, tmp)
+        await bale.send_photo(chat_id, tmp, caption=caption,
+                              reply_markup=reply_markup, parse_mode=None)
+        return True
+    except Exception as e:
+        log.warning("[%s] sendPhoto by file also failed: %s — delivering text without image",
+                    bale.platform, e)
+        return False
+    finally:
+        if tmp and os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 async def _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser):
     kb = _view_full_inline(lang, dream_id)
+    # عکس + کپشن در یک پیام؛ اگر موفق شد همان بس است.
     if image_url and len(teaser) <= _CAPTION_SAFE:
-        await bale.send_photo(chat_id, image_url, caption=teaser, reply_markup=kb, parse_mode=None)
+        if await _send_photo_robust(bale, chat_id, image_url, caption=teaser, reply_markup=kb):
+            return
     elif image_url:
-        await bale.send_photo(chat_id, image_url)
-        await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
+        await _send_photo_robust(bale, chat_id, image_url)
     else:
         await bale.send_message(chat_id, C.get(lang, "image_failed"), parse_mode=None)
-        await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
+    await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
 
 
 async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
@@ -807,13 +842,14 @@ async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
       عکس + کپشن = preview (خام، بدونِ «…»)، و سپس depth در یک پیامِ جدا.
     عمداً preview را به depth نمی‌چسبانیم: اگر مدل preview را داخلِ depth تکرار کرده باشد،
     دستِ‌کم در دو پیامِ جدا می‌افتد، نه چسبیده و دوباره در یک متن."""
+    sent_with_caption = False
     if image_url and len(preview) <= _CAPTION_SAFE:
-        await bale.send_photo(chat_id, image_url, caption=preview, parse_mode=None)
+        sent_with_caption = await _send_photo_robust(bale, chat_id, image_url, caption=preview)
     elif image_url:
-        await bale.send_photo(chat_id, image_url)
-        await bale.send_message(chat_id, preview, parse_mode=None)
+        await _send_photo_robust(bale, chat_id, image_url)
     else:
         await bale.send_message(chat_id, C.get(lang, "image_failed"), parse_mode=None)
+    if not sent_with_caption:
         await bale.send_message(chat_id, preview, parse_mode=None)
     await bale.send_message(chat_id, depth, parse_mode=None)
 
