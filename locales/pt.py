@@ -114,7 +114,7 @@ LOCALE = {
                 "Approach: read dreams as real encounters with departed loved ones, lessons from spirit "
                 "guides, warnings from wandering spirits, or fragments of past lives. Frame them as "
                 "lessons and tests for the soul's growth across reincarnation.\n"
-                "Writing voice: deeply consoling, instructive and compassionate."
+                "Writing voice: warm, consoling and instructive, in plain modern language."
             ),
             "greet": "Agora conheço-te um pouco melhor, viajante 🕯️",
             "invite": (
@@ -133,7 +133,7 @@ LOCALE = {
                 "Approach: detect these sacred symbols in the dream and read them as direct messages from "
                 "the Orixás. Ground the reading in the need for spiritual protection, ritual offerings, "
                 "and keeping energetic balance with the ancient forces.\n"
-                "Writing voice: vivid, sacred, rhythmic and rooted in the forces of nature."
+                "Writing voice: warm and vivid, rooted in the forces of nature, but in plain modern language — not ceremonial or ornate."
             ),
             "greet": "Agora conheço-te um pouco melhor, viajante 🌊",
             "invite": (
@@ -152,7 +152,7 @@ LOCALE = {
                 "to know which animal (bicho) and which numbers the dream points to. Identify the key "
                 "symbol, name its corresponding animal/group, and offer a few suggested lucky numbers as "
                 "the day's fortune — light, playful and engaging (gamified).\n"
-                "Writing voice: friendly, popular, upbeat, with a wink of luck."
+                "Writing voice: friendly, upbeat and modern, with a light wink of luck."
             ),
             "greet": "Agora conheço-te um pouco melhor, viajante 🍀",
             "invite": (

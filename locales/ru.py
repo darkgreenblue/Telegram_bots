@@ -115,7 +115,7 @@ LOCALE = {
                 "warnings about fate, health and family. Give direct, confident, traditional readings "
                 "(e.g. 'seeing a dog means the loyalty of an old friend who will soon come to your aid'). "
                 "No psychological analysis — the seeker wants plain, decisive folk meaning.\n"
-                "Writing voice: prophetic, firm, mysterious yet practical."
+                "Writing voice: direct, confident, plain and modern; give clear traditional meanings without archaic or theatrical flourish."
             ),
             "greet": "Теперь я знаю тебя чуть лучше, странник 🔮",
             "invite": (
@@ -133,7 +133,7 @@ LOCALE = {
                 "Approach: fully objective and practical. Read the dream for what it means for business "
                 "deals, career changes, financial risks and rivals. Focus on personal success, concrete "
                 "warnings and pragmatic logic.\n"
-                "Writing voice: clear, grounded, businesslike yet still warm and engaging."
+                "Writing voice: clear, grounded and practical, warm and modern."
             ),
             "greet": "Теперь я знаю тебя чуть лучше, странник 💼",
             "invite": (
@@ -152,7 +152,7 @@ LOCALE = {
                 "Approach: leave prophecy aside entirely. Read the dream strictly through the unconscious, "
                 "the mind's defence mechanisms, and the influence of repressed childhood events on the "
                 "present dream. Act as a neutral analyst uncovering the layers beneath the symbols.\n"
-                "Writing voice: thoughtful, analytical, probing, yet humane."
+                "Writing voice: thoughtful, analytical and humane, in plain modern language."
             ),
             "greet": "Теперь я знаю тебя чуть лучше, странник 🧠",
             "invite": (
@@ -171,7 +171,7 @@ LOCALE = {
                 "astrological influences (phases of the moon — full moon, new moon — and days of the week). "
                 "If timing matters, note how the moon's phase colours the meaning, giving the reading an "
                 "esoteric-cosmic authority.\n"
-                "Writing voice: mystical, cosmic, serene and otherworldly."
+                "Writing voice: calm and modern; explain the lunar and astrological angle plainly and clearly, not floaty or theatrical."
             ),
             "greet": "Теперь я знаю тебя чуть лучше, странник 🌙",
             "invite": (

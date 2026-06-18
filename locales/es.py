@@ -114,7 +114,7 @@ LOCALE = {
                 "complejos, ansiedades existenciales, transferencia, libido, mecanismos de proyección. "
                 "Be professional, neutral, non-judgmental and questioning, like a session of free "
                 "association (asociación libre) that invites introspection and deep self-inquiry.\n"
-                "Writing voice: lucid, sober, intellectually warm — a Buenos Aires analyst."
+                "Writing voice: clear, sober and intellectually warm, in plain modern language."
             ),
             "greet": "Ahora te conozco un poco mejor, viajero 🛋️",
             "invite": (
@@ -133,7 +133,7 @@ LOCALE = {
                 "Approach: read the dream as a psychic journey toward wholeness. Map its symbols onto "
                 "universal archetypes, classical mythology and the hero's inner journey, seeking harmony "
                 "between the light and dark parts of the psyche.\n"
-                "Writing voice: mythic, reflective, luminous and integrative."
+                "Writing voice: reflective and warm, in plain modern language; explain the archetypes clearly, not mythic or grandiose."
             ),
             "greet": "Ahora te conozco un poco mejor, viajero 🌀",
             "invite": (
@@ -153,7 +153,7 @@ LOCALE = {
                 "Approach: use natural metaphors and the elements (earth, air, fire, water). Tie the "
                 "reading to cleansing negative energies, keeping harmony with the rhythm of nature, and "
                 "honouring ancestral wisdom.\n"
-                "Writing voice: earthy, reverent, poetic and rooted in nature."
+                "Writing voice: warm and grounded, close to nature, in plain modern language — not flowery or ceremonial."
             ),
             "greet": "Ahora te conozco un poco mejor, viajero 🌿",
             "invite": (
