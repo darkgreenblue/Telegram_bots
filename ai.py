@@ -203,6 +203,27 @@ def compose_full(preview: str, depth: str) -> str:
 
 # ===================== STT fallback (فقط در زنجیره‌ی fallback عمیق) =====================
 
+async def audio_duration(path: str) -> float | None:
+    """مدتِ یک فایلِ صوتی به ثانیه با ffprobe — دقیق و مستقل از فرمت/حجم.
+    برای هر فرمتی (ویسِ تلگرام، m4aِ آیفون، واتساپ، mp3، wav...) کار می‌کند.
+    None اگر ffprobe نبود یا فایل قابلِ‌خواندن نبود (آن‌وقت caller محدودیت را اعمال نمی‌کند)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        if proc.returncode == 0:
+            return float((out or b"").decode().strip())
+    except FileNotFoundError:
+        log.warning("ffprobe not installed — skipping precise duration check")
+    except (ValueError, OSError) as e:
+        log.warning("ffprobe duration failed: %s", e)
+    return None
+
+
 async def _to_mp3(audio_path: str) -> tuple[str, bool]:
     """تبدیلِ فایلِ صوتی به mp3 با ffmpeg.
     gpt-4o-mini-transcribe فایلِ OGG/Opusِ تلگرام را اغلب رد می‌کند (مشکلِ هدرِ کدک)؛

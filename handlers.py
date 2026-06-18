@@ -81,6 +81,34 @@ def _user_fields(obj: dict):
     return frm.get("id"), frm.get("username"), frm.get("first_name")
 
 
+# پسوندهای صوتیِ متداول (ویس‌رکوردرِ گوشی‌ها، واتساپ، آیفون m4a، ...)
+_AUDIO_EXTS = {"ogg", "oga", "opus", "mp3", "m4a", "mp4", "aac",
+               "wav", "webm", "flac", "amr", "3gp", "3gpp"}
+
+
+def _extract_audio_input(msg: dict):
+    """ورودیِ صوتی می‌تواند به سه شکل بیاید و هر سه را به یک «خوابِ صوتی» می‌بریم:
+      voice    → ویسِ بومیِ تلگرام/بله (OGG)؛ همیشه duration دارد.
+      audio    → فایلِ صوتی (مثلِ ویس‌مموی آیفون که فوروارد می‌شود)؛ معمولاً duration دارد.
+      document → هر فایل؛ فقط اگر mime یا پسوندش صوتی باشد قبول می‌شود؛ duration ندارد
+                 (مدتش بعد از دانلود با ffprobe دقیق سنجیده می‌شود).
+    خروجی: {file_id, duration|None}  یا None اگر اصلاً صوتی نبود."""
+    v = msg.get("voice")
+    if v and v.get("file_id"):
+        return {"file_id": v["file_id"], "duration": v.get("duration")}
+    a = msg.get("audio")
+    if a and a.get("file_id"):
+        return {"file_id": a["file_id"], "duration": a.get("duration")}
+    d = msg.get("document")
+    if d and d.get("file_id"):
+        mime = (d.get("mime_type") or "").lower()
+        name = (d.get("file_name") or "").lower()
+        ext = name.rsplit(".", 1)[-1] if "." in name else ""
+        if mime.startswith("audio/") or ext in _AUDIO_EXTS:
+            return {"file_id": d["file_id"], "duration": None}
+    return None
+
+
 def _lock_key(bale, user_id, scope):
     return (bale.platform, user_id, scope)
 
@@ -160,11 +188,11 @@ async def _narrate(bale, chat_id, lang):
             text = lines[i] if i < n else patience[(i - n) % len(patience)]
             try:
                 if not sent_once:
-                    res = await bale.send_message(chat_id, text)
+                    res = await bale.send_message(chat_id, text, parse_mode=None)
                     sent_once = True
                     msg_id = (res or {}).get("message_id") if isinstance(res, dict) else None
                 elif msg_id is not None:
-                    await bale.edit_message_text(chat_id, msg_id, text)
+                    await bale.edit_message_text(chat_id, msg_id, text, parse_mode=None)
             except Exception:
                 pass
             i += 1
@@ -213,8 +241,9 @@ async def _handle_message(bale, msg: dict):
             await _send_language_picker(bale, chat_id)
             return
 
-    if "voice" in msg:
-        await _handle_dream_input(bale, chat_id, user_id, "voice", voice=msg["voice"])
+    audio = _extract_audio_input(msg)
+    if audio:
+        await _handle_dream_input(bale, chat_id, user_id, "voice", voice=audio)
         return
 
     text = (msg.get("text") or "").strip()
@@ -340,16 +369,20 @@ async def _handle_dream_input(bale, chat_id, user_id, source, voice=None, text=N
         return
 
     if source == "voice":
-        # بله مدتِ صوت را به «میلی‌ثانیه» گزارش می‌کند، تلگرام به «ثانیه». به ثانیه نرمال می‌کنیم.
-        dur = (voice or {}).get("duration", 0) or 0
-        if bale.platform == "bale":
-            dur = dur / 1000
-        if dur < MIN_VOICE_DURATION:
-            await bale.send_message(chat_id, C.get(lang, "voice_too_short"))
-            return
-        if dur > MAX_VOICE_DURATION:
-            await bale.send_message(chat_id, C.get(lang, "voice_too_long"))
-            return
+        # بررسیِ سریعِ مدت وقتی پیام‌رسان خودش گزارش کرده (ویس و اغلبِ audioها).
+        # بله مدت را به «میلی‌ثانیه» می‌دهد، تلگرام به «ثانیه». به ثانیه نرمال می‌کنیم.
+        # اگر duration نبود (مثلِ document/فایلِ فورواردشده)، اینجا رد نمی‌کنیم؛
+        # بعد از دانلود با ffprobe دقیق سنجیده می‌شود (مستقل از فرمت/حجم).
+        dur = (voice or {}).get("duration")
+        if dur:
+            if bale.platform == "bale":
+                dur = dur / 1000
+            if dur < MIN_VOICE_DURATION:
+                await bale.send_message(chat_id, C.get(lang, "voice_too_short"))
+                return
+            if dur > MAX_VOICE_DURATION:
+                await bale.send_message(chat_id, C.get(lang, "voice_too_long"))
+                return
         payload = voice["file_id"]
     else:
         if len(text) < MIN_TEXT_CHARS:
@@ -603,6 +636,18 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                     await _staged(
                         bale.download_file(file_path, tmp_path),
                         DOWNLOAD_TIMEOUT, "download", bale.platform)
+                    # سنجشِ دقیقِ مدت با ffprobe — مستقل از فرمت/حجم. مخصوصاً برای فایل‌هایی
+                    # که مدت‌شان را گزارش نکرده‌اند (document/m4aِ فورواردشده) تنها بررسیِ معتبر است.
+                    real_dur = await ai.audio_duration(tmp_path)
+                    if real_dur is not None and not (MIN_VOICE_DURATION <= real_dur <= MAX_VOICE_DURATION):
+                        log.info("[%s] audio duration %.1fs out of [%s,%s] → rejected",
+                                 bale.platform, real_dur, MIN_VOICE_DURATION, MAX_VOICE_DURATION)
+                        narrator.cancel()
+                        await _refund()
+                        await db.clear_pending(user_id)
+                        key = "voice_too_short" if real_dur < MIN_VOICE_DURATION else "voice_too_long"
+                        await bale.send_message(chat_id, C.get(lang, key))
+                        return
                     result = await _staged(
                         ai.process_voice_dream(tmp_path, lang, persona, profile, tier),
                         INTERPRET_TIMEOUT, "interpret-voice", bale.platform)
@@ -748,7 +793,7 @@ async def _try_resume_pending_dream(bale, chat_id, user_id) -> bool:
 async def _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser):
     kb = _view_full_inline(lang, dream_id)
     if image_url and len(teaser) <= _CAPTION_SAFE:
-        await bale.send_photo(chat_id, image_url, caption=teaser, reply_markup=kb)
+        await bale.send_photo(chat_id, image_url, caption=teaser, reply_markup=kb, parse_mode=None)
     elif image_url:
         await bale.send_photo(chat_id, image_url)
         await bale.send_message(chat_id, teaser, reply_markup=kb, parse_mode=None)
@@ -763,7 +808,7 @@ async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
     عمداً preview را به depth نمی‌چسبانیم: اگر مدل preview را داخلِ depth تکرار کرده باشد،
     دستِ‌کم در دو پیامِ جدا می‌افتد، نه چسبیده و دوباره در یک متن."""
     if image_url and len(preview) <= _CAPTION_SAFE:
-        await bale.send_photo(chat_id, image_url, caption=preview)
+        await bale.send_photo(chat_id, image_url, caption=preview, parse_mode=None)
     elif image_url:
         await bale.send_photo(chat_id, image_url)
         await bale.send_message(chat_id, preview, parse_mode=None)
