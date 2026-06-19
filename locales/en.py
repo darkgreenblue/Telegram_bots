@@ -115,13 +115,13 @@ LOCALE = {
                 "and induction practices so the dreamer can reach lucidity next time.\n"
                 "Writing voice: clear, encouraging and practical — a knowledgeable modern guide; plain everyday language."
             ),
-            "greet": "Now I know you a little better, wayfarer 🧭",
+            "greet": "Now I know you a little better 🧭",
             "invite": (
-                "Record your dream and send it to me, so I can chart its signs and patterns — "
-                "a *voice message* 🎙 (or write it, if you prefer)."
+                "Send me a voice note of your dream and I'll chart its signs and patterns — "
+                "a *voice message* 🎙 (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, mapped in light 🎨✨",
-            "error": "The thread of the dream slipped for a moment 🌫️ Try again; your quota is safe with me.",
+            "error": "Lost the thread for a second 🌫️ Try again — your quota is still good.",
         },
         "therapeutic": {
             "prompt": (
@@ -134,13 +134,13 @@ LOCALE = {
                 "exercises to ease them. No prophecy, no mysticism — grounded, kind, actionable.\n"
                 "Writing voice: warm, validating and plain-spoken, like a grounded modern therapist who truly listens."
             ),
-            "greet": "Now I know you a little better, wayfarer 🧠",
+            "greet": "Now I know you a little better 🧠",
             "invite": (
-                "Tell me your dream, and together we'll trace what it carries from your waking life — "
-                "a *voice message* 🎙 (or write it, if you prefer)."
+                "Tell me your dream and together we'll trace what it's carrying from your waking life — "
+                "a *voice message* 🎙 (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, given a calming form 🎨✨",
-            "error": "Our thread slipped for a moment 🌫️ Try again; your quota is safe with me.",
+            "error": "Lost the thread for a second 🌫️ Try again — your quota is still good.",
         },
         "cayce": {
             "prompt": (
@@ -156,31 +156,31 @@ LOCALE = {
                 "recurring guidance.\n"
                 "Writing voice: warm, calm and reassuring; spiritually grounded but plain and modern, never floaty or theatrical."
             ),
-            "greet": "Now I know you a little better, wayfarer 🔮",
+            "greet": "Now I know you a little better 🔮",
             "invite": (
-                "Share your dream with me, so I may read the guidance it holds for your path — "
-                "a *voice message* 🎙 (or write it, if you prefer)."
+                "Share your dream with me and I'll read the guidance it holds for you — "
+                "a *voice message* 🎙 (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, revealed as quiet guidance 🎨✨",
-            "error": "The connection grew still for a moment 🌫️ Try again; your quota is safe with me.",
+            "error": "Lost the connection for a second 🌫️ Try again — your quota is still good.",
         },
     },
 
-    "voice_too_short": "Your whisper was brief, wayfarer 🌙 Tell your dream a little more fully so I can read it.",
-    "voice_too_long":  "Your dream runs very long 🌌 Tell it a little more concisely (under 10 minutes) so none is lost.",
-    "text_too_short":  "You wrote rather little ✍️ Tell me a bit more so I can unveil its secret.",
+    "voice_too_short": "That was a bit short 🌙 Tell your dream in a little more detail so I can read it.",
+    "voice_too_long":  "Your dream is quite long 🌌 Try to keep it under 5 minutes so nothing gets lost.",
+    "text_too_short":  "That's not quite enough to go on ✍️ Tell me a bit more and I'll dig into it.",
 
-    "confirm_voice": "I heard the voice of your dream 🌙 Shall I take this one for interpretation?",
-    "confirm_text":  "I read your dream 🌙 Shall I take this one for interpretation?",
+    "confirm_voice": "Got your dream 🌙 Ready to interpret this one?",
+    "confirm_text":  "Read your dream 🌙 Ready to interpret this one?",
     "btn_confirm":   "✅ Yes, interpret it",
     "btn_cancel":    "🔁 I'll send it again",
-    "cancelled":     "As you wish, wayfarer 🌙 Whenever you're ready, tell me your dream again.",
+    "cancelled":     "No worries 🌙 Send it whenever you're ready.",
 
     "daily_limit": (
-        "Tonight I read your dream and we journeyed together through the Realm of Dreams 🌙\n"
-        "I interpret only one dream each night; tomorrow night I'll be waiting for you again ✨"
+        "Tonight I read your dream and we journeyed through the Realm of Dreams together 🌙\n"
+        "I can only take one dream a night — I'll be here again tomorrow ✨"
     ),
-    "image_failed": "The image of your dream was lost in the mist this time 🌫️ but here is its interpretation:",
+    "image_failed": "The image got lost in the mist this time 🌫️ but here's the interpretation:",
     "btn_view_full": "🔓 Unlock the full interpretation",
 
     "narration": [
@@ -196,42 +196,42 @@ LOCALE = {
         "I am near… the last veils are drawing aside… 🌌",
     ],
     "narration_patience": [
-        "Stay with me a little longer, wayfarer… 🍇",
+        "Hang on just a little longer… 🍇",
         "Patience turns the unripe grape to sweetness ✨",
-        "Deep dreams yield their secrets slowly… linger with me a moment more 🌙",
-        "We are close… patience is the key to every hidden treasure 🗝️",
+        "Deep dreams take time to open up… stay with me a moment more 🌙",
+        "Almost there… patience is the key to every hidden treasure 🗝️",
     ],
 
     "catchphrase": "Give me your hand and be my companion in the Realm of Dreams 🌙",
     "pay_success_tmpl": (
-        "Payment received, and I have taken your hand, companion! 🤝✨\n"
-        "From now, for *{days} days*, we walk side by side through the Realm of Dreams 🌙"
+        "Payment received — I've got your hand, companion! 🤝✨\n"
+        "For the next *{days} days* we walk side by side through the Realm of Dreams 🌙"
     ),
     "referral_reward": (
-        "The one you brought to the Realm of Dreams took my hand and became my companion 🎁\n"
-        "I've granted you 7 days of companionship as a gift; my thanks are with you ✨"
+        "The person you brought to the Realm of Dreams took my hand and joined us 🎁\n"
+        "You've got 7 gift days of companionship — thank you ✨"
     ),
     "sub_active_tmpl": (
-        "You are my companion in the Realm of Dreams 🌙\n"
-        "For *{days} more days* we walk side by side ✨"
+        "You're my companion in the Realm of Dreams 🌙\n"
+        "*{days} more days* walking side by side ✨"
     ),
-    "sub_inactive_head": "You are not yet my companion 🌙",
-    "need_subscription_prefix": "To unlock the full interpretation, you need the key to this gate. 🗝️",
+    "sub_inactive_head": "You haven't joined me yet 🌙",
+    "need_subscription_prefix": "To unlock the full interpretation, you'll need the key to this gate. 🗝️",
     "paywall_offer": (
-        "Take my hand and journey with me into the depths of your nightly dreams:\n\n"
+        "Take my hand and come with me into the depths of your nightly dreams:\n\n"
         "🎁 1-month companionship 👈 50% better value\n"
         "💎 3-month companionship 👈 70% better value\n"
         "👇"
     ),
-    "paywall_intro": "Every journey needs provisions; choose one:",
+    "paywall_intro": "Every journey needs provisions; pick one:",
 
     "invite_text_tmpl": (
-        "For everyone you bring to the *Realm of Dreams*, you receive 7 gift days of companionship "
-        "with their first companionship 🎁\n\n"
+        "For everyone you bring to the *Realm of Dreams*, you get 7 free days of companionship "
+        "when they subscribe 🎁\n\n"
         "Your link:\n{link}"
     ),
-    "new_dream_greet": "Another night, and a dream I long to hear! 🌙",
-    "returning_welcome": "Blessed be your return to the *Realm of Dreams* 🌙",
+    "new_dream_greet": "Another night, another dream — let's hear it! 🌙",
+    "returning_welcome": "Welcome back to the *Realm of Dreams* 🌙",
 
     "tiers": {"week": "7 days", "month": "1 month", "quarter": "3 months"},
 
@@ -247,5 +247,5 @@ LOCALE = {
     "onboarding_prev_btn": "◀️ Previous question",
 
     "lang_changed": "Language set to *English* 🌙 Let us begin anew…",
-    "processing_busy": "One moment, wayfarer — I'm still with your previous dream… 🌙",
+    "processing_busy": "One moment — I'm still working on your last dream… 🌙",
 }

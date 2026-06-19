@@ -116,13 +116,13 @@ LOCALE = {
                 "association (asociación libre) that invites introspection and deep self-inquiry.\n"
                 "Writing voice: clear, sober and intellectually warm, in plain modern language."
             ),
-            "greet": "Ahora te conozco un poco mejor, viajero 🛋️",
+            "greet": "Ahora te conozco un poco mejor 🛋️",
             "invite": (
-                "Cuéntame tu sueño, y juntos distinguiremos lo manifiesto de lo latente — "
-                "un *mensaje de voz* 🎙 (o escríbelo, si prefieres)."
+                "Cuéntame tu sueño y juntos vamos a distinguir lo manifiesto de lo latente — "
+                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño tomó forma desde lo latente 🎨✨",
-            "error": "El hilo de la sesión se cortó un instante 🌫️ Inténtalo de nuevo; tu cupo está a salvo conmigo.",
+            "error": "El hilo se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",
         },
         "jungian": {
             "prompt": (
@@ -135,13 +135,13 @@ LOCALE = {
                 "between the light and dark parts of the psyche.\n"
                 "Writing voice: reflective and warm, in plain modern language; explain the archetypes clearly, not mythic or grandiose."
             ),
-            "greet": "Ahora te conozco un poco mejor, viajero 🌀",
+            "greet": "Ahora te conozco un poco mejor 🌀",
             "invite": (
-                "Cuéntame tu sueño, y descifraremos los arquetipos que habitan en él — "
-                "un *mensaje de voz* 🎙 (o escríbelo, si prefieres)."
+                "Cuéntame tu sueño y vamos a descifrar los arquetipos que viven en él — "
+                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño se reveló en sus arquetipos 🎨✨",
-            "error": "El hilo se cortó un instante 🌫️ Inténtalo de nuevo; tu cupo está a salvo conmigo.",
+            "error": "El hilo se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",
         },
         "indigenous": {
             "prompt": (
@@ -155,31 +155,31 @@ LOCALE = {
                 "honouring ancestral wisdom.\n"
                 "Writing voice: warm and grounded, close to nature, in plain modern language — not flowery or ceremonial."
             ),
-            "greet": "Ahora te conozco un poco mejor, viajero 🌿",
+            "greet": "Ahora te conozco un poco mejor 🌿",
             "invite": (
-                "Cuéntame tu sueño, y leeremos el viaje que tu alma emprendió — "
-                "un *mensaje de voz* 🎙 (o escríbelo, si prefieres)."
+                "Cuéntame tu sueño y vamos a leer el viaje que hizo tu alma — "
+                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño cobró vida como un viaje del alma 🎨✨",
-            "error": "El puente con los espíritus tembló un instante 🌫️ Inténtalo de nuevo; tu cupo está a salvo conmigo.",
+            "error": "El puente se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",
         },
     },
 
-    "voice_too_short": "Tu susurro fue breve, viajero 🌙 Cuéntame tu sueño un poco más para poder leerlo.",
-    "voice_too_long":  "Tu sueño es muy largo 🌌 Cuéntalo algo más conciso (menos de 10 minutos) para no perder nada.",
-    "text_too_short":  "Escribiste algo escueto ✍️ Dime un poco más para desvelar su secreto.",
+    "voice_too_short": "El mensaje fue un poco corto 🌙 Cuéntame tu sueño con un poco más de detalle para poder leerlo.",
+    "voice_too_long":  "Tu sueño es bastante largo 🌌 Cuéntalo de forma más concisa (menos de 5 minutos) para no perder nada.",
+    "text_too_short":  "Escribiste poco ✍️ Dime un poco más y le saco el secreto.",
 
-    "confirm_voice": "Escuché la voz de tu sueño 🌙 ¿Tomo este para interpretarlo?",
-    "confirm_text":  "Leí tu sueño 🌙 ¿Tomo este para interpretarlo?",
+    "confirm_voice": "Recibí tu sueño 🌙 ¿Lo tomo para interpretarlo?",
+    "confirm_text":  "Leí tu sueño 🌙 ¿Lo tomo para interpretarlo?",
     "btn_confirm":   "✅ Sí, interprétalo",
     "btn_cancel":    "🔁 Quiero enviarlo de nuevo",
-    "cancelled":     "Como quieras, viajero 🌙 Cuando estés listo, cuéntame tu sueño otra vez.",
+    "cancelled":     "Sin problema 🌙 Cuando estés listo, cuéntame tu sueño.",
 
     "daily_limit": (
         "Esta noche leí tu sueño y viajamos juntos por el Reino de los Sueños 🌙\n"
-        "Interpreto solo un sueño cada noche; mañana por la noche te esperaré de nuevo ✨"
+        "Solo interpreto un sueño por noche — mañana te espero de nuevo ✨"
     ),
-    "image_failed": "La imagen de tu sueño se perdió en la niebla esta vez 🌫️ pero aquí está su interpretación:",
+    "image_failed": "La imagen se perdió en la niebla esta vez 🌫️ pero aquí está la interpretación:",
     "btn_view_full": "🔓 Abrir la interpretación completa",
 
     "narration": [
@@ -195,29 +195,29 @@ LOCALE = {
         "Estoy cerca… los últimos velos se apartan… 🌌",
     ],
     "narration_patience": [
-        "Quédate conmigo un poco más, viajero… 🍇",
+        "Quédate un momento más… 🍇",
         "La paciencia convierte la uva verde en dulzura ✨",
-        "Los sueños profundos revelan su secreto más tarde… quédate un momento más 🌙",
-        "Estamos cerca… la paciencia es la llave de todo tesoro oculto 🗝️",
+        "Los sueños profundos revelan su secreto despacio… quédate un momento más 🌙",
+        "Ya casi… la paciencia es la llave de todo tesoro oculto 🗝️",
     ],
 
     "catchphrase": "Dame tu mano y sé mi compañero en el Reino de los Sueños 🌙",
     "pay_success_tmpl": (
-        "¡Pago recibido, y he tomado tu mano, compañero! 🤝✨\n"
-        "Desde ahora, durante *{days} días*, caminamos juntos por el Reino de los Sueños 🌙"
+        "¡Pago recibido — te tomo de la mano, compañero! 🤝✨\n"
+        "A partir de ahora, por *{days} días*, caminamos juntos por el Reino de los Sueños 🌙"
     ),
     "referral_reward": (
         "Quien trajiste al Reino de los Sueños tomó mi mano y se hizo mi compañero 🎁\n"
-        "Te he regalado 7 días de compañía; mi gratitud te acompaña ✨"
+        "Te regalo 7 días de compañía — ¡gracias! ✨"
     ),
     "sub_active_tmpl": (
         "Eres mi compañero en el Reino de los Sueños 🌙\n"
-        "Durante *{days} días* más caminamos juntos ✨"
+        "*{days} días* más caminamos juntos ✨"
     ),
-    "sub_inactive_head": "Aún no eres mi compañero 🌙",
+    "sub_inactive_head": "Todavía no eres mi compañero 🌙",
     "need_subscription_prefix": "Para abrir la interpretación completa, necesitas la llave de esta puerta. 🗝️",
     "paywall_offer": (
-        "Toma mi mano y viaja conmigo a las profundidades de tus sueños nocturnos:\n\n"
+        "Dame tu mano y viaja conmigo a las profundidades de tus sueños nocturnos:\n\n"
         "🎁 Compañía de 1 mes 👈 50% más conveniente\n"
         "💎 Compañía de 3 meses 👈 70% más conveniente\n"
         "👇"
@@ -225,12 +225,12 @@ LOCALE = {
     "paywall_intro": "Todo viaje necesita provisiones; elige una:",
 
     "invite_text_tmpl": (
-        "Por cada persona que traigas al *Reino de los Sueños*, recibes 7 días de compañía de regalo "
-        "con su primera compañía 🎁\n\n"
+        "Por cada persona que traigas al *Reino de los Sueños*, recibes 7 días de compañía gratis "
+        "con su primera suscripción 🎁\n\n"
         "Tu enlace:\n{link}"
     ),
-    "new_dream_greet": "¡Otra noche, y un sueño que anhelo escuchar! 🌙",
-    "returning_welcome": "Bendita sea tu vuelta al *Reino de los Sueños* 🌙",
+    "new_dream_greet": "¡Otra noche, otro sueño — cuéntamelo! 🌙",
+    "returning_welcome": "¡Bienvenido de vuelta al *Reino de los Sueños*! 🌙",
 
     "tiers": {"week": "7 días", "month": "1 mes", "quarter": "3 meses"},
 
@@ -246,5 +246,5 @@ LOCALE = {
     "onboarding_prev_btn": "◀️ Pregunta anterior",
 
     "lang_changed": "Idioma configurado en *Español* 🌙 Empecemos de nuevo…",
-    "processing_busy": "Un momento, viajero — aún estoy con tu sueño anterior… 🌙",
+    "processing_busy": "Un momento — todavía estoy con tu sueño anterior… 🌙",
 }
