@@ -28,12 +28,12 @@ LOCALE = {
     "onboarding_start_btn": "I'm ready for the {count} key questions ✨",
     "progress_tmpl": "🔮 Question {n} of {total}",
     "choose_persona_first": "Let's get to know each other with a few short questions 🌌",
-    "persona_change_prompt": "Choose the lens through which I shall read your dreams 🎭",
+    "persona_change_prompt": "Pick the lens you'd like me to read your dreams through 🎭",
 
     "onboarding": [
         {
             "key": "persona", "is_persona": True,
-            "prompt": "Tell me, wayfarer… when you wake from a strange dream, which voice rises first within you?",
+            "prompt": "When you wake up from a strange dream, what's the first thing that comes to mind? 💭",
             "options": [
                 ("lucid",       "A signal to decode — I want to master my dreams. 🧭"),
                 ("therapeutic", "A mirror of my stress and inner life. 🧠"),
@@ -64,7 +64,7 @@ LOCALE = {
         },
         {
             "key": "nature_refuge",
-            "prompt": "If you sought peace in the arms of nature, where would you go? 🌿",
+            "prompt": "If you wanted to find some peace out in nature, where would you go? 🌿",
             "options": [
                 ("water",    "By the sea or a river, where water sings. 🌊"),
                 ("forest",   "Deep in the forest, among old trees and the scent of earth. 🌲"),
@@ -246,6 +246,6 @@ LOCALE = {
 
     "onboarding_prev_btn": "◀️ Previous question",
 
-    "lang_changed": "Language set to *English* 🌙 Let us begin anew…",
+    "lang_changed": "Language set to *English* 🌙 Let's start fresh…",
     "processing_busy": "One moment — I'm still working on your last dream… 🌙",
 }

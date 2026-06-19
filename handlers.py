@@ -297,6 +297,10 @@ async def _handle_message(bale, msg: dict):
     if action == "reset_test" and RESET_BUTTON_ENABLED:
         await db.reset_user(user_id)
         log.info("[%s] RESET user=%s by reset_test button", bale.platform, user_id)
+        # کیبوردِ پایین (شاملِ خودِ دکمه‌ی ریست) را دوباره بفرست تا بعد از ریست هم در دسترس بماند —
+        # وگرنه چون یوزر «جدید» می‌شود و وارد آنبوردینگ می‌شود، دکمه تا پایانِ آنبوردینگ ناپدید می‌ماند.
+        await bale.send_message(chat_id, "🔄 ریست شد — انگار یه یوزرِ تازه!",
+                                reply_markup=_main_reply_kb(bale, lang), parse_mode=None)
         await _send_welcome(bale, chat_id, lang)
         return
 

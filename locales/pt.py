@@ -24,26 +24,26 @@ LOCALE = {
     "welcome_intro": (
         "Olá, seja bem-vindo 🌙\n"
         "Eu sou o *Grande Intérprete*, guardião do *Reino dos Sonhos* — onde cada sonho é uma porta para um segredo oculto.\n"
-        "Vamos primeiro nos conhecer: farei {count} perguntas curtas e depois leremos o teu sonho juntos 💫"
+        "Primeiro vamos nos conhecer: vou te fazer {count} perguntas curtas e depois a gente lê o seu sonho juntos 💫"
     ),
-    "onboarding_start_btn": "Pronto para as {count} perguntas-chave ✨",
+    "onboarding_start_btn": "Pronto, bora com as {count} perguntas ✨",
     "progress_tmpl": "🔮 Pergunta {n} de {total}",
-    "choose_persona_first": "Primeiro, deixa-me conhecer-te com algumas perguntas curtas 🌌",
-    "persona_change_prompt": "Escolhe a janela pela qual devo ler os teus sonhos 🎭",
+    "choose_persona_first": "Primeiro vamos nos conhecer com umas perguntas curtas 🌌",
+    "persona_change_prompt": "Escolhe o estilo que você quer que eu leia seus sonhos 🎭",
 
     "onboarding": [
         {
             "key": "persona", "is_persona": True,
-            "prompt": "Diz-me, viajante… ao despertares de um sonho estranho, que voz ressoa primeiro em ti?",
+            "prompt": "Quando você acorda de um sonho estranho, qual é a primeira coisa que vem à cabeça? 💭",
             "options": [
-                ("spiritist",   "Um encontro do espírito: mensagens de quem partiu e dos guias. 🕯️"),
+                ("spiritist",   "Um encontro do espírito: recados de quem partiu e dos guias. 🕯️"),
                 ("afro",        "Um recado dos Orixás e das forças da natureza. 🌊"),
                 ("lottery",     "Um sinal de sorte — que bicho e que números ele aponta? 🍀"),
             ],
         },
         {
             "key": "life_focus",
-            "prompt": "Nestes dias, onde mora mais o teu coração? 🍃",
+            "prompt": "Nesses dias, onde está mais a sua cabeça e o seu coração? 🍃",
             "options": [
                 ("money",    "Trabalho e sustento. 💼"),
                 ("love",     "Amor e relação. ❤️"),
@@ -55,51 +55,51 @@ LOCALE = {
         },
         {
             "key": "inner_compass",
-            "prompt": "E nas decisões da vida, em que mais te apoias? 🧭",
+            "prompt": "E nas decisões da vida, em que você mais se apoia? 🧭",
             "options": [
-                ("reason",    "A razão e a lógica. ⚖️"),
-                ("heart",     "O coração e o sentimento. 💖"),
-                ("intuition", "A intuição e o sentir interior. 👁️"),
-                ("faith",     "A fé e a crença. 🕊️"),
+                ("reason",    "Na razão e na lógica. ⚖️"),
+                ("heart",     "No coração e no que sinto. 💖"),
+                ("intuition", "Na intuição e no meu sentir interior. 👁️"),
+                ("faith",     "Na fé e nas minhas crenças. 🕊️"),
             ],
         },
         {
             "key": "nature_refuge",
-            "prompt": "Se buscasses paz no colo da natureza, para onde irias? 🌿",
+            "prompt": "Se você quisesse relaxar na natureza, para onde iria? 🌿",
             "options": [
-                ("water",    "Junto ao mar ou a um rio, onde a água canta. 🌊"),
-                ("forest",   "No fundo da floresta, entre árvores antigas e o cheiro da terra. 🌲"),
-                ("mountain", "O cume de uma montanha, onde o céu está perto e o ar é frio e claro. ⛰️"),
-                ("fire",     "Contemplar as chamas numa noite estrelada. 🔥"),
+                ("water",    "Perto do mar ou de um rio, onde dá pra ouvir a água. 🌊"),
+                ("forest",   "No fundo da floresta, entre árvores antigas e o cheiro de terra. 🌲"),
+                ("mountain", "No alto de uma montanha, onde o céu está perto e o ar é frio e limpo. ⛰️"),
+                ("fire",     "Olhando o fogo numa noite estrelada. 🔥"),
             ],
         },
         {
             "key": "time_travel",
-            "prompt": "Se pudesses viajar no tempo para mudar ou reviver um único instante, o que farias? ⏳",
+            "prompt": "Se você pudesse viajar no tempo para mudar ou reviver um único momento, o que faria? ⏳",
             "options": [
-                ("past",    "Voltar ao passado para reparar um erro ou rever alguém. 🔙"),
-                ("future",  "Ir ao futuro para ver o fruto dos meus esforços. 🔜"),
-                ("present", "Ficar neste instante; o presente é o que mais me importa. ⏸️"),
+                ("past",    "Voltar ao passado para consertar um erro ou rever alguém. 🔙"),
+                ("future",  "Ir ao futuro para ver no que deram os meus esforços. 🔜"),
+                ("present", "Ficar neste momento; o presente é o que mais me importa. ⏸️"),
             ],
         },
         {
             "key": "dream_frequency",
-            "prompt": "Normalmente, com que frequência tens sonhos que chamam a tua atenção? 🌙",
+            "prompt": "Normalmente, com que frequência você tem sonhos que chamam a sua atenção? 🌙",
             "options": [
                 ("often",   "Muito, quase toda noite ou na maioria das noites. 🌌"),
-                ("weekly",  "Moderadamente, uma ou duas vezes por semana. 📅"),
-                ("monthly", "Pouco, algumas vezes por mês (geralmente quando minha mente está ocupada). 📆"),
+                ("weekly",  "Mais ou menos, uma ou duas vezes por semana. 📅"),
+                ("monthly", "Pouco, algumas vezes por mês (geralmente quando estou com a cabeça cheia). 📆"),
                 ("seldom",  "Muito raramente, talvez algumas vezes por ano. 🌠"),
             ],
         },
         {
             "key": "dream_recall",
-            "prompt": "Ao acordar, quanto dos detalhes dos teus sonhos costumas lembrar? 🎞️",
+            "prompt": "Ao acordar, quanto dos detalhes dos seus sonhos você costuma lembrar? 🎞️",
             "options": [
                 ("vivid",    "Como um filme nítido, com todas as cores, diálogos e detalhes. 🎬"),
-                ("gist",     "O todo da história e os acontecimentos principais. 📝"),
-                ("fragment", "Apenas uma cena, uma imagem ou uma sensação vaga. 🖼️"),
-                ("fading",   "Esvai-se depressa; mal abro os olhos, tudo se vai. 💨"),
+                ("gist",     "A história no geral e o principal que aconteceu. 📝"),
+                ("fragment", "Só uma cena, uma imagem ou uma sensação vaga. 🖼️"),
+                ("fading",   "Some rápido; assim que abro os olhos, vai tudo embora. 💨"),
             ],
         },
     ],
@@ -121,7 +121,7 @@ LOCALE = {
                 "Me conta o seu sonho pra eu ler o que o seu espírito viveu — "
                 "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
             ),
-            "image_caption": "O teu sonho ganhou forma entre os dois mundos 🎨✨",
+            "image_caption": "O seu sonho ganhou forma entre os dois mundos 🎨✨",
             "error": "A ponte com o mundo espiritual oscilou por um instante 🌫️ Tenta de novo; sua cota está guardada.",
         },
         "afro": {
@@ -140,7 +140,7 @@ LOCALE = {
                 "Me conta o seu sonho pra eu ouvir o recado dos Orixás — "
                 "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
             ),
-            "image_caption": "O teu sonho acendeu-se com as forças da natureza 🎨✨",
+            "image_caption": "O seu sonho se acendeu com as forças da natureza 🎨✨",
             "error": "A ligação com as forças oscilou por um instante 🌫️ Tenta de novo; sua cota está guardada.",
         },
         "lottery": {
@@ -159,51 +159,51 @@ LOCALE = {
                 "Me conta o seu sonho pra eu descobrir o bicho e os números que ele aponta — "
                 "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
             ),
-            "image_caption": "O teu sonho virou imagem — e talvez sorte 🎨✨",
+            "image_caption": "O seu sonho virou imagem — e talvez sorte 🎨✨",
             "error": "O fio do sonho se cortou por um instante 🌫️ Tenta de novo; sua cota está guardada.",
         },
     },
 
     "voice_too_short": "A mensagem ficou curtinha 🌙 Me conta o sonho com um pouco mais de detalhe pra eu conseguir ler.",
-    "voice_too_long":  "Seu sonho ficou bem longo 🌌 Tenta contar de forma mais breve (até 5 minutos) pra não perder nada.",
-    "text_too_short":  "Escreveu pouco ✍️ Me conta um pouco mais e eu desvendo o segredo.",
+    "voice_too_long":  "Seu sonho ficou bem longo 🌌 Tenta contar mais resumido (até 5 minutos) pra não perder nada.",
+    "text_too_short":  "Com isso não tenho muito pra trabalhar ✍️ Me conta um pouco mais e eu desvendo.",
 
-    "confirm_voice": "Recebi o seu sonho 🌙 Levo esse pra interpretar?",
-    "confirm_text":  "Li o seu sonho 🌙 Levo esse pra interpretar?",
+    "confirm_voice": "Recebi o seu sonho 🌙 Interpreto esse?",
+    "confirm_text":  "Li o seu sonho 🌙 Interpreto esse?",
     "btn_confirm":   "✅ Sim, interpreta",
     "btn_cancel":    "🔁 Quero enviar de novo",
-    "cancelled":     "Tudo bem 🌙 Quando estiver pronto, me conta o sonho.",
+    "cancelled":     "Tranquilo 🌙 Me manda quando estiver pronto.",
 
     "daily_limit": (
-        "Esta noite li o seu sonho e viajamos juntos pelo Reino dos Sonhos 🌙\n"
-        "Só interpreto um sonho por noite — amanhã estarei aqui de novo ✨"
+        "Esta noite li o seu sonho e demos uma volta juntos pelo Reino dos Sonhos 🌙\n"
+        "Só pego um sonho por noite — amanhã estou aqui de novo ✨"
     ),
-    "image_failed": "A imagem do sonho se perdeu na névoa desta vez 🌫️ mas aqui está a interpretação:",
+    "image_failed": "A imagem do sonho se perdeu na névoa dessa vez 🌫️ mas aqui está a interpretação:",
     "btn_view_full": "🔓 Abrir a interpretação completa",
 
     "narration": [
-        "Estou a escutar o sussurro do teu sonho… 🕯️",
-        "Levo a tua voz ao coração do Reino dos Sonhos… 🌙",
-        "Caminho pelos corredores do teu sono… 🚪",
-        "Os sinais surgem um a um da névoa… 🌫️",
-        "As estrelas sussurram-me os seus segredos ao ouvido… ✨",
-        "Disponho os símbolos antigos lado a lado… 📜",
+        "Estou ouvindo o sussurro do seu sonho… 🕯️",
+        "Levo a sua voz ao coração do Reino dos Sonhos… 🌙",
+        "Caminho pelos corredores do seu sono… 🚪",
+        "Os sinais vão surgindo um a um da névoa… 🌫️",
+        "As estrelas sussurram seus segredos no meu ouvido… ✨",
+        "Vou juntando os símbolos antigos lado a lado… 📜",
         "O fio do sonho ganha vida nas minhas mãos… 🧵",
-        "Extraio o sentido oculto da escuridão… 🔮",
-        "Pinto com luz a imagem do teu sonho… 🎨",
-        "Estou perto… os últimos véus afastam-se… 🌌",
+        "Tiro o sentido oculto da escuridão… 🔮",
+        "Pinto com luz a imagem do seu sonho… 🎨",
+        "Estou perto… os últimos véus vão se abrindo… 🌌",
     ],
     "narration_patience": [
-        "Fica comigo mais um instante… 🍇",
+        "Fica comigo mais um pouquinho… 🍇",
         "A paciência transforma a uva verde em doçura ✨",
-        "Sonhos profundos revelam seu segredo devagar… fica mais um pouquinho 🌙",
-        "Já tô chegando… a paciência é a chave de todo tesouro oculto 🗝️",
+        "Sonhos profundos revelam o segredo devagar… fica mais um pouquinho 🌙",
+        "Já tô chegando… a paciência é a chave de todo tesouro escondido 🗝️",
     ],
 
-    "catchphrase": "Dá-me a tua mão e sê meu companheiro no Reino dos Sonhos 🌙",
+    "catchphrase": "Me dá a sua mão e seja meu companheiro no Reino dos Sonhos 🌙",
     "pay_success_tmpl": (
         "Pagamento recebido — te peguei pela mão, companheiro! 🤝✨\n"
-        "A partir de agora, por *{days} dias*, caminhamos juntos pelo Reino dos Sonhos 🌙"
+        "A partir de agora, por *{days} dias*, a gente caminha junto pelo Reino dos Sonhos 🌙"
     ),
     "referral_reward": (
         "Quem você trouxe ao Reino dos Sonhos tomou minha mão e se tornou meu companheiro 🎁\n"
@@ -211,7 +211,7 @@ LOCALE = {
     ),
     "sub_active_tmpl": (
         "Você é meu companheiro no Reino dos Sonhos 🌙\n"
-        "Por mais *{days} dias* caminhamos juntos ✨"
+        "Por mais *{days} dias* a gente caminha junto ✨"
     ),
     "sub_inactive_head": "Você ainda não é meu companheiro 🌙",
     "need_subscription_prefix": "Para abrir a interpretação completa, você precisa da chave deste portão. 🗝️",
@@ -228,7 +228,7 @@ LOCALE = {
         "na primeira assinatura dela 🎁\n\n"
         "Seu link:\n{link}"
     ),
-    "new_dream_greet": "Mais uma noite, mais um sonho — me conta! 🌙",
+    "new_dream_greet": "Mais uma noite, mais um sonho — pode mandar! 🌙",
     "returning_welcome": "Bem-vindo de volta ao *Reino dos Sonhos* 🌙",
 
     "tiers": {"week": "7 dias", "month": "1 mês", "quarter": "3 meses"},

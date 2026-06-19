@@ -22,28 +22,28 @@ LOCALE = {
     },
 
     "welcome_intro": (
-        "Hola, te doy la bienvenida 🌙\n"
+        "Hola, ¡bienvenido! 🌙\n"
         "Soy el *Gran Intérprete*, guardián del *Reino de los Sueños* — donde cada sueño es una puerta a un secreto oculto.\n"
-        "Conozcámonos primero: te haré {count} preguntas breves y luego leeremos tu sueño juntos 💫"
+        "Primero conozcámonos: te haré {count} preguntas cortas y luego leemos tu sueño juntos 💫"
     ),
-    "onboarding_start_btn": "Listo para las {count} preguntas clave ✨",
+    "onboarding_start_btn": "Listo, vamos con las {count} preguntas ✨",
     "progress_tmpl": "🔮 Pregunta {n} de {total}",
-    "choose_persona_first": "Primero, deja que te conozca con unas breves preguntas 🌌",
-    "persona_change_prompt": "Elige la ventana por la que he de leer tus sueños 🎭",
+    "choose_persona_first": "Primero conozcámonos con unas preguntas cortas 🌌",
+    "persona_change_prompt": "Elige el enfoque con el que quieres que lea tus sueños 🎭",
 
     "onboarding": [
         {
             "key": "persona", "is_persona": True,
-            "prompt": "Dime, viajero… cuando despiertas de un sueño extraño, ¿qué voz resuena primero en ti?",
+            "prompt": "Cuando despiertas de un sueño raro, ¿qué es lo primero que se te viene a la mente? 💭",
             "options": [
-                ("clinical",   "Lo manifiesto y lo latente: deseos y temores reprimidos. 🛋️"),
+                ("clinical",   "Lo manifiesto y lo latente: deseos y miedos reprimidos. 🛋️"),
                 ("jungian",    "Arquetipos del inconsciente colectivo y mi camino interior. 🌀"),
                 ("indigenous", "Un viaje del alma y la sabiduría de la naturaleza y los ancestros. 🌿"),
             ],
         },
         {
             "key": "life_focus",
-            "prompt": "En estos días, ¿dónde habita más tu corazón? 🍃",
+            "prompt": "En estos días, ¿en qué está más puesta tu cabeza y tu corazón? 🍃",
             "options": [
                 ("money",    "El trabajo y el sustento. 💼"),
                 ("love",     "El amor y la relación. ❤️"),
@@ -55,51 +55,51 @@ LOCALE = {
         },
         {
             "key": "inner_compass",
-            "prompt": "Y en las decisiones de la vida, ¿en qué te apoyas más? 🧭",
+            "prompt": "Y cuando tomas decisiones, ¿en qué te apoyas más? 🧭",
             "options": [
-                ("reason",    "La razón y la lógica. ⚖️"),
-                ("heart",     "El corazón y el sentimiento. 💖"),
-                ("intuition", "La intuición y el sentir interior. 👁️"),
-                ("faith",     "La fe y la creencia. 🕊️"),
+                ("reason",    "En la razón y la lógica. ⚖️"),
+                ("heart",     "En el corazón y lo que siento. 💖"),
+                ("intuition", "En la intuición y mi sentir interior. 👁️"),
+                ("faith",     "En la fe y mis creencias. 🕊️"),
             ],
         },
         {
             "key": "nature_refuge",
-            "prompt": "Si buscaras paz en el regazo de la naturaleza, ¿a dónde irías? 🌿",
+            "prompt": "Si quisieras desconectar en la naturaleza, ¿a dónde irías? 🌿",
             "options": [
-                ("water",    "Junto al mar o un río, donde canta el agua. 🌊"),
-                ("forest",   "En lo profundo del bosque, entre árboles antiguos y olor a tierra. 🌲"),
-                ("mountain", "La cima de una montaña, donde el cielo está cerca y el aire es frío y claro. ⛰️"),
-                ("fire",     "Contemplar las llamas en una noche estrellada. 🔥"),
+                ("water",    "Junto al mar o un río, donde se escucha el agua. 🌊"),
+                ("forest",   "En lo profundo del bosque, entre árboles viejos y olor a tierra. 🌲"),
+                ("mountain", "A la cima de una montaña, donde el cielo está cerca y el aire es frío y limpio. ⛰️"),
+                ("fire",     "Mirando el fuego en una noche estrellada. 🔥"),
             ],
         },
         {
             "key": "time_travel",
-            "prompt": "Si pudieras viajar en el tiempo para cambiar o revivir un solo instante, ¿qué harías? ⏳",
+            "prompt": "Si pudieras viajar en el tiempo para cambiar o revivir un solo momento, ¿qué harías? ⏳",
             "options": [
-                ("past",    "Volver al pasado para reparar un error o ver a alguien de nuevo. 🔙"),
-                ("future",  "Ir al futuro para ver el fruto de mis esfuerzos. 🔜"),
-                ("present", "Quedarme en este instante; el presente es lo que más me importa. ⏸️"),
+                ("past",    "Volver al pasado para arreglar un error o ver a alguien de nuevo. 🔙"),
+                ("future",  "Ir al futuro para ver en qué quedaron mis esfuerzos. 🔜"),
+                ("present", "Quedarme en este momento; el presente es lo que más me importa. ⏸️"),
             ],
         },
         {
             "key": "dream_frequency",
-            "prompt": "Normalmente, ¿con qué frecuencia tienes sueños que llaman tu atención? 🌙",
+            "prompt": "Normalmente, ¿cada cuánto tienes sueños que te llaman la atención? 🌙",
             "options": [
-                ("often",   "Muy a menudo, casi cada noche o la mayoría de las noches. 🌌"),
-                ("weekly",  "Moderadamente, una o dos veces por semana. 📅"),
-                ("monthly", "Poco, algunas veces al mes (suele ser cuando mi mente está ocupada). 📆"),
+                ("often",   "Muy seguido, casi todas las noches o la mayoría. 🌌"),
+                ("weekly",  "Más o menos, una o dos veces por semana. 📅"),
+                ("monthly", "Poco, algunas veces al mes (normalmente cuando tengo la cabeza llena). 📆"),
                 ("seldom",  "Muy rara vez, quizá unas pocas veces al año. 🌠"),
             ],
         },
         {
             "key": "dream_recall",
-            "prompt": "Al despertar, ¿cuánto detalle de tus sueños sueles recordar? 🎞️",
+            "prompt": "Al despertar, ¿cuántos detalles de tus sueños sueles recordar? 🎞️",
             "options": [
                 ("vivid",    "Como una película nítida, con todos los colores, diálogos y detalles. 🎬"),
-                ("gist",     "El conjunto de la historia y los sucesos principales. 📝"),
+                ("gist",     "La historia en general y lo principal que pasó. 📝"),
                 ("fragment", "Solo una escena, una imagen o una sensación vaga. 🖼️"),
-                ("fading",   "Se desvanece pronto; en cuanto abro los ojos, todo se va. 💨"),
+                ("fading",   "Se borra rápido; en cuanto abro los ojos, se va todo. 💨"),
             ],
         },
     ],
@@ -165,21 +165,21 @@ LOCALE = {
         },
     },
 
-    "voice_too_short": "El mensaje fue un poco corto 🌙 Cuéntame tu sueño con un poco más de detalle para poder leerlo.",
-    "voice_too_long":  "Tu sueño es bastante largo 🌌 Cuéntalo de forma más concisa (menos de 5 minutos) para no perder nada.",
-    "text_too_short":  "Escribiste poco ✍️ Dime un poco más y le saco el secreto.",
+    "voice_too_short": "Quedó un poco corto 🌙 Cuéntame tu sueño con un poco más de detalle para poder leerlo.",
+    "voice_too_long":  "Tu sueño quedó bastante largo 🌌 Cuéntalo un poco más corto (menos de 5 minutos) para no perder nada.",
+    "text_too_short":  "Con eso no tengo mucho de dónde agarrarme ✍️ Cuéntame un poco más y le saco el sentido.",
 
-    "confirm_voice": "Recibí tu sueño 🌙 ¿Lo tomo para interpretarlo?",
-    "confirm_text":  "Leí tu sueño 🌙 ¿Lo tomo para interpretarlo?",
+    "confirm_voice": "Recibí tu sueño 🌙 ¿Lo interpreto?",
+    "confirm_text":  "Leí tu sueño 🌙 ¿Lo interpreto?",
     "btn_confirm":   "✅ Sí, interprétalo",
-    "btn_cancel":    "🔁 Quiero enviarlo de nuevo",
-    "cancelled":     "Sin problema 🌙 Cuando estés listo, cuéntame tu sueño.",
+    "btn_cancel":    "🔁 Lo envío de nuevo",
+    "cancelled":     "Sin problema 🌙 Envíamelo cuando estés listo.",
 
     "daily_limit": (
-        "Esta noche leí tu sueño y viajamos juntos por el Reino de los Sueños 🌙\n"
-        "Solo interpreto un sueño por noche — mañana te espero de nuevo ✨"
+        "Esta noche leí tu sueño y recorrimos juntos el Reino de los Sueños 🌙\n"
+        "Solo tomo un sueño por noche — mañana vuelvo a estar aquí ✨"
     ),
-    "image_failed": "La imagen se perdió en la niebla esta vez 🌫️ pero aquí está la interpretación:",
+    "image_failed": "La imagen se perdió en la niebla esta vez 🌫️ pero aquí tienes la interpretación:",
     "btn_view_full": "🔓 Abrir la interpretación completa",
 
     "narration": [
@@ -217,7 +217,7 @@ LOCALE = {
     "sub_inactive_head": "Todavía no eres mi compañero 🌙",
     "need_subscription_prefix": "Para abrir la interpretación completa, necesitas la llave de esta puerta. 🗝️",
     "paywall_offer": (
-        "Dame tu mano y viaja conmigo a las profundidades de tus sueños nocturnos:\n\n"
+        "Dame tu mano y ven conmigo a las profundidades de tus sueños nocturnos:\n\n"
         "🎁 Compañía de 1 mes 👈 50% más conveniente\n"
         "💎 Compañía de 3 meses 👈 70% más conveniente\n"
         "👇"
@@ -245,6 +245,6 @@ LOCALE = {
 
     "onboarding_prev_btn": "◀️ Pregunta anterior",
 
-    "lang_changed": "Idioma configurado en *Español* 🌙 Empecemos de nuevo…",
+    "lang_changed": "Idioma cambiado a *Español* 🌙 Empecemos de nuevo…",
     "processing_busy": "Un momento — todavía estoy con tu sueño anterior… 🌙",
 }
