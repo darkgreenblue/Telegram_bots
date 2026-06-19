@@ -24,6 +24,7 @@ from config import (
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
     DEFAULT_LANGUAGE, multilang_enabled, payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
+    RESET_BUTTON_ENABLED,
 )
 
 log = logging.getLogger("handlers")
@@ -43,13 +44,19 @@ for _code in locales.LANG_ORDER:
     _KB_ACTION[_kb["persona"]]      = "persona"
     _KB_ACTION[_kb["invite"]]       = "invite"
     _KB_ACTION[_kb["language"]]     = "language"
+    if "reset_test" in _kb:
+        _KB_ACTION[_kb["reset_test"]] = "reset_test"
 
 
 # ===================== کیبوردها =====================
 
 def _main_reply_kb(bale, lang):
     # دکمه‌ی زبان فقط روی تلگرام (بله تک‌زبانه است)
-    return reply_keyboard(C.main_reply_rows(lang, include_language=multilang_enabled(bale.platform)))
+    return reply_keyboard(C.main_reply_rows(
+        lang,
+        include_language=multilang_enabled(bale.platform),
+        include_reset=RESET_BUTTON_ENABLED,
+    ))
 
 
 def _packages_inline(lang):
@@ -285,6 +292,12 @@ async def _handle_message(bale, msg: dict):
         return
     if action == "invite" and REFERRAL_ENABLED:
         await bale.send_message(chat_id, C.invite_text(lang, bale.invite_link(user_id)))
+        return
+
+    if action == "reset_test" and RESET_BUTTON_ENABLED:
+        await db.reset_user(user_id)
+        log.info("[%s] RESET user=%s by reset_test button", bale.platform, user_id)
+        await _send_welcome(bale, chat_id, lang)
         return
 
     # در غیر این صورت = خواب متنی

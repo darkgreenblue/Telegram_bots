@@ -237,6 +237,31 @@ async def restart_onboarding(user_id: int):
         await db.commit()
 
 
+async def reset_user(user_id: int):
+    """ریست کامل کاربر برای تست: برمی‌گردد به حالت کاربر تازه.
+    زبان را نگه می‌دارد تا ادمین مجبور نباشد هر بار دوباره زبان انتخاب کند."""
+    async with aiosqlite.connect(_path()) as db:
+        await db.execute(
+            """UPDATE users SET
+               onboarding_step     = 0,
+               profile             = '{}',
+               persona             = NULL,
+               has_used_free_trial = 0,
+               has_paid            = 0,
+               sub_tier            = NULL,
+               sub_expires_at      = NULL,
+               last_dream_date     = NULL,
+               pending_source      = NULL,
+               pending_payload     = NULL,
+               pending_state       = NULL,
+               pending_mode        = NULL,
+               pending_dream_id    = NULL
+               WHERE user_id = ?""",
+            (user_id,),
+        )
+        await db.commit()
+
+
 async def set_onboarding_step(user_id: int, step: int):
     """نشاندار onboarding_step (برای برگشت/جلو رفتن)."""
     async with aiosqlite.connect(_path()) as db:

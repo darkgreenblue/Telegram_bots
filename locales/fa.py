@@ -17,6 +17,7 @@ LOCALE = {
         "persona":      "🎭 تغییر سبک تعبیر",
         "invite":       "🎁 لینک دعوت",
         "language":     "🌐 زبان",
+        "reset_test":   "🔄 ریسک کردن",
     },
 
     "welcome_intro": (

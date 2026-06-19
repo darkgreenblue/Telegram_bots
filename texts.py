@@ -59,9 +59,11 @@ def kb_labels(lang: str | None) -> dict:
     return locales.get(lang)["kb"]
 
 
-def main_reply_rows(lang: str | None, include_language: bool = True) -> list:
+def main_reply_rows(lang: str | None, include_language: bool = True,
+                    include_reset: bool = False) -> list:
     """ردیف‌های کیبورد ثابتِ پایین (متن دکمه‌ها).
-    include_language=False برای بله (تک‌زبانه)."""
+    include_language=False برای بله (تک‌زبانه).
+    include_reset=True دکمه‌ی موقت تست «ریسک کردن» را اضافه می‌کند."""
     kb = kb_labels(lang)
     second_row = [kb["persona"]]
     if REFERRAL_ENABLED:           # دکمه‌ی «لینک دعوت» فقط وقتی رفرال روشن است
@@ -72,6 +74,8 @@ def main_reply_rows(lang: str | None, include_language: bool = True) -> list:
     ]
     if include_language:
         rows.append([kb["language"]])
+    if include_reset and "reset_test" in kb:
+        rows.append([kb["reset_test"]])
     return rows
 
 
