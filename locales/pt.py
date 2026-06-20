@@ -182,16 +182,12 @@ LOCALE = {
     "btn_view_full": "🔓 Abrir a interpretação completa",
 
     "narration": [
-        "Estou ouvindo o sussurro do seu sonho… 🕯️",
-        "Levo a sua voz ao coração do Reino dos Sonhos… 🌙",
-        "Caminho pelos corredores do seu sono… 🚪",
+        "Estou ouvindo o seu sonho… 🕯️",
+        "Levo a sua voz ao Reino dos Sonhos… 🌙",
         "Os sinais vão surgindo um a um da névoa… 🌫️",
-        "As estrelas sussurram seus segredos no meu ouvido… ✨",
-        "Vou juntando os símbolos antigos lado a lado… 📜",
         "O fio do sonho ganha vida nas minhas mãos… 🧵",
         "Tiro o sentido oculto da escuridão… 🔮",
         "Pinto com luz a imagem do seu sonho… 🎨",
-        "Estou perto… os últimos véus vão se abrindo… 🌌",
     ],
     "narration_patience": [
         "Fica comigo mais um pouquinho… 🍇",

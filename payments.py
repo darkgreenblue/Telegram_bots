@@ -109,16 +109,13 @@ async def apply_successful_payment(bot, user_id: int, payload: str, charge_id: s
     chat_id = (user or {}).get("chat_id", user_id)
     await bot.send_message(chat_id, C.pay_success(lang, days))
 
-    # تحویل خودکار تعبیر کامل خوابِ تریالِ معلق
+    # تحویل خودکار بخشِ کاملِ خوابِ تریالِ معلق — فقط depth (preview را کاربر از آزمایشی دیده)
     pending_dream = await db.get_pending_trial_dream(user_id)
-    if pending_dream and pending_dream.get("interpretation"):
-        full = pending_dream["interpretation"]  # کاملِ ذخیره‌شده (preview+depth)
-        persona = pending_dream.get("persona") or locales.default_persona(lang)
-        try:
-            await bot.send_message(
-                chat_id, C.persona_key(lang, persona, "image_caption") + "\n\n" + full,
-                parse_mode=None,
-            )
-            await db.mark_full_delivered(pending_dream["id"])
-        except Exception as e:
-            log.warning("failed to auto-deliver trial full interpretation: %s", e)
+    if pending_dream:
+        depth = pending_dream.get("depth") or pending_dream.get("interpretation") or ""
+        if depth:
+            try:
+                await bot.send_message(chat_id, depth, parse_mode=None)
+                await db.mark_full_delivered(pending_dream["id"])
+            except Exception as e:
+                log.warning("failed to auto-deliver trial full interpretation: %s", e)

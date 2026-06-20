@@ -184,16 +184,12 @@ LOCALE = {
     "btn_view_full": "🔓 Unlock the full interpretation",
 
     "narration": [
-        "I'm listening to the whisper of your dream… 🕯️",
-        "Carrying your voice into the heart of the Realm of Dreams… 🌙",
-        "Walking the corridors of your sleep… 🚪",
+        "I'm listening to your dream… 🕯️",
+        "Carrying your voice into the Realm of Dreams… 🌙",
         "The signs emerge one by one from the mist… 🌫️",
-        "The stars murmur their secrets in my ear… ✨",
-        "I gather the ancient symbols side by side… 📜",
         "The thread of the dream comes alive in my hands… 🧵",
         "I draw the hidden meaning out of the dark… 🔮",
         "I paint the image of your dream in light… 🎨",
-        "I am near… the last veils are drawing aside… 🌌",
     ],
     "narration_patience": [
         "Hang on just a little longer… 🍇",

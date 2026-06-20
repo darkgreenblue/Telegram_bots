@@ -183,16 +183,12 @@ LOCALE = {
     "btn_view_full": "🔓 Abrir la interpretación completa",
 
     "narration": [
-        "Estoy escuchando el susurro de tu sueño… 🕯️",
-        "Llevo tu voz al corazón del Reino de los Sueños… 🌙",
-        "Camino por los pasillos de tu sueño… 🚪",
+        "Escucho tu sueño… 🕯️",
+        "Llevo tu voz al Reino de los Sueños… 🌙",
         "Los signos emergen uno a uno de la niebla… 🌫️",
-        "Las estrellas me susurran sus secretos al oído… ✨",
-        "Coloco los símbolos antiguos uno junto a otro… 📜",
         "El hilo del sueño cobra vida en mis manos… 🧵",
         "Extraigo el sentido oculto de la oscuridad… 🔮",
         "Pinto con luz la imagen de tu sueño… 🎨",
-        "Estoy cerca… los últimos velos se apartan… 🌌",
     ],
     "narration_patience": [
         "Quédate un momento más… 🍇",
