@@ -119,7 +119,7 @@ LOCALE = {
             "greet": "Agora te conheço um pouco melhor 🕯️",
             "invite": (
                 "Me conta o seu sonho pra eu ler o que o seu espírito viveu — "
-                "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
+                "uma *mensagem de voz* 🎙 até 5 min (ou escreve se preferir)."
             ),
             "image_caption": "O seu sonho ganhou forma entre os dois mundos 🎨✨",
             "error": "A ponte com o mundo espiritual oscilou por um instante 🌫️ Tenta de novo; sua cota está guardada.",
@@ -138,7 +138,7 @@ LOCALE = {
             "greet": "Agora te conheço um pouco melhor 🌊",
             "invite": (
                 "Me conta o seu sonho pra eu ouvir o recado dos Orixás — "
-                "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
+                "uma *mensagem de voz* 🎙 até 5 min (ou escreve se preferir)."
             ),
             "image_caption": "O seu sonho se acendeu com as forças da natureza 🎨✨",
             "error": "A ligação com as forças oscilou por um instante 🌫️ Tenta de novo; sua cota está guardada.",
@@ -157,7 +157,7 @@ LOCALE = {
             "greet": "Agora te conheço um pouco melhor 🍀",
             "invite": (
                 "Me conta o seu sonho pra eu descobrir o bicho e os números que ele aponta — "
-                "uma *mensagem de voz* 🎙 (ou escreve se preferir)."
+                "uma *mensagem de voz* 🎙 até 5 min (ou escreve se preferir)."
             ),
             "image_caption": "O seu sonho virou imagem — e talvez sorte 🎨✨",
             "error": "O fio do sonho se cortou por um instante 🌫️ Tenta de novo; sua cota está guardada.",

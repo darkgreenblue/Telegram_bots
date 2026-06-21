@@ -119,7 +119,7 @@ LOCALE = {
             "greet": "Ahora te conozco un poco mejor 🛋️",
             "invite": (
                 "Cuéntame tu sueño y juntos vamos a distinguir lo manifiesto de lo latente — "
-                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
+                "un *mensaje de voz* 🎙 máx. 5 min (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño tomó forma desde lo latente 🎨✨",
             "error": "El hilo se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",
@@ -138,7 +138,7 @@ LOCALE = {
             "greet": "Ahora te conozco un poco mejor 🌀",
             "invite": (
                 "Cuéntame tu sueño y vamos a descifrar los arquetipos que viven en él — "
-                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
+                "un *mensaje de voz* 🎙 máx. 5 min (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño se reveló en sus arquetipos 🎨✨",
             "error": "El hilo se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",
@@ -158,7 +158,7 @@ LOCALE = {
             "greet": "Ahora te conozco un poco mejor 🌿",
             "invite": (
                 "Cuéntame tu sueño y vamos a leer el viaje que hizo tu alma — "
-                "un *mensaje de voz* 🎙 (o escríbelo si prefieres)."
+                "un *mensaje de voz* 🎙 máx. 5 min (o escríbelo si prefieres)."
             ),
             "image_caption": "Tu sueño cobró vida como un viaje del alma 🎨✨",
             "error": "El puente se cortó un momento 🌫️ Inténtalo de nuevo; tu cupo está a salvo.",

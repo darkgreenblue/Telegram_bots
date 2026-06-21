@@ -118,7 +118,7 @@ LOCALE = {
             "greet": "Now I know you a little better 🧭",
             "invite": (
                 "Send me a voice note of your dream and I'll chart its signs and patterns — "
-                "a *voice message* 🎙 (or type it out if you'd rather)."
+                "a *voice message* 🎙 max 5 min (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, mapped in light 🎨✨",
             "error": "Lost the thread for a second 🌫️ Try again — your quota is still good.",
@@ -137,7 +137,7 @@ LOCALE = {
             "greet": "Now I know you a little better 🧠",
             "invite": (
                 "Tell me your dream and together we'll trace what it's carrying from your waking life — "
-                "a *voice message* 🎙 (or type it out if you'd rather)."
+                "a *voice message* 🎙 max 5 min (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, given a calming form 🎨✨",
             "error": "Lost the thread for a second 🌫️ Try again — your quota is still good.",
@@ -159,7 +159,7 @@ LOCALE = {
             "greet": "Now I know you a little better 🔮",
             "invite": (
                 "Share your dream with me and I'll read the guidance it holds for you — "
-                "a *voice message* 🎙 (or type it out if you'd rather)."
+                "a *voice message* 🎙 max 5 min (or type it out if you'd rather)."
             ),
             "image_caption": "Your dream, revealed as quiet guidance 🎨✨",
             "error": "Lost the connection for a second 🌫️ Try again — your quota is still good.",
