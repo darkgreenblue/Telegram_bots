@@ -102,6 +102,24 @@ db.prepare("UPDATE users SET model='google/gemini-2.5-flash' WHERE model='xiaomi
 // Migrations for discount columns
 try { db.prepare('ALTER TABLE payments ADD COLUMN discount_code_id INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE payments ADD COLUMN original_amount INTEGER').run(); } catch {}
+// Migration: مرحله‌ی فعلی فلوی پرداخت (amount / receipt / ...) — برای ثبت اینکه کاربر کجا انصراف داد
+try { db.prepare('ALTER TABLE payments ADD COLUMN step TEXT').run(); } catch {}
+
+// فلوهای تبدیل ویس به متن — ثبت چرخه‌ی عمر و وضعیت (active/completed/cancelled) برای مدیریت استیت
+db.exec(`
+  CREATE TABLE IF NOT EXISTS voice_flows (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    token        TEXT    NOT NULL,
+    user_id      INTEGER NOT NULL,
+    model        TEXT,
+    duration_sec REAL,
+    type         TEXT,
+    step         TEXT,
+    status       TEXT    NOT NULL DEFAULT 'active',
+    created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+`);
 
 const stmts = {
   getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
@@ -112,9 +130,16 @@ const stmts = {
   credit:        db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?'),
   insertUsage:   db.prepare('INSERT INTO usage_log (user_id, model, duration_sec, cost, type, success) VALUES (?,?,?,?,?,?)'),
   insertPayment: db.prepare('INSERT INTO payments (user_id, amount) VALUES (?,?)'),
+  insertPaymentPending: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
+  setPaymentAmount:  db.prepare('UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?'),
+  setPaymentStep:    db.prepare('UPDATE payments SET step=?, updated_at=unixepoch() WHERE id=?'),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // voice_flows
+  insertFlow:    db.prepare("INSERT INTO voice_flows (token, user_id, model, duration_sec, step, status) VALUES (?,?,?,?,?,'active')"),
+  setFlowStatus: db.prepare('UPDATE voice_flows SET status=?, updated_at=unixepoch() WHERE token=?'),
+  setFlowStep:   db.prepare('UPDATE voice_flows SET step=?, type=?, model=?, updated_at=unixepoch() WHERE token=?'),
   // dashboard
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
@@ -198,6 +223,10 @@ function getModelPrice(modelId, userType) {
 function getVisibleModels(userType) {
   return Object.keys(MODEL_CONFIG).filter(id => userType !== 'regular' || !MODEL_CONFIG[id].whitelistOnly);
 }
+
+// رتبه‌ی پردازنده‌ها (از روی ترتیب تعریف در MODEL_CONFIG) — برای ارتقای مدل در صورت جلسه
+const MODEL_RANK = Object.fromEntries(Object.keys(MODEL_CONFIG).map((id, i) => [id, i + 1]));
+const MEETING_MIN_MODEL = 'google/gemini-2.5-flash'; // صورت جلسه دست‌کم با این پردازنده
 
 function calcCost(durationSec, model, userType = 'regular') {
   const cfg = MODEL_CONFIG[model];
@@ -460,6 +489,36 @@ async function convertToMp3(buffer) {
   }
 }
 
+// مدت زمان واقعی فایل صوتی را با ffprobe می‌خوانیم (برای داکیومنت‌ها تلگرام duration نمی‌دهد و
+// حتی برای audio هم گاهی نادرست است — هزینه بر مبنای این مقدار محاسبه می‌شود).
+async function probeDurationSec(buffer) {
+  const inPath = `/tmp/probe_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  writeFileSync(inPath, buffer);
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', inPath,
+    ]);
+    const sec = parseFloat(String(stdout).trim());
+    return (isFinite(sec) && sec > 0) ? sec : null;
+  } catch (e) {
+    logErr('ffprobe error:', e.message);
+    return null;
+  } finally {
+    try { unlinkSync(inPath); } catch {}
+  }
+}
+
+// تشخیص اینکه یک داکیومنت، فایل صوتی است (بر اساس mime یا پسوند)
+const AUDIO_EXT_RE = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|wma|amr|3gp|aiff|alac|mp4|m4b|mka|weba|webm)$/i;
+function isAudioDocument(doc) {
+  if (!doc) return false;
+  if (doc.mime_type && /^audio\//i.test(doc.mime_type)) return true;
+  if (doc.mime_type === 'application/ogg') return true;
+  if (doc.file_name && AUDIO_EXT_RE.test(doc.file_name)) return true;
+  return false;
+}
+
 const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
 
 async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
@@ -608,6 +667,25 @@ const jobCount   = (uid) => activeJobs.get(uid) || 0;
 const incJob     = (uid) => activeJobs.set(uid, jobCount(uid) + 1);
 const decJob     = (uid) => { const n = jobCount(uid) - 1; if (n > 0) activeJobs.set(uid, n); else activeJobs.delete(uid); };
 
+// فلوی تبدیل ویس «ناتمام» تا وقتی به یکی از این مرحله‌ها نرسیده فعال محسوب می‌شود
+const FLOW_NONTERMINAL = new Set(['await_process_type', 'processing', 'await_output_format', 'processing_output']);
+const MAX_ACTIVE_FLOWS = 2;
+function activeFlows(userId) {
+  const out = [];
+  for (const [t, s] of sessions) {
+    if (s.userId === userId && FLOW_NONTERMINAL.has(s.step)) out.push([t, s]);
+  }
+  out.sort((a, b) => a[1].createdAt - b[1].createdAt);
+  return out;
+}
+// لغو یک فلو: پیام‌هایش پاک، سشن حذف، و در دیتابیس cancelled ثبت می‌شود
+async function cancelFlow(token, session) {
+  try { await bot.telegram.deleteMessage(session.chatId, session.promptMsgId); } catch {}
+  if (session.modeMsgId) { try { await bot.telegram.deleteMessage(session.chatId, session.modeMsgId); } catch {} }
+  sessions.delete(token);
+  try { stmts.setFlowStatus.run('cancelled', token); } catch {}
+}
+
 // همه‌ی پیام‌های یک ورک‌فلو به پیام مبدأ ریپلای می‌شوند (قابل پیگیری)
 const replyTo = (id) => (id ? { reply_to_message_id: id, allow_sending_without_reply: true } : {});
 
@@ -712,6 +790,10 @@ function createOutputFormatKeyboard(token) {
     [Markup.button.callback('🚫 انصراف',              `cancel:${token}`)],
   ]);
 }
+
+// دکمه‌ی انصراف از پرداخت (در همه‌ی مراحل فلوی شارژ تکرار می‌شود)
+const payCancelBtn = (paymentId) => Markup.button.callback('🚫 انصراف از پرداخت', `pay_cancel:${paymentId}`);
+const payCancelKb  = (paymentId) => Markup.inlineKeyboard([[payCancelBtn(paymentId)]]);
 
 async function sendLongTextAsMessages(ctx, text, extra = {}) {
   const parts = splitForTelegram(text);
@@ -923,14 +1005,14 @@ async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, tex
 
 /* ===== 8) Handlers ===== */
 
-bot.start(async (ctx) => {
-  const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-  const keyboard  = mainKeyboard(ctx.from.id);
+// منوی اصلی: پیام خوش‌آمد/راهنما + دکمه‌های داشبورد اصلی (کیف‌پول/تعویض پردازنده یا داشبورد/تعویض)
+async function sendMainMenu(ctx, { gift = false } = {}) {
+  const keyboard = mainKeyboard(ctx.from.id);
   if (isAdmin(ctx.from.id)) {
-    await ctx.reply('سلام! یک ویس بفرست. 🎤', keyboard);
+    await ctx.reply('سلام! یک ویس یا فایل صوتی بفرست. 🎤', keyboard);
     return;
   }
-  const giftLine = isNew
+  const giftLine = gift
     ? `🎁 به عنوان هدیه خوش‌آمد، ${WELCOME_GIFT.toLocaleString('fa-IR')} تومان به کیف پولت شارژ شد!\n\n`
     : '';
   await ctx.reply(
@@ -939,11 +1021,16 @@ bot.start(async (ctx) => {
     `اونم با بیشترین دقت و کیفیت!\n\n` +
     giftLine +
     `📋 راهنما:\n` +
-    `• یک ویس بفرست تا شروع کنیم 🎤\n` +
+    `• یک ویس یا فایل صوتی بفرست تا شروع کنیم 🎤\n` +
     `• با دکمه «🔄 تعویض پردازنده» پردازنده هوش مصنوعی و نرخ پردازش رو انتخاب کن\n` +
     `• با دکمه «👛 کیف پول» موجودیت رو ببین و شارژ کن`,
     keyboard
   );
+}
+
+bot.start(async (ctx) => {
+  const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  await sendMainMenu(ctx, { gift: isNew });
 });
 
 bot.hears('🔄 تعویض پردازنده', async (ctx) => {
@@ -984,17 +1071,49 @@ bot.hears('📊 داشبورد', async (ctx) => {
   await ctx.reply(v.text, v.kb);
 });
 
-bot.on(['voice', 'audio'], async (ctx) => {
+bot.on(['voice', 'audio', 'document'], async (ctx) => {
   const userId = ctx.from.id;
+
+  // کاربر وسط فلوی شارژ است → پردازش ویس شروع نمی‌شود؛ راهنمایی + دکمه انصراف
+  const rstate = userStates.get(userId);
+  if (rstate && !isAdmin(userId)) {
+    let msg = 'الان وسط فلوی شارژ کیف پول هستی. اول اون رو کامل کن یا انصراف بده.';
+    if (rstate.step === 'waiting_amount')             msg = 'لطفاً مبلغ شارژ را به تومان بنویس، یا انصراف بده:';
+    else if (rstate.step === 'waiting_discount_code') msg = 'کد تخفیفت رو تایپ کن، یا انصراف بده:';
+    else if (rstate.step === 'waiting_receipt')       msg = 'فیش واریز رو بفرست (عکس یا متن)، یا انصراف بده:';
+    await ctx.reply(msg, { ...replyTo(ctx.message.message_id), ...payCancelKb(rstate.paymentId) });
+    return;
+  }
+
+  // داکیومنت غیرصوتی → ورودی نامعتبر، منوی اصلی نمایش داده شود
+  if (ctx.message.document && !isAudioDocument(ctx.message.document)) {
+    upsertUser(userId, ctx.from.first_name, ctx.from.username);
+    await sendMainMenu(ctx);
+    return;
+  }
+
   upsertUser(userId, ctx.from.first_name, ctx.from.username);
 
   const userType    = getUserType(userId);
   const userModel   = getUserModel(userId);
-  const media       = ctx.message.voice || ctx.message.audio;
+  const media       = ctx.message.voice || ctx.message.audio || ctx.message.document;
   const voiceMsgId  = ctx.message.message_id;
   const tgDuration  = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
-  const estimatedCost = tgDuration > 0 ? calcCost(tgDuration, userModel, userType) : null;
-  log(`🎤 voice recv  uid=${userId} (@${ctx.from.username||'—'}) dur=${tgDuration}s size=${media?.file_size ? (media.file_size/1024).toFixed(0)+'KB' : '?'} model=${userModel}`);
+  log(`🎤 voice recv  uid=${userId} (@${ctx.from.username||'—'}) tgDur=${tgDuration}s size=${media?.file_size ? (media.file_size/1024).toFixed(0)+'KB' : '?'} model=${userModel}`);
+
+  // سقف ۲ فلوی هم‌زمان: اگر کاربر دو پردازش ناتمام دارد، ویس سوم پذیرفته نمی‌شود
+  const active = activeFlows(userId);
+  if (active.length >= MAX_ACTIVE_FLOWS) {
+    await ctx.reply(
+      `⚠️ هم‌زمان حداکثر ${MAX_ACTIVE_FLOWS.toLocaleString('fa-IR')} پردازش می‌تونی داشته باشی.\n` +
+      `اول یکی از پردازش‌های قبلی رو لغو کن (یا تا آخر ببرش)، بعد این ویس رو دوباره بفرست:`,
+      { ...replyTo(voiceMsgId), ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚫 لغو پردازش اول', `flowcancel:${active[0][0]}`)],
+        [Markup.button.callback('🚫 لغو پردازش دوم', `flowcancel:${active[1][0]}`)],
+      ]) }
+    );
+    return;
+  }
 
   // محدودیت تلگرام: فایل بزرگ‌تر از ۲۰MB اصلاً قابل دانلود توسط ربات نیست.
   if (media?.file_size && media.file_size > TELEGRAM_MAX_DOWNLOAD) {
@@ -1002,36 +1121,63 @@ bot.on(['voice', 'audio'], async (ctx) => {
     return;
   }
 
-  // Check balance before downloading (only non-admin)
-  if (!isAdmin(userId) && estimatedCost !== null && estimatedCost > 0) {
-    const balance = getBalance(userId);
-    if (balance < estimatedCost) {
-      await ctx.reply(
-        `👛 موجودی کافی نیست.\n\n` +
-        `💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان\n` +
-        `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
-        { ...replyTo(voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
-      );
-      return;
-    }
-  }
+  // رزرو فوری اسلات فلو (همگام، قبل از هر await) تا سقف ۲ فلو با ارسال سریع چند ویس دور زده نشود
+  const token = makeToken();
+  sessions.set(token, { step: 'await_process_type', userId, createdAt: Date.now(), reserving: true });
 
-  const thinking = await ctx.reply('⏳ دریافت فایل...', replyTo(voiceMsgId));
+  let thinking;
   try {
+    thinking = await ctx.reply('⏳ دریافت فایل...', replyTo(voiceMsgId));
     const fileUrl = await ctx.telegram.getFileLink(media.file_id);
     const res     = await fetch(fileUrl.href);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const audioBuffer = Buffer.from(await res.arrayBuffer());
 
     let mimeType = 'audio/ogg';
-    if (ctx.message.audio?.mime_type) mimeType = ctx.message.audio.mime_type;
+    if (ctx.message.audio?.mime_type)    mimeType = ctx.message.audio.mime_type;
+    else if (ctx.message.document?.mime_type) mimeType = ctx.message.document.mime_type;
 
-    const token = makeToken();
+    // مدت زمان: ویس بومی تلگرام را دقیق گزارش می‌دهد؛ برای داکیومنت/فایل بدون duration با ffprobe می‌خوانیم
+    const probed = tgDuration > 0 ? null : await probeDurationSec(audioBuffer);
+    const durationSec = tgDuration > 0 ? tgDuration : (probed || null);
+    log(`⏱️ duration uid=${userId} probed=${probed ? probed.toFixed(1) : '—'}s tg=${tgDuration}s used=${durationSec ? Number(durationSec).toFixed(1) : '—'}s`);
+
+    // اگر مدت برای کاربر غیرادمین قابل‌تشخیص نباشد، نمی‌توان درست هزینه گرفت → پردازش نکن
+    if (!isAdmin(userId) && !durationSec) {
+      sessions.delete(token);
+      try {
+        await ctx.telegram.editMessageText(
+          thinking.chat.id, thinking.message_id, undefined,
+          '😕 مدت‌زمان این فایل قابل تشخیص نبود.\nلطفاً به‌صورت ویس یا فایل صوتی استاندارد (mp3، m4a، ogg، wav) بفرست.'
+        );
+      } catch {}
+      return;
+    }
+
+    // بررسی موجودی بعد از تشخیص مدت واقعی (فقط کاربر غیرادمین)
+    if (!isAdmin(userId) && durationSec) {
+      const estimatedCost = calcCost(durationSec, userModel, userType);
+      const balance = getBalance(userId);
+      if (estimatedCost > 0 && balance < estimatedCost) {
+        sessions.delete(token);
+        try {
+          await ctx.telegram.editMessageText(
+            thinking.chat.id, thinking.message_id, undefined,
+            `👛 موجودی کافی نیست.\n\n` +
+            `💰 هزینه پردازش: ${estimatedCost.toLocaleString('fa-IR')} تومان\n` +
+            `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+            { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]).reply_markup }
+          );
+        } catch {}
+        return;
+      }
+    }
+
     sessions.set(token, {
       step:        'await_process_type',
       mimeType,
       audioBuffer,
-      durationSec: tgDuration || null,
+      durationSec,
       userModel,
       chatId:      thinking.chat.id,
       promptMsgId: thinking.message_id,
@@ -1039,8 +1185,9 @@ bot.on(['voice', 'audio'], async (ctx) => {
       userId,
       createdAt:   Date.now(),
     });
+    try { stmts.insertFlow.run(token, userId, userModel, durationSec || null, 'await_process_type'); } catch {}
 
-    const costBlock = buildCostBlock(tgDuration, userModel, userType);
+    const costBlock = buildCostBlock(durationSec, userModel, userType);
     const questionText = `چطور میخوای متن پردازش بشه؟${costBlock ? `\n\n${costBlock}` : ''}`;
 
     await ctx.telegram.editMessageText(
@@ -1049,21 +1196,34 @@ bot.on(['voice', 'audio'], async (ctx) => {
       { parse_mode: 'HTML' }
     );
     // پیام دوم به پیام اولش («چطور میخوای…») ریپلای می‌شود
-    await ctx.reply(MODE_SELECT_TEXT, { ...replyTo(thinking.message_id), ...createProcessTypeKeyboard(token) });
+    const modeMsg = await ctx.reply(MODE_SELECT_TEXT, { ...replyTo(thinking.message_id), ...createProcessTypeKeyboard(token) });
+    const sess = sessions.get(token);
+    if (sess) sess.modeMsgId = modeMsg.message_id;
   } catch (err) {
+    sessions.delete(token); // آزادسازی اسلات رزروشده در صورت خطا
     logErr(`❌ voice download error uid=${ctx.from.id}:`, err.message);
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
       m = FILE_TOO_BIG_MSG;
     }
-    try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {}
+    if (thinking) { try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {} }
+    else { try { await ctx.reply(m, replyTo(voiceMsgId)); } catch {} }
   }
 });
 
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const state  = userStates.get(userId);
-  if (state?.step !== 'waiting_receipt') return;
+  if (state?.step !== 'waiting_receipt') {
+    // عکس وسط فلوی شارژ (قبل از مرحله فیش) → راهنمایی + دکمه انصراف
+    if (state && state.paymentId) {
+      await ctx.reply('برای ادامه‌ی شارژ، اول مبلغ/کد رو وارد کن، یا انصراف بده:', payCancelKb(state.paymentId));
+      return;
+    }
+    // عکس خارج از هر فلو → منوی اصلی
+    if (!isAdmin(userId)) { upsertUser(userId, ctx.from.first_name, ctx.from.username); await sendMainMenu(ctx); }
+    return;
+  }
 
   const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   const payment = stmts.getPayment.get(state.paymentId);
@@ -1188,21 +1348,27 @@ bot.on('text', async (ctx) => {
   }
 
   const state = userStates.get(userId);
-  if (!state) return;
+  if (!state) { await sendMainMenu(ctx); return; }
 
   if (state.step === 'waiting_amount') {
+    // اگر پرداخت دیگر pending نیست (لغو/منقضی)، فلو را پاک کن
+    const payment = stmts.getPayment.get(state.paymentId);
+    if (!payment || payment.status !== 'pending') { userStates.delete(userId); await sendMainMenu(ctx); return; }
     const raw    = normalizeDigits(ctx.message.text.trim()).replace(/[,،\s]/g, '');
     const amount = parseInt(raw, 10);
     if (isNaN(amount) || amount < MIN_RECHARGE) {
-      await ctx.reply(`❌ حداقل مبلغ شارژ ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان است.\nمبلغ معتبر وارد کن:`);
+      await ctx.reply(`❌ لطفاً مبلغ را به تومان بنویس (حداقل ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان):`, payCancelKb(state.paymentId));
       return;
     }
-    const paymentId = Number(stmts.insertPayment.run(userId, amount).lastInsertRowid);
+    stmts.setPaymentAmount.run(amount, 'receipt', state.paymentId);
     const invoiceMsg = await ctx.reply(
       buildInvoiceText(amount, null, null),
-      { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)]]) }
+      { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+        [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${state.paymentId}`)],
+        [payCancelBtn(state.paymentId)],
+      ]) }
     );
-    userStates.set(userId, { step: 'waiting_receipt', paymentId, invoiceMsgId: invoiceMsg.message_id });
+    userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: invoiceMsg.message_id });
     return;
   }
 
@@ -1211,7 +1377,7 @@ bot.on('text', async (ctx) => {
     if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
     const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount, ctx.from.username);
     if (!result.ok) {
-      await ctx.reply(result.err + '\nدوباره امتحان کن یا /start بزن.');
+      await ctx.reply(result.err + '\nدوباره امتحان کن:', payCancelKb(state.paymentId));
       return;
     }
     stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
@@ -1238,7 +1404,10 @@ bot.on('text', async (ctx) => {
     try {
       await ctx.telegram.editMessageText(ctx.chat.id, state.invoiceMsgId, undefined,
         buildInvoiceText(result.finalAmount, payment.amount, result.dc.discount_percent),
-        { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🗑️ حذف کد تخفیف', `disc_remove:${state.paymentId}`)]]).reply_markup }
+        { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('🗑️ حذف کد تخفیف', `disc_remove:${state.paymentId}`)],
+          [payCancelBtn(state.paymentId)],
+        ]).reply_markup }
       );
     } catch {}
     await ctx.reply(`✅ کد تخفیف اعمال شد! ${result.dc.discount_percent}٪ تخفیف\nمبلغ نهایی: ${result.finalAmount.toLocaleString('fa-IR')} تومان\n\nحالا فیش واریز رو بفرست.`);
@@ -1495,17 +1664,52 @@ bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data || '';
     const userId = ctx.from.id;
 
-    // ── Cancel ──
+    // ── Cancel (in-flow process cancel button) ──
     const c = data.match(/^cancel:([a-z0-9]+)$/i);
     if (c) {
       const session = sessions.get(c[1]);
-      if (session?.step === 'processing') return ctx.answerCbQuery('در حال پردازش است، لطفاً صبر کن.', { show_alert: true });
+      if (session?.step === 'processing' || session?.step === 'processing_output') return ctx.answerCbQuery('در حال پردازش است، لطفاً صبر کن.', { show_alert: true });
       await ctx.answerCbQuery('لغو شد');
       try { await ctx.editMessageText('🚫 لغو شد'); } catch {}
       if (session) {
         try { await ctx.telegram.deleteMessage(session.chatId, session.promptMsgId); } catch {}
         sessions.delete(c[1]);
+        try { stmts.setFlowStatus.run('cancelled', c[1]); } catch {}
       }
+      return;
+    }
+
+    // ── Cancel a specific flow (when user has 2 active and sent a 3rd) ──
+    const fc = data.match(/^flowcancel:([a-z0-9]+)$/i);
+    if (fc) {
+      const token = fc[1];
+      const session = sessions.get(token);
+      if (!session) {
+        await ctx.answerCbQuery('این پردازش دیگه فعال نیست');
+        try { await ctx.editMessageText('✅ این پردازش دیگه فعال نیست. حالا می‌تونی ویس جدیدت رو بفرستی.'); } catch {}
+        return;
+      }
+      if (session.step === 'processing' || session.step === 'processing_output') {
+        return ctx.answerCbQuery('این پردازش در حال انجامه و قابل لغو نیست؛ تا اتمامش صبر کن.', { show_alert: true });
+      }
+      await cancelFlow(token, session);
+      await ctx.answerCbQuery('لغو شد');
+      try { await ctx.editMessageText('✅ پردازش قبلی لغو شد. حالا ویس جدیدت رو دوباره بفرست.'); } catch {}
+      return;
+    }
+
+    // ── Cancel a payment/recharge flow → back to main menu ──
+    const pc = data.match(/^pay_cancel:(\d+)$/);
+    if (pc) {
+      const paymentId = parseInt(pc[1]);
+      const payment = stmts.getPayment.get(paymentId);
+      if (payment && payment.user_id === userId && payment.status === 'pending') {
+        stmts.setPaymentStatus.run('cancelled', paymentId); // step ثبت‌شده نشان می‌دهد کجا انصراف داد
+      }
+      userStates.delete(userId);
+      await ctx.answerCbQuery('پرداخت لغو شد');
+      try { await ctx.editMessageText('🚫 پرداخت لغو شد.'); } catch {}
+      await sendMainMenu(ctx);
       return;
     }
 
@@ -1616,12 +1820,15 @@ bot.on('callback_query', async (ctx) => {
     // ── Recharge (start wallet top-up) ──
     if (data === 'recharge') {
       if (isAdmin(userId)) return ctx.answerCbQuery();
-      userStates.set(userId, { step: 'waiting_amount' });
+      // به محض شروع فلو، یک رکورد پرداخت در دیتابیس ساخته می‌شود (step='amount')
+      const paymentId = Number(stmts.insertPaymentPending.run(userId).lastInsertRowid);
+      userStates.set(userId, { step: 'waiting_amount', paymentId });
       await ctx.answerCbQuery();
       await ctx.reply(
         `💰 چه مبلغی می‌خوای شارژ کنی؟\n` +
         `(حداقل ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان)\n\n` +
-        `مبلغ را به تومان بنویس:`
+        `مبلغ را به تومان بنویس:`,
+        payCancelKb(paymentId)
       );
       return;
     }
@@ -1651,7 +1858,10 @@ bot.on('callback_query', async (ctx) => {
       try {
         await ctx.telegram.editMessageText(ctx.chat.id, invoiceMsgId, undefined,
           buildInvoiceText(updatedPayment.amount, null, null),
-          { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)]]).reply_markup }
+          { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)],
+            [payCancelBtn(paymentId)],
+          ]).reply_markup }
         );
       } catch {}
       userStates.set(userId, { step: 'waiting_receipt', paymentId, invoiceMsgId });
@@ -2038,10 +2248,19 @@ bot.on('callback_query', async (ctx) => {
       const session = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
+      if (!session.audioBuffer) return ctx.answerCbQuery('هنوز در حال آماده‌سازی فایل است، یک لحظه صبر کن.');
 
       const sessUserId = session.userId;
-      const userModel  = session.userModel || getUserModel(sessUserId);
+      const selectedModel = session.userModel || getUserModel(sessUserId);
       const uType      = getUserType(sessUserId);
+
+      // صورت جلسه با پردازنده سبک باگ دارد → دست‌کم پردازنده حرفه‌ای (بدون تغییر پیش‌فرض کاربر)
+      let userModel = selectedModel;
+      let modelBumped = false;
+      if (type === 'meeting' && (MODEL_RANK[userModel] || 1) < MODEL_RANK[MEETING_MIN_MODEL]) {
+        userModel = MEETING_MIN_MODEL;
+        modelBumped = true;
+      }
 
       // Balance check BEFORE locking — keep the keyboard so user can switch model / recharge
       if (!isAdmin(sessUserId) && session.durationSec) {
@@ -2051,6 +2270,7 @@ bot.on('callback_query', async (ctx) => {
           await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
           await ctx.reply(
             `👛 موجودی کافی نیست.\n\n` +
+            (modelBumped ? `ℹ️ صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر).\n` : '') +
             `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
             `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
             { ...replyTo(session.voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
@@ -2067,13 +2287,20 @@ bot.on('callback_query', async (ctx) => {
         );
       }
       session.step = 'processing';
+      session.userModel = userModel; // پردازنده‌ی واقعیِ این پردازش (callAI از همین می‌خواند)
       incJob(sessUserId);
+      try { stmts.setFlowStep.run('processing', type, userModel, token); } catch {}
       const jobStart = Date.now();
-      log(`🚀 job start  uid=${sessUserId} type=${type} model=${userModel} dur=${session.durationSec||'?'}s jobs=${jobCount(sessUserId)}`);
+      log(`🚀 job start  uid=${sessUserId} type=${type} model=${userModel}${modelBumped ? ' (bumped)' : ''} dur=${session.durationSec||'?'}s jobs=${jobCount(sessUserId)}`);
 
       let waiting;
       try {
-        await ctx.answerCbQuery('در حال پردازش...');
+        // اگر پردازنده برای صورت جلسه ارتقا یافت، فقط با نوتیف (toast) اطلاع می‌دهیم — بدون پیام جدید
+        if (modelBumped) {
+          await ctx.answerCbQuery('صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر). هزینه بر همین اساس محاسبه شد.', { show_alert: true });
+        } else {
+          await ctx.answerCbQuery('در حال پردازش...');
+        }
         try { await ctx.deleteMessage(); } catch {}
         // Trim the first message to cost box with ptypeLabel
         const costBlock = buildCostBlock(session.durationSec, userModel, uType, PTYPE_LABELS[type]);
@@ -2114,6 +2341,8 @@ bot.on('callback_query', async (ctx) => {
               errMsg = '😕 هیچ پردازنده‌ای پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
+            session.step = 'failed'; // پایان فلو (آزاد شدن ظرفیت)
+            try { stmts.setFlowStatus.run('failed', token); } catch {}
             return;
           }
 
@@ -2133,6 +2362,7 @@ bot.on('callback_query', async (ctx) => {
           if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
             session.step = 'ready';
+            try { stmts.setFlowStatus.run('completed', token); } catch {}
             await maybeWarnLowBalance(ctx);
             await maybeSendNotionPrompt(ctx.telegram, sessUserId, waiting.chat.id, waiting.message_id, text);
           } else {
@@ -2151,6 +2381,12 @@ bot.on('callback_query', async (ctx) => {
         } catch (e) {
           logErr(`❌ job pipeline error uid=${sessUserId}:`, e.message);
         } finally {
+          // اگر فلو به مرحله‌ی پایانی نرسید (استثنا بعد از پردازش)، آزادش کن تا اسلات ۲تایی قفل نشود
+          const s = sessions.get(token);
+          if (s && (s.step === 'processing')) {
+            s.step = 'failed';
+            try { stmts.setFlowStatus.run('failed', token); } catch {}
+          }
           decJob(sessUserId);
           log(`🏁 job freed  uid=${sessUserId} remaining=${jobCount(sessUserId)}`);
         }
@@ -2196,6 +2432,7 @@ bot.on('callback_query', async (ctx) => {
       } catch {}
 
       session.step = 'ready';
+      try { stmts.setFlowStatus.run('completed', token); } catch {}
       await maybeWarnLowBalance(ctx);
       if (lastOutputMsg) {
         await maybeSendNotionPrompt(ctx.telegram, ctx.from.id, ctx.chat.id, lastOutputMsg.message_id, session.resultText);
@@ -2310,6 +2547,18 @@ bot.on('callback_query', async (ctx) => {
     logErr('❌ unhandled callback error:', err.message);
     try { await ctx.reply('😕 خطا رخ داد. دوباره تلاش کن.'); } catch {}
   }
+});
+
+// هر پیام دیگری که با هندلرهای بالا مدیریت نشد (استیکر، ویدیو، لوکیشن و …) → منوی اصلی
+bot.on('message', async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  // ادمین در حال کار با پنل/ورودی متنی → دست نزن
+  if (isAdmin(userId) && adminStates.get(userId)) return;
+  // کاربر وسط فلوی شارژ → دست نزن (هندلرهای متن/عکس کارش را می‌کنند)
+  if (userStates.get(userId)) return;
+  upsertUser(userId, ctx.from.first_name, ctx.from.username);
+  await sendMainMenu(ctx);
 });
 
 /* ===== 9) Launch ===== */
