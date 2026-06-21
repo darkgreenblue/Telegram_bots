@@ -140,6 +140,7 @@ const stmts = {
   insertFlow:    db.prepare("INSERT INTO voice_flows (token, user_id, model, duration_sec, step, status) VALUES (?,?,?,?,?,'active')"),
   setFlowStatus: db.prepare('UPDATE voice_flows SET status=?, updated_at=unixepoch() WHERE token=?'),
   setFlowStep:   db.prepare('UPDATE voice_flows SET step=?, type=?, model=?, updated_at=unixepoch() WHERE token=?'),
+  setFlowModel:  db.prepare('UPDATE voice_flows SET model=?, updated_at=unixepoch() WHERE token=?'),
   // dashboard
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
@@ -691,15 +692,35 @@ const replyTo = (id) => (id ? { reply_to_message_id: id, allow_sending_without_r
 
 function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 
-setInterval(() => {
+// انقضای فلوهای بازِ ناتمام: ویس + پیام «یکی از حالت‌ها رو انتخاب کن» بعد از این مدت منقضی می‌شود
+// (تلگرام خودش دکمه‌ی پیام‌های قدیمی را منقضی نمی‌کند؛ پس خودمان مدیریتش می‌کنیم تا روی RAM/سشن انباشته نشود)
+const FLOW_TTL_MS = 15 * 60 * 1000; // ۱۵ دقیقه
+const FLOW_EXPIRABLE = new Set(['await_process_type', 'await_output_format']);
+const FLOW_EXPIRED_MSG = '⏱️ این درخواست منقضی شد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.';
+
+setInterval(async () => {
   const now = Date.now();
   for (const [k,v] of sessions) {
-    if (now - v.createdAt > 2*60*60*1000) sessions.delete(k);
+    const age = now - (v.createdAt || 0);
+    // فلوی ناتمام که از TTL گذشته → منقضی کن، پیام را نشانه‌گذاری کن، حافظه آزاد شود
+    if (FLOW_EXPIRABLE.has(v.step) && age > FLOW_TTL_MS) {
+      if (v.modeMsgId && v.chatId) {
+        try { await bot.telegram.editMessageText(v.chatId, v.modeMsgId, undefined, FLOW_EXPIRED_MSG); } catch {}
+        if (v.promptMsgId) { try { await bot.telegram.deleteMessage(v.chatId, v.promptMsgId); } catch {} }
+      } else if (v.promptMsgId && v.chatId) {
+        try { await bot.telegram.editMessageText(v.chatId, v.promptMsgId, undefined, FLOW_EXPIRED_MSG); } catch {}
+      }
+      sessions.delete(k);
+      try { stmts.setFlowStatus.run('expired', k); } catch {}
+      continue;
+    }
+    // فالبک: هر سشن خیلی قدیمی (حتی فعال/گیرکرده) پاک شود
+    if (age > 2*60*60*1000) sessions.delete(k);
   }
   for (const [k,v] of notionStates) {
     if (now - v.createdAt > 60*60*1000) notionStates.delete(k);
   }
-}, 30*60*1000);
+}, 60*1000);
 
 /* ===== 7) Keyboards ===== */
 const MODE_SELECT_TEXT = 'یکی از حالت‌های زیر رو انتخاب کن:';
@@ -1830,6 +1851,23 @@ bot.on('callback_query', async (ctx) => {
       stmts.setModel.run(modelId, userId);
       const lbl = getModelLabel(modelId, uType);
       const prc = getModelPrice(modelId, uType);
+
+      // همه‌ی فلوهای بازِ همین کاربر که هنوز حالت پردازش انتخاب نکرده‌اند، به مدل جدید آپدیت شوند
+      // (هم سشن، هم باکس هزینه‌ی زیر پیام «چطور میخوای پردازش بشه» بدون پیام اضافه)
+      for (const [t, s] of sessions) {
+        if (s.userId !== userId || s.step !== 'await_process_type' || !s.promptMsgId) continue;
+        s.userModel = modelId;
+        try { stmts.setFlowModel.run(modelId, t); } catch {}
+        const costBlock = buildCostBlock(s.durationSec, modelId, uType);
+        try {
+          await ctx.telegram.editMessageText(
+            s.chatId, s.promptMsgId, undefined,
+            `چطور میخوای متن پردازش بشه؟${costBlock ? `\n\n${costBlock}` : ''}`,
+            { parse_mode: 'HTML' }
+          );
+        } catch {}
+      }
+
       await ctx.answerCbQuery(`✅ پردازنده به ${lbl} تغییر یافت`);
       try {
         await ctx.editMessageText(
