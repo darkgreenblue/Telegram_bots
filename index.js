@@ -1005,11 +1005,15 @@ async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, tex
 
 /* ===== 8) Handlers ===== */
 
-// منوی اصلی: پیام خوش‌آمد/راهنما + دکمه‌های داشبورد اصلی (کیف‌پول/تعویض پردازنده یا داشبورد/تعویض)
-async function sendMainMenu(ctx, { gift = false } = {}) {
+// منوی اصلی: welcome=true فقط از /start می‌آید؛ بقیه مسیرها (انصراف و غیره) پیام ساده می‌گیرند
+async function sendMainMenu(ctx, { gift = false, welcome = false } = {}) {
   const keyboard = mainKeyboard(ctx.from.id);
   if (isAdmin(ctx.from.id)) {
-    await ctx.reply('سلام! یک ویس یا فایل صوتی بفرست. 🎤', keyboard);
+    await ctx.reply('یک ویس یا فایل صوتی بفرست. 🎤', keyboard);
+    return;
+  }
+  if (!welcome) {
+    await ctx.reply('یک ویس یا فایل صوتی بفرست تا شروع کنیم 🎤', keyboard);
     return;
   }
   const giftLine = gift
@@ -1030,7 +1034,7 @@ async function sendMainMenu(ctx, { gift = false } = {}) {
 
 bot.start(async (ctx) => {
   const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-  await sendMainMenu(ctx, { gift: isNew });
+  await sendMainMenu(ctx, { welcome: true, gift: isNew });
 });
 
 bot.hears('🔄 تعویض پردازنده', async (ctx) => {
@@ -1078,9 +1082,10 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   const rstate = userStates.get(userId);
   if (rstate && !isAdmin(userId)) {
     let msg = 'الان وسط فلوی شارژ کیف پول هستی. اول اون رو کامل کن یا انصراف بده.';
-    if (rstate.step === 'waiting_amount')             msg = 'لطفاً مبلغ شارژ را به تومان بنویس، یا انصراف بده:';
-    else if (rstate.step === 'waiting_discount_code') msg = 'کد تخفیفت رو تایپ کن، یا انصراف بده:';
-    else if (rstate.step === 'waiting_receipt')       msg = 'فیش واریز رو بفرست (عکس یا متن)، یا انصراف بده:';
+    if (rstate.step === 'waiting_amount')             msg = 'لطفاً مبلغ شارژ را به تومان بنویس:';
+    else if (rstate.step === 'waiting_discount_code') msg = 'کد تخفیفت رو تایپ کن:';
+    else if (rstate.step === 'waiting_receipt')       msg = 'فیش واریز رو بفرست (عکس یا متن):';
+    rstate.fromVoice = true;
     await ctx.reply(msg, { ...replyTo(ctx.message.message_id), ...payCancelKb(rstate.paymentId) });
     return;
   }
@@ -1108,8 +1113,8 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
       `⚠️ هم‌زمان حداکثر ${MAX_ACTIVE_FLOWS.toLocaleString('fa-IR')} پردازش می‌تونی داشته باشی.\n` +
       `اول یکی از پردازش‌های قبلی رو لغو کن (یا تا آخر ببرش)، بعد این ویس رو دوباره بفرست:`,
       { ...replyTo(voiceMsgId), ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚫 لغو پردازش اول', `flowcancel:${active[0][0]}`)],
-        [Markup.button.callback('🚫 لغو پردازش دوم', `flowcancel:${active[1][0]}`)],
+        [Markup.button.callback('🚫 لغو پردازش اول', `flowcancel:1:${active[0][0]}`)],
+        [Markup.button.callback('🚫 لغو پردازش دوم', `flowcancel:2:${active[1][0]}`)],
       ]) }
     );
     return;
@@ -1680,9 +1685,10 @@ bot.on('callback_query', async (ctx) => {
     }
 
     // ── Cancel a specific flow (when user has 2 active and sent a 3rd) ──
-    const fc = data.match(/^flowcancel:([a-z0-9]+)$/i);
+    const fc = data.match(/^flowcancel:([12]):([a-z0-9]+)$/i);
     if (fc) {
-      const token = fc[1];
+      const flowNum = fc[1] === '1' ? 'اول' : 'دوم';
+      const token = fc[2];
       const session = sessions.get(token);
       if (!session) {
         await ctx.answerCbQuery('این پردازش دیگه فعال نیست');
@@ -1692,24 +1698,40 @@ bot.on('callback_query', async (ctx) => {
       if (session.step === 'processing' || session.step === 'processing_output') {
         return ctx.answerCbQuery('این پردازش در حال انجامه و قابل لغو نیست؛ تا اتمامش صبر کن.', { show_alert: true });
       }
-      await cancelFlow(token, session);
+      // پیام مود سلکت (یا پرامپت اگه مود هنوز نیومده) رو به «❌ لغو شد» تبدیل کن؛ پاک نکن
+      const chatId = session.chatId;
+      if (session.modeMsgId) {
+        try { await bot.telegram.editMessageText(chatId, session.modeMsgId, undefined, '❌ لغو شد'); } catch {}
+        try { await bot.telegram.deleteMessage(chatId, session.promptMsgId); } catch {}
+      } else if (session.promptMsgId) {
+        try { await bot.telegram.editMessageText(chatId, session.promptMsgId, undefined, '❌ لغو شد'); } catch {}
+      }
+      sessions.delete(token);
+      try { stmts.setFlowStatus.run('cancelled', token); } catch {}
       await ctx.answerCbQuery('لغو شد');
-      try { await ctx.editMessageText('✅ پردازش قبلی لغو شد. حالا ویس جدیدت رو دوباره بفرست.'); } catch {}
+      try { await ctx.editMessageText(`✅ پردازش ${flowNum} لغو شد. حالا ویس جدیدت رو دوباره بفرست.`); } catch {}
       return;
     }
 
-    // ── Cancel a payment/recharge flow → back to main menu ──
+    // ── Cancel a payment/recharge flow ──
     const pc = data.match(/^pay_cancel:(\d+)$/);
     if (pc) {
       const paymentId = parseInt(pc[1]);
       const payment = stmts.getPayment.get(paymentId);
+      const state = userStates.get(userId);
+      const fromVoice = state?.fromVoice || false;
       if (payment && payment.user_id === userId && payment.status === 'pending') {
-        stmts.setPaymentStatus.run('cancelled', paymentId); // step ثبت‌شده نشان می‌دهد کجا انصراف داد
+        stmts.setPaymentStatus.run('cancelled', paymentId);
       }
       userStates.delete(userId);
       await ctx.answerCbQuery('پرداخت لغو شد');
-      try { await ctx.editMessageText('🚫 پرداخت لغو شد.'); } catch {}
-      await sendMainMenu(ctx);
+      if (fromVoice) {
+        // وقتی ویس وسط فلوی شارژ اومد، ریپلای به همون ویس باقی می‌مونه بدون منوی اضافه
+        try { await ctx.editMessageText('🚫 پرداخت لغو شد. حالا ویس جدیدت رو دوباره بفرست.'); } catch {}
+      } else {
+        try { await ctx.editMessageText('🚫 پرداخت لغو شد.'); } catch {}
+        await sendMainMenu(ctx);
+      }
       return;
     }
 
