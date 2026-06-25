@@ -24,8 +24,10 @@ npm start
 
 ## دیپلوی روی VPS
 این ربات بخشی از مونوریپوست و با PM2 از طریق `ecosystem.config.cjs` ریشه اجرا می‌شود.
-یک‌بار روی سرور فایل env مخصوص این ربات را بسازید (توکن و کلید **جداگانه** برای اندازه‌گیری هزینه):
-```bash
-nano ~/voice2text/bots/resume-tailor/.env   # BOT_TOKEN=... و OPENROUTER_API_KEY=...
-```
-از اولین push بعدی، workflowِ `Deploy` این ربات را خودکار نصب و با pm2 استارت می‌کند. تا وقتی این `.env` ساخته نشده باشد، ربات به‌صورت امن skip می‌شود و ربات `voice2text` دست‌نخورده می‌ماند.
+نیازی به SSH دستی نیست؛ توکن و کلید **جداگانه** (برای اندازه‌گیری هزینه) از طریق GitHub Secrets تزریق می‌شوند:
+
+در GitHub: **Settings → Secrets and variables → Actions → New repository secret** و این دو را بسازید:
+- `RESUME_BOT_TOKEN` = توکن تلگرام این ربات
+- `RESUME_OPENROUTER_KEY` = کلید OpenRouter این ربات
+
+workflowِ `Deploy` در هر push به `main`، فایل `bots/resume-tailor/.env` را روی سرور از روی همین secretها می‌سازد و ربات را با pm2 استارت می‌کند. تا وقتی این دو secret تنظیم نشده باشند، ربات به‌صورت امن skip می‌شود و `voice2text` دست‌نخورده می‌ماند.

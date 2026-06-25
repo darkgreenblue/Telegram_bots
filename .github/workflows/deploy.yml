@@ -11,10 +11,15 @@ jobs:
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
+        env:
+          RESUME_BOT_TOKEN: ${{ secrets.RESUME_BOT_TOKEN }}
+          RESUME_OPENROUTER_KEY: ${{ secrets.RESUME_OPENROUTER_KEY }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
+          # ارسال این متغیرها به شل ریموت تا فایل .env ربات جدید از روی GitHub Secrets ساخته شود
+          envs: RESUME_BOT_TOKEN,RESUME_OPENROUTER_KEY
           script: |
             set -e
             cd ~/voice2text
@@ -39,12 +44,23 @@ jobs:
             # --- استارت/ریلود voice2text از ecosystem (داون‌تایم حداقلی) ---
             pm2 startOrReload ecosystem.config.cjs --update-env --only voice2text
 
-            # --- resume-tailor فقط در صورت وجود .env روی سرور دیپلوی شود (وگرنه skip امن) ---
+            # --- ساخت .env ربات جدید از روی GitHub Secrets (بدون نیاز به SSH دستی) ---
+            # اگر هر دو secret تنظیم شده باشند، فایل را می‌نویسیم/به‌روزرسانی می‌کنیم.
+            if [ -n "$RESUME_BOT_TOKEN" ] && [ -n "$RESUME_OPENROUTER_KEY" ]; then
+              mkdir -p bots/resume-tailor
+              umask 077
+              cat > bots/resume-tailor/.env <<EOF
+BOT_TOKEN=${RESUME_BOT_TOKEN}
+OPENROUTER_API_KEY=${RESUME_OPENROUTER_KEY}
+EOF
+            fi
+
+            # --- resume-tailor فقط در صورت وجود .env دیپلوی شود (وگرنه skip امن) ---
             if [ -f bots/resume-tailor/.env ]; then
               npm ci --prefix bots/resume-tailor --omit=dev
               pm2 startOrReload ecosystem.config.cjs --update-env --only resume-tailor
             else
-              echo "ℹ️ bots/resume-tailor/.env یافت نشد — این ربات skip شد (voice2text دست‌نخورده)."
+              echo "ℹ️ secretهای RESUME_BOT_TOKEN/RESUME_OPENROUTER_KEY تنظیم نشده‌اند — resume-tailor skip شد (voice2text دست‌نخورده)."
             fi
 
             pm2 save
