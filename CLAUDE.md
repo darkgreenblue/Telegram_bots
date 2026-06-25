@@ -38,6 +38,19 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 
 > تاریخچه: کلیدهای voice2text در اصل **در GitHub نبودند** و دستی در `~/voice2text/.env` روی سرور قرار داشتند. معماری جدید این را به Secrets منتقل می‌کند (به‌صورت اختیاری و بدون‌شکست).
 
+**از کجا مقدارِ هر Secret را برداریم:**
+- `*_BOT_TOKEN`: از [@BotFather](https://t.me/BotFather) → `/mybots` → ربات موردنظر → API Token (همان توکنِ زنده).
+- `*_OPENROUTER_KEY`: داشبورد OpenRouter (`openrouter.ai/keys`). کلیدها فقط یک‌بار نمایش داده می‌شوند؛ اگر کلید قبلی ذخیره نشده، یک کلیدِ نو (با اعتبار) بساز — ربات بعد از deploy به آن سوییچ می‌کند.
+- `VOICE2TEXT_NOTION_TOKEN` *(اختیاری)*: فقط اگر قابلیتِ «ارسال به Notion» استفاده می‌شود. **هشدار:** چون materialize فایل `.env` را بازنویسی می‌کند، اگر این قابلیت فعال است و این secret را نگذاری، بعد از یکپارچه‌سازی غیرفعال می‌شود. دیپلوی قبل از اولین بازنویسی یک `bots/voice2text/.env.bak` می‌سازد تا قابل بازگردانی باشد.
+
+## ۴ب) بررسی سلامت بعد از deploy و rollback
+بعد از merge، نتیجه‌ی workflowِ `Deploy` را در GitHub Actions ببین (لاگ SSH خطوط `✅ <bot> دیپلوی شد` را چاپ می‌کند). چون به VPS دسترسی نداری، برای تأیید نهایی از کاربر بخواه:
+- `pm2 ls` → هر دو ربات `online`.
+- `pm2 logs voice2text --lines 50` → بدون کرش‌لوپ.
+- یک تست واقعیِ voice2text (ارسال ویس) و یک `/start` روی resume-tailor.
+
+**Rollback اگر voice2text بعد از یکپارچه‌سازی مشکل گرفت:** مقادیر درست را در Secrets اصلاح کن و یک کامیت خالی به `main` بزن (دیپلوی دوباره اجرا می‌شود). فایلِ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستیِ قبلی را نگه داشته (برای مقایسه/بازگردانی). برای rollbackِ کد: `git revert` کامیتِ مشکل‌دار و merge.
+
 ## ۵) افزودن یک ربات جدید (چک‌لیست کمینه)
 1. `bots/<name>/` با `index.js` (ESM)، `package.json` و `package-lock.json` و `.env.example` بساز.
 2. در `ecosystem.config.cjs` یک اپ اضافه کن: `{ name: '<name>', cwd: 'bots/<name>', script: 'index.js' }`.

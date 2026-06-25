@@ -44,12 +44,15 @@ jobs:
             # قاعده: فقط وقتی توکنِ آن ربات ست شده باشد، .env نوشته/به‌روز می‌شود؛
             # در غیر این صورت .env موجود روی سرور دست‌نخورده می‌ماند (عدم‌شکستن رباتِ فعال).
             if [ -n "$VOICE2TEXT_BOT_TOKEN" ] && [ -n "$VOICE2TEXT_OPENROUTER_KEY" ]; then
-              mkdir -p bots/voice2text; ( umask 077; {
+              mkdir -p bots/voice2text
+              # بکاپ یک‌باره از .env دستیِ سرور (شامل هر متغیر اضافه‌ای که ممکن است داشته باشد)
+              [ -f bots/voice2text/.env ] && [ ! -f bots/voice2text/.env.bak ] && cp bots/voice2text/.env bots/voice2text/.env.bak || true
+              ( umask 077; {
                 echo "BOT_TOKEN=${VOICE2TEXT_BOT_TOKEN}"
                 echo "OPENROUTER_API_KEY=${VOICE2TEXT_OPENROUTER_KEY}"
                 [ -n "$VOICE2TEXT_NOTION_TOKEN" ] && echo "NOTION_TOKEN=${VOICE2TEXT_NOTION_TOKEN}"
               } > bots/voice2text/.env )
-              echo "🔑 voice2text/.env از روی secrets نوشته شد"
+              echo "🔑 voice2text/.env از روی secrets نوشته شد (بکاپ: .env.bak)"
             fi
             if [ -n "$RESUME_TAILOR_BOT_TOKEN" ] && [ -n "$RESUME_TAILOR_OPENROUTER_KEY" ]; then
               mkdir -p bots/resume-tailor; ( umask 077; {
