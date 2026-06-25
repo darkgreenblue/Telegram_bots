@@ -21,13 +21,17 @@ jobs:
             git pull --ff-only
 
             # --- مهاجرت یک‌باره به ساختار مونوریپو (در دیپلوی‌های بعدی no-op می‌شود) ---
-            # انتقال دیتابیس و env قدیمی از ریشه به پوشه‌ی ربات
+            # تشخیص نیاز به مهاجرت: پروسه‌ی قدیمی هنوز به index.js ریشه اشاره می‌کند؟
+            NEED_MIGRATE=0
+            if pm2 jlist | grep -q '/home/ubuntu/voice2text/index.js'; then NEED_MIGRATE=1; fi
+            # مهم: قبل از جابجایی پوشه‌ی data، پروسه باید متوقف شود تا فایل‌های باز SQLite
+            # (.db / .db-wal / .db-shm) حین نوشتن جابجا نشوند و دیتابیس خراب نشود.
+            if [ "$NEED_MIGRATE" = "1" ]; then pm2 stop voice2text || true; fi
+            # انتقال دیتابیس و env قدیمی از ریشه به پوشه‌ی ربات (وقتی پروسه متوقف است)
             [ -d data ] && [ ! -d bots/voice2text/data ] && mv data bots/voice2text/data || true
             [ -f .env ] && [ ! -f bots/voice2text/.env ] && mv .env bots/voice2text/.env || true
-            # اگر پروسه‌ی قدیمی هنوز به index.js ریشه اشاره می‌کند، یک‌بار حذفش کن تا با مسیر جدید استارت شود
-            if pm2 jlist | grep -q '/home/ubuntu/voice2text/index.js'; then
-              pm2 delete voice2text || true
-            fi
+            # حذف پروسه‌ی قدیمی تا با مسیر/‌cwd جدید از ecosystem استارت شود
+            if [ "$NEED_MIGRATE" = "1" ]; then pm2 delete voice2text || true; fi
 
             # --- نصب وابستگی‌ها به‌صورت per-bot ---
             npm ci --prefix bots/voice2text --omit=dev
