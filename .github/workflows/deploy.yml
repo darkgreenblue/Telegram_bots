@@ -16,7 +16,31 @@ jobs:
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd ~/voice2text
             git pull --ff-only
-            npm ci --omit=dev
-            pm2 restart voice2text
+
+            # --- مهاجرت یک‌باره به ساختار مونوریپو (در دیپلوی‌های بعدی no-op می‌شود) ---
+            # انتقال دیتابیس و env قدیمی از ریشه به پوشه‌ی ربات
+            [ -d data ] && [ ! -d bots/voice2text/data ] && mv data bots/voice2text/data || true
+            [ -f .env ] && [ ! -f bots/voice2text/.env ] && mv .env bots/voice2text/.env || true
+            # اگر پروسه‌ی قدیمی هنوز به index.js ریشه اشاره می‌کند، یک‌بار حذفش کن تا با مسیر جدید استارت شود
+            if pm2 jlist | grep -q '/home/ubuntu/voice2text/index.js'; then
+              pm2 delete voice2text || true
+            fi
+
+            # --- نصب وابستگی‌ها به‌صورت per-bot ---
+            npm ci --prefix bots/voice2text --omit=dev
+
+            # --- استارت/ریلود voice2text از ecosystem (داون‌تایم حداقلی) ---
+            pm2 startOrReload ecosystem.config.cjs --update-env --only voice2text
+
+            # --- resume-tailor فقط در صورت وجود .env روی سرور دیپلوی شود (وگرنه skip امن) ---
+            if [ -f bots/resume-tailor/.env ]; then
+              npm ci --prefix bots/resume-tailor --omit=dev
+              pm2 startOrReload ecosystem.config.cjs --update-env --only resume-tailor
+            else
+              echo "ℹ️ bots/resume-tailor/.env یافت نشد — این ربات skip شد (voice2text دست‌نخورده)."
+            fi
+
+            pm2 save
