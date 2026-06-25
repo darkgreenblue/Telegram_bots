@@ -27,7 +27,7 @@ npm start
 نیازی به SSH دستی نیست؛ توکن و کلید **جداگانه** (برای اندازه‌گیری هزینه) از طریق GitHub Secrets تزریق می‌شوند:
 
 در GitHub: **Settings → Secrets and variables → Actions → New repository secret** و این دو را بسازید:
-- `RESUME_BOT_TOKEN` = توکن تلگرام این ربات
-- `RESUME_OPENROUTER_KEY` = کلید OpenRouter این ربات
+- `RESUME_TAILOR_BOT_TOKEN` = توکن تلگرام این ربات
+- `RESUME_TAILOR_OPENROUTER_KEY` = کلید OpenRouter این ربات
 
 workflowِ `Deploy` در هر push به `main`، فایل `bots/resume-tailor/.env` را روی سرور از روی همین secretها می‌سازد و ربات را با pm2 استارت می‌کند. تا وقتی این دو secret تنظیم نشده باشند، ربات به‌صورت امن skip می‌شود و `voice2text` دست‌نخورده می‌ماند.
