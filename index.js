@@ -1,5 +1,6 @@
 // index.js — SaaS Telegram voice→text bot (multi-user, wallet, model selection)
 import 'dotenv/config';
+import https from 'https';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
@@ -2621,7 +2622,127 @@ bot.on('message', async (ctx) => {
   await sendMainMenu(ctx);
 });
 
-/* ===== 9) Launch ===== */
+/* ===== 9) Admin API ===== */
+// API سبک HTTPS برای دسترسی Claude Code به داده‌ها و اکشن‌های مدیریتی.
+// HTTPS اجباری است: محیط اجرای Claude فقط از طریق پروکسیِ HTTPS (CONNECT tunnel)
+// به سرور می‌رسد؛ HTTP ساده از آن محیط قابل دسترسی نیست. مستندسازی: CLAUDE.md
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN?.trim() || '';
+const ADMIN_API_PORT  = parseInt(process.env.ADMIN_API_PORT || '3001', 10);
+const ADMIN_API_CERT  = process.env.ADMIN_API_CERT?.trim() || '';
+const ADMIN_API_KEY   = process.env.ADMIN_API_KEY?.trim()  || '';
+
+function adminApiHandler(req, res) {
+  const send = (data, status = 200) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
+    res.end(JSON.stringify(data, null, 2));
+  };
+  const auth = (req.headers['authorization'] || '').trim();
+  if (!ADMIN_API_TOKEN || auth !== `Bearer ${ADMIN_API_TOKEN}`) return send({ error: 'unauthorized' }, 401);
+
+  let body = '';
+  req.on('data', c => { body += c; });
+  req.on('end', () => {
+    try {
+      const url  = new URL(req.url, 'http://localhost');
+      const path = url.pathname.replace(/\/$/, '') || '/';
+      const method = req.method;
+
+      // ── GET /admin/stats ──
+      if (method === 'GET' && path === '/admin/stats') {
+        const totalUsers   = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+        const activeToday  = db.prepare("SELECT COUNT(DISTINCT user_id) as c FROM usage_log WHERE created_at >= unixepoch()-86400").get().c;
+        const totalRevenue = db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved'").get().s;
+        const todayRevenue = db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at>=unixepoch()-86400").get().s;
+        const usage        = db.prepare('SELECT COUNT(*) as jobs, COALESCE(SUM(cost),0) as spent, COALESCE(SUM(duration_sec),0) as secs FROM usage_log WHERE success=1').get();
+        return send({ totalUsers, activeToday, totalRevenue, todayRevenue, usage });
+      }
+
+      // ── GET /admin/users ──
+      if (method === 'GET' && path === '/admin/users') {
+        const users = db.prepare(`
+          SELECT u.telegram_id, u.name, u.username, u.balance, u.model,
+            datetime(u.created_at,'unixepoch') as joined,
+            datetime(u.last_seen,'unixepoch')  as last_seen,
+            COUNT(DISTINCT ul.id)              as job_count,
+            COALESCE(SUM(ul.cost),0)           as total_spent,
+            ROUND(COALESCE(SUM(ul.duration_sec),0)/60.0,1) as total_min
+          FROM users u
+          LEFT JOIN usage_log ul ON ul.user_id=u.telegram_id AND ul.success=1
+          GROUP BY u.telegram_id
+          ORDER BY u.last_seen DESC
+        `).all();
+        return send({ count: users.length, users });
+      }
+
+      // ── GET /admin/users/:id ──
+      const userMatch = path.match(/^\/admin\/users\/(-?\d+)$/);
+      if (method === 'GET' && userMatch) {
+        const id   = parseInt(userMatch[1]);
+        const user = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
+        if (!user) return send({ error: 'not found' }, 404);
+        const usage    = db.prepare('SELECT type,model,duration_sec,cost,success,datetime(created_at,"unixepoch") as at FROM usage_log WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(id);
+        const payments = db.prepare('SELECT id,amount,status,datetime(created_at,"unixepoch") as at FROM payments WHERE user_id=? ORDER BY created_at DESC LIMIT 20').all(id);
+        return send({ user, usage, payments });
+      }
+
+      // ── POST /admin/users/:id/credit | /deduct ──
+      const actionMatch = path.match(/^\/admin\/users\/(-?\d+)\/(credit|deduct)$/);
+      if (method === 'POST' && actionMatch) {
+        const id     = parseInt(actionMatch[1]);
+        const action = actionMatch[2];
+        let parsed;
+        try { parsed = JSON.parse(body || '{}'); } catch { return send({ error: 'invalid json' }, 400); }
+        const amount = parseInt(parsed.amount);
+        if (!amount || amount <= 0) return send({ error: 'amount must be positive integer (toman)' }, 400);
+        const user = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
+        if (!user) return send({ error: 'user not found' }, 404);
+        if (action === 'credit') stmts.credit.run(amount, id);
+        else stmts.deduct.run(amount, id);
+        const updated = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
+        log(`🔧 admin-api ${action} uid=${id} amount=${amount} new_balance=${updated.balance}`);
+        return send({ ok: true, action, amount, user: updated });
+      }
+
+      // ── GET /admin/payments?status=&limit= ──
+      if (method === 'GET' && path === '/admin/payments') {
+        const status = url.searchParams.get('status') || null;
+        const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
+        const rows   = status
+          ? db.prepare('SELECT p.*,u.name,u.username FROM payments p JOIN users u ON u.telegram_id=p.user_id WHERE p.status=? ORDER BY p.created_at DESC LIMIT ?').all(status, limit)
+          : db.prepare('SELECT p.*,u.name,u.username FROM payments p JOIN users u ON u.telegram_id=p.user_id ORDER BY p.created_at DESC LIMIT ?').all(limit);
+        return send({ count: rows.length, payments: rows });
+      }
+
+      // ── GET /admin/flows?status= ──
+      if (method === 'GET' && path === '/admin/flows') {
+        const status = url.searchParams.get('status') || 'active';
+        const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
+        const rows   = db.prepare('SELECT f.*,u.name,u.username FROM voice_flows f JOIN users u ON u.telegram_id=f.user_id WHERE f.status=? ORDER BY f.created_at DESC LIMIT ?').all(status, limit);
+        return send({ count: rows.length, flows: rows });
+      }
+
+      return send({ error: 'not found' }, 404);
+    } catch (e) {
+      logErr('admin-api error:', e.message);
+      send({ error: e.message }, 500);
+    }
+  });
+}
+
+if (ADMIN_API_TOKEN && ADMIN_API_CERT && ADMIN_API_KEY) {
+  try {
+    const tlsOpts = { cert: readFileSync(ADMIN_API_CERT), key: readFileSync(ADMIN_API_KEY) };
+    https.createServer(tlsOpts, adminApiHandler).listen(ADMIN_API_PORT, () => {
+      log(`🔧 Admin API  https://0.0.0.0:${ADMIN_API_PORT}/admin  (TLS + token)`);
+    });
+  } catch (e) {
+    logErr('❌ Admin API TLS setup failed — disabled:', e.message);
+  }
+} else {
+  log('⚠️  Admin API disabled (need ADMIN_API_TOKEN + ADMIN_API_CERT + ADMIN_API_KEY)');
+}
+
+/* ===== 10) Launch ===== */
 function launch() {
   bot.launch({ dropPendingUpdates: true })
     .then(() => log('✅ Bot started (long polling)'))
