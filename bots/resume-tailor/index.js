@@ -108,6 +108,16 @@ function getState(uid)   { return qGetUser.get(uid)?.state || 'new'; }
 function setState(uid, s) { qSetState.run(s, uid); }
 function setPending(uid, url, text) { qSetPending.run(url || '', text || '', uid); }
 function getPending(uid) { const u = qGetUser.get(uid); return u ? { jobUrl: u.pending_job_url || null, jobText: u.pending_job_text || '' } : null; }
+// پاک‌سازی کاملِ یک کاربر — انگار کاربر جدید آمده (برای فاز تست)
+function wipeUser(uid) {
+  db.prepare('DELETE FROM profiles WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM history_chunks WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM generations WHERE user_id=?').run(uid);
+  qClearPending.run(uid);
+  qSetEditIdx.run(-1, uid);
+  setState(uid, 'new');
+  qEnsureProfile.run(uid);
+}
 
 /* ===== 3) OpenRouter ===== */
 async function orRequest(body) {
@@ -470,6 +480,10 @@ const HELP =
 /* ===== 11) Bot ===== */
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: OR_TIMEOUT_MS });
 
+// دکمه‌ی persistent «ریست» زیر محل تایپ (فاز تست)
+const RESET_BTN = '🔄 ریست ربات (تست)';
+const testKb = Markup.keyboard([[RESET_BTN]]).resize();
+
 function profileReady(uid) { const s = getStructured(uid); return !!(s && s.companies); }
 
 async function askHasResume(ctx) {
@@ -488,19 +502,21 @@ async function startHistoryCollection(ctx) {
   );
 }
 
-bot.start(async (ctx) => { upsertUser(ctx); await askHasResume(ctx); });
-bot.command('help', (ctx) => ctx.reply(HELP));
-
-bot.command('reset', (ctx) => {
-  const uid = ctx.from.id;
-  db.prepare('DELETE FROM profiles WHERE user_id=?').run(uid);
-  qDelChunks.run(uid);
-  qClearPending.run(uid);
-  qSetEditIdx.run(-1, uid);
-  setState(uid, 'new');
-  qEnsureProfile.run(uid);
-  return ctx.reply('🗑️ همه‌چیز پاک شد. برای شروع دوباره /start را بزن.');
+bot.start(async (ctx) => {
+  upsertUser(ctx);
+  await ctx.reply('🧪 حالت تست فعال است. برای پاک‌سازی کاملِ اطلاعاتت و شروع از صفر، هر زمان دکمه‌ی «🔄 ریست ربات (تست)» پایین را بزن.', testKb);
+  await askHasResume(ctx);
 });
+bot.command('help', (ctx) => ctx.reply(HELP, testKb));
+
+// دکمه/کامند ریست تست — کاربر را کاملاً پاک می‌کند (انگار کاربر جدید)
+async function doReset(ctx) {
+  wipeUser(ctx.from.id);
+  await ctx.reply('🔄 ربات ریست شد. تمام اطلاعاتت پاک شد و مثل کاربر جدید هستی.', testKb);
+  return askHasResume(ctx);
+}
+bot.hears(RESET_BTN, (ctx) => { upsertUser(ctx); return doReset(ctx); });
+bot.command('reset', (ctx) => { upsertUser(ctx); return doReset(ctx); });
 
 bot.command('profile', (ctx) => {
   upsertUser(ctx);

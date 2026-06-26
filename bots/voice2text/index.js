@@ -23,6 +23,7 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
 const ADMIN_IDS    = [100257975];
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
 const OWNER_ID = 100257975; // فقط این کاربر — مستقل از سیستم ادمین
+const RESET_TEST_BTN = '🔄 ریست ربات (تست)'; // فاز تست — فقط برای OWNER
 
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
@@ -757,7 +758,9 @@ function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
 
 function mainKeyboard(userId) {
   if (isAdmin(userId)) {
-    return Markup.keyboard([['🔄 تعویض پردازنده', '📊 داشبورد']]).resize();
+    const rows = [['🔄 تعویض پردازنده', '📊 داشبورد']];
+    if (userId === OWNER_ID) rows.push([RESET_TEST_BTN]); // فاز تست — فقط مالک
+    return Markup.keyboard(rows).resize();
   }
   return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
 }
@@ -1055,6 +1058,20 @@ async function sendMainMenu(ctx, { gift = false, welcome = false } = {}) {
 
 bot.start(async (ctx) => {
   const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  await sendMainMenu(ctx, { welcome: true, gift: isNew });
+});
+
+// فاز تست — ریست کاملِ خودِ مالک (فقط ردیف‌های همین کاربر؛ owner-only برای ایمنی رباتِ زنده)
+bot.hears(RESET_TEST_BTN, async (ctx) => {
+  const uid = ctx.from.id;
+  if (uid !== OWNER_ID) return;
+  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id']]) {
+    try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
+  }
+  userStates.delete(uid); notionStates.delete(uid); activeJobs.delete(uid);
+  for (const [tok, s] of sessions) if (s && s.userId === uid) sessions.delete(tok);
+  const { isNew } = upsertUser(uid, ctx.from.first_name, ctx.from.username);
+  await ctx.reply('🔄 ربات برای تو ریست شد. مثل کاربر جدید هستی.');
   await sendMainMenu(ctx, { welcome: true, gift: isNew });
 });
 
