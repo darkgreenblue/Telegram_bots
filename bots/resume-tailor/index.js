@@ -27,8 +27,11 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const TRANSCRIBE_MODEL = 'google/gemini-2.5-flash'; // ویس → متن
-const GEN_MODEL        = 'google/gemini-2.5-pro';   // ساماندهی و تولید (دقیق)
+// بهینه‌سازی هزینه: Pro فقط برای بزرگ‌ترین و مهم‌ترین بخش (شرح شغلیِ رزومه).
+// بقیه‌ی کارها (ویس→متن، ساماندهی پروفایل، ویرایش، Summary، Skills) با Flash.
+const FLASH = 'google/gemini-2.5-flash';
+const PRO   = 'google/gemini-2.5-pro';
+const TRANSCRIBE_MODEL = FLASH; // ویس → متن
 const OR_TIMEOUT_MS    = 10 * 60 * 1000;
 const MIN_JOB_TEXT_LEN = 400;
 const TELEGRAM_MAX_DOWNLOAD = 20 * 1024 * 1024;
@@ -302,14 +305,14 @@ function collectSourcesText(uid) {
 
 async function buildStructuredProfile(uid) {
   const sources = collectSourcesText(uid);
-  // لایه ۱: تفکیک شرکت‌ها
-  const splitRaw = await orChat(GEN_MODEL, AGENT_SPLIT_COMPANIES, sources);
+  // لایه ۱: تفکیک شرکت‌ها (Flash)
+  const splitRaw = await orChat(FLASH, AGENT_SPLIT_COMPANIES, sources);
   const split = parseJsonLoose(splitRaw) || { companies: [], education: '', certifications: '', other: '' };
   const companiesRaw = Array.isArray(split.companies) ? split.companies : [];
   // لایه ۲: ساختارمندکردنِ هر شرکت (موازی)
   const organized = await Promise.all(companiesRaw.map(async (c) => {
     try {
-      const out = await orChat(GEN_MODEL, AGENT_ORGANIZE_COMPANY, `### EMPLOYER: ${c.company || ''}\n${c.raw || ''}`);
+      const out = await orChat(FLASH, AGENT_ORGANIZE_COMPANY, `### EMPLOYER: ${c.company || ''}\n${c.raw || ''}`);
       const obj = parseJsonLoose(out);
       return obj || { company: c.company || 'Unknown', positions: [], work_items: [], skills: [], notes: c.raw || '' };
     } catch (e) {
@@ -370,10 +373,11 @@ function buildGenContext(p, s, jobText, jobUrl, notes) {
 }
 async function generateResumeMultiAgent(p, s, jobText, jobUrl, notes) {
   const ctx = buildGenContext(p, s, jobText, jobUrl, notes);
+  // فقط Experience (بزرگ‌ترین/مهم‌ترین بخش) با Pro؛ Summary و Skills با Flash.
   const [summary, experience, skills] = await Promise.all([
-    orChat(GEN_MODEL, AGENT_SUMMARY(RESUME_KNOWLEDGE), ctx),
-    orChat(GEN_MODEL, AGENT_EXPERIENCE(RESUME_KNOWLEDGE), ctx),
-    orChat(GEN_MODEL, AGENT_SKILLS(RESUME_KNOWLEDGE), ctx),
+    orChat(FLASH, AGENT_SUMMARY(RESUME_KNOWLEDGE), ctx),
+    orChat(PRO,   AGENT_EXPERIENCE(RESUME_KNOWLEDGE), ctx),
+    orChat(FLASH, AGENT_SKILLS(RESUME_KNOWLEDGE), ctx),
   ]);
   // ترکیب برنامه‌نویسی‌شده
   const header = (p.contact_info || '').trim();
@@ -520,7 +524,7 @@ async function applyCompanyEdit(ctx, instruction) {
   if (idx < 0 || !s?.companies?.[idx]) { setState(uid, 'ready'); return ctx.reply('چیزی برای ویرایش نبود.'); }
   await ctx.reply('⏳ در حال اعمال تغییر...');
   try {
-    const out = await orChat(GEN_MODEL, AGENT_EDIT_COMPANY,
+    const out = await orChat(FLASH, AGENT_EDIT_COMPANY,
       `### CURRENT COMPANY JSON\n${JSON.stringify(s.companies[idx])}\n\n### USER INSTRUCTION\n${instruction}`);
     const updated = parseJsonLoose(out);
     if (!updated) throw new Error('parse failed');
@@ -552,7 +556,7 @@ async function generateResume(ctx, notes) {
   try {
     const out = await generateResumeMultiAgent(p, s, job.jobText, job.jobUrl, notes);
     if (!out) throw new Error('empty output');
-    qInsertGen.run(uid, job.jobUrl, job.jobText, notes || '', out, GEN_MODEL);
+    qInsertGen.run(uid, job.jobUrl, job.jobText, notes || '', out, 'exp=pro;summary,skills=flash');
     await replyLong(ctx, out);
     await sendResumeFile(ctx, out);
     await ctx.reply(PDF_HINT);
