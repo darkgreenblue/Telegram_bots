@@ -290,6 +290,29 @@ ${NO_HALLUCINATION}
 - Group skills sensibly (e.g., by domain/tooling). Prioritize skills relevant to the target job. Include only skills present in the profile.
 Output ONLY the skills section (compact), no top-level header, no commentary.`;
 
+// ---- ایجنت عمومیِ یک بخش دلخواه (هر بخشی غیر از Summary/Skills/Experience) ----
+const AGENT_SECTION = (title, knowledge) =>
+`You are a professional resume writer producing ONLY the "${title}" section of a resume, tailored to the TARGET JOB, drawn strictly from the candidate's data (STRUCTURED_PROFILE and MAIN_RESUME).
+${knowledge}
+${NO_HALLUCINATION}
+- Include only content actually present in the data. If there is NO supporting data for this section, output exactly: __EMPTY__
+- Do NOT print the section title/header; output only the section body as clean Markdown.`;
+
+// ---- مغزِ ساختار (Flash): تصمیم می‌گیرد رزومه شامل چه بخش‌هایی باشد ----
+const AGENT_STRUCTURE_PLANNER =
+`You are a resume STRUCTURE planner. Decide which sections the final resume should contain and in what order, based on ALL of: the TARGET JOB, the candidate's MAIN_RESUME (their latest version), their STRUCTURED_PROFILE, the EXTRA_NOTES (explicit user requests), and the RESUME KNOWLEDGE.
+
+${NO_HALLUCINATION}
+
+Rules:
+- ALWAYS include these three (use exactly these ids): "summary", "skills", "experience".
+- Add OTHER sections (e.g. education, certifications, projects, languages, awards, publications, volunteer) ONLY when they are supported by the candidate's data OR explicitly requested in EXTRA_NOTES.
+- Respect explicit user requests in EXTRA_NOTES about which sections to include/exclude/order.
+- Choose a sensible professional order (commonly: summary, skills, experience, then extras; education/certifications usually near the end).
+
+Output ONLY valid minified JSON: {"sections":[{"id":"summary","title":"Professional Summary"},{"id":"skills","title":"Core Skills"},{"id":"experience","title":"Professional Experience"}]}
+- id is a short lowercase key; title is the display heading. No commentary.`;
+
 const CONTACT_EXTRACT_PROMPT =
 `Extract ONLY the fixed contact/header block from the resume text as plain lines (do not invent anything): Full name, Email, Phone, Location/City, LinkedIn/GitHub/Portfolio URLs, and any headline/title shown in the header. Omit missing fields. Output only these lines.`;
 
@@ -366,28 +389,61 @@ function profileForGeneration(s) {
 function buildGenContext(p, s, jobText, jobUrl, notes) {
   return [
     `### CONTACT_INFO\n${p.contact_info || '(derive from profile)'}`,
+    `### MAIN_RESUME (candidate's latest version, may be incomplete)\n${p.main_resume || '(none)'}`,
     `### STRUCTURED_PROFILE\n${profileForGeneration(s)}`,
     `### TARGET_JOB${jobUrl ? ` (source: ${jobUrl})` : ''}\n${jobText}`,
     `### EXTRA_NOTES\n${notes && notes.trim() ? notes.trim() : '(none — keep titles fixed, tailor the rest.)'}`,
   ].join('\n\n');
 }
+
+const DEFAULT_SECTIONS = [
+  { id: 'summary',    title: 'Professional Summary' },
+  { id: 'skills',     title: 'Core Skills' },
+  { id: 'experience', title: 'Professional Experience' },
+];
+// تضمین حضور سه بخشِ الزامی (در صورتی که planner جا انداخته باشد)
+function ensureCoreSections(sections) {
+  const out = Array.isArray(sections) ? sections.filter(x => x && x.id && x.title) : [];
+  for (const core of DEFAULT_SECTIONS) {
+    if (!out.some(x => x.id === core.id)) out.push(core);
+  }
+  return out;
+}
+// انتخاب مدل و پرامپتِ هر بخش: فقط experience با Pro، بقیه Flash.
+function agentForSection(sec) {
+  if (sec.id === 'experience') return { model: PRO,   system: AGENT_EXPERIENCE(RESUME_KNOWLEDGE) };
+  if (sec.id === 'summary')    return { model: FLASH, system: AGENT_SUMMARY(RESUME_KNOWLEDGE) };
+  if (sec.id === 'skills')     return { model: FLASH, system: AGENT_SKILLS(RESUME_KNOWLEDGE) };
+  return { model: FLASH, system: AGENT_SECTION(sec.title, RESUME_KNOWLEDGE) };
+}
+
 async function generateResumeMultiAgent(p, s, jobText, jobUrl, notes) {
   const ctx = buildGenContext(p, s, jobText, jobUrl, notes);
-  // فقط Experience (بزرگ‌ترین/مهم‌ترین بخش) با Pro؛ Summary و Skills با Flash.
-  const [summary, experience, skills] = await Promise.all([
-    orChat(FLASH, AGENT_SUMMARY(RESUME_KNOWLEDGE), ctx),
-    orChat(PRO,   AGENT_EXPERIENCE(RESUME_KNOWLEDGE), ctx),
-    orChat(FLASH, AGENT_SKILLS(RESUME_KNOWLEDGE), ctx),
-  ]);
-  // ترکیب برنامه‌نویسی‌شده
+  // ۱) مغزِ ساختار (Flash) تصمیم می‌گیرد رزومه چه بخش‌هایی داشته باشد
+  let sections;
+  try {
+    const planRaw = await orChat(FLASH, AGENT_STRUCTURE_PLANNER, ctx);
+    sections = ensureCoreSections(parseJsonLoose(planRaw)?.sections);
+  } catch (e) { logErr('planner failed, using default sections:', e.message); sections = [...DEFAULT_SECTIONS]; }
+  log(`🧩 sections: ${sections.map(x => x.id).join(', ')}`);
+
+  // ۲) هر بخش با ایجنت خودش (موازی)؛ فقط experience با Pro
+  const bodies = await Promise.all(sections.map(async (sec) => {
+    const { model, system } = agentForSection(sec);
+    try {
+      const body = (await orChat(model, system, ctx)).trim();
+      return { sec, body };
+    } catch (e) { logErr(`section ${sec.id} failed:`, e.message); return { sec, body: '' }; }
+  }));
+
+  // ۳) ترکیب برنامه‌نویسی‌شده به ترتیبِ planner (بخش‌های خالی حذف می‌شوند)
   const header = (p.contact_info || '').trim();
   const parts = [];
   if (header) parts.push(header);
-  parts.push(`## Professional Summary\n${summary.trim()}`);
-  parts.push(`## Skills\n${skills.trim()}`);
-  parts.push(`## Professional Experience\n${experience.trim()}`);
-  if (s.education?.trim())      parts.push(`## Education\n${s.education.trim()}`);
-  if (s.certifications?.trim()) parts.push(`## Certifications\n${s.certifications.trim()}`);
+  for (const { sec, body } of bodies) {
+    if (!body || body === '__EMPTY__') continue;
+    parts.push(`## ${sec.title}\n${body}`);
+  }
   return parts.join('\n\n');
 }
 
@@ -552,7 +608,7 @@ async function generateResume(ctx, notes) {
   const p = qGetProfile.get(uid);
   const s = getStructured(uid);
   if (!s) { setState(uid, 'new'); return ctx.reply('اول باید پروفایلت ساخته شود. /start را بزن.'); }
-  await ctx.reply('⏳ در حال ساخت رزومه‌ی کاستومایز با چند ایجنت (Summary / Experience / Skills)...');
+  await ctx.reply('⏳ در حال ساخت رزومه‌ی کاستومایز... (اول ساختار بخش‌ها تعیین می‌شود، بعد هر بخش با ایجنت خودش ساخته می‌شود)');
   try {
     const out = await generateResumeMultiAgent(p, s, job.jobText, job.jobUrl, notes);
     if (!out) throw new Error('empty output');
