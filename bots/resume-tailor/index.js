@@ -15,6 +15,7 @@ import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+import { RESUME_KNOWLEDGE } from './resume-knowledge.js';
 
 /* ===== 0) Logger ===== */
 function ts() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
@@ -254,17 +255,7 @@ ${NO_HALLUCINATION}
 
 Output ONLY the updated company JSON (same shape as input), minified. No commentary.`;
 
-// ---- دانش رزومه‌نویسی (هوک Deep Research) ----
-// TODO(deep-research): وقتی فایل تحقیق کاربر رسید، «نکات کلیدی و دستورالعمل‌های مهم» آن
-// را اینجا جایگزین/تکمیل کن. این متن به‌صورت خودکار به همه‌ی ایجنت‌های تولیدِ رزومه تزریق می‌شود.
-const RESUME_KNOWLEDGE =
-`STANDARD RESUME PRINCIPLES (baseline until the user's deep-research notes are injected):
-- ATS-friendly: clean structure, standard section names, no tables/graphics/columns in the text, mirror the target job's key terminology naturally.
-- Strong action verbs; lead bullets with impact; quantify with real numbers only when present in the data.
-- Concision: tight, professional wording; avoid fluff, pronouns, and clichés.
-- Relevance: foreground what matches the target position; de-emphasize unrelated content.
-- Consistency: parallel structure, consistent tense (past for past roles), consistent date formatting.
-- Honesty: never fabricate; only reflect the candidate's real, provided experience.`;
+// ---- دانش رزومه‌نویسی: از فایل resume-knowledge.js (عصاره‌ی Deep Research) تزریق می‌شود ----
 
 // ---- ایجنت‌های تولید (هر بخش جدا) ----
 const AGENT_SUMMARY = (knowledge) =>
@@ -422,7 +413,7 @@ async function generateResumeMultiAgent(p, s, jobText, jobUrl, notes) {
   // ۱) مغزِ ساختار (Flash) تصمیم می‌گیرد رزومه چه بخش‌هایی داشته باشد
   let sections;
   try {
-    const planRaw = await orChat(FLASH, AGENT_STRUCTURE_PLANNER, ctx);
+    const planRaw = await orChat(FLASH, `${AGENT_STRUCTURE_PLANNER}\n\n### RESUME KNOWLEDGE\n${RESUME_KNOWLEDGE}`, ctx);
     sections = ensureCoreSections(parseJsonLoose(planRaw)?.sections);
   } catch (e) { logErr('planner failed, using default sections:', e.message); sections = [...DEFAULT_SECTIONS]; }
   log(`🧩 sections: ${sections.map(x => x.id).join(', ')}`);
