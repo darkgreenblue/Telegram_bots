@@ -7,18 +7,73 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    needs: []
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
+        # تک‌منبعِ حقیقت برای همه‌ی کلیدها = GitHub Secrets.
+        # برای هر ربات جدید: دو خط اینجا اضافه کن، نامش را به envs اضافه کن،
+        # یک بلوک materialize و یک deploy_bot در اسکریپت پایین بگذار.
+        env:
+          # voice2text (اختیاری: تا وقتی این secretها تنظیم نشوند، .env فعلی روی سرور استفاده می‌شود)
+          VOICE2TEXT_BOT_TOKEN:         ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          VOICE2TEXT_OPENROUTER_KEY:    ${{ secrets.VOICE2TEXT_OPENROUTER_KEY }}
+          VOICE2TEXT_NOTION_TOKEN:      ${{ secrets.VOICE2TEXT_NOTION_TOKEN }}
+          # resume-tailor
+          RESUME_TAILOR_BOT_TOKEN:      ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          RESUME_TAILOR_OPENROUTER_KEY: ${{ secrets.RESUME_TAILOR_OPENROUTER_KEY }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY
           script: |
+            set -e
             cd ~/voice2text
             git pull --ff-only
-            npm ci --omit=dev
-            pm2 restart voice2text
-            pm2 restart voice2text-ops || pm2 start ops-server.js --name voice2text-ops
+
+            # ---------- مهاجرت یک‌باره به ساختار مونوریپو (در دیپلوی‌های بعدی no-op) ----------
+            NEED_MIGRATE=0
+            if pm2 jlist | grep -q '/home/ubuntu/voice2text/index.js'; then NEED_MIGRATE=1; fi
+            # مهم: قبل از جابجایی data، پروسه متوقف شود تا فایل‌های باز SQLite خراب نشوند.
+            if [ "$NEED_MIGRATE" = "1" ]; then pm2 stop voice2text || true; fi
+            [ -d data ] && [ ! -d bots/voice2text/data ] && mv data bots/voice2text/data || true
+            [ -f .env ] && [ ! -f bots/voice2text/.env ] && mv .env bots/voice2text/.env || true
+            if [ "$NEED_MIGRATE" = "1" ]; then pm2 delete voice2text || true; fi
+
+            # ---------- ساخت .env هر ربات از روی GitHub Secrets ----------
+            # قاعده: فقط وقتی توکنِ آن ربات ست شده باشد، .env نوشته/به‌روز می‌شود؛
+            # در غیر این صورت .env موجود روی سرور دست‌نخورده می‌ماند (عدم‌شکستن رباتِ فعال).
+            if [ -n "$VOICE2TEXT_BOT_TOKEN" ] && [ -n "$VOICE2TEXT_OPENROUTER_KEY" ]; then
+              mkdir -p bots/voice2text
+              # بکاپ یک‌باره از .env دستیِ سرور (شامل هر متغیر اضافه‌ای که ممکن است داشته باشد)
+              [ -f bots/voice2text/.env ] && [ ! -f bots/voice2text/.env.bak ] && cp bots/voice2text/.env bots/voice2text/.env.bak || true
+              ( umask 077; {
+                echo "BOT_TOKEN=${VOICE2TEXT_BOT_TOKEN}"
+                echo "OPENROUTER_API_KEY=${VOICE2TEXT_OPENROUTER_KEY}"
+                [ -n "$VOICE2TEXT_NOTION_TOKEN" ] && echo "NOTION_TOKEN=${VOICE2TEXT_NOTION_TOKEN}"
+              } > bots/voice2text/.env )
+              echo "🔑 voice2text/.env از روی secrets نوشته شد (بکاپ: .env.bak)"
+            fi
+            if [ -n "$RESUME_TAILOR_BOT_TOKEN" ] && [ -n "$RESUME_TAILOR_OPENROUTER_KEY" ]; then
+              mkdir -p bots/resume-tailor; ( umask 077; {
+                echo "BOT_TOKEN=${RESUME_TAILOR_BOT_TOKEN}"
+                echo "OPENROUTER_API_KEY=${RESUME_TAILOR_OPENROUTER_KEY}"
+              } > bots/resume-tailor/.env )
+              echo "🔑 resume-tailor/.env از روی secrets نوشته شد"
+            fi
+
+            # ---------- نصب و استارت هر ربات (فقط اگر .env داشته باشد) ----------
+            deploy_bot() {
+              name="$1"
+              if [ -f "bots/$name/.env" ]; then
+                npm ci --prefix "bots/$name" --omit=dev
+                pm2 startOrReload ecosystem.config.cjs --update-env --only "$name"
+                echo "✅ $name دیپلوی شد"
+              else
+                echo "ℹ️ bots/$name/.env نبود — $name رد شد (بدون اثر روی بقیه)"
+              fi
+            }
+            deploy_bot voice2text
+            deploy_bot resume-tailor
+
             pm2 save

@@ -1,6 +1,5 @@
 // index.js — SaaS Telegram voice→text bot (multi-user, wallet, model selection)
 import 'dotenv/config';
-import https from 'https';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
@@ -24,6 +23,7 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
 const ADMIN_IDS    = [100257975];
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
 const OWNER_ID = 100257975; // فقط این کاربر — مستقل از سیستم ادمین
+const RESET_TEST_BTN = '🔄 ریست ربات (تست)'; // فاز تست — فقط برای OWNER
 
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
@@ -437,15 +437,6 @@ const FILE_TOO_BIG_MSG =
   '• سرعت پخش را ۲x کن تا حجم نصف شود';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// خطاهای شبکه‌ایِ گذرا (معمولاً ارتباط با تلگرام/سرویس قطع یا کند شده)
-const NETWORK_ERR_RE = /fetch failed|terminated|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|network timeout|UND_ERR|aborted|timeout/i;
-const isNetworkErr = (msg) => NETWORK_ERR_RE.test(String(msg || ''));
-// پیام کاربرپسند برای قطعی موقت شبکه
-const NETWORK_ERR_MSG =
-  '🔌 ارتباط با تلگرام موقتاً قطع یا کند شد و پردازش کامل نشد.\n' +
-  'این مشکل معمولاً گذراست — چند دقیقه دیگه دوباره همین ویس رو بفرست.\n' +
-  '(هیچ هزینه‌ای کسر نشد)';
-
 const PTYPE_LABELS = { full: 'متن کامل', clean: 'متن مفید', summary: 'خلاصه تیتروار', meeting: 'صورت جلسه' };
 
 function normalizeDigits(s) {
@@ -767,7 +758,9 @@ function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
 
 function mainKeyboard(userId) {
   if (isAdmin(userId)) {
-    return Markup.keyboard([['🔄 تعویض پردازنده', '📊 داشبورد']]).resize();
+    const rows = [['🔄 تعویض پردازنده', '📊 داشبورد']];
+    if (userId === OWNER_ID) rows.push([RESET_TEST_BTN]); // فاز تست — فقط مالک
+    return Markup.keyboard(rows).resize();
   }
   return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
 }
@@ -1068,6 +1061,20 @@ bot.start(async (ctx) => {
   await sendMainMenu(ctx, { welcome: true, gift: isNew });
 });
 
+// فاز تست — ریست کاملِ خودِ مالک (فقط ردیف‌های همین کاربر؛ owner-only برای ایمنی رباتِ زنده)
+bot.hears(RESET_TEST_BTN, async (ctx) => {
+  const uid = ctx.from.id;
+  if (uid !== OWNER_ID) return;
+  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id']]) {
+    try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
+  }
+  userStates.delete(uid); notionStates.delete(uid); activeJobs.delete(uid);
+  for (const [tok, s] of sessions) if (s && s.userId === uid) sessions.delete(tok);
+  const { isNew } = upsertUser(uid, ctx.from.first_name, ctx.from.username);
+  await ctx.reply('🔄 ربات برای تو ریست شد. مثل کاربر جدید هستی.');
+  await sendMainMenu(ctx, { welcome: true, gift: isNew });
+});
+
 bot.hears('🔄 تعویض پردازنده', async (ctx) => {
   upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
   const userId = ctx.from.id;
@@ -1164,21 +1171,10 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   let thinking;
   try {
     thinking = await ctx.reply('⏳ دریافت فایل...', replyTo(voiceMsgId));
-    // دانلود فایل با retry: قطعی‌های کوتاهِ تلگرام خودشان جبران شوند (۳ تلاش، backoff)
-    let audioBuffer;
-    for (let attempt = 1; ; attempt++) {
-      try {
-        const fileUrl = await ctx.telegram.getFileLink(media.file_id);
-        const res     = await fetch(fileUrl.href);
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        audioBuffer = Buffer.from(await res.arrayBuffer());
-        break;
-      } catch (e) {
-        if (attempt >= 3 || !isNetworkErr(e.message)) throw e;
-        logErr(`⚠️ download retry ${attempt}/3 uid=${userId}:`, e.message);
-        await sleep(attempt * 1500);
-      }
-    }
+    const fileUrl = await ctx.telegram.getFileLink(media.file_id);
+    const res     = await fetch(fileUrl.href);
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const audioBuffer = Buffer.from(await res.arrayBuffer());
 
     let mimeType = 'audio/ogg';
     if (ctx.message.audio?.mime_type)    mimeType = ctx.message.audio.mime_type;
@@ -1252,8 +1248,6 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
       m = FILE_TOO_BIG_MSG;
-    } else if (isNetworkErr(err.message)) {
-      m = NETWORK_ERR_MSG;
     }
     if (thinking) { try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {} }
     else { try { await ctx.reply(m, replyTo(voiceMsgId)); } catch {} }
@@ -2422,8 +2416,6 @@ bot.on('callback_query', async (ctx) => {
               errMsg = '⏱️ پردازنده در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
             } else if (m.includes('ALL_FAILED')) {
               errMsg = '😕 هیچ پردازنده‌ای پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
-            } else if (isNetworkErr(m)) {
-              errMsg = NETWORK_ERR_MSG;
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
             session.step = 'failed'; // پایان فلو (آزاد شدن ظرفیت)
@@ -2646,127 +2638,7 @@ bot.on('message', async (ctx) => {
   await sendMainMenu(ctx);
 });
 
-/* ===== 9) Admin API ===== */
-// API سبک HTTPS برای دسترسی Claude Code به داده‌ها و اکشن‌های مدیریتی.
-// HTTPS اجباری است: محیط اجرای Claude فقط از طریق پروکسیِ HTTPS (CONNECT tunnel)
-// به سرور می‌رسد؛ HTTP ساده از آن محیط قابل دسترسی نیست. مستندسازی: CLAUDE.md
-const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN?.trim() || '';
-const ADMIN_API_PORT  = parseInt(process.env.ADMIN_API_PORT || '3001', 10);
-const ADMIN_API_CERT  = process.env.ADMIN_API_CERT?.trim() || '';
-const ADMIN_API_KEY   = process.env.ADMIN_API_KEY?.trim()  || '';
-
-function adminApiHandler(req, res) {
-  const send = (data, status = 200) => {
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
-    res.end(JSON.stringify(data, null, 2));
-  };
-  const auth = (req.headers['authorization'] || '').trim();
-  if (!ADMIN_API_TOKEN || auth !== `Bearer ${ADMIN_API_TOKEN}`) return send({ error: 'unauthorized' }, 401);
-
-  let body = '';
-  req.on('data', c => { body += c; });
-  req.on('end', () => {
-    try {
-      const url  = new URL(req.url, 'http://localhost');
-      const path = url.pathname.replace(/\/$/, '') || '/';
-      const method = req.method;
-
-      // ── GET /admin/stats ──
-      if (method === 'GET' && path === '/admin/stats') {
-        const totalUsers   = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
-        const activeToday  = db.prepare("SELECT COUNT(DISTINCT user_id) as c FROM usage_log WHERE created_at >= unixepoch()-86400").get().c;
-        const totalRevenue = db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved'").get().s;
-        const todayRevenue = db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at>=unixepoch()-86400").get().s;
-        const usage        = db.prepare('SELECT COUNT(*) as jobs, COALESCE(SUM(cost),0) as spent, COALESCE(SUM(duration_sec),0) as secs FROM usage_log WHERE success=1').get();
-        return send({ totalUsers, activeToday, totalRevenue, todayRevenue, usage });
-      }
-
-      // ── GET /admin/users ──
-      if (method === 'GET' && path === '/admin/users') {
-        const users = db.prepare(`
-          SELECT u.telegram_id, u.name, u.username, u.balance, u.model,
-            datetime(u.created_at,'unixepoch') as joined,
-            datetime(u.last_seen,'unixepoch')  as last_seen,
-            COUNT(DISTINCT ul.id)              as job_count,
-            COALESCE(SUM(ul.cost),0)           as total_spent,
-            ROUND(COALESCE(SUM(ul.duration_sec),0)/60.0,1) as total_min
-          FROM users u
-          LEFT JOIN usage_log ul ON ul.user_id=u.telegram_id AND ul.success=1
-          GROUP BY u.telegram_id
-          ORDER BY u.last_seen DESC
-        `).all();
-        return send({ count: users.length, users });
-      }
-
-      // ── GET /admin/users/:id ──
-      const userMatch = path.match(/^\/admin\/users\/(-?\d+)$/);
-      if (method === 'GET' && userMatch) {
-        const id   = parseInt(userMatch[1]);
-        const user = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
-        if (!user) return send({ error: 'not found' }, 404);
-        const usage    = db.prepare('SELECT type,model,duration_sec,cost,success,datetime(created_at,"unixepoch") as at FROM usage_log WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(id);
-        const payments = db.prepare('SELECT id,amount,status,datetime(created_at,"unixepoch") as at FROM payments WHERE user_id=? ORDER BY created_at DESC LIMIT 20').all(id);
-        return send({ user, usage, payments });
-      }
-
-      // ── POST /admin/users/:id/credit | /deduct ──
-      const actionMatch = path.match(/^\/admin\/users\/(-?\d+)\/(credit|deduct)$/);
-      if (method === 'POST' && actionMatch) {
-        const id     = parseInt(actionMatch[1]);
-        const action = actionMatch[2];
-        let parsed;
-        try { parsed = JSON.parse(body || '{}'); } catch { return send({ error: 'invalid json' }, 400); }
-        const amount = parseInt(parsed.amount);
-        if (!amount || amount <= 0) return send({ error: 'amount must be positive integer (toman)' }, 400);
-        const user = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
-        if (!user) return send({ error: 'user not found' }, 404);
-        if (action === 'credit') stmts.credit.run(amount, id);
-        else stmts.deduct.run(amount, id);
-        const updated = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(id);
-        log(`🔧 admin-api ${action} uid=${id} amount=${amount} new_balance=${updated.balance}`);
-        return send({ ok: true, action, amount, user: updated });
-      }
-
-      // ── GET /admin/payments?status=&limit= ──
-      if (method === 'GET' && path === '/admin/payments') {
-        const status = url.searchParams.get('status') || null;
-        const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
-        const rows   = status
-          ? db.prepare('SELECT p.*,u.name,u.username FROM payments p JOIN users u ON u.telegram_id=p.user_id WHERE p.status=? ORDER BY p.created_at DESC LIMIT ?').all(status, limit)
-          : db.prepare('SELECT p.*,u.name,u.username FROM payments p JOIN users u ON u.telegram_id=p.user_id ORDER BY p.created_at DESC LIMIT ?').all(limit);
-        return send({ count: rows.length, payments: rows });
-      }
-
-      // ── GET /admin/flows?status= ──
-      if (method === 'GET' && path === '/admin/flows') {
-        const status = url.searchParams.get('status') || 'active';
-        const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
-        const rows   = db.prepare('SELECT f.*,u.name,u.username FROM voice_flows f JOIN users u ON u.telegram_id=f.user_id WHERE f.status=? ORDER BY f.created_at DESC LIMIT ?').all(status, limit);
-        return send({ count: rows.length, flows: rows });
-      }
-
-      return send({ error: 'not found' }, 404);
-    } catch (e) {
-      logErr('admin-api error:', e.message);
-      send({ error: e.message }, 500);
-    }
-  });
-}
-
-if (ADMIN_API_TOKEN && ADMIN_API_CERT && ADMIN_API_KEY) {
-  try {
-    const tlsOpts = { cert: readFileSync(ADMIN_API_CERT), key: readFileSync(ADMIN_API_KEY) };
-    https.createServer(tlsOpts, adminApiHandler).listen(ADMIN_API_PORT, () => {
-      log(`🔧 Admin API  https://0.0.0.0:${ADMIN_API_PORT}/admin  (TLS + token)`);
-    });
-  } catch (e) {
-    logErr('❌ Admin API TLS setup failed — disabled:', e.message);
-  }
-} else {
-  log('⚠️  Admin API disabled (need ADMIN_API_TOKEN + ADMIN_API_CERT + ADMIN_API_KEY)');
-}
-
-/* ===== 10) Launch ===== */
+/* ===== 9) Launch ===== */
 function launch() {
   bot.launch({ dropPendingUpdates: true })
     .then(() => log('✅ Bot started (long polling)'))

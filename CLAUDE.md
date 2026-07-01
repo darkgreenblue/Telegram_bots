@@ -1,220 +1,75 @@
-# CLAUDE.md — راهنمای فنی پروژه voice2text
+# CLAUDE.md — راهنمای کامل ریپو برای سشن‌های Claude Code
 
-این فایل برای Claude Code نوشته شده و باید در شروع هر سشن خوانده شود.
+> این فایل را در شروع هر سشن کامل بخوان. هدف: بدون توضیح دوباره‌ی کاربر، کل معماری، محدودیت‌ها و گردش‌کار را بدانی و بتوانی با **کمترین دخالت کاربر** تغییرات را خودت جلو ببری.
 
----
+## ۱) این ریپو چیست
+مونوریپوی **ربات‌های تلگرام**. هر ربات در `bots/<name>/` مستقل است: `index.js` (ESM, Node ≥ 20)، `package.json`، `.env` و دیتابیس `data/` جداگانه. هدف: افزودن آسانِ محصولات جدید با معماری و مدیریت کلیدِ **یکپارچه**، و اندازه‌گیری مستقل هزینه‌ی هر ربات (توکن تلگرام و کلید OpenRouter جدا).
 
-## Admin API Pattern
+## ۲) ربات‌های فعلی
+| پوشه | پروسه‌ی pm2 | شرح | حساسیت |
+|------|-----------|-----|--------|
+| `bots/voice2text` | `voice2text` | ویس→متن (Gemini از OpenRouter)، کیف‌پول/پرداخت، SQLite، long-polling | **زنده و درآمدزا — هرگز نباید بشکند** |
+| `bots/resume-tailor` | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی | در حال راه‌اندازی |
 
-هر پروژه در این ریپو یک **HTTPS** Admin API دارد که Claude Code می‌تواند از هر سشن به آن وصل شود.
-این pattern باید در همه پروژه‌های فعلی و آینده پیاده شود.
+مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`.
 
-> ⚠️ **چرا HTTPS اجباری است:** محیط اجرای Claude Code فقط از طریق یک پروکسیِ HTTPS
-> (CONNECT tunnel) به اینترنت دسترسی دارد. HTTP ساده از آن محیط **قابل دسترسی نیست**
-> (timeout می‌شود). پس Admin API حتماً باید TLS داشته باشد وگرنه من نمی‌توانم به آن وصل شوم.
+## ۳) زیرساخت استقرار (مهم)
+- **VPS:** host `185.204.171.170`، کاربر `ubuntu`، مسیر کلون `~/voice2text` (نامش تاریخی است؛ همین مونوریپوست). اجرا با **PM2**، Node 20.
+- **CD:** `.github/workflows/deploy.yml` روی هر push به `main` → با `appleboy/ssh-action` و سکرت **`VPS_SSH_KEY`** به VPS وصل می‌شود → `git pull` → مهاجرت → ساخت `.env`ها از Secrets → `pm2 startOrReload ecosystem.config.cjs`.
+- **`ecosystem.config.cjs`** (ریشه): همه‌ی ربات‌ها را با `cwd` مخصوص خودشان تعریف می‌کند، پس هر کدام `.env` و `data/` خودش را از پوشه‌ی خودش می‌خواند.
+- **CI:** `.github/workflows/ci.yml` با build-matrix هر ربات را جدا `npm ci` + `node --check` می‌کند.
+- کاربر **به VPS دسترسی SSH ندارد** (فقط کلیدِ CI مجاز است). یعنی **هر تغییر سروری فقط از مسیر کامیت→merge→deploy انجام می‌شود.** خودت با کامیت روی برنچ و mer, deploy را پیش ببر.
 
-### آدرس سرور
-```
-VPS:       185.204.171.170
-Admin API: https://185.204.171.170:3001
-```
+## ۴) مدیریت کلیدها — تک‌منبعِ حقیقت = GitHub Secrets
+دیپلوی، فایل `bots/<name>/.env` را روی سرور از روی Secrets می‌سازد. قرارداد نام‌گذاری:
+- `<BOT>_BOT_TOKEN` و `<BOT>_OPENROUTER_KEY` (و اختیاری مثل `<BOT>_NOTION_TOKEN`).
 
-### احراز هویت
-همه درخواست‌ها نیاز به هدر زیر دارند:
-```
-Authorization: Bearer <ADMIN_API_TOKEN>
-```
-مقدار `ADMIN_API_TOKEN` در فایل `.env` روی VPS قرار دارد.
+Secretهای فعلی/موردانتظار (در `Settings → Secrets and variables → Actions`):
+| Secret | کاربرد |
+|--------|--------|
+| `VPS_SSH_KEY` | کلید SSH برای اتصال CD به سرور (از قبل موجود) |
+| `RESUME_TAILOR_BOT_TOKEN` | توکن تلگرام resume-tailor |
+| `RESUME_TAILOR_OPENROUTER_KEY` | کلید OpenRouter resume-tailor |
+| `VOICE2TEXT_BOT_TOKEN` *(اختیاری)* | برای یکپارچه‌کردن voice2text؛ تا ست نشود، از `.env` روی سرور استفاده می‌شود |
+| `VOICE2TEXT_OPENROUTER_KEY` *(اختیاری)* | همان |
+| `VOICE2TEXT_NOTION_TOKEN` *(اختیاری)* | NOTION_TOKEN ربات voice2text |
 
-### نحوه‌ی اتصال من (Claude) به API
-چون cert سلف‌ساین است، باید آن را pin کنم. cert عمومی در ریپو ذخیره شده:
-`admin-api-cert.pem` (فقط بخش عمومی — محرمانه نیست).
+**قاعده‌ی غیرمخرب:** deploy فقط وقتی توکنِ یک ربات در Secrets ست شده باشد `.env` آن را می‌نویسد؛ در غیر این صورت `.env` موجود روی سرور دست‌نخورده می‌ماند. به همین دلیل voice2text تا قبل از ست‌شدن secretهایش دقیقاً مثل قبل کار می‌کند.
 
-```bash
-# توکن را از کاربر بگیر و در متغیر بذار:
-TOKEN="<از کاربر بپرس>"
+> تاریخچه: کلیدهای voice2text در اصل **در GitHub نبودند** و دستی در `~/voice2text/.env` روی سرور قرار داشتند. معماری جدید این را به Secrets منتقل می‌کند (به‌صورت اختیاری و بدون‌شکست).
 
-curl -s --cacert admin-api-cert.pem \
-  -H "Authorization: Bearer $TOKEN" \
-  https://185.204.171.170:3001/admin/stats | python3 -m json.tool
-```
+**از کجا مقدارِ هر Secret را برداریم:**
+- `*_BOT_TOKEN`: از [@BotFather](https://t.me/BotFather) → `/mybots` → ربات موردنظر → API Token (همان توکنِ زنده).
+- `*_OPENROUTER_KEY`: داشبورد OpenRouter (`openrouter.ai/keys`). کلیدها فقط یک‌بار نمایش داده می‌شوند؛ اگر کلید قبلی ذخیره نشده، یک کلیدِ نو (با اعتبار) بساز — ربات بعد از deploy به آن سوییچ می‌کند.
+- `VOICE2TEXT_NOTION_TOKEN` *(اختیاری)*: فقط اگر قابلیتِ «ارسال به Notion» استفاده می‌شود. **هشدار:** چون materialize فایل `.env` را بازنویسی می‌کند، اگر این قابلیت فعال است و این secret را نگذاری، بعد از یکپارچه‌سازی غیرفعال می‌شود. دیپلوی قبل از اولین بازنویسی یک `bots/voice2text/.env.bak` می‌سازد تا قابل بازگردانی باشد.
 
-اگر pin با `--cacert admin-api-cert.pem` خطای cert داد (مثلاً پروکسی TLS را
-re-terminate کرده)، یک بار با CA باندل پروکسی امتحان کن:
-```bash
-curl -s --cacert /root/.ccr/ca-bundle.crt -H "Authorization: Bearer $TOKEN" \
-  https://185.204.171.170:3001/admin/stats
-```
+## ۴ب) بررسی سلامت بعد از deploy و rollback
+بعد از merge، نتیجه‌ی workflowِ `Deploy` را در GitHub Actions ببین (لاگ SSH خطوط `✅ <bot> دیپلوی شد` را چاپ می‌کند). چون به VPS دسترسی نداری، برای تأیید نهایی از کاربر بخواه:
+- `pm2 ls` → هر دو ربات `online`.
+- `pm2 logs voice2text --lines 50` → بدون کرش‌لوپ.
+- یک تست واقعیِ voice2text (ارسال ویس) و یک `/start` روی resume-tailor.
 
----
+**Rollback اگر voice2text بعد از یکپارچه‌سازی مشکل گرفت:** مقادیر درست را در Secrets اصلاح کن و یک کامیت خالی به `main` بزن (دیپلوی دوباره اجرا می‌شود). فایلِ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستیِ قبلی را نگه داشته (برای مقایسه/بازگردانی). برای rollbackِ کد: `git revert` کامیتِ مشکل‌دار و merge.
 
-## Endpoints
+## ۵) افزودن یک ربات جدید (چک‌لیست کمینه)
+1. `bots/<name>/` با `index.js` (ESM)، `package.json` و `package-lock.json` و `.env.example` بساز.
+2. در `ecosystem.config.cjs` یک اپ اضافه کن: `{ name: '<name>', cwd: 'bots/<name>', script: 'index.js' }`.
+3. در `.github/workflows/ci.yml` نام را به ماتریس `bot:` اضافه کن.
+4. در `.github/workflows/deploy.yml`: دو خط `env:` (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`)، اضافه‌کردنشان به `envs:`، یک بلوک materialize، و یک `deploy_bot <name>`.
+5. کاربر فقط دو Secret را در رابط وب گیت‌هاب می‌سازد. بقیه با merge خودکار است.
 
-> در مثال‌ها `--cacert admin-api-cert.pem` و هدر توکن لازم است (برای اختصار حذف شده).
+## ۶) محدودیت‌ها و نکات حیاتی
+- **voice2text نباید بشکند.** تنها نقطه‌ی حساس، اولین دیپلویِ مهاجرت است (root→`bots/voice2text`). امن شده: قبل از `mv data` پروسه `pm2 stop` می‌شود، بعد `delete` و استارت از `cwd` جدید. مهاجرت ایدمپوتنت است.
+- بعد از هر دیپلویِ حساس، با کاربر چک کن: `pm2 ls` هر دو `online`، و یک تست واقعی voice2text.
+- secretها هرگز در گیت/کامیت/چت نروند. `.env`، `data/`، `node_modules/` در `.gitignore` هستند.
 
-### `GET /admin/stats`
-آمار کلی: تعداد کاربران، کاربران فعال امروز، درآمد امروز/کل، تعداد و مدت و هزینه کل پردازش‌ها.
+## ۶ب) دکمه‌ی «ریست تست» (قرارداد فاز تست — همه‌ی ربات‌ها)
+در فاز تست، هر ربات یک دکمه‌ی persistent در reply-keyboard با متن **`🔄 ریست ربات (تست)`** دارد که با زدنش، داده‌های کاربر کاملاً پاک می‌شود (انگار کاربر جدید آمده). پیاده‌سازی با `bot.hears(RESET_TEST_BTN, ...)`.
+- **رباتِ تست/بدون‌درآمد** (مثل resume-tailor): برای همه‌ی کاربران فعال است؛ همه‌ی جدول‌های کاربرـمحورِ آن ربات برای آن کاربر پاک می‌شوند (تابع `wipeUser`).
+- **رباتِ زنده/درآمدزا** (مثل voice2text): این دکمه و عملکردش **فقط برای `OWNER_ID`** است (تا کاربرِ پولی تصادفاً کیف‌پول/تاریخچه‌اش را پاک نکند). فقط ردیف‌های خودِ مالک از جدول‌ها (`users, usage_log, payments, discount_uses, pro_whitelist, voice_flows`) و stateهای in-memory پاک می‌شوند.
+- هنگام افزودن ربات جدید، همین دکمه را اضافه کن (با همین متن و قاعده‌ی owner-only روی ربات‌های دارای پول).
+- جمع‌بندیِ پایان فاز تست: این دکمه باید قبل از انتشار نهایی حذف یا پشت یک فلگ غیرفعال شود.
 
-### `GET /admin/users`
-لیست همه کاربران با: آیدی تلگرام، نام، یوزرنیم، موجودی، مدل، تعداد پردازش، هزینه کل، دقیقه‌ی کل.
-
-### `GET /admin/users/:id`
-جزئیات یک کاربر خاص + ۵۰ پردازش اخیر + ۲۰ پرداخت اخیر.
-```bash
-curl -s --cacert admin-api-cert.pem -H "Authorization: Bearer $TOKEN" \
-  https://185.204.171.170:3001/admin/users/100257975 | python3 -m json.tool
-```
-
-### `POST /admin/users/:id/credit`
-شارژ کیف پول (مبلغ به تومان).
-```bash
-curl -s --cacert admin-api-cert.pem -X POST \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"amount": 50000}' \
-  https://185.204.171.170:3001/admin/users/123456789/credit | python3 -m json.tool
-```
-
-### `POST /admin/users/:id/deduct`
-کسر از کیف پول (مبلغ به تومان). همان فرمت بالا با endpoint `/deduct`.
-
-### `GET /admin/payments?status=pending&limit=50`
-لیست پرداخت‌ها. پارامترها: `status` (pending/approved/cancelled)، `limit` (max 200).
-
-### `GET /admin/flows?status=active&limit=50`
-لیست فلوهای پردازش صوتی. وضعیت‌ها: `active`, `completed`, `cancelled`, `failed`, `expired`.
-
----
-
-## Ops Server (لاگ / وضعیت / ری‌استارت)
-
-یک سرور HTTPS **جداگانه** (`ops-server.js`، pm2 app: `voice2text-ops`، پورت `3002`)
-که مستقل از ربات اجرا می‌شود؛ پس حتی وقتی ربات اصلی crash کرده یا در restart loop
-است، من می‌توانم لاگ‌ها را بخوانم، وضعیت pm2 را ببینم و ربات را restart کنم.
-همان توکن/گواهیِ Admin API را استفاده می‌کند.
-
-> پارامتر `app` در همه‌ی endpointها اختیاری است (پیش‌فرض `voice2text`) تا برای
-> بقیه‌ی pm2 appهای این سرور هم قابل استفاده باشد.
-
-### `GET /ops/logs?type=error|out&lines=80&app=voice2text`
-آخرین N خط از لاگ pm2 (خطا یا خروجی).
-```bash
-curl -s --cacert admin-api-cert.pem -H "Authorization: Bearer $TOKEN" \
-  "https://185.204.171.170:3002/ops/logs?type=error&lines=120" | python3 -m json.tool
-```
-
-### `GET /ops/status`
-وضعیت همه‌ی pm2 appها: status، تعداد restart، uptime، cpu، memory.
-
-### `POST /ops/restart?app=voice2text`
-ری‌استارت یک pm2 app.
-```bash
-curl -s --cacert admin-api-cert.pem -X POST -H "Authorization: Bearer $TOKEN" \
-  "https://185.204.171.170:3002/ops/restart?app=voice2text" | python3 -m json.tool
-```
-
-### راه‌اندازی ops server (یک‌بار روی VPS)
-```bash
-cd ~/voice2text
-sudo ufw allow 3002/tcp comment "voice2text ops"
-pm2 start ops-server.js --name voice2text-ops
-pm2 save
-```
-
----
-
-## راه‌اندازی اولیه (one-time setup روی VPS)
-
-```bash
-cd ~/voice2text
-
-# ۱. ساخت توکن تصادفی قوی
-echo "ADMIN_API_TOKEN=$(openssl rand -hex 32)" >> .env
-
-# ۲. ساخت گواهی self-signed با SAN روی IP سرور (اعتبار ۱۰ سال)
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout data/admin-api-key.pem -out data/admin-api-cert.pem \
-  -days 3650 -subj "/CN=185.204.171.170" \
-  -addext "subjectAltName=IP:185.204.171.170"
-
-# ۳. مسیر گواهی‌ها در .env
-echo "ADMIN_API_CERT=$HOME/voice2text/data/admin-api-cert.pem" >> .env
-echo "ADMIN_API_KEY=$HOME/voice2text/data/admin-api-key.pem"   >> .env
-
-# ۴. باز کردن پورت در فایروال
-sudo ufw allow 3001/tcp comment "voice2text admin api"
-
-# ۵. ری‌استارت ربات
-pm2 restart voice2text && pm2 logs voice2text --lines 5
-
-# ۶. تست محلی (روی خود سرور)
-TOKEN=$(grep ADMIN_API_TOKEN .env | cut -d= -f2)
-curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:3001/admin/stats
-
-# ۷. محتوای cert عمومی را به Claude بده تا در ریپو ذخیره کند:
-cat data/admin-api-cert.pem
-```
-
-> `data/admin-api-key.pem` (کلید خصوصی) هرگز نباید از سرور خارج یا commit شود.
-> فولدر `data/` در `.gitignore` است. فقط بخش **عمومی** cert در ریپو ذخیره می‌شود
-> (`admin-api-cert.pem` در ریشه‌ی پروژه) تا من بتوانم pin کنم.
-
----
-
-## متغیرهای محیطی
-
-| متغیر | پیش‌فرض | توضیح |
-|---|---|---|
-| `ADMIN_API_TOKEN` | — | اجباری. توکن Bearer |
-| `ADMIN_API_CERT` | — | اجباری. مسیر cert عمومی (PEM) |
-| `ADMIN_API_KEY` | — | اجباری. مسیر کلید خصوصی (PEM) |
-| `ADMIN_API_PORT` | `3001` | پورت HTTPS |
-| `BOT_TOKEN` | — | توکن ربات تلگرام |
-| `OPENROUTER_API_KEY` | — | کلید API مدل‌های زبانی |
-| `NOTION_TOKEN` | — | توکن integration نوشن (اختیاری) |
-
-اگر هر سه متغیر `ADMIN_API_TOKEN`/`ADMIN_API_CERT`/`ADMIN_API_KEY` ست نباشند، Admin API غیرفعال می‌شود.
-
----
-
-## اضافه کردن به پروژه جدید
-
-۱. بخش `/* ===== Admin API ===== */` را از `index.js` این پروژه کپی کن
-۲. `import https from 'https'` را به ابتدای فایل اضافه کن
-۳. Query های مربوط به DB را با schema پروژه جدید تطبیق بده
-۴. setup سرور را اجرا کن (توکن + cert + پورت در فایروال)
-۵. cert عمومی را در ریپوی آن پروژه ذخیره کن و در CLAUDE.md همان پروژه مستند کن
-
----
-
-## معماری پروژه
-
-```
-index.js              — تمام منطق ربات (single-file)
-admin-api-cert.pem    — گواهی عمومی Admin API (برای pin کردن؛ محرمانه نیست)
-data/bot.db           — SQLite database (WAL mode)  [gitignored]
-data/admin-api-*.pem  — cert/key سرور  [gitignored — key هرگز commit نشود]
-.env                  — متغیرهای محیطی (روی VPS، در ریپو نیست)
-.github/workflows/
-  ci.yml              — چک سینتکس (node --check)
-  deploy.yml          — deploy خودکار به VPS بعد از merge به main
-```
-
-### جداول DB
-- `users` — کاربران (telegram_id, balance, model, ...)
-- `usage_log` — لاگ هر پردازش (model, duration_sec, cost, type, success, ...)
-- `payments` — تراکنش‌های شارژ کیف پول (status: pending/approved/cancelled)
-- `voice_flows` — فلوهای پردازش صوتی با وضعیت
-- `discount_codes` / `discount_uses` — سیستم کد تخفیف
-- `pro_whitelist` — کاربران با دسترسی به مدل‌های پیشرفته
-
----
-
-## نکات مهم توسعه
-
-- **سشن‌ها** (`sessions` Map): در حافظه، نگه‌دارنده‌ی `audioBuffer` تا کاربر حالت پردازش انتخاب کند. TTL: ۱۵ دقیقه.
-- **فلوهای همزمان**: حداکثر ۲ فلو فعال per user. اسلات synchronously رزرو می‌شود تا race condition نباشد.
-- **OWNER_ID=100257975**: برای integration نوشن. مستقل از `ADMIN_IDS`.
-- **Meeting bump**: صورت جلسه همیشه حداقل با `google/gemini-2.5-flash` پردازش می‌شود.
-- **ffprobe**: برای تشخیص مدت داکیومنت‌های صوتی که تلگرام duration ندارد.
-- **deploy**: فقط push به `main` → GitHub Actions → ssh به VPS → git pull + npm ci + pm2 restart.
-- **دسترسی من (Claude)**: فقط از طریق HTTPS Admin API. SSH و HTTP ساده از محیط من کار نمی‌کنند.
+## ۷) گردش‌کار توسعه
+- روی برنچ feature کار کن (الگوی `claude/...`)، PR بده، بعد از سبزشدن CI به `main` merge کن تا deploy اجرا شود.
+- `بات‌های ریزِ بعدی` هم در همین ریپو زیر `bots/` می‌آیند.
