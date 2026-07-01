@@ -85,6 +85,43 @@ curl -s --cacert admin-api-cert.pem -X POST \
 
 ---
 
+## Ops Server (لاگ / وضعیت / ری‌استارت)
+
+یک سرور HTTPS **جداگانه** (`ops-server.js`، pm2 app: `voice2text-ops`، پورت `3002`)
+که مستقل از ربات اجرا می‌شود؛ پس حتی وقتی ربات اصلی crash کرده یا در restart loop
+است، من می‌توانم لاگ‌ها را بخوانم، وضعیت pm2 را ببینم و ربات را restart کنم.
+همان توکن/گواهیِ Admin API را استفاده می‌کند.
+
+> پارامتر `app` در همه‌ی endpointها اختیاری است (پیش‌فرض `voice2text`) تا برای
+> بقیه‌ی pm2 appهای این سرور هم قابل استفاده باشد.
+
+### `GET /ops/logs?type=error|out&lines=80&app=voice2text`
+آخرین N خط از لاگ pm2 (خطا یا خروجی).
+```bash
+curl -s --cacert admin-api-cert.pem -H "Authorization: Bearer $TOKEN" \
+  "https://185.204.171.170:3002/ops/logs?type=error&lines=120" | python3 -m json.tool
+```
+
+### `GET /ops/status`
+وضعیت همه‌ی pm2 appها: status، تعداد restart، uptime، cpu، memory.
+
+### `POST /ops/restart?app=voice2text`
+ری‌استارت یک pm2 app.
+```bash
+curl -s --cacert admin-api-cert.pem -X POST -H "Authorization: Bearer $TOKEN" \
+  "https://185.204.171.170:3002/ops/restart?app=voice2text" | python3 -m json.tool
+```
+
+### راه‌اندازی ops server (یک‌بار روی VPS)
+```bash
+cd ~/voice2text
+sudo ufw allow 3002/tcp comment "voice2text ops"
+pm2 start ops-server.js --name voice2text-ops
+pm2 save
+```
+
+---
+
 ## راه‌اندازی اولیه (one-time setup روی VPS)
 
 ```bash

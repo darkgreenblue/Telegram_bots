@@ -20,3 +20,5 @@ jobs:
             git pull --ff-only
             npm ci --omit=dev
             pm2 restart voice2text
+            pm2 restart voice2text-ops || pm2 start ops-server.js --name voice2text-ops
+            pm2 save
