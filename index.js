@@ -437,6 +437,15 @@ const FILE_TOO_BIG_MSG =
   '• سرعت پخش را ۲x کن تا حجم نصف شود';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// خطاهای شبکه‌ایِ گذرا (معمولاً ارتباط با تلگرام/سرویس قطع یا کند شده)
+const NETWORK_ERR_RE = /fetch failed|terminated|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|network timeout|UND_ERR|aborted|timeout/i;
+const isNetworkErr = (msg) => NETWORK_ERR_RE.test(String(msg || ''));
+// پیام کاربرپسند برای قطعی موقت شبکه
+const NETWORK_ERR_MSG =
+  '🔌 ارتباط با تلگرام موقتاً قطع یا کند شد و پردازش کامل نشد.\n' +
+  'این مشکل معمولاً گذراست — چند دقیقه دیگه دوباره همین ویس رو بفرست.\n' +
+  '(هیچ هزینه‌ای کسر نشد)';
+
 const PTYPE_LABELS = { full: 'متن کامل', clean: 'متن مفید', summary: 'خلاصه تیتروار', meeting: 'صورت جلسه' };
 
 function normalizeDigits(s) {
@@ -1155,10 +1164,21 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   let thinking;
   try {
     thinking = await ctx.reply('⏳ دریافت فایل...', replyTo(voiceMsgId));
-    const fileUrl = await ctx.telegram.getFileLink(media.file_id);
-    const res     = await fetch(fileUrl.href);
-    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-    const audioBuffer = Buffer.from(await res.arrayBuffer());
+    // دانلود فایل با retry: قطعی‌های کوتاهِ تلگرام خودشان جبران شوند (۳ تلاش، backoff)
+    let audioBuffer;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const fileUrl = await ctx.telegram.getFileLink(media.file_id);
+        const res     = await fetch(fileUrl.href);
+        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+        audioBuffer = Buffer.from(await res.arrayBuffer());
+        break;
+      } catch (e) {
+        if (attempt >= 3 || !isNetworkErr(e.message)) throw e;
+        logErr(`⚠️ download retry ${attempt}/3 uid=${userId}:`, e.message);
+        await sleep(attempt * 1500);
+      }
+    }
 
     let mimeType = 'audio/ogg';
     if (ctx.message.audio?.mime_type)    mimeType = ctx.message.audio.mime_type;
@@ -1232,6 +1252,8 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
     let m = '😕 خطا در دریافت فایل. دوباره امتحان کن.';
     if (/too big|file is too big|413|request entity too large/i.test(err.message || '')) {
       m = FILE_TOO_BIG_MSG;
+    } else if (isNetworkErr(err.message)) {
+      m = NETWORK_ERR_MSG;
     }
     if (thinking) { try { await ctx.telegram.editMessageText(thinking.chat.id, thinking.message_id, undefined, m); } catch {} }
     else { try { await ctx.reply(m, replyTo(voiceMsgId)); } catch {} }
@@ -2400,6 +2422,8 @@ bot.on('callback_query', async (ctx) => {
               errMsg = '⏱️ پردازنده در ۱۰ دقیقه پاسخ نداد. فایل احتمالاً خیلی طولانی است — امتحان کن به بخش‌های کوچک‌تر تقسیم کنی.\n(هزینه‌ای کسر نشد)';
             } else if (m.includes('ALL_FAILED')) {
               errMsg = '😕 هیچ پردازنده‌ای پاسخ نداد. مشکل موقت است — چند دقیقه دیگر امتحان کن.\n(هزینه‌ای کسر نشد)';
+            } else if (isNetworkErr(m)) {
+              errMsg = NETWORK_ERR_MSG;
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
             session.step = 'failed'; // پایان فلو (آزاد شدن ظرفیت)
