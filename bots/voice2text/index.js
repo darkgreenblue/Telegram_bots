@@ -672,7 +672,8 @@ const adminStates = new Map(); // adminId → { step, partial, ... }
 const notionStates = new Map(); // userId → { text, chatId, promptMsgId, navPath }
 
 // پردازش هم‌زمان: حداکثر چند فایل صوتی به‌طور موازی برای هر کاربر
-const MAX_CONCURRENT_JOBS = 2;
+// (هم‌راستا با MAX_ACTIVE_FLOWS تا ویسِ پذیرفته‌شده پشت سد «ظرفیت پر» نماند)
+const MAX_CONCURRENT_JOBS = 10;
 const activeJobs = new Map(); // userId → تعداد پردازش‌های در جریان
 const jobCount   = (uid) => activeJobs.get(uid) || 0;
 const incJob     = (uid) => activeJobs.set(uid, jobCount(uid) + 1);
@@ -680,7 +681,9 @@ const decJob     = (uid) => { const n = jobCount(uid) - 1; if (n > 0) activeJobs
 
 // فلوی تبدیل ویس «ناتمام» تا وقتی به یکی از این مرحله‌ها نرسیده فعال محسوب می‌شود
 const FLOW_NONTERMINAL = new Set(['await_process_type', 'processing', 'await_output_format', 'processing_output']);
-const MAX_ACTIVE_FLOWS = 2;
+const MAX_ACTIVE_FLOWS = 10;
+// ترتیب فارسی برای برچسب دکمه‌های «لغو پردازش …» (تا سقف MAX_ACTIVE_FLOWS)
+const FLOW_ORDINALS = ['اول','دوم','سوم','چهارم','پنجم','ششم','هفتم','هشتم','نهم','دهم'];
 function activeFlows(userId) {
   const out = [];
   for (const [t, s] of sessions) {
@@ -1153,16 +1156,17 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   const tgDuration  = ctx.message.voice?.duration || ctx.message.audio?.duration || 0;
   log(`🎤 voice recv  uid=${userId} (@${ctx.from.username||'—'}) tgDur=${tgDuration}s size=${media?.file_size ? (media.file_size/1024).toFixed(0)+'KB' : '?'} model=${userModel}`);
 
-  // سقف ۲ فلوی هم‌زمان: اگر کاربر دو پردازش ناتمام دارد، ویس سوم پذیرفته نمی‌شود
+  // سقف فلوهای هم‌زمان: اگر کاربر به سقف پردازش ناتمام رسیده، ویس جدید پذیرفته نمی‌شود
   const active = activeFlows(userId);
   if (active.length >= MAX_ACTIVE_FLOWS) {
     await ctx.reply(
       `⚠️ هم‌زمان حداکثر ${MAX_ACTIVE_FLOWS.toLocaleString('fa-IR')} پردازش می‌تونی داشته باشی.\n` +
       `اول یکی از پردازش‌های قبلی رو لغو کن (یا تا آخر ببرش)، بعد این ویس رو دوباره بفرست:`,
-      { ...replyTo(voiceMsgId), ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚫 لغو پردازش اول', `flowcancel:1:${active[0][0]}`)],
-        [Markup.button.callback('🚫 لغو پردازش دوم', `flowcancel:2:${active[1][0]}`)],
-      ]) }
+      { ...replyTo(voiceMsgId), ...Markup.inlineKeyboard(
+        active.map(([tok], i) =>
+          [Markup.button.callback(`🚫 لغو پردازش ${FLOW_ORDINALS[i] || i + 1}`, `flowcancel:${i + 1}:${tok}`)]
+        )
+      ) }
     );
     return;
   }
@@ -1173,7 +1177,7 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
     return;
   }
 
-  // رزرو فوری اسلات فلو (همگام، قبل از هر await) تا سقف ۲ فلو با ارسال سریع چند ویس دور زده نشود
+  // رزرو فوری اسلات فلو (همگام، قبل از هر await) تا سقف فلوها با ارسال سریع چند ویس دور زده نشود
   const token = makeToken();
   sessions.set(token, { step: 'await_process_type', userId, createdAt: Date.now(), reserving: true });
 
@@ -1744,10 +1748,10 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
-    // ── Cancel a specific flow (when user has 2 active and sent a 3rd) ──
-    const fc = data.match(/^flowcancel:([12]):([a-z0-9]+)$/i);
+    // ── Cancel a specific flow (when user hit the active-flow cap) ──
+    const fc = data.match(/^flowcancel:(\d+):([a-z0-9]+)$/i);
     if (fc) {
-      const flowNum = fc[1] === '1' ? 'اول' : 'دوم';
+      const flowNum = FLOW_ORDINALS[parseInt(fc[1]) - 1] || fc[1];
       const token = fc[2];
       const session = sessions.get(token);
       if (!session) {
