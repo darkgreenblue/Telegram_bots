@@ -35,8 +35,12 @@ const LOCALE = process.env.LOCALE?.trim() || 'fa';
 const L = (await import(`./locales/${LOCALE}.js`)).default;
 const fmt = L.fmt;
 
-const FLASH         = 'google/gemini-2.5-flash';
-const OR_TIMEOUT_MS = 10 * 60 * 1000;
+const FLASH          = 'google/gemini-2.5-flash';
+const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
+const OR_TIMEOUT_MS  = 10 * 60 * 1000;
+const MAX_VOICE_SEC  = 120;              // سقف طول ویسِ سؤال — جلوی هزینه‌ی رونویسیِ نامحدود قبل از پرداخت
+const MAX_VOICE_BYTES = 3 * 1024 * 1024;
+const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM per کاربر — ضد حلقه‌ی «انتخاب کن، لغو کن»
 
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
 // قبل از انتشار عمومی حتماً false شود (دکمه کلاً مخفی می‌شود؛ /reset فقط برای OWNER می‌ماند).
@@ -176,6 +180,7 @@ const stmts = {
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
   setReadingFeedback: db.prepare('UPDATE readings SET feedback=? WHERE id=?'),
   lastDelivered: db.prepare("SELECT * FROM readings WHERE user_id=? AND status='delivered' ORDER BY id DESC LIMIT ?"),
+  countReadingsToday: db.prepare('SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND created_at >= unixepoch()-86400'),
   countDelivered: db.prepare("SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND status='delivered'"),
   countPaidDelivered: db.prepare("SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND status='delivered' AND price>0"),
   readingsByType: db.prepare("SELECT type, COUNT(*) AS c, COALESCE(SUM(price),0) AS s FROM readings WHERE status='delivered' GROUP BY type"),
@@ -271,11 +276,25 @@ async function orRequest(body) {
 }
 function orChat(system, user, opts = {}) {
   return orRequest({
-    model: FLASH,
+    model: opts.model || FLASH,
     temperature: opts.temperature ?? 0.9,
     max_tokens: opts.maxTokens,
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   });
+}
+// فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب
+async function orChatResilient(system, user, opts = {}, plan = [FLASH, FLASH, FLASH, FALLBACK_MODEL, FALLBACK_MODEL]) {
+  for (let i = 0; i < plan.length; i++) {
+    try {
+      const out = await orChat(system, user, { ...opts, model: plan[i] });
+      if (!opts.validate || opts.validate(out)) return { out, model: plan[i] };
+      logErr(`LLM invalid output (attempt ${i + 1}, ${plan[i]})`);
+    } catch (e) {
+      logErr(`LLM error (attempt ${i + 1}, ${plan[i]}):`, e.message);
+    }
+    if (i < plan.length - 1) await sleep(1500);
+  }
+  return null;
 }
 function orTranscribe(audioBuffer, format) {
   return orRequest({
@@ -391,20 +410,20 @@ async function callReadingLLM(readingId) {
   const ctx = buildReadingCtx(user, spread, r.question, cards);
   const system = L.prompts.readerSystem(spread);
   const userMsg = L.prompts.readingContext(ctx);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const out = await orChat(system, userMsg, { maxTokens: spread.maxTokens });
+  // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود
+  let parsed = null;
+  const res = await orChatResilient(system, userMsg, {
+    maxTokens: spread.maxTokens,
+    validate: (out) => {
       const obj = parseJsonLoose(out);
-      if (obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative) {
-        stmts.setReadingLlm.run(JSON.stringify(obj), String(obj.summary || '').slice(0, 300), readingId);
-        return obj;
-      }
-      logErr(`reading#${readingId} bad JSON (attempt ${attempt + 1})`);
-    } catch (e) {
-      logErr(`reading#${readingId} LLM error (attempt ${attempt + 1}):`, e.message);
-    }
-  }
-  return null;
+      if (obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative) { parsed = obj; return true; }
+      return false;
+    },
+  });
+  if (!res || !parsed) { logErr(`reading#${readingId} همه‌ی تلاش‌ها شکست خورد (REFUND path)`); return null; }
+  log(`reading#${readingId} آماده شد با ${res.model}`);
+  stmts.setReadingLlm.run(JSON.stringify(parsed), String(parsed.summary || '').slice(0, 300), readingId);
+  return parsed;
 }
 
 function startPrefetch(uid, readingId) {
@@ -520,10 +539,11 @@ async function dailyCard(ctx) {
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
   const info = CARD_BY_KEY[card.key];
 
-  // فراخوانی LLM همین حالا فایر می‌شود و با مکث‌های فضاسازی هم‌پوشان است
-  const llmP = orChat(L.prompts.dailySystem, L.prompts.dailyContext({
+  // فراخوانی LLM همین حالا فایر می‌شود و با مکث‌های فضاسازی هم‌پوشان است (۲×Flash → ۱×فالبک)
+  const llmP = orChatResilient(L.prompts.dailySystem, L.prompts.dailyContext({
     name: user.name, focusFa: L.focusFa[user.focus_area] || '-', card: info, reversed: card.reversed,
-  }), { maxTokens: DAILY.maxTokens }).catch(e => { logErr('daily LLM:', e.message); return null; });
+  }), { maxTokens: DAILY.maxTokens }, [FLASH, FLASH, FALLBACK_MODEL])
+    .then(r => r?.out || null).catch(e => { logErr('daily LLM:', e.message); return null; });
 
   await typing(ctx, PACE_M);
   await ctx.reply(L.daily.drawing);
@@ -617,11 +637,12 @@ bot.action('ready_breath', async (ctx) => {
     [Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')],
   ]));
   patchSession(uid, { shuffleMsgId: m.message_id });
-  // انیمیشن شافل: ادیت متن هر ~۹۰۰ms؛ اگر کاربر تا آخر نزد، خودکار جلو می‌رویم
+  // انیمیشن شافل: بُر زدن ادامه دارد تا خودِ کاربر «نگه‌دار» را بزند — هرگز خودکار جلو نمی‌رویم.
+  // بعد از ~۲ دقیقه فقط ادیت‌کردن متوقف می‌شود (ریت‌لیمیت تلگرام) ولی دکمه سر جایش می‌ماند.
   (async () => {
-    for (let i = 1; i < 8; i++) {
-      await sleep(900);
-      if (getState(uid) !== 'shuffling') return;
+    for (let i = 1; i < 90; i++) {
+      await sleep(1300);
+      if (getState(uid) !== 'shuffling' || getSession(uid).shuffleMsgId !== m.message_id) return;
       const frame = L.reading.shuffleFrames[i % L.reading.shuffleFrames.length];
       try {
         await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, undefined, frame, {
@@ -629,7 +650,6 @@ bot.action('ready_breath', async (ctx) => {
         });
       } catch {}
     }
-    if (getState(uid) === 'shuffling') await startPicking(ctx, uid, m.message_id);
   })().catch(e => logErr('shuffle anim:', e.message));
 });
 
@@ -691,8 +711,12 @@ async function finishPicking(ctx, uid, s) {
   ).lastInsertRowid);
   patchSession(uid, { readingId });
 
-  // پیش‌فراخوانی LLM — هم‌زمان با پی‌وال، تا موقع افشا آماده باشد
-  startPrefetch(uid, readingId);
+  // پیش‌فراخوانی LLM فقط وقتی کاربر توان پرداخت دارد (هزینه‌ی قبل از پرداخت = صفر برای کاربرِ بدون موجودی)
+  // + سقف روزانه ضد حلقه‌ی «انتخاب کن، لغو کن». در غیر این صورت فراخوانی موقع unlock انجام می‌شود.
+  const readingsToday = stmts.countReadingsToday.get(uid).c;
+  if (getBalance(uid) >= spread.price && readingsToday <= MAX_PREFETCH_PER_DAY) {
+    startPrefetch(uid, readingId);
+  }
 
   await typing(ctx, PACE_M);
   if (spread.size > USER_PICKS) await ctx.reply(L.reading.extraCardsNote(spread.size - USER_PICKS));
@@ -777,17 +801,43 @@ async function startReveal(ctx, uid, readingId) {
   const llm = await waitLLMWithLoading(ctx, uid, readingId);
   const r = stmts.getReading.get(readingId);
   if (!llm) {
-    // شکست نهایی → برگشت کامل مبلغ
+    // شکست نهایی (بعد از ۳×Flash + ۲×فالبک) → برگشت کامل مبلغ + دکمه‌ی تلاش مجدد از همان نقطه
     if (r && r.status === 'started') {
       if (r.price > 0) stmts.credit.run(r.price, uid);
       stmts.setReadingStatus.run('refunded', readingId);
     }
     setState(uid, 'idle');
     setSession(uid, null);
-    return ctx.reply(L.reading.refunded, mainKeyboard());
+    return ctx.reply(L.reading.refunded, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.retry, `retryr:${readingId}`)],
+    ]));
   }
   await revealNext(ctx, uid, readingId);
 }
+
+// تلاش مجدد بعد از refund: همان کارت‌ها و همان سؤال — فقط فراخوانی LLM از نو
+bot.action(/^retryr:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  const readingId = parseInt(ctx.match[1], 10);
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid) return ctx.answerCbQuery().catch(() => {});
+  if (r.status !== 'refunded') return ctx.answerCbQuery('✅').catch(() => {});
+  if (r.price > 0) {
+    const res = stmts.deduct.run(r.price, uid, r.price);
+    if (res.changes === 0) {
+      await ctx.answerCbQuery().catch(() => {});
+      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid)), Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.recharge, 'recharge')],
+      ]));
+    }
+  }
+  stmts.setReadingStatus.run('started', readingId);
+  setState(uid, 'revealing');
+  setSession(uid, { spreadId: r.type, readingId, revealIdx: 0, fbDone: false });
+  await ctx.answerCbQuery('🔮').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await startReveal(ctx, uid, readingId);
+});
 
 async function revealNext(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
@@ -827,16 +877,19 @@ async function revealNext(ctx, uid, readingId) {
 
   await ctx.reply(esc(interp), {
     parse_mode: 'HTML',
-    ...(isLast ? {} : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}`)]])),
+    // دکمه شماره‌ی کارتِ بعدی را حمل می‌کند تا دابل‌تاچ/دکمه‌ی کهنه هرگز کارت تکراری یا پرشی نفرستد
+    ...(isLast ? {} : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}:${idx + 1}`)]])),
   });
   if (isLast) await finishReading(ctx, uid, readingId);
 }
 
-bot.action(/^next:(\d+)$/, async (ctx) => {
+bot.action(/^next:(\d+):(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery('🎴').catch(() => {});
   const readingId = parseInt(ctx.match[1], 10);
-  if (getState(uid) !== 'revealing' || getSession(uid).readingId !== readingId) return;
+  const expectIdx = parseInt(ctx.match[2], 10);
+  const s = getSession(uid);
+  if (getState(uid) !== 'revealing' || s.readingId !== readingId || (s.revealIdx || 0) !== expectIdx) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await revealNext(ctx, uid, readingId);
 });
@@ -851,19 +904,20 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
   setState(uid, 'revealing');
 
   if (kind === 'no' || freeText) {
-    // مثل فالگیر واقعی: زاویه‌ی تفسیر با یک فراخوانی کوچک تصحیح می‌شود
+    // مثل فالگیر واقعی: زاویه‌ی تفسیر با یک فراخوانی کوچک تصحیح می‌شود (فالبک: جمله‌ی همدلانه‌ی آماده)
     await typing(ctx, PACE_M);
     const s = getSession(uid);
     const midIdx = (s.revealIdx || 1) - 1;
     const cards = JSON.parse(r.cards_json);
-    const recal = await orChat(L.prompts.feedbackSystem, L.prompts.feedbackContext({
+    const recal = await orChatResilient(L.prompts.feedbackSystem, L.prompts.feedbackContext({
       confirmationQuestion: llm?.confirmation_question || '',
       userAnswer: freeText || 'نه دقیقاً',
       card: CARD_BY_KEY[cards[midIdx]?.key]?.fa || '',
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
-    }), { maxTokens: 300 }).catch(e => { logErr('feedback LLM:', e.message); return null; });
-    if (recal) await ctx.reply(recal);
+    }), { maxTokens: 300 }, [FLASH, FALLBACK_MODEL])
+      .then(res => res?.out || null).catch(e => { logErr('feedback LLM:', e.message); return null; });
+    await ctx.reply(recal || L.reading.recalFallback);
   } else {
     const bridges = L.reading.positiveBridges;
     await ctx.reply(bridges[Math.floor((readingId + (kind === 'yes' ? 0 : 1)) % bridges.length)]);
@@ -1026,6 +1080,8 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.reading.canceled, mainKeyboard());
+  // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
+  await offerPendingReading(ctx, uid);
 });
 
 function validateDiscount(code, userId, amount) {
@@ -1089,6 +1145,26 @@ function approvePayment(paymentId) {
     stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, (p.original_amount || p.amount) - p.amount);
   }
   return { p, creditAmount };
+}
+
+// پیشنهاد دوباره‌ی فال رزروشده (بعد از انصراف پرداخت، پیام متنی وسط پی‌وال و…)
+async function offerPendingReading(ctx, uid) {
+  const s = getSession(uid);
+  const r = s.readingId && stmts.getReading.get(s.readingId);
+  if (!r || r.status !== 'pending_payment') return false;
+  const balance = getBalance(uid);
+  if (balance >= r.price) {
+    await ctx.reply(L.reading.paywall(r.price), Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.openCards(r.price), `unlock:${r.id}`)],
+      [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+    ]));
+  } else {
+    await ctx.reply(L.reading.paywallShort(r.price, balance), Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.recharge, 'recharge')],
+      [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+    ]));
+  }
+  return true;
 }
 
 // مهم‌ترین اهرم کانورژن: بعد از تأیید شارژ، فالِ رزروشده خودکار ادامه پیدا می‌کند
@@ -1208,6 +1284,13 @@ bot.on('text', async (ctx) => {
       const s = getSession(uid);
       if (s.readingId) return await handleFeedback(ctx, uid, s.readingId, 'text', text.trim());
     }
+    // وسط فلوی فال: به‌جای پیام خوش‌آمدِ گیج‌کننده، نرم به دکمه‌ها برگردان
+    if (state === 'confirm_pay') {
+      if (await offerPendingReading(ctx, uid)) return;
+    }
+    if (['choose_spread', 'confirm_focus', 'breathing', 'shuffling', 'picking', 'revealing'].includes(state)) {
+      return ctx.reply(L.errors.useButtons);
+    }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
     return ctx.reply(L.returning.greeting(ctx.from.first_name, getBalance(uid)), mainKeyboard());
@@ -1223,13 +1306,20 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(ctx);
   if (getState(uid) !== 'await_question') return;
   try {
-    await typing(ctx, PACE_S);
     const media = ctx.message.voice || ctx.message.audio;
+    // سقف طول/حجم — رونویسی قبل از پرداخت انجام می‌شود و نباید هزینه‌ی بی‌سقف بسازد
+    if ((media.duration && media.duration > MAX_VOICE_SEC) || (media.file_size && media.file_size > MAX_VOICE_BYTES)) {
+      return ctx.reply(L.errors.voiceTooLong(MAX_VOICE_SEC));
+    }
+    await typing(ctx, PACE_S);
     const link = await ctx.telegram.getFileLink(media.file_id);
     const res = await fetch(link.href);
     const buf = Buffer.from(await res.arrayBuffer());
     const mime = media.mime_type || 'audio/ogg';
-    const txt = await orTranscribe(buf, /wav/i.test(mime) ? 'wav' : 'mp3');
+    let txt = null;
+    for (let attempt = 0; attempt < 2 && !txt; attempt++) {
+      txt = await orTranscribe(buf, /wav/i.test(mime) ? 'wav' : 'mp3').catch(e => { logErr('transcribe:', e.message); return null; });
+    }
     if (!txt?.trim()) return ctx.reply(L.errors.generic);
     return await handleQuestion(ctx, txt.trim());
   } catch (e) {
