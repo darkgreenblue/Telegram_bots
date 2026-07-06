@@ -56,6 +56,11 @@ const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
 const WELCOME_GIFT     = 30_000;  // دقیقاً قیمت فال سه‌کارتی — «فال اول مهمان ما»
 const MIN_RECHARGE     = 50_000;
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
+// هدیه‌ی شارژ (ARPU بالاتر): مبلغ‌های بزرگ‌تر، هدیه‌ی بیشتر — از بزرگ به کوچک چک می‌شود
+const RECHARGE_BONUS   = [{ min: 200_000, bonus: 30_000 }, { min: 100_000, bonus: 10_000 }];
+const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus || 0;
+const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
+const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
 const FIRST_PAID_DISCOUNT = { percent: 20, hours: 72 };
 const MILESTONE_DAYS   = 14;
@@ -160,6 +165,8 @@ db.exec(`
 `);
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
+try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -171,7 +178,8 @@ const stmts = {
   setFocus:   db.prepare('UPDATE users SET focus_area=? WHERE telegram_id=?'),
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
-  setDaily:   db.prepare('UPDATE users SET last_daily_date=? WHERE telegram_id=?'),
+  setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
+  readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
   setReferredBy: db.prepare('UPDATE users SET referred_by=? WHERE telegram_id=?'),
@@ -527,7 +535,9 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
   if (inOnboarding) {
     await typing(ctx, PACE_M);
     setState(uid, 'idle');
+    // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, true), 'spread:three')],
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
     ]));
   } else {
@@ -550,7 +560,10 @@ async function dailyCard(ctx) {
       [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, false), 'spread:three')],
     ]));
   }
-  stmts.setDaily.run(today, uid);
+  // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
+  const yesterday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(Date.now() - 86400_000));
+  const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
+  stmts.setDaily.run(today, streak, uid);
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
   const info = CARD_BY_KEY[card.key];
 
@@ -575,6 +588,15 @@ async function dailyCard(ctx) {
   await typing(ctx, PACE_REVEAL);
   const text = await llmP;
   if (text) await ctx.reply(text);
+  // موتور عادت: نمایش استریک از روز دوم + جایزه‌ی هر ۷ روز پیاپی (اعتبار داخل ربات)
+  if (streak >= 2) {
+    await sleep(PACE_S);
+    await ctx.reply(L.daily.streak(streak));
+    if (streak % STREAK_EVERY === 0) {
+      stmts.credit.run(STREAK_REWARD, uid);
+      await ctx.reply(L.daily.streakReward(STREAK_REWARD));
+    }
+  }
   await sleep(PACE_M);
   const paidCount = stmts.countPaidDelivered.get(uid).c;
   const canGift = getBalance(uid) >= SPREAD_BY_ID.three.price && paidCount === 0;
@@ -591,7 +613,7 @@ async function showCatalog(ctx) {
   upsertUser(ctx);
   setState(uid, 'choose_spread');
   setSession(uid, null);
-  const lines = SPREADS.map(s => L.reading.spreadLine(s)).join('\n\n');
+  const lines = SPREADS.map(s => L.reading.spreadLine(s, L.reading.badges[s.id])).join('\n\n');
   await ctx.reply(`${L.reading.catalog}\n\n${lines}`, Markup.inlineKeyboard(
     SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s), `spread:${s.id}`)])
   ));
@@ -640,9 +662,14 @@ async function handleQuestion(ctx, question) {
   patchSession(uid, { question: question.slice(0, 1500) });
   setState(uid, 'breathing');
   await typing(ctx, PACE_S);
-  await ctx.reply(L.reading.atmosphere1);
-  await typing(ctx, PACE_M);
-  await ctx.reply(L.reading.atmosphere2);
+  // مشتری ثابت (۲+ فال کامل) آیین کوتاه‌تر می‌گیرد — مثل تاروت‌خوان واقعی با مشتری آشنا
+  if (stmts.countDelivered.get(uid).c >= 2) {
+    await ctx.reply(L.reading.atmosphereShort);
+  } else {
+    await ctx.reply(L.reading.atmosphere1);
+    await typing(ctx, PACE_M);
+    await ctx.reply(L.reading.atmosphere2);
+  }
   await typing(ctx, PACE_M);
   await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
 }
@@ -1049,7 +1076,6 @@ async function finishReading(ctx, uid, readingId) {
     }
   } catch (e) { logErr('first-paid gift:', e.message); }
 
-  await ctx.reply('🌙', mainKeyboard());
 }
 
 /* ---------- کیف پول و شارژ (کارت‌به‌کارت + تأیید ادمین) ---------- */
@@ -1081,7 +1107,7 @@ bot.action('recharge', async (ctx) => {
     }
   }
   await ctx.reply(L.wallet.askAmount(MIN_RECHARGE), Markup.inlineKeyboard([
-    ...amounts.map(a => [Markup.button.callback(L.buttons.rechargeAmount(a), `ramt:${a}`)]),
+    ...amounts.map(a => [Markup.button.callback(L.buttons.rechargeAmount(a, bonusFor(a)), `ramt:${a}`)]),
     [Markup.button.callback(L.buttons.customAmount, 'rcustom')],
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
   ]));
@@ -1188,13 +1214,14 @@ function approvePayment(paymentId) {
   const p = stmts.getPayment.get(paymentId);
   if (!p || !['pending', 'waiting_review'].includes(p.status)) return null;
   const creditAmount = p.original_amount || p.amount;
+  const bonus = bonusFor(creditAmount); // هدیه‌ی شارژ روی مبلغ اصلی (قبل از تخفیف)
   stmts.setPaymentStatus.run('approved', paymentId);
-  stmts.credit.run(creditAmount, p.user_id);
+  stmts.credit.run(creditAmount + bonus, p.user_id);
   if (p.discount_code_id) {
     stmts.incDiscountUses.run(p.discount_code_id);
     stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, (p.original_amount || p.amount) - p.amount);
   }
-  return { p, creditAmount };
+  return { p, creditAmount, bonus };
 }
 
 // پیشنهاد دوباره‌ی فال رزروشده (بعد از انصراف پرداخت، پیام متنی وسط پی‌وال و…)
@@ -1243,8 +1270,8 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  const { p, creditAmount } = done;
-  await bot.telegram.sendMessage(p.user_id, L.wallet.approved(creditAmount, getBalance(p.user_id))).catch(() => {});
+  const { p, creditAmount, bonus } = done;
+  await bot.telegram.sendMessage(p.user_id, L.wallet.approved(creditAmount, getBalance(p.user_id), bonus)).catch(() => {});
   await afterApproval(p.user_id);
 });
 bot.action(/^reject:(\d+)$/, async (ctx) => {
@@ -1261,9 +1288,11 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
 bot.command('stats', (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
   const types = stmts.readingsByType.all().map(t => `  ${t.type}: ${fmt(t.c)} فال / ${fmt(t.s)} تومان`).join('\n') || '  —';
+  // قیف کانورژن: pending_payment باقی‌مانده = رهاشده در پی‌وال؛ delivered/کل = نرخ تکمیل
+  const funnel = stmts.readingsByStatus.all().map(x => `  ${x.status}: ${fmt(x.c)}`).join('\n') || '  —';
   return ctx.reply(
     `📊 آمار\n\n👥 کاربران: ${fmt(stmts.countUsers.get().c)}\n` +
-    `💰 درآمد ۲۴س: ${fmt(stmts.dailyRevenue.get().s)}\n💰 درآمد ۳۰روز: ${fmt(stmts.monthlyRevenue.get().s)}\n💰 کل: ${fmt(stmts.totalRevenue.get().s)}\n\n🔮 فال‌ها:\n${types}`
+    `💰 درآمد ۲۴س: ${fmt(stmts.dailyRevenue.get().s)}\n💰 درآمد ۳۰روز: ${fmt(stmts.monthlyRevenue.get().s)}\n💰 کل: ${fmt(stmts.totalRevenue.get().s)}\n\n🔮 فال‌های کامل:\n${types}\n\n📈 قیف (وضعیت همه‌ی فال‌ها):\n${funnel}`
   );
 });
 // /newcode CODE PERCENT DAYS [USER_ID]
