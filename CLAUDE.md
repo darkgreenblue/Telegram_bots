@@ -11,6 +11,7 @@
 | `bots/voice2text` | `voice2text` | ویس→متن (Gemini از OpenRouter)، کیف‌پول/پرداخت، SQLite، long-polling | **زنده و درآمدزا — هرگز نباید بشکند** |
 | `bots/resume-tailor` | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی | در حال راه‌اندازی |
 | `bots/tarot` | `tarot` | فال تاروت فارسی — بازسازی سفر مشتری تاروت‌خوان حرفه‌ای؛ کیف‌پول + کارت‌به‌کارت، رفرال، milestone | در حال راه‌اندازی |
+| `bots/tabir-khab` | — (systemd: `tabir-khab`) | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2. جزئیات در `bots/tabir-khab/CLAUDE.md` | در حال تست شخصی — روی سرور زنده است |
 
 مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`؛ مغز فال تاروت = `google/gemini-2.5-flash`.
 
@@ -22,6 +23,14 @@
 - **`ecosystem.config.cjs`** (ریشه): همه‌ی ربات‌ها را با `cwd` مخصوص خودشان تعریف می‌کند، پس هر کدام `.env` و `data/` خودش را از پوشه‌ی خودش می‌خواند.
 - **CI:** `.github/workflows/ci.yml` با build-matrix هر ربات را جدا `npm ci` + `node --check` می‌کند.
 - کاربر **به VPS دسترسی SSH ندارد** (فقط کلیدِ CI مجاز است). یعنی **هر تغییر سروری فقط از مسیر کامیت→merge→deploy انجام می‌شود.** خودت با کامیت روی برنچ و mer, deploy را پیش ببر.
+
+### ۳ب) استثنای tabir-khab (پایتون + systemd — نه pm2)
+- **کد** در `bots/tabir-khab/` است ولی **روی سرور** در مسیر تاریخی خودش می‌ماند: `/home/ubuntu/tabir_khab` (همان VPS، venv و `.env` و دیتابیس‌های SQLite و `logs/` مخصوص خودش)، با سرویسِ systemd به نام `tabir-khab` (نه pm2/ecosystem).
+- **دیپلوی:** جابِ `deploy-tabir-khab` در همان `deploy.yml` — کدِ `bots/tabir-khab` را با `git archive | tar -x` روی مسیرِ سرور overlay می‌کند (فایل‌های runtime مثل `.env`/db/logs/venv دست نمی‌خورند؛ فایل‌های *حذف‌شده* از ریپو هم از سرور پاک نمی‌شوند — اگر فایلی را حذف/تغییرنام دادی و مهم بود، حذفش را در اسکریپت دیپلوی یک‌باره اضافه کن) و بعد `sudo systemctl restart tabir-khab`.
+- **کلیدها:** `.env` این ربات (BALE_BOT_TOKEN، TELEGRAM_BOT_TOKEN، OPENROUTER_API_KEY، GAPGPT_API_KEY و…) دستی روی سرور است و دیپلوی به آن دست نمی‌زند — از قاعده‌ی materialize از Secrets پیروی نمی‌کند (فعلاً عمداً؛ برای یکپارچه‌سازی بعداً می‌شود secrets اضافه کرد).
+- **دیباگ:** چون خارج از pm2 است، `Ops`/`Health` آن را نمی‌بینند. به‌جایش: workflowِ `Tabir-khab logs` (وضعیت systemd + tail لاگ) و `Tabir-khab report` (داشبورد کاربر/درآمد) را dispatch کن و خروجی را از لاگ جاب بخوان.
+- **CI:** جاب `check-tabir-khab` در `ci.yml` (setup-python + pip install + compileall).
+- ریپوی قدیمیِ `darkgreenblue/tabir-khab` فقط آرشیو است؛ deploy آن غیرفعال شده — **توسعه فقط اینجا.** راهنمای کاملِ خودِ ربات: `bots/tabir-khab/CLAUDE.md`.
 
 ## ۴) مدیریت کلیدها — تک‌منبعِ حقیقت = GitHub Secrets
 دیپلوی، فایل `bots/<name>/.env` را روی سرور از روی Secrets می‌سازد. قرارداد نام‌گذاری:
