@@ -1,0 +1,19 @@
+{
+  "name": "tarot-bot",
+  "version": "1.0.0",
+  "description": "ربات تلگرام فال تاروت فارسی — تجربه‌ی تاروت‌خوان حرفه‌ای با مغز LLM",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "fetch-cards": "node scripts/fetch-cards.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3"
+  }
+}

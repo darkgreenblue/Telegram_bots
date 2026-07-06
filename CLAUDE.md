@@ -10,8 +10,11 @@
 |------|-----------|-----|--------|
 | `bots/voice2text` | `voice2text` | ویس→متن (Gemini از OpenRouter)، کیف‌پول/پرداخت، SQLite، long-polling | **زنده و درآمدزا — هرگز نباید بشکند** |
 | `bots/resume-tailor` | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی | در حال راه‌اندازی |
+| `bots/tarot` | `tarot` | فال تاروت فارسی — بازسازی سفر مشتری تاروت‌خوان حرفه‌ای؛ کیف‌پول + کارت‌به‌کارت، رفرال، milestone | در حال راه‌اندازی |
 
-مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`.
+مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`؛ مغز فال تاروت = `google/gemini-2.5-flash`.
+
+نکته‌ی tarot: چندزبانه‌ی آماده — همه‌ی متن‌ها/پرامپت‌ها در `bots/tarot/locales/<LOCALE>.js`؛ هر زبان بعداً یک اپ pm2 جدا از همان پوشه با `ENV_FILE` و `LOCALE` خودش (دیتابیس جدا: `data/bot-<LOCALE>.db`). تصاویر ۷۹گانه‌ی دک RWS (public domain) در `assets/cards/` کامیت شده‌اند.
 
 ## ۳) زیرساخت استقرار (مهم)
 - **VPS:** host `185.204.171.170`، کاربر `ubuntu`، مسیر کلون `~/voice2text` (نامش تاریخی است؛ همین مونوریپوست). اجرا با **PM2**، Node 20.
@@ -33,6 +36,8 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 | `VOICE2TEXT_BOT_TOKEN` *(اختیاری)* | برای یکپارچه‌کردن voice2text؛ تا ست نشود، از `.env` روی سرور استفاده می‌شود |
 | `VOICE2TEXT_OPENROUTER_KEY` *(اختیاری)* | همان |
 | `VOICE2TEXT_NOTION_TOKEN` *(اختیاری)* | NOTION_TOKEN ربات voice2text |
+| `TAROT_BOT_TOKEN` | توکن تلگرام tarot (از BotFather؛ روی همین ربات `/setinline` هم فعال شود — لازمه‌ی دکمه‌ی دعوت) |
+| `TAROT_OPENROUTER_KEY` | کلید OpenRouter ربات tarot |
 
 **قاعده‌ی غیرمخرب:** deploy فقط وقتی توکنِ یک ربات در Secrets ست شده باشد `.env` آن را می‌نویسد؛ در غیر این صورت `.env` موجود روی سرور دست‌نخورده می‌ماند. به همین دلیل voice2text تا قبل از ست‌شدن secretهایش دقیقاً مثل قبل کار می‌کند.
 
@@ -45,9 +50,9 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 
 ## ۴ب) بررسی سلامت بعد از deploy و rollback
 بعد از merge، نتیجه‌ی workflowِ `Deploy` را در GitHub Actions ببین (لاگ SSH خطوط `✅ <bot> دیپلوی شد` را چاپ می‌کند). چون به VPS دسترسی نداری، برای تأیید نهایی از کاربر بخواه:
-- `pm2 ls` → هر دو ربات `online`.
+- `pm2 ls` → هر سه ربات (`voice2text`, `resume-tailor`, `tarot`) روی `online`.
 - `pm2 logs voice2text --lines 50` → بدون کرش‌لوپ.
-- یک تست واقعیِ voice2text (ارسال ویس) و یک `/start` روی resume-tailor.
+- یک تست واقعیِ voice2text (ارسال ویس)، یک `/start` روی resume-tailor، و یک `/start` + کارت روز روی tarot.
 
 **Rollback اگر voice2text بعد از یکپارچه‌سازی مشکل گرفت:** مقادیر درست را در Secrets اصلاح کن و یک کامیت خالی به `main` بزن (دیپلوی دوباره اجرا می‌شود). فایلِ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستیِ قبلی را نگه داشته (برای مقایسه/بازگردانی). برای rollbackِ کد: `git revert` کامیتِ مشکل‌دار و merge.
 
@@ -60,7 +65,7 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 
 ## ۶) محدودیت‌ها و نکات حیاتی
 - **voice2text نباید بشکند.** تنها نقطه‌ی حساس، اولین دیپلویِ مهاجرت است (root→`bots/voice2text`). امن شده: قبل از `mv data` پروسه `pm2 stop` می‌شود، بعد `delete` و استارت از `cwd` جدید. مهاجرت ایدمپوتنت است.
-- بعد از هر دیپلویِ حساس، با کاربر چک کن: `pm2 ls` هر دو `online`، و یک تست واقعی voice2text.
+- بعد از هر دیپلویِ حساس، با کاربر چک کن: `pm2 ls` همه‌ی ربات‌ها `online`، و یک تست واقعی voice2text.
 - secretها هرگز در گیت/کامیت/چت نروند. `.env`، `data/`، `node_modules/` در `.gitignore` هستند.
 
 ## ۶ب) دکمه‌ی «ریست تست» (قرارداد فاز تست — همه‌ی ربات‌ها)
