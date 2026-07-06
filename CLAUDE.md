@@ -31,9 +31,10 @@
 
 ### ۳ب) استثنای tabir-khab (پایتون + systemd — نه pm2)
 - **کد** در `bots/tabir-khab/` است ولی **روی سرور** در مسیر تاریخی خودش می‌ماند: `/home/ubuntu/tabir_khab` (همان VPS، venv و `.env` و دیتابیس‌های SQLite و `logs/` مخصوص خودش)، با سرویسِ systemd به نام `tabir-khab` (نه pm2/ecosystem).
+- **معماری چند-رباته:** یک ربات per زبان (نه انتخابگر زبان) — فارسی بله+تلگرام، بقیه فقط تلگرام؛ همه در یک پروسه/سرویس. جزئیات کامل: `bots/tabir-khab/CLAUDE.md`.
 - **دیپلوی:** جابِ `deploy-tabir-khab` در همان `deploy.yml` — **انتخابی** (فقط وقتی `bots/tabir-khab/` تغییر کرده یا force_all): کد را با `git archive | tar -x` روی مسیر سرور overlay می‌کند (فایل‌های runtime مثل `.env`/db/logs/venv دست نمی‌خورند؛ فایل‌های *حذف‌شده* از ریپو هم از سرور پاک نمی‌شوند — اگر حذف مهم بود، در اسکریپت دیپلوی یک‌باره اضافه کن) و بعد `sudo systemctl restart tabir-khab`.
-- **کلیدها:** `.env` این ربات (BALE_BOT_TOKEN، TELEGRAM_BOT_TOKEN، OPENROUTER_API_KEY، GAPGPT_API_KEY و…) دستی روی سرور است و دیپلوی به آن دست نمی‌زند — از قاعده‌ی materialize از Secrets پیروی نمی‌کند (فعلاً عمداً).
-- **دیباگ:** چون خارج از pm2 است، `Ops` آن را نمی‌بیند — به‌جایش workflowِ `Tabir-khab logs` (وضعیت systemd + tail لاگ) و `Tabir-khab report` (داشبورد کاربر/درآمد) را dispatch کن. **`Health` آن را هم پایش می‌کند** (چک systemd + tail لاگ در خرابی). **بکاپ:** workflow `Backup` دیتابیس‌های آن را هم می‌گیرد (snapshot پایتونی از `/home/ubuntu/tabir_khab/*.db`).
+- **کلیدها:** یک ربات per زبان (توکن تلگرام جدا برای هر زبان؛ فارسی بله هم دارد). دیپلوی توکن‌های `TABIR_TELEGRAM_BOT_TOKEN_{FA,EN,AR,RU,ES,PT}` و `TABIR_BALE_BOT_TOKEN` را از Secrets در `.env` سرور **upsert** می‌کند (فقط کلیدهای ست‌شده — بقیه‌ی .env مثل `OPENROUTER_API_KEY`/`GAPGPT_API_KEY` که دستی روی سرور است دست نمی‌خورد).
+- **دیباگ:** چون خارج از pm2 است، `Ops` آن را نمی‌بیند — به‌جایش workflowِ `Tabir-khab logs` (وضعیت systemd + tail لاگ) و `Tabir-khab report` (داشبورد کاربر/درآمد) را dispatch کن. **`Health` آن را هم پایش می‌کند** (چک systemd + tail لاگ در خرابی). **بکاپ:** workflow `Backup` دیتابیس‌های آن را هم می‌گیرد (snapshot پایتونی از `/home/ubuntu/tabir_khab/*.db` — با چند DB per زبان هم خودکار همه را می‌گیرد).
 - **CI:** جاب `check-tabir-khab` در `ci.yml` (setup-python + pip install + compileall).
 - ریپوی قدیمیِ `darkgreenblue/tabir-khab` فقط آرشیو است — **توسعه فقط اینجا.** راهنمای کامل: `bots/tabir-khab/CLAUDE.md`.
 

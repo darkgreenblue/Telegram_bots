@@ -11,9 +11,13 @@ import os
 import sqlite3
 import datetime
 
+import config
+
+# فهرستِ DBها از config می‌آید — هر ربات (پلتفرم×زبان) DB خودش را دارد؛
+# زبان جدید که اضافه شود، گزارش خودکار آن را هم می‌پوشاند.
 DBS = [
-    ("بله",    "tabir_bale.db"),
-    ("تلگرام", "tabir_telegram.db"),
+    (f"{spec['platform']}-{spec['locale']}", spec["db"])
+    for spec in config.bot_instances()
 ]
 
 # پرداخت‌های تستی/شبیه‌سازی‌شده با این charge_idها مشخص می‌شوند (SKIP_PAYMENT)

@@ -1,8 +1,11 @@
-"""روتینگ آپدیت‌ها و کل منطق تعامل (بله + تلگرام) — چندزبانه.
+"""روتینگ آپدیت‌ها و کل منطق تعامل (بله + تلگرام) — چندزبانه در کد، تک‌زبانه در هر ربات.
 
-جریان: [تلگرام] انتخاب زبان → آنبوردینگ ۵سؤالی → دریافت خواب → کارت تأیید →
-gate همسفری → خروجی «اول عکس، بعد تعبیر».
-بله فقط فارسی است (بدون انتخابگر زبان).
+هر رباتِ در حالِ اجرا زبانِ ثابت دارد (bale.locale) — مرحله‌ی انتخاب زبان حذف شده؛
+هر زبان رباتِ تلگرامِ خودش را دارد (برای مارکتینگِ جدا). متن‌ها همچنان از locales
+می‌آیند تا هر تغییرِ کد یک‌جا برای همه‌ی زبان‌ها اعمال شود.
+
+جریان: آنبوردینگ ۵سؤالی → دریافت خواب → کارت تأیید → gate همسفری →
+خروجی «اول عکس، بعد تعبیر».
 """
 import os
 import re
@@ -22,14 +25,14 @@ from config import (
     ADMIN_USER_ID, MIN_VOICE_DURATION, MAX_VOICE_DURATION,
     MIN_TEXT_CHARS, MAX_TEXT_CHARS,
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
-    DEFAULT_LANGUAGE, multilang_enabled, payment_methods_for, REFERRAL_ENABLED,
+    payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
     RESET_BUTTON_ENABLED,
 )
 
 log = logging.getLogger("handlers")
 
-# قفل ضد کلیک/پیام رگباری — کلید: (platform, user_id, scope)
+# قفل ضد کلیک/پیام رگباری — کلید: (bot-tag, user_id, scope) — tag چون چند ربات تلگرامی داریم
 _processing: set = set()
 
 _REF_RE = re.compile(r"^ref_(\d+)$")
@@ -43,7 +46,6 @@ for _code in locales.LANG_ORDER:
     _KB_ACTION[_kb["subscription"]] = "subscription"
     _KB_ACTION[_kb["persona"]]      = "persona"
     _KB_ACTION[_kb["invite"]]       = "invite"
-    _KB_ACTION[_kb["language"]]     = "language"
     if "reset_test" in _kb:
         _KB_ACTION[_kb["reset_test"]] = "reset_test"
 
@@ -51,10 +53,10 @@ for _code in locales.LANG_ORDER:
 # ===================== کیبوردها =====================
 
 def _main_reply_kb(bale, lang):
-    # دکمه‌ی زبان فقط روی تلگرام (بله تک‌زبانه است)
+    # دکمه‌ی زبان حذف شده — زبانِ هر ربات ثابت است
     return reply_keyboard(C.main_reply_rows(
         lang,
-        include_language=multilang_enabled(bale.platform),
+        include_language=False,
         include_reset=RESET_BUTTON_ENABLED,
     ))
 
@@ -75,10 +77,6 @@ def _confirm_inline(lang):
 def _view_full_inline(lang, dream_id: int):
     return inline_keyboard([[{"text": C.get(lang, "btn_view_full"),
                               "callback_data": f"fullview:{dream_id}"}]])
-
-
-def _language_picker_kb():
-    return inline_keyboard(locales.language_picker_rows())
 
 
 # ===================== کمک‌ها =====================
@@ -117,7 +115,7 @@ def _extract_audio_input(msg: dict):
 
 
 def _lock_key(bale, user_id, scope):
-    return (bale.platform, user_id, scope)
+    return (bale.tag, user_id, scope)
 
 
 async def _staged(coro, timeout: float, label: str, platform: str):
@@ -137,9 +135,9 @@ async def _staged(coro, timeout: float, label: str, platform: str):
 
 
 def _lang_of(user: dict, bale=None) -> str:
-    """زبانِ کاربر؛ بله همیشه فارسی."""
-    if bale is not None and not multilang_enabled(bale.platform):
-        return DEFAULT_LANGUAGE
+    """زبانِ ربات — هر ربات زبانِ ثابتِ خودش را دارد (نه انتخابِ کاربر)."""
+    if bale is not None:
+        return bale.locale
     return db.user_lang(user)
 
 
@@ -176,11 +174,6 @@ async def _send_paywall(bale, chat_id, lang, prefix=""):
         await bale.send_message(chat_id, caption, reply_markup=kb)
 
 
-async def _send_language_picker(bale, chat_id):
-    await bale.send_message(chat_id, locales.LANGUAGE_PICKER_TITLE,
-                            reply_markup=_language_picker_kb(), parse_mode=None)
-
-
 # روایت‌گرِ پس‌زمینه — یک پیامِ واحد که هر ~۴.۵ ثانیه ادیت می‌شود تا کاربر تنها نماند.
 async def _narrate(bale, chat_id, lang):
     loc = locales.get(lang)
@@ -211,7 +204,7 @@ async def _narrate(bale, chat_id, lang):
 # ===================== دیسپچر =====================
 
 async def handle_update(bale, update: dict):
-    log.info("[%s] update %s keys=%s", bale.platform, update.get("update_id"),
+    log.info("[%s] update %s keys=%s", bale.tag, update.get("update_id"),
              [k for k in update if k != "update_id"])
     if "callback_query" in update:
         await _handle_callback(bale, update["callback_query"])
@@ -242,12 +235,6 @@ async def _handle_message(bale, msg: dict):
 
     user = await db.get_user(user_id)
 
-    # تلگرام: اگر زبان هنوز انتخاب نشده، تا قبل از هر چیز انتخابگر زبان
-    if user is not None and multilang_enabled(bale.platform) and not user.get("language"):
-        if not (msg.get("text", "").startswith("/start")):
-            await _send_language_picker(bale, chat_id)
-            return
-
     audio = _extract_audio_input(msg)
     if audio:
         await _handle_dream_input(bale, chat_id, user_id, "voice", voice=audio)
@@ -272,11 +259,6 @@ async def _handle_message(bale, msg: dict):
         await _send_new_dream_guide(bale, chat_id, user_id)
         return
 
-    # دکمه‌ی زبان (فقط تلگرام)
-    if action == "language" and multilang_enabled(bale.platform):
-        await _send_language_picker(bale, chat_id)
-        return
-
     # هر اکشن دیگری: اگر خوابِ ناتمامِ شکست‌خورده هست، اول بازتلاش
     if (user or {}).get("pending_state") == "processing_failed":
         handled = await _try_resume_pending_dream(bale, chat_id, user_id)
@@ -296,7 +278,7 @@ async def _handle_message(bale, msg: dict):
 
     if action == "reset_test" and RESET_BUTTON_ENABLED:
         await db.reset_user(user_id)
-        log.info("[%s] RESET user=%s by reset_test button", bale.platform, user_id)
+        log.info("[%s] RESET user=%s by reset_test button", bale.tag, user_id)
         # کیبوردِ پایین (شاملِ خودِ دکمه‌ی ریست) را دوباره بفرست تا بعد از ریست هم در دسترس بماند —
         # وگرنه چون یوزر «جدید» می‌شود و وارد آنبوردینگ می‌شود، دکمه تا پایانِ آنبوردینگ ناپدید می‌ماند.
         await bale.send_message(chat_id, "🔄 ریست شد — انگار یه یوزرِ تازه!",
@@ -319,16 +301,10 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
                 if ref_id != user_id:
                     referred_by = ref_id
 
-    # بله → fa فوری؛ تلگرام → None (انتخابگر زبان)
-    init_lang = None if multilang_enabled(bale.platform) else DEFAULT_LANGUAGE
+    # زبان از همان ابتدا = زبانِ ثابتِ ربات (استپ انتخاب زبان حذف شده)
     is_new, user = await db.get_or_create_user(
-        user_id, chat_id, username, first_name, referred_by=referred_by, language=init_lang
+        user_id, chat_id, username, first_name, referred_by=referred_by, language=bale.locale
     )
-
-    # تلگرام و زبان انتخاب‌نشده → انتخابگر زبان
-    if multilang_enabled(bale.platform) and not user.get("language"):
-        await _send_language_picker(bale, chat_id)
-        return
 
     lang = _lang_of(user, bale)
     if db.onboarding_done(user):
@@ -372,13 +348,9 @@ async def _send_subscription_status(bale, chat_id, user_id):
 async def _handle_dream_input(bale, chat_id, user_id, source, voice=None, text=None):
     user = await db.get_user(user_id)
     if not user:
-        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None,
+                                              language=bale.locale)
     lang = _lang_of(user, bale)
-
-    # تلگرام بدون زبان → انتخابگر
-    if multilang_enabled(bale.platform) and not user.get("language"):
-        await _send_language_picker(bale, chat_id)
-        return
 
     if not db.onboarding_done(user):
         await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
@@ -424,9 +396,7 @@ async def _handle_callback(bale, cq: dict):
     msg_id = (cq.get("message") or {}).get("message_id")
 
     try:
-        if data.startswith("lang:"):
-            await _cb_set_language(bale, cq_id, chat_id, user_id, data.split(":", 1)[1])
-        elif data == "onb_start":
+        if data == "onb_start":
             await _cb_onboarding_start(bale, cq_id, chat_id, user_id)
         elif data.startswith("onb:"):
             _, step, idx = data.split(":")
@@ -460,27 +430,12 @@ async def _handle_callback(bale, cq: dict):
             pass
 
 
-async def _cb_set_language(bale, cq_id, chat_id, user_id, lang_code):
-    if not locales.is_supported(lang_code):
-        await bale.answer_callback_query(cq_id)
-        return
-    # کاربر باید وجود داشته باشد
-    user = await db.get_user(user_id)
-    if not user:
-        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
-    await db.set_language(user_id, lang_code)
-    await bale.answer_callback_query(cq_id, text=locales.get(lang_code)["meta"]["name"])
-    # کیبوردِ پایین فوراً به زبان جدید عوض شود
-    await bale.send_message(chat_id, C.get(lang_code, "lang_changed"),
-                            reply_markup=_main_reply_kb(bale, lang_code))
-    await _send_welcome(bale, chat_id, lang_code)
-
-
 async def _cb_onboarding_start(bale, cq_id, chat_id, user_id):
     """شروع آنبوردینگ: سؤال اول را بفرست."""
     user = await db.get_user(user_id)
     if not user:
-        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None,
+                                              language=bale.locale)
     lang = _lang_of(user, bale)
     await db.set_onboarding_step(user_id, 0)
     await bale.answer_callback_query(cq_id)
@@ -491,7 +446,8 @@ async def _cb_onboarding_answer(bale, cq_id, chat_id, msg_id, user_id, step, idx
     """پاسخ‌دادن به سؤال؛ همان پیام در جا به سؤالِ بعد ادیت می‌شود."""
     user = await db.get_user(user_id)
     if not user:
-        _, user = await db.get_or_create_user(user_id, chat_id, None, None)
+        _, user = await db.get_or_create_user(user_id, chat_id, None, None,
+                                              language=bale.locale)
     lang = _lang_of(user, bale)
     if step != user.get("onboarding_step", 0):
         await bale.answer_callback_query(cq_id)
@@ -596,7 +552,7 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
         return
     _processing.add(lock)
     log.info("[%s] _process_dream START user=%s mode=%s source=%s",
-             bale.platform, user_id, mode, (pending or {}).get("source"))
+             bale.tag, user_id, mode, (pending or {}).get("source"))
 
     user = await db.get_user(user_id)
     lang = _lang_of(user, bale)
@@ -646,19 +602,19 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                 try:
                     file_path = await _staged(
                         bale.get_file_path(pending["payload"]),
-                        FILE_API_TIMEOUT, "getfile", bale.platform)
+                        FILE_API_TIMEOUT, "getfile", bale.tag)
                     ext = os.path.splitext(file_path)[1] or ".ogg"
                     fd, tmp_path = tempfile.mkstemp(suffix=ext)
                     os.close(fd)
                     await _staged(
                         bale.download_file(file_path, tmp_path),
-                        DOWNLOAD_TIMEOUT, "download", bale.platform)
+                        DOWNLOAD_TIMEOUT, "download", bale.tag)
                     # سنجشِ دقیقِ مدت با ffprobe — مستقل از فرمت/حجم. مخصوصاً برای فایل‌هایی
                     # که مدت‌شان را گزارش نکرده‌اند (document/m4aِ فورواردشده) تنها بررسیِ معتبر است.
                     real_dur = await ai.audio_duration(tmp_path)
                     if real_dur is not None and not (MIN_VOICE_DURATION <= real_dur <= MAX_VOICE_DURATION):
                         log.info("[%s] audio duration %.1fs out of [%s,%s] → rejected",
-                                 bale.platform, real_dur, MIN_VOICE_DURATION, MAX_VOICE_DURATION)
+                                 bale.tag, real_dur, MIN_VOICE_DURATION, MAX_VOICE_DURATION)
                         narrator.cancel()
                         await _refund()
                         await db.clear_pending(user_id)
@@ -667,9 +623,9 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                         return
                     result = await _staged(
                         ai.process_voice_dream(tmp_path, lang, persona, profile, tier),
-                        INTERPRET_TIMEOUT, "interpret-voice", bale.platform)
+                        INTERPRET_TIMEOUT, "interpret-voice", bale.tag)
                 except Exception as e:
-                    log.warning("[%s] voice dream FAILED → notifying user: %s", bale.platform, e)
+                    log.warning("[%s] voice dream FAILED → notifying user: %s", bale.tag, e)
                     narrator.cancel()
                     await _refund()
                     await db.set_pending_state(user_id, "processing_failed", mode)
@@ -687,9 +643,9 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                 try:
                     result = await _staged(
                         ai.interpret_dream(transcript, lang, persona, profile, tier),
-                        INTERPRET_TIMEOUT, "interpret-text", bale.platform)
+                        INTERPRET_TIMEOUT, "interpret-text", bale.tag)
                 except Exception as e:
-                    log.warning("[%s] text dream FAILED → notifying user: %s", bale.platform, e)
+                    log.warning("[%s] text dream FAILED → notifying user: %s", bale.tag, e)
                     narrator.cancel()
                     await _refund()
                     await db.set_pending_state(user_id, "processing_failed", mode)
@@ -717,7 +673,7 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                 try:
                     img = await _staged(
                         ai.generate_image(image_prompt),
-                        IMAGE_TIMEOUT, "image", bale.platform)
+                        IMAGE_TIMEOUT, "image", bale.tag)
                     image_url = img["url"]
                     await db.mark_image(
                         dream_id, image_url,
@@ -726,7 +682,7 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                     )
                 except Exception as e:
                     log.warning("[%s] image generation failed (continuing without image): %s",
-                                bale.platform, e)
+                                bale.tag, e)
 
             narrator.cancel()
 
@@ -738,16 +694,16 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
 
             await db.clear_pending(user_id)
             log.info("[%s] _process_dream DONE user=%s dream=%s image=%s",
-                     bale.platform, user_id, dream_id, "yes" if image_url else "no")
+                     bale.tag, user_id, dream_id, "yes" if image_url else "no")
         except Exception as e:
             # تعبیر سالم در DB مانده؛ resumeِ بعدی بدون LLM فقط عکس/تحویل را تکرار می‌کند.
             log.warning("[%s] delivery failed (will resume without re-interpreting): %s",
-                        bale.platform, e)
+                        bale.tag, e)
             await db.set_pending_state(user_id, "processing_failed", mode)
 
     except Exception as e:
         # هر خطای پیش‌بینی‌نشده‌ای: کاربر نباید بی‌خبر بماند.
-        log.exception("[%s] _process_dream UNEXPECTED error user=%s: %s", bale.platform, user_id, e)
+        log.exception("[%s] _process_dream UNEXPECTED error user=%s: %s", bale.tag, user_id, e)
         try:
             await db.set_pending_state(user_id, "processing_failed", mode)
             await bale.send_message(chat_id, C.persona_key(lang, persona, "error"))
@@ -820,7 +776,7 @@ async def _send_photo_robust(bale, chat_id, image_url, caption=None, reply_marku
                               reply_markup=reply_markup, parse_mode=None)
         return True
     except Exception as e:
-        log.warning("[%s] sendPhoto by URL failed (%s) — trying download+upload", bale.platform, e)
+        log.warning("[%s] sendPhoto by URL failed (%s) — trying download+upload", bale.tag, e)
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(suffix=".png")
@@ -831,7 +787,7 @@ async def _send_photo_robust(bale, chat_id, image_url, caption=None, reply_marku
         return True
     except Exception as e:
         log.warning("[%s] sendPhoto by file also failed: %s — delivering text without image",
-                    bale.platform, e)
+                    bale.tag, e)
         return False
     finally:
         if tmp and os.path.exists(tmp):
