@@ -62,7 +62,7 @@ const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
 const GRID_SIZE        = 24; // ۶ ردیف × ۴
-const USER_PICKS       = 3;  // در همه‌ی فال‌ها کاربر ۳ کارت انتخاب می‌کند
+const USER_PICKS       = 3;  // حداکثر تعداد انتخاب کاربر از گرید (فال کوچک‌تر = به تعداد خودش)
 
 const PACE_S = 1200, PACE_M = 2500, PACE_REVEAL = 3500;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -336,9 +336,10 @@ function shuffledDeck(seedStr) {
   return deck.map(key => ({ key, reversed: rng() < REVERSAL_PROB }));
 }
 // کارت‌های نهایی خوانش: انتخاب‌های کاربر از گرید + بقیه از «جای بریدن دک»
+// مهم: برای فال‌های کوچک‌تر از تعداد انتخاب (مثل آری/نه ۲کارتی) فقط size کارت اول
 function drawCards(seedStr, picks, size) {
   const deck = shuffledDeck(seedStr);
-  const chosen = picks.map(i => deck[i]);
+  const chosen = picks.slice(0, size).map(i => deck[i]);
   let cursor = GRID_SIZE;
   while (chosen.length < size) chosen.push(deck[cursor++]);
   return chosen;
@@ -389,7 +390,7 @@ function buildReadingCtx(user, spread, question, cards) {
     question,
     spreadFa: spread.fa,
     cards: cards.map((c, i) => ({
-      positionFa: spread.positions[i].fa,
+      positionFa: spread.positions[i]?.fa || `کارت ${i + 1}`,
       fa: CARD_BY_KEY[c.key].fa,
       en: CARD_BY_KEY[c.key].en,
       reversed: c.reversed,
@@ -674,12 +675,15 @@ function pickGridKb(picks) {
 async function startPicking(ctx, uid, shuffleMsgId) {
   // seed قطعی: بعد از این لحظه شافل و جهت کارت‌ها ثابت است (حتی بعد از ری‌استارت)
   const seed = `r:${uid}:${shuffleMsgId}:${Date.now()}`;
+  const spread = SPREAD_BY_ID[getSession(uid).spreadId];
+  // فال‌های کوچک‌تر (مثل آری/نه ۲کارتی) به تعداد خودشان انتخاب می‌خواهند
+  const need = Math.min(USER_PICKS, spread?.size || USER_PICKS);
   setState(uid, 'picking'); // قبل از هر await — گارد برابر دوباره‌کاری
-  patchSession(uid, { seed, picks: [] });
+  patchSession(uid, { seed, picks: [], need });
   if (shuffleMsgId) {
     try { await ctx.telegram.editMessageText(ctx.chat.id, shuffleMsgId, undefined, '🂠 ✋'); } catch {}
   }
-  await ctx.reply(L.reading.pickPrompt(USER_PICKS), pickGridKb([]));
+  await ctx.reply(L.reading.pickPrompt(need), pickGridKb([]));
 }
 
 bot.action(/^pick:(\d+)$/, async (ctx) => {
@@ -688,11 +692,12 @@ bot.action(/^pick:(\d+)$/, async (ctx) => {
   if (getState(uid) !== 'picking') return ctx.answerCbQuery().catch(() => {});
   // ثبت همگام قبل از هر await — ضد race در کلیک‌های پشت‌سرهم
   const s = getSession(uid);
-  if (!s.picks || s.picks.includes(i) || s.picks.length >= USER_PICKS) {
+  const need = s.need || USER_PICKS;
+  if (!s.picks || s.picks.includes(i) || s.picks.length >= need) {
     return ctx.answerCbQuery().catch(() => {});
   }
   s.picks.push(i);
-  const done = s.picks.length >= USER_PICKS;
+  const done = s.picks.length >= need;
   if (done) setState(uid, 'confirm_pay'); // قفل فوری قبل از await
   setSession(uid, s);
 
@@ -719,7 +724,7 @@ async function finishPicking(ctx, uid, s) {
   }
 
   await typing(ctx, PACE_M);
-  if (spread.size > USER_PICKS) await ctx.reply(L.reading.extraCardsNote(spread.size - USER_PICKS));
+  if (spread.size > s.picks.length) await ctx.reply(L.reading.extraCardsNote(spread.size - s.picks.length));
 
   const balance = getBalance(uid);
   if (balance >= spread.price) {
@@ -854,7 +859,7 @@ async function revealNext(ctx, uid, readingId) {
   patchSession(uid, { revealIdx: idx + 1 }); // قبل از await — دکمه‌ی تکراری دوباره همین کارت را نفرستد
 
   await typing(ctx, PACE_S, 'upload_photo');
-  await sendCardPhoto(ctx, card.key, L.reading.revealCaption(spread.positions[idx].fa, info, card.reversed));
+  await sendCardPhoto(ctx, card.key, L.reading.revealCaption(spread.positions[idx]?.fa || `کارت ${idx + 1}`, info, card.reversed));
   await sleep(PACE_REVEAL);
   await typing(ctx, PACE_S);
 
