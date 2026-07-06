@@ -1,0 +1,90 @@
+# Ops — دسترسی on-demand به لاگ‌ها و وضعیت pm2 روی VPS (بدون نیاز به SSH کاربر)
+#
+# هر سشن Claude Code می‌تواند این workflow را با workflow_dispatch اجرا کند
+# (از طریق GitHub MCP: actions_run_trigger) و بعد خروجی را از لاگ جاب بخواند
+# (get_job_logs). خروجی دستورها مستقیم در لاگ همین جاب چاپ می‌شود.
+name: Ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'چه کاری؟'
+        required: true
+        type: choice
+        options: [status, logs, errors, restart, env-check]
+      app:
+        description: 'نام اپ pm2 (برای logs/errors/restart) مثل tarot'
+        required: false
+        default: ''
+      lines:
+        description: 'تعداد خطوط لاگ'
+        required: false
+        default: '100'
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run ops command on VPS
+        uses: appleboy/ssh-action@v1
+        env:
+          OPS_ACTION: ${{ inputs.action }}
+          OPS_APP:    ${{ inputs.app }}
+          OPS_LINES:  ${{ inputs.lines }}
+        with:
+          host: 185.204.171.170
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: OPS_ACTION,OPS_APP,OPS_LINES
+          script: |
+            set -e
+            cd ~/voice2text
+            # ضد تزریق: نام اپ و تعداد خطوط فقط با الگوی امن
+            case "$OPS_APP"   in (*[!a-z0-9-]*) echo "❌ نام اپ نامعتبر"; exit 1;; esac
+            case "$OPS_LINES" in (*[!0-9]*|'') OPS_LINES=100;; esac
+
+            case "$OPS_ACTION" in
+              status)
+                pm2 ls
+                echo
+                pm2 jlist | node -e "
+                  const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                  for (const p of a) console.log(
+                    p.name.padEnd(16),
+                    'status=' + p.pm2_env.status,
+                    'restarts=' + p.pm2_env.restart_time,
+                    'uptime_min=' + Math.round((Date.now() - p.pm2_env.pm_uptime) / 60000),
+                    'mem_mb=' + Math.round((p.monit?.memory || 0) / 1048576)
+                  );"
+                ;;
+              logs)
+                [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
+                echo "===== $OPS_APP — out.log (آخرین $OPS_LINES خط) ====="
+                tail -n "$OPS_LINES" ~/.pm2/logs/"$OPS_APP"-out.log 2>/dev/null || echo "(خالی/موجود نیست)"
+                echo
+                echo "===== $OPS_APP — error.log (آخرین $OPS_LINES خط) ====="
+                tail -n "$OPS_LINES" ~/.pm2/logs/"$OPS_APP"-error.log 2>/dev/null || echo "(خالی/موجود نیست)"
+                ;;
+              errors)
+                [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
+                echo "===== $OPS_APP — error.log (آخرین $OPS_LINES خط) ====="
+                tail -n "$OPS_LINES" ~/.pm2/logs/"$OPS_APP"-error.log 2>/dev/null || echo "(خالی/موجود نیست)"
+                ;;
+              restart)
+                [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
+                pm2 restart "$OPS_APP" --update-env
+                sleep 3
+                pm2 ls
+                echo "--- ۲۰ خط آخر بعد از ری‌استارت ---"
+                tail -n 20 ~/.pm2/logs/"$OPS_APP"-out.log 2>/dev/null || true
+                tail -n 20 ~/.pm2/logs/"$OPS_APP"-error.log 2>/dev/null || true
+                ;;
+              env-check)
+                # فقط وجود فایل‌ها — هرگز محتوای .env چاپ نمی‌شود
+                for d in bots/*/; do
+                  n=$(basename "$d")
+                  [ -f "$d/.env" ] && echo "$n: .env ✅" || echo "$n: .env ❌"
+                done
+                ;;
+            esac
