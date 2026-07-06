@@ -520,7 +520,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
-    if (spread) await ctx.reply(L.reading.askQuestion(spread.price));
+    if (spread) await ctx.reply(L.reading.askQuestion());
   }
 });
 
@@ -606,7 +606,7 @@ bot.action('keepfocus', async (ctx) => {
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
   if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard());
   setState(uid, 'await_question');
-  await ctx.reply(L.reading.askQuestion(spread.price));
+  await ctx.reply(L.reading.askQuestion());
 });
 
 /* ---------- دریافت سؤال → فضاسازی → تنفس ---------- */
@@ -935,6 +935,23 @@ bot.action(/^fb:(yes|some|no):(\d+)$/, async (ctx) => {
 });
 
 /* ---------- پایان‌بندی + قلاب بازگشت ---------- */
+// پیشنهاد شخصی‌سازی‌شده‌ی فال بعدی: بر اساس حوزه‌ی تمرکز کاربر + آنچه هنوز تجربه نکرده
+const FOCUS_SUGGEST = {
+  love:     ['love', 'choice', 'inner', 'celtic'],
+  career:   ['career', 'money', 'choice', 'celtic'],
+  money:    ['money', 'career', 'choice', 'celtic'],
+  inner:    ['inner', 'three', 'love', 'celtic'],
+  question: ['choice', 'yesno', 'three', 'celtic'],
+};
+function suggestSpreads(uid, currentType) {
+  const focus = getUser(uid)?.focus_area || 'question';
+  const tried = new Set(stmts.lastDelivered.all(uid, 10).map(x => x.type));
+  const pool = [...(FOCUS_SUGGEST[focus] || []), ...SPREADS.map(s => s.id)];
+  const fresh = pool.filter(id => id !== currentType && SPREAD_BY_ID[id] && !tried.has(id));
+  const any   = pool.filter(id => id !== currentType && SPREAD_BY_ID[id]);
+  const ids = [...new Set([...fresh, ...any])].slice(0, 2);
+  return ids.map(id => SPREAD_BY_ID[id]);
+}
 async function finishReading(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (!r || r.status !== 'started') return;
@@ -978,12 +995,14 @@ async function finishReading(ctx, uid, readingId) {
     await ctx.replyWithMediaGroup(media);
   } catch (e) { logErr('media group:', e.message); }
 
-  // milestone ۱۴روزه + دکمه‌ی دعوت
+  // milestone ۱۴روزه بی‌صدا ذخیره می‌شود (فقط برای قلاب /start و پوش چک‌این) —
+  // پیام «بعداً برگرد» ضد ریتنشن فوری است؛ به‌جایش پیشنهاد شخصی‌سازی‌شده‌ی فال بعدی:
   await sleep(PACE_M);
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
-  const hookText = llm.next_milestone?.text || '';
-  await ctx.reply(`🕯️ ${hookText}`, Markup.inlineKeyboard([
+  const offers = suggestSpreads(uid, r.type);
+  await ctx.reply(L.reading.nextOffers, Markup.inlineKeyboard([
+    ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
     [Markup.button.switchToChat(L.buttons.share, '')],
   ]));
 
