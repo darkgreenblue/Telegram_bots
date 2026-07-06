@@ -12,6 +12,7 @@
 |------|------------|-------|
 | [`bots/voice2text`](bots/voice2text) | `voice2text` | ویس → متن (Gemini از طریق OpenRouter)، کیف‌پول و پرداخت |
 | [`bots/resume-tailor`](bots/resume-tailor) | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی |
+| [`bots/tarot`](bots/tarot) | `tarot` | فال تاروت فارسی — سفر مشتری تاروت‌خوان حرفه‌ای، کیف‌پول + کارت‌به‌کارت |
 
 ## ساختار
 ```
@@ -29,8 +30,8 @@ bots/<name>/           ← هر ربات: index.js, package.json, .env, data/
    { name: '<name>', cwd: 'bots/<name>', script: 'index.js' },
    ```
 3. نام ربات را به ماتریس `bot:` در `.github/workflows/ci.yml` اضافه کنید.
-4. در `deploy.yml` یک بلوک نصب/استارت مشابه `resume-tailor` اضافه کنید (با گارد وجود `.env`).
-5. روی VPS فایل `~/voice2text/bots/<name>/.env` را با توکن تلگرام و کلید OpenRouter **مخصوص همان ربات** بسازید.
+4. در `deploy.yml` یک بلوک نصب/استارت مشابه `resume-tailor`/`tarot` اضافه کنید (با گارد وجود `.env`).
+5. در گیت‌هاب دو Secret بسازید: `<NAME>_BOT_TOKEN` و `<NAME>_OPENROUTER_KEY`. `.env` روی سرور خودکار از روی همین Secrets ساخته می‌شود — نیازی به SSH یا دسترسی مستقیم به VPS نیست.
 
 ## دیپلوی
 - روی هر push به `main`، workflowِ `Deploy` با SSH به VPS متصل می‌شود، `git pull` می‌کند، وابستگی‌ها را per-bot نصب و با `pm2 startOrReload ecosystem.config.cjs` ربات‌ها را به‌روز می‌کند.

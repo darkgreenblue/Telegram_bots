@@ -50,9 +50,9 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 
 ## ۴ب) بررسی سلامت بعد از deploy و rollback
 بعد از merge، نتیجه‌ی workflowِ `Deploy` را در GitHub Actions ببین (لاگ SSH خطوط `✅ <bot> دیپلوی شد` را چاپ می‌کند). چون به VPS دسترسی نداری، برای تأیید نهایی از کاربر بخواه:
-- `pm2 ls` → هر دو ربات `online`.
+- `pm2 ls` → هر سه ربات (`voice2text`, `resume-tailor`, `tarot`) روی `online`.
 - `pm2 logs voice2text --lines 50` → بدون کرش‌لوپ.
-- یک تست واقعیِ voice2text (ارسال ویس) و یک `/start` روی resume-tailor.
+- یک تست واقعیِ voice2text (ارسال ویس)، یک `/start` روی resume-tailor، و یک `/start` + کارت روز روی tarot.
 
 **Rollback اگر voice2text بعد از یکپارچه‌سازی مشکل گرفت:** مقادیر درست را در Secrets اصلاح کن و یک کامیت خالی به `main` بزن (دیپلوی دوباره اجرا می‌شود). فایلِ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستیِ قبلی را نگه داشته (برای مقایسه/بازگردانی). برای rollbackِ کد: `git revert` کامیتِ مشکل‌دار و merge.
 
@@ -65,7 +65,7 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 
 ## ۶) محدودیت‌ها و نکات حیاتی
 - **voice2text نباید بشکند.** تنها نقطه‌ی حساس، اولین دیپلویِ مهاجرت است (root→`bots/voice2text`). امن شده: قبل از `mv data` پروسه `pm2 stop` می‌شود، بعد `delete` و استارت از `cwd` جدید. مهاجرت ایدمپوتنت است.
-- بعد از هر دیپلویِ حساس، با کاربر چک کن: `pm2 ls` هر دو `online`، و یک تست واقعی voice2text.
+- بعد از هر دیپلویِ حساس، با کاربر چک کن: `pm2 ls` همه‌ی ربات‌ها `online`، و یک تست واقعی voice2text.
 - secretها هرگز در گیت/کامیت/چت نروند. `.env`، `data/`، `node_modules/` در `.gitignore` هستند.
 
 ## ۶ب) دکمه‌ی «ریست تست» (قرارداد فاز تست — همه‌ی ربات‌ها)
