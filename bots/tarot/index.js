@@ -403,8 +403,9 @@ function mainKeyboard() {
 const prefetches = new Map(); // uid -> Promise<object|null> (فقط بهینه‌سازی؛ منبع حقیقت readings.llm_json)
 
 function buildReadingCtx(user, spread, question, cards) {
-  const prev = stmts.lastDelivered.all(user.telegram_id, 2)
-    .map(r => ({ 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
+  // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
+  const prev = stmts.lastDelivered.all(user.telegram_id, 4)
+    .map(r => ({ 'نوع فال': r.type, 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
   return {
     memory: user.memory_json || '',
     name: user.name || '',
@@ -1026,7 +1027,7 @@ async function finishReading(ctx, uid, readingId) {
   stmts.setReadingStatus.run('delivered', readingId);
   // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
   if (typeof llm.memory === 'string' && llm.memory.trim()) {
-    stmts.setMemory.run(llm.memory.trim().slice(0, 600), uid);
+    stmts.setMemory.run(llm.memory.trim().slice(0, 1200), uid);
   }
   setState(uid, 'idle');
   setSession(uid, null);
