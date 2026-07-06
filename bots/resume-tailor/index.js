@@ -16,11 +16,8 @@ import Database from 'better-sqlite3';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { RESUME_KNOWLEDGE } from './resume-knowledge.js';
-
-/* ===== 0) Logger ===== */
-function ts() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
-function log(...a)    { console.log(`[${ts()}]`,   ...a); }
-function logErr(...a) { console.error(`[${ts()}]`, ...a); }
+import { log, logErr } from '../../shared/logger.js';
+import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
 
 /* ===== 1) ENV ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -480,6 +477,9 @@ const HELP =
 /* ===== 11) Bot ===== */
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: OR_TIMEOUT_MS });
 
+// گارد خطای سراسری (بند ۸ CLAUDE.md): هیچ خطایی نباید بی‌صدا فلو را بکشد
+bot.catch(makeBotCatch({ getState }));
+
 // دکمه‌ی persistent «ریست» زیر محل تایپ (فاز تست)
 const RESET_BTN = '🔄 ریست ربات (تست)';
 const testKb = Markup.keyboard([[RESET_BTN]]).resize();
@@ -750,5 +750,6 @@ function launch() {
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 launch();
+registerGlobalErrorHandlers('resume-tailor');
 process.once('SIGINT',  () => { try { bot.stop('SIGINT'); } catch {} });
 process.once('SIGTERM', () => { try { bot.stop('SIGTERM'); } catch {} });
