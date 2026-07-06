@@ -1,0 +1,44 @@
+name: Fetch server logs
+
+# دیباگِ از راه دور: این workflow را دستی (یا با API توسط Claude) اجرا کن؛
+# روی سرور SSH می‌زند، وضعیتِ سرویس + آخرِ لاگ را می‌کشد و در خروجیِ همین job چاپ می‌کند.
+# چون Claude به لاگِ Actions دسترسی دارد، می‌تواند هر وقت لازم شد لاگِ سرور را بخواند —
+# بدون نیاز به SSHِ مستقیم (که از محیطِ Claude بسته است).
+
+on:
+  workflow_dispatch:
+    inputs:
+      lines:
+        description: "چند خطِ آخرِ لاگ tail شود"
+        required: false
+        default: "300"
+      grep:
+        description: "فیلترِ اختیاری (خالی = همه‌ی خطوط)"
+        required: false
+        default: ""
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tail logs over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          LINES: ${{ github.event.inputs.lines }}
+          PATTERN: ${{ github.event.inputs.grep }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: LINES,PATTERN
+          script: |
+            echo "===== systemctl status tabir-khab ====="
+            sudo systemctl status tabir-khab --no-pager -l | head -n 25 || true
+            echo
+            echo "===== last ${LINES} log lines (filter: '${PATTERN:-<none>}') ====="
+            LOG=/home/ubuntu/tabir_khab/logs/bot.log
+            if [ -n "${PATTERN}" ]; then
+              grep -F -- "${PATTERN}" "$LOG" | tail -n "${LINES}"
+            else
+              tail -n "${LINES}" "$LOG"
+            fi

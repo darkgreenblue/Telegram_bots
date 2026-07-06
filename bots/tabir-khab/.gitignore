@@ -1,0 +1,24 @@
+# --- محرمانه‌ها ---
+.env
+
+# --- پایتون ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- دیتابیس (per-server، نباید نسخه‌گذاری شود) ---
+*.db
+*.sqlite3
+
+# --- لاگ‌ها و خروجی‌های اجرا ---
+logs/
+*.log
+nohup.out
+
+# --- کش‌های زمانِ اجرا ---
+assets/fileids_*.json
+downloads/
+
+# --- سیستم ---
+.DS_Store
