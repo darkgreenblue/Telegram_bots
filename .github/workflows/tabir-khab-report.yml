@@ -1,0 +1,23 @@
+# داشبوردِ مدیریتیِ tabir-khab از راه دور: این workflow را دستی (یا با API توسط
+# Claude) اجرا کن؛ روی سرور SSH می‌زند، report.py را اجرا می‌کند و خروجی
+# (کاربرها/خواب‌ها/درآمد) را در لاگِ همین job چاپ می‌کند.
+# نکته: کدِ روی سرور با جاب deploy-tabir-khab (روی push به main) به‌روز می‌شود؛
+# اینجا git pull لازم نیست (مسیرِ سرور دیگر با git آپدیت نمی‌شود).
+name: Tabir-khab report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run admin report over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 185.204.171.170
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/tabir_khab
+            .venv/bin/python report.py

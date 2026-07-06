@@ -89,3 +89,38 @@ jobs:
             deploy_bot tarot
 
             pm2 save
+
+  # ---------- tabir-khab (استثنای مونوریپو: پایتون + systemd، نه pm2) ----------
+  # سرویس روی سرور همان‌جاست که همیشه بود: /home/ubuntu/tabir_khab با سرویسِ
+  # systemd به نام tabir-khab. این جاب فقط «محتوای» bots/tabir-khab را با
+  # git archive روی همان مسیر overlay می‌کند — .env و دیتابیس‌های SQLite و
+  # logs/ و .venv/ روی سرور دست‌نخورده می‌مانند — و بعد همان ری‌استارتِ
+  # همیشگی را می‌زند. جدا از جاب pm2 است تا خطای هرکدام به دیگری سرایت نکند.
+  deploy-tabir-khab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy tabir-khab (overlay + restart)
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
+          SSH="ssh -i $HOME/.ssh/deploy_key ubuntu@185.204.171.170"
+
+          # ۱) کد جدید را روی مسیر فعلی سرور overlay کن (فایل‌های untracked مثل .env/db دست نمی‌خورند)
+          git archive HEAD:bots/tabir-khab | $SSH 'mkdir -p /home/ubuntu/tabir_khab && tar -x -C /home/ubuntu/tabir_khab'
+
+          # ۲) وابستگی‌ها + ری‌استارت + چک سلامت (همان دستورهای دیپلوی قبلیِ این ربات)
+          $SSH 'set -e
+            cd /home/ubuntu/tabir_khab
+            which ffmpeg >/dev/null || sudo apt-get install -y -q ffmpeg < /dev/null
+            .venv/bin/pip install -q -r requirements.txt
+            sudo systemctl restart tabir-khab
+            sleep 2
+            sudo systemctl is-active tabir-khab
+            echo "✅ tabir-khab دیپلوی شد"'

@@ -26,3 +26,22 @@ jobs:
 
       - name: Syntax check
         run: node --check bots/${{ matrix.bot }}/index.js
+
+  # tabir-khab پایتونی است (استثنای مونوریپو) — جدا از ماتریس Node چک می‌شود
+  check-tabir-khab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: bots/tabir-khab/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r bots/tabir-khab/requirements.txt
+
+      - name: Syntax check
+        run: python -m compileall -q bots/tabir-khab
