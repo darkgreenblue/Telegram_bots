@@ -666,6 +666,12 @@ async function maybeWarnLowBalance(ctx) {
 // handlerTimeout: Infinity → پردازش فایل‌های طولانی (چند دقیقه‌ای) قطع نشود
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: Infinity });
 
+// گارد خطای سراسری (بند ۸ CLAUDE.md): هیچ خطایی نباید بی‌صدا فلو را بکشد یا پروسه را کرش دهد
+bot.catch(async (err, ctx) => {
+  logErr(`❌ GLOBAL [${ctx.updateType}] uid=${ctx.from?.id}:`, err.stack || err.message);
+  try { await ctx.reply('😕 خطای غیرمنتظره‌ای رخ داد. لطفاً دوباره تلاش کن.'); } catch {}
+});
+
 const sessions    = new Map(); // token → voice session
 const userStates  = new Map(); // userId → { step, paymentId, ... }
 const adminStates = new Map(); // adminId → { step, partial, ... }
@@ -2676,6 +2682,16 @@ function launch() {
     });
 }
 launch();
+
+// خطاهای سطح پروسه (بند ۸ CLAUDE.md): rejection بی‌صاحب فقط لاگ می‌شود (کرش = ازدست‌رفتن همه‌ی
+// سشن‌های در جریان)؛ exception واقعی با stack کامل لاگ و بعد خارج می‌شود تا pm2 ری‌استارت کند.
+process.on('unhandledRejection', (reason) => {
+  logErr('❌ UNHANDLED_REJECTION [voice2text]:', reason?.stack || reason);
+});
+process.on('uncaughtException', (err) => {
+  logErr('❌ UNCAUGHT_EXCEPTION [voice2text] — exiting for pm2 restart:', err.stack || err.message);
+  process.exit(1);
+});
 
 process.once('SIGINT',  () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

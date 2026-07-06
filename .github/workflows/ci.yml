@@ -27,6 +27,18 @@ jobs:
       - name: Syntax check
         run: node --check bots/${{ matrix.bot }}/index.js
 
+      # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
+      # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
+      - name: Boot smoke test
+        run: |
+          cd bots/${{ matrix.bot }}
+          set +e
+          OUT=$(BOT_TOKEN= OPENROUTER_API_KEY= node index.js 2>&1); CODE=$?
+          set -e
+          echo "$OUT"
+          [ "$CODE" = "1" ] || { echo "❌ انتظار exit=1 بود، شد $CODE"; exit 1; }
+          echo "$OUT" | grep -q "خالی است" || { echo "❌ پیام گارد ENV دیده نشد"; exit 1; }
+
   # tabir-khab پایتونی است (استثنای مونوریپو) — جدا از ماتریس Node چک می‌شود
   check-tabir-khab:
     runs-on: ubuntu-latest

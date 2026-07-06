@@ -19,11 +19,8 @@ import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
 import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
-
-/* ===== 0) Logger ===== */
-function ts() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
-function log(...a)    { console.log(`[${ts()}]`,   ...a); }
-function logErr(...a) { console.error(`[${ts()}]`, ...a); }
+import { log, logErr } from '../../shared/logger.js';
+import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -1448,5 +1445,6 @@ function launch() {
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
 launch();
+registerGlobalErrorHandlers('tarot');
 process.once('SIGINT',  () => { try { bot.stop('SIGINT'); } catch {} });
 process.once('SIGTERM', () => { try { bot.stop('SIGTERM'); } catch {} });

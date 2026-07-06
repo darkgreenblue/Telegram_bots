@@ -12,15 +12,19 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check]
+        options: [status, logs, errors, restart, env-check, db-query]
       app:
-        description: 'نام اپ pm2 (برای logs/errors/restart) مثل tarot'
+        description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
         default: ''
       lines:
         description: 'تعداد خطوط لاگ'
         required: false
         default: '100'
+      query:
+        description: 'کوئری SQL فقط-خواندنی (برای db-query) — مثل SELECT count(*) FROM users'
+        required: false
+        default: ''
 
 jobs:
   ops:
@@ -32,11 +36,12 @@ jobs:
           OPS_ACTION: ${{ inputs.action }}
           OPS_APP:    ${{ inputs.app }}
           OPS_LINES:  ${{ inputs.lines }}
+          OPS_QUERY:  ${{ inputs.query }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: OPS_ACTION,OPS_APP,OPS_LINES
+          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY
           script: |
             set -e
             cd ~/voice2text
@@ -57,6 +62,13 @@ jobs:
                     'uptime_min=' + Math.round((Date.now() - p.pm2_env.pm_uptime) / 60000),
                     'mem_mb=' + Math.round((p.monit?.memory || 0) / 1048576)
                   );"
+                echo
+                # آیا بعد از reboot سرور، pm2 خودکار بالا می‌آید؟
+                if systemctl list-unit-files 2>/dev/null | grep -q '^pm2-ubuntu'; then
+                  echo "pm2 startup: ✅ $(systemctl is-enabled pm2-ubuntu 2>/dev/null || echo '?')"
+                else
+                  echo "pm2 startup: ❌ تنظیم نشده — بعد از reboot سرور ربات‌ها خودکار بالا نمی‌آیند (فیکس: pm2 startup + دستور چاپ‌شده + pm2 save)"
+                fi
                 ;;
               logs)
                 [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
@@ -86,5 +98,27 @@ jobs:
                   n=$(basename "$d")
                   [ -f "$d/.env" ] && echo "$n: .env ✅" || echo "$n: .env ❌"
                 done
+                ;;
+              db-query)
+                # کوئری فقط-خواندنی روی SQLite همان ربات (اتصال readonly — نوشتن در سطح SQLite رد می‌شود)
+                [ -n "$OPS_APP" ]   || { echo "❌ app لازم است"; exit 1; }
+                [ -n "$OPS_QUERY" ] || { echo "❌ query لازم است"; exit 1; }
+                cd "bots/$OPS_APP"
+                DBFILE=$(ls data/*.db 2>/dev/null | head -1)
+                [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
+                echo "===== db-query روی $OPS_APP/$DBFILE ====="
+                DBFILE="$DBFILE" node -e "
+                  const path = require('path');
+                  const D = require(path.join(process.cwd(), 'node_modules', 'better-sqlite3'));
+                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
+                  const stmt = db.prepare(process.env.OPS_QUERY);
+                  if (stmt.reader) {
+                    const rows = stmt.all();
+                    console.log(JSON.stringify(rows.slice(0, 200), null, 1));
+                    console.log('--- rows: ' + rows.length + (rows.length > 200 ? ' (فقط ۲۰۰ ردیف اول چاپ شد)' : ''));
+                  } else {
+                    console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
+                  }
+                "
                 ;;
             esac
