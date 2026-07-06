@@ -19,7 +19,7 @@ export default {
     showNarrative: 'پیوند کارت‌ها رو ببینم 🧵',
     openCards: (price) => `🔮 باز کردن کارت‌ها (${fmt(price)} تومان از کیف‌پول)`,
     recharge: '➕ افزایش موجودی',
-    rechargeAmount: (a) => `${fmt(a)} تومان`,
+    rechargeAmount: (a, bonus) => bonus ? `${fmt(a)} تومان (+${fmt(bonus)} هدیه 🎁)` : `${fmt(a)} تومان`,
     customAmount: '✏️ مبلغ دلخواه',
     discountHave: '🎟️ کد تخفیف دارم',
     cancel: '❌ انصراف',
@@ -67,12 +67,16 @@ export default {
     drawing: 'چشم‌هات رو یه لحظه ببند... دارم برات یه کارت از دک می‌کشم 🌬️',
     caption: (card, reversed) => `🎴 کارت امروز تو:\n«${card.fa}»${reversed ? ' 🔃 (معکوس)' : ''}\n\nروی تصویر بزن تا کارت برگرده ✨`,
     alreadyUsed: 'کارت امروزت رو گرفتی 🌙 هر روز فقط یک کارت — فردا دوباره منتظرتم.\n\nولی اگه ذهنت درگیره و می‌خوای عمیق‌تر ببینیم، یه فال کامل چیز دیگه‌ایه:',
+    streak: (n) => `🔥 ${fmt(n)} روز پیاپی! هر روز که میای، پیوندت با کارت‌ها عمیق‌تر می‌شه.`,
+    streakReward: (amount) => `🎁 جایزه‌ی ۷ روز همراهی: ${fmt(amount)} تومان به کیف‌پولت اضافه شد!`,
     upsell: 'این فقط یک کارت بود — یک تیکه از پازل.\nبرای دیدن کلِ مسیر (ریشه‌ی ماجرا، انرژی الان، و جهت پیش رو):',
   },
 
   reading: {
     catalog: 'کدوم خوانش به دلت می‌شینه؟ 🔮\n\nهر کدوم یک نگاه متفاوت به ماجرای توئه:',
-    spreadLine: (s) => `${s.emoji} ${s.fa}\n${s.desc}`,
+    spreadLine: (s, badge) => `${s.emoji} ${s.fa}${badge ? ` — ${badge}` : ''}\n${s.desc}`,
+    badges: { three: '🔥 محبوب‌ترین', celtic: '💎 کامل‌ترین' },
+    atmosphereShort: 'دریافت شد 🤲 فضامون آماده‌ست — می‌شناسمت دیگه، پس بریم سراغ کارت‌ها.',
     confirmFocus: (focusFa) => `این خوانش حول «${focusFa}» باشه یا موضوع دیگه‌ای تو ذهنته؟`,
     keepFocus: (focusFa) => `همین «${focusFa}» ✅`,
     askQuestion: () =>
@@ -141,7 +145,8 @@ export default {
     badDiscount: 'این کد معتبر نیست یا منقضی شده 🙏',
     freeApproved: '🎉 با این کد، شارژت رایگان تأیید شد!',
     receiptReceived: 'رسیدت رسید ✅ به‌محض تأیید (معمولاً خیلی سریع) خبرت می‌کنم.',
-    approved: (amount, balance) => `✅ شارژ ${fmt(amount)} تومانی تأیید شد!\nموجودی جدید: ${fmt(balance)} تومان`,
+    approved: (amount, balance, bonus) =>
+      `✅ شارژ ${fmt(amount)} تومانی تأیید شد!${bonus ? `\n🎁 + ${fmt(bonus)} تومان هدیه‌ی شارژ` : ''}\nموجودی جدید: ${fmt(balance)} تومان`,
     rejected: 'متأسفانه رسیدت تأیید نشد ❌ اگه فکر می‌کنی اشتباهی شده، دوباره رسید درست رو بفرست.',
     adminNotify: (p, user) =>
       `💳 پرداخت جدید #${p.id}\nکاربر: ${user.name} (@${user.username || '-'}) [${p.user_id}]\nمبلغ: ${fmt(p.amount)} تومان${p.original_amount && p.original_amount !== p.amount ? ` (اصل: ${fmt(p.original_amount)})` : ''}`,
