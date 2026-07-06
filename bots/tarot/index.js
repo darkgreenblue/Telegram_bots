@@ -336,7 +336,7 @@ async function replyLong(ctx, text, extra) {
 // ارسال عکس کارت با کش file_id (اولین بار از فایل، بعد از آن از file_id تلگرام)
 async function sendCardPhoto(ctx, cardKey, caption, { spoiler = true } = {}) {
   const cached = stmts.getCardFile.get(cardKey)?.file_id;
-  const media = cached || { source: `./assets/cards/${cardKey === 'back' ? 'back' : CARD_BY_KEY[cardKey].file}` };
+  const media = cached || { source: `./assets/cards/${cardKey === 'back' ? 'back.jpg' : CARD_BY_KEY[cardKey].file}` };
   const msg = await ctx.replyWithPhoto(media, { caption, has_spoiler: spoiler });
   if (!cached) {
     const fid = msg.photo?.[msg.photo.length - 1]?.file_id;
@@ -428,6 +428,12 @@ async function awaitReadingLLM(uid, readingId) {
 /* ===== 8) Bot ===== */
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: OR_TIMEOUT_MS });
 let BOT_USERNAME = '';
+
+// گارد خطای سراسری: هیچ خطایی نباید بی‌صدا فلو را بکشد — لاگ کامل + پیام عذرخواهی به کاربر
+bot.catch(async (err, ctx) => {
+  logErr(`global error [${ctx.updateType}] uid=${ctx.from?.id} state=${ctx.from ? getState(ctx.from.id) : '-'}:`, err.stack || err.message);
+  try { await ctx.reply(L.errors.generic); } catch {}
+});
 
 /* ---------- آنبوردینگ و /start ---------- */
 async function handleStart(ctx) {

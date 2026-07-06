@@ -1,0 +1,66 @@
+# Health — پایش خودکار سلامت ربات‌ها روی VPS، هر ۳۰ دقیقه.
+# اگر رباتی offline/errored باشد یا در کرش‌لوپ افتاده باشد، جاب قرمز می‌شود،
+# آخرین خطوط error-log همان ربات در لاگ چاپ می‌شود و یک GitHub Issue
+# ساخته/به‌روزرسانی می‌شود تا مشکل حتی وقتی کسی آنلاین نیست ثبت شود.
+name: Health
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check bot health on VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 185.204.171.170
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/voice2text
+            UNHEALTHY=$(pm2 jlist | node -e "
+              const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              const bad = a.filter(p =>
+                p.pm2_env.status !== 'online' ||
+                // کرش‌لوپ: بالا آمده ولی در ۱۰ دقیقه‌ی اخیر و با ری‌استارت زیاد
+                ((Date.now() - p.pm2_env.pm_uptime) < 10 * 60000 && p.pm2_env.restart_time > 5)
+              );
+              for (const p of bad) console.log(p.name + ' status=' + p.pm2_env.status + ' restarts=' + p.pm2_env.restart_time);
+            ")
+            if [ -n "$UNHEALTHY" ]; then
+              echo "🚨 ربات(های) ناسالم:"
+              echo "$UNHEALTHY"
+              echo "$UNHEALTHY" | awk '{print $1}' | while read -r app; do
+                echo "===== $app — error.log (آخرین ۴۰ خط) ====="
+                tail -n 40 ~/.pm2/logs/"$app"-error.log 2>/dev/null || echo "(خالی)"
+                echo "===== $app — out.log (آخرین ۲۰ خط) ====="
+                tail -n 20 ~/.pm2/logs/"$app"-out.log 2>/dev/null || echo "(خالی)"
+              done
+              exit 1
+            fi
+            echo "✅ همه‌ی ربات‌ها online"
+
+      - name: Create or update alert issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="🚨 Health check failed — یک یا چند ربات ناسالم است"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          body="پایش خودکار سلامت شکست خورد. لاگ خطای ربات(های) ناسالم در خودِ همین run چاپ شده:
+          $run_url
+
+          برای دیباگ: workflow «Ops» را با action=logs و نام ربات اجرا کن (یا به Claude Code بگو)."
+          existing=$(gh issue list --repo "${{ github.repository }}" --state open --search "in:title Health check failed" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$title" --body "$body"
+          fi
