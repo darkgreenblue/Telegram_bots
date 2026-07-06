@@ -5,5 +5,6 @@ module.exports = {
   apps: [
     { name: 'voice2text',    cwd: 'bots/voice2text',    script: 'index.js' },
     { name: 'resume-tailor', cwd: 'bots/resume-tailor',  script: 'index.js' },
+    { name: 'tarot',         cwd: 'bots/tarot',          script: 'index.js' },
   ],
 };

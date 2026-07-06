@@ -10,8 +10,11 @@
 |------|-----------|-----|--------|
 | `bots/voice2text` | `voice2text` | ویس→متن (Gemini از OpenRouter)، کیف‌پول/پرداخت، SQLite، long-polling | **زنده و درآمدزا — هرگز نباید بشکند** |
 | `bots/resume-tailor` | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی | در حال راه‌اندازی |
+| `bots/tarot` | `tarot` | فال تاروت فارسی — بازسازی سفر مشتری تاروت‌خوان حرفه‌ای؛ کیف‌پول + کارت‌به‌کارت، رفرال، milestone | در حال راه‌اندازی |
 
-مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`.
+مدل‌ها (همه از طریق **OpenRouter**): ویس→متن = `google/gemini-2.5-flash`؛ کارهای دقیق (تولید رزومه) = `google/gemini-2.5-pro`؛ مغز فال تاروت = `google/gemini-2.5-flash`.
+
+نکته‌ی tarot: چندزبانه‌ی آماده — همه‌ی متن‌ها/پرامپت‌ها در `bots/tarot/locales/<LOCALE>.js`؛ هر زبان بعداً یک اپ pm2 جدا از همان پوشه با `ENV_FILE` و `LOCALE` خودش (دیتابیس جدا: `data/bot-<LOCALE>.db`). تصاویر ۷۹گانه‌ی دک RWS (public domain) در `assets/cards/` کامیت شده‌اند.
 
 ## ۳) زیرساخت استقرار (مهم)
 - **VPS:** host `185.204.171.170`، کاربر `ubuntu`، مسیر کلون `~/voice2text` (نامش تاریخی است؛ همین مونوریپوست). اجرا با **PM2**، Node 20.
@@ -33,6 +36,8 @@ Secretهای فعلی/موردانتظار (در `Settings → Secrets and varia
 | `VOICE2TEXT_BOT_TOKEN` *(اختیاری)* | برای یکپارچه‌کردن voice2text؛ تا ست نشود، از `.env` روی سرور استفاده می‌شود |
 | `VOICE2TEXT_OPENROUTER_KEY` *(اختیاری)* | همان |
 | `VOICE2TEXT_NOTION_TOKEN` *(اختیاری)* | NOTION_TOKEN ربات voice2text |
+| `TAROT_BOT_TOKEN` | توکن تلگرام tarot (از BotFather؛ روی همین ربات `/setinline` هم فعال شود — لازمه‌ی دکمه‌ی دعوت) |
+| `TAROT_OPENROUTER_KEY` | کلید OpenRouter ربات tarot |
 
 **قاعده‌ی غیرمخرب:** deploy فقط وقتی توکنِ یک ربات در Secrets ست شده باشد `.env` آن را می‌نویسد؛ در غیر این صورت `.env` موجود روی سرور دست‌نخورده می‌ماند. به همین دلیل voice2text تا قبل از ست‌شدن secretهایش دقیقاً مثل قبل کار می‌کند.
 

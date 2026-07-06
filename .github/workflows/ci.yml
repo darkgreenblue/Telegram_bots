@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        bot: [voice2text, resume-tailor]
+        bot: [voice2text, resume-tailor, tarot]
     steps:
       - uses: actions/checkout@v4
 
