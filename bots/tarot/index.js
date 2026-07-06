@@ -149,7 +149,17 @@ db.exec(`
     file_id    TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS daily_texts (
+    card_key   TEXT    NOT NULL,
+    reversed   INTEGER NOT NULL,
+    focus      TEXT    NOT NULL,
+    text       TEXT    NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (card_key, reversed, focus)
+  );
 `);
+// migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
+try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -208,6 +218,9 @@ const stmts = {
   getReferralByReferee: db.prepare('SELECT * FROM referrals WHERE referee_id=?'),
   setReferralRewarded:  db.prepare('UPDATE referrals SET rewarded=1 WHERE id=?'),
 
+  setMemory: db.prepare('UPDATE users SET memory_json=? WHERE telegram_id=?'),
+  getDailyText: db.prepare('SELECT text FROM daily_texts WHERE card_key=? AND reversed=? AND focus=?'),
+  setDailyText: db.prepare('INSERT OR REPLACE INTO daily_texts (card_key, reversed, focus, text) VALUES (?,?,?,?)'),
   getCardFile: db.prepare('SELECT file_id FROM card_files WHERE card_key=?'),
   setCardFile: db.prepare('INSERT INTO card_files (card_key, file_id, updated_at) VALUES (?,?,unixepoch()) ON CONFLICT(card_key) DO UPDATE SET file_id=excluded.file_id, updated_at=unixepoch()'),
 };
@@ -385,6 +398,7 @@ function buildReadingCtx(user, spread, question, cards) {
   const prev = stmts.lastDelivered.all(user.telegram_id, 2)
     .map(r => ({ 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
   return {
+    memory: user.memory_json || '',
     name: user.name || '',
     focusFa: L.focusFa[user.focus_area] || user.focus_area || '-',
     question,
@@ -540,11 +554,19 @@ async function dailyCard(ctx) {
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
   const info = CARD_BY_KEY[card.key];
 
-  // فراخوانی LLM همین حالا فایر می‌شود و با مکث‌های فضاسازی هم‌پوشان است (۲×Flash → ۱×فالبک)
-  const llmP = orChatResilient(L.prompts.dailySystem, L.prompts.dailyContext({
-    name: user.name, focusFa: L.focusFa[user.focus_area] || '-', card: info, reversed: card.reversed,
-  }), { maxTokens: DAILY.maxTokens }, [FLASH, FLASH, FALLBACK_MODEL])
-    .then(r => r?.out || null).catch(e => { logErr('daily LLM:', e.message); return null; });
+  // کش دائمی تفسیر روزانه بر اساس (کارت × جهت × حوزه‌ی تمرکز):
+  // حداکثر ۷۸×۲×۵ ترکیب در کل عمر ربات → هزینه‌ی LLM کارت روز در هر مقیاسی تقریباً صفر می‌ماند.
+  const focusKey = user.focus_area || '-';
+  const cached = stmts.getDailyText.get(card.key, card.reversed ? 1 : 0, focusKey)?.text;
+  const llmP = cached
+    ? Promise.resolve(cached)
+    : orChatResilient(L.prompts.dailySystem, L.prompts.dailyContext({
+        focusFa: L.focusFa[user.focus_area] || '-', card: info, reversed: card.reversed,
+      }), { maxTokens: DAILY.maxTokens }, [FLASH, FLASH, FALLBACK_MODEL])
+        .then(r => {
+          if (r?.out) stmts.setDailyText.run(card.key, card.reversed ? 1 : 0, focusKey, r.out);
+          return r?.out || null;
+        }).catch(e => { logErr('daily LLM:', e.message); return null; });
 
   await typing(ctx, PACE_M);
   await ctx.reply(L.daily.drawing);
@@ -975,6 +997,10 @@ async function finishReading(ctx, uid, readingId) {
   await ctx.reply(L.reading.empowerClose);
 
   stmts.setReadingStatus.run('delivered', readingId);
+  // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
+  if (typeof llm.memory === 'string' && llm.memory.trim()) {
+    stmts.setMemory.run(llm.memory.trim().slice(0, 600), uid);
+  }
   setState(uid, 'idle');
   setSession(uid, null);
 
