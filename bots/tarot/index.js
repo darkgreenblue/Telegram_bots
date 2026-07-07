@@ -58,7 +58,9 @@ const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus ||
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
-const DAILY_CODE = { percent: 20, cap: 100_000 }; // کد شخصی بعد از اولین کارت روز؛ بدون انقضا، یادآوری بعد از هر کارت روز تا مصرف
+// هدیه‌ی اولین اقدام به شارژ: خودکار (بدون کد) روی اولین شارژ موفق هر کاربر اعمال می‌شود؛
+// بعد از اولین approve دیگر نشان داده/اعمال نمی‌شود (hasRecharged).
+const FIRST_RECHARGE_DISCOUNT = { percent: 35, cap: 100_000 };
 const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
@@ -215,8 +217,8 @@ const stmts = {
   getDiscountCode:     db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:     db.prepare('SELECT * FROM discount_codes WHERE id=?'),
   insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
-  getPersonalCode:     db.prepare('SELECT * FROM discount_codes WHERE only_user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
+  countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -242,6 +244,7 @@ const getUser  = (uid) => stmts.getUser.get(uid);
 const getState = (uid) => getUser(uid)?.state || 'new';
 const setState = (uid, s) => stmts.setState.run(s, uid);
 const getBalance = (uid) => getUser(uid)?.balance || 0;
+const hasRecharged = (uid) => stmts.countApprovedPayments.get(uid).c > 0;
 
 function getSession(uid) {
   const raw = getUser(uid)?.session_json;
@@ -464,7 +467,6 @@ async function awaitReadingLLM(uid, readingId) {
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
   const p = prefetches.get(uid);
   const result = p ? await p : await callReadingLLM(readingId);
-  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
@@ -541,8 +543,8 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'idle');
     // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
+      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
     ]));
   } else {
     // تغییر تمرکز وسط فلوی فال
@@ -606,24 +608,6 @@ async function dailyCard(ctx) {
   await ctx.reply(L.daily.upsell, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
   ]));
-
-  // کد تخفیف شخصی: بعد از اولین کارت روز صادر می‌شود (۲۰٪ تا سقف ۱۰۰ هزار تومان، بدون انقضا)
-  // و تا وقتی مصرف نشده، بعد از هر کارت روز یادآوری می‌شود.
-  try {
-    const existing = stmts.getPersonalCode.get(uid);
-    if (!existing) {
-      const code = `TAR${uid.toString(36).toUpperCase()}`;
-      stmts.insertDiscountCode.run(code, DAILY_CODE.percent, DAILY_CODE.cap, null, 1, uid, 0);
-      await sleep(PACE_S);
-      await ctx.reply(L.daily.codeGrant(code, DAILY_CODE.percent, DAILY_CODE.cap), { parse_mode: 'Markdown' });
-    } else {
-      const used = stmts.getUserDiscountUses.get(existing.id, uid).c + stmts.countPendingDiscount.get(existing.id, uid).c;
-      if (used < existing.max_uses_per_user) {
-        await sleep(PACE_S);
-        await ctx.reply(L.daily.codeRemind(existing.code, existing.discount_percent, existing.max_discount_amount), { parse_mode: 'Markdown' });
-      }
-    }
-  } catch (e) { logErr('daily code:', e.message); }
 }
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
@@ -821,7 +805,7 @@ async function finishPicking(ctx, uid, s) {
   } else {
     await ctx.reply(L.reading.paywall(spread.price));
     await sleep(PACE_S);
-    await ctx.reply(L.reading.paywallShort(spread.price, balance), Markup.inlineKeyboard([
+    await ctx.reply(L.reading.paywallShort(spread.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
@@ -834,7 +818,6 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const readingId = parseInt(ctx.match[1], 10);
   const r = stmts.getReading.get(readingId);
   if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', readingId);
-  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
   setState(uid, 'idle');
   setSession(uid, null);
@@ -854,7 +837,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid)), Markup.inlineKeyboard([
+      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.recharge, 'recharge')],
       ]));
     }
@@ -918,7 +901,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid)), Markup.inlineKeyboard([
+      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.recharge, 'recharge')],
       ]));
     }
@@ -1169,8 +1152,19 @@ async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
   stmts.setPaymentAmount.run(amount, 'receipt', s.paymentId);
+
+  // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
+  // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
+  let payAmount = amount;
+  if (!hasRecharged(uid)) {
+    const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
+    payAmount = Math.max(0, amount - disc);
+    stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
+    await ctx.reply(L.wallet.firstDiscountApplied(amount, payAmount, FIRST_RECHARGE_DISCOUNT.percent), { parse_mode: 'Markdown' });
+  }
+
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoice(amount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.discountHave, `disc:${s.paymentId}`)],
@@ -1289,7 +1283,7 @@ async function offerPendingReading(ctx, uid) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(L.reading.paywallShort(r.price, balance), Markup.inlineKeyboard([
+    await ctx.reply(L.reading.paywallShort(r.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
