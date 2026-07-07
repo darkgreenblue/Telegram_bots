@@ -500,8 +500,8 @@ async function handleStart(ctx) {
   if (!user.welcomed) {
     stmts.setWelcomed.run(uid);
     stmts.credit.run(WELCOME_GIFT, uid);
-    if (refBonus) stmts.credit.run(REFERRAL_BONUS, uid);
     await ctx.reply(L.onboarding.welcome(ctx.from.first_name, WELCOME_GIFT), mainKeyboard());
+    // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
     if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
     await typing(ctx, PACE_S);
     setState(uid, 'onboard_focus');
@@ -1051,12 +1051,15 @@ async function finishReading(ctx, uid, readingId) {
   setState(uid, 'idle');
   setSession(uid, null);
 
-  // پاداش رفرال: بعد از اولین فال کاملِ دعوت‌شده، دعوت‌کننده هم هدیه می‌گیرد
+  // پاداش رفرال: فقط بعد از اولین فال کاملِ دعوت‌شده (نه لحظه‌ی ورود) —
+  // هر دو طرف واریز و به هر دو اطلاع داده می‌شود
   try {
     const ref = stmts.getReferralByReferee.get(uid);
     if (ref && !ref.rewarded && stmts.countDelivered.get(uid).c === 1) {
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(REFERRAL_BONUS, ref.referrer_id);
+      stmts.credit.run(REFERRAL_BONUS, uid);
+      await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
       const referee = getUser(uid);
       await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(referee?.name, REFERRAL_BONUS)).catch(() => {});
     }
@@ -1079,10 +1082,11 @@ async function finishReading(ctx, uid, readingId) {
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   const offers = suggestSpreads(uid, r.type);
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.reading.nextOffers, Markup.inlineKeyboard([
     ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
     [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
-    [Markup.button.switchToChat(L.buttons.share, '')],
+    [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
   ]));
 
   // کد تخفیف شخصی بعد از اولین فال کامل (کاربر ارزش را چشیده — بهترین لحظه‌ی آفر خوانش دوم)
@@ -1109,6 +1113,13 @@ async function showWallet(ctx) {
 }
 bot.hears(L.buttons.wallet, showWallet);
 
+// لینک اشتراک‌گذاری استاندارد تلگرام: با یک تاچ، پیام آماده + لینک دعوت در چت انتخابی گذاشته می‌شود.
+// (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)
+function shareUrlFor(uid) {
+  const link = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
+  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText())}`;
+}
+
 // دعوت دوستان از کیبورد اصلی: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان
 bot.hears(L.buttons.inviteMain, async (ctx) => {
   const uid = ctx.from.id;
@@ -1116,7 +1127,7 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
     parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([[Markup.button.switchToChat(L.buttons.share, '')]]).reply_markup,
+    reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share, shareUrlFor(uid))]]).reply_markup,
   });
 });
 
