@@ -50,8 +50,7 @@ const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
 
-const WELCOME_GIFT     = 30_000;  // دقیقاً قیمت فال سه‌کارتی — «فال اول مهمان ما»
-const MIN_RECHARGE     = 50_000;
+// هدیه‌ی خوش‌آمد حذف شد: مسیر رایگان فقط «کارت روز» است؛ حداقل مبلغ شارژ هم نداریم
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
 // هدیه‌ی شارژ (ARPU بالاتر): مبلغ‌های بزرگ‌تر، هدیه‌ی بیشتر — از بزرگ به کوچک چک می‌شود
 const RECHARGE_BONUS   = [{ min: 200_000, bonus: 30_000 }, { min: 100_000, bonus: 10_000 }];
@@ -59,7 +58,7 @@ const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus ||
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
-const FIRST_PAID_DISCOUNT = { percent: 20, hours: 72 };
+const DAILY_CODE = { percent: 20, cap: 100_000 }; // کد شخصی بعد از اولین کارت روز؛ بدون انقضا، یادآوری بعد از هر کارت روز تا مصرف
 const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
@@ -164,6 +163,8 @@ db.exec(`
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
+try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -213,7 +214,8 @@ const stmts = {
 
   getDiscountCode:     db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:     db.prepare('SELECT * FROM discount_codes WHERE id=?'),
-  insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?)'),
+  insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
+  getPersonalCode:     db.prepare('SELECT * FROM discount_codes WHERE only_user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
@@ -254,6 +256,7 @@ function wipeUser(uid) {
   for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
+  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
 }
 
@@ -461,6 +464,7 @@ async function awaitReadingLLM(uid, readingId) {
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
   const p = prefetches.get(uid);
   const result = p ? await p : await callReadingLLM(readingId);
+  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
@@ -499,8 +503,7 @@ async function handleStart(ctx) {
 
   if (!user.welcomed) {
     stmts.setWelcomed.run(uid);
-    stmts.credit.run(WELCOME_GIFT, uid);
-    await ctx.reply(L.onboarding.welcome(ctx.from.first_name, WELCOME_GIFT), mainKeyboard());
+    await ctx.reply(L.onboarding.welcome(ctx.from.first_name), mainKeyboard());
     // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
     if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
     await typing(ctx, PACE_S);
@@ -600,11 +603,27 @@ async function dailyCard(ctx) {
     }
   }
   await sleep(PACE_M);
-  const paidCount = stmts.countPaidDelivered.get(uid).c;
-  const canGift = getBalance(uid) >= SPREAD_BY_ID.three.price && paidCount === 0;
   await ctx.reply(L.daily.upsell, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
   ]));
+
+  // کد تخفیف شخصی: بعد از اولین کارت روز صادر می‌شود (۲۰٪ تا سقف ۱۰۰ هزار تومان، بدون انقضا)
+  // و تا وقتی مصرف نشده، بعد از هر کارت روز یادآوری می‌شود.
+  try {
+    const existing = stmts.getPersonalCode.get(uid);
+    if (!existing) {
+      const code = `TAR${uid.toString(36).toUpperCase()}`;
+      stmts.insertDiscountCode.run(code, DAILY_CODE.percent, DAILY_CODE.cap, null, 1, uid, 0);
+      await sleep(PACE_S);
+      await ctx.reply(L.daily.codeGrant(code, DAILY_CODE.percent, DAILY_CODE.cap), { parse_mode: 'Markdown' });
+    } else {
+      const used = stmts.getUserDiscountUses.get(existing.id, uid).c + stmts.countPendingDiscount.get(existing.id, uid).c;
+      if (used < existing.max_uses_per_user) {
+        await sleep(PACE_S);
+        await ctx.reply(L.daily.codeRemind(existing.code, existing.discount_percent, existing.max_discount_amount), { parse_mode: 'Markdown' });
+      }
+    }
+  } catch (e) { logErr('daily code:', e.message); }
 }
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
@@ -815,6 +834,7 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const readingId = parseInt(ctx.match[1], 10);
   const r = stmts.getReading.get(readingId);
   if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', readingId);
+  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
   setState(uid, 'idle');
   setSession(uid, null);
@@ -1089,17 +1109,6 @@ async function finishReading(ctx, uid, readingId) {
     [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
   ]));
 
-  // کد تخفیف شخصی بعد از اولین فال کامل (کاربر ارزش را چشیده — بهترین لحظه‌ی آفر خوانش دوم)
-  try {
-    const paidCount = stmts.countPaidDelivered.get(uid).c;
-    if (r.price > 0 && paidCount === 1) {
-      const code = `TAR${String(readingId).padStart(4, '0')}${Math.abs(seedToInt(r.seed) % 100)}`;
-      stmts.insertDiscountCode.run(code, FIRST_PAID_DISCOUNT.percent,
-        Math.floor(Date.now() / 1000) + FIRST_PAID_DISCOUNT.hours * 3600, 1, uid, 0);
-      await sleep(PACE_S);
-      await ctx.reply(L.reading.firstPaidGift(code, FIRST_PAID_DISCOUNT.percent, FIRST_PAID_DISCOUNT.hours), { parse_mode: 'Markdown' });
-    }
-  } catch (e) { logErr('first-paid gift:', e.message); }
 
 }
 
@@ -1145,11 +1154,11 @@ bot.action('recharge', async (ctx) => {
     const r = stmts.getReading.get(s.readingId);
     if (r && r.status === 'pending_payment') {
       const shortfall = Math.max(r.price - getBalance(uid), 0);
-      const suggested = Math.max(MIN_RECHARGE, Math.ceil(shortfall / 10000) * 10000);
+      const suggested = Math.max(Math.ceil(shortfall / 1000) * 1000, 1000);
       amounts = [...new Set([suggested, ...QUICK_AMOUNTS])].sort((a, b) => a - b).slice(0, 4);
     }
   }
-  await ctx.reply(L.wallet.askAmount(MIN_RECHARGE), Markup.inlineKeyboard([
+  await ctx.reply(L.wallet.askAmount(), Markup.inlineKeyboard([
     ...amounts.map(a => [Markup.button.callback(L.buttons.rechargeAmount(a, bonusFor(a)), `ramt:${a}`)]),
     [Markup.button.callback(L.buttons.customAmount, 'rcustom')],
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
@@ -1179,7 +1188,7 @@ bot.action(/^ramt:(\d+)$/, async (ctx) => {
 bot.action('rcustom', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   if (getState(ctx.from.id) !== 'pay_amount') return;
-  await ctx.reply(L.wallet.askAmount(MIN_RECHARGE));
+  await ctx.reply(L.wallet.askAmount());
 });
 bot.action(/^disc:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -1210,7 +1219,8 @@ function validateDiscount(code, userId, amount) {
   if (dc.only_user_id && dc.only_user_id !== userId) return { ok: false };
   const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
   if (uses >= dc.max_uses_per_user) return { ok: false };
-  const disc = Math.round(amount * dc.discount_percent / 100);
+  let disc = Math.round(amount * dc.discount_percent / 100);
+  if (dc.max_discount_amount != null && disc > dc.max_discount_amount) disc = dc.max_discount_amount;
   return { ok: true, dc, finalAmount: Math.max(0, amount - disc) };
 }
 
@@ -1347,7 +1357,7 @@ bot.command('newcode', (ctx) => {
   const d = parseInt(normalizeDigits(days || ''), 10);
   if (!code || !pct || !d) return ctx.reply('فرمت: /newcode CODE PERCENT DAYS [USER_ID]');
   try {
-    stmts.insertDiscountCode.run(code.toUpperCase(), pct, Math.floor(Date.now() / 1000) + d * 86400,
+    stmts.insertDiscountCode.run(code.toUpperCase(), pct, null, Math.floor(Date.now() / 1000) + d * 86400,
       1, onlyUser ? parseInt(normalizeDigits(onlyUser), 10) : null, ctx.from.id);
     return ctx.reply(`✅ کد ${code.toUpperCase()} (${pct}٪، ${d} روز) ساخته شد.`);
   } catch (e) { return ctx.reply(`❌ ${e.message}`); }
@@ -1390,7 +1400,7 @@ bot.on('text', async (ctx) => {
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     if (state === 'pay_amount') {
       const amount = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''), 10);
-      if (!amount || amount < MIN_RECHARGE) return ctx.reply(L.wallet.invalidAmount(MIN_RECHARGE));
+      if (!amount || amount <= 0) return ctx.reply(L.wallet.invalidAmount());
       return await setRechargeAmount(ctx, uid, amount);
     }
     if (state === 'pay_discount') return await applyDiscount(ctx, uid, text);
