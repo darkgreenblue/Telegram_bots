@@ -297,6 +297,9 @@ function orChat(system, user, opts = {}) {
     model: opts.model || FLASH,
     temperature: opts.temperature ?? 0.9,
     max_tokens: opts.maxTokens,
+    // تفکر (reasoning) خاموش: وگرنه Gemini بخشی از max_tokens را صرف thinking می‌کند و
+    // خروجی JSON وسط رشته بریده می‌شود (Unterminated string) — دیده‌شده در لاگ پروداکشن
+    reasoning: { enabled: false },
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   });
 }
