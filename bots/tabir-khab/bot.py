@@ -1,4 +1,4 @@
-"""نقطه‌ی ورود — دو polling loop موازی: بله + تلگرام."""
+"""نقطه‌ی ورود — یک polling loop موازی برای هر ربات (بله‌ی فارسی + یک ربات تلگرام per زبان)."""
 import os
 import asyncio
 import logging
@@ -9,7 +9,7 @@ import locales
 from bale import Bale
 from handlers import handle_update
 import config
-from config import BALE_BOT_TOKEN, TELEGRAM_BOT_TOKEN, LOG_DIR, LOG_FILE
+from config import LOG_DIR, LOG_FILE
 
 # --- لاگ‌گیریِ ماندگار: هم کنسول، هم فایلِ چرخشی (برای تشخیصِ بعدیِ مشکلات) ---
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -30,8 +30,8 @@ log = logging.getLogger("bot")
 
 
 async def polling_loop(bot: Bale):
-    """حلقه‌ی long-polling برای یک پلتفرم."""
-    platform = bot.platform.upper()
+    """حلقه‌ی long-polling برای یک ربات (پلتفرم×زبان)."""
+    platform = bot.tag.upper()
 
     # هر loop مسیر DB خودش را set می‌کند (ContextVar)
     db.set_db_path(bot.db_path)
@@ -76,20 +76,18 @@ async def main():
         log.info("[LOCALE] همه‌ی %d زبان هماهنگ‌اند: %s",
                  len(locales.LANG_ORDER), ", ".join(locales.LANG_ORDER))
 
+    # هر instance با توکنِ ست‌شده یک polling-loop می‌گیرد؛ بقیه فقط warning (راه‌اندازیِ تدریجی زبان‌ها)
     tasks = []
-
-    if BALE_BOT_TOKEN:
-        tasks.append(polling_loop(Bale.for_bale()))
-    else:
-        log.warning("BALE_BOT_TOKEN تنظیم نشده — ربات بله غیرفعال")
-
-    if TELEGRAM_BOT_TOKEN:
-        tasks.append(polling_loop(Bale.for_telegram()))
-    else:
-        log.warning("TELEGRAM_BOT_TOKEN تنظیم نشده — ربات تلگرام غیرفعال")
+    for spec in config.bot_instances():
+        tag = f"{spec['platform']}:{spec['locale']}"
+        if spec["token"]:
+            tasks.append(polling_loop(Bale.for_instance(spec)))
+            log.info("[%s] فعال — db=%s", tag.upper(), spec["db"])
+        else:
+            log.warning("[%s] توکن تنظیم نشده — این ربات غیرفعال است", tag.upper())
 
     if not tasks:
-        raise SystemExit("هیچ توکنی تنظیم نشده — حداقل یکی از BALE_BOT_TOKEN یا TELEGRAM_BOT_TOKEN را پر کن.")
+        raise SystemExit("هیچ توکنی تنظیم نشده — حداقل توکنِ یکی از ربات‌ها را در .env پر کن.")
 
     await asyncio.gather(*tasks)
 

@@ -50,10 +50,30 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
 
 ## معماری سریع
 - `ai.py` — لایه‌ی هوش مصنوعی (Gemini Flash اصلی، DeepSeek+STT فال‌بک)
-- `handlers.py` — منطقِ اصلیِ ربات (بله + تلگرام)
-- `config.py` — همه‌ی ثابت‌ها و فلگ‌ها (از جمله `FORCE_FALLBACK_FOR_TEST`)
-- `db.py` — دیتابیس SQLite (دو فایلِ جدا برای بله و تلگرام)
-- `locales/` — متن‌های چندزبانه
+- `handlers.py` — منطقِ اصلیِ ربات (مشترک بین همه‌ی ربات‌ها)
+- `config.py` — همه‌ی ثابت‌ها و فلگ‌ها (از جمله `FORCE_FALLBACK_FOR_TEST`) + `bot_instances()`
+- `db.py` — دیتابیس SQLite (هر ربات فایلِ جدا؛ سوییچ با ContextVar per polling-loop)
+- `locales/` — متن‌های چندزبانه (تک‌منبعِ حقیقتِ همه‌ی کپی/پرامپت‌ها)
+
+## معماری چند-رباته (یک ربات per زبان — مهم)
+- **مرحله‌ی انتخاب زبان حذف شده.** هر زبان یک رباتِ تلگرامِ مستقل با توکن و آیدیِ خودش دارد
+  (برای مارکتینگِ جدا)؛ فارسی علاوه بر تلگرام، بله هم دارد. کلید OpenRouter بین همه مشترک است.
+- همه در **یک پروسه** اجرا می‌شوند (همان سرویسِ systemd) — `bot.py` برای هر instance با توکنِ
+  ست‌شده یک polling-loop می‌سازد؛ توکنِ خالی = آن ربات غیرفعال (راه‌اندازی تدریجی).
+- **کد همچنان چندزبانه است**: هر تغییرِ رفتار/متن از `locales/` و کدِ مشترک یک‌جا روی همه‌ی
+  زبان‌ها اعمال می‌شود. زبانِ هر instance ثابت است (`bale.locale`) و `_lang_of` همان را برمی‌گرداند.
+- **زبان جدید**: فقط `locales/<code>.py` بساز + به `LANG_ORDER` اضافه کن — instance و DB و
+  گزارش خودکار تعریف می‌شوند؛ بعد secret توکنش را بساز و به deploy.yml اضافه کن.
+- **دیتابیس‌ها**: `tabir_bale.db` (بله‌ی فارسی)، `tabir_telegram.db` (تلگرامِ فارسی — نامِ تاریخی،
+  داده‌های قبلی حفظ شده)، `tabir_telegram_<lang>.db` برای بقیه.
+- **توکن‌ها در .env سرور**: `BALE_BOT_TOKEN`، `TELEGRAM_BOT_TOKEN_FA` (فالبک: `TELEGRAM_BOT_TOKEN`)،
+  `TELEGRAM_BOT_TOKEN_{EN,AR,RU,ES,PT}`. جابِ deploy این‌ها را از GitHub Secrets با نام‌های
+  `TABIR_TELEGRAM_BOT_TOKEN_<LANG>` (و `TABIR_BALE_BOT_TOKEN`) upsert می‌کند — فقط کلیدهای
+  ست‌شده؛ بقیه‌ی .env دست نمی‌خورد. برای اعمالِ secret جدید بدون کامیت: workflow ِ Deploy را
+  dispatch کن.
+- **پرونده‌ی باز پرداخت**: `payment_methods_for(lang)` در config — به‌زودی باید per-language
+  کاستومایز شود (زرین‌پال برای فارسی، Stars/کریپتو بقیه).
+- برچسبِ لاگ هر ربات `platform:locale` است (مثل `telegram:en`) — برای grep در `logs/bot.log`.
 
 ## فلگ‌های مهم در config.py
 - `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). بعد از تست باید `False` بشود.

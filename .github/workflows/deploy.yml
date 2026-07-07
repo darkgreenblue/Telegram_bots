@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # اجرای دستی: هم برای force_all، هم برای اعمالِ secretهای تازه‌ساخته بدون کامیت جدید
   workflow_dispatch:
     inputs:
       force_all:
@@ -170,6 +171,16 @@ jobs:
         if: steps.changed.outputs.deploy == '1'
         env:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          # توکن‌های تلگرامِ per-language — هر کدام ست باشد در .env سرور upsert می‌شود؛
+          # خالی = دست‌نخورده. (فارسی از قبل با نامِ قدیمی TELEGRAM_BOT_TOKEN روی سرور است؛
+          # TABIR_TELEGRAM_BOT_TOKEN_FA فقط برای تعویضِ احتمالیِ آن است.)
+          T_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          T_EN: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_EN }}
+          T_AR: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_AR }}
+          T_RU: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_RU }}
+          T_ES: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_ES }}
+          T_PT: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_PT }}
+          T_BALE: ${{ secrets.TABIR_BALE_BOT_TOKEN }}
         run: |
           set -e
           mkdir -p ~/.ssh
@@ -181,7 +192,33 @@ jobs:
           # ۱) کد جدید را روی مسیر فعلی سرور overlay کن (فایل‌های untracked مثل .env/db دست نمی‌خورند)
           git archive HEAD:bots/tabir-khab | $SSH 'mkdir -p /home/ubuntu/tabir_khab && tar -x -C /home/ubuntu/tabir_khab'
 
-          # ۲) وابستگی‌ها + ری‌استارت + چک سلامت (همان دستورهای دیپلوی قبلیِ این ربات)
+          # ۲) upsertِ توکن‌ها در .env سرور — فقط کلیدهایی که در Secrets ست شده‌اند؛
+          #    بقیه‌ی .env (OPENROUTER_API_KEY, GAPGPT_API_KEY, پرداخت و...) دست نمی‌خورد.
+          #    مقادیر هرگز در لاگ چاپ نمی‌شوند (فقط نام کلید).
+          {
+            echo "TELEGRAM_BOT_TOKEN_FA=$T_FA"
+            echo "TELEGRAM_BOT_TOKEN_EN=$T_EN"
+            echo "TELEGRAM_BOT_TOKEN_AR=$T_AR"
+            echo "TELEGRAM_BOT_TOKEN_RU=$T_RU"
+            echo "TELEGRAM_BOT_TOKEN_ES=$T_ES"
+            echo "TELEGRAM_BOT_TOKEN_PT=$T_PT"
+            echo "BALE_BOT_TOKEN=$T_BALE"
+          } | $SSH 'umask 077
+            cd /home/ubuntu/tabir_khab
+            touch .env
+            [ -f .env.bak ] || cp .env .env.bak
+            while IFS= read -r line; do
+              key=${line%%=*}; val=${line#*=}
+              [ -n "$val" ] || continue
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+              else
+                printf "%s\n" "${key}=${val}" >> .env
+              fi
+              echo "🔑 ${key} از Secrets در .env ست شد"
+            done'
+
+          # ۳) وابستگی‌ها + ری‌استارت + چک سلامت (همان دستورهای دیپلوی قبلیِ این ربات)
           $SSH 'set -e
             cd /home/ubuntu/tabir_khab
             which ffmpeg >/dev/null || sudo apt-get install -y -q ffmpeg < /dev/null

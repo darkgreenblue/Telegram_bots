@@ -9,9 +9,9 @@ import logging
 import aiohttp
 
 from config import (
-    BALE_BOT_TOKEN, BALE_API_BASE, BALE_SSL_NO_VERIFY, BALE_PAYMENT_TOKEN,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_API_BASE, TELEGRAM_SSL_NO_VERIFY, TELEGRAM_PAYMENT_TOKEN,
-    BALE_DB_PATH, TELEGRAM_DB_PATH, ASSETS_DIR,
+    BALE_API_BASE, BALE_SSL_NO_VERIFY, BALE_PAYMENT_TOKEN,
+    TELEGRAM_API_BASE, TELEGRAM_SSL_NO_VERIFY, TELEGRAM_PAYMENT_TOKEN,
+    ASSETS_DIR,
 )
 
 log = logging.getLogger("bale")
@@ -29,6 +29,7 @@ class Bale:
         token: str,
         api_base: str,
         platform: str,          # "bale" | "telegram"
+        locale: str,            # زبانِ ثابتِ این ربات ("fa", "en", ...)
         ssl_no_verify: bool,
         payment_token: str,
         db_path: str,
@@ -38,33 +39,30 @@ class Bale:
         self._file_base = f"{api_base}/file/bot{token}"
         self._ssl_no_verify = ssl_no_verify
         self.platform = platform          # public — استفاده در payments/handlers
+        self.locale = locale              # زبانِ ثابت — انتخابگر زبان حذف شده
+        self.tag = f"{platform}:{locale}" # برچسبِ لاگ/قفل (چند ربات تلگرامی داریم)
         self.payment_token = payment_token
         self.db_path = db_path
         self.bot_username: str = ""       # بعد از getMe پر می‌شود
         self._session: aiohttp.ClientSession | None = None
 
-    # --- factory methods ---
+    # --- factory ---
 
     @classmethod
-    def for_bale(cls) -> "Bale":
+    def for_instance(cls, spec: dict) -> "Bale":
+        """ساخت کلاینت از روی یک instance از config.bot_instances()."""
+        if spec["platform"] == "bale":
+            api_base, ssl_nv, pay = BALE_API_BASE, BALE_SSL_NO_VERIFY, BALE_PAYMENT_TOKEN
+        else:
+            api_base, ssl_nv, pay = TELEGRAM_API_BASE, TELEGRAM_SSL_NO_VERIFY, TELEGRAM_PAYMENT_TOKEN
         return cls(
-            token=BALE_BOT_TOKEN,
-            api_base=BALE_API_BASE,
-            platform="bale",
-            ssl_no_verify=BALE_SSL_NO_VERIFY,
-            payment_token=BALE_PAYMENT_TOKEN,
-            db_path=BALE_DB_PATH,
-        )
-
-    @classmethod
-    def for_telegram(cls) -> "Bale":
-        return cls(
-            token=TELEGRAM_BOT_TOKEN,
-            api_base=TELEGRAM_API_BASE,
-            platform="telegram",
-            ssl_no_verify=TELEGRAM_SSL_NO_VERIFY,
-            payment_token=TELEGRAM_PAYMENT_TOKEN,
-            db_path=TELEGRAM_DB_PATH,
+            token=spec["token"],
+            api_base=api_base,
+            platform=spec["platform"],
+            locale=spec["locale"],
+            ssl_no_verify=ssl_nv,
+            payment_token=pay,
+            db_path=spec["db"],
         )
 
     # --- session ---
@@ -183,7 +181,8 @@ class Bale:
     # --- دارایی‌ها (مسکات) با کش file_id per-platform ---
 
     def _fileid_cache_path(self) -> str:
-        return os.path.join(ASSETS_DIR, f"fileids_{self.platform}.json")
+        # file_id در تلگرام مخصوصِ هر ربات است — با چند رباتِ تلگرامی، کش باید per-instance باشد
+        return os.path.join(ASSETS_DIR, f"fileids_{self.platform}_{self.locale}.json")
 
     def _load_fileid_cache(self) -> dict:
         try:

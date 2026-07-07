@@ -11,8 +11,6 @@ load_dotenv()
 # ============================================================
 #  محرمانه‌ها — تنها چیزهایی که در .env قرار می‌گیرند
 # ============================================================
-BALE_BOT_TOKEN          = os.getenv("BALE_BOT_TOKEN", "").strip()
-TELEGRAM_BOT_TOKEN      = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GAPGPT_API_KEY          = os.getenv("GAPGPT_API_KEY", "").strip()
 OPENROUTER_API_KEY      = os.getenv("OPENROUTER_API_KEY", "").strip()
 
@@ -29,9 +27,48 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 BALE_API_BASE     = "https://tapi.bale.ai"
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
-# --- دیتابیس — هر پلتفرم DB جداگانه دارد ---
+# --- دیتابیس — هر ربات (پلتفرم×زبان) DB جداگانه دارد ---
 BALE_DB_PATH     = "tabir_bale.db"
-TELEGRAM_DB_PATH = "tabir_telegram.db"
+TELEGRAM_DB_PATH = "tabir_telegram.db"   # DB تاریخیِ ربات تلگرام → حالا رباتِ فارسی
+
+# ============================================================
+#  ربات‌ها — هر زبان یک رباتِ تلگرامِ مستقل (بدون مرحله‌ی انتخاب زبان)
+# ============================================================
+# معماری: یک پروسه، یک polling-loop برای هر ربات. کد و locale ها مشترک‌اند؛
+# هر instance زبانش fix است (برای مارکتینگِ جدا و حذفِ استپ انتخاب زبان).
+# فارسی: بله + تلگرام. بقیه‌ی زبان‌ها: فقط تلگرام. کلید OpenRouter مشترک است.
+#
+# توکن‌ها در .env: BALE_BOT_TOKEN، TELEGRAM_BOT_TOKEN_FA (فالبک: TELEGRAM_BOT_TOKEN
+# — نام قدیمی، تا رباتِ موجود بدون تغییر secret کار کند)، TELEGRAM_BOT_TOKEN_EN و... .
+# توکنِ خالی = آن ربات غیرفعال (بقیه بالا می‌آیند) — افزودن زبان‌ها تدریجی ممکن است.
+# زبان جدید؟ فقط locales/<code>.py و LANG_ORDER — ربات و DBاش خودکار تعریف می‌شود.
+
+def _env(*names: str) -> str:
+    for n in names:
+        v = os.getenv(n, "").strip()
+        if v:
+            return v
+    return ""
+
+
+def bot_instances() -> list[dict]:
+    """تعریفِ همه‌ی ربات‌ها. import داخلی تا حلقه‌ی config↔locales پیش نیاید."""
+    from locales import LANG_ORDER
+    instances = [{
+        "platform": "bale", "locale": "fa",
+        "token": _env("BALE_BOT_TOKEN"), "db": BALE_DB_PATH,
+    }]
+    for code in LANG_ORDER:
+        envs = (f"TELEGRAM_BOT_TOKEN_{code.upper()}",)
+        db = f"tabir_telegram_{code}.db"
+        if code == "fa":   # ربات موجود: نامِ قدیمیِ توکن و DB حفظ می‌شود (داده‌ها می‌مانند)
+            envs += ("TELEGRAM_BOT_TOKEN",)
+            db = TELEGRAM_DB_PATH
+        instances.append({
+            "platform": "telegram", "locale": code,
+            "token": _env(*envs), "db": db,
+        })
+    return instances
 
 # --- GapGPT (OpenAI-compatible) — فقط برای تولید تصویر اصلی ---
 GAPGPT_BASE_URL  = "https://api.gapgpt.app/v1"
@@ -184,11 +221,8 @@ def savings_percent(tier: str) -> int:
 # --- چندزبانه ---
 # پرسوناها، سؤالات آنبوردینگ، و همه‌ی متن‌ها در پکیج locales/ تعریف شده‌اند.
 # هر زبان فایل خودش را دارد (locales/fa.py, en.py, ...).
+# زبانِ هر ربات fix است (bot_instances)؛ انتخابگرِ زبان از UX حذف شده.
 DEFAULT_LANGUAGE = "fa"
-
-# فقط تلگرام چندزبانه است؛ بله فقط فارسی.
-def multilang_enabled(platform: str) -> bool:
-    return platform == "telegram"
 
 # روش پرداخت بر اساس زبان:
 #   فارسی → زرین‌پال (stub فعلاً)
