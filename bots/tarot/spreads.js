@@ -1,6 +1,9 @@
-// کاتالوگ فال‌ها — قیمت‌ها به تومان
-// picks: کاربر همیشه ۳ کارت را خودش از گرید انتخاب می‌کند؛ اگر size بیشتر باشد،
+// کاتالوگ فال‌ها
+// قانون قیمت: هر کارت ۱۰٬۰۰۰ تومان (price = size × 10k) — استثنا ندارد.
+// picks: کاربر حداکثر ۳ کارت را خودش از گرید انتخاب می‌کند؛ اگر size بیشتر باشد،
 // بقیه «از جای بریدن دک» به‌ترتیب شافل کشیده می‌شوند (UX ثابت و کم‌اصطکاک).
+// focus: فال «موضوعی» است — مرحله‌ی «حول چه موضوعی؟» پرسیده نمی‌شود و همین کلید
+// به‌عنوان حوزه‌ی خوانش به LLM می‌رود. نام فال با نام حوزه در پرسشنامه یکی است.
 
 export const DAILY = {
   id: 'daily',
@@ -11,9 +14,11 @@ export const DAILY = {
   maxTokens: 450,
 };
 
+const PER_CARD = 10_000;
+
 const SPREADS = [
   {
-    id: 'three', emoji: '🔮', fa: 'گذشته، حال، آینده', size: 3, price: 30_000, maxTokens: 1600,
+    id: 'three', emoji: '🔮', fa: 'گذشته، حال، آینده', size: 3, maxTokens: 1600,
     desc: 'نگاه کامل به مسیرت: ریشه‌ی ماجرا، انرژی الان، و جهتی که پیش روته',
     positions: [
       { key: 'past', fa: 'گذشته' },
@@ -22,15 +27,7 @@ const SPREADS = [
     ],
   },
   {
-    id: 'yesno', emoji: '⚖️', fa: 'آری یا نه', size: 2, price: 15_000, maxTokens: 1200,
-    desc: 'برای یک تصمیم مشخص: جوابِ تمایل انرژی + چرایی‌اش',
-    positions: [
-      { key: 'core', fa: 'قلب ماجرا' },
-      { key: 'direction', fa: 'جهت انرژی' },
-    ],
-  },
-  {
-    id: 'love', emoji: '💞', fa: 'عشق و رابطه', size: 5, price: 50_000, maxTokens: 2400,
+    id: 'love', emoji: '💞', fa: 'عشق و رابطه', size: 5, maxTokens: 2400, focus: 'love',
     desc: 'عمیق‌ترین نگاه به رابطه: دل تو، دل او، پیوند، مانع، و مسیر پیش رو',
     positions: [
       { key: 'you', fa: 'قلب تو' },
@@ -41,8 +38,8 @@ const SPREADS = [
     ],
   },
   {
-    id: 'career', emoji: '💼', fa: 'کار و پول', size: 5, price: 50_000, maxTokens: 2400,
-    desc: 'وضعیت حرفه‌ای و مالی: جایگاه الان، نقطه‌ی قوت، مانع، فرصت پنهان، و نتیجه',
+    id: 'career', emoji: '💼', fa: 'کار و مسیر', size: 5, maxTokens: 2400, focus: 'career',
+    desc: 'وضعیت حرفه‌ای‌ات: جایگاه الان، برگ برنده، مانع، فرصت پنهان، و برآیند مسیر',
     positions: [
       { key: 'now', fa: 'جایگاه فعلی' },
       { key: 'strength', fa: 'برگ برنده‌ات' },
@@ -52,27 +49,59 @@ const SPREADS = [
     ],
   },
   {
-    id: 'money', emoji: '💰', fa: 'پول و فراوانی', size: 4, price: 40_000, maxTokens: 2000,
-    desc: 'رابطه‌ات با پول: وضعیت الان، جایی که انرژی نشت می‌کنه، فرصت پیش رو، و مسیر فراوانی',
+    id: 'money', emoji: '💰', fa: 'پول و فراوانی', size: 5, maxTokens: 2400, focus: 'money',
+    desc: 'رابطه‌ات با پول: وضعیت الان، نشتی انرژی، باور پنهان، فرصت پیش رو، و مسیر فراوانی',
     positions: [
       { key: 'now', fa: 'وضعیت مالی الان' },
       { key: 'leak', fa: 'نشتی انرژی و پول' },
+      { key: 'belief', fa: 'باور پنهانت درباره‌ی پول' },
       { key: 'opportunity', fa: 'فرصت پیش رو' },
       { key: 'path', fa: 'مسیر فراوانی' },
     ],
   },
   {
-    id: 'inner', emoji: '🧘', fa: 'آینه‌ی درون', size: 4, price: 40_000, maxTokens: 2000,
-    desc: 'برای وقتی حالت با خودت روشن نیست: حال الان، ریشه‌ی ناآرامی، نیاز پنهان، مسیر آرامش',
+    id: 'inner', emoji: '🧘', fa: 'حال درونی', size: 5, maxTokens: 2400, focus: 'inner',
+    desc: 'برای وقتی حالت با خودت روشن نیست: حال الان، ریشه‌ی ناآرامی، نیاز پنهان، نقطه‌ی قوت، مسیر آرامش',
     positions: [
       { key: 'now', fa: 'حال درونی الان' },
       { key: 'root', fa: 'ریشه‌ی ناآرامی' },
       { key: 'need', fa: 'نیاز پنهان' },
+      { key: 'strength', fa: 'نقطه‌ی قوتت' },
       { key: 'path', fa: 'مسیر آرامش' },
     ],
   },
   {
-    id: 'choice', emoji: '🔀', fa: 'دوراهی', size: 5, price: 50_000, maxTokens: 2400,
+    id: 'family', emoji: '🏠', fa: 'خانواده و نزدیکان', size: 5, maxTokens: 2400, focus: 'family',
+    desc: 'فضای بین تو و نزدیکانت: حال رابطه، ریشه‌ی تنش، نقش تو، آنچه دیده نمی‌شه، و مسیر نزدیک‌تر شدن',
+    positions: [
+      { key: 'now', fa: 'فضای الان' },
+      { key: 'root', fa: 'ریشه‌ی تنش' },
+      { key: 'role', fa: 'نقش تو' },
+      { key: 'unseen', fa: 'چیزی که دیده نمی‌شه' },
+      { key: 'path', fa: 'مسیر نزدیک‌تر شدن' },
+    ],
+  },
+  {
+    id: 'migration', emoji: '✈️', fa: 'مهاجرت و تغییر بزرگ', size: 5, maxTokens: 2400, focus: 'migration',
+    desc: 'برای جابه‌جایی‌های بزرگ زندگی: جایگاه الان، انگیزه‌ی واقعی، ریسک، آنچه در مقصد منتظرته، و چراغ تصمیم',
+    positions: [
+      { key: 'now', fa: 'جایگاه الان' },
+      { key: 'why', fa: 'انگیزه‌ی واقعی' },
+      { key: 'risk', fa: 'مانع یا ریسک' },
+      { key: 'there', fa: 'چیزی که در مقصد منتظرته' },
+      { key: 'guide', fa: 'چراغ تصمیم' },
+    ],
+  },
+  {
+    id: 'yesno', emoji: '⚖️', fa: 'آری یا نه', size: 2, maxTokens: 1200,
+    desc: 'برای یک تصمیم مشخص: جوابِ تمایل انرژی + چرایی‌اش',
+    positions: [
+      { key: 'core', fa: 'قلب ماجرا' },
+      { key: 'direction', fa: 'جهت انرژی' },
+    ],
+  },
+  {
+    id: 'choice', emoji: '🔀', fa: 'دوراهی', size: 5, maxTokens: 2400,
     desc: 'بین دو مسیر گیر کردی؟ انرژی هر دو راه، عامل پنهان ماجرا، و چراغ راهنمای انتخاب',
     positions: [
       { key: 'you', fa: 'خودت در این لحظه' },
@@ -83,7 +112,7 @@ const SPREADS = [
     ],
   },
   {
-    id: 'celtic', emoji: '✨', fa: 'صلیب سلتی (کامل)', size: 10, price: 90_000, maxTokens: 3500,
+    id: 'celtic', emoji: '✨', fa: 'صلیب سلتی (کامل)', size: 10, maxTokens: 3500,
     desc: 'کامل‌ترین خوانش تاروت: ده کارت، تصویر تمام‌قد از زندگی‌ات حول این سؤال',
     positions: [
       { key: 'situation', fa: 'موقعیت فعلی' },
@@ -98,7 +127,7 @@ const SPREADS = [
       { key: 'outcome', fa: 'برآیند' },
     ],
   },
-];
+].map(s => ({ ...s, price: s.size * PER_CARD }));
 
 export const SPREAD_BY_ID = Object.fromEntries(SPREADS.map(s => [s.id, s]));
 export default SPREADS;

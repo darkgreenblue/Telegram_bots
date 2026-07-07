@@ -390,7 +390,7 @@ async function typing(ctx, ms, action = 'typing') {
 function mainKeyboard() {
   const rows = [
     [L.buttons.daily, L.buttons.reading],
-    [L.buttons.wallet],
+    [L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (TEST_PHASE) rows.push([L.buttons.resetTest]);
   return Markup.keyboard(rows).resize();
@@ -399,14 +399,14 @@ function mainKeyboard() {
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
 const prefetches = new Map(); // uid -> Promise<object|null> (فقط بهینه‌سازی؛ منبع حقیقت readings.llm_json)
 
-function buildReadingCtx(user, spread, question, cards) {
+function buildReadingCtx(user, spread, question, cards, focusKey) {
   // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
   const prev = stmts.lastDelivered.all(user.telegram_id, 4)
     .map(r => ({ 'نوع فال': r.type, 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
   return {
     memory: user.memory_json || '',
     name: user.name || '',
-    focusFa: L.focusFa[user.focus_area] || user.focus_area || '-',
+    focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
     spreadFa: spread.fa,
     cards: cards.map((c, i) => ({
@@ -428,7 +428,7 @@ async function callReadingLLM(readingId) {
   const user = getUser(r.user_id);
   const spread = SPREAD_BY_ID[r.type];
   const cards = JSON.parse(r.cards_json);
-  const ctx = buildReadingCtx(user, spread, r.question, cards);
+  const ctx = buildReadingCtx(user, spread, r.question, cards, r.focus_area);
   const system = L.prompts.readerSystem(spread);
   const userMsg = L.prompts.readingContext(ctx);
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود
@@ -535,11 +535,12 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'idle');
     // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, true), 'spread:three')],
+      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
     ]));
   } else {
     // تغییر تمرکز وسط فلوی فال
+    patchSession(uid, { focusKey: key });
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
@@ -555,7 +556,7 @@ async function dailyCard(ctx) {
   const today = tehranToday();
   if (user.last_daily_date === today) {
     return ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, false), 'spread:three')],
+      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
     ]));
   }
   // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
@@ -599,7 +600,7 @@ async function dailyCard(ctx) {
   const paidCount = stmts.countPaidDelivered.get(uid).c;
   const canGift = getBalance(uid) >= SPREAD_BY_ID.three.price && paidCount === 0;
   await ctx.reply(L.daily.upsell, Markup.inlineKeyboard([
-    [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, canGift), 'spread:three')],
+    [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
   ]));
 }
 bot.hears(L.buttons.daily, dailyCard);
@@ -624,8 +625,17 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   upsertUser(ctx);
   const spread = SPREAD_BY_ID[ctx.match[1]];
   if (!spread) return;
-  patchSession(uid, { spreadId: spread.id, picks: [] });
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+
+  // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
+  if (spread.focus) {
+    patchSession(uid, { spreadId: spread.id, picks: [], focusKey: spread.focus });
+    setState(uid, 'await_question');
+    return ctx.reply(L.reading.askQuestion());
+  }
+
+  // فال عمومی (گذشته/حال/آینده، آری/نه، دوراهی، سلتی): حوزه از کاربر پرسیده می‌شود
+  patchSession(uid, { spreadId: spread.id, picks: [], focusKey: null });
   const user = getUser(uid);
   if (user.focus_area) {
     setState(uid, 'confirm_focus');
@@ -648,8 +658,15 @@ bot.action('keepfocus', async (ctx) => {
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
   if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard());
+  patchSession(uid, { focusKey: getUser(uid).focus_area });
   setState(uid, 'await_question');
   await ctx.reply(L.reading.askQuestion());
+});
+
+// دکمه‌ی «مشاهده‌ی همه‌ی فال‌ها» زیر پیشنهادهای پایان فال
+bot.action('catalog_go', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showCatalog(ctx);
 });
 
 /* ---------- دریافت سؤال → فضاسازی → تنفس ---------- */
@@ -759,7 +776,7 @@ async function finishPicking(ctx, uid, s) {
   const user = getUser(uid);
   const cards = drawCards(s.seed, s.picks, spread.size);
   const readingId = Number(stmts.insertReading.run(
-    uid, spread.id, spread.price, user.focus_area, s.question || '', s.seed, JSON.stringify(cards)
+    uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards)
   ).lastInsertRowid);
   patchSession(uid, { readingId });
 
@@ -989,11 +1006,13 @@ bot.action(/^fb:(yes|some|no):(\d+)$/, async (ctx) => {
 /* ---------- پایان‌بندی + قلاب بازگشت ---------- */
 // پیشنهاد شخصی‌سازی‌شده‌ی فال بعدی: بر اساس حوزه‌ی تمرکز کاربر + آنچه هنوز تجربه نکرده
 const FOCUS_SUGGEST = {
-  love:     ['love', 'choice', 'inner', 'celtic'],
-  career:   ['career', 'money', 'choice', 'celtic'],
-  money:    ['money', 'career', 'choice', 'celtic'],
-  inner:    ['inner', 'three', 'love', 'celtic'],
-  question: ['choice', 'yesno', 'three', 'celtic'],
+  love:      ['love', 'family', 'choice', 'inner', 'celtic'],
+  career:    ['career', 'money', 'migration', 'choice', 'celtic'],
+  money:     ['money', 'career', 'choice', 'celtic'],
+  inner:     ['inner', 'three', 'love', 'celtic'],
+  family:    ['family', 'love', 'inner', 'celtic'],
+  migration: ['migration', 'choice', 'career', 'celtic'],
+  question:  ['choice', 'yesno', 'three', 'celtic'],
 };
 function suggestSpreads(uid, currentType) {
   const focus = getUser(uid)?.focus_area || 'question';
@@ -1059,6 +1078,7 @@ async function finishReading(ctx, uid, readingId) {
   const offers = suggestSpreads(uid, r.type);
   await ctx.reply(L.reading.nextOffers, Markup.inlineKeyboard([
     ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
+    [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
     [Markup.button.switchToChat(L.buttons.share, '')],
   ]));
 
@@ -1070,7 +1090,7 @@ async function finishReading(ctx, uid, readingId) {
       stmts.insertDiscountCode.run(code, FIRST_PAID_DISCOUNT.percent,
         Math.floor(Date.now() / 1000) + FIRST_PAID_DISCOUNT.hours * 3600, 1, uid, 0);
       await sleep(PACE_S);
-      await ctx.reply(L.reading.firstPaidGift(code, FIRST_PAID_DISCOUNT.percent, FIRST_PAID_DISCOUNT.hours));
+      await ctx.reply(L.reading.firstPaidGift(code, FIRST_PAID_DISCOUNT.percent, FIRST_PAID_DISCOUNT.hours), { parse_mode: 'Markdown' });
     }
   } catch (e) { logErr('first-paid gift:', e.message); }
 
@@ -1085,6 +1105,17 @@ async function showWallet(ctx) {
   });
 }
 bot.hears(L.buttons.wallet, showWallet);
+
+// دعوت دوستان از کیبورد اصلی: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان
+bot.hears(L.buttons.inviteMain, async (ctx) => {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([[Markup.button.switchToChat(L.buttons.share, '')]]).reply_markup,
+  });
+});
 
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
@@ -1428,7 +1459,7 @@ setInterval(async () => {
       await bot.telegram.sendMessage(telegram_id, L.milestone.checkin(last.summary), {
         reply_markup: Markup.inlineKeyboard([
           [Markup.button.callback(L.buttons.daily, 'daily_go')],
-          [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, false), 'spread:three')],
+          [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
         ]).reply_markup,
       }).catch(() => {});
       await sleep(300);
