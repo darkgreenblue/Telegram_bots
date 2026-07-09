@@ -20,6 +20,8 @@ import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody } from './routes/support.js';
 import { financeBody, financeCsv } from './routes/finance.js';
+import { funnelsBody } from './routes/funnels.js';
+import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 
 /* ===== ENV ===== */
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN?.trim();
@@ -51,8 +53,8 @@ const PAGES = {
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
-  '/funnels': () => ['فانل‌ها', '<div class="card"><p class="muted">این بخش در PR بعدی فعال می‌شود.</p></div>'],
-  '/discounts': () => ['کد تخفیف', '<div class="card"><p class="muted">این بخش در PR بعدی فعال می‌شود.</p></div>'],
+  '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
+  '/discounts': () => ['کد تخفیف', discountsBody()],
 };
 
 /* ===== اکشن‌های POST: هرکدام پیام موفقیت برمی‌گرداند و به backTo ری‌دایرکت می‌شود ===== */
@@ -60,6 +62,8 @@ const ACTIONS = {
   '/marketing/create': { fn: marketingCreate, backTo: '/marketing' },
   '/marketing/toggle': { fn: marketingToggle, backTo: '/marketing' },
   '/marketing/usernames': { fn: marketingUsernames, backTo: '/marketing' },
+  '/discounts/create': { fn: discountCreate, backTo: '/discounts' },
+  '/discounts/toggle': { fn: discountToggle, backTo: '/discounts' },
 };
 
 const server = http.createServer(async (req, res) => {

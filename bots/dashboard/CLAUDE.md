@@ -26,7 +26,8 @@
 | `/marketing` | ساخت لینک کمپین (`t.me/<bot>?start=c_<code>`) + جدول کمپین‌ها با قیف تا-درآمد (استارت کل / کاربر جدید first-touch / **کلیک برگشتی** / first_value / پی‌وال / خریدار+درآمد) + مقایسه‌ی چنل‌ها (کمپین/رفرال/ارگانیک از `users.first_source`) + فرم یوزرنیم ربات‌ها |
 | `/support` | سرچ id/username در همه‌ی instance ها (id مرجع است؛ username فقط hint) → پروفایل (همه‌ی ستون‌های users بجز session_json) + **تایم‌لاین معکوس** merge شده: events + payments + readings (tarot) + usage_log/voice_flows (voice2text) + generations (resume-tailor) |
 | `/finance` | پرداخت‌های همه‌ی ربات‌ها با فیلتر ربات/وضعیت/بازه + جمع per وضعیت + CSV (با ثبت در audit) + جدول audit_log |
-| `/funnels`, `/discounts` | placeholder — PR بعدی |
+| `/funnels` | per ربات: **قیف رویدادی** (کاربر یکتا per مرحله، ٪ نسبت به مرحله‌ی اول، دراپ نسبت به قبلی) با breakdown چنل (همه/ارگانیک/رفرال/کمپین) + قیف شارژ + نقطه‌ی رها کردن شارژ (payments.step روی ناتمام‌ها) + **توزیع وضعیت رکوردهای قطعی** (readings/voice_flows — بدون بایاس snapshot؛ شامل کاربران قبل از آنالیتیکس). هیچ عددی از `users.state` ساخته نمی‌شود. تعریف قیف‌ها: `routes/funnels.js` (`FUNNELS`) |
+| `/discounts` | ساخت/غیرفعال‌سازی کد تخفیف با **درج مستقیم در `discount_codes` خود ربات** (validate خود ربات‌ها دست‌نخورده): tarot با `only_user_id`؛ voice2text با سگمنت‌ها (`V2T_SEGMENTS` — آینه‌ی SEGMENTS خود ربات) و `allowed_user_ids` (عدد یا یوزرنیم lowercase). کد uppercase ذخیره می‌شود؛ `created_by=0` = ساخته‌ی داشبورد. بدون سگمنت/کاربر → خودکار `all` (قاعده‌ی v2t: خالی = هیچ‌کس). هر write با `assertColumns` گارد می‌شود + آمار مصرف از `discount_uses` |
 
 نکته‌ی تحلیلی: «درآمد» = `SUM(amount)` یعنی پول واقعاً پرداخت‌شده بعد از تخفیف (همان قرارداد /stats خود ربات‌ها)؛ `original_amount` مبلغ شارژ کیف‌پول است.
 
