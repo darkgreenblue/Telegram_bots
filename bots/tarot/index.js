@@ -19,11 +19,8 @@ import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
 import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
-
-/* ===== 0) Logger ===== */
-function ts() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
-function log(...a)    { console.log(`[${ts()}]`,   ...a); }
-function logErr(...a) { console.error(`[${ts()}]`, ...a); }
+import { log, logErr } from '../../shared/logger.js';
+import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -53,8 +50,7 @@ const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
 
-const WELCOME_GIFT     = 30_000;  // دقیقاً قیمت فال سه‌کارتی — «فال اول مهمان ما»
-const MIN_RECHARGE     = 50_000;
+// هدیه‌ی خوش‌آمد حذف شد: مسیر رایگان فقط «کارت روز» است؛ حداقل مبلغ شارژ هم نداریم
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
 // هدیه‌ی شارژ (ARPU بالاتر): مبلغ‌های بزرگ‌تر، هدیه‌ی بیشتر — از بزرگ به کوچک چک می‌شود
 const RECHARGE_BONUS   = [{ min: 200_000, bonus: 30_000 }, { min: 100_000, bonus: 10_000 }];
@@ -62,7 +58,9 @@ const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus ||
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
-const FIRST_PAID_DISCOUNT = { percent: 20, hours: 72 };
+// هدیه‌ی اولین اقدام به شارژ: خودکار (بدون کد) روی اولین شارژ موفق هر کاربر اعمال می‌شود؛
+// بعد از اولین approve دیگر نشان داده/اعمال نمی‌شود (hasRecharged).
+const FIRST_RECHARGE_DISCOUNT = { percent: 35, cap: 100_000 };
 const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
@@ -167,6 +165,8 @@ db.exec(`
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
+try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -216,8 +216,9 @@ const stmts = {
 
   getDiscountCode:     db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:     db.prepare('SELECT * FROM discount_codes WHERE id=?'),
-  insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?)'),
+  insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
+  countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -243,6 +244,7 @@ const getUser  = (uid) => stmts.getUser.get(uid);
 const getState = (uid) => getUser(uid)?.state || 'new';
 const setState = (uid, s) => stmts.setState.run(s, uid);
 const getBalance = (uid) => getUser(uid)?.balance || 0;
+const hasRecharged = (uid) => stmts.countApprovedPayments.get(uid).c > 0;
 
 function getSession(uid) {
   const raw = getUser(uid)?.session_json;
@@ -257,6 +259,7 @@ function wipeUser(uid) {
   for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
+  try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
   prefetches.delete(uid);
 }
 
@@ -300,6 +303,9 @@ function orChat(system, user, opts = {}) {
     model: opts.model || FLASH,
     temperature: opts.temperature ?? 0.9,
     max_tokens: opts.maxTokens,
+    // تفکر (reasoning) خاموش: وگرنه Gemini بخشی از max_tokens را صرف thinking می‌کند و
+    // خروجی JSON وسط رشته بریده می‌شود (Unterminated string) — دیده‌شده در لاگ پروداکشن
+    reasoning: { enabled: false },
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   });
 }
@@ -393,7 +399,7 @@ async function typing(ctx, ms, action = 'typing') {
 function mainKeyboard() {
   const rows = [
     [L.buttons.daily, L.buttons.reading],
-    [L.buttons.wallet],
+    [L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (TEST_PHASE) rows.push([L.buttons.resetTest]);
   return Markup.keyboard(rows).resize();
@@ -402,14 +408,14 @@ function mainKeyboard() {
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
 const prefetches = new Map(); // uid -> Promise<object|null> (فقط بهینه‌سازی؛ منبع حقیقت readings.llm_json)
 
-function buildReadingCtx(user, spread, question, cards) {
+function buildReadingCtx(user, spread, question, cards, focusKey) {
   // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
   const prev = stmts.lastDelivered.all(user.telegram_id, 4)
     .map(r => ({ 'نوع فال': r.type, 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
   return {
     memory: user.memory_json || '',
     name: user.name || '',
-    focusFa: L.focusFa[user.focus_area] || user.focus_area || '-',
+    focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
     spreadFa: spread.fa,
     cards: cards.map((c, i) => ({
@@ -431,7 +437,7 @@ async function callReadingLLM(readingId) {
   const user = getUser(r.user_id);
   const spread = SPREAD_BY_ID[r.type];
   const cards = JSON.parse(r.cards_json);
-  const ctx = buildReadingCtx(user, spread, r.question, cards);
+  const ctx = buildReadingCtx(user, spread, r.question, cards, r.focus_area);
   const system = L.prompts.readerSystem(spread);
   const userMsg = L.prompts.readingContext(ctx);
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود
@@ -499,9 +505,8 @@ async function handleStart(ctx) {
 
   if (!user.welcomed) {
     stmts.setWelcomed.run(uid);
-    stmts.credit.run(WELCOME_GIFT, uid);
-    if (refBonus) stmts.credit.run(REFERRAL_BONUS, uid);
-    await ctx.reply(L.onboarding.welcome(ctx.from.first_name, WELCOME_GIFT), mainKeyboard());
+    await ctx.reply(L.onboarding.welcome(ctx.from.first_name), mainKeyboard());
+    // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
     if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
     await typing(ctx, PACE_S);
     setState(uid, 'onboard_focus');
@@ -538,11 +543,12 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'idle');
     // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, true), 'spread:three')],
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
+      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
     ]));
   } else {
     // تغییر تمرکز وسط فلوی فال
+    patchSession(uid, { focusKey: key });
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
@@ -558,7 +564,7 @@ async function dailyCard(ctx) {
   const today = tehranToday();
   if (user.last_daily_date === today) {
     return ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, false), 'spread:three')],
+      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
     ]));
   }
   // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
@@ -599,10 +605,8 @@ async function dailyCard(ctx) {
     }
   }
   await sleep(PACE_M);
-  const paidCount = stmts.countPaidDelivered.get(uid).c;
-  const canGift = getBalance(uid) >= SPREAD_BY_ID.three.price && paidCount === 0;
   await ctx.reply(L.daily.upsell, Markup.inlineKeyboard([
-    [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, canGift), 'spread:three')],
+    [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
   ]));
 }
 bot.hears(L.buttons.daily, dailyCard);
@@ -627,8 +631,17 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   upsertUser(ctx);
   const spread = SPREAD_BY_ID[ctx.match[1]];
   if (!spread) return;
-  patchSession(uid, { spreadId: spread.id, picks: [] });
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+
+  // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
+  if (spread.focus) {
+    patchSession(uid, { spreadId: spread.id, picks: [], focusKey: spread.focus });
+    setState(uid, 'await_question');
+    return ctx.reply(L.reading.askQuestion());
+  }
+
+  // فال عمومی (گذشته/حال/آینده، آری/نه، دوراهی، سلتی): حوزه از کاربر پرسیده می‌شود
+  patchSession(uid, { spreadId: spread.id, picks: [], focusKey: null });
   const user = getUser(uid);
   if (user.focus_area) {
     setState(uid, 'confirm_focus');
@@ -651,8 +664,15 @@ bot.action('keepfocus', async (ctx) => {
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
   if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard());
+  patchSession(uid, { focusKey: getUser(uid).focus_area });
   setState(uid, 'await_question');
   await ctx.reply(L.reading.askQuestion());
+});
+
+// دکمه‌ی «مشاهده‌ی همه‌ی فال‌ها» زیر پیشنهادهای پایان فال
+bot.action('catalog_go', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showCatalog(ctx);
 });
 
 /* ---------- دریافت سؤال → فضاسازی → تنفس ---------- */
@@ -762,7 +782,7 @@ async function finishPicking(ctx, uid, s) {
   const user = getUser(uid);
   const cards = drawCards(s.seed, s.picks, spread.size);
   const readingId = Number(stmts.insertReading.run(
-    uid, spread.id, spread.price, user.focus_area, s.question || '', s.seed, JSON.stringify(cards)
+    uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards)
   ).lastInsertRowid);
   patchSession(uid, { readingId });
 
@@ -785,7 +805,7 @@ async function finishPicking(ctx, uid, s) {
   } else {
     await ctx.reply(L.reading.paywall(spread.price));
     await sleep(PACE_S);
-    await ctx.reply(L.reading.paywallShort(spread.price, balance), Markup.inlineKeyboard([
+    await ctx.reply(L.reading.paywallShort(spread.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
@@ -817,7 +837,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid)), Markup.inlineKeyboard([
+      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.recharge, 'recharge')],
       ]));
     }
@@ -881,7 +901,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid)), Markup.inlineKeyboard([
+      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.recharge, 'recharge')],
       ]));
     }
@@ -992,11 +1012,13 @@ bot.action(/^fb:(yes|some|no):(\d+)$/, async (ctx) => {
 /* ---------- پایان‌بندی + قلاب بازگشت ---------- */
 // پیشنهاد شخصی‌سازی‌شده‌ی فال بعدی: بر اساس حوزه‌ی تمرکز کاربر + آنچه هنوز تجربه نکرده
 const FOCUS_SUGGEST = {
-  love:     ['love', 'choice', 'inner', 'celtic'],
-  career:   ['career', 'money', 'choice', 'celtic'],
-  money:    ['money', 'career', 'choice', 'celtic'],
-  inner:    ['inner', 'three', 'love', 'celtic'],
-  question: ['choice', 'yesno', 'three', 'celtic'],
+  love:      ['love', 'family', 'choice', 'inner', 'celtic'],
+  career:    ['career', 'money', 'migration', 'choice', 'celtic'],
+  money:     ['money', 'career', 'choice', 'celtic'],
+  inner:     ['inner', 'three', 'love', 'celtic'],
+  family:    ['family', 'love', 'inner', 'celtic'],
+  migration: ['migration', 'choice', 'career', 'celtic'],
+  question:  ['choice', 'yesno', 'three', 'celtic'],
 };
 function suggestSpreads(uid, currentType) {
   const focus = getUser(uid)?.focus_area || 'question';
@@ -1032,12 +1054,15 @@ async function finishReading(ctx, uid, readingId) {
   setState(uid, 'idle');
   setSession(uid, null);
 
-  // پاداش رفرال: بعد از اولین فال کاملِ دعوت‌شده، دعوت‌کننده هم هدیه می‌گیرد
+  // پاداش رفرال: فقط بعد از اولین فال کاملِ دعوت‌شده (نه لحظه‌ی ورود) —
+  // هر دو طرف واریز و به هر دو اطلاع داده می‌شود
   try {
     const ref = stmts.getReferralByReferee.get(uid);
     if (ref && !ref.rewarded && stmts.countDelivered.get(uid).c === 1) {
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(REFERRAL_BONUS, ref.referrer_id);
+      stmts.credit.run(REFERRAL_BONUS, uid);
+      await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
       const referee = getUser(uid);
       await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(referee?.name, REFERRAL_BONUS)).catch(() => {});
     }
@@ -1060,22 +1085,13 @@ async function finishReading(ctx, uid, readingId) {
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   const offers = suggestSpreads(uid, r.type);
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.reading.nextOffers, Markup.inlineKeyboard([
     ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
-    [Markup.button.switchToChat(L.buttons.share, '')],
+    [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
+    [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
   ]));
 
-  // کد تخفیف شخصی بعد از اولین فال کامل (کاربر ارزش را چشیده — بهترین لحظه‌ی آفر خوانش دوم)
-  try {
-    const paidCount = stmts.countPaidDelivered.get(uid).c;
-    if (r.price > 0 && paidCount === 1) {
-      const code = `TAR${String(readingId).padStart(4, '0')}${Math.abs(seedToInt(r.seed) % 100)}`;
-      stmts.insertDiscountCode.run(code, FIRST_PAID_DISCOUNT.percent,
-        Math.floor(Date.now() / 1000) + FIRST_PAID_DISCOUNT.hours * 3600, 1, uid, 0);
-      await sleep(PACE_S);
-      await ctx.reply(L.reading.firstPaidGift(code, FIRST_PAID_DISCOUNT.percent, FIRST_PAID_DISCOUNT.hours));
-    }
-  } catch (e) { logErr('first-paid gift:', e.message); }
 
 }
 
@@ -1088,6 +1104,24 @@ async function showWallet(ctx) {
   });
 }
 bot.hears(L.buttons.wallet, showWallet);
+
+// لینک اشتراک‌گذاری استاندارد تلگرام: با یک تاچ، پیام آماده + لینک دعوت در چت انتخابی گذاشته می‌شود.
+// (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)
+function shareUrlFor(uid) {
+  const link = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
+  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText())}`;
+}
+
+// دعوت دوستان از کیبورد اصلی: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان
+bot.hears(L.buttons.inviteMain, async (ctx) => {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share, shareUrlFor(uid))]]).reply_markup,
+  });
+});
 
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
@@ -1103,11 +1137,11 @@ bot.action('recharge', async (ctx) => {
     const r = stmts.getReading.get(s.readingId);
     if (r && r.status === 'pending_payment') {
       const shortfall = Math.max(r.price - getBalance(uid), 0);
-      const suggested = Math.max(MIN_RECHARGE, Math.ceil(shortfall / 10000) * 10000);
+      const suggested = Math.max(Math.ceil(shortfall / 1000) * 1000, 1000);
       amounts = [...new Set([suggested, ...QUICK_AMOUNTS])].sort((a, b) => a - b).slice(0, 4);
     }
   }
-  await ctx.reply(L.wallet.askAmount(MIN_RECHARGE), Markup.inlineKeyboard([
+  await ctx.reply(L.wallet.askAmount(), Markup.inlineKeyboard([
     ...amounts.map(a => [Markup.button.callback(L.buttons.rechargeAmount(a, bonusFor(a)), `ramt:${a}`)]),
     [Markup.button.callback(L.buttons.customAmount, 'rcustom')],
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
@@ -1118,8 +1152,19 @@ async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
   stmts.setPaymentAmount.run(amount, 'receipt', s.paymentId);
+
+  // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
+  // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
+  let payAmount = amount;
+  if (!hasRecharged(uid)) {
+    const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
+    payAmount = Math.max(0, amount - disc);
+    stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
+    await ctx.reply(L.wallet.firstDiscountApplied(amount, payAmount, FIRST_RECHARGE_DISCOUNT.percent), { parse_mode: 'Markdown' });
+  }
+
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoice(amount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.discountHave, `disc:${s.paymentId}`)],
@@ -1137,7 +1182,7 @@ bot.action(/^ramt:(\d+)$/, async (ctx) => {
 bot.action('rcustom', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   if (getState(ctx.from.id) !== 'pay_amount') return;
-  await ctx.reply(L.wallet.askAmount(MIN_RECHARGE));
+  await ctx.reply(L.wallet.askAmount());
 });
 bot.action(/^disc:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -1168,7 +1213,8 @@ function validateDiscount(code, userId, amount) {
   if (dc.only_user_id && dc.only_user_id !== userId) return { ok: false };
   const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
   if (uses >= dc.max_uses_per_user) return { ok: false };
-  const disc = Math.round(amount * dc.discount_percent / 100);
+  let disc = Math.round(amount * dc.discount_percent / 100);
+  if (dc.max_discount_amount != null && disc > dc.max_discount_amount) disc = dc.max_discount_amount;
   return { ok: true, dc, finalAmount: Math.max(0, amount - disc) };
 }
 
@@ -1237,7 +1283,7 @@ async function offerPendingReading(ctx, uid) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(L.reading.paywallShort(r.price, balance), Markup.inlineKeyboard([
+    await ctx.reply(L.reading.paywallShort(r.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
@@ -1305,7 +1351,7 @@ bot.command('newcode', (ctx) => {
   const d = parseInt(normalizeDigits(days || ''), 10);
   if (!code || !pct || !d) return ctx.reply('فرمت: /newcode CODE PERCENT DAYS [USER_ID]');
   try {
-    stmts.insertDiscountCode.run(code.toUpperCase(), pct, Math.floor(Date.now() / 1000) + d * 86400,
+    stmts.insertDiscountCode.run(code.toUpperCase(), pct, null, Math.floor(Date.now() / 1000) + d * 86400,
       1, onlyUser ? parseInt(normalizeDigits(onlyUser), 10) : null, ctx.from.id);
     return ctx.reply(`✅ کد ${code.toUpperCase()} (${pct}٪، ${d} روز) ساخته شد.`);
   } catch (e) { return ctx.reply(`❌ ${e.message}`); }
@@ -1348,7 +1394,7 @@ bot.on('text', async (ctx) => {
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     if (state === 'pay_amount') {
       const amount = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''), 10);
-      if (!amount || amount < MIN_RECHARGE) return ctx.reply(L.wallet.invalidAmount(MIN_RECHARGE));
+      if (!amount || amount <= 0) return ctx.reply(L.wallet.invalidAmount());
       return await setRechargeAmount(ctx, uid, amount);
     }
     if (state === 'pay_discount') return await applyDiscount(ctx, uid, text);
@@ -1431,7 +1477,7 @@ setInterval(async () => {
       await bot.telegram.sendMessage(telegram_id, L.milestone.checkin(last.summary), {
         reply_markup: Markup.inlineKeyboard([
           [Markup.button.callback(L.buttons.daily, 'daily_go')],
-          [Markup.button.callback(L.buttons.startThree(SPREAD_BY_ID.three.price, false), 'spread:three')],
+          [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
         ]).reply_markup,
       }).catch(() => {});
       await sleep(300);
@@ -1448,5 +1494,6 @@ function launch() {
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
 launch();
+registerGlobalErrorHandlers('tarot');
 process.once('SIGINT',  () => { try { bot.stop('SIGINT'); } catch {} });
 process.once('SIGTERM', () => { try { bot.stop('SIGTERM'); } catch {} });

@@ -1,0 +1,113 @@
+# Backup — بکاپ شبانه‌ی دیتابیس‌های SQLite همه‌ی ربات‌ها (مهم‌ترین دارایی: کیف‌پول/پرداخت‌های voice2text).
+#
+# روش: روی VPS با خودِ better-sqlite3 هر ربات یک snapshot سازگار (online backup API) گرفته می‌شود
+# (امن حین اجرا — WAL هم پوشش داده می‌شود)، به runner منتقل و به‌عنوان artifact با نگه‌داری ۳۰روزه
+# ذخیره می‌شود. اگر secret اختیاری BACKUP_PASSPHRASE ست باشد، خروجی با gpg رمز می‌شود.
+#
+# بازگردانی: artifact را دانلود کن (در صورت رمز: gpg -d)، فایل .db را در bots/<name>/data/ روی سرور
+# جایگزین کن (اول pm2 stop <name>، بعد start). چون کاربر SSH ندارد، بازگردانی از مسیر Claude + Ops انجام می‌شود.
+name: Backup
+
+on:
+  schedule:
+    - cron: '47 2 * * *'   # هر شب ~۰۶:۱۷ به وقت تهران
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Snapshot DBs on VPS and fetch
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/vps && chmod 600 ~/.ssh/vps
+          SSH_OPTS="-i $HOME/.ssh/vps -o StrictHostKeyChecking=accept-new"
+          HOST="ubuntu@185.204.171.170"
+
+          cat > /tmp/snapshot.sh <<'SNAP'
+          set -e
+          STAGE="$HOME/db-backup-staging"
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          cd "$HOME/voice2text"
+          FAIL=0; COUNT=0
+          for d in bots/*/; do
+            n=$(basename "$d")
+            [ -d "$d/data" ] || continue
+            if [ ! -d "$d/node_modules/better-sqlite3" ]; then echo "⏭ $n: node_modules ندارد — رد شد"; continue; fi
+            mkdir -p "$STAGE/$n"
+            for f in "$d"data/*.db; do
+              [ -e "$f" ] || continue
+              base=$(basename "$f")
+              if ( cd "$d" && node -e '
+                const path = require("path");
+                const D = require(path.join(process.cwd(), "node_modules", "better-sqlite3"));
+                const db = new D(process.argv[1], { readonly: true, fileMustExist: true });
+                db.backup(process.argv[2]).then(() => { db.close(); console.log("✅ snapshot: " + process.argv[1]); })
+                  .catch((e) => { console.error("❌ " + process.argv[1] + ": " + e.message); process.exit(1); });
+              ' "data/$base" "$STAGE/$n/$base" ); then COUNT=$((COUNT+1)); else FAIL=1; fi
+            done
+          done
+          # tabir-khab (استثنای مونوریپو: پایتون، خارج از bots/*/data — مسیر تاریخی خودش)
+          if [ -d "$HOME/tabir_khab" ]; then
+            mkdir -p "$STAGE/tabir-khab"
+            for f in "$HOME"/tabir_khab/*.db; do
+              [ -e "$f" ] || continue
+              if python3 -c 'import sqlite3,sys; src=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); dst=sqlite3.connect(sys.argv[2]); src.backup(dst); dst.close(); src.close(); print("✅ snapshot: "+sys.argv[1])' "$f" "$STAGE/tabir-khab/$(basename "$f")"; then
+                COUNT=$((COUNT+1))
+              else
+                echo "❌ $f"; FAIL=1
+              fi
+            done
+          fi
+          echo "جمع snapshot ها: $COUNT"
+          [ "$COUNT" -gt 0 ] || { echo "❌ هیچ دیتابیسی پیدا نشد"; exit 1; }
+          exit $FAIL
+          SNAP
+
+          scp $SSH_OPTS /tmp/snapshot.sh "$HOST:/tmp/snapshot.sh"
+          ssh $SSH_OPTS "$HOST" 'bash /tmp/snapshot.sh'
+          scp $SSH_OPTS -r "$HOST:db-backup-staging" ./db-snap
+          ssh $SSH_OPTS "$HOST" 'rm -rf ~/db-backup-staging /tmp/snapshot.sh'
+
+      - name: Pack (and encrypt if BACKUP_PASSPHRASE set)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -e
+          STAMP=$(date -u +%F)
+          tar czf "db-backup-$STAMP.tar.gz" db-snap
+          if [ -n "$BACKUP_PASSPHRASE" ]; then
+            gpg --batch --symmetric --cipher-algo AES256 --passphrase "$BACKUP_PASSPHRASE" \
+                -o "db-backup-$STAMP.tar.gz.gpg" "db-backup-$STAMP.tar.gz"
+            rm "db-backup-$STAMP.tar.gz"
+            echo "🔐 بکاپ رمزنگاری شد"
+          else
+            echo "ℹ️ BACKUP_PASSPHRASE ست نیست — بکاپ بدون رمز آپلود می‌شود (ریپو خصوصی است ولی رمز توصیه می‌شود)"
+          fi
+          rm -rf db-snap
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: db-backup-*
+          retention-days: 30
+          if-no-files-found: error
+
+      # شکست بکاپ باید دیده شود — هم Issue (مثل Health) و هم تلگرام
+      - name: Telegram alert on failure
+        if: failure()
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="$OWNER" \
+            --data-urlencode text="🚨 بکاپ شبانه‌ی دیتابیس‌ها شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true

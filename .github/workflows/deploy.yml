@@ -3,6 +3,13 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # اجرای دستی: هم برای force_all، هم برای اعمالِ secretهای تازه‌ساخته بدون کامیت جدید
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: 'دیپلوی اجباری همه‌ی ربات‌ها (حتی بدون تغییر)'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -12,7 +19,7 @@ jobs:
         uses: appleboy/ssh-action@v1
         # تک‌منبعِ حقیقت برای همه‌ی کلیدها = GitHub Secrets.
         # برای هر ربات جدید: دو خط اینجا اضافه کن، نامش را به envs اضافه کن،
-        # یک بلوک materialize و یک deploy_bot در اسکریپت پایین بگذار.
+        # یک بلوک write_env و یک deploy_bot در اسکریپت پایین بگذار.
         env:
           # voice2text (اختیاری: تا وقتی این secretها تنظیم نشوند، .env فعلی روی سرور استفاده می‌شود)
           VOICE2TEXT_BOT_TOKEN:         ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
@@ -24,15 +31,23 @@ jobs:
           # tarot
           TAROT_BOT_TOKEN:              ${{ secrets.TAROT_BOT_TOKEN }}
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # اجرای دستی با force_all=true → همه ری‌دیپلوی می‌شوند
+          FORCE_ALL:                    ${{ github.event.inputs.force_all || 'false' }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
+            OLD_HEAD=$(git rev-parse HEAD)
             git pull --ff-only
+            NEW_HEAD=$(git rev-parse HEAD)
+            CHANGED_FILES=$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD" || echo "")
+            # تغییر زیرساخت مشترک → همه‌ی ربات‌ها ری‌دیپلوی می‌شوند
+            INFRA_CHANGED=0
+            if echo "$CHANGED_FILES" | grep -qE '^(ecosystem\.config\.cjs|shared/|\.github/workflows/deploy\.yml)'; then INFRA_CHANGED=1; fi
 
             # ---------- مهاجرت یک‌باره به ساختار مونوریپو (در دیپلوی‌های بعدی no-op) ----------
             NEED_MIGRATE=0
@@ -46,46 +61,169 @@ jobs:
             # ---------- ساخت .env هر ربات از روی GitHub Secrets ----------
             # قاعده: فقط وقتی توکنِ آن ربات ست شده باشد، .env نوشته/به‌روز می‌شود؛
             # در غیر این صورت .env موجود روی سرور دست‌نخورده می‌ماند (عدم‌شکستن رباتِ فعال).
+            # اگر محتوای .env عوض شود، همان ربات برای ری‌لود علامت می‌خورد (ENV_CHANGED).
+            ENV_CHANGED=""
+            write_env() { # $1=bot ، $2=محتوای کامل .env
+              mkdir -p "bots/$1"
+              ( umask 077; printf '%s\n' "$2" > "bots/$1/.env.new" )
+              if [ ! -f "bots/$1/.env" ] || ! cmp -s "bots/$1/.env.new" "bots/$1/.env"; then
+                mv "bots/$1/.env.new" "bots/$1/.env"
+                ENV_CHANGED="$ENV_CHANGED $1"
+                echo "🔑 $1/.env از روی secrets نوشته/به‌روز شد"
+              else
+                rm -f "bots/$1/.env.new"
+              fi
+            }
             if [ -n "$VOICE2TEXT_BOT_TOKEN" ] && [ -n "$VOICE2TEXT_OPENROUTER_KEY" ]; then
-              mkdir -p bots/voice2text
               # بکاپ یک‌باره از .env دستیِ سرور (شامل هر متغیر اضافه‌ای که ممکن است داشته باشد)
               [ -f bots/voice2text/.env ] && [ ! -f bots/voice2text/.env.bak ] && cp bots/voice2text/.env bots/voice2text/.env.bak || true
-              ( umask 077; {
-                echo "BOT_TOKEN=${VOICE2TEXT_BOT_TOKEN}"
-                echo "OPENROUTER_API_KEY=${VOICE2TEXT_OPENROUTER_KEY}"
-                [ -n "$VOICE2TEXT_NOTION_TOKEN" ] && echo "NOTION_TOKEN=${VOICE2TEXT_NOTION_TOKEN}"
-              } > bots/voice2text/.env )
-              echo "🔑 voice2text/.env از روی secrets نوشته شد (بکاپ: .env.bak)"
+              V2T_ENV="$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s' "$VOICE2TEXT_BOT_TOKEN" "$VOICE2TEXT_OPENROUTER_KEY")"
+              [ -n "$VOICE2TEXT_NOTION_TOKEN" ] && V2T_ENV="$(printf '%s\nNOTION_TOKEN=%s' "$V2T_ENV" "$VOICE2TEXT_NOTION_TOKEN")"
+              write_env voice2text "$V2T_ENV"
             fi
             if [ -n "$RESUME_TAILOR_BOT_TOKEN" ] && [ -n "$RESUME_TAILOR_OPENROUTER_KEY" ]; then
-              mkdir -p bots/resume-tailor; ( umask 077; {
-                echo "BOT_TOKEN=${RESUME_TAILOR_BOT_TOKEN}"
-                echo "OPENROUTER_API_KEY=${RESUME_TAILOR_OPENROUTER_KEY}"
-              } > bots/resume-tailor/.env )
-              echo "🔑 resume-tailor/.env از روی secrets نوشته شد"
+              write_env resume-tailor "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s' "$RESUME_TAILOR_BOT_TOKEN" "$RESUME_TAILOR_OPENROUTER_KEY")"
             fi
             if [ -n "$TAROT_BOT_TOKEN" ] && [ -n "$TAROT_OPENROUTER_KEY" ]; then
-              mkdir -p bots/tarot; ( umask 077; {
-                echo "BOT_TOKEN=${TAROT_BOT_TOKEN}"
-                echo "OPENROUTER_API_KEY=${TAROT_OPENROUTER_KEY}"
-                echo "LOCALE=fa"
-              } > bots/tarot/.env )
-              echo "🔑 tarot/.env از روی secrets نوشته شد"
+              write_env tarot "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
             fi
 
-            # ---------- نصب و استارت هر ربات (فقط اگر .env داشته باشد) ----------
+            # ---------- دیپلوی انتخابی: فقط ربات‌هایی که واقعاً تغییر کرده‌اند ----------
+            # خط قرمز: merge ای که به یک ربات ربطی ندارد نباید ربات‌های دیگر (خصوصاً voice2text) را ری‌استارت کند.
             deploy_bot() {
               name="$1"
-              if [ -f "bots/$name/.env" ]; then
-                npm ci --prefix "bots/$name" --omit=dev
-                pm2 startOrReload ecosystem.config.cjs --update-env --only "$name"
-                echo "✅ $name دیپلوی شد"
-              else
+              if [ ! -f "bots/$name/.env" ]; then
                 echo "ℹ️ bots/$name/.env نبود — $name رد شد (بدون اثر روی بقیه)"
+                return
               fi
+              reason=""
+              [ "$FORCE_ALL" = "true" ] && reason="force"
+              [ -z "$reason" ] && [ "$INFRA_CHANGED" = "1" ] && reason="infra"
+              # تغییر کد خود ربات (تغییر مستندات .md و .env.example ری‌استارت لازم ندارد)
+              if [ -z "$reason" ] && echo "$CHANGED_FILES" | grep -E "^bots/$name/" | grep -vE '\.(md|example)$' | grep -q .; then reason="code"; fi
+              case " $ENV_CHANGED " in *" $name "*) [ -z "$reason" ] && reason="env";; esac
+              # اگر ربات اصلاً در pm2 نیست (ربات تازه) → استارت
+              if [ -z "$reason" ] && ! pm2 jlist | grep -q "\"name\":\"$name\""; then reason="new-app"; fi
+              if [ -z "$reason" ]; then
+                echo "⏭ $name بدون تغییر — دست نخورد (ری‌استارت نشد)"
+                return
+              fi
+              npm ci --prefix "bots/$name" --omit=dev
+              pm2 startOrReload ecosystem.config.cjs --update-env --only "$name"
+              echo "✅ $name دیپلوی شد (دلیل: $reason)"
             }
             deploy_bot voice2text
             deploy_bot resume-tailor
             deploy_bot tarot
 
             pm2 save
+            echo "---- وضعیت نهایی ----"
+            pm2 ls
+
+      # اگر دیپلوی شکست بخورد، به تلگرام مالک پیام می‌رود (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
+      - name: Telegram alert on failure
+        if: failure()
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="$OWNER" \
+            --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+
+  # ---------- tabir-khab (استثنای مونوریپو: پایتون + systemd، نه pm2) ----------
+  # سرویس روی سرور همان‌جاست که همیشه بود: /home/ubuntu/tabir_khab با سرویسِ
+  # systemd به نام tabir-khab. این جاب فقط «محتوای» bots/tabir-khab را با
+  # git archive روی همان مسیر overlay می‌کند — .env و دیتابیس‌های SQLite و
+  # logs/ و .venv/ روی سرور دست‌نخورده می‌مانند — و بعد همان ری‌استارتِ
+  # همیشگی را می‌زند. جدا از جاب pm2 است تا خطای هرکدام به دیگری سرایت نکند.
+  # دیپلوی انتخابی: فقط وقتی bots/tabir-khab تغییر کرده باشد (یا force_all) ری‌استارت می‌شود.
+  deploy-tabir-khab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tabir-khab changed
+        id: changed
+        env:
+          FORCE_ALL: ${{ github.event.inputs.force_all || 'false' }}
+          BEFORE:    ${{ github.event.before }}
+        run: |
+          DEPLOY=1
+          if [ "${{ github.event_name }}" = "push" ] && [ "$FORCE_ALL" != "true" ] \
+             && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            if git diff --name-only "$BEFORE" "${{ github.sha }}" | grep -E '^bots/tabir-khab/' | grep -vE '\.md$' | grep -q .; then
+              DEPLOY=1
+            else
+              DEPLOY=0
+            fi
+          fi
+          echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
+          [ "$DEPLOY" = "1" ] && echo "🚀 tabir-khab دیپلوی می‌شود" || echo "⏭ tabir-khab بدون تغییر — ری‌استارت نشد"
+
+      - name: Deploy tabir-khab (overlay + restart)
+        if: steps.changed.outputs.deploy == '1'
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          # توکن‌های تلگرامِ per-language — هر کدام ست باشد در .env سرور upsert می‌شود؛
+          # خالی = دست‌نخورده. (فارسی از قبل با نامِ قدیمی TELEGRAM_BOT_TOKEN روی سرور است؛
+          # TABIR_TELEGRAM_BOT_TOKEN_FA فقط برای تعویضِ احتمالیِ آن است.)
+          T_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          T_EN: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_EN }}
+          T_AR: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_AR }}
+          T_RU: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_RU }}
+          T_ES: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_ES }}
+          T_PT: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_PT }}
+          T_BALE: ${{ secrets.TABIR_BALE_BOT_TOKEN }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
+          SSH="ssh -i $HOME/.ssh/deploy_key ubuntu@185.204.171.170"
+
+          # ۱) کد جدید را روی مسیر فعلی سرور overlay کن (فایل‌های untracked مثل .env/db دست نمی‌خورند)
+          git archive HEAD:bots/tabir-khab | $SSH 'mkdir -p /home/ubuntu/tabir_khab && tar -x -C /home/ubuntu/tabir_khab'
+
+          # ۲) upsertِ توکن‌ها در .env سرور — فقط کلیدهایی که در Secrets ست شده‌اند؛
+          #    بقیه‌ی .env (OPENROUTER_API_KEY, GAPGPT_API_KEY, پرداخت و...) دست نمی‌خورد.
+          #    مقادیر هرگز در لاگ چاپ نمی‌شوند (فقط نام کلید).
+          {
+            echo "TELEGRAM_BOT_TOKEN_FA=$T_FA"
+            echo "TELEGRAM_BOT_TOKEN_EN=$T_EN"
+            echo "TELEGRAM_BOT_TOKEN_AR=$T_AR"
+            echo "TELEGRAM_BOT_TOKEN_RU=$T_RU"
+            echo "TELEGRAM_BOT_TOKEN_ES=$T_ES"
+            echo "TELEGRAM_BOT_TOKEN_PT=$T_PT"
+            echo "BALE_BOT_TOKEN=$T_BALE"
+          } | $SSH 'umask 077
+            cd /home/ubuntu/tabir_khab
+            touch .env
+            [ -f .env.bak ] || cp .env .env.bak
+            while IFS= read -r line; do
+              key=${line%%=*}; val=${line#*=}
+              [ -n "$val" ] || continue
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+              else
+                printf "%s\n" "${key}=${val}" >> .env
+              fi
+              echo "🔑 ${key} از Secrets در .env ست شد"
+            done'
+
+          # ۳) وابستگی‌ها + ری‌استارت + چک سلامت (همان دستورهای دیپلوی قبلیِ این ربات)
+          $SSH 'set -e
+            cd /home/ubuntu/tabir_khab
+            which ffmpeg >/dev/null || sudo apt-get install -y -q ffmpeg < /dev/null
+            .venv/bin/pip install -q -r requirements.txt
+            sudo systemctl restart tabir-khab
+            sleep 2
+            sudo systemctl is-active tabir-khab
+            echo "✅ tabir-khab دیپلوی شد"'
