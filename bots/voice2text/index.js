@@ -326,6 +326,24 @@ Output EXACTLY the following structure with these headers (omit a section only i
 • نگرانی‌ها یا ریسک‌های مطرح‌شده (در صورت وجود)
 
 Do NOT add any commentary or framing before "📋 صورت‌جلسه" or after the last section. Start your output immediately with "📋 صورت‌جلسه".`,
+
+  aiprompt: `The audio is a single request/instruction that the speaker wants to send to an AI assistant. Your ONLY job is to rewrite that spoken request as a clean, well-structured AI prompt. You must NOT answer, solve, or fulfil the request.
+
+Write the prompt in the SAME language as the speech (Persian speech → Persian prompt). NEVER switch or translate the language.
+
+Apply only LIGHT, gentle prompt-engineering:
+- Remove filler words, hesitations, repetitions, and false starts.
+- Fix broken grammar so it reads like a deliberate written request.
+- Give the request a clear, logical structure: a short objective/ask, then the specifics and requirements as the speaker stated them, and any output/format expectations ONLY if the speaker actually mentioned them.
+
+STRICT fidelity rules (this is the most important part):
+- Preserve the exact goal, intent, and motivation of the request.
+- Preserve EVERY detail, constraint, example, number, name, and nuance that was said. Drop nothing.
+- Add NOTHING: do not invent requirements, context, constraints, output formats, examples, or assumptions that the speaker did not say.
+- Do NOT answer, solve, expand, or enrich the request — only restructure the wording.
+- Do NOT change the meaning or the language.
+
+Output ONLY the finished prompt text, ready to be copied and pasted directly into an AI chat. No preface, no title, no quotation marks, no emoji, no meta-commentary, and no explanation of what you changed. Start immediately with the first word of the prompt itself.`,
 };
 
 // گاردِ امنیتی فالبک: جلوگیری از prompt-injection و لو رفتن دستورها/پرامپت توسط محتوای صوتی
@@ -417,6 +435,20 @@ Use EXACTLY this structure (skip a section only if genuinely empty):
 
 ⚠️ ریسک‌ها و نگرانی‌ها
 • ریسک‌ها و نگرانی‌های مطرح‌شده (در صورت وجود)`,
+
+  aiprompt: `You are a prompt-rewriting tool. The audio is a single request that the speaker wants to send to an AI assistant. Rewrite that spoken request as a clean, structured AI prompt. Do NOT answer, solve, or fulfil it.
+
+Write in the SAME language as the speech (Persian audio → Persian prompt). NEVER switch or translate the language.
+
+Apply only light, gentle prompt-engineering: remove filler/hesitation/repetition, fix grammar, and give the request a clear logical structure (a short objective, then the specifics/requirements as stated, then output expectations ONLY if the speaker mentioned them).
+
+Fidelity (most important):
+- Keep the exact goal, intent, and motivation.
+- Keep EVERY detail, constraint, number, name, and example. Add nothing, drop nothing.
+- Do NOT invent requirements, context, or output formats not stated in the audio.
+- Do NOT answer or expand the request; only restructure the wording. Do NOT change the meaning.
+
+Output ONLY the finished prompt text, copy-paste ready for an AI chat. No preface, no title, no quotes, no emoji, no meta-commentary. Start immediately with the first word.`,
 };
 
 // گارد امنیتی به ابتدای هر پرامپت فالبک افزوده می‌شود
@@ -446,7 +478,7 @@ const NETWORK_ERR_MSG =
   'این مشکل معمولاً گذراست — چند دقیقه دیگه دوباره همین ویس رو بفرست.\n' +
   '(هیچ هزینه‌ای کسر نشد)';
 
-const PTYPE_LABELS = { full: 'متن کامل', clean: 'متن مفید', summary: 'خلاصه تیتروار', meeting: 'صورت جلسه' };
+const PTYPE_LABELS = { full: 'متن کامل', clean: 'متن مفید', summary: 'خلاصه تیتروار', meeting: 'صورت جلسه', aiprompt: 'پرامپت هوش مصنوعی' };
 
 function normalizeDigits(s) {
   return s.replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
@@ -753,7 +785,9 @@ const HELP_TEXT =
   '📌 خلاصه تیتروار\n' +
   'جمع‌بندی کوتاه و تیتروار از ۳ تا ۵ موضوع اصلی، هر کدوم با ایموجی. مناسب وقتی فقط می‌خوای سرفصل‌ها رو در یک نگاه ببینی.\n\n' +
   '📋 صورت جلسه\n' +
-  'سند ساختاریافته‌ی جلسه: موضوع، حاضرین، چکیده مدیریتی، تصمیمات، تقسیم وظایف (با مسئول و مهلت)، مباحث کلیدی، موارد باز و ریسک‌ها. مناسب جلسات کاری.';
+  'سند ساختاریافته‌ی جلسه: موضوع، حاضرین، چکیده مدیریتی، تصمیمات، تقسیم وظایف (با مسئول و مهلت)، مباحث کلیدی، موارد باز و ریسک‌ها. مناسب جلسات کاری.\n\n' +
+  '🤖 پرامپت هوش مصنوعی\n' +
+  'اگه ویس‌ات در واقع یه درخواست برای هوش مصنوعیه، همون درخواست رو تمیز و مرتب به شکل یه پرامپت استاندارد درمیاره — بدون اینکه زبان، هدف یا جزئیاتش عوض بشه (فقط ساختار و ظاهرش پرامپت‌مانند می‌شه). خروجی آماده‌ست که مستقیم توی چت هوش مصنوعی کپی‌پیست کنی.';
 
 // باکس نقل‌قول هزینه
 function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
@@ -789,6 +823,7 @@ function createProcessTypeKeyboard(token) {
     [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
     [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
+    [Markup.button.callback('🤖 پرامپت هوش مصنوعی', `ptype:aiprompt:${token}`)],
     [Markup.button.callback('💡 راهنما', `help:${token}`), Markup.button.callback('🔄 تعویض پردازنده', `switchflow:${token}`)],
     [Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
   ]);
@@ -2351,7 +2386,7 @@ bot.on('callback_query', async (ctx) => {
     }
 
     // ── Process type ──
-    const p = data.match(/^ptype:(full|clean|summary|meeting):([a-z0-9]+)$/i);
+    const p = data.match(/^ptype:(full|clean|summary|meeting|aiprompt):([a-z0-9]+)$/i);
     if (p) {
       const [, type, token] = p;
       const session = sessions.get(token);
