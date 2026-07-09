@@ -1,10 +1,13 @@
-// مالی: پرداخت‌های همه‌ی ربات‌ها با فیلتر وضعیت/بازه + خروجی CSV (با ثبت در audit) + دفتر ممیزی
-import { instances, getInstance, withDb, hasTable, rows } from '../lib/bots.js';
+// مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
+// هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
+// این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
+import { instances, getInstance, withDb, hasTable, rows, moneyOf, unixOf, toToman } from '../lib/bots.js';
 import { listAudit, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
 
-const STATUSES = ['', 'pending', 'waiting_review', 'approved', 'rejected', 'cancelled', 'canceled'];
+// وضعیت‌های همه‌ی مدل‌های مالی (کیف‌پول + اشتراک tabir)
+const STATUSES = ['', 'pending', 'waiting_review', 'approved', 'paid', 'rejected', 'cancelled', 'canceled'];
 
 function readFilters(url) {
   const instId = url.searchParams.get('inst') || '';
@@ -13,22 +16,33 @@ function readFilters(url) {
   return { instId, status, days };
 }
 
+// یک رکورد نرمالِ مشترک برای همه‌ی ربات‌ها (مبلغ به تومان)
 function collectPayments({ instId, status, days }) {
   const since = days ? nowSec() - days * 86400 : 0;
   const targets = instId ? [getInstance(instId)].filter(Boolean) : instances();
   const all = [];
   for (const inst of targets) {
     withDb(inst.file, (db) => {
-      if (!hasTable(db, 'payments')) return;
-      const conds = ['created_at >= ?'];
+      const m = moneyOf(inst.bot);
+      if (!hasTable(db, m.table)) return;
+      const catExpr = unixOf(m.createdKind, 'created_at');
+      const conds = [`${catExpr} >= ?`];
       const params = [since];
       if (status) { conds.push('status = ?'); params.push(status); }
-      for (const p of rows(db, `SELECT * FROM payments WHERE ${conds.join(' AND ')} ORDER BY id DESC LIMIT 300`, params)) {
-        all.push({ inst, p });
+      for (const p of rows(db, `SELECT *, ${catExpr} AS _cat FROM ${m.table} WHERE ${conds.join(' AND ')} ORDER BY id DESC LIMIT 300`, params)) {
+        const uat = p.updated_at != null ? (m.createdKind === 'iso' ? Math.floor(Date.parse(p.updated_at) / 1000) || null : p.updated_at) : null;
+        all.push({
+          inst, id: p.id, userId: p.user_id,
+          amount: toToman(inst.bot, p[m.amountCol]),
+          original: p.original_amount != null ? toToman(inst.bot, p.original_amount) : null,
+          status: p.status,
+          step: p.step ?? (p.tier ? `اشتراک ${p.tier}` : null), // tabir: به‌جای مرحله، نوع اشتراک
+          created: p._cat, updated: uat || p._cat,
+        });
       }
     });
   }
-  all.sort((a, b) => b.p.created_at - a.p.created_at);
+  all.sort((a, b) => b.created - a.created);
   return all;
 }
 
@@ -37,7 +51,7 @@ export function financeBody(url) {
   const all = collectPayments(f);
 
   const totals = {};
-  for (const { p } of all) {
+  for (const p of all) {
     totals[p.status] = totals[p.status] || { c: 0, s: 0 };
     totals[p.status].c += 1; totals[p.status].s += p.amount || 0;
   }
@@ -57,15 +71,15 @@ export function financeBody(url) {
     <a href="/finance.csv?inst=${encodeURIComponent(f.instId)}&status=${f.status}&days=${f.days}"><button type="button" class="ghost">⬇ CSV</button></a>
   </form>`;
 
-  const rowsHtml = all.slice(0, 150).map(({ inst, p }) => [
-    esc(inst.title),
+  const rowsHtml = all.slice(0, 150).map((p) => [
+    esc(p.inst.title),
     `#${p.id}`,
-    `<a href="/support/user?inst=${encodeURIComponent(inst.id)}&id=${p.user_id}" class="mono">${p.user_id}</a>`,
-    fmt(p.amount) + ' ت' + (p.original_amount && p.original_amount !== p.amount ? ` <span class="muted">(اصل ${fmt(p.original_amount)})</span>` : ''),
+    `<a href="/support/user?inst=${encodeURIComponent(p.inst.id)}&id=${p.userId}" class="mono">${p.userId}</a>`,
+    fmt(p.amount) + ' ت' + (p.original && p.original !== p.amount ? ` <span class="muted">(اصل ${fmt(p.original)})</span>` : ''),
     statusBadge(p.status),
     esc(p.step || '-'),
-    tehranDateTime(p.created_at),
-    tehranDateTime(p.updated_at),
+    tehranDateTime(p.created),
+    tehranDateTime(p.updated),
   ]);
 
   const auditHtml = table(
@@ -76,8 +90,8 @@ export function financeBody(url) {
 
   return `<div class="card"><h2>💰 مالی</h2>${filterForm}<div class="grid" style="margin-top:12px">${totalsHtml}</div></div>
   <div class="card"><h2>پرداخت‌ها (${fmt(all.length)}${all.length > 150 ? ' — نمایش ۱۵۰ ردیف اول' : ''})</h2>
-  ${table(['ربات', 'شماره', 'کاربر', 'مبلغ', 'وضعیت', 'مرحله', 'ساخت', 'به‌روزرسانی'], rowsHtml)}
-  <p class="muted">«مرحله» یعنی کاربر تا کجای فلوی شارژ رفته (نقطه‌ی رها کردن). مبلغ = پرداخت واقعی بعد از تخفیف.</p></div>
+  ${table(['ربات', 'شماره', 'کاربر', 'مبلغ', 'وضعیت', 'مرحله/اشتراک', 'ساخت', 'به‌روزرسانی'], rowsHtml)}
+  <p class="muted">مبلغ همه‌جا به تومان (اشتراک‌های ریالیِ تعبیر خواب ÷۱۰ شده‌اند). پرداخت واقعی بعد از تخفیف؛ پرداخت‌های تستی تعبیر خواب (SKIP/SIMULATED) در «درآمد» نمای کلی نمی‌آیند ولی این‌جا برای شفافیت دیده می‌شوند.</p></div>
   <div class="card"><h2>🧾 دفتر ممیزی داشبورد (writeها و exportها)</h2>${auditHtml}</div>`;
 }
 
@@ -85,9 +99,9 @@ export function financeCsv(url) {
   const f = readFilters(url);
   const all = collectPayments(f);
   audit('export.csv', 'finance', `inst=${f.instId || 'all'} status=${f.status || 'all'} days=${f.days} rows=${all.length}`);
-  const header = 'bot,payment_id,user_id,amount,original_amount,status,step,created_at,updated_at';
-  const lines = all.map(({ inst, p }) =>
-    [inst.id, p.id, p.user_id, p.amount ?? '', p.original_amount ?? '', p.status ?? '', p.step ?? '', p.created_at ?? '', p.updated_at ?? '']
+  const header = 'bot,payment_id,user_id,amount_toman,original_toman,status,step,created_at,updated_at';
+  const lines = all.map((p) =>
+    [p.inst.id, p.id, p.userId, p.amount ?? '', p.original ?? '', p.status ?? '', p.step ?? '', p.created ?? '', p.updated ?? '']
       .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
   return [header, ...lines].join('\n');
 }

@@ -1,6 +1,6 @@
 // تست‌ها (A/B): ساخت/اجرا/توقف نرم/kill/تصمیم + نتایج آماری صادقانه برای نمونه‌ی کم.
 // config آزمایش در DB خود ربات نوشته می‌شود (ربات با کش ۶۰ثانیه‌ای می‌خواند — توقف بدون deploy).
-import { instances, getInstance, withDb, withWritableDb, hasTable, scalar, rows } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported } from '../lib/bots.js';
 import { ensureAb } from '../../../shared/ab.js';
 import { chanceToWin, rateCI, srmCheck, meanSE, MIN_SAMPLE, SHIP_CTW } from '../lib/stats.js';
 import { audit, listCampaigns } from '../lib/platform.js';
@@ -24,7 +24,10 @@ function listExperiments() {
 
 /* ---------- صفحه‌ی فهرست + فرم ساخت ---------- */
 export function experimentsBody() {
-  const instOptions = instances().map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join('');
+  // فقط ربات‌هایی که variant() را سیم‌کشی کرده‌اند (abSupport) قابل تست‌اند
+  const abInstances = instances().filter(i => abSupported(i.bot));
+  const instOptions = abInstances.map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join('')
+    || '<option value="">(هیچ رباتی هنوز A/B را سیم‌کشی نکرده)</option>';
   const form = `<div class="card"><h2>➕ آزمایش جدید</h2>
   <form method="post" action="/experiments/create" class="inline">
     <label>ربات<select name="inst">${instOptions}</select></label>
@@ -228,6 +231,7 @@ export function experimentViewBody(url) {
 export function experimentCreate(body) {
   const inst = getInstance(body.get('inst') || '');
   if (!inst) throw new Error('ربات نامعتبر');
+  if (!abSupported(inst.bot)) throw new Error('این ربات هنوز A/B را سیم‌کشی نکرده (variant() در کدش نیست)');
   const key = (body.get('key') || '').trim();
   if (!/^[a-z0-9_]{3,48}$/.test(key)) throw new Error('کلید فقط حروف کوچک/عدد/underscore');
   const mode = body.get('mode') === 'switchover' ? 'switchover' : 'split';

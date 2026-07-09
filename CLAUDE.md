@@ -12,7 +12,7 @@
 | پوشه | پروسه | شرح | حساسیت | جزئیات |
 |------|-------|-----|--------|--------|
 | `bots/voice2text` | pm2: `voice2text` | ویس→متن، کیف‌پول/پرداخت | **زنده و درآمدزا — هرگز نباید بشکند؛ از shared استفاده نمی‌کند** | `bots/voice2text/CLAUDE.md` |
-| `bots/resume-tailor` | pm2: `resume-tailor` | رزومه‌ی انگلیسی کاستومایز per آگهی | فاز تست | `bots/resume-tailor/CLAUDE.md` |
+| `bots/resume-tailor` | pm2: `resume-tailor` | رزومه‌ی انگلیسی کاستومایز per آگهی | **در حال حذف** (از داشبورد برداشته شد؛ بعداً از ریپو هم) | `bots/resume-tailor/CLAUDE.md` |
 | `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت | فاز تست | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | در حال تست شخصی — روی سرور زنده است | `bots/tabir-khab/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
@@ -66,12 +66,31 @@
 بعد از merge، نتیجه‌ی workflow `Deploy` را ببین (لاگ خطوط `✅ <bot> دیپلوی شد (دلیل: ...)` و `⏭ <bot> بدون تغییر` دارد). بعد با workflow `Ops` (action=`status`) صحت را خودت تأیید کن. برای تست واقعی محصول (ارسال ویس، /start و…) از کاربر بخواه.
 **Rollback کد:** `git revert` کامیت مشکل‌دار → merge. **Rollback کلید:** Secret را اصلاح کن → اجرای `Deploy` با `force_all=true` (نیازی به کامیت خالی نیست؛ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستی قدیمی را دارد). **Rollback دیتابیس:** بند ۸ب.
 
-## ۵) افزودن ربات جدید (چک‌لیست)
-1. `cp -r bots/_template bots/<name>` → طبق `bots/_template/README.md` کامل کن (`npm install` برای lockfile، `CLAUDE.md` مخصوص ربات).
+## ۵) افزودن ربات جدید (چک‌لیست کامل — روی زیرساخت رشد)
+> هدف: ربات جدید از روز اول اتریبیوشن/فانل/A-B/مالی/پشتیبانی را در داشبورد داشته باشد، **بدون دوباره‌کاری**. `_template` از قبل همه‌ی این‌ها را سیم‌کشی کرده؛ فقط track ها و ردیف رجیستری را اضافه کن.
+
+**الف) ساخت از قالب**
+1. `cp -r bots/_template bots/<name>` → `<NAME>`/`tg-NAME` را جایگزین کن، `npm install` (برای lockfile)، `bots/<name>/CLAUDE.md` بساز، README قالب را با README واقعی جایگزین کن.
 2. `ecosystem.config.cjs`: `{ name: '<name>', cwd: 'bots/<name>', script: 'index.js' }`.
 3. `ci.yml`: نام به ماتریس `bot:`.
-4. `deploy.yml`: دو خط `env:`، افزودن نام‌ها به `envs:`، یک بلوک `write_env <name>` و یک `deploy_bot <name>`.
-5. کاربر فقط دو Secret می‌سازد (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`). بقیه با merge خودکار است.
+4. `deploy.yml`: دو خط `env:` (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`)، افزودن به `envs:`، یک بلوک `write_env <name>`، یک `deploy_bot <name>`.
+5. کاربر فقط دو Secret می‌سازد (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`).
+
+**ب) زیرساخت رشد در کد ربات** (قالب از قبل دارد — فقط track ها را بگذار)
+6. `ensureAnalytics(db)` + `ensureAb(db)` بعد از ساخت جدول users (در قالب هست).
+7. `captureStart(db, uid, ctx.startPayload, isNew)` در `bot.start` (در قالب هست).
+8. **track در نقاط فانل** با ثابت‌های `EVENTS` (نه string خام): حداقل `onboard_done`, `first_value` (با `trackOnce`), و اگر پولی است `paywall_shown`/`recharge_started`/`receipt_submitted`/`payment_approved`/`payment_rejected`/`product_delivered`. رویداد اختصاصی مجاز است (snake_case) ولی نباید هم‌معنی هسته باشد.
+9. **A/B (اختیاری):** هرجا فرضیه داری با `variant(db, uid, 'key')` شاخه بزن (تا از داشبورد running نشود = control). و در رجیستری داشبورد `abSupport: true` بده.
+10. `wipeUser` جدول‌های `events` و `ab_exposures` را هم پاک کند (در قالب هست).
+
+**ج) قرارداد schema تا داشبورد «خودکار» کار کند** (`bots/dashboard/lib/bots.js`)
+11. یک ردیف به `BOTS` اضافه کن. اگر قرارداد پیش‌فرض را رعایت کنی (کاری که قالب می‌کند)، ردیف مینیمال است:
+    `{ key, title, dataDir: '../<name>/data', pattern: /^bot\.db$/, userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET }`.
+    - **پول:** اگر جدول `payments` با ستون‌های `amount`/`status`(`waiting_review`→`approved`)/`created_at`(unix) داری → `money: MONEY_WALLET` و مالی/درآمد/صف‌رسید خودکار کار می‌کند. اگر مدل پولت فرق دارد (مثل tabir: جدول `transactions`، `amount_rial`، status `paid`، ریال، `created_at` ISO، پرداخت تستی) → یک آبجکت `money` سفارشی بده (نمونه در همان فایل). پروفایل تفاوت‌ها را می‌پوشاند؛ **هیچ route ای را دست نزن.**
+    - **فانل:** یک entry در `FUNNELS` (`bots/dashboard/routes/funnels.js`) با مراحل رویدادی + (اختیاری) `entity` برای توزیع وضعیت رکوردهای قطعی (مثل readings/dreams؛ اگر ستون status نیست `statusExpr` بده).
+12. اگر ربات پایتونی است (استثنای مونوریپو مثل tabir): از `bots/tabir-khab/analytics.py` (پورت هم‌قرارداد) الگو بگیر؛ `ANALYTICS_SCHEMA_VERSION` و قطعه‌های قرارداد باید با shared یکی بمانند (چک CI: `tools/check-analytics-sync.mjs`). مسیر DB مطلق را با `dataDir` مطلق + `envDir` در رجیستری بده.
+
+**قرارداد طلایی داشبورد:** داشبورد هیچ‌جا مقدار schema را hardcode نمی‌کند؛ همه از پروفایلِ `lib/bots.js` می‌آید (`userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `toToman`, `revenueWhere`, `abSupported`). ربات جدیدی که قرارداد را رعایت کند با **یک ردیف رجیستری** کامل در داشبورد ظاهر می‌شود.
 
 ## ۶) محدودیت‌ها و نکات حیاتی
 - **voice2text نباید بشکند** — تغییراتش کمینه و افزایشی؛ refactor فقط با تصمیم صریح کاربر؛ از `shared/` استفاده نمی‌کند (خودکفاست).

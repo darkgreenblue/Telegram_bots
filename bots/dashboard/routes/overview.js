@@ -1,5 +1,5 @@
 // نمای کلی: وضعیت هر ربات (کاربر/فعال/درآمد به وقت تهران) + سلامت عملیاتی (صف رسید، حجم DB)
-import { instances, withDb, hasTable, scalar, rows, dbSizes } from '../lib/bots.js';
+import { instances, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman } from '../lib/bots.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
 import { stat } from '../lib/html.js';
 import { EVENTS } from '../../../shared/analytics.js';
@@ -25,17 +25,21 @@ export function overviewBody() {
   for (const inst of insts) {
     const s = withDb(inst.file, (db) => {
       const ev = hasTable(db, 'events');
-      const pay = hasTable(db, 'payments');
+      const m = moneyOf(inst.bot);
+      const pay = hasTable(db, m.table);
+      const uCreated = userCreatedExpr(inst.bot);
+      const rw = revenueWhere(inst.bot);
+      const rev = (since) => toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${rw.amountCol}),0) s FROM ${rw.table} WHERE ${rw.where}`, [since]));
       return {
         users: scalar(db, 'SELECT COUNT(*) c FROM users'),
-        newToday: scalar(db, 'SELECT COUNT(*) c FROM users WHERE created_at >= ?', [today]),
-        newWeek: scalar(db, 'SELECT COUNT(*) c FROM users WHERE created_at >= ?', [week]),
+        newToday: scalar(db, `SELECT COUNT(*) c FROM users WHERE ${uCreated} >= ?`, [today]),
+        newWeek: scalar(db, `SELECT COUNT(*) c FROM users WHERE ${uCreated} >= ?`, [week]),
         dau: ev ? scalar(db, 'SELECT COUNT(DISTINCT user_id) c FROM events WHERE created_at >= ?', [today]) : null,
         wau: ev ? scalar(db, 'SELECT COUNT(DISTINCT user_id) c FROM events WHERE created_at >= ?', [week]) : null,
-        revToday: pay ? scalar(db, "SELECT COALESCE(SUM(amount),0) s FROM payments WHERE status='approved' AND created_at >= ?", [today]) : null,
-        revMonth: pay ? scalar(db, "SELECT COALESCE(SUM(amount),0) s FROM payments WHERE status='approved' AND created_at >= ?", [month]) : null,
-        revTotal: pay ? scalar(db, "SELECT COALESCE(SUM(amount),0) s FROM payments WHERE status='approved'") : null,
-        waitingReview: pay ? scalar(db, "SELECT COUNT(*) c FROM payments WHERE status='waiting_review'") : null,
+        revToday: pay ? rev(today) : null,
+        revMonth: pay ? rev(month) : null,
+        revTotal: pay ? toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${m.amountCol}),0) s FROM ${m.table} WHERE status='${m.successStatus}'${m.testFilter ? ` AND ${m.testFilter}` : ''}`)) : null,
+        waitingReview: pay ? scalar(db, `SELECT COUNT(*) c FROM ${m.table} WHERE status='${m.pendingStatus}'`) : null,
       };
     });
     const sizes = dbSizes(inst.file);

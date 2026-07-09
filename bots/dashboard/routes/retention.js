@@ -1,6 +1,6 @@
 // ریتنشن: مثلث هفتگی (کوهورت = هفته‌ی ورود کاربر؛ بازگشت = هر رویدادی در هفته‌های بعد)
 // + خلاصه‌ی lifecycle هفته‌ی جاری (جدید/برگشتی/خفته). هفته‌ها تقویم تهران، شروع از شنبه.
-import { instancesOf, BOTS, withDb, hasTable, rows } from '../lib/bots.js';
+import { instancesOf, BOTS, withDb, hasTable, rows, userPk, userCreatedExpr } from '../lib/bots.js';
 import { fmt, esc } from '../lib/util.js';
 import { table, stat } from '../lib/html.js';
 
@@ -18,9 +18,11 @@ function botRetention(botKey, weeksBack = 8) {
   const activeSets = new Map(); // `${w}:${off}` -> Set
   let lastWeekActive = new Set(), thisWeekActive = new Set(), thisWeekNew = 0;
 
+  const pk = userPk(botKey);
+  const createdExpr = userCreatedExpr(botKey);
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
-      for (const u of rows(db, 'SELECT telegram_id id, created_at c FROM users')) {
+      for (const u of rows(db, `SELECT ${pk} id, ${createdExpr} c FROM users`)) {
         const w = weekIdx(u.c);
         cohortOf.set(`${inst.id}:${u.id}`, w);
         if (w >= firstW) cohortSize.set(w, (cohortSize.get(w) || 0) + 1);

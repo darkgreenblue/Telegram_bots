@@ -3,7 +3,7 @@
 //    فقط از زمان نصب آنالیتیکس دیتا دارد — برای voice2text یعنی رفتار کاربران قدیمی را نشان نمی‌دهد.
 // ۲) توزیع وضعیت رکوردهای قطعی per-entity (readings/voice_flows/payments.step): بدون بایاس snapshot،
 //    شامل کاربران قبل از آنالیتیکس. (هیچ عددی از users.state ساخته نمی‌شود — state فقط «الان» را می‌گوید.)
-import { instancesOf, withDb, hasTable, scalar, rows } from '../lib/bots.js';
+import { instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf } from '../lib/bots.js';
 import { fmt, esc, nowSec } from '../lib/util.js';
 import { table } from '../lib/html.js';
 
@@ -36,13 +36,16 @@ export const FUNNELS = {
     ],
     entity: { table: 'voice_flows', title: 'وضعیت فلوهای ویس (رکورد قطعی — شامل قبل از آنالیتیکس)' },
   },
-  'resume-tailor': {
-    title: '📄 رزومه‌ساز',
+  'tabir-khab': {
+    title: '🌙 تعبیر خواب',
     steps: [
       ['start', 'استارت'],
-      ['onboard_done', 'پروفایل ساخته شد'],
-      ['product_delivered', 'رزومه تحویل شد'],
+      ['first_value', 'اولین تعبیر (تریال)'],
+      ['product_delivered', 'تعبیر کامل'],
+      ['payment_approved', 'پرداخت اشتراک'],
     ],
+    // dreams ستون status ندارد → از full_delivered یک برچسب می‌سازیم
+    entity: { table: 'dreams', title: 'وضعیت خواب‌ها', statusExpr: "CASE WHEN full_delivered=1 THEN 'delivered' WHEN is_free_trial=1 THEN 'trial_preview' ELSE 'pending' END" },
   },
 };
 
@@ -56,12 +59,13 @@ const CHANNELS = [
 
 function stepCounts(botKey, event, since) {
   const out = CHANNELS.map(() => 0);
+  const pk = userPk(botKey);
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'events')) return;
       CHANNELS.forEach(([, cond], i) => {
         out[i] += scalar(db, `SELECT COUNT(DISTINCT e.user_id) c FROM events e
-          JOIN users u ON u.telegram_id = e.user_id
+          JOIN users u ON u.${pk} = e.user_id
           WHERE e.event = ? AND e.created_at >= ? AND ${cond}`, [event, since]);
       });
     });
@@ -69,12 +73,16 @@ function stepCounts(botKey, event, since) {
   return out;
 }
 
-function entityStatuses(botKey, tableName, since) {
+// وضعیت رکوردهای قطعی. برخی جدول‌ها ستون status ندارند (dreams: full_delivered) —
+// statusExpr سفارشی از FUNNELS.entity گرفته می‌شود؛ created_at هم بسته به فرمت نرمال می‌شود.
+function entityStatuses(botKey, entity, since) {
   const merged = new Map();
+  const statusExpr = entity.statusExpr || 'status';
+  const catExpr = unixOf(botKey === 'tabir-khab' ? 'iso' : 'unix', 'created_at');
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
-      if (!hasTable(db, tableName)) return;
-      for (const r of rows(db, `SELECT status, COUNT(*) c FROM ${tableName} WHERE created_at >= ? GROUP BY status`, [since])) {
+      if (!hasTable(db, entity.table)) return;
+      for (const r of rows(db, `SELECT ${statusExpr} status, COUNT(*) c FROM ${entity.table} WHERE ${catExpr} >= ? GROUP BY ${statusExpr}`, [since])) {
         merged.set(r.status, (merged.get(r.status) || 0) + r.c);
       }
     });
@@ -83,13 +91,17 @@ function entityStatuses(botKey, tableName, since) {
 }
 
 function paymentSteps(botKey, since) {
-  // نقطه‌ی رها کردن فلوی شارژ: payments.step روی پرداخت‌های ناتمام (pending/canceled)
+  // نقطه‌ی رها کردن فلوی شارژ: step روی پرداخت‌های ناتمام (فقط ربات‌های کیف‌پولی step دارند)
   const merged = new Map();
+  const m = moneyOf(botKey);
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
-      if (!hasTable(db, 'payments')) return;
-      for (const r of rows(db, `SELECT COALESCE(step,'-') step, COUNT(*) c FROM payments
-          WHERE created_at >= ? AND status IN ('pending','canceled','cancelled') GROUP BY step`, [since])) {
+      if (!hasTable(db, m.table)) return;
+      const cols = db.prepare(`PRAGMA table_info(${m.table})`).all().map(c => c.name);
+      if (!cols.includes('step')) return; // tabir transactions مرحله ندارد
+      const catExpr = unixOf(m.createdKind, 'created_at');
+      for (const r of rows(db, `SELECT COALESCE(step,'-') step, COUNT(*) c FROM ${m.table}
+          WHERE ${catExpr} >= ? AND status IN ('pending','canceled','cancelled') GROUP BY step`, [since])) {
         merged.set(r.step, (merged.get(r.step) || 0) + r.c);
       }
     });
@@ -138,7 +150,7 @@ export function funnelsBody(url) {
       })()}</div>`;
     }
     if (f.entity) {
-      const st = entityStatuses(botKey, f.entity.table, since);
+      const st = entityStatuses(botKey, f.entity, since);
       out += `<div class="card"><h2>${esc(f.title)} — ${esc(f.entity.title)}</h2>
       ${table(['وضعیت', 'تعداد'], st.map(([s, c]) => [esc(String(s)), fmt(c)]), 'رکوردی نیست.')}</div>`;
     }
