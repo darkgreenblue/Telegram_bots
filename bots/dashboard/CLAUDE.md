@@ -22,7 +22,7 @@
 ## صفحات
 | مسیر | چیست |
 |------|------|
-| `/` | نمای کلی per ربات: کاربر/جدید/DAU/WAU (از events)، درآمد امروز/۳۰روز/کل (payments approved، **مرز روز = تهران** با `tehranDayStart`)، صف رسید waiting_review، حجم DB+WAL |
+| `/` | نمای کلی per ربات: کاربر/جدید/DAU/WAU (از events)، درآمد امروز/۳۰روز/کل (per پروفایلِ مالی، **مرز روز = تهران**، ریال tabir به تومان و پرداخت تستی حذف)، صف رسید معلق، حجم DB+WAL + ویجت رویدادهای خارج از واژه‌نامه |
 | `/marketing` | ساخت لینک کمپین (`t.me/<bot>?start=c_<code>`) + جدول کمپین‌ها با قیف تا-درآمد (استارت کل / کاربر جدید first-touch / **کلیک برگشتی** / first_value / پی‌وال / خریدار+درآمد) + مقایسه‌ی چنل‌ها (کمپین/رفرال/ارگانیک از `users.first_source`) + فرم یوزرنیم ربات‌ها |
 | `/support` | سرچ id/username در همه‌ی instance ها (id مرجع است؛ username فقط hint) → پروفایل (همه‌ی ستون‌های users بجز session_json) + **تایم‌لاین معکوس** merge شده: events + payments + readings (tarot) + usage_log/voice_flows (voice2text) + generations (resume-tailor) |
 | `/finance` | پرداخت‌های همه‌ی ربات‌ها با فیلتر ربات/وضعیت/بازه + جمع per وضعیت + CSV (با ثبت در audit) + جدول audit_log |
@@ -34,8 +34,21 @@
 
 نکته‌ی تحلیلی: «درآمد» = `SUM(amount)` یعنی پول واقعاً پرداخت‌شده بعد از تخفیف (همان قرارداد /stats خود ربات‌ها)؛ `original_amount` مبلغ شارژ کیف‌پول است.
 
-## instance ها
-هر فایل db یک instance است: `voice2text:bot.db`، `tarot:bot-fa.db` (per locale)، `resume-tailor:bot.db`. رجیستری در `lib/bots.js` (`BOTS`) — ربات جدید = یک خط آن‌جا. id ها هرگز مستقیم به مسیر تبدیل نمی‌شوند (ضد path traversal). tabir-khab فاز بعد (`TABIR_DB_GLOB`).
+## instance ها و «پروفایل schema» (مهم‌ترین قرارداد افزودن ربات)
+هر فایل db یک instance است: `voice2text:bot.db`، `tarot:bot-fa.db` (per locale)، `tabir-khab:tabir_telegram.db` و بقیه‌ی فایل‌های per زبان. رجیستری در `lib/bots.js` (`BOTS`). id ها هرگز مستقیم به مسیر تبدیل نمی‌شوند (ضد path traversal).
+
+**هیچ route ای مقدار schema را hardcode نمی‌کند** — همه از پروفایلِ هر ربات می‌آید تا افزودن ربات = یک ردیف رجیستری باشد:
+| فیلد پروفایل | چیست | پیش‌فرض |
+|------|------|--------|
+| `userPk` | ستون کلید کاربر | `telegram_id` (tabir: `user_id`) |
+| `userNameCol` | ستون نام نمایشی (پشتیبانی) | `name` (tabir: `first_name`) |
+| `userCreatedKind` | فرمت `users.created_at` | `unix` (tabir: `iso`) |
+| `money` | `{table, amountCol, successStatus, pendingStatus, unit, createdKind, testFilter}` | `MONEY_WALLET` (payments/amount/approved/waiting_review/تومان/unix). tabir: transactions/amount_rial/paid/pending/ریال/iso/حذفِ charge_id تستی |
+| `dataDir` + `envDir` | مسیر db (نسبی یا مطلقِ سرور + env override) | نسبی `../<name>/data`؛ tabir مطلق `/home/ubuntu/tabir_khab` + `TABIR_DB_DIR` |
+| `idFromFile` | برچسب instance از نام فایل (locale/platform) | — |
+| `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
+
+helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`. جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
 
 ## env
 `DASHBOARD_TOKEN`* (توکن ورود — همان Secret)، `PORT` (پیش‌فرض 8787). Secrets مرتبط دیپلوی: `DASHBOARD_TOKEN`*, `CLOUDFLARE_TUNNEL_TOKEN` (اختیاری)، `OWNER_TELEGRAM_ID` (گیرنده‌ی آدرس تونل).

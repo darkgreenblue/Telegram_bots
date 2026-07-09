@@ -9,6 +9,10 @@ import { log, logErr } from '../../shared/logger.js';
 import { createOpenRouter, parseJsonLoose } from '../../shared/llm.js';
 import { RESET_TEST_BTN, registerTestReset } from '../../shared/reset.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
+// زیرساخت رشد (اتریبیوشن + A/B) — از قبل سیم‌کشی شده؛ فقط track ها را در نقاط فانل بگذار.
+// جزئیات کامل: بند «افزودن ربات جدید» در CLAUDE.md ریشه.
+import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
+import { ensureAb, variant } from '../../shared/ab.js';
 
 /* ===== ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -41,14 +45,20 @@ db.exec(`
     last_seen   INTEGER DEFAULT (unixepoch())
   );
 `);
+// زیرساخت رشد: جدول events + ستون‌های first_source/first_payload + جدول‌های A/B.
+// قرارداد داشبورد: users با PK به نام telegram_id و created_at از نوع unix (پیش‌فرض داشبورد).
+ensureAnalytics(db);
+ensureAb(db);
 function upsertUser(ctx) {
   db.prepare(`INSERT INTO users (telegram_id, name, username) VALUES (?, ?, ?)
               ON CONFLICT(telegram_id) DO UPDATE SET name=excluded.name, username=excluded.username, last_seen=unixepoch()`)
     .run(ctx.from.id, ctx.from.first_name || '', ctx.from.username || '');
 }
-// همه‌ی جدول‌های کاربرمحور این ربات را اینجا پاک کن (قرارداد دکمه‌ی ریست تست)
+// همه‌ی جدول‌های کاربرمحور این ربات را اینجا پاک کن (قرارداد دکمه‌ی ریست تست) — events/ab_exposures هم
 function wipeUser(uid) {
-  db.prepare('DELETE FROM users WHERE telegram_id=?').run(uid);
+  for (const [t, col] of [['users','telegram_id'],['events','user_id'],['ab_exposures','user_id']]) {
+    try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
+  }
 }
 
 /* ===== Bot ===== */
@@ -57,7 +67,10 @@ bot.catch(makeBotCatch());
 registerGlobalErrorHandlers('<NAME>');
 
 async function handleStart(ctx) {
+  const before = db.prepare('SELECT 1 FROM users WHERE telegram_id=?').get(ctx.from.id);
   upsertUser(ctx);
+  // اتریبیوشن: رویداد start برای هر /start + first_source فقط برای کاربر جدید (write-once)
+  captureStart(db, ctx.from.id, ctx.startPayload, !before);
   const kb = TEST_PHASE ? Markup.keyboard([[RESET_TEST_BTN]]).resize() : undefined;
   await ctx.reply('👋 سلام! TODO: پیام خوش‌آمد محصول.', kb);
 }
@@ -67,6 +80,14 @@ registerTestReset(bot, { ownerId: OWNER_ID, testPhase: TEST_PHASE, wipe: wipeUse
 // TODO: هندلرهای محصول اینجا. نمونه‌ی فراخوانی LLM:
 // const res = await or.chatResilient('system prompt', 'user text', { maxTokens: 500 });
 // const data = parseJsonLoose(res?.out);
+//
+// ── زیرساخت رشد (این‌ها را در نقاط فانل محصول بگذار تا داشبورد پرشود) ──
+// رویداد فانل (از ثابت‌های EVENTS استفاده کن، نه string خام):
+//   track(db, ctx.from.id, EVENTS.PAYWALL_SHOWN, { price });
+//   trackOnce(db, ctx.from.id, EVENTS.FIRST_VALUE, { via: 'x' });  // فقط اولین‌بار per کاربر
+// A/B تست (تا وقتی از داشبورد running نشود، همیشه 'control' برمی‌گرداند = رفتار پیش‌فرض):
+//   if (variant(db, ctx.from.id, 'my_experiment_key') === 'b') { /* شاخه‌ی B */ }
+// پول: اگر جدول payments (کیف‌پول) داری، داشبورد خودکار می‌بیند (بند «افزودن ربات جدید»).
 
 /* ===== Launch ===== */
 function launch() {

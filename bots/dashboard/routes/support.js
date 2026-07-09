@@ -1,8 +1,12 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, getInstance, withDb, hasTable, rows } from '../lib/bots.js';
+import { instances, getInstance, withDb, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman } from '../lib/bots.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
+
+// created_at ممکن است unix یا ISO باشد → همیشه به رشته‌ی قابل‌نمایش تبدیل شود
+const showTime = (v) => (typeof v === 'string' ? v : tehranDateTime(v));
+const toUnix = (v) => (typeof v === 'string' ? Math.floor(Date.parse(v) / 1000) || 0 : (v || 0));
 
 export function supportBody(url) {
   const q = (url.searchParams.get('q') || '').trim();
@@ -19,19 +23,21 @@ export function supportBody(url) {
   const results = [];
   for (const inst of instances()) {
     withDb(inst.file, (db) => {
+      const pk = userPk(inst.bot);
+      const nameCol = userNameCol(inst.bot);
       const found = numeric
-        ? rows(db, 'SELECT * FROM users WHERE telegram_id=?', [parseInt(uname, 10)])
-        : rows(db, 'SELECT * FROM users WHERE username LIKE ? OR name LIKE ? LIMIT 20', [`%${uname}%`, `%${uname}%`]);
-      for (const u of found) results.push({ inst, u });
+        ? rows(db, `SELECT * FROM users WHERE ${pk}=?`, [parseInt(uname, 10)])
+        : rows(db, `SELECT * FROM users WHERE username LIKE ? OR ${nameCol} LIKE ? LIMIT 20`, [`%${uname}%`, `%${uname}%`]);
+      for (const u of found) results.push({ inst, u, pk, nameCol });
     });
   }
   const list = table(
     ['ربات', 'آی‌دی', 'نام', 'یوزرنیم', 'ورود', 'آخرین فعالیت', ''],
-    results.map(({ inst, u }) => [
-      esc(inst.title), `<span class="mono">${u.telegram_id}</span>`, esc(u.name || '-'),
+    results.map(({ inst, u, pk, nameCol }) => [
+      esc(inst.title), `<span class="mono">${u[pk]}</span>`, esc(u[nameCol] || '-'),
       u.username ? `<span class="mono">@${esc(u.username)}</span>` : '-',
-      tehranDateTime(u.created_at), tehranDateTime(u.last_seen),
-      `<a href="/support/user?inst=${encodeURIComponent(inst.id)}&id=${u.telegram_id}">پروفایل و تایم‌لاین ←</a>`,
+      showTime(u.created_at), showTime(u.last_seen ?? u.last_dream_date ?? '-'),
+      `<a href="/support/user?inst=${encodeURIComponent(inst.id)}&id=${u[pk]}">پروفایل و تایم‌لاین ←</a>`,
     ]),
     'کاربری با این مشخصات پیدا نشد.'
   );
@@ -52,10 +58,11 @@ function profileCard(inst, u) {
       if (val.length > TRUNC) val = val.slice(0, TRUNC) + '…';
       return stat(k, esc(val || '-'));
     }).join('');
-  return `<div class="card"><h2>👤 ${esc(u.name || u.telegram_id)} — ${esc(inst.title)}</h2><div class="grid">${cells}</div></div>`;
+  const nameCol = userNameCol(inst.bot), pk = userPk(inst.bot);
+  return `<div class="card"><h2>👤 ${esc(u[nameCol] || u[pk])} — ${esc(inst.title)}</h2><div class="grid">${cells}</div></div>`;
 }
 
-// تایم‌لاین: merge معکوس رویدادها + پرداخت‌ها + رکوردهای اختصاصی هر ربات
+// تایم‌لاین: merge معکوس رویدادها + پرداخت‌ها + رکوردهای اختصاصی هر ربات (ts نرمال به unix)
 function buildTimeline(db, botKey, uid) {
   const items = [];
   if (hasTable(db, 'events')) {
@@ -65,11 +72,14 @@ function buildTimeline(db, botKey, uid) {
       items.push({ ts: e.ts, icon: '⚡', label: e.event, detail });
     }
   }
-  if (hasTable(db, 'payments')) {
-    for (const p of rows(db, 'SELECT * FROM payments WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
+  const m = moneyOf(botKey);
+  if (hasTable(db, m.table)) {
+    for (const p of rows(db, `SELECT * FROM ${m.table} WHERE user_id=? ORDER BY id DESC LIMIT 100`, [uid])) {
+      const amt = toToman(botKey, p[m.amountCol]);
+      const orig = p.original_amount != null ? toToman(botKey, p.original_amount) : null;
       items.push({
-        ts: p.created_at, icon: '💳',
-        label: `پرداخت #${p.id} — ${fmt(p.amount)} ت` + (p.original_amount && p.original_amount !== p.amount ? ` (اصل ${fmt(p.original_amount)})` : ''),
+        ts: toUnix(p.created_at), icon: '💳',
+        label: `پرداخت #${p.id} — ${fmt(amt)} ت` + (orig && orig !== amt ? ` (اصل ${fmt(orig)})` : '') + (p.tier ? ` · اشتراک ${p.tier}` : ''),
         detail: `${p.status}${p.step ? ` · مرحله: ${p.step}` : ''}`, status: p.status,
       });
     }
@@ -91,9 +101,9 @@ function buildTimeline(db, botKey, uid) {
       }
     }
   }
-  if (botKey === 'resume-tailor' && hasTable(db, 'generations')) {
-    for (const g of rows(db, 'SELECT id, created_at, model, job_url FROM generations WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
-      items.push({ ts: g.created_at, icon: '📄', label: `رزومه #${g.id}`, detail: g.job_url || '', status: 'completed' });
+  if (botKey === 'tabir-khab' && hasTable(db, 'dreams')) {
+    for (const d of rows(db, 'SELECT id, created_at, is_free_trial, full_delivered, image_generated FROM dreams WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
+      items.push({ ts: toUnix(d.created_at), icon: '🌙', label: `خواب #${d.id}${d.is_free_trial ? ' (رایگان)' : ''}`, detail: `${d.full_delivered ? 'تحویل کامل' : 'preview'}${d.image_generated ? ' · تصویر' : ''}`, status: d.full_delivered ? 'delivered' : 'pending_payment' });
     }
   }
   items.sort((a, b) => b.ts - a.ts);
@@ -105,7 +115,7 @@ export function supportUserBody(url) {
   const uid = parseInt(url.searchParams.get('id') || '', 10);
   if (!inst || !uid) return `<div class="card"><p class="muted">پارامتر نامعتبر.</p></div>`;
   return withDb(inst.file, (db) => {
-    const u = db.prepare('SELECT * FROM users WHERE telegram_id=?').get(uid);
+    const u = db.prepare(`SELECT * FROM users WHERE ${userPk(inst.bot)}=?`).get(uid);
     if (!u) return `<div class="card"><p class="muted">کاربر در این ربات نیست.</p></div>`;
     const tl = buildTimeline(db, inst.bot, uid);
     const tlHtml = table(

@@ -1,5 +1,5 @@
 // مارکتینگ: ساخت لینک کمپین (t.me/<bot>?start=c_<code>) + قیفِ تا-درآمد هر کمپین + مقایسه‌ی چنل‌ها
-import { BOTS, instancesOf, withDb, hasTable, scalar, rows } from '../lib/bots.js';
+import { BOTS, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman } from '../lib/bots.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime } from '../lib/util.js';
 import { table } from '../lib/html.js';
@@ -10,19 +10,22 @@ const usernameKey = (botKey) => `username:${botKey}`;
 export function campaignStats(c) {
   const src = `campaign:${c.code}`;
   const agg = { starts: 0, returning: 0, newUsers: 0, firstValue: 0, paywall: 0, payers: 0, revenue: 0, hasPayments: false };
+  const pk = userPk(c.bot);
+  const m = moneyOf(c.bot);
+  const testClause = m.testFilter ? ` AND p.${m.testFilter}` : '';
   for (const inst of instancesOf(c.bot)) {
     withDb(inst.file, (db) => {
       if (hasTable(db, 'events')) {
         agg.starts += scalar(db, "SELECT COUNT(*) c FROM events WHERE event='start' AND json_extract(props,'$.kind')='campaign' AND json_extract(props,'$.code')=?", [c.code]);
         agg.returning += scalar(db, "SELECT COUNT(*) c FROM events WHERE event='start' AND json_extract(props,'$.code')=? AND json_extract(props,'$.new')=0", [c.code]);
-        agg.firstValue += scalar(db, "SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.telegram_id=e.user_id WHERE u.first_source=? AND e.event='first_value'", [src]);
-        agg.paywall += scalar(db, "SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.telegram_id=e.user_id WHERE u.first_source=? AND e.event='paywall_shown'", [src]);
+        agg.firstValue += scalar(db, `SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.${pk}=e.user_id WHERE u.first_source=? AND e.event='first_value'`, [src]);
+        agg.paywall += scalar(db, `SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.${pk}=e.user_id WHERE u.first_source=? AND e.event='paywall_shown'`, [src]);
       }
       agg.newUsers += scalar(db, 'SELECT COUNT(*) c FROM users WHERE first_source=?', [src]);
-      if (hasTable(db, 'payments')) {
+      if (hasTable(db, m.table)) {
         agg.hasPayments = true;
-        agg.payers += scalar(db, "SELECT COUNT(DISTINCT p.user_id) c FROM payments p JOIN users u ON u.telegram_id=p.user_id WHERE u.first_source=? AND p.status='approved'", [src]);
-        agg.revenue += scalar(db, "SELECT COALESCE(SUM(p.amount),0) s FROM payments p JOIN users u ON u.telegram_id=p.user_id WHERE u.first_source=? AND p.status='approved'", [src]);
+        agg.payers += scalar(db, `SELECT COUNT(DISTINCT p.user_id) c FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}`, [src]);
+        agg.revenue += toToman(c.bot, scalar(db, `SELECT COALESCE(SUM(p.${m.amountCol}),0) s FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}`, [src]));
       }
     });
   }
@@ -39,17 +42,20 @@ const CH_EXPR = `CASE
 
 function channelSummary(botKey) {
   const merged = new Map(); // ch -> {users, payers, revenue}
+  const pk = userPk(botKey);
+  const mn = moneyOf(botKey);
+  const testClause = mn.testFilter ? ` AND p.${mn.testFilter}` : '';
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(*) c FROM users GROUP BY ch`)) {
         const m = merged.get(r.ch) || { users: 0, payers: 0, revenue: 0 };
         m.users += r.c; merged.set(r.ch, m);
       }
-      if (hasTable(db, 'payments')) {
-        for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(DISTINCT p.user_id) payers, COALESCE(SUM(p.amount),0) rev
-            FROM payments p JOIN users u ON u.telegram_id=p.user_id WHERE p.status='approved' GROUP BY ch`)) {
+      if (hasTable(db, mn.table)) {
+        for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(DISTINCT p.user_id) payers, COALESCE(SUM(p.${mn.amountCol}),0) rev
+            FROM ${mn.table} p JOIN users u ON u.${pk}=p.user_id WHERE p.status='${mn.successStatus}'${testClause} GROUP BY ch`)) {
           const m = merged.get(r.ch) || { users: 0, payers: 0, revenue: 0 };
-          m.payers += r.payers; m.revenue += r.rev; merged.set(r.ch, m);
+          m.payers += r.payers; m.revenue += toToman(botKey, r.rev); merged.set(r.ch, m);
         }
       }
     });
