@@ -122,6 +122,51 @@ db.exec(`
   );
 `);
 
+/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 1) =====
+   این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
+   قرارداد payload لینک استارت: c_<code> کمپین / r_<uid> یا ref_<uid> رفرال / خالی organic */
+db.pragma('busy_timeout = 5000');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    event      TEXT    NOT NULL,
+    props      TEXT    NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_user  ON events(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_events_event ON events(event, created_at);
+`);
+try { db.prepare("ALTER TABLE users ADD COLUMN first_source TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare("ALTER TABLE users ADD COLUMN first_payload TEXT NOT NULL DEFAULT ''").run(); } catch {}
+const anStmts = {
+  insertEvent: db.prepare('INSERT INTO events (user_id, event, props) VALUES (?, ?, ?)'),
+  setFirstSource: db.prepare("UPDATE users SET first_source=?, first_payload=? WHERE telegram_id=? AND first_source=''"),
+};
+// ثبت رویداد — fail-safe: خطای آنالیتیکس هرگز فلوی محصول را نمی‌شکند
+function track(userId, event, props) {
+  try { anStmts.insertEvent.run(userId ?? null, event, props ? JSON.stringify(props) : '{}'); }
+  catch (e) { logErr('analytics track:', event, e.message); }
+}
+// رویداد start برای هر /start + first_source (write-once) فقط برای کاربر جدید
+function captureStart(userId, rawPayload, isNew) {
+  try {
+    const payload = String(rawPayload || '').trim().slice(0, 64);
+    let kind = 'organic', code = '';
+    let m = payload.match(/^c_([A-Za-z0-9]{1,32})$/);
+    if (m) { kind = 'campaign'; code = m[1]; }
+    else if ((m = payload.match(/^r(?:ef)?_(\d+)$/))) { kind = 'referral'; code = m[1]; }
+    else if (payload) kind = 'other';
+    if (isNew) {
+      const src = kind === 'campaign' ? `campaign:${code}`
+        : kind === 'referral' ? `referral:${code}`
+        : kind === 'other' ? `other:${payload}` : 'organic';
+      anStmts.setFirstSource.run(src, payload, userId);
+    }
+    track(userId, 'start', { payload, kind, code, new: !!isNew });
+  } catch (e) { logErr('analytics captureStart:', e.message); }
+}
+
 const stmts = {
   getUser:       db.prepare('SELECT * FROM users WHERE telegram_id = ?'),
   insertUser:    db.prepare('INSERT OR IGNORE INTO users (telegram_id, name, username, balance) VALUES (?, ?, ?, ?)'),
@@ -1076,6 +1121,7 @@ async function sendMainMenu(ctx, { gift = false, welcome = false } = {}) {
 
 bot.start(async (ctx) => {
   const { isNew } = upsertUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+  captureStart(ctx.from.id, ctx.startPayload, isNew); // اتریبیوشن — فقط ثبت، هیچ اثری روی فلو ندارد
   await sendMainMenu(ctx, { welcome: true, gift: isNew });
 });
 
@@ -1083,7 +1129,7 @@ bot.start(async (ctx) => {
 bot.hears(RESET_TEST_BTN, async (ctx) => {
   const uid = ctx.from.id;
   if (uid !== OWNER_ID) return;
-  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['events','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
   }
   userStates.delete(uid); notionStates.delete(uid); activeJobs.delete(uid);
@@ -1462,6 +1508,7 @@ bot.on('text', async (ctx) => {
       // Auto-approve: 100% discount
       stmts.setPaymentStatus.run('approved', state.paymentId);
       stmts.credit.run(payment.amount, userId); // credit original amount
+      track(userId, 'payment_approved', { payment_id: state.paymentId, amount: 0, credited: payment.amount, auto: true });
       stmts.incDiscountUses.run(result.discountAmount, result.dc.id);
       stmts.insertDiscountUse.run(result.dc.id, userId, state.paymentId, result.discountAmount);
       userStates.delete(userId);
@@ -1989,6 +2036,7 @@ bot.on('callback_query', async (ctx) => {
       const creditAmount = payment.original_amount || payment.amount;
       stmts.setPaymentStatus.run('approved', paymentId);
       stmts.credit.run(creditAmount, payment.user_id);
+      track(payment.user_id, 'payment_approved', { payment_id: paymentId, amount: payment.amount, credited: creditAmount });
 
       // If has discount, record use
       if (payment.discount_code_id) {
@@ -2021,6 +2069,7 @@ bot.on('callback_query', async (ctx) => {
       if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
 
       stmts.setPaymentStatus.run('rejected', paymentId);
+      track(payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: payment.amount });
 
       await ctx.answerCbQuery('❌ رد شد');
       await editAdminPaymentMsg(ctx, `❌ رد شد — ${payment.amount.toLocaleString('fa-IR')} تومان`);
@@ -2469,6 +2518,7 @@ bot.on('callback_query', async (ctx) => {
           }
 
           log(`✅ job done   uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
+          track(sessUserId, 'product_delivered', { type, model: userModel, duration_sec: session.durationSec || 0 });
           const parts = splitForTelegram(text);
           if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
