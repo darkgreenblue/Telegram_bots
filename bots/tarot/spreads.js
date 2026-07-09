@@ -129,5 +129,31 @@ const SPREADS = [
   },
 ].map(s => ({ ...s, price: s.size * PER_CARD }));
 
-export const SPREAD_BY_ID = Object.fromEntries(SPREADS.map(s => [s.id, s]));
+// فال «موضوع آزاد»: کاربر خودش موضوع را می‌نویسد (هر چیزی از زندگی‌اش).
+// عمداً در کاتالوگِ SPREADS و suggestSpreads نمی‌آید؛ فقط از دکمه‌ی «موضوع دلخواه» و SPREAD_BY_ID
+// در دسترس است تا هدفِ سیگنال‌دادنِ «می‌تونی درباره‌ی هر چیزی فال بگیری» بدون شلوغ‌کردن کاتالوگ انجام شود.
+export const OPEN_SPREADS = [
+  {
+    id: 'open3', emoji: '🌀', fa: 'موضوع دلخواه', size: 3, maxTokens: 1600, open: true,
+    desc: 'هر چیزی که این روزها ذهنت رو گرفته',
+    positions: [
+      { key: 'root', fa: 'ریشه‌ی ماجرا' },
+      { key: 'now', fa: 'وضعیت الان' },
+      { key: 'path', fa: 'مسیر پیش رو' },
+    ],
+  },
+  {
+    id: 'open5', emoji: '🌀', fa: 'موضوع دلخواه (عمیق‌تر)', size: 5, maxTokens: 2400, open: true,
+    desc: 'همون موضوع، با نگاهی عمیق‌تر و پنج‌کارتی',
+    positions: [
+      { key: 'core', fa: 'قلب ماجرا' },
+      { key: 'root', fa: 'ریشه' },
+      { key: 'hidden', fa: 'نیروی پنهان' },
+      { key: 'challenge', fa: 'مانع پیش رو' },
+      { key: 'path', fa: 'مسیر پیش رو' },
+    ],
+  },
+].map(s => ({ ...s, price: s.size * PER_CARD }));
+
+export const SPREAD_BY_ID = Object.fromEntries([...SPREADS, ...OPEN_SPREADS].map(s => [s.id, s]));
 export default SPREADS;
