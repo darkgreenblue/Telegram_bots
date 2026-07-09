@@ -4,10 +4,13 @@ import { esc } from './util.js';
 const NAV = [
   ['/', 'نمای کلی'],
   ['/marketing', 'مارکتینگ'],
+  ['/experiments', 'تست‌ها'],
   ['/funnels', 'فانل‌ها'],
+  ['/retention', 'ریتنشن'],
   ['/finance', 'مالی'],
   ['/discounts', 'کد تخفیف'],
   ['/support', 'پشتیبانی'],
+  ['/journal', 'ژورنال'],
 ];
 
 const CSS = `

@@ -31,6 +31,31 @@ pdb.exec(`
     details    TEXT    NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  -- ژورنال محصول: تاریخچه‌ی نسخه‌ها و اینسایت‌ها (بایگانی خواسته‌شده در طرح)
+  CREATE TABLE IF NOT EXISTS product_versions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot         TEXT    NOT NULL,
+    label       TEXT    NOT NULL,
+    description TEXT    NOT NULL DEFAULT '',
+    git_ref     TEXT    NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE TABLE IF NOT EXISTS insights (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot            TEXT    NOT NULL DEFAULT '',
+    text           TEXT    NOT NULL,
+    experiment_key TEXT    NOT NULL DEFAULT '',
+    created_at     INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  -- rollup ماهیانه/روزانه‌ی رویدادها (سیاست retention — جارو در lib/maintenance.js)
+  CREATE TABLE IF NOT EXISTS events_rollup (
+    bot   TEXT    NOT NULL,
+    day   TEXT    NOT NULL,
+    event TEXT    NOT NULL,
+    users INTEGER NOT NULL DEFAULT 0,
+    cnt   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bot, day, event)
+  );
 `);
 
 const st = {
@@ -74,3 +99,15 @@ export const setSetting = (key, value) => st.setSetting.run(key, String(value ??
 export const audit = (action, target = '', details = '') =>
   st.insertAudit.run(action, String(target).slice(0, 200), String(details).slice(0, 1000));
 export const listAudit = (limit = 50) => st.listAudit.all(limit);
+
+/* ---- ژورنال محصول ---- */
+export const addVersion = (bot, label, description, gitRef) =>
+  pdb.prepare('INSERT INTO product_versions (bot, label, description, git_ref) VALUES (?,?,?,?)')
+    .run(bot, label.slice(0, 100), (description || '').slice(0, 1000), (gitRef || '').slice(0, 60));
+export const listVersions = (limit = 100) =>
+  pdb.prepare('SELECT * FROM product_versions ORDER BY id DESC LIMIT ?').all(limit);
+export const addInsight = (bot, text, experimentKey) =>
+  pdb.prepare('INSERT INTO insights (bot, text, experiment_key) VALUES (?,?,?)')
+    .run(bot || '', text.slice(0, 2000), (experimentKey || '').slice(0, 64));
+export const listInsights = (limit = 100) =>
+  pdb.prepare('SELECT * FROM insights ORDER BY id DESC LIMIT ?').all(limit);

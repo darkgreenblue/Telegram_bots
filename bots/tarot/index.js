@@ -22,6 +22,7 @@ import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
+import { ensureAb, variant } from '../../shared/ab.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -177,6 +178,8 @@ try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAUL
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
+// A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
+ensureAb(db);
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -270,7 +273,7 @@ function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, 
 
 // پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -585,11 +588,14 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     await typing(ctx, PACE_M);
     setState(uid, 'idle');
     track(db, uid, EVENTS.ONBOARD_DONE, { focus: key });
-    // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
-    await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
+    // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل — آزمایش onboard_cta_order ترتیب را تست می‌کند
+    // (تا وقتی آزمایش از داشبورد running نشود، variant() همیشه control برمی‌گرداند = رفتار فعلی)
+    const ctaRows = [
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
       [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
-    ]));
+    ];
+    if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+    await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard(ctaRows));
   } else {
     // تغییر تمرکز وسط فلوی فال
     patchSession(uid, { focusKey: key });

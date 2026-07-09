@@ -7,7 +7,7 @@ import { instancesOf, withDb, hasTable, scalar, rows } from '../lib/bots.js';
 import { fmt, esc, nowSec } from '../lib/util.js';
 import { table } from '../lib/html.js';
 
-const FUNNELS = {
+export const FUNNELS = {
   tarot: {
     title: '🔮 تاروت',
     steps: [

@@ -56,8 +56,31 @@ jobs:
                 tail -n 40 /home/ubuntu/tabir_khab/logs/bot.log 2>/dev/null || echo "(خالی)"
               fi
             fi
+            # صف رسیدهای معطل: پرداخت waiting_review قدیمی‌تر از ۲ ساعت = اعتماد مالی در خطر (بند ۱۰ ریشه)
+            STALE=$(for d in bots/*/data; do
+              app=$(basename "$(dirname "$d")")
+              DBFILE=$(ls "$d"/*.db 2>/dev/null | head -1)
+              [ -n "$DBFILE" ] || continue
+              [ -d "bots/$app/node_modules/better-sqlite3" ] || continue
+              DBFILE="$DBFILE" APP="$app" node -e "
+                try {
+                  const path = require('path');
+                  const D = require(path.join(process.cwd(), 'bots', process.env.APP, 'node_modules', 'better-sqlite3'));
+                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
+                  const t = db.prepare(\"SELECT name FROM sqlite_master WHERE type='table' AND name='payments'\").get();
+                  if (!t) process.exit(0);
+                  const r = db.prepare(\"SELECT COUNT(*) c FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200\").get();
+                  if (r.c > 0) console.log(process.env.APP + ': ' + r.c + ' رسید بیش از ۲ ساعت منتظر تأیید');
+                } catch (e) {}
+              " 2>/dev/null
+            done)
+            if [ -n "$STALE" ]; then
+              FAILED=1
+              echo "🚨 صف رسید معطل:"
+              echo "$STALE"
+            fi
             [ "$FAILED" = "0" ] || exit 1
-            echo "✅ همه‌ی ربات‌ها online"
+            echo "✅ همه‌ی ربات‌ها online و صف رسید خالی/تازه است"
 
       # پیام مستقیم تلگرام به مالک — مالک غیرفنی در GitHub زندگی نمی‌کند (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
       - name: Telegram alert on failure
