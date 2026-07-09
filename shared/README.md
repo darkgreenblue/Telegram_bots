@@ -23,5 +23,6 @@ import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 | `llm.js` | `createOpenRouter, parseJsonLoose` | فراخوانی OpenRouter با timeout + retry + مدل فالبک (الگوی جاافتاده‌ی tarot) |
 | `reset.js` | `RESET_TEST_BTN, registerTestReset` | دکمه‌ی «🔄 ریست ربات (تست)» طبق قرارداد بند ۶ب CLAUDE.md |
 | `errors.js` | `registerGlobalErrorHandlers, makeBotCatch` | bot.catch سراسری + هندلر unhandledRejection/uncaughtException |
+| `analytics.js` | `EVENTS, ANALYTICS_SCHEMA_VERSION, ensureAnalytics, track, trackOnce, captureStart, parseStartPayload` | جدول events + اتریبیوشن استارت (first_source write-once + رویداد start برای هر /start)؛ همه fail-safe — voice2text کپی محلی هم‌قرارداد خودش را دارد (چک CI سینک می‌کند) |
 
 ربات جدید را از روی `bots/_template/` کپی کن — همه‌ی این‌ها از قبل سیم‌کشی شده‌اند.
