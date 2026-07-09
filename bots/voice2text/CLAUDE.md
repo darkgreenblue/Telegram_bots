@@ -24,6 +24,7 @@
 | `discount_uses` | دفتر مصرف کدها |
 | `pro_whitelist` | دسترسی مدل Pro |
 | `voice_flows` | چرخه‌ی حیات هر فلو: active/completed/cancelled/expired/failed |
+| `events` | آنالیتیکس کمینه (کپی محلی هم‌قرارداد `shared/analytics.js` — پایین) |
 
 ## فلوها و state های in-memory
 - `sessions` (token→سشن ویس)، `userStates` (فلوی شارژ)، `adminStates` (پنل تخفیف)، `notionStates`, `activeJobs`. ری‌استارت = پاک‌شدن این‌ها (فلوهای وسط کار می‌میرند) — دلیل اصلی دیپلوی انتخابی.
@@ -41,8 +42,12 @@
 - پیشوندهای قابل‌grep: `❌ GLOBAL`, `❌ UNHANDLED_REJECTION`, `❌ UNCAUGHT_EXCEPTION`, `CreditError`, `RATE_LIMIT`.
 - خطاهای کاربرپسند نگاشت‌شده: اعتبار تمام (CreditError، هرگز retry نمی‌شود)، rate-limit، تبدیل، TIMEOUT، شبکه.
 
+## آنالیتیکس کمینه (اتریبیوشن)
+- این ربات از shared استفاده نمی‌کند؛ **کپی محلی** هم‌قرارداد `shared/analytics.js` (بلوک `ANALYTICS_SCHEMA_VERSION = 1` بعد از voice_flows در index.js). چک CI (`tools/check-analytics-sync.mjs`) سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید همین‌جا هم اعمال شود.
+- جدول `events` + ستون‌های write-once `users.first_source/first_payload`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `payment_approved` (approve ادمین + تخفیف ۱۰۰٪ خودکار)، `payment_rejected`. track fail-safe است (فقط logErr).
+
 ## ریست تست (بند ۶ب ریشه)
-`RESET_TEST_BTN` **فقط برای OWNER** (کاربر پولی نباید تصادفاً پاک شود): حذف ردیف‌های مالک از ۶ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows) + پاک‌سازی state های in-memory. کدهای تخفیف (discount_codes) پاک نمی‌شوند.
+`RESET_TEST_BTN` **فقط برای OWNER** (کاربر پولی نباید تصادفاً پاک شود): حذف ردیف‌های مالک از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + پاک‌سازی state های in-memory. کدهای تخفیف (discount_codes) پاک نمی‌شوند.
 
 ## env
 `BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری). نیازمند ffmpeg/ffprobe روی سرور.

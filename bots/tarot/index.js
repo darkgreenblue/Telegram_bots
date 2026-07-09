@@ -21,6 +21,7 @@ import CARDS, { CARD_BY_KEY } from './cards.js';
 import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
+import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -174,6 +175,8 @@ try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEF
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
+ensureAnalytics(db);
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -267,7 +270,7 @@ function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, 
 
 // پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -501,8 +504,11 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // رفرال: /start ref_<id>
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source فقط برای کاربر جدید
   const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
+  captureStart(db, uid, payload, isNew);
+
+  // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);
   let refBonus = false;
   if (refMatch && isNew) {
@@ -578,6 +584,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
   if (inOnboarding) {
     await typing(ctx, PACE_M);
     setState(uid, 'idle');
+    track(db, uid, EVENTS.ONBOARD_DONE, { focus: key });
     // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
@@ -632,6 +639,8 @@ async function dailyCard(ctx) {
   await typing(ctx, PACE_REVEAL);
   const text = await llmP;
   if (text) await ctx.reply(text);
+  track(db, uid, 'daily_card', { streak, cached: !!cached });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'daily' });
   // موتور عادت: نمایش استریک از روز دوم + جایزه‌ی هر ۷ روز پیاپی (اعتبار داخل ربات)
   if (streak >= 2) {
     await sleep(PACE_S);
@@ -701,6 +710,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   const spread = SPREAD_BY_ID[ctx.match[1]];
   if (!spread) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  track(db, uid, 'spread_selected', { spread: spread.id });
 
   // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
   if (spread.focus) {
@@ -751,6 +761,7 @@ async function handleQuestion(ctx, question) {
   if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
   patchSession(uid, { question: question.slice(0, 1500) });
   setState(uid, 'breathing');
+  track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
   await typing(ctx, PACE_S);
   // مشتری ثابت (۲+ فال کامل) آیین کوتاه‌تر می‌گیرد — مثل تاروت‌خوان واقعی با مشتری آشنا
   if (stmts.countDelivered.get(uid).c >= 2) {
@@ -854,6 +865,7 @@ async function finishPicking(ctx, uid, s) {
     uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards)
   ).lastInsertRowid);
   patchSession(uid, { readingId });
+  track(db, uid, 'cards_picked', { spread: spread.id, reading_id: readingId });
 
   // پیش‌فراخوانی LLM فقط وقتی کاربر توان پرداخت دارد (هزینه‌ی قبل از پرداخت = صفر برای کاربرِ بدون موجودی)
   // + سقف روزانه ضد حلقه‌ی «انتخاب کن، لغو کن». در غیر این صورت فراخوانی موقع unlock انجام می‌شود.
@@ -866,6 +878,7 @@ async function finishPicking(ctx, uid, s) {
   if (spread.size > s.picks.length) await ctx.reply(L.reading.extraCardsNote(spread.size - s.picks.length));
 
   const balance = getBalance(uid);
+  track(db, uid, EVENTS.PAYWALL_SHOWN, { reading_id: readingId, price: spread.price, can_afford: balance >= spread.price });
   if (balance >= spread.price) {
     await ctx.reply(L.reading.paywall(spread.price), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.openCards(spread.price), `unlock:${readingId}`)],
@@ -912,6 +925,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     }
   }
   stmts.setReadingStatus.run('started', readingId);
+  track(db, uid, 'reading_started', { reading_id: readingId, price: r.price });
   setState(uid, 'revealing');
   patchSession(uid, { readingId, revealIdx: 0, fbDone: false });
   await ctx.answerCbQuery('🔮').catch(() => {});
@@ -949,6 +963,7 @@ async function startReveal(ctx, uid, readingId) {
     if (r && r.status === 'started') {
       if (r.price > 0) stmts.credit.run(r.price, uid);
       stmts.setReadingStatus.run('refunded', readingId);
+      track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price });
     }
     setState(uid, 'idle');
     setSession(uid, null);
@@ -976,6 +991,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     }
   }
   stmts.setReadingStatus.run('started', readingId);
+  track(db, uid, 'reading_started', { reading_id: readingId, price: r.price, retry: true });
   setState(uid, 'revealing');
   setSession(uid, { spreadId: r.type, readingId, revealIdx: 0, fbDone: false });
   await ctx.answerCbQuery('🔮').catch(() => {});
@@ -1044,6 +1060,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
   if (!r) return;
   const llm = r.llm_json ? JSON.parse(r.llm_json) : null;
   stmts.setReadingFeedback.run(freeText ? `text: ${freeText.slice(0, 300)}` : kind, readingId);
+  track(db, uid, EVENTS.FEEDBACK, { reading_id: readingId, kind: freeText ? 'text' : kind });
   patchSession(uid, { fbDone: true });
   setState(uid, 'revealing');
 
@@ -1116,6 +1133,8 @@ async function finishReading(ctx, uid, readingId) {
   await ctx.reply(L.reading.empowerClose);
 
   stmts.setReadingStatus.run('delivered', readingId);
+  track(db, uid, EVENTS.PRODUCT_DELIVERED, { type: r.type, price: r.price, reading_id: readingId });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'reading' });
   // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
   if (typeof llm.memory === 'string' && llm.memory.trim()) {
     stmts.setMemory.run(llm.memory.trim().slice(0, 1200), uid);
@@ -1198,6 +1217,7 @@ bot.action('recharge', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
   const paymentId = Number(stmts.insertPayment.run(uid).lastInsertRowid);
+  track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
   patchSession(uid, { paymentId });
   const s = getSession(uid);
@@ -1325,6 +1345,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+  track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });
 }
 
 function approvePayment(paymentId) {
@@ -1334,6 +1355,7 @@ function approvePayment(paymentId) {
   const bonus = bonusFor(creditAmount); // هدیه‌ی شارژ روی مبلغ اصلی (قبل از تخفیف)
   stmts.setPaymentStatus.run('approved', paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
+  track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
   if (p.discount_code_id) {
     stmts.incDiscountUses.run(p.discount_code_id);
     stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, (p.original_amount || p.amount) - p.amount);
@@ -1396,6 +1418,7 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
   const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
   if (!p || p.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
@@ -1444,6 +1467,7 @@ bot.on('inline_query', async (ctx) => {
 /* ---------- ریست تست (قرارداد ریپو §۶ب — فاز تست: همه‌ی کاربران) ---------- */
 async function doReset(ctx) {
   wipeUser(ctx.from.id);
+  track(db, ctx.from.id, EVENTS.RESET, {});
   await ctx.reply(L.reset.done, mainKeyboard());
   return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو
 }

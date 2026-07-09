@@ -17,7 +17,11 @@
 - بدون retry per فراخوانی؛ degradation نرم: planner→DEFAULT_SECTIONS، بخش شکست‌خورده حذف، organize→ساختار حداقلی. ویس→متن با Flash (`input_audio`، ogg با برچسب mp3).
 
 ## دیتابیس (`data/bot.db`)
-`users` (state، pending_job_url/text، edit_company_idx)، `profiles` (main_resume، contact_info، structured_profile JSON)، `history_chunks` (kind: text/document/voice)، `generations`.
+`users` (state، pending_job_url/text، edit_company_idx، **first_source/first_payload** اتریبیوشن write-once)، `profiles` (main_resume، contact_info، structured_profile JSON)، `history_chunks` (kind: text/document/voice)، `generations`، **`events`** (آنالیتیکس مشترک).
+
+## آنالیتیکس و اتریبیوشن (shared/analytics.js)
+- `ensureAnalytics(db)` بعد از ساخت جدول‌ها؛ `captureStart` در `bot.start` (رویداد `start` برای هر /start + first_source فقط کاربر جدید؛ payload: `c_<code>` کمپین / خالی = organic — این ربات رفرال ندارد).
+- رویدادها: `start`، `onboard_done` (پایان ساماندهی پروفایل)، `product_delivered` + `first_value` (تحویل رزومه)، `reset`. `wipeUser` جدول events را هم پاک می‌کند. خطای track هرگز فلو را نمی‌شکند.
 
 ## ماشین حالت
 `new → ask_has_resume → await_resume_file → collect_history → structuring → ready` + `edit_company`, `await_notes`, `await_job_text`. ویس فقط در `await_notes/collect_history/edit_company/await_resume_file`.

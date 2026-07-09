@@ -18,6 +18,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { RESUME_KNOWLEDGE } from './resume-knowledge.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
+import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 
 /* ===== 1) ENV ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -77,6 +78,8 @@ db.exec(`
     created_at  INTEGER NOT NULL DEFAULT (unixepoch())
   );
 `);
+// آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
+ensureAnalytics(db);
 
 const qUpsertUser = db.prepare(`
   INSERT INTO users (telegram_id, name, username) VALUES (?, ?, ?)
@@ -110,6 +113,7 @@ function wipeUser(uid) {
   db.prepare('DELETE FROM profiles WHERE user_id=?').run(uid);
   db.prepare('DELETE FROM history_chunks WHERE user_id=?').run(uid);
   db.prepare('DELETE FROM generations WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM events WHERE user_id=?').run(uid);
   qClearPending.run(uid);
   qSetEditIdx.run(-1, uid);
   setState(uid, 'new');
@@ -503,7 +507,10 @@ async function startHistoryCollection(ctx) {
 }
 
 bot.start(async (ctx) => {
+  // اتریبیوشن: رویداد start برای هر /start + first_source (write-once) فقط برای کاربر جدید
+  const isNew = !qGetUser.get(ctx.from.id);
   upsertUser(ctx);
+  captureStart(db, ctx.from.id, ctx.startPayload, isNew);
   await ctx.reply('🧪 حالت تست فعال است. برای پاک‌سازی کاملِ اطلاعاتت و شروع از صفر، هر زمان دکمه‌ی «🔄 ریست ربات (تست)» پایین را بزن.', testKb);
   await askHasResume(ctx);
 });
@@ -512,6 +519,7 @@ bot.command('help', (ctx) => ctx.reply(HELP, testKb));
 // دکمه/کامند ریست تست — کاربر را کاملاً پاک می‌کند (انگار کاربر جدید)
 async function doReset(ctx) {
   wipeUser(ctx.from.id);
+  track(db, ctx.from.id, EVENTS.RESET, {});
   await ctx.reply('🔄 ربات ریست شد. تمام اطلاعاتت پاک شد و مثل کاربر جدید هستی.', testKb);
   return askHasResume(ctx);
 }
@@ -556,6 +564,7 @@ bot.action('history_done', async (ctx) => {
   try {
     const s = await buildStructuredProfile(uid);
     setState(uid, 'ready');
+    track(db, uid, EVENTS.ONBOARD_DONE, { chunks: n, has_resume: !!hasResume });
     await replyLong(ctx, '✅ پروفایلت ساختارمند شد:\n\n' + renderStructured(s));
     await ctx.reply('می‌توانی با /edit ویرایشش کنی. هر وقت آماده بودی، لینک یا متن یک آگهی شغلی بفرست تا رزومه‌ی کاستومایز بسازم.');
   } catch (e) {
@@ -620,6 +629,8 @@ async function generateResume(ctx, notes) {
     const out = await generateResumeMultiAgent(p, s, job.jobText, job.jobUrl, notes);
     if (!out) throw new Error('empty output');
     qInsertGen.run(uid, job.jobUrl, job.jobText, notes || '', out, 'exp=pro;summary,skills=flash');
+    track(db, uid, EVENTS.PRODUCT_DELIVERED, { type: 'resume', via_url: !!job.jobUrl });
+    trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'resume' });
     await replyLong(ctx, out);
     await sendResumeFile(ctx, out);
     await ctx.reply(PDF_HINT);
