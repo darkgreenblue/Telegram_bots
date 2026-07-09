@@ -1,7 +1,16 @@
 // نمای کلی: وضعیت هر ربات (کاربر/فعال/درآمد به وقت تهران) + سلامت عملیاتی (صف رسید، حجم DB)
-import { instances, withDb, hasTable, scalar, dbSizes } from '../lib/bots.js';
+import { instances, withDb, hasTable, scalar, rows, dbSizes } from '../lib/bots.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
 import { stat } from '../lib/html.js';
+import { EVENTS } from '../../../shared/analytics.js';
+import { FUNNELS } from './funnels.js';
+
+// واژه‌نامه‌ی شناخته‌شده: هسته‌ی EVENTS + رویدادهای اختصاصی تعریف‌شده در فانل‌ها + موارد ثبت‌شده‌ی معلوم
+const KNOWN_EVENTS = new Set([
+  ...Object.values(EVENTS),
+  ...Object.values(FUNNELS).flatMap(f => [...(f.steps || []), ...(f.payment || [])].map(([ev]) => ev)),
+  'daily_card',
+]);
 
 const mb = (bytes) => (bytes / 1048576).toFixed(1);
 
@@ -43,6 +52,19 @@ export function overviewBody() {
       ${s.waitingReview ? stat('⏳ رسید در انتظار تأیید', fmt(s.waitingReview)) : ''}
       ${stat('حجم DB', `${mb(sizes.db)}MB` + (sizes.wal ? ` <span class="muted">(+${mb(sizes.wal)}MB WAL)</span>` : ''))}
     </div></div>`;
+  }
+  // ویجت drift واژه‌نامه: رویدادی که در قرارداد نیست = خطای قابل‌مشاهده، نه باگ خاموش در اعداد
+  const unknown = [];
+  for (const inst of insts) {
+    withDb(inst.file, (db) => {
+      if (!hasTable(db, 'events')) return;
+      for (const r of rows(db, 'SELECT event, COUNT(*) c FROM events GROUP BY event')) {
+        if (!KNOWN_EVENTS.has(r.event)) unknown.push(`${inst.id}: ${r.event} (${fmt(r.c)})`);
+      }
+    });
+  }
+  if (unknown.length) {
+    out += `<div class="note">⚠️ رویدادهای خارج از واژه‌نامه (drift قرارداد آنالیتیکس؟): ${unknown.map(esc).join(' · ')}</div>`;
   }
   out += `<p class="muted">درآمد = مبلغ واقعاً پرداخت‌شده (بعد از تخفیف)، تأییدشده. مرز «امروز» = نیمه‌شب تهران. tabir-khab در فاز بعدی به داشبورد وصل می‌شود.</p>`;
   return out;

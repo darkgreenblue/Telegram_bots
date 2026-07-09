@@ -96,6 +96,9 @@ async def init_db(db_path: str | None = None) -> None:
     async with aiosqlite.connect(_path()) as db:
         await db.executescript(_SCHEMA)
         await db.commit()
+        # آنالیتیکس مشترک مونوریپو: جدول events + ستون‌های first_source/first_payload (analytics.py)
+        from analytics import ensure_analytics
+        await ensure_analytics(db)
     await _migrate_db()
 
 

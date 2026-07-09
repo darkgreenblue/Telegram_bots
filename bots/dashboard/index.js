@@ -22,6 +22,10 @@ import { supportBody, supportUserBody } from './routes/support.js';
 import { financeBody, financeCsv } from './routes/finance.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
+import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
+import { retentionBody } from './routes/retention.js';
+import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
+import { scheduleMaintenance } from './lib/maintenance.js';
 
 /* ===== ENV ===== */
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN?.trim();
@@ -55,6 +59,10 @@ const PAGES = {
   '/finance': (url) => ['مالی', financeBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
   '/discounts': () => ['کد تخفیف', discountsBody()],
+  '/experiments': () => ['تست‌ها', experimentsBody()],
+  '/experiments/view': (url) => ['تست‌ها', experimentViewBody(url), '/experiments'],
+  '/retention': () => ['ریتنشن', retentionBody()],
+  '/journal': () => ['ژورنال', journalBody()],
 };
 
 /* ===== اکشن‌های POST: هرکدام پیام موفقیت برمی‌گرداند و به backTo ری‌دایرکت می‌شود ===== */
@@ -64,6 +72,11 @@ const ACTIONS = {
   '/marketing/usernames': { fn: marketingUsernames, backTo: '/marketing' },
   '/discounts/create': { fn: discountCreate, backTo: '/discounts' },
   '/discounts/toggle': { fn: discountToggle, backTo: '/discounts' },
+  '/experiments/create': { fn: experimentCreate, backTo: '/experiments' },
+  '/experiments/status': { fn: experimentStatus, backTo: '/experiments' },
+  '/experiments/decide': { fn: experimentDecide, backTo: '/experiments' },
+  '/journal/version': { fn: journalVersion, backTo: '/journal' },
+  '/journal/insight': { fn: journalInsight, backTo: '/journal' },
 };
 
 const server = http.createServer(async (req, res) => {
@@ -130,5 +143,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => log(`✅ dashboard listening on http://127.0.0.1:${PORT} (فقط لوکال — دسترسی از تونل)`));
 registerGlobalErrorHandlers('dashboard');
+scheduleMaintenance(); // rollup روزانه‌ی رویدادها (+ حذف خام فقط اگر events_retention_days ست شده باشد)
 process.once('SIGINT', () => server.close());
 process.once('SIGTERM', () => server.close());

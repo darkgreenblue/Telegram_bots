@@ -75,6 +75,12 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
   کاستومایز شود (زرین‌پال برای فارسی، Stars/کریپتو بقیه).
 - برچسبِ لاگ هر ربات `platform:locale` است (مثل `telegram:en`) — برای grep در `logs/bot.log`.
 
+## آنالیتیکس مونوریپو (analytics.py)
+- پورت پایتونیِ هم‌قرارداد `shared/analytics.js` (نسخه در `ANALYTICS_SCHEMA_VERSION`؛ چک CI ریشه `tools/check-analytics-sync.mjs` سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید این‌جا هم بیاید).
+- `ensure_analytics` در `db.init_db` (per فایل DB): جدول `events` + ستون‌های write-once `users.first_source/first_payload`.
+- `capture_start` در `_handle_start` (رویداد `start` برای هر /start + first_source فقط کاربر جدید؛ payload: `c_<code>` کمپین / `ref_<id>` رفرال / خالی organic). رویدادهای دیگر: `product_delivered` + `first_value` (تحویل تعبیر)، `payment_approved` (props: simulated برای SKIP/SIMULATED). همه fail-safe.
+- خواندن این DBها در داشبورد ادمین: فاز بعدی (نیازمند pk=user_id در رجیستری داشبورد).
+
 ## فلگ‌های مهم در config.py
 - `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). بعد از تست باید `False` بشود.
 - `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست).

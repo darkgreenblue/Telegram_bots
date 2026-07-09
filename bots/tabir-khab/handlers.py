@@ -16,6 +16,7 @@ import tempfile
 
 import db
 import ai
+import analytics
 import locales
 import payments
 import texts as C
@@ -291,20 +292,22 @@ async def _handle_message(bale, msg: dict):
 
 
 async def _handle_start(bale, chat_id, user_id, username, first_name, text):
+    parts = text.split(maxsplit=1)
+    raw_payload = parts[1].strip() if len(parts) == 2 else ""
     referred_by = None
     if REFERRAL_ENABLED:                       # رفرال خاموش → deeplinkِ ref_ نادیده گرفته می‌شود
-        parts = text.split(maxsplit=1)
-        if len(parts) == 2:
-            m = _REF_RE.match(parts[1].strip())
-            if m:
-                ref_id = int(m.group(1))
-                if ref_id != user_id:
-                    referred_by = ref_id
+        m = _REF_RE.match(raw_payload)
+        if m:
+            ref_id = int(m.group(1))
+            if ref_id != user_id:
+                referred_by = ref_id
 
     # زبان از همان ابتدا = زبانِ ثابتِ ربات (استپ انتخاب زبان حذف شده)
     is_new, user = await db.get_or_create_user(
         user_id, chat_id, username, first_name, referred_by=referred_by, language=bale.locale
     )
+    # اتریبیوشن مونوریپو: رویداد start برای هر /start + first_source فقط برای کاربر جدید (analytics.py)
+    await analytics.capture_start(user_id, raw_payload, is_new)
 
     lang = _lang_of(user, bale)
     if db.onboarding_done(user):
@@ -688,9 +691,12 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
 
             if mode == "free":
                 await _deliver_trial(bale, chat_id, lang, dream_id, image_url, teaser)
+                await analytics.track_once(user_id, "first_value", {"via": "trial"})
             else:
                 await _deliver_paid(bale, chat_id, lang, image_url, preview, depth)
                 await db.mark_full_delivered(dream_id)
+                await analytics.track(user_id, "product_delivered", {"type": "dream", "dream_id": dream_id})
+                await analytics.track_once(user_id, "first_value", {"via": "dream"})
 
             await db.clear_pending(user_id)
             log.info("[%s] _process_dream DONE user=%s dream=%s image=%s",
@@ -878,6 +884,8 @@ async def _cb_view_full(bale, cq_id, chat_id, user_id, dream_id):
         await bale.answer_callback_query(cq_id)
         await bale.send_message(chat_id, depth, parse_mode=None)
         await db.mark_full_delivered(dream_id)
+        await analytics.track(user_id, "product_delivered", {"type": "dream", "dream_id": dream_id})
+        await analytics.track_once(user_id, "first_value", {"via": "dream"})
     else:
         await bale.answer_callback_query(cq_id)
         await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))

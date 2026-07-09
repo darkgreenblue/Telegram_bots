@@ -34,7 +34,8 @@
 ## آنالیتیکس و اتریبیوشن (shared/analytics.js)
 - `ensureAnalytics(db)` بعد از migration ها؛ `captureStart` در `handleStart`: رویداد `start` برای **هر** /start (props: payload/kind/code/new) + `first_source` فقط برای کاربر جدید (write-once). قرارداد payload: `c_<code>` کمپین (لینک از داشبورد)، `ref_<id>` رفرال (الگوی موجود)، خالی = organic.
 - رویدادهای ثبت‌شده (ثابت‌های `EVENTS` + اختصاصی‌ها): `start`, `onboard_done`, `daily_card`, `first_value` (once)، `spread_selected`, `question_submitted`, `cards_picked`, `paywall_shown` (props: can_afford)، `reading_started`, `product_delivered`, `refund`, `recharge_started`, `receipt_submitted`, `payment_approved`, `payment_rejected`, `feedback`, `reset`.
-- `wipeUser` جدول `events` را هم پاک می‌کند (قرارداد ریست تست). خطای track هرگز فلو را نمی‌شکند (fail-safe).
+- `wipeUser` جدول‌های `events` و `ab_exposures` را هم پاک می‌کند (قرارداد ریست تست). خطای track هرگز فلو را نمی‌شکند (fail-safe).
+- **A/B تست (shared/ab.js):** `ensureAb(db)` در boot؛ آزمایش فعال: `onboard_cta_order` — variant `reading_first` ترتیب دو دکمه‌ی CTA پایان آنبوردینگ را برعکس می‌کند (فال اول). تا وقتی آزمایش از داشبورد running نشود، `variant()` همیشه control برمی‌گرداند (رفتار عیناً قبلی). config آزمایش‌ها را داشبورد در جدول `experiments` همین DB می‌نویسد.
 
 ## ماشین حالت (users.state)
 `new → onboard_name → onboard_focus → idle → choose_spread → confirm_focus → await_question → breathing → shuffling → picking → confirm_pay → revealing → feedback` + `pay_amount/pay_receipt/pay_discount`. دک با seed قطعی (sha256+mulberry32، `REVERSAL_PROB=0.3`). گارد race در `pick:` (قفل سینکرون قبل از await). شارژ وسط فال → بعد از approve ادمین، فال خودکار ادامه می‌یابد (`afterApproval`). **آیین تطبیقی**: مشتری ثابت (۲+ فال کامل) فضاسازی کوتاه‌تر می‌گیرد.
