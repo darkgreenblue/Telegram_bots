@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query]
+        options: [status, logs, errors, restart, env-check, db-query, tunnel-url]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -120,5 +120,12 @@ jobs:
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
                 "
+                ;;
+              tunnel-url)
+                # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)
+                echo "dash-tunnel: $(systemctl is-active dash-tunnel 2>/dev/null || echo 'نصب نشده')"
+                echo "dashboard local: HTTP $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/login || echo 000) (انتظار: 200)"
+                URL=$(sudo journalctl -u dash-tunnel -n 1000 -o cat 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
+                echo "🌐 ${URL:-آدرس trycloudflare در لاگ نبود (named tunnel؟ یا سرویس تازه بالا آمده)}"
                 ;;
             esac

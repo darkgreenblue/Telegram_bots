@@ -15,8 +15,15 @@
 | `bots/resume-tailor` | pm2: `resume-tailor` | رزومه‌ی انگلیسی کاستومایز per آگهی | فاز تست | `bots/resume-tailor/CLAUDE.md` |
 | `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت | فاز تست | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | در حال تست شخصی — روی سرور زنده است | `bots/tabir-khab/CLAUDE.md` |
+| `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
 مدل‌ها (همه از **OpenRouter**): پیش‌فرض `google/gemini-2.5-flash`؛ کارهای دقیق `google/gemini-2.5-pro`؛ فالبک ارزان `deepseek/deepseek-v3.2`.
+
+## ۲الف) آنالیتیکس، اتریبیوشن و داشبورد (زیرساخت رشد)
+- **رویدادها:** هر ربات Node جدول `events` + ستون‌های write-once `users.first_source/first_payload` دارد (`shared/analytics.js` — voice2text کپی محلی هم‌قرارداد با چک CI: `tools/check-analytics-sync.mjs`). ثبت با ثابت‌های `EVENTS` (هسته: start, onboard_done, first_value, paywall_shown, recharge_started, receipt_submitted, payment_approved, payment_rejected, product_delivered, refund, feedback, reset, ab_exposure) — string خام ممنوع. track ها fail-safe اند و هرگز فلو را نمی‌شکنند. ریست تست جدول events همان کاربر را هم پاک می‌کند.
+- **قرارداد payload لینک استارت** (`t.me/<bot>?start=…`، سقف ۶۴ کاراکتر): `c_<code>` کمپین (کد base62 که داشبورد می‌سازد؛ متادیتا سمت داشبورد)، `ref_<id>`/`r_<id>` رفرال، خالی = ارگانیک. هر لینک فقط یک payload. رویداد `start` برای **هر** /start ثبت می‌شود (کمپین‌های re-engagement هم دیده شوند)؛ first_source فقط برای کاربر جدید.
+- **داشبورد** (`bots/dashboard/`، pm2: `dashboard`): وب‌اپ SSR فارسی؛ دیتای ربات‌ها را readonly می‌خواند (اتصال کوتاه per-request)، config را با گارد schema می‌نویسد، دیتای خودش در `data/platform.db` (campaigns/settings/audit_log). امنیت: bind فقط `127.0.0.1:8787`، دسترسی از **Cloudflare Tunnel** (سرویس systemd `dash-tunnel` که deploy می‌سازد؛ بدون دامنه = quick tunnel و آدرس بعد از هر ری‌استارت به تلگرام مالک پیام می‌شود؛ `Ops → tunnel-url` هم چاپش می‌کند)، کوکی HttpOnly+SameSite=Strict، چک Origin روی POST، audit_log برای هر write/export. جزئیات: `bots/dashboard/CLAUDE.md`.
+- **تحلیل درست:** تجمیع روزانه همیشه با مرز روز تهران؛ «درآمد» = SUM(amount) تأییدشده (پرداخت واقعی بعد از تخفیف).
 
 ## ۲ب) قرارداد «تعریفِ تمام‌شدن» (ضد گم‌شدن کانتکست)
 هر PR که **رفتار** یک ربات را عوض می‌کند (قیمت، فلو، جدول DB، پرامپت، دستور ادمین، env جدید) باید `bots/<name>/CLAUDE.md` همان ربات را هم به‌روز کند. تغییرات پلتفرمی (workflow، shared، قرارداد کلیدها) باید همین فایل ریشه را به‌روز کنند. PR بدون آپدیت مستندات = ناقص.
@@ -46,7 +53,9 @@
 | `VPS_SSH_KEY` | اتصال CI/CD به سرور (موجود) |
 | `<BOT>_BOT_TOKEN` / `<BOT>_OPENROUTER_KEY` | per ربات: `VOICE2TEXT_*` (اختیاری)، `RESUME_TAILOR_*`، `TAROT_*` |
 | `VOICE2TEXT_NOTION_TOKEN` | اختیاری — قابلیت Notion |
-| `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup |
+| `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup + دریافت آدرس تونل داشبورد |
+| `DASHBOARD_TOKEN` | توکن ورود به داشبورد ادمین (رشته‌ی تصادفی بلند ≥۳۲ کاراکتر) — تا ست نشود داشبورد دیپلوی نمی‌شود |
+| `CLOUDFLARE_TUNNEL_TOKEN` | اختیاری: توکن named tunnel کلادفلر → آدرس ثابت داشبورد روی دامنه؛ بدون آن quick tunnel رایگان |
 | `BACKUP_PASSPHRASE` | اختیاری: رمزنگاری بکاپ شبانه‌ی دیتابیس‌ها |
 
 منبع مقادیر: `*_BOT_TOKEN` از [@BotFather](https://t.me/BotFather)؛ `*_OPENROUTER_KEY` از `openrouter.ai/keys` (فقط یک‌بار نمایش داده می‌شود — در صورت گم‌شدن کلید نو بساز). نکته‌ی tarot: روی BotFather برای این ربات `/setinline` فعال شود (لازمه‌ی دکمه‌ی دعوت).
