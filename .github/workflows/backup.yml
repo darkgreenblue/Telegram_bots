@@ -108,6 +108,11 @@ jobs:
         run: |
           TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
           if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d chat_id="$OWNER" \
-            --data-urlencode text="🚨 بکاپ شبانه‌ی دیتابیس‌ها شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="🚨 بکاپ شبانه‌ی دیتابیس‌ها شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          done

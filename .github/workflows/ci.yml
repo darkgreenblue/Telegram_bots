@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        bot: [voice2text, resume-tailor, tarot]
+        bot: [voice2text, resume-tailor, tarot, dashboard]
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +26,11 @@ jobs:
 
       - name: Syntax check
         run: node --check bots/${{ matrix.bot }}/index.js
+
+      # قرارداد آنالیتیکس: کپی محلی voice2text باید با shared/analytics.js سینک بماند
+      - name: Analytics contract check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-analytics-sync.mjs
 
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).

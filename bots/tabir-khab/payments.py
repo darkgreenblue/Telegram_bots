@@ -7,6 +7,7 @@
 import uuid
 import logging
 
+import analytics
 import db
 import locales
 import texts as C
@@ -83,6 +84,10 @@ async def apply_successful_payment(bot, user_id: int, payload: str, charge_id: s
 
     tier = txn["tier"]
     days = txn["duration_days"]
+    # آنالیتیکس مونوریپو: charge_id های SKIP/SIMULATED یعنی پرداخت تستی (مثل report.py جدا شمرده می‌شود)
+    await analytics.track(user_id, "payment_approved", {
+        "tier": tier, "amount_rial": txn["amount_rial"], "simulated": charge_id in ("SKIP", "SIMULATED"),
+    })
 
     user = await db.get_user(user_id)
     was_first_purchase = (user or {}).get("has_paid", 0) == 0

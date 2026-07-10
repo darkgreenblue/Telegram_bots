@@ -31,13 +31,17 @@ jobs:
           # tarot
           TAROT_BOT_TOKEN:              ${{ secrets.TAROT_BOT_TOKEN }}
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # dashboard (داشبورد ادمین): توکن ورود + تونل اختیاری Cloudflare (named) + گیرنده‌ی آدرس تونل
+          DASHBOARD_TOKEN:              ${{ secrets.DASHBOARD_TOKEN }}
+          CLOUDFLARE_TUNNEL_TOKEN:      ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          OWNER_TELEGRAM_ID:            ${{ secrets.OWNER_TELEGRAM_ID }}
           # اجرای دستی با force_all=true → همه ری‌دیپلوی می‌شوند
           FORCE_ALL:                    ${{ github.event.inputs.force_all || 'false' }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,FORCE_ALL
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -87,6 +91,9 @@ jobs:
             if [ -n "$TAROT_BOT_TOKEN" ] && [ -n "$TAROT_OPENROUTER_KEY" ]; then
               write_env tarot "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
             fi
+            if [ -n "$DASHBOARD_TOKEN" ]; then
+              write_env dashboard "$(printf 'DASHBOARD_TOKEN=%s\nPORT=8787' "$DASHBOARD_TOKEN")"
+            fi
 
             # ---------- دیپلوی انتخابی: فقط ربات‌هایی که واقعاً تغییر کرده‌اند ----------
             # خط قرمز: merge ای که به یک ربات ربطی ندارد نباید ربات‌های دیگر (خصوصاً voice2text) را ری‌استارت کند.
@@ -115,6 +122,56 @@ jobs:
             deploy_bot voice2text
             deploy_bot resume-tailor
             deploy_bot tarot
+            deploy_bot dashboard
+
+            # ---------- Cloudflare Tunnel داشبورد (هیچ پورت inbound باز نمی‌شود) ----------
+            # named tunnel اگر CLOUDFLARE_TUNNEL_TOKEN ست باشد (آدرس ثابت با دامنه)،
+            # وگرنه quick tunnel رایگان trycloudflare (آدرس بعد از هر ری‌استارت عوض می‌شود؛
+            # آدرس فعلی به تلگرام مالک پیام می‌شود و با Ops → tunnel-url هم قابل خواندن است).
+            if [ -f bots/dashboard/.env ]; then
+              if ! command -v cloudflared >/dev/null 2>&1; then
+                echo "⬇️ نصب cloudflared..."
+                curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+                sudo dpkg -i /tmp/cloudflared.deb >/dev/null 2>&1 || sudo apt-get -f install -y -q
+                rm -f /tmp/cloudflared.deb
+              fi
+              CF_BIN=$(command -v cloudflared)
+              if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+                TUNNEL_EXEC="$CF_BIN tunnel --no-autoupdate run --token $CLOUDFLARE_TUNNEL_TOKEN"
+              else
+                TUNNEL_EXEC="$CF_BIN tunnel --no-autoupdate --url http://127.0.0.1:8787"
+              fi
+              printf '[Unit]\nDescription=Cloudflare tunnel for bots dashboard\nAfter=network-online.target\n\n[Service]\nExecStart=%s\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n' "$TUNNEL_EXEC" > /tmp/dash-tunnel.service
+              if ! sudo cmp -s /tmp/dash-tunnel.service /etc/systemd/system/dash-tunnel.service 2>/dev/null; then
+                sudo cp /tmp/dash-tunnel.service /etc/systemd/system/dash-tunnel.service
+                sudo chmod 600 /etc/systemd/system/dash-tunnel.service
+                sudo systemctl daemon-reload
+                sudo systemctl enable dash-tunnel >/dev/null 2>&1 || true
+                sudo systemctl restart dash-tunnel
+                echo "🌀 dash-tunnel راه‌اندازی/به‌روز شد"
+                sleep 5
+              fi
+              rm -f /tmp/dash-tunnel.service
+              # چک دسترسی لوکال داشبورد + استخراج آدرس تونل و ارسال به تلگرام مالک
+              DASH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/login || echo 000)
+              echo "داشبورد لوکال: HTTP $DASH_HTTP (انتظار: 200)"
+              TUNNEL_URL=$(sudo journalctl -u dash-tunnel -n 1000 -o cat 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
+              [ -z "$TUNNEL_URL" ] && [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ] && TUNNEL_URL="(named tunnel — آدرس دامنه‌ی خودت)"
+              echo "🌐 آدرس داشبورد: ${TUNNEL_URL:-هنوز آماده نیست — Ops → tunnel-url}"
+              if [ -n "$OWNER_TELEGRAM_ID" ] && [ -n "$TUNNEL_URL" ]; then
+                MSG_TOKEN="${TAROT_BOT_TOKEN:-${VOICE2TEXT_BOT_TOKEN:-$RESUME_TAILOR_BOT_TOKEN}}"
+                if [ -n "$MSG_TOKEN" ]; then
+                  # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
+                  IFS=',' read -ra OWNERS <<< "$OWNER_TELEGRAM_ID"
+                  for id in "${OWNERS[@]}"; do
+                    id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+                    curl -fsS -X POST "https://api.telegram.org/bot${MSG_TOKEN}/sendMessage" \
+                      -d chat_id="$id" \
+                      --data-urlencode text="🌐 آدرس داشبورد: $TUNNEL_URL" >/dev/null || true
+                  done
+                fi
+              fi
+            fi
 
             pm2 save
             echo "---- وضعیت نهایی ----"
@@ -131,9 +188,14 @@ jobs:
         run: |
           TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
           if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d chat_id="$OWNER" \
-            --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          done
 
   # ---------- tabir-khab (استثنای مونوریپو: پایتون + systemd، نه pm2) ----------
   # سرویس روی سرور همان‌جاست که همیشه بود: /home/ubuntu/tabir_khab با سرویسِ

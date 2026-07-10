@@ -1,7 +1,10 @@
-# Health — پایش خودکار سلامت ربات‌ها روی VPS، هر ۳۰ دقیقه.
-# اگر رباتی offline/errored باشد یا در کرش‌لوپ افتاده باشد، جاب قرمز می‌شود،
-# آخرین خطوط error-log همان ربات در لاگ چاپ می‌شود و یک GitHub Issue
-# ساخته/به‌روزرسانی می‌شود تا مشکل حتی وقتی کسی آنلاین نیست ثبت شود.
+# Health — پایش خودکار سلامت ربات‌ها روی VPS (هر ۳۰ دقیقه؛ گیت‌هاب گاهی اجرا را عقب می‌اندازد).
+# دو سطح شدت، با پیامِ مشخص (کدام ربات + چه مشکلی):
+#   🔴 خرابیِ واقعی (ربات pm2 آفلاین/کرش‌لوپ، یا سرویس systemd تعبیر خواب غیرفعال، یا سرور
+#      در دسترس نیست) → جاب قرمز + ساخت/آپدیت Issue + پیام تلگرام.
+#   🟡 صف رسید معطل (پرداخت waiting_review قدیمی‌تر از ۲ ساعت) → ربات‌ها سالم‌اند؛ فقط
+#      اطلاع‌رسانی تلگرام (بدون قرمزکردن جاب و بدون Issue) تا مالک رسید را تأیید/رد کند.
+# جزئیات مشکل از خروجی چک روی سرور استخراج و در پیام گنجانده می‌شود (خطوط با پیشوند PROBLEM:).
 name: Health
 
 on:
@@ -18,77 +21,145 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check bot health on VPS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: 185.204.171.170
-          username: ubuntu
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
+        id: check
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set +e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/health_key
+          chmod 600 ~/.ssh/health_key
+          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
+          OUT=$(ssh -i ~/.ssh/health_key -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@185.204.171.170 'bash -s' <<'REMOTE'
             cd ~/voice2text
-            UNHEALTHY=$(pm2 jlist | node -e "
+            # ── خرابیِ pm2: آفلاین یا کرش‌لوپ (بالا آمده ولی در ۱۰ دقیقه‌ی اخیر با ری‌استارت زیاد) ──
+            pm2 jlist | node -e "
               const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              const bad = a.filter(p =>
-                p.pm2_env.status !== 'online' ||
-                // کرش‌لوپ: بالا آمده ولی در ۱۰ دقیقه‌ی اخیر و با ری‌استارت زیاد
-                ((Date.now() - p.pm2_env.pm_uptime) < 10 * 60000 && p.pm2_env.restart_time > 5)
-              );
-              for (const p of bad) console.log(p.name + ' status=' + p.pm2_env.status + ' restarts=' + p.pm2_env.restart_time);
-            ")
-            FAILED=0
-            if [ -n "$UNHEALTHY" ]; then
-              FAILED=1
-              echo "🚨 ربات(های) ناسالم (pm2):"
-              echo "$UNHEALTHY"
-              echo "$UNHEALTHY" | awk '{print $1}' | while read -r app; do
-                echo "===== $app — error.log (آخرین ۴۰ خط) ====="
-                tail -n 40 ~/.pm2/logs/"$app"-error.log 2>/dev/null || echo "(خالی)"
-                echo "===== $app — out.log (آخرین ۲۰ خط) ====="
-                tail -n 20 ~/.pm2/logs/"$app"-out.log 2>/dev/null || echo "(خالی)"
-              done
-            fi
-            # tabir-khab: systemd نه pm2 (استثنای مونوریپو)
+              for (const p of a) {
+                const offline = p.pm2_env.status !== 'online';
+                const loop = (Date.now() - p.pm2_env.pm_uptime) < 10*60000 && p.pm2_env.restart_time > 5;
+                if (offline) console.log('PROBLEM:🔴 ربات «' + p.name + '» آفلاین است (وضعیت=' + p.pm2_env.status + ', ری‌استارت=' + p.pm2_env.restart_time + ')');
+                else if (loop) console.log('PROBLEM:🔴 ربات «' + p.name + '» در کرش‌لوپ است (ری‌استارت=' + p.pm2_env.restart_time + ' در ۱۰ دقیقه)');
+              }
+            "
+            # error-log ربات‌های خراب را در لاگِ همین run چاپ کن (برای دیباگ)
+            pm2 jlist | node -e "
+              const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              for (const p of a) {
+                const bad = p.pm2_env.status !== 'online' || ((Date.now()-p.pm2_env.pm_uptime)<10*60000 && p.pm2_env.restart_time>5);
+                if (bad) console.log(p.name);
+              }
+            " | while read -r app; do
+              echo "===== $app — error.log (آخرین ۴۰ خط) ====="
+              tail -n 40 ~/.pm2/logs/"$app"-error.log 2>/dev/null || echo "(خالی)"
+            done
+            # ── تعبیر خواب: systemd نه pm2 (استثنای مونوریپو) ──
             if sudo systemctl list-unit-files 2>/dev/null | grep -q '^tabir-khab'; then
               STATE=$(sudo systemctl is-active tabir-khab 2>/dev/null || true)
               if [ "$STATE" != "active" ]; then
-                FAILED=1
-                echo "🚨 tabir-khab status=$STATE (systemd)"
+                echo "PROBLEM:🔴 سرویس «tabir-khab» (تعبیر خواب) فعال نیست (وضعیت=$STATE)"
                 echo "===== tabir-khab — bot.log (آخرین ۴۰ خط) ====="
                 tail -n 40 /home/ubuntu/tabir_khab/logs/bot.log 2>/dev/null || echo "(خالی)"
               fi
             fi
-            [ "$FAILED" = "0" ] || exit 1
-            echo "✅ همه‌ی ربات‌ها online"
+            # ── صف رسید معطل: پرداخت waiting_review قدیمی‌تر از ۲ ساعت (اعتماد مالی — بند ۱۰ ریشه) ──
+            # این «خرابی» نیست؛ ربات سالم است ولی رسیدی منتظر تأیید مالک مانده. شماره‌ی رسیدها هم می‌آید.
+            for d in bots/*/data; do
+              app=$(basename "$(dirname "$d")")
+              DBFILE=$(ls "$d"/*.db 2>/dev/null | head -1)
+              [ -n "$DBFILE" ] || continue
+              [ -d "bots/$app/node_modules/better-sqlite3" ] || continue
+              DBFILE="$DBFILE" APP="$app" node -e "
+                try {
+                  const path = require('path');
+                  const D = require(path.join(process.cwd(), 'bots', process.env.APP, 'node_modules', 'better-sqlite3'));
+                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
+                  if (!db.prepare(\"SELECT 1 FROM sqlite_master WHERE type='table' AND name='payments'\").get()) process.exit(0);
+                  const rows = db.prepare(\"SELECT id FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 ORDER BY id\").all();
+                  if (rows.length) console.log('PROBLEM:🟡 ' + process.env.APP + ': ' + rows.length + ' رسید پرداخت بیش از ۲ ساعت منتظر تأیید (شماره: ' + rows.map(r => r.id).join(', ') + ') — در ربات یا داشبورد تأیید/رد کن');
+                } catch (e) {}
+              " 2>/dev/null
+            done
+            echo "HEALTH_DONE"
+          REMOTE
+          )
+          RC=$?
+          echo "$OUT"
+          # سرور در دسترس نیست (SSH ناموفق یا خروجی ناقص) = خرابیِ جدی
+          if [ $RC -ne 0 ] || ! printf '%s' "$OUT" | grep -q 'HEALTH_DONE'; then
+            LINE="🔴 سرور VPS در دسترس نیست (SSH ناموفق, rc=$RC) — ممکن است کل سرور یا شبکه داون باشد"
+            { echo "alert<<EOF"; echo "$LINE"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            echo "outage=true"  >> "$GITHUB_OUTPUT"
+            echo "has_alert=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ALERT=$(printf '%s\n' "$OUT" | sed -n 's/^PROBLEM://p')
+          { echo "alert<<EOF"; printf '%s\n' "$ALERT"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          # 🔴 فقط خرابیِ واقعی جاب را قرمز/Issue می‌کند؛ 🟡 (صف رسید) فقط اطلاع‌رسانی است
+          if printf '%s' "$ALERT" | grep -q '🔴'; then echo "outage=true"; else echo "outage=false"; fi >> "$GITHUB_OUTPUT"
+          if [ -n "$ALERT" ]; then echo "has_alert=true"; else echo "has_alert=false"; fi >> "$GITHUB_OUTPUT"
+          [ -n "$ALERT" ] && echo "⚠️ موارد یافت‌شده:" && printf '%s\n' "$ALERT" || echo "✅ همه‌ی ربات‌ها سالم و صف رسید خالی/تازه است"
 
-      # پیام مستقیم تلگرام به مالک — مالک غیرفنی در GitHub زندگی نمی‌کند (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
-      - name: Telegram alert on failure
-        if: failure()
+      # پیام تلگرام به مالک(ها) — با جزئیاتِ مشخص. برای 🔴 و 🟡 هر دو می‌آید ولی متن فرق دارد.
+      - name: Telegram alert
+        if: steps.check.outputs.has_alert == 'true'
         env:
           T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
           T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
           T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
           OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          DETAIL:  ${{ steps.check.outputs.alert }}
+          OUTAGE:  ${{ steps.check.outputs.outage }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
           if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d chat_id="$OWNER" \
-            --data-urlencode text="🚨 یک یا چند ربات ناسالم است — لاگ خطا: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          (برای دیباگ به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده»)" || true
+          if [ "$OUTAGE" = "true" ]; then
+            HEAD="🚨 پایش سلامت — خرابی:"
+            FOOT="لاگ کامل: $RUN_URL
+          (به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده» تا بررسی کنم)"
+          else
+            HEAD="🟡 پایش سلامت — نیازمند رسیدگی (ربات‌ها سالم‌اند):"
+            FOOT="این هشدار تا وقتی رسیدها تأیید/رد نشوند تکرار می‌شود."
+          fi
+          MSG="$HEAD
 
+          $DETAIL
+
+          $FOOT"
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="$MSG" >/dev/null || true
+          done
+
+      # Issue فقط برای خرابیِ واقعی (🔴) — صف رسید Issue نمی‌سازد
       - name: Create or update alert issue
-        if: failure()
+        if: steps.check.outputs.outage == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          DETAIL:   ${{ steps.check.outputs.alert }}
         run: |
-          title="🚨 Health check failed — یک یا چند ربات ناسالم است"
+          title="🚨 Health check failed — خرابی ربات"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          body="پایش خودکار سلامت شکست خورد. لاگ خطای ربات(های) ناسالم در خودِ همین run چاپ شده:
-          $run_url
+          body="پایش خودکار سلامت خرابی پیدا کرد:
 
-          برای دیباگ: workflow «Ops» را با action=logs و نام ربات اجرا کن (یا به Claude Code بگو)."
+          $DETAIL
+
+          لاگ کامل: $run_url
+          برای دیباگ: workflow «Ops» با action=logs و نام ربات (یا به Claude Code بگو)."
           existing=$(gh issue list --repo "${{ github.repository }}" --state open --search "in:title Health check failed" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
           else
             gh issue create --repo "${{ github.repository }}" --title "$title" --body "$body"
           fi
+
+      # جاب فقط برای خرابیِ واقعی قرمز می‌شود (صف رسید = زرد، جاب سبز می‌ماند)
+      - name: Mark job failed on outage
+        if: steps.check.outputs.outage == 'true'
+        run: |
+          echo "خرابی واقعی — جاب قرمز می‌شود."
+          exit 1

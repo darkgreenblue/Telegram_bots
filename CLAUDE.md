@@ -12,11 +12,20 @@
 | پوشه | پروسه | شرح | حساسیت | جزئیات |
 |------|-------|-----|--------|--------|
 | `bots/voice2text` | pm2: `voice2text` | ویس→متن، کیف‌پول/پرداخت | **زنده و درآمدزا — هرگز نباید بشکند؛ از shared استفاده نمی‌کند** | `bots/voice2text/CLAUDE.md` |
-| `bots/resume-tailor` | pm2: `resume-tailor` | رزومه‌ی انگلیسی کاستومایز per آگهی | فاز تست | `bots/resume-tailor/CLAUDE.md` |
+| `bots/resume-tailor` | pm2: `resume-tailor` | رزومه‌ی انگلیسی کاستومایز per آگهی | **در حال حذف** (از داشبورد برداشته شد؛ بعداً از ریپو هم) | `bots/resume-tailor/CLAUDE.md` |
 | `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت | فاز تست | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | در حال تست شخصی — روی سرور زنده است | `bots/tabir-khab/CLAUDE.md` |
+| `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
 مدل‌ها (همه از **OpenRouter**): پیش‌فرض `google/gemini-2.5-flash`؛ کارهای دقیق `google/gemini-2.5-pro`؛ فالبک ارزان `deepseek/deepseek-v3.2`.
+
+## ۲الف) آنالیتیکس، اتریبیوشن و داشبورد (زیرساخت رشد)
+- **رویدادها:** هر ربات Node جدول `events` + ستون‌های write-once `users.first_source/first_payload` دارد (`shared/analytics.js` — voice2text کپی محلی هم‌قرارداد با چک CI: `tools/check-analytics-sync.mjs`). ثبت با ثابت‌های `EVENTS` (هسته: start, onboard_done, first_value, paywall_shown, recharge_started, receipt_submitted, payment_approved, payment_rejected, product_delivered, refund, feedback, reset, ab_exposure) — string خام ممنوع. track ها fail-safe اند و هرگز فلو را نمی‌شکنند. ریست تست جدول events همان کاربر را هم پاک می‌کند.
+- **قرارداد payload لینک استارت** (`t.me/<bot>?start=…`، سقف ۶۴ کاراکتر): `c_<code>` کمپین (کد base62 که داشبورد می‌سازد؛ متادیتا سمت داشبورد)، `ref_<id>`/`r_<id>` رفرال، خالی = ارگانیک. هر لینک فقط یک payload. رویداد `start` برای **هر** /start ثبت می‌شود (کمپین‌های re-engagement هم دیده شوند)؛ first_source فقط برای کاربر جدید.
+- **داشبورد** (`bots/dashboard/`، pm2: `dashboard`): وب‌اپ SSR فارسی؛ دیتای ربات‌ها را readonly می‌خواند (اتصال کوتاه per-request)، config را با گارد schema می‌نویسد، دیتای خودش در `data/platform.db` (campaigns/settings/audit_log). امنیت: bind فقط `127.0.0.1:8787`، دسترسی از **Cloudflare Tunnel** (سرویس systemd `dash-tunnel` که deploy می‌سازد؛ بدون دامنه = quick tunnel و آدرس بعد از هر ری‌استارت به تلگرام مالک پیام می‌شود؛ `Ops → tunnel-url` هم چاپش می‌کند)، کوکی HttpOnly+SameSite=Strict، چک Origin روی POST، audit_log برای هر write/export. جزئیات: `bots/dashboard/CLAUDE.md`.
+- **تحلیل درست:** تجمیع روزانه همیشه با مرز روز تهران؛ «درآمد» = SUM(amount) تأییدشده (پرداخت واقعی بعد از تخفیف).
+- **A/B تست (`shared/ab.js` + صفحه‌ی «تست‌ها»):** انتساب با هش قطعی `userId:expKey`؛ exposure در `ab_exposures` خود ربات (تگ ماندگار + منبع حقیقت sticky)؛ چرخه‌ی `draft→running→draining→stopped` — **drain** = exposure جدید ممنوع و expose شده‌ها فلوشان را تمام می‌کنند؛ **stopped/kill** = برگشت فوری همه به control (بدون deploy، ≤۶۰ ثانیه). گردش‌کار: فرضیه به Claude → پیاده‌سازی شاخه با `variant(db, uid, 'key')` در ربات (تا running نشود رفتار = قبلی) → ساخت/کنترل از داشبورد. نتایج: CTW بیزی فقط برای متریک rate + چک SRM + برچسب «کم‌نمونه» زیر ۲۰۰ exposure/variant + برچسب «شواهد ضعیف» برای switchover. قانون تصمیم پیش‌فرض: ship اگر CTW>85٪ و guardrail سالم. tabir-khab: پورت `analytics.py` (فقط رویدادها؛ A/B هنوز ندارد).
+- **پایش مالی و شدت هشدار Health:** Health هر ۳۰ دقیقه (گیت‌هاب گاهی عقب می‌اندازد) دو سطح دارد و پیامش **مشخص** است (کدام ربات + چه مشکلی + شماره‌ی رسید): **🔴 خرابیِ واقعی** (pm2 آفلاین/کرش‌لوپ، systemd تعبیر خواب غیرفعال، یا سرور در دسترس نیست) = جاب قرمز + Issue + تلگرام؛ **🟡 صف رسید معطل** (waiting_review قدیمی‌تر از ۲ ساعت) = ربات سالم است، فقط تلگرام اطلاع‌رسانی (بدون قرمزکردن جاب/Issue) تا مالک رسید را تأیید/رد کند. داشبورد rollup روزانه‌ی events را در platform.db نگه می‌دارد؛ حذف خام‌های قدیمی فقط با تنظیم صریح `events_retention_days` (حداقل ۳۰).
 
 ## ۲ب) قرارداد «تعریفِ تمام‌شدن» (ضد گم‌شدن کانتکست)
 هر PR که **رفتار** یک ربات را عوض می‌کند (قیمت، فلو، جدول DB، پرامپت، دستور ادمین، env جدید) باید `bots/<name>/CLAUDE.md` همان ربات را هم به‌روز کند. تغییرات پلتفرمی (workflow، shared، قرارداد کلیدها) باید همین فایل ریشه را به‌روز کنند. PR بدون آپدیت مستندات = ناقص.
@@ -46,7 +55,9 @@
 | `VPS_SSH_KEY` | اتصال CI/CD به سرور (موجود) |
 | `<BOT>_BOT_TOKEN` / `<BOT>_OPENROUTER_KEY` | per ربات: `VOICE2TEXT_*` (اختیاری)، `RESUME_TAILOR_*`، `TAROT_*` |
 | `VOICE2TEXT_NOTION_TOKEN` | اختیاری — قابلیت Notion |
-| `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup |
+| `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup + دریافت آدرس تونل داشبورد. **می‌تواند چند آی‌دی با کاما باشد** (مثل `111,222,333`) تا چند نفر هشدار بگیرند — فقط مقدار Secret را در گیت‌هاب ویرایش کن، نیازی به کد/PR نیست |
+| `DASHBOARD_TOKEN` | توکن ورود به داشبورد ادمین (رشته‌ی تصادفی بلند ≥۳۲ کاراکتر) — تا ست نشود داشبورد دیپلوی نمی‌شود |
+| `CLOUDFLARE_TUNNEL_TOKEN` | اختیاری: توکن named tunnel کلادفلر → آدرس ثابت داشبورد روی دامنه؛ بدون آن quick tunnel رایگان |
 | `BACKUP_PASSPHRASE` | اختیاری: رمزنگاری بکاپ شبانه‌ی دیتابیس‌ها |
 
 منبع مقادیر: `*_BOT_TOKEN` از [@BotFather](https://t.me/BotFather)؛ `*_OPENROUTER_KEY` از `openrouter.ai/keys` (فقط یک‌بار نمایش داده می‌شود — در صورت گم‌شدن کلید نو بساز). نکته‌ی tarot: روی BotFather برای این ربات `/setinline` فعال شود (لازمه‌ی دکمه‌ی دعوت).
@@ -55,12 +66,31 @@
 بعد از merge، نتیجه‌ی workflow `Deploy` را ببین (لاگ خطوط `✅ <bot> دیپلوی شد (دلیل: ...)` و `⏭ <bot> بدون تغییر` دارد). بعد با workflow `Ops` (action=`status`) صحت را خودت تأیید کن. برای تست واقعی محصول (ارسال ویس، /start و…) از کاربر بخواه.
 **Rollback کد:** `git revert` کامیت مشکل‌دار → merge. **Rollback کلید:** Secret را اصلاح کن → اجرای `Deploy` با `force_all=true` (نیازی به کامیت خالی نیست؛ `bots/voice2text/.env.bak` روی سرور نسخه‌ی دستی قدیمی را دارد). **Rollback دیتابیس:** بند ۸ب.
 
-## ۵) افزودن ربات جدید (چک‌لیست)
-1. `cp -r bots/_template bots/<name>` → طبق `bots/_template/README.md` کامل کن (`npm install` برای lockfile، `CLAUDE.md` مخصوص ربات).
+## ۵) افزودن ربات جدید (چک‌لیست کامل — روی زیرساخت رشد)
+> هدف: ربات جدید از روز اول اتریبیوشن/فانل/A-B/مالی/پشتیبانی را در داشبورد داشته باشد، **بدون دوباره‌کاری**. `_template` از قبل همه‌ی این‌ها را سیم‌کشی کرده؛ فقط track ها و ردیف رجیستری را اضافه کن.
+
+**الف) ساخت از قالب**
+1. `cp -r bots/_template bots/<name>` → `<NAME>`/`tg-NAME` را جایگزین کن، `npm install` (برای lockfile)، `bots/<name>/CLAUDE.md` بساز، README قالب را با README واقعی جایگزین کن.
 2. `ecosystem.config.cjs`: `{ name: '<name>', cwd: 'bots/<name>', script: 'index.js' }`.
 3. `ci.yml`: نام به ماتریس `bot:`.
-4. `deploy.yml`: دو خط `env:`، افزودن نام‌ها به `envs:`، یک بلوک `write_env <name>` و یک `deploy_bot <name>`.
-5. کاربر فقط دو Secret می‌سازد (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`). بقیه با merge خودکار است.
+4. `deploy.yml`: دو خط `env:` (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`)، افزودن به `envs:`، یک بلوک `write_env <name>`، یک `deploy_bot <name>`.
+5. کاربر فقط دو Secret می‌سازد (`<NAME>_BOT_TOKEN`, `<NAME>_OPENROUTER_KEY`).
+
+**ب) زیرساخت رشد در کد ربات** (قالب از قبل دارد — فقط track ها را بگذار)
+6. `ensureAnalytics(db)` + `ensureAb(db)` بعد از ساخت جدول users (در قالب هست).
+7. `captureStart(db, uid, ctx.startPayload, isNew)` در `bot.start` (در قالب هست).
+8. **track در نقاط فانل** با ثابت‌های `EVENTS` (نه string خام): حداقل `onboard_done`, `first_value` (با `trackOnce`), و اگر پولی است `paywall_shown`/`recharge_started`/`receipt_submitted`/`payment_approved`/`payment_rejected`/`product_delivered`. رویداد اختصاصی مجاز است (snake_case) ولی نباید هم‌معنی هسته باشد.
+9. **A/B (اختیاری):** هرجا فرضیه داری با `variant(db, uid, 'key')` شاخه بزن (تا از داشبورد running نشود = control). و در رجیستری داشبورد `abSupport: true` بده.
+10. `wipeUser` جدول‌های `events` و `ab_exposures` را هم پاک کند (در قالب هست).
+
+**ج) قرارداد schema تا داشبورد «خودکار» کار کند** (`bots/dashboard/lib/bots.js`)
+11. یک ردیف به `BOTS` اضافه کن. اگر قرارداد پیش‌فرض را رعایت کنی (کاری که قالب می‌کند)، ردیف مینیمال است:
+    `{ key, title, dataDir: '../<name>/data', pattern: /^bot\.db$/, userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET }`.
+    - **پول:** اگر جدول `payments` با ستون‌های `amount`/`status`(`waiting_review`→`approved`)/`created_at`(unix) داری → `money: MONEY_WALLET` و مالی/درآمد/صف‌رسید خودکار کار می‌کند. اگر مدل پولت فرق دارد (مثل tabir: جدول `transactions`، `amount_rial`، status `paid`، ریال، `created_at` ISO، پرداخت تستی) → یک آبجکت `money` سفارشی بده (نمونه در همان فایل). پروفایل تفاوت‌ها را می‌پوشاند؛ **هیچ route ای را دست نزن.**
+    - **فانل:** یک entry در `FUNNELS` (`bots/dashboard/routes/funnels.js`) با مراحل رویدادی + (اختیاری) `entity` برای توزیع وضعیت رکوردهای قطعی (مثل readings/dreams؛ اگر ستون status نیست `statusExpr` بده).
+12. اگر ربات پایتونی است (استثنای مونوریپو مثل tabir): از `bots/tabir-khab/analytics.py` (پورت هم‌قرارداد) الگو بگیر؛ `ANALYTICS_SCHEMA_VERSION` و قطعه‌های قرارداد باید با shared یکی بمانند (چک CI: `tools/check-analytics-sync.mjs`). مسیر DB مطلق را با `dataDir` مطلق + `envDir` در رجیستری بده.
+
+**قرارداد طلایی داشبورد:** داشبورد هیچ‌جا مقدار schema را hardcode نمی‌کند؛ همه از پروفایلِ `lib/bots.js` می‌آید (`userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `toToman`, `revenueWhere`, `abSupported`). ربات جدیدی که قرارداد را رعایت کند با **یک ردیف رجیستری** کامل در داشبورد ظاهر می‌شود.
 
 ## ۶) محدودیت‌ها و نکات حیاتی
 - **voice2text نباید بشکند** — تغییراتش کمینه و افزایشی؛ refactor فقط با تصمیم صریح کاربر؛ از `shared/` استفاده نمی‌کند (خودکفاست).

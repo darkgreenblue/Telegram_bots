@@ -21,6 +21,8 @@ import CARDS, { CARD_BY_KEY } from './cards.js';
 import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
+import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
+import { ensureAb, variant } from '../../shared/ab.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -42,6 +44,11 @@ const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
 // قبل از انتشار عمومی حتماً false شود (دکمه کلاً مخفی می‌شود؛ /reset فقط برای OWNER می‌ماند).
 const TEST_PHASE = true;
+
+// 🌀 فال با موضوع آزاد: به کاربر سیگنال می‌دهد می‌تواند درباره‌ی «هر موضوعی» فال بگیرد (نه فقط کاتالوگ ثابت).
+// Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
+// (فال‌های open3/open5 که قبلاً ثبت شده‌اند بی‌ضرر در DB می‌مانند؛ پایپ‌لاین افشا از SPREAD_BY_ID می‌خواند).
+const OPEN_TOPIC_ENABLED = true;
 
 const ADMIN_IDS = [100257975];
 const OWNER_ID  = 100257975;
@@ -165,8 +172,14 @@ db.exec(`
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// migration: نام فارسیِ خودِ کاربر (جدا از first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند)
+try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
+ensureAnalytics(db);
+// A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
+ensureAb(db);
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -176,6 +189,7 @@ const stmts = {
   getUser:    db.prepare('SELECT * FROM users WHERE telegram_id=?'),
   setState:   db.prepare('UPDATE users SET state=?, last_seen=unixepoch() WHERE telegram_id=?'),
   setFocus:   db.prepare('UPDATE users SET focus_area=? WHERE telegram_id=?'),
+  setDisplayName: db.prepare('UPDATE users SET display_name=? WHERE telegram_id=?'),
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
@@ -245,6 +259,9 @@ const getState = (uid) => getUser(uid)?.state || 'new';
 const setState = (uid, s) => stmts.setState.run(s, uid);
 const getBalance = (uid) => getUser(uid)?.balance || 0;
 const hasRecharged = (uid) => stmts.countApprovedPayments.get(uid).c > 0;
+// نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
+// در متن‌های رو-به-کاربر با fallback خالی؛ به LLM هرگز نام تلگرام نمی‌رود (تا مدل نام نامفهوم را تکرار نکند).
+const dispName = (u) => (u?.display_name || '').trim();
 
 function getSession(uid) {
   const raw = getUser(uid)?.session_json;
@@ -256,7 +273,7 @@ function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, 
 
 // پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -414,7 +431,7 @@ function buildReadingCtx(user, spread, question, cards, focusKey) {
     .map(r => ({ 'نوع فال': r.type, 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
   return {
     memory: user.memory_json || '',
-    name: user.name || '',
+    name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
     focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
     spreadFa: spread.fa,
@@ -490,8 +507,11 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // رفرال: /start ref_<id>
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source فقط برای کاربر جدید
   const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
+  captureStart(db, uid, payload, isNew);
+
+  // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);
   let refBonus = false;
   if (refMatch && isNew) {
@@ -504,22 +524,18 @@ async function handleStart(ctx) {
   }
 
   if (!user.welcomed) {
-    stmts.setWelcomed.run(uid);
-    await ctx.reply(L.onboarding.welcome(ctx.from.first_name), mainKeyboard());
-    // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
-    if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
-    await typing(ctx, PACE_S);
-    setState(uid, 'onboard_focus');
-    await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
-      L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
-    ));
+    // قدم صفر آنبوردینگ: قبل از هر توضیحی، نام فارسیِ کاربر را می‌پرسیم (بهانه‌ی طبیعیِ فال).
+    // نام تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند؛ پس نامِ خودگفته را مبنا می‌گیریم.
+    setState(uid, 'onboard_name');
+    setSession(uid, { refBonus }); // وعده‌ی رفرال بعد از گرفتن نام نشان داده می‌شود
+    await ctx.reply(L.onboarding.askName, mainKeyboard());
     return;
   }
 
   // کاربر برگشتی
   setState(uid, 'idle');
   setSession(uid, null);
-  let msg = L.returning.greeting(ctx.from.first_name, getBalance(uid));
+  let msg = L.returning.greeting(dispName(user), getBalance(uid));
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
@@ -529,6 +545,36 @@ async function handleStart(ctx) {
   await ctx.reply(msg, mainKeyboard());
 }
 bot.start(handleStart);
+
+// پاک‌سازیِ سبکِ نامِ ورودی: خط اول، بدون ایموجی/کاراکترهای کنترلی، حداکثر ۳۲ کاراکتر
+function cleanName(raw) {
+  return String(raw || '')
+    .split('\n')[0]
+    .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .slice(0, 32)
+    .trim();
+}
+
+// تکمیل آنبوردینگ بعد از گرفتن نام: ذخیره‌ی نام، خوش‌آمدِ شخصی‌شده، سپس پرسش حوزه‌ی تمرکز.
+async function finishNameOnboarding(ctx, rawName) {
+  const uid = ctx.from.id;
+  const name = cleanName(rawName);
+  if (!name) return ctx.reply(L.onboarding.askNameRetry);
+  stmts.setDisplayName.run(name, uid);
+  const refBonus = getSession(uid).refBonus;
+  stmts.setWelcomed.run(uid);
+  setSession(uid, null);
+  await ctx.reply(L.onboarding.welcome(name), mainKeyboard());
+  // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
+  if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
+  await typing(ctx, PACE_S);
+  setState(uid, 'onboard_focus');
+  await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
+    L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
+  ));
+}
 
 bot.action(/^focus:(\w+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -541,11 +587,15 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
   if (inOnboarding) {
     await typing(ctx, PACE_M);
     setState(uid, 'idle');
-    // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل رایگان با هدیه — مسیر دوم قلاب اصلی است
-    await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard([
+    track(db, uid, EVENTS.ONBOARD_DONE, { focus: key });
+    // دو مسیر ورود: مزه‌ی سریع (کارت روز) یا تجربه‌ی کامل — آزمایش onboard_cta_order ترتیب را تست می‌کند
+    // (تا وقتی آزمایش از داشبورد running نشود، variant() همیشه control برمی‌گرداند = رفتار فعلی)
+    const ctaRows = [
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
       [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
-    ]));
+    ];
+    if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+    await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard(ctaRows));
   } else {
     // تغییر تمرکز وسط فلوی فال
     patchSession(uid, { focusKey: key });
@@ -595,6 +645,8 @@ async function dailyCard(ctx) {
   await typing(ctx, PACE_REVEAL);
   const text = await llmP;
   if (text) await ctx.reply(text);
+  track(db, uid, 'daily_card', { streak, cached: !!cached });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'daily' });
   // موتور عادت: نمایش استریک از روز دوم + جایزه‌ی هر ۷ روز پیاپی (اعتبار داخل ربات)
   if (streak >= 2) {
     await sleep(PACE_S);
@@ -619,11 +671,43 @@ async function showCatalog(ctx) {
   setState(uid, 'choose_spread');
   setSession(uid, null);
   const lines = SPREADS.map(s => L.reading.spreadLine(s, L.reading.badges[s.id])).join('\n\n');
-  await ctx.reply(`${L.reading.catalog}\n\n${lines}`, Markup.inlineKeyboard(
-    SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s), `spread:${s.id}`)])
-  ));
+  const rows = SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s), `spread:${s.id}`)]);
+  // دکمه‌ی موضوع آزاد بالای کاتالوگ: مهم‌ترین نقطه‌ی سیگنالِ «درباره‌ی هر چیزی می‌تونی فال بگیری»
+  const head = OPEN_TOPIC_ENABLED ? `${L.reading.openTopicHint}\n\n` : '';
+  const kb = OPEN_TOPIC_ENABLED
+    ? [[Markup.button.callback(L.buttons.openTopic, 'opentopic')], ...rows]
+    : rows;
+  await ctx.reply(`${L.reading.catalog}\n\n${head}${lines}`, Markup.inlineKeyboard(kb));
 }
 bot.hears(L.buttons.reading, showCatalog);
+
+// موضوع آزاد: انتخاب عمق (۳ یا ۵ کارت) — قیمت طبق قرارداد فقط در پی‌وال نشان داده می‌شود
+bot.action('opentopic', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (!OPEN_TOPIC_ENABLED) return;
+  upsertUser(ctx);
+  setState(uid, 'choose_spread');
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.reading.openDepthPrompt, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.openDepth3, 'odepth:open3')],
+    [Markup.button.callback(L.buttons.openDepth5, 'odepth:open5')],
+  ]));
+});
+
+bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (!OPEN_TOPIC_ENABLED) return;
+  upsertUser(ctx);
+  const spread = SPREAD_BY_ID[ctx.match[1]];
+  if (!spread) return;
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  // موضوعِ تایپ‌شده خودش حوزه است → مرحله‌ی «حول چی؟» رد می‌شود؛ مستقیم سراغ نوشتن موضوع
+  patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
+  setState(uid, 'await_question');
+  await ctx.reply(L.reading.askTopic);
+});
 
 bot.action(/^spread:(\w+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -632,6 +716,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   const spread = SPREAD_BY_ID[ctx.match[1]];
   if (!spread) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  track(db, uid, 'spread_selected', { spread: spread.id });
 
   // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
   if (spread.focus) {
@@ -682,6 +767,7 @@ async function handleQuestion(ctx, question) {
   if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
   patchSession(uid, { question: question.slice(0, 1500) });
   setState(uid, 'breathing');
+  track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
   await typing(ctx, PACE_S);
   // مشتری ثابت (۲+ فال کامل) آیین کوتاه‌تر می‌گیرد — مثل تاروت‌خوان واقعی با مشتری آشنا
   if (stmts.countDelivered.get(uid).c >= 2) {
@@ -785,6 +871,7 @@ async function finishPicking(ctx, uid, s) {
     uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards)
   ).lastInsertRowid);
   patchSession(uid, { readingId });
+  track(db, uid, 'cards_picked', { spread: spread.id, reading_id: readingId });
 
   // پیش‌فراخوانی LLM فقط وقتی کاربر توان پرداخت دارد (هزینه‌ی قبل از پرداخت = صفر برای کاربرِ بدون موجودی)
   // + سقف روزانه ضد حلقه‌ی «انتخاب کن، لغو کن». در غیر این صورت فراخوانی موقع unlock انجام می‌شود.
@@ -797,6 +884,7 @@ async function finishPicking(ctx, uid, s) {
   if (spread.size > s.picks.length) await ctx.reply(L.reading.extraCardsNote(spread.size - s.picks.length));
 
   const balance = getBalance(uid);
+  track(db, uid, EVENTS.PAYWALL_SHOWN, { reading_id: readingId, price: spread.price, can_afford: balance >= spread.price });
   if (balance >= spread.price) {
     await ctx.reply(L.reading.paywall(spread.price), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.openCards(spread.price), `unlock:${readingId}`)],
@@ -843,6 +931,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     }
   }
   stmts.setReadingStatus.run('started', readingId);
+  track(db, uid, 'reading_started', { reading_id: readingId, price: r.price });
   setState(uid, 'revealing');
   patchSession(uid, { readingId, revealIdx: 0, fbDone: false });
   await ctx.answerCbQuery('🔮').catch(() => {});
@@ -880,6 +969,7 @@ async function startReveal(ctx, uid, readingId) {
     if (r && r.status === 'started') {
       if (r.price > 0) stmts.credit.run(r.price, uid);
       stmts.setReadingStatus.run('refunded', readingId);
+      track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price });
     }
     setState(uid, 'idle');
     setSession(uid, null);
@@ -907,6 +997,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     }
   }
   stmts.setReadingStatus.run('started', readingId);
+  track(db, uid, 'reading_started', { reading_id: readingId, price: r.price, retry: true });
   setState(uid, 'revealing');
   setSession(uid, { spreadId: r.type, readingId, revealIdx: 0, fbDone: false });
   await ctx.answerCbQuery('🔮').catch(() => {});
@@ -975,6 +1066,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
   if (!r) return;
   const llm = r.llm_json ? JSON.parse(r.llm_json) : null;
   stmts.setReadingFeedback.run(freeText ? `text: ${freeText.slice(0, 300)}` : kind, readingId);
+  track(db, uid, EVENTS.FEEDBACK, { reading_id: readingId, kind: freeText ? 'text' : kind });
   patchSession(uid, { fbDone: true });
   setState(uid, 'revealing');
 
@@ -1047,6 +1139,8 @@ async function finishReading(ctx, uid, readingId) {
   await ctx.reply(L.reading.empowerClose);
 
   stmts.setReadingStatus.run('delivered', readingId);
+  track(db, uid, EVENTS.PRODUCT_DELIVERED, { type: r.type, price: r.price, reading_id: readingId });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'reading' });
   // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
   if (typeof llm.memory === 'string' && llm.memory.trim()) {
     stmts.setMemory.run(llm.memory.trim().slice(0, 1200), uid);
@@ -1064,7 +1158,7 @@ async function finishReading(ctx, uid, readingId) {
       stmts.credit.run(REFERRAL_BONUS, uid);
       await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
       const referee = getUser(uid);
-      await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(referee?.name, REFERRAL_BONUS)).catch(() => {});
+      await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), REFERRAL_BONUS)).catch(() => {});
     }
   } catch (e) { logErr('referral reward:', e.message); }
 
@@ -1086,8 +1180,9 @@ async function finishReading(ctx, uid, readingId) {
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   const offers = suggestSpreads(uid, r.type);
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  await ctx.reply(L.reading.nextOffers, Markup.inlineKeyboard([
+  await ctx.reply(OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers, Markup.inlineKeyboard([
     ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
+    ...(OPEN_TOPIC_ENABLED ? [[Markup.button.callback(L.buttons.openTopic, 'opentopic')]] : []),
     [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
     [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
   ]));
@@ -1128,6 +1223,7 @@ bot.action('recharge', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
   const paymentId = Number(stmts.insertPayment.run(uid).lastInsertRowid);
+  track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
   patchSession(uid, { paymentId });
   const s = getSession(uid);
@@ -1255,6 +1351,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+  track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });
 }
 
 function approvePayment(paymentId) {
@@ -1264,6 +1361,7 @@ function approvePayment(paymentId) {
   const bonus = bonusFor(creditAmount); // هدیه‌ی شارژ روی مبلغ اصلی (قبل از تخفیف)
   stmts.setPaymentStatus.run('approved', paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
+  track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
   if (p.discount_code_id) {
     stmts.incDiscountUses.run(p.discount_code_id);
     stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, (p.original_amount || p.amount) - p.amount);
@@ -1326,6 +1424,7 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
   const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
   if (!p || p.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
@@ -1374,6 +1473,7 @@ bot.on('inline_query', async (ctx) => {
 /* ---------- ریست تست (قرارداد ریپو §۶ب — فاز تست: همه‌ی کاربران) ---------- */
 async function doReset(ctx) {
   wipeUser(ctx.from.id);
+  track(db, ctx.from.id, EVENTS.RESET, {});
   await ctx.reply(L.reset.done, mainKeyboard());
   return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو
 }
@@ -1391,6 +1491,7 @@ bot.on('text', async (ctx) => {
   if (text.startsWith('/')) return;
   const state = getState(uid);
   try {
+    if (state === 'onboard_name') return await finishNameOnboarding(ctx, text);
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     if (state === 'pay_amount') {
       const amount = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''), 10);
@@ -1419,7 +1520,7 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(ctx.from.first_name, getBalance(uid)), mainKeyboard());
+    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard());
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
@@ -1430,6 +1531,8 @@ bot.on('text', async (ctx) => {
 bot.on(['voice', 'audio'], async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);
+  // در مرحله‌ی نام، ویس نمی‌گیریم (نام را تایپی می‌خواهیم) — راهنمای نرم به‌جای سکوت
+  if (getState(uid) === 'onboard_name') return ctx.reply(L.onboarding.askNameRetry);
   if (getState(uid) !== 'await_question') return;
   try {
     const media = ctx.message.voice || ctx.message.audio;

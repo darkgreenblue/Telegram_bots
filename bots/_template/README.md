@@ -9,6 +9,12 @@
 4. چک‌لیست بند ۵ CLAUDE.md ریشه را کامل کن (ecosystem, ci.yml, deploy.yml, دو Secret).
 
 قالب از قبل شامل: قرارداد لاگ/`bot.catch`/هندلرهای خطای پروسه (بند ۸)، دکمه‌ی ریست تست (بند ۶ب)،
-فراخوانی مقاوم OpenRouter با فالبک، SQLite جدا در `data/`، و launch با retry — همه از `shared/`.
+فراخوانی مقاوم OpenRouter با فالبک، SQLite جدا در `data/`، launch با retry، و **زیرساخت رشد از قبل سیم‌کشی‌شده**
+(`ensureAnalytics`+`ensureAb`، `captureStart` در /start، `wipeUser` که events/ab_exposures را هم پاک می‌کند) — همه از `shared/`.
+
+**برای اتصال به داشبورد** (اتریبیوشن/فانل/A-B/مالی/پشتیبانی): بند ۵ CLAUDE.md ریشه را کامل کن — خلاصه:
+۱) track ها را با ثابت‌های `EVENTS` در نقاط فانل بگذار (کامنت راهنما ته index.js هست)،
+۲) یک ردیف به `BOTS` در `bots/dashboard/lib/bots.js` اضافه کن (اگر قرارداد پیش‌فرض را رعایت کنی مینیمال است)،
+۳) یک entry فانل در `bots/dashboard/routes/funnels.js`. اگر پول داری، جدول `payments` استاندارد بساز تا مالی خودکار کار کند.
 
 **قبل از طراحی و حین ساخت، بندهای ۹ (اصول فنی)، ۱۰ (اصول محصولی) و ۱۱ (سؤالات اجباری) CLAUDE.md ریشه را رعایت کن** — جوابِ سؤالات بند ۱۱ را در CLAUDE.md خود ربات ثبت کن.

@@ -16,6 +16,8 @@
 - کارت: همان کارت voice2text. کد ۱۰۰٪ = تأیید خودکار بدون رسید. `/newcode CODE PERCENT DAYS [USER_ID]`، `/stats` (شامل قیف کانورژن: readings به تفکیک status). پیام رد رسید = ادبیات voice2text با راه تماس `@alireza_oliya`.
 - **معماری پرداخت قابل‌تعویض** (برای Stars/زرین‌پال در آینده): کل ریل پرداخت فقط در این نقاط است: اکشن `recharge` + `setRechargeAmount` + هندلرهای رسید (photo/text در state `pay_receipt`) + `approvePayment` + `afterApproval`. پی‌وال و unlock هرگز با ریل پرداخت کاری ندارند؛ فقط با `balance` (کیف‌پول) حرف می‌زنند. تعویض درگاه = جایگزینی همین چند تابع؛ جدول `payments` و `credit/deduct` ثابت می‌مانند.
 - CTA دوگانه در استارت (به این ترتیب): «کارت امروزم رو ببینم (رایگان)» اول، «فال گذشته/حال/آینده (محبوب‌ترین)» دوم.
+- **آنبوردینگ نام (قدم صفر):** اولین کار بعد از /start، پرسیدن **نام فارسیِ خودِ کاربر** است (state `onboard_name`) قبل از هر توضیح؛ چون `first_name` تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل آن را در متن فال/خوش‌آمد تکرار کند. نام در ستون `users.display_name` ذخیره می‌شود (جدا از `name` که همان نام تلگرام برای ادمین است). helper `dispName(user)` منبعِ همه‌ی متن‌های رو-به-کاربر و **تنها نامی که به LLM می‌رود** است (نام تلگرام هرگز به مدل نمی‌رود). ورودی با `cleanName` پاک می‌شود (خط اول، بدون ایموجی، ≤۳۲ کاراکتر).
+- **🌀 فال با موضوع آزاد** (`OPEN_TOPIC_ENABLED` بالای index.js): دکمه‌ی «موضوع دلخواه» بالای کاتالوگ + در پیشنهادهای پایان فال؛ کاربر عمق (open3/open5) را انتخاب و موضوعش را خودش می‌نویسد (ویس هم کار می‌کند). چیدمان‌های `open3`/`open5` در `spreads.js` (فقط `SPREAD_BY_ID`، نه در کاتالوگ/suggestSpreads)، `focusKey='open'`. هدف: سیگنالِ «درباره‌ی هر چیزی می‌تونی فال بگیری» بدون تغییر فرمت پاسخ‌دهی. **Rollback فوری:** `OPEN_TOPIC_ENABLED=false` → دکمه/کپی‌ها محو و رفتار دقیقاً مثل قبل (فال‌های open ثبت‌شده بی‌ضرر می‌مانند).
 
 ## LLM
 - `FLASH = google/gemini-2.5-flash`؛ فالبک `deepseek/deepseek-v3.2`؛ برنامه‌ی retry: `[FLASH×3, DeepSeek×2]` با validate خروجی JSON (`orChatResilient`).
@@ -27,10 +29,16 @@
 - کارت روز در `daily_texts` **دائمی** کش می‌شود (کلید: کارت×جهت×تمرکز، بدون نام کاربر).
 
 ## دیتابیس (`data/bot-<LOCALE>.db`)
-`users` (balance، state، focus_area، session_json، memory_json، milestone/push)، `readings` (منبع حقیقت فال: seed، cards_json، llm_json، status: pending_payment/started/delivered/canceled/refunded)، `payments`، `discount_codes`، `discount_uses`، `referrals`، `card_files` (کش file_id تصاویر)، `daily_texts`.
+`users` (balance، state، focus_area، session_json، memory_json، milestone/push، **first_source/first_payload** اتریبیوشن write-once)، `readings` (منبع حقیقت فال: seed، cards_json، llm_json، status: pending_payment/started/delivered/canceled/refunded)، `payments`، `discount_codes`، `discount_uses`، `referrals`، `card_files` (کش file_id تصاویر)، `daily_texts`، **`events`** (آنالیتیکس مشترک — پایین).
+
+## آنالیتیکس و اتریبیوشن (shared/analytics.js)
+- `ensureAnalytics(db)` بعد از migration ها؛ `captureStart` در `handleStart`: رویداد `start` برای **هر** /start (props: payload/kind/code/new) + `first_source` فقط برای کاربر جدید (write-once). قرارداد payload: `c_<code>` کمپین (لینک از داشبورد)، `ref_<id>` رفرال (الگوی موجود)، خالی = organic.
+- رویدادهای ثبت‌شده (ثابت‌های `EVENTS` + اختصاصی‌ها): `start`, `onboard_done`, `daily_card`, `first_value` (once)، `spread_selected`, `question_submitted`, `cards_picked`, `paywall_shown` (props: can_afford)، `reading_started`, `product_delivered`, `refund`, `recharge_started`, `receipt_submitted`, `payment_approved`, `payment_rejected`, `feedback`, `reset`.
+- `wipeUser` جدول‌های `events` و `ab_exposures` را هم پاک می‌کند (قرارداد ریست تست). خطای track هرگز فلو را نمی‌شکند (fail-safe).
+- **A/B تست (shared/ab.js):** `ensureAb(db)` در boot؛ آزمایش فعال: `onboard_cta_order` — variant `reading_first` ترتیب دو دکمه‌ی CTA پایان آنبوردینگ را برعکس می‌کند (فال اول). تا وقتی آزمایش از داشبورد running نشود، `variant()` همیشه control برمی‌گرداند (رفتار عیناً قبلی). config آزمایش‌ها را داشبورد در جدول `experiments` همین DB می‌نویسد.
 
 ## ماشین حالت (users.state)
-`new → onboard_focus → idle → choose_spread → confirm_focus → await_question → breathing → shuffling → picking → confirm_pay → revealing → feedback` + `pay_amount/pay_receipt/pay_discount`. دک با seed قطعی (sha256+mulberry32، `REVERSAL_PROB=0.3`). گارد race در `pick:` (قفل سینکرون قبل از await). شارژ وسط فال → بعد از approve ادمین، فال خودکار ادامه می‌یابد (`afterApproval`). **آیین تطبیقی**: مشتری ثابت (۲+ فال کامل) فضاسازی کوتاه‌تر می‌گیرد.
+`new → onboard_name → onboard_focus → idle → choose_spread → confirm_focus → await_question → breathing → shuffling → picking → confirm_pay → revealing → feedback` + `pay_amount/pay_receipt/pay_discount`. دک با seed قطعی (sha256+mulberry32، `REVERSAL_PROB=0.3`). گارد race در `pick:` (قفل سینکرون قبل از await). شارژ وسط فال → بعد از approve ادمین، فال خودکار ادامه می‌یابد (`afterApproval`). **آیین تطبیقی**: مشتری ثابت (۲+ فال کامل) فضاسازی کوتاه‌تر می‌گیرد.
 
 ## پس‌زمینه و in-memory
 - `prefetches` Map (فقط بهینه‌سازی — حقیقت در `readings.llm_json`).
