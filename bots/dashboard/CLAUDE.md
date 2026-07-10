@@ -25,7 +25,7 @@
 | `/` | نمای کلی per ربات: کاربر/جدید/DAU/WAU (از events)، درآمد امروز/۳۰روز/کل (per پروفایلِ مالی، **مرز روز = تهران**، ریال tabir به تومان و پرداخت تستی حذف)، صف رسید معلق، حجم DB+WAL + ویجت رویدادهای خارج از واژه‌نامه |
 | `/marketing` | ساخت لینک کمپین (`t.me/<bot>?start=c_<code>`) + جدول کمپین‌ها با قیف تا-درآمد (استارت کل / کاربر جدید first-touch / **کلیک برگشتی** / first_value / پی‌وال / خریدار+درآمد) + مقایسه‌ی چنل‌ها (کمپین/رفرال/ارگانیک از `users.first_source`) + فرم یوزرنیم ربات‌ها |
 | `/support` | سرچ id/username در همه‌ی instance ها (id مرجع است؛ username فقط hint) → پروفایل (همه‌ی ستون‌های users بجز session_json) + **تایم‌لاین معکوس** merge شده: events + payments + readings (tarot) + usage_log/voice_flows (voice2text) + generations (resume-tailor) |
-| `/finance` | پرداخت‌های همه‌ی ربات‌ها با فیلتر ربات/وضعیت/بازه + جمع per وضعیت + CSV (با ثبت در audit) + جدول audit_log |
+| `/finance` | پرداخت‌های همه‌ی ربات‌ها با فیلتر ربات/وضعیت/بازه + جمع per وضعیت + CSV (با ثبت در audit) + جدول audit_log + **راهنمای معنی وضعیت‌ها** + **دکمه‌ی تأیید/رد رسید** (فقط روی رسیدِ «منتظر تأیید» ربات‌های `receiptQueue`): داشبورد پول را دست نمی‌زند، اقدام را در جدول `admin_actions` خود ربات enqueue می‌کند (`financeAction`؛ گارد: فقط رسیدِ pending، ضد دوبار enqueue) و sweepِ ۶۰ثانیه‌ایِ ربات با منطق واقعی (اعتبار + پیام به کاربر) اجرا می‌کند؛ تا اجرا، ستون اقدام «در صف» را نشان می‌دهد |
 | `/experiments` | چرخه‌ی کامل A/B (بالا در CLAUDE.md ریشه، بند ۲الف): ساخت (کلید باید در کد ربات با `variant()` پیاده شده باشد) → شروع → drain/kill → تصمیم+آرشیو. نتایج: exposures/تبدیل/lift/CTW بیزی (Monte Carlo قطعی، `lib/stats.js`) + بازه‌ی ۹۵٪ + چک SRM + گاردریل‌ها + فانل per variant + برچسب‌های «کم‌نمونه» و «شواهد ضعیف switchover» و هشدار همپوشانی کمپین |
 | `/retention` | مثلث ریتنشن هفتگی per ربات (کوهورت = هفته‌ی ورود؛ فعالیت از events؛ هفته‌های شنبه‌محور تهران) + lifecycle (فعال/جدید/خفته) |
 | `/journal` | ژورنال محصول: `product_versions` + `insights` (با لینک به آزمایش) در platform.db |
@@ -47,8 +47,9 @@
 | `dataDir` + `envDir` | مسیر db (نسبی یا مطلقِ سرور + env override) | نسبی `../<name>/data`؛ tabir مطلق `/home/ubuntu/tabir_khab` + `TABIR_DB_DIR` |
 | `idFromFile` | برچسب instance از نام فایل (locale/platform) | — |
 | `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
+| `receiptQueue` | ربات جدول `admin_actions` + sweep دارد؟ (دکمه‌ی تأیید/رد رسید از داشبورد فعال) | false (voice2text/tarot: true) |
 
-helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`. جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
+helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`, `receiptQueueSupported`. جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
 
 ## env
 `DASHBOARD_TOKEN`* (توکن ورود — همان Secret)، `PORT` (پیش‌فرض 8787). Secrets مرتبط دیپلوی: `DASHBOARD_TOKEN`*, `CLOUDFLARE_TUNNEL_TOKEN` (اختیاری)، `OWNER_TELEGRAM_ID` (گیرنده‌ی آدرس تونل).

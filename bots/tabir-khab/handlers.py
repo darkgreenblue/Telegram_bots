@@ -23,7 +23,7 @@ import texts as C
 from bale import inline_keyboard, reply_keyboard
 from config import (
     SUBSCRIPTIONS, SUBSCRIPTION_ORDER,
-    ADMIN_USER_ID, MIN_VOICE_DURATION, MAX_VOICE_DURATION,
+    ADMIN_USER_ID, ADMIN_IDS, MIN_VOICE_DURATION, MAX_VOICE_DURATION,
     MIN_TEXT_CHARS, MAX_TEXT_CHARS,
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
     payment_methods_for, REFERRAL_ENABLED,
@@ -248,7 +248,7 @@ async def _handle_message(bale, msg: dict):
     if text.startswith("/start"):
         await _handle_start(bale, chat_id, user_id, username, first_name, text)
         return
-    if text.startswith("/simulate_pay") and user_id == ADMIN_USER_ID:
+    if text.startswith("/simulate_pay") and (user_id == ADMIN_USER_ID or user_id in ADMIN_IDS):
         await _handle_simulate_pay(bale, chat_id, user_id, text)
         return
 

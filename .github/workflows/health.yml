@@ -1,9 +1,8 @@
 # Health — پایش خودکار سلامت ربات‌ها روی VPS (هر ۳۰ دقیقه؛ گیت‌هاب گاهی اجرا را عقب می‌اندازد).
-# دو سطح شدت، با پیامِ مشخص (کدام ربات + چه مشکلی):
-#   🔴 خرابیِ واقعی (ربات pm2 آفلاین/کرش‌لوپ، یا سرویس systemd تعبیر خواب غیرفعال، یا سرور
-#      در دسترس نیست) → جاب قرمز + ساخت/آپدیت Issue + پیام تلگرام.
-#   🟡 صف رسید معطل (پرداخت waiting_review قدیمی‌تر از ۲ ساعت) → ربات‌ها سالم‌اند؛ فقط
-#      اطلاع‌رسانی تلگرام (بدون قرمزکردن جاب و بدون Issue) تا مالک رسید را تأیید/رد کند.
+# فقط خرابیِ واقعی را می‌پاید (ربات pm2 آفلاین/کرش‌لوپ، سرویس systemd تعبیر خواب غیرفعال، یا سرور
+# در دسترس نیست) → جاب قرمز + ساخت/آپدیت Issue + پیام تلگرام به مالک با جزئیات مشخص.
+# صف رسید معطل دیگر این‌جا چک نمی‌شود؛ خودِ هر ربات رسیدهای معطل را دوره‌ای دوباره برای ادمین‌هایش
+# می‌فرستد (resendReceiptToAdmins در sweep) — یادآوری در همان رباتِ مربوطه، نه cross-bot.
 # جزئیات مشکل از خروجی چک روی سرور استخراج و در پیام گنجانده می‌شود (خطوط با پیشوند PROBLEM:).
 name: Health
 
@@ -62,24 +61,8 @@ jobs:
                 tail -n 40 /home/ubuntu/tabir_khab/logs/bot.log 2>/dev/null || echo "(خالی)"
               fi
             fi
-            # ── صف رسید معطل: پرداخت waiting_review قدیمی‌تر از ۲ ساعت (اعتماد مالی — بند ۱۰ ریشه) ──
-            # این «خرابی» نیست؛ ربات سالم است ولی رسیدی منتظر تأیید مالک مانده. شماره‌ی رسیدها هم می‌آید.
-            for d in bots/*/data; do
-              app=$(basename "$(dirname "$d")")
-              DBFILE=$(ls "$d"/*.db 2>/dev/null | head -1)
-              [ -n "$DBFILE" ] || continue
-              [ -d "bots/$app/node_modules/better-sqlite3" ] || continue
-              DBFILE="$DBFILE" APP="$app" node -e "
-                try {
-                  const path = require('path');
-                  const D = require(path.join(process.cwd(), 'bots', process.env.APP, 'node_modules', 'better-sqlite3'));
-                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
-                  if (!db.prepare(\"SELECT 1 FROM sqlite_master WHERE type='table' AND name='payments'\").get()) process.exit(0);
-                  const rows = db.prepare(\"SELECT id FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 ORDER BY id\").all();
-                  if (rows.length) console.log('PROBLEM:🟡 ' + process.env.APP + ': ' + rows.length + ' رسید پرداخت بیش از ۲ ساعت منتظر تأیید (شماره: ' + rows.map(r => r.id).join(', ') + ') — در ربات یا داشبورد تأیید/رد کن');
-                } catch (e) {}
-              " 2>/dev/null
-            done
+            # صف رسید معطل این‌جا چک نمی‌شود — هر ربات خودش رسیدهای معطل را دوره‌ای دوباره
+            # برای ادمین‌هایش می‌فرستد (یادآوری per-bot، نه از مسیر Health/cross-bot).
             echo "HEALTH_DONE"
           REMOTE
           )
@@ -100,7 +83,7 @@ jobs:
           if [ -n "$ALERT" ]; then echo "has_alert=true"; else echo "has_alert=false"; fi >> "$GITHUB_OUTPUT"
           [ -n "$ALERT" ] && echo "⚠️ موارد یافت‌شده:" && printf '%s\n' "$ALERT" || echo "✅ همه‌ی ربات‌ها سالم و صف رسید خالی/تازه است"
 
-      # پیام تلگرام به مالک(ها) — با جزئیاتِ مشخص. برای 🔴 و 🟡 هر دو می‌آید ولی متن فرق دارد.
+      # پیام تلگرام به مالک(ها) — با جزئیاتِ مشخص (کدام ربات + چه مشکلی). فقط خرابیِ واقعی (🔴).
       - name: Telegram alert
         if: steps.check.outputs.has_alert == 'true'
         env:
@@ -109,24 +92,16 @@ jobs:
           T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
           OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
           DETAIL:  ${{ steps.check.outputs.alert }}
-          OUTAGE:  ${{ steps.check.outputs.outage }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
           if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          if [ "$OUTAGE" = "true" ]; then
-            HEAD="🚨 پایش سلامت — خرابی:"
-            FOOT="لاگ کامل: $RUN_URL
-          (به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده» تا بررسی کنم)"
-          else
-            HEAD="🟡 پایش سلامت — نیازمند رسیدگی (ربات‌ها سالم‌اند):"
-            FOOT="این هشدار تا وقتی رسیدها تأیید/رد نشوند تکرار می‌شود."
-          fi
-          MSG="$HEAD
+          MSG="🚨 پایش سلامت — خرابی:
 
           $DETAIL
 
-          $FOOT"
+          لاگ کامل: $RUN_URL
+          (به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده» تا بررسی کنم)"
           IFS=',' read -ra OWNERS <<< "$OWNER"
           for id in "${OWNERS[@]}"; do
             id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue

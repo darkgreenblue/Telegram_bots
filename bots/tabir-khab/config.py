@@ -159,8 +159,12 @@ def llm_model_for(tier: str) -> str:
 BALE_SSL_NO_VERIFY     = True   # شبکه محلی با گواهی self-signed
 TELEGRAM_SSL_NO_VERIFY = True
 
-# --- ادمین (برای دستور تست /simulate_pay) ---
-ADMIN_USER_ID = 0
+# --- ادمین (از env ADMIN_IDS کاما-جدا؛ همان OWNER_TELEGRAM_ID مشترکِ بقیه‌ی ربات‌ها) ---
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.strip().isdigit()]
+ADMIN_USER_ID = ADMIN_IDS[0] if ADMIN_IDS else 0  # سازگاری با کد قدیمی (اولین آی‌دی)
+
+def is_admin(uid) -> bool:
+    return uid in ADMIN_IDS
 
 # --- دکمه‌ی تست موقت «ریسک کردن» ---
 # وقتی True باشد، یک دکمه‌ی ریست کنار دکمه‌های اصلی ظاهر می‌شود.

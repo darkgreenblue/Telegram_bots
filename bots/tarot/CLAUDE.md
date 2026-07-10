@@ -14,6 +14,8 @@
 - **فال موضوعی vs عمومی**: فال‌های دارای فیلد `focus` در spreads.js (عشق/کار/پول/درون/خانواده/مهاجرت) مرحله‌ی «حول چه موضوعی؟» را رد می‌کنند و مستقیم به سؤال می‌روند؛ فقط فال‌های عمومی (three/yesno/choice/celtic) حوزه را می‌پرسند. حوزه‌ی هر خوانش در `readings.focus_area` (از `session.focusKey`) ذخیره و به LLM داده می‌شود؛ نام فال‌های موضوعی با نام حوزه‌ها در پرسشنامه یکی است.
 - رفرال: `/start ref_<id>`؛ **هیچ واریزی لحظه‌ی ورود نیست** (فقط پیام وعده). بعد از **اولین فال deliver شده‌ی** گیرنده (که با حذف هدیه‌ی خوش‌آمد عملاً یعنی بعد از اولین پرداختش): هر دو طرف ۱۰k واریز + به هر دو اطلاع داده می‌شود. دکمه‌ی «📤 دعوت دوستان» در کیبورد اصلی: لینک اختصاصی قابل‌کپی + دکمه‌ی `t.me/share/url` (پیام آماده + لینک با یک تاچ؛ switch_inline_query عمداً حذف شد چون کاربر ناآشنا فقط @botname را می‌فرستاد).
 - کارت: همان کارت voice2text. کد ۱۰۰٪ = تأیید خودکار بدون رسید. `/newcode CODE PERCENT DAYS [USER_ID]`، `/stats` (شامل قیف کانورژن: readings به تفکیک status). پیام رد رسید = ادبیات voice2text با راه تماس `@alireza_oliya`.
+- **ادمین‌ها از env:** `ADMIN_IDS` (کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند؛ پیش‌فرض `100257975`)، `OWNER_ID = ADMIN_IDS[0]`. رسید تأیید/رد به **همه‌ی ADMIN_IDS** می‌رود (هشدارِ per-bot، نه cross-bot).
+- **صف تأیید داشبوردی + یادآوری رسید:** جدول `admin_actions` (داشبورد تأیید/رد را enqueue می‌کند) + ستون `payments.reminded_at`. جاروی پرداختِ ۶۰ثانیه‌ای (fail-safe): درین `admin_actions` با `approvePayment`/`rejectPaymentDb` + پیام کاربر، و یادآوریِ رسیدهای `waiting_review` قدیمی‌تر از ۲ ساعت به ادمین‌ها با دکمه‌ی فعال (throttle `reminded_at` هر ۴ ساعت). `wipeUser` جدول `admin_actions` را هم پاک می‌کند.
 - **معماری پرداخت قابل‌تعویض** (برای Stars/زرین‌پال در آینده): کل ریل پرداخت فقط در این نقاط است: اکشن `recharge` + `setRechargeAmount` + هندلرهای رسید (photo/text در state `pay_receipt`) + `approvePayment` + `afterApproval`. پی‌وال و unlock هرگز با ریل پرداخت کاری ندارند؛ فقط با `balance` (کیف‌پول) حرف می‌زنند. تعویض درگاه = جایگزینی همین چند تابع؛ جدول `payments` و `credit/deduct` ثابت می‌مانند.
 - CTA دوگانه در استارت (به این ترتیب): «کارت امروزم رو ببینم (رایگان)» اول، «فال گذشته/حال/آینده (محبوب‌ترین)» دوم.
 - **آنبوردینگ نام (قدم صفر):** اولین کار بعد از /start، پرسیدن **نام فارسیِ خودِ کاربر** است (state `onboard_name`) قبل از هر توضیح؛ چون `first_name` تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل آن را در متن فال/خوش‌آمد تکرار کند. نام در ستون `users.display_name` ذخیره می‌شود (جدا از `name` که همان نام تلگرام برای ادمین است). helper `dispName(user)` منبعِ همه‌ی متن‌های رو-به-کاربر و **تنها نامی که به LLM می‌رود** است (نام تلگرام هرگز به مدل نمی‌رود). ورودی با `cleanName` پاک می‌شود (خط اول، بدون ایموجی، ≤۳۲ کاراکتر).
@@ -29,7 +31,7 @@
 - کارت روز در `daily_texts` **دائمی** کش می‌شود (کلید: کارت×جهت×تمرکز، بدون نام کاربر).
 
 ## دیتابیس (`data/bot-<LOCALE>.db`)
-`users` (balance، state، focus_area، session_json، memory_json، milestone/push، **first_source/first_payload** اتریبیوشن write-once)، `readings` (منبع حقیقت فال: seed، cards_json، llm_json، status: pending_payment/started/delivered/canceled/refunded)، `payments`، `discount_codes`، `discount_uses`، `referrals`، `card_files` (کش file_id تصاویر)، `daily_texts`، **`events`** (آنالیتیکس مشترک — پایین).
+`users` (balance، state، focus_area، session_json، memory_json، milestone/push، **first_source/first_payload** اتریبیوشن write-once)، `readings` (منبع حقیقت فال: seed، cards_json، llm_json، status: pending_payment/started/delivered/canceled/refunded)، `payments` (+ `reminded_at`)، `admin_actions` (صف تأیید/رد رسید از داشبورد)، `discount_codes`، `discount_uses`، `referrals`، `card_files` (کش file_id تصاویر)، `daily_texts`، **`events`** (آنالیتیکس مشترک — پایین).
 
 ## آنالیتیکس و اتریبیوشن (shared/analytics.js)
 - `ensureAnalytics(db)` بعد از migration ها؛ `captureStart` در `handleStart`: رویداد `start` برای **هر** /start (props: payload/kind/code/new) + `first_source` فقط برای کاربر جدید (write-once). قرارداد payload: `c_<code>` کمپین (لینک از داشبورد)، `ref_<id>` رفرال (الگوی موجود)، خالی = organic.
@@ -52,4 +54,4 @@
 - دکمه‌ی دعوت با `t.me/share/url` کار می‌کند و نیازی به `/setinline` ندارد (هندلر inline_query صرفاً باقی مانده و بی‌ضرر است).
 
 ## env
-`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `LOCALE` (پیش‌فرض fa), `ENV_FILE` (اختیاری).
+`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `LOCALE` (پیش‌فرض fa), `ENV_FILE` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند).
