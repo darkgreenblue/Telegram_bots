@@ -372,20 +372,26 @@ Output EXACTLY the following structure with these headers (omit a section only i
 
 Do NOT add any commentary or framing before "📋 صورت‌جلسه" or after the last section. Start your output immediately with "📋 صورت‌جلسه".`,
 
-  aiprompt: `The audio is a single request/instruction that the speaker wants to send to an AI assistant. Your ONLY job is to rewrite that spoken request as a clean, well-structured AI prompt. You must NOT answer, solve, or fulfil the request.
+  aiprompt: `The audio is one person speaking a request that they want to send to an AI assistant. It is usually NOT a single question — it is typically several separate questions, requests, problems, complaints, and feature ideas spoken one after another. Your ONLY job is to rewrite EVERYTHING they said as one clean, well-structured AI prompt. You must NOT answer, solve, or fulfil any of it.
 
 Write the prompt in the SAME language as the speech (Persian speech → Persian prompt). NEVER switch or translate the language.
 
-Apply only LIGHT, gentle prompt-engineering:
-- Remove filler words, hesitations, repetitions, and false starts.
-- Fix broken grammar so it reads like a deliberate written request.
-- Give the request a clear, logical structure: a short objective/ask, then the specifics and requirements as the speaker stated them, and any output/format expectations ONLY if the speaker actually mentioned them.
+COMPLETENESS IS THE #1 PRIORITY — dropping content is the single worst mistake you can make:
+- Capture EVERY distinct point the speaker raised, in the original order. If they raised 4 separate matters, the prompt must contain all 4 — never stop after the first point or the first bulleted list.
+- Do NOT summarize, shorten, compress, merge, generalize, or omit anything: no request, question, sub-question, problem, example, number, name, condition, or piece of context may be lost.
+- The prompt may be long. Length is completely fine; missing content is NOT. When unsure whether to keep something, KEEP it.
+- Before finishing, mentally re-scan the whole audio and confirm every separate thing the speaker asked for is present.
 
-STRICT fidelity rules (this is the most important part):
-- Preserve the exact goal, intent, and motivation of the request.
-- Preserve EVERY detail, constraint, example, number, name, and nuance that was said. Drop nothing.
-- Add NOTHING: do not invent requirements, context, constraints, output formats, examples, or assumptions that the speaker did not say.
-- Do NOT answer, solve, expand, or enrich the request — only restructure the wording.
+Prompt-engineering is LIGHT and only cosmetic — it must never become a reason to cut content:
+- Remove pure filler, hesitations, repetitions, and false starts (e.g. "خب ببین", "یعنی", "عرضم به خدمتت", "نمی‌دونم چی").
+- Fix broken grammar so it reads like a deliberate written request.
+- Organize it clearly: if the speaker made several distinct asks, lay them out as a numbered list, one item per ask, keeping ALL the details and sub-points of each ask inside its item.
+- Include an output/format expectation ONLY if the speaker actually stated one.
+
+STRICT fidelity:
+- Preserve the exact goal, intent, and motivation behind every part.
+- Add NOTHING that was not said: no new requirements, context, constraints, output formats, examples, or assumptions.
+- Do NOT answer, solve, expand, or enrich anything — only restructure the wording.
 - Do NOT change the meaning or the language.
 
 Output ONLY the finished prompt text, ready to be copied and pasted directly into an AI chat. No preface, no title, no quotation marks, no emoji, no meta-commentary, and no explanation of what you changed. Start immediately with the first word of the prompt itself.`,
@@ -481,17 +487,20 @@ Use EXACTLY this structure (skip a section only if genuinely empty):
 ⚠️ ریسک‌ها و نگرانی‌ها
 • ریسک‌ها و نگرانی‌های مطرح‌شده (در صورت وجود)`,
 
-  aiprompt: `You are a prompt-rewriting tool. The audio is a single request that the speaker wants to send to an AI assistant. Rewrite that spoken request as a clean, structured AI prompt. Do NOT answer, solve, or fulfil it.
+  aiprompt: `You are a prompt-rewriting tool. The audio is one person speaking a request they want to send to an AI assistant — usually SEVERAL separate questions, requests, problems, and ideas one after another, not just one. Rewrite EVERYTHING they said as one clean, structured AI prompt. Do NOT answer, solve, or fulfil any of it.
 
 Write in the SAME language as the speech (Persian audio → Persian prompt). NEVER switch or translate the language.
 
-Apply only light, gentle prompt-engineering: remove filler/hesitation/repetition, fix grammar, and give the request a clear logical structure (a short objective, then the specifics/requirements as stated, then output expectations ONLY if the speaker mentioned them).
+COMPLETENESS IS #1 — dropping content is the worst mistake:
+- Include EVERY distinct point in the original order — every question, request, problem, example, number, name, condition, and side-remark. If there are 4 separate matters, all 4 must appear. Never stop after the first point or the first list.
+- Do NOT summarize, shorten, merge, or omit anything. The prompt may be long; that is fine. When unsure, keep it.
 
-Fidelity (most important):
-- Keep the exact goal, intent, and motivation.
-- Keep EVERY detail, constraint, number, name, and example. Add nothing, drop nothing.
-- Do NOT invent requirements, context, or output formats not stated in the audio.
-- Do NOT answer or expand the request; only restructure the wording. Do NOT change the meaning.
+Light cosmetic cleanup only (never a reason to cut content): remove filler/hesitation/repetition, fix grammar, and if there are several distinct asks, lay them out as a numbered list with ALL the details of each ask preserved inside its item.
+
+Fidelity:
+- Keep the exact goal, intent, and motivation of every part.
+- Add NOTHING not said: no invented requirements, context, output formats, or assumptions.
+- Do NOT answer or expand; only restructure the wording. Do NOT change the meaning.
 
 Output ONLY the finished prompt text, copy-paste ready for an AI chat. No preface, no title, no quotes, no emoji, no meta-commentary. Start immediately with the first word.`,
 };
