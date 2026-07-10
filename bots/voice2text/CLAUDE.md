@@ -7,8 +7,9 @@
 ویس/فایل صوتی → متن با ۵ حالت پردازش (📝 کامل، ✂️ مفید، 📌 خلاصه، 📋 صورت‌جلسه، 🤖 پرامپت هوش مصنوعی) روی مدل‌های Gemini از OpenRouter. «پرامپت هوش مصنوعی» = ویس را که یک درخواست خطاب به AI است، با پرامپت‌اینجینیرینگ ملایم و **حفظ کامل زبان/هدف/جزئیات** به یک پرامپت استاندارد و آماده‌ی کپی‌پیست تبدیل می‌کند (فقط ساختار عوض می‌شود، نه محتوا). کیف‌پول تومانی، شارژ کارت‌به‌کارت با تأیید ادمین، کد تخفیف سگمنت‌محور، whitelist مدل Pro، ارسال به Notion (فقط مالک). Long-polling، تک‌فایل `index.js` (~۲۷۰۰ خط).
 
 ## ثابت‌های کلیدی (ابتدای index.js)
-- `OWNER_ID = ADMIN_IDS = [100257975]` — مالک: علیرضا اولیا، پشتیبانی `@alireza_oliya`
+- `ADMIN_IDS` از env (`process.env.ADMIN_IDS`، کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند؛ پیش‌فرض `100257975`)؛ `OWNER_ID = ADMIN_IDS[0]` (کارهای مخرب مثل ریست فقط مالک). قرارداد یکپارچه‌ی همه‌ی ربات‌ها. پشتیبانی `@alireza_oliya`
 - کارت: `6219861904145405` (بلوبانک) — `MIN_RECHARGE=50٬000`، `WELCOME_GIFT=10٬000` تومان
+- `RECHARGE_PRESETS = [50k, 100k, 200k, 500k]` — دکمه‌های مبلغ پیش‌فرض شارژ (+ «مبلغ دیگر»). پارس مبلغ مقاوم است: جداکننده/تومان/ارقام فارسی حذف و فقط رقم‌ها می‌مانند.
 - مدل‌ها (`MODEL_CONFIG`): flash-lite «سبک» ۳۰۰ت/دقیقه، flash «حرفه‌ای» ۹۰۰ت/دقیقه (پیش‌فرض)، pro ۳۰۰۰ت/دقیقه (فقط whitelist). فالبک: `openai/gpt-audio-mini` (بعد از ۳ تلاش، تبدیل به mp3 با ffmpeg).
 - هزینه = `round(دقیقه × قیمت‌دقیقه)`؛ فقط در موفقیت کسر می‌شود؛ ادمین‌ها رایگان (برآورد USD می‌بینند).
 - سقف‌ها: `MAX_CONCURRENT_JOBS=10`، `MAX_ACTIVE_FLOWS=10`، دانلود ۲۰MB، `FLOW_TTL=15min`، `RETRIES=3`، timeout ده دقیقه.
@@ -24,7 +25,10 @@
 | `discount_uses` | دفتر مصرف کدها |
 | `pro_whitelist` | دسترسی مدل Pro |
 | `voice_flows` | چرخه‌ی حیات هر فلو: active/completed/cancelled/expired/failed |
+| `admin_actions` | صف تأیید/رد رسید که **داشبورد** enqueue می‌کند؛ sweep ربات با منطق واقعی درین می‌کند (payment_id, action, source, done_at) |
 | `events` | آنالیتیکس کمینه (کپی محلی هم‌قرارداد `shared/analytics.js` — پایین) |
+
+`payments.reminded_at`: آخرین یادآوریِ رسیدِ معطل به ادمین (برای throttle یادآوری دوره‌ای).
 
 ## فلوها و state های in-memory
 - `sessions` (token→سشن ویس)، `userStates` (فلوی شارژ)، `adminStates` (پنل تخفیف)، `notionStates`, `activeJobs`. ری‌استارت = پاک‌شدن این‌ها (فلوهای وسط کار می‌میرند) — دلیل اصلی دیپلوی انتخابی.
@@ -33,6 +37,7 @@
 - سگمنت‌های تخفیف: all, new(<7d), no_balance, inactive(>30d), loyal(≥5پرداخت), premium, first_charge, high_usage(≥10), low_balance.
 - پنل ادمین دکمه‌ای: داشبورد (کاربر/درآمد/موجودی OpenRouter — هشدار زیر $1)، CRUD کد تخفیف، پیام promo قابل‌فوروارد.
 - جاروی ۶۰ثانیه‌ای: انقضای فلوهای رهاشده، پاک‌سازی سشن‌های >۲h و notionStates >۱h.
+- جاروی پرداختِ ۶۰ثانیه‌ای (جدا، fail-safe): (۱) درین `admin_actions` (تأیید/رد enqueue‌شده‌ی داشبورد → `approvePaymentDb`/`rejectPaymentDb` + پیام به کاربر)؛ (۲) یادآوریِ per-bot رسیدهای `waiting_review` قدیمی‌تر از ۲ ساعت با دکمه‌های تأیید/رد فعال، به **همه‌ی ADMIN_IDS** (throttle با `reminded_at` هر ۴ ساعت). یادآوری رسید دیگر از Health/cross-bot نمی‌آید.
 
 ## Notion (فقط OWNER + نیازمند NOTION_TOKEN)
 بعد از هر رونویسی موفق: پیشنهاد ارسال → مرور صفحات ریشه/فرزند → عنوان فارسی خودکار (flash-lite) → ساخت صفحه (بلوک‌های ۲۰۰۰کاراکتری، سقف ۱۰۰).
@@ -50,4 +55,4 @@
 `RESET_TEST_BTN` **فقط برای OWNER** (کاربر پولی نباید تصادفاً پاک شود): حذف ردیف‌های مالک از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + پاک‌سازی state های in-memory. کدهای تخفیف (discount_codes) پاک نمی‌شوند.
 
 ## env
-`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری). نیازمند ffmpeg/ffprobe روی سرور.
+`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور). نیازمند ffmpeg/ffprobe روی سرور.

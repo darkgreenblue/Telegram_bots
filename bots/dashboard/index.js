@@ -19,7 +19,7 @@ import { audit } from './lib/platform.js';
 import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody } from './routes/support.js';
-import { financeBody, financeCsv } from './routes/finance.js';
+import { financeBody, financeCsv, financeAction } from './routes/finance.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
@@ -70,6 +70,7 @@ const ACTIONS = {
   '/marketing/create': { fn: marketingCreate, backTo: '/marketing' },
   '/marketing/toggle': { fn: marketingToggle, backTo: '/marketing' },
   '/marketing/usernames': { fn: marketingUsernames, backTo: '/marketing' },
+  '/finance/action': { fn: financeAction, backTo: '/finance' },
   '/discounts/create': { fn: discountCreate, backTo: '/discounts' },
   '/discounts/toggle': { fn: discountToggle, backTo: '/discounts' },
   '/experiments/create': { fn: experimentCreate, backTo: '/experiments' },

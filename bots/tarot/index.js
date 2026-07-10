@@ -50,8 +50,10 @@ const TEST_PHASE = true;
 // (فال‌های open3/open5 که قبلاً ثبت شده‌اند بی‌ضرر در DB می‌مانند؛ پایپ‌لاین افشا از SPREAD_BY_ID می‌خواند).
 const OPEN_TOPIC_ENABLED = true;
 
-const ADMIN_IDS = [100257975];
-const OWNER_ID  = 100257975;
+// ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
+const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
+  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
 const CARD_NUMBER = '6219861904145405';
@@ -176,6 +178,14 @@ try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEF
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
+try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL DEFAULT (unixepoch()), done_at INTEGER
+  );
+`);
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
@@ -222,6 +232,10 @@ const stmts = {
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
+  setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
+  pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
+  markActionDone: db.prepare('UPDATE admin_actions SET done_at=unixepoch() WHERE id=?'),
   setPaymentDiscount: db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=?'),
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
@@ -273,7 +287,7 @@ function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, 
 
 // پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id'],['admin_actions','payment_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -1421,14 +1435,55 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
 });
 bot.action(/^reject:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
-  const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
-  if (!p || p.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
-  stmts.setPaymentStatus.run('rejected', p.id);
-  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
+  const p = rejectPaymentDb(parseInt(ctx.match[1], 10));
+  if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
 });
+
+/* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
+function rejectPaymentDb(paymentId) {
+  const p = stmts.getPayment.get(paymentId);
+  if (!p || p.status !== 'waiting_review') return null;
+  stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
+  return p;
+}
+// ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد
+async function resendReceiptToAdmins(p) {
+  const u = getUser(p.user_id);
+  const caption = `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n👤 ${dispName(u) || u?.name || '-'}\n🆔 ${p.user_id}\n💰 ${(p.original_amount || p.amount).toLocaleString('fa-IR')} تومان\n🔢 پرداخت #${p.id}\n\nهمین‌جا تأیید/رد کن (یا از داشبورد):`;
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback('✅ تایید', `approve:${p.id}`),
+    Markup.button.callback('❌ رد', `reject:${p.id}`),
+  ]]).reply_markup;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
+      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+    } catch {}
+  }
+  stmts.setReminded.run(p.id);
+}
+// sweep پرداخت (۶۰ ثانیه): درین صف اکشن داشبورد + یادآوری رسیدهای معطل — همه fail-safe
+setInterval(async () => {
+  try {
+    for (const act of stmts.pendingActions.all()) {
+      try {
+        if (act.action === 'approve') {
+          const done = approvePayment(act.payment_id);
+          if (done) { await bot.telegram.sendMessage(done.p.user_id, L.wallet.approved(done.creditAmount, getBalance(done.p.user_id), done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
+        } else if (act.action === 'reject') {
+          const p = rejectPaymentDb(act.payment_id);
+          if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+        }
+      } catch (e) { logErr('admin_action exec:', act.id, e.message); }
+      stmts.markActionDone.run(act.id);
+    }
+    for (const p of stmts.staleReceipts.all()) await resendReceiptToAdmins(p);
+  } catch (e) { logErr('payment sweep:', e.message); }
+}, 60_000);
 
 /* ---------- ادمین: /stats و /newcode ---------- */
 bot.command('stats', (ctx) => {
@@ -1494,7 +1549,7 @@ bot.on('text', async (ctx) => {
     if (state === 'onboard_name') return await finishNameOnboarding(ctx, text);
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     if (state === 'pay_amount') {
-      const amount = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''), 10);
+      const amount = parseInt(normalizeDigits(text).replace(/[^\d]/g, ''), 10);
       if (!amount || amount <= 0) return ctx.reply(L.wallet.invalidAmount());
       return await setRechargeAmount(ctx, uid, amount);
     }

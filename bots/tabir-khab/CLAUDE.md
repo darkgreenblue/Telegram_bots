@@ -81,6 +81,9 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
 - `capture_start` در `_handle_start` (رویداد `start` برای هر /start + first_source فقط کاربر جدید؛ payload: `c_<code>` کمپین / `ref_<id>` رفرال / خالی organic). رویدادهای دیگر: `product_delivered` + `first_value` (تحویل تعبیر)، `payment_approved` (props: simulated برای SKIP/SIMULATED). همه fail-safe.
 - **در داشبورد ادمین وصل است**: رجیستری `bots/dashboard/lib/bots.js` با پروفایلِ خودش (userPk=`user_id`، userNameCol=`first_name`، created_at ISO، money=`transactions`/`amount_rial`/`paid`/ریال با حذف پرداخت تستی SKIP/SIMULATED). مسیر DB مطلق `/home/ubuntu/tabir_khab` (override با env `TABIR_DB_DIR` برای تست لوکال). A/B هنوز ندارد (فقط رویدادها).
 
+## ادمین‌ها (config.py — قرارداد یکپارچه‌ی همه‌ی ربات‌ها)
+- `ADMIN_IDS` از env `ADMIN_IDS` (کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند)؛ `ADMIN_USER_ID = ADMIN_IDS[0]`؛ `is_admin(uid)` عضویت را چک می‌کند. دستورهای ادمین (مثل `/simulate_pay`) هم `ADMIN_USER_ID` و هم `ADMIN_IDS` را می‌پذیرند. هشدار/گزارش هر ربات per-bot می‌ماند (نه cross-bot).
+
 ## فلگ‌های مهم در config.py
 - `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). بعد از تست باید `False` بشود.
 - `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست).

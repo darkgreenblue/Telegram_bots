@@ -20,8 +20,12 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const OWNER_ID  = 100257975;
-const ADMIN_IDS = [OWNER_ID];
+// ادمین‌ها از env: کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد (قرارداد یکپارچه‌ی همه‌ی ربات‌ها).
+// این‌طوری هر ربات جدید هم همان آی‌دی‌های ادمینِ گیت‌هاب را می‌گیرد؛ هشدار/پشتیبانی هر ربات per-bot می‌ماند.
+const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
+  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+const OWNER_ID  = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
+const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true; // ⚠️ قبل از انتشار عمومی false شود (قرارداد بند ۶ب CLAUDE.md)
 
 const FLASH = 'google/gemini-2.5-flash';

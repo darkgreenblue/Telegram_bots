@@ -20,15 +20,19 @@ if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          pro
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
 
-const ADMIN_IDS    = [100257975];
+// ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — همه‌ی ربات‌ها
+// همین لیست را دارند. اگر ست نشده باشد، به مالک تاریخی برمی‌گردد (بدون شکستن).
+const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
+  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
-const OWNER_ID = 100257975; // فقط این کاربر — مستقل از سیستم ادمین
+const OWNER_ID = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
 const RESET_TEST_BTN = '🔄 ریست ربات (تست)'; // فاز تست — فقط برای OWNER
 
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
 const MIN_RECHARGE = 50_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
+const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -105,6 +109,19 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN discount_code_id INTEGER').run
 try { db.prepare('ALTER TABLE payments ADD COLUMN original_amount INTEGER').run(); } catch {}
 // Migration: مرحله‌ی فعلی فلوی پرداخت (amount / receipt / ...) — برای ثبت اینکه کاربر کجا انصراف داد
 try { db.prepare('ALTER TABLE payments ADD COLUMN step TEXT').run(); } catch {}
+// Migration: آخرین یادآوریِ رسیدِ معطل به ادمین (برای throttle یادآوری دوره‌ای)
+try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
+// صف اکشن ادمین: داشبورد تأیید/رد را این‌جا enqueue می‌کند و sweep ربات با منطق واقعی درین می‌کند
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_actions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    payment_id INTEGER NOT NULL,
+    action     TEXT    NOT NULL,
+    source     TEXT    NOT NULL DEFAULT 'dashboard',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    done_at    INTEGER
+  );
+`);
 
 // فلوهای تبدیل ویس به متن — ثبت چرخه‌ی عمر و وضعیت (active/completed/cancelled) برای مدیریت استیت
 db.exec(`
@@ -182,6 +199,11 @@ const stmts = {
   getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // یادآوری رسید معطل + صف اکشن ادمین (داشبورد)
+  staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
+  setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
+  pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
+  markActionDone: db.prepare('UPDATE admin_actions SET done_at=unixepoch() WHERE id=?'),
   // voice_flows
   insertFlow:    db.prepare("INSERT INTO voice_flows (token, user_id, model, duration_sec, step, status) VALUES (?,?,?,?,?,'active')"),
   setFlowStatus: db.prepare('UPDATE voice_flows SET status=?, updated_at=unixepoch() WHERE token=?'),
@@ -1411,6 +1433,19 @@ async function editAdminPaymentMsg(ctx, text) {
   } catch {}
 }
 
+// ثبت مبلغ شارژ + نمایش فاکتور با شماره کارت (مشترک بین دکمه‌های پیش‌فرض و ورود دستی)
+async function applyRechargeAmount(ctx, userId, paymentId, amount) {
+  stmts.setPaymentAmount.run(amount, 'receipt', paymentId);
+  const invoiceMsg = await ctx.reply(
+    buildInvoiceText(amount, null, null),
+    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+      [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)],
+      [payCancelBtn(paymentId)],
+    ]) }
+  );
+  userStates.set(userId, { step: 'waiting_receipt', paymentId, invoiceMsgId: invoiceMsg.message_id });
+}
+
 async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody) {
   const user    = getUser(userId);
   const payment = stmts.getPayment.get(paymentId);
@@ -1446,6 +1481,83 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
 }
+
+/* ── تأیید/رد پرداخت: منطق DB جدا از ctx تا callbackِ ادمین، صفِ داشبورد و sweep هر سه از یکی استفاده کنند ──
+   پیام به کاربر با bot.telegram می‌رود (نه ctx) تا مستقل از منبعِ فراخوانی باشد. */
+function approvePaymentDb(paymentId) {
+  const payment = stmts.getPayment.get(paymentId);
+  if (!payment || payment.status !== 'waiting_review') return null;
+  const creditAmount = payment.original_amount || payment.amount;
+  stmts.setPaymentStatus.run('approved', paymentId);
+  stmts.credit.run(creditAmount, payment.user_id);
+  track(payment.user_id, 'payment_approved', { payment_id: paymentId, amount: payment.amount, credited: creditAmount });
+  if (payment.discount_code_id) {
+    const discAmt = (payment.original_amount || payment.amount) - payment.amount;
+    stmts.incDiscountUses.run(discAmt, payment.discount_code_id);
+    stmts.insertDiscountUse.run(payment.discount_code_id, payment.user_id, paymentId, discAmt);
+  }
+  return { payment, creditAmount };
+}
+async function notifyApproved(payment, creditAmount) {
+  const newBalance = getBalance(payment.user_id);
+  try {
+    await bot.telegram.sendMessage(payment.user_id,
+      `✅ شارژ تایید شد!\n\n💰 ${creditAmount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n💳 موجودی جدید: ${newBalance.toLocaleString('fa-IR')} تومان`);
+  } catch {}
+}
+function rejectPaymentDb(paymentId) {
+  const payment = stmts.getPayment.get(paymentId);
+  if (!payment || payment.status !== 'waiting_review') return null;
+  stmts.setPaymentStatus.run('rejected', paymentId);
+  track(payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: payment.amount });
+  return { payment };
+}
+async function notifyRejected(payment) {
+  try {
+    await bot.telegram.sendMessage(payment.user_id,
+      `❌ فیش پرداختت تایید نشد.\n\nاگر مشکلی هست به آیدی @alireza_oliya پیام بده.`);
+  } catch {}
+}
+
+// ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها (بدون تغییر وضعیت) با همان دکمه‌های تأیید/رد که واقعاً کار می‌کنند
+async function resendReceiptToAdmins(payment) {
+  const user = getUser(payment.user_id);
+  const caption =
+    `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n` +
+    `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'})\n` +
+    `🆔 آیدی: ${payment.user_id}\n` +
+    `💰 مبلغ: ${(payment.original_amount || payment.amount).toLocaleString('fa-IR')} تومان\n` +
+    `🔢 پرداخت #${payment.id}\n\n` +
+    `همین‌جا تأیید یا رد کن (یا از داشبورد):`;
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback('✅ تایید', `approve:${payment.id}`),
+    Markup.button.callback('❌ رد',    `reject:${payment.id}`),
+  ]]).reply_markup;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      if (payment.receipt_file_id) await bot.telegram.sendPhoto(adminId, payment.receipt_file_id, { caption, reply_markup: kb });
+      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+    } catch {}
+  }
+  stmts.setReminded.run(payment.id);
+}
+
+// sweep پرداخت (هر ۶۰ ثانیه): (۱) درین صفِ اکشن داشبورد، (۲) یادآوری رسیدهای معطل.
+// همه‌چیز در try/catch — این حلقه هرگز نباید ربات را بشکند.
+setInterval(async () => {
+  try {
+    for (const act of stmts.pendingActions.all()) {
+      try {
+        if (act.action === 'approve') { const r = approvePaymentDb(act.payment_id); if (r) await notifyApproved(r.payment, r.creditAmount); }
+        else if (act.action === 'reject') { const r = rejectPaymentDb(act.payment_id); if (r) await notifyRejected(r.payment); }
+      } catch (e) { logErr('admin_action exec:', act.id, e.message); }
+      stmts.markActionDone.run(act.id); // چه اجرا شده چه (رسید دیگر waiting_review نبوده) → done تا دوباره پردازش نشود
+    }
+    for (const p of stmts.staleReceipts.all()) {
+      await resendReceiptToAdmins(p);
+    }
+  } catch (e) { logErr('payment sweep:', e.message); }
+}, 60_000);
 
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
@@ -1519,21 +1631,18 @@ bot.on('text', async (ctx) => {
     // اگر پرداخت دیگر pending نیست (لغو/منقضی)، فلو را پاک کن
     const payment = stmts.getPayment.get(state.paymentId);
     if (!payment || payment.status !== 'pending') { userStates.delete(userId); await sendMainMenu(ctx); return; }
-    const raw    = normalizeDigits(ctx.message.text.trim()).replace(/[,،\s]/g, '');
+    // پارس مقاوم: هر چیزی جز رقم دور ریخته می‌شود (٬ . , فاصله «تومان» و…) تا کاربر اشتباه نکند
+    const raw    = normalizeDigits(ctx.message.text).replace(/[^\d]/g, '');
     const amount = parseInt(raw, 10);
     if (isNaN(amount) || amount < MIN_RECHARGE) {
-      await ctx.reply(`❌ لطفاً مبلغ را به تومان بنویس (حداقل ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان):`, payCancelKb(state.paymentId));
+      await ctx.reply(
+        `❌ مبلغ نامعتبر بود. فقط عددِ مبلغ را کامل و با همه‌ی صفرهایش بنویس (بدون نقطه، ویرگول یا کلمه‌ی تومان).\n` +
+        `مثال برای پنجاه هزار تومان: 50000\n\n` +
+        `حداقل شارژ ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان است:`,
+        payCancelKb(state.paymentId));
       return;
     }
-    stmts.setPaymentAmount.run(amount, 'receipt', state.paymentId);
-    const invoiceMsg = await ctx.reply(
-      buildInvoiceText(amount, null, null),
-      { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-        [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${state.paymentId}`)],
-        [payCancelBtn(state.paymentId)],
-      ]) }
-    );
-    userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: invoiceMsg.message_id });
+    await applyRechargeAmount(ctx, userId, state.paymentId, amount);
     return;
   }
 
@@ -2024,11 +2133,39 @@ bot.on('callback_query', async (ctx) => {
       const paymentId = Number(stmts.insertPaymentPending.run(userId).lastInsertRowid);
       userStates.set(userId, { step: 'waiting_amount', paymentId });
       await ctx.answerCbQuery();
+      // مبلغ‌های پیش‌فرض (یک تاچ) + گزینه‌ی مبلغ دلخواه
+      const presets = RECHARGE_PRESETS.map(a => [Markup.button.callback(`${a.toLocaleString('fa-IR')} تومان`, `ramt:${a}`)]);
       await ctx.reply(
-        `💰 چه مبلغی می‌خوای شارژ کنی؟\n` +
-        `(حداقل ${MIN_RECHARGE.toLocaleString('fa-IR')} تومان)\n\n` +
-        `مبلغ را به تومان بنویس:`,
-        payCancelKb(paymentId)
+        `💰 چه مبلغی می‌خوای شارژ کنی؟ یکی را انتخاب کن یا «مبلغ دیگر» را بزن.`,
+        Markup.inlineKeyboard([
+          ...presets,
+          [Markup.button.callback('✏️ مبلغ دیگر', `rcustom:${paymentId}`)],
+          [payCancelBtn(paymentId)],
+        ])
+      );
+      return;
+    }
+
+    // ── Recharge: preset amount picked ──
+    const ramt = data.match(/^ramt:(\d+)$/);
+    if (ramt) {
+      const state = userStates.get(userId);
+      if (!state || state.step !== 'waiting_amount') return ctx.answerCbQuery();
+      const payment = stmts.getPayment.get(state.paymentId);
+      if (!payment || payment.status !== 'pending') { userStates.delete(userId); return ctx.answerCbQuery(); }
+      await ctx.answerCbQuery();
+      await applyRechargeAmount(ctx, userId, state.paymentId, parseInt(ramt[1], 10));
+      return;
+    }
+    // ── Recharge: custom amount → راهنمای ورود ──
+    const rcust = data.match(/^rcustom:(\d+)$/);
+    if (rcust) {
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        `✏️ مبلغ دلخواهت را به تومان بنویس.\n` +
+        `فقط عدد را کامل و با همه‌ی صفرهایش بفرست (بدون نقطه، ویرگول یا کلمه‌ی تومان).\n` +
+        `مثال برای صد هزار تومان: 100000`,
+        payCancelKb(parseInt(rcust[1], 10))
       );
       return;
     }
@@ -2074,33 +2211,11 @@ bot.on('callback_query', async (ctx) => {
     if (ap) {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
       const paymentId = parseInt(ap[1]);
-      const payment   = stmts.getPayment.get(paymentId);
-      if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
-
-      const creditAmount = payment.original_amount || payment.amount;
-      stmts.setPaymentStatus.run('approved', paymentId);
-      stmts.credit.run(creditAmount, payment.user_id);
-      track(payment.user_id, 'payment_approved', { payment_id: paymentId, amount: payment.amount, credited: creditAmount });
-
-      // If has discount, record use
-      if (payment.discount_code_id) {
-        const discAmt = (payment.original_amount || payment.amount) - payment.amount;
-        stmts.incDiscountUses.run(discAmt, payment.discount_code_id);
-        stmts.insertDiscountUse.run(payment.discount_code_id, payment.user_id, paymentId, discAmt);
-      }
-
+      const r = approvePaymentDb(paymentId);
+      if (!r) return ctx.answerCbQuery('قبلاً پردازش شده');
       await ctx.answerCbQuery('✅ تایید شد');
-      await editAdminPaymentMsg(ctx, `✅ تایید شد — ${creditAmount.toLocaleString('fa-IR')} تومان`);
-
-      const newBalance = getBalance(payment.user_id);
-      try {
-        await ctx.telegram.sendMessage(
-          payment.user_id,
-          `✅ شارژ تایید شد!\n\n` +
-          `💰 ${creditAmount.toLocaleString('fa-IR')} تومان به کیف پولت اضافه شد.\n` +
-          `💳 موجودی جدید: ${newBalance.toLocaleString('fa-IR')} تومان`
-        );
-      } catch {}
+      await editAdminPaymentMsg(ctx, `✅ تایید شد — ${r.creditAmount.toLocaleString('fa-IR')} تومان`);
+      await notifyApproved(r.payment, r.creditAmount);
       return;
     }
 
@@ -2109,22 +2224,11 @@ bot.on('callback_query', async (ctx) => {
     if (rj) {
       if (!isAdmin(userId)) return ctx.answerCbQuery('🔒');
       const paymentId = parseInt(rj[1]);
-      const payment   = stmts.getPayment.get(paymentId);
-      if (!payment || payment.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده');
-
-      stmts.setPaymentStatus.run('rejected', paymentId);
-      track(payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: payment.amount });
-
+      const r = rejectPaymentDb(paymentId);
+      if (!r) return ctx.answerCbQuery('قبلاً پردازش شده');
       await ctx.answerCbQuery('❌ رد شد');
-      await editAdminPaymentMsg(ctx, `❌ رد شد — ${payment.amount.toLocaleString('fa-IR')} تومان`);
-
-      try {
-        await ctx.telegram.sendMessage(
-          payment.user_id,
-          `❌ فیش پرداختت تایید نشد.\n\n` +
-          `اگر مشکلی هست به آیدی @alireza_oliya پیام بده.`
-        );
-      } catch {}
+      await editAdminPaymentMsg(ctx, `❌ رد شد — ${r.payment.amount.toLocaleString('fa-IR')} تومان`);
+      await notifyRejected(r.payment);
       return;
     }
 
