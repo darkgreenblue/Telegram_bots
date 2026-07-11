@@ -33,6 +33,8 @@ const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
 const MIN_RECHARGE = 50_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
 const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+const PRODUCT_VERSION = '1.0.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -138,8 +140,10 @@ db.exec(`
     updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
   );
 `);
+// Migration: مبلغِ رزروشده‌ی این فلو (کسر اتمیک در شروع پردازش؛ در شکست/ری‌استارت refund می‌شود)
+try { db.prepare('ALTER TABLE voice_flows ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 
-/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 1) =====
+/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 2) =====
    این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
    قرارداد payload لینک استارت: c_<code> کمپین / r_<uid> یا ref_<uid> رفرال / خالی organic */
 db.pragma('busy_timeout = 5000');
@@ -156,16 +160,19 @@ db.exec(`
 `);
 try { db.prepare("ALTER TABLE users ADD COLUMN first_source TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare("ALTER TABLE users ADD COLUMN first_payload TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// کوهورت نسخه: کاربر با کدام نسخه‌ی محصول شروع کرد (write-once؛ '' = قبل از ردیابی نسخه)
+try { db.prepare("ALTER TABLE users ADD COLUMN first_version TEXT NOT NULL DEFAULT ''").run(); } catch {}
 const anStmts = {
   insertEvent: db.prepare('INSERT INTO events (user_id, event, props) VALUES (?, ?, ?)'),
   setFirstSource: db.prepare("UPDATE users SET first_source=?, first_payload=? WHERE telegram_id=? AND first_source=''"),
+  setFirstVersion: db.prepare("UPDATE users SET first_version=? WHERE telegram_id=? AND first_version=''"),
 };
 // ثبت رویداد — fail-safe: خطای آنالیتیکس هرگز فلوی محصول را نمی‌شکند
 function track(userId, event, props) {
   try { anStmts.insertEvent.run(userId ?? null, event, props ? JSON.stringify(props) : '{}'); }
   catch (e) { logErr('analytics track:', event, e.message); }
 }
-// رویداد start برای هر /start + first_source (write-once) فقط برای کاربر جدید
+// رویداد start برای هر /start + first_source و first_version (write-once) فقط برای کاربر جدید
 function captureStart(userId, rawPayload, isNew) {
   try {
     const payload = String(rawPayload || '').trim().slice(0, 64);
@@ -179,8 +186,9 @@ function captureStart(userId, rawPayload, isNew) {
         : kind === 'referral' ? `referral:${code}`
         : kind === 'other' ? `other:${payload}` : 'organic';
       anStmts.setFirstSource.run(src, payload, userId);
+      anStmts.setFirstVersion.run(PRODUCT_VERSION, userId);
     }
-    track(userId, 'start', { payload, kind, code, new: !!isNew });
+    track(userId, 'start', { payload, kind, code, new: !!isNew, v: PRODUCT_VERSION });
   } catch (e) { logErr('analytics captureStart:', e.message); }
 }
 
@@ -190,13 +198,19 @@ const stmts = {
   touchUser:     db.prepare('UPDATE users SET name=?, username=?, last_seen=unixepoch() WHERE telegram_id=?'),
   setModel:      db.prepare('UPDATE users SET model=? WHERE telegram_id=?'),
   deduct:        db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ?'),
+  // کسر اتمیک با گارد موجودی — ضد چند فلوی هم‌زمان که همه چکِ موجودی را رد کنند و رایگان بگیرند
+  deductIf:      db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ? AND balance >= ?'),
   credit:        db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?'),
   insertUsage:   db.prepare('INSERT INTO usage_log (user_id, model, duration_sec, cost, type, success) VALUES (?,?,?,?,?,?)'),
   insertPayment: db.prepare('INSERT INTO payments (user_id, amount) VALUES (?,?)'),
   insertPaymentPending: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   setPaymentAmount:  db.prepare('UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?'),
+  // ادعای اتمیک مبلغ: فقط اگر هنوز مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت روی preset)
+  claimAmount:       db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStep:    db.prepare('UPDATE payments SET step=?, updated_at=unixepoch() WHERE id=?'),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
+  // پرداختِ منتظرِ رسیدِ همین کاربر (بازیابیِ فیش وقتی state حافظه‌ای گم شده — ری‌استارت/`/start` بعد از فاکتور)
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
   // یادآوری رسید معطل + صف اکشن ادمین (داشبورد)
@@ -207,6 +221,7 @@ const stmts = {
   // voice_flows
   insertFlow:    db.prepare("INSERT INTO voice_flows (token, user_id, model, duration_sec, step, status) VALUES (?,?,?,?,?,'active')"),
   setFlowStatus: db.prepare('UPDATE voice_flows SET status=?, updated_at=unixepoch() WHERE token=?'),
+  setFlowReserved: db.prepare('UPDATE voice_flows SET reserved=?, updated_at=unixepoch() WHERE token=?'),
   setFlowStep:   db.prepare('UPDATE voice_flows SET step=?, type=?, model=?, updated_at=unixepoch() WHERE token=?'),
   setFlowModel:  db.prepare('UPDATE voice_flows SET model=?, updated_at=unixepoch() WHERE token=?'),
   // dashboard
@@ -221,8 +236,9 @@ const stmts = {
   // COALESCE: اگر قبلاً تخفیف خورده، original_amount دست‌نخورده می‌ماند تا با اعمال دوباره خراب نشود
   setPaymentDiscount:    db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, ?), amount=?, updated_at=unixepoch() WHERE id=?'),
   clearPaymentDiscount:  db.prepare('UPDATE payments SET amount=original_amount, original_amount=NULL, discount_code_id=NULL, updated_at=unixepoch() WHERE id=?'),
-  // شمارش پرداخت‌های معلق/در-انتظار که همین کد را دارند تا سقف هر-کاربر با چند پرداخت هم‌زمان دور زده نشود
-  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
+  // شمارش پرداخت‌های در-انتظار که همین کد را دارند (ضد دور زدنِ سقفِ هر-کاربر با چند پرداخت هم‌زمان).
+  // waiting_review همیشه شمرده می‌شود؛ pending فقط اگر تازه باشد (<۲۴س) تا پرداختِ رهاشده سهمیه‌ی کد را برای همیشه نسوزاند.
+  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND (status='waiting_review' OR (status='pending' AND created_at > unixepoch()-86400))"),
   getDiscountCode:       db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:       db.prepare('SELECT * FROM discount_codes WHERE id=?'),
   insertDiscountCode:    db.prepare('INSERT INTO discount_codes (code,discount_percent,max_discount_amount,expires_at,max_uses_per_user,allowed_segments,allowed_user_ids,created_by) VALUES (?,?,?,?,?,?,?,?)'),
@@ -591,7 +607,9 @@ function throwForStatus(status, body) {
 }
 
 async function convertToMp3(buffer) {
-  const id      = Date.now();
+  // suffix تصادفی لازم است: دو تبدیلِ هم‌زمان (مثلاً وقتی همه‌ی jobها با هم به fallback می‌روند) با
+  // Date.now() تنها ممکن بود مسیر یکسان بگیرند و صدای دو کاربر روی هم بنویسند (نشت حریم خصوصی)
+  const id      = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const inPath  = `/tmp/voice_in_${id}`;
   const outPath = `/tmp/voice_out_${id}.mp3`;
   writeFileSync(inPath, buffer);
@@ -1195,6 +1213,8 @@ bot.start(async (ctx) => {
 bot.hears(RESET_TEST_BTN, async (ctx) => {
   const uid = ctx.from.id;
   if (uid !== OWNER_ID) return;
+  // صف اکشن رسیدها به payment_id وصل است → قبل از حذف payments با subquery پاک شود (ضد ردیف یتیم)
+  try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('reset-test del admin_actions', e.message); }
   for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['events','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
   }
@@ -1401,24 +1421,34 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const state  = userStates.get(userId);
-  if (state?.step !== 'waiting_receipt') {
+  let paymentId = null;
+  let recovered = false;
+  if (state?.step === 'waiting_receipt') {
+    paymentId = state.paymentId;
+  } else if (state && state.paymentId) {
     // عکس وسط فلوی شارژ (قبل از مرحله فیش) → راهنمایی + دکمه انصراف
-    if (state && state.paymentId) {
-      await ctx.reply('برای ادامه‌ی شارژ، اول مبلغ/کد رو وارد کن، یا انصراف بده:', payCancelKb(state.paymentId));
+    await ctx.reply('برای ادامه‌ی شارژ، اول مبلغ/کد رو وارد کن، یا انصراف بده:', payCancelKb(state.paymentId));
+    return;
+  } else {
+    // state حافظه‌ای گم شده (ری‌استارت/‌/start بعد از فاکتور) — پرداختِ منتظرِ رسید را از DB بازیابی کن
+    // تا فیش واقعی در سیاه‌چاله نیفتد (پرداخت در pending می‌ماند و یادآور هم فقط waiting_review را می‌پاید)
+    const pend = stmts.pendingReceiptPayment.get(userId);
+    if (!pend) {
+      if (!isAdmin(userId)) { upsertUser(userId, ctx.from.first_name, ctx.from.username); await sendMainMenu(ctx); }
       return;
     }
-    // عکس خارج از هر فلو → منوی اصلی
-    if (!isAdmin(userId)) { upsertUser(userId, ctx.from.first_name, ctx.from.username); await sendMainMenu(ctx); }
-    return;
+    paymentId = pend.id; recovered = true;
   }
 
   const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  const payment = stmts.getPayment.get(state.paymentId);
-  if (!payment || payment.status !== 'pending') return;
+  const payment = stmts.getPayment.get(paymentId);
+  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
 
-  await sendReceiptToAdmin(ctx, userId, state.paymentId, fileId, null);
+  await sendReceiptToAdmin(ctx, userId, paymentId, fileId, null);
   userStates.delete(userId);
-  await ctx.reply('✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
+  await ctx.reply(recovered
+    ? '✅ فیش واریزت دریافت شد و به شارژِ در انتظارت وصل شد؛ در انتظار تایید ادمین است.'
+    : '✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
 });
 
 // ویرایش پیام درخواست شارژ نزد ادمین: عکس → caption، متن → text
@@ -1435,7 +1465,8 @@ async function editAdminPaymentMsg(ctx, text) {
 
 // ثبت مبلغ شارژ + نمایش فاکتور با شماره کارت (مشترک بین دکمه‌های پیش‌فرض و ورود دستی)
 async function applyRechargeAmount(ctx, userId, paymentId, amount) {
-  stmts.setPaymentAmount.run(amount, 'receipt', paymentId);
+  // ادعای اتمیک قبل از هر await: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
+  if (stmts.claimAmount.run(amount, paymentId).changes === 0) return;
   const invoiceMsg = await ctx.reply(
     buildInvoiceText(amount, null, null),
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
@@ -1480,6 +1511,7 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+  track(userId, 'receipt_submitted', { payment_id: paymentId });
 }
 
 /* ── تأیید/رد پرداخت: منطق DB جدا از ctx تا callbackِ ادمین، صفِ داشبورد و sweep هر سه از یکی استفاده کنند ──
@@ -1657,8 +1689,8 @@ bot.on('text', async (ctx) => {
     stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
     userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: state.invoiceMsgId, discountCodeId: result.dc.id });
 
-    if (result.dc.discount_percent === 100 || result.finalAmount === 0) {
-      // Auto-approve: 100% discount
+    // Auto-approve فقط برای تخفیف واقعیِ ۱۰۰٪ روی مبلغ مثبت — گارد ضد credit(NULL)/credit(0)
+    if ((result.dc.discount_percent === 100 || result.finalAmount === 0) && payment.amount > 0) {
       stmts.setPaymentStatus.run('approved', state.paymentId);
       stmts.credit.run(payment.amount, userId); // credit original amount
       track(userId, 'payment_approved', { payment_id: state.paymentId, amount: 0, credited: payment.amount, auto: true });
@@ -1990,6 +2022,10 @@ bot.on('callback_query', async (ctx) => {
       const payment = stmts.getPayment.get(paymentId);
       const state = userStates.get(userId);
       const fromVoice = state?.fromVoice || false;
+      // رسید فرستاده شده (waiting_review) قابل لغو نیست — وگرنه کاربر «لغو شد» می‌بیند ولی ادمین بعداً تأیید می‌کند
+      if (payment && payment.user_id === userId && payment.status === 'waiting_review') {
+        return ctx.answerCbQuery('رسیدت ثبت شده و در حال بررسی است؛ دیگر قابل لغو نیست. اگر اشتباه شده به @alireza_oliya پیام بده.', { show_alert: true });
+      }
       if (payment && payment.user_id === userId && payment.status === 'pending') {
         stmts.setPaymentStatus.run('cancelled', paymentId);
       }
@@ -2022,6 +2058,7 @@ bot.on('callback_query', async (ctx) => {
       const token   = swf[1];
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       const currentModel = session.userModel || getUserModel(session.userId);
       const uType = getUserType(session.userId);
       await ctx.answerCbQuery();
@@ -2062,6 +2099,7 @@ bot.on('callback_query', async (ctx) => {
       const token   = smf[2];
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('پردازنده نامعتبر');
 
       const uType = getUserType(session.userId);
@@ -2132,6 +2170,7 @@ bot.on('callback_query', async (ctx) => {
       // به محض شروع فلو، یک رکورد پرداخت در دیتابیس ساخته می‌شود (step='amount')
       const paymentId = Number(stmts.insertPaymentPending.run(userId).lastInsertRowid);
       userStates.set(userId, { step: 'waiting_amount', paymentId });
+      track(userId, 'recharge_started', { payment_id: paymentId });
       await ctx.answerCbQuery();
       // مبلغ‌های پیش‌فرض (یک تاچ) + گزینه‌ی مبلغ دلخواه
       const presets = RECHARGE_PRESETS.map(a => [Markup.button.callback(`${a.toLocaleString('fa-IR')} تومان`, `ramt:${a}`)]);
@@ -2189,6 +2228,8 @@ bot.on('callback_query', async (ctx) => {
       const paymentId = parseInt(dr[1]);
       const payment = stmts.getPayment.get(paymentId);
       if (!payment || payment.user_id !== userId || payment.status !== 'pending') return ctx.answerCbQuery('پرداخت نامعتبر است.', { show_alert: true });
+      // گارد ضد دابل‌تپِ دکمه‌ی کهنه: بدون کد تخفیف، clearPaymentDiscount مبلغ را NULL می‌کند (کیف‌پول را نابود می‌کند)
+      if (!payment.discount_code_id) return ctx.answerCbQuery('کد تخفیفی روی این پرداخت نیست.', { show_alert: true });
       stmts.clearPaymentDiscount.run(paymentId);
       const updatedPayment = stmts.getPayment.get(paymentId);
       const invoiceMsgId = ctx.callbackQuery.message.message_id;
@@ -2553,6 +2594,8 @@ bot.on('callback_query', async (ctx) => {
       const [, type, token] = p;
       const session = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      // مالکیت: فقط کاربری که ویس را فرستاده می‌تواند پردازش/هزینه را کنترل کند (ضد اکسپلویت چت گروهی)
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
       if (!session.audioBuffer) return ctx.answerCbQuery('هنوز در حال آماده‌سازی فایل است، یک لحظه صبر کن.');
 
@@ -2568,31 +2611,39 @@ bot.on('callback_query', async (ctx) => {
         modelBumped = true;
       }
 
-      // Balance check BEFORE locking — keep the keyboard so user can switch model / recharge
+      // رزرو اتمیکِ هزینه در شروع (نه کسر بعد از موفقیت) — ضد باگِ چند فلوی هم‌زمان که همه چکِ
+      // موجودی را رد کنند و رایگان بگیرند. در شکست/ری‌استارت کامل refund می‌شود (کاربر فقط برای موفقیت می‌پردازد).
+      let reservedCost = 0;
       if (!isAdmin(sessUserId) && session.durationSec) {
-        const cost    = calcCost(session.durationSec, userModel, uType);
-        const balance = getBalance(sessUserId);
-        if (balance < cost) {
-          await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
-          await ctx.reply(
-            `👛 موجودی کافی نیست.\n\n` +
-            (modelBumped ? `ℹ️ صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر).\n` : '') +
-            `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
-            `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
-            { ...replyTo(session.voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
-          );
-          return;
+        const cost = calcCost(session.durationSec, userModel, uType);
+        if (cost > 0) {
+          if (stmts.deductIf.run(cost, sessUserId, cost).changes === 0) {
+            const balance = getBalance(sessUserId);
+            track(sessUserId, 'paywall_shown', { price: cost, balance, type });
+            await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
+            await ctx.reply(
+              `👛 موجودی کافی نیست.\n\n` +
+              (modelBumped ? `ℹ️ صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر).\n` : '') +
+              `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
+              `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+              { ...replyTo(session.voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
+            );
+            return;
+          }
+          reservedCost = cost;
         }
       }
 
-      // Concurrency cap
+      // Concurrency cap — اگر پر بود، رزروِ انجام‌شده را برگردان
       if (jobCount(sessUserId) >= MAX_CONCURRENT_JOBS) {
+        if (reservedCost > 0) stmts.credit.run(reservedCost, sessUserId);
         return ctx.answerCbQuery(
           `ظرفیت پردازش هم‌زمان شما پر شده (${MAX_CONCURRENT_JOBS.toLocaleString('fa-IR')} فایل). لطفاً تا اتمام یکی صبر کنید.`,
           { show_alert: true }
         );
       }
       session.step = 'processing';
+      try { stmts.setFlowReserved.run(reservedCost, token); } catch {} // برای refund در بوت اگر ری‌استارت شود
       session.userModel = userModel; // پردازنده‌ی واقعیِ این پردازش (callAI از همین می‌خواند)
       incJob(sessUserId);
       try { stmts.setFlowStep.run('processing', type, userModel, token); } catch {}
@@ -2649,21 +2700,20 @@ bot.on('callback_query', async (ctx) => {
               errMsg = NETWORK_ERR_MSG;
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
+            // شکست → برگشت کامل رزرو (کاربر فقط برای موفقیت می‌پردازد) + پاک‌کردن reserved تا بوت دوباره refund نکند
+            if (reservedCost > 0) { stmts.credit.run(reservedCost, sessUserId); try { stmts.setFlowReserved.run(0, token); } catch {} }
             session.step = 'failed'; // پایان فلو (آزاد شدن ظرفیت)
             try { stmts.setFlowStatus.run('failed', token); } catch {}
             return;
           }
 
-          // Deduct balance on success (non-admin)
-          if (!isAdmin(sessUserId) && session.durationSec) {
-            const cost = calcCost(session.durationSec, userModel, uType);
-            if (cost > 0) {
-              stmts.deduct.run(cost, sessUserId);
-              stmts.insertUsage.run(sessUserId, userModel, session.durationSec, cost, type, 1);
-            }
+          // موفقیت: هزینه در شروع رزرو شده — کسر دوباره نمی‌کنیم؛ فقط مصرف را ثبت و reserved را نهایی می‌کنیم
+          if (!isAdmin(sessUserId) && reservedCost > 0) {
+            stmts.insertUsage.run(sessUserId, userModel, session.durationSec, reservedCost, type, 1);
           } else {
             stmts.insertUsage.run(sessUserId, userModel, session.durationSec || null, 0, type, 1);
           }
+          try { stmts.setFlowReserved.run(0, token); } catch {} // مصرف‌شده — دیگر قابل refund در بوت نیست
 
           log(`✅ job done   uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
           track(sessUserId, 'product_delivered', { type, model: userModel, duration_sec: session.durationSec || 0 });
@@ -2709,6 +2759,7 @@ bot.on('callback_query', async (ctx) => {
       const [, format, token] = o;
       const session = sessions.get(token);
       if (!session?.resultText) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (session.step !== 'await_output_format') return ctx.answerCbQuery('قبلاً پردازش شده.', { show_alert: true });
 
       session.step = 'processing_output';
@@ -2871,9 +2922,22 @@ bot.on('message', async (ctx) => {
 });
 
 /* ===== 9) Launch ===== */
+// بازیابیِ بوت: فلوهایی که وسط پردازش با ری‌استارت یتیم شدند — رزروِ کسرشده refund شود
+// (در لحظه‌ی بوت هیچ پردازشی در جریان نیست پس هر active/processing قطعاً یتیم است). V14 هم حل می‌شود.
+function recoverOrphanFlows() {
+  try {
+    const orphans = db.prepare("SELECT token, user_id, reserved FROM voice_flows WHERE status IN ('active','processing') AND reserved > 0").all();
+    for (const f of orphans) {
+      try { stmts.credit.run(f.reserved, f.user_id); } catch (e) { logErr('recoverFlow credit:', e.message); }
+    }
+    db.prepare("UPDATE voice_flows SET status='expired', reserved=0, updated_at=unixepoch() WHERE status IN ('active','processing')").run();
+    if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فلوِ یتیم refund شد`);
+  } catch (e) { logErr('recoverOrphanFlows:', e.message); }
+}
+
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log('✅ Bot started (long polling)'))
+    .then(() => { log('✅ Bot started (long polling)'); recoverOrphanFlows(); })
     .catch(err => {
       logErr('❌ Bot launch error, retrying in 5s:', err.message);
       setTimeout(launch, 5000);

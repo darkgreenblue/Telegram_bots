@@ -77,14 +77,16 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
 
 ## آنالیتیکس مونوریپو (analytics.py)
 - پورت پایتونیِ هم‌قرارداد `shared/analytics.js` (نسخه در `ANALYTICS_SCHEMA_VERSION`؛ چک CI ریشه `tools/check-analytics-sync.mjs` سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید این‌جا هم بیاید).
-- `ensure_analytics` در `db.init_db` (per فایل DB): جدول `events` + ستون‌های write-once `users.first_source/first_payload`.
-- `capture_start` در `_handle_start` (رویداد `start` برای هر /start + first_source فقط کاربر جدید؛ payload: `c_<code>` کمپین / `ref_<id>` رفرال / خالی organic). رویدادهای دیگر: `product_delivered` + `first_value` (تحویل تعبیر)، `payment_approved` (props: simulated برای SKIP/SIMULATED). همه fail-safe.
+- `ensure_analytics` در `db.init_db` (per فایل DB): جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version`.
+- `capture_start` در `_handle_start` (رویداد `start` برای هر /start + first_source/first_version فقط کاربر جدید؛ نسخه از `PRODUCT_VERSION` در config.py — با هر تغییر رفتاری bump شود؛ payload: `c_<code>` کمپین / `ref_<id>` رفرال / خالی organic). رویدادهای دیگر: `product_delivered` + `first_value` (تحویل تعبیر)، `payment_approved` (props: simulated برای SKIP/SIMULATED). همه fail-safe.
 - **در داشبورد ادمین وصل است**: رجیستری `bots/dashboard/lib/bots.js` با پروفایلِ خودش (userPk=`user_id`، userNameCol=`first_name`، created_at ISO، money=`transactions`/`amount_rial`/`paid`/ریال با حذف پرداخت تستی SKIP/SIMULATED). مسیر DB مطلق `/home/ubuntu/tabir_khab` (override با env `TABIR_DB_DIR` برای تست لوکال). A/B هنوز ندارد (فقط رویدادها).
 
 ## ادمین‌ها (config.py — قرارداد یکپارچه‌ی همه‌ی ربات‌ها)
 - `ADMIN_IDS` از env `ADMIN_IDS` (کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند)؛ `ADMIN_USER_ID = ADMIN_IDS[0]`؛ `is_admin(uid)` عضویت را چک می‌کند. دستورهای ادمین (مثل `/simulate_pay`) هم `ADMIN_USER_ID` و هم `ADMIN_IDS` را می‌پذیرند. هشدار/گزارش هر ربات per-bot می‌ماند (نه cross-bot).
 
 ## فلگ‌های مهم در config.py
-- `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). بعد از تست باید `False` بشود.
-- `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست).
-- `SKIP_DAILY_LIMIT` — وقتی `True`، محدودیتِ روزانه برداشته می‌شود.
+- `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). فعلاً `False`.
+- `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست). فعلاً `True` (درگاه واقعی هنوز وصل نیست).
+- `SKIP_DAILY_LIMIT` — **`False`** (سخت‌سازی پیش‌لانچِ ربات‌های همسایه): سقفِ «هر شب یک رویا» فعال است تا غریبه‌ای که به این ربات برسد نتواند مصرفِ LLM بی‌سقف بتراشد (چون پرداخت هنوز شبیه‌سازی است).
+- `RESET_BUTTON_ENABLED` — **`False`**: دکمه‌ی ریست خاموش (وگرنه هر کاربر تریالِ مجانیِ بی‌نهایت می‌گرفت).
+- **بلاکرهای لانچِ خودِ tabir (برای بعد):** درگاه واقعی + Stars واقعی به‌جای simulate، `SKIP_PAYMENT=False`، اعتبارسنجی pre_checkout، `BALE_PAYMENT_TOKEN` واقعی، روشن‌کردن verify گواهی TLS (فعلاً `*_SSL_NO_VERIFY=True` برای تلگرام/OpenRouter هم هست — ریسک MITM)، راه تماس پشتیبانی در پیام مالی.

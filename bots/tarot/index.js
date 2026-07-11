@@ -42,8 +42,11 @@ const MAX_VOICE_BYTES = 3 * 1024 * 1024;
 const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM per کاربر — ضد حلقه‌ی «انتخاب کن، لغو کن»
 
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
-// قبل از انتشار عمومی حتماً false شود (دکمه کلاً مخفی می‌شود؛ /reset فقط برای OWNER می‌ماند).
-const TEST_PHASE = true;
+// false = ربات زنده (لانچ ۱۴۰۵/۰۴/۲۰): دکمه کلاً مخفی؛ /reset فقط برای OWNER می‌ماند.
+const TEST_PHASE = false;
+
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+const PRODUCT_VERSION = '1.0.0';
 
 // 🌀 فال با موضوع آزاد: به کاربر سیگنال می‌دهد می‌تواند درباره‌ی «هر موضوعی» فال بگیرد (نه فقط کاتالوگ ثابت).
 // Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
@@ -230,8 +233,12 @@ const stmts = {
   insertPayment: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id=?'),
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
+  // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
+  claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
   staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
   setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
   pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
@@ -247,6 +254,9 @@ const stmts = {
   insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
   countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
+  // پرداختی که تخفیفِ خودکارِ اولین شارژ گرفته (discount_code_id NULL + original_amount ست) و هنوز باطل نشده —
+  // ضد race که کاربر با چند پرداختِ pending هم‌زمان تخفیف اولِ خودکار را چندبار بگیرد
+  countAutoDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND discount_code_id IS NULL AND original_amount IS NOT NULL AND status IN ('pending','waiting_review','approved')"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -285,9 +295,12 @@ function getSession(uid) {
 function setSession(uid, s) { stmts.setSession.run(s ? JSON.stringify(s) : '', uid); }
 function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, patch); setSession(uid, s); return s; }
 
-// پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
+// پاک‌سازی کامل یک کاربر — /reset مالک (شامل کیف‌پول)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id'],['admin_actions','payment_id']]) {
+  // صف اکشن رسیدها به payment_id وصل است نه user_id → قبل از حذف payments با subquery پاک شود
+  try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('wipe admin_actions', e.message); }
+  try { db.prepare('DELETE FROM referrals WHERE referee_id=? OR referrer_id=?').run(uid, uid); } catch (e) { logErr('wipe referrals', e.message); }
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -489,20 +502,42 @@ async function callReadingLLM(readingId) {
 
 function startPrefetch(uid, readingId) {
   const p = callReadingLLM(readingId).catch(e => { logErr('prefetch:', e.message); return null; });
-  prefetches.set(uid, p);
+  prefetches.set(uid, { readingId, promise: p }); // readingId تا نتیجه‌ی فالِ دیگری به این فال تزریق نشود
   return p;
 }
 // نتیجه‌ی LLM؛ اگر پیش‌فراخوانی از دست رفته بود (مثلاً ری‌استارت) دوباره صدا می‌زند
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const p = prefetches.get(uid);
-  const result = p ? await p : await callReadingLLM(readingId);
-  prefetches.delete(uid);
+  const entry = prefetches.get(uid);
+  // فقط اگر پیش‌فراخوانی دقیقاً برای همین فال بود از آن استفاده کن؛ وگرنه از نو صدا بزن
+  // (باگ: کاربر فال A را رها و فال B را باز می‌کرد → پرامیس A نتیجه‌ی اشتباه/سکوت می‌داد)
+  const p = (entry && entry.readingId === readingId) ? entry.promise : callReadingLLM(readingId);
+  const result = await p;
+  if (entry && entry.readingId === readingId) prefetches.delete(uid);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
   if (r2?.llm_json) { try { return JSON.parse(r2.llm_json); } catch {} }
   return null;
+}
+
+// بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
+// → برگشت کامل مبلغ + پیام + دکمه‌ی تلاش مجدد. در لحظه‌ی بوت هیچ فراخوانی LLM در جریان نیست پس امن است
+// (پول کاربر هرگز در حالت نامعلوم نمی‌ماند — بند ۹ CLAUDE.md).
+function recoverOrphanReadings() {
+  let orphans = [];
+  try { orphans = db.prepare("SELECT id, user_id, price FROM readings WHERE status='started' AND llm_json=''").all(); }
+  catch (e) { logErr('recoverOrphan query:', e.message); return; }
+  for (const r of orphans) {
+    try {
+      if (r.price > 0) stmts.credit.run(r.price, r.user_id);
+      stmts.setReadingStatus.run('refunded', r.id);
+      track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'restart' });
+      const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.retry, `retryr:${r.id}`)]]);
+      bot.telegram.sendMessage(r.user_id, L.reading.refunded, { reply_markup: kb.reply_markup }).catch(() => {});
+    } catch (e) { logErr('recoverOrphan reading#' + r.id, e.message); }
+  }
+  if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فالِ یتیمِ پرداخت‌شده refund شد`);
 }
 
 /* ===== 8) Bot ===== */
@@ -521,9 +556,9 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source فقط برای کاربر جدید
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source/first_version فقط کاربر جدید
   const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
-  captureStart(db, uid, payload, isNew);
+  captureStart(db, uid, payload, isNew, PRODUCT_VERSION);
 
   // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);
@@ -1261,12 +1296,15 @@ bot.action('recharge', async (ctx) => {
 async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
-  stmts.setPaymentAmount.run(amount, 'receipt', s.paymentId);
+  // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
+  if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
   // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
   // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
   let payAmount = amount;
-  if (!hasRecharged(uid)) {
+  // تخفیف اولین شارژ فقط اگر نه شارژِ تأییدشده دارد و نه پرداختِ در جریانی که همین تخفیف را قبلاً گرفته
+  // (چک و نوشتنِ setPaymentDiscount سینکرون‌اند و قبل از اولین await → race بسته می‌شود)
+  if (!hasRecharged(uid) && stmts.countAutoDiscount.get(uid).c === 0) {
     const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
     payAmount = Math.max(0, amount - disc);
     stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
@@ -1616,13 +1654,20 @@ bot.on(['voice', 'audio'], async (ctx) => {
 bot.on('photo', async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);
-  if (getState(uid) !== 'pay_receipt') return;
   const s = getSession(uid);
-  if (!s.paymentId) return;
+  // مسیر عادی: وسط فلوی رسید. مسیر بازیابی: state گم شده (کاربر بعد از فاکتور /start زده) ولی
+  // پرداختِ منتظرِ رسید در DB هست → عکس را به همان وصل کن تا پول واقعی در سیاه‌چاله نیفتد.
+  let paymentId = (getState(uid) === 'pay_receipt' && s?.paymentId) ? s.paymentId : null;
+  let recovered = false;
+  if (!paymentId) {
+    const pend = stmts.pendingReceiptPayment.get(uid);
+    if (!pend) return; // عکسِ بی‌ربط به پرداخت — نادیده
+    paymentId = pend.id; recovered = true;
+  }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  await sendReceiptToAdmin(ctx, uid, s.paymentId, fileId, null);
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
-  await ctx.reply(L.wallet.receiptReceived);
+  await sendReceiptToAdmin(ctx, uid, paymentId, fileId, null);
+  setState(uid, s?.readingId ? 'confirm_pay' : 'idle');
+  await ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
 });
 
 /* ---------- sweep ساعتی milestone (پوش پیشگیرانه، سقف ۱/هفته) ---------- */
@@ -1647,7 +1692,7 @@ setInterval(async () => {
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log(`✅ tarot bot started (long polling, locale=${LOCALE})`))
+    .then(() => { log(`✅ tarot bot started (long polling, locale=${LOCALE})`); recoverOrphanReadings(); })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});

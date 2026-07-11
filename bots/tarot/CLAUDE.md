@@ -1,6 +1,7 @@
-# CLAUDE.md — tarot (فال تاروت فارسی 🔮 — فاز تست)
+# CLAUDE.md — tarot (فال تاروت فارسی 🔮 — 🟢 زنده از ۱۴۰۵/۰۴/۲۰)
 
-> این فایل باید با هر PR که رفتار ربات را عوض می‌کند به‌روز شود. از `shared/` (logger, errors) استفاده می‌کند.
+> **این ربات زنده است** (تبلیغات فعال؛ کاربر واقعی/پولی): «قوانین تغییر ربات زنده» بند ۲ج CLAUDE.md ریشه در هر PR اجباری است. این فایل باید با هر PR که رفتار ربات را عوض می‌کند به‌روز شود. از `shared/` (logger, errors) استفاده می‌کند.
+> `PRODUCT_VERSION` (بالای index.js، فعلاً `1.0.0`): با هر تغییر رفتاریِ رو-به-کاربر در همان PR بامپ شود — کوهورت `users.first_version` از همین پر می‌شود.
 
 ## چیستی
 بازسازی سفر مشتری یک تاروت‌خوان حرفه‌ای در ۵ پرده: پیش‌جلسه (پرسشنامه تمرکز + سؤال متنی/ویسی) → فضاسازی (مدیریت انتظار + تمرین تنفس) → خوانش (بُر با توقف کاربر → انتخاب از گرید ۲۴تایی → **پی‌وال دقیقاً قبل از افشا** → افشای مرحله‌ای spoiler + حلقه‌ی بازخورد وسط خوانش) → پایان‌بندی (روایت + ۳ قدم عملی) → قلاب بازگشت (مدیاگروپ یادگاری، milestone، کد تخفیف کارت روز، رفرال). مغز: تک‌فراخوانی LLM per فال با prefetch بعد از انتخاب کارت آخر.
@@ -34,7 +35,7 @@
 `users` (balance، state، focus_area، session_json، memory_json، milestone/push، **first_source/first_payload** اتریبیوشن write-once)، `readings` (منبع حقیقت فال: seed، cards_json، llm_json، status: pending_payment/started/delivered/canceled/refunded)، `payments` (+ `reminded_at`)، `admin_actions` (صف تأیید/رد رسید از داشبورد)، `discount_codes`، `discount_uses`، `referrals`، `card_files` (کش file_id تصاویر)، `daily_texts`، **`events`** (آنالیتیکس مشترک — پایین).
 
 ## آنالیتیکس و اتریبیوشن (shared/analytics.js)
-- `ensureAnalytics(db)` بعد از migration ها؛ `captureStart` در `handleStart`: رویداد `start` برای **هر** /start (props: payload/kind/code/new) + `first_source` فقط برای کاربر جدید (write-once). قرارداد payload: `c_<code>` کمپین (لینک از داشبورد)، `ref_<id>` رفرال (الگوی موجود)، خالی = organic.
+- `ensureAnalytics(db)` بعد از migration ها؛ `captureStart` در `handleStart`: رویداد `start` برای **هر** /start (props: payload/kind/code/new/v) + `first_source` و `first_version` (از `PRODUCT_VERSION`) فقط برای کاربر جدید (write-once). قرارداد payload: `c_<code>` کمپین (لینک از داشبورد)، `ref_<id>` رفرال (الگوی موجود)، خالی = organic.
 - رویدادهای ثبت‌شده (ثابت‌های `EVENTS` + اختصاصی‌ها): `start`, `onboard_done`, `daily_card`, `first_value` (once)، `spread_selected`, `question_submitted`, `cards_picked`, `paywall_shown` (props: can_afford)، `reading_started`, `product_delivered`, `refund`, `recharge_started`, `receipt_submitted`, `payment_approved`, `payment_rejected`, `feedback`, `reset`.
 - `wipeUser` جدول‌های `events` و `ab_exposures` را هم پاک می‌کند (قرارداد ریست تست). خطای track هرگز فلو را نمی‌شکند (fail-safe).
 - **A/B تست (shared/ab.js):** `ensureAb(db)` در boot؛ آزمایش فعال: `onboard_cta_order` — variant `reading_first` ترتیب دو دکمه‌ی CTA پایان آنبوردینگ را برعکس می‌کند (فال اول). تا وقتی آزمایش از داشبورد running نشود، `variant()` همیشه control برمی‌گرداند (رفتار عیناً قبلی). config آزمایش‌ها را داشبورد در جدول `experiments` همین DB می‌نویسد.
@@ -43,14 +44,17 @@
 `new → onboard_name → onboard_focus → idle → choose_spread → confirm_focus → await_question → breathing → shuffling → picking → confirm_pay → revealing → feedback` + `pay_amount/pay_receipt/pay_discount`. دک با seed قطعی (sha256+mulberry32، `REVERSAL_PROB=0.3`). گارد race در `pick:` (قفل سینکرون قبل از await). شارژ وسط فال → بعد از approve ادمین، فال خودکار ادامه می‌یابد (`afterApproval`). **آیین تطبیقی**: مشتری ثابت (۲+ فال کامل) فضاسازی کوتاه‌تر می‌گیرد.
 
 ## پس‌زمینه و in-memory
-- `prefetches` Map (فقط بهینه‌سازی — حقیقت در `readings.llm_json`).
+- `prefetches` Map با کلید `{readingId, promise}` (نه فقط uid) — تا نتیجه‌ی فالِ دیگری به فالِ جاری تزریق نشود؛ حقیقت در `readings.llm_json`.
+- `recoverOrphanReadings` در بوت: فالِ `started` با `llm_json` خالی (یتیمِ ری‌استارتِ وسطِ LLM) → refund + دکمه‌ی تلاش مجدد.
+- بازیابیِ رسید: هندلر photo اگر state گم شده باشد، پرداختِ `pending`/`step=receipt` (پنجره‌ی ۳ روز) را بازیابی می‌کند.
+- `claimAmount` اتمیک (`WHERE step='amount'`) ضد دابل‌تپِ دو مبلغ؛ `countAutoDiscount` ضد چندبار گرفتن تخفیفِ اولِ خودکار با pendingهای هم‌زمان.
 - جاروی ساعتی milestone: یادآوری ۱۴روزه با خلاصه‌ی فال قبل (سقف ۲۰/ساعت، cooldown هفتگی).
 
 ## چندزبانگی
 هر زبان = اپ pm2 جدا از همین پوشه: `locales/<LOCALE>.js` + `ENV_FILE=.env.<locale>` + دیتابیس جدا. زبان جدید: فایل locale بساز + اپ در ecosystem.
 
-## فاز تست
-`TEST_PHASE=true` (index.js): دکمه‌ی ریست برای همه؛ `wipeUser` = حذف از users/readings/payments/discount_uses/referrals (کیف‌پول هم صفر می‌شود — در فاز تست فقط پول هدیه است). **قبل از انتشار عمومی false شود**؛ `/reset` برای OWNER می‌ماند.
+## وضعیت لانچ (فاز تست تمام شد)
+`TEST_PHASE=false` از ۱۴۰۵/۰۴/۲۰: دکمه‌ی ریست از کیبورد حذف شده؛ `/reset` فقط برای OWNER مانده (wipeUser سر جایش است). دیتای دوره‌ی تست با اسکریپت یک‌باره‌ی `tools/launch-wipe-tarot.mjs` در دیپلوی لانچ پاک شد (بکاپ `bot-*.db.pre-launch.bak` روی سرور؛ marker: `data/.launch-wipe-done`) — فقط ردیف‌های ادمین‌ها ماندند.
 - دکمه‌ی دعوت با `t.me/share/url` کار می‌کند و نیازی به `/setinline` ندارد (هندلر inline_query صرفاً باقی مانده و بی‌ضرر است).
 
 ## env

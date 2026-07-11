@@ -52,6 +52,17 @@ jobs:
               echo "===== $app — error.log (آخرین ۴۰ خط) ====="
               tail -n 40 ~/.pm2/logs/"$app"-error.log 2>/dev/null || echo "(خالی)"
             done
+            # ── اپ گم‌شده: هر اپ ecosystem که .env دارد باید در pm2 باشد ──
+            # (بدون این چک، pm2ِ «خالی» بعد از ریبوت = لیست خالی = هیچ هشداری! لیست خالی یعنی همه‌چیز داون است)
+            pm2 jlist | node -e "
+              const eco = require(process.cwd() + '/ecosystem.config.cjs');
+              const fs = require('fs');
+              const up = new Set(JSON.parse(fs.readFileSync(0, 'utf8')).map(p => p.name));
+              for (const app of eco.apps) {
+                if (!fs.existsSync(process.cwd() + '/' + app.cwd + '/.env')) continue; // هنوز secret ندارد — انتظار نمی‌رود اجرا باشد
+                if (!up.has(app.name)) console.log('PROBLEM:🔴 ربات «' + app.name + '» اصلاً در pm2 نیست (ریبوت سرور بدون pm2 resurrect؟ با Ops restart یا deploy برگردان)');
+              }
+            "
             # ── تعبیر خواب: systemd نه pm2 (استثنای مونوریپو) ──
             if sudo systemctl list-unit-files 2>/dev/null | grep -q '^tabir-khab'; then
               STATE=$(sudo systemctl is-active tabir-khab 2>/dev/null || true)
@@ -59,6 +70,13 @@ jobs:
                 echo "PROBLEM:🔴 سرویس «tabir-khab» (تعبیر خواب) فعال نیست (وضعیت=$STATE)"
                 echo "===== tabir-khab — bot.log (آخرین ۴۰ خط) ====="
                 tail -n 40 /home/ubuntu/tabir_khab/logs/bot.log 2>/dev/null || echo "(خالی)"
+              fi
+            fi
+            # ── تونل داشبورد: داشبورد فقط از Cloudflare Tunnel در دسترس است؛ pm2 سالم ≠ داشبورد در دسترس ──
+            if sudo systemctl list-unit-files 2>/dev/null | grep -q '^dash-tunnel'; then
+              TSTATE=$(sudo systemctl is-active dash-tunnel 2>/dev/null || true)
+              if [ "$TSTATE" != "active" ]; then
+                echo "PROBLEM:🔴 سرویس «dash-tunnel» (تونل داشبورد) فعال نیست (وضعیت=$TSTATE) — داشبورد از بیرون در دسترس نیست"
               fi
             fi
             # صف رسید معطل این‌جا چک نمی‌شود — هر ربات خودش رسیدهای معطل را دوره‌ای دوباره

@@ -168,6 +168,7 @@ export default {
     badDiscount: 'این کد معتبر نیست یا منقضی شده 🙏',
     freeApproved: '🎉 با این کد، شارژت رایگان تأیید شد!',
     receiptReceived: 'رسیدت رسید ✅ به‌محض تأیید (معمولاً خیلی سریع) خبرت می‌کنم.',
+    receiptReceivedRecovered: 'رسیدِ پرداختت رسید ✅ (به شارژِ در انتظارت وصلش کردم) به‌محض تأیید خبرت می‌کنم.',
     approved: (amount, balance, bonus) =>
       `✅ شارژ ${fmt(amount)} تومانی تأیید شد!${bonus ? `\n🎁 + ${fmt(bonus)} تومان هدیه‌ی شارژ` : ''}\nموجودی جدید: ${fmt(balance)} تومان`,
     rejected: '❌ فیش پرداختت تایید نشد.\n\nاگر مشکلی هست به آیدی @alireza_oliya پیام بده.',
