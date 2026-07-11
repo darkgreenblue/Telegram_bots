@@ -43,6 +43,9 @@ LOCALE = {
         "btn_prev":      "◀️ Previous",
         "btn_next":      "Next ▶️",
         "btn_paywall":   "🔍 Dream Symbol Finder (free)",
+        "search_hint":   "Or just type a symbol's name here (like: snake, teeth, water) and I'll find it for you 👇",
+        "search_multi":  "🔍 I found {count} symbols close to what you wrote. Which one was in your dream?",
+        "not_found":     "No symbol recorded for \"{query}\" yet 🌫️\n\nYou can browse by letter, or tell me your full dream so I can unpack it precisely and personally.",
     },
 
     "welcome_intro": (

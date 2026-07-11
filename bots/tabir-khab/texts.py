@@ -250,11 +250,35 @@ def _sym_rtl(lang: str | None) -> bool:
 
 
 def symbols_home_message(lang: str | None):
-    """(text, rows) — معرفی + گرید حروف الفبا."""
+    """(text, rows) — معرفی + راهنمای تایپ + گرید حروف الفبا."""
     buttons = [{"text": letter, "callback_data": f"sym:l:{i}"}
                for i, letter in enumerate(SYM.letters(lang))]
     rows = _sym_rows(buttons, SYM_LETTERS_PER_ROW, _sym_rtl(lang))
-    return sym_text(lang, "intro"), rows
+    hint = sym_text(lang, "search_hint")
+    intro = sym_text(lang, "intro") + (("\n\n" + hint) if hint else "")
+    return intro, rows
+
+
+def symbols_result_list_message(lang: str | None, results: list):
+    """(text, rows) — جستجو چند نماد برگرداند: دکمه‌های انتخاب (sym:w) + برگشت به حروف."""
+    buttons = [{"text": e["word"], "callback_data": f"sym:w:{li}:{wi}"} for li, wi, e in results]
+    rows = _sym_rows(buttons, 2, _sym_rtl(lang))
+    rows.append([{"text": sym_text(lang, "btn_letters"), "callback_data": "sym:home"}])
+    return sym_text(lang, "search_multi", count=num(lang, len(results))), rows
+
+
+def symbols_not_found_message(lang: str | None, query: str, suggestions: list):
+    """(text, rows) — جستجوی بی‌نتیجه: پیام صادقانه + پیشنهادِ نزدیک + CTA خواب کامل + حروف.
+    این پیام باید با parse_mode=None فرستاده شود چون کوئریِ خام کاربر را نمایش می‌دهد."""
+    rtl = _sym_rtl(lang)
+    rows = []
+    if suggestions:
+        sug = [{"text": e["word"], "callback_data": f"sym:w:{li}:{wi}"} for li, wi, e in suggestions]
+        rows += _sym_rows(sug, 2, rtl)
+    rows.append([{"text": sym_text(lang, "btn_dream"), "callback_data": "sym:dream"}])
+    rows.append([{"text": sym_text(lang, "btn_letters"), "callback_data": "sym:home"}])
+    disp = " ".join((query or "").split())[:40]
+    return sym_text(lang, "not_found", query=disp), rows
 
 
 def symbols_list_message(lang: str | None, li: int, page: int):

@@ -168,6 +168,31 @@ def get_profile(user: dict) -> dict:
         return {}
 
 
+def is_sym_browse(user: dict) -> bool:
+    """آیا کاربر داخلِ حالتِ «نمادیاب» است؟ (فلگِ سبکِ UI در profile JSON).
+    در این حالت متنِ کوتاه = جستجوی نماد؛ خارج از آن، همه‌ی متن‌ها = ورودی خواب (رفتار قبلی)."""
+    return bool(get_profile(user).get("sym_browse"))
+
+
+async def set_sym_browse(user_id: int, on: bool):
+    """ورود/خروجِ حالتِ نمادیاب را در profile JSON ثبت می‌کند (write-merge روی بقیه‌ی پروفایل).
+    ephemeral است و با ریست/تغییر زبان طبیعتاً پاک می‌شود؛ روی فلوی خواب اثری ندارد."""
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute("SELECT profile FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        try:
+            profile = json.loads((row[0] if row else "{}") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            profile = {}
+        if on:
+            profile["sym_browse"] = True
+        else:
+            profile.pop("sym_browse", None)
+        await db.execute("UPDATE users SET profile = ? WHERE user_id = ?",
+                         (json.dumps(profile, ensure_ascii=False), user_id))
+        await db.commit()
+
+
 def onboarding_done(user: dict) -> bool:
     lang = (user or {}).get("language") or DEFAULT_LANGUAGE
     return (user or {}).get("onboarding_step", 0) >= locales.question_count(lang)

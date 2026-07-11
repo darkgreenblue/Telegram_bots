@@ -44,6 +44,9 @@ LOCALE = {
         "btn_prev":      "◀️ Anterior",
         "btn_next":      "Próxima ▶️",
         "btn_paywall":   "🔍 Buscador de símbolos (grátis)",
+        "search_hint":   "Ou digite aqui o nome de um símbolo (como: cobra, dentes, água) e eu o encontro para você 👇",
+        "search_multi":  "🔍 Encontrei {count} símbolos próximos do que você escreveu. Qual estava no seu sonho?",
+        "not_found":     "Ainda não há nenhum símbolo para «{query}» 🌫️\n\nVocê pode buscar por letra, ou me contar o sonho completo para eu interpretá-lo com precisão e de forma pessoal.",
     },
 
     "welcome_intro": (
