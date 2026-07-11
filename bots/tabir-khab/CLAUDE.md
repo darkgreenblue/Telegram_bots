@@ -85,6 +85,8 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
 - `ADMIN_IDS` از env `ADMIN_IDS` (کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند)؛ `ADMIN_USER_ID = ADMIN_IDS[0]`؛ `is_admin(uid)` عضویت را چک می‌کند. دستورهای ادمین (مثل `/simulate_pay`) هم `ADMIN_USER_ID` و هم `ADMIN_IDS` را می‌پذیرند. هشدار/گزارش هر ربات per-bot می‌ماند (نه cross-bot).
 
 ## فلگ‌های مهم در config.py
-- `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). بعد از تست باید `False` بشود.
-- `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست).
-- `SKIP_DAILY_LIMIT` — وقتی `True`، محدودیتِ روزانه برداشته می‌شود.
+- `FORCE_FALLBACK_FOR_TEST` — وقتی `True`، همه‌ی خواب‌ها از مسیرِ فال‌بک می‌روند (برای تست). فعلاً `False`.
+- `SKIP_PAYMENT` — وقتی `True`، پرداخت شبیه‌سازی می‌شود (محیطِ تست). فعلاً `True` (درگاه واقعی هنوز وصل نیست).
+- `SKIP_DAILY_LIMIT` — **`False`** (سخت‌سازی پیش‌لانچِ ربات‌های همسایه): سقفِ «هر شب یک رویا» فعال است تا غریبه‌ای که به این ربات برسد نتواند مصرفِ LLM بی‌سقف بتراشد (چون پرداخت هنوز شبیه‌سازی است).
+- `RESET_BUTTON_ENABLED` — **`False`**: دکمه‌ی ریست خاموش (وگرنه هر کاربر تریالِ مجانیِ بی‌نهایت می‌گرفت).
+- **بلاکرهای لانچِ خودِ tabir (برای بعد):** درگاه واقعی + Stars واقعی به‌جای simulate، `SKIP_PAYMENT=False`، اعتبارسنجی pre_checkout، `BALE_PAYMENT_TOKEN` واقعی، روشن‌کردن verify گواهی TLS (فعلاً `*_SSL_NO_VERIFY=True` برای تلگرام/OpenRouter هم هست — ریسک MITM)، راه تماس پشتیبانی در پیام مالی.

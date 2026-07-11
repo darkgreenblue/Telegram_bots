@@ -156,9 +156,10 @@ jobs:
               echo "✅ $name دیپلوی شد (دلیل: $reason)"
             }
             deploy_bot voice2text
-            deploy_bot resume-tailor
             deploy_bot tarot
             deploy_bot dashboard
+            # resume-tailor بازنشسته شد (منسوخ + مصرف LLM بی‌سقف/SSRF) — یک‌باره از pm2 حذف می‌شود
+            pm2 delete resume-tailor 2>/dev/null && pm2 save || true
 
             # ---------- Cloudflare Tunnel داشبورد (هیچ پورت inbound باز نمی‌شود) ----------
             # named tunnel اگر CLOUDFLARE_TUNNEL_TOKEN ست باشد (آدرس ثابت با دامنه)،
