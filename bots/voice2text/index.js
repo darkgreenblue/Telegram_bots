@@ -205,6 +205,8 @@ const stmts = {
   insertPayment: db.prepare('INSERT INTO payments (user_id, amount) VALUES (?,?)'),
   insertPaymentPending: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   setPaymentAmount:  db.prepare('UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?'),
+  // ادعای اتمیک مبلغ: فقط اگر هنوز مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت روی preset)
+  claimAmount:       db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStep:    db.prepare('UPDATE payments SET step=?, updated_at=unixepoch() WHERE id=?'),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (بازیابیِ فیش وقتی state حافظه‌ای گم شده — ری‌استارت/`/start` بعد از فاکتور)
@@ -234,8 +236,9 @@ const stmts = {
   // COALESCE: اگر قبلاً تخفیف خورده، original_amount دست‌نخورده می‌ماند تا با اعمال دوباره خراب نشود
   setPaymentDiscount:    db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, ?), amount=?, updated_at=unixepoch() WHERE id=?'),
   clearPaymentDiscount:  db.prepare('UPDATE payments SET amount=original_amount, original_amount=NULL, discount_code_id=NULL, updated_at=unixepoch() WHERE id=?'),
-  // شمارش پرداخت‌های معلق/در-انتظار که همین کد را دارند تا سقف هر-کاربر با چند پرداخت هم‌زمان دور زده نشود
-  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
+  // شمارش پرداخت‌های در-انتظار که همین کد را دارند (ضد دور زدنِ سقفِ هر-کاربر با چند پرداخت هم‌زمان).
+  // waiting_review همیشه شمرده می‌شود؛ pending فقط اگر تازه باشد (<۲۴س) تا پرداختِ رهاشده سهمیه‌ی کد را برای همیشه نسوزاند.
+  countPendingDiscount:  db.prepare("SELECT COUNT(*) as c FROM payments WHERE discount_code_id=? AND user_id=? AND (status='waiting_review' OR (status='pending' AND created_at > unixepoch()-86400))"),
   getDiscountCode:       db.prepare('SELECT * FROM discount_codes WHERE code=? AND is_active=1'),
   getDiscountById:       db.prepare('SELECT * FROM discount_codes WHERE id=?'),
   insertDiscountCode:    db.prepare('INSERT INTO discount_codes (code,discount_percent,max_discount_amount,expires_at,max_uses_per_user,allowed_segments,allowed_user_ids,created_by) VALUES (?,?,?,?,?,?,?,?)'),
@@ -1462,7 +1465,8 @@ async function editAdminPaymentMsg(ctx, text) {
 
 // ثبت مبلغ شارژ + نمایش فاکتور با شماره کارت (مشترک بین دکمه‌های پیش‌فرض و ورود دستی)
 async function applyRechargeAmount(ctx, userId, paymentId, amount) {
-  stmts.setPaymentAmount.run(amount, 'receipt', paymentId);
+  // ادعای اتمیک قبل از هر await: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
+  if (stmts.claimAmount.run(amount, paymentId).changes === 0) return;
   const invoiceMsg = await ctx.reply(
     buildInvoiceText(amount, null, null),
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
