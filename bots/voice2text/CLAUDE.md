@@ -24,7 +24,7 @@
 | `discount_codes` | کد، درصد، سقف مبلغ، انقضا، سقف مصرف per user، سگمنت‌ها/لیست کاربر مجاز، آمار |
 | `discount_uses` | دفتر مصرف کدها |
 | `pro_whitelist` | دسترسی مدل Pro |
-| `voice_flows` | چرخه‌ی حیات هر فلو: active/completed/cancelled/expired/failed |
+| `voice_flows` | چرخه‌ی حیات هر فلو: active/completed/cancelled/expired/failed + `reserved` (مبلغِ رزروشده برای refund در ری‌استارت) |
 | `admin_actions` | صف تأیید/رد رسید که **داشبورد** enqueue می‌کند؛ sweep ربات با منطق واقعی درین می‌کند (payment_id, action, source, done_at) |
 | `events` | آنالیتیکس کمینه (کپی محلی هم‌قرارداد `shared/analytics.js` — پایین) |
 
@@ -32,7 +32,8 @@
 
 ## فلوها و state های in-memory
 - `sessions` (token→سشن ویس)، `userStates` (فلوی شارژ)، `adminStates` (پنل تخفیف)، `notionStates`, `activeJobs`. ری‌استارت = پاک‌شدن این‌ها (فلوهای وسط کار می‌میرند) — دلیل اصلی دیپلوی انتخابی.
-- فلوی ویس: دریافت → گارد فلوهای فعال/سایز/موجودی → طول (native یا ffprobe) → انتخاب نوع پردازش → LLM با retry/فالبک → خروجی (>۴۰۰۰ کاراکتر: پیام تکه‌تکه یا فایل) → کسر هزینه → (مالک: پیشنهاد Notion).
+- فلوی ویس: دریافت → گارد فلوهای فعال/سایز/موجودی → طول (native یا ffprobe) → انتخاب نوع پردازش → **رزرو اتمیکِ هزینه** (`deductIf` با `WHERE balance>=cost` در شروع job، نه بعد از موفقیت — ضد مصرفِ رایگانِ چند فلوی هم‌زمان) → LLM با retry/فالبک → خروجی (>۴۰۰۰ کاراکتر: پیام تکه‌تکه یا فایل). شکستِ LLM = **refund کامل رزرو**؛ ری‌استارتِ وسطِ کار = `recoverOrphanFlows` در بوت رزروِ یتیم را برمی‌گرداند. کال‌بک‌های فلو (ptype/switchflow/setmodelflow/output) مالکیت `session.userId` را چک می‌کنند (ضد اکسپلویت گروه). → (مالک: پیشنهاد Notion).
+- **بازیابیِ رسید:** هندلر photo اگر state حافظه‌ای گم شده باشد (ری‌استارت/`/start` بعد از فاکتور)، پرداختِ `pending` با `step='receipt'` (پنجره‌ی ۳ روز) را از DB بازیابی و رسید را به همان وصل می‌کند (وگرنه فیش در سیاه‌چاله می‌افتاد). «انصراف» روی رسیدِ `waiting_review` رد می‌شود (لغو دروغین قبلاً پول را معلق می‌گذاشت).
 - شارژ: مبلغ → فاکتور با شماره کارت → کد تخفیف اختیاری → رسید (عکس/متن) → ادمین approve/reject. تخفیف ۱۰۰٪ = تأیید خودکار.
 - سگمنت‌های تخفیف: all, new(<7d), no_balance, inactive(>30d), loyal(≥5پرداخت), premium, first_charge, high_usage(≥10), low_balance.
 - پنل ادمین دکمه‌ای: داشبورد (کاربر/درآمد/موجودی OpenRouter — هشدار زیر $1)، CRUD کد تخفیف، پیام promo قابل‌فوروارد.

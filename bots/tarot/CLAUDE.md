@@ -44,7 +44,10 @@
 `new → onboard_name → onboard_focus → idle → choose_spread → confirm_focus → await_question → breathing → shuffling → picking → confirm_pay → revealing → feedback` + `pay_amount/pay_receipt/pay_discount`. دک با seed قطعی (sha256+mulberry32، `REVERSAL_PROB=0.3`). گارد race در `pick:` (قفل سینکرون قبل از await). شارژ وسط فال → بعد از approve ادمین، فال خودکار ادامه می‌یابد (`afterApproval`). **آیین تطبیقی**: مشتری ثابت (۲+ فال کامل) فضاسازی کوتاه‌تر می‌گیرد.
 
 ## پس‌زمینه و in-memory
-- `prefetches` Map (فقط بهینه‌سازی — حقیقت در `readings.llm_json`).
+- `prefetches` Map با کلید `{readingId, promise}` (نه فقط uid) — تا نتیجه‌ی فالِ دیگری به فالِ جاری تزریق نشود؛ حقیقت در `readings.llm_json`.
+- `recoverOrphanReadings` در بوت: فالِ `started` با `llm_json` خالی (یتیمِ ری‌استارتِ وسطِ LLM) → refund + دکمه‌ی تلاش مجدد.
+- بازیابیِ رسید: هندلر photo اگر state گم شده باشد، پرداختِ `pending`/`step=receipt` (پنجره‌ی ۳ روز) را بازیابی می‌کند.
+- `claimAmount` اتمیک (`WHERE step='amount'`) ضد دابل‌تپِ دو مبلغ؛ `countAutoDiscount` ضد چندبار گرفتن تخفیفِ اولِ خودکار با pendingهای هم‌زمان.
 - جاروی ساعتی milestone: یادآوری ۱۴روزه با خلاصه‌ی فال قبل (سقف ۲۰/ساعت، cooldown هفتگی).
 
 ## چندزبانگی
