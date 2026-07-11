@@ -235,6 +235,8 @@ const stmts = {
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
   staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
   setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
   pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
@@ -1622,13 +1624,20 @@ bot.on(['voice', 'audio'], async (ctx) => {
 bot.on('photo', async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);
-  if (getState(uid) !== 'pay_receipt') return;
   const s = getSession(uid);
-  if (!s.paymentId) return;
+  // مسیر عادی: وسط فلوی رسید. مسیر بازیابی: state گم شده (کاربر بعد از فاکتور /start زده) ولی
+  // پرداختِ منتظرِ رسید در DB هست → عکس را به همان وصل کن تا پول واقعی در سیاه‌چاله نیفتد.
+  let paymentId = (getState(uid) === 'pay_receipt' && s?.paymentId) ? s.paymentId : null;
+  let recovered = false;
+  if (!paymentId) {
+    const pend = stmts.pendingReceiptPayment.get(uid);
+    if (!pend) return; // عکسِ بی‌ربط به پرداخت — نادیده
+    paymentId = pend.id; recovered = true;
+  }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  await sendReceiptToAdmin(ctx, uid, s.paymentId, fileId, null);
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
-  await ctx.reply(L.wallet.receiptReceived);
+  await sendReceiptToAdmin(ctx, uid, paymentId, fileId, null);
+  setState(uid, s?.readingId ? 'confirm_pay' : 'idle');
+  await ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
 });
 
 /* ---------- sweep ساعتی milestone (پوش پیشگیرانه، سقف ۱/هفته) ---------- */

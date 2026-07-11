@@ -203,6 +203,8 @@ const stmts = {
   setPaymentAmount:  db.prepare('UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentStep:    db.prepare('UPDATE payments SET step=?, updated_at=unixepoch() WHERE id=?'),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id = ?'),
+  // پرداختِ منتظرِ رسیدِ همین کاربر (بازیابیِ فیش وقتی state حافظه‌ای گم شده — ری‌استارت/`/start` بعد از فاکتور)
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
   // یادآوری رسید معطل + صف اکشن ادمین (داشبورد)
@@ -1409,24 +1411,34 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const state  = userStates.get(userId);
-  if (state?.step !== 'waiting_receipt') {
+  let paymentId = null;
+  let recovered = false;
+  if (state?.step === 'waiting_receipt') {
+    paymentId = state.paymentId;
+  } else if (state && state.paymentId) {
     // عکس وسط فلوی شارژ (قبل از مرحله فیش) → راهنمایی + دکمه انصراف
-    if (state && state.paymentId) {
-      await ctx.reply('برای ادامه‌ی شارژ، اول مبلغ/کد رو وارد کن، یا انصراف بده:', payCancelKb(state.paymentId));
+    await ctx.reply('برای ادامه‌ی شارژ، اول مبلغ/کد رو وارد کن، یا انصراف بده:', payCancelKb(state.paymentId));
+    return;
+  } else {
+    // state حافظه‌ای گم شده (ری‌استارت/‌/start بعد از فاکتور) — پرداختِ منتظرِ رسید را از DB بازیابی کن
+    // تا فیش واقعی در سیاه‌چاله نیفتد (پرداخت در pending می‌ماند و یادآور هم فقط waiting_review را می‌پاید)
+    const pend = stmts.pendingReceiptPayment.get(userId);
+    if (!pend) {
+      if (!isAdmin(userId)) { upsertUser(userId, ctx.from.first_name, ctx.from.username); await sendMainMenu(ctx); }
       return;
     }
-    // عکس خارج از هر فلو → منوی اصلی
-    if (!isAdmin(userId)) { upsertUser(userId, ctx.from.first_name, ctx.from.username); await sendMainMenu(ctx); }
-    return;
+    paymentId = pend.id; recovered = true;
   }
 
   const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  const payment = stmts.getPayment.get(state.paymentId);
-  if (!payment || payment.status !== 'pending') return;
+  const payment = stmts.getPayment.get(paymentId);
+  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
 
-  await sendReceiptToAdmin(ctx, userId, state.paymentId, fileId, null);
+  await sendReceiptToAdmin(ctx, userId, paymentId, fileId, null);
   userStates.delete(userId);
-  await ctx.reply('✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
+  await ctx.reply(recovered
+    ? '✅ فیش واریزت دریافت شد و به شارژِ در انتظارت وصل شد؛ در انتظار تایید ادمین است.'
+    : '✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.');
 });
 
 // ویرایش پیام درخواست شارژ نزد ادمین: عکس → caption، متن → text
@@ -1665,8 +1677,8 @@ bot.on('text', async (ctx) => {
     stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
     userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: state.invoiceMsgId, discountCodeId: result.dc.id });
 
-    if (result.dc.discount_percent === 100 || result.finalAmount === 0) {
-      // Auto-approve: 100% discount
+    // Auto-approve فقط برای تخفیف واقعیِ ۱۰۰٪ روی مبلغ مثبت — گارد ضد credit(NULL)/credit(0)
+    if ((result.dc.discount_percent === 100 || result.finalAmount === 0) && payment.amount > 0) {
       stmts.setPaymentStatus.run('approved', state.paymentId);
       stmts.credit.run(payment.amount, userId); // credit original amount
       track(userId, 'payment_approved', { payment_id: state.paymentId, amount: 0, credited: payment.amount, auto: true });
@@ -2197,6 +2209,8 @@ bot.on('callback_query', async (ctx) => {
       const paymentId = parseInt(dr[1]);
       const payment = stmts.getPayment.get(paymentId);
       if (!payment || payment.user_id !== userId || payment.status !== 'pending') return ctx.answerCbQuery('پرداخت نامعتبر است.', { show_alert: true });
+      // گارد ضد دابل‌تپِ دکمه‌ی کهنه: بدون کد تخفیف، clearPaymentDiscount مبلغ را NULL می‌کند (کیف‌پول را نابود می‌کند)
+      if (!payment.discount_code_id) return ctx.answerCbQuery('کد تخفیفی روی این پرداخت نیست.', { show_alert: true });
       stmts.clearPaymentDiscount.run(paymentId);
       const updatedPayment = stmts.getPayment.get(paymentId);
       const invoiceMsgId = ctx.callbackQuery.message.message_id;
