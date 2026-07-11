@@ -49,6 +49,8 @@ for _code in locales.LANG_ORDER:
     _KB_ACTION[_kb["invite"]]       = "invite"
     if "reset_test" in _kb:
         _KB_ACTION[_kb["reset_test"]] = "reset_test"
+    if "symbols" in _kb:
+        _KB_ACTION[_kb["symbols"]] = "symbols"
 
 
 # ===================== کیبوردها =====================
@@ -167,9 +169,15 @@ async def _send_welcome(bale, chat_id, lang):
 
 
 async def _send_paywall(bale, chat_id, lang, prefix=""):
-    """دعوت به همسفری: عکس مسکات + کپشن + دکمه‌های پلن."""
+    """دعوت به همسفری: عکس مسکات + کپشن + دکمه‌های پلن.
+    زیر پلن‌ها، مسیر رایگان «نمادیاب خواب» هم پیشنهاد می‌شود تا کاربری که فعلاً
+    نمی‌خواهد بخرد، به جای ترک ربات وارد بازی رایگان شود."""
     caption = C.paywall_full(lang, prefix)
-    kb = _packages_inline(lang)
+    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}"}]
+            for t in SUBSCRIPTION_ORDER]
+    if C.symbols_available(lang):
+        rows.append([{"text": C.sym_text(lang, "btn_paywall"), "callback_data": "sym:open"}])
+    kb = inline_keyboard(rows)
     res = await bale.send_asset(chat_id, MASCOT_INVITE, caption=caption, reply_markup=kb)
     if res is None:
         await bale.send_message(chat_id, caption, reply_markup=kb)
@@ -275,6 +283,9 @@ async def _handle_message(bale, msg: dict):
         return
     if action == "invite" and REFERRAL_ENABLED:
         await bale.send_message(chat_id, C.invite_text(lang, bale.invite_link(user_id)))
+        return
+    if action == "symbols":
+        await _send_symbols_home(bale, chat_id, user_id, via="keyboard")
         return
 
     if action == "reset_test" and RESET_BUTTON_ENABLED:
@@ -423,6 +434,8 @@ async def _handle_callback(bale, cq: dict):
             await _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier)
         elif data.startswith("fullview:"):
             await _cb_view_full(bale, cq_id, chat_id, user_id, int(data.split(":", 1)[1]))
+        elif data.startswith("sym:"):
+            await _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data)
         else:
             await bale.answer_callback_query(cq_id)
     except Exception as e:
@@ -831,6 +844,69 @@ async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
     if not sent_with_caption:
         await bale.send_message(chat_id, preview, parse_mode=None)
     await bale.send_message(chat_id, depth, parse_mode=None)
+
+
+# ===================== نمادیاب خواب (مسیر رایگان بدون LLM) =====================
+
+async def _send_symbols_home(bale, chat_id, user_id, via: str):
+    """ورود به نمادیاب: معرفی + گرید حروف (پیام جدید — از کیبورد یا پی‌وال)."""
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    if not C.symbols_available(lang):
+        return
+    text, rows = C.symbols_home_message(lang)
+    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+    await analytics.track(user_id, "symbol_opened", {"via": via})
+
+
+async def _sym_show(bale, chat_id, msg_id, text, rows):
+    """ناوبری نمادیاب روی همان پیام ادیت می‌شود تا چت شلوغ نشود؛ بدون msg_id پیام جدید."""
+    kb = inline_keyboard(rows)
+    if msg_id:
+        await bale.edit_message_text(chat_id, msg_id, text, reply_markup=kb)
+    else:
+        await bale.send_message(chat_id, text, reply_markup=kb)
+
+
+async def _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data):
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    if not C.symbols_available(lang):
+        await bale.answer_callback_query(cq_id)
+        return
+    parts = data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    persona = (user or {}).get("persona") or locales.default_persona(lang)
+
+    if action == "open":       # از پی‌وال — پیام جدید تا پیام پی‌وال دست‌نخورده بماند
+        await bale.answer_callback_query(cq_id)
+        await _send_symbols_home(bale, chat_id, user_id, via="paywall")
+        return
+    if action == "dream":      # CTA: از نماد به تعریف کامل خواب
+        await bale.answer_callback_query(cq_id)
+        await analytics.track(user_id, "symbol_cta_dream", {})
+        await _send_new_dream_guide(bale, chat_id, user_id)
+        return
+
+    if action == "home":
+        text, rows = C.symbols_home_message(lang)
+    elif action == "l" and len(parts) == 3 and parts[2].isdigit():
+        text, rows = C.symbols_list_message(lang, int(parts[2]), 0)
+    elif action == "p" and len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
+        text, rows = C.symbols_list_message(lang, int(parts[2]), int(parts[3]))
+    elif action == "w" and len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
+        li, wi = int(parts[2]), int(parts[3])
+        text, rows, entry = C.symbols_word_message(lang, li, wi, persona)
+        if entry:
+            await analytics.track(user_id, "symbol_viewed", {
+                "letter": entry["letter"], "word": entry["word"], "persona": persona,
+            })
+    else:
+        text, rows = None, None
+
+    await bale.answer_callback_query(cq_id)
+    if text is not None:
+        await _sym_show(bale, chat_id, msg_id, text, rows)
 
 
 # ===================== پرداخت =====================

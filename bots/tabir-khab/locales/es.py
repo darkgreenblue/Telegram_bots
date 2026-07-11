@@ -19,6 +19,31 @@ LOCALE = {
         "persona":      "🎭 Cambiar estilo",
         "invite":       "🎁 Enlace de invitación",
         "language":     "🌐 Idioma",
+        "symbols":      "🔍 Buscador de símbolos (gratis)",
+    },
+
+    # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/es نمایش داده نمی‌شوند
+    "sym": {
+        "intro": (
+            "Bienvenido al *Buscador de símbolos del sueño* 🔍\n\n"
+            "Todo lo que ves en un sueño (agua, dientes, una serpiente, volar...) es un símbolo con un secreto dentro. "
+            "Elige la primera letra de lo que viste y te diré su significado en tu propio estilo de interpretación.\n\n"
+            "Esta parte es totalmente gratis ✨"
+        ),
+        "letter_header": "🔍 Símbolos con «{letter}» (página {page} de {pages})\n\nElige lo que viste en tu sueño:",
+        "letter_empty": "Aún no hay símbolos para «{letter}» 🌫️ Prueba otra letra.",
+        "word_title": "🔍 El símbolo «{word}» en el Reino de los Sueños",
+        "cta_line": (
+            "Pero recuerda, compañero: el verdadero significado de este símbolo está ligado al resto de tu sueño. "
+            "Junto a las personas, lugares y emociones de tu sueño puede tomar un sentido mucho más preciso y personal; "
+            "por eso contar el sueño completo es otro mundo 💫"
+        ),
+        "btn_dream":     "✨ Contar mi sueño completo",
+        "btn_letters":   "🔤 Todas las letras",
+        "btn_back_list": "🔙 Volver a la lista",
+        "btn_prev":      "◀️ Anterior",
+        "btn_next":      "Siguiente ▶️",
+        "btn_paywall":   "🔍 Buscador de símbolos (gratis)",
     },
 
     "welcome_intro": (
