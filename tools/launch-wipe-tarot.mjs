@@ -4,7 +4,7 @@
 //   node tools/launch-wipe-tarot.mjs <dataDir>      (ADMIN_IDS از env: کامای آی‌دی‌ها)
 // امن: اول از هر DB با online-backup بکاپ می‌گیرد (<db>.pre-launch.bak کنار خودش)؛
 // کش‌های غیرکاربری (card_files/daily_texts) و discount_codes (config) دست نمی‌خورند.
-import { readdirSync, existsSync } from 'fs';
+import { readdirSync, existsSync, rmSync } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 
@@ -35,13 +35,28 @@ if (!dbFiles.length) {
 const hasTable = (db, t) =>
   !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
 
+// گاردِ ایمنی: اگر تعداد کاربرانِ غیرادمین از این آستانه بیشتر بود، این یک ربات زنده است نه فاز تست →
+// wipe متوقف می‌شود تا کیف‌پول کاربران واقعی تصادفاً پاک نشود (override آگاهانه: env ALLOW_LIVE_WIPE=1).
+const LIVE_GUARD = parseInt(process.env.LIVE_WIPE_MAX || '20', 10);
+
 for (const f of dbFiles) {
   const file = path.join(dataDir, f);
   const db = new Database(file);
   db.pragma('busy_timeout = 5000');
-  // بکاپ سازگار قبل از هر حذف (همان online-backup API بکاپ شبانه)
+
+  if (hasTable(db, 'users') && process.env.ALLOW_LIVE_WIPE !== '1') {
+    const nonAdmin = db.prepare(`SELECT COUNT(*) c FROM users WHERE telegram_id NOT IN (${keep})`).get().c;
+    if (nonAdmin > LIVE_GUARD) {
+      console.error(`❌ ${f}: ${nonAdmin} کاربرِ غیرادمین دارد (> ${LIVE_GUARD}) — به‌نظر ربات زنده است، wipe متوقف شد. برای اجرای آگاهانه ALLOW_LIVE_WIPE=1 بگذار.`);
+      db.close();
+      process.exit(2);
+    }
+  }
+
+  // بکاپ سازگار قبل از هر حذف (VACUUM INTO snapshot). idempotent: بکاپِ قبلی (اجرای ناتمام) را پاک کن
+  // چون VACUUM INTO روی فایلِ موجود خطا می‌دهد و باعث حلقه‌ی شکستِ دیپلوی می‌شد.
   const bak = `${file}.pre-launch.bak`;
-  // db.backup async است؛ ولی برای سادگی و چون پروسه‌ی دیگری ننوشته، از VACUUM INTO استفاده می‌کنیم (snapshot سازگار)
+  if (existsSync(bak)) rmSync(bak);
   db.prepare(`VACUUM INTO ?`).run(bak);
   console.log(`💾 ${f}: بکاپ گرفته شد → ${path.basename(bak)}`);
 
