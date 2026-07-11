@@ -101,3 +101,65 @@ def stats(lang: str | None) -> dict:
     data = _DATA.get(lang or "", {})
     per = {letter: len(v) for letter, v in data.items()}
     return {"total": sum(per.values()), "per_letter": per}
+
+
+# ===================== جستجوی متنی =====================
+
+import re as _re
+
+_ZWNJ = "‌"
+_HARAKAT = _re.compile(r"[ً-ْ]")   # اعراب عربی
+_PARENS = _re.compile(r"\(.*?\)")            # پرانتزِ ابهام‌زدا: «مو (تاک)» → «مو»
+
+
+def _norm(s: str) -> str:
+    """نرمال‌سازی برای تطبیقِ جستجو (نه برای نمایش): یکسان‌سازی ی/ك عربی، حذف اعراب/نیم‌فاصله،
+    یکدست‌کردن همزه‌ها و فاصله‌ها. آ/ا هم برای تطبیق یکی می‌شوند تا کاربر مجبور به تایپ دقیق نباشد."""
+    s = (s or "").strip().replace(_ZWNJ, "").replace("‏", "").replace("‎", "")
+    s = (s.replace("ي", "ی").replace("ك", "ک").replace("ة", "ه").replace("ؤ", "و")
+           .replace("ئ", "ی").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا"))
+    s = _HARAKAT.sub("", s)
+    return _re.sub(r"\s+", " ", s).strip()
+
+
+def _core(word: str) -> str:
+    """نرمالِ کلمه بدون بخشِ داخل پرانتز (برای تطبیقِ «مو» با «مو (تاک)»)."""
+    return _norm(_PARENS.sub("", word))
+
+
+def search(lang: str | None, query: str, limit: int = 8) -> list[tuple]:
+    """جستجوی نماد: لیست (li, wi, entry) مرتب بر پایه‌ی دقیق → پیشوندی → شامل. خالی = نبود نتیجه.
+    li ایندکس حرف در FA_LETTERS و wi ایندکس کلمه در لیستِ مرتبِ همان حرف (سازگار با get/word_message)."""
+    q = _norm(query)
+    data = _DATA.get(lang or "", {})
+    if not q or not data:
+        return []
+    exact, prefix, sub, seen = [], [], [], set()
+    for letter, entries in data.items():
+        li = FA_LETTERS.index(letter)
+        for wi, e in enumerate(entries):
+            w, c = _norm(e["word"]), _core(e["word"])
+            key = (li, wi)
+            if q in (w, c):
+                exact.append((li, wi, e)); seen.add(key)
+            elif w.startswith(q) or c.startswith(q):
+                prefix.append((li, wi, e)); seen.add(key)
+            elif q in w:
+                sub.append((li, wi, e)); seen.add(key)
+    return (exact + prefix + sub)[:limit]
+
+
+def suggest(lang: str | None, query: str, limit: int = 3) -> list[tuple]:
+    """پیشنهاد برای «نتیجه نداشت»: چند نمادِ اولِ حرفی که با نویسه‌ی اولِ کوئری می‌خواند."""
+    q = _norm(query)
+    data = _DATA.get(lang or "", {})
+    if not q or not data:
+        return []
+    first = q[0]
+    out = []
+    for letter in FA_LETTERS:
+        if _norm(letter) == first and data.get(letter):
+            for wi, e in enumerate(data[letter][:limit]):
+                out.append((FA_LETTERS.index(letter), wi, e))
+            break
+    return out[:limit]

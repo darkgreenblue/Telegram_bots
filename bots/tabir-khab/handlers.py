@@ -19,6 +19,7 @@ import ai
 import analytics
 import locales
 import payments
+import symbols as SYM
 import texts as C
 from bale import inline_keyboard, reply_keyboard
 from config import (
@@ -298,6 +299,14 @@ async def _handle_message(bale, msg: dict):
         await _send_welcome(bale, chat_id, lang)
         return
 
+    # حالتِ نمادیاب: متنِ کوتاه = جستجوی نماد (نه خواب)؛ متنِ بلند = کاربر دارد خوابش را
+    # می‌گوید، پس از حالت خارج و به فلوی خواب می‌رود (ضدِ بلعیده‌شدنِ روایتِ خواب توسط جستجو).
+    if C.symbols_available(lang) and db.is_sym_browse(user):
+        if _looks_like_symbol_query(text):
+            await _handle_symbol_search(bale, chat_id, user_id, lang, text)
+            return
+        await db.set_sym_browse(user_id, False)
+
     # در غیر این صورت = خواب متنی
     await _handle_dream_input(bale, chat_id, user_id, "text", text=text)
 
@@ -335,6 +344,7 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
 
 async def _send_new_dream_guide(bale, chat_id, user_id):
     await db.clear_pending(user_id)
+    await db.set_sym_browse(user_id, False)   # «خواب جدید»/CTA = خروج از حالت نمادیاب
     user = await db.get_user(user_id)
     lang = _lang_of(user, bale)
     if not user or not db.onboarding_done(user):
@@ -848,6 +858,38 @@ async def _deliver_paid(bale, chat_id, lang, image_url, preview, depth):
 
 # ===================== نمادیاب خواب (مسیر رایگان بدون LLM) =====================
 
+_SYM_QUERY_MAX = 24   # نامِ نماد کوتاه است؛ متنِ بلندتر = روایتِ خواب، نه کوئری
+
+
+def _looks_like_symbol_query(text: str) -> bool:
+    """آیا این متن، کوئریِ نماد است (نه روایتِ خواب)؟ کوتاه و کم‌کلمه = کوئری."""
+    t = (text or "").strip()
+    return 0 < len(t) <= _SYM_QUERY_MAX and len(t.split()) <= 3
+
+
+async def _handle_symbol_search(bale, chat_id, user_id, lang, query):
+    """جستجوی متنیِ نماد در حالتِ نمادیاب. یک نتیجه → مستقیم؛ چند نتیجه → لیست؛ صفر → پیام
+    صادقانه + پیشنهاد + CTA (و ثبتِ symbol_not_found برای فازِ گسترشِ دیتا)."""
+    user = await db.get_user(user_id)
+    persona = (user or {}).get("persona") or locales.default_persona(lang)
+    results = SYM.search(lang, query)
+    if len(results) == 1:
+        li, wi, entry = results[0]
+        text, rows, _ = C.symbols_word_message(lang, li, wi, persona)
+        await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+        await analytics.track(user_id, "symbol_viewed", {
+            "letter": entry["letter"], "word": entry["word"], "persona": persona, "via": "search",
+        })
+    elif results:
+        text, rows = C.symbols_result_list_message(lang, results)
+        await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+        await analytics.track(user_id, "symbol_search", {"n": len(results)})
+    else:
+        text, rows = C.symbols_not_found_message(lang, query, SYM.suggest(lang, query))
+        await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows), parse_mode=None)
+        await analytics.track(user_id, "symbol_not_found", {"query": " ".join((query or "").split())[:64]})
+
+
 async def _send_symbols_home(bale, chat_id, user_id, via: str):
     """ورود به نمادیاب: معرفی + گرید حروف (پیام جدید — از کیبورد یا پی‌وال)."""
     user = await db.get_user(user_id)
@@ -856,6 +898,7 @@ async def _send_symbols_home(bale, chat_id, user_id, via: str):
         return
     text, rows = C.symbols_home_message(lang)
     await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+    await db.set_sym_browse(user_id, True)   # از این پس متنِ کوتاه = جستجوی نماد (تا خروج)
     await analytics.track(user_id, "symbol_opened", {"via": via})
 
 
