@@ -4,7 +4,7 @@
 import { logErr } from './logger.js';
 
 // نسخه‌ی قرارداد schema/رویدادها — کپی محلی voice2text و پورت پایتونی tabir-khab باید همین عدد را داشته باشند
-export const ANALYTICS_SCHEMA_VERSION = 1;
+export const ANALYTICS_SCHEMA_VERSION = 2;
 
 // واژه‌نامه‌ی رویدادهای استاندارد (هسته‌ی مشترک بین همه‌ی ربات‌ها).
 // همیشه از این ثابت‌ها استفاده کن، نه string خام — داشبورد رویدادهای خارج از واژه‌نامه را جدا نشان می‌دهد.
@@ -51,6 +51,9 @@ function prep(db) {
       setFirstSource: db.prepare(
         "UPDATE users SET first_source=?, first_payload=? WHERE telegram_id=? AND first_source=''"
       ),
+      setFirstVersion: db.prepare(
+        "UPDATE users SET first_version=? WHERE telegram_id=? AND first_version=''"
+      ),
     };
     prepCache.set(db, c);
   }
@@ -74,6 +77,8 @@ export function ensureAnalytics(db) {
   // اتریبیوشن write-once روی users (قرارداد: PK = telegram_id در همه‌ی ربات‌های Node)
   try { db.prepare("ALTER TABLE users ADD COLUMN first_source TEXT NOT NULL DEFAULT ''").run(); } catch {}
   try { db.prepare("ALTER TABLE users ADD COLUMN first_payload TEXT NOT NULL DEFAULT ''").run(); } catch {}
+  // کوهورت نسخه: کاربر با کدام نسخه‌ی محصول شروع کرد (write-once؛ '' = قبل از ردیابی نسخه)
+  try { db.prepare("ALTER TABLE users ADD COLUMN first_version TEXT NOT NULL DEFAULT ''").run(); } catch {}
 }
 
 // ثبت رویداد — سینکرون و fail-safe؛ props باید object سبک باشد (در DB به JSON تبدیل می‌شود)
@@ -93,9 +98,10 @@ export function trackOnce(db, userId, event, props) {
 }
 
 // در /start صدا زده شود: (۱) رویداد start برای همه، همیشه — کمپین‌های برگشتی/re-engagement هم دیده شوند
-// (۲) فقط برای کاربر جدید: first_source/first_payload (write-once؛ گارد در خود SQL است).
+// (۲) فقط برای کاربر جدید: first_source/first_payload و first_version (write-once؛ گارد در خود SQL است).
+// version = ثابت PRODUCT_VERSION ربات (کوهورت «کاربر با کدام نسخه شروع کرد» — مقایسه‌ی رفتار قبل/بعد از هر تغییر).
 // خروجی: نتیجه‌ی parseStartPayload تا ربات منطق خودش (مثل رفرال) را ادامه دهد.
-export function captureStart(db, userId, rawPayload, isNew) {
+export function captureStart(db, userId, rawPayload, isNew, version = '') {
   const parsed = parseStartPayload(rawPayload);
   try {
     if (isNew) {
@@ -104,9 +110,11 @@ export function captureStart(db, userId, rawPayload, isNew) {
         : parsed.kind === 'other' ? `other:${parsed.payload}`
         : 'organic';
       prep(db).setFirstSource.run(src, parsed.payload, userId);
+      if (version) prep(db).setFirstVersion.run(String(version), userId);
     }
     track(db, userId, EVENTS.START, {
       payload: parsed.payload, kind: parsed.kind, code: parsed.code, new: !!isNew,
+      ...(version ? { v: String(version) } : {}),
     });
   } catch (e) { logErr('analytics captureStart:', e.message); }
   return parsed;

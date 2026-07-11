@@ -116,6 +116,21 @@ jobs:
               done
             fi
 
+            # ---------- یک‌باره: پاک‌سازی دیتای تستی tarot قبل از لانچ عمومی (تصمیم مالک) ----------
+            # فقط یک‌بار اجرا می‌شود (marker روی سرور). اول بکاپ per-DB، بعد حذف ردیف‌های غیرادمین.
+            # شکستِ پاک‌سازی، دیپلوی بقیه‌ی ربات‌ها را نمی‌شکند؛ marker هم فقط بعد از موفقیت ست می‌شود.
+            if [ -d bots/tarot/data ] && [ ! -f bots/tarot/data/.launch-wipe-done ] && ls bots/tarot/data/bot-*.db >/dev/null 2>&1; then
+              echo "🧹 پاک‌سازی یک‌باره‌ی دیتای تستی tarot (لانچ)..."
+              pm2 stop tarot >/dev/null 2>&1 || true
+              if ADMIN_IDS="$OWNER_TELEGRAM_ID" node tools/launch-wipe-tarot.mjs bots/tarot/data; then
+                touch bots/tarot/data/.launch-wipe-done
+                ENV_CHANGED="$ENV_CHANGED tarot"
+              else
+                echo "❌ پاک‌سازی tarot شکست خورد — بدون marker؛ در دیپلوی بعدی دوباره تلاش می‌شود"
+                pm2 start tarot >/dev/null 2>&1 || true
+              fi
+            fi
+
             # ---------- دیپلوی انتخابی: فقط ربات‌هایی که واقعاً تغییر کرده‌اند ----------
             # خط قرمز: merge ای که به یک ربات ربطی ندارد نباید ربات‌های دیگر (خصوصاً voice2text) را ری‌استارت کند.
             deploy_bot() {

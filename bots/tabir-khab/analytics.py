@@ -1,12 +1,12 @@
 """analytics.py — پورت پایتونیِ هم‌قرارداد shared/analytics.js (مونوریپو).
 
-ANALYTICS_SCHEMA_VERSION = 1
+ANALYTICS_SCHEMA_VERSION = 2
 
 قرارداد (چک CI ریشه: tools/check-analytics-sync.mjs سینک بودن را با shared تضمین می‌کند):
 - جدول events (user_id, event, props JSON, created_at یونیکس) + ایندکس‌های idx_events_user / idx_events_event
-- ستون‌های write-once روی users: first_source / first_payload
+- ستون‌های write-once روی users: first_source / first_payload / first_version (کوهورت نسخه‌ی ورود)
 - payload لینک استارت: c_<code> کمپین / r_<uid> یا ref_<uid> رفرال / خالی = organic
-- رویداد start برای «هر» /start ثبت می‌شود؛ first_source فقط برای کاربر جدید
+- رویداد start برای «هر» /start ثبت می‌شود؛ first_source/first_version فقط برای کاربر جدید
 - همه‌ی توابع fail-safe اند: خطای آنالیتیکس هرگز فلوی محصول را نمی‌شکند (فقط لاگ)
 
 تفاوت پیاده‌سازی با Node: created_at با strftime('%s','now') پر می‌شود چون sqlite سیستمی
@@ -18,7 +18,7 @@ import re
 
 import aiosqlite
 
-ANALYTICS_SCHEMA_VERSION = 1
+ANALYTICS_SCHEMA_VERSION = 2
 
 log = logging.getLogger("analytics")
 
@@ -47,7 +47,7 @@ def _path() -> str:
 async def ensure_analytics(conn: aiosqlite.Connection) -> None:
     """در init_db هر دیتابیس صدا زده می‌شود (روی همان اتصال باز)."""
     await conn.executescript(_DDL)
-    for col in ("first_source", "first_payload"):
+    for col in ("first_source", "first_payload", "first_version"):
         try:
             await conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
         except Exception:
@@ -101,8 +101,10 @@ async def track_once(user_id, event: str, props: dict | None = None) -> bool:
         return False
 
 
-async def capture_start(user_id, raw_payload: str, is_new: bool) -> dict:
-    """در هندلر /start: رویداد start برای همه، همیشه؛ first_source فقط برای کاربر جدید (write-once)."""
+async def capture_start(user_id, raw_payload: str, is_new: bool, version: str = "") -> dict:
+    """در هندلر /start: رویداد start برای همه، همیشه؛ first_source/first_version فقط برای کاربر جدید (write-once).
+
+    version = ثابت PRODUCT_VERSION ربات (کوهورت «کاربر با کدام نسخه شروع کرد»)."""
     parsed = parse_start_payload(raw_payload)
     try:
         if is_new:
@@ -118,10 +120,18 @@ async def capture_start(user_id, raw_payload: str, is_new: bool) -> dict:
                     "UPDATE users SET first_source=?, first_payload=? WHERE user_id=? AND first_source=''",
                     (src, parsed["payload"], user_id),
                 )
+                if version:
+                    await conn.execute(
+                        "UPDATE users SET first_version=? WHERE user_id=? AND first_version=''",
+                        (str(version), user_id),
+                    )
                 await conn.commit()
-        await track(user_id, "start", {
+        props = {
             "payload": parsed["payload"], "kind": parsed["kind"], "code": parsed["code"], "new": bool(is_new),
-        })
+        }
+        if version:
+            props["v"] = str(version)
+        await track(user_id, "start", props)
     except Exception as e:
         log.warning("analytics capture_start: %s", e)
     return parsed

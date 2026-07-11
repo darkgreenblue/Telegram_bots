@@ -27,6 +27,8 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true; // ⚠️ قبل از انتشار عمومی false شود (قرارداد بند ۶ب CLAUDE.md)
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده»
+const PRODUCT_VERSION = '1.0.0';
 
 const FLASH = 'google/gemini-2.5-flash';
 const or = createOpenRouter({
@@ -73,8 +75,8 @@ registerGlobalErrorHandlers('<NAME>');
 async function handleStart(ctx) {
   const before = db.prepare('SELECT 1 FROM users WHERE telegram_id=?').get(ctx.from.id);
   upsertUser(ctx);
-  // اتریبیوشن: رویداد start برای هر /start + first_source فقط برای کاربر جدید (write-once)
-  captureStart(db, ctx.from.id, ctx.startPayload, !before);
+  // اتریبیوشن: رویداد start برای هر /start + first_source/first_version فقط برای کاربر جدید (write-once)
+  captureStart(db, ctx.from.id, ctx.startPayload, !before, PRODUCT_VERSION);
   const kb = TEST_PHASE ? Markup.keyboard([[RESET_TEST_BTN]]).resize() : undefined;
   await ctx.reply('👋 سلام! TODO: پیام خوش‌آمد محصول.', kb);
 }

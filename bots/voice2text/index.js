@@ -33,6 +33,8 @@ const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
 const MIN_RECHARGE = 50_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
 const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+const PRODUCT_VERSION = '1.0.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -139,7 +141,7 @@ db.exec(`
   );
 `);
 
-/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 1) =====
+/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 2) =====
    این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
    قرارداد payload لینک استارت: c_<code> کمپین / r_<uid> یا ref_<uid> رفرال / خالی organic */
 db.pragma('busy_timeout = 5000');
@@ -156,16 +158,19 @@ db.exec(`
 `);
 try { db.prepare("ALTER TABLE users ADD COLUMN first_source TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare("ALTER TABLE users ADD COLUMN first_payload TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// کوهورت نسخه: کاربر با کدام نسخه‌ی محصول شروع کرد (write-once؛ '' = قبل از ردیابی نسخه)
+try { db.prepare("ALTER TABLE users ADD COLUMN first_version TEXT NOT NULL DEFAULT ''").run(); } catch {}
 const anStmts = {
   insertEvent: db.prepare('INSERT INTO events (user_id, event, props) VALUES (?, ?, ?)'),
   setFirstSource: db.prepare("UPDATE users SET first_source=?, first_payload=? WHERE telegram_id=? AND first_source=''"),
+  setFirstVersion: db.prepare("UPDATE users SET first_version=? WHERE telegram_id=? AND first_version=''"),
 };
 // ثبت رویداد — fail-safe: خطای آنالیتیکس هرگز فلوی محصول را نمی‌شکند
 function track(userId, event, props) {
   try { anStmts.insertEvent.run(userId ?? null, event, props ? JSON.stringify(props) : '{}'); }
   catch (e) { logErr('analytics track:', event, e.message); }
 }
-// رویداد start برای هر /start + first_source (write-once) فقط برای کاربر جدید
+// رویداد start برای هر /start + first_source و first_version (write-once) فقط برای کاربر جدید
 function captureStart(userId, rawPayload, isNew) {
   try {
     const payload = String(rawPayload || '').trim().slice(0, 64);
@@ -179,8 +184,9 @@ function captureStart(userId, rawPayload, isNew) {
         : kind === 'referral' ? `referral:${code}`
         : kind === 'other' ? `other:${payload}` : 'organic';
       anStmts.setFirstSource.run(src, payload, userId);
+      anStmts.setFirstVersion.run(PRODUCT_VERSION, userId);
     }
-    track(userId, 'start', { payload, kind, code, new: !!isNew });
+    track(userId, 'start', { payload, kind, code, new: !!isNew, v: PRODUCT_VERSION });
   } catch (e) { logErr('analytics captureStart:', e.message); }
 }
 
@@ -1195,6 +1201,8 @@ bot.start(async (ctx) => {
 bot.hears(RESET_TEST_BTN, async (ctx) => {
   const uid = ctx.from.id;
   if (uid !== OWNER_ID) return;
+  // صف اکشن رسیدها به payment_id وصل است → قبل از حذف payments با subquery پاک شود (ضد ردیف یتیم)
+  try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('reset-test del admin_actions', e.message); }
   for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['events','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
   }

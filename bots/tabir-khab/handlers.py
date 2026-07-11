@@ -28,7 +28,7 @@ from config import (
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
     payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
-    RESET_BUTTON_ENABLED,
+    RESET_BUTTON_ENABLED, PRODUCT_VERSION,
 )
 
 log = logging.getLogger("handlers")
@@ -306,8 +306,8 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
     is_new, user = await db.get_or_create_user(
         user_id, chat_id, username, first_name, referred_by=referred_by, language=bale.locale
     )
-    # اتریبیوشن مونوریپو: رویداد start برای هر /start + first_source فقط برای کاربر جدید (analytics.py)
-    await analytics.capture_start(user_id, raw_payload, is_new)
+    # اتریبیوشن مونوریپو: رویداد start برای هر /start + first_source/first_version فقط برای کاربر جدید (analytics.py)
+    await analytics.capture_start(user_id, raw_payload, is_new, version=PRODUCT_VERSION)
 
     lang = _lang_of(user, bale)
     if db.onboarding_done(user):

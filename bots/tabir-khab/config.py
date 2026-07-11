@@ -23,6 +23,10 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 #  ثابت‌های غیرمحرمانه — داخل کد
 # ============================================================
 
+# نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
+# — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
+PRODUCT_VERSION = "1.0.0"
+
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
 TELEGRAM_API_BASE = "https://api.telegram.org"

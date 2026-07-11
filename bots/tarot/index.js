@@ -42,8 +42,11 @@ const MAX_VOICE_BYTES = 3 * 1024 * 1024;
 const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM per کاربر — ضد حلقه‌ی «انتخاب کن، لغو کن»
 
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
-// قبل از انتشار عمومی حتماً false شود (دکمه کلاً مخفی می‌شود؛ /reset فقط برای OWNER می‌ماند).
-const TEST_PHASE = true;
+// false = ربات زنده (لانچ ۱۴۰۵/۰۴/۲۰): دکمه کلاً مخفی؛ /reset فقط برای OWNER می‌ماند.
+const TEST_PHASE = false;
+
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+const PRODUCT_VERSION = '1.0.0';
 
 // 🌀 فال با موضوع آزاد: به کاربر سیگنال می‌دهد می‌تواند درباره‌ی «هر موضوعی» فال بگیرد (نه فقط کاتالوگ ثابت).
 // Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
@@ -285,9 +288,12 @@ function getSession(uid) {
 function setSession(uid, s) { stmts.setSession.run(s ? JSON.stringify(s) : '', uid); }
 function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, patch); setSession(uid, s); return s; }
 
-// پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
+// پاک‌سازی کامل یک کاربر — /reset مالک (شامل کیف‌پول)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id'],['admin_actions','payment_id']]) {
+  // صف اکشن رسیدها به payment_id وصل است نه user_id → قبل از حذف payments با subquery پاک شود
+  try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('wipe admin_actions', e.message); }
+  try { db.prepare('DELETE FROM referrals WHERE referee_id=? OR referrer_id=?').run(uid, uid); } catch (e) { logErr('wipe referrals', e.message); }
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -521,9 +527,9 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source فقط برای کاربر جدید
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source/first_version فقط کاربر جدید
   const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
-  captureStart(db, uid, payload, isNew);
+  captureStart(db, uid, payload, isNew, PRODUCT_VERSION);
 
   // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);

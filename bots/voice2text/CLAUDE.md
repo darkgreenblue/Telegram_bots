@@ -48,8 +48,8 @@
 - خطاهای کاربرپسند نگاشت‌شده: اعتبار تمام (CreditError، هرگز retry نمی‌شود)، rate-limit، تبدیل، TIMEOUT، شبکه.
 
 ## آنالیتیکس کمینه (اتریبیوشن)
-- این ربات از shared استفاده نمی‌کند؛ **کپی محلی** هم‌قرارداد `shared/analytics.js` (بلوک `ANALYTICS_SCHEMA_VERSION = 1` بعد از voice_flows در index.js). چک CI (`tools/check-analytics-sync.mjs`) سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید همین‌جا هم اعمال شود.
-- جدول `events` + ستون‌های write-once `users.first_source/first_payload`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `payment_approved` (approve ادمین + تخفیف ۱۰۰٪ خودکار)، `payment_rejected`. track fail-safe است (فقط logErr).
+- این ربات از shared استفاده نمی‌کند؛ **کپی محلی** هم‌قرارداد `shared/analytics.js` (بلوک `ANALYTICS_SCHEMA_VERSION = 2` بعد از voice_flows در index.js). چک CI (`tools/check-analytics-sync.mjs`) سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید همین‌جا هم اعمال شود.
+- جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic؛ نسخه از ثابت `PRODUCT_VERSION` بالای فایل — با هر تغییر رفتاری bump شود، بند ۲ج ریشه). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `payment_approved` (approve ادمین + تخفیف ۱۰۰٪ خودکار)، `payment_rejected`. track fail-safe است (فقط logErr).
 
 ## ریست تست (بند ۶ب ریشه)
 `RESET_TEST_BTN` **فقط برای OWNER** (کاربر پولی نباید تصادفاً پاک شود): حذف ردیف‌های مالک از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + پاک‌سازی state های in-memory. کدهای تخفیف (discount_codes) پاک نمی‌شوند.
