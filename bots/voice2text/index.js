@@ -599,7 +599,9 @@ function throwForStatus(status, body) {
 }
 
 async function convertToMp3(buffer) {
-  const id      = Date.now();
+  // suffix تصادفی لازم است: دو تبدیلِ هم‌زمان (مثلاً وقتی همه‌ی jobها با هم به fallback می‌روند) با
+  // Date.now() تنها ممکن بود مسیر یکسان بگیرند و صدای دو کاربر روی هم بنویسند (نشت حریم خصوصی)
+  const id      = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const inPath  = `/tmp/voice_in_${id}`;
   const outPath = `/tmp/voice_out_${id}.mp3`;
   writeFileSync(inPath, buffer);
@@ -2010,6 +2012,10 @@ bot.on('callback_query', async (ctx) => {
       const payment = stmts.getPayment.get(paymentId);
       const state = userStates.get(userId);
       const fromVoice = state?.fromVoice || false;
+      // رسید فرستاده شده (waiting_review) قابل لغو نیست — وگرنه کاربر «لغو شد» می‌بیند ولی ادمین بعداً تأیید می‌کند
+      if (payment && payment.user_id === userId && payment.status === 'waiting_review') {
+        return ctx.answerCbQuery('رسیدت ثبت شده و در حال بررسی است؛ دیگر قابل لغو نیست. اگر اشتباه شده به @alireza_oliya پیام بده.', { show_alert: true });
+      }
       if (payment && payment.user_id === userId && payment.status === 'pending') {
         stmts.setPaymentStatus.run('cancelled', paymentId);
       }
@@ -2042,6 +2048,7 @@ bot.on('callback_query', async (ctx) => {
       const token   = swf[1];
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       const currentModel = session.userModel || getUserModel(session.userId);
       const uType = getUserType(session.userId);
       await ctx.answerCbQuery();
@@ -2082,6 +2089,7 @@ bot.on('callback_query', async (ctx) => {
       const token   = smf[2];
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (!MODEL_CONFIG[modelId]) return ctx.answerCbQuery('پردازنده نامعتبر');
 
       const uType = getUserType(session.userId);
@@ -2575,6 +2583,8 @@ bot.on('callback_query', async (ctx) => {
       const [, type, token] = p;
       const session = sessions.get(token);
       if (!session) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      // مالکیت: فقط کاربری که ویس را فرستاده می‌تواند پردازش/هزینه را کنترل کند (ضد اکسپلویت چت گروهی)
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (session.step !== 'await_process_type') return ctx.answerCbQuery('قبلاً پردازش شده یا در حال انجام است.', { show_alert: true });
       if (!session.audioBuffer) return ctx.answerCbQuery('هنوز در حال آماده‌سازی فایل است، یک لحظه صبر کن.');
 
@@ -2731,6 +2741,7 @@ bot.on('callback_query', async (ctx) => {
       const [, format, token] = o;
       const session = sessions.get(token);
       if (!session?.resultText) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       if (session.step !== 'await_output_format') return ctx.answerCbQuery('قبلاً پردازش شده.', { show_alert: true });
 
       session.step = 'processing_output';
