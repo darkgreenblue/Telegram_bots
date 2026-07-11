@@ -18,6 +18,31 @@ LOCALE = {
         "persona":      "🎭 Change style",
         "invite":       "🎁 Invite link",
         "language":     "🌐 Language",
+        "symbols":      "🔍 Dream Symbol Finder (free)",
+    },
+
+    # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/en نمایش داده نمی‌شوند
+    "sym": {
+        "intro": (
+            "Welcome to the *Dream Symbol Finder* 🔍\n\n"
+            "Everything you see in a dream (water, teeth, a snake, flying...) is a symbol with a secret inside. "
+            "Pick the first letter of what you saw and I'll tell you its meaning in your own interpretation style.\n\n"
+            "This part is completely free ✨"
+        ),
+        "letter_header": "🔍 Symbols for \"{letter}\" (page {page} of {pages})\n\nPick what you saw in your dream:",
+        "letter_empty": "No symbols recorded for \"{letter}\" yet 🌫️ Try another letter.",
+        "word_title": "🔍 The symbol \"{word}\" in the Realm of Dreams",
+        "cta_line": (
+            "But remember, companion: the true meaning of this symbol is tied to the rest of your dream. "
+            "Next to the people, places and feelings of your dream it can take a far more precise, personal meaning; "
+            "that's why telling the full dream is a whole other world 💫"
+        ),
+        "btn_dream":     "✨ Tell my full dream",
+        "btn_letters":   "🔤 All letters",
+        "btn_back_list": "🔙 Back to list",
+        "btn_prev":      "◀️ Previous",
+        "btn_next":      "Next ▶️",
+        "btn_paywall":   "🔍 Dream Symbol Finder (free)",
     },
 
     "welcome_intro": (
