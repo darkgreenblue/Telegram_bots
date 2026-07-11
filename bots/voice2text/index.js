@@ -140,6 +140,8 @@ db.exec(`
     updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
   );
 `);
+// Migration: مبلغِ رزروشده‌ی این فلو (کسر اتمیک در شروع پردازش؛ در شکست/ری‌استارت refund می‌شود)
+try { db.prepare('ALTER TABLE voice_flows ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 
 /* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 2) =====
    این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
@@ -196,6 +198,8 @@ const stmts = {
   touchUser:     db.prepare('UPDATE users SET name=?, username=?, last_seen=unixepoch() WHERE telegram_id=?'),
   setModel:      db.prepare('UPDATE users SET model=? WHERE telegram_id=?'),
   deduct:        db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ?'),
+  // کسر اتمیک با گارد موجودی — ضد چند فلوی هم‌زمان که همه چکِ موجودی را رد کنند و رایگان بگیرند
+  deductIf:      db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id = ? AND balance >= ?'),
   credit:        db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?'),
   insertUsage:   db.prepare('INSERT INTO usage_log (user_id, model, duration_sec, cost, type, success) VALUES (?,?,?,?,?,?)'),
   insertPayment: db.prepare('INSERT INTO payments (user_id, amount) VALUES (?,?)'),
@@ -215,6 +219,7 @@ const stmts = {
   // voice_flows
   insertFlow:    db.prepare("INSERT INTO voice_flows (token, user_id, model, duration_sec, step, status) VALUES (?,?,?,?,?,'active')"),
   setFlowStatus: db.prepare('UPDATE voice_flows SET status=?, updated_at=unixepoch() WHERE token=?'),
+  setFlowReserved: db.prepare('UPDATE voice_flows SET reserved=?, updated_at=unixepoch() WHERE token=?'),
   setFlowStep:   db.prepare('UPDATE voice_flows SET step=?, type=?, model=?, updated_at=unixepoch() WHERE token=?'),
   setFlowModel:  db.prepare('UPDATE voice_flows SET model=?, updated_at=unixepoch() WHERE token=?'),
   // dashboard
@@ -2600,31 +2605,38 @@ bot.on('callback_query', async (ctx) => {
         modelBumped = true;
       }
 
-      // Balance check BEFORE locking — keep the keyboard so user can switch model / recharge
+      // رزرو اتمیکِ هزینه در شروع (نه کسر بعد از موفقیت) — ضد باگِ چند فلوی هم‌زمان که همه چکِ
+      // موجودی را رد کنند و رایگان بگیرند. در شکست/ری‌استارت کامل refund می‌شود (کاربر فقط برای موفقیت می‌پردازد).
+      let reservedCost = 0;
       if (!isAdmin(sessUserId) && session.durationSec) {
-        const cost    = calcCost(session.durationSec, userModel, uType);
-        const balance = getBalance(sessUserId);
-        if (balance < cost) {
-          await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
-          await ctx.reply(
-            `👛 موجودی کافی نیست.\n\n` +
-            (modelBumped ? `ℹ️ صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر).\n` : '') +
-            `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
-            `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
-            { ...replyTo(session.voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
-          );
-          return;
+        const cost = calcCost(session.durationSec, userModel, uType);
+        if (cost > 0) {
+          if (stmts.deductIf.run(cost, sessUserId, cost).changes === 0) {
+            const balance = getBalance(sessUserId);
+            await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
+            await ctx.reply(
+              `👛 موجودی کافی نیست.\n\n` +
+              (modelBumped ? `ℹ️ صورت جلسه با پردازنده حرفه‌ای انجام می‌شه (دقت بالاتر).\n` : '') +
+              `💰 هزینه پردازش: ${cost.toLocaleString('fa-IR')} تومان\n` +
+              `💳 موجودی: ${balance.toLocaleString('fa-IR')} تومان`,
+              { ...replyTo(session.voiceMsgId), ...Markup.inlineKeyboard([[Markup.button.callback('➕ افزایش موجودی', 'recharge')]]) }
+            );
+            return;
+          }
+          reservedCost = cost;
         }
       }
 
-      // Concurrency cap
+      // Concurrency cap — اگر پر بود، رزروِ انجام‌شده را برگردان
       if (jobCount(sessUserId) >= MAX_CONCURRENT_JOBS) {
+        if (reservedCost > 0) stmts.credit.run(reservedCost, sessUserId);
         return ctx.answerCbQuery(
           `ظرفیت پردازش هم‌زمان شما پر شده (${MAX_CONCURRENT_JOBS.toLocaleString('fa-IR')} فایل). لطفاً تا اتمام یکی صبر کنید.`,
           { show_alert: true }
         );
       }
       session.step = 'processing';
+      try { stmts.setFlowReserved.run(reservedCost, token); } catch {} // برای refund در بوت اگر ری‌استارت شود
       session.userModel = userModel; // پردازنده‌ی واقعیِ این پردازش (callAI از همین می‌خواند)
       incJob(sessUserId);
       try { stmts.setFlowStep.run('processing', type, userModel, token); } catch {}
@@ -2681,21 +2693,20 @@ bot.on('callback_query', async (ctx) => {
               errMsg = NETWORK_ERR_MSG;
             }
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, errMsg); } catch {}
+            // شکست → برگشت کامل رزرو (کاربر فقط برای موفقیت می‌پردازد) + پاک‌کردن reserved تا بوت دوباره refund نکند
+            if (reservedCost > 0) { stmts.credit.run(reservedCost, sessUserId); try { stmts.setFlowReserved.run(0, token); } catch {} }
             session.step = 'failed'; // پایان فلو (آزاد شدن ظرفیت)
             try { stmts.setFlowStatus.run('failed', token); } catch {}
             return;
           }
 
-          // Deduct balance on success (non-admin)
-          if (!isAdmin(sessUserId) && session.durationSec) {
-            const cost = calcCost(session.durationSec, userModel, uType);
-            if (cost > 0) {
-              stmts.deduct.run(cost, sessUserId);
-              stmts.insertUsage.run(sessUserId, userModel, session.durationSec, cost, type, 1);
-            }
+          // موفقیت: هزینه در شروع رزرو شده — کسر دوباره نمی‌کنیم؛ فقط مصرف را ثبت و reserved را نهایی می‌کنیم
+          if (!isAdmin(sessUserId) && reservedCost > 0) {
+            stmts.insertUsage.run(sessUserId, userModel, session.durationSec, reservedCost, type, 1);
           } else {
             stmts.insertUsage.run(sessUserId, userModel, session.durationSec || null, 0, type, 1);
           }
+          try { stmts.setFlowReserved.run(0, token); } catch {} // مصرف‌شده — دیگر قابل refund در بوت نیست
 
           log(`✅ job done   uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
           track(sessUserId, 'product_delivered', { type, model: userModel, duration_sec: session.durationSec || 0 });
@@ -2904,9 +2915,22 @@ bot.on('message', async (ctx) => {
 });
 
 /* ===== 9) Launch ===== */
+// بازیابیِ بوت: فلوهایی که وسط پردازش با ری‌استارت یتیم شدند — رزروِ کسرشده refund شود
+// (در لحظه‌ی بوت هیچ پردازشی در جریان نیست پس هر active/processing قطعاً یتیم است). V14 هم حل می‌شود.
+function recoverOrphanFlows() {
+  try {
+    const orphans = db.prepare("SELECT token, user_id, reserved FROM voice_flows WHERE status IN ('active','processing') AND reserved > 0").all();
+    for (const f of orphans) {
+      try { stmts.credit.run(f.reserved, f.user_id); } catch (e) { logErr('recoverFlow credit:', e.message); }
+    }
+    db.prepare("UPDATE voice_flows SET status='expired', reserved=0, updated_at=unixepoch() WHERE status IN ('active','processing')").run();
+    if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فلوِ یتیم refund شد`);
+  } catch (e) { logErr('recoverOrphanFlows:', e.message); }
+}
+
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log('✅ Bot started (long polling)'))
+    .then(() => { log('✅ Bot started (long polling)'); recoverOrphanFlows(); })
     .catch(err => {
       logErr('❌ Bot launch error, retrying in 5s:', err.message);
       setTimeout(launch, 5000);
