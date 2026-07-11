@@ -233,6 +233,8 @@ const stmts = {
   insertPayment: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id=?'),
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
+  // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
+  claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
@@ -252,6 +254,9 @@ const stmts = {
   insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
   countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
+  // پرداختی که تخفیفِ خودکارِ اولین شارژ گرفته (discount_code_id NULL + original_amount ست) و هنوز باطل نشده —
+  // ضد race که کاربر با چند پرداختِ pending هم‌زمان تخفیف اولِ خودکار را چندبار بگیرد
+  countAutoDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND discount_code_id IS NULL AND original_amount IS NOT NULL AND status IN ('pending','waiting_review','approved')"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -497,20 +502,42 @@ async function callReadingLLM(readingId) {
 
 function startPrefetch(uid, readingId) {
   const p = callReadingLLM(readingId).catch(e => { logErr('prefetch:', e.message); return null; });
-  prefetches.set(uid, p);
+  prefetches.set(uid, { readingId, promise: p }); // readingId تا نتیجه‌ی فالِ دیگری به این فال تزریق نشود
   return p;
 }
 // نتیجه‌ی LLM؛ اگر پیش‌فراخوانی از دست رفته بود (مثلاً ری‌استارت) دوباره صدا می‌زند
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const p = prefetches.get(uid);
-  const result = p ? await p : await callReadingLLM(readingId);
-  prefetches.delete(uid);
+  const entry = prefetches.get(uid);
+  // فقط اگر پیش‌فراخوانی دقیقاً برای همین فال بود از آن استفاده کن؛ وگرنه از نو صدا بزن
+  // (باگ: کاربر فال A را رها و فال B را باز می‌کرد → پرامیس A نتیجه‌ی اشتباه/سکوت می‌داد)
+  const p = (entry && entry.readingId === readingId) ? entry.promise : callReadingLLM(readingId);
+  const result = await p;
+  if (entry && entry.readingId === readingId) prefetches.delete(uid);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
   if (r2?.llm_json) { try { return JSON.parse(r2.llm_json); } catch {} }
   return null;
+}
+
+// بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
+// → برگشت کامل مبلغ + پیام + دکمه‌ی تلاش مجدد. در لحظه‌ی بوت هیچ فراخوانی LLM در جریان نیست پس امن است
+// (پول کاربر هرگز در حالت نامعلوم نمی‌ماند — بند ۹ CLAUDE.md).
+function recoverOrphanReadings() {
+  let orphans = [];
+  try { orphans = db.prepare("SELECT id, user_id, price FROM readings WHERE status='started' AND llm_json=''").all(); }
+  catch (e) { logErr('recoverOrphan query:', e.message); return; }
+  for (const r of orphans) {
+    try {
+      if (r.price > 0) stmts.credit.run(r.price, r.user_id);
+      stmts.setReadingStatus.run('refunded', r.id);
+      track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'restart' });
+      const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.retry, `retryr:${r.id}`)]]);
+      bot.telegram.sendMessage(r.user_id, L.reading.refunded, { reply_markup: kb.reply_markup }).catch(() => {});
+    } catch (e) { logErr('recoverOrphan reading#' + r.id, e.message); }
+  }
+  if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فالِ یتیمِ پرداخت‌شده refund شد`);
 }
 
 /* ===== 8) Bot ===== */
@@ -1269,12 +1296,15 @@ bot.action('recharge', async (ctx) => {
 async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
-  stmts.setPaymentAmount.run(amount, 'receipt', s.paymentId);
+  // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
+  if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
   // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
   // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
   let payAmount = amount;
-  if (!hasRecharged(uid)) {
+  // تخفیف اولین شارژ فقط اگر نه شارژِ تأییدشده دارد و نه پرداختِ در جریانی که همین تخفیف را قبلاً گرفته
+  // (چک و نوشتنِ setPaymentDiscount سینکرون‌اند و قبل از اولین await → race بسته می‌شود)
+  if (!hasRecharged(uid) && stmts.countAutoDiscount.get(uid).c === 0) {
     const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
     payAmount = Math.max(0, amount - disc);
     stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
@@ -1662,7 +1692,7 @@ setInterval(async () => {
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log(`✅ tarot bot started (long polling, locale=${LOCALE})`))
+    .then(() => { log(`✅ tarot bot started (long polling, locale=${LOCALE})`); recoverOrphanReadings(); })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
