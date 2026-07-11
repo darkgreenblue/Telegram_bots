@@ -31,21 +31,25 @@ jobs:
           ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
           OUT=$(ssh -i ~/.ssh/health_key -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@185.204.171.170 'bash -s' <<'REMOTE'
             cd ~/voice2text
-            # ── خرابیِ pm2: آفلاین یا کرش‌لوپ (بالا آمده ولی در ۱۰ دقیقه‌ی اخیر با ری‌استارت زیاد) ──
+            # ── خرابیِ pm2: آفلاین یا کرش‌لوپ ──
+            # کرش‌لوپ با unstable_restarts سنجیده می‌شود (ری‌استارتِ داخل min_uptime = کرشِ واقعی)، نه
+            # restart_time که تجمعی است و هر reloadِ دیپلوی بالایش می‌برد → وگرنه بعد از چند دیپلویِ لانچ
+            # هشدارِ کرش‌لوپِ کاذب می‌داد و مالک را به هشدارها بی‌حس می‌کرد.
             pm2 jlist | node -e "
               const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
               for (const p of a) {
                 const offline = p.pm2_env.status !== 'online';
-                const loop = (Date.now() - p.pm2_env.pm_uptime) < 10*60000 && p.pm2_env.restart_time > 5;
-                if (offline) console.log('PROBLEM:🔴 ربات «' + p.name + '» آفلاین است (وضعیت=' + p.pm2_env.status + ', ری‌استارت=' + p.pm2_env.restart_time + ')');
-                else if (loop) console.log('PROBLEM:🔴 ربات «' + p.name + '» در کرش‌لوپ است (ری‌استارت=' + p.pm2_env.restart_time + ' در ۱۰ دقیقه)');
+                const unstable = p.pm2_env.unstable_restarts || 0;
+                const loop = (Date.now() - p.pm2_env.pm_uptime) < 10*60000 && unstable > 5;
+                if (offline) console.log('PROBLEM:🔴 ربات «' + p.name + '» آفلاین است (وضعیت=' + p.pm2_env.status + ')');
+                else if (loop) console.log('PROBLEM:🔴 ربات «' + p.name + '» در کرش‌لوپ است (کرشِ ناپایدار=' + unstable + ')');
               }
             "
             # error-log ربات‌های خراب را در لاگِ همین run چاپ کن (برای دیباگ)
             pm2 jlist | node -e "
               const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
               for (const p of a) {
-                const bad = p.pm2_env.status !== 'online' || ((Date.now()-p.pm2_env.pm_uptime)<10*60000 && p.pm2_env.restart_time>5);
+                const bad = p.pm2_env.status !== 'online' || ((Date.now()-p.pm2_env.pm_uptime)<10*60000 && (p.pm2_env.unstable_restarts||0)>5);
                 if (bad) console.log(p.name);
               }
             " | while read -r app; do
@@ -79,6 +83,24 @@ jobs:
                 echo "PROBLEM:🔴 سرویس «dash-tunnel» (تونل داشبورد) فعال نیست (وضعیت=$TSTATE) — داشبورد از بیرون در دسترس نیست"
               fi
             fi
+            # ── دیسک پر: pm2 online می‌ماند ولی نوشتنِ SQLite (پول!) شکست می‌خورد ──
+            USEPCT=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+            if [ -n "$USEPCT" ] && [ "$USEPCT" -ge 92 ]; then
+              echo "PROBLEM:🔴 دیسک سرور ${USEPCT}٪ پر است — نوشتنِ دیتابیس‌ها (پول) ممکن است شکست بخورد. لاگ/بکاپ قدیمی را پاک کن."
+            fi
+            # ── موجودی OpenRouter هر ربات: کلیدِ تمام‌شده = قطعیِ کاملِ محصول (وسط تبلیغات فاجعه است) ──
+            # آستانه‌ی هشدار بالا ($5) چون نرخ سوختِ تبلیغات بالاست؛ فقط اگر endpoint پاسخ عددی داد.
+            for d in bots/voice2text bots/tarot; do
+              envf="$d/.env"
+              [ -f "$envf" ] || continue
+              KEY=$(grep -m1 '^OPENROUTER_API_KEY=' "$envf" | cut -d= -f2- | tr -d '"')
+              [ -n "$KEY" ] || continue
+              REMAIN=$(curl -fsS -m 15 -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/credits 2>/dev/null \
+                | node -e "try{const j=JSON.parse(require('fs').readFileSync(0,'utf8')).data;const r=Number(j.total_credits)-Number(j.total_usage);if(isFinite(r))console.log(r.toFixed(2));}catch(e){}" 2>/dev/null)
+              if [ -n "$REMAIN" ] && node -e "process.exit(Number(process.argv[1])<5?0:1)" "$REMAIN"; then
+                echo "PROBLEM:🔴 موجودی OpenRouterِ «$(basename "$d")» فقط \$$REMAIN مانده — قبل از تمام‌شدن شارژ کن (وگرنه محصول کامل می‌خوابد)."
+              fi
+            done
             # صف رسید معطل این‌جا چک نمی‌شود — هر ربات خودش رسیدهای معطل را دوره‌ای دوباره
             # برای ادمین‌هایش می‌فرستد (یادآوری per-bot، نه از مسیر Health/cross-bot).
             echo "HEALTH_DONE"
