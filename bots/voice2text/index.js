@@ -1511,6 +1511,7 @@ async function sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody)
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+  track(userId, 'receipt_submitted', { payment_id: paymentId });
 }
 
 /* ── تأیید/رد پرداخت: منطق DB جدا از ctx تا callbackِ ادمین، صفِ داشبورد و sweep هر سه از یکی استفاده کنند ──
@@ -2169,6 +2170,7 @@ bot.on('callback_query', async (ctx) => {
       // به محض شروع فلو، یک رکورد پرداخت در دیتابیس ساخته می‌شود (step='amount')
       const paymentId = Number(stmts.insertPaymentPending.run(userId).lastInsertRowid);
       userStates.set(userId, { step: 'waiting_amount', paymentId });
+      track(userId, 'recharge_started', { payment_id: paymentId });
       await ctx.answerCbQuery();
       // مبلغ‌های پیش‌فرض (یک تاچ) + گزینه‌ی مبلغ دلخواه
       const presets = RECHARGE_PRESETS.map(a => [Markup.button.callback(`${a.toLocaleString('fa-IR')} تومان`, `ramt:${a}`)]);
@@ -2617,6 +2619,7 @@ bot.on('callback_query', async (ctx) => {
         if (cost > 0) {
           if (stmts.deductIf.run(cost, sessUserId, cost).changes === 0) {
             const balance = getBalance(sessUserId);
+            track(sessUserId, 'paywall_shown', { price: cost, balance, type });
             await ctx.answerCbQuery('موجودی کافی نیست', { show_alert: true });
             await ctx.reply(
               `👛 موجودی کافی نیست.\n\n` +
