@@ -190,6 +190,9 @@ try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEF
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: آخرین روزِ گرفتنِ فال حافظ (قلاب رایگانِ روزانه، مستقل از کارت روز)
 try { db.prepare("ALTER TABLE users ADD COLUMN last_hafez_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: سقفِ نرمِ استخاره‌ی روزانه (تاریخ + شمارنده؛ صفر می‌شود در روزِ نو)
+try { db.prepare("ALTER TABLE users ADD COLUMN estekhare_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN estekhare_count INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
@@ -218,6 +221,7 @@ const stmts = {
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
   setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
+  setEstekhare: db.prepare('UPDATE users SET estekhare_date=?, estekhare_count=? WHERE telegram_id=?'),
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
@@ -734,6 +738,7 @@ async function showFreeMenu(ctx) {
   upsertUser(ctx);
   const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
   if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
   await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
   track(db, uid, 'free_menu_opened', {});
 }
@@ -766,6 +771,45 @@ async function hafezFaal(ctx, via) {
   await ctx.reply(L.hafez.cta, ctaKb);
 }
 bot.action('hafez_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return hafezFaal(ctx, 'menu'); });
+
+/* ---------- 📿 استخاره با تسبیح (رایگان، سقفِ نرمِ ۳/روز، بدون LLM) ---------- */
+const ESTEKHARE_CAP = 3;
+async function estekhareFaal(ctx, via) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  const ctaKb = Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.estekhareYesno, 'spread:yesno')],
+    [Markup.button.callback(L.buttons.estekhareChoice, 'spread:choice')],
+  ]);
+  const count = user.estekhare_date === today ? (user.estekhare_count || 0) : 0;
+  if (count >= ESTEKHARE_CAP) return ctx.reply(L.estekhare.cap, ctaKb);
+  stmts.setEstekhare.run(today, count + 1, uid);
+  // نتیجه‌ی قطعی از هش؛ count داخلِ seed است تا سه استخاره‌ی یک روز سه جوابِ متفاوت بدهند
+  const buckets = ['good', 'mid', 'bad'];
+  const h = seedToInt(`estekhare:${uid}:${today}:${count}`);
+  const outcome = buckets[h % 3];
+  const variants = L.estekhare.outcomes[outcome];
+  const text = variants[(h >>> 2) % variants.length];
+  // فضاسازی + انیمیشنِ شمردنِ دانه‌ها (ادیتِ پیاپیِ یک پیام)
+  await ctx.reply(L.estekhare.intent);
+  await typing(ctx, PACE_M);
+  const frames = L.estekhare.beadFrames;
+  const msg = await ctx.reply(frames[0]);
+  for (let i = 1; i < frames.length; i++) {
+    await sleep(PACE_M);
+    try { await ctx.telegram.editMessageText(msg.chat.id, msg.message_id, undefined, frames[i]); } catch {}
+  }
+  await sleep(PACE_REVEAL);
+  await ctx.reply(L.estekhare.result(text));
+  track(db, uid, 'estekhare_taken', { outcome, via: via || 'menu' });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'estekhare' });
+  await sleep(PACE_S);
+  await ctx.reply(L.estekhare.cta, ctaKb);
+}
+bot.action('estekhare_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return estekhareFaal(ctx, 'menu'); });
 
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 async function showCatalog(ctx) {
