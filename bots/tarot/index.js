@@ -749,6 +749,7 @@ async function showFreeMenu(ctx) {
   rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
   if (Object.keys(QUIZ).length) rows.push([Markup.button.callback(L.buttons.freeQuiz, 'quiz_go')]);
   rows.push([Markup.button.callback(L.buttons.freeCoffee, 'coffee_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeLibrary, 'lib_go')]);
   await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
   track(db, uid, 'free_menu_opened', {});
 }
@@ -947,6 +948,56 @@ bot.action(/^coffee:(\d+)$/, async (ctx) => {
   trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'coffee' });
   await sleep(PACE_S);
   await ctx.reply(L.coffee.cta, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]));
+});
+
+/* ---------- 📖 کتابخانه‌ی معنیِ ۷۸ کارت (رایگان، مرور؛ دیتا از cards.js، بدون LLM) ---------- */
+const LIB_PAGE = 8;
+const libCards = (g) => CARDS.filter(c => g === 'major' ? c.arcana === 'major' : c.key[0] === g);
+async function libraryMenu(ctx, edit) {
+  if (!FREE_MENU_ENABLED) return;
+  upsertUser(ctx);
+  const rows = L.library.groups.map((grp, gi) => [Markup.button.callback(grp.t, `lib:l:${gi}:0`)]);
+  const kb = Markup.inlineKeyboard(rows);
+  if (edit) { try { await ctx.editMessageText(L.library.menu, kb); } catch {} }
+  else await ctx.reply(L.library.menu, kb);
+}
+bot.action('lib_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return libraryMenu(ctx, false); });
+bot.action('lib:home', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return libraryMenu(ctx, true); });
+
+bot.action(/^lib:l:(\d+):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const gi = Number(ctx.match[1]);
+  const grp = L.library.groups[gi];
+  if (!grp) return;
+  const cards = libCards(grp.g);
+  const pages = Math.max(1, Math.ceil(cards.length / LIB_PAGE));
+  const p = Math.max(0, Math.min(Number(ctx.match[2]), pages - 1));
+  const rows = cards.slice(p * LIB_PAGE, (p + 1) * LIB_PAGE).map(c => [Markup.button.callback(c.fa, `lib:c:${c.key}`)]);
+  const nav = [];
+  if (p > 0) nav.push(Markup.button.callback(L.library.btnPrev, `lib:l:${gi}:${p - 1}`));
+  if (p < pages - 1) nav.push(Markup.button.callback(L.library.btnNext, `lib:l:${gi}:${p + 1}`));
+  if (nav.length) rows.push(nav);
+  rows.push([Markup.button.callback(L.library.btnCats, 'lib:home')]);
+  try { await ctx.editMessageText(L.library.listHeader(grp.t, p + 1, pages), Markup.inlineKeyboard(rows)); } catch {}
+});
+
+bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const key = ctx.match[1];
+  const c = CARD_BY_KEY[key];
+  if (!c) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  await typing(ctx, PACE_M, 'upload_photo');
+  await sendCardPhoto(ctx, key, L.library.card(c), { spoiler: false });
+  track(db, uid, 'card_meaning_viewed', { card: key });
+  const gi = L.library.groups.findIndex(grp => grp.g === (c.arcana === 'major' ? 'major' : key[0]));
+  await ctx.reply(L.library.cta, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.libCta, 'opentopic')],
+    [Markup.button.callback(L.library.btnCats, gi >= 0 ? `lib:l:${gi}:0` : 'lib:home')],
+  ]));
 });
 
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
