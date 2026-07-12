@@ -35,6 +35,8 @@ const L = (await import(`./locales/${LOCALE}.js`)).default;
 const fmt = L.fmt;
 // فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
+// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale)
+const QUIZ = await import(`./quiz.js`).then(m => m.default.personalities).catch(() => ({}));
 
 const FLASH          = 'google/gemini-2.5-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
@@ -193,6 +195,8 @@ try { db.prepare("ALTER TABLE users ADD COLUMN last_hafez_date TEXT NOT NULL DEF
 // migration: سقفِ نرمِ استخاره‌ی روزانه (تاریخ + شمارنده؛ صفر می‌شود در روزِ نو)
 try { db.prepare("ALTER TABLE users ADD COLUMN estekhare_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN estekhare_count INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// migration: آخرین روزِ کوییزِ «کدام کارتِ تاروتی؟» (تکرارِ ماهی‌یک‌بار)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_quiz_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
@@ -222,6 +226,7 @@ const stmts = {
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
   setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
   setEstekhare: db.prepare('UPDATE users SET estekhare_date=?, estekhare_count=? WHERE telegram_id=?'),
+  setQuiz:    db.prepare('UPDATE users SET last_quiz_date=? WHERE telegram_id=?'),
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
@@ -739,6 +744,7 @@ async function showFreeMenu(ctx) {
   const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
   if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
   rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
+  if (Object.keys(QUIZ).length) rows.push([Markup.button.callback(L.buttons.freeQuiz, 'quiz_go')]);
   await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
   track(db, uid, 'free_menu_opened', {});
 }
@@ -810,6 +816,78 @@ async function estekhareFaal(ctx, via) {
   await ctx.reply(L.estekhare.cta, ctaKb);
 }
 bot.action('estekhare_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return estekhareFaal(ctx, 'menu'); });
+
+/* ---------- 🃏 کوییز «کدام کارتِ تاروتی؟» (رایگان، ماهی‌یک‌بار، بدون LLM؛ موتور رفرال) ----------
+   حالتِ بدونِ state: کلِ مسیرِ پاسخ‌ها در callback_data کدگذاری می‌شود (`quiz:<answers>`)،
+   پس ری‌استارتِ وسطِ کوییز هم بی‌خطر است. */
+const QUIZ_COOLDOWN_DAYS = 30;
+function quizQuestionView(answers) {
+  const step = answers.length;
+  const q = L.quiz.questions[step];
+  const text = `${L.quiz.progress(step + 1, L.quiz.questions.length)}\n\n${q.q}`;
+  const rows = q.options.map((o, i) => [Markup.button.callback(o.t, `quiz:${answers}${i}`)]);
+  return { text, rows };
+}
+async function quizStart(ctx) {
+  if (!FREE_MENU_ENABLED || !Object.keys(QUIZ).length) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  if (user.last_quiz_date) {
+    const days = Math.floor((new Date(today) - new Date(user.last_quiz_date)) / 86400000);
+    if (days >= 0 && days < QUIZ_COOLDOWN_DAYS) {
+      return ctx.reply(L.quiz.cap, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.quizCta, 'opentopic')]]));
+    }
+  }
+  track(db, uid, 'quiz_started', {});
+  const { text, rows } = quizQuestionView('');
+  await ctx.reply(L.quiz.intro);
+  await ctx.reply(text, Markup.inlineKeyboard(rows));
+}
+bot.action('quiz_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return quizStart(ctx); });
+
+bot.action(/^quiz:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED || !Object.keys(QUIZ).length) return;
+  const answers = ctx.match[1];
+  const total = L.quiz.questions.length;
+  if (answers.length < total) {              // سؤالِ بعدی روی همان پیام
+    const { text, rows } = quizQuestionView(answers);
+    try { await ctx.editMessageText(text, Markup.inlineKeyboard(rows)); } catch {}
+    return;
+  }
+  // نگاشتِ قطعی: جمعِ رأی‌ها → argmax (tie-break: ترتیبِ m00..m21 در QUIZ)
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const votes = {};
+  for (let s = 0; s < total; s++) {
+    const opt = L.quiz.questions[s].options[Number(answers[s])];
+    if (opt) for (const k of opt.c) votes[k] = (votes[k] || 0) + 1;
+  }
+  // بیشینه‌ی رأی؛ در صورتِ تساوی، انتخابِ قطعی با هش (تا کارت‌های هم‌رأی همه قابل‌دسترس بمانند)
+  const keys = Object.keys(QUIZ);
+  const maxV = Math.max(...keys.map(k => votes[k] || 0));
+  const tied = keys.filter(k => (votes[k] || 0) === maxV);
+  const best = tied[seedToInt(`quiz:${answers}`) % tied.length];
+  const card = CARD_BY_KEY[best];
+  stmts.setQuiz.run(tehranToday(), uid);
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await typing(ctx, PACE_M, 'upload_photo');
+  await sendCardPhoto(ctx, best, L.quiz.resultHead(card), { spoiler: false });
+  await typing(ctx, PACE_M);
+  await ctx.reply(QUIZ[best]);
+  track(db, uid, 'quiz_done', { card: best });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'quiz' });
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  await sleep(PACE_S);
+  const refLink = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(L.quiz.shareText(card))}`;
+  await ctx.reply(L.quiz.cta, Markup.inlineKeyboard([
+    [Markup.button.url(L.buttons.quizShare, shareUrl)],
+    [Markup.button.callback(L.buttons.quizCta, 'opentopic')],
+  ]));
+});
 
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 async function showCatalog(ctx) {
