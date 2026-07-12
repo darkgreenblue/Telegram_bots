@@ -197,6 +197,8 @@ try { db.prepare("ALTER TABLE users ADD COLUMN estekhare_date TEXT NOT NULL DEFA
 try { db.prepare('ALTER TABLE users ADD COLUMN estekhare_count INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: آخرین روزِ کوییزِ «کدام کارتِ تاروتی؟» (تکرارِ ماهی‌یک‌بار)
 try { db.prepare("ALTER TABLE users ADD COLUMN last_quiz_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: آخرین روزِ فالِ قهوه (رایگانِ روزی‌یک‌بار)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_coffee_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
@@ -227,6 +229,7 @@ const stmts = {
   setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
   setEstekhare: db.prepare('UPDATE users SET estekhare_date=?, estekhare_count=? WHERE telegram_id=?'),
   setQuiz:    db.prepare('UPDATE users SET last_quiz_date=? WHERE telegram_id=?'),
+  setCoffee:  db.prepare('UPDATE users SET last_coffee_date=? WHERE telegram_id=?'),
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
@@ -745,6 +748,7 @@ async function showFreeMenu(ctx) {
   if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
   rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
   if (Object.keys(QUIZ).length) rows.push([Markup.button.callback(L.buttons.freeQuiz, 'quiz_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeCoffee, 'coffee_go')]);
   await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
   track(db, uid, 'free_menu_opened', {});
 }
@@ -887,6 +891,62 @@ bot.action(/^quiz:(\d+)$/, async (ctx) => {
     [Markup.button.url(L.buttons.quizShare, shareUrl)],
     [Markup.button.callback(L.buttons.quizCta, 'opentopic')],
   ]));
+});
+
+/* ---------- ☕ فال قهوه‌ی سؤال‌محور (رایگان، روزی‌یک‌بار، بدون LLM) ----------
+   حالتِ بدونِ state: پاسخ‌ها در callback_data (`coffee:<answers>`). خوانش = چیدنِ سه نقشِ فنجان. */
+function coffeeQuestionView(answers) {
+  const step = answers.length;
+  const q = L.coffee.questions[step];
+  const text = `${L.coffee.progress(step + 1, L.coffee.questions.length)}\n\n${q.q}`;
+  const rows = q.options.map((o, i) => [Markup.button.callback(o.t, `coffee:${answers}${i}`)]);
+  return { text, rows };
+}
+async function coffeeStart(ctx) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]);
+  if (getUser(uid).last_coffee_date === tehranToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
+  const { text, rows } = coffeeQuestionView('');
+  await ctx.reply(L.coffee.intro);
+  await ctx.reply(text, Markup.inlineKeyboard(rows));
+}
+bot.action('coffee_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return coffeeStart(ctx); });
+
+bot.action(/^coffee:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const answers = ctx.match[1];
+  const total = L.coffee.questions.length;
+  if (answers.length < total) {
+    const { text, rows } = coffeeQuestionView(answers);
+    try { await ctx.editMessageText(text, Markup.inlineKeyboard(rows)); } catch {}
+    return;
+  }
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const today = tehranToday();
+  // اگر همین امروز خوانده، دوباره نده (گاردِ روزی‌یک‌بار روی خودِ نتیجه هم)
+  if (getUser(uid).last_coffee_date === today) {
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    return ctx.reply(L.coffee.alreadyUsed, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]));
+  }
+  stmts.setCoffee.run(today, uid);
+  const parts = [];
+  for (let s = 0; s < total; s++) {
+    const opt = L.coffee.questions[s].options[Number(answers[s])];
+    if (opt) parts.push(opt.s);
+  }
+  const closing = L.coffee.closings[seedToInt(`coffee:${uid}:${today}`) % L.coffee.closings.length];
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.coffee.turn);
+  await typing(ctx, PACE_REVEAL);
+  await ctx.reply(L.coffee.compose(parts, closing));
+  track(db, uid, 'coffee_taken', { combo: answers });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'coffee' });
+  await sleep(PACE_S);
+  await ctx.reply(L.coffee.cta, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]));
 });
 
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
