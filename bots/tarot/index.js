@@ -33,6 +33,8 @@ if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); pro
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 const L = (await import(`./locales/${LOCALE}.js`)).default;
 const fmt = L.fmt;
+// فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
+const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
 
 const FLASH          = 'google/gemini-2.5-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
@@ -46,7 +48,14 @@ const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM
 const TEST_PHASE = false;
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+// این PR رفتار را عوض نمی‌کند (فیچرِ زیر پشتِ فلگِ خاموش است)؛ هنگام روشن‌کردنِ FREE_MENU_ENABLED باید به 1.1.0 bump شود.
 const PRODUCT_VERSION = '1.0.0';
+
+// 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
+// فعلاً خاموش عرضه می‌شود (dark launch): merge روی ربات زنده هیچ تغییرِ رفتاری نمی‌دهد.
+// روشن‌کردن = یک‌خط true + bump PRODUCT_VERSION به 1.1.0 در همان PR (تغییرِ رفتاری).
+// Rollback فوری: دوباره false کن → دکمه‌ی کیبورد، منو و همه‌ی callbackها محو و رفتار دقیقاً مثل قبل.
+const FREE_MENU_ENABLED = false;
 
 // 🌀 فال با موضوع آزاد: به کاربر سیگنال می‌دهد می‌تواند درباره‌ی «هر موضوعی» فال بگیرد (نه فقط کاتالوگ ثابت).
 // Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
@@ -179,6 +188,8 @@ try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: نام فارسیِ خودِ کاربر (جدا از first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند)
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: آخرین روزِ گرفتنِ فال حافظ (قلاب رایگانِ روزانه، مستقل از کارت روز)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_hafez_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
@@ -206,6 +217,7 @@ const stmts = {
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
+  setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
@@ -445,6 +457,7 @@ function mainKeyboard() {
     [L.buttons.daily, L.buttons.reading],
     [L.buttons.wallet, L.buttons.inviteMain],
   ];
+  if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
   if (TEST_PHASE) rows.push([L.buttons.resetTest]);
   return Markup.keyboard(rows).resize();
 }
@@ -713,6 +726,47 @@ async function dailyCard(ctx) {
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
 
+/* ---------- 🎁 منوی سرگرمی‌های رایگان + 📜 فال حافظ (رایگان، روزی یک‌بار، بدون LLM) ----------
+   کل این بخش پشت FREE_MENU_ENABLED است؛ خاموش = دکمه/منو/callbackها بی‌اثر (رفتار عیناً قبلی). */
+async function showFreeMenu(ctx) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
+  if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
+  await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
+  track(db, uid, 'free_menu_opened', {});
+}
+bot.hears(L.buttons.freeMenu, showFreeMenu);
+bot.action('freemenu', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showFreeMenu(ctx); });
+// ردیفِ «به‌جای ترک، رایگان بازی کن» برای پی‌وال (خالی وقتی فیچر خاموش است)
+const freeMenuRow = () => (FREE_MENU_ENABLED && HAFEZ.length)
+  ? [[Markup.button.callback(L.buttons.freeMenu, 'freemenu')]] : [];
+
+async function hafezFaal(ctx, via) {
+  if (!FREE_MENU_ENABLED || !HAFEZ.length) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.hafezCta, 'opentopic')]]);
+  if (user.last_hafez_date === today) return ctx.reply(L.hafez.alreadyUsed, ctaKb);
+  stmts.setHafez.run(today, uid);
+  // انتخابِ قطعیِ روزانه از هش (بعد از ری‌استارت هم همان غزلِ همان روز برای همان کاربر)
+  const g = HAFEZ[seedToInt(`hafez:${uid}:${today}`) % HAFEZ.length];
+  await typing(ctx, PACE_M);
+  await ctx.reply(L.hafez.intent);
+  await typing(ctx, PACE_REVEAL);
+  await ctx.reply(L.hafez.ghazal(g));
+  await typing(ctx, PACE_M);
+  await ctx.reply(L.hafez.faal(g.faal));
+  track(db, uid, 'hafez_taken', { n: g.n, via: via || 'menu' });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'hafez' });
+  await sleep(PACE_S);
+  await ctx.reply(L.hafez.cta, ctaKb);
+}
+bot.action('hafez_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return hafezFaal(ctx, 'menu'); });
+
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 async function showCatalog(ctx) {
   const uid = ctx.from.id;
@@ -944,6 +998,7 @@ async function finishPicking(ctx, uid, s) {
     await sleep(PACE_S);
     await ctx.reply(L.reading.paywallShort(spread.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
+      ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   }
