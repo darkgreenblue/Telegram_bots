@@ -25,6 +25,18 @@ export const FUNNELS = {
       ['receipt_submitted', 'ارسال رسید'],
       ['payment_approved', 'تأیید پرداخت'],
     ],
+    // قیف سرگرمی‌های رایگان (فاز اینگیجمنت) → تبدیل. آیتم‌ها موازی‌اند (نه سریالی)؛
+    // هدف: دیدن کدام قلاب رایگان بیشتر استفاده می‌شود و نرخِ رسیدن از منوی رایگان به پرداخت.
+    free: [
+      ['free_menu_opened', 'باز کردن منوی رایگان'],
+      ['hafez_taken', 'فال حافظ'],
+      ['estekhare_taken', 'استخاره'],
+      ['quiz_done', 'کوییز کارت'],
+      ['coffee_taken', 'فال قهوه'],
+      ['card_meaning_viewed', 'کتابخانه کارت'],
+      ['paywall_shown', 'دیدن پی‌وال'],
+      ['payment_approved', 'پرداخت'],
+    ],
     entity: { table: 'readings', title: 'وضعیت فال‌ها (رکورد قطعی — شامل قبل از آنالیتیکس)' },
   },
   voice2text: {
@@ -43,6 +55,15 @@ export const FUNNELS = {
       ['first_value', 'اولین تعبیر (تریال)'],
       ['product_delivered', 'تعبیر کامل'],
       ['payment_approved', 'پرداخت اشتراک'],
+    ],
+    // قیف نمادیاب خواب (مرور رایگان نمادها → CTA → تعبیر کامل)
+    free: [
+      ['symbol_opened', 'باز کردن نمادیاب'],
+      ['symbol_viewed', 'دیدن نماد'],
+      ['symbol_search', 'جستجوی نماد'],
+      ['symbol_not_found', 'نماد پیدا نشد'],
+      ['symbol_cta_dream', 'CTA به تعریف خواب'],
+      ['product_delivered', 'تعبیر کامل'],
     ],
     // dreams ستون status ندارد → از full_delivered یک برچسب می‌سازیم
     entity: { table: 'dreams', title: 'وضعیت خواب‌ها', statusExpr: "CASE WHEN full_delivered=1 THEN 'delivered' WHEN is_free_trial=1 THEN 'trial_preview' ELSE 'pending' END" },
@@ -170,6 +191,10 @@ export function funnelsBody(url) {
   for (const [botKey, f] of Object.entries(FUNNELS)) {
     if (!instancesOf(botKey).length) continue;
     out += `<div class="card"><h2>${esc(f.title)} — قیف اصلی</h2>${funnelTable(botKey, f.steps, since, ver)}</div>`;
+    if (f.free) {
+      out += `<div class="card"><h2>${esc(f.title)} — قیف سرگرمی‌های رایگان</h2>${funnelTable(botKey, f.free, since, ver)}
+      <p class="muted" style="margin-top:8px">آیتم‌های میانی موازی‌اند (کاربر یکی را انتخاب می‌کند، نه پشت‌سرهم)؛ این جدول نشان می‌دهد کدام قلاب رایگان بیشتر استفاده و چقدر به پرداخت ختم می‌شود.</p></div>`;
+    }
     if (f.payment) {
       out += `<div class="card"><h2>${esc(f.title)} — قیف شارژ</h2>${funnelTable(botKey, f.payment, since, ver)}
       ${(() => {
