@@ -42,6 +42,7 @@ LOCALE = {
         "btn_back_list": "🔙 Back to list",
         "btn_prev":      "◀️ Previous",
         "btn_next":      "Next ▶️",
+        "page_btn": "Page {n}",
         "btn_paywall":   "🔍 Dream Symbol Finder (free)",
         "search_hint":   "Or just type a symbol's name here (like: snake, teeth, water) and I'll find it for you 👇",
         "search_multi":  "🔍 I found {count} symbols close to what you wrote. Which one was in your dream?",
@@ -272,4 +273,6 @@ LOCALE = {
 
     "lang_changed": "Language set to *English* 🌙 Let's start fresh…",
     "processing_busy": "One moment — I'm still working on your last dream… 🌙",
+    "main_menu": "🌙 Main menu\n\nWhat would you like to do?",
+    "btn_back": "◀️ Back",
 }

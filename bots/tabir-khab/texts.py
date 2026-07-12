@@ -60,6 +60,27 @@ def kb_labels(lang: str | None) -> dict:
     return locales.get(lang)["kb"]
 
 
+def back_button(lang: str | None) -> dict:
+    """دکمه‌ی «بازگشت» (اینلاین) → منوی اصلی. یک سطح بالاتر در فلوی درختی."""
+    return {"text": get(lang, "btn_back"), "callback_data": "menu:home"}
+
+
+def back_row(lang: str | None) -> list:
+    return [back_button(lang)]
+
+
+def main_menu_message(lang: str | None):
+    """(text, rows) — منوی اصلیِ اینلاین که همه‌ی دکمه‌های بازگشت به آن می‌رسند.
+    دکمه‌ها همان اکشن‌های منوی پایین‌اند (خواب جدید، نمادیاب، همسفری، تغییر سبک)."""
+    kb = kb_labels(lang)
+    rows = [[{"text": kb["new_dream"], "callback_data": "menu:new_dream"}]]
+    if symbols_available(lang) and "symbols" in kb:
+        rows.append([{"text": kb["symbols"], "callback_data": "menu:symbols"}])
+    rows.append([{"text": kb["subscription"], "callback_data": "menu:sub"}])
+    rows.append([{"text": kb["persona"], "callback_data": "menu:persona"}])
+    return get(lang, "main_menu"), rows
+
+
 def main_reply_rows(lang: str | None, include_language: bool = True,
                     include_reset: bool = False) -> list:
     """ردیف‌های کیبورد ثابتِ پایین (متن دکمه‌ها).
@@ -126,6 +147,7 @@ def persona_change_message(lang: str | None):
     buttons = [{"text": num(lang, i + 1), "callback_data": f"pers:{i}"}
                for i in range(len(q["options"]))]
     rows = [buttons] if len(buttons) <= 5 else [buttons[:3], buttons[3:]]
+    rows.append(back_row(lang))   # «تغییر سبک» → بازگشت به منوی اصلی (فلوی درختی)
     return "\n".join(lines), rows
 
 
@@ -254,6 +276,7 @@ def symbols_home_message(lang: str | None):
     buttons = [{"text": letter, "callback_data": f"sym:l:{i}"}
                for i, letter in enumerate(SYM.letters(lang))]
     rows = _sym_rows(buttons, SYM_LETTERS_PER_ROW, _sym_rtl(lang))
+    rows.append(back_row(lang))   # خانه‌ی نمادیاب → منوی اصلی (فلوی درختی)
     hint = sym_text(lang, "search_hint")
     intro = sym_text(lang, "intro") + (("\n\n" + hint) if hint else "")
     return intro, rows
@@ -287,9 +310,10 @@ def symbols_list_message(lang: str | None, li: int, page: int):
     if letter is None:
         return None, None
     entries = SYM.words_for(lang, letter)
-    back_row = [{"text": sym_text(lang, "btn_letters"), "callback_data": "sym:home"}]
+    # «بازگشت» یک سطح بالاتر = گریدِ حروف (خانه‌ی نمادیاب)؛ جایگزینِ دکمه‌ی «همه‌ی حروف».
+    back = [{"text": get(lang, "btn_back"), "callback_data": "sym:home"}]
     if not entries:
-        return sym_text(lang, "letter_empty", letter=letter), [back_row]
+        return sym_text(lang, "letter_empty", letter=letter), [back]
 
     pages = (len(entries) + SYM_PAGE_SIZE - 1) // SYM_PAGE_SIZE
     page = max(0, min(page, pages - 1))
@@ -300,14 +324,16 @@ def symbols_list_message(lang: str | None, li: int, page: int):
                for j, e in enumerate(entries[start:start + SYM_PAGE_SIZE])]
     rows = _sym_rows(buttons, 2, rtl)
 
-    nav = []
-    if page > 0:
-        nav.append({"text": sym_text(lang, "btn_prev"), "callback_data": f"sym:p:{li}:{page - 1}"})
-    if page < pages - 1:
-        nav.append({"text": sym_text(lang, "btn_next"), "callback_data": f"sym:p:{li}:{page + 1}"})
-    if nav:
-        rows.append(list(reversed(nav)) if rtl else nav)
-    rows.append(back_row)
+    # ناوبریِ صفحه: به‌جای قبل/بعد، دکمه‌ی کوچکِ هر صفحه؛ صفحه‌ی فعلی با تیک سبز.
+    if pages > 1:
+        page_btns = []
+        for p in range(pages):
+            label = sym_text(lang, "page_btn", n=num(lang, p + 1))
+            if p == page:
+                label = "✅ " + label
+            page_btns.append({"text": label, "callback_data": f"sym:p:{li}:{p}"})
+        rows += _sym_rows(page_btns, 5, rtl)   # حداکثر ۵ صفحه در هر ردیف
+    rows.append(back)
 
     text = sym_text(lang, "letter_header", letter=letter,
                     page=num(lang, page + 1), pages=num(lang, pages))

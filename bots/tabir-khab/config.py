@@ -25,7 +25,7 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.1.0"   # 1.1: جستجوی متنیِ نماد در نمادیاب خواب (فاز ۱٫۵)
+PRODUCT_VERSION = "1.2.0"   # 1.2: فلوی درختی/منوی اصلی + فیکس گیت اشتراک و resume پرداخت
 
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"

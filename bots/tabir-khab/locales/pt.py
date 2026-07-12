@@ -43,6 +43,7 @@ LOCALE = {
         "btn_back_list": "🔙 Voltar à lista",
         "btn_prev":      "◀️ Anterior",
         "btn_next":      "Próxima ▶️",
+        "page_btn": "Pág. {n}",
         "btn_paywall":   "🔍 Buscador de símbolos (grátis)",
         "search_hint":   "Ou digite aqui o nome de um símbolo (como: cobra, dentes, água) e eu o encontro para você 👇",
         "search_multi":  "🔍 Encontrei {count} símbolos próximos do que você escreveu. Qual estava no seu sonho?",
@@ -270,4 +271,6 @@ LOCALE = {
 
     "lang_changed": "Idioma definido para *Português* 🌙 Vamos começar de novo…",
     "processing_busy": "Um momento — ainda tô com seu sonho anterior… 🌙",
+    "main_menu": "🌙 Menu principal\n\nO que você quer fazer?",
+    "btn_back": "◀️ Voltar",
 }

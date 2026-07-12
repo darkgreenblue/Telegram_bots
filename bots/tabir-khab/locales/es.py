@@ -43,6 +43,7 @@ LOCALE = {
         "btn_back_list": "🔙 Volver a la lista",
         "btn_prev":      "◀️ Anterior",
         "btn_next":      "Siguiente ▶️",
+        "page_btn": "Pág. {n}",
         "btn_paywall":   "🔍 Buscador de símbolos (gratis)",
         "search_hint":   "O escribe aquí el nombre de un símbolo (como: serpiente, dientes, agua) y lo busco para ti 👇",
         "search_multi":  "🔍 Encontré {count} símbolos cercanos a lo que escribiste. ¿Cuál estaba en tu sueño?",
@@ -271,4 +272,6 @@ LOCALE = {
 
     "lang_changed": "Idioma cambiado a *Español* 🌙 Empecemos de nuevo…",
     "processing_busy": "Un momento — todavía estoy con tu sueño anterior… 🌙",
+    "main_menu": "🌙 Menú principal\n\n¿Qué quieres hacer?",
+    "btn_back": "◀️ Atrás",
 }
