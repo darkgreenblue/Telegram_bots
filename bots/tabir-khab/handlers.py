@@ -65,8 +65,12 @@ def _main_reply_kb(bale, lang):
     ))
 
 
-def _packages_inline(lang):
-    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}"}]
+def _packages_inline(lang, resume: bool = False):
+    """دکمه‌های پکیج. resume=True یعنی این پی‌وال از مسیرِ خواب→دمو→«باز کردن تعبیر
+    کامل» آمده و پرداختش باید همان خواب را ادامه دهد (نشانِ `:r` روی callback).
+    resume=False (منوی «همسفری من») = خریدِ مستقل؛ بعد از پرداخت فقط منوی اصلی."""
+    suffix = ":r" if resume else ""
+    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}{suffix}"}]
             for t in SUBSCRIPTION_ORDER]
     return inline_keyboard(rows)
 
@@ -174,7 +178,8 @@ async def _send_paywall(bale, chat_id, lang, prefix=""):
     زیر پلن‌ها، مسیر رایگان «نمادیاب خواب» هم پیشنهاد می‌شود تا کاربری که فعلاً
     نمی‌خواهد بخرد، به جای ترک ربات وارد بازی رایگان شود."""
     caption = C.paywall_full(lang, prefix)
-    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}"}]
+    # این پی‌وال از مسیرِ خواب آمده → نشانِ `:r` تا پرداخت همان خواب را ادامه دهد (باگ استیت‌منیجمنت).
+    rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}:r"}]
             for t in SUBSCRIPTION_ORDER]
     if C.symbols_available(lang):
         rows.append([{"text": C.sym_text(lang, "btn_paywall"), "callback_data": "sym:open"}])
@@ -235,6 +240,9 @@ async def _handle_message(bale, msg: dict):
         return
 
     if "successful_payment" in msg:
+        # مسیرِ پرداختِ واقعی (SKIP_PAYMENT=False). فعلاً غیرفعال است (شبیه‌سازی از _cb_buy می‌رود).
+        # TODO لانچ: نیتِ resume باید در invoice_payload کد شود (مثل مسیرِ شبیه‌سازیِ `:r`) تا
+        # خریدِ واقعیِ از منوی «همسفری من» خوابِ کهنه را resume نکند — قرینه‌ی باگ استیت‌منیجمنت.
         sp = msg["successful_payment"]
         await payments.apply_successful_payment(
             bale, user_id, sp.get("invoice_payload", ""),
@@ -342,7 +350,20 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
         await _send_onboarding_step(bale, chat_id, lang, user["onboarding_step"])
 
 
-async def _send_new_dream_guide(bale, chat_id, user_id):
+async def _edit_or_send(bale, chat_id, msg_id, text, rows, parse_mode="Markdown"):
+    """ادیتِ همان پیام (فلوی درختی، چت تمیز)؛ اگر ادیت نشد (مثلاً پیام عکس‌دار) پیام جدید."""
+    kb = inline_keyboard(rows)
+    if msg_id:
+        try:
+            await bale.edit_message_text(chat_id, msg_id, text, reply_markup=kb,
+                                         parse_mode=parse_mode)
+            return
+        except Exception:
+            pass
+    await bale.send_message(chat_id, text, reply_markup=kb, parse_mode=parse_mode)
+
+
+async def _send_new_dream_guide(bale, chat_id, user_id, msg_id=None):
     await db.clear_pending(user_id)
     await db.set_sym_browse(user_id, False)   # «خواب جدید»/CTA = خروج از حالت نمادیاب
     user = await db.get_user(user_id)
@@ -352,19 +373,31 @@ async def _send_new_dream_guide(bale, chat_id, user_id):
         await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
         await _send_onboarding_step(bale, chat_id, lang, step)
         return
-    await bale.send_message(chat_id, C.new_dream_text(lang, user["persona"]),
-                            reply_markup=_main_reply_kb(bale, lang))
+    # زیرِ پیامِ «خواب جدید» دکمه‌ی بازگشت به منوی اصلی (کیبوردِ پایین از قبل هست و می‌ماند)
+    await _edit_or_send(bale, chat_id, msg_id, C.new_dream_text(lang, user["persona"]),
+                        [C.back_row(lang)])
+
+
+def _subscription_status_view(lang, status):
+    """(text, rows) وضعیت اشتراک. فعال → دکمه‌های اقدام (خواب جدید/نمادیاب) + بازگشت.
+    غیرفعال (از منوی «همسفری من») → پکیج‌ها بدونِ نشانِ resume + بازگشت."""
+    text = C.subscription_status_text(lang, status)
+    if status["active"]:
+        rows = [[{"text": C.kb_labels(lang)["new_dream"], "callback_data": "menu:new_dream"}]]
+        if C.symbols_available(lang) and "symbols" in C.kb_labels(lang):
+            rows.append([{"text": C.kb_labels(lang)["symbols"], "callback_data": "menu:symbols"}])
+        rows.append(C.back_row(lang))
+    else:
+        rows = _packages_inline(lang, resume=False)["inline_keyboard"] + [C.back_row(lang)]
+    return text, rows
 
 
 async def _send_subscription_status(bale, chat_id, user_id):
     user = await db.get_user(user_id)
     lang = _lang_of(user, bale)
     status = db.subscription_status(user or {})
-    text = C.subscription_status_text(lang, status)
-    if status["active"]:
-        await bale.send_message(chat_id, text)
-    else:
-        await bale.send_message(chat_id, text, reply_markup=_packages_inline(lang))
+    text, rows = _subscription_status_view(lang, status)
+    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
 
 
 # ===================== دریافت خواب =====================
@@ -438,14 +471,19 @@ async def _handle_callback(bale, cq: dict):
             await bale.answer_callback_query(cq_id)
             await bale.send_message(chat_id, C.get(lang, "cancelled"))
         elif data.startswith("buy:"):
-            await _cb_buy(bale, cq_id, chat_id, user_id, data.split(":", 1)[1])
+            parts = data.split(":")
+            resume = len(parts) > 2 and parts[2] == "r"
+            await _cb_buy(bale, cq_id, chat_id, user_id, parts[1], resume)
         elif data.startswith("paym:"):
-            _, method, tier = data.split(":")
-            await _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier)
+            parts = data.split(":")
+            resume = len(parts) > 3 and parts[3] == "r"
+            await _cb_pay_method(bale, cq_id, chat_id, user_id, parts[1], parts[2], resume)
         elif data.startswith("fullview:"):
             await _cb_view_full(bale, cq_id, chat_id, user_id, int(data.split(":", 1)[1]))
         elif data.startswith("sym:"):
             await _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data)
+        elif data.startswith("menu:"):
+            await _cb_menu(bale, cq_id, chat_id, msg_id, user_id, data.split(":", 1)[1])
         else:
             await bale.answer_callback_query(cq_id)
     except Exception as e:
@@ -542,22 +580,23 @@ async def _cb_confirm_dream(bale, cq_id, chat_id, user_id):
     lang = _lang_of(user, bale)
 
     # --- eligibility gate ---
-    if not user.get("has_used_free_trial"):
+    # ترتیب مهم است: مشترکِ فعال همیشه paid (دمو+کامل همزمان + مصرفِ سهمیه‌ی روزانه).
+    # فقط غیرمشترک تریالِ رایگان می‌گیرد — وگرنه مشترک روزِ اول ۱ تریال + ۱ پولی = ۲ خواب می‌گرفت.
+    status = db.subscription_status(user)
+    if status["active"]:
+        if not SKIP_DAILY_LIMIT and not await db.can_use_today(user_id):
+            await bale.answer_callback_query(cq_id)
+            await db.clear_pending(user_id)
+            await bale.send_message(chat_id, C.get(lang, "daily_limit"))
+            return
+        mode = "paid"
+    elif not user.get("has_used_free_trial"):
         mode = "free"
     else:
-        status = db.subscription_status(user)
-        if status["active"]:
-            if not SKIP_DAILY_LIMIT and not await db.can_use_today(user_id):
-                await bale.answer_callback_query(cq_id)
-                await db.clear_pending(user_id)
-                await bale.send_message(chat_id, C.get(lang, "daily_limit"))
-                return
-            mode = "paid"
-        else:
-            await bale.answer_callback_query(cq_id)
-            await db.set_pending_state(user_id, "awaiting_payment", "paid")
-            await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
-            return
+        await bale.answer_callback_query(cq_id)
+        await db.set_pending_state(user_id, "awaiting_payment", "paid")
+        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+        return
 
     lock = _lock_key(bale, user_id, "dream")
     if lock in _processing:
@@ -890,14 +929,14 @@ async def _handle_symbol_search(bale, chat_id, user_id, lang, query):
         await analytics.track(user_id, "symbol_not_found", {"query": " ".join((query or "").split())[:64]})
 
 
-async def _send_symbols_home(bale, chat_id, user_id, via: str):
-    """ورود به نمادیاب: معرفی + گرید حروف (پیام جدید — از کیبورد یا پی‌وال)."""
+async def _send_symbols_home(bale, chat_id, user_id, via: str, msg_id=None):
+    """ورود به نمادیاب: معرفی + گرید حروف. msg_id → ادیت در جا (ناوبری درختی از منوی اصلی)."""
     user = await db.get_user(user_id)
     lang = _lang_of(user, bale)
     if not C.symbols_available(lang):
         return
     text, rows = C.symbols_home_message(lang)
-    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+    await _edit_or_send(bale, chat_id, msg_id, text, rows)
     await db.set_sym_browse(user_id, True)   # از این پس متنِ کوتاه = جستجوی نماد (تا خروج)
     await analytics.track(user_id, "symbol_opened", {"via": via})
 
@@ -952,9 +991,51 @@ async def _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data):
         await _sym_show(bale, chat_id, msg_id, text, rows)
 
 
+async def _cb_menu(bale, cq_id, chat_id, msg_id, user_id, action):
+    """منوی اصلیِ اینلاین (فلوی درختی). دکمه‌های بازگشت به `menu:home` می‌رسند و از آنجا
+    به هر بخش. همه ادیت‌درجا (چت تمیز). آنبوردینگ استثناست: کاربر تازه‌وارد این‌ها را نمی‌بیند
+    چون منوی اصلی فقط از دکمه‌های حالت‌هایی می‌آید که کاربرِ عادی (نه در آنبوردینگ) با آن‌ها روبروست."""
+    user = await db.get_user(user_id)
+    lang = _lang_of(user, bale)
+    await bale.answer_callback_query(cq_id)
+
+    if action == "home":
+        await db.set_sym_browse(user_id, False)
+        text, rows = C.main_menu_message(lang)
+        await _edit_or_send(bale, chat_id, msg_id, text, rows)
+    elif action == "new_dream":
+        await _send_new_dream_guide(bale, chat_id, user_id, msg_id=msg_id)
+    elif action == "symbols":
+        await _send_symbols_home(bale, chat_id, user_id, via="menu", msg_id=msg_id)
+    elif action == "sub":
+        await db.set_sym_browse(user_id, False)
+        status = db.subscription_status(user or {})
+        text, rows = _subscription_status_view(lang, status)
+        await _edit_or_send(bale, chat_id, msg_id, text, rows)
+    elif action == "persona":
+        await db.set_sym_browse(user_id, False)
+        ptext, rows = C.persona_change_message(lang)
+        await _edit_or_send(bale, chat_id, msg_id, ptext, rows)
+
+
 # ===================== پرداخت =====================
 
-async def _cb_buy(bale, cq_id, chat_id, user_id, tier):
+async def _after_purchase(bale, chat_id, user_id, resume: bool):
+    """بعد از پرداخت: فقط اگر از مسیرِ خواب→پی‌وال آمده (resume) خواب را ادامه بده؛
+    وگرنه (خریدِ مستقل از منوی «همسفری من») استیتِ خوابِ کهنه را پاک کن و منوی اصلی را نشان بده."""
+    if resume:
+        await _try_resume_pending_dream(bale, chat_id, user_id)
+        return
+    # خریدِ منو: هیچ خوابی resume نمی‌شود؛ استیتِ awaiting_paymentِ کهنه پاک شود تا بعداً زنده نشود
+    user = await db.get_user(user_id)
+    if (user or {}).get("pending_state") == "awaiting_payment":
+        await db.clear_pending(user_id)
+    lang = _lang_of(user, bale)
+    text, rows = C.main_menu_message(lang)
+    await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+
+
+async def _cb_buy(bale, cq_id, chat_id, user_id, tier, resume: bool = False):
     await bale.answer_callback_query(cq_id)
     if tier not in SUBSCRIPTIONS:
         return
@@ -966,26 +1047,27 @@ async def _cb_buy(bale, cq_id, chat_id, user_id, tier):
         # فارسی → زرین‌پال (در حالت تست SKIP_PAYMENT شبیه‌سازی)
         if SKIP_PAYMENT:
             await payments.simulate_purchase(bale, chat_id, user_id, tier)
-            await _try_resume_pending_dream(bale, chat_id, user_id)
+            await _after_purchase(bale, chat_id, user_id, resume)
         else:
             await payments.send_subscription_invoice(bale, chat_id, user_id, tier)
         return
 
-    # بقیه‌ی زبان‌ها → انتخاب روش (Stars / Crypto)
-    rows = [[{"text": C.pay_method_button(lang, m), "callback_data": f"paym:{m}:{tier}"}]
+    # بقیه‌ی زبان‌ها → انتخاب روش (Stars / Crypto)؛ نشانِ resume تا پرداخت حفظ می‌شود
+    suffix = ":r" if resume else ""
+    rows = [[{"text": C.pay_method_button(lang, m), "callback_data": f"paym:{m}:{tier}{suffix}"}]
             for m in methods]
     title = locales.get(lang)["tiers"].get(tier, tier)
     text = f"*{title}*\n\n" + C.pay_choose_text(lang)
     await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
 
 
-async def _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier):
+async def _cb_pay_method(bale, cq_id, chat_id, user_id, method, tier, resume: bool = False):
     await bale.answer_callback_query(cq_id)
     if tier not in SUBSCRIPTIONS:
         return
     # حالت تست: هر کلیک = پرداخت‌شده فرض می‌شود
     await payments.simulate_purchase(bale, chat_id, user_id, tier)
-    await _try_resume_pending_dream(bale, chat_id, user_id)
+    await _after_purchase(bale, chat_id, user_id, resume)
 
 
 async def _cb_view_full(bale, cq_id, chat_id, user_id, dream_id):
