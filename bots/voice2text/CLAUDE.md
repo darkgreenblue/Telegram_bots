@@ -52,8 +52,8 @@
 - این ربات از shared استفاده نمی‌کند؛ **کپی محلی** هم‌قرارداد `shared/analytics.js` (بلوک `ANALYTICS_SCHEMA_VERSION = 2` بعد از voice_flows در index.js). چک CI (`tools/check-analytics-sync.mjs`) سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید همین‌جا هم اعمال شود.
 - جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic؛ نسخه از ثابت `PRODUCT_VERSION` بالای فایل — با هر تغییر رفتاری bump شود، بند ۲ج ریشه). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `payment_approved` (approve ادمین + تخفیف ۱۰۰٪ خودکار)، `payment_rejected`. track fail-safe است (فقط logErr).
 
-## ریست تست (بند ۶ب ریشه)
-`RESET_TEST_BTN` **فقط برای OWNER** (کاربر پولی نباید تصادفاً پاک شود): حذف ردیف‌های مالک از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + پاک‌سازی state های in-memory. کدهای تخفیف (discount_codes) پاک نمی‌شوند.
+## ریست حساب ادمین (بند ۶ب ریشه)
+دکمه‌ی `🔄 ریست حساب (ادمین)` (`RESET_TEST_BTN`) **برای هر دو آی‌دیِ ADMIN_IDS، همیشه**: حذف ردیف‌های همان ادمین از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + `admin_actions` مرتبط (subquery) + پاک‌سازی state های in-memory، بعد معرفی مثل کاربر جدید (`upsertUser` → هدیه‌ی خوش‌آمد از نو). کدهای تخفیف (discount_codes) پاک نمی‌شوند. برچسبِ قدیمیِ `🔄 ریست ربات (تست)` هم هنوز match می‌شود. توجه: ادمینِ voice2text عمداً متمایز است (مصرف رایگان + مدل Pro)، پس ریست بیشتر برای پاک‌کردنِ دیتای تستِ خودِ ادمین است.
 
 ## env
 `BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور). نیازمند ffmpeg/ffprobe روی سرور.

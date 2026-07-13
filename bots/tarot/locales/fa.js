@@ -12,7 +12,7 @@ export default {
     daily: '🎴 کارت روز (رایگان)',
     reading: '🔮 فال بگیر',
     wallet: '💰 کیف پول',
-    resetTest: '🔄 ریست ربات (تست)',
+    resetTest: '🔄 ریست حساب (ادمین)',
     ready: 'آماده‌ام ✨',
     stopShuffle: '⏹️ همین‌جا نگه‌دار',
     nextCard: 'کارت بعدی 🎴',

@@ -29,7 +29,7 @@ from config import (
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
     payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
-    RESET_BUTTON_ENABLED, PRODUCT_VERSION,
+    RESET_BUTTON_ENABLED, PRODUCT_VERSION, is_admin,
 )
 
 log = logging.getLogger("handlers")
@@ -56,12 +56,13 @@ for _code in locales.LANG_ORDER:
 
 # ===================== کیبوردها =====================
 
-def _main_reply_kb(bale, lang):
-    # دکمه‌ی زبان حذف شده — زبانِ هر ربات ثابت است
+def _main_reply_kb(bale, lang, uid=0):
+    # دکمه‌ی زبان حذف شده — زبانِ هر ربات ثابت است.
+    # دکمه‌ی ریست فقط برای ادمین‌ها (همیشه، حتی خارج از فاز تست) — ابزار مدیریتی برای تستِ فلوها.
     return reply_keyboard(C.main_reply_rows(
         lang,
         include_language=False,
-        include_reset=RESET_BUTTON_ENABLED,
+        include_reset=is_admin(uid),
     ))
 
 
@@ -297,13 +298,13 @@ async def _handle_message(bale, msg: dict):
         await _send_symbols_home(bale, chat_id, user_id, via="keyboard")
         return
 
-    if action == "reset_test" and RESET_BUTTON_ENABLED:
+    if action == "reset_test" and is_admin(user_id):
         await db.reset_user(user_id)
-        log.info("[%s] RESET user=%s by reset_test button", bale.tag, user_id)
+        log.info("[%s] ADMIN RESET user=%s by reset button", bale.tag, user_id)
         # کیبوردِ پایین (شاملِ خودِ دکمه‌ی ریست) را دوباره بفرست تا بعد از ریست هم در دسترس بماند —
         # وگرنه چون یوزر «جدید» می‌شود و وارد آنبوردینگ می‌شود، دکمه تا پایانِ آنبوردینگ ناپدید می‌ماند.
         await bale.send_message(chat_id, "🔄 ریست شد — انگار یه یوزرِ تازه!",
-                                reply_markup=_main_reply_kb(bale, lang), parse_mode=None)
+                                reply_markup=_main_reply_kb(bale, lang, user_id), parse_mode=None)
         await _send_welcome(bale, chat_id, lang)
         return
 
@@ -342,7 +343,7 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
         await bale.send_message(
             chat_id,
             C.get(lang, "returning_welcome") + "\n\n" + C.invite_line(lang, user["persona"]),
-            reply_markup=_main_reply_kb(bale, lang),
+            reply_markup=_main_reply_kb(bale, lang, user_id),
         )
     elif user["onboarding_step"] == 0:
         await _send_welcome(bale, chat_id, lang)
@@ -537,7 +538,7 @@ async def _cb_onboarding_answer(bale, cq_id, chat_id, msg_id, user_id, step, idx
         if msg_id:
             await bale.edit_message_text(chat_id, msg_id, C.persona_key(lang, persona, "greet"))
         await bale.send_message(chat_id, C.persona_key(lang, persona, "invite"),
-                                reply_markup=_main_reply_kb(bale, lang))
+                                reply_markup=_main_reply_kb(bale, lang, user_id))
 
 
 async def _cb_onboarding_prev(bale, cq_id, chat_id, msg_id, user_id):
@@ -567,7 +568,7 @@ async def _cb_persona_change(bale, cq_id, chat_id, user_id, idx):
     val, label = q["options"][idx]
     await db.set_persona(user_id, val)
     await bale.answer_callback_query(cq_id, text=label[:40])
-    await bale.send_message(chat_id, C.ready_text(lang, val), reply_markup=_main_reply_kb(bale, lang))
+    await bale.send_message(chat_id, C.ready_text(lang, val), reply_markup=_main_reply_kb(bale, lang, user_id))
 
 
 async def _cb_confirm_dream(bale, cq_id, chat_id, user_id):
