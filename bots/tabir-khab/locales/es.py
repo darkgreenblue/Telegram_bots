@@ -20,6 +20,7 @@ LOCALE = {
         "invite":       "🎁 Enlace de invitación",
         "language":     "🌐 Idioma",
         "symbols":      "🔍 Buscador de símbolos (gratis)",
+        "reset_test":   "🔄 Restablecer cuenta (admin)",
     },
 
     # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/es نمایش داده نمی‌شوند
