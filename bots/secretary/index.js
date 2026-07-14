@@ -9,7 +9,7 @@ import { Telegraf, Markup } from 'telegraf';
 import crypto from 'crypto';
 import { log, logErr } from '../../shared/logger.js';
 import { createOpenRouter } from '../../shared/llm.js';
-import { RESET_TEST_BTN, registerTestReset } from '../../shared/reset.js';
+import { registerAdminReset, adminResetRow } from '../../shared/reset.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
 import { EVENTS, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { setupDb, getSetting, setSetting, wipeUser, CAPTURE_TERMINAL } from './db.js';
@@ -122,7 +122,9 @@ async function handleStart(ctx) {
   const before = db.prepare('SELECT 1 FROM users WHERE telegram_id=?').get(ctx.from.id);
   upsertUser(ctx);
   captureStart(db, ctx.from.id, ctx.startPayload, !before, PRODUCT_VERSION);
-  const kb = TEST_PHASE ? Markup.keyboard([[RESET_TEST_BTN]]).resize() : undefined;
+  // دکمه‌ی «ریست حساب (ادمین)» فقط برای ادمین (این ربات کلاً تک‌کاربره است)
+  const rows = [...adminResetRow(isAdmin, ctx.from.id)];
+  const kb = rows.length ? Markup.keyboard(rows).resize() : undefined;
   await ctx.reply(C.WELCOME, kb);
 }
 bot.start(handleStart);
@@ -143,7 +145,8 @@ bot.command('ticktick_code', async (ctx) => {
 });
 bot.command('memory', (ctx) => ctx.reply(C.memoryText(getMemory(ctx.from.id))));
 
-registerTestReset(bot, { ownerId: OWNER_ID, ownerOnly: false, testPhase: TEST_PHASE, wipe: (uid) => wipeUser(db, uid), after: handleStart });
+// ریستِ فقط-ادمین (همیشه فعال): دیتای خودِ ادمین را پاک و او را مثل کاربر جدید معرفی می‌کند
+registerAdminReset(bot, { isAdmin, wipe: (uid) => wipeUser(db, uid), after: handleStart });
 
 /* ===== ورودی: متن ===== */
 const editStates = new Map(); // uid → itemId (در حال ویرایش)؛ حافظه‌ای و بازسازی‌پذیر (گم شد، دوباره «اصلاح» بزن)
