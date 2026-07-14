@@ -31,6 +31,13 @@ jobs:
           # tarot
           TAROT_BOT_TOKEN:              ${{ secrets.TAROT_BOT_TOKEN }}
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # secretary (منشیِ شخصی) — چهار secret گوگل/تیک‌تیک اختیاری‌اند؛ قابلیت مربوطه تا ست‌شدنشان خاموش می‌ماند
+          SECRETARY_BOT_TOKEN:            ${{ secrets.SECRETARY_BOT_TOKEN }}
+          SECRETARY_OPENROUTER_KEY:       ${{ secrets.SECRETARY_OPENROUTER_KEY }}
+          SECRETARY_GOOGLE_SA_KEY_B64:    ${{ secrets.SECRETARY_GOOGLE_SA_KEY_B64 }}
+          SECRETARY_GOOGLE_CALENDAR_ID:   ${{ secrets.SECRETARY_GOOGLE_CALENDAR_ID }}
+          SECRETARY_TICKTICK_CLIENT_ID:   ${{ secrets.SECRETARY_TICKTICK_CLIENT_ID }}
+          SECRETARY_TICKTICK_CLIENT_SECRET: ${{ secrets.SECRETARY_TICKTICK_CLIENT_SECRET }}
           # dashboard (داشبورد ادمین): توکن ورود + تونل اختیاری Cloudflare (named) + گیرنده‌ی آدرس تونل
           DASHBOARD_TOKEN:              ${{ secrets.DASHBOARD_TOKEN }}
           CLOUDFLARE_TUNNEL_TOKEN:      ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
@@ -41,7 +48,7 @@ jobs:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,SECRETARY_BOT_TOKEN,SECRETARY_OPENROUTER_KEY,SECRETARY_GOOGLE_SA_KEY_B64,SECRETARY_GOOGLE_CALENDAR_ID,SECRETARY_TICKTICK_CLIENT_ID,SECRETARY_TICKTICK_CLIENT_SECRET,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -91,6 +98,14 @@ jobs:
             if [ -n "$TAROT_BOT_TOKEN" ] && [ -n "$TAROT_OPENROUTER_KEY" ]; then
               write_env tarot "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
             fi
+            if [ -n "$SECRETARY_BOT_TOKEN" ] && [ -n "$SECRETARY_OPENROUTER_KEY" ]; then
+              SEC_ENV="$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s' "$SECRETARY_BOT_TOKEN" "$SECRETARY_OPENROUTER_KEY")"
+              [ -n "$SECRETARY_GOOGLE_SA_KEY_B64" ]      && SEC_ENV="$(printf '%s\nGOOGLE_SA_KEY_B64=%s' "$SEC_ENV" "$SECRETARY_GOOGLE_SA_KEY_B64")"
+              [ -n "$SECRETARY_GOOGLE_CALENDAR_ID" ]     && SEC_ENV="$(printf '%s\nGOOGLE_CALENDAR_ID=%s' "$SEC_ENV" "$SECRETARY_GOOGLE_CALENDAR_ID")"
+              [ -n "$SECRETARY_TICKTICK_CLIENT_ID" ]     && SEC_ENV="$(printf '%s\nTICKTICK_CLIENT_ID=%s' "$SEC_ENV" "$SECRETARY_TICKTICK_CLIENT_ID")"
+              [ -n "$SECRETARY_TICKTICK_CLIENT_SECRET" ] && SEC_ENV="$(printf '%s\nTICKTICK_CLIENT_SECRET=%s' "$SEC_ENV" "$SECRETARY_TICKTICK_CLIENT_SECRET")"
+              write_env secretary "$SEC_ENV"
+            fi
             if [ -n "$DASHBOARD_TOKEN" ]; then
               write_env dashboard "$(printf 'DASHBOARD_TOKEN=%s\nPORT=8787' "$DASHBOARD_TOKEN")"
             fi
@@ -100,7 +115,7 @@ jobs:
             # داشته باشد که write_env دست نمی‌زند. فقط خطِ ADMIN_IDS را upsert می‌کند (توکن/کلید/نوشن
             # دست نمی‌خورد → قانون «voice2text نشکند») و اگر عوض شد همان ربات را برای ری‌لود علامت می‌زند.
             if [ -n "$OWNER_TELEGRAM_ID" ]; then
-              for b in voice2text tarot; do
+              for b in voice2text tarot secretary; do
                 envf="bots/$b/.env"
                 [ -f "$envf" ] || continue
                 cur=$(sed -n 's/^ADMIN_IDS=//p' "$envf" | head -1)
@@ -148,6 +163,7 @@ jobs:
             }
             deploy_bot voice2text
             deploy_bot tarot
+            deploy_bot secretary
             deploy_bot dashboard
             # resume-tailor بازنشسته شد (منسوخ + مصرف LLM بی‌سقف/SSRF) — یک‌باره از pm2 حذف می‌شود
             pm2 delete resume-tailor 2>/dev/null && pm2 save || true

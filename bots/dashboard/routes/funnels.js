@@ -39,6 +39,16 @@ export const FUNNELS = {
     ],
     entity: { table: 'readings', title: 'وضعیت فال‌ها (رکورد قطعی — شامل قبل از آنالیتیکس)' },
   },
+  secretary: {
+    title: '🗂 منشی',
+    steps: [
+      ['start', 'استارت'],
+      ['capture_received', 'دریافت ورودی'],
+      ['items_extracted', 'استخراج نیت'],
+      ['product_delivered', 'مسیریابی'],
+    ],
+    entity: { table: 'captures', title: 'وضعیت ورودی‌ها (رکورد قطعی)' },
+  },
   voice2text: {
     title: '🎙 ویس به متن',
     steps: [

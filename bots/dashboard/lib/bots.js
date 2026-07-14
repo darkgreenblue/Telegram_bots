@@ -31,6 +31,11 @@ export const BOTS = [
     receiptQueue: true, // جدول admin_actions دارد؛ داشبورد تأیید/رد را enqueue می‌کند
   },
   {
+    // منشیِ شخصیِ صوتی — بدون پول (money حذف؛ همه‌ی route های مالی با hasTable(payments) گارد دارند و skip می‌کنند)
+    key: 'secretary', title: '🗂 منشی', dataDir: '../secretary/data', pattern: /^bot\.db$/,
+    userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix',
+  },
+  {
     key: 'tarot', title: '🔮 تاروت', dataDir: '../tarot/data', pattern: /^bot-[a-z-]+\.db$/,
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
