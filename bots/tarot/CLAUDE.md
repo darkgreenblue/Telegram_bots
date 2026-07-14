@@ -68,7 +68,8 @@
 هر زبان = اپ pm2 جدا از همین پوشه: `locales/<LOCALE>.js` + `ENV_FILE=.env.<locale>` + دیتابیس جدا. زبان جدید: فایل locale بساز + اپ در ecosystem.
 
 ## وضعیت لانچ (فاز تست تمام شد)
-`TEST_PHASE=false` از ۱۴۰۵/۰۴/۲۰: دکمه‌ی ریست از کیبورد حذف شده؛ `/reset` فقط برای OWNER مانده (wipeUser سر جایش است). دیتای دوره‌ی تست با اسکریپت یک‌باره‌ی `tools/launch-wipe-tarot.mjs` در دیپلوی لانچ پاک شد (بکاپ `bot-*.db.pre-launch.bak` روی سرور؛ marker: `data/.launch-wipe-done`) — فقط ردیف‌های ادمین‌ها ماندند.
+`TEST_PHASE=false` از ۱۴۰۵/۰۴/۲۰. دیتای دوره‌ی تست با اسکریپت یک‌باره‌ی `tools/launch-wipe-tarot.mjs` در دیپلوی لانچ پاک شد (بکاپ `bot-*.db.pre-launch.bak` روی سرور؛ marker: `data/.launch-wipe-done`) — فقط ردیف‌های ادمین‌ها ماندند.
+- **دکمه‌ی `🔄 ریست حساب (ادمین)`** (بند ۶ب ریشه): فقط برای `ADMIN_IDS`، همیشه فعال (نه TEST_PHASE). `doReset` (گارد دومِ `isAdmin`) → `wipeUser(uid)` → `handleStart` (مثل کاربر جدید). `mainKeyboard(uid)` ردیفش را فقط برای ادمین اضافه می‌کند؛ `/reset` هم فقط ادمین. برچسبِ قدیمیِ `🔄 ریست ربات (تست)` هم match می‌شود. فلوی ادمین هیچ تمایز دیگری با کاربر عادی ندارد.
 - دکمه‌ی دعوت با `t.me/share/url` کار می‌کند و نیازی به `/setinline` ندارد (هندلر inline_query صرفاً باقی مانده و بی‌ضرر است).
 
 ## env

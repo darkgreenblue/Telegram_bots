@@ -26,7 +26,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
   .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
 const OWNER_ID = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
-const RESET_TEST_BTN = '🔄 ریست ربات (تست)'; // فاز تست — فقط برای OWNER
+const RESET_TEST_BTN = '🔄 ریست حساب (ادمین)'; // ابزار مدیریتیِ همیشه‌فعالِ فقط-ادمین (هر دو آی‌دیِ ADMIN_IDS)
 
 const CARD_NUMBER  = '6219861904145405';
 const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
@@ -905,7 +905,7 @@ function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
 function mainKeyboard(userId) {
   if (isAdmin(userId)) {
     const rows = [['🔄 تعویض پردازنده', '📊 داشبورد']];
-    if (userId === OWNER_ID) rows.push([RESET_TEST_BTN]); // فاز تست — فقط مالک
+    rows.push([RESET_TEST_BTN]); // ابزار مدیریتی — برای هر دو ادمین
     return Markup.keyboard(rows).resize();
   }
   return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
@@ -1209,10 +1209,11 @@ bot.start(async (ctx) => {
   await sendMainMenu(ctx, { welcome: true, gift: isNew });
 });
 
-// فاز تست — ریست کاملِ خودِ مالک (فقط ردیف‌های همین کاربر؛ owner-only برای ایمنی رباتِ زنده)
-bot.hears(RESET_TEST_BTN, async (ctx) => {
+// ابزار مدیریتیِ فقط-ادمین (هر دو آی‌دیِ ADMIN_IDS) — همیشه فعال. فقط دیتای خودِ همان ادمین را پاک
+// می‌کند و او را مثل کاربر جدید معرفی می‌کند (برای تستِ فلوها). هم برچسبِ جدید هم قدیمی را می‌گیرد.
+bot.hears([RESET_TEST_BTN, '🔄 ریست ربات (تست)'], async (ctx) => {
   const uid = ctx.from.id;
-  if (uid !== OWNER_ID) return;
+  if (!isAdmin(uid)) return;
   // صف اکشن رسیدها به payment_id وصل است → قبل از حذف payments با subquery پاک شود (ضد ردیف یتیم)
   try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('reset-test del admin_actions', e.message); }
   for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['events','user_id']]) {

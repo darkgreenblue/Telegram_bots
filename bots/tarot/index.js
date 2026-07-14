@@ -464,13 +464,15 @@ async function typing(ctx, ms, action = 'typing') {
   await sleep(ms);
 }
 
-function mainKeyboard() {
+// uid اختیاری: فقط ادمین‌ها (دو آی‌دیِ ADMIN_IDS) دکمه‌ی «ریست حساب (ادمین)» را می‌بینند — همیشه،
+// حتی خارج از فاز تست. این تنها تمایزِ رو-به-کاربرِ ادمین است (ابزار مدیریتی؛ فلوی محصول یکسان می‌ماند).
+function mainKeyboard(uid) {
   const rows = [
     [L.buttons.daily, L.buttons.reading],
     [L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
-  if (TEST_PHASE) rows.push([L.buttons.resetTest]);
+  if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
   return Markup.keyboard(rows).resize();
 }
 
@@ -602,7 +604,7 @@ async function handleStart(ctx) {
     // نام تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند؛ پس نامِ خودگفته را مبنا می‌گیریم.
     setState(uid, 'onboard_name');
     setSession(uid, { refBonus }); // وعده‌ی رفرال بعد از گرفتن نام نشان داده می‌شود
-    await ctx.reply(L.onboarding.askName, mainKeyboard());
+    await ctx.reply(L.onboarding.askName, mainKeyboard(ctx.from.id));
     return;
   }
 
@@ -616,7 +618,7 @@ async function handleStart(ctx) {
   } else if (user.last_daily_date !== tehranToday()) {
     msg += L.returning.dailyReminder;
   }
-  await ctx.reply(msg, mainKeyboard());
+  await ctx.reply(msg, mainKeyboard(ctx.from.id));
 }
 bot.start(handleStart);
 
@@ -640,7 +642,7 @@ async function finishNameOnboarding(ctx, rawName) {
   const refBonus = getSession(uid).refBonus;
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
-  await ctx.reply(L.onboarding.welcome(name), mainKeyboard());
+  await ctx.reply(L.onboarding.welcome(name), mainKeyboard(ctx.from.id));
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
   await typing(ctx, PACE_S);
@@ -1084,7 +1086,7 @@ bot.action('keepfocus', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard());
+  if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
   patchSession(uid, { focusKey: getUser(uid).focus_area });
   setState(uid, 'await_question');
   await ctx.reply(L.reading.askQuestion());
@@ -1100,7 +1102,7 @@ bot.action('catalog_go', async (ctx) => {
 async function handleQuestion(ctx, question) {
   const uid = ctx.from.id;
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
+  if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   patchSession(uid, { question: question.slice(0, 1500) });
   setState(uid, 'breathing');
   track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
@@ -1247,7 +1249,7 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard());
+  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
 });
 
 /* ---------- پی‌وال → کسر → افشای مرحله‌ای ---------- */
@@ -1583,7 +1585,7 @@ bot.action('recharge', async (ctx) => {
 
 async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
-  if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
+  if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
   // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
   if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
@@ -1637,7 +1639,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   setSession(uid, s);
   setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard());
+  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
   await offerPendingReading(ctx, uid);
 });
@@ -1657,7 +1659,7 @@ function validateDiscount(code, userId, amount) {
 async function applyDiscount(ctx, uid, codeText) {
   const s = getSession(uid);
   const p = s.paymentId && stmts.getPayment.get(s.paymentId);
-  if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
+  if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   const v = validateDiscount(codeText, uid, p.original_amount || p.amount);
   if (!v.ok) { setState(uid, 'pay_receipt'); return ctx.reply(L.wallet.badDiscount); }
   stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, p.id);
@@ -1852,17 +1854,19 @@ bot.on('inline_query', async (ctx) => {
 });
 
 /* ---------- ریست تست (قرارداد ریپو §۶ب — فاز تست: همه‌ی کاربران) ---------- */
+// ابزارِ مدیریتیِ فقط-ادمین (دو آی‌دیِ ADMIN_IDS)، همیشه فعال — حتی خارج از فاز تست.
+// فقط دیتای خودِ همان ادمین را پاک می‌کند و او را مثل یک کاربرِ کاملاً جدید از نو معرفی می‌کند
+// (برای تستِ فلوها بدون انتظار). هیچ کاربر دیگری این را نمی‌بیند و در هیچ فلویی دخالت نمی‌کند.
 async function doReset(ctx) {
+  if (!isAdmin(ctx.from.id)) return; // گاردِ اصلی — دکمه فقط برای ادمین‌ها نمایش داده می‌شود، این هم لایه‌ی دوم
   wipeUser(ctx.from.id);
   track(db, ctx.from.id, EVENTS.RESET, {});
-  await ctx.reply(L.reset.done, mainKeyboard());
-  return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو
+  await ctx.reply(L.reset.done, mainKeyboard(ctx.from.id));
+  return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو (upsertUser → isNew=true)
 }
-if (TEST_PHASE) bot.hears(L.buttons.resetTest, doReset);
-bot.command('reset', (ctx) => {
-  if (!TEST_PHASE && ctx.from.id !== OWNER_ID) return;
-  return doReset(ctx);
-});
+// هم برچسبِ جدید، هم برچسبِ قدیمیِ فاز تست (برای دکمه‌ی کش‌شده‌ی احتمالی) — doReset خودش isAdmin را چک می‌کند
+bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
+bot.command('reset', doReset);
 
 /* ---------- هندلر متن (state machine) ---------- */
 bot.on('text', async (ctx) => {
@@ -1883,7 +1887,7 @@ bot.on('text', async (ctx) => {
     if (state === 'pay_receipt') {
       // رسید متنی
       const s = getSession(uid);
-      if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
+      if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
       await sendReceiptToAdmin(ctx, uid, s.paymentId, null, text);
       setState(uid, s.readingId ? 'confirm_pay' : 'idle');
       return ctx.reply(L.wallet.receiptReceived);
@@ -1901,7 +1905,7 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard());
+    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard(ctx.from.id));
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});

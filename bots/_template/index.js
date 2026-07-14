@@ -7,7 +7,7 @@ import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import { log, logErr } from '../../shared/logger.js';
 import { createOpenRouter, parseJsonLoose } from '../../shared/llm.js';
-import { RESET_TEST_BTN, registerTestReset } from '../../shared/reset.js';
+import { registerAdminReset, adminResetRow } from '../../shared/reset.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
 // زیرساخت رشد (اتریبیوشن + A/B) — از قبل سیم‌کشی شده؛ فقط track ها را در نقاط فانل بگذار.
 // جزئیات کامل: بند «افزودن ربات جدید» در CLAUDE.md ریشه.
@@ -77,11 +77,17 @@ async function handleStart(ctx) {
   upsertUser(ctx);
   // اتریبیوشن: رویداد start برای هر /start + first_source/first_version فقط برای کاربر جدید (write-once)
   captureStart(db, ctx.from.id, ctx.startPayload, !before, PRODUCT_VERSION);
-  const kb = TEST_PHASE ? Markup.keyboard([[RESET_TEST_BTN]]).resize() : undefined;
+  // دکمه‌ی «ریست حساب (ادمین)» فقط برای ادمین‌ها (همیشه، حتی خارج از فاز تست) — ابزار مدیریتی
+  const rows = [
+    // TODO: ردیف‌های دکمه‌ی محصول را اینجا بگذار، مثل: ['📝 دکمه‌ی اول', '⚙️ دکمه‌ی دوم']
+    ...adminResetRow(isAdmin, ctx.from.id),
+  ];
+  const kb = rows.length ? Markup.keyboard(rows).resize() : undefined;
   await ctx.reply('👋 سلام! TODO: پیام خوش‌آمد محصول.', kb);
 }
 bot.start(handleStart);
-registerTestReset(bot, { ownerId: OWNER_ID, testPhase: TEST_PHASE, wipe: wipeUser, after: handleStart });
+// ریستِ فقط-ادمین (همیشه فعال): دیتای خودِ ادمین را پاک و او را مثل کاربر جدید معرفی می‌کند
+registerAdminReset(bot, { isAdmin, wipe: wipeUser, after: handleStart });
 
 // TODO: هندلرهای محصول اینجا. نمونه‌ی فراخوانی LLM:
 // const res = await or.chatResilient('system prompt', 'user text', { maxTokens: 500 });

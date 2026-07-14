@@ -19,6 +19,7 @@ LOCALE = {
         "invite":       "🎁 Invite link",
         "language":     "🌐 Language",
         "symbols":      "🔍 Dream Symbol Finder (free)",
+        "reset_test":   "🔄 Reset account (admin)",
     },
 
     # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/en نمایش داده نمی‌شوند
