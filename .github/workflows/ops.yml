@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query]
+        options: [status, logs, errors, restart, env-check, db-query, tunnel-diag]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -97,6 +97,30 @@ jobs:
                 for d in bots/*/; do
                   n=$(basename "$d")
                   [ -f "$d/.env" ] && echo "$n: .env ✅" || echo "$n: .env ❌"
+                done
+                ;;
+              tunnel-diag)
+                # تشخیصِ فقط‌خواندنیِ راه‌اندازیِ داشبورد/تونل (منبع پیام‌های «آدرس داشبورد»)
+                echo "===== unit files (dash|tunnel|cloudflare) ====="
+                systemctl list-unit-files 2>/dev/null | grep -iE 'dash|tunnel|cloudflare' || echo "(هیچ unit)"
+                echo; echo "===== timers ====="
+                systemctl list-timers --all 2>/dev/null | grep -iE 'dash|tunnel|cloudflare' || echo "(هیچ timer)"
+                for U in dash-tunnel dash-notify dashboard cloudflared; do
+                  if systemctl list-unit-files 2>/dev/null | grep -q "^${U}"; then
+                    echo; echo "===== systemctl status ${U} ====="
+                    sudo systemctl status "$U" --no-pager 2>/dev/null | head -20 || true
+                    echo "--- ExecStart ---"
+                    systemctl cat "$U" 2>/dev/null | grep -iE 'ExecStart|Restart|OnCalendar|WorkingDirectory' || true
+                    echo "--- journal (۳۰ خط آخر) ---"
+                    sudo journalctl -u "$U" -n 30 --no-pager 2>/dev/null | tail -30 || true
+                  fi
+                done
+                echo; echo "===== اسکریپت‌ها/سرویس‌هایی که به تلگرام پیام می‌دهند یا trycloudflare دارند ====="
+                sudo grep -rlsiE 'trycloudflare|آدرس داشبورد|api\.telegram' /etc/systemd/system /home/ubuntu 2>/dev/null | grep -vE 'node_modules|/\.git/|voice2text/bots' | head -20 || echo "(چیزی پیدا نشد)"
+                echo; echo "===== محتوای اسکریپت‌های مشکوک (بدون چاپ توکن) ====="
+                for f in $(sudo grep -rlsiE 'trycloudflare|آدرس داشبورد' /etc/systemd/system /home/ubuntu 2>/dev/null | grep -vE 'node_modules|/\.git/' | head -5); do
+                  echo "----- $f -----"
+                  sudo sed -E 's/[0-9]{6,}:[A-Za-z0-9_-]{30,}/<BOT_TOKEN>/g' "$f" 2>/dev/null | head -60 || true
                 done
                 ;;
               db-query)
