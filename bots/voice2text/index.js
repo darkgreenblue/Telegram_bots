@@ -34,7 +34,7 @@ const MIN_RECHARGE = 50_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
 const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
-const PRODUCT_VERSION = '1.0.0';
+const PRODUCT_VERSION = '1.0.1';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -1138,6 +1138,15 @@ async function notionCreatePage(parentId, title, content) {
     children: textToNotionBlocks(content),
   });
 }
+
+// مقصدهای سریعِ Notion برای مالک (به‌جای مرور کل صفحات): هر خروجی مستقیماً به
+// زیرصفحه‌ی «Voice Inbox»ِ صفحه‌ی انتخابی می‌رود. عنوان/آیکون دقیقاً مطابق Notion.
+// inbox = آی‌دیِ صفحه‌ی «Voice Inbox» داخل هر صفحه‌ی اصلی.
+const NOTION_QUICK_TARGETS = [
+  { icon: '✏️', title: 'منشی شخصی',  inbox: '39f6db84-2315-8120-849e-f5e634f01d84' },
+  { icon: '🥎', title: 'صف پرامپت‌ها', inbox: '39f6db84-2315-8092-8d72-fcc2fd13bb40' },
+  { icon: '🎤', title: 'Meetings',    inbox: '39f6db84-2315-8099-9a4e-ea1238dc8ae9' },
+];
 
 async function generateNotionTitle(text) {
   try {
@@ -2818,86 +2827,28 @@ bot.on('callback_query', async (ctx) => {
         } catch {}
       };
 
-      if (data === 'ntn:start' || data === 'ntn:back') {
+      if (data === 'ntn:start') {
         await ctx.answerCbQuery();
-        if (data === 'ntn:back') state.navPath.pop();
-
-        if (state.navPath.length === 0) {
-          let pages;
-          try { pages = await notionGetRootPages(); }
-          catch (e) { return editNotionMsg('❌ خطا در اتصال به نوشن: ' + e.message, []); }
-          if (!pages.length) return editNotionMsg('هیچ صفحه‌ای با Integration share نشده.', []);
-          await editNotionMsg(
-            'به کدوم بخش بفرستم؟',
-            pages.map(p => [{ text: '📂 ' + notionPageTitle(p), callback_data: 'ntn:nav:' + id32(p.id) }])
-          );
-        } else {
-          const cur = state.navPath[state.navPath.length - 1];
-          let children;
-          try { children = await notionGetChildPages(cur.id); }
-          catch (e) { return editNotionMsg('❌ خطا در دریافت زیرصفحه‌ها', []); }
-          await editNotionMsg(
-            state.navPath.map(n => n.title).join(' ▸ '),
-            [
-              [{ text: '📌 بفرست همین‌جا', callback_data: 'ntn:sel:' + id32(cur.id) }],
-              ...children.map(p => [{ text: '📂 ' + p.title, callback_data: 'ntn:nav:' + id32(p.id) }]),
-              [{ text: '◀️ بازگشت', callback_data: 'ntn:back' }],
-            ]
-          );
-        }
-        return;
-      }
-
-      if (data.startsWith('ntn:nav:')) {
-        await ctx.answerCbQuery();
-        const id32str = data.slice(8);
-        const pageId = id36(id32str);
-
-        let children;
-        try { children = await notionGetChildPages(pageId); }
-        catch (e) { return editNotionMsg('❌ خطا: ' + e.message, []); }
-
-        let pageTitle = 'صفحه';
-        try { pageTitle = notionPageTitle(await notionAPI('GET', `/pages/${pageId}`)); } catch {}
-
-        if (!children.length) {
-          // Leaf — auto-create
-          await editNotionMsg('⏳ در حال ارسال به نوشن...', []);
-          try {
-            const title = await generateNotionTitle(state.text);
-            await notionCreatePage(pageId, title, state.text);
-            await editNotionMsg(`✅ صفحه «${title}» در نوشن ساخته شد.`, []);
-            notionStates.delete(uid);
-          } catch (e) {
-            logErr('Notion create error:', e.message);
-            await editNotionMsg('❌ خطا در ارسال به نوشن: ' + e.message, []);
-          }
-          return;
-        }
-
-        state.navPath.push({ id: pageId, title: pageTitle });
         await editNotionMsg(
-          state.navPath.map(n => n.title).join(' ▸ '),
-          [
-            [{ text: '📌 بفرست همین‌جا', callback_data: 'ntn:sel:' + id32str }],
-            ...children.map(p => [{ text: '📂 ' + p.title, callback_data: 'ntn:nav:' + id32(p.id) }]),
-            [{ text: '◀️ بازگشت', callback_data: 'ntn:back' }],
-          ]
+          'به کدوم بخش بفرستم؟',
+          NOTION_QUICK_TARGETS.map((t, i) => [{ text: `${t.icon} ${t.title}`, callback_data: `ntn:quick:${i}` }])
         );
         return;
       }
 
-      if (data.startsWith('ntn:sel:')) {
+      if (data.startsWith('ntn:quick:')) {
         await ctx.answerCbQuery('در حال ارسال...');
-        const pageId = id36(data.slice(8));
+        const target = NOTION_QUICK_TARGETS[parseInt(data.slice('ntn:quick:'.length), 10)];
+        if (!target) return editNotionMsg('❌ گزینه نامعتبر است.', []);
         await editNotionMsg('⏳ در حال ارسال به نوشن...', []);
         try {
           const title = await generateNotionTitle(state.text);
-          await notionCreatePage(pageId, title, state.text);
-          await editNotionMsg(`✅ صفحه «${title}» در نوشن ساخته شد.`, []);
+          // خروجی به‌صورت یک صفحه‌ی جدید داخل «Voice Inbox»ِ بخش انتخابی ثبت می‌شود
+          await notionCreatePage(target.inbox, title, state.text);
+          await editNotionMsg(`✅ در «Voice Inbox»ِ «${target.icon} ${target.title}» ثبت شد:\n«${title}»`, []);
           notionStates.delete(uid);
         } catch (e) {
-          logErr('Notion create error:', e.message);
+          logErr('Notion quick create error:', e.message);
           await editNotionMsg('❌ خطا در ارسال به نوشن: ' + e.message, []);
         }
         return;
