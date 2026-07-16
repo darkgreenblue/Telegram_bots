@@ -28,11 +28,13 @@ export const BOTS = [
   {
     key: 'voice2text', title: '🎙 ویس به متن', dataDir: '../voice2text/data', pattern: /^bot\.db$/,
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
+    receiptQueue: true, // جدول admin_actions دارد؛ داشبورد تأیید/رد را enqueue می‌کند
   },
   {
     key: 'tarot', title: '🔮 تاروت', dataDir: '../tarot/data', pattern: /^bot-[a-z-]+\.db$/,
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
+    receiptQueue: true,
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
   {
@@ -75,6 +77,7 @@ export function instances() {
 
 /* ---- helperهای پروفایل: هر route به‌جای مقدار hardcode این‌ها را صدا می‌زند ---- */
 export const abSupported = (bot) => !!botByKey(bot)?.abSupport;
+export const receiptQueueSupported = (bot) => !!botByKey(bot)?.receiptQueue;
 export const userPk = (bot) => botByKey(bot)?.userPk || 'telegram_id';
 export const userNameCol = (bot) => botByKey(bot)?.userNameCol || 'name';
 export const moneyOf = (bot) => botByKey(bot)?.money || MONEY_WALLET;

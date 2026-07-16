@@ -19,6 +19,36 @@ LOCALE = {
         "persona":      "🎭 Mudar estilo",
         "invite":       "🎁 Link de convite",
         "language":     "🌐 Idioma",
+        "symbols":      "🔍 Buscador de símbolos (grátis)",
+        "reset_test":   "🔄 Redefinir conta (admin)",
+    },
+
+    # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/pt نمایش داده نمی‌شوند
+    "sym": {
+        "intro": (
+            "Bem-vindo ao *Buscador de símbolos do sonho* 🔍\n\n"
+            "Tudo o que você vê num sonho (água, dentes, uma cobra, voar...) é um símbolo com um segredo dentro. "
+            "Escolha a primeira letra do que você viu e eu direi o significado no seu próprio estilo de interpretação.\n\n"
+            "Esta parte é totalmente grátis ✨"
+        ),
+        "letter_header": "🔍 Símbolos com «{letter}» (página {page} de {pages})\n\nEscolha o que você viu no seu sonho:",
+        "letter_empty": "Ainda não há símbolos para «{letter}» 🌫️ Tente outra letra.",
+        "word_title": "🔍 O símbolo «{word}» no Reino dos Sonhos",
+        "cta_line": (
+            "Mas lembre-se, companheiro: o verdadeiro significado deste símbolo está ligado ao resto do seu sonho. "
+            "Junto às pessoas, lugares e emoções do seu sonho ele pode ganhar um sentido muito mais preciso e pessoal; "
+            "por isso contar o sonho completo é outro mundo 💫"
+        ),
+        "btn_dream":     "✨ Contar meu sonho completo",
+        "btn_letters":   "🔤 Todas as letras",
+        "btn_back_list": "🔙 Voltar à lista",
+        "btn_prev":      "◀️ Anterior",
+        "btn_next":      "Próxima ▶️",
+        "page_btn": "Pág. {n}",
+        "btn_paywall":   "🔍 Buscador de símbolos (grátis)",
+        "search_hint":   "Ou digite aqui o nome de um símbolo (como: cobra, dentes, água) e eu o encontro para você 👇",
+        "search_multi":  "🔍 Encontrei {count} símbolos próximos do que você escreveu. Qual estava no seu sonho?",
+        "not_found":     "Ainda não há nenhum símbolo para «{query}» 🌫️\n\nVocê pode buscar por letra, ou me contar o sonho completo para eu interpretá-lo com precisão e de forma pessoal.",
     },
 
     "welcome_intro": (
@@ -242,4 +272,6 @@ LOCALE = {
 
     "lang_changed": "Idioma definido para *Português* 🌙 Vamos começar de novo…",
     "processing_busy": "Um momento — ainda tô com seu sonho anterior… 🌙",
+    "main_menu": "🌙 Menu principal\n\nO que você quer fazer?",
+    "btn_back": "◀️ Voltar",
 }

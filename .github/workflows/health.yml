@@ -1,9 +1,8 @@
 # Health — پایش خودکار سلامت ربات‌ها روی VPS (هر ۳۰ دقیقه؛ گیت‌هاب گاهی اجرا را عقب می‌اندازد).
-# دو سطح شدت، با پیامِ مشخص (کدام ربات + چه مشکلی):
-#   🔴 خرابیِ واقعی (ربات pm2 آفلاین/کرش‌لوپ، یا سرویس systemd تعبیر خواب غیرفعال، یا سرور
-#      در دسترس نیست) → جاب قرمز + ساخت/آپدیت Issue + پیام تلگرام.
-#   🟡 صف رسید معطل (پرداخت waiting_review قدیمی‌تر از ۲ ساعت) → ربات‌ها سالم‌اند؛ فقط
-#      اطلاع‌رسانی تلگرام (بدون قرمزکردن جاب و بدون Issue) تا مالک رسید را تأیید/رد کند.
+# فقط خرابیِ واقعی را می‌پاید (ربات pm2 آفلاین/کرش‌لوپ، سرویس systemd تعبیر خواب غیرفعال، یا سرور
+# در دسترس نیست) → جاب قرمز + ساخت/آپدیت Issue + پیام تلگرام به مالک با جزئیات مشخص.
+# صف رسید معطل دیگر این‌جا چک نمی‌شود؛ خودِ هر ربات رسیدهای معطل را دوره‌ای دوباره برای ادمین‌هایش
+# می‌فرستد (resendReceiptToAdmins در sweep) — یادآوری در همان رباتِ مربوطه، نه cross-bot.
 # جزئیات مشکل از خروجی چک روی سرور استخراج و در پیام گنجانده می‌شود (خطوط با پیشوند PROBLEM:).
 name: Health
 
@@ -32,27 +31,42 @@ jobs:
           ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
           OUT=$(ssh -i ~/.ssh/health_key -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@185.204.171.170 'bash -s' <<'REMOTE'
             cd ~/voice2text
-            # ── خرابیِ pm2: آفلاین یا کرش‌لوپ (بالا آمده ولی در ۱۰ دقیقه‌ی اخیر با ری‌استارت زیاد) ──
+            # ── خرابیِ pm2: آفلاین یا کرش‌لوپ ──
+            # کرش‌لوپ با unstable_restarts سنجیده می‌شود (ری‌استارتِ داخل min_uptime = کرشِ واقعی)، نه
+            # restart_time که تجمعی است و هر reloadِ دیپلوی بالایش می‌برد → وگرنه بعد از چند دیپلویِ لانچ
+            # هشدارِ کرش‌لوپِ کاذب می‌داد و مالک را به هشدارها بی‌حس می‌کرد.
             pm2 jlist | node -e "
               const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
               for (const p of a) {
                 const offline = p.pm2_env.status !== 'online';
-                const loop = (Date.now() - p.pm2_env.pm_uptime) < 10*60000 && p.pm2_env.restart_time > 5;
-                if (offline) console.log('PROBLEM:🔴 ربات «' + p.name + '» آفلاین است (وضعیت=' + p.pm2_env.status + ', ری‌استارت=' + p.pm2_env.restart_time + ')');
-                else if (loop) console.log('PROBLEM:🔴 ربات «' + p.name + '» در کرش‌لوپ است (ری‌استارت=' + p.pm2_env.restart_time + ' در ۱۰ دقیقه)');
+                const unstable = p.pm2_env.unstable_restarts || 0;
+                const loop = (Date.now() - p.pm2_env.pm_uptime) < 10*60000 && unstable > 5;
+                if (offline) console.log('PROBLEM:🔴 ربات «' + p.name + '» آفلاین است (وضعیت=' + p.pm2_env.status + ')');
+                else if (loop) console.log('PROBLEM:🔴 ربات «' + p.name + '» در کرش‌لوپ است (کرشِ ناپایدار=' + unstable + ')');
               }
             "
             # error-log ربات‌های خراب را در لاگِ همین run چاپ کن (برای دیباگ)
             pm2 jlist | node -e "
               const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
               for (const p of a) {
-                const bad = p.pm2_env.status !== 'online' || ((Date.now()-p.pm2_env.pm_uptime)<10*60000 && p.pm2_env.restart_time>5);
+                const bad = p.pm2_env.status !== 'online' || ((Date.now()-p.pm2_env.pm_uptime)<10*60000 && (p.pm2_env.unstable_restarts||0)>5);
                 if (bad) console.log(p.name);
               }
             " | while read -r app; do
               echo "===== $app — error.log (آخرین ۴۰ خط) ====="
               tail -n 40 ~/.pm2/logs/"$app"-error.log 2>/dev/null || echo "(خالی)"
             done
+            # ── اپ گم‌شده: هر اپ ecosystem که .env دارد باید در pm2 باشد ──
+            # (بدون این چک، pm2ِ «خالی» بعد از ریبوت = لیست خالی = هیچ هشداری! لیست خالی یعنی همه‌چیز داون است)
+            pm2 jlist | node -e "
+              const eco = require(process.cwd() + '/ecosystem.config.cjs');
+              const fs = require('fs');
+              const up = new Set(JSON.parse(fs.readFileSync(0, 'utf8')).map(p => p.name));
+              for (const app of eco.apps) {
+                if (!fs.existsSync(process.cwd() + '/' + app.cwd + '/.env')) continue; // هنوز secret ندارد — انتظار نمی‌رود اجرا باشد
+                if (!up.has(app.name)) console.log('PROBLEM:🔴 ربات «' + app.name + '» اصلاً در pm2 نیست (ریبوت سرور بدون pm2 resurrect؟ با Ops restart یا deploy برگردان)');
+              }
+            "
             # ── تعبیر خواب: systemd نه pm2 (استثنای مونوریپو) ──
             if sudo systemctl list-unit-files 2>/dev/null | grep -q '^tabir-khab'; then
               STATE=$(sudo systemctl is-active tabir-khab 2>/dev/null || true)
@@ -62,24 +76,33 @@ jobs:
                 tail -n 40 /home/ubuntu/tabir_khab/logs/bot.log 2>/dev/null || echo "(خالی)"
               fi
             fi
-            # ── صف رسید معطل: پرداخت waiting_review قدیمی‌تر از ۲ ساعت (اعتماد مالی — بند ۱۰ ریشه) ──
-            # این «خرابی» نیست؛ ربات سالم است ولی رسیدی منتظر تأیید مالک مانده. شماره‌ی رسیدها هم می‌آید.
-            for d in bots/*/data; do
-              app=$(basename "$(dirname "$d")")
-              DBFILE=$(ls "$d"/*.db 2>/dev/null | head -1)
-              [ -n "$DBFILE" ] || continue
-              [ -d "bots/$app/node_modules/better-sqlite3" ] || continue
-              DBFILE="$DBFILE" APP="$app" node -e "
-                try {
-                  const path = require('path');
-                  const D = require(path.join(process.cwd(), 'bots', process.env.APP, 'node_modules', 'better-sqlite3'));
-                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
-                  if (!db.prepare(\"SELECT 1 FROM sqlite_master WHERE type='table' AND name='payments'\").get()) process.exit(0);
-                  const rows = db.prepare(\"SELECT id FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 ORDER BY id\").all();
-                  if (rows.length) console.log('PROBLEM:🟡 ' + process.env.APP + ': ' + rows.length + ' رسید پرداخت بیش از ۲ ساعت منتظر تأیید (شماره: ' + rows.map(r => r.id).join(', ') + ') — در ربات یا داشبورد تأیید/رد کن');
-                } catch (e) {}
-              " 2>/dev/null
+            # ── تونل داشبورد: داشبورد فقط از Cloudflare Tunnel در دسترس است؛ pm2 سالم ≠ داشبورد در دسترس ──
+            if sudo systemctl list-unit-files 2>/dev/null | grep -q '^dash-tunnel'; then
+              TSTATE=$(sudo systemctl is-active dash-tunnel 2>/dev/null || true)
+              if [ "$TSTATE" != "active" ]; then
+                echo "PROBLEM:🔴 سرویس «dash-tunnel» (تونل داشبورد) فعال نیست (وضعیت=$TSTATE) — داشبورد از بیرون در دسترس نیست"
+              fi
+            fi
+            # ── دیسک پر: pm2 online می‌ماند ولی نوشتنِ SQLite (پول!) شکست می‌خورد ──
+            USEPCT=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+            if [ -n "$USEPCT" ] && [ "$USEPCT" -ge 92 ]; then
+              echo "PROBLEM:🔴 دیسک سرور ${USEPCT}٪ پر است — نوشتنِ دیتابیس‌ها (پول) ممکن است شکست بخورد. لاگ/بکاپ قدیمی را پاک کن."
+            fi
+            # ── موجودی OpenRouter هر ربات: کلیدِ تمام‌شده = قطعیِ کاملِ محصول (وسط تبلیغات فاجعه است) ──
+            # آستانه‌ی هشدار بالا ($5) چون نرخ سوختِ تبلیغات بالاست؛ فقط اگر endpoint پاسخ عددی داد.
+            for d in bots/voice2text bots/tarot; do
+              envf="$d/.env"
+              [ -f "$envf" ] || continue
+              KEY=$(grep -m1 '^OPENROUTER_API_KEY=' "$envf" | cut -d= -f2- | tr -d '"')
+              [ -n "$KEY" ] || continue
+              REMAIN=$(curl -fsS -m 15 -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/credits 2>/dev/null \
+                | node -e "try{const j=JSON.parse(require('fs').readFileSync(0,'utf8')).data;const r=Number(j.total_credits)-Number(j.total_usage);if(isFinite(r))console.log(r.toFixed(2));}catch(e){}" 2>/dev/null)
+              if [ -n "$REMAIN" ] && node -e "process.exit(Number(process.argv[1])<5?0:1)" "$REMAIN"; then
+                echo "PROBLEM:🔴 موجودی OpenRouterِ «$(basename "$d")» فقط \$$REMAIN مانده — قبل از تمام‌شدن شارژ کن (وگرنه محصول کامل می‌خوابد)."
+              fi
             done
+            # صف رسید معطل این‌جا چک نمی‌شود — هر ربات خودش رسیدهای معطل را دوره‌ای دوباره
+            # برای ادمین‌هایش می‌فرستد (یادآوری per-bot، نه از مسیر Health/cross-bot).
             echo "HEALTH_DONE"
           REMOTE
           )
@@ -100,7 +123,7 @@ jobs:
           if [ -n "$ALERT" ]; then echo "has_alert=true"; else echo "has_alert=false"; fi >> "$GITHUB_OUTPUT"
           [ -n "$ALERT" ] && echo "⚠️ موارد یافت‌شده:" && printf '%s\n' "$ALERT" || echo "✅ همه‌ی ربات‌ها سالم و صف رسید خالی/تازه است"
 
-      # پیام تلگرام به مالک(ها) — با جزئیاتِ مشخص. برای 🔴 و 🟡 هر دو می‌آید ولی متن فرق دارد.
+      # پیام تلگرام به مالک(ها) — با جزئیاتِ مشخص (کدام ربات + چه مشکلی). فقط خرابیِ واقعی (🔴).
       - name: Telegram alert
         if: steps.check.outputs.has_alert == 'true'
         env:
@@ -109,24 +132,16 @@ jobs:
           T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
           OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
           DETAIL:  ${{ steps.check.outputs.alert }}
-          OUTAGE:  ${{ steps.check.outputs.outage }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
           if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          if [ "$OUTAGE" = "true" ]; then
-            HEAD="🚨 پایش سلامت — خرابی:"
-            FOOT="لاگ کامل: $RUN_URL
-          (به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده» تا بررسی کنم)"
-          else
-            HEAD="🟡 پایش سلامت — نیازمند رسیدگی (ربات‌ها سالم‌اند):"
-            FOOT="این هشدار تا وقتی رسیدها تأیید/رد نشوند تکرار می‌شود."
-          fi
-          MSG="$HEAD
+          MSG="🚨 پایش سلامت — خرابی:
 
           $DETAIL
 
-          $FOOT"
+          لاگ کامل: $RUN_URL
+          (به Claude Code بگو: «ربات مشکل دارد، Health قرمز شده» تا بررسی کنم)"
           IFS=',' read -ra OWNERS <<< "$OWNER"
           for id in "${OWNERS[@]}"; do
             id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue

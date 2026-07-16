@@ -33,6 +33,10 @@ if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); pro
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 const L = (await import(`./locales/${LOCALE}.js`)).default;
 const fmt = L.fmt;
+// فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
+const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
+// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale)
+const QUIZ = await import(`./quiz.js`).then(m => m.default.personalities).catch(() => ({}));
 
 const FLASH          = 'google/gemini-2.5-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
@@ -42,16 +46,28 @@ const MAX_VOICE_BYTES = 3 * 1024 * 1024;
 const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM per کاربر — ضد حلقه‌ی «انتخاب کن، لغو کن»
 
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
-// قبل از انتشار عمومی حتماً false شود (دکمه کلاً مخفی می‌شود؛ /reset فقط برای OWNER می‌ماند).
-const TEST_PHASE = true;
+// false = ربات زنده (لانچ ۱۴۰۵/۰۴/۲۰): دکمه کلاً مخفی؛ /reset فقط برای OWNER می‌ماند.
+const TEST_PHASE = false;
+
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
+// این PR رفتار را عوض نمی‌کند (فیچرِ زیر پشتِ فلگِ خاموش است)؛ هنگام روشن‌کردنِ FREE_MENU_ENABLED باید به 1.1.0 bump شود.
+const PRODUCT_VERSION = '1.0.0';
+
+// 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
+// فعلاً خاموش عرضه می‌شود (dark launch): merge روی ربات زنده هیچ تغییرِ رفتاری نمی‌دهد.
+// روشن‌کردن = یک‌خط true + bump PRODUCT_VERSION به 1.1.0 در همان PR (تغییرِ رفتاری).
+// Rollback فوری: دوباره false کن → دکمه‌ی کیبورد، منو و همه‌ی callbackها محو و رفتار دقیقاً مثل قبل.
+const FREE_MENU_ENABLED = false;
 
 // 🌀 فال با موضوع آزاد: به کاربر سیگنال می‌دهد می‌تواند درباره‌ی «هر موضوعی» فال بگیرد (نه فقط کاتالوگ ثابت).
 // Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
 // (فال‌های open3/open5 که قبلاً ثبت شده‌اند بی‌ضرر در DB می‌مانند؛ پایپ‌لاین افشا از SPREAD_BY_ID می‌خواند).
 const OPEN_TOPIC_ENABLED = true;
 
-const ADMIN_IDS = [100257975];
-const OWNER_ID  = 100257975;
+// ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
+const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
+  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
 const CARD_NUMBER = '6219861904145405';
@@ -174,8 +190,25 @@ try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: نام فارسیِ خودِ کاربر (جدا از first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند)
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: آخرین روزِ گرفتنِ فال حافظ (قلاب رایگانِ روزانه، مستقل از کارت روز)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_hafez_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: سقفِ نرمِ استخاره‌ی روزانه (تاریخ + شمارنده؛ صفر می‌شود در روزِ نو)
+try { db.prepare("ALTER TABLE users ADD COLUMN estekhare_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN estekhare_count INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// migration: آخرین روزِ کوییزِ «کدام کارتِ تاروتی؟» (تکرارِ ماهی‌یک‌بار)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_quiz_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration: آخرین روزِ فالِ قهوه (رایگانِ روزی‌یک‌بار)
+try { db.prepare("ALTER TABLE users ADD COLUMN last_coffee_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
+try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL DEFAULT (unixepoch()), done_at INTEGER
+  );
+`);
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
@@ -193,6 +226,10 @@ const stmts = {
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
+  setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
+  setEstekhare: db.prepare('UPDATE users SET estekhare_date=?, estekhare_count=? WHERE telegram_id=?'),
+  setQuiz:    db.prepare('UPDATE users SET last_quiz_date=? WHERE telegram_id=?'),
+  setCoffee:  db.prepare('UPDATE users SET last_coffee_date=? WHERE telegram_id=?'),
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
@@ -220,8 +257,16 @@ const stmts = {
   insertPayment: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id=?'),
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
+  // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
+  claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
+  staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
+  setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
+  pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
+  markActionDone: db.prepare('UPDATE admin_actions SET done_at=unixepoch() WHERE id=?'),
   setPaymentDiscount: db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=?'),
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
@@ -233,6 +278,9 @@ const stmts = {
   insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
   countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
+  // پرداختی که تخفیفِ خودکارِ اولین شارژ گرفته (discount_code_id NULL + original_amount ست) و هنوز باطل نشده —
+  // ضد race که کاربر با چند پرداختِ pending هم‌زمان تخفیف اولِ خودکار را چندبار بگیرد
+  countAutoDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND discount_code_id IS NULL AND original_amount IS NOT NULL AND status IN ('pending','waiting_review','approved')"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -271,9 +319,12 @@ function getSession(uid) {
 function setSession(uid, s) { stmts.setSession.run(s ? JSON.stringify(s) : '', uid); }
 function patchSession(uid, patch) { const s = getSession(uid); Object.assign(s, patch); setSession(uid, s); return s; }
 
-// پاک‌سازی کامل یک کاربر — فاز تست (شامل کیف‌پول، چون فقط پول هدیه است)
+// پاک‌سازی کامل یک کاربر — /reset مالک (شامل کیف‌پول)
 function wipeUser(uid) {
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['referrals','referee_id'],['events','user_id'],['ab_exposures','user_id']]) {
+  // صف اکشن رسیدها به payment_id وصل است نه user_id → قبل از حذف payments با subquery پاک شود
+  try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('wipe admin_actions', e.message); }
+  try { db.prepare('DELETE FROM referrals WHERE referee_id=? OR referrer_id=?').run(uid, uid); } catch (e) { logErr('wipe referrals', e.message); }
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -413,12 +464,15 @@ async function typing(ctx, ms, action = 'typing') {
   await sleep(ms);
 }
 
-function mainKeyboard() {
+// uid اختیاری: فقط ادمین‌ها (دو آی‌دیِ ADMIN_IDS) دکمه‌ی «ریست حساب (ادمین)» را می‌بینند — همیشه،
+// حتی خارج از فاز تست. این تنها تمایزِ رو-به-کاربرِ ادمین است (ابزار مدیریتی؛ فلوی محصول یکسان می‌ماند).
+function mainKeyboard(uid) {
   const rows = [
     [L.buttons.daily, L.buttons.reading],
     [L.buttons.wallet, L.buttons.inviteMain],
   ];
-  if (TEST_PHASE) rows.push([L.buttons.resetTest]);
+  if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
+  if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
   return Markup.keyboard(rows).resize();
 }
 
@@ -475,20 +529,42 @@ async function callReadingLLM(readingId) {
 
 function startPrefetch(uid, readingId) {
   const p = callReadingLLM(readingId).catch(e => { logErr('prefetch:', e.message); return null; });
-  prefetches.set(uid, p);
+  prefetches.set(uid, { readingId, promise: p }); // readingId تا نتیجه‌ی فالِ دیگری به این فال تزریق نشود
   return p;
 }
 // نتیجه‌ی LLM؛ اگر پیش‌فراخوانی از دست رفته بود (مثلاً ری‌استارت) دوباره صدا می‌زند
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const p = prefetches.get(uid);
-  const result = p ? await p : await callReadingLLM(readingId);
-  prefetches.delete(uid);
+  const entry = prefetches.get(uid);
+  // فقط اگر پیش‌فراخوانی دقیقاً برای همین فال بود از آن استفاده کن؛ وگرنه از نو صدا بزن
+  // (باگ: کاربر فال A را رها و فال B را باز می‌کرد → پرامیس A نتیجه‌ی اشتباه/سکوت می‌داد)
+  const p = (entry && entry.readingId === readingId) ? entry.promise : callReadingLLM(readingId);
+  const result = await p;
+  if (entry && entry.readingId === readingId) prefetches.delete(uid);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
   if (r2?.llm_json) { try { return JSON.parse(r2.llm_json); } catch {} }
   return null;
+}
+
+// بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
+// → برگشت کامل مبلغ + پیام + دکمه‌ی تلاش مجدد. در لحظه‌ی بوت هیچ فراخوانی LLM در جریان نیست پس امن است
+// (پول کاربر هرگز در حالت نامعلوم نمی‌ماند — بند ۹ CLAUDE.md).
+function recoverOrphanReadings() {
+  let orphans = [];
+  try { orphans = db.prepare("SELECT id, user_id, price FROM readings WHERE status='started' AND llm_json=''").all(); }
+  catch (e) { logErr('recoverOrphan query:', e.message); return; }
+  for (const r of orphans) {
+    try {
+      if (r.price > 0) stmts.credit.run(r.price, r.user_id);
+      stmts.setReadingStatus.run('refunded', r.id);
+      track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'restart' });
+      const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.retry, `retryr:${r.id}`)]]);
+      bot.telegram.sendMessage(r.user_id, L.reading.refunded, { reply_markup: kb.reply_markup }).catch(() => {});
+    } catch (e) { logErr('recoverOrphan reading#' + r.id, e.message); }
+  }
+  if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فالِ یتیمِ پرداخت‌شده refund شد`);
 }
 
 /* ===== 8) Bot ===== */
@@ -507,9 +583,9 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source فقط برای کاربر جدید
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source/first_version فقط کاربر جدید
   const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
-  captureStart(db, uid, payload, isNew);
+  captureStart(db, uid, payload, isNew, PRODUCT_VERSION);
 
   // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);
@@ -528,7 +604,7 @@ async function handleStart(ctx) {
     // نام تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند؛ پس نامِ خودگفته را مبنا می‌گیریم.
     setState(uid, 'onboard_name');
     setSession(uid, { refBonus }); // وعده‌ی رفرال بعد از گرفتن نام نشان داده می‌شود
-    await ctx.reply(L.onboarding.askName, mainKeyboard());
+    await ctx.reply(L.onboarding.askName, mainKeyboard(ctx.from.id));
     return;
   }
 
@@ -542,7 +618,7 @@ async function handleStart(ctx) {
   } else if (user.last_daily_date !== tehranToday()) {
     msg += L.returning.dailyReminder;
   }
-  await ctx.reply(msg, mainKeyboard());
+  await ctx.reply(msg, mainKeyboard(ctx.from.id));
 }
 bot.start(handleStart);
 
@@ -566,7 +642,7 @@ async function finishNameOnboarding(ctx, rawName) {
   const refBonus = getSession(uid).refBonus;
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
-  await ctx.reply(L.onboarding.welcome(name), mainKeyboard());
+  await ctx.reply(L.onboarding.welcome(name), mainKeyboard(ctx.from.id));
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
   await typing(ctx, PACE_S);
@@ -664,6 +740,268 @@ async function dailyCard(ctx) {
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
 
+/* ---------- 🎁 منوی سرگرمی‌های رایگان + 📜 فال حافظ (رایگان، روزی یک‌بار، بدون LLM) ----------
+   کل این بخش پشت FREE_MENU_ENABLED است؛ خاموش = دکمه/منو/callbackها بی‌اثر (رفتار عیناً قبلی). */
+async function showFreeMenu(ctx) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
+  if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
+  if (Object.keys(QUIZ).length) rows.push([Markup.button.callback(L.buttons.freeQuiz, 'quiz_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeCoffee, 'coffee_go')]);
+  rows.push([Markup.button.callback(L.buttons.freeLibrary, 'lib_go')]);
+  await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
+  track(db, uid, 'free_menu_opened', {});
+}
+bot.hears(L.buttons.freeMenu, showFreeMenu);
+bot.action('freemenu', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showFreeMenu(ctx); });
+// ردیفِ «به‌جای ترک، رایگان بازی کن» برای پی‌وال (خالی وقتی فیچر خاموش است)
+const freeMenuRow = () => (FREE_MENU_ENABLED && HAFEZ.length)
+  ? [[Markup.button.callback(L.buttons.freeMenu, 'freemenu')]] : [];
+
+async function hafezFaal(ctx, via) {
+  if (!FREE_MENU_ENABLED || !HAFEZ.length) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.hafezCta, 'opentopic')]]);
+  if (user.last_hafez_date === today) return ctx.reply(L.hafez.alreadyUsed, ctaKb);
+  stmts.setHafez.run(today, uid);
+  // انتخابِ قطعیِ روزانه از هش (بعد از ری‌استارت هم همان غزلِ همان روز برای همان کاربر)
+  const g = HAFEZ[seedToInt(`hafez:${uid}:${today}`) % HAFEZ.length];
+  await typing(ctx, PACE_M);
+  await ctx.reply(L.hafez.intent);
+  await typing(ctx, PACE_REVEAL);
+  await ctx.reply(L.hafez.ghazal(g));
+  await typing(ctx, PACE_M);
+  await ctx.reply(L.hafez.faal(g.faal));
+  track(db, uid, 'hafez_taken', { n: g.n, via: via || 'menu' });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'hafez' });
+  await sleep(PACE_S);
+  await ctx.reply(L.hafez.cta, ctaKb);
+}
+bot.action('hafez_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return hafezFaal(ctx, 'menu'); });
+
+/* ---------- 📿 استخاره با تسبیح (رایگان، سقفِ نرمِ ۳/روز، بدون LLM) ---------- */
+const ESTEKHARE_CAP = 3;
+async function estekhareFaal(ctx, via) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  const ctaKb = Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.estekhareYesno, 'spread:yesno')],
+    [Markup.button.callback(L.buttons.estekhareChoice, 'spread:choice')],
+  ]);
+  const count = user.estekhare_date === today ? (user.estekhare_count || 0) : 0;
+  if (count >= ESTEKHARE_CAP) return ctx.reply(L.estekhare.cap, ctaKb);
+  stmts.setEstekhare.run(today, count + 1, uid);
+  // نتیجه‌ی قطعی از هش؛ count داخلِ seed است تا سه استخاره‌ی یک روز سه جوابِ متفاوت بدهند
+  const buckets = ['good', 'mid', 'bad'];
+  const h = seedToInt(`estekhare:${uid}:${today}:${count}`);
+  const outcome = buckets[h % 3];
+  const variants = L.estekhare.outcomes[outcome];
+  const text = variants[(h >>> 2) % variants.length];
+  // فضاسازی + انیمیشنِ شمردنِ دانه‌ها (ادیتِ پیاپیِ یک پیام)
+  await ctx.reply(L.estekhare.intent);
+  await typing(ctx, PACE_M);
+  const frames = L.estekhare.beadFrames;
+  const msg = await ctx.reply(frames[0]);
+  for (let i = 1; i < frames.length; i++) {
+    await sleep(PACE_M);
+    try { await ctx.telegram.editMessageText(msg.chat.id, msg.message_id, undefined, frames[i]); } catch {}
+  }
+  await sleep(PACE_REVEAL);
+  await ctx.reply(L.estekhare.result(text));
+  track(db, uid, 'estekhare_taken', { outcome, via: via || 'menu' });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'estekhare' });
+  await sleep(PACE_S);
+  await ctx.reply(L.estekhare.cta, ctaKb);
+}
+bot.action('estekhare_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return estekhareFaal(ctx, 'menu'); });
+
+/* ---------- 🃏 کوییز «کدام کارتِ تاروتی؟» (رایگان، ماهی‌یک‌بار، بدون LLM؛ موتور رفرال) ----------
+   حالتِ بدونِ state: کلِ مسیرِ پاسخ‌ها در callback_data کدگذاری می‌شود (`quiz:<answers>`)،
+   پس ری‌استارتِ وسطِ کوییز هم بی‌خطر است. */
+const QUIZ_COOLDOWN_DAYS = 30;
+function quizQuestionView(answers) {
+  const step = answers.length;
+  const q = L.quiz.questions[step];
+  const text = `${L.quiz.progress(step + 1, L.quiz.questions.length)}\n\n${q.q}`;
+  const rows = q.options.map((o, i) => [Markup.button.callback(o.t, `quiz:${answers}${i}`)]);
+  return { text, rows };
+}
+async function quizStart(ctx) {
+  if (!FREE_MENU_ENABLED || !Object.keys(QUIZ).length) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const today = tehranToday();
+  if (user.last_quiz_date) {
+    const days = Math.floor((new Date(today) - new Date(user.last_quiz_date)) / 86400000);
+    if (days >= 0 && days < QUIZ_COOLDOWN_DAYS) {
+      return ctx.reply(L.quiz.cap, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.quizCta, 'opentopic')]]));
+    }
+  }
+  track(db, uid, 'quiz_started', {});
+  const { text, rows } = quizQuestionView('');
+  await ctx.reply(L.quiz.intro);
+  await ctx.reply(text, Markup.inlineKeyboard(rows));
+}
+bot.action('quiz_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return quizStart(ctx); });
+
+bot.action(/^quiz:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED || !Object.keys(QUIZ).length) return;
+  const answers = ctx.match[1];
+  const total = L.quiz.questions.length;
+  if (answers.length < total) {              // سؤالِ بعدی روی همان پیام
+    const { text, rows } = quizQuestionView(answers);
+    try { await ctx.editMessageText(text, Markup.inlineKeyboard(rows)); } catch {}
+    return;
+  }
+  // نگاشتِ قطعی: جمعِ رأی‌ها → argmax (tie-break: ترتیبِ m00..m21 در QUIZ)
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const votes = {};
+  for (let s = 0; s < total; s++) {
+    const opt = L.quiz.questions[s].options[Number(answers[s])];
+    if (opt) for (const k of opt.c) votes[k] = (votes[k] || 0) + 1;
+  }
+  // بیشینه‌ی رأی؛ در صورتِ تساوی، انتخابِ قطعی با هش (تا کارت‌های هم‌رأی همه قابل‌دسترس بمانند)
+  const keys = Object.keys(QUIZ);
+  const maxV = Math.max(...keys.map(k => votes[k] || 0));
+  const tied = keys.filter(k => (votes[k] || 0) === maxV);
+  const best = tied[seedToInt(`quiz:${answers}`) % tied.length];
+  const card = CARD_BY_KEY[best];
+  stmts.setQuiz.run(tehranToday(), uid);
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await typing(ctx, PACE_M, 'upload_photo');
+  await sendCardPhoto(ctx, best, L.quiz.resultHead(card), { spoiler: false });
+  await typing(ctx, PACE_M);
+  await ctx.reply(QUIZ[best]);
+  track(db, uid, 'quiz_done', { card: best });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'quiz' });
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  await sleep(PACE_S);
+  const refLink = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(L.quiz.shareText(card))}`;
+  await ctx.reply(L.quiz.cta, Markup.inlineKeyboard([
+    [Markup.button.url(L.buttons.quizShare, shareUrl)],
+    [Markup.button.callback(L.buttons.quizCta, 'opentopic')],
+  ]));
+});
+
+/* ---------- ☕ فال قهوه‌ی سؤال‌محور (رایگان، روزی‌یک‌بار، بدون LLM) ----------
+   حالتِ بدونِ state: پاسخ‌ها در callback_data (`coffee:<answers>`). خوانش = چیدنِ سه نقشِ فنجان. */
+function coffeeQuestionView(answers) {
+  const step = answers.length;
+  const q = L.coffee.questions[step];
+  const text = `${L.coffee.progress(step + 1, L.coffee.questions.length)}\n\n${q.q}`;
+  const rows = q.options.map((o, i) => [Markup.button.callback(o.t, `coffee:${answers}${i}`)]);
+  return { text, rows };
+}
+async function coffeeStart(ctx) {
+  if (!FREE_MENU_ENABLED) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]);
+  if (getUser(uid).last_coffee_date === tehranToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
+  const { text, rows } = coffeeQuestionView('');
+  await ctx.reply(L.coffee.intro);
+  await ctx.reply(text, Markup.inlineKeyboard(rows));
+}
+bot.action('coffee_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return coffeeStart(ctx); });
+
+bot.action(/^coffee:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const answers = ctx.match[1];
+  const total = L.coffee.questions.length;
+  if (answers.length < total) {
+    const { text, rows } = coffeeQuestionView(answers);
+    try { await ctx.editMessageText(text, Markup.inlineKeyboard(rows)); } catch {}
+    return;
+  }
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const today = tehranToday();
+  // اگر همین امروز خوانده، دوباره نده (گاردِ روزی‌یک‌بار روی خودِ نتیجه هم)
+  if (getUser(uid).last_coffee_date === today) {
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    return ctx.reply(L.coffee.alreadyUsed, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]));
+  }
+  stmts.setCoffee.run(today, uid);
+  const parts = [];
+  for (let s = 0; s < total; s++) {
+    const opt = L.coffee.questions[s].options[Number(answers[s])];
+    if (opt) parts.push(opt.s);
+  }
+  const closing = L.coffee.closings[seedToInt(`coffee:${uid}:${today}`) % L.coffee.closings.length];
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.coffee.turn);
+  await typing(ctx, PACE_REVEAL);
+  await ctx.reply(L.coffee.compose(parts, closing));
+  track(db, uid, 'coffee_taken', { combo: answers });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'coffee' });
+  await sleep(PACE_S);
+  await ctx.reply(L.coffee.cta, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]));
+});
+
+/* ---------- 📖 کتابخانه‌ی معنیِ ۷۸ کارت (رایگان، مرور؛ دیتا از cards.js، بدون LLM) ---------- */
+const LIB_PAGE = 8;
+const libCards = (g) => CARDS.filter(c => g === 'major' ? c.arcana === 'major' : c.key[0] === g);
+async function libraryMenu(ctx, edit) {
+  if (!FREE_MENU_ENABLED) return;
+  upsertUser(ctx);
+  const rows = L.library.groups.map((grp, gi) => [Markup.button.callback(grp.t, `lib:l:${gi}:0`)]);
+  const kb = Markup.inlineKeyboard(rows);
+  if (edit) { try { await ctx.editMessageText(L.library.menu, kb); } catch {} }
+  else await ctx.reply(L.library.menu, kb);
+}
+bot.action('lib_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return libraryMenu(ctx, false); });
+bot.action('lib:home', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return libraryMenu(ctx, true); });
+
+bot.action(/^lib:l:(\d+):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const gi = Number(ctx.match[1]);
+  const grp = L.library.groups[gi];
+  if (!grp) return;
+  const cards = libCards(grp.g);
+  const pages = Math.max(1, Math.ceil(cards.length / LIB_PAGE));
+  const p = Math.max(0, Math.min(Number(ctx.match[2]), pages - 1));
+  const rows = cards.slice(p * LIB_PAGE, (p + 1) * LIB_PAGE).map(c => [Markup.button.callback(c.fa, `lib:c:${c.key}`)]);
+  const nav = [];
+  if (p > 0) nav.push(Markup.button.callback(L.library.btnPrev, `lib:l:${gi}:${p - 1}`));
+  if (p < pages - 1) nav.push(Markup.button.callback(L.library.btnNext, `lib:l:${gi}:${p + 1}`));
+  if (nav.length) rows.push(nav);
+  rows.push([Markup.button.callback(L.library.btnCats, 'lib:home')]);
+  try { await ctx.editMessageText(L.library.listHeader(grp.t, p + 1, pages), Markup.inlineKeyboard(rows)); } catch {}
+});
+
+bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!FREE_MENU_ENABLED) return;
+  const key = ctx.match[1];
+  const c = CARD_BY_KEY[key];
+  if (!c) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  await typing(ctx, PACE_M, 'upload_photo');
+  await sendCardPhoto(ctx, key, L.library.card(c), { spoiler: false });
+  track(db, uid, 'card_meaning_viewed', { card: key });
+  const gi = L.library.groups.findIndex(grp => grp.g === (c.arcana === 'major' ? 'major' : key[0]));
+  await ctx.reply(L.library.cta, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.libCta, 'opentopic')],
+    [Markup.button.callback(L.library.btnCats, gi >= 0 ? `lib:l:${gi}:0` : 'lib:home')],
+  ]));
+});
+
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 async function showCatalog(ctx) {
   const uid = ctx.from.id;
@@ -748,7 +1086,7 @@ bot.action('keepfocus', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard());
+  if (!spread) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
   patchSession(uid, { focusKey: getUser(uid).focus_area });
   setState(uid, 'await_question');
   await ctx.reply(L.reading.askQuestion());
@@ -764,7 +1102,7 @@ bot.action('catalog_go', async (ctx) => {
 async function handleQuestion(ctx, question) {
   const uid = ctx.from.id;
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
+  if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   patchSession(uid, { question: question.slice(0, 1500) });
   setState(uid, 'breathing');
   track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
@@ -895,6 +1233,7 @@ async function finishPicking(ctx, uid, s) {
     await sleep(PACE_S);
     await ctx.reply(L.reading.paywallShort(spread.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.recharge, 'recharge')],
+      ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   }
@@ -910,7 +1249,7 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard());
+  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
 });
 
 /* ---------- پی‌وال → کسر → افشای مرحله‌ای ---------- */
@@ -1246,13 +1585,16 @@ bot.action('recharge', async (ctx) => {
 
 async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
-  if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
-  stmts.setPaymentAmount.run(amount, 'receipt', s.paymentId);
+  if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
+  // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
+  if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
   // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
   // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
   let payAmount = amount;
-  if (!hasRecharged(uid)) {
+  // تخفیف اولین شارژ فقط اگر نه شارژِ تأییدشده دارد و نه پرداختِ در جریانی که همین تخفیف را قبلاً گرفته
+  // (چک و نوشتنِ setPaymentDiscount سینکرون‌اند و قبل از اولین await → race بسته می‌شود)
+  if (!hasRecharged(uid) && stmts.countAutoDiscount.get(uid).c === 0) {
     const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
     payAmount = Math.max(0, amount - disc);
     stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
@@ -1297,7 +1639,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   setSession(uid, s);
   setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard());
+  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
   await offerPendingReading(ctx, uid);
 });
@@ -1317,7 +1659,7 @@ function validateDiscount(code, userId, amount) {
 async function applyDiscount(ctx, uid, codeText) {
   const s = getSession(uid);
   const p = s.paymentId && stmts.getPayment.get(s.paymentId);
-  if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard()); }
+  if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   const v = validateDiscount(codeText, uid, p.original_amount || p.amount);
   if (!v.ok) { setState(uid, 'pay_receipt'); return ctx.reply(L.wallet.badDiscount); }
   stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, p.id);
@@ -1421,14 +1763,55 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
 });
 bot.action(/^reject:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
-  const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
-  if (!p || p.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
-  stmts.setPaymentStatus.run('rejected', p.id);
-  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
+  const p = rejectPaymentDb(parseInt(ctx.match[1], 10));
+  if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
 });
+
+/* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
+function rejectPaymentDb(paymentId) {
+  const p = stmts.getPayment.get(paymentId);
+  if (!p || p.status !== 'waiting_review') return null;
+  stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
+  return p;
+}
+// ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد
+async function resendReceiptToAdmins(p) {
+  const u = getUser(p.user_id);
+  const caption = `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n👤 ${dispName(u) || u?.name || '-'}\n🆔 ${p.user_id}\n💰 ${(p.original_amount || p.amount).toLocaleString('fa-IR')} تومان\n🔢 پرداخت #${p.id}\n\nهمین‌جا تأیید/رد کن (یا از داشبورد):`;
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback('✅ تایید', `approve:${p.id}`),
+    Markup.button.callback('❌ رد', `reject:${p.id}`),
+  ]]).reply_markup;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
+      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+    } catch {}
+  }
+  stmts.setReminded.run(p.id);
+}
+// sweep پرداخت (۶۰ ثانیه): درین صف اکشن داشبورد + یادآوری رسیدهای معطل — همه fail-safe
+setInterval(async () => {
+  try {
+    for (const act of stmts.pendingActions.all()) {
+      try {
+        if (act.action === 'approve') {
+          const done = approvePayment(act.payment_id);
+          if (done) { await bot.telegram.sendMessage(done.p.user_id, L.wallet.approved(done.creditAmount, getBalance(done.p.user_id), done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
+        } else if (act.action === 'reject') {
+          const p = rejectPaymentDb(act.payment_id);
+          if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+        }
+      } catch (e) { logErr('admin_action exec:', act.id, e.message); }
+      stmts.markActionDone.run(act.id);
+    }
+    for (const p of stmts.staleReceipts.all()) await resendReceiptToAdmins(p);
+  } catch (e) { logErr('payment sweep:', e.message); }
+}, 60_000);
 
 /* ---------- ادمین: /stats و /newcode ---------- */
 bot.command('stats', (ctx) => {
@@ -1471,17 +1854,19 @@ bot.on('inline_query', async (ctx) => {
 });
 
 /* ---------- ریست تست (قرارداد ریپو §۶ب — فاز تست: همه‌ی کاربران) ---------- */
+// ابزارِ مدیریتیِ فقط-ادمین (دو آی‌دیِ ADMIN_IDS)، همیشه فعال — حتی خارج از فاز تست.
+// فقط دیتای خودِ همان ادمین را پاک می‌کند و او را مثل یک کاربرِ کاملاً جدید از نو معرفی می‌کند
+// (برای تستِ فلوها بدون انتظار). هیچ کاربر دیگری این را نمی‌بیند و در هیچ فلویی دخالت نمی‌کند.
 async function doReset(ctx) {
+  if (!isAdmin(ctx.from.id)) return; // گاردِ اصلی — دکمه فقط برای ادمین‌ها نمایش داده می‌شود، این هم لایه‌ی دوم
   wipeUser(ctx.from.id);
   track(db, ctx.from.id, EVENTS.RESET, {});
-  await ctx.reply(L.reset.done, mainKeyboard());
-  return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو
+  await ctx.reply(L.reset.done, mainKeyboard(ctx.from.id));
+  return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو (upsertUser → isNew=true)
 }
-if (TEST_PHASE) bot.hears(L.buttons.resetTest, doReset);
-bot.command('reset', (ctx) => {
-  if (!TEST_PHASE && ctx.from.id !== OWNER_ID) return;
-  return doReset(ctx);
-});
+// هم برچسبِ جدید، هم برچسبِ قدیمیِ فاز تست (برای دکمه‌ی کش‌شده‌ی احتمالی) — doReset خودش isAdmin را چک می‌کند
+bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
+bot.command('reset', doReset);
 
 /* ---------- هندلر متن (state machine) ---------- */
 bot.on('text', async (ctx) => {
@@ -1494,7 +1879,7 @@ bot.on('text', async (ctx) => {
     if (state === 'onboard_name') return await finishNameOnboarding(ctx, text);
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     if (state === 'pay_amount') {
-      const amount = parseInt(normalizeDigits(text).replace(/[,،\s]/g, ''), 10);
+      const amount = parseInt(normalizeDigits(text).replace(/[^\d]/g, ''), 10);
       if (!amount || amount <= 0) return ctx.reply(L.wallet.invalidAmount());
       return await setRechargeAmount(ctx, uid, amount);
     }
@@ -1502,7 +1887,7 @@ bot.on('text', async (ctx) => {
     if (state === 'pay_receipt') {
       // رسید متنی
       const s = getSession(uid);
-      if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard());
+      if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
       await sendReceiptToAdmin(ctx, uid, s.paymentId, null, text);
       setState(uid, s.readingId ? 'confirm_pay' : 'idle');
       return ctx.reply(L.wallet.receiptReceived);
@@ -1520,7 +1905,7 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard());
+    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard(ctx.from.id));
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
@@ -1561,13 +1946,20 @@ bot.on(['voice', 'audio'], async (ctx) => {
 bot.on('photo', async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);
-  if (getState(uid) !== 'pay_receipt') return;
   const s = getSession(uid);
-  if (!s.paymentId) return;
+  // مسیر عادی: وسط فلوی رسید. مسیر بازیابی: state گم شده (کاربر بعد از فاکتور /start زده) ولی
+  // پرداختِ منتظرِ رسید در DB هست → عکس را به همان وصل کن تا پول واقعی در سیاه‌چاله نیفتد.
+  let paymentId = (getState(uid) === 'pay_receipt' && s?.paymentId) ? s.paymentId : null;
+  let recovered = false;
+  if (!paymentId) {
+    const pend = stmts.pendingReceiptPayment.get(uid);
+    if (!pend) return; // عکسِ بی‌ربط به پرداخت — نادیده
+    paymentId = pend.id; recovered = true;
+  }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  await sendReceiptToAdmin(ctx, uid, s.paymentId, fileId, null);
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
-  await ctx.reply(L.wallet.receiptReceived);
+  await sendReceiptToAdmin(ctx, uid, paymentId, fileId, null);
+  setState(uid, s?.readingId ? 'confirm_pay' : 'idle');
+  await ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
 });
 
 /* ---------- sweep ساعتی milestone (پوش پیشگیرانه، سقف ۱/هفته) ---------- */
@@ -1592,7 +1984,7 @@ setInterval(async () => {
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log(`✅ tarot bot started (long polling, locale=${LOCALE})`))
+    .then(() => { log(`✅ tarot bot started (long polling, locale=${LOCALE})`); recoverOrphanReadings(); })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});

@@ -7,7 +7,7 @@ import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import { log, logErr } from '../../shared/logger.js';
 import { createOpenRouter, parseJsonLoose } from '../../shared/llm.js';
-import { RESET_TEST_BTN, registerTestReset } from '../../shared/reset.js';
+import { registerAdminReset, adminResetRow } from '../../shared/reset.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
 // زیرساخت رشد (اتریبیوشن + A/B) — از قبل سیم‌کشی شده؛ فقط track ها را در نقاط فانل بگذار.
 // جزئیات کامل: بند «افزودن ربات جدید» در CLAUDE.md ریشه.
@@ -20,9 +20,15 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const OWNER_ID  = 100257975;
-const ADMIN_IDS = [OWNER_ID];
+// ادمین‌ها از env: کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد (قرارداد یکپارچه‌ی همه‌ی ربات‌ها).
+// این‌طوری هر ربات جدید هم همان آی‌دی‌های ادمینِ گیت‌هاب را می‌گیرد؛ هشدار/پشتیبانی هر ربات per-bot می‌ماند.
+const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
+  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+const OWNER_ID  = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
+const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true; // ⚠️ قبل از انتشار عمومی false شود (قرارداد بند ۶ب CLAUDE.md)
+// نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده»
+const PRODUCT_VERSION = '1.0.0';
 
 const FLASH = 'google/gemini-2.5-flash';
 const or = createOpenRouter({
@@ -69,13 +75,19 @@ registerGlobalErrorHandlers('<NAME>');
 async function handleStart(ctx) {
   const before = db.prepare('SELECT 1 FROM users WHERE telegram_id=?').get(ctx.from.id);
   upsertUser(ctx);
-  // اتریبیوشن: رویداد start برای هر /start + first_source فقط برای کاربر جدید (write-once)
-  captureStart(db, ctx.from.id, ctx.startPayload, !before);
-  const kb = TEST_PHASE ? Markup.keyboard([[RESET_TEST_BTN]]).resize() : undefined;
+  // اتریبیوشن: رویداد start برای هر /start + first_source/first_version فقط برای کاربر جدید (write-once)
+  captureStart(db, ctx.from.id, ctx.startPayload, !before, PRODUCT_VERSION);
+  // دکمه‌ی «ریست حساب (ادمین)» فقط برای ادمین‌ها (همیشه، حتی خارج از فاز تست) — ابزار مدیریتی
+  const rows = [
+    // TODO: ردیف‌های دکمه‌ی محصول را اینجا بگذار، مثل: ['📝 دکمه‌ی اول', '⚙️ دکمه‌ی دوم']
+    ...adminResetRow(isAdmin, ctx.from.id),
+  ];
+  const kb = rows.length ? Markup.keyboard(rows).resize() : undefined;
   await ctx.reply('👋 سلام! TODO: پیام خوش‌آمد محصول.', kb);
 }
 bot.start(handleStart);
-registerTestReset(bot, { ownerId: OWNER_ID, testPhase: TEST_PHASE, wipe: wipeUser, after: handleStart });
+// ریستِ فقط-ادمین (همیشه فعال): دیتای خودِ ادمین را پاک و او را مثل کاربر جدید معرفی می‌کند
+registerAdminReset(bot, { isAdmin, wipe: wipeUser, after: handleStart });
 
 // TODO: هندلرهای محصول اینجا. نمونه‌ی فراخوانی LLM:
 // const res = await or.chatResilient('system prompt', 'user text', { maxTokens: 500 });

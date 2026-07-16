@@ -95,6 +95,33 @@ jobs:
               write_env dashboard "$(printf 'DASHBOARD_TOKEN=%s\nPORT=8787' "$DASHBOARD_TOKEN")"
             fi
 
+            # ---------- ادمین یکپارچه‌ی همه‌ی ربات‌های Node: ADMIN_IDS = OWNER_TELEGRAM_ID ----------
+            # مستقل از ست‌بودن توکنِ ربات در Secrets اجرا می‌شود؛ voice2text ممکن است .env دستیِ سرور
+            # داشته باشد که write_env دست نمی‌زند. فقط خطِ ADMIN_IDS را upsert می‌کند (توکن/کلید/نوشن
+            # دست نمی‌خورد → قانون «voice2text نشکند») و اگر عوض شد همان ربات را برای ری‌لود علامت می‌زند.
+            if [ -n "$OWNER_TELEGRAM_ID" ]; then
+              for b in voice2text tarot; do
+                envf="bots/$b/.env"
+                [ -f "$envf" ] || continue
+                cur=$(sed -n 's/^ADMIN_IDS=//p' "$envf" | head -1)
+                [ "$cur" = "$OWNER_TELEGRAM_ID" ] && continue
+                [ -f "bots/$b/.env.bak" ] || cp "$envf" "bots/$b/.env.bak"
+                if grep -q '^ADMIN_IDS=' "$envf"; then
+                  sed -i "s|^ADMIN_IDS=.*|ADMIN_IDS=${OWNER_TELEGRAM_ID}|" "$envf"
+                else
+                  printf 'ADMIN_IDS=%s\n' "$OWNER_TELEGRAM_ID" >> "$envf"
+                fi
+                ENV_CHANGED="$ENV_CHANGED $b"
+                echo "🔑 $b/ADMIN_IDS به‌روز شد (ادمین‌های مشترک)"
+              done
+            fi
+
+            # ---------- پاک‌سازی یک‌باره‌ی دیتای تستی tarot (لانچ ۱۴۰۵/۰۴/۲۰) — انجام شد، بلوک برداشته شد ----------
+            # این پاک‌سازی یک‌بار در دیپلوی لانچ اجرا و marker `bots/tarot/data/.launch-wipe-done` ست شد.
+            # بلوکِ خودکار عمداً حذف شد تا «حذفِ کاربران غیرادمین» یک footgunِ نهفته نماند (مثلاً بعد از
+            # restore دیتابیس بدون marker روی رباتِ زنده). اسکریپت `tools/launch-wipe-tarot.mjs` برای
+            # استفاده‌ی دستیِ آگاهانه می‌ماند (خودش قبل از حذف، بکاپ VACUUM INTO می‌گیرد و گاردِ حجم دارد).
+
             # ---------- دیپلوی انتخابی: فقط ربات‌هایی که واقعاً تغییر کرده‌اند ----------
             # خط قرمز: merge ای که به یک ربات ربطی ندارد نباید ربات‌های دیگر (خصوصاً voice2text) را ری‌استارت کند.
             deploy_bot() {
@@ -120,9 +147,10 @@ jobs:
               echo "✅ $name دیپلوی شد (دلیل: $reason)"
             }
             deploy_bot voice2text
-            deploy_bot resume-tailor
             deploy_bot tarot
             deploy_bot dashboard
+            # resume-tailor بازنشسته شد (منسوخ + مصرف LLM بی‌سقف/SSRF) — یک‌باره از pm2 حذف می‌شود
+            pm2 delete resume-tailor 2>/dev/null && pm2 save || true
 
             # ---------- Cloudflare Tunnel داشبورد (هیچ پورت inbound باز نمی‌شود) ----------
             # named tunnel اگر CLOUDFLARE_TUNNEL_TOKEN ست باشد (آدرس ثابت با دامنه)،
@@ -243,6 +271,7 @@ jobs:
           T_ES: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_ES }}
           T_PT: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_PT }}
           T_BALE: ${{ secrets.TABIR_BALE_BOT_TOKEN }}
+          ADMIN_IDS_VAL: ${{ secrets.OWNER_TELEGRAM_ID }}
         run: |
           set -e
           mkdir -p ~/.ssh
@@ -265,6 +294,7 @@ jobs:
             echo "TELEGRAM_BOT_TOKEN_ES=$T_ES"
             echo "TELEGRAM_BOT_TOKEN_PT=$T_PT"
             echo "BALE_BOT_TOKEN=$T_BALE"
+            echo "ADMIN_IDS=$ADMIN_IDS_VAL"
           } | $SSH 'umask 077
             cd /home/ubuntu/tabir_khab
             touch .env

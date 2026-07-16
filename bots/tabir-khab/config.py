@@ -23,6 +23,10 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 #  ثابت‌های غیرمحرمانه — داخل کد
 # ============================================================
 
+# نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
+# — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
+PRODUCT_VERSION = "1.2.0"   # 1.2: فلوی درختی/منوی اصلی + فیکس گیت اشتراک و resume پرداخت
+
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
 TELEGRAM_API_BASE = "https://api.telegram.org"
@@ -159,14 +163,24 @@ def llm_model_for(tier: str) -> str:
 BALE_SSL_NO_VERIFY     = True   # شبکه محلی با گواهی self-signed
 TELEGRAM_SSL_NO_VERIFY = True
 
-# --- ادمین (برای دستور تست /simulate_pay) ---
-ADMIN_USER_ID = 0
+# --- ادمین (از env ADMIN_IDS کاما-جدا؛ همان OWNER_TELEGRAM_ID مشترکِ بقیه‌ی ربات‌ها) ---
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.strip().isdigit()]
+ADMIN_USER_ID = ADMIN_IDS[0] if ADMIN_IDS else 0  # سازگاری با کد قدیمی (اولین آی‌دی)
+
+def is_admin(uid) -> bool:
+    return uid in ADMIN_IDS
 
 # --- دکمه‌ی تست موقت «ریسک کردن» ---
 # وقتی True باشد، یک دکمه‌ی ریست کنار دکمه‌های اصلی ظاهر می‌شود.
 # فشار دادن آن کاربر را کاملاً ریست می‌کند (آنبوردینگ، اشتراک، تریال — همه).
-# برای پروداکشن این را False کن.
-RESET_BUTTON_ENABLED = True
+# سخت‌سازی پیش‌لانچِ ربات‌های زنده‌ی همسایه: خاموش تا غریبه نتواند تریالِ مجانی بی‌نهایت بگیرد.
+RESET_BUTTON_ENABLED = False
+
+# --- نمادیاب خواب (مسیر رایگان بدون LLM) ---
+# وقتی True باشد، دکمه‌ی «نمادیاب خواب (رایگان)» در کیبورد اصلی و پی‌وال ظاهر می‌شود
+# (فقط برای زبان‌هایی که دیتای symbols/<lang> دارند). Rollback فوری: False کن؛
+# دکمه‌ها و callback ها محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود.
+SYMBOL_FINDER_ENABLED = True
 
 # --- مارکر برش تعبیر (نقطه‌ی تعلیق برای تریال) ---
 CUT_MARKER = "||CUT||"
@@ -180,7 +194,7 @@ MASCOT_INVITE       = "mascot_invite.png"    # حالت دست‌دراز‌کر
 # فعلاً پرداخت رد می‌شود: کلیک روی پلن بلافاصله همسفری را فعال می‌کند.
 # برای فعال‌کردن درگاه واقعی، این را False کن.
 SKIP_PAYMENT = True
-SKIP_DAILY_LIMIT = True   # برای تست: محدودیت «هر شب یک رویا» را برمی‌دارد — برای پروداکشن False کن
+SKIP_DAILY_LIMIT = False  # سقفِ «هر شب یک رویا» فعال — ضد مصرفِ LLM بی‌سقفِ غریبه (پرداخت هنوز شبیه‌سازی است)
 
 # --- محدودیت‌ها ---
 MIN_VOICE_DURATION = 10      # ثانیه — کمتر از این «خیلی کوتاه»

@@ -18,6 +18,36 @@ LOCALE = {
         "persona":      "🎭 Change style",
         "invite":       "🎁 Invite link",
         "language":     "🌐 Language",
+        "symbols":      "🔍 Dream Symbol Finder (free)",
+        "reset_test":   "🔄 Reset account (admin)",
+    },
+
+    # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/en نمایش داده نمی‌شوند
+    "sym": {
+        "intro": (
+            "Welcome to the *Dream Symbol Finder* 🔍\n\n"
+            "Everything you see in a dream (water, teeth, a snake, flying...) is a symbol with a secret inside. "
+            "Pick the first letter of what you saw and I'll tell you its meaning in your own interpretation style.\n\n"
+            "This part is completely free ✨"
+        ),
+        "letter_header": "🔍 Symbols for \"{letter}\" (page {page} of {pages})\n\nPick what you saw in your dream:",
+        "letter_empty": "No symbols recorded for \"{letter}\" yet 🌫️ Try another letter.",
+        "word_title": "🔍 The symbol \"{word}\" in the Realm of Dreams",
+        "cta_line": (
+            "But remember, companion: the true meaning of this symbol is tied to the rest of your dream. "
+            "Next to the people, places and feelings of your dream it can take a far more precise, personal meaning; "
+            "that's why telling the full dream is a whole other world 💫"
+        ),
+        "btn_dream":     "✨ Tell my full dream",
+        "btn_letters":   "🔤 All letters",
+        "btn_back_list": "🔙 Back to list",
+        "btn_prev":      "◀️ Previous",
+        "btn_next":      "Next ▶️",
+        "page_btn": "Page {n}",
+        "btn_paywall":   "🔍 Dream Symbol Finder (free)",
+        "search_hint":   "Or just type a symbol's name here (like: snake, teeth, water) and I'll find it for you 👇",
+        "search_multi":  "🔍 I found {count} symbols close to what you wrote. Which one was in your dream?",
+        "not_found":     "No symbol recorded for \"{query}\" yet 🌫️\n\nYou can browse by letter, or tell me your full dream so I can unpack it precisely and personally.",
     },
 
     "welcome_intro": (
@@ -244,4 +274,6 @@ LOCALE = {
 
     "lang_changed": "Language set to *English* 🌙 Let's start fresh…",
     "processing_busy": "One moment — I'm still working on your last dream… 🌙",
+    "main_menu": "🌙 Main menu\n\nWhat would you like to do?",
+    "btn_back": "◀️ Back",
 }
