@@ -186,19 +186,29 @@ jobs:
               TUNNEL_URL=$(sudo journalctl -u dash-tunnel -n 1000 -o cat 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
               [ -z "$TUNNEL_URL" ] && [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ] && TUNNEL_URL="(named tunnel — آدرس دامنه‌ی خودت)"
               echo "🌐 آدرس داشبورد: ${TUNNEL_URL:-هنوز آماده نیست — Ops → tunnel-url}"
-              if [ -n "$OWNER_TELEGRAM_ID" ] && [ -n "$TUNNEL_URL" ]; then
-                MSG_TOKEN="${TAROT_BOT_TOKEN:-${VOICE2TEXT_BOT_TOKEN:-$RESUME_TAILOR_BOT_TOKEN}}"
-                if [ -n "$MSG_TOKEN" ]; then
-                  # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
-                  IFS=',' read -ra OWNERS <<< "$OWNER_TELEGRAM_ID"
-                  for id in "${OWNERS[@]}"; do
-                    id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
-                    curl -fsS -X POST "https://api.telegram.org/bot${MSG_TOKEN}/sendMessage" \
-                      -d chat_id="$id" \
-                      --data-urlencode text="🌐 آدرس داشبورد: $TUNNEL_URL" >/dev/null || true
-                  done
-                fi
-              fi
+              # فقط وقتی آدرسِ quick tunnel *واقعاً عوض شده* به مالک خبر بده (وگرنه هر دیپلوی = اسپم).
+              # آدرسِ آخرین‌بارِ اطلاع‌داده‌شده در ~/.dash-tunnel-last-url نگه داشته می‌شود.
+              # named tunnel آدرس ثابت دارد → هرگز پیام نمی‌دهیم (URL با trycloudflare شروع نمی‌شود).
+              case "$TUNNEL_URL" in
+                https://*.trycloudflare.com)
+                  LAST_URL_FILE="$HOME/.dash-tunnel-last-url"
+                  PREV_URL=$(cat "$LAST_URL_FILE" 2>/dev/null || true)
+                  if [ "$TUNNEL_URL" != "$PREV_URL" ] && [ -n "$OWNER_TELEGRAM_ID" ]; then
+                    MSG_TOKEN="${TAROT_BOT_TOKEN:-${VOICE2TEXT_BOT_TOKEN:-$RESUME_TAILOR_BOT_TOKEN}}"
+                    if [ -n "$MSG_TOKEN" ]; then
+                      # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد
+                      IFS=',' read -ra OWNERS <<< "$OWNER_TELEGRAM_ID"
+                      for id in "${OWNERS[@]}"; do
+                        id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+                        curl -fsS -X POST "https://api.telegram.org/bot${MSG_TOKEN}/sendMessage" \
+                          -d chat_id="$id" \
+                          --data-urlencode text="🌐 آدرس جدید داشبورد (عوض شد): $TUNNEL_URL" >/dev/null || true
+                      done
+                    fi
+                  fi
+                  printf '%s' "$TUNNEL_URL" > "$LAST_URL_FILE" 2>/dev/null || true
+                  ;;
+              esac
             fi
 
             pm2 save

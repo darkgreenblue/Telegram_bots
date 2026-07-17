@@ -13,7 +13,7 @@
 - Backup شبانه خودکار platform.db را هم می‌گیرد (glob `bots/*/data/*.db`)؛ `Ops db-query` با app=`dashboard` هم کار می‌کند.
 
 ## امنیت (بازطراحی پس از نقد متخصص‌ها — پایین نیاوردنی)
-- سرور فقط روی `127.0.0.1:8787` گوش می‌دهد؛ **هیچ پورت inbound روی سرور باز نمی‌شود**. دسترسی بیرونی فقط از **Cloudflare Tunnel** (سرویس systemd به نام `dash-tunnel` که deploy.yml می‌سازد): با secret اختیاری `CLOUDFLARE_TUNNEL_TOKEN` → named tunnel (آدرس ثابت روی دامنه)؛ بدون آن → quick tunnel رایگان trycloudflare (آدرس بعد از هر ری‌استارت عوض می‌شود؛ deploy آدرس فعلی را به تلگرام مالک می‌فرستد؛ `Ops → tunnel-url` هم همان را چاپ می‌کند).
+- سرور فقط روی `127.0.0.1:8787` گوش می‌دهد؛ **هیچ پورت inbound روی سرور باز نمی‌شود**. دسترسی بیرونی فقط از **Cloudflare Tunnel** (سرویس systemd به نام `dash-tunnel` که deploy.yml می‌سازد): با secret اختیاری `CLOUDFLARE_TUNNEL_TOKEN` → named tunnel (آدرس ثابت روی دامنه)؛ بدون آن → quick tunnel رایگان trycloudflare (آدرس بعد از هر ری‌استارت عوض می‌شود؛ deploy آدرس را به تلگرام مالک می‌فرستد **فقط اگر نسبت به آخرین‌بار عوض شده باشد** — مقایسه با `~/.dash-tunnel-last-url` تا هر دیپلوی اسپم نشود؛ `Ops → tunnel-url` هم همان را چاپ می‌کند). **برای آدرس ثابت و بی‌اسپم، `CLOUDFLARE_TUNNEL_TOKEN` را ست کن (named tunnel).**
 - ورود: فرم توکن (secret `DASHBOARD_TOKEN`، مقایسه‌ی زمان-ثابت روی hash) → کوکی سشن `HttpOnly + SameSite=Strict` (+`Secure` پشت تونل). سشن‌ها in-memory (ری‌استارت = ورود دوباره — قابل قبول برای تک‌ادمین). **توکن هرگز در URL نمی‌رود.**
 - ضد CSRF: هر POST باید `Origin` (یا Referer) هم‌میزبان داشته باشد (`sameOrigin`) — تست با curl نیازمند هدر Origin است.
 - rate-limit ورود: ۵ تلاش/دقیقه per IP. همه‌ی write ها و export ها در `audit_log` ثبت و در پایین صفحه‌ی مالی نمایش داده می‌شوند.
