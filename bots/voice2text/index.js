@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
-import { analyzeReceipt } from './cardpay.js';
+import { analyzeReceipt, decideReceipt } from './cardpay.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,8 +44,10 @@ const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').
 const RECEIPT_MODEL = 'google/gemini-2.5-flash';
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
-// 1.1.0: رسیدِ شارژ حالا از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
-const PRODUCT_VERSION = '1.1.0';
+// 1.1.0: رسیدِ شارژ از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
+// 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ ۳ تا ۱۰ ثانیه، بدونِ لوکنندنِ ایجنت)
+//        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
+const PRODUCT_VERSION = '1.1.1';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -1613,18 +1615,16 @@ async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, rec
   track(userId, 'receipt_submitted', { payment_id: paymentId });
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
 
-  const manualDoneMsg = recovered
-    ? '✅ فیش واریزت دریافت شد و به شارژِ در انتظارت وصل شد؛ در انتظار تایید ادمین است.'
-    : '✅ فیش دریافت شد و در انتظار تایید ادمین است.\nمعمولاً در کمتر از ۲۴ ساعت بررسی می‌شود.';
+  // پیامِ انسانی: فیش برای بررسی/تأیید فرستاده شد (هیچ اشاره‌ای به بررسیِ خودکار نیست)
+  await ctx.reply('فیشت رسید ✅ برای بررسی و تأیید فرستاده شد؛ به‌محضِ تأیید، شارژت انجام می‌شه و خبرت می‌کنم 🙏').catch(() => {});
 
+  // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → مستقیم به ادمینِ واقعی (بدونِ تصمیمِ خودکار و بدونِ تأخیرِ ساختگی)
   if (!RECEIPT_AI_AUTO_APPROVE || isDistrusted(userId)) {
     await sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody);
     userStates.delete(userId);
-    await ctx.reply(manualDoneMsg);
     return;
   }
 
-  await ctx.reply('فیشت رسید ✅ دارم بررسی‌اش می‌کنم…').catch(() => {});
   let imageBuffer = null;
   if (photoFileId) {
     try {
@@ -1634,49 +1634,70 @@ async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, rec
     } catch (e) { logErr('receipt download:', e.message); }
   }
   const amountToman = payment.original_amount || payment.amount;
-  const verdict = await analyzeReceipt({
-    apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
-    expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
-    imageBuffer, imageMime: 'image/jpeg', text: textBody,
-  });
-  const reasonFa = verdict.reason_fa || 'نامشخص';
-
-  if (verdict.verdict === 'approve') {
-    const r = approvePaymentAuto(paymentId);
-    userStates.delete(userId);
-    if (r) {
-      track(r.payment.user_id, 'payment_approved', { payment_id: paymentId, amount: r.payment.amount, credited: r.creditAmount, via: 'ai' });
-      await notifyApproved(r.payment, r.creditAmount);
-      await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(userId), reasonFa);
-    }
-    return;
+  let decision;
+  try {
+    const verdict = await analyzeReceipt({
+      apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
+      expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
+      imageBuffer, imageMime: 'image/jpeg', text: textBody,
+    });
+    decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
+  } catch (e) {
+    logErr('receipt agent:', e.message);
+    decision = { action: 'review', reason_fa: '', overpaid: 0 };
   }
-  if (verdict.verdict === 'reject') {
-    if (verdict.reason_code === 'not_a_receipt') {
-      // خطای کاربر، نه شکستِ پرداخت → پرداخت باز می‌ماند (userState دست‌نخورده) تا فیشِ درست بفرستد
-      await ctx.reply('این پیام فیشِ پرداخت به‌نظر نمی‌رسه 🙏 لطفاً عکسِ فیش یا متنِ تأییدِ بانک رو بفرست.').catch(() => {});
+
+  // تأخیرِ انسانیِ ۳ تا ۱۰ ثانیه (حسِ «ادمین دارد اپِ بانکی را چک می‌کند») — فقط مسیرِ خودکار
+  await sleep(3000 + Math.floor(Math.random() * 7000));
+
+  const reasonFa = decision.reason_fa || 'نامشخص';
+  try {
+    if (decision.action === 'approve') {
+      const r = approvePaymentAuto(paymentId);
+      userStates.delete(userId);
+      if (r) {
+        track(r.payment.user_id, 'payment_approved', { payment_id: paymentId, amount: r.payment.amount, credited: r.creditAmount, via: 'ai' });
+        await notifyApproved(r.payment, r.creditAmount);
+        await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(userId), reasonFa, decision.overpaid, amountToman);
+      }
       return;
     }
-    const r = rejectPaymentAuto(paymentId);
+    if (decision.action === 'not_a_receipt') {
+      // چیزی که فرستاد فیش نبود → پرداخت باز می‌ماند (userState دست‌نخورده) تا فیشِ درست بفرستد
+      await ctx.reply('چیزی که فرستادی فیشِ پرداخت نبود 🙏 لطفاً تصویرِ فیشِ واریز یا متنِ تأییدِ بانک رو بفرست.').catch(() => {});
+      return;
+    }
+    if (decision.action === 'reject') {
+      const r = rejectPaymentAuto(paymentId);
+      userStates.delete(userId);
+      if (r) track(r.payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: r.payment.amount, via: 'ai' });
+      await notifyAdminAuto(payment, getUser(userId), `❌ auto-reject: ${reasonFa}`, photoFileId);
+      await ctx.reply(`❌ متأسفانه پرداختت تأیید نشد.\nدلیل: ${reasonFa}\n\nاگر فکر می‌کنی اشتباهی شده، به آیدی @alireza_oliya پیام بده.`).catch(() => {});
+      return;
+    }
+    // review → تصمیمِ انسانی (پیامِ اول قبلاً رفته؛ ادمین با دکمه تأیید/رد می‌کند)
+    await sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody);
     userStates.delete(userId);
-    if (r) track(r.payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: r.payment.amount, via: 'ai' });
-    await notifyAdminAuto(payment, getUser(userId), `❌ auto-reject: ${reasonFa}`, photoFileId);
-    await ctx.reply(`❌ فیش پرداختت تایید نشد.\nدلیل: ${reasonFa}\n\nاگر مشکلی هست به آیدی @alireza_oliya پیام بده.`).catch(() => {});
-    return;
+  } catch (e) {
+    // شبکه‌ی ایمنیِ نهایی: کاربر بی‌جواب نماند و پول در هوا نماند → به ادمینِ انسانی بسپار
+    logErr('processReceipt terminal:', e.message);
+    try { await sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody); } catch {}
+    userStates.delete(userId);
   }
-  // review → تصمیمِ انسانی
-  await sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody);
-  userStates.delete(userId);
-  await ctx.reply(manualDoneMsg).catch(() => {});
 }
 
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
-async function notifyAdminAutoApproved(payment, user, reasonFa) {
-  const caption =
+// overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
+async function notifyAdminAutoApproved(payment, user, reasonFa, overpaid = 0, expectedToman = 0) {
+  let caption =
     `✅ پرداخت #${payment.id} توسط ایجنت تأیید و اعتبار داده شد.\n` +
     `👤 ${user?.name || 'نامشخص'} (@${user?.username || '—'}) [${payment.user_id}]\n` +
     `💰 ${(payment.original_amount || payment.amount).toLocaleString('fa-IR')} تومان\n` +
     `🤖 ${reasonFa}`;
+  if (overpaid > 0) {
+    const exp = expectedToman || (payment.original_amount || payment.amount);
+    caption += `\n\n⚠️ کاربر مبلغِ بیشتری واریز کرده: حدود ${overpaid.toLocaleString('fa-IR')} تومان به‌جای ${exp.toLocaleString('fa-IR')} تومان. اگر خواستی، اختلاف را دستی اعتبار بده.`;
+  }
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback('🚫 پیامکش نیومده', `cardsms:${payment.id}`),
   ]]).reply_markup;
