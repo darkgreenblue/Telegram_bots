@@ -23,6 +23,7 @@ import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { ensureAb, variant } from '../../shared/ab.js';
+import { analyzeReceipt } from './cardpay.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -50,8 +51,9 @@ const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM
 const TEST_PHASE = false;
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
-// این PR رفتار را عوض نمی‌کند (فیچرِ زیر پشتِ فلگِ خاموش است)؛ هنگام روشن‌کردنِ FREE_MENU_ENABLED باید به 1.1.0 bump شود.
-const PRODUCT_VERSION = '1.0.0';
+// 1.1.0: رسیدِ پرداخت حالا از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
+// (روشن‌کردنِ FREE_MENU_ENABLED هم رفتاری‌ست و باید نسخه را جلوتر ببرد.)
+const PRODUCT_VERSION = '1.1.0';
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
 // فعلاً خاموش عرضه می‌شود (dark launch): merge روی ربات زنده هیچ تغییرِ رفتاری نمی‌دهد.
@@ -72,6 +74,14 @@ const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
+const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
+const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
+
+// ایجنتِ رسیدِ کارت‌به‌کارت (Gemini Flash از طریق OpenRouter): auto-approve با شبکه‌ی ایمنیِ
+// برگشت + بی‌اعتمادی. کلیدِ خاموشیِ سراسری (env RECEIPT_AI_AUTO_APPROVE=false → همه‌ی رسیدها
+// دستی به ادمین می‌روند، بدون تصمیمِ خودکار). پیش‌فرض: روشن.
+const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
+const RECEIPT_MODEL = FLASH;
 
 // هدیه‌ی خوش‌آمد حذف شد: مسیر رایگان فقط «کارت روز» است؛ حداقل مبلغ شارژ هم نداریم
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
@@ -203,6 +213,9 @@ try { db.prepare("ALTER TABLE users ADD COLUMN last_coffee_date TEXT NOT NULL DE
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
 try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
+// کاربرِ «بی‌اعتماد»: بعد از یک برگشتِ پرداخت (رسیدِ فیک)، ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
+// و همه‌ی پرداخت‌هایش دستی به ادمین می‌رود. (status پرداخت می‌تواند 'reversed' هم بشود — بدونِ تغییرِ schema.)
+try { db.prepare('ALTER TABLE users ADD COLUMN pay_distrust INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -261,6 +274,13 @@ const stmts = {
   claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  // ذخیره‌ی خودِ رسید بدونِ تغییرِ وضعیت (مسیرِ auto-approve/reject؛ waiting_review را sendReceiptToAdmin می‌زند)
+  saveReceiptFile: db.prepare('UPDATE payments SET receipt_file_id=?, updated_at=unixepoch() WHERE id=?'),
+  // برگشتِ پرداخت — فقط از approved (idempotent، ضدِ دوبار). changes==1 یعنی همین حالا برگشت خورد.
+  markPaymentReversed: db.prepare("UPDATE payments SET status='reversed', updated_at=unixepoch() WHERE id=? AND status='approved'"),
+  setDistrust: db.prepare('UPDATE users SET pay_distrust=1 WHERE telegram_id=?'),
+  // کسرِ اعتبارِ برگشتی، اما هرگز زیرِ صفر (مصرف‌شده تا آن لحظه اشکالی ندارد)
+  clawback: db.prepare('UPDATE users SET balance = MAX(0, balance - ?) WHERE telegram_id=?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
   pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
   staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
@@ -307,6 +327,8 @@ const getState = (uid) => getUser(uid)?.state || 'new';
 const setState = (uid, s) => stmts.setState.run(s, uid);
 const getBalance = (uid) => getUser(uid)?.balance || 0;
 const hasRecharged = (uid) => stmts.countApprovedPayments.get(uid).c > 0;
+// کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
+const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
 // نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
 // در متن‌های رو-به-کاربر با fallback خالی؛ به LLM هرگز نام تلگرام نمی‌رود (تا مدل نام نامفهوم را تکرار نکند).
 const dispName = (u) => (u?.display_name || '').trim();
@@ -1693,7 +1715,113 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+}
+
+// ورودیِ همه‌ی رسیدها (عکس/متن): داوریِ ایجنتِ کارت‌به‌کارت، سپس مسیر:
+//   approve  → اعتبار + پیام به کاربر + اطلاع به ادمین با دکمه‌ی «پیامکش نیومده» (شبکه‌ی ایمنی)
+//   reject   → رد + پیام با دلیل (مگر «اصلاً رسید نیست» که فقط راهنمایی و پرداخت باز می‌ماند)
+//   review   → کلِ رسید با دکمه‌های تأیید/رد به ادمین (تصمیمِ انسانی)
+// auto-approve خاموش (کلید سراسری) یا کاربرِ بی‌اعتماد → همیشه review (بدونِ خرجِ ایجنت).
+async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
+  const p = stmts.getPayment.get(paymentId);
+  if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
+  const s = getSession(uid);
+  const nextState = s?.readingId ? 'confirm_pay' : 'idle';
   track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });
+  // رسیدِ خام را همان اول ذخیره کن (برای بازبینی/برگشت) بدونِ تغییرِ وضعیت
+  if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
+
+  // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → مستقیم به ادمین، بدونِ تصمیمِ خودکار
+  if (!RECEIPT_AI_AUTO_APPROVE || isDistrusted(uid)) {
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+    setState(uid, nextState);
+    return ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
+  }
+
+  await ctx.reply(L.wallet.receiptChecking).catch(() => {});
+  // دانلودِ عکس برای ایجنت (fail-safe: هر خطا → بدونِ عکس؛ ایجنت آن را به review می‌برد)
+  let imageBuffer = null;
+  if (photoFileId) {
+    try {
+      const link = await ctx.telegram.getFileLink(photoFileId);
+      const res = await fetch(link.href);
+      imageBuffer = Buffer.from(await res.arrayBuffer());
+    } catch (e) { logErr('receipt download:', e.message); }
+  }
+  // مبلغِ موردِانتظار = اصلِ قبل از تخفیف (همان که کاربر واریز می‌کند و اعتبار می‌گیرد)
+  const amountToman = p.original_amount || p.amount;
+  const verdict = await analyzeReceipt({
+    apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
+    expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
+    imageBuffer, imageMime: 'image/jpeg', text: textBody,
+  });
+  const reasonFa = verdict.reason_fa || 'نامشخص';
+
+  if (verdict.verdict === 'approve') {
+    const done = approvePayment(paymentId);
+    if (!done) { setState(uid, nextState); return ctx.reply(L.wallet.receiptReceived); } // ضدِ دوبار
+    await ctx.reply(L.wallet.approved(done.creditAmount, getBalance(uid), done.bonus)).catch(() => {});
+    await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa);
+    return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
+  }
+  if (verdict.verdict === 'reject') {
+    if (verdict.reason_code === 'not_a_receipt') {
+      // خطای کاربر، نه شکستِ پرداخت → پرداخت باز می‌ماند (state دست‌نخورده) تا رسیدِ درست بفرستد
+      return ctx.reply(L.wallet.notReceiptHint).catch(() => {});
+    }
+    rejectPaymentAI(paymentId);
+    setState(uid, nextState);
+    await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
+    return ctx.reply(L.wallet.rejectedReason(reasonFa)).catch(() => {});
+  }
+  // review → تصمیمِ انسانی
+  await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+  setState(uid, nextState);
+  return ctx.reply(L.wallet.receiptReceived).catch(() => {});
+}
+
+// اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
+async function notifyAdminAutoApproved(p, user, reasonFa) {
+  const caption = L.wallet.adminAutoApproved(p, user, reasonFa);
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${p.id}`),
+  ]]).reply_markup;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
+      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+    } catch {}
+  }
+}
+// یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject
+async function notifyAdminAuto(p, user, note, photoFileId) {
+  const caption = `${note}\n\n${L.wallet.adminNotify(p, user)}`;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption });
+      else await bot.telegram.sendMessage(adminId, caption);
+    } catch {}
+  }
+}
+// ردِ خودکارِ ایجنت — از pending هم مجاز (قبل از waiting_review)؛ ضدِ دوبار با گاردِ status
+function rejectPaymentAI(paymentId) {
+  const p = stmts.getPayment.get(paymentId);
+  if (!p || !['pending', 'waiting_review'].includes(p.status)) return null;
+  stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount, via: 'ai' });
+  return p;
+}
+// برگشتِ پرداختِ فیک: کسرِ اعتبارِ ناشی از این پرداخت (کفِ صفر) + بی‌اعتمادکردنِ کاربر.
+// ضدِ دوبار با گذارِ اتمیکِ approved→reversed. null یعنی قبلاً برگشت خورده/approved نبوده.
+async function reversePayment(paymentId) {
+  if (stmts.markPaymentReversed.run(paymentId).changes === 0) return null;
+  const p = stmts.getPayment.get(paymentId);
+  const creditAmount = p.original_amount || p.amount;
+  const back = creditAmount + bonusFor(creditAmount); // همان که approve اعتبار داد (اصل + هدیه)
+  stmts.clawback.run(back, p.user_id);
+  stmts.setDistrust.run(p.user_id);
+  track(db, p.user_id, 'payment_reversed', { payment_id: paymentId, amount: p.amount, clawed: back });
+  return { p, back };
 }
 
 function approvePayment(paymentId) {
@@ -1768,6 +1896,32 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+});
+
+/* ── شبکه‌ی ایمنیِ auto-approve: «پیامکش نیومده» → تأیید دوم → برگشت + بی‌اعتمادی ── */
+bot.action(/^cardsms:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  const pid = parseInt(ctx.match[1], 10);
+  await ctx.reply(L.wallet.confirmReverse(pid), Markup.inlineKeyboard([[
+    Markup.button.callback(L.buttons.reverseYes, `cardrev:${pid}`),
+    Markup.button.callback(L.buttons.reverseNo, `cardrevno:${pid}`),
+  ]])).catch(() => {});
+});
+bot.action(/^cardrev:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery('در حال برگشت…').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  const done = await reversePayment(parseInt(ctx.match[1], 10));
+  if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
+  await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser).catch(() => {});
+  await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back)).catch(() => {});
+});
+bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.wallet.reverseCancelled(parseInt(ctx.match[1], 10))).catch(() => {});
 });
 
 /* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
@@ -1888,9 +2042,7 @@ bot.on('text', async (ctx) => {
       // رسید متنی
       const s = getSession(uid);
       if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
-      await sendReceiptToAdmin(ctx, uid, s.paymentId, null, text);
-      setState(uid, s.readingId ? 'confirm_pay' : 'idle');
-      return ctx.reply(L.wallet.receiptReceived);
+      return await processReceipt(ctx, uid, s.paymentId, null, text, false);
     }
     if (state === 'feedback') {
       const s = getSession(uid);
@@ -1957,9 +2109,7 @@ bot.on('photo', async (ctx) => {
     paymentId = pend.id; recovered = true;
   }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  await sendReceiptToAdmin(ctx, uid, paymentId, fileId, null);
-  setState(uid, s?.readingId ? 'confirm_pay' : 'idle');
-  await ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
+  await processReceipt(ctx, uid, paymentId, fileId, null, recovered);
 });
 
 /* ---------- sweep ساعتی milestone (پوش پیشگیرانه، سقف ۱/هفته) ---------- */
