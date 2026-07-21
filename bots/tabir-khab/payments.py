@@ -18,9 +18,11 @@ log = logging.getLogger("payments")
 
 # ===================== ارسال فاکتور اشتراک =====================
 
-async def send_subscription_invoice(bot, chat_id: int, user_id: int, tier: str):
+async def send_subscription_invoice(bot, chat_id: int, user_id: int, tier: str, resume: bool = False):
+    # نیتِ resume در انتهای payload کد می‌شود (`:r`) و در وب‌هوکِ successful_payment خوانده می‌شود —
+    # تا خریدِ واقعیِ از منوی «همسفری من» خوابِ کهنه را resume نکند (گیتِ استیت‌منیجمنت).
     sub = SUBSCRIPTIONS[tier]
-    payload = f"sub_{tier}_{uuid.uuid4().hex}"
+    payload = f"sub_{tier}_{uuid.uuid4().hex}" + (":r" if resume else "")
     await db.create_transaction(
         user_id=user_id, tier=tier, duration_days=sub["days"],
         amount_rial=sub["rial"], invoice_payload=payload,
