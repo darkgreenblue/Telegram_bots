@@ -327,6 +327,26 @@ async def activate_subscription(user_id: int, tier: str, days: int):
         return new_expiry
 
 
+async def reverse_subscription(user_id: int, days: int):
+    """برگشتِ یک پرداخت: روزهای همان پرداخت را از انقضا کم می‌کند (کاربر به حالتِ قبل برمی‌گردد).
+    اگر نتیجه ≤ الان شد، اشتراک کاملاً غیرفعال می‌شود (tier هم پاک). هرچه تا الان مصرف شده اشکال ندارد."""
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute("SELECT sub_expires_at FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        exp = _parse_dt(row[0] if row else None)
+        if not exp:
+            return
+        new_exp = exp - datetime.timedelta(days=days)
+        if new_exp <= _now():
+            await db.execute(
+                "UPDATE users SET sub_tier = NULL, sub_expires_at = NULL WHERE user_id = ?", (user_id,))
+        else:
+            await db.execute(
+                "UPDATE users SET sub_expires_at = ? WHERE user_id = ?",
+                (new_exp.isoformat(timespec="seconds"), user_id))
+        await db.commit()
+
+
 def subscription_status(user: dict) -> dict:
     """{active, tier, remaining_days, expires_at} از روی رکورد کاربر."""
     exp = _parse_dt((user or {}).get("sub_expires_at"))
@@ -527,6 +547,17 @@ async def mark_transaction_paid(invoice_payload: str, charge_id: str) -> bool:
             """UPDATE transactions SET status = 'paid', charge_id = ?
                WHERE invoice_payload = ? AND status != 'paid'""",
             (charge_id, invoice_payload),
+        )
+        await db.commit()
+        return cur.rowcount == 1
+
+
+async def mark_transaction_reversed(invoice_payload: str) -> bool:
+    """برگشتِ یک تراکنشِ paid (رسیدِ فیک) — از درآمدِ گزارش/داشبورد کنار می‌رود."""
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute(
+            "UPDATE transactions SET status = 'reversed' WHERE invoice_payload = ? AND status = 'paid'",
+            (invoice_payload,),
         )
         await db.commit()
         return cur.rowcount == 1

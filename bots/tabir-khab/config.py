@@ -25,7 +25,7 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.3.0"   # 1.3: پرداختِ کارت‌به‌کارتِ تلگرام (ماژول cardpay + ایجنتِ رسید) + بله واقعی
+PRODUCT_VERSION = "1.3.1"   # 1.3.1: برگشتِ پرداختِ فیک (تأیید دومِ ادمین + لغوِ اشتراک + بی‌اعتمادیِ کاربر)
 
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
