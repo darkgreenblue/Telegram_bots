@@ -16,11 +16,13 @@ import tempfile
 
 import db
 import ai
+import config
 import analytics
 import locales
 import payments
 import symbols as SYM
 import texts as C
+import cardpay
 from bale import inline_keyboard, reply_keyboard
 from config import (
     SUBSCRIPTIONS, SUBSCRIPTION_ORDER,
@@ -30,6 +32,8 @@ from config import (
     payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
     RESET_BUTTON_ENABLED, PRODUCT_VERSION, is_admin,
+    OPENROUTER_API_KEY, OPENROUTER_BASE_URL, RECEIPT_MODEL, RECEIPT_AI_AUTO_APPROVE,
+    CARD_NUMBER, CARD_OWNER, CARD_RECIPIENT_NAME, CARD_DEST_LAST4, SUPPORT_CONTACT,
 )
 
 log = logging.getLogger("handlers")
@@ -39,6 +43,48 @@ _processing: set = set()
 
 _REF_RE = re.compile(r"^ref_(\d+)$")
 _CAPTION_SAFE = 1000  # حاشیه‌ی امن زیر سقف ۱۰۲۴ کپشن
+
+
+# ===================== کارت‌به‌کارت (تلگرامِ فارسی) =====================
+# ماژولِ قابلِ‌حملِ cardpay: نمایشِ کارت → دریافتِ رسید → ایجنتِ Gemini Flash → تأیید/رد/ارجاع.
+# on_approved = گلوِ tabir: فعال‌سازیِ اشتراک (از مسیرِ موجودِ apply_successful_payment) + resumeِ گیت‌شده.
+cardpay.store.configure(db._path)
+
+
+async def _cardpay_on_approved(bot, payment):
+    import uuid
+    tier = payment.get("tier")
+    sub = SUBSCRIPTIONS.get(tier)
+    if not sub:
+        return
+    user_id = payment["user_id"]
+    chat_id = payment.get("chat_id") or user_id
+    payload = f"card_{tier}_{uuid.uuid4().hex}"
+    await db.create_transaction(user_id, tier, sub["days"], sub["rial"], payload)
+    # apply_successful_payment: فعال‌سازی/تمدید + آنالیتیکس + پیام موفقیت + تحویلِ خودکارِ خوابِ تریالِ معلق
+    await payments.apply_successful_payment(bot, user_id, payload, charge_id="CARD")
+    # خوابِ awaiting_payment را فقط اگر از مسیرِ پی‌وال آمده resume کن (گیتِ استیت‌منیجمنت)
+    if payment.get("resume"):
+        await _try_resume_pending_dream(bot, chat_id, user_id)
+    else:
+        try:
+            text, rows = C.main_menu_message(bot.locale)
+            await bot.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+        except Exception:
+            pass
+
+
+async def _cardpay_on_rejected(bot, payment, reason):
+    return  # ماژول خودش کاربر را با دلیل مطلع کرده
+
+
+CARDPAY = cardpay.CardPay(
+    card_number=CARD_NUMBER, card_owner=CARD_OWNER, recipient_name=CARD_RECIPIENT_NAME,
+    dest_last4=CARD_DEST_LAST4, api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL,
+    model=RECEIPT_MODEL, auto_approve=RECEIPT_AI_AUTO_APPROVE, admin_ids=ADMIN_IDS,
+    on_approved=_cardpay_on_approved, on_rejected=_cardpay_on_rejected,
+    support_contact=SUPPORT_CONTACT,
+)
 
 # نگاشتِ معکوسِ متنِ دکمه‌های پایین → اکشن (در همه‌ی زبان‌ها، مقاوم به تغییر زبان)
 _KB_ACTION: dict = {}
@@ -241,18 +287,32 @@ async def _handle_message(bale, msg: dict):
         return
 
     if "successful_payment" in msg:
-        # مسیرِ پرداختِ واقعی (SKIP_PAYMENT=False). فعلاً غیرفعال است (شبیه‌سازی از _cb_buy می‌رود).
-        # TODO لانچ: نیتِ resume باید در invoice_payload کد شود (مثل مسیرِ شبیه‌سازیِ `:r`) تا
-        # خریدِ واقعیِ از منوی «همسفری من» خوابِ کهنه را resume نکند — قرینه‌ی باگ استیت‌منیجمنت.
+        # پرداختِ واقعیِ بله (sendInvoice). نیتِ resume در انتهای payload کد شده (`:r`) — قرینه‌ی
+        # گیتِ استیت‌منیجمنتِ کارت‌به‌کارت: فقط اگر از مسیرِ پی‌والِ خواب آمده، خواب resume می‌شود.
         sp = msg["successful_payment"]
+        payload = sp.get("invoice_payload", "")
         await payments.apply_successful_payment(
-            bale, user_id, sp.get("invoice_payload", ""),
-            sp.get("telegram_payment_charge_id", ""),
+            bale, user_id, payload, sp.get("telegram_payment_charge_id", ""),
         )
-        await _try_resume_pending_dream(bale, chat_id, user_id)
+        if payload.endswith(":r"):
+            await _try_resume_pending_dream(bale, chat_id, user_id)
+        else:
+            try:
+                text, rows = C.main_menu_message(bale.locale)
+                await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))
+            except Exception:
+                pass
         return
 
     user = await db.get_user(user_id)
+
+    # --- کارت‌به‌کارت: عکسِ رسید (فقط ربات‌های card-mode = تلگرامِ فارسی) ---
+    if config.payment_mode(bale.platform, bale.locale) == "card":
+        photo = msg.get("photo")
+        if photo:
+            fid = photo[-1].get("file_id")
+            await CARDPAY.maybe_handle_receipt(bale, user_id, chat_id, photo_file_id=fid, text=None)
+            return
 
     audio = _extract_audio_input(msg)
     if audio:
@@ -315,6 +375,11 @@ async def _handle_message(bale, msg: dict):
             await _handle_symbol_search(bale, chat_id, user_id, lang, text)
             return
         await db.set_sym_browse(user_id, False)
+
+    # --- کارت‌به‌کارت: متنِ رسید (فقط اگر پرداختِ منتظرِ رسید داشته باشد؛ فرمان/دکمه قبلاً هندل شده) ---
+    if config.payment_mode(bale.platform, bale.locale) == "card" and not action:
+        if await CARDPAY.maybe_handle_receipt(bale, user_id, chat_id, photo_file_id=None, text=text):
+            return
 
     # در غیر این صورت = خواب متنی
     await _handle_dream_input(bale, chat_id, user_id, "text", text=text)
@@ -485,6 +550,8 @@ async def _handle_callback(bale, cq: dict):
             await _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data)
         elif data.startswith("menu:"):
             await _cb_menu(bale, cq_id, chat_id, msg_id, user_id, data.split(":", 1)[1])
+        elif data.startswith("cardok:") or data.startswith("cardno:"):
+            await CARDPAY.handle_admin_callback(bale, cq_id, user_id, data)
         else:
             await bale.answer_callback_query(cq_id)
     except Exception as e:
@@ -1042,18 +1109,22 @@ async def _cb_buy(bale, cq_id, chat_id, user_id, tier, resume: bool = False):
         return
     user = await db.get_user(user_id)
     lang = _lang_of(user, bale)
-    methods = payment_methods_for(lang)
+    mode = config.payment_mode(bale.platform, bale.locale)
+    sub = SUBSCRIPTIONS[tier]
 
-    if "zarinpal" in methods:
-        # فارسی → زرین‌پال (در حالت تست SKIP_PAYMENT شبیه‌سازی)
-        if SKIP_PAYMENT:
-            await payments.simulate_purchase(bale, chat_id, user_id, tier)
-            await _after_purchase(bale, chat_id, user_id, resume)
-        else:
-            await payments.send_subscription_invoice(bale, chat_id, user_id, tier)
+    if mode == "card":
+        # تلگرامِ فارسی → کارت‌به‌کارت (ماژول cardpay). نیتِ resume در خودِ پرداخت ذخیره می‌شود.
+        await CARDPAY.start(bale, user_id, chat_id, tier, amount_rial=sub["rial"],
+                            amount_toman=sub["toman"], tier_title=sub["title"], resume=resume)
         return
 
-    # بقیه‌ی زبان‌ها → انتخاب روش (Stars / Crypto)؛ نشانِ resume تا پرداخت حفظ می‌شود
+    if mode == "bale_invoice":
+        # بله → sendInvoice بومیِ کیف‌پولِ بله (پرداختِ واقعی)؛ نیتِ resume در payload کد می‌شود.
+        await payments.send_subscription_invoice(bale, chat_id, user_id, tier, resume=resume)
+        return
+
+    # simulate (غیرفارسیِ تلگرام) → انتخاب روش (Stars / Crypto)؛ نشانِ resume تا پرداخت حفظ می‌شود
+    methods = payment_methods_for(lang)
     suffix = ":r" if resume else ""
     rows = [[{"text": C.pay_method_button(lang, m), "callback_data": f"paym:{m}:{tier}{suffix}"}]
             for m in methods]

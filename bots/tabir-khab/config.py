@@ -25,7 +25,7 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.2.0"   # 1.2: فلوی درختی/منوی اصلی + فیکس گیت اشتراک و resume پرداخت
+PRODUCT_VERSION = "1.3.0"   # 1.3: پرداختِ کارت‌به‌کارتِ تلگرام (ماژول cardpay + ایجنتِ رسید) + بله واقعی
 
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
@@ -191,10 +191,30 @@ MASCOT_WELCOME      = "mascot_welcome.png"   # حالت خوش‌آمدگویی
 MASCOT_INVITE       = "mascot_invite.png"    # حالت دست‌دراز‌کرده (دعوت به همسفری)
 
 # --- پرداخت ---
-# فعلاً پرداخت رد می‌شود: کلیک روی پلن بلافاصله همسفری را فعال می‌کند.
-# برای فعال‌کردن درگاه واقعی، این را False کن.
+# روش پرداخت per (پلتفرم × زبان):
+#   تلگرامِ فارسی → کارت‌به‌کارت (ماژول cardpay + ایجنتِ رسیدِ Gemini Flash)
+#   بله (فارسی)   → sendInvoice بومیِ کیف‌پولِ بله (پرداختِ واقعیِ بله)
+#   بقیه (غیرفارسی تلگرام) → فعلاً شبیه‌سازی (Stars/کریپتو، خارج از این فاز)
+def payment_mode(platform: str, locale: str) -> str:
+    if platform == "telegram" and (locale or DEFAULT_LANGUAGE) == "fa":
+        return "card"
+    if platform == "bale":
+        return "bale_invoice"
+    return "simulate"
+
+# SKIP_PAYMENT فقط برای مسیرِ «simulate» (غیرفارسی) معنی دارد؛ کارت‌به‌کارت و بله واقعی‌اند.
 SKIP_PAYMENT = True
-SKIP_DAILY_LIMIT = False  # سقفِ «هر شب یک رویا» فعال — ضد مصرفِ LLM بی‌سقفِ غریبه (پرداخت هنوز شبیه‌سازی است)
+SKIP_DAILY_LIMIT = False  # سقفِ «هر شب یک رویا» فعال — ضد مصرفِ LLM بی‌سقفِ غریبه
+
+# --- کارت‌به‌کارت (تلگرامِ فارسی) ---
+CARD_NUMBER          = os.getenv("CARD_NUMBER", "6219861904145405").strip()
+CARD_OWNER           = os.getenv("CARD_OWNER", "علیرضا اولیا — بلوبانک").strip()
+CARD_RECIPIENT_NAME  = os.getenv("CARD_RECIPIENT_NAME", "علیرضا اولیا").strip()  # نامِ تطبیق در رسید
+CARD_DEST_LAST4      = os.getenv("CARD_DEST_LAST4", "5405").strip()             # ۴رقمِ آخرِ کارتِ مقصد
+SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", "@alireza_oliya").strip()
+# ایجنتِ رسید: روشن = تأییدِ خودکارِ AI؛ خاموش = همه‌ی رسیدها به ادمین (رول‌بکِ فوری).
+RECEIPT_AI_AUTO_APPROVE = True
+RECEIPT_MODEL           = LLM_MODEL   # Gemini Flash (چندوجهی، همان مسیرِ عکسِ ai.py)
 
 # --- محدودیت‌ها ---
 MIN_VOICE_DURATION = 10      # ثانیه — کمتر از این «خیلی کوتاه»

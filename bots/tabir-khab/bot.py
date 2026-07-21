@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 import db
 import locales
 from bale import Bale
+import handlers
 from handlers import handle_update
 import config
 from config import LOG_DIR, LOG_FILE
@@ -38,6 +39,15 @@ async def polling_loop(bot: Bale):
     await db.init_db(bot.db_path)
     log.info("[%s] database ready → %s", platform, bot.db_path)
 
+    # کارت‌به‌کارت (تلگرامِ فارسی): جدول‌های cardpay + جاروی ۶۰ثانیه‌ایِ صفِ ادمین/یادآوری
+    if config.payment_mode(bot.platform, bot.locale) == "card":
+        try:
+            await handlers.CARDPAY.ensure_schema()
+            asyncio.create_task(_cardpay_sweep_loop(bot))
+            log.info("[%s] cardpay فعال (کارت‌به‌کارت + ایجنتِ رسید)", platform)
+        except Exception as e:
+            log.warning("[%s] cardpay init failed: %s", platform, e)
+
     try:
         me = await bot.get_me()
         bot.bot_username = (me.get("username") or "").lstrip("@")
@@ -64,6 +74,18 @@ async def polling_loop(bot: Bale):
             except Exception as e:
                 log.exception("[%s] handler error on update %s: %s",
                               platform, update.get("update_id"), e)
+
+
+async def _cardpay_sweep_loop(bot: Bale):
+    """جاروی ۶۰ثانیه‌ایِ کارت‌به‌کارت (fail-safe): درینِ صفِ ادمین + یادآوریِ رسیدِ معطل.
+    ContextVarِ مسیرِ DB در همین تسک ست می‌شود (چون تسکِ جدا کپیِ کانتکست دارد)."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            db.set_db_path(bot.db_path)
+            await handlers.CARDPAY.sweep(bot)
+        except Exception as e:
+            log.warning("[%s] cardpay sweep error: %s", bot.tag.upper(), e)
 
 
 async def main():
