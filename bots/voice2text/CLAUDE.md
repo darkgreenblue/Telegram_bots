@@ -20,7 +20,7 @@
 |------|-----|
 | `users` | balance (تومان)، model انتخابی، پروفایل |
 | `usage_log` | هر پردازش: مدل، ثانیه، هزینه، type، success |
-| `payments` | شارژها: amount نهایی، original_amount قبل تخفیف، status: pending→waiting_review→approved/rejected، step |
+| `payments` | شارژها: amount نهایی، original_amount قبل تخفیف، status: pending→waiting_review→approved/rejected (و `reversed` در برگشتِ رسیدِ فیک)، step |
 | `discount_codes` | کد، درصد، سقف مبلغ، انقضا، سقف مصرف per user، سگمنت‌ها/لیست کاربر مجاز، آمار |
 | `discount_uses` | دفتر مصرف کدها |
 | `pro_whitelist` | دسترسی مدل Pro |
@@ -28,13 +28,25 @@
 | `admin_actions` | صف تأیید/رد رسید که **داشبورد** enqueue می‌کند؛ sweep ربات با منطق واقعی درین می‌کند (payment_id, action, source, done_at) |
 | `events` | آنالیتیکس کمینه (کپی محلی هم‌قرارداد `shared/analytics.js` — پایین) |
 
-`payments.reminded_at`: آخرین یادآوریِ رسیدِ معطل به ادمین (برای throttle یادآوری دوره‌ای).
+`payments.reminded_at`: آخرین یادآوریِ رسیدِ معطل به ادمین (برای throttle یادآوری دوره‌ای). `users.pay_distrust`: کاربرِ بی‌اعتماد بعد از برگشتِ رسیدِ فیک (ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد).
+
+## ایجنتِ رسیدِ کارت‌به‌کارت + auto-approve + برگشت/بی‌اعتمادی (`cardpay.js` — کپیِ محلی، خودکفا)
+`cardpay.js` دوقلوی نودیِ `bots/tabir-khab/cardpay/agent.py` است (همان قرارداد؛ کپیِ محلی چون این ربات از `shared/` استفاده نمی‌کند و برای ایزوله‌ماندنِ دیپلوی). هر رسید (عکس/متن) اول از `processReceipt` رد می‌شود که `analyzeReceipt` (Gemini Flash از OpenRouter، `RECEIPT_MODEL='google/gemini-2.5-flash'`) را صدا می‌زند:
+- **approve** → `approvePaymentAuto` (گذارِ اتمیکِ `finalizeFromOpen` از pending، همان منطقِ پولِ `approvePaymentDb` + دفترِ تخفیف، در `db.transaction`) + پیام به کاربر + اطلاع به ادمین با دکمه‌ی «🚫 پیامکش نیومده».
+- **reject** با `reason_code=not_a_receipt` → فقط راهنمایی و پرداخت باز می‌ماند (خطای کاربر، نه شکستِ پرداخت)؛ سایرِ reject → `rejectPaymentAuto` + پیام با دلیل + یادداشت به ادمین.
+- **review** → مسیرِ قدیمیِ `sendReceiptToAdmin` (تصمیمِ انسانی با دکمه‌های approve/reject).
+- fail-safe: هر خطای دانلود/شبکه/JSON → review (هرگز auto approve/reject در خطا).
+- **توابعِ سنّتیِ `approvePaymentDb`/`rejectPaymentDb` دست‌نخورده‌اند** (فقط waiting_review؛ برای callbackِ ادمین و صفِ داشبورد). مسیرِ auto جدا و اتمیک است.
+
+**کلیدِ خاموشیِ `RECEIPT_AI_AUTO_APPROVE`** (env، پیش‌فرض روشن): خاموش → همه‌ی رسیدها دستی به ادمین. **کاربرِ بی‌اعتماد** (`pay_distrust=1`) هم همیشه دستی می‌رود. Rollback فوری بدونِ دیپلوی: Secret `RECEIPT_AI_AUTO_APPROVE=false` + `Deploy force_all`.
+
+**شبکه‌ی ایمنیِ برگشت (رسیدِ فیک):** روی هر پرداختِ auto-approveشده دکمه‌ی «🚫 پیامکش نیومده» → تأیید دوم (`cardsms` با یادآوریِ چکِ اپِ بانکی) → `cardrev` = `reversePayment`: گذارِ اتمیکِ `approved→reversed` (ضدِ دوبار)، کسرِ اعتبارِ ناشی از این پرداخت با `clawback` (کفِ صفر؛ مصرف‌شده اشکالی ندارد؛ voice2text بدونِ هدیه‌ی شارژ)، `pay_distrust=1`، پیام به کاربر و ادمین. `cardrevno` = انصراف. رویداد `payment_reversed` (props: payment_id/amount/clawed).
 
 ## فلوها و state های in-memory
 - `sessions` (token→سشن ویس)، `userStates` (فلوی شارژ)، `adminStates` (پنل تخفیف)، `notionStates`, `activeJobs`. ری‌استارت = پاک‌شدن این‌ها (فلوهای وسط کار می‌میرند) — دلیل اصلی دیپلوی انتخابی.
 - فلوی ویس: دریافت → گارد فلوهای فعال/سایز/موجودی → طول (native یا ffprobe) → انتخاب نوع پردازش → **رزرو اتمیکِ هزینه** (`deductIf` با `WHERE balance>=cost` در شروع job، نه بعد از موفقیت — ضد مصرفِ رایگانِ چند فلوی هم‌زمان) → LLM با retry/فالبک → خروجی (>۴۰۰۰ کاراکتر: پیام تکه‌تکه یا فایل). شکستِ LLM = **refund کامل رزرو**؛ ری‌استارتِ وسطِ کار = `recoverOrphanFlows` در بوت رزروِ یتیم را برمی‌گرداند. کال‌بک‌های فلو (ptype/switchflow/setmodelflow/output) مالکیت `session.userId` را چک می‌کنند (ضد اکسپلویت گروه). → (مالک: پیشنهاد Notion).
 - **بازیابیِ رسید:** هندلر photo اگر state حافظه‌ای گم شده باشد (ری‌استارت/`/start` بعد از فاکتور)، پرداختِ `pending` با `step='receipt'` (پنجره‌ی ۳ روز) را از DB بازیابی و رسید را به همان وصل می‌کند (وگرنه فیش در سیاه‌چاله می‌افتاد). «انصراف» روی رسیدِ `waiting_review` رد می‌شود (لغو دروغین قبلاً پول را معلق می‌گذاشت).
-- شارژ: مبلغ → فاکتور با شماره کارت → کد تخفیف اختیاری → رسید (عکس/متن) → ادمین approve/reject. تخفیف ۱۰۰٪ = تأیید خودکار.
+- شارژ: مبلغ → فاکتور با شماره کارت → کد تخفیف اختیاری → رسید (عکس/متن) → **ایجنتِ رسید (auto-approve/reject/review؛ بخشِ «ایجنتِ رسید» بالا)**. تخفیف ۱۰۰٪ = تأیید خودکار.
 - سگمنت‌های تخفیف: all, new(<7d), no_balance, inactive(>30d), loyal(≥5پرداخت), premium, first_charge, high_usage(≥10), low_balance.
 - پنل ادمین دکمه‌ای: داشبورد (کاربر/درآمد/موجودی OpenRouter — هشدار زیر $1)، CRUD کد تخفیف، پیام promo قابل‌فوروارد.
 - جاروی ۶۰ثانیه‌ای: انقضای فلوهای رهاشده، پاک‌سازی سشن‌های >۲h و notionStates >۱h.
@@ -53,10 +65,10 @@
 
 ## آنالیتیکس کمینه (اتریبیوشن)
 - این ربات از shared استفاده نمی‌کند؛ **کپی محلی** هم‌قرارداد `shared/analytics.js` (بلوک `ANALYTICS_SCHEMA_VERSION = 2` بعد از voice_flows در index.js). چک CI (`tools/check-analytics-sync.mjs`) سینک بودن را تضمین می‌کند — تغییر قرارداد در shared باید همین‌جا هم اعمال شود.
-- جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic؛ نسخه از ثابت `PRODUCT_VERSION` بالای فایل — با هر تغییر رفتاری bump شود، بند ۲ج ریشه). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `payment_approved` (approve ادمین + تخفیف ۱۰۰٪ خودکار)، `payment_rejected`. track fail-safe است (فقط logErr).
+- جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version`. `captureStart` در `bot.start` (payload: `c_<code>` کمپین از داشبورد / خالی organic؛ نسخه از ثابت `PRODUCT_VERSION` بالای فایل — با هر تغییر رفتاری bump شود، بند ۲ج ریشه). رویدادهای ثبت‌شده (فقط ثبت — هیچ اثری روی فلو): `start`، `product_delivered` (job موفق)، `receipt_submitted`، `payment_approved` (approve ادمین/ایجنت + تخفیف ۱۰۰٪ خودکار؛ props: via=ai در auto)، `payment_rejected` (props: via=ai)، `payment_reversed` (برگشتِ رسیدِ فیک؛ props: payment_id/amount/clawed). track fail-safe است (فقط logErr). این رویدادهای اضافه فقط prop/نامِ جدید اضافه می‌کنند و قرارداد schema (`ANALYTICS_SCHEMA_VERSION`) را عوض نمی‌کنند.
 
 ## ریست حساب ادمین (بند ۶ب ریشه)
 دکمه‌ی `🔄 ریست حساب (ادمین)` (`RESET_TEST_BTN`) **برای هر دو آی‌دیِ ADMIN_IDS، همیشه**: حذف ردیف‌های همان ادمین از ۷ جدول (users, usage_log, payments, discount_uses, pro_whitelist, voice_flows, events) + `admin_actions` مرتبط (subquery) + پاک‌سازی state های in-memory، بعد معرفی مثل کاربر جدید (`upsertUser` → هدیه‌ی خوش‌آمد از نو). کدهای تخفیف (discount_codes) پاک نمی‌شوند. برچسبِ قدیمیِ `🔄 ریست ربات (تست)` هم هنوز match می‌شود. توجه: ادمینِ voice2text عمداً متمایز است (مصرف رایگان + مدل Pro)، پس ریست بیشتر برای پاک‌کردنِ دیتای تستِ خودِ ادمین است.
 
 ## env
-`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور). نیازمند ffmpeg/ffprobe روی سرور.
+`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور)، `RECEIPT_AI_AUTO_APPROVE` (اختیاری، پیش‌فرض روشن؛ `false` = خاموش‌کردنِ auto-approveِ ایجنتِ رسید بدونِ دیپلوی). نیازمند ffmpeg/ffprobe روی سرور.
