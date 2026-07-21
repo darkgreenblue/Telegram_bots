@@ -51,9 +51,10 @@ const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM
 const TEST_PHASE = false;
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
-// 1.1.0: رسیدِ پرداخت حالا از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
-// (روشن‌کردنِ FREE_MENU_ENABLED هم رفتاری‌ست و باید نسخه را جلوتر ببرد.)
-const PRODUCT_VERSION = '1.1.0';
+// 1.1.0: رسیدِ پرداخت از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
+// 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ ۳ تا ۱۰ ثانیه، بدونِ لوکنندنِ ایجنت)
+//        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید، نه رد) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
+const PRODUCT_VERSION = '1.1.1';
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
 // فعلاً خاموش عرضه می‌شود (dark launch): merge روی ربات زنده هیچ تغییرِ رفتاری نمی‌دهد.
@@ -1731,14 +1732,15 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   // رسیدِ خام را همان اول ذخیره کن (برای بازبینی/برگشت) بدونِ تغییرِ وضعیت
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
 
-  // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → مستقیم به ادمین، بدونِ تصمیمِ خودکار
+  // پیامِ انسانی: رسید برای بررسی/تأیید فرستاده شد (هیچ اشاره‌ای به بررسیِ خودکار نیست)
+  await ctx.reply(L.wallet.receiptSent).catch(() => {});
+
+  // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → مستقیم به ادمینِ واقعی (بدونِ تصمیمِ خودکار و بدونِ تأخیرِ ساختگی)
   if (!RECEIPT_AI_AUTO_APPROVE || isDistrusted(uid)) {
     await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
-    setState(uid, nextState);
-    return ctx.reply(recovered ? L.wallet.receiptReceivedRecovered : L.wallet.receiptReceived);
+    return setState(uid, nextState);
   }
 
-  await ctx.reply(L.wallet.receiptChecking).catch(() => {});
   // دانلودِ عکس برای ایجنت (fail-safe: هر خطا → بدونِ عکس؛ ایجنت آن را به review می‌برد)
   let imageBuffer = null;
   if (photoFileId) {
@@ -1750,39 +1752,57 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   }
   // مبلغِ موردِانتظار = اصلِ قبل از تخفیف (همان که کاربر واریز می‌کند و اعتبار می‌گیرد)
   const amountToman = p.original_amount || p.amount;
-  const verdict = await analyzeReceipt({
-    apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
-    expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
-    imageBuffer, imageMime: 'image/jpeg', text: textBody,
-  });
-  const reasonFa = verdict.reason_fa || 'نامشخص';
-
-  if (verdict.verdict === 'approve') {
-    const done = approvePayment(paymentId);
-    if (!done) { setState(uid, nextState); return ctx.reply(L.wallet.receiptReceived); } // ضدِ دوبار
-    await ctx.reply(L.wallet.approved(done.creditAmount, getBalance(uid), done.bonus)).catch(() => {});
-    await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa);
-    return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
+  let decision;
+  try {
+    const verdict = await analyzeReceipt({
+      apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
+      expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
+      imageBuffer, imageMime: 'image/jpeg', text: textBody,
+    });
+    decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
+  } catch (e) {
+    logErr('receipt agent:', e.message);
+    decision = { action: 'review', reason_fa: '', overpaid: 0 };
   }
-  if (verdict.verdict === 'reject') {
-    if (verdict.reason_code === 'not_a_receipt') {
-      // خطای کاربر، نه شکستِ پرداخت → پرداخت باز می‌ماند (state دست‌نخورده) تا رسیدِ درست بفرستد
+
+  // تأخیرِ انسانیِ ۳ تا ۱۰ ثانیه (حسِ «ادمین دارد اپِ بانکی را چک می‌کند») — فقط مسیرِ خودکار
+  await sleep(3000 + Math.floor(Math.random() * 7000));
+
+  const reasonFa = decision.reason_fa || 'نامشخص';
+  try {
+    if (decision.action === 'approve') {
+      const done = approvePayment(paymentId);
+      if (!done) return setState(uid, nextState); // ضدِ دوبار (قبلاً نهایی شده)
+      await ctx.reply(L.wallet.approved(done.creditAmount, getBalance(uid), done.bonus)).catch(() => {});
+      await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
+      return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
+    }
+    if (decision.action === 'not_a_receipt') {
+      // چیزی که فرستاد رسید نبود → پرداخت باز می‌ماند (state دست‌نخورده) تا رسیدِ درست بفرستد
       return ctx.reply(L.wallet.notReceiptHint).catch(() => {});
     }
-    rejectPaymentAI(paymentId);
+    if (decision.action === 'reject') {
+      rejectPaymentAI(paymentId);
+      setState(uid, nextState);
+      await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
+      return ctx.reply(L.wallet.rejectedReason(reasonFa)).catch(() => {});
+    }
+    // review → تصمیمِ انسانی (پیامِ receiptSent قبلاً رفته؛ ادمین با دکمه تأیید/رد می‌کند)
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
     setState(uid, nextState);
-    await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
-    return ctx.reply(L.wallet.rejectedReason(reasonFa)).catch(() => {});
+  } catch (e) {
+    // شبکه‌ی ایمنیِ نهایی: کاربر هرگز بی‌جواب نماند و پول در هوا نماند → به ادمینِ انسانی بسپار
+    logErr('processReceipt terminal:', e.message);
+    try { await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody); } catch {}
+    setState(uid, nextState);
   }
-  // review → تصمیمِ انسانی
-  await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
-  setState(uid, nextState);
-  return ctx.reply(L.wallet.receiptReceived).catch(() => {});
 }
 
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
-async function notifyAdminAutoApproved(p, user, reasonFa) {
-  const caption = L.wallet.adminAutoApproved(p, user, reasonFa);
+// overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
+async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
+  let caption = L.wallet.adminAutoApproved(p, user, reasonFa);
+  if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${p.id}`),
   ]]).reply_markup;
@@ -1793,9 +1813,9 @@ async function notifyAdminAutoApproved(p, user, reasonFa) {
     } catch {}
   }
 }
-// یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject
+// یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
 async function notifyAdminAuto(p, user, note, photoFileId) {
-  const caption = `${note}\n\n${L.wallet.adminNotify(p, user)}`;
+  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' })}`;
   for (const adminId of ADMIN_IDS) {
     try {
       if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption });

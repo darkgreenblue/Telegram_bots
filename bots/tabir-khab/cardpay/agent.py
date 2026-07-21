@@ -49,12 +49,13 @@ EXPECTED:
 
 DECISION RULES (apply in order):
 1. If the input is NOT a payment receipt at all (random text, unrelated photo, a sentence, a greeting) → verdict "reject", reason_code "not_a_receipt".
-2. If it IS a receipt and you can read the amount, and the PAID amount is clearly LESS than the expected amount → verdict "reject", reason_code "amount_too_low".
-3. If it IS a genuine-looking SUCCESSFUL receipt AND paid amount ≥ expected amount AND (recipient_name matches OR dest_card_last4 matches the expected) AND you see no strong forgery signal → verdict "approve", reason_code "ok".
+2. If it IS a receipt and you can read the amount, and the PAID amount is STRICTLY LESS than the expected amount (paid < expected) → verdict "reject", reason_code "amount_too_low".
+3. If it IS a genuine-looking SUCCESSFUL receipt AND paid amount is GREATER THAN OR EQUAL to expected (paid >= expected) AND (recipient_name matches OR dest_card_last4 matches the expected) AND you see no strong forgery signal → verdict "approve", reason_code "ok".
 4. Otherwise (receipt but: unreadable/low quality, amount ambiguous, missing key fields, status not clearly successful, recipient/last4 do not match but it is still plausibly a real receipt, or you are unsure for ANY reason) → verdict "review", reason_code one of: "low_quality", "missing_fields", "mismatch", "uncertain".
 
+CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When the paid amount is greater than or equal to the expected amount you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3). Always fill extracted.amount_toman with the paid amount you read (in Toman) so this can be double-checked.
+
 Notes:
-- Paying MORE than expected is fine (still approve on amount).
 - A round amount (exact multiple of 100,000) is a mild fraud signal but NOT reason alone to reject; note it in risk_flags.
 - Be conservative: when in doubt, choose "review", never "approve".
 - Amount comparison: normalize Rial/Toman correctly (1 Toman = 10 Rial).
@@ -93,6 +94,32 @@ def _norm(data: dict) -> dict:
         "extracted": ext,
         "risk_flags": [str(f) for f in flags][:8],
     }
+
+
+def decide_receipt(verdict: dict, expected_toman: float) -> dict:
+    """خروجیِ خامِ ایجنت را به یک «تصمیمِ قطعی» تبدیل می‌کند و گاردِ مبلغ می‌زند.
+
+    گاردِ قطعی (ضدِ خطای مدل): اگر ایجنت «مبلغ کم» گفت ولی مبلغِ استخراج‌شده ≥ موردانتظار،
+    به approve override می‌شود (پرداختِ بیشتر همیشه قابل‌قبول است). overpaid = مبلغِ پرداختی
+    وقتی به‌قدرِ محسوس (≥۱۰٪) بیشتر است، تا میزبان به ادمین اطلاع دهد.
+    خروجی: {action: approve|reject|review|not_a_receipt, reason_fa, reason_code, paid, overpaid}
+    """
+    ext = verdict.get("extracted") or {}
+    try:
+        paid = float(ext.get("amount_toman"))
+    except (TypeError, ValueError):
+        paid = None
+    has_paid = paid is not None and paid > 0
+    exp = float(expected_toman or 0)
+    v = verdict.get("verdict")
+    if (v == "reject" and verdict.get("reason_code") == "amount_too_low"
+            and has_paid and exp > 0 and paid >= exp):
+        v = "approve"
+    overpaid = paid if (v == "approve" and has_paid and exp > 0 and paid >= exp * 1.1) else 0
+    action = "not_a_receipt" if (v == "reject" and verdict.get("reason_code") == "not_a_receipt") else v
+    return {"action": action, "reason_fa": verdict.get("reason_fa", "") or "",
+            "reason_code": verdict.get("reason_code", "") or "",
+            "paid": paid if has_paid else None, "overpaid": overpaid}
 
 
 def _parse(raw: str) -> dict:

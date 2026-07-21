@@ -14,6 +14,8 @@
 کارت‌به‌کارت خاصِ ایران/فارسی است (ماژول کپیِ خودش را حمل می‌کند تا قابلِ‌حمل بماند).
 """
 import os
+import random
+import asyncio
 import logging
 import tempfile
 
@@ -35,11 +37,12 @@ _DEFAULT_TEXTS = {
         "`{card_number}`\n{card_owner}\n\n"
         "بعد از واریز، *تصویرِ فیش یا متنِ تأیید* را همین‌جا بفرست تا بررسی شود. ⏰ مهلت: ۲۴ ساعت"
     ),
-    "got_receipt": "رسیدت رسید 🌙 دارم بررسی‌اش می‌کنم…",
+    "got_receipt": "رسیدت رسید 🌙 برای بررسی و تأیید فرستاده شد؛ به‌محضِ تأیید، همسفری‌ات فعال می‌شود و خبرت می‌کنم.",
     "approved": "✅ پرداختت تأیید شد؛ همسفری‌ات فعال شد 🌙",
-    "rejected": "❌ رسیدِ پرداختت تأیید نشد.\nدلیل: {reason}\n\nاگر اشتباهی هست به پشتیبانی پیام بده: {support}",
+    "rejected": "❌ متأسفانه رسیدِ پرداختت تأیید نشد.\nدلیل: {reason}\n\nاگر فکر می‌کنی اشتباهی شده، به پشتیبانی پیام بده: {support}",
     "review": "رسیدت رسید و برای بررسیِ نهایی به ادمین رفت 🌙 به‌زودی نتیجه را می‌گویم.",
-    "not_receipt_hint": "این پیام رسیدِ پرداخت به‌نظر نمی‌رسد. لطفاً تصویرِ فیش یا متنِ تأییدِ بانک را بفرست.",
+    "not_receipt_hint": "چیزی که فرستادی رسیدِ پرداخت نبود. لطفاً تصویرِ فیشِ واریز یا متنِ تأییدِ بانک را بفرست.",
+    "overpaid_note": "کاربر مبلغِ بیشتری واریز کرده: حدود {paid} تومان به‌جای {expected} تومان. اگر خواستی، اختلاف را دستی لحاظ کن.",
     # برگشتِ پرداخت (رسیدِ فیک)
     "admin_ai_approved": "✅ پرداخت #{pid} — مبلغ {amount} تومان توسط ایجنت تأیید و فعال شد.\n{note}",
     "confirm_reverse": (
@@ -59,7 +62,10 @@ _DEFAULT_TEXTS = {
 class CardPay:
     def __init__(self, *, card_number, card_owner, recipient_name=None, dest_last4="",
                  api_key, base_url, model, auto_approve, admin_ids,
-                 on_approved, on_rejected, on_reversed=None, support_contact="", texts=None):
+                 on_approved, on_rejected, on_reversed=None, support_contact="", texts=None,
+                 human_delay_range=(3.0, 10.0)):
+        # تأخیرِ انسانیِ بین «رسید رسید» و نتیجه (حسِ بررسیِ ادمین)؛ تست‌ها (0,0) می‌دهند.
+        self.human_delay_range = human_delay_range
         self.card_number = card_number
         self.card_owner = card_owner
         self.recipient_name = recipient_name or card_owner
@@ -102,15 +108,24 @@ class CardPay:
         pid = payment["id"]
 
         await store.set_receipt_media(pid, photo_file_id, text)
+        # پیامِ انسانی: رسید برای بررسی/تأیید فرستاده شد (بدونِ اشاره به بررسیِ خودکار)
         await bot.send_message(chat_id, self.T["got_receipt"])
 
-        # --- داوریِ ایجنت ---
+        expected_toman = payment["amount_rial"] // 10
         expected = {
-            "amount_toman": payment["amount_rial"] // 10,
+            "amount_toman": expected_toman,
             "amount_rial": payment["amount_rial"],
             "recipient": self.recipient_name,
             "dest_last4": self.dest_last4,
         }
+
+        # کلیدِ خاموشی یا کاربرِ بی‌اعتماد = مستقیم به ادمین (دستی، بدونِ تصمیمِ خودکار و بدونِ تأخیرِ ساختگی)
+        distrusted = await store.is_distrusted(user_id)
+        if not self.auto_approve or distrusted:
+            await store.set_ai(pid, "review", "manual" if distrusted else "auto_off")
+            await self._escalate(bot, payment, "بررسیِ دستی", [])
+            return True
+
         image_bytes = None
         if photo_file_id:
             try:
@@ -118,33 +133,41 @@ class CardPay:
             except Exception as e:
                 log.warning("[cardpay] receipt download failed → review: %s", e)
 
-        verdict = await agent.analyze_receipt(
-            api_key=self.api_key, base_url=self.base_url, model=self.model,
-            expected=expected, image_bytes=image_bytes,
-            image_mime="image/jpeg", text=text,
-        )
-        await store.set_ai(pid, verdict["verdict"], verdict.get("reason_code", ""))
-        reason_fa = verdict.get("reason_fa") or "نامشخص"
+        verdict = None
+        try:
+            verdict = await agent.analyze_receipt(
+                api_key=self.api_key, base_url=self.base_url, model=self.model,
+                expected=expected, image_bytes=image_bytes,
+                image_mime="image/jpeg", text=text,
+            )
+            decision = agent.decide_receipt(verdict, expected_toman)  # گاردِ قطعیِ مبلغ (بیشتر → تأیید)
+            await store.set_ai(pid, verdict["verdict"], verdict.get("reason_code", ""))
+        except Exception as e:
+            log.warning("[cardpay] agent failed → review: %s", e)
+            decision = {"action": "review", "reason_fa": "", "overpaid": 0}
 
-        # auto_approve خاموش (کلید سراسری) یا کاربرِ بی‌اعتماد = همه‌ی رسیدها به ادمین (دستی)
-        distrusted = await store.is_distrusted(user_id)
-        v = verdict["verdict"] if (self.auto_approve and not distrusted) else "review"
+        # تأخیرِ انسانیِ ۳ تا ۱۰ ثانیه (حسِ «ادمین اپِ بانکی را چک می‌کند») — فقط مسیرِ خودکار
+        lo, hi = self.human_delay_range
+        if hi and hi > 0:
+            await asyncio.sleep(random.uniform(lo, hi))
 
-        if v == "approve":
-            await self._approve(bot, pid, via="ai", note=reason_fa)
-        elif v == "reject":
+        reason_fa = decision.get("reason_fa") or "نامشخص"
+        action = decision["action"]
+        if action == "approve":
+            await self._approve(bot, pid, via="ai", note=reason_fa,
+                                overpaid=decision.get("overpaid", 0), expected_toman=expected_toman)
+        elif action == "not_a_receipt":
             # «اصلاً رسید نیست» = خطای کاربر، نه شکستِ پرداخت → پرداخت باز می‌ماند تا رسیدِ درست بفرستد.
-            if verdict.get("reason_code") == "not_a_receipt":
-                await bot.send_message(chat_id, self.T["not_receipt_hint"])
-            else:
-                await self._reject(bot, pid, reason_fa, via="ai")
+            await bot.send_message(chat_id, self.T["not_receipt_hint"])
+        elif action == "reject":
+            await self._reject(bot, pid, reason_fa, via="ai")
         else:
-            await self._escalate(bot, payment, reason_fa, verdict.get("risk_flags", []))
+            await self._escalate(bot, payment, reason_fa, verdict.get("risk_flags", []) if verdict else [])
         return True
 
     # ===================== تأیید / رد =====================
 
-    async def _approve(self, bot, payment_id, *, via, note=""):
+    async def _approve(self, bot, payment_id, *, via, note="", overpaid=0, expected_toman=0):
         if not await store.finalize(payment_id, "approved"):
             return  # قبلاً نهایی شده (ضد دوبار)
         payment = await store.get_payment(payment_id)
@@ -157,6 +180,10 @@ class CardPay:
             # اطلاع به ادمین + دکمه‌ی «پیامکش نیومده» (برای گرفتنِ جلوی رسیدِ فیکی که AI تأیید کرده)
             text = self.T["admin_ai_approved"].format(
                 pid=payment_id, amount=f"{payment['amount_rial'] // 10:,}", note=note)
+            if overpaid and overpaid > 0:
+                exp = expected_toman or (payment["amount_rial"] // 10)
+                text += "\n\n⚠️ " + self.T["overpaid_note"].format(
+                    paid=f"{int(overpaid):,}", expected=f"{int(exp):,}")
             kb = {"inline_keyboard": [[
                 {"text": "🚫 پیامکش نیومده", "callback_data": f"{_SMS_CB}:{payment_id}"},
             ]]}

@@ -26,11 +26,13 @@ EXPECTED:
 
 DECISION RULES (in order):
 1. If the input is NOT a payment receipt at all (random text, unrelated photo, a sentence, a greeting) → verdict "reject", reason_code "not_a_receipt".
-2. If it IS a receipt and you can read the amount and the PAID amount is clearly LESS than the expected amount → verdict "reject", reason_code "amount_too_low".
-3. If it IS a genuine-looking SUCCESSFUL receipt AND paid amount ≥ expected AND (recipient_name matches OR dest_card_last4 matches) AND no strong forgery signal → verdict "approve", reason_code "ok".
+2. If it IS a receipt and you can read the amount and the PAID amount is STRICTLY LESS than the expected amount (paid < expected) → verdict "reject", reason_code "amount_too_low".
+3. If it IS a genuine-looking SUCCESSFUL receipt AND paid amount is GREATER THAN OR EQUAL to expected (paid >= expected) AND (recipient_name matches OR dest_card_last4 matches) AND no strong forgery signal → verdict "approve", reason_code "ok".
 4. Otherwise (receipt but unreadable/low quality, amount ambiguous, missing key fields, status not clearly successful, recipient/last4 mismatch but still plausibly real, or unsure for ANY reason) → verdict "review", reason_code one of "low_quality","missing_fields","mismatch","uncertain".
 
-Notes: paying MORE is fine (approve on amount). A round amount (exact multiple of 100,000) is a mild fraud signal, note in risk_flags, not a reason alone to reject. When in doubt choose "review", never "approve". Normalize Rial/Toman (1 Toman = 10 Rial).
+CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When the paid amount is greater than or equal to the expected amount you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3). Always fill extracted.amount_toman with the paid amount you read (in Toman) so this can be double-checked.
+
+Notes: a round amount (exact multiple of 100,000) is a mild fraud signal, note in risk_flags, not a reason alone to reject. When in doubt choose "review", never "approve". Normalize Rial/Toman (1 Toman = 10 Rial).
 
 Return ONLY a JSON object, no markdown, EXACTLY these keys:
 {"verdict":"approve|reject|review","reason_code":"ok|not_a_receipt|amount_too_low|low_quality|missing_fields|mismatch|uncertain","reason_fa":"<one short Persian sentence, no em dash>","extracted":{"amount_toman":<number|null>,"recipient_name":"<string|null>","dest_card_last4":"<string|null>","tracking_code":"<string|null>","status_successful":<true|false|null>},"risk_flags":["<tags: round_amount, name_mismatch, last4_mismatch, no_recipient, edited_look>"]}`;
@@ -56,6 +58,27 @@ function parse(raw) {
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
   if (a !== -1 && b !== -1 && b > a) s = s.slice(a, b + 1);
   return normalize(JSON.parse(s));
+}
+
+// decideReceipt: خروجیِ خامِ ایجنت را به یک «تصمیمِ قطعی» تبدیل می‌کند و گاردِ مبلغ می‌زند.
+// گاردِ قطعی (ضدِ خطای مدل): اگر ایجنت «مبلغ کم» گفت ولی مبلغِ استخراج‌شده ≥ موردِانتظار،
+// به approve override کن (پرداختِ بیشتر همیشه قابل‌قبول است). overpaid = مبلغِ پرداختی وقتی
+// به‌قدرِ محسوس (≥۱۰٪) بیشتر است، تا میزبان به ادمین اطلاع دهد.
+// خروجی: { action: approve|reject|review|not_a_receipt, reason_fa, reason_code, paid, overpaid }
+function decideReceipt(verdict, expectedToman) {
+  const ext = verdict.extracted || {};
+  const paid = Number(ext.amount_toman);
+  const hasPaid = Number.isFinite(paid) && paid > 0;
+  const exp = Number(expectedToman) || 0;
+  let v = verdict.verdict;
+  // override: ردِ «مبلغ کم» در حالی که پرداختی ≥ موردانتظار → تأیید (خطای رایجِ مدل)
+  if (v === 'reject' && verdict.reason_code === 'amount_too_low' && hasPaid && exp > 0 && paid >= exp) {
+    v = 'approve';
+  }
+  const overpaid = (v === 'approve' && hasPaid && exp > 0 && paid >= exp * 1.1) ? paid : 0;
+  const action = (v === 'reject' && verdict.reason_code === 'not_a_receipt') ? 'not_a_receipt' : v;
+  return { action, reason_fa: verdict.reason_fa || '', reason_code: verdict.reason_code || '',
+           paid: hasPaid ? paid : null, overpaid };
 }
 
 // analyzeReceipt: یکی از imageBuffer یا text را بده.
@@ -104,4 +127,4 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
   }
 }
 
-export { analyzeReceipt, VERDICTS };
+export { analyzeReceipt, decideReceipt, VERDICTS };
