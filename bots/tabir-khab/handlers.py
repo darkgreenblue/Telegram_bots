@@ -61,6 +61,11 @@ async def _cardpay_on_approved(bot, payment):
     chat_id = payment.get("chat_id") or user_id
     payload = f"card_{tier}_{uuid.uuid4().hex}"
     await db.create_transaction(user_id, tier, sub["days"], sub["rial"], payload)
+    # رفرنسِ تراکنش را روی رکوردِ cardpay ذخیره کن تا در صورتِ برگشت (رسیدِ فیک) قابل لغو باشد
+    try:
+        await cardpay.store.set_txn_payload(payment["id"], payload)
+    except Exception:
+        pass
     # apply_successful_payment: فعال‌سازی/تمدید + آنالیتیکس + پیام موفقیت + تحویلِ خودکارِ خوابِ تریالِ معلق
     await payments.apply_successful_payment(bot, user_id, payload, charge_id="CARD")
     # خوابِ awaiting_payment را فقط اگر از مسیرِ پی‌وال آمده resume کن (گیتِ استیت‌منیجمنت)
@@ -78,12 +83,24 @@ async def _cardpay_on_rejected(bot, payment, reason):
     return  # ماژول خودش کاربر را با دلیل مطلع کرده
 
 
+async def _cardpay_on_reversed(bot, payment):
+    """برگشتِ پرداختِ فیک: اشتراکِ ناشی از آن پرداخت لغو و از درآمد کنار می‌رود (مصرف‌شده اشکال ندارد).
+    کاربر به حالتِ قبل (غیرمشترک) برمی‌گردد؛ ماژول خودش او را بی‌اعتماد و مطلع کرده."""
+    tier = payment.get("tier")
+    sub = SUBSCRIPTIONS.get(tier)
+    if sub:
+        await db.reverse_subscription(payment["user_id"], sub["days"])
+    txn = payment.get("txn_payload")
+    if txn:
+        await db.mark_transaction_reversed(txn)
+
+
 CARDPAY = cardpay.CardPay(
     card_number=CARD_NUMBER, card_owner=CARD_OWNER, recipient_name=CARD_RECIPIENT_NAME,
     dest_last4=CARD_DEST_LAST4, api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL,
     model=RECEIPT_MODEL, auto_approve=RECEIPT_AI_AUTO_APPROVE, admin_ids=ADMIN_IDS,
     on_approved=_cardpay_on_approved, on_rejected=_cardpay_on_rejected,
-    support_contact=SUPPORT_CONTACT,
+    on_reversed=_cardpay_on_reversed, support_contact=SUPPORT_CONTACT,
 )
 
 # نگاشتِ معکوسِ متنِ دکمه‌های پایین → اکشن (در همه‌ی زبان‌ها، مقاوم به تغییر زبان)
@@ -550,7 +567,7 @@ async def _handle_callback(bale, cq: dict):
             await _cb_symbols(bale, cq_id, chat_id, msg_id, user_id, data)
         elif data.startswith("menu:"):
             await _cb_menu(bale, cq_id, chat_id, msg_id, user_id, data.split(":", 1)[1])
-        elif data.startswith("cardok:") or data.startswith("cardno:"):
+        elif data.startswith("card"):   # cardok/cardno/cardsms/cardrev/cardrevno (ادمین)
             await CARDPAY.handle_admin_callback(bale, cq_id, user_id, data)
         else:
             await bale.answer_callback_query(cq_id)

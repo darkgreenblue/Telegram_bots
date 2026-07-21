@@ -58,13 +58,31 @@ CREATE TABLE IF NOT EXISTS card_admin_actions (
     action      TEXT NOT NULL,
     done_at     INTEGER
 );
+
+-- کاربرانِ «بی‌اعتماد»: بعد از یک برگشتِ پرداخت (رسیدِ فیک)، ایجنت دیگر برایشان خودکار
+-- تصمیم نمی‌گیرد؛ همه‌ی پرداخت‌هایشان به ادمین (دستی) می‌رود.
+CREATE TABLE IF NOT EXISTS card_distrust (
+    user_id  INTEGER PRIMARY KEY,
+    at       INTEGER
+);
 """
+
+# ستون‌های افزایشی (روی DBهایی که card_payments از قبل ساخته شده):
+_MIGRATIONS = [
+    ("card_payments", "txn_payload", "TEXT"),   # payload تراکنشِ میزبان (برای برگشت/مارک)
+]
 
 
 async def ensure_schema() -> None:
     async with aiosqlite.connect(_path()) as db:
         await db.executescript(_SCHEMA)
         await db.commit()
+        for table, col, col_type in _MIGRATIONS:
+            try:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                await db.commit()
+            except Exception:
+                pass
 
 
 def _row(cur, row):
@@ -144,6 +162,39 @@ async def finalize(payment_id, status) -> bool:
         )
         await db.commit()
         return cur.rowcount == 1
+
+
+async def set_txn_payload(payment_id, payload):
+    """ذخیره‌ی رفرنسِ تراکنشِ میزبان (برای برگشت/مارک‌کردنِ درآمد)."""
+    async with aiosqlite.connect(_path()) as db:
+        await db.execute("UPDATE card_payments SET txn_payload = ? WHERE id = ?", (payload, payment_id))
+        await db.commit()
+
+
+async def mark_reversed(payment_id) -> bool:
+    """برگشتِ پرداخت — فقط از approved (idempotent، ضد دوبار). True یعنی همین حالا برگشت خورد."""
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute(
+            "UPDATE card_payments SET status = 'reversed', updated_at = ? WHERE id = ? AND status = 'approved'",
+            (_now(), payment_id),
+        )
+        await db.commit()
+        return cur.rowcount == 1
+
+
+# ===================== بی‌اعتمادیِ کاربر (بعد از برگشتِ رسیدِ فیک) =====================
+
+async def is_distrusted(user_id) -> bool:
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute("SELECT 1 FROM card_distrust WHERE user_id = ?", (user_id,))
+        return await cur.fetchone() is not None
+
+
+async def set_distrusted(user_id):
+    async with aiosqlite.connect(_path()) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO card_distrust (user_id, at) VALUES (?, ?)", (user_id, _now()))
+        await db.commit()
 
 
 # ===================== صفِ اکشنِ ادمین (داشبورد) + یادآوری =====================

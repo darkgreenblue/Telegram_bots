@@ -22,8 +22,11 @@ from . import agent
 
 log = logging.getLogger("cardpay.flow")
 
-_APPROVE_CB = "cardok"
-_REJECT_CB = "cardno"
+_APPROVE_CB = "cardok"      # ادمین: تأیید رسیدِ مشکوک
+_REJECT_CB = "cardno"       # ادمین: ردِ رسیدِ مشکوک
+_SMS_CB = "cardsms"         # ادمین: «پیامکش نیومده» روی پرداختِ auto-approveشده
+_REV_CB = "cardrev"         # ادمین: تأیید دومِ برگشت
+_REVNO_CB = "cardrevno"     # ادمین: انصراف از برگشت
 
 _DEFAULT_TEXTS = {
     "invoice": (
@@ -37,13 +40,26 @@ _DEFAULT_TEXTS = {
     "rejected": "❌ رسیدِ پرداختت تأیید نشد.\nدلیل: {reason}\n\nاگر اشتباهی هست به پشتیبانی پیام بده: {support}",
     "review": "رسیدت رسید و برای بررسیِ نهایی به ادمین رفت 🌙 به‌زودی نتیجه را می‌گویم.",
     "not_receipt_hint": "این پیام رسیدِ پرداخت به‌نظر نمی‌رسد. لطفاً تصویرِ فیش یا متنِ تأییدِ بانک را بفرست.",
+    # برگشتِ پرداخت (رسیدِ فیک)
+    "admin_ai_approved": "✅ پرداخت #{pid} — مبلغ {amount} تومان توسط ایجنت تأیید و فعال شد.\n{note}",
+    "confirm_reverse": (
+        "⚠️ مطمئنی پیامکِ واریزِ پرداخت #{pid} نیومده؟\n"
+        "اول اپِ بانکی/پیامک را چک کن. با تأیید، اشتراکِ ناشی از این پرداخت *لغو* و کاربر به حالتِ قبل برمی‌گردد "
+        "و از این به بعد پرداخت‌هایش فقط دستی (توسط تو) تأیید می‌شود."
+    ),
+    "reversed_user": (
+        "پرداختِ قبلی شما لغو شد و اشتراکِ ناشی از آن برداشته شد. 🌙\n"
+        "اگر فکر می‌کنی اشتباهی شده، به پشتیبانی پیام بده: {support}"
+    ),
+    "admin_reversed": "↩️ پرداخت #{pid} برگشت خورد، اشتراک لغو شد و کاربر {user} بی‌اعتماد علامت خورد (از این پس دستی).",
+    "admin_reverse_cancelled": "باشه، برگشت انجام نشد. پرداخت #{pid} سرِ جایش ماند.",
 }
 
 
 class CardPay:
     def __init__(self, *, card_number, card_owner, recipient_name=None, dest_last4="",
                  api_key, base_url, model, auto_approve, admin_ids,
-                 on_approved, on_rejected, support_contact="", texts=None):
+                 on_approved, on_rejected, on_reversed=None, support_contact="", texts=None):
         self.card_number = card_number
         self.card_owner = card_owner
         self.recipient_name = recipient_name or card_owner
@@ -55,6 +71,7 @@ class CardPay:
         self.admin_ids = list(admin_ids or [])
         self.on_approved = on_approved
         self.on_rejected = on_rejected
+        self.on_reversed = on_reversed   # میزبان: لغوِ اشتراک/شارژِ ناشی از این پرداخت
         self.support_contact = support_contact
         self.T = {**_DEFAULT_TEXTS, **(texts or {})}
 
@@ -109,8 +126,9 @@ class CardPay:
         await store.set_ai(pid, verdict["verdict"], verdict.get("reason_code", ""))
         reason_fa = verdict.get("reason_fa") or "نامشخص"
 
-        # auto_approve خاموش = همه‌ی رسیدها به ادمین (رول‌بکِ فوری)
-        v = verdict["verdict"] if self.auto_approve else "review"
+        # auto_approve خاموش (کلید سراسری) یا کاربرِ بی‌اعتماد = همه‌ی رسیدها به ادمین (دستی)
+        distrusted = await store.is_distrusted(user_id)
+        v = verdict["verdict"] if (self.auto_approve and not distrusted) else "review"
 
         if v == "approve":
             await self._approve(bot, pid, via="ai", note=reason_fa)
@@ -134,8 +152,19 @@ class CardPay:
             await self.on_approved(bot, payment)
         except Exception as e:
             log.warning("[cardpay] on_approved failed: %s", e)
-        await self._admin_note(bot, f"✅ پرداخت #{payment_id} تأیید شد ({'AI' if via=='ai' else via}). {note}",
-                               photo_file_id=payment.get("receipt_file_id"))
+
+        if via == "ai":
+            # اطلاع به ادمین + دکمه‌ی «پیامکش نیومده» (برای گرفتنِ جلوی رسیدِ فیکی که AI تأیید کرده)
+            text = self.T["admin_ai_approved"].format(
+                pid=payment_id, amount=f"{payment['amount_rial'] // 10:,}", note=note)
+            kb = {"inline_keyboard": [[
+                {"text": "🚫 پیامکش نیومده", "callback_data": f"{_SMS_CB}:{payment_id}"},
+            ]]}
+            await self._admin_send(bot, text, reply_markup=kb,
+                                   photo_file_id=payment.get("receipt_file_id"))
+        else:
+            await self._admin_note(bot, f"✅ پرداخت #{payment_id} تأیید شد ({via}). {note}",
+                                   photo_file_id=payment.get("receipt_file_id"))
 
     async def _reject(self, bot, payment_id, reason, *, via):
         if not await store.finalize(payment_id, "rejected"):
@@ -186,25 +215,58 @@ class CardPay:
     # ===================== کال‌بکِ ادمین =====================
 
     async def handle_admin_callback(self, bot, cq_id, admin_id, data) -> bool:
-        """دکمه‌های cardok:/cardno: ادمین. True یعنی مصرف شد."""
+        """دکمه‌های ادمین: cardok/cardno (تأیید/ردِ مشکوک)، cardsms (پیامک نیومده)،
+        cardrev/cardrevno (تأیید دوم/انصرافِ برگشت). True یعنی مصرف شد."""
         if ":" not in data:
             return False
         act, _, sid = data.partition(":")
-        if act not in (_APPROVE_CB, _REJECT_CB) or not sid.isdigit():
+        if act not in (_APPROVE_CB, _REJECT_CB, _SMS_CB, _REV_CB, _REVNO_CB) or not sid.isdigit():
             return False
         if admin_id not in self.admin_ids:
             await bot.answer_callback_query(cq_id)
             return True
         pid = int(sid)
+
         if act == _APPROVE_CB:
             await bot.answer_callback_query(cq_id, text="تأیید شد")
             await self._approve(bot, pid, via="admin")
-        else:
-            payment = await store.get_payment(pid)
-            reason = (payment or {}).get("ai_reason") or "توسط ادمین رد شد"
+        elif act == _REJECT_CB:
             await bot.answer_callback_query(cq_id, text="رد شد")
             await self._reject(bot, pid, "توسط ادمین بررسی و رد شد", via="admin")
+        elif act == _SMS_CB:
+            # تأیید دوم قبل از برگشت (کامیونیکیت + یادآوریِ چکِ اپِ بانکی)
+            await bot.answer_callback_query(cq_id)
+            kb = {"inline_keyboard": [[
+                {"text": "✅ بله مطمئنم، لغو کن", "callback_data": f"{_REV_CB}:{pid}"},
+                {"text": "↩️ نه، بی‌خیال", "callback_data": f"{_REVNO_CB}:{pid}"},
+            ]]}
+            await self._admin_send(bot, self.T["confirm_reverse"].format(pid=pid), reply_markup=kb)
+        elif act == _REV_CB:
+            await bot.answer_callback_query(cq_id, text="در حال برگشت…")
+            await self._reverse(bot, pid)
+        elif act == _REVNO_CB:
+            await bot.answer_callback_query(cq_id, text="بی‌خیال شد")
+            await self._admin_send(bot, self.T["admin_reverse_cancelled"].format(pid=pid))
         return True
+
+    async def _reverse(self, bot, payment_id):
+        """برگشتِ پرداختِ فیک: لغوِ اشتراک/شارژ (میزبان) + بی‌اعتمادکردنِ کاربر + اطلاع به کاربر و ادمین."""
+        if not await store.mark_reversed(payment_id):
+            return  # قبلاً برگشت خورده یا approved نبوده (ضد دوبار)
+        payment = await store.get_payment(payment_id)
+        user_id = payment["user_id"]
+        await store.set_distrusted(user_id)   # از این پس فقط دستی
+        try:
+            if self.on_reversed:
+                await self.on_reversed(bot, payment)   # میزبان: لغوِ اشتراک/شارژِ ناشی از این پرداخت
+        except Exception as e:
+            log.warning("[cardpay] on_reversed failed: %s", e)
+        try:
+            await bot.send_message(payment["chat_id"] or user_id,
+                                   self.T["reversed_user"].format(support=self.support_contact))
+        except Exception:
+            pass
+        await self._admin_send(bot, self.T["admin_reversed"].format(pid=payment_id, user=user_id))
 
     # ===================== sweep (هر ۶۰ ثانیه) =====================
 
@@ -250,12 +312,16 @@ class CardPay:
     # ===================== کمک‌ها =====================
 
     async def _admin_note(self, bot, text, photo_file_id=None):
+        await self._admin_send(bot, text, photo_file_id=photo_file_id)
+
+    async def _admin_send(self, bot, text, reply_markup=None, photo_file_id=None):
         for adm in self.admin_ids:
             try:
                 if photo_file_id:
-                    await bot.send_photo(adm, photo_file_id, caption=text, parse_mode=None)
+                    await bot.send_photo(adm, photo_file_id, caption=text,
+                                         reply_markup=reply_markup, parse_mode=None)
                 else:
-                    await bot.send_message(adm, text, parse_mode=None)
+                    await bot.send_message(adm, text, reply_markup=reply_markup, parse_mode=None)
             except Exception:
                 pass
 
