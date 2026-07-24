@@ -20,6 +20,19 @@ LOCALE = {
         "language":     "🌐 Language",
         "symbols":      "🔍 Dream Symbol Finder (free)",
         "reset_test":   "🔄 Reset account (admin)",
+        "support":      "🆘 Support",
+    },
+
+    # پشتیبانی (قرارداد مشترکِ همه‌ی ربات‌ها؛ لینک و کد در support.py). {code} = #DRM-<user_id>
+    "support": {
+        "open_btn":   "💬 Open support chat",
+        "draft_note": "Please keep this code and write your message below it 👇",
+        "body": (
+            "🆘 *Support*\n\n"
+            "Tap the button below and write your message, short and clear. We answer fast.\n\n"
+            "A ready message with your tracking code will open. Keep the code and write your message under it.\n\n"
+            "Your tracking code (tap to copy):\n`{code}`"
+        ),
     },
 
     # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/en نمایش داده نمی‌شوند

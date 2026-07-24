@@ -35,6 +35,7 @@ from config import (
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL, RECEIPT_MODEL, RECEIPT_AI_AUTO_APPROVE,
     CARD_NUMBER, CARD_OWNER, CARD_RECIPIENT_NAME, CARD_DEST_LAST4, SUPPORT_CONTACT,
 )
+from support import SUPPORT_ENABLED
 
 log = logging.getLogger("handlers")
 
@@ -115,6 +116,8 @@ for _code in locales.LANG_ORDER:
         _KB_ACTION[_kb["reset_test"]] = "reset_test"
     if "symbols" in _kb:
         _KB_ACTION[_kb["symbols"]] = "symbols"
+    if "support" in _kb:
+        _KB_ACTION[_kb["support"]] = "support"
 
 
 # ===================== کیبوردها =====================
@@ -351,14 +354,24 @@ async def _handle_message(bale, msg: dict):
 
     lang = _lang_of(user, bale)
     action = _KB_ACTION.get(text)
+    if text.startswith("/support") and SUPPORT_ENABLED:
+        action = "support"  # /support = همان دکمه‌ی پشتیبانی (برای کیبوردِ پنهان یا کاربرِ دستوری)
 
-    # هر دکمه‌ی منوی پایین (جز خودِ نمادیاب) = خروج از حالتِ نمادیاب، تا متنِ بعدی «خواب» تلقی شود نه «جستجوی نماد»
-    if action and action != "symbols" and C.symbols_available(lang) and db.is_sym_browse(user):
+    # هر دکمه‌ی منوی پایین (جز خودِ نمادیاب و پشتیبانی) = خروج از حالتِ نمادیاب، تا متنِ بعدی
+    # «خواب» تلقی شود نه «جستجوی نماد». پشتیبانی فقط یک پیامِ اطلاعاتی است و حالت را عوض نمی‌کند.
+    if action and action not in ("symbols", "support") and C.symbols_available(lang) and db.is_sym_browse(user):
         await db.set_sym_browse(user_id, False)
 
     # «خواب جدید» = ریست آگاهانه
     if action == "new_dream":
         await _send_new_dream_guide(bale, chat_id, user_id)
+        return
+
+    # 🆘 پشتیبانی: قبل از هر بازیابیِ فلو — فقط یک پیامِ اطلاعاتی (کدِ پیگیری + لینکِ پیامِ آماده)؛
+    # هیچ حالتی را عوض نمی‌کند، پس کاربرِ وسطِ فلو دقیقاً از همان‌جا ادامه می‌دهد.
+    if action == "support":
+        stext, srows = C.support_message(lang, user_id)
+        await bale.send_message(chat_id, stext, reply_markup=inline_keyboard(srows))
         return
 
     # هر اکشن دیگری: اگر خوابِ ناتمامِ شکست‌خورده هست، اول بازتلاش

@@ -5,6 +5,7 @@
 """
 import os
 from dotenv import load_dotenv
+from support import SUPPORT_CONTACT as _SUPPORT_CONTACT  # تک‌منبعِ حسابِ پشتیبانی
 
 load_dotenv()
 
@@ -25,7 +26,8 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.5.0"   # 1.5.0: کاهشِ چشمگیرِ قیمتِ اشتراک‌ها (هفته ۵۰k، ماه ۹۸k، سه‌ماه ۱۹۸k)؛ درصدِ به‌صرفگی همان (۵۰٪/۷۰٪، خودکار از savings_percent)
+PRODUCT_VERSION = "1.6.0"   # 1.6.0: دکمه‌ی «🆘 پشتیبانی» در منوی پایین (مشترکِ همه‌ی ربات‌ها) + /support — لینکِ چتِ پشتیبانی با پیامِ آماده‌ی حاویِ کدِ #DRM-<user_id> (support.py)
+# 1.5.0: کاهشِ چشمگیرِ قیمتِ اشتراک‌ها (هفته ۵۰k، ماه ۹۸k، سه‌ماه ۱۹۸k)؛ درصدِ به‌صرفگی همان (۵۰٪/۷۰٪، خودکار از savings_percent)
 # 1.4.0: ساده‌سازیِ کپیِ آنبوردینگ (welcome + ۷ سؤال، سبک‌تر/کوتاه‌تر برای کانورژن) بدونِ تغییرِ حس/داستان + حذفِ «—» از inv‌ها
 
 # --- پلتفرم‌ها ---
@@ -212,7 +214,8 @@ CARD_NUMBER          = os.getenv("CARD_NUMBER", "6219861904145405").strip()
 CARD_OWNER           = os.getenv("CARD_OWNER", "علیرضا اولیا — بلوبانک").strip()
 CARD_RECIPIENT_NAME  = os.getenv("CARD_RECIPIENT_NAME", "علیرضا اولیا").strip()  # نامِ تطبیق در رسید
 CARD_DEST_LAST4      = os.getenv("CARD_DEST_LAST4", "5405").strip()             # ۴رقمِ آخرِ کارتِ مقصد
-SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", "@Efficient_Support").strip()
+# حسابِ پشتیبانی تک‌منبع است (support.py — پورتِ shared/support.js)؛ env فقط برای override موقت
+SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", _SUPPORT_CONTACT).strip()
 # ایجنتِ رسید: روشن = تأییدِ خودکارِ AI؛ خاموش = همه‌ی رسیدها به ادمین (رول‌بکِ فوری).
 RECEIPT_AI_AUTO_APPROVE = True
 RECEIPT_MODEL           = LLM_MODEL   # Gemini Flash (چندوجهی، همان مسیرِ عکسِ ai.py)

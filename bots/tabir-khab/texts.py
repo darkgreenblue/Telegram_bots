@@ -10,6 +10,7 @@ from config import (
     SUBSCRIPTIONS, SUBSCRIPTION_ORDER, savings_percent, fmt_toman, DEFAULT_LANGUAGE,
     REFERRAL_ENABLED, SYMBOL_FINDER_ENABLED,
 )
+from support import SUPPORT_ENABLED, support_message as _support_message
 
 _TIER_EMOJI = {"week": "🌒", "month": "🌓", "quarter": "🌕"}
 
@@ -69,6 +70,12 @@ def back_row(lang: str | None) -> list:
     return [back_button(lang)]
 
 
+def support_message(lang: str | None, uid: int):
+    """(text, inline_rows) پیامِ پشتیبانی به زبانِ کاربر: کدِ پیگیری + دکمه‌ی چتِ پشتیبانی
+    با پیامِ آماده. منطق و حسابِ پشتیبانی در support.py (پورتِ shared/support.js)."""
+    return _support_message(locales.get(lang)["support"], uid)
+
+
 def main_menu_message(lang: str | None):
     """(text, rows) — منوی اصلیِ اینلاین که همه‌ی دکمه‌های بازگشت به آن می‌رسند.
     دکمه‌ها همان اکشن‌های منوی پایین‌اند (خواب جدید، نمادیاب، همسفری، تغییر سبک)."""
@@ -99,6 +106,9 @@ def main_reply_rows(lang: str | None, include_language: bool = True,
         rows.insert(1, [kb["symbols"]])
     if include_language:
         rows.append([kb["language"]])
+    # 🆘 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (SUPPORT_ENABLED=False → دکمه محو می‌شود)
+    if SUPPORT_ENABLED and "support" in kb:
+        rows.append([kb["support"]])
     if include_reset and "reset_test" in kb:
         rows.append([kb["reset_test"]])
     return rows

@@ -9,6 +9,7 @@
 4. چک‌لیست بند ۵ CLAUDE.md ریشه را کامل کن (ecosystem, ci.yml, deploy.yml, دو Secret).
 
 قالب از قبل شامل: قرارداد لاگ/`bot.catch`/هندلرهای خطای پروسه (بند ۸)، دکمه‌ی ریست تست (بند ۶ب)،
+دکمه‌ی «🆘 پشتیبانی» (بند ۶ج — فقط کافی است یک ردیف در `BOT_CODES` در `shared/support.js` اضافه کنی و همان کد را به `registerSupport` بدهی)،
 فراخوانی مقاوم OpenRouter با فالبک، SQLite جدا در `data/`، launch با retry، و **زیرساخت رشد از قبل سیم‌کشی‌شده**
 (`ensureAnalytics`+`ensureAb`، `captureStart` در /start، `wipeUser` که events/ab_exposures را هم پاک می‌کند) — همه از `shared/`.
 

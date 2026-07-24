@@ -82,6 +82,10 @@
 ## چندزبانگی
 هر زبان = اپ pm2 جدا از همین پوشه: `locales/<LOCALE>.js` + `ENV_FILE=.env.<locale>` + دیتابیس جدا. زبان جدید: فایل locale بساز + اپ در ecosystem.
 
+## پشتیبانی (بند ۶ج ریشه)
+دکمه‌ی `🆘 پشتیبانی` در کیبوردِ اصلی (`mainKeyboard`) برای همه، همیشه + دستور `/support`. متن‌ها locale-owned اند (`L.support`: `button, openBtn, draft(code), body(code)`) و منطق/حساب از `shared/support.js` می‌آید. کدِ پیگیری: `#TRT-<user_id>`؛ لینک: `t.me/Efficient_Support?text=…` که کادرِ تایپِ کاربر را با کد + «کد را پاک نکن» پر می‌کند.
+عمداً پشتِ `blockDuringOnboarding`/`blockDuringOpenPay` **نیست** (راهِ فرارِ کاربرِ گیرکرده)، ولی چون قبل از `bot.on('text')` ثبت می‌شود متنِ دکمه به‌عنوان «نام» یا «مبلغ» ثبت نمی‌شود، و بعد از پیامِ پشتیبانی همان دو گارد به‌عنوان `after` صدا زده می‌شوند تا قدمِ فعلی (یا فاکتورِ باز + دکمه‌ی انصراف) دوباره یادآوری شود. آی‌دیِ پشتیبانی در `locales/fa.js` هم از `SUPPORT_CONTACT` می‌آید (دیگر hardcode نیست). رول‌بک: `SUPPORT.enabled = false` در shared.
+
 ## وضعیت لانچ (فاز تست تمام شد)
 `TEST_PHASE=false` از ۱۴۰۵/۰۴/۲۰. دیتای دوره‌ی تست با اسکریپت یک‌باره‌ی `tools/launch-wipe-tarot.mjs` در دیپلوی لانچ پاک شد (بکاپ `bot-*.db.pre-launch.bak` روی سرور؛ marker: `data/.launch-wipe-done`) — فقط ردیف‌های ادمین‌ها ماندند.
 - **دکمه‌ی `🔄 ریست حساب (ادمین)`** (بند ۶ب ریشه): فقط برای `ADMIN_IDS`، همیشه فعال (نه TEST_PHASE). `doReset` (گارد دومِ `isAdmin`) → `wipeUser(uid)` → `handleStart` (مثل کاربر جدید). `mainKeyboard(uid)` ردیفش را فقط برای ادمین اضافه می‌کند؛ `/reset` هم فقط ادمین. برچسبِ قدیمیِ `🔄 ریست ربات (تست)` هم match می‌شود. فلوی ادمین هیچ تمایز دیگری با کاربر عادی ندارد.
