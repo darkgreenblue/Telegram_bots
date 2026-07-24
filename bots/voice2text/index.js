@@ -42,12 +42,20 @@ const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌ها
 // دستی به ادمین می‌روند). پیش‌فرض: روشن. مدلِ ثابت (نیازمندِ vision، مستقل از MODEL_CONFIG).
 const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
 const RECEIPT_MODEL = 'google/gemini-2.5-flash';
+const SUPPORT_CONTACT = '@Efficient_Support';   // آیدیِ پشتیبانیِ همه‌ی ربات‌ها (پیام‌های پرداخت)
+// پیامِ ردِ یکپارچه (همه‌ی مسیرها: AI/ادمین/مبلغِ کم) — بدونِ دلیل، فقط راهِ پیگیری (لو نرفتنِ ایجنت)
+const REJECT_MSG = `❌ پرداخت شما تأیید نشد.\n\nبرای پیگیری با پشتیبانی در ارتباط باش: ${SUPPORT_CONTACT}`;
+// دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
+// هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
+const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
 // 1.1.0: رسیدِ شارژ از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
 // 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ ۳ تا ۱۰ ثانیه، بدونِ لوکنندنِ ایجنت)
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
-const PRODUCT_VERSION = '1.1.1';
+// 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «فیش نبود»/دلیل)
+//        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
+const PRODUCT_VERSION = '1.1.2';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -1503,6 +1511,7 @@ async function applyRechargeAmount(ctx, userId, paymentId, amount) {
   const invoiceMsg = await ctx.reply(
     buildInvoiceText(amount, null, null),
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+      cardCopyRow(),
       [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)],
       [payCancelBtn(paymentId)],
     ]) }
@@ -1579,8 +1588,7 @@ function rejectPaymentDb(paymentId) {
 }
 async function notifyRejected(payment) {
   try {
-    await bot.telegram.sendMessage(payment.user_id,
-      `❌ فیش پرداختت تایید نشد.\n\nاگر مشکلی هست به آیدی @alireza_oliya پیام بده.`);
+    await bot.telegram.sendMessage(payment.user_id, REJECT_MSG); // پیامِ یکپارچه‌ی رد
   } catch {}
 }
 
@@ -1652,6 +1660,9 @@ async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, rec
 
   const reasonFa = decision.reason_fa || 'نامشخص';
   try {
+    // سیاست: فقط دو نتیجه‌ی خودکار — approve (پرداختِ کافی و واقعی) و reject (فقط مبلغِ اکیداً کمتر).
+    // بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
+    // پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (بدونِ «فیش نبود» یا دلیل).
     if (decision.action === 'approve') {
       const r = approvePaymentAuto(paymentId);
       userStates.delete(userId);
@@ -1662,20 +1673,15 @@ async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, rec
       }
       return;
     }
-    if (decision.action === 'not_a_receipt') {
-      // چیزی که فرستاد فیش نبود → پرداخت باز می‌ماند (userState دست‌نخورده) تا فیشِ درست بفرستد
-      await ctx.reply('چیزی که فرستادی فیشِ پرداخت نبود 🙏 لطفاً تصویرِ فیشِ واریز یا متنِ تأییدِ بانک رو بفرست.').catch(() => {});
-      return;
-    }
     if (decision.action === 'reject') {
       const r = rejectPaymentAuto(paymentId);
       userStates.delete(userId);
       if (r) track(r.payment.user_id, 'payment_rejected', { payment_id: paymentId, amount: r.payment.amount, via: 'ai' });
       await notifyAdminAuto(payment, getUser(userId), `❌ auto-reject: ${reasonFa}`, photoFileId);
-      await ctx.reply(`❌ متأسفانه پرداختت تأیید نشد.\nدلیل: ${reasonFa}\n\nاگر فکر می‌کنی اشتباهی شده، به آیدی @alireza_oliya پیام بده.`).catch(() => {});
+      await ctx.reply(REJECT_MSG).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
       return;
     }
-    // review → تصمیمِ انسانی (پیامِ اول قبلاً رفته؛ ادمین با دکمه تأیید/رد می‌کند)
+    // not_a_receipt یا review → تصمیمِ انسانیِ ادمین (پیامِ اول قبلاً رفته)
     await sendReceiptToAdmin(ctx, userId, paymentId, photoFileId, textBody);
     userStates.delete(userId);
   } catch (e) {
@@ -1891,6 +1897,7 @@ bot.on('text', async (ctx) => {
       await ctx.telegram.editMessageText(ctx.chat.id, state.invoiceMsgId, undefined,
         buildInvoiceText(result.finalAmount, payment.amount, result.dc.discount_percent),
         { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([
+          cardCopyRow(),
           [Markup.button.callback('🗑️ حذف کد تخفیف', `disc_remove:${state.paymentId}`)],
           [payCancelBtn(state.paymentId)],
         ]).reply_markup }
@@ -2414,6 +2421,7 @@ bot.on('callback_query', async (ctx) => {
         await ctx.telegram.editMessageText(ctx.chat.id, invoiceMsgId, undefined,
           buildInvoiceText(updatedPayment.amount, null, null),
           { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard([
+            cardCopyRow(),
             [Markup.button.callback('🎟️ ثبت کد تخفیف', `disc_apply:${paymentId}`)],
             [payCancelBtn(paymentId)],
           ]).reply_markup }

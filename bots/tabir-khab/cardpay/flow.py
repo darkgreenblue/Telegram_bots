@@ -39,7 +39,8 @@ _DEFAULT_TEXTS = {
     ),
     "got_receipt": "رسیدت رسید 🌙 برای بررسی و تأیید فرستاده شد؛ به‌محضِ تأیید، همسفری‌ات فعال می‌شود و خبرت می‌کنم.",
     "approved": "✅ پرداختت تأیید شد؛ همسفری‌ات فعال شد 🌙",
-    "rejected": "❌ متأسفانه رسیدِ پرداختت تأیید نشد.\nدلیل: {reason}\n\nاگر فکر می‌کنی اشتباهی شده، به پشتیبانی پیام بده: {support}",
+    # پیامِ ردِ یکپارچه (همه‌ی مسیرها) — بدونِ دلیل، فقط راهِ پیگیری (لو نرفتنِ ایجنت)
+    "rejected": "❌ پرداخت شما تأیید نشد.\n\nبرای پیگیری با پشتیبانی در ارتباط باش: {support}",
     "review": "رسیدت رسید و برای بررسیِ نهایی به ادمین رفت 🌙 به‌زودی نتیجه را می‌گویم.",
     "not_receipt_hint": "چیزی که فرستادی رسیدِ پرداخت نبود. لطفاً تصویرِ فیشِ واریز یا متنِ تأییدِ بانک را بفرست.",
     "overpaid_note": "کاربر مبلغِ بیشتری واریز کرده: حدود {paid} تومان به‌جای {expected} تومان. اگر خواستی، اختلاف را دستی لحاظ کن.",
@@ -93,7 +94,11 @@ class CardPay:
             tier_title=tier_title, amount=f"{amount_toman:,}",
             card_number=self.card_number, card_owner=self.card_owner,
         )
-        await bot.send_message(chat_id, text)
+        # دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
+        # هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد این دکمه را زیرش دارد.
+        kb = {"inline_keyboard": [[{"text": "📋 کپی شماره کارت",
+                                    "copy_text": {"text": self.card_number}}]]}
+        await bot.send_message(chat_id, text, reply_markup=kb)
         return pid
 
     # ===================== دریافتِ رسید =====================
@@ -153,15 +158,15 @@ class CardPay:
 
         reason_fa = decision.get("reason_fa") or "نامشخص"
         action = decision["action"]
+        # سیاست: فقط دو نتیجه‌ی خودکار — approve (پرداختِ کافی و واقعی) و reject (فقط مبلغِ اکیداً کمتر).
+        # بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
+        # پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (بدونِ «رسید نیست» یا دلیل).
         if action == "approve":
             await self._approve(bot, pid, via="ai", note=reason_fa,
                                 overpaid=decision.get("overpaid", 0), expected_toman=expected_toman)
-        elif action == "not_a_receipt":
-            # «اصلاً رسید نیست» = خطای کاربر، نه شکستِ پرداخت → پرداخت باز می‌ماند تا رسیدِ درست بفرستد.
-            await bot.send_message(chat_id, self.T["not_receipt_hint"])
         elif action == "reject":
             await self._reject(bot, pid, reason_fa, via="ai")
-        else:
+        else:  # not_a_receipt یا review → تصمیمِ انسانیِ ادمین
             await self._escalate(bot, payment, reason_fa, verdict.get("risk_flags", []) if verdict else [])
         return True
 
