@@ -57,7 +57,9 @@ const TEST_PHASE = false;
 // 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «رسید نیست»/دلیل)
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
 // 1.3.0: ناوبری درختی + گاردِ فلوی بازِ پرداخت (قرارداد State Management یکپارچه) — پشتِ NAV_GUARD_ENABLED.
-const PRODUCT_VERSION = '1.3.0';
+// 1.3.1: پالایشِ کپیِ آنبوردینگ/خوانش — دکمه‌ی سوم «همه فال‌ها»، کارت روز در کاتالوگ،
+//        آشکارسازیِ کیبورد بعد از «یه قرار کوچیک»، انتقال جمله‌ی فضای امن به قبلِ نوشتنِ سؤال.
+const PRODUCT_VERSION = '1.3.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -737,8 +739,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
   stmts.setFocus.run(key, uid);
   const inOnboarding = getState(uid) === 'onboard_focus';
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  // در آنبوردینگ، همین‌جا کیبورد اصلی برای اولین‌بار آشکار می‌شود (آنبوردینگ کامل شد).
-  await ctx.reply(L.onboarding.focusSaved(L.focusFa[key] || key), inOnboarding ? mainKeyboard(uid) : undefined);
+  await ctx.reply(L.onboarding.focusSaved(L.focusFa[key] || key));
   if (inOnboarding) {
     await typing(ctx, PACE_M);
     setState(uid, 'idle');
@@ -750,7 +751,13 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
       [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
     ];
     if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+    // دکمه‌ی سوم: مشاهده‌ی همه‌ی فال‌ها (زیرِ دو دکمه‌ی اصلی؛ همان پیام به کاتالوگ ادیت می‌شود)
+    ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
     await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard(ctaRows));
+    // کیبورد اصلی *بعد* از پیام «یه قرار کوچیک» آشکار می‌شود (نه قبلش) — تلگرام اجازه‌ی
+    // یک reply_markup در هر پیام را می‌دهد، پس آشکارسازی کیبورد یک پیام کوتاه جدا لازم دارد.
+    await typing(ctx, PACE_S);
+    await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid));
   } else {
     // تغییر تمرکز وسط فلوی فال
     patchSession(uid, { focusKey: key });
@@ -1088,10 +1095,13 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 // کیبورد کاتالوگ: [موضوع آزاد؟] + دکمه‌های فال + دکمه‌ی «راهنمای انتخاب» ته لیست.
 function catalogKb() {
-  const rows = SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s), `spread:${s.id}`)]);
-  const kb = OPEN_TOPIC_ENABLED
-    ? [[Markup.button.callback(L.buttons.openTopic, 'opentopic')], ...rows]
-    : rows;
+  // بَج‌های کوتاه روی دکمه‌ها: «گذشته، حال، آینده» = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
+  const rows = SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s, L.reading.catalogBadges[s.id]), `spread:${s.id}`)]);
+  const kb = [];
+  if (OPEN_TOPIC_ENABLED) kb.push([Markup.button.callback(L.buttons.openTopic, 'opentopic')]);
+  // کارت روزِ رایگان به‌عنوان اولین گزینه‌ی لیست (نقطه‌ی ورودِ بی‌هزینه).
+  kb.push([Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')]);
+  kb.push(...rows);
   kb.push([Markup.button.callback(L.buttons.spreadGuide, 'cat_guide')]);
   kb.push(...navMenuRow());
   return kb;
@@ -1193,6 +1203,21 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
 bot.action('catalog_go', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   return showCatalog(ctx);
+});
+
+// دکمه‌ی «همه فال‌ها» زیر پیام «یه قرار کوچیک» آنبوردینگ: معادلِ «فال بگیر» ولی به‌جای
+// پیام جدید، همین پیام را به کاتالوگ ادیت می‌کند (بدونِ شلوغیِ چت). اگر ادیت نشد (پیام
+// خیلی قدیمی/حذف‌شده)، به showCatalog برمی‌گردیم تا کاربر بن‌بست نخورد.
+bot.action('onboard_allspreads', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  if (await blockDuringOpenPay(ctx)) return;
+  setState(uid, 'choose_spread');
+  setSession(uid, null);
+  try {
+    await ctx.editMessageText(L.reading.catalog, Markup.inlineKeyboard(catalogKb()));
+  } catch { return showCatalog(ctx); }
 });
 
 /* ---------- دریافت سؤال → فضاسازی → تنفس ---------- */
