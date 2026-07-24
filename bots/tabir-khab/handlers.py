@@ -247,6 +247,8 @@ async def _send_paywall(bale, chat_id, lang, prefix=""):
             for t in SUBSCRIPTION_ORDER]
     if C.symbols_available(lang):
         rows.append([{"text": C.sym_text(lang, "btn_paywall"), "callback_data": "sym:open"}])
+    # قرارداد State Management: پی‌وال هم مثل بقیه‌ی صفحه‌ها دکمه‌ی بازگشت به منو دارد (بن‌بست نباشد).
+    rows.append(C.back_row(lang))
     kb = inline_keyboard(rows)
     res = await bale.send_asset(chat_id, MASCOT_INVITE, caption=caption, reply_markup=kb)
     if res is None:
@@ -349,6 +351,10 @@ async def _handle_message(bale, msg: dict):
 
     lang = _lang_of(user, bale)
     action = _KB_ACTION.get(text)
+
+    # هر دکمه‌ی منوی پایین (جز خودِ نمادیاب) = خروج از حالتِ نمادیاب، تا متنِ بعدی «خواب» تلقی شود نه «جستجوی نماد»
+    if action and action != "symbols" and C.symbols_available(lang) and db.is_sym_browse(user):
+        await db.set_sym_browse(user_id, False)
 
     # «خواب جدید» = ریست آگاهانه
     if action == "new_dream":
@@ -1145,6 +1151,7 @@ async def _cb_buy(bale, cq_id, chat_id, user_id, tier, resume: bool = False):
     suffix = ":r" if resume else ""
     rows = [[{"text": C.pay_method_button(lang, m), "callback_data": f"paym:{m}:{tier}{suffix}"}]
             for m in methods]
+    rows.append(C.back_row(lang))  # قرارداد State Management: انتخابگر روش پرداخت هم دکمه‌ی بازگشت دارد
     title = locales.get(lang)["tiers"].get(tier, tier)
     text = f"*{title}*\n\n" + C.pay_choose_text(lang)
     await bale.send_message(chat_id, text, reply_markup=inline_keyboard(rows))

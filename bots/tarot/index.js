@@ -56,7 +56,8 @@ const TEST_PHASE = false;
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید، نه رد) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
 // 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «رسید نیست»/دلیل)
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
-const PRODUCT_VERSION = '1.2.0';
+// 1.3.0: ناوبری درختی + گاردِ فلوی بازِ پرداخت (قرارداد State Management یکپارچه) — پشتِ NAV_GUARD_ENABLED.
+const PRODUCT_VERSION = '1.3.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -69,6 +70,12 @@ const FREE_MENU_ENABLED = false;
 // Rollback فوری: این را false کن → دکمه و کپی‌های موضوع آزاد کاملاً محو می‌شوند و رفتار دقیقاً مثل قبل می‌شود
 // (فال‌های open3/open5 که قبلاً ثبت شده‌اند بی‌ضرر در DB می‌مانند؛ پایپ‌لاین افشا از SPREAD_BY_ID می‌خواند).
 const OPEN_TOPIC_ENABLED = true;
+
+// 🧭 ناوبری درختی + گاردِ فلوی باز (قرارداد State Management، CLAUDE.md ریشه): هر استیتِ میانیِ فلو دکمه‌ی
+// «بازگشت به منو» می‌گیرد، و پرداختِ باز دکمه‌های منو را بلاک می‌کند (پیام «فاکتور باز داری» + انصراف)
+// به‌جای یتیم‌کردنِ بی‌صدای فاکتور. Rollback فوری: false کن → دکمه‌های nav و گارد محو، رفتار دقیقاً مثل قبل
+// (callbackِ nav:menu ثبت‌شده می‌ماند تا دکمه‌ی کش‌شده هم بی‌خطر باشد).
+const NAV_GUARD_ENABLED = true;
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
@@ -524,6 +531,27 @@ async function blockDuringOnboarding(ctx) {
   return true;
 }
 
+// 🧭 ردیفِ «بازگشت به منو» برای استیت‌های میانیِ فلو (خالی وقتی گارد خاموش است تا رفتار عیناً قبلی شود).
+const navMenuRow = () => (NAV_GUARD_ENABLED ? [[Markup.button.callback(L.buttons.backToMenu, 'nav:menu')]] : []);
+// کیبوردِ اینلاینِ فقط-nav برای پیام‌های متنی (askQuestion/askTopic/useButtons)؛ undefined = بدون تغییرِ رفتار.
+const askQuestionKb = () => (NAV_GUARD_ENABLED ? Markup.inlineKeyboard(navMenuRow()) : undefined);
+
+// گاردِ «پرداختِ باز» — دوقلوی blockDuringOnboarding برای ریلِ پرداخت (الگوی voice2text):
+// اگر کاربر فاکتورِ باز دارد، دکمه‌های منو نباید آن را بی‌صدا یتیم کنند؛ به‌جای اجرا «فاکتور باز داری»
+// + دکمه‌ی انصراف نشان بده و اکشن را متوقف کن. خروجی true = بلاک شد.
+const PAY_STATES = ['pay_amount', 'pay_receipt', 'pay_discount'];
+async function blockDuringOpenPay(ctx) {
+  if (!NAV_GUARD_ENABLED) return false;
+  const uid = ctx.from.id;
+  if (!PAY_STATES.includes(getState(uid))) return false;
+  const pid = getSession(uid)?.paymentId;
+  if (!pid) return false; // بدون paymentId نمی‌توان انصراف را وصل کرد → بگذار رد شود (مسیر بازیابیِ رسید)
+  await ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+  ]));
+  return true;
+}
+
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
 const prefetches = new Map(); // uid -> Promise<object|null> (فقط بهینه‌سازی؛ منبع حقیقت readings.llm_json)
 
@@ -729,7 +757,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
-    if (spread) await ctx.reply(L.reading.askQuestion());
+    if (spread) await ctx.reply(L.reading.askQuestion(), askQuestionKb());
   }
 });
 
@@ -738,6 +766,7 @@ async function dailyCard(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
   const user = getUser(uid);
   const today = tehranToday();
   if (user.last_daily_date === today) {
@@ -799,6 +828,7 @@ async function showFreeMenu(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
   const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
   if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
   rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
@@ -1063,12 +1093,14 @@ function catalogKb() {
     ? [[Markup.button.callback(L.buttons.openTopic, 'opentopic')], ...rows]
     : rows;
   kb.push([Markup.button.callback(L.buttons.spreadGuide, 'cat_guide')]);
+  kb.push(...navMenuRow());
   return kb;
 }
 async function showCatalog(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
@@ -1104,6 +1136,7 @@ bot.action('opentopic', async (ctx) => {
   await ctx.reply(L.reading.openDepthPrompt, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.openDepth3, 'odepth:open3')],
     [Markup.button.callback(L.buttons.openDepth5, 'odepth:open5')],
+    ...navMenuRow(),
   ]));
 });
 
@@ -1118,7 +1151,7 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   // موضوعِ تایپ‌شده خودش حوزه است → مرحله‌ی «حول چی؟» رد می‌شود؛ مستقیم سراغ نوشتن موضوع
   patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
   setState(uid, 'await_question');
-  await ctx.reply(L.reading.askTopic);
+  await ctx.reply(L.reading.askTopic, askQuestionKb());
 });
 
 bot.action(/^spread:(\w+)$/, async (ctx) => {
@@ -1134,7 +1167,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (spread.focus) {
     patchSession(uid, { spreadId: spread.id, picks: [], focusKey: spread.focus });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion());
+    return ctx.reply(L.reading.askQuestion(), askQuestionKb());
   }
 
   // فال عمومی (گذشته/حال/آینده، آری/نه، دوراهی، سلتی): حوزه‌ی تمرکز
@@ -1146,13 +1179,14 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (fresh) {
     patchSession(uid, { focusKey: user.focus_area });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion());
+    return ctx.reply(L.reading.askQuestion(), askQuestionKb());
   }
   // بازپرسیِ هفتگی (یا اولین بار): بدون مقدمه‌ی «بذار یه کم بشناسمت»
   setState(uid, 'confirm_focus');
-  await ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard(
-    L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
-  ));
+  await ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard([
+    ...L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)]),
+    ...navMenuRow(),
+  ]));
 });
 
 // دکمه‌ی «مشاهده‌ی همه‌ی فال‌ها» زیر پیشنهادهای پایان فال
@@ -1179,7 +1213,7 @@ async function handleQuestion(ctx, question) {
     await ctx.reply(L.reading.atmosphere2);
   }
   await typing(ctx, PACE_M);
-  await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
+  await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')], ...navMenuRow()]));
 }
 
 /* ---------- بُر زدن با توقف کاربر ---------- */
@@ -1193,6 +1227,7 @@ bot.action('ready_breath', async (ctx) => {
   await sendCardPhoto(ctx, 'back', L.reading.shuffleCaption, { spoiler: false });
   const m = await ctx.reply(L.reading.shuffleFrames[0], Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')],
+    ...navMenuRow(),
   ]));
   patchSession(uid, { shuffleMsgId: m.message_id });
   // انیمیشن شافل: بُر زدن ادامه دارد تا خودِ کاربر «نگه‌دار» را بزند — هرگز خودکار جلو نمی‌رویم.
@@ -1204,7 +1239,7 @@ bot.action('ready_breath', async (ctx) => {
       const frame = L.reading.shuffleFrames[i % L.reading.shuffleFrames.length];
       try {
         await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, undefined, frame, {
-          reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')]]).reply_markup,
+          reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')], ...navMenuRow()]).reply_markup,
         });
       } catch {}
     }
@@ -1226,6 +1261,7 @@ function pickGridKb(picks) {
       return Markup.button.callback(picks.includes(i) ? '✨' : '🂠', `pick:${i}`);
     }));
   }
+  rows.push(...navMenuRow());
   return Markup.inlineKeyboard(rows);
 }
 
@@ -1313,6 +1349,30 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
+});
+
+// 🧭 بازگشت به منوی اصلی از هر استیتِ میانی (قرارداد State Management). فالِ هنوز-پرداخت‌نشده لغو می‌شود؛
+// فالِ started/delivered (پول‌داده) هرگز دست نمی‌خورد. همیشه ثبت می‌شود (حتی با گاردِ خاموش) تا دکمه‌ی
+// کش‌شده خطا ندهد. اگر کاربر وسط پرداخت است، فاکتور را یتیم نمی‌کند؛ به‌جایش انصراف را پیشنهاد می‌دهد.
+bot.action('nav:menu', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const pid = getSession(uid)?.paymentId;
+  if (PAY_STATES.includes(getState(uid)) && pid) {
+    return ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+    ]));
+  }
+  const s = getSession(uid);
+  if (s?.readingId) {
+    const r = stmts.getReading.get(s.readingId);
+    if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
+  }
+  prefetches.delete(uid);
+  setState(uid, 'idle');
+  setSession(uid, null);
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
 });
 
 /* ---------- پی‌وال → کسر → افشای مرحله‌ای ---------- */
@@ -1596,6 +1656,7 @@ async function finishReading(ctx, uid, readingId) {
 async function showWallet(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
   await ctx.reply(L.wallet.info(getBalance(ctx.from.id)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.recharge, 'recharge')]]).reply_markup,
@@ -1615,6 +1676,7 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
     parse_mode: 'Markdown',
@@ -1693,7 +1755,21 @@ bot.action(/^disc:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   if (getState(uid) !== 'pay_receipt') return;
   setState(uid, 'pay_discount');
-  await ctx.reply(L.wallet.askDiscount);
+  // بازگشت به فاکتور (نه منو) چون کاربر هنوز وسط پرداخت است — پول یتیم نمی‌شود
+  await ctx.reply(L.wallet.askDiscount, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${ctx.match[1]}`)],
+  ]));
+});
+// انصراف از واردکردن کد تخفیف → برگشت به مرحله‌ی رسید (فاکتور همان‌طور باز می‌ماند)
+bot.action(/^disc_back:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (getState(uid) !== 'pay_discount') return;
+  setState(uid, 'pay_receipt');
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.wallet.discountSkipped, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.cancel, `pay_cancel:${ctx.match[1]}`)],
+  ]));
 });
 bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -2124,7 +2200,8 @@ bot.on('text', async (ctx) => {
       if (await offerPendingReading(ctx, uid)) return;
     }
     if (['choose_spread', 'confirm_focus', 'breathing', 'shuffling', 'picking', 'revealing'].includes(state)) {
-      return ctx.reply(L.errors.useButtons);
+      // خوانش هنوز باز است: بلاک می‌کنیم ولی راهِ فرار (بازگشت به منو) را در همان پیام می‌دهیم تا کاربر گیر نیفتد
+      return ctx.reply(L.errors.useButtons, askQuestionKb());
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
