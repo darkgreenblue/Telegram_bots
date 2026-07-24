@@ -203,7 +203,7 @@ def sub_button_label(lang: str | None, tier: str) -> str:
     emoji = _TIER_EMOJI.get(tier, "🌙")
     if (lang or DEFAULT_LANGUAGE) == "fa":
         s = SUBSCRIPTIONS[tier]
-        return f"{emoji} {title} — {fmt_toman(s['toman'])} تومان"
+        return f"{emoji} {title}: {fmt_toman(s['toman'])} تومان"
     return f"{emoji} {title}"
 
 

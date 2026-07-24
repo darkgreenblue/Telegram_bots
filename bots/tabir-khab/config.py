@@ -25,7 +25,8 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.4.0"   # 1.4.0: ساده‌سازیِ کپیِ آنبوردینگ (welcome + ۷ سؤال، سبک‌تر/کوتاه‌تر برای کانورژن) بدونِ تغییرِ حس/داستان + حذفِ «—» از inv‌ها
+PRODUCT_VERSION = "1.5.0"   # 1.5.0: کاهشِ چشمگیرِ قیمتِ اشتراک‌ها (هفته ۵۰k، ماه ۹۸k، سه‌ماه ۱۹۸k)؛ درصدِ به‌صرفگی همان (۵۰٪/۷۰٪، خودکار از savings_percent)
+# 1.4.0: ساده‌سازیِ کپیِ آنبوردینگ (welcome + ۷ سؤال، سبک‌تر/کوتاه‌تر برای کانورژن) بدونِ تغییرِ حس/داستان + حذفِ «—» از inv‌ها
 
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
@@ -227,9 +228,9 @@ NARRATE_INTERVAL   = 4.5     # ثانیه — فاصله‌ی جملات روا�
 # --- اقتصاد: اشتراک زمان‌دار (به‌جای اعتبار ستاره‌ای) ---
 # مبلغ ریال = تومان × ۱۰ (برای درگاه بله)
 SUBSCRIPTIONS = {
-    "week":    {"days": 7,  "toman": 98_000,  "rial": 980_000,   "title": "۷ روزه"},
-    "month":   {"days": 30, "toman": 198_000, "rial": 1_980_000, "title": "۱ ماهه"},
-    "quarter": {"days": 90, "toman": 398_000, "rial": 3_980_000, "title": "۳ ماهه"},
+    "week":    {"days": 7,  "toman": 50_000,  "rial": 500_000,   "title": "۷ روزه"},
+    "month":   {"days": 30, "toman": 98_000,  "rial": 980_000,   "title": "۱ ماهه"},
+    "quarter": {"days": 90, "toman": 198_000, "rial": 1_980_000, "title": "۳ ماهه"},
 }
 SUBSCRIPTION_ORDER = ["week", "month", "quarter"]
 
