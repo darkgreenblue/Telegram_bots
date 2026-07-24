@@ -487,7 +487,7 @@ bot.catch(makeBotCatch({ getState }));
 
 // دکمه‌ی persistent «ریست» زیر محل تایپ (فاز تست)
 const RESET_BTN = '🔄 ریست ربات (تست)';
-// 🆘 پشتیبانی (بند ۶ج ریشه) — این ربات بازنشسته است، ولی قرارداد مشترک اینجا هم رعایت می‌شود
+// 💬 پشتیبانی (بند ۶ج ریشه) — این ربات بازنشسته است، ولی قرارداد مشترک اینجا هم رعایت می‌شود
 const testKb = Markup.keyboard([...supportRow(), [RESET_BTN]]).resize();
 
 function profileReady(uid) { const s = getStructured(uid); return !!(s && s.companies); }
@@ -527,7 +527,7 @@ async function doReset(ctx) {
 }
 bot.hears(RESET_BTN, (ctx) => { upsertUser(ctx); return doReset(ctx); });
 bot.command('reset', (ctx) => { upsertUser(ctx); return doReset(ctx); });
-registerSupport(bot, { botCode: 'RSM' }); // 🆘 پشتیبانی + /support (قبل از هندلرهای متنیِ فلو)
+registerSupport(bot, { botCode: 'RSM' }); // 💬 پشتیبانی + /support (قبل از هندلرهای متنیِ فلو)
 
 bot.command('profile', (ctx) => {
   upsertUser(ctx);

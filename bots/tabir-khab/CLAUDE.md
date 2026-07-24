@@ -82,7 +82,7 @@ tail -f /home/ubuntu/tabir_khab/logs/bot.log  # لاگ زنده
 - **در داشبورد ادمین وصل است**: رجیستری `bots/dashboard/lib/bots.js` با پروفایلِ خودش (userPk=`user_id`، userNameCol=`first_name`، created_at ISO، money=`transactions`/`amount_rial`/`paid`/ریال با حذف پرداخت تستی SKIP/SIMULATED). مسیر DB مطلق `/home/ubuntu/tabir_khab` (override با env `TABIR_DB_DIR` برای تست لوکال). A/B هنوز ندارد (فقط رویدادها).
 
 ## پشتیبانی (support.py — پورتِ هم‌قراردادِ shared/support.js، بند ۶ج ریشه)
-- دکمه‌ی `🆘 پشتیبانی` در منوی پایین (`main_reply_rows`) برای همه، در **هر شش زبان** (`locales/*.py` → `kb["support"]` + بلوکِ `support`) + دستور `/support`. اکشنِ `support` در `handlers.py` **قبل از** بازیابیِ خوابِ ناتمام هندل می‌شود و حالت را عوض نمی‌کند (از حالتِ نمادیاب هم خارج نمی‌کند)، پس کاربر بعدش دقیقاً از همان‌جا ادامه می‌دهد.
+- دکمه‌ی `💬 پشتیبانی` در منوی پایین (`main_reply_rows`) برای همه، در **هر شش زبان** (`locales/*.py` → `kb["support"]` + بلوکِ `support`) + دستور `/support`. اکشنِ `support` در `handlers.py` **قبل از** بازیابیِ خوابِ ناتمام هندل می‌شود و حالت را عوض نمی‌کند (از حالتِ نمادیاب هم خارج نمی‌کند)، پس کاربر بعدش دقیقاً از همان‌جا ادامه می‌دهد.
 - پیام: کدِ پیگیریِ `` `#DRM-<user_id>` `` (Markdown، قابلِ کپی) + دکمه‌ی url به `t.me/Efficient_Support?text=…` که کادرِ تایپِ کاربر را با همان کد + «کد را پاک نکن» پر می‌کند.
 - `support.py` تک‌منبعِ حسابِ پشتیبانی برای این ربات است و `config.SUPPORT_CONTACT` (پیام‌های ردِ پرداخت) هم از آن می‌آید؛ سینک بودنش با `shared/support.js` را چک CI ریشه `tools/check-support-sync.mjs` تضمین می‌کند. رول‌بک: `SUPPORT_ENABLED = False`.
 - نکته‌ی بله: حسابِ پشتیبانی تلگرامی است، پس روی بله دکمه لینکِ t.me را بیرونی باز می‌کند؛ کد داخلِ خودِ پیام هم چاپ می‌شود و همان قرارداد را حفظ می‌کند.

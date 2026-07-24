@@ -50,7 +50,7 @@ const RECEIPT_MODEL = 'google/gemini-2.5-flash';
 const SUPPORT_ENABLED  = true;
 const SUPPORT_USERNAME = 'Efficient_Support';
 const SUPPORT_CONTACT  = `@${SUPPORT_USERNAME}`;  // آیدیِ پشتیبانیِ همه‌ی ربات‌ها (پیام‌های پرداخت)
-const SUPPORT_BTN      = '🆘 پشتیبانی';
+const SUPPORT_BTN      = '💬 پشتیبانی';
 const SUPPORT_BOT_CODE = 'V2T';                   // کدِ این ربات در کدِ پیگیری (BOT_CODES در shared)
 // کدِ پیگیری: #V2T-<user_id> — ASCII و خطِ اولِ پیامِ آماده، تا پشتیبانیِ مشترک بفهمد پیام از کدام
 // ربات و کدام کاربر است. لینک: قابلیتِ رسمیِ تلگرام (t.me/<user>?text=) که کادرِ تایپ را پر می‌کند.
@@ -69,7 +69,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
 // 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «فیش نبود»/دلیل)
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
-// 1.2.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
+// 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
 const PRODUCT_VERSION = '1.2.0';
 
@@ -954,7 +954,7 @@ function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
 }
 
 function mainKeyboard(userId) {
-  const supportRow = SUPPORT_ENABLED ? [[SUPPORT_BTN]] : []; // 🆘 پشتیبانی — برای همه، همیشه
+  const supportRow = SUPPORT_ENABLED ? [[SUPPORT_BTN]] : []; // 💬 پشتیبانی — برای همه، همیشه
   if (isAdmin(userId)) {
     const rows = [['🔄 تعویض پردازنده', '📊 داشبورد'], ...supportRow];
     rows.push([RESET_TEST_BTN]); // ابزار مدیریتی — برای هر دو ادمین
@@ -1325,17 +1325,14 @@ bot.hears('📊 داشبورد', async (ctx) => {
   await ctx.reply(v.text, v.kb);
 });
 
-// 🆘 پشتیبانی — فقط یک پیامِ اطلاعاتی: هیچ state ای را عوض نمی‌کند و هیچ فلوی پرداختی را یتیم
+// 💬 پشتیبانی — فقط یک پیامِ اطلاعاتی: هیچ state ای را عوض نمی‌کند و هیچ فلوی پرداختی را یتیم
 // نمی‌کند (کاربرِ وسطِ شارژ بعدش دقیقاً از همان‌جا ادامه می‌دهد). چون قبل از bot.on('text') ثبت
 // شده، متنِ دکمه به‌عنوان «مبلغ» یا ورودیِ فلو بلعیده نمی‌شود.
 if (SUPPORT_ENABLED) {
   const sendSupport = async (ctx) => {
     const code = supportCode(ctx.from.id);
     await ctx.reply(
-      '🆘 <b>پشتیبانی</b>\n\n' +
-      'روی دکمه‌ی زیر بزن و پیامت را کوتاه و روشن بنویس؛ زود جوابت را می‌دهیم.\n\n' +
-      'یک پیامِ آماده با کدِ پیگیری‌ات برایت باز می‌شود. کد را پاک نکن و پیامت را پایین‌ترش بنویس.\n\n' +
-      `کدِ پیگیری تو (برای کپی، رویش بزن):\n<code>${code}</code>`,
+      `💬 روی دکمه‌ی زیر بزن و پیامت رو بنویس؛ این کد رو پاک نکن:\n<code>${code}</code>`,
       {
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard: [[{ text: '💬 باز کردن چت پشتیبانی', url: supportLink(ctx.from.id) }]] },

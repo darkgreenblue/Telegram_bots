@@ -367,7 +367,7 @@ async def _handle_message(bale, msg: dict):
         await _send_new_dream_guide(bale, chat_id, user_id)
         return
 
-    # 🆘 پشتیبانی: قبل از هر بازیابیِ فلو — فقط یک پیامِ اطلاعاتی (کدِ پیگیری + لینکِ پیامِ آماده)؛
+    # 💬 پشتیبانی: قبل از هر بازیابیِ فلو — فقط یک پیامِ اطلاعاتی (کدِ پیگیری + لینکِ پیامِ آماده)؛
     # هیچ حالتی را عوض نمی‌کند، پس کاربرِ وسطِ فلو دقیقاً از همان‌جا ادامه می‌دهد.
     if action == "support":
         stext, srows = C.support_message(lang, user_id)
