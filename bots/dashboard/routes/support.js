@@ -2,6 +2,7 @@
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
 import { instances, getInstance, withDb, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman } from '../lib/bots.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
+import { parseSupportCode } from '../../../shared/support.js';
 import { table, statusBadge, stat } from '../lib/html.js';
 
 // created_at ممکن است unix یا ISO باشد → همیشه به رشته‌ی قابل‌نمایش تبدیل شود
@@ -10,16 +11,22 @@ const toUnix = (v) => (typeof v === 'string' ? Math.floor(Date.parse(v) / 1000) 
 
 export function supportBody(url) {
   const q = (url.searchParams.get('q') || '').trim();
+  // کدِ پیگیریِ پشتیبانی (#TRT-123456789) که کاربر در چتِ پشتیبانی فرستاده: کلِ پیامش را هم
+  // می‌شود paste کرد؛ کد از داخلش بیرون کشیده و به آی‌دیِ عددی تبدیل می‌شود (shared/support.js).
+  const code = parseSupportCode(q);
   const form = `<div class="card"><h2>🔎 جستجوی کاربر</h2>
   <form method="get" action="/support" class="inline">
-    <label>آی‌دی عددی تلگرام یا یوزرنیم<input name="q" dir="ltr" value="${esc(q)}" autofocus></label>
+    <label>آی‌دی عددی، یوزرنیم، یا کد پشتیبانی<input name="q" dir="ltr" value="${esc(q)}" autofocus></label>
     <button type="submit">بگرد</button>
   </form>
-  <p class="muted">مرجع، آی‌دی عددی است؛ یوزرنیم ممکن است قدیمی باشد.</p></div>`;
+  <p class="muted">مرجع، آی‌دی عددی است؛ یوزرنیم ممکن است قدیمی باشد. کدِ پشتیبانی (مثل <span class="mono">#TRT-123456789</span>) یا کلِ پیامِ کاربر را هم می‌توانی همین‌جا بگذاری.</p></div>`;
   if (!q) return form;
 
-  const numeric = /^\d+$/.test(q.replace(/^@/, ''));
-  const uname = q.replace(/^@/, '');
+  const hint = code
+    ? `<p class="muted">کدِ پشتیبانی خوانده شد: ربات <b>${esc(code.bot || code.botCode)}</b>، کاربر <span class="mono">${code.userId}</span></p>`
+    : '';
+  const numeric = code ? true : /^\d+$/.test(q.replace(/^@/, ''));
+  const uname = code ? String(code.userId) : q.replace(/^@/, '');
   const results = [];
   for (const inst of instances()) {
     withDb(inst.file, (db) => {
@@ -41,7 +48,7 @@ export function supportBody(url) {
     ]),
     'کاربری با این مشخصات پیدا نشد.'
   );
-  return form + `<div class="card"><h2>نتایج</h2>${list}</div>`;
+  return form + `<div class="card"><h2>نتایج</h2>${hint}${list}</div>`;
 }
 
 // ستون‌هایی که در پروفایل نمایش داده نمی‌شوند یا کوتاه می‌شوند

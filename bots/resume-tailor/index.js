@@ -19,6 +19,7 @@ import { RESUME_KNOWLEDGE } from './resume-knowledge.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
+import { registerSupport, supportRow } from '../../shared/support.js';
 
 /* ===== 1) ENV ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -486,7 +487,8 @@ bot.catch(makeBotCatch({ getState }));
 
 // دکمه‌ی persistent «ریست» زیر محل تایپ (فاز تست)
 const RESET_BTN = '🔄 ریست ربات (تست)';
-const testKb = Markup.keyboard([[RESET_BTN]]).resize();
+// 🆘 پشتیبانی (بند ۶ج ریشه) — این ربات بازنشسته است، ولی قرارداد مشترک اینجا هم رعایت می‌شود
+const testKb = Markup.keyboard([...supportRow(), [RESET_BTN]]).resize();
 
 function profileReady(uid) { const s = getStructured(uid); return !!(s && s.companies); }
 
@@ -525,6 +527,7 @@ async function doReset(ctx) {
 }
 bot.hears(RESET_BTN, (ctx) => { upsertUser(ctx); return doReset(ctx); });
 bot.command('reset', (ctx) => { upsertUser(ctx); return doReset(ctx); });
+registerSupport(bot, { botCode: 'RSM' }); // 🆘 پشتیبانی + /support (قبل از هندلرهای متنیِ فلو)
 
 bot.command('profile', (ctx) => {
   upsertUser(ctx);

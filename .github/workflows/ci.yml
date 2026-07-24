@@ -32,6 +32,11 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-analytics-sync.mjs
 
+      # قرارداد پشتیبانی: حساب و فرمت کد پیگیری در shared + کپی voice2text + پورت tabir یکی بماند
+      - name: Support contract check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-support-sync.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test

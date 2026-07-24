@@ -23,6 +23,8 @@ import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { ensureAb, variant } from '../../shared/ab.js';
+// پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
+import { registerSupport, supportRow } from '../../shared/support.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -59,7 +61,9 @@ const TEST_PHASE = false;
 // 1.3.0: ناوبری درختی + گاردِ فلوی بازِ پرداخت (قرارداد State Management یکپارچه) — پشتِ NAV_GUARD_ENABLED.
 // 1.3.1: پالایشِ کپیِ آنبوردینگ/خوانش — دکمه‌ی سوم «همه فال‌ها»، کارت روز در کاتالوگ،
 //        آشکارسازیِ کیبورد بعد از «یه قرار کوچیک»، انتقال جمله‌ی فضای امن به قبلِ نوشتنِ سؤال.
-const PRODUCT_VERSION = '1.3.1';
+// 1.4.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
+//        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #TRT-<user_id> (shared/support.js).
+const PRODUCT_VERSION = '1.4.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -512,6 +516,7 @@ function mainKeyboard(uid) {
     [L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
+  rows.push(...supportRow(L.support)); // 🆘 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
   if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
   return Markup.keyboard(rows).resize();
 }
@@ -2187,6 +2192,19 @@ async function doReset(ctx) {
 // هم برچسبِ جدید، هم برچسبِ قدیمیِ فاز تست (برای دکمه‌ی کش‌شده‌ی احتمالی) — doReset خودش isAdmin را چک می‌کند
 bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
 bot.command('reset', doReset);
+
+// 🆘 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
+// چون فقط یک پیامِ اطلاعاتی است، هیچ فلو/فاکتوری را یتیم نمی‌کند). ولی چون قبل از bot.on('text')
+// ثبت می‌شود، متنِ دکمه دیگر به‌عنوان «نام» یا «مبلغ» بلعیده نمی‌شود؛ بعدش هم قدمِ فعلیِ کاربر
+// دوباره یادآوری می‌شود تا سرگردان نماند (قرارداد ۹ب).
+registerSupport(bot, {
+  botCode: 'TRT',
+  texts: L.support,
+  after: async (ctx) => {
+    if (await blockDuringOnboarding(ctx)) return;
+    await blockDuringOpenPay(ctx);
+  },
+});
 
 /* ---------- هندلر متن (state machine) ---------- */
 bot.on('text', async (ctx) => {

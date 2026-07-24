@@ -21,6 +21,19 @@ LOCALE = {
         "language":     "🌐 Idioma",
         "symbols":      "🔍 Buscador de símbolos (gratis)",
         "reset_test":   "🔄 Restablecer cuenta (admin)",
+        "support":      "🆘 Soporte",
+    },
+
+    # پشتیبانی (قرارداد مشترکِ همه‌ی ربات‌ها؛ لینک و کد در support.py). {code} = #DRM-<user_id>
+    "support": {
+        "open_btn":   "💬 Abrir chat de soporte",
+        "draft_note": "Por favor, no borres este código y escribe tu mensaje debajo 👇",
+        "body": (
+            "🆘 *Soporte*\n\n"
+            "Toca el botón de abajo y escribe tu mensaje, corto y claro; te respondemos rápido.\n\n"
+            "Se abrirá un mensaje listo con tu código de seguimiento. No borres el código y escribe tu mensaje debajo.\n\n"
+            "Tu código de seguimiento (toca para copiar):\n`{code}`"
+        ),
     },
 
     # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/es نمایش داده نمی‌شوند

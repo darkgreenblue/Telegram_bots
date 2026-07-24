@@ -42,7 +42,21 @@ const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌ها
 // دستی به ادمین می‌روند). پیش‌فرض: روشن. مدلِ ثابت (نیازمندِ vision، مستقل از MODEL_CONFIG).
 const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
 const RECEIPT_MODEL = 'google/gemini-2.5-flash';
-const SUPPORT_CONTACT = '@Efficient_Support';   // آیدیِ پشتیبانیِ همه‌ی ربات‌ها (پیام‌های پرداخت)
+// ── پشتیبانی (کپیِ خودکفا از shared/support.js) ─────────────────────────────────────────
+// voice2text عمداً از shared ایمپورت نمی‌کند (قانونِ خودکفاییِ ربات زنده)، پس این چند خط کپیِ
+// قرارداد است و CI با tools/check-support-sync.mjs از drift جلوگیری می‌کند. اگر حسابِ پشتیبانی
+// عوض شد، هم اینجا هم shared/support.js را عوض کن.
+// SUPPORT_ENABLED=false → دکمه از کیبورد محو و هندلر ثبت نمی‌شود (رول‌بکِ یک‌خطی).
+const SUPPORT_ENABLED  = true;
+const SUPPORT_USERNAME = 'Efficient_Support';
+const SUPPORT_CONTACT  = `@${SUPPORT_USERNAME}`;  // آیدیِ پشتیبانیِ همه‌ی ربات‌ها (پیام‌های پرداخت)
+const SUPPORT_BTN      = '🆘 پشتیبانی';
+const SUPPORT_BOT_CODE = 'V2T';                   // کدِ این ربات در کدِ پیگیری (BOT_CODES در shared)
+// کدِ پیگیری: #V2T-<user_id> — ASCII و خطِ اولِ پیامِ آماده، تا پشتیبانیِ مشترک بفهمد پیام از کدام
+// ربات و کدام کاربر است. لینک: قابلیتِ رسمیِ تلگرام (t.me/<user>?text=) که کادرِ تایپ را پر می‌کند.
+const supportCode  = (uid) => `#${SUPPORT_BOT_CODE}-${uid}`;
+const supportDraft = (code) => `${code}\n\nلطفاً این کد را پاک نکنید و پیام‌تان را پایین‌تر بنویسید 👇\n`;
+const supportLink  = (uid) => `https://t.me/${SUPPORT_USERNAME}?text=${encodeURIComponent(supportDraft(supportCode(uid)))}`;
 // پیامِ ردِ یکپارچه (همه‌ی مسیرها: AI/ادمین/مبلغِ کم) — بدونِ دلیل، فقط راهِ پیگیری (لو نرفتنِ ایجنت)
 const REJECT_MSG = `❌ پرداخت شما تأیید نشد.\n\nبرای پیگیری با پشتیبانی در ارتباط باش: ${SUPPORT_CONTACT}`;
 // دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
@@ -55,7 +69,9 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
 // 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «فیش نبود»/دلیل)
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
-const PRODUCT_VERSION = '1.1.2';
+// 1.2.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
+//        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
+const PRODUCT_VERSION = '1.2.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -938,12 +954,13 @@ function buildCostBlock(durationSec, model, userType, ptypeLabel = null) {
 }
 
 function mainKeyboard(userId) {
+  const supportRow = SUPPORT_ENABLED ? [[SUPPORT_BTN]] : []; // 🆘 پشتیبانی — برای همه، همیشه
   if (isAdmin(userId)) {
-    const rows = [['🔄 تعویض پردازنده', '📊 داشبورد']];
+    const rows = [['🔄 تعویض پردازنده', '📊 داشبورد'], ...supportRow];
     rows.push([RESET_TEST_BTN]); // ابزار مدیریتی — برای هر دو ادمین
     return Markup.keyboard(rows).resize();
   }
-  return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول']]).resize();
+  return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول'], ...supportRow]).resize();
 }
 
 function createProcessTypeKeyboard(token) {
@@ -1307,6 +1324,27 @@ bot.hears('📊 داشبورد', async (ctx) => {
   const v = await dashboardView();
   await ctx.reply(v.text, v.kb);
 });
+
+// 🆘 پشتیبانی — فقط یک پیامِ اطلاعاتی: هیچ state ای را عوض نمی‌کند و هیچ فلوی پرداختی را یتیم
+// نمی‌کند (کاربرِ وسطِ شارژ بعدش دقیقاً از همان‌جا ادامه می‌دهد). چون قبل از bot.on('text') ثبت
+// شده، متنِ دکمه به‌عنوان «مبلغ» یا ورودیِ فلو بلعیده نمی‌شود.
+if (SUPPORT_ENABLED) {
+  const sendSupport = async (ctx) => {
+    const code = supportCode(ctx.from.id);
+    await ctx.reply(
+      '🆘 <b>پشتیبانی</b>\n\n' +
+      'روی دکمه‌ی زیر بزن و پیامت را کوتاه و روشن بنویس؛ زود جوابت را می‌دهیم.\n\n' +
+      'یک پیامِ آماده با کدِ پیگیری‌ات برایت باز می‌شود. کد را پاک نکن و پیامت را پایین‌ترش بنویس.\n\n' +
+      `کدِ پیگیری تو (برای کپی، رویش بزن):\n<code>${code}</code>`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: '💬 باز کردن چت پشتیبانی', url: supportLink(ctx.from.id) }]] },
+      }
+    );
+  };
+  bot.hears(SUPPORT_BTN, sendSupport);
+  bot.command('support', sendSupport);
+}
 
 bot.on(['voice', 'audio', 'document'], async (ctx) => {
   const userId = ctx.from.id;

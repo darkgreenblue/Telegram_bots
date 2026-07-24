@@ -9,6 +9,8 @@ import { log, logErr } from '../../shared/logger.js';
 import { createOpenRouter, parseJsonLoose } from '../../shared/llm.js';
 import { registerAdminReset, adminResetRow } from '../../shared/reset.js';
 import { registerGlobalErrorHandlers, makeBotCatch } from '../../shared/errors.js';
+// دکمه‌ی پشتیبانی (مشترکِ همه‌ی ربات‌ها) — حسابِ پشتیبانی و کدِ پیگیری در shared/support.js
+import { registerSupport, supportRow } from '../../shared/support.js';
 // زیرساخت رشد (اتریبیوشن + A/B) — از قبل سیم‌کشی شده؛ فقط track ها را در نقاط فانل بگذار.
 // جزئیات کامل: بند «افزودن ربات جدید» در CLAUDE.md ریشه.
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
@@ -80,6 +82,7 @@ async function handleStart(ctx) {
   // دکمه‌ی «ریست حساب (ادمین)» فقط برای ادمین‌ها (همیشه، حتی خارج از فاز تست) — ابزار مدیریتی
   const rows = [
     // TODO: ردیف‌های دکمه‌ی محصول را اینجا بگذار، مثل: ['📝 دکمه‌ی اول', '⚙️ دکمه‌ی دوم']
+    ...supportRow(), // 🆘 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (بند ۶ج CLAUDE.md)
     ...adminResetRow(isAdmin, ctx.from.id),
   ];
   const kb = rows.length ? Markup.keyboard(rows).resize() : undefined;
@@ -88,6 +91,9 @@ async function handleStart(ctx) {
 bot.start(handleStart);
 // ریستِ فقط-ادمین (همیشه فعال): دیتای خودِ ادمین را پاک و او را مثل کاربر جدید معرفی می‌کند
 registerAdminReset(bot, { isAdmin, wipe: wipeUser, after: handleStart });
+// پشتیبانی: دکمه‌ی منو + /support → لینکِ چتِ پشتیبانی با پیامِ آماده‌ی حاویِ کدِ پیگیری
+// TODO: botCode را در shared/support.js (BOT_CODES) برای این ربات ثبت کن و اینجا بگذار.
+registerSupport(bot, { botCode: '<NAME>' });
 
 // TODO: هندلرهای محصول اینجا. نمونه‌ی فراخوانی LLM:
 // const res = await or.chatResilient('system prompt', 'user text', { maxTokens: 500 });
