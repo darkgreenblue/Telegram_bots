@@ -25,7 +25,7 @@ TELEGRAM_PAYMENT_TOKEN  = os.getenv("TELEGRAM_PAYMENT_TOKEN", "").strip()
 
 # نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن
 # — بند «قوانین ربات زنده» CLAUDE.md ریشه‌ی مونوریپو
-PRODUCT_VERSION = "1.3.2"   # 1.3.2: فلوی رسیدِ انسانی‌تر (تأخیرِ ۳ تا ۱۰ ثانیه بدونِ لوکنندنِ ایجنت) + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید)
+PRODUCT_VERSION = "1.3.3"   # 1.3.3: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی، بدونِ «رسید نیست»/دلیل) + دکمه‌ی «کپی شماره کارت» زیرِ فاکتور
 
 # --- پلتفرم‌ها ---
 BALE_API_BASE     = "https://tapi.bale.ai"
@@ -211,7 +211,7 @@ CARD_NUMBER          = os.getenv("CARD_NUMBER", "6219861904145405").strip()
 CARD_OWNER           = os.getenv("CARD_OWNER", "علیرضا اولیا — بلوبانک").strip()
 CARD_RECIPIENT_NAME  = os.getenv("CARD_RECIPIENT_NAME", "علیرضا اولیا").strip()  # نامِ تطبیق در رسید
 CARD_DEST_LAST4      = os.getenv("CARD_DEST_LAST4", "5405").strip()             # ۴رقمِ آخرِ کارتِ مقصد
-SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", "@alireza_oliya").strip()
+SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", "@Efficient_Support").strip()
 # ایجنتِ رسید: روشن = تأییدِ خودکارِ AI؛ خاموش = همه‌ی رسیدها به ادمین (رول‌بکِ فوری).
 RECEIPT_AI_AUTO_APPROVE = True
 RECEIPT_MODEL           = LLM_MODEL   # Gemini Flash (چندوجهی، همان مسیرِ عکسِ ai.py)

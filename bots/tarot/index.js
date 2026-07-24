@@ -54,7 +54,9 @@ const TEST_PHASE = false;
 // 1.1.0: رسیدِ پرداخت از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
 // 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ ۳ تا ۱۰ ثانیه، بدونِ لوکنندنِ ایجنت)
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید، نه رد) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
-const PRODUCT_VERSION = '1.1.1';
+// 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «رسید نیست»/دلیل)
+//        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
+const PRODUCT_VERSION = '1.1.2';
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
 // فعلاً خاموش عرضه می‌شود (dark launch): merge روی ربات زنده هیچ تغییرِ رفتاری نمی‌دهد.
@@ -83,6 +85,9 @@ const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ ک�
 // دستی به ادمین می‌روند، بدون تصمیمِ خودکار). پیش‌فرض: روشن.
 const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
 const RECEIPT_MODEL = FLASH;
+// دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
+// هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
+const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
 
 // هدیه‌ی خوش‌آمد حذف شد: مسیر رایگان فقط «کارت روز» است؛ حداقل مبلغ شارژ هم نداریم
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
@@ -1628,6 +1633,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
+      cardCopyRow(),
       [Markup.button.callback(L.buttons.discountHave, `disc:${s.paymentId}`)],
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
     ]).reply_markup,
@@ -1694,7 +1700,10 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER), { parse_mode: 'Markdown' });
+    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([cardCopyRow()]).reply_markup,
+    });
   }
 }
 
@@ -1770,6 +1779,9 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 
   const reasonFa = decision.reason_fa || 'نامشخص';
   try {
+    // سیاست: فقط دو نتیجه‌ی خودکار — approve (پرداختِ کافی و واقعی) و reject (فقط مبلغِ اکیداً کمتر).
+    // بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
+    // پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (هیچ «این رسید نیست» یا دلیلی).
     if (decision.action === 'approve') {
       const done = approvePayment(paymentId);
       if (!done) return setState(uid, nextState); // ضدِ دوبار (قبلاً نهایی شده)
@@ -1777,17 +1789,13 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
       return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
     }
-    if (decision.action === 'not_a_receipt') {
-      // چیزی که فرستاد رسید نبود → پرداخت باز می‌ماند (state دست‌نخورده) تا رسیدِ درست بفرستد
-      return ctx.reply(L.wallet.notReceiptHint).catch(() => {});
-    }
     if (decision.action === 'reject') {
       rejectPaymentAI(paymentId);
       setState(uid, nextState);
       await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
-      return ctx.reply(L.wallet.rejectedReason(reasonFa)).catch(() => {});
+      return ctx.reply(L.wallet.rejected).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
     }
-    // review → تصمیمِ انسانی (پیامِ receiptSent قبلاً رفته؛ ادمین با دکمه تأیید/رد می‌کند)
+    // not_a_receipt یا review → تصمیمِ انسانیِ ادمین (پیامِ receiptSent قبلاً رفته)
     await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
     setState(uid, nextState);
   } catch (e) {
