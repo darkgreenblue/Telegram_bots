@@ -440,8 +440,9 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
 
 
 async def _edit_or_send(bale, chat_id, msg_id, text, rows, parse_mode="Markdown"):
-    """ادیتِ همان پیام (فلوی درختی، چت تمیز)؛ اگر ادیت نشد (مثلاً پیام عکس‌دار) پیام جدید."""
-    kb = inline_keyboard(rows)
+    """ادیتِ همان پیام (فلوی درختی، چت تمیز)؛ اگر ادیت نشد (مثلاً پیام عکس‌دار) پیام جدید.
+    rows خالی/None = بدونِ دکمه (برای پیام‌های «تایپ/ویس بفرست» که نباید دکمه‌ی حواس‌پرت‌کن داشته باشند)."""
+    kb = inline_keyboard(rows) if rows else None
     if msg_id:
         try:
             await bale.edit_message_text(chat_id, msg_id, text, reply_markup=kb,
@@ -462,9 +463,9 @@ async def _send_new_dream_guide(bale, chat_id, user_id, msg_id=None):
         await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
         await _send_onboarding_step(bale, chat_id, lang, step)
         return
-    # زیرِ پیامِ «خواب جدید» دکمه‌ی بازگشت به منوی اصلی (کیبوردِ پایین از قبل هست و می‌ماند)
-    await _edit_or_send(bale, chat_id, msg_id, C.new_dream_text(lang, user["persona"]),
-                        [C.back_row(lang)])
+    # پیامِ «رویات رو تعریف کن» یک ورودیِ تایپ/ویس است → طبق قرارداد ۹ب هیچ دکمه‌ی حواس‌پرت‌کنی نمی‌گذاریم
+    # (کاربر روی گفتنِ خواب تمرکز کند)؛ راهِ خروج، کیبوردِ ماندگارِ پایین است که همیشه حاضر است.
+    await _edit_or_send(bale, chat_id, msg_id, C.new_dream_text(lang, user["persona"]), [])
 
 
 def _subscription_status_view(lang, status):
