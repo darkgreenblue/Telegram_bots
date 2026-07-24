@@ -106,7 +106,7 @@ def main_reply_rows(lang: str | None, include_language: bool = True,
         rows.insert(1, [kb["symbols"]])
     if include_language:
         rows.append([kb["language"]])
-    # 🆘 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (SUPPORT_ENABLED=False → دکمه محو می‌شود)
+    # 💬 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (SUPPORT_ENABLED=False → دکمه محو می‌شود)
     if SUPPORT_ENABLED and "support" in kb:
         rows.append([kb["support"]])
     if include_reset and "reset_test" in kb:

@@ -21,19 +21,14 @@ LOCALE = {
         "language":     "🌐 Idioma",
         "symbols":      "🔍 Buscador de símbolos (grátis)",
         "reset_test":   "🔄 Redefinir conta (admin)",
-        "support":      "🆘 Suporte",
+        "support":      "💬 Suporte",
     },
 
     # پشتیبانی (قرارداد مشترکِ همه‌ی ربات‌ها؛ لینک و کد در support.py). {code} = #DRM-<user_id>
     "support": {
         "open_btn":   "💬 Abrir chat do suporte",
         "draft_note": "Por favor, não apague este código e escreva sua mensagem abaixo 👇",
-        "body": (
-            "🆘 *Suporte*\n\n"
-            "Toque no botão abaixo e escreva sua mensagem, curta e clara; respondemos rápido.\n\n"
-            "Uma mensagem pronta com seu código de acompanhamento vai abrir. Não apague o código e escreva sua mensagem abaixo dele.\n\n"
-            "Seu código de acompanhamento (toque para copiar):\n`{code}`"
-        ),
+        "body": "💬 Toque no botão abaixo e escreva sua mensagem; não apague este código:\n`{code}`",
     },
 
     # نمادیاب — فعلاً فقط فارسی دیتا دارد؛ این متن‌ها تا افزودن symbols/pt نمایش داده نمی‌شوند

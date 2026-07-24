@@ -63,7 +63,7 @@ const TEST_PHASE = false;
 //        آشکارسازیِ کیبورد بعد از «یه قرار کوچیک»، انتقال جمله‌ی فضای امن به قبلِ نوشتنِ سؤال.
 // 1.4.0: استیت‌های ورودی (askQuestion/askTopic) دیگر دکمه ندارند (تمرکز روی نوشتن) + گاردِ «فالِ باز»
 //        (blockDuringOpenReading) با دو دکمه‌ی «ادامه/انصراف» — قرارداد State Management بند ۹ب.
-// 1.5.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
+// 1.5.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #TRT-<user_id> (shared/support.js).
 const PRODUCT_VERSION = '1.5.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
@@ -518,7 +518,7 @@ function mainKeyboard(uid) {
     [L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
-  rows.push(...supportRow(L.support)); // 🆘 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
+  rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
   if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
   return Markup.keyboard(rows).resize();
 }
@@ -2261,7 +2261,7 @@ async function doReset(ctx) {
 bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
 bot.command('reset', doReset);
 
-// 🆘 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
+// 💬 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
 // چون فقط یک پیامِ اطلاعاتی است، هیچ فلو/فاکتوری را یتیم نمی‌کند). ولی چون قبل از bot.on('text')
 // ثبت می‌شود، متنِ دکمه دیگر به‌عنوان «نام» یا «مبلغ» بلعیده نمی‌شود؛ بعدش هم قدمِ فعلیِ کاربر
 // دوباره یادآوری می‌شود تا سرگردان نماند (قرارداد ۹ب).

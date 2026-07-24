@@ -82,7 +82,7 @@ async function handleStart(ctx) {
   // دکمه‌ی «ریست حساب (ادمین)» فقط برای ادمین‌ها (همیشه، حتی خارج از فاز تست) — ابزار مدیریتی
   const rows = [
     // TODO: ردیف‌های دکمه‌ی محصول را اینجا بگذار، مثل: ['📝 دکمه‌ی اول', '⚙️ دکمه‌ی دوم']
-    ...supportRow(), // 🆘 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (بند ۶ج CLAUDE.md)
+    ...supportRow(), // 💬 پشتیبانی — قرارداد مشترکِ همه‌ی ربات‌ها (بند ۶ج CLAUDE.md)
     ...adminResetRow(isAdmin, ctx.from.id),
   ];
   const kb = rows.length ? Markup.keyboard(rows).resize() : undefined;
