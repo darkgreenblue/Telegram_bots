@@ -61,9 +61,11 @@ const TEST_PHASE = false;
 // 1.3.0: ناوبری درختی + گاردِ فلوی بازِ پرداخت (قرارداد State Management یکپارچه) — پشتِ NAV_GUARD_ENABLED.
 // 1.3.1: پالایشِ کپیِ آنبوردینگ/خوانش — دکمه‌ی سوم «همه فال‌ها»، کارت روز در کاتالوگ،
 //        آشکارسازیِ کیبورد بعد از «یه قرار کوچیک»، انتقال جمله‌ی فضای امن به قبلِ نوشتنِ سؤال.
-// 1.4.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
+// 1.4.0: استیت‌های ورودی (askQuestion/askTopic) دیگر دکمه ندارند (تمرکز روی نوشتن) + گاردِ «فالِ باز»
+//        (blockDuringOpenReading) با دو دکمه‌ی «ادامه/انصراف» — قرارداد State Management بند ۹ب.
+// 1.5.0: دکمه‌ی «🆘 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #TRT-<user_id> (shared/support.js).
-const PRODUCT_VERSION = '1.4.0';
+const PRODUCT_VERSION = '1.5.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -540,8 +542,10 @@ async function blockDuringOnboarding(ctx) {
 
 // 🧭 ردیفِ «بازگشت به منو» برای استیت‌های میانیِ فلو (خالی وقتی گارد خاموش است تا رفتار عیناً قبلی شود).
 const navMenuRow = () => (NAV_GUARD_ENABLED ? [[Markup.button.callback(L.buttons.backToMenu, 'nav:menu')]] : []);
-// کیبوردِ اینلاینِ فقط-nav برای پیام‌های متنی (askQuestion/askTopic/useButtons)؛ undefined = بدون تغییرِ رفتار.
-const askQuestionKb = () => (NAV_GUARD_ENABLED ? Markup.inlineKeyboard(navMenuRow()) : undefined);
+// کیبوردِ اینلاینِ فقط-nav برای پیامِ خطا/یادآوری (useButtons)؛ undefined = بدون تغییرِ رفتار.
+// نکته‌ی UX (بند ۹ب ریشه): در استیت‌هایی که از کاربر «تایپ/ویس» می‌خواهیم (askQuestion/askTopic) هیچ
+// دکمه‌ای نمی‌گذاریم تا حواسش پرت نشود؛ راهِ خروجِ آن‌جا گاردِ «فالِ باز» است، نه دکمه‌ی درون-پیام.
+const navMenuKb = () => (NAV_GUARD_ENABLED ? Markup.inlineKeyboard(navMenuRow()) : undefined);
 
 // گاردِ «پرداختِ باز» — دوقلوی blockDuringOnboarding برای ریلِ پرداخت (الگوی voice2text):
 // اگر کاربر فاکتورِ باز دارد، دکمه‌های منو نباید آن را بی‌صدا یتیم کنند؛ به‌جای اجرا «فاکتور باز داری»
@@ -557,6 +561,46 @@ async function blockDuringOpenPay(ctx) {
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
   ]));
   return true;
+}
+
+// گاردِ «فالِ باز» — وقتی کاربر وسط فلوی خوانش (بعد از انتخاب فال) است و به‌جای ادامه دکمه‌ی منو می‌زند:
+// به‌جای رهاکردنِ بی‌صدای فال، می‌پرسیم «ادامه بدم یا انصراف». مخصوصاً برای استیتِ ورودی (await_question)
+// که عمداً دکمه‌ی درون-پیام ندارد؛ این گارد راهِ خروجِ آن است (قرارداد State Management بند ۹ب ریشه).
+const READING_INPROGRESS = ['confirm_focus', 'await_question', 'breathing', 'shuffling', 'picking'];
+async function blockDuringOpenReading(ctx) {
+  if (!NAV_GUARD_ENABLED) return false;
+  if (!READING_INPROGRESS.includes(getState(ctx.from.id))) return false;
+  await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
+    [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
+  ]));
+  return true;
+}
+
+// «اونو ادامه می‌دم» → همان پیامِ آخرِ فلو (مطابقِ استیتِ فعلی) دوباره نشان داده می‌شود.
+async function resendCurrentStep(ctx, uid) {
+  const state = getState(uid);
+  const s = getSession(uid);
+  if (state === 'await_question') {
+    return ctx.reply(s?.focusKey === 'open' ? L.reading.askTopic : L.reading.askQuestion(), { parse_mode: 'Markdown' });
+  }
+  if (state === 'confirm_focus') {
+    return ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard(
+      L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
+    ));
+  }
+  if (state === 'breathing') {
+    return ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
+  }
+  if (state === 'picking') {
+    return ctx.reply(L.reading.pickPrompt(s?.need || USER_PICKS), pickGridKb(s?.picks || []));
+  }
+  if (state === 'shuffling') {
+    const m = await ctx.reply(L.reading.shuffleFrames[0], Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')]]));
+    patchSession(uid, { shuffleMsgId: m.message_id });
+    return;
+  }
+  return ctx.reply(L.errors.useButtons, navMenuKb());
 }
 
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
@@ -769,7 +813,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
-    if (spread) await ctx.reply(L.reading.askQuestion(), askQuestionKb());
+    if (spread) await ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
   }
 });
 
@@ -779,6 +823,7 @@ async function dailyCard(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
   const user = getUser(uid);
   const today = tehranToday();
   if (user.last_daily_date === today) {
@@ -841,6 +886,7 @@ async function showFreeMenu(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
   const rows = [[Markup.button.callback(L.buttons.freeDaily, 'daily_go')]];
   if (HAFEZ.length) rows.push([Markup.button.callback(L.buttons.freeHafez, 'hafez_go')]);
   rows.push([Markup.button.callback(L.buttons.freeEstekhare, 'estekhare_go')]);
@@ -1116,6 +1162,7 @@ async function showCatalog(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
@@ -1166,7 +1213,7 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   // موضوعِ تایپ‌شده خودش حوزه است → مرحله‌ی «حول چی؟» رد می‌شود؛ مستقیم سراغ نوشتن موضوع
   patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
   setState(uid, 'await_question');
-  await ctx.reply(L.reading.askTopic, askQuestionKb());
+  await ctx.reply(L.reading.askTopic, { parse_mode: 'Markdown' });
 });
 
 bot.action(/^spread:(\w+)$/, async (ctx) => {
@@ -1182,7 +1229,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (spread.focus) {
     patchSession(uid, { spreadId: spread.id, picks: [], focusKey: spread.focus });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion(), askQuestionKb());
+    return ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
   }
 
   // فال عمومی (گذشته/حال/آینده، آری/نه، دوراهی، سلتی): حوزه‌ی تمرکز
@@ -1194,14 +1241,13 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (fresh) {
     patchSession(uid, { focusKey: user.focus_area });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion(), askQuestionKb());
+    return ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
   }
   // بازپرسیِ هفتگی (یا اولین بار): بدون مقدمه‌ی «بذار یه کم بشناسمت»
   setState(uid, 'confirm_focus');
-  await ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard([
-    ...L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)]),
-    ...navMenuRow(),
-  ]));
+  await ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard(
+    L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
+  ));
 });
 
 // دکمه‌ی «مشاهده‌ی همه‌ی فال‌ها» زیر پیشنهادهای پایان فال
@@ -1243,7 +1289,7 @@ async function handleQuestion(ctx, question) {
     await ctx.reply(L.reading.atmosphere2);
   }
   await typing(ctx, PACE_M);
-  await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')], ...navMenuRow()]));
+  await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
 }
 
 /* ---------- بُر زدن با توقف کاربر ---------- */
@@ -1257,7 +1303,6 @@ bot.action('ready_breath', async (ctx) => {
   await sendCardPhoto(ctx, 'back', L.reading.shuffleCaption, { spoiler: false });
   const m = await ctx.reply(L.reading.shuffleFrames[0], Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')],
-    ...navMenuRow(),
   ]));
   patchSession(uid, { shuffleMsgId: m.message_id });
   // انیمیشن شافل: بُر زدن ادامه دارد تا خودِ کاربر «نگه‌دار» را بزند — هرگز خودکار جلو نمی‌رویم.
@@ -1269,7 +1314,7 @@ bot.action('ready_breath', async (ctx) => {
       const frame = L.reading.shuffleFrames[i % L.reading.shuffleFrames.length];
       try {
         await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, undefined, frame, {
-          reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')], ...navMenuRow()]).reply_markup,
+          reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')]]).reply_markup,
         });
       } catch {}
     }
@@ -1291,7 +1336,6 @@ function pickGridKb(picks) {
       return Markup.button.callback(picks.includes(i) ? '✨' : '🂠', `pick:${i}`);
     }));
   }
-  rows.push(...navMenuRow());
   return Markup.inlineKeyboard(rows);
 }
 
@@ -1403,6 +1447,28 @@ bot.action('nav:menu', async (ctx) => {
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
+});
+
+// گاردِ «فالِ باز» — «اونو ادامه می‌دم»: همان پیامِ آخرِ فلو دوباره نشان داده می‌شود (کاربر سرِ کارش برمی‌گردد).
+bot.action('reading:resume', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await resendCurrentStep(ctx, ctx.from.id);
+});
+// گاردِ «فالِ باز» — «انصراف»: فال لغو و بازگشت به منوی اصلی (همان‌جایی که قبل از شروع فال بود).
+bot.action('reading:cancel', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const s = getSession(uid);
+  if (s?.readingId) {
+    const r = stmts.getReading.get(s.readingId);
+    if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
+  }
+  prefetches.delete(uid);
+  setState(uid, 'idle');
+  setSession(uid, null);
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.reading.canceled, mainKeyboard(uid));
 });
 
 /* ---------- پی‌وال → کسر → افشای مرحله‌ای ---------- */
@@ -1687,6 +1753,7 @@ async function showWallet(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
   await ctx.reply(L.wallet.info(getBalance(ctx.from.id)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.recharge, 'recharge')]]).reply_markup,
@@ -1707,6 +1774,7 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
     parse_mode: 'Markdown',
@@ -2202,6 +2270,7 @@ registerSupport(bot, {
   texts: L.support,
   after: async (ctx) => {
     if (await blockDuringOnboarding(ctx)) return;
+    if (await blockDuringOpenReading(ctx)) return;
     await blockDuringOpenPay(ctx);
   },
 });
@@ -2244,7 +2313,7 @@ bot.on('text', async (ctx) => {
     }
     if (['choose_spread', 'confirm_focus', 'breathing', 'shuffling', 'picking', 'revealing'].includes(state)) {
       // خوانش هنوز باز است: بلاک می‌کنیم ولی راهِ فرار (بازگشت به منو) را در همان پیام می‌دهیم تا کاربر گیر نیفتد
-      return ctx.reply(L.errors.useButtons, askQuestionKb());
+      return ctx.reply(L.errors.useButtons, navMenuKb());
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
