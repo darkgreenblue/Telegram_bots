@@ -23,7 +23,7 @@ import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { ensureAb, variant } from '../../shared/ab.js';
-import { analyzeReceipt } from './cardpay.js';
+import { analyzeReceipt, decideReceipt } from './cardpay.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
