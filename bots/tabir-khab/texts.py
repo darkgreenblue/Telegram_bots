@@ -159,6 +159,14 @@ def persona_key(lang: str | None, persona: str, key: str) -> str:
     return p[key]
 
 
+def input_hint(lang: str | None, kind: str = "voice") -> str:
+    """راهنمای ورودی (قاعده‌ی سراسری، بند ۹ج ریشه): هرجا از کاربر ویس یا تایپ می‌خواهیم،
+    با یک خطِ فاصله + فلش + متنِ بولد صریح بگوییم دقیقاً کجا باید بفرستد تا گیج نشود.
+    خروجی با «\\n\\n» شروع می‌شود تا مستقیم به انتهای پیامِ دعوت بچسبد."""
+    key = "input_hint_text" if kind == "text" else "input_hint_voice"
+    return "\n\n" + get(lang, key)
+
+
 def invite_line(lang: str | None, persona: str) -> str:
     return persona_key(lang, persona, "invite")
 

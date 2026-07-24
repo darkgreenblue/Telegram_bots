@@ -276,4 +276,7 @@ LOCALE = {
     "processing_busy": "One moment — I'm still working on your last dream… 🌙",
     "main_menu": "🌙 Main menu\n\nWhat would you like to do?",
     "btn_back": "◀️ Back",
+    # راهنمای ورودی (قاعده‌ی سراسری): فلش + بولد، تا کاربر بداند دقیقاً کجا بفرستد/بنویسد
+    "input_hint_voice": "👇 *Send me your voice message right below*",
+    "input_hint_text": "👇 *Type it for me right below*",
 }

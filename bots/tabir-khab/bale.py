@@ -295,3 +295,9 @@ def inline_keyboard(rows):
 def reply_keyboard(rows, resize=True):
     keyboard = [[{"text": t} for t in row] for row in rows]
     return {"keyboard": keyboard, "resize_keyboard": resize}
+
+
+def remove_reply_keyboard():
+    """کیبوردِ پایین را برمی‌دارد (قاعده‌ی «آنبوردینگِ بدون‌مزاحم»، بند ۹ج ریشه):
+    در طولِ آنبوردینگ هیچ منویی زیرِ باکسِ تایپ نباشد تا تمرکزِ کاربر نشکند."""
+    return {"remove_keyboard": True}

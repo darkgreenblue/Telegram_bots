@@ -23,7 +23,7 @@ import payments
 import symbols as SYM
 import texts as C
 import cardpay
-from bale import inline_keyboard, reply_keyboard
+from bale import inline_keyboard, reply_keyboard, remove_reply_keyboard
 from config import (
     SUBSCRIPTIONS, SUBSCRIPTION_ORDER,
     ADMIN_USER_ID, ADMIN_IDS, MIN_VOICE_DURATION, MAX_VOICE_DURATION,
@@ -127,6 +127,14 @@ def _main_reply_kb(bale, lang, uid=0):
         include_language=False,
         include_reset=is_admin(uid),
     ))
+
+
+def _kb_gated(bale, lang, uid, user):
+    """کیبوردِ پایین فقط بعد از آشکارشدنِ منو (بند ۹ج ریشه: «آنبوردینگِ بدون‌مزاحم»).
+    تا آن لحظه صریحاً کیبورد را برمی‌داریم تا هیچ دکمه‌ای زیرِ باکسِ تایپ نماند."""
+    if db.menu_revealed(user):
+        return _main_reply_kb(bale, lang, uid)
+    return remove_reply_keyboard()
 
 
 def _packages_inline(lang, resume: bool = False):
@@ -237,11 +245,24 @@ async def _send_welcome(bale, chat_id, lang):
         await bale.send_message(chat_id, caption, reply_markup=kb)
 
 
-async def _send_paywall(bale, chat_id, lang, prefix=""):
+async def _send_paywall(bale, chat_id, lang, prefix="", user_id=0):
     """دعوت به همسفری: عکس مسکات + کپشن + دکمه‌های پلن.
     زیر پلن‌ها، مسیر رایگان «نمادیاب خواب» هم پیشنهاد می‌شود تا کاربری که فعلاً
-    نمی‌خواهد بخرد، به جای ترک ربات وارد بازی رایگان شود."""
+    نمی‌خواهد بخرد، به جای ترک ربات وارد بازی رایگان شود.
+
+    **تنها نقطه‌ی آشکارشدنِ منوی اصلی** (بند ۹ج ریشه): تا اینجا کلِ آنبوردینگ (خوش‌آمد،
+    سؤال‌ها، دعوت به ویس، دمو) بدونِ هیچ منویی زیرِ باکسِ تایپ بوده تا حواسِ کاربر پرت نشود؛
+    اینجا که به نقطه‌ی پول می‌رسد، کیبوردِ اصلی یک‌بار برای همیشه باز می‌شود."""
     caption = C.paywall_full(lang, prefix)
+    if user_id:
+        user = await db.get_user(user_id)
+        if user and not db.menu_revealed(user):
+            await db.set_menu_revealed(user_id)
+            # پیشوند را جدا و همراهِ کیبوردِ اصلی می‌فرستیم تا کارتِ پلن‌ها (CTAِ اصلی)
+            # آخرین پیام بماند و صدرنشینِ توجه باشد.
+            await bale.send_message(chat_id, (prefix or C.need_subscription_prefix(lang)).strip(),
+                                    reply_markup=_main_reply_kb(bale, lang, user_id))
+            caption = C.paywall_full(lang, "")
     # این پی‌وال از مسیرِ خواب آمده → نشانِ `:r` تا پرداخت همان خواب را ادامه دهد (باگ استیت‌منیجمنت).
     rows = [[{"text": C.sub_button_label(lang, t), "callback_data": f"buy:{t}:r"}]
             for t in SUBSCRIPTION_ORDER]
@@ -428,10 +449,13 @@ async def _handle_start(bale, chat_id, user_id, username, first_name, text):
 
     lang = _lang_of(user, bale)
     if db.onboarding_done(user):
+        # کاربری که سؤال‌ها را تمام کرده ولی هنوز به پی‌وال نرسیده، همچنان وسطِ آنبوردینگ است:
+        # منو برایش باز نمی‌شود (بند ۹ج ریشه) و فقط دعوت به تعریفِ خواب را می‌بیند.
         await bale.send_message(
             chat_id,
-            C.get(lang, "returning_welcome") + "\n\n" + C.invite_line(lang, user["persona"]),
-            reply_markup=_main_reply_kb(bale, lang, user_id),
+            C.get(lang, "returning_welcome") + "\n\n" + C.invite_line(lang, user["persona"])
+            + ("" if db.menu_revealed(user) else C.input_hint(lang, "voice")),
+            reply_markup=_kb_gated(bale, lang, user_id, user),
         )
     elif user["onboarding_step"] == 0:
         await _send_welcome(bale, chat_id, lang)
@@ -462,8 +486,10 @@ async def _send_new_dream_guide(bale, chat_id, user_id, msg_id=None):
         await bale.send_message(chat_id, C.get(lang, "choose_persona_first"))
         await _send_onboarding_step(bale, chat_id, lang, step)
         return
-    # زیرِ پیامِ «خواب جدید» دکمه‌ی بازگشت به منوی اصلی (کیبوردِ پایین از قبل هست و می‌ماند)
-    await _edit_or_send(bale, chat_id, msg_id, C.new_dream_text(lang, user["persona"]),
+    # پیامِ دعوت به تعریفِ خواب = «درخواستِ ورودی»: راهنمای فلش+بولد می‌گیرد و تنها دکمه‌اش
+    # راهِ خروج (بازگشت) است، نه CTAِ حواس‌پرت‌کن (بند ۹ج ریشه).
+    await _edit_or_send(bale, chat_id, msg_id,
+                        C.new_dream_text(lang, user["persona"]) + C.input_hint(lang, "voice"),
                         [C.back_row(lang)])
 
 
@@ -627,8 +653,13 @@ async def _cb_onboarding_answer(bale, cq_id, chat_id, msg_id, user_id, step, idx
         persona = user["persona"]
         if msg_id:
             await bale.edit_message_text(chat_id, msg_id, C.persona_key(lang, persona, "greet"))
-        await bale.send_message(chat_id, C.persona_key(lang, persona, "invite"),
-                                reply_markup=_main_reply_kb(bale, lang, user_id))
+        # دعوت به فرستادنِ رویا هنوز **بخشی از آنبوردینگ** است (بند ۹ج ریشه):
+        #   • منوی پایین باز نمی‌شود (صریحاً برداشته می‌شود تا کیبوردِ کهنه هم نماند)،
+        #   • هیچ دکمه/CTAِ دیگری کنارش نیست،
+        #   • و راهنمای «همین پایین ویس بفرست» با فلش و بولد به متن چسبیده است.
+        await bale.send_message(chat_id,
+                                C.persona_key(lang, persona, "invite") + C.input_hint(lang, "voice"),
+                                reply_markup=remove_reply_keyboard())
 
 
 async def _cb_onboarding_prev(bale, cq_id, chat_id, msg_id, user_id):
@@ -686,7 +717,7 @@ async def _cb_confirm_dream(bale, cq_id, chat_id, user_id):
     else:
         await bale.answer_callback_query(cq_id)
         await db.set_pending_state(user_id, "awaiting_payment", "paid")
-        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang), user_id)
         return
 
     lock = _lock_key(bale, user_id, "dream")
@@ -894,7 +925,7 @@ async def _try_resume_pending_dream(bale, chat_id, user_id) -> bool:
             sub = db.subscription_status(user)
             if not sub["active"]:
                 await db.set_pending_state(user_id, "awaiting_payment", mode)
-                await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+                await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang), user_id)
                 return True
             if not SKIP_DAILY_LIMIT and not await db.can_use_today(user_id):
                 await db.clear_pending(user_id)
@@ -916,7 +947,7 @@ async def _try_resume_pending_dream(bale, chat_id, user_id) -> bool:
                 asyncio.create_task(_process_dream(bale, chat_id, user_id, mode, pending))
             return True
         else:
-            await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+            await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang), user_id)
             return True
 
     return False
@@ -1185,7 +1216,7 @@ async def _cb_view_full(bale, cq_id, chat_id, user_id, dream_id):
         await analytics.track_once(user_id, "first_value", {"via": "dream"})
     else:
         await bale.answer_callback_query(cq_id)
-        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang))
+        await _send_paywall(bale, chat_id, lang, C.need_subscription_prefix(lang), user_id)
 
 
 # ===================== تست ادمین =====================

@@ -193,6 +193,31 @@ async def set_sym_browse(user_id: int, on: bool):
         await db.commit()
 
 
+def menu_revealed(user: dict) -> bool:
+    """آیا منوی اصلی (کیبوردِ پایین) برای این کاربر آشکار شده؟ (قاعده‌ی «آنبوردینگِ بدون‌مزاحم»، بند ۹ج ریشه)
+
+    تا لحظه‌ی پی‌وال (نقطه‌ی پول) منو پنهان می‌ماند تا آنبوردینگ تحت‌الشعاع قرار نگیرد.
+    کاربری که اشتراک دارد/داشته هم قطعاً از آن نقطه گذشته، پس منویش باز است (گاردِ کاربرانِ قدیمی)."""
+    if bool(get_profile(user).get("menu_revealed")):
+        return True
+    return bool((user or {}).get("sub_expires_at"))
+
+
+async def set_menu_revealed(user_id: int):
+    """فلگِ آشکارشدنِ منو را در profile JSON ثبت می‌کند (write-merge روی بقیه‌ی پروفایل)."""
+    async with aiosqlite.connect(_path()) as db:
+        cur = await db.execute("SELECT profile FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        try:
+            profile = json.loads((row[0] if row else "{}") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            profile = {}
+        profile["menu_revealed"] = True
+        await db.execute("UPDATE users SET profile = ? WHERE user_id = ?",
+                         (json.dumps(profile, ensure_ascii=False), user_id))
+        await db.commit()
+
+
 def onboarding_done(user: dict) -> bool:
     lang = (user or {}).get("language") or DEFAULT_LANGUAGE
     return (user or {}).get("onboarding_step", 0) >= locales.question_count(lang)
