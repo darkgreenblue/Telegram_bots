@@ -5,85 +5,11 @@
 //    شامل کاربران قبل از آنالیتیکس. (هیچ عددی از users.state ساخته نمی‌شود — state فقط «الان» را می‌گوید.)
 import { instances, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf } from '../lib/bots.js';
 import { fmt, esc, nowSec } from '../lib/util.js';
-import { table } from '../lib/html.js';
+import { table, cohortCount } from '../lib/html.js';
+// تعریفِ قیف‌ها/چنل‌ها یک‌جا در lib است تا عددِ جدول و لیستِ کاربرانِ پشتِ آن از یک منبع بیایند
+import { FUNNELS, CHANNELS, verCond } from '../lib/funnels-def.js';
 
-export const FUNNELS = {
-  tarot: {
-    title: '🔮 تاروت',
-    steps: [
-      ['start', 'استارت'],
-      ['onboard_done', 'آنبوردینگ کامل'],
-      ['spread_selected', 'انتخاب نوع فال'],
-      ['question_submitted', 'ارسال سؤال'],
-      ['cards_picked', 'انتخاب کارت‌ها'],
-      ['paywall_shown', 'دیدن پی‌وال'],
-      ['reading_started', 'باز کردن کارت‌ها (پرداخت)'],
-      ['product_delivered', 'تحویل کامل فال'],
-    ],
-    payment: [
-      ['recharge_started', 'شروع شارژ'],
-      ['receipt_submitted', 'ارسال رسید'],
-      ['payment_approved', 'تأیید پرداخت'],
-    ],
-    // قیف سرگرمی‌های رایگان (فاز اینگیجمنت) → تبدیل. آیتم‌ها موازی‌اند (نه سریالی)؛
-    // هدف: دیدن کدام قلاب رایگان بیشتر استفاده می‌شود و نرخِ رسیدن از منوی رایگان به پرداخت.
-    free: [
-      ['free_menu_opened', 'باز کردن منوی رایگان'],
-      ['hafez_taken', 'فال حافظ'],
-      ['estekhare_taken', 'استخاره'],
-      ['quiz_done', 'کوییز کارت'],
-      ['coffee_taken', 'فال قهوه'],
-      ['card_meaning_viewed', 'کتابخانه کارت'],
-      ['paywall_shown', 'دیدن پی‌وال'],
-      ['payment_approved', 'پرداخت'],
-    ],
-    entity: { table: 'readings', title: 'وضعیت فال‌ها (رکورد قطعی — شامل قبل از آنالیتیکس)' },
-  },
-  voice2text: {
-    title: '🎙 ویس به متن',
-    steps: [
-      ['start', 'استارت'],
-      ['product_delivered', 'پردازش موفق'],
-      ['payment_approved', 'پرداخت موفق'],
-    ],
-    entity: { table: 'voice_flows', title: 'وضعیت فلوهای ویس (رکورد قطعی — شامل قبل از آنالیتیکس)' },
-  },
-  'tabir-khab': {
-    title: '🌙 تعبیر خواب',
-    steps: [
-      ['start', 'استارت'],
-      ['first_value', 'اولین تعبیر (تریال)'],
-      ['product_delivered', 'تعبیر کامل'],
-      ['payment_approved', 'پرداخت اشتراک'],
-    ],
-    // قیف نمادیاب خواب (مرور رایگان نمادها → CTA → تعبیر کامل)
-    free: [
-      ['symbol_opened', 'باز کردن نمادیاب'],
-      ['symbol_viewed', 'دیدن نماد'],
-      ['symbol_search', 'جستجوی نماد'],
-      ['symbol_not_found', 'نماد پیدا نشد'],
-      ['symbol_cta_dream', 'CTA به تعریف خواب'],
-      ['product_delivered', 'تعبیر کامل'],
-    ],
-    // dreams ستون status ندارد → از full_delivered یک برچسب می‌سازیم
-    entity: { table: 'dreams', title: 'وضعیت خواب‌ها', statusExpr: "CASE WHEN full_delivered=1 THEN 'delivered' WHEN is_free_trial=1 THEN 'trial_preview' ELSE 'pending' END" },
-  },
-};
-
-// ستون‌های breakdown چنل — شرط SQL روی users.first_source (کاربرِ join شده به رویداد)
-const CHANNELS = [
-  ['همه', '1=1'],
-  ['ارگانیک', "u.first_source = 'organic'"],
-  ['رفرال', "u.first_source LIKE 'referral:%'"],
-  ['کمپین‌ها', "u.first_source LIKE 'campaign:%'"],
-];
-
-// کوهورت نسخه: فیلتر اختیاری روی users.first_version ('' = همه؛ '_pre' = کاربران قبل از ردیابی نسخه)
-function verCond(ver) {
-  if (!ver) return { cond: '1=1', params: [] };
-  if (ver === '_pre') return { cond: "u.first_version = ''", params: [] };
-  return { cond: 'u.first_version = ?', params: [ver] };
-}
+export { FUNNELS }; // سازگاری: overview.js واژه‌نامه‌ی رویدادها را از همین‌جا می‌خواند
 
 // همه‌ی نسخه‌هایی که کاربری با آن‌ها وارد شده (برای انتخابگر کوهورت)
 function allVersions() {
@@ -118,12 +44,14 @@ function stepCounts(botKey, event, since, ver) {
 // statusExpr سفارشی از FUNNELS.entity گرفته می‌شود؛ created_at هم بسته به فرمت نرمال می‌شود.
 function entityStatuses(botKey, entity, since) {
   const merged = new Map();
-  const statusExpr = entity.statusExpr || 'status';
-  const catExpr = unixOf(botKey === 'tabir-khab' ? 'iso' : 'unix', 'created_at');
+  // alias t: statusExpr در lib/funnels-def.js با پیشوند t. نوشته شده تا در کوئریِ کوهورت (join با users)
+  // هم بدون ابهام باشد؛ همان عبارت این‌جا هم استفاده می‌شود تا عدد و لیست دقیقاً یکی بمانند.
+  const statusExpr = entity.statusExpr || 't.status';
+  const catExpr = unixOf(botKey === 'tabir-khab' ? 'iso' : 'unix', 't.created_at');
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, entity.table)) return;
-      for (const r of rows(db, `SELECT ${statusExpr} status, COUNT(*) c FROM ${entity.table} WHERE ${catExpr} >= ? GROUP BY ${statusExpr}`, [since])) {
+      for (const r of rows(db, `SELECT ${statusExpr} status, COUNT(*) c FROM ${entity.table} t WHERE ${catExpr} >= ? GROUP BY ${statusExpr}`, [since])) {
         merged.set(r.status, (merged.get(r.status) || 0) + r.c);
       }
     });
@@ -151,16 +79,18 @@ function paymentSteps(botKey, since) {
 }
 
 function funnelTable(botKey, steps, since, ver) {
-  const data = steps.map(([ev, label]) => [label, stepCounts(botKey, ev, since, ver)]);
+  const data = steps.map(([ev, label]) => [label, stepCounts(botKey, ev, since, ver), ev]);
   const base = data[0]?.[1] || CHANNELS.map(() => 0);
-  const body = data.map(([label, counts], idx) => {
+  const body = data.map(([label, counts, ev], idx) => {
     const prev = idx > 0 ? data[idx - 1][1] : null;
     return [
       esc(label),
+      // هر عدد = کاربرانِ همان مرحله در همان چنل → با کلیک، لیستشان همان‌جا باز می‌شود
       ...counts.map((c, i) => {
         const pctBase = base[i] ? Math.round(c / base[i] * 100) : 0;
         const drop = prev && prev[i] > 0 ? ` <span class="muted">(−${fmt(prev[i] - c)})</span>` : '';
-        return `<b>${fmt(c)}</b> <span class="muted">${idx ? pctBase + '٪' : ''}</span>${idx ? drop : ''}`;
+        const meta = `<span class="muted">${idx ? pctBase + '٪' : ''}</span>${idx ? drop : ''}`;
+        return cohortCount(c, { k: 'funnel', bot: botKey, ev, ch: String(i), since: String(since), ver }, { suffix: ` ${meta}` });
       }),
     ];
   });
@@ -199,13 +129,19 @@ export function funnelsBody(url) {
       out += `<div class="card"><h2>${esc(f.title)} — قیف شارژ</h2>${funnelTable(botKey, f.payment, since, ver)}
       ${(() => {
         const st = paymentSteps(botKey, since);
-        return st.length ? `<p class="muted" style="margin-top:8px">نقطه‌ی رها کردن شارژهای ناتمام: ${st.map(([s, c]) => `${esc(s)}: ${fmt(c)}`).join(' · ')}</p>` : '';
+        // هر عدد = کاربرانی که شارژشان دقیقاً در همان مرحله رها شده (لیستِ طلاییِ پیگیری)
+        return st.length ? `<p class="muted" style="margin-top:8px">نقطه‌ی رها کردن شارژهای ناتمام: ${st.map(([s, c]) =>
+          `${esc(s)}: ${cohortCount(c, { k: 'paystep', bot: botKey, step: s, since: String(since) })}`).join(' · ')}</p>` : '';
       })()}</div>`;
     }
     if (f.entity) {
       const st = entityStatuses(botKey, f.entity, since);
       out += `<div class="card"><h2>${esc(f.title)} — ${esc(f.entity.title)}</h2>
-      ${table(['وضعیت', 'تعداد'], st.map(([s, c]) => [esc(String(s)), fmt(c)]), 'رکوردی نیست.')}</div>`;
+      ${table(['وضعیت', 'تعداد رکورد', 'کاربران'], st.map(([s, c]) => [
+        esc(String(s)), fmt(c),
+        cohortCount(c, { k: 'entity', bot: botKey, st: String(s), since: String(since) }),
+      ]), 'رکوردی نیست.')}
+      <p class="muted" style="margin-top:8px">«تعداد رکورد» ممکن است از «کاربران» بیشتر باشد (یک کاربر چند رکورد دارد). روی عددِ ستون کاربران بزن تا لیستشان باز شود.</p></div>`;
     }
   }
   return out;

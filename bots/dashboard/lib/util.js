@@ -19,6 +19,14 @@ export function tehranDateTime(unixSec) {
   }).format(new Date(unixSec * 1000));
 }
 
+/* هفته‌های شنبه‌محورِ تهران (ریتنشن + کوهورت‌ها) — epoch یونیکس پنجشنبه است؛ +۲ روز → مرز شنبه */
+export const WEEK = 7 * 86400;
+export const weekIdx = (unixSec) => Math.floor((unixSec + TEHRAN_OFFSET_S - 2 * 86400) / WEEK);
+// همان محاسبه به‌صورت عبارت SQL روی یک ستون/عبارتِ unix (برای کوئری مستقیم روی DB)
+export const weekExpr = (col) => `CAST((${col} + ${TEHRAN_OFFSET_S} - ${2 * 86400}) / ${WEEK} AS INTEGER)`;
+// تاریخ شروع هفته (برچسب ستون/ردیف)
+export const weekLabel = (w) => new Date((w * WEEK + 2 * 86400 - TEHRAN_OFFSET_S) * 1000).toISOString().slice(0, 10);
+
 export const fmt = (n) => (Number(n) || 0).toLocaleString('fa-IR');
 
 export const esc = (s) => String(s ?? '')

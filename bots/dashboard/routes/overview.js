@@ -1,9 +1,9 @@
 // نمای کلی: وضعیت هر ربات (کاربر/فعال/درآمد به وقت تهران) + سلامت عملیاتی (صف رسید، حجم DB)
 import { instances, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman } from '../lib/bots.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
-import { stat } from '../lib/html.js';
+import { stat, cohortCount } from '../lib/html.js';
 import { EVENTS } from '../../../shared/analytics.js';
-import { FUNNELS } from './funnels.js';
+import { FUNNELS } from '../lib/funnels-def.js';
 
 // واژه‌نامه‌ی شناخته‌شده: هسته‌ی EVENTS + رویدادهای اختصاصی تعریف‌شده در فانل‌ها + موارد ثبت‌شده‌ی معلوم
 const KNOWN_EVENTS = new Set([
@@ -45,11 +45,11 @@ export function overviewBody() {
     const sizes = dbSizes(inst.file);
     if (!s) { out += `<div class="card"><h2>${esc(inst.title)}</h2><p class="muted">دیتابیس در دسترس نیست.</p></div>`; continue; }
     out += `<div class="card"><h2>${esc(inst.title)} <span class="muted mono">${esc(inst.id)}</span></h2><div class="grid">
-      ${stat('کاربران', fmt(s.users))}
-      ${stat('جدید امروز', fmt(s.newToday))}
-      ${stat('جدید ۷ روز', fmt(s.newWeek))}
-      ${s.dau !== null ? stat('کاربر فعال امروز (DAU)', fmt(s.dau)) : ''}
-      ${s.wau !== null ? stat('فعال ۷ روز (WAU)', fmt(s.wau)) : ''}
+      ${stat('کاربران', cohortCount(s.users, { k: 'users', bot: inst.bot, inst: inst.id }))}
+      ${stat('جدید امروز', cohortCount(s.newToday, { k: 'users', bot: inst.bot, inst: inst.id, since: String(today) }))}
+      ${stat('جدید ۷ روز', cohortCount(s.newWeek, { k: 'users', bot: inst.bot, inst: inst.id, since: String(week) }))}
+      ${s.dau !== null ? stat('کاربر فعال امروز (DAU)', cohortCount(s.dau, { k: 'actives', bot: inst.bot, inst: inst.id, since: String(today) })) : ''}
+      ${s.wau !== null ? stat('فعال ۷ روز (WAU)', cohortCount(s.wau, { k: 'actives', bot: inst.bot, inst: inst.id, since: String(week) })) : ''}
       ${s.revToday !== null ? stat('درآمد امروز', fmt(s.revToday) + ' ت') : ''}
       ${s.revMonth !== null ? stat('درآمد ۳۰ روز', fmt(s.revMonth) + ' ت') : ''}
       ${s.revTotal !== null ? stat('درآمد کل', fmt(s.revTotal) + ' ت') : ''}
