@@ -25,6 +25,8 @@ import { discountsBody, discountCreate, discountToggle } from './routes/discount
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
 import { retentionBody } from './routes/retention.js';
 import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
+import { cohortBody, cohortFragment } from './routes/cohort.js';
+import { usersBody, usersCsv } from './routes/users.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 
 /* ===== ENV ===== */
@@ -63,6 +65,9 @@ const PAGES = {
   '/experiments/view': (url) => ['تست‌ها', experimentViewBody(url), '/experiments'],
   '/retention': () => ['ریتنشن', retentionBody()],
   '/journal': () => ['ژورنال', journalBody()],
+  '/users': (url) => ['کاربران', usersBody(url)],
+  // «کاربرانِ پشتِ یک عدد» — نسخه‌ی صفحه‌ی کامل (قطعه‌ی کشویی پایین‌تر، خارج از PAGES)
+  '/cohort': (url) => ['کاربران', cohortBody(url), '/users'],
 };
 
 /* ===== اکشن‌های POST: هرکدام پیام موفقیت برمی‌گرداند و به backTo ری‌دایرکت می‌شود ===== */
@@ -129,6 +134,17 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': 'attachment; filename="payments.csv"',
       });
+    }
+    if (path === '/users.csv') {
+      return send(res, 200, usersCsv(url), {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="users.csv"',
+      });
+    }
+
+    /* ---- قطعه‌ی کشویی «کاربرانِ پشتِ این عدد» (fetch از خودِ صفحه؛ HTML خام بدون layout) ---- */
+    if (path === '/cohort.fragment') {
+      return send(res, 200, cohortFragment(url));
     }
 
     /* ---- صفحات ---- */

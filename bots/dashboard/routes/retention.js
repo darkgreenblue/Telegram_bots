@@ -1,13 +1,8 @@
 // ریتنشن: مثلث هفتگی (کوهورت = هفته‌ی ورود کاربر؛ بازگشت = هر رویدادی در هفته‌های بعد)
 // + خلاصه‌ی lifecycle هفته‌ی جاری (جدید/برگشتی/خفته). هفته‌ها تقویم تهران، شروع از شنبه.
 import { instancesOf, BOTS, withDb, hasTable, rows, userPk, userCreatedExpr } from '../lib/bots.js';
-import { fmt, esc } from '../lib/util.js';
-import { table, stat } from '../lib/html.js';
-
-const TEHRAN_OFFSET_S = 3.5 * 3600;
-const WEEK = 7 * 86400;
-// epoch یونیکس پنجشنبه است؛ +۲ روز → مرز هفته‌ها شنبه‌ی تهران می‌شود
-const weekIdx = (unixSec) => Math.floor((unixSec + TEHRAN_OFFSET_S - 2 * 86400) / WEEK);
+import { fmt, esc, weekIdx, weekExpr, weekLabel } from '../lib/util.js';
+import { table, stat, cohortCount } from '../lib/html.js';
 
 function botRetention(botKey, weeksBack = 8) {
   const nowW = weekIdx(Math.floor(Date.now() / 1000));
@@ -29,7 +24,7 @@ function botRetention(botKey, weeksBack = 8) {
         if (w === nowW) thisWeekNew++;
       }
       if (!hasTable(db, 'events')) return;
-      const wexpr = `CAST((created_at + ${TEHRAN_OFFSET_S} - ${2 * 86400}) / ${WEEK} AS INTEGER)`;
+      const wexpr = weekExpr('created_at'); // همان فرمولِ هفته‌ی کوهورت‌ها (lib/util.js) — بدون drift
       for (const r of rows(db, `SELECT DISTINCT user_id id, ${wexpr} w FROM events WHERE user_id IS NOT NULL`)) {
         const cw = cohortOf.get(`${inst.id}:${r.id}`);
         if (cw === undefined) continue;
@@ -58,24 +53,26 @@ export function retentionBody() {
     const headers = ['هفته‌ی ورود', 'کاربر', ...Array.from({ length: r.weeksBack }, (_, i) => `+${i}`)];
     const body = r.cohorts.map((w) => {
       const size = r.cohortSize.get(w) || 0;
-      const weekLabel = new Date((w * WEEK + 2 * 86400 - TEHRAN_OFFSET_S) * 1000).toISOString().slice(0, 10);
       return [
-        `<span class="mono">${weekLabel}</span>`,
-        fmt(size),
+        `<span class="mono">${weekLabel(w)}</span>`,
+        // اندازه‌ی کوهورت = کاربرانِ واردشده در آن هفته (قابل کلیک)
+        cohortCount(size, { k: 'retc', bot: b.key, w: String(w) }),
         ...Array.from({ length: r.weeksBack }, (_, off) => {
           if (w + off > r.nowW) return '';
           const a = r.activeSets.get(`${w}:${off}`)?.size || 0;
           const pct = size ? Math.round(a / size * 100) : 0;
           const bg = pct >= 40 ? '#dcfce7' : pct >= 15 ? '#fef9c3' : pct > 0 ? '#fee2e2' : 'transparent';
-          return `<span style="display:inline-block;min-width:44px;background:${bg};border-radius:6px;padding:2px 4px">${pct}٪ <span class="muted">${fmt(a)}</span></span>`;
+          // هر سلول = همان کاربرانِ کوهورت که در هفته‌ی +off برگشته‌اند
+          return `<span style="display:inline-block;min-width:44px;background:${bg};border-radius:6px;padding:2px 4px">${pct}٪ `
+            + cohortCount(a, { k: 'retcell', bot: b.key, w: String(w), off: String(off) }) + `</span>`;
         }),
       ];
     });
     out += `<div class="card"><h2>${esc(b.title)} — ریتنشن هفتگی</h2>
     <div class="grid" style="margin-bottom:10px">
-      ${stat('فعال این هفته', fmt(r.lifecycle.active))}
-      ${stat('جدید این هفته', fmt(r.lifecycle.newUsers))}
-      ${stat('خفته (هفته‌ی قبل فعال، این هفته نه)', fmt(r.lifecycle.dormant))}
+      ${stat('فعال این هفته', cohortCount(r.lifecycle.active, { k: 'life', bot: b.key, t: 'active' }))}
+      ${stat('جدید این هفته', cohortCount(r.lifecycle.newUsers, { k: 'life', bot: b.key, t: 'new' }))}
+      ${stat('خفته (هفته‌ی قبل فعال، این هفته نه)', cohortCount(r.lifecycle.dormant, { k: 'life', bot: b.key, t: 'dormant' }))}
     </div>
     ${table(headers, body)}</div>`;
   }

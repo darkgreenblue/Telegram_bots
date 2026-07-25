@@ -1,5 +1,5 @@
 // رندر HTML سمت سرور — RTL فارسی، بدون build step و بدون هیچ منبع خارجی (self-contained)
-import { esc } from './util.js';
+import { esc, fmt } from './util.js';
 
 const NAV = [
   ['/', 'نمای کلی'],
@@ -8,6 +8,7 @@ const NAV = [
   ['/funnels', 'فانل‌ها'],
   ['/retention', 'ریتنشن'],
   ['/finance', 'مالی'],
+  ['/users', 'کاربران'],
   ['/discounts', 'کد تخفیف'],
   ['/support', 'پشتیبانی'],
   ['/journal', 'ژورنال'],
@@ -47,6 +48,16 @@ const CSS = `
   .mono { font-family:ui-monospace,monospace; direction:ltr; unicode-bidi:embed; }
   .note { background:#fef3e2; border:1px solid #fcd9a0; border-radius:8px; padding:8px 12px; font-size:13px; margin-bottom:12px; }
   .copy { cursor:pointer; }
+  /* عددِ کاربرمحورِ قابل‌کلیک: باز می‌شود و لیستِ کاربرانِ پشتِ همان عدد را نشان می‌دهد */
+  details.cohort { display:inline-block; }
+  details.cohort > summary { cursor:pointer; list-style:none; font-weight:700; color:var(--accent);
+    text-decoration:underline dotted; text-underline-offset:3px; }
+  details.cohort > summary::-webkit-details-marker { display:none; }
+  details.cohort[open] { display:block; }
+  .cohort-body { margin-top:6px; min-width:280px; max-width:420px; max-height:280px; overflow:auto;
+    border:1px solid var(--line); border-radius:8px; padding:8px; background:#fbfcff; white-space:normal; font-weight:400; }
+  .cohort-body .u { display:block; padding:3px 4px; border-bottom:1px solid #eef0f7; }
+  .cohort-body .u:last-child { border-bottom:0; }
 `;
 
 export function layout(title, active, body, { msg = '' } = {}) {
@@ -74,6 +85,20 @@ document.addEventListener('click', (e) => {
     setTimeout(() => { el.textContent = t; }, 1200);
   });
 });
+// عددهای کاربرمحور: با اولین باز شدن، لیستِ کاربرانش را همان‌جا (بدون ترک صفحه) می‌گیرد.
+// رویداد toggle بابل نمی‌شود → شنونده در فاز capture ثبت می‌شود.
+document.addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d || d.tagName !== 'DETAILS' || !d.classList.contains('cohort') || !d.open || d.dataset.loaded) return;
+  d.dataset.loaded = '1';
+  const box = d.querySelector('.cohort-body');
+  if (!box) return;
+  box.textContent = 'در حال آوردن لیست…';
+  fetch('/cohort.fragment?' + d.dataset.q, { credentials: 'same-origin' })
+    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.status))))
+    .then((h) => { box.innerHTML = h; })
+    .catch(() => { box.innerHTML = '<span class="muted">لیست باز نشد؛ دوباره امتحان کن.</span>'; d.dataset.loaded = ''; });
+}, true);
 </script>
 </body></html>`;
 }
@@ -103,6 +128,19 @@ export function table(headers, bodyRows, emptyText = 'داده‌ای نیست')
 }
 
 export const stat = (k, v) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+
+/* عددِ کاربرمحورِ قابل‌کلیک (قرارداد: هیچ عددی که به کاربر اشاره می‌کند بن‌بست نباشد).
+   params همان توصیفِ کوهورت است (lib/cohorts.js) — با کلیک، لیستِ کاربران همان‌جا باز می‌شود
+   و هر آی‌دی به پروفایلِ همان کاربر در همان ربات می‌رود. صفر = بدون لینک (چیزی برای دیدن نیست). */
+export function cohortCount(n, params, { suffix = '' } = {}) {
+  const num = fmt(n);
+  if (!Number(n)) return `<span class="muted">${num}</span>${suffix}`;
+  const q = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  ).toString();
+  return `<details class="cohort" data-q="${esc(q)}"><summary>${num}</summary>`
+    + `<div class="cohort-body muted">…</div></details>${suffix}`;
+}
 
 export function statusBadge(s) {
   const cls = s === 'approved' || s === 'delivered' || s === 'completed' ? 'ok'

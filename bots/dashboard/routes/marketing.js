@@ -2,7 +2,7 @@
 import { BOTS, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman } from '../lib/bots.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime } from '../lib/util.js';
-import { table } from '../lib/html.js';
+import { table, cohortCount } from '../lib/html.js';
 
 const usernameKey = (botKey) => `username:${botKey}`;
 
@@ -98,8 +98,16 @@ export function marketingBody() {
       link
         ? `<span class="mono">${esc(link)}</span> <button type="button" class="ghost copy" data-copy="${esc(link)}">کپی</button>`
         : `<span class="badge warn">یوزرنیم ربات را بالا ست کن</span> <span class="mono">c_${esc(c.code)}</span>`,
-      fmt(s.starts), fmt(s.newUsers), fmt(s.returning), fmt(s.firstValue), fmt(s.paywall),
-      s.hasPayments ? `${fmt(s.payers)} / ${fmt(s.revenue)} ت` : '-',
+      // «استارت کل» و «کلیک برگشتی» شمارشِ رویدادند (نه کاربر یکتا) → عدد ساده می‌مانند؛
+      // بقیه کاربرمحورند و با کلیک لیستشان باز می‌شود.
+      fmt(s.starts),
+      cohortCount(s.newUsers, { k: 'camp', bot: c.bot, code: c.code, m: 'new' }),
+      fmt(s.returning),
+      cohortCount(s.firstValue, { k: 'camp', bot: c.bot, code: c.code, m: 'fv' }),
+      cohortCount(s.paywall, { k: 'camp', bot: c.bot, code: c.code, m: 'pw' }),
+      s.hasPayments
+        ? `${cohortCount(s.payers, { k: 'camp', bot: c.bot, code: c.code, m: 'payers' })} / ${fmt(s.revenue)} ت`
+        : '-',
       tehranDateTime(c.created_at),
       `<form method="post" action="/marketing/toggle" style="display:inline"><input type="hidden" name="id" value="${c.id}">
         <button class="ghost" type="submit">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button></form>${c.is_active ? '' : ' <span class="badge bad">غیرفعال</span>'}`,
@@ -117,7 +125,19 @@ export function marketingBody() {
     channels += `<div class="card"><h2>🛣 چنل‌های ورودی — ${esc(b.title)}</h2>
     ${table(['چنل', 'کاربر', 'خریدار', 'درآمد'], list.map(([ch, m]) => {
       const camp = ch.startsWith('campaign:') && listCampaigns().find(c => `campaign:${c.code}` === ch);
-      return [camp ? `کمپین: ${esc(camp.name || camp.code)}` : esc(ch), fmt(m.users), fmt(m.payers), fmt(m.revenue) + ' ت'];
+      // نگاشتِ برچسبِ چنل به کلیدِ whitelistِ کوهورت (هیچ شرطی از متن ساخته نمی‌شود)
+      const cohort = ch.startsWith('campaign:')
+        ? { k: 'chan', bot: b.key, c: 'campaign', val: ch }
+        : ch === 'رفرال' ? { k: 'chan', bot: b.key, c: 'referral' }
+        : ch === 'ارگانیک' ? { k: 'chan', bot: b.key, c: 'organic' }
+        : ch === 'سایر payload' ? { k: 'chan', bot: b.key, c: 'other' }
+        : { k: 'chan', bot: b.key, c: 'unknown' };
+      return [
+        camp ? `کمپین: ${esc(camp.name || camp.code)}` : esc(ch),
+        cohortCount(m.users, cohort),
+        camp ? cohortCount(m.payers, { k: 'camp', bot: b.key, code: camp.code, m: 'payers' }) : fmt(m.payers),
+        fmt(m.revenue) + ' ت',
+      ];
     }))}</div>`;
   }
 

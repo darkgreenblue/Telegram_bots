@@ -1,0 +1,274 @@
+// «پشتِ هر عدد، کاربرانش» — تک‌منبعِ تبدیلِ یک عددِ داشبورد به لیستِ کاربرانِ همان عدد.
+//
+// چرا این فایل هست: هر عددی که در داشبورد به کاربر اشاره می‌کند باید قابلِ باز شدن باشد تا مالک
+// بتواند دقیقاً همان آدم‌ها را ببیند و باهاشان حرف بزند (user discovery). اگر هر صفحه لیستِ خودش
+// را جدا می‌ساخت، عدد و لیست از هم می‌پاشیدند؛ این‌جا شرطِ عدد و شرطِ لیست **یکی** است.
+//
+// امنیت (قاعده‌ی سختِ داشبورد): هیچ رشته‌ای از URL داخل SQL تزریق نمی‌شود.
+//  - نام جدول/ستون/statusExpr فقط از پروفایلِ ربات (lib/bots.js) و تعاریفِ lib/funnels-def.js می‌آید.
+//  - هر مقدارِ ورودیِ کاربر (نام رویداد، status، step، کد کمپین، شماره‌ی هفته) bound parameter است.
+//  - انتخابِ چنل/نسخه/نوع از لیستِ whitelist ایندکس می‌شود، نه از متنِ خام.
+import {
+  instancesOf, getInstance, withDb, hasTable, rows,
+  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr,
+} from './bots.js';
+import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
+import { weekIdx, weekExpr, weekLabel, nowSec } from './util.js';
+
+// سقفِ لیست: داشبورد ابزارِ تماس‌گرفتن است نه export انبوه (برای انبوه، تب «کاربران» + CSV هست).
+export const COHORT_LIMIT = 300;
+
+/* اجرای یک کوئریِ کاربرمحور روی instanceهای هدف و نرمال‌کردن خروجی.
+   هر کوئری باید ستون‌های id/nm/un را با همین نام برگرداند. */
+function collect(targets, botKey, build) {
+  const out = [];
+  const pk = userPk(botKey);
+  const nameCol = userNameCol(botKey);
+  for (const inst of targets) {
+    if (out.length >= COHORT_LIMIT) break;
+    withDb(inst.file, (db) => {
+      const q = build(db, { pk, nameCol, bot: botKey });
+      if (!q) return;
+      for (const u of rows(db, q.sql, q.params)) {
+        out.push({ instId: inst.id, instTitle: inst.title, uid: u.id, name: u.nm || '', username: u.un || '' });
+      }
+    });
+  }
+  return out;
+}
+
+const targetsOf = (url, botKey) => {
+  const instId = url.searchParams.get('inst') || '';
+  if (instId) { const i = getInstance(instId); return i ? [i] : []; }
+  return instancesOf(botKey);
+};
+
+const intParam = (url, key, def = 0) => {
+  const v = parseInt(url.searchParams.get(key) ?? '', 10);
+  return Number.isFinite(v) ? v : def;
+};
+
+// انتخابِ ایمنِ عبارتِ چنل از whitelist (هرگز از متنِ خام)
+const CHAN_CONDS = {
+  organic: { cond: "first_source = 'organic'", label: 'ارگانیک' },
+  referral: { cond: "first_source LIKE 'referral:%'", label: 'رفرال' },
+  other: { cond: "first_source LIKE 'other:%'", label: 'سایر payload' },
+  unknown: { cond: "first_source IS NULL OR first_source = ''", label: 'نامشخص (قبل از اتریبیوشن)' },
+  campaign: { cond: 'first_source = ?', label: 'کمپین' }, // مقدار bound می‌شود
+};
+
+/* ═══ حلّالِ اصلی ═══
+   خروجی: { title, users, truncated } — یا { error } اگر پارامترها نامعتبر بودند. */
+export function resolveCohort(url) {
+  const k = url.searchParams.get('k') || '';
+  const botKey = url.searchParams.get('bot') || '';
+  const since = Math.max(0, intParam(url, 'since', 0));
+  const targets = targetsOf(url, botKey);
+  if (!targets.length) return { error: 'ربات/دیتابیسی برای این عدد پیدا نشد.' };
+
+  const lim = ` LIMIT ${COHORT_LIMIT}`;
+  const sel = (pk, nameCol, alias = 'u') => `${alias}.${pk} id, ${alias}.${nameCol} nm, ${alias}.username un`;
+
+  switch (k) {
+    /* قیف رویدادی: کاربرانی که یک رویداد مشخص را در بازه انجام داده‌اند (+ بُرشِ چنل و کوهورت نسخه) */
+    case 'funnel': {
+      const ev = url.searchParams.get('ev') || '';
+      const ci = Math.min(CHANNELS.length - 1, Math.max(0, intParam(url, 'ch', 0)));
+      const ver = url.searchParams.get('ver') || '';
+      const v = verCond(ver);
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                WHERE e.event = ? AND e.created_at >= ? AND ${CHANNELS[ci][1]} AND ${v.cond}
+                ORDER BY u.${pk}${lim}`,
+          params: [ev, since, ...v.params],
+        };
+      });
+      return done(`رویداد «${ev}» · ${CHANNELS[ci][0]}${ver ? ` · نسخه ${ver}` : ''}`, users);
+    }
+
+    /* وضعیت رکوردهای قطعی (readings/voice_flows/dreams): کاربرانِ رکوردهایی با آن وضعیت */
+    case 'entity': {
+      const entity = FUNNELS[botKey]?.entity;
+      if (!entity) return { error: 'این ربات جدول رکورد قطعی ندارد.' };
+      const st = url.searchParams.get('st') || '';
+      const statusExpr = entity.statusExpr || 't.status';
+      const catExpr = unixOf(botKey === 'tabir-khab' ? 'iso' : 'unix', 't.created_at');
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, entity.table)) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM ${entity.table} t JOIN users u ON u.${pk} = t.user_id
+                WHERE ${statusExpr} = ? AND ${catExpr} >= ? ORDER BY u.${pk}${lim}`,
+          params: [st, since],
+        };
+      });
+      return done(`${entity.title} · وضعیت «${st}»`, users);
+    }
+
+    /* نقطه‌ی رها کردن شارژ: کاربرانِ پرداخت‌های ناتمام در یک مرحله */
+    case 'paystep': {
+      const step = url.searchParams.get('step') || '';
+      const m = moneyOf(botKey);
+      const catExpr = unixOf(m.createdKind, 'p.created_at');
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, m.table)) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
+                WHERE COALESCE(p.step,'-') = ? AND ${catExpr} >= ?
+                  AND p.status IN ('pending','canceled','cancelled') ORDER BY u.${pk}${lim}`,
+          params: [step, since],
+        };
+      });
+      return done(`شارژِ ناتمام، رها شده در مرحله‌ی «${step}»`, users);
+    }
+
+    /* کوهورتِ ریتنشن: کاربرانِ واردشده در یک هفته */
+    case 'retc': {
+      const w = intParam(url, 'w', 0);
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => ({
+        sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users
+              WHERE ${weekExpr(userCreatedExpr(botKey))} = ? ORDER BY ${pk}${lim}`,
+        params: [w],
+      }));
+      return done(`کاربرانِ واردشده در هفته‌ی ${weekLabel(w)}`, users);
+    }
+
+    /* سلولِ ریتنشن: از کوهورتِ هفته‌ی w، کدام‌ها در هفته‌ی w+off فعال بوده‌اند */
+    case 'retcell': {
+      const w = intParam(url, 'w', 0);
+      const off = Math.max(0, intParam(url, 'off', 0));
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                WHERE ${weekExpr('e.created_at')} = ? AND ${weekExpr(userCreatedExpr(botKey, 'u.created_at'))} = ?
+                ORDER BY u.${pk}${lim}`,
+          params: [w + off, w],
+        };
+      });
+      return done(`کوهورتِ ${weekLabel(w)} که در هفته‌ی +${off} فعال بودند`, users);
+    }
+
+    /* lifecycle هفته‌ی جاری: فعال / جدید / خفته */
+    case 'life': {
+      const t = url.searchParams.get('t') || 'active';
+      const nowW = weekIdx(nowSec());
+      if (t === 'new') {
+        const users = collect(targets, botKey, (db, { pk, nameCol }) => ({
+          sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users
+                WHERE ${weekExpr(userCreatedExpr(botKey))} = ? ORDER BY ${pk}${lim}`,
+          params: [nowW],
+        }));
+        return done('کاربرانِ جدیدِ این هفته', users);
+      }
+      if (t === 'dormant') {
+        // هفته‌ی قبل فعال بوده، این هفته نه (خفته‌ها = مهم‌ترین لیست برای بازگرداندن)
+        const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+          if (!hasTable(db, 'events')) return null;
+          return {
+            sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                  WHERE ${weekExpr('e.created_at')} = ?
+                    AND NOT EXISTS (SELECT 1 FROM events e2 WHERE e2.user_id = e.user_id AND ${weekExpr('e2.created_at')} = ?)
+                  ORDER BY u.${pk}${lim}`,
+            params: [nowW - 1, nowW],
+          };
+        });
+        return done('خفته‌ها (هفته‌ی قبل فعال، این هفته نه)', users);
+      }
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                WHERE ${weekExpr('e.created_at')} = ? ORDER BY u.${pk}${lim}`,
+          params: [nowW],
+        };
+      });
+      return done('کاربرانِ فعالِ این هفته', users);
+    }
+
+    /* کاربرانِ ثبت‌نام‌شده (کل یا از یک زمان به بعد) — اعداد نمای کلی */
+    case 'users': {
+      const createdExpr = userCreatedExpr(botKey);
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => ({
+        sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users
+              ${since ? `WHERE ${createdExpr} >= ?` : ''} ORDER BY ${createdExpr} DESC${lim}`,
+        params: since ? [since] : [],
+      }));
+      return done(since ? 'کاربرانِ جدید در این بازه' : 'همه‌ی کاربران', users);
+    }
+
+    /* کاربرانِ فعال (هر رویدادی) از یک زمان به بعد — DAU/WAU */
+    case 'actives': {
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                WHERE e.created_at >= ? ORDER BY u.${pk}${lim}`,
+          params: [since],
+        };
+      });
+      return done('کاربرانِ فعال در این بازه', users);
+    }
+
+    /* چنلِ ورود (first_source) — جدولِ مقایسه‌ی چنل‌ها در مارکتینگ */
+    case 'chan': {
+      const c = CHAN_CONDS[url.searchParams.get('c') || ''] ? url.searchParams.get('c') : '';
+      if (!c) return { error: 'چنل نامعتبر.' };
+      const val = url.searchParams.get('val') || '';
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => ({
+        sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users
+              WHERE ${CHAN_CONDS[c].cond} ORDER BY ${userCreatedExpr(botKey)} DESC${lim}`,
+        params: c === 'campaign' ? [val] : [],
+      }));
+      return done(`چنلِ ورود: ${CHAN_CONDS[c].label}${c === 'campaign' ? ` (${val})` : ''}`, users);
+    }
+
+    /* قیفِ یک کمپین: کاربر جدید / به ارزش رسید / پی‌وال دید / خریدار */
+    case 'camp': {
+      const code = url.searchParams.get('code') || '';
+      const mode = url.searchParams.get('m') || 'new';
+      const src = `campaign:${code}`;
+      const m = moneyOf(botKey);
+      const test = m.testFilter ? ` AND p.${m.testFilter}` : '';
+      const byEvent = { fv: 'first_value', pw: 'paywall_shown' }[mode];
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (byEvent) {
+          if (!hasTable(db, 'events')) return null;
+          return {
+            sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
+                  WHERE u.first_source = ? AND e.event = ? ORDER BY u.${pk}${lim}`,
+            params: [src, byEvent],
+          };
+        }
+        if (mode === 'payers') {
+          if (!hasTable(db, m.table)) return null;
+          return {
+            sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
+                  WHERE u.first_source = ? AND p.status = '${m.successStatus}'${test} ORDER BY u.${pk}${lim}`,
+            params: [src],
+          };
+        }
+        return {
+          sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users WHERE first_source = ?
+                ORDER BY ${userCreatedExpr(botKey)} DESC${lim}`,
+          params: [src],
+        };
+      });
+      const label = { fv: 'به اولین ارزش رسید', pw: 'پی‌وال دید', payers: 'خریدار' }[mode] || 'کاربر جدید';
+      return done(`کمپین ${code} · ${label}`, users);
+    }
+
+    default:
+      return { error: 'نوع کوهورت نامعتبر است.' };
+  }
+}
+
+function done(title, users) {
+  return { title, users: users.slice(0, COHORT_LIMIT), truncated: users.length >= COHORT_LIMIT };
+}
+
+// رشته‌ی query یک کوهورت (همان چیزی که دکمه‌ی عدد حمل می‌کند)
+export const cohortQuery = (params) => new URLSearchParams(
+  Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+).toString();
