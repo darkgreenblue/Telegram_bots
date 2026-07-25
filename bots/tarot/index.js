@@ -65,7 +65,10 @@ const TEST_PHASE = false;
 //        (blockDuringOpenReading) با دو دکمه‌ی «ادامه/انصراف» — قرارداد State Management بند ۹ب.
 // 1.5.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #TRT-<user_id> (shared/support.js).
-const PRODUCT_VERSION = '1.5.0';
+// 1.6.0: بازطراحیِ پی‌والِ کم‌موجودی (بزرگ‌ترین نقطه‌ی ریزش): پیامِ کوتاهِ شخصی‌شده با تعدادِ
+//        کارت و قیمت، تخفیف از پیام حذف و پشتِ دکمه‌ی «تخفیف می‌خوام» رفت، تخفیفِ اولین شارژ
+//        ۳۵٪→۵۰٪ و دیگر خودکار نیست (کدِ شخصیِ کپی‌شدنی)، و برای کاربرِ شارژکرده مسیر دعوت دوستان.
+const PRODUCT_VERSION = '1.6.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -113,9 +116,10 @@ const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus ||
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
-// هدیه‌ی اولین اقدام به شارژ: خودکار (بدون کد) روی اولین شارژ موفق هر کاربر اعمال می‌شود؛
-// بعد از اولین approve دیگر نشان داده/اعمال نمی‌شود (hasRecharged).
-const FIRST_RECHARGE_DISCOUNT = { percent: 35, cap: 100_000 };
+// هدیه‌ی اولین اقدام به شارژ: **هرگز خودکار اعمال نمی‌شود**. فقط وقتی کاربر روی دکمه‌ی
+// «تخفیف می‌خوام» بزند یک کدِ شخصی می‌گیرد و خودش هنگام پرداخت واردش می‌کند (تخفیف پشتِ
+// دکمه = کاربرِ آماده‌ی پرداخت حواسش پرت نمی‌شود). بعد از اولین شارژِ تأییدشده کد بی‌اثر است.
+const FIRST_RECHARGE_DISCOUNT = { percent: 50, cap: 100_000 };
 const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
@@ -322,9 +326,6 @@ const stmts = {
   insertDiscountCode:  db.prepare('INSERT INTO discount_codes (code, discount_percent, max_discount_amount, expires_at, max_uses_per_user, only_user_id, created_by) VALUES (?,?,?,?,?,?,?)'),
   incDiscountUses:     db.prepare('UPDATE discount_codes SET total_uses=total_uses+1 WHERE id=?'),
   countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
-  // پرداختی که تخفیفِ خودکارِ اولین شارژ گرفته (discount_code_id NULL + original_amount ست) و هنوز باطل نشده —
-  // ضد race که کاربر با چند پرداختِ pending هم‌زمان تخفیف اولِ خودکار را چندبار بگیرد
-  countAutoDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND discount_code_id IS NULL AND original_amount IS NOT NULL AND status IN ('pending','waiting_review','approved')"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
   countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
@@ -351,6 +352,30 @@ const getState = (uid) => getUser(uid)?.state || 'new';
 const setState = (uid, s) => stmts.setState.run(s, uid);
 const getBalance = (uid) => getUser(uid)?.balance || 0;
 const hasRecharged = (uid) => stmts.countApprovedPayments.get(uid).c > 0;
+// کدِ شخصیِ تخفیفِ اولین شارژ: قطعی و یکتا per کاربر (base36 آی‌دی → بدون احتمالِ برخورد)،
+// پس چندبار زدنِ دکمه همان کد را می‌دهد نه کدِ تازه. فقط با only_user_id خودش و یک‌بار مصرف.
+const firstCodeFor = (uid) => 'T50' + Number(uid).toString(36).toUpperCase();
+function ensureFirstDiscountCode(uid) {
+  const code = firstCodeFor(uid);
+  if (stmts.getDiscountCode.get(code)) return code;
+  try {
+    stmts.insertDiscountCode.run(code, FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap,
+      null, 1, uid, 0);
+  } catch (e) { logErr('first discount code', e.message); }
+  return code;
+}
+
+// تعداد کارت‌های یک خوانش (برای متنِ «هزینه‌ی این سه تا کارت»): از خودِ چیدمان،
+// و اگر چیدمان پیدا نشد از قیمت (قانونِ ثابتِ هر کارت ۱۰٬۰۰۰ تومان).
+const cardsOf = (r) => SPREAD_BY_ID[r.type]?.size || Math.max(1, Math.round(r.price / 10_000));
+// پیامِ یکسانِ «موجودی کافی نیست» در همه‌ی نقاطِ پی‌وال (شخصی‌شده با نام کاربر).
+const needBalanceText = (uid, price, cards) =>
+  L.reading.needBalance(dispName(getUser(uid)), L.reading.cardCountFa(cards), price);
+// ردیفِ ثابتِ زیرِ پیامِ کم‌موجودی: مسیر اصلی (شارژ) اول، تخفیف پشتِ دکمه‌ی دوم.
+const needBalanceRows = () => [
+  [Markup.button.callback(L.buttons.recharge, 'recharge')],
+  [Markup.button.callback(L.buttons.wantDiscount, 'want_discount')],
+];
 // کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
 // نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
@@ -1402,10 +1427,9 @@ async function finishPicking(ctx, uid, s) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   } else {
-    await ctx.reply(L.reading.paywall(spread.price));
-    await sleep(PACE_S);
-    await ctx.reply(L.reading.paywallShort(spread.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.recharge, 'recharge')],
+    // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
+    await ctx.reply(needBalanceText(uid, spread.price, spread.size), Markup.inlineKeyboard([
+      ...needBalanceRows(),
       ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
@@ -1483,9 +1507,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
-        [Markup.button.callback(L.buttons.recharge, 'recharge')],
-      ]));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows()));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1549,9 +1571,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(L.reading.paywallShort(r.price, getBalance(uid), hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
-        [Markup.button.callback(L.buttons.recharge, 'recharge')],
-      ]));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows()));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1782,6 +1802,33 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
   });
 });
 
+// «تخفیف می‌خوام» — شاخه‌ی اختیاریِ کنارِ مسیر اصلی؛ استیت را دست نمی‌زند تا فالِ رزروشده
+// و پرداختِ در جریان سالم بمانند. اولین شارژ → کدِ شخصیِ ۵۰٪ (دستی وارد می‌شود، هرگز خودکار)؛
+// بعد از آن → مسیر دعوت دوستان. هر دو پیام دکمه‌ی «افزایش موجودی» دارند تا برگشت به مسیر اصلی یک تاچ باشد.
+bot.action('want_discount', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  const first = !hasRecharged(uid);
+  track(db, uid, 'discount_requested', { first });
+  const rechargeRow = [Markup.button.callback(L.buttons.recharge, 'recharge')];
+  if (first) {
+    const code = ensureFirstDiscountCode(uid);
+    return ctx.reply(L.wallet.firstDiscountOffer(FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap, code), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        [{ text: L.buttons.copyCode, copy_text: { text: code } }],
+        rechargeRow,
+      ]).reply_markup,
+    });
+  }
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  return ctx.reply(L.wallet.inviteInsteadOfDiscount(REFERRAL_BONUS), Markup.inlineKeyboard([
+    [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
+    rechargeRow,
+  ]));
+});
+
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
@@ -1814,17 +1861,9 @@ async function setRechargeAmount(ctx, uid, amount) {
   // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
   if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
-  // هدیه‌ی اولین اقدام به شارژ: خودکار اعمال می‌شود (بدون کد)؛ کاربر مبلغ کمتر واریز می‌کند
-  // ولی original_amount کامل به کیف‌پولش اعتبار می‌گیرد (همان الگوی کد تخفیف دستی).
-  let payAmount = amount;
-  // تخفیف اولین شارژ فقط اگر نه شارژِ تأییدشده دارد و نه پرداختِ در جریانی که همین تخفیف را قبلاً گرفته
-  // (چک و نوشتنِ setPaymentDiscount سینکرون‌اند و قبل از اولین await → race بسته می‌شود)
-  if (!hasRecharged(uid) && stmts.countAutoDiscount.get(uid).c === 0) {
-    const disc = Math.min(Math.round(amount * FIRST_RECHARGE_DISCOUNT.percent / 100), FIRST_RECHARGE_DISCOUNT.cap);
-    payAmount = Math.max(0, amount - disc);
-    stmts.setPaymentDiscount.run(null, payAmount, s.paymentId);
-    await ctx.reply(L.wallet.firstDiscountApplied(amount, payAmount, FIRST_RECHARGE_DISCOUNT.percent), { parse_mode: 'Markdown' });
-  }
+  // هیچ تخفیفی خودکار اعمال نمی‌شود: کاربر یا کدش را از دکمه‌ی «تخفیف می‌خوام» گرفته و
+  // این‌جا با «🎟️ کد تخفیف دارم» واردش می‌کند، یا مبلغ کامل را می‌پردازد.
+  const payAmount = amount;
 
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
@@ -1889,6 +1928,9 @@ function validateDiscount(code, userId, amount) {
   if (!dc) return { ok: false };
   if (dc.expires_at && dc.expires_at < Date.now() / 1000) return { ok: false };
   if (dc.only_user_id && dc.only_user_id !== userId) return { ok: false };
+  // کدِ «اولین شارژ» فقط تا قبل از اولین شارژِ تأییدشده معتبر است (وگرنه کاربری که بارِ اول
+  // بدون کد پرداخت کرده بود، می‌توانست همان کد را روی شارژِ دومش خرج کند).
+  if (dc.code === firstCodeFor(userId) && hasRecharged(userId)) return { ok: false };
   const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
   if (uses >= dc.max_uses_per_user) return { ok: false };
   let disc = Math.round(amount * dc.discount_percent / 100);
@@ -2090,8 +2132,8 @@ async function offerPendingReading(ctx, uid) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(L.reading.paywallShort(r.price, balance, hasRecharged(uid) ? null : FIRST_RECHARGE_DISCOUNT), Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.recharge, 'recharge')],
+    await ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard([
+      ...needBalanceRows(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   }
