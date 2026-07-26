@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "_docs": "رجیستری مارکتینگ کانال‌ها — قرارداد در .claude/skills/telegram-channel-marketing/SKILL.md و بند «مارکتینگ کانال» CLAUDE.md ریشه. افزودن ربات جدید = یک ردیف اینجا + نگاشت توکن در .github/workflows/marketing.yml. کانال با status=pending در پست روزانه رد می‌شود؛ بعد از ساخت کانال توسط مالک و ادمین‌شدن ربات، chat را پر کن و status را active کن.",
+  "bots": {
+    "tarot": {
+      "title": "فال تاروت",
+      "botUsername": "",
+      "tokenSecret": "TAROT_BOT_TOKEN",
+      "language": "fa",
+      "productState": "live",
+      "tone": "صمیمی، گرم، رازآلود ولی مثبت و توانمندساز؛ فارسی محاوره‌ای تمیز؛ بدون خط تیره‌ی بلند",
+      "productFacts": [
+        "کارت روز رایگان (روزی یک‌بار) + استریک با جایزه",
+        "فال گذشته/حال/آینده (۳ کارت) محبوب‌ترین است",
+        "قیمت: هر کارت ۱۰ هزار تومان (۲ کارتی ۲۰k تا کلتیک ۱۰ کارتی ۱۰۰k)",
+        "فال موضوعی: عشق، کار، پول، درون، خانواده، مهاجرت + موضوع دلخواه",
+        "سؤال را می‌شود تایپ کرد یا ویس فرستاد",
+        "تخفیف ۵۰٪ اولین شارژ (تا سقف ۱۰۰ هزار تومان) پشت دکمه",
+        "دعوت دوستان: هر دعوت ۱۰ هزار تومان برای هر دو طرف",
+        "حافظه دارد: فال‌های بعدی شخصی‌تر می‌شوند"
+      ],
+      "pillars": [],
+      "channels": [
+        { "id": "main", "role": "main", "chat": "", "campaign": "PKxwQ", "status": "pending" },
+        { "id": "aux1", "role": "aux", "chat": "", "campaign": "Pkpmh", "status": "pending" },
+        { "id": "aux2", "role": "aux", "chat": "", "campaign": "UwAiA", "status": "pending" },
+        { "id": "aux3", "role": "aux", "chat": "", "campaign": "bWLVq", "status": "pending" }
+      ]
+    },
+    "tabir-khab": {
+      "title": "تعبیر خواب",
+      "botUsername": "",
+      "tokenSecret": "TABIR_TELEGRAM_BOT_TOKEN_FA",
+      "language": "fa",
+      "productState": "test",
+      "tone": "آرام، امن، همدل و کمی رازآلود (تعبیرکننده‌ی اعظم)؛ فارسی روان؛ بدون خط تیره‌ی بلند",
+      "productFacts": [
+        "اولین تعبیر خواب رایگان است (تریال)",
+        "خواب را می‌شود تایپ کرد یا ویس فرستاد",
+        "سه سبک تعبیر: مذهبی، سنتی، روانشناختی (پرسونا)",
+        "نمادیاب رایگان: معنی ۴۰۰+ نماد خواب per حرف الفبا + جستجو",
+        "اشتراک همسفری: هفته‌ای ۵۰ هزار، ماهانه ۹۸ هزار، سه‌ماهه ۱۹۸ هزار تومان",
+        "هر شب یک خواب (سقف روزانه)",
+        "پرداخت کارت‌به‌کارت با تأیید سریع"
+      ],
+      "pillars": [],
+      "channels": [
+        { "id": "main", "role": "main", "chat": "", "campaign": "j6Njc", "status": "pending" },
+        { "id": "aux1", "role": "aux", "chat": "", "campaign": "mkw75", "status": "pending" },
+        { "id": "aux2", "role": "aux", "chat": "", "campaign": "rJAYh", "status": "pending" },
+        { "id": "aux3", "role": "aux", "chat": "", "campaign": "sEtss", "status": "pending" }
+      ]
+    }
+  }
+}
