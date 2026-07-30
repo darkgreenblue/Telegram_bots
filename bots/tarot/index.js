@@ -25,6 +25,8 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb, variant } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
 import { registerSupport, supportRow } from '../../shared/support.js';
+// ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
+import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -87,6 +89,12 @@ const OPEN_TOPIC_ENABLED = true;
 // به‌جای یتیم‌کردنِ بی‌صدای فاکتور. Rollback فوری: false کن → دکمه‌های nav و گارد محو، رفتار دقیقاً مثل قبل
 // (callbackِ nav:menu ثبت‌شده می‌ماند تا دکمه‌ی کش‌شده هم بی‌خطر باشد).
 const NAV_GUARD_ENABLED = true;
+
+// 🧭 ثبتِ خودکارِ مسیرِ ریزِ کاربر (shared/journey.js): هر پیامِ خروجی (`view`) و هر اکشنِ ورودی
+// (`act`) ثبت می‌شود تا در داشبورد بشود دید کاربر دقیقاً پشتِ کدام پیام/دکمه ریخته است.
+// کاملاً fail-safe و بدونِ هیچ اثرِ رو-به-کاربر. Rollback فوری: false کن → هیچ رویدادِ ریزی
+// ثبت نمی‌شود و هیچ متدی رپ نمی‌شود (رفتار دقیقاً مثل قبل؛ دیتای ثبت‌شده بی‌ضرر می‌ماند).
+const JOURNEY_ENABLED = true;
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
@@ -727,6 +735,21 @@ let BOT_USERNAME = '';
 bot.catch(async (err, ctx) => {
   logErr(`global error [${ctx.updateType}] uid=${ctx.from?.id} state=${ctx.from ? getState(ctx.from.id) : '-'}:`, err.stack || err.message);
   try { await ctx.reply(L.errors.generic); } catch {}
+});
+
+// ثبتِ مسیرِ ریز — **باید قبل از همه‌ی هندلرها** ثبت شود (میدل‌ورِ تلگراف ترتیبی اجرا می‌شود).
+// برچسبِ دکمه‌های کیبوردِ ماندگار را می‌دهیم تا «زدنِ دکمه» از «تایپِ آزاد» تفکیک شود، و
+// نامِ نمایشیِ کاربر را می‌دهیم تا از متنِ پیام حذف شود و کلیدِ صفحه برای همه یکی بماند.
+const KB_LABELS = new Set([
+  L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.inviteMain,
+  L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
+].filter(Boolean));
+registerJourney(bot, {
+  db,
+  enabled: JOURNEY_ENABLED,
+  isAdmin,
+  isButtonLabel: (t) => KB_LABELS.has(t),
+  redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
 });
 
 /* ---------- آنبوردینگ و /start ---------- */

@@ -37,6 +37,12 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-support-sync.mjs
 
+      # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
+      # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
+      - name: Journey contract check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-journey.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test

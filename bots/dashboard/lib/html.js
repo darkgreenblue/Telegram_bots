@@ -6,6 +6,7 @@ const NAV = [
   ['/marketing', 'مارکتینگ'],
   ['/experiments', 'تست‌ها'],
   ['/funnels', 'فانل‌ها'],
+  ['/screens', 'صفحه‌ها'],
   ['/retention', 'ریتنشن'],
   ['/finance', 'مالی'],
   ['/users', 'کاربران'],
@@ -58,6 +59,18 @@ const CSS = `
     border:1px solid var(--line); border-radius:8px; padding:8px; background:#fbfcff; white-space:normal; font-weight:400; }
   .cohort-body .u { display:block; padding:3px 4px; border-bottom:1px solid #eef0f7; }
   .cohort-body .u:last-child { border-bottom:0; }
+  /* بازشویِ «قدم‌های ریزِ» یک مرحله‌ی قیف: تمام‌عرض، داخلِ همان ردیف */
+  details.drill > summary { cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; }
+  details.drill > summary::-webkit-details-marker { display:none; }
+  details.drill > summary .chev { color:var(--dim); transition:transform .15s; display:inline-block; }
+  details.drill[open] > summary .chev { transform:rotate(-90deg); }
+  .drill-body { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; white-space:normal; }
+  .drill-body table { font-size:13px; }
+  td.step { white-space:normal; max-width:520px; }
+  .step-txt { display:block; color:var(--text); }
+  .step-meta { display:block; color:var(--dim); font-size:11px; margin-top:2px; }
+  .bar { display:inline-block; height:6px; border-radius:3px; background:var(--accent); vertical-align:middle; min-width:2px; }
+  .drop { color:var(--bad); font-weight:700; }
 `;
 
 export function layout(title, active, body, { msg = '' } = {}) {
@@ -87,17 +100,21 @@ document.addEventListener('click', (e) => {
 });
 // عددهای کاربرمحور: با اولین باز شدن، لیستِ کاربرانش را همان‌جا (بدون ترک صفحه) می‌گیرد.
 // رویداد toggle بابل نمی‌شود → شنونده در فاز capture ثبت می‌شود.
+// هر <details data-frag="مسیر" data-q="query"> با اولین باز شدن، محتوایش را از سرور می‌گیرد
+// (lazy — هزینه‌ی رندرِ صفحه صفر می‌ماند). عددهای کاربرمحور و قدم‌های ریزِ قیف هر دو از همین‌جا.
 document.addEventListener('toggle', (e) => {
   const d = e.target;
-  if (!d || d.tagName !== 'DETAILS' || !d.classList.contains('cohort') || !d.open || d.dataset.loaded) return;
-  d.dataset.loaded = '1';
-  const box = d.querySelector('.cohort-body');
+  if (!d || d.tagName !== 'DETAILS' || !d.open || d.dataset.loaded) return;
+  const frag = d.dataset.frag || (d.classList.contains('cohort') ? '/cohort.fragment' : '');
+  if (!frag) return;
+  const box = d.querySelector('.cohort-body, .drill-body');
   if (!box) return;
-  box.textContent = 'در حال آوردن لیست…';
-  fetch('/cohort.fragment?' + d.dataset.q, { credentials: 'same-origin' })
+  d.dataset.loaded = '1';
+  box.textContent = 'در حال آوردن…';
+  fetch(frag + '?' + d.dataset.q, { credentials: 'same-origin' })
     .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.status))))
     .then((h) => { box.innerHTML = h; })
-    .catch(() => { box.innerHTML = '<span class="muted">لیست باز نشد؛ دوباره امتحان کن.</span>'; d.dataset.loaded = ''; });
+    .catch(() => { box.innerHTML = '<span class="muted">باز نشد؛ دوباره امتحان کن.</span>'; d.dataset.loaded = ''; });
 }, true);
 </script>
 </body></html>`;
