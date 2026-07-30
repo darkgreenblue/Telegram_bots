@@ -26,6 +26,7 @@ import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus
 import { retentionBody } from './routes/retention.js';
 import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
 import { cohortBody, cohortFragment } from './routes/cohort.js';
+import { funnelStepsFragment, screensBody } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 
@@ -60,6 +61,7 @@ const PAGES = {
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
+  '/screens': (url) => ['صفحه‌ها', screensBody(url)],
   '/discounts': () => ['کد تخفیف', discountsBody()],
   '/experiments': () => ['تست‌ها', experimentsBody()],
   '/experiments/view': (url) => ['تست‌ها', experimentViewBody(url), '/experiments'],
@@ -145,6 +147,11 @@ const server = http.createServer(async (req, res) => {
     /* ---- قطعه‌ی کشویی «کاربرانِ پشتِ این عدد» (fetch از خودِ صفحه؛ HTML خام بدون layout) ---- */
     if (path === '/cohort.fragment') {
       return send(res, 200, cohortFragment(url));
+    }
+
+    /* ---- قطعه‌ی بازشویِ «قدم‌های ریزِ» یک مرحله‌ی قیف (HTML خام، بدون layout) ---- */
+    if (path === '/funnel.steps.fragment') {
+      return send(res, 200, funnelStepsFragment(url));
     }
 
     /* ---- صفحات ---- */

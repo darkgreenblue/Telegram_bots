@@ -8,6 +8,9 @@ import { fmt, esc, nowSec } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
 // تعریفِ قیف‌ها/چنل‌ها یک‌جا در lib است تا عددِ جدول و لیستِ کاربرانِ پشتِ آن از یک منبع بیایند
 import { FUNNELS, CHANNELS, verCond } from '../lib/funnels-def.js';
+import { cohortQuery } from '../lib/cohorts.js';
+// کارتِ «کجا ریختند؟» (نقاط خروج) — از همان رویدادهای ریزِ shared/journey.js تغذیه می‌شود
+import { exitCard } from './journey.js';
 
 export { FUNNELS }; // سازگاری: overview.js واژه‌نامه‌ی رویدادها را از همین‌جا می‌خواند
 
@@ -78,12 +81,18 @@ function paymentSteps(botKey, since) {
   return [...merged.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-function funnelTable(botKey, steps, since, ver) {
+/* جدولِ قیف — هر مرحله علاوه بر عددها، یک ردیفِ بازشو دارد که «قدم‌های ریزِ» همان مرحله را
+   (پیام‌ها و دکمه‌هایی که کاربر بینِ این مرحله و مرحله‌ی بعد دید/زد) از سرور می‌گیرد.
+   drill=false برای قیف‌هایی که مراحلشان موازی‌اند (سرگرمی‌های رایگان) و «بین دو مرحله» معنا ندارد. */
+function funnelTable(botKey, steps, since, ver, { drill = true } = {}) {
   const data = steps.map(([ev, label]) => [label, stepCounts(botKey, ev, since, ver), ev]);
   const base = data[0]?.[1] || CHANNELS.map(() => 0);
-  const body = data.map(([label, counts, ev], idx) => {
+  const cols = CHANNELS.length + 1;
+  if (!data.length) return `<p class="muted">رویدادی ثبت نشده.</p>`;
+
+  const rowsHtml = data.map(([label, counts, ev], idx) => {
     const prev = idx > 0 ? data[idx - 1][1] : null;
-    return [
+    const cells = [
       esc(label),
       // هر عدد = کاربرانِ همان مرحله در همان چنل → با کلیک، لیستشان همان‌جا باز می‌شود
       ...counts.map((c, i) => {
@@ -93,8 +102,22 @@ function funnelTable(botKey, steps, since, ver) {
         return cohortCount(c, { k: 'funnel', bot: botKey, ev, ch: String(i), since: String(since), ver }, { suffix: ` ${meta}` });
       }),
     ];
-  });
-  return table(['مرحله', ...CHANNELS.map(([l]) => l)], body, 'رویدادی ثبت نشده.');
+    let html = `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
+    if (drill) {
+      const next = data[idx + 1]?.[2] || '';
+      const q = cohortQuery({ bot: botKey, ev, next, since: String(since), ch: '0', ver });
+      const to = next ? `«${data[idx + 1][0]}»` : 'پایانِ مسیر';
+      html += `<tr><td colspan="${cols}" style="padding-top:0">
+        <details class="drill" data-frag="/funnel.steps.fragment" data-q="${esc(q)}">
+          <summary><span class="chev">◀</span> <span class="muted">قدم‌های ریزِ بینِ «${esc(label)}» و ${esc(to)}</span></summary>
+          <div class="drill-body muted">…</div>
+        </details></td></tr>`;
+    }
+    return html;
+  }).join('');
+
+  return `<table><thead><tr>${['مرحله', ...CHANNELS.map(([l]) => l)].map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+<tbody>${rowsHtml}</tbody></table>`;
 }
 
 export function funnelsBody(url) {
@@ -120,9 +143,12 @@ export function funnelsBody(url) {
   let out = filter;
   for (const [botKey, f] of Object.entries(FUNNELS)) {
     if (!instancesOf(botKey).length) continue;
-    out += `<div class="card"><h2>${esc(f.title)} — قیف اصلی</h2>${funnelTable(botKey, f.steps, since, ver)}</div>`;
+    out += `<div class="card"><h2>${esc(f.title)} — قیف اصلی</h2>${funnelTable(botKey, f.steps, since, ver)}
+      <p class="muted" style="margin-top:8px">زیرِ هر مرحله، «قدم‌های ریز» را باز کن تا ببینی کاربر بینِ آن مرحله و
+        مرحله‌ی بعد دقیقاً چه پیام‌هایی دید و چه دکمه‌هایی زد و کجا ریخت.</p></div>`;
+    out += exitCard(botKey, { since, ch: 0, ver });
     if (f.free) {
-      out += `<div class="card"><h2>${esc(f.title)} — قیف سرگرمی‌های رایگان</h2>${funnelTable(botKey, f.free, since, ver)}
+      out += `<div class="card"><h2>${esc(f.title)} — قیف سرگرمی‌های رایگان</h2>${funnelTable(botKey, f.free, since, ver, { drill: false })}
       <p class="muted" style="margin-top:8px">آیتم‌های میانی موازی‌اند (کاربر یکی را انتخاب می‌کند، نه پشت‌سرهم)؛ این جدول نشان می‌دهد کدام قلاب رایگان بیشتر استفاده و چقدر به پرداخت ختم می‌شود.</p></div>`;
     }
     if (f.payment) {

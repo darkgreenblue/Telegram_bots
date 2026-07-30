@@ -13,6 +13,8 @@ import {
   userPk, userNameCol, moneyOf, unixOf, userCreatedExpr,
 } from './bots.js';
 import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
+// شرط‌های مسیرِ ریز از همان‌جایی می‌آیند که عددها ساخته می‌شوند (تک‌منبع؛ ضدِ واگراییِ عدد و لیست)
+import { KEY_EXPR, notAdmin } from './journey.js';
 import { weekIdx, weekExpr, weekLabel, nowSec } from './util.js';
 
 // سقفِ لیست: داشبورد ابزارِ تماس‌گرفتن است نه export انبوه (برای انبوه، تب «کاربران» + CSV هست).
@@ -222,6 +224,57 @@ export function resolveCohort(url) {
         params: c === 'campaign' ? [val] : [],
       }));
       return done(`چنلِ ورود: ${CHAN_CONDS[c].label}${c === 'campaign' ? ` (${val})` : ''}`, users);
+    }
+
+    /* قدمِ ریزِ یک مرحله‌ی قیف: کاربرانی که این پیام را دیدند یا این دکمه را زدند، در همان
+       پنجره‌ی بینِ دو milestone. شرطِ پنجره **عیناً** همان چیزی است که microSteps عدد را با آن
+       ساخته (lib/journey.js) تا عدد و لیست هرگز از هم نپاشند. */
+    case 'micro': {
+      const ev = url.searchParams.get('ev') === 'act' ? 'act' : 'view';
+      const key = url.searchParams.get('key') || '';
+      const stage = url.searchParams.get('stage') || '';
+      const next = url.searchParams.get('next') || '';
+      if (!stage) return { error: 'مرحله نامعتبر است.' };
+      const ci = Math.min(CHANNELS.length - 1, Math.max(0, intParam(url, 'ch', 0)));
+      const v = verCond(url.searchParams.get('ver') || '');
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `WITH st AS (SELECT user_id, MIN(id) sid FROM events WHERE event=? AND created_at>=? GROUP BY user_id),
+                     nx AS (SELECT user_id, MIN(id) nid FROM events WHERE event=? AND created_at>=? GROUP BY user_id)
+                SELECT DISTINCT ${sel(pk, nameCol)} FROM events e
+                JOIN st ON st.user_id = e.user_id
+                LEFT JOIN nx ON nx.user_id = e.user_id
+                JOIN users u ON u.${pk} = e.user_id
+                WHERE e.event = ? AND ${KEY_EXPR('e')} = ?
+                  AND e.id > st.sid AND (nx.nid IS NULL OR e.id < nx.nid)
+                  AND e.created_at >= ? AND ${CHANNELS[ci][1]} AND ${v.cond} AND ${notAdmin('e')}
+                ORDER BY u.${pk}${lim}`,
+          params: [stage, since, next, since, ev, key, since, ...v.params],
+        };
+      });
+      return done(`قدمِ ریز «${key}» در مرحله‌ی «${stage}» · ${CHANNELS[ci][0]}`, users);
+    }
+
+    /* نقطه‌ی خروج: کاربرانی که آخرین رویدادشان همین بوده و دیگر برنگشته‌اند */
+    case 'exit': {
+      const ev = url.searchParams.get('ev') || '';
+      const key = url.searchParams.get('key') || '';
+      const idle = intParam(url, 'idle', 0);
+      if (!ev || !idle) return { error: 'نقطه‌ی خروج نامعتبر است.' };
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'events')) return null;
+        return {
+          sql: `WITH last AS (SELECT user_id, MAX(id) mid FROM events WHERE created_at>=? GROUP BY user_id)
+                SELECT DISTINCT ${sel(pk, nameCol)} FROM events e
+                JOIN last ON last.mid = e.id
+                JOIN users u ON u.${pk} = e.user_id
+                WHERE e.event = ? AND ${KEY_EXPR('e')} = ? AND e.created_at < ? AND ${notAdmin('e')}
+                ORDER BY u.${pk}${lim}`,
+          params: [since, ev, key, idle],
+        };
+      });
+      return done(`کسانی که آخرین کارشان «${key || ev}» بود و دیگر برنگشتند`, users);
     }
 
     /* قیفِ یک کمپین: کاربر جدید / به ارزش رسید / پی‌وال دید / خریدار */

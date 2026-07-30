@@ -4,6 +4,7 @@ import { instances, getInstance, withDb, hasTable, rows, userPk, userNameCol, mo
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
 import { table, statusBadge, stat } from '../lib/html.js';
+import { groupSessions } from '../lib/journey.js';
 
 // created_at ممکن است unix یا ISO باشد → همیشه به رشته‌ی قابل‌نمایش تبدیل شود
 const showTime = (v) => (typeof v === 'string' ? v : tehranDateTime(v));
@@ -72,9 +73,26 @@ function profileCard(inst, u) {
 // تایم‌لاین: merge معکوس رویدادها + پرداخت‌ها + رکوردهای اختصاصی هر ربات (ts نرمال به unix)
 function buildTimeline(db, botKey, uid) {
   const items = [];
+  // کاتالوگِ صفحه‌ها: کلیدِ هشیِ رویدادهای view را به متنِ واقعیِ پیام تبدیل می‌کند
+  const screens = new Map();
+  if (hasTable(db, 'screens')) {
+    for (const s of rows(db, 'SELECT k, label, sample FROM screens')) screens.set(s.k, s);
+  }
   if (hasTable(db, 'events')) {
-    for (const e of rows(db, 'SELECT created_at ts, event, props FROM events WHERE user_id=? ORDER BY id DESC LIMIT 300', [uid])) {
+    for (const e of rows(db, 'SELECT created_at ts, event, props FROM events WHERE user_id=? ORDER BY id DESC LIMIT 400', [uid])) {
       const p = parseJsonSafe(e.props);
+      // رویدادهای ریزِ مسیر (shared/journey.js) خواناتر نمایش داده می‌شوند: خودِ پیام / خودِ دکمه
+      if (e.event === 'view') {
+        const s = screens.get(p.k);
+        const txt = p.k === 'content' ? `متنِ محتوا (${fmt(p.n || 0)} کاراکتر)`
+          : (s?.label || (s?.sample || '').replace(/\s+/g, ' ').trim().slice(0, 110) || `صفحه ${p.k}`);
+        items.push({ ts: e.ts, icon: '💬', label: txt, detail: 'ربات نشان داد', micro: true });
+        continue;
+      }
+      if (e.event === 'act') {
+        items.push({ ts: e.ts, icon: '👆', label: p.d || p.a, detail: 'کاربر انجام داد', micro: true });
+        continue;
+      }
       const detail = Object.entries(p).map(([k, v]) => `${k}=${v}`).join(' ');
       items.push({ ts: e.ts, icon: '⚡', label: e.event, detail });
     }
@@ -114,7 +132,7 @@ function buildTimeline(db, botKey, uid) {
     }
   }
   items.sort((a, b) => b.ts - a.ts);
-  return items.slice(0, 300);
+  return items.slice(0, 400).reverse(); // صعودی، تا سشن‌بندی و «بازپخشِ» مسیر درست خوانده شود
 }
 
 export function supportUserBody(url) {
@@ -124,20 +142,28 @@ export function supportUserBody(url) {
   return withDb(inst.file, (db) => {
     const u = db.prepare(`SELECT * FROM users WHERE ${userPk(inst.bot)}=?`).get(uid);
     if (!u) return `<div class="card"><p class="muted">کاربر در این ربات نیست.</p></div>`;
-    const tl = buildTimeline(db, inst.bot, uid);
-    const tlHtml = table(
-      ['زمان', '', 'چه شد', 'جزئیات'],
-      tl.map(i => [
-        tehranDateTime(i.ts), i.icon,
-        esc(i.label) + (i.status ? ' ' + statusBadge(i.status) : ''),
-        `<span class="muted">${esc(i.detail || '')}</span>`,
-      ]),
-      'هنوز فعالیتی ثبت نشده.'
-    );
+    // سشن = فعالیت‌های پشت‌سرهم با فاصله‌ی کمتر از نیم‌ساعت. جدیدترین سشن اول، ولی **داخلِ هر
+    // سشن به ترتیبِ وقوع** — یعنی دقیقاً همان چیزی که کاربر تجربه کرده، مثل بازپخش.
+    const sessions = groupSessions(buildTimeline(db, inst.bot, uid));
+    const tlHtml = sessions.length ? sessions.map((s, i) => {
+      const mins = Math.max(0, Math.round((s.end - s.start) / 60));
+      return `<h3 style="margin:14px 0 6px;font-size:13px">
+          سشن ${fmt(sessions.length - i)} · ${esc(tehranDateTime(s.start))}
+          <span class="muted">· ${fmt(mins)} دقیقه · ${fmt(s.items.length)} قدم</span></h3>`
+        + table(['زمان', '', 'چه شد', 'جزئیات'], s.items.map(it => [
+          tehranDateTime(it.ts), it.icon,
+          (it.micro ? '<span class="muted">' : '') + esc(it.label) + (it.micro ? '</span>' : '')
+            + (it.status ? ' ' + statusBadge(it.status) : ''),
+          `<span class="muted">${esc(it.detail || '')}</span>`,
+        ]));
+    }).join('') : '<p class="muted">هنوز فعالیتی ثبت نشده.</p>';
+
     const others = instances().filter(x => x.id !== inst.id)
       .map(x => `<a href="/support/user?inst=${encodeURIComponent(x.id)}&id=${uid}">${esc(x.title)}</a>`).join(' · ');
     return profileCard(inst, u)
-      + `<div class="card"><h2>🕓 تایم‌لاین (جدید → قدیم)</h2>${tlHtml}</div>`
+      + `<div class="card"><h2>🕓 سشن‌ها و بازپخشِ مسیر</h2>
+         <p class="muted">هر سشن = فعالیتِ پیوسته با فاصله‌ی کمتر از ۳۰ دقیقه. ردیف‌های کم‌رنگ، قدم‌های ریز
+           (پیامی که ربات نشان داد یا دکمه‌ای که کاربر زد) هستند.</p>${tlHtml}</div>`
       + `<div class="card"><p class="muted">همین کاربر در ربات‌های دیگر: ${others}</p></div>`;
   }, `<div class="card"><p class="muted">دیتابیس در دسترس نیست.</p></div>`);
 }
