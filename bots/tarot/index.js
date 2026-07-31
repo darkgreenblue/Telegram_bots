@@ -29,6 +29,7 @@ import { registerSupport, supportRow } from '../../shared/support.js';
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
+import { normalizeVerdict, decisiveMode } from './verdict.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -91,7 +92,9 @@ const TEST_PHASE = false;
 //        حداقلِ مبلغ شارژ، بعد از باگی که یک «۸» یک کدِ ۱۰۰٬۰۰۰ تومانی را سوزاند.
 // 2.3.0: پرداختِ کمتر از فاکتور دیگر رد نمی‌شود؛ فاکتور به مبلغِ واقعاً پرداخت‌شده اصلاح
 //        می‌شود، کاربر دقیقاً همان‌قدر اعتبار می‌گیرد و دلیلِ اصلاح لاگ می‌شود.
-const PRODUCT_VERSION = '2.3.0';
+// 2.4.0: فال‌های تصمیم‌محور (آری یا نه، دوراهی) با یک «جوابِ قاطع + نشونه» تمام می‌شوند،
+//        از فیدبکِ کاربرِ واقعی که گفت جوابِ روشنی که دنبالش بود را نگرفت.
+const PRODUCT_VERSION = '2.4.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -116,6 +119,13 @@ const NAV_GUARD_ENABLED = true;
 // کاملاً fail-safe و بدونِ هیچ اثرِ رو-به-کاربر. Rollback فوری: false کن → هیچ رویدادِ ریزی
 // ثبت نمی‌شود و هیچ متدی رپ نمی‌شود (رفتار دقیقاً مثل قبل؛ دیتای ثبت‌شده بی‌ضرر می‌ماند).
 const JOURNEY_ENABLED = true;
+
+// ⚖️ جوابِ قاطع برای فال‌های تصمیم‌محور (spreads.js → decisive؛ فعلاً آری/نه و دوراهی).
+// از فیدبکِ کاربرِ واقعی: «اون جوابی که می‌خواستم رو آخر نفهمیدم و نگرفتم... اگه توش
+// نشونه‌ای بتونه ببینه توی اون جوابه، می‌تونه خودشو آروم کنه.» منطقِ خالص: verdict.js
+// Rollback فوری: false کن → پرامپت و پیامِ جواب کاملاً محو، خوانش دقیقاً مثل قبل
+// (فال‌هایی که verdict شان در DB ذخیره شده بی‌ضرر می‌مانند و فقط نمایش داده نمی‌شوند).
+const DECISIVE_VERDICT_ENABLED = true;
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
@@ -799,20 +809,35 @@ async function callReadingLLM(readingId) {
   const spread = SPREAD_BY_ID[r.type];
   const cards = JSON.parse(r.cards_json);
   const ctx = buildReadingCtx(user, spread, r.question, cards, r.focus_area);
-  const system = L.prompts.readerSystem(spread);
+  // پرچمِ خاموش باید پرامپت را هم دقیقاً به حالتِ قبل برگرداند، نه فقط پیام را پنهان کند
+  // (وگرنه رول‌بک نصفه است: هزینه‌ی توکنِ اضافه می‌ماند بدونِ هیچ فایده‌ای).
+  const wantVerdict = DECISIVE_VERDICT_ENABLED ? decisiveMode(spread) : null;
+  const system = L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
   const userMsg = L.prompts.readingContext(ctx);
-  // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود
-  let parsed = null;
+  // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
+  // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
+  // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
+  // خوانشِ سالمِ آخر پذیرفته می‌شود و فقط بخشِ جواب نمایش داده نمی‌شود. وگرنه یک
+  // «شاید»ِ مدل، کاربر را به مسیر ریفاند می‌انداخت که خیلی بدتر از نداشتنِ آن بخش است.
+  let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
+  let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
   const res = await orChatResilient(system, userMsg, {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
-      if (obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative) { parsed = obj; return true; }
-      return false;
+      const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
+      if (!usable) return false;
+      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict)) { fallback = obj; return false; }
+      parsed = obj;
+      return true;
     },
   });
-  if (!res || !parsed) { logErr(`reading#${readingId} همه‌ی تلاش‌ها شکست خورد (REFUND path)`); return null; }
-  log(`reading#${readingId} آماده شد با ${res.model}`);
+  if (!parsed && fallback) {
+    logErr(`reading#${readingId} جوابِ قاطع بعد از همه‌ی تلاش‌ها مبهم ماند — خوانش بدونِ بخشِ جواب تحویل می‌شود`);
+    parsed = fallback;
+  }
+  if (!parsed) { logErr(`reading#${readingId} همه‌ی تلاش‌ها شکست خورد (REFUND path)`); return null; }
+  log(`reading#${readingId} آماده شد با ${res?.model || 'fallback'}`);
   stmts.setReadingLlm.run(JSON.stringify(parsed), String(parsed.summary || '').slice(0, 300), readingId);
   return parsed;
 }
@@ -1942,6 +1967,28 @@ async function ensureMenu(ctx, uid) {
     await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid)).catch(() => {});
   } catch (e) { logErr('ensureMenu:', e.message); }
 }
+// پیامِ «جوابِ قاطع» برای فال‌های تصمیم‌محور. کاملاً fail-safe: هر مشکلی پیش بیاید
+// (پرچم خاموش، فالِ غیرتصمیمی، جوابِ مبهمِ مدل، خطای تلگرام) خوانش بدونِ این بخش و
+// دقیقاً مثلِ قبل ادامه می‌دهد. متنِ داینامیک از LLM می‌آید → esc() + HTML.
+async function sendVerdict(ctx, llm, spread) {
+  try {
+    if (!DECISIVE_VERDICT_ENABLED) return;
+    const mode = decisiveMode(spread);
+    if (!mode) return;
+    const v = normalizeVerdict(llm?.verdict, mode);
+    if (!v) return;
+    await sleep(PACE_M);
+    await typing(ctx, PACE_S);
+    const body = L.reading.verdictBody({
+      answer: esc(v.answer),
+      sign: esc(v.sign),
+      because: v.because ? esc(v.because) : '',
+      nuance: v.nuance ? esc(v.nuance) : '',
+    });
+    await ctx.reply(`${L.reading.verdictHeader}\n\n${body}`, { parse_mode: 'HTML' });
+  } catch (e) { logErr('verdict:', e.message); }
+}
+
 async function finishReading(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (!r || r.status !== 'started') return;
@@ -1951,6 +1998,10 @@ async function finishReading(ctx, uid, readingId) {
   // روایت پیوندی
   await typing(ctx, PACE_M);
   await replyLong(ctx, `🧵 ${llm.narrative}`);
+
+  // جوابِ قاطعِ فال‌های تصمیم‌محور — بعد از روایت (روایت پرونده را می‌سازد، این حکم را
+  // می‌دهد) و قبل از قدم‌های عملی. پیامِ جدا تا گم نشود؛ همان چیزی که کاربر گفت کم بود.
+  await sendVerdict(ctx, llm, SPREAD_BY_ID[r.type]);
 
   // سه قدم عملی + توانمندسازی
   await sleep(PACE_M);
