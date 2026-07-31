@@ -76,7 +76,10 @@ const TEST_PHASE = false;
 // 1.6.2: کدِ تخفیفِ اولین شارژ دیگر با یک فاکتورِ رهاشده برای همیشه قفل نمی‌شود (فاکتورِ
 //        pending بدونِ رسید عملاً غیرقابل‌دسترس است و نباید کد را نگه دارد)، پیامِ «قبلاً
 //        استفاده شده» از «نامعتبر» جدا شد، و پیشنهادِ کد با پذیرشِ کد هم‌شرط شد.
-const PRODUCT_VERSION = '1.6.2';
+// 1.7.0: دکمه‌ی «🎁 تخفیف می‌خوام» در پی‌وال فقط برای کسی که واقعاً تخفیفِ اولین شارژ
+//        دارد نشان داده می‌شود، و مسیرِ «دعوت دوستان به‌جای تخفیف» حذف شد (وسطِ فالِ
+//        رزروشده کاربر را از خریدش منحرف می‌کرد). تک‌منبعِ شرط: firstDiscountAvailable().
+const PRODUCT_VERSION = '1.7.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -385,6 +388,16 @@ function ensureFirstDiscountCode(uid) {
   } catch (e) { logErr('first discount code', e.message); }
   return code;
 }
+// تک‌منبعِ حقیقتِ «این کاربر واقعاً تخفیفِ اولین شارژ دارد؟» — هم دکمه‌ی پی‌وال و هم
+// هندلرِ want_discount از همین می‌پرسند، تا هرگز دکمه‌ای دیده نشود که پشتش تخفیفی نیست.
+function firstDiscountAvailable(uid) {
+  if (hasRecharged(uid)) return false;
+  const dc = stmts.getDiscountCode.get(firstCodeFor(uid));
+  if (!dc) return true; // کد هنوز ساخته نشده = دست‌نخورده
+  const used = stmts.getUserDiscountUses.get(dc.id, uid).c
+    + stmts.countPendingDiscount.get(dc.id, uid, 0).c;
+  return used < dc.max_uses_per_user;
+}
 
 // تعداد کارت‌های یک خوانش (برای متنِ «هزینه‌ی این سه تا کارت»): از خودِ چیدمان،
 // و اگر چیدمان پیدا نشد از قیمت (قانونِ ثابتِ هر کارت ۱۰٬۰۰۰ تومان).
@@ -393,10 +406,14 @@ const cardsOf = (r) => SPREAD_BY_ID[r.type]?.size || Math.max(1, Math.round(r.pr
 const needBalanceText = (uid, price, cards) =>
   L.reading.needBalance(dispName(getUser(uid)), L.reading.cardCountFa(cards), price);
 // ردیفِ ثابتِ زیرِ پیامِ کم‌موجودی: مسیر اصلی (شارژ) اول، تخفیف پشتِ دکمه‌ی دوم.
-const needBalanceRows = () => [
-  [Markup.button.callback(L.buttons.recharge, 'recharge')],
-  [Markup.button.callback(L.buttons.wantDiscount, 'want_discount')],
-];
+// دکمه‌ی «🎁 تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین شارژ دارد. کاربری که
+// قبلاً شارژ کرده یا تخفیفش خرج شده، این دکمه را اصلاً نمی‌بیند: تا قبل از این، زدنش
+// او را به دعوتِ دوستان می‌برد و وسطِ فالِ رزروشده، مسیرِ کاربر را کاملاً منحرف می‌کرد.
+const needBalanceRows = (uid) => {
+  const rows = [[Markup.button.callback(L.buttons.recharge, 'recharge')]];
+  if (firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, 'want_discount')]);
+  return rows;
+};
 // کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
 // نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
@@ -1487,7 +1504,7 @@ async function finishPicking(ctx, uid, s) {
   } else {
     // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
     await ctx.reply(needBalanceText(uid, spread.price, spread.size), Markup.inlineKeyboard([
-      ...needBalanceRows(),
+      ...needBalanceRows(uid),
       ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
@@ -1565,7 +1582,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows()));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid)));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1629,7 +1646,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows()));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid)));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1867,34 +1884,22 @@ bot.action('want_discount', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
-  const first = !hasRecharged(uid);
-  track(db, uid, 'discount_requested', { first });
+  const avail = firstDiscountAvailable(uid);
+  track(db, uid, 'discount_requested', { first: !hasRecharged(uid), avail });
   const rechargeRow = [Markup.button.callback(L.buttons.recharge, 'recharge')];
-  if (first) {
-    const code = ensureFirstDiscountCode(uid);
-    // شرطِ «پیشنهاد دادن» باید با شرطِ «پذیرفتن» یکی باشد: اگر کد همین حالا روی یک فاکتورِ
-    // در انتظارِ تأیید نشسته، دوباره پیشنهادش نده — وگرنه کاربر کدی می‌گیرد که خودِ ربات
-    // چند ثانیه بعد ردش می‌کند (دقیقاً همان تناقضی که این باگ را ساخت).
-    const dc = stmts.getDiscountCode.get(code);
-    const held = dc
-      ? stmts.getUserDiscountUses.get(dc.id, uid).c + stmts.countPendingDiscount.get(dc.id, uid, 0).c
-      : 0;
-    if (dc && held >= dc.max_uses_per_user) {
-      return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([rechargeRow]));
-    }
-    return ctx.reply(L.wallet.firstDiscountOffer(FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap, code), {
-      parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([
-        [{ text: L.buttons.copyCode, copy_text: { text: code } }],
-        rechargeRow,
-      ]).reply_markup,
-    });
-  }
-  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  return ctx.reply(L.wallet.inviteInsteadOfDiscount(REFERRAL_BONUS), Markup.inlineKeyboard([
-    [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
-    rechargeRow,
-  ]));
+  // دکمه دیگر فقط به کسی نشان داده می‌شود که تخفیف دارد (needBalanceRows)، پس این شاخه
+  // فقط برای دکمه‌ی کهنه‌ی داخلِ چتِ کاربران است (قرارداد «callbackهای قدیمی نمی‌میرند»).
+  // مسیرِ قدیمیِ «دعوت دوستان به‌جای تخفیف» عمداً حذف شد: وسطِ فالِ رزروشده، کاربری که
+  // دنبالِ تخفیف بود را به یک مسیرِ کاملاً دیگر می‌برد و از خریدش دور می‌کرد.
+  if (!avail) return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([rechargeRow]));
+  const code = ensureFirstDiscountCode(uid);
+  return ctx.reply(L.wallet.firstDiscountOffer(FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap, code), {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([
+      [{ text: L.buttons.copyCode, copy_text: { text: code } }],
+      rechargeRow,
+    ]).reply_markup,
+  });
 });
 
 bot.action('recharge', async (ctx) => {
@@ -2219,7 +2224,7 @@ async function offerPendingReading(ctx, uid) {
     ]));
   } else {
     await ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard([
-      ...needBalanceRows(),
+      ...needBalanceRows(uid),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   }
