@@ -67,9 +67,24 @@ jobs:
             # در غیر این صورت .env موجود روی سرور دست‌نخورده می‌ماند (عدم‌شکستن رباتِ فعال).
             # اگر محتوای .env عوض شود، همان ربات برای ری‌لود علامت می‌خورد (ENV_CHANGED).
             ENV_CHANGED=""
-            write_env() { # $1=bot ، $2=محتوای کامل .env
+            # ربات‌هایی که ADMIN_IDS می‌گیرند — **تک‌منبعِ حقیقت**. هم write_env و هم بلوکِ
+            # upsertِ پایین از همین لیست می‌خوانند. اگر دو جا جدا نگه داشته شوند واگرا می‌شوند و
+            # نتیجه‌اش پینگ‌پنگِ همیشگی است: write_env فایلِ بدونِ ADMIN_IDS می‌سازد → cmp فرق
+            # می‌کند → ENV_CHANGED → upsert دوباره ADMIN_IDS را می‌گذارد → ENV_CHANGED. یعنی
+            # **هر دیپلوی، حتی وقتی هیچ کدِ رباتی عوض نشده، ربات‌های زنده را ری‌استارت می‌کند**
+            # (باگِ واقعی؛ در لاگ به‌شکلِ «دلیل: env» روی PRِ صرفاً مستنداتی دیده شد).
+            ADMIN_BOTS=" voice2text tarot "
+            write_env() { # $1=bot ، $2=محتوای کامل .env (بدونِ ADMIN_IDS — خودش اضافه می‌کند)
               mkdir -p "bots/$1"
-              ( umask 077; printf '%s\n' "$2" > "bots/$1/.env.new" )
+              content="$2"
+              case "$ADMIN_BOTS" in
+                *" $1 "*)
+                  if [ -n "$OWNER_TELEGRAM_ID" ]; then
+                    content="$(printf '%s\nADMIN_IDS=%s' "$content" "$OWNER_TELEGRAM_ID")"
+                  fi
+                  ;;
+              esac
+              ( umask 077; printf '%s\n' "$content" > "bots/$1/.env.new" )
               if [ ! -f "bots/$1/.env" ] || ! cmp -s "bots/$1/.env.new" "bots/$1/.env"; then
                 mv "bots/$1/.env.new" "bots/$1/.env"
                 ENV_CHANGED="$ENV_CHANGED $1"
@@ -99,8 +114,10 @@ jobs:
             # مستقل از ست‌بودن توکنِ ربات در Secrets اجرا می‌شود؛ voice2text ممکن است .env دستیِ سرور
             # داشته باشد که write_env دست نمی‌زند. فقط خطِ ADMIN_IDS را upsert می‌کند (توکن/کلید/نوشن
             # دست نمی‌خورد → قانون «voice2text نشکند») و اگر عوض شد همان ربات را برای ری‌لود علامت می‌زند.
+            # برای رباتی که write_env نوشته این حلقه no-op است (ADMIN_IDS از قبل درست است) — همان
+            # چیزی که جلوی ری‌استارتِ بی‌دلیل در هر دیپلوی را می‌گیرد. لیست از $ADMIN_BOTS می‌آید.
             if [ -n "$OWNER_TELEGRAM_ID" ]; then
-              for b in voice2text tarot; do
+              for b in $ADMIN_BOTS; do
                 envf="bots/$b/.env"
                 [ -f "$envf" ] || continue
                 cur=$(sed -n 's/^ADMIN_IDS=//p' "$envf" | head -1)

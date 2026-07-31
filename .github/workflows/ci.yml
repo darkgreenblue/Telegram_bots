@@ -44,6 +44,12 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-undefined.mjs
 
+      # دیپلوی باید idempotent باشد: بدونِ تغییرِ واقعی هیچ رباتی ری‌استارت نشود (بند ۳ و ۲ج/۲).
+      # قطعه‌ی shellِ ساختِ .env را از خودِ deploy.yml می‌خواند و دو دیپلویِ پیاپی را شبیه‌سازی می‌کند.
+      - name: Deploy idempotency check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-deploy-env.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
