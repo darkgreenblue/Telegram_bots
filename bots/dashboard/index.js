@@ -19,7 +19,7 @@ import { audit } from './lib/platform.js';
 import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody } from './routes/support.js';
-import { financeBody, financeCsv, financeAction } from './routes/finance.js';
+import { financeBody, financeCsv, financeAction, costsBody } from './routes/finance.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
@@ -60,6 +60,7 @@ const PAGES = {
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
+  '/costs': (url) => ['هزینه‌ها', costsBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
   '/screens': (url) => ['صفحه‌ها', screensBody(url)],
   '/discounts': () => ['کد تخفیف', discountsBody()],

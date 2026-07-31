@@ -31,7 +31,6 @@ const TEXT = [
 const KEYBOARD = {
   inline_keyboard: [
     [{ text: '🔮 فال گذشته، حال، آینده (محبوب‌ترین)', callback_data: 'spread:three' }],
-    [{ text: '🎴 کارت روز (رایگان)', callback_data: 'daily_go' }],
     [{ text: '🗂 مشاهده‌ی همه‌ی فال‌ها', callback_data: 'onboard_allspreads' }],
   ],
 };
@@ -64,11 +63,11 @@ console.log(`👥 واجد شرط: ${targets.length} کاربر`);
 
 const claim = db.prepare('UPDATE users SET welcome_bonus_at=unixepoch() WHERE telegram_id=? AND welcome_bonus_at IS NULL');
 const credit = db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id=?');
-const event = db.prepare("INSERT INTO events (user_id, event, props) VALUES (?, 'welcome_bonus', ?)");
+const event = db.prepare("INSERT INTO events (user_id, event, props) VALUES (?, 'credit_granted', ?)");
 const grant = db.transaction((uid) => {
   if (!claim.run(uid).changes) return false;   // گاردِ write-once
   credit.run(AMOUNT, uid);
-  event.run(uid, JSON.stringify({ amount: AMOUNT, backfill: 1 }));
+  event.run(uid, JSON.stringify({ amount: AMOUNT, kind: 'welcome', backfill: 1 }));
   return true;
 });
 

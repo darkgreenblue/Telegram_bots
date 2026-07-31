@@ -863,7 +863,7 @@ function grantWelcomeBonus(uid) {
     const done = stmts.claimWelcomeBonus.run(uid).changes;
     if (!done) return false;
     stmts.credit.run(WELCOME_BONUS, uid);
-    track(db, uid, 'welcome_bonus', { amount: WELCOME_BONUS });
+    track(db, uid, 'credit_granted', { amount: WELCOME_BONUS, kind: 'welcome' });
     return true;
   } catch (e) { logErr('welcome bonus:', e.message); return false; }
 }
@@ -1035,6 +1035,7 @@ async function dailyCard(ctx) {
     await ctx.reply(L.daily.streak(streak));
     if (streak % STREAK_EVERY === 0) {
       stmts.credit.run(STREAK_REWARD, uid);
+      track(db, uid, 'credit_granted', { amount: STREAK_REWARD, kind: 'streak' });
       await ctx.reply(L.daily.streakReward(STREAK_REWARD));
     }
   }
@@ -1888,6 +1889,8 @@ async function finishReading(ctx, uid, readingId) {
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(REFERRAL_BONUS, ref.referrer_id);
       stmts.credit.run(REFERRAL_BONUS, uid);
+      track(db, ref.referrer_id, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
+      track(db, uid, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
       await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
       const referee = getUser(uid);
       await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), REFERRAL_BONUS)).catch(() => {});
