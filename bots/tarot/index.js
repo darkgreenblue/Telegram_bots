@@ -89,7 +89,9 @@ const TEST_PHASE = false;
 //        که کاربر تازه گرفته پیشنهاد نمی‌دهد) + کیبوردِ منو دیگر گم نمی‌شود.
 // 2.2.0: صفِ اقدامِ پشتیبانی (تأییدِ دستیِ پرداختِ ردشده، شارژ/کسرِ دستی، بازکردنِ فال) +
 //        حداقلِ مبلغ شارژ، بعد از باگی که یک «۸» یک کدِ ۱۰۰٬۰۰۰ تومانی را سوزاند.
-const PRODUCT_VERSION = '2.2.0';
+// 2.3.0: پرداختِ کمتر از فاکتور دیگر رد نمی‌شود؛ فاکتور به مبلغِ واقعاً پرداخت‌شده اصلاح
+//        می‌شود، کاربر دقیقاً همان‌قدر اعتبار می‌گیرد و دلیلِ اصلاح لاگ می‌شود.
+const PRODUCT_VERSION = '2.3.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -252,6 +254,8 @@ db.exec(`
     PRIMARY KEY (card_key, reversed, focus)
   );
 `);
+// migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
+try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.2.0): صفِ اقدامِ پشتیبانی فراتر از تأیید/ردِ رسید (شارژ دستی، بازکردنِ فال).
 // payment_id در اقدام‌های غیرپرداختی صفر می‌ماند (ستون NOT NULL است و تغییرش غیرافزایشی بود).
 try { db.prepare('ALTER TABLE admin_actions ADD COLUMN user_id INTEGER').run(); } catch {}
@@ -329,6 +333,10 @@ const stmts = {
      LIMIT 200`),
   setDailyReminded: db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
+  // اصلاحِ فاکتور به مبلغِ واقعاً پرداخت‌شده (پرداختِ کمتر). original_amount هم برابر می‌شود
+  // تا اعتبارِ approvePayment دقیقاً همان چیزی باشد که کاربر داده، نه بیشتر.
+  adjustPaymentAmount: db.prepare(
+    "UPDATE payments SET amount=?, original_amount=?, adjust_note=?, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
   setKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=?'),
   // پیشنهاددهنده: آخرین باری که کاربر هر نوع فال را **تحویل گرفته** (منبعِ جریمه‌ی تازگی)
   lastByType: db.prepare("SELECT type, MAX(created_at) AS last FROM readings WHERE user_id=? AND status='delivered' GROUP BY type"),
@@ -2310,6 +2318,28 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       await ctx.reply(L.wallet.approved(done.creditAmount, getBalance(uid), done.bonus)).catch(() => {});
       await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
       return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
+    }
+    // پرداختِ کمتر از فاکتور: رسید واقعی است و پول رسیده، فقط کمتر. لغوِ کاملش هم به کاربر
+    // ظلم است هم پولِ رسیده را از درآمد حذف می‌کند. پس فاکتور به همان مبلغِ واقعی **اصلاح**
+    // می‌شود و کاربر دقیقاً همان‌قدر اعتبار می‌گیرد.
+    // گاردِ صریح: اگر پای تخفیف وسط باشد، خودکار تصمیم نمی‌گیریم — چون اختلافِ مبلغ در آن
+    // حالت می‌تواند باگِ تطبیق باشد نه اشتباهِ کاربر (همان فاجعه‌ی ۱۴۰۵/۰۵/۰۹). → ادمین.
+    if (decision.action === 'underpaid') {
+      const paid = Number(decision.paid) || 0;
+      const safe = !p.discount_code_id && paid >= MIN_RECHARGE && paid < amountToman;
+      if (safe && stmts.adjustPaymentAmount.run(paid, paid, 'اصلاح به دلیل پرداخت کمتر', paymentId).changes) {
+        track(db, uid, 'payment_adjusted',
+          { payment_id: paymentId, from: amountToman, to: paid, reason: 'underpaid' });
+        const done = approvePayment(paymentId);
+        if (!done) return setState(uid, nextState);
+        await ctx.reply(L.wallet.underpaidApproved(paid, getBalance(uid))).catch(() => {});
+        await notifyAdminAuto(stmts.getPayment.get(paymentId), getUser(uid),
+          `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId);
+        return await afterApproval(uid);
+      }
+      // ناامن (تخفیف داشت، یا مبلغ خیلی کم بود) → تصمیمِ انسانی
+      await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+      return setState(uid, nextState);
     }
     if (decision.action === 'reject') {
       rejectPaymentAI(paymentId);

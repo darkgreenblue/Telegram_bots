@@ -76,7 +76,12 @@ function decideReceipt(verdict, expectedToman) {
     v = 'approve';
   }
   const overpaid = (v === 'approve' && hasPaid && exp > 0 && paid >= exp * 1.1) ? paid : 0;
-  const action = (v === 'reject' && verdict.reason_code === 'not_a_receipt') ? 'not_a_receipt' : v;
+  // «کمتر پرداخت شده» یک نتیجه‌ی جداست، نه رد: رسید واقعی است و پول واقعاً رسیده، فقط کمتر
+  // از فاکتور. تصمیمِ اینکه با آن چه کنیم بالادست گرفته می‌شود (index.js)، نه این‌جا.
+  const underpaid = (v === 'reject' && verdict.reason_code === 'amount_too_low'
+                     && hasPaid && exp > 0 && paid < exp);
+  const action = (v === 'reject' && verdict.reason_code === 'not_a_receipt') ? 'not_a_receipt'
+               : (underpaid ? 'underpaid' : v);
   return { action, reason_fa: verdict.reason_fa || '', reason_code: verdict.reason_code || '',
            paid: hasPaid ? paid : null, overpaid };
 }
