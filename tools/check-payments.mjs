@@ -136,6 +136,20 @@ console.log('\n▶ قرارداد: شرطِ نشان‌دادن و شرطِ پذ
     'دکمه‌ی پی‌وال هم از همان تابع می‌پرسد (نه از شرطِ جداگانه)');
 }
 
+console.log('\n▶ ایجنتِ رسید با «مبلغِ روی فاکتور» مقایسه می‌کند، نه با اصلِ قبل از تخفیف');
+{
+  // باگِ واقعی ۱۴۰۵/۰۵/۰۹: expected = original_amount بود، پس کاربری که ۵۰k را با ۲۰٪
+  // تخفیف ۴۰k پرداخت کرده بود، رسیدِ درستش «مبلغ کم» تشخیص داده و **رد** می‌شد.
+  const block = SRC.slice(SRC.indexOf('const amountToman'), SRC.indexOf('const amountToman') + 120);
+  ok(/const amountToman\s*=\s*p\.amount\s*;/.test(block),
+    'amountToman = p.amount (مبلغی که کاربر واقعاً باید واریز کند)');
+  ok(!/amountToman\s*=\s*p\.original_amount/.test(SRC),
+    'هیچ‌جا original_amount مبنای تطبیقِ رسید نیست');
+  // و در مقابل: اعتبارِ لحظه‌ی تأیید همچنان باید original_amount باشد
+  ok(/const creditAmount\s*=\s*p\.original_amount\s*\|\|\s*p\.amount\s*;/.test(SRC),
+    'ولی اعتبارِ approvePayment همچنان original_amount است (کاربر اصلِ شارژ را می‌گیرد)');
+}
+
 console.log('\n▶ کدِ غیرفعال اصلاً پیدا نمی‌شود (getDiscountCode فیلترِ is_active دارد)');
 {
   db.prepare("UPDATE discount_codes SET is_active=0 WHERE id=?").run(CODE_ID);
