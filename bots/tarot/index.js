@@ -2260,8 +2260,17 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       imageBuffer = Buffer.from(await res.arrayBuffer());
     } catch (e) { logErr('receipt download:', e.message); }
   }
-  // مبلغِ موردِانتظار = اصلِ قبل از تخفیف (همان که کاربر واریز می‌کند و اعتبار می‌گیرد)
-  const amountToman = p.original_amount || p.amount;
+  // مبلغِ موردِانتظارِ رسید = **همان عددی که روی فاکتور به کاربر نشان دادیم** یعنی `p.amount`
+  // (بعد از تخفیف). قبلاً این‌جا `original_amount` بود و فاجعه ساخت: کاربری که ۵۰k را با
+  // ۲۰٪ تخفیف ۴۰k پرداخت کرده بود، رسیدِ درستش «مبلغ کم» تشخیص داده و رد می‌شد.
+  // `original_amount` فقط تعیین می‌کند بعد از تأیید چقدر **اعتبار** داده شود؛ ربطی به رسید ندارد.
+  const amountToman = p.amount;
+  // اگر به هر دلیلی مبلغِ فاکتور صفر/نامعتبر باشد، تصمیمِ خودکار نمی‌گیریم (تصمیمِ انسانی)
+  if (!(amountToman > 0)) {
+    logErr(`receipt: payment #${paymentId} مبلغِ نامعتبر (${p.amount}) → بازبینیِ انسانی`);
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+    return setState(uid, nextState);
+  }
   let decision;
   try {
     const verdict = await analyzeReceipt({
