@@ -94,7 +94,10 @@ const TEST_PHASE = false;
 //        می‌شود، کاربر دقیقاً همان‌قدر اعتبار می‌گیرد و دلیلِ اصلاح لاگ می‌شود.
 // 2.4.0: فال‌های تصمیم‌محور (آری یا نه، دوراهی) با یک «جوابِ قاطع + نشونه» تمام می‌شوند،
 //        از فیدبکِ کاربرِ واقعی که گفت جوابِ روشنی که دنبالش بود را نگرفت.
-const PRODUCT_VERSION = '2.4.0';
+// 2.5.0: کاربری که اعتبارش کافی است دیگر صفحه‌ی قیمت‌دار نمی‌بیند؛ صریح می‌گوید پرداختی
+//        لازم نیست. از تحلیل جرنی: کاربرانی با موجودیِ دقیقاً کافی یک تپ تا فالشان مانده
+//        بودند و حرکت نمی‌کردند، یعنی مانع پول نبود، صفحه شبیه پی‌وال بود.
+const PRODUCT_VERSION = '2.5.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -126,6 +129,12 @@ const JOURNEY_ENABLED = true;
 // Rollback فوری: false کن → پرامپت و پیامِ جواب کاملاً محو، خوانش دقیقاً مثل قبل
 // (فال‌هایی که verdict شان در DB ذخیره شده بی‌ضرر می‌مانند و فقط نمایش داده نمی‌شوند).
 const DECISIVE_VERDICT_ENABLED = true;
+
+// 💳 صفحه‌ی «اعتبارت کافیه» به‌جای صفحه‌ی قیمت‌دار، برای کاربری که موجودی‌اش هزینه‌ی فال را
+// پوشش می‌دهد. از تحلیل جرنی: چند کاربر با موجودیِ دقیقاً کافی در confirm_pay مانده بودند،
+// یعنی مانع پول نبود؛ صفحه شبیه پی‌وال بود و نمی‌فهمیدند پرداختی لازم نیست.
+// Rollback فوری: false کن → همان دکمه‌ی قیمت‌دار و متنِ قبلی برمی‌گردد، بدونِ هیچ اثر دیگری.
+const COVERED_PAYWALL_ENABLED = true;
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
@@ -473,6 +482,21 @@ const needBalanceText = (uid, price, cards) =>
 // ترتیبِ عمدی (v2.0.0): «پرداختِ هزینه‌ی همین فال» اولِ همه، چون کم‌اصطکاک‌ترین مسیرِ رسیدن
 // به همان چیزی است که کاربر همین حالا می‌خواهد؛ «افزایش موجودی» مسیرِ کیف‌پول است و
 // «تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین پرداخت را دارد.
+// صفحه‌ی «باز کردن کارت‌ها» برای کاربری که اعتبارش کافی است — تک‌منبعِ متن و دکمه.
+// چرا وجود دارد: قبلاً این کاربر همان دکمه‌ی قیمت‌دارِ «۳۰٬۰۰۰ تومان از کیف‌پول» را می‌دید و
+// هیچ‌جا نمی‌گفتیم «این پول را داری». تحلیل جرنی نشان داد چند کاربر با موجودیِ دقیقاً کافی
+// یک تپ تا فالِ کاملشان مانده‌اند و حرکت نمی‌کنند. حالا صریح می‌گوییم پرداختی در کار نیست.
+const coveredText = (uid, price) => {
+  const u = getUser(uid);
+  // «هدیه پوشش می‌دهد» فقط وقتی واقعاً همان هدیه است: هدیه گرفته و هنوز هیچ فالی نگرفته
+  const byGift = !!u?.welcome_bonus_at && stmts.countDelivered.get(uid).c === 0;
+  return L.reading.paywallCovered({ name: dispName(u), price, byGift });
+};
+const coveredRow = (readingId, price) => [Markup.button.callback(
+  COVERED_PAYWALL_ENABLED ? L.buttons.openCardsCovered : L.buttons.openCards(price),
+  `unlock:${readingId}`,
+)];
+
 const needBalanceRows = (uid, reading) => {
   const rows = [];
   if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
@@ -1629,8 +1653,9 @@ async function finishPicking(ctx, uid, s) {
   const balance = getBalance(uid);
   track(db, uid, EVENTS.PAYWALL_SHOWN, { reading_id: readingId, price: spread.price, can_afford: balance >= spread.price });
   if (balance >= spread.price) {
-    await ctx.reply(L.reading.paywall(spread.price), Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.openCards(spread.price), `unlock:${readingId}`)],
+    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, spread.price) : L.reading.paywall(spread.price);
+    await ctx.reply(body, Markup.inlineKeyboard([
+      coveredRow(readingId, spread.price),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   } else {
@@ -2480,8 +2505,9 @@ async function offerPendingReading(ctx, uid) {
   if (!r || r.status !== 'pending_payment') return false;
   const balance = getBalance(uid);
   if (balance >= r.price) {
-    await ctx.reply(L.reading.paywall(r.price), Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.openCards(r.price), `unlock:${r.id}`)],
+    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, r.price) : L.reading.paywall(r.price);
+    await ctx.reply(body, Markup.inlineKeyboard([
+      coveredRow(r.id, r.price),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
@@ -2503,9 +2529,7 @@ async function afterApproval(uid) {
     if (r && r.status === 'pending_payment') {
       setState(uid, 'confirm_pay');
       await bot.telegram.sendMessage(uid, L.reading.resumeAfterRecharge, {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback(L.buttons.openCards(r.price), `unlock:${r.id}`)],
-        ]).reply_markup,
+        reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price)]).reply_markup,
       }).catch(() => {});
       return;
     }
@@ -2628,9 +2652,7 @@ setInterval(async () => {
             stmts.credit.run(r.price, r.user_id);
             track(db, r.user_id, 'credit_granted', { amount: r.price, kind: 'support_reading', reading_id: r.id });
             await bot.telegram.sendMessage(r.user_id, L.wallet.supportUnlocked, {
-              reply_markup: Markup.inlineKeyboard([
-                [Markup.button.callback(L.buttons.openCards(r.price), `unlock:${r.id}`)],
-              ]).reply_markup,
+              reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price)]).reply_markup,
             }).catch(() => {});
           }
         }
