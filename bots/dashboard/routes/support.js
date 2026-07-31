@@ -178,6 +178,7 @@ export function supportUserBody(url) {
    چیزی است که این هفته پنج بار ازش باگ درآمد. */
 const SUPPORT_ACTIONS = {
   force_approve: 'تأیید دستیِ پرداخت',
+  approve_accounting: 'ثبتِ درآمد بدونِ اعتبار',
   reject: 'ردِ پرداخت',
   credit: 'شارژ دستی',
   debit: 'کسرِ اعتبار',
@@ -213,11 +214,12 @@ function openStateCard(inst, uid) {
       statusBadge(p.status),
       esc(p.step || '-'),
       tehranDateTime(p.t),
-      qFor('force_approve', p.id) || qFor('reject', p.id)
+      qFor('force_approve', p.id) || qFor('reject', p.id) || qFor('approve_accounting', p.id)
         ? '<span class="badge warn">در صف (تا ۱ دقیقه)</span>'
         : `<form method="post" action="/support/action" style="display:inline">${hidden}
              <input type="hidden" name="pid" value="${p.id}">
-             <button name="act" value="force_approve" type="submit">✅ تأیید</button>
+             <button name="act" value="force_approve" type="submit">✅ تأیید + اعتبار</button>
+             <button name="act" value="approve_accounting" type="submit" class="ghost">🧾 فقط درآمد</button>
              <button name="act" value="reject" type="submit" class="ghost">❌ رد</button></form>`,
     ]);
     const readRows = reads.map(r => [
@@ -235,9 +237,12 @@ function openStateCard(inst, uid) {
 
       <h3 style="margin-top:14px;font-size:13px">پرداخت‌های باز و ردشده</h3>
       ${table(['شماره', 'مبلغ', 'وضعیت', 'مرحله', 'زمان', 'اقدام'], payRows, 'پرداختِ بازی نیست')}
-      <p class="muted">«تأیید» روی پرداختِ <b>ردشده</b> هم کار می‌کند: درآمد به‌اندازه‌ی مبلغِ
-        واریزشده بالا می‌رود و کاربر اعتبارِ کاملِ اصل را می‌گیرد (همان دو ستونِ amount و
-        original_amount). این تنها راهِ درستِ ثبتِ پولی است که واقعاً رسیده.</p>
+      <p class="muted"><b>✅ تأیید + اعتبار</b> روی پرداختِ <b>ردشده</b> هم کار می‌کند: درآمد
+        به‌اندازه‌ی مبلغِ واریزشده بالا می‌رود <i>و</i> کاربر اعتبارِ کاملِ اصل را می‌گیرد
+        (همان دو ستونِ amount و original_amount).<br>
+        <b>🧾 فقط درآمد</b> برای وقتی است که پول واقعاً رسیده ولی کاربر ارزشش را از راهِ دیگری
+        گرفته (جبرانِ دستی یا کدِ هدیه): وضعیت approved می‌شود تا درآمد درست شمرده شود، ولی
+        <b>هیچ اعتباری داده نمی‌شود و هیچ پیامی به کاربر نمی‌رود</b>. برای دوبار جبران‌نکردن.</p>
 
       <h3 style="margin-top:14px;font-size:13px">فال‌های منتظرِ پرداخت</h3>
       ${table(['شماره', 'نوع', 'قیمت', 'زمان', 'اقدام'], readRows, 'فالِ منتظرِ پرداختی نیست')}
@@ -272,15 +277,16 @@ export function supportAction(body) {
       'INSERT INTO admin_actions (payment_id, action, user_id, amount, ref_id, note) VALUES (?,?,?,?,?,?)');
     const dupPay = (id) => db.prepare('SELECT 1 FROM admin_actions WHERE payment_id=? AND done_at IS NULL').get(id);
 
-    if (act === 'force_approve' || act === 'reject') {
+    if (act === 'force_approve' || act === 'reject' || act === 'approve_accounting') {
       const pid = parseInt(body.get('pid'), 10);
       if (!pid) throw new Error('شماره‌ی پرداخت نامعتبر');
       const p = db.prepare(`SELECT id, user_id, status FROM ${moneyOf(inst.bot).table} WHERE id=?`).get(pid);
       if (!p) throw new Error('پرداخت پیدا نشد');
       if (p.user_id !== uid) throw new Error('این پرداخت مالِ این کاربر نیست');
-      if (!['pending', 'waiting_review', 'rejected'].includes(p.status)) {
-        throw new Error(`روی وضعیتِ «${p.status}» اقدام دستی معنا ندارد`);
-      }
+      const okFor = act === 'approve_accounting'
+        ? ['pending', 'waiting_review', 'rejected', 'canceled']
+        : ['pending', 'waiting_review', 'rejected'];
+      if (!okFor.includes(p.status)) throw new Error(`روی وضعیتِ «${p.status}» این اقدام معنا ندارد`);
       if (dupPay(pid)) throw new Error('برای این پرداخت یک اقدام در صف است؛ صبر کن');
       ins.run(pid, act, uid, null, null, note);
       msg = `«${SUPPORT_ACTIONS[act]}» برای پرداخت #${pid} در صف ربات قرار گرفت`;

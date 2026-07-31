@@ -2512,6 +2512,16 @@ setInterval(async () => {
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
           if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+        } else if (act.action === 'approve_accounting') {
+          // «فقط حسابداری»: پولی که واقعاً رسیده ولی کاربر ارزشش را از راهِ دیگری گرفته
+          // (جبرانِ دستی، کدِ هدیه). وضعیت به approved می‌رود تا SUM(amount) درآمدِ واقعی را
+          // نشان دهد، ولی **هیچ اعتباری داده نمی‌شود و هیچ پیامی به کاربر نمی‌رود**.
+          const p2 = stmts.getPayment.get(act.payment_id);
+          if (p2 && ['pending', 'waiting_review', 'rejected', 'canceled'].includes(p2.status)) {
+            stmts.setPaymentStatus.run('approved', p2.id);
+            track(db, p2.user_id, EVENTS.PAYMENT_APPROVED,
+              { payment_id: p2.id, amount: p2.amount, credited: 0, accounting: 1 });
+          }
         } else if (act.action === 'debit') {
           // کسرِ اعتبار (اصلاحِ حساب توسط پشتیبانی) — کفِ صفر، بی‌صدا برای کاربر
           const uid2 = act.user_id, amt = act.amount;
