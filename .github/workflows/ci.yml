@@ -48,6 +48,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-reco.mjs
 
+      # ریلِ پرداخت: SQL واقعیِ index.js را روی DB موقت اجرا می‌کند (اتمیک بودنِ مبلغ،
+      # ریاضیِ تخفیف، و قفل‌نشدنِ کد با فاکتورِ رهاشده). روی جابِ dashboard چون
+      # better-sqlite3 آن‌جا نصب است.
+      - name: Payment rail check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-payments.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test
