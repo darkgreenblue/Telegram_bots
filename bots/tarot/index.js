@@ -70,7 +70,10 @@ const TEST_PHASE = false;
 // 1.6.0: بازطراحیِ پی‌والِ کم‌موجودی (بزرگ‌ترین نقطه‌ی ریزش): پیامِ کوتاهِ شخصی‌شده با تعدادِ
 //        کارت و قیمت، تخفیف از پیام حذف و پشتِ دکمه‌ی «تخفیف می‌خوام» رفت، تخفیفِ اولین شارژ
 //        ۳۵٪→۵۰٪ و دیگر خودکار نیست (کدِ شخصیِ کپی‌شدنی)، و برای کاربرِ شارژکرده مسیر دعوت دوستان.
-const PRODUCT_VERSION = '1.6.0';
+// 1.6.1: سه فیکسِ ریلِ پرداخت (از تحلیلِ جرنیِ یک کاربرِ واقعی): کدِ تخفیفِ اشتباه دیگر کاربر را
+//        از مرحله‌ی کد بیرون نمی‌اندازد، متنی که خودش یک کدِ تخفیف است دیگر «رسید» حساب نمی‌شود،
+//        و شروعِ فالِ جدید وقتی فالِ رزروشده منتظرِ پرداخت است دیگر آن را بی‌صدا یتیم نمی‌کند.
+const PRODUCT_VERSION = '1.6.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -608,6 +611,17 @@ async function blockDuringOpenReading(ctx) {
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
   ]));
   return true;
+}
+
+// گاردِ «فالِ رزروشده» — کاربر فالی دارد که کارت‌هایش انتخاب شده و منتظرِ پرداخت است
+// (state=confirm_pay، بعد از انصراف از فاکتور یا بعد از فرستادنِ رسید) و به‌جای ادامه/انصراف،
+// فالِ جدید شروع می‌کند. تا قبل از این، فالِ قبلی بی‌صدا یتیم می‌شد و کاربر بدونِ هیچ پیامی
+// فالِ رزروشده‌اش را از دست می‌داد. حالا همان پی‌وال («باز کردن کارت‌ها» = ادامه) + «انصراف»
+// دوباره نشان داده می‌شود (قرارداد State Management بند ۹ب). خروجی true = بلاک شد.
+async function blockDuringPendingReading(ctx) {
+  if (!NAV_GUARD_ENABLED) return false;
+  if (getState(ctx.from.id) !== 'confirm_pay') return false;
+  return await offerPendingReading(ctx, ctx.from.id);
 }
 
 // «اونو ادامه می‌دم» → همان پیامِ آخرِ فلو (مطابقِ استیتِ فعلی) دوباره نشان داده می‌شود.
@@ -1211,6 +1225,8 @@ async function showCatalog(ctx) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringOpenReading(ctx)) return;
+  // setSession(uid, null) پایین‌تر readingId را دور می‌ریزد؛ پس قبلش فالِ رزروشده باید گارد شود
+  if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
@@ -1241,6 +1257,9 @@ bot.action('opentopic', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   if (!OPEN_TOPIC_ENABLED) return;
   upsertUser(ctx);
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.reading.openDepthPrompt, Markup.inlineKeyboard([
@@ -1270,6 +1289,12 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   upsertUser(ctx);
   const spread = SPREAD_BY_ID[ctx.match[1]];
   if (!spread) return;
+  // دکمه‌ی «شروع فال» در پیام‌های زیادی هست (منو، بعد از تحویل، پوشِ milestone و…) و تا قبل از
+  // این هیچ گاردی نداشت: کاربری که وسطِ پرداخت یا وسطِ یک فالِ باز بود، با یک تپ فلوی قبلی‌اش
+  // را بی‌صدا از دست می‌داد. حالا مثل بقیه‌ی نقاطِ ورودِ منو گارد می‌شود (بند ۹ب).
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringPendingReading(ctx)) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   track(db, uid, 'spread_selected', { spread: spread.id });
 
@@ -1961,12 +1986,27 @@ function validateDiscount(code, userId, amount) {
   return { ok: true, dc, finalAmount: Math.max(0, amount - disc) };
 }
 
+// آیا این متن دقیقاً یک کدِ تخفیفِ فعالِ موجود در DB است؟ (تک‌کلمه و کوتاه — رسیدِ واقعی
+// هیچ‌وقت این شکل نیست). گاردِ «کد را جای اشتباه فرستادم».
+function looksLikeDiscountCode(text) {
+  const t = normalizeDigits(String(text ?? '')).trim().toUpperCase();
+  if (!t || t.length > 32 || /\s/.test(t)) return false;
+  try { return !!stmts.getDiscountCode.get(t); } catch { return false; }
+}
+
 async function applyDiscount(ctx, uid, codeText) {
   const s = getSession(uid);
   const p = s.paymentId && stmts.getPayment.get(s.paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   const v = validateDiscount(codeText, uid, p.original_amount || p.amount);
-  if (!v.ok) { setState(uid, 'pay_receipt'); return ctx.reply(L.wallet.badDiscount); }
+  if (!v.ok) {
+    // کدِ اشتباه کاربر را از مرحله‌ی کد بیرون نمی‌اندازد. قبلاً state به pay_receipt برمی‌گشت و
+    // تلاشِ دومِ کاربر به‌عنوان «رسیدِ متنی» بلعیده می‌شد → پرداختی که هرگز انجام نشده بود به
+    // ادمین می‌رفت و ساعت‌ها بعد «تأیید نشد» می‌گرفت (اتفاقِ واقعیِ ۱۴۰۵/۰۵/۰۹).
+    return ctx.reply(L.wallet.badDiscount, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${p.id}`)],
+    ]));
+  }
   stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, p.id);
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.invoiceDiscounted(p.original_amount || p.amount, v.finalAmount, v.dc.code), { parse_mode: 'Markdown' });
@@ -2366,6 +2406,13 @@ bot.on('text', async (ctx) => {
       // رسید متنی
       const s = getSession(uid);
       if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
+      // اگر متن خودش یک کدِ تخفیفِ موجود است، رسید نیست: کاربر کدش را یک قدم دیرتر فرستاده.
+      // ثبتش به‌عنوان رسید یعنی پرداختِ ناموجود در صفِ ادمین و در نهایت پیامِ «تأیید نشد» به
+      // کاربری که اصلاً پولی نفرستاده بود. به‌جایش مثل کد تخفیف رفتارش می‌کنیم.
+      if (looksLikeDiscountCode(text)) {
+        setState(uid, 'pay_discount');
+        return await applyDiscount(ctx, uid, text);
+      }
       return await processReceipt(ctx, uid, s.paymentId, null, text, false);
     }
     if (state === 'feedback') {
