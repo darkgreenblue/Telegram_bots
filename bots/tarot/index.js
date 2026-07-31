@@ -73,7 +73,10 @@ const TEST_PHASE = false;
 // 1.6.1: سه فیکسِ ریلِ پرداخت (از تحلیلِ جرنیِ یک کاربرِ واقعی): کدِ تخفیفِ اشتباه دیگر کاربر را
 //        از مرحله‌ی کد بیرون نمی‌اندازد، متنی که خودش یک کدِ تخفیف است دیگر «رسید» حساب نمی‌شود،
 //        و شروعِ فالِ جدید وقتی فالِ رزروشده منتظرِ پرداخت است دیگر آن را بی‌صدا یتیم نمی‌کند.
-const PRODUCT_VERSION = '1.6.1';
+// 1.6.2: کدِ تخفیفِ اولین شارژ دیگر با یک فاکتورِ رهاشده برای همیشه قفل نمی‌شود (فاکتورِ
+//        pending بدونِ رسید عملاً غیرقابل‌دسترس است و نباید کد را نگه دارد)، پیامِ «قبلاً
+//        استفاده شده» از «نامعتبر» جدا شد، و پیشنهادِ کد با پذیرشِ کد هم‌شرط شد.
+const PRODUCT_VERSION = '1.6.2';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -339,7 +342,14 @@ const stmts = {
   countApprovedPayments: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved'"),
   insertDiscountUse:   db.prepare('INSERT INTO discount_uses (code_id, user_id, payment_id, discount_amount) VALUES (?,?,?,?)'),
   getUserDiscountUses: db.prepare('SELECT COUNT(*) AS c FROM discount_uses WHERE code_id=? AND user_id=?'),
-  countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND status IN ('pending','waiting_review')"),
+  // «کد الان دستِ کدام فاکتور است؟» — فقط فاکتورِ رسیدداده‌ی منتظرِ تأیید کد را نگه می‌دارد.
+  // فاکتورِ `pending` (بدونِ رسید) عمداً شمرده نمی‌شود: کاربر همیشه فقط با تازه‌ترین فاکتورش
+  // کار می‌کند (session.paymentId و بازیابیِ عکس هر دو تازه‌ترین را می‌گیرند)، پس فاکتورِ
+  // قدیمیِ رهاشده هیچ راهی ندارد که به waiting_review برسد و کد را خرج کند. شمردنش فقط
+  // کدِ یک‌بارمصرفِ خودِ کاربر را برای همیشه قفل می‌کرد (باگِ واقعی: کدی که ربات پیشنهاد
+  // می‌داد ولی هرگز پذیرفته نمی‌شد). خودِ فاکتورِ جاری هم کنار گذاشته می‌شود تا واردکردنِ
+  // دوباره‌ی کد روی همان فاکتور خودش را بلاک نکند.
+  countPendingDiscount: db.prepare("SELECT COUNT(*) AS c FROM payments WHERE discount_code_id=? AND user_id=? AND id<>? AND status='waiting_review'"),
 
   insertReferral: db.prepare('INSERT OR IGNORE INTO referrals (referrer_id, referee_id) VALUES (?,?)'),
   getReferralByReferee: db.prepare('SELECT * FROM referrals WHERE referee_id=?'),
@@ -1862,6 +1872,16 @@ bot.action('want_discount', async (ctx) => {
   const rechargeRow = [Markup.button.callback(L.buttons.recharge, 'recharge')];
   if (first) {
     const code = ensureFirstDiscountCode(uid);
+    // شرطِ «پیشنهاد دادن» باید با شرطِ «پذیرفتن» یکی باشد: اگر کد همین حالا روی یک فاکتورِ
+    // در انتظارِ تأیید نشسته، دوباره پیشنهادش نده — وگرنه کاربر کدی می‌گیرد که خودِ ربات
+    // چند ثانیه بعد ردش می‌کند (دقیقاً همان تناقضی که این باگ را ساخت).
+    const dc = stmts.getDiscountCode.get(code);
+    const held = dc
+      ? stmts.getUserDiscountUses.get(dc.id, uid).c + stmts.countPendingDiscount.get(dc.id, uid, 0).c
+      : 0;
+    if (dc && held >= dc.max_uses_per_user) {
+      return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([rechargeRow]));
+    }
     return ctx.reply(L.wallet.firstDiscountOffer(FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap, code), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
@@ -1971,16 +1991,19 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   await offerPendingReading(ctx, uid);
 });
 
-function validateDiscount(code, userId, amount) {
+// reason: 'unknown' (نبود/منقضی/مالِ کسِ دیگر) یا 'used' (قبلاً خرج شده یا روی فاکتورِ
+// در انتظارِ تأیید است) — پیامِ کاربر بر همین اساس فرق می‌کند تا سردرگم نشود.
+function validateDiscount(code, userId, amount, currentPaymentId = 0) {
   const dc = stmts.getDiscountCode.get(normalizeDigits(code).trim().toUpperCase());
-  if (!dc) return { ok: false };
-  if (dc.expires_at && dc.expires_at < Date.now() / 1000) return { ok: false };
-  if (dc.only_user_id && dc.only_user_id !== userId) return { ok: false };
+  if (!dc) return { ok: false, reason: 'unknown' };
+  if (dc.expires_at && dc.expires_at < Date.now() / 1000) return { ok: false, reason: 'unknown' };
+  if (dc.only_user_id && dc.only_user_id !== userId) return { ok: false, reason: 'unknown' };
   // کدِ «اولین شارژ» فقط تا قبل از اولین شارژِ تأییدشده معتبر است (وگرنه کاربری که بارِ اول
   // بدون کد پرداخت کرده بود، می‌توانست همان کد را روی شارژِ دومش خرج کند).
-  if (dc.code === firstCodeFor(userId) && hasRecharged(userId)) return { ok: false };
-  const uses = stmts.getUserDiscountUses.get(dc.id, userId).c + stmts.countPendingDiscount.get(dc.id, userId).c;
-  if (uses >= dc.max_uses_per_user) return { ok: false };
+  if (dc.code === firstCodeFor(userId) && hasRecharged(userId)) return { ok: false, reason: 'used' };
+  const uses = stmts.getUserDiscountUses.get(dc.id, userId).c
+    + stmts.countPendingDiscount.get(dc.id, userId, currentPaymentId).c;
+  if (uses >= dc.max_uses_per_user) return { ok: false, reason: 'used' };
   let disc = Math.round(amount * dc.discount_percent / 100);
   if (dc.max_discount_amount != null && disc > dc.max_discount_amount) disc = dc.max_discount_amount;
   return { ok: true, dc, finalAmount: Math.max(0, amount - disc) };
@@ -1998,12 +2021,12 @@ async function applyDiscount(ctx, uid, codeText) {
   const s = getSession(uid);
   const p = s.paymentId && stmts.getPayment.get(s.paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
-  const v = validateDiscount(codeText, uid, p.original_amount || p.amount);
+  const v = validateDiscount(codeText, uid, p.original_amount || p.amount, p.id);
   if (!v.ok) {
     // کدِ اشتباه کاربر را از مرحله‌ی کد بیرون نمی‌اندازد. قبلاً state به pay_receipt برمی‌گشت و
     // تلاشِ دومِ کاربر به‌عنوان «رسیدِ متنی» بلعیده می‌شد → پرداختی که هرگز انجام نشده بود به
     // ادمین می‌رفت و ساعت‌ها بعد «تأیید نشد» می‌گرفت (اتفاقِ واقعیِ ۱۴۰۵/۰۵/۰۹).
-    return ctx.reply(L.wallet.badDiscount, Markup.inlineKeyboard([
+    return ctx.reply(v.reason === 'used' ? L.wallet.usedDiscount : L.wallet.badDiscount, Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${p.id}`)],
     ]));
   }
