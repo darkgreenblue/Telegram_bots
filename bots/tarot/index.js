@@ -469,12 +469,17 @@ function firstDiscountAvailable(uid) {
   return used < dc.max_uses_per_user;
 }
 
-// تعداد کارت‌های یک خوانش (برای متنِ «هزینه‌ی این سه تا کارت»): از خودِ چیدمان،
-// و اگر چیدمان پیدا نشد از قیمت (قانونِ ثابتِ هر کارت ۱۰٬۰۰۰ تومان).
-const cardsOf = (r) => SPREAD_BY_ID[r.type]?.size || Math.max(1, Math.round(r.price / 10_000));
+// نامِ فارسیِ چیدمان (برای خطِ «هزینه‌ی فال «...»»). اگر چیدمان پیدا نشد، متنِ عمومی.
+const spreadFaOf = (r) => SPREAD_BY_ID[r?.type]?.fa || L.reading.spreadFallbackFa;
 // پیامِ یکسانِ «موجودی کافی نیست» در همه‌ی نقاطِ پی‌وال (شخصی‌شده با نام کاربر).
-const needBalanceText = (uid, price, cards) =>
-  L.reading.needBalance(dispName(getUser(uid)), L.reading.cardCountFa(cards), price);
+// موجودی و نامِ فال هم نشان داده می‌شوند تا کاربر کسری را خودش ببیند.
+const needBalanceText = (uid, reading) =>
+  L.reading.needBalance({
+    name: dispName(getUser(uid)),
+    balance: getBalance(uid),
+    spreadFa: spreadFaOf(reading),
+    price: reading.price,
+  });
 // ردیفِ ثابتِ زیرِ پیامِ کم‌موجودی: مسیر اصلی (شارژ) اول، تخفیف پشتِ دکمه‌ی دوم.
 // دکمه‌ی «🎁 تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین شارژ دارد. کاربری که
 // قبلاً شارژ کرده یا تخفیفش خرج شده، این دکمه را اصلاً نمی‌بیند: تا قبل از این، زدنش
@@ -486,12 +491,12 @@ const needBalanceText = (uid, price, cards) =>
 // چرا وجود دارد: قبلاً این کاربر همان دکمه‌ی قیمت‌دارِ «۳۰٬۰۰۰ تومان از کیف‌پول» را می‌دید و
 // هیچ‌جا نمی‌گفتیم «این پول را داری». تحلیل جرنی نشان داد چند کاربر با موجودیِ دقیقاً کافی
 // یک تپ تا فالِ کاملشان مانده‌اند و حرکت نمی‌کنند. حالا صریح می‌گوییم پرداختی در کار نیست.
-const coveredText = (uid, price) => {
-  const u = getUser(uid);
-  // «هدیه پوشش می‌دهد» فقط وقتی واقعاً همان هدیه است: هدیه گرفته و هنوز هیچ فالی نگرفته
-  const byGift = !!u?.welcome_bonus_at && stmts.countDelivered.get(uid).c === 0;
-  return L.reading.paywallCovered({ name: dispName(u), price, byGift });
-};
+const coveredText = (uid, reading) => L.reading.balanceEnough({
+  name: dispName(getUser(uid)),
+  balance: getBalance(uid),
+  spreadFa: spreadFaOf(reading),
+  price: reading.price,
+});
 const coveredRow = (readingId, price) => [Markup.button.callback(
   COVERED_PAYWALL_ENABLED ? L.buttons.openCardsCovered : L.buttons.openCards(price),
   `unlock:${readingId}`,
@@ -1653,14 +1658,15 @@ async function finishPicking(ctx, uid, s) {
   const balance = getBalance(uid);
   track(db, uid, EVENTS.PAYWALL_SHOWN, { reading_id: readingId, price: spread.price, can_afford: balance >= spread.price });
   if (balance >= spread.price) {
-    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, spread.price) : L.reading.paywall(spread.price);
+    const reading = { type: spread.id, price: spread.price };
+    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, reading) : L.reading.paywall(spread.price);
     await ctx.reply(body, Markup.inlineKeyboard([
       coveredRow(readingId, spread.price),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   } else {
     // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
-    await ctx.reply(needBalanceText(uid, spread.price, spread.size), Markup.inlineKeyboard([
+    await ctx.reply(needBalanceText(uid, { type: spread.id, price: spread.price }), Markup.inlineKeyboard([
       ...needBalanceRows(uid, { id: readingId, price: spread.price }),
       ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
@@ -1739,7 +1745,10 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid, r)));
+      return ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
+        ...needBalanceRows(uid, r),
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+      ]));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1803,7 +1812,10 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid, r)));
+      return ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
+        ...needBalanceRows(uid, r),
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+      ]));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -2505,13 +2517,13 @@ async function offerPendingReading(ctx, uid) {
   if (!r || r.status !== 'pending_payment') return false;
   const balance = getBalance(uid);
   if (balance >= r.price) {
-    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, r.price) : L.reading.paywall(r.price);
+    const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, r) : L.reading.paywall(r.price);
     await ctx.reply(body, Markup.inlineKeyboard([
       coveredRow(r.id, r.price),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard([
+    await ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
       ...needBalanceRows(uid, r),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
