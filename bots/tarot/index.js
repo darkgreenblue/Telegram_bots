@@ -28,6 +28,7 @@ import { registerSupport, supportRow } from '../../shared/support.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
+import { scoreSpreads, RECO } from './reco.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -84,7 +85,9 @@ const TEST_PHASE = false;
 //        به‌جای مرحله‌ی «چقدر شارژ کنم؟»، تخفیفِ اولین پرداخت ۵۰٪→۲۰٪ و فقط روی همان فال
 //        (بدونِ کد و بدونِ سقف)، نردبانِ شارژ ۵۰/۱۰۰/۲۰۰k با هدیه فقط از ۲۰۰k، و حذفِ پوشِ
 //        دوهفته‌ای به نفعِ تنها قلاب بازگشت: یادآوریِ شبانه‌ی کارت روز با انصرافِ دومرحله‌ای.
-const PRODUCT_VERSION = '2.0.0';
+// 2.1.0: پیشنهاددهنده‌ی امتیازی جای پیشنهادِ هاردکد را گرفت (کارتِ روز دیگر همان فالی را
+//        که کاربر تازه گرفته پیشنهاد نمی‌دهد) + کیبوردِ منو دیگر گم نمی‌شود.
+const PRODUCT_VERSION = '2.1.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -246,6 +249,8 @@ db.exec(`
     PRIMARY KEY (card_key, reversed, focus)
   );
 `);
+// migration (v2.1.0): آخرین باری که کیبوردِ منو واقعاً برای کاربر فرستاده شد (ضدِ «منو ناپدید شد»)
+try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // migration (v2.0.0): هدیه‌ی خوش‌آمد write-once + انصراف از یادآوریِ کارت روز
 try { db.prepare('ALTER TABLE users ADD COLUMN welcome_bonus_at INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_reminder_off INTEGER NOT NULL DEFAULT 0').run(); } catch {}
@@ -315,6 +320,11 @@ const stmts = {
      LIMIT 200`),
   setDailyReminded: db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
+  setKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=?'),
+  // پیشنهاددهنده: آخرین باری که کاربر هر نوع فال را **تحویل گرفته** (منبعِ جریمه‌ی تازگی)
+  lastByType: db.prepare("SELECT type, MAX(created_at) AS last FROM readings WHERE user_id=? AND status='delivered' GROUP BY type"),
+  // اقبال عمومی: چند بار هر نوع فال در کلِ ربات تحویل شده
+  popByType: db.prepare("SELECT type, COUNT(*) AS c FROM readings WHERE status='delivered' GROUP BY type"),
   setReferredBy: db.prepare('UPDATE users SET referred_by=? WHERE telegram_id=?'),
   credit:     db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id=?'),
   deduct:     db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id=? AND balance >= ?'),
@@ -914,6 +924,7 @@ async function handleStart(ctx) {
   } else if (user.last_daily_date !== tehranToday()) {
     msg += L.returning.dailyReminder;
   }
+  stmts.setKbShown.run(uid);
   await ctx.reply(msg, mainKeyboard(ctx.from.id));
 }
 bot.start(handleStart);
@@ -974,6 +985,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     // کیبورد اصلی *بعد* از پیام «یه قرار کوچیک» آشکار می‌شود (نه قبلش) — تلگرام اجازه‌ی
     // یک reply_markup در هر پیام را می‌دهد، پس آشکارسازی کیبورد یک پیام کوتاه جدا لازم دارد.
     await typing(ctx, PACE_S);
+    stmts.setKbShown.run(uid);
     await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid));
   } else {
     // تغییر تمرکز وسط فلوی فال
@@ -995,9 +1007,8 @@ async function dailyCard(ctx) {
   const user = getUser(uid);
   const today = tehranToday();
   if (user.last_daily_date === today) {
-    return ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
-    ]));
+    await ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard(recoRows(uid, null)));
+    return ensureMenu(ctx, uid);
   }
   // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
   const yesterday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(Date.now() - 86400_000));
@@ -1040,9 +1051,8 @@ async function dailyCard(ctx) {
     }
   }
   await sleep(PACE_M);
-  await ctx.reply(L.daily.upsell, Markup.inlineKeyboard([
-    [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
-  ]));
+  await ctx.reply(L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await ensureMenu(ctx, uid);
 }
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
@@ -1845,14 +1855,75 @@ const FOCUS_SUGGEST = {
   migration: ['migration', 'choice', 'career', 'celtic'],
   question:  ['choice', 'yesno', 'three', 'celtic'],
 };
-function suggestSpreads(uid, currentType) {
-  const focus = getUser(uid)?.focus_area || 'question';
-  const tried = new Set(stmts.lastDelivered.all(uid, 10).map(x => x.type));
-  const pool = [...(FOCUS_SUGGEST[focus] || []), ...SPREADS.map(s => s.id)];
-  const fresh = pool.filter(id => id !== currentType && SPREAD_BY_ID[id] && !tried.has(id));
-  const any   = pool.filter(id => id !== currentType && SPREAD_BY_ID[id]);
-  const ids = [...new Set([...fresh, ...any])].slice(0, 2);
-  return ids.map(id => SPREAD_BY_ID[id]);
+/* ===== پیشنهاددهنده‌ی فال (v2.1.0 — امتیازیِ هاردکد، بدونِ LLM و بدونِ هیچ هزینه‌ای) =====
+   قبلاً هرجا پیشنهاد می‌دادیم دو حالت بود: یا لیستِ ثابتِ حوزه، یا بدتر، دکمه‌ی هاردکدِ
+   «گذشته، حال، آینده» زیرِ کارت روز — یعنی کاربری که همین الان همان فال را گرفته بود،
+   دقیقه‌ای بعد دوباره همان را پیشنهاد می‌گرفت. حالا هر فال برای هر کاربر یک امتیاز دارد:
+
+     امتیاز = ۱۰۰ + بونوسِ حوزه + بونوسِ اقبال عمومی − جریمه‌ی تازگی
+
+   و مهم‌تر از امتیاز، یک **قفلِ سخت** هست: فالی که ظرفِ RECO_COOLDOWN_DAYS تحویل گرفته
+   شده (و همیشه فالِ همین لحظه) اصلاً وارد رقابت نمی‌شود. این قانونِ نشکستنی است؛ حتی
+   محبوب‌ترین فالِ ربات هم اگر تازه گرفته شده باشد نمایش داده نمی‌شود. */
+const RECO_SLOTS = RECO.SLOTS;
+let popCache = { at: 0, map: null };
+
+// اقبال عمومی با کشِ ۱۰ دقیقه‌ای (کوئری روی کلِ readings است، نه per درخواست)
+function popularity() {
+  const now = Date.now();
+  if (popCache.map && now - popCache.at < 600_000) return popCache.map;
+  const map = new Map();
+  try {
+    const all = stmts.popByType.all();
+    const max = Math.max(1, ...all.map(r => r.c));
+    for (const r of all) map.set(r.type, r.c / max); // ۰..۱
+  } catch (e) { logErr('popularity:', e.message); }
+  popCache = { at: now, map };
+  return map;
+}
+
+// جمع‌کردنِ دیتای کاربر و سپردنِ امتیازدهی به ماژولِ خالصِ reco.js
+function recommendSpreads(uid, currentType, slots = RECO_SLOTS) {
+  try {
+    const focus = getUser(uid)?.focus_area || '';
+    const lastByType = new Map();
+    for (const r of stmts.lastByType.all(uid)) lastByType.set(r.type, r.last);
+    return scoreSpreads(SPREADS, {
+      currentType, focus,
+      focusIds: new Set(FOCUS_SUGGEST[focus] || []),
+      popMap: popularity(),
+      lastByType,
+      nowS: Math.floor(Date.now() / 1000),
+      slots,
+    });
+  } catch (e) {
+    logErr('recommend:', e.message);
+    // fail-safe: هرگز فالِ همین لحظه را برنگردان (قانونِ نشکستنیِ مالک)
+    return SPREADS.filter(s => s.id !== currentType).slice(0, slots);
+  }
+}
+
+// ردیف‌های آماده‌ی پیشنهاد: سه جایگاه + جایگاه چهارمِ «مشاهده‌ی همه‌ی فال‌ها»
+function recoRows(uid, currentType) {
+  return [
+    ...recommendSpreads(uid, currentType).map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
+    [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
+  ];
+}
+
+// کیبوردِ منو نباید هیچ‌وقت گم شود: تلگرام کیبوردِ reply را تا جایگزینی نگه می‌دارد، ولی اگر
+// کاربر آن را جمع کند و بعد فقط دکمه‌های inline ببیند، عملاً راهی برای تعامل ندارد. این تابع
+// حداکثر هر KB_REFRESH_DAYS یک پیامِ کوتاه با کیبوردِ منو می‌فرستد (نه در آنبوردینگ).
+const KB_REFRESH_DAYS = 3;
+async function ensureMenu(ctx, uid) {
+  try {
+    const u = getUser(uid);
+    if (!u?.welcomed || ONBOARDING_STATES.includes(getState(uid))) return;
+    const shown = u.kb_shown_at || 0;
+    if (Date.now() / 1000 - shown < KB_REFRESH_DAYS * 86400) return;
+    stmts.setKbShown.run(uid);
+    await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid)).catch(() => {});
+  } catch (e) { logErr('ensureMenu:', e.message); }
 }
 async function finishReading(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
@@ -1913,14 +1984,12 @@ async function finishReading(ctx, uid, readingId) {
   await sleep(PACE_M);
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
-  const offers = suggestSpreads(uid, r.type);
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers, Markup.inlineKeyboard([
-    ...offers.map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
-    ...(OPEN_TOPIC_ENABLED ? [[Markup.button.callback(L.buttons.openTopic, 'opentopic')]] : []),
-    [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
+    ...recoRows(uid, r.type),
     [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
   ]));
+  await ensureMenu(ctx, uid);
 
 
 }
