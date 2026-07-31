@@ -1,6 +1,7 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, getInstance, withDb, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman } from '../lib/bots.js';
+import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
 import { table, statusBadge, stat } from '../lib/html.js';
@@ -161,9 +162,149 @@ export function supportUserBody(url) {
     const others = instances().filter(x => x.id !== inst.id)
       .map(x => `<a href="/support/user?inst=${encodeURIComponent(x.id)}&id=${uid}">${esc(x.title)}</a>`).join(' · ');
     return profileCard(inst, u)
+      + openStateCard(inst, uid)
       + `<div class="card"><h2>🕓 سشن‌ها و بازپخشِ مسیر</h2>
          <p class="muted">هر سشن = فعالیتِ پیوسته با فاصله‌ی کمتر از ۳۰ دقیقه. ردیف‌های کم‌رنگ، قدم‌های ریز
            (پیامی که ربات نشان داد یا دکمه‌ای که کاربر زد) هستند.</p>${tlHtml}</div>`
       + `<div class="card"><p class="muted">همین کاربر در ربات‌های دیگر: ${others}</p></div>`;
   }, `<div class="card"><p class="muted">دیتابیس در دسترس نیست.</p></div>`);
+}
+
+/* ===== 🛠 اقدام‌های دستیِ پشتیبانی =====
+   قرارداد نشکستنی (همان مسیرِ تأییدِ رسید): داشبورد **هرگز مستقیم پول را دست نمی‌زند**.
+   هر اقدام در جدولِ `admin_actions` خودِ ربات صف می‌شود و sweepِ ۶۰ثانیه‌ایِ ربات آن را با
+   منطقِ واقعی (اعتبار + پیام به کاربر + ادامه‌ی فالِ رزروشده) اجرا می‌کند. دلیلش این است که
+   داشبورد توکنِ ربات را ندارد و منطقِ پول باید تک‌منبع بماند؛ دو منبعِ حقیقت برای پول همان
+   چیزی است که این هفته پنج بار ازش باگ درآمد. */
+const SUPPORT_ACTIONS = {
+  force_approve: 'تأیید دستیِ پرداخت',
+  reject: 'ردِ پرداخت',
+  credit: 'شارژ دستی',
+  debit: 'کسرِ اعتبار',
+  unlock_reading: 'بازکردنِ فالِ رزروشده',
+};
+const MAX_MANUAL = 5_000_000;   // سقفِ ایمنیِ یک اقدامِ دستی (ضدِ صفرِ اضافه)
+
+// وضعیت‌های بازِ کاربر: چیزی که پشتیبانی باید در یک نگاه ببیند و بتواند تعیین تکلیف کند
+function openStateCard(inst, uid) {
+  const m = moneyOf(inst.bot);
+  if (!inst.bot || !hasTable) return '';
+  return withDb(inst.file, (db) => {
+    if (!hasTable(db, 'admin_actions')) {
+      return `<div class="card"><h2>🛠 اقدام‌های پشتیبانی</h2>
+        <p class="muted">این ربات صفِ اقدامِ داشبوردی (<code>admin_actions</code>) ندارد.</p></div>`;
+    }
+    const cat = unixOf(m.createdKind, 'created_at');
+    const pays = rows(db, `SELECT id, ${m.amountCol} AS amount, original_amount, status, step, ${cat} AS t
+        FROM ${m.table} WHERE user_id=? AND status IN ('pending','waiting_review','rejected')
+        ORDER BY id DESC LIMIT 12`, [uid]);
+    const reads = hasTable(db, 'readings')
+      ? rows(db, `SELECT id, type, price, created_at AS t FROM readings
+          WHERE user_id=? AND status='pending_payment' ORDER BY id DESC LIMIT 12`, [uid]) : [];
+    const queued = rows(db, 'SELECT id, action, payment_id, ref_id, amount FROM admin_actions WHERE done_at IS NULL ORDER BY id');
+    const qFor = (a, id) => queued.some(q => q.action === a && (q.payment_id === id || q.ref_id === id));
+
+    const hidden = `<input type="hidden" name="inst" value="${esc(inst.id)}"><input type="hidden" name="uid" value="${uid}">`;
+    const payRows = pays.map(p => [
+      `#${p.id}`,
+      `${fmt(toToman(inst.bot, p.amount))} ت` +
+        (p.original_amount && p.original_amount !== p.amount
+          ? ` <span class="muted">(اعتبار ${fmt(toToman(inst.bot, p.original_amount))})</span>` : ''),
+      statusBadge(p.status),
+      esc(p.step || '-'),
+      tehranDateTime(p.t),
+      qFor('force_approve', p.id) || qFor('reject', p.id)
+        ? '<span class="badge warn">در صف (تا ۱ دقیقه)</span>'
+        : `<form method="post" action="/support/action" style="display:inline">${hidden}
+             <input type="hidden" name="pid" value="${p.id}">
+             <button name="act" value="force_approve" type="submit">✅ تأیید</button>
+             <button name="act" value="reject" type="submit" class="ghost">❌ رد</button></form>`,
+    ]);
+    const readRows = reads.map(r => [
+      `#${r.id}`, esc(r.type), `${fmt(r.price)} ت`, tehranDateTime(r.t),
+      qFor('unlock_reading', r.id)
+        ? '<span class="badge warn">در صف (تا ۱ دقیقه)</span>'
+        : `<form method="post" action="/support/action" style="display:inline">${hidden}
+             <input type="hidden" name="rid" value="${r.id}">
+             <button name="act" value="unlock_reading" type="submit">🔓 پرداختش کن</button></form>`,
+    ]);
+
+    return `<div class="card"><h2>🛠 اقدام‌های پشتیبانی</h2>
+      <p class="muted">هر اقدام در صفِ خودِ ربات می‌نشیند و تا ۱ دقیقه با منطقِ واقعی اجرا می‌شود
+        (اعتبار + پیام به کاربر). داشبورد هیچ‌وقت مستقیم موجودی را دست نمی‌زند.</p>
+
+      <h3 style="margin-top:14px;font-size:13px">پرداخت‌های باز و ردشده</h3>
+      ${table(['شماره', 'مبلغ', 'وضعیت', 'مرحله', 'زمان', 'اقدام'], payRows, 'پرداختِ بازی نیست')}
+      <p class="muted">«تأیید» روی پرداختِ <b>ردشده</b> هم کار می‌کند: درآمد به‌اندازه‌ی مبلغِ
+        واریزشده بالا می‌رود و کاربر اعتبارِ کاملِ اصل را می‌گیرد (همان دو ستونِ amount و
+        original_amount). این تنها راهِ درستِ ثبتِ پولی است که واقعاً رسیده.</p>
+
+      <h3 style="margin-top:14px;font-size:13px">فال‌های منتظرِ پرداخت</h3>
+      ${table(['شماره', 'نوع', 'قیمت', 'زمان', 'اقدام'], readRows, 'فالِ منتظرِ پرداختی نیست')}
+
+      <h3 style="margin-top:14px;font-size:13px">شارژ یا کسرِ دستی</h3>
+      <form method="post" action="/support/action" class="inline">${hidden}
+        <label>مبلغ (تومان)<input type="number" name="amount" min="1" max="${MAX_MANUAL}" required style="width:140px"></label>
+        <label>یادداشت<input type="text" name="note" maxlength="120" placeholder="دلیل (در دفتر ممیزی می‌ماند)"></label>
+        <button name="act" value="credit" type="submit">➕ شارژ کن</button>
+        <button name="act" value="debit" type="submit" class="ghost">➖ کسر کن</button>
+      </form>
+      <p class="muted">شارژِ دستی به کاربر پیام می‌دهد («مبلغ X توسط پشتیبانی اضافه شد») و اگر فالِ
+        رزروشده داشته باشد خودکار ادامه‌اش می‌دهد. کسر بی‌صدا و با کفِ صفر است. هیچ‌کدام ردیفِ
+        <code>payments</code> نمی‌سازند، پس درآمد را آلوده نمی‌کنند.</p>
+    </div>`;
+  }, '');
+}
+
+export function supportAction(body) {
+  const inst = getInstance(body.get('inst') || '');
+  if (!inst) throw new Error('ربات نامعتبر');
+  const uid = parseInt(body.get('uid'), 10);
+  if (!uid) throw new Error('کاربر نامعتبر');
+  const act = body.get('act') || '';
+  if (!SUPPORT_ACTIONS[act]) throw new Error('اقدام نامعتبر');
+  const note = (body.get('note') || '').slice(0, 120);
+
+  let msg = '';
+  withWritableDb(inst.file, (db) => {
+    assertColumns(db, 'admin_actions', ['payment_id', 'action', 'user_id', 'amount', 'ref_id', 'note']);
+    const ins = db.prepare(
+      'INSERT INTO admin_actions (payment_id, action, user_id, amount, ref_id, note) VALUES (?,?,?,?,?,?)');
+    const dupPay = (id) => db.prepare('SELECT 1 FROM admin_actions WHERE payment_id=? AND done_at IS NULL').get(id);
+
+    if (act === 'force_approve' || act === 'reject') {
+      const pid = parseInt(body.get('pid'), 10);
+      if (!pid) throw new Error('شماره‌ی پرداخت نامعتبر');
+      const p = db.prepare(`SELECT id, user_id, status FROM ${moneyOf(inst.bot).table} WHERE id=?`).get(pid);
+      if (!p) throw new Error('پرداخت پیدا نشد');
+      if (p.user_id !== uid) throw new Error('این پرداخت مالِ این کاربر نیست');
+      if (!['pending', 'waiting_review', 'rejected'].includes(p.status)) {
+        throw new Error(`روی وضعیتِ «${p.status}» اقدام دستی معنا ندارد`);
+      }
+      if (dupPay(pid)) throw new Error('برای این پرداخت یک اقدام در صف است؛ صبر کن');
+      ins.run(pid, act, uid, null, null, note);
+      msg = `«${SUPPORT_ACTIONS[act]}» برای پرداخت #${pid} در صف ربات قرار گرفت`;
+    } else if (act === 'unlock_reading') {
+      const rid = parseInt(body.get('rid'), 10);
+      if (!rid) throw new Error('شماره‌ی فال نامعتبر');
+      const r = db.prepare('SELECT id, user_id, status, price FROM readings WHERE id=?').get(rid);
+      if (!r) throw new Error('فال پیدا نشد');
+      if (r.user_id !== uid) throw new Error('این فال مالِ این کاربر نیست');
+      if (r.status !== 'pending_payment') throw new Error(`این فال «${r.status}» است، منتظرِ پرداخت نیست`);
+      if (db.prepare("SELECT 1 FROM admin_actions WHERE action='unlock_reading' AND ref_id=? AND done_at IS NULL").get(rid)) {
+        throw new Error('برای این فال یک اقدام در صف است؛ صبر کن');
+      }
+      ins.run(0, act, uid, r.price, rid, note);
+      msg = `فال #${rid} (${fmt(r.price)} تومان) در صف بازکردن قرار گرفت`;
+    } else {
+      const amount = parseInt(body.get('amount'), 10);
+      if (!Number.isFinite(amount) || amount < 1 || amount > MAX_MANUAL) {
+        throw new Error(`مبلغ باید بین ۱ و ${fmt(MAX_MANUAL)} تومان باشد`);
+      }
+      ins.run(0, act, uid, amount, null, note);
+      msg = `«${SUPPORT_ACTIONS[act]}» به مبلغ ${fmt(amount)} تومان برای کاربر ${uid} در صف قرار گرفت`;
+    }
+  });
+  audit('support.action', `${inst.id}/${uid}`, `${act} ${note}`.trim());
+  return `${msg} (تا ۱ دقیقه اجرا می‌شود)`;
 }

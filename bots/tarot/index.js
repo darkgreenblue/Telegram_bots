@@ -87,7 +87,9 @@ const TEST_PHASE = false;
 //        دوهفته‌ای به نفعِ تنها قلاب بازگشت: یادآوریِ شبانه‌ی کارت روز با انصرافِ دومرحله‌ای.
 // 2.1.0: پیشنهاددهنده‌ی امتیازی جای پیشنهادِ هاردکد را گرفت (کارتِ روز دیگر همان فالی را
 //        که کاربر تازه گرفته پیشنهاد نمی‌دهد) + کیبوردِ منو دیگر گم نمی‌شود.
-const PRODUCT_VERSION = '2.1.0';
+// 2.2.0: صفِ اقدامِ پشتیبانی (تأییدِ دستیِ پرداختِ ردشده، شارژ/کسرِ دستی، بازکردنِ فال) +
+//        حداقلِ مبلغ شارژ، بعد از باگی که یک «۸» یک کدِ ۱۰۰٬۰۰۰ تومانی را سوزاند.
+const PRODUCT_VERSION = '2.2.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -138,6 +140,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 // ستونِ users.welcome_bonus_at — ری‌استارت/چندبار /start دوباره هدیه نمی‌دهد.
 const WELCOME_BONUS    = 30_000;
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
+const MIN_RECHARGE     = 10_000;  // کف‌گیرِ اشتباهِ تایپی (پایین‌تر از ارزان‌ترین فال)
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
 const RECHARGE_BONUS   = [{ min: 200_000, bonus: 50_000 }];
 const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus || 0;
@@ -249,6 +252,12 @@ db.exec(`
     PRIMARY KEY (card_key, reversed, focus)
   );
 `);
+// migration (v2.2.0): صفِ اقدامِ پشتیبانی فراتر از تأیید/ردِ رسید (شارژ دستی، بازکردنِ فال).
+// payment_id در اقدام‌های غیرپرداختی صفر می‌ماند (ستون NOT NULL است و تغییرش غیرافزایشی بود).
+try { db.prepare('ALTER TABLE admin_actions ADD COLUMN user_id INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE admin_actions ADD COLUMN amount INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE admin_actions ADD COLUMN ref_id INTEGER').run(); } catch {}
+try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.1.0): آخرین باری که کیبوردِ منو واقعاً برای کاربر فرستاده شد (ضدِ «منو ناپدید شد»)
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // migration (v2.0.0): هدیه‌ی خوش‌آمد write-once + انصراف از یادآوریِ کارت روز
@@ -2088,6 +2097,9 @@ bot.action('recharge', async (ctx) => {
 async function setRechargeAmount(ctx, uid, amount) {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
+  // حداقلِ مبلغ: کاربری «۸» نوشت و سیستم جدی گرفت، کدِ تخفیفِ ۱۰۰٬۰۰۰ رویش خرج شد و
+  // ۸ تومان اعتبار داد (۱۴۰۵/۰۵/۰۹). عددی که آشکارا اشتباهِ تایپی است نباید فاکتور بسازد.
+  if (amount < MIN_RECHARGE) return ctx.reply(L.wallet.amountTooLow(MIN_RECHARGE));
   // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
   if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
 
@@ -2362,9 +2374,12 @@ async function reversePayment(paymentId) {
   return { p, back };
 }
 
-function approvePayment(paymentId) {
+// allowRejected فقط از مسیرِ پشتیبانی می‌آید: پرداختی که ایجنت اشتباهاً رد کرده بود باید
+// بتواند برگردد. مسیرِ خودکار هرگز این را نمی‌فرستد، پس رفتارِ عادی دست‌نخورده می‌ماند.
+function approvePayment(paymentId, allowRejected = false) {
   const p = stmts.getPayment.get(paymentId);
-  if (!p || !['pending', 'waiting_review'].includes(p.status)) return null;
+  const okStates = allowRejected ? ['pending', 'waiting_review', 'rejected'] : ['pending', 'waiting_review'];
+  if (!p || !okStates.includes(p.status)) return null;
   const creditAmount = p.original_amount || p.amount;
   const bonus = bonusFor(creditAmount); // هدیه‌ی شارژ روی مبلغ اصلی (قبل از تخفیف)
   stmts.setPaymentStatus.run('approved', paymentId);
@@ -2491,12 +2506,42 @@ setInterval(async () => {
   try {
     for (const act of stmts.pendingActions.all()) {
       try {
-        if (act.action === 'approve') {
-          const done = approvePayment(act.payment_id);
+        if (act.action === 'approve' || act.action === 'force_approve') {
+          const done = approvePayment(act.payment_id, act.action === 'force_approve');
           if (done) { await bot.telegram.sendMessage(done.p.user_id, L.wallet.approved(done.creditAmount, getBalance(done.p.user_id), done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
           if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+        } else if (act.action === 'debit') {
+          // کسرِ اعتبار (اصلاحِ حساب توسط پشتیبانی) — کفِ صفر، بی‌صدا برای کاربر
+          const uid2 = act.user_id, amt = act.amount;
+          if (uid2 && amt > 0 && getUser(uid2)) {
+            const take = Math.min(amt, getBalance(uid2));
+            if (take > 0) stmts.credit.run(-take, uid2);
+            track(db, uid2, 'credit_adjusted', { amount: -take, kind: 'support' });
+          }
+        } else if (act.action === 'credit') {
+          // شارژِ دستیِ پشتیبانی — بدونِ کدِ تخفیف و بدونِ ردیفِ payments (هدیه است نه درآمد)
+          const uid2 = act.user_id, amt = act.amount;
+          if (uid2 && amt > 0 && getUser(uid2)) {
+            stmts.credit.run(amt, uid2);
+            track(db, uid2, 'credit_granted', { amount: amt, kind: 'support' });
+            await bot.telegram.sendMessage(uid2, L.wallet.supportCredited(amt, getBalance(uid2))).catch(() => {});
+            await afterApproval(uid2); // اگر فالِ رزروشده دارد، خودکار ادامه پیدا کند
+          }
+        } else if (act.action === 'unlock_reading') {
+          // بازکردنِ دستیِ یک فالِ رزروشده: قیمتش اعتبار داده می‌شود و خودِ کاربر با دکمه‌ی
+          // همیشگی بازش می‌کند — یعنی هیچ مسیرِ کسرِ جدیدی ساخته نمی‌شود (ریلِ پول تک‌منبع).
+          const r = stmts.getReading.get(act.ref_id);
+          if (r && r.status === 'pending_payment') {
+            stmts.credit.run(r.price, r.user_id);
+            track(db, r.user_id, 'credit_granted', { amount: r.price, kind: 'support_reading', reading_id: r.id });
+            await bot.telegram.sendMessage(r.user_id, L.wallet.supportUnlocked, {
+              reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback(L.buttons.openCards(r.price), `unlock:${r.id}`)],
+              ]).reply_markup,
+            }).catch(() => {});
+          }
         }
       } catch (e) { logErr('admin_action exec:', act.id, e.message); }
       stmts.markActionDone.run(act.id);

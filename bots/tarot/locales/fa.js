@@ -370,6 +370,11 @@ export default {
     discountApplied: (orig, final, percent) =>
       `🎟️ ${fmt(percent)}٪ تخفیفِ اولین پرداخت اعمال شد: ${fmt(orig)} ← *${fmt(final)} تومان*`,
     invalidAmount: () => 'مبلغ نامعتبره؛ یه عدد به تومان بفرست 🙏',
+    amountTooLow: (min) => `حداقل مبلغ شارژ ${fmt(min)} تومانه 🙏\nیه عدد بزرگ‌تر بفرست.`,
+    // شارژ/بازکردنِ دستی توسط پشتیبانی
+    supportCredited: (amount, balance) =>
+      `✅ ${fmt(amount)} تومان توسط پشتیبانی به حساب شما اضافه شد.\n\n💰 موجودی فعلی: ${fmt(balance)} تومان`,
+    supportUnlocked: 'فال شما توسط پشتیبانی پرداخت شد ✅\nهر وقت آماده بودی، کارت‌هات رو باز کن 👇',
     invoice: (amount, card, owner) =>
       `🧾 فاکتور شارژ\n\nمبلغ: *${fmt(amount)} تومان*\n\nکارت‌به‌کارت به:\n\`${card}\`\n${owner}\n\nبعد از واریز، عکس رسید رو همین‌جا بفرست 📸`,
     invoiceDiscounted: (orig, amount, code) =>

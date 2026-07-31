@@ -18,7 +18,7 @@ import {
 import { audit } from './lib/platform.js';
 import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
-import { supportBody, supportUserBody } from './routes/support.js';
+import { supportBody, supportUserBody, supportAction } from './routes/support.js';
 import { financeBody, financeCsv, financeAction, costsBody } from './routes/finance.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
@@ -79,6 +79,13 @@ const ACTIONS = {
   '/marketing/toggle': { fn: marketingToggle, backTo: '/marketing' },
   '/marketing/usernames': { fn: marketingUsernames, backTo: '/marketing' },
   '/finance/action': { fn: financeAction, backTo: '/finance' },
+  '/support/action': {
+    fn: supportAction,
+    backTo: (b) => {
+      const inst = String(b.get('inst') || ''), uid = parseInt(b.get('uid'), 10);
+      return (inst && uid) ? `/support/user?inst=${encodeURIComponent(inst)}&id=${uid}` : '/support';
+    },
+  },
   '/discounts/create': { fn: discountCreate, backTo: '/discounts' },
   '/discounts/toggle': { fn: discountToggle, backTo: '/discounts' },
   '/experiments/create': { fn: experimentCreate, backTo: '/experiments' },
@@ -128,7 +135,10 @@ const server = http.createServer(async (req, res) => {
       let msg;
       try { msg = action.fn(body); }
       catch (e) { logErr('dashboard action:', path, e.message); msg = `❌ ${e.message}`; }
-      return redirect(res, `${action.backTo}?msg=${encodeURIComponent(msg || '')}`);
+      // backTo می‌تواند تابع باشد تا اکشن به همان صفحه‌ای که از آن آمده برگردد
+      // (مثلاً اقدامِ پشتیبانی → پروفایلِ همان کاربر، نه صفحه‌ی جستجو).
+      const back = typeof action.backTo === 'function' ? action.backTo(body) : action.backTo;
+      return redirect(res, `${back}?msg=${encodeURIComponent(msg || '')}`);
     }
 
     /* ---- CSV (export — در خود handler در audit ثبت می‌شود) ---- */
