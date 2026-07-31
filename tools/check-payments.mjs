@@ -35,6 +35,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, discount_code_id INTEGER,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
+    adjust_note TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
   CREATE TABLE discount_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, discount_percent INTEGER NOT NULL,
@@ -148,6 +149,48 @@ console.log('\n▶ ایجنتِ رسید با «مبلغِ روی فاکتور»
   // و در مقابل: اعتبارِ لحظه‌ی تأیید همچنان باید original_amount باشد
   ok(/const creditAmount\s*=\s*p\.original_amount\s*\|\|\s*p\.amount\s*;/.test(SRC),
     'ولی اعتبارِ approvePayment همچنان original_amount است (کاربر اصلِ شارژ را می‌گیرد)');
+}
+
+console.log('\n▶ پرداختِ کمتر از فاکتور: تشخیصِ decideReceipt');
+{
+  const { decideReceipt } = await import('../bots/tarot/cardpay.js');
+  const low = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low',
+    extracted: { amount_toman: 40000 } }, 50000);
+  ok(low.action === 'underpaid', 'پرداختِ ۴۰k روی فاکتورِ ۵۰k → underpaid (نه reject)');
+  ok(low.paid === 40000, 'مبلغِ واقعیِ پرداخت‌شده برگردانده می‌شود');
+
+  const enough = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low',
+    extracted: { amount_toman: 50000 } }, 50000);
+  ok(enough.action === 'approve', 'پرداختِ کافی که مدل اشتباه رد کرده → override به approve');
+
+  const notReceipt = decideReceipt({ verdict: 'reject', reason_code: 'not_a_receipt', extracted: {} }, 50000);
+  ok(notReceipt.action === 'not_a_receipt', 'رسید نبودن همچنان مسیرِ خودش را دارد');
+
+  const noAmount = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low', extracted: {} }, 50000);
+  ok(noAmount.action === 'reject', 'بدونِ مبلغِ استخراج‌شده، underpaid نمی‌شود');
+}
+
+console.log('\n▶ اصلاحِ فاکتور: اعتبار = دقیقاً همان چیزی که پرداخت شد');
+{
+  const p = newPayment();
+  claim(50_000, p);
+  const adj = sqlOf('adjustPaymentAmount');
+  ok(!!adj, 'statement اصلاحِ فاکتور در index.js هست');
+  db.prepare(adj).run(40_000, 40_000, 'اصلاح به دلیل پرداخت کمتر', p);
+  const row = db.prepare('SELECT amount, original_amount, adjust_note, status FROM payments WHERE id=?').get(p);
+  ok(row.amount === 40_000, 'مبلغِ فاکتور به پرداختِ واقعی اصلاح شد (درآمد = ۴۰k)');
+  ok((row.original_amount || row.amount) === 40_000, 'اعتبار هم ۴۰k می‌شود، نه ۵۰k');
+  ok(row.adjust_note === 'اصلاح به دلیل پرداخت کمتر', 'دلیلِ اصلاح لاگ شد');
+  setStatus('approved', p);
+  ok(db.prepare(adj).run(10, 10, 'x', p).changes === 0, 'فاکتورِ نهایی‌شده دیگر اصلاح نمی‌شود');
+}
+
+console.log('\n▶ گاردِ صریح: با تخفیف، پرداختِ کمتر خودکار تصمیم گرفته نمی‌شود');
+{
+  const src = SRC.slice(SRC.indexOf("decision.action === 'underpaid'"), SRC.indexOf("decision.action === 'underpaid'") + 400);
+  ok(/!p\.discount_code_id/.test(src), 'شرطِ safe شاملِ «تخفیف نداشته باشد» است');
+  ok(/paid >= MIN_RECHARGE/.test(src), 'مبلغِ خیلی کم هم خودکار تصمیم گرفته نمی‌شود');
+  ok(/paid < amountToman/.test(src), 'و فقط وقتی واقعاً کمتر از فاکتور باشد');
 }
 
 console.log('\n▶ کدِ غیرفعال اصلاً پیدا نمی‌شود (getDiscountCode فیلترِ is_active دارد)');
