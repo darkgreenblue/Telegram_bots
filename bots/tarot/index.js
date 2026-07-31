@@ -79,7 +79,12 @@ const TEST_PHASE = false;
 // 1.7.0: دکمه‌ی «🎁 تخفیف می‌خوام» در پی‌وال فقط برای کسی که واقعاً تخفیفِ اولین شارژ
 //        دارد نشان داده می‌شود، و مسیرِ «دعوت دوستان به‌جای تخفیف» حذف شد (وسطِ فالِ
 //        رزروشده کاربر را از خریدش منحرف می‌کرد). تک‌منبعِ شرط: firstDiscountAvailable().
-const PRODUCT_VERSION = '1.7.0';
+// 2.0.0: بازطراحیِ کاملِ ورود و ریلِ اولین پرداخت — هدیه‌ی خوش‌آمدِ ۳۰k (آنبوردینگ دو پیامی:
+//        اول ارزش، بعد اسم)، اولین فالِ سه‌کارتی بدونِ پی‌وال، دکمه‌ی «پرداختِ هزینه‌ی همین فال»
+//        به‌جای مرحله‌ی «چقدر شارژ کنم؟»، تخفیفِ اولین پرداخت ۵۰٪→۲۰٪ و فقط روی همان فال
+//        (بدونِ کد و بدونِ سقف)، نردبانِ شارژ ۵۰/۱۰۰/۲۰۰k با هدیه فقط از ۲۰۰k، و حذفِ پوشِ
+//        دوهفته‌ای به نفعِ تنها قلاب بازگشت: یادآوریِ شبانه‌ی کارت روز با انصرافِ دومرحله‌ای.
+const PRODUCT_VERSION = '2.0.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -125,18 +130,22 @@ const RECEIPT_MODEL = FLASH;
 // هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
 const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
 
-// هدیه‌ی خوش‌آمد حذف شد: مسیر رایگان فقط «کارت روز» است؛ حداقل مبلغ شارژ هم نداریم
+// 🎁 هدیه‌ی خوش‌آمد (v2.0.0): دقیقاً بهای یک فالِ کاملِ سه‌کارتی، تا کاربرِ جدید **قبل از
+// هر پی‌والی** ارزشِ واقعیِ محصول را ببیند (بند ۱۰ ریشه: اول ارزش، بعد پول). write-once با
+// ستونِ users.welcome_bonus_at — ری‌استارت/چندبار /start دوباره هدیه نمی‌دهد.
+const WELCOME_BONUS    = 30_000;
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
-// هدیه‌ی شارژ (ARPU بالاتر): مبلغ‌های بزرگ‌تر، هدیه‌ی بیشتر — از بزرگ به کوچک چک می‌شود
-const RECHARGE_BONUS   = [{ min: 200_000, bonus: 30_000 }, { min: 100_000, bonus: 10_000 }];
+// هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
+const RECHARGE_BONUS   = [{ min: 200_000, bonus: 50_000 }];
 const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus || 0;
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
-// هدیه‌ی اولین اقدام به شارژ: **هرگز خودکار اعمال نمی‌شود**. فقط وقتی کاربر روی دکمه‌ی
-// «تخفیف می‌خوام» بزند یک کدِ شخصی می‌گیرد و خودش هنگام پرداخت واردش می‌کند (تخفیف پشتِ
-// دکمه = کاربرِ آماده‌ی پرداخت حواسش پرت نمی‌شود). بعد از اولین شارژِ تأییدشده کد بی‌اثر است.
-const FIRST_RECHARGE_DISCOUNT = { percent: 50, cap: 100_000 };
+// تخفیفِ اولین پرداخت (v2.0.0): ۲۰٪، **فقط روی فالِ رزروشده‌ی همان لحظه** و بدون سقف.
+// دیگر کدی کپی نمی‌شود: دکمه‌ی «تخفیف می‌خوام» یک پیامِ کوتاهِ اطلاع‌رسانی می‌دهد و بلافاصله
+// خودِ فاکتورِ تخفیف‌خورده را می‌فرستد. شارژِ کیف‌پول عمداً تخفیف نمی‌گیرد (فرایندِ جداست).
+// کدِ `firstCodeFor(uid)` فقط دفترِ حسابداریِ «این کاربر تخفیفش را خرج کرد» است.
+const FIRST_RECHARGE_DISCOUNT = { percent: 20 };
 const MILESTONE_DAYS   = 14;
 const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیرانه در هفته
 const REVERSAL_PROB    = 0.3;
@@ -237,6 +246,10 @@ db.exec(`
     PRIMARY KEY (card_key, reversed, focus)
   );
 `);
+// migration (v2.0.0): هدیه‌ی خوش‌آمد write-once + انصراف از یادآوریِ کارت روز
+try { db.prepare('ALTER TABLE users ADD COLUMN welcome_bonus_at INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN daily_reminder_off INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN last_daily_reminder_at INTEGER').run(); } catch {}
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
@@ -291,6 +304,17 @@ const stmts = {
   readingsByStatus: db.prepare('SELECT status, COUNT(*) AS c FROM readings GROUP BY status'),
   setMilestone: db.prepare('UPDATE users SET next_milestone_at=? WHERE telegram_id=?'),
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
+  // هدیه‌ی خوش‌آمد: گاردِ write-once داخل خودِ UPDATE (changes=0 یعنی قبلاً گرفته)
+  claimWelcomeBonus: db.prepare('UPDATE users SET welcome_bonus_at=unixepoch() WHERE telegram_id=? AND welcome_bonus_at IS NULL'),
+  // یادآوریِ کارت روز: کسانی که امروز کارتشان را ندیده‌اند، انصراف نداده‌اند و امروز یادآوری نگرفته‌اند
+  dueDailyReminder: db.prepare(`
+    SELECT telegram_id FROM users
+     WHERE welcomed=1 AND daily_reminder_off=0
+       AND COALESCE(last_daily_date,'') <> ?
+       AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
+     LIMIT 200`),
+  setDailyReminded: db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
+  setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
   setReferredBy: db.prepare('UPDATE users SET referred_by=? WHERE telegram_id=?'),
   credit:     db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id=?'),
   deduct:     db.prepare('UPDATE users SET balance = balance - ? WHERE telegram_id=? AND balance >= ?'),
@@ -383,7 +407,7 @@ function ensureFirstDiscountCode(uid) {
   const code = firstCodeFor(uid);
   if (stmts.getDiscountCode.get(code)) return code;
   try {
-    stmts.insertDiscountCode.run(code, FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap,
+    stmts.insertDiscountCode.run(code, FIRST_RECHARGE_DISCOUNT.percent, null,
       null, 1, uid, 0);
   } catch (e) { logErr('first discount code', e.message); }
   return code;
@@ -409,11 +433,49 @@ const needBalanceText = (uid, price, cards) =>
 // دکمه‌ی «🎁 تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین شارژ دارد. کاربری که
 // قبلاً شارژ کرده یا تخفیفش خرج شده، این دکمه را اصلاً نمی‌بیند: تا قبل از این، زدنش
 // او را به دعوتِ دوستان می‌برد و وسطِ فالِ رزروشده، مسیرِ کاربر را کاملاً منحرف می‌کرد.
-const needBalanceRows = (uid) => {
-  const rows = [[Markup.button.callback(L.buttons.recharge, 'recharge')]];
-  if (firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, 'want_discount')]);
+// ترتیبِ عمدی (v2.0.0): «پرداختِ هزینه‌ی همین فال» اولِ همه، چون کم‌اصطکاک‌ترین مسیرِ رسیدن
+// به همان چیزی است که کاربر همین حالا می‌خواهد؛ «افزایش موجودی» مسیرِ کیف‌پول است و
+// «تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین پرداخت را دارد.
+const needBalanceRows = (uid, reading) => {
+  const rows = [];
+  if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
+  rows.push([Markup.button.callback(L.buttons.recharge, 'recharge')]);
+  if (reading && firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, `wdisc:${reading.id}`)]);
   return rows;
 };
+
+// فاکتورِ مستقیمِ یک فالِ رزروشده: بدونِ مرحله‌ی «چقدر شارژ کنم؟». مبلغِ پرداخت = قیمتِ فال
+// (یا ۲۰٪ کمتر با تخفیفِ اولین پرداخت)، ولی اعتبارِ داده‌شده هنگام تأیید همان قیمتِ کاملِ فال
+// است (`original_amount`) تا فال دقیقاً باز شود — همان ریاضیِ جاافتاده‌ی تخفیف، بدونِ منطقِ نو.
+async function invoiceForReading(ctx, uid, readingId, withDiscount) {
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid || r.status !== 'pending_payment') {
+    return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
+  }
+  const price = r.price;
+  let payAmount = price;
+  let dc = null;
+  if (withDiscount && firstDiscountAvailable(uid)) {
+    ensureFirstDiscountCode(uid);
+    dc = stmts.getDiscountCode.get(firstCodeFor(uid));
+    if (dc) payAmount = Math.max(0, price - Math.round(price * dc.discount_percent / 100));
+  }
+  const paymentId = Number(stmts.insertPayment.run(uid).lastInsertRowid);
+  track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
+  stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
+  if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
+  patchSession(uid, { paymentId, readingId });
+  setState(uid, 'pay_receipt');
+  // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
+  if (dc) await ctx.reply(L.wallet.discountApplied(price, payAmount, dc.discount_percent), { parse_mode: 'Markdown' });
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([
+      cardCopyRow(),
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
+    ]).reply_markup,
+  });
+}
 // کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
 // نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
@@ -794,6 +856,18 @@ registerJourney(bot, {
 });
 
 /* ---------- آنبوردینگ و /start ---------- */
+// هدیه‌ی خوش‌آمد — write-once با ستونِ welcome_bonus_at (گاردِ اتمیک: فقط وقتی هنوز NULL
+// است هم اعتبار می‌دهد هم مهر می‌زند، پس چندبار /start یا ری‌استارت دوباره پول نمی‌دهد).
+function grantWelcomeBonus(uid) {
+  try {
+    const done = stmts.claimWelcomeBonus.run(uid).changes;
+    if (!done) return false;
+    stmts.credit.run(WELCOME_BONUS, uid);
+    track(db, uid, 'credit_granted', { amount: WELCOME_BONUS, kind: 'welcome' });
+    return true;
+  } catch (e) { logErr('welcome bonus:', e.message); return false; }
+}
+
 async function handleStart(ctx) {
   const uid = ctx.from.id;
   const { isNew } = upsertUser(ctx);
@@ -816,12 +890,17 @@ async function handleStart(ctx) {
   }
 
   if (!user.welcomed) {
-    // قدم صفر آنبوردینگ: قبل از هر توضیحی، نام فارسیِ کاربر را می‌پرسیم (بهانه‌ی طبیعیِ فال).
-    // نام تلگرام ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند؛ پس نامِ خودگفته را مبنا می‌گیریم.
-    // کیبورد اصلی هنوز نشان داده نمی‌شود؛ تا پایان آنبوردینگ کاربر نباید بتواند مراحل را رد کند.
+    // v2.0.0 — اول ارزش، بعد اسم: پیامِ اول خوش‌آمد + هدیه‌ی اعتبار (دقیقاً بهای یک فالِ
+    // کامل) را می‌دهد، پیامِ دوم تازه نام را می‌پرسد. قبلاً اولین چیزی که کاربر می‌دید یک
+    // درخواست بود، نه یک ارزش.
+    grantWelcomeBonus(uid);
+    await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS), Markup.removeKeyboard());
+    await typing(ctx, PACE_S);
+    // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
+    // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
     setState(uid, 'onboard_name');
     setSession(uid, { refBonus }); // وعده‌ی رفرال بعد از گرفتن نام نشان داده می‌شود
-    await ctx.reply(L.onboarding.askName, Markup.removeKeyboard());
+    await ctx.reply(L.onboarding.askName, { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
     return;
   }
 
@@ -956,6 +1035,7 @@ async function dailyCard(ctx) {
     await ctx.reply(L.daily.streak(streak));
     if (streak % STREAK_EVERY === 0) {
       stmts.credit.run(STREAK_REWARD, uid);
+      track(db, uid, 'credit_granted', { amount: STREAK_REWARD, kind: 'streak' });
       await ctx.reply(L.daily.streakReward(STREAK_REWARD));
     }
   }
@@ -1504,7 +1584,7 @@ async function finishPicking(ctx, uid, s) {
   } else {
     // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
     await ctx.reply(needBalanceText(uid, spread.price, spread.size), Markup.inlineKeyboard([
-      ...needBalanceRows(uid),
+      ...needBalanceRows(uid, { id: readingId, price: spread.price }),
       ...freeMenuRow(),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
@@ -1582,7 +1662,7 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid)));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid, r)));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1646,7 +1726,7 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid)));
+      return ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard(needBalanceRows(uid, r)));
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -1809,6 +1889,8 @@ async function finishReading(ctx, uid, readingId) {
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(REFERRAL_BONUS, ref.referrer_id);
       stmts.credit.run(REFERRAL_BONUS, uid);
+      track(db, ref.referrer_id, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
+      track(db, uid, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
       await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
       const referee = getUser(uid);
       await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), REFERRAL_BONUS)).catch(() => {});
@@ -1880,26 +1962,40 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
 // «تخفیف می‌خوام» — شاخه‌ی اختیاریِ کنارِ مسیر اصلی؛ استیت را دست نمی‌زند تا فالِ رزروشده
 // و پرداختِ در جریان سالم بمانند. اولین شارژ → کدِ شخصیِ ۵۰٪ (دستی وارد می‌شود، هرگز خودکار)؛
 // بعد از آن → مسیر دعوت دوستان. هر دو پیام دکمه‌ی «افزایش موجودی» دارند تا برگشت به مسیر اصلی یک تاچ باشد.
+// «پرداختِ هزینه‌ی همین فال» — مستقیم فاکتور، بدونِ مرحله‌ی انتخابِ مبلغ
+bot.action(/^payr:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  if (await blockDuringOpenPay(ctx)) return;
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await invoiceForReading(ctx, uid, parseInt(ctx.match[1], 10), false);
+});
+
+// «تخفیف می‌خوام» — دقیقاً مثل payr، فقط با یک پیامِ اطلاع‌رسانیِ کوتاه قبل از فاکتور.
+// هیچ کدی کپی نمی‌شود و هیچ دکمه‌ی میانی‌ای وسط راه نیست؛ کاربری که تخفیف می‌خواهد یعنی
+// می‌خواهد کمتر بپردازد، پس یک قدم بعد باید فاکتورش جلویش باشد.
+bot.action(/^wdisc:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  if (await blockDuringOpenPay(ctx)) return;
+  const avail = firstDiscountAvailable(uid);
+  track(db, uid, 'discount_requested', { first: !hasRecharged(uid), avail });
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await invoiceForReading(ctx, uid, parseInt(ctx.match[1], 10), true);
+});
+
+// دکمه‌ی کهنه‌ی داخلِ چتِ کاربران (قرارداد «callbackهای قدیمی نمی‌میرند»): دیگر کد نمی‌دهد،
+// چون تخفیف حالا فقط روی فالِ رزروشده و از مسیرِ wdisc اعمال می‌شود.
 bot.action('want_discount', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
-  const avail = firstDiscountAvailable(uid);
-  track(db, uid, 'discount_requested', { first: !hasRecharged(uid), avail });
-  const rechargeRow = [Markup.button.callback(L.buttons.recharge, 'recharge')];
-  // دکمه دیگر فقط به کسی نشان داده می‌شود که تخفیف دارد (needBalanceRows)، پس این شاخه
-  // فقط برای دکمه‌ی کهنه‌ی داخلِ چتِ کاربران است (قرارداد «callbackهای قدیمی نمی‌میرند»).
-  // مسیرِ قدیمیِ «دعوت دوستان به‌جای تخفیف» عمداً حذف شد: وسطِ فالِ رزروشده، کاربری که
-  // دنبالِ تخفیف بود را به یک مسیرِ کاملاً دیگر می‌برد و از خریدش دور می‌کرد.
-  if (!avail) return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([rechargeRow]));
-  const code = ensureFirstDiscountCode(uid);
-  return ctx.reply(L.wallet.firstDiscountOffer(FIRST_RECHARGE_DISCOUNT.percent, FIRST_RECHARGE_DISCOUNT.cap, code), {
-    parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([
-      [{ text: L.buttons.copyCode, copy_text: { text: code } }],
-      rechargeRow,
-    ]).reply_markup,
-  });
+  if (await offerPendingReading(ctx, uid)) return;
+  return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.recharge, 'recharge')],
+  ]));
 });
 
 bot.action('recharge', async (ctx) => {
@@ -1910,17 +2006,9 @@ bot.action('recharge', async (ctx) => {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
   patchSession(uid, { paymentId });
-  const s = getSession(uid);
-  // مبلغ پیشنهادی: اگر وسط فال گیر کرده، دقیقاً کسری + رند به بالا
-  let amounts = QUICK_AMOUNTS;
-  if (s.readingId) {
-    const r = stmts.getReading.get(s.readingId);
-    if (r && r.status === 'pending_payment') {
-      const shortfall = Math.max(r.price - getBalance(uid), 0);
-      const suggested = Math.max(Math.ceil(shortfall / 1000) * 1000, 1000);
-      amounts = [...new Set([suggested, ...QUICK_AMOUNTS])].sort((a, b) => a - b).slice(0, 4);
-    }
-  }
+  // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
+  // همین فال» بهتر انجام می‌دهد. این‌جا فقط نردبانِ قیمتِ کیف‌پول است.
+  const amounts = QUICK_AMOUNTS;
   await ctx.reply(L.wallet.askAmount(), Markup.inlineKeyboard([
     ...amounts.map(a => [Markup.button.callback(L.buttons.rechargeAmount(a, bonusFor(a)), `ramt:${a}`)]),
     [Markup.button.callback(L.buttons.customAmount, 'rcustom')],
@@ -2224,7 +2312,7 @@ async function offerPendingReading(ctx, uid) {
     ]));
   } else {
     await ctx.reply(needBalanceText(uid, r.price, cardsOf(r)), Markup.inlineKeyboard([
-      ...needBalanceRows(uid),
+      ...needBalanceRows(uid, r),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   }
@@ -2512,23 +2600,55 @@ bot.on('photo', async (ctx) => {
   await processReceipt(ctx, uid, paymentId, fileId, null, recovered);
 });
 
-/* ---------- sweep ساعتی milestone (پوش پیشگیرانه، سقف ۱/هفته) ---------- */
+/* ---------- یادآوریِ کارت روز (تنها قلاب بازگشت — v2.0.0) ----------
+   پوشِ milestone دوهفته‌ای کاملاً حذف شد. به‌جایش هر شب ساعت ۲۲ به وقت تهران، به کسانی که
+   کارتِ امروزشان را ندیده‌اند یک یادآوری می‌رود: تا نیمه‌شب فرصت دارند (تقویمِ کارت روز سرِ
+   ساعت ۰۰:۰۰ تهران ریست می‌شود). هر کاربر می‌تواند برای همیشه انصراف بدهد.
+   جارو هر ۱۵ دقیقه بیدار می‌شود ولی فقط داخلِ همان ساعت کار می‌کند؛ گاردِ ۱۸ساعته‌ی
+   last_daily_reminder_at جلوی پیامِ تکراری بعد از ری‌استارت را می‌گیرد. */
+const DAILY_REMINDER_HOUR = 22;
 setInterval(async () => {
   try {
-    for (const { telegram_id } of stmts.dueMilestones.all()) {
-      const last = stmts.lastDelivered.all(telegram_id, 1)[0];
-      stmts.setPush.run(telegram_id);
-      if (!last?.summary) continue;
-      await bot.telegram.sendMessage(telegram_id, L.milestone.checkin(last.summary), {
+    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
+    }).format(new Date()), 10);
+    if (hour !== DAILY_REMINDER_HOUR) return;
+    const today = tehranToday();
+    for (const { telegram_id } of stmts.dueDailyReminder.all(today)) {
+      stmts.setDailyReminded.run(telegram_id);
+      const ok = await bot.telegram.sendMessage(telegram_id, L.daily.reminder, {
         reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback(L.buttons.daily, 'daily_go')],
-          [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
+          [Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')],
+          [Markup.button.callback(L.buttons.dailyReminderOff, 'dailyoff')],
         ]).reply_markup,
-      }).catch(() => {});
+      }).then(() => true).catch(() => false);
+      if (ok) track(db, telegram_id, 'daily_reminder_sent', {});
       await sleep(300);
     }
-  } catch (e) { logErr('milestone sweep:', e.message); }
-}, 3600 * 1000);
+  } catch (e) { logErr('daily reminder sweep:', e.message); }
+}, 15 * 60 * 1000);
+
+// انصراف از یادآوری — تأییدِ دومرحله‌ای تا با یک تپِ اشتباه قلاب بازگشت را از دست ندهیم
+bot.action('dailyoff', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await ctx.reply(L.daily.reminderOffConfirm, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.dailyReminderOffYes, 'dailyoff_yes')],
+    [Markup.button.callback(L.buttons.cancel, 'dailyoff_no')],
+  ]));
+});
+bot.action('dailyoff_yes', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  stmts.setDailyReminderOff.run(uid);
+  track(db, uid, 'daily_reminder_off', {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.daily.reminderOffDone, mainKeyboard(uid));
+});
+bot.action('dailyoff_no', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.daily.reminderOffCanceled, mainKeyboard(ctx.from.id));
+});
 
 /* ===== Launch ===== */
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');

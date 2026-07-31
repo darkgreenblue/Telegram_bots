@@ -9,6 +9,7 @@ const NAV = [
   ['/screens', 'صفحه‌ها'],
   ['/retention', 'ریتنشن'],
   ['/finance', 'مالی'],
+  ['/costs', 'هزینه‌ها'],
   ['/users', 'کاربران'],
   ['/discounts', 'کد تخفیف'],
   ['/support', 'پشتیبانی'],

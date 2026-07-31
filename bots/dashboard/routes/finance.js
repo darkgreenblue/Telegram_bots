@@ -1,9 +1,9 @@
 // مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
 // هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
 // این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, moneyOf, unixOf, toToman, receiptQueueSupported } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere } from '../lib/bots.js';
 import { listAudit, audit } from '../lib/platform.js';
-import { fmt, esc, tehranDateTime, nowSec } from '../lib/util.js';
+import { fmt, esc, tehranDateTime, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
 
 // وضعیت‌های همه‌ی مدل‌های مالی (کیف‌پول + اشتراک tabir)
@@ -156,4 +156,100 @@ export function financeCsv(url) {
     [p.inst.id, p.id, p.userId, p.amount ?? '', p.original ?? '', p.status ?? '', p.step ?? '', p.created ?? '', p.updated ?? '']
       .map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
   return [header, ...lines].join('\n');
+}
+
+/* ===== هزینه‌ها vs درآمد (روزانه) =====
+   «هزینه» این‌جا یعنی **اعتباری که مجانی دادیم** و **تخفیفی که از درآمد گذشتیم** — هر دو به
+   تومان و مستقیماً با درآمد قابل‌مقایسه. منبع: رویدادِ `credit_granted` (props: amount, kind)
+   و جدولِ `discount_uses`. مرزِ روز همیشه تهران است (قرارداد بند ۲الف ریشه).
+   ⚠️ هزینه‌ی LLM این‌جا نیست: هیچ ربات این ریپو مصرفِ توکن را ثبت نمی‌کند، پس عددی که
+   نداریم را نمی‌سازیم. برای واردکردنش یا باید per-call هزینه ثبت شود یا از OpenRouter خوانده. */
+const COST_KINDS = { welcome: 'خوش‌آمد', streak: 'استریک', referral: 'رفرال', '': 'سایر' };
+
+function collectDaily(days) {
+  const since = tehranDayStart(-(days - 1));
+  const day = new Map(); // 'YYYY-MM-DD' → { rev, gift, disc, kinds:{} }
+  const at = (d) => { if (!day.has(d)) day.set(d, { rev: 0, gift: 0, disc: 0, kinds: {} }); return day.get(d); };
+  for (const inst of instances()) {
+    withDb(inst.file, (db) => {
+      const m = moneyOf(inst.bot);
+      // درآمدِ تأییدشده — از تک‌منبعِ revenueWhere (فیلترِ پرداختِ شبیه‌سازی‌شده‌ی tabir هم داخلش است)
+      const rw = revenueWhere(inst.bot, '?');
+      if (hasTable(db, rw.table)) {
+        const catExpr = unixOf(m.createdKind, 'created_at');
+        for (const r of rows(db, `SELECT ${catExpr} AS t, ${rw.amountCol} AS a FROM ${rw.table} WHERE ${rw.where}`, [since])) {
+          at(tehranDayStr(r.t)).rev += toToman(inst.bot, r.a) || 0;
+        }
+      }
+      // اعتبارِ هدیه‌شده
+      if (hasTable(db, 'events')) {
+        for (const r of rows(db, `SELECT created_at AS t,
+               COALESCE(json_extract(props,'$.amount'), 0) AS a,
+               COALESCE(json_extract(props,'$.kind'), '') AS k
+             FROM events WHERE event='credit_granted' AND created_at >= ?`, [since])) {
+          const d = at(tehranDayStr(r.t));
+          const v = toToman(inst.bot, r.a) || 0;
+          d.gift += v;
+          d.kinds[r.k] = (d.kinds[r.k] || 0) + v;
+        }
+      }
+      // تخفیفِ داده‌شده (درآمدِ ازدست‌رفته)
+      if (hasTable(db, 'discount_uses')) {
+        for (const r of rows(db, 'SELECT used_at AS t, discount_amount AS a FROM discount_uses WHERE used_at >= ?', [since])) {
+          at(tehranDayStr(r.t)).disc += toToman(inst.bot, r.a) || 0;
+        }
+      }
+    });
+  }
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    const d = tehranDayStr(tehranDayStart(-i));
+    out.push({ d, ...(day.get(d) || { rev: 0, gift: 0, disc: 0, kinds: {} }) });
+  }
+  return out;
+}
+
+export function costsBody(url) {
+  const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 7), 180);
+  const series = collectDaily(days);
+  const sum = series.reduce((a, r) => ({ rev: a.rev + r.rev, gift: a.gift + r.gift, disc: a.disc + r.disc }), { rev: 0, gift: 0, disc: 0 });
+  const cost = sum.gift + sum.disc;
+  const net = sum.rev - cost;
+  const kinds = {};
+  for (const r of series) for (const [k, v] of Object.entries(r.kinds)) kinds[k] = (kinds[k] || 0) + v;
+
+  const max = Math.max(1, ...series.map(r => Math.max(r.rev, r.gift + r.disc)));
+  const px = (v) => Math.round((v / max) * 220);
+  const rowsHtml = series.map(r => [
+    r.d,
+    `${fmt(r.rev)} ت <span class="bar" style="width:${px(r.rev)}px"></span>`,
+    `${fmt(r.gift)} ت`,
+    `${fmt(r.disc)} ت`,
+    `<span class="${r.rev - r.gift - r.disc < 0 ? 'drop' : ''}">${fmt(r.rev - r.gift - r.disc)} ت</span>` +
+      ` <span class="bar" style="width:${px(r.gift + r.disc)}px;background:var(--bad,#c0392b)"></span>`,
+  ]);
+
+  return `
+    <h1>هزینه‌ها و درآمد</h1>
+    <form method="get" action="/costs" class="inline">
+      <label>بازه<select name="days">
+        ${[7, 30, 90, 180].map(v => `<option value="${v}" ${v === days ? 'selected' : ''}>${v} روز</option>`).join('')}
+      </select></label><button type="submit">اعمال</button>
+    </form>
+    <div class="stats">
+      ${stat('درآمدِ تأییدشده', `${fmt(sum.rev)} ت`)}
+      ${stat('اعتبارِ هدیه‌شده', `${fmt(sum.gift)} ت`)}
+      ${stat('تخفیفِ داده‌شده', `${fmt(sum.disc)} ت`)}
+      ${stat('خالص (درآمد منهای هزینه)', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`)}
+    </div>
+    <p class="muted">${net < 0
+      ? '⚠️ در این بازه، هزینه‌ی هدیه و تخفیف از درآمد بیشتر بوده.'
+      : 'در این بازه درآمد از هزینه‌ی هدیه و تخفیف بیشتر بوده.'}</p>
+    <h2>تفکیک اعتبارِ هدیه</h2>
+    ${table(['نوع', 'مبلغ'], Object.entries(kinds).sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => [esc(COST_KINDS[k] || k || 'سایر'), `${fmt(v)} ت`]), 'هنوز هدیه‌ای داده نشده')}
+    <h2>روزانه</h2>
+    ${table(['روز', 'درآمد', 'هدیه', 'تخفیف', 'خالص'], rowsHtml)}
+    <p class="muted">⚠️ هزینه‌ی LLM در این اعداد نیست: مصرفِ توکن هیچ‌جا ثبت نمی‌شود.
+      این صفحه فقط پولی را نشان می‌دهد که واقعاً از جیبِ درآمد رفته (اعتبارِ مجانی + تخفیف).</p>`;
 }
