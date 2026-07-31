@@ -13,3 +13,6 @@ data/
 bots/*/data/
 bots/*/.env
 bots/*/node_modules/
+
+# گزارش‌های PDF تحلیل (از روی md دوباره ساخته می‌شوند)
+analytics/*/reports/*.pdf
