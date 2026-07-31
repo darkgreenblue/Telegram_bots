@@ -152,6 +152,17 @@ jobs:
             # resume-tailor بازنشسته شد (منسوخ + مصرف LLM بی‌سقف/SSRF) — یک‌باره از pm2 حذف می‌شود
             pm2 delete resume-tailor 2>/dev/null && pm2 save || true
 
+            # ---------- جبرانِ یک‌باره‌ی کاربرِ آسیب‌دیده از باگِ کدِ تخفیف (تصمیم مالک ۱۴۰۵/۰۵/۰۹) ----------
+            # خودِ اسکریپت با فایلِ marker یک‌باره است (اجرای دوم هیچ‌کاری نمی‌کند و هرگز دوبار
+            # اعتبار نمی‌دهد). بعد از تأییدِ اجرا، این بلوک در یک PR جدا برداشته می‌شود تا مثل
+            # بلوکِ launch-wipe یک تله‌ی خفته نماند.
+            if [ -f bots/tarot/.env ] && [ ! -f bots/tarot/data/.goodwill-8985999244-done ]; then
+              echo "🎁 جبرانِ یک‌باره‌ی کاربرِ باگِ تخفیف..."
+              BOT_TOKEN="$(grep -m1 '^BOT_TOKEN=' bots/tarot/.env | cut -d= -f2-)" \
+                node tools/goodwill-credit-tarot.mjs bots/tarot/data \
+                || echo "⚠️ جبران ناتمام ماند — لاگ بالا را ببین (اعتبار دوباره داده نمی‌شود)"
+            fi
+
             # ---------- Cloudflare Tunnel داشبورد (هیچ پورت inbound باز نمی‌شود) ----------
             # named tunnel اگر CLOUDFLARE_TUNNEL_TOKEN ست باشد (آدرس ثابت با دامنه)،
             # وگرنه quick tunnel رایگان trycloudflare (آدرس بعد از هر ری‌استارت عوض می‌شود؛
