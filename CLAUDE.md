@@ -173,6 +173,7 @@
 - **`bot.catch` سراسری الزامی** + هندلرهای `unhandledRejection` (فقط لاگ — کرش یعنی مرگ همه‌ی فلوهای در جریان) و `uncaughtException` (لاگ stack + exit تا pm2 ری‌استارت کند). پیاده‌سازی آماده: `shared/errors.js`. هرگز فلو «بی‌صدا» نمیرد.
 - لاگ = stdout/stderr که pm2 در `~/.pm2/logs/<app>-{out,error}.log` نگه می‌دارد — منبع حقیقت دیباگ؛ لاگر جدا نساز.
 - خطاهای عملیاتی مهم با پیشوند ثابت قابل‌grep: `❌ GLOBAL`، `❌ UNHANDLED_REJECTION`، `❌ UNCAUGHT_EXCEPTION`، `REFUND path`.
+- **مسیرهای سرد را CI نمی‌بیند — چکِ شناسه لازم است:** `node --check` فقط سینتکس است و boot smoke test فقط تا گاردِ ENV می‌رود، پس یک شناسه‌ی import/تعریف‌نشده روی مسیرِ کم‌رفت‌وآمد (رسید، ریفاند، ادمین، شاخه‌ی خطا) تا لحظه‌ی رسیدنِ کاربرِ واقعی ساکت می‌ماند. باگِ واقعی: `decideReceipt` که import نشده بود و **تأییدِ خودکارِ رسیدِ tarot را یک روز خواباند** (۲۳ تیر ۱۴۰۵؛ فیکس `3ded4ec`). گارد: `tools/check-undefined.mjs` (چکِ CI روی لگِ voice2text) که هر `NAME(...)`ِ تعریف‌نشده را قرمز می‌کند. **ماژولِ جدید یا فایلِ ورودیِ ربات جدید را به آرایه‌ی `TARGETS` همان اسکریپت اضافه کن**، وگرنه چک از کنارش رد می‌شود.
 
 ## ۸ب) بکاپ دیتابیس‌ها: workflow `Backup` (`.github/workflows/backup.yml`)
 - هر شب خودکار (+ dispatch دستی): snapshot سازگار همه‌ی `bots/*/data/*.db` با online-backup API خود better-sqlite3 (امن حین اجرا، WAL پوشش داده می‌شود) + دیتابیس‌های tabir-khab با sqlite3 پایتون → artifact در Actions با نگه‌داری ۳۰ روز؛ اگر `BACKUP_PASSPHRASE` ست باشد رمز می‌شود. شکست بکاپ → پیام تلگرام به مالک + جاب قرمز.

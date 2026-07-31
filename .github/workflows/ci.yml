@@ -37,6 +37,13 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-support-sync.mjs
 
+      # شناسه‌های تعریف‌نشده: `node --check` فقط سینتکس را می‌بیند و boot smoke test فقط تا
+      # گاردِ ENV می‌رود، پس یک import گمشده روی مسیرِ سرد (رسید، ریفاند، ادمین) تا لحظه‌ی
+      # اجرا نامرئی می‌ماند. باگِ واقعی: decideReceipt که یک روز تأییدِ خودکارِ رسید را خواباند.
+      - name: Undefined identifier check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-undefined.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
