@@ -41,6 +41,8 @@ const TARGETS = [
   'shared/support.js',
   'shared/errors.js',
   'shared/logger.js',
+  'tools/benchmark/tme.mjs',
+  'tools/benchmark/collect.mjs',
 ];
 
 const GLOBALS = new Set([

@@ -208,7 +208,10 @@ export async function fetchPreview(username, before = null, { timeoutMs = 20000 
  * تاریخچه‌ی یک کانال را تا `pages` صفحه (هر صفحه ~۲۰ پست) عقب می‌رود.
  * با فاصله‌ی مودبانه بین درخواست‌ها تا t.me محدودمان نکند.
  */
-export async function collectChannel(username, { pages = 5, delayMs = 1200, log = () => {} } = {}) {
+export async function collectChannel(username, opts = {}) {
+  const pages = opts.pages ?? 5;
+  const delayMs = opts.delayMs ?? 1200;
+  const log = typeof opts.log === 'function' ? opts.log : () => {};
   const first = await fetchPreview(username);
   if (!first.ok) {
     return { username, ok: false, error: `HTTP ${first.status}`, posts: [], header: null };
