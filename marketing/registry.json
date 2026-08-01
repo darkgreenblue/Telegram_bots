@@ -3,7 +3,7 @@
   "_docs": "رجیستری مارکتینگ کانال‌ها — قرارداد در .claude/skills/telegram-channel-marketing/SKILL.md و بند «مارکتینگ کانال» CLAUDE.md ریشه. افزودن ربات جدید = یک ردیف اینجا + نگاشت توکن در .github/workflows/marketing.yml. کانال با status=pending در پست روزانه رد می‌شود؛ بعد از ساخت کانال توسط مالک و ادمین‌شدن ربات، chat را پر کن و status را active کن.",
   "bots": {
     "tarot": {
-      "title": "فال تاروت",
+      "title": "فال تاروت هوش مصنوعی",
       "botUsername": "taroot_fa_bot",
       "tokenSecret": "TAROT_BOT_TOKEN",
       "language": "fa",
@@ -22,70 +22,10 @@
       ],
       "pillars": [
         {
-          "key": "zodiac_daily",
-          "desc": "فال روزانه‌ی ماه تولد: هر ۱۲ ماه، ۲ تا ۳ خط. ستون پرچم‌دار کانال و هر روز منتشر می‌شود",
-          "weight": 6,
-          "cta": "engage"
-        },
-        {
-          "key": "abjad",
-          "desc": "فال ابجد ماه‌به‌ماه: همان فرمت ۱۲ ماهه با زبان ابجد",
-          "weight": 3,
-          "cta": "engage"
-        },
-        {
-          "key": "hafez",
-          "desc": "فال حافظ روزانه per ماه: بیت واقعی (دو بیت) + تعبیر با رجیستر کتابی",
-          "weight": 3,
-          "cta": "engage"
-        },
-        {
-          "key": "tarot_12",
-          "desc": "تک نیت تاروت ۱۲ ماهه: کارت هر ماه با تفسیر کوتاه",
-          "weight": 3,
-          "cta": "engage"
-        },
-        {
-          "key": "night_12",
-          "desc": "فال شبانه ۱۲ ماهه: پیام کوتاه شبانه برای هر ماه",
-          "weight": 2,
-          "cta": "engage"
-        },
-        {
-          "key": "tarot_card",
-          "desc": "تک نیت احساسی گذشته/حال/آینده (بدون تفکیک ماه)",
-          "weight": 2,
+          "key": "ai_tarot_daily",
+          "desc": "فال تاروت روزانه‌ی ماه تولد از زبان هوش مصنوعی: برای هر ۱۲ ماه یک کارت و تفسیر کوتاه. تنها ستون فعال.",
+          "weight": 10,
           "cta": "bot"
-        },
-        {
-          "key": "interactive",
-          "desc": "نیت کن و یکی از چند گزینه را انتخاب کن؛ جواب در پست بعدی",
-          "weight": 2,
-          "cta": "engage"
-        },
-        {
-          "key": "coffee",
-          "desc": "فال قهوه: تفسیر یک نماد فنجان",
-          "weight": 1,
-          "cta": "engage"
-        },
-        {
-          "key": "emotional",
-          "desc": "پیام کوتاه احساسی و معنوی (۲۵۰ تا ۳۵۰ کاراکتر)",
-          "weight": 1,
-          "cta": "share"
-        },
-        {
-          "key": "night",
-          "desc": "پیام شب کوتاه با رجیستر کتابی",
-          "weight": 1,
-          "cta": "engage"
-        },
-        {
-          "key": "dream",
-          "desc": "تعبیر خواب کوتاه: یک نماد پرتکرار",
-          "weight": 1,
-          "cta": "engage"
         }
       ],
       "channels": [
@@ -95,63 +35,18 @@
           "chat": "@taroot_fa",
           "campaign": "PKxwQ",
           "status": "active",
-          "mode": "daily10",
+          "mode": "daily1",
           "strategy": "marketing/tarot/strategy.md",
           "slots": [
             {
               "slot": 1,
-              "tehran": "08:00",
+              "tehran": "10:00",
               "notify": true
-            },
-            {
-              "slot": 2,
-              "tehran": "09:30",
-              "notify": false
-            },
-            {
-              "slot": 3,
-              "tehran": "11:00",
-              "notify": false
-            },
-            {
-              "slot": 4,
-              "tehran": "12:30",
-              "notify": false
-            },
-            {
-              "slot": 5,
-              "tehran": "14:00",
-              "notify": true
-            },
-            {
-              "slot": 6,
-              "tehran": "16:00",
-              "notify": false
-            },
-            {
-              "slot": 7,
-              "tehran": "18:00",
-              "notify": false
-            },
-            {
-              "slot": 8,
-              "tehran": "20:00",
-              "notify": true
-            },
-            {
-              "slot": 9,
-              "tehran": "21:30",
-              "notify": false
-            },
-            {
-              "slot": 10,
-              "tehran": "23:00",
-              "notify": false
             }
           ],
           "ctaPolicy": {
-            "maxBotCtaPerDay": 3,
-            "note": "بقیه‌ی پست‌ها CTA درگیرکننده دارند (ری‌اکشن، کامنت، فوروارد) نه لینک ربات. لینک ربات فقط جایی که واقعاً ادامه‌ی طبیعی محتواست."
+            "maxBotCtaPerDay": 1,
+            "note": "تنها CTA هر پست، دکمه‌ی «فال روزانه‌ی شخصی خودت رو بگیر» است که به ربات لینک می‌شود. هیچ CTA اینگیجمنتی (ری‌اکشن/کامنت) در انتهای فال نوشته نمی‌شود."
           },
           "postRef": "c_<campaign>_<YYMMDD>s<slot>"
         },
@@ -177,7 +72,7 @@
           "status": "pending"
         }
       ],
-      "channelIdentity": "کانال یک رسانه‌ی محتوایی مستقل درباره‌ی انواع فال است، نه ویترین ربات. کاربر باید برای خودِ محتوا عضو بماند. ربات فقط یکی از راه‌های ادامه دادن است و حداکثر در ۳ پست از هر ۱۰ پست دیده می‌شود. تبلیغات آینده برای خودِ کانال است."
+      "channelIdentity": "کانالِ «فالِ هوش مصنوعی». تمایزِ اصلی و مانورِ همیشگی: این فال را یک هوش مصنوعی می‌گیرد، نه یک فالگیر انسانی. لحن از زبانِ خودِ هوش مصنوعی است. فعلاً روزی یک پست: فال تاروت روزانه‌ی ماه تولد برای هر دوازده ماه."
     },
     "tabir-khab": {
       "title": "تعبیر خواب",
