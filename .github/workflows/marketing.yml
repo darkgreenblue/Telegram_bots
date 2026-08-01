@@ -35,7 +35,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [post, campaign-add, getme]
+        options: [post, campaign-add, getme, delete]
       bot:
         description: 'کلید ربات در marketing/registry.json (مثل tarot یا tabir-khab)'
         required: true
@@ -57,6 +57,10 @@ on:
         default: ''
       name:
         description: 'برچسب کمپین (برای campaign-add)'
+        required: false
+        default: ''
+      message_ids:
+        description: 'شناسه‌ی پیام‌ها با کاما برای حذف (برای delete)، مثل 8,9,10'
         required: false
         default: ''
 
@@ -212,6 +216,37 @@ jobs:
           fi
           MSG_ID=$(printf '%s' "$RESP" | jq -r '.result.message_id')
           echo "✅ پست منتشر شد: chat=$CHAT message_id=$MSG_ID path=$MKT_PATH"
+
+      # حذفِ پیام‌های خودِ ربات از کانال (Bot API فقط پیامِ خودش را و فقط تا ۴۸ ساعت می‌تواند پاک کند)
+      - name: Delete messages
+        if: inputs.action == 'delete'
+        env:
+          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          MKT_BOT:    ${{ inputs.bot }}
+          MKT_CHAT:   ${{ inputs.chat }}
+          MKT_IDS:    ${{ inputs.message_ids }}
+        run: |
+          set -e
+          case "$MKT_BOT" in
+            tarot)      TOKEN="$T_TAROT";;
+            tabir-khab) TOKEN="$T_TABIR_FA";;
+            *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
+          esac
+          [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
+          case "$MKT_CHAT" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ chat نامعتبر: «$MKT_CHAT»"; exit 1;; esac
+          case "$MKT_IDS" in (*[!0-9,]*|'') echo "❌ message_ids فقط عدد و کاما"; exit 1;; esac
+          OK=0; FAIL=0
+          for ID in $(printf '%s' "$MKT_IDS" | tr ',' ' '); do
+            RESP=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/deleteMessage" \
+              -d chat_id="$MKT_CHAT" -d message_id="$ID") || { echo "❌ خطای شبکه روی $ID"; FAIL=$((FAIL+1)); continue; }
+            if [ "$(printf '%s' "$RESP" | jq -r '.ok')" = "true" ]; then
+              echo "🗑 پیام $ID پاک شد"; OK=$((OK+1))
+            else
+              echo "⏭ پیام $ID پاک نشد: $(printf '%s' "$RESP" | jq -r '.description // .')"; FAIL=$((FAIL+1))
+            fi
+          done
+          echo "نتیجه: $OK پاک شد، $FAIL ناموفق"
 
       - name: Get bot username (getme)
         if: inputs.action == 'getme'

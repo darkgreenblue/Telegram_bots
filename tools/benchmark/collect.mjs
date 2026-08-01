@@ -30,6 +30,8 @@ function args() {
     delayMs: Number(get('delay', 1200)),
     probe: a.includes('--probe'),
     topN: Number(get('top', 5)),
+    swipeN: Number(get('swipe', 4)),
+    swipeChars: Number(get('swipeChars', 1400)),
   };
 }
 
@@ -229,6 +231,59 @@ async function main() {
   }
 
   for (const a of analyses) printChannel(a, opt.topN);
+
+  // ── سواکردنِ پست‌های موفق (Swipe file) ─────────────────────────────────────
+  // چرا: گزارشِ عددی می‌گوید «فرمتِ دوازده‌ماهه برنده است» ولی کپی‌رایتر از عدد نمی‌تواند
+  // تقلید کند؛ باید **متنِ کاملِ** پستِ برنده را ببیند: قلم، ایموجی، ریتم، و مهم‌تر از همه
+  // شکلِ CTA. این بخش پست‌های واقعاً موفق را با متنِ کامل جدا می‌کند تا ورودیِ مستقیمِ
+  // تولید محتوا باشد. معیارِ «موفق» نسبی است (نسبت به میانه‌ی همان کانال) نه مطلق.
+  const swipeLines = [];
+  swipeLines.push(`# پست‌های موفقِ حوزه‌ی ${opt.domain} (متن کامل)`);
+  swipeLines.push('');
+  swipeLines.push(`> تولید خودکار: ${new Date().toISOString().slice(0, 10)} — از ${raw.length} کانال.`);
+  swipeLines.push('> این فایل ورودیِ مستقیمِ کپی‌رایترهاست. «موفق» یعنی ویو یا ری‌اکشنِ پست');
+  swipeLines.push('> نسبت به **میانه‌ی همان کانال** بالا بوده، نه عددِ مطلق (عددِ مطلق می‌تواند تبلیغِ خریداری‌شده باشد).');
+  swipeLines.push('> قلم، ریتم، ایموجی و مخصوصاً **شکلِ CTA** را از این‌ها تقلید کن، نه محتوای عینی را.');
+  swipeLines.push('');
+
+  for (const a of analyses) {
+    const ch = raw.find((r) => r.username === a.username);
+    if (!ch || !a.medianViews) continue;
+    const now2 = Date.now();
+    const cand = ch.posts
+      .filter((p) => !p.isService && p.date && Number.isFinite(p.views) && p.text && p.text.length > 40)
+      .filter((p) => now2 - new Date(p.date).getTime() >= MATURE_HOURS * 3600e3)
+      .map((p) => ({
+        ...p,
+        vr: p.views / a.medianViews,
+        er: p.views > 0 ? p.reactionTotal / p.views : 0,
+      }));
+    // امتیازِ «موفق بودن» = ویوِ نسبی + وزنِ ری‌اکشن (ری‌اکشن سیگنالِ کیفیتِ محتواست، ویو سیگنالِ رسایی)
+    const ranked = cand
+      .map((p) => ({ ...p, s: p.vr + (p.er / 0.02) * 0.6 }))
+      .sort((x, y) => y.s - x.s)
+      .slice(0, opt.swipeN);
+    if (!ranked.length) continue;
+
+    swipeLines.push(`## @${a.username}${a.title ? ' — ' + a.title : ''}`);
+    swipeLines.push(`میانه‌ی ویوِ کانال: ${fmt(a.medianViews)} | ویو/ممبر: ${pctStr(a.viewRate)} | ER: ${pctStr(a.er)}`);
+    swipeLines.push('');
+    for (const p of ranked) {
+      swipeLines.push(`### پست ${p.id} — ویو ${fmt(p.views)} (${p.vr.toFixed(2)}× میانه) | ری‌اکشن ${p.reactionTotal} (ER ${pctStr(p.er)}) | ${p.date?.slice(0, 16)} | ${p.media.join('+') || 'فقط متن'} | ${p.textLen} کاراکتر`);
+      if (p.reactions.length) swipeLines.push(`ری‌اکشن‌ها: ${p.reactions.map((r) => `${r.emoji}${r.count}`).join(' ')}`);
+      swipeLines.push('```');
+      swipeLines.push(p.text.slice(0, opt.swipeChars));
+      if (p.text.length > opt.swipeChars) swipeLines.push(`… [${p.text.length - opt.swipeChars} کاراکتر بیشتر]`);
+      swipeLines.push('```');
+      swipeLines.push('');
+    }
+  }
+
+  const swipeMd = swipeLines.join('\n');
+  writeFileSync(join(ROOT, 'benchmark', `swipe-${opt.domain}.md`), swipeMd);
+  console.log(`\n<<<SWIPE_MD>>>`);
+  console.log(swipeMd);
+  console.log(`<<<END_SWIPE_MD>>>`);
 
   // کشفِ کاندیداهای بنچمارک: کانال‌هایی که خودِ رقبا به آن‌ها لینک/منشن می‌دهند
   // (خوراکِ گام «جذب» اسکیل telegram-benchmark-loop؛ قضاوتِ مرتبط‌بودن با سشن است، نه اینجا)
