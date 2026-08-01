@@ -22,6 +22,7 @@ const MUST_HAVE = [
   "ADD COLUMN first_version TEXT NOT NULL DEFAULT ''",
   "first_version=? WHERE telegram_id=? AND first_version=''",
   'c_([A-Za-z0-9]{1,32})',
+  'c_([A-Za-z0-9]{1,32})_([A-Za-z0-9]{1,24})',
   'r(?:ef)?_(\\d+)',
   'busy_timeout = 5000',
 ];
@@ -37,6 +38,7 @@ const PY_MUST_HAVE = [
   'first_payload',
   'first_version',
   'c_([A-Za-z0-9]{1,32})',
+  'c_([A-Za-z0-9]{1,32})_([A-Za-z0-9]{1,24})',
   'r(?:ef)?_(\\d+)',
   'busy_timeout = 5000',
 ];

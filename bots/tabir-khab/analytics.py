@@ -1,6 +1,6 @@
 """analytics.py — پورت پایتونیِ هم‌قرارداد shared/analytics.js (مونوریپو).
 
-ANALYTICS_SCHEMA_VERSION = 2
+ANALYTICS_SCHEMA_VERSION = 3
 
 قرارداد (چک CI ریشه: tools/check-analytics-sync.mjs سینک بودن را با shared تضمین می‌کند):
 - جدول events (user_id, event, props JSON, created_at یونیکس) + ایندکس‌های idx_events_user / idx_events_event
@@ -18,10 +18,11 @@ import re
 
 import aiosqlite
 
-ANALYTICS_SCHEMA_VERSION = 2
+ANALYTICS_SCHEMA_VERSION = 3
 
 log = logging.getLogger("analytics")
 
+_CAMPAIGN_POST_RE = re.compile(r"^c_([A-Za-z0-9]{1,32})_([A-Za-z0-9]{1,24})$")
 _CAMPAIGN_RE = re.compile(r"^c_([A-Za-z0-9]{1,32})$")
 _REFERRAL_RE = re.compile(r"^r(?:ef)?_(\d+)$")
 
@@ -58,14 +59,17 @@ async def ensure_analytics(conn: aiosqlite.Connection) -> None:
 def parse_start_payload(raw: str) -> dict:
     payload = (raw or "").strip()[:64]
     if not payload:
-        return {"payload": "", "kind": "organic", "code": ""}
+        return {"payload": "", "kind": "organic", "code": "", "post": ""}
+    m = _CAMPAIGN_POST_RE.match(payload)
+    if m:
+        return {"payload": payload, "kind": "campaign", "code": m.group(1), "post": m.group(2)}
     m = _CAMPAIGN_RE.match(payload)
     if m:
-        return {"payload": payload, "kind": "campaign", "code": m.group(1)}
+        return {"payload": payload, "kind": "campaign", "code": m.group(1), "post": ""}
     m = _REFERRAL_RE.match(payload)
     if m:
-        return {"payload": payload, "kind": "referral", "code": m.group(1)}
-    return {"payload": payload, "kind": "other", "code": ""}
+        return {"payload": payload, "kind": "referral", "code": m.group(1), "post": ""}
+    return {"payload": payload, "kind": "other", "code": "", "post": ""}
 
 
 async def track(user_id, event: str, props: dict | None = None) -> None:
@@ -129,6 +133,8 @@ async def capture_start(user_id, raw_payload: str, is_new: bool, version: str = 
         props = {
             "payload": parsed["payload"], "kind": parsed["kind"], "code": parsed["code"], "new": bool(is_new),
         }
+        if parsed.get("post"):
+            props["post"] = parsed["post"]
         if version:
             props["v"] = str(version)
         await track(user_id, "start", props)

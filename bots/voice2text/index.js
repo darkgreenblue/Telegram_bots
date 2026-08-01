@@ -180,7 +180,7 @@ db.exec(`
 // Migration: مبلغِ رزروشده‌ی این فلو (کسر اتمیک در شروع پردازش؛ در شکست/ری‌استارت refund می‌شود)
 try { db.prepare('ALTER TABLE voice_flows ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 
-/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 2) =====
+/* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 3) =====
    این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
    قرارداد payload لینک استارت: c_<code> کمپین / r_<uid> یا ref_<uid> رفرال / خالی organic */
 db.pragma('busy_timeout = 5000');
@@ -217,8 +217,10 @@ function captureStart(userId, rawPayload, isNew) {
   try {
     const payload = String(rawPayload || '').trim().slice(0, 64);
     let kind = 'organic', code = '';
-    let m = payload.match(/^c_([A-Za-z0-9]{1,32})$/);
-    if (m) { kind = 'campaign'; code = m[1]; }
+    let post = '';
+    let m = payload.match(/^c_([A-Za-z0-9]{1,32})_([A-Za-z0-9]{1,24})$/);
+    if (m) { kind = 'campaign'; code = m[1]; post = m[2]; }
+    else if ((m = payload.match(/^c_([A-Za-z0-9]{1,32})$/))) { kind = 'campaign'; code = m[1]; }
     else if ((m = payload.match(/^r(?:ef)?_(\d+)$/))) { kind = 'referral'; code = m[1]; }
     else if (payload) kind = 'other';
     if (isNew) {
@@ -228,7 +230,7 @@ function captureStart(userId, rawPayload, isNew) {
       anStmts.setFirstSource.run(src, payload, userId);
       anStmts.setFirstVersion.run(PRODUCT_VERSION, userId);
     }
-    track(userId, 'start', { payload, kind, code, new: !!isNew, v: PRODUCT_VERSION });
+    track(userId, 'start', { payload, kind, code, ...(post ? { post } : {}), new: !!isNew, v: PRODUCT_VERSION });
   } catch (e) { logErr('analytics captureStart:', e.message); }
 }
 

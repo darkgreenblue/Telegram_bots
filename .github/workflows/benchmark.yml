@@ -27,6 +27,14 @@ on:
         required: false
         type: boolean
         default: false
+      self_channel:
+        description: 'کانال خودمان برای کارنامه‌ی عملکرد (مثل taroot_fa؛ خالی = رد)'
+        required: false
+        default: ''
+      starts_json:
+        description: 'JSON نگاشت شناسه‌ی پست به تعداد استارت، از Ops db-query (مثل {"260801s4":12})'
+        required: false
+        default: ''
 jobs:
   collect:
     runs-on: ubuntu-latest
@@ -46,11 +54,41 @@ jobs:
             --pages "${{ inputs.pages || '6' }}" \
             ${{ inputs.probe && '--probe' || '' }}
 
+      # کارنامه‌ی عملکردِ کانالِ خودمان: اسکرپِ کانال خودی + استارت‌های هر پست → امتیاز per ستون.
+      # استارت‌ها از Ops db-query می‌آیند (این جاب هیچ رازی ندارد و به سرور وصل نمی‌شود).
+      - name: Self performance scorecard
+        if: inputs.self_channel != ''
+        env:
+          SELF_CH: ${{ inputs.self_channel }}
+          STARTS: ${{ inputs.starts_json }}
+        run: |
+          set -e
+          case "$SELF_CH" in (*[!A-Za-z0-9_]*|'') echo "❌ نام کانال نامعتبر"; exit 1;; esac
+          node tools/benchmark/collect.mjs --channels "$SELF_CH" --pages 8 --top 3 \
+            > /tmp/self-collect.log 2>&1 || { tail -30 /tmp/self-collect.log; exit 1; }
+          SELF_FILE=$(ls -t benchmark/data/*.json | head -1)
+          echo "📥 اسکرپِ کانال خودی: $SELF_FILE"
+          ARGS=(--self "$SELF_FILE")
+          if [ -n "$STARTS" ]; then
+            printf '%s' "$STARTS" > /tmp/starts.json
+            jq -e . /tmp/starts.json >/dev/null || { echo "❌ starts_json معتبر نیست"; exit 1; }
+            ARGS+=(--starts /tmp/starts.json)
+          else
+            echo "ℹ️ بدون دیتای استارت — امتیاز کانورژن محاسبه نمی‌شود"
+          fi
+          node tools/marketing/perf.mjs "${ARGS[@]}"
+          echo ""
+          echo "<<<PERFORMANCE_MD>>>"
+          cat marketing/tarot/performance.md
+          echo "<<<END_PERFORMANCE_MD>>>"
+
       - name: Upload raw data
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ inputs.domain || 'fal' }}
-          path: benchmark/data/*.json
+          path: |
+            benchmark/data/*.json
+            marketing/tarot/performance.json
           retention-days: 30
           if-no-files-found: warn

@@ -15,7 +15,7 @@ import {
 import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
 // شرط‌های مسیرِ ریز از همان‌جایی می‌آیند که عددها ساخته می‌شوند (تک‌منبع؛ ضدِ واگراییِ عدد و لیست)
 import { KEY_EXPR, notAdmin } from './journey.js';
-import { weekIdx, weekExpr, weekLabel, nowSec } from './util.js';
+import { weekIdx, weekExpr, weekLabel, nowSec, postRefLabel } from './util.js';
 
 // سقفِ لیست: داشبورد ابزارِ تماس‌گرفتن است نه export انبوه (برای انبوه، تب «کاربران» + CSV هست).
 export const COHORT_LIMIT = 300;
@@ -58,6 +58,43 @@ const CHAN_CONDS = {
   unknown: { cond: "first_source IS NULL OR first_source = ''", label: 'نامشخص (قبل از اتریبیوشن)' },
   campaign: { cond: 'first_source = ?', label: 'کمپین' }, // مقدار bound می‌شود
 };
+
+/* قیفِ اتریبیوشن — مشترکِ «کمپین» و «پستِ کانال»: هر دو یک ستونِ write-onceِ users را با یک مقدار
+   می‌سنجند (کمپین → first_source = campaign:<code> ، پست → first_payload = c_<code>_<postref>)
+   و چهار حالتِ یکسان دارند: کاربر جدید / به اولین ارزش رسید / پی‌وال دید / خریدار.
+   امنیت: `col` هرگز از URL نمی‌آید (فقط ثابتِ داخلِ همان case)؛ `val` همیشه bound parameter است. */
+const ATTR_EVENT = { fv: 'first_value', pw: 'paywall_shown' };
+const ATTR_LABEL = { fv: 'به اولین ارزش رسید', pw: 'پی‌وال دید', payers: 'خریدار' };
+
+function attrCohort(targets, botKey, col, val, mode) {
+  const lim = ` LIMIT ${COHORT_LIMIT}`;
+  const m = moneyOf(botKey);
+  const test = m.testFilter ? ` AND p.${m.testFilter}` : '';
+  const byEvent = ATTR_EVENT[mode];
+  return collect(targets, botKey, (db, { pk, nameCol }) => {
+    if (byEvent) {
+      if (!hasTable(db, 'events')) return null;
+      return {
+        sql: `SELECT DISTINCT u.${pk} id, u.${nameCol} nm, u.username un FROM events e JOIN users u ON u.${pk} = e.user_id
+              WHERE u.${col} = ? AND e.event = ? ORDER BY u.${pk}${lim}`,
+        params: [val, byEvent],
+      };
+    }
+    if (mode === 'payers') {
+      if (!hasTable(db, m.table)) return null;
+      return {
+        sql: `SELECT DISTINCT u.${pk} id, u.${nameCol} nm, u.username un FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
+              WHERE u.${col} = ? AND p.status = '${m.successStatus}'${test} ORDER BY u.${pk}${lim}`,
+        params: [val],
+      };
+    }
+    return {
+      sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users WHERE ${col} = ?
+            ORDER BY ${userCreatedExpr(botKey)} DESC${lim}`,
+      params: [val],
+    };
+  });
+}
 
 /* ═══ حلّالِ اصلی ═══
    خروجی: { title, users, truncated } — یا { error } اگر پارامترها نامعتبر بودند. */
@@ -281,35 +318,20 @@ export function resolveCohort(url) {
     case 'camp': {
       const code = url.searchParams.get('code') || '';
       const mode = url.searchParams.get('m') || 'new';
-      const src = `campaign:${code}`;
-      const m = moneyOf(botKey);
-      const test = m.testFilter ? ` AND p.${m.testFilter}` : '';
-      const byEvent = { fv: 'first_value', pw: 'paywall_shown' }[mode];
-      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
-        if (byEvent) {
-          if (!hasTable(db, 'events')) return null;
-          return {
-            sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM events e JOIN users u ON u.${pk} = e.user_id
-                  WHERE u.first_source = ? AND e.event = ? ORDER BY u.${pk}${lim}`,
-            params: [src, byEvent],
-          };
-        }
-        if (mode === 'payers') {
-          if (!hasTable(db, m.table)) return null;
-          return {
-            sql: `SELECT DISTINCT ${sel(pk, nameCol)} FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
-                  WHERE u.first_source = ? AND p.status = '${m.successStatus}'${test} ORDER BY u.${pk}${lim}`,
-            params: [src],
-          };
-        }
-        return {
-          sql: `SELECT ${pk} id, ${nameCol} nm, username un FROM users WHERE first_source = ?
-                ORDER BY ${userCreatedExpr(botKey)} DESC${lim}`,
-          params: [src],
-        };
-      });
-      const label = { fv: 'به اولین ارزش رسید', pw: 'پی‌وال دید', payers: 'خریدار' }[mode] || 'کاربر جدید';
-      return done(`کمپین ${code} · ${label}`, users);
+      const users = attrCohort(targets, botKey, 'first_source', `campaign:${code}`, mode);
+      return done(`کمپین ${code} · ${ATTR_LABEL[mode] || 'کاربر جدید'}`, users);
+    }
+
+    /* قیفِ یک پستِ کانال: همان چهار حالتِ کمپین، ولی روی payload کاملِ لینکِ پست
+       (users.first_payload = c_<code>_<postref>) تا معلوم شود کدام پست آدمِ واقعی آورد. */
+    case 'post': {
+      const pl = url.searchParams.get('pl') || '';
+      const mode = url.searchParams.get('m') || 'new';
+      // شکلِ payload عیناً همان الگوی parseStartPayload است (مقدار به‌هرحال bound می‌شود)
+      if (!/^c_[A-Za-z0-9]{1,32}_[A-Za-z0-9]{1,24}$/.test(pl)) return { error: 'شناسه‌ی پست نامعتبر است.' };
+      const users = attrCohort(targets, botKey, 'first_payload', pl, mode);
+      const post = pl.slice(pl.indexOf('_', 2) + 1);
+      return done(`پستِ ${postRefLabel(post)} · ${ATTR_LABEL[mode] || 'کاربر جدید'}`, users);
     }
 
     default:

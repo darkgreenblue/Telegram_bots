@@ -43,6 +43,7 @@ const TARGETS = [
   'shared/logger.js',
   'tools/benchmark/tme.mjs',
   'tools/benchmark/collect.mjs',
+  'tools/marketing/perf.mjs',
 ];
 
 const GLOBALS = new Set([

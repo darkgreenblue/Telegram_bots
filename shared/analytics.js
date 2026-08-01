@@ -4,7 +4,7 @@
 import { logErr } from './logger.js';
 
 // نسخه‌ی قرارداد schema/رویدادها — کپی محلی voice2text و پورت پایتونی tabir-khab باید همین عدد را داشته باشند
-export const ANALYTICS_SCHEMA_VERSION = 2;
+export const ANALYTICS_SCHEMA_VERSION = 3;
 
 // واژه‌نامه‌ی رویدادهای استاندارد (هسته‌ی مشترک بین همه‌ی ربات‌ها).
 // همیشه از این ثابت‌ها استفاده کن، نه string خام — داشبورد رویدادهای خارج از واژه‌نامه را جدا نشان می‌دهد.
@@ -26,18 +26,28 @@ export const EVENTS = {
 };
 
 // قرارداد payload لینک استارت (t.me/<bot>?start=PAYLOAD — سقف ۶۴ کاراکتر base64url):
-//   c_<code>  → لینک کمپین (کد کوتاه base62؛ متادیتای کمپین سمت داشبورد است، ربات resolve نمی‌کند)
+//   c_<code>          → لینک کمپین (کد کوتاه base62؛ متادیتای کمپین سمت داشبورد است، ربات resolve نمی‌کند)
+//   c_<code>_<post>   → همان کمپین + شناسه‌ی پستِ منبع (اتریبیوشن در سطح پست، شبیه utm_content)
 //   r_<uid> یا ref_<uid> → رفرال (الگوی موجود tarot حفظ شده)
-//   خالی      → organic
+//   خالی               → organic
 // هر لینک فقط یک payload دارد — کمپین و رفرال هرگز ترکیب نمی‌شوند.
+//
+// چرا شکلِ «کمپین + پست» و نه یک کد کمپینِ مستقل per پست: کد کمپین واحدِ کانال است و همه‌ی
+// کوئری‌های موجودِ داشبورد روی `code` و `first_source='campaign:<code>'` می‌نشینند. اگر هر پست
+// کد جدا می‌گرفت، هم آن کوئری‌ها کانال را تکه‌تکه می‌دیدند و هم جدول campaigns با ~۳۶۵۰ ردیف
+// در سال منفجر می‌شد. این شکل، `code` را دست‌نخورده نگه می‌دارد و پست را در فیلدِ **جدید** `post`
+// می‌گذارد: افزایشی، سازگار با گذشته، و بدون هیچ تغییری در معنیِ ستون‌های قبلی.
+// شناسه‌ی پست: <YYMMDD>s<slot> (مثل 260801s4) — کوتاه، مرتب‌شدنی و قابلِ join با فایلِ پست در ریپو.
 export function parseStartPayload(raw) {
   const payload = String(raw || '').trim().slice(0, 64);
-  if (!payload) return { payload: '', kind: 'organic', code: '' };
-  let m = payload.match(/^c_([A-Za-z0-9]{1,32})$/);
-  if (m) return { payload, kind: 'campaign', code: m[1] };
+  if (!payload) return { payload: '', kind: 'organic', code: '', post: '' };
+  let m = payload.match(/^c_([A-Za-z0-9]{1,32})_([A-Za-z0-9]{1,24})$/);
+  if (m) return { payload, kind: 'campaign', code: m[1], post: m[2] };
+  m = payload.match(/^c_([A-Za-z0-9]{1,32})$/);
+  if (m) return { payload, kind: 'campaign', code: m[1], post: '' };
   m = payload.match(/^r(?:ef)?_(\d+)$/);
-  if (m) return { payload, kind: 'referral', code: m[1] };
-  return { payload, kind: 'other', code: '' };
+  if (m) return { payload, kind: 'referral', code: m[1], post: '' };
+  return { payload, kind: 'other', code: '', post: '' };
 }
 
 // کش prepared statement ها per اتصال db (بدون state سراسری — چند db در یک پروسه هم امن است)
@@ -114,6 +124,7 @@ export function captureStart(db, userId, rawPayload, isNew, version = '') {
     }
     track(db, userId, EVENTS.START, {
       payload: parsed.payload, kind: parsed.kind, code: parsed.code, new: !!isNew,
+      ...(parsed.post ? { post: parsed.post } : {}),
       ...(version ? { v: String(version) } : {}),
     });
   } catch (e) { logErr('analytics captureStart:', e.message); }
