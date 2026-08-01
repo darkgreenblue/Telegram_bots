@@ -9,16 +9,48 @@
       "relatedBot": "tarot",
       "status": "active",
       "channels": [
-        { "username": "Faaldoony", "status": "active" },
-        { "username": "saminfalll", "status": "active" },
-        { "username": "fale_rooz_ost", "status": "active" },
-        { "username": "hashemi2055", "status": "active" },
-        { "username": "falesaghar", "status": "active" },
-        { "username": "doanevissimojarab", "status": "active" },
-        { "username": "fallltaroot", "status": "active" },
-        { "username": "bmaryamfal", "status": "active" },
-        { "username": "falmehrbano", "status": "active" },
-        { "username": "fallbaharbanoo", "status": "active" }
+        {
+          "username": "Faaldoony",
+          "status": "active",
+          "note": "پیش‌نمایش وب ندارد؛ فقط با MTProto خواندنی است (فاز بعد)"
+        },
+        {
+          "username": "saminfalll",
+          "status": "active"
+        },
+        {
+          "username": "fale_rooz_ost",
+          "status": "active",
+          "note": "پیش‌نمایش وب ندارد؛ فقط با MTProto خواندنی است (فاز بعد)"
+        },
+        {
+          "username": "hashemi2055",
+          "status": "active"
+        },
+        {
+          "username": "falesaghar",
+          "status": "active"
+        },
+        {
+          "username": "doanevissimojarab",
+          "status": "active"
+        },
+        {
+          "username": "fallltaroot",
+          "status": "active"
+        },
+        {
+          "username": "bmaryamfal",
+          "status": "active"
+        },
+        {
+          "username": "falmehrbano",
+          "status": "active"
+        },
+        {
+          "username": "fallbaharbanoo",
+          "status": "active"
+        }
       ]
     }
   ]

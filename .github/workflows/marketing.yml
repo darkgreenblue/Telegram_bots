@@ -12,6 +12,17 @@
 name: Marketing
 
 on:
+  # انتشار زمان‌بندی‌شده‌ی اسلات‌های روزانه (قرارداد: marketing/tarot/strategy.md بند ۳).
+  # هر cron یکی از ۵ اسلات تهران است (تهران = UTC+3:30 ثابت):
+  #   ۰۸:۳۰ ← 05:00 UTC | ۱۴:۰۰ ← 10:30 | ۱۷:۰۰ ← 13:30 | ۲۰:۳۰ ← 17:00 | ۲۳:۰۰ ← 19:30
+  # جاب slot-post فایل marketing/<bot>/posts/<تاریخ-تهران>-s<slot>.json را (اگر merge شده باشد)
+  # منتشر می‌کند؛ نبودن فایل = رد بی‌صدا (روتین تولید محتوا هنوز نرسیده یا آن روز عمداً خالی است).
+  schedule:
+    - cron: '0 5 * * *'
+    - cron: '30 10 * * *'
+    - cron: '30 13 * * *'
+    - cron: '0 17 * * *'
+    - cron: '30 19 * * *'
   workflow_dispatch:
     inputs:
       action:
@@ -44,7 +55,93 @@ on:
         default: ''
 
 jobs:
+  # انتشار خودکار اسلاتِ الان (فقط روی رویداد schedule)
+  slot-post:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Publish current slot posts
+        env:
+          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+        run: |
+          set -e
+          # اسلات = نزدیک‌ترین زمانِ اسلات به الان (ضد تأخیرِ چند دقیقه‌ایِ کرانِ گیت‌هاب)
+          NOW_MIN=$(( 10#$(date -u +%H) * 60 + 10#$(date -u +%M) ))
+          BEST_SLOT=""; BEST_DIST=999999
+          i=0
+          for M in 300 630 810 1020 1170; do
+            i=$((i+1))
+            D=$(( NOW_MIN - M )); [ $D -lt 0 ] && D=$(( -D ))
+            if [ $D -lt $BEST_DIST ]; then BEST_DIST=$D; BEST_SLOT=$i; fi
+          done
+          # تاریخِ تهران (UTC+3:30)
+          TODAY=$(date -u -d '+3 hours +30 minutes' +%F)
+          echo "🕐 اسلات $BEST_SLOT برای $TODAY (فاصله از زمان اسمی: ${BEST_DIST}m)"
+
+          FOUND=0
+          for F in marketing/*/posts/${TODAY}-s${BEST_SLOT}.json; do
+            [ -f "$F" ] || continue
+            FOUND=1
+            BOT=$(echo "$F" | cut -d/ -f2)
+            case "$BOT" in
+              tarot)      TOKEN="$T_TAROT";;
+              tabir-khab) TOKEN="$T_TABIR_FA";;
+              *) echo "⏭ $F: نگاشت توکن برای «$BOT» نیست"; continue;;
+            esac
+            [ -n "$TOKEN" ] || { echo "⏭ $F: Secret توکن ست نیست"; continue; }
+
+            CHAT=$(jq -r '.chat // empty' "$F")
+            TEXT=$(jq -r '.text // empty' "$F")
+            case "$CHAT" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ $F: chat نامعتبر"; exit 1;; esac
+            [ -n "$TEXT" ] || { echo "❌ $F: متن خالی"; exit 1; }
+            LEN=$(printf '%s' "$TEXT" | wc -m)
+            [ "$LEN" -le 4096 ] || { echo "❌ $F: متن $LEN کاراکتر (سقف 4096)"; exit 1; }
+
+            BTN_TEXT=$(jq -r '.button_text // empty' "$F")
+            BTN_URL=$(jq -r '.button_url // empty' "$F")
+            PREVIEW=$(jq -r 'if .preview == true then "false" else "true" end' "$F")
+            SILENT=$(jq -r 'if .silent == true then "true" else "false" end' "$F")
+
+            ARGS=( -d chat_id="$CHAT" -d parse_mode=HTML -d disable_web_page_preview="$PREVIEW" -d disable_notification="$SILENT" )
+            if [ -n "$BTN_TEXT" ] && [ -n "$BTN_URL" ]; then
+              KB=$(jq -cn --arg t "$BTN_TEXT" --arg u "$BTN_URL" '{inline_keyboard: [[{text: $t, url: $u}]]}')
+              ARGS+=( -d reply_markup="$KB" )
+            fi
+            RESP=$(printf '%s' "$TEXT" | curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              "${ARGS[@]}" --data-urlencode text@- ) || { echo "❌ $F: خطای شبکه"; exit 1; }
+            OK=$(printf '%s' "$RESP" | jq -r '.ok')
+            if [ "$OK" != "true" ]; then
+              echo "❌ $F: تلگرام رد کرد: $(printf '%s' "$RESP" | jq -r '.description // .')"
+              exit 1
+            fi
+            echo "✅ اسلات $BEST_SLOT منتشر شد: $F → $CHAT message_id=$(printf '%s' "$RESP" | jq -r '.result.message_id') silent=$SILENT"
+          done
+          [ "$FOUND" = "1" ] || echo "⏭ فایل پستی برای اسلات $BEST_SLOT امروز نیست (روتین محتوا هنوز merge نکرده)"
+
+      - name: Telegram alert to owner on failure
+        if: failure()
+        env:
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$T_TAROT" ] || [ -z "$OWNER" ]; then exit 0; fi
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${T_TAROT}/sendMessage" -d chat_id="$id" \
+              --data-urlencode text="⚠️ انتشار اسلات زمان‌بندی‌شده‌ی کانال شکست خورد
+          $RUN_URL" >/dev/null || true
+          done
+
   marketing:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (main — فایل پست باید merge شده باشد)

@@ -27,14 +27,6 @@ on:
         required: false
         type: boolean
         default: false
-  # موقت: تا وقتی پارسر روی HTML واقعی تثبیت شود، push روی همین برنچ هم اجرا می‌کند.
-  push:
-    branches: ['claude/telegram-content-analysis-system-0lci80']
-    paths:
-      - 'tools/benchmark/**'
-      - '.github/workflows/benchmark.yml'
-      - 'benchmark/registry.json'
-
 jobs:
   collect:
     runs-on: ubuntu-latest

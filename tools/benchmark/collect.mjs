@@ -230,6 +230,32 @@ async function main() {
 
   for (const a of analyses) printChannel(a, opt.topN);
 
+  // کشفِ کاندیداهای بنچمارک: کانال‌هایی که خودِ رقبا به آن‌ها لینک/منشن می‌دهند
+  // (خوراکِ گام «جذب» اسکیل telegram-benchmark-loop؛ قضاوتِ مرتبط‌بودن با سشن است، نه اینجا)
+  const watched = new Set(list.map((u) => u.toLowerCase()));
+  const mentionMap = new Map(); // username → Set(کانال‌های منبع)
+  for (const ch of raw) {
+    for (const p of ch.posts) {
+      for (const link of p.externalLinks || []) {
+        const m = link.match(/^https?:\/\/t\.me\/(?:s\/)?([A-Za-z][A-Za-z0-9_]{3,31})(?:[/?#]|$)/);
+        if (!m) continue;
+        const u = m[1].toLowerCase();
+        if (watched.has(u) || u.startsWith('joinchat') || u === 'share' || u === 'proxy' || u === 'addstickers') continue;
+        if (!mentionMap.has(u)) mentionMap.set(u, new Set());
+        mentionMap.get(u).add(ch.username);
+      }
+    }
+  }
+  const candidates = [...mentionMap.entries()]
+    .map(([u, srcs]) => ({ username: u, sources: [...srcs] }))
+    .filter((c) => c.sources.length >= 1)
+    .sort((a, b) => b.sources.length - a.sources.length)
+    .slice(0, 20);
+  if (candidates.length) {
+    console.log(`\n🔭 DISCOVERY (منشن‌شده توسط کانال‌های تحت رصد؛ کاندیدای بررسی، نه تأییدشده):`);
+    for (const c of candidates) console.log(`  @${c.username} ← ${c.sources.map((s) => '@' + s).join(', ')}`);
+  }
+
   const outDir = join(ROOT, 'benchmark', 'data');
   mkdirSync(outDir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 10);
@@ -237,7 +263,7 @@ async function main() {
   writeFileSync(
     outFile,
     JSON.stringify(
-      { domain: opt.domain, collectedAt: new Date().toISOString(), pages: opt.pages, failed, channels: raw, analyses },
+      { domain: opt.domain, collectedAt: new Date().toISOString(), pages: opt.pages, failed, candidates, channels: raw, analyses },
       null,
       2
     )
