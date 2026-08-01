@@ -1,0 +1,15 @@
+{
+  "_docs": "حافظه‌ی حلقه‌ی بنچمارک (اسکیل telegram-benchmark-loop): آخرین سنجش موفق و strikes هر کانال. این فایل را فقط همان اسکیل به‌روز می‌کند.",
+  "fal": {
+    "Faaldoony": { "lastOk": null, "strikes": 1, "note": "پیش‌نمایش وب ندارد؛ فقط با MTProto خواندنی است، حذف نشود" },
+    "saminfalll": { "lastOk": "2026-08-01", "strikes": 0, "med": 786, "vr": 0.013, "er": 0.009 },
+    "fale_rooz_ost": { "lastOk": null, "strikes": 1, "note": "پیش‌نمایش وب ندارد؛ فقط با MTProto" },
+    "hashemi2055": { "lastOk": "2026-08-01", "strikes": 0, "med": 1740, "vr": 0.012, "er": 0.001 },
+    "falesaghar": { "lastOk": "2026-08-01", "strikes": 0, "med": 758, "vr": 0.121, "er": 0.016 },
+    "doanevissimojarab": { "lastOk": "2026-08-01", "strikes": 0, "med": 24800, "vr": 0.284, "er": null, "note": "ویو مشکوک به غیرارگانیک؛ زیر نظر" },
+    "fallltaroot": { "lastOk": "2026-08-01", "strikes": 0, "med": 219, "vr": 0.036, "er": 0.005 },
+    "bmaryamfal": { "lastOk": "2026-08-01", "strikes": 0, "med": 5360, "vr": 0.171, "er": 0.014 },
+    "falmehrbano": { "lastOk": "2026-08-01", "strikes": 0, "med": 211, "vr": 0.005, "er": 0.005 },
+    "fallbaharbanoo": { "lastOk": "2026-08-01", "strikes": 0, "med": 1520, "vr": 0.222, "er": null }
+  }
+}

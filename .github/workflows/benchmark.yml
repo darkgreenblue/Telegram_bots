@@ -1,0 +1,56 @@
+# Benchmark — جمع‌آوری و تحلیلِ کانال‌های رقیب در یک حوزه (قرارداد: بند «بنچمارک کانال‌های خارجی» CLAUDE.md ریشه)
+#
+# چرا روی GitHub Actions و نه سرور: این جاب فقط صفحه‌ی عمومیِ t.me/s/<channel> را می‌خواند
+# (بدون اکانت، بدون توکن، بدون ریسکِ بن). رانرِ گیت‌هاب اینترنتِ باز دارد و هیچ رباتی را ری‌استارت نمی‌کند.
+#
+# سشن‌های Claude Code این را با workflow_dispatch اجرا می‌کنند و خروجی را از لاگِ جاب می‌خوانند؛
+# دیتای خام هم به‌عنوان artifact می‌ماند (۳۰ روز) تا تحلیلِ بعدی بتواند روند را مقایسه کند.
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'کلید حوزه در benchmark/registry.json (مثل fal)'
+        required: false
+        default: 'fal'
+      channels:
+        description: 'لیست دستیِ کانال‌ها با کاما (اگر پر شود، رجیستری نادیده گرفته می‌شود)'
+        required: false
+        default: ''
+      pages:
+        description: 'چند صفحه تاریخچه per کانال (هر صفحه ~۲۰ پست)'
+        required: false
+        default: '6'
+      probe:
+        description: 'حالت عیب‌یابیِ پارسر (چاپ کلاس‌های HTML)'
+        required: false
+        type: boolean
+        default: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Collect & analyze
+        run: |
+          node tools/benchmark/collect.mjs \
+            --domain "${{ inputs.domain || 'fal' }}" \
+            --channels "${{ inputs.channels }}" \
+            --pages "${{ inputs.pages || '6' }}" \
+            ${{ inputs.probe && '--probe' || '' }}
+
+      - name: Upload raw data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ inputs.domain || 'fal' }}
+          path: benchmark/data/*.json
+          retention-days: 30
+          if-no-files-found: warn
