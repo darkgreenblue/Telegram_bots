@@ -35,3 +35,23 @@ export const esc = (s) => String(s ?? '')
 export function parseJsonSafe(s, fallback = {}) {
   try { return JSON.parse(s); } catch { return fallback; }
 }
+
+/* برچسبِ خوانای «پستِ کانال» از روی postrefِ قراردادِ لینکِ پست: <YYMMDD>s<slot> (مثل 260801s4).
+   تبدیل به تقویم شمسی با خودِ Intl انجام می‌شود (locale فارسی = تقویم فارسی)؛ هیچ کتابخانه‌ای
+   اضافه نمی‌شود. اگر شکلِ رشته ناشناخته بود یا تاریخ نامعتبر (مثل ماه ۱۳)، همان رشته‌ی خام
+   برگردانده می‌شود — هرگز تاریخی از خودمان ساخته نمی‌شود. */
+export function postRefLabel(ref) {
+  const raw = String(ref ?? '');
+  const m = /^(\d{2})(\d{2})(\d{2})s(\d{1,2})$/.exec(raw);
+  if (!m) return raw;
+  const [, yy, mm, dd, slot] = m;
+  const d = new Date(Date.UTC(2000 + Number(yy), Number(mm) - 1, Number(dd)));
+  // rollover تاریخ (۲۶۱۳۰۱ → ژانویه‌ی سال بعد) نباید بی‌صدا برچسبِ اشتباه بسازد
+  if (Number.isNaN(d.getTime()) || d.getUTCMonth() !== Number(mm) - 1 || d.getUTCDate() !== Number(dd)) return raw;
+  try {
+    const day = new Intl.DateTimeFormat('fa-IR', {
+      timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric',
+    }).format(d);
+    return `${day} · اسلات ${fmt(slot)}`;
+  } catch { return raw; }
+}

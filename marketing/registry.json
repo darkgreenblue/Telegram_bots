@@ -22,44 +22,76 @@
       ],
       "pillars": [
         {
-          "key": "daily_ritual",
-          "desc": "آیین روزانه: کارت روز عمومی کانال با معنی کوتاه؛ نسخه‌ی شخصی در ربات",
-          "weight": 3
+          "key": "hafez",
+          "desc": "فال حافظ روزانه: بیت‌های واقعی غزل + تعبیر محاوره‌ای و کاربردی",
+          "weight": 3,
+          "cta": "engage"
         },
         {
-          "key": "emotional",
-          "desc": "پیام احساسی دوم‌شخص (اثر بارنوم)؛ پرفورواردترین فرمت",
-          "weight": 3
+          "key": "zodiac",
+          "desc": "طالع‌بینی ماه تولد: دوازده ماه در یک پست، هر ماه ۱ تا ۲ خط",
+          "weight": 3,
+          "cta": "engage"
+        },
+        {
+          "key": "tarot_card",
+          "desc": "کارت روز تاروت با معنی کوتاه و یک توصیه‌ی عملی",
+          "weight": 2,
+          "cta": "bot"
         },
         {
           "key": "interactive",
-          "desc": "نیت کن و یکی از ۳ کارت را انتخاب کن؛ جواب عمیق در ربات",
-          "weight": 2
+          "desc": "نیت کن و یکی از چند گزینه را انتخاب کن؛ تفسیر همان‌جا",
+          "weight": 2,
+          "cta": "engage"
+        },
+        {
+          "key": "emotional",
+          "desc": "پیام احساسی دوم‌شخص درباره‌ی حال دل؛ پرفورواردترین فرمت حوزه",
+          "weight": 2,
+          "cta": "engage"
+        },
+        {
+          "key": "coffee",
+          "desc": "فال قهوه: تفسیر یک نماد فنجان (مار، پرنده، راه، حلقه...)",
+          "weight": 2,
+          "cta": "engage"
+        },
+        {
+          "key": "night",
+          "desc": "پیام شب: آرام‌کننده، کوتاه، قلاب بازگشت به فردا صبح",
+          "weight": 2,
+          "cta": "none"
         },
         {
           "key": "educational",
-          "desc": "آموزش: معنی یک کارت، اصول تاروت، شکستن ترس‌ها (کارت مرگ و...)",
-          "weight": 2
+          "desc": "آموزش: معنی یک نماد یا کارت، شکستن باورهای غلط",
+          "weight": 1,
+          "cta": "bot"
         },
         {
-          "key": "feature",
-          "desc": "معرفی یک قابلیت ربات (ویس، حافظه، موضوع دلخواه، کارت روز رایگان)",
-          "weight": 1
+          "key": "abjad",
+          "desc": "فال ابجد و حروف: نیت با حرف اول اسم",
+          "weight": 1,
+          "cta": "engage"
         },
         {
-          "key": "social_proof",
-          "desc": "اثبات اجتماعی: بازگویی بی‌نام تجربه‌ی کاربران، عدد واقعی",
-          "weight": 1
+          "key": "lenormand",
+          "desc": "لنورماند: کارت هفته با تفسیر کوتاه",
+          "weight": 1,
+          "cta": "engage"
         },
         {
-          "key": "offer",
-          "desc": "پیشنهاد: شروع رایگان، تخفیف اولین شارژ؛ فقط با ددلاین/شرایط واقعی",
-          "weight": 1
+          "key": "dream",
+          "desc": "تعبیر خواب کوتاه: یک نماد پرتکرار خواب",
+          "weight": 1,
+          "cta": "engage"
         },
         {
-          "key": "story",
-          "desc": "قصه‌گویی: روایت بی‌نام یک فال، تاریخچه‌ی یک کارت",
-          "weight": 1
+          "key": "omen",
+          "desc": "نشانه‌ها و باورهای عامیانه (پرش چشم، شکستن آینه) با لحن بازیگوش",
+          "weight": 1,
+          "cta": "engage"
         }
       ],
       "channels": [
@@ -69,15 +101,65 @@
           "chat": "@taroot_fa",
           "campaign": "PKxwQ",
           "status": "active",
-          "mode": "daily5",
+          "mode": "daily10",
           "strategy": "marketing/tarot/strategy.md",
           "slots": [
-            { "slot": 1, "tehran": "08:30", "notify": true },
-            { "slot": 2, "tehran": "14:00", "notify": false },
-            { "slot": 3, "tehran": "17:00", "notify": false },
-            { "slot": 4, "tehran": "20:30", "notify": true },
-            { "slot": 5, "tehran": "23:00", "notify": true }
-          ]
+            {
+              "slot": 1,
+              "tehran": "08:00",
+              "notify": true
+            },
+            {
+              "slot": 2,
+              "tehran": "09:30",
+              "notify": false
+            },
+            {
+              "slot": 3,
+              "tehran": "11:00",
+              "notify": false
+            },
+            {
+              "slot": 4,
+              "tehran": "12:30",
+              "notify": false
+            },
+            {
+              "slot": 5,
+              "tehran": "14:00",
+              "notify": true
+            },
+            {
+              "slot": 6,
+              "tehran": "16:00",
+              "notify": false
+            },
+            {
+              "slot": 7,
+              "tehran": "18:00",
+              "notify": false
+            },
+            {
+              "slot": 8,
+              "tehran": "20:00",
+              "notify": true
+            },
+            {
+              "slot": 9,
+              "tehran": "21:30",
+              "notify": false
+            },
+            {
+              "slot": 10,
+              "tehran": "23:00",
+              "notify": false
+            }
+          ],
+          "ctaPolicy": {
+            "maxBotCtaPerDay": 3,
+            "note": "بقیه‌ی پست‌ها CTA درگیرکننده دارند (ری‌اکشن، کامنت، فوروارد) نه لینک ربات. لینک ربات فقط جایی که واقعاً ادامه‌ی طبیعی محتواست."
+          },
+          "postRef": "c_<campaign>_<YYMMDD>s<slot>"
         },
         {
           "id": "aux1",
@@ -100,7 +182,8 @@
           "campaign": "bWLVq",
           "status": "pending"
         }
-      ]
+      ],
+      "channelIdentity": "کانال یک رسانه‌ی محتوایی مستقل درباره‌ی انواع فال است، نه ویترین ربات. کاربر باید برای خودِ محتوا عضو بماند. ربات فقط یکی از راه‌های ادامه دادن است و حداکثر در ۳ پست از هر ۱۰ پست دیده می‌شود. تبلیغات آینده برای خودِ کانال است."
     },
     "tabir-khab": {
       "title": "تعبیر خواب",
