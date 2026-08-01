@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "note": "منبع حقیقتِ «چه کانال‌هایی در چه حوزه‌ای رصد می‌شوند». افزودن حوزه‌ی جدید = یک ردیف اینجا، بدون کد جدید. قرارداد کامل: بند «بنچمارک کانال‌های خارجی» در CLAUDE.md ریشه.",
+  "domains": [
+    {
+      "key": "fal",
+      "title": "فال و طالع‌بینی",
+      "language": "fa",
+      "relatedBot": "tarot",
+      "status": "active",
+      "channels": [
+        { "username": "Faaldoony", "status": "active" },
+        { "username": "saminfalll", "status": "active" },
+        { "username": "fale_rooz_ost", "status": "active" },
+        { "username": "hashemi2055", "status": "active" },
+        { "username": "falesaghar", "status": "active" },
+        { "username": "doanevissimojarab", "status": "active" },
+        { "username": "fallltaroot", "status": "active" },
+        { "username": "bmaryamfal", "status": "active" },
+        { "username": "falmehrbano", "status": "active" },
+        { "username": "fallbaharbanoo", "status": "active" }
+      ]
+    }
+  ]
+}
