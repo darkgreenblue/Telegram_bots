@@ -58,6 +58,7 @@ const GLOBALS = new Set([
   'process', 'Buffer', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
   'encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI', 'escape', 'unescape',
   'fetch', 'AbortController', 'AbortSignal', 'Headers', 'Request', 'Response',
+  'FormData', 'Blob', 'File',
   'require', 'super', 'Function', 'Int8Array', 'Uint8Array', 'Float64Array',
 ]);
 
