@@ -71,7 +71,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
 // 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
-const PRODUCT_VERSION = '1.2.0';
+const PRODUCT_VERSION = '1.3.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });

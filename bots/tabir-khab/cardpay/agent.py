@@ -40,25 +40,33 @@ _SYSTEM_PROMPT = """You are a strict Iranian bank card-to-card (کارت به ک
 
 You are given (a) a payment receipt — either an IMAGE (screenshot/photo of a bank app, ATM slip, USSD, or internet-banking receipt) or plain TEXT the user typed as their receipt — and (b) the EXPECTED payment details. Decide whether to APPROVE, REJECT, or send to human REVIEW.
 
-Iranian receipts usually contain these fields (recognize them in Persian): مبلغ (amount, often in ریال = Toman×10), کد رهگیری/کد پیگیری (tracking code), شماره مرجع/RRN (reference number), تاریخ و ساعت (date/time), شماره کارت مقصد (destination card, masked, last 4 digits visible), وضعیت: موفق/تراکنش موفق (successful status), and sometimes نام گیرنده/صاحب حساب (recipient name) and شماره کارت مبدأ (source card).
+Iranian receipts usually contain these fields (recognize them in Persian): مبلغ (amount, almost always in ریال), کد رهگیری/کد پیگیری (tracking code), شماره مرجع/RRN (reference number), تاریخ و ساعت (date/time), شماره کارت مقصد (destination card, masked, last 4 digits visible), وضعیت: موفق/تراکنش موفق (successful status), and sometimes نام گیرنده/صاحب حساب (recipient name) and شماره کارت مبدأ (source card).
 
 EXPECTED:
-- amount_toman: {amount_toman}   (equivalently amount_rial: {amount_rial}؛ receipts often show Rial = Toman × 10)
+- amount_toman: {amount_toman}
+- amount_rial: {amount_rial}   ← a CORRECT receipt shows THIS number (one more zero than the Toman figure)
 - recipient_name: {recipient}
 - dest_card_last4: {dest_last4}
 
-DECISION RULES (apply in order):
+CURRENCY RULE (the most important rule here, read it twice):
+Iranian bank receipts print RIAL. The invoice we showed the user is in TOMAN. 1 Toman = 10 Rial.
+**Never convert anything yourself.** Report only what is printed:
+- extracted.amount_raw = the amount EXACTLY as printed on the receipt (plain digits, no separators, NO conversion)
+- extracted.amount_currency = "rial" if the receipt shows ریال/IRR, "toman" if it shows تومان/تومن, null if no unit is printed or you cannot read it
+The server does the Rial↔Toman arithmetic and re-checks your verdict. If you convert, you will be wrong.
+The exact mistake to avoid: a receipt printed «۱۰۰,۰۰۰ ریال» is only 10,000 Toman. Correct output is amount_raw=100000 with amount_currency="rial". Calling it 100,000 Toman would approve a payment that is TEN TIMES too small.
+
+DECISION RULES (apply in order). Compare paid vs expected in the SAME unit, using amount_rial when the receipt is in Rial:
 1. If the input is NOT a payment receipt at all (random text, unrelated photo, a sentence, a greeting) → verdict "reject", reason_code "not_a_receipt".
 2. If it IS a receipt and you can read the amount, and the PAID amount is STRICTLY LESS than the expected amount (paid < expected) → verdict "reject", reason_code "amount_too_low".
 3. If it IS a genuine-looking SUCCESSFUL receipt AND paid amount is GREATER THAN OR EQUAL to expected (paid >= expected) AND (recipient_name matches OR dest_card_last4 matches the expected) AND you see no strong forgery signal → verdict "approve", reason_code "ok".
 4. Otherwise (receipt but: unreadable/low quality, amount ambiguous, missing key fields, status not clearly successful, recipient/last4 do not match but it is still plausibly a real receipt, or you are unsure for ANY reason) → verdict "review", reason_code one of: "low_quality", "missing_fields", "mismatch", "uncertain".
 
-CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When the paid amount is greater than or equal to the expected amount you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3). Always fill extracted.amount_toman with the paid amount you read (in Toman) so this can be double-checked.
+CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When the paid amount is greater than or equal to the expected amount you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3).
 
 Notes:
 - A round amount (exact multiple of 100,000) is a mild fraud signal but NOT reason alone to reject; note it in risk_flags.
 - Be conservative: when in doubt, choose "review", never "approve".
-- Amount comparison: normalize Rial/Toman correctly (1 Toman = 10 Rial).
 
 Return ONLY a JSON object, no markdown, with EXACTLY these keys:
 {{
@@ -66,7 +74,8 @@ Return ONLY a JSON object, no markdown, with EXACTLY these keys:
   "reason_code": "ok" | "not_a_receipt" | "amount_too_low" | "low_quality" | "missing_fields" | "mismatch" | "uncertain",
   "reason_fa": "<one short Persian sentence explaining the verdict, no em dash>",
   "extracted": {{
-    "amount_toman": <number or null>,
+    "amount_raw": <number or null>,
+    "amount_currency": "rial" | "toman" | null,
     "recipient_name": "<string or null>",
     "dest_card_last4": "<string or null>",
     "tracking_code": "<string or null>",
@@ -96,30 +105,92 @@ def _norm(data: dict) -> dict:
     }
 
 
+_RIAL_WORDS = {"rial", "rials", "irr", "ریال"}
+_TOMAN_WORDS = {"toman", "tomans", "tuman", "tumans", "irt", "تومان", "تومن"}
+
+
+def resolve_paid_toman(ext: dict, expected_toman: float) -> tuple:
+    """عددِ چاپ‌شده‌ی رسید → مبلغِ واقعی به **تومان**. خروجی: (raw, toman, basis).
+
+    رسیدِ بانکیِ ایرانی **ریال** چاپ می‌کند ولی فاکتورِ ما **تومان** است، پس رسیدِ درست همیشه
+    یک صفر بیشتر دارد. باگِ واقعی (۱۴۰۵/۰۵/۱۲ روی ربات زنده‌ی tarot): تبدیل به عهده‌ی خودِ
+    مدل بود (`amount_toman`)، کاربری هر سه پرداختش را یک صفر کمتر زد، مدل عددِ چاپ‌شده را
+    «تومان» گزارش کرد و ربات هر سه را تأیید کرد. تبدیلِ واحد یک عملِ حسابیِ قطعی است و هرگز
+    نباید به مدلِ احتمالاتی سپرده شود.
+
+    وقتی واحد چاپ نشده و عدد آن‌قدر بزرگ نیست که قطعاً ریال باشد → `ambiguous`، چون هر دو
+    حدس خطرناک است: حدسِ «تومان» ما را سرِ ۹۰٪ پول می‌گذارد و حدسِ «ریال» اعتبارِ کاربرِ
+    درست‌پرداخت‌کرده را یک‌دهم می‌کند.
+    """
+    raw = None
+    for key in ("amount_raw", "amount_toman"):  # amount_toman = پاسخِ قدیمیِ مدل
+        try:
+            candidate = float(ext.get(key))
+        except (TypeError, ValueError):
+            continue
+        if candidate > 0:
+            raw = candidate
+            break
+    if raw is None:
+        return (None, None, "none")
+    cur = str(ext.get("amount_currency") or "").strip().lower()
+    if cur in _RIAL_WORDS:
+        return (raw, raw // 10, "rial")
+    if cur in _TOMAN_WORDS:
+        return (raw, raw, "toman")
+    exp = float(expected_toman or 0)
+    # واحد چاپ نشده ولی عدد ≥ ده‌برابرِ فاکتور است: در هر دو خوانش کافی است، پس بی‌خطر
+    if exp > 0 and raw >= exp * 10:
+        return (raw, raw // 10, "rial_inferred")
+    return (raw, None, "ambiguous")
+
+
 def decide_receipt(verdict: dict, expected_toman: float) -> dict:
     """خروجیِ خامِ ایجنت را به یک «تصمیمِ قطعی» تبدیل می‌کند و گاردِ مبلغ می‌زند.
 
-    گاردِ قطعی (ضدِ خطای مدل): اگر ایجنت «مبلغ کم» گفت ولی مبلغِ استخراج‌شده ≥ موردانتظار،
-    به approve override می‌شود (پرداختِ بیشتر همیشه قابل‌قبول است). overpaid = مبلغِ پرداختی
-    وقتی به‌قدرِ محسوس (≥۱۰٪) بیشتر است، تا میزبان به ادمین اطلاع دهد.
-    خروجی: {action: approve|reject|review|not_a_receipt, reason_fa, reason_code, paid, overpaid}
+    مبلغ را **کد** داوری می‌کند نه مدل، و در **هر دو جهت**: تأییدِ اشتباهِ مدل هم اصلاح
+    می‌شود، نه فقط ردِ اشتباهش (همان چیزی که نبودنش باگِ ریال را ساخت). overpaid = مبلغِ
+    پرداختی وقتی به‌قدرِ محسوس (≥۱۰٪) بیشتر است، تا میزبان به ادمین اطلاع دهد.
+    خروجی: {action: approve|reject|review|not_a_receipt, reason_fa, reason_code, paid, overpaid, basis}
     """
     ext = verdict.get("extracted") or {}
-    try:
-        paid = float(ext.get("amount_toman"))
-    except (TypeError, ValueError):
-        paid = None
-    has_paid = paid is not None and paid > 0
     exp = float(expected_toman or 0)
+    rc = verdict.get("reason_code", "") or ""
+    reason_fa = verdict.get("reason_fa", "") or ""
+
+    def out(action, **extra):
+        base = {"action": action, "reason_fa": reason_fa, "reason_code": rc,
+                "paid": None, "overpaid": 0, "basis": "none"}
+        base.update(extra)
+        return base
+
+    # «اصلاً رسید نیست» ربطی به مبلغ ندارد، پس اول بررسی می‌شود
+    if verdict.get("verdict") == "reject" and rc == "not_a_receipt":
+        return out("not_a_receipt")
+
+    raw, paid, basis = resolve_paid_toman(ext, exp)
+    has_paid = paid is not None and paid > 0
+    # واحدِ مبلغ مبهم است → هیچ تصمیمِ خودکاری (نه تأیید، نه رد)
+    if basis == "ambiguous":
+        return out("review", reason_code="amount_ambiguous", basis=basis)
+
     v = verdict.get("verdict")
-    if (v == "reject" and verdict.get("reason_code") == "amount_too_low"
-            and has_paid and exp > 0 and paid >= exp):
-        v = "approve"
+    if has_paid and exp > 0:
+        # مدل اشتباه رد کرده در حالی که پول کافی رسیده → تأیید
+        if paid >= exp and v == "reject" and rc == "amount_too_low":
+            v = "approve"
+        # مدل اشتباه تأیید کرده در حالی که پول کافی نرسیده → رد (گاردِ باگِ ریال)
+        if paid < exp and v == "approve":
+            v = "reject"
+
+    # اختلافی که دقیقاً امضای «اشتباهِ واحد» است: عددِ چاپ‌شده برابرِ خودِ فاکتور است.
+    # یا کاربر مبلغِ تومانی را در اپِ ریالی زده، یا رسید واقعاً تومانی و پرداخت درست بوده.
+    # این دو از روی عدد تفکیک‌پذیر نیستند → تصمیمِ انسانی.
+    if has_paid and exp > 0 and paid < exp and raw == exp:
+        return out("review", reason_code="amount_unit_suspect", paid=paid, basis=basis)
+
     overpaid = paid if (v == "approve" and has_paid and exp > 0 and paid >= exp * 1.1) else 0
-    action = "not_a_receipt" if (v == "reject" and verdict.get("reason_code") == "not_a_receipt") else v
-    return {"action": action, "reason_fa": verdict.get("reason_fa", "") or "",
-            "reason_code": verdict.get("reason_code", "") or "",
-            "paid": paid if has_paid else None, "overpaid": overpaid}
+    return out(v, paid=paid if has_paid else None, overpaid=overpaid, basis=basis)
 
 
 def _parse(raw: str) -> dict:

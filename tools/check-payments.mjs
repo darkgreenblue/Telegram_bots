@@ -153,14 +153,19 @@ console.log('\n▶ ایجنتِ رسید با «مبلغِ روی فاکتور»
 
 console.log('\n▶ پرداختِ کمتر از فاکتور: تشخیصِ decideReceipt');
 {
+  // نکته: از v2.6.0 مدل عددِ **خام** رسید را با واحدش می‌دهد و تبدیل در کد انجام می‌شود
+  // (باگِ ریال: نگاه کن به tools/check-receipt-amount.mjs). پس فیکسچرها باید واحد داشته
+  // باشند؛ رسیدِ بدونِ واحد که ده‌برابرِ فاکتور هم نیست عمداً به بازبینیِ انسانی می‌رود.
   const { decideReceipt } = await import('../bots/tarot/cardpay.js');
+  const rial = (n) => ({ amount_raw: n, amount_currency: 'rial' });
+
   const low = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low',
-    extracted: { amount_toman: 40000 } }, 50000);
+    extracted: rial(400000) }, 50000);
   ok(low.action === 'underpaid', 'پرداختِ ۴۰k روی فاکتورِ ۵۰k → underpaid (نه reject)');
   ok(low.paid === 40000, 'مبلغِ واقعیِ پرداخت‌شده برگردانده می‌شود');
 
   const enough = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low',
-    extracted: { amount_toman: 50000 } }, 50000);
+    extracted: rial(500000) }, 50000);
   ok(enough.action === 'approve', 'پرداختِ کافی که مدل اشتباه رد کرده → override به approve');
 
   const notReceipt = decideReceipt({ verdict: 'reject', reason_code: 'not_a_receipt', extracted: {} }, 50000);
@@ -168,6 +173,11 @@ console.log('\n▶ پرداختِ کمتر از فاکتور: تشخیصِ decid
 
   const noAmount = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low', extracted: {} }, 50000);
   ok(noAmount.action === 'reject', 'بدونِ مبلغِ استخراج‌شده، underpaid نمی‌شود');
+
+  // و همان فیکسچر بدونِ واحد دیگر خودکار تصمیم گرفته نمی‌شود (گاردِ باگِ ریال)
+  const noUnit = decideReceipt({ verdict: 'reject', reason_code: 'amount_too_low',
+    extracted: { amount_toman: 40000 } }, 50000);
+  ok(noUnit.action === 'review', 'رسیدِ بدونِ واحدِ خوانا → بازبینیِ انسانی، نه اصلاحِ خودکارِ فاکتور');
 }
 
 console.log('\n▶ اصلاحِ فاکتور: اعتبار = دقیقاً همان چیزی که پرداخت شد');
