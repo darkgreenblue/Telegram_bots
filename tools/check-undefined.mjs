@@ -44,6 +44,8 @@ const TARGETS = [
   'tools/benchmark/tme.mjs',
   'tools/benchmark/collect.mjs',
   'tools/marketing/perf.mjs',
+  'tools/marketing/pick-cards.mjs',
+  'tools/marketing/publish-day.mjs',
 ];
 
 const GLOBALS = new Set([

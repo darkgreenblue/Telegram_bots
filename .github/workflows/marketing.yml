@@ -26,7 +26,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [post, campaign-add, getme, delete]
+        options: [post, day-post, campaign-add, getme, delete]
       bot:
         description: 'کلید ربات در marketing/registry.json (مثل tarot یا tabir-khab)'
         required: true
@@ -56,37 +56,29 @@ on:
         default: ''
 
 jobs:
-  # انتشار خودکار اسلاتِ الان (فقط روی رویداد schedule)
-  slot-post:
+  # انتشارِ خودکارِ روزِ کامل: هدر + دوازده پستِ تصویری (فروردین تا اسفند)
+  # فایلِ روز: marketing/<bot>/posts/<تاریخ تهران>-day.json — نبودنش = ردِ بی‌صدا
+  day-post:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Publish current slot posts
+      - name: Publish today's full day
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
         run: |
           set -e
-          # اسلات = نزدیک‌ترین زمانِ اسلات به الان (ضد تأخیرِ چند دقیقه‌ایِ کرانِ گیت‌هاب)
-          NOW_MIN=$(( 10#$(date -u +%H) * 60 + 10#$(date -u +%M) ))
-          BEST_SLOT=""; BEST_DIST=999999
-          i=0
-          for M in 390; do
-            i=$((i+1))
-            D=$(( NOW_MIN - M )); [ $D -lt 0 ] && D=$(( -D ))
-            if [ $D -lt $BEST_DIST ]; then BEST_DIST=$D; BEST_SLOT=$i; fi
-          done
-          # تاریخِ تهران (UTC+3:30)
           TODAY=$(date -u -d '+3 hours +30 minutes' +%F)
-          echo "🕐 اسلات $BEST_SLOT برای $TODAY (فاصله از زمان اسمی: ${BEST_DIST}m)"
-
           FOUND=0
-          for F in marketing/*/posts/${TODAY}-s${BEST_SLOT}.json; do
+          for F in marketing/*/posts/${TODAY}-day.json; do
             [ -f "$F" ] || continue
             FOUND=1
             BOT=$(echo "$F" | cut -d/ -f2)
@@ -96,34 +88,13 @@ jobs:
               *) echo "⏭ $F: نگاشت توکن برای «$BOT» نیست"; continue;;
             esac
             [ -n "$TOKEN" ] || { echo "⏭ $F: Secret توکن ست نیست"; continue; }
-
-            CHAT=$(jq -r '.chat // empty' "$F")
-            TEXT=$(jq -r '.text // empty' "$F")
-            case "$CHAT" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ $F: chat نامعتبر"; exit 1;; esac
-            [ -n "$TEXT" ] || { echo "❌ $F: متن خالی"; exit 1; }
-            LEN=$(printf '%s' "$TEXT" | wc -m)
-            [ "$LEN" -le 4096 ] || { echo "❌ $F: متن $LEN کاراکتر (سقف 4096)"; exit 1; }
-
-            BTN_TEXT=$(jq -r '.button_text // empty' "$F")
-            BTN_URL=$(jq -r '.button_url // empty' "$F")
-            PREVIEW=$(jq -r 'if .preview == true then "false" else "true" end' "$F")
-            SILENT=$(jq -r 'if .silent == true then "true" else "false" end' "$F")
-
-            ARGS=( -d chat_id="$CHAT" -d parse_mode=HTML -d disable_web_page_preview="$PREVIEW" -d disable_notification="$SILENT" )
-            if [ -n "$BTN_TEXT" ] && [ -n "$BTN_URL" ]; then
-              KB=$(jq -cn --arg t "$BTN_TEXT" --arg u "$BTN_URL" '{inline_keyboard: [[{text: $t, url: $u}]]}')
-              ARGS+=( -d reply_markup="$KB" )
-            fi
-            RESP=$(printf '%s' "$TEXT" | curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-              "${ARGS[@]}" --data-urlencode text@- ) || { echo "❌ $F: خطای شبکه"; exit 1; }
-            OK=$(printf '%s' "$RESP" | jq -r '.ok')
-            if [ "$OK" != "true" ]; then
-              echo "❌ $F: تلگرام رد کرد: $(printf '%s' "$RESP" | jq -r '.description // .')"
-              exit 1
-            fi
-            echo "✅ اسلات $BEST_SLOT منتشر شد: $F → $CHAT message_id=$(printf '%s' "$RESP" | jq -r '.result.message_id') silent=$SILENT"
+            echo "📤 انتشار روز از $F"
+            TELEGRAM_TOKEN="$TOKEN" node tools/marketing/publish-day.mjs --file "$F"
           done
-          [ "$FOUND" = "1" ] || echo "⏭ فایل پستی برای اسلات $BEST_SLOT امروز نیست (روتین محتوا هنوز merge نکرده)"
+          if [ "$FOUND" != "1" ]; then
+            echo "❌ فایلِ روزِ $TODAY وجود ندارد — روتینِ تولید محتوا اجرا نشده یا merge نکرده"
+            exit 1
+          fi
 
       - name: Telegram alert to owner on failure
         if: failure()
@@ -146,10 +117,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (main — فایل پست باید merge شده باشد)
-        if: inputs.action == 'post'
+        if: inputs.action == 'post' || inputs.action == 'day-post'
         uses: actions/checkout@v4
         with:
           ref: main
+
+      - uses: actions/setup-node@v4
+        if: inputs.action == 'day-post'
+        with:
+          node-version: '20'
 
       - name: Post to channel
         if: inputs.action == 'post'
@@ -238,6 +214,29 @@ jobs:
             fi
           done
           echo "نتیجه: $OK پاک شد، $FAIL ناموفق"
+
+      # انتشارِ دستیِ روزِ کامل (همان منطقِ جابِ زمان‌بندی‌شده)
+      - name: Day post (manual)
+        if: inputs.action == 'day-post'
+        env:
+          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          MKT_BOT:    ${{ inputs.bot }}
+          MKT_PATH:   ${{ inputs.path }}
+        run: |
+          set -e
+          case "$MKT_BOT" in
+            tarot)      TOKEN="$T_TAROT";;
+            tabir-khab) TOKEN="$T_TABIR_FA";;
+            *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
+          esac
+          [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
+          case "$MKT_PATH" in
+            marketing/*/posts/*.json) ;;
+            *) echo "❌ مسیر نامعتبر: «$MKT_PATH»"; exit 1;;
+          esac
+          case "$MKT_PATH" in *..*) echo "❌ مسیر نامعتبر"; exit 1;; esac
+          TELEGRAM_TOKEN="$TOKEN" node tools/marketing/publish-day.mjs --file "$MKT_PATH"
 
       - name: Get bot username (getme)
         if: inputs.action == 'getme'
