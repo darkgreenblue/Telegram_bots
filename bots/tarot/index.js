@@ -97,7 +97,7 @@ const TEST_PHASE = false;
 // 2.5.0: کاربری که اعتبارش کافی است دیگر صفحه‌ی قیمت‌دار نمی‌بیند؛ صریح می‌گوید پرداختی
 //        لازم نیست. از تحلیل جرنی: کاربرانی با موجودیِ دقیقاً کافی یک تپ تا فالشان مانده
 //        بودند و حرکت نمی‌کردند، یعنی مانع پول نبود، صفحه شبیه پی‌وال بود.
-const PRODUCT_VERSION = '2.5.0';
+const PRODUCT_VERSION = '2.6.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2316,10 +2316,13 @@ async function applyDiscount(ctx, uid, codeText) {
   }
 }
 
-async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
+// note: هشدارِ اختیاری بالای رسید (مثلاً «مبلغ ممکن است ریال باشد») تا ادمین کورکورانه
+// تأیید نکند. بدونِ آن، بازبینیِ انسانی همان خطای مدل را تکرار می‌کند.
+async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, note = '') {
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
-  const caption = L.wallet.adminNotify(p, user) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+  const caption = (note ? `${note}\n\n` : '')
+    + L.wallet.adminNotify(p, user) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.approve(paymentId), `approve:${paymentId}`),
     Markup.button.callback(L.buttons.reject(paymentId), `reject:${paymentId}`),
@@ -2436,7 +2439,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       return ctx.reply(L.wallet.rejected).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
     }
     // not_a_receipt یا review → تصمیمِ انسانیِ ادمین (پیامِ receiptSent قبلاً رفته)
-    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody,
+      L.wallet.adminAmountNote(decision.reason_code, amountToman, decision.paid));
     setState(uid, nextState);
   } catch (e) {
     // شبکه‌ی ایمنیِ نهایی: کاربر هرگز بی‌جواب نماند و پول در هوا نماند → به ادمینِ انسانی بسپار

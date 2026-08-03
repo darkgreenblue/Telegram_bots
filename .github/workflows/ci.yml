@@ -67,6 +67,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-verdict.mjs
 
+      # واحدِ مبلغِ رسید: رسیدِ بانکی ریال چاپ می‌کند و فاکتورِ ما تومان است. یک‌بار تبدیل به
+      # عهده‌ی مدل بود و کاربری که هر سه پرداختش را یک صفر کمتر زد **خودکار تأیید شد**.
+      # این چک همان سناریو را روی هر سه کپیِ ایجنت اجرا می‌کند و انتظار دارد تأیید نشود.
+      - name: Receipt amount unit check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-receipt-amount.mjs
+
       # ریلِ پرداخت: SQL واقعیِ index.js را روی DB موقت اجرا می‌کند (اتمیک بودنِ مبلغ،
       # ریاضیِ تخفیف، و قفل‌نشدنِ کد با فاکتورِ رهاشده). روی جابِ dashboard چون
       # better-sqlite3 آن‌جا نصب است.
