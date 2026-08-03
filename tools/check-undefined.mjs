@@ -44,6 +44,8 @@ const TARGETS = [
   'tools/benchmark/tme.mjs',
   'tools/benchmark/collect.mjs',
   'tools/marketing/perf.mjs',
+  'tools/marketing/pick-cards.mjs',
+  'tools/marketing/publish-day.mjs',
 ];
 
 const GLOBALS = new Set([
@@ -56,6 +58,7 @@ const GLOBALS = new Set([
   'process', 'Buffer', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
   'encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI', 'escape', 'unescape',
   'fetch', 'AbortController', 'AbortSignal', 'Headers', 'Request', 'Response',
+  'FormData', 'Blob', 'File',
   'require', 'super', 'Function', 'Int8Array', 'Uint8Array', 'Float64Array',
 ]);
 
