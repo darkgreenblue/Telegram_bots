@@ -56,6 +56,10 @@ export function validateDay(day) {
     if (!p.caption || !p.caption.trim()) errs.push(`${tag}: کپشن خالی`);
     else if (p.caption.length > CAPTION_MAX) errs.push(`${tag}: کپشن ${p.caption.length} کاراکتر (سقف ${CAPTION_MAX})`);
     if (p.caption && !p.caption.includes(`#${p.month}`)) errs.push(`${tag}: هشتگ #${p.month} در کپشن نیست`);
+    // تاریخِ روز باید در هر کپشن باشد (خواسته‌ی صریح: هر پست خودش تاریخ‌دار باشد،
+    // چون پست‌ها جدا فوروارد می‌شوند و باید معلوم باشد مالِ چه روزی‌اند)
+    if (day.jalali && p.caption && !p.caption.includes(day.jalali))
+      errs.push(`${tag}: تاریخِ «${day.jalali}» در کپشن نیست`);
     if (!p.file) errs.push(`${tag}: فیلد file ندارد`);
     else if (!existsSync(join(ROOT, 'bots/tarot/assets/cards', p.file))) errs.push(`${tag}: تصویر «${p.file}» پیدا نشد`);
     if (p.key) {

@@ -48,7 +48,7 @@
             "maxBotCtaPerDay": 1,
             "note": "تنها CTA هر پست، دکمه‌ی «فال روزانه‌ی شخصی خودت رو بگیر» است که به ربات لینک می‌شود. هیچ CTA اینگیجمنتی (ری‌اکشن/کامنت) در انتهای فال نوشته نمی‌شود."
           },
-          "postRef": "c_<campaign>_<YYMMDD>s<slot>"
+          "postRef": "c_<campaign>_<YYMMDD>m<MM>"
         },
         {
           "id": "aux1",
