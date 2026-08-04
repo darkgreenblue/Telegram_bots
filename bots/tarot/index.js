@@ -108,7 +108,10 @@ const TEST_PHASE = false;
 // 2.7.3: بازنویسیِ پیامِ اول (بدونِ توضیحِ مکانیک؛ «همون تجربه‌ی تاروت‌خوانِ حرفه‌ای، فقط
 //        توی جیبت») + آزمایشِ A/B روی همان پیام: control با بندِ «قدرتش رو از هوش مصنوعی
 //        می‌گیره» و no_ai بدونِ آن. تک‌متغیره، تا نتیجه تفسیرپذیر بماند.
-const PRODUCT_VERSION = '2.7.3';
+// 2.8.0: موضع‌گیریِ «هوش مصنوعی» از فلو برداشته شد (بیرون از ربات، روی بنر تبلیغاتی تست
+//        می‌شود) و آزمایشِ gate_intro_ai متوقف شد. به‌جایش آزمایشِ intro_order: همان دو
+//        بلوکِ آنبوردینگ، فقط ترتیبشان عوض می‌شود (تجربه اول یا آمار اول).
+const PRODUCT_VERSION = '2.8.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -352,13 +355,18 @@ ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
 ensureAb(db);
 
-// 🅰️/🅱️ آزمایشِ «کلیدواژه‌ی هوش مصنوعی در پیامِ اول» (v2.7.3).
-// معمولاً آزمایش را داشبورد می‌سازد و ربات فقط می‌خواند. این‌جا یک **seedِ یک‌باره** می‌گذاریم
-// چون کمپینِ تبلیغاتی همان شب شروع می‌شود و ترافیکِ اولِ کمپین گران‌ترین ترافیکی است که
-// داریم؛ اگر آزمایش دیرتر روشن شود همان کاربران برای همیشه از نمونه بیرون می‌مانند.
-// `INSERT OR IGNORE` است، پس داشبورد همچنان تنها مرجعِ کنترل می‌ماند: هر توقف/kill/تغییرِ
-// وزنی که از آن‌جا بخورد باقی می‌ماند و این خط دیگر هیچ‌وقت بازنویسی‌اش نمی‌کند.
-const AB_GATE_INTRO = 'gate_intro_ai';
+// 🅰️/🅱️ آزمایشِ «ترتیبِ دو پیامِ آنبوردینگ» (v2.8.0).
+// هر کاربرِ جدید دقیقاً همان دو بلوکِ محتوایی را می‌بیند و تنها متغیر **ترتیب** است:
+//   control    → پیامِ اول «تجربه»، پیامِ بعد از نام «آمار»
+//   stat_first → برعکس
+// سؤال: کاربرِ تازه‌وارد اول باید بداند این‌جا چه چیزی هست، یا اول باید دلیلی برای باور
+// کردن داشته باشد؟ چون هر دو بلوک در هر دو نسخه دیده می‌شوند، تفاوتِ نتیجه فقط از ترتیب است.
+//
+// معمولاً آزمایش را داشبورد می‌سازد و ربات فقط می‌خواند. این‌جا **seedِ یک‌باره** است چون
+// کمپین همین حالا در جریان است و ترافیکِ کمپین گران‌ترین ترافیکِ ماست؛ کاربری که قبل از
+// روشن‌شدنِ آزمایش بیاید برای همیشه از نمونه بیرون می‌ماند. `INSERT OR IGNORE` است، پس
+// داشبورد همچنان تنها مرجعِ کنترل می‌ماند (هر stop/kill/تغییرِ وزن از آن‌جا باقی می‌ماند).
+const AB_INTRO_ORDER = 'intro_order';
 try {
   db.prepare(`
     INSERT OR IGNORE INTO experiments
@@ -366,13 +374,21 @@ try {
        primary_metric, guardrails_json, started_at)
     VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
   `).run(
-    AB_GATE_INTRO,
-    'کلیدواژه‌ی هوش مصنوعی در پیامِ اول',
-    'اگر در همان پیامِ اول بگوییم قدرتِ ربات از هوش مصنوعی است، کاربرِ بیشتری تا تحویلِ فال جلو می‌رود (تمایزی که رقبا ادعایش را ندارند).',
-    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'no_ai', weight: 50 }]),
+    AB_INTRO_ORDER,
+    'ترتیبِ دو پیامِ آنبوردینگ (تجربه یا آمار، کدام اول)',
+    'اگر شاهدِ اجتماعی (۸۶٪) را قبل از وعده‌ی تجربه نشان دهیم، کاربرِ بیشتری تا تحویلِ فال جلو می‌رود.',
+    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'stat_first', weight: 50 }]),
     EVENTS.PRODUCT_DELIVERED,
     JSON.stringify([]),
   );
+  // آزمایشِ قبلی (کلیدواژه‌ی هوش مصنوعی) با تصمیمِ مالک متوقف شد: موضع‌گیریِ هوش مصنوعی
+  // بیرون از فلو و روی بنرِ تبلیغاتی تست می‌شود، نه این‌جا. صراحتاً stop می‌کنیم تا در
+  // داشبورد «در حال اجرا»ی دروغین نماند. یک‌باره است (شرطِ status آن را idempotent می‌کند).
+  db.prepare(`
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='inconclusive — متوقف پیش از نمونه‌ی معنادار؛ فرضیه‌ی هوش مصنوعی بیرون از فلو (بنر تبلیغاتی) تست می‌شود'
+    WHERE key='gate_intro_ai' AND status<>'stopped'
+  `).run();
 } catch (e) { logErr('ab seed:', e.message); } // آزمایش هرگز نباید بوتِ ربات را بشکند
 
 const stmts = {
@@ -1035,15 +1051,16 @@ async function isChannelMember(ctx, uid) {
   }
 }
 
+// آیا این کاربر در شاخه‌ی «اول آمار» است؟ (آزمایشِ intro_order)
+// variant() به‌خاطرِ ab_exposures چسبنده است، پس صدا زدنش در دو نقطه‌ی فلو همیشه یک جواب
+// می‌دهد و کاربر هرگز یک بلوک را دو بار یا هیچ‌کدام را نمی‌بیند.
+const statFirstFor = (uid) => variant(db, uid, AB_INTRO_ORDER) === 'stat_first';
+
 // نمایشِ گیت: پیامِ معرفی (کاهشِ dropِ لحظه‌ی ورود) و بعد دعوت به عضویت.
-// آزمایشِ `gate_intro_ai`: تنها تفاوتِ دو نسخه یک بند است («قدرتش رو از هوش مصنوعی می‌گیره»)
-// تا نتیجه تفسیرپذیر بماند. control = نسخه‌ی هوش مصنوعی (هم‌راستا با نامِ کانال)، پس kill کردنِ
-// آزمایش از داشبورد همه را به همان حالتِ هم‌راستا با برند برمی‌گرداند، نه به حالتِ خنثی.
 async function showGate(ctx, uid, refBonus = false) {
   setState(uid, 'gate_join');
   setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
-  const noAi = variant(db, uid, AB_GATE_INTRO) === 'no_ai';
-  await ctx.reply(noAi ? L.onboarding.gateIntroNoAi : L.onboarding.gateIntro, Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS), gateKeyboard());
 }
@@ -1201,7 +1218,8 @@ async function finishNameOnboarding(ctx, rawName) {
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
   // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
-  await ctx.reply(L.onboarding.welcome(name), Markup.removeKeyboard());
+  // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid)), Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
   await typing(ctx, PACE_S);
