@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// چکِ «گیتِ عضویت در کانال» + قرارداد «فالِ محبوب هم‌اندازه‌ی هدیه».
+//
+// چرا وجود دارد: گیتِ عضویت تنها چیزی در این ربات است که می‌تواند **کاربر را بیرون نگه دارد**.
+// یک اشتباهِ کوچک در دامنه‌اش دو فاجعه‌ی متفاوت می‌سازد و هیچ‌کدام سروصدا نمی‌کنند:
+//   ۱) دامنه‌ی زیادی گشاد → کاربرِ فعلیِ پولی هم گیت می‌خورد و از ربات بیرون می‌افتد.
+//   ۲) fail-closed شدنِ چکِ عضویت → اگر ربات از ادمینیِ کانال بیفتد، **همه‌ی** ثبت‌نام‌های
+//      جدید بی‌صدا می‌خشکند و تا وقتی کسی شکایت نکند نمی‌فهمیم.
+// هر دو مسیرِ سردند و boot smoke test نمی‌بیندشان (درسِ بند ۸ ریشه).
+//
+// اجرا: node tools/check-gate.mjs
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const idx = readFileSync(join(root, 'bots/tarot/index.js'), 'utf8');
+const loc = readFileSync(join(root, 'bots/tarot/locales/fa.js'), 'utf8');
+
+let fails = 0, passes = 0;
+const ok = (cond, msg) => { if (cond) { passes++; } else { fails++; console.error(`❌ ${msg}`); } };
+
+// ── ۱) دامنه‌ی گیت: کاربرِ فعلی هرگز گیت نمی‌خورد ────────────────────────────
+const needsGateSrc = idx.match(/function needsGate\(user\)\s*\{[\s\S]*?\n\}/)?.[0] || '';
+ok(needsGateSrc, 'تابعِ needsGate پیدا شد');
+ok(/!user\.welcome_bonus_at/.test(needsGateSrc),
+   'needsGate باید روی «هدیه‌ی خوش‌آمد را نگرفته» شرط بگذارد، وگرنه کاربرِ فعلی هم گیت می‌خورد');
+ok(/!JOIN_GATE_ENABLED\)\s*return false/.test(needsGateSrc),
+   'فلگِ خاموشی باید اولین شرطِ needsGate باشد (رول‌بکِ یک‌خطی)');
+
+// شبیه‌سازیِ واقعیِ همان تابع روی کاربرهای نمونه
+const needsGate = new Function('JOIN_GATE_ENABLED', `return (${needsGateSrc.replace(/^function /, 'function ')});`);
+for (const enabled of [true, false]) {
+  const fn = needsGate(enabled);
+  const t = (m) => `${enabled ? 'روشن' : 'خاموش'}: ${m}`;
+  ok(fn({ joined_gate_at: null, welcome_bonus_at: null, welcomed: 0 }) === enabled,
+     t('کاربرِ کاملاً جدید باید گیت بخورد (و با فلگِ خاموش، نخورد)'));
+  ok(fn({ joined_gate_at: null, welcome_bonus_at: 1_700_000_000, welcomed: 0 }) === false,
+     t('کاربری که هدیه گرفته ولی آنبوردینگ را رها کرده هرگز گیت نمی‌خورد'));
+  ok(fn({ joined_gate_at: null, welcome_bonus_at: 1_700_000_000, welcomed: 1 }) === false,
+     t('کاربرِ کاملِ فعلی هرگز گیت نمی‌خورد'));
+  ok(fn({ joined_gate_at: 1_700_000_000, welcome_bonus_at: null, welcomed: 0 }) === false,
+     t('کاربری که گیت را رد کرده دوباره گیت نمی‌خورد'));
+  ok(fn(null) === false, t('کاربرِ ناموجود نباید گیت بخورد'));
+}
+
+// ── ۲) چکِ عضویت باید fail-open باشد ─────────────────────────────────────────
+const memberSrc = idx.match(/async function isChannelMember\([\s\S]*?\n\}/)?.[0] || '';
+ok(memberSrc, 'تابعِ isChannelMember پیدا شد');
+ok(/catch[\s\S]*return true/.test(memberSrc),
+   'خطای getChatMember باید fail-open باشد؛ وگرنه افتادنِ ربات از ادمینیِ کانال همه‌ی ثبت‌نام‌ها را می‌خشکاند');
+ok(/GATE_CHECK/.test(memberSrc), 'خطای گیت باید با پیشوندِ قابلِ grep لاگ شود');
+ok(/restricted/.test(memberSrc) && /is_member/.test(memberSrc),
+   'وضعیتِ restricted فقط با is_member===true عضو حساب می‌شود');
+
+// ── ۳) راهِ فرار همیشه باز است (بند ۶ج ریشه) ─────────────────────────────────
+const mwSrc = idx.match(/GATE_FREE_CMD[\s\S]*?\n\s{2}\}\);/)?.[0] || '';
+ok(mwSrc, 'میدل‌ورِ گیت پیدا شد');
+ok(/'\/start'/.test(mwSrc), 'دستور /start باید همیشه از گیت رد شود');
+ok(/'\/support'/.test(mwSrc), 'دستور /support هرگز گیت نمی‌شود (راهِ فرارِ کاربرِ گیرکرده)');
+ok(/support\?\.button/.test(mwSrc), 'دکمه‌ی پشتیبانی هم باید آزاد باشد، نه فقط دستورش');
+ok(/data\.startsWith\('gate:'\)/.test(mwSrc), 'خودِ دکمه‌ی گیت نباید توسط گیت بلاک شود');
+ok(/catch[\s\S]*return next\(\)/.test(mwSrc), 'هر خطای میدل‌ور باید fail-open باشد، نه قفلِ ربات');
+
+// ── ۴) گیت یک نقطه است، نه ده‌ها گارد پراکنده ────────────────────────────────
+ok((idx.match(/needsGate\(/g) || []).length <= 4,
+   'needsGate باید فقط در چند نقطه‌ی مشخص صدا زده شود (گیت میدل‌ورِ واحد است، نه گاردِ پراکنده)');
+
+// ── ۵) هدیه دقیقاً لحظه‌ی عبور از گیت داده می‌شود، نه قبلش ───────────────────
+const startSrc = idx.match(/async function handleStart\([\s\S]*?\n\}/)?.[0] || '';
+ok(!/grantWelcomeBonus/.test(startSrc),
+   'handleStart نباید مستقیم هدیه بدهد؛ هدیه فقط از startOnboarding (بعد از گیت) می‌آید');
+const gateCheckSrc = idx.match(/bot\.action\('gate:check'[\s\S]*?\n\}\);/)?.[0] || '';
+ok(/claimGate\.run\(uid\)\.changes/.test(gateCheckSrc), 'عبور از گیت باید اتمیک باشد (ضدِ دوبار-تپ)');
+ok(/show_alert: true/.test(gateCheckSrc), 'عضو نبودن باید پاپ‌آپِ روی صفحه بدهد، نه پیامِ جدید');
+ok(/startOnboarding/.test(gateCheckSrc), 'بعد از تأییدِ عضویت، فلو باید به همان آنبوردینگِ همیشگی برود');
+
+// ── ۶) قرارداد: فالِ «محبوب‌ترین» باید با اعتبارِ هدیه قابلِ گرفتن باشد ───────
+const { default: SPREADS, SPREAD_BY_ID } = await import(join(root, 'bots/tarot/spreads.js'));
+const WELCOME_BONUS = Number(idx.match(/const WELCOME_BONUS\s*=\s*([\d_]+)/)?.[1]?.replace(/_/g, '') || 0);
+ok(WELCOME_BONUS > 0, 'WELCOME_BONUS از index.js خوانده شد');
+
+const badge = loc.match(/catalogBadges:\s*\{\s*(\w+):\s*'محبوب‌ترین'/)?.[1];
+ok(badge, 'بَجِ «محبوب‌ترین» در locale پیدا شد');
+const popular = SPREAD_BY_ID[badge];
+ok(popular, `فالِ محبوب (${badge}) در spreads.js وجود دارد`);
+ok(popular?.price === WELCOME_BONUS,
+   `قرارداد: فالِ محبوب باید دقیقاً هم‌اندازه‌ی هدیه‌ی خوش‌آمد باشد تا کاربرِ تازه بتواند با اعتبارِ هدیه بگیردش (فال: ${popular?.price}، هدیه: ${WELCOME_BONUS})`);
+ok(SPREADS[0]?.id === badge, 'فالِ محبوب باید اولین گزینه‌ی کاتالوگ باشد');
+ok(new RegExp(`startPopular[\\s\\S]{0,80}${popular?.fa}`).test(loc),
+   'دکمه‌ی CTAِ پایانِ آنبوردینگ باید همان فالِ محبوب را نام ببرد');
+ok(new RegExp(`startPopular\\(\\),\\s*'spread:${badge}'`).test(idx),
+   `دکمه‌ی CTA باید به spread:${badge} وصل باشد، نه فالِ دیگری`);
+
+// قانونِ قیمت (بدونِ استثنا): هر کارت ۱۰٬۰۰۰ تومان
+for (const s of SPREADS) {
+  ok(s.price === s.size * 10_000, `قیمتِ «${s.fa}» باید size×۱۰٬۰۰۰ باشد (${s.price})`);
+  ok(s.positions.length === s.size, `تعدادِ جایگاه‌های «${s.fa}» باید با size یکی باشد`);
+}
+
+if (fails) {
+  console.error(`\n${fails} ادعا شکست خورد.`);
+  process.exit(1);
+}
+console.log(`✅ چکِ گیتِ عضویت و فالِ محبوب: ${passes} ادعا، همه سبز.`);
