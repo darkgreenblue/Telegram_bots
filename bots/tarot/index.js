@@ -97,7 +97,10 @@ const TEST_PHASE = false;
 // 2.5.0: کاربری که اعتبارش کافی است دیگر صفحه‌ی قیمت‌دار نمی‌بیند؛ صریح می‌گوید پرداختی
 //        لازم نیست. از تحلیل جرنی: کاربرانی با موجودیِ دقیقاً کافی یک تپ تا فالشان مانده
 //        بودند و حرکت نمی‌کردند، یعنی مانع پول نبود، صفحه شبیه پی‌وال بود.
-const PRODUCT_VERSION = '2.6.0';
+// 2.7.0: گیتِ عضویت در کانال برای کاربرِ جدید (معرفی → دعوت به عضویت → هدیه لحظه‌ی تأیید)
+//        + «عشق و رابطه» محبوب‌ترین و اولِ کاتالوگ شد، سه‌کارتی و ۳۰٬۰۰۰ تومان یعنی دقیقاً
+//        هم‌اندازه‌ی هدیه‌ی خوش‌آمد، تا کاربرِ تازه پرتقاضاترین فال را با اعتبارِ هدیه بگیرد.
+const PRODUCT_VERSION = '2.7.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -122,6 +125,22 @@ const NAV_GUARD_ENABLED = true;
 // کاملاً fail-safe و بدونِ هیچ اثرِ رو-به-کاربر. Rollback فوری: false کن → هیچ رویدادِ ریزی
 // ثبت نمی‌شود و هیچ متدی رپ نمی‌شود (رفتار دقیقاً مثل قبل؛ دیتای ثبت‌شده بی‌ضرر می‌ماند).
 const JOURNEY_ENABLED = true;
+
+// 🔑 عضویتِ اجباری در کانال برای کاربرِ **جدید** (v2.7.0): قبل از هدیه‌ی خوش‌آمد، کاربر یک
+// پیامِ کوتاهِ معرفی می‌بیند و بعد دعوت به عضویت در کانال. هدیه دقیقاً لحظه‌ی تأییدِ عضویت
+// واریز می‌شود، پس عضویت یک «هزینه» نیست، کلیدِ گرفتنِ هدیه است.
+//
+// دامنه‌ی گارد عمداً باریک است (بند ۲ج: کاربرِ زنده وسط فلو نباید بشکند): فقط کسی گیت
+// می‌خورد که **هنوز هدیه‌ی خوش‌آمد نگرفته** باشد. هر کاربرِ فعلی، حتی نیمه‌آنبورد، از قبل
+// هدیه را گرفته پس هرگز گیت نمی‌بیند و تجربه‌اش ذره‌ای عوض نمی‌شود.
+//
+// Rollback فوری: false کن → گیت و میدل‌ورش کاملاً محو، فلو دقیقاً مثل قبل (کاربرانی که
+// gate را رد کرده‌اند بی‌ضرر می‌مانند؛ callbackِ gate:check ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد).
+const JOIN_GATE_ENABLED = true;
+const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim() || '@taroot_fa';
+const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || 'https://t.me/taroot_fa';
+// وضعیت‌هایی که یعنی «عضو است». `restricted` فقط وقتی عضو است که is_member هم true باشد.
+const GATE_OK_STATUS = new Set(['member', 'administrator', 'creator']);
 
 // ⚖️ جوابِ قاطع برای فال‌های تصمیم‌محور (spreads.js → decisive؛ فعلاً آری/نه و دوراهی).
 // از فیدبکِ کاربرِ واقعی: «اون جوابی که می‌خواستم رو آخر نفهمیدم و نگرفتم... اگه توش
@@ -293,6 +312,9 @@ try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: نام فارسیِ خودِ کاربر (جدا از first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند)
 try { db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration (v2.7.0): لحظه‌ی تأییدِ عضویت در کانال (write-once). فقط برای کاربرِ جدید معنا دارد؛
+// کاربرانِ فعلی چون هدیه‌ی خوش‌آمد را قبلاً گرفته‌اند اصلاً وارد گیت نمی‌شوند.
+try { db.prepare('ALTER TABLE users ADD COLUMN joined_gate_at INTEGER').run(); } catch {}
 // migration: آخرین روزِ گرفتنِ فال حافظ (قلاب رایگانِ روزانه، مستقل از کارت روز)
 try { db.prepare("ALTER TABLE users ADD COLUMN last_hafez_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقفِ نرمِ استخاره‌ی روزانه (تاریخ + شمارنده؛ صفر می‌شود در روزِ نو)
@@ -332,6 +354,8 @@ const stmts = {
   setFocus:   db.prepare('UPDATE users SET focus_area=?, focus_asked_at=unixepoch() WHERE telegram_id=?'),
   setDisplayName: db.prepare('UPDATE users SET display_name=? WHERE telegram_id=?'),
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
+  // گاردِ اتمیک داخلِ خودِ UPDATE: فقط وقتی هنوز NULL است می‌نویسد، پس دوبار-تپ اثری ندارد
+  claimGate: db.prepare('UPDATE users SET joined_gate_at=unixepoch() WHERE telegram_id=? AND joined_gate_at IS NULL'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
   setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
@@ -949,6 +973,59 @@ function grantWelcomeBonus(uid) {
   } catch (e) { logErr('welcome bonus:', e.message); return false; }
 }
 
+/* ---------- 🔑 گیتِ عضویت در کانال (v2.7.0) ---------- */
+// needsGate: **باریک‌ترین شرطِ ممکن** تا هیچ کاربرِ فعلی گیت نبیند (بند ۲ج/۲). ملاک را
+// «هدیه‌ی خوش‌آمد را گرفته یا نه» گذاشتیم، نه welcomed: کاربری که وسط آنبوردینگ رها کرده
+// هم هدیه‌اش را گرفته، پس نباید حالا بابتِ هدیه‌ای که دارد دوباره شرط بگذاریم.
+function needsGate(user) {
+  if (!JOIN_GATE_ENABLED) return false;
+  if (!user) return false;
+  return !user.joined_gate_at && !user.welcome_bonus_at && !user.welcomed;
+}
+
+const gateKeyboard = () => Markup.inlineKeyboard([
+  [Markup.button.url(L.buttons.gateOpenChannel, GATE_CHANNEL_URL)],
+  [Markup.button.callback(L.buttons.gateCheck, 'gate:check')],
+]);
+
+// isChannelMember: تنها منبعِ حقیقتِ عضویت. **fail-open عمدی**: اگر تلگرام خطا داد (ربات از
+// ادمینیِ کانال افتاد، کانال عوض شد، شبکه قطع بود) کاربر را رد می‌کنیم تا جلو برود. اگر
+// fail-closed بود، یک خطای سمتِ ما کلِ ثبت‌نامِ کاربرهای جدید را بی‌صدا می‌خشکاند و تا
+// وقتی کسی شکایت نکند نمی‌فهمیدیم. خطا با پیشوندِ قابلِ grep لاگ می‌شود.
+async function isChannelMember(ctx, uid) {
+  try {
+    const m = await ctx.telegram.getChatMember(GATE_CHANNEL, uid);
+    if (GATE_OK_STATUS.has(m?.status)) return true;
+    if (m?.status === 'restricted') return m.is_member === true;
+    return false; // left / kicked
+  } catch (e) {
+    logErr(`❌ GATE_CHECK ${GATE_CHANNEL}:`, e.message);
+    return true; // fail-open: خطای ما نباید راهِ کاربر را ببندد
+  }
+}
+
+// نمایشِ گیت: پیامِ معرفی (کاهشِ dropِ لحظه‌ی ورود) و بعد دعوت به عضویت.
+async function showGate(ctx, uid, refBonus = false) {
+  setState(uid, 'gate_join');
+  setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
+  await ctx.reply(L.onboarding.gateIntro, Markup.removeKeyboard());
+  await typing(ctx, PACE_S);
+  await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS), gateKeyboard());
+}
+
+// بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
+// گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
+async function startOnboarding(ctx, uid, refBonus) {
+  grantWelcomeBonus(uid);
+  await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS), Markup.removeKeyboard());
+  await typing(ctx, PACE_S);
+  // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
+  // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
+  setState(uid, 'onboard_name');
+  setSession(uid, { refBonus });
+  await ctx.reply(L.onboarding.askName, { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
+}
+
 async function handleStart(ctx) {
   const uid = ctx.from.id;
   const { isNew } = upsertUser(ctx);
@@ -971,18 +1048,17 @@ async function handleStart(ctx) {
   }
 
   if (!user.welcomed) {
+    // 🔑 گیتِ عضویت مقدم بر هدیه است: هدیه لحظه‌ی تأییدِ عضویت واریز می‌شود، پس عضویت
+    // «شرطِ گرفتنِ هدیه» است نه هزینه‌ای اضافه. کاربرِ فعلی هرگز این شاخه را نمی‌بیند
+    // (needsGate روی هدیه‌ی گرفته‌نشده شرط دارد).
+    if (needsGate(user)) {
+      track(db, uid, 'gate_shown', { ch: GATE_CHANNEL });
+      return showGate(ctx, uid, refBonus);
+    }
     // v2.0.0 — اول ارزش، بعد اسم: پیامِ اول خوش‌آمد + هدیه‌ی اعتبار (دقیقاً بهای یک فالِ
     // کامل) را می‌دهد، پیامِ دوم تازه نام را می‌پرسد. قبلاً اولین چیزی که کاربر می‌دید یک
     // درخواست بود، نه یک ارزش.
-    grantWelcomeBonus(uid);
-    await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS), Markup.removeKeyboard());
-    await typing(ctx, PACE_S);
-    // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
-    // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
-    setState(uid, 'onboard_name');
-    setSession(uid, { refBonus }); // وعده‌ی رفرال بعد از گرفتن نام نشان داده می‌شود
-    await ctx.reply(L.onboarding.askName, { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
-    return;
+    return startOnboarding(ctx, uid, refBonus);
   }
 
   // کاربر برگشتی
@@ -999,6 +1075,57 @@ async function handleStart(ctx) {
   await ctx.reply(msg, mainKeyboard(ctx.from.id));
 }
 bot.start(handleStart);
+
+// دکمه‌ی «عضو شدم، بررسی کن». دو نتیجه بیشتر ندارد: یا عضو است و بلافاصله هدیه و ادامه‌ی
+// فلو را می‌گیرد، یا پاپ‌آپِ «تایید نشده» می‌بیند و روی همان صفحه می‌ماند (بدونِ پیامِ جدید،
+// تا چت شلوغ نشود). دوبار-تپ بی‌خطر است چون claimGate اتمیک است و grantWelcomeBonus write-once.
+bot.action('gate:check', async (ctx) => {
+  const uid = ctx.from.id;
+  const user = getUser(uid);
+  // دکمه‌ی کهنه یا کاربری که قبلاً رد شده: فقط پاسخِ خالی، بدونِ هیچ رفتارِ عجیب
+  if (!user || !needsGate(user)) return ctx.answerCbQuery().catch(() => {});
+  const okMember = await isChannelMember(ctx, uid);
+  track(db, uid, 'gate_check', { ok: okMember ? 1 : 0 });
+  if (!okMember) {
+    return ctx.answerCbQuery(L.onboarding.gateNotJoined, { show_alert: true }).catch(() => {});
+  }
+  await ctx.answerCbQuery().catch(() => {});
+  if (!stmts.claimGate.run(uid).changes) return; // ضدِ دوبار-تپ (یکی از دو تپ برنده است)
+  track(db, uid, 'gate_passed', { ch: GATE_CHANNEL });
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {} // دکمه‌ها بعد از عبور می‌روند
+  return startOnboarding(ctx, uid, getSession(uid)?.refBonus === true);
+});
+
+/* 🔑 میدل‌ورِ گیت — عمداً یک نقطه، نه گارد روی تک‌تکِ هندلرها.
+   درسِ بند ۸ ریشه: هر جایی که باید دستی به ده‌ها هندلر اضافه شود، دیر یا زود یکی جا می‌ماند
+   (و مسیرهای سرد را CI نمی‌بیند). این‌جا یک میدل‌ورِ واحد قبل از همه‌ی هندلرها می‌نشیند، پس
+   هیچ مسیری، حتی مسیرهایی که در آینده اضافه می‌شوند، از قلم نمی‌افتد.
+   عبورِ آزاد: /start (تا خودِ گیت دوباره نشان داده شود)، خودِ دکمه‌ی gate، و پشتیبانی
+   (بند ۶ج: راهِ فرارِ کاربرِ گیرکرده هرگز بسته نمی‌شود). */
+if (JOIN_GATE_ENABLED) {
+  // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
+  const GATE_FREE_CMD = new Set(['/start', '/support']);
+  bot.use(async (ctx, next) => {
+    try {
+      const uid = ctx.from?.id;
+      if (!uid) return next();
+      const data = ctx.callbackQuery?.data || '';
+      if (data.startsWith('gate:')) return next();
+      const text = ctx.message?.text?.trim() || '';
+      const cmd = text.split(/[\s@]/)[0];
+      if (GATE_FREE_CMD.has(cmd) || text === L.support?.button) return next();
+      if (!needsGate(getUser(uid))) return next();
+      // گیت‌شده: روی دکمه پاپ‌آپ، روی پیام یادآوریِ کوتاه + همان دو دکمه (هیچ صفحه‌ای بن‌بست نیست)
+      if (ctx.callbackQuery) {
+        return ctx.answerCbQuery(L.onboarding.gateNotJoined, { show_alert: true }).catch(() => {});
+      }
+      return ctx.reply(L.onboarding.gateReminder, gateKeyboard()).catch(() => {});
+    } catch (e) {
+      logErr('gate middleware:', e.message);
+      return next(); // هیچ خطایی در گیت نباید ربات را قفل کند
+    }
+  });
+}
 
 // پاک‌سازیِ سبکِ نامِ ورودی: خط اول، بدون ایموجی/کاراکترهای کنترلی، حداکثر ۳۲ کاراکتر
 function cleanName(raw) {
@@ -1047,7 +1174,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     // (تا وقتی آزمایش از داشبورد running نشود، variant() همیشه control برمی‌گرداند = رفتار فعلی)
     const ctaRows = [
       [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
-      [Markup.button.callback(L.buttons.startThree(), 'spread:three')],
+      [Markup.button.callback(L.buttons.startPopular(), 'spread:love')],
     ];
     if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
     // دکمه‌ی سوم: مشاهده‌ی همه‌ی فال‌ها (زیرِ دو دکمه‌ی اصلی؛ همان پیام به کاتالوگ ادیت می‌شود)
@@ -1929,10 +2056,10 @@ const FOCUS_SUGGEST = {
   love:      ['love', 'family', 'choice', 'inner', 'celtic'],
   career:    ['career', 'money', 'migration', 'choice', 'celtic'],
   money:     ['money', 'career', 'choice', 'celtic'],
-  inner:     ['inner', 'three', 'love', 'celtic'],
+  inner:     ['inner', 'love', 'three', 'celtic'],
   family:    ['family', 'love', 'inner', 'celtic'],
   migration: ['migration', 'choice', 'career', 'celtic'],
-  question:  ['choice', 'yesno', 'three', 'celtic'],
+  question:  ['choice', 'yesno', 'love', 'celtic'],
 };
 /* ===== پیشنهاددهنده‌ی فال (v2.1.0 — امتیازیِ هاردکد، بدونِ LLM و بدونِ هیچ هزینه‌ای) =====
    قبلاً هرجا پیشنهاد می‌دادیم دو حالت بود: یا لیستِ ثابتِ حوزه، یا بدتر، دکمه‌ی هاردکدِ
