@@ -102,7 +102,10 @@ const TEST_PHASE = false;
 //        هم‌اندازه‌ی هدیه‌ی خوش‌آمد، تا کاربرِ تازه پرتقاضاترین فال را با اعتبارِ هدیه بگیرد.
 // 2.7.1: حذفِ تکرارِ معرفی بعد از گرفتنِ نام (کاربر یک متن را دو بار می‌دید) و جایگزینی‌اش
 //        با فکتِ واقعیِ «۸۶٪ گفتن خوانششون با واقعیت خوند» + پررنگ‌کردنِ «هوش مصنوعی» در معرفی.
-const PRODUCT_VERSION = '2.7.1';
+// 2.7.2: سه فیکس از تستِ دستیِ مالک — یادآوریِ گیت روی آپدیتِ سرویسیِ my_chat_member
+//        فرستاده می‌شد، ریستِ ادمین وسطِ گیت بلاک می‌شد، و payloadِ اتریبیوشن از کلمه‌ی
+//        دومِ هر متنی خوانده می‌شد (ریستِ ادمین `payload:"ریست"` ثبت می‌کرد). + کپیِ فکت.
+const PRODUCT_VERSION = '2.7.2';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1033,8 +1036,15 @@ async function handleStart(ctx) {
   const { isNew } = upsertUser(ctx);
   const user = getUser(uid);
 
-  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source/first_version فقط کاربر جدید
-  const payload = (ctx.startPayload ?? ctx.message?.text?.split(/\s+/)[1] ?? '').trim();
+  // اتریبیوشن: رویداد start برای هر /start (کمپین برگشتی هم دیده شود) + first_source/first_version فقط کاربر جدید.
+  //
+  // ⚠️ payload فقط از یک پیامِ واقعیِ `/start` خوانده می‌شود. `handleStart` از دو جای دیگر هم
+  // صدا زده می‌شود (دکمه‌ی ریستِ ادمین، و کاربرِ ناتمامی که متن می‌فرستد) و آن‌جا `ctx.message.text`
+  // اصلاً /start نیست. فالبکِ قبلی «کلمه‌ی دومِ هر متنی» را payload می‌گرفت: ریستِ ادمین
+  // `payload:"ریست"` ثبت می‌کرد و کاربرِ ناتمام کلمه‌ی دومِ حرفش را. یعنی اتریبیوشن با متنِ
+  // تصادفی آلوده می‌شد (باگِ دیده‌شده در لاگ ۱۴۰۵/۰۵/۱۳).
+  const isStartCmd = /^\/start(?:@\S+)?(?:\s|$)/.test(ctx.message?.text || '');
+  const payload = (ctx.startPayload ?? (isStartCmd ? ctx.message.text.split(/\s+/)[1] : '') ?? '').trim();
   captureStart(db, uid, payload, isNew, PRODUCT_VERSION);
 
   // رفرال: /start ref_<id>
@@ -1102,20 +1112,31 @@ bot.action('gate:check', async (ctx) => {
    درسِ بند ۸ ریشه: هر جایی که باید دستی به ده‌ها هندلر اضافه شود، دیر یا زود یکی جا می‌ماند
    (و مسیرهای سرد را CI نمی‌بیند). این‌جا یک میدل‌ورِ واحد قبل از همه‌ی هندلرها می‌نشیند، پس
    هیچ مسیری، حتی مسیرهایی که در آینده اضافه می‌شوند، از قلم نمی‌افتد.
-   عبورِ آزاد: /start (تا خودِ گیت دوباره نشان داده شود)، خودِ دکمه‌ی gate، و پشتیبانی
-   (بند ۶ج: راهِ فرارِ کاربرِ گیرکرده هرگز بسته نمی‌شود). */
+   عبورِ آزاد: /start (تا خودِ گیت دوباره نشان داده شود)، خودِ دکمه‌ی gate، پشتیبانی
+   (بند ۶ج: راهِ فرارِ کاربرِ گیرکرده هرگز بسته نمی‌شود)، و **ریستِ ادمین**.
+   چرا ریست: `bot.hears(resetTest)` و `/reset` بعد از این میدل‌ور ثبت می‌شوند، پس بدونِ
+   این استثنا ادمینی که وسطِ گیت است نمی‌تواند ریست کند و گیت را دوباره تست کند — دقیقاً
+   همان چیزی که مالک دید (به‌جای ریست، پیامِ یادآوریِ گیت گرفت). بند ۶ب می‌گوید این دکمه
+   «همیشه» در دسترسِ ادمین است. برای کاربرِ عادی بی‌خطر است چون `doReset` خودش `isAdmin` را چک می‌کند. */
 if (JOIN_GATE_ENABLED) {
   // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
-  const GATE_FREE_CMD = new Set(['/start', '/support']);
+  const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
+  const GATE_FREE_TEXT = new Set(
+    [L.support?.button, L.buttons.resetTest, '🔄 ریست ربات (تست)'].filter(Boolean));
   bot.use(async (ctx, next) => {
     try {
       const uid = ctx.from?.id;
       if (!uid) return next();
+      // فقط **اقدامِ واقعیِ کاربر** گیت می‌شود. آپدیت‌های سرویسیِ تلگرام (my_chat_member وقتی
+      // کاربر کانال را ترک/عضو می‌کند یا ربات را بلاک/آنبلاک می‌کند، edited_message، …) پیام
+      // ندارند و قبلاً به‌اشتباه «اقدام» حساب می‌شدند: کاربر بدونِ اینکه کاری کرده باشد یادآوریِ
+      // گیت می‌گرفت. باگِ واقعی و دیده‌شده — در لاگ سه بار پشت‌سرهم روی my_chat_member تکرار شد.
+      if (!ctx.message && !ctx.callbackQuery) return next();
       const data = ctx.callbackQuery?.data || '';
       if (data.startsWith('gate:')) return next();
       const text = ctx.message?.text?.trim() || '';
       const cmd = text.split(/[\s@]/)[0];
-      if (GATE_FREE_CMD.has(cmd) || text === L.support?.button) return next();
+      if (GATE_FREE_CMD.has(cmd) || GATE_FREE_TEXT.has(text)) return next();
       if (!needsGate(getUser(uid))) return next();
       // گیت‌شده: روی دکمه پاپ‌آپ، روی پیام یادآوریِ کوتاه + همان دو دکمه (هیچ صفحه‌ای بن‌بست نیست)
       if (ctx.callbackQuery) {
