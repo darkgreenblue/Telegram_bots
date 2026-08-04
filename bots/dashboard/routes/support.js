@@ -5,7 +5,7 @@ import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
 import { table, statusBadge, stat } from '../lib/html.js';
-import { groupSessions } from '../lib/journey.js';
+import { groupSessions, screenText } from '../lib/journey.js';
 
 // created_at ممکن است unix یا ISO باشد → همیشه به رشته‌ی قابل‌نمایش تبدیل شود
 const showTime = (v) => (typeof v === 'string' ? v : tehranDateTime(v));
@@ -85,9 +85,12 @@ function buildTimeline(db, botKey, uid) {
       // رویدادهای ریزِ مسیر (shared/journey.js) خواناتر نمایش داده می‌شوند: خودِ پیام / خودِ دکمه
       if (e.event === 'view') {
         const s = screens.get(p.k);
+        // screenText اعداد را ماسک می‌کند: نمونه‌ی هر صفحه فقط یک‌بار (اولین کاربر) ذخیره
+        // شده، پس عددِ داخلش مالِ این کاربر نیست. مبلغِ واقعی از ردیفِ payments همین
+        // تایم‌لاین خوانده می‌شود. جزئیات: کامنتِ screenText در lib/journey.js
         const txt = p.k === 'content' ? `متنِ محتوا (${fmt(p.n || 0)} کاراکتر)`
-          : (s?.label || (s?.sample || '').replace(/\s+/g, ' ').trim().slice(0, 110) || `صفحه ${p.k}`);
-        items.push({ ts: e.ts, icon: '💬', label: txt, detail: 'ربات نشان داد', micro: true });
+          : screenText(s, p.k, 110);
+        items.push({ ts: e.ts, icon: '💬', label: txt, detail: 'ربات نشان داد (متنِ نمونه)', micro: true });
         continue;
       }
       if (e.event === 'act') {
