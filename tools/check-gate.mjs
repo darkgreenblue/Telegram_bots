@@ -111,6 +111,28 @@ ok(new RegExp(`startPopular[\\s\\S]{0,80}${popular?.fa}`).test(loc),
 ok(new RegExp(`startPopular\\(\\),\\s*'spread:${badge}'`).test(idx),
    `دکمه‌ی CTA باید به spread:${badge} وصل باشد، نه فالِ دیگری`);
 
+// ── ۷) آزمایشِ پیامِ اول: تک‌متغیره بودن ────────────────────────────────────
+// اگر دو نسخه در بیش از یک چیز فرق کنند، نتیجه‌ی آزمایش تفسیرپذیر نیست و کلِ هزینه‌ی
+// ترافیکِ کمپین هدر می‌رود. این ادعا همان تک‌متغیره بودن را قفل می‌کند.
+const grab = (k) => loc.match(new RegExp(`${k}:\\s*\\n?([\\s\\S]*?)',\\n`))?.[1] || '';
+const introA = grab('gateIntro');
+const introB = grab('gateIntroNoAi');
+ok(introA && introB, 'هر دو نسخه‌ی پیامِ اول در locale هستند');
+ok(/هوش مصنوعی/.test(introA), 'نسخه‌ی control باید بندِ هوش مصنوعی را داشته باشد');
+ok(!/هوش مصنوعی/.test(introB), 'نسخه‌ی no_ai نباید هیچ اشاره‌ای به هوش مصنوعی داشته باشد');
+const strip = (s) => s.replace(/['+\s]/g, '');
+ok(strip(introB).length < strip(introA).length,
+   'نسخه‌ی no_ai باید کوتاه‌تر باشد (فقط بندِ هوش مصنوعی حذف شده)');
+ok(strip(introA).startsWith(strip(introB).slice(0, 60)),
+   'دو نسخه باید از یک متن شروع شوند؛ تفاوتشان فقط بندِ هوش مصنوعی باشد (تک‌متغیره)');
+// مکانیکِ محصول عمداً در پیامِ اول توضیح داده نمی‌شود (کاربر چند ثانیه بعد خودش می‌بیند)
+for (const [k, s] of [['control', introA], ['no_ai', introB]]) {
+  ok(!/از دک برمی‌داری|انتخاب می‌کنی/.test(s), `نسخه‌ی ${k} نباید مکانیکِ محصول را توضیح دهد`);
+}
+ok(/variant\(db, uid, AB_GATE_INTRO\)/.test(idx), 'شاخه‌ی A/B باید از variant() بخواند');
+ok(/INSERT OR IGNORE INTO experiments/.test(idx),
+   'seedِ آزمایش باید idempotent باشد تا کنترلِ داشبورد را بازنویسی نکند');
+
 // قانونِ قیمت (بدونِ استثنا): هر کارت ۱۰٬۰۰۰ تومان
 for (const s of SPREADS) {
   ok(s.price === s.size * 10_000, `قیمتِ «${s.fa}» باید size×۱۰٬۰۰۰ باشد (${s.price})`);
