@@ -111,27 +111,36 @@ ok(new RegExp(`startPopular[\\s\\S]{0,80}${popular?.fa}`).test(loc),
 ok(new RegExp(`startPopular\\(\\),\\s*'spread:${badge}'`).test(idx),
    `دکمه‌ی CTA باید به spread:${badge} وصل باشد، نه فالِ دیگری`);
 
-// ── ۷) آزمایشِ پیامِ اول: تک‌متغیره بودن ────────────────────────────────────
-// اگر دو نسخه در بیش از یک چیز فرق کنند، نتیجه‌ی آزمایش تفسیرپذیر نیست و کلِ هزینه‌ی
-// ترافیکِ کمپین هدر می‌رود. این ادعا همان تک‌متغیره بودن را قفل می‌کند.
-const grab = (k) => loc.match(new RegExp(`${k}:\\s*\\n?([\\s\\S]*?)',\\n`))?.[1] || '';
-const introA = grab('gateIntro');
-const introB = grab('gateIntroNoAi');
-ok(introA && introB, 'هر دو نسخه‌ی پیامِ اول در locale هستند');
-ok(/هوش مصنوعی/.test(introA), 'نسخه‌ی control باید بندِ هوش مصنوعی را داشته باشد');
-ok(!/هوش مصنوعی/.test(introB), 'نسخه‌ی no_ai نباید هیچ اشاره‌ای به هوش مصنوعی داشته باشد');
-const strip = (s) => s.replace(/['+\s]/g, '');
-ok(strip(introB).length < strip(introA).length,
-   'نسخه‌ی no_ai باید کوتاه‌تر باشد (فقط بندِ هوش مصنوعی حذف شده)');
-ok(strip(introA).startsWith(strip(introB).slice(0, 60)),
-   'دو نسخه باید از یک متن شروع شوند؛ تفاوتشان فقط بندِ هوش مصنوعی باشد (تک‌متغیره)');
-// مکانیکِ محصول عمداً در پیامِ اول توضیح داده نمی‌شود (کاربر چند ثانیه بعد خودش می‌بیند)
-for (const [k, s] of [['control', introA], ['no_ai', introB]]) {
-  ok(!/از دک برمی‌داری|انتخاب می‌کنی/.test(s), `نسخه‌ی ${k} نباید مکانیکِ محصول را توضیح دهد`);
+// ── ۷) آزمایشِ ترتیبِ آنبوردینگ: هر کاربر هر دو بلوک را دقیقاً یک‌بار ببیند ──
+// این آزمایش فقط **جای** دو بلوک را عوض می‌کند. اگر خودِ متن‌ها هم بین دو نسخه فرق کنند،
+// آزمایش دو متغیره می‌شود و نتیجه تفسیرپذیر نیست؛ و اگر هر پیام نسخه‌ی خودش را داشته باشد،
+// کاربر می‌تواند یک بلوک را دو بار یا هیچ‌کدام را نبیند. پس هر دو پیام باید از **یک منبع**
+// (ثابت‌های module-level) بخوانند.
+ok(/const INTRO_EXPERIENCE\s*=/.test(loc) && /const INTRO_STAT\s*=/.test(loc),
+   'دو بلوکِ محتوایی باید ثابتِ module-level باشند (تک‌منبع برای هر دو پیام)');
+const gateIntroSrc = loc.match(/gateIntro:\s*\(statFirst\)[\s\S]*?,\n/)?.[0] || '';
+const welcomeSrc = loc.match(/welcome:\s*\(name, statFirst\)[\s\S]*?,\n/)?.[0] || '';
+ok(gateIntroSrc && welcomeSrc, 'هر دو پیامِ آنبوردینگ باید statFirst بگیرند');
+ok(/statFirst \? INTRO_STAT : INTRO_EXPERIENCE/.test(gateIntroSrc),
+   'پیامِ اول: در شاخه‌ی stat_first باید آمار بیاید و در control تجربه');
+ok(/statFirst \? INTRO_EXPERIENCE : INTRO_STAT/.test(welcomeSrc),
+   'پیامِ بعد از نام باید **مکملِ** پیامِ اول باشد (برعکسِ همان شرط)، نه تکرارش');
+// مکانیکِ محصول عمداً توضیح داده نمی‌شود (کاربر چند ثانیه بعد خودش می‌بیند)
+ok(!/از دک برمی‌داری|انتخاب می‌کنی/.test(loc.match(/const INTRO_EXPERIENCE[\s\S]*?;\n/)?.[0] || ''),
+   'بلوکِ تجربه نباید مکانیکِ محصول را توضیح دهد');
+// موضع‌گیریِ «هوش مصنوعی» از فلو برداشته شد (بیرون از ربات تست می‌شود). نامِ کانال استثناست
+// چون مقصدِ واقعیِ کاربر است، نه ادعای محصولی.
+const aiHits = [...loc.matchAll(/^.*هوش مصنوعی.*$/gm)].map(m => m[0]);
+for (const line of aiHits) {
+  ok(/کانال/.test(line), `«هوش مصنوعی» فقط به‌عنوانِ نامِ کانال مجاز است، نه ادعای محصولی: ${line.trim().slice(0, 70)}`);
 }
-ok(/variant\(db, uid, AB_GATE_INTRO\)/.test(idx), 'شاخه‌ی A/B باید از variant() بخواند');
+ok(/variant\(db, uid, AB_INTRO_ORDER\)/.test(idx), 'شاخه‌ی A/B باید از variant() بخواند');
+ok(/const statFirstFor =/.test(idx),
+   'هر دو نقطه باید از یک helper بخوانند تا شاخه‌شان هرگز از هم جدا نشود');
 ok(/INSERT OR IGNORE INTO experiments/.test(idx),
    'seedِ آزمایش باید idempotent باشد تا کنترلِ داشبورد را بازنویسی نکند');
+ok(/UPDATE experiments SET status='stopped'[\s\S]*?gate_intro_ai/.test(idx),
+   'آزمایشِ بازنشسته باید صراحتاً stop شود، نه اینکه در داشبورد «در حال اجرا»ی دروغین بماند');
 
 // قانونِ قیمت (بدونِ استثنا): هر کارت ۱۰٬۰۰۰ تومان
 for (const s of SPREADS) {
