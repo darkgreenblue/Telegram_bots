@@ -105,7 +105,10 @@ const TEST_PHASE = false;
 // 2.7.2: سه فیکس از تستِ دستیِ مالک — یادآوریِ گیت روی آپدیتِ سرویسیِ my_chat_member
 //        فرستاده می‌شد، ریستِ ادمین وسطِ گیت بلاک می‌شد، و payloadِ اتریبیوشن از کلمه‌ی
 //        دومِ هر متنی خوانده می‌شد (ریستِ ادمین `payload:"ریست"` ثبت می‌کرد). + کپیِ فکت.
-const PRODUCT_VERSION = '2.7.2';
+// 2.7.3: بازنویسیِ پیامِ اول (بدونِ توضیحِ مکانیک؛ «همون تجربه‌ی تاروت‌خوانِ حرفه‌ای، فقط
+//        توی جیبت») + آزمایشِ A/B روی همان پیام: control با بندِ «قدرتش رو از هوش مصنوعی
+//        می‌گیره» و no_ai بدونِ آن. تک‌متغیره، تا نتیجه تفسیرپذیر بماند.
+const PRODUCT_VERSION = '2.7.3';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -348,6 +351,29 @@ db.exec(`
 ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
 ensureAb(db);
+
+// 🅰️/🅱️ آزمایشِ «کلیدواژه‌ی هوش مصنوعی در پیامِ اول» (v2.7.3).
+// معمولاً آزمایش را داشبورد می‌سازد و ربات فقط می‌خواند. این‌جا یک **seedِ یک‌باره** می‌گذاریم
+// چون کمپینِ تبلیغاتی همان شب شروع می‌شود و ترافیکِ اولِ کمپین گران‌ترین ترافیکی است که
+// داریم؛ اگر آزمایش دیرتر روشن شود همان کاربران برای همیشه از نمونه بیرون می‌مانند.
+// `INSERT OR IGNORE` است، پس داشبورد همچنان تنها مرجعِ کنترل می‌ماند: هر توقف/kill/تغییرِ
+// وزنی که از آن‌جا بخورد باقی می‌ماند و این خط دیگر هیچ‌وقت بازنویسی‌اش نمی‌کند.
+const AB_GATE_INTRO = 'gate_intro_ai';
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO experiments
+      (key, name, hypothesis, mode, metric_kind, variants_json, status,
+       primary_metric, guardrails_json, started_at)
+    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
+  `).run(
+    AB_GATE_INTRO,
+    'کلیدواژه‌ی هوش مصنوعی در پیامِ اول',
+    'اگر در همان پیامِ اول بگوییم قدرتِ ربات از هوش مصنوعی است، کاربرِ بیشتری تا تحویلِ فال جلو می‌رود (تمایزی که رقبا ادعایش را ندارند).',
+    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'no_ai', weight: 50 }]),
+    EVENTS.PRODUCT_DELIVERED,
+    JSON.stringify([]),
+  );
+} catch (e) { logErr('ab seed:', e.message); } // آزمایش هرگز نباید بوتِ ربات را بشکند
 
 const stmts = {
   upsertUser: db.prepare(`
@@ -1010,10 +1036,14 @@ async function isChannelMember(ctx, uid) {
 }
 
 // نمایشِ گیت: پیامِ معرفی (کاهشِ dropِ لحظه‌ی ورود) و بعد دعوت به عضویت.
+// آزمایشِ `gate_intro_ai`: تنها تفاوتِ دو نسخه یک بند است («قدرتش رو از هوش مصنوعی می‌گیره»)
+// تا نتیجه تفسیرپذیر بماند. control = نسخه‌ی هوش مصنوعی (هم‌راستا با نامِ کانال)، پس kill کردنِ
+// آزمایش از داشبورد همه را به همان حالتِ هم‌راستا با برند برمی‌گرداند، نه به حالتِ خنثی.
 async function showGate(ctx, uid, refBonus = false) {
   setState(uid, 'gate_join');
   setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
-  await ctx.reply(L.onboarding.gateIntro, Markup.removeKeyboard());
+  const noAi = variant(db, uid, AB_GATE_INTRO) === 'no_ai';
+  await ctx.reply(noAi ? L.onboarding.gateIntroNoAi : L.onboarding.gateIntro, Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS), gateKeyboard());
 }
