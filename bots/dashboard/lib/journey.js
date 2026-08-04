@@ -44,17 +44,38 @@ export function screenMap(botKey) {
   return map;
 }
 
+/* ═══ متنِ صفحه برای نمایش — چرا اعداد ماسک می‌شوند ═══
+   کلیدِ صفحه عمداً اعداد را حذف می‌کند (تا یک صفحه برای همه‌ی کاربران یک کلید بدهد)، ولی
+   `screens.sample` با `INSERT OR IGNORE` **فقط یک‌بار** نوشته می‌شود: متنِ اولین کاربری که
+   آن صفحه را دید. یعنی عددِ داخلِ نمونه مالِ آن کاربرِ اول است، نه کاربری که داریم تایم‌لاینش
+   را می‌خوانیم.
+
+   باگِ واقعی (۱۴۰۵/۰۵/۱۳): در تایم‌لاینِ کاربر ۱۰۴۳۰۷۴۴۶۷ فاکتور «۱۰۰٬۰۰۰ تومان» نشان داده
+   شد در حالی که فاکتورِ واقعیِ او ۴۰٬۰۰۰ بود (نمونه از کاربرِ ۳۱ جولای مانده بود). مالک آن را
+   باگِ پرداخت فهمید؛ پول سالم بود، **نمایش** دروغ می‌گفت. این دقیقاً همان جایی است که تحلیلِ
+   جرنی رویش تصمیم می‌گیرد، پس عددِ گمراه‌کننده بدتر از نبودنِ عدد است.
+
+   درمان: عدد را با `⋯` ماسک می‌کنیم. مبلغِ واقعی همیشه از جدولِ `payments` خوانده می‌شود
+   (تایم‌لاین همان را جدا نشان می‌دهد)، پس هیچ اطلاعاتِ درستی از دست نمی‌رود. */
+const maskNums = (s) => String(s ?? '').replace(/[0-9۰-۹٠-٩][0-9۰-۹٠-٩,،٬.]*/g, '⋯');
+
+/* متنِ خوانای یک صفحه: برچسبِ دستی (ctx.step) اگر هست، وگرنه نمونه‌ی ماسک‌شده. */
+export function screenText(s, key, maxLen = 90) {
+  if (s?.label) return s.label;
+  const sample = maskNums((s?.sample || '').replace(/\s+/g, ' ').trim());
+  return sample.slice(0, maxLen) || `صفحه ${key}`;
+}
+
 /* برچسبِ خوانای یک قدمِ ریز برای نمایش در جدول */
 export function stepLabel(ev, key, screens) {
   if (ev === 'act') return { icon: '👆', text: ACT_LABELS[key] || key || 'اکشن', kind: 'act' };
   if (key === 'content') return { icon: '📄', text: 'متنِ محتوا (خروجی مدل)', kind: 'content' };
   const s = screens.get(key);
-  const sample = (s?.sample || '').replace(/\s+/g, ' ').trim();
   return {
     icon: '💬',
-    text: s?.label || sample.slice(0, 90) || `صفحه ${key}`,
+    text: screenText(s, key),
     kind: 'view',
-    full: sample,
+    full: maskNums((s?.sample || '').replace(/\s+/g, ' ').trim()),
     buttons: s?.buttons || '',
   };
 }
