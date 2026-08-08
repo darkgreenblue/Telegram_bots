@@ -160,6 +160,50 @@ jobs:
           $RUN_URL" >/dev/null || true
           done
 
+  # پایشِ موجودیِ بافرِ محتوا.
+  #
+  # چرا وجود دارد: تولیدِ محتوا دستِ یک سشنِ Claude است و آن سشن ممکن است
+  # اصلاً اجرا نشود. اگر تنها هشدارِ ما «امروز فایل نبود» باشد، همیشه دیر
+  # می‌فهمیم (سه روزِ ۶ تا ۸ مرداد دقیقاً همین‌طور از دست رفت). این جاب
+  # **چند روز جلوتر** خبر می‌دهد که بافر دارد ته می‌کشد، تا وقتِ واکنش باشد.
+  buffer-check:
+    # فقط یک بار در روز، روی پنجره‌ی اولِ انتشار (تا برای واکنش وقت باشد)
+    if: github.event_name == 'schedule' && github.event.schedule == '30 6 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Count future day files
+        env:
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          LOW_AT:  '4'
+        run: |
+          set -e
+          TODAY=$(date -u -d '+3 hours +30 minutes' +%F)
+          DAYS=0
+          for F in marketing/tarot/posts/*-day.json; do
+            [ -f "$F" ] || continue
+            D=$(basename "$F" -day.json)
+            [[ "$D" > "$TODAY" || "$D" == "$TODAY" ]] && DAYS=$((DAYS+1))
+          done
+          echo "📦 بافرِ فال: $DAYS روزِ آماده (از $TODAY به بعد)"
+          if [ "$DAYS" -gt "$LOW_AT" ]; then
+            echo "✅ کافی است؛ هشداری لازم نیست"
+            exit 0
+          fi
+          echo "⚠️ بافر کم است ($DAYS روز)"
+          if [ -z "$T_TAROT" ] || [ -z "$OWNER" ]; then exit 0; fi
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${T_TAROT}/sendMessage" -d chat_id="$id" \
+              --data-urlencode text="📦 بافرِ فالِ کانال رو به اتمام است: فقط $DAYS روز محتوای آماده مانده.
+          به Claude بگو «بافر فال رو پر کن» تا روزهای بعدی ساخته شوند." >/dev/null || true
+          done
+
   marketing:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
