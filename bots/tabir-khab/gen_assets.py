@@ -47,7 +47,7 @@ async def _download(url: str, dest: str):
 async def _make(filename: str, pose: str):
     prompt = f"{CHARACTER}\n{pose}"
     print(f"→ generating {filename} …")
-    url = await ai.generate_image(prompt)
+    url = (await ai.generate_image(prompt))["url"]
     dest = os.path.join(ASSETS_DIR, filename)
     await _download(url, dest)
     size = os.path.getsize(dest)
