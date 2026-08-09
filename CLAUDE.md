@@ -100,6 +100,7 @@
 | `VPS_SSH_KEY` | اتصال CI/CD به سرور (موجود) |
 | `<BOT>_BOT_TOKEN` / `<BOT>_OPENROUTER_KEY` | per ربات: `VOICE2TEXT_*` (اختیاری)، `RESUME_TAILOR_*`، `TAROT_*` |
 | `VOICE2TEXT_NOTION_TOKEN` | اختیاری — قابلیت Notion |
+| `VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED` | اختیاری — کلید OpenRouter شخصیِ مالک؛ فقط پردازش‌های `OWNER_ID` (اولین `ADMIN_IDS`, پیش‌فرض `100257975`) روی voice2text از این کلید استفاده می‌کنند، بقیه‌ی کاربران همچنان از `VOICE2TEXT_OPENROUTER_KEY` — مصرفِ شخصیِ مالک را از هزینه‌ی سرویس جدا می‌کند |
 | `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup + دریافت آدرس تونل داشبورد + **ادمینِ همه‌ی ربات‌ها** (deploy همین مقدار را به‌صورت `ADMIN_IDS` در .env هر ربات upsert می‌کند). **می‌تواند چند آی‌دی با کاما باشد** (مثل `111,222,333`) تا چند نفر هم هشدار بگیرند هم ادمین باشند — فقط مقدار Secret را در گیت‌هاب ویرایش کن، نیازی به کد/PR نیست |
 | `DASHBOARD_TOKEN` | توکن ورود به داشبورد ادمین (رشته‌ی تصادفی بلند ≥۳۲ کاراکتر) — تا ست نشود داشبورد دیپلوی نمی‌شود |
 | `CLOUDFLARE_TUNNEL_TOKEN` | اختیاری: توکن named tunnel کلادفلر → آدرس ثابت داشبورد روی دامنه؛ بدون آن quick tunnel رایگان |
