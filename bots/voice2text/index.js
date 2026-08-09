@@ -20,6 +20,9 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
+// کلید OpenRouter شخصیِ مالک (اختیاری): فقط برای پردازش‌های خودِ OWNER_ID، مصرفش را از کلید
+// اصلیِ سرویس جدا نگه می‌دارد. ست‌نشده → مثل قبل، همه از OPENROUTER_API_KEY استفاده می‌کنند.
+const OPENROUTER_API_KEY_PERSONAL = process.env.OPENROUTER_API_KEY_PERSONAL?.trim() || '';
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — همه‌ی ربات‌ها
 // همین لیست را دارند. اگر ست نشده باشد، به مالک تاریخی برمی‌گردد (بدون شکستن).
@@ -27,6 +30,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
   .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
 function isAdmin(uid) { return ADMIN_IDS.includes(uid); }
 const OWNER_ID = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک (کارهای مخرب مثل ریست فقط برای او)
+function apiKeyFor(uid) { return (uid === OWNER_ID && OPENROUTER_API_KEY_PERSONAL) ? OPENROUTER_API_KEY_PERSONAL : OPENROUTER_API_KEY; }
 const RESET_TEST_BTN = '🔄 ریست حساب (ادمین)'; // ابزار مدیریتیِ همیشه‌فعالِ فقط-ادمین (هر دو آی‌دیِ ADMIN_IDS)
 
 const CARD_NUMBER  = '6219861904145405';
@@ -711,7 +715,7 @@ function isAudioDocument(doc) {
 
 const OR_TIMEOUT_MS = 10 * 60 * 1000; // ۱۰ دقیقه — برای فایل‌های طولانی
 
-async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
+async function callOpenRouter(model, audioBuffer, mimeType, prompt, apiKey = OPENROUTER_API_KEY) {
   let content;
   if (/audio/i.test(model)) {
     let format = 'mp3';
@@ -735,7 +739,7 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   try {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
       signal: ctrl.signal,
     });
@@ -762,7 +766,7 @@ async function callOpenRouter(model, audioBuffer, mimeType, prompt) {
   }
 }
 
-async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback) {
+async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primaryModel, useFallback, apiKey = OPENROUTER_API_KEY) {
   let lastErr = null;
 
   for (let i = 0; i < RETRIES; i++) {
@@ -771,7 +775,7 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
       await sleep(RETRY_DELAY);
     }
     try {
-      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt);
+      const out = await callOpenRouter(primaryModel, audioBuffer, mimeType, prompt, apiKey);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
@@ -797,7 +801,7 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
       await sleep(RETRY_DELAY);
     }
     try {
-      const out = await callOpenRouter(GPT_MODEL, mp3Buffer, 'audio/mpeg', promptGpt);
+      const out = await callOpenRouter(GPT_MODEL, mp3Buffer, 'audio/mpeg', promptGpt, apiKey);
       if (out) return out;
     } catch (err) {
       if (err instanceof CreditError) throw err;
@@ -810,11 +814,11 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
 
 // کل فایل یک‌جا به مدل فرستاده می‌شود (بدون تقسیم). تبدیل فرمت فقط در مسیر fallback لازم است.
 async function callAI(session, type) {
-  const { audioBuffer, mimeType, userModel } = session;
+  const { audioBuffer, mimeType, userModel, userId } = session;
   const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
   const prompt    = PROMPT_MAP[type]     || PROMPT_MAP.full;
   const promptGpt = PROMPT_MAP_GPT[type] || PROMPT_MAP_GPT.full;
-  return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback);
+  return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback, apiKeyFor(userId));
 }
 
 async function getOpenRouterBalance() {
