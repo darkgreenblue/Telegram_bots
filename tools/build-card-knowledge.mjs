@@ -18,7 +18,11 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 const KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!KEY) { console.error('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-const MODEL = process.env.KNOWLEDGE_MODEL?.trim() || 'google/gemini-2.5-pro';
+// ⚠️ مدلِ «فکرکننده» (مثل gemini-2.5-pro) بخشِ بزرگی از max_tokens را خرجِ استدلال می‌کند و
+// اگر سقف کم باشد **محتوا خالی برمی‌گردد** (اولین اجرا دقیقاً همین شد: هر ۴ تلاش «خروجیِ
+// ناقص»). این کار ترجمه و فشرده‌سازی است، نه استدلالِ سنگین؛ پس پیش‌فرض Flash است و سقفِ
+// توکن هم بالا گرفته شده تا حتی با مدلِ فکرکننده هم جا برای خروجی بماند.
+const MODEL = process.env.KNOWLEDGE_MODEL?.trim() || 'google/gemini-2.5-flash';
 const SRC  = new URL('../bots/tarot/card-source.en.json', import.meta.url);
 const DEST = new URL('../bots/tarot/card-knowledge.fa.json', import.meta.url);
 
@@ -63,15 +67,18 @@ async function callOR(user) {
         method: 'POST',
         headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: MODEL, temperature: 0.3, max_tokens: 700,
+          model: MODEL, temperature: 0.3, max_tokens: 2500,
           messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
         }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const j = await r.json();
-      const obj = parseLoose(j.choices?.[0]?.message?.content);
+      const raw = j.choices?.[0]?.message?.content;
+      const obj = parseLoose(raw);
       if (obj?.image && obj?.up && obj?.down) return obj;
-      throw new Error('خروجیِ ناقص');
+      // پیامِ خطا باید **قابلِ تشخیص** باشد: «خروجیِ ناقص» به‌تنهایی هیچ نمی‌گوید و
+      // دیباگ کردنش یک اجرای دیگر خرج برداشت.
+      throw new Error(`خروجیِ ناقص (finish=${j.choices?.[0]?.finish_reason}، طولِ متن=${(raw || '').length}): ${String(raw || '').slice(0, 160)}`);
     } catch (e) {
       if (i === 3) throw e;
       await new Promise(res => setTimeout(res, 1500 * (i + 1)));

@@ -15,7 +15,7 @@ on:
       model:
         description: 'مدل'
         required: false
-        default: 'google/gemini-2.5-pro'
+        default: 'google/gemini-2.5-flash'
 
 permissions:
   contents: write
