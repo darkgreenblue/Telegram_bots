@@ -56,6 +56,13 @@ export function validateDay(day) {
     if (!p.caption || !p.caption.trim()) errs.push(`${tag}: کپشن خالی`);
     else if (p.caption.length > CAPTION_MAX) errs.push(`${tag}: کپشن ${p.caption.length} کاراکتر (سقف ${CAPTION_MAX})`);
     if (p.caption && !p.caption.includes(`#${p.month}`)) errs.push(`${tag}: هشتگ #${p.month} در کپشن نیست`);
+    // تگِ اسپویلر (متنِ شطرنجی که با یک تپ باز می‌شود) باید متوازن باشد؛ تگِ نیمه‌باز
+    // یعنی تلگرام کلِ پست را رد می‌کند و روز نصفه منتشر می‌ماند.
+    if (p.caption) {
+      const open = (p.caption.match(/<tg-spoiler>/g) || []).length;
+      const close = (p.caption.match(/<\/tg-spoiler>/g) || []).length;
+      if (open !== close) errs.push(`${tag}: تگِ tg-spoiler نامتوازن است (${open} باز، ${close} بسته)`);
+    }
     // تاریخِ روز باید در هر کپشن باشد (خواسته‌ی صریح: هر پست خودش تاریخ‌دار باشد،
     // چون پست‌ها جدا فوروارد می‌شوند و باید معلوم باشد مالِ چه روزی‌اند)
     if (day.jalali && p.caption && !p.caption.includes(day.jalali))

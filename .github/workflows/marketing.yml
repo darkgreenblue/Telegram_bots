@@ -224,6 +224,7 @@ jobs:
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          OWNER:      ${{ secrets.OWNER_TELEGRAM_ID }}
           MKT_BOT:    ${{ inputs.bot }}
           MKT_CHAT:   ${{ inputs.chat }}
           MKT_PATH:   ${{ inputs.path }}
@@ -246,6 +247,12 @@ jobs:
           [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
 
           CHAT="${MKT_CHAT:-$(jq -r '.chat // empty' "$MKT_PATH")}"
+          # chat=owner یعنی «به‌جای کانال، به خودِ مالک بفرست» — برای دیدنِ یک قالبِ جدید
+          # قبل از اینکه عمومی شود (مثلاً وقتی شکلِ کپشن عوض می‌شود).
+          if [ "$CHAT" = "owner" ]; then
+            CHAT="$(printf '%s' "$OWNER" | cut -d, -f1 | tr -d '[:space:]')"
+            [ -n "$CHAT" ] || { echo "❌ chat=owner ولی OWNER_TELEGRAM_ID ست نیست"; exit 1; }
+          fi
           case "$CHAT" in
             @[A-Za-z0-9_]*|-100[0-9]*|[0-9]*) ;;
             *) echo "❌ chat نامعتبر: «$CHAT»"; exit 1;;
