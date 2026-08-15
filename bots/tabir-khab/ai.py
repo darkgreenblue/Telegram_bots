@@ -23,16 +23,18 @@ import json
 import asyncio
 import logging
 import tempfile
+import time
 
 import aiohttp
 from openai import AsyncOpenAI
 
 from config import (
-    GAPGPT_API_KEY, GAPGPT_BASE_URL,
+    GAPGPT_API_KEY, GAPGPT_BASE_URL, GAPGPT_BASE_URL_FALLBACK,
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL,
     STT_FALLBACK_MODEL, LLM_FALLBACK_MODEL,
     IMAGE_MODEL, IMAGE_SIZE, IMAGE_BLACK_MAX_LUMA,
     IMAGE_ART_DIRECTION, IMAGE_SAFE_RETRY_NOTE,
+    IMAGE_TIMEOUT, IMAGE_REQUEST_TIMEOUT, IMAGE_PROBE_TIMEOUT,
     PRIMARY_FORMAT_ATTEMPTS, FORCE_FALLBACK_FOR_TEST,
     llm_model_for,
 )
@@ -43,17 +45,27 @@ log = logging.getLogger("ai")
 REQUIRED_KEYS = ("preview", "depth", "image_prompt")
 
 # ---- کلاینت GapGPT — فقط برای تولید تصویر (gapgpt/z-image) ----
-_gap_client: AsyncOpenAI | None = None
+# دو endpointِ هم‌کلید: CDNِ خارجی (اول) و دامنه‌ی اصلی (فالبک). هر کدام کلاینتِ خودش.
+_gap_clients: dict[str, AsyncOpenAI] = {}
 
 
-def _get_gap_client() -> AsyncOpenAI:
-    global _gap_client
-    if _gap_client is None:
-        _gap_client = AsyncOpenAI(
+def _image_endpoints() -> list[str]:
+    """endpointها به ترتیبِ تلاش، بدونِ تکرار (اگر env روی همان فالبک ست شده باشد)."""
+    return list(dict.fromkeys([GAPGPT_BASE_URL, GAPGPT_BASE_URL_FALLBACK]))
+
+
+def _get_gap_client(base_url: str | None = None) -> AsyncOpenAI:
+    url = base_url or GAPGPT_BASE_URL
+    if url not in _gap_clients:
+        # timeout/max_retries صریح: پیش‌فرضِ SDK (۶۰۰ ثانیه با ۲ ریتری) یعنی یک هنگِ
+        # سرویسِ تصویر تا سقفِ بیرونی طول می‌کشد و کاربر را پشتِ «صبر کن» نگه می‌دارد.
+        _gap_clients[url] = AsyncOpenAI(
             api_key=GAPGPT_API_KEY or "missing",
-            base_url=GAPGPT_BASE_URL,
+            base_url=url,
+            timeout=IMAGE_REQUEST_TIMEOUT,
+            max_retries=0,
         )
-    return _gap_client
+    return _gap_clients[url]
 
 
 # ---- کلاینت OpenRouter — همه‌ی LLM ----
@@ -405,25 +417,61 @@ async def interpret_dream(transcript: str, lang: str, persona: str, profile: dic
 # ===================== تولید تصویر =====================
 
 
-async def _request_image(prompt: str) -> str:
-    """یک ریکوئستِ تصویر به مدلِ اصلی (gapgpt/z-image) — URL مستقیم برمی‌گرداند."""
-    resp = await _get_gap_client().images.generate(
-        model=IMAGE_MODEL, prompt=prompt, size=IMAGE_SIZE, n=1
-    )
+async def _request_image_once(prompt: str, base_url: str, budget: float) -> str:
+    """یک ریکوئستِ تصویر به یک endpointِ مشخص — URL مستقیم برمی‌گرداند.
+    `budget` سقفِ ثانیه‌ایِ همین ریکوئست است (باقیمانده‌ی بودجه‌ی کلِ مرحله)."""
+    t0 = time.monotonic()
+    try:
+        resp = await asyncio.wait_for(
+            _get_gap_client(base_url).images.generate(
+                model=IMAGE_MODEL, prompt=prompt, size=IMAGE_SIZE, n=1
+            ),
+            timeout=max(1.0, budget),
+        )
+    except asyncio.TimeoutError:
+        raise AIError(
+            f"image request ({IMAGE_MODEL} @ {base_url}) timed out "
+            f"after {time.monotonic() - t0:.1f}s"
+        ) from None
     url = getattr(resp.data[0], "url", None)
     if not url:
-        raise AIError(f"model {IMAGE_MODEL} returned no URL")
+        raise AIError(f"model {IMAGE_MODEL} @ {base_url} returned no URL")
+    log.info("image request ✓ %.1fs via %s", time.monotonic() - t0, base_url)
     return url
 
 
-async def _probe_image(url: str) -> dict | None:
+async def _request_image(prompt: str, left) -> str:
+    """تلاش روی endpointها به ترتیب، تا وقتی بودجه هست.
+    `left` تابعی است که ثانیه‌های باقیمانده‌ی بودجه‌ی کلِ مرحله را برمی‌گرداند."""
+    errors = []
+    for base_url in _image_endpoints():
+        budget = min(IMAGE_REQUEST_TIMEOUT, left())
+        if budget < 2:
+            break
+        try:
+            return await _request_image_once(prompt, base_url, budget)
+        except Exception as e:
+            errors.append(f"{base_url}: {e or type(e).__name__}")
+            log.warning("image endpoint failed (%s) — %s",
+                        base_url, e or type(e).__name__)
+    raise AIError("image generation failed on all endpoints → " + " | ".join(errors))
+
+
+async def _probe_image(url: str, budget: float | None = None) -> dict | None:
     """دانلودِ تصویر و استخراجِ {width, height, is_black}.
     در هر خطایی None برمی‌گرداند تا هرگز مسیرِ تحویل را مسدود نکند (best-effort).
-    is_black تنها بررسیِ هاردکدِ تصویر است: مدل گاهی فریمِ کاملاً سیاه برمی‌گرداند."""
+    is_black تنها بررسیِ هاردکدِ تصویر است: مدل گاهی فریمِ کاملاً سیاه برمی‌گرداند.
+
+    این مرحله صرفاً «متادیتا» است، پس بودجه‌ی کوتاهی می‌گیرد: اگر میزبانِ تصویر کند بود،
+    عکس همان‌طور تحویل می‌شود و فقط ابعاد/چکِ سیاهی از دست می‌رود."""
+    cap = IMAGE_PROBE_TIMEOUT if budget is None else min(IMAGE_PROBE_TIMEOUT, budget)
+    if cap <= 0:
+        return None
+    t0 = time.monotonic()
     try:
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as s:
-            async with s.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=cap)) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.read()
@@ -431,9 +479,11 @@ async def _probe_image(url: str) -> dict | None:
         img = Image.open(io.BytesIO(data))
         w, h = img.size
         _lo, hi = img.convert("L").getextrema()  # روشن‌ترین پیکسل
+        log.info("image probe ✓ %.1fs (%sx%s)", time.monotonic() - t0, w, h)
         return {"width": w, "height": h, "is_black": hi <= IMAGE_BLACK_MAX_LUMA}
     except Exception as e:
-        log.warning("image probe failed (ignored): %s", e)
+        log.warning("image probe failed after %.1fs (ignored): %s",
+                    time.monotonic() - t0, e or type(e).__name__)
         return None
 
 
@@ -448,26 +498,38 @@ async def generate_image(description: str) -> dict:
     برمی‌گرداند: {url, width, height, black_retries}
     """
     prompt = IMAGE_ART_DIRECTION.format(description=description)
+    # بودجه‌ی کلِ مرحله بین زیرمرحله‌ها تقسیم می‌شود تا هیچ‌کدام بقیه را قربانی نکند؛
+    # کاربر پشتِ تصویر (که تزئینِ تعبیر است) بیش از این منتظر نمی‌ماند.
+    deadline = time.monotonic() + IMAGE_TIMEOUT
+
+    def _left() -> float:
+        return deadline - time.monotonic()
+
     try:
-        url = await _request_image(prompt)
+        url = await _request_image(prompt, _left)
     except AIError:
         raise
     except Exception as e:
         raise AIError(f"image generation ({IMAGE_MODEL}) failed: {e}") from e
 
-    meta = await _probe_image(url)
+    meta = await _probe_image(url, _left())
     black_retries = 0
 
-    # تصویرِ سیاه → یک تلاشِ دوباره به همان مدلِ اصلی، با یادداشتِ «بی‌خطرسازی»
+    # تصویرِ سیاه → یک تلاشِ دوباره به همان مدلِ اصلی، با یادداشتِ «بی‌خطرسازی».
+    # فقط اگر بودجه واقعاً باقی مانده باشد؛ وگرنه همان تصویرِ اول تحویل می‌شود
+    # (تصویرِ سیاه از دو دقیقه انتظار بهتر است).
     if meta and meta.get("is_black"):
-        black_retries = 1
-        log.warning("image came back fully black — retrying same model with safe-render note")
-        try:
-            url2 = await _request_image(prompt + "\n\n" + IMAGE_SAFE_RETRY_NOTE)
-            meta2 = await _probe_image(url2)
-            url, meta = url2, (meta2 or meta)
-        except Exception as e:
-            log.warning("black-image retry failed (keeping first image): %s", e)
+        if _left() < 5:
+            log.warning("image came back fully black — no time budget left for retry")
+        else:
+            black_retries = 1
+            log.warning("image came back fully black — retrying same model with safe-render note")
+            try:
+                url2 = await _request_image(prompt + "\n\n" + IMAGE_SAFE_RETRY_NOTE, _left)
+                meta2 = await _probe_image(url2, _left())
+                url, meta = url2, (meta2 or meta)
+            except Exception as e:
+                log.warning("black-image retry failed (keeping first image): %s", e)
 
     return {
         "url": url,

@@ -31,6 +31,7 @@ from config import (
     MASCOT_WELCOME, MASCOT_INVITE, SKIP_PAYMENT, SKIP_DAILY_LIMIT, NARRATE_INTERVAL,
     payment_methods_for, REFERRAL_ENABLED,
     FILE_API_TIMEOUT, DOWNLOAD_TIMEOUT, INTERPRET_TIMEOUT, IMAGE_TIMEOUT,
+    IMAGE_ENABLED,
     RESET_BUTTON_ENABLED, PRODUCT_VERSION, is_admin,
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL, RECEIPT_MODEL, RECEIPT_AI_AUTO_APPROVE,
     CARD_NUMBER, CARD_OWNER, CARD_RECIPIENT_NAME, CARD_DEST_LAST4, SUPPORT_CONTACT,
@@ -205,7 +206,8 @@ async def _staged(coro, timeout: float, label: str, platform: str):
         log.error("[%s] stage '%s' ✗ TIMEOUT after %ss", platform, label, timeout)
         raise
     except Exception as e:
-        log.warning("[%s] stage '%s' ✗ %.1fs: %s", platform, label, time.monotonic() - t0, e)
+        log.warning("[%s] stage '%s' ✗ %.1fs: %s", platform, label,
+                    time.monotonic() - t0, e or type(e).__name__)
         raise
 
 
@@ -839,11 +841,16 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
         # --- عکس و تحویل (بعد از این نقطه، هر خطایی resume می‌شود نه از نو) ---
         try:
             # عکس: اگر از قبل ساخته شده بازاستفاده، وگرنه از روی image_promptِ ذخیره‌شده بساز (بدون LLM)
-            if not image_url:
+            if not image_url and not IMAGE_ENABLED:
+                log.info("[%s] IMAGE_ENABLED=False → مرحله‌ی تصویر رد شد", bale.tag)
+            elif not image_url:
                 try:
+                    # ai.generate_image خودش بودجه‌ی IMAGE_TIMEOUT را بین زیرمرحله‌ها
+                    # تقسیم می‌کند؛ این سقف فقط شبکه‌ی ایمنیِ بیرونی است (کمی بزرگ‌تر،
+                    # تا خطای گویای داخلی برنده شود نه TimeoutErrorِ بی‌پیام).
                     img = await _staged(
                         ai.generate_image(image_prompt),
-                        IMAGE_TIMEOUT, "image", bale.tag)
+                        IMAGE_TIMEOUT + 5, "image", bale.tag)
                     image_url = img["url"]
                     await db.mark_image(
                         dream_id, image_url,
@@ -851,8 +858,9 @@ async def _process_dream(bale, chat_id, user_id, mode, pending):
                         black_retries=img.get("black_retries", 0),
                     )
                 except Exception as e:
+                    # str(TimeoutError()) خالی است — بدونِ نامِ نوع، لاگ بی‌معنا می‌شد.
                     log.warning("[%s] image generation failed (continuing without image): %s",
-                                bale.tag, e)
+                                bale.tag, e or type(e).__name__)
 
             narrator.cancel()
 
