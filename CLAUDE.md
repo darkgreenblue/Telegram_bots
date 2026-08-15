@@ -15,7 +15,7 @@
 |------|-------|-----|--------|--------|
 | `bots/voice2text` | pm2: `voice2text` | ویس→متن، کیف‌پول/پرداخت | **🟢 زنده و درآمدزا — هرگز نباید بشکند؛ از shared استفاده نمی‌کند** | `bots/voice2text/CLAUDE.md` |
 | `bots/resume-tailor` | ~~pm2~~ **بازنشسته** | رزومه‌ی انگلیسی کاستومایز per آگهی | **🗑 حذف‌شده از pm2** (منسوخ + LLM بی‌سقف/SSRF؛ deploy یک‌باره `pm2 delete` کرد و از ecosystem خارج شد؛ کد برای آرشیو مانده. کلید OpenRouterش را هم مالک در openrouter.ai غیرفعال کند) | `bots/resume-tailor/CLAUDE.md` |
-| `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت (از v3.0.0 اقتصادِ سکه و لحنِ صریح — **فعلاً فقط اکانتِ ادمین**) | **🟢 زنده از ۱۴۰۵/۰۴/۲۰** (شروع تبلیغات؛ TEST_PHASE=false، دیتای تست پاک شد) | `bots/tarot/CLAUDE.md` |
+| `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت (از v3.1.0 لحنِ صریحِ خوانش — **فعلاً فقط اکانتِ ادمین**؛ اقتصادِ سکه ساخته و موقتاً پارک شد) | **🟢 زنده از ۱۴۰۵/۰۴/۲۰** (شروع تبلیغات؛ TEST_PHASE=false، دیتای تست پاک شد) | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | 🧪 تست شخصی — روی سرور اجراست؛ پرداختش هنوز شبیه‌سازی است | `bots/tabir-khab/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
