@@ -123,7 +123,11 @@ const TEST_PHASE = false;
 // 3.0.1: بازنویسیِ صدا از روی خوانش‌های واقعیِ یک تاروت‌خوانِ انسان (bots/tarot/STYLE.md):
 //        فارسیِ گفتاری، حذفِ برچسبِ «نشونه‌ات» و شعارِ پایانی، و تصحیحِ مهم‌ترین اشتباهِ
 //        نسخه‌ی قبل — زبانِ احتمال ممنوع نیست، جوابِ بی‌جهت ممنوع است.
-const PRODUCT_VERSION = '3.0.1';
+// 3.1.0: تمرکز فقط روی کیفیتِ خروجی (تصمیمِ مالک). اقتصادِ سکه و کاتالوگِ نسل دوم **پارک**
+//        شدند (پرچم خاموش، کد سرِ جایش) و آزمایشِ نامِ واحد منحل شد. پرامپت فشرده شد چون
+//        ورودیِ متورم روی Flash هم گران است هم کیفیت را پایین می‌آورد. جمله‌های دلداریِ
+//        پراکنده‌ی وسطِ جرنی هم در لحنِ جدید حذف شدند.
+const PRODUCT_VERSION = '3.1.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -209,21 +213,26 @@ const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || is
 // ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `COIN_ECONOMY_ADMIN_ONLY = false`.
 // Rollback فوری: `COIN_ECONOMY = false` → کاتالوگ، کیف‌پول و همه‌ی متن‌ها به تومان برمی‌گردند
 // (سکه هیچ ستونی در DB ندارد، پس چیزی برای مهاجرتِ برگشتی وجود ندارد).
-const COIN_ECONOMY = true;
+// ⏸ **پارک‌شده (۱۴۰۵/۰۵/۲۴ — تصمیمِ مالک).** کدش عمداً حذف نشد چون به‌زودی دوباره
+// رویش کار می‌کنیم؛ فقط پرچم خاموش است، پس حتی ادمین هم دنیای تومانیِ قبلی را می‌بیند.
+// چون کاتالوگِ نسل دوم (عشق‌محورِ تقابلی) هم از همین helper شاخه می‌گیرد، خاموش‌کردنِ
+// این یک پرچم **هر دو** را با هم به حالتِ قبل برمی‌گرداند.
+// روشن‌کردنِ دوباره: `COIN_ECONOMY = true` (+ bump نسخه). **آن موقع فقط «سکه» می‌ماند و
+// «فال‌گیر» کلاً حذف است** — آزمایشِ نامِ واحد منحل شد.
+const COIN_ECONOMY = false;
 const COIN_ECONOMY_ADMIN_ONLY = true;
 const COIN_VALUE = 10_000;   // ارزشِ داخلیِ هر سکه به تومان (= قیمتِ یک کارت)
 const coinsOn = (uid) => COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isAdmin(uid));
 
-// آزمایشِ A/B نامِ واحدِ پول: «سکه» (مرسوم و بی‌ابهام) در برابر «فال‌گیر» (به روایتِ ربات
-// نزدیک‌تر). انتساب قطعی و ماندگار است (shared/ab.js)، پس نامِ واحد برای یک کاربر هرگز
-// وسطِ کار عوض نمی‌شود — که برای واحدِ پول شرطِ اول است.
+// آزمایشِ نامِ واحد (سکه در برابر فال‌گیر) **منحل شد**: «فال‌گیر» در عمل بد جا می‌افتاد.
+// واحد از این به بعد فقط «سکه 🪙» است. کلید را نگه می‌داریم تا بتوانیم آزمایش را در DB
+// صراحتاً stop کنیم (وگرنه در داشبورد «در حال اجرا»ی دروغین می‌ماند).
 const AB_COIN_NAME = 'coin_name';
 // آبجکتِ ارز که به همه‌ی متن‌های locale پاس داده می‌شود. `on:false` یعنی «دقیقاً مثل قبل، تومان».
 const TOMAN_CUR = { on: false, value: 1, name: 'تومان', emoji: '' };
 function curOf(uid) {
   if (!coinsOn(uid)) return TOMAN_CUR;
-  const unit = variant(db, uid, AB_COIN_NAME) === 'fortune' ? L.coinUnits.fortune : L.coinUnits.control;
-  return { on: true, value: COIN_VALUE, name: unit.name, emoji: unit.emoji };
+  return { on: true, value: COIN_VALUE, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
 }
 // سه بسته‌ی خریدِ سکه (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
 // اعتباری است که به کیف‌پول اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
@@ -452,22 +461,13 @@ try {
     EVENTS.PRODUCT_DELIVERED,
     JSON.stringify([]),
   );
-  // نامِ واحدِ پولِ داخلی: «سکه» (مرسوم و بی‌ابهام) در برابر «فال‌گیر» (به روایتِ ربات
-  // نزدیک‌تر). پنجاه‌پنجاه. متریکِ اصلی همان تحویلِ فال است، چون سؤالِ واقعی این است که
-  // کدام نام کاربر را راحت‌تر تا خرج‌کردنِ اعتبار می‌برد، نه کدام قشنگ‌تر است.
+  // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
+  // می‌شود تا در داشبورد «در حال اجرا»ی دروغین نماند. idempotent است.
   db.prepare(`
-    INSERT OR IGNORE INTO experiments
-      (key, name, hypothesis, mode, metric_kind, variants_json, status,
-       primary_metric, guardrails_json, started_at)
-    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
-  `).run(
-    AB_COIN_NAME,
-    'نامِ واحدِ پولِ داخلی (سکه یا فال‌گیر)',
-    'نامِ واحدِ پول روی درکِ ارزش و نرخِ خرج‌کردنِ اعتبار اثر می‌گذارد؛ «فال‌گیر» به روایتِ محصول نزدیک‌تر است ولی «سکه» بی‌ابهام‌تر.',
-    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'fortune', weight: 50 }]),
-    EVENTS.PRODUCT_DELIVERED,
-    JSON.stringify([]),
-  );
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='منحل — واحد فقط «سکه» می‌ماند؛ «فال‌گیر» حذف شد'
+    WHERE key=? AND status<>'stopped'
+  `).run(AB_COIN_NAME);
   // آزمایشِ قبلی (کلیدواژه‌ی هوش مصنوعی) با تصمیمِ مالک متوقف شد: موضع‌گیریِ هوش مصنوعی
   // بیرون از فلو و روی بنرِ تبلیغاتی تست می‌شود، نه این‌جا. صراحتاً stop می‌کنیم تا در
   // داشبورد «در حال اجرا»ی دروغین نماند. یک‌باره است (شرطِ status آن را idempotent می‌کند).
@@ -1369,7 +1369,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
     // دکمه‌ی سوم: مشاهده‌ی همه‌ی فال‌ها (زیرِ دو دکمه‌ی اصلی؛ همان پیام به کاتالوگ ادیت می‌شود)
     ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
-    await ctx.reply(L.onboarding.expectations, Markup.inlineKeyboard(ctaRows));
+    await ctx.reply(L.onboarding.expectations(toneV2For(uid)), Markup.inlineKeyboard(ctaRows));
     // کیبورد اصلی *بعد* از پیام «یه قرار کوچیک» آشکار می‌شود (نه قبلش) — تلگرام اجازه‌ی
     // یک reply_markup در هر پیام را می‌دهد، پس آشکارسازی کیبورد یک پیام کوتاه جدا لازم دارد.
     await typing(ctx, PACE_S);
@@ -1872,7 +1872,9 @@ async function handleQuestion(ctx, question) {
   } else {
     await ctx.reply(L.reading.atmosphere1);
     await typing(ctx, PACE_M);
-    await ctx.reply(L.reading.atmosphere2);
+    // «کارت‌ها قرار نیست بترسوننت» یک جمله‌ی دلداریِ اضافه است که در لحنِ جدید حذف می‌شود
+    // (تصمیمِ مالک: این جمله‌ها در طولِ جرنی پراکنده‌اند و باید بروند).
+    if (!toneV2For(uid)) await ctx.reply(L.reading.atmosphere2);
   }
   await typing(ctx, PACE_M);
   await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
