@@ -46,10 +46,13 @@ jobs:
           set -e
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- bots/tarot/card-knowledge.fa.json; then
+          # ⚠️ `git diff` فایلِ **untracked** را نمی‌بیند. بارِ اول فایل تازه ساخته می‌شود،
+          # پس چکِ قبلی «بدون تغییر» می‌گفت و کلِ خروجی دور ریخته می‌شد (اتفاقِ واقعی).
+          # اول add، بعد مقایسه‌ی ایندکس.
+          git add bots/tarot/card-knowledge.fa.json
+          if git diff --cached --quiet -- bots/tarot/card-knowledge.fa.json; then
             echo "بدون تغییر"; exit 0
           fi
-          git add bots/tarot/card-knowledge.fa.json
           git commit -m "data(tarot): جدولِ دانشِ کارت‌ها به فارسی (تولیدِ خودکار)"
           git push origin main
 
