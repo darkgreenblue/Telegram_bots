@@ -44,6 +44,13 @@ const fmt = L.fmt;
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
 // کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale)
 const QUIZ = await import(`./quiz.js`).then(m => m.default.personalities).catch(() => ({}));
+// 📚 جدولِ دانشِ کارت (فارسی، تولیدِ آفلاین از منبعِ آموزشی — tools/build-card-knowledge.mjs).
+// **RAG نیست و لازم هم نیست:** کلیدِ بازیابی قطعی است (می‌دانیم کدام کارت کشیده شده)، پس یک
+// lookup کافی است — بدونِ embedding، بدونِ شبکه، زیر یک میلی‌ثانیه.
+// فقط ردیفِ همان کارت‌هایی که کشیده شده‌اند به پرامپت می‌رود، نه کلِ جدول.
+// fail-safe: اگر فایل نباشد یا خراب باشد، خوانش دقیقاً مثل قبل کار می‌کند.
+const CARD_KB = await import('./card-knowledge.fa.json', { with: { type: 'json' } })
+  .then(m => m.default).catch(() => ({}));
 
 const FLASH          = 'google/gemini-2.5-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
@@ -1010,6 +1017,10 @@ function buildReadingCtx(user, spread, question, cards, focusKey) {
       reversed: c.reversed,
       up: CARD_BY_KEY[c.key].up,
       down: CARD_BY_KEY[c.key].down,
+      // دانشِ همین کارت (فقط در لحنِ جدید). مهم‌ترین تکه‌اش `image` است: cards.js فقط
+      // کلیدواژه‌ی انتزاعی دارد («آغاز تازه»)، پس تا امروز مدل مجبور بود نمادِ تصویریِ
+      // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.
+      kb: (toneV2For(user.telegram_id) && CARD_KB[c.key]) || undefined,
     })),
     previous: prev,
     today: tehranToday(),
