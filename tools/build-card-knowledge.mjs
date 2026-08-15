@@ -60,7 +60,11 @@ const trim = (s, n) => {
   return v.length > n ? `${v.slice(0, n).trimEnd()}…` : v;
 };
 
-async function callOR(user) {
+// یک کلمه‌ی انگلیسیِ جامانده کافی است تا کلِ فایل رد شود (گاردِ زبان). به‌جای اینکه کلِ
+// اجرا هدر برود، **همان کارت** با یک تذکرِ صریح دوباره ساخته می‌شود.
+const hasLatin = (o) => Object.values(o).some(v => typeof v === 'string' && /[A-Za-z]{3,}/.test(v));
+
+async function callOR(user, extra = '') {
   for (let i = 0; i < 4; i++) {
     try {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -68,14 +72,15 @@ async function callOR(user) {
         headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: MODEL, temperature: 0.3, max_tokens: 2500,
-          messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
+          messages: [{ role: 'system', content: SYSTEM + extra }, { role: 'user', content: user }],
         }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const j = await r.json();
       const raw = j.choices?.[0]?.message?.content;
       const obj = parseLoose(raw);
-      if (obj?.image && obj?.up && obj?.down) return obj;
+      if (obj?.image && obj?.up && obj?.down && !hasLatin(obj)) return obj;
+      if (obj && hasLatin(obj)) throw new Error('کلمه‌ی انگلیسی در خروجی');
       // پیامِ خطا باید **قابلِ تشخیص** باشد: «خروجیِ ناقص» به‌تنهایی هیچ نمی‌گوید و
       // دیباگ کردنش یک اجرای دیگر خرج برداشت.
       throw new Error(`خروجیِ ناقص (finish=${j.choices?.[0]?.finish_reason}، طولِ متن=${(raw || '').length}): ${String(raw || '').slice(0, 160)}`);
@@ -98,7 +103,13 @@ for (const key of keys) {
     upright_love: c.upLove, upright_career: c.upCareer,
     reversed_love: c.revLove, reversed_career: c.revCareer,
   });
-  const o = await callOR(user);
+  // اگر تلاش‌های عادی به‌خاطر کلمه‌ی انگلیسی شکست خوردند، یک‌بار با تذکرِ صریح‌تر
+  let o;
+  try { o = await callOR(user); }
+  catch (e) {
+    console.log(`  ↻ ${key}: ${e.message} — تلاشِ دوباره با تذکرِ صریح`);
+    o = await callOR(user, '\n\n⚠️ تأکیدِ دوباره: خروجی باید **کاملاً فارسی** باشد. حتی یک کلمه‌ی انگلیسی هم مجاز نیست؛ معادلِ فارسی بگذار.');
+  }
   out[key] = {
     fa: c.fa,
     image: trim(o.image, LIMITS.image),
