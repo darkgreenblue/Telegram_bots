@@ -95,6 +95,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-coins.mjs
 
+      # جدولِ دانشِ کارت: پوششِ ۷۸ کارت، فارسیِ خالص (هیچ انگلیسی‌ای وارد پرامپت نشود) و
+      # سقفِ اندازه (این متن در **هر فال** به پرامپت اضافه می‌شود). اگر فایل هنوز ساخته نشده
+      # باشد سبز رد می‌شود، چون فیچر fail-safe است.
+      - name: Card knowledge check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-knowledge.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test
