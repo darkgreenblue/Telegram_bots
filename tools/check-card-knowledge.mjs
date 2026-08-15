@@ -10,7 +10,7 @@
 //
 // اگر فایل هنوز ساخته نشده باشد چک **سبز** رد می‌شود (فیچر fail-safe است و نبودنِ فایل
 // یعنی رفتارِ دقیقاً قبلی)، ولی فایلِ نصفه‌کاره قرمز می‌شود.
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import CARDS from '../bots/tarot/cards.js';
 
 const P = new URL('../bots/tarot/card-knowledge.fa.json', import.meta.url);
@@ -69,6 +69,17 @@ console.log('\n▶ سقفِ اندازه (ضدِ تورمِ پرامپت)');
   // سه کارت per فال؛ با میانگینِ ۵۰۰ کاراکتر یعنی ~۱۵۰۰ کاراکتر ≈ ۷۰۰ توکن اضافه (زیر ۵٪ هزینه)
   ok(avg <= 600, `میانگینِ هر ردیف ${avg} کاراکتر (سقف ۶۰۰ → حدود ${Math.round(avg * 3 / 2.2)} توکن per فالِ سه‌کارتی)`);
   ok(max <= 800, `چاق‌ترین ردیف ${max} کاراکتر (سقف ۸۰۰)`);
+}
+
+console.log('\n▶ ترجمه دستی است، نه ماشینی');
+{
+  // قاعده‌ی صریحِ مالک (۱۴۰۵/۰۵/۲۴): کلیدِ OpenRouter **فقط** برای خودِ محصول است و
+  // کارِ توسعه با آن انجام نمی‌شود. این ادعا جلوی برگشتنِ آن الگو را می‌گیرد.
+  const files = readdirSync(new URL('../tools/', import.meta.url));
+  const bad = files.filter(f => /card-knowledge/.test(f) && /build|generate/.test(f));
+  ok(bad.length === 0, `هیچ اسکریپتِ تولیدِ خودکارِ جدولِ دانش وجود ندارد${bad.length ? ` (${bad.join(',')})` : ''}`);
+  const wf = readdirSync(new URL('../.github/workflows/', import.meta.url));
+  ok(!wf.includes('card-knowledge.yml'), 'هیچ workflowی جدولِ دانش را با LLM نمی‌سازد');
 }
 
 console.log('\n▶ سیم‌کشیِ runtime');
