@@ -133,8 +133,16 @@ console.log('\n▶ قرارداد: شرطِ نشان‌دادن و شرطِ پذ
   const src = SRC.slice(SRC.indexOf('function firstDiscountAvailable'), SRC.indexOf('function firstDiscountAvailable') + 700);
   ok(/getUserDiscountUses/.test(src) && /countPendingDiscount/.test(src),
     'firstDiscountAvailable از همان دو شمارنده‌ی validateDiscount استفاده می‌کند');
-  ok(/firstDiscountAvailable\(uid\)/.test(SRC.slice(SRC.indexOf('const needBalanceRows'), SRC.indexOf('const needBalanceRows') + 500)),
+  // تا **انتهای خودِ تابع** بخوان، نه یک پنجره‌ی کاراکتریِ ثابت: کامنتِ جدید داخلِ تابع
+  // نباید ادعا را قرمز کند، ولی جابه‌جا شدنِ شرط به بیرونِ تابع باید قرمز کند.
+  const nbrStart = SRC.indexOf('const needBalanceRows');
+  const nbr = SRC.slice(nbrStart, SRC.indexOf('\n};', nbrStart));
+  ok(/firstDiscountAvailable\(uid\)/.test(nbr),
     'دکمه‌ی پی‌وال هم از همان تابع می‌پرسد (نه از شرطِ جداگانه)');
+  // اقتصادِ سکه یک مسیرِ زودهنگامِ return دارد؛ باید **قبل** از ردیفِ تخفیف باشد تا در آن
+  // دنیا هیچ دکمه‌ی تخفیفی ساخته نشود (بسته‌ها خودشان تخفیف‌اند).
+  ok(nbr.indexOf('coinsOn(uid)') >= 0 && nbr.indexOf('coinsOn(uid)') < nbr.indexOf('firstDiscountAvailable(uid)'),
+    'در اقتصادِ سکه، پی‌وال قبل از رسیدن به دکمه‌ی تخفیف برمی‌گردد');
 }
 
 console.log('\n▶ ایجنتِ رسید با «مبلغِ روی فاکتور» مقایسه می‌کند، نه با اصلِ قبل از تخفیف');

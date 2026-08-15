@@ -18,7 +18,7 @@ import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
-import SPREADS, { DAILY, SPREAD_BY_ID } from './spreads.js';
+import SPREADS, { DAILY, SPREAD_BY_ID, spreadsFor, faOf } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
@@ -116,7 +116,11 @@ const TEST_PHASE = false;
 //        تخفیف). از تحلیلِ دور پنجم: فالِ گران‌تر از هدیه ۷٪ تحویل داشت و ارزان‌تر ۷۱٪.
 // 2.9.1: اصلاحِ ابهامِ کپیِ «دو مورد اول» در پیشنهادِ فالِ بعدی ← «دو تا پیشنهاد اول»
 //        (کاربرِ واقعی فکر کرده بود منظور دو تا کارتِ اوله).
-const PRODUCT_VERSION = '2.9.1';
+// 3.0.0: دو تغییرِ بنیادین، هر دو **فعلاً فقط روی اکانتِ ادمین** (تصمیمِ صریحِ مالک: اول
+//        خودش تست کند، بعد برای همه باز شود):
+//        (۱) لحنِ خوانش: صریح، بی‌طفره، و پایانِ **هر** فال یک جوابِ مشخص + نشونه.
+//        (۲) اقتصادِ سکه: واحدِ پولِ داخلی + سه بسته‌ی خرید + کاتالوگِ عشق‌محورِ تقابلی.
+const PRODUCT_VERSION = '3.0.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -177,6 +181,57 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
+// ───────────────────────────────────────────────────────────────────────────
+// 🎭 نسخه‌ی دومِ لحنِ خوانش (v3.0.0)
+// ───────────────────────────────────────────────────────────────────────────
+// چرا: ریتنشن پایین بود و فیدبکِ کاربرها و چند تاروت‌خوانِ حرفه‌ای یک حرفِ مشترک داشت —
+// خوانش‌های ما محتاط، وسط‌باز و پر از «شاید» بودند و کاربر بدونِ جواب می‌رفت. نسخه‌ی دوم
+// صریح می‌نویسد و **هر** فال (نه فقط فال‌های تصمیم‌محور) با یک جوابِ مشخص + نشونه تمام می‌شود.
+//
+// ⚠️ فعلاً فقط ادمین (تصمیمِ مالک: اول تست دستی، بعد باز کردن برای همه). باز کردن برای
+// همه = `READING_TONE_V2_ADMIN_ONLY = false` در یک PR با bump نسخه. Rollback فوری:
+// `READING_TONE_V2 = false` → پرامپت و فلو دقیقاً به حالتِ قبل برمی‌گردد.
+const READING_TONE_V2 = true;
+const READING_TONE_V2_ADMIN_ONLY = true;
+const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isAdmin(uid));
+
+// ───────────────────────────────────────────────────────────────────────────
+// 🪙 اقتصادِ سکه (v3.0.0)
+// ───────────────────────────────────────────────────────────────────────────
+// موجودیِ داخلی **همچنان تومان** است (منبعِ حقیقتِ پول عوض نمی‌شود؛ بند ۹ ریشه). سکه فقط
+// واحدِ نمایش است: هر کارت = ۱ سکه = COIN_VALUE تومان. چون قانونِ قیمت از قبل «هر کارت
+// ۱۰٬۰۰۰ تومان» بود، `coins = spread.size` بدونِ هیچ عددِ جدیدی درمی‌آید و هیچ قیمتی دو
+// جا نوشته نمی‌شود. هدیه‌ی خوش‌آمدِ ۳۰٬۰۰۰ هم دقیقاً ۳ سکه است، یعنی یک فالِ کامل.
+//
+// ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `COIN_ECONOMY_ADMIN_ONLY = false`.
+// Rollback فوری: `COIN_ECONOMY = false` → کاتالوگ، کیف‌پول و همه‌ی متن‌ها به تومان برمی‌گردند
+// (سکه هیچ ستونی در DB ندارد، پس چیزی برای مهاجرتِ برگشتی وجود ندارد).
+const COIN_ECONOMY = true;
+const COIN_ECONOMY_ADMIN_ONLY = true;
+const COIN_VALUE = 10_000;   // ارزشِ داخلیِ هر سکه به تومان (= قیمتِ یک کارت)
+const coinsOn = (uid) => COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isAdmin(uid));
+
+// آزمایشِ A/B نامِ واحدِ پول: «سکه» (مرسوم و بی‌ابهام) در برابر «فال‌گیر» (به روایتِ ربات
+// نزدیک‌تر). انتساب قطعی و ماندگار است (shared/ab.js)، پس نامِ واحد برای یک کاربر هرگز
+// وسطِ کار عوض نمی‌شود — که برای واحدِ پول شرطِ اول است.
+const AB_COIN_NAME = 'coin_name';
+// آبجکتِ ارز که به همه‌ی متن‌های locale پاس داده می‌شود. `on:false` یعنی «دقیقاً مثل قبل، تومان».
+const TOMAN_CUR = { on: false, value: 1, name: 'تومان', emoji: '' };
+function curOf(uid) {
+  if (!coinsOn(uid)) return TOMAN_CUR;
+  const unit = variant(db, uid, AB_COIN_NAME) === 'fortune' ? L.coinUnits.fortune : L.coinUnits.control;
+  return { on: true, value: COIN_VALUE, name: unit.name, emoji: unit.emoji };
+}
+// سه بسته‌ی خریدِ سکه (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
+// اعتباری است که به کیف‌پول اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
+// هر سکه را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
+const COIN_PACKAGES = [
+  { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 50_000 },
+  { key: 'gold',   fa: 'بسته‌ی طلایی',  emoji: '🥇', coins: 30,  toman: 70_000 },
+  { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
+];
+const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
+
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
 const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
@@ -203,6 +258,10 @@ const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus ||
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
+// در اقتصادِ سکه هدیه‌ی دعوت **هم‌اندازه‌ی هدیه‌ی خوش‌آمد** است (۳ سکه = یک فالِ کامل):
+// یعنی هر دعوتِ موفق دقیقاً یک فال به دعوت‌کننده می‌دهد، که پیامِ ساده‌ای برای گفتن دارد.
+const REFERRAL_BONUS_COINS = 3;
+const referralBonusFor = (uid) => (coinsOn(uid) ? REFERRAL_BONUS_COINS * COIN_VALUE : REFERRAL_BONUS);
 // تخفیفِ اولین پرداخت (v2.0.0): ۲۰٪، **فقط روی فالِ رزروشده‌ی همان لحظه** و بدون سقف.
 // دیگر کدی کپی نمی‌شود: دکمه‌ی «تخفیف می‌خوام» یک پیامِ کوتاهِ اطلاع‌رسانی می‌دهد و بلافاصله
 // خودِ فاکتورِ تخفیف‌خورده را می‌فرستد. شارژِ کیف‌پول عمداً تخفیف نمی‌گیرد (فرایندِ جداست).
@@ -310,6 +369,10 @@ db.exec(`
 `);
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
+// قدیمی دقیقاً مثلِ قبل رفتار می‌کند. خالی نبودنش یعنی «این پرداخت یک بسته است»، و همین
+// یک بیت هم هدیه‌ی شارژ را خاموش می‌کند هم اصلاحِ خودکارِ مبلغ را.
+try { db.prepare("ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.2.0): صفِ اقدامِ پشتیبانی فراتر از تأیید/ردِ رسید (شارژ دستی، بازکردنِ فال).
 // payment_id در اقدام‌های غیرپرداختی صفر می‌ماند (ستون NOT NULL است و تغییرش غیرافزایشی بود).
 try { db.prepare('ALTER TABLE admin_actions ADD COLUMN user_id INTEGER').run(); } catch {}
@@ -386,6 +449,22 @@ try {
     EVENTS.PRODUCT_DELIVERED,
     JSON.stringify([]),
   );
+  // نامِ واحدِ پولِ داخلی: «سکه» (مرسوم و بی‌ابهام) در برابر «فال‌گیر» (به روایتِ ربات
+  // نزدیک‌تر). پنجاه‌پنجاه. متریکِ اصلی همان تحویلِ فال است، چون سؤالِ واقعی این است که
+  // کدام نام کاربر را راحت‌تر تا خرج‌کردنِ اعتبار می‌برد، نه کدام قشنگ‌تر است.
+  db.prepare(`
+    INSERT OR IGNORE INTO experiments
+      (key, name, hypothesis, mode, metric_kind, variants_json, status,
+       primary_metric, guardrails_json, started_at)
+    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
+  `).run(
+    AB_COIN_NAME,
+    'نامِ واحدِ پولِ داخلی (سکه یا فال‌گیر)',
+    'نامِ واحدِ پول روی درکِ ارزش و نرخِ خرج‌کردنِ اعتبار اثر می‌گذارد؛ «فال‌گیر» به روایتِ محصول نزدیک‌تر است ولی «سکه» بی‌ابهام‌تر.',
+    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'fortune', weight: 50 }]),
+    EVENTS.PRODUCT_DELIVERED,
+    JSON.stringify([]),
+  );
   // آزمایشِ قبلی (کلیدواژه‌ی هوش مصنوعی) با تصمیمِ مالک متوقف شد: موضع‌گیریِ هوش مصنوعی
   // بیرون از فلو و روی بنرِ تبلیغاتی تست می‌شود، نه این‌جا. صراحتاً stop می‌کنیم تا در
   // داشبورد «در حال اجرا»ی دروغین نماند. یک‌باره است (شرطِ status آن را idempotent می‌کند).
@@ -432,6 +511,15 @@ const stmts = {
   // تا اعتبارِ approvePayment دقیقاً همان چیزی باشد که کاربر داده، نه بیشتر.
   adjustPaymentAmount: db.prepare(
     "UPDATE payments SET amount=?, original_amount=?, adjust_note=?, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
+  // بسته‌ی سکه: original_amount را claimAmount گذاشته (ارزشِ سکه‌ها)، این‌جا فقط مبلغِ
+  // پرداختیِ واقعی و کلیدِ بسته می‌نشیند. گاردِ step='receipt' یعنی بعد از نهایی‌شدنِ
+  // فاکتور دیگر بسته عوض نمی‌شود.
+  // دقیقاً هم‌شکلِ setPaymentDiscount: `original_amount` اعتباری است که داده می‌شود (ارزشِ
+  // سکه‌های بسته، که claimAmount در amount گذاشته بود) و `amount` پولی است که کاربر واقعاً
+  // می‌پردازد. COALESCE لازم است چون approvePayment از `original_amount || amount` می‌خواند؛
+  // بدونِ آن، اعتبارِ بسته برابرِ مبلغِ پرداختی می‌شد و کاربر یک‌سومِ سکه‌هایش را می‌گرفت.
+  setPaymentPackage: db.prepare(
+    "UPDATE payments SET pkg=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=? AND step='receipt' AND status='pending'"),
   setKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=?'),
   // پیشنهاددهنده: آخرین باری که کاربر هر نوع فال را **تحویل گرفته** (منبعِ جریمه‌ی تازگی)
   lastByType: db.prepare("SELECT type, MAX(created_at) AS last FROM readings WHERE user_id=? AND status='delivered' GROUP BY type"),
@@ -546,15 +634,16 @@ function firstDiscountAvailable(uid) {
 }
 
 // نامِ فارسیِ چیدمان (برای خطِ «هزینه‌ی فال «...»»). اگر چیدمان پیدا نشد، متنِ عمومی.
-const spreadFaOf = (r) => SPREAD_BY_ID[r?.type]?.fa || L.reading.spreadFallbackFa;
+const spreadFaOf = (r, uid) => faOf(SPREAD_BY_ID[r?.type], coinsOn(uid)) || L.reading.spreadFallbackFa;
 // پیامِ یکسانِ «موجودی کافی نیست» در همه‌ی نقاطِ پی‌وال (شخصی‌شده با نام کاربر).
 // موجودی و نامِ فال هم نشان داده می‌شوند تا کاربر کسری را خودش ببیند.
 const needBalanceText = (uid, reading) =>
   L.reading.needBalance({
     name: dispName(getUser(uid)),
     balance: getBalance(uid),
-    spreadFa: spreadFaOf(reading),
+    spreadFa: spreadFaOf(reading, uid),
     price: reading.price,
+    cur: curOf(uid),
   });
 // ردیفِ ثابتِ زیرِ پیامِ کم‌موجودی: مسیر اصلی (شارژ) اول، تخفیف پشتِ دکمه‌ی دوم.
 // دکمه‌ی «🎁 تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین شارژ دارد. کاربری که
@@ -570,20 +659,37 @@ const needBalanceText = (uid, reading) =>
 const coveredText = (uid, reading) => L.reading.balanceEnough({
   name: dispName(getUser(uid)),
   balance: getBalance(uid),
-  spreadFa: spreadFaOf(reading),
+  spreadFa: spreadFaOf(reading, uid),
   price: reading.price,
+  cur: curOf(uid),
 });
-const coveredRow = (readingId, price) => [Markup.button.callback(
-  COVERED_PAYWALL_ENABLED ? L.buttons.openCardsCovered : L.buttons.openCards(price),
+const coveredRow = (readingId, price, uid) => [Markup.button.callback(
+  COVERED_PAYWALL_ENABLED ? L.buttons.openCardsCovered : L.buttons.openCards(price, curOf(uid)),
   `unlock:${readingId}`,
 )];
 
 const needBalanceRows = (uid, reading) => {
+  // اقتصادِ سکه: یک مسیر و بس — «خریدِ سکه» که مستقیم به سه بسته می‌رود. «پرداختِ هزینه‌ی
+  // همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند (فاکتورِ تک‌فال با قیمتِ همان
+  // فال)؛ در دنیای بسته‌ای نگه‌داشتنشان دو ریلِ قیمتِ موازی می‌ساخت. خودِ بسته‌ها تخفیف‌اند.
+  if (coinsOn(uid)) return [[Markup.button.callback(L.buttons.buyCoins(curOf(uid)), 'recharge')]];
   const rows = [];
   if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
   rows.push([Markup.button.callback(L.buttons.recharge, 'recharge')]);
   if (reading && firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, `wdisc:${reading.id}`)]);
   return rows;
+};
+
+// پیامِ «شارژ تأیید شد» به زبانِ اقتصادِ همان کاربر: تومانی همان متنِ همیشگی، سکه‌ای تعدادِ
+// سکه‌ی اضافه‌شده و موجودیِ جدید به سکه.
+const approvedMsg = (uid, creditAmount, bonus) => {
+  const cur = curOf(uid);
+  if (!cur.on) return L.wallet.approved(creditAmount, getBalance(uid), bonus);
+  return L.wallet.coinsApproved(
+    Math.round((creditAmount + bonus) / COIN_VALUE),
+    Math.round(getBalance(uid) / COIN_VALUE),
+    cur,
+  );
 };
 
 // فاکتورِ مستقیمِ یک فالِ رزروشده: بدونِ مرحله‌ی «چقدر شارژ کنم؟». مبلغِ پرداخت = قیمتِ فال
@@ -860,7 +966,7 @@ async function resendCurrentStep(ctx, uid) {
   const state = getState(uid);
   const s = getSession(uid);
   if (state === 'await_question') {
-    return ctx.reply(s?.focusKey === 'open' ? L.reading.askTopic : L.reading.askQuestion(), { parse_mode: 'Markdown' });
+    return ctx.reply(s?.focusKey === 'open' ? L.reading.askTopic(toneV2For(uid)) : L.reading.askQuestion(toneV2For(uid)), { parse_mode: 'Markdown' });
   }
   if (state === 'confirm_focus') {
     return ctx.reply(L.reading.askFocusAgain, Markup.inlineKeyboard(
@@ -916,8 +1022,13 @@ async function callReadingLLM(readingId) {
   const ctx = buildReadingCtx(user, spread, r.question, cards, r.focus_area);
   // پرچمِ خاموش باید پرامپت را هم دقیقاً به حالتِ قبل برگرداند، نه فقط پیام را پنهان کند
   // (وگرنه رول‌بک نصفه است: هزینه‌ی توکنِ اضافه می‌ماند بدونِ هیچ فایده‌ای).
-  const wantVerdict = DECISIVE_VERDICT_ENABLED ? decisiveMode(spread) : null;
-  const system = L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
+  const toneV2 = toneV2For(r.user_id);
+  // در نسخه‌ی دومِ لحن **هر** فال جواب می‌دهد (حالتِ direct برای فال‌های تفسیری)، نه فقط
+  // فال‌های تصمیم‌محور. پرچمِ DECISIVE_VERDICT_ENABLED همچنان کلیدِ خاموشیِ کلِ این بخش است.
+  const wantVerdict = DECISIVE_VERDICT_ENABLED ? decisiveMode(spread, toneV2) : null;
+  const system = toneV2
+    ? L.prompts.readerSystemV2(spread, wantVerdict)
+    : L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
   const userMsg = L.prompts.readingContext(ctx);
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
@@ -932,7 +1043,7 @@ async function callReadingLLM(readingId) {
       const obj = parseJsonLoose(out);
       const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
       if (!usable) return false;
-      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict)) { fallback = obj; return false; }
+      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: spread?.choiceLabels })) { fallback = obj; return false; }
       parsed = obj;
       return true;
     },
@@ -1067,14 +1178,14 @@ async function showGate(ctx, uid, refBonus = false) {
   setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
   await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
-  await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS), gateKeyboard());
+  await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS, curOf(uid)), gateKeyboard());
 }
 
 // بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
 // گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
 async function startOnboarding(ctx, uid, refBonus) {
   grantWelcomeBonus(uid);
-  await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS, curOf(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
@@ -1128,7 +1239,7 @@ async function handleStart(ctx) {
   // کاربر برگشتی
   setState(uid, 'idle');
   setSession(uid, null);
-  let msg = L.returning.greeting(dispName(user), getBalance(uid));
+  let msg = L.returning.greeting(dispName(user), getBalance(uid), curOf(uid));
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
@@ -1226,7 +1337,7 @@ async function finishNameOnboarding(ctx, rawName) {
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
   await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid)), Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
-  if (refBonus) await ctx.reply(L.share.referralWelcome(REFERRAL_BONUS));
+  if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
   setState(uid, 'onboard_focus');
   await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
@@ -1267,7 +1378,7 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
     setState(uid, 'await_question');
     const s = getSession(uid);
     const spread = SPREAD_BY_ID[s.spreadId];
-    if (spread) await ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
+    if (spread) await ctx.reply(L.reading.askQuestion(toneV2For(uid)), { parse_mode: 'Markdown' });
   }
 });
 
@@ -1598,11 +1709,16 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 
 /* ---------- فال پولی: کاتالوگ → تمرکز → سؤال ---------- */
 // کیبورد کاتالوگ: [موضوع آزاد؟] + دکمه‌های فال + دکمه‌ی «راهنمای انتخاب» ته لیست.
-function catalogKb() {
-  // بَج‌های کوتاه روی دکمه‌ها: «گذشته، حال، آینده» = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
-  const rows = SPREADS.map(s => [Markup.button.callback(L.buttons.spread(s, L.reading.catalogBadges[s.id]), `spread:${s.id}`)]);
+// کاتالوگ per کاربر: نسلِ دومِ کاتالوگ (عشق‌محورِ تقابلی) فقط به کسی نشان داده می‌شود که
+// اقتصادِ سکه برایش روشن است، چون قیمت‌های کنارِ گزینه‌ها هم به سکه‌اند و این دو یک بسته‌اند.
+function catalogKb(uid) {
+  const v2 = coinsOn(uid);
+  const cur = curOf(uid);
+  // بَج‌های کوتاه روی دکمه‌ها: عشق و رابطه = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
+  const rows = spreadsFor(v2).map(s => [Markup.button.callback(
+    L.buttons.spread(s, L.reading.catalogBadges[s.id], cur, faOf(s, v2)), `spread:${s.id}`)]);
   const kb = [];
-  if (OPEN_TOPIC_ENABLED) kb.push([Markup.button.callback(L.buttons.openTopic, 'opentopic')]);
+  if (OPEN_TOPIC_ENABLED) kb.push([Markup.button.callback(L.buttons.openTopic(v2), 'opentopic')]);
   // کارت روزِ رایگان به‌عنوان اولین گزینه‌ی لیست (نقطه‌ی ورودِ بی‌هزینه).
   kb.push([Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')]);
   kb.push(...rows);
@@ -1621,15 +1737,18 @@ async function showCatalog(ctx) {
   setState(uid, 'choose_spread');
   setSession(uid, null);
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
-  await ctx.reply(L.reading.catalog, Markup.inlineKeyboard(catalogKb()));
+  await ctx.reply(L.reading.catalog, Markup.inlineKeyboard(catalogKb(uid)));
 }
 bot.hears(L.buttons.reading, showCatalog);
 
 // راهنمای انتخاب: همین پیام ادیت می‌شود به توضیحِ فال‌ها + دکمه‌ی بازگشت (بدون پیام جدید).
 bot.action('cat_guide', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  const lines = SPREADS.map(s => L.reading.spreadLine(s, L.reading.badges[s.id])).join('\n\n');
-  const guide = OPEN_TOPIC_ENABLED ? `${L.reading.openTopicHint}\n\n${lines}` : lines;
+  const v2 = coinsOn(ctx.from.id);
+  const cur = curOf(ctx.from.id);
+  const lines = spreadsFor(v2)
+    .map(s => L.reading.spreadLine(s, L.reading.badges[s.id], cur, faOf(s, v2))).join('\n\n');
+  const guide = OPEN_TOPIC_ENABLED ? `${L.reading.openTopicHint(v2)}\n\n${lines}` : lines;
   try {
     await ctx.editMessageText(`${L.reading.guideTitle}\n\n${guide}`, Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.guideBack, 'cat_back')],
@@ -1639,7 +1758,7 @@ bot.action('cat_guide', async (ctx) => {
 // بازگشت از راهنما به لیست انتخاب فال (همان پیام ادیت می‌شود).
 bot.action('cat_back', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  try { await ctx.editMessageText(L.reading.catalog, Markup.inlineKeyboard(catalogKb())); } catch {}
+  try { await ctx.editMessageText(L.reading.catalog, Markup.inlineKeyboard(catalogKb(ctx.from.id))); } catch {}
 });
 
 // موضوع آزاد: انتخاب عمق (۳ یا ۵ کارت) — قیمت طبق قرارداد فقط در پی‌وال نشان داده می‌شود
@@ -1671,7 +1790,7 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   // موضوعِ تایپ‌شده خودش حوزه است → مرحله‌ی «حول چی؟» رد می‌شود؛ مستقیم سراغ نوشتن موضوع
   patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
   setState(uid, 'await_question');
-  await ctx.reply(L.reading.askTopic, { parse_mode: 'Markdown' });
+  await ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
 });
 
 bot.action(/^spread:(\w+)$/, async (ctx) => {
@@ -1693,7 +1812,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (spread.focus) {
     patchSession(uid, { spreadId: spread.id, picks: [], focusKey: spread.focus });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
+    return ctx.reply(L.reading.askQuestion(toneV2For(uid)), { parse_mode: 'Markdown' });
   }
 
   // فال عمومی (گذشته/حال/آینده، آری/نه، دوراهی، سلتی): حوزه‌ی تمرکز
@@ -1705,7 +1824,7 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (fresh) {
     patchSession(uid, { focusKey: user.focus_area });
     setState(uid, 'await_question');
-    return ctx.reply(L.reading.askQuestion(), { parse_mode: 'Markdown' });
+    return ctx.reply(L.reading.askQuestion(toneV2For(uid)), { parse_mode: 'Markdown' });
   }
   // بازپرسیِ هفتگی (یا اولین بار): بدون مقدمه‌ی «بذار یه کم بشناسمت»
   setState(uid, 'confirm_focus');
@@ -1864,7 +1983,7 @@ async function finishPicking(ctx, uid, s) {
     const reading = { type: spread.id, price: spread.price };
     const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, reading) : L.reading.paywall(spread.price);
     await ctx.reply(body, Markup.inlineKeyboard([
-      coveredRow(readingId, spread.price),
+      coveredRow(readingId, spread.price, uid),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
     ]));
   } else {
@@ -2128,11 +2247,14 @@ bot.action(/^fb:(yes|some|no):(\d+)$/, async (ctx) => {
 
 /* ---------- پایان‌بندی + قلاب بازگشت ---------- */
 // پیشنهاد شخصی‌سازی‌شده‌ی فال بعدی: بر اساس حوزه‌ی تمرکز کاربر + آنچه هنوز تجربه نکرده
+// آی‌دی‌های هر دو نسلِ کاتالوگ با هم می‌آیند: `scoreSpreads` فقط روی چیدمان‌هایی کار می‌کند
+// که در کاتالوگِ همان کاربر هستند، پس آی‌دیِ اضافه بی‌ضرر است و این‌طوری هیچ حوزه‌ای بعد از
+// باز شدنِ کاتالوگِ جدید برای همه، بی‌پیشنهاد نمی‌ماند.
 const FOCUS_SUGGEST = {
-  love:      ['love', 'family', 'choice', 'inner', 'celtic'],
+  love:      ['love', 'stayleave', 'crush', 'lovehate', 'commit', 'broken', 'family', 'choice', 'inner', 'celtic'],
   career:    ['career', 'money', 'migration', 'choice', 'celtic'],
   money:     ['money', 'career', 'choice', 'celtic'],
-  inner:     ['inner', 'love', 'three', 'celtic'],
+  inner:     ['inner', 'love', 'broken', 'three', 'celtic'],
   family:    ['family', 'love', 'inner', 'celtic'],
   migration: ['migration', 'choice', 'career', 'celtic'],
   question:  ['choice', 'yesno', 'love', 'celtic'],
@@ -2170,7 +2292,7 @@ function recommendSpreads(uid, currentType, slots = RECO_SLOTS) {
     const focus = getUser(uid)?.focus_area || '';
     const lastByType = new Map();
     for (const r of stmts.lastByType.all(uid)) lastByType.set(r.type, r.last);
-    return scoreSpreads(SPREADS, {
+    return scoreSpreads(spreadsFor(coinsOn(uid)), {
       currentType, focus,
       focusIds: new Set(FOCUS_SUGGEST[focus] || []),
       popMap: popularity(),
@@ -2181,14 +2303,17 @@ function recommendSpreads(uid, currentType, slots = RECO_SLOTS) {
   } catch (e) {
     logErr('recommend:', e.message);
     // fail-safe: هرگز فالِ همین لحظه را برنگردان (قانونِ نشکستنیِ مالک)
-    return SPREADS.filter(s => s.id !== currentType).slice(0, slots);
+    return spreadsFor(coinsOn(uid)).filter(s => s.id !== currentType).slice(0, slots);
   }
 }
 
 // ردیف‌های آماده‌ی پیشنهاد: سه جایگاه + جایگاه چهارمِ «مشاهده‌ی همه‌ی فال‌ها»
 function recoRows(uid, currentType) {
+  const v2 = coinsOn(uid);
+  const cur = curOf(uid);
   return [
-    ...recommendSpreads(uid, currentType).map(sp => [Markup.button.callback(L.buttons.spread(sp), `spread:${sp.id}`)]),
+    ...recommendSpreads(uid, currentType).map(sp => [Markup.button.callback(
+      L.buttons.spread(sp, null, cur, faOf(sp, v2)), `spread:${sp.id}`)]),
     [Markup.button.callback(L.buttons.allSpreads, 'catalog_go')],
   ];
 }
@@ -2213,9 +2338,9 @@ async function ensureMenu(ctx, uid) {
 async function sendVerdict(ctx, llm, spread) {
   try {
     if (!DECISIVE_VERDICT_ENABLED) return;
-    const mode = decisiveMode(spread);
+    const mode = decisiveMode(spread, toneV2For(ctx.from.id));
     if (!mode) return;
-    const v = normalizeVerdict(llm?.verdict, mode);
+    const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: spread?.choiceLabels });
     if (!v) return;
     await sleep(PACE_M);
     await typing(ctx, PACE_S);
@@ -2266,13 +2391,17 @@ async function finishReading(ctx, uid, readingId) {
     const ref = stmts.getReferralByReferee.get(uid);
     if (ref && !ref.rewarded && stmts.countDelivered.get(uid).c === 1) {
       stmts.setReferralRewarded.run(ref.id);
-      stmts.credit.run(REFERRAL_BONUS, ref.referrer_id);
-      stmts.credit.run(REFERRAL_BONUS, uid);
-      track(db, ref.referrer_id, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
-      track(db, uid, 'credit_granted', { amount: REFERRAL_BONUS, kind: 'referral' });
-      await ctx.reply(L.share.refereeReward(REFERRAL_BONUS));
+      // هر طرف طبق اقتصادِ **خودش** هدیه می‌گیرد: دعوت‌کننده و دعوت‌شده ممکن است در دو
+      // دنیای متفاوت باشند (فعلاً فقط ادمین سکه دارد)، و هیچ‌کدام نباید عددِ آن یکی را ببیند.
+      const refAmt = referralBonusFor(ref.referrer_id);
+      const meAmt  = referralBonusFor(uid);
+      stmts.credit.run(refAmt, ref.referrer_id);
+      stmts.credit.run(meAmt, uid);
+      track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
+      track(db, uid, 'credit_granted', { amount: meAmt, kind: 'referral' });
+      await ctx.reply(L.share.refereeReward(meAmt, curOf(uid)));
       const referee = getUser(uid);
-      await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), REFERRAL_BONUS)).catch(() => {});
+      await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), refAmt, curOf(ref.referrer_id))).catch(() => {});
     }
   } catch (e) { logErr('referral reward:', e.message); }
 
@@ -2295,7 +2424,7 @@ async function finishReading(ctx, uid, readingId) {
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers, Markup.inlineKeyboard([
     ...recoRows(uid, r.type),
-    [Markup.button.url(L.buttons.share, shareUrlFor(uid))],
+    [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
   ]));
   await ensureMenu(ctx, uid);
 
@@ -2308,7 +2437,7 @@ async function showWallet(ctx) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringOpenReading(ctx)) return;
-  await ctx.reply(L.wallet.info(getBalance(ctx.from.id)), {
+  await ctx.reply(L.wallet.info(getBalance(ctx.from.id), curOf(ctx.from.id)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.recharge, 'recharge')]]).reply_markup,
   });
@@ -2319,7 +2448,7 @@ bot.hears(L.buttons.wallet, showWallet);
 // (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)
 function shareUrlFor(uid) {
   const link = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
-  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText())}`;
+  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText(referralBonusFor(uid), curOf(uid)))}`;
 }
 
 // دعوت دوستان از کیبورد اصلی: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان
@@ -2330,9 +2459,9 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
   if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringOpenReading(ctx)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, REFERRAL_BONUS), {
+  await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, referralBonusFor(uid), curOf(uid)), {
     parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share, shareUrlFor(uid))]]).reply_markup,
+    reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))]]).reply_markup,
   });
 });
 
@@ -2383,6 +2512,14 @@ bot.action('recharge', async (ctx) => {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
   patchSession(uid, { paymentId });
+  // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
+  if (coinsOn(uid)) {
+    const cur = curOf(uid);
+    return ctx.reply(L.wallet.coinPacks(cur), Markup.inlineKeyboard([
+      ...COIN_PACKAGES.map(p => [Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`)]),
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
+    ]));
+  }
   // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
   // همین فال» بهتر انجام می‌دهد. این‌جا فقط نردبانِ قیمتِ کیف‌پول است.
   const amounts = QUICK_AMOUNTS;
@@ -2416,6 +2553,36 @@ async function setRechargeAmount(ctx, uid, amount) {
     ]).reply_markup,
   });
 }
+
+// خریدِ بسته‌ی سکه: مبلغِ پرداخت = قیمتِ بسته (تومانِ واقعی)، اعتباری که بعد از تأیید داده
+// می‌شود = ارزشِ سکه‌های بسته. دقیقاً همان ریاضیِ جاافتاده‌ی تخفیف (`original_amount` اعتبار
+// می‌گیرد، `amount` پرداخت می‌شود)، پس هیچ منطقِ پولِ جدیدی ساخته نشد.
+// ستونِ `pkg` دو کارِ حیاتی می‌کند: (۱) هدیه‌ی شارژِ ۲۰۰k به بسته نمی‌چسبد (وگرنه بسته‌ی
+// جادویی با اعتبارِ یک‌میلیونی، ۵۰k هدیه‌ی بی‌دلیل هم می‌گرفت)، (۲) اصلاحِ خودکارِ
+// «پرداختِ کمتر» روی بسته اجرا نمی‌شود چون وعده‌ی بسته را می‌شکند → تصمیمِ انسانی.
+bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (!coinsOn(uid)) return;
+  if (getState(uid) !== 'pay_amount') return;
+  const pack = PACKAGE_BY_KEY[ctx.match[1]];
+  if (!pack) return;
+  const s = getSession(uid);
+  if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
+  // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
+  if (stmts.claimAmount.run(pack.coins * COIN_VALUE, s.paymentId).changes === 0) return;
+  stmts.setPaymentPackage.run(pack.key, pack.toman, s.paymentId);
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  setState(uid, 'pay_receipt');
+  await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
+  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER), {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([
+      cardCopyRow(),
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
+    ]).reply_markup,
+  });
+});
 
 bot.action(/^ramt:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -2609,7 +2776,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     if (decision.action === 'approve') {
       const done = approvePayment(paymentId);
       if (!done) return setState(uid, nextState); // ضدِ دوبار (قبلاً نهایی شده)
-      await ctx.reply(L.wallet.approved(done.creditAmount, getBalance(uid), done.bonus)).catch(() => {});
+      await ctx.reply(approvedMsg(uid, done.creditAmount, done.bonus)).catch(() => {});
       await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
       return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
     }
@@ -2620,7 +2787,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     // حالت می‌تواند باگِ تطبیق باشد نه اشتباهِ کاربر (همان فاجعه‌ی ۱۴۰۵/۰۵/۰۹). → ادمین.
     if (decision.action === 'underpaid') {
       const paid = Number(decision.paid) || 0;
-      const safe = !p.discount_code_id && paid >= MIN_RECHARGE && paid < amountToman;
+      const safe = !p.discount_code_id && !p.pkg && paid >= MIN_RECHARGE && paid < amountToman;
       if (safe && stmts.adjustPaymentAmount.run(paid, paid, 'اصلاح به دلیل پرداخت کمتر', paymentId).changes) {
         track(db, uid, 'payment_adjusted',
           { payment_id: paymentId, from: amountToman, to: paid, reason: 'underpaid' });
@@ -2692,7 +2859,7 @@ async function reversePayment(paymentId) {
   if (stmts.markPaymentReversed.run(paymentId).changes === 0) return null;
   const p = stmts.getPayment.get(paymentId);
   const creditAmount = p.original_amount || p.amount;
-  const back = creditAmount + bonusFor(creditAmount); // همان که approve اعتبار داد (اصل + هدیه)
+  const back = creditAmount + (p.pkg ? 0 : bonusFor(creditAmount)); // دقیقاً همان که approve اعتبار داد
   stmts.clawback.run(back, p.user_id);
   stmts.setDistrust.run(p.user_id);
   track(db, p.user_id, 'payment_reversed', { payment_id: paymentId, amount: p.amount, clawed: back });
@@ -2706,7 +2873,9 @@ function approvePayment(paymentId, allowRejected = false) {
   const okStates = allowRejected ? ['pending', 'waiting_review', 'rejected'] : ['pending', 'waiting_review'];
   if (!p || !okStates.includes(p.status)) return null;
   const creditAmount = p.original_amount || p.amount;
-  const bonus = bonusFor(creditAmount); // هدیه‌ی شارژ روی مبلغ اصلی (قبل از تخفیف)
+  // بسته‌ی سکه خودش تخفیفِ ذاتی دارد؛ هدیه‌ی شارژِ ۲۰۰k رویش اعمال نمی‌شود (وگرنه بسته‌ی
+  // بزرگ دو بار تخفیف می‌گرفت و نردبانِ قیمت بی‌معنی می‌شد).
+  const bonus = p.pkg ? 0 : bonusFor(creditAmount);
   stmts.setPaymentStatus.run('approved', paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
@@ -2726,7 +2895,7 @@ async function offerPendingReading(ctx, uid) {
   if (balance >= r.price) {
     const body = COVERED_PAYWALL_ENABLED ? coveredText(uid, r) : L.reading.paywall(r.price);
     await ctx.reply(body, Markup.inlineKeyboard([
-      coveredRow(r.id, r.price),
+      coveredRow(r.id, r.price, uid),
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
@@ -2748,7 +2917,7 @@ async function afterApproval(uid) {
     if (r && r.status === 'pending_payment') {
       setState(uid, 'confirm_pay');
       await bot.telegram.sendMessage(uid, L.reading.resumeAfterRecharge, {
-        reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price)]).reply_markup,
+        reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price, uid)]).reply_markup,
       }).catch(() => {});
       return;
     }
@@ -2763,7 +2932,7 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery('✅').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const { p, creditAmount, bonus } = done;
-  await bot.telegram.sendMessage(p.user_id, L.wallet.approved(creditAmount, getBalance(p.user_id), bonus)).catch(() => {});
+  await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
 });
 bot.action(/^reject:(\d+)$/, async (ctx) => {
@@ -2832,7 +3001,7 @@ setInterval(async () => {
       try {
         if (act.action === 'approve' || act.action === 'force_approve') {
           const done = approvePayment(act.payment_id, act.action === 'force_approve');
-          if (done) { await bot.telegram.sendMessage(done.p.user_id, L.wallet.approved(done.creditAmount, getBalance(done.p.user_id), done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
+          if (done) { await bot.telegram.sendMessage(done.p.user_id, approvedMsg(done.p.user_id, done.creditAmount, done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
           if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
@@ -2860,7 +3029,7 @@ setInterval(async () => {
           if (uid2 && amt > 0 && getUser(uid2)) {
             stmts.credit.run(amt, uid2);
             track(db, uid2, 'credit_granted', { amount: amt, kind: 'support' });
-            await bot.telegram.sendMessage(uid2, L.wallet.supportCredited(amt, getBalance(uid2))).catch(() => {});
+            await bot.telegram.sendMessage(uid2, L.wallet.supportCredited(amt, getBalance(uid2), curOf(uid2))).catch(() => {});
             await afterApproval(uid2); // اگر فالِ رزروشده دارد، خودکار ادامه پیدا کند
           }
         } else if (act.action === 'unlock_reading') {
@@ -2871,7 +3040,7 @@ setInterval(async () => {
             stmts.credit.run(r.price, r.user_id);
             track(db, r.user_id, 'credit_granted', { amount: r.price, kind: 'support_reading', reading_id: r.id });
             await bot.telegram.sendMessage(r.user_id, L.wallet.supportUnlocked, {
-              reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price)]).reply_markup,
+              reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price, r.user_id)]).reply_markup,
             }).catch(() => {});
           }
         }
@@ -3000,7 +3169,7 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid)), mainKeyboard(ctx.from.id));
+    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid), curOf(uid)), mainKeyboard(ctx.from.id));
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
