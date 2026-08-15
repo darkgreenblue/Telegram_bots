@@ -120,7 +120,10 @@ const TEST_PHASE = false;
 //        خودش تست کند، بعد برای همه باز شود):
 //        (۱) لحنِ خوانش: صریح، بی‌طفره، و پایانِ **هر** فال یک جوابِ مشخص + نشونه.
 //        (۲) اقتصادِ سکه: واحدِ پولِ داخلی + سه بسته‌ی خرید + کاتالوگِ عشق‌محورِ تقابلی.
-const PRODUCT_VERSION = '3.0.0';
+// 3.0.1: بازنویسیِ صدا از روی خوانش‌های واقعیِ یک تاروت‌خوانِ انسان (bots/tarot/STYLE.md):
+//        فارسیِ گفتاری، حذفِ برچسبِ «نشونه‌ات» و شعارِ پایانی، و تصحیحِ مهم‌ترین اشتباهِ
+//        نسخه‌ی قبل — زبانِ احتمال ممنوع نیست، جوابِ بی‌جهت ممنوع است.
+const PRODUCT_VERSION = '3.0.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2338,7 +2341,8 @@ async function ensureMenu(ctx, uid) {
 async function sendVerdict(ctx, llm, spread) {
   try {
     if (!DECISIVE_VERDICT_ENABLED) return;
-    const mode = decisiveMode(spread, toneV2For(ctx.from.id));
+    const toneV2 = toneV2For(ctx.from.id);
+    const mode = decisiveMode(spread, toneV2);
     if (!mode) return;
     const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: spread?.choiceLabels });
     if (!v) return;
@@ -2349,8 +2353,8 @@ async function sendVerdict(ctx, llm, spread) {
       sign: esc(v.sign),
       because: v.because ? esc(v.because) : '',
       nuance: v.nuance ? esc(v.nuance) : '',
-    });
-    await ctx.reply(`${L.reading.verdictHeader}\n\n${body}`, { parse_mode: 'HTML' });
+    }, toneV2);
+    await ctx.reply(`${L.reading.verdictHeader(toneV2)}\n\n${body}`, { parse_mode: 'HTML' });
   } catch (e) { logErr('verdict:', e.message); }
 }
 
@@ -2372,8 +2376,13 @@ async function finishReading(ctx, uid, readingId) {
   await sleep(PACE_M);
   const items = (llm.action_items || []).slice(0, 3).map((a, i) => `${fmt(i + 1)}. ${a}`).join('\n');
   await ctx.reply(`${L.reading.actionHeader}\n\n${items}`);
-  await sleep(PACE_M);
-  await ctx.reply(L.reading.empowerClose);
+  // شعارِ پایانی («کارت‌ها آینه‌ان، نه قفس») فقط در لحنِ قدیم می‌ماند. در لحنِ جدید حذف است:
+  // یک شعارِ توانمندسازِ عمومی، آخرین چیزی که کاربر می‌خواند، کلِ قاطعیتِ خوانش را آب می‌کند
+  // (STYLE.md بند ۵ — بازخوردِ صریحِ مالک درباره‌ی لوس‌کردنِ کاربر).
+  if (!toneV2For(uid)) {
+    await sleep(PACE_M);
+    await ctx.reply(L.reading.empowerClose);
+  }
 
   stmts.setReadingStatus.run('delivered', readingId);
   track(db, uid, EVENTS.PRODUCT_DELIVERED, { type: r.type, price: r.price, reading_id: readingId });
