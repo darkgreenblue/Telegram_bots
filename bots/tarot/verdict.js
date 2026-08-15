@@ -13,9 +13,12 @@
 // normalizeVerdict مقدارِ null می‌دهد و ربات دوباره تلاش می‌کند؛ اگر باز هم نشد،
 // خوانش مثلِ قبل و بدونِ بخشِ جواب تحویل می‌شود (هرگز خوانش را نمی‌شکند).
 
-export const VERDICT_MODES = { BINARY: 'binary', CHOICE: 'choice' };
+// `DIRECT` از بازنگریِ لحن آمد (نسخه‌ی دوم خوانش): **هر** فال باید به سؤالِ کاربر جواب
+// بدهد، نه فقط فال‌های تصمیم‌محور. جواب این‌جا متنِ آزاد است (چون سؤال آزاد است) ولی از
+// همان فیلترِ ابهام رد می‌شود: جوابی که «شاید» و «بستگی داره» باشد نمایش داده نمی‌شود.
+export const VERDICT_MODES = { BINARY: 'binary', CHOICE: 'choice', DIRECT: 'direct' };
 
-export const VERDICT_LIMITS = { sign: 300, because: 300, nuance: 200 };
+export const VERDICT_LIMITS = { sign: 300, because: 300, nuance: 200, answer: 240 };
 
 export const BINARY_ANSWERS = { YES: 'آره', NO: 'نه' };
 export const CHOICE_ANSWERS = { FIRST: 'مسیر اول', SECOND: 'مسیر دوم' };
@@ -65,6 +68,23 @@ function pickSide(value, setA, setB, outA, outB) {
   return hasA ? outA : outB;
 }
 
+// برچسبِ اختصاصیِ دو سمتِ یک فالِ تقابلی (spreads.js → choiceLabels)، مثل «موندن»/«جدایی».
+// چرا لازم شد: «مسیر دوم» جوابِ قابلِ لمسی برای «تعهد یا خیانت؟» نیست؛ کاربر باید همان
+// کلمه‌ای را ببیند که در عنوانِ فال دیده. اگر برچسب‌ها توکنِ مشترک داشته باشند (یعنی
+// تفکیک‌ناپذیرند) بی‌صدا به حالتِ عمومیِ «مسیر اول/دوم» برمی‌گردیم، نه اینکه اشتباه انتخاب کنیم.
+function labelSets(labels) {
+  if (!Array.isArray(labels) || labels.length !== 2) return null;
+  const [a, b] = labels.map((l) => tokens(l));
+  if (!a.length || !b.length) return null;
+  if (a.some((w) => b.includes(w))) return null;
+  return {
+    setA: new Set([...FIRST, ...a]),
+    setB: new Set([...SECOND, ...b]),
+    outA: String(labels[0]).trim(),
+    outB: String(labels[1]).trim(),
+  };
+}
+
 const clean = (s, max) => {
   const v = String(s ?? '').replace(/\s+/g, ' ').trim();
   return v.length > max ? `${v.slice(0, max).trimEnd()}…` : v;
@@ -77,14 +97,23 @@ const clean = (s, max) => {
  * @returns {{answer: string, sign: string, because: string, nuance: string}|null}
  *          null یعنی «قابلِ اتکا نیست» → نمایش نده و دوباره تلاش کن.
  */
-export function normalizeVerdict(raw, mode) {
+export function normalizeVerdict(raw, mode, opts = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 
   let answer = null;
   if (mode === VERDICT_MODES.BINARY) {
     answer = pickSide(raw.answer, YES, NO, BINARY_ANSWERS.YES, BINARY_ANSWERS.NO);
   } else if (mode === VERDICT_MODES.CHOICE) {
-    answer = pickSide(raw.answer, FIRST, SECOND, CHOICE_ANSWERS.FIRST, CHOICE_ANSWERS.SECOND);
+    const cl = labelSets(opts.choiceLabels);
+    answer = cl
+      ? pickSide(raw.answer, cl.setA, cl.setB, cl.outA, cl.outB)
+      : pickSide(raw.answer, FIRST, SECOND, CHOICE_ANSWERS.FIRST, CHOICE_ANSWERS.SECOND);
+  } else if (mode === VERDICT_MODES.DIRECT) {
+    // متنِ آزاد، ولی همان سخت‌گیری: جوابی که خودش «جواب ندادم» است رد می‌شود.
+    // یک جمله‌ی کوتاه هم لازم است (تک‌کلمه‌ای مثل «بله» بدونِ ادامه، جوابِ سؤالِ باز نیست).
+    const v = clean(raw.answer, VERDICT_LIMITS.answer);
+    const flat = norm(v);
+    if (v && !AMBIGUOUS.some((p) => flat.includes(p)) && tokens(v).length >= 3) answer = v;
   }
   if (!answer) return null;
 
@@ -101,5 +130,12 @@ export function normalizeVerdict(raw, mode) {
   };
 }
 
-/** آیا این چیدمان جوابِ قاطع می‌خواهد؟ */
-export const decisiveMode = (spread) => spread?.decisive || null;
+/**
+ * آیا این چیدمان جوابِ قاطع می‌خواهد؟
+ * @param {object} spread چیدمان
+ * @param {boolean} toneV2 در نسخه‌ی دوم لحن، **هر** فال جواب می‌دهد: چیدمانی که
+ *   `decisive` ندارد حالتِ `direct` می‌گیرد (جوابِ متنیِ کوتاه به سؤالِ خودِ کاربر)
+ *   به‌جای اینکه اصلاً جواب ندهد.
+ */
+export const decisiveMode = (spread, toneV2 = false) =>
+  spread?.decisive || (toneV2 ? VERDICT_MODES.DIRECT : null);

@@ -88,6 +88,13 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-payments.mjs
 
+      # اقتصادِ سکه + نسخه‌ی دومِ لحن (tarot): هر دو فعلاً فقط روی اکانتِ ادمین‌اند، پس این
+      # چک قبل از هر چیز «نشتی به کاربرِ واقعی» را می‌گیرد؛ بعد ریاضیِ سکه (هر کارت = ۱ سکه)،
+      # نردبانِ بسته‌ها، سالم‌ماندنِ چیدمان‌های قدیمی، و قانونِ «جوابِ مبهم نمایش داده نمی‌شود».
+      - name: Coin economy and reading tone check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-coins.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test
