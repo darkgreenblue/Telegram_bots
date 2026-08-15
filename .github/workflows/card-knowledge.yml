@@ -53,12 +53,15 @@ jobs:
           git commit -m "data(tarot): جدولِ دانشِ کارت‌ها به فارسی (تولیدِ خودکار)"
           git push origin main
 
+      # نکته: `secrets` در شرطِ step مجاز نیست (خطای «Unrecognized named-value»)، پس
+      # خالی‌بودنِ سکرت داخلِ خودِ اسکریپت چک می‌شود — همان الگوی health.yml.
       - name: Telegram alert on failure
-        if: failure() && secrets.OWNER_TELEGRAM_ID != ''
+        if: failure()
         env:
           TOKEN: ${{ secrets.TAROT_BOT_TOKEN }}
           IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
         run: |
+          if [ -z "$TOKEN" ] || [ -z "$IDS" ]; then echo "ℹ️ سکرت ست نشده — هشدار رد شد"; exit 0; fi
           for id in $(echo "$IDS" | tr ',' ' '); do
             curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
               -d chat_id="$id" \
