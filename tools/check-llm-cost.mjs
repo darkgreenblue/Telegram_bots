@@ -1,0 +1,162 @@
+#!/usr/bin/env node
+// چکِ «قاعده‌ی آهنینِ هزینه» (بند ۹ CLAUDE.md ریشه):
+//
+//   تا وقتی از اعتبارِ کاربر کم نکرده‌ایم، هیچ فراخوانیِ پولیِ OpenRouter زده نمی‌شود.
+//
+// چرا این چک وجود دارد: باگِ واقعیِ ۱۴۰۵/۰۵/۲۵ که مالک با تستِ دستی پیدایش کرد. دو نقطه
+// **قبل** از تصمیمِ کاربر پول خرج می‌کردند:
+//   ۱) رونویسیِ ویس، لحظه‌ای که کاربر سؤالش را می‌فرستاد (خیلی قبل‌تر از پی‌وال)
+//   ۲) پیش‌فراخوانیِ خوانش در finishPicking، درست قبل از نمایشِ پی‌وال
+// یعنی کاربری که ویس می‌فرستاد و منصرف می‌شد، دو فراخوانی هزینه روی دستمان می‌گذاشت.
+//
+// این چک ساختاری **و** رفتاری است: هم می‌گوید گارد سرِ جایش هست، هم منطقش را واقعاً اجرا
+// می‌کند، هم ترتیبِ کد را می‌سنجد (گاردی که بعد از خرجِ پول بیاید بی‌فایده است).
+import fs from 'node:fs';
+
+const SRC = fs.readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+const LOC = fs.readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
+
+let pass = 0; const errs = [];
+const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } else { errs.push(msg); console.log(`  ❌ ${msg}`); } };
+
+// بدنه‌ی یک تابع را از سورس بیرون می‌کشد (شمارشِ آکولاد، نه regex ساده)
+function bodyOf(src, header) {
+  const i = src.indexOf(header);
+  if (i < 0) return null;
+  let d = 0, started = false;
+  for (let j = src.indexOf('{', i); j < src.length; j++) {
+    if (src[j] === '{') { d++; started = true; }
+    else if (src[j] === '}') { d--; if (started && d === 0) return src.slice(i, j + 1); }
+  }
+  return null;
+}
+
+// هر چیزی که به OpenRouter می‌رود و برای ما پول دارد
+const PAID_CALLS = ['orChatResilient(', 'orTranscribe(', 'orChat(', 'orRequest('];
+
+console.log('▶ گاردِ هزینه: هیچ فراخوانیِ پولی قبل از کسرِ اعتبار');
+{
+  // ۱) خودِ منطقِ گارد، واقعاً اجرا می‌شود (نه فقط وجود داشته باشد)
+  const guardSrc = bodyOf(SRC, 'function paidForReading(');
+  ok(!!guardSrc, 'تابعِ paidForReading وجود دارد');
+  if (guardSrc) {
+    const paidFor = new Function(`${guardSrc}; return paidForReading;`)();
+    ok(paidFor({ price: 30000, status: 'pending_payment' }) === false,
+      'فالِ پولیِ پرداخت‌نشده → فراخوانی ممنوع');
+    ok(paidFor({ price: 30000, status: 'started' }) === true,
+      'فالِ پولی بعد از کسرِ اعتبار (started) → فراخوانی مجاز');
+    ok(paidFor({ price: 30000, status: 'canceled' }) === false, 'فالِ لغوشده → ممنوع');
+    ok(paidFor({ price: 30000, status: 'refunded' }) === false,
+      'فالِ ریفاندشده → ممنوع (تا retry دوباره کسر نکند)');
+    ok(paidFor({ price: 30000, status: 'delivered' }) === false,
+      'فالِ تحویل‌شده → ممنوع (خروجی از DB خوانده می‌شود، نه فراخوانیِ دوباره)');
+    ok(paidFor({ price: 0, status: 'pending_payment' }) === true,
+      'فالِ رایگان استثناست (چیزی برای کسر ندارد)');
+  }
+
+  // ۲) گارد باید **قبل از** هر خرجِ پول در همان تابع باشد
+  const call = bodyOf(SRC, 'async function callReadingLLM(');
+  ok(!!call, 'تابعِ callReadingLLM پیدا شد');
+  if (call) {
+    const gi = call.indexOf('paidForReading(');
+    ok(gi > 0, 'callReadingLLM گاردِ paidForReading را صدا می‌زند');
+    ok(/if \(!paidForReading\(r\)\) \{[\s\S]{0,200}return null;/.test(call),
+      'گارد در صورتِ نقض، null برمی‌گرداند (نه ادامه‌ی بی‌صدا)');
+    for (const c of PAID_CALLS) {
+      const ci = call.indexOf(c);
+      if (ci < 0) continue;
+      ok(gi < ci, `«${c}» بعد از گارد می‌آید، نه قبلش`);
+    }
+  }
+}
+
+console.log('\n▶ نقاطی که قبلاً قاعده را می‌شکستند');
+{
+  // پیش‌فراخوانیِ قبل از پی‌وال کاملاً حذف شده — نه خاموش، حذف
+  ok(!/function startPrefetch/.test(SRC), 'startPrefetch دیگر وجود ندارد');
+  ok(!/startPrefetch\(/.test(SRC), 'هیچ‌جا startPrefetch صدا زده نمی‌شود');
+
+  // finishPicking پیامِ بعدی‌اش پی‌وال است؛ اینجا هیچ خرجی مجاز نیست
+  const fp = bodyOf(SRC, 'async function finishPicking(');
+  ok(!!fp, 'تابعِ finishPicking پیدا شد');
+  if (fp) {
+    for (const c of PAID_CALLS) {
+      ok(!fp.includes(c), `finishPicking هیچ «${c}» ندارد (کاربر هنوز تصمیم نگرفته)`);
+    }
+  }
+
+  // هندلرِ ویس فقط ارجاعِ فایل را نگه می‌دارد؛ رونویسی آنجا یعنی خرجِ قبل از پرداخت
+  const vh = bodyOf(SRC, "bot.on(['voice', 'audio']");
+  ok(!!vh, 'هندلرِ ویس پیدا شد');
+  if (vh) {
+    for (const c of PAID_CALLS) {
+      ok(!vh.includes(c), `هندلرِ ویس هیچ «${c}» ندارد`);
+    }
+    ok(/handleQuestion\(ctx, '', \{ id: media\.file_id/.test(vh),
+      'هندلرِ ویس فقط file_id را جلو می‌برد (نه محتوای رونویسی‌شده)');
+  }
+
+  // رونویسی فقط داخلِ callReadingLLM مجاز است (یعنی پشتِ گارد)
+  const transcribeCallers = [...SRC.matchAll(/orTranscribe\(/g)].length;
+  const inReading = (bodyOf(SRC, 'async function callReadingLLM(') || '').match(/orTranscribe\(/g)?.length || 0;
+  const defined = /function orTranscribe\(/.test(SRC) ? 1 : 0;
+  ok(transcribeCallers - defined === inReading,
+    `orTranscribe فقط از داخلِ callReadingLLM صدا زده می‌شود (${inReading} مورد)`);
+}
+
+console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو تا');
+{
+  ok(/const AUDIO_DIRECT_ENABLED = true;/.test(SRC), 'پرچمِ AUDIO_DIRECT_ENABLED روشن است');
+  // مهاجرتِ افزایشی (بند ۲ج/۱): فقط ADD COLUMN با DEFAULT
+  ok(/ALTER TABLE readings ADD COLUMN question_audio TEXT NOT NULL DEFAULT ''/.test(SRC),
+    'ستونِ question_audio افزایشی اضافه شده');
+  ok(/ALTER TABLE readings ADD COLUMN question_audio_fmt TEXT NOT NULL DEFAULT ''/.test(SRC),
+    'ستونِ question_audio_fmt افزایشی اضافه شده');
+  ok(/INSERT INTO readings \([^)]*question_audio, question_audio_fmt\) VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?\)/.test(SRC),
+    'insertReading هر دو ستون را می‌نویسد (۹ پارامتر)');
+
+  // خودِ فایل به مدل می‌رود
+  ok(/type: 'input_audio', input_audio: \{ data: audio\.data, format: audio\.format \}/.test(SRC),
+    'فایلِ صوتی به‌عنوان content-part کنارِ پرامپت می‌رود');
+  ok(/const plan = audio \? \[FLASH, FLASH, FLASH\] : undefined;/.test(SRC),
+    'برای ورودی صوتی فقط مدل‌های شنوا در برنامه‌ی retry می‌مانند (DeepSeek صدا نمی‌فهمد)');
+
+  // نشتِ ویسِ فالِ قبلی به فالِ بعدی — باگی که موقعِ همین تغییر پیدا و بسته شد
+  const hq = bodyOf(SRC, 'async function handleQuestion(');
+  ok(!!hq, 'تابعِ handleQuestion پیدا شد');
+  if (hq) {
+    ok(/questionAudio: audio\?\.id \|\| ''/.test(hq) && /questionAudioFmt: audio\?\.fmt \|\| ''/.test(hq),
+      'handleQuestion هر دو فیلد را همیشه می‌نویسد (سؤالِ متنی، ویسِ قبلی را پاک می‌کند)');
+  }
+  ok([...SRC.matchAll(/questionAudio:/g)].length === 1,
+    'فقط یک نقطه در کل کد questionAudio را ست می‌کند (تک‌منبع)');
+
+  // متنِ سؤال بدونِ فراخوانیِ دوم پر می‌شود
+  ok(/if \(audio && parsed\.question_text\)/.test(SRC),
+    'متنِ سؤالِ ویس از خروجیِ همان فراخوانی برداشته می‌شود، نه یک فراخوانیِ دوم');
+  ok(/WHERE id=\? AND question=\?/.test(SRC),
+    'ثبتِ متنِ سؤال شرط دارد تا متنِ موجود بازنویسی نشود');
+
+  // گاردِ prompt-injection روی محتوای صوتی (بند ۹ ریشه: ورودی کاربر data است نه instruction)
+  ok(/audioQuestionNote:/.test(LOC), 'بلوکِ راهنمای ورودی صوتی در locale است، نه در index.js');
+  ok(/فقط \*\*داده\*\* است/.test(LOC), 'صریح گفته شده محتوای صوت داده است نه دستور');
+  ok(/question_text/.test(LOC), 'پرامپت متنِ سؤال را می‌خواهد');
+  // پرامپتِ مسیرِ متنی نباید عوض شده باشد: بلوکِ صوتی فقط وقتی audio هست چسبانده می‌شود
+  ok(/const systemFinal = audio \? `\$\{system\}\\n\$\{L\.prompts\.audioQuestionNote\}` : system;/.test(SRC),
+    'بلوکِ صوتی فقط در حالتِ صوتی به پرامپت اضافه می‌شود (مسیرِ متنی دست‌نخورده)');
+}
+
+console.log('\n▶ شبکه‌ی ایمنی بعد از پرداخت');
+{
+  // دانلودِ ویس بعد از کسرِ اعتبار است، پس شکستش باید به ریفاند برسد نه خوانشِ بی‌سؤال
+  ok(/async function fetchQuestionAudio\(/.test(SRC), 'دانلودِ ویس تابعِ جدا دارد');
+  ok(/logErr\(`reading#\$\{r\.id\} دانلودِ ویسِ سؤال شکست خورد:`/.test(SRC),
+    'شکستِ دانلود لاگِ قابلِ grep دارد');
+  ok(/buf\.length > MAX_VOICE_BYTES/.test(SRC),
+    'حجمِ دانلودشده دوباره چک می‌شود (نه فقط موقعِ آپلود)');
+  // مسیرِ ریفاند دست‌نخورده مانده
+  ok(/REFUND path/.test(SRC), 'مسیرِ ریفاندِ شکستِ کاملِ LLM سرِ جایش است');
+}
+
+console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
+if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

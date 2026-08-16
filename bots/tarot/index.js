@@ -55,9 +55,8 @@ const CARD_KB = await import('./card-knowledge.fa.json', { with: { type: 'json' 
 const FLASH          = 'google/gemini-2.5-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
 const OR_TIMEOUT_MS  = 10 * 60 * 1000;
-const MAX_VOICE_SEC  = 120;              // سقف طول ویسِ سؤال — جلوی هزینه‌ی رونویسیِ نامحدود قبل از پرداخت
+const MAX_VOICE_SEC  = 120;              // سقف طول ویسِ سؤال (خودِ فایل به مدل می‌رود، پس سقف = سقفِ توکنِ ورودی)
 const MAX_VOICE_BYTES = 3 * 1024 * 1024;
-const MAX_PREFETCH_PER_DAY = 15;         // سقف پیش‌فراخوانی LLM per کاربر — ضد حلقه‌ی «انتخاب کن، لغو کن»
 
 // ⚠️ TEST_PHASE: تا وقتی true است دکمه‌ی «ریست ربات (تست)» برای همه فعال است.
 // false = ربات زنده (لانچ ۱۴۰۵/۰۴/۲۰): دکمه کلاً مخفی؛ /reset فقط برای OWNER می‌ماند.
@@ -142,7 +141,10 @@ const TEST_PHASE = false;
 //        **هر** فال با دلیلِ لنگرخورده به نامِ کارت‌ها، جدولِ دانشِ ۷۸ کارت در پرامپت،
 //        حذفِ سه قدمِ عملی و شعارِ پایانی و جمله‌های دلداریِ وسطِ جرنی، و پرسشِ «سؤالت چیه»
 //        به‌جای «موضوعت چیه». هدفِ سنجش: **ریتنشن** (بازگشت و فالِ دوم) و کیفیتِ فیدبک.
-const PRODUCT_VERSION = '3.3.0';
+// 3.4.0: 💸 قاعده‌ی هزینه: هیچ فراخوانیِ پولی قبل از کسرِ اعتبار. دو نشتی بسته شد
+//        (رونویسیِ ویس لحظه‌ی ارسال، و پیش‌فراخوانیِ خوانش قبل از پی‌وال). ضمناً سؤالِ
+//        صوتی حالا **یک** فراخوانی است: خودِ فایل کنارِ پرامپت به مدل می‌رود.
+const PRODUCT_VERSION = '3.4.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -218,6 +220,14 @@ const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 // مسیرِ باریک‌کردن هم یک‌خطی بماند (همان دو-پرچمِ بند ۲ج-۲).
 const READING_TONE_V2 = true;
 const READING_TONE_V2_ADMIN_ONLY = false;
+
+// 🎙 سؤالِ صوتی مستقیم به مدل (v3.4.0): تا قبل از این، ویس **دو** فراخوانی می‌شد — یکی
+// رونویسی و یکی خوانش. حالا خودِ فایلِ صوتی کنارِ پرامپت به Gemini می‌رود و کلِ کار **یک**
+// فراخوانی است. مدل متنِ سؤال را هم در `question_text` برمی‌گرداند تا رکوردِ فال مثل قبل
+// سؤال را داشته باشد (پشتیبانی/دیباگ) بدونِ اینکه فراخوانیِ دومی لازم باشد.
+// Rollback یک‌خطی: false → برمی‌گردیم به مسیرِ رونویسی، ولی **همچنان بعد از پرداخت**
+// (قاعده‌ی هزینه پایین‌تر مستقل از این پرچم است و با آن رول‌بک نمی‌شود).
+const AUDIO_DIRECT_ENABLED = true;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isAdmin(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -397,6 +407,12 @@ db.exec(`
     PRIMARY KEY (card_key, reversed, focus)
   );
 `);
+// migration (v3.4.0): ارجاعِ فایلِ صوتیِ سؤال. **خودِ صدا ذخیره نمی‌شود**، فقط file_id تلگرام
+// (یک اشاره‌گر) تا موقعِ خوانش — یعنی بعد از پرداخت — دانلود و مستقیم به مدل داده شود.
+// چرا در DB و نه در session: هر deploy یعنی restart و سشنِ in-memory می‌میرد؛ کاربری که
+// ویس فرستاده و هنوز پرداخت نکرده نباید سؤالش را از دست بدهد (بند ۹ب/۵).
+try { db.prepare("ALTER TABLE readings ADD COLUMN question_audio TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare("ALTER TABLE readings ADD COLUMN question_audio_fmt TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
@@ -556,7 +572,9 @@ const stmts = {
     LIMIT 20
   `),
 
-  insertReading: db.prepare(`INSERT INTO readings (user_id, type, price, focus_area, question, seed, cards_json) VALUES (?,?,?,?,?,?,?)`),
+  insertReading: db.prepare(`INSERT INTO readings (user_id, type, price, focus_area, question, seed, cards_json, question_audio, question_audio_fmt) VALUES (?,?,?,?,?,?,?,?,?)`),
+  // متنِ سؤال وقتی ویس بوده و مدل آن را در question_text برگردانده (رکورد برای پشتیبانی/دیباگ)
+  setReadingQuestion: db.prepare('UPDATE readings SET question=? WHERE id=? AND question=?'),
   getReading:    db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingLlm: db.prepare('UPDATE readings SET llm_json=?, summary=? WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
@@ -768,7 +786,6 @@ function wipeUser(uid) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
-  prefetches.delete(uid);
 }
 
 function normalizeDigits(s) {
@@ -1009,7 +1026,6 @@ async function resendCurrentStep(ctx, uid) {
 }
 
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
-const prefetches = new Map(); // uid -> Promise<object|null> (فقط بهینه‌سازی؛ منبع حقیقت readings.llm_json)
 
 function buildReadingCtx(user, spread, question, cards, focusKey) {
   // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
@@ -1038,13 +1054,69 @@ function buildReadingCtx(user, spread, question, cards, focusKey) {
   };
 }
 
+// 💸 دانلودِ فایلِ صوتیِ سؤال. **رایگان است** (Bot API تلگرام، نه OpenRouter) پس قاعده‌ی
+// هزینه را نمی‌شکند؛ ولی چون بعد از کسرِ اعتبار اجرا می‌شود، شکستش باید به مسیرِ ریفاند
+// برود نه به خوانشِ بی‌سؤال. برای همین در شکست null می‌دهد و صداکننده تصمیم می‌گیرد.
+async function fetchQuestionAudio(r) {
+  try {
+    const link = await bot.telegram.getFileLink(r.question_audio);
+    const res = await fetch(link.href);
+    if (!res.ok) throw new Error(`telegram file ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length || buf.length > MAX_VOICE_BYTES) throw new Error(`bad size ${buf.length}`);
+    return { data: buf.toString('base64'), format: r.question_audio_fmt || 'mp3' };
+  } catch (e) {
+    logErr(`reading#${r.id} دانلودِ ویسِ سؤال شکست خورد:`, e.message);
+    return null;
+  }
+}
+
+// ═══ قاعده‌ی آهنینِ هزینه (بند ۹ ریشه) ═══
+// هیچ فراخوانیِ پولیِ OpenRouter برای یک فال قبل از اینکه اعتبارِ کاربر کسر شده باشد.
+// تنها نقطه‌ی کسر `unlock:`/`retryr:` است و هر دو بلافاصله status را 'started' می‌کنند،
+// پس همین یک شرط کلِ قاعده را قفل می‌کند — و چون داخلِ خودِ تابعِ فراخوانی است، هر مسیرِ
+// **آینده‌ای** هم که یادش برود، اینجا متوقف می‌شود (درسِ بند ۸ ریشه: گاردِ پراکنده دیر یا
+// زود یک مسیر را جا می‌گذارد). فالِ رایگان (price=0) استثناست چون چیزی برای کسر ندارد.
+function paidForReading(r) {
+  return r.price === 0 || r.status === 'started';
+}
+
 async function callReadingLLM(readingId) {
   const r = stmts.getReading.get(readingId);
   if (!r) return null;
+  if (!paidForReading(r)) {
+    logErr(`❌ COST_GUARD reading#${readingId} status=${r.status} — فراخوانیِ LLM قبل از کسرِ اعتبار متوقف شد`);
+    return null;
+  }
   const user = getUser(r.user_id);
   const spread = SPREAD_BY_ID[r.type];
   const cards = JSON.parse(r.cards_json);
-  const ctx = buildReadingCtx(user, spread, r.question, cards, r.focus_area);
+
+  // ── سؤالِ صوتی: یک فراخوانی، نه دو تا ──────────────────────────────────────
+  // اگر سؤال ویس بوده، خودِ فایل کنارِ پرامپت می‌رود و مدل هم‌زمان می‌شنود و خوانش
+  // می‌نویسد. اگر به هر دلیلی نشد (پرچم خاموش، دانلود خراب)، به مسیرِ رونویسی برمی‌گردیم
+  // که **باز هم بعد از پرداخت** است؛ یعنی قاعده‌ی هزینه در هیچ شاخه‌ای نمی‌شکند.
+  let audio = null;
+  if (r.question_audio && !r.question) {
+    const fetched = await fetchQuestionAudio(r); // یک دانلود، نه بیشتر
+    if (fetched && AUDIO_DIRECT_ENABLED) {
+      audio = fetched;                           // مسیرِ اصلی: یک فراخوانی برای کلِ کار
+    } else if (fetched) {
+      // پرچم خاموش: به مسیرِ رونویسی برمی‌گردیم. دو فراخوانی می‌شود ولی هر دو **بعد از**
+      // پرداخت‌اند، پس قاعده‌ی هزینه نمی‌شکند (رول‌بک نباید قاعده را هم برگرداند).
+      const txt = await orTranscribe(Buffer.from(fetched.data, 'base64'), fetched.format)
+        .catch(e => { logErr(`reading#${readingId} رونویسیِ فالبک شکست خورد:`, e.message); return null; });
+      if (txt?.trim()) {
+        r.question = txt.trim().slice(0, 1500);
+        stmts.setReadingQuestion.run(r.question, readingId, '');
+      }
+    }
+  }
+  // اگر ویس نه شنیده شد و نه رونویسی، **نباید** به مدل بگوییم «به فایلِ پیوست گوش کن»
+  // (فایلی در کار نیست و مدل گیج می‌شود). به‌جایش صریح می‌گوییم سؤالِ مشخصی نداریم و
+  // خوانش روی حوزه‌ی تمرکز بنا می‌شود — این خیلی بهتر از ریفاندِ کاربری است که پول داده.
+  const questionText = r.question || (audio ? L.prompts.questionInAudio : L.prompts.questionMissing);
+  const ctx = buildReadingCtx(user, spread, questionText, cards, r.focus_area);
   // پرچمِ خاموش باید پرامپت را هم دقیقاً به حالتِ قبل برگرداند، نه فقط پیام را پنهان کند
   // (وگرنه رول‌بک نصفه است: هزینه‌ی توکنِ اضافه می‌ماند بدونِ هیچ فایده‌ای).
   const toneV2 = toneV2For(r.user_id);
@@ -1054,7 +1126,16 @@ async function callReadingLLM(readingId) {
   const system = toneV2
     ? L.prompts.readerSystemV2(spread, wantVerdict)
     : L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
-  const userMsg = L.prompts.readingContext(ctx);
+  // وقتی صدا همراه است، سؤال از خودِ فایل شنیده می‌شود؛ یک بلوکِ کوتاه به پرامپت اضافه
+  // می‌شود که می‌گوید صدا **داده است نه دستور** (گاردِ prompt-injection، بند ۹ ریشه) و
+  // متنِ سؤال را در `question_text` برگردان تا رکوردِ فال بدونِ فراخوانیِ دوم کامل شود.
+  const systemFinal = audio ? `${system}\n${L.prompts.audioQuestionNote}` : system;
+  const textPart = L.prompts.readingContext(ctx);
+  const userMsg = audio
+    ? [{ type: 'text', text: textPart }, { type: 'input_audio', input_audio: { data: audio.data, format: audio.format } }]
+    : textPart;
+  // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند.
+  const plan = audio ? [FLASH, FLASH, FLASH] : undefined;
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
@@ -1062,7 +1143,7 @@ async function callReadingLLM(readingId) {
   // «شاید»ِ مدل، کاربر را به مسیر ریفاند می‌انداخت که خیلی بدتر از نداشتنِ آن بخش است.
   let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
-  const res = await orChatResilient(system, userMsg, {
+  const res = await orChatResilient(systemFinal, userMsg, {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
@@ -1072,32 +1153,32 @@ async function callReadingLLM(readingId) {
       parsed = obj;
       return true;
     },
-  });
+  }, plan);
   if (!parsed && fallback) {
     logErr(`reading#${readingId} جوابِ قاطع بعد از همه‌ی تلاش‌ها مبهم ماند — خوانش بدونِ بخشِ جواب تحویل می‌شود`);
     parsed = fallback;
   }
   if (!parsed) { logErr(`reading#${readingId} همه‌ی تلاش‌ها شکست خورد (REFUND path)`); return null; }
-  log(`reading#${readingId} آماده شد با ${res?.model || 'fallback'}`);
+  log(`reading#${readingId} آماده شد با ${res?.model || 'fallback'}${audio ? ' (ورودی صوتی، تک‌فراخوانی)' : ''}`);
+  // متنِ سؤالِ ویس از همان خروجی برداشته می‌شود (نه یک فراخوانیِ دوم). شرطِ `question=''`
+  // در خودِ UPDATE است تا اگر قبلاً متنی ثبت شده بود بازنویسی نشود.
+  if (audio && parsed.question_text) {
+    stmts.setReadingQuestion.run(String(parsed.question_text).slice(0, 1500), readingId, '');
+  }
   stmts.setReadingLlm.run(JSON.stringify(parsed), String(parsed.summary || '').slice(0, 300), readingId);
   return parsed;
 }
 
-function startPrefetch(uid, readingId) {
-  const p = callReadingLLM(readingId).catch(e => { logErr('prefetch:', e.message); return null; });
-  prefetches.set(uid, { readingId, promise: p }); // readingId تا نتیجه‌ی فالِ دیگری به این فال تزریق نشود
-  return p;
-}
-// نتیجه‌ی LLM؛ اگر پیش‌فراخوانی از دست رفته بود (مثلاً ری‌استارت) دوباره صدا می‌زند
+// ⛔️ `startPrefetch` حذف شد (v3.4.0). پیش‌فراخوانی خوانش را **قبل** از پی‌وال شروع می‌کرد،
+// یعنی برای هر کاربری که موجودی داشت ولی سرِ پی‌وال منصرف می‌شد، هزینه‌ی یک فالِ کامل را
+// می‌دادیم و هیچ درآمدی نمی‌گرفتیم. «توانِ پرداخت» با «تصمیمِ پرداخت» یکی نیست.
+// جایش: خوانش در `awaitReadingLLM` صدا زده می‌شود که فقط از مسیرِ بعد از کسرِ اعتبار
+// می‌آید، و انتظارِ کاربر با همان لودینگِ زنده‌ی `waitLLMWithLoading` پوشانده می‌شود.
+// نتیجه‌ی LLM (منبع حقیقت readings.llm_json؛ اگر ری‌استارت شده بود دوباره صدا می‌زند)
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const entry = prefetches.get(uid);
-  // فقط اگر پیش‌فراخوانی دقیقاً برای همین فال بود از آن استفاده کن؛ وگرنه از نو صدا بزن
-  // (باگ: کاربر فال A را رها و فال B را باز می‌کرد → پرامیس A نتیجه‌ی اشتباه/سکوت می‌داد)
-  const p = (entry && entry.readingId === readingId) ? entry.promise : callReadingLLM(readingId);
-  const result = await p;
-  if (entry && entry.readingId === readingId) prefetches.delete(uid);
+  const result = await callReadingLLM(readingId);
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
   if (r2?.llm_json) { try { return JSON.parse(r2.llm_json); } catch {} }
@@ -1880,11 +1961,18 @@ bot.action('onboard_allspreads', async (ctx) => {
 });
 
 /* ---------- دریافت سؤال → فضاسازی → تنفس ---------- */
-async function handleQuestion(ctx, question) {
+async function handleQuestion(ctx, question, audio = null) {
   const uid = ctx.from.id;
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
   if (!spread) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
-  patchSession(uid, { question: question.slice(0, 1500) });
+  // هر دو فیلد **همیشه** با هم نوشته می‌شوند، حتی وقتی خالی‌اند. اگر فقط در شاخه‌ی ویس
+  // ست می‌شدند، سشن merge می‌شود و ویسِ فالِ قبلی به فالِ بعدیِ متنی می‌چسبید — یعنی مدل
+  // صدای یک سؤال را با متنِ سؤالِ دیگری می‌شنید. این تک‌نقطه جلوی آن را می‌گیرد.
+  patchSession(uid, {
+    question: question.slice(0, 1500),
+    questionAudio: audio?.id || '',
+    questionAudioFmt: audio?.fmt || '',
+  });
   setState(uid, 'breathing');
   track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
   await typing(ctx, PACE_S);
@@ -1989,18 +2077,14 @@ async function finishPicking(ctx, uid, s) {
   const user = getUser(uid);
   const cards = drawCards(s.seed, s.picks, spread.size);
   const readingId = Number(stmts.insertReading.run(
-    uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards)
+    uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards),
+    s.questionAudio || '', s.questionAudioFmt || ''
   ).lastInsertRowid);
   patchSession(uid, { readingId });
   track(db, uid, 'cards_picked', { spread: spread.id, reading_id: readingId });
 
-  // پیش‌فراخوانی LLM فقط وقتی کاربر توان پرداخت دارد (هزینه‌ی قبل از پرداخت = صفر برای کاربرِ بدون موجودی)
-  // + سقف روزانه ضد حلقه‌ی «انتخاب کن، لغو کن». در غیر این صورت فراخوانی موقع unlock انجام می‌شود.
-  const readingsToday = stmts.countReadingsToday.get(uid).c;
-  if (getBalance(uid) >= spread.price && readingsToday <= MAX_PREFETCH_PER_DAY) {
-    startPrefetch(uid, readingId);
-  }
-
+  // ⚠️ اینجا عمداً هیچ فراخوانیِ LLM نیست. پیامِ بعدی پی‌وال است و کاربر هنوز تصمیم نگرفته
+  // (بند ۹ ریشه، قاعده‌ی هزینه). خوانش فقط بعد از کسرِ اعتبار در `unlock:` شروع می‌شود.
   await typing(ctx, PACE_M);
   if (spread.size > s.picks.length) await ctx.reply(L.reading.extraCardsNote(spread.size - s.picks.length));
 
@@ -2029,7 +2113,6 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const readingId = parseInt(ctx.match[1], 10);
   const r = stmts.getReading.get(readingId);
   if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', readingId);
-  prefetches.delete(uid);
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -2053,7 +2136,6 @@ bot.action('nav:menu', async (ctx) => {
     const r = stmts.getReading.get(s.readingId);
     if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
   }
-  prefetches.delete(uid);
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -2075,7 +2157,6 @@ bot.action('reading:cancel', async (ctx) => {
     const r = stmts.getReading.get(s.readingId);
     if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
   }
-  prefetches.delete(uid);
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -3222,21 +3303,17 @@ bot.on(['voice', 'audio'], async (ctx) => {
   if (getState(uid) !== 'await_question') return;
   try {
     const media = ctx.message.voice || ctx.message.audio;
-    // سقف طول/حجم — رونویسی قبل از پرداخت انجام می‌شود و نباید هزینه‌ی بی‌سقف بسازد
+    // سقف طول/حجم: خودِ فایل به مدل می‌رود، پس این سقف مستقیماً سقفِ توکنِ ورودی است.
     if ((media.duration && media.duration > MAX_VOICE_SEC) || (media.file_size && media.file_size > MAX_VOICE_BYTES)) {
       return ctx.reply(L.errors.voiceTooLong(MAX_VOICE_SEC));
     }
-    await typing(ctx, PACE_S);
-    const link = await ctx.telegram.getFileLink(media.file_id);
-    const res = await fetch(link.href);
-    const buf = Buffer.from(await res.arrayBuffer());
+    // ⚠️ اینجا هیچ فراخوانیِ OpenRouter نیست (v3.4.0). قبلاً همین‌جا ویس رونویسی می‌شد،
+    // یعنی برای کاربری که هیچ‌وقت پرداخت نمی‌کرد هم هزینه می‌دادیم. حالا فقط ارجاعِ فایل
+    // نگه داشته می‌شود و خودِ فایل موقعِ خوانش (بعد از کسرِ اعتبار) به مدل داده می‌شود.
     const mime = media.mime_type || 'audio/ogg';
-    let txt = null;
-    for (let attempt = 0; attempt < 2 && !txt; attempt++) {
-      txt = await orTranscribe(buf, /wav/i.test(mime) ? 'wav' : 'mp3').catch(e => { logErr('transcribe:', e.message); return null; });
-    }
-    if (!txt?.trim()) return ctx.reply(L.errors.generic);
-    return await handleQuestion(ctx, txt.trim());
+    await typing(ctx, PACE_S);
+    // متنِ سؤال خالی می‌ماند؛ بعد از خوانش از `question_text` خودِ مدل پر می‌شود.
+    return await handleQuestion(ctx, '', { id: media.file_id, fmt: /wav/i.test(mime) ? 'wav' : 'mp3' });
   } catch (e) {
     logErr('voice handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
