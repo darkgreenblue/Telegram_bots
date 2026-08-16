@@ -147,7 +147,10 @@ const TEST_PHASE = false;
 // 3.5.0: 🔮 بازطراحیِ ساختارِ خوانش (v4، فقط ادمین) از روی تحلیلِ خوانش‌های واقعیِ
 //        انسانی + دو تحقیقِ مستقل: افشا = تیزرِ کوتاه، متنِ نهایی با **جواب** شروع
 //        می‌شود، و بازخورد به آخرِ کار رفت با مقیاسِ ۱ تا ۵ درباره‌ی **رضایت**.
-const PRODUCT_VERSION = '3.5.0';
+// 3.5.1: از تستِ میدانیِ سه فال: نقشه‌ی راه قبل از انتظار، کپشنِ ترتیبی (جا افتاده بود)،
+//        تیزرِ واقعیِ کارت (نام+تصویر+معنی)، ایموجیِ بخش‌بندی، و سه فیکسِ کیفی —
+//        نشتِ جمله‌ی نمونه، لغزشِ «شما»، و نبودِ حافظه/پنجره‌ی زمانی.
+const PRODUCT_VERSION = '3.5.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -235,6 +238,11 @@ const READING_TONE_V2_ADMIN_ONLY = false;
 const READING_V4 = true;
 const READING_V4_ADMIN_ONLY = true;
 const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isAdmin(uid));
+// نشانه‌ی ابتدای هر بخشِ متنِ نهایی. عمداً در **کد** است نه در پرامپت: مدل اگر آزاد
+// باشد هر بار سلیقه‌ای ایموجی می‌پاشد؛ این‌طوری ثابت، کم و قابلِ‌تغییر از یک نقطه است.
+// (خوانش‌های واقعیِ انسانی اصلاً ایموجی ندارند؛ این یک انتخابِ آگاهانه‌ی محصولی است تا
+// متنِ بلندِ تلگرام بخش‌بندیِ چشمی داشته باشد و دیوارِ متن نباشد.)
+const SECT = { headline: '🔮', callback: '🔁', pattern: '🧩', card: '🃏', absent: '🌿', closing: '🕯️' };
 
 // 🎙 سؤالِ صوتی مستقیم به مدل (v3.4.0): تا قبل از این، ویس **دو** فراخوانی می‌شد — یکی
 // رونویسی و یکی خوانش. حالا خودِ فایلِ صوتی کنارِ پرامپت به Gemini می‌رود و کلِ کار **یک**
@@ -2246,6 +2254,13 @@ async function waitLLMWithLoading(ctx, uid, readingId) {
 }
 
 async function startReveal(ctx, uid, readingId) {
+  // نقشه‌ی راه **قبل از** پیام‌های انتظار: کاربر تازه پول داده و باید یک بار بداند مسیر
+  // چیست (اول کارت‌ها دونه‌دونه، بعد جوابِ کامل). انتظارِ بدونِ نقشه طولانی‌تر حس می‌شود.
+  if (v4For(uid)) {
+    const rr = stmts.getReading.get(readingId);
+    const n = rr ? JSON.parse(rr.cards_json).length : 0;
+    if (n) await ctx.reply(L.reading.flowIntro(n));
+  }
   const llm = await waitLLMWithLoading(ctx, uid, readingId);
   const r = stmts.getReading.get(readingId);
   if (!llm) {
@@ -2305,7 +2320,11 @@ async function revealNext(ctx, uid, readingId) {
   patchSession(uid, { revealIdx: idx + 1 }); // قبل از await — دکمه‌ی تکراری دوباره همین کارت را نفرستد
 
   await typing(ctx, PACE_S, 'upload_photo');
-  await sendCardPhoto(ctx, card.key, L.reading.revealCaption(spread.positions[idx]?.fa || `کارت ${idx + 1}`, info, card.reversed));
+  // در v4 کپشن هم مثل متن، برچسبِ **ترتیبی** می‌گیرد نه نامِ جایگاه — وگرنه کاربر هم‌زمان
+  // «کارت قلب تو» و «کارت اولت» را می‌بیند و تناقض حس می‌کند.
+  await sendCardPhoto(ctx, card.key, v4For(uid)
+    ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
+    : L.reading.revealCaption(spread.positions[idx]?.fa || `کارت ${idx + 1}`, info, card.reversed));
   await sleep(PACE_REVEAL);
   await typing(ctx, PACE_S);
 
@@ -2516,20 +2535,25 @@ async function finishReading(ctx, uid, readingId) {
     // متنِ خام یعنی تلگرام هیچ نشانه‌گذاری‌ای را تفسیر نمی‌کند — پس نه escape لازم است
     // نه ریسکِ خرابیِ قالب. (replyLong هم extra را فقط به تکه‌ی آخر می‌دهد.)
     await typing(ctx, PACE_M);
-    if (llm.headline) await ctx.reply(String(llm.headline));
+    if (llm.headline) await ctx.reply(`${SECT.headline} ${String(llm.headline)}`);
 
+    // ایموجیِ ابتدای هر بخش از **کد** می‌آید نه از مدل: این‌طوری هم ثابت و بی‌لوس می‌ماند،
+    // هم قاعده‌ی «مدل ایموجی نگذارد» سرِ جایش می‌ماند (وگرنه مدل هر بار سلیقه‌ای می‌پاشد
+    // و همان چیزی می‌شود که مالک «لوس» می‌نامد).
     const body = [
-      llm.pattern,
+      llm.callback && `${SECT.callback} ${llm.callback}`,
+      llm.pattern && `${SECT.pattern} ${llm.pattern}`,
       ...(llm.reads || []).slice(0, cards.length).map((x, i) => {
         const t = String(x?.text || '').trim();
         if (!t) return '';
         // اگر مدل خودش با برچسبِ ترتیبی شروع کرده، دوباره اضافه نکن
-        return t.startsWith(labels[i]) || t.startsWith('کارت') ? t : `${labels[i]} ${t}`;
+        const line = t.startsWith(labels[i]) || t.startsWith('کارت') ? t : `${labels[i]} ${t}`;
+        return `${SECT.card} ${line}`;
       }),
-      llm.absent,
+      llm.absent && `${SECT.absent} ${llm.absent}`,
     ].filter((x) => x && String(x).trim()).join('\n\n');
     if (body) { await sleep(PACE_M); await replyLong(ctx, body); }
-    if (llm.closing) { await sleep(PACE_M); await replyLong(ctx, String(llm.closing)); }
+    if (llm.closing) { await sleep(PACE_M); await replyLong(ctx, `${SECT.closing} ${String(llm.closing)}`); }
   } else {
     // روایت پیوندی
     await typing(ctx, PACE_M);
