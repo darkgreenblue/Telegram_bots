@@ -29,7 +29,7 @@ import { registerSupport, supportRow } from '../../shared/support.js';
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
-import { normalizeVerdict, decisiveMode } from './verdict.js';
+import { normalizeVerdict, decisiveMode, headlineOk } from './verdict.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -144,7 +144,10 @@ const TEST_PHASE = false;
 // 3.4.0: 💸 قاعده‌ی هزینه: هیچ فراخوانیِ پولی قبل از کسرِ اعتبار. دو نشتی بسته شد
 //        (رونویسیِ ویس لحظه‌ی ارسال، و پیش‌فراخوانیِ خوانش قبل از پی‌وال). ضمناً سؤالِ
 //        صوتی حالا **یک** فراخوانی است: خودِ فایل کنارِ پرامپت به مدل می‌رود.
-const PRODUCT_VERSION = '3.4.0';
+// 3.5.0: 🔮 بازطراحیِ ساختارِ خوانش (v4، فقط ادمین) از روی تحلیلِ خوانش‌های واقعیِ
+//        انسانی + دو تحقیقِ مستقل: افشا = تیزرِ کوتاه، متنِ نهایی با **جواب** شروع
+//        می‌شود، و بازخورد به آخرِ کار رفت با مقیاسِ ۱ تا ۵ درباره‌ی **رضایت**.
+const PRODUCT_VERSION = '3.5.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -220,6 +223,18 @@ const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 // مسیرِ باریک‌کردن هم یک‌خطی بماند (همان دو-پرچمِ بند ۲ج-۲).
 const READING_TONE_V2 = true;
 const READING_TONE_V2_ADMIN_ONLY = false;
+
+// 🔮 ساختارِ خوانشِ v4 (v3.5.0) — بازطراحیِ کاملِ شکلِ خروجی بر اساسِ تحلیلِ خوانش‌های
+// واقعیِ انسانی + دو تحقیقِ مستقل. جزئیات و وزنِ منابع در bots/tarot/STYLE.md.
+// سه تغییرِ ساختاری:
+//   ۱) افشا = تیزرِ کوتاه per کارت (چند کلمه، درباره‌ی خودِ کارت) تا تعلیق حفظ شود
+//   ۲) متنِ نهایی با **سرخطِ جواب** شروع می‌شود، نه با روایت
+//   ۳) بازخورد از وسطِ خوانش به آخرِ کار منتقل شد و مقیاسِ ۱ تا ۵ گرفت
+// ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `READING_V4_ADMIN_ONLY = false` در یک PR جدا.
+// Rollback: `READING_V4 = false` → دقیقاً به خوانشِ v3 برمی‌گردد (پرامپت، افشا، بازخورد).
+const READING_V4 = true;
+const READING_V4_ADMIN_ONLY = true;
+const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isAdmin(uid));
 
 // 🎙 سؤالِ صوتی مستقیم به مدل (v3.4.0): تا قبل از این، ویس **دو** فراخوانی می‌شد — یکی
 // رونویسی و یکی خوانش. حالا خودِ فایلِ صوتی کنارِ پرامپت به Gemini می‌رود و کلِ کار **یک**
@@ -1122,10 +1137,16 @@ async function callReadingLLM(readingId) {
   const toneV2 = toneV2For(r.user_id);
   // در نسخه‌ی دومِ لحن **هر** فال جواب می‌دهد (حالتِ direct برای فال‌های تفسیری)، نه فقط
   // فال‌های تصمیم‌محور. پرچمِ DECISIVE_VERDICT_ENABLED همچنان کلیدِ خاموشیِ کلِ این بخش است.
-  const wantVerdict = DECISIVE_VERDICT_ENABLED ? decisiveMode(spread, toneV2) : null;
-  const system = toneV2
-    ? L.prompts.readerSystemV2(spread, wantVerdict)
-    : L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
+  const v4 = v4For(r.user_id);
+  // در v4 سرخط جای verdict را می‌گیرد: هر خوانش یک جوابِ صریح دارد و اعتبارسنجی‌اش
+  // (`headlineOk`) همان قانونِ نشکستنی است — جوابِ بی‌جهت نمایش داده نمی‌شود.
+  const wantVerdict = v4 ? null : (DECISIVE_VERDICT_ENABLED ? decisiveMode(spread, toneV2) : null);
+  const labels = L.prompts.cardLabels(cards.length);
+  const system = v4
+    ? L.prompts.readerSystemV4(spread, labels)
+    : toneV2
+      ? L.prompts.readerSystemV2(spread, wantVerdict)
+      : L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
   // وقتی صدا همراه است، سؤال از خودِ فایل شنیده می‌شود؛ یک بلوکِ کوتاه به پرامپت اضافه
   // می‌شود که می‌گوید صدا **داده است نه دستور** (گاردِ prompt-injection، بند ۹ ریشه) و
   // متنِ سؤال را در `question_text` برگردان تا رکوردِ فال بدونِ فراخوانیِ دوم کامل شود.
@@ -1147,6 +1168,18 @@ async function callReadingLLM(readingId) {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
+      if (v4) {
+        // ساختارِ v4: تیزرِ هر کارت + سرخط + الگو + خوانشِ هر کارت + جمع‌بندی
+        const shaped = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length
+          && Array.isArray(obj.reads) && obj.reads.length >= cards.length
+          && obj.closing && obj.pattern;
+        if (!shaped) return false;
+        // سرخطِ بی‌جهت یا بدونِ «ولی» پذیرفته نمی‌شود؛ ولی مثل verdict، شکستِ نهاییِ آن
+        // هرگز به ریفاند نمی‌رسد — آخرین خروجیِ سالم بدونِ سرخط تحویل می‌شود.
+        if (!headlineOk(obj.headline)) { fallback = obj; return false; }
+        parsed = obj;
+        return true;
+      }
       const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
       if (!usable) return false;
       if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: spread?.choiceLabels })) { fallback = obj; return false; }
@@ -2276,10 +2309,15 @@ async function revealNext(ctx, uid, readingId) {
   await sleep(PACE_REVEAL);
   await typing(ctx, PACE_S);
 
-  const interp = llm.cards[idx]?.text || '';
+  // v4: در مرحله‌ی افشا فقط یک تیزرِ کوتاه درباره‌ی خودِ کارت می‌آید تا تعلیق حفظ شود و
+  // کاربر در ساختنِ روایت همراه شود. تحلیلِ کامل و جواب، در متنِ نهایی می‌آید.
+  const v4 = v4For(uid);
+  const interp = (v4 ? llm.cards[idx]?.teaser : llm.cards[idx]?.text) || '';
   const isLast = idx === cards.length - 1;
   const midIdx = Math.floor((cards.length - 1) / 2);
-  const askFeedback = idx === midIdx && !s.fbDone && llm.confirmation_question;
+  // v4: هیچ بازخوردی وسطِ خوانش گرفته نمی‌شود (تعلیق را می‌شکست و چیزی را می‌سنجید که
+  // هنوز تمام نشده بود). بازخورد به آخرِ کار منتقل شده — پایینِ finishReading.
+  const askFeedback = !v4 && idx === midIdx && !s.fbDone && llm.confirmation_question;
 
   if (askFeedback) {
     await ctx.reply(esc(interp), { parse_mode: 'HTML' });
@@ -2469,13 +2507,38 @@ async function finishReading(ctx, uid, readingId) {
   const llm = JSON.parse(r.llm_json);
   const cards = JSON.parse(r.cards_json);
 
-  // روایت پیوندی
-  await typing(ctx, PACE_M);
-  await replyLong(ctx, `🧵 ${llm.narrative}`);
+  if (v4For(uid)) {
+    // ── متنِ نهایی v4: جواب اول، بعد دلیل ──────────────────────────────────
+    // ترتیب عمدی است: کاربر تازه پول داده و اولین چیزی که می‌بیند جوابِ سؤالش است،
+    // بعد الگو و کارت‌به‌کارت که «چرا»ی همان جواب‌اند، و آخر جمع‌بندی با «ولی» بازشده.
+    const labels = L.prompts.cardLabels(cards.length);
+    // بدونِ parse_mode: خروجیِ v4 عمداً هیچ قالب‌بندی‌ای ندارد (نه بولد، نه تیتر)، و
+    // متنِ خام یعنی تلگرام هیچ نشانه‌گذاری‌ای را تفسیر نمی‌کند — پس نه escape لازم است
+    // نه ریسکِ خرابیِ قالب. (replyLong هم extra را فقط به تکه‌ی آخر می‌دهد.)
+    await typing(ctx, PACE_M);
+    if (llm.headline) await ctx.reply(String(llm.headline));
 
-  // جوابِ قاطعِ فال‌های تصمیم‌محور — بعد از روایت (روایت پرونده را می‌سازد، این حکم را
-  // می‌دهد) و قبل از قدم‌های عملی. پیامِ جدا تا گم نشود؛ همان چیزی که کاربر گفت کم بود.
-  await sendVerdict(ctx, llm, SPREAD_BY_ID[r.type]);
+    const body = [
+      llm.pattern,
+      ...(llm.reads || []).slice(0, cards.length).map((x, i) => {
+        const t = String(x?.text || '').trim();
+        if (!t) return '';
+        // اگر مدل خودش با برچسبِ ترتیبی شروع کرده، دوباره اضافه نکن
+        return t.startsWith(labels[i]) || t.startsWith('کارت') ? t : `${labels[i]} ${t}`;
+      }),
+      llm.absent,
+    ].filter((x) => x && String(x).trim()).join('\n\n');
+    if (body) { await sleep(PACE_M); await replyLong(ctx, body); }
+    if (llm.closing) { await sleep(PACE_M); await replyLong(ctx, String(llm.closing)); }
+  } else {
+    // روایت پیوندی
+    await typing(ctx, PACE_M);
+    await replyLong(ctx, `🧵 ${llm.narrative}`);
+
+    // جوابِ قاطعِ فال‌های تصمیم‌محور — بعد از روایت (روایت پرونده را می‌سازد، این حکم را
+    // می‌دهد) و قبل از قدم‌های عملی. پیامِ جدا تا گم نشود؛ همان چیزی که کاربر گفت کم بود.
+    await sendVerdict(ctx, llm, SPREAD_BY_ID[r.type]);
+  }
 
   // «سه قدم عملی» در لحنِ جدید حذف شد (تصمیمِ مالک): تاروت‌خوانِ واقعی لیستِ کار نمی‌دهد،
   // و این بخش خوانش را به لحنِ کوچینگ می‌برد — دقیقاً همان چیزی که قرار بود از آن دور شویم.
@@ -2546,8 +2609,34 @@ async function finishReading(ctx, uid, readingId) {
   ]));
   await ensureMenu(ctx, uid);
 
-
+  // v4: بازخورد در **آخرِ آخر**، بعد از تمام‌شدنِ کامل خوانش. مقیاسِ ۱ تا ۵ و سؤال درباره‌ی
+  // **رضایت** است نه انطباق با واقعیت: چیزی که می‌خواهیم بدانیم این است که کاربر راضی
+  // بیرون رفت یا نه، چون همان است که تعیین می‌کند برمی‌گردد یا نه.
+  // بدونِ state: دکمه‌ها readingId را حمل می‌کنند، پس فلوی بعدیِ کاربر بلاک نمی‌شود.
+  if (v4For(uid)) {
+    await sleep(PACE_M);
+    await ctx.reply(L.reading.rateAsk, Markup.inlineKeyboard([
+      [1, 2, 3, 4, 5].map((n) => Markup.button.callback(L.buttons.rate(n), `fbr:${n}:${readingId}`)),
+    ]));
+  }
 }
+
+// بازخوردِ ۱ تا ۵ (v4). گاردها: مالکیتِ رکورد، و ثبتِ یک‌باره تا دوبار-تپ دو رویداد نسازد.
+bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery('🙏').catch(() => {});
+  const score = parseInt(ctx.match[1], 10);
+  const readingId = parseInt(ctx.match[2], 10);
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid) return;
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  if (r.feedback) return; // قبلاً ثبت شده
+  // مقدار با پیشوندِ `rate:` ذخیره می‌شود تا از مقادیرِ قدیمیِ yes/some/no قابلِ تفکیک
+  // بماند و تحلیلِ تاریخی نشکند (بند ۲ج/۳: فقط اضافه کن، معنیِ داده‌ی قبلی را عوض نکن).
+  stmts.setReadingFeedback.run(`rate:${score}`, readingId);
+  track(db, uid, EVENTS.FEEDBACK, { reading_id: readingId, score, scale: 5 });
+  await ctx.reply(L.reading.rateThanks).catch(() => {});
+});
 
 /* ---------- کیف پول و شارژ (کارت‌به‌کارت + تأیید ادمین) ---------- */
 async function showWallet(ctx) {

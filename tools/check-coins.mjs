@@ -194,7 +194,10 @@ console.log('\n▶ نسخه‌ی دومِ لحن: هر فال باید جواب 
 
 console.log('\n▶ قواعدِ کپیِ پرامپتِ جدید (منبع: bots/tarot/STYLE.md)');
 {
-  const p = LOC.slice(LOC.indexOf('readerSystemV2'), LOC.indexOf('readerSystem: (spread)'));
+  // مرزِ برش تا **شروعِ پرامپتِ v4** است، نه تا readerSystem قدیمی: از v3.5.0 پرامپتِ v4
+  // بینِ این دو نشسته و اگر مرز اصلاح نشود، اندازه و قواعدِ v4 به حسابِ v2 گذاشته می‌شود.
+  // هر پرامپت سقف و قواعدِ خودش را دارد (سقفِ v4 در tools/check-reading-v4.mjs).
+  const p = LOC.slice(LOC.indexOf('readerSystemV2'), LOC.indexOf('readerSystemV4'));
   ok(p.length > 800, 'پرامپتِ نسخه‌ی دوم پیدا شد');
 
   // ⚠️ سقفِ اندازه: پرامپتِ متورم روی Gemini Flash هم گران است هم کیفیت را پایین می‌آورد
