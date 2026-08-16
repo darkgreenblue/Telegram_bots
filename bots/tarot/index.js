@@ -150,7 +150,10 @@ const TEST_PHASE = false;
 // 3.5.1: از تستِ میدانیِ سه فال: نقشه‌ی راه قبل از انتظار، کپشنِ ترتیبی (جا افتاده بود)،
 //        تیزرِ واقعیِ کارت (نام+تصویر+معنی)، ایموجیِ بخش‌بندی، و سه فیکسِ کیفی —
 //        نشتِ جمله‌ی نمونه، لغزشِ «شما»، و نبودِ حافظه/پنجره‌ی زمانی.
-const PRODUCT_VERSION = '3.5.1';
+// 3.5.2: از دورِ دومِ تست — شماره‌گذاریِ ترتیبیِ کارت‌ها، دکمه‌ی «حالا جوابم رو بگو»
+//        زیرِ کارتِ آخر (جمع‌بندی دیگر خودکار نمی‌آید)، فشرده‌سازیِ چیدمانِ بزرگ، و دو
+//        باگ: تکرارِ برچسب و نشتِ دومِ مثالِ پرامپت در فیلدِ callback.
+const PRODUCT_VERSION = '3.5.2';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2350,12 +2353,20 @@ async function revealNext(ctx, uid, readingId) {
     return;
   }
 
+  // v4: کارتِ آخر هم دکمه دارد. قبلاً بعد از آخرین تیزر، جمع‌بندی خودکار می‌آمد و کاربر
+  // ناگهان با دیوارِ متن روبه‌رو می‌شد؛ حالا خودش لحظه‌ی جواب را انتخاب می‌کند و همان
+  // انتخاب، اوجِ انتظار را می‌سازد.
+  const lastRow = v4
+    ? [[Markup.button.callback(L.buttons.finalAnswer, `final:${readingId}`)]]
+    : null;
   await ctx.reply(esc(interp), {
     parse_mode: 'HTML',
     // دکمه شماره‌ی کارتِ بعدی را حمل می‌کند تا دابل‌تاچ/دکمه‌ی کهنه هرگز کارت تکراری یا پرشی نفرستد
-    ...(isLast ? {} : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}:${idx + 1}`)]])),
+    ...(isLast
+      ? (lastRow ? Markup.inlineKeyboard(lastRow) : {})
+      : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}:${idx + 1}`)]])),
   });
-  if (isLast) await finishReading(ctx, uid, readingId);
+  if (isLast && !v4) await finishReading(ctx, uid, readingId);
 }
 
 bot.action(/^next:(\d+):(\d+)$/, async (ctx) => {
@@ -2367,6 +2378,22 @@ bot.action(/^next:(\d+):(\d+)$/, async (ctx) => {
   if (getState(uid) !== 'revealing' || s.readingId !== readingId || (s.revealIdx || 0) !== expectIdx) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await revealNext(ctx, uid, readingId);
+});
+
+// دکمه‌ی «حالا جوابم رو بگو» زیرِ کارتِ آخر (v4). گاردِ دوبار-تپ **سینکرون و قبل از اولین
+// await** است (الگوی `pick:`): بینِ شروعِ finishReading و لحظه‌ی delivered شدنِ رکورد چند
+// ثانیه await هست و بدونِ این قفل، دو تپِ پشت‌سرهم کلِ جمع‌بندی را دو بار می‌فرستاد.
+bot.action(/^final:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery('🔮').catch(() => {});
+  const readingId = parseInt(ctx.match[1], 10);
+  const s = getSession(uid);
+  if (s.readingId !== readingId || s.finalDone) return;
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid || r.status !== 'started') return;
+  patchSession(uid, { finalDone: true }); // قفل قبل از هر await
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await finishReading(ctx, uid, readingId);
 });
 
 /* ---------- حلقه‌ی بازخورد وسط خوانش ---------- */
@@ -2547,7 +2574,10 @@ async function finishReading(ctx, uid, readingId) {
         const t = String(x?.text || '').trim();
         if (!t) return '';
         // اگر مدل خودش با برچسبِ ترتیبی شروع کرده، دوباره اضافه نکن
-        const line = t.startsWith(labels[i]) || t.startsWith('کارت') ? t : `${labels[i]} ${t}`;
+        // برچسب فقط وقتی اضافه می‌شود که مدل خودش جایی در **ابتدای** جمله کارت را صدا
+        // نزده باشد. شرطِ قبلی فقط ابتدای رشته را می‌دید، پس جمله‌ای که با «اما کارتِ
+        // آخرت…» شروع می‌شد برچسب می‌گرفت و «کارت آخرت اما کارتِ آخرت» می‌شد (باگِ دیده‌شده).
+        const line = t.slice(0, 30).includes('کارت') ? t : `${labels[i]} ${t}`;
         return `${SECT.card} ${line}`;
       }),
       llm.absent && `${SECT.absent} ${llm.absent}`,
