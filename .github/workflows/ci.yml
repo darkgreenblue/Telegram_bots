@@ -106,6 +106,10 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs
 
+      - name: Reading v4 structure check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-reading-v4.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test
