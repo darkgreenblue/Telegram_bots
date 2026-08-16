@@ -156,7 +156,10 @@ const TEST_PHASE = false;
 // 3.5.3: انضباطِ ورودی و «هرچه کد می‌تواند تضمین کند، در پرامپت نیاید»: شماره‌گذاریِ
 //        کارت‌ها قطعی و از کد (strip+prefix)، پاک‌کردنِ خط تیره در کد، و قفلِ CI روی
 //        سقفِ بدترین‌حالتِ ورودیِ مدل.
-const PRODUCT_VERSION = '3.5.3';
+// 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
+//        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
+//        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
+const PRODUCT_VERSION = '3.5.4';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -274,6 +277,18 @@ function stripCardLabel(t) {
 // خط تیره‌ی بلند امضای متنِ ماشینی است (بند ۱۰ ریشه). پرامپت ممنوعش کرده، ولی این
 // شبکه‌ی ایمنیِ قطعی است: چیزی که کد می‌تواند تضمین کند نباید فقط به مدل سپرده شود.
 const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*--\s*/g, '، ');
+
+// فاصله‌ی زمانی به فارسیِ گفتاری، برای اینکه مدل مجبور نباشد زمانِ فالِ قبلی را حدس بزند.
+function agoFa(unixSec) {
+  const m = Math.max(0, Math.floor((Date.now() / 1000 - Number(unixSec || 0)) / 60));
+  if (m < 60) return m <= 1 ? 'همین چند دقیقه پیش' : `${m} دقیقه پیش`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ساعت پیش`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return d === 1 ? 'دیروز' : `${d} روز پیش`;
+  const mo = Math.floor(d / 30);
+  return mo < 12 ? `${mo} ماه پیش` : `${Math.floor(mo / 12)} سال پیش`;
+}
 
 // 🎙 سؤالِ صوتی مستقیم به مدل (v3.4.0): تا قبل از این، ویس **دو** فراخوانی می‌شد — یکی
 // رونویسی و یکی خوانش. حالا خودِ فایلِ صوتی کنارِ پرامپت به Gemini می‌رود و کلِ کار **یک**
@@ -1083,8 +1098,17 @@ async function resendCurrentStep(ctx, uid) {
 
 function buildReadingCtx(user, spread, question, cards, focusKey) {
   // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
+  // ⏱ فاصله‌ی زمانیِ هر خوانشِ قبلی **اجباری** است. باگِ واقعی (۱۴۰۵/۰۵/۲۶): مدل هیچ
+  // تاریخی از فال‌های قبلی نداشت، فقط `today` را داشت، پس وقتی می‌خواست به جلسه‌ی قبل
+  // ارجاع بدهد زمانش را از خودش ساخت و نوشت «پارسال» برای فالی که ۱۰ دقیقه قبل بود.
+  // این توهمِ محض نبود، کمبودِ داده بود؛ پس با **داده** حل می‌شود نه با دستور.
   const prev = stmts.lastDelivered.all(user.telegram_id, 4)
-    .map(r => ({ 'نوع فال': r.type, 'خلاصه': r.summary, 'بازخورد کاربر': r.feedback || '-' }));
+    .map(r => ({
+      'چه‌وقت': agoFa(r.created_at),
+      'نوع فال': r.type,
+      'خلاصه': r.summary,
+      'بازخورد کاربر': r.feedback || '-',
+    }));
   return {
     memory: user.memory_json || '',
     name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
@@ -2290,7 +2314,7 @@ async function startReveal(ctx, uid, readingId) {
   if (v4For(uid)) {
     const rr = stmts.getReading.get(readingId);
     const n = rr ? JSON.parse(rr.cards_json).length : 0;
-    if (n) await ctx.reply(L.reading.flowIntro(n));
+    if (n) await ctx.reply(L.reading.flowIntro());
   }
   const llm = await waitLLMWithLoading(ctx, uid, readingId);
   const r = stmts.getReading.get(readingId);
@@ -2595,21 +2619,22 @@ async function finishReading(ctx, uid, readingId) {
     // ایموجیِ ابتدای هر بخش از **کد** می‌آید نه از مدل: این‌طوری هم ثابت و بی‌لوس می‌ماند،
     // هم قاعده‌ی «مدل ایموجی نگذارد» سرِ جایش می‌ماند (وگرنه مدل هر بار سلیقه‌ای می‌پاشد
     // و همان چیزی می‌شود که مالک «لوس» می‌نامد).
+    // خوانشِ کارت‌ها **یک بلوکِ پیوسته** است، نه یک پاراگرافِ جدا با ایموجی per کارت.
+    // بازخوردِ مالک از دورِ سوم، و تطبیق با خوانشِ واقعیِ انسانی: آن‌جا کارت‌ها پشتِ سرِ
+    // هم و در یک تکه می‌آیند («کارت اولت می‌گه… کارت بعدیت می‌گه…»)؛ تیترِ ایموجی‌دار
+    // برای هر کارت متن را رباتی می‌کند. ایموجیِ بخش می‌ماند، ولی فقط **یک بار**.
+    const cardLines = (llm.reads || []).slice(0, cards.length).map((x, i) => {
+      const t = String(x?.text || '').trim();
+      if (!t) return '';
+      // شماره‌ی کارت **قطعی و از کد** می‌آید، نه از مدل: هر برچسبی که مدل خودش جلوی
+      // جمله گذاشته باشد اول برداشته می‌شود و بعد برچسبِ درست چسبانده می‌شود.
+      return `${labels[i]} ${noDash(stripCardLabel(t))}`;
+    }).filter(Boolean);
+
     const body = [
       llm.callback && `${SECT.callback} ${noDash(llm.callback)}`,
       llm.pattern && `${SECT.pattern} ${noDash(llm.pattern)}`,
-      ...(llm.reads || []).slice(0, cards.length).map((x, i) => {
-        const t = String(x?.text || '').trim();
-        if (!t) return '';
-        // اگر مدل خودش با برچسبِ ترتیبی شروع کرده، دوباره اضافه نکن
-        // شماره‌ی کارت **قطعی و از کد** می‌آید، نه از مدل: هر برچسبی که مدل خودش جلوی
-        // جمله گذاشته باشد اول برداشته می‌شود و بعد برچسبِ درست چسبانده می‌شود.
-        // چرا این‌طوری و نه با یک شرط: نسخه‌ی قبلی اگر «کارت» را در ۳۰ کاراکترِ اول
-        // می‌دید برچسب نمی‌زد، پس جمله‌ای مثل «این کارت می‌گه…» بی‌شماره می‌ماند و کاربر
-        // نمی‌فهمید کدام کارت است — یعنی فیکسِ باگِ تکرار، خودش یک باگِ جدید می‌ساخت.
-        const line = `${labels[i]} ${noDash(stripCardLabel(t))}`;
-        return `${SECT.card} ${line}`;
-      }),
+      cardLines.length ? `${SECT.card} ${cardLines.join('\n')}` : '',
       llm.absent && `${SECT.absent} ${noDash(llm.absent)}`,
     ].filter((x) => x && String(x).trim()).join('\n\n');
     if (body) { await sleep(PACE_M); await replyLong(ctx, body); }
