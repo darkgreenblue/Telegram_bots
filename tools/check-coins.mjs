@@ -21,16 +21,22 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 
 const COIN_VALUE = 10_000;
 
-console.log('▶ گاردِ «فقط ادمین» (تا وقتی مالک تست نکرده، هیچ کاربرِ واقعی نباید ببیند)');
+console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچر + دامنه، با یک helper)');
 {
-  for (const [flag, gate, helper] of [
-    ['READING_TONE_V2', 'READING_TONE_V2_ADMIN_ONLY', 'toneV2For'],
-    ['COIN_ECONOMY', 'COIN_ECONOMY_ADMIN_ONLY', 'coinsOn'],
+  // `expectAdminOnly` = دامنه‌ی فعلیِ هر فیچر. عوض‌کردنش اینجا **عمداً** لازم است: باز کردنِ
+  // یک فیچر برای همه باید یک تغییرِ آگاهانه در تست هم باشد، نه چیزی که بی‌صدا از کنارش رد شود.
+  for (const [flag, gate, helper, expectFlag, expectAdminOnly] of [
+    ['READING_TONE_V2', 'READING_TONE_V2_ADMIN_ONLY', 'toneV2For', true, false], // v3.3.0: برای همه باز شد
+    ['COIN_ECONOMY', 'COIN_ECONOMY_ADMIN_ONLY', 'coinsOn', false, true],         // پارک‌شده
   ]) {
-    ok(new RegExp(`const ${gate}\\s*=\\s*true`).test(SRC), `${gate} هنوز true است (فقط ادمین)`);
-    void flag;
+    ok(new RegExp(`const ${flag}\\s*=\\s*${expectFlag}`).test(SRC),
+      `${flag} === ${expectFlag} (${expectFlag ? 'روشن؛ رول‌بک = false کردنش' : 'پارک‌شده'})`);
+    ok(new RegExp(`const ${gate}\\s*=\\s*${expectAdminOnly}`).test(SRC),
+      `${gate} === ${expectAdminOnly} (${expectAdminOnly ? 'فقط ادمین' : 'باز برای همه'})`);
+    // شکلِ helper باید ثابت بماند: خاموش‌کردنِ پرچمِ اصلی همیشه همه را به رفتارِ قبلی
+    // برمی‌گرداند، حتی وقتی دامنه باز است (تنها مسیرِ رول‌بکِ یک‌خطی — بند ۲ج/۸).
     const re = new RegExp(`const ${helper}\\s*=\\s*\\(uid\\)\\s*=>\\s*${flag}\\s*&&\\s*\\(!${gate}\\s*\\|\\|\\s*isAdmin\\(uid\\)\\)`);
-    ok(re.test(SRC), `${helper} هم پرچمِ اصلی و هم گاردِ ادمین را با هم چک می‌کند`);
+    ok(re.test(SRC), `${helper} هم پرچمِ اصلی و هم گاردِ دامنه را با هم چک می‌کند`);
   }
   // هر تصمیمِ رو-به-کاربر باید از همین دو helper بیاید، نه از خودِ پرچمِ خام (وگرنه یک
   // مسیر گاردِ ادمین را جا می‌اندازد و کاربرِ واقعی وسطِ فلو سکه می‌بیند). کامنت‌ها را
