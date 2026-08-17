@@ -226,7 +226,9 @@ for (const persona of personas) {
     console.log('┄'.repeat(72));
 
     const { issues, notes, stats } = r.check;
+    const a = r.check.anchor || { loose: 0, total: 0, pct: 0, samples: [] };
     console.log(`\n   📏 ${stats.chars} کاراکتر | ${stats.perCard} کاراکتر per کارت | ${stats.named}/${stats.cards} کارت با نامِ خودش صدا زده شد`);
+    console.log(`   🎯 جمله‌ی بی‌لنگر: ${a.loose}/${a.total} (${a.pct}٪)` + (a.samples.length ? ` — نمونه: «${a.samples[0]}»` : ''));
     if (issues.length) { console.log('   ❌ ایرادها:'); issues.forEach(x => console.log(`      - ${x}`)); }
     else console.log('   ✅ همه‌ی سنجه‌های قطعی سبز');
     if (notes.length) { console.log('   ⚠️ نکته‌ها:'); notes.forEach(x => console.log(`      - ${x}`)); }
@@ -262,6 +264,11 @@ if (!DRY) {
   const tokIn = done.reduce((a, r) => a + r.usage.in, 0), tokOut = done.reduce((a, r) => a + r.usage.out, 0);
   const bad = done.filter(r => r.check.issues.length);
   console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${done.reduce((a, r) => a + (r.attempts - 1), 0)}`);
+  // متریکِ کیفیِ اصلی برای مقایسه‌ی دورها: چند درصد از جمله‌ها به هیچ چیزِ مخصوصِ
+  // همین فال گره نخورده‌اند. هرچه کمتر، خوانش شخصی‌تر و کمتر Barnum.
+  const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
+  const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
+  console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
   console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
   for (const r of done) {
     const n = r.check.issues.length;

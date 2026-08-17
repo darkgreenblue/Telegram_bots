@@ -36,6 +36,52 @@ export function modelText(llm) {
     .filter(Boolean).join('\n');
 }
 
+// ═══ سنجه‌ی «جمله‌ی بی‌لنگر» — ابزارِ اندازه‌گیریِ Barnum ═══
+//
+// چرا لازم شد: بقیه‌ی سنجه‌ها **وجود یا نبودِ** چیزی را می‌بینند و به سقفشان خورده‌اند.
+// هیچ‌کدام نمی‌تواند بگوید «این جمله عمومی است». جمله‌ای مثل «تواناییِ خلقِ چیزهای زیبا
+// رو داری» از همه‌ی چک‌ها رد می‌شود، ولی دقیقاً همان چیزی است که تحقیق ۱ دلیلِ شماره‌یکِ
+// رهاکردن می‌داند و تستِ کپیِ ما را رد می‌کند.
+//
+// ایده: هر جمله‌ی خوب باید به چیزی **مخصوصِ همین فال** گره خورده باشد. سه لنگرِ ممکن:
+//   ۱) نامِ یکی از کارت‌های کشیده‌شده
+//   ۲) کلمه‌ای محتوایی از سؤالِ خودِ کاربر
+//   ۳) چیزی از شناختِ قبلی (حافظه/خلاصه‌ی فال‌های قبل)
+// جمله‌ای که به هیچ‌کدام نخورد، جمله‌ای است که می‌شود عیناً برای هر کسِ دیگری فرستاد.
+// نرخش را می‌شماریم؛ عدد است، نه سلیقه.
+const STOP = new Set(['که','این','اون','برای','از','با','رو','به','تو','یه','یک','هم','هست',
+  'می','نمی','های','ها','در','و','یا','تا','چه','چی','ولی','اما','اگه','اگر','خیلی','بیشتر',
+  'الان','حالا','باید','شاید','همه','چون','وقتی','کنم','کنی','کنه','بشه','شده','بود','دارم',
+  'داری','داره','می‌کنم','می‌کنی','می‌شه','می‌تونی','خودت','خودم','بهش','براش','منم','نه','بله']);
+
+const contentWords = (s) => words(s).map(w => w.replace(/[،.؛:!؟«»()"']/g, ''))
+  .filter(w => w.length >= 4 && !STOP.has(w));
+
+// جمله‌های فارسی: نقطه، علامت سؤال، و خطِ جدید. «؛» و «،» جمله را نمی‌شکنند.
+const sentences = (t) => String(t || '').split(/[.!؟?\n]+/).map(x => x.trim()).filter(x => words(x).length >= 4);
+
+export function anchorScore({ llm, cards, ctx }) {
+  const cardNames = cards.map(c => CARD_BY_KEY[c.key].fa);
+  const qWords = new Set(contentWords(ctx.question));
+  const memWords = new Set([...contentWords(ctx.memory),
+    ...(ctx.previous || []).flatMap(p => contentWords(p['خلاصه']))]);
+
+  // فقط متنِ **تفسیری** سنجیده می‌شود. تیزرها عمداً بیرون‌اند: کارشان معرفیِ خودِ کارت
+  // است و طبیعتاً عمومی‌اند؛ انداختنشان در این شمارش عدد را بی‌معنی می‌کرد.
+  const body = [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
+    ...(llm.reads || []).map(readText)].filter(Boolean).join('\n');
+
+  const all = sentences(body);
+  const loose = all.filter((sent) => {
+    if (cardNames.some(n => sent.includes(n))) return false;
+    const w = contentWords(sent);
+    if (w.some(x => qWords.has(x))) return false;
+    if (w.some(x => memWords.has(x))) return false;
+    return true;
+  });
+  return { total: all.length, loose: loose.length, pct: all.length ? Math.round(loose.length * 100 / all.length) : 0, samples: loose.slice(0, 3) };
+}
+
 export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
   const issues = [], notes = [];
   const raw = modelText(llm);
@@ -109,6 +155,11 @@ export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
   const perCard = lines.length ? Math.round(block.length / lines.length) : 0;
   if (spread.size >= 6 && perCard > 220) issues.push(`هر کارت ${perCard} کاراکتر است (چیدمانِ بزرگ باید یک جمله باشد)`);
 
-  return { issues, notes, stats: { chars: full.length, perCard, named, cards: cards.length } };
+  // ۱۱) نرخِ جمله‌ی بی‌لنگر (Barnum). عمداً «ایراد» نیست، **عدد** است: آستانه‌اش را هنوز
+  // نمی‌دانیم و تا وقتی چند دور اندازه نگرفته‌ایم، قرمزکردنش حدس است نه سنجش.
+  const anchor = anchorScore({ llm, cards, ctx });
+  if (anchor.pct >= 50) notes.push(`نیمی از جمله‌ها بی‌لنگرند (${anchor.loose}/${anchor.total})`);
+
+  return { issues, notes, anchor, stats: { chars: full.length, perCard, named, cards: cards.length } };
 }
 
