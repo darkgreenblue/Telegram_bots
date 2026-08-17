@@ -174,17 +174,13 @@ export function stripCardLabel(t) {
 // شبکه‌ی ایمنیِ قطعی است: چیزی که کد می‌تواند تضمین کند نباید فقط به مدل سپرده شود.
 export const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*--\s*/g, '، ');
 
-// فاصله‌ی زمانی به فارسیِ گفتاری، برای اینکه مدل مجبور نباشد زمانِ فالِ قبلی را حدس بزند.
-export function agoFa(unixSec, nowSec = Date.now() / 1000) {
-  const m = Math.max(0, Math.floor((nowSec - Number(unixSec || 0)) / 60));
-  if (m < 60) return m <= 1 ? 'همین چند دقیقه پیش' : `${m} دقیقه پیش`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ساعت پیش`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return d === 1 ? 'دیروز' : `${d} روز پیش`;
-  const mo = Math.floor(d / 30);
-  return mo < 12 ? `${mo} ماه پیش` : `${Math.floor(mo / 12)} سال پیش`;
-}
+// ⏱ `agoFa` (فاصله‌ی زمانی به فارسیِ گفتاری) حذف شد. تاریخچه‌ی کوتاهش درس دارد:
+// اول مدل زمانِ فال‌های قبلی را از خودش می‌ساخت («پارسال» برای فالی که ۱۰ دقیقه قبل
+// بود)، پس داده‌ی دقیق اضافه کردیم؛ بعد مدل همان داده را هم نادیده گرفت و «هفته‌های
+// قبل» نوشت، پس قاعده‌ی پرامپت اضافه کردیم؛ بعد قاعده را سراسری کردیم. سه لایه وصله
+// روی چیزی که **اصلاً لازم نبود**: کاربر در بخشِ یادآوری نمی‌خواهد بداند فالِ قبلی کِی
+// بوده، می‌خواهد بداند یادش هست چه پرسیده. پس خودِ داده حذف شد و مسئله از بین رفت.
+// (بازه‌ی زمانیِ **آینده** در جمع‌بندی سرِ جایش است؛ آن‌جا واقعاً ارزش دارد.)
 
 export const tehranToday = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(d);
@@ -198,7 +194,7 @@ export const tehranToday = (d = new Date()) =>
 //
 // همه‌ی وابستگی‌های بیرونی (رکوردهای قبلی از DB، نامِ نمایشی، پرچمِ دانشِ کارت) پارامترند
 // تا این تابع خالص بماند و آزمایشگاه بتواند بدونِ دیتابیس همان ورودی را بسازد.
-export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '', now }) {
+export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '' }) {
   return {
     memory: user.memory_json || '',
     name, // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
@@ -217,8 +213,8 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
       // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.
       kb: (kbOn && CARD_KB[c.key]) || undefined,
     })),
+    // بدونِ هیچ فیلدِ زمانی: مرتب‌شده از تازه‌ترین، و همین کافی است.
     previous: prev.map(r => ({
-      'چه‌وقت': agoFa(r.created_at, now),
       'نوع فال': r.type,
       'خلاصه': r.summary,
       'بازخورد کاربر': r.feedback || '-',
