@@ -22,6 +22,15 @@ on:
         type: boolean
         required: false
         default: false
+      probe:
+        description: 'اندازه‌گیریِ نرخِ خرابیِ شکلِ خروجی per چیدمان (به‌جای اجرای سناریوها)'
+        type: boolean
+        required: false
+        default: false
+      reps:
+        description: 'تعدادِ تکرارِ هر چیدمان در حالتِ probe'
+        required: false
+        default: '5'
 
 concurrency:
   group: reading-lab
@@ -55,10 +64,15 @@ jobs:
           ARGS=""
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ "${{ inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
-          node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
+          if [ "${{ inputs.probe }}" = "true" ]; then
+            node tools/reading-lab.mjs --probe --reps "${{ inputs.reps }}"
+          else
+            node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
+          fi
 
+      # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
-        if: always()
+        if: always() && inputs.probe != true
         uses: actions/upload-artifact@v4
         with:
           name: reading-lab

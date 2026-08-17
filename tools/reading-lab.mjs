@@ -24,10 +24,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 import { headlineOk } from '../bots/tarot/verdict.js';
 import {
-  drawCards, buildReadingCtx, renderV4, checkV4Shape,
-  orChatResilient, parseJsonLoose, agoFa,
+  drawCards, buildReadingCtx, renderV4, checkV4Shape, readText,
+  orChat, orChatResilient, parseJsonLoose,
 } from '../bots/tarot/reading-core.js';
 
 const L = (await import('../bots/tarot/locales/fa.js')).default;
@@ -52,8 +53,13 @@ const FORMAL = /(^|[\s،.؛:!؟(])(شما|شمارو|بفرمایید|بفرما
 // عبارت‌هایی که پرامپت صریحاً ممنوعشان کرده (جمله‌ی بی‌جهت)
 const BANNED = ['بستگی به خودت داره', 'بستگی داره', 'به شهودت اعتماد کن', 'کائنات',
   'شاید آره شاید نه', 'هم این باشه هم اون', 'فقط خودت می‌دونی'];
-// زمانی که مدل نباید از خودش بسازد. فقط وقتی خطاست که در دیتای واقعیِ همان فال نباشد.
-const TIME_WORDS = ['پارسال', 'سال پیش', 'ماه پیش', 'هفته پیش', 'چند وقت پیش', 'سال گذشته', 'ماه گذشته'];
+// اشاره‌ی زمانی به **گذشته** ممنوعِ مطلق است. تاریخچه‌ی این تصمیم مهم است: اول داده‌ی
+// دقیقِ زمان به مدل دادیم، بعد قاعده‌ی پرامپت، بعد قاعده‌ی سراسری — و هر بار مدل یک
+// راهِ تازه برای ساختنِ زمان پیدا کرد. حالا خودِ داده حذف شده و قاعده یک‌خطی است، پس
+// این سنجه هم دیگر لازم نیست چیزی را با «زمانِ واقعی» مقایسه کند: هر واژه‌ی زمانِ
+// گذشته در متن = ایراد. (بازه‌ی آینده مثل «تا آخر این فصل» عمداً در لیست نیست.)
+const PAST_TIME = /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پیش|ماهِ? ?(پیش|گذشته)|ماه‌ها پیش|ماه‌های قبل|هفتهٔ? ?(پیش|گذشته)|هفته‌ی (پیش|گذشته)|هفته‌ها پیش|هفته‌های قبل|روزهای قبل|چند وقت پیش|دفعه‌ی قبل که|بارِ? قبل که)/;
+
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
 
 const words = (s) => String(s || '').replace(/[‌]/g, ' ').split(/\s+/).filter(Boolean);
@@ -62,7 +68,7 @@ const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; i + n <
 // متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
 function modelText(llm) {
   return [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
-    ...(llm.reads || []).map(r => r?.text), ...(llm.cards || []).map(c => c?.teaser)]
+    ...(llm.reads || []).map(readText), ...(llm.cards || []).map(c => c?.teaser)]
     .filter(Boolean).join('\n');
 }
 
@@ -104,13 +110,9 @@ function checkReading({ llm, rendered, spread, cards, ctx, step }) {
   const em = raw.match(EMOJI);
   if (em) notes.push(`مدل ایموجی گذاشت: ${em[0]}`);
 
-  // ۷) ارجاعِ زمانی: فقط زمانی مجاز است که در دیتای واقعیِ همان فال باشد
-  const realTimes = (ctx.previous || []).map(p => p['چه‌وقت']);
-  for (const t of TIME_WORDS) {
-    if (raw.includes(t) && !realTimes.some(rt => rt.includes(t))) {
-      issues.push(`زمانِ ساختگی: «${t}» (زمان‌های واقعی: ${realTimes.join(' / ') || 'هیچ'})`);
-    }
-  }
+  // ۷) هیچ اشاره‌ی زمانیِ گذشته‌ای مجاز نیست (داده‌اش را اصلاً به مدل نمی‌دهیم)
+  const pt = raw.match(PAST_TIME);
+  if (pt) issues.push(`اشاره‌ی زمانی به گذشته: «${pt[0]}»`);
   // و اگر شناختِ قبلی هست، ارجاع باید وجود داشته باشد
   if ((ctx.previous || []).length && !String(llm.callback || '').trim())
     notes.push('شناختِ قبلی وجود داشت ولی هیچ ارجاعی به جلسه‌ی قبل نداد');
@@ -120,13 +122,17 @@ function checkReading({ llm, rendered, spread, cards, ctx, step }) {
   // ۸) تکرارِ تیزر در خوانشِ همان کارت (پرامپت: حرفی که در معرفی زدی را تکرار نکن)
   (llm.reads || []).forEach((r, i) => {
     const a = new Set(ngrams(llm.cards?.[i]?.teaser, 4));
-    const dup = ngrams(r?.text, 4).filter(g => a.has(g));
+    const dup = ngrams(readText(r), 4).filter(g => a.has(g));
     if (dup.length) notes.push(`خوانشِ کارت ${i + 1} تیزر را تکرار کرد: «${dup[0]}»`);
   });
 
-  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»)
-  const named = cards.filter(c => full.includes(c.fa)).length;
+  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»).
+  // ⚠️ نامِ فارسیِ کارت روی `CARD_BY_KEY` است نه روی خروجیِ `drawCards` (که فقط
+  // key و reversed دارد). نسخه‌ی اول `c.fa` را می‌خواند و همیشه undefined می‌گرفت،
+  // پس این ادعا روی **هر ۹ فال** به‌غلط قرمز شد در حالی که لنگر درست کار می‌کرد.
+  const named = cards.filter(c => full.includes(CARD_BY_KEY[c.key].fa)).length;
   if (named === 0) issues.push('هیچ کارتی در متن با نامِ خودش صدا زده نشد');
+  else if (named < Math.min(2, cards.length)) notes.push(`فقط ${named} کارت با نامِ خودش صدا زده شد`);
 
   // ۱۰) اندازه: چیدمانِ بزرگ نباید دیوارِ متن بسازد
   const perCard = lines.length ? Math.round(block.length / lines.length) : 0;
@@ -151,7 +157,6 @@ async function runStep(persona, step, i, state) {
     name: persona.name,
     kbOn: true,                 // لحنِ جدید برای همه روشن است (toneV2)
     prev: state.prev.slice(0, 4),
-    now: state.nowSec,
   });
 
   const labels = L.prompts.cardLabels(cards.length);
@@ -192,6 +197,83 @@ async function runStep(persona, step, i, state) {
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
     }), { in: 0, out: 0 }),
   };
+}
+
+/* ═══════════════ حالتِ probe: «چقدر متداول است و روی کدام فال؟» ═══════════════ */
+// چرا لازم شد: اولین اجرا نشان داد در ۲ فال از ۹ بلوکِ کارت‌ها غایب می‌شود. سؤالِ درستِ
+// بعدی «چطور وصله‌اش کنیم» نیست، «چند وقت یک‌بار و روی کدام چیدمان» است. بدونِ این عدد
+// نمی‌شود تصمیم گرفت که آیا ارزشِ دو-ریکوئستی‌کردنِ چیدمانِ بزرگ را دارد یا نه.
+//
+// ⚠️ عمداً `orChat` را **خام** صدا می‌زند نه `orChatResilient`: رتراییِ خودکار دقیقاً همان
+// چیزی را پنهان می‌کند که می‌خواهیم بشماریم. هر نمونه = یک تلاشِ اول، مثل چیزی که
+// کاربر در بهترین حالت می‌گیرد.
+const SHAPE = (obj, n) => {
+  if (!obj) return 'JSON خراب';
+  if (!Array.isArray(obj.reads)) return 'reads نیست';
+  if (obj.reads.length < n) return `reads کوتاه (${obj.reads.length}/${n})`;
+  const sample = obj.reads.slice(0, n);
+  const withText = sample.filter(r => r && typeof r === 'object' && String(r.text || '').trim()).length;
+  const strings = sample.filter(r => typeof r === 'string' && r.trim()).length;
+  if (withText === n) return 'سالم: [{text}]';
+  if (strings === n) return 'آرایه‌ی رشته';
+  if (withText + strings === 0) return '🔴 همه خالی';
+  return `مخلوط (${withText} شیء + ${strings} رشته)`;
+};
+
+async function probe(reps) {
+  // چهار اندازه‌ی مختلف تا معلوم شود مسئله مالِ صلیب سلتی است یا سراسری
+  const targets = ['yesno', 'three', 'open5', 'celtic'];
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log(`🔬 probe — هر چیدمان ${reps} بار، تلاشِ اول، بدونِ retry`);
+  console.log('═'.repeat(72));
+  const rows = [];
+  for (const id of targets) {
+    const spread = SPREAD_BY_ID[id];
+    const tally = {}; let okShape = 0, okHeadline = 0, outTok = 0, trunc = 0;
+    for (let k = 0; k < reps; k++) {
+      const cards = drawCards(`probe:${id}:${k}`, [k % 24, (k + 7) % 24, (k + 13) % 24], spread.size);
+      const ctx = buildReadingCtx({
+        user: { telegram_id: 1, memory_json: '', focus_area: spread.focus || 'question' },
+        spread, question: 'این روزها حس می‌کنم سرِ یه دوراهیِ مهمم و نمی‌دونم کدوم طرف برم.',
+        cards, focusKey: spread.focus || 'question', L, name: 'آرش', kbOn: true, prev: [],
+      });
+      const labels = L.prompts.cardLabels(cards.length);
+      let out = null, usage = {};
+      try {
+        const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
+          { maxTokens: spread.maxTokens });
+        out = r.text; usage = r.usage || {};
+      } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
+      const obj = parseJsonLoose(out);
+      const shape = SHAPE(obj, spread.size);
+      tally[shape] = (tally[shape] || 0) + 1;
+      if (checkV4Shape(obj, spread.size)) okShape++;
+      if (obj && headlineOk(obj.headline)) okHeadline++;
+      outTok += usage.completion_tokens || 0;
+      // بریدگیِ خروجی: اگر به سقفِ توکن خورده باشیم مسئله «شکلِ خروجی» نیست، «جا نشدن» است
+      if ((usage.completion_tokens || 0) >= spread.maxTokens - 40) trunc++;
+    }
+    rows.push({ id, fa: spread.fa, size: spread.size, okShape, okHeadline, reps, tally,
+      avgOut: Math.round(outTok / reps), max: spread.maxTokens, trunc });
+  }
+  console.log('\nچیدمان            کارت  شکلِ سالم  سرخطِ سالم  میانگینِ توکنِ خروجی (سقف)  بریدگی');
+  for (const r of rows) {
+    console.log(`${r.fa.padEnd(20)}${String(r.size).padEnd(6)}${`${r.okShape}/${r.reps}`.padEnd(11)}`
+      + `${`${r.okHeadline}/${r.reps}`.padEnd(12)}${`${r.avgOut} (${r.max})`.padEnd(27)}${r.trunc}/${r.reps}`);
+  }
+  console.log('\nتوزیعِ شکلِ `reads`:');
+  for (const r of rows) {
+    const parts = Object.entries(r.tally).map(([k, v]) => `${k} ×${v}`).join('  |  ');
+    console.log(`   ${r.fa}: ${parts}`);
+  }
+  const bad = rows.filter(r => r.okShape < r.reps);
+  console.log(`\nحکم: ${bad.length ? bad.map(r => `${r.fa} (${r.reps - r.okShape} از ${r.reps} خراب)`).join('، ') : 'هیچ چیدمانی خرابی نداشت'}`);
+  return rows;
+}
+
+if (flag('probe')) {
+  await probe(parseInt(val('reps', '5'), 10));
+  process.exit(0);
 }
 
 /* ═══════════════ اجرا ═══════════════ */

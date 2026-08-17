@@ -174,17 +174,13 @@ export function stripCardLabel(t) {
 // شبکه‌ی ایمنیِ قطعی است: چیزی که کد می‌تواند تضمین کند نباید فقط به مدل سپرده شود.
 export const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*--\s*/g, '، ');
 
-// فاصله‌ی زمانی به فارسیِ گفتاری، برای اینکه مدل مجبور نباشد زمانِ فالِ قبلی را حدس بزند.
-export function agoFa(unixSec, nowSec = Date.now() / 1000) {
-  const m = Math.max(0, Math.floor((nowSec - Number(unixSec || 0)) / 60));
-  if (m < 60) return m <= 1 ? 'همین چند دقیقه پیش' : `${m} دقیقه پیش`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ساعت پیش`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return d === 1 ? 'دیروز' : `${d} روز پیش`;
-  const mo = Math.floor(d / 30);
-  return mo < 12 ? `${mo} ماه پیش` : `${Math.floor(mo / 12)} سال پیش`;
-}
+// ⏱ `agoFa` (فاصله‌ی زمانی به فارسیِ گفتاری) حذف شد. تاریخچه‌ی کوتاهش درس دارد:
+// اول مدل زمانِ فال‌های قبلی را از خودش می‌ساخت («پارسال» برای فالی که ۱۰ دقیقه قبل
+// بود)، پس داده‌ی دقیق اضافه کردیم؛ بعد مدل همان داده را هم نادیده گرفت و «هفته‌های
+// قبل» نوشت، پس قاعده‌ی پرامپت اضافه کردیم؛ بعد قاعده را سراسری کردیم. سه لایه وصله
+// روی چیزی که **اصلاً لازم نبود**: کاربر در بخشِ یادآوری نمی‌خواهد بداند فالِ قبلی کِی
+// بوده، می‌خواهد بداند یادش هست چه پرسیده. پس خودِ داده حذف شد و مسئله از بین رفت.
+// (بازه‌ی زمانیِ **آینده** در جمع‌بندی سرِ جایش است؛ آن‌جا واقعاً ارزش دارد.)
 
 export const tehranToday = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(d);
@@ -198,7 +194,7 @@ export const tehranToday = (d = new Date()) =>
 //
 // همه‌ی وابستگی‌های بیرونی (رکوردهای قبلی از DB، نامِ نمایشی، پرچمِ دانشِ کارت) پارامترند
 // تا این تابع خالص بماند و آزمایشگاه بتواند بدونِ دیتابیس همان ورودی را بسازد.
-export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '', now }) {
+export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '' }) {
   return {
     memory: user.memory_json || '',
     name, // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
@@ -217,8 +213,8 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
       // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.
       kb: (kbOn && CARD_KB[c.key]) || undefined,
     })),
+    // بدونِ هیچ فیلدِ زمانی: مرتب‌شده از تازه‌ترین، و همین کافی است.
     previous: prev.map(r => ({
-      'چه‌وقت': agoFa(r.created_at, now),
       'نوع فال': r.type,
       'خلاصه': r.summary,
       'بازخورد کاربر': r.feedback || '-',
@@ -227,13 +223,43 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
   };
 }
 
+// متنِ خوانشِ یک کارت. مدل گاهی به‌جای `[{text}]` آرایه‌ی رشته می‌دهد (دیده‌شده در
+// آزمایشگاه، مخصوصاً در چیدمانِ ده‌کارتی که خروجی بلند است). هر دو شکل پذیرفته می‌شود،
+// وگرنه محتوایی که مدل تولید کرده بی‌صدا دور ریخته می‌شود.
+export const readText = (x) => String(typeof x === 'string' ? x : (x?.text || '')).trim();
+
 // شرطِ پذیرشِ شکلِ خروجیِ v4. عمداً این‌جاست نه داخلِ index.js: آزمایشگاه باید **همان**
 // معیارِ پذیرش را داشته باشد، وگرنه چیزی را سبز گزارش می‌کند که ربات ردش می‌کند.
 // (اعتبارسنجیِ سرخط جداست و در `verdict.js` می‌ماند چون قاعده‌ی محتوایی است نه ساختاری.)
+//
+// ⚠️ «طولِ آرایه» کافی نیست — باگِ واقعی که آزمایشگاه در اولین اجرا پیدا کرد (۱۴۰۵/۰۵/۲۶):
+// در ۲ فال از ۹ فال، `reads` طولِ درست داشت ولی متنِ هیچ کارتی خوانده نمی‌شد، پس رندر
+// همه را دور می‌ریخت و **کلِ بلوکِ کارت‌به‌کارت از خوانش غایب می‌شد**. یکی از آن دو
+// صلیب سلتیِ ۱۰۰٬۰۰۰ تومانی بود: کاربر بهای ده کارت را می‌داد و چهار خط تحویل می‌گرفت.
+// هیچ خطایی هم لاگ نمی‌شد. حالا خوانشِ خالی = خروجیِ نامعتبر = retry.
+// ── فیلدهای **اجباری**: نبودشان یعنی محصول شکسته و ارزشِ retry دارد ──────────
+//   `reads`  خودِ محصول است (کاربر بابتِ تفسیرِ کارت‌ها پول داده)
+//   `teaser` مرحله‌ی افشا بدونش عکسِ بی‌کپشن می‌شود
+//   `closing` جمع‌بندی و جوابِ بازشده است
+// `pattern`، `absent`، `callback` و **فرمولِ** سرخط عمداً این‌جا نیستند: نبودشان
+// خوانش را نمی‌شکند، پس بازتولیدِ کلِ خروجی برایشان صرف نمی‌کند (بند ۹/۰ ریشه).
 export function checkV4Shape(obj, cardCount) {
-  return !!(obj && Array.isArray(obj.cards) && obj.cards.length >= cardCount
-    && Array.isArray(obj.reads) && obj.reads.length >= cardCount
-    && obj.closing && obj.pattern);
+  if (!obj || !Array.isArray(obj.cards) || obj.cards.length < cardCount) return false;
+  if (!Array.isArray(obj.reads) || obj.reads.length < cardCount) return false;
+  if (!obj.closing) return false;
+  if (!obj.cards.slice(0, cardCount).every(c => String(c?.teaser || '').trim())) return false;
+  return obj.reads.slice(0, cardCount).every(r => readText(r).length > 0);
+}
+
+// ── فیلدهای **اختیاری**: نبودشان کاربر را ناراضی نمی‌کند، پس فقط شمرده می‌شوند ──
+// چرا شمرده می‌شوند: «اختیاری» یعنی retry نمی‌کنیم، نه اینکه برایمان مهم نیست. اگر
+// نرخِ نبودنشان بالا برود باید بفهمیم، و تنها راهش لاگ‌کردنِ همان لحظه است.
+export function softMissesV4(obj) {
+  const miss = [];
+  if (!String(obj?.pattern || '').trim()) miss.push('pattern');
+  if (!String(obj?.summary || '').trim()) miss.push('summary');
+  if (!String(obj?.memory || '').trim()) miss.push('memory');
+  return miss;
 }
 
 /* ═══ رندرِ متنِ نهایی v4 ═══ */
@@ -246,7 +272,7 @@ export function renderV4(llm, cards, labels) {
   // هم و در یک تکه می‌آیند («کارت اولت می‌گه… کارت بعدیت می‌گه…»)؛ تیترِ ایموجی‌دار
   // برای هر کارت متن را رباتی می‌کند. ایموجیِ بخش می‌ماند، ولی فقط **یک بار**.
   const cardLines = (llm.reads || []).slice(0, cards.length).map((x, i) => {
-    const t = String(x?.text || '').trim();
+    const t = readText(x);
     if (!t) return '';
     // شماره‌ی کارت **قطعی و از کد** می‌آید، نه از مدل: هر برچسبی که مدل خودش جلوی
     // جمله گذاشته باشد اول برداشته می‌شود و بعد برچسبِ درست چسبانده می‌شود.

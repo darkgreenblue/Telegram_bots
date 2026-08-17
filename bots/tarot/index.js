@@ -37,7 +37,7 @@ import {
   FLASH, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose,
   seedToInt, shuffledDeck, drawCards, tehranToday,
-  checkV4Shape,
+  checkV4Shape, softMissesV4,
   buildReadingCtx, renderV4,
 } from './reading-core.js';
 
@@ -164,7 +164,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.5.4';
+const PRODUCT_VERSION = '3.5.7';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1075,8 +1075,15 @@ async function callReadingLLM(readingId) {
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
   // خوانشِ سالمِ آخر پذیرفته می‌شود و فقط بخشِ جواب نمایش داده نمی‌شود. وگرنه یک
   // «شاید»ِ مدل، کاربر را به مسیر ریفاند می‌انداخت که خیلی بدتر از نداشتنِ آن بخش است.
+  //
+  // 💸 بودجه‌ی retry فقط خرجِ چیزی می‌شود که کاربر واقعاً از نبودش ناراضی می‌شود.
+  // باگِ اقتصادیِ نسخه‌ی قبل: سرخطِ بی‌فرمول **۵ بار** کلِ خروجی را بازتولید می‌کرد و
+  // در آخر همان سرخط را نشان می‌داد؛ یعنی تا ۴ ریکوئستِ کامل برای صفر تغییر در چیزی
+  // که کاربر می‌بیند. حالا سرخط یک تلاشِ اضافه می‌گیرد، بعد پذیرفته می‌شود.
+  const HEADLINE_EXTRA_TRIES = 1;
   let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
+  let headlineTries = 0;
   const res = await orChatResilient(systemFinal, userMsg, {
     maxTokens: spread.maxTokens,
     validate: (out) => {
@@ -1086,7 +1093,8 @@ async function callReadingLLM(readingId) {
         if (!checkV4Shape(obj, cards.length)) return false;
         // سرخطِ بی‌جهت یا بدونِ «ولی» پذیرفته نمی‌شود؛ ولی مثل verdict، شکستِ نهاییِ آن
         // هرگز به ریفاند نمی‌رسد — آخرین خروجیِ سالم بدونِ سرخط تحویل می‌شود.
-        if (!headlineOk(obj.headline)) { fallback = obj; return false; }
+        // فرمولِ سرخط «نرم» است: یک تلاشِ اضافه می‌دهیم، بعد همان را می‌پذیریم.
+        if (!headlineOk(obj.headline) && headlineTries++ < HEADLINE_EXTRA_TRIES) { fallback = obj; return false; }
         parsed = obj;
         return true;
       }
@@ -1102,6 +1110,13 @@ async function callReadingLLM(readingId) {
     parsed = fallback;
   }
   if (!parsed) { logErr(`reading#${readingId} همه‌ی تلاش‌ها شکست خورد (REFUND path)`); return null; }
+  // فیلدهای اختیاریِ جامانده فقط شمرده می‌شوند (نه retry): اگر نرخشان بالا رفت باید
+  // بفهمیم، وگرنه «اختیاری» بی‌صدا به «همیشه غایب» تبدیل می‌شود.
+  if (v4) {
+    const soft = softMissesV4(parsed);
+    if (soft.length) log(`reading#${readingId} فیلدِ اختیاریِ جامانده: ${soft.join(', ')}`);
+    if (!headlineOk(parsed.headline)) log(`reading#${readingId} سرخط فرمول را ندارد (پذیرفته شد)`);
+  }
   log(`reading#${readingId} آماده شد با ${res?.model || 'fallback'}${audio ? ' (ورودی صوتی، تک‌فراخوانی)' : ''}`);
   // متنِ سؤالِ ویس از همان خروجی برداشته می‌شود (نه یک فراخوانیِ دوم). شرطِ `question=''`
   // در خودِ UPDATE است تا اگر قبلاً متنی ثبت شده بود بازنویسی نشود.
