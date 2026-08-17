@@ -17,7 +17,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian, familyVoice, synthChunk } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -115,6 +115,58 @@ ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی ر�
 // مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
 // می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.
 eq(realWorld[0].id, 'deepgram/flux-tts:free', 'آرایه‌ی ورودی دست‌نخورده می‌ماند');
+
+/* ── ۳ج) قلقِ ارائه‌دهنده‌ها (از شکستِ واقعیِ اولین بیک‌آف) ─────────────────── */
+// در اولین بیک‌آفِ واقعی سه موتور رد شدند و هر سه از جنسِ «قلقی که کاتالوگ اعلام نمی‌کند»
+// بودند: MiniMax بدونِ voice جواب نمی‌دهد و Gemini فقط pcm می‌دهد. بدترین بخشش این بود
+// که دقیقاً موتورهای فارسی‌دار از مقایسه بیرون افتادند. به‌جای جدولِ دستیِ استثناها، کد از
+// خودِ پیامِ خطا یاد می‌گیرد؛ این بخش همان یادگیری را می‌سنجد.
+console.log('\n🧩 قلقِ ارائه‌دهنده‌ها');
+ok(familyVoice('minimax/speech-2.8-hd'), 'MiniMax صدای پیش‌فرضِ شناخته‌شده دارد');
+eq(defaultVoice({ id: 'minimax/speech-2.8-hd', supported_voices: [] }), familyVoice('minimax/speech-2.8-hd'),
+  'وقتی کاتالوگ صدا نمی‌دهد، صدای خانواده استفاده می‌شود');
+eq(defaultVoice({ id: 'minimax/speech-2.8-hd', supported_voices: ['X'] }), 'X',
+  'اگر کاتالوگ صدا بدهد، همان مقدم است');
+
+// سناریوی واقعیِ MiniMax: اولین درخواستِ بی‌صدا رد می‌شود، دومی با صدا باید بگیرد
+let calls = [];
+const voiceThenOk = async (url, opts) => {
+  const b = JSON.parse(opts.body);
+  calls.push(b);
+  if (!b.voice) return { ok: false, status: 400, text: async () => '{"error":{"message":"An explicit voice is required for this TTS provider."}}' };
+  return { ok: true, headers: { get: () => '' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+};
+const r1 = await synthChunk({ apiKey: 'k', modelId: 'minimax/speech-2.8-hd', voice: '', text: 'سلام', fetchImpl: voiceThenOk });
+ok(r1.buf.length > 0, 'بعد از خطای «صدا لازم است» با صدای خانواده دوباره تلاش و موفق می‌شود');
+eq(calls.length, 2, 'دقیقاً یک تلاشِ دوباره، نه حلقه‌ی بی‌پایان');
+ok(!!calls[1].voice, 'تلاشِ دوم صدا دارد');
+
+// سناریوی واقعیِ Gemini: mp3 رد می‌شود، pcm باید بگیرد و به‌عنوان pcm علامت بخورد
+calls = [];
+const pcmThenOk = async (url, opts) => {
+  const b = JSON.parse(opts.body);
+  calls.push(b);
+  if (b.response_format !== 'pcm') return { ok: false, status: 400, text: async () => '{"error":{"message":"Gemini TTS only supports response_format=\\"pcm\\". Got \\"mp3\\"."}}' };
+  return {
+    ok: true,
+    headers: { get: (h) => (h === 'content-type' ? 'audio/pcm;rate=24000;channels=1' : '') },
+    arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+  };
+};
+const r2 = await synthChunk({ apiKey: 'k', modelId: 'google/gemini-3.1-flash-tts-preview', voice: 'Kore', text: 'سلام', fetchImpl: pcmThenOk });
+eq(calls[0].response_format, 'mp3', 'اول mp3 را امتحان می‌کند');
+eq(calls[1].response_format, 'pcm', 'بعد از خطا به pcm سوییچ می‌کند');
+eq(r2.pcm?.rate, 24000, 'نرخِ نمونه‌برداری از هدر خوانده می‌شود، نه از حدس');
+eq(r2.pcm?.channels, 1, 'تعدادِ کانال هم از هدر می‌آید');
+// خطایی که ربطی به این دو قلق ندارد نباید بی‌جهت retry شود
+calls = [];
+let threw = false;
+try {
+  await synthChunk({ apiKey: 'k', modelId: 'x/y', voice: 'v', text: 'a',
+    fetchImpl: async (u, o) => { calls.push(JSON.parse(o.body)); return { ok: false, status: 402, text: async () => 'insufficient credits' }; } });
+} catch { threw = true; }
+ok(threw, 'خطای نامرتبط بالا می‌رود، نه اینکه بی‌صدا بلعیده شود');
+eq(calls.length, 1, 'خطای نامرتبط اصلاً retry نمی‌شود (اعتبار بی‌جهت خرج نمی‌شود)');
 
 /* ── ۳ب) گرافِ فیلترِ ffmpeg ─────────────────────────────────────────────── */
 // چرا اینجا و نه با اجرای واقعیِ ffmpeg: محیطِ توسعه ffmpeg ندارد و خطای گراف فقط روی

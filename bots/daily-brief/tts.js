@@ -96,12 +96,22 @@ export const engineLabel = (id) => {
   return `🗣 ${m?.name || String(id).split('/').pop()}`;
 };
 
-// صدای پیش‌فرضِ هر مدل: اولین صدای پشتیبانی‌شده، وگرنه حدسِ متعارفِ همان خانواده.
+// صدای پیش‌فرضِ خانواده‌ها برای وقتی که کاتالوگ `supported_voices` نمی‌دهد.
+// لازم است چون بعضی ارائه‌دهنده‌ها بدونِ voice اصلاً جواب نمی‌دهند: در اولین بیک‌آفِ واقعی،
+// هر دو مدلِ MiniMax با «An explicit voice is required for this TTS provider» رد شدند —
+// یعنی دقیقاً موتوری که فارسی را رسماً پشتیبانی می‌کند از مقایسه بیرون افتاد.
+const FAMILY_VOICE = [
+  [/^minimax\//i, 'Deep_Voice_Man'],   // از صداهای سیستمیِ خودِ MiniMax
+  [/gemini.*tts/i, 'Kore'],
+  [/^openai\//i, 'nova'],
+  [/^fish-audio\//i, 'default'],
+];
+export const familyVoice = (id) => (FAMILY_VOICE.find(([re]) => re.test(String(id || '')))?.[1] || '');
+
+// صدای پیش‌فرضِ هر مدل: اولین صدای پشتیبانی‌شده، وگرنه صدای شناخته‌شده‌ی همان خانواده.
 export function defaultVoice(model) {
   if (model?.supported_voices?.length) return model.supported_voices[0];
-  if (/gemini/i.test(model?.id || '')) return 'Kore';
-  if (/openai|gpt/i.test(model?.id || '')) return 'nova';
-  return '';
+  return familyVoice(model?.id);
 }
 
 // دو گوینده‌ی بومی فقط روی خانواده‌ی جمنای مستند شده است.
@@ -180,7 +190,11 @@ export const turnsToNarration = (turns) =>
   (turns || []).map((t) => String(t.text || '').trim()).filter(Boolean).join('\n\n');
 
 /* ===== آداپتورِ واحد (OpenRouter) ===== */
-async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
+// هر ارائه‌دهنده قلقِ خودش را دارد و کاتالوگ آن قلق‌ها را اعلام نمی‌کند. به‌جای نگه‌داشتنِ
+// یک جدولِ دستیِ استثناها (که برای مدلِ بعدی دوباره ناقص می‌شود)، از خودِ پیامِ خطا یاد
+// می‌گیریم و **یک بار** با تنظیمِ اصلاح‌شده دوباره تلاش می‌کنیم. دو موردی که در اولین
+// بیک‌آفِ واقعی دیده شد: MiniMax بدونِ voice رد می‌کند، و Gemini فقط pcm می‌دهد.
+async function postSpeech({ apiKey, modelId, voice, text, speed, format, fetchImpl }) {
   const res = await fetchImpl('https://openrouter.ai/api/v1/audio/speech', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -188,18 +202,54 @@ async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
       model: modelId,
       input: text,
       ...(voice ? { voice } : {}),
-      response_format: 'mp3',
+      response_format: format,
       ...(speed && speed !== 1 ? { speed } : {}),
     }),
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => '');
-    throw new Error(`TTS ${res.status}: ${msg.slice(0, 200)}`);
+    const err = new Error(`TTS ${res.status}: ${msg.slice(0, 200)}`);
+    err.status = res.status;
+    err.body = msg;
+    throw err;
   }
+  const ctype = res.headers.get('content-type') || '';
   return {
     buf: Buffer.from(await res.arrayBuffer()),
     genId: res.headers.get('x-generation-id') || '',
+    // خامِ pcm باید قبل از چسباندن به mp3 تبدیل شود؛ نرخ و کانال از خودِ هدر می‌آید
+    // (مثلاً audio/pcm;rate=24000;channels=1) نه از حدسِ ما.
+    pcm: /pcm/i.test(ctype) || format === 'pcm'
+      ? {
+          rate: Number(/rate=(\d+)/.exec(ctype)?.[1]) || 24000,
+          channels: Number(/channels=(\d+)/.exec(ctype)?.[1]) || 1,
+        }
+      : null,
   };
+}
+
+export async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
+  let useVoice = voice;
+  let format = 'mp3';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await postSpeech({ apiKey, modelId, voice: useVoice, text, speed, format, fetchImpl });
+    } catch (e) {
+      const body = String(e.body || e.message || '');
+      if (e.status === 400 && /voice/i.test(body) && !useVoice) {
+        useVoice = familyVoice(modelId) || 'default';
+        logErr(`TTS ${modelId}: صدا لازم بود، با «${useVoice}» دوباره تلاش می‌کنم`);
+        continue;
+      }
+      if (e.status === 400 && /pcm/i.test(body) && format !== 'pcm') {
+        format = 'pcm';
+        logErr(`TTS ${modelId}: فقط pcm می‌دهد، با pcm دوباره تلاش می‌کنم`);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(`TTS ${modelId}: بعد از تلاشِ دوباره هم جواب نداد`);
 }
 
 /* ===== ffmpeg ===== */
@@ -300,12 +350,20 @@ export async function synthesize({
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
       chars += piece.length;
-      const { buf, genId } = await synthChunk({
+      const { buf, genId, pcm } = await synthChunk({
         apiKey: openrouterKey, modelId, voice: useVoice, text: piece, speed, fetchImpl,
       });
       if (!buf?.length) throw new Error(`چانک ${i + 1} خروجیِ صوتی نداد`);
       const f = join(dir, `p${String(i).padStart(3, '0')}.mp3`);
-      await writeFile(f, buf);
+      if (pcm) {
+        // خامِ بدونِ هدر: ffmpeg باید نرخ و کانال را از ما بگیرد وگرنه صدا تندشده یا خش‌دار می‌شود
+        const raw = join(dir, `p${String(i).padStart(3, '0')}.pcm`);
+        await writeFile(raw, buf);
+        await run('ffmpeg', ['-y', '-f', 's16le', '-ar', String(pcm.rate), '-ac', String(pcm.channels),
+          '-i', raw, ...LAME, f]);
+      } else {
+        await writeFile(f, buf);
+      }
       files.push(f);
       if (genId) genIds.push(genId);
       log(`🔊 chunk ${i + 1}/${pieces.length} (${piece.length} chars, ${buf.length} bytes)`);
