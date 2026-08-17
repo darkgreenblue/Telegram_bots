@@ -71,6 +71,26 @@ export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 
   }
 }
 
+// کاتالوگِ OpenRouter ۱۸ مدلِ صوتی دارد و بیشترشان انگلیسی‌محورند. ساختنِ ۱۸ نمونه هم
+// وقتِ مالک را می‌گیرد هم بیشترش دور ریختنی است، پس موتورهایی که **پشتیبانیِ چندزبانه‌ی
+// اعلام‌شده** دارند اول می‌آیند. این فقط ترتیب است، نه فیلتر: هر ۱۸ تا در لیستِ انتخاب هستند
+// و قضاوتِ نهایی همچنان با گوشِ مالک است، نه با این جدول.
+const PERSIAN_FIRST = [
+  'minimax/speech-2.8-hd',      // فارسی صراحتاً در زبان‌های اعلام‌شده‌اش هست
+  'minimax/speech-2.8-turbo',
+  'fish-audio/s2.1-pro',        // چندزبانه
+  'fish-audio/s1',
+  'google/gemini-3.1-flash-tts-preview',
+  'mistralai/voxtral-mini-tts-2603',
+];
+export function rankForPersian(models) {
+  const rank = (id) => {
+    const i = PERSIAN_FIRST.indexOf(id);
+    return i === -1 ? PERSIAN_FIRST.length : i;
+  };
+  return [...models].sort((a, b) => rank(a.id) - rank(b.id));
+}
+
 export const engineLabel = (id) => {
   const m = (catalogCache.models || FALLBACK_MODELS).find((x) => x.id === id);
   return `🗣 ${m?.name || String(id).split('/').pop()}`;
