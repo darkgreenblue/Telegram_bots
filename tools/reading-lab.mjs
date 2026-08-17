@@ -28,7 +28,7 @@ import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 import { headlineOk } from '../bots/tarot/verdict.js';
 import {
   drawCards, buildReadingCtx, renderV4, checkV4Shape, readText,
-  orChatResilient, parseJsonLoose,
+  orChat, orChatResilient, parseJsonLoose,
 } from '../bots/tarot/reading-core.js';
 
 const L = (await import('../bots/tarot/locales/fa.js')).default;
@@ -157,7 +157,6 @@ async function runStep(persona, step, i, state) {
     name: persona.name,
     kbOn: true,                 // لحنِ جدید برای همه روشن است (toneV2)
     prev: state.prev.slice(0, 4),
-    now: state.nowSec,
   });
 
   const labels = L.prompts.cardLabels(cards.length);
@@ -198,6 +197,83 @@ async function runStep(persona, step, i, state) {
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
     }), { in: 0, out: 0 }),
   };
+}
+
+/* ═══════════════ حالتِ probe: «چقدر متداول است و روی کدام فال؟» ═══════════════ */
+// چرا لازم شد: اولین اجرا نشان داد در ۲ فال از ۹ بلوکِ کارت‌ها غایب می‌شود. سؤالِ درستِ
+// بعدی «چطور وصله‌اش کنیم» نیست، «چند وقت یک‌بار و روی کدام چیدمان» است. بدونِ این عدد
+// نمی‌شود تصمیم گرفت که آیا ارزشِ دو-ریکوئستی‌کردنِ چیدمانِ بزرگ را دارد یا نه.
+//
+// ⚠️ عمداً `orChat` را **خام** صدا می‌زند نه `orChatResilient`: رتراییِ خودکار دقیقاً همان
+// چیزی را پنهان می‌کند که می‌خواهیم بشماریم. هر نمونه = یک تلاشِ اول، مثل چیزی که
+// کاربر در بهترین حالت می‌گیرد.
+const SHAPE = (obj, n) => {
+  if (!obj) return 'JSON خراب';
+  if (!Array.isArray(obj.reads)) return 'reads نیست';
+  if (obj.reads.length < n) return `reads کوتاه (${obj.reads.length}/${n})`;
+  const sample = obj.reads.slice(0, n);
+  const withText = sample.filter(r => r && typeof r === 'object' && String(r.text || '').trim()).length;
+  const strings = sample.filter(r => typeof r === 'string' && r.trim()).length;
+  if (withText === n) return 'سالم: [{text}]';
+  if (strings === n) return 'آرایه‌ی رشته';
+  if (withText + strings === 0) return '🔴 همه خالی';
+  return `مخلوط (${withText} شیء + ${strings} رشته)`;
+};
+
+async function probe(reps) {
+  // چهار اندازه‌ی مختلف تا معلوم شود مسئله مالِ صلیب سلتی است یا سراسری
+  const targets = ['yesno', 'three', 'open5', 'celtic'];
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log(`🔬 probe — هر چیدمان ${reps} بار، تلاشِ اول، بدونِ retry`);
+  console.log('═'.repeat(72));
+  const rows = [];
+  for (const id of targets) {
+    const spread = SPREAD_BY_ID[id];
+    const tally = {}; let okShape = 0, okHeadline = 0, outTok = 0, trunc = 0;
+    for (let k = 0; k < reps; k++) {
+      const cards = drawCards(`probe:${id}:${k}`, [k % 24, (k + 7) % 24, (k + 13) % 24], spread.size);
+      const ctx = buildReadingCtx({
+        user: { telegram_id: 1, memory_json: '', focus_area: spread.focus || 'question' },
+        spread, question: 'این روزها حس می‌کنم سرِ یه دوراهیِ مهمم و نمی‌دونم کدوم طرف برم.',
+        cards, focusKey: spread.focus || 'question', L, name: 'آرش', kbOn: true, prev: [],
+      });
+      const labels = L.prompts.cardLabels(cards.length);
+      let out = null, usage = {};
+      try {
+        const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
+          { maxTokens: spread.maxTokens });
+        out = r.text; usage = r.usage || {};
+      } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
+      const obj = parseJsonLoose(out);
+      const shape = SHAPE(obj, spread.size);
+      tally[shape] = (tally[shape] || 0) + 1;
+      if (checkV4Shape(obj, spread.size)) okShape++;
+      if (obj && headlineOk(obj.headline)) okHeadline++;
+      outTok += usage.completion_tokens || 0;
+      // بریدگیِ خروجی: اگر به سقفِ توکن خورده باشیم مسئله «شکلِ خروجی» نیست، «جا نشدن» است
+      if ((usage.completion_tokens || 0) >= spread.maxTokens - 40) trunc++;
+    }
+    rows.push({ id, fa: spread.fa, size: spread.size, okShape, okHeadline, reps, tally,
+      avgOut: Math.round(outTok / reps), max: spread.maxTokens, trunc });
+  }
+  console.log('\nچیدمان            کارت  شکلِ سالم  سرخطِ سالم  میانگینِ توکنِ خروجی (سقف)  بریدگی');
+  for (const r of rows) {
+    console.log(`${r.fa.padEnd(20)}${String(r.size).padEnd(6)}${`${r.okShape}/${r.reps}`.padEnd(11)}`
+      + `${`${r.okHeadline}/${r.reps}`.padEnd(12)}${`${r.avgOut} (${r.max})`.padEnd(27)}${r.trunc}/${r.reps}`);
+  }
+  console.log('\nتوزیعِ شکلِ `reads`:');
+  for (const r of rows) {
+    const parts = Object.entries(r.tally).map(([k, v]) => `${k} ×${v}`).join('  |  ');
+    console.log(`   ${r.fa}: ${parts}`);
+  }
+  const bad = rows.filter(r => r.okShape < r.reps);
+  console.log(`\nحکم: ${bad.length ? bad.map(r => `${r.fa} (${r.reps - r.okShape} از ${r.reps} خراب)`).join('، ') : 'هیچ چیدمانی خرابی نداشت'}`);
+  return rows;
+}
+
+if (flag('probe')) {
+  await probe(parseInt(val('reps', '5'), 10));
+  process.exit(0);
 }
 
 /* ═══════════════ اجرا ═══════════════ */
