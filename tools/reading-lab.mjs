@@ -88,16 +88,23 @@ function checkReading({ llm, rendered, spread, cards, ctx, step }) {
   if (/—|--/.test(full)) issues.push('خط تیره در متنِ نهایی مانده (noDash کار نکرده)');
   if (/—|--/.test(raw)) notes.push('مدل خط تیره تولید کرد ولی کد پاکش کرد');
 
-  // ۴) برچسبِ کارت‌ها: هر خط دقیقاً یک برچسب، بدونِ تکرار و بدونِ جاافتادگی
+  // ۴) برچسبِ کارت‌ها: هر برچسب دقیقاً یک بار و به ترتیب، بدونِ تکرارِ چسبیده.
+  // ⚠️ «یک خط per کارت» فرضِ غلطی بود: متنِ خودِ مدل می‌تواند خطِ جدید داشته باشد و
+  // آن‌وقت شمارشِ موقعیتی می‌شکند (کرشِ واقعیِ اجرای دوم). پس به‌جای موقعیت، **جای
+  // هر برچسب** پیدا می‌شود و خطوطِ اضافه به‌عنوان ادامه‌ی متن پذیرفته می‌شوند.
   const labels = L.prompts.cardLabels(cards.length);
   const block = (rendered.body.split('\n\n').find(b => b.startsWith('🃏')) || '').replace(/^🃏\s*/, '');
   const lines = block.split('\n').filter(Boolean);
-  if (lines.length !== cards.length) issues.push(`تعدادِ خطِ کارت ${lines.length} است، باید ${cards.length} باشد`);
-  lines.forEach((ln, i) => {
-    if (!ln.startsWith(labels[i])) issues.push(`خطِ ${i + 1} با «${labels[i]}» شروع نمی‌شود`);
-    const rest = ln.slice(labels[i].length);
+  if (!lines.length) issues.push(`بلوکِ کارت‌ها اصلاً نیامد (باید ${cards.length} کارت باشد)`);
+  let cursor = -1;
+  labels.forEach((lab, i) => {
+    const at = lines.findIndex((ln, k) => k > cursor && ln.startsWith(lab));
+    if (at < 0) { issues.push(`برچسبِ «${lab}» پیدا نشد`); return; }
+    cursor = at;
+    const rest = lines[at].slice(lab.length);
     if (/^\s*(?:و |اما |ولی )?کارت[ً-ْ]*[\s‌]*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|بعدی|آخر)/.test(rest))
-      issues.push(`برچسبِ تکراری در خطِ ${i + 1}: «${ln.slice(0, 40)}…»`);
+      issues.push(`برچسبِ تکراری در «${lab}»: «${lines[at].slice(0, 40)}…»`);
+    if (lines.slice(at + 1).some(ln => ln.startsWith(lab))) issues.push(`برچسبِ «${lab}» بیش از یک بار آمده`);
   });
 
   // ۵) نامِ جایگاه نباید در متن بیاید (پرامپت صریحاً گفته)
@@ -181,7 +188,14 @@ async function runStep(persona, step, i, state) {
   if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
 
   const rendered = renderV4(parsed, cards, labels);
-  const check = checkReading({ llm: parsed, rendered, spread, cards, ctx, step });
+  // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
+  // نباید بابتِ یک باگِ ابزار از بین برود (درسِ کرشِ اجرای دوم).
+  let check;
+  try {
+    check = checkReading({ llm: parsed, rendered, spread, cards, ctx, step });
+  } catch (e) {
+    check = { issues: [`خطای خودِ سنجه: ${e.message}`], notes: [], stats: { chars: 0, perCard: 0, named: 0, cards: cards.length } };
+  }
 
   // حافظه و تاریخچه دقیقاً مثل ربات به قدمِ بعد منتقل می‌شوند
   if (typeof parsed.memory === 'string' && parsed.memory.trim()) state.memory = parsed.memory.trim().slice(0, 1200);
