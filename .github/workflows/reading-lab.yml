@@ -1,0 +1,67 @@
+name: Reading lab
+
+# 🧪 آزمایشگاهِ خوانشِ تاروت: کاربر را آفلاین شبیه‌سازی می‌کند و چند فالِ کامل می‌گیرد،
+# با **همان** پرامپت و همان کدی که در پروداکشن اجرا می‌شود (`bots/tarot/reading-core.js`).
+#
+# چرا این‌جا و نه روی سرور: هیچ چیزی از سرور لازم ندارد (نه دیتابیس، نه توکنِ تلگرام) و
+# **هیچ رباتی را ری‌استارت نمی‌کند**. تنها رازِ لازم کلیدِ OpenRouterِ خودِ تاروت است، پس
+# هزینه دقیقاً روی همان کلیدی می‌نشیند که محصول از آن استفاده می‌کند.
+#
+# هزینه: هر فالِ سه‌کارتی حدود ۰.۶ سنت، صلیب سلتی حدود ۱.۳ سنت. یک دورِ کاملِ ۹ فالی
+# زیرِ ۱۰ سنت است. با `dry: true` هیچ فراخوانی‌ای نمی‌رود (فقط اندازه‌ی ورودی سنجیده می‌شود).
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'پرسوناها (خالی = همه). مثل: P1,P2'
+        required: false
+        default: ''
+      dry:
+        description: 'بدونِ فراخوانیِ مدل (فقط سلامتِ خطِ لوله و اندازه‌ی ورودی)'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: reading-lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # آزمایشگاه هیچ وابستگیِ npm ندارد (فقط ماژول‌های داخلیِ Node)، پس نه npm ci لازم
+      # است نه کشِ node_modules. اگر روزی وابستگی اضافه شد، همین‌جا نصبش کن.
+      - name: گاردِ کلید
+        env:
+          KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+        run: |
+          if [ "${{ inputs.dry }}" != "true" ] && [ -z "$KEY" ]; then
+            echo "::error::سکرتِ TAROT_OPENROUTER_KEY ست نشده — بدونِ آن فقط حالتِ dry ممکن است."
+            exit 1
+          fi
+
+      - name: اجرای آزمایشگاه
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
+          [ "${{ inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
+          node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
+
+      - name: خروجیِ خام
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reading-lab
+          path: reading-lab-out.json
+          retention-days: 30
+          if-no-files-found: ignore

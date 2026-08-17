@@ -26,6 +26,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // فایل‌هایی که چک می‌شوند: نقطه‌ی ورود و ماژول‌های محلیِ هر ربات Node.
 const TARGETS = [
   'bots/tarot/index.js',
+  'bots/tarot/reading-core.js',
   'bots/tarot/cardpay.js',
   'bots/tarot/reco.js',
   'bots/tarot/verdict.js',
