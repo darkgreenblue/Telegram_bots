@@ -237,11 +237,29 @@ export const readText = (x) => String(typeof x === 'string' ? x : (x?.text || ''
 // همه را دور می‌ریخت و **کلِ بلوکِ کارت‌به‌کارت از خوانش غایب می‌شد**. یکی از آن دو
 // صلیب سلتیِ ۱۰۰٬۰۰۰ تومانی بود: کاربر بهای ده کارت را می‌داد و چهار خط تحویل می‌گرفت.
 // هیچ خطایی هم لاگ نمی‌شد. حالا خوانشِ خالی = خروجیِ نامعتبر = retry.
+// ── فیلدهای **اجباری**: نبودشان یعنی محصول شکسته و ارزشِ retry دارد ──────────
+//   `reads`  خودِ محصول است (کاربر بابتِ تفسیرِ کارت‌ها پول داده)
+//   `teaser` مرحله‌ی افشا بدونش عکسِ بی‌کپشن می‌شود
+//   `closing` جمع‌بندی و جوابِ بازشده است
+// `pattern`، `absent`، `callback` و **فرمولِ** سرخط عمداً این‌جا نیستند: نبودشان
+// خوانش را نمی‌شکند، پس بازتولیدِ کلِ خروجی برایشان صرف نمی‌کند (بند ۹/۰ ریشه).
 export function checkV4Shape(obj, cardCount) {
   if (!obj || !Array.isArray(obj.cards) || obj.cards.length < cardCount) return false;
   if (!Array.isArray(obj.reads) || obj.reads.length < cardCount) return false;
-  if (!obj.closing || !obj.pattern) return false;
+  if (!obj.closing) return false;
+  if (!obj.cards.slice(0, cardCount).every(c => String(c?.teaser || '').trim())) return false;
   return obj.reads.slice(0, cardCount).every(r => readText(r).length > 0);
+}
+
+// ── فیلدهای **اختیاری**: نبودشان کاربر را ناراضی نمی‌کند، پس فقط شمرده می‌شوند ──
+// چرا شمرده می‌شوند: «اختیاری» یعنی retry نمی‌کنیم، نه اینکه برایمان مهم نیست. اگر
+// نرخِ نبودنشان بالا برود باید بفهمیم، و تنها راهش لاگ‌کردنِ همان لحظه است.
+export function softMissesV4(obj) {
+  const miss = [];
+  if (!String(obj?.pattern || '').trim()) miss.push('pattern');
+  if (!String(obj?.summary || '').trim()) miss.push('summary');
+  if (!String(obj?.memory || '').trim()) miss.push('memory');
+  return miss;
 }
 
 /* ═══ رندرِ متنِ نهایی v4 ═══ */

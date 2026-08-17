@@ -37,8 +37,10 @@ console.log('\n▶ سرخط: قانونِ «بله‌ی گران»');
   const V = fs.readFileSync(new URL('../bots/tarot/verdict.js', import.meta.url), 'utf8');
   ok(/export function headlineOk/.test(V), 'اعتبارسنجِ سرخط در ماژولِ خالصِ verdict.js است');
   ok(/headlineOk\(obj\.headline\)/.test(SRC), 'سرخط قبل از پذیرش اعتبارسنجی می‌شود');
-  ok(/if \(!headlineOk\(obj\.headline\)\) \{ fallback = obj; return false; \}/.test(SRC),
-    'سرخطِ بد باعث retry می‌شود ولی خوانشِ سالم را دور نمی‌ریزد (ضدِ ریفاند)');
+  ok(/if \(!headlineOk\(obj\.headline\) && headlineTries\+\+ < HEADLINE_EXTRA_TRIES\) \{ fallback = obj; return false; \}/.test(SRC),
+    'سرخطِ بد یک تلاشِ اضافه می‌گیرد، بعد پذیرفته می‌شود (ضدِ ریفاند و ضدِ اسراف)');
+  ok(/const HEADLINE_EXTRA_TRIES = 1;/.test(SRC),
+    'بودجه‌ی retryِ سرخط محدود است — قبلاً ۵ بار بازتولید می‌شد و آخرش همان سرخط نشان داده می‌شد');
   // فرمول در خودِ پرامپت
   ok(/\[جهت\] \+ \[قیدِ احتمال\] \+ «اما\/ولی» \+ \[بهای مشخص\]/.test(V4),
     'فرمولِ سرخط صریح در پرامپت آمده');
@@ -258,12 +260,12 @@ console.log('\n▶ درسِ اولین اجرای آزمایشگاه (۱۴۰۵/�
   // چون **نبودنِ** یک بخش را باید بفهمی، نه بودنِ چیزِ غلط.
   ok(/obj\.reads\.slice\(0, cardCount\)\.every\(r => readText\(r\)\.length > 0\)/.test(CORE),
     'خوانشِ خالی خروجیِ نامعتبر است و retry می‌گیرد، نه اینکه بی‌صدا حذف شود');
-  ok(core.checkV4Shape({ cards: [1, 2], reads: [{ text: '' }, { text: '' }], closing: 'c', pattern: 'p' }, 2) === false,
+  ok(core.checkV4Shape({ cards: [{ teaser: 't' }, { teaser: 't' }], reads: [{ text: '' }, { text: '' }], closing: 'c' }, 2) === false,
     'منطقش واقعاً اجرا می‌شود: reads خالی رد');
-  ok(core.checkV4Shape({ cards: [1, 2], reads: [{ text: 'a' }, { text: 'b' }], closing: 'c', pattern: 'p' }, 2) === true,
+  ok(core.checkV4Shape({ cards: [{ teaser: 't' }, { teaser: 't' }], reads: [{ text: 'a' }, { text: 'b' }], closing: 'c' }, 2) === true,
     'خروجیِ سالم همچنان پذیرفته می‌شود');
   // مدل گاهی به‌جای [{text}] آرایه‌ی رشته می‌دهد؛ محتوایش نباید دور ریخته شود
-  ok(core.checkV4Shape({ cards: [1, 2], reads: ['الف', 'ب'], closing: 'c', pattern: 'p' }, 2) === true,
+  ok(core.checkV4Shape({ cards: [{ teaser: 't' }, { teaser: 't' }], reads: ['الف', 'ب'], closing: 'c' }, 2) === true,
     'آرایه‌ی رشته هم شکلِ معتبری است (ضدِ دورریزِ بی‌صدا)');
   ok(core.renderV4({ reads: ['الف', 'ب'], pattern: 'p' }, [1, 2], ['کارت اول', 'کارت دوم']).body.includes('کارت اول الف'),
     'رندر هم هر دو شکل را می‌سازد');
@@ -276,6 +278,25 @@ console.log('\n▶ درسِ اولین اجرای آزمایشگاه (۱۴۰۵/�
   // زمانِ ساختگی از فیلدِ callback به بقیه‌ی متن سرریز کرد. راه‌حلِ نهایی وصله‌ی
   // بیشتر نبود، حذفِ خودِ داده بود (بخشِ «زمانِ گذشته» پایین‌تر).
   ok(!/چه‌وقت/.test(V4), 'هیچ ارجاعی به فیلدِ زمانی در پرامپت نمانده');
+}
+
+console.log('\n▶ قرارداد فیلدهای اجباری و اختیاری (بودجه‌ی retry)');
+{
+  // بندِ ۹/۰ ریشه: retry فقط خرجِ چیزی می‌شود که کاربر از نبودش ناراضی می‌شود.
+  // ریاضیِ واقعیِ صلیب سلتی: هر retry حدود ۰.۶۷ سنت، و دو-ریکوئستی‌کردن +۲۳٪ چون
+  // پرامپتِ سیستم دو بار پول می‌خورد. پس ارزان‌ترین کار این است که اصلاً برای
+  // فیلدِ غیرحیاتی retry نکنیم.
+  ok(/export function softMissesV4/.test(CORE), 'فیلدهای اختیاری یک تابعِ مشخص دارند');
+  ok(/softMissesV4\(parsed\)/.test(SRC), 'جاماندنِ فیلدِ اختیاری لاگ می‌شود (اختیاری ≠ بی‌اهمیت)');
+
+  const hard = { cards: [{ teaser: 't' }], reads: [{ text: 'r' }], closing: 'c' };
+  ok(core.checkV4Shape(hard, 1) === true, 'سه فیلدِ اجباری کافی‌اند (pattern لازم نیست)');
+  ok(core.checkV4Shape({ ...hard, cards: [{ teaser: '' }] }, 1) === false, 'تیزرِ خالی رد می‌شود (افشا بدونش می‌شکند)');
+  ok(core.checkV4Shape({ ...hard, closing: '' }, 1) === false, 'جمع‌بندیِ خالی رد می‌شود');
+  ok(core.checkV4Shape({ ...hard, reads: [{ text: '' }] }, 1) === false, 'خوانشِ خالی رد می‌شود');
+  ok(JSON.stringify(core.softMissesV4({ pattern: 'p', summary: 's', memory: 'm' })) === '[]',
+    'خروجیِ کامل هیچ فیلدِ جامانده‌ای ندارد');
+  ok(core.softMissesV4({ pattern: '' }).includes('pattern'), 'نبودِ الگو شمرده می‌شود ولی retry نمی‌گیرد');
 }
 
 console.log('\n▶ اندازه‌ی پرامپت');
