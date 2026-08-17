@@ -118,6 +118,14 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/reading-lab.mjs --dry
 
+      # تستِ واحدِ خودِ سنجه‌ها. حالتِ dry بالا فقط خطِ لوله را لمس می‌کند و هرگز
+      # `checkReading` را صدا نمی‌زند، پس کلِ لایه‌ی سنجش بی‌تست بود — و یک کرشِ واقعی
+      # (`labels[i]` تعریف‌نشده وقتی متنِ کارت خطِ جدید داشت) کلِ اجرای ۹ فالی را کشت.
+      # این چک برای هر سنجه دو حالت دارد: یکی که باید قرمز کند و یکی که نباید.
+      - name: Reading lab checks
+        if: matrix.bot == 'tarot'
+        run: node tools/check-reading-lab.mjs
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test
