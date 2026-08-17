@@ -309,9 +309,16 @@ if (!DRY) {
   const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
   console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
   console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
+  // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
+  // خط است؛ بدونِ این خلاصه برای فهمیدنِ «کدام فال چه ایرادی داشت» باید کلِ لاگ خوانده
+  // شود. با این خلاصه، ۳۰ خطِ آخر برای نتیجه‌گیریِ یک دور کافی است.
   for (const r of done) {
     const n = r.check.issues.length;
-    console.log(`   ${n ? '❌' : '✅'} ${r.persona}.${r.i + 1} ${r.spread.fa}${n ? ` — ${n} ایراد` : ''}`);
+    const a = r.check.anchor;
+    const pct = a?.total ? ` | بی‌لنگر ${a.loose}/${a.total}` : '';
+    console.log(`   ${n ? '❌' : '✅'} ${r.persona}.${r.i + 1} ${r.spread.fa}${pct}`);
+    r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
   }
 }
 
