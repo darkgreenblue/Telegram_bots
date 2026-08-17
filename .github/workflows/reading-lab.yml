@@ -70,8 +70,9 @@ jobs:
             node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
           fi
 
+      # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
-        if: always()
+        if: always() && inputs.probe != true
         uses: actions/upload-artifact@v4
         with:
           name: reading-lab
