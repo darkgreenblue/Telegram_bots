@@ -31,7 +31,7 @@ export const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; 
 
 // متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
 export function modelText(llm) {
-  return [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
+  return [llm.headline, llm.pattern, llm.callback, llm.closing,
     ...(llm.reads || []).map(readText), ...(llm.cards || []).map(c => c?.teaser)]
     .filter(Boolean).join('\n');
 }
@@ -68,7 +68,7 @@ export function anchorScore({ llm, cards, ctx }) {
 
   // فقط متنِ **تفسیری** سنجیده می‌شود. تیزرها عمداً بیرون‌اند: کارشان معرفیِ خودِ کارت
   // است و طبیعتاً عمومی‌اند؛ انداختنشان در این شمارش عدد را بی‌معنی می‌کرد.
-  const body = [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
+  const body = [llm.headline, llm.pattern, llm.callback, llm.closing,
     ...(llm.reads || []).map(readText)].filter(Boolean).join('\n');
 
   const all = sentences(body);
