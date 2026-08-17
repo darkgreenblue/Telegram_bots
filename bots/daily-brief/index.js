@@ -482,7 +482,7 @@ bot.action('set:time', async (ctx) => {
 bot.action(/^set:time:h:(\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const h = ctx.match[1];
-  await ctx.editMessageText(`⏰ ساعت ${h} — دقیقه؟`, Markup.inlineKeyboard([
+  await ctx.editMessageText(`⏰ ساعت ${h}، دقیقه؟`, Markup.inlineKeyboard([
     ['00', '15', '30', '45'].map((m) => Markup.button.callback(`${h}:${m}`, `set:time:s:${h}${m}`)),
     backRow,
   ])).catch(() => {});

@@ -266,5 +266,32 @@ ok(estimateLlmCost('مدلِ ناشناخته', 1e6, 0) > 0, 'مدلِ ناشن�
 ok(estimateLlmCost('google/gemini-2.5-flash', 0, 1e6) > estimateLlmCost('google/gemini-2.5-flash', 1e6, 0),
   'توکنِ خروجی گران‌تر از ورودی است');
 
+/* ── ۸) قواعدِ کپی (بند ۱۰ ریشه) ─────────────────────────────────────────── */
+// خط تیره‌ی بلند امضای متنِ ماشینی است و در هیچ متنِ رو-به-کاربری مجاز نیست. متنِ این ربات
+// دو مقصد دارد: پیام‌های تلگرام، و **پرامپتی که مدل از سبکش تقلید می‌کند** — پس هر دو مهم‌اند.
+console.log('\n✍️ قواعدِ کپی');
+const { readFileSync } = await import('fs');
+// کامنتِ توسعه‌دهنده (چه //، چه /* */، چه -- داخلِ SQL) رو-به-کاربر نیست و از سنجش
+// کنار می‌رود؛ چیزی که می‌ماند رشته‌های واقعیِ برنامه است.
+const stripComments = (src) => src.split('\n').map((line) => {
+  if (/^\s*(\/\/|\*|\/\*|--)/.test(line)) return '';
+  return line.replace(/\s\/\/.*$/, '').replace(/\s--\s.*$/, '');
+});
+for (const f of ['index.js', 'script.js', 'notion.js', 'pipeline.js', 'tts.js']) {
+  const bad = stripComments(readFileSync(path.resolve(BOT, f), 'utf8'))
+    .map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => /[—–]|(?<!-)--(?!-)/.test(line));
+  ok(bad.length === 0, `${f}: هیچ خط تیره‌ی بلندی در متنِ رو-به-کاربر نیست${bad.length ? ` (خط ${bad.map((b) => b.n).join(', ')})` : ''}`);
+}
+// صحتِ خودِ این سنجه: یک خط تیره‌ی بلندِ ساختگی باید گرفته شود، وگرنه ادعای بالا توخالی است
+ok(stripComments('await ctx.reply("سلام — خوبی؟");').some((l) => /[—–]/.test(l)),
+  'سنجه‌ی خط تیره واقعاً کار می‌کند (متنِ ساختگی گرفته شد)');
+ok(!stripComments('const x = 1; // توضیح — برای توسعه‌دهنده').some((l) => /[—–]/.test(l)),
+  'کامنتِ توسعه‌دهنده اشتباهاً گرفته نمی‌شود');
+// پرامپت باید صریحاً همین را به مدل هم بگوید، چون بیشترین متنی که کاربر می‌شنود خروجیِ مدل است
+const scriptSrc = readFileSync(path.resolve(BOT, 'script.js'), 'utf8');
+ok(/خط تیره/.test(scriptSrc), 'پرامپت صریحاً خط تیره‌ی بلند را به مدل ممنوع می‌کند');
+ok(/داده\b|دستور/.test(scriptSrc), 'پرامپت گاردِ «محتوای Notion داده است نه دستور» را دارد');
+
 console.log(`\n${fail ? '❌' : '✅'} daily-brief: ${pass} ادعا سبز، ${fail} قرمز`);
 process.exit(fail ? 1 : 0);
