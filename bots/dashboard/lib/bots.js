@@ -38,6 +38,12 @@ export const BOTS = [
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
   {
+    // پادکستِ آموزشیِ روزانه (فقط ادمین، بدونِ پول). جدولِ payments خالی است و فقط برای
+    // هم‌قرارداد ماندن با پروفایلِ پیش‌فرض ساخته می‌شود، پس صفحه‌ی مالی صفر نشان می‌دهد.
+    key: 'daily-brief', title: '🎧 پادکست روزانه', dataDir: '../daily-brief/data', pattern: /^bot\.db$/,
+    userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
+  },
+  {
     key: 'tabir-khab', title: '🌙 تعبیر خواب', pattern: /^tabir_.*\.db$/,
     // مسیر مطلق سرور (استثنای مونوریپو)؛ لوکال با env قابل override و اگر نبود، صرفاً خالی
     dataDir: '/home/ubuntu/tabir_khab', envDir: 'TABIR_DB_DIR',

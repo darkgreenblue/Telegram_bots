@@ -38,6 +38,7 @@ export const BOT_CODES = {
   tarot: 'TRT',
   'tabir-khab': 'DRM',
   'resume-tailor': 'RSM',
+  'daily-brief': 'DLB',
 };
 
 export const supportCode = (botCode, uid) => `#${String(botCode).toUpperCase()}-${uid}`;

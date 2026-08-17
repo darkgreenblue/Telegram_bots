@@ -32,6 +32,11 @@ jobs:
           # tarot
           TAROT_BOT_TOKEN:              ${{ secrets.TAROT_BOT_TOKEN }}
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # daily-brief (پادکست روزانه): دو تای اول اجباری، Notion اختیاری
+          # (بدون Notion ربات بالا می‌آید ولی رودمپ ندارد). موتورهای صدا هم از همان کلیدِ OpenRouter می‌آیند.
+          DAILY_BRIEF_BOT_TOKEN:        ${{ secrets.DAILY_BRIEF_BOT_TOKEN }}
+          DAILY_BRIEF_OPENROUTER_KEY:   ${{ secrets.DAILY_BRIEF_OPENROUTER_KEY }}
+          DAILY_BRIEF_NOTION_TOKEN:     ${{ secrets.DAILY_BRIEF_NOTION_TOKEN }}
           # dashboard (داشبورد ادمین): توکن ورود + تونل اختیاری Cloudflare (named) + گیرنده‌ی آدرس تونل
           DASHBOARD_TOKEN:              ${{ secrets.DASHBOARD_TOKEN }}
           CLOUDFLARE_TUNNEL_TOKEN:      ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
@@ -42,7 +47,7 @@ jobs:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -74,7 +79,7 @@ jobs:
             # می‌کند → ENV_CHANGED → upsert دوباره ADMIN_IDS را می‌گذارد → ENV_CHANGED. یعنی
             # **هر دیپلوی، حتی وقتی هیچ کدِ رباتی عوض نشده، ربات‌های زنده را ری‌استارت می‌کند**
             # (باگِ واقعی؛ در لاگ به‌شکلِ «دلیل: env» روی PRِ صرفاً مستنداتی دیده شد).
-            ADMIN_BOTS=" voice2text tarot "
+            ADMIN_BOTS=" voice2text tarot daily-brief "
             write_env() { # $1=bot ، $2=محتوای کامل .env (بدونِ ADMIN_IDS — خودش اضافه می‌کند)
               mkdir -p "bots/$1"
               content="$2"
@@ -107,6 +112,13 @@ jobs:
             fi
             if [ -n "$TAROT_BOT_TOKEN" ] && [ -n "$TAROT_OPENROUTER_KEY" ]; then
               write_env tarot "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
+            fi
+            if [ -n "$DAILY_BRIEF_BOT_TOKEN" ] && [ -n "$DAILY_BRIEF_OPENROUTER_KEY" ]; then
+              # کلیدهای اختیاری داخلِ همین بلوک append می‌شوند، وگرنه cmp هر دیپلوی فرق می‌بیند
+              # و ربات بی‌دلیل ری‌استارت می‌شود (همان باگِ پینگ‌پنگِ ADMIN_IDS — بالا).
+              DLB_ENV="$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s' "$DAILY_BRIEF_BOT_TOKEN" "$DAILY_BRIEF_OPENROUTER_KEY")"
+              [ -n "$DAILY_BRIEF_NOTION_TOKEN" ] && DLB_ENV="$(printf '%s\nNOTION_TOKEN=%s' "$DLB_ENV" "$DAILY_BRIEF_NOTION_TOKEN")"
+              write_env daily-brief "$DLB_ENV"
             fi
             if [ -n "$DASHBOARD_TOKEN" ]; then
               write_env dashboard "$(printf 'DASHBOARD_TOKEN=%s\nPORT=8787' "$DASHBOARD_TOKEN")"
@@ -167,6 +179,7 @@ jobs:
             }
             deploy_bot voice2text
             deploy_bot tarot
+            deploy_bot daily-brief
             deploy_bot dashboard
             # resume-tailor بازنشسته شد (منسوخ + مصرف LLM بی‌سقف/SSRF) — یک‌باره از pm2 حذف می‌شود
             pm2 delete resume-tailor 2>/dev/null && pm2 save || true

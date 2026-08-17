@@ -17,6 +17,7 @@
 | `bots/resume-tailor` | ~~pm2~~ **بازنشسته** | رزومه‌ی انگلیسی کاستومایز per آگهی | **🗑 حذف‌شده از pm2** (منسوخ + LLM بی‌سقف/SSRF؛ deploy یک‌باره `pm2 delete` کرد و از ecosystem خارج شد؛ کد برای آرشیو مانده. کلید OpenRouterش را هم مالک در openrouter.ai غیرفعال کند) | `bots/resume-tailor/CLAUDE.md` |
 | `bots/tarot` | pm2: `tarot` | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت (از v3.1.0 لحنِ صریحِ خوانش — **فعلاً فقط اکانتِ ادمین**؛ اقتصادِ سکه ساخته و موقتاً پارک شد) | **🟢 زنده از ۱۴۰۵/۰۴/۲۰** (شروع تبلیغات؛ TEST_PHASE=false، دیتای تست پاک شد) | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | 🧪 تست شخصی — روی سرور اجراست؛ پرداختش هنوز شبیه‌سازی است | `bots/tabir-khab/CLAUDE.md` |
+| `bots/daily-brief` | pm2: `daily-brief` | پادکستِ آموزشیِ روزانه‌ی شخصی: رودمپِ Notion → متن با LLM → صدا با TTS → ارسالِ صبحگاهی | 🧪 تست شخصی — **فقط ادمین** (کاربر دیگری نمی‌تواند استفاده کند)؛ بدون پرداخت | `bots/daily-brief/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
 مدل‌ها (همه از **OpenRouter**): پیش‌فرض `google/gemini-2.5-flash`؛ کارهای دقیق `google/gemini-2.5-pro`؛ فالبک ارزان `deepseek/deepseek-v3.2`.
@@ -109,6 +110,7 @@
 | `VPS_SSH_KEY` | اتصال CI/CD به سرور (موجود) |
 | `<BOT>_BOT_TOKEN` / `<BOT>_OPENROUTER_KEY` | per ربات: `VOICE2TEXT_*` (اختیاری)، `RESUME_TAILOR_*`، `TAROT_*` |
 | `VOICE2TEXT_NOTION_TOKEN` | اختیاری — قابلیت Notion |
+| `DAILY_BRIEF_NOTION_TOKEN` | اختیاری ولی لازمِ کارکرد: توکنِ Internal Integration نوشن که پیجِ «دستیار آموزشی» با آن share شده. بدونش ربات بالا می‌آید ولی رودمپ ندارد |
 | `VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED` | اختیاری — کلید OpenRouter شخصیِ مالک؛ فقط پردازش‌های `OWNER_ID` (اولین `ADMIN_IDS`, پیش‌فرض `100257975`) روی voice2text از این کلید استفاده می‌کنند، بقیه‌ی کاربران همچنان از `VOICE2TEXT_OPENROUTER_KEY` — مصرفِ شخصیِ مالک را از هزینه‌ی سرویس جدا می‌کند |
 | `OWNER_TELEGRAM_ID` | **اختیاری ولی مهم**: آی‌دی عددی تلگرام مالک → هشدار تلگرامی خرابی Health/Deploy/Backup + دریافت آدرس تونل داشبورد + **ادمینِ همه‌ی ربات‌ها** (deploy همین مقدار را به‌صورت `ADMIN_IDS` در .env هر ربات upsert می‌کند). **می‌تواند چند آی‌دی با کاما باشد** (مثل `111,222,333`) تا چند نفر هم هشدار بگیرند هم ادمین باشند — فقط مقدار Secret را در گیت‌هاب ویرایش کن، نیازی به کد/PR نیست |
 | `DASHBOARD_TOKEN` | توکن ورود به داشبورد ادمین (رشته‌ی تصادفی بلند ≥۳۲ کاراکتر) — تا ست نشود داشبورد دیپلوی نمی‌شود |

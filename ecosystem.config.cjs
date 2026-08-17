@@ -6,6 +6,8 @@ module.exports = {
     { name: 'voice2text',    cwd: 'bots/voice2text',    script: 'index.js' },
     // resume-tailor بازنشسته شد (منسوخ؛ deploy.yml یک‌باره از pm2 حذفش می‌کند). کدش برای آرشیو می‌ماند.
     { name: 'tarot',         cwd: 'bots/tarot',          script: 'index.js' },
+    // پادکستِ آموزشیِ روزانه‌ی شخصیِ مالک (فقط ادمین؛ Notion → LLM → TTS → تلگرام)
+    { name: 'daily-brief',   cwd: 'bots/daily-brief',    script: 'index.js' },
     // داشبورد ادمین — ربات نیست ولی همین زنجیره‌ی deploy/backup/ops را استفاده می‌کند؛
     // فقط روی 127.0.0.1:8787 گوش می‌دهد و از Cloudflare Tunnel در دسترس است (deploy.yml)
     { name: 'dashboard',     cwd: 'bots/dashboard',      script: 'index.js' },
