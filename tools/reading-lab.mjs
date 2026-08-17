@@ -24,12 +24,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
-import { CARD_BY_KEY } from '../bots/tarot/cards.js';
-import { headlineOk } from '../bots/tarot/verdict.js';
 import {
-  drawCards, buildReadingCtx, renderV4, checkV4Shape, readText,
+  drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose,
 } from '../bots/tarot/reading-core.js';
+// سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
+import { checkReading, modelText, ngrams } from './reading-lab/checks.mjs';
 
 const L = (await import('../bots/tarot/locales/fa.js')).default;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,111 +42,6 @@ const ONLY = (val('only', '') || '').split(',').filter(Boolean);
 const OUT = val('out', '');
 
 const SCEN = JSON.parse(fs.readFileSync(path.join(HERE, 'reading-lab', 'scenarios.json'), 'utf8'));
-
-/* ═══════════════ سنجه‌های مکانیکی ═══════════════ */
-// همه‌ی این‌ها **قطعی** اند: یا رد می‌شوند یا نمی‌شوند. قضاوتِ سلیقه‌ای جای دیگری است.
-// قاعده: هر چیزی که بتوان مکانیکی سنجید نباید به چشمِ آدم سپرده شود (همان قاعده‌ای که
-// می‌گوید هرچه کد می‌تواند تضمین کند نباید در پرامپت بیاید).
-
-// خطابِ رسمی. نمونه‌های واقعیِ انسانی ۱۰۰٪ «تو» اند و پرامپت هم قفلش کرده.
-const FORMAL = /(^|[\s،.؛:!؟(])(شما|شمارو|بفرمایید|بفرمائید|می‌کنید|میکنید|می‌بینید|می‌دانید|می‌دونید که شما|دارید|هستید|باشید|کنید|نمایید|بدانید|خواهید)([\s،.؛:!؟)]|$)/;
-// عبارت‌هایی که پرامپت صریحاً ممنوعشان کرده (جمله‌ی بی‌جهت)
-const BANNED = ['بستگی به خودت داره', 'بستگی داره', 'به شهودت اعتماد کن', 'کائنات',
-  'شاید آره شاید نه', 'هم این باشه هم اون', 'فقط خودت می‌دونی'];
-// اشاره‌ی زمانی به **گذشته** ممنوعِ مطلق است. تاریخچه‌ی این تصمیم مهم است: اول داده‌ی
-// دقیقِ زمان به مدل دادیم، بعد قاعده‌ی پرامپت، بعد قاعده‌ی سراسری — و هر بار مدل یک
-// راهِ تازه برای ساختنِ زمان پیدا کرد. حالا خودِ داده حذف شده و قاعده یک‌خطی است، پس
-// این سنجه هم دیگر لازم نیست چیزی را با «زمانِ واقعی» مقایسه کند: هر واژه‌ی زمانِ
-// گذشته در متن = ایراد. (بازه‌ی آینده مثل «تا آخر این فصل» عمداً در لیست نیست.)
-const PAST_TIME = /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پیش|ماهِ? ?(پیش|گذشته)|ماه‌ها پیش|ماه‌های قبل|هفتهٔ? ?(پیش|گذشته)|هفته‌ی (پیش|گذشته)|هفته‌ها پیش|هفته‌های قبل|روزهای قبل|چند وقت پیش|دفعه‌ی قبل که|بارِ? قبل که)/;
-
-const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
-
-const words = (s) => String(s || '').replace(/[‌]/g, ' ').split(/\s+/).filter(Boolean);
-const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; i + n <= w.length; i++) out.push(w.slice(i, i + n).join(' ')); return out; };
-
-// متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
-function modelText(llm) {
-  return [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
-    ...(llm.reads || []).map(readText), ...(llm.cards || []).map(c => c?.teaser)]
-    .filter(Boolean).join('\n');
-}
-
-function checkReading({ llm, rendered, spread, cards, ctx, step }) {
-  const issues = [], notes = [];
-  const raw = modelText(llm);
-  const full = [rendered.headline, rendered.body, rendered.closing].join('\n');
-
-  // ۱) سرخط: همان گاردی که خودِ ربات اعمال می‌کند
-  if (!headlineOk(llm.headline)) issues.push(`سرخط فرمول را ندارد: «${llm.headline}»`);
-
-  // ۲) لحن
-  const fm = raw.match(FORMAL);
-  if (fm) issues.push(`لحنِ رسمی: «${fm[2]}»`);
-
-  // ۳) خط تیره: باید در متنِ نهایی صفر باشد (noDash تضمینش می‌کند)
-  if (/—|--/.test(full)) issues.push('خط تیره در متنِ نهایی مانده (noDash کار نکرده)');
-  if (/—|--/.test(raw)) notes.push('مدل خط تیره تولید کرد ولی کد پاکش کرد');
-
-  // ۴) برچسبِ کارت‌ها: هر برچسب دقیقاً یک بار و به ترتیب، بدونِ تکرارِ چسبیده.
-  // ⚠️ «یک خط per کارت» فرضِ غلطی بود: متنِ خودِ مدل می‌تواند خطِ جدید داشته باشد و
-  // آن‌وقت شمارشِ موقعیتی می‌شکند (کرشِ واقعیِ اجرای دوم). پس به‌جای موقعیت، **جای
-  // هر برچسب** پیدا می‌شود و خطوطِ اضافه به‌عنوان ادامه‌ی متن پذیرفته می‌شوند.
-  const labels = L.prompts.cardLabels(cards.length);
-  const block = (rendered.body.split('\n\n').find(b => b.startsWith('🃏')) || '').replace(/^🃏\s*/, '');
-  const lines = block.split('\n').filter(Boolean);
-  if (!lines.length) issues.push(`بلوکِ کارت‌ها اصلاً نیامد (باید ${cards.length} کارت باشد)`);
-  let cursor = -1;
-  labels.forEach((lab, i) => {
-    const at = lines.findIndex((ln, k) => k > cursor && ln.startsWith(lab));
-    if (at < 0) { issues.push(`برچسبِ «${lab}» پیدا نشد`); return; }
-    cursor = at;
-    const rest = lines[at].slice(lab.length);
-    if (/^\s*(?:و |اما |ولی )?کارت[ً-ْ]*[\s‌]*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|بعدی|آخر)/.test(rest))
-      issues.push(`برچسبِ تکراری در «${lab}»: «${lines[at].slice(0, 40)}…»`);
-    if (lines.slice(at + 1).some(ln => ln.startsWith(lab))) issues.push(`برچسبِ «${lab}» بیش از یک بار آمده`);
-  });
-
-  // ۵) نامِ جایگاه نباید در متن بیاید (پرامپت صریحاً گفته)
-  for (const p of spread.positions) {
-    if (p.fa.length >= 4 && full.includes(p.fa)) notes.push(`نامِ جایگاه «${p.fa}» در متن آمده`);
-  }
-
-  // ۶) عبارت‌های ممنوع و ایموجیِ مدل
-  for (const b of BANNED) if (raw.includes(b)) issues.push(`عبارتِ ممنوع: «${b}»`);
-  const em = raw.match(EMOJI);
-  if (em) notes.push(`مدل ایموجی گذاشت: ${em[0]}`);
-
-  // ۷) هیچ اشاره‌ی زمانیِ گذشته‌ای مجاز نیست (داده‌اش را اصلاً به مدل نمی‌دهیم)
-  const pt = raw.match(PAST_TIME);
-  if (pt) issues.push(`اشاره‌ی زمانی به گذشته: «${pt[0]}»`);
-  // و اگر شناختِ قبلی هست، ارجاع باید وجود داشته باشد
-  if ((ctx.previous || []).length && !String(llm.callback || '').trim())
-    notes.push('شناختِ قبلی وجود داشت ولی هیچ ارجاعی به جلسه‌ی قبل نداد');
-  if (!(ctx.previous || []).length && String(llm.callback || '').trim())
-    issues.push('اولین فال است ولی به «جلسه‌ی قبل» ارجاع داد (توهم)');
-
-  // ۸) تکرارِ تیزر در خوانشِ همان کارت (پرامپت: حرفی که در معرفی زدی را تکرار نکن)
-  (llm.reads || []).forEach((r, i) => {
-    const a = new Set(ngrams(llm.cards?.[i]?.teaser, 4));
-    const dup = ngrams(readText(r), 4).filter(g => a.has(g));
-    if (dup.length) notes.push(`خوانشِ کارت ${i + 1} تیزر را تکرار کرد: «${dup[0]}»`);
-  });
-
-  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»).
-  // ⚠️ نامِ فارسیِ کارت روی `CARD_BY_KEY` است نه روی خروجیِ `drawCards` (که فقط
-  // key و reversed دارد). نسخه‌ی اول `c.fa` را می‌خواند و همیشه undefined می‌گرفت،
-  // پس این ادعا روی **هر ۹ فال** به‌غلط قرمز شد در حالی که لنگر درست کار می‌کرد.
-  const named = cards.filter(c => full.includes(CARD_BY_KEY[c.key].fa)).length;
-  if (named === 0) issues.push('هیچ کارتی در متن با نامِ خودش صدا زده نشد');
-  else if (named < Math.min(2, cards.length)) notes.push(`فقط ${named} کارت با نامِ خودش صدا زده شد`);
-
-  // ۱۰) اندازه: چیدمانِ بزرگ نباید دیوارِ متن بسازد
-  const perCard = lines.length ? Math.round(block.length / lines.length) : 0;
-  if (spread.size >= 6 && perCard > 220) issues.push(`هر کارت ${perCard} کاراکتر است (چیدمانِ بزرگ باید یک جمله باشد)`);
-
-  return { issues, notes, stats: { chars: full.length, perCard, named, cards: cards.length } };
-}
 
 /* ═══════════════ اجرای یک فال ═══════════════ */
 async function runStep(persona, step, i, state) {
@@ -192,7 +87,7 @@ async function runStep(persona, step, i, state) {
   // نباید بابتِ یک باگِ ابزار از بین برود (درسِ کرشِ اجرای دوم).
   let check;
   try {
-    check = checkReading({ llm: parsed, rendered, spread, cards, ctx, step });
+    check = checkReading({ llm: parsed, rendered, spread, cards, ctx, L });
   } catch (e) {
     check = { issues: [`خطای خودِ سنجه: ${e.message}`], notes: [], stats: { chars: 0, perCard: 0, named: 0, cards: cards.length } };
   }
