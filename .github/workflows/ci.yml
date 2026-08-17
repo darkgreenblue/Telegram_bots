@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        bot: [voice2text, resume-tailor, tarot, dashboard]
+        bot: [voice2text, resume-tailor, tarot, dashboard, daily-brief]
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +125,13 @@ jobs:
       - name: Reading lab checks
         if: matrix.bot == 'tarot'
         run: node tools/check-reading-lab.mjs
+
+      # پادکستِ روزانه: کلِ ارزشِ این ربات روی مسیرهایی است که CI معمولاً نمی‌بیند — زمان‌بندیِ
+      # صبحگاهی، چانک‌بندیِ متنِ بلند برای TTS، و گاردِ «روزی یک قسمت» که فقط موقعِ ری‌استارت
+      # معنی پیدا می‌کند. هر سه در توابعِ خالص‌اند و این‌جا واقعاً اجرا می‌شوند (بدونِ شبکه).
+      - name: Daily brief check
+        if: matrix.bot == 'daily-brief'
+        run: node tools/check-daily-brief.mjs
 
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
