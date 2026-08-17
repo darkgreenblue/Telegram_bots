@@ -24,6 +24,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+// ⚠️ سنجه‌ها که به checks.mjs منتقل شدند، این import با آن‌ها رفت — ولی خودِ آزمایشگاه
+// هنوز در شرطِ پذیرشِ ریکوئست و در probe از آن استفاده می‌کند. نتیجه: ReferenceError
+// داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
+// تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
+import { headlineOk } from '../bots/tarot/verdict.js';
 import {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose,
