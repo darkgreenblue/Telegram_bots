@@ -809,9 +809,14 @@ for (const r of recoverStuck(db)) {
 }
 
 function launch() {
-  bot.launch({ dropPendingUpdates: true })
-    .then(() => log(`✅ daily-brief bot started (v${PRODUCT_VERSION}, test=${TEST_PHASE}, notion=${!!NOTION_TOKEN})`))
-    .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
+  // خطِ تأییدِ بوت از کال‌بکِ onLaunch می‌آید، نه از then: در Telegraf 4 پرامیسِ launch
+  // تا **توقفِ** ربات resolve نمی‌شود (خودش حلقه‌ی polling را await می‌کند)، پس then
+  // عملاً هرگز اجرا نمی‌شد و out.log خالی می‌ماند. برای رباتی که کارش صبحِ زود و بدونِ
+  // ناظر است، نبودِ خطِ «بالا آمدم» یعنی هیچ راهی برای تشخیصِ سالم‌بودنش از روی لاگ نداریم.
+  // onLaunch دقیقاً بعد از موفقیتِ getMe صدا زده می‌شود، یعنی توکن هم معتبر است.
+  bot.launch({ dropPendingUpdates: true }, () => {
+    log(`✅ daily-brief bot started (v${PRODUCT_VERSION}, test=${TEST_PHASE}, notion=${!!NOTION_TOKEN}, admins=${ADMIN_IDS.join(',')})`);
+  }).catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 launch();
 process.once('SIGINT',  () => { try { bot.stop('SIGINT'); } catch {} });
