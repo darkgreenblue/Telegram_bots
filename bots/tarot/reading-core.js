@@ -227,13 +227,25 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
   };
 }
 
+// متنِ خوانشِ یک کارت. مدل گاهی به‌جای `[{text}]` آرایه‌ی رشته می‌دهد (دیده‌شده در
+// آزمایشگاه، مخصوصاً در چیدمانِ ده‌کارتی که خروجی بلند است). هر دو شکل پذیرفته می‌شود،
+// وگرنه محتوایی که مدل تولید کرده بی‌صدا دور ریخته می‌شود.
+export const readText = (x) => String(typeof x === 'string' ? x : (x?.text || '')).trim();
+
 // شرطِ پذیرشِ شکلِ خروجیِ v4. عمداً این‌جاست نه داخلِ index.js: آزمایشگاه باید **همان**
 // معیارِ پذیرش را داشته باشد، وگرنه چیزی را سبز گزارش می‌کند که ربات ردش می‌کند.
 // (اعتبارسنجیِ سرخط جداست و در `verdict.js` می‌ماند چون قاعده‌ی محتوایی است نه ساختاری.)
+//
+// ⚠️ «طولِ آرایه» کافی نیست — باگِ واقعی که آزمایشگاه در اولین اجرا پیدا کرد (۱۴۰۵/۰۵/۲۶):
+// در ۲ فال از ۹ فال، `reads` طولِ درست داشت ولی متنِ هیچ کارتی خوانده نمی‌شد، پس رندر
+// همه را دور می‌ریخت و **کلِ بلوکِ کارت‌به‌کارت از خوانش غایب می‌شد**. یکی از آن دو
+// صلیب سلتیِ ۱۰۰٬۰۰۰ تومانی بود: کاربر بهای ده کارت را می‌داد و چهار خط تحویل می‌گرفت.
+// هیچ خطایی هم لاگ نمی‌شد. حالا خوانشِ خالی = خروجیِ نامعتبر = retry.
 export function checkV4Shape(obj, cardCount) {
-  return !!(obj && Array.isArray(obj.cards) && obj.cards.length >= cardCount
-    && Array.isArray(obj.reads) && obj.reads.length >= cardCount
-    && obj.closing && obj.pattern);
+  if (!obj || !Array.isArray(obj.cards) || obj.cards.length < cardCount) return false;
+  if (!Array.isArray(obj.reads) || obj.reads.length < cardCount) return false;
+  if (!obj.closing || !obj.pattern) return false;
+  return obj.reads.slice(0, cardCount).every(r => readText(r).length > 0);
 }
 
 /* ═══ رندرِ متنِ نهایی v4 ═══ */
@@ -246,7 +258,7 @@ export function renderV4(llm, cards, labels) {
   // هم و در یک تکه می‌آیند («کارت اولت می‌گه… کارت بعدیت می‌گه…»)؛ تیترِ ایموجی‌دار
   // برای هر کارت متن را رباتی می‌کند. ایموجیِ بخش می‌ماند، ولی فقط **یک بار**.
   const cardLines = (llm.reads || []).slice(0, cards.length).map((x, i) => {
-    const t = String(x?.text || '').trim();
+    const t = readText(x);
     if (!t) return '';
     // شماره‌ی کارت **قطعی و از کد** می‌آید، نه از مدل: هر برچسبی که مدل خودش جلوی
     // جمله گذاشته باشد اول برداشته می‌شود و بعد برچسبِ درست چسبانده می‌شود.

@@ -24,9 +24,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 import { headlineOk } from '../bots/tarot/verdict.js';
 import {
-  drawCards, buildReadingCtx, renderV4, checkV4Shape,
+  drawCards, buildReadingCtx, renderV4, checkV4Shape, readText,
   orChatResilient, parseJsonLoose, agoFa,
 } from '../bots/tarot/reading-core.js';
 
@@ -53,7 +54,11 @@ const FORMAL = /(^|[\s،.؛:!؟(])(شما|شمارو|بفرمایید|بفرما
 const BANNED = ['بستگی به خودت داره', 'بستگی داره', 'به شهودت اعتماد کن', 'کائنات',
   'شاید آره شاید نه', 'هم این باشه هم اون', 'فقط خودت می‌دونی'];
 // زمانی که مدل نباید از خودش بسازد. فقط وقتی خطاست که در دیتای واقعیِ همان فال نباشد.
-const TIME_WORDS = ['پارسال', 'سال پیش', 'ماه پیش', 'هفته پیش', 'چند وقت پیش', 'سال گذشته', 'ماه گذشته'];
+// ⚠️ حالتِ جمع و «قبل» هم لازم است: در اولین اجرا مدل نوشت «هفته‌های قبل» برای فالی
+// که ۴۰ دقیقه قبل بود، و نسخه‌ی اولِ این لیست از کنارش رد شد.
+const TIME_WORDS = ['پارسال', 'سال پیش', 'سال‌ها پیش', 'ماه پیش', 'ماه‌ها پیش', 'ماه‌های قبل',
+  'هفته پیش', 'هفته‌ها پیش', 'هفته‌های قبل', 'روزهای قبل', 'چند وقت پیش', 'سال گذشته',
+  'ماه گذشته', 'هفته‌ی گذشته', 'دفعه‌ی قبل که'];
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
 
 const words = (s) => String(s || '').replace(/[‌]/g, ' ').split(/\s+/).filter(Boolean);
@@ -62,7 +67,7 @@ const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; i + n <
 // متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
 function modelText(llm) {
   return [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
-    ...(llm.reads || []).map(r => r?.text), ...(llm.cards || []).map(c => c?.teaser)]
+    ...(llm.reads || []).map(readText), ...(llm.cards || []).map(c => c?.teaser)]
     .filter(Boolean).join('\n');
 }
 
@@ -120,13 +125,17 @@ function checkReading({ llm, rendered, spread, cards, ctx, step }) {
   // ۸) تکرارِ تیزر در خوانشِ همان کارت (پرامپت: حرفی که در معرفی زدی را تکرار نکن)
   (llm.reads || []).forEach((r, i) => {
     const a = new Set(ngrams(llm.cards?.[i]?.teaser, 4));
-    const dup = ngrams(r?.text, 4).filter(g => a.has(g));
+    const dup = ngrams(readText(r), 4).filter(g => a.has(g));
     if (dup.length) notes.push(`خوانشِ کارت ${i + 1} تیزر را تکرار کرد: «${dup[0]}»`);
   });
 
-  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»)
-  const named = cards.filter(c => full.includes(c.fa)).length;
+  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»).
+  // ⚠️ نامِ فارسیِ کارت روی `CARD_BY_KEY` است نه روی خروجیِ `drawCards` (که فقط
+  // key و reversed دارد). نسخه‌ی اول `c.fa` را می‌خواند و همیشه undefined می‌گرفت،
+  // پس این ادعا روی **هر ۹ فال** به‌غلط قرمز شد در حالی که لنگر درست کار می‌کرد.
+  const named = cards.filter(c => full.includes(CARD_BY_KEY[c.key].fa)).length;
   if (named === 0) issues.push('هیچ کارتی در متن با نامِ خودش صدا زده نشد');
+  else if (named < Math.min(2, cards.length)) notes.push(`فقط ${named} کارت با نامِ خودش صدا زده شد`);
 
   // ۱۰) اندازه: چیدمانِ بزرگ نباید دیوارِ متن بسازد
   const perCard = lines.length ? Math.round(block.length / lines.length) : 0;
