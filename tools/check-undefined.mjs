@@ -44,6 +44,7 @@ const TARGETS = [
   'shared/logger.js',
   'tools/benchmark/tme.mjs',
   'tools/benchmark/collect.mjs',
+  'tools/reading-lab.mjs',
   'tools/reading-lab/checks.mjs',
   'tools/marketing/perf.mjs',
   'tools/marketing/pick-cards.mjs',

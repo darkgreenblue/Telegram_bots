@@ -24,6 +24,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+import { CARD_BY_KEY } from '../bots/tarot/cards.js';
+// ⚠️ سنجه‌ها که به checks.mjs منتقل شدند، این import با آن‌ها رفت — ولی خودِ آزمایشگاه
+// هنوز در شرطِ پذیرشِ ریکوئست و در probe از آن استفاده می‌کند. نتیجه: ReferenceError
+// داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
+// تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
+import { headlineOk } from '../bots/tarot/verdict.js';
 import {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose,
@@ -38,10 +44,35 @@ const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(`--${n}`);
 const val = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const DRY = flag('dry');
+// حالتِ fake: کلِ خطِ لوله **واقعاً** اجرا می‌شود (ساختِ پرامپت، callbackِ validate،
+// رندر، همه‌ی سنجه‌ها، گزارش) ولی پاسخ از یک استابِ محلی می‌آید نه از شبکه.
+// چرا لازم شد: `--dry` قبل از validate برمی‌گردد، پس مسیرِ پذیرش/رندر/سنجش را اصلاً
+// لمس نمی‌کند. یک importِ جامانده (`headlineOk`) دقیقاً همان‌جا پنهان ماند، داخلِ
+// try/catch به‌عنوان «خطای LLM» بلعیده شد، و کلِ دورِ چهارم با ۴۵ ریکوئستِ هدررفته و
+// صفر فال تمام شد. با `--fake` همان باگ در دو ثانیه و با صفر هزینه پیدا می‌شود.
+const FAKE = flag('fake');
 const ONLY = (val('only', '') || '').split(',').filter(Boolean);
 const OUT = val('out', '');
 
 const SCEN = JSON.parse(fs.readFileSync(path.join(HERE, 'reading-lab', 'scenarios.json'), 'utf8'));
+
+/* ═══════════════ استابِ پاسخِ مدل (حالتِ fake) ═══════════════ */
+// خروجیِ ساختگی ولی **معتبر**: باید از checkV4Shape و headlineOk رد شود تا مسیرِ
+// «پذیرش» اجرا شود. متنش عمداً به کارت‌ها و سؤال لنگر می‌خورد تا سنجه‌ها هم کار کنند.
+function fakeOut(spread, cards, ctx) {
+  const names = cards.map(c => CARD_BY_KEY[c.key].fa);
+  const q = String(ctx.question || '').split(/\s+/).slice(0, 3).join(' ');
+  return JSON.stringify({
+    cards: names.map(n => ({ teaser: `کارتِ ${n}، کارتِ نمونه است. تصویرش یک صحنه‌ی ساختگی دارد.` })),
+    headline: `بله با احتمالِ زیاد پیش می‌ره، ولی باید بهای صبر رو بدی.`,
+    pattern: `ترکیبِ ${names[0]} و ${names[names.length - 1]} درباره‌ی «${q}» یک جهت نشان می‌دهد.`,
+    reads: names.map(n => ({ text: `${n} می‌گه این بخش از «${q}» دارد جابه‌جا می‌شود.` })),
+    absent: ctx['کارتِ سنگینی که نیامده'] ? `کارتِ ${ctx['کارتِ سنگینی که نیامده'].fa} نیامده و این یعنی خبری از آن نوع فشار نیست.` : '',
+    callback: (ctx.previous || []).length ? `دفعه‌ی قبل هم حولِ همین موضوع بودی.` : '',
+    closing: `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
+    summary: 'خلاصه‌ی ساختگی', memory: 'حافظه‌ی ساختگی',
+  });
+}
 
 /* ═══════════════ اجرای یک فال ═══════════════ */
 async function runStep(persona, step, i, state) {
@@ -69,7 +100,16 @@ async function runStep(persona, step, i, state) {
   if (DRY) return { spread, cards, ctx, inputChars, dry: true };
 
   let parsed = null, fallback = null;
-  const res = await orChatResilient(system, userMsg, {
+  // در حالتِ fake همان callbackِ validate اجرا می‌شود، فقط ورودی‌اش از استاب می‌آید.
+  const call = FAKE
+    ? (sys, usr, opts) => {
+        const out = fakeOut(spread, cards, ctx);
+        return opts.validate(out)
+          ? { out, model: 'fake', attempts: 1, usages: [{ prompt_tokens: 0, completion_tokens: 0 }] }
+          : null;
+      }
+    : orChatResilient;
+  const res = await call(system, userMsg, {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
