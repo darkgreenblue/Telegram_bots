@@ -110,6 +110,14 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-reading-v4.mjs
 
+      # آزمایشگاهِ خوانش در حالتِ dry: کلِ مسیرِ تولیدِ فال (کشیدنِ کارت، ساختِ کانتکست،
+      # ساختِ پرامپت) واقعاً اجرا می‌شود، فقط بدونِ فراخوانیِ مدل. این تنها چکی است که
+      # مسیرِ **سردِ** خوانش را در CI لمس می‌کند؛ boot smoke test فقط تا گاردِ ENV می‌رود
+      # و یک شناسه‌ی تعریف‌نشده روی این مسیر تا رسیدنِ کاربرِ واقعی ساکت می‌ماند (بند ۸).
+      - name: Reading lab (dry)
+        if: matrix.bot == 'tarot'
+        run: node tools/reading-lab.mjs --dry
+
       # اجرای واقعی تا گاردِ ENV: همه‌ی import ها (از جمله shared/) resolve می‌شوند و باید
       # با کد ۱ و پیام «خالی است» خارج شود — بدون side effect (گارد قبل از ساخت DB است).
       - name: Boot smoke test

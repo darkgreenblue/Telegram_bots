@@ -1,0 +1,288 @@
+#!/usr/bin/env node
+// 🧪 آزمایشگاهِ خوانش — شبیه‌سازیِ کاملِ کاربر بدونِ تلگرام و بدونِ دیتابیس.
+//
+// چرا هست: تا امروز تنها راهِ سنجیدنِ کیفیتِ خوانش، طی‌کردنِ دستیِ فلو در خودِ ربات بود
+// (انتخابِ کارت، انتظار، و بعد کپیِ ده‌ها پیام). این یعنی هر دورِ بهبود ساعت‌ها کارِ دستی
+// می‌خواست و عملاً بیشتر از دو سه فال تست نمی‌شد. حالا کلِ مسیرِ «کاربرِ جدید → چند فالِ
+// پشتِ سرِ هم با حافظه‌ی انباشته» آفلاین اجرا می‌شود و خروجی با معیارهای مکانیکی سنجیده
+// می‌شود، در چند دقیقه و با چند سنت.
+//
+// ⚠️ این کپیِ ربات نیست: پرامپت از `locales/fa.js`، کلاینتِ OpenRouter و موتورِ دک و
+// کانتکست و رندر از `bots/tarot/reading-core.js`، و شرطِ پذیرش از همان‌جا + `verdict.js`
+// می‌آید. یعنی هر چیزی که این‌جا می‌بینی دقیقاً همان چیزی است که کاربر می‌بیند.
+//
+// ⚠️ هزینه: هر فال یک فراخوانیِ واقعیِ OpenRouter است و روی **کلیدِ خودِ تاروت** می‌نشیند
+// (همان `OPENROUTER_API_KEY`). یک فالِ سه‌کارتی حدود ۰.۶ سنت و صلیب سلتی حدود ۱.۳ سنت.
+//
+// اجرا:
+//   node tools/reading-lab.mjs --dry              # بدونِ فراخوانی: فقط اندازه‌ی ورودی و سلامتِ خطِ لوله
+//   node tools/reading-lab.mjs                    # اجرای کاملِ همه‌ی پرسوناها
+//   node tools/reading-lab.mjs --only P1,P2       # فقط چند پرسونا
+//   node tools/reading-lab.mjs --out out.json     # ذخیره‌ی خامِ همه‌چیز برای مقایسه‌ی دورِ بعد
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+import { headlineOk } from '../bots/tarot/verdict.js';
+import {
+  drawCards, buildReadingCtx, renderV4, checkV4Shape,
+  orChatResilient, parseJsonLoose, agoFa,
+} from '../bots/tarot/reading-core.js';
+
+const L = (await import('../bots/tarot/locales/fa.js')).default;
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+const argv = process.argv.slice(2);
+const flag = (n) => argv.includes(`--${n}`);
+const val = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
+const DRY = flag('dry');
+const ONLY = (val('only', '') || '').split(',').filter(Boolean);
+const OUT = val('out', '');
+
+const SCEN = JSON.parse(fs.readFileSync(path.join(HERE, 'reading-lab', 'scenarios.json'), 'utf8'));
+
+/* ═══════════════ سنجه‌های مکانیکی ═══════════════ */
+// همه‌ی این‌ها **قطعی** اند: یا رد می‌شوند یا نمی‌شوند. قضاوتِ سلیقه‌ای جای دیگری است.
+// قاعده: هر چیزی که بتوان مکانیکی سنجید نباید به چشمِ آدم سپرده شود (همان قاعده‌ای که
+// می‌گوید هرچه کد می‌تواند تضمین کند نباید در پرامپت بیاید).
+
+// خطابِ رسمی. نمونه‌های واقعیِ انسانی ۱۰۰٪ «تو» اند و پرامپت هم قفلش کرده.
+const FORMAL = /(^|[\s،.؛:!؟(])(شما|شمارو|بفرمایید|بفرمائید|می‌کنید|میکنید|می‌بینید|می‌دانید|می‌دونید که شما|دارید|هستید|باشید|کنید|نمایید|بدانید|خواهید)([\s،.؛:!؟)]|$)/;
+// عبارت‌هایی که پرامپت صریحاً ممنوعشان کرده (جمله‌ی بی‌جهت)
+const BANNED = ['بستگی به خودت داره', 'بستگی داره', 'به شهودت اعتماد کن', 'کائنات',
+  'شاید آره شاید نه', 'هم این باشه هم اون', 'فقط خودت می‌دونی'];
+// زمانی که مدل نباید از خودش بسازد. فقط وقتی خطاست که در دیتای واقعیِ همان فال نباشد.
+const TIME_WORDS = ['پارسال', 'سال پیش', 'ماه پیش', 'هفته پیش', 'چند وقت پیش', 'سال گذشته', 'ماه گذشته'];
+const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
+
+const words = (s) => String(s || '').replace(/[‌]/g, ' ').split(/\s+/).filter(Boolean);
+const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; i + n <= w.length; i++) out.push(w.slice(i, i + n).join(' ')); return out; };
+
+// متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
+function modelText(llm) {
+  return [llm.headline, llm.pattern, llm.callback, llm.absent, llm.closing,
+    ...(llm.reads || []).map(r => r?.text), ...(llm.cards || []).map(c => c?.teaser)]
+    .filter(Boolean).join('\n');
+}
+
+function checkReading({ llm, rendered, spread, cards, ctx, step }) {
+  const issues = [], notes = [];
+  const raw = modelText(llm);
+  const full = [rendered.headline, rendered.body, rendered.closing].join('\n');
+
+  // ۱) سرخط: همان گاردی که خودِ ربات اعمال می‌کند
+  if (!headlineOk(llm.headline)) issues.push(`سرخط فرمول را ندارد: «${llm.headline}»`);
+
+  // ۲) لحن
+  const fm = raw.match(FORMAL);
+  if (fm) issues.push(`لحنِ رسمی: «${fm[2]}»`);
+
+  // ۳) خط تیره: باید در متنِ نهایی صفر باشد (noDash تضمینش می‌کند)
+  if (/—|--/.test(full)) issues.push('خط تیره در متنِ نهایی مانده (noDash کار نکرده)');
+  if (/—|--/.test(raw)) notes.push('مدل خط تیره تولید کرد ولی کد پاکش کرد');
+
+  // ۴) برچسبِ کارت‌ها: هر خط دقیقاً یک برچسب، بدونِ تکرار و بدونِ جاافتادگی
+  const labels = L.prompts.cardLabels(cards.length);
+  const block = (rendered.body.split('\n\n').find(b => b.startsWith('🃏')) || '').replace(/^🃏\s*/, '');
+  const lines = block.split('\n').filter(Boolean);
+  if (lines.length !== cards.length) issues.push(`تعدادِ خطِ کارت ${lines.length} است، باید ${cards.length} باشد`);
+  lines.forEach((ln, i) => {
+    if (!ln.startsWith(labels[i])) issues.push(`خطِ ${i + 1} با «${labels[i]}» شروع نمی‌شود`);
+    const rest = ln.slice(labels[i].length);
+    if (/^\s*(?:و |اما |ولی )?کارت[ً-ْ]*[\s‌]*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|بعدی|آخر)/.test(rest))
+      issues.push(`برچسبِ تکراری در خطِ ${i + 1}: «${ln.slice(0, 40)}…»`);
+  });
+
+  // ۵) نامِ جایگاه نباید در متن بیاید (پرامپت صریحاً گفته)
+  for (const p of spread.positions) {
+    if (p.fa.length >= 4 && full.includes(p.fa)) notes.push(`نامِ جایگاه «${p.fa}» در متن آمده`);
+  }
+
+  // ۶) عبارت‌های ممنوع و ایموجیِ مدل
+  for (const b of BANNED) if (raw.includes(b)) issues.push(`عبارتِ ممنوع: «${b}»`);
+  const em = raw.match(EMOJI);
+  if (em) notes.push(`مدل ایموجی گذاشت: ${em[0]}`);
+
+  // ۷) ارجاعِ زمانی: فقط زمانی مجاز است که در دیتای واقعیِ همان فال باشد
+  const realTimes = (ctx.previous || []).map(p => p['چه‌وقت']);
+  for (const t of TIME_WORDS) {
+    if (raw.includes(t) && !realTimes.some(rt => rt.includes(t))) {
+      issues.push(`زمانِ ساختگی: «${t}» (زمان‌های واقعی: ${realTimes.join(' / ') || 'هیچ'})`);
+    }
+  }
+  // و اگر شناختِ قبلی هست، ارجاع باید وجود داشته باشد
+  if ((ctx.previous || []).length && !String(llm.callback || '').trim())
+    notes.push('شناختِ قبلی وجود داشت ولی هیچ ارجاعی به جلسه‌ی قبل نداد');
+  if (!(ctx.previous || []).length && String(llm.callback || '').trim())
+    issues.push('اولین فال است ولی به «جلسه‌ی قبل» ارجاع داد (توهم)');
+
+  // ۸) تکرارِ تیزر در خوانشِ همان کارت (پرامپت: حرفی که در معرفی زدی را تکرار نکن)
+  (llm.reads || []).forEach((r, i) => {
+    const a = new Set(ngrams(llm.cards?.[i]?.teaser, 4));
+    const dup = ngrams(r?.text, 4).filter(g => a.has(g));
+    if (dup.length) notes.push(`خوانشِ کارت ${i + 1} تیزر را تکرار کرد: «${dup[0]}»`);
+  });
+
+  // ۹) لنگر: الگو باید نامِ خودِ کارت‌ها را ببرد (قلبِ «دلیلِ لنگرخورده»)
+  const named = cards.filter(c => full.includes(c.fa)).length;
+  if (named === 0) issues.push('هیچ کارتی در متن با نامِ خودش صدا زده نشد');
+
+  // ۱۰) اندازه: چیدمانِ بزرگ نباید دیوارِ متن بسازد
+  const perCard = lines.length ? Math.round(block.length / lines.length) : 0;
+  if (spread.size >= 6 && perCard > 220) issues.push(`هر کارت ${perCard} کاراکتر است (چیدمانِ بزرگ باید یک جمله باشد)`);
+
+  return { issues, notes, stats: { chars: full.length, perCard, named, cards: cards.length } };
+}
+
+/* ═══════════════ اجرای یک فال ═══════════════ */
+async function runStep(persona, step, i, state) {
+  const spread = SPREAD_BY_ID[step.spread];
+  if (!spread) throw new Error(`چیدمانِ ناشناخته: ${step.spread}`);
+  // seed ثابت per قدم: اجرای دوباره **همان کارت‌ها** را می‌کشد، پس وقتی پرامپت را عوض
+  // می‌کنیم تفاوتِ خروجی فقط از پرامپت می‌آید نه از شانسِ کارت. این ستونِ فقراتِ مقایسه است.
+  const seed = `lab:${persona.id}:${i}`;
+  const cards = drawCards(seed, step.picks || [0, 1, 2], spread.size);
+
+  state.nowSec += (step.afterMinutes || 0) * 60;
+  const user = { telegram_id: 900000 + i, memory_json: state.memory, focus_area: persona.focus };
+  const ctx = buildReadingCtx({
+    user, spread, question: step.question, cards, focusKey: persona.focus, L,
+    name: persona.name,
+    kbOn: true,                 // لحنِ جدید برای همه روشن است (toneV2)
+    prev: state.prev.slice(0, 4),
+    now: state.nowSec,
+  });
+
+  const labels = L.prompts.cardLabels(cards.length);
+  const system = L.prompts.readerSystemV4(spread, labels);
+  const userMsg = L.prompts.readingContext(ctx);
+  const inputChars = system.length + userMsg.length;
+
+  if (DRY) return { spread, cards, ctx, inputChars, dry: true };
+
+  let parsed = null, fallback = null;
+  const res = await orChatResilient(system, userMsg, {
+    maxTokens: spread.maxTokens,
+    validate: (out) => {
+      const obj = parseJsonLoose(out);
+      if (!checkV4Shape(obj, cards.length)) return false;
+      if (!headlineOk(obj.headline)) { fallback = obj; return false; }
+      parsed = obj;
+      return true;
+    },
+  });
+  if (!parsed && fallback) parsed = fallback;
+  if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
+
+  const rendered = renderV4(parsed, cards, labels);
+  const check = checkReading({ llm: parsed, rendered, spread, cards, ctx, step });
+
+  // حافظه و تاریخچه دقیقاً مثل ربات به قدمِ بعد منتقل می‌شوند
+  if (typeof parsed.memory === 'string' && parsed.memory.trim()) state.memory = parsed.memory.trim().slice(0, 1200);
+  state.prev.unshift({
+    created_at: state.nowSec, type: spread.id,
+    summary: String(parsed.summary || '').slice(0, 300), feedback: '-',
+  });
+
+  return {
+    spread, cards, ctx, inputChars, llm: parsed, rendered, check,
+    model: res?.model, attempts: res?.attempts,
+    usage: (res?.usages || []).reduce((a, u) => ({
+      in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
+    }), { in: 0, out: 0 }),
+  };
+}
+
+/* ═══════════════ اجرا ═══════════════ */
+const personas = SCEN.personas.filter(p => !ONLY.length || ONLY.includes(p.id));
+const all = [];
+
+for (const persona of personas) {
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log(`👤 ${persona.id} — ${persona.name}  (تمرکز: ${persona.focus})`);
+  console.log(`   ${persona.why}`);
+  console.log('═'.repeat(72));
+
+  // کاربرِ کاملاً جدید: حافظه‌ی خالی، بدونِ هیچ فالِ قبلی
+  const state = { memory: '', prev: [], nowSec: Math.floor(Date.now() / 1000) };
+
+  for (let i = 0; i < persona.steps.length; i++) {
+    const step = persona.steps[i];
+    const r = await runStep(persona, step, i, state);
+    all.push({ persona: persona.id, i, step, ...r });
+
+    const head = `\n── ${persona.id}.${i + 1} «${r.spread.fa}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
+    console.log(head);
+    console.log(`   سؤال: ${step.question}`);
+    console.log(`   چالش: ${step.expect}`);
+    console.log(`   کارت‌ها: ${r.cards.map(c => c.key + (c.reversed ? '↕' : '')).join(', ')}`);
+    console.log(`   ورودیِ مدل: ${r.inputChars} کاراکتر ≈ ${Math.round(r.inputChars / 2.2)} توکن` +
+      (r.ctx.previous.length ? ` | فال‌های قبلی: ${r.ctx.previous.map(p => p['چه‌وقت']).join(' / ')}` : ' | بدونِ سابقه'));
+    if (r.dry) continue;
+    if (r.failed) { console.log('   ❌ همه‌ی تلاش‌ها شکست خورد (مسیرِ REFUND)'); continue; }
+
+    console.log(`   مدل: ${r.model} | تلاش: ${r.attempts} | توکن in/out: ${r.usage.in}/${r.usage.out}`);
+    console.log('\n' + '┄'.repeat(72));
+    console.log('🎴 تیزرها (چیزی که کاربر هنگام رو شدنِ هر کارت می‌بیند):');
+    (r.llm.cards || []).slice(0, r.cards.length).forEach((c, k) => console.log(`   ${k + 1}) ${c?.teaser || '—'}`));
+    console.log('\n📩 متنِ نهایی (عیناً همان سه پیامی که کاربر می‌گیرد):');
+    console.log(r.rendered.headline);
+    console.log('');
+    console.log(r.rendered.body);
+    console.log('');
+    console.log(r.rendered.closing);
+    console.log('┄'.repeat(72));
+
+    const { issues, notes, stats } = r.check;
+    console.log(`\n   📏 ${stats.chars} کاراکتر | ${stats.perCard} کاراکتر per کارت | ${stats.named}/${stats.cards} کارت با نامِ خودش صدا زده شد`);
+    if (issues.length) { console.log('   ❌ ایرادها:'); issues.forEach(x => console.log(`      - ${x}`)); }
+    else console.log('   ✅ همه‌ی سنجه‌های قطعی سبز');
+    if (notes.length) { console.log('   ⚠️ نکته‌ها:'); notes.forEach(x => console.log(`      - ${x}`)); }
+  }
+}
+
+/* ═══════════════ تکرارِ بین‌فالی: مهم‌ترین سنجه ═══════════════ */
+// تحقیق ۱ دلیلِ شماره‌یکِ رهاکردنِ محصولاتِ AI را «تکراری و قالبی» می‌داند، و دو بار هم
+// همین‌جا نشتِ few-shot دیدیم. یک فال به‌تنهایی هرگز این را لو نمی‌دهد؛ فقط کنارِ هم
+// گذاشتنِ چند فال نشان می‌دهد کدام جمله دارد از پرامپت تکرار می‌شود.
+if (!DRY) {
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log('🔁 تکرارِ بین‌فالی (متنی که در بیش از یک فال عیناً آمده)');
+  console.log('═'.repeat(72));
+  const done = all.filter(r => r.llm);
+  const seen = new Map();
+  for (const r of done) {
+    for (const g of new Set(ngrams(modelText(r.llm), 6))) {
+      if (!seen.has(g)) seen.set(g, new Set());
+      seen.get(g).add(`${r.persona}.${r.i + 1}`);
+    }
+  }
+  const repeats = [...seen.entries()].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
+  if (!repeats.length) console.log('   ✅ هیچ ۶کلمه‌ای در دو فالِ متفاوت تکرار نشده');
+  else {
+    console.log(`   ❌ ${repeats.length} تکرار:`);
+    for (const [g, s] of repeats.slice(0, 25)) console.log(`      [${[...s].join(', ')}] «${g}»`);
+  }
+
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log('📊 جمع‌بندی');
+  console.log('═'.repeat(72));
+  const tokIn = done.reduce((a, r) => a + r.usage.in, 0), tokOut = done.reduce((a, r) => a + r.usage.out, 0);
+  const bad = done.filter(r => r.check.issues.length);
+  console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${done.reduce((a, r) => a + (r.attempts - 1), 0)}`);
+  console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  for (const r of done) {
+    const n = r.check.issues.length;
+    console.log(`   ${n ? '❌' : '✅'} ${r.persona}.${r.i + 1} ${r.spread.fa}${n ? ` — ${n} ایراد` : ''}`);
+  }
+}
+
+if (OUT) {
+  fs.writeFileSync(OUT, JSON.stringify(all.map(r => ({
+    persona: r.persona, step: r.i, spread: r.spread?.id, question: r.step?.question,
+    cards: r.cards?.map(c => c.key + (c.reversed ? '↕' : '')),
+    inputChars: r.inputChars, llm: r.llm, rendered: r.rendered, check: r.check,
+  })), null, 2));
+  console.log(`\n💾 خروجیِ خام: ${OUT}`);
+}

@@ -84,10 +84,13 @@ console.log('\n▶ ترجمه دستی است، نه ماشینی');
 
 console.log('\n▶ سیم‌کشیِ runtime');
 {
-  const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+  // از v3.6.0 تزریقِ دانش در هسته‌ی خالصِ خوانش است (تا آزمایشگاهِ آفلاین هم همان را ببیند)
+  const SRC = readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
   const LOC = readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
   ok(/CARD_KB\[c\.key\]/.test(SRC), 'فقط ردیفِ کارتِ کشیده‌شده خوانده می‌شود (نه کلِ جدول)');
-  ok(/toneV2For\(user\.telegram_id\) && CARD_KB/.test(SRC), 'دانش فقط در لحنِ جدید تزریق می‌شود');
+  ok(/kbOn && CARD_KB/.test(SRC), 'دانش فقط در لحنِ جدید تزریق می‌شود');
+  const BOT = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+  ok(/kbOn: toneV2For\(user\.telegram_id\)/.test(BOT), 'پرچمِ لحن از خودِ ربات می‌آید، نه از هسته');
   ok(/catch\(\(\) => \(\{\}\)\)/.test(SRC), 'نبودنِ فایل خوانش را نمی‌شکند (fail-safe)');
   ok(/تصویرِ روی کارت/.test(LOC), 'تصویرِ کارت به کانتکست می‌رود (ماده‌ی خامِ دلیل‌آوریِ لنگرخورده)');
 }

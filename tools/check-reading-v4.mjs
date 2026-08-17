@@ -7,6 +7,13 @@
 import fs from 'node:fs';
 
 const SRC = fs.readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+// هسته‌ی خالصِ خوانش. از v3.6.0 ساختِ کانتکست، رندرِ متنِ نهایی و هلپرهای متن این‌جا
+// هستند تا `tools/reading-lab.mjs` بتواند **همان کد** را آفلاین اجرا کند. ادعاهایی که
+// قبلاً روی index.js بودند، حالا این‌جا را می‌بینند؛ نیتشان عوض نشده، هدفشان جابه‌جا شده.
+const CORE = fs.readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
+// و چون هسته یک ماژولِ واقعیِ importable است، دیگر لازم نیست منطق را از متنِ سورس
+// بیرون بکشیم: خودِ تابعِ صادرشده اجرا می‌شود (دقیق‌تر از new Function روی slice).
+const core = await import('../bots/tarot/reading-core.js');
 const LOC = fs.readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
 const V4 = LOC.slice(LOC.indexOf('readerSystemV4'), LOC.indexOf('readerSystem: (spread)'));
 
@@ -81,11 +88,25 @@ console.log('\n▶ شکلِ خروجی');
     'در افشا تیزر نمایش داده می‌شود، نه تحلیلِ کامل');
   ok(/const askFeedback = !v4 &&/.test(SRC), 'هیچ بازخوردی وسطِ خوانش گرفته نمی‌شود');
   ok(!/confirmation_question/.test(V4), 'سؤالِ تأییدیِ وسطِ خوانش از پرامپتِ v4 حذف شده');
-  ok(/if \(llm\.headline\) await ctx\.reply/.test(SRC), 'متنِ نهایی با سرخط شروع می‌شود');
-  // ترتیب: سرخط باید قبل از الگو و کارت‌به‌کارت و جمع‌بندی بیاید
+  ok(/if \(headline\) await ctx\.reply\(headline\);/.test(SRC), 'متنِ نهایی با سرخط شروع می‌شود');
+  // ترتیبِ **ارسال** در ربات: سرخط، بعد بدنه، بعد جمع‌بندی
   const fin = SRC.slice(SRC.indexOf('async function finishReading('));
-  const iH = fin.indexOf('llm.headline'), iP = fin.indexOf('llm.pattern'), iC = fin.indexOf('llm.closing');
-  ok(iH > 0 && iP > iH && iC > iP, 'ترتیبِ کد: سرخط → الگو → جمع‌بندی');
+  const iH = fin.indexOf('if (headline)'), iB = fin.indexOf('if (body)'), iC = fin.indexOf('if (closing)');
+  ok(iH > 0 && iB > iH && iC > iB, 'ترتیبِ ارسال: سرخط → بدنه → جمع‌بندی');
+  // و ترتیبِ **ساخت** در هسته: سرخط قبل از الگو، الگو قبل از جمع‌بندی
+  const iCh = CORE.indexOf('llm.callback'), iP = CORE.indexOf('llm.pattern'), iCl = CORE.indexOf('llm.closing');
+  ok(iCh > 0 && iP > iCh && iCl > iP, 'ترتیبِ کد در هسته: ارجاع → الگو → جمع‌بندی');
+  {
+    // رندر واقعاً اجرا می‌شود، نه اینکه فقط وجود داشته باشد
+    const r = core.renderV4(
+      { headline: 'بله ولی دیر', pattern: 'الگو', reads: [{ text: 'کارت اول می‌گه الف' }, { text: 'ب' }], closing: 'در کل…' },
+      [1, 2], ['کارت اول', 'کارت دوم']);
+    ok(r.headline.startsWith('🔮 '), 'سرخط نشانه‌ی بخشِ خودش را می‌گیرد');
+    ok(r.body.includes('🃏 کارت اول می‌گه الف\nکارت دوم ب'),
+      'برچسبِ ترتیبی از کد چسبیده و کارت‌ها در یک بلوکِ پیوسته‌اند');
+    ok((r.body.match(/🃏/g) || []).length === 1, 'فقط یک ایموجیِ کارت در کلِ بلوک (نه per کارت)');
+    ok(r.closing.startsWith('🕯️ '), 'جمع‌بندی نشانه‌ی بخشِ خودش را می‌گیرد');
+  }
   ok(/جایگاه‌ها[\s\S]{0,60}اسمشان را در متن نیاور/.test(V4),
     'نامِ جایگاه به مدل داده می‌شود ولی در متن نمی‌آید');
   ok(/cardLabels: \(n\)/.test(LOC), 'برچسبِ ترتیبیِ کارت‌ها در locale است');
@@ -108,23 +129,19 @@ console.log('\n▶ شکلِ خروجی');
   // تاریخچه‌ی دو باگ: اول برچسب دوباره چسبانده می‌شد («کارت آخرت اما کارتِ آخرت»)، بعد
   // فیکسش باعث می‌شد جمله‌ای مثل «این کارت می‌گه…» اصلاً بی‌شماره بماند. حالا قطعی است:
   // هر برچسبی که مدل گذاشته برداشته می‌شود و برچسبِ درست چسبانده می‌شود.
-  ok(/return `\$\{labels\[i\]\} \$\{noDash\(stripCardLabel\(t\)\)\}`;/.test(SRC),
+  ok(/return `\$\{labels\[i\]\} \$\{noDash\(stripCardLabel\(t\)\)\}`;/.test(CORE),
     'برچسب همیشه از کد می‌آید (strip + prefix)، نه از مدل');
   // بازخوردِ دورِ سوم: تیترِ ایموجی‌دار per کارت متن را رباتی می‌کرد. خوانشِ واقعیِ انسانی
   // کارت‌ها را پشتِ سرِ هم در یک تکه می‌آورد، نه هر کدام در پاراگرافِ جدا.
-  ok(/cardLines\.length \? `\$\{SECT\.card\} \$\{cardLines\.join\('\\n'\)\}` : ''/.test(SRC),
+  ok(/cardLines\.length \? `\$\{SECT\.card\} \$\{cardLines\.join\('\\n'\)\}` : ''/.test(CORE),
     'خوانشِ کارت‌ها یک بلوکِ پیوسته است، نه یک ایموجی per کارت');
   ok(/\*\*شماره‌ی کارت را ننویس، خودم اضافه می‌کنم\*\*/.test(V4),
     'پرامپت هم می‌گوید شماره را ننویس (تا تکرار اصلاً تولید نشود)');
   ok(!/کارت‌ها را با همین برچسب‌ها صدا بزن/.test(V4),
     'دستورِ برچسب‌گذاری از پرامپت حذف شد (کد ضمانتش می‌کند)');
   {
-    // منطقِ برداشتنِ برچسب واقعاً اجرا می‌شود
-    const pick = (n) => SRC.slice(SRC.indexOf(`const ${n}`), SRC.indexOf('\n', SRC.indexOf(';', SRC.indexOf(`const ${n}`))));
-    const fnI = SRC.indexOf('function stripCardLabel');
-    const body = [pick('ORD_FA'), pick('HAR'), pick('CARD_LABEL_RE'),
-      SRC.slice(fnI, SRC.indexOf('\n}', fnI) + 2)].join('\n');
-    const strip = new Function(body + '; return stripCardLabel;')();
+    // منطقِ برداشتنِ برچسب واقعاً اجرا می‌شود (خودِ تابعِ صادرشده، نه بازسازی از سورس)
+    const strip = core.stripCardLabel;
     ok(strip('اما کارتِ آخرت، مرد آویخته…') === 'مرد آویخته…', 'برچسبِ «اما کارتِ آخرت» برداشته می‌شود');
     ok(strip('کارت سوم می‌گه ثبات.') === 'می‌گه ثبات.', 'برچسبِ درستِ مدل هم برداشته می‌شود (ضدِ تکرار)');
     ok(strip('این کارت می‌گه وضعیت روشن نیست.') === 'این کارت می‌گه وضعیت روشن نیست.',
@@ -132,10 +149,8 @@ console.log('\n▶ شکلِ خروجی');
     ok(strip('نه جامه: رضایتِ عمیقی داری.') === 'نه جامه: رضایتِ عمیقی داری.', 'متنِ بدونِ برچسب دست‌نخورده');
   }
   {
-    const i = SRC.indexOf('const noDash');
-    const noDash = new Function(SRC.slice(i, SRC.indexOf('\n', i)) + '; return noDash;')();
-    ok(noDash('متن — با تیره') === 'متن، با تیره', 'خط تیره‌ی بلند در کد پاک می‌شود، نه فقط با پرامپت');
-    ok([...SRC.matchAll(/noDash\(/g)].length >= 6, 'همه‌ی بخش‌های خروجی از فیلترِ خط تیره رد می‌شوند');
+    ok(core.noDash('متن — با تیره') === 'متن، با تیره', 'خط تیره‌ی بلند در کد پاک می‌شود، نه فقط با پرامپت');
+    ok([...CORE.matchAll(/noDash\(/g)].length >= 6, 'همه‌ی بخش‌های خروجی از فیلترِ خط تیره رد می‌شوند');
   }
   ok(/بدونِ ایموجی/.test(V4), 'خروجیِ v4 بدونِ ایموجی است (نمونه‌های واقعی هیچ ایموجی ندارند)');
   ok(/بدونِ تیتر و بولد و بولت/.test(V4), 'بدونِ قالب‌بندی');
@@ -165,7 +180,7 @@ console.log('\n▶ درس‌های تستِ میدانیِ ۱۴۰۵/۰۵/۲۶');
   // ۳) حافظه‌ی بین‌جلسه‌ای: رتبه ۲ تحقیق ۱، و نبودش شایع‌ترین دلیلِ رهاکردن. سه فالِ
   // پشت‌سرهم هیچ ارجاعی به هم نداشتند، پس فیلدِ صریح لازم بود نه توصیه‌ی نرم.
   ok(/"callback":/.test(V4), 'فیلدِ صریحِ ارجاع به جلسه‌ی قبل');
-  ok(/llm\.callback && `\$\{SECT\.callback\}/.test(SRC), 'ارجاع در خروجی رندر می‌شود');
+  ok(/llm\.callback && `\$\{SECT\.callback\}/.test(CORE), 'ارجاع در خروجی رندر می‌شود');
 
   // ۴) پنجره‌ی زمانی: رتبه ۳ تحقیق ۱. هیچ‌کدام از سه فال زمان نداشت.
   ok(/بازه‌ی زمانیِ تقریبی بده/.test(V4), 'جمع‌بندی یک بازه‌ی زمانیِ تقریبی می‌دهد');
@@ -213,10 +228,10 @@ console.log('\n▶ فشرده‌سازیِ چیدمانِ بزرگ');
 
 console.log('\n▶ ایموجیِ بخش‌بندی (از کد، نه از مدل)');
 {
-  ok(/const SECT = \{/.test(SRC), 'نشانه‌های بخش در یک نقطه‌ی کد تعریف شده‌اند');
+  ok(/export const SECT = \{/.test(CORE), 'نشانه‌های بخش در یک نقطه‌ی کد تعریف شده‌اند');
   ok(/بدونِ ایموجی/.test(V4), 'مدل همچنان اجازه‌ی ایموجی ندارد (وگرنه سلیقه‌ای می‌پاشد)');
   for (const k of ['headline', 'pattern', 'card', 'absent', 'closing']) {
-    ok(new RegExp(`SECT\\.${k}`).test(SRC), `بخشِ ${k} نشانه دارد`);
+    ok(new RegExp(`SECT\\.${k}`).test(CORE), `بخشِ ${k} نشانه دارد`);
   }
 }
 
@@ -247,11 +262,10 @@ console.log('\n▶ درس‌های دورِ سوم (۱۴۰۵/۰۵/۲۶ عصر)')
   // باگِ «پارسال»: مدل به فالی که ۱۰ دقیقه قبل بود گفت «پارسال». علتش توهمِ محض نبود —
   // رکوردهای قبلی **هیچ تاریخی** نداشتند و مدل فقط `today` را می‌دید، پس زمان را از
   // خودش ساخت. حل با **داده**، نه با دستور.
-  ok(/'چه‌وقت': agoFa\(r\.created_at\)/.test(SRC), 'هر خوانشِ قبلی فاصله‌ی زمانی‌اش را همراه دارد');
-  ok(/function agoFa\(unixSec\)/.test(SRC), 'محاسبه‌ی فاصله در کد است، نه حدسِ مدل');
+  ok(/'چه‌وقت': agoFa\(r\.created_at, now\)/.test(CORE), 'هر خوانشِ قبلی فاصله‌ی زمانی‌اش را همراه دارد');
+  ok(/export function agoFa\(unixSec/.test(CORE), 'محاسبه‌ی فاصله در کد است، نه حدسِ مدل');
   {
-    const i = SRC.indexOf('function agoFa(');
-    const agoFa = new Function(SRC.slice(i, SRC.indexOf('\n}', i) + 2) + '; return agoFa;')();
+    const agoFa = core.agoFa;
     const now = Math.floor(Date.now() / 1000);
     ok(agoFa(now - 600) === '10 دقیقه پیش', 'ده دقیقه پیش درست گفته می‌شود');
     ok(agoFa(now - 7200) === '2 ساعت پیش', 'دو ساعت پیش درست گفته می‌شود');

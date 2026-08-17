@@ -1,0 +1,268 @@
+// هسته‌ی خالصِ تولیدِ خوانش — همه‌چیزِ «ساختنِ یک فال» که به تلگرام و SQLite کاری ندارد.
+//
+// چرا این فایل هست: تا امروز کلِ این منطق داخلِ index.js بود و تنها راهِ تستش، طی‌کردنِ
+// دستیِ فلو در خودِ ربات بود (انتخابِ کارت، انتظار، و بعد کپیِ ده‌ها پیام). حالا همان کد
+// از دو جا صدا زده می‌شود: ربات (`index.js`) و آزمایشگاه (`tools/reading-lab.mjs`) که کاربر
+// را آفلاین شبیه‌سازی می‌کند. **کپی نیست، همان کد است** — پس آزمایشگاه هرگز چیزی را تست
+// نمی‌کند که با پروداکشن فرق داشته باشد، و هیچ drift ای ممکن نیست.
+//
+// قاعده‌ی این فایل: هیچ import از telegraf/better-sqlite3، هیچ دسترسی به db، هیچ state.
+// هر چیزی که به کاربرِ مشخص یا رکوردِ دیتابیس نیاز دارد، به‌صورت پارامتر می‌آید.
+import { createHash } from 'crypto';
+import CARDS, { CARD_BY_KEY } from './cards.js';
+import { log, logErr } from '../../shared/logger.js';
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// دانشِ دست‌نویسِ کارت‌ها (نماد، تصویر، تفسیرِ مستقیم و معکوس). fail-safe: اگر فایل
+// نباشد یا خراب باشد، خوانش دقیقاً مثل قبل کار می‌کند، فقط بدونِ این لایه‌ی دانش.
+export const CARD_KB = await import('./card-knowledge.fa.json', { with: { type: 'json' } })
+  .then(m => m.default).catch(() => ({}));
+
+/* ═══ مدل‌ها و کلاینتِ OpenRouter ═══ */
+export const FLASH          = 'google/gemini-2.5-flash';
+export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
+export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
+
+// کلید از env خوانده می‌شود، نه از پارامتر: هم ربات و هم آزمایشگاه همان `OPENROUTER_API_KEY`
+// را می‌بینند، پس هزینه‌ی تست دقیقاً روی همان کلیدِ تاروت می‌نشیند که خودِ محصول از آن
+// استفاده می‌کند و در گزارشِ OpenRouter از هم جدا نمی‌شوند.
+const keyOf = () => process.env.OPENROUTER_API_KEY;
+
+export async function orRequest(body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  const t0 = Date.now();
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${keyOf()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      logErr(`❌ OpenRouter ${res.status} (${body.model}) after ${Date.now() - t0}ms:`, errBody.slice(0, 300));
+      throw new Error(`OpenRouter error ${res.status}`);
+    }
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content?.trim() || '';
+    const u = data.usage || {};
+    log(`✅ ${body.model} in ${Date.now() - t0}ms | tok(in/out)=${u.prompt_tokens ?? '?'}/${u.completion_tokens ?? '?'}`);
+    return { text, usage: u };
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('TIMEOUT');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function orChat(system, user, opts = {}) {
+  return orRequest({
+    model: opts.model || FLASH,
+    temperature: opts.temperature ?? 0.9,
+    max_tokens: opts.maxTokens,
+    // تفکر (reasoning) خاموش: وگرنه Gemini بخشی از max_tokens را صرف thinking می‌کند و
+    // خروجی JSON وسط رشته بریده می‌شود (Unterminated string) — دیده‌شده در لاگ پروداکشن
+    reasoning: { enabled: false },
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+  });
+}
+
+// فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
+// `usage` و شماره‌ی تلاش هم برمی‌گردند تا آزمایشگاه بتواند هزینه و نرخِ retry را گزارش کند
+// (ربات فقط `out` و `model` را می‌خواند، پس این افزودنی چیزی را عوض نمی‌کند).
+export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FLASH, FLASH, FALLBACK_MODEL, FALLBACK_MODEL]) {
+  const usages = [];
+  for (let i = 0; i < plan.length; i++) {
+    try {
+      const { text: out, usage } = await orChat(system, user, { ...opts, model: plan[i] });
+      usages.push(usage);
+      if (!opts.validate || opts.validate(out)) return { out, model: plan[i], attempts: i + 1, usages };
+      logErr(`LLM invalid output (attempt ${i + 1}, ${plan[i]})`);
+    } catch (e) {
+      logErr(`LLM error (attempt ${i + 1}, ${plan[i]}):`, e.message);
+    }
+    if (i < plan.length - 1) await sleep(1500);
+  }
+  return null;
+}
+
+export async function orTranscribe(audioBuffer, format) {
+  const { text } = await orRequest({
+    model: FLASH,
+    messages: [{ role: 'user', content: [
+      { type: 'text', text: 'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.' },
+      { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
+    ] }],
+  });
+  return text;
+}
+
+export function parseJsonLoose(s) {
+  if (!s) return null;
+  let t = s.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  const i = t.indexOf('{'), j = t.lastIndexOf('}');
+  if (i >= 0 && j > i) t = t.slice(i, j + 1);
+  try { return JSON.parse(t); } catch (e) { logErr('JSON parse failed:', e.message, '| head:', t.slice(0, 120)); return null; }
+}
+
+/* ═══ موتور دک (شافل قطعی از seed) ═══ */
+export const REVERSAL_PROB = 0.3;
+export const GRID_SIZE     = 24; // ۶ ردیف × ۴
+
+export function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export function seedToInt(seedStr) {
+  return createHash('sha256').update(seedStr).digest().readUInt32LE(0);
+}
+export function shuffledDeck(seedStr) {
+  const rng = mulberry32(seedToInt(seedStr));
+  const deck = CARDS.map(c => c.key);
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck.map(key => ({ key, reversed: rng() < REVERSAL_PROB }));
+}
+// کارت‌های نهایی خوانش: انتخاب‌های کاربر از گرید + بقیه از «جای بریدن دک»
+// مهم: برای فال‌های کوچک‌تر از تعداد انتخاب (مثل آری/نه ۲کارتی) فقط size کارت اول
+export function drawCards(seedStr, picks, size) {
+  const deck = shuffledDeck(seedStr);
+  const chosen = picks.slice(0, size).map(i => deck[i]);
+  let cursor = GRID_SIZE;
+  while (chosen.length < size) chosen.push(deck[cursor++]);
+  return chosen;
+}
+
+/* ═══ هلپرهای متنِ خروجی ═══ */
+// نشانه‌ی ابتدای هر بخشِ متنِ نهایی. عمداً در **کد** است نه در پرامپت: مدل اگر آزاد
+// باشد هر بار سلیقه‌ای ایموجی می‌پاشد؛ این‌طوری ثابت، کم و قابلِ‌تغییر از یک نقطه است.
+// (خوانش‌های واقعیِ انسانی اصلاً ایموجی ندارند؛ این یک انتخابِ آگاهانه‌ی محصولی است تا
+// متنِ بلندِ تلگرام بخش‌بندیِ چشمی داشته باشد و دیوارِ متن نباشد.)
+export const SECT = { headline: '🔮', callback: '🔁', pattern: '🧩', card: '🃏', absent: '🌿', closing: '🕯️' };
+
+// برچسبِ ترتیبی‌ای که مدل شاید خودش جلوی جمله گذاشته باشد را برمی‌دارد («کارت سوم می‌گه…»،
+// «اما کارتِ آخرت…»). شماره‌گذاری کارِ کد است نه مدل: قطعی، بدونِ تکرار و بدونِ جاافتادگی.
+// عمداً فقط **ابتدای** جمله را می‌بیند تا اشاره‌های وسطِ متن به کارت‌ها دست‌نخورده بمانند.
+const ORD_FA = 'اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|بعدی|آخر';
+// `ً-ْ` = اعرابِ عربی. متنِ مدل اغلب «کارتِ آخرت» می‌نویسد (با کسره)، پس بدونِ
+// این بازه، همان موردی که باگ را ساخته بود از فیلتر رد می‌شد.
+const HAR = '[\\u064B-\\u0652]*';
+const CARD_LABEL_RE = new RegExp(
+  `^\\s*(?:و\\s+|اما\\s+|ولی\\s+)?کارت${HAR}[\\s\\u200c]*(?:${ORD_FA})${HAR}[\\s\\u200c]*(?:ت|تون|ی)?${HAR}\\s*[،:؛.]?\\s*`);
+// تا وقتی برچسب می‌بیند برمی‌دارد: اگر مدل دو بار پشت‌سرهم برچسب بگذارد، یک‌بار
+// پاک‌کردن باز هم یک برچسبِ اضافه باقی می‌گذارد.
+export function stripCardLabel(t) {
+  let s = String(t).trim();
+  for (let i = 0; i < 3; i++) {
+    const next = s.replace(CARD_LABEL_RE, '').trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+// خط تیره‌ی بلند امضای متنِ ماشینی است (بند ۱۰ ریشه). پرامپت ممنوعش کرده، ولی این
+// شبکه‌ی ایمنیِ قطعی است: چیزی که کد می‌تواند تضمین کند نباید فقط به مدل سپرده شود.
+export const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*--\s*/g, '، ');
+
+// فاصله‌ی زمانی به فارسیِ گفتاری، برای اینکه مدل مجبور نباشد زمانِ فالِ قبلی را حدس بزند.
+export function agoFa(unixSec, nowSec = Date.now() / 1000) {
+  const m = Math.max(0, Math.floor((nowSec - Number(unixSec || 0)) / 60));
+  if (m < 60) return m <= 1 ? 'همین چند دقیقه پیش' : `${m} دقیقه پیش`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ساعت پیش`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return d === 1 ? 'دیروز' : `${d} روز پیش`;
+  const mo = Math.floor(d / 30);
+  return mo < 12 ? `${mo} ماه پیش` : `${Math.floor(mo / 12)} سال پیش`;
+}
+
+export const tehranToday = (d = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(d);
+
+/* ═══ کانتکستِ خوانش ═══ */
+// ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست.
+// ⏱ فاصله‌ی زمانیِ هر خوانشِ قبلی **اجباری** است. باگ واقعی (۱۴۰۵/۰۵/۲۶): مدل هیچ
+// تاریخی از فال‌های قبلی نداشت، فقط `today` را داشت، پس وقتی می‌خواست به جلسه‌ی قبل
+// ارجاع بدهد زمانش را از خودش ساخت و نوشت «پارسال» برای فالی که ۱۰ دقیقه قبل بود.
+// این توهمِ محض نبود، کمبودِ داده بود؛ پس با **داده** حل می‌شود نه با دستور.
+//
+// همه‌ی وابستگی‌های بیرونی (رکوردهای قبلی از DB، نامِ نمایشی، پرچمِ دانشِ کارت) پارامترند
+// تا این تابع خالص بماند و آزمایشگاه بتواند بدونِ دیتابیس همان ورودی را بسازد.
+export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '', now }) {
+  return {
+    memory: user.memory_json || '',
+    name, // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
+    focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
+    question,
+    spreadFa: spread.fa,
+    cards: cards.map((c, i) => ({
+      positionFa: spread.positions[i]?.fa || `کارت ${i + 1}`,
+      fa: CARD_BY_KEY[c.key].fa,
+      en: CARD_BY_KEY[c.key].en,
+      reversed: c.reversed,
+      up: CARD_BY_KEY[c.key].up,
+      down: CARD_BY_KEY[c.key].down,
+      // دانشِ همین کارت (فقط در لحنِ جدید). مهم‌ترین تکه‌اش `image` است: cards.js فقط
+      // کلیدواژه‌ی انتزاعی دارد («آغاز تازه»)، پس تا امروز مدل مجبور بود نمادِ تصویریِ
+      // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.
+      kb: (kbOn && CARD_KB[c.key]) || undefined,
+    })),
+    previous: prev.map(r => ({
+      'چه‌وقت': agoFa(r.created_at, now),
+      'نوع فال': r.type,
+      'خلاصه': r.summary,
+      'بازخورد کاربر': r.feedback || '-',
+    })),
+    today: tehranToday(),
+  };
+}
+
+// شرطِ پذیرشِ شکلِ خروجیِ v4. عمداً این‌جاست نه داخلِ index.js: آزمایشگاه باید **همان**
+// معیارِ پذیرش را داشته باشد، وگرنه چیزی را سبز گزارش می‌کند که ربات ردش می‌کند.
+// (اعتبارسنجیِ سرخط جداست و در `verdict.js` می‌ماند چون قاعده‌ی محتوایی است نه ساختاری.)
+export function checkV4Shape(obj, cardCount) {
+  return !!(obj && Array.isArray(obj.cards) && obj.cards.length >= cardCount
+    && Array.isArray(obj.reads) && obj.reads.length >= cardCount
+    && obj.closing && obj.pattern);
+}
+
+/* ═══ رندرِ متنِ نهایی v4 ═══ */
+// ترتیب عمدی است: کاربر تازه پول داده و اولین چیزی که می‌بیند جوابِ سؤالش است،
+// بعد الگو و کارت‌به‌کارت که «چرا»ی همان جواب‌اند، و آخر جمع‌بندی با «ولی» بازشده.
+// خروجی سه تکه‌ی متنی است چون ربات آن‌ها را با مکث و به‌صورت سه پیامِ جدا می‌فرستد.
+export function renderV4(llm, cards, labels) {
+  // خوانشِ کارت‌ها **یک بلوکِ پیوسته** است، نه یک پاراگرافِ جدا با ایموجی per کارت.
+  // بازخوردِ مالک از دورِ سوم، و تطبیق با خوانشِ واقعیِ انسانی: آن‌جا کارت‌ها پشتِ سرِ
+  // هم و در یک تکه می‌آیند («کارت اولت می‌گه… کارت بعدیت می‌گه…»)؛ تیترِ ایموجی‌دار
+  // برای هر کارت متن را رباتی می‌کند. ایموجیِ بخش می‌ماند، ولی فقط **یک بار**.
+  const cardLines = (llm.reads || []).slice(0, cards.length).map((x, i) => {
+    const t = String(x?.text || '').trim();
+    if (!t) return '';
+    // شماره‌ی کارت **قطعی و از کد** می‌آید، نه از مدل: هر برچسبی که مدل خودش جلوی
+    // جمله گذاشته باشد اول برداشته می‌شود و بعد برچسبِ درست چسبانده می‌شود.
+    return `${labels[i]} ${noDash(stripCardLabel(t))}`;
+  }).filter(Boolean);
+
+  const body = [
+    llm.callback && `${SECT.callback} ${noDash(llm.callback)}`,
+    llm.pattern && `${SECT.pattern} ${noDash(llm.pattern)}`,
+    cardLines.length ? `${SECT.card} ${cardLines.join('\n')}` : '',
+    llm.absent && `${SECT.absent} ${noDash(llm.absent)}`,
+  ].filter((x) => x && String(x).trim()).join('\n\n');
+
+  return {
+    headline: llm.headline ? `${SECT.headline} ${noDash(llm.headline)}` : '',
+    body,
+    closing: llm.closing ? `${SECT.closing} ${noDash(llm.closing)}` : '',
+  };
+}
