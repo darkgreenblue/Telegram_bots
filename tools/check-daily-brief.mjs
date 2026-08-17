@@ -17,7 +17,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -97,6 +97,24 @@ const fallback = await listSpeechModels({
 });
 ok(fallback.length > 0, 'شکستِ کشفِ مدل‌ها فالبکِ ثابت می‌دهد، نه لیستِ خالی');
 ok(fallback.every((m) => m.id.includes('/')), 'اسلاگِ فالبک شکلِ درستِ OpenRouter را دارد');
+
+// ترتیبِ فارسی‌اول: کاتالوگِ واقعی ۱۸ مدل دارد و بیشترشان انگلیسی‌محورند. بیک‌آف فقط
+// شش تای اول را می‌سازد، پس اگر این ترتیب خراب شود مالک نمونه‌ی موتورهای بی‌ربط را
+// می‌شنود و موتورِ فارسی‌دار اصلاً تست نمی‌شود.
+const realWorld = [
+  { id: 'deepgram/flux-tts:free' }, { id: 'hexgrad/kokoro-82m' },
+  { id: 'sesame/csm-1b' }, { id: 'minimax/speech-2.8-hd' },
+  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'fish-audio/s1' },
+];
+const ranked = rankForPersian(realWorld);
+eq(ranked[0].id, 'minimax/speech-2.8-hd', 'موتوری که فارسی را اعلام کرده اولِ لیست می‌آید');
+eq(ranked.length, realWorld.length, 'مرتب‌سازی هیچ موتوری را حذف نمی‌کند (فقط ترتیب است)');
+ok(ranked.findIndex((m) => m.id === 'fish-audio/s1')
+   < ranked.findIndex((m) => m.id === 'sesame/csm-1b'), 'موتورِ چندزبانه جلوتر از موتورِ انگلیسی‌محور است');
+ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی را نمی‌شکند');
+// مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
+// می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.
+eq(realWorld[0].id, 'deepgram/flux-tts:free', 'آرایه‌ی ورودی دست‌نخورده می‌ماند');
 
 /* ── ۳ب) گرافِ فیلترِ ffmpeg ─────────────────────────────────────────────── */
 // چرا اینجا و نه با اجرای واقعیِ ffmpeg: محیطِ توسعه ffmpeg ندارد و خطای گراف فقط روی

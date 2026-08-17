@@ -18,7 +18,7 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb } from '../../shared/ab.js';
 import { createLLM, wordTarget } from './script.js';
 import { createNotion, pickNextLesson, notionErrorFa } from './notion.js';
-import { listSpeechModels, defaultVoice, engineLabel, synthesize } from './tts.js';
+import { listSpeechModels, defaultVoice, engineLabel, synthesize, rankForPersian } from './tts.js';
 import {
   bake, deliver, claimDaily, createEpisode, recoverStuck, refreshRoadmap,
   tehranNow, hhmmToMinutes, PipelineError,
@@ -165,9 +165,11 @@ const DEFAULTS = {
   duration_min: 15,
   duration_by_day: {},
   format: 'single',
-  // شناسه‌ی مدلِ OpenRouter. اگر این مدل در کاتالوگ نبود، synthesize روی اولین مدلِ
-  // در دسترس می‌افتد و همان را روی ردیفِ قسمت ثبت می‌کند.
-  engine: 'openai/gpt-4o-mini-tts',
+  // شناسه‌ی مدلِ OpenRouter. تنها موتورِ کاتالوگ که فارسی صراحتاً در زبان‌های اعلام‌شده‌اش
+  // هست؛ تا وقتی بیک‌آف حرفِ آخر را نزده، منطقی‌ترین پیش‌فرض همین است.
+  // اگر این مدل روزی از کاتالوگ برود، synthesize روی اولین مدلِ در دسترس می‌افتد و همان را
+  // روی ردیفِ قسمت ثبت می‌کند (پس گزارشِ هزینه دروغ نمی‌گوید).
+  engine: 'minimax/speech-2.8-hd',
   voices: {},
   speed: 1,
   tomorrow: null,
@@ -621,8 +623,10 @@ bot.action('set:fmt:soon', async (ctx) => {
 // ── موتور صدا ──
 // کاتالوگ زنده از OpenRouter می‌آید، پس callback_data نمی‌تواند شناسه‌ی مدل را حمل کند
 // (اسلاگ بلند است و سقفِ ۶۴ بایتیِ تلگرام را می‌شکند). به‌جایش اندیسِ همان لیست می‌رود.
+// **تک‌منبعِ ترتیب**: هم لیستِ انتخاب و هم هندلرِ انتخاب از همین می‌خوانند، چون
+// callback_data اندیسِ همین آرایه را حمل می‌کند و دو ترتیبِ متفاوت یعنی انتخابِ موتورِ اشتباه.
 async function speechModels() {
-  return listSpeechModels({ apiKey: OPENROUTER_API_KEY });
+  return rankForPersian(await listSpeechModels({ apiKey: OPENROUTER_API_KEY }));
 }
 bot.action('set:eng', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -656,19 +660,35 @@ bot.action(/^set:eng:(\d+)$/, async (ctx) => {
 // یک متنِ نمونه‌ی کوتاه ساخته می‌شود و با همه‌ی موتورها خوانده می‌شود تا مالک با گوشِ خودش
 // انتخاب کند. این هم تستِ کیفیتِ فارسی است و هم تنها تستِ یکپارچگیِ واقعیِ TTS بعد از دیپلوی.
 const BAKEOFF_MINUTES = 1;
-bot.action('bake:ask', async (ctx) => {
+// OpenRouter الان ۱۸ موتورِ صوتی دارد و بیشترشان انگلیسی‌محورند. پیش‌فرض فقط شش تای اولِ
+// لیستِ فارسی‌اول ساخته می‌شود؛ هجده فایلِ صوتی نه قابلِ گوش‌دادن است نه ارزشش را دارد.
+const BAKEOFF_TOP = 6;
+const bakeoffList = async (all) => (all ? await speechModels() : (await speechModels()).slice(0, BAKEOFF_TOP));
+
+const bakeAskText = async (all) => {
+  const models = await bakeoffList(all);
+  const total = (await speechModels()).length;
+  return {
+    text: `🧪 مقایسه‌ی صداها\n\nیک متنِ نمونه‌ی حدوداً یک‌دقیقه‌ای ساخته می‌شود و با ${fa(models.length)} موتور خوانده می‌شود:\n` +
+      `${models.map((m) => `· ${engineLabel(m.id)}`).join('\n')}\n\n` +
+      (all ? '' : `(از ${fa(total)} موتورِ موجود، آن‌هایی که چندزبانه‌اند اول آمده‌اند.)\n\n`) +
+      'هزینه‌اش ناچیز است.',
+    keyboard: Markup.inlineKeyboard([
+      [Markup.button.callback('✅ بساز', all ? 'bake:go:all' : 'bake:go')],
+      all ? [] : [Markup.button.callback(`🔊 همه‌ی ${fa(total)} موتور`, 'bake:ask:all')],
+      [Markup.button.callback('انصراف', 'set:home')],
+    ].filter((r) => r.length)),
+  };
+};
+bot.action(/^bake:ask(:all)?$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  const models = await speechModels();
-  await ctx.editMessageText(
-    `🧪 مقایسه‌ی صداها\n\nیک متنِ نمونه‌ی حدوداً یک‌دقیقه‌ای ساخته می‌شود و با ${fa(models.length)} موتور خوانده می‌شود:\n` +
-    `${models.map((m) => `· ${engineLabel(m.id)}`).join('\n')}\n\nهزینه‌اش ناچیز است (حدودِ چند سنت).`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('✅ بساز', 'bake:go'), Markup.button.callback('انصراف', 'set:home')],
-    ])).catch(() => {});
+  const v = await bakeAskText(!!ctx.match[1]);
+  await ctx.editMessageText(v.text, v.keyboard).catch(() => {});
 });
 
-bot.action('bake:go', async (ctx) => {
+bot.action(/^bake:go(:all)?$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
+  const runAll = !!ctx.match[1];
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   if (running) { await ctx.reply(T.busy); return; }
   running = true;
@@ -680,8 +700,8 @@ bot.action('bake:go', async (ctx) => {
     // متن یک بار ساخته و بین همه‌ی موتورها مشترک است تا مقایسه فقط درباره‌ی صدا باشد.
     const seed = createEpisode(deps, { date: now.date, kind: 'bakeoff', settings: s });
     const { ep } = await bake(deps, seed.id, { stopAfter: 'scripted' });
-    const models = await speechModels();
-    track(db, ctx.from.id, 'bakeoff_run', { engines: models.length });
+    const models = await bakeoffList(runAll);
+    track(db, ctx.from.id, 'bakeoff_run', { engines: models.length, all: runAll ? 1 : 0 });
 
     const okModels = [];
     for (const m of models) {
@@ -713,8 +733,12 @@ bot.action('bake:go', async (ctx) => {
     }
     db.prepare("UPDATE episodes SET status='delivered', delivered_at=unixepoch() WHERE id=?").run(ep.id);
     if (okModels.length) {
+      // اندیس باید در **لیستِ کامل** حساب شود، نه در لیستِ برش‌خورده‌ی بیک‌آف:
+      // هندلرِ set:eng از لیستِ کامل می‌خواند و هر اختلافِ ترتیب یعنی انتخابِ موتورِ اشتباه.
+      const full = await speechModels();
       await bot.telegram.sendMessage(chatId, 'کدام صدا بهتر بود؟', Markup.inlineKeyboard(
-        okModels.map((m) => [Markup.button.callback(engineLabel(m.id), `set:eng:${models.indexOf(m)}`)])));
+        okModels.map((m) => [Markup.button.callback(
+          engineLabel(m.id), `set:eng:${full.findIndex((x) => x.id === m.id)}`)])));
     }
   } catch (e) {
     logErr('bakeoff:', e.message);
@@ -739,12 +763,8 @@ bot.command('retry', async (ctx) => {
     ]]));
 });
 bot.command('bakeoff', async (ctx) => {
-  const models = await speechModels();
-  await ctx.reply(`🧪 مقایسه‌ی صداها با ${fa(models.length)} موتورِ OpenRouter:\n` +
-    models.map((m) => `· ${engineLabel(m.id)}`).join('\n'),
-    Markup.inlineKeyboard([[
-      Markup.button.callback('✅ بساز', 'bake:go'), Markup.button.callback('انصراف', 'nav:close'),
-    ]]));
+  const v = await bakeAskText(false);
+  await ctx.reply(v.text, v.keyboard);
 });
 
 /* ===== زمان‌بند ===== */
