@@ -80,7 +80,7 @@ const SECRETS = {
   // (Notion و ElevenLabs) دارد و دقیقاً همین شکل است که اگر بیرونِ write_env نوشته شود،
   // هر دیپلوی را به پینگ‌پنگِ ری‌استارت تبدیل می‌کند.
   DAILY_BRIEF_BOT_TOKEN: 'dtok2', DAILY_BRIEF_OPENROUTER_KEY: 'dkey2',
-  DAILY_BRIEF_NOTION_TOKEN: 'ntok', DAILY_BRIEF_ELEVENLABS_KEY: 'ekey',
+  DAILY_BRIEF_NOTION_TOKEN: 'ntok',
   DASHBOARD_TOKEN: 'dtok',
   RESUME_TAILOR_BOT_TOKEN: '', RESUME_TAILOR_OPENROUTER_KEY: '',
 };
@@ -105,8 +105,7 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
   const dashEnv = readFileSync(join(d, 'bots/dashboard/.env'), 'utf8');
   chk('dashboard ADMIN_IDS نمی‌گیرد', /ADMIN_IDS/.test(dashEnv), false);
   const dlbEnv = readFileSync(join(d, 'bots/daily-brief/.env'), 'utf8');
-  chk('daily-brief کلیدهای اختیاری را می‌گیرد',
-    /^NOTION_TOKEN=ntok$/m.test(dlbEnv) && /^ELEVENLABS_API_KEY=ekey$/m.test(dlbEnv), true);
+  chk('daily-brief کلیدِ اختیاریِ Notion را می‌گیرد', /^NOTION_TOKEN=ntok$/m.test(dlbEnv), true);
   chk('daily-brief ADMIN_IDS می‌گیرد (وگرنه مالک پشتِ گیتِ خودش می‌ماند)',
     /^ADMIN_IDS=111,222$/m.test(dlbEnv), true);
 }
@@ -114,11 +113,11 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
 // ۱ب) کلیدِ اختیاریِ ست‌نشده هم نباید پینگ‌پنگ بسازد (بلوکِ شرطی درست جای خودش است)
 {
   const d = fresh('optionalkeys');
-  const noOpt = { ...SECRETS, DAILY_BRIEF_NOTION_TOKEN: '', DAILY_BRIEF_ELEVENLABS_KEY: '' };
+  const noOpt = { ...SECRETS, DAILY_BRIEF_NOTION_TOKEN: '' };
   round(d, noOpt);
-  chk('daily-brief بدونِ کلیدهای اختیاری هم در دورِ دوم ساکت است', round(d, noOpt), '');
+  chk('daily-brief بدونِ کلیدِ اختیاری هم در دورِ دوم ساکت است', round(d, noOpt), '');
   const env = readFileSync(join(d, 'bots/daily-brief/.env'), 'utf8');
-  chk('کلیدِ اختیاریِ ست‌نشده اصلاً در .env نمی‌آید', /NOTION_TOKEN|ELEVENLABS/.test(env), false);
+  chk('کلیدِ اختیاریِ ست‌نشده اصلاً در .env نمی‌آید', /NOTION_TOKEN/.test(env), false);
   // و اضافه‌شدنِ بعدیِ همان کلید باید ری‌استارت بدهد (وگرنه Secret تازه بی‌اثر می‌ماند)
   chk('اضافه‌شدنِ کلیدِ Notion ری‌استارت می‌دهد',
     round(d, { ...noOpt, DAILY_BRIEF_NOTION_TOKEN: 'ntok' }).includes('daily-brief'), true);

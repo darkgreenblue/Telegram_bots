@@ -1,7 +1,7 @@
 // index.js — daily-brief: پادکستِ آموزشیِ روزانه‌ی شخصی.
 //
 // هدف (یک جمله): هر صبح یک قسمتِ پادکستِ آموزشیِ شخصی‌شده که مالک واقعاً گوش بدهد.
-// مسیرِ داده: پیجِ «دستیار آموزشی» در Notion → انتخابِ جلسه‌ی بعدی → متن با LLM → صدا با TTS → تلگرام.
+// مسیرِ داده: پیجِ «Learning» در Notion → جلسه‌ی بعدی و متنش → متن با LLM → صدا با TTS → تلگرام.
 //
 // MVP فقط-ادمین است: هیچ کاربرِ دیگری نمی‌تواند استفاده کند و هیچ پرداختی وجود ندارد.
 // قرارداد کامل + ساختارِ پیجِ Notion: bots/daily-brief/CLAUDE.md
@@ -18,7 +18,7 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb } from '../../shared/ab.js';
 import { createLLM, wordTarget } from './script.js';
 import { createNotion, pickNextLesson, notionErrorFa } from './notion.js';
-import { ENGINES, availableEngines, engineLabel, synthesize } from './tts.js';
+import { listSpeechModels, defaultVoice, engineLabel, synthesize } from './tts.js';
 import {
   bake, deliver, claimDaily, createEpisode, recoverStuck, refreshRoadmap,
   tehranNow, hhmmToMinutes, PipelineError,
@@ -29,10 +29,9 @@ const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
-// هر دو اختیاری‌اند و نبودشان بوت را نمی‌شکند: Notion بدونِ توکن یعنی پیامِ راهنما به‌جای رودمپ،
-// و ElevenLabs بدونِ کلید یعنی آن موتور اصلاً در لیست و بیک‌آف دیده نمی‌شود.
+// اختیاری و نبودش بوت را نمی‌شکند: Notion بدونِ توکن یعنی پیامِ راهنما به‌جای رودمپ.
+// همه‌ی موتورهای صدا از همان OPENROUTER_API_KEY می‌آیند؛ هیچ سرویسِ صوتیِ مستقیمی نداریم.
 const NOTION_TOKEN       = process.env.NOTION_TOKEN?.trim() || '';
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY?.trim() || '';
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
   .split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite);
@@ -95,6 +94,7 @@ db.exec(`
     topic_order   INTEGER NOT NULL DEFAULT 0,
     lesson_order  INTEGER NOT NULL DEFAULT 0,
     title         TEXT NOT NULL,
+    kind          TEXT NOT NULL DEFAULT 'page',
     status        TEXT NOT NULL DEFAULT 'pending',
     delivered_at  INTEGER,
     episode_id    INTEGER
@@ -165,7 +165,9 @@ const DEFAULTS = {
   duration_min: 15,
   duration_by_day: {},
   format: 'single',
-  engine: 'gpt4o-mini-tts',
+  // شناسه‌ی مدلِ OpenRouter. اگر این مدل در کاتالوگ نبود، synthesize روی اولین مدلِ
+  // در دسترس می‌افتد و همان را روی ردیفِ قسمت ثبت می‌کند.
+  engine: 'openai/gpt-4o-mini-tts',
   voices: {},
   speed: 1,
   tomorrow: null,
@@ -245,7 +247,7 @@ registerGlobalErrorHandlers('daily-brief');
 const deps = {
   db, llm, notion, telegram: bot.telegram, ownerId: OWNER_ID, texts: T,
   audioDir: AUDIO_DIR,
-  keys: { openrouter: OPENROUTER_API_KEY, eleven: ELEVENLABS_API_KEY },
+  keys: { openrouter: OPENROUTER_API_KEY },
   cache: {}, cacheTtlMs: ROADMAP_CACHE_MS,
 };
 
@@ -617,30 +619,35 @@ bot.action('set:fmt:soon', async (ctx) => {
 });
 
 // ── موتور صدا ──
+// کاتالوگ زنده از OpenRouter می‌آید، پس callback_data نمی‌تواند شناسه‌ی مدل را حمل کند
+// (اسلاگ بلند است و سقفِ ۶۴ بایتیِ تلگرام را می‌شکند). به‌جایش اندیسِ همان لیست می‌رود.
+async function speechModels() {
+  return listSpeechModels({ apiKey: OPENROUTER_API_KEY });
+}
 bot.action('set:eng', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const cur = getSetting('engine');
-  const avail = availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY });
-  const last = db.prepare(`SELECT engine, tts_cost_usd, tts_chars FROM episodes
-                           WHERE kind='bakeoff' AND status='delivered' ORDER BY id DESC LIMIT 10`).all();
-  const costOf = (k) => {
-    const r = last.find((x) => x.engine === k);
+  const models = await speechModels();
+  const last = db.prepare(`SELECT engine, tts_cost_usd FROM episodes
+                           WHERE kind='bakeoff' AND tts_cost_usd > 0 ORDER BY id DESC LIMIT 20`).all();
+  const costOf = (id) => {
+    const r = last.find((x) => x.engine === id);
     return r ? ` · نمونه ${usd(r.tts_cost_usd)}` : '';
   };
-  const missing = Object.keys(ENGINES).filter((k) => !avail.includes(k));
-  await ctx.editMessageText(
-    `🔊 موتور صدا${missing.length ? `\n\n(${missing.map(engineLabel).join('، ')} کلید ندارد و غیرفعال است)` : ''}`,
-    Markup.inlineKeyboard([
-      ...avail.map((k) => [Markup.button.callback(`${cur === k ? '✅ ' : ''}${engineLabel(k)}${costOf(k)}`, `set:eng:${k}`)]),
-      [Markup.button.callback('🧪 مقایسه‌ی صداها', 'bake:ask')],
-      backRow,
-    ])).catch(() => {});
+  await ctx.editMessageText('🔊 موتور صدا (همه از OpenRouter):', Markup.inlineKeyboard([
+    ...models.map((m, i) => [Markup.button.callback(
+      `${cur === m.id ? '✅ ' : ''}${engineLabel(m.id)}${costOf(m.id)}`, `set:eng:${i}`)]),
+    [Markup.button.callback('🧪 مقایسه‌ی صداها', 'bake:ask')],
+    backRow,
+  ])).catch(() => {});
 });
-bot.action(/^set:eng:([\w-]+)$/, async (ctx) => {
-  const k = ctx.match[1];
-  if (!ENGINES[k]) { await ctx.answerCbQuery('این موتور شناخته نشد').catch(() => {}); return; }
-  setSetting('engine', k);
-  track(db, ctx.from.id, 'settings_changed', { key: 'engine', engine: k });
+bot.action(/^set:eng:(\d+)$/, async (ctx) => {
+  const models = await speechModels();
+  const m = models[Number(ctx.match[1])];
+  if (!m) { await ctx.answerCbQuery('این موتور دیگر در دسترس نیست').catch(() => {}); return; }
+  setSetting('engine', m.id);
+  setSetting('voices', { ...(getSetting('voices') || {}), [m.id]: defaultVoice(m) });
+  track(db, ctx.from.id, 'settings_changed', { key: 'engine', engine: m.id });
   await ctx.answerCbQuery('ثبت شد ✅').catch(() => {});
   await showSettings(ctx, true);
 });
@@ -651,12 +658,10 @@ bot.action(/^set:eng:([\w-]+)$/, async (ctx) => {
 const BAKEOFF_MINUTES = 1;
 bot.action('bake:ask', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  const avail = availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY });
-  const words = wordTarget(BAKEOFF_MINUTES, 'single');
-  const est = avail.reduce((sum, k) => sum + words * 6 * ENGINES[k].pricePerChar, 0);
+  const models = await speechModels();
   await ctx.editMessageText(
-    `🧪 مقایسه‌ی صداها\n\nیک متنِ نمونه‌ی حدوداً یک‌دقیقه‌ای ساخته می‌شود و با ${fa(avail.length)} موتور خوانده می‌شود:\n` +
-    `${avail.map((k) => `· ${engineLabel(k)}`).join('\n')}\n\nهزینه‌ی تقریبی: ${usd(est)}`,
+    `🧪 مقایسه‌ی صداها\n\nیک متنِ نمونه‌ی حدوداً یک‌دقیقه‌ای ساخته می‌شود و با ${fa(models.length)} موتور خوانده می‌شود:\n` +
+    `${models.map((m) => `· ${engineLabel(m.id)}`).join('\n')}\n\nهزینه‌اش ناچیز است (حدودِ چند سنت).`,
     Markup.inlineKeyboard([
       [Markup.button.callback('✅ بساز', 'bake:go'), Markup.button.callback('انصراف', 'set:home')],
     ])).catch(() => {});
@@ -675,32 +680,42 @@ bot.action('bake:go', async (ctx) => {
     // متن یک بار ساخته و بین همه‌ی موتورها مشترک است تا مقایسه فقط درباره‌ی صدا باشد.
     const seed = createEpisode(deps, { date: now.date, kind: 'bakeoff', settings: s });
     const { ep } = await bake(deps, seed.id, { stopAfter: 'scripted' });
-    track(db, ctx.from.id, 'bakeoff_run', { engines: availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY }).length });
+    const models = await speechModels();
+    track(db, ctx.from.id, 'bakeoff_run', { engines: models.length });
 
-    for (const key of availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY })) {
+    const okModels = [];
+    for (const m of models) {
       try {
         const out = await synthesize({
-          engineKey: key, script: ep.script, speed: getSetting('speed'),
-          openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY,
+          engineKey: m.id, script: ep.script, speed: getSetting('speed'),
+          voice: defaultVoice(m), openrouterKey: OPENROUTER_API_KEY,
           generationCost: llm.generationCost,
         });
-        db.prepare(`UPDATE episodes SET engine=?, tts_chars=?, tts_cost_usd=?, audio_seconds=?, audio_bytes=?
-                    WHERE id=?`).run(key, out.chars, out.costUsd, out.seconds, out.buffer.length, ep.id);
-        await bot.telegram.sendAudio(chatId, { source: out.buffer, filename: `bakeoff-${key}.mp3` }, {
-          title: `نمونه ${engineLabel(key)}`, performer: T.performer,
-          caption: `🎙 ${engineLabel(key)}\n⏱ ${mmss(out.seconds)} · 📦 ${mb(out.buffer.length)}\n` +
-                   `💵 ${usd(out.costUsd)} (${fa(out.chars)} کاراکتر)`,
-        });
+        // هر نمونه ردیفِ خودش را می‌گیرد تا هزینه‌ی هر موتور جدا قابلِ مقایسه بماند
+        db.prepare(`INSERT INTO episodes (date, kind, status, title, duration_target, format, engine,
+                    tts_chars, tts_cost_usd, audio_seconds, audio_bytes, delivered_at)
+                    VALUES (?, 'bakeoff', 'delivered', ?, ?, 'single', ?, ?, ?, ?, ?, unixepoch())`)
+          .run(now.date, `نمونه ${m.id}`, BAKEOFF_MINUTES, out.engine,
+               out.chars, out.costUsd, out.seconds, out.buffer.length);
+        await bot.telegram.sendAudio(chatId,
+          { source: out.buffer, filename: `bakeoff-${m.id.replace(/\W+/g, '-')}.mp3` }, {
+            title: `نمونه ${engineLabel(m.id)}`, performer: T.performer,
+            caption: `🎙 ${engineLabel(m.id)}${out.voice ? ` (${out.voice})` : ''}\n` +
+                     `⏱ ${mmss(out.seconds)} · 📦 ${mb(out.buffer.length)}\n` +
+                     `💵 ${usd(out.costUsd)} (${fa(out.chars)} کاراکتر)`,
+          });
+        okModels.push(m);
       } catch (e) {
         // خطای یک موتور نباید بقیه‌ی مقایسه را بکشد؛ همان‌جا گزارش می‌شود.
-        logErr(`bakeoff ${key}:`, e.message);
-        await bot.telegram.sendMessage(chatId, `❌ ${engineLabel(key)}: ${String(e.message).slice(0, 200)}`);
+        logErr(`bakeoff ${m.id}:`, e.message);
+        await bot.telegram.sendMessage(chatId, `❌ ${engineLabel(m.id)}: ${String(e.message).slice(0, 200)}`);
       }
     }
     db.prepare("UPDATE episodes SET status='delivered', delivered_at=unixepoch() WHERE id=?").run(ep.id);
-    const avail = availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY });
-    await bot.telegram.sendMessage(chatId, 'کدام صدا بهتر بود؟', Markup.inlineKeyboard(
-      avail.map((k) => [Markup.button.callback(engineLabel(k), `set:eng:${k}`)])));
+    if (okModels.length) {
+      await bot.telegram.sendMessage(chatId, 'کدام صدا بهتر بود؟', Markup.inlineKeyboard(
+        okModels.map((m) => [Markup.button.callback(engineLabel(m.id), `set:eng:${models.indexOf(m)}`)])));
+    }
   } catch (e) {
     logErr('bakeoff:', e.message);
     await bot.telegram.sendMessage(chatId, `❌ ساختِ نمونه‌ها شکست خورد: ${String(e.message).slice(0, 200)}`);
@@ -724,10 +739,9 @@ bot.command('retry', async (ctx) => {
     ]]));
 });
 bot.command('bakeoff', async (ctx) => {
-  const avail = availableEngines({ openrouterKey: OPENROUTER_API_KEY, elevenKey: ELEVENLABS_API_KEY });
-  const words = wordTarget(BAKEOFF_MINUTES, 'single');
-  const est = avail.reduce((sum, k) => sum + words * 6 * ENGINES[k].pricePerChar, 0);
-  await ctx.reply(`🧪 مقایسه‌ی صداها با ${fa(avail.length)} موتور. هزینه‌ی تقریبی: ${usd(est)}`,
+  const models = await speechModels();
+  await ctx.reply(`🧪 مقایسه‌ی صداها با ${fa(models.length)} موتورِ OpenRouter:\n` +
+    models.map((m) => `· ${engineLabel(m.id)}`).join('\n'),
     Markup.inlineKeyboard([[
       Markup.button.callback('✅ بساز', 'bake:go'), Markup.button.callback('انصراف', 'nav:close'),
     ]]));
@@ -796,7 +810,7 @@ for (const r of recoverStuck(db)) {
 
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => log(`✅ daily-brief bot started (v${PRODUCT_VERSION}, test=${TEST_PHASE}, notion=${!!NOTION_TOKEN}, eleven=${!!ELEVENLABS_API_KEY})`))
+    .then(() => log(`✅ daily-brief bot started (v${PRODUCT_VERSION}, test=${TEST_PHASE}, notion=${!!NOTION_TOKEN})`))
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 launch();

@@ -17,9 +17,9 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, ENGINES, availableEngines, buildConcatFilter } = await import(path.resolve(BOT, 'tts.js'));
-const { parseTopicBlocks, fetchRoadmap, syncLessons, pickNextLesson, blockText } = await import(path.resolve(BOT, 'notion.js'));
-const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck } = await import(path.resolve(BOT, 'pipeline.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker } = await import(path.resolve(BOT, 'tts.js'));
+const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
+const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
 /* ── ۱) ریاضیِ مدت ───────────────────────────────────────────────────────── */
 console.log('\n⏱ مدت → تعدادِ کلمه');
@@ -73,16 +73,30 @@ eq(tchunks.flat().length, turns.length, 'هیچ نوبتی گم یا تکرار 
 ok(tchunks.flat().every((t, i) => t.text === turns[i].text), 'ترتیبِ نوبت‌ها حفظ شد');
 ok(turnsToNarration(turns).includes('نوبتِ گفتار شماره ۰'.replace('۰', '0')), 'تبدیلِ دیالوگ به روایتِ تک‌صدا متن را نگه می‌دارد');
 
-/* ── ۳) موتورهای صدا ─────────────────────────────────────────────────────── */
-console.log('\n🔊 موتورهای صدا');
-ok(Object.values(ENGINES).every((e) => e.maxChars > 0 && e.pricePerChar > 0),
-  'هر موتور سقفِ کاراکتر و قیمت دارد (ستونِ هزینه هرگز خالی نمی‌ماند)');
-ok(Object.values(ENGINES).some((e) => e.multiSpeaker), 'دستِ‌کم یک موتورِ چندگوینده برای فازِ دیالوگ داریم');
-eq(availableEngines({ openrouterKey: 'k', elevenKey: '' }).includes('elevenlabs'), false,
-  'بدونِ کلیدِ ElevenLabs آن موتور اصلاً پیشنهاد نمی‌شود');
-ok(availableEngines({ openrouterKey: 'k', elevenKey: 'x' }).includes('elevenlabs'),
-  'با کلید، ElevenLabs در دسترس است');
-eq(availableEngines({ openrouterKey: '', elevenKey: '' }).length, 0, 'بدونِ هیچ کلیدی هیچ موتوری فعال نیست');
+/* ── ۳) کاتالوگِ موتورهای صدا (زنده از OpenRouter) ───────────────────────── */
+// کاتالوگ عمداً هاردکد نیست: اسلاگِ مدل‌های TTS تاریخ‌دار است و عوض می‌شود. این بخش
+// می‌سنجد که کشفِ زنده کار کند **و** شکستش ربات را نشکند.
+console.log('\n🔊 کاتالوگِ موتورهای صدا');
+const liveModels = await listSpeechModels({
+  apiKey: 'k',
+  fetchImpl: async () => ({ ok: true, json: async () => ({ data: [
+    { id: 'x/one-tts', name: 'One', supported_voices: ['aa', 'bb'], pricing: { output: '0.000004' } },
+    { id: 'google/gemini-3.1-flash-tts-preview', name: 'Gemini TTS', supported_voices: ['Kore'] },
+  ] }) }),
+  ttlMs: 0,
+});
+eq(liveModels.length, 2, 'مدل‌ها از endpoint خوانده می‌شوند');
+eq(defaultVoice(liveModels[0]), 'aa', 'صدای پیش‌فرض اولین صدای پشتیبانی‌شده است');
+ok(defaultVoice({ id: 'openai/gpt-4o-mini-tts', supported_voices: [] }), 'مدلِ بدونِ لیستِ صدا هم حدسِ متعارف می‌گیرد');
+ok(isMultiSpeaker('google/gemini-3.1-flash-tts-preview'), 'جمنای به‌عنوان موتورِ دو گوینده شناخته می‌شود');
+ok(!isMultiSpeaker('openai/gpt-4o-mini-tts'), 'موتورِ تک‌صدا به‌اشتباه چندگوینده اعلام نمی‌شود');
+// شکستِ endpoint نباید هیچ‌چیز را بشکند: فالبکِ ثابت برمی‌گردد
+const fallback = await listSpeechModels({
+  apiKey: 'k', ttlMs: 0,
+  fetchImpl: async () => { throw new Error('network down'); },
+});
+ok(fallback.length > 0, 'شکستِ کشفِ مدل‌ها فالبکِ ثابت می‌دهد، نه لیستِ خالی');
+ok(fallback.every((m) => m.id.includes('/')), 'اسلاگِ فالبک شکلِ درستِ OpenRouter را دارد');
 
 /* ── ۳ب) گرافِ فیلترِ ffmpeg ─────────────────────────────────────────────── */
 // چرا اینجا و نه با اجرای واقعیِ ffmpeg: محیطِ توسعه ffmpeg ندارد و خطای گراف فقط روی
@@ -122,32 +136,76 @@ ok(buildConcatFilter(4).graph.includes('asplit=3'), 'چهار تکه یعنی س
 ok(!buildConcatFilter(2).graph.includes('asplit'), 'دو تکه فقط یک سکوت دارد و asplit لازم ندارد');
 
 /* ── ۴) پارسِ رودمپِ Notion ──────────────────────────────────────────────── */
-console.log('\n📚 پارسِ رودمپ');
+// این فیکسچر **ساختارِ واقعیِ پیجِ Learning مالک** است: یک هدینگ به‌عنوان موضوع و
+// زیرصفحه‌ها به‌عنوان جلسه‌ها. پارسر باید با شکلِ طبیعیِ یادداشت‌برداری کار کند، نه با
+// قالبی که ما تحمیل کرده باشیم.
+console.log('\n📚 پارسِ رودمپ (ساختارِ واقعیِ پیجِ Learning)');
 const rt = (s) => [{ plain_text: s }];
-const topicBlocks = [
-  { id: 'b1', type: 'paragraph', paragraph: { rich_text: rt('هدف: عمیق شدن در معماری نرم‌افزار') } },
-  { id: 'b2', type: 'paragraph', paragraph: { rich_text: rt('عمق: متوسط') } },
-  { id: 'b3', type: 'bulleted_list_item', bulleted_list_item: { rich_text: rt('منابع: کتاب DDIA') } },
-  { id: 'b4', type: 'heading_2', heading_2: { rich_text: rt('رودمپ جلسات') } },
-  { id: 'b5', type: 'to_do', to_do: { rich_text: rt('جلسه ۱: مبانی'), checked: false } },
-  { id: 'b6', type: 'to_do', to_do: { rich_text: rt('جلسه ۲: تکرارپذیری'), checked: true } },
-  { id: 'b7', type: 'paragraph', paragraph: { rich_text: rt('این یادداشتِ آزادِ من است.') } },
-  { id: 'b8', type: 'image', image: {} },                                   // بلوکِ بی‌ربط
-  { id: 'b9', type: 'paragraph', paragraph: { rich_text: [] } },            // بلوکِ خالی
-  { id: 'b10', type: 'to_do', to_do: { rich_text: [], checked: false } },   // جلسه‌ی بی‌عنوان
+const realBlocks = [
+  { id: 'q', type: 'quote', quote: { rich_text: rt('فضای یادگیری شخصی، یادداشت‌های اتمی.') } },
+  { id: 'h2', type: 'heading_2', heading_2: { rich_text: rt('موضوعات') } },
+  { id: 'h3', type: 'heading_3', heading_3: { rich_text: rt('RAG (Retrieval-Augmented Generation)') } },
+  { id: 'p1', type: 'paragraph', paragraph: { rich_text: rt('۲۱ یادداشت اتمی از تعریف پایه تا تصمیم‌های محصولی.') } },
+  { id: 'p2', type: 'paragraph', paragraph: { rich_text: rt('مسیر پیشنهادی مطالعه:') } },
+  { id: 'n1', type: 'numbered_list_item', numbered_list_item: { rich_text: rt('RAG-01 تا RAG-02 چرایی') } },
+  { id: 'c1', type: 'child_page', child_page: { title: 'RAG-01 — RAG چیست؟' } },
+  { id: 'c2', type: 'child_page', child_page: { title: 'RAG-02 — سه مشکل بنیادین' } },
+  { id: 'c3', type: 'child_page', child_page: { title: 'RAG-03 — Ingestion' } },
+  { id: 'img', type: 'image', image: {} },                               // بلوکِ بی‌ربط
+  { id: 'e', type: 'paragraph', paragraph: { rich_text: [] } },          // بلوکِ خالی
 ];
-const parsed = parseTopicBlocks(topicBlocks);
-eq(parsed.meta.goal, 'عمیق شدن در معماری نرم‌افزار', 'خطِ «هدف:» متادیتا شد');
-eq(parsed.meta.depth, 'متوسط', 'خطِ «عمق:» متادیتا شد');
-eq(parsed.meta.sources, 'کتاب DDIA', 'خطِ «منابع:» از bullet هم خوانده می‌شود');
-eq(parsed.lessons.length, 2, 'فقط to_doهای دارای عنوان جلسه شدند');
-eq(parsed.lessons[0].blockId, 'b5', 'کلیدِ جلسه block_id است، نه عنوانش');
-eq(parsed.lessons[1].checked, true, 'وضعیتِ چک‌باکسِ Notion خوانده می‌شود');
-ok(parsed.notes.includes('یادداشتِ آزادِ من'), 'متنِ آزاد به یادداشتِ کانتکست رفت');
-ok(!parsed.notes.includes('هدف:'), 'خطِ متادیتا دوباره در یادداشت تکرار نشد');
-ok(parseTopicBlocks(null).lessons.length === 0, 'ورودیِ خراب کرش نمی‌کند');
-ok(parseTopicBlocks([{ id: 'x', type: 'to_do' }]).lessons.length === 0, 'بلوکِ ناقص رد می‌شود، نه کرش');
+const topicsReal = parseRoadmapBlocks(realBlocks, { rootTitle: 'Learning' });
+eq(topicsReal.length, 1, 'هدینگِ «موضوعات» که جلسه ندارد وارد رودمپ نمی‌شود');
+eq(topicsReal[0].title, 'RAG (Retrieval-Augmented Generation)', 'هدینگ همان موضوع است');
+eq(topicsReal[0].lessons.length, 3, 'هر زیرصفحه یک جلسه است');
+eq(topicsReal[0].lessons[0].blockId, 'c1', 'کلیدِ جلسه block_id است، نه عنوانش');
+eq(topicsReal[0].lessons[0].kind, 'page', 'جلسه‌ی زیرصفحه‌ای kind=page می‌گیرد');
+ok(topicsReal[0].notes.includes('۲۱ یادداشت اتمی'), 'متنِ زیرِ هدینگ یادداشتِ کانتکستِ موضوع شد');
+ok(topicsReal[0].notes.includes('مسیر پیشنهادی'), 'لیستِ مسیرِ مطالعه هم در کانتکست هست');
+
+// ساختارِ مستندشده‌ی چک‌باکسی هم باید کار کند (رودمپی که هنوز زیرصفحه ندارد)
+const todoBlocks = [
+  { id: 'h', type: 'heading_2', heading_2: { rich_text: rt('معماری نرم‌افزار') } },
+  { id: 'm1', type: 'paragraph', paragraph: { rich_text: rt('هدف: عمیق شدن در معماری') } },
+  { id: 'm2', type: 'bulleted_list_item', bulleted_list_item: { rich_text: rt('منابع: کتاب DDIA') } },
+  { id: 't1', type: 'to_do', to_do: { rich_text: rt('جلسه ۱: مبانی'), checked: false } },
+  { id: 't2', type: 'to_do', to_do: { rich_text: rt('جلسه ۲: تکرارپذیری'), checked: true } },
+  { id: 't3', type: 'to_do', to_do: { rich_text: [], checked: false } },  // جلسه‌ی بی‌عنوان
+];
+const todoTopics = parseRoadmapBlocks(todoBlocks);
+eq(todoTopics[0].meta.goal, 'عمیق شدن در معماری', 'خطِ «هدف:» متادیتا شد');
+eq(todoTopics[0].meta.sources, 'کتاب DDIA', 'خطِ «منابع:» از bullet هم خوانده می‌شود');
+eq(todoTopics[0].lessons.length, 2, 'فقط چک‌باکسِ دارای عنوان جلسه شد');
+eq(todoTopics[0].lessons[1].checked, true, 'وضعیتِ چک‌باکسِ Notion خوانده می‌شود');
+eq(todoTopics[0].lessons[0].kind, 'todo', 'جلسه‌ی چک‌باکسی kind=todo می‌گیرد');
+ok(!todoTopics[0].notes.includes('هدف:'), 'خطِ متادیتا دوباره در یادداشت تکرار نشد');
+
+// جلسه‌ای که قبل از هر هدینگی بیاید هم گم نمی‌شود
+const noHeading = parseRoadmapBlocks(
+  [{ id: 'c', type: 'child_page', child_page: { title: 'تنها جلسه' } }], { rootTitle: 'Learning' });
+eq(noHeading.length, 1, 'جلسه‌ی بدونِ هدینگ زیرِ عنوانِ خودِ پیج می‌نشیند');
+eq(noHeading[0].title, 'Learning', 'موضوعِ پیش‌فرض عنوانِ پیجِ ریشه است');
+
+ok(parseRoadmapBlocks(null).length === 0, 'ورودیِ خراب کرش نمی‌کند');
+ok(parseRoadmapBlocks([{ id: 'x', type: 'to_do' }]).length === 0, 'بلوکِ ناقص رد می‌شود، نه کرش');
 eq(blockText({ type: 'paragraph', paragraph: { rich_text: rt('  فاصله  ') } }), 'فاصله', 'متنِ بلوک trim می‌شود');
+
+// متنِ جلسه: مادهٔ خامِ قسمت، فقط برای همان جلسه خوانده می‌شود
+console.log('\n📖 متنِ جلسه');
+const bodyBlocks = {
+  c1: [
+    { id: 'x1', type: 'heading_2', heading_2: { rich_text: rt('هسته') } },
+    { id: 'x2', type: 'paragraph', paragraph: { rich_text: rt('RAG یعنی بازیابی قبل از تولید.') } },
+    { id: 'x3', type: 'child_page', child_page: { title: 'زیرصفحه‌ی تودرتو' } },
+    { id: 'x4', type: 'image', image: {} },
+  ],
+};
+const bodyNotion = { children: async (id) => bodyBlocks[id] || [] };
+const body = await fetchLessonBody(bodyNotion, { block_id: 'c1', kind: 'page' });
+ok(body.includes('هسته') && body.includes('بازیابی قبل از تولید'), 'متن و تیترهای صفحه خوانده می‌شوند');
+ok(!body.includes('زیرصفحه‌ی تودرتو'), 'زیرصفحه‌ی تودرتو بدنه‌ی این جلسه نیست (جلسه‌ی خودش است)');
+eq(await fetchLessonBody(bodyNotion, { block_id: 't1', kind: 'todo' }), '',
+  'جلسه‌ی چک‌باکسی بدنه ندارد و درخواستِ اضافه هم نمی‌زند');
 
 /* ── ۵) DB: پیشرفت، ترتیب و گاردِ روزانه ─────────────────────────────────── */
 console.log('\n🗄 دیتابیس');
@@ -157,7 +215,7 @@ db.exec(`
   CREATE TABLE lessons (
     block_id TEXT PRIMARY KEY, topic_page_id TEXT NOT NULL, topic_title TEXT NOT NULL,
     topic_order INTEGER NOT NULL DEFAULT 0, lesson_order INTEGER NOT NULL DEFAULT 0,
-    title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'page', status TEXT NOT NULL DEFAULT 'pending',
     delivered_at INTEGER, episode_id INTEGER);
   CREATE TABLE episodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'daily',
@@ -165,19 +223,15 @@ db.exec(`
   CREATE UNIQUE INDEX idx_episodes_daily_once ON episodes(date) WHERE kind='daily';
 `);
 
-// کلاینتِ جعلیِ Notion: دو موضوع، ترتیبشان معنی‌دار است
-const fakeTopics = {
-  root: [
-    { id: 'p2', type: 'child_page', child_page: { title: 'موضوع دوم' } },
-    { id: 'p1', type: 'child_page', child_page: { title: 'موضوع اول' } },
-  ],
-  p2: [{ id: 'l21', type: 'to_do', to_do: { rich_text: rt('جلسه‌ی دومِ موضوعِ دوم'), checked: false } }],
-  p1: [
-    { id: 'l11', type: 'to_do', to_do: { rich_text: rt('اولین جلسه'), checked: false } },
-    { id: 'l12', type: 'to_do', to_do: { rich_text: rt('دومین جلسه'), checked: false } },
-  ],
-};
-const fakeNotion = { children: async (id) => fakeTopics[id] || [] };
+// کلاینتِ جعلیِ Notion: دو موضوع (هدینگ)، ترتیبشان معنی‌دار است
+const rootBlocks = [
+  { id: 'h2', type: 'heading_2', heading_2: { rich_text: rt('موضوع دوم') } },
+  { id: 'l21', type: 'to_do', to_do: { rich_text: rt('جلسه‌ی دومِ موضوعِ دوم'), checked: false } },
+  { id: 'h1', type: 'heading_2', heading_2: { rich_text: rt('موضوع اول') } },
+  { id: 'l11', type: 'to_do', to_do: { rich_text: rt('اولین جلسه'), checked: false } },
+  { id: 'l12', type: 'to_do', to_do: { rich_text: rt('دومین جلسه'), checked: false } },
+];
+const fakeNotion = { children: async (id) => (id === 'root' ? rootBlocks : []) };
 const topics = await fetchRoadmap(fakeNotion, 'root');
 eq(topics.length, 2, 'دو موضوع خوانده شد');
 eq(topics[0].title, 'موضوع دوم', 'ترتیبِ موضوع‌ها همان ترتیبِ Notion است، نه الفبایی');
@@ -190,7 +244,7 @@ db.prepare("UPDATE lessons SET status='delivered' WHERE block_id='l21'").run();
 eq(pickNextLesson(db).block_id, 'l11', 'بعد از تحویل، سراغِ جلسه‌ی بعدی می‌رود');
 
 // تیک‌خوردن در Notion یعنی «جای دیگری یادش گرفتم» → رد شو
-fakeTopics.p1[0].to_do.checked = true;
+rootBlocks[3].to_do.checked = true;   // l11
 syncLessons(db, await fetchRoadmap(fakeNotion, 'root'));
 eq(db.prepare("SELECT status FROM lessons WHERE block_id='l11'").get().status, 'done_in_notion',
   'چک‌باکسِ تیک‌خورده‌ی Notion جلسه را از صف بیرون می‌برد');
@@ -199,22 +253,34 @@ eq(db.prepare("SELECT status FROM lessons WHERE block_id='l21'").get().status, '
   'جلسه‌ی تحویل‌شده هرگز به حالتِ دیگری برنمی‌گردد');
 
 // برداشتنِ تیک، جلسه را به صف برمی‌گرداند (کاربر نظرش عوض شده)
-fakeTopics.p1[0].to_do.checked = false;
+rootBlocks[3].to_do.checked = false;
 syncLessons(db, await fetchRoadmap(fakeNotion, 'root'));
 eq(pickNextLesson(db).block_id, 'l11', 'با برداشتنِ تیک، جلسه دوباره در صف قرار می‌گیرد');
 
 // تغییرِ عنوان نباید پیشرفت را پاک کند (کلید block_id است)
-fakeTopics.p1[0].to_do.rich_text = rt('اولین جلسه (بازنویسی‌شده)');
+rootBlocks[3].to_do.rich_text = rt('اولین جلسه (بازنویسی‌شده)');
 syncLessons(db, await fetchRoadmap(fakeNotion, 'root'));
 eq(db.prepare('SELECT COUNT(*) n FROM lessons').get().n, 3, 'تغییرِ عنوانِ جلسه ردیفِ تکراری نمی‌سازد');
 eq(db.prepare("SELECT title FROM lessons WHERE block_id='l11'").get().title, 'اولین جلسه (بازنویسی‌شده)',
   'عنوانِ تازه به‌روز شد');
 
 // حذف از Notion فقط ردیفِ در-صف را کنار می‌گذارد، نه تاریخچه را
-fakeTopics.p1.pop();
+rootBlocks.pop();   // حذفِ l12 از Notion
 syncLessons(db, await fetchRoadmap(fakeNotion, 'root'));
 eq(db.prepare("SELECT status FROM lessons WHERE block_id='l12'").get().status, 'skipped',
   'جلسه‌ی حذف‌شده از Notion از صف بیرون می‌رود');
+
+// اتصالِ موضوع به جلسه: باگِ واقعی و بی‌صدا بود. اگر کلیدی که saveTopics می‌نویسد با
+// کلیدی که syncLessons در lessons.topic_page_id می‌گذارد یکی نباشد، یادداشت‌های موضوع
+// هرگز به پرامپت نمی‌رسند و هیچ خطایی هم دیده نمی‌شود؛ فقط کیفیتِ قسمت بی‌دلیل افت می‌کند.
+db.exec(`CREATE TABLE topics (page_id TEXT PRIMARY KEY, title TEXT, topic_order INTEGER,
+         meta_json TEXT DEFAULT '{}', notes TEXT DEFAULT '', synced_at INTEGER)`);
+saveTopics(db, topics);
+const linked = db.prepare(`
+  SELECT t.notes FROM lessons l JOIN topics t ON t.page_id = l.topic_page_id LIMIT 1`).get();
+ok(!!linked, 'هر جلسه به ردیفِ موضوعِ خودش join می‌شود (کلیدِ topics و lessons یکی است)');
+eq(db.prepare('SELECT COUNT(*) n FROM topics WHERE page_id IS NULL').get().n, 0,
+  'هیچ موضوعی بدونِ کلید ذخیره نمی‌شود');
 
 console.log('\n🔒 گاردِ «روزی یک قسمت»');
 const claim = (date) => db.prepare("INSERT OR IGNORE INTO episodes (date, kind, status) VALUES (?, 'daily', 'pending')").run(date).changes;

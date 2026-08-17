@@ -24,48 +24,76 @@ const run = promisify(execFile);
 // نیم‌ثانیه برای مرزِ وسطِ یک پاراگرافِ در جریان زیاد است و مکثِ غیرطبیعی می‌سازد.
 const GAP_MS = 220;
 
-// جدولِ موتورها. price = دلار بر کاراکتر (تخمینِ فالبک؛ هزینه‌ی واقعی اگر در دسترس باشد
-// از خودِ سرویس خوانده می‌شود). maxChars از سقفِ ورودیِ همان سرویس می‌آید.
-export const ENGINES = {
-  'gpt4o-mini-tts': {
-    label: '🗣 GPT-4o mini TTS',
-    provider: 'openrouter',
-    model: 'openai/gpt-4o-mini-tts',
-    voice: 'nova',
-    maxChars: 3500,
-    pricePerChar: 0.60 / 1_000_000,
-    multiSpeaker: false,
-  },
-  'gemini-tts': {
-    label: '🗣 Gemini TTS',
-    provider: 'openrouter',
-    model: 'google/gemini-3.1-flash-tts-preview',
-    voice: 'Kore',
-    maxChars: 3500,
-    // قیمتِ توکنیِ این مدل با کاراکتر یکی نیست؛ این عدد فقط تخمینِ درشت است تا
-    // ستونِ هزینه هرگز خالی نماند. عددِ دقیق از پاسخِ خودِ سرویس می‌آید.
-    pricePerChar: 20 / 1_000_000,
-    multiSpeaker: true,
-  },
-  elevenlabs: {
-    label: '🗣 ElevenLabs',
-    provider: 'elevenlabs',
-    // مدلِ چندزبانه‌ی v3 فارسی را رسماً پشتیبانی می‌کند؛ تنها موتورِ لیستِ ما با این تضمین.
-    model: 'eleven_v3',
-    voice: '21m00Tcm4TlvDq8ikWAM', // Rachel — صدای پیش‌فرضِ عمومیِ سرویس
-    maxChars: 2800,
-    pricePerChar: 100 / 1_000_000,
-    multiSpeaker: false,
-  },
+// **همه‌چیز از OpenRouter.** هیچ سرویسِ صوتیِ مستقیمی صدا زده نمی‌شود؛ اگر روزی موتورِ
+// دیگری (مثلاً ElevenLabs) لازم شد، از روی همین endpoint و با همان کلید می‌آید.
+//
+// کاتالوگِ موتورها **زنده** از خودِ OpenRouter خوانده می‌شود، نه هاردکد: اسلاگِ مدل‌های TTS
+// تاریخ‌دار است و مرتب عوض می‌شود؛ لیستِ هاردکد یعنی روزی که اسلاگ عوض شود ربات ساکت
+// می‌شکند. لیستِ ثابتِ پایین فقط فالبکِ آفلاین است (اگر endpoint در دسترس نباشد).
+const FALLBACK_MODELS = [
+  { id: 'openai/gpt-4o-mini-tts', name: 'GPT-4o mini TTS', supported_voices: ['nova', 'alloy', 'shimmer'] },
+  { id: 'google/gemini-3.1-flash-tts-preview', name: 'Gemini Flash TTS', supported_voices: ['Kore', 'Puck'] },
+  { id: 'mistralai/voxtral-mini-tts-2603', name: 'Voxtral Mini TTS', supported_voices: [] },
+];
+// سقفِ ورودیِ هر درخواست. سازگار با OpenAI Audio API (۴۰۹۶) با حاشیه‌ی امن.
+const MAX_CHARS = 3500;
+// تخمینِ درشتِ فالبک وقتی نه قیمتِ مدل در دسترس است نه هزینه‌ی واقعیِ generation.
+const FALLBACK_PRICE_PER_CHAR = 5 / 1_000_000;
+
+let catalogCache = { at: 0, models: null };
+
+// کشفِ مدل‌های صوتی. شکستش هرگز چیزی را نمی‌شکند: فالبکِ ثابت برمی‌گردد.
+export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 3600 * 1000 } = {}) {
+  if (catalogCache.models && Date.now() - catalogCache.at < ttlMs) return catalogCache.models;
+  try {
+    const res = await fetchImpl('https://openrouter.ai/api/v1/models?output_modalities=speech', {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    });
+    if (!res.ok) throw new Error(`models ${res.status}`);
+    const data = await res.json();
+    const models = (data?.data || [])
+      .filter((m) => m?.id)
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        supported_voices: Array.isArray(m.supported_voices) ? m.supported_voices : [],
+        pricing: m.pricing || null,
+      }));
+    if (models.length) {
+      catalogCache = { at: Date.now(), models };
+      log(`🔊 ${models.length} مدلِ صوتی از OpenRouter: ${models.map((m) => m.id).join(', ')}`);
+      return models;
+    }
+    throw new Error('لیستِ مدل‌های صوتی خالی بود');
+  } catch (e) {
+    logErr('listSpeechModels:', e.message, '| فالبکِ ثابت استفاده می‌شود');
+    return FALLBACK_MODELS;
+  }
+}
+
+export const engineLabel = (id) => {
+  const m = (catalogCache.models || FALLBACK_MODELS).find((x) => x.id === id);
+  return `🗣 ${m?.name || String(id).split('/').pop()}`;
 };
 
-export const engineLabel = (key) => ENGINES[key]?.label || key;
+// صدای پیش‌فرضِ هر مدل: اولین صدای پشتیبانی‌شده، وگرنه حدسِ متعارفِ همان خانواده.
+export function defaultVoice(model) {
+  if (model?.supported_voices?.length) return model.supported_voices[0];
+  if (/gemini/i.test(model?.id || '')) return 'Kore';
+  if (/openai|gpt/i.test(model?.id || '')) return 'nova';
+  return '';
+}
 
-// موتورهایی که کلیدشان ست است (ElevenLabs اختیاری است و بدونِ کلید اصلاً نمایش داده نمی‌شود).
-export function availableEngines({ openrouterKey, elevenKey }) {
-  return Object.entries(ENGINES)
-    .filter(([, e]) => (e.provider === 'openrouter' ? !!openrouterKey : !!elevenKey))
-    .map(([k]) => k);
+// دو گوینده‌ی بومی فقط روی خانواده‌ی جمنای مستند شده است.
+export const isMultiSpeaker = (id) => /gemini.*tts/i.test(String(id || ''));
+
+// قیمتِ هر کاراکتر از روی قیمتِ مدل، اگر بدهد. OpenRouter قیمت را per توکن می‌دهد و
+// برای TTS رابطه‌ی توکن و کاراکتر ثابت نیست، پس این فقط تخمین است؛ عددِ دقیق از
+// خودِ generation می‌آید (پایین).
+function pricePerChar(model) {
+  const p = Number(model?.pricing?.output);
+  if (Number.isFinite(p) && p > 0) return p / 4; // تقریبِ چهار کاراکتر به ازای هر توکن
+  return FALLBACK_PRICE_PER_CHAR;
 }
 
 /* ===== چانک‌بندی ===== */
@@ -131,15 +159,15 @@ export function chunkTurns(turns, maxChars) {
 export const turnsToNarration = (turns) =>
   (turns || []).map((t) => String(t.text || '').trim()).filter(Boolean).join('\n\n');
 
-/* ===== آداپتورها ===== */
-async function synthOpenRouter({ apiKey, engine, text, speed, fetchImpl }) {
+/* ===== آداپتورِ واحد (OpenRouter) ===== */
+async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
   const res = await fetchImpl('https://openrouter.ai/api/v1/audio/speech', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: engine.model,
+      model: modelId,
       input: text,
-      voice: engine.voice,
+      ...(voice ? { voice } : {}),
       response_format: 'mp3',
       ...(speed && speed !== 1 ? { speed } : {}),
     }),
@@ -152,24 +180,6 @@ async function synthOpenRouter({ apiKey, engine, text, speed, fetchImpl }) {
     buf: Buffer.from(await res.arrayBuffer()),
     genId: res.headers.get('x-generation-id') || '',
   };
-}
-
-async function synthElevenLabs({ apiKey, engine, text, speed, fetchImpl }) {
-  const res = await fetchImpl(
-    `https://api.elevenlabs.io/v1/text-to-speech/${engine.voice}?output_format=mp3_44100_64`, {
-      method: 'POST',
-      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        model_id: engine.model,
-        ...(speed && speed !== 1 ? { voice_settings: { speed } } : {}),
-      }),
-    });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(`ElevenLabs ${res.status}: ${msg.slice(0, 200)}`);
-  }
-  return { buf: Buffer.from(await res.arrayBuffer()), genId: '' };
 }
 
 /* ===== ffmpeg ===== */
@@ -237,27 +247,28 @@ async function probeSeconds(path) {
 }
 
 /* ===== ورودیِ اصلی ===== */
-// خروجی: {buffer, chars, costUsd, seconds, chunks, engine, degraded}
+// engineKey = شناسه‌ی مدلِ OpenRouter (مثل openai/gpt-4o-mini-tts).
+// خروجی: {buffer, chars, costUsd, seconds, chunks, engine, voice, degraded}
 // degraded یعنی دیالوگ خواسته شده بود ولی موتور چند گوینده ندارد و روایتِ تک‌صدا ساخته شد.
 export async function synthesize({
-  engineKey, script, turns = null, speed = 1,
-  openrouterKey, elevenKey, fetchImpl = fetch, generationCost = null,
+  engineKey, script, turns = null, speed = 1, voice = '',
+  openrouterKey, fetchImpl = fetch, generationCost = null,
 }) {
-  const engine = ENGINES[engineKey];
-  if (!engine) throw new Error(`موتور ناشناخته: ${engineKey}`);
-  const key = engine.provider === 'openrouter' ? openrouterKey : elevenKey;
-  if (!key) throw new Error(`کلیدِ موتور ${engineKey} ست نشده است`);
+  if (!openrouterKey) throw new Error('OPENROUTER_API_KEY ست نشده است');
+  const models = await listSpeechModels({ apiKey: openrouterKey, fetchImpl });
+  const model = models.find((m) => m.id === engineKey)
+    || models[0]
+    || { id: engineKey, supported_voices: [] };
+  const modelId = model.id;
+  const useVoice = voice || defaultVoice(model);
+  const multi = isMultiSpeaker(modelId);
 
   const wantsDialogue = Array.isArray(turns) && turns.length > 0;
-  const degraded = wantsDialogue && !engine.multiSpeaker;
-  const text = wantsDialogue
-    ? (engine.multiSpeaker ? null : turnsToNarration(turns))
-    : String(script || '');
-
-  const pieces = engine.multiSpeaker && wantsDialogue
-    ? chunkTurns(turns, engine.maxChars).map((g) =>
+  const degraded = wantsDialogue && !multi;
+  const pieces = wantsDialogue && multi
+    ? chunkTurns(turns, MAX_CHARS).map((g) =>
         g.map((t) => `${t.speaker === 'b' ? 'Speaker 2' : 'Speaker 1'}: ${t.text}`).join('\n'))
-    : chunkText(text, engine.maxChars);
+    : chunkText(wantsDialogue ? turnsToNarration(turns) : String(script || ''), MAX_CHARS);
 
   if (!pieces.length) throw new Error('متنی برای تبدیل به صدا نیست');
 
@@ -269,8 +280,9 @@ export async function synthesize({
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
       chars += piece.length;
-      const synth = engine.provider === 'openrouter' ? synthOpenRouter : synthElevenLabs;
-      const { buf, genId } = await synth({ apiKey: key, engine, text: piece, speed, fetchImpl });
+      const { buf, genId } = await synthChunk({
+        apiKey: openrouterKey, modelId, voice: useVoice, text: piece, speed, fetchImpl,
+      });
       if (!buf?.length) throw new Error(`چانک ${i + 1} خروجیِ صوتی نداد`);
       const f = join(dir, `p${String(i).padStart(3, '0')}.mp3`);
       await writeFile(f, buf);
@@ -283,15 +295,15 @@ export async function synthesize({
     await concatMp3(files, outPath);
     const [buffer, seconds] = await Promise.all([readFile(outPath), probeSeconds(outPath)]);
 
-    // هزینه: اول عددِ واقعیِ سرویس، وگرنه تخمینِ جدولِ قیمت.
-    let costUsd = chars * engine.pricePerChar;
+    // هزینه: اول عددِ واقعیِ سرویس، وگرنه تخمین از قیمتِ مدل.
+    let costUsd = chars * pricePerChar(model);
     if (generationCost && genIds.length) {
       const real = (await Promise.all(genIds.map((id) => generationCost(id).catch(() => null))))
         .filter((c) => typeof c === 'number');
       if (real.length === genIds.length) costUsd = real.reduce((a, b) => a + b, 0);
     }
 
-    return { buffer, chars, costUsd, seconds, chunks: pieces.length, engine: engineKey, degraded };
+    return { buffer, chars, costUsd, seconds, chunks: pieces.length, engine: modelId, voice: useVoice, degraded };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch((e) => logErr('tts tmp cleanup:', e.message));
   }

@@ -11,7 +11,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { log, logErr } from '../../shared/logger.js';
-import { fetchRoadmap, syncLessons, pickNextLesson, notionErrorFa } from './notion.js';
+import { fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, notionErrorFa } from './notion.js';
 import { writeScript } from './script.js';
 import { synthesize, engineLabel } from './tts.js';
 
@@ -77,8 +77,10 @@ export function saveTopics(db, topics) {
       title=excluded.title, topic_order=excluded.topic_order,
       meta_json=excluded.meta_json, notes=excluded.notes, synced_at=unixepoch()
   `);
+  // کلیدِ موضوع همان key ای است که syncLessons در lessons.topic_page_id می‌نویسد؛
+  // اگر این دو از هم واگرا شوند، یادداشت‌های موضوع بی‌صدا به پرامپت نمی‌رسند.
   db.transaction(() => {
-    for (const t of topics) up.run(t.pageId, t.title, t.order, JSON.stringify(t.meta || {}), t.notes || '');
+    for (const t of topics) up.run(t.key, t.title, t.order, JSON.stringify(t.meta || {}), t.notes || '');
   })();
 }
 
@@ -108,7 +110,7 @@ export async function refreshRoadmap(deps, { force = false } = {}) {
 }
 
 async function stageScript(deps, ep) {
-  const { db, llm } = deps;
+  const { db, llm, notion } = deps;
   try {
     await refreshRoadmap(deps);
   } catch (e) {
@@ -120,9 +122,18 @@ async function stageScript(deps, ep) {
   const lesson = pickNextLesson(db);
   if (!lesson) throw new PipelineError('roadmap', 'هیچ جلسه‌ی باقی‌مانده‌ای در رودمپ نیست. به پیج Notion جلسه‌ی تازه اضافه کن.');
 
+  // متنِ خودِ جلسه ماده‌ی اصلیِ قسمت است و فقط برای همین یک جلسه خوانده می‌شود
+  // (نه در همگام‌سازی، وگرنه هر بار ده‌ها درخواستِ اضافه به نوشن می‌رفت).
+  let body = '';
+  if (notion) {
+    try { body = await fetchLessonBody(notion, lesson); }
+    catch (e) { logErr('lesson body fetch:', e.message); }
+  }
+
   const res = await writeScript(llm, {
     topic: topicOf(db, lesson),
     lesson,
+    body,
     recent: recentTitles(db),
     next: nextAfter(db, lesson),
     minutes: ep.duration_target,
@@ -144,13 +155,15 @@ async function stageSynth(deps, ep) {
   if (ep.format === 'dialogue' && ep.turns_json) {
     try { turns = JSON.parse(ep.turns_json); } catch {}
   }
+  let voices = {};
+  try { voices = ep.voices_json ? JSON.parse(ep.voices_json) : {}; } catch {}
   const out = await synthesize({
     engineKey: ep.engine,
     script: ep.script,
     turns,
     speed: ep.speed || 1,
+    voice: voices[ep.engine] || '',
     openrouterKey: keys.openrouter,
-    elevenKey: keys.eleven,
     generationCost: llm.generationCost,
   });
   // صدا روی دیسک می‌نشیند نه در حافظه: بینِ ساختِ زودهنگام و ارسالِ رأسِ ساعت ممکن است
@@ -158,9 +171,11 @@ async function stageSynth(deps, ep) {
   mkdirSync(audioDir, { recursive: true });
   const path = join(audioDir, `ep${ep.id}.mp3`);
   writeFileSync(path, out.buffer);
-  db.prepare(`UPDATE episodes SET status='synthesized', tts_chars=?, tts_cost_usd=?,
+  // engine از خروجی نوشته می‌شود نه از ورودی: اگر مدلِ ذخیره‌شده دیگر در کاتالوگ نباشد،
+  // synthesize روی مدلِ در دسترس می‌افتد و گزارشِ هزینه باید همان را نشان بدهد.
+  db.prepare(`UPDATE episodes SET status='synthesized', engine=?, tts_chars=?, tts_cost_usd=?,
               audio_seconds=?, audio_bytes=?, audio_path=? WHERE id=?`)
-    .run(out.chars, out.costUsd, out.seconds, out.buffer.length, path, ep.id);
+    .run(out.engine, out.chars, out.costUsd, out.seconds, out.buffer.length, path, ep.id);
   return { ep: db.prepare('SELECT * FROM episodes WHERE id=?').get(ep.id), audio: out };
 }
 
