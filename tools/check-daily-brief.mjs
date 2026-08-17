@@ -103,14 +103,22 @@ ok(fallback.every((m) => m.id.includes('/')), 'اسلاگِ فالبک شکلِ 
 // می‌شنود و موتورِ فارسی‌دار اصلاً تست نمی‌شود.
 const realWorld = [
   { id: 'deepgram/flux-tts:free' }, { id: 'hexgrad/kokoro-82m' },
-  { id: 'sesame/csm-1b' }, { id: 'minimax/speech-2.8-hd' },
-  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'fish-audio/s1' },
+  { id: 'fish-audio/s2.1-pro' }, { id: 'minimax/speech-2.8-hd' },
+  { id: 'mistralai/voxtral-mini-tts-2603' }, { id: 'qwen/qwen-audio-3.0-tts-plus' },
+  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'google/gemini-3.1-flash-tts-preview' },
 ];
 const ranked = rankForPersian(realWorld);
 eq(ranked[0].id, 'minimax/speech-2.8-hd', 'موتوری که فارسی را اعلام کرده اولِ لیست می‌آید');
-eq(ranked.length, realWorld.length, 'مرتب‌سازی هیچ موتوری را حذف نمی‌کند (فقط ترتیب است)');
-ok(ranked.findIndex((m) => m.id === 'fish-audio/s1')
-   < ranked.findIndex((m) => m.id === 'sesame/csm-1b'), 'موتورِ چندزبانه جلوتر از موتورِ انگلیسی‌محور است');
+// ردشده با گوشِ مالک باید کاملاً ناپدید شود، نه اینکه فقط ته‌ی لیست برود
+ok(!ranked.some((m) => /fish-audio|voxtral/.test(m.id)),
+  'موتورهایی که مالک ردشان کرده اصلاً در لیست نمی‌آیند');
+eq(ranked.length, realWorld.length - 2, 'دقیقاً همان دو موتورِ ردشده حذف شده‌اند');
+// موتورهایی که مستنداتشان فارسی ندارد نباید سهمِ شش‌تاییِ بیک‌آف را بگیرند
+ok(ranked.findIndex((m) => m.id === 'x-ai/grok-voice-tts-1.0')
+   < ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus'),
+  'موتورِ چندزبانه جلوتر از موتوری است که فارسی مستند ندارد');
+ok(ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus')
+   < ranked.length, 'موتورِ کم‌اولویت حذف نمی‌شود، فقط ته می‌رود');
 ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی را نمی‌شکند');
 // مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
 // می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.

@@ -71,24 +71,43 @@ export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 
   }
 }
 
-// کاتالوگِ OpenRouter ۱۸ مدلِ صوتی دارد و بیشترشان انگلیسی‌محورند. ساختنِ ۱۸ نمونه هم
-// وقتِ مالک را می‌گیرد هم بیشترش دور ریختنی است، پس موتورهایی که **پشتیبانیِ چندزبانه‌ی
-// اعلام‌شده** دارند اول می‌آیند. این فقط ترتیب است، نه فیلتر: هر ۱۸ تا در لیستِ انتخاب هستند
-// و قضاوتِ نهایی همچنان با گوشِ مالک است، نه با این جدول.
-const PERSIAN_FIRST = [
-  'minimax/speech-2.8-hd',      // فارسی صراحتاً در زبان‌های اعلام‌شده‌اش هست
-  'minimax/speech-2.8-turbo',
-  'fish-audio/s2.1-pro',        // چندزبانه
-  'fish-audio/s1',
-  'google/gemini-3.1-flash-tts-preview',
-  'mistralai/voxtral-mini-tts-2603',
+// کاتالوگِ OpenRouter ۱۸ مدلِ صوتی دارد و بیشترشان انگلیسی‌محورند. ساختنِ نمونه با همه‌شان
+// هم وقتِ مالک را می‌گیرد هم بیشترش دور ریختنی است، پس این سه لایه ترتیب و صافیِ لیست را
+// تعیین می‌کنند. **قضاوتِ نهایی همیشه با گوشِ مالک است**؛ این جدول‌ها فقط نتیجه‌ی همان
+// قضاوت‌ها و مستنداتِ رسمیِ ارائه‌دهنده‌ها را نگه می‌دارند تا دوباره وقت هدر نرود.
+
+// ۱) رد شده با گوشِ مالک (۱۴۰۵/۰۵/۲۶، اولین بیک‌آفِ واقعی): خروجیِ فارسی‌شان بی‌معنی بود.
+// این‌ها از لیستِ انتخاب هم حذف می‌شوند، نه فقط از بیک‌آف. برگرداندن = حذفِ همین ردیف.
+const REJECTED = [
+  /^fish-audio\//i,
+  /voxtral/i,
 ];
+
+// ۲) اولویتِ فارسی، بر اساسِ زبان‌های رسماً اعلام‌شده‌ی هر ارائه‌دهنده.
+const PERSIAN_FIRST = [
+  'minimax/speech-2.8-hd',                // فارسی صراحتاً در زبان‌های اعلام‌شده‌اش هست
+  'minimax/speech-2.8-turbo',
+  'x-ai/grok-voice-tts-1.0',              // ۲۰+ زبان و خطوطِ غیرلاتین
+  'google/gemini-3.1-flash-tts-preview',  // تنها موتورِ دو گوینده (فارسی تأییدنشده)
+  'microsoft/mai-voice-2',
+  'microsoft/mai-voice-2-flash',
+];
+
+// ۳) ته‌ی لیست: مستنداتشان فارسی ندارد (Qwen رسماً ۱۰ زبان و فارسی بینشان نیست و در عمل
+// با لهجه‌ی چینی می‌خواند؛ kokoro هشت زبان؛ orpheus و csm انگلیسی). حذف نمی‌شوند تا اگر
+// روزی خواستی امتحانشان کنی در دسترس باشند، ولی سهمِ بیک‌آف را نمی‌گیرند.
+const LOW_PRIORITY = [/^qwen\//i, /kokoro/i, /orpheus/i, /csm-1b/i, /^deepgram\//i];
+
+// خروجی هم **مرتب‌شده** است هم **صاف‌شده** (ردشده‌ها بیرون می‌روند).
 export function rankForPersian(models) {
   const rank = (id) => {
     const i = PERSIAN_FIRST.indexOf(id);
-    return i === -1 ? PERSIAN_FIRST.length : i;
+    if (i !== -1) return i;
+    return LOW_PRIORITY.some((re) => re.test(id)) ? PERSIAN_FIRST.length + 1 : PERSIAN_FIRST.length;
   };
-  return [...models].sort((a, b) => rank(a.id) - rank(b.id));
+  return models
+    .filter((m) => !REJECTED.some((re) => re.test(m.id)))
+    .sort((a, b) => rank(a.id) - rank(b.id));
 }
 
 export const engineLabel = (id) => {
