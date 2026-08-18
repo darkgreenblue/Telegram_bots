@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.9.2';
+const PRODUCT_VERSION = '3.9.3';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1399,20 +1399,20 @@ async function showGate(ctx, uid, refBonus = false) {
   setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
   await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
-  await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid)), gateKeyboard());
+  await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), gateKeyboard());
 }
 
 // بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
 // گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
 async function startOnboarding(ctx, uid, refBonus) {
   grantWelcomeBonus(uid);
-  await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid)), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
   setState(uid, 'onboard_name');
   setSession(uid, { refBonus });
-  await ctx.reply(L.onboarding.askName, { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
+  await ctx.reply(L.onboarding.askName(uxV2For(uid)), { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
 }
 
 async function handleStart(ctx) {
@@ -1559,7 +1559,7 @@ async function finishNameOnboarding(ctx, rawName) {
   setSession(uid, null);
   // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid)), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -1604,8 +1604,12 @@ bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
   if (!(m >= 1 && m <= 12)) return;
   stmts.setBirthMonth.run(m, uid);
   const inOnboarding = getState(uid) === 'onboard_month';
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.onboarding.birthMonthSaved(monthFa(m)));
+  // تأیید **روی همان پیامِ سؤال** ادیت می‌شود، نه یک پیامِ جدید (تصمیمِ مالک): دوازده
+  // دکمه محو می‌شوند و جایشان یک خطِ کوتاه می‌نشیند، پس چت شلوغ نمی‌ماند.
+  // اگر ادیت نشد (پیامِ خیلی قدیمی یا حذف‌شده) به پیامِ جدا برمی‌گردیم تا کاربر بی‌جواب نماند.
+  const saved = L.onboarding.birthMonthSaved(monthFa(m));
+  try { await ctx.editMessageText(saved); }
+  catch { await ctx.reply(saved).catch(() => {}); }
   if (!inOnboarding) return;
   await finishOnboarding(ctx, uid, { birth_month: m });
   await typing(ctx, PACE_S);
@@ -1928,6 +1932,10 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   const reminderOn = !!getUser(uid)?.lucky_reminder_on;
   await ctx.reply(found ? L.lucky.won(found) : L.lucky.lost,
     Markup.inlineKeyboard([luckyReminderRow(reminderOn)]));
+  // UX v2.1 (تصمیمِ صریحِ مالک): بعد از کشیدنِ کارتِ شانس، کاربر دعوت می‌شود سؤالِ
+  // بعدی‌اش را از تاروت بپرسد — چه سکه برده باشد چه نه، همیشه یک قدمِ بعدیِ روشن دارد.
+  await sleep(PACE_S);
+  await sendContinuePrompt(ctx, uid);
   await ensureMenu(ctx, uid);
 });
 
@@ -2612,7 +2620,7 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
+  await replyCanceled(ctx, uid);
 });
 
 // 🧭 بازگشت به منوی اصلی از هر استیتِ میانی (قرارداد State Management). فالِ هنوز-پرداخت‌نشده لغو می‌شود؛
@@ -2656,7 +2664,7 @@ bot.action('reading:cancel', async (ctx) => {
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard(uid));
+  await replyCanceled(ctx, uid);
 });
 
 /* ---------- پی‌وال → کسر → افشای مرحله‌ای ---------- */
@@ -3005,6 +3013,25 @@ function recoRows(uid, currentType) {
   ];
 }
 
+// پیامِ عمومیِ «ادامه‌ی کار با ربات» (UX v2.1، تصمیمِ صریحِ مالک): همان متن و دکمه‌هایی که
+// بعد از تحویلِ فال نشان می‌دهیم («هر سؤال دیگه‌ای داری…» + recoRows + دعوت)، حالا هر
+// جایی که یک فرآیند تمام یا لغو می‌شود هم می‌آید — به‌جای جمله‌ی صرفاً محاوره‌ایِ قدیمی
+// («باشه، هر وقت آماده بودی همین‌جام»). کاربر باید همیشه یک قدمِ بعدیِ روشن جلوی چشمش
+// داشته باشد، نه فقط تأییدِ اینکه فرآیند تمام شد.
+async function sendContinuePrompt(ctx, uid) {
+  await ctx.reply(L.reading.nextOffersV3, Markup.inlineKeyboard([
+    ...recoRows(uid, null),
+    [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
+  ]));
+}
+// جایگزینِ نقاطِ لغوِ قدیمی (که قبلاً مستقیم L.reading.canceled را می‌فرستادند): در
+// دنیای UX v2 پیامِ «ادامه» را می‌فرستد؛ در دنیای قدیم رفتار **دقیقاً** قبلی می‌ماند
+// (رول‌بکِ یک‌خطی: uxV2For همیشه false → این تابع همیشه شاخه‌ی قدیم را می‌رود).
+async function replyCanceled(ctx, uid) {
+  if (uxV2For(uid)) return sendContinuePrompt(ctx, uid);
+  return ctx.reply(L.reading.canceled, mainKeyboard(uid));
+}
+
 // کیبوردِ منو نباید هیچ‌وقت گم شود: تلگرام کیبوردِ reply را تا جایگزینی نگه می‌دارد، ولی اگر
 // کاربر آن را جمع کند و بعد فقط دکمه‌های inline ببیند، عملاً راهی برای تعامل ندارد. این تابع
 // حداکثر هر KB_REFRESH_DAYS یک پیامِ کوتاه با کیبوردِ منو می‌فرستد (نه در آنبوردینگ).
@@ -3134,14 +3161,23 @@ async function finishReading(ctx, uid, readingId) {
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  // CTA بعد از فالِ **پولی** (UX v2.1 — متنِ خودِ مالک). عمداً با متنِ بعد از کارتِ روز
-  // فرق دارد: این‌جا کاربر یک جوابِ کامل گرفته، آن‌جا فقط یک تکه.
-  const nextText = uxV2For(uid) ? L.reading.nextOffersV3
-    : OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers;
-  await ctx.reply(nextText, Markup.inlineKeyboard([
-    ...recoRows(uid, r.type),
-    [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
-  ]));
+  // اولین فالِ کاملِ این کاربر (شمارش بعد از setReadingStatus بالا، پس همین فال را هم
+  // می‌شمارد — همان قراردادی که پاداشِ رفرال بالاتر استفاده کرد).
+  const isFirstReading = stmts.countDelivered.get(uid).c === 1;
+  // UX v2.1 (تصمیمِ صریحِ مالک): برای **اولین** فالِ کاربر، پیشنهادِ فالِ جدید این‌جا
+  // نمی‌آید؛ به‌جایش بعد از نمره‌دادن به همین فال، تبلیغِ کارتِ شانس می‌آید (پایین‌تر در
+  // `fbr:`) و دعوت به فالِ بعدی به بعد از کشیدنِ آن کارت موکول می‌شود. برای فال‌های
+  // بعدی و برای دنیای قدیم، رفتار دقیقاً همان قبلی است.
+  if (!(uxV2For(uid) && isFirstReading)) {
+    // CTA بعد از فالِ **پولی** (UX v2.1 — متنِ خودِ مالک). عمداً با متنِ بعد از کارتِ روز
+    // فرق دارد: این‌جا کاربر یک جوابِ کامل گرفته، آن‌جا فقط یک تکه.
+    const nextText = uxV2For(uid) ? L.reading.nextOffersV3
+      : OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers;
+    await ctx.reply(nextText, Markup.inlineKeyboard([
+      ...recoRows(uid, r.type),
+      [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
+    ]));
+  }
   await ensureMenu(ctx, uid);
 
   // v4: بازخورد در **آخرِ آخر**، بعد از تمام‌شدنِ کامل خوانش. مقیاسِ ۱ تا ۵ و سؤال درباره‌ی
@@ -3170,10 +3206,36 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // بماند و تحلیلِ تاریخی نشکند (بند ۲ج/۳: فقط اضافه کن، معنیِ داده‌ی قبلی را عوض نکن).
   stmts.setReadingFeedback.run(`rate:${score}`, readingId);
   track(db, uid, EVENTS.FEEDBACK, { reading_id: readingId, score, scale: 5 });
-  await ctx.reply(L.reading.rateThanks).catch(() => {});
+  // UX v2.1 (تصمیمِ صریحِ مالک): درست بعد از نمره‌دادن به **اولین** فالِ کاربر، به‌جای
+  // تشکرِ صرف، تبلیغِ کارتِ شانس می‌آید — این‌جا و نه هرجای دیگر، چون کاربر همین الان
+  // یک تجربه‌ی کاملِ مثبت گرفته و بهترین لحظه برای معرفیِ آیینِ روزانه‌ی بعدی است.
+  // اگر همان روز کارت شانسش را قبلاً کشیده (نادر، ولی ممکن)، همان تشکرِ همیشگی می‌ماند.
+  const isFirstReading = stmts.countDelivered.get(uid).c === 1;
+  const luckyAvailable = getUser(uid)?.lucky_date !== tehranToday();
+  if (uxV2For(uid) && isFirstReading && luckyAvailable) {
+    await ctx.reply(L.lucky.promo(dispName(getUser(uid))), Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
+    ])).catch(() => {});
+  } else {
+    await ctx.reply(L.reading.rateThanks).catch(() => {});
+  }
 });
 
 /* ---------- کیف پول و شارژ (کارت‌به‌کارت + تأیید ادمین) ---------- */
+// سه راهِ پرکردنِ کیف، به‌ترتیبِ هزینه برای کاربر: خرید، معرفی، و کارت شانسِ رایگان.
+// دکمه‌ی کارت شانس فقط وقتی می‌آید که سهمیه‌ی امروز مصرف نشده باشد — دکمه‌ای که به
+// «امروز استفاده کردی» ختم شود یک بن‌بستِ کوچک است (بند ۹ب ریشه).
+function walletRows(uid) {
+  const rows = [[Markup.button.callback(rechargeLabel(uid), 'recharge')]];
+  if (!uxV2For(uid)) return rows;
+  const cur = curOf(uid);
+  rows.push([Markup.button.callback(L.buttons.inviteWithBonus(referralBonusFor(uid), cur), 'invite_go')]);
+  if (getUser(uid)?.lucky_date !== tehranToday()) {
+    rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
+  }
+  return rows;
+}
+
 async function showWallet(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
@@ -3181,7 +3243,7 @@ async function showWallet(ctx) {
   if (await blockDuringOpenReading(ctx)) return;
   await ctx.reply(L.wallet.info(getBalance(ctx.from.id), curOf(ctx.from.id)), {
     parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([[Markup.button.callback(rechargeLabel(ctx.from.id), 'recharge')]]).reply_markup,
+    reply_markup: Markup.inlineKeyboard(walletRows(ctx.from.id)).reply_markup,
   });
 }
 bot.hears(L.buttons.wallet, showWallet);
@@ -3194,8 +3256,9 @@ function shareUrlFor(uid) {
   return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText(referralBonusFor(uid), curOf(uid)))}`;
 }
 
-// دعوت دوستان از کیبورد اصلی: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان
-bot.hears(L.buttons.inviteMain, async (ctx) => {
+// دعوت دوستان: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان. یک تابع، دو ورودی
+// (کیبورد اصلی + دکمه‌ی اینلاینِ «معرفی دوستان» زیرِ صفحه‌ی کیف الماس) تا رفتار یکی بماند.
+async function showInvite(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
@@ -3206,7 +3269,9 @@ bot.hears(L.buttons.inviteMain, async (ctx) => {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))]]).reply_markup,
   });
-});
+}
+bot.hears(L.buttons.inviteMain, showInvite);
+bot.action('invite_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showInvite(ctx); });
 
 // «تخفیف می‌خوام» — شاخه‌ی اختیاریِ کنارِ مسیر اصلی؛ استیت را دست نمی‌زند تا فالِ رزروشده
 // و پرداختِ در جریان سالم بمانند. اولین شارژ → کدِ شخصیِ ۵۰٪ (دستی وارد می‌شود، هرگز خودکار)؛
@@ -3369,7 +3434,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   setSession(uid, s);
   setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.canceled, mainKeyboard(ctx.from.id));
+  await replyCanceled(ctx, uid);
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
   await offerPendingReading(ctx, uid);
 });
