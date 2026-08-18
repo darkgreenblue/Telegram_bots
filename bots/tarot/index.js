@@ -18,7 +18,7 @@ import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
-import SPREADS, { DAILY, SPREAD_BY_ID, spreadsFor, faOf } from './spreads.js';
+import SPREADS, { DAILY, SPREAD_BY_ID, SPREADS_V3, spreadsFor, faOf } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
@@ -1895,6 +1895,16 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 // کاتالوگ per کاربر: نسلِ دومِ کاتالوگ (عشق‌محورِ تقابلی) فقط به کسی نشان داده می‌شود که
 // اقتصادِ سکه برایش روشن است، چون قیمت‌های کنارِ گزینه‌ها هم به سکه‌اند و این دو یک بسته‌اند.
 function catalogKb(uid) {
+  // UX v2: کاتالوگ فقط سه گزینه دارد و همه‌شان `open` اند (سؤال را خودِ کاربر می‌نویسد).
+  // «موضوع دلخواه» جداگانه لازم نیست چون هر سه دقیقاً همان‌اند، و کارتِ روزِ رایگان
+  // به‌عنوان نقطه‌ی ورودِ بی‌هزینه می‌ماند.
+  if (uxV2For(uid)) {
+    const kb = [[Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')]];
+    kb.push(...SPREADS_V3.map(sp => [Markup.button.callback(
+      L.buttons.spreadV3(sp), `spread:${sp.id}`)]));
+    kb.push(...navMenuRow());
+    return kb;
+  }
   const v2 = coinsOn(uid);
   const cur = curOf(uid);
   // بَج‌های کوتاه روی دکمه‌ها: عشق و رابطه = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
@@ -1990,6 +2000,15 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (await blockDuringPendingReading(ctx)) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   track(db, uid, 'spread_selected', { spread: spread.id });
+
+  // فالِ `open` (کلِ کاتالوگِ UX v2): سؤال را خودش می‌نویسد، پس هیچ مرحله‌ی موضوعی نیست.
+  // این شاخه قبلاً فقط از دکمه‌ی `odepth:` می‌آمد؛ حالا که کاتالوگ خودش open است، باید
+  // این‌جا هم باشد وگرنه کاربر به مرحله‌ی حذف‌شده‌ی «حول چی؟» می‌افتد.
+  if (spread.open) {
+    patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
+    setState(uid, 'await_question');
+    return ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
+  }
 
   // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
   if (spread.focus) {
@@ -2118,8 +2137,13 @@ async function startPicking(ctx, uid, shuffleMsgId) {
   // seed قطعی: بعد از این لحظه شافل و جهت کارت‌ها ثابت است (حتی بعد از ری‌استارت)
   const seed = `r:${uid}:${shuffleMsgId}:${Date.now()}`;
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  // فال‌های کوچک‌تر (مثل آری/نه ۲کارتی) به تعداد خودشان انتخاب می‌خواهند
-  const need = Math.min(USER_PICKS, spread?.size || USER_PICKS);
+  // UX v2: کاربر **همه‌ی** کارت‌ها را خودش می‌چیند (۳، ۵ یا ۱۰ تا)، نه سه‌تا و بقیه
+  // خودکار. تصمیمِ صریحِ مالک: حسِ «خودم کارتم را کشیدم» بخشی از خودِ محصول است و
+  // کارتِ خودکار آن را از بین می‌برد. گریدِ ۲۴تایی برای ۱۰ انتخاب هم جا دارد.
+  // در دنیای قدیم مثل قبل: حداکثر سه‌تا (فالِ کوچک‌تر به اندازه‌ی خودش).
+  const need = uxV2For(uid)
+    ? (spread?.size || USER_PICKS)
+    : Math.min(USER_PICKS, spread?.size || USER_PICKS);
   setState(uid, 'picking'); // قبل از هر await — گارد برابر دوباره‌کاری
   patchSession(uid, { seed, picks: [], need });
   if (shuffleMsgId) {
