@@ -31,6 +31,7 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
+import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, NO_REPEAT_DAYS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
@@ -614,6 +615,9 @@ const stmts = {
   getUser:    db.prepare('SELECT * FROM users WHERE telegram_id=?'),
   setState:   db.prepare('UPDATE users SET state=?, last_seen=unixepoch() WHERE telegram_id=?'),
   setFocus:   db.prepare('UPDATE users SET focus_area=?, focus_asked_at=unixepoch() WHERE telegram_id=?'),
+  // UX v2: ماهِ تولد. `focus_asked_at` هم مهر می‌خورد چون همین سؤال جای آن یکی نشسته و
+  // تحلیل‌های «آنبوردینگ تمام شد» نباید بشکنند (بند ۲ج/۳: فقط اضافه کن، معنا را عوض نکن).
+  setBirthMonth: db.prepare('UPDATE users SET birth_month=?, focus_asked_at=unixepoch() WHERE telegram_id=?'),
   setDisplayName: db.prepare('UPDATE users SET display_name=? WHERE telegram_id=?'),
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   // گاردِ اتمیک داخلِ خودِ UPDATE: فقط وقتی هنوز NULL است می‌نویسد، پس دوبار-تپ اثری ندارد
@@ -933,7 +937,7 @@ function mainKeyboard(uid) {
 }
 
 // تا پایان آنبوردینگ (نوشتن نام + پاسخ به حوزه‌ی تمرکز)، کاربر نباید بتواند با دکمه‌ها مرحله را رد کند.
-const ONBOARDING_STATES = ['onboard_name', 'onboard_focus'];
+const ONBOARDING_STATES = ['onboard_name', 'onboard_focus', 'onboard_month'];
 // اگر کاربر وسط آنبوردینگ روی یک دکمه‌ی اصلی زد (کیبوردِ کش‌شده یا تایپِ دستی)، به‌جای اجرا،
 // همان قدمِ فعلیِ آنبوردینگ دوباره یادآوری می‌شود. خروجی true = بلاک شد.
 async function blockDuringOnboarding(ctx) {
@@ -941,12 +945,23 @@ async function blockDuringOnboarding(ctx) {
   if (!ONBOARDING_STATES.includes(st)) return false;
   if (st === 'onboard_name') {
     await ctx.reply(L.onboarding.askNameRetry, Markup.removeKeyboard());
+  } else if (st === 'onboard_month') {
+    await askBirthMonth(ctx);
   } else {
     await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
       L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
     ));
   }
   return true;
+}
+
+// 🗓 سؤالِ ماهِ تولد. دو ستونی چیده می‌شود: دوازده دکمه در یک ستون شش صفحه می‌شود.
+async function askBirthMonth(ctx) {
+  const rows = [];
+  for (let i = 0; i < 12; i += 2) {
+    rows.push([i, i + 1].map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
+  }
+  await ctx.reply(L.onboarding.askBirthMonth, Markup.inlineKeyboard(rows));
 }
 
 // 🧭 ردیفِ «بازگشت به منو» برای استیت‌های میانیِ فلو (خالی وقتی گارد خاموش است تا رفتار عیناً قبلی شود).
@@ -1367,7 +1382,10 @@ async function handleStart(ctx) {
   // کاربر برگشتی
   setState(uid, 'idle');
   setSession(uid, null);
-  let msg = L.returning.greeting(dispName(user), getBalance(uid), curOf(uid));
+  // UX v2: موجودی از پیامِ بازگشت حذف شد — عددِ پول اولین چیزی نباشد که کاربر می‌بیند.
+  let msg = uxV2For(uid)
+    ? L.returning.greetingV2(dispName(user))
+    : L.returning.greeting(dispName(user), getBalance(uid), curOf(uid));
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
@@ -1467,11 +1485,48 @@ async function finishNameOnboarding(ctx, rawName) {
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
+  // UX v2: ماهِ تولد جای حوزه‌ی تمرکز را گرفت. حوزه‌ی تمرکز کاربر را از همان اول به یک
+  // موضوع بایاس می‌کرد؛ ماهِ تولد عوض نمی‌شود و کارتِ روز را برای همیشه شخصی می‌کند.
+  if (uxV2For(uid)) {
+    setState(uid, 'onboard_month');
+    return askBirthMonth(ctx);
+  }
   setState(uid, 'onboard_focus');
   await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
     L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
   ));
 }
+
+// همان مسیرِ پایانیِ آنبوردینگ برای هر دو نسل (حوزه‌ی تمرکز و ماهِ تولد): استیت، رویداد،
+// و دو دکمه‌ی ورود. عمداً یک تابع است تا اگر فردا این پایان عوض شد، یک جا عوض شود.
+async function finishOnboarding(ctx, uid, props) {
+  await typing(ctx, PACE_M);
+  setState(uid, 'idle');
+  track(db, uid, EVENTS.ONBOARD_DONE, props);
+  const ctaRows = [
+    [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
+    [Markup.button.callback(L.buttons.startPopular(), uxV2For(uid) ? 'spread:three' : 'spread:love')],
+  ];
+  if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+  ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
+  await ctx.reply(L.onboarding.expectations(toneV2For(uid)), Markup.inlineKeyboard(ctaRows));
+}
+
+bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const m = parseInt(ctx.match[1], 10);
+  if (!(m >= 1 && m <= 12)) return;
+  stmts.setBirthMonth.run(m, uid);
+  const inOnboarding = getState(uid) === 'onboard_month';
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.onboarding.birthMonthSaved(monthFa(m)));
+  if (!inOnboarding) return;
+  await finishOnboarding(ctx, uid, { birth_month: m });
+  await typing(ctx, PACE_S);
+  await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid));
+  stmts.setKbShown.run(uid);
+});
 
 bot.action(/^focus:(\w+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -3389,7 +3444,9 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid), curOf(uid)), mainKeyboard(ctx.from.id));
+    return ctx.reply(uxV2For(uid)
+      ? L.returning.greetingV2(dispName(getUser(uid)))
+      : L.returning.greeting(dispName(getUser(uid)), getBalance(uid), curOf(uid)), mainKeyboard(ctx.from.id));
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
