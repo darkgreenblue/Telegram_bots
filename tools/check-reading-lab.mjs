@@ -218,6 +218,9 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
   const bad = await rep.repairEvasion(base(), badCall);
   ok(!bad.repaired && bad.llm.closing === base().closing,
     'تعمیرِ ناموفق = متنِ اصلی برمی‌گردد (نه خوانشِ شکسته)');
+  ok(bad.fired === true, 'تعمیرِ ناموفق «شلیک‌شده» شمرده می‌شود، نه «شلیک‌نشده»');
+  ok(rep.findEvasion({ cards: [{ teaser: 'کارتِ برج، بستگی داره.' }] }).length === 1,
+    'تیزر هم دیده می‌شود (گارد و سنجه یک متن را می‌بینند)');
   const throwCall = () => { throw new Error('boom'); };
   const boom = await rep.repairEvasion(base(), throwCall);
   ok(!boom.repaired && boom.llm.closing === base().closing, 'خطای شبکه هم خوانش را نمی‌شکند');

@@ -142,7 +142,7 @@ async function runStep(persona, step, i, state) {
   const rep = await repairEvasion(parsed, FAKE ? fakeRepair : orChatResilient,
     { tag: `${persona.id}.${i + 1}` });
   parsed = rep.llm;
-  const repair = { fired: rep.repaired || !!rep.usage, ms: Date.now() - t0, usage: rep.usage || null };
+  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
 
   const rendered = renderV4(parsed, cards, labels);
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
@@ -375,11 +375,13 @@ if (!DRY) {
   // هر سه عدد لازم است — «ارزان» بدونِ تأخیر بی‌معناست و برعکس.
   {
     const fired = done.filter(r => r.repair?.fired);
+    const failed = fired.filter(r => !r.repair.ok);
     const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
     const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
     const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
     const cost = rin / 1e6 * 0.30 + rout / 1e6 * 2.50;
     console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
+      (failed.length ? ` (${failed.length} ناموفق)` : '') +
       (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
         ` | توکن ${rin}+${rout} ≈ $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : ''));
   }

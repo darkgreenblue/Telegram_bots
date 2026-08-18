@@ -19,8 +19,14 @@ import { evasionIn } from './verdict.js';
 import { parseJsonLoose, readText } from './reading-core.js';
 import { log, logErr } from '../../shared/logger.js';
 
-// فیلدهای رو-به-کاربر که ممکن است طفره‌رفتن داشته باشند. تیزرها عمداً بیرون‌اند:
-// معرفیِ کارت‌اند و جوابی در خود ندارند که بشود ازش طفره رفت.
+// همه‌ی فیلدهای رو-به-کاربر، **دقیقاً همان‌هایی که `v4Text` می‌بیند**.
+//
+// ⚠️ نسخه‌ی اول تیزرها را عمداً کنار گذاشته بود («معرفیِ کارت‌اند، جوابی ندارند که
+// ازش طفره بروند»). استدلال قشنگ بود و غلط: سنجه‌ی آزمایشگاه تیزرها را می‌دید و
+// گارد نمی‌دید، پس در دورِ سیزدهم یک فال با «بستگی داره» رد شد بی‌آنکه تعمیر اصلاً
+// شلیک کند. همان قانونی که در کامنتِ `v4Text` نوشته بودیم را خودمان شکسته بودیم:
+// **گارد و سنجه باید عیناً یک متن را ببینند**، وگرنه یکی چیزی را می‌گیرد که آن یکی
+// نمی‌بیند. هر فیلدی که به کاربر می‌رسد اینجا هم باید باشد.
 export function findEvasion(llm) {
   const hits = [];
   const push = (path, text) => {
@@ -34,6 +40,7 @@ export function findEvasion(llm) {
   push('callback', llm?.callback);
   push('closing', llm?.closing);
   (llm?.reads || []).forEach((r, i) => push(`reads.${i}`, readText(r)));
+  (llm?.cards || []).forEach((c, i) => push(`cards.${i}.teaser`, c?.teaser));
   return hits;
 }
 
@@ -47,6 +54,10 @@ export function applyFixes(llm, hits, fixes) {
       const idx = Number(h.path.split('.')[1]);
       const cur = out.reads[idx];
       out.reads[idx] = typeof cur === 'string' ? fixed : { ...cur, text: fixed };
+    } else if (h.path.startsWith('cards.')) {
+      const idx = Number(h.path.split('.')[1]);
+      out.cards = [...(out.cards || [])];
+      out.cards[idx] = { ...out.cards[idx], teaser: fixed };
     } else {
       out[h.path] = fixed;
     }
@@ -78,11 +89,13 @@ export const repairUser = (hits) =>
 /**
  * یک بار تلاش برای تعمیرِ طفره‌رفتن. `call` تزریق می‌شود تا ربات و آزمایشگاه **همین**
  * کد را اجرا کنند و هیچ drift ای ممکن نباشد.
- * @returns {{llm: object, repaired: boolean, usage?: object}} همیشه یک خوانشِ قابلِ تحویل
+ * @returns {{llm, fired: boolean, repaired: boolean, usage?: object}} همیشه یک خوانشِ قابلِ تحویل.
+ * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
+ * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
 export async function repairEvasion(llm, call, { tag = '' } = {}) {
   const hits = findEvasion(llm);
-  if (!hits.length) return { llm, repaired: false };
+  if (!hits.length) return { llm, fired: false, repaired: false };
 
   let res = null;
   try {
@@ -105,8 +118,8 @@ export async function repairEvasion(llm, call, { tag = '' } = {}) {
   const obj = res && parseJsonLoose(res.out);
   if (!obj?.fixes) {
     logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (طفره: «${hits[0].phrase}»)`);
-    return { llm, repaired: false };
+    return { llm, fired: true, repaired: false };
   }
   log(`${tag} طفره‌رفتن تعمیر شد: ${hits.map((h) => `«${h.phrase}»`).join('، ')}`);
-  return { llm: applyFixes(llm, hits, obj.fixes), repaired: true, usage: res.usages?.[0] };
+  return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0] };
 }
