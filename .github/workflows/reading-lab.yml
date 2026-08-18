@@ -28,9 +28,9 @@ on:
         required: false
         default: false
       reps:
-        description: 'تعدادِ تکرارِ هر چیدمان در حالتِ probe'
+        description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان'
         required: false
-        default: '5'
+        default: '1'
 
 concurrency:
   group: reading-lab
@@ -64,6 +64,10 @@ jobs:
           ARGS=""
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ "${{ inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
+          # `reps` در **هر دو** حالت پاس داده می‌شود. قبلاً فقط به probe می‌رسید و
+          # یک دورِ سه‌پاسه بی‌صدا تک‌پاسه اجرا می‌شد — یعنی گزارشِ «نویز سنجیده شد»
+          # می‌دادیم بدونِ اینکه اصلاً چند پاس گرفته باشیم.
+          [ -n "${{ inputs.reps }}" ] && ARGS="$ARGS --reps ${{ inputs.reps }}"
           if [ "${{ inputs.probe }}" = "true" ]; then
             node tools/reading-lab.mjs --probe --reps "${{ inputs.reps }}"
           else

@@ -228,6 +228,21 @@ if (flag('probe')) {
 const personas = SCEN.personas.filter(p => !ONLY.length || ONLY.includes(p.id));
 const all = [];
 
+// چند **پاسِ کامل** روی همان سناریوها با همان کارت‌ها. تنها متغیرِ بین پاس‌ها
+// نمونه‌برداریِ خودِ مدل است، یعنی دقیقاً همان نویزی که می‌خواهیم اندازه بگیریم.
+//
+// چرا اضافه شد (یافته‌ی دورِ هفتم، ۱۴۰۵/۰۵/۲۷): دور ۶ و دور ۷ **پرامپتِ یکسان**
+// داشتند و متریکِ جمله‌ی بی‌لنگر ۲۲٪ و ۲۸٪ شد. یعنی یک اجرای ۹ فالی حدودِ ۶ واحد
+// نویز دارد و هر «بهبودِ» کوچک‌تر از آن بی‌معناست — همان‌طور که «بهبودِ» ۲۴٪→۲۲٪
+// دورِ پنجم در واقع نویز بود. بدونِ این پرچم، لوپِ بهبود دارد به خودش دروغ می‌گوید.
+const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
+
+for (let rep = 0; rep < REPS; rep++) {
+if (REPS > 1) {
+  console.log(`\n${'█'.repeat(72)}`);
+  console.log(`🔁 پاسِ ${rep + 1} از ${REPS} (همان کارت‌ها، همان پرامپت)`);
+  console.log('█'.repeat(72));
+}
 for (const persona of personas) {
   console.log(`\n${'═'.repeat(72)}`);
   console.log(`👤 ${persona.id} — ${persona.name}  (تمرکز: ${persona.focus})`);
@@ -240,7 +255,7 @@ for (const persona of personas) {
   for (let i = 0; i < persona.steps.length; i++) {
     const step = persona.steps[i];
     const r = await runStep(persona, step, i, state);
-    all.push({ persona: persona.id, i, step, ...r });
+    all.push({ persona: persona.id, i, rep, step, ...r });
 
     const head = `\n── ${persona.id}.${i + 1} «${r.spread.fa}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
     console.log(head);
@@ -273,6 +288,7 @@ for (const persona of personas) {
     if (notes.length) { console.log('   ⚠️ نکته‌ها:'); notes.forEach(x => console.log(`      - ${x}`)); }
   }
 }
+}
 
 /* ═══════════════ تکرارِ بین‌فالی: مهم‌ترین سنجه ═══════════════ */
 // تحقیق ۱ دلیلِ شماره‌یکِ رهاکردنِ محصولاتِ AI را «تکراری و قالبی» می‌داند، و دو بار هم
@@ -283,19 +299,25 @@ if (!DRY) {
   console.log('🔁 تکرارِ بین‌فالی (متنی که در بیش از یک فال عیناً آمده)');
   console.log('═'.repeat(72));
   const done = all.filter(r => r.llm);
-  const seen = new Map();
-  for (const r of done) {
-    for (const g of new Set(ngrams(modelText(r.llm), 6))) {
-      if (!seen.has(g)) seen.set(g, new Set());
-      seen.get(g).add(`${r.persona}.${r.i + 1}`);
+  // ⚠️ مقایسه فقط **داخلِ هر پاس**. اگر پاس‌ها با هم مخلوط شوند، همان سناریو با همان
+  // کارت‌ها در دو پاس طبیعتاً شبیهِ خودش درمی‌آید و عددِ تکرار را الکی باد می‌کند.
+  const repsSeen = [...new Set(done.map(r => r.rep))].sort();
+  const perRep = [];
+  for (const rp of repsSeen) {
+    const seen = new Map();
+    for (const r of done.filter(x => x.rep === rp)) {
+      for (const g of new Set(ngrams(modelText(r.llm), 6))) {
+        if (!seen.has(g)) seen.set(g, new Set());
+        seen.get(g).add(`${r.persona}.${r.i + 1}`);
+      }
     }
+    const rr = [...seen.entries()].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
+    perRep.push(rr);
+    if (repsSeen.length > 1) console.log(`\n   ── پاسِ ${rp + 1}: ${rr.length} تکرار`);
+    if (!rr.length) console.log('   ✅ هیچ ۶کلمه‌ای در دو فالِ متفاوت تکرار نشده');
+    else for (const [g, s] of rr.slice(0, repsSeen.length > 1 ? 8 : 25)) console.log(`      [${[...s].join(', ')}] «${g}»`);
   }
-  const repeats = [...seen.entries()].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
-  if (!repeats.length) console.log('   ✅ هیچ ۶کلمه‌ای در دو فالِ متفاوت تکرار نشده');
-  else {
-    console.log(`   ❌ ${repeats.length} تکرار:`);
-    for (const [g, s] of repeats.slice(0, 25)) console.log(`      [${[...s].join(', ')}] «${g}»`);
-  }
+  const repeatCounts = perRep.map(x => x.length);
 
   console.log(`\n${'═'.repeat(72)}`);
   console.log('📊 جمع‌بندی');
@@ -308,16 +330,38 @@ if (!DRY) {
   const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
   const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
   console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
+  // پراکندگیِ بین پاس‌ها = واحدِ سنجشِ نویز. بدونِ این عدد نمی‌شود فهمید یک تفاوتِ
+  // چندواحدی «بهبود» است یا فقط شانسِ نمونه‌برداریِ مدل (یافته‌ی دورِ هفتم).
+  if (repsSeen.length > 1) {
+    const pcts = repsSeen.map(rp => {
+      const d = done.filter(x => x.rep === rp);
+      const l = d.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
+      const t = d.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
+      return t ? Math.round(l * 100 / t) : 0;
+    });
+    const badPer = repsSeen.map(rp => done.filter(x => x.rep === rp && x.check.issues.length).length);
+    console.log(`      per پاس: ${pcts.map(x => x + '٪').join(' , ')}  (دامنه ${Math.min(...pcts)} تا ${Math.max(...pcts)})`);
+    console.log(`   🔁 تکرارِ بین‌فالی per پاس: ${repeatCounts.join(' , ')}`);
+    console.log(`   ❌ فالِ ایرادناک per پاس: ${badPer.join(' , ')}`);
+  }
   console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
+  // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
+  // خط است؛ بدونِ این خلاصه برای فهمیدنِ «کدام فال چه ایرادی داشت» باید کلِ لاگ خوانده
+  // شود. با این خلاصه، ۳۰ خطِ آخر برای نتیجه‌گیریِ یک دور کافی است.
   for (const r of done) {
     const n = r.check.issues.length;
-    console.log(`   ${n ? '❌' : '✅'} ${r.persona}.${r.i + 1} ${r.spread.fa}${n ? ` — ${n} ایراد` : ''}`);
+    const a = r.check.anchor;
+    const pct = a?.total ? ` | بی‌لنگر ${a.loose}/${a.total}` : '';
+    const tag = repsSeen.length > 1 ? `پ${r.rep + 1} ` : '';
+    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${r.spread.fa}${pct}`);
+    r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
   }
 }
 
 if (OUT) {
   fs.writeFileSync(OUT, JSON.stringify(all.map(r => ({
-    persona: r.persona, step: r.i, spread: r.spread?.id, question: r.step?.question,
+    persona: r.persona, step: r.i, rep: r.rep, spread: r.spread?.id, question: r.step?.question,
     cards: r.cards?.map(c => c.key + (c.reversed ? '↕' : '')),
     inputChars: r.inputChars, llm: r.llm, rendered: r.rendered, check: r.check,
   })), null, 2));
