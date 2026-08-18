@@ -277,6 +277,30 @@ const AUDIO_DIRECT_ENABLED = true;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isAdmin(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
+// 🧭 UX v2 (v3.8.0) — بازطراحیِ بنیادیِ سفرِ کاربر
+// ───────────────────────────────────────────────────────────────────────────
+// یک پرچم برای **کلِ** بازطراحی، نه یکی per تغییر. دلیل: این ده تغییر به هم وابسته‌اند
+// (ماهِ تولد ورودیِ کارتِ روز است، سکه واحدِ کاتالوگِ جدید است، حذفِ موضوع یعنی کاتالوگِ
+// جدید). اگر هرکدام پرچمِ خودش را داشت، ترکیب‌های نیمه‌روشن ممکن می‌شد که هیچ‌وقت تست
+// نشده‌اند. یک پرچم یعنی دقیقاً دو حالتِ ممکن: دنیای قدیم، یا دنیای نو.
+//
+// چه چیزی عوض می‌شود:
+//   ۱) آنبوردینگ: «ذهنت درگیر چیه؟» → «ماه تولدت چیه؟»
+//   ۲) کاتالوگ: موضوع‌ها حذف؛ فقط سه فال بر اساسِ **اندازه** (۳/۵/۱۰ کارت)
+//   ۳) کاربر **همه‌ی** کارت‌ها را خودش می‌چیند (نه سه‌تا و بقیه خودکار)
+//   ۴) کیف پول → سکه‌فروشی با سه بسته
+//   ۵) هدیه‌ها و پاداش‌ها به سکه
+//   ۶) کارتِ روز: انتخابِ کارت توسط کاربر + متنِ از-پیش-نوشته (بدونِ LLM)
+//
+// ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `UX_V2_ADMIN_ONLY = false` در یک PR جدا.
+// Rollback فوری: `UX_V2 = false` → همه‌چیز دقیقاً به سفرِ قبلی برمی‌گردد. ستون‌های
+// جدیدِ DB (birth_month, coins) و جدولِ daily_log می‌مانند ولی خوانده نمی‌شوند، پس
+// مهاجرتِ برگشتی لازم نیست (بند ۲ج/۱: فقط افزایشی).
+const UX_V2 = true;
+const UX_V2_ADMIN_ONLY = true;
+const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isAdmin(uid));
+
+// ───────────────────────────────────────────────────────────────────────────
 // 🪙 اقتصادِ سکه (v3.0.0)
 // ───────────────────────────────────────────────────────────────────────────
 // موجودیِ داخلی **همچنان تومان** است (منبعِ حقیقتِ پول عوض نمی‌شود؛ بند ۹ ریشه). سکه فقط
@@ -443,6 +467,20 @@ db.exec(`
     file_id    TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  -- 🎴 دفترِ کارتِ روز (UX v2). یک ردیف per کاربر per روز، و همین یک جدول **هر دو**
+  -- قاعده‌ی عدم‌تکرار را جواب می‌دهد: کارت‌های ۷ روزِ اخیر (فیلترِ date) و نسخه‌هایی که
+  -- کاربر از یک کارتِ مشخص دیده (فیلترِ card_key). کلیدِ اصلی (user_id, date) خودش
+  -- گاردِ «روزی یک بار» است، پس دوبار-تپ نمی‌تواند دو ردیف بسازد.
+  CREATE TABLE IF NOT EXISTS daily_log (
+    user_id    INTEGER NOT NULL,
+    date       TEXT    NOT NULL,
+    card_key   TEXT    NOT NULL,
+    reversed   INTEGER NOT NULL DEFAULT 0,
+    variant    INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_id, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_daily_log_user_card ON daily_log(user_id, card_key);
   CREATE TABLE IF NOT EXISTS daily_texts (
     card_key   TEXT    NOT NULL,
     reversed   INTEGER NOT NULL,
@@ -496,6 +534,17 @@ try { db.prepare("ALTER TABLE users ADD COLUMN last_quiz_date TEXT NOT NULL DEFA
 try { db.prepare("ALTER TABLE users ADD COLUMN last_coffee_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// ── UX v2 (v3.8.0) — همه افزایشی، همه با پیش‌فرضی که رفتارِ قدیم را عوض نمی‌کند ──
+// ماهِ تولد (۱..۱۲ شمسی، ۰ = نپرسیده). جایگزینِ `focus_area` در آنبوردینگ شد، ولی
+// خودِ focus_area **پاک نشد**: دیتای تاریخیِ همه‌ی کاربرانِ فعلی آن‌جاست و تحلیل‌های
+// قبلی رویش نشسته‌اند (بند ۲ج/۱ و ۲ج/۳).
+try { db.prepare('ALTER TABLE users ADD COLUMN birth_month INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// موجودیِ سکه. چرا ستونِ جدا و نه `balance / COIN_VALUE`: بسته‌های جدید نرخِ متفاوت
+// دارند (۳۰k→۱۰ سکه، ۶۰k→۳۰، ۱۵۰k→۱۰۰)، پس دیگر یک نرخِ ثابت وجود ندارد که بشود
+// تومان را به سکه ترجمه کرد. `balance` تومانی دست‌نخورده می‌ماند تا رول‌بک ممکن بماند.
+try { db.prepare('ALTER TABLE users ADD COLUMN coins INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// هدیه‌ی خوش‌آمدِ سکه‌ای، write-once و جدا از هدیه‌ی تومانیِ قدیم
+try { db.prepare('ALTER TABLE users ADD COLUMN coin_welcome_at INTEGER').run(); } catch {}
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
 try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
 // کاربرِ «بی‌اعتماد»: بعد از یک برگشتِ پرداخت (رسیدِ فیک)، ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
