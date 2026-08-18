@@ -112,8 +112,11 @@ export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
 
   // ۲) لحن
   const fm = raw.match(FORMAL);
-  if (fm && !PLURAL_COUPLE.test(sentenceAround(raw, fm.index))) {
-    issues.push(`لحنِ رسمی: «${fm[2]}»`);
+  if (fm) {
+    const sent = sentenceAround(raw, fm.index);
+    // خودِ جمله هم چاپ می‌شود: سه دور پیاپی همین سنجه روی فالِ عشق قرمز کرد و
+    // بدونِ دیدنِ جمله نمی‌شد فهمید «شما»ی جمعِ درست است یا خطابِ رسمیِ واقعی.
+    if (!PLURAL_COUPLE.test(sent)) issues.push(`لحنِ رسمی: «${fm[2]}» در «${sent.trim().slice(0, 120)}»`);
   }
 
   // ۳) خط تیره: باید در متنِ نهایی صفر باشد (noDash تضمینش می‌کند)
