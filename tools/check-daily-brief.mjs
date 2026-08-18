@@ -17,7 +17,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian, familyVoice, synthChunk, bakeoffPick } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -103,18 +103,130 @@ ok(fallback.every((m) => m.id.includes('/')), 'اسلاگِ فالبک شکلِ 
 // می‌شنود و موتورِ فارسی‌دار اصلاً تست نمی‌شود.
 const realWorld = [
   { id: 'deepgram/flux-tts:free' }, { id: 'hexgrad/kokoro-82m' },
-  { id: 'sesame/csm-1b' }, { id: 'minimax/speech-2.8-hd' },
-  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'fish-audio/s1' },
+  { id: 'fish-audio/s2.1-pro' }, { id: 'minimax/speech-2.8-hd' },
+  { id: 'mistralai/voxtral-mini-tts-2603' }, { id: 'qwen/qwen-audio-3.0-tts-plus' },
+  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'google/gemini-3.1-flash-tts-preview' },
 ];
 const ranked = rankForPersian(realWorld);
 eq(ranked[0].id, 'minimax/speech-2.8-hd', 'موتوری که فارسی را اعلام کرده اولِ لیست می‌آید');
-eq(ranked.length, realWorld.length, 'مرتب‌سازی هیچ موتوری را حذف نمی‌کند (فقط ترتیب است)');
-ok(ranked.findIndex((m) => m.id === 'fish-audio/s1')
-   < ranked.findIndex((m) => m.id === 'sesame/csm-1b'), 'موتورِ چندزبانه جلوتر از موتورِ انگلیسی‌محور است');
+// ردشده با گوشِ مالک باید کاملاً ناپدید شود، نه اینکه فقط ته‌ی لیست برود
+ok(!ranked.some((m) => /fish-audio|voxtral/.test(m.id)),
+  'موتورهایی که مالک ردشان کرده اصلاً در لیست نمی‌آیند');
+eq(ranked.length, realWorld.length - 2, 'دقیقاً همان دو موتورِ ردشده حذف شده‌اند');
+// موتورهایی که مستنداتشان فارسی ندارد نباید سهمِ شش‌تاییِ بیک‌آف را بگیرند
+ok(ranked.findIndex((m) => m.id === 'x-ai/grok-voice-tts-1.0')
+   < ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus'),
+  'موتورِ چندزبانه جلوتر از موتوری است که فارسی مستند ندارد');
+ok(ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus')
+   < ranked.length, 'موتورِ کم‌اولویت حذف نمی‌شود، فقط ته می‌رود');
 ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی را نمی‌شکند');
 // مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
 // می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.
 eq(realWorld[0].id, 'deepgram/flux-tts:free', 'آرایه‌ی ورودی دست‌نخورده می‌ماند');
+
+// انتخابِ بیک‌آف: **همه‌ی گوگل‌ها همیشه داخل‌اند** (خواسته‌ی صریحِ مالک: نسخه‌های مختلفِ
+// گوگل کنارِ هم شنیده شوند تا اگر نسخه‌ی گران بهبودِ محسوسی نداشت انتخاب نشود).
+const manyModels = [
+  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'google/gemini-3.1-pro-tts' },
+  { id: 'google/gemini-2.5-flash-tts' }, { id: 'minimax/speech-2.8-hd' },
+  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'microsoft/mai-voice-2' },
+  { id: 'qwen/qwen-audio-3.0-tts-plus' }, { id: 'hexgrad/kokoro-82m' },
+  { id: 'deepgram/aura-2' }, { id: 'sesame/csm-1b' },
+];
+const picked = bakeoffPick(manyModels, { top: 3 });
+eq(picked.filter((m) => m.id.startsWith('google/')).length, 3,
+  'هر سه مدلِ گوگل در بیک‌آف هستند، حتی با سهمیه‌ی کوچکِ بقیه');
+eq(picked.length, 6, 'گوگل‌ها + دقیقاً سه کاندیدِ دیگر');
+ok(picked.some((m) => m.id === 'minimax/speech-2.8-hd'), 'کاندیدِ فارسی‌دار هم جا دارد');
+ok(!picked.some((m) => m.id === 'sesame/csm-1b'), 'موتورِ ته‌ی لیست سهمیه را نمی‌گیرد');
+// ترتیبِ خروجی باید همان ترتیبِ ورودی بماند تا مقایسه قابلِ پیش‌بینی باشد
+ok(picked.map((m) => m.id).join() === manyModels.filter((m) => picked.includes(m)).map((m) => m.id).join(),
+  'ترتیبِ لیستِ اصلی حفظ می‌شود');
+eq(bakeoffPick([], { top: 3 }).length, 0, 'لیستِ خالی انتخاب را نمی‌شکند');
+// اگر هیچ مدلِ گوگلی نبود، باز هم سهمیه‌ی بقیه کامل داده می‌شود
+eq(bakeoffPick(manyModels.filter((m) => !m.id.startsWith('google/')), { top: 3 }).length, 3,
+  'بدونِ مدلِ گوگل، سهمیه‌ی بقیه دست‌نخورده می‌ماند');
+
+// کشفِ وسیع‌تر: فیلترِ speech لزوماً همه‌ی مدل‌های خروجی‌صوتی را نمی‌دهد (کاتالوگِ واقعی
+// فقط یک مدلِ گوگل در آن فیلتر داشت)، پس کلِ کاتالوگ هم اسکن می‌شود.
+const merged = await listSpeechModels({
+  apiKey: 'k', ttlMs: 0,
+  fetchImpl: async (url) => ({
+    ok: true,
+    json: async () => ({
+      data: url.includes('output_modalities=speech')
+        ? [{ id: 'a/one-tts', name: 'One' }]
+        : [
+            { id: 'a/one-tts', name: 'One' },                                     // تکراری
+            { id: 'google/gemini-pro-tts', architecture: { output_modalities: ['audio'] } },
+            { id: 'openai/whisper-large', architecture: { output_modalities: ['text'] } }, // صوت‌به‌متن
+          ],
+    }),
+  }),
+});
+eq(merged.length, 2, 'مدلِ خروجی‌صوتیِ بیرونِ فیلتر هم پیدا می‌شود، بدونِ تکراری');
+ok(merged.some((m) => m.id === 'google/gemini-pro-tts'), 'مدلِ گوگلِ جاافتاده از کاتالوگِ کامل اضافه شد');
+ok(!merged.some((m) => m.id.includes('whisper')), 'مدلِ صوت‌به‌متن وارد لیستِ صداسازی نمی‌شود');
+// شکستِ منبعِ دوم نباید کلِ کشف را بشکند
+const partial = await listSpeechModels({
+  apiKey: 'k', ttlMs: 0,
+  fetchImpl: async (url) => (url.includes('output_modalities=speech')
+    ? { ok: true, json: async () => ({ data: [{ id: 'a/one-tts' }] }) }
+    : { ok: false, status: 500 }),
+});
+eq(partial.length, 1, 'اگر کاتالوگِ کامل نیامد، لیستِ فیلترشده کار را راه می‌اندازد');
+
+/* ── ۳ج) قلقِ ارائه‌دهنده‌ها (از شکستِ واقعیِ اولین بیک‌آف) ─────────────────── */
+// در اولین بیک‌آفِ واقعی سه موتور رد شدند و هر سه از جنسِ «قلقی که کاتالوگ اعلام نمی‌کند»
+// بودند: MiniMax بدونِ voice جواب نمی‌دهد و Gemini فقط pcm می‌دهد. بدترین بخشش این بود
+// که دقیقاً موتورهای فارسی‌دار از مقایسه بیرون افتادند. به‌جای جدولِ دستیِ استثناها، کد از
+// خودِ پیامِ خطا یاد می‌گیرد؛ این بخش همان یادگیری را می‌سنجد.
+console.log('\n🧩 قلقِ ارائه‌دهنده‌ها');
+ok(familyVoice('minimax/speech-2.8-hd'), 'MiniMax صدای پیش‌فرضِ شناخته‌شده دارد');
+eq(defaultVoice({ id: 'minimax/speech-2.8-hd', supported_voices: [] }), familyVoice('minimax/speech-2.8-hd'),
+  'وقتی کاتالوگ صدا نمی‌دهد، صدای خانواده استفاده می‌شود');
+eq(defaultVoice({ id: 'minimax/speech-2.8-hd', supported_voices: ['X'] }), 'X',
+  'اگر کاتالوگ صدا بدهد، همان مقدم است');
+
+// سناریوی واقعیِ MiniMax: اولین درخواستِ بی‌صدا رد می‌شود، دومی با صدا باید بگیرد
+let calls = [];
+const voiceThenOk = async (url, opts) => {
+  const b = JSON.parse(opts.body);
+  calls.push(b);
+  if (!b.voice) return { ok: false, status: 400, text: async () => '{"error":{"message":"An explicit voice is required for this TTS provider."}}' };
+  return { ok: true, headers: { get: () => '' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+};
+const r1 = await synthChunk({ apiKey: 'k', modelId: 'minimax/speech-2.8-hd', voice: '', text: 'سلام', fetchImpl: voiceThenOk });
+ok(r1.buf.length > 0, 'بعد از خطای «صدا لازم است» با صدای خانواده دوباره تلاش و موفق می‌شود');
+eq(calls.length, 2, 'دقیقاً یک تلاشِ دوباره، نه حلقه‌ی بی‌پایان');
+ok(!!calls[1].voice, 'تلاشِ دوم صدا دارد');
+
+// سناریوی واقعیِ Gemini: mp3 رد می‌شود، pcm باید بگیرد و به‌عنوان pcm علامت بخورد
+calls = [];
+const pcmThenOk = async (url, opts) => {
+  const b = JSON.parse(opts.body);
+  calls.push(b);
+  if (b.response_format !== 'pcm') return { ok: false, status: 400, text: async () => '{"error":{"message":"Gemini TTS only supports response_format=\\"pcm\\". Got \\"mp3\\"."}}' };
+  return {
+    ok: true,
+    headers: { get: (h) => (h === 'content-type' ? 'audio/pcm;rate=24000;channels=1' : '') },
+    arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+  };
+};
+const r2 = await synthChunk({ apiKey: 'k', modelId: 'google/gemini-3.1-flash-tts-preview', voice: 'Kore', text: 'سلام', fetchImpl: pcmThenOk });
+eq(calls[0].response_format, 'mp3', 'اول mp3 را امتحان می‌کند');
+eq(calls[1].response_format, 'pcm', 'بعد از خطا به pcm سوییچ می‌کند');
+eq(r2.pcm?.rate, 24000, 'نرخِ نمونه‌برداری از هدر خوانده می‌شود، نه از حدس');
+eq(r2.pcm?.channels, 1, 'تعدادِ کانال هم از هدر می‌آید');
+// خطایی که ربطی به این دو قلق ندارد نباید بی‌جهت retry شود
+calls = [];
+let threw = false;
+try {
+  await synthChunk({ apiKey: 'k', modelId: 'x/y', voice: 'v', text: 'a',
+    fetchImpl: async (u, o) => { calls.push(JSON.parse(o.body)); return { ok: false, status: 402, text: async () => 'insufficient credits' }; } });
+} catch { threw = true; }
+ok(threw, 'خطای نامرتبط بالا می‌رود، نه اینکه بی‌صدا بلعیده شود');
+eq(calls.length, 1, 'خطای نامرتبط اصلاً retry نمی‌شود (اعتبار بی‌جهت خرج نمی‌شود)');
 
 /* ── ۳ب) گرافِ فیلترِ ffmpeg ─────────────────────────────────────────────── */
 // چرا اینجا و نه با اجرای واقعیِ ffmpeg: محیطِ توسعه ffmpeg ندارد و خطای گراف فقط روی

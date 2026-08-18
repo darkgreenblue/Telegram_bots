@@ -42,23 +42,45 @@ const FALLBACK_PRICE_PER_CHAR = 5 / 1_000_000;
 
 let catalogCache = { at: 0, models: null };
 
+const normalize = (m) => ({
+  id: m.id,
+  name: m.name || m.id,
+  supported_voices: Array.isArray(m.supported_voices) ? m.supported_voices : [],
+  pricing: m.pricing || null,
+});
+
+// آیا این مدل خروجیِ صوتی می‌دهد؟ شکلِ فیلد بینِ نسخه‌های کاتالوگ فرق می‌کند، پس هر دو
+// جای متعارف نگاه می‌شود. اسمِ مدل به‌تنهایی ملاک نیست چون مدل‌های **صوت به متن** هم
+// «audio» در نامشان دارند و اگر واردِ لیست شوند، بیک‌آف روی آن‌ها خطا می‌دهد.
+const outputsAudio = (m) => {
+  const mods = m?.output_modalities || m?.architecture?.output_modalities;
+  return Array.isArray(mods) && mods.some((x) => /audio|speech/i.test(String(x)));
+};
+
 // کشفِ مدل‌های صوتی. شکستش هرگز چیزی را نمی‌شکند: فالبکِ ثابت برمی‌گردد.
+// **دو منبع** خوانده می‌شود چون فیلترِ `output_modalities=speech` لزوماً همه‌ی مدل‌های
+// خروجی‌صوتی را برنمی‌گرداند (کاتالوگِ واقعی فقط یک مدلِ گوگل در آن فیلتر داشت). کلِ
+// کاتالوگ هم اسکن می‌شود و هرچه خروجیِ صوتی اعلام کرده اضافه می‌شود.
 export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 3600 * 1000 } = {}) {
   if (catalogCache.models && Date.now() - catalogCache.at < ttlMs) return catalogCache.models;
-  try {
-    const res = await fetchImpl('https://openrouter.ai/api/v1/models?output_modalities=speech', {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    });
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  const get = async (url) => {
+    const res = await fetchImpl(url, { headers });
     if (!res.ok) throw new Error(`models ${res.status}`);
-    const data = await res.json();
-    const models = (data?.data || [])
-      .filter((m) => m?.id)
-      .map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        supported_voices: Array.isArray(m.supported_voices) ? m.supported_voices : [],
-        pricing: m.pricing || null,
-      }));
+    return (await res.json())?.data || [];
+  };
+  try {
+    const primary = (await get('https://openrouter.ai/api/v1/models?output_modalities=speech'))
+      .filter((m) => m?.id).map(normalize);
+    const byId = new Map(primary.map((m) => [m.id, m]));
+    // منبعِ دوم بهترین‌تلاش است: اگر نشد، همان لیستِ اول کار را راه می‌اندازد.
+    try {
+      for (const m of await get('https://openrouter.ai/api/v1/models')) {
+        if (m?.id && !byId.has(m.id) && outputsAudio(m)) byId.set(m.id, normalize(m));
+      }
+    } catch (e) { logErr('کاتالوگِ کامل خوانده نشد:', e.message); }
+
+    const models = [...byId.values()];
     if (models.length) {
       catalogCache = { at: Date.now(), models };
       log(`🔊 ${models.length} مدلِ صوتی از OpenRouter: ${models.map((m) => m.id).join(', ')}`);
@@ -71,24 +93,55 @@ export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 
   }
 }
 
-// کاتالوگِ OpenRouter ۱۸ مدلِ صوتی دارد و بیشترشان انگلیسی‌محورند. ساختنِ ۱۸ نمونه هم
-// وقتِ مالک را می‌گیرد هم بیشترش دور ریختنی است، پس موتورهایی که **پشتیبانیِ چندزبانه‌ی
-// اعلام‌شده** دارند اول می‌آیند. این فقط ترتیب است، نه فیلتر: هر ۱۸ تا در لیستِ انتخاب هستند
-// و قضاوتِ نهایی همچنان با گوشِ مالک است، نه با این جدول.
-const PERSIAN_FIRST = [
-  'minimax/speech-2.8-hd',      // فارسی صراحتاً در زبان‌های اعلام‌شده‌اش هست
-  'minimax/speech-2.8-turbo',
-  'fish-audio/s2.1-pro',        // چندزبانه
-  'fish-audio/s1',
-  'google/gemini-3.1-flash-tts-preview',
-  'mistralai/voxtral-mini-tts-2603',
+// کاتالوگِ OpenRouter ۱۸ مدلِ صوتی دارد و بیشترشان انگلیسی‌محورند. ساختنِ نمونه با همه‌شان
+// هم وقتِ مالک را می‌گیرد هم بیشترش دور ریختنی است، پس این سه لایه ترتیب و صافیِ لیست را
+// تعیین می‌کنند. **قضاوتِ نهایی همیشه با گوشِ مالک است**؛ این جدول‌ها فقط نتیجه‌ی همان
+// قضاوت‌ها و مستنداتِ رسمیِ ارائه‌دهنده‌ها را نگه می‌دارند تا دوباره وقت هدر نرود.
+
+// ۱) رد شده با گوشِ مالک (۱۴۰۵/۰۵/۲۶، اولین بیک‌آفِ واقعی): خروجیِ فارسی‌شان بی‌معنی بود.
+// این‌ها از لیستِ انتخاب هم حذف می‌شوند، نه فقط از بیک‌آف. برگرداندن = حذفِ همین ردیف.
+const REJECTED = [
+  /^fish-audio\//i,
+  /voxtral/i,
 ];
+
+// ۲) اولویتِ فارسی، بر اساسِ زبان‌های رسماً اعلام‌شده‌ی هر ارائه‌دهنده.
+const PERSIAN_FIRST = [
+  'minimax/speech-2.8-hd',                // فارسی صراحتاً در زبان‌های اعلام‌شده‌اش هست
+  'minimax/speech-2.8-turbo',
+  'x-ai/grok-voice-tts-1.0',              // ۲۰+ زبان و خطوطِ غیرلاتین
+  'google/gemini-3.1-flash-tts-preview',  // تنها موتورِ دو گوینده (فارسی تأییدنشده)
+  'microsoft/mai-voice-2',
+  'microsoft/mai-voice-2-flash',
+];
+
+// ۳) ته‌ی لیست: مستنداتشان فارسی ندارد (Qwen رسماً ۱۰ زبان و فارسی بینشان نیست و در عمل
+// با لهجه‌ی چینی می‌خواند؛ kokoro هشت زبان؛ orpheus و csm انگلیسی). حذف نمی‌شوند تا اگر
+// روزی خواستی امتحانشان کنی در دسترس باشند، ولی سهمِ بیک‌آف را نمی‌گیرند.
+const LOW_PRIORITY = [/^qwen\//i, /kokoro/i, /orpheus/i, /csm-1b/i, /^deepgram\//i];
+
+// انتخابِ موتورهای بیک‌آف. **همه‌ی مدل‌های گوگل همیشه داخل‌اند** (خواسته‌ی صریحِ مالک:
+// تنوعِ نسخه‌های گوگل بالا برود تا فلش و پرو و نسخه‌های مختلف کنارِ هم شنیده شوند و اگر
+// نسخه‌ی گران بهبودِ محسوسی نداشت انتخاب نشود)، به‌علاوه‌ی سهمیه‌ای از بقیه‌ی کاندیدها.
+export function bakeoffPick(models, { top = 6 } = {}) {
+  const isGoogle = (m) => /^google\//i.test(m.id);
+  const google = models.filter(isGoogle);
+  const others = models.filter((m) => !isGoogle(m)).slice(0, top);
+  // ترتیبِ نهایی همان ترتیبِ لیستِ اصلی می‌ماند تا مقایسه قابلِ پیش‌بینی بماند
+  const keep = new Set([...google, ...others].map((m) => m.id));
+  return models.filter((m) => keep.has(m.id));
+}
+
+// خروجی هم **مرتب‌شده** است هم **صاف‌شده** (ردشده‌ها بیرون می‌روند).
 export function rankForPersian(models) {
   const rank = (id) => {
     const i = PERSIAN_FIRST.indexOf(id);
-    return i === -1 ? PERSIAN_FIRST.length : i;
+    if (i !== -1) return i;
+    return LOW_PRIORITY.some((re) => re.test(id)) ? PERSIAN_FIRST.length + 1 : PERSIAN_FIRST.length;
   };
-  return [...models].sort((a, b) => rank(a.id) - rank(b.id));
+  return models
+    .filter((m) => !REJECTED.some((re) => re.test(m.id)))
+    .sort((a, b) => rank(a.id) - rank(b.id));
 }
 
 export const engineLabel = (id) => {
@@ -96,12 +149,22 @@ export const engineLabel = (id) => {
   return `🗣 ${m?.name || String(id).split('/').pop()}`;
 };
 
-// صدای پیش‌فرضِ هر مدل: اولین صدای پشتیبانی‌شده، وگرنه حدسِ متعارفِ همان خانواده.
+// صدای پیش‌فرضِ خانواده‌ها برای وقتی که کاتالوگ `supported_voices` نمی‌دهد.
+// لازم است چون بعضی ارائه‌دهنده‌ها بدونِ voice اصلاً جواب نمی‌دهند: در اولین بیک‌آفِ واقعی،
+// هر دو مدلِ MiniMax با «An explicit voice is required for this TTS provider» رد شدند —
+// یعنی دقیقاً موتوری که فارسی را رسماً پشتیبانی می‌کند از مقایسه بیرون افتاد.
+const FAMILY_VOICE = [
+  [/^minimax\//i, 'Deep_Voice_Man'],   // از صداهای سیستمیِ خودِ MiniMax
+  [/gemini.*tts/i, 'Kore'],
+  [/^openai\//i, 'nova'],
+  [/^fish-audio\//i, 'default'],
+];
+export const familyVoice = (id) => (FAMILY_VOICE.find(([re]) => re.test(String(id || '')))?.[1] || '');
+
+// صدای پیش‌فرضِ هر مدل: اولین صدای پشتیبانی‌شده، وگرنه صدای شناخته‌شده‌ی همان خانواده.
 export function defaultVoice(model) {
   if (model?.supported_voices?.length) return model.supported_voices[0];
-  if (/gemini/i.test(model?.id || '')) return 'Kore';
-  if (/openai|gpt/i.test(model?.id || '')) return 'nova';
-  return '';
+  return familyVoice(model?.id);
 }
 
 // دو گوینده‌ی بومی فقط روی خانواده‌ی جمنای مستند شده است.
@@ -180,7 +243,11 @@ export const turnsToNarration = (turns) =>
   (turns || []).map((t) => String(t.text || '').trim()).filter(Boolean).join('\n\n');
 
 /* ===== آداپتورِ واحد (OpenRouter) ===== */
-async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
+// هر ارائه‌دهنده قلقِ خودش را دارد و کاتالوگ آن قلق‌ها را اعلام نمی‌کند. به‌جای نگه‌داشتنِ
+// یک جدولِ دستیِ استثناها (که برای مدلِ بعدی دوباره ناقص می‌شود)، از خودِ پیامِ خطا یاد
+// می‌گیریم و **یک بار** با تنظیمِ اصلاح‌شده دوباره تلاش می‌کنیم. دو موردی که در اولین
+// بیک‌آفِ واقعی دیده شد: MiniMax بدونِ voice رد می‌کند، و Gemini فقط pcm می‌دهد.
+async function postSpeech({ apiKey, modelId, voice, text, speed, format, fetchImpl }) {
   const res = await fetchImpl('https://openrouter.ai/api/v1/audio/speech', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -188,18 +255,54 @@ async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
       model: modelId,
       input: text,
       ...(voice ? { voice } : {}),
-      response_format: 'mp3',
+      response_format: format,
       ...(speed && speed !== 1 ? { speed } : {}),
     }),
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => '');
-    throw new Error(`TTS ${res.status}: ${msg.slice(0, 200)}`);
+    const err = new Error(`TTS ${res.status}: ${msg.slice(0, 200)}`);
+    err.status = res.status;
+    err.body = msg;
+    throw err;
   }
+  const ctype = res.headers.get('content-type') || '';
   return {
     buf: Buffer.from(await res.arrayBuffer()),
     genId: res.headers.get('x-generation-id') || '',
+    // خامِ pcm باید قبل از چسباندن به mp3 تبدیل شود؛ نرخ و کانال از خودِ هدر می‌آید
+    // (مثلاً audio/pcm;rate=24000;channels=1) نه از حدسِ ما.
+    pcm: /pcm/i.test(ctype) || format === 'pcm'
+      ? {
+          rate: Number(/rate=(\d+)/.exec(ctype)?.[1]) || 24000,
+          channels: Number(/channels=(\d+)/.exec(ctype)?.[1]) || 1,
+        }
+      : null,
   };
+}
+
+export async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
+  let useVoice = voice;
+  let format = 'mp3';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await postSpeech({ apiKey, modelId, voice: useVoice, text, speed, format, fetchImpl });
+    } catch (e) {
+      const body = String(e.body || e.message || '');
+      if (e.status === 400 && /voice/i.test(body) && !useVoice) {
+        useVoice = familyVoice(modelId) || 'default';
+        logErr(`TTS ${modelId}: صدا لازم بود، با «${useVoice}» دوباره تلاش می‌کنم`);
+        continue;
+      }
+      if (e.status === 400 && /pcm/i.test(body) && format !== 'pcm') {
+        format = 'pcm';
+        logErr(`TTS ${modelId}: فقط pcm می‌دهد، با pcm دوباره تلاش می‌کنم`);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(`TTS ${modelId}: بعد از تلاشِ دوباره هم جواب نداد`);
 }
 
 /* ===== ffmpeg ===== */
@@ -300,12 +403,20 @@ export async function synthesize({
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
       chars += piece.length;
-      const { buf, genId } = await synthChunk({
+      const { buf, genId, pcm } = await synthChunk({
         apiKey: openrouterKey, modelId, voice: useVoice, text: piece, speed, fetchImpl,
       });
       if (!buf?.length) throw new Error(`چانک ${i + 1} خروجیِ صوتی نداد`);
       const f = join(dir, `p${String(i).padStart(3, '0')}.mp3`);
-      await writeFile(f, buf);
+      if (pcm) {
+        // خامِ بدونِ هدر: ffmpeg باید نرخ و کانال را از ما بگیرد وگرنه صدا تندشده یا خش‌دار می‌شود
+        const raw = join(dir, `p${String(i).padStart(3, '0')}.pcm`);
+        await writeFile(raw, buf);
+        await run('ffmpeg', ['-y', '-f', 's16le', '-ar', String(pcm.rate), '-ac', String(pcm.channels),
+          '-i', raw, ...LAME, f]);
+      } else {
+        await writeFile(f, buf);
+      }
       files.push(f);
       if (genId) genIds.push(genId);
       log(`🔊 chunk ${i + 1}/${pieces.length} (${piece.length} chars, ${buf.length} bytes)`);
