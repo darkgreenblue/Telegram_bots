@@ -27,7 +27,11 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs
 console.log('▶ دامنه و رول‌بک (بند ۲ج-۲ ریشه)');
 {
   ok(/const READING_V4 = true;/.test(SRC), 'پرچمِ اصلی روشن است');
-  ok(/const READING_V4_ADMIN_ONLY = true;/.test(SRC), 'هنوز فقط ادمین (باز کردن = یک PR جدا)');
+  // از v3.7.0 برای همه باز است. این ردیف عمداً برعکس شد تا اگر روزی کسی دوباره
+  // ادمین-محدودش کرد، تصمیمِ صریح باشد نه سهو.
+  ok(/const READING_V4_ADMIN_ONLY = false;/.test(SRC), 'برای همه‌ی کاربران باز است (v3.7.0)');
+  // ولی پرچمِ اصلی و helper سرِ جایشان‌اند: رول‌بکِ یک‌خطی باید همیشه ممکن بماند (بند ۲ج/۸)
+  ok(/const READING_V4 = true;/.test(SRC), 'پرچمِ رول‌بک هنوز وجود دارد');
   ok(/const v4For = \(uid\) => READING_V4 && \(!READING_V4_ADMIN_ONLY \|\| isAdmin\(uid\)\)/.test(SRC),
     'helper هر دو پرچم را با هم چک می‌کند');
   const raw = [...SRC.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
