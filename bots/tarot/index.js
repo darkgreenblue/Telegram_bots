@@ -166,7 +166,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.7.0';
+const PRODUCT_VERSION = '3.8.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -294,9 +294,10 @@ const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || is
 //   ۶) کارتِ روز: انتخابِ کارت توسط کاربر + متنِ از-پیش-نوشته (بدونِ LLM)
 //
 // ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `UX_V2_ADMIN_ONLY = false` در یک PR جدا.
-// Rollback فوری: `UX_V2 = false` → همه‌چیز دقیقاً به سفرِ قبلی برمی‌گردد. ستون‌های
-// جدیدِ DB (birth_month, coins) و جدولِ daily_log می‌مانند ولی خوانده نمی‌شوند، پس
-// مهاجرتِ برگشتی لازم نیست (بند ۲ج/۱: فقط افزایشی).
+// Rollback فوری: `UX_V2 = false` → همه‌چیز دقیقاً به سفرِ قبلی برمی‌گردد. ستونِ
+// جدیدِ `users.birth_month` و جدولِ `daily_log` می‌مانند ولی خوانده نمی‌شوند، پس
+// مهاجرتِ برگشتی لازم نیست (بند ۲ج/۱: فقط افزایشی). ستونِ `coins` عمداً ساخته نشد:
+// موجودی همچنان تومان است و سکه فقط واحدِ نمایش (بند ۹ ریشه، منبعِ حقیقتِ پول یکی است).
 const UX_V2 = true;
 const UX_V2_ADMIN_ONLY = true;
 const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isAdmin(uid));
@@ -1068,6 +1069,7 @@ function readingCtxFor(user, spread, question, cards, focusKey) {
     user, spread, question, cards, focusKey, L,
     name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
     kbOn: toneV2For(user.telegram_id),
+    hideName: uxV2For(user.telegram_id),
     // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
     prev: stmts.lastDelivered.all(user.telegram_id, 4),
   });
@@ -2738,7 +2740,8 @@ async function finishReading(ctx, uid, readingId) {
     // بدونِ parse_mode: خروجیِ v4 عمداً هیچ قالب‌بندی‌ای ندارد (نه بولد، نه تیتر)، و
     // متنِ خام یعنی تلگرام هیچ نشانه‌گذاری‌ای را تفسیر نمی‌کند — پس نه escape لازم است
     // نه ریسکِ خرابیِ قالب. (replyLong هم extra را فقط به تکه‌ی آخر می‌دهد.)
-    const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length));
+    const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length),
+    { name: uxV2For(r.user_id) ? dispName(getUser(r.user_id)) : '' });
     await typing(ctx, PACE_M);
     if (headline) await ctx.reply(headline);
     if (body) { await sleep(PACE_M); await replyLong(ctx, body); }

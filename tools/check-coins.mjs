@@ -28,6 +28,7 @@ console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچ�
   for (const [flag, gate, helper, expectFlag, expectAdminOnly] of [
     ['READING_TONE_V2', 'READING_TONE_V2_ADMIN_ONLY', 'toneV2For', true, false], // v3.3.0: برای همه باز شد
     ['COIN_ECONOMY', 'COIN_ECONOMY_ADMIN_ONLY', 'coinsOn', false, true],         // پارک‌شده
+    ['UX_V2', 'UX_V2_ADMIN_ONLY', 'uxV2For', true, true],                        // v3.8.0: فعلاً فقط ادمین
   ]) {
     ok(new RegExp(`const ${flag}\\s*=\\s*${expectFlag}`).test(SRC),
       `${flag} === ${expectFlag} (${expectFlag ? 'روشن؛ رول‌بک = false کردنش' : 'پارک‌شده'})`);
@@ -35,7 +36,12 @@ console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچ�
       `${gate} === ${expectAdminOnly} (${expectAdminOnly ? 'فقط ادمین' : 'باز برای همه'})`);
     // شکلِ helper باید ثابت بماند: خاموش‌کردنِ پرچمِ اصلی همیشه همه را به رفتارِ قبلی
     // برمی‌گرداند، حتی وقتی دامنه باز است (تنها مسیرِ رول‌بکِ یک‌خطی — بند ۲ج/۸).
-    const re = new RegExp(`const ${helper}\\s*=\\s*\\(uid\\)\\s*=>\\s*${flag}\\s*&&\\s*\\(!${gate}\\s*\\|\\|\\s*isAdmin\\(uid\\)\\)`);
+    // استثنای عمدی: `coinsOn` یک شرطِ **اضافه** دارد چون UX v2 خودش سکه‌محور است
+    // (سکه‌فروشی جزوِ همان بسته است)، پس رول‌بکش `UX_V2 = false` است نه `COIN_ECONOMY`.
+    const own = `${flag}\\s*&&\\s*\\(!${gate}\\s*\\|\\|\\s*isAdmin\\(uid\\)\\)`;
+    const re = helper === 'coinsOn'
+      ? new RegExp(`const coinsOn\\s*=\\s*\\(uid\\)\\s*=>\\s*uxV2For\\(uid\\)\\s*\\|\\|\\s*\\(${own}\\)`)
+      : new RegExp(`const ${helper}\\s*=\\s*\\(uid\\)\\s*=>\\s*${own}`);
     ok(re.test(SRC), `${helper} هم پرچمِ اصلی و هم گاردِ دامنه را با هم چک می‌کند`);
   }
   // هر تصمیمِ رو-به-کاربر باید از همین دو helper بیاید، نه از خودِ پرچمِ خام (وگرنه یک
@@ -46,6 +52,11 @@ console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچ�
   ok(rawUses === 2, `COIN_ECONOMY فقط در تعریف و داخلِ coinsOn استفاده شده (${rawUses} مورد)`);
   const rawTone = [...CODE.matchAll(/\bREADING_TONE_V2\b(?!_ADMIN_ONLY)/g)].length;
   ok(rawTone === 2, `READING_TONE_V2 فقط در تعریف و داخلِ toneV2For استفاده شده (${rawTone} مورد)`);
+  // UX v2 مسیرهای زیادی را عوض می‌کند (آنبوردینگ، کاتالوگ، انتخابِ کارت، کارتِ روز،
+  // سکه‌فروشی). یک مسیری که گاردِ ادمین را جا بیندازد یعنی کاربرِ واقعیِ ربات زنده
+  // وسطِ فلو نسخه‌ی نیمه‌تمام می‌بیند — دقیقاً چیزی که بند ۲ج-۲ ممنوع کرده.
+  const rawUx = [...CODE.matchAll(/\bUX_V2\b(?!_ADMIN_ONLY)/g)].length;
+  ok(rawUx === 2, `UX_V2 فقط در تعریف و داخلِ uxV2For استفاده شده (${rawUx} مورد)`);
 }
 
 console.log('\n▶ پارک‌شدنِ اقتصادِ سکه و انحلالِ آزمایشِ نامِ واحد (تصمیمِ مالک ۱۴۰۵/۰۵/۲۴)');

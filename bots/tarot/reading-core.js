@@ -207,10 +207,11 @@ export const tehranToday = (d = new Date()) =>
 //
 // همه‌ی وابستگی‌های بیرونی (رکوردهای قبلی از DB، نامِ نمایشی، پرچمِ دانشِ کارت) پارامترند
 // تا این تابع خالص بماند و آزمایشگاه بتواند بدونِ دیتابیس همان ورودی را بسازد.
-export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '' }) {
+export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '', hideName = false }) {
   return {
     memory: user.memory_json || '',
     name, // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
+    hideName, // UX v2: نام اصلاً به مدل نمی‌رود و کد خودش یک بار می‌چسباند
     focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
     spreadFa: spread.fa,
@@ -289,7 +290,7 @@ export function softMissesV4(obj) {
 // ترتیب عمدی است: کاربر تازه پول داده و اولین چیزی که می‌بیند جوابِ سؤالش است،
 // بعد الگو و کارت‌به‌کارت که «چرا»ی همان جواب‌اند، و آخر جمع‌بندی با «ولی» بازشده.
 // خروجی سه تکه‌ی متنی است چون ربات آن‌ها را با مکث و به‌صورت سه پیامِ جدا می‌فرستد.
-export function renderV4(llm, cards, labels) {
+export function renderV4(llm, cards, labels, { name = '' } = {}) {
   // خوانشِ کارت‌ها **یک بلوکِ پیوسته** است، نه یک پاراگرافِ جدا با ایموجی per کارت.
   // بازخوردِ مالک از دورِ سوم، و تطبیق با خوانشِ واقعیِ انسانی: آن‌جا کارت‌ها پشتِ سرِ
   // هم و در یک تکه می‌آیند («کارت اولت می‌گه… کارت بعدیت می‌گه…»)؛ تیترِ ایموجی‌دار
@@ -308,8 +309,13 @@ export function renderV4(llm, cards, labels) {
     cardLines.length ? `${SECT.card} ${cardLines.join('\n')}` : '',
   ].filter((x) => x && String(x).trim()).join('\n\n');
 
+  // نامِ مخاطب **دقیقاً یک بار** و از کد، نه از مدل. تضمینِ ساختاری به‌جای دستورِ
+  // پرامپتی که سه دور جواب نداد.
+  const head = llm.headline
+    ? `${SECT.headline} ${name ? `${name}، ` : ''}${noDash(llm.headline)}`
+    : '';
   return {
-    headline: llm.headline ? `${SECT.headline} ${noDash(llm.headline)}` : '',
+    headline: head,
     body,
     closing: llm.closing ? `${SECT.closing} ${noDash(llm.closing)}` : '',
   };
