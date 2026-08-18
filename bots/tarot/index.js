@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.10.1';
+const PRODUCT_VERSION = '3.11.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1004,7 +1004,10 @@ function mainKeyboard(uid) {
   // «کارت شانس» ردیفِ خودش را دارد چون مسیرِ متفاوتی است: الماس می‌گیرد، فال نمی‌دهد.
   const rows = uxV2For(uid)
     ? [
-      [L.buttons.dailyOneCard, L.buttons.reading],
+      // تصمیمِ صریحِ مالک: «فال بگیر» بالای «فال تک کارت» و هر دو تمام‌عرض — نه دو دکمه‌ی
+      // نصفه کنارِ هم. فالِ پولی محصولِ اصلی است و باید بزرگ‌ترین و اولین چیزِ کیبورد باشد.
+      [L.buttons.reading],
+      [L.buttons.dailyOneCard],
       [L.buttons.luckyMain],
       [L.buttons.coinShop, L.buttons.inviteMain],
     ]
@@ -1340,7 +1343,9 @@ bot.catch(async (err, ctx) => {
 const KB_LABELS = new Set([
   L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.coinShop, L.buttons.inviteMain,
   L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
-  '📤 معرفی دوستان',   // برچسبِ میانیِ دکمه‌ی دعوت — تا کیبوردهای کش‌شده هم «تپِ دکمه» شمرده شوند
+  // برچسب‌های کهنه‌ی کیبورد — تا تپِ کیبوردهای کش‌شده هم «دکمه» شمرده شود، نه «تایپِ آزاد»
+  '📤 معرفی دوستان', '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)',
+  '💎 کیف الماس', '💎 الماس فروشی',
   L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
 ].filter(Boolean));
 registerJourney(bot, {
@@ -1594,7 +1599,15 @@ async function finishOnboarding(ctx, uid, props) {
   // وگرنه اولین انتخابِ کاربرِ تازه همیشه رایگان می‌شود و هیچ‌وقت فالِ واقعی را نمی‌بیند.
   if (uxV2For(uid)) {
     setState(uid, 'choose_spread');
-    return ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
+    // UX v2.4 (تصمیمِ صریحِ مالک): پیامِ جداگانه‌ی «از دکمه‌های پایین شروع کن 👇» حذف شد.
+    // ولی کیبوردِ ماندگار نباید قربانی شود: `askName` عمداً removeKeyboard می‌کند، پس اگر
+    // این‌جا تحویل نشود کاربرِ تازه‌ی دنیای الماس **هیچ‌وقت** کیبورد نمی‌گیرد (بن‌بستِ بند ۹ب/۴).
+    // راه‌حل: کیبورد به پیامی می‌چسبد که به‌هرحال قرار بود برود («از کجا شروع کنیم؟»)، و
+    // منوی فال پیامِ بعدی می‌شود — تلگرام در هر پیام فقط یک reply_markup می‌پذیرد.
+    stmts.setKbShown.run(uid);
+    await ctx.reply(L.reading.startWhere, mainKeyboard(uid));
+    await typing(ctx, PACE_S);
+    return ctx.reply(L.reading.catalogV3, Markup.inlineKeyboard(falMenuKb(uid)));
   }
   const ctaRows = [
     [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
@@ -1868,6 +1881,22 @@ function luckyGridKb(picked = [], coins = []) {
   return Markup.inlineKeyboard(rows);
 }
 
+/** پیامِ **واحدِ** وضعیتِ کارت شانس: بارِ اول ساخته می‌شود، از آن به بعد فقط همان ادیت
+ *  می‌شود. تصمیمِ صریحِ مالک: شمارنده و نتیجه نباید سه پیامِ مستقل در چت بگذارند.
+ *  اگر ادیت نشد (پیامِ پاک‌شده) بی‌سروصدا پیامِ تازه می‌سازد و از آن به بعد همان را ادیت می‌کند. */
+async function showLuckyStatus(ctx, uid, text, extra) {
+  const id = getSession(uid)?.luckyStatusMsgId;
+  if (id) {
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, id, undefined, text,
+        extra ? { reply_markup: extra.reply_markup } : undefined);
+      return;
+    } catch {}
+  }
+  const m = await ctx.reply(text, extra).catch(() => null);
+  if (m) patchSession(uid, { luckyStatusMsgId: m.message_id });
+}
+
 const luckyReminderRow = (on) => [Markup.button.callback(
   on ? L.buttons.luckyRemindOff : L.buttons.luckyRemindOn, on ? 'lremind:0' : 'lremind:1')];
 
@@ -1905,7 +1934,10 @@ async function luckyCard(ctx) {
     }
   })().catch(e => logErr('lucky anim:', e.message));
 }
-bot.hears(L.buttons.luckyMain, luckyCard);
+// برچسبِ این دکمه در v3.10.2 از 🍀 به 🎲 رفت. کیبوردِ reply روی گوشیِ کاربر تا اولین
+// جایگزینی می‌ماند، پس برچسبِ قبلی هم باید match شود وگرنه دکمه‌ی کش‌شده می‌میرد (بند ۲ج/۶).
+const LUCKY_LABELS = [L.buttons.luckyMain, '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)'];
+bot.hears(LUCKY_LABELS, luckyCard);
 bot.action('lucky_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return luckyCard(ctx); });
 
 bot.action('lucky_stop', async (ctx) => {
@@ -1916,7 +1948,7 @@ bot.action('lucky_stop', async (ctx) => {
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
   // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
   const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
-  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today, luckyNonce });
+  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today, luckyNonce, luckyStatusMsgId: 0 });
   const msgId = getSession(uid).luckyMsgId;
   if (msgId) { try { await ctx.telegram.editMessageText(ctx.chat.id, msgId, undefined, '🂠 ✋'); } catch {} }
   await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS), luckyGridKb());
@@ -1953,12 +1985,17 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   }
   await ctx.answerCbQuery(hit ? L.lucky.hitToast : L.lucky.missToast).catch(() => {});
   try { await ctx.editMessageReplyMarkup(luckyGridKb(picks, coinSlots).reply_markup); } catch {}
-  if (!done) return ctx.reply(L.lucky.progress(picks.length, LUCKY_PICKS, found)).catch(() => {});
+  // شمارنده حالا کارتِ **سوم** را هم نشان می‌دهد؛ قبلاً تپِ آخر از رویش می‌پرید و کاربر
+  // «۳ از ۳» را هرگز نمی‌دید (ایرادِ صریحِ مالک).
+  const counter = L.lucky.progress(picks.length, LUCKY_PICKS, found);
+  await showLuckyStatus(ctx, uid, counter);
+  if (!done) return;
 
   track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS });
   await sleep(PACE_S);
   const reminderOn = !!getUser(uid)?.lucky_reminder_on;
-  await ctx.reply(found ? L.lucky.won(found) : L.lucky.lost,
+  // نتیجه روی **همان** پیامِ وضعیت می‌نشیند (خطِ شمارنده بالایش می‌ماند تا «۳ از ۳» دیده شود).
+  await showLuckyStatus(ctx, uid, `${counter}\n\n${found ? L.lucky.won(found) : L.lucky.lost}`,
     Markup.inlineKeyboard([luckyReminderRow(reminderOn)]));
   // UX v2.1 (تصمیمِ صریحِ مالک): بعد از کشیدنِ کارتِ شانس، کاربر دعوت می‌شود سؤالِ
   // بعدی‌اش را از تاروت بپرسد — چه سکه برده باشد چه نه، همیشه یک قدمِ بعدیِ روشن دارد.
@@ -3153,6 +3190,11 @@ async function replyCanceled(ctx, uid) {
 const KB_REFRESH_DAYS = 3;
 async function ensureMenu(ctx, uid) {
   try {
+    // UX v2.4: در دنیای الماس این پیام اصلاً وجود ندارد (تصمیمِ صریحِ مالک: «نقشش اضافیه»).
+    // آن‌جا کیبورد یک‌بار در پایانِ آنبوردینگ به پیامِ «از کجا شروع کنیم؟» چسبیده می‌آید و
+    // تلگرام تا جایگزینی نگهش می‌دارد. دنیای تومانی دست‌نخورده می‌ماند: آن‌جا این تابع
+    // تنها تورِ ایمنیِ کیبوردِ گم‌شده است.
+    if (uxV2For(uid)) return;
     const u = getUser(uid);
     if (!u?.welcomed || ONBOARDING_STATES.includes(getState(uid))) return;
     const shown = u.kb_shown_at || 0;
@@ -3367,7 +3409,9 @@ async function showWallet(ctx) {
   await ctx.reply(text, extra);
 }
 bot.hears(L.buttons.wallet, showWallet);
-bot.hears(L.buttons.coinShop, showWallet);   // UX v2: همان صفحه، نامِ تازه
+// همان قاعده: «💎 کیف الماس» (و «💎 الماس فروشی»ِ نسلِ قبل) هنوز match می‌شوند.
+const WALLET_LABELS = [L.buttons.coinShop, '💎 کیف الماس', '💎 الماس فروشی'];
+bot.hears(WALLET_LABELS, showWallet);   // UX v2: همان صفحه، نامِ تازه
 
 // لینک اشتراک‌گذاری استاندارد تلگرام: با یک تاچ، پیام آماده + لینک دعوت در چت انتخابی گذاشته می‌شود.
 // (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)

@@ -99,8 +99,11 @@ console.log('\n▶ قرارداد منوی فال (پین اول، «همه فا
   ok(!/daily_go/.test(SRC.slice(SRC.indexOf('function falMenuKb('), SRC.indexOf('function catalogKb('))),
     'کارتِ روزِ رایگان در منوی فال نیست (فقط کیبوردِ اصلی)');
   ok(/uxV2For\(uid\)\) return allTopicsKb\(\)/.test(cat), 'کاتالوگِ UX v2 همان لیستِ کاملِ موضوع‌هاست');
-  ok(/L\.buttons\.dailyOneCard, L\.buttons\.reading/.test(SRC),
+  // v2.4 (تصمیمِ صریحِ مالک): «فال بگیر» بالای «فال تک کارت» و هر دو **تمام‌عرض**.
+  ok(/dailyOneCard: '🎴 فال تک کارت امروز \(رایگان\)'/.test(LOC),
     'کیبوردِ اصلی نامِ صریحِ «فال تک کارت امروز (رایگان)» را دارد');
+  ok(/\[L\.buttons\.reading\],\s*\n\s*\[L\.buttons\.dailyOneCard\],/.test(SRC),
+    '«فال بگیر» ردیفِ خودش را بالای «فال تک کارت» دارد (هیچ‌کدام نصفه نیستند)');
   ok(/L\.buttons\.luckyMain\]/.test(SRC), 'کارت شانس ردیفِ خودش را در کیبوردِ اصلی دارد');
   // CTAی بعد از فال و بعد از کارتِ روز هر دو از همین قرارداد می‌آیند
   const reco = SRC.slice(SRC.indexOf('function recoRows('), SRC.indexOf('// کیبوردِ منو نباید'));
@@ -277,7 +280,7 @@ console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه 
   ok(/inviteMain: '📤 دعوت دوستان'/.test(LOC), 'دکمه‌ی کیبورد «دعوت دوستان» است');
   ok(!/معرفی دوستان/.test(LOC) && !/دعوت دوستات/.test(LOC),
     'هیچ‌جای متن‌ها «معرفی دوستان» یا «دعوت دوستات» نمانده');
-  ok(/luckyMain: '🍀 کارت شانس \(استخراج الماس\)'/.test(LOC), 'دکمه‌ی کیبوردِ کارت شانس «استخراج الماس» می‌گوید');
+  ok(/luckyMain: '🎲 کارت شانس \(استخراج الماس\)'/.test(LOC), 'دکمه‌ی کیبوردِ کارت شانس «استخراج الماس» می‌گوید');
   ok(/askBirthMonth: 'ماه تولدت چیه؟ 🌿'/.test(LOC), 'سؤالِ ماهِ تولد کوتاه شد (بدونِ مقدمه‌ی «قبل از هر چیز»)');
   ok(/startWhere: 'از کجا شروع کنیم؟ 📌'/.test(LOC), '«از کجا شروع کنیم؟» ایموجیِ 📌 گرفت');
   // askName حالا تابعِ v2 است: نسخه‌ی الماس صریح می‌گوید ربات است (تصمیمِ مالک)، و
@@ -329,10 +332,26 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
 
   // و اینکه کد واقعاً nonce را per دست می‌سازد و از session می‌خواند (نه از حافظه).
   ok(/function luckyCoinSlots\(uid, today, nonce = ''\)/.test(SRC), 'تابعِ چیدمان nonce می‌گیرد');
-  ok(/luckyDay: today, luckyNonce \}\)/.test(SRC), 'nonce لحظه‌ی باز شدنِ گرید ساخته و در session ذخیره می‌شود');
+  ok(/luckyDay: today, luckyNonce[,\s}]/.test(SRC), 'nonce لحظه‌ی باز شدنِ گرید ساخته و در session ذخیره می‌شود');
   ok(/luckyCoinSlots\(uid, today, s\.luckyNonce\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
   ok(!/luckyCoinSlots\(uid, today\)(?!,)/.test(SRC.replace(/function luckyCoinSlots[\s\S]*?\n\}/, '')),
     'هیچ فراخوانیِ بدونِ nonce نمانده');
+
+  // v2.4 (ایرادِ صریحِ مالک): شمارنده و نتیجه یک **پیامِ واحدِ ادیت‌شونده‌اند**، نه سه پیامِ جدا،
+  // و کارتِ سوم هم شمرده می‌شود (قبلاً تپِ آخر از شمارنده می‌پرید).
+  const lp = SRC.slice(SRC.indexOf("bot.action(/^lpick:"), SRC.indexOf("bot.action(/^lremind:"));
+  ok(!/ctx\.reply\(L\.lucky\.progress/.test(lp), 'شمارنده دیگر پیامِ مستقل نمی‌سازد');
+  ok(!/ctx\.reply\(found \? L\.lucky\.won/.test(lp), 'نتیجه هم پیامِ مستقل نمی‌سازد');
+  ok(/const counter = L\.lucky\.progress\(picks\.length, LUCKY_PICKS, found\);\s*\n\s*await showLuckyStatus\(ctx, uid, counter\);\s*\n\s*if \(!done\) return;/.test(lp),
+    'شمارنده **قبل از** خروجِ زودهنگام می‌آید، پس «۳ از ۳» هم نشان داده می‌شود');
+  ok(/showLuckyStatus\(ctx, uid, `\$\{counter\}\\n\\n\$\{found \? L\.lucky\.won\(found\) : L\.lucky\.lost\}`/.test(lp),
+    'نتیجه روی همان پیام می‌نشیند و خطِ شمارنده بالایش می‌ماند');
+  const sls = SRC.slice(SRC.indexOf('async function showLuckyStatus'), SRC.indexOf('const luckyReminderRow'));
+  ok(/getSession\(uid\)\?\.luckyStatusMsgId/.test(sls) && /editMessageText/.test(sls),
+    'پیامِ وضعیت از شناسه‌ی ذخیره‌شده در session ادیت می‌شود (ری‌استارت‌پذیر)');
+  ok(/patchSession\(uid, \{ luckyStatusMsgId: m\.message_id \}\)/.test(sls),
+    'شناسه‌ی پیامِ تازه ذخیره می‌شود تا تپِ بعدی همان را ادیت کند');
+  ok(/luckyStatusMsgId: 0/.test(SRC), 'هر دستِ تازه پیامِ وضعیتِ خودش را می‌سازد');
 }
 
 console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');
@@ -419,6 +438,19 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   ok(/await ensureMenu\(ctx, uid\)/.test(cont), 'sendContinuePrompt خودش کیبوردِ اصلی را تضمین می‌کند');
   ok(/nextOffersV3: 'برای جواب دادن به سؤالاتی که جوابش رو نمی‌دونی من همیشه اینجام!'/.test(LOC),
     'متنِ تازه‌ی پیامِ «ادامه»');
+
+  // v2.4: پیامِ «از دکمه‌های پایین شروع کن 👇» در دنیای الماس اصلاً فرستاده نمی‌شود، ولی
+  // کیبورد نباید قربانی شود (askName عمداً removeKeyboard می‌کند) — پس به پیامِ پایانِ
+  // آنبوردینگ می‌چسبد. بدونِ این، کاربرِ تازه هیچ‌وقت کیبورد نمی‌گیرد (بن‌بستِ بند ۹ب/۴).
+  const ens = SRC.slice(SRC.indexOf('async function ensureMenu'), SRC.indexOf('async function sendVerdict'));
+  ok(/if \(uxV2For\(uid\)\) return;/.test(ens), 'ensureMenu در دنیای الماس هیچ پیامی نمی‌فرستد');
+  ok(/L\.onboarding\.keyboardReveal/.test(ens), 'دنیای تومانی همان تورِ ایمنیِ قبلی را دارد (دست‌نخورده)');
+  const fin = SRC.slice(SRC.indexOf('async function finishOnboarding'), SRC.indexOf('bot.action(/^bmonth:'));
+  ok(/ctx\.reply\(L\.reading\.startWhere, mainKeyboard\(uid\)\)/.test(fin),
+    'کیبوردِ ماندگار به پیامِ «از کجا شروع کنیم؟» می‌چسبد (بدونِ پیامِ اعلانِ جداگانه)');
+  ok(/stmts\.setKbShown\.run\(uid\)/.test(fin), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
+  ok(/ctx\.reply\(L\.reading\.catalogV3, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\)/.test(fin),
+    'منوی فال پیامِ بعدی است (هر پیام فقط یک reply_markup می‌پذیرد)');
 }
 
 console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چسبیده‌ی عدد و واحد (UX v2.3)');
@@ -453,8 +485,12 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
   ok(/buyCoins: \(cur\) => `💰 خرید \$\{cur\.name\}\$\{cur\.emoji\}`/.test(LOC), 'دکمه‌ی خرید: «💰 خرید الماس💎»');
   ok(/inviteWithBonus: \(bonus, cur\) => `📤 دعوت دوستان \(هر دعوت ➕\$\{moneyTight\(bonus, cur\)\}\)`/.test(LOC),
     'دکمه‌ی دعوت: «📤 دعوت دوستان (هر دعوت ➕۱۰💎)»');
-  ok(/luckyDraw: \(max, cur\) => `🍀 کارت شانس \(➕صفر تا \$\{fmt\(max\)\}\$\{cur\.emoji\}\)`/.test(LOC),
-    'دکمه‌ی کارت شانس: «🍀 کارت شانس (➕صفر تا ۳💎)»');
+  ok(/luckyDraw: \(max, cur\) => `🎲 کارت شانس \(➕صفر تا \$\{fmt\(max\)\}\$\{cur\.emoji\}\)`/.test(LOC),
+    'دکمه‌ی کارت شانس: «🎲 کارت شانس (➕صفر تا ۳💎)»');
+  // v2.4: ایموجیِ کارت شانس از برگ به تاس رفت — هیچ 🍀ای در متن‌های رو-به-کاربر نماند.
+  ok(!/🍀/.test(LOC), 'هیچ 🍀ای در متن‌های رو-به-کاربر نمانده (همه 🎲 شدند)');
+  ok(/LUCKY_LABELS = \[L\.buttons\.luckyMain, '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),
+    'برچسبِ کهنه‌ی 🍀 هنوز match می‌شود (کیبوردِ کش‌شده)');
   ok(/topicSize: \(size, price, cur\) => `\$\{fmt\(size\)\} کارتی \(➖\$\{moneyTight\(price, cur\)\}\)`/.test(LOC),
     'دکمه‌ی اندازه: «۳ کارتی (➖۳💎)»');
   ok(/L\.buttons\.topicSize\(size, sp\.price, cur\)/.test(SRC), 'قیمتِ دکمه از خودِ رکوردِ چیدمان می‌آید، نه از ضربِ دوباره');
@@ -466,7 +502,8 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
   ok(/const INVITE_LABELS = \[L\.buttons\.inviteMain, '📤 معرفی دوستان'\]/.test(SRC),
     'برچسبِ میانیِ «معرفی دوستان» هنوز match می‌شود (کیبوردِ کش‌شده)');
   ok(/bot\.hears\(INVITE_LABELS, showInvite\)/.test(SRC), 'هندلرِ دعوت هر دو برچسب را می‌گیرد');
-  ok(/'📤 معرفی دوستان',\s*\/\//.test(SRC), 'برچسبِ میانی در KB_LABELS هست (تپِ دکمه در قیف گم نشود)');
+  ok(/'📤 معرفی دوستان', '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),
+    'برچسب‌های کهنه در KB_LABELS هستند (تپِ دکمه در قیف گم نشود)');
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
