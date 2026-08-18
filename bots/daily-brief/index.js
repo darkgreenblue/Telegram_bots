@@ -18,7 +18,7 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb } from '../../shared/ab.js';
 import { createLLM, wordTarget } from './script.js';
 import { createNotion, pickNextLesson, notionErrorFa } from './notion.js';
-import { listSpeechModels, defaultVoice, engineLabel, synthesize, rankForPersian } from './tts.js';
+import { listSpeechModels, defaultVoice, engineLabel, synthesize, rankForPersian, bakeoffPick } from './tts.js';
 import {
   bake, deliver, claimDaily, createEpisode, recoverStuck, refreshRoadmap,
   tehranNow, hhmmToMinutes, PipelineError,
@@ -663,7 +663,11 @@ const BAKEOFF_MINUTES = 1;
 // OpenRouter الان ۱۸ موتورِ صوتی دارد و بیشترشان انگلیسی‌محورند. پیش‌فرض فقط شش تای اولِ
 // لیستِ فارسی‌اول ساخته می‌شود؛ هجده فایلِ صوتی نه قابلِ گوش‌دادن است نه ارزشش را دارد.
 const BAKEOFF_TOP = 6;
-const bakeoffList = async (all) => (all ? await speechModels() : (await speechModels()).slice(0, BAKEOFF_TOP));
+// همه‌ی مدل‌های گوگل + شش کاندیدِ برترِ بقیه (bakeoffPick)
+const bakeoffList = async (all) => {
+  const models = await speechModels();
+  return all ? models : bakeoffPick(models, { top: BAKEOFF_TOP });
+};
 
 const bakeAskText = async (all) => {
   const models = await bakeoffList(all);
@@ -736,6 +740,15 @@ bot.action(/^bake:go(:all)?$/, async (ctx) => {
       // اندیس باید در **لیستِ کامل** حساب شود، نه در لیستِ برش‌خورده‌ی بیک‌آف:
       // هندلرِ set:eng از لیستِ کامل می‌خواند و هر اختلافِ ترتیب یعنی انتخابِ موتورِ اشتباه.
       const full = await speechModels();
+      // جدولِ هزینه‌ی همین نمونه‌ها: تصمیمِ «گران‌تر ولی بدونِ بهبودِ محسوس را برندار»
+      // بدونِ عدد قابلِ گرفتن نیست، و ارزانی وقتی معنی دارد که کیفیت هم‌تراز باشد.
+      const rows = db.prepare(`SELECT engine, tts_cost_usd c, audio_seconds s FROM episodes
+                               WHERE kind='bakeoff' AND date=? ORDER BY c`).all(now.date);
+      const perMin = (r) => (r.s ? (r.c / (r.s / 60)) : 0);
+      const table = rows.map((r) => `${engineLabel(r.engine)}\n   ${usd(r.c)} برای ${mmss(r.s)} · ${usd(perMin(r))} هر دقیقه`).join('\n');
+      await bot.telegram.sendMessage(chatId,
+        `💵 هزینه‌ی همین نمونه‌ها (ارزان به گران):\n\n${table}\n\n` +
+        `اگر دو تا صدا هم‌کیفیت بودند، ارزان‌تر را انتخاب کن.`);
       await bot.telegram.sendMessage(chatId, 'کدام صدا بهتر بود؟', Markup.inlineKeyboard(
         okModels.map((m) => [Markup.button.callback(
           engineLabel(m.id), `set:eng:${full.findIndex((x) => x.id === m.id)}`)])));

@@ -17,7 +17,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian, familyVoice, synthChunk } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian, familyVoice, synthChunk, bakeoffPick } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -123,6 +123,58 @@ ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی ر�
 // مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
 // می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.
 eq(realWorld[0].id, 'deepgram/flux-tts:free', 'آرایه‌ی ورودی دست‌نخورده می‌ماند');
+
+// انتخابِ بیک‌آف: **همه‌ی گوگل‌ها همیشه داخل‌اند** (خواسته‌ی صریحِ مالک: نسخه‌های مختلفِ
+// گوگل کنارِ هم شنیده شوند تا اگر نسخه‌ی گران بهبودِ محسوسی نداشت انتخاب نشود).
+const manyModels = [
+  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'google/gemini-3.1-pro-tts' },
+  { id: 'google/gemini-2.5-flash-tts' }, { id: 'minimax/speech-2.8-hd' },
+  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'microsoft/mai-voice-2' },
+  { id: 'qwen/qwen-audio-3.0-tts-plus' }, { id: 'hexgrad/kokoro-82m' },
+  { id: 'deepgram/aura-2' }, { id: 'sesame/csm-1b' },
+];
+const picked = bakeoffPick(manyModels, { top: 3 });
+eq(picked.filter((m) => m.id.startsWith('google/')).length, 3,
+  'هر سه مدلِ گوگل در بیک‌آف هستند، حتی با سهمیه‌ی کوچکِ بقیه');
+eq(picked.length, 6, 'گوگل‌ها + دقیقاً سه کاندیدِ دیگر');
+ok(picked.some((m) => m.id === 'minimax/speech-2.8-hd'), 'کاندیدِ فارسی‌دار هم جا دارد');
+ok(!picked.some((m) => m.id === 'sesame/csm-1b'), 'موتورِ ته‌ی لیست سهمیه را نمی‌گیرد');
+// ترتیبِ خروجی باید همان ترتیبِ ورودی بماند تا مقایسه قابلِ پیش‌بینی باشد
+ok(picked.map((m) => m.id).join() === manyModels.filter((m) => picked.includes(m)).map((m) => m.id).join(),
+  'ترتیبِ لیستِ اصلی حفظ می‌شود');
+eq(bakeoffPick([], { top: 3 }).length, 0, 'لیستِ خالی انتخاب را نمی‌شکند');
+// اگر هیچ مدلِ گوگلی نبود، باز هم سهمیه‌ی بقیه کامل داده می‌شود
+eq(bakeoffPick(manyModels.filter((m) => !m.id.startsWith('google/')), { top: 3 }).length, 3,
+  'بدونِ مدلِ گوگل، سهمیه‌ی بقیه دست‌نخورده می‌ماند');
+
+// کشفِ وسیع‌تر: فیلترِ speech لزوماً همه‌ی مدل‌های خروجی‌صوتی را نمی‌دهد (کاتالوگِ واقعی
+// فقط یک مدلِ گوگل در آن فیلتر داشت)، پس کلِ کاتالوگ هم اسکن می‌شود.
+const merged = await listSpeechModels({
+  apiKey: 'k', ttlMs: 0,
+  fetchImpl: async (url) => ({
+    ok: true,
+    json: async () => ({
+      data: url.includes('output_modalities=speech')
+        ? [{ id: 'a/one-tts', name: 'One' }]
+        : [
+            { id: 'a/one-tts', name: 'One' },                                     // تکراری
+            { id: 'google/gemini-pro-tts', architecture: { output_modalities: ['audio'] } },
+            { id: 'openai/whisper-large', architecture: { output_modalities: ['text'] } }, // صوت‌به‌متن
+          ],
+    }),
+  }),
+});
+eq(merged.length, 2, 'مدلِ خروجی‌صوتیِ بیرونِ فیلتر هم پیدا می‌شود، بدونِ تکراری');
+ok(merged.some((m) => m.id === 'google/gemini-pro-tts'), 'مدلِ گوگلِ جاافتاده از کاتالوگِ کامل اضافه شد');
+ok(!merged.some((m) => m.id.includes('whisper')), 'مدلِ صوت‌به‌متن وارد لیستِ صداسازی نمی‌شود');
+// شکستِ منبعِ دوم نباید کلِ کشف را بشکند
+const partial = await listSpeechModels({
+  apiKey: 'k', ttlMs: 0,
+  fetchImpl: async (url) => (url.includes('output_modalities=speech')
+    ? { ok: true, json: async () => ({ data: [{ id: 'a/one-tts' }] }) }
+    : { ok: false, status: 500 }),
+});
+eq(partial.length, 1, 'اگر کاتالوگِ کامل نیامد، لیستِ فیلترشده کار را راه می‌اندازد');
 
 /* ── ۳ج) قلقِ ارائه‌دهنده‌ها (از شکستِ واقعیِ اولین بیک‌آف) ─────────────────── */
 // در اولین بیک‌آفِ واقعی سه موتور رد شدند و هر سه از جنسِ «قلقی که کاتالوگ اعلام نمی‌کند»

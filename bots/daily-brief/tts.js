@@ -42,23 +42,45 @@ const FALLBACK_PRICE_PER_CHAR = 5 / 1_000_000;
 
 let catalogCache = { at: 0, models: null };
 
+const normalize = (m) => ({
+  id: m.id,
+  name: m.name || m.id,
+  supported_voices: Array.isArray(m.supported_voices) ? m.supported_voices : [],
+  pricing: m.pricing || null,
+});
+
+// آیا این مدل خروجیِ صوتی می‌دهد؟ شکلِ فیلد بینِ نسخه‌های کاتالوگ فرق می‌کند، پس هر دو
+// جای متعارف نگاه می‌شود. اسمِ مدل به‌تنهایی ملاک نیست چون مدل‌های **صوت به متن** هم
+// «audio» در نامشان دارند و اگر واردِ لیست شوند، بیک‌آف روی آن‌ها خطا می‌دهد.
+const outputsAudio = (m) => {
+  const mods = m?.output_modalities || m?.architecture?.output_modalities;
+  return Array.isArray(mods) && mods.some((x) => /audio|speech/i.test(String(x)));
+};
+
 // کشفِ مدل‌های صوتی. شکستش هرگز چیزی را نمی‌شکند: فالبکِ ثابت برمی‌گردد.
+// **دو منبع** خوانده می‌شود چون فیلترِ `output_modalities=speech` لزوماً همه‌ی مدل‌های
+// خروجی‌صوتی را برنمی‌گرداند (کاتالوگِ واقعی فقط یک مدلِ گوگل در آن فیلتر داشت). کلِ
+// کاتالوگ هم اسکن می‌شود و هرچه خروجیِ صوتی اعلام کرده اضافه می‌شود.
 export async function listSpeechModels({ apiKey, fetchImpl = fetch, ttlMs = 6 * 3600 * 1000 } = {}) {
   if (catalogCache.models && Date.now() - catalogCache.at < ttlMs) return catalogCache.models;
-  try {
-    const res = await fetchImpl('https://openrouter.ai/api/v1/models?output_modalities=speech', {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    });
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  const get = async (url) => {
+    const res = await fetchImpl(url, { headers });
     if (!res.ok) throw new Error(`models ${res.status}`);
-    const data = await res.json();
-    const models = (data?.data || [])
-      .filter((m) => m?.id)
-      .map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        supported_voices: Array.isArray(m.supported_voices) ? m.supported_voices : [],
-        pricing: m.pricing || null,
-      }));
+    return (await res.json())?.data || [];
+  };
+  try {
+    const primary = (await get('https://openrouter.ai/api/v1/models?output_modalities=speech'))
+      .filter((m) => m?.id).map(normalize);
+    const byId = new Map(primary.map((m) => [m.id, m]));
+    // منبعِ دوم بهترین‌تلاش است: اگر نشد، همان لیستِ اول کار را راه می‌اندازد.
+    try {
+      for (const m of await get('https://openrouter.ai/api/v1/models')) {
+        if (m?.id && !byId.has(m.id) && outputsAudio(m)) byId.set(m.id, normalize(m));
+      }
+    } catch (e) { logErr('کاتالوگِ کامل خوانده نشد:', e.message); }
+
+    const models = [...byId.values()];
     if (models.length) {
       catalogCache = { at: Date.now(), models };
       log(`🔊 ${models.length} مدلِ صوتی از OpenRouter: ${models.map((m) => m.id).join(', ')}`);
@@ -97,6 +119,18 @@ const PERSIAN_FIRST = [
 // با لهجه‌ی چینی می‌خواند؛ kokoro هشت زبان؛ orpheus و csm انگلیسی). حذف نمی‌شوند تا اگر
 // روزی خواستی امتحانشان کنی در دسترس باشند، ولی سهمِ بیک‌آف را نمی‌گیرند.
 const LOW_PRIORITY = [/^qwen\//i, /kokoro/i, /orpheus/i, /csm-1b/i, /^deepgram\//i];
+
+// انتخابِ موتورهای بیک‌آف. **همه‌ی مدل‌های گوگل همیشه داخل‌اند** (خواسته‌ی صریحِ مالک:
+// تنوعِ نسخه‌های گوگل بالا برود تا فلش و پرو و نسخه‌های مختلف کنارِ هم شنیده شوند و اگر
+// نسخه‌ی گران بهبودِ محسوسی نداشت انتخاب نشود)، به‌علاوه‌ی سهمیه‌ای از بقیه‌ی کاندیدها.
+export function bakeoffPick(models, { top = 6 } = {}) {
+  const isGoogle = (m) => /^google\//i.test(m.id);
+  const google = models.filter(isGoogle);
+  const others = models.filter((m) => !isGoogle(m)).slice(0, top);
+  // ترتیبِ نهایی همان ترتیبِ لیستِ اصلی می‌ماند تا مقایسه قابلِ پیش‌بینی بماند
+  const keep = new Set([...google, ...others].map((m) => m.id));
+  return models.filter((m) => keep.has(m.id));
+}
 
 // خروجی هم **مرتب‌شده** است هم **صاف‌شده** (ردشده‌ها بیرون می‌روند).
 export function rankForPersian(models) {
