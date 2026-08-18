@@ -7,6 +7,7 @@
 //
 // هیچ فراخوانیِ شبکه‌ای اینجا نیست: کلاینتِ Notion و LLM با تزریقِ وابستگی جعل می‌شوند.
 import path from 'path';
+import { readFileSync } from 'fs';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -17,7 +18,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, rankForPersian, familyVoice, synthChunk, bakeoffPick } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, familyVoice, synthChunk } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -98,54 +99,58 @@ const fallback = await listSpeechModels({
 ok(fallback.length > 0, 'شکستِ کشفِ مدل‌ها فالبکِ ثابت می‌دهد، نه لیستِ خالی');
 ok(fallback.every((m) => m.id.includes('/')), 'اسلاگِ فالبک شکلِ درستِ OpenRouter را دارد');
 
-// ترتیبِ فارسی‌اول: کاتالوگِ واقعی ۱۸ مدل دارد و بیشترشان انگلیسی‌محورند. بیک‌آف فقط
-// شش تای اول را می‌سازد، پس اگر این ترتیب خراب شود مالک نمونه‌ی موتورهای بی‌ربط را
-// می‌شنود و موتورِ فارسی‌دار اصلاً تست نمی‌شود.
-const realWorld = [
-  { id: 'deepgram/flux-tts:free' }, { id: 'hexgrad/kokoro-82m' },
-  { id: 'fish-audio/s2.1-pro' }, { id: 'minimax/speech-2.8-hd' },
-  { id: 'mistralai/voxtral-mini-tts-2603' }, { id: 'qwen/qwen-audio-3.0-tts-plus' },
-  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'google/gemini-3.1-flash-tts-preview' },
-];
-const ranked = rankForPersian(realWorld);
-eq(ranked[0].id, 'minimax/speech-2.8-hd', 'موتوری که فارسی را اعلام کرده اولِ لیست می‌آید');
-// ردشده با گوشِ مالک باید کاملاً ناپدید شود، نه اینکه فقط ته‌ی لیست برود
-ok(!ranked.some((m) => /fish-audio|voxtral/.test(m.id)),
-  'موتورهایی که مالک ردشان کرده اصلاً در لیست نمی‌آیند');
-eq(ranked.length, realWorld.length - 2, 'دقیقاً همان دو موتورِ ردشده حذف شده‌اند');
-// موتورهایی که مستنداتشان فارسی ندارد نباید سهمِ شش‌تاییِ بیک‌آف را بگیرند
-ok(ranked.findIndex((m) => m.id === 'x-ai/grok-voice-tts-1.0')
-   < ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus'),
-  'موتورِ چندزبانه جلوتر از موتوری است که فارسی مستند ندارد');
-ok(ranked.findIndex((m) => m.id === 'qwen/qwen-audio-3.0-tts-plus')
-   < ranked.length, 'موتورِ کم‌اولویت حذف نمی‌شود، فقط ته می‌رود');
-ok(rankForPersian([]).length === 0, 'لیستِ خالی مرتب‌سازی را نمی‌شکند');
-// مرتب‌سازی نباید آرایه‌ی ورودی را جابه‌جا کند: هم لیستِ انتخاب و هم هندلر از یک منبع
-// می‌خوانند و اندیسِ callback_data به همان ترتیب وابسته است.
-eq(realWorld[0].id, 'deepgram/flux-tts:free', 'آرایه‌ی ورودی دست‌نخورده می‌ماند');
+// موتور دیگر انتخابی نیست: بعد از مقایسه‌ی واقعیِ صداها جمنای انتخاب شد و کلِ منطقِ
+// ترتیب/صافی/بیک‌آف حذف شد. این ادعاها قفل می‌کنند که انتخابگر واقعاً برنگردد و موتور
+// از settingsِ کهنه خوانده نشود (مقدارِ ذخیره‌شده‌ی دورانِ انتخاب هنوز در DB هست).
+const idxSrc = readFileSync(path.resolve(BOT, 'index.js'), 'utf8');
+ok(/const TTS_MODEL = 'google\/gemini[^']*'/.test(idxSrc), 'موتورِ صدا یک ثابتِ واحد است');
+ok(/engine: TTS_MODEL/.test(idxSrc), 'effectiveSettings موتور را از ثابت می‌گیرد، نه از settings');
+ok(!/getSetting\('engine'\)/.test(idxSrc), 'هیچ‌جا موتور از settingsِ کهنه خوانده نمی‌شود');
+ok(!/bake:ask|bake:go|BAKEOFF_TOP|bakeAskText/.test(idxSrc), 'کدِ بیک‌آف واقعاً حذف شده، نه خاموش');
+ok(!/set:eng:\$\{/.test(idxSrc), 'دکمه‌ی انتخابِ موتور دیگر ساخته نمی‌شود');
+ok(/bot\.action\(\/\^\(bake:\|set:eng\)\//.test(idxSrc),
+  'دکمه‌های کهنه‌ی داخلِ چت جوابِ مودبانه می‌گیرند (بند ۲ج/۶)');
 
-// انتخابِ بیک‌آف: **همه‌ی گوگل‌ها همیشه داخل‌اند** (خواسته‌ی صریحِ مالک: نسخه‌های مختلفِ
-// گوگل کنارِ هم شنیده شوند تا اگر نسخه‌ی گران بهبودِ محسوسی نداشت انتخاب نشود).
-const manyModels = [
-  { id: 'google/gemini-3.1-flash-tts-preview' }, { id: 'google/gemini-3.1-pro-tts' },
-  { id: 'google/gemini-2.5-flash-tts' }, { id: 'minimax/speech-2.8-hd' },
-  { id: 'x-ai/grok-voice-tts-1.0' }, { id: 'microsoft/mai-voice-2' },
-  { id: 'qwen/qwen-audio-3.0-tts-plus' }, { id: 'hexgrad/kokoro-82m' },
-  { id: 'deepgram/aura-2' }, { id: 'sesame/csm-1b' },
-];
-const picked = bakeoffPick(manyModels, { top: 3 });
-eq(picked.filter((m) => m.id.startsWith('google/')).length, 3,
-  'هر سه مدلِ گوگل در بیک‌آف هستند، حتی با سهمیه‌ی کوچکِ بقیه');
-eq(picked.length, 6, 'گوگل‌ها + دقیقاً سه کاندیدِ دیگر');
-ok(picked.some((m) => m.id === 'minimax/speech-2.8-hd'), 'کاندیدِ فارسی‌دار هم جا دارد');
-ok(!picked.some((m) => m.id === 'sesame/csm-1b'), 'موتورِ ته‌ی لیست سهمیه را نمی‌گیرد');
-// ترتیبِ خروجی باید همان ترتیبِ ورودی بماند تا مقایسه قابلِ پیش‌بینی باشد
-ok(picked.map((m) => m.id).join() === manyModels.filter((m) => picked.includes(m)).map((m) => m.id).join(),
-  'ترتیبِ لیستِ اصلی حفظ می‌شود');
-eq(bakeoffPick([], { top: 3 }).length, 0, 'لیستِ خالی انتخاب را نمی‌شکند');
-// اگر هیچ مدلِ گوگلی نبود، باز هم سهمیه‌ی بقیه کامل داده می‌شود
-eq(bakeoffPick(manyModels.filter((m) => !m.id.startsWith('google/')), { top: 3 }).length, 3,
-  'بدونِ مدلِ گوگل، سهمیه‌ی بقیه دست‌نخورده می‌ماند');
+/* ── ۶ب) کاتالوگِ گوینده‌ها ─────────────────────────────────────────────── */
+// این‌ها ادعای محصولی‌اند، نه سلیقه: شش گزینه (نه بیشتر، وگرنه انتخاب سخت می‌شود)، نیمی
+// مرد و نیمی زن، و هر کدام با یک نامِ فارسیِ یکتا و یک لحن که کنارِ نمونه نشان داده می‌شود.
+console.log('\n🗣 گوینده‌ها');
+const { VOICES, DEFAULT_VOICE, SAMPLE_VERSION, sampleText, voiceById, voiceLabel } =
+  await import(path.resolve(BOT, 'voices.js'));
+eq(VOICES.length, 6, 'دقیقاً شش گوینده');
+eq(VOICES.filter((v) => v.gender === 'male').length, 3, 'سه گوینده‌ی مرد');
+eq(VOICES.filter((v) => v.gender === 'female').length, 3, 'سه گوینده‌ی زن');
+eq(new Set(VOICES.map((v) => v.id)).size, 6, 'شناسه‌ها یکتا هستند (دو ردیف یک صدا نیستند)');
+eq(new Set(VOICES.map((v) => v.name)).size, 6, 'نام‌ها یکتا هستند');
+eq(new Set(VOICES.map((v) => v.tone)).size, 6, 'لحن‌ها هم یکتا هستند (شش گزینه‌ی واقعاً متفاوت)');
+ok(VOICES.every((v) => /^[؀-ۿ\s‌]+$/.test(v.name)), 'نامِ همه‌ی گوینده‌ها فارسی است');
+ok(VOICES.every((v) => v.tone && /[؀-ۿ]/.test(v.tone)), 'هر گوینده لحنِ فارسی دارد');
+ok(VOICES.every((v) => /^[A-Za-z]+$/.test(v.id)), 'شناسه‌ی فنی ASCII است (همان چیزی که به API می‌رود)');
+ok(!!voiceById(DEFAULT_VOICE), 'صدای پیش‌فرض واقعاً در لیست هست');
+eq(voiceById('NoSuchVoice'), null, 'شناسه‌ی ناشناخته null می‌دهد، نه یک صدای تصادفی');
+ok(/پیش‌فرض/.test(voiceLabel('NoSuchVoice')), 'برچسبِ شناسه‌ی ناشناخته کرش نمی‌کند');
+// سقفِ ۶۴ بایتیِ callback_data تلگرام: دکمه‌ی هر گوینده باید جا شود، وگرنه دکمه‌ها ساخته
+// نمی‌شوند و صفحه‌ی انتخاب خالی می‌ماند.
+ok(VOICES.every((v) => Buffer.byteLength(`set:voice:${v.id}`) <= 64), 'callback_data هر گوینده زیرِ ۶۴ بایت است');
+// نمونه باید حدودِ ۱۰ تا ۱۵ ثانیه باشد (با سرعتِ گفتارِ تک‌گوینده). کوتاه‌تر برای قضاوت کافی
+// نیست و بلندتر یعنی شنیدنِ شش نمونه کاری حوصله‌سربر می‌شود.
+for (const v of VOICES) {
+  const words = countWords(sampleText(v));
+  const seconds = (words / WPM.single) * 60;
+  ok(seconds >= 9 && seconds <= 17, `نمونه‌ی ${v.name} حدودِ ده تا پانزده ثانیه است (${seconds.toFixed(0)} ثانیه)`);
+  ok(sampleText(v).includes(v.name), `نمونه‌ی ${v.name} خودش را با اسم معرفی می‌کند`);
+}
+ok(Number.isInteger(SAMPLE_VERSION) && SAMPLE_VERSION >= 1, 'نسخه‌ی نمونه‌ها عددِ صحیح است (کلیدِ کش)');
+
+// سیم‌کشیِ صفحه‌ی انتخاب در خودِ ربات
+ok(/CREATE TABLE IF NOT EXISTS voice_samples/.test(idxSrc), 'جدولِ کشِ نمونه‌ها ساخته می‌شود');
+ok(/SAMPLE_VERSION/.test(idxSrc), 'کشِ نمونه با نسخه کلید می‌خورد، نه فقط با شناسه‌ی صدا');
+ok(/bot\.action\('set:voice'/.test(idxSrc), 'دکمه‌ی «انتخاب گوینده» در تنظیمات هندلر دارد');
+ok(/bot\.action\(\/\^set:voice:\(\[A-Za-z\]\+\)\$\//.test(idxSrc), 'انتخابِ هر گوینده هندلر دارد');
+ok(/voices: \{ \[TTS_MODEL\]: currentVoice\(\) \}/.test(idxSrc),
+  'صدای انتخابی واقعاً به پایپ‌لاین می‌رسد (نه فقط در تنظیمات ذخیره می‌شود)');
+ok(/replyWithAudio/.test(idxSrc), 'نمونه‌ها به‌صورت فایلِ صوتیِ قابلِ پخش فرستاده می‌شوند');
+ok(/samplesBuilding/.test(idxSrc), 'دوبار زدنِ دکمه نمونه‌ها را دوبار نمی‌سازد (گاردِ هزینه)');
 
 // کشفِ وسیع‌تر: فیلترِ speech لزوماً همه‌ی مدل‌های خروجی‌صوتی را نمی‌دهد (کاتالوگِ واقعی
 // فقط یک مدلِ گوگل در آن فیلتر داشت)، پس کلِ کاتالوگ هم اسکن می‌شود.
@@ -480,14 +485,13 @@ ok(estimateLlmCost('google/gemini-2.5-flash', 0, 1e6) > estimateLlmCost('google/
 // خط تیره‌ی بلند امضای متنِ ماشینی است و در هیچ متنِ رو-به-کاربری مجاز نیست. متنِ این ربات
 // دو مقصد دارد: پیام‌های تلگرام، و **پرامپتی که مدل از سبکش تقلید می‌کند** — پس هر دو مهم‌اند.
 console.log('\n✍️ قواعدِ کپی');
-const { readFileSync } = await import('fs');
 // کامنتِ توسعه‌دهنده (چه //، چه /* */، چه -- داخلِ SQL) رو-به-کاربر نیست و از سنجش
 // کنار می‌رود؛ چیزی که می‌ماند رشته‌های واقعیِ برنامه است.
 const stripComments = (src) => src.split('\n').map((line) => {
   if (/^\s*(\/\/|\*|\/\*|--)/.test(line)) return '';
   return line.replace(/\s\/\/.*$/, '').replace(/\s--\s.*$/, '');
 });
-for (const f of ['index.js', 'script.js', 'notion.js', 'pipeline.js', 'tts.js']) {
+for (const f of ['index.js', 'script.js', 'notion.js', 'pipeline.js', 'tts.js', 'voices.js']) {
   const bad = stripComments(readFileSync(path.resolve(BOT, f), 'utf8'))
     .map((line, i) => ({ line, n: i + 1 }))
     .filter(({ line }) => /[—–]|(?<!-)--(?!-)/.test(line));

@@ -18,7 +18,8 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb } from '../../shared/ab.js';
 import { createLLM, wordTarget } from './script.js';
 import { createNotion, pickNextLesson, notionErrorFa } from './notion.js';
-import { listSpeechModels, defaultVoice, engineLabel, synthesize, rankForPersian, bakeoffPick } from './tts.js';
+import { engineLabel, synthesize } from './tts.js';
+import { VOICES, DEFAULT_VOICE, SAMPLE_VERSION, sampleText, voiceById } from './voices.js';
 import {
   bake, deliver, claimDaily, createEpisode, recoverStuck, refreshRoadmap,
   tehranNow, hhmmToMinutes, PipelineError,
@@ -38,9 +39,11 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true;
-const PRODUCT_VERSION = '1.0.0';
+const PRODUCT_VERSION = '1.2.0';
 
 const FLASH = 'google/gemini-2.5-flash';
+// موتورِ صدا (ثابت، بعد از مقایسه‌ی واقعی انتخاب شد)
+const TTS_MODEL = 'google/gemini-3.1-flash-tts-preview';
 // ساختِ قسمت چند دقیقه طول می‌کشد، پس زودتر از ساعتِ ارسال شروع می‌شود و رأسِ ساعت
 // فقط فایلِ آماده فرستاده می‌شود (وگرنه کاربر همیشه چند دقیقه دیرتر پادکستش را می‌گرفت).
 const BAKE_LEAD_MIN = 15;
@@ -133,6 +136,15 @@ db.exec(`
   );
   -- گاردِ «روزی یک قسمت»: ری‌استارت یا دو تیکِ هم‌زمانِ زمان‌بند دو قسمت نمی‌سازد.
   CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_daily_once ON episodes(date) WHERE kind='daily';
+  -- نمونه‌های صوتیِ گوینده‌ها: یک بار ساخته می‌شوند و بعد فقط file_id فرستاده می‌شود.
+  -- بدونِ این جدول، هر بار باز کردنِ صفحه‌ی انتخابِ گوینده شش فراخوانیِ پولیِ تازه بود.
+  CREATE TABLE IF NOT EXISTS voice_samples (
+    voice_id   TEXT NOT NULL,
+    version    INTEGER NOT NULL DEFAULT 1,
+    file_id    TEXT NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    PRIMARY KEY (voice_id, version)
+  );
   -- جدولِ خالیِ هم‌قرارداد داشبورد (این ربات پول ندارد؛ فقط تا ردیفِ رجیستری خطا ندهد)
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
@@ -165,12 +177,13 @@ const DEFAULTS = {
   duration_min: 15,
   duration_by_day: {},
   format: 'single',
-  // شناسه‌ی مدلِ OpenRouter. تنها موتورِ کاتالوگ که فارسی صراحتاً در زبان‌های اعلام‌شده‌اش
-  // هست؛ تا وقتی بیک‌آف حرفِ آخر را نزده، منطقی‌ترین پیش‌فرض همین است.
-  // اگر این مدل روزی از کاتالوگ برود، synthesize روی اولین مدلِ در دسترس می‌افتد و همان را
-  // روی ردیفِ قسمت ثبت می‌کند (پس گزارشِ هزینه دروغ نمی‌گوید).
-  engine: 'minimax/speech-2.8-hd',
-  voices: {},
+  // موتورِ صدا **ثابت** است: جمنای، بعد از مقایسه‌ی واقعیِ صداها انتخاب شد (۱۴۰۵/۰۵/۲۷).
+  // در settings می‌ماند تا ردیفِ هر قسمت بداند با چه موتوری ساخته شده (تاریخچه‌ی هزینه)،
+  // ولی دیگر از اینترفیس قابلِ تغییر نیست. عوض کردنش = همین یک خط.
+  engine: TTS_MODEL,
+  // نگاشتِ موتور به صدا. کلیدْ موتور است چون هر موتور صداهای خودش را دارد و اگر روزی
+  // موتور عوض شود، صدای انتخابیِ قبلی نباید بی‌صدا به موتورِ جدید پاس داده شود.
+  voices: { [TTS_MODEL]: DEFAULT_VOICE },
   speed: 1,
   tomorrow: null,
 };
@@ -183,6 +196,16 @@ function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
     .run(key, JSON.stringify(value));
 }
+// صدای فعلی. شناسه‌ی ناشناخته (مثلاً بعد از حذفِ یک گوینده از کاتالوگ) به پیش‌فرض برمی‌گردد
+// تا هیچ‌وقت شناسه‌ای که موتور نمی‌شناسد به API نرود.
+function currentVoice() {
+  const picked = (getSetting('voices') || {})[TTS_MODEL];
+  return voiceById(picked) ? picked : DEFAULT_VOICE;
+}
+function setVoice(id) {
+  setSetting('voices', { ...(getSetting('voices') || {}), [TTS_MODEL]: id });
+}
+
 // تنظیماتِ مؤثرِ یک روز: override فردا > مدتِ همان روزِ هفته > مدتِ پیش‌فرض.
 function effectiveSettings(dayKey, date) {
   const tomorrow = getSetting('tomorrow');
@@ -191,8 +214,12 @@ function effectiveSettings(dayKey, date) {
   return {
     durationMin: override?.duration_min || byDay[dayKey] || getSetting('duration_min'),
     format: getSetting('format'),
-    engine: getSetting('engine'),
-    voices: getSetting('voices'),
+    // موتور دیگر خواندنی از settings نیست: مقدارِ ذخیره‌شده از دورانِ انتخابِ موتور مانده و
+    // اگر خوانده شود، ربات بی‌صدا با موتورِ قدیمیِ همان ردیف کار می‌کند.
+    engine: TTS_MODEL,
+    // همیشه از currentVoice می‌آید، نه خامِ settings: ردیفِ ذخیره‌شده ممکن است از قبل از
+    // وجودِ انتخابِ گوینده مانده و خالی باشد، و آن‌وقت صدا بی‌صدا به حدسِ خانواده می‌افتاد.
+    voices: { [TTS_MODEL]: currentVoice() },
     speed: getSetting('speed'),
     skip: !!override?.skip,
     hasOverride: !!override,
@@ -214,6 +241,11 @@ const T = {
   noNotion: '🔌 اتصال Notion هنوز وصل نیست.\n\nSecret به نام DAILY_BRIEF_NOTION_TOKEN را در گیت‌هاب بساز و پیجِ «دستیار آموزشی» را با همان Integration به اشتراک بگذار.',
   building: '🎙 دارم می‌سازم، چند دقیقه طول می‌کشه.',
   busy: '⏳ یه قسمت همین الان در حال ساخته. تمام که شد خبر می‌دم.',
+  samplesBuilding: (n) => `🎙 دارم ${fa(n)} نمونه‌ی صوتی می‌سازم، یه لحظه صبر کن.\nاین کار فقط یک بار انجام می‌شه؛ دفعه‌ی بعد نمونه‌ها فوری میان.`,
+  samplesBusy: '⏳ نمونه‌ها همین الان در حال ساخته شدنه. چند لحظه‌ی دیگه دوباره بزن.',
+  sampleFailed: (v) => `🎙 ${v.name} (${v.tone})\nنمونه‌ی این صدا الان ساخته نشد، ولی می‌تونی از دکمه‌های پایین انتخابش کنی.`,
+  voicePick: '🗣 هر شش نمونه رو گوش بده و صدایی که دوست داری رو از دکمه‌های پایین انتخاب کن 👇',
+  voicePicked: (v) => `✅ صدای ${v.name} انتخاب شد.\nاز قسمتِ بعدی با همین صدا می‌شنوی. هر وقت خواستی از همین‌جا عوضش کن.`,
   episodeCaption: (ep) => {
     const cost = (ep.llm_cost_usd || 0) + (ep.tts_cost_usd || 0);
     const lines = [`🎧 ${ep.title || ep.lesson_title || 'قسمت روزانه'}`];
@@ -459,12 +491,11 @@ function settingsView() {
       `📅 روزها: ${daysFa(getSetting('days'))}\n` +
       `⏱ مدت: ${fa(getSetting('duration_min'))} دقیقه${perDay}\n` +
       `🎙 قالب: ${getSetting('format') === 'dialogue' ? 'گفت‌وگوی دونفره' : 'تک‌گوینده'}\n` +
-      `🔊 موتور صدا: ${engineLabel(getSetting('engine'))}${tm}`,
+      `🗣 گوینده: ${voiceById(currentVoice())?.name || '؟'} (${voiceById(currentVoice())?.tone || ''})${tm}`,
     keyboard: Markup.inlineKeyboard([
       [Markup.button.callback('⏰ ساعت ارسال', 'set:time'), Markup.button.callback('📅 روزها', 'set:days')],
       [Markup.button.callback('⏱ مدت', 'set:dur'), Markup.button.callback('🌙 فقط فردا', 'set:tmr')],
-      [Markup.button.callback('🎙 قالب', 'set:fmt'), Markup.button.callback('🔊 موتور صدا', 'set:eng')],
-      [Markup.button.callback('🧪 مقایسه‌ی صداها', 'bake:ask')],
+      [Markup.button.callback('🎙 قالب', 'set:fmt'), Markup.button.callback('🗣 انتخاب گوینده', 'set:voice')],
     ]),
   };
 }
@@ -625,147 +656,94 @@ bot.action('set:fmt:single', async (ctx) => {
   await showSettings(ctx, true);
 });
 bot.action('set:fmt:soon', async (ctx) => {
-  await ctx.answerCbQuery('اول کیفیتِ فارسیِ صداها را در «مقایسه‌ی صداها» می‌سنجیم، بعد این باز می‌شود.',
+  await ctx.answerCbQuery('گفت‌وگوی دونفره هنوز آماده نیست؛ به‌زودی باز می‌شود.',
     { show_alert: true }).catch(() => {});
 });
 
-// ── موتور صدا ──
-// کاتالوگ زنده از OpenRouter می‌آید، پس callback_data نمی‌تواند شناسه‌ی مدل را حمل کند
-// (اسلاگ بلند است و سقفِ ۶۴ بایتیِ تلگرام را می‌شکند). به‌جایش اندیسِ همان لیست می‌رود.
-// **تک‌منبعِ ترتیب**: هم لیستِ انتخاب و هم هندلرِ انتخاب از همین می‌خوانند، چون
-// callback_data اندیسِ همین آرایه را حمل می‌کند و دو ترتیبِ متفاوت یعنی انتخابِ موتورِ اشتباه.
-async function speechModels() {
-  return rankForPersian(await listSpeechModels({ apiKey: OPENROUTER_API_KEY }));
-}
-bot.action('set:eng', async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const cur = getSetting('engine');
-  const models = await speechModels();
-  const last = db.prepare(`SELECT engine, tts_cost_usd FROM episodes
-                           WHERE kind='bakeoff' AND tts_cost_usd > 0 ORDER BY id DESC LIMIT 20`).all();
-  const costOf = (id) => {
-    const r = last.find((x) => x.engine === id);
-    return r ? ` · نمونه ${usd(r.tts_cost_usd)}` : '';
-  };
-  await ctx.editMessageText('🔊 موتور صدا (همه از OpenRouter):', Markup.inlineKeyboard([
-    ...models.map((m, i) => [Markup.button.callback(
-      `${cur === m.id ? '✅ ' : ''}${engineLabel(m.id)}${costOf(m.id)}`, `set:eng:${i}`)]),
-    [Markup.button.callback('🧪 مقایسه‌ی صداها', 'bake:ask')],
+// ── انتخابِ گوینده ──
+// شش صدا، سه مرد و سه زن، عمداً دور از هم (کاتالوگ و دلیلش: voices.js).
+// نمونه‌ها **یک بار** ساخته و file_id شان کش می‌شود: باز کردنِ دوباره‌ی این صفحه هیچ
+// هزینه‌ای ندارد و فوری است. ساختِ نمونه پشتِ تپِ صریحِ کاربر است (قاعده‌ی هزینه، بند ۹).
+let samplesBuilding = false;
+
+const cachedSample = (voiceId) => db
+  .prepare('SELECT file_id FROM voice_samples WHERE voice_id=? AND version=?')
+  .get(voiceId, SAMPLE_VERSION)?.file_id || '';
+const saveSample = (voiceId, fileId) => db
+  .prepare(`INSERT INTO voice_samples (voice_id, version, file_id) VALUES (?,?,?)
+            ON CONFLICT(voice_id, version) DO UPDATE SET file_id=excluded.file_id`)
+  .run(voiceId, SAMPLE_VERSION, fileId);
+
+const voiceKeyboard = () => {
+  const cur = currentVoice();
+  return Markup.inlineKeyboard([
+    ...chunk(VOICES.map((v) => Markup.button.callback(
+      `${v.id === cur ? '✅ ' : ''}${v.name}`, `set:voice:${v.id}`)), 2),
     backRow,
-  ])).catch(() => {});
-});
-bot.action(/^set:eng:(\d+)$/, async (ctx) => {
-  const models = await speechModels();
-  const m = models[Number(ctx.match[1])];
-  if (!m) { await ctx.answerCbQuery('این موتور دیگر در دسترس نیست').catch(() => {}); return; }
-  setSetting('engine', m.id);
-  setSetting('voices', { ...(getSetting('voices') || {}), [m.id]: defaultVoice(m) });
-  track(db, ctx.from.id, 'settings_changed', { key: 'engine', engine: m.id });
-  await ctx.answerCbQuery('ثبت شد ✅').catch(() => {});
-  await showSettings(ctx, true);
-});
-
-/* ===== بیک‌آف: مقایسه‌ی صداها ===== */
-// یک متنِ نمونه‌ی کوتاه ساخته می‌شود و با همه‌ی موتورها خوانده می‌شود تا مالک با گوشِ خودش
-// انتخاب کند. این هم تستِ کیفیتِ فارسی است و هم تنها تستِ یکپارچگیِ واقعیِ TTS بعد از دیپلوی.
-const BAKEOFF_MINUTES = 1;
-// OpenRouter الان ۱۸ موتورِ صوتی دارد و بیشترشان انگلیسی‌محورند. پیش‌فرض فقط شش تای اولِ
-// لیستِ فارسی‌اول ساخته می‌شود؛ هجده فایلِ صوتی نه قابلِ گوش‌دادن است نه ارزشش را دارد.
-const BAKEOFF_TOP = 6;
-// همه‌ی مدل‌های گوگل + شش کاندیدِ برترِ بقیه (bakeoffPick)
-const bakeoffList = async (all) => {
-  const models = await speechModels();
-  return all ? models : bakeoffPick(models, { top: BAKEOFF_TOP });
+  ]);
 };
 
-const bakeAskText = async (all) => {
-  const models = await bakeoffList(all);
-  const total = (await speechModels()).length;
-  return {
-    text: `🧪 مقایسه‌ی صداها\n\nیک متنِ نمونه‌ی حدوداً یک‌دقیقه‌ای ساخته می‌شود و با ${fa(models.length)} موتور خوانده می‌شود:\n` +
-      `${models.map((m) => `· ${engineLabel(m.id)}`).join('\n')}\n\n` +
-      (all ? '' : `(از ${fa(total)} موتورِ موجود، آن‌هایی که چندزبانه‌اند اول آمده‌اند.)\n\n`) +
-      'هزینه‌اش ناچیز است.',
-    keyboard: Markup.inlineKeyboard([
-      [Markup.button.callback('✅ بساز', all ? 'bake:go:all' : 'bake:go')],
-      all ? [] : [Markup.button.callback(`🔊 همه‌ی ${fa(total)} موتور`, 'bake:ask:all')],
-      [Markup.button.callback('انصراف', 'set:home')],
-    ].filter((r) => r.length)),
-  };
-};
-bot.action(/^bake:ask(:all)?$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const v = await bakeAskText(!!ctx.match[1]);
-  await ctx.editMessageText(v.text, v.keyboard).catch(() => {});
-});
+// هر نمونه یک پیامِ صوتیِ جدا با نام و لحن در کپشن، تا زیرِ هر فایل معلوم باشد کدام صداست.
+// شکستِ یک نمونه بقیه را نمی‌کشد: کاربر باید بتواند از بینِ همان‌هایی که آمدند انتخاب کند.
+async function sendVoiceSamples(ctx) {
+  for (const v of VOICES) {
+    const caption = `🎙 ${v.name}\n${v.tone}`;
+    const extra = { caption, title: v.name, performer: v.tone };
+    try {
+      const cached = cachedSample(v.id);
+      if (cached) { await ctx.replyWithAudio(cached, extra); continue; }
+      const out = await synthesize({
+        engineKey: TTS_MODEL, script: sampleText(v), voice: v.id,
+        openrouterKey: OPENROUTER_API_KEY,
+      });
+      const msg = await ctx.replyWithAudio({ source: out.buffer, filename: `${v.id}.mp3` }, extra);
+      if (msg?.audio?.file_id) saveSample(v.id, msg.audio.file_id);
+    } catch (e) {
+      logErr('❌ VOICE_SAMPLE', v.id, e.message);
+      await ctx.reply(T.sampleFailed(v)).catch(() => {});
+    }
+  }
+}
 
-bot.action(/^bake:go(:all)?$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const runAll = !!ctx.match[1];
-  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
-  if (running) { await ctx.reply(T.busy); return; }
-  running = true;
-  const chatId = ctx.chat.id;
+async function showVoicePicker(ctx) {
+  if (samplesBuilding) { await ctx.reply(T.samplesBusy); return; }
+  const missing = VOICES.filter((v) => !cachedSample(v.id)).length;
+  samplesBuilding = true;
   try {
-    await ctx.reply('🧪 دارم نمونه‌ها را می‌سازم…');
-    const now = tehranNow();
-    const s = { ...effectiveSettings(now.weekday, now.date), durationMin: BAKEOFF_MINUTES };
-    // متن یک بار ساخته و بین همه‌ی موتورها مشترک است تا مقایسه فقط درباره‌ی صدا باشد.
-    const seed = createEpisode(deps, { date: now.date, kind: 'bakeoff', settings: s });
-    const { ep } = await bake(deps, seed.id, { stopAfter: 'scripted' });
-    const models = await bakeoffList(runAll);
-    track(db, ctx.from.id, 'bakeoff_run', { engines: models.length, all: runAll ? 1 : 0 });
+    if (missing) await ctx.reply(T.samplesBuilding(missing));
+    await sendVoiceSamples(ctx);
+    await ctx.reply(T.voicePick, voiceKeyboard());
+  } finally {
+    samplesBuilding = false;
+  }
+}
 
-    const okModels = [];
-    for (const m of models) {
-      try {
-        const out = await synthesize({
-          engineKey: m.id, script: ep.script, speed: getSetting('speed'),
-          voice: defaultVoice(m), openrouterKey: OPENROUTER_API_KEY,
-          generationCost: llm.generationCost,
-        });
-        // هر نمونه ردیفِ خودش را می‌گیرد تا هزینه‌ی هر موتور جدا قابلِ مقایسه بماند
-        db.prepare(`INSERT INTO episodes (date, kind, status, title, duration_target, format, engine,
-                    tts_chars, tts_cost_usd, audio_seconds, audio_bytes, delivered_at)
-                    VALUES (?, 'bakeoff', 'delivered', ?, ?, 'single', ?, ?, ?, ?, ?, unixepoch())`)
-          .run(now.date, `نمونه ${m.id}`, BAKEOFF_MINUTES, out.engine,
-               out.chars, out.costUsd, out.seconds, out.buffer.length);
-        await bot.telegram.sendAudio(chatId,
-          { source: out.buffer, filename: `bakeoff-${m.id.replace(/\W+/g, '-')}.mp3` }, {
-            title: `نمونه ${engineLabel(m.id)}`, performer: T.performer,
-            caption: `🎙 ${engineLabel(m.id)}${out.voice ? ` (${out.voice})` : ''}\n` +
-                     `⏱ ${mmss(out.seconds)} · 📦 ${mb(out.buffer.length)}\n` +
-                     `💵 ${usd(out.costUsd)} (${fa(out.chars)} کاراکتر)`,
-          });
-        okModels.push(m);
-      } catch (e) {
-        // خطای یک موتور نباید بقیه‌ی مقایسه را بکشد؛ همان‌جا گزارش می‌شود.
-        logErr(`bakeoff ${m.id}:`, e.message);
-        await bot.telegram.sendMessage(chatId, `❌ ${engineLabel(m.id)}: ${String(e.message).slice(0, 200)}`);
-      }
-    }
-    db.prepare("UPDATE episodes SET status='delivered', delivered_at=unixepoch() WHERE id=?").run(ep.id);
-    if (okModels.length) {
-      // اندیس باید در **لیستِ کامل** حساب شود، نه در لیستِ برش‌خورده‌ی بیک‌آف:
-      // هندلرِ set:eng از لیستِ کامل می‌خواند و هر اختلافِ ترتیب یعنی انتخابِ موتورِ اشتباه.
-      const full = await speechModels();
-      // جدولِ هزینه‌ی همین نمونه‌ها: تصمیمِ «گران‌تر ولی بدونِ بهبودِ محسوس را برندار»
-      // بدونِ عدد قابلِ گرفتن نیست، و ارزانی وقتی معنی دارد که کیفیت هم‌تراز باشد.
-      const rows = db.prepare(`SELECT engine, tts_cost_usd c, audio_seconds s FROM episodes
-                               WHERE kind='bakeoff' AND date=? ORDER BY c`).all(now.date);
-      const perMin = (r) => (r.s ? (r.c / (r.s / 60)) : 0);
-      const table = rows.map((r) => `${engineLabel(r.engine)}\n   ${usd(r.c)} برای ${mmss(r.s)} · ${usd(perMin(r))} هر دقیقه`).join('\n');
-      await bot.telegram.sendMessage(chatId,
-        `💵 هزینه‌ی همین نمونه‌ها (ارزان به گران):\n\n${table}\n\n` +
-        `اگر دو تا صدا هم‌کیفیت بودند، ارزان‌تر را انتخاب کن.`);
-      await bot.telegram.sendMessage(chatId, 'کدام صدا بهتر بود؟', Markup.inlineKeyboard(
-        okModels.map((m) => [Markup.button.callback(
-          engineLabel(m.id), `set:eng:${full.findIndex((x) => x.id === m.id)}`)])));
-    }
-  } catch (e) {
-    logErr('bakeoff:', e.message);
-    await bot.telegram.sendMessage(chatId, `❌ ساختِ نمونه‌ها شکست خورد: ${String(e.message).slice(0, 200)}`);
-  } finally { running = false; }
+bot.action('set:voice', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await showVoicePicker(ctx);
+});
+bot.action(/^set:voice:([A-Za-z]+)$/, async (ctx) => {
+  const v = voiceById(ctx.match[1]);
+  // دکمه‌ی کهنه‌ی یک گوینده‌ی حذف‌شده نباید شناسه‌ی ناشناخته را به موتور بفرستد (بند ۲ج/۶).
+  if (!v) {
+    await ctx.answerCbQuery('این گوینده دیگر در لیست نیست؛ یکی از گزینه‌های فعلی را انتخاب کن.',
+      { show_alert: true }).catch(() => {});
+    return;
+  }
+  setVoice(v.id);
+  track(db, ctx.from.id, 'settings_changed', { key: 'voice', voice: v.id });
+  await ctx.answerCbQuery(`${v.name} انتخاب شد ✅`).catch(() => {});
+  await ctx.editMessageText(T.voicePicked(v), voiceKeyboard()).catch(() => {});
+});
+
+// ── موتورِ صدا: دیگر انتخابی نیست ──
+// بعد از مقایسه‌ی واقعیِ صداها (۱۴۰۵/۰۵/۲۷) مالک جمنای را انتخاب کرد و تصمیم گرفت کلِ
+// «تست و انتخابِ موتور» از اینترفیس برداشته شود. کدِ بیک‌آف و لیستِ انتخاب حذف شدند، نه
+// خاموش: بندِ ۹/۰ ریشه می‌گوید چیزی که به هدف نزدیک نمی‌کند باید حذف شود نه نگهداری.
+// دکمه‌های کهنه‌ی داخلِ چت‌های قدیمی جوابِ مودبانه می‌گیرند (بند ۲ج/۶: callback نمی‌میرد).
+bot.action(/^(bake:|set:eng)/, async (ctx) => {
+  await ctx.answerCbQuery('انتخابِ صدا برداشته شد؛ صدای ربات روی جمنای ثابت است.',
+    { show_alert: true }).catch(() => {});
 });
 
 /* ===== دستورها ===== */
@@ -774,6 +752,7 @@ bot.command('cost', showCost);
 bot.command('now', askBuildNow);
 bot.command('roadmap', showRoadmap);
 bot.command('settings', (ctx) => showSettings(ctx, false));
+bot.command('voice', showVoicePicker);
 // راهِ نجات وقتی پیامِ خطا با دکمه‌ی تلاشِ دوباره گم شده باشد.
 bot.command('retry', async (ctx) => {
   const ep = db.prepare("SELECT * FROM episodes WHERE status='failed' ORDER BY id DESC LIMIT 1").get();
@@ -784,11 +763,6 @@ bot.command('retry', async (ctx) => {
       Markup.button.callback('انصراف', 'nav:close'),
     ]]));
 });
-bot.command('bakeoff', async (ctx) => {
-  const v = await bakeAskText(false);
-  await ctx.reply(v.text, v.keyboard);
-});
-
 /* ===== زمان‌بند ===== */
 // هر دقیقه بیدار می‌شود و دو کارِ کاملاً جدا انجام می‌دهد:
 //   ۱) ساختِ زودهنگام (BAKE_LEAD_MIN دقیقه قبل از ساعتِ ارسال) تا فایل به‌موقع آماده باشد،
