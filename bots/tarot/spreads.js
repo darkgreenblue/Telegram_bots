@@ -327,11 +327,129 @@ export const SPREADS_V3 = [
   },
 ].map(s => ({ ...s, price: s.size * PER_CARD }));
 
-// SPREAD_BY_ID باید **همه‌ی** چیدمان‌ها را داشته باشد (هر دو نسل + موضوع آزاد): خوانش‌های
+// ═══ نسل چهارم (UX v2.1) — «موضوع» و «اندازه» دو انتخابِ جدا ═══
+//
+// تصمیمِ صریحِ مالک (۱۴۰۵/۰۵/۲۸): تا حالا هر ردیفِ کاتالوگ **هم** موضوع بود **هم** اندازه
+// («عشق و رابطه» یعنی حتماً سه کارت، «صلیب سلتی» یعنی حتماً ده کارت). دو ایراد داشت:
+//   ۱) کاربری که سؤالِ عشقی داشت و فالِ عمیق می‌خواست، مجبور بود موضوعش را عوض کند.
+//   ۲) قیمت به موضوع چسبیده بود، در حالی که قیمت فقط تابعِ تعدادِ کارت است.
+// حالا کاربر اول **موضوع** را می‌گوید و بعد **عمق** را؛ قیمت همان‌جا و از تعدادِ کارت
+// درمی‌آید (هر کارت = ۱ سکه). یعنی «صلیب سلتی» به‌عنوان یک فالِ جدا حذف شد: ده‌کارتی
+// حالا فقط یک **اندازه** است که روی هر موضوعی می‌نشیند.
+//
+// موضوع‌ها عمداً روی دو حوزه متمرکزند (تصمیمِ مالک): **عشق و رابطه** و **پول و شغل**.
+// «حال درونی»، «خانواده» و «مهاجرت» حذف شدند (در SPREAD_BY_ID می‌مانند تا خوانش‌های
+// ثبت‌شده و دکمه‌های کهنه نشکنند).
+export const TOPICS_V3 = [
+  // ترتیبِ این آرایه = ترتیبِ لیستِ «همه‌ی فال‌ها» (تصمیمِ مالک): سؤالِ شخصی، بله/خیر،
+  // عاطفی‌ها، بعد شغل و پول و بقیه.
+  { key: 'personal', emoji: '🌀', fa: 'سؤال شخصی خودم', open: true, focus: 'open',
+    desc: 'هر سؤالی که ذهنت رو گرفته، با کلمه‌های خودت' },
+  { key: 'yesno', emoji: '⚖️', fa: 'بله و خیر قطعی', decisive: 'binary',
+    desc: 'یک تصمیمِ مشخص، یک جوابِ روشن' },
+  { key: 'love', emoji: '💞', fa: 'عشق و رابطه', focus: 'love',
+    desc: 'دل تو، دل او، و مسیری که پیش روتونه' },
+  { key: 'crush', emoji: '😍', fa: 'فال کراش', focus: 'love',
+    desc: 'اونی که ذهنت رو گرفته: چطور می‌بینتت و این ماجرا کجا می‌ره' },
+  { key: 'feel', emoji: '💭', fa: 'حس طرف مقابل', focus: 'love',
+    desc: 'حسِ واقعیِ او به تو، بدونِ تعارف' },
+  { key: 'commit', emoji: '💍', fa: 'تعهد یا خیانت', focus: 'love',
+    decisive: 'choice', choiceLabels: ['تعهد', 'خیانت'],
+    desc: 'وقتی به وفاداریِ او شک داری: یک جوابِ صریح' },
+  { key: 'career', emoji: '💼', fa: 'شغل و مسیر کاری', focus: 'career',
+    desc: 'جایگاه الان، مانعی که سد راهته، و برآیندِ مسیر' },
+  { key: 'money', emoji: '💰', fa: 'پول و درآمد بیشتر', focus: 'money',
+    desc: 'وضعیتِ مالی الان و مسیرِ درآمدِ بیشتر' },
+  { key: 'choice', emoji: '🔀', fa: 'دوراهی', decisive: 'choice',
+    desc: 'بین دو مسیر گیر کردی؟ در آخر یک مسیرِ روشن' },
+];
+
+// جایگاه‌های **خنثی** per اندازه: چون موضوع دیگر جایگاه نمی‌سازد، جایگاه فقط «عمق» را
+// می‌گوید. مدل موضوع را از خودِ سؤالِ کاربر و از حوزه‌ی تمرکز می‌گیرد.
+const POS_NEUTRAL = {
+  3: [
+    { key: 'root', fa: 'ریشه‌ی ماجرا' },
+    { key: 'now', fa: 'وضعیت الان' },
+    { key: 'path', fa: 'مسیر پیش رو' },
+  ],
+  5: [
+    { key: 'core', fa: 'قلب ماجرا' },
+    { key: 'root', fa: 'ریشه' },
+    { key: 'hidden', fa: 'نیروی پنهان' },
+    { key: 'challenge', fa: 'مانع پیش رو' },
+    { key: 'path', fa: 'مسیر پیش رو' },
+  ],
+  10: [
+    { key: 'core', fa: 'قلب ماجرا' },
+    { key: 'challenge', fa: 'چالش' },
+    { key: 'root', fa: 'ریشه' },
+    { key: 'past', fa: 'آنچه گذشت' },
+    { key: 'aware', fa: 'آنچه می‌دانی' },
+    { key: 'soon', fa: 'آنچه نزدیک است' },
+    { key: 'self', fa: 'خودت' },
+    { key: 'around', fa: 'اطرافیان' },
+    { key: 'hope', fa: 'امید و ترس' },
+    { key: 'outcome', fa: 'برآیند' },
+  ],
+};
+
+// فالِ **تقابلی** (تعهد/خیانت، دوراهی) استثناست: اگر جایگاه‌هایش خنثی بمانند، مدل
+// کارت‌ها را مثل یک خطِ زمانی می‌خواند و دو سمتِ تصمیم گم می‌شود — دقیقاً همان چیزی که
+// خروجیِ `decisive` باید انتخابش کند (verdict.js). پس دو سمت در خودِ جایگاه‌ها لنگر می‌خورند.
+// اندازه‌ی ده‌کارتی نیاز ندارد: آن‌جا آن‌قدر جایگاه هست که هر دو سمت جا بگیرند.
+// اگر فال برچسبِ اختصاصی دارد (مثل «تعهد»/«خیانت») همان کلمه‌ها روی جایگاه‌ها می‌نشینند،
+// نه «مسیر اول/دوم»: کاربر و مدل باید یک واژگان ببینند، وگرنه جوابِ نهایی به جایگاه‌ها
+// لنگر نمی‌خورد (همان دلیلی که `choiceLabels` برای verdict ساخته شد).
+const POS_CHOICE = (labels) => {
+  const [a, b] = Array.isArray(labels) && labels.length === 2 ? labels : ['مسیر اول', 'مسیر دوم'];
+  return {
+    3: [
+      { key: 'pathA', fa: a },
+      { key: 'pathB', fa: b },
+      { key: 'guide', fa: 'چراغ راهنما' },
+    ],
+    5: [
+      { key: 'pathA', fa: a },
+      { key: 'forceA', fa: `نیروی پشتِ ${a}` },
+      { key: 'pathB', fa: b },
+      { key: 'forceB', fa: `نیروی پشتِ ${b}` },
+      { key: 'guide', fa: 'چراغ راهنما' },
+    ],
+  };
+};
+
+// سه اندازه، تنها چیزی که قیمت را تعیین می‌کند. `maxTokens` از همان چیدمان‌های موجود
+// برداشته شد تا رفتارِ مدل عوض نشود؛ فالِ تصمیم‌محور کمی بیشتر می‌گیرد چون بلوکِ
+// verdict خروجیِ اضافه دارد (همان قاعده‌ی v2.4.0).
+export const SIZES_V3 = [3, 5, 10];
+const MAX_TOKENS_BY_SIZE = { 3: 1600, 5: 2400, 10: 3500 };
+
+/** آی‌دیِ چیدمان از موضوع و اندازه. عمداً بدونِ جداکننده تا با `\w+` کال‌بک‌ها بخواند. */
+export const spreadIdOf = (topicKey, size) => `${topicKey}${size}`;
+
+export const TOPIC_SPREADS = TOPICS_V3.flatMap((t) => SIZES_V3.map((size) => ({
+  id: spreadIdOf(t.key, size),
+  topic: t.key,
+  emoji: t.emoji,
+  fa: t.fa,
+  desc: t.desc,
+  size,
+  maxTokens: MAX_TOKENS_BY_SIZE[size] + (t.decisive ? 200 : 0),
+  positions: (t.decisive === 'choice' && POS_CHOICE(t.choiceLabels)[size]) || POS_NEUTRAL[size],
+  ...(t.focus ? { focus: t.focus } : {}),
+  ...(t.open ? { open: true } : {}),
+  ...(t.decisive ? { decisive: t.decisive } : {}),
+  ...(t.choiceLabels ? { choiceLabels: t.choiceLabels } : {}),
+}))).map(s => ({ ...s, price: s.size * PER_CARD }));
+
+export const TOPIC_BY_KEY = Object.fromEntries(TOPICS_V3.map(t => [t.key, t]));
+
+// SPREAD_BY_ID باید **همه‌ی** چیدمان‌ها را داشته باشد (هر سه نسل + موضوع آزاد): خوانش‌های
 // ثبت‌شده و دکمه‌های کهنه‌ی داخلِ چت‌ها از همین‌جا resolve می‌شوند. v2 اول می‌آید تا برای
 // آی‌دی‌های مشترک (love/yesno/choice/three/career/money/celtic) تعریفِ تازه برنده باشد.
+// آی‌دیِ نسل چهارم (`love5`, `yesno3`, …) با هیچ آی‌دیِ قدیمی‌ای تصادم ندارد.
 export const SPREAD_BY_ID = Object.fromEntries(
-  [...SPREADS, ...SPREADS_V2, ...OPEN_SPREADS, ...SPREADS_V3].map(s => [s.id, s]),
+  [...SPREADS, ...SPREADS_V2, ...OPEN_SPREADS, ...SPREADS_V3, ...TOPIC_SPREADS].map(s => [s.id, s]),
 );
 
 // نامِ نمایشیِ چیدمان بر اساس نسلِ کاتالوگی که کاربر می‌بیند.
@@ -339,6 +457,20 @@ export const faOf = (s, v2, v3) => ((v3 && s?.faV3) || (v2 && s?.faV2) || s?.fa 
 
 /** کاتالوگی که به این کاربر نشان داده می‌شود (v2 = کاتالوگ عشق‌محورِ تقابلی). */
 export const spreadsFor = (v2) => (v2 ? SPREADS_V2 : SPREADS);
+
+/**
+ * موضوعِ یک آی‌دیِ چیدمان — برای پیشنهاددهنده و آنالیتیکس.
+ * چیدمان‌های نسل‌های قبل خودشان `topic` ندارند، پس از روی `focus`/`id` حدس زده می‌شوند
+ * تا سابقه‌ی کاربرِ قدیمی هم در قاعده‌ی «چیزی که تازه گرفته دوباره پیشنهاد نشود» بشمارد.
+ */
+export function topicOf(spreadId) {
+  const s = SPREAD_BY_ID[spreadId];
+  if (!s) return null;
+  if (s.topic) return s.topic;
+  if (TOPIC_BY_KEY[s.id]) return s.id;              // love/yesno/choice/career/money/crush/commit
+  if (s.open) return 'personal';                     // open3/open5/open10
+  return null;                                       // three/celtic/inner/family/… موضوعِ نسل جدید ندارند
+}
 
 export { SPREADS_V2 };
 export default SPREADS;
