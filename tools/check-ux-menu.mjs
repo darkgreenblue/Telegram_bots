@@ -170,6 +170,14 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
   ok(/if \(uxV2For\(telegram_id\)\) continue;\n\s*stmts\.setDailyReminded/.test(SRC),
     'یادآوریِ کارتِ روز برای کاربرِ UX v2 متوقف شده (جایش را کارت شانس گرفت)');
   ok(/'lucky_card', \{ coins: found/.test(SRC), 'رویدادِ lucky_card با تعدادِ سکه ثبت می‌شود');
+  // ⚠️ حیاتی: کارتِ روز نباید سکه بدهد. مالک تصمیمِ اولش را عوض کرد و آن سکه به کارت
+  // شانس منتقل شد؛ اگر هر دو بمانند نرخِ رایگان **دو برابر** طراحی می‌شود (۲ سکه در
+  // روز) و کلِ محاسبه‌ی امیدِ ریاضی بی‌معنی می‌شود.
+  ok(!/DAILY_COIN_REWARD/.test(SRC), 'کارتِ روز هیچ سکه‌ای نمی‌دهد (سکه‌ی رایگان فقط از کارت شانس)');
+  ok(!/coinReward/.test(LOC), 'متنِ «سکه بابتِ کارت امروز» هم پاک شده (کدِ مرده نمی‌ماند)');
+  const kinds = [...SRC.matchAll(/kind: '(\w+)' \}\)/g)].map(m => m[1]);
+  ok(kinds.includes('lucky') && !kinds.includes('daily'),
+    'تنها منبعِ سکه‌ی رایگانِ روزانه kind:lucky است');
   ok(/\['daily_log','user_id'\]/.test(SRC), 'ریستِ ادمین daily_log را هم پاک می‌کند');
 }
 
