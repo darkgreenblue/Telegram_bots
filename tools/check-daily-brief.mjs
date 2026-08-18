@@ -349,7 +349,8 @@ db.exec(`
     delivered_at INTEGER, episode_id INTEGER);
   CREATE TABLE episodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'daily',
-    status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER DEFAULT (unixepoch()), error TEXT);
+    status TEXT NOT NULL DEFAULT 'pending', engine TEXT, voices_json TEXT DEFAULT '{}',
+    speed REAL DEFAULT 1, created_at INTEGER DEFAULT (unixepoch()), error TEXT);
   CREATE UNIQUE INDEX idx_episodes_daily_once ON episodes(date) WHERE kind='daily';
 `);
 
@@ -425,6 +426,19 @@ db.prepare("INSERT INTO episodes (date, kind, status) VALUES ('2026-08-17','manu
 db.prepare("INSERT INTO episodes (date, kind, status) VALUES ('2026-08-17','bakeoff','pending')").run();
 eq(db.prepare("SELECT COUNT(*) n FROM episodes WHERE date='2026-08-17'").get().n, 3,
   'ساختِ دستی و مقایسه‌ی صداها زیرِ قفلِ روزانه نیستند');
+
+// «تلاشِ دوباره» یک تصمیمِ تازه است، پس موتور را از تنظیماتِ فعلی می‌گیرد نه از snapshotِ
+// لحظه‌ی ساخت. سناریوی واقعی: قسمتِ امروز با موتوری شکست خورد، مالک بعد از شنیدنِ نمونه‌ها
+// موتور را عوض کرد، و انتظار دارد تلاشِ دوباره با موتورِ **جدید** باشد.
+console.log('\n🔁 تلاشِ دوباره');
+db.exec(`INSERT INTO episodes (id, date, kind, status, engine) VALUES (99, '2026-08-20', 'daily', 'failed', 'old/engine')`);
+const retryClaim = db.prepare("UPDATE episodes SET status='pending', error=NULL WHERE id=? AND status='failed'").run(99);
+eq(retryClaim.changes, 1, 'گذارِ failed→pending اتمیک است');
+eq(db.prepare("UPDATE episodes SET status='pending' WHERE id=? AND status='failed'").run(99).changes, 0,
+  'تپِ دومِ تلاشِ دوباره بی‌اثر است (ضدِ دو بار اجرا)');
+db.prepare('UPDATE episodes SET engine=? WHERE id=?').run('new/engine', 99);
+eq(db.prepare('SELECT engine FROM episodes WHERE id=99').get().engine, 'new/engine',
+  'موتورِ قسمت با تلاشِ دوباره به تنظیماتِ فعلی به‌روز می‌شود');
 
 console.log('\n♻️ بازیابیِ بعد از ری‌استارت');
 db.prepare("INSERT INTO episodes (date, kind, status, created_at) VALUES ('2026-08-10','manual','scripted', unixepoch()-9999)").run();

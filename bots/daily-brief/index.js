@@ -422,6 +422,15 @@ bot.action(/^retry:(\d+)$/, async (ctx) => {
   if (!ep) { await ctx.reply('این قسمت پیدا نشد.'); return; }
   // اگر متن از قبل ساخته شده بود، status به scripted برمی‌گردد تا پولِ LLM دوباره خرج نشود
   if (info.changes && ep.script) db.prepare("UPDATE episodes SET status='scripted' WHERE id=?").run(id);
+  // **موتور از تنظیماتِ فعلی تازه می‌شود.** snapshotِ لحظه‌ی ساخت برای این است که تغییرِ
+  // وسطِ کارِ تنظیمات یک قسمتِ در جریان را خراب نکند؛ ولی «تلاشِ دوباره» خودش یک تصمیمِ
+  // تازه است. بدونِ این، کسی که بعد از شنیدنِ نمونه‌ها موتور را عوض کرده باز هم قسمت را
+  // با همان موتورِ قبلی (که شاید خودش دلیلِ شکست بوده) می‌گیرد.
+  if (info.changes) {
+    const s = effectiveSettings(tehranNow().weekday, tehranNow().date);
+    db.prepare('UPDATE episodes SET engine=?, voices_json=?, speed=? WHERE id=?')
+      .run(s.engine, JSON.stringify(s.voices || {}), s.speed || 1, id);
+  }
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   if (running) { await ctx.reply(T.busy); return; }
   await ctx.reply(T.building);
