@@ -15,7 +15,7 @@
 //   • **دقیقاً یک** فراخوانیِ تعمیر. حلقه نداریم.
 //   • شکستِ تعمیر هرگز خوانش را نمی‌شکند: متنِ اصلی برمی‌گردد.
 //   • تعمیر فقط فیلدهای معیوب را عوض می‌کند؛ بقیه‌ی خوانش بیت‌به‌بیت دست‌نخورده می‌ماند.
-import { evasionIn } from './verdict.js';
+import { evasionIn, pastTimeIn } from './verdict.js';
 import { parseJsonLoose, readText } from './reading-core.js';
 import { log, logErr } from '../../shared/logger.js';
 
@@ -27,13 +27,33 @@ import { log, logErr } from '../../shared/logger.js';
 // شلیک کند. همان قانونی که در کامنتِ `v4Text` نوشته بودیم را خودمان شکسته بودیم:
 // **گارد و سنجه باید عیناً یک متن را ببینند**، وگرنه یکی چیزی را می‌گیرد که آن یکی
 // نمی‌بیند. هر فیلدی که به کاربر می‌رسد اینجا هم باید باشد.
-export function findEvasion(llm) {
+//
+// دو نوع ضعف تا امروز ارزشِ تعمیر دارند. هر دو **هاردکد** تشخیص داده می‌شوند و هر دو
+// در **یک** فراخوانی با هم تعمیر می‌شوند — نه یکی یکی، وگرنه فالِ بدشانس دو بار
+// معطل می‌شود. افزودنِ نوعِ سوم = یک ردیف در این آرایه، نه یک مسیرِ جدید.
+export const DEFECTS = [
+  {
+    id: 'evasion',
+    find: evasionIn,
+    // متنِ راهنما برای همان تکه؛ کوتاه چون در ورودی تکرار می‌شود
+    hint: 'تصمیم را به خودِ مخاطب پس داده. جهت بده: بگو کدام سمت سنگین‌تر است.',
+  },
+  {
+    id: 'pastTime',
+    find: pastTimeIn,
+    hint: 'به زمانِ گذشته اشاره کرده در حالی که تاریخِ جلسه‌های قبل را نداریم. خودِ اشاره‌ی زمانی را بردار و فقط موضوع را نگه دار.',
+  },
+];
+
+export function findDefects(llm) {
   const hits = [];
   const push = (path, text) => {
     const t = String(text || '').trim();
     if (!t) return;
-    const phrase = evasionIn(t);
-    if (phrase) hits.push({ path, text: t, phrase });
+    for (const d of DEFECTS) {
+      const phrase = d.find(t);
+      if (phrase) { hits.push({ path, text: t, phrase, kind: d.id, hint: d.hint }); return; }
+    }
   };
   push('headline', llm?.headline);
   push('pattern', llm?.pattern);
@@ -69,9 +89,7 @@ export function applyFixes(llm, hits, fixes) {
 // وسوسه می‌شود متن را بازنویسی کند، در حالی که ما فقط یک جراحیِ کوچک می‌خواهیم.
 export const REPAIR_SYSTEM = `تو ویراستارِ یک متنِ تاروتِ فارسی هستی.
 
-در جمله‌هایی که می‌گیری، عبارتی هست که تصمیم را به خودِ مخاطب پس می‌دهد («بستگی به خودت داره»، «به شهودت اعتماد کن»، «شاید آره شاید نه»، «هم این هم اون»، «فقط خودت می‌دونی»). این ممنوع است: مخاطب آمده جواب بگیرد.
-
-کارِ تو فقط همین است: همان تکه را با یک جمله‌ی **جهت‌دار** عوض کن که بگوید کدام سمت سنگین‌تر است.
+هر جمله‌ای که می‌گیری یک ایرادِ مشخص دارد که کنارش نوشته شده. فقط همان ایراد را برطرف کن.
 
 قواعد:
 - بقیه‌ی جمله را دست نزن. طول و لحن و معنیِ کلی همان بماند.
@@ -83,8 +101,10 @@ export const REPAIR_SYSTEM = `تو ویراستارِ یک متنِ تاروتِ
 {"fixes": ["جمله‌ی تعمیرشده‌ی ۱", "جمله‌ی تعمیرشده‌ی ۲"]}
 به همان ترتیبِ ورودی و با همان تعداد.`;
 
+// هر تکه با **ایرادِ خودش** می‌رود، پس یک فراخوانی می‌تواند چند نوع ضعف را با هم
+// بردارد و مدل دقیقاً می‌داند چه چیزی را باید عوض کند.
 export const repairUser = (hits) =>
-  hits.map((h, i) => `${i + 1}) ${h.text}`).join('\n\n');
+  hits.map((h, i) => `${i + 1}) [ایراد: ${h.hint}]\n${h.text}`).join('\n\n');
 
 /**
  * یک بار تلاش برای تعمیرِ طفره‌رفتن. `call` تزریق می‌شود تا ربات و آزمایشگاه **همین**
@@ -93,8 +113,8 @@ export const repairUser = (hits) =>
  * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
  * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
-export async function repairEvasion(llm, call, { tag = '' } = {}) {
-  const hits = findEvasion(llm);
+export async function repairDefects(llm, call, { tag = '' } = {}) {
+  const hits = findDefects(llm);
   if (!hits.length) return { llm, fired: false, repaired: false };
 
   let res = null;
@@ -107,7 +127,11 @@ export async function repairEvasion(llm, call, { tag = '' } = {}) {
         if (!obj || !Array.isArray(obj.fixes) || obj.fixes.length !== hits.length) return false;
         // اگر تعمیر خودش طفره‌رفتن داشته باشد، تعمیر نشده. ولی **دوباره نمی‌پرسیم** —
         // یک فراخوانی یعنی یک فراخوانی؛ خروجیِ اصلی تحویل می‌شود.
-        return obj.fixes.every((f) => String(f || '').trim() && !evasionIn(String(f)));
+        // تعمیر نباید خودش همان ایراد را دوباره داشته باشد — هیچ‌کدام از انواع.
+        return obj.fixes.every((f, i) => {
+          const t = String(f || '').trim();
+          return t && !DEFECTS.some((d) => d.find(t));
+        });
       },
     // فقط یک تلاش: بودجه‌ی این مسیر عمداً سخت‌گیرانه است.
     }, [undefined]);
@@ -117,9 +141,9 @@ export async function repairEvasion(llm, call, { tag = '' } = {}) {
 
   const obj = res && parseJsonLoose(res.out);
   if (!obj?.fixes) {
-    logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (طفره: «${hits[0].phrase}»)`);
+    logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (${hits[0].kind}: «${hits[0].phrase}»)`);
     return { llm, fired: true, repaired: false };
   }
-  log(`${tag} طفره‌رفتن تعمیر شد: ${hits.map((h) => `«${h.phrase}»`).join('، ')}`);
+  log(`${tag} تعمیر شد: ${hits.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
   return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0] };
 }

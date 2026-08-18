@@ -30,7 +30,7 @@ import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 // داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
 // تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
 import { headlineOk } from '../bots/tarot/verdict.js';
-import { repairEvasion } from '../bots/tarot/repair.js';
+import { repairDefects } from '../bots/tarot/repair.js';
 import {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose,
@@ -139,7 +139,7 @@ async function runStep(persona, step, i, state) {
   // تعمیرِ نقطه‌ای — **همان کدِ ربات**. اینجا اجرا می‌شود تا آزمایشگاه دقیقاً همان
   // چیزی را بسنجد که کاربر می‌گیرد، و هزینه/تأخیرِ واقعیِ این مسیر اندازه گرفته شود.
   const t0 = Date.now();
-  const rep = await repairEvasion(parsed, FAKE ? fakeRepair : orChatResilient,
+  const rep = await repairDefects(parsed, FAKE ? fakeRepair : orChatResilient,
     { tag: `${persona.id}.${i + 1}` });
   parsed = rep.llm;
   const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };

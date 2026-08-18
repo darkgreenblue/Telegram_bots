@@ -30,7 +30,7 @@ import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
-import { repairEvasion } from './repair.js';
+import { repairDefects } from './repair.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
@@ -165,7 +165,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.6.5';
+const PRODUCT_VERSION = '3.6.6';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1121,7 +1121,7 @@ async function callReadingLLM(readingId) {
     if (soft.length) log(`reading#${readingId} فیلدِ اختیاریِ جامانده: ${soft.join(', ')}`);
     if (!headlineOk(parsed.headline)) log(`reading#${readingId} سرخط فرمول را ندارد (پذیرفته شد)`);
     // تعمیرِ نقطه‌ای: فقط اگر تشخیصِ هاردکد چیزی پیدا کند، و فقط یک فراخوانیِ کوچک.
-    const rep = await repairEvasion(parsed, orChatResilient, { tag: `reading#${readingId}` });
+    const rep = await repairDefects(parsed, orChatResilient, { tag: `reading#${readingId}` });
     parsed = rep.llm;
     const evLeft = evasionIn(v4Text(parsed));
     if (evLeft) logErr(`reading#${readingId} طفره‌رفتن «${evLeft}» بعد از تعمیر هم ماند (پذیرفته شد)`);

@@ -182,10 +182,10 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
   });
 
   // ۱) تشخیص: کدام فیلد و کدام عبارت
-  const hits = rep.findEvasion(base());
+  const hits = rep.findDefects(base());
   ok(hits.length === 1 && hits[0].path === 'closing', 'فیلدِ معیوب دقیق پیدا می‌شود');
   ok(hits[0].phrase === 'بستگی داره', 'خودِ عبارت گزارش می‌شود');
-  ok(rep.findEvasion({ ...base(), closing: 'در کل، بله می‌شه ولی صبر لازمه.' }).length === 0,
+  ok(rep.findDefects({ ...base(), closing: 'در کل، بله می‌شه ولی صبر لازمه.' }).length === 0,
     'متنِ سالم تعمیر نمی‌خواهد');
 
   // ۲) ورودیِ پرامپتِ تعمیر فقط همان تکه است، نه کلِ فال — دلیلِ ارزان‌بودنش همین است
@@ -206,23 +206,45 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
     const out = JSON.stringify({ fixes: ['در کل، بیشتر به این می‌خوره که جلو بره، ولی صبر می‌خواد.'] });
     return opts.validate(out) ? { out, usages: [{ prompt_tokens: 100, completion_tokens: 50 }] } : null;
   };
-  const good = await rep.repairEvasion(base(), okCall);
+  const good = await rep.repairDefects(base(), okCall);
   ok(calls === 1, 'فقط یک فراخوانیِ تعمیر (نه حلقه)');
-  ok(good.repaired && !rep.findEvasion(good.llm).length, 'خروجیِ تعمیرشده دیگر طفره ندارد');
+  ok(good.repaired && !rep.findDefects(good.llm).length, 'خروجیِ تعمیرشده دیگر طفره ندارد');
 
   // ۵) مسیرِ شکست: تعمیرِ خراب هرگز خوانش را نمی‌شکند
   const badCall = (sys, usr, opts) => {
     const out = JSON.stringify({ fixes: ['خب بستگی داره دیگه.'] });   // باز هم طفره
     return opts.validate(out) ? { out, usages: [] } : null;
   };
-  const bad = await rep.repairEvasion(base(), badCall);
+  const bad = await rep.repairDefects(base(), badCall);
   ok(!bad.repaired && bad.llm.closing === base().closing,
     'تعمیرِ ناموفق = متنِ اصلی برمی‌گردد (نه خوانشِ شکسته)');
   ok(bad.fired === true, 'تعمیرِ ناموفق «شلیک‌شده» شمرده می‌شود، نه «شلیک‌نشده»');
-  ok(rep.findEvasion({ cards: [{ teaser: 'کارتِ برج، بستگی داره.' }] }).length === 1,
+  ok(rep.findDefects({ cards: [{ teaser: 'کارتِ برج، بستگی داره.' }] }).length === 1,
     'تیزر هم دیده می‌شود (گارد و سنجه یک متن را می‌بینند)');
+
+  // نوعِ دومِ ضعف: اشاره‌ی زمانیِ ساختگی به گذشته. مدل تاریخِ جلسه‌های قبل را ندارد،
+  // پس هر «دفعه‌ی قبل که» ساخته‌ی خودش است.
+  const pt = { ...base(), closing: 'در کل، دفعه‌ی قبل که حرف زدیم فرق داشت.' };
+  const ptHits = rep.findDefects(pt);
+  ok(ptHits.length === 1 && ptHits[0].kind === 'pastTime', 'زمانِ ساختگیِ گذشته هم تشخیص داده می‌شود');
+
+  // و مهم‌تر: دو نوعِ متفاوت در **یک** فراخوانی، نه دو تا (وگرنه فالِ بدشانس دو بار معطل می‌شود)
+  const both = { ...base(), closing: 'در کل، دفعه‌ی قبل که حرف زدیم فرق داشت.', reads: [{ text: 'بستگی داره.' }] };
+  const bothHits = rep.findDefects(both);
+  ok(bothHits.length === 2 && new Set(bothHits.map(h => h.kind)).size === 2,
+    'دو نوعِ ضعف با هم پیدا می‌شوند');
+  let n = 0;
+  const twoCall = (sys, usr, opts) => {
+    n++;
+    const out = JSON.stringify({ fixes: ['در کل، همون موضوع هنوز بازه.', 'بیشتر به این می‌خوره که پیش بره.'] });
+    return opts.validate(out) ? { out, usages: [{ prompt_tokens: 90, completion_tokens: 40 }] } : null;
+  };
+  const fixedBoth = await rep.repairDefects(both, twoCall);
+  ok(n === 1, 'هر دو ضعف در یک فراخوانی تعمیر می‌شوند');
+  ok(fixedBoth.repaired && rep.findDefects(fixedBoth.llm).length === 0, 'هیچ ضعفی باقی نمی‌ماند');
+  ok(rep.repairUser(bothHits).includes('[ایراد:'), 'هر تکه با ایرادِ خودش به مدل می‌رود');
   const throwCall = () => { throw new Error('boom'); };
-  const boom = await rep.repairEvasion(base(), throwCall);
+  const boom = await rep.repairDefects(base(), throwCall);
   ok(!boom.repaired && boom.llm.closing === base().closing, 'خطای شبکه هم خوانش را نمی‌شکند');
 }
 

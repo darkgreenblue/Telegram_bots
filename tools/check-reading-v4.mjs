@@ -99,14 +99,20 @@ console.log('\n▶ چیزهایی که عمداً **رد** شدند (تناقض�
   // ورودیِ یک پرامپتِ کوچکِ تخصصی می‌شود. سه دلیل: بازتولیدِ کامل گران است، کند است،
   // و تضمینی ندارد (همان پرامپت، همان احتمالِ خطا).
   ok(!/EVASION_EXTRA_TRIES/.test(SRC), 'بازتولیدِ کامل برای طفره‌رفتن برداشته شده');
-  ok(/repairEvasion\(parsed, orChatResilient/.test(SRC), 'تعمیرِ نقطه‌ای بعد از پذیرش اجرا می‌شود');
-  ok(/export async function repairEvasion/.test(RP), 'ماژولِ تعمیر وجود دارد');
+  ok(/repairDefects\(parsed, orChatResilient/.test(SRC), 'تعمیرِ نقطه‌ای بعد از پذیرش اجرا می‌شود');
+  ok(/export async function repairDefects/.test(RP), 'ماژولِ تعمیر وجود دارد');
+  ok(/export const DEFECTS/.test(RP) && rp.DEFECTS.length >= 2,
+    'تعمیر چندنوعی است (افزودنِ نوعِ بعدی = یک ردیف، نه مسیرِ جدید)');
+  ok(/export function pastTimeIn/.test(VD), 'تشخیصِ زمانِ گذشته هم تک‌منبع در verdict.js است');
   ok(/\}, \[undefined\]\);/.test(RP), 'تعمیر دقیقاً یک فراخوانی دارد (planِ تک‌عضوی)');
-  ok(!/for \(|while \(/.test(RP), 'هیچ حلقه‌ای در مسیرِ تعمیر نیست');
+  // ادعا «هیچ for ی نباشد» نبود — پیمایشِ انواعِ ضعف طبیعتاً حلقه دارد. ادعای واقعی
+  // این است که **حلقه‌ی تلاشِ دوباره** نباشد: تعمیر دقیقاً یک بار مدل را صدا می‌زند.
+  ok([...RP.matchAll(/await call\(/g)].length === 1, 'مدل دقیقاً یک بار در مسیرِ تعمیر صدا زده می‌شود');
+  ok(!/while \(/.test(RP), 'هیچ حلقه‌ی تلاشِ دوباره‌ای نیست');
   {
     // تشخیص باید **هاردکد** بماند: هیچ فالی نباید برای «فهمیدنِ اینکه مشکل دارد»
     // به مدل پول بدهد. اگر روزی این ادعا شکست، یعنی کسی یک ریکوئستِ چک اضافه کرده.
-    const hits = rp.findEvasion({ closing: 'در کل بستگی داره.', reads: [], cards: [] });
+    const hits = rp.findDefects({ closing: 'در کل بستگی داره.', reads: [], cards: [] });
     ok(hits.length === 1 && hits[0].path === 'closing', 'تشخیص هاردکد است، نه فراخوانیِ LLM');
     const clean = rp.applyFixes({ closing: 'x', reads: [{ text: 'y' }] }, [{ path: 'closing' }], ['z']);
     ok(clean.closing === 'z' && clean.reads[0].text === 'y', 'تعمیر فقط فیلدِ معیوب را عوض می‌کند');
