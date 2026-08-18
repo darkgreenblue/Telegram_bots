@@ -9,8 +9,8 @@
 // قاعده: همه‌ی این‌ها **قطعی** اند — یا رد می‌شوند یا نمی‌شوند. قضاوتِ سلیقه‌ای جای
 // دیگری است (هرچه بتوان مکانیکی سنجید نباید به چشمِ آدم سپرده شود).
 import { CARD_BY_KEY } from '../../bots/tarot/cards.js';
-import { headlineOk } from '../../bots/tarot/verdict.js';
-import { readText } from '../../bots/tarot/reading-core.js';
+import { headlineOk, evasionIn } from '../../bots/tarot/verdict.js';
+import { readText, v4Text } from '../../bots/tarot/reading-core.js';
 
 // خطابِ رسمی. نمونه‌های واقعیِ انسانی ۱۰۰٪ «تو» اند و پرامپت هم قفلش کرده.
 //
@@ -35,8 +35,12 @@ function sentenceAround(text, idx) {
   return text.slice(start, end + 1);
 }
 // عبارت‌هایی که پرامپت صریحاً ممنوعشان کرده (جمله‌ی بی‌جهت)
-const BANNED = ['بستگی به خودت داره', 'بستگی داره', 'به شهودت اعتماد کن', 'کائنات',
-  'شاید آره شاید نه', 'هم این باشه هم اون', 'فقط خودت می‌دونی'];
+// ⚠️ این لیست قبلاً **یک** چیز بود و دو چیزِ متفاوت را قاطی می‌کرد. تفکیکشان از
+// سؤالِ مالک درآمد: «واقعاً ممنوع‌اند یا فقط ایده‌آل نیستند؟»
+//   طفره‌رفتن  → قولِ اصلیِ محصول را می‌شکند («جوابی که می‌خواستم رو نگرفتم»). ایراد.
+//   لحنی       → فقط واژه‌ی عمومیِ نامطلوب است. نکته، نه ایراد؛ ارزشِ بازتولید ندارد.
+// منبعِ حقیقتِ دسته‌ی اول خودِ `verdict.js` است تا سنجه و گاردِ ربات یکی بمانند.
+const REGISTER = ['کائنات', 'انرژی کائنات'];
 // اشاره‌ی زمانی به **گذشته** ممنوعِ مطلق است. تاریخچه‌ی این تصمیم مهم است: اول داده‌ی
 // دقیقِ زمان به مدل دادیم، بعد قاعده‌ی پرامپت، بعد قاعده‌ی سراسری — و هر بار مدل یک
 // راهِ تازه برای ساختنِ زمان پیدا کرد. حالا خودِ داده حذف شده و قاعده یک‌خطی است، پس
@@ -49,12 +53,9 @@ const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u;
 export const words = (s) => String(s || '').replace(/[‌]/g, ' ').split(/\s+/).filter(Boolean);
 export const ngrams = (s, n) => { const w = words(s), out = []; for (let i = 0; i + n <= w.length; i++) out.push(w.slice(i, i + n).join(' ')); return out; };
 
-// متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم)
-export function modelText(llm) {
-  return [llm.headline, llm.pattern, llm.callback, llm.closing,
-    ...(llm.reads || []).map(readText), ...(llm.cards || []).map(c => c?.teaser)]
-    .filter(Boolean).join('\n');
-}
+// متنِ خامِ مدل (بدونِ نشانه‌های بخش که خودِ ما اضافه می‌کنیم).
+// از هسته می‌آید تا سنجه و گاردِ ربات **عیناً** یک متن را ببینند.
+export const modelText = v4Text;
 
 // ═══ سنجه‌ی «جمله‌ی بی‌لنگر» — ابزارِ اندازه‌گیریِ Barnum ═══
 //
@@ -145,7 +146,9 @@ export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
   }
 
   // ۶) عبارت‌های ممنوع و ایموجیِ مدل
-  for (const b of BANNED) if (raw.includes(b)) issues.push(`عبارتِ ممنوع: «${b}»`);
+  const ev = evasionIn(raw);
+  if (ev) issues.push(`طفره‌رفتن: «${ev}»`);
+  for (const r of REGISTER) if (raw.includes(r)) notes.push(`واژه‌ی لحنیِ نامطلوب: «${r}»`);
   const em = raw.match(EMOJI);
   if (em) notes.push(`مدل ایموجی گذاشت: ${em[0]}`);
 
