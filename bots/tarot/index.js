@@ -18,7 +18,10 @@ import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
-import SPREADS, { DAILY, SPREAD_BY_ID, SPREADS_V3, spreadsFor, faOf } from './spreads.js';
+import SPREADS, {
+  DAILY, SPREAD_BY_ID, SPREADS_V3, spreadsFor, faOf,
+  TOPICS_V3, TOPIC_BY_KEY, SIZES_V3, spreadIdOf, topicOf,
+} from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
@@ -166,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.8.0';
+const PRODUCT_VERSION = '3.9.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -390,6 +393,24 @@ const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_V
 // جایزه‌ی کارتِ روز: ۱ سکه، روزی یک بار. اهرمِ عادتِ روزانه (بند ۱۰ ریشه: قلابِ بازگشت
 // باید در خودِ محصول باشد نه فقط در پوش).
 const DAILY_COIN_REWARD = 1 * COIN_VALUE;
+
+// ───────────────────────────────────────────────────────────────────────────
+// 🍀 کارت شانس — سکه‌ی رایگانِ روزانه با امیدِ ریاضیِ **دقیقاً ۱ سکه**
+// ───────────────────────────────────────────────────────────────────────────
+// چرا این شکل و نه «هر روز یک سکه‌ی رایگان»: تصمیمِ صریحِ مالک. هزینه‌ی روزانه برای ما
+// یکسان می‌ماند ولی تجربه از «دریافتِ خودکار» به یک **آیین** تبدیل می‌شود، و آیین همان
+// چیزی است که کاربر را برمی‌گرداند (بند ۱۰ ریشه، قلاب بازگشت).
+//
+// ریاضیِ انتخاب بدونِ جایگذاری (هندسی/هایپرژئومتریک):
+//   امیدِ ریاضی = LUCKY_PICKS × LUCKY_COINS / GRID_SIZE
+//   با گریدِ ۲۴تایی و ۳ انتخاب:  E = 3 × K / 24 = K / 8
+//   پس برای E = ۱ سکه باید **K = ۸** کارت سکه داشته باشند (هر کدام ۱ سکه).
+// توزیعِ نتیجه با همین اعداد: صفر سکه ۲۷.۷٪ · یک ۴۷.۴٪ · دو ۲۲.۱٪ · سه ۲.۸٪.
+// یعنی حداکثرِ روزانه ۳ سکه است (خواسته‌ی مالک) و میانگین دقیقاً ۱ سکه.
+// تستِ CI همین تساوی را اجرا می‌کند، پس دست‌کاریِ هر عدد بدونِ دیدنِ اثرش ممکن نیست.
+const LUCKY_PICKS = 3;                    // چند کارت انتخاب می‌کند
+const LUCKY_COINS = 8;                    // پشتِ چند کارت از GRID_SIZE سکه هست
+const LUCKY_COIN_VALUE = 1 * COIN_VALUE;  // ارزشِ هر کارتِ سکه‌دار
 // تخفیفِ اولین پرداخت (v2.0.0): ۲۰٪، **فقط روی فالِ رزروشده‌ی همان لحظه** و بدون سقف.
 // دیگر کدی کپی نمی‌شود: دکمه‌ی «تخفیف می‌خوام» یک پیامِ کوتاهِ اطلاع‌رسانی می‌دهد و بلافاصله
 // خودِ فاکتورِ تخفیف‌خورده را می‌فرستد. شارژِ کیف‌پول عمداً تخفیف نمی‌گیرد (فرایندِ جداست).
@@ -532,6 +553,12 @@ try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } ca
 try { db.prepare('ALTER TABLE users ADD COLUMN welcome_bonus_at INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_reminder_off INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN last_daily_reminder_at INTEGER').run(); } catch {}
+// migration (v3.9.0 — کارت شانس): روزِ آخرین استفاده + انتخابِ یادآوریِ شبانه.
+// یادآوری این‌جا **opt-in** است (برخلافِ کارت روز که opt-out بود): کاربر خودش دکمه‌ی
+// «فردا یادآوری کن» را می‌زند، پس هیچ پیامِ ناخواسته‌ای فرستاده نمی‌شود.
+try { db.prepare("ALTER TABLE users ADD COLUMN lucky_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN lucky_reminder_on INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN last_lucky_reminder_at INTEGER').run(); } catch {}
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
@@ -663,6 +690,17 @@ const stmts = {
      LIMIT 200`),
   setDailyReminded: db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
+  // 🍀 کارت شانس. `claimLucky` گاردِ اتمیکِ «روزی یک بار» است: شرطِ روز داخلِ خودِ UPDATE
+  // نشسته، پس دو تپِ هم‌زمان فقط یک بار changes=1 می‌دهد (همان الگوی claimWelcomeBonus).
+  claimLucky: db.prepare("UPDATE users SET lucky_date=? WHERE telegram_id=? AND COALESCE(lucky_date,'') <> ?"),
+  setLuckyReminder: db.prepare('UPDATE users SET lucky_reminder_on=? WHERE telegram_id=?'),
+  setLuckyReminded: db.prepare('UPDATE users SET last_lucky_reminder_at=unixepoch() WHERE telegram_id=?'),
+  dueLuckyReminder: db.prepare(`
+    SELECT telegram_id FROM users
+     WHERE welcomed=1 AND lucky_reminder_on=1
+       AND COALESCE(lucky_date,'') <> ?
+       AND (last_lucky_reminder_at IS NULL OR last_lucky_reminder_at < unixepoch()-64800)
+     LIMIT 200`),
   // اصلاحِ فاکتور به مبلغِ واقعاً پرداخت‌شده (پرداختِ کمتر). original_amount هم برابر می‌شود
   // تا اعتبارِ approvePayment دقیقاً همان چیزی باشد که کاربر داده، نه بیشتر.
   adjustPaymentAmount: db.prepare(
@@ -901,7 +939,9 @@ function wipeUser(uid) {
   // صف اکشن رسیدها به payment_id وصل است نه user_id → قبل از حذف payments با subquery پاک شود
   try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('wipe admin_actions', e.message); }
   try { db.prepare('DELETE FROM referrals WHERE referee_id=? OR referrer_id=?').run(uid, uid); } catch (e) { logErr('wipe referrals', e.message); }
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id']]) {
+  // `daily_log` هم باید پاک شود، وگرنه ادمینی که ریست کرده هفت روز نمی‌تواند
+  // کارت‌هایی را که قبلاً دیده دوباره بگیرد و تستِ کارتِ روز عملاً قفل می‌شود.
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -947,10 +987,19 @@ async function typing(ctx, ms, action = 'typing') {
 // uid اختیاری: فقط ادمین‌ها (دو آی‌دیِ ADMIN_IDS) دکمه‌ی «ریست حساب (ادمین)» را می‌بینند — همیشه،
 // حتی خارج از فاز تست. این تنها تمایزِ رو-به-کاربرِ ادمین است (ابزار مدیریتی؛ فلوی محصول یکسان می‌ماند).
 function mainKeyboard(uid) {
-  const rows = [
-    [L.buttons.daily, L.buttons.reading],
-    [uxV2For(uid) ? L.buttons.coinShop : L.buttons.wallet, L.buttons.inviteMain],
-  ];
+  // UX v2.1: کارتِ روزِ رایگان نامِ صریح‌تری گرفت («فال تک کارت امروز») و **تنها** نقطه‌ی
+  // دسترسی‌اش همین کیبورد است — از منوی فال‌ها برداشته شد تا آن‌جا فقط فالِ واقعی باشد.
+  // «کارت شانس» ردیفِ خودش را دارد چون مسیرِ متفاوتی است: سکه می‌گیرد، فال نمی‌دهد.
+  const rows = uxV2For(uid)
+    ? [
+      [L.buttons.dailyOneCard, L.buttons.reading],
+      [L.buttons.luckyMain],
+      [L.buttons.coinShop, L.buttons.inviteMain],
+    ]
+    : [
+      [L.buttons.daily, L.buttons.reading],
+      [L.buttons.wallet, L.buttons.inviteMain],
+    ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
   rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
   if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
@@ -1279,6 +1328,7 @@ bot.catch(async (err, ctx) => {
 const KB_LABELS = new Set([
   L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.coinShop, L.buttons.inviteMain,
   L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
+  L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
 ].filter(Boolean));
 registerJourney(bot, {
   db,
@@ -1526,9 +1576,16 @@ async function finishOnboarding(ctx, uid, props) {
   await typing(ctx, PACE_M);
   setState(uid, 'idle');
   track(db, uid, EVENTS.ONBOARD_DONE, props);
+  // UX v2.1: بلافاصله بعد از ماهِ تولد، «از کجا شروع کنیم؟» با **همان** منوی فال.
+  // عمداً بدونِ فالِ رایگان (تصمیمِ مالک): فالِ رایگان فقط از کیبوردِ اصلی گرفته می‌شود،
+  // وگرنه اولین انتخابِ کاربرِ تازه همیشه رایگان می‌شود و هیچ‌وقت فالِ واقعی را نمی‌بیند.
+  if (uxV2For(uid)) {
+    setState(uid, 'choose_spread');
+    return ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
+  }
   const ctaRows = [
     [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
-    [Markup.button.callback(L.buttons.startPopular(), uxV2For(uid) ? 'spread:three' : 'spread:love')],
+    [Markup.button.callback(L.buttons.startPopular(), 'spread:love')],
   ];
   if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
   ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
@@ -1683,7 +1740,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
     await ctx.reply(L.daily.streak(streak));
   }
   await sleep(PACE_M);
-  await ctx.reply(L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
   await ensureMenu(ctx, uid);
 });
 
@@ -1742,11 +1799,145 @@ async function dailyCard(ctx) {
     }
   }
   await sleep(PACE_M);
-  await ctx.reply(L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
   await ensureMenu(ctx, uid);
 }
 bot.hears(L.buttons.daily, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
+
+/* ═══════════ 🍀 کارت شانس — سکه‌ی رایگانِ روزانه (بدونِ هیچ LLM) ═══════════
+   UX عمداً **همان** آیینِ کشیدنِ کارت است (بُر → توقفِ خودِ کاربر → گریدِ ۲۴تایی → انتخاب)
+   چون کاربر این آیین را از فال بلد است و چیزِ تازه‌ای برای یادگرفتن ندارد.
+   سه تصمیمِ طراحی که عمدی‌اند:
+     ۱) **سکه لحظه‌ی برگشتنِ هر کارت واریز می‌شود، نه آخرِ کار.** هر deploy یعنی restart
+        (بند ۲ج/۲)؛ اگر جایزه را آخر می‌دادیم، ری‌استارتِ وسطِ بازی پولِ کاربر را می‌خورد.
+     ۲) **روز با اولین انتخاب سوخته می‌شود، نه با دیدنِ گرید.** کسی که فقط نگاه کرد و
+        بست، روزش را از دست نمی‌دهد.
+     ۳) چیدمانِ سکه‌ها از seedِ قطعیِ (کاربر × روز) می‌آید، پس بستن و بازکردنِ چت
+        نتیجه را عوض نمی‌کند و «تا سکه بیاد دوباره امتحان می‌کنم» ممکن نیست. */
+
+/** موقعیتِ کارت‌های سکه‌دار برای این کاربر در این روز — قطعی و تکرارپذیر. */
+function luckyCoinSlots(uid, today) {
+  const seed = `lucky:${uid}:${today}`;
+  return Array.from({ length: GRID_SIZE }, (_, i) => i)
+    .sort((a, b) => seedToInt(seed + ':' + a) - seedToInt(seed + ':' + b))
+    .slice(0, LUCKY_COINS);
+}
+
+function luckyGridKb(picked = [], coins = []) {
+  const rows = [];
+  for (let r = 0; r < GRID_SIZE / 4; r++) {
+    rows.push(Array.from({ length: 4 }, (_, c) => {
+      const i = r * 4 + c;
+      const face = !picked.includes(i) ? '🂠' : (coins.includes(i) ? '🪙' : '🍂');
+      return Markup.button.callback(face, `lpick:${i}`);
+    }));
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+const luckyReminderRow = (on) => [Markup.button.callback(
+  on ? L.buttons.luckyRemindOff : L.buttons.luckyRemindOn, on ? 'lremind:0' : 'lremind:1')];
+
+async function luckyCard(ctx) {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  if (!uxV2For(uid)) return;
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  const user = getUser(uid);
+  const today = tehranToday();
+  if (user.lucky_date === today) {
+    return ctx.reply(L.lucky.already, Markup.inlineKeyboard([luckyReminderRow(!!user.lucky_reminder_on)]));
+  }
+  setState(uid, 'lucky_shuffle');
+  await ctx.reply(L.lucky.intro(LUCKY_PICKS, LUCKY_COINS, GRID_SIZE));
+  await typing(ctx, PACE_S, 'upload_photo');
+  await sendCardPhoto(ctx, 'back', L.lucky.shuffleCaption, { spoiler: false });
+  const m = await ctx.reply(L.reading.shuffleFrames[0], Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.stopShuffle, 'lucky_stop')],
+  ]));
+  patchSession(uid, { luckyMsgId: m.message_id });
+  (async () => {
+    for (let i = 1; i < 90; i++) {
+      await sleep(1300);
+      if (getState(uid) !== 'lucky_shuffle' || getSession(uid).luckyMsgId !== m.message_id) return;
+      const frame = L.reading.shuffleFrames[i % L.reading.shuffleFrames.length];
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, undefined, frame, {
+          reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'lucky_stop')]]).reply_markup,
+        });
+      } catch {}
+    }
+  })().catch(e => logErr('lucky anim:', e.message));
+}
+bot.hears(L.buttons.luckyMain, luckyCard);
+bot.action('lucky_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return luckyCard(ctx); });
+
+bot.action('lucky_stop', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery('✋').catch(() => {});
+  if (getState(uid) !== 'lucky_shuffle') return;
+  const today = tehranToday();
+  setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
+  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today });
+  const msgId = getSession(uid).luckyMsgId;
+  if (msgId) { try { await ctx.telegram.editMessageText(ctx.chat.id, msgId, undefined, '🂠 ✋'); } catch {} }
+  await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS), luckyGridKb());
+});
+
+bot.action(/^lpick:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  const i = parseInt(ctx.match[1], 10);
+  if (getState(uid) !== 'lucky_pick') return ctx.answerCbQuery().catch(() => {});
+  const s = getSession(uid) || {};
+  const today = tehranToday();
+  const picks = s.luckyPicks || [];
+  // گاردهای سینکرون **قبل از** اولین await: تکراری، سهمیه‌ی تمام‌شده، یا سشنِ روزِ قبل
+  if (picks.includes(i) || picks.length >= LUCKY_PICKS || s.luckyDay !== today) {
+    return ctx.answerCbQuery().catch(() => {});
+  }
+  // روز فقط با **اولین** انتخاب سوخته می‌شود، و آن هم اتمیک (شرطِ روز داخلِ UPDATE).
+  if (!picks.length && stmts.claimLucky.run(today, uid, today).changes === 0) {
+    setState(uid, 'idle');
+    return ctx.answerCbQuery().catch(() => {});
+  }
+  const coinSlots = luckyCoinSlots(uid, today);
+  const hit = coinSlots.includes(i);
+  picks.push(i);
+  const found = (s.luckyCoinsFound || 0) + (hit ? 1 : 0);
+  const done = picks.length >= LUCKY_PICKS;
+  if (done) setState(uid, 'idle');
+  setSession(uid, { ...s, luckyPicks: picks, luckyCoinsFound: found });
+
+  // واریزِ همان لحظه (نه آخرِ بازی): ری‌استارتِ وسطِ کار نباید سکه‌ی برده‌شده را بخورد.
+  if (hit) {
+    stmts.credit.run(LUCKY_COIN_VALUE, uid);
+    track(db, uid, 'credit_granted', { amount: LUCKY_COIN_VALUE, kind: 'lucky' });
+  }
+  await ctx.answerCbQuery(hit ? L.lucky.hitToast : L.lucky.missToast).catch(() => {});
+  try { await ctx.editMessageReplyMarkup(luckyGridKb(picks, coinSlots).reply_markup); } catch {}
+  if (!done) return ctx.reply(L.lucky.progress(picks.length, LUCKY_PICKS, found)).catch(() => {});
+
+  track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS });
+  await sleep(PACE_S);
+  const reminderOn = !!getUser(uid)?.lucky_reminder_on;
+  await ctx.reply(found ? L.lucky.won(found) : L.lucky.lost,
+    Markup.inlineKeyboard([luckyReminderRow(reminderOn)]));
+  await ensureMenu(ctx, uid);
+});
+
+bot.action(/^lremind:([01])$/, async (ctx) => {
+  const uid = ctx.from.id;
+  const on = ctx.match[1] === '1';
+  await ctx.answerCbQuery().catch(() => {});
+  stmts.setLuckyReminder.run(on ? 1 : 0, uid);
+  track(db, uid, 'lucky_reminder', { on: on ? 1 : 0 });
+  try { await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([luckyReminderRow(on)]).reply_markup); } catch {}
+  await ctx.reply(on ? L.lucky.remindOn : L.lucky.remindOff);
+});
 
 /* ---------- 🎁 منوی سرگرمی‌های رایگان + 📜 فال حافظ (رایگان، روزی یک‌بار، بدون LLM) ----------
    کل این بخش پشت FREE_MENU_ENABLED است؛ خاموش = دکمه/منو/callbackها بی‌اثر (رفتار عیناً قبلی). */
@@ -2017,17 +2208,51 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 // کیبورد کاتالوگ: [موضوع آزاد؟] + دکمه‌های فال + دکمه‌ی «راهنمای انتخاب» ته لیست.
 // کاتالوگ per کاربر: نسلِ دومِ کاتالوگ (عشق‌محورِ تقابلی) فقط به کسی نشان داده می‌شود که
 // اقتصادِ سکه برایش روشن است، چون قیمت‌های کنارِ گزینه‌ها هم به سکه‌اند و این دو یک بسته‌اند.
+// ═══ منوی فال (UX v2.1) ═══
+// ساختارِ ثابتِ چهارتایی (تصمیمِ صریحِ مالک):
+//   ۱) «سؤال شخصی خودم» — **همیشه** اول و همیشه همین یکی. نقطه‌ی ورودِ بدونِ محدودیت.
+//   ۲و۳) دو جایگاهِ چرخشی که با A/B تعیین می‌شوند.
+//   ۴) «مشاهده همه فال‌ها» — لیستِ کامل.
+// چرا جایگاه ۲و۳ آزمایشی‌اند: کدام موضوع بیشترین کلیک را می‌گیرد یک **فرضیه** است نه
+// دانسته، و بند ۲ج/۴ ریشه می‌گوید فرضیه از مسیرِ A/B برود نه سوییچِ سخت. تا وقتی
+// آزمایش از داشبورد running نشود، `variant()` همیشه control می‌دهد = همین جفتِ پیش‌فرض.
+const MENU_PIN = 'personal';                 // جایگاهِ اولِ ثابت
+const MENU_SLOTS_DEFAULT = ['yesno', 'love'];
+// نسخه‌های آزمایشِ `menu_slots`. control عمداً اولین ردیف است تا خاموش‌بودنِ آزمایش
+// دقیقاً یعنی «همان چیزی که مالک برای شروع خواست».
+const MENU_SLOT_VARIANTS = {
+  control: MENU_SLOTS_DEFAULT,
+  love_first: ['love', 'yesno'],
+  crush_money: ['crush', 'money'],
+  feel_career: ['feel', 'career'],
+};
+const menuSlotsFor = (uid) => {
+  try { return MENU_SLOT_VARIANTS[variant(db, uid, 'menu_slots')] || MENU_SLOTS_DEFAULT; }
+  catch { return MENU_SLOTS_DEFAULT; }
+};
+
+const topicRow = (key) => {
+  const t = TOPIC_BY_KEY[key];
+  return t ? [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`)] : null;
+};
+
+/** منوی کوتاهِ فال: پین + دو جایگاهِ آزمایشی + «همه‌ی فال‌ها». */
+function falMenuKb(uid) {
+  const keys = [MENU_PIN, ...menuSlotsFor(uid).filter(k => k !== MENU_PIN)].slice(0, 3);
+  return [
+    ...keys.map(topicRow).filter(Boolean),
+    [Markup.button.callback(L.buttons.allSpreadsV2, 'catalog_go')],
+  ];
+}
+
+/** لیستِ کاملِ موضوع‌ها، به همان ترتیبِ TOPICS_V3 (سؤالِ شخصی، بله/خیر، عاطفی، شغل و پول). */
+const allTopicsKb = () => [
+  ...TOPICS_V3.map(t => [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`)]),
+  ...navMenuRow(),
+];
+
 function catalogKb(uid) {
-  // UX v2: کاتالوگ فقط سه گزینه دارد و همه‌شان `open` اند (سؤال را خودِ کاربر می‌نویسد).
-  // «موضوع دلخواه» جداگانه لازم نیست چون هر سه دقیقاً همان‌اند، و کارتِ روزِ رایگان
-  // به‌عنوان نقطه‌ی ورودِ بی‌هزینه می‌ماند.
-  if (uxV2For(uid)) {
-    const kb = [[Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')]];
-    kb.push(...SPREADS_V3.map(sp => [Markup.button.callback(
-      L.buttons.spreadV3(sp), `spread:${sp.id}`)]));
-    kb.push(...navMenuRow());
-    return kb;
-  }
+  if (uxV2For(uid)) return allTopicsKb();
   const v2 = coinsOn(uid);
   const cur = curOf(uid);
   // بَج‌های کوتاه روی دکمه‌ها: عشق و رابطه = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
@@ -2042,7 +2267,9 @@ function catalogKb(uid) {
   kb.push(...navMenuRow());
   return kb;
 }
-async function showCatalog(ctx) {
+// `full=true` یعنی لیستِ کاملِ موضوع‌ها (دکمه‌ی «مشاهده همه فال‌ها»)؛ پیش‌فرض منوی کوتاه.
+// در دنیای قبل از UX v2 هر دو یک چیزند (همان کاتالوگِ قدیمی)، پس رفتار عوض نمی‌شود.
+async function showCatalog(ctx, full = false) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
@@ -2052,10 +2279,14 @@ async function showCatalog(ctx) {
   if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
+  if (uxV2For(uid)) {
+    return ctx.reply(full ? L.reading.allTopics : L.reading.catalogV3,
+      Markup.inlineKeyboard(full ? allTopicsKb() : falMenuKb(uid)));
+  }
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
   await ctx.reply(L.reading.catalog, Markup.inlineKeyboard(catalogKb(uid)));
 }
-bot.hears(L.buttons.reading, showCatalog);
+bot.hears(L.buttons.reading, (ctx) => showCatalog(ctx));
 
 // راهنمای انتخاب: همین پیام ادیت می‌شود به توضیحِ فال‌ها + دکمه‌ی بازگشت (بدون پیام جدید).
 bot.action('cat_guide', async (ctx) => {
@@ -2122,11 +2353,26 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (await blockDuringOpenReading(ctx)) return;
   if (await blockDuringPendingReading(ctx)) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  track(db, uid, 'spread_selected', { spread: spread.id });
+  // propهای `topic` و `size` افزایشی‌اند (بند ۲ج/۳): `spread` دست‌نخورده می‌ماند تا
+  // تحلیلِ تاریخی نشکند، ولی حالا می‌شود «کدام موضوع» را جدا از «چه عمقی» سنجید —
+  // و همین ورودیِ آزمایشِ چرخشیِ جایگاه‌های منوست.
+  track(db, uid, 'spread_selected', { spread: spread.id, topic: topicOf(spread.id) || '', size: spread.size });
 
-  // فالِ `open` (کلِ کاتالوگِ UX v2): سؤال را خودش می‌نویسد، پس هیچ مرحله‌ی موضوعی نیست.
-  // این شاخه قبلاً فقط از دکمه‌ی `odepth:` می‌آمد؛ حالا که کاتالوگ خودش open است، باید
-  // این‌جا هم باشد وگرنه کاربر به مرحله‌ی حذف‌شده‌ی «حول چی؟» می‌افتد.
+  // نسل چهارم (UX v2.1): موضوع را کاربر **قبلاً** انتخاب کرده، پس مرحله‌ی «حول چه
+  // موضوعی؟» در هیچ حالتی اجرا نمی‌شود. این شرط عمداً روی `spread.topic` است نه روی
+  // `spread.focus`: «بله و خیر» و «دوراهی» حوزه‌ی تمرکز ندارند و بدونِ این شرط دقیقاً
+  // به همان مرحله‌ی حذف‌شده می‌افتادند (یک باگِ خاموش که فقط در آن دو موضوع دیده می‌شد).
+  if (spread.topic) {
+    patchSession(uid, {
+      spreadId: spread.id, picks: [],
+      focusKey: spread.focus || getUser(uid)?.focus_area || 'question',
+    });
+    setState(uid, 'await_question');
+    return ctx.reply(spread.open ? L.reading.askTopic(toneV2For(uid)) : L.reading.askQuestion(toneV2For(uid)),
+      { parse_mode: 'Markdown' });
+  }
+
+  // فالِ `open` (کاتالوگِ نسل سومِ UX v2): سؤال را خودش می‌نویسد، پس هیچ مرحله‌ی موضوعی نیست.
   if (spread.open) {
     patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
     setState(uid, 'await_question');
@@ -2158,10 +2404,34 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   ));
 });
 
-// دکمه‌ی «مشاهده‌ی همه‌ی فال‌ها» زیر پیشنهادهای پایان فال
+// دکمه‌ی «مشاهده همه فال‌ها» — همه‌جا (منوی فال، پایانِ فال، بعدِ کارتِ روز) همین یکی است
 bot.action('catalog_go', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  return showCatalog(ctx);
+  return showCatalog(ctx, true);
+});
+
+/* ═══ انتخابِ موضوع → انتخابِ اندازه (UX v2.1) ═══
+   دو انتخابِ جدا، چون قیمت فقط تابعِ **اندازه** است نه موضوع: هر موضوعی می‌تواند
+   ۳ یا ۵ یا ۱۰ کارتی تفسیر شود و کاربر همان‌جا می‌بیند چقدر می‌دهد (هر کارت = ۱ سکه).
+   خودِ دکمه‌ی اندازه یک `spread:<topic><size>` می‌زند، پس همه‌ی گاردها و مسیرِ موجود
+   دست‌نخورده می‌ماند و هیچ شاخه‌ی جدیدی در فلوی فال ساخته نمی‌شود. */
+bot.action(/^topic:(\w+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  const t = TOPIC_BY_KEY[ctx.match[1]];
+  if (!t) return;
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  setState(uid, 'choose_spread');
+  track(db, uid, 'topic_selected', { topic: t.key });
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.reading.pickSize(t.fa), Markup.inlineKeyboard([
+    ...SIZES_V3.map(size => [Markup.button.callback(
+      L.buttons.topicSize(size), `spread:${spreadIdOf(t.key, size)}`)]),
+    ...navMenuRow(),
+  ]));
 });
 
 // دکمه‌ی «همه فال‌ها» زیر پیام «یه قرار کوچیک» آنبوردینگ: معادلِ «فال بگیر» ولی به‌جای
@@ -2679,8 +2949,51 @@ function recommendSpreads(uid, currentType, slots = RECO_SLOTS) {
   }
 }
 
-// ردیف‌های آماده‌ی پیشنهاد: سه جایگاه + جایگاه چهارمِ «مشاهده‌ی همه‌ی فال‌ها»
+// پیشنهادِ **موضوع** (UX v2.1) — نه چیدمان. سابقه‌ی کاربر روی آی‌دیِ چیدمان ثبت شده
+// (`love5`)، پس اول به موضوع تبدیل می‌شود تا قاعده‌ی «چیزی که تازه گرفته دوباره پیشنهاد
+// نشود» روی موضوع کار کند، نه روی عمق: کسی که دیروز «عشق ۳ کارتی» گرفته، «عشق ۱۰ کارتی»
+// هم برایش تکراری است.
+function recommendTopics(uid, currentTopic, slots) {
+  try {
+    const focus = getUser(uid)?.focus_area || '';
+    const lastByTopic = new Map();
+    for (const r of stmts.lastByType.all(uid)) {
+      const key = topicOf(r.type);
+      if (!key) continue;
+      lastByTopic.set(key, Math.max(lastByTopic.get(key) || 0, r.last));
+    }
+    const popMap = new Map();
+    for (const [id, v] of popularity()) {
+      const key = topicOf(id);
+      if (key) popMap.set(key, Math.max(popMap.get(key) || 0, v));
+    }
+    return scoreSpreads(TOPICS_V3.map(t => ({ id: t.key, focus: t.focus })), {
+      currentType: currentTopic, focus,
+      focusIds: new Set(FOCUS_SUGGEST[focus] || []),
+      popMap, lastByType: lastByTopic,
+      nowS: Math.floor(Date.now() / 1000), slots,
+    }).map(x => TOPIC_BY_KEY[x.id]).filter(Boolean);
+  } catch (e) {
+    logErr('recommendTopics:', e.message);
+    return TOPICS_V3.filter(t => t.key !== currentTopic && t.key !== MENU_PIN).slice(0, slots);
+  }
+}
+
+// ردیف‌های آماده‌ی پیشنهاد.
+// UX v2.1 (تصمیمِ صریحِ مالک): «سؤال شخصی خودم» **همیشه** دکمه‌ی اول است، بعد دو
+// پیشنهادِ داینامیک (با جریمه‌ی تازگی)، و آخر «مشاهده همه فال‌ها».
 function recoRows(uid, currentType) {
+  if (uxV2For(uid)) {
+    const currentTopic = currentType ? topicOf(currentType) : null;
+    const picks = recommendTopics(uid, currentTopic, 3)
+      .filter(t => t.key !== MENU_PIN)   // پین جای خودش را دارد، دو بار نیاید
+      .slice(0, 2);
+    return [
+      topicRow(MENU_PIN),
+      ...picks.map(t => topicRow(t.key)),
+      [Markup.button.callback(L.buttons.allSpreadsV2, 'catalog_go')],
+    ].filter(Boolean);
+  }
   const v2 = coinsOn(uid);
   const cur = curOf(uid);
   return [
@@ -2819,7 +3132,11 @@ async function finishReading(ctx, uid, readingId) {
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  await ctx.reply(OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers, Markup.inlineKeyboard([
+  // CTA بعد از فالِ **پولی** (UX v2.1 — متنِ خودِ مالک). عمداً با متنِ بعد از کارتِ روز
+  // فرق دارد: این‌جا کاربر یک جوابِ کامل گرفته، آن‌جا فقط یک تکه.
+  const nextText = uxV2For(uid) ? L.reading.nextOffersV3
+    : OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers;
+  await ctx.reply(nextText, Markup.inlineKeyboard([
     ...recoRows(uid, r.type),
     [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
   ]));
@@ -3661,6 +3978,10 @@ setInterval(async () => {
     if (hour !== DAILY_REMINDER_HOUR) return;
     const today = tehranToday();
     for (const { telegram_id } of stmts.dueDailyReminder.all(today)) {
+      // UX v2.1 (تصمیمِ صریحِ مالک): یادآوریِ کارتِ روز متوقف شد و جایش را یادآوریِ
+      // **کارت شانس** گرفت — آن یکی opt-in است و جایزه‌ی ملموس دارد. دو یادآوریِ شبانه
+      // در یک ساعت هم یعنی دو پیامِ پشت‌سرهم، که خودش دلیلِ بلاک‌شدن است.
+      if (uxV2For(telegram_id)) continue;
       stmts.setDailyReminded.run(telegram_id);
       const ok = await bot.telegram.sendMessage(telegram_id, L.daily.reminder, {
         reply_markup: Markup.inlineKeyboard([
@@ -3672,6 +3993,30 @@ setInterval(async () => {
       await sleep(300);
     }
   } catch (e) { logErr('daily reminder sweep:', e.message); }
+}, 15 * 60 * 1000);
+
+/* 🍀 یادآوریِ کارت شانس — همان ساعت ۲۲، ولی **opt-in**: فقط کسی که خودش دکمه‌ی
+   «فردا یادآوری کن» را زده. همان گاردِ ۱۸ساعته ضدِ پیامِ تکراری بعد از ری‌استارت. */
+setInterval(async () => {
+  try {
+    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
+    }).format(new Date()), 10);
+    if (hour !== DAILY_REMINDER_HOUR) return;
+    const today = tehranToday();
+    for (const { telegram_id } of stmts.dueLuckyReminder.all(today)) {
+      if (!uxV2For(telegram_id)) continue;
+      stmts.setLuckyReminded.run(telegram_id);
+      const ok = await bot.telegram.sendMessage(telegram_id, L.lucky.reminder, {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback(L.buttons.luckyStart, 'lucky_go')],
+          [Markup.button.callback(L.buttons.luckyRemindOff, 'lremind:0')],
+        ]).reply_markup,
+      }).then(() => true).catch(() => false);
+      if (ok) track(db, telegram_id, 'lucky_reminder_sent', {});
+      await sleep(300);
+    }
+  } catch (e) { logErr('lucky reminder sweep:', e.message); }
 }, 15 * 60 * 1000);
 
 // انصراف از یادآوری — تأییدِ دومرحله‌ای تا با یک تپِ اشتباه قلاب بازگشت را از دست ندهیم

@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SPREAD_BY_ID } from '../bots/tarot/spreads.js';
+import { SPREAD_BY_ID, topicOf } from '../bots/tarot/spreads.js';
 import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 // ⚠️ سنجه‌ها که به checks.mjs منتقل شدند، این import با آن‌ها رفت — ولی خودِ آزمایشگاه
 // هنوز در شرطِ پذیرشِ ریکوئست و در probe از آن استفاده می‌کند. نتیجه: ReferenceError
@@ -73,7 +73,10 @@ function fakeOut(spread, cards, ctx) {
     // تعمیر را واقعاً اجرا کند (تشخیص، فراخوانی، اعتبارسنجی، جایگذاری). بدونِ این،
     // `--fake` سبز رد می‌شد در حالی که آن مسیر هرگز لمس نشده بود — همان اشتباهی که
     // یک بار با `--dry` تکرار شد و یک دورِ ۹ فالی را سوزاند.
-    closing: spread.id === 'yesno'
+    // شرط روی **موضوع** است نه آی‌دیِ کامل، وگرنه با هر تغییرِ نام‌گذاریِ چیدمان
+    // (مثل عبورِ `yesno` به `yesno3` در نسل چهارم) این تزریق بی‌صدا خاموش می‌شود و
+    // `--fake` دوباره سبزِ دروغین می‌دهد.
+    closing: topicOf(spread.id) === 'yesno' || spread.id === 'yesno'
       ? `در کل، «${q}» بستگی داره به خودت، ولی ${names[0]} می‌گه صبر کن.`
       : `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
     summary: 'خلاصه‌ی ساختگی', memory: 'حافظه‌ی ساختگی',
@@ -200,7 +203,7 @@ const SHAPE = (obj, n) => {
 
 async function probe(reps) {
   // چهار اندازه‌ی مختلف تا معلوم شود مسئله مالِ صلیب سلتی است یا سراسری
-  const targets = ['yesno', 'three', 'open5', 'celtic'];
+  const targets = ['yesno3', 'love3', 'personal5', 'personal10'];
   console.log(`\n${'═'.repeat(72)}`);
   console.log(`🔬 probe — هر چیدمان ${reps} بار، تلاشِ اول، بدونِ retry`);
   console.log('═'.repeat(72));
