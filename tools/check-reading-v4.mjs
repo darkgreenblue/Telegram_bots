@@ -14,7 +14,11 @@ const CORE = fs.readFileSync(new URL('../bots/tarot/reading-core.js', import.met
 // و چون هسته یک ماژولِ واقعیِ importable است، دیگر لازم نیست منطق را از متنِ سورس
 // بیرون بکشیم: خودِ تابعِ صادرشده اجرا می‌شود (دقیق‌تر از new Function روی slice).
 const core = await import('../bots/tarot/reading-core.js');
+const vd = await import('../bots/tarot/verdict.js');
+const rp = await import('../bots/tarot/repair.js');
 const LOC = fs.readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
+const VD = fs.readFileSync(new URL('../bots/tarot/verdict.js', import.meta.url), 'utf8');
+const RP = fs.readFileSync(new URL('../bots/tarot/repair.js', import.meta.url), 'utf8');
 const V4 = LOC.slice(LOC.indexOf('readerSystemV4'), LOC.indexOf('readerSystem: (spread)'));
 
 let pass = 0; const errs = [];
@@ -75,7 +79,50 @@ console.log('\n▶ چیزهایی که عمداً **رد** شدند (تناقض�
 {
   // تحقیق دوم واژگانِ «کائنات/شهود» را پیشنهاد می‌دهد؛ نمونه‌ها هرگز از آن استفاده
   // نمی‌کنند و قاعده‌ی «هر جمله باید جهت داشته باشد» آن را رد می‌کند.
+  // ⚠️ فرضیه‌ی «تلقین» تست و **رد** شد (دورِ یازدهم، ۲۷ فال). نامِ این عبارت‌ها یک دور
+  // از پرامپت برداشته شد تا ببینیم نام‌بردنشان خودش تلقینشان می‌کند یا نه؛ «به شهودت
+  // اعتماد کن» با همان نرخ نشت کرد (۱/۲۷ در برابر ۱/۲۷) و لنگر هم کمی بدتر شد. چون
+  // تفاوتی نداشت و نسخه‌ی بی‌نام نه کوتاه‌تر بود نه روشن‌تر، برگردانده شد.
+  // درسِ واقعیِ آن دور جای دیگری بود: این لیست دو چیزِ متفاوت را قاطی کرده بود و
+  // گارد فقط روی **سرخط** اجرا می‌شد، نه کلِ متن. حالا `evasionIn` کلِ خوانش را
+  // می‌بیند و «کائنات» به‌عنوان ایرادِ لحنی از طفره‌رفتن جدا شده.
   ok(/«کائنات»/.test(V4) && /ممنوع/.test(V4), '«کائنات» و «به شهودت اعتماد کن» ممنوع مانده‌اند');
+  // گاردِ طفره‌رفتن حالا کلِ متن را می‌بیند، نه فقط سرخط — و با همان انضباطِ سرخط:
+  // یک تلاشِ اضافه، بعد پذیرش، هرگز ریفاند.
+  ok(/export function evasionIn/.test(VD), 'گاردِ طفره‌رفتنِ کلِ متن در verdict.js است');
+  ok(/export const EVASION/.test(VD) && /const REGISTER/.test(VD),
+    'طفره‌رفتن از واژه‌ی لحنی جدا شده (تصمیمِ صریح، نه سهو)');
+  ok(!vd.EVASION.some((p) => p.includes('کائنات')), '«کائنات» در لیستِ طفره‌رفتن نیست');
+  ok(vd.evasionIn('در کل بستگی داره') && !vd.evasionIn('انرژیِ کائنات همراهته'),
+    'گارد طفره‌رفتن را می‌گیرد و واژه‌ی لحنی را نمی‌گیرد');
+  // مسیرِ درمان **بازتولید نیست**، تعمیرِ نقطه‌ای است (تصمیمِ صریحِ مالک): خروجیِ معیوب
+  // ورودیِ یک پرامپتِ کوچکِ تخصصی می‌شود. سه دلیل: بازتولیدِ کامل گران است، کند است،
+  // و تضمینی ندارد (همان پرامپت، همان احتمالِ خطا).
+  ok(!/EVASION_EXTRA_TRIES/.test(SRC), 'بازتولیدِ کامل برای طفره‌رفتن برداشته شده');
+  ok(/repairDefects\(parsed, orChatResilient/.test(SRC), 'تعمیرِ نقطه‌ای بعد از پذیرش اجرا می‌شود');
+  ok(/export async function repairDefects/.test(RP), 'ماژولِ تعمیر وجود دارد');
+  ok(/export const DEFECTS/.test(RP) && rp.DEFECTS.length >= 2,
+    'تعمیر چندنوعی است (افزودنِ نوعِ بعدی = یک ردیف، نه مسیرِ جدید)');
+  ok(/export function pastTimeIn/.test(VD), 'تشخیصِ زمانِ گذشته هم تک‌منبع در verdict.js است');
+  ok(/\}, \[undefined\]\);/.test(RP), 'تعمیر دقیقاً یک فراخوانی دارد (planِ تک‌عضوی)');
+  // ادعا «هیچ for ی نباشد» نبود — پیمایشِ انواعِ ضعف طبیعتاً حلقه دارد. ادعای واقعی
+  // این است که **حلقه‌ی تلاشِ دوباره** نباشد: تعمیر دقیقاً یک بار مدل را صدا می‌زند.
+  ok([...RP.matchAll(/await call\(/g)].length === 1, 'مدل دقیقاً یک بار در مسیرِ تعمیر صدا زده می‌شود');
+  ok(!/while \(/.test(RP), 'هیچ حلقه‌ی تلاشِ دوباره‌ای نیست');
+  {
+    // تشخیص باید **هاردکد** بماند: هیچ فالی نباید برای «فهمیدنِ اینکه مشکل دارد»
+    // به مدل پول بدهد. اگر روزی این ادعا شکست، یعنی کسی یک ریکوئستِ چک اضافه کرده.
+    const hits = rp.findDefects({ closing: 'در کل بستگی داره.', reads: [], cards: [] });
+    ok(hits.length === 1 && hits[0].path === 'closing', 'تشخیص هاردکد است، نه فراخوانیِ LLM');
+    const clean = rp.applyFixes({ closing: 'x', reads: [{ text: 'y' }] }, [{ path: 'closing' }], ['z']);
+    ok(clean.closing === 'z' && clean.reads[0].text === 'y', 'تعمیر فقط فیلدِ معیوب را عوض می‌کند');
+  }
+  ok(/export function v4Text/.test(CORE), 'متنِ کاملِ مدل تک‌منبع در هسته است');
+  {
+    const v = core.v4Text({ headline: 'ه', closing: 'ج', reads: [{ text: 'خ' }], cards: [{ teaser: 'ت' }] });
+    ok(v.includes('ه') && v.includes('ج') && v.includes('خ') && v.includes('ت'),
+      'v4Text همه‌ی بخش‌های رو-به-کاربر را می‌بیند');
+  }
   // تحقیق دوم می‌گوید از جوابِ بله/خیر طفره برو؛ خودش هم می‌گوید طفره‌رفتن بازخوردِ منفی
   // می‌گیرد. نمونه‌ها جوابِ صریح می‌دهند، پس صراحت برنده است.
   ok(/طفره رفتن بدترین کاری است/.test(V4), 'طفره‌رفتن صریحاً ممنوع است، نه توصیه‌شده');

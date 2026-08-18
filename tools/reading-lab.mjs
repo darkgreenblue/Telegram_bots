@@ -30,6 +30,7 @@ import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 // داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
 // تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
 import { headlineOk } from '../bots/tarot/verdict.js';
+import { repairDefects } from '../bots/tarot/repair.js';
 import {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose,
@@ -68,9 +69,23 @@ function fakeOut(spread, cards, ctx) {
     pattern: `ترکیبِ ${names[0]} و ${names[names.length - 1]} درباره‌ی «${q}» یک جهت نشان می‌دهد.`,
     reads: names.map(n => ({ text: `${n} می‌گه این بخش از «${q}» دارد جابه‌جا می‌شود.` })),
     callback: (ctx.previous || []).length ? `دفعه‌ی قبل هم حولِ همین موضوع بودی.` : '',
-    closing: `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
+    // ⚠️ عمداً در **یک** چیدمانِ مشخص طفره‌رفتن تزریق می‌شود تا حالتِ fake کلِ مسیرِ
+    // تعمیر را واقعاً اجرا کند (تشخیص، فراخوانی، اعتبارسنجی، جایگذاری). بدونِ این،
+    // `--fake` سبز رد می‌شد در حالی که آن مسیر هرگز لمس نشده بود — همان اشتباهی که
+    // یک بار با `--dry` تکرار شد و یک دورِ ۹ فالی را سوزاند.
+    closing: spread.id === 'yesno'
+      ? `در کل، «${q}» بستگی داره به خودت، ولی ${names[0]} می‌گه صبر کن.`
+      : `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
     summary: 'خلاصه‌ی ساختگی', memory: 'حافظه‌ی ساختگی',
   });
+}
+
+// استابِ تعمیر در حالتِ fake: خروجیِ معتبر می‌دهد تا کلِ مسیرِ تعمیر (پارس، اعتبارسنجی،
+// جایگذاری) واقعاً اجرا شود، بدونِ شبکه. تعدادِ fixes از خودِ ورودی شمرده می‌شود.
+function fakeRepair(sys, usr, opts) {
+  const n = (usr.match(/^\d+\)/gm) || []).length || 1;
+  const out = JSON.stringify({ fixes: Array.from({ length: n }, () => 'بیشتر به این سمت می‌خوره که پیش بره، ولی صبر می‌خواد.') });
+  return opts.validate(out) ? { out, model: 'fake', attempts: 1, usages: [{ prompt_tokens: 0, completion_tokens: 0 }] } : null;
 }
 
 /* ═══════════════ اجرای یک فال ═══════════════ */
@@ -121,6 +136,14 @@ async function runStep(persona, step, i, state) {
   if (!parsed && fallback) parsed = fallback;
   if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
 
+  // تعمیرِ نقطه‌ای — **همان کدِ ربات**. اینجا اجرا می‌شود تا آزمایشگاه دقیقاً همان
+  // چیزی را بسنجد که کاربر می‌گیرد، و هزینه/تأخیرِ واقعیِ این مسیر اندازه گرفته شود.
+  const t0 = Date.now();
+  const rep = await repairDefects(parsed, FAKE ? fakeRepair : orChatResilient,
+    { tag: `${persona.id}.${i + 1}` });
+  parsed = rep.llm;
+  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
+
   const rendered = renderV4(parsed, cards, labels);
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
   // نباید بابتِ یک باگِ ابزار از بین برود (درسِ کرشِ اجرای دوم).
@@ -139,11 +162,14 @@ async function runStep(persona, step, i, state) {
   });
 
   return {
-    spread, cards, ctx, inputChars, llm: parsed, rendered, check,
+    spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair,
     model: res?.model, attempts: res?.attempts,
     usage: (res?.usages || []).reduce((a, u) => ({
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
     }), { in: 0, out: 0 }),
+    // هزینه‌ی تعمیر **جدا** شمرده می‌شود، وگرنه در هزینه‌ی کلی گم می‌شود و
+    // نمی‌فهمیم این مسیر واقعاً ارزان است یا فقط ادعا کرده‌ایم.
+    repairUsage: { in: rep.usage?.prompt_tokens || 0, out: rep.usage?.completion_tokens || 0 },
   };
 }
 
@@ -345,6 +371,20 @@ if (!DRY) {
     console.log(`   ❌ فالِ ایرادناک per پاس: ${badPer.join(' , ')}`);
   }
   console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  // مسیرِ تعمیر جدا گزارش می‌شود: چند بار شلیک کرد، چقدر طول کشید، چقدر خرج برداشت.
+  // هر سه عدد لازم است — «ارزان» بدونِ تأخیر بی‌معناست و برعکس.
+  {
+    const fired = done.filter(r => r.repair?.fired);
+    const failed = fired.filter(r => !r.repair.ok);
+    const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
+    const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
+    const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
+    const cost = rin / 1e6 * 0.30 + rout / 1e6 * 2.50;
+    console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
+      (failed.length ? ` (${failed.length} ناموفق)` : '') +
+      (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
+        ` | توکن ${rin}+${rout} ≈ $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : ''));
+  }
   // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
   // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
   // خط است؛ بدونِ این خلاصه برای فهمیدنِ «کدام فال چه ایرادی داشت» باید کلِ لاگ خوانده

@@ -239,6 +239,16 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
 // متنِ خوانشِ یک کارت. مدل گاهی به‌جای `[{text}]` آرایه‌ی رشته می‌دهد (دیده‌شده در
 // آزمایشگاه، مخصوصاً در چیدمانِ ده‌کارتی که خروجی بلند است). هر دو شکل پذیرفته می‌شود،
 // وگرنه محتوایی که مدل تولید کرده بی‌صدا دور ریخته می‌شود.
+// کلِ متنی که مدل تولید کرده، در یک رشته. عمداً در هسته است نه در آزمایشگاه: گاردِ
+// طفره‌رفتن در **ربات** روی همین اجرا می‌شود و سنجه‌ی آزمایشگاه هم باید دقیقاً همان
+// متن را ببیند، وگرنه یکی چیزی را می‌گیرد که آن یکی نمی‌بیند.
+export function v4Text(llm) {
+  if (!llm) return '';
+  return [llm.headline, llm.callback, llm.pattern, llm.closing,
+    ...(llm.reads || []).map(readText), ...(llm.cards || []).map((c) => c?.teaser)]
+    .filter(Boolean).join('\n');
+}
+
 export const readText = (x) => String(typeof x === 'string' ? x : (x?.text || '')).trim();
 
 // شرطِ پذیرشِ شکلِ خروجیِ v4. عمداً این‌جاست نه داخلِ index.js: آزمایشگاه باید **همان**
