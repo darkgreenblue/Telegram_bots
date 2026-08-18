@@ -13,6 +13,7 @@
 //
 // اجرا: node tools/check-ux-menu.mjs
 import { readFileSync } from 'fs';
+import { seedToInt } from '../bots/tarot/reading-core.js';
 import {
   TOPICS_V3, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
 } from '../bots/tarot/spreads.js';
@@ -272,7 +273,10 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
 
 console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۲۸)');
 {
-  ok(/inviteMain: '📤 معرفی دوستان'/.test(LOC), 'دکمه‌ی کیبورد «معرفی دوستان» شد (نه «دعوت»)');
+  // v2.3 (تصمیمِ صریحِ مالک): «معرفی دوستان» و «دعوت دوستات» هر دو غلط بودند؛ همه‌جا «دعوت دوستان».
+  ok(/inviteMain: '📤 دعوت دوستان'/.test(LOC), 'دکمه‌ی کیبورد «دعوت دوستان» است');
+  ok(!/معرفی دوستان/.test(LOC) && !/دعوت دوستات/.test(LOC),
+    'هیچ‌جای متن‌ها «معرفی دوستان» یا «دعوت دوستات» نمانده');
   ok(/luckyMain: '🍀 کارت شانس \(استخراج الماس\)'/.test(LOC), 'دکمه‌ی کیبوردِ کارت شانس «استخراج الماس» می‌گوید');
   ok(/askBirthMonth: 'ماه تولدت چیه؟ 🌿'/.test(LOC), 'سؤالِ ماهِ تولد کوتاه شد (بدونِ مقدمه‌ی «قبل از هر چیز»)');
   ok(/startWhere: 'از کجا شروع کنیم؟ 📌'/.test(LOC), '«از کجا شروع کنیم؟» ایموجیِ 📌 گرفت');
@@ -295,7 +299,174 @@ console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه 
   ok(/gateJoin\(welcomeBonusFor\(uid\), curOf\(uid\), uxV2For\(uid\)\)/.test(SRC), 'index.js پرچم را به gateJoin هم می‌دهد');
   // بسته‌های الماس: کپیِ جدید («از بین سه بسته») به‌جای توضیحِ ریاضیِ قبلی
   ok(/از بین سه بسته‌ی زیر، بسته‌ای که برات مناسبه رو انتخاب کن/.test(LOC), 'متنِ انتخابِ بسته عوض شد');
-  ok(/🛒 با انتخابِ? بسته‌های بزرگ‌تر/.test(LOC), 'یادآوریِ ارزان‌ترشدنِ هر الماس با ایموجیِ 🛒 می‌آید');
+  // v2.3: 🛒 از خطِ دومِ یادآوری به **اولِ** جمله‌ی دعوت منتقل شد (تصمیمِ صریحِ مالک).
+  ok(/🛒 از بین سه بسته‌ی زیر/.test(LOC), 'ایموجیِ سبد خرید اولِ جمله‌ی انتخابِ بسته است');
+  ok(!/🛒 با انتخابِ? بسته‌های بزرگ‌تر/.test(LOC), 'خطِ دومِ یادآوری دیگر ایموجیِ 🛒 ندارد');
+}
+
+console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، نه per روز (باگِ ۱۴۰۵/۰۵/۲۹)');
+{
+  // گزارشِ واقعیِ مالک: «۴ بار بازی کردم، ۲ بارش هر سه کارت الماس بود». ریاضی درست بود
+  // (E=1 در بلوکِ بالا اثبات می‌شود) ولی seed فقط (uid, day) بود، پس هر دستِ دوباره در همان
+  // روز — که ریستِ ادمین بازش می‌کند — روی **همان تخته‌ی نیمه‌روشده** انجام می‌شد.
+  const slots = (uid, day, nonce = '') => {
+    const seed = nonce ? `lucky:${uid}:${day}:${nonce}` : `lucky:${uid}:${day}`;
+    return Array.from({ length: 24 }, (_, i) => i)
+      .sort((a, b) => seedToInt(seed + ':' + a) - seedToInt(seed + ':' + b))
+      .slice(0, 8);
+  };
+  const key = (a) => JSON.stringify([...a].sort((x, y) => x - y));
+  const uid = 100257975, day = '1405-05-29';
+  ok(key(slots(uid, day, 'n1')) !== key(slots(uid, day, 'n2')),
+    'دو دستِ مختلف در یک روز چیدمانِ متفاوت دارند (دانشِ دستِ قبل بی‌ارزش می‌شود)');
+  ok(key(slots(uid, day, 'n1')) === key(slots(uid, day, 'n1')),
+    'داخلِ یک دست چیدمان ثابت است (بستن/باز کردنِ چت و ری‌استارت نتیجه را عوض نمی‌کند)');
+  ok(key(slots(uid, day)) === key(slots(uid, day)),
+    'دستِ در جریانِ لحظه‌ی دیپلوی (بدونِ nonce) به seedِ قدیمی برمی‌گردد، پس وسطِ بازی نمی‌شکند');
+  // هنوز دقیقاً ۸ الماس از ۲۴ — یعنی امیدِ ریاضی دست نخورده
+  for (const n of ['n1', 'n2', 'n3']) ok(slots(uid, day, n).length === 8, `دستِ ${n} هنوز دقیقاً ۸ الماس دارد`);
+  ok(new Set(slots(uid, day, 'n1')).size === 8, 'موقعیت‌ها یکتا هستند');
+
+  // و اینکه کد واقعاً nonce را per دست می‌سازد و از session می‌خواند (نه از حافظه).
+  ok(/function luckyCoinSlots\(uid, today, nonce = ''\)/.test(SRC), 'تابعِ چیدمان nonce می‌گیرد');
+  ok(/luckyDay: today, luckyNonce \}\)/.test(SRC), 'nonce لحظه‌ی باز شدنِ گرید ساخته و در session ذخیره می‌شود');
+  ok(/luckyCoinSlots\(uid, today, s\.luckyNonce\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
+  ok(!/luckyCoinSlots\(uid, today\)(?!,)/.test(SRC.replace(/function luckyCoinSlots[\s\S]*?\n\}/, '')),
+    'هیچ فراخوانیِ بدونِ nonce نمانده');
+}
+
+console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');
+{
+  // ۱) صفحه‌ی اندازه روی همان پیام ادیت می‌شود، نه پیامِ جدید.
+  const topicH = SRC.slice(SRC.indexOf('bot.action(/^topic:'), SRC.indexOf('bot.action(/^tback:'));
+  ok(/ctx\.editMessageText\(text, extra\)/.test(topicH), 'انتخابِ موضوع همان پیام را به صفحه‌ی اندازه ادیت می‌کند');
+  ok(/ctx\.reply\(text, extra\)\.catch/.test(topicH), 'اگر ادیت نشد (پیامِ کهنه) پیامِ جدید می‌رود — کاربر بی‌جواب نمی‌ماند');
+  // کشتنِ کیبوردِ مبدأ فقط باید **داخلِ catch** باشد: در مسیرِ موفق لازم نیست (همان پیام
+  // ادیت می‌شود) ولی در fallback واجب است وگرنه منوی مبدأ دوباره‌زدنی می‌ماند.
+  ok(topicH.indexOf('editMessageReplyMarkup(undefined)') > topicH.indexOf('catch {'),
+    'در مسیرِ موفق کیبوردِ مبدأ کشته نمی‌شود (خودِ همان پیام ادیت می‌شود)');
+  ok(/catch \{[\s\S]{0,320}editMessageReplyMarkup\(undefined\)[\s\S]{0,120}ctx\.reply\(text, extra\)/.test(topicH),
+    'در مسیرِ fallback کیبوردِ مبدأ کشته می‌شود تا دوباره‌زدنی نماند');
+
+  // ۲) مبدأ در callback_data می‌آید، نه در session (session با showCatalog/nav:menu پاک می‌شود).
+  ok(/topic:\$\{t\.key\}:a/.test(SRC), 'لیستِ کامل مبدأ را با پسوندِ :a در callback می‌فرستد');
+  ok(/\^topic:\(\\w\+\)\(\?:\:\(a\)\)\?\$/.test(SRC), 'رجکسِ topic پسوند را **اختیاری** گرفته');
+  // دکمه‌ی کهنه‌ی بدونِ پسوند باید هنوز کار کند (بند ۲ج/۶) — `\w` دونقطه را نمی‌گیرد.
+  const re = /^topic:(\w+)(?::(a))?$/;
+  ok(re.test('topic:love') && 'topic:love'.match(re)[1] === 'love', 'دکمه‌ی کهنه‌ی `topic:love` هنوز match می‌شود');
+  ok('topic:love'.match(re)[2] === undefined, 'دکمه‌ی کهنه مبدأ ندارد → به منوی کوتاه برمی‌گردد');
+  ok('topic:love:a'.match(re)[1] === 'love' && 'topic:love:a'.match(re)[2] === 'a', 'دکمه‌ی لیستِ کامل مبدأ را درست می‌دهد');
+  ok('topic:personal:a'.length <= 64, 'callback_data زیرِ سقفِ ۶۴ بایتِ تلگرام است');
+
+  // ۳) بازگشتِ یک‌قدمی: همان پیام به منوی مبدأ برمی‌گردد و **کلِ فلو ریست نمی‌شود**.
+  // تا **انتهای خودِ هندلر** برش بزن، نه پنجره‌ی کاراکتریِ ثابت: هندلرِ بعدی setState/setSession
+  // دارد و پنجره‌ی ثابت آن را داخلِ برش می‌آورد و ادعاها را بی‌خود قرمز می‌کند.
+  const tbackStart = SRC.indexOf('bot.action(/^tback:');
+  const tback = SRC.slice(tbackStart, SRC.indexOf('\n});', tbackStart));
+  ok(/topicMenuScreen\(uid, ctx\.match\[1\]\)/.test(tback), 'بازگشت همان منویی را می‌دهد که کاربر از آن آمده');
+  ok(/ctx\.editMessageText\(text, kb\)/.test(tback), 'بازگشت هم ادیت می‌کند، نه پیامِ جدید');
+  ok(!/setSession\(uid, null\)/.test(tback), 'بازگشتِ یک‌قدمی session را نمی‌کُشد (هنوز چیزی شروع نشده)');
+  // باگِ واقعی که همین‌جا گرفته شد: `setState` بی‌قید در این هندلر، تپِ یک دکمه‌ی کهنه را
+  // به یتیم‌شدنِ بی‌صدای فاکتور تبدیل می‌کرد (هر دو گارد روی استیت کار می‌کنند).
+  ok(!/setState\(uid, /.test(tback), 'بازگشتِ یک‌قدمی استیت را بازنویسی نمی‌کند (فقط رندرِ دوباره است)');
+  ok(/blockDuringOpenPay\(ctx\)/.test(tback) && /blockDuringOpenReading\(ctx\)/.test(tback)
+    && /blockDuringPendingReading\(ctx\)/.test(tback),
+    'دکمه‌ی کهنه‌ی بازگشت وسطِ پرداخت/فالِ باز گارد می‌شود، نه اینکه بی‌صدا ردش کند');
+  ok(!/sendContinuePrompt|replyCanceled/.test(tback), 'بازگشتِ یک‌قدمی پیامِ «ادامه» نمی‌آورد (خروج از فلو نیست)');
+  ok(/backToMenu, `tback:\$\{from\}`/.test(SRC), 'آخرین گزینه‌ی صفحه‌ی اندازه همان «بازگشت به منو» است');
+
+  // ۴) «مشاهده همه فال‌ها» همان پیام را ادیت می‌کند.
+  ok(/showCatalog\(ctx, true, true\)/.test(SRC), 'دکمه‌ی «مشاهده همه فال‌ها» ادیت‌کنان جلو می‌رود');
+  ok(/if \(edit\) \{ try \{ return await ctx\.editMessageText\(text, kb\); \} catch \{\} \}/.test(SRC),
+    'showCatalog در حالتِ edit همان پیام را ادیت می‌کند و در شکست به پیامِ جدید برمی‌گردد');
+
+  // ۵) nav:menu هم ادیت می‌کند و متنش عوض شده.
+  ok(/backToMenu: 'برگشتیم به منوی اصلی 🌳'/.test(LOC), 'متنِ بازگشت به منو: بدونِ «باشه» و با ایموجیِ 🌳');
+  const navH = SRC.slice(SRC.indexOf("bot.action('nav:menu'"), SRC.indexOf("bot.action('reading:resume'"));
+  ok(/ctx\.editMessageText\(L\.reading\.backToMenu\)/.test(navH), 'nav:menu همان پیام را به تأییدِ بازگشت ادیت می‌کند');
+  ok(/if \(edited\) await ensureMenu/.test(navH), 'بعد از ادیت، کیبوردِ ماندگار تضمین می‌شود');
+  ok(/else await ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\)/.test(navH), 'شکستِ ادیت دقیقاً به رفتارِ قبلی برمی‌گردد');
+
+  // ۶) صفحه‌ی بسته‌ها زیرمنوی کیف است: ادیت + دکمه‌ی «بازگشت» (نه «انصراف»).
+  ok(/backOneStep: '◀️ بازگشت'/.test(LOC), 'برچسبِ بازگشتِ یک‌قدمی جدا از «انصراف» تعریف شده');
+  ok(/L\.buttons\.backOneStep, `pay_back:\$\{paymentId\}`/.test(SRC), 'صفحه‌ی بسته‌ها دکمه‌ی بازگشت دارد نه انصراف');
+  const payBackStart = SRC.indexOf('bot.action(/^pay_back:');
+  const payBack = SRC.slice(payBackStart, SRC.indexOf('\n});', payBackStart));
+  ok(/setPaymentStatus\.run\('canceled', p\.id\)/.test(payBack), 'بازگشت فاکتورِ خالی را می‌بندد (وگرنه گاردِ پرداخت کاربر را قفل می‌کند)');
+  ok(/walletScreen\(uid\)/.test(payBack), 'بازگشت دقیقاً همان صفحه‌ی کیف را رندر می‌کند (تک‌منبع)');
+  ok(!/replyCanceled|sendContinuePrompt/.test(payBack), 'بازگشت از بسته‌ها پیامِ «ادامه» نمی‌آورد');
+  ok(/offerPendingReading\(ctx, uid\)/.test(payBack), 'فالِ رزروشده بعد از بازگشت سرگردان نمی‌ماند');
+  // باگی که ریویوِ خصمانه گرفت: گاردِ `p.status === 'pending'` فقط لغوِ فاکتور را می‌پوشاند،
+  // ولی جداکردنِ فاکتور از سشن بی‌قید بود. یعنی تپِ یک دکمه‌ی کهنه، فاکتورِ **زنده‌ی فعلی**
+  // را از سشن جدا می‌کرد و رسیدی که کاربر بعداً می‌فرستاد بی‌صاحب می‌شد (پولِ واریزشده گم).
+  for (const [name, marker] of [['pay_back', 'bot.action(/^pay_back:'], ['pay_cancel', 'bot.action(/^pay_cancel:']]) {
+    const start = SRC.indexOf(marker);
+    const body = SRC.slice(start, SRC.indexOf('\n});', start));
+    ok(/if \(s\.paymentId === pid\) \{/.test(body),
+      `«${name}» سشن را فقط وقتی دست می‌زند که دکمه به همان فاکتورِ جاری اشاره کند`);
+    ok(!/^\s*delete s\.paymentId;$/m.test(body.replace(/if \(s\.paymentId === pid\) \{[\s\S]*?\n  \}/, '')),
+      `«${name}» هیچ مسیرِ بی‌قیدی برای جداکردنِ فاکتور ندارد`);
+  }
+
+  // nav:menu در دنیای تومانی (کاربرِ واقعی) باید دقیقاً رفتارِ قبلی را داشته باشد: پیامِ
+  // تازه + کیبوردِ اصلی. ادیت‌کردنِ یک پیامِ بالای چت برای او یعنی «هیچ اتفاقی نیفتاد»،
+  // و این پرتکرارترین نقطه‌ی تحویلِ دوباره‌ی کیبورد است.
+  ok(/if \(!uxV2For\(uid\)\) \{[\s\S]{0,220}ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\);/.test(navH),
+    'دنیای تومانی همان پیامِ تازه + کیبوردِ اصلی را می‌گیرد (ادیت فقط برای دنیای الماس)');
+
+  // ۷) پیامِ «ادامه» تنها نقطه‌ی باز شدنِ منوی اصلی است (تصمیمِ مالک).
+  const cont = SRC.slice(SRC.indexOf('async function sendContinuePrompt'), SRC.indexOf('async function replyCanceled'));
+  ok(/await ensureMenu\(ctx, uid\)/.test(cont), 'sendContinuePrompt خودش کیبوردِ اصلی را تضمین می‌کند');
+  ok(/nextOffersV3: 'برای جواب دادن به سؤالاتی که جوابش رو نمی‌دونی من همیشه اینجام!'/.test(LOC),
+    'متنِ تازه‌ی پیامِ «ادامه»');
+}
+
+console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چسبیده‌ی عدد و واحد (UX v2.3)');
+{
+  ok(/const moneyTight = /.test(LOC), 'تابعِ نسخه‌ی چسبیده تعریف شده');
+  ok(/moneyTight = \(toman, cur\) =>\s*\n?\s*\(cur\?\.on \? `\$\{fmt\(Math\.round\(Number\(toman\) \/ cur\.value\)\)\}\$\{cur\.emoji\}`/.test(LOC),
+    'در دنیای الماس عدد و ایموجی هیچ فاصله‌ای ندارند');
+  ok(/: `\$\{fmt\(toman\)\} تومان`\)/.test(LOC), 'در دنیای تومانی خروجی دقیقاً همان متنِ قبلی است');
+  ok(/purseLine = \(balance, cur\) => \(cur\?\.on \? `موجودی \$\{purse\(cur\)\}: \$\{moneyTight\(balance, cur\)\}`/.test(LOC),
+    'خطِ موجودی یک‌خطی و چسبیده است (به خطِ بعد نمی‌رود)');
+  ok(!/موجودی کیف \$\{cur\.name\}:\\n/.test(LOC), 'شکستِ خطِ قدیمی حذف شده');
+
+  // باکسِ نقل‌قول فقط در دنیای الماس تولید شود، وگرنه کاربرِ تومانی تگِ خام می‌بیند.
+  ok(/const purseQuote = \(balance, cur\) => \{[\s\S]{0,220}cur\?\.on \? quote\(line\) : line;/.test(LOC),
+    'باکسِ نقل‌قول فقط وقتی می‌آید که دنیای الماس روشن است');
+  ok(/const quote = \(s\) => `<blockquote>\$\{s\}<\/blockquote>`;/.test(LOC), 'باکس با تگِ blockquote تلگرام ساخته می‌شود');
+  for (const key of ['pickSize', 'needBalance']) {
+    ok(new RegExp(`${key}:[\\s\\S]{0,400}?purseQuote\\(`).test(LOC), `«${key}» موجودی را داخلِ باکس نشان می‌دهد`);
+  }
+  // هر پیامی که باکس دارد باید HTML برود، وگرنه تگ خام دیده می‌شود.
+  ok(/const needBalanceExtra = \{ parse_mode: 'HTML' \};/.test(SRC), 'پیامِ کم‌موجودی HTML می‌رود');
+  const nbCalls = (SRC.match(/needBalanceText\(uid/g) || []).length;
+  const nbExtras = (SRC.match(/\.\.\.needBalanceExtra,/g) || []).length;
+  ok(nbCalls > 0 && nbCalls === nbExtras, `هر ${nbCalls} فراخوانیِ پیامِ کم‌موجودی parse_mode دارد (${nbExtras})`);
+  const pickScreen = SRC.slice(SRC.indexOf('function pickSizeScreen'), SRC.indexOf('bot.action(/^topic:'));
+  ok(/parse_mode: 'HTML'/.test(pickScreen) && /L\.buttons\.topicSize/.test(pickScreen),
+    'صفحه‌ی اندازه هم HTML می‌رود');
+  // نامِ کاربر داخلِ HTML باید esc شود.
+  ok(/name: esc\(dispName\(getUser\(uid\)\)\)/.test(SRC), 'نامِ کاربر قبل از رفتن به HTML امن می‌شود');
+
+  // نگارشِ یکسانِ دکمه‌ها (تصمیمِ صریحِ مالک)
+  ok(/buyCoins: \(cur\) => `💰 خرید \$\{cur\.name\}\$\{cur\.emoji\}`/.test(LOC), 'دکمه‌ی خرید: «💰 خرید الماس💎»');
+  ok(/inviteWithBonus: \(bonus, cur\) => `📤 دعوت دوستان \(هر دعوت ➕\$\{moneyTight\(bonus, cur\)\}\)`/.test(LOC),
+    'دکمه‌ی دعوت: «📤 دعوت دوستان (هر دعوت ➕۱۰💎)»');
+  ok(/luckyDraw: \(max, cur\) => `🍀 کارت شانس \(➕صفر تا \$\{fmt\(max\)\}\$\{cur\.emoji\}\)`/.test(LOC),
+    'دکمه‌ی کارت شانس: «🍀 کارت شانس (➕صفر تا ۳💎)»');
+  ok(/topicSize: \(size, price, cur\) => `\$\{fmt\(size\)\} کارتی \(➖\$\{moneyTight\(price, cur\)\}\)`/.test(LOC),
+    'دکمه‌ی اندازه: «۳ کارتی (➖۳💎)»');
+  ok(/L\.buttons\.topicSize\(size, sp\.price, cur\)/.test(SRC), 'قیمتِ دکمه از خودِ رکوردِ چیدمان می‌آید، نه از ضربِ دوباره');
+
+  // زیرِ پیامِ کم‌موجودی همان سه راهِ کیف می‌آید (تک‌منبع، نه لیستِ موازی).
+  ok(/if \(coinsOn\(uid\)\) return walletRows\(uid\);/.test(SRC), 'دکمه‌های زیرِ پیامِ کم‌موجودی = همان دکمه‌های کیف');
+
+  // برچسبِ کیبوردِ ماندگار عوض شد → دکمه‌ی کش‌شده روی گوشیِ کاربر نباید بمیرد (بند ۲ج/۶).
+  ok(/const INVITE_LABELS = \[L\.buttons\.inviteMain, '📤 معرفی دوستان'\]/.test(SRC),
+    'برچسبِ میانیِ «معرفی دوستان» هنوز match می‌شود (کیبوردِ کش‌شده)');
+  ok(/bot\.hears\(INVITE_LABELS, showInvite\)/.test(SRC), 'هندلرِ دعوت هر دو برچسب را می‌گیرد');
+  ok(/'📤 معرفی دوستان',\s*\/\//.test(SRC), 'برچسبِ میانی در KB_LABELS هست (تپِ دکمه در قیف گم نشود)');
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
