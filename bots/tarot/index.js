@@ -392,7 +392,6 @@ const WELCOME_BONUS_COINS_V2 = 5;
 const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_VALUE : WELCOME_BONUS);
 // جایزه‌ی کارتِ روز: ۱ سکه، روزی یک بار. اهرمِ عادتِ روزانه (بند ۱۰ ریشه: قلابِ بازگشت
 // باید در خودِ محصول باشد نه فقط در پوش).
-const DAILY_COIN_REWARD = 1 * COIN_VALUE;
 
 // ───────────────────────────────────────────────────────────────────────────
 // 🍀 کارت شانس — سکه‌ی رایگانِ روزانه با امیدِ ریاضیِ **دقیقاً ۱ سکه**
@@ -1726,13 +1725,10 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   await typing(ctx, PACE_REVEAL);
   if (text) await replyLong(ctx, text);
 
-  // 🪙 جایزه‌ی روزانه: یک سکه، روزی یک بار. اهرمِ عادت (بند ۱۰ ریشه).
-  // امنیت: کلیدِ (user_id, date) در daily_log و مهرِ last_daily_date هر دو جلوی
-  // گرفتنِ دوباره در همان روز را می‌گیرند، پس دوبار-تپ دو سکه نمی‌دهد.
-  stmts.credit.run(DAILY_COIN_REWARD, uid);
-  track(db, uid, 'credit_granted', { amount: DAILY_COIN_REWARD, kind: 'daily' });
-  await ctx.reply(L.daily.coinReward(1));
-
+  // ⚠️ این‌جا عمداً **هیچ سکه‌ای** داده نمی‌شود. نسخه‌ی اولِ UX v2 یک سکه بابتِ کارتِ
+  // روز می‌داد؛ مالک تصمیمش را عوض کرد و آن سکه به **کارت شانس** منتقل شد. اگر هر دو
+  // بمانند نرخِ رایگان دو برابرِ چیزی می‌شود که طراحی شده (۲ سکه در روز به‌جای ۱)، و
+  // کلِ محاسبه‌ی امیدِ ریاضیِ کارت شانس بی‌معنی می‌شود. چکِ CI همین را قفل کرده.
   track(db, uid, 'daily_card', { streak, card: key, variant, month });
   trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'daily' });
   if (streak >= 2) {
