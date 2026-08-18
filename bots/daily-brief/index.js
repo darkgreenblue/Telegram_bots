@@ -1,7 +1,8 @@
 // index.js — daily-brief: پادکستِ آموزشیِ روزانه‌ی شخصی.
 //
 // هدف (یک جمله): هر صبح یک قسمتِ پادکستِ آموزشیِ شخصی‌شده که مالک واقعاً گوش بدهد.
-// مسیرِ داده: پیجِ «Learning» در Notion → جلسه‌ی بعدی و متنش → متن با LLM → صدا با TTS → تلگرام.
+// مسیرِ داده: پیجِ «Learning» در Notion → جلسه‌ی بعدی و متنش → متن با LLM (نویسنده) →
+// تگ‌های اجرا با LLM (کارگردانِ صدا) → صدا با TTS → تلگرام.
 //
 // MVP فقط-ادمین است: هیچ کاربرِ دیگری نمی‌تواند استفاده کند و هیچ پرداختی وجود ندارد.
 // قرارداد کامل + ساختارِ پیجِ Notion: bots/daily-brief/CLAUDE.md
@@ -39,7 +40,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true;
-const PRODUCT_VERSION = '1.2.0';
+const PRODUCT_VERSION = '1.3.0';
 
 const FLASH = 'google/gemini-2.5-flash';
 // موتورِ صدا (ثابت، بعد از مقایسه‌ی واقعی انتخاب شد)
@@ -116,6 +117,10 @@ db.exec(`
     voices_json     TEXT DEFAULT '{}',
     speed           REAL DEFAULT 1,
     script          TEXT,
+    -- متنِ آماده‌ی موتورِ صدا (تگ‌خورده). جدا از ستونِ script می‌ماند چون آن متنِ خواناست
+    -- و اگر تگ‌ها را داخلش بریزیم، نه قابلِ بازخوانیِ آدمیزاد است نه قابلِ تگ‌گذاریِ دوباره.
+    tts_input       TEXT,
+    tts_tags        INTEGER DEFAULT 0,
     turns_json      TEXT,
     script_words    INTEGER DEFAULT 0,
     llm_model       TEXT,
@@ -151,6 +156,14 @@ db.exec(`
     status TEXT, created_at INTEGER DEFAULT (unixepoch())
   );
 `);
+// Migration افزایشی (بند ۲ج/۱ ریشه): `CREATE TABLE IF NOT EXISTS` روی دیتابیسِ موجود هیچ
+// ستونی اضافه نمی‌کند، پس ستونِ تازه باید صریح ALTER شود. تکرارِ اجرا بی‌خطر است.
+for (const sql of [
+  'ALTER TABLE episodes ADD COLUMN tts_input TEXT',
+  'ALTER TABLE episodes ADD COLUMN tts_tags INTEGER DEFAULT 0',
+]) {
+  try { db.prepare(sql).run(); } catch { /* ستون از قبل هست */ }
+}
 ensureAnalytics(db);
 ensureAb(db);
 

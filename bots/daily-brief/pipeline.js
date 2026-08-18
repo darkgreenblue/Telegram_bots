@@ -14,6 +14,7 @@ import { log, logErr } from '../../shared/logger.js';
 import { fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, notionErrorFa } from './notion.js';
 import { writeScript } from './script.js';
 import { synthesize, engineLabel } from './tts.js';
+import { tagScript, STYLE_DIRECTIVE } from './tagger.js';
 
 // تعدادِ جلسه‌های قبلی که به‌عنوان حافظه به مدل داده می‌شود (یادآوریِ ابتدای قسمت).
 const RECENT_LESSONS = 3;
@@ -141,11 +142,18 @@ async function stageScript(deps, ep) {
   });
   if (!res) throw new PipelineError('script', 'ساختِ متنِ قسمت بعد از چند تلاش شکست خورد.');
 
+  // ایجنتِ دوم: کارگردانِ صدا. شکستش قسمت را نمی‌کشد (متنِ بی‌تگ خودش پخش‌شدنی است)،
+  // پس عمداً بعد از ذخیره‌ی امنِ متن نمی‌آید بلکه در همین تراکنشِ منطقی جمع می‌شود تا
+  // تلاشِ دوباره‌ی بعد از شکستِ TTS دوباره پولِ نویسنده را خرج نکند.
+  const tagged = await tagScript(llm, res.script);
+
   db.prepare(`UPDATE episodes SET status='scripted', lesson_block_id=?, lesson_title=?, title=?,
-              script=?, script_words=?, llm_model=?, llm_tokens_in=?, llm_tokens_out=?, llm_gen_ids=?
-              WHERE id=?`)
-    .run(lesson.block_id, lesson.title, res.title, res.script, res.words,
-         res.models.join(','), res.usage.in, res.usage.out, res.ids.join(','), ep.id);
+              script=?, tts_input=?, tts_tags=?, script_words=?, llm_model=?,
+              llm_tokens_in=?, llm_tokens_out=?, llm_gen_ids=? WHERE id=?`)
+    .run(lesson.block_id, lesson.title, res.title, res.script, tagged.text, tagged.tags, res.words,
+         [...res.models, ...tagged.models].join(','),
+         res.usage.in + tagged.usage.in, res.usage.out + tagged.usage.out,
+         [...res.ids, ...tagged.ids].join(','), ep.id);
   return db.prepare('SELECT * FROM episodes WHERE id=?').get(ep.id);
 }
 
@@ -159,7 +167,10 @@ async function stageSynth(deps, ep) {
   try { voices = ep.voices_json ? JSON.parse(ep.voices_json) : {}; } catch {}
   const out = await synthesize({
     engineKey: ep.engine,
-    script: ep.script,
+    // متنِ تگ‌خورده اگر باشد، وگرنه متنِ خام. قسمت‌های قدیمی‌ترِ DB ستونش خالی است و
+    // باید همان‌طور که بودند دوباره ساخته شوند (سازگاری با گذشته، بند ۲ج/۱).
+    script: ep.tts_input || ep.script,
+    stylePrefix: STYLE_DIRECTIVE,
     turns,
     speed: ep.speed || 1,
     voice: voices[ep.engine] || '',

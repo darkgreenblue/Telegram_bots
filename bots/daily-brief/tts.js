@@ -139,6 +139,17 @@ function pricePerChar(model) {
 // شکستن روی مرزِ پاراگراف، و اگر پاراگراف بزرگ‌تر از سقف بود روی مرزِ جمله.
 // جمله‌ای که به‌تنهایی از سقف بزرگ‌تر باشد (عملاً غیرممکن در متنِ گفتاری) ناچار روی
 // مرزِ فاصله بریده می‌شود تا هرگز وسطِ کلمه نشکند.
+// جمله‌ی سبک روی **هر** چانک تکرار می‌شود، نه فقط اولی. دلیلش گزارشِ پرتکرارِ کاربرانِ
+// همین مدل است: هر درخواست پروفایلِ صوتی را از نو می‌سازد، پس چانکی که دستورِ سبک ندارد
+// با لحن و ریتمِ متفاوت خوانده می‌شود و شنونده وسطِ قسمت حسِ عوض شدنِ گوینده می‌گیرد.
+// الگوی «{دستور}: {متن}» مستندِ خودِ مدل است و بخشِ قبل از دو نقطه خوانده نمی‌شود.
+export const withStyle = (prefix, text) => {
+  const p = String(prefix || '').trim();
+  const t = String(text || '').trim();
+  if (!p) return t;
+  return `${p.replace(/:*$/, ':')} ${t}`;
+};
+
 export function chunkText(text, maxChars) {
   const out = [];
   const flush = (s) => { const t = s.trim(); if (t) out.push(t); };
@@ -164,6 +175,10 @@ export function chunkText(text, maxChars) {
         while (rest.length > maxChars) {
           let cut = rest.lastIndexOf(' ', maxChars);
           if (cut <= 0) cut = maxChars;
+          // برشِ سخت نباید وسطِ یک تگِ اجرا بیفتد (تگ فاصله دارد، مثل «[short pause]»):
+          // نصفه‌ی تگ یا بلند خوانده می‌شود یا کلِ چانک را خراب می‌کند.
+          const open = rest.lastIndexOf('[', cut);
+          if (open > -1 && rest.indexOf(']', open) >= cut) cut = open;
           push(rest.slice(0, cut).trim());
           rest = rest.slice(cut).trim();
         }
@@ -330,7 +345,7 @@ async function probeSeconds(path) {
 // خروجی: {buffer, chars, costUsd, seconds, chunks, engine, voice, degraded}
 // degraded یعنی دیالوگ خواسته شده بود ولی موتور چند گوینده ندارد و روایتِ تک‌صدا ساخته شد.
 export async function synthesize({
-  engineKey, script, turns = null, speed = 1, voice = '',
+  engineKey, script, turns = null, speed = 1, voice = '', stylePrefix = '',
   openrouterKey, fetchImpl = fetch, generationCost = null,
 }) {
   if (!openrouterKey) throw new Error('OPENROUTER_API_KEY ست نشده است');
@@ -360,7 +375,8 @@ export async function synthesize({
       const piece = pieces[i];
       chars += piece.length;
       const { buf, genId, pcm } = await synthChunk({
-        apiKey: openrouterKey, modelId, voice: useVoice, text: piece, speed, fetchImpl,
+        apiKey: openrouterKey, modelId, voice: useVoice, text: withStyle(stylePrefix, piece),
+        speed, fetchImpl,
       });
       if (!buf?.length) throw new Error(`چانک ${i + 1} خروجیِ صوتی نداد`);
       const f = join(dir, `p${String(i).padStart(3, '0')}.mp3`);

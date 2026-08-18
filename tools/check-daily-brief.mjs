@@ -114,6 +114,113 @@ ok(/bot\.action\(\/\^\(bake:\|set:eng\)\//.test(idxSrc),
 /* ── ۶ب) کاتالوگِ گوینده‌ها ─────────────────────────────────────────────── */
 // این‌ها ادعای محصولی‌اند، نه سلیقه: شش گزینه (نه بیشتر، وگرنه انتخاب سخت می‌شود)، نیمی
 // مرد و نیمی زن، و هر کدام با یک نامِ فارسیِ یکتا و یک لحن که کنارِ نمونه نشان داده می‌شود.
+/* ── ۶ج) کارگردانِ صدا (ایجنتِ تگ‌گذار) ──────────────────────────────────── */
+// این‌ها گاردِ واقعیِ محصول‌اند: خروجیِ این ایجنت مستقیم به یک سرویسِ پولی می‌رود و
+// اشتباهش را شنونده در گوشش می‌شنود، پس اعتبارسنجی در کد است نه در پرامپت.
+console.log('\n🎭 کارگردانِ صدا');
+const scriptSrcEarly = readFileSync(path.resolve(BOT, 'script.js'), 'utf8');
+const { sanitizeTagged, ALLOWED_TAGS, WORDS_PER_TAG, MAX_TAGS, stripTags, normalizeWords,
+  STYLE_DIRECTIVE, tagScript } = await import(path.resolve(BOT, 'tagger.js'));
+const { withStyle } = await import(path.resolve(BOT, 'tts.js'));
+
+const plain = Array.from({ length: 12 },
+  (_, i) => `این جمله‌ی شماره ${i + 1} از متنِ نمونه است و چند کلمه‌ی ساده دارد.`).join(' ');
+
+// ۱) درج‌کردنِ تگ مجاز است، بازنویسیِ کلمات نه.
+const good = sanitizeTagged(`[curiosity] ${plain}`, plain);
+ok(good.ok, 'درجِ تگ روی متنِ دست‌نخورده پذیرفته می‌شود');
+eq(good.tags, 1, 'همان یک تگ باقی می‌ماند');
+eq(stripTags(good.text).replace(/\s+/g, ' ').trim(), plain, 'کلماتِ گفتنی دقیقاً همان‌اند');
+const rewritten = sanitizeTagged(`[curiosity] ${plain} و یک جمله‌ی اضافه که نویسنده ننوشته بود.`, plain);
+ok(!rewritten.ok, 'اگر کارگردان متن را بازنویسی کند، خروجی رد می‌شود');
+eq(rewritten.text, plain, 'در ردشدن، متنِ اصلی برمی‌گردد نه خروجیِ دستکاری‌شده');
+ok(!sanitizeTagged(plain.replace('ساده', 'پیچیده'), plain).ok, 'حتی عوض شدنِ یک کلمه هم گرفته می‌شود');
+ok(!sanitizeTagged('', plain).ok, 'خروجیِ خالی رد می‌شود');
+ok(sanitizeTagged(`[curiosity] ${plain.replace(/ی/g, 'ي')}`, plain).ok,
+  'تفاوتِ بی‌ضررِ ی/ك عربی دستکاری شمرده نمی‌شود');
+
+// ۲) تگِ ناشناخته حذف می‌شود، حتی اگر اسمش معتبر به نظر برسد.
+const unknown = sanitizeTagged(`[teleport] ${plain}`, plain);
+ok(unknown.ok && unknown.tags === 0, 'تگِ بیرونِ لیستِ سفید حذف می‌شود');
+ok(unknown.dropped > 0, 'حذفِ تگ گزارش می‌شود');
+ok(!/teleport/.test(unknown.text), 'اسمِ تگِ ناشناخته در متن باقی نمی‌ماند');
+
+// ۳) دو تگِ چسبیده ممنوع است (خطای مستندشده‌ی خودِ موتور).
+const adj = sanitizeTagged(`[slow] [curiosity] ${plain}`, plain);
+ok(adj.ok, 'تگِ چسبیده کلِ خروجی را رد نمی‌کند، فقط اصلاح می‌شود');
+eq(adj.tags, 1, 'از دو تگِ چسبیده فقط اولی می‌ماند');
+ok(!/\]\s*\[/.test(adj.text), 'در خروجی هیچ دو تگی کنارِ هم نیست');
+
+// ۴) سقفِ چگالی: تگِ زیاد باعث می‌شود موتور خودِ تگ را بلند بخواند.
+const spammy = plain.split(' ').map((w) => `[enthusiasm] ${w}`).join(' ');
+const capped = sanitizeTagged(spammy, plain);
+ok(capped.ok, 'متنِ پرتگ رد نمی‌شود، هرس می‌شود');
+const words = plain.trim().split(/\s+/).length;
+ok(capped.tags <= Math.max(1, Math.floor(words / WORDS_PER_TAG)),
+  `تعدادِ تگ از سقفِ چگالی بیشتر نمی‌شود (${capped.tags} تگ برای ${words} کلمه)`);
+ok(capped.tags <= MAX_TAGS, 'سقفِ مطلقِ تگ هم رعایت می‌شود');
+
+// ۵) تگِ آخرِ متن هیچ کلمه‌ای برای اجرا ندارد و فقط ریسکِ خوانده‌شدن است.
+const trailing = sanitizeTagged(`${plain} [long pause]`, plain);
+ok(trailing.ok && trailing.tags === 0, 'تگِ چسبیده به انتهای متن حذف می‌شود');
+
+// ۶) فاصله‌ی دورِ تگ (قاعده‌ی مستند: تگ نباید به کلمه بچسبد).
+const glued = sanitizeTagged(`[slow]${plain}`, plain);
+ok(glued.ok && / \[slow\] /.test(` ${glued.text} `), 'تگ از کلمه‌ی بعدی فاصله می‌گیرد');
+
+// ۷) لیستِ سفید عمداً کوچک است و فقط تگ‌های به‌دردخورِ یک پادکستِ آموزشی را دارد.
+ok(ALLOWED_TAGS.length >= 6 && ALLOWED_TAGS.length <= 20,
+  `لیستِ تگ کوچک و قابلِ کنترل است (${ALLOWED_TAGS.length} تگ)`);
+ok(ALLOWED_TAGS.every((t) => /^[a-z ]+$/.test(t)), 'همه‌ی تگ‌ها انگلیسی و کوچک‌اند (قاعده‌ی مستندِ موتور)');
+ok(['slow', 'fast'].every((t) => ALLOWED_TAGS.includes(t)), 'کنترلِ ریتم هست');
+ok(ALLOWED_TAGS.some((t) => /pause/.test(t)), 'کنترلِ مکث هست');
+
+// ۸) جمله‌ی سبک: الگوی مستندِ «{دستور}: {متن}» و تکرارش روی هر چانک.
+ok(/:$/.test(STYLE_DIRECTIVE.trim()), 'جمله‌ی سبک با دو نقطه تمام می‌شود (بخشِ قبلش خوانده نمی‌شود)');
+ok(/persian/i.test(STYLE_DIRECTIVE), 'جمله‌ی سبک صراحتاً زبان را فارسی اعلام می‌کند');
+ok(STYLE_DIRECTIVE.split('\n').length === 1, 'جمله‌ی سبک یک خط است (دستورِ بلند احتمالِ خوانده‌شدنش بیشتر است)');
+eq(withStyle('Read this:', 'سلام'), 'Read this: سلام', 'جمله‌ی سبک به متن می‌چسبد');
+eq(withStyle('Read this', 'سلام'), 'Read this: سلام', 'دو نقطه‌ی جاافتاده خودکار اضافه می‌شود');
+eq(withStyle('', 'سلام'), 'سلام', 'بدونِ جمله‌ی سبک، متن دست‌نخورده می‌رود');
+const styledChunks = chunkText(`${plain}\n\n${plain}`, 200).map((c) => withStyle(STYLE_DIRECTIVE, c));
+ok(styledChunks.length > 1 && styledChunks.every((c) => c.startsWith(STYLE_DIRECTIVE)),
+  'جمله‌ی سبک روی همه‌ی چانک‌ها تکرار می‌شود، نه فقط اولی (ضدِ تغییرِ لحن وسطِ قسمت)');
+
+// ۹) برشِ سختِ چانک نباید وسطِ یک تگ بیفتد (تگِ نصفه یا بلند خوانده می‌شود یا خطا می‌دهد).
+// عمداً طوری چیده شده که نقطه‌ی برشِ سخت دقیقاً روی فاصله‌ی داخلِ «[short pause]» بیفتد:
+// تگ خودش فاصله دارد، پس بدونِ گاردِ براکت، چانک با «[short» تمام می‌شد.
+const tagSplit = `${'ا'.repeat(20)} [short pause] ${'ب'.repeat(40)}`;
+const balanced = (c) => (c.match(/\[/g) || []).length === (c.match(/\]/g) || []).length;
+ok(chunkText(tagSplit, 28).every(balanced), 'برشِ سخت وسطِ تگ نمی‌افتد');
+ok(chunkText(`${'کلمه '.repeat(60)}[short pause] ${'کلمه '.repeat(60)}`, 120).every(balanced),
+  'در متنِ بلندِ بدونِ نقطه هم هیچ چانکی تگِ نصفه ندارد');
+
+// ۱۰) شکستِ ایجنت هرگز قسمت را نمی‌کشد: متنِ بی‌تگ خودش پخش‌شدنی است.
+const deadLlm = { chatResilient: async () => null };
+const fellBack = await tagScript(deadLlm, plain);
+eq(fellBack.text, plain, 'اگر کارگردان جواب ندهد، متنِ اصلی به صدا می‌رود');
+ok(!fellBack.ok, 'شکستِ کارگردان صادقانه گزارش می‌شود');
+const rogueLlm = { chatResilient: async (_s, _u, o) => {
+  const bad = 'یک متنِ کاملاً متفاوت که نویسنده ننوشته بود.';
+  return o?.validate && !o.validate(bad) ? null : { text: bad, usage: { in: 1, out: 1 }, id: 'x', model: 'm' };
+} };
+eq((await tagScript(rogueLlm, plain)).text, plain, 'خروجیِ بازنویسی‌شده حتی از مسیرِ validate هم رد می‌شود');
+const okLlm = { chatResilient: async () => ({ text: `[curiosity] ${plain}`, usage: { in: 5, out: 7 }, id: 'g1', model: 'm' }) };
+const tagged = await tagScript(okLlm, plain);
+ok(tagged.ok && tagged.tags === 1, 'مسیرِ سالم تگ را تحویل می‌دهد');
+eq(tagged.usage.out, 7, 'مصرفِ توکنِ کارگردان برای حسابِ هزینه برمی‌گردد');
+eq(tagged.ids[0], 'g1', 'شناسه‌ی generation برای تسویه‌ی هزینه‌ی واقعی برمی‌گردد');
+
+// ۱۱) سیم‌کشی: نویسنده تگ نمی‌گذارد، پایپ‌لاین متنِ تگ‌خورده را ذخیره و مصرف می‌کند.
+const pipeSrc = readFileSync(path.resolve(BOT, 'pipeline.js'), 'utf8');
+ok(/tagScript\(llm, res\.script\)/.test(pipeSrc), 'کارگردان روی متنِ نویسنده اجرا می‌شود');
+ok(/tts_input=\?/.test(pipeSrc), 'متنِ تگ‌خورده در ستونِ جدا ذخیره می‌شود، نه روی متنِ خوانا');
+ok(/ep\.tts_input \|\| ep\.script/.test(pipeSrc), 'قسمتِ قدیمیِ بدونِ تگ هم قابلِ ساخت می‌ماند (سازگاری با گذشته)');
+ok(/stylePrefix: STYLE_DIRECTIVE/.test(pipeSrc), 'جمله‌ی سبک به موتور پاس داده می‌شود');
+ok(/res\.usage\.in \+ tagged\.usage\.in/.test(pipeSrc), 'هزینه‌ی کارگردان هم روی همان قسمت حساب می‌شود');
+ok(/ALTER TABLE episodes ADD COLUMN tts_input/.test(idxSrc), 'ستونِ تازه با migration افزایشی اضافه می‌شود (بند ۲ج/۱)');
+ok(/براکت|تگ/.test(scriptSrcEarly), 'پرامپتِ نویسنده صریحاً می‌گوید تگ نگذارد');
+
 console.log('\n🗣 گوینده‌ها');
 const { VOICES, DEFAULT_VOICE, SAMPLE_VERSION, sampleText, voiceById, voiceLabel } =
   await import(path.resolve(BOT, 'voices.js'));
