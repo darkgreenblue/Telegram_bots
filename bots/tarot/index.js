@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.9.3';
+const PRODUCT_VERSION = '3.9.4';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1611,10 +1611,11 @@ bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
   try { await ctx.editMessageText(saved); }
   catch { await ctx.reply(saved).catch(() => {}); }
   if (!inOnboarding) return;
+  // UX v2.2 (تصمیمِ صریحِ مالک): پیامِ جداگانه‌ی «از دکمه‌های پایین شروع کن» اینجا حذف
+  // شد — لزومی ندارد، چون `finishOnboarding` همین‌جا کاربر را مستقیم توی منوی فال
+  // می‌گذارد (دکمه‌های اینلاین)، و کیبوردِ اصلی خودش اولین بار که `ensureMenu` صدا زده
+  // می‌شود (پایانِ اولین فال/کارتِ روز/کارتِ شانس) بی‌سروصدا ظاهر می‌شود.
   await finishOnboarding(ctx, uid, { birth_month: m });
-  await typing(ctx, PACE_S);
-  await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid));
-  stmts.setKbShown.run(uid);
 });
 
 bot.action(/^focus:(\w+)$/, async (ctx) => {
@@ -2437,7 +2438,7 @@ bot.action(/^topic:(\w+)$/, async (ctx) => {
   setState(uid, 'choose_spread');
   track(db, uid, 'topic_selected', { topic: t.key });
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.pickSize(t.fa), Markup.inlineKeyboard([
+  await ctx.reply(L.reading.pickSize(getBalance(uid), curOf(uid)), Markup.inlineKeyboard([
     ...SIZES_V3.map(size => [Markup.button.callback(
       L.buttons.topicSize(size), `spread:${spreadIdOf(t.key, size)}`)]),
     ...navMenuRow(),
