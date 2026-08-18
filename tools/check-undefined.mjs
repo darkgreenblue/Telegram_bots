@@ -37,6 +37,7 @@ const TARGETS = [
   'bots/daily-brief/notion.js',
   'bots/daily-brief/script.js',
   'bots/daily-brief/tts.js',
+  'bots/daily-brief/voices.js',
   'bots/daily-brief/pipeline.js',
   'bots/_template/index.js',
   'shared/analytics.js',

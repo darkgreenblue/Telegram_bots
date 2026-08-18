@@ -111,6 +111,47 @@ ok(!/set:eng:\$\{/.test(idxSrc), 'دکمه‌ی انتخابِ موتور دیگ
 ok(/bot\.action\(\/\^\(bake:\|set:eng\)\//.test(idxSrc),
   'دکمه‌های کهنه‌ی داخلِ چت جوابِ مودبانه می‌گیرند (بند ۲ج/۶)');
 
+/* ── ۶ب) کاتالوگِ گوینده‌ها ─────────────────────────────────────────────── */
+// این‌ها ادعای محصولی‌اند، نه سلیقه: شش گزینه (نه بیشتر، وگرنه انتخاب سخت می‌شود)، نیمی
+// مرد و نیمی زن، و هر کدام با یک نامِ فارسیِ یکتا و یک لحن که کنارِ نمونه نشان داده می‌شود.
+console.log('\n🗣 گوینده‌ها');
+const { VOICES, DEFAULT_VOICE, SAMPLE_VERSION, sampleText, voiceById, voiceLabel } =
+  await import(path.resolve(BOT, 'voices.js'));
+eq(VOICES.length, 6, 'دقیقاً شش گوینده');
+eq(VOICES.filter((v) => v.gender === 'male').length, 3, 'سه گوینده‌ی مرد');
+eq(VOICES.filter((v) => v.gender === 'female').length, 3, 'سه گوینده‌ی زن');
+eq(new Set(VOICES.map((v) => v.id)).size, 6, 'شناسه‌ها یکتا هستند (دو ردیف یک صدا نیستند)');
+eq(new Set(VOICES.map((v) => v.name)).size, 6, 'نام‌ها یکتا هستند');
+eq(new Set(VOICES.map((v) => v.tone)).size, 6, 'لحن‌ها هم یکتا هستند (شش گزینه‌ی واقعاً متفاوت)');
+ok(VOICES.every((v) => /^[؀-ۿ\s‌]+$/.test(v.name)), 'نامِ همه‌ی گوینده‌ها فارسی است');
+ok(VOICES.every((v) => v.tone && /[؀-ۿ]/.test(v.tone)), 'هر گوینده لحنِ فارسی دارد');
+ok(VOICES.every((v) => /^[A-Za-z]+$/.test(v.id)), 'شناسه‌ی فنی ASCII است (همان چیزی که به API می‌رود)');
+ok(!!voiceById(DEFAULT_VOICE), 'صدای پیش‌فرض واقعاً در لیست هست');
+eq(voiceById('NoSuchVoice'), null, 'شناسه‌ی ناشناخته null می‌دهد، نه یک صدای تصادفی');
+ok(/پیش‌فرض/.test(voiceLabel('NoSuchVoice')), 'برچسبِ شناسه‌ی ناشناخته کرش نمی‌کند');
+// سقفِ ۶۴ بایتیِ callback_data تلگرام: دکمه‌ی هر گوینده باید جا شود، وگرنه دکمه‌ها ساخته
+// نمی‌شوند و صفحه‌ی انتخاب خالی می‌ماند.
+ok(VOICES.every((v) => Buffer.byteLength(`set:voice:${v.id}`) <= 64), 'callback_data هر گوینده زیرِ ۶۴ بایت است');
+// نمونه باید حدودِ ۱۰ تا ۱۵ ثانیه باشد (با سرعتِ گفتارِ تک‌گوینده). کوتاه‌تر برای قضاوت کافی
+// نیست و بلندتر یعنی شنیدنِ شش نمونه کاری حوصله‌سربر می‌شود.
+for (const v of VOICES) {
+  const words = countWords(sampleText(v));
+  const seconds = (words / WPM.single) * 60;
+  ok(seconds >= 9 && seconds <= 17, `نمونه‌ی ${v.name} حدودِ ده تا پانزده ثانیه است (${seconds.toFixed(0)} ثانیه)`);
+  ok(sampleText(v).includes(v.name), `نمونه‌ی ${v.name} خودش را با اسم معرفی می‌کند`);
+}
+ok(Number.isInteger(SAMPLE_VERSION) && SAMPLE_VERSION >= 1, 'نسخه‌ی نمونه‌ها عددِ صحیح است (کلیدِ کش)');
+
+// سیم‌کشیِ صفحه‌ی انتخاب در خودِ ربات
+ok(/CREATE TABLE IF NOT EXISTS voice_samples/.test(idxSrc), 'جدولِ کشِ نمونه‌ها ساخته می‌شود');
+ok(/SAMPLE_VERSION/.test(idxSrc), 'کشِ نمونه با نسخه کلید می‌خورد، نه فقط با شناسه‌ی صدا');
+ok(/bot\.action\('set:voice'/.test(idxSrc), 'دکمه‌ی «انتخاب گوینده» در تنظیمات هندلر دارد');
+ok(/bot\.action\(\/\^set:voice:\(\[A-Za-z\]\+\)\$\//.test(idxSrc), 'انتخابِ هر گوینده هندلر دارد');
+ok(/voices: \{ \[TTS_MODEL\]: currentVoice\(\) \}/.test(idxSrc),
+  'صدای انتخابی واقعاً به پایپ‌لاین می‌رسد (نه فقط در تنظیمات ذخیره می‌شود)');
+ok(/replyWithAudio/.test(idxSrc), 'نمونه‌ها به‌صورت فایلِ صوتیِ قابلِ پخش فرستاده می‌شوند');
+ok(/samplesBuilding/.test(idxSrc), 'دوبار زدنِ دکمه نمونه‌ها را دوبار نمی‌سازد (گاردِ هزینه)');
+
 // کشفِ وسیع‌تر: فیلترِ speech لزوماً همه‌ی مدل‌های خروجی‌صوتی را نمی‌دهد (کاتالوگِ واقعی
 // فقط یک مدلِ گوگل در آن فیلتر داشت)، پس کلِ کاتالوگ هم اسکن می‌شود.
 const merged = await listSpeechModels({
@@ -450,7 +491,7 @@ const stripComments = (src) => src.split('\n').map((line) => {
   if (/^\s*(\/\/|\*|\/\*|--)/.test(line)) return '';
   return line.replace(/\s\/\/.*$/, '').replace(/\s--\s.*$/, '');
 });
-for (const f of ['index.js', 'script.js', 'notion.js', 'pipeline.js', 'tts.js']) {
+for (const f of ['index.js', 'script.js', 'notion.js', 'pipeline.js', 'tts.js', 'voices.js']) {
   const bad = stripComments(readFileSync(path.resolve(BOT, f), 'utf8'))
     .map((line, i) => ({ line, n: i + 1 }))
     .filter(({ line }) => /[—–]|(?<!-)--(?!-)/.test(line));

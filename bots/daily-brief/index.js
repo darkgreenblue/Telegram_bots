@@ -19,6 +19,7 @@ import { ensureAb } from '../../shared/ab.js';
 import { createLLM, wordTarget } from './script.js';
 import { createNotion, pickNextLesson, notionErrorFa } from './notion.js';
 import { engineLabel, synthesize } from './tts.js';
+import { VOICES, DEFAULT_VOICE, SAMPLE_VERSION, sampleText, voiceById } from './voices.js';
 import {
   bake, deliver, claimDaily, createEpisode, recoverStuck, refreshRoadmap,
   tehranNow, hhmmToMinutes, PipelineError,
@@ -38,7 +39,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true;
-const PRODUCT_VERSION = '1.1.0';
+const PRODUCT_VERSION = '1.2.0';
 
 const FLASH = 'google/gemini-2.5-flash';
 // موتورِ صدا (ثابت، بعد از مقایسه‌ی واقعی انتخاب شد)
@@ -135,6 +136,15 @@ db.exec(`
   );
   -- گاردِ «روزی یک قسمت»: ری‌استارت یا دو تیکِ هم‌زمانِ زمان‌بند دو قسمت نمی‌سازد.
   CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_daily_once ON episodes(date) WHERE kind='daily';
+  -- نمونه‌های صوتیِ گوینده‌ها: یک بار ساخته می‌شوند و بعد فقط file_id فرستاده می‌شود.
+  -- بدونِ این جدول، هر بار باز کردنِ صفحه‌ی انتخابِ گوینده شش فراخوانیِ پولیِ تازه بود.
+  CREATE TABLE IF NOT EXISTS voice_samples (
+    voice_id   TEXT NOT NULL,
+    version    INTEGER NOT NULL DEFAULT 1,
+    file_id    TEXT NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    PRIMARY KEY (voice_id, version)
+  );
   -- جدولِ خالیِ هم‌قرارداد داشبورد (این ربات پول ندارد؛ فقط تا ردیفِ رجیستری خطا ندهد)
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
@@ -171,7 +181,9 @@ const DEFAULTS = {
   // در settings می‌ماند تا ردیفِ هر قسمت بداند با چه موتوری ساخته شده (تاریخچه‌ی هزینه)،
   // ولی دیگر از اینترفیس قابلِ تغییر نیست. عوض کردنش = همین یک خط.
   engine: TTS_MODEL,
-  voices: {},
+  // نگاشتِ موتور به صدا. کلیدْ موتور است چون هر موتور صداهای خودش را دارد و اگر روزی
+  // موتور عوض شود، صدای انتخابیِ قبلی نباید بی‌صدا به موتورِ جدید پاس داده شود.
+  voices: { [TTS_MODEL]: DEFAULT_VOICE },
   speed: 1,
   tomorrow: null,
 };
@@ -184,6 +196,16 @@ function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
     .run(key, JSON.stringify(value));
 }
+// صدای فعلی. شناسه‌ی ناشناخته (مثلاً بعد از حذفِ یک گوینده از کاتالوگ) به پیش‌فرض برمی‌گردد
+// تا هیچ‌وقت شناسه‌ای که موتور نمی‌شناسد به API نرود.
+function currentVoice() {
+  const picked = (getSetting('voices') || {})[TTS_MODEL];
+  return voiceById(picked) ? picked : DEFAULT_VOICE;
+}
+function setVoice(id) {
+  setSetting('voices', { ...(getSetting('voices') || {}), [TTS_MODEL]: id });
+}
+
 // تنظیماتِ مؤثرِ یک روز: override فردا > مدتِ همان روزِ هفته > مدتِ پیش‌فرض.
 function effectiveSettings(dayKey, date) {
   const tomorrow = getSetting('tomorrow');
@@ -195,7 +217,9 @@ function effectiveSettings(dayKey, date) {
     // موتور دیگر خواندنی از settings نیست: مقدارِ ذخیره‌شده از دورانِ انتخابِ موتور مانده و
     // اگر خوانده شود، ربات بی‌صدا با موتورِ قدیمیِ همان ردیف کار می‌کند.
     engine: TTS_MODEL,
-    voices: getSetting('voices'),
+    // همیشه از currentVoice می‌آید، نه خامِ settings: ردیفِ ذخیره‌شده ممکن است از قبل از
+    // وجودِ انتخابِ گوینده مانده و خالی باشد، و آن‌وقت صدا بی‌صدا به حدسِ خانواده می‌افتاد.
+    voices: { [TTS_MODEL]: currentVoice() },
     speed: getSetting('speed'),
     skip: !!override?.skip,
     hasOverride: !!override,
@@ -217,6 +241,11 @@ const T = {
   noNotion: '🔌 اتصال Notion هنوز وصل نیست.\n\nSecret به نام DAILY_BRIEF_NOTION_TOKEN را در گیت‌هاب بساز و پیجِ «دستیار آموزشی» را با همان Integration به اشتراک بگذار.',
   building: '🎙 دارم می‌سازم، چند دقیقه طول می‌کشه.',
   busy: '⏳ یه قسمت همین الان در حال ساخته. تمام که شد خبر می‌دم.',
+  samplesBuilding: (n) => `🎙 دارم ${fa(n)} نمونه‌ی صوتی می‌سازم، یه لحظه صبر کن.\nاین کار فقط یک بار انجام می‌شه؛ دفعه‌ی بعد نمونه‌ها فوری میان.`,
+  samplesBusy: '⏳ نمونه‌ها همین الان در حال ساخته شدنه. چند لحظه‌ی دیگه دوباره بزن.',
+  sampleFailed: (v) => `🎙 ${v.name} (${v.tone})\nنمونه‌ی این صدا الان ساخته نشد، ولی می‌تونی از دکمه‌های پایین انتخابش کنی.`,
+  voicePick: '🗣 هر شش نمونه رو گوش بده و صدایی که دوست داری رو از دکمه‌های پایین انتخاب کن 👇',
+  voicePicked: (v) => `✅ صدای ${v.name} انتخاب شد.\nاز قسمتِ بعدی با همین صدا می‌شنوی. هر وقت خواستی از همین‌جا عوضش کن.`,
   episodeCaption: (ep) => {
     const cost = (ep.llm_cost_usd || 0) + (ep.tts_cost_usd || 0);
     const lines = [`🎧 ${ep.title || ep.lesson_title || 'قسمت روزانه'}`];
@@ -461,11 +490,12 @@ function settingsView() {
     text: `⚙️ تنظیمات\n\n⏰ ساعت ارسال: ${getSetting('send_time')}\n` +
       `📅 روزها: ${daysFa(getSetting('days'))}\n` +
       `⏱ مدت: ${fa(getSetting('duration_min'))} دقیقه${perDay}\n` +
-      `🎙 قالب: ${getSetting('format') === 'dialogue' ? 'گفت‌وگوی دونفره' : 'تک‌گوینده'}${tm}`,
+      `🎙 قالب: ${getSetting('format') === 'dialogue' ? 'گفت‌وگوی دونفره' : 'تک‌گوینده'}\n` +
+      `🗣 گوینده: ${voiceById(currentVoice())?.name || '؟'} (${voiceById(currentVoice())?.tone || ''})${tm}`,
     keyboard: Markup.inlineKeyboard([
       [Markup.button.callback('⏰ ساعت ارسال', 'set:time'), Markup.button.callback('📅 روزها', 'set:days')],
       [Markup.button.callback('⏱ مدت', 'set:dur'), Markup.button.callback('🌙 فقط فردا', 'set:tmr')],
-      [Markup.button.callback('🎙 قالب', 'set:fmt')],
+      [Markup.button.callback('🎙 قالب', 'set:fmt'), Markup.button.callback('🗣 انتخاب گوینده', 'set:voice')],
     ]),
   };
 }
@@ -626,8 +656,84 @@ bot.action('set:fmt:single', async (ctx) => {
   await showSettings(ctx, true);
 });
 bot.action('set:fmt:soon', async (ctx) => {
-  await ctx.answerCbQuery('اول کیفیتِ فارسیِ صداها را در «مقایسه‌ی صداها» می‌سنجیم، بعد این باز می‌شود.',
+  await ctx.answerCbQuery('گفت‌وگوی دونفره هنوز آماده نیست؛ به‌زودی باز می‌شود.',
     { show_alert: true }).catch(() => {});
+});
+
+// ── انتخابِ گوینده ──
+// شش صدا، سه مرد و سه زن، عمداً دور از هم (کاتالوگ و دلیلش: voices.js).
+// نمونه‌ها **یک بار** ساخته و file_id شان کش می‌شود: باز کردنِ دوباره‌ی این صفحه هیچ
+// هزینه‌ای ندارد و فوری است. ساختِ نمونه پشتِ تپِ صریحِ کاربر است (قاعده‌ی هزینه، بند ۹).
+let samplesBuilding = false;
+
+const cachedSample = (voiceId) => db
+  .prepare('SELECT file_id FROM voice_samples WHERE voice_id=? AND version=?')
+  .get(voiceId, SAMPLE_VERSION)?.file_id || '';
+const saveSample = (voiceId, fileId) => db
+  .prepare(`INSERT INTO voice_samples (voice_id, version, file_id) VALUES (?,?,?)
+            ON CONFLICT(voice_id, version) DO UPDATE SET file_id=excluded.file_id`)
+  .run(voiceId, SAMPLE_VERSION, fileId);
+
+const voiceKeyboard = () => {
+  const cur = currentVoice();
+  return Markup.inlineKeyboard([
+    ...chunk(VOICES.map((v) => Markup.button.callback(
+      `${v.id === cur ? '✅ ' : ''}${v.name}`, `set:voice:${v.id}`)), 2),
+    backRow,
+  ]);
+};
+
+// هر نمونه یک پیامِ صوتیِ جدا با نام و لحن در کپشن، تا زیرِ هر فایل معلوم باشد کدام صداست.
+// شکستِ یک نمونه بقیه را نمی‌کشد: کاربر باید بتواند از بینِ همان‌هایی که آمدند انتخاب کند.
+async function sendVoiceSamples(ctx) {
+  for (const v of VOICES) {
+    const caption = `🎙 ${v.name}\n${v.tone}`;
+    const extra = { caption, title: v.name, performer: v.tone };
+    try {
+      const cached = cachedSample(v.id);
+      if (cached) { await ctx.replyWithAudio(cached, extra); continue; }
+      const out = await synthesize({
+        engineKey: TTS_MODEL, script: sampleText(v), voice: v.id,
+        openrouterKey: OPENROUTER_API_KEY,
+      });
+      const msg = await ctx.replyWithAudio({ source: out.buffer, filename: `${v.id}.mp3` }, extra);
+      if (msg?.audio?.file_id) saveSample(v.id, msg.audio.file_id);
+    } catch (e) {
+      logErr('❌ VOICE_SAMPLE', v.id, e.message);
+      await ctx.reply(T.sampleFailed(v)).catch(() => {});
+    }
+  }
+}
+
+async function showVoicePicker(ctx) {
+  if (samplesBuilding) { await ctx.reply(T.samplesBusy); return; }
+  const missing = VOICES.filter((v) => !cachedSample(v.id)).length;
+  samplesBuilding = true;
+  try {
+    if (missing) await ctx.reply(T.samplesBuilding(missing));
+    await sendVoiceSamples(ctx);
+    await ctx.reply(T.voicePick, voiceKeyboard());
+  } finally {
+    samplesBuilding = false;
+  }
+}
+
+bot.action('set:voice', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await showVoicePicker(ctx);
+});
+bot.action(/^set:voice:([A-Za-z]+)$/, async (ctx) => {
+  const v = voiceById(ctx.match[1]);
+  // دکمه‌ی کهنه‌ی یک گوینده‌ی حذف‌شده نباید شناسه‌ی ناشناخته را به موتور بفرستد (بند ۲ج/۶).
+  if (!v) {
+    await ctx.answerCbQuery('این گوینده دیگر در لیست نیست؛ یکی از گزینه‌های فعلی را انتخاب کن.',
+      { show_alert: true }).catch(() => {});
+    return;
+  }
+  setVoice(v.id);
+  track(db, ctx.from.id, 'settings_changed', { key: 'voice', voice: v.id });
+  await ctx.answerCbQuery(`${v.name} انتخاب شد ✅`).catch(() => {});
+  await ctx.editMessageText(T.voicePicked(v), voiceKeyboard()).catch(() => {});
 });
 
 // ── موتورِ صدا: دیگر انتخابی نیست ──
@@ -646,6 +752,7 @@ bot.command('cost', showCost);
 bot.command('now', askBuildNow);
 bot.command('roadmap', showRoadmap);
 bot.command('settings', (ctx) => showSettings(ctx, false));
+bot.command('voice', showVoicePicker);
 // راهِ نجات وقتی پیامِ خطا با دکمه‌ی تلاشِ دوباره گم شده باشد.
 bot.command('retry', async (ctx) => {
   const ep = db.prepare("SELECT * FROM episodes WHERE status='failed' ORDER BY id DESC LIMIT 1").get();
