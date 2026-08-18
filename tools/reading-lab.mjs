@@ -102,6 +102,10 @@ async function runStep(persona, step, i, state) {
   const ctx = buildReadingCtx({
     user, spread, question: step.question, cards, focusKey: persona.focus, L,
     name: persona.name,
+    // UX v2: نام به مدل داده **نمی‌شود** و کد خودش یک بار اولِ سرخط می‌گذاردش.
+    // آزمایشگاه باید همین را بسنجد، وگرنه تکرارِ نام را در متنی می‌سنجیم که
+    // کاربر اصلاً نمی‌بیند.
+    hideName: true,
     kbOn: true,                 // لحنِ جدید برای همه روشن است (toneV2)
     prev: state.prev.slice(0, 4),
   });
@@ -144,7 +148,7 @@ async function runStep(persona, step, i, state) {
   parsed = rep.llm;
   const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
 
-  const rendered = renderV4(parsed, cards, labels);
+  const rendered = renderV4(parsed, cards, labels, { name: persona.name });
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
   // نباید بابتِ یک باگِ ابزار از بین برود (درسِ کرشِ اجرای دوم).
   let check;

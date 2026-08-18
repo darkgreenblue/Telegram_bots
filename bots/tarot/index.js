@@ -18,7 +18,7 @@ import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
-import SPREADS, { DAILY, SPREAD_BY_ID, spreadsFor, faOf } from './spreads.js';
+import SPREADS, { DAILY, SPREAD_BY_ID, SPREADS_V3, spreadsFor, faOf } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
@@ -31,13 +31,14 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
+import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, NO_REPEAT_DAYS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
 import {
   FLASH, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose,
-  seedToInt, shuffledDeck, drawCards, tehranToday,
+  seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4,
 } from './reading-core.js';
@@ -165,7 +166,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.7.0';
+const PRODUCT_VERSION = '3.8.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -277,6 +278,31 @@ const AUDIO_DIRECT_ENABLED = true;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isAdmin(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
+// 🧭 UX v2 (v3.8.0) — بازطراحیِ بنیادیِ سفرِ کاربر
+// ───────────────────────────────────────────────────────────────────────────
+// یک پرچم برای **کلِ** بازطراحی، نه یکی per تغییر. دلیل: این ده تغییر به هم وابسته‌اند
+// (ماهِ تولد ورودیِ کارتِ روز است، سکه واحدِ کاتالوگِ جدید است، حذفِ موضوع یعنی کاتالوگِ
+// جدید). اگر هرکدام پرچمِ خودش را داشت، ترکیب‌های نیمه‌روشن ممکن می‌شد که هیچ‌وقت تست
+// نشده‌اند. یک پرچم یعنی دقیقاً دو حالتِ ممکن: دنیای قدیم، یا دنیای نو.
+//
+// چه چیزی عوض می‌شود:
+//   ۱) آنبوردینگ: «ذهنت درگیر چیه؟» → «ماه تولدت چیه؟»
+//   ۲) کاتالوگ: موضوع‌ها حذف؛ فقط سه فال بر اساسِ **اندازه** (۳/۵/۱۰ کارت)
+//   ۳) کاربر **همه‌ی** کارت‌ها را خودش می‌چیند (نه سه‌تا و بقیه خودکار)
+//   ۴) کیف پول → سکه‌فروشی با سه بسته
+//   ۵) هدیه‌ها و پاداش‌ها به سکه
+//   ۶) کارتِ روز: انتخابِ کارت توسط کاربر + متنِ از-پیش-نوشته (بدونِ LLM)
+//
+// ⚠️ فعلاً فقط ادمین. باز کردن برای همه = `UX_V2_ADMIN_ONLY = false` در یک PR جدا.
+// Rollback فوری: `UX_V2 = false` → همه‌چیز دقیقاً به سفرِ قبلی برمی‌گردد. ستونِ
+// جدیدِ `users.birth_month` و جدولِ `daily_log` می‌مانند ولی خوانده نمی‌شوند، پس
+// مهاجرتِ برگشتی لازم نیست (بند ۲ج/۱: فقط افزایشی). ستونِ `coins` عمداً ساخته نشد:
+// موجودی همچنان تومان است و سکه فقط واحدِ نمایش (بند ۹ ریشه، منبعِ حقیقتِ پول یکی است).
+const UX_V2 = true;
+const UX_V2_ADMIN_ONLY = true;
+const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isAdmin(uid));
+
+// ───────────────────────────────────────────────────────────────────────────
 // 🪙 اقتصادِ سکه (v3.0.0)
 // ───────────────────────────────────────────────────────────────────────────
 // موجودیِ داخلی **همچنان تومان** است (منبعِ حقیقتِ پول عوض نمی‌شود؛ بند ۹ ریشه). سکه فقط
@@ -296,7 +322,9 @@ const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || is
 const COIN_ECONOMY = false;
 const COIN_ECONOMY_ADMIN_ONLY = true;
 const COIN_VALUE = 10_000;   // ارزشِ داخلیِ هر سکه به تومان (= قیمتِ یک کارت)
-const coinsOn = (uid) => COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isAdmin(uid));
+// UX v2 ذاتاً سکه‌ای است (کاتالوگ و سکه‌فروشی هر دو به سکه حرف می‌زنند)، پس پرچمِ
+// جداگانه‌ی سکه را هم روشن می‌کند. پرچمِ قدیم برای دنیای قبل سرِ جایش می‌ماند.
+const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isAdmin(uid)));
 
 // آزمایشِ نامِ واحد (سکه در برابر فال‌گیر) **منحل شد**: «فال‌گیر» در عمل بد جا می‌افتاد.
 // واحد از این به بعد فقط «سکه 🪙» است. کلید را نگه می‌داریم تا بتوانیم آزمایش را در DB
@@ -312,8 +340,12 @@ function curOf(uid) {
 // اعتباری است که به کیف‌پول اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر سکه را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
 const COIN_PACKAGES = [
-  { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 50_000 },
-  { key: 'gold',   fa: 'بسته‌ی طلایی',  emoji: '🥇', coins: 30,  toman: 70_000 },
+  // ⚠️ قیمت‌های UX v2 (تصمیمِ مالک ۱۴۰۵/۰۵/۲۷). این یک **کاهشِ قیمتِ واقعی** است، نه
+  // فقط تغییرِ بسته‌بندی: هر سکه از ۱۰٬۰۰۰ تومان به ۳٬۰۰۰ / ۲٬۰۰۰ / ۱٬۵۰۰ می‌رسد، یعنی
+  // فالِ سه‌کارتی از ۳۰٬۰۰۰ به ۹٬۰۰۰ تا ۴٬۵۰۰ تومان. قبل از باز کردن برای کاربرِ واقعی
+  // این عدد باید دوباره دیده شود.
+  { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 30_000 },
+  { key: 'gold',   fa: 'بسته‌ی طلایی',  emoji: '🥇', coins: 30,  toman: 60_000 },
   { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
@@ -346,8 +378,18 @@ const STREAK_REWARD    = 5_000;
 const REFERRAL_BONUS   = 10_000;
 // در اقتصادِ سکه هدیه‌ی دعوت **هم‌اندازه‌ی هدیه‌ی خوش‌آمد** است (۳ سکه = یک فالِ کامل):
 // یعنی هر دعوتِ موفق دقیقاً یک فال به دعوت‌کننده می‌دهد، که پیامِ ساده‌ای برای گفتن دارد.
+// UX v2: پاداشِ دعوت ۱۰ سکه برای **دعوت‌کننده**. دعوت‌شده فقط همان هدیه‌ی خوش‌آمد را
+// می‌گیرد و پاداشِ اضافه ندارد (تصمیمِ صریحِ مالک).
 const REFERRAL_BONUS_COINS = 3;
-const referralBonusFor = (uid) => (coinsOn(uid) ? REFERRAL_BONUS_COINS * COIN_VALUE : REFERRAL_BONUS);
+const REFERRAL_BONUS_COINS_V2 = 10;
+const referralBonusFor = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2 * COIN_VALUE
+  : coinsOn(uid) ? REFERRAL_BONUS_COINS * COIN_VALUE : REFERRAL_BONUS);
+// هدیه‌ی خوش‌آمد: ۵ سکه در UX v2 (به‌جای ۳۰٬۰۰۰ تومان که ۳ سکه بود)
+const WELCOME_BONUS_COINS_V2 = 5;
+const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_VALUE : WELCOME_BONUS);
+// جایزه‌ی کارتِ روز: ۱ سکه، روزی یک بار. اهرمِ عادتِ روزانه (بند ۱۰ ریشه: قلابِ بازگشت
+// باید در خودِ محصول باشد نه فقط در پوش).
+const DAILY_COIN_REWARD = 1 * COIN_VALUE;
 // تخفیفِ اولین پرداخت (v2.0.0): ۲۰٪، **فقط روی فالِ رزروشده‌ی همان لحظه** و بدون سقف.
 // دیگر کدی کپی نمی‌شود: دکمه‌ی «تخفیف می‌خوام» یک پیامِ کوتاهِ اطلاع‌رسانی می‌دهد و بلافاصله
 // خودِ فاکتورِ تخفیف‌خورده را می‌فرستد. شارژِ کیف‌پول عمداً تخفیف نمی‌گیرد (فرایندِ جداست).
@@ -443,6 +485,20 @@ db.exec(`
     file_id    TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  -- 🎴 دفترِ کارتِ روز (UX v2). یک ردیف per کاربر per روز، و همین یک جدول **هر دو**
+  -- قاعده‌ی عدم‌تکرار را جواب می‌دهد: کارت‌های ۷ روزِ اخیر (فیلترِ date) و نسخه‌هایی که
+  -- کاربر از یک کارتِ مشخص دیده (فیلترِ card_key). کلیدِ اصلی (user_id, date) خودش
+  -- گاردِ «روزی یک بار» است، پس دوبار-تپ نمی‌تواند دو ردیف بسازد.
+  CREATE TABLE IF NOT EXISTS daily_log (
+    user_id    INTEGER NOT NULL,
+    date       TEXT    NOT NULL,
+    card_key   TEXT    NOT NULL,
+    reversed   INTEGER NOT NULL DEFAULT 0,
+    variant    INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_id, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_daily_log_user_card ON daily_log(user_id, card_key);
   CREATE TABLE IF NOT EXISTS daily_texts (
     card_key   TEXT    NOT NULL,
     reversed   INTEGER NOT NULL,
@@ -496,6 +552,16 @@ try { db.prepare("ALTER TABLE users ADD COLUMN last_quiz_date TEXT NOT NULL DEFA
 try { db.prepare("ALTER TABLE users ADD COLUMN last_coffee_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration: سقف مبلغ تخفیف per کد (۲۰٪ تا سقف ۱۰۰k برای کد شخصی کارت روز)
 try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTEGER').run(); } catch {}
+// ── UX v2 (v3.8.0) — همه افزایشی، همه با پیش‌فرضی که رفتارِ قدیم را عوض نمی‌کند ──
+// ماهِ تولد (۱..۱۲ شمسی، ۰ = نپرسیده). جایگزینِ `focus_area` در آنبوردینگ شد، ولی
+// خودِ focus_area **پاک نشد**: دیتای تاریخیِ همه‌ی کاربرانِ فعلی آن‌جاست و تحلیل‌های
+// قبلی رویش نشسته‌اند (بند ۲ج/۱ و ۲ج/۳).
+try { db.prepare('ALTER TABLE users ADD COLUMN birth_month INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// ⚠️ ستونِ `coins` عمداً ساخته **نشد**. اولین طرح یک ستونِ جدا داشت، ولی ماشینِ سکه‌ی
+// v3.0.0 از قبل جواب را داشت: موجودی همیشه **تومان** می‌ماند و سکه فقط واحدِ نمایش است
+// (`coins = balance / COIN_VALUE`). بسته‌ها هم با کرِدیتِ `coins × COIN_VALUE` و پرداختِ
+// کمتر، تخفیفشان را می‌سازند. ستونِ دومِ پول یعنی دو منبعِ حقیقتِ پول، و بند ۹ ریشه
+// دقیقاً همین را ممنوع کرده.
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
 try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); } catch {}
 // کاربرِ «بی‌اعتماد»: بعد از یک برگشتِ پرداخت (رسیدِ فیک)، ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
@@ -565,12 +631,20 @@ const stmts = {
   getUser:    db.prepare('SELECT * FROM users WHERE telegram_id=?'),
   setState:   db.prepare('UPDATE users SET state=?, last_seen=unixepoch() WHERE telegram_id=?'),
   setFocus:   db.prepare('UPDATE users SET focus_area=?, focus_asked_at=unixepoch() WHERE telegram_id=?'),
+  // UX v2: ماهِ تولد. `focus_asked_at` هم مهر می‌خورد چون همین سؤال جای آن یکی نشسته و
+  // تحلیل‌های «آنبوردینگ تمام شد» نباید بشکنند (بند ۲ج/۳: فقط اضافه کن، معنا را عوض نکن).
+  setBirthMonth: db.prepare('UPDATE users SET birth_month=?, focus_asked_at=unixepoch() WHERE telegram_id=?'),
   setDisplayName: db.prepare('UPDATE users SET display_name=? WHERE telegram_id=?'),
   setWelcomed: db.prepare('UPDATE users SET welcomed=1 WHERE telegram_id=?'),
   // گاردِ اتمیک داخلِ خودِ UPDATE: فقط وقتی هنوز NULL است می‌نویسد، پس دوبار-تپ اثری ندارد
   claimGate: db.prepare('UPDATE users SET joined_gate_at=unixepoch() WHERE telegram_id=? AND joined_gate_at IS NULL'),
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
+  // 🎴 دفترِ کارتِ روز (UX v2). یک جدول، هر دو قاعده‌ی عدم‌تکرار.
+  recentDailyCards: db.prepare('SELECT card_key FROM daily_log WHERE user_id=? AND date >= ?'),
+  seenDailyVariants: db.prepare('SELECT variant FROM daily_log WHERE user_id=? AND card_key=?'),
+  // OR IGNORE: کلیدِ (user_id, date) گاردِ «روزی یک بار» است، پس دوبار-تپ ردیفِ دوم نمی‌سازد
+  logDaily: db.prepare('INSERT OR IGNORE INTO daily_log (user_id, date, card_key, reversed, variant) VALUES (?,?,?,?,?)'),
   setHafez:   db.prepare('UPDATE users SET last_hafez_date=? WHERE telegram_id=?'),
   setEstekhare: db.prepare('UPDATE users SET estekhare_date=?, estekhare_count=? WHERE telegram_id=?'),
   setQuiz:    db.prepare('UPDATE users SET last_quiz_date=? WHERE telegram_id=?'),
@@ -875,7 +949,7 @@ async function typing(ctx, ms, action = 'typing') {
 function mainKeyboard(uid) {
   const rows = [
     [L.buttons.daily, L.buttons.reading],
-    [L.buttons.wallet, L.buttons.inviteMain],
+    [uxV2For(uid) ? L.buttons.coinShop : L.buttons.wallet, L.buttons.inviteMain],
   ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
   rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
@@ -884,7 +958,7 @@ function mainKeyboard(uid) {
 }
 
 // تا پایان آنبوردینگ (نوشتن نام + پاسخ به حوزه‌ی تمرکز)، کاربر نباید بتواند با دکمه‌ها مرحله را رد کند.
-const ONBOARDING_STATES = ['onboard_name', 'onboard_focus'];
+const ONBOARDING_STATES = ['onboard_name', 'onboard_focus', 'onboard_month'];
 // اگر کاربر وسط آنبوردینگ روی یک دکمه‌ی اصلی زد (کیبوردِ کش‌شده یا تایپِ دستی)، به‌جای اجرا،
 // همان قدمِ فعلیِ آنبوردینگ دوباره یادآوری می‌شود. خروجی true = بلاک شد.
 async function blockDuringOnboarding(ctx) {
@@ -892,12 +966,23 @@ async function blockDuringOnboarding(ctx) {
   if (!ONBOARDING_STATES.includes(st)) return false;
   if (st === 'onboard_name') {
     await ctx.reply(L.onboarding.askNameRetry, Markup.removeKeyboard());
+  } else if (st === 'onboard_month') {
+    await askBirthMonth(ctx);
   } else {
     await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
       L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
     ));
   }
   return true;
+}
+
+// 🗓 سؤالِ ماهِ تولد. دو ستونی چیده می‌شود: دوازده دکمه در یک ستون شش صفحه می‌شود.
+async function askBirthMonth(ctx) {
+  const rows = [];
+  for (let i = 0; i < 12; i += 2) {
+    rows.push([i, i + 1].map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
+  }
+  await ctx.reply(L.onboarding.askBirthMonth, Markup.inlineKeyboard(rows));
 }
 
 // 🧭 ردیفِ «بازگشت به منو» برای استیت‌های میانیِ فلو (خالی وقتی گارد خاموش است تا رفتار عیناً قبلی شود).
@@ -984,6 +1069,7 @@ function readingCtxFor(user, spread, question, cards, focusKey) {
     user, spread, question, cards, focusKey, L,
     name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
     kbOn: toneV2For(user.telegram_id),
+    hideName: uxV2For(user.telegram_id),
     // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
     prev: stmts.lastDelivered.all(user.telegram_id, 4),
   });
@@ -1191,7 +1277,7 @@ bot.catch(async (err, ctx) => {
 // برچسبِ دکمه‌های کیبوردِ ماندگار را می‌دهیم تا «زدنِ دکمه» از «تایپِ آزاد» تفکیک شود، و
 // نامِ نمایشیِ کاربر را می‌دهیم تا از متنِ پیام حذف شود و کلیدِ صفحه برای همه یکی بماند.
 const KB_LABELS = new Set([
-  L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.inviteMain,
+  L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.coinShop, L.buttons.inviteMain,
   L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
 ].filter(Boolean));
 registerJourney(bot, {
@@ -1209,8 +1295,9 @@ function grantWelcomeBonus(uid) {
   try {
     const done = stmts.claimWelcomeBonus.run(uid).changes;
     if (!done) return false;
-    stmts.credit.run(WELCOME_BONUS, uid);
-    track(db, uid, 'credit_granted', { amount: WELCOME_BONUS, kind: 'welcome' });
+    const wb = welcomeBonusFor(uid);
+    stmts.credit.run(wb, uid);
+    track(db, uid, 'credit_granted', { amount: wb, kind: 'welcome' });
     return true;
   } catch (e) { logErr('welcome bonus:', e.message); return false; }
 }
@@ -1257,14 +1344,14 @@ async function showGate(ctx, uid, refBonus = false) {
   setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
   await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
-  await ctx.reply(L.onboarding.gateJoin(WELCOME_BONUS, curOf(uid)), gateKeyboard());
+  await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid)), gateKeyboard());
 }
 
 // بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
 // گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
 async function startOnboarding(ctx, uid, refBonus) {
   grantWelcomeBonus(uid);
-  await ctx.reply(L.onboarding.welcomeGift(WELCOME_BONUS, curOf(uid)), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
@@ -1318,7 +1405,10 @@ async function handleStart(ctx) {
   // کاربر برگشتی
   setState(uid, 'idle');
   setSession(uid, null);
-  let msg = L.returning.greeting(dispName(user), getBalance(uid), curOf(uid));
+  // UX v2: موجودی از پیامِ بازگشت حذف شد — عددِ پول اولین چیزی نباشد که کاربر می‌بیند.
+  let msg = uxV2For(uid)
+    ? L.returning.greetingV2(dispName(user))
+    : L.returning.greeting(dispName(user), getBalance(uid), curOf(uid));
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
@@ -1418,11 +1508,48 @@ async function finishNameOnboarding(ctx, rawName) {
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
+  // UX v2: ماهِ تولد جای حوزه‌ی تمرکز را گرفت. حوزه‌ی تمرکز کاربر را از همان اول به یک
+  // موضوع بایاس می‌کرد؛ ماهِ تولد عوض نمی‌شود و کارتِ روز را برای همیشه شخصی می‌کند.
+  if (uxV2For(uid)) {
+    setState(uid, 'onboard_month');
+    return askBirthMonth(ctx);
+  }
   setState(uid, 'onboard_focus');
   await ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
     L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
   ));
 }
+
+// همان مسیرِ پایانیِ آنبوردینگ برای هر دو نسل (حوزه‌ی تمرکز و ماهِ تولد): استیت، رویداد،
+// و دو دکمه‌ی ورود. عمداً یک تابع است تا اگر فردا این پایان عوض شد، یک جا عوض شود.
+async function finishOnboarding(ctx, uid, props) {
+  await typing(ctx, PACE_M);
+  setState(uid, 'idle');
+  track(db, uid, EVENTS.ONBOARD_DONE, props);
+  const ctaRows = [
+    [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
+    [Markup.button.callback(L.buttons.startPopular(), uxV2For(uid) ? 'spread:three' : 'spread:love')],
+  ];
+  if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+  ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
+  await ctx.reply(L.onboarding.expectations(toneV2For(uid)), Markup.inlineKeyboard(ctaRows));
+}
+
+bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const m = parseInt(ctx.match[1], 10);
+  if (!(m >= 1 && m <= 12)) return;
+  stmts.setBirthMonth.run(m, uid);
+  const inOnboarding = getState(uid) === 'onboard_month';
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.onboarding.birthMonthSaved(monthFa(m)));
+  if (!inOnboarding) return;
+  await finishOnboarding(ctx, uid, { birth_month: m });
+  await typing(ctx, PACE_S);
+  await ctx.reply(L.onboarding.keyboardReveal, mainKeyboard(uid));
+  stmts.setKbShown.run(uid);
+});
 
 bot.action(/^focus:(\w+)$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -1461,6 +1588,105 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
   }
 });
 
+/* ═══════════ کارتِ روز — نسل دوم (UX v2) ═══════════
+   سه تفاوتِ بنیادی با نسل اول:
+     ۱) کارت را **کاربر** انتخاب می‌کند، نه کد. حسِ «خودم کشیدم» بخشِ اصلیِ این آیین است.
+     ۲) متن از **گنجینه** می‌آید، نه LLM. کارتِ روز رایگان است و روزی یک بار برای هر
+        کاربر اجرا می‌شود، یعنی تنها مسیری که هزینه‌اش با تعدادِ کاربر خطی بالا می‌رود.
+     ۳) متن به **ماهِ تولد** گره خورده، نه به «حوزه‌ی تمرکز» که دیگر پرسیده نمی‌شود.
+   عدم‌تکرار در دو لایه: کارت (۷ روز) و نسخه‌ی تفسیر (۳ نسخه per کارت per ماه). */
+
+// روزِ تهران، n روز قبل. برای پنجره‌ی «۷ روزِ اخیر».
+const tehranDaysAgo = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' })
+  .format(new Date(Date.now() - n * 86400_000));
+
+// گریدِ رو-به-پشتِ کارتِ روز. اندازه‌اش به اندازه‌ی حوضچه‌ی واجدِ شرایط است (سقفِ ۲۴)،
+// چون دکمه‌ای که به هیچ کارتی نمی‌رسد یعنی دروغ گفتن به کاربر.
+function dailyGridKb(n, picked = -1) {
+  const rows = [];
+  for (let i = 0; i < n; i += 4) {
+    rows.push(Array.from({ length: Math.min(4, n - i) }, (_, c) =>
+      Markup.button.callback(i + c === picked ? '✨' : '🂠', `dpick:${i + c}`)));
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+async function dailyCardV2(ctx, uid, user, today) {
+  // ماهِ تولد لازم است و کاربرانِ قدیمی ندارندش؛ همان‌جا پرسیده می‌شود (بدونِ بن‌بست).
+  if (!user.birth_month) {
+    await ctx.reply(L.daily.needBirthMonth);
+    return askBirthMonth(ctx);
+  }
+  const recent = stmts.recentDailyCards.all(uid, tehranDaysAgo(NO_REPEAT_DAYS)).map(r => r.card_key);
+  const pool = eligibleCards(Object.keys(CARD_BY_KEY), user.birth_month, recent);
+  if (!pool.length) {
+    // گنجینه‌ی این ماه هنوز نوشته نشده. صادق و بدونِ فالبکِ LLM (قاعده‌ی آهنین).
+    await ctx.reply(L.daily.ganjinehEmpty(monthFa(user.birth_month)));
+    return ensureMenu(ctx, uid);
+  }
+  // seed قطعی per کاربر per روز: بعد از این لحظه ترتیبِ حوضچه ثابت است، حتی بعد از
+  // ری‌استارت. یعنی «کارتی که انتخاب کردم» با دوباره‌بازکردنِ چت عوض نمی‌شود.
+  const seed = `daily:${uid}:${today}`;
+  const order = pool.slice().sort((a, b) => seedToInt(seed + a) - seedToInt(seed + b));
+  const n = Math.min(GRID_SIZE, order.length);
+  patchSession(uid, { dailyOrder: order.slice(0, n), dailyDate: today });
+  setState(uid, 'daily_pick');
+  await ctx.reply(L.daily.pickPrompt);
+  await ctx.reply(L.daily.pickHint, dailyGridKb(n));
+}
+
+bot.action(/^dpick:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  if (getState(uid) !== 'daily_pick') return ctx.answerCbQuery().catch(() => {});
+  const s = getSession(uid) || {};
+  const order = s.dailyOrder || [];
+  const i = parseInt(ctx.match[1], 10);
+  const key = order[i];
+  const today = tehranToday();
+  // گاردِ دوبار-تپ **قبل** از اولین await، و گاردِ روزِ کهنه (سشنِ دیروز در چت مانده)
+  if (!key || s.dailyDate !== today) return ctx.answerCbQuery().catch(() => {});
+  setState(uid, 'idle');
+  await ctx.answerCbQuery('✨').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(dailyGridKb(order.length, i).reply_markup); } catch {}
+
+  const user = getUser(uid);
+  const month = user.birth_month;
+  // نسخه‌ای که ندیده. اگر هر سه را دیده، شانسی — چرخه بسته شده.
+  const seen = stmts.seenDailyVariants.all(uid, key).map(r => r.variant);
+  const variant = pickVariant(seen);
+  const text = ganjinehText(month, key, variant);
+  const info = CARD_BY_KEY[key];
+
+  // استریک مثل قبل، ولی ثبتِ روز **بعد** از انتخاب انجام می‌شود نه قبلش: اگر کاربر
+  // گرید را ببیند و نزند، روزش نباید سوخته باشد.
+  const yesterday = tehranDaysAgo(1);
+  const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
+  stmts.setDaily.run(today, streak, uid);
+  stmts.logDaily.run(uid, today, key, info?.reversed ? 1 : 0, variant);
+
+  await typing(ctx, PACE_M, 'upload_photo');
+  await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthFa(month)));
+  await typing(ctx, PACE_REVEAL);
+  if (text) await replyLong(ctx, text);
+
+  // 🪙 جایزه‌ی روزانه: یک سکه، روزی یک بار. اهرمِ عادت (بند ۱۰ ریشه).
+  // امنیت: کلیدِ (user_id, date) در daily_log و مهرِ last_daily_date هر دو جلوی
+  // گرفتنِ دوباره در همان روز را می‌گیرند، پس دوبار-تپ دو سکه نمی‌دهد.
+  stmts.credit.run(DAILY_COIN_REWARD, uid);
+  track(db, uid, 'credit_granted', { amount: DAILY_COIN_REWARD, kind: 'daily' });
+  await ctx.reply(L.daily.coinReward(1));
+
+  track(db, uid, 'daily_card', { streak, card: key, variant, month });
+  trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'daily' });
+  if (streak >= 2) {
+    await sleep(PACE_S);
+    await ctx.reply(L.daily.streak(streak));
+  }
+  await sleep(PACE_M);
+  await ctx.reply(L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await ensureMenu(ctx, uid);
+});
+
 /* ---------- کارت روز (رایگان، روزی یک‌بار) ---------- */
 async function dailyCard(ctx) {
   const uid = ctx.from.id;
@@ -1474,6 +1700,7 @@ async function dailyCard(ctx) {
     await ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard(recoRows(uid, null)));
     return ensureMenu(ctx, uid);
   }
+  if (uxV2For(uid)) return dailyCardV2(ctx, uid, user, today);
   // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
   const yesterday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(Date.now() - 86400_000));
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
@@ -1791,6 +2018,16 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 // کاتالوگ per کاربر: نسلِ دومِ کاتالوگ (عشق‌محورِ تقابلی) فقط به کسی نشان داده می‌شود که
 // اقتصادِ سکه برایش روشن است، چون قیمت‌های کنارِ گزینه‌ها هم به سکه‌اند و این دو یک بسته‌اند.
 function catalogKb(uid) {
+  // UX v2: کاتالوگ فقط سه گزینه دارد و همه‌شان `open` اند (سؤال را خودِ کاربر می‌نویسد).
+  // «موضوع دلخواه» جداگانه لازم نیست چون هر سه دقیقاً همان‌اند، و کارتِ روزِ رایگان
+  // به‌عنوان نقطه‌ی ورودِ بی‌هزینه می‌ماند.
+  if (uxV2For(uid)) {
+    const kb = [[Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')]];
+    kb.push(...SPREADS_V3.map(sp => [Markup.button.callback(
+      L.buttons.spreadV3(sp), `spread:${sp.id}`)]));
+    kb.push(...navMenuRow());
+    return kb;
+  }
   const v2 = coinsOn(uid);
   const cur = curOf(uid);
   // بَج‌های کوتاه روی دکمه‌ها: عشق و رابطه = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
@@ -1886,6 +2123,15 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   if (await blockDuringPendingReading(ctx)) return;
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   track(db, uid, 'spread_selected', { spread: spread.id });
+
+  // فالِ `open` (کلِ کاتالوگِ UX v2): سؤال را خودش می‌نویسد، پس هیچ مرحله‌ی موضوعی نیست.
+  // این شاخه قبلاً فقط از دکمه‌ی `odepth:` می‌آمد؛ حالا که کاتالوگ خودش open است، باید
+  // این‌جا هم باشد وگرنه کاربر به مرحله‌ی حذف‌شده‌ی «حول چی؟» می‌افتد.
+  if (spread.open) {
+    patchSession(uid, { spreadId: spread.id, picks: [], focusKey: 'open' });
+    setState(uid, 'await_question');
+    return ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
+  }
 
   // فال موضوعی (عشق/کار/پول/…): حوزه همان موضوع فال است — مرحله‌ی «حول چی؟» حذف
   if (spread.focus) {
@@ -2014,8 +2260,13 @@ async function startPicking(ctx, uid, shuffleMsgId) {
   // seed قطعی: بعد از این لحظه شافل و جهت کارت‌ها ثابت است (حتی بعد از ری‌استارت)
   const seed = `r:${uid}:${shuffleMsgId}:${Date.now()}`;
   const spread = SPREAD_BY_ID[getSession(uid).spreadId];
-  // فال‌های کوچک‌تر (مثل آری/نه ۲کارتی) به تعداد خودشان انتخاب می‌خواهند
-  const need = Math.min(USER_PICKS, spread?.size || USER_PICKS);
+  // UX v2: کاربر **همه‌ی** کارت‌ها را خودش می‌چیند (۳، ۵ یا ۱۰ تا)، نه سه‌تا و بقیه
+  // خودکار. تصمیمِ صریحِ مالک: حسِ «خودم کارتم را کشیدم» بخشی از خودِ محصول است و
+  // کارتِ خودکار آن را از بین می‌برد. گریدِ ۲۴تایی برای ۱۰ انتخاب هم جا دارد.
+  // در دنیای قدیم مثل قبل: حداکثر سه‌تا (فالِ کوچک‌تر به اندازه‌ی خودش).
+  const need = uxV2For(uid)
+    ? (spread?.size || USER_PICKS)
+    : Math.min(USER_PICKS, spread?.size || USER_PICKS);
   setState(uid, 'picking'); // قبل از هر await — گارد برابر دوباره‌کاری
   patchSession(uid, { seed, picks: [], need });
   if (shuffleMsgId) {
@@ -2489,7 +2740,8 @@ async function finishReading(ctx, uid, readingId) {
     // بدونِ parse_mode: خروجیِ v4 عمداً هیچ قالب‌بندی‌ای ندارد (نه بولد، نه تیتر)، و
     // متنِ خام یعنی تلگرام هیچ نشانه‌گذاری‌ای را تفسیر نمی‌کند — پس نه escape لازم است
     // نه ریسکِ خرابیِ قالب. (replyLong هم extra را فقط به تکه‌ی آخر می‌دهد.)
-    const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length));
+    const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length),
+    { name: uxV2For(r.user_id) ? dispName(getUser(r.user_id)) : '' });
     await typing(ctx, PACE_M);
     if (headline) await ctx.reply(headline);
     if (body) { await sleep(PACE_M); await replyLong(ctx, body); }
@@ -2614,6 +2866,7 @@ async function showWallet(ctx) {
   });
 }
 bot.hears(L.buttons.wallet, showWallet);
+bot.hears(L.buttons.coinShop, showWallet);   // UX v2: همان صفحه، نامِ تازه
 
 // لینک اشتراک‌گذاری استاندارد تلگرام: با یک تاچ، پیام آماده + لینک دعوت در چت انتخابی گذاشته می‌شود.
 // (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)
@@ -3340,7 +3593,9 @@ bot.on('text', async (ctx) => {
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
-    return ctx.reply(L.returning.greeting(dispName(getUser(uid)), getBalance(uid), curOf(uid)), mainKeyboard(ctx.from.id));
+    return ctx.reply(uxV2For(uid)
+      ? L.returning.greetingV2(dispName(getUser(uid)))
+      : L.returning.greeting(dispName(getUser(uid)), getBalance(uid), curOf(uid)), mainKeyboard(ctx.from.id));
   } catch (e) {
     logErr('text handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
