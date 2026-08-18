@@ -171,4 +171,56 @@ console.log('\n▶ فشرده‌بودنِ چیدمانِ بزرگ');
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
+
+console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولیدِ کلِ فال)');
+{
+  const rep = await import('../bots/tarot/repair.js');
+  const base = () => ({
+    headline: 'بله می‌شه ولی صبر می‌خواد', pattern: 'الگو',
+    reads: [{ text: 'برج می‌گه یه چیزی می‌ریزه' }, { text: 'ده جام آرومه' }],
+    closing: 'در کل، بستگی داره به خودت.', cards: [{ teaser: 'ت۱' }, { teaser: 'ت۲' }],
+  });
+
+  // ۱) تشخیص: کدام فیلد و کدام عبارت
+  const hits = rep.findEvasion(base());
+  ok(hits.length === 1 && hits[0].path === 'closing', 'فیلدِ معیوب دقیق پیدا می‌شود');
+  ok(hits[0].phrase === 'بستگی داره', 'خودِ عبارت گزارش می‌شود');
+  ok(rep.findEvasion({ ...base(), closing: 'در کل، بله می‌شه ولی صبر لازمه.' }).length === 0,
+    'متنِ سالم تعمیر نمی‌خواهد');
+
+  // ۲) ورودیِ پرامپتِ تعمیر فقط همان تکه است، نه کلِ فال — دلیلِ ارزان‌بودنش همین است
+  const u = rep.repairUser(hits);
+  ok(u.includes('بستگی داره') && !u.includes('ده جام'),
+    'فقط فیلدِ معیوب به مدل می‌رود، نه کلِ خوانش');
+
+  // ۳) جایگذاری: بقیه‌ی خوانش بیت‌به‌بیت دست‌نخورده می‌ماند
+  const fixed = rep.applyFixes(base(), hits, ['در کل، بیشتر به این می‌خوره که پیش بره.']);
+  ok(fixed.closing.includes('بیشتر به این می‌خوره'), 'فیلدِ معیوب عوض شد');
+  ok(fixed.reads[0].text === 'برج می‌گه یه چیزی می‌ریزه' && fixed.headline === base().headline,
+    'بقیه‌ی فیلدها دست‌نخورده‌اند');
+
+  // ۴) مسیرِ موفق: **دقیقاً یک** فراخوانی
+  let calls = 0;
+  const okCall = (sys, usr, opts) => {
+    calls++;
+    const out = JSON.stringify({ fixes: ['در کل، بیشتر به این می‌خوره که جلو بره، ولی صبر می‌خواد.'] });
+    return opts.validate(out) ? { out, usages: [{ prompt_tokens: 100, completion_tokens: 50 }] } : null;
+  };
+  const good = await rep.repairEvasion(base(), okCall);
+  ok(calls === 1, 'فقط یک فراخوانیِ تعمیر (نه حلقه)');
+  ok(good.repaired && !rep.findEvasion(good.llm).length, 'خروجیِ تعمیرشده دیگر طفره ندارد');
+
+  // ۵) مسیرِ شکست: تعمیرِ خراب هرگز خوانش را نمی‌شکند
+  const badCall = (sys, usr, opts) => {
+    const out = JSON.stringify({ fixes: ['خب بستگی داره دیگه.'] });   // باز هم طفره
+    return opts.validate(out) ? { out, usages: [] } : null;
+  };
+  const bad = await rep.repairEvasion(base(), badCall);
+  ok(!bad.repaired && bad.llm.closing === base().closing,
+    'تعمیرِ ناموفق = متنِ اصلی برمی‌گردد (نه خوانشِ شکسته)');
+  const throwCall = () => { throw new Error('boom'); };
+  const boom = await rep.repairEvasion(base(), throwCall);
+  ok(!boom.repaired && boom.llm.closing === base().closing, 'خطای شبکه هم خوانش را نمی‌شکند');
+}
+
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

@@ -30,6 +30,7 @@ import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
+import { repairEvasion } from './repair.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
@@ -164,7 +165,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.6.3';
+const PRODUCT_VERSION = '3.6.4';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1081,16 +1082,9 @@ async function callReadingLLM(readingId) {
   // در آخر همان سرخط را نشان می‌داد؛ یعنی تا ۴ ریکوئستِ کامل برای صفر تغییر در چیزی
   // که کاربر می‌بیند. حالا سرخط یک تلاشِ اضافه می‌گیرد، بعد پذیرفته می‌شود.
   const HEADLINE_EXTRA_TRIES = 1;
-  // طفره‌رفتن در **کلِ متن**، نه فقط سرخط. تا v3.6.2 گارد فقط سرخط را می‌دید، پس
-  // «بستگی داره» یا «به شهودت اعتماد کن» در جمع‌بندی آزادانه رد می‌شد — آزمایشگاه در
-  // ۸۱ فال سه بار همین را گرفت. برخلاف ایرادِ لحنی («کائنات») این یکی ارزشِ یک
-  // بازتولید را دارد چون قولِ اصلیِ محصول را می‌شکند؛ و چون نرخش ~۴٪ است، هزینه‌ی
-  // موردانتظارش در هر فال حدودِ ۰.۰۲ سنت می‌شود، نه یک بازتولید برای همه.
-  const EVASION_EXTRA_TRIES = 1;
   let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
   let headlineTries = 0;
-  let evasionTries = 0;
   const res = await orChatResilient(systemFinal, userMsg, {
     maxTokens: spread.maxTokens,
     validate: (out) => {
@@ -1102,13 +1096,9 @@ async function callReadingLLM(readingId) {
         // هرگز به ریفاند نمی‌رسد — آخرین خروجیِ سالم بدونِ سرخط تحویل می‌شود.
         // فرمولِ سرخط «نرم» است: یک تلاشِ اضافه می‌دهیم، بعد همان را می‌پذیریم.
         if (!headlineOk(obj.headline) && headlineTries++ < HEADLINE_EXTRA_TRIES) { fallback = obj; return false; }
-        // همان الگوی سرخط: یک تلاشِ اضافه، بعد پذیرش. هرگز ریفاند — خوانشِ طفره‌دار
-        // از هیچ خوانشی بهتر است، ولی یک بار ارزشِ دوباره‌خواستن را دارد.
-        const ev = evasionIn(v4Text(obj));
-        if (ev && evasionTries++ < EVASION_EXTRA_TRIES) {
-          log(`reading#${readingId} طفره‌رفتن در متن: «${ev}» — یک تلاشِ دیگر`);
-          fallback = obj; return false;
-        }
+        // طفره‌رفتن اینجا **رد نمی‌شود**: بازتولیدِ کلِ فال برای یک جمله هم گران است
+        // هم کند هم بی‌تضمین (همان پرامپت، همان احتمالِ خطا). به‌جایش بعد از پذیرش،
+        // یک تعمیرِ نقطه‌ای روی همان فیلد اجرا می‌شود (`repair.js`).
         parsed = obj;
         return true;
       }
@@ -1130,8 +1120,11 @@ async function callReadingLLM(readingId) {
     const soft = softMissesV4(parsed);
     if (soft.length) log(`reading#${readingId} فیلدِ اختیاریِ جامانده: ${soft.join(', ')}`);
     if (!headlineOk(parsed.headline)) log(`reading#${readingId} سرخط فرمول را ندارد (پذیرفته شد)`);
+    // تعمیرِ نقطه‌ای: فقط اگر تشخیصِ هاردکد چیزی پیدا کند، و فقط یک فراخوانیِ کوچک.
+    const rep = await repairEvasion(parsed, orChatResilient, { tag: `reading#${readingId}` });
+    parsed = rep.llm;
     const evLeft = evasionIn(v4Text(parsed));
-    if (evLeft) logErr(`reading#${readingId} طفره‌رفتن «${evLeft}» بعد از retry هم ماند (پذیرفته شد)`);
+    if (evLeft) logErr(`reading#${readingId} طفره‌رفتن «${evLeft}» بعد از تعمیر هم ماند (پذیرفته شد)`);
   }
   log(`reading#${readingId} آماده شد با ${res?.model || 'fallback'}${audio ? ' (ورودی صوتی، تک‌فراخوانی)' : ''}`);
   // متنِ سؤالِ ویس از همان خروجی برداشته می‌شود (نه یک فراخوانیِ دوم). شرطِ `question=''`

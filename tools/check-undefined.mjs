@@ -30,6 +30,7 @@ const TARGETS = [
   'bots/tarot/cardpay.js',
   'bots/tarot/reco.js',
   'bots/tarot/verdict.js',
+  'bots/tarot/repair.js',
   'bots/tarot/spreads.js',
   'bots/voice2text/index.js',
   'bots/dashboard/index.js',

@@ -15,8 +15,10 @@ const CORE = fs.readFileSync(new URL('../bots/tarot/reading-core.js', import.met
 // بیرون بکشیم: خودِ تابعِ صادرشده اجرا می‌شود (دقیق‌تر از new Function روی slice).
 const core = await import('../bots/tarot/reading-core.js');
 const vd = await import('../bots/tarot/verdict.js');
+const rp = await import('../bots/tarot/repair.js');
 const LOC = fs.readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
 const VD = fs.readFileSync(new URL('../bots/tarot/verdict.js', import.meta.url), 'utf8');
+const RP = fs.readFileSync(new URL('../bots/tarot/repair.js', import.meta.url), 'utf8');
 const V4 = LOC.slice(LOC.indexOf('readerSystemV4'), LOC.indexOf('readerSystem: (spread)'));
 
 let pass = 0; const errs = [];
@@ -93,8 +95,22 @@ console.log('\n▶ چیزهایی که عمداً **رد** شدند (تناقض�
   ok(!vd.EVASION.some((p) => p.includes('کائنات')), '«کائنات» در لیستِ طفره‌رفتن نیست');
   ok(vd.evasionIn('در کل بستگی داره') && !vd.evasionIn('انرژیِ کائنات همراهته'),
     'گارد طفره‌رفتن را می‌گیرد و واژه‌ی لحنی را نمی‌گیرد');
-  ok(/const EVASION_EXTRA_TRIES = 1;/.test(SRC), 'بودجه‌ی retryِ طفره‌رفتن محدود است');
-  ok(/const ev = evasionIn\(v4Text\(obj\)\);/.test(SRC), 'گارد روی کلِ متنِ مدل اجرا می‌شود');
+  // مسیرِ درمان **بازتولید نیست**، تعمیرِ نقطه‌ای است (تصمیمِ صریحِ مالک): خروجیِ معیوب
+  // ورودیِ یک پرامپتِ کوچکِ تخصصی می‌شود. سه دلیل: بازتولیدِ کامل گران است، کند است،
+  // و تضمینی ندارد (همان پرامپت، همان احتمالِ خطا).
+  ok(!/EVASION_EXTRA_TRIES/.test(SRC), 'بازتولیدِ کامل برای طفره‌رفتن برداشته شده');
+  ok(/repairEvasion\(parsed, orChatResilient/.test(SRC), 'تعمیرِ نقطه‌ای بعد از پذیرش اجرا می‌شود');
+  ok(/export async function repairEvasion/.test(RP), 'ماژولِ تعمیر وجود دارد');
+  ok(/\}, \[undefined\]\);/.test(RP), 'تعمیر دقیقاً یک فراخوانی دارد (planِ تک‌عضوی)');
+  ok(!/for \(|while \(/.test(RP), 'هیچ حلقه‌ای در مسیرِ تعمیر نیست');
+  {
+    // تشخیص باید **هاردکد** بماند: هیچ فالی نباید برای «فهمیدنِ اینکه مشکل دارد»
+    // به مدل پول بدهد. اگر روزی این ادعا شکست، یعنی کسی یک ریکوئستِ چک اضافه کرده.
+    const hits = rp.findEvasion({ closing: 'در کل بستگی داره.', reads: [], cards: [] });
+    ok(hits.length === 1 && hits[0].path === 'closing', 'تشخیص هاردکد است، نه فراخوانیِ LLM');
+    const clean = rp.applyFixes({ closing: 'x', reads: [{ text: 'y' }] }, [{ path: 'closing' }], ['z']);
+    ok(clean.closing === 'z' && clean.reads[0].text === 'y', 'تعمیر فقط فیلدِ معیوب را عوض می‌کند');
+  }
   ok(/export function v4Text/.test(CORE), 'متنِ کاملِ مدل تک‌منبع در هسته است');
   {
     const v = core.v4Text({ headline: 'ه', closing: 'ج', reads: [{ text: 'خ' }], cards: [{ teaser: 'ت' }] });
