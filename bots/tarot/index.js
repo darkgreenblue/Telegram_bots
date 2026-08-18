@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.9.1';
+const PRODUCT_VERSION = '3.9.2';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -340,7 +340,7 @@ function curOf(uid) {
   return { on: true, value: COIN_VALUE, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
 }
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
-// اعتباری است که به کیف‌پول اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
+// اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
 const COIN_PACKAGES = [
   // ⚠️ قیمت‌های UX v2 (تصمیمِ مالک ۱۴۰۵/۰۵/۲۷). این یک **کاهشِ قیمتِ واقعی** است، نه
@@ -348,7 +348,9 @@ const COIN_PACKAGES = [
   // فالِ سه‌کارتی از ۳۰٬۰۰۰ به ۹٬۰۰۰ تا ۴٬۵۰۰ تومان. قبل از باز کردن برای کاربرِ واقعی
   // این عدد باید دوباره دیده شود.
   { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 30_000 },
-  { key: 'gold',   fa: 'بسته‌ی طلایی',  emoji: '🥇', coins: 30,  toman: 60_000 },
+  // ایموجیِ بسته‌ی وسط از 🥇 به 💠 رفت: با نامِ «الماسی» بخواند، و عمداً **خودِ 💎 نباشد**
+  // چون در همان دکمه ایموجیِ واحد هم می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود.
+  { key: 'gold',   fa: 'بسته‌ی الماسی', emoji: '💠', coins: 30,  toman: 60_000 },
   { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
@@ -863,6 +865,10 @@ const coveredRow = (readingId, price, uid) => [Markup.button.callback(
   `unlock:${readingId}`,
 )];
 
+// برچسبِ دکمه‌ی شارژ به زبانِ اقتصادِ همان کاربر: در دنیای الماس «خرید الماس»،
+// در دنیای تومانی همان «افزایش موجودی کیف پول». هر نقطه‌ی جدید باید از همین بخواند.
+const rechargeLabel = (uid) => (coinsOn(uid) ? L.buttons.buyCoins(curOf(uid)) : L.buttons.recharge);
+
 const needBalanceRows = (uid, reading) => {
   // اقتصادِ سکه: یک مسیر و بس — «خریدِ سکه» که مستقیم به سه بسته می‌رود. «پرداختِ هزینه‌ی
   // همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند (فاکتورِ تک‌فال با قیمتِ همان
@@ -1305,7 +1311,7 @@ function recoverOrphanReadings() {
       stmts.setReadingStatus.run('refunded', r.id);
       track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'restart' });
       const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.retry, `retryr:${r.id}`)]]);
-      bot.telegram.sendMessage(r.user_id, L.reading.refunded, { reply_markup: kb.reply_markup }).catch(() => {});
+      bot.telegram.sendMessage(r.user_id, L.reading.refunded(curOf(r.user_id)), { reply_markup: kb.reply_markup }).catch(() => {});
     } catch (e) { logErr('recoverOrphan reading#' + r.id, e.message); }
   }
   if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فالِ یتیمِ پرداخت‌شده refund شد`);
@@ -2721,7 +2727,7 @@ async function startReveal(ctx, uid, readingId) {
     }
     setState(uid, 'idle');
     setSession(uid, null);
-    return ctx.reply(L.reading.refunded, Markup.inlineKeyboard([
+    return ctx.reply(L.reading.refunded(curOf(uid)), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.retry, `retryr:${readingId}`)],
     ]));
   }
@@ -3175,7 +3181,7 @@ async function showWallet(ctx) {
   if (await blockDuringOpenReading(ctx)) return;
   await ctx.reply(L.wallet.info(getBalance(ctx.from.id), curOf(ctx.from.id)), {
     parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.recharge, 'recharge')]]).reply_markup,
+    reply_markup: Markup.inlineKeyboard([[Markup.button.callback(rechargeLabel(ctx.from.id), 'recharge')]]).reply_markup,
   });
 }
 bot.hears(L.buttons.wallet, showWallet);
@@ -3237,7 +3243,7 @@ bot.action('want_discount', async (ctx) => {
   upsertUser(ctx);
   if (await offerPendingReading(ctx, uid)) return;
   return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([
-    [Markup.button.callback(L.buttons.recharge, 'recharge')],
+    [Markup.button.callback(rechargeLabel(uid), 'recharge')],
   ]));
 });
 
@@ -3697,7 +3703,7 @@ bot.action(/^cardrev:(\d+)$/, async (ctx) => {
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const done = await reversePayment(parseInt(ctx.match[1], 10));
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
-  await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser).catch(() => {});
+  await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser(curOf(done.p.user_id))).catch(() => {});
   await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back)).catch(() => {});
 });
 bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
