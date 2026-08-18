@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.9.4';
+const PRODUCT_VERSION = '3.10.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -834,14 +834,19 @@ function firstDiscountAvailable(uid) {
 const spreadFaOf = (r, uid) => faOf(SPREAD_BY_ID[r?.type], coinsOn(uid)) || L.reading.spreadFallbackFa;
 // پیامِ یکسانِ «موجودی کافی نیست» در همه‌ی نقاطِ پی‌وال (شخصی‌شده با نام کاربر).
 // موجودی و نامِ فال هم نشان داده می‌شوند تا کاربر کسری را خودش ببیند.
+// ⚠️ در دنیای الماس این متن HTML است (باکسِ نقل‌قولِ موجودی)، پس هر مقدارِ کاربرساخته باید
+// esc شود. نامِ کاربر تنها ورودیِ کاربرساخته است؛ `spreadFa` از ثابت‌های خودمان می‌آید ولی
+// برای اینکه این تابع در آینده هم امن بماند، هر دو esc می‌شوند.
 const needBalanceText = (uid, reading) =>
   L.reading.needBalance({
-    name: dispName(getUser(uid)),
+    name: esc(dispName(getUser(uid))),
     balance: getBalance(uid),
-    spreadFa: spreadFaOf(reading, uid),
+    spreadFa: esc(spreadFaOf(reading, uid)),
     price: reading.price,
     cur: curOf(uid),
   });
+// هر پیامی که needBalanceText می‌فرستد باید این extra را هم بدهد، وگرنه تگِ نقل‌قول خام دیده می‌شود.
+const needBalanceExtra = { parse_mode: 'HTML' };
 // ردیفِ ثابتِ زیرِ پیامِ کم‌موجودی: مسیر اصلی (شارژ) اول، تخفیف پشتِ دکمه‌ی دوم.
 // دکمه‌ی «🎁 تخفیف می‌خوام» فقط برای کسی که واقعاً تخفیفِ اولین شارژ دارد. کاربری که
 // قبلاً شارژ کرده یا تخفیفش خرج شده، این دکمه را اصلاً نمی‌بیند: تا قبل از این، زدنش
@@ -870,10 +875,12 @@ const coveredRow = (readingId, price, uid) => [Markup.button.callback(
 const rechargeLabel = (uid) => (coinsOn(uid) ? L.buttons.buyCoins(curOf(uid)) : L.buttons.recharge);
 
 const needBalanceRows = (uid, reading) => {
-  // اقتصادِ سکه: یک مسیر و بس — «خریدِ سکه» که مستقیم به سه بسته می‌رود. «پرداختِ هزینه‌ی
-  // همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند (فاکتورِ تک‌فال با قیمتِ همان
-  // فال)؛ در دنیای بسته‌ای نگه‌داشتنشان دو ریلِ قیمتِ موازی می‌ساخت. خودِ بسته‌ها تخفیف‌اند.
-  if (coinsOn(uid)) return [[Markup.button.callback(L.buttons.buyCoins(curOf(uid)), 'recharge')]];
+  // اقتصادِ سکه: «پرداختِ هزینه‌ی همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند
+  // (فاکتورِ تک‌فال با قیمتِ همان فال)؛ در دنیای بسته‌ای نگه‌داشتنشان دو ریلِ قیمتِ موازی
+  // می‌ساخت. خودِ بسته‌ها تخفیف‌اند.
+  // UX v2.3 (تصمیمِ صریحِ مالک): زیرِ پیامِ کم‌موجودی **دقیقاً همان سه راهِ صفحه‌ی کیف** بیاید
+  // (خرید، دعوت، و کارت شانس اگر سهمیه‌ی امروز باز است) — یک تک‌منبع، نه دو لیستِ موازی.
+  if (coinsOn(uid)) return walletRows(uid);
   const rows = [];
   if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
   rows.push([Markup.button.callback(L.buttons.recharge, 'recharge')]);
@@ -1333,6 +1340,7 @@ bot.catch(async (err, ctx) => {
 const KB_LABELS = new Set([
   L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.coinShop, L.buttons.inviteMain,
   L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
+  '📤 معرفی دوستان',   // برچسبِ میانیِ دکمه‌ی دعوت — تا کیبوردهای کش‌شده هم «تپِ دکمه» شمرده شوند
   L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
 ].filter(Boolean));
 registerJourney(bot, {
@@ -1936,8 +1944,8 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   // UX v2.1 (تصمیمِ صریحِ مالک): بعد از کشیدنِ کارتِ شانس، کاربر دعوت می‌شود سؤالِ
   // بعدی‌اش را از تاروت بپرسد — چه سکه برده باشد چه نه، همیشه یک قدمِ بعدیِ روشن دارد.
   await sleep(PACE_S);
+  // (ensureMenu حالا داخلِ خودِ sendContinuePrompt است — تک‌نقطه، بدونِ تکرار)
   await sendContinuePrompt(ctx, uid);
-  await ensureMenu(ctx, uid);
 });
 
 bot.action(/^lremind:([01])$/, async (ctx) => {
@@ -2257,10 +2265,20 @@ function falMenuKb(uid) {
 }
 
 /** لیستِ کاملِ موضوع‌ها، به همان ترتیبِ TOPICS_V3 (سؤالِ شخصی، بله/خیر، عاطفی، شغل و پول). */
+// پسوندِ `:a` یعنی «کاربر از لیستِ کامل آمده» — تنها چیزی که صفحه‌ی بعدی لازم دارد تا دکمه‌ی
+// بازگشتش **یک قدم** عقب برود و همین لیست را برگرداند، نه منوی کوتاه را (UX v2.3).
+// حالت را در session نمی‌گذاریم چون showCatalog/nav:menu آن را پاک می‌کنند و دکمه‌ی کهنه
+// هم باید سال‌ها بعد درست کار کند؛ callback_data تنها جای مطمئن است (سقف ۶۴ بایت، این ۱۶).
 const allTopicsKb = () => [
-  ...TOPICS_V3.map(t => [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`)]),
+  ...TOPICS_V3.map(t => [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`)]),
   ...navMenuRow(),
 ];
+
+// تک‌منبعِ «متن + کیبورد» هر صفحه‌ی ناوبری، تا showCatalog و دکمه‌های بازگشت دقیقاً یک چیز
+// را رندر کنند (همان الگوی cat_guide/cat_back که از قبل در همین فایل هست).
+const falMenuScreen = (uid) => [L.reading.catalogV3, Markup.inlineKeyboard(falMenuKb(uid))];
+const allTopicsScreen = () => [L.reading.allTopics, Markup.inlineKeyboard(allTopicsKb())];
+const topicMenuScreen = (uid, kind) => (kind === 'a' ? allTopicsScreen() : falMenuScreen(uid));
 
 function catalogKb(uid) {
   if (uxV2For(uid)) return allTopicsKb();
@@ -2280,7 +2298,10 @@ function catalogKb(uid) {
 }
 // `full=true` یعنی لیستِ کاملِ موضوع‌ها (دکمه‌ی «مشاهده همه فال‌ها»)؛ پیش‌فرض منوی کوتاه.
 // در دنیای قبل از UX v2 هر دو یک چیزند (همان کاتالوگِ قدیمی)، پس رفتار عوض نمی‌شود.
-async function showCatalog(ctx, full = false) {
+// `edit=true` یعنی به‌جای پیامِ جدید، همین پیامِ دکمه‌خورده ادیت شود (دکمه‌ی «مشاهده همه
+// فال‌ها»): کاربر یک صفحه جلو می‌رود، نه اینکه چت شلوغ‌تر شود. اگر ادیت نشد (پیامِ کهنه یا
+// پاک‌شده) بی‌سروصدا به همان پیامِ جدیدِ همیشگی برمی‌گردیم.
+async function showCatalog(ctx, full = false, edit = false) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
@@ -2291,8 +2312,9 @@ async function showCatalog(ctx, full = false) {
   setState(uid, 'choose_spread');
   setSession(uid, null);
   if (uxV2For(uid)) {
-    return ctx.reply(full ? L.reading.allTopics : L.reading.catalogV3,
-      Markup.inlineKeyboard(full ? allTopicsKb() : falMenuKb(uid)));
+    const [text, kb] = full ? allTopicsScreen() : falMenuScreen(uid);
+    if (edit) { try { return await ctx.editMessageText(text, kb); } catch {} }
+    return ctx.reply(text, kb);
   }
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
   await ctx.reply(L.reading.catalog, Markup.inlineKeyboard(catalogKb(uid)));
@@ -2415,10 +2437,11 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   ));
 });
 
-// دکمه‌ی «مشاهده همه فال‌ها» — همه‌جا (منوی فال، پایانِ فال، بعدِ کارتِ روز) همین یکی است
+// دکمه‌ی «مشاهده همه فال‌ها» — همه‌جا (منوی فال، پایانِ فال، بعدِ کارتِ روز) همین یکی است.
+// UX v2.3: همان پیام ادیت می‌شود («از کجا شروع کنیم؟» → «یکی از فال‌ها رو انتخاب کن»).
 bot.action('catalog_go', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  return showCatalog(ctx, true);
+  return showCatalog(ctx, true, true);
 });
 
 /* ═══ انتخابِ موضوع → انتخابِ اندازه (UX v2.1) ═══
@@ -2426,7 +2449,29 @@ bot.action('catalog_go', async (ctx) => {
    ۳ یا ۵ یا ۱۰ کارتی تفسیر شود و کاربر همان‌جا می‌بیند چقدر می‌دهد (هر کارت = ۱ الماس).
    خودِ دکمه‌ی اندازه یک `spread:<topic><size>` می‌زند، پس همه‌ی گاردها و مسیرِ موجود
    دست‌نخورده می‌ماند و هیچ شاخه‌ی جدیدی در فلوی فال ساخته نمی‌شود. */
-bot.action(/^topic:(\w+)$/, async (ctx) => {
+// صفحه‌ی انتخابِ اندازه: متن + کیبورد در یک تابع، چون هم `topic:` آن را می‌سازد و هم
+// (در صورتِ نیاز) هر نقطه‌ی دیگری که بخواهد همین صفحه را دوباره رندر کند.
+// ⚠️ `parse_mode: 'HTML'` لازم است چون خطِ موجودی داخلِ باکسِ نقل‌قول می‌رود.
+function pickSizeScreen(uid, t, from) {
+  const cur = curOf(uid);
+  return [L.reading.pickSize(getBalance(uid), cur), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      ...SIZES_V3.map((size) => {
+        const sp = SPREAD_BY_ID[spreadIdOf(t.key, size)];
+        // قیمت از خودِ رکوردِ چیدمان می‌آید (تک‌منبعِ قیمت)، نه از ضربِ دوباره‌ی اندازه.
+        return [Markup.button.callback(L.buttons.topicSize(size, sp.price, cur), `spread:${sp.id}`)];
+      }),
+      // آخرین گزینه: بازگشتِ **یک قدمی** به همان منویی که کاربر از آن آمده.
+      [Markup.button.callback(L.buttons.backToMenu, `tback:${from}`)],
+    ]),
+  }];
+}
+
+// پسوندِ اختیاریِ `:a` = «از لیستِ کامل آمده». `\w` دونقطه را نمی‌گیرد، پس گروهِ اول
+// هیچ‌وقت پسوند را نمی‌بلعد و دکمه‌های کهنه‌ی بدونِ پسوند (که در چتِ کاربران مانده‌اند)
+// دقیقاً مثل قبل کار می‌کنند و به منوی کوتاه برمی‌گردند (بند ۲ج/۶).
+bot.action(/^topic:(\w+)(?::(a))?$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
@@ -2437,12 +2482,34 @@ bot.action(/^topic:(\w+)$/, async (ctx) => {
   if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
   track(db, uid, 'topic_selected', { topic: t.key });
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.pickSize(getBalance(uid), curOf(uid)), Markup.inlineKeyboard([
-    ...SIZES_V3.map(size => [Markup.button.callback(
-      L.buttons.topicSize(size), `spread:${spreadIdOf(t.key, size)}`)]),
-    ...navMenuRow(),
-  ]));
+  // UX v2.3: به‌جای «کشتنِ کیبوردِ پیامِ قبلی + یک پیامِ جدید»، همین پیام به صفحه‌ی اندازه
+  // ادیت می‌شود (الگوی cat_guide/cat_back). این تنها راهی است که دکمه‌ی بازگشت واقعاً
+  // «یک قدم» باشد: همان پیام دوباره به منوی قبلی برمی‌گردد و چت شلوغ نمی‌شود.
+  const [text, extra] = pickSizeScreen(uid, t, ctx.match[2] === 'a' ? 'a' : 'm');
+  try { await ctx.editMessageText(text, extra); }
+  catch {
+    // مسیرِ کهنه: پیام قابلِ ادیت نبود (عکس، پیامِ خیلی قدیمی، پاک‌شده). دقیقاً مثل قبل
+    // عمل می‌کنیم: کیبوردِ مبدأ کشته می‌شود تا دوباره‌زدنی نماند، بعد پیامِ جدید می‌رود.
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    await ctx.reply(text, extra).catch(() => {});
+  }
+});
+
+// ◀️ بازگشتِ یک‌قدمی از صفحه‌ی اندازه به همان منوی مبدأ (بدونِ پیامِ جدید، بدونِ ریست‌کردنِ
+// کلِ فلو). در مسیرِ عادی استیت همان `choose_spread` است که `topic:` گذاشته، پس این فقط یک
+// **رندرِ دوباره** است و عمداً هیچ استیتی نمی‌نویسد.
+// ⚠️ ولی گاردها لازم‌اند: این دکمه در پیام‌های قدیمیِ چت می‌ماند و کاربری که حالا وسطِ
+// پرداخت یا وسطِ یک فالِ باز است ممکن است بزندش. چون هر دو گارد روی **استیت** کار می‌کنند،
+// نوشتنِ استیت این‌جا (یا حتی رد شدن بی‌گارد) فاکتور/فالِ باز را بی‌صدا یتیم می‌کرد.
+bot.action(/^tback:([ma])$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  const [text, kb] = topicMenuScreen(uid, ctx.match[1]);
+  try { await ctx.editMessageText(text, kb); }
+  catch { await ctx.reply(text, kb).catch(() => {}); }
 });
 
 // دکمه‌ی «همه فال‌ها» زیر پیام «یه قرار کوچیک» آنبوردینگ: معادلِ «فال بگیر» ولی به‌جای
@@ -2604,11 +2671,14 @@ async function finishPicking(ctx, uid, s) {
     ]));
   } else {
     // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
-    await ctx.reply(needBalanceText(uid, { type: spread.id, price: spread.price }), Markup.inlineKeyboard([
-      ...needBalanceRows(uid, { id: readingId, price: spread.price }),
-      ...freeMenuRow(),
-      [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
-    ]));
+    await ctx.reply(needBalanceText(uid, { type: spread.id, price: spread.price }), {
+      ...needBalanceExtra,
+      ...Markup.inlineKeyboard([
+        ...needBalanceRows(uid, { id: readingId, price: spread.price }),
+        ...freeMenuRow(),
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
+      ]),
+    });
   }
 }
 
@@ -2643,8 +2713,14 @@ bot.action('nav:menu', async (ctx) => {
   }
   setState(uid, 'idle');
   setSession(uid, null);
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
+  // UX v2.3: به‌جای «کشتنِ کیبورد + پیامِ جدید»، همین پیام به تأییدِ بازگشت ادیت می‌شود.
+  // کیبوردِ ماندگار را نمی‌شود به یک ادیت چسباند (تلگرام فقط inline را در ادیت می‌پذیرد)،
+  // ولی خودش از قبل پایینِ چت هست؛ `ensureMenu` تورِ ایمنیِ کسی است که جمعش کرده باشد.
+  // اگر ادیت نشد (پیامِ کهنه) دقیقاً به رفتارِ قبلی برمی‌گردیم تا کاربر بی‌جواب نماند.
+  let edited = false;
+  try { await ctx.editMessageText(L.reading.backToMenu); edited = true; } catch {}
+  if (edited) await ensureMenu(ctx, uid);
+  else await ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
 });
 
 // گاردِ «فالِ باز» — «اونو ادامه می‌دم»: همان پیامِ آخرِ فلو دوباره نشان داده می‌شود (کاربر سرِ کارش برمی‌گردد).
@@ -2680,10 +2756,13 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
-        ...needBalanceRows(uid, r),
-        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-      ]));
+      return ctx.reply(needBalanceText(uid, r), {
+        ...needBalanceExtra,
+        ...Markup.inlineKeyboard([
+          ...needBalanceRows(uid, r),
+          [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+        ]),
+      });
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -2754,10 +2833,13 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
-        ...needBalanceRows(uid, r),
-        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-      ]));
+      return ctx.reply(needBalanceText(uid, r), {
+        ...needBalanceExtra,
+        ...Markup.inlineKeyboard([
+          ...needBalanceRows(uid, r),
+          [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+        ]),
+      });
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -3019,11 +3101,16 @@ function recoRows(uid, currentType) {
 // جایی که یک فرآیند تمام یا لغو می‌شود هم می‌آید — به‌جای جمله‌ی صرفاً محاوره‌ایِ قدیمی
 // («باشه، هر وقت آماده بودی همین‌جام»). کاربر باید همیشه یک قدمِ بعدیِ روشن جلوی چشمش
 // داشته باشد، نه فقط تأییدِ اینکه فرآیند تمام شد.
+// UX v2.3 (تصمیمِ صریحِ مالک): «منوی اصلی دقیقاً هم‌زمان با همین پیام باز شود» — چون این
+// پیام دقیقاً همان لحظه‌ای می‌آید که یک شاخه‌ی اصلی تمام شده. یک پیام نمی‌تواند هم دکمه‌ی
+// inline داشته باشد هم کیبوردِ ماندگار، پس `ensureMenu` (throttle‌دار) بلافاصله بعدش می‌آید
+// و این‌جا تک‌نقطه‌ای می‌شود: هر نقطه‌ی «فرآیند تمام شد» خودکار کیبورد را هم تضمین می‌کند.
 async function sendContinuePrompt(ctx, uid) {
   await ctx.reply(L.reading.nextOffersV3, Markup.inlineKeyboard([
     ...recoRows(uid, null),
     [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
   ]));
+  await ensureMenu(ctx, uid);
 }
 // جایگزینِ نقاطِ لغوِ قدیمی (که قبلاً مستقیم L.reading.canceled را می‌فرستادند): در
 // دنیای UX v2 پیامِ «ادامه» را می‌فرستد؛ در دنیای قدیم رفتار **دقیقاً** قبلی می‌ماند
@@ -3237,15 +3324,20 @@ function walletRows(uid) {
   return rows;
 }
 
+// تک‌منبعِ «متن + دکمه‌ها»ی صفحه‌ی کیف، تا هم showWallet و هم دکمه‌ی بازگشتِ صفحه‌ی بسته‌ها
+// دقیقاً یک چیز را رندر کنند (همان الگوی falMenuScreen/allTopicsScreen).
+const walletScreen = (uid) => [L.wallet.info(getBalance(uid), curOf(uid)), {
+  parse_mode: 'Markdown',
+  ...Markup.inlineKeyboard(walletRows(uid)),
+}];
+
 async function showWallet(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringOpenReading(ctx)) return;
-  await ctx.reply(L.wallet.info(getBalance(ctx.from.id), curOf(ctx.from.id)), {
-    parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard(walletRows(ctx.from.id)).reply_markup,
-  });
+  const [text, extra] = walletScreen(ctx.from.id);
+  await ctx.reply(text, extra);
 }
 bot.hears(L.buttons.wallet, showWallet);
 bot.hears(L.buttons.coinShop, showWallet);   // UX v2: همان صفحه، نامِ تازه
@@ -3271,7 +3363,12 @@ async function showInvite(ctx) {
     reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))]]).reply_markup,
   });
 }
-bot.hears(L.buttons.inviteMain, showInvite);
+// برچسبِ این دکمه در v3.9.2 به «معرفی دوستان» رفت و در v2.3 به «دعوت دوستان» برگشت. کیبوردِ
+// reply روی گوشیِ کاربر تا اولین جایگزینی می‌ماند، پس کاربری که کیبوردش هنوز برچسبِ میانی را
+// دارد با یک تپ متنی می‌فرستد که دیگر هیچ hears ای نمی‌گیردش (بند ۲ج/۶: دکمه‌ی کهنه نباید
+// بمیرد). همان الگوی دکمه‌ی ریست: هر دو برچسب match می‌شوند.
+const INVITE_LABELS = [L.buttons.inviteMain, '📤 معرفی دوستان'];
+bot.hears(INVITE_LABELS, showInvite);
 bot.action('invite_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showInvite(ctx); });
 
 // «تخفیف می‌خوام» — شاخه‌ی اختیاریِ کنارِ مسیر اصلی؛ استیت را دست نمی‌زند تا فالِ رزروشده
@@ -3324,10 +3421,16 @@ bot.action('recharge', async (ctx) => {
   // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
   if (coinsOn(uid)) {
     const cur = curOf(uid);
-    return ctx.reply(L.wallet.coinPacks(cur), Markup.inlineKeyboard([
+    // UX v2.3: صفحه‌ی بسته‌ها **روی همان پیامِ کیف** ادیت می‌شود (زیرمنو، نه پیامِ تازه) و
+    // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
+    // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
+    const text = L.wallet.coinPacks(cur);
+    const extra = Markup.inlineKeyboard([
       ...COIN_PACKAGES.map(p => [Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`)]),
-      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
-    ]));
+      [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
+    ]);
+    try { return await ctx.editMessageText(text, extra); } catch {}
+    return ctx.reply(text, extra);
   }
   // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
   // همین فال» بهتر انجام می‌دهد. این‌جا فقط نردبانِ قیمتِ کیف‌پول است.
@@ -3437,6 +3540,25 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await replyCanceled(ctx, uid);
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
+  await offerPendingReading(ctx, uid);
+});
+
+// ◀️ بازگشتِ یک‌قدمی از صفحه‌ی بسته‌ها به خودِ کیف. دقیقاً همان پاک‌سازیِ pay_cancel را
+// می‌کند (فاکتورِ خالی نباید باز بماند وگرنه blockDuringOpenPay کاربر را قفل می‌کند)، ولی
+// **پیامِ «ادامه» را نمی‌فرستد**: این خروج از فلو نیست، فقط یک قدم عقب در همان زیرمنوست.
+bot.action(/^pay_back:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
+  if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
+  const s = getSession(uid);
+  delete s.paymentId;
+  setSession(uid, s);
+  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  const [text, extra] = walletScreen(uid);
+  try { await ctx.editMessageText(text, extra); }
+  catch { await ctx.reply(text, extra).catch(() => {}); }
+  // فالِ رزروشده نباید سرگردان بماند (همان کاری که pay_cancel می‌کند).
   await offerPendingReading(ctx, uid);
 });
 
@@ -3708,10 +3830,13 @@ async function offerPendingReading(ctx, uid) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(needBalanceText(uid, r), Markup.inlineKeyboard([
-      ...needBalanceRows(uid, r),
-      [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-    ]));
+    await ctx.reply(needBalanceText(uid, r), {
+      ...needBalanceExtra,
+      ...Markup.inlineKeyboard([
+        ...needBalanceRows(uid, r),
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+      ]),
+    });
   }
   return true;
 }
