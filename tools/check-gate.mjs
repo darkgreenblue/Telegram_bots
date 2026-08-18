@@ -119,12 +119,22 @@ ok(new RegExp(`startPopular\\(\\),\\s*'spread:${badge}'`).test(idx),
 ok(/const INTRO_EXPERIENCE\s*=/.test(loc) && /const INTRO_STAT\s*=/.test(loc),
    'دو بلوکِ محتوایی باید ثابتِ module-level باشند (تک‌منبع برای هر دو پیام)');
 const gateIntroSrc = loc.match(/gateIntro:\s*\(statFirst\)[\s\S]*?,\n/)?.[0] || '';
-const welcomeSrc = loc.match(/welcome:\s*\(name, statFirst\)[\s\S]*?,\n/)?.[0] || '';
+// UX v2.1: welcome() یک پارامترِ سومِ اختیاری (v2) گرفت تا نسخه‌ی تازه‌ی INTRO_EXPERIENCE
+// را انتخاب کند؛ امضا دیگر دقیقاً `(name, statFirst)` نیست، پس رجکس باید پارامترهای
+// اضافه را هم بپذیرد — ولی همچنان باید مطمئن شود اسمِ اولین دو پارامتر عوض نشده.
+const welcomeSrc = loc.match(/welcome:\s*\(name, statFirst(?:, \w+)*\)[\s\S]*?,\n/)?.[0] || '';
 ok(gateIntroSrc && welcomeSrc, 'هر دو پیامِ آنبوردینگ باید statFirst بگیرند');
 ok(/statFirst \? INTRO_STAT : INTRO_EXPERIENCE/.test(gateIntroSrc),
    'پیامِ اول: در شاخه‌ی stat_first باید آمار بیاید و در control تجربه');
-ok(/statFirst \? INTRO_EXPERIENCE : INTRO_STAT/.test(welcomeSrc),
+// UX v2.1: شاخه‌ی true حالا خودش یک انشعابِ v2 دارد (`v2 ? INTRO_EXPERIENCE_V2 :
+// INTRO_EXPERIENCE`) ولی جوهرِ قرارداد دست‌نخورده است: وقتی گیت STAT نشان داده،
+// این‌جا باید از **خانواده‌ی EXPERIENCE** چیزی بیاید (کدام نسخه فرقی به حالِ آزمایش
+// نمی‌کند، چون v2 خودش یک متغیرِ مستقلِ دیگر است، نه شاخه‌ی این آزمایش).
+ok(/statFirst \? \(v2 \? INTRO_EXPERIENCE_V2 : INTRO_EXPERIENCE\) : INTRO_STAT/.test(welcomeSrc),
    'پیامِ بعد از نام باید **مکملِ** پیامِ اول باشد (برعکسِ همان شرط)، نه تکرارش');
+// دنیای قدیم (v2 نادرست/نبود) باید بیت‌به‌بیت به رفتارِ قبلی برگردد
+ok(/const INTRO_EXPERIENCE_V2\s*=/.test(loc),
+   'نسخه‌ی UX v2.1 پیام هم ثابتِ module-level جدا دارد (تکرارِ همان الگوی تک‌منبع)');
 // مکانیکِ محصول عمداً توضیح داده نمی‌شود (کاربر چند ثانیه بعد خودش می‌بیند)
 ok(!/از دک برمی‌داری|انتخاب می‌کنی/.test(loc.match(/const INTRO_EXPERIENCE[\s\S]*?;\n/)?.[0] || ''),
    'بلوکِ تجربه نباید مکانیکِ محصول را توضیح دهد');

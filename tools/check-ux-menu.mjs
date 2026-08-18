@@ -200,5 +200,103 @@ console.log('\n▶ کلمه‌ی «خوانش» از متن‌های رو-به-�
   }
 }
 
+console.log('\n▶ پیامِ عمومیِ «ادامه» جایگزینِ جمله‌ی صرفاً محاوره‌ای شد (UX v2.2)');
+{
+  // بند: هیچ نقطه‌ی لغو/بازگشتی نباید مستقیم L.reading.canceled را صدا بزند —
+  // همه باید از replyCanceled عبور کنند تا در دنیای UX v2 پیامِ «ادامه» جایگزین شود.
+  // تنها نمونه‌ی مجاز، شاخه‌ی داخلِ خودِ replyCanceled است (دنیای قدیم). هر جای دیگر
+  // باید از replyCanceled عبور کند تا در دنیای الماس پیامِ «ادامه» جایگزین شود.
+  const rawCanceled = [...SRC.matchAll(/ctx\.reply\(L\.reading\.canceled/g)].length;
+  ok(rawCanceled === 1, `فقط یک نقطه (خودِ replyCanceled) مستقیم L.reading.canceled را صدا می‌زند (یافت شد: ${rawCanceled})`);
+  ok(/async function replyCanceled\(ctx, uid\) \{\s*\n\s*if \(uxV2For\(uid\)\) return sendContinuePrompt\(ctx, uid\);\s*\n\s*return ctx\.reply\(L\.reading\.canceled, mainKeyboard\(uid\)\);/.test(SRC),
+    'replyCanceled: دنیای الماس → پیامِ ادامه، دنیای قدیم → دقیقاً همان جمله‌ی قبلی (رول‌بکِ یک‌خطی)');
+  const callers = [...SRC.matchAll(/await replyCanceled\(ctx, uid\)/g)].length;
+  ok(callers === 3, `سه نقطه‌ی لغو (rcancel/reading:cancel/pay_cancel) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
+  ok(/async function sendContinuePrompt\(ctx, uid\) \{\s*\n\s*await ctx\.reply\(L\.reading\.nextOffersV3, Markup\.inlineKeyboard\(\[\s*\n\s*\.\.\.recoRows\(uid, null\)/.test(SRC),
+    'sendContinuePrompt همان متن و ساختارِ CTAی پایانِ فال را می‌فرستد (یک منبع)');
+}
+
+console.log('\n▶ اولین فالِ کاربر: پیشنهادِ فالِ جدید عقب می‌افتد، تبلیغِ کارت شانس جایش می‌آید');
+{
+  // اندازه‌گیریِ «اولین فال» باید **بعد** از ثبتِ delivered انجام شود تا همین فال را هم بشمارد
+  const iSetDelivered = SRC.indexOf("stmts.setReadingStatus.run('delivered', readingId);");
+  const iIsFirst1 = SRC.indexOf('const isFirstReading = stmts.countDelivered.get(uid).c === 1;');
+  ok(iSetDelivered > 0 && iIsFirst1 > iSetDelivered,
+    'شمارشِ اولین فال بعد از ثبتِ status=delivered انجام می‌شود (همین فال را هم می‌شمارد)');
+  ok(/if \(!\(uxV2For\(uid\) && isFirstReading\)\) \{/.test(SRC),
+    'پیشنهادِ فالِ جدید فقط برای «دنیای قدیم یا فالِ غیرِ‌اول» نشان داده می‌شود');
+  // بندِ دوم: در fbr: (بعد از نمره‌دادن) باید یک isFirstReading دیگر (تازه، مستقل) محاسبه شود
+  const iIsFirst2 = SRC.indexOf('const isFirstReading = stmts.countDelivered.get(uid).c === 1;', iIsFirst1 + 1);
+  ok(iIsFirst2 > iIsFirst1, 'fbr: هم isFirstReading را دوباره (مستقل) محاسبه می‌کند');
+  const iFbr = SRC.indexOf('bot.action(/^fbr:');
+  const fbrBlock = SRC.slice(iFbr, SRC.indexOf('bot.action(', iFbr + 20));
+  ok(/luckyAvailable = getUser\(uid\)\?\.lucky_date !== tehranToday\(\)/.test(fbrBlock),
+    'تبلیغِ کارت شانس فقط اگر سهمیه‌ی امروز هنوز مصرف نشده نشان داده می‌شود');
+  ok(/if \(uxV2For\(uid\) && isFirstReading && luckyAvailable\) \{/.test(fbrBlock),
+    'شرطِ نمایشِ تبلیغ: دنیای الماس + اولین فال + سهمیه‌ی کارت شانس باز');
+  ok(/L\.lucky\.promo\(dispName\(getUser\(uid\)\)\)/.test(fbrBlock), 'تبلیغ از L.lucky.promo با نامِ کاربر ساخته می‌شود');
+  ok(/luckyDraw\(LUCKY_PICKS, curOf\(uid\)\), 'lucky_go'/.test(fbrBlock), 'دکمه‌ی تبلیغ مستقیم به lucky_go وصل است');
+  ok(/\} else \{\s*\n\s*await ctx\.reply\(L\.reading\.rateThanks\)/.test(fbrBlock),
+    'برای فالِ غیرِاول (یا دنیای قدیم) رفتار دقیقاً همان تشکرِ قبلی می‌ماند');
+}
+
+console.log('\n▶ بعد از کشیدنِ کارت شانس، دعوت به فالِ بعدی می‌آید');
+{
+  const lpick = SRC.slice(SRC.indexOf("bot.action(/^lpick:"), SRC.indexOf("bot.action(/^lremind:"));
+  ok(/await sendContinuePrompt\(ctx, uid\);/.test(lpick),
+    'پایانِ کارت شانس، چه برده چه نه، پیامِ «ادامه» را می‌فرستد');
+  const iWonLost = lpick.indexOf('L.lucky.won(found) : L.lucky.lost');
+  const iContinue = lpick.indexOf('sendContinuePrompt');
+  ok(iWonLost > 0 && iContinue > iWonLost, 'ترتیب: اول نتیجه‌ی برد/باخت، بعد دعوتِ فالِ بعدی');
+}
+
+console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ سؤال ادیت می‌شود (نه پیامِ جدا)');
+{
+  const bmonth = SRC.slice(SRC.indexOf('bot.action(/^bmonth:'), SRC.indexOf('bot.action(/^focus:'));
+  ok(/const saved = L\.onboarding\.birthMonthSaved\(monthFa\(m\)\);/.test(bmonth), 'متنِ تأیید از قبل ساخته می‌شود');
+  ok(/try \{ await ctx\.editMessageText\(saved\); \}/.test(bmonth), 'روی همان پیام ادیت می‌شود');
+  ok(/catch \{ await ctx\.reply\(saved\)\.catch\(\(\) => \{\}\); \}/.test(bmonth),
+    'اگر ادیت نشد (پیامِ کهنه) به پیامِ جدا برمی‌گردیم تا کاربر بی‌جواب نماند');
+}
+
+console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (خرید، معرفی، کارت شانسِ رایگان)');
+{
+  ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
+    'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
+  ok(/inviteWithBonus\(referralBonusFor\(uid\), cur\), 'invite_go'/.test(SRC), 'دکمه‌ی معرفیِ دوستان با مبلغِ پاداش');
+  ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
+    'دکمه‌ی کارت شانس فقط وقتی سهمیه‌ی امروز باز است نشان داده می‌شود (بن‌بست نمی‌سازد)');
+  ok(/bot\.action\('invite_go', async \(ctx\) => \{ await ctx\.answerCbQuery\(\)\.catch\(\(\) => \{\}\); return showInvite\(ctx\); \}\);/.test(SRC),
+    'دکمه‌ی معرفیِ دوستانِ داخلِ کیف، همان تابعِ hears اصلی را صدا می‌زند (بدونِ کپیِ منطق)');
+}
+
+console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۲۸)');
+{
+  ok(/inviteMain: '📤 معرفی دوستان'/.test(LOC), 'دکمه‌ی کیبورد «معرفی دوستان» شد (نه «دعوت»)');
+  ok(/luckyMain: '🍀 کارت شانس \(استخراج الماس\)'/.test(LOC), 'دکمه‌ی کیبوردِ کارت شانس «استخراج الماس» می‌گوید');
+  ok(/askBirthMonth: 'ماه تولدت چیه؟ 🌿'/.test(LOC), 'سؤالِ ماهِ تولد کوتاه شد (بدونِ مقدمه‌ی «قبل از هر چیز»)');
+  ok(/startWhere: 'از کجا شروع کنیم؟ 📌'/.test(LOC), '«از کجا شروع کنیم؟» ایموجیِ 📌 گرفت');
+  // askName حالا تابعِ v2 است: نسخه‌ی الماس صریح می‌گوید ربات است (تصمیمِ مالک)، و
+  // نسخه‌ی قدیم بیت‌به‌بیت دست‌نخورده می‌ماند (شاخه‌ی else).
+  ok(/askName: \(v2\) => \(v2\s*\n\s*\? 'من ربات تاروت‌خوان هستم!/.test(LOC),
+    'askName در دنیای الماس صریح می‌گوید «من ربات تاروت‌خوانم»');
+  ok(/: 'این‌جا قراره شگفت‌زده بشی؛ ولی پیش از هر چیز، دوست دارم درست صدات کنم\.\\n\\n' \+\s*\n\s*'⬇️\\n\*اسمت رو برام بنویس\.\*'\),/.test(LOC),
+    'شاخه‌ی else همان متنِ قدیمیِ askName را عیناً برمی‌گرداند (رول‌بکِ یک‌خطی)');
+  ok(/L\.onboarding\.askName\(uxV2For\(uid\)\)/.test(SRC), 'index.js پرچمِ uxV2For را به askName پاس می‌دهد');
+  // هدیه‌ی خوش‌آمد: نسخه‌ی v2 فقط همان یک خطِ هدیه می‌ماند (بدونِ خوش‌آمدِ تکراری/جمله‌ی آخر)
+  ok(/welcomeGift: \(amount, cur, v2\) => \(v2/.test(LOC), 'welcomeGift پارامترِ v2 گرفت');
+  const welcomeGiftV2 = LOC.match(/welcomeGift: \(amount, cur, v2\) => \(v2\s*\n\s*\? `🎁[^`]*`/)?.[0] || '';
+  ok(!!welcomeGiftV2 && !/خوش اومدی|هر کارتِ فال/.test(welcomeGiftV2),
+    'نسخه‌ی v2 نه «خوش اومدی» تکرار می‌کند نه جمله‌ی «هر کارتِ فال یک…» را');
+  ok(/welcomeGift\(welcomeBonusFor\(uid\), curOf\(uid\), uxV2For\(uid\)\)/.test(SRC), 'index.js پرچم را به welcomeGift هم می‌دهد');
+  // گیتِ عضویت: نسخه‌ی v2 می‌گوید هدیه **بعد از عضویت** می‌رسد، نه همان لحظه
+  ok(/gateJoin: \(amount, cur, v2\) =>/.test(LOC), 'gateJoin پارامترِ v2 گرفت');
+  ok(/بعد از اینکه عضو بشی[\s\S]{0,120}اضافه می‌شه!/.test(LOC), 'نسخه‌ی v2 صریح می‌گوید هدیه بعد از عضویت اضافه می‌شود');
+  ok(/gateJoin\(welcomeBonusFor\(uid\), curOf\(uid\), uxV2For\(uid\)\)/.test(SRC), 'index.js پرچم را به gateJoin هم می‌دهد');
+  // بسته‌های الماس: کپیِ جدید («از بین سه بسته») به‌جای توضیحِ ریاضیِ قبلی
+  ok(/از بین سه بسته‌ی زیر، بسته‌ای که برات مناسبه رو انتخاب کن/.test(LOC), 'متنِ انتخابِ بسته عوض شد');
+  ok(/🛒 با انتخابِ? بسته‌های بزرگ‌تر/.test(LOC), 'یادآوریِ ارزان‌ترشدنِ هر الماس با ایموجیِ 🛒 می‌آید');
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }
