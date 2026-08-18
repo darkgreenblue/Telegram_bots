@@ -13,6 +13,7 @@
 //
 // اجرا: node tools/check-ux-menu.mjs
 import { readFileSync } from 'fs';
+import { seedToInt } from '../bots/tarot/reading-core.js';
 import {
   TOPICS_V3, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
 } from '../bots/tarot/spreads.js';
@@ -301,6 +302,37 @@ console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه 
   // v2.3: 🛒 از خطِ دومِ یادآوری به **اولِ** جمله‌ی دعوت منتقل شد (تصمیمِ صریحِ مالک).
   ok(/🛒 از بین سه بسته‌ی زیر/.test(LOC), 'ایموجیِ سبد خرید اولِ جمله‌ی انتخابِ بسته است');
   ok(!/🛒 با انتخابِ? بسته‌های بزرگ‌تر/.test(LOC), 'خطِ دومِ یادآوری دیگر ایموجیِ 🛒 ندارد');
+}
+
+console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، نه per روز (باگِ ۱۴۰۵/۰۵/۲۹)');
+{
+  // گزارشِ واقعیِ مالک: «۴ بار بازی کردم، ۲ بارش هر سه کارت الماس بود». ریاضی درست بود
+  // (E=1 در بلوکِ بالا اثبات می‌شود) ولی seed فقط (uid, day) بود، پس هر دستِ دوباره در همان
+  // روز — که ریستِ ادمین بازش می‌کند — روی **همان تخته‌ی نیمه‌روشده** انجام می‌شد.
+  const slots = (uid, day, nonce = '') => {
+    const seed = nonce ? `lucky:${uid}:${day}:${nonce}` : `lucky:${uid}:${day}`;
+    return Array.from({ length: 24 }, (_, i) => i)
+      .sort((a, b) => seedToInt(seed + ':' + a) - seedToInt(seed + ':' + b))
+      .slice(0, 8);
+  };
+  const key = (a) => JSON.stringify([...a].sort((x, y) => x - y));
+  const uid = 100257975, day = '1405-05-29';
+  ok(key(slots(uid, day, 'n1')) !== key(slots(uid, day, 'n2')),
+    'دو دستِ مختلف در یک روز چیدمانِ متفاوت دارند (دانشِ دستِ قبل بی‌ارزش می‌شود)');
+  ok(key(slots(uid, day, 'n1')) === key(slots(uid, day, 'n1')),
+    'داخلِ یک دست چیدمان ثابت است (بستن/باز کردنِ چت و ری‌استارت نتیجه را عوض نمی‌کند)');
+  ok(key(slots(uid, day)) === key(slots(uid, day)),
+    'دستِ در جریانِ لحظه‌ی دیپلوی (بدونِ nonce) به seedِ قدیمی برمی‌گردد، پس وسطِ بازی نمی‌شکند');
+  // هنوز دقیقاً ۸ الماس از ۲۴ — یعنی امیدِ ریاضی دست نخورده
+  for (const n of ['n1', 'n2', 'n3']) ok(slots(uid, day, n).length === 8, `دستِ ${n} هنوز دقیقاً ۸ الماس دارد`);
+  ok(new Set(slots(uid, day, 'n1')).size === 8, 'موقعیت‌ها یکتا هستند');
+
+  // و اینکه کد واقعاً nonce را per دست می‌سازد و از session می‌خواند (نه از حافظه).
+  ok(/function luckyCoinSlots\(uid, today, nonce = ''\)/.test(SRC), 'تابعِ چیدمان nonce می‌گیرد');
+  ok(/luckyDay: today, luckyNonce \}\)/.test(SRC), 'nonce لحظه‌ی باز شدنِ گرید ساخته و در session ذخیره می‌شود');
+  ok(/luckyCoinSlots\(uid, today, s\.luckyNonce\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
+  ok(!/luckyCoinSlots\(uid, today\)(?!,)/.test(SRC.replace(/function luckyCoinSlots[\s\S]*?\n\}/, '')),
+    'هیچ فراخوانیِ بدونِ nonce نمانده');
 }
 
 console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');

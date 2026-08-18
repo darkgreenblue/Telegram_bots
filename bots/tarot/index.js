@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.10.0';
+const PRODUCT_VERSION = '3.10.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1831,9 +1831,26 @@ bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}
      ۳) چیدمانِ الماس‌ها از seedِ قطعیِ (کاربر × روز) می‌آید، پس بستن و بازکردنِ چت
         نتیجه را عوض نمی‌کند و «تا الماس بیاد دوباره امتحان می‌کنم» ممکن نیست. */
 
-/** موقعیتِ کارت‌های الماس‌دار برای این کاربر در این روز — قطعی و تکرارپذیر. */
-function luckyCoinSlots(uid, today) {
-  const seed = `lucky:${uid}:${today}`;
+/** موقعیتِ کارت‌های الماس‌دار برای **یک دستِ مشخص** — قطعی و تکرارپذیر داخلِ همان دست.
+ *
+ * ⚠️ باگِ واقعی (۱۴۰۵/۰۵/۲۹، گزارشِ مالک: «۴ بار بازی کردم، ۲ بارش هر سه کارت الماس بود»):
+ * تا قبل از این، seed فقط `(uid, today)` بود، یعنی چیدمانِ الماس‌ها برای یک کاربر در یک روز
+ * **همیشه یکی** بود. ریستِ ادمین کلِ ردیفِ کاربر را پاک می‌کند (پس `lucky_date` هم می‌رود) و
+ * بازی در همان روز دوباره باز می‌شود — این بار روی **همان تخته‌ای که کاربر قبلاً بخشی‌اش را
+ * دیده**. یعنی هر دستِ بعدی در همان روز عملاً با ورق‌های رو انجام می‌شد و امیدِ ریاضیِ
+ * ۱ الماس در روز از بین می‌رفت. خودِ ریاضی درست بود (۳ × ۸/۲۴ = ۱ و شبیه‌سازی هم تأییدش
+ * می‌کند)؛ نشتی از تکرارِ چیدمان می‌آمد، نه از توزیع.
+ *
+ * حالا یک nonce per **دست** داخلِ seed می‌آید که لحظه‌ی باز شدنِ گرید ساخته و در session
+ * ذخیره می‌شود. سه خاصیت با هم حفظ می‌شوند:
+ *   ۱) داخلِ یک دست ثابت است → بستن و باز کردنِ چت نتیجه را عوض نمی‌کند (تصمیمِ طراحیِ ۳).
+ *   ۲) هر دستِ تازه چیدمانِ تازه دارد → دانشِ دستِ قبلی بی‌ارزش می‌شود.
+ *   ۳) در session است نه حافظه → ری‌استارتِ وسطِ بازی چیدمان را عوض نمی‌کند (بند ۹ب/۵).
+ * دست‌های در جریانِ لحظه‌ی دیپلوی nonce ندارند؛ برای آن‌ها عمداً به seedِ قدیمی برمی‌گردیم
+ * تا کارتی که کاربر همین الان 💎 دیده وسطِ بازی به 🍂 تبدیل نشود (بند ۲ج/۱).
+ */
+function luckyCoinSlots(uid, today, nonce = '') {
+  const seed = nonce ? `lucky:${uid}:${today}:${nonce}` : `lucky:${uid}:${today}`;
   return Array.from({ length: GRID_SIZE }, (_, i) => i)
     .sort((a, b) => seedToInt(seed + ':' + a) - seedToInt(seed + ':' + b))
     .slice(0, LUCKY_COINS);
@@ -1897,7 +1914,9 @@ bot.action('lucky_stop', async (ctx) => {
   if (getState(uid) !== 'lucky_shuffle') return;
   const today = tehranToday();
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
-  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today });
+  // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
+  const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
+  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today, luckyNonce });
   const msgId = getSession(uid).luckyMsgId;
   if (msgId) { try { await ctx.telegram.editMessageText(ctx.chat.id, msgId, undefined, '🂠 ✋'); } catch {} }
   await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS), luckyGridKb());
@@ -1919,7 +1938,7 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
     setState(uid, 'idle');
     return ctx.answerCbQuery().catch(() => {});
   }
-  const coinSlots = luckyCoinSlots(uid, today);
+  const coinSlots = luckyCoinSlots(uid, today, s.luckyNonce);
   const hit = coinSlots.includes(i);
   picks.push(i);
   const found = (s.luckyCoinsFound || 0) + (hit ? 1 : 0);
