@@ -2732,10 +2732,18 @@ bot.action('nav:menu', async (ctx) => {
   }
   setState(uid, 'idle');
   setSession(uid, null);
-  // UX v2.3: به‌جای «کشتنِ کیبورد + پیامِ جدید»، همین پیام به تأییدِ بازگشت ادیت می‌شود.
-  // کیبوردِ ماندگار را نمی‌شود به یک ادیت چسباند (تلگرام فقط inline را در ادیت می‌پذیرد)،
-  // ولی خودش از قبل پایینِ چت هست؛ `ensureMenu` تورِ ایمنیِ کسی است که جمعش کرده باشد.
-  // اگر ادیت نشد (پیامِ کهنه) دقیقاً به رفتارِ قبلی برمی‌گردیم تا کاربر بی‌جواب نماند.
+  // UX v2.3: در دنیای الماس به‌جای «کشتنِ کیبورد + پیامِ جدید»، همین پیام به تأییدِ بازگشت
+  // ادیت می‌شود (خواسته‌ی مالک: پیامِ «یکی از فال‌ها رو انتخاب کن» جای خودش عوض شود).
+  // کیبوردِ ماندگار را نمی‌شود به یک ادیت چسباند (تلگرام در ادیت فقط inline می‌پذیرد)، ولی
+  // خودش از قبل پایینِ چت هست و `ensureMenu` تورِ ایمنیِ کسی است که جمعش کرده باشد.
+  // ⚠️ دنیای تومانی عمداً مسیرِ قدیمی را می‌رود: آن‌جا کاربرِ واقعی است و این دکمه از
+  // کاتالوگِ تومانی و پیامِ `useButtons` هم می‌آید. ادیتِ یک پیامِ بالای چت برای او یعنی
+  // «هیچ اتفاقی نیفتاد»، و مهم‌تر: این پرتکرارترین نقطه‌ای است که کیبوردِ اصلی دوباره
+  // به او تحویل می‌شود. پس رفتارش بیت‌به‌بیت دست‌نخورده می‌ماند.
+  if (!uxV2For(uid)) {
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    return ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
+  }
   let edited = false;
   try { await ctx.editMessageText(L.reading.backToMenu); edited = true; } catch {}
   if (edited) await ensureMenu(ctx, uid);
@@ -3550,12 +3558,17 @@ bot.action(/^disc_back:(\d+)$/, async (ctx) => {
 bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
-  const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
   if (p && p.user_id === uid && ['pending'].includes(p.status)) stmts.setPaymentStatus.run('canceled', p.id);
+  // همان قاعده‌ی pay_back (باگِ از قبل موجود): تپِ یک دکمه‌ی انصرافِ کهنه نباید فاکتورِ
+  // زنده‌ی فعلی را از سشن جدا کند. در مسیرِ عادی (p.id === s.paymentId) رفتار عوض نمی‌شود.
   const s = getSession(uid);
-  delete s.paymentId;
-  setSession(uid, s);
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  if (s.paymentId === pid) {
+    delete s.paymentId;
+    setSession(uid, s);
+    setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await replyCanceled(ctx, uid);
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
@@ -3568,12 +3581,18 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
 bot.action(/^pay_back:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
-  const p = stmts.getPayment.get(parseInt(ctx.match[1], 10));
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
   if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
+  // ⚠️ استیت/سشن فقط وقتی دست بخورد که این دکمه به **همان** فاکتوری اشاره کند که کاربر
+  // الان درگیرش است. دکمه‌ی کهنه‌ی یک فاکتورِ رهاشده نباید فاکتورِ زنده‌ی فعلی را از سشن
+  // جدا کند، وگرنه رسیدی که کاربر بعداً می‌فرستد بی‌صاحب می‌شود و پولِ واریزشده گم می‌ماند.
   const s = getSession(uid);
-  delete s.paymentId;
-  setSession(uid, s);
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  if (s.paymentId === pid) {
+    delete s.paymentId;
+    setSession(uid, s);
+    setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  }
   const [text, extra] = walletScreen(uid);
   try { await ctx.editMessageText(text, extra); }
   catch { await ctx.reply(text, extra).catch(() => {}); }

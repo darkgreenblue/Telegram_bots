@@ -390,11 +390,29 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // ۶) صفحه‌ی بسته‌ها زیرمنوی کیف است: ادیت + دکمه‌ی «بازگشت» (نه «انصراف»).
   ok(/backOneStep: '◀️ بازگشت'/.test(LOC), 'برچسبِ بازگشتِ یک‌قدمی جدا از «انصراف» تعریف شده');
   ok(/L\.buttons\.backOneStep, `pay_back:\$\{paymentId\}`/.test(SRC), 'صفحه‌ی بسته‌ها دکمه‌ی بازگشت دارد نه انصراف');
-  const payBack = SRC.slice(SRC.indexOf('bot.action(/^pay_back:'), SRC.indexOf('bot.action(/^pay_back:') + 900);
+  const payBackStart = SRC.indexOf('bot.action(/^pay_back:');
+  const payBack = SRC.slice(payBackStart, SRC.indexOf('\n});', payBackStart));
   ok(/setPaymentStatus\.run\('canceled', p\.id\)/.test(payBack), 'بازگشت فاکتورِ خالی را می‌بندد (وگرنه گاردِ پرداخت کاربر را قفل می‌کند)');
   ok(/walletScreen\(uid\)/.test(payBack), 'بازگشت دقیقاً همان صفحه‌ی کیف را رندر می‌کند (تک‌منبع)');
   ok(!/replyCanceled|sendContinuePrompt/.test(payBack), 'بازگشت از بسته‌ها پیامِ «ادامه» نمی‌آورد');
   ok(/offerPendingReading\(ctx, uid\)/.test(payBack), 'فالِ رزروشده بعد از بازگشت سرگردان نمی‌ماند');
+  // باگی که ریویوِ خصمانه گرفت: گاردِ `p.status === 'pending'` فقط لغوِ فاکتور را می‌پوشاند،
+  // ولی جداکردنِ فاکتور از سشن بی‌قید بود. یعنی تپِ یک دکمه‌ی کهنه، فاکتورِ **زنده‌ی فعلی**
+  // را از سشن جدا می‌کرد و رسیدی که کاربر بعداً می‌فرستاد بی‌صاحب می‌شد (پولِ واریزشده گم).
+  for (const [name, marker] of [['pay_back', 'bot.action(/^pay_back:'], ['pay_cancel', 'bot.action(/^pay_cancel:']]) {
+    const start = SRC.indexOf(marker);
+    const body = SRC.slice(start, SRC.indexOf('\n});', start));
+    ok(/if \(s\.paymentId === pid\) \{/.test(body),
+      `«${name}» سشن را فقط وقتی دست می‌زند که دکمه به همان فاکتورِ جاری اشاره کند`);
+    ok(!/^\s*delete s\.paymentId;$/m.test(body.replace(/if \(s\.paymentId === pid\) \{[\s\S]*?\n  \}/, '')),
+      `«${name}» هیچ مسیرِ بی‌قیدی برای جداکردنِ فاکتور ندارد`);
+  }
+
+  // nav:menu در دنیای تومانی (کاربرِ واقعی) باید دقیقاً رفتارِ قبلی را داشته باشد: پیامِ
+  // تازه + کیبوردِ اصلی. ادیت‌کردنِ یک پیامِ بالای چت برای او یعنی «هیچ اتفاقی نیفتاد»،
+  // و این پرتکرارترین نقطه‌ی تحویلِ دوباره‌ی کیبورد است.
+  ok(/if \(!uxV2For\(uid\)\) \{[\s\S]{0,220}ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\);/.test(navH),
+    'دنیای تومانی همان پیامِ تازه + کیبوردِ اصلی را می‌گیرد (ادیت فقط برای دنیای الماس)');
 
   // ۷) پیامِ «ادامه» تنها نقطه‌ی باز شدنِ منوی اصلی است (تصمیمِ مالک).
   const cont = SRC.slice(SRC.indexOf('async function sendContinuePrompt'), SRC.indexOf('async function replyCanceled'));
