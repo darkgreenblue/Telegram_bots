@@ -1,0 +1,19 @@
+{
+  "name": "tarot-reel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ساخت ویدیوی عمودی ریلز از یک فال تاروت (Remotion). خارج از bots/ تا دیپلوی هیچ رباتی را لمس نکند.",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render src/index.mjs TarotReel out/reel.mp4 --codec=h264",
+    "stage": "node ../../tools/tarot-video/stage-assets.mjs --props fixtures/props.sample.json"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.513",
+    "@remotion/fonts": "4.0.513",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.513"
+  }
+}
