@@ -169,7 +169,9 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.16.0';
+// 3.17.0: دستورِ فقط-ادمینِ /reel — ساختِ ویدیوی ریلز از یک فالِ ناشناس. رفتارِ هیچ
+//         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
+const PRODUCT_VERSION = '3.17.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -231,6 +233,18 @@ const DECISIVE_VERDICT_ENABLED = true;
 // یعنی مانع پول نبود؛ صفحه شبیه پی‌وال بود و نمی‌فهمیدند پرداختی لازم نیست.
 // Rollback فوری: false کن → همان دکمه‌ی قیمت‌دار و متنِ قبلی برمی‌گردد، بدونِ هیچ اثر دیگری.
 const COVERED_PAYWALL_ENABLED = true;
+
+// 🎬 ویدیوی ریلز (فقط ادمین): دستورِ /reel یک ورک‌فلوی گیت‌هاب را صدا می‌زند که سوالِ بعدی
+// را از Notion برمی‌دارد، یک فالِ **ناشناس** می‌گیرد (بدونِ نام و بدونِ حافظه) و خروجی را
+// به‌جای متن، یک ویدیوی عمودیِ بی‌صدا می‌سازد و در همین چت می‌فرستد.
+// خودِ ربات هیچ رندری نمی‌کند: نه Chrome می‌خواهد، نه CPU می‌گیرد، نه فلوی کاربرِ واقعی را
+// لمس می‌کند. تنها کارش یک ریکوئستِ HTTP است.
+// Rollback یک‌خطی: false کن → دستور کاملاً بی‌اثر می‌شود (کاربر عادی هم اصلاً نمی‌بیندش).
+const VIDEO_REEL_ENABLED = true;
+const VIDEO_DISPATCH_REPO = 'darkgreenblue/Telegram_bots';
+// واریانت‌های مجازِ پس‌زمینه. allowlist عمدی است: آرگومانِ کاربر هرگز خام وارد payloadِ
+// گیت‌هاب نمی‌شود، حتی وقتی فرستنده ادمین است.
+const VIDEO_BACKGROUNDS = ['mystic', 'nature', 'minimal'];
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
 const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
@@ -4271,6 +4285,44 @@ bot.command('newcode', (ctx) => {
       1, onlyUser ? parseInt(normalizeDigits(onlyUser), 10) : null, ctx.from.id);
     return ctx.reply(`✅ کد ${code.toUpperCase()} (${pct}٪، ${d} روز) ساخته شد.`);
   } catch (e) { return ctx.reply(`❌ ${e.message}`); }
+});
+
+// 🎬 /reel [mystic|nature|minimal] — ساختِ ویدیوی ریلز از سوالِ بعدیِ صفِ Notion.
+// عمداً بعد از /newcode و بیرون از ناحیه‌هایی است که چک‌های سورس‌خوانِ تاروت روی آن‌ها
+// ادعا دارند. ورک‌فلو خودش ویدیو را به همین چت می‌فرستد، پس این‌جا فقط «شروع شد» گفته می‌شود.
+bot.command('reel', async (ctx) => {
+  if (!VIDEO_REEL_ENABLED || !isAdmin(ctx.from.id)) return; // returnِ بی‌صدا، الگوی /stats
+  const token = process.env.VIDEO_DISPATCH_TOKEN;
+  if (!token) return ctx.reply(L.reel.noToken);
+  const arg = (ctx.message.text || '').trim().split(/\s+/)[1];
+  const bg = VIDEO_BACKGROUNDS.includes(arg) ? arg : '';
+  // تایم‌اوتِ صریح: بدونش یک شبکه‌ی کند هندلر را تا ابد باز نگه می‌دارد و ادمین
+  // هیچ جوابی نمی‌گیرد، پس دوباره می‌زند و دو ران هم‌زمان می‌سازد.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${VIDEO_DISPATCH_REPO}/actions/workflows/tarot-video.yml/dispatches`,
+      {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ref: 'main', inputs: bg ? { background: bg } : {} }),
+      },
+    );
+    // گیت‌هاب برای dispatchِ موفق ۲۰۴ و بدنه‌ی خالی می‌دهد؛ هر چیز دیگری یعنی نشد.
+    if (res.status === 204) return ctx.reply(L.reel.started);
+    return ctx.reply(L.reel.failed(String(res.status)));
+  } catch (e) {
+    return ctx.reply(L.reel.failed(e.name === 'AbortError' ? 'timeout' : String(e.message || e)));
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 /* ---------- اشتراک‌گذاری (inline mode) ---------- */

@@ -49,6 +49,10 @@ const DB_ARG = val('db', '').trim();
 const FAKE_QUESTION = 'این مسیری که انتخاب کردم درست پیش می‌ره؟';
 
 const fail = (msg) => { console.error(`::error::${msg}`); process.exit(1); };
+// نامِ فلگ از یک تابع می‌آید و نه مستقیم داخلِ متنِ فارسی. دلیل: قاعده‌ی بند ۱۰ ریشه
+// خطِ تیره را در متنِ رو-به-کاربر ممنوع می‌کند و سنجه‌های خودکار نمی‌توانند «نشانه‌گذاری»
+// را از «نامِ فلگ» تشخیص بدهند. این‌طوری پیام نامِ واقعیِ فلگ را می‌گوید بدونِ ابهام.
+const cli = (n) => `--${n}`;
 
 /** خروجیِ جاب برای گیت‌هاب اکشنز. بیرونِ اکشنز بی‌صدا رد می‌شود. */
 function ghOutput(key, value) {
@@ -90,7 +94,7 @@ async function tellAdmins(text) {
  */
 async function pickQuestion() {
   if (Q_OVERRIDE) {
-    console.log('📝 سوال از فلگِ --question (نوشن اصلاً صدا زده نشد)');
+    console.log(`📝 سوال از فلگِ ${cli('question')}؛ نوشن اصلاً صدا زده نشد`);
     return { pageId: '', question: Q_OVERRIDE, topicKey: '', background: '' };
   }
 
@@ -127,11 +131,24 @@ async function pickQuestion() {
 }
 
 /* ═══════════════ چیدمان و پس‌زمینه ═══════════════ */
-/** `--spread` هم آی‌دیِ کامل (`career3`) را می‌پذیرد هم کلیدِ موضوع (`career`). */
+/**
+ * چیدمانِ این ویدیو.
+ *
+ * ⚠️ موضوعِ نوشن **همیشه** به آی‌دیِ نسل چهارم (`<topic>3`) می‌رود، نه به `SPREAD_BY_ID[topic]`.
+ * دلیل: کلیدِ موضوع با آی‌دیِ یک چیدمانِ نسلِ قدیم هم‌نام است (`career`, `love`, `money`)
+ * و آن رکوردهای قدیمی جایگاه و اندازه‌ی دیگری دارند. بدونِ این قاعده، «شغل» بی‌صدا به
+ * چیدمانِ بازنشسته می‌افتاد و کسی تا دیدنِ خودِ ویدیو نمی‌فهمید.
+ *
+ * `--spread` عمداً بازتر است: هم آی‌دیِ کامل (`career3`) را می‌پذیرد هم کلیدِ موضوع.
+ */
 function resolveSpread(topicKey) {
-  const wanted = SPREAD_ARG || topicKey || 'personal';
-  const spread = SPREAD_BY_ID[wanted] || SPREAD_BY_ID[`${wanted}3`];
-  if (!spread) fail(`چیدمانِ ناشناخته: «${wanted}»`);
+  // ترتیبِ ترجیح در فلگ هم عمدی است: اول `<arg>3` و بعد خودِ `arg`. اگر برعکس بود،
+  // `--spread money` به همان چیدمانِ بازنشسته می‌رسید که بالا توضیح داده شد.
+  const id = SPREAD_ARG
+    ? (SPREAD_BY_ID[`${SPREAD_ARG}3`] ? `${SPREAD_ARG}3` : SPREAD_ARG)
+    : `${topicKey || 'personal'}3`;
+  const spread = SPREAD_BY_ID[id];
+  if (!spread) fail(`چیدمانِ ناشناخته: «${SPREAD_ARG || topicKey}»`);
   return spread;
 }
 

@@ -76,6 +76,9 @@ const SECRETS = {
   OWNER_TELEGRAM_ID: '111,222',
   VOICE2TEXT_BOT_TOKEN: 'vtok', VOICE2TEXT_OPENROUTER_KEY: 'vkey', VOICE2TEXT_NOTION_TOKEN: '',
   TAROT_BOT_TOKEN: 'tok', TAROT_OPENROUTER_KEY: 'key',
+  // کلیدِ اختیاریِ ویدیو عمداً **ست‌شده** تست می‌شود: خطِ شرطی‌اش دقیقاً همان شکلی است
+  // که اگر بیرونِ write_env بنشیند هر دیپلوی را به پینگ‌پنگِ ری‌استارت تبدیل می‌کند.
+  TAROT_VIDEO_DISPATCH_TOKEN: 'vidtok',
   // daily-brief عمداً با کلیدهای اختیاریِ **ست‌شده** تست می‌شود: بلوکِ .envِ آن دو خطِ شرطی
   // (Notion و ElevenLabs) دارد و دقیقاً همین شکل است که اگر بیرونِ write_env نوشته شود،
   // هر دیپلوی را به پینگ‌پنگِ ری‌استارت تبدیل می‌کند.
@@ -102,6 +105,7 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
   chk('سرور تازه: دورِ سوم هم نه', round(d, SECRETS), '');
   const tarotEnv = readFileSync(join(d, 'bots/tarot/.env'), 'utf8');
   chk('ADMIN_IDS در .envِ tarot نوشته شده', /^ADMIN_IDS=111,222$/m.test(tarotEnv), true);
+  chk('tarot توکنِ dispatchِ ویدیو را می‌گیرد', /^VIDEO_DISPATCH_TOKEN=vidtok$/m.test(tarotEnv), true);
   const dashEnv = readFileSync(join(d, 'bots/dashboard/.env'), 'utf8');
   chk('dashboard ADMIN_IDS نمی‌گیرد', /ADMIN_IDS/.test(dashEnv), false);
   const dlbEnv = readFileSync(join(d, 'bots/daily-brief/.env'), 'utf8');
@@ -121,6 +125,18 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
   // و اضافه‌شدنِ بعدیِ همان کلید باید ری‌استارت بدهد (وگرنه Secret تازه بی‌اثر می‌ماند)
   chk('اضافه‌شدنِ کلیدِ Notion ری‌استارت می‌دهد',
     round(d, { ...noOpt, DAILY_BRIEF_NOTION_TOKEN: 'ntok' }).includes('daily-brief'), true);
+}
+
+// ۱ج) همان قاعده برای کلیدِ اختیاریِ ویدیو (نبودش ساکت، افزودنش ری‌استارت)
+{
+  const d = fresh('videokey');
+  const noVid = { ...SECRETS, TAROT_VIDEO_DISPATCH_TOKEN: '' };
+  round(d, noVid);
+  chk('tarot بدونِ توکنِ ویدیو هم در دورِ دوم ساکت است', round(d, noVid), '');
+  const env = readFileSync(join(d, 'bots/tarot/.env'), 'utf8');
+  chk('توکنِ ویدیوی ست‌نشده اصلاً در .env نمی‌آید', /VIDEO_DISPATCH_TOKEN/.test(env), false);
+  chk('اضافه‌شدنِ توکنِ ویدیو ری‌استارت می‌دهد',
+    round(d, { ...noVid, TAROT_VIDEO_DISPATCH_TOKEN: 'vidtok' }).includes('tarot'), true);
 }
 
 // ۲) تغییرِ واقعیِ Secret باید ری‌استارت بدهد (وگرنه ویرایشِ Secret بی‌اثر می‌ماند)

@@ -714,8 +714,13 @@ ok(reelIdx >= 0, 'بلوکِ reel در locales/fa.js هست');
   ok(bad.length === 0, `بلوکِ reel هیچ خط تیره‌ی بلندی ندارد${bad.length ? ` (${bad.slice(0, 2).join(' | ')})` : ''}`);
   ok(faStrings(block).length > 0, 'بلوکِ reel واقعاً متنِ فارسی دارد (سنجه‌ی بالا توخالی نیست)');
 }
+// ⚠️ در فایل‌های `tools/` نامِ فلگِ خط فرمان (`--props`, `--dry`) داخلِ همان پیام‌های فارسیِ
+// راهنما می‌آید و با `--`ِ نگارشی یکی نیست. قاعده‌ی بند ۱۰ ریشه خطِ تیره را به‌عنوان
+// **نشانه‌گذاری** ممنوع می‌کند، نه نامِ فلگ را. پس قبل از سنجش، فلگ‌ها از رشته حذف می‌شوند؛
+// بدونِ این، تنها راهِ سبزکردنِ چک این بود که پیام‌های راهنما نامِ فلگ را نگویند.
+const dropFlags = (s) => s.replace(/--[A-Za-z][\w-]*/g, '');
 for (const f of TOOL_FILES) {
-  const bad = faStrings(src(f)).filter((s) => /[—–]|(?<!-)--(?!-)/.test(s));
+  const bad = faStrings(src(f)).filter((s) => /[—–]|(?<!-)--(?!-)/.test(dropFlags(s)));
   ok(bad.length === 0, `${path.basename(f)}: متنِ فارسی بدونِ خط تیره‌ی بلند${bad.length ? ` (${bad.slice(0, 2).join(' | ')})` : ''}`);
 }
 

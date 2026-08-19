@@ -59,9 +59,10 @@ export function stageCards(props, { root = REPO_ROOT } = {}) {
 /* ═══════════════ CLI ═══════════════ */
 function main() {
   const argv = process.argv.slice(2);
-  const val = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : ''; };
+  const cli = (n) => `--${n}`;
+  const val = (n) => { const i = argv.indexOf(cli(n)); return i >= 0 ? argv[i + 1] : ''; };
   const p = val('props');
-  if (!p) { console.error('::error::فلگ --props لازم است'); process.exit(1); }
+  if (!p) { console.error(`::error::فلگ ${cli('props')} لازم است`); process.exit(1); }
 
   const file = path.isAbsolute(p) ? p : path.resolve(REPO_ROOT, p);
   if (!existsSync(file) || !statSync(file).isFile()) {
