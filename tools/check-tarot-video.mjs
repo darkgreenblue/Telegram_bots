@@ -684,7 +684,7 @@ const idxText = stripCommentsOnly(IDX);
 const flagUses = (idxCode.match(/\bVIDEO_REEL_ENABLED\b/g) || []).length;
 eq(flagUses, 2, 'پرچمِ VIDEO_REEL_ENABLED دقیقاً دو بار استفاده شده (تعریف + گاردِ دستور)');
 ok(/const\s+VIDEO_REEL_ENABLED\s*=\s*(true|false)\s*;/.test(idxCode), 'پرچم یک ثابتِ بولینِ یک‌خطی است (رول‌بکِ یک‌خطی)');
-ok(/const\s+PRODUCT_VERSION\s*=\s*['"`]3\.17\.0['"`]/.test(idxText), 'PRODUCT_VERSION روی 3.17.0 بامپ شده (بند ۲ج/۴)');
+ok(/const\s+PRODUCT_VERSION\s*=\s*['"`]3\.20\.0['"`]/.test(idxText), 'PRODUCT_VERSION روی 3.20.0 بامپ شده (بند ۲ج/۴)');
 
 const cmdIdx = IDX.indexOf("bot.command('reel'");
 ok(cmdIdx >= 0, "دستور bot.command('reel', ...) ثبت شده است");

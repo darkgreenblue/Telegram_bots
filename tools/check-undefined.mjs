@@ -32,6 +32,8 @@ const TARGETS = [
   'bots/tarot/verdict.js',
   'bots/tarot/repair.js',
   'bots/tarot/spreads.js',
+  'bots/tarot/loading.js',
+  'bots/tarot/ganjineh.js',   // ماژولِ نشانگرِ انتظار (بند ۸ ریشه: ماژولِ جدید به TARGETS اضافه شود)
   'bots/voice2text/index.js',
   'bots/dashboard/index.js',
   'bots/daily-brief/index.js',
