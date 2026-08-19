@@ -79,7 +79,9 @@ export function themeOf(name) {
 export const FONT = {
   family: "'Vazirmatn', system-ui, sans-serif",
   title: { min: 34, max: 58 },
-  caption: { min: 30, max: 56 },
+  // کپشن کفِ پایین‌تری دارد چون `CAPTION_BOX` کوتاه است (فقط ۲۷۰px زیرِ کارتِ بزرگ) و تفسیرِ
+  // یک کارت گاهی ۴۰۰ نویسه می‌شود. حذفِ متن ممنوع است، پس فونت اجازه‌ی نفس‌کشیدن می‌گیرد.
+  caption: { min: 26, max: 52 },
   headline: { min: 36, max: 66 },
   verdict: { min: 30, max: 56 },
   label: 40,
