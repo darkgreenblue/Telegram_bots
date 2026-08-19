@@ -265,7 +265,7 @@ console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ س�
 
 console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (خرید، معرفی، کارت شانسِ رایگان)');
 {
-  ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
+  ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[rechargeBtn\(uid\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
     'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
   ok(/inviteWithBonus\(referralBonusFor\(uid\), cur\), 'invite_go'/.test(SRC), 'دکمه‌ی معرفیِ دوستان با مبلغِ پاداش');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
@@ -285,8 +285,8 @@ console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه 
   ok(/startWhere: 'از کجا شروع کنیم؟ 📌'/.test(LOC), '«از کجا شروع کنیم؟» ایموجیِ 📌 گرفت');
   // askName حالا تابعِ v2 است: نسخه‌ی الماس صریح می‌گوید ربات است (تصمیمِ مالک)، و
   // نسخه‌ی قدیم بیت‌به‌بیت دست‌نخورده می‌ماند (شاخه‌ی else).
-  ok(/askName: \(v2\) => \(v2\s*\n\s*\? 'من ربات تاروت‌خوان هستم!/.test(LOC),
-    'askName در دنیای الماس صریح می‌گوید «من ربات تاروت‌خوانم»');
+  ok(/askName: \(v2\) => \(v2\s*\n\s*\? '🧙‍♂️ من ربات تاروت‌خوان هستم!/.test(LOC),
+    'askName در دنیای الماس با ایموجیِ جادوگر شروع می‌شود و صریح می‌گوید «من ربات تاروت‌خوانم»');
   ok(/: 'این‌جا قراره شگفت‌زده بشی؛ ولی پیش از هر چیز، دوست دارم درست صدات کنم\.\\n\\n' \+\s*\n\s*'⬇️\\n\*اسمت رو برام بنویس\.\*'\),/.test(LOC),
     'شاخه‌ی else همان متنِ قدیمیِ askName را عیناً برمی‌گرداند (رول‌بکِ یک‌خطی)');
   ok(/L\.onboarding\.askName\(uxV2For\(uid\)\)/.test(SRC), 'index.js پرچمِ uxV2For را به askName پاس می‌دهد');
@@ -352,6 +352,46 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
   ok(/patchSession\(uid, \{ luckyStatusMsgId: m\.message_id \}\)/.test(sls),
     'شناسه‌ی پیامِ تازه ذخیره می‌شود تا تپِ بعدی همان را ادیت کند');
   ok(/luckyStatusMsgId: 0/.test(SRC), 'هر دستِ تازه پیامِ وضعیتِ خودش را می‌سازد');
+}
+
+console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style)');
+{
+  // فقط سه مقدارِ مجازِ خودِ Bot API: success (سبز)، primary (آبی)، danger (قرمز).
+  // نبودِ فیلد = رنگِ پیش‌فرضِ کلاینت، پس کلاینتِ قدیمی‌تر بی‌خطر ردش می‌کند.
+  // هر آرگومانِ دومِ `styled(...)` باید یا یکی از سه مقدارِ مجاز باشد یا یکی از دو تابعِ
+  // تصمیم‌گیرنده. اگر کسی 'green' یا 'blue' بنویسد (که Bot API ردش می‌کند) این قرمز می‌شود.
+  const ALLOWED = ["'success'", "'primary'", "'danger'", 'topicStyle(', 'PACK_STYLE['];
+  const calls = [...SRC.matchAll(/styled\(/g)].map(m => SRC.slice(m.index, m.index + 260));
+  const decls = calls.filter(c => !/=> \(style \?/.test(c)); // خودِ تعریفِ helper را نشمار
+  ok(decls.length >= 4, `helper در همه‌ی نقاطِ رنگی استفاده شده (${decls.length} فراخوانی)`);
+  const bad = decls.filter(c => !ALLOWED.some(a => c.includes(a)));
+  ok(bad.length === 0, `هیچ فراخوانیِ styled با مقدارِ ناشناخته نیست (${bad.length} مورد)`);
+  // و مجموعه‌ی مقادیرِ خامِ استفاده‌شده زیرمجموعه‌ی سه مقدارِ Bot API است
+  const lits = [...SRC.matchAll(/(?:\? |: |gold: )'(success|primary|danger|[a-z]+)'/g)]
+    .map(m => m[1]).filter(v => ['success', 'primary', 'danger', 'green', 'blue', 'red'].includes(v));
+  ok(lits.length > 0 && lits.every(v => ['success', 'primary', 'danger'].includes(v)),
+    `مقادیرِ رنگ از سه مقدارِ مجازِ Bot API اند (${[...new Set(lits)].join(', ')})`);
+  ok(/const styled = \(btn, style\) => \(style \? \{ \.\.\.btn, style \} : btn\);/.test(SRC),
+    'helper وقتی رنگ ندارد دکمه را **دست‌نخورده** برمی‌گرداند (نه style: undefined)');
+
+  // ۱) خریدِ الماس سبز، و فقط در دنیای الماس (دکمه‌ی تومانیِ کاربرِ واقعی دست‌نخورده)
+  ok(/const rechargeBtn = \(uid\) => styled\(\s*\n?\s*Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\), coinsOn\(uid\) \? 'success' : undefined\);/.test(SRC),
+    'دکمه‌ی «خرید الماس» سبز است و فقط در دنیای الماس رنگ می‌گیرد');
+  ok(!/Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]/.test(SRC),
+    'هیچ نقطه‌ای دکمه‌ی شارژ را بدونِ helper نمی‌سازد (وگرنه یک‌جا بی‌رنگ می‌ماند)');
+
+  // ۲) «سؤال شخصی خودم» آبی، در **هر دو** منویی که ساخته می‌شود
+  ok(/const topicStyle = \(key\) => \(key === MENU_PIN \? 'primary' : undefined\);/.test(SRC),
+    '«سؤال شخصی خودم» آبی است (از روی MENU_PIN، نه رشته‌ی دستی)');
+  ok(/topicRow = \(key\) => \{[\s\S]{0,220}styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}`\), topicStyle\(key\)\)/.test(SRC),
+    'منوی کوتاه رنگ را اعمال می‌کند');
+  ok(/styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}:a`\), topicStyle\(t\.key\)\)/.test(SRC),
+    'لیستِ کامل هم همان رنگ را اعمال می‌کند (وگرنه دو منو دو شکل می‌شدند)');
+
+  // ۳) بسته‌ی الماسی سبز
+  ok(/const PACK_STYLE = \{ gold: 'success' \};/.test(SRC), 'بسته‌ی الماسی سبز است');
+  ok(/styled\(Markup\.button\.callback\(L\.buttons\.coinPack\(p, cur\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
+    'رنگِ بسته از جدولِ PACK_STYLE می‌آید، نه شرطِ درجا');
 }
 
 console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');
@@ -445,12 +485,31 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   const ens = SRC.slice(SRC.indexOf('async function ensureMenu'), SRC.indexOf('async function sendVerdict'));
   ok(/if \(uxV2For\(uid\)\) return;/.test(ens), 'ensureMenu در دنیای الماس هیچ پیامی نمی‌فرستد');
   ok(/L\.onboarding\.keyboardReveal/.test(ens), 'دنیای تومانی همان تورِ ایمنیِ قبلی را دارد (دست‌نخورده)');
+  // v2.5: پایانِ آنبوردینگ دوباره **یک پیام** است (چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟»)،
+  // و کیبوردِ ماندگار یک قدم جلوتر روی پیامِ «خوش اومدی» تحویل می‌شود — تنها پیامِ آنبوردینگ
+  // که کیبوردِ inline ندارد، پس تنها جایی است که می‌تواند حاملش باشد.
   const fin = SRC.slice(SRC.indexOf('async function finishOnboarding'), SRC.indexOf('bot.action(/^bmonth:'));
-  ok(/ctx\.reply\(L\.reading\.startWhere, mainKeyboard\(uid\)\)/.test(fin),
-    'کیبوردِ ماندگار به پیامِ «از کجا شروع کنیم؟» می‌چسبد (بدونِ پیامِ اعلانِ جداگانه)');
-  ok(/stmts\.setKbShown\.run\(uid\)/.test(fin), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
-  ok(/ctx\.reply\(L\.reading\.catalogV3, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\)/.test(fin),
-    'منوی فال پیامِ بعدی است (هر پیام فقط یک reply_markup می‌پذیرد)');
+  ok(/return ctx\.reply\(L\.reading\.startWhere, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\);/.test(fin),
+    'پایانِ آنبوردینگ یک پیام است: چهار دکمه زیرِ «از کجا شروع کنیم؟»');
+  ok(!/catalogV3/.test(fin), 'متنِ «کدوم فال رو انتخاب می‌کنی؟» در آنبوردینگ نمی‌آید (استثنای عمدی)');
+  const nameStart = SRC.indexOf('async function finishNameOnboarding');
+  const nameFn = SRC.slice(nameStart, SRC.indexOf('\n}', nameStart));
+  ok(/uxV2For\(uid\) \? mainKeyboard\(uid\) : Markup\.removeKeyboard\(\)/.test(nameFn),
+    'کیبوردِ ماندگار روی پیامِ «خوش اومدی» تحویل می‌شود (و دنیای تومانی همان removeKeyboard می‌ماند)');
+  ok(/if \(uxV2For\(uid\)\) stmts\.setKbShown\.run\(uid\);/.test(nameFn), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
+  // «از کجا شروع کنیم؟» فقط جای خودش (آنبوردینگ) بماند و هیچ‌جای دیگر نیاید.
+  ok((SRC.match(/L\.reading\.startWhere/g) || []).length === 1, '«از کجا شروع کنیم؟» فقط در آنبوردینگ استفاده می‌شود');
+  // نگارشِ تازه‌ی دکمه‌ی بسته‌ها + نبودِ خطِ تیره‌ی بلند (بند ۱۰ ریشه)
+  ok(/coinPack: \(p, cur\) => `\$\{p\.emoji\} \$\{p\.fa\}: ➕\$\{fmt\(p\.coins\)\}\$\{cur\.emoji\} \| \$\{fmt\(p\.toman\)\} تومان`/.test(LOC),
+    'دکمه‌ی بسته: «🥉 بسته‌ی معمولی: ➕۱۰💎 | ۳۰٬۰۰۰ تومان»');
+  // خطِ تیره‌ی بلند در متنِ رو-به-کاربر ممنوع است (بند ۱۰ ریشه). دامنه: بلوکِ `buttons` و
+  // `wallet` — یعنی همان‌جایی که این PR دست زد. (کامنت‌ها و پرامپت‌ها بیرونِ دامنه‌اند؛
+  // چند «—» داخلِ خودِ پرامپت‌های خوانش از قبل هست و پاک‌کردنشان تغییرِ رفتاریِ جداست.)
+  const walletBlock = LOC.slice(LOC.indexOf('  wallet: {'), LOC.indexOf('  wallet: {') + 3000);
+  for (const [name, block] of [['coinPack', LOC], ['بلوکِ کیف', walletBlock]]) {
+    const lines = block.split('\n').filter(l => /coinPack/.test(l) && !l.trim().startsWith('//'));
+    ok(lines.length > 0 && !lines.some(l => l.includes('—')), `«${name}» خطِ تیره‌ی بلند ندارد`);
+  }
 }
 
 console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چسبیده‌ی عدد و واحد (UX v2.3)');

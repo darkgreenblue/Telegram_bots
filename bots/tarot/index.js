@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.11.0';
+const PRODUCT_VERSION = '3.13.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -188,6 +188,14 @@ const OPEN_TOPIC_ENABLED = true;
 // به‌جای یتیم‌کردنِ بی‌صدای فاکتور. Rollback فوری: false کن → دکمه‌های nav و گارد محو، رفتار دقیقاً مثل قبل
 // (callbackِ nav:menu ثبت‌شده می‌ماند تا دکمه‌ی کش‌شده هم بی‌خطر باشد).
 const NAV_GUARD_ENABLED = true;
+
+// 🪙 UX v2.6 — نقطه‌ی کسرِ اعتبار از **پی‌والِ بعد از انتخابِ کارت‌ها** به **لحظه‌ی انتخابِ
+// اندازه** منتقل شد (تصمیمِ صریحِ مالک). یعنی کاربر همان‌جا که «۵ کارتی (➖۵💎)» را می‌زند
+// پول می‌دهد، و دیگر جلوتر هیچ پی‌والی نمی‌بیند.
+// این پرچم **عمداً از UX_V2 جداست** تا رول‌بکش مستقل باشد: false → دقیقاً مسیرِ قبلی
+// (insert در finishPicking + پی‌وال + کسر در unlock:) بدونِ اینکه بقیه‌ی UX v2 خاموش شود.
+const PAY_AT_SIZE = true;
+const payAtSizeFor = (uid) => PAY_AT_SIZE && uxV2For(uid);
 
 // 🧭 ثبتِ خودکارِ مسیرِ ریزِ کاربر (shared/journey.js): هر پیامِ خروجی (`view`) و هر اکشنِ ورودی
 // (`act`) ثبت می‌شود تا در داشبورد بشود دید کاربر دقیقاً پشتِ کدام پیام/دکمه ریخته است.
@@ -342,6 +350,9 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
+// رنگِ دکمه‌ی هر بسته: «بسته‌ی الماسی» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
+// (تصمیمِ صریحِ مالک). بقیه رنگِ پیش‌فرضِ کلاینت را می‌گیرند.
+const PACK_STYLE = { gold: 'success' };
 const COIN_PACKAGES = [
   // ⚠️ قیمت‌های UX v2 (تصمیمِ مالک ۱۴۰۵/۰۵/۲۷). این یک **کاهشِ قیمتِ واقعی** است، نه
   // فقط تغییرِ بسته‌بندی: هر الماس از ۱۰٬۰۰۰ تومان به ۳٬۰۰۰ / ۲٬۰۰۰ / ۱٬۵۰۰ می‌رسد، یعنی
@@ -736,6 +747,12 @@ const stmts = {
   getReading:    db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingLlm: db.prepare('UPDATE readings SET llm_json=?, summary=? WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
+  // ادعای اتمیکِ استیت — گاردِ دوبار-تپ روی دکمه‌ی اندازه. `setState` بی‌قید است و
+  // دو تپِ سریع هر دو رد می‌شدند؛ این یکی فقط برای **اولین** تپ changes=1 می‌دهد.
+  claimState: db.prepare('UPDATE users SET state=? WHERE telegram_id=? AND state<>?'),
+  // کارت‌ها فقط **یک بار** روی یک فالِ پرداخت‌شده نوشته می‌شوند (شرطِ cards_json='').
+  setReadingCards: db.prepare(`UPDATE readings SET seed=?, cards_json=?, focus_area=?, question=?, question_audio=?, question_audio_fmt=? WHERE id=? AND cards_json=''`),
+  // فالِ پرداخت‌شده‌ای که کاربر هرگز کارت‌هایش را نکشید (کهنه‌تر از یک شبانه‌روز).
   setReadingFeedback: db.prepare('UPDATE readings SET feedback=? WHERE id=?'),
   lastDelivered: db.prepare("SELECT * FROM readings WHERE user_id=? AND status='delivered' ORDER BY id DESC LIMIT ?"),
   countReadingsToday: db.prepare('SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND created_at >= unixepoch()-86400'),
@@ -873,6 +890,10 @@ const coveredRow = (readingId, price, uid) => [Markup.button.callback(
 // برچسبِ دکمه‌ی شارژ به زبانِ اقتصادِ همان کاربر: در دنیای الماس «خرید الماس»،
 // در دنیای تومانی همان «افزایش موجودی کیف پول». هر نقطه‌ی جدید باید از همین بخواند.
 const rechargeLabel = (uid) => (coinsOn(uid) ? L.buttons.buyCoins(curOf(uid)) : L.buttons.recharge);
+// دکمه‌ی «خرید الماس» همیشه **سبز** است (تصمیمِ صریحِ مالک). فقط در دنیای الماس رنگ
+// می‌گیرد؛ دکمه‌ی تومانیِ کاربرِ واقعی بیت‌به‌بیت دست‌نخورده می‌ماند.
+const rechargeBtn = (uid) => styled(
+  Markup.button.callback(rechargeLabel(uid), 'recharge'), coinsOn(uid) ? 'success' : undefined);
 
 const needBalanceRows = (uid, reading) => {
   // اقتصادِ سکه: «پرداختِ هزینه‌ی همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند
@@ -883,7 +904,7 @@ const needBalanceRows = (uid, reading) => {
   if (coinsOn(uid)) return walletRows(uid);
   const rows = [];
   if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
-  rows.push([Markup.button.callback(L.buttons.recharge, 'recharge')]);
+  rows.push([rechargeBtn(uid)]);
   if (reading && firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, `wdisc:${reading.id}`)]);
   return rows;
 };
@@ -998,6 +1019,12 @@ async function typing(ctx, ms, action = 'typing') {
 
 // uid اختیاری: فقط ادمین‌ها (دو آی‌دیِ ADMIN_IDS) دکمه‌ی «ریست حساب (ادمین)» را می‌بینند — همیشه،
 // حتی خارج از فاز تست. این تنها تمایزِ رو-به-کاربرِ ادمین است (ابزار مدیریتی؛ فلوی محصول یکسان می‌ماند).
+// 🎨 رنگِ دکمه — Bot API 9.4 (۹ فوریه ۲۰۲۶): فیلدِ `style` روی KeyboardButton و
+// InlineKeyboardButton، یکی از 'success' (سبز)، 'primary' (آبی) یا 'danger' (قرمز).
+// نبودش = رنگِ پیش‌فرضِ خودِ کلاینت، پس روی کلاینت‌های قدیمی‌تر بی‌اثر و بی‌خطر است
+// (فیلدِ ناشناخته را نادیده می‌گیرند). telegraf آن را دست‌نخورده سریالایز می‌کند.
+const styled = (btn, style) => (style ? { ...btn, style } : btn);
+
 function mainKeyboard(uid) {
   // UX v2.1: کارتِ روزِ رایگان نامِ صریح‌تری گرفت («فال تک کارت امروز») و **تنها** نقطه‌ی
   // دسترسی‌اش همین کیبورد است — از منوی فال‌ها برداشته شد تا آن‌جا فقط فالِ واقعی باشد.
@@ -1162,6 +1189,37 @@ async function fetchQuestionAudio(r) {
 // پس همین یک شرط کلِ قاعده را قفل می‌کند — و چون داخلِ خودِ تابعِ فراخوانی است، هر مسیرِ
 // **آینده‌ای** هم که یادش برود، اینجا متوقف می‌شود (درسِ بند ۸ ریشه: گاردِ پراکنده دیر یا
 // زود یک مسیر را جا می‌گذارد). فالِ رایگان (price=0) استثناست چون چیزی برای کسر ندارد.
+/* ═══ 🪙 پرداخت در لحظه‌ی انتخابِ اندازه (UX v2.6) ═══
+   وضعیتِ تازه‌ی `paid` = پول کم شده ولی کارت‌ها هنوز کشیده نشده‌اند. عمداً `started`
+   نیست: `recoverOrphanReadings` هر فالِ `started` با `llm_json` خالی را در بوت ریفاند
+   می‌کند، و چون حالا فاصله‌ی «پرداخت تا کشیدنِ کارت» شاملِ نوشتنِ سؤال و بُر و انتخاب
+   است (چند دقیقه)، هر دیپلوی کاربرانِ وسطِ کار را ریفاند می‌کرد و دکمه‌ی `retryr:`
+   دستشان می‌داد که روی `cards_json` خالی کرش می‌کند.
+
+   کسر و ساختِ رکورد **در یک تراکنش**: یا هر دو یا هیچ‌کدام. اگر فقط کسر انجام می‌شد و
+   insert می‌افتاد، پولِ کاربر بی‌ردپا می‌رفت (بند ۹ ریشه: هر ریال ردپای DB دارد). */
+const payForSpread = db.transaction((uid, spread, focusKey) => {
+  if (spread.price > 0 && stmts.deduct.run(spread.price, uid, spread.price).changes === 0) return 0;
+  const id = Number(stmts.insertReading.run(
+    uid, spread.id, spread.price, focusKey || '', '', '', '', '', '',
+  ).lastInsertRowid);
+  stmts.setReadingStatus.run('paid', id);
+  return id;
+});
+
+/** لغوِ یک فالِ نیمه‌کاره. اگر پول داده شده، **کامل** برمی‌گردد. فالِ started/delivered
+ *  هرگز دست نمی‌خورد. خروجی: مبلغی که برگشت (۰ یعنی چیزی برنگشت). */
+function cancelReading(uid, readingId) {
+  const r = readingId && stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid) return 0;
+  if (r.status === 'pending_payment') { stmts.setReadingStatus.run('canceled', readingId); return 0; }
+  if (r.status !== 'paid') return 0;
+  if (r.price > 0) stmts.credit.run(r.price, uid);
+  stmts.setReadingStatus.run('refunded', readingId);
+  track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'cancel' });
+  return r.price;
+}
+
 function paidForReading(r) {
   return r.price === 0 || r.status === 'started';
 }
@@ -1325,6 +1383,30 @@ function recoverOrphanReadings() {
     } catch (e) { logErr('recoverOrphan reading#' + r.id, e.message); }
   }
   if (orphans.length) log(`♻️ بازیابی بوت: ${orphans.length} فالِ یتیمِ پرداخت‌شده refund شد`);
+}
+
+// 🪙 فالِ **پرداخت‌شده‌ای که هرگز کارت نکشید** (UX v2.6). از وقتی کسر به لحظه‌ی انتخابِ
+// اندازه آمده، بینِ «پول داده شد» و «کارت‌ها کشیده شد» چند دقیقه فاصله است و کاربر ممکن
+// است وسطش برای همیشه برود. آن رکورد `paid` می‌ماند: پول رفته، محصولی نرسیده.
+// عمداً **فقط رکوردهای کهنه‌تر از یک شبانه‌روز** ریفاند می‌شوند — نه در بوت و نه زودتر —
+// چون استیت و سشن در DB اند و کاربرِ وسطِ نوشتنِ سؤال بعد از ری‌استارت ادامه می‌دهد؛
+// ریفاندِ زودهنگام فالش را از زیرِ پایش می‌کشید و بعد فالِ مجانی تحویل می‌داد.
+function refundAbandonedPaidReadings() {
+  let rows = [];
+  try {
+    rows = db.prepare(
+      "SELECT id, user_id, price FROM readings WHERE status='paid' AND created_at < unixepoch()-86400",
+    ).all();
+  } catch (e) { logErr('refundAbandoned query:', e.message); return; }
+  for (const r of rows) {
+    try {
+      if (r.price > 0) stmts.credit.run(r.price, r.user_id);
+      stmts.setReadingStatus.run('refunded', r.id);
+      track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'abandoned' });
+      bot.telegram.sendMessage(r.user_id, L.reading.refundedOnCancel(r.price, curOf(r.user_id))).catch(() => {});
+    } catch (e) { logErr('refundAbandoned reading#' + r.id, e.message); }
+  }
+  if (rows.length) log(`♻️ ${rows.length} فالِ پرداخت‌شده‌ی رهاشده ریفاند شد`);
 }
 
 /* ===== 8) Bot ===== */
@@ -1572,7 +1654,14 @@ async function finishNameOnboarding(ctx, rawName) {
   setSession(uid, null);
   // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
+  // UX v2.5: کیبوردِ ماندگار این‌جا تحویل می‌شود — تنها پیامِ آنبوردینگ که کیبوردِ inline
+  // ندارد، پس تنها جایی است که می‌تواند حاملش باشد (هر پیام فقط یک reply_markup می‌پذیرد).
+  // این‌طور پایانِ آنبوردینگ دوباره **یک پیام** می‌شود («از کجا شروع کنیم؟» + چهار دکمه)،
+  // همان شکلی که مالک می‌خواست. تپِ دکمه‌های منو وسطِ آنبوردینگ را `blockDuringOnboarding`
+  // می‌گیرد و همان قدمِ فعلی را یادآوری می‌کند، پس هیچ مرحله‌ای رد نمی‌شود.
+  if (uxV2For(uid)) stmts.setKbShown.run(uid);
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)),
+    uxV2For(uid) ? mainKeyboard(uid) : Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -1599,15 +1688,10 @@ async function finishOnboarding(ctx, uid, props) {
   // وگرنه اولین انتخابِ کاربرِ تازه همیشه رایگان می‌شود و هیچ‌وقت فالِ واقعی را نمی‌بیند.
   if (uxV2For(uid)) {
     setState(uid, 'choose_spread');
-    // UX v2.4 (تصمیمِ صریحِ مالک): پیامِ جداگانه‌ی «از دکمه‌های پایین شروع کن 👇» حذف شد.
-    // ولی کیبوردِ ماندگار نباید قربانی شود: `askName` عمداً removeKeyboard می‌کند، پس اگر
-    // این‌جا تحویل نشود کاربرِ تازه‌ی دنیای الماس **هیچ‌وقت** کیبورد نمی‌گیرد (بن‌بستِ بند ۹ب/۴).
-    // راه‌حل: کیبورد به پیامی می‌چسبد که به‌هرحال قرار بود برود («از کجا شروع کنیم؟»)، و
-    // منوی فال پیامِ بعدی می‌شود — تلگرام در هر پیام فقط یک reply_markup می‌پذیرد.
-    stmts.setKbShown.run(uid);
-    await ctx.reply(L.reading.startWhere, mainKeyboard(uid));
-    await typing(ctx, PACE_S);
-    return ctx.reply(L.reading.catalogV3, Markup.inlineKeyboard(falMenuKb(uid)));
+    // UX v2.5: دوباره **یک پیام** — چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟ 📌» می‌نشینند و
+    // «کدوم فال رو انتخاب می‌کنی؟» این‌جا (و فقط این‌جا) نمی‌آید. کیبوردِ ماندگار جلوتر، روی
+    // پیامِ «خوش اومدی»، تحویل شده است.
+    return ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
   }
   const ctaRows = [
     [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
@@ -2306,9 +2390,12 @@ const menuSlotsFor = (uid) => {
   catch { return MENU_SLOTS_DEFAULT; }
 };
 
+// «سؤال شخصی خودم» (پینِ منو) همیشه **آبی** است (تصمیمِ صریحِ مالک) — پرتکرارترین
+// ورودیِ فال و تنها موضوعی که کاربر با کلماتِ خودش می‌نویسد.
+const topicStyle = (key) => (key === MENU_PIN ? 'primary' : undefined);
 const topicRow = (key) => {
   const t = TOPIC_BY_KEY[key];
-  return t ? [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`)] : null;
+  return t ? [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`), topicStyle(key))] : null;
 };
 
 /** منوی کوتاهِ فال: پین + دو جایگاهِ آزمایشی + «همه‌ی فال‌ها». */
@@ -2326,7 +2413,7 @@ function falMenuKb(uid) {
 // حالت را در session نمی‌گذاریم چون showCatalog/nav:menu آن را پاک می‌کنند و دکمه‌ی کهنه
 // هم باید سال‌ها بعد درست کار کند؛ callback_data تنها جای مطمئن است (سقف ۶۴ بایت، این ۱۶).
 const allTopicsKb = () => [
-  ...TOPICS_V3.map(t => [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`)]),
+  ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`), topicStyle(t.key))]),
   ...navMenuRow(),
 ];
 
@@ -2429,6 +2516,40 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   await ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
 });
 
+/** کسرِ هزینه‌ی یک چیدمان در لحظه‌ی انتخابِ اندازه.
+ *  خروجی true = پول کم شد و می‌شود ادامه داد؛ false = کم‌موجودی (پیامش همین‌جا رفت).
+ *
+ *  دو گاردِ **سینکرون قبل از اولین await** (الگوی `pick:` و `claimAmount`):
+ *    ۱) `claimState` — دوبار-تپِ سریع روی دکمه‌ی اندازه نباید دو بار پول کم کند.
+ *       `deduct` با شرطِ `balance >= ?` فقط جلوی اضافه‌برداشت را می‌گیرد، نه دوبار-خرید:
+ *       کاربری با ۱۵ الماس که دو بار «۵ کارتی» را بزند از نظرِ SQL دو خریدِ معتبر دارد.
+ *    ۲) `payForSpread` — کسر و ساختِ رکورد در یک تراکنش.
+ *  هر دو **قبل از** اولین await اجرا می‌شوند، وگرنه دو تپ بینشان جا می‌شوند. */
+async function chargeForSpread(ctx, uid, spread, focusKey) {
+  // اگر تپِ دوم است، استیت از قبل await_question شده و ادعا شکست می‌خورد → بی‌صدا برگرد.
+  if (stmts.claimState.run('await_question', uid, 'await_question').changes === 0) return false;
+  const readingId = payForSpread(uid, spread, focusKey);
+  if (!readingId) {
+    // پول کم بود: استیت را برگردان (وگرنه کاربر در await_question گیر می‌کند) و پیامِ
+    // کم‌موجودی را با همان سه دکمه‌ی ذخایر نشان بده.
+    setState(uid, 'choose_spread');
+    track(db, uid, EVENTS.PAYWALL_SHOWN, { spread: spread.id, price: spread.price, can_afford: false });
+    const text = needBalanceText(uid, { type: spread.id, price: spread.price });
+    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceRows(uid, null)) };
+    try { await ctx.editMessageText(text, extra); }
+    catch { await ctx.reply(text, extra).catch(() => {}); }
+    return false;
+  }
+  patchSession(uid, { readingId });
+  track(db, uid, 'reading_paid', { reading_id: readingId, spread: spread.id, price: spread.price });
+  // تأییدِ کسر روی **همان** پیامِ «چند کارتی؟» می‌نشیند (نه پیامِ تازه).
+  const paid = L.reading.paidForSpread(spread.size, spread.price, getBalance(uid), curOf(uid));
+  try { await ctx.editMessageText(paid, { parse_mode: 'HTML' }); }
+  catch { await ctx.reply(paid, { parse_mode: 'HTML' }).catch(() => {}); }
+  await typing(ctx, PACE_S);
+  return true;
+}
+
 bot.action(/^spread:(\w+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
@@ -2446,6 +2567,22 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   // تحلیلِ تاریخی نشکند، ولی حالا می‌شود «کدام موضوع» را جدا از «چه عمقی» سنجید —
   // و همین ورودیِ آزمایشِ چرخشیِ جایگاه‌های منوست.
   track(db, uid, 'spread_selected', { spread: spread.id, topic: topicOf(spread.id) || '', size: spread.size });
+
+  // 🪙 UX v2.6: کسرِ اعتبار **همین‌جا** (قبل از پرسیدنِ سؤال)، نه در پی‌والِ بعد از
+  // انتخابِ کارت‌ها. اگر موفق شد، بقیه‌ی فلو دقیقاً مثل قبل ادامه می‌دهد ولی دیگر
+  // هیچ پی‌والی جلوتر نمی‌آید؛ اگر موجودی کم بود، همین‌جا (و فقط همین‌جا) پیامِ
+  // کم‌موجودی با همان سه دکمه‌ی ذخایر می‌آید.
+  if (payAtSizeFor(uid)) {
+    const focusKey = spread.open ? 'open'
+      : (spread.focus || (spread.topic ? (getUser(uid)?.focus_area || 'question') : null));
+    // سشن **قبل از** کسر نوشته می‌شود: اگر پروسه دقیقاً بینِ کسر و نوشتنِ سشن ری‌استارت
+    // شود، فالِ پرداخت‌شده بدونِ spreadId می‌ماند و هیچ‌وقت به finishPicking نمی‌رسد.
+    patchSession(uid, { spreadId: spread.id, picks: [], focusKey });
+    if (!(await chargeForSpread(ctx, uid, spread, focusKey))) return;
+    setState(uid, 'await_question');
+    return ctx.reply(spread.open ? L.reading.askTopic(toneV2For(uid)) : L.reading.askQuestion(toneV2For(uid)),
+      { parse_mode: 'Markdown' });
+  }
 
   // نسل چهارم (UX v2.1): موضوع را کاربر **قبلاً** انتخاب کرده، پس مرحله‌ی «حول چه
   // موضوعی؟» در هیچ حالتی اجرا نمی‌شود. این شرط عمداً روی `spread.topic` است نه روی
@@ -2704,12 +2841,33 @@ async function finishPicking(ctx, uid, s) {
   const spread = SPREAD_BY_ID[s.spreadId];
   const user = getUser(uid);
   const cards = drawCards(s.seed, s.picks, spread.size);
-  const readingId = Number(stmts.insertReading.run(
-    uid, spread.id, spread.price, s.focusKey || user.focus_area || '', s.question || '', s.seed, JSON.stringify(cards),
+  const focusArea = s.focusKey || user.focus_area || '';
+
+  // 🪙 UX v2.6: اگر لحظه‌ی انتخابِ اندازه پول داده شده، رکورد از قبل هست و فقط کارت‌هایش
+  // نوشته می‌شود (شرطِ `cards_json=''` جلوی کشیدنِ دوباره‌ی کارت‌های یک فالِ پرداخت‌شده
+  // را می‌گیرد). وگرنه دقیقاً مثل قبل یک رکوردِ تازه ساخته می‌شود.
+  const prepaid = payAtSizeFor(uid) && s.readingId
+    && stmts.getReading.get(s.readingId)?.status === 'paid' ? s.readingId : 0;
+  const readingId = prepaid || Number(stmts.insertReading.run(
+    uid, spread.id, spread.price, focusArea, s.question || '', s.seed, JSON.stringify(cards),
     s.questionAudio || '', s.questionAudioFmt || ''
   ).lastInsertRowid);
+  if (prepaid) {
+    stmts.setReadingCards.run(s.seed, JSON.stringify(cards), focusArea, s.question || '',
+      s.questionAudio || '', s.questionAudioFmt || '', readingId);
+  }
   patchSession(uid, { readingId });
   track(db, uid, 'cards_picked', { spread: spread.id, reading_id: readingId });
+
+  // فالِ از-پیش-پرداخت‌شده هیچ پی‌والی ندارد: مستقیم می‌رود سرِ افشا.
+  if (prepaid) {
+    if (spread.size > s.picks.length) await ctx.reply(L.reading.extraCardsNote(spread.size - s.picks.length));
+    stmts.setReadingStatus.run('started', readingId);
+    track(db, uid, 'reading_started', { reading_id: readingId, price: spread.price });
+    setState(uid, 'revealing');
+    patchSession(uid, { readingId, revealIdx: 0, fbDone: false });
+    return startReveal(ctx, uid, readingId);
+  }
 
   // ⚠️ اینجا عمداً هیچ فراخوانیِ LLM نیست. پیامِ بعدی پی‌وال است و کاربر هنوز تصمیم نگرفته
   // (بند ۹ ریشه، قاعده‌ی هزینه). خوانش فقط بعد از کسرِ اعتبار در `unlock:` شروع می‌شود.
@@ -2742,11 +2900,13 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   const readingId = parseInt(ctx.match[1], 10);
-  const r = stmts.getReading.get(readingId);
-  if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', readingId);
+  // 🪙 فالِ پرداخت‌شده (paid) این‌جا **ریفاند** می‌شود، نه فقط canceled — وگرنه از v2.6
+  // به بعد هر انصراف پولِ کاربر را می‌خورد.
+  const back = cancelReading(uid, readingId);
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
   await replyCanceled(ctx, uid);
 });
 
@@ -2763,12 +2923,10 @@ bot.action('nav:menu', async (ctx) => {
     ]));
   }
   const s = getSession(uid);
-  if (s?.readingId) {
-    const r = stmts.getReading.get(s.readingId);
-    if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
-  }
+  const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
   setSession(uid, null);
+  if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
   // UX v2.3: در دنیای الماس به‌جای «کشتنِ کیبورد + پیامِ جدید»، همین پیام به تأییدِ بازگشت
   // ادیت می‌شود (خواسته‌ی مالک: پیامِ «یکی از فال‌ها رو انتخاب کن» جای خودش عوض شود).
   // کیبوردِ ماندگار را نمی‌شود به یک ادیت چسباند (تلگرام در ادیت فقط inline می‌پذیرد)، ولی
@@ -2798,13 +2956,11 @@ bot.action('reading:cancel', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   const s = getSession(uid);
-  if (s?.readingId) {
-    const r = stmts.getReading.get(s.readingId);
-    if (r && r.user_id === uid && r.status === 'pending_payment') stmts.setReadingStatus.run('canceled', s.readingId);
-  }
+  const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
   setSession(uid, null);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
   await replyCanceled(ctx, uid);
 });
 
@@ -2893,6 +3049,10 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
   const r = stmts.getReading.get(readingId);
   if (!r || r.user_id !== uid) return ctx.answerCbQuery().catch(() => {});
   if (r.status !== 'refunded') return ctx.answerCbQuery('✅').catch(() => {});
+  // 🪙 گاردِ عمقی (UX v2.6): فالی که قبل از کشیدنِ کارت‌ها ریفاند شده `cards_json` خالی
+  // دارد و `startReveal` رویش با JSON.parse('') کرش می‌کند. امروز هیچ دکمه‌ی retry برای
+  // چنین رکوردی ساخته نمی‌شود، ولی این مسیر پول کم می‌کند پس گاردش این‌جا می‌ماند.
+  if (!r.cards_json) return ctx.answerCbQuery('✅').catch(() => {});
   if (r.price > 0) {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
@@ -3383,7 +3543,7 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
 // دکمه‌ی کارت شانس فقط وقتی می‌آید که سهمیه‌ی امروز مصرف نشده باشد — دکمه‌ای که به
 // «امروز استفاده کردی» ختم شود یک بن‌بستِ کوچک است (بند ۹ب ریشه).
 function walletRows(uid) {
-  const rows = [[Markup.button.callback(rechargeLabel(uid), 'recharge')]];
+  const rows = [[rechargeBtn(uid)]];
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
   rows.push([Markup.button.callback(L.buttons.inviteWithBonus(referralBonusFor(uid), cur), 'invite_go')]);
@@ -3477,7 +3637,7 @@ bot.action('want_discount', async (ctx) => {
   upsertUser(ctx);
   if (await offerPendingReading(ctx, uid)) return;
   return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([
-    [Markup.button.callback(rechargeLabel(uid), 'recharge')],
+    [rechargeBtn(uid)],
   ]));
 });
 
@@ -3497,7 +3657,7 @@ bot.action('recharge', async (ctx) => {
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const text = L.wallet.coinPacks(cur);
     const extra = Markup.inlineKeyboard([
-      ...COIN_PACKAGES.map(p => [Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`)]),
+      ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`), PACK_STYLE[p.key])]),
       [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
     ]);
     try { return await ctx.editMessageText(text, extra); } catch {}
@@ -4320,7 +4480,13 @@ bot.action('dailyoff_no', async (ctx) => {
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');
 function launch() {
   bot.launch({ dropPendingUpdates: true })
-    .then(() => { log(`✅ tarot bot started (long polling, locale=${LOCALE})`); recoverOrphanReadings(); })
+    .then(() => {
+      log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
+      recoverOrphanReadings();
+      refundAbandonedPaidReadings();
+      // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
+      setInterval(refundAbandonedPaidReadings, 6 * 3600 * 1000);
+    })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
