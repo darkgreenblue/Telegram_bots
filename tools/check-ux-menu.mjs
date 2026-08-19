@@ -265,7 +265,7 @@ console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ س�
 
 console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (خرید، معرفی، کارت شانسِ رایگان)');
 {
-  ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
+  ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[rechargeBtn\(uid\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
     'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
   ok(/inviteWithBonus\(referralBonusFor\(uid\), cur\), 'invite_go'/.test(SRC), 'دکمه‌ی معرفیِ دوستان با مبلغِ پاداش');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
@@ -352,6 +352,46 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
   ok(/patchSession\(uid, \{ luckyStatusMsgId: m\.message_id \}\)/.test(sls),
     'شناسه‌ی پیامِ تازه ذخیره می‌شود تا تپِ بعدی همان را ادیت کند');
   ok(/luckyStatusMsgId: 0/.test(SRC), 'هر دستِ تازه پیامِ وضعیتِ خودش را می‌سازد');
+}
+
+console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style)');
+{
+  // فقط سه مقدارِ مجازِ خودِ Bot API: success (سبز)، primary (آبی)، danger (قرمز).
+  // نبودِ فیلد = رنگِ پیش‌فرضِ کلاینت، پس کلاینتِ قدیمی‌تر بی‌خطر ردش می‌کند.
+  // هر آرگومانِ دومِ `styled(...)` باید یا یکی از سه مقدارِ مجاز باشد یا یکی از دو تابعِ
+  // تصمیم‌گیرنده. اگر کسی 'green' یا 'blue' بنویسد (که Bot API ردش می‌کند) این قرمز می‌شود.
+  const ALLOWED = ["'success'", "'primary'", "'danger'", 'topicStyle(', 'PACK_STYLE['];
+  const calls = [...SRC.matchAll(/styled\(/g)].map(m => SRC.slice(m.index, m.index + 260));
+  const decls = calls.filter(c => !/=> \(style \?/.test(c)); // خودِ تعریفِ helper را نشمار
+  ok(decls.length >= 4, `helper در همه‌ی نقاطِ رنگی استفاده شده (${decls.length} فراخوانی)`);
+  const bad = decls.filter(c => !ALLOWED.some(a => c.includes(a)));
+  ok(bad.length === 0, `هیچ فراخوانیِ styled با مقدارِ ناشناخته نیست (${bad.length} مورد)`);
+  // و مجموعه‌ی مقادیرِ خامِ استفاده‌شده زیرمجموعه‌ی سه مقدارِ Bot API است
+  const lits = [...SRC.matchAll(/(?:\? |: |gold: )'(success|primary|danger|[a-z]+)'/g)]
+    .map(m => m[1]).filter(v => ['success', 'primary', 'danger', 'green', 'blue', 'red'].includes(v));
+  ok(lits.length > 0 && lits.every(v => ['success', 'primary', 'danger'].includes(v)),
+    `مقادیرِ رنگ از سه مقدارِ مجازِ Bot API اند (${[...new Set(lits)].join(', ')})`);
+  ok(/const styled = \(btn, style\) => \(style \? \{ \.\.\.btn, style \} : btn\);/.test(SRC),
+    'helper وقتی رنگ ندارد دکمه را **دست‌نخورده** برمی‌گرداند (نه style: undefined)');
+
+  // ۱) خریدِ الماس سبز، و فقط در دنیای الماس (دکمه‌ی تومانیِ کاربرِ واقعی دست‌نخورده)
+  ok(/const rechargeBtn = \(uid\) => styled\(\s*\n?\s*Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\), coinsOn\(uid\) \? 'success' : undefined\);/.test(SRC),
+    'دکمه‌ی «خرید الماس» سبز است و فقط در دنیای الماس رنگ می‌گیرد');
+  ok(!/Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]/.test(SRC),
+    'هیچ نقطه‌ای دکمه‌ی شارژ را بدونِ helper نمی‌سازد (وگرنه یک‌جا بی‌رنگ می‌ماند)');
+
+  // ۲) «سؤال شخصی خودم» آبی، در **هر دو** منویی که ساخته می‌شود
+  ok(/const topicStyle = \(key\) => \(key === MENU_PIN \? 'primary' : undefined\);/.test(SRC),
+    '«سؤال شخصی خودم» آبی است (از روی MENU_PIN، نه رشته‌ی دستی)');
+  ok(/topicRow = \(key\) => \{[\s\S]{0,220}styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}`\), topicStyle\(key\)\)/.test(SRC),
+    'منوی کوتاه رنگ را اعمال می‌کند');
+  ok(/styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}:a`\), topicStyle\(t\.key\)\)/.test(SRC),
+    'لیستِ کامل هم همان رنگ را اعمال می‌کند (وگرنه دو منو دو شکل می‌شدند)');
+
+  // ۳) بسته‌ی الماسی سبز
+  ok(/const PACK_STYLE = \{ gold: 'success' \};/.test(SRC), 'بسته‌ی الماسی سبز است');
+  ok(/styled\(Markup\.button\.callback\(L\.buttons\.coinPack\(p, cur\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
+    'رنگِ بسته از جدولِ PACK_STYLE می‌آید، نه شرطِ درجا');
 }
 
 console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');

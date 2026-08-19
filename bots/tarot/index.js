@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.11.1';
+const PRODUCT_VERSION = '3.12.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -342,6 +342,9 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
+// رنگِ دکمه‌ی هر بسته: «بسته‌ی الماسی» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
+// (تصمیمِ صریحِ مالک). بقیه رنگِ پیش‌فرضِ کلاینت را می‌گیرند.
+const PACK_STYLE = { gold: 'success' };
 const COIN_PACKAGES = [
   // ⚠️ قیمت‌های UX v2 (تصمیمِ مالک ۱۴۰۵/۰۵/۲۷). این یک **کاهشِ قیمتِ واقعی** است، نه
   // فقط تغییرِ بسته‌بندی: هر الماس از ۱۰٬۰۰۰ تومان به ۳٬۰۰۰ / ۲٬۰۰۰ / ۱٬۵۰۰ می‌رسد، یعنی
@@ -873,6 +876,10 @@ const coveredRow = (readingId, price, uid) => [Markup.button.callback(
 // برچسبِ دکمه‌ی شارژ به زبانِ اقتصادِ همان کاربر: در دنیای الماس «خرید الماس»،
 // در دنیای تومانی همان «افزایش موجودی کیف پول». هر نقطه‌ی جدید باید از همین بخواند.
 const rechargeLabel = (uid) => (coinsOn(uid) ? L.buttons.buyCoins(curOf(uid)) : L.buttons.recharge);
+// دکمه‌ی «خرید الماس» همیشه **سبز** است (تصمیمِ صریحِ مالک). فقط در دنیای الماس رنگ
+// می‌گیرد؛ دکمه‌ی تومانیِ کاربرِ واقعی بیت‌به‌بیت دست‌نخورده می‌ماند.
+const rechargeBtn = (uid) => styled(
+  Markup.button.callback(rechargeLabel(uid), 'recharge'), coinsOn(uid) ? 'success' : undefined);
 
 const needBalanceRows = (uid, reading) => {
   // اقتصادِ سکه: «پرداختِ هزینه‌ی همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند
@@ -883,7 +890,7 @@ const needBalanceRows = (uid, reading) => {
   if (coinsOn(uid)) return walletRows(uid);
   const rows = [];
   if (reading) rows.push([Markup.button.callback(L.buttons.payThisReading(reading.price), `payr:${reading.id}`)]);
-  rows.push([Markup.button.callback(L.buttons.recharge, 'recharge')]);
+  rows.push([rechargeBtn(uid)]);
   if (reading && firstDiscountAvailable(uid)) rows.push([Markup.button.callback(L.buttons.wantDiscount, `wdisc:${reading.id}`)]);
   return rows;
 };
@@ -998,6 +1005,12 @@ async function typing(ctx, ms, action = 'typing') {
 
 // uid اختیاری: فقط ادمین‌ها (دو آی‌دیِ ADMIN_IDS) دکمه‌ی «ریست حساب (ادمین)» را می‌بینند — همیشه،
 // حتی خارج از فاز تست. این تنها تمایزِ رو-به-کاربرِ ادمین است (ابزار مدیریتی؛ فلوی محصول یکسان می‌ماند).
+// 🎨 رنگِ دکمه — Bot API 9.4 (۹ فوریه ۲۰۲۶): فیلدِ `style` روی KeyboardButton و
+// InlineKeyboardButton، یکی از 'success' (سبز)، 'primary' (آبی) یا 'danger' (قرمز).
+// نبودش = رنگِ پیش‌فرضِ خودِ کلاینت، پس روی کلاینت‌های قدیمی‌تر بی‌اثر و بی‌خطر است
+// (فیلدِ ناشناخته را نادیده می‌گیرند). telegraf آن را دست‌نخورده سریالایز می‌کند.
+const styled = (btn, style) => (style ? { ...btn, style } : btn);
+
 function mainKeyboard(uid) {
   // UX v2.1: کارتِ روزِ رایگان نامِ صریح‌تری گرفت («فال تک کارت امروز») و **تنها** نقطه‌ی
   // دسترسی‌اش همین کیبورد است — از منوی فال‌ها برداشته شد تا آن‌جا فقط فالِ واقعی باشد.
@@ -2308,9 +2321,12 @@ const menuSlotsFor = (uid) => {
   catch { return MENU_SLOTS_DEFAULT; }
 };
 
+// «سؤال شخصی خودم» (پینِ منو) همیشه **آبی** است (تصمیمِ صریحِ مالک) — پرتکرارترین
+// ورودیِ فال و تنها موضوعی که کاربر با کلماتِ خودش می‌نویسد.
+const topicStyle = (key) => (key === MENU_PIN ? 'primary' : undefined);
 const topicRow = (key) => {
   const t = TOPIC_BY_KEY[key];
-  return t ? [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`)] : null;
+  return t ? [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`), topicStyle(key))] : null;
 };
 
 /** منوی کوتاهِ فال: پین + دو جایگاهِ آزمایشی + «همه‌ی فال‌ها». */
@@ -2328,7 +2344,7 @@ function falMenuKb(uid) {
 // حالت را در session نمی‌گذاریم چون showCatalog/nav:menu آن را پاک می‌کنند و دکمه‌ی کهنه
 // هم باید سال‌ها بعد درست کار کند؛ callback_data تنها جای مطمئن است (سقف ۶۴ بایت، این ۱۶).
 const allTopicsKb = () => [
-  ...TOPICS_V3.map(t => [Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`)]),
+  ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`), topicStyle(t.key))]),
   ...navMenuRow(),
 ];
 
@@ -3385,7 +3401,7 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
 // دکمه‌ی کارت شانس فقط وقتی می‌آید که سهمیه‌ی امروز مصرف نشده باشد — دکمه‌ای که به
 // «امروز استفاده کردی» ختم شود یک بن‌بستِ کوچک است (بند ۹ب ریشه).
 function walletRows(uid) {
-  const rows = [[Markup.button.callback(rechargeLabel(uid), 'recharge')]];
+  const rows = [[rechargeBtn(uid)]];
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
   rows.push([Markup.button.callback(L.buttons.inviteWithBonus(referralBonusFor(uid), cur), 'invite_go')]);
@@ -3479,7 +3495,7 @@ bot.action('want_discount', async (ctx) => {
   upsertUser(ctx);
   if (await offerPendingReading(ctx, uid)) return;
   return ctx.reply(L.wallet.discountHeld, Markup.inlineKeyboard([
-    [Markup.button.callback(rechargeLabel(uid), 'recharge')],
+    [rechargeBtn(uid)],
   ]));
 });
 
@@ -3499,7 +3515,7 @@ bot.action('recharge', async (ctx) => {
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const text = L.wallet.coinPacks(cur);
     const extra = Markup.inlineKeyboard([
-      ...COIN_PACKAGES.map(p => [Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`)]),
+      ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`), PACK_STYLE[p.key])]),
       [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
     ]);
     try { return await ctx.editMessageText(text, extra); } catch {}
