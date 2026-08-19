@@ -285,8 +285,8 @@ console.log('\n▶ برچسب‌های کیبورد و متن‌های تازه 
   ok(/startWhere: 'از کجا شروع کنیم؟ 📌'/.test(LOC), '«از کجا شروع کنیم؟» ایموجیِ 📌 گرفت');
   // askName حالا تابعِ v2 است: نسخه‌ی الماس صریح می‌گوید ربات است (تصمیمِ مالک)، و
   // نسخه‌ی قدیم بیت‌به‌بیت دست‌نخورده می‌ماند (شاخه‌ی else).
-  ok(/askName: \(v2\) => \(v2\s*\n\s*\? 'من ربات تاروت‌خوان هستم!/.test(LOC),
-    'askName در دنیای الماس صریح می‌گوید «من ربات تاروت‌خوانم»');
+  ok(/askName: \(v2\) => \(v2\s*\n\s*\? '🧙‍♂️ من ربات تاروت‌خوان هستم!/.test(LOC),
+    'askName در دنیای الماس با ایموجیِ جادوگر شروع می‌شود و صریح می‌گوید «من ربات تاروت‌خوانم»');
   ok(/: 'این‌جا قراره شگفت‌زده بشی؛ ولی پیش از هر چیز، دوست دارم درست صدات کنم\.\\n\\n' \+\s*\n\s*'⬇️\\n\*اسمت رو برام بنویس\.\*'\),/.test(LOC),
     'شاخه‌ی else همان متنِ قدیمیِ askName را عیناً برمی‌گرداند (رول‌بکِ یک‌خطی)');
   ok(/L\.onboarding\.askName\(uxV2For\(uid\)\)/.test(SRC), 'index.js پرچمِ uxV2For را به askName پاس می‌دهد');
@@ -445,12 +445,31 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   const ens = SRC.slice(SRC.indexOf('async function ensureMenu'), SRC.indexOf('async function sendVerdict'));
   ok(/if \(uxV2For\(uid\)\) return;/.test(ens), 'ensureMenu در دنیای الماس هیچ پیامی نمی‌فرستد');
   ok(/L\.onboarding\.keyboardReveal/.test(ens), 'دنیای تومانی همان تورِ ایمنیِ قبلی را دارد (دست‌نخورده)');
+  // v2.5: پایانِ آنبوردینگ دوباره **یک پیام** است (چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟»)،
+  // و کیبوردِ ماندگار یک قدم جلوتر روی پیامِ «خوش اومدی» تحویل می‌شود — تنها پیامِ آنبوردینگ
+  // که کیبوردِ inline ندارد، پس تنها جایی است که می‌تواند حاملش باشد.
   const fin = SRC.slice(SRC.indexOf('async function finishOnboarding'), SRC.indexOf('bot.action(/^bmonth:'));
-  ok(/ctx\.reply\(L\.reading\.startWhere, mainKeyboard\(uid\)\)/.test(fin),
-    'کیبوردِ ماندگار به پیامِ «از کجا شروع کنیم؟» می‌چسبد (بدونِ پیامِ اعلانِ جداگانه)');
-  ok(/stmts\.setKbShown\.run\(uid\)/.test(fin), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
-  ok(/ctx\.reply\(L\.reading\.catalogV3, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\)/.test(fin),
-    'منوی فال پیامِ بعدی است (هر پیام فقط یک reply_markup می‌پذیرد)');
+  ok(/return ctx\.reply\(L\.reading\.startWhere, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\);/.test(fin),
+    'پایانِ آنبوردینگ یک پیام است: چهار دکمه زیرِ «از کجا شروع کنیم؟»');
+  ok(!/catalogV3/.test(fin), 'متنِ «کدوم فال رو انتخاب می‌کنی؟» در آنبوردینگ نمی‌آید (استثنای عمدی)');
+  const nameStart = SRC.indexOf('async function finishNameOnboarding');
+  const nameFn = SRC.slice(nameStart, SRC.indexOf('\n}', nameStart));
+  ok(/uxV2For\(uid\) \? mainKeyboard\(uid\) : Markup\.removeKeyboard\(\)/.test(nameFn),
+    'کیبوردِ ماندگار روی پیامِ «خوش اومدی» تحویل می‌شود (و دنیای تومانی همان removeKeyboard می‌ماند)');
+  ok(/if \(uxV2For\(uid\)\) stmts\.setKbShown\.run\(uid\);/.test(nameFn), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
+  // «از کجا شروع کنیم؟» فقط جای خودش (آنبوردینگ) بماند و هیچ‌جای دیگر نیاید.
+  ok((SRC.match(/L\.reading\.startWhere/g) || []).length === 1, '«از کجا شروع کنیم؟» فقط در آنبوردینگ استفاده می‌شود');
+  // نگارشِ تازه‌ی دکمه‌ی بسته‌ها + نبودِ خطِ تیره‌ی بلند (بند ۱۰ ریشه)
+  ok(/coinPack: \(p, cur\) => `\$\{p\.emoji\} \$\{p\.fa\}: ➕\$\{fmt\(p\.coins\)\}\$\{cur\.emoji\} \| \$\{fmt\(p\.toman\)\} تومان`/.test(LOC),
+    'دکمه‌ی بسته: «🥉 بسته‌ی معمولی: ➕۱۰💎 | ۳۰٬۰۰۰ تومان»');
+  // خطِ تیره‌ی بلند در متنِ رو-به-کاربر ممنوع است (بند ۱۰ ریشه). دامنه: بلوکِ `buttons` و
+  // `wallet` — یعنی همان‌جایی که این PR دست زد. (کامنت‌ها و پرامپت‌ها بیرونِ دامنه‌اند؛
+  // چند «—» داخلِ خودِ پرامپت‌های خوانش از قبل هست و پاک‌کردنشان تغییرِ رفتاریِ جداست.)
+  const walletBlock = LOC.slice(LOC.indexOf('  wallet: {'), LOC.indexOf('  wallet: {') + 3000);
+  for (const [name, block] of [['coinPack', LOC], ['بلوکِ کیف', walletBlock]]) {
+    const lines = block.split('\n').filter(l => /coinPack/.test(l) && !l.trim().startsWith('//'));
+    ok(lines.length > 0 && !lines.some(l => l.includes('—')), `«${name}» خطِ تیره‌ی بلند ندارد`);
+  }
 }
 
 console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چسبیده‌ی عدد و واحد (UX v2.3)');

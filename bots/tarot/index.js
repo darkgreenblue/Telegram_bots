@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.11.0';
+const PRODUCT_VERSION = '3.11.1';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1572,7 +1572,14 @@ async function finishNameOnboarding(ctx, rawName) {
   setSession(uid, null);
   // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
+  // UX v2.5: کیبوردِ ماندگار این‌جا تحویل می‌شود — تنها پیامِ آنبوردینگ که کیبوردِ inline
+  // ندارد، پس تنها جایی است که می‌تواند حاملش باشد (هر پیام فقط یک reply_markup می‌پذیرد).
+  // این‌طور پایانِ آنبوردینگ دوباره **یک پیام** می‌شود («از کجا شروع کنیم؟» + چهار دکمه)،
+  // همان شکلی که مالک می‌خواست. تپِ دکمه‌های منو وسطِ آنبوردینگ را `blockDuringOnboarding`
+  // می‌گیرد و همان قدمِ فعلی را یادآوری می‌کند، پس هیچ مرحله‌ای رد نمی‌شود.
+  if (uxV2For(uid)) stmts.setKbShown.run(uid);
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)),
+    uxV2For(uid) ? mainKeyboard(uid) : Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -1599,15 +1606,10 @@ async function finishOnboarding(ctx, uid, props) {
   // وگرنه اولین انتخابِ کاربرِ تازه همیشه رایگان می‌شود و هیچ‌وقت فالِ واقعی را نمی‌بیند.
   if (uxV2For(uid)) {
     setState(uid, 'choose_spread');
-    // UX v2.4 (تصمیمِ صریحِ مالک): پیامِ جداگانه‌ی «از دکمه‌های پایین شروع کن 👇» حذف شد.
-    // ولی کیبوردِ ماندگار نباید قربانی شود: `askName` عمداً removeKeyboard می‌کند، پس اگر
-    // این‌جا تحویل نشود کاربرِ تازه‌ی دنیای الماس **هیچ‌وقت** کیبورد نمی‌گیرد (بن‌بستِ بند ۹ب/۴).
-    // راه‌حل: کیبورد به پیامی می‌چسبد که به‌هرحال قرار بود برود («از کجا شروع کنیم؟»)، و
-    // منوی فال پیامِ بعدی می‌شود — تلگرام در هر پیام فقط یک reply_markup می‌پذیرد.
-    stmts.setKbShown.run(uid);
-    await ctx.reply(L.reading.startWhere, mainKeyboard(uid));
-    await typing(ctx, PACE_S);
-    return ctx.reply(L.reading.catalogV3, Markup.inlineKeyboard(falMenuKb(uid)));
+    // UX v2.5: دوباره **یک پیام** — چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟ 📌» می‌نشینند و
+    // «کدوم فال رو انتخاب می‌کنی؟» این‌جا (و فقط این‌جا) نمی‌آید. کیبوردِ ماندگار جلوتر، روی
+    // پیامِ «خوش اومدی»، تحویل شده است.
+    return ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
   }
   const ctaRows = [
     [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
