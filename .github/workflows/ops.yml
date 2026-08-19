@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, tunnel-url]
+        options: [status, logs, errors, restart, env-check, db-query, tunnel-url, loading-lab]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -23,6 +23,10 @@ on:
         default: '100'
       query:
         description: 'کوئری SQL فقط-خواندنی (برای db-query) — مثل SELECT count(*) FROM users'
+        required: false
+        default: ''
+      variants:
+        description: 'برای loading-lab: فهرست کامایی طرح‌ها (خالی = هر پنج‌تا). مثل moon,hybrid'
         required: false
         default: ''
 
@@ -37,11 +41,13 @@ jobs:
           OPS_APP:    ${{ inputs.app }}
           OPS_LINES:  ${{ inputs.lines }}
           OPS_QUERY:  ${{ inputs.query }}
+          OPS_VARIANTS: ${{ inputs.variants }}
+          OPS_OWNER:  ${{ secrets.OWNER_TELEGRAM_ID }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY
+          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY,OPS_VARIANTS,OPS_OWNER
           script: |
             set -e
             cd ~/voice2text
@@ -120,6 +126,15 @@ jobs:
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
                 "
+                ;;
+              loading-lab)
+                # 🧪 هر پنج طرحِ نشانگرِ انتظار را زنده در تلگرامِ مالک پخش می‌کند تا خودش
+                # یکی را انتخاب کند. به هیچ دیتابیسی دست نمی‌زند و هیچ رباتی ری‌استارت نمی‌شود.
+                # اولین آی‌دیِ OWNER_TELEGRAM_ID مقصد است (همان قرارداد ADMIN_IDS).
+                CHAT=$(echo "$OPS_OWNER" | cut -d, -f1 | tr -d ' ')
+                case "$CHAT" in (''|*[!0-9]*) echo "❌ OWNER_TELEGRAM_ID ست نشده یا عددی نیست"; exit 1;; esac
+                case "$OPS_VARIANTS" in (*[!a-z,]*) echo "❌ نام طرح نامعتبر"; exit 1;; esac
+                node tools/loading-lab.mjs "$CHAT" "$OPS_VARIANTS"
                 ;;
               tunnel-url)
                 # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)

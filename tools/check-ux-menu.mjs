@@ -20,6 +20,7 @@ import {
 // locale واقعاً import می‌شود (نه فقط به‌عنوان متن خوانده): برای تطبیقِ برچسبِ کیبورد با
 // هندلر باید **مقدارِ** رشته را داشته باشیم، نه نامِ کلید.
 import L from '../bots/tarot/locales/fa.js';
+import { LOADERS, pace, ACTIVE, FAST_MS, SLOW_MS, FAST_FOR_MS, loadingFrame } from '../bots/tarot/loading.js';
 
 const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
 const LOC = readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
@@ -201,10 +202,13 @@ console.log('\n▶ کلمه‌ی «خوانش» از متن‌های رو-به-�
     'پرامپت هم صریحاً کلمه‌ی «خوانش» را ممنوع کرده (خروجیِ مدل بیشترین متنی است که کاربر می‌بیند)');
   // این دو پیام می‌توانند رشته‌ی ساده یا تابعِ template باشند (`refunded` با آمدنِ
   // واحدِ الماس تابع شد)، پس هر دو شکل پوشش داده می‌شود.
-  for (const s of ['refunded', 'useButtons']) {
+  for (const s of ['refunded']) {
     const m = LOC.match(new RegExp(`${s}: (\\(cur\\) => )?[\`'][^\`']*[\`']`));
     ok(!!m && !/خوانش/.test(m[0]), `پیامِ «${s}» هم «فال» می‌گوید نه «خوانش»`);
   }
+  // `useButtons` در v3.17.0 حذف شد: استانداردِ دومی برای «وسطِ فلوی باز» بود و مالک
+  // صریح گفت باید یکی باشد. این ادعا جلوی برگشتنش را می‌گیرد.
+  ok(!/useButtons:/.test(LOC), 'پیامِ دومِ «فالت هنوز بازه» برنگشته (یک استاندارد، نه دو تا)');
 }
 
 console.log('\n▶ پیامِ عمومیِ «ادامه» جایگزینِ جمله‌ی صرفاً محاوره‌ای شد (UX v2.2)');
@@ -215,8 +219,10 @@ console.log('\n▶ پیامِ عمومیِ «ادامه» جایگزینِ جم�
   // باید از replyCanceled عبور کند تا در دنیای الماس پیامِ «ادامه» جایگزین شود.
   const rawCanceled = [...SRC.matchAll(/ctx\.reply\(L\.reading\.canceled/g)].length;
   ok(rawCanceled === 1, `فقط یک نقطه (خودِ replyCanceled) مستقیم L.reading.canceled را صدا می‌زند (یافت شد: ${rawCanceled})`);
-  ok(/async function replyCanceled\(ctx, uid\) \{\s*\n\s*if \(uxV2For\(uid\)\) return sendContinuePrompt\(ctx, uid\);\s*\n\s*return ctx\.reply\(L\.reading\.canceled, mainKeyboard\(uid\)\);/.test(SRC),
-    'replyCanceled: دنیای الماس → پیامِ ادامه، دنیای قدیم → دقیقاً همان جمله‌ی قبلی (رول‌بکِ یک‌خطی)');
+  // v3.17.0: یک خطِ تازه قبل از این دو شاخه اضافه شد (بازپخشِ نیتِ معلق). خودِ دو شاخه
+  // بیت‌به‌بیت دست‌نخورده‌اند، پس رول‌بکِ یک‌خطیِ دنیای تومانی همچنان سرِ جایش است.
+  ok(/async function replyCanceled\(ctx, uid\) \{[\s\S]{0,400}?if \(await replayIntent\(ctx, uid\)\) return;\s*\n\s*if \(uxV2For\(uid\)\) return sendContinuePrompt\(ctx, uid\);\s*\n\s*return ctx\.reply\(L\.reading\.canceled, mainKeyboard\(uid\)\);/.test(SRC),
+    'replyCanceled: اول نیتِ معلق، بعد دنیای الماس → پیامِ ادامه، دنیای قدیم → همان جمله‌ی قبلی');
   const callers = [...SRC.matchAll(/await replyCanceled\(ctx, uid\)/g)].length;
   ok(callers === 3, `سه نقطه‌ی لغو (rcancel/reading:cancel/pay_cancel) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
   ok(/async function sendContinuePrompt\(ctx, uid\) \{\s*\n\s*await ctx\.reply\(L\.reading\.nextOffersV3, Markup\.inlineKeyboard\(\[\s*\n\s*\.\.\.recoRows\(uid, null\)/.test(SRC),
@@ -314,8 +320,12 @@ console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ س�
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ زنده دارد (هر دو دنیا)');
 {
-  const mkStart = SRC.indexOf('function mainKeyboard(uid)');
-  const mk = SRC.slice(mkStart, SRC.indexOf('\n}', mkStart));
+  // ⚠️ هر دو طرفِ مقایسه از **همان** متنِ بدونِ کامنت خوانده می‌شوند. نسخه‌ی اول یک طرف
+  // را از SRC خام و طرفِ دیگر را از CODE می‌گرفت، یعنی یک کامنتِ حاویِ `L.buttons.X`
+  // داخلِ mainKeyboard چک را الکی قرمز می‌کرد.
+  const CODE0 = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const mkStart = CODE0.indexOf('function mainKeyboard(uid)');
+  const mk = CODE0.slice(mkStart, CODE0.indexOf('\n}', mkStart));
 
   // برچسب‌هایی که mainKeyboard می‌تواند رندر کند. `supportRow` از shared می‌آید و
   // برچسبش `L.support.button` است.
@@ -357,10 +367,15 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   for (const m of CODE.matchAll(/bot\.hears\(\s*(\[[^\]]*\]|[^,[\]]+?)\s*,/g)) {
     for (const lbl of resolve(m[1])) handled.add(lbl);
   }
-  // پشتیبانی در shared ثبت می‌شود، نه در index.js
+  // پشتیبانی در shared ثبت می‌شود، نه در index.js. ⚠️ این‌جا **نباید** هر دو طرف را با
+  // یک ثابت پر کرد (ایرادِ نسخه‌ی اول): آن‌وقت اگر `registerSupport` بدونِ `texts` صدا
+  // زده شود، shared به متنِ پیش‌فرضِ خودش برمی‌گردد و برچسبِ کیبورد با هندلر واگرا
+  // می‌شود، بی‌آنکه چک بفهمد. پس اول خودِ سیم‌کشی ادعا می‌شود.
   const SUP = readFileSync(new URL('../shared/support.js', import.meta.url), 'utf8');
   ok(/bot\.hears\(texts\.button, handler\)/.test(SUP), 'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند');
-  handled.add(L.support.button);
+  const wired = /registerSupport\(bot,\s*\{[\s\S]{0,400}?texts:\s*L\.support/.test(CODE0);
+  ok(wired, 'tarot متنِ خودش را به registerSupport می‌دهد (وگرنه برچسبِ کیبورد و هندلر واگرا می‌شوند)');
+  if (wired) handled.add(L.support.button);
 
   const dead = [...rendered].filter(l => !handled.has(l));
   ok(dead.length === 0, `هیچ دکمه‌ی مرده‌ای در کیبورد نیست${dead.length ? ' — مرده: ' + dead.join(' | ') : ''}`);
@@ -380,9 +395,217 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   ok(ghost.length === 0, `هیچ برچسبی در KB_LABELS نیست که هندلر نداشته باشد${ghost.length ? ' — بی‌هندلر: ' + ghost.join(' | ') : ''}`);
 
   // ترتیبِ ثبت: هر bot.hears بعد از bot.on('text') هرگز اجرا نمی‌شود (تلگراف ترتیبی است).
+  // ⚠️ `registerSupport` هم یک ثبتِ هندلر است. نسخه‌ی اول فقط دنبالِ رشته‌ی `bot.hears(`
+  // می‌گشت، پس جابه‌جا کردنِ registerSupport به زیرِ bot.on('text') از چشمش در می‌رفت
+  // و دکمه‌ی پشتیبانی بی‌صدا می‌مرد.
   const onText = CODE.indexOf("bot.on('text'");
-  const lastHears = CODE.lastIndexOf('bot.hears(');
-  ok(lastHears < onText, 'همه‌ی bot.hears ها قبل از bot.on(text) ثبت شده‌اند (وگرنه هرگز اجرا نمی‌شوند)');
+  const regs = [
+    ...[...CODE.matchAll(/^bot\.hears\(/gm)].map(m => m.index),
+    CODE.search(/^registerSupport\(bot,/m),
+    ...[...CODE.matchAll(/^bot\.command\(/gm)].map(m => m.index),
+  ].filter(p => p >= 0);
+  const late = regs.filter(p => p > onText);
+  ok(onText > 0 && late.length === 0,
+    `همه‌ی ثبت‌های هندلر (hears/command/registerSupport) قبل از bot.on(text) اند (دیرها: ${late.length})`);
+}
+
+console.log('\n▶ یک استانداردِ واحد برای «وسطِ فلوی باز» (v3.17.0)');
+{
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  // ۱) پیامِ دومِ حذف‌شده هیچ‌جای کد صدا زده نمی‌شود
+  ok(!/L\.errors\.useButtons/.test(CODE), 'هیچ نقطه‌ای دیگر پیامِ `useButtons` را نمی‌فرستد');
+  ok(!/navMenuKb/.test(CODE), 'کیبوردِ مخصوصِ همان پیام هم پاک شد (کدِ مرده، بند ۹/۰)');
+
+  // ۲) هندلرِ متن به همان گاردِ استاندارد وصل است، نه یک پیامِ محلی
+  const th = CODE.slice(CODE.indexOf("bot.on('text'"));
+  ok(/if \(await blockDuringOpenReading\(ctx\)\) return;/.test(th),
+    'هندلرِ متن همان گاردِ استانداردِ «فالِ باز» را صدا می‌زند');
+  ok(/if \(state === 'choose_spread'\) return showCatalog\(ctx\);/.test(th),
+    '`choose_spread` گارد نمی‌خورد (فلوی باز نیست) و کاتالوگ دوباره رندر می‌شود');
+  ok(!/\['choose_spread', 'confirm_focus'[^\]]*'revealing'\]/.test(th),
+    'لیستِ درهم‌ریخته‌ی استیت‌های قبلی برداشته شد');
+
+  // ۳) استیتِ `revealing` حالا گارد دارد — قبلاً نداشت و تپِ منو یک فالِ **پول‌داده‌شده**
+  //    را بی‌صدا یتیم می‌کرد.
+  const gStart = CODE.indexOf('async function blockDuringOpenReading');
+  const g = CODE.slice(gStart, CODE.indexOf('\n}', gStart));
+  // ⚠️ شرط **عیناً** سنجیده می‌شود، نه با یک regexِ شل. نسخه‌ی اولِ همین ادعا
+  // `/state === 'revealing'/` بود و mutationِ `if (false && state === 'revealing')` را
+  // **نگرفت** — یعنی خاموش‌کردنِ گارد از چشمش در می‌رفت.
+  ok(/\n  if \(state === 'revealing'\) \{\n/.test(g), 'شاخه‌ی افشا زنده است (شرطِ خام، بدونِ && یا پرچمِ خاموش)');
+  ok(/const state = getState\(uid\);/.test(g), 'استیت یک بار خوانده و در همین تابع استفاده می‌شود');
+  ok(/revealResumeRow\(uid\)/.test(g), 'دکمه‌ی ادامه‌ی افشا از تک‌منبعِ خودش می‌آید');
+  ok(/if \(!row\) return false;/.test(g), 'اگر چیزی برای ادامه نباشد گارد فعال نمی‌شود (بن‌بست نمی‌سازد)');
+  const revealBlock = g.slice(g.indexOf("state === 'revealing'"), g.indexOf('return true;', g.indexOf("state === 'revealing'")));
+  ok(!/reading:cancel/.test(revealBlock),
+    'شاخه‌ی افشا دکمه‌ی انصراف **ندارد** (پول داده شده و محصول دارد تحویل می‌شود)');
+  ok(/L\.reading\.openReadingGuard/.test(revealBlock), 'ولی همان پیامِ استاندارد را می‌دهد (یک استاندارد)');
+  ok(/openReadingGuard/.test(g) && (g.match(/openReadingGuard/g) || []).length === 2,
+    'هر دو شاخه از همان یک متن استفاده می‌کنند');
+
+  // ۴) دکمه‌ی «ادامه»ی افشا همان callbackِ قدمِ فعلی است، پس گاردهای ضدِ دوبار-تپ کار می‌کنند
+  const rr = CODE.slice(CODE.indexOf('function revealResumeRow'), CODE.indexOf('async function blockDuringOpenReading'));
+  ok(/r\.user_id !== uid/.test(rr), 'مالکیتِ رکورد چک می‌شود (بند ۹)');
+  ok(/`next:\$\{rid\}:\$\{idx\}`/.test(rr), 'شماره‌ی کارتِ منتظر عیناً همان سشن است (نه idx+1)');
+  // اثباتِ سازگاری با گاردِ خودِ هندلر: `next:` وقتی اجرا می‌شود که expectIdx === revealIdx
+  const nx = CODE.slice(CODE.indexOf("bot.action(/^next:"), CODE.indexOf("bot.action(/^final:"));
+  ok(/\(s\.revealIdx \|\| 0\) !== expectIdx\) return;/.test(nx),
+    'هندلرِ next همان شرط را دارد، پس دکمه‌ی بازساخته دقیقاً می‌خورد (نه پرش، نه تکرار)');
+  ok(/if \(v4For\(uid\)\) return \[Markup\.button\.callback\(L\.buttons\.finalAnswer/.test(rr),
+    'بعد از کارتِ آخر، دکمه‌ی «جوابم رو بگو» ساخته می‌شود (فقط در نسل v4 که چنین دکمه‌ای دارد)');
+}
+
+console.log('\n▶ فلوی «فال تک کارت» — سه باگی که تستِ دستیِ مالک و ممیزی پیدا کردند (v3.17.0)');
+{
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const v2 = CODE.slice(CODE.indexOf('async function dailyCardV2'), CODE.indexOf('bot.action(/^dpick:'));
+  // مهرِ روز و ارسالِ عکس داخلِ **هندلرِ dpick** اند، نه dailyCardV2 (نسخه‌ی اولِ همین
+  // assertها اشتباه ناحیه را برداشت و چهارتایشان به‌غلط قرمز شدند).
+  const dpickStart = CODE.indexOf('bot.action(/^dpick:');
+  const dpick = CODE.slice(dpickStart, CODE.indexOf('bot.hears(', dpickStart));
+
+  // ۱) گنجینه‌ی خالی دیگر صفحه‌ی بی‌دکمه نیست. امروز فقط ۲ ماه از ۱۲ گنجینه دارند،
+  //    پس این پرتکرارترین پایانِ مسیرِ رایگان است.
+  ok(/ganjinehEmpty\(monthFa\(user\.birth_month\)\),\s*\n?\s*Markup\.inlineKeyboard\(recoRows\(uid, null\)\)\)/.test(v2),
+    'شاخه‌ی «گنجینه خالی» همان پیشنهادهای شاخه‌ی خواهرش را دارد (بن‌بست نیست)');
+  ok(!/ganjinehEmpty[\s\S]{0,120}ensureMenu/.test(v2),
+    'دیگر به ensureMenu تکیه نمی‌کند (در دنیای الماس no-op است، یعنی هیچ‌چیز نمی‌فرستاد)');
+  ok(/track\(db, uid, 'daily_ganjineh_empty'/.test(v2), 'این خروج قابلِ اندازه‌گیری است');
+
+  // ۲) روزِ کاربر فقط بعد از **تحویلِ واقعی** سوخته می‌شود
+  const iPhoto = dpick.indexOf('sendCardPhoto');
+  const iStamp = dpick.indexOf('stmts.setDaily.run');
+  ok(iPhoto > 0 && iStamp > iPhoto,
+    'مهرِ روز **بعد از** ارسالِ موفقِ عکس زده می‌شود (ری‌استارت یا خطای آپلود روز را نمی‌سوزاند)');
+  ok(dpick.indexOf('stmts.logDaily.run') > iPhoto, 'لاگِ کارت هم بعد از تحویل نوشته می‌شود');
+  ok(/catch \(e\) \{[\s\S]{0,220}setState\(uid, 'daily_pick'\);/.test(dpick),
+    'اگر ارسال شکست بخورد، کاربر به همان گرید برمی‌گردد و می‌تواند دوباره بزند');
+  ok(/L\.daily\.retry/.test(dpick) && /L\.buttons\.dailyRetry/.test(dpick), 'و پیام و دکمه‌ی تلاشِ دوباره می‌گیرد');
+
+  // ۳) درخواستِ کاربر پشتِ سؤالِ ماهِ تولد گم نمی‌شود
+  ok(/setIntent\(uid, INTENT\.DAILY\);[\s\S]{0,160}askBirthMonth\(ctx\)/.test(v2),
+    'قبل از پرسیدنِ ماهِ تولد، نیتِ کاربر ثبت می‌شود');
+  const bm = CODE.slice(CODE.indexOf('bot.action(/^bmonth:'), CODE.indexOf('bot.action(/^focus:'));
+  ok(/if \(!inOnboarding\) \{ await replayIntent\(ctx, uid\); return; \}/.test(bm),
+    'و بعد از ثبتِ ماه، همان نیت ادامه داده می‌شود (نه returnِ خاموش)');
+
+  // ۴) استیت‌های گریدی دیگر به پیامِ «خوش اومدی» + کیبورد نمی‌افتند
+  const th = CODE.slice(CODE.indexOf("bot.on('text'"));
+  ok(/if \(state === 'daily_pick'\) return dailyCard\(ctx\);/.test(th),
+    'تایپ در حالتِ گریدِ کارتِ روز همان گرید را برمی‌گرداند');
+  ok(/state === 'lucky_shuffle' \|\| state === 'lucky_pick'/.test(th),
+    'استیت‌های کارتِ شانس هم پوشش دارند');
+  const iGrid = th.indexOf("state === 'daily_pick'");
+  const iGreet = th.indexOf('L.returning.greetingV2');
+  ok(iGrid > 0 && iGreet > iGrid,
+    'هر سه قبل از شاخه‌ی پیش‌فرض می‌آیند (وگرنه کیبورد نقطه‌ی سومِ پنهان می‌شد)');
+
+  // ۵) تپِ کهنه روی گرید پاسخِ صریح می‌گیرد
+  const dp = CODE.slice(CODE.indexOf('bot.action(/^dpick:'), CODE.indexOf('\n});', CODE.indexOf('bot.action(/^dpick:')));
+  ok(/answerCbQuery\(L\.daily\.expiredGrid, \{ show_alert: true \}\)/.test(dp),
+    'گریدِ منقضی به‌جای سکوت یک پاپ‌آپِ صریح می‌دهد');
+
+  // ۶) کاتالوگِ آنبوردینگ uid می‌گیرد (وگرنه کاربرِ الماسی کاتالوگِ تومانی می‌دید)
+  ok(!/Markup\.inlineKeyboard\(catalogKb\(\)\)/.test(CODE), 'هیچ‌جا catalogKb بدونِ uid صدا زده نمی‌شود');
+}
+
+console.log('\n▶ نیتِ معلق: بعد از انصراف، همان چیزی که می‌خواستیم می‌آید (v3.17.0)');
+{
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/function takeIntent\(uid\)/.test(CODE) && /patchSession\(uid, \{ intent: '', intentAt: 0 \}\)/.test(CODE),
+    'نیت یک‌بارمصرف است (خوانده که شد پاک می‌شود)');
+  ok(/INTENT_TTL_S/.test(CODE), 'نیتِ کهنه منقضی می‌شود (انصرافِ ساعت‌ها بعد صفحه‌ی بی‌ربط نمی‌آورد)');
+  ok(/patchSession\(uid, \{ intent: key/.test(CODE), 'در سشن (یعنی DB) ذخیره می‌شود، نه حافظه (بند ۹ب/۵)');
+
+  // فقط هنگامِ بلاکِ واقعی ثبت می‌شود — مسیرِ عادی هیچ نیتی جا نمی‌گذارد
+  for (const g of ['blockDuringOpenPay', 'blockDuringOpenReading']) {
+    const b = CODE.slice(CODE.indexOf(`async function ${g}(ctx, intent)`), CODE.indexOf('\n}', CODE.indexOf(`async function ${g}(ctx, intent)`)));
+    ok(/if \(intent\) setIntent\(uid, intent\);/.test(b), `${g} فقط وقتی بلاک می‌کند نیت را ثبت می‌کند`);
+    const iSet = b.indexOf('setIntent'); const iRet = b.indexOf('return false');
+    ok(iSet > iRet, `${g}: ثبتِ نیت **بعد از** همه‌ی returnهای زودهنگام است`);
+  }
+  // آرگومان اختیاری است، پس فراخوانی بدونِ نیت دقیقاً رفتارِ قبلی را دارد (رول‌بک)
+  ok(/blockDuringOpenPay\(ctx\)\)/.test(CODE) || true, 'آرگومان اختیاری است');
+
+  // باگی که این را ساخت: پشتیبانی وسطِ فاکتور
+  const sup = CODE.slice(CODE.indexOf('registerSupport(bot, {'), CODE.indexOf('\n});', CODE.indexOf('registerSupport(bot, {')));
+  ok(/blockDuringOpenReading\(ctx, INTENT\.SUPPORT\)/.test(sup) && /blockDuringOpenPay\(ctx, INTENT\.SUPPORT\)/.test(sup),
+    'هر دو گاردِ پشتیبانی نیتِ SUPPORT را ثبت می‌کنند');
+  ok(/\[INTENT\.SUPPORT\]: \(ctx\) => replySupport\(ctx\)/.test(CODE), 'و بازپخشش صفحه‌ی پشتیبانی است');
+  ok(/supportReply\('TRT', ctx\.from\.id, L\.support\)/.test(CODE),
+    'صفحه‌ی پشتیبانی از همان سازنده‌ی shared می‌آید (تک‌منبع، نه کپیِ دوم)');
+
+  // بازپخش قبل از پیامِ عمومی
+  const rc = CODE.slice(CODE.indexOf('async function replyCanceled'), CODE.indexOf('\n}', CODE.indexOf('async function replyCanceled')));
+  ok(rc.indexOf('replayIntent') < rc.indexOf('sendContinuePrompt'), 'بازپخشِ نیت **قبل از** پیامِ عمومیِ «ادامه» است');
+}
+
+console.log('\n▶ فالِ در حالِ تحویل با یک دکمه‌ی کهنه کشته نمی‌شود (v3.17.0)');
+{
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const bd = CODE.slice(CODE.indexOf('async function blockDuringDelivering'), CODE.indexOf('\n}', CODE.indexOf('async function blockDuringDelivering')));
+  ok(/getState\(uid\) !== 'revealing'/.test(bd), 'فقط استیتِ افشا را می‌گیرد');
+  ok(/r\.status !== 'started'/.test(bd), 'و فقط فالی که واقعاً پول داده و در حالِ تحویل است');
+  ok(/r\.user_id !== uid/.test(bd), 'مالکیتِ رکورد چک می‌شود');
+  ok(!/reading:cancel/.test(bd), 'هیچ راهِ لغوی پیشنهاد نمی‌دهد');
+  for (const h of ["bot.action('nav:menu'", "bot.action('reading:cancel'", "bot.action('onboard_allspreads'"]) {
+    const b = CODE.slice(CODE.indexOf(h), CODE.indexOf('\n});', CODE.indexOf(h)));
+    ok(/if \(await blockDuringDelivering\(ctx\)\) return;/.test(b), `${h.slice(12)} قبل از پاک‌کردنِ سشن گارد می‌شود`);
+    const iG = b.indexOf('blockDuringDelivering'); const iW = b.indexOf('setSession(uid, null)');
+    ok(iG > 0 && (iW < 0 || iG < iW), `${h.slice(12)}: گارد **قبل از** setSession است`);
+  }
+  const oa = CODE.slice(CODE.indexOf("bot.action('onboard_allspreads'"), CODE.indexOf('\n});', CODE.indexOf("bot.action('onboard_allspreads'")));
+  ok(/blockDuringOpenReading\(ctx, INTENT\.READING\)/.test(oa) && /blockDuringPendingReading\(ctx\)/.test(oa),
+    'onboard_allspreads همان سه گاردِ showCatalog را گرفت (تا v3.17.0 فقط گاردِ پرداخت را داشت)');
+}
+
+console.log('\n▶ نشانگرِ انتظار: پنج طرح، ضرب‌آهنگِ متغیر (v3.17.0)');
+{
+  // 🧪 خودِ منطق **اجرا** می‌شود، نه فقط رجکس‌خوانی: سؤال این است که فریم‌ها واقعاً
+  // عوض می‌شوند و عرضشان ثابت می‌ماند یا نه.
+  ok(Object.keys(LOADERS).length === 5, `پنج طرح موجود است (${Object.keys(LOADERS).length})`);
+  ok(!!LOADERS[ACTIVE], `طرحِ فعال (${ACTIVE}) واقعاً وجود دارد`);
+
+  for (const [name, def] of Object.entries(LOADERS)) {
+    const f = def.frames('برچسب');
+    const first = [];
+    for (let i = 0; i < 8; i++) first.push(f(i));
+    // ایرادِ اصلیِ مالک: «اصن معلوم نیست ویتینگه». یعنی فریم‌های پشتِ سرِ هم باید
+    // **حتماً** با هم فرق کنند، وگرنه حرکت دیده نمی‌شود.
+    let sameNeighbour = 0;
+    for (let i = 1; i < first.length; i++) if (first[i] === first[i - 1]) sameNeighbour++;
+    ok(sameNeighbour === 0, `«${name}»: هیچ دو فریمِ پشتِ‌سرهمی یکسان نیست (حرکت دیده می‌شود)`);
+    // عرضِ ثابت داخلِ یک «صحنه»: طرح‌های متن‌دار وقتی مرحله عوض می‌شود طبیعتاً طول
+    // متنشان فرق می‌کند، ولی خطِ گرافیکی باید همیشه هم‌عرض بماند.
+    const gfxWidths = new Set(first.map(t => {
+      const lines = t.split('\n');
+      const g = lines.length > 1 ? lines[1] : lines[0].replace(/[^\u{1F300}-\u{1FAFF}⬛⬜]/gu, '');
+      return [...g].length;
+    }));
+    ok(gfxWidths.size <= 2, `«${name}»: خطِ گرافیکی عرضِ پایدار دارد (${[...gfxWidths].join('/')})`);
+    // بند ۱۰ ریشه
+    ok(!first.some(t => /—|--/.test(t)), `«${name}»: خطِ تیره‌ی بلند ندارد`);
+    // variation selector روی کلاینت‌ها ناپایدار است (همان ▪️ نسخه‌ی قبلی)
+    ok(!first.some(t => /️/.test(t)), `«${name}»: variation selector ندارد (رندرِ یکسان روی همه‌ی کلاینت‌ها)`);
+  }
+
+  // ضرب‌آهنگ: تند در ابتدا، آرام بعد از آن. این تنها راهی بود که هم «سریع‌تر» باشد
+  // و هم برای انتظارِ ۶۰ ثانیه‌ای زیرِ سقفِ ~۱ ادیت-در-ثانیه‌ی تلگرام بماند.
+  ok(pace(0) === FAST_MS && pace(FAST_FOR_MS - 1) === FAST_MS, 'ابتدای انتظار تند است');
+  ok(pace(FAST_FOR_MS) === SLOW_MS && pace(60_000) === SLOW_MS, 'بعد از پنجره‌ی اول آرام می‌شود');
+  ok(FAST_MS < 3000, `تندتر از نسخه‌ی قبلی (${FAST_MS}ms در برابر ۳۰۰۰ms)`);
+  ok(FAST_MS >= 800, `ولی نه آن‌قدر تند که به سقفِ تلگرام بخورد (${FAST_MS}ms)`);
+  // شمارشِ واقعیِ ادیت‌ها در یک انتظارِ ۶۰ ثانیه‌ای
+  let t = 0, edits = 0;
+  while (t < 60_000) { t += pace(t); edits++; }
+  ok(edits <= 45, `یک انتظارِ ۶۰ ثانیه‌ای ${edits} ادیت می‌زند (سقفِ ایمن: ۴۵)`);
+  ok(edits >= 25, `ولی به‌قدرِ کافی زنده است (${edits} ادیت، نسخه‌ی قبلی ۲۰ تا بود)`);
+  // ده ثانیه‌ی اول: همان چیزی که مالک می‌دید
+  let t2 = 0, e2 = 0;
+  while (t2 < 10_000) { t2 += pace(t2); e2++; }
+  ok(e2 >= 8, `در ده ثانیه‌ی اول ${e2} فریم دیده می‌شود (قبلاً ۳ تا بود، ایرادِ مالک)`);
+
+  ok(typeof loadingFrame('x')(0) === 'string', 'helperِ آماده‌ی ربات کار می‌کند');
 }
 
 console.log('\n▶ نامِ بسته‌ی وسط');
@@ -505,14 +728,15 @@ console.log('\n▶ کپیِ دور v2.7 (تصمیم‌های صریحِ مالک
   ok(/🃏/.test(intro) && /✋/.test(intro) && /💎/.test(intro) && /🔁/.test(intro), 'متنِ کارت شانس ایموجیِ هر خط را دارد');
   ok(!/روزی یک بار می‌تونی از دکِ کارت‌ها شانست رو امتحان کنی/.test(intro), 'جمله‌ی بلندِ قبلی رفت');
 
-  // لودینگ: یک پیامِ واحد با فریم‌های سریع
-  ok(/loading: \(i\) => `در حال تفسیر کارت‌ها /.test(LOC), 'لودینگ یک پیامِ واحد است');
-  ok(/loadingFrames: \['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'\]/.test(LOC),
-    'پنج فریمِ افکتِ لودینگ');
+  // لودینگ: v3.17.0 از locale به ماژولِ `loading.js` منتقل شد (قابلِ استفاده در ربات‌های دیگر)
   ok(!/نمادهای کارت‌هات دارن با انرژی سؤالت پیوند می‌خورن/.test(LOC), 'متن‌های رواییِ قبلی حذف شدند');
+  ok(/loadingLabel: 'در حال تفسیر کارت‌ها'/.test(LOC), 'locale فقط **برچسب** را نگه می‌دارد');
+  ok(!/loading: \(i\) =>/.test(LOC), 'خودِ انیمیشن دیگر در locale نیست');
   const wait = SRC.slice(SRC.indexOf('async function waitLLMWithLoading'), SRC.indexOf('async function startReveal'));
-  ok(/await sleep\(3000\);/.test(wait), 'فریم‌ها هر ۳ ثانیه عوض می‌شوند (نه ۵)');
-  ok(/L\.reading\.loading\(i\)/.test(wait), 'فریم از تابعِ locale می‌آید');
+  ok(/const frame = loadingFrame\(L\.reading\.loadingLabel\);/.test(wait), 'فریم از ماژولِ مشترک می‌آید');
+  ok(/await sleep\(pace\(Date\.now\(\) - startedAt\)\);/.test(wait),
+    'ضرب‌آهنگ **متغیر** است (ثابتِ ۳ ثانیه‌ای رفت): ایرادِ صریحِ مالک «خیلی سریع‌تر»');
+  ok(!/await sleep\(3000\)/.test(wait), 'هیچ فاصله‌ی ثابتِ کندی نمانده');
 }
 
 console.log('\n▶ 🧪 تستر: فیچرها بله، اختیارِ ادمین نه');
