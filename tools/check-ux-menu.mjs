@@ -227,8 +227,14 @@ console.log('\n▶ اولین فالِ کاربر: پیشنهادِ فالِ ج�
   const iIsFirst1 = SRC.indexOf('const isFirstReading = stmts.countDelivered.get(uid).c === 1;');
   ok(iSetDelivered > 0 && iIsFirst1 > iSetDelivered,
     'شمارشِ اولین فال بعد از ثبتِ status=delivered انجام می‌شود (همین فال را هم می‌شمارد)');
-  ok(/if \(!\(uxV2For\(uid\) && isFirstReading\)\) \{/.test(SRC),
-    'پیشنهادِ فالِ جدید فقط برای «دنیای قدیم یا فالِ غیرِ‌اول» نشان داده می‌شود');
+  // v2.7 (باگِ گزارش‌شده): پیامِ «ادامه» **قبل از** نظرسنجی می‌آمد. حالا هر جا نظرسنجی
+  // پرسیده می‌شود، قدمِ بعدی به بعد از نمره‌دادن موکول می‌شود.
+  ok(/if \(!v4For\(uid\)\) \{/.test(SRC),
+    'وقتی نظرسنجی پرسیده می‌شود، پیامِ «ادامه» در تحویل نمی‌آید (به fbr موکول می‌شود)');
+  const deliverTail = SRC.slice(iSetDelivered, SRC.indexOf("bot.action(/^fbr:"));
+  ok(deliverTail.indexOf('L.reading.rateAsk') > 0, 'سؤالِ نمره در خودِ تحویل می‌ماند');
+  ok(!/nextOffersV3[\s\S]{0,400}rateAsk/.test(deliverTail),
+    'هیچ مسیری پیامِ «ادامه» را قبل از سؤالِ نمره نمی‌فرستد');
   // بندِ دوم: در fbr: (بعد از نمره‌دادن) باید یک isFirstReading دیگر (تازه، مستقل) محاسبه شود
   const iIsFirst2 = SRC.indexOf('const isFirstReading = stmts.countDelivered.get(uid).c === 1;', iIsFirst1 + 1);
   ok(iIsFirst2 > iIsFirst1, 'fbr: هم isFirstReading را دوباره (مستقل) محاسبه می‌کند');
@@ -240,8 +246,18 @@ console.log('\n▶ اولین فالِ کاربر: پیشنهادِ فالِ ج�
     'شرطِ نمایشِ تبلیغ: دنیای الماس + اولین فال + سهمیه‌ی کارت شانس باز');
   ok(/L\.lucky\.promo\(dispName\(getUser\(uid\)\)\)/.test(fbrBlock), 'تبلیغ از L.lucky.promo با نامِ کاربر ساخته می‌شود');
   ok(/luckyDraw\(LUCKY_PICKS, curOf\(uid\)\), 'lucky_go'/.test(fbrBlock), 'دکمه‌ی تبلیغ مستقیم به lucky_go وصل است');
-  ok(/\} else \{\s*\n\s*await ctx\.reply\(L\.reading\.rateThanks\)/.test(fbrBlock),
-    'برای فالِ غیرِاول (یا دنیای قدیم) رفتار دقیقاً همان تشکرِ قبلی می‌ماند');
+  // v2.7 (باگِ گزارش‌شده): تشکر **همیشه** می‌آید و بعدش حتماً یک قدمِ بعدی. قبلاً فقط
+  // «اولین فال + کارتِ شانسِ باز» قدمِ بعدی می‌گرفت و بقیه بعد از تشکر به بن‌بست می‌خوردند
+  // (مثلاً کسی که کارتِ شانسش را قبلاً کشیده بود، یا فالِ اولش در آنبوردینگ نبود).
+  const iThanks = fbrBlock.indexOf('L.reading.rateThanks');
+  const iPromo = fbrBlock.indexOf('L.lucky.promo');
+  ok(iThanks > 0 && iThanks < iPromo, 'تشکر همیشه و **قبل از** قدمِ بعدی می‌آید');
+  ok(!/\} else \{\s*\n\s*await ctx\.reply\(L\.reading\.rateThanks\)/.test(fbrBlock),
+    'تشکر دیگر در شاخه‌ی else حبس نیست');
+  ok(/if \(uxV2For\(uid\)\) await sendContinuePrompt\(ctx, uid\);/.test(fbrBlock),
+    'هر مسیرِ دیگری بعد از تشکر پیامِ «ادامه» می‌گیرد (بن‌بست ندارد)');
+  ok(/rateThanks, uxV2For\(uid\) \? mainKeyboard\(uid\) : undefined\)/.test(fbrBlock),
+    'کیبوردِ اصلی روی همین پیامِ تشکر سوار می‌شود (هم‌زمان با قدمِ بعدی، بدونِ پیامِ اضافه)');
 }
 
 console.log('\n▶ بعد از کشیدنِ کارت شانس، دعوت به فالِ بعدی می‌آید');
@@ -352,6 +368,35 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
   ok(/patchSession\(uid, \{ luckyStatusMsgId: m\.message_id \}\)/.test(sls),
     'شناسه‌ی پیامِ تازه ذخیره می‌شود تا تپِ بعدی همان را ادیت کند');
   ok(/luckyStatusMsgId: 0/.test(SRC), 'هر دستِ تازه پیامِ وضعیتِ خودش را می‌سازد');
+}
+
+console.log('\n▶ کپیِ دور v2.7 (تصمیم‌های صریحِ مالک)');
+{
+  ok(!/👛/.test(LOC) && !/👛/.test(SRC), 'ایموجیِ کیف 👛 از کلِ ربات برداشته شده');
+  ok(/const line = `💠 \$\{purseLine\(balance, cur\)\}`;/.test(LOC), 'جایش 💠 نشسته');
+  ok(/تعداد کارت‌های بیشتر ◀️◀️ تحلیل کامل‌تر و عمیق‌تر/.test(LOC), 'بدنه‌ی کوتاهِ صفحه‌ی اندازه');
+  ok(/❤️حالا با حس قلبت/.test(LOC), 'انتخابِ کارت ایموجیِ قلب گرفت');
+  ok(/breathing: '🔮 حالا باید نیت کنی:/.test(LOC), 'متنِ نیت‌کردن مرحله‌بندی شد');
+  ok(/1️⃣ اول سه نفس عمیق/.test(LOC) && /2️⃣ بعدش انرژی و ذهنت/.test(LOC), 'دو قدمِ شماره‌دار');
+  ok(/ready: 'نیت کردم 🔮'/.test(LOC), 'دکمه‌ی زیرش «نیت کردم» شد');
+  ok(/rateAsk: '⭐️ /.test(LOC), 'سؤالِ نمره ایموجی گرفت');
+  ok(/چقدر از فال راضی بودی؟/.test(LOC) && !/از فالی که برات گرفتم/.test(LOC),
+    '«برات گرفتم» حذف شد');
+  ok(/😍 ۵ = بیشترین رضایت/.test(LOC) && /🙁 ۱ = کمترین رضایت/.test(LOC),
+    'دو سرِ مقیاس با ایموجی از هم جدا شدند');
+  // کارت شانس: کوتاه‌تر و ایموجی‌دار
+  const intro = LOC.slice(LOC.indexOf('    intro: (picks, coins, grid)'), LOC.indexOf('    already:'));
+  ok(/🃏/.test(intro) && /✋/.test(intro) && /💎/.test(intro) && /🔁/.test(intro), 'متنِ کارت شانس ایموجیِ هر خط را دارد');
+  ok(!/روزی یک بار می‌تونی از دکِ کارت‌ها شانست رو امتحان کنی/.test(intro), 'جمله‌ی بلندِ قبلی رفت');
+
+  // لودینگ: یک پیامِ واحد با فریم‌های سریع
+  ok(/loading: \(i\) => `در حال تفسیر کارت‌ها /.test(LOC), 'لودینگ یک پیامِ واحد است');
+  ok(/loadingFrames: \['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'\]/.test(LOC),
+    'پنج فریمِ افکتِ لودینگ');
+  ok(!/نمادهای کارت‌هات دارن با انرژی سؤالت پیوند می‌خورن/.test(LOC), 'متن‌های رواییِ قبلی حذف شدند');
+  const wait = SRC.slice(SRC.indexOf('async function waitLLMWithLoading'), SRC.indexOf('async function startReveal'));
+  ok(/await sleep\(3000\);/.test(wait), 'فریم‌ها هر ۳ ثانیه عوض می‌شوند (نه ۵)');
+  ok(/L\.reading\.loading\(i\)/.test(wait), 'فریم از تابعِ locale می‌آید');
 }
 
 console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style)');
@@ -476,8 +521,8 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // ۷) پیامِ «ادامه» تنها نقطه‌ی باز شدنِ منوی اصلی است (تصمیمِ مالک).
   const cont = SRC.slice(SRC.indexOf('async function sendContinuePrompt'), SRC.indexOf('async function replyCanceled'));
   ok(/await ensureMenu\(ctx, uid\)/.test(cont), 'sendContinuePrompt خودش کیبوردِ اصلی را تضمین می‌کند');
-  ok(/nextOffersV3: 'برای جواب دادن به سؤالاتی که جوابش رو نمی‌دونی من همیشه اینجام!'/.test(LOC),
-    'متنِ تازه‌ی پیامِ «ادامه»');
+  ok(/nextOffersV3: '🔮 برای جواب دادن به سؤالاتی که جوابش رو نمی‌دونی من همیشه اینجام!'/.test(LOC),
+    'متنِ تازه‌ی پیامِ «ادامه» (با ایموجی)');
 
   // v2.4: پیامِ «از دکمه‌های پایین شروع کن 👇» در دنیای الماس اصلاً فرستاده نمی‌شود، ولی
   // کیبورد نباید قربانی شود (askName عمداً removeKeyboard می‌کند) — پس به پیامِ پایانِ

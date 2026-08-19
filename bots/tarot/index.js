@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.13.0';
+const PRODUCT_VERSION = '3.14.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2998,14 +2998,18 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
 async function waitLLMWithLoading(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const msg = await ctx.reply(L.reading.loading[0]);
+  const msg = await ctx.reply(L.reading.loading(0));
   let i = 1, done = false;
   (async () => { // پیام لودینگ پویا؛ بدون await تا افشا معطل نماند
+    // ۳ ثانیه: عمداً محافظه‌کارانه، نه اندازه‌گیری‌شده. تلگرام سقفِ دقیقِ editMessageText را
+    // مستند نکرده و خوانشِ ده‌کارتی می‌تواند ۶۰ ثانیه طول بکشد؛ با ۱ ثانیه یعنی ~۶۰ ادیت
+    // پشتِ‌سرهم روی یک چت که ریسکِ 429 دارد. ۳ ثانیه هم به‌قدرِ کافی زنده دیده می‌شود.
+    // اگر مالک سریع‌تر خواست، پایین‌آوردنش یک عدد است — ولی باید روی چتِ واقعی تست شود.
     while (!done) {
-      await sleep(5000);
+      await sleep(3000);
       if (done) break;
       try {
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, L.reading.loading[i % L.reading.loading.length]);
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, L.reading.loading(i));
       } catch {}
       i++;
     }
@@ -3485,7 +3489,11 @@ async function finishReading(ctx, uid, readingId) {
   // نمی‌آید؛ به‌جایش بعد از نمره‌دادن به همین فال، تبلیغِ کارتِ شانس می‌آید (پایین‌تر در
   // `fbr:`) و دعوت به فالِ بعدی به بعد از کشیدنِ آن کارت موکول می‌شود. برای فال‌های
   // بعدی و برای دنیای قدیم، رفتار دقیقاً همان قبلی است.
-  if (!(uxV2For(uid) && isFirstReading)) {
+  // 🐛 باگِ ترتیب (گزارشِ مالک): تا امروز پیامِ «ادامه» **قبل از** نظرسنجی می‌آمد و گاهی
+  // کاربر CTA را زودتر از سؤالِ نمره می‌دید. قرارداد این است: اول نمره، بعد تشکر، بعد
+  // قدمِ بعدی. پس وقتی نظرسنجی پرسیده می‌شود (v4)، پیامِ «ادامه» به `fbr:` موکول می‌شود.
+  // در دنیای بدونِ نظرسنجی رفتار دقیقاً همان قبلی می‌ماند.
+  if (!v4For(uid)) {
     // CTA بعد از فالِ **پولی** (UX v2.1 — متنِ خودِ مالک). عمداً با متنِ بعد از کارتِ روز
     // فرق دارد: این‌جا کاربر یک جوابِ کامل گرفته، آن‌جا فقط یک تکه.
     const nextText = uxV2For(uid) ? L.reading.nextOffersV3
@@ -3494,8 +3502,8 @@ async function finishReading(ctx, uid, readingId) {
       ...recoRows(uid, r.type),
       [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
     ]));
+    await ensureMenu(ctx, uid);
   }
-  await ensureMenu(ctx, uid);
 
   // v4: بازخورد در **آخرِ آخر**، بعد از تمام‌شدنِ کامل خوانش. مقیاسِ ۱ تا ۵ و سؤال درباره‌ی
   // **رضایت** است نه انطباق با واقعیت: چیزی که می‌خواهیم بدانیم این است که کاربر راضی
@@ -3529,13 +3537,23 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // اگر همان روز کارت شانسش را قبلاً کشیده (نادر، ولی ممکن)، همان تشکرِ همیشگی می‌ماند.
   const isFirstReading = stmts.countDelivered.get(uid).c === 1;
   const luckyAvailable = getUser(uid)?.lucky_date !== tehranToday();
+  // تشکر **همیشه** اول می‌آید، و کیبوردِ اصلی روی همین پیام سوار می‌شود: این تنها پیامِ
+  // این نقطه است که کیبوردِ inline ندارد، پس تنها چیزی است که می‌تواند حاملش باشد —
+  // و دقیقاً همان لحظه‌ای است که مالک خواست منو صادر شود (هم‌زمان با قدمِ بعدی).
+  await ctx.reply(L.reading.rateThanks, uxV2For(uid) ? mainKeyboard(uid) : undefined).catch(() => {});
+  // 🐛 باگِ گزارش‌شده: قبلاً فقط **اولین فالِ همراه با کارتِ شانسِ باز** قدمِ بعدی می‌گرفت.
+  // کاربری که کارتِ شانسش را قبلاً کشیده بود (یا فالِ اولش در آنبوردینگ نبود) بعد از
+  // تشکر به بن‌بست می‌خورد. حالا آن شرط فقط تعیین می‌کند **کدام** قدمِ بعدی بیاید، نه اینکه
+  // قدمِ بعدی بیاید یا نه.
   if (uxV2For(uid) && isFirstReading && luckyAvailable) {
+    // آشناسازی با کارتِ شانس = آخرین قدمِ آنبوردینگ. دعوت به فالِ بعدی بعد از کشیدنِ آن
+    // می‌آید (پایانِ `lpick:`)، وگرنه کاربر هم‌زمان دو دعوتِ رقیب می‌گیرد.
     await ctx.reply(L.lucky.promo(dispName(getUser(uid))), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
     ])).catch(() => {});
-  } else {
-    await ctx.reply(L.reading.rateThanks).catch(() => {});
+    return;
   }
+  if (uxV2For(uid)) await sendContinuePrompt(ctx, uid);
 });
 
 /* ---------- کیف پول و شارژ (کارت‌به‌کارت + تأیید ادمین) ---------- */
