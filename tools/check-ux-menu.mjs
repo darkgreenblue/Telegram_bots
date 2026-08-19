@@ -538,9 +538,19 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // ۵) nav:menu هم ادیت می‌کند و متنش عوض شده.
   ok(/backToMenu: 'برگشتیم به منوی اصلی 🌳'/.test(LOC), 'متنِ بازگشت به منو: بدونِ «باشه» و با ایموجیِ 🌳');
   const navH = SRC.slice(SRC.indexOf("bot.action('nav:menu'"), SRC.indexOf("bot.action('reading:resume'"));
-  ok(/ctx\.editMessageText\(L\.reading\.backToMenu\)/.test(navH), 'nav:menu همان پیام را به تأییدِ بازگشت ادیت می‌کند');
-  ok(/if \(edited\) await ensureMenu/.test(navH), 'بعد از ادیت، کیبوردِ ماندگار تضمین می‌شود');
-  ok(/else await ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\)/.test(navH), 'شکستِ ادیت دقیقاً به رفتارِ قبلی برمی‌گردد');
+  // 🎹 قراردادِ کیبورد (مالک، بارها تکرار شده): دستورِ باز شدنِ منوی پایین **فقط دو نقطه**
+  // دارد — (۱) بازگشت، تا وقتی به منوی اصلی برسیم، (۲) لحظه‌ی قدمِ بعدی بعد از نظرسنجی.
+  // پس nav:menu پیامِ **تازه** می‌فرستد نه ادیت. ادیتِ تلگرام فقط `InlineKeyboardMarkup`
+  // قبول می‌کند، یعنی یک ادیت هرگز نمی‌تواند کیبوردِ reply را حمل کند و کاربری که هنوز
+  // کیبورد نگرفته دقیقاً همین‌جا بن‌بست می‌خورد. این تنها معاوضه‌ی این قرارداد است.
+  ok(/return ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\);/.test(navH),
+    'nav:menu (نقطه‌ی ۱) پیامِ بازگشت را با کیبوردِ اصلی می‌فرستد');
+  ok(!/editMessageText/.test(navH),
+    'nav:menu متن را ادیت نمی‌کند (ادیت نمی‌تواند کیبوردِ reply را حمل کند)');
+  ok(/editMessageReplyMarkup\(undefined\)/.test(navH),
+    'دکمه‌های پیامِ مبدأ کشته می‌شوند تا دوباره‌زدنی نماند');
+  ok(!/uxV2For\(uid\)/.test(navH),
+    'nav:menu شاخه‌ی جدا برای دو دنیا ندارد (دنیای تومانی هم دقیقاً همین رفتارِ همیشگی را دارد)');
 
   // ۶) صفحه‌ی بسته‌ها زیرمنوی کیف است: ادیت + دکمه‌ی «بازگشت» (نه «انصراف»).
   ok(/backOneStep: '◀️ بازگشت'/.test(LOC), 'برچسبِ بازگشتِ یک‌قدمی جدا از «انصراف» تعریف شده');
@@ -563,12 +573,6 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
       `«${name}» هیچ مسیرِ بی‌قیدی برای جداکردنِ فاکتور ندارد`);
   }
 
-  // nav:menu در دنیای تومانی (کاربرِ واقعی) باید دقیقاً رفتارِ قبلی را داشته باشد: پیامِ
-  // تازه + کیبوردِ اصلی. ادیت‌کردنِ یک پیامِ بالای چت برای او یعنی «هیچ اتفاقی نیفتاد»،
-  // و این پرتکرارترین نقطه‌ی تحویلِ دوباره‌ی کیبورد است.
-  ok(/if \(!uxV2For\(uid\)\) \{[\s\S]{0,220}ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\);/.test(navH),
-    'دنیای تومانی همان پیامِ تازه + کیبوردِ اصلی را می‌گیرد (ادیت فقط برای دنیای الماس)');
-
   // ۷) پیامِ «ادامه» تنها نقطه‌ی باز شدنِ منوی اصلی است (تصمیمِ مالک).
   const cont = SRC.slice(SRC.indexOf('async function sendContinuePrompt'), SRC.indexOf('async function replyCanceled'));
   ok(/await ensureMenu\(ctx, uid\)/.test(cont), 'sendContinuePrompt خودش کیبوردِ اصلی را تضمین می‌کند');
@@ -590,9 +594,20 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   ok(!/catalogV3/.test(fin), 'متنِ «کدوم فال رو انتخاب می‌کنی؟» در آنبوردینگ نمی‌آید (استثنای عمدی)');
   const nameStart = SRC.indexOf('async function finishNameOnboarding');
   const nameFn = SRC.slice(nameStart, SRC.indexOf('\n}', nameStart));
-  ok(/uxV2For\(uid\) \? mainKeyboard\(uid\) : Markup\.removeKeyboard\(\)/.test(nameFn),
-    'کیبوردِ ماندگار روی پیامِ «خوش اومدی» تحویل می‌شود (و دنیای تومانی همان removeKeyboard می‌ماند)');
-  ok(/if \(uxV2For\(uid\)\) stmts\.setKbShown\.run\(uid\);/.test(nameFn), 'همان‌جا مهرِ نمایشِ کیبورد زده می‌شود');
+  // v2.8: آنبوردینگ **هیچ کیبوردی صادر نمی‌کند**. نسخه‌ی v2.5 کیبورد را به پیامِ «خوش اومدی»
+  // چسبانده بود و مالک پسش داد: کاربر تازه اسمش را نوشته، هنوز وسطِ آنبوردینگ است و منوی
+  // پایین آن‌جا فقط حواسش را پرت می‌کند. قرارداد فقط دو نقطه دارد و این یکی از آن دو نیست.
+  ok(/await ctx\.reply\(L\.onboarding\.welcome\([^;]*?\), Markup\.removeKeyboard\(\)\);/.test(nameFn),
+    'پیامِ «خوش اومدی» کیبورد را برمی‌دارد، نه اینکه منوی اصلی را صادر کند');
+  ok(!/mainKeyboard/.test(nameFn) && !/setKbShown/.test(nameFn),
+    'مسیرِ ثبتِ نام نه کیبوردِ اصلی می‌دهد نه مهرِ نمایشِ کیبورد می‌زند');
+  // گاردِ ناحیه‌ای: کلِ آنبوردینگِ دنیای الماس (نام → ماهِ تولد → «از کجا شروع کنیم؟»)
+  // باید بی‌کیبورد بماند. مالک این را دو بار پس داد؛ این assert جلوی بارِ سوم را می‌گیرد.
+  // (هندلرِ `focus:` عمداً بیرونِ ناحیه است: مسیرِ نسلِ قبل و فقط برای دنیای تومانی.)
+  const obRegion = SRC.slice(nameStart, SRC.indexOf('bot.action(/^focus:'));
+  ok(!/mainKeyboard\(/.test(obRegion), 'هیچ نقطه‌ای از مسیرِ آنبوردینگ کیبوردِ ماندگار صادر نمی‌کند');
+  ok(/finishOnboarding/.test(obRegion) && /askBirthMonth/.test(obRegion),
+    'ناحیه‌ی گاردشده واقعاً کلِ آنبوردینگ را می‌گیرد (نه یک تکه‌ی کوچک)');
   // «از کجا شروع کنیم؟» فقط جای خودش (آنبوردینگ) بماند و هیچ‌جای دیگر نیاید.
   ok((SRC.match(/L\.reading\.startWhere/g) || []).length === 1, '«از کجا شروع کنیم؟» فقط در آنبوردینگ استفاده می‌شود');
   // نگارشِ تازه‌ی دکمه‌ی بسته‌ها + نبودِ خطِ تیره‌ی بلند (بند ۱۰ ریشه)

@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.15.0';
+const PRODUCT_VERSION = '3.16.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1669,14 +1669,11 @@ async function finishNameOnboarding(ctx, rawName) {
   setSession(uid, null);
   // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  // UX v2.5: کیبوردِ ماندگار این‌جا تحویل می‌شود — تنها پیامِ آنبوردینگ که کیبوردِ inline
-  // ندارد، پس تنها جایی است که می‌تواند حاملش باشد (هر پیام فقط یک reply_markup می‌پذیرد).
-  // این‌طور پایانِ آنبوردینگ دوباره **یک پیام** می‌شود («از کجا شروع کنیم؟» + چهار دکمه)،
-  // همان شکلی که مالک می‌خواست. تپِ دکمه‌های منو وسطِ آنبوردینگ را `blockDuringOnboarding`
-  // می‌گیرد و همان قدمِ فعلی را یادآوری می‌کند، پس هیچ مرحله‌ای رد نمی‌شود.
-  if (uxV2For(uid)) stmts.setKbShown.run(uid);
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)),
-    uxV2For(uid) ? mainKeyboard(uid) : Markup.removeKeyboard());
+  // ⚠️ این‌جا **هیچ کیبوردی صادر نمی‌شود**. قراردادِ صریح و تکرارشده‌ی مالک: دستورِ باز شدنِ
+  // منوی پایین فقط دو نقطه دارد (پایینِ همین فایل مستند شده) و آنبوردینگ هیچ‌کدامشان نیست.
+  // یک نسخه‌ی قبلی کیبورد را به همین پیام چسبانده بود و مالک درست گرفتش: کاربر تازه اسمش
+  // را نوشته و هنوز وسطِ آنبوردینگ است، منو آن‌جا فقط حواسش را پرت می‌کند.
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -2942,22 +2939,12 @@ bot.action('nav:menu', async (ctx) => {
   setState(uid, 'idle');
   setSession(uid, null);
   if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
-  // UX v2.3: در دنیای الماس به‌جای «کشتنِ کیبورد + پیامِ جدید»، همین پیام به تأییدِ بازگشت
-  // ادیت می‌شود (خواسته‌ی مالک: پیامِ «یکی از فال‌ها رو انتخاب کن» جای خودش عوض شود).
-  // کیبوردِ ماندگار را نمی‌شود به یک ادیت چسباند (تلگرام در ادیت فقط inline می‌پذیرد)، ولی
-  // خودش از قبل پایینِ چت هست و `ensureMenu` تورِ ایمنیِ کسی است که جمعش کرده باشد.
-  // ⚠️ دنیای تومانی عمداً مسیرِ قدیمی را می‌رود: آن‌جا کاربرِ واقعی است و این دکمه از
-  // کاتالوگِ تومانی و پیامِ `useButtons` هم می‌آید. ادیتِ یک پیامِ بالای چت برای او یعنی
-  // «هیچ اتفاقی نیفتاد»، و مهم‌تر: این پرتکرارترین نقطه‌ای است که کیبوردِ اصلی دوباره
-  // به او تحویل می‌شود. پس رفتارش بیت‌به‌بیت دست‌نخورده می‌ماند.
-  if (!uxV2For(uid)) {
-    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-    return ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
-  }
-  let edited = false;
-  try { await ctx.editMessageText(L.reading.backToMenu); edited = true; } catch {}
-  if (edited) await ensureMenu(ctx, uid);
-  else await ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
+  // 🎹 **نقطه‌ی مجازِ ۱ برای صدورِ کیبورد** (قراردادِ مالک): «بازگشت تا رسیدن به منوی اصلی».
+  // پس این‌جا پیامِ تأیید با `mainKeyboard` می‌رود، نه یک ادیت — ادیت نمی‌تواند کیبوردِ
+  // reply را حمل کند (تلگرام در ادیت فقط inline می‌پذیرد) و کاربری که هنوز کیبورد نگرفته
+  // این‌جا بن‌بست می‌خورد. کیبوردِ پیامِ مبدأ کشته می‌شود تا دوباره‌زدنی نماند.
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  return ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
 });
 
 // گاردِ «فالِ باز» — «اونو ادامه می‌دم»: همان پیامِ آخرِ فلو دوباره نشان داده می‌شود (کاربر سرِ کارش برمی‌گردد).
