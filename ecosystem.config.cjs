@@ -11,5 +11,10 @@ module.exports = {
     // داشبورد ادمین — ربات نیست ولی همین زنجیره‌ی deploy/backup/ops را استفاده می‌کند؛
     // فقط روی 127.0.0.1:8787 گوش می‌دهد و از Cloudflare Tunnel در دسترس است (deploy.yml)
     { name: 'dashboard',     cwd: 'bots/dashboard',      script: 'index.js' },
+    // ناظرِ سلامت — ربات نیست و .env هم ندارد؛ توکن و ADMIN_IDS را از .envِ خودِ ربات‌ها
+    // می‌خواند. جای پایشِ هر ۳۰ دقیقه‌ایِ GitHub Actions را گرفت (که ۷۲٪ سهمیه‌ی حساب را
+    // می‌خورد و ۱ تا ۴ ساعت هم عقب می‌افتاد). cwd ریشه است چون به کلِ ecosystem و به
+    // .envِ همه‌ی ربات‌ها نگاه می‌کند. جزئیات: tools/health-watch.mjs
+    { name: 'health-watch',  cwd: '.',                   script: 'tools/health-watch.mjs' },
   ],
 };
