@@ -35,7 +35,7 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
-import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, NO_REPEAT_DAYS } from './ganjineh.js';
+import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
@@ -170,7 +170,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.17.0';
+const PRODUCT_VERSION = '3.18.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -697,7 +697,10 @@ const stmts = {
   setSession: db.prepare('UPDATE users SET session_json=? WHERE telegram_id=?'),
   setDaily:   db.prepare('UPDATE users SET last_daily_date=?, daily_streak=? WHERE telegram_id=?'),
   // 🎴 دفترِ کارتِ روز (UX v2). یک جدول، هر دو قاعده‌ی عدم‌تکرار.
-  recentDailyCards: db.prepare('SELECT card_key FROM daily_log WHERE user_id=? AND date >= ?'),
+  // ⚠️ معیار **«بارِ فال‌گیری»** است نه «روز» (تصمیمِ صریحِ مالک): کاربر هر روز فال
+  // نمی‌گیرد، و با معیارِ روز کسی که هفته‌ای یک بار می‌آید عملاً هیچ محافظتی نداشت.
+  // یک ردیف per (کاربر، روز) داریم، پس ORDER BY date DESC دقیقاً «آخرین N بار» است.
+  recentDailyDraws: db.prepare('SELECT card_key FROM daily_log WHERE user_id=? ORDER BY date DESC LIMIT ?'),
   seenDailyVariants: db.prepare('SELECT variant FROM daily_log WHERE user_id=? AND card_key=?'),
   // OR IGNORE: کلیدِ (user_id, date) گاردِ «روزی یک بار» است، پس دوبار-تپ ردیفِ دوم نمی‌سازد
   logDaily: db.prepare('INSERT OR IGNORE INTO daily_log (user_id, date, card_key, reversed, variant) VALUES (?,?,?,?,?)'),
@@ -1934,7 +1937,9 @@ async function dailyCardV2(ctx, uid, user, today) {
     await ctx.reply(L.daily.needBirthMonth);
     return askBirthMonth(ctx);
   }
-  const recent = stmts.recentDailyCards.all(uid, tehranDaysAgo(NO_REPEAT_DAYS)).map(r => r.card_key);
+  // اگر کاربر تا حالا فقط ۲ یا ۳ بار فال گرفته، همان ۲ یا ۳ کارت حذف می‌شوند: LIMIT
+  // خودش کمتر بودنِ ردیف‌ها را درست هندل می‌کند.
+  const recent = stmts.recentDailyDraws.all(uid, NO_REPEAT_DRAWS).map(r => r.card_key);
   const pool = eligibleCards(Object.keys(CARD_BY_KEY), user.birth_month, recent);
   if (!pool.length) {
     // گنجینه‌ی این ماه هنوز نوشته نشده. صادق و بدونِ فالبکِ LLM (قاعده‌ی آهنین).
@@ -1977,7 +1982,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const month = user.birth_month;
   // نسخه‌ای که ندیده. اگر هر سه را دیده، شانسی — چرخه بسته شده.
   const seen = stmts.seenDailyVariants.all(uid, key).map(r => r.variant);
-  const variant = pickVariant(seen);
+  const variant = pickVariant(seen, ganjinehCount(month, key));
   const text = ganjinehText(month, key, variant);
   const info = CARD_BY_KEY[key];
 
@@ -2001,7 +2006,11 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
     ]]));
   }
   stmts.setDaily.run(today, streak, uid);
-  stmts.logDaily.run(uid, today, key, info?.reversed ? 1 : 0, variant);
+  // ⚠️ کارتِ روزِ نسل دوم **همیشه ایستاده** است: هیچ قرعه‌ی معکوسی زده نمی‌شود و
+  // `CARD_BY_KEY` اصلاً فیلدِ `reversed` ندارد (صفر از ۷۸ کارت). شرطِ قبلی
+  // (`info?.reversed ? 1 : 0`) همیشه صفر می‌داد ولی طوری خوانده می‌شد که انگار
+  // کاری می‌کند. ستون طبق بند ۲ج/۱ سرِ جایش می‌ماند (اگر روزی معکوس اضافه شد).
+  stmts.logDaily.run(uid, today, key, 0, variant);
 
   await typing(ctx, PACE_REVEAL);
   if (text) await replyLong(ctx, text);
