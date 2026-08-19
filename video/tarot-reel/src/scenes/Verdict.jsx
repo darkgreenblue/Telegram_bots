@@ -10,11 +10,10 @@
 
 import React from 'react';
 import { useCurrentFrame, interpolate } from 'remotion';
-import { VERDICT_BOX, COLORS, FONT } from '../layout.js';
+import { VERDICT_BOX, VERDICT_DOTS_H, COLORS, FONT } from '../layout.js';
 import { LINE_HEIGHT } from '../text.js';
 
 const CLAMP = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' };
-const DOT_ROW_H = 46;
 
 export const Verdict = ({ scene }) => {
   const frame = useCurrentFrame();
@@ -23,7 +22,7 @@ export const Verdict = ({ scene }) => {
   const rise = interpolate(frame, [0, Math.max(2, scene.fadeFrames * 2)], [24, 0], CLAMP);
 
   const showDots = !isHeadline && pages > 1;
-  const boxH = VERDICT_BOX.h - (showDots ? DOT_ROW_H : 0);
+  const boxH = VERDICT_BOX.h - (showDots ? VERDICT_DOTS_H : 0);
 
   return (
     <>
@@ -65,7 +64,7 @@ export const Verdict = ({ scene }) => {
             left: VERDICT_BOX.x,
             top: VERDICT_BOX.y + boxH,
             width: VERDICT_BOX.w,
-            height: DOT_ROW_H,
+            height: VERDICT_DOTS_H,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

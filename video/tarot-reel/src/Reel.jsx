@@ -18,6 +18,7 @@ import React, { useMemo } from 'react';
 import { AbsoluteFill, Sequence, useCurrentFrame, interpolate } from 'remotion';
 import { FONT, COLORS, themeOf } from './layout.js';
 import { buildPlan } from './timing.js';
+import { useVazirmatn } from './useVazirmatn.jsx';
 import { Background } from './scenes/Background.jsx';
 import { Cards } from './scenes/Cards.jsx';
 import { Intro } from './scenes/Intro.jsx';
@@ -46,6 +47,8 @@ const SceneFade = ({ scene, children }) => {
 };
 
 export const Reel = (props) => {
+  // فونت باید پیش از اولین فریم آماده باشد، وگرنه متنِ فارسی با فونتِ سیستمی رندر می‌شود.
+  useVazirmatn();
   const plan = useMemo(() => buildPlan(props), [props]);
   const theme = themeOf(props.background);
   const cards = Array.isArray(props.cards) ? props.cards : [];

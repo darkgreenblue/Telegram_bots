@@ -11,7 +11,7 @@
 // آخرین شبکه‌ی ایمنی: اگر با همه‌ی این‌ها باز هم از سقف رد شدیم، فریم‌ها یکی‌یکی از بلندترین
 // صحنه کم می‌شوند. `totalFrames > CAP_FRAMES` هیچ‌وقت از این تابع بیرون نمی‌آید.
 
-import { FPS, VERDICT_BOX, FONT, titleTextBox, captionTextBox } from './layout.js';
+import { FPS, VERDICT_BOX, FONT, titleTextBox, captionTextBox, verdictTextBox } from './layout.js';
 import { fitFontSize, paginateToFit, stripDash, normalizeWs } from './text.js';
 
 export const CHARS_PER_SEC = 22; // کمی سریع‌تر از خواندنِ عادی؛ خواسته‌ی مالک
@@ -148,7 +148,8 @@ export function buildPlan(props = {}) {
     });
   }
 
-  const closing = paginateToFit(closingSrc, VERDICT_BOX, {
+  // با `verdictTextBox` نه `VERDICT_BOX`: ردیفِ نقطه‌های صفحه از قبل کسر شده است.
+  const closing = paginateToFit(closingSrc, verdictTextBox(), {
     ...FONT.verdict,
     minPages: CLOSING_MIN_PAGES,
     maxPages: CLOSING_MAX_PAGES,

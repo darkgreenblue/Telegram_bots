@@ -602,6 +602,17 @@ ok(SPREAD_BY_ID[`${DEFAULT_TOPIC}3`]?.size === 3, `موضوعِ پیش‌فرض 
 ok(new Set(Object.values(BG_MAP)).size === 3 && ['mystic', 'nature', 'minimal'].every((b) => Object.values(BG_MAP).includes(b)),
   'هر سه پس‌زمینه‌ی قرارداد در نگاشت هستند');
 
+// `config.json` تنها جایی است که آی‌دیِ دیتابیس و پس‌زمینه‌ی پیش‌فرض می‌نشیند. پس‌زمینه‌ی
+// تایپ‌غلط هیچ خطایی نمی‌دهد؛ فقط تمِ ویدیو بی‌صدا عوض می‌شود. آی‌دیِ خالی هم فقط موقعِ
+// اجرای واقعیِ ورک‌فلو معلوم می‌شود، پس این‌جا هشدارِ زودهنگام می‌گیرد.
+{
+  const cfg = JSON.parse(src(rel('tools/tarot-video/config.json')));
+  ok(['mystic', 'nature', 'minimal'].includes(cfg.defaultBackground),
+    `پس‌زمینه‌ی پیش‌فرضِ config یکی از سه تمِ موجود است (${cfg.defaultBackground})`);
+  ok(/^[0-9a-f]{32}$/.test(String(cfg.notionDatabaseId || '').replace(/-/g, '')),
+    'آی‌دیِ دیتابیسِ Notion در config پر و به شکلِ معتبر است');
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    ۶) validateProps
    قراردادِ props تنها چیزی است که بینِ `generate.mjs` و کامپوزیشن ایستاده. اگر خرابیِ
@@ -673,7 +684,7 @@ const idxText = stripCommentsOnly(IDX);
 const flagUses = (idxCode.match(/\bVIDEO_REEL_ENABLED\b/g) || []).length;
 eq(flagUses, 2, 'پرچمِ VIDEO_REEL_ENABLED دقیقاً دو بار استفاده شده (تعریف + گاردِ دستور)');
 ok(/const\s+VIDEO_REEL_ENABLED\s*=\s*(true|false)\s*;/.test(idxCode), 'پرچم یک ثابتِ بولینِ یک‌خطی است (رول‌بکِ یک‌خطی)');
-ok(/const\s+PRODUCT_VERSION\s*=\s*'3\.17\.0'/.test(idxText), 'PRODUCT_VERSION روی 3.17.0 بامپ شده (بند ۲ج/۴)');
+ok(/const\s+PRODUCT_VERSION\s*=\s*['"`]3\.17\.0['"`]/.test(idxText), 'PRODUCT_VERSION روی 3.17.0 بامپ شده (بند ۲ج/۴)');
 
 const cmdIdx = IDX.indexOf("bot.command('reel'");
 ok(cmdIdx >= 0, "دستور bot.command('reel', ...) ثبت شده است");
@@ -686,7 +697,7 @@ ok(/\bL\.reel\b/.test(stripComments(cmdBody)), 'متنِ دستور از L.reel 
   const inside = faStrings(cmdBody);
   ok(inside.length === 0, `هیچ رشته‌ی فارسی‌ای در بدنه‌ی دستور نیست${inside.length ? ` (${inside.slice(0, 3).join(' | ')})` : ''}`);
 }
-ok(/const\s+VIDEO_DISPATCH_REPO\s*=\s*'[^']+\/[^']+'/.test(idxText), 'مقصدِ dispatch یک ثابتِ نام‌دار است، نه رشته‌ی درجا');
+ok(/const\s+VIDEO_DISPATCH_REPO\s*=\s*(['"`])[^'"`]+\/[^'"`]+\1/.test(idxText), 'مقصدِ dispatch یک ثابتِ نام‌دار است، نه رشته‌ی درجا');
 
 /* ══════════════════════════════════════════════════════════════════════════
    ۸) قاعده‌ی کپی (بند ۱۰ ریشه)

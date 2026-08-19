@@ -76,7 +76,12 @@ export const CardFocus = ({ scene }) => {
           width: text.w,
           height: text.h,
           display: 'flex',
-          alignItems: 'center',
+          // چسبیده به **کفِ** باکس، نه وسطِ آن. `captionTextBox` کوتاه است و کفش دقیقاً روی
+          // `CONTENT_BOTTOM` می‌نشیند؛ تفسیرِ بلندتر از ظرفیت (طبق قرارداد `fitFontSize` متن
+          // هرگز حذف نمی‌شود و کمی سرریز می‌کند) اگر وسط‌چین باشد از پایین بیرون می‌زند و
+          // زیرِ رابطِ اینستاگرام گم می‌شود. با کف‌چین، سرریز به سمتِ **بالا** و به فضای خالیِ
+          // زیرِ کارت می‌رود که هم دیده می‌شود هم چیزی را خراب نمی‌کند.
+          alignItems: 'flex-end',
           justifyContent: 'center',
           transform: `translateY(${rise}px)`,
         }}
