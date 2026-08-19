@@ -169,7 +169,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.14.0';
+const PRODUCT_VERSION = '3.15.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -238,6 +238,19 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
+// 🧪 **تستر** — کاربری که همه‌ی فیچرهای در-حالِ-تست (که فعلاً `_ADMIN_ONLY` اند) را می‌بیند
+// و دکمه‌ی «ریست حساب» دارد، ولی **هیچ اختیارِ ادمینی ندارد**: نه تأیید/ردِ رسید، نه
+// `/stats` و `/newcode`، نه هشدارهای مالی، نه هیچ دکمه‌ی ادمینِ دیگری.
+//
+// ⚠️ عمداً از `ADMIN_IDS` جداست و نباید با آن یکی شود: افزودنِ یک تستر به آن لیست،
+// اختیارِ دست‌زدن به **پولِ کاربرانِ واقعی** را هم به او می‌داد (بند ۹ ریشه).
+// افزودن/حذفِ تستر = ویرایشِ همین یک آرایه.
+const TESTER_IDS = [
+  5725984933,   // تسترِ دعوت‌شده‌ی مالک (۱۴۰۵/۰۵/۲۹)
+];
+// فیچرهای در-حالِ-تست از این می‌خوانند، نه از isAdmin — پس ادمین هم خودکار تستر است.
+const isTester = (uid) => isAdmin(uid) || TESTER_IDS.includes(uid);
+
 // ───────────────────────────────────────────────────────────────────────────
 // 🎭 نسخه‌ی دومِ لحنِ خوانش (v3.0.0)
 // ───────────────────────────────────────────────────────────────────────────
@@ -270,7 +283,7 @@ const READING_TONE_V2_ADMIN_ONLY = false;
 // پس حذفِ v3 یک PR جداست، بعد از اینکه این لانچ چند روز پایدار ماند.
 const READING_V4 = true;
 const READING_V4_ADMIN_ONLY = false;
-const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isAdmin(uid));
+const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isTester(uid));
 // نشانه‌ی ابتدای هر بخشِ متنِ نهایی. عمداً در **کد** است نه در پرامپت: مدل اگر آزاد
 // باشد هر بار سلیقه‌ای ایموجی می‌پاشد؛ این‌طوری ثابت، کم و قابلِ‌تغییر از یک نقطه است.
 // (خوانش‌های واقعیِ انسانی اصلاً ایموجی ندارند؛ این یک انتخابِ آگاهانه‌ی محصولی است تا
@@ -286,7 +299,7 @@ const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isAdmin(uid));
 // Rollback یک‌خطی: false → برمی‌گردیم به مسیرِ رونویسی، ولی **همچنان بعد از پرداخت**
 // (قاعده‌ی هزینه پایین‌تر مستقل از این پرچم است و با آن رول‌بک نمی‌شود).
 const AUDIO_DIRECT_ENABLED = true;
-const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isAdmin(uid));
+const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isTester(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
 // 🧭 UX v2 (v3.8.0) — بازطراحیِ بنیادیِ سفرِ کاربر
@@ -311,7 +324,7 @@ const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || is
 // موجودی همچنان تومان است و الماس فقط واحدِ نمایش (بند ۹ ریشه، منبعِ حقیقتِ پول یکی است).
 const UX_V2 = true;
 const UX_V2_ADMIN_ONLY = true;
-const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isAdmin(uid));
+const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isTester(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
 // 🪙 اقتصادِ سکه (v3.0.0)
@@ -335,7 +348,7 @@ const COIN_ECONOMY_ADMIN_ONLY = true;
 const COIN_VALUE = 10_000;   // ارزشِ داخلیِ هر الماس به تومان (= قیمتِ یک کارت)
 // UX v2 ذاتاً الماسی است (کاتالوگ و الماس‌فروشی هر دو به الماس حرف می‌زنند)، پس پرچمِ
 // جداگانه‌ی الماس را هم روشن می‌کند. پرچمِ قدیم برای دنیای قبل سرِ جایش می‌ماند.
-const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isAdmin(uid)));
+const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isTester(uid)));
 
 // آزمایشِ نامِ واحد (الماس در برابر فال‌گیر) **منحل شد**: «فال‌گیر» در عمل بد جا می‌افتاد.
 // واحد از این به بعد فقط «الماس 🪙» است. کلید را نگه می‌داریم تا بتوانیم آزمایش را در DB
@@ -1044,7 +1057,7 @@ function mainKeyboard(uid) {
     ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
   rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
-  if (isAdmin(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست فقط برای ادمین‌ها، همیشه
+  if (isTester(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست: ادمین‌ها و تسترها، همیشه
   return Markup.keyboard(rows).resize();
 }
 
@@ -1433,7 +1446,9 @@ const KB_LABELS = new Set([
 registerJourney(bot, {
   db,
   enabled: JOURNEY_ENABLED,
-  isAdmin,
+  // تپ‌های **تستر** هم مثل ادمین از قیف‌های محصولی بیرون می‌مانند: او دارد فیچر را
+  // می‌آزماید، نه رفتارِ واقعیِ کاربر را نشان می‌دهد. (این «اختیار» نیست، بهداشتِ دیتاست.)
+  isAdmin: isTester,
   isButtonLabel: (t) => KB_LABELS.has(t),
   redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
 });
@@ -4290,7 +4305,7 @@ bot.on('inline_query', async (ctx) => {
 // فقط دیتای خودِ همان ادمین را پاک می‌کند و او را مثل یک کاربرِ کاملاً جدید از نو معرفی می‌کند
 // (برای تستِ فلوها بدون انتظار). هیچ کاربر دیگری این را نمی‌بیند و در هیچ فلویی دخالت نمی‌کند.
 async function doReset(ctx) {
-  if (!isAdmin(ctx.from.id)) return; // گاردِ اصلی — دکمه فقط برای ادمین‌ها نمایش داده می‌شود، این هم لایه‌ی دوم
+  if (!isTester(ctx.from.id)) return; // گاردِ اصلی — دکمه فقط به ادمین/تستر نشان داده می‌شود، این لایه‌ی دوم است
   wipeUser(ctx.from.id);
   track(db, ctx.from.id, EVENTS.RESET, {});
   await ctx.reply(L.reset.done, mainKeyboard(ctx.from.id));

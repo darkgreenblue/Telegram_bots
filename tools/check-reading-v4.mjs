@@ -32,8 +32,8 @@ console.log('▶ دامنه و رول‌بک (بند ۲ج-۲ ریشه)');
   ok(/const READING_V4_ADMIN_ONLY = false;/.test(SRC), 'برای همه‌ی کاربران باز است (v3.7.0)');
   // ولی پرچمِ اصلی و helper سرِ جایشان‌اند: رول‌بکِ یک‌خطی باید همیشه ممکن بماند (بند ۲ج/۸)
   ok(/const READING_V4 = true;/.test(SRC), 'پرچمِ رول‌بک هنوز وجود دارد');
-  ok(/const v4For = \(uid\) => READING_V4 && \(!READING_V4_ADMIN_ONLY \|\| isAdmin\(uid\)\)/.test(SRC),
-    'helper هر دو پرچم را با هم چک می‌کند');
+  ok(/const v4For = \(uid\) => READING_V4 && \(!READING_V4_ADMIN_ONLY \|\| isTester\(uid\)\)/.test(SRC),
+    'helper هر دو پرچم را با هم چک می‌کند (دامنه: ادمین + تستر)');
   const raw = [...SRC.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
     .matchAll(/\bREADING_V4\b(?!_ADMIN_ONLY)/g)].length;
   ok(raw === 2, `READING_V4 فقط در تعریف و داخلِ v4For استفاده شده (${raw} مورد)`);

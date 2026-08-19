@@ -38,7 +38,8 @@ console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچ�
     // برمی‌گرداند، حتی وقتی دامنه باز است (تنها مسیرِ رول‌بکِ یک‌خطی — بند ۲ج/۸).
     // استثنای عمدی: `coinsOn` یک شرطِ **اضافه** دارد چون UX v2 خودش سکه‌محور است
     // (سکه‌فروشی جزوِ همان بسته است)، پس رول‌بکش `UX_V2 = false` است نه `COIN_ECONOMY`.
-    const own = `${flag}\\s*&&\\s*\\(!${gate}\\s*\\|\\|\\s*isAdmin\\(uid\\)\\)`;
+    // v2.8: گاردِ دامنه از `isAdmin` به `isTester` رفت (ادمین + تسترهای دعوت‌شده).
+    const own = `${flag}\\s*&&\\s*\\(!${gate}\\s*\\|\\|\\s*isTester\\(uid\\)\\)`;
     const re = helper === 'coinsOn'
       ? new RegExp(`const coinsOn\\s*=\\s*\\(uid\\)\\s*=>\\s*uxV2For\\(uid\\)\\s*\\|\\|\\s*\\(${own}\\)`)
       : new RegExp(`const ${helper}\\s*=\\s*\\(uid\\)\\s*=>\\s*${own}`);
