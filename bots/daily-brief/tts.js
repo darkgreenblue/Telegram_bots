@@ -19,6 +19,7 @@ import { promisify } from 'util';
 import { log, logErr } from '../../shared/logger.js';
 
 const run = promisify(execFile);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // سکوتِ کوتاه بینِ چانک‌ها: مرزِ دو فایلِ mp3 در غیر این صورت به‌صورت یک کلیکِ ریز شنیده می‌شود.
 // نیم‌ثانیه برای مرزِ وسطِ یک پاراگرافِ در جریان زیاد است و مکثِ غیرطبیعی می‌سازد.
@@ -35,8 +36,21 @@ const FALLBACK_MODELS = [
   { id: 'google/gemini-3.1-flash-tts-preview', name: 'Gemini Flash TTS', supported_voices: ['Kore', 'Puck'] },
   { id: 'mistralai/voxtral-mini-tts-2603', name: 'Voxtral Mini TTS', supported_voices: [] },
 ];
-// سقفِ ورودیِ هر درخواست. سازگار با OpenAI Audio API (۴۰۹۶) با حاشیه‌ی امن.
-const MAX_CHARS = 3500;
+// سقفِ چانک از **مدتِ صدا** حساب می‌شود، نه از عددِ دلبخواهِ کاراکتر.
+//
+// چرا (باگِ واقعیِ ۱۴۰۵/۰۵/۲۸): قسمتِ پنج‌دقیقه‌ایِ روزانه با «Provider returned an empty
+// audio stream after returning HTTP 200» شکست خورد. علتش این بود که با سقفِ ۳۵۰۰
+// کاراکتری، کلِ قسمت **در یک درخواست** می‌رفت. حسابش:
+//   خروجیِ صوتیِ این مدل ۲۵ توکن به‌ازای هر ثانیه صداست، و پنج دقیقه یعنی ۳۰۰ ثانیه
+//   → ۷۵۰۰ توکنِ خروجی، به‌علاوه‌ی خودِ متن به‌عنوان ورودی، روی مدلی با کانتکستِ ۸ هزار.
+// یعنی درخواست دقیقاً لبِ سقف بود: قسمتِ ۲۸۷۷ کاراکتریِ دیروز رد شد و ۳۱۴۳ کاراکتریِ
+// امروز نشد. سرویس به‌جای خطای صریح، ۲۰۰ با بدنه‌ی خالی برمی‌گرداند.
+// ۹۰ ثانیه یعنی حدودِ ۲۲۵۰ توکنِ خروجی؛ با فاصله‌ی امن زیرِ سقف، و داخلِ همان پنجره‌ای
+// که کیفیتِ این مدل هنوز افت نکرده (گزارشِ کاربران: افتِ کیفیت بعد از چند دقیقه‌ی پیوسته).
+const TARGET_CHUNK_SECONDS = 90;
+// فارسیِ گفتاری با ۱۵۰ کلمه بر دقیقه و میانگینِ ~۵.۵ کاراکتر per کلمه (با فاصله)
+const CHARS_PER_SECOND = 13.5;
+export const MAX_CHARS = Math.round(TARGET_CHUNK_SECONDS * CHARS_PER_SECOND);
 // تخمینِ درشتِ فالبک وقتی نه قیمتِ مدل در دسترس است نه هزینه‌ی واقعیِ generation.
 const FALLBACK_PRICE_PER_CHAR = 5 / 1_000_000;
 
@@ -143,6 +157,10 @@ function pricePerChar(model) {
 // همین مدل است: هر درخواست پروفایلِ صوتی را از نو می‌سازد، پس چانکی که دستورِ سبک ندارد
 // با لحن و ریتمِ متفاوت خوانده می‌شود و شنونده وسطِ قسمت حسِ عوض شدنِ گوینده می‌گیرد.
 // الگوی «{دستور}: {متن}» مستندِ خودِ مدل است و بخشِ قبل از دو نقطه خوانده نمی‌شود.
+// پاک‌کردنِ تگ‌های اجرا: آخرین پله‌ی نردبان، وقتی مشکوکیم خودِ تگ‌ها مشکل‌سازند.
+export const stripPerformanceTags = (s) =>
+  String(s || '').replace(/\[[^\]\n]{1,24}\]/g, ' ').replace(/[ \t]{2,}/g, ' ').trim();
+
 export const withStyle = (prefix, text) => {
   const p = String(prefix || '').trim();
   const t = String(text || '').trim();
@@ -252,12 +270,28 @@ async function postSpeech({ apiKey, modelId, voice, text, speed, format, fetchIm
   };
 }
 
-export async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl }) {
+// خطای گذرا در برابر خطای واقعی: ۵xx و «استریمِ خالی» هر دو یعنی سرویس این لحظه نتوانست،
+// نه اینکه ورودیِ ما غلط است. تا قبل از این، همین یک خطا کلِ قسمتِ روز را می‌کشت.
+export const isTransientTts = (e) => {
+  const body = String(e?.body || e?.message || '');
+  return e?.status >= 500 || /empty audio stream|timeout|overloaded|unavailable/i.test(body);
+};
+
+export async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImpl, sleepImpl = sleep }) {
   let useVoice = voice;
   let format = 'mp3';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let transient = 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      return await postSpeech({ apiKey, modelId, voice: useVoice, text, speed, format, fetchImpl });
+      const out = await postSpeech({ apiKey, modelId, voice: useVoice, text, speed, format, fetchImpl });
+      // ۲۰۰ با بدنه‌ی خالی هم شکست است، حتی اگر HTTP بگوید موفق بود.
+      if (!out.buf?.length) {
+        const err = new Error(`TTS ${modelId}: پاسخِ ۲۰۰ ولی بدونِ صدا`);
+        err.status = 200;
+        err.body = 'empty audio stream';
+        throw err;
+      }
+      return out;
     } catch (e) {
       const body = String(e.body || e.message || '');
       if (e.status === 400 && /voice/i.test(body) && !useVoice) {
@@ -268,6 +302,12 @@ export async function synthChunk({ apiKey, modelId, voice, text, speed, fetchImp
       if (e.status === 400 && /pcm/i.test(body) && format !== 'pcm') {
         format = 'pcm';
         logErr(`TTS ${modelId}: فقط pcm می‌دهد، با pcm دوباره تلاش می‌کنم`);
+        continue;
+      }
+      if (isTransientTts(e) && transient < 2) {
+        transient++;
+        logErr(`TTS ${modelId}: خطای گذرا (${body.slice(0, 80)})، تلاشِ ${transient} از ۲`);
+        await sleepImpl(2000 * transient);
         continue;
       }
       throw e;
@@ -374,10 +414,30 @@ export async function synthesize({
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
       chars += piece.length;
-      const { buf, genId, pcm } = await synthChunk({
-        apiKey: openrouterKey, modelId, voice: useVoice, text: withStyle(stylePrefix, piece),
-        speed, fetchImpl,
-      });
+      // نردبانِ تنزل: هر پله یک متغیرِ تازه را از درخواست برمی‌دارد. قسمتِ روزانه نباید
+      // به‌خاطرِ یک تکه بمیرد، و لاگِ پله می‌گوید در عمل کدام چیز مقصر بوده (یادگیری از
+      // پروداکشن، چون سندباکس به سرویس دسترسی ندارد).
+      const rungs = [
+        { name: 'styled', text: withStyle(stylePrefix, piece) },
+        ...(stylePrefix ? [{ name: 'no-style', text: piece }] : []),
+        ...(/\[[^\]\n]+\]/.test(piece) ? [{ name: 'plain', text: stripPerformanceTags(piece) }] : []),
+      ];
+      let got = null;
+      let lastErr = null;
+      for (const rung of rungs) {
+        try {
+          got = await synthChunk({
+            apiKey: openrouterKey, modelId, voice: useVoice, text: rung.text, speed, fetchImpl,
+          });
+          if (rung.name !== 'styled') logErr(`🔊 chunk ${i + 1}: با پله‌ی «${rung.name}» ساخته شد`);
+          break;
+        } catch (e) {
+          lastErr = e;
+          logErr(`🔊 chunk ${i + 1}: پله‌ی «${rung.name}» نشد (${String(e.message).slice(0, 90)})`);
+        }
+      }
+      if (!got) throw lastErr;
+      const { buf, genId, pcm } = got;
       if (!buf?.length) throw new Error(`چانک ${i + 1} خروجیِ صوتی نداد`);
       const f = join(dir, `p${String(i).padStart(3, '0')}.mp3`);
       if (pcm) {

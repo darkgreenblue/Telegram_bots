@@ -18,7 +18,7 @@ const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } e
 const eq = (a, b, msg) => ok(a === b, `${msg} (=${JSON.stringify(a)})`);
 
 const { wordTarget, countWords, sectionPlan, SINGLE_CALL_MAX_WORDS, WPM } = await import(path.resolve(BOT, 'script.js'));
-const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, familyVoice, synthChunk } = await import(path.resolve(BOT, 'tts.js'));
+const { chunkText, chunkTurns, turnsToNarration, buildConcatFilter, listSpeechModels, defaultVoice, isMultiSpeaker, familyVoice, synthChunk, MAX_CHARS, isTransientTts, stripPerformanceTags } = await import(path.resolve(BOT, 'tts.js'));
 const { parseRoadmapBlocks, fetchRoadmap, syncLessons, pickNextLesson, fetchLessonBody, blockText } = await import(path.resolve(BOT, 'notion.js'));
 const { tehranNow, hhmmToMinutes, estimateLlmCost, recoverStuck, saveTopics } = await import(path.resolve(BOT, 'pipeline.js'));
 
@@ -114,6 +114,60 @@ ok(/bot\.action\(\/\^\(bake:\|set:eng\)\//.test(idxSrc),
 /* ── ۶ب) کاتالوگِ گوینده‌ها ─────────────────────────────────────────────── */
 // این‌ها ادعای محصولی‌اند، نه سلیقه: شش گزینه (نه بیشتر، وگرنه انتخاب سخت می‌شود)، نیمی
 // مرد و نیمی زن، و هر کدام با یک نامِ فارسیِ یکتا و یک لحن که کنارِ نمونه نشان داده می‌شود.
+/* ── ۲ب) سقفِ چانک و خطای گذرای TTS ──────────────────────────────────────── */
+// باگِ واقعیِ ۱۴۰۵/۰۵/۲۸: قسمتِ پنج‌دقیقه‌ای در **یک** درخواست رفت و سرویس ۲۰۰ با بدنه‌ی
+// خالی برگرداند (۲۵ توکن بر ثانیه صدا × ۳۰۰ ثانیه ≈ لبِ کانتکستِ مدل). این ادعاها همان
+// حساب را قفل می‌کنند تا کسی دوباره سقف را بزرگ نکند.
+console.log('\n📏 سقفِ چانک و خطای گذرا');
+ok(MAX_CHARS >= 800 && MAX_CHARS <= 1600, `سقفِ چانک در بازه‌ی امن است (${MAX_CHARS} کاراکتر)`);
+// هر چانک باید حدوداً زیرِ دو دقیقه صدا بدهد تا از سقفِ توکنِ خروجی رد نشود.
+const chunkSeconds = MAX_CHARS / 13.5;
+ok(chunkSeconds <= 120, `هر چانک زیرِ دو دقیقه صداست (${Math.round(chunkSeconds)} ثانیه)`);
+ok(chunkSeconds * 25 < 4000, 'توکنِ خروجیِ هر چانک فاصله‌ی امن تا کانتکستِ مدل دارد');
+// قسمتِ پنج‌دقیقه‌ایِ واقعی (همان که شکست) حالا باید چند تکه شود، نه یکی.
+const realEpisode = Array.from({ length: 60 },
+  (_, i) => `این جمله‌ی شماره ${i} از یک قسمتِ واقعیِ پنج دقیقه‌ای است و حدودِ پنجاه کاراکتر دارد.`).join(' ');
+ok(realEpisode.length > 3000, 'متنِ نمونه هم‌اندازه‌ی قسمتی است که در عمل شکست خورد');
+ok(chunkText(realEpisode, MAX_CHARS).length >= 3,
+  `قسمتِ پنج‌دقیقه‌ای حالا چند درخواست می‌شود، نه یکی (${chunkText(realEpisode, MAX_CHARS).length} تکه)`);
+
+// تشخیصِ خطای گذرا: ۵xx و «استریمِ خالی» باید تلاشِ دوباره بگیرند، ولی خطای ورودی نه.
+ok(isTransientTts({ status: 502, body: 'Provider returned an empty audio stream after returning HTTP 200' }),
+  'همان خطای واقعیِ امروز گذرا شناخته می‌شود');
+ok(isTransientTts({ status: 200, body: 'empty audio stream' }), 'پاسخِ ۲۰۰ ولی بی‌صدا هم گذراست');
+ok(isTransientTts({ status: 503, body: 'overloaded' }), 'سرویسِ شلوغ گذراست');
+ok(!isTransientTts({ status: 400, body: 'invalid voice' }), 'خطای ورودی گذرا نیست و بی‌جهت تکرار نمی‌شود');
+ok(!isTransientTts({ status: 401, body: 'unauthorized' }), 'کلیدِ غلط گذرا نیست');
+
+// synthChunk واقعاً روی خطای گذرا دوباره تلاش می‌کند و ۲۰۰ِ بی‌صدا را شکست می‌شمارد.
+let ttsCalls = 0;
+const flaky = async () => {
+  ttsCalls++;
+  if (ttsCalls < 3) return { ok: true, headers: { get: () => '' }, arrayBuffer: async () => new ArrayBuffer(0) };
+  return { ok: true, headers: { get: (h) => (h === 'content-type' ? 'audio/mpeg' : 'gen-1') }, arrayBuffer: async () => new ArrayBuffer(64) };
+};
+const ttsRecovered = await synthChunk({ apiKey: 'k', modelId: 'm', voice: 'v', text: 'سلام', fetchImpl: flaky, sleepImpl: async () => {} });
+eq(ttsCalls, 3, 'بعد از دو پاسخِ بی‌صدا، تلاشِ سوم انجام می‌شود');
+ok(ttsRecovered.buf.length === 64, 'خروجیِ سالمِ تلاشِ آخر برگردانده می‌شود');
+let hardCalls = 0;
+const alwaysEmpty = async () => {
+  hardCalls++;
+  return { ok: true, headers: { get: () => '' }, arrayBuffer: async () => new ArrayBuffer(0) };
+};
+let emptyThrew = false;
+try { await synthChunk({ apiKey: 'k', modelId: 'm', voice: 'v', text: 'سلام', fetchImpl: alwaysEmpty, sleepImpl: async () => {} }); }
+catch { emptyThrew = true; }
+ok(emptyThrew, 'اگر همیشه بی‌صدا برگردد، بالاخره خطا می‌دهد (بی‌نهایت تلاش نمی‌کند)');
+ok(hardCalls <= 4, `تعدادِ تلاش‌ها کران‌دار است (${hardCalls} بار)`);
+
+// آخرین پله‌ی نردبان: متن بدونِ تگ.
+eq(stripPerformanceTags('[slow] سلام [short pause] دنیا'), 'سلام  دنیا'.replace(/ {2,}/g, ' '),
+  'پاک‌کردنِ تگ‌ها فقط تگ را برمی‌دارد، نه کلمه‌ها');
+const ttsSrcLadder = readFileSync(path.resolve(BOT, 'tts.js'), 'utf8');
+ok(/rungs = \[/.test(ttsSrcLadder), 'نردبانِ تنزل وجود دارد');
+ok(/'no-style'/.test(ttsSrcLadder) && /'plain'/.test(ttsSrcLadder),
+  'نردبان اول جمله‌ی سبک و بعد تگ‌ها را برمی‌دارد (تا قسمت به‌خاطرِ یک تکه نمیرد)');
+
 /* ── ۶ج) کارگردانِ صدا (ایجنتِ تگ‌گذار) ──────────────────────────────────── */
 // این‌ها گاردِ واقعیِ محصول‌اند: خروجیِ این ایجنت مستقیم به یک سرویسِ پولی می‌رود و
 // اشتباهش را شنونده در گوشش می‌شنود، پس اعتبارسنجی در کد است نه در پرامپت.

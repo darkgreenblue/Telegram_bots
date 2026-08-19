@@ -40,7 +40,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 const TEST_PHASE = true;
-const PRODUCT_VERSION = '1.3.0';
+const PRODUCT_VERSION = '1.3.1';
 
 const FLASH = 'google/gemini-2.5-flash';
 // موتورِ صدا (ثابت، بعد از مقایسه‌ی واقعی انتخاب شد)
