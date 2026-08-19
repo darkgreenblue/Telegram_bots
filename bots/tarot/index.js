@@ -170,7 +170,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.18.0';
+const PRODUCT_VERSION = '3.19.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -587,6 +587,16 @@ try { db.prepare('ALTER TABLE users ADD COLUMN last_daily_reminder_at INTEGER').
 // «فردا یادآوری کن» را می‌زند، پس هیچ پیامِ ناخواسته‌ای فرستاده نمی‌شود.
 try { db.prepare("ALTER TABLE users ADD COLUMN lucky_date TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN lucky_reminder_on INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// 🎲 دستِ در جریانِ کارت شانس. **عمداً روی ردیفِ کاربر است، نه در سشن.**
+// باگِ واقعی: سشن با `setSession(uid, null)` در شش نقطه پاک می‌شود (کاتالوگ، nav:menu،
+// reading:cancel، rcancel، onboard_allspreads، /start). کاربری که کارتِ اولش را کشیده بود
+// و بعد «فال بگیر» می‌زد، nonce و انتخاب‌هایش پاک می‌شد؛ `lucky_date` هم از قبل مهر خورده
+// بود، پس تپِ بعدیِ دکمه‌ی کارت شانس «امروز استفاده کردی» می‌گرفت و **دو انتخابِ باقی‌مانده
+// برای همیشه از دست می‌رفت، بدونِ هیچ راهِ بازگشتی**. گاردگذاشتن روی آن شش نقطه همان
+// الگویی است که بند ۸ ریشه می‌گوید دیر یا زود یکی را جا می‌گذارد (و همین PR ثابتش کرد:
+// `onboard_allspreads` سال‌ها گاردِ فال را نداشت). پس خودِ داده از دسترسِ آن‌ها بیرون رفت.
+// یک ستونِ JSON، نه چهار ستون: نوشتنش اتمیک است و اضافه‌کردنِ فیلد مهاجرت نمی‌خواهد.
+try { db.prepare("ALTER TABLE users ADD COLUMN lucky_hand TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN last_lucky_reminder_at INTEGER').run(); } catch {}
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
@@ -726,6 +736,7 @@ const stmts = {
   // نشسته، پس دو تپِ هم‌زمان فقط یک بار changes=1 می‌دهد (همان الگوی claimWelcomeBonus).
   claimLucky: db.prepare("UPDATE users SET lucky_date=? WHERE telegram_id=? AND COALESCE(lucky_date,'') <> ?"),
   setLuckyReminder: db.prepare('UPDATE users SET lucky_reminder_on=? WHERE telegram_id=?'),
+  setLuckyHand: db.prepare('UPDATE users SET lucky_hand=? WHERE telegram_id=?'),
   setLuckyReminded: db.prepare('UPDATE users SET last_lucky_reminder_at=unixepoch() WHERE telegram_id=?'),
   dueLuckyReminder: db.prepare(`
     SELECT telegram_id FROM users
@@ -2037,6 +2048,7 @@ async function dailyCard(ctx) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.DAILY)) return;
   if (await blockDuringOpenReading(ctx, INTENT.DAILY)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.DAILY)) return;
   const user = getUser(uid);
   const today = tehranToday();
   if (user.last_daily_date === today) {
@@ -2168,6 +2180,66 @@ async function showLuckyStatus(ctx, uid, text, extra) {
 const luckyReminderRow = (on) => [Markup.button.callback(
   on ? L.buttons.luckyRemindOff : L.buttons.luckyRemindOn, on ? 'lremind:0' : 'lremind:1')];
 
+/* دستِ در جریان: `{ d: روز, n: nonce, p: [انتخاب‌ها], f: تعدادِ الماسِ پیداشده }`.
+   خواندن fail-safe است: هر JSON خرابی مثل «دستی وجود ندارد» رفتار می‌کند، نه کرش. */
+function readLuckyHand(uid) {
+  try {
+    const raw = getUser(uid)?.lucky_hand;
+    if (!raw) return null;
+    const h = JSON.parse(raw);
+    if (!h || typeof h.d !== 'string' || !Array.isArray(h.p)) return null;
+    return { d: h.d, n: String(h.n || ''), p: h.p.map(Number).filter(Number.isInteger), f: Number(h.f) || 0 };
+  } catch { return null; }
+}
+const writeLuckyHand = (uid, h) => { try { stmts.setLuckyHand.run(JSON.stringify(h), uid); } catch {} };
+/** دستی که **همین امروز** باز است و هنوز انتخابِ نکشیده دارد. */
+function openLuckyHand(uid) {
+  const h = readLuckyHand(uid);
+  return h && h.d === tehranToday() && h.n && h.p.length < LUCKY_PICKS ? h : null;
+}
+/** گریدِ همان دست را دوباره جلوی کاربر می‌گذارد (ادامه‌ی بازی). */
+async function resumeLuckyHand(ctx, uid, h) {
+  setState(uid, 'lucky_pick');
+  const slots = luckyCoinSlots(uid, h.d, h.n);
+  await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS - h.p.length), luckyGridKb(h.p, slots));
+}
+
+// 🎲 گاردِ «دستِ بازِ کارت شانس» — دوقلوی `blockDuringOpenReading`. با اینکه دست دیگر
+// از بین نمی‌رود (روی ردیفِ کاربر است)، تپِ یک دکمه‌ی منو وسطِ بازی نباید **بی‌صدا**
+// گرید را رها کند (بند ۹ب/۲): یا ادامه، یا کنارگذاشتنِ آگاهانه.
+async function blockDuringOpenLucky(ctx, intent) {
+  if (!NAV_GUARD_ENABLED) return false;
+  const uid = ctx.from.id;
+  if (!['lucky_shuffle', 'lucky_pick'].includes(getState(uid))) return false;
+  const h = openLuckyHand(uid);
+  if (!h) return false;                    // دستی برای ادامه نیست → مسیرِ عادی برود
+  if (intent) setIntent(uid, intent);
+  await ctx.reply(L.lucky.openGuard, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.luckyResume, 'lucky:resume')],
+    [Markup.button.callback(L.buttons.cancel, 'lucky:cancel')],
+  ]));
+  return true;
+}
+
+bot.action('lucky:resume', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  const uid = ctx.from.id;
+  const h = openLuckyHand(uid);
+  if (!h) return ctx.reply(L.lucky.expired).catch(() => {});
+  await resumeLuckyHand(ctx, uid, h);
+});
+
+// «بی‌خیال» دستِ کاربر را **نمی‌کُشد**: انتخاب‌های باقی‌مانده حقِ اوست و تا آخرِ همان روز
+// با دکمه‌ی کارت شانس برمی‌گردد. فقط از حالتِ گیر درمی‌آید.
+bot.action('lucky:cancel', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  const uid = ctx.from.id;
+  setState(uid, 'idle');
+  await replyCanceled(ctx, uid);
+});
+
 async function luckyCard(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
@@ -2178,6 +2250,11 @@ async function luckyCard(ctx) {
   if (await blockDuringPendingReading(ctx)) return;
   const user = getUser(uid);
   const today = tehranToday();
+  // 🔁 دستِ نیمه‌تمامِ همین امروز **ادامه** داده می‌شود. تا قبل از این، کاربری که کارتِ
+  // اولش را کشیده بود و بعد بیرون رفته بود، پیامِ «امروز استفاده کردی» می‌گرفت در حالی
+  // که هنوز دو انتخاب طلبکار بود.
+  const open = openLuckyHand(uid);
+  if (open) return resumeLuckyHand(ctx, uid, open);
   if (user.lucky_date === today) {
     return ctx.reply(L.lucky.already, Markup.inlineKeyboard([luckyReminderRow(!!user.lucky_reminder_on)]));
   }
@@ -2216,7 +2293,9 @@ bot.action('lucky_stop', async (ctx) => {
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
   // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
   const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
-  patchSession(uid, { luckyPicks: [], luckyCoinsFound: 0, luckyDay: today, luckyNonce, luckyStatusMsgId: 0 });
+  writeLuckyHand(uid, { d: today, n: luckyNonce, p: [], f: 0 });
+  // فقط شناسه‌ی پیامِ وضعیت در سشن می‌ماند (جزئیاتِ نمایشی؛ گم شدنش فقط یک پیامِ تازه می‌سازد)
+  patchSession(uid, { luckyStatusMsgId: 0 });
   const msgId = getSession(uid).luckyMsgId;
   if (msgId) { try { await ctx.telegram.editMessageText(ctx.chat.id, msgId, undefined, '🂠 ✋'); } catch {} }
   await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS), luckyGridKb());
@@ -2225,12 +2304,17 @@ bot.action('lucky_stop', async (ctx) => {
 bot.action(/^lpick:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   const i = parseInt(ctx.match[1], 10);
-  if (getState(uid) !== 'lucky_pick') return ctx.answerCbQuery().catch(() => {});
-  const s = getSession(uid) || {};
   const today = tehranToday();
-  const picks = s.luckyPicks || [];
-  // گاردهای سینکرون **قبل از** اولین await: تکراری، سهمیه‌ی تمام‌شده، یا سشنِ روزِ قبل
-  if (picks.includes(i) || picks.length >= LUCKY_PICKS || s.luckyDay !== today) {
+  // ⚠️ دست از **ردیفِ کاربر** خوانده می‌شود، نه از سشن و نه از استیت. یعنی نه
+  // `setSession(uid, null)` هیچ‌کدام از شش نقطه‌اش، و نه یک `setState` در مسیرِ دیگر،
+  // نمی‌تواند انتخاب‌های باقی‌ماندهٔ کاربر را از بین ببرد. استیت فقط برای UX ست می‌شود.
+  const hand = readLuckyHand(uid);
+  // گاردهای سینکرون **قبل از** اولین await: دستِ نبود/کهنه، تکراری، سهمیه‌ی تمام‌شده
+  if (!hand || hand.d !== today || !hand.n) {
+    return ctx.answerCbQuery(L.lucky.expired, { show_alert: true }).catch(() => {});
+  }
+  const picks = hand.p.slice();
+  if (picks.includes(i) || picks.length >= LUCKY_PICKS) {
     return ctx.answerCbQuery().catch(() => {});
   }
   // روز فقط با **اولین** انتخاب سوخته می‌شود، و آن هم اتمیک (شرطِ روز داخلِ UPDATE).
@@ -2238,13 +2322,13 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
     setState(uid, 'idle');
     return ctx.answerCbQuery().catch(() => {});
   }
-  const coinSlots = luckyCoinSlots(uid, today, s.luckyNonce);
+  const coinSlots = luckyCoinSlots(uid, today, hand.n);
   const hit = coinSlots.includes(i);
   picks.push(i);
-  const found = (s.luckyCoinsFound || 0) + (hit ? 1 : 0);
+  const found = hand.f + (hit ? 1 : 0);
   const done = picks.length >= LUCKY_PICKS;
-  if (done) setState(uid, 'idle');
-  setSession(uid, { ...s, luckyPicks: picks, luckyCoinsFound: found });
+  setState(uid, done ? 'idle' : 'lucky_pick');
+  writeLuckyHand(uid, { d: today, n: hand.n, p: picks, f: found });
 
   // واریزِ همان لحظه (نه آخرِ بازی): ری‌استارتِ وسطِ کار نباید الماسِ برده‌شده را بخورد.
   if (hit) {
@@ -2634,6 +2718,7 @@ async function showCatalog(ctx, full = false, edit = false) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.READING)) return;
   if (await blockDuringOpenReading(ctx, INTENT.READING)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.READING)) return;
   // setSession(uid, null) پایین‌تر readingId را دور می‌ریزد؛ پس قبلش فالِ رزروشده باید گارد شود
   if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
@@ -2903,6 +2988,7 @@ bot.action('onboard_allspreads', async (ctx) => {
   if (await blockDuringOpenReading(ctx, INTENT.READING)) return;
   if (await blockDuringPendingReading(ctx)) return;
   if (await blockDuringDelivering(ctx)) return;
+  if (await blockDuringOpenLucky(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
   try {
@@ -3113,7 +3199,8 @@ bot.action('nav:menu', async (ctx) => {
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
     ]));
   }
-  if (await blockDuringDelivering(ctx)) return;   // فالِ پول‌داده‌ی وسطِ افشا پاک نمی‌شود
+  if (await blockDuringDelivering(ctx)) return;
+  if (await blockDuringOpenLucky(ctx)) return;   // فالِ پول‌داده‌ی وسطِ افشا پاک نمی‌شود
   const s = getSession(uid);
   const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
@@ -3771,6 +3858,7 @@ async function showWallet(ctx) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.WALLET)) return;
   if (await blockDuringOpenReading(ctx, INTENT.WALLET)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.WALLET)) return;
   const [text, extra] = walletScreen(ctx.from.id);
   await ctx.reply(text, extra);
 }
@@ -3794,6 +3882,7 @@ async function showInvite(ctx) {
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.INVITE)) return;
   if (await blockDuringOpenReading(ctx, INTENT.INVITE)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.INVITE)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, referralBonusFor(uid), curOf(uid)), {
     parse_mode: 'Markdown',
@@ -4564,11 +4653,10 @@ bot.on('text', async (ctx) => {
     // پنهان که قراردادِ دو-نقطه‌ای را می‌شکست. حالا همان گرید دوباره جلوی کاربر می‌آید.
     if (state === 'daily_pick') return dailyCard(ctx);   // چیدمان قطعی است، پس بازسازی بی‌ضرر
     if (state === 'lucky_shuffle' || state === 'lucky_pick') {
-      const ls = getSession(uid) || {};
-      const picks = ls.luckyPicks || [];
-      return showLuckyStatus(ctx, uid,
-        L.lucky.progress(picks.length, LUCKY_PICKS, ls.luckyCoinsFound || 0),
-        luckyGridKb(picks, luckyCoinSlots(uid, tehranToday(), ls.luckyNonce || '')));
+      const h = openLuckyHand(uid);
+      if (h) return resumeLuckyHand(ctx, uid, h);
+      setState(uid, 'idle');   // دستی برای ادامه نیست؛ کاربر را در استیتِ مرده نگه ندار
+      return sendContinuePrompt(ctx, uid);
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);

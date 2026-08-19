@@ -165,7 +165,9 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
     'روز با **اولین** انتخاب سوخته می‌شود، نه با دیدنِ گرید');
   ok(h.indexOf('stmts.credit.run(LUCKY_COIN_VALUE') < h.indexOf('if (!done)'),
     'الماس لحظه‌ی برگشتنِ هر کارت واریز می‌شود، نه آخرِ بازی (ری‌استارت پول را نمی‌خورد)');
-  ok(/picks\.includes\(i\) \|\| picks\.length >= LUCKY_PICKS \|\| s\.luckyDay !== today/.test(h),
+  // v3.19.0: دست از ردیفِ کاربر خوانده می‌شود، نه سشن. جزئیاتِ رفتاری در check-lucky.mjs
+  // **اجرا** می‌شوند؛ این‌جا فقط شکلِ گاردها قفل می‌شود.
+  ok(/hand\.d !== today/.test(h) && /picks\.includes\(i\) \|\| picks\.length >= LUCKY_PICKS/.test(h),
     'گاردهای تکراری/سهمیه/روزِ کهنه قبل از اولین await اند');
   ok(/claimLucky: db\.prepare\("UPDATE users SET lucky_date=\? WHERE telegram_id=\? AND COALESCE\(lucky_date,''\) <> \?"\)/.test(SRC),
     'claimLucky واقعاً اتمیک است');
@@ -223,8 +225,9 @@ console.log('\n▶ پیامِ عمومیِ «ادامه» جایگزینِ جم�
   // بیت‌به‌بیت دست‌نخورده‌اند، پس رول‌بکِ یک‌خطیِ دنیای تومانی همچنان سرِ جایش است.
   ok(/async function replyCanceled\(ctx, uid\) \{[\s\S]{0,400}?if \(await replayIntent\(ctx, uid\)\) return;\s*\n\s*if \(uxV2For\(uid\)\) return sendContinuePrompt\(ctx, uid\);\s*\n\s*return ctx\.reply\(L\.reading\.canceled, mainKeyboard\(uid\)\);/.test(SRC),
     'replyCanceled: اول نیتِ معلق، بعد دنیای الماس → پیامِ ادامه، دنیای قدیم → همان جمله‌ی قبلی');
+  // v3.19.0: نقطه‌ی چهارم `lucky:cancel` اضافه شد (کنارگذاشتنِ دستِ کارت شانس).
   const callers = [...SRC.matchAll(/await replyCanceled\(ctx, uid\)/g)].length;
-  ok(callers === 3, `سه نقطه‌ی لغو (rcancel/reading:cancel/pay_cancel) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
+  ok(callers === 4, `چهار نقطه‌ی لغو (rcancel/reading:cancel/pay_cancel/lucky:cancel) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
   ok(/async function sendContinuePrompt\(ctx, uid\) \{\s*\n\s*await ctx\.reply\(L\.reading\.nextOffersV3, Markup\.inlineKeyboard\(\[\s*\n\s*\.\.\.recoRows\(uid, null\)/.test(SRC),
     'sendContinuePrompt همان متن و ساختارِ CTAی پایانِ فال را می‌فرستد (یک منبع)');
 }
@@ -606,6 +609,27 @@ console.log('\n▶ نشانگرِ انتظار: پنج طرح، ضرب‌آهن�
   ok(e2 >= 8, `در ده ثانیه‌ی اول ${e2} فریم دیده می‌شود (قبلاً ۳ تا بود، ایرادِ مالک)`);
 
   ok(typeof loadingFrame('x')(0) === 'string', 'helperِ آماده‌ی ربات کار می‌کند');
+
+  // 🔒 گاردِ کپی: طرحِ فعال **باید** متنِ locale را عیناً نشان بدهد.
+  // نسخه‌ی اولِ hybrid برچسب را دور می‌ریخت و به‌جایش متنِ مرحله می‌گذاشت، یعنی یک
+  // تغییرِ کپیِ رو-به-کاربر که هیچ‌کس نخواسته بود. مالک درست گرفتش. این assert
+  // جلوی تکرارش را می‌گیرد: عوض کردنِ متن باید یک تصمیمِ صریح باشد، نه اثرِ جانبیِ
+  // انتخابِ یک طرحِ گرافیکی.
+  const LBL = 'در حال تفسیر کارت‌ها';
+  ok(LOADERS[ACTIVE].keepsLabel === true, `طرحِ فعال (${ACTIVE}) متنِ locale را نگه می‌دارد`);
+  const act = LOADERS[ACTIVE].frames(LBL);
+  let missing = 0;
+  for (let i = 0; i < 20; i++) if (!act(i).includes(LBL)) missing++;
+  ok(missing === 0, 'متنِ «در حال تفسیر کارت‌ها» در **هر** فریمِ طرحِ فعال دیده می‌شود');
+  // و برچسبِ خودِ locale همان چیزی است که مالک خواست
+  ok(/loadingLabel: 'در حال تفسیر کارت‌ها'/.test(LOC), 'متنِ locale دست‌نخورده است');
+  // هر طرحی که ادعای keepsLabel دارد واقعاً نگهش می‌دارد (ادعا با رفتار سنجیده می‌شود)
+  const liars = Object.entries(LOADERS)
+    .filter(([, d]) => d.keepsLabel)
+    .filter(([, d]) => { const f = d.frames(LBL); for (let i = 0; i < 12; i++) if (!f(i).includes(LBL)) return true; return false; })
+    .map(([k]) => k);
+  ok(!liars.length, `ادعای keepsLabel با رفتار می‌خواند${liars.length ? ' — دروغ: ' + liars.join(',') : ''}`);
+  ok(LOADERS.phases.keepsLabel === false, 'و طرحِ مرحله‌محور صادقانه اعلام می‌کند که متن را عوض می‌کند');
 }
 
 console.log('\n▶ نامِ بسته‌ی وسط');
@@ -687,8 +711,11 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
 
   // و اینکه کد واقعاً nonce را per دست می‌سازد و از session می‌خواند (نه از حافظه).
   ok(/function luckyCoinSlots\(uid, today, nonce = ''\)/.test(SRC), 'تابعِ چیدمان nonce می‌گیرد');
-  ok(/luckyDay: today, luckyNonce[,\s}]/.test(SRC), 'nonce لحظه‌ی باز شدنِ گرید ساخته و در session ذخیره می‌شود');
-  ok(/luckyCoinSlots\(uid, today, s\.luckyNonce\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
+  // ⚠️ از v3.19.0 دست در **ردیفِ کاربر** می‌نشیند نه در سشن: سشن در شش نقطه پاک می‌شود
+  // و همان باعثِ سوختنِ انتخاب‌های باقی‌مانده بود (جزئیات در check-lucky.mjs).
+  ok(/writeLuckyHand\(uid, \{ d: today, n: luckyNonce, p: \[\], f: 0 \}\)/.test(SRC),
+    'nonce لحظه‌ی باز شدنِ گرید ساخته و روی ردیفِ کاربر ذخیره می‌شود');
+  ok(/luckyCoinSlots\(uid, today, hand\.n\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
   ok(!/luckyCoinSlots\(uid, today\)(?!,)/.test(SRC.replace(/function luckyCoinSlots[\s\S]*?\n\}/, '')),
     'هیچ فراخوانیِ بدونِ nonce نمانده');
 
