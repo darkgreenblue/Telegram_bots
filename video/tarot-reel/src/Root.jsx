@@ -26,18 +26,20 @@ import { buildPlan } from './timing.js';
 import { Reel } from './Reel.jsx';
 import sampleProps from '../fixtures/props.sample.json';
 
-loadFont({
-  family: 'Vazirmatn',
-  url: staticFile('fonts/Vazirmatn-Regular.woff2'),
-  format: 'woff2',
-  weight: '400',
-});
-loadFont({
-  family: 'Vazirmatn',
-  url: staticFile('fonts/Vazirmatn-Bold.woff2'),
-  format: 'woff2',
-  weight: '700',
-});
+
+const url = staticFile('fonts/Vazirmatn-Regular.woff2');
+console.log('PROBE url', url, 'FontFace?', typeof FontFace, 'fonts?', typeof document.fonts);
+fetch(url).then((r) => r.arrayBuffer()).then((b) => {
+  console.log('PROBE fetch ok bytes', b.byteLength);
+  const ff = new FontFace('ProbeFont', b);
+  return ff.load().then(() => { document.fonts.add(ff); console.log('PROBE buffer-load RESOLVED'); },
+                        (e) => console.log('PROBE buffer-load REJECTED', String(e)));
+}).catch((e) => console.log('PROBE fetch FAILED', String(e)));
+
+const ff2 = new FontFace('ProbeUrlFont', `url('${url}') format('woff2')`);
+ff2.load().then(() => console.log('PROBE url-load RESOLVED'), (e) => console.log('PROBE url-load REJECTED', String(e)));
+document.fonts.ready.then(() => console.log('PROBE fonts.ready RESOLVED'));
+
 
 export const RemotionRoot = () => {
   return (

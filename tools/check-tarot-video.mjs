@@ -184,6 +184,10 @@ ok(sliceBalanced("f(a, /\\(/, 'متن (پرانتزدار)');", 0, '(', ')') ===
 ok(faStrings("// کامنتِ فارسی — با خط تیره\nconst a = 1;").length === 0, 'کامنت رشته شمرده نمی‌شود');
 ok((stripComments("const A = 1; // A A A\nconst s = 'A';").match(/\bA\b/g) || []).length === 1,
   'شمارشِ شناسه فقط روی کد است، نه کامنت و نه رشته');
+// تلهٔ واقعی: ادعایی که به **مقدارِ** یک رشته کار دارد (مثل شماره‌ی نسخه) اگر روی نمای
+// بی‌رشته بنشیند، هرگز match نمی‌کند و برای همیشه قرمز می‌ماند. دو نما عمداً جدا هستند.
+ok(/= '3\.17\.0'/.test(stripCommentsOnly("const V = '3.17.0'; // نسخه")), 'نمای «فقط بی‌کامنت» مقدارِ رشته را نگه می‌دارد');
+ok(!/= '3\.17\.0'/.test(stripComments("const V = '3.17.0';")), 'نمای «اسکلتِ کد» مقدارِ رشته را نگه نمی‌دارد');
 ok(importsOf("import {x} from 'remotion';\nconst y = require('react');").join() === 'remotion,react',
   'سنجه‌ی خلوص واقعاً import پیدا می‌کند (متنِ ساختگی گرفته شد)');
 ok(importsOf("// import {x} from 'remotion';\nimport a from './b.js';").join() === './b.js',
@@ -660,11 +664,16 @@ ok(!isValid(null) && !isValid({}) && !isValid({ cards: [] }), 'propsِ پوچ/خ
    ══════════════════════════════════════════════════════════════════════════ */
 console.log('\n▶ ۷) دستورِ /reel در رباتِ زنده');
 const IDX = src(rel('bots/tarot/index.js'));
+// دو نمای متفاوت از یک فایل، و انتخابِ اشتباه بینشان ادعا را **همیشه** قرمز یا **همیشه**
+// سبز می‌کند: `idxCode` محتوای رشته‌ها را هم خالی می‌کند (درست برای شمردنِ نامِ شناسه، تا
+// نامِ پرچم داخلِ یک پیام شمرده نشود)، ولی هر ادعایی که به **مقدارِ** یک رشته کار دارد
+// (شماره‌ی نسخه، نامِ ریپو) باید روی `idxText` بنشیند که رشته‌ها را دست‌نخورده نگه می‌دارد.
 const idxCode = stripComments(IDX);
+const idxText = stripCommentsOnly(IDX);
 const flagUses = (idxCode.match(/\bVIDEO_REEL_ENABLED\b/g) || []).length;
 eq(flagUses, 2, 'پرچمِ VIDEO_REEL_ENABLED دقیقاً دو بار استفاده شده (تعریف + گاردِ دستور)');
 ok(/const\s+VIDEO_REEL_ENABLED\s*=\s*(true|false)\s*;/.test(idxCode), 'پرچم یک ثابتِ بولینِ یک‌خطی است (رول‌بکِ یک‌خطی)');
-ok(/const\s+PRODUCT_VERSION\s*=\s*'3\.17\.0'/.test(idxCode), 'PRODUCT_VERSION روی 3.17.0 بامپ شده (بند ۲ج/۴)');
+ok(/const\s+PRODUCT_VERSION\s*=\s*'3\.17\.0'/.test(idxText), 'PRODUCT_VERSION روی 3.17.0 بامپ شده (بند ۲ج/۴)');
 
 const cmdIdx = IDX.indexOf("bot.command('reel'");
 ok(cmdIdx >= 0, "دستور bot.command('reel', ...) ثبت شده است");
@@ -677,7 +686,7 @@ ok(/\bL\.reel\b/.test(stripComments(cmdBody)), 'متنِ دستور از L.reel 
   const inside = faStrings(cmdBody);
   ok(inside.length === 0, `هیچ رشته‌ی فارسی‌ای در بدنه‌ی دستور نیست${inside.length ? ` (${inside.slice(0, 3).join(' | ')})` : ''}`);
 }
-ok(/const\s+VIDEO_DISPATCH_REPO\s*=\s*'[^']+\/[^']+'/.test(idxCode), 'مقصدِ dispatch یک ثابتِ نام‌دار است، نه رشته‌ی درجا');
+ok(/const\s+VIDEO_DISPATCH_REPO\s*=\s*'[^']+\/[^']+'/.test(idxText), 'مقصدِ dispatch یک ثابتِ نام‌دار است، نه رشته‌ی درجا');
 
 /* ══════════════════════════════════════════════════════════════════════════
    ۸) قاعده‌ی کپی (بند ۱۰ ریشه)
