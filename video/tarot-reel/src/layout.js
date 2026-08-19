@@ -40,6 +40,19 @@ export const VERDICT_BOX = { x: 80, y: 900, w: 920, h: 960 };
 // متنِ سوال/نوعِ فال در اینترو: بالای باکس، پیش از آنکه کارت‌ها بنشینند.
 export const TITLE_BOX = { x: 70, y: 110, w: 940, h: 290 };
 
+// هر دو باکسِ بالا یک سطرِ سرآمد دارند که متنِ اصلی نیست: نوعِ فال بالای سؤال، و نامِ کارت
+// بالای تفسیر. اگر `fitFontSize` روی کلِ باکس حساب شود، متن دقیقاً به اندازه‌ی همان سطر
+// سرریز می‌کند و در اینترو حتی می‌تواند به باندِ `SAFE_BOX` برسد. پس سهمِ سرآمد اینجا کسر
+// می‌شود، در ماژولِ خالص، تا هم زمان‌بندی و هم رندر از یک عدد بخوانند.
+export const TITLE_LABEL_H = 60;
+export const CAPTION_HEAD_H = 60;
+export function titleTextBox() {
+  return { x: TITLE_BOX.x, y: TITLE_BOX.y + TITLE_LABEL_H, w: TITLE_BOX.w, h: TITLE_BOX.h - TITLE_LABEL_H };
+}
+export function captionTextBox() {
+  return { x: CAPTION_BOX.x, y: CAPTION_BOX.y + CAPTION_HEAD_H, w: CAPTION_BOX.w, h: CAPTION_BOX.h - CAPTION_HEAD_H };
+}
+
 // نسبتِ عرض به ارتفاعِ فایل‌های کارت. عکس‌ها ۴۵۰px عرض‌اند و ارتفاعشان کمی فرق می‌کند،
 // پس نسبت اینجا قفل می‌شود و رندر با objectFit:'cover' اختلاف را می‌بلعد.
 export const CARD_AR = 450 / 775;
