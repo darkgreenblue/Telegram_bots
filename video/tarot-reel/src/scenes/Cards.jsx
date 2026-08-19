@@ -31,7 +31,11 @@ export const Cards = ({ plan, cards = [] }) => {
   const decor = scene.kind === 'intro' ? decorSlots(n) : [];
 
   return (
-    <AbsoluteFill>
+    // zIndex صفر عمدی است و یک خطِ حیاتی: بدونش این AbsoluteFill استکینگ‌کانتکست
+    // نمی‌سازد و zIndexِ ۱۰۰ی کارتِ فوکوس در ریشه با Sequenceهای متن رقابت می‌کند و
+    // برنده می‌شود، یعنی تفسیر پشتِ کارت گم می‌شود. با این خط، لایه‌بندیِ کارت‌ها داخلِ
+    // خودشان محبوس می‌ماند و متن همیشه بالای تصویر است.
+    <AbsoluteFill style={{ zIndex: 0 }}>
       {decor.map((k) => (
         <Card key={`deck-${k}`} rect={deckRectAt({ t, k, n })} file="back.jpg" />
       ))}

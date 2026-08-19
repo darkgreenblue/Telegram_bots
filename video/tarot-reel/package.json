@@ -6,7 +6,7 @@
   "description": "ساخت ویدیوی عمودی ریلز از یک فال تاروت (Remotion). خارج از bots/ تا دیپلوی هیچ رباتی را لمس نکند.",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render src/index.mjs TarotReel out/reel.mp4 --codec=h264",
+    "render": "remotion render src/index.js TarotReel out/reel.mp4 --codec=h264",
     "stage": "node ../../tools/tarot-video/stage-assets.mjs --props fixtures/props.sample.json"
   },
   "dependencies": {

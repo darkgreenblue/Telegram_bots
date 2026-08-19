@@ -34,7 +34,11 @@ export const Verdict = ({ scene }) => {
           width: VERDICT_BOX.w,
           height: boxH,
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
+          // کلیپِ سختِ سرریز. صفحه‌بندی سرریز را در عمل غیرممکن می‌کند، ولی وسط‌چینِ قبلی
+          // یعنی هر سرریزِ پیش‌بینی‌نشده **دوطرفه** بالا می‌زد و در حالتِ حدی به باکسِ استیکر
+          // می‌رسید. این دو خط قاعده‌ی مقدس را از سلامتِ صفحه‌بندی مستقل می‌کند.
+          overflow: 'hidden',
           justifyContent: 'center',
           transform: `translateY(${rise}px)`,
         }}
