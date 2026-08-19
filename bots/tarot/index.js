@@ -27,7 +27,8 @@ import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { ensureAb, variant } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
-import { registerSupport, supportRow } from '../../shared/support.js';
+import { registerSupport, supportRow, supportReply } from '../../shared/support.js';
+import { loadingFrame, pace } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
@@ -169,7 +170,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.16.0';
+const PRODUCT_VERSION = '3.17.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -363,7 +364,7 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
-// رنگِ دکمه‌ی هر بسته: «بسته‌ی الماسی» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
+// رنگِ دکمه‌ی هر بسته: «بسته ویژه» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
 // (تصمیمِ صریحِ مالک). بقیه رنگِ پیش‌فرضِ کلاینت را می‌گیرند.
 const PACK_STYLE = { gold: 'success' };
 const COIN_PACKAGES = [
@@ -372,9 +373,12 @@ const COIN_PACKAGES = [
   // فالِ سه‌کارتی از ۳۰٬۰۰۰ به ۹٬۰۰۰ تا ۴٬۵۰۰ تومان. قبل از باز کردن برای کاربرِ واقعی
   // این عدد باید دوباره دیده شود.
   { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 30_000 },
-  // ایموجیِ بسته‌ی وسط از 🥇 به 💠 رفت: با نامِ «الماسی» بخواند، و عمداً **خودِ 💎 نباشد**
-  // چون در همان دکمه ایموجیِ واحد هم می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود.
-  { key: 'gold',   fa: 'بسته‌ی الماسی', emoji: '💠', coins: 30,  toman: 60_000 },
+  // ایموجیِ بسته‌ی وسط 💠 است و عمداً **خودِ 💎 نیست**: در همان دکمه ایموجیِ واحد هم
+  // می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود. نامش از «بسته‌ی الماسی» به «بسته ویژه»
+  // رفت (تصمیمِ مالک): «الماسی» با واحدِ الماس اشتباه گرفته می‌شد، انگار فقط این یکی
+  // بسته الماس می‌دهد. کلیدِ `gold` عوض نشد چون در `payments.package_key` کاربرانِ
+  // واقعی نشسته و بند ۲ج/۱ تغییرِ معنیِ داده‌ی موجود را ممنوع کرده.
+  { key: 'gold',   fa: 'بسته ویژه', emoji: '💠', coins: 30,  toman: 60_000 },
   { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
@@ -1080,32 +1084,99 @@ async function blockDuringOnboarding(ctx) {
   return true;
 }
 
-// 🗓 سؤالِ ماهِ تولد. دو ستونی چیده می‌شود: دوازده دکمه در یک ستون شش صفحه می‌شود.
+// 🗓 سؤالِ ماهِ تولد. **چهار ستون × سه ردیف** (تصمیمِ صریحِ مالک): چیدمانِ دو ستونیِ قبلی
+// شش ردیف می‌شد و تقریباً یک صفحه‌ی موبایل را می‌گرفت. نامِ ماه‌های فارسی کوتاه‌اند
+// (بلندترین «اردیبهشت» با ۸ حرف) پس در چهار ستون هم کامل جا می‌شوند.
+const BMONTH_COLS = 4;
 async function askBirthMonth(ctx) {
   const rows = [];
-  for (let i = 0; i < 12; i += 2) {
-    rows.push([i, i + 1].map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
+  for (let i = 0; i < 12; i += BMONTH_COLS) {
+    rows.push(Array.from({ length: BMONTH_COLS }, (_, d) => i + d)
+      .map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
   }
   await ctx.reply(L.onboarding.askBirthMonth, Markup.inlineKeyboard(rows));
 }
 
 // 🧭 ردیفِ «بازگشت به منو» برای استیت‌های میانیِ فلو (خالی وقتی گارد خاموش است تا رفتار عیناً قبلی شود).
 const navMenuRow = () => (NAV_GUARD_ENABLED ? [[Markup.button.callback(L.buttons.backToMenu, 'nav:menu')]] : []);
-// کیبوردِ اینلاینِ فقط-nav برای پیامِ خطا/یادآوری (useButtons)؛ undefined = بدون تغییرِ رفتار.
 // نکته‌ی UX (بند ۹ب ریشه): در استیت‌هایی که از کاربر «تایپ/ویس» می‌خواهیم (askQuestion/askTopic) هیچ
 // دکمه‌ای نمی‌گذاریم تا حواسش پرت نشود؛ راهِ خروجِ آن‌جا گاردِ «فالِ باز» است، نه دکمه‌ی درون-پیام.
-const navMenuKb = () => (NAV_GUARD_ENABLED ? Markup.inlineKeyboard(navMenuRow()) : undefined);
+// (`navMenuKb` با حذفِ پیامِ `useButtons` در v3.17.0 بی‌مصرف شد و طبق بند ۹/۰ ریشه پاک شد.)
+
+/* ═══════════ 🎯 نیتِ معلق (pending intent) ═══════════
+   قاعده‌ی صریحِ مالک: «وقتی بابتِ رسیدن به چیزی، فلوی موجود رو انصراف می‌زنیم، بعد از
+   انصراف همون چیزی باید بیاد که می‌خواستیم بهش برسیم.»
+   باگِ واقعی که این را ساخت: کاربر وسطِ فاکتور دکمه‌ی پشتیبانی را زد، گارد گفت «فاکتور
+   باز داری، انصراف بده»، انصراف داد، و به‌جای پشتیبانی پیامِ عمومیِ «همیشه اینجام» گرفت.
+
+   چهار تصمیمِ عمدی:
+   ۱) **فقط وقتی یک گارد واقعاً بلاک می‌کند** نیت ثبت می‌شود. مسیرِ عادی هیچ‌چیز
+      نمی‌نویسد، پس هیچ نیتِ کهنه‌ای در سشن جا نمی‌ماند.
+   ۲) **opt-in per call site**: گاردها آرگومانِ دومِ اختیاری می‌گیرند. هر فراخوانی که
+      نیت ندهد دقیقاً مثل قبل رفتار می‌کند — یعنی رول‌بکِ این فیچر «ندادنِ آرگومان» است.
+   ۳) **در سشن (یعنی DB) ذخیره می‌شود، نه حافظه** (بند ۹ب/۵): بینِ بلاک شدن و انصراف
+      دادن ممکن است دیپلوی بیفتد، و آن‌وقت کاربر همان قولی را که بهش دادیم گم می‌کند.
+   ۴) **یک‌بارمصرف و تاریخ‌دار**: `takeIntent` می‌خواند و پاک می‌کند، و نیتِ کهنه‌تر از
+      `INTENT_TTL_S` نادیده گرفته می‌شود تا یک انصرافِ ساعت‌ها بعد صفحه‌ی بی‌ربط نیاورد.
+*/
+const INTENT_TTL_S = 30 * 60;
+const INTENT = {
+  DAILY:   'daily',
+  SUPPORT: 'support',
+  WALLET:  'wallet',
+  INVITE:  'invite',
+  LUCKY:   'lucky',
+  READING: 'reading',
+};
+function setIntent(uid, key) {
+  try { patchSession(uid, { intent: key, intentAt: Math.floor(Date.now() / 1000) }); } catch {}
+}
+function takeIntent(uid) {
+  try {
+    const s = getSession(uid) || {};
+    const k = s.intent;
+    if (!k) return null;
+    patchSession(uid, { intent: '', intentAt: 0 });
+    if (!s.intentAt || Math.floor(Date.now() / 1000) - s.intentAt > INTENT_TTL_S) return null;
+    return k;
+  } catch { return null; }
+}
+// جدولِ بازپخش عمداً **صریح** است، نه بازفرستادنِ آپدیتِ خام: بازفرستادن یعنی گاردها
+// دوباره اجرا شوند و کاربر در همان حلقه بیفتد.
+const INTENT_REPLAY = {
+  [INTENT.DAILY]:   (ctx) => dailyCard(ctx),
+  [INTENT.SUPPORT]: (ctx) => replySupport(ctx),
+  [INTENT.WALLET]:  (ctx) => showWallet(ctx),
+  [INTENT.INVITE]:  (ctx) => showInvite(ctx),
+  [INTENT.LUCKY]:   (ctx) => luckyCard(ctx),
+  [INTENT.READING]: (ctx) => showCatalog(ctx),
+};
+// صفحه‌ی پشتیبانی از **همان** سازنده‌ی shared می‌آید که خودِ دکمه استفاده می‌کند، تا
+// بازپخشِ نیت هیچ‌وقت با تپِ واقعیِ دکمه واگرا نشود (بند ۶ج: تک‌منبع).
+async function replySupport(ctx) {
+  const r = supportReply('TRT', ctx.from.id, L.support);
+  return ctx.reply(r.text, r.extra);
+}
+
+// خروجی true = نیت بازپخش شد، پس صدازننده نباید پیامِ عمومیِ خودش را هم بفرستد.
+async function replayIntent(ctx, uid) {
+  const k = takeIntent(uid);
+  const fn = k && INTENT_REPLAY[k];
+  if (!fn) return false;
+  try { await fn(ctx); return true; } catch (e) { logErr('replayIntent:', e.message); return false; }
+}
 
 // گاردِ «پرداختِ باز» — دوقلوی blockDuringOnboarding برای ریلِ پرداخت (الگوی voice2text):
 // اگر کاربر فاکتورِ باز دارد، دکمه‌های منو نباید آن را بی‌صدا یتیم کنند؛ به‌جای اجرا «فاکتور باز داری»
 // + دکمه‌ی انصراف نشان بده و اکشن را متوقف کن. خروجی true = بلاک شد.
 const PAY_STATES = ['pay_amount', 'pay_receipt', 'pay_discount'];
-async function blockDuringOpenPay(ctx) {
+async function blockDuringOpenPay(ctx, intent) {
   if (!NAV_GUARD_ENABLED) return false;
   const uid = ctx.from.id;
   if (!PAY_STATES.includes(getState(uid))) return false;
   const pid = getSession(uid)?.paymentId;
   if (!pid) return false; // بدون paymentId نمی‌توان انصراف را وصل کرد → بگذار رد شود (مسیر بازیابیِ رسید)
+  if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
   await ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
   ]));
@@ -1116,9 +1187,59 @@ async function blockDuringOpenPay(ctx) {
 // به‌جای رهاکردنِ بی‌صدای فال، می‌پرسیم «ادامه بدم یا انصراف». مخصوصاً برای استیتِ ورودی (await_question)
 // که عمداً دکمه‌ی درون-پیام ندارد؛ این گارد راهِ خروجِ آن است (قرارداد State Management بند ۹ب ریشه).
 const READING_INPROGRESS = ['confirm_focus', 'await_question', 'breathing', 'shuffling', 'picking'];
-async function blockDuringOpenReading(ctx) {
+
+// دکمه‌ی «ادامه» برای فالی که وسطِ **افشا**ست. عمداً همان `callback_data`ِ قدمِ فعلی
+// دوباره ساخته می‌شود، نه یک مسیرِ تازه: پس گاردهای ضدِ دوبار-تپِ `next:`/`final:`
+// (که شماره‌ی کارتِ منتظر را با سشن می‌سنجند) عیناً کار می‌کنند و هیچ کارتی پرش یا
+// تکرار نمی‌شود. `null` = چیزی برای ادامه نیست، پس گارد اصلاً نباید فعال شود.
+function revealResumeRow(uid) {
+  const s = getSession(uid) || {};
+  const rid = s.readingId;
+  if (!rid) return null;
+  const r = stmts.getReading.get(rid);
+  if (!r || r.user_id !== uid || !r.cards_json) return null;   // مالکیتِ رکورد (بند ۹)
+  let n;
+  try { n = JSON.parse(r.cards_json).length; } catch { return null; }
+  const idx = s.revealIdx || 0;
+  if (idx < n) return [Markup.button.callback(L.buttons.nextCard, `next:${rid}:${idx}`)];
+  if (v4For(uid)) return [Markup.button.callback(L.buttons.finalAnswer, `final:${rid}`)];
+  return null;   // نسل قدیم بعد از کارتِ آخر خودکار جمع‌بندی می‌کند؛ چیزی برای ادامه نمانده
+}
+
+// 🔒 فالِ **در حالِ تحویل** (پول داده شده، `status='started'`) هرگز با یک تپ از سشن پاک
+// نمی‌شود. `cancelReading` خودش درست عمل می‌کند و پولی برنمی‌گرداند (محصول دارد تحویل
+// می‌شود)، ولی `setSession(uid, null)`ِ بعدش `readingId` و `revealIdx` را می‌برد و کاربر
+// دیگر هیچ راهی به بقیه‌ی فالی که خریده ندارد — بی‌صدا، بدونِ ریفاند، بدونِ هیچ پیامی.
+// مسیرِ واقعیِ رسیدن به این حالت: یک دکمه‌ی **کهنه‌ی** `nav:menu` یا `reading:cancel` که
+// بالای چت مانده و کاربر وسطِ افشا اسکرول می‌کند و می‌زند.
+async function blockDuringDelivering(ctx) {
+  const uid = ctx.from.id;
+  if (getState(uid) !== 'revealing') return false;
+  const rid = getSession(uid)?.readingId;
+  const r = rid && stmts.getReading.get(rid);
+  if (!r || r.user_id !== uid || r.status !== 'started') return false;
+  const row = revealResumeRow(uid);
+  if (!row) return false;   // چیزی برای ادامه نمانده → بگذار مسیرِ عادی برود
+  await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+  return true;
+}
+
+async function blockDuringOpenReading(ctx, intent) {
   if (!NAV_GUARD_ENABLED) return false;
-  if (!READING_INPROGRESS.includes(getState(ctx.from.id))) return false;
+  const uid = ctx.from.id;
+  const state = getState(uid);
+  // فالِ در حالِ **تحویل** (`revealing`): همان پیامِ استاندارد، ولی **بدونِ انصراف**.
+  // این‌جا پول داده شده و محصول دارد می‌رسد؛ «انصراف» یعنی پس‌گرفتنِ چیزی که کاربر
+  // همین حالا دارد می‌گیرد. تا قبل از v3.17.0 این استیت اصلاً گارد نداشت، یعنی تپِ
+  // «فال بگیر» وسطِ افشا یک فالِ **پول‌داده‌شده** را بی‌صدا یتیم می‌کرد.
+  if (state === 'revealing') {
+    const row = revealResumeRow(uid);
+    if (!row) return false;
+    await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+    return true;
+  }
+  if (!READING_INPROGRESS.includes(state)) return false;
+  if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
   await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
@@ -1160,7 +1281,9 @@ async function resendCurrentStep(ctx, uid) {
     patchSession(uid, { shuffleMsgId: m.message_id });
     return;
   }
-  return ctx.reply(L.errors.useButtons, navMenuKb());
+  // دکمه‌ی کهنه‌ی «ادامه» در استیتی که دیگر فلوی بازی ندارد: به‌جای پیامِ حذف‌شده‌ی
+  // `useButtons`، همان کاتالوگ نشان داده می‌شود (بن‌بست نیست و استانداردِ دومی نمی‌سازد).
+  return showCatalog(ctx);
 }
 
 /* ===== 7) LLM خوانش — پیش‌فراخوانی و ساخت کانتکست ===== */
@@ -1667,13 +1790,15 @@ async function finishNameOnboarding(ctx, rawName) {
   const refBonus = getSession(uid).refBonus;
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
-  // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  // ⚠️ این‌جا **هیچ کیبوردی صادر نمی‌شود**. قراردادِ صریح و تکرارشده‌ی مالک: دستورِ باز شدنِ
-  // منوی پایین فقط دو نقطه دارد (پایینِ همین فایل مستند شده) و آنبوردینگ هیچ‌کدامشان نیست.
-  // یک نسخه‌ی قبلی کیبورد را به همین پیام چسبانده بود و مالک درست گرفتش: کاربر تازه اسمش
-  // را نوشته و هنوز وسطِ آنبوردینگ است، منو آن‌جا فقط حواسش را پرت می‌کند.
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
+  // ⚠️ این پیام عمداً **هیچ reply_markup ای ندارد**، به دو دلیلِ جدا:
+  //   ۱) منوی پایین صادر نمی‌شود، چون قراردادِ مالک فقط دو نقطه دارد و آنبوردینگ هیچ‌کدام
+  //      نیست (پایینِ همین فایل مستند شده).
+  //   ۲) removeKeyboard هم فرستاده نمی‌شود، چون مستنداتِ Bot API می‌گوید کلاینت با آن
+  //      «کیبوردِ سفارشی را برمی‌دارد و letter-keyboard پیش‌فرض را نشان می‌دهد» — یعنی
+  //      کیبوردِ تایپِ گوشی را باز نگه می‌داشت و نصفِ صفحه را می‌گرفت. کیبوردِ سفارشی از
+  //      قبل در `askName` برداشته شده، پس این تکرار بی‌اثر ولی پرعارضه بود.
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)));
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -1727,7 +1852,9 @@ bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
   const saved = L.onboarding.birthMonthSaved(monthFa(m));
   try { await ctx.editMessageText(saved); }
   catch { await ctx.reply(saved).catch(() => {}); }
-  if (!inOnboarding) return;
+  // 🎯 خارج از آنبوردینگ، ماهِ تولد فقط یک قدمِ میانی بوده که جلوی نیتِ کاربر را گرفت.
+  // پس همان نیت ادامه داده می‌شود، نه اینکه بی‌صدا return کنیم (باگِ v3.9.0 تا v3.17.0).
+  if (!inOnboarding) { await replayIntent(ctx, uid); return; }
   // UX v2.2 (تصمیمِ صریحِ مالک): پیامِ جداگانه‌ی «از دکمه‌های پایین شروع کن» اینجا حذف
   // شد — لزومی ندارد، چون `finishOnboarding` همین‌جا کاربر را مستقیم توی منوی فال
   // می‌گذارد (دکمه‌های اینلاین)، و کیبوردِ اصلی خودش اولین بار که `ensureMenu` صدا زده
@@ -1796,8 +1923,14 @@ function dailyGridKb(n, picked = -1) {
 }
 
 async function dailyCardV2(ctx, uid, user, today) {
-  // ماهِ تولد لازم است و کاربرانِ قدیمی ندارندش؛ همان‌جا پرسیده می‌شود (بدونِ بن‌بست).
+  // ماهِ تولد لازم است و کاربرانِ قدیمی ندارندش؛ همان‌جا پرسیده می‌شود.
+  // 🐛 تا v3.17.0 این‌جا نیتِ کاربر **بی‌صدا دور ریخته می‌شد**: ماه را می‌پرسیدیم، کاربر
+  // جواب می‌داد، و هندلرِ `bmonth:` چون `inOnboarding` نبود همان‌جا return می‌کرد. یعنی
+  // کارتی که کاربر برایش دکمه زده بود هرگز نمی‌آمد و هیچ‌کس هم نمی‌گفت دوباره بزن.
+  // قاعده‌ی مالک: «وقتی بابتِ رسیدن به چیزی یک قدمِ میانی می‌خوریم، بعد از آن قدم باید
+  // همان چیزی بیاید که می‌خواستیم». پس نیت ثبت می‌شود و `bmonth:` ادامه‌اش می‌دهد.
   if (!user.birth_month) {
+    setIntent(uid, INTENT.DAILY);
     await ctx.reply(L.daily.needBirthMonth);
     return askBirthMonth(ctx);
   }
@@ -1805,8 +1938,13 @@ async function dailyCardV2(ctx, uid, user, today) {
   const pool = eligibleCards(Object.keys(CARD_BY_KEY), user.birth_month, recent);
   if (!pool.length) {
     // گنجینه‌ی این ماه هنوز نوشته نشده. صادق و بدونِ فالبکِ LLM (قاعده‌ی آهنین).
-    await ctx.reply(L.daily.ganjinehEmpty(monthFa(user.birth_month)));
-    return ensureMenu(ctx, uid);
+    // ⚠️ ولی **بی‌دکمه نه**: امروز فقط دو ماه از دوازده ماه گنجینه دارند، یعنی این شاخه
+    // پرتکرارترین پایانِ مسیرِ رایگان است. `ensureMenu` در دنیای الماس no-op است، پس
+    // نسخه‌ی قبلی این‌جا یک صفحه‌ی بدونِ هیچ قدمِ بعدی می‌ساخت (بند ۹ب/۱). حالا همان
+    // پیشنهادهایی می‌آید که شاخه‌ی خواهرش («امروز گرفتی») از قبل داشت.
+    track(db, uid, 'daily_ganjineh_empty', { month: user.birth_month });
+    return ctx.reply(L.daily.ganjinehEmpty(monthFa(user.birth_month)),
+      Markup.inlineKeyboard(recoRows(uid, null)));
   }
   // seed قطعی per کاربر per روز: بعد از این لحظه ترتیبِ حوضچه ثابت است، حتی بعد از
   // ری‌استارت. یعنی «کارتی که انتخاب کردم» با دوباره‌بازکردنِ چت عوض نمی‌شود.
@@ -1827,8 +1965,10 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const i = parseInt(ctx.match[1], 10);
   const key = order[i];
   const today = tehranToday();
-  // گاردِ دوبار-تپ **قبل** از اولین await، و گاردِ روزِ کهنه (سشنِ دیروز در چت مانده)
-  if (!key || s.dailyDate !== today) return ctx.answerCbQuery().catch(() => {});
+  // گاردِ دوبار-تپ **قبل** از اولین await، و گاردِ روزِ کهنه (سشنِ دیروز در چت مانده).
+  // پاسخ عمداً **صریح** است نه سکوت: تپِ بی‌جواب روی یک دکمه، کاربر را وادار می‌کند
+  // چند بار دیگر هم بزند و فکر کند ربات خراب است (بند ۹ب/۱).
+  if (!key || s.dailyDate !== today) return ctx.answerCbQuery(L.daily.expiredGrid, { show_alert: true }).catch(() => {});
   setState(uid, 'idle');
   await ctx.answerCbQuery('✨').catch(() => {});
   try { await ctx.editMessageReplyMarkup(dailyGridKb(order.length, i).reply_markup); } catch {}
@@ -1841,15 +1981,28 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const text = ganjinehText(month, key, variant);
   const info = CARD_BY_KEY[key];
 
-  // استریک مثل قبل، ولی ثبتِ روز **بعد** از انتخاب انجام می‌شود نه قبلش: اگر کاربر
-  // گرید را ببیند و نزند، روزش نباید سوخته باشد.
   const yesterday = tehranDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
+
+  // 🐛 تا v3.17.0 روز **قبل از** تحویل مهر می‌خورد و بینِ مهر تا رسیدنِ عکس حدود ۶ ثانیه
+  // مکث و آپلود بود. هر دیپلوی یعنی ری‌استارت (بند ۲ج/۲) و هر خطای آپلود یعنی همان
+  // نتیجه: کاربر هیچ کارتی ندید ولی تپِ بعدی‌اش «کارت امروزت رو گرفتی» می‌گیرد و روزش
+  // سوخته. حالا مهر **بعد از رسیدنِ واقعیِ عکس** زده می‌شود — همان منطقِ کارت شانس که
+  // الماس را لحظه‌ی برگشتنِ هر کارت واریز می‌کند، نه آخرِ بازی.
+  // اگر ارسال شکست بخورد، استیت به `daily_pick` برمی‌گردد تا کاربر بتواند دوباره بزند.
+  await typing(ctx, PACE_M, 'upload_photo');
+  try {
+    await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthFa(month)));
+  } catch (e) {
+    logErr('dailyCardV2 photo:', e.message);
+    setState(uid, 'daily_pick');   // روز نسوخت؛ همان گرید هنوز معتبر است
+    return ctx.reply(L.daily.retry, Markup.inlineKeyboard([[
+      Markup.button.callback(L.buttons.dailyRetry, 'daily_go'),
+    ]]));
+  }
   stmts.setDaily.run(today, streak, uid);
   stmts.logDaily.run(uid, today, key, info?.reversed ? 1 : 0, variant);
 
-  await typing(ctx, PACE_M, 'upload_photo');
-  await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthFa(month)));
   await typing(ctx, PACE_REVEAL);
   if (text) await replyLong(ctx, text);
 
@@ -1873,8 +2026,8 @@ async function dailyCard(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
-  if (await blockDuringOpenPay(ctx)) return;
-  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.DAILY)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.DAILY)) return;
   const user = getUser(uid);
   const today = tehranToday();
   if (user.last_daily_date === today) {
@@ -1926,7 +2079,17 @@ async function dailyCard(ctx) {
   await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
   await ensureMenu(ctx, uid);
 }
-bot.hears(L.buttons.daily, dailyCard);
+// ⚠️ **همه‌ی** برچسب‌هایی که کیبورد در طولِ عمرش زده است، نه فقط برچسبِ امروز — همان
+// الگوی LUCKY_LABELS / WALLET_LABELS / INVITE_LABELS (بند ۲ج/۶).
+// 🐛 باگِ v3.9.0 تا v3.16.0 که مالک با چتِ واقعی گرفت: کیبوردِ دنیای الماس برچسبِ
+// `dailyOneCard` («فال تک کارت امروز») را می‌زد ولی تنها هندلر روی `daily` («کارت روز»)
+// بود. یعنی دکمه **مرده** بود: هر تپ از همه‌ی bot.hears ها رد می‌شد و به bot.on('text')
+// می‌رسید، که در استیتِ idle پیامِ «خوش اومدی» می‌داد و در استیتِ منو پیامِ «فالت هنوز
+// بازه». برچسب در `KB_LABELS` بود (پس در قیف ثبت می‌شد) ولی هیچ‌جا اجرا نمی‌شد، و
+// همین شکافِ بینِ «ثبت می‌شود» و «اجرا می‌شود» بود که باگ را ماه‌ها پنهان نگه داشت.
+// حالا یک چکِ CI هر برچسبِ کیبورد را با هندلرش تطبیق می‌دهد.
+const DAILY_LABELS = [L.buttons.dailyOneCard, L.buttons.daily];
+bot.hears(DAILY_LABELS, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
 
 /* ═══════════ 🍀 کارت شانس — الماسِ رایگانِ روزانه (بدونِ هیچ LLM) ═══════════
@@ -2001,8 +2164,8 @@ async function luckyCard(ctx) {
   upsertUser(ctx);
   if (!uxV2For(uid)) return;
   if (await blockDuringOnboarding(ctx)) return;
-  if (await blockDuringOpenPay(ctx)) return;
-  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.LUCKY)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.LUCKY)) return;
   if (await blockDuringPendingReading(ctx)) return;
   const user = getUser(uid);
   const today = tehranToday();
@@ -2460,8 +2623,8 @@ async function showCatalog(ctx, full = false, edit = false) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
-  if (await blockDuringOpenPay(ctx)) return;
-  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.READING)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.READING)) return;
   // setSession(uid, null) پایین‌تر readingId را دور می‌ریزد؛ پس قبلش فالِ رزروشده باید گارد شود
   if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
@@ -2724,11 +2887,18 @@ bot.action('onboard_allspreads', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const uid = ctx.from.id;
   upsertUser(ctx);
-  if (await blockDuringOpenPay(ctx)) return;
+  // ⚠️ این هندلر `setSession(uid, null)` می‌کند، پس **باید** همان سه گاردِ showCatalog را
+  // داشته باشد؛ وگرنه یک فالِ در جریان (یا پول‌داده) را بی‌صدا یتیم می‌کند. تا v3.17.0
+  // فقط گاردِ پرداخت را داشت.
+  if (await blockDuringOpenPay(ctx, INTENT.READING)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.READING)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  if (await blockDuringDelivering(ctx)) return;
   setState(uid, 'choose_spread');
   setSession(uid, null);
   try {
-    await ctx.editMessageText(L.reading.catalog, Markup.inlineKeyboard(catalogKb()));
+    // `catalogKb()` بدونِ uid یعنی کاربرِ دنیای الماس کاتالوگِ تومانی می‌دید
+    await ctx.editMessageText(L.reading.catalog, Markup.inlineKeyboard(catalogKb(uid)));
   } catch { return showCatalog(ctx); }
 });
 
@@ -2934,6 +3104,7 @@ bot.action('nav:menu', async (ctx) => {
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
     ]));
   }
+  if (await blockDuringDelivering(ctx)) return;   // فالِ پول‌داده‌ی وسطِ افشا پاک نمی‌شود
   const s = getSession(uid);
   const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
@@ -2957,6 +3128,7 @@ bot.action('reading:resume', async (ctx) => {
 bot.action('reading:cancel', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
+  if (await blockDuringDelivering(ctx)) return;   // دکمه‌ی کهنه وسطِ افشا فال را نمی‌کُشد
   const s = getSession(uid);
   const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
@@ -3000,18 +3172,20 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
 async function waitLLMWithLoading(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const msg = await ctx.reply(L.reading.loading(0));
+  const frame = loadingFrame(L.reading.loadingLabel);
+  const msg = await ctx.reply(frame(0));
   let i = 1, done = false;
+  const startedAt = Date.now();
   (async () => { // پیام لودینگ پویا؛ بدون await تا افشا معطل نماند
-    // ۳ ثانیه: عمداً محافظه‌کارانه، نه اندازه‌گیری‌شده. تلگرام سقفِ دقیقِ editMessageText را
-    // مستند نکرده و خوانشِ ده‌کارتی می‌تواند ۶۰ ثانیه طول بکشد؛ با ۱ ثانیه یعنی ~۶۰ ادیت
-    // پشتِ‌سرهم روی یک چت که ریسکِ 429 دارد. ۳ ثانیه هم به‌قدرِ کافی زنده دیده می‌شود.
-    // اگر مالک سریع‌تر خواست، پایین‌آوردنش یک عدد است — ولی باید روی چتِ واقعی تست شود.
+    // ⏱ ضرب‌آهنگ **متغیر** است، نه یک عددِ ثابت (جزئیاتِ کامل در `loading.js`):
+    // ده ثانیه‌ی اول تند (کاربر همان‌جا تصمیم می‌گیرد «کار می‌کند یا خراب است»)، بعد
+    // آرام. این تنها راهی بود که هم ایرادِ مالک («خیلی سریع‌تر، الان معلوم نیست ویتینگه»)
+    // را جواب بدهد و هم برای انتظارِ ۶۰ ثانیه‌ای زیرِ سقفِ ~۱ ادیت-در-ثانیه‌ی تلگرام بماند.
     while (!done) {
-      await sleep(3000);
+      await sleep(pace(Date.now() - startedAt));
       if (done) break;
       try {
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, L.reading.loading(i));
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, frame(i));
       } catch {}
       i++;
     }
@@ -3346,6 +3520,9 @@ async function sendContinuePrompt(ctx, uid) {
 // دنیای UX v2 پیامِ «ادامه» را می‌فرستد؛ در دنیای قدیم رفتار **دقیقاً** قبلی می‌ماند
 // (رول‌بکِ یک‌خطی: uxV2For همیشه false → این تابع همیشه شاخه‌ی قدیم را می‌رود).
 async function replyCanceled(ctx, uid) {
+  // 🎯 اگر کاربر بابتِ رسیدن به چیزی انصراف داده بود، همان چیز می‌آید — نه پیامِ عمومی.
+  // این تنها نقطه‌ی مصرف است، چون تک‌نقطه‌ی همه‌ی لغوهاست (قرارداد UX v2.2).
+  if (await replayIntent(ctx, uid)) return;
   if (uxV2For(uid)) return sendContinuePrompt(ctx, uid);
   return ctx.reply(L.reading.canceled, mainKeyboard(uid));
 }
@@ -3583,8 +3760,8 @@ const walletScreen = (uid) => [L.wallet.info(getBalance(uid), curOf(uid)), {
 async function showWallet(ctx) {
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
-  if (await blockDuringOpenPay(ctx)) return;
-  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.WALLET)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.WALLET)) return;
   const [text, extra] = walletScreen(ctx.from.id);
   await ctx.reply(text, extra);
 }
@@ -3606,8 +3783,8 @@ async function showInvite(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
-  if (await blockDuringOpenPay(ctx)) return;
-  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.INVITE)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.INVITE)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
   await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, referralBonusFor(uid), curOf(uid)), {
     parse_mode: 'Markdown',
@@ -4309,10 +4486,13 @@ bot.command('reset', doReset);
 registerSupport(bot, {
   botCode: 'TRT',
   texts: L.support,
+  // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف
+  // بده، انصراف داد و پیامِ عمومیِ «همیشه اینجام» گرفت به‌جای پشتیبانی. حالا هر دو گارد
+  // نیتِ SUPPORT را ثبت می‌کنند و `replyCanceled` بعد از انصراف همین صفحه را برمی‌گرداند.
   after: async (ctx) => {
     if (await blockDuringOnboarding(ctx)) return;
-    if (await blockDuringOpenReading(ctx)) return;
-    await blockDuringOpenPay(ctx);
+    if (await blockDuringOpenReading(ctx, INTENT.SUPPORT)) return;
+    await blockDuringOpenPay(ctx, INTENT.SUPPORT);
   },
 });
 
@@ -4359,9 +4539,27 @@ bot.on('text', async (ctx) => {
     if (state === 'confirm_pay') {
       if (await offerPendingReading(ctx, uid)) return;
     }
-    if (['choose_spread', 'confirm_focus', 'breathing', 'shuffling', 'picking', 'revealing'].includes(state)) {
-      // خوانش هنوز باز است: بلاک می‌کنیم ولی راهِ فرار (بازگشت به منو) را در همان پیام می‌دهیم تا کاربر گیر نیفتد
-      return ctx.reply(L.errors.useButtons, navMenuKb());
+    // ⚖️ **یک استاندارد، نه دو تا** (ایرادِ صریحِ مالک): تا قبل از v3.17.0 این‌جا پیامِ
+    // دومی به نامِ `useButtons` می‌آمد («فالت هنوز بازه، از دکمه‌های همین گفتگو استفاده
+    // کن») که فقط دکمه‌ی بازگشت داشت، در حالی که هر جای دیگرِ ربات برای همین موقعیت
+    // پیامِ «یه فالِ باز داری» با دو دکمه‌ی ادامه/انصراف را می‌داد. حالا هر دو مسیر از
+    // همان یک گارد رد می‌شوند.
+    if (await blockDuringOpenReading(ctx)) return;
+    // `choose_spread` فلوی باز **نیست**: فقط کاتالوگ روی صفحه است و هیچ فالی رزرو نشده،
+    // پس نه گارد لازم دارد نه پیامِ خطا. کاتالوگ دوباره نشان داده می‌شود تا کاربر به‌جای
+    // یک تذکر، همان چیزی را ببیند که می‌خواست انتخاب کند.
+    if (state === 'choose_spread') return showCatalog(ctx);
+    // 🂠 استیت‌های **گریدی** (کارتِ روز و کارتِ شانس). تا v3.17.0 این‌ها هیچ شاخه‌ای
+    // نداشتند و به پیش‌فرضِ پایین می‌افتادند، یعنی کاربری که وسطِ گرید چیزی تایپ می‌کرد
+    // پیامِ «خوش اومدی» می‌گرفت **و کیبوردِ ماندگار دوباره صادر می‌شد** — یک نقطه‌ی سومِ
+    // پنهان که قراردادِ دو-نقطه‌ای را می‌شکست. حالا همان گرید دوباره جلوی کاربر می‌آید.
+    if (state === 'daily_pick') return dailyCard(ctx);   // چیدمان قطعی است، پس بازسازی بی‌ضرر
+    if (state === 'lucky_shuffle' || state === 'lucky_pick') {
+      const ls = getSession(uid) || {};
+      const picks = ls.luckyPicks || [];
+      return showLuckyStatus(ctx, uid,
+        L.lucky.progress(picks.length, LUCKY_PICKS, ls.luckyCoinsFound || 0),
+        luckyGridKb(picks, luckyCoinSlots(uid, tehranToday(), ls.luckyNonce || '')));
     }
     // پیش‌فرض: کاربر جدید → آنبوردینگ؛ بقیه → منوی اصلی
     if (!getUser(uid).welcomed) return handleStart(ctx);
