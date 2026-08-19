@@ -17,6 +17,9 @@ import { seedToInt } from '../bots/tarot/reading-core.js';
 import {
   TOPICS_V3, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
 } from '../bots/tarot/spreads.js';
+// locale واقعاً import می‌شود (نه فقط به‌عنوان متن خوانده): برای تطبیقِ برچسبِ کیبورد با
+// هندلر باید **مقدارِ** رشته را داشته باشیم، نه نامِ کلید.
+import L from '../bots/tarot/locales/fa.js';
 
 const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
 const LOC = readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
@@ -277,6 +280,119 @@ console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ س�
   ok(/try \{ await ctx\.editMessageText\(saved\); \}/.test(bmonth), 'روی همان پیام ادیت می‌شود');
   ok(/catch \{ await ctx\.reply\(saved\)\.catch\(\(\) => \{\}\); \}/.test(bmonth),
     'اگر ادیت نشد (پیامِ کهنه) به پیامِ جدا برمی‌گردیم تا کاربر بی‌جواب نماند');
+
+  // v2.9: گریدِ ماهِ تولد ۴ ستون × ۳ ردیف شد (بود ۲×۶). چیدمان **اجرا** می‌شود نه فقط
+  // رجکس‌خوانی، چون سؤال این است که واقعاً چند ردیف تولید می‌شود و هر دوازده ماه سرِ
+  // جای خودشان هستند یا نه.
+  const cols = Number(/const BMONTH_COLS = (\d+);/.exec(SRC)?.[1]);
+  ok(cols === 4, 'تعدادِ ستون‌ها ۴ است');
+  const grid = [];
+  for (let i = 0; i < 12; i += cols) {
+    grid.push(Array.from({ length: cols }, (_, d) => i + d));
+  }
+  ok(grid.length === 3, `گرید ۳ ردیف دارد (شد ${grid.length})`);
+  ok(grid.every(r => r.length === 4), 'هر ردیف دقیقاً ۴ دکمه دارد');
+  ok(JSON.stringify(grid.flat()) === JSON.stringify([...Array(12).keys()]),
+    'هر دوازده ماه دقیقاً یک بار و به ترتیب می‌آیند (هیچ ماهی جا نمی‌افتد و تکرار نمی‌شود)');
+  ok(/`bmonth:\$\{k \+ 1\}`/.test(SRC), 'شماره‌ی ماه همچنان ۱-پایه است (سازگار با دیتای موجود)');
+  // دوازده بر چهار بخش‌پذیر است؛ اگر کسی ستون را روی عددی بگذارد که نباشد، ردیفِ آخر
+  // با ماهِ تعریف‌نشده پر می‌شود و دکمه‌ی خالی می‌سازد.
+  ok(12 % cols === 0, 'دوازده بر تعدادِ ستون بخش‌پذیر است (وگرنه ردیفِ آخر دکمه‌ی خالی می‌گیرد)');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🔑 گاردِ سیستمی: هر برچسبِ کیبوردِ ماندگار باید یک هندلرِ زنده داشته باشد.
+//
+// این بلوک بعد از یک باگِ **واقعیِ تولید** نوشته شد که مالک با فوروارد کردنِ چتِ خودش
+// گرفت: کیبوردِ دنیای الماس برچسبِ «🎴 فال تک کارت امروز (رایگان)» را می‌زد، ولی تنها
+// `bot.hears`ِ کارتِ روز روی برچسبِ قدیمیِ «🎴 کارت روز (رایگان)» بود. دکمه هفت نسخه
+// **مرده** ماند و هر تپ بی‌صدا به `bot.on('text')` می‌ریخت.
+//
+// چرا هیچ چکِ قبلی‌ای نگرفتش: برچسب در `KB_LABELS` **بود** (پس در قیف ثبت می‌شد و
+// حتی assert داشت)، در `mainKeyboard` هم بود. چیزی که هیچ‌کس نمی‌سنجید، **اتصالِ**
+// این دو به یک هندلر بود. پس این چک دقیقاً همان اتصال را می‌سنجد، برای هر دو دنیا.
+// ══════════════════════════════════════════════════════════════════════════════
+console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ زنده دارد (هر دو دنیا)');
+{
+  const mkStart = SRC.indexOf('function mainKeyboard(uid)');
+  const mk = SRC.slice(mkStart, SRC.indexOf('\n}', mkStart));
+
+  // برچسب‌هایی که mainKeyboard می‌تواند رندر کند. `supportRow` از shared می‌آید و
+  // برچسبش `L.support.button` است.
+  const rendered = new Set();
+  for (const m of mk.matchAll(/L\.buttons\.(\w+)/g)) {
+    const v = L.buttons?.[m[1]];
+    ok(typeof v === 'string', `برچسبِ L.buttons.${m[1]} یک رشته است (قابلِ تطبیق با هندلر)`);
+    if (typeof v === 'string') rendered.add(v);
+  }
+  ok(/supportRow\(L\.support\)/.test(mk), 'ردیفِ پشتیبانی از shared می‌آید');
+  rendered.add(L.support.button);
+
+  // برچسب‌هایی که یک `bot.hears` واقعاً می‌گیرد. سه شکلِ آرگومان پشتیبانی می‌شود:
+  //   bot.hears(L.buttons.X, …) · bot.hears(SOME_LABELS, …) · bot.hears([a, b], …)
+  const resolve = (expr) => {
+    expr = expr.trim();
+    const direct = /^L\.buttons\.(\w+)$/.exec(expr);
+    if (direct) return [L.buttons[direct[1]]];
+    if (expr.startsWith('[')) expr = expr.slice(1, -1);
+    else if (/^[A-Z_]+$/.test(expr)) {
+      const def = new RegExp(`const ${expr}\\s*=\\s*\\[([^\\]]*)\\]`).exec(SRC);
+      if (!def) return [];
+      expr = def[1];
+    } else return [];
+    return expr.split(',').map(part => {
+      part = part.trim();
+      const b = /^L\.buttons\.(\w+)$/.exec(part);
+      if (b) return L.buttons[b[1]];
+      const lit = /^'(.*)'$/.exec(part) || /^"(.*)"$/.exec(part);
+      return lit ? lit[1] : null;
+    }).filter(Boolean);
+  };
+
+  // ⚠️ روی سورسِ **بدونِ کامنت** کار می‌کنیم. نسخه‌ی اولِ همین چک روی سورسِ خام بود و
+  // سه false positive داد، از جمله یکی که خودِ کامنتِ توضیحیِ بالای همین باگ ساختش.
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const handled = new Set();
+  // آرگومانِ اول یا یک آرایه‌ی براکتی است یا یک توکنِ بدونِ کاما
+  for (const m of CODE.matchAll(/bot\.hears\(\s*(\[[^\]]*\]|[^,[\]]+?)\s*,/g)) {
+    for (const lbl of resolve(m[1])) handled.add(lbl);
+  }
+  // پشتیبانی در shared ثبت می‌شود، نه در index.js
+  const SUP = readFileSync(new URL('../shared/support.js', import.meta.url), 'utf8');
+  ok(/bot\.hears\(texts\.button, handler\)/.test(SUP), 'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند');
+  handled.add(L.support.button);
+
+  const dead = [...rendered].filter(l => !handled.has(l));
+  ok(dead.length === 0, `هیچ دکمه‌ی مرده‌ای در کیبورد نیست${dead.length ? ' — مرده: ' + dead.join(' | ') : ''}`);
+
+  // خودِ باگ، صریح و نام‌برده، تا اگر کسی DAILY_LABELS را دستکاری کرد بداند چه شکست
+  ok(handled.has(L.buttons.dailyOneCard), 'دکمه‌ی «فال تک کارت امروز» هندلر دارد (باگِ v3.9.0)');
+  ok(handled.has(L.buttons.daily), 'برچسبِ کهنه‌ی «کارت روز» هم هنوز کار می‌کند (کیبوردِ کش‌شده)');
+  ok(/const DAILY_LABELS = \[L\.buttons\.dailyOneCard, L\.buttons\.daily\]/.test(SRC),
+    'هر دو برچسب از یک آرایه‌ی تک‌منبع می‌آیند');
+
+  // هر برچسبی که در قیف ثبت می‌شود ولی هیچ‌جا اجرا نمی‌شود، دقیقاً اثرانگشتِ همین باگ است.
+  const kbStart = SRC.indexOf('const KB_LABELS = new Set([');
+  const kbBlock = SRC.slice(kbStart, SRC.indexOf('].filter(Boolean)', kbStart));
+  const tracked = new Set();
+  for (const m of kbBlock.matchAll(/L\.buttons\.(\w+)/g)) if (L.buttons[m[1]]) tracked.add(L.buttons[m[1]]);
+  const ghost = [...tracked].filter(l => !handled.has(l));
+  ok(ghost.length === 0, `هیچ برچسبی در KB_LABELS نیست که هندلر نداشته باشد${ghost.length ? ' — بی‌هندلر: ' + ghost.join(' | ') : ''}`);
+
+  // ترتیبِ ثبت: هر bot.hears بعد از bot.on('text') هرگز اجرا نمی‌شود (تلگراف ترتیبی است).
+  const onText = CODE.indexOf("bot.on('text'");
+  const lastHears = CODE.lastIndexOf('bot.hears(');
+  ok(lastHears < onText, 'همه‌ی bot.hears ها قبل از bot.on(text) ثبت شده‌اند (وگرنه هرگز اجرا نمی‌شوند)');
+}
+
+console.log('\n▶ نامِ بسته‌ی وسط');
+{
+  ok(/\{ key: 'gold',\s+fa: 'بسته ویژه',/.test(SRC), 'بسته‌ی وسط «بسته ویژه» نام دارد (بود «بسته‌ی الماسی»)');
+  ok(!/fa: 'بسته‌ی الماسی'/.test(SRC), 'نامِ قبلی جایی نمانده');
+  // ⚠️ کلیدِ `gold` روی ردیف‌های واقعیِ `payments` نشسته؛ عوض کردنش معنیِ داده‌ی موجود
+  // را تغییر می‌دهد (بند ۲ج/۱).
+  ok(/key: 'gold'/.test(SRC), 'کلیدِ داخلی دست‌نخورده ماند (دیتای پرداختِ کاربرانِ واقعی به آن اشاره دارد)');
+  ok(/PACK_STYLE = \{ gold: 'success' \}/.test(SRC), 'رنگِ سبزش هم به همان کلید بسته است، نه به نام');
 }
 
 console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (خرید، معرفی، کارت شانسِ رایگان)');
@@ -597,8 +713,20 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // v2.8: آنبوردینگ **هیچ کیبوردی صادر نمی‌کند**. نسخه‌ی v2.5 کیبورد را به پیامِ «خوش اومدی»
   // چسبانده بود و مالک پسش داد: کاربر تازه اسمش را نوشته، هنوز وسطِ آنبوردینگ است و منوی
   // پایین آن‌جا فقط حواسش را پرت می‌کند. قرارداد فقط دو نقطه دارد و این یکی از آن دو نیست.
-  ok(/await ctx\.reply\(L\.onboarding\.welcome\([^;]*?\), Markup\.removeKeyboard\(\)\);/.test(nameFn),
-    'پیامِ «خوش اومدی» کیبورد را برمی‌دارد، نه اینکه منوی اصلی را صادر کند');
+  // v2.9: این پیام **هیچ reply_markup ای** ندارد. مستنداتِ Bot API می‌گوید
+  // ReplyKeyboardRemove باعث می‌شود کلاینت «letter-keyboard پیش‌فرض را نشان بدهد»، یعنی
+  // removeKeyboard اینجا کیبوردِ تایپِ گوشی را باز نگه می‌داشت (ایرادِ صریحِ مالک: «نصف
+  // صفحه رو اشغال می‌کنه»). کیبوردِ سفارشی از askName برداشته شده، پس برداشتنِ دوباره
+  // بی‌اثر ولی پرعارضه بود.
+  ok(/await ctx\.reply\(L\.onboarding\.welcome\(name, statFirstFor\(uid\), uxV2For\(uid\)\)\);/.test(nameFn),
+    'پیامِ «خوش اومدی» هیچ reply_markup ای ندارد (نه منو، نه removeKeyboard)');
+  // روی **کد** سنجیده می‌شود نه کامنت: خودِ کامنتِ توضیحیِ بالای همین خط اسمِ
+  // removeKeyboard را می‌برد و نسخه‌ی اولِ این assert به همان کامنت گیر کرد.
+  const nameCode = nameFn.replace(/\/\/.*$/gm, '');
+  ok(!/removeKeyboard/.test(nameCode),
+    'removeKeyboard از پیامِ «خوش اومدی» برداشته شد (وگرنه کیبوردِ تایپ را باز نگه می‌داشت)');
+  ok(/Markup\.removeKeyboard\(\)/.test(SRC.slice(SRC.indexOf('L.onboarding.askName('), SRC.indexOf('L.onboarding.askName(') + 200)),
+    'ولی خودِ پرسشِ نام همچنان کیبوردِ سفارشی را برمی‌دارد (کاربر باید بتواند تایپ کند)');
   ok(!/mainKeyboard/.test(nameFn) && !/setKbShown/.test(nameFn),
     'مسیرِ ثبتِ نام نه کیبوردِ اصلی می‌دهد نه مهرِ نمایشِ کیبورد می‌زند');
   // گاردِ ناحیه‌ای: کلِ آنبوردینگِ دنیای الماس (نام → ماهِ تولد → «از کجا شروع کنیم؟»)

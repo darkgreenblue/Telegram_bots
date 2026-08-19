@@ -363,7 +363,7 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
-// رنگِ دکمه‌ی هر بسته: «بسته‌ی الماسی» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
+// رنگِ دکمه‌ی هر بسته: «بسته ویژه» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود
 // (تصمیمِ صریحِ مالک). بقیه رنگِ پیش‌فرضِ کلاینت را می‌گیرند.
 const PACK_STYLE = { gold: 'success' };
 const COIN_PACKAGES = [
@@ -372,9 +372,12 @@ const COIN_PACKAGES = [
   // فالِ سه‌کارتی از ۳۰٬۰۰۰ به ۹٬۰۰۰ تا ۴٬۵۰۰ تومان. قبل از باز کردن برای کاربرِ واقعی
   // این عدد باید دوباره دیده شود.
   { key: 'basic',  fa: 'بسته‌ی معمولی', emoji: '🥉', coins: 10,  toman: 30_000 },
-  // ایموجیِ بسته‌ی وسط از 🥇 به 💠 رفت: با نامِ «الماسی» بخواند، و عمداً **خودِ 💎 نباشد**
-  // چون در همان دکمه ایموجیِ واحد هم می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود.
-  { key: 'gold',   fa: 'بسته‌ی الماسی', emoji: '💠', coins: 30,  toman: 60_000 },
+  // ایموجیِ بسته‌ی وسط 💠 است و عمداً **خودِ 💎 نیست**: در همان دکمه ایموجیِ واحد هم
+  // می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود. نامش از «بسته‌ی الماسی» به «بسته ویژه»
+  // رفت (تصمیمِ مالک): «الماسی» با واحدِ الماس اشتباه گرفته می‌شد، انگار فقط این یکی
+  // بسته الماس می‌دهد. کلیدِ `gold` عوض نشد چون در `payments.package_key` کاربرانِ
+  // واقعی نشسته و بند ۲ج/۱ تغییرِ معنیِ داده‌ی موجود را ممنوع کرده.
+  { key: 'gold',   fa: 'بسته ویژه', emoji: '💠', coins: 30,  toman: 60_000 },
   { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
@@ -1080,11 +1083,15 @@ async function blockDuringOnboarding(ctx) {
   return true;
 }
 
-// 🗓 سؤالِ ماهِ تولد. دو ستونی چیده می‌شود: دوازده دکمه در یک ستون شش صفحه می‌شود.
+// 🗓 سؤالِ ماهِ تولد. **چهار ستون × سه ردیف** (تصمیمِ صریحِ مالک): چیدمانِ دو ستونیِ قبلی
+// شش ردیف می‌شد و تقریباً یک صفحه‌ی موبایل را می‌گرفت. نامِ ماه‌های فارسی کوتاه‌اند
+// (بلندترین «اردیبهشت» با ۸ حرف) پس در چهار ستون هم کامل جا می‌شوند.
+const BMONTH_COLS = 4;
 async function askBirthMonth(ctx) {
   const rows = [];
-  for (let i = 0; i < 12; i += 2) {
-    rows.push([i, i + 1].map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
+  for (let i = 0; i < 12; i += BMONTH_COLS) {
+    rows.push(Array.from({ length: BMONTH_COLS }, (_, d) => i + d)
+      .map((k) => Markup.button.callback(L.buttons.birthMonths[k], `bmonth:${k + 1}`)));
   }
   await ctx.reply(L.onboarding.askBirthMonth, Markup.inlineKeyboard(rows));
 }
@@ -1667,13 +1674,15 @@ async function finishNameOnboarding(ctx, rawName) {
   const refBonus = getSession(uid).refBonus;
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
-  // هنوز آنبوردینگ تمام نشده؛ کیبورد اصلی نمایش داده نمی‌شود (removeKeyboard).
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
-  // ⚠️ این‌جا **هیچ کیبوردی صادر نمی‌شود**. قراردادِ صریح و تکرارشده‌ی مالک: دستورِ باز شدنِ
-  // منوی پایین فقط دو نقطه دارد (پایینِ همین فایل مستند شده) و آنبوردینگ هیچ‌کدامشان نیست.
-  // یک نسخه‌ی قبلی کیبورد را به همین پیام چسبانده بود و مالک درست گرفتش: کاربر تازه اسمش
-  // را نوشته و هنوز وسطِ آنبوردینگ است، منو آن‌جا فقط حواسش را پرت می‌کند.
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)), Markup.removeKeyboard());
+  // ⚠️ این پیام عمداً **هیچ reply_markup ای ندارد**، به دو دلیلِ جدا:
+  //   ۱) منوی پایین صادر نمی‌شود، چون قراردادِ مالک فقط دو نقطه دارد و آنبوردینگ هیچ‌کدام
+  //      نیست (پایینِ همین فایل مستند شده).
+  //   ۲) removeKeyboard هم فرستاده نمی‌شود، چون مستنداتِ Bot API می‌گوید کلاینت با آن
+  //      «کیبوردِ سفارشی را برمی‌دارد و letter-keyboard پیش‌فرض را نشان می‌دهد» — یعنی
+  //      کیبوردِ تایپِ گوشی را باز نگه می‌داشت و نصفِ صفحه را می‌گرفت. کیبوردِ سفارشی از
+  //      قبل در `askName` برداشته شده، پس این تکرار بی‌اثر ولی پرعارضه بود.
+  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)));
   // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
   if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
   await typing(ctx, PACE_S);
@@ -1926,7 +1935,17 @@ async function dailyCard(ctx) {
   await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
   await ensureMenu(ctx, uid);
 }
-bot.hears(L.buttons.daily, dailyCard);
+// ⚠️ **همه‌ی** برچسب‌هایی که کیبورد در طولِ عمرش زده است، نه فقط برچسبِ امروز — همان
+// الگوی LUCKY_LABELS / WALLET_LABELS / INVITE_LABELS (بند ۲ج/۶).
+// 🐛 باگِ v3.9.0 تا v3.16.0 که مالک با چتِ واقعی گرفت: کیبوردِ دنیای الماس برچسبِ
+// `dailyOneCard` («فال تک کارت امروز») را می‌زد ولی تنها هندلر روی `daily` («کارت روز»)
+// بود. یعنی دکمه **مرده** بود: هر تپ از همه‌ی bot.hears ها رد می‌شد و به bot.on('text')
+// می‌رسید، که در استیتِ idle پیامِ «خوش اومدی» می‌داد و در استیتِ منو پیامِ «فالت هنوز
+// بازه». برچسب در `KB_LABELS` بود (پس در قیف ثبت می‌شد) ولی هیچ‌جا اجرا نمی‌شد، و
+// همین شکافِ بینِ «ثبت می‌شود» و «اجرا می‌شود» بود که باگ را ماه‌ها پنهان نگه داشت.
+// حالا یک چکِ CI هر برچسبِ کیبورد را با هندلرش تطبیق می‌دهد.
+const DAILY_LABELS = [L.buttons.dailyOneCard, L.buttons.daily];
+bot.hears(DAILY_LABELS, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
 
 /* ═══════════ 🍀 کارت شانس — الماسِ رایگانِ روزانه (بدونِ هیچ LLM) ═══════════
