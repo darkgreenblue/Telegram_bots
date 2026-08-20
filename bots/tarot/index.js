@@ -28,7 +28,7 @@ import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../s
 import { ensureAb, variant } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
 import { registerSupport, supportRow, supportReply } from '../../shared/support.js';
-import { loadingFrame, pace } from './loading.js';
+import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
@@ -170,9 +170,9 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-// 3.20.0: دستورِ فقط-ادمینِ /reel — ساختِ ویدیوی ریلز از یک فالِ ناشناس. رفتارِ هیچ
+// 3.21.0: دستورِ فقط-ادمینِ /reel — ساختِ ویدیوی ریلز از یک فالِ ناشناس. رفتارِ هیچ
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
-const PRODUCT_VERSION = '3.20.0';
+const PRODUCT_VERSION = '3.21.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -4627,6 +4627,56 @@ async function doReset(ctx) {
 }
 // هم برچسبِ جدید، هم برچسبِ قدیمیِ فاز تست (برای دکمه‌ی کش‌شده‌ی احتمالی) — doReset خودش isAdmin را چک می‌کند
 bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
+/* 🧪 `/loading` — نمایشِ زنده‌ی پنج طرحِ نشانگرِ انتظار، داخلِ خودِ تلگرام.
+   خواسته‌ی صریحِ مالک: «یه دستور موقت باشه که بزنم و ببینمشون». عرضِ اموجی، رندرِ RTL و
+   «حسِ» سرعت را نمی‌شود از روی کد قضاوت کرد؛ باید روی کلاینتِ واقعی دید.
+
+   • **فقط تستر/ادمین** (`isTester`)، پس هیچ کاربرِ واقعی‌ای نمی‌بیندش.
+   • با **همان `pace()`ِ خودِ ربات** اجرا می‌شود، نه یک سرعتِ ساختگی — وگرنه چیزی که
+     می‌بینی با چیزی که کاربر می‌بیند فرق دارد.
+   • `429` را **گزارش** می‌کند، چون نکته‌ی اصلیِ همین آزمایش این است که بفهمیم ضرب‌آهنگ
+     به سقفِ تلگرام می‌خورد یا نه.
+   • `/loading moon` فقط یک طرح را نشان می‌دهد.
+   ⚠️ موقت است: `LOADING_LAB = false` کاملاً خاموشش می‌کند (یک خط). */
+const LOADING_LAB = true;
+const LAB_PLAY_MS = 12_000;
+
+bot.command('loading', async (ctx) => {
+  const uid = ctx.from.id;
+  if (!LOADING_LAB || !isTester(uid)) return;
+  const arg = (ctx.message.text.split(/\s+/)[1] || '').trim();
+  const names = arg && LOADERS[arg] ? [arg] : Object.keys(LOADERS);
+  const label = L.reading.loadingLabel;
+  let rate = 0;
+
+  await ctx.reply(`🧪 ${names.length} طرح، هر کدام ${LAB_PLAY_MS / 1000} ثانیه، با همان ضرب‌آهنگِ واقعیِ ربات.`);
+  for (const name of names) {
+    const def = LOADERS[name];
+    const tag = `${def.fa}${name === ACTIVE ? '  ← الان فعال است' : ''}${def.keepsLabel ? '' : '  ⚠️ متن را عوض می‌کند'}`;
+    await ctx.reply(tag).catch(() => {});
+    const frame = def.frames(label);
+    const m = await ctx.reply(frame(0)).catch(() => null);
+    if (!m) continue;
+    const startedAt = Date.now();
+    let i = 1, edits = 0;
+    while (Date.now() - startedAt < LAB_PLAY_MS) {
+      await sleep(pace(Date.now() - startedAt));
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, undefined, frame(i));
+        edits++;
+      } catch (e) {
+        if (/429|Too Many Requests/i.test(e.message || '')) rate++;
+      }
+      i++;
+    }
+    await ctx.reply(`↑ ${name} · ${edits} ادیت در ${LAB_PLAY_MS / 1000} ثانیه`).catch(() => {});
+    await sleep(900);
+  }
+  await ctx.reply(rate
+    ? `⚠️ ${rate} بار 429 گرفتیم. ضرب‌آهنگ باید آرام‌تر شود (FAST_MS در bots/tarot/loading.js).`
+    : `✅ هیچ 429ای نگرفتیم؛ ضرب‌آهنگِ فعلی امن است.\n\nطرحِ فعال: ${ACTIVE}. برای عوض کردنش اسمش را به من بگو.`);
+});
+
 bot.command('reset', doReset);
 
 // 💬 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
