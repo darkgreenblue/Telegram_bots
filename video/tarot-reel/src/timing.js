@@ -16,7 +16,9 @@ import { fitFontSize, paginateToFit, stripDash, normalizeWs } from './text.js';
 
 export const CHARS_PER_SEC = 22; // کمی سریع‌تر از خواندنِ عادی؛ خواسته‌ی مالک
 export const INTRO_SEC = 4;
-export const FLY_SEC = 0.7;
+export // حرکتِ دو ضربِ «برو، بعد بزرگ شو» به زمان نیاز دارد: با ۰.۷ ثانیه هر ضرب حدود یک‌سومِ
+// ثانیه می‌شد و چشم آن را حرکت نمی‌دید، فقط پرش.
+const FLY_SEC = 1.15;
 export const FADE_SEC = 0.4;
 export const MIN_TEXT_SEC = 2.2;
 export const CAP_SEC = 58;

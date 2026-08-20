@@ -136,12 +136,20 @@ export function corridorGate(y, h, y0, y1) {
   return span <= 0 ? 1 : smoothstep((b - y) / span);
 }
 
-// پنجره‌های زمانیِ حس (نه امنیت): x زود به سمتِ دالان می‌رود و دیر از آن بیرون می‌آید،
-// ارتفاع دیر بزرگ و زود کوچک می‌شود تا لحظه‌ی عبور همیشه لاغرترین حالت باشد.
+// پنجره‌های زمانیِ حس (نه امنیت). حرکت عمداً **دو ضرب** است، نه یک ضرب:
+// اول کارت جابه‌جا می‌شود و بعد بزرگ می‌شود (و در برگشت اول کوچک می‌شود و بعد می‌رود).
+//
+// چرا دو ضرب شد (باگِ دیده‌شده‌ی مالک: «بزرگ‌شدنِ کارت پرش دارد و انگار اصلاً انیمیشن نیست»):
+// وقتی رشد و سفر هم‌زمان بودند، کارت تا آخرین لحظه داخلِ دالان و در نتیجه باریک نگه داشته
+// می‌شد و رشدِ واقعی‌اش در **یک فریم** اتفاق می‌افتاد (۳۰۳ → ۴۴۰ پیکسل). حالا سفر در پنجره‌ی
+// خودش تمام می‌شود، کارت آن‌جا از باندِ باکس بیرون است، گیت صفر می‌شود، و رشد کلِ پنجره‌ی
+// بعدی را برای خودش دارد.
 const X_IN_END = 0.34;
 const X_OUT_START = 0.66;
-const H_GROW = [0.58, 1];
-const H_SHRINK = [0, 0.42];
+const H_GROW = [0.54, 1];
+const Y_GROW = [0, 0.5];
+const H_SHRINK = [0, 0.46];
+const Y_SHRINK = [0.5, 1];
 
 /**
  * مسیرِ تضمین‌شده‌ی یک کارت از مستطیلِ `from` به `to`.
@@ -152,26 +160,32 @@ export function corridorPath(from, to, side, t) {
   const tt = clamp01(t);
   const grow = to.h >= from.h;
   const hWin = grow ? H_GROW : H_SHRINK;
+  const yWin = grow ? Y_GROW : Y_SHRINK;
   const hRaw = lerp(from.h, to.h, easeInOut(sub(tt, hWin[0], hWin[1])));
-  const yRaw = lerp(from.y, to.y, easeInOut(tt));
+  // `p` پیشرفتِ سفرِ عمودی است، نه زمانِ کلِ صحنه. x و گیتِ حس هر دو از همین می‌خوانند تا
+  // بیرونِ پنجره‌ی سفر (یعنی وقتی کارت دارد بزرگ یا کوچک می‌شود) هیچ‌کدام تکان نخورند.
+  const p = clamp01(sub(tt, yWin[0], yWin[1]));
+  const yRaw = lerp(from.y, to.y, easeInOut(p));
+
+  // مرکزِ افقی مبنا است نه لبه‌ی چپ: عرضِ کارت وسطِ رشد عوض می‌شود و لرپ روی لبه یعنی
+  // کارت حینِ بزرگ‌شدن به یک سمت سُر می‌خورد.
+  const fromCx = from.x + from.w / 2;
+  const toCx = to.x + to.w / 2;
 
   if (!crossesSafeBand(from, to)) {
     // مسیرِ مستقیم: هیچ نقطه‌ای از آن نمی‌تواند به باکس برسد، پس دالان فقط حرکت را زشت می‌کرد.
     const w = cardW(hRaw);
-    const e = easeInOut(tt);
-    return { x: lerp(from.x, to.x, e), y: yRaw, w, h: hRaw };
+    return { x: lerp(fromCx, toCx, easeInOut(p)) - w / 2, y: yRaw, w, h: hRaw };
   }
 
   const inner = corridorInner(side);
-  const wRaw = cardW(hRaw);
-  const anchorX = inner.cx - wRaw / 2;
-  const inF = easeInOut(sub(tt, 0, X_IN_END));
-  const outF = easeInOut(sub(tt, X_OUT_START, 1));
-  const xRaw = lerp(lerp(from.x, anchorX, inF), to.x, outF);
+  const inF = easeInOut(sub(p, 0, X_IN_END));
+  const outF = easeInOut(sub(p, X_OUT_START, 1));
+  const cxRaw = lerp(lerp(fromCx, inner.cx, inF), toCx, outF);
 
   const gateT = Math.min(
-    smoothstep(sub(tt, 0, X_IN_END)),
-    smoothstep(sub(1 - tt, 0, 1 - X_OUT_START)),
+    smoothstep(sub(p, 0, X_IN_END)),
+    smoothstep(sub(1 - p, 0, 1 - X_OUT_START)),
   );
   const gate = Math.max(gateT, corridorGate(yRaw, hRaw, from.y, to.y));
 
@@ -179,7 +193,7 @@ export function corridorPath(from, to, side, t) {
   const hFit = Math.min(hRaw, corridorMaxCardH(side));
   const h = lerp(hRaw, hFit, gate);
   const w = cardW(h);
-  const x = lerp(xRaw, inner.cx - w / 2, gate);
+  const x = lerp(cxRaw - w / 2, inner.cx - w / 2, gate);
   return { x, y: yRaw, w, h };
 }
 
