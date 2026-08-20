@@ -684,15 +684,17 @@ const idxText = stripCommentsOnly(IDX);
 const flagUses = (idxCode.match(/\bVIDEO_REEL_ENABLED\b/g) || []).length;
 eq(flagUses, 2, 'پرچمِ VIDEO_REEL_ENABLED دقیقاً دو بار استفاده شده (تعریف + گاردِ دستور)');
 ok(/const\s+VIDEO_REEL_ENABLED\s*=\s*(true|false)\s*;/.test(idxCode), 'پرچم یک ثابتِ بولینِ یک‌خطی است (رول‌بکِ یک‌خطی)');
+// ⚠️ این ادعا عمداً **کف** است، نه تساوی. نسخه‌ی اولش `=== '3.22.0'` بود و همان روز
+// با اولین PR بعدی قرمز شد: هر تغییرِ رفتاریِ بعدی باید نسخه را بالا ببرد (بند ۲ج/۴)،
+// پس پین کردنِ عددِ دقیق یعنی این چک هر بار جلوی رعایتِ همان قاعده را می‌گیرد.
 {
-  // نسخه‌ی دقیقاً ۳.۲۲.۰ را نمی‌سنجیم — این PR فقط یعنی بامپ لازم را انجام داده،
-  // نه اینکه نسخه تا ابد همین‌جا بماند. PRهای بعدی هم طبقِ بند ۲ج/۴ بامپ می‌کنند و
-  // چکِ سختِ برابری همان‌جا برای همیشه قرمز می‌شد. پس فقط >= ۳.۲۲.۰ کافی است.
-  const m = idxText.match(/const\s+PRODUCT_VERSION\s*=\s*['"`](\d+)\.(\d+)\.(\d+)['"`]/);
-  const cur = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-  const min = [3, 22, 0];
-  const atLeast = cur && (cur[0] > min[0] || (cur[0] === min[0] && (cur[1] > min[1] || (cur[1] === min[1] && cur[2] >= min[2]))));
-  ok(atLeast, `PRODUCT_VERSION حداقل روی 3.22.0 بامپ شده (بند ۲ج/۴)${cur ? ` — فعلی: ${cur.join('.')}` : ''}`);
+  const v = (idxText.match(/const\s+PRODUCT_VERSION\s*=\s*['"`]([\d.]+)['"`]/) || [])[1] || '0';
+  const cmp = (a, b) => {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+    return 0;
+  };
+  ok(cmp(v, '3.22.0') >= 0, `PRODUCT_VERSION دستِ‌کم روی 3.22.0 بامپ شده (فعلی: ${v} — بند ۲ج/۴)`);
 }
 
 const cmdIdx = IDX.indexOf("bot.command('reel'");
