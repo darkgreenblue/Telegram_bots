@@ -106,9 +106,20 @@ console.log('\n▶ قرارداد منوی فال (پین اول، «همه فا
   // v2.4 (تصمیمِ صریحِ مالک): «فال بگیر» بالای «فال تک کارت» و هر دو **تمام‌عرض**.
   ok(/dailyOneCard: '🎴 فال تک کارت امروز \(رایگان\)'/.test(LOC),
     'کیبوردِ اصلی نامِ صریحِ «فال تک کارت امروز (رایگان)» را دارد');
-  ok(/\[L\.buttons\.reading\],\s*\n\s*\[L\.buttons\.dailyOneCard\],/.test(SRC),
-    '«فال بگیر» ردیفِ خودش را بالای «فال تک کارت» دارد (هیچ‌کدام نصفه نیستند)');
-  ok(/L\.buttons\.luckyMain\]/.test(SRC), 'کارت شانس ردیفِ خودش را در کیبوردِ اصلی دارد');
+  // ⚠️ ترتیبِ **کاملِ** کیبورد پین می‌شود، نه فقط دو ردیفِ اولش. نسخه‌ی قبلیِ این ادعا
+  // فقط «reading بالای dailyOneCard» را می‌دید، پس جابه‌جاییِ کارت شانس را اصلاً
+  // نمی‌فهمید. حالا هر چهار ردیف پشتِ‌سرِهم سنجیده می‌شوند.
+  // v3.25.0 (تصمیمِ صریحِ مالک): کارت شانس یک پله بالا، فال تک کارت یک پله پایین.
+  const kbV2 = SRC.slice(SRC.indexOf('const rows = uxV2For(uid)'), SRC.indexOf('if (FREE_MENU_ENABLED'));
+  const ORDER = ['reading', 'luckyMain', 'dailyOneCard'];
+  const seen = [...kbV2.matchAll(/L\.buttons\.(\w+)/g)].map(m => m[1]);
+  ok(seen.slice(0, 3).join('>') === ORDER.join('>'),
+    `ترتیبِ کیبوردِ اصلی: ${ORDER.join(' ⟵ ')} (دیده شد: ${seen.slice(0, 3).join(' ⟵ ')})`);
+  ok(/\[L\.buttons\.reading\],/.test(kbV2) && /\[L\.buttons\.luckyMain\],/.test(kbV2)
+    && /\[L\.buttons\.dailyOneCard\],/.test(kbV2),
+    'و هر سه ردیفِ خودشان را دارند (هیچ‌کدام نصفه کنارِ هم نیستند)');
+  ok(seen.slice(3, 5).join(',') === 'coinShop,inviteMain', 'ردیفِ چهارم: فروشگاه + دعوت');
+
   // CTAی بعد از فال و بعد از کارتِ روز هر دو از همین قرارداد می‌آیند
   const reco = SRC.slice(SRC.indexOf('function recoRows('), SRC.indexOf('// کیبوردِ منو نباید'));
   ok(/topicRow\(MENU_PIN\)/.test(reco), 'CTAی پایانِ فال هم با «سؤال شخصی خودم» شروع می‌شود');
@@ -402,6 +413,31 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   ok(handled.has(L.buttons.daily), 'برچسبِ کهنه‌ی «کارت روز» هم هنوز کار می‌کند (کیبوردِ کش‌شده)');
   ok(/const DAILY_LABELS = \[L\.buttons\.dailyOneCard, L\.buttons\.daily\]/.test(SRC),
     'هر دو برچسب از یک آرایه‌ی تک‌منبع می‌آیند');
+
+  // 🚚 پنجره‌ی یک‌باره‌ی مهاجرتِ کیبورد (v3.25.0). خطرِ واقعیِ لحظه‌ی لانچ: کاربرِ فعلی
+  // کیبوردِ **تومانیِ** قدیمی را روی گوشی دارد و تلگرام تا اولین جایگزینی نگهش می‌دارد،
+  // یعنی «کارت شانس» را که اصلاً در آن کیبورد نیست هرگز نمی‌بیند.
+  const em = CODE.slice(CODE.indexOf('async function ensureMenu('), CODE.indexOf('async function sendVerdict('));
+  ok(/KB_V2_EPOCH/.test(em), 'ensureMenu پنجره‌ی مهاجرتِ کیبورد را دارد');
+  ok(!/if \(uxV2For\(uid\)\) return;/.test(em),
+    'و دیگر در دنیای الماس بی‌قید return نمی‌کند (وگرنه کاربرِ قدیمی کیبوردِ نسل قبل را نگه می‌داشت)');
+  ok(/created_at \|\| 0\) >= KB_V2_EPOCH\) return;/.test(em),
+    'کاربرِ **بعد از** لانچ از این پنجره رد می‌شود (قراردادِ دو-نقطه‌ای v3.16.0 دست‌نخورده)');
+  ok(/kb_shown_at \|\| 0\) >= KB_V2_EPOCH\) return;/.test(em),
+    'و هر کاربر حداکثر **یک بار** آن را می‌گیرد');
+  ok(/const KB_V2_EPOCH = \d{10}/.test(CODE), 'مرزِ لانچ یک عددِ ثابت است، نه محاسبه‌ی زنده');
+  // هر دو نقطه‌ی قراردادِ صدورِ کیبورد باید پنجره را ببندند، وگرنه کاربری که کیبورد را
+  // از آن‌جا گرفته باز هم پیامِ اضافه‌ی مهاجرت می‌گیرد.
+  const navm = CODE.slice(CODE.indexOf("bot.action('nav:menu'"), CODE.indexOf("bot.action('reading:resume'"));
+  ok(/setKbShown\.run\(uid\)/.test(navm), 'بازگشت به منو پنجره‌ی مهاجرت را می‌بندد');
+  const fbr = CODE.slice(CODE.indexOf('L.reading.rateThanks') - 200, CODE.indexOf('L.reading.rateThanks') + 200);
+  ok(/setKbShown\.run\(uid\)/.test(fbr), 'تشکرِ بعد از نمره هم پنجره را می‌بندد');
+
+  // ⚠️ کیبوردِ **قدیمیِ تومانی** روی گوشیِ کاربر می‌ماند تا لحظه‌ی جایگزینی، پس تک‌تکِ
+  // برچسب‌هایش باید هنوز هندلر داشته باشند وگرنه دکمه‌ی زنده‌ی مرده می‌سازیم (بند ۲ج/۶).
+  for (const lbl of [L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.inviteMain]) {
+    ok(handled.has(lbl), `برچسبِ کیبوردِ نسلِ قبل «${lbl}» هنوز هندلر دارد`);
+  }
 
   // هر برچسبی که در قیف ثبت می‌شود ولی هیچ‌جا اجرا نمی‌شود، دقیقاً اثرانگشتِ همین باگ است.
   const kbStart = SRC.indexOf('const KB_LABELS = new Set([');
@@ -1035,7 +1071,15 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // کیبورد نباید قربانی شود (askName عمداً removeKeyboard می‌کند) — پس به پیامِ پایانِ
   // آنبوردینگ می‌چسبد. بدونِ این، کاربرِ تازه هیچ‌وقت کیبورد نمی‌گیرد (بن‌بستِ بند ۹ب/۴).
   const ens = SRC.slice(SRC.indexOf('async function ensureMenu'), SRC.indexOf('async function sendVerdict'));
-  ok(/if \(uxV2For\(uid\)\) return;/.test(ens), 'ensureMenu در دنیای الماس هیچ پیامی نمی‌فرستد');
+  // ⚠️ این ادعا در v3.25.0 عوض شد. تا قبلش `ensureMenu` در دنیای الماس **بی‌قید** return
+  // می‌کرد و همین درست بود، چون آن‌جا همه‌ی کاربران از روز اول در دنیای الماس بودند.
+  // با باز شدن برای همه، ~۱۰۰ کاربرِ فعلی کیبوردِ نسلِ قبل را روی گوشی داشتند و این
+  // return آن‌ها را برای همیشه پشتِ کیبوردِ قدیمی نگه می‌داشت. حالا فقط برای کاربرِ
+  // **بعد از** لانچ زودهنگام برمی‌گردد، یعنی قراردادِ دو-نقطه‌ای برای او دست‌نخورده است.
+  ok(/created_at \|\| 0\) >= KB_V2_EPOCH\) return;/.test(ens),
+    'ensureMenu برای کاربرِ بعد از لانچ هیچ پیامی نمی‌فرستد (قراردادِ دو-نقطه‌ای)');
+  ok(/stmts\.setKbShown\.run\(uid\);\s*\n\s*await ctx\.reply\(L\.onboarding\.keyboardReveal/.test(ens),
+    'و در پنجره‌ی مهاجرت **قبل از** ارسال مهر می‌زند (پس دوبار نمی‌فرستد)');
   ok(/L\.onboarding\.keyboardReveal/.test(ens), 'دنیای تومانی همان تورِ ایمنیِ قبلی را دارد (دست‌نخورده)');
   // v2.5: پایانِ آنبوردینگ دوباره **یک پیام** است (چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟»)،
   // و کیبوردِ ماندگار یک قدم جلوتر روی پیامِ «خوش اومدی» تحویل می‌شود — تنها پیامِ آنبوردینگ

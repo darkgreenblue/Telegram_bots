@@ -128,6 +128,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-coin-migration.mjs
 
+      # پیامِ اطلاع‌رسانیِ آپدیت: یک بار به همه‌ی کاربران می‌رود و برگشت‌پذیر نیست.
+      - name: Announcement check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-announce.mjs
+
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs

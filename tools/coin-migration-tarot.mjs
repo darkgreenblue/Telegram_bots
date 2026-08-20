@@ -45,12 +45,28 @@ const Database = require(path.resolve('bots/tarot/node_modules/better-sqlite3'))
 export const COIN_VALUE = 10_000;        // ارزشِ داخلیِ هر الماس (واحدِ ستونِ balance)
 export const OLD_WELCOME_TOMAN = 30_000; // هدیه‌ی خوش‌آمدِ دنیای تومانی
 export const NEW_WELCOME_COINS = 5;      // هدیه‌ی خوش‌آمدِ دنیای الماس
-export const TOMAN_PER_COIN = OLD_WELCOME_TOMAN / NEW_WELCOME_COINS; // = ۶٬۰۰۰
 
-/** تومانِ قدیمی ⟶ تعدادِ الماس. گردکردن به بالا (به نفعِ کاربر)، و هرگز منفی. */
-export const coinsFor = (toman) => Math.max(0, Math.ceil(Math.max(0, toman) / TOMAN_PER_COIN));
+/* ── دو نرخ، چون دو گروهِ کاملاً متفاوت‌اند (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۳۰) ──────────
+   • **هدیه‌بگیر** (خوش‌آمد، دعوت، استریک): نرخِ «۳۰٬۰۰۰ تومان = ۵ الماس»، یعنی هر
+     ۶٬۰۰۰ تومان یک الماس. این عدد تصادفی نیست: هدیه‌ی خوش‌آمدِ قدیم دقیقاً ۳۰٬۰۰۰
+     تومان بود و هدیه‌ی جدید دقیقاً ۵ الماس، پس کسی که هدیه‌اش را خرج نکرده **عیناً**
+     همان چیزی را می‌گیرد که یک کاربرِ تازه امروز می‌گیرد. اگر این گروه هم با نرخِ
+     ۱٬۵۰۰ تبدیل می‌شد، ۳۰٬۰۰۰ تومان می‌شد ۲۰ الماس، یعنی کاربرِ قدیمیِ هدیه‌بگیر
+     چهار برابرِ کاربرِ جدید هدیه می‌گرفت.
+   • **پرداخت‌کرده** (پولِ واقعی داده): نرخِ **۱٬۵۰۰ تومان = ۱ الماس**، یعنی ارزان‌ترین
+     نرخِ فروشگاه (بسته‌ی جادویی). کسی که پولِ واقعی داده باید بهترین نرخِ ممکن را
+     بگیرد، نه نرخِ هدیه.
+   هر دو **به بالا** گرد می‌شوند (به نفعِ کاربر). */
+export const TOMAN_PER_COIN_GIFT = OLD_WELCOME_TOMAN / NEW_WELCOME_COINS; // = ۶٬۰۰۰
+export const TOMAN_PER_COIN_PAID = 1_500;                                 // بسته‌ی جادویی
+
+/** تومانِ قدیمی ⟶ تعدادِ الماس، با نرخِ دلخواه. به بالا گرد می‌شود و هرگز منفی نیست. */
+export const coinsAt = (toman, rate) => Math.max(0, Math.ceil(Math.max(0, toman) / rate));
+export const coinsFor = (toman) => coinsAt(toman, TOMAN_PER_COIN_GIFT);
+export const coinsForPaid = (toman) => coinsAt(toman, TOMAN_PER_COIN_PAID);
 /** تومانِ قدیمی ⟶ مقدارِ جدیدِ ستونِ balance. */
 export const newBalanceFor = (toman) => coinsFor(toman) * COIN_VALUE;
+export const newBalanceForPaid = (toman) => coinsForPaid(toman) * COIN_VALUE;
 
 /* ═══════ ورودی‌ها ═══════ */
 const dataDir = process.argv[2];
@@ -83,35 +99,51 @@ export function planFor(db, { setUser = new Map(), zeroUser = [], autoOff = fals
   const plan = [];
   for (const u of rows) {
     const id = u.telegram_id;
+    // ⚠️ ترتیبِ این شرط‌ها خودش قرارداد است: صفرکردن بر همه چیز مقدم است (کاربرِ تستی
+    // حتی اگر پرداختِ تأییدشده داشته باشد باید صفر شود، چون رسیدش جعلی بوده).
     let to, kind;
     if (zeroUser.includes(id)) { to = 0; kind = 'zero'; }
     else if (setUser.has(id)) { to = setUser.get(id) * COIN_VALUE; kind = 'manual'; }
-    else if (payers.has(id)) { continue; }                 // ⛔️ تصمیمِ انسانی، دست نمی‌خورد
     else if (!u.balance) { continue; }                     // چیزی برای تبدیل نیست
     else if (autoOff) { continue; }                        // اجرای دوباره: فقط تصمیم‌های صریح
-    else { to = newBalanceFor(u.balance); kind = 'auto'; }
+    else if (payers.has(id)) { to = newBalanceForPaid(u.balance); kind = 'paid'; }
+    else { to = newBalanceFor(u.balance); kind = 'gift'; }
     if (to === u.balance) continue;                        // بدونِ تغییر، ردیفی هم ثبت نمی‌شود
     plan.push({ id, name: u.name, username: u.username, from: u.balance, to, kind });
   }
-  return { plan, payers };
+  // پرداخت‌هایی که باید از **درآمد** بیرون بروند: فقط کاربرانِ صفرشده (رسیدِ جعلی).
+  // وضعیتِ `reversed` عمداً انتخاب شده چون از قبل دقیقاً معنیِ «رسیدِ فیک، برگشت خورد»
+  // را دارد و همه‌ی کوئری‌های درآمد روی `status='approved'` می‌نشینند، پس خودکار حذف
+  // می‌شود بدونِ اینکه ردیف پاک شود (بند ۹ ریشه: هر ریال ردپای DB دارد).
+  const voidPays = zeroUser.length
+    ? db.prepare(`SELECT id, user_id, amount FROM payments WHERE status='approved' AND user_id IN (${zeroUser.map(() => '?').join(',')})`).all(...zeroUser)
+    : [];
+  return { plan, payers, voidPays };
 }
 
 function run(file, opts) {
   const db = new Database(file);
   db.pragma('busy_timeout = 5000');
-  const { plan, payers } = planFor(db, opts);
+  const { plan, payers, voidPays } = planFor(db, opts);
 
   console.log(`\n📄 ${path.basename(file)}`);
-  console.log(`   قاعده: هر ${fa(TOMAN_PER_COIN)} تومان = ۱ الماس (گردکردن به بالا) · ${fa(OLD_WELCOME_TOMAN)} تومان = ${fa(NEW_WELCOME_COINS)} الماس`);
-  const auto = plan.filter(p => p.kind === 'auto');
+  console.log(`   نرخِ هدیه‌بگیر: هر ${fa(TOMAN_PER_COIN_GIFT)} تومان = ۱ الماس (${fa(OLD_WELCOME_TOMAN)} تومان = ${fa(NEW_WELCOME_COINS)} الماس)`);
+  console.log(`   نرخِ پرداخت‌کرده: هر ${fa(TOMAN_PER_COIN_PAID)} تومان = ۱ الماس (ارزان‌ترین نرخِ فروشگاه)`);
+  const gift = plan.filter(p => p.kind === 'gift');
+  const paid = plan.filter(p => p.kind === 'paid');
   const manual = plan.filter(p => p.kind === 'manual');
   const zero = plan.filter(p => p.kind === 'zero');
   const coins = (b) => Math.round(b / COIN_VALUE);
-  console.log(`   🔁 تبدیلِ خودکار: ${fa(auto.length)} کاربر · مجموع ${fa(auto.reduce((a, p) => a + p.from, 0))} تومان ⟵⟶ ${fa(auto.reduce((a, p) => a + coins(p.to), 0))} الماس`);
+  const sum = (a, f) => a.reduce((s, p) => s + f(p), 0);
+  console.log(`   🎁 هدیه‌بگیر: ${fa(gift.length)} کاربر · ${fa(sum(gift, p => p.from))} تومان ⟵⟶ ${fa(sum(gift, p => coins(p.to)))} الماس`);
+  console.log(`   💳 پرداخت‌کرده: ${fa(paid.length)} کاربر · ${fa(sum(paid, p => p.from))} تومان ⟵⟶ ${fa(sum(paid, p => coins(p.to)))} الماس`);
   if (manual.length) console.log(`   ✍️ موجودیِ دستی (اعلامِ مالک): ${fa(manual.length)} کاربر`);
   if (zero.length) console.log(`   🧹 صفر شد: ${fa(zero.length)} کاربر`);
+  if (voidPays.length) {
+    console.log(`   🚫 از درآمد حذف می‌شود (approved ⟶ reversed): ${fa(voidPays.length)} پرداخت · ${fa(sum(voidPays, p => p.amount))} تومان`);
+  }
   const untouched = [...payers].filter(id => !plan.some(p => p.id === id));
-  if (untouched.length) console.log(`   ⛔️ دست‌نخورده (پرداختِ واقعی، منتظرِ تصمیمِ مالک): ${fa(untouched.length)} کاربر → ${untouched.join(', ')}`);
+  if (untouched.length) console.log(`   ℹ️ پرداخت‌کرده‌ی بدونِ تغییر (موجودیِ صفر یا از قبل درست): ${fa(untouched.length)}`);
 
   for (const p of plan) {
     const who = `${p.id}${p.username ? ` @${p.username}` : ''}${p.name ? ` (${p.name})` : ''}`;
@@ -119,7 +151,7 @@ function run(file, opts) {
   }
 
   if (!apply) { console.log('   ℹ️ dry-run — چیزی نوشته نشد (برای اعمال: --apply)'); db.close(); return plan.length; }
-  if (!plan.length) { console.log('   ℹ️ چیزی برای تغییر نیست'); db.close(); return 0; }
+  if (!plan.length && !voidPays.length) { console.log('   ℹ️ چیزی برای تغییر نیست'); db.close(); return 0; }
 
   const bak = `${file}.pre-coins.bak`;
   if (existsSync(bak)) rmSync(bak);
@@ -132,13 +164,19 @@ function run(file, opts) {
     ? db.prepare("INSERT INTO events (user_id, event, props) VALUES (?, 'coin_migration', ?)")
     : null;
 
+  const voidPay = db.prepare("UPDATE payments SET status='reversed' WHERE id=? AND status='approved'");
+
   db.transaction(() => {
     for (const p of plan) {
       setBalance.run(p.to, p.id);
       logEvent?.run(p.id, JSON.stringify({ from: p.from, to: p.to, coins: coins(p.to), kind: p.kind }));
     }
+    for (const v of voidPays) {
+      voidPay.run(v.id);
+      logEvent?.run(v.user_id, JSON.stringify({ kind: 'void_payment', payment_id: v.id, amount: v.amount }));
+    }
   })();
-  console.log(`   ✅ ${fa(plan.length)} ردیف به‌روز شد`);
+  console.log(`   ✅ ${fa(plan.length)} ردیفِ موجودی${voidPays.length ? ` و ${fa(voidPays.length)} پرداخت` : ''} به‌روز شد`);
   db.close();
   return plan.length;
 }
