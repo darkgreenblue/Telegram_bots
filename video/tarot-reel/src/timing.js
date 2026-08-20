@@ -15,10 +15,10 @@ import { FPS, VERDICT_BOX, FONT, titleTextBox, captionTextBox, verdictTextBox } 
 import { fitFontSize, paginateToFit, stripDash, normalizeWs } from './text.js';
 
 export const CHARS_PER_SEC = 22; // کمی سریع‌تر از خواندنِ عادی؛ خواسته‌ی مالک
-export const INTRO_SEC = 4;
-export // حرکتِ دو ضربِ «برو، بعد بزرگ شو» به زمان نیاز دارد: با ۰.۷ ثانیه هر ضرب حدود یک‌سومِ
-// ثانیه می‌شد و چشم آن را حرکت نمی‌دید، فقط پرش.
-const FLY_SEC = 1.15;
+export const INTRO_SEC = 5.5;
+// مسیرِ پرواز سه ضرب دارد (به دالان، عمودی، به مقصد و رشد). با ۰.۷ ثانیه هر ضرب حدود
+// یک‌پنجمِ ثانیه می‌شد و چشم آن را حرکت نمی‌دید، فقط پرش.
+export const FLY_SEC = 1.5;
 export const FADE_SEC = 0.4;
 export const MIN_TEXT_SEC = 2.2;
 export const CAP_SEC = 58;
@@ -180,9 +180,14 @@ export function buildPlan(props = {}) {
   let total = frames.reduce((a, f) => a + f, 0);
   // گردکردن می‌تواند چند فریم اضافه بیاورد و مسیرِ فشرده‌سازیِ نسبی هم دقیقاً روی سقف می‌نشیند.
   // این حلقه سقف را قطعی می‌کند، بدون اینکه صحنه‌ای صفر شود.
-  while (total > CAP_FRAMES) {
-    let big = 0;
-    for (let i = 1; i < frames.length; i++) if (frames[i] > frames[big]) big = i;
+  // ⚠️ اینترو هرگز اهداکننده نیست. با متنِ افراطی همه‌ی صحنه‌های متنی به کفشان می‌رسند و
+  // آن‌وقت اینترو بلندترین صحنه می‌شود، پس این حلقه شروع می‌کرد به خوردنِ خودِ انیمیشن.
+  // اینترو اصلاً «نگه‌داشتِ متن» ندارد که کوتاه شود؛ کوتاه‌کردنش یعنی جویده‌کردنِ همان چیزی
+  // که کل این فیچر برایش ساخته شده.
+  const donors = sized.map((it, i) => i).filter((i) => sized[i].kind !== 'intro');
+  while (total > CAP_FRAMES && donors.length) {
+    let big = donors[0];
+    for (const i of donors) if (frames[i] > frames[big]) big = i;
     if (frames[big] <= 1) break;
     frames[big] -= 1;
     total -= 1;
