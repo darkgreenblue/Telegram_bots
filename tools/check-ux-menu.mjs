@@ -106,9 +106,19 @@ console.log('\n▶ قرارداد منوی فال (پین اول، «همه فا
   // v2.4 (تصمیمِ صریحِ مالک): «فال بگیر» بالای «فال تک کارت» و هر دو **تمام‌عرض**.
   ok(/dailyOneCard: '🎴 فال تک کارت امروز \(رایگان\)'/.test(LOC),
     'کیبوردِ اصلی نامِ صریحِ «فال تک کارت امروز (رایگان)» را دارد');
-  ok(/\[L\.buttons\.reading\],\s*\n\s*\[L\.buttons\.dailyOneCard\],/.test(SRC),
-    '«فال بگیر» ردیفِ خودش را بالای «فال تک کارت» دارد (هیچ‌کدام نصفه نیستند)');
-  ok(/L\.buttons\.luckyMain\]/.test(SRC), 'کارت شانس ردیفِ خودش را در کیبوردِ اصلی دارد');
+  // ⚠️ ترتیبِ **کاملِ** کیبورد پین می‌شود، نه فقط دو ردیفِ اولش. نسخه‌ی قبلیِ این ادعا
+  // فقط «reading بالای dailyOneCard» را می‌دید، پس جابه‌جاییِ کارت شانس را اصلاً
+  // نمی‌فهمید. حالا هر چهار ردیف پشتِ‌سرِهم سنجیده می‌شوند.
+  // v3.25.0 (تصمیمِ صریحِ مالک): کارت شانس یک پله بالا، فال تک کارت یک پله پایین.
+  const kbV2 = SRC.slice(SRC.indexOf('const rows = uxV2For(uid)'), SRC.indexOf('if (FREE_MENU_ENABLED'));
+  const ORDER = ['reading', 'luckyMain', 'dailyOneCard'];
+  const seen = [...kbV2.matchAll(/L\.buttons\.(\w+)/g)].map(m => m[1]);
+  ok(seen.slice(0, 3).join('>') === ORDER.join('>'),
+    `ترتیبِ کیبوردِ اصلی: ${ORDER.join(' ⟵ ')} (دیده شد: ${seen.slice(0, 3).join(' ⟵ ')})`);
+  ok(/\[L\.buttons\.reading\],/.test(kbV2) && /\[L\.buttons\.luckyMain\],/.test(kbV2)
+    && /\[L\.buttons\.dailyOneCard\],/.test(kbV2),
+    'و هر سه ردیفِ خودشان را دارند (هیچ‌کدام نصفه کنارِ هم نیستند)');
+  ok(seen.slice(3, 5).join(',') === 'coinShop,inviteMain', 'ردیفِ چهارم: فروشگاه + دعوت');
   // CTAی بعد از فال و بعد از کارتِ روز هر دو از همین قرارداد می‌آیند
   const reco = SRC.slice(SRC.indexOf('function recoRows('), SRC.indexOf('// کیبوردِ منو نباید'));
   ok(/topicRow\(MENU_PIN\)/.test(reco), 'CTAی پایانِ فال هم با «سؤال شخصی خودم» شروع می‌شود');

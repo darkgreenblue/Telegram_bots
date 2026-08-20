@@ -11,8 +11,10 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
 import {
-  COIN_VALUE, OLD_WELCOME_TOMAN, NEW_WELCOME_COINS, TOMAN_PER_COIN,
-  coinsFor, newBalanceFor, parseSetUser, parseIdList, planFor,
+  COIN_VALUE, OLD_WELCOME_TOMAN, NEW_WELCOME_COINS,
+  TOMAN_PER_COIN_GIFT, TOMAN_PER_COIN_PAID,
+  coinsFor, coinsForPaid, newBalanceFor, newBalanceForPaid,
+  parseSetUser, parseIdList, planFor,
 } from './coin-migration-tarot.mjs';
 
 const require = createRequire(import.meta.url);
@@ -30,17 +32,24 @@ console.log('▶ قرارداد با خودِ ربات (وگرنه مهاجرت 
   ok(botCoinValue === COIN_VALUE, `ارزشِ الماس با ربات یکی است (${COIN_VALUE})`);
   ok(botWelcomeCoins === NEW_WELCOME_COINS, `هدیه‌ی خوش‌آمدِ جدید با ربات یکی است (${NEW_WELCOME_COINS} الماس)`);
   ok(botWelcomeToman === OLD_WELCOME_TOMAN, `هدیه‌ی خوش‌آمدِ قدیم با ربات یکی است (${OLD_WELCOME_TOMAN} تومان)`);
-  ok(TOMAN_PER_COIN === 6000, 'نرخ دقیقاً ۶٬۰۰۰ تومان به ازای هر الماس است');
+  ok(TOMAN_PER_COIN_GIFT === 6000, 'نرخِ هدیه‌بگیر دقیقاً ۶٬۰۰۰ تومان به ازای هر الماس است');
+  // نرخِ پرداخت‌کرده باید **دقیقاً** ارزان‌ترین نرخِ فروشگاه باشد، نه یک عددِ دستی.
+  // اگر روزی قیمتِ بسته‌ها عوض شود و این عدد جا بماند، به کاربرِ پرداخت‌کرده کم داده‌ایم.
+  const packs = [...SRC.matchAll(/coins:\s*(\d+)[^}]*?toman:\s*([0-9_]+)/g)]
+    .map(m => Number(m[2].replace(/_/g, '')) / Number(m[1]));
+  ok(packs.length >= 3, `بسته‌های فروشگاه از index.js خوانده شدند (${packs.length} بسته)`);
+  ok(TOMAN_PER_COIN_PAID === Math.min(...packs),
+    `نرخِ پرداخت‌کرده = ارزان‌ترین نرخِ فروشگاه (${TOMAN_PER_COIN_PAID} تومان)`);
 }
 
-console.log('\n▶ فرمول — دقیقاً همان دو مثالی که مالک داد');
+console.log('\n▶ فرمولِ هدیه‌بگیر — دقیقاً همان دو مثالی که مالک داد');
 {
   ok(coinsFor(30_000) === 5, 'کلِ هدیه‌ی خوش‌آمد (۳۰٬۰۰۰) ⟶ ۵ الماس');
   ok(coinsFor(10_000) === 2, 'یک‌سومِ هدیه (۱۰٬۰۰۰) ⟶ ۱.۶۶ که به بالا گرد می‌شود ⟶ ۲ الماس');
   ok(coinsFor(0) === 0, 'کسی که همه‌اش را خرج کرده ⟶ هیچ');
   // گردکردن **همیشه** به بالاست: هیچ کاربری از تبدیل ضرر نمی‌کند
   let alwaysUp = true;
-  for (let t = 1; t <= 300_000; t += 137) if (coinsFor(t) * TOMAN_PER_COIN < t) alwaysUp = false;
+  for (let t = 1; t <= 300_000; t += 137) if (coinsFor(t) * TOMAN_PER_COIN_GIFT < t) alwaysUp = false;
   ok(alwaysUp, 'گردکردن همیشه به نفعِ کاربر است (هیچ ریالی حذف نمی‌شود)');
   let monotone = true;
   for (let t = 1; t <= 200_000; t += 97) if (coinsFor(t) < coinsFor(t - 1)) monotone = false;
@@ -83,19 +92,34 @@ db.prepare("INSERT INTO payments VALUES (1,5,'approved',130000)").run();
 db.prepare("INSERT INTO payments VALUES (2,6,'approved',30000)").run();
 db.prepare("INSERT INTO payments VALUES (3,1,'rejected',50000)").run();  // ردشده ≠ پرداخت‌کننده
 
-console.log('\n▶ چه کسی مهاجرت می‌کند و چه کسی نه');
+console.log('\n▶ فرمولِ پرداخت‌کرده — ارزان‌ترین نرخِ فروشگاه');
+{
+  ok(coinsForPaid(150_000) === 100, 'یک بسته‌ی جادوییِ کامل (۱۵۰٬۰۰۰) ⟶ ۱۰۰ الماس');
+  ok(coinsForPaid(30_000) === 20, '۳۰٬۰۰۰ تومانِ پرداختی ⟶ ۲۰ الماس');
+  ok(coinsForPaid(1_000) === 1, 'کمتر از یک الماس هم به بالا گرد می‌شود ⟶ ۱ الماس');
+  ok(coinsForPaid(0) === 0, 'موجودیِ صفر ⟶ هیچ');
+  // ⚠️ مهم‌ترین ادعای این بلوک: نرخِ پرداخت‌کرده باید **سخاوتمندانه‌تر** باشد، وگرنه
+  // کسی که پولِ واقعی داده از کسی که هدیه گرفته کمتر می‌گیرد.
+  let alwaysBetter = true;
+  for (let t = 1; t <= 300_000; t += 131) if (coinsForPaid(t) < coinsFor(t)) alwaysBetter = false;
+  ok(alwaysBetter, 'نرخِ پرداخت‌کرده هرگز بدتر از نرخِ هدیه‌بگیر نیست');
+  ok(coinsForPaid(30_000) === 4 * coinsFor(30_000), 'و روی هدیه‌ی خوش‌آمد دقیقاً چهار برابر است');
+  ok(newBalanceForPaid(-500) === 0, 'موجودیِ منفی هرگز به الماسِ منفی تبدیل نمی‌شود');
+}
+
+console.log('\n▶ چه کسی با کدام نرخ مهاجرت می‌کند');
 {
   const { plan } = planFor(db);
   const by = Object.fromEntries(plan.map(p => [p.id, p]));
-  ok(!!by[1] && by[1].to === 50_000, 'هدیه‌ی دست‌نخورده ⟶ ۵ الماس');
-  ok(!!by[2] && by[2].to === 20_000, 'یک‌سومِ باقی‌مانده ⟶ ۲ الماس');
+  ok(by[1]?.to === 50_000 && by[1].kind === 'gift', 'هدیه‌ی دست‌نخورده ⟶ ۵ الماس (نرخِ هدیه)');
+  ok(by[2]?.to === 20_000 && by[2].kind === 'gift', 'یک‌سومِ باقی‌مانده ⟶ ۲ الماس');
   ok(!by[3], 'کاربرِ خالی اصلاً در برنامه نیست (چیزی برای تبدیل ندارد)');
-  ok(!!by[4] && by[4].to === 70_000, 'موجودیِ غیرپرداختیِ بزرگ‌تر با همان نسبت (۴۰٬۰۰۰ ⟶ ۷ الماس)');
-  // ⚠️ حیاتی: پولِ واقعیِ کاربر با فرمولِ کلی جابه‌جا نمی‌شود
-  ok(!by[5], 'کاربرِ پرداخت‌کرده **دست نمی‌خورد** (تصمیمِ موردیِ مالک)');
-  ok(!by[6], 'پرداخت‌کننده‌ی با موجودیِ صفر هم دست نمی‌خورد');
-  ok(!!by[1], 'پرداختِ **ردشده** کسی را پرداخت‌کننده نمی‌کند');
-  ok(plan.every(p => p.kind === 'auto'), 'بدونِ ورودیِ مالک، فقط تبدیلِ خودکار');
+  ok(by[4]?.to === 70_000 && by[4].kind === 'gift', 'موجودیِ غیرپرداختیِ بزرگ‌تر با همان نسبت (۴۰٬۰۰۰ ⟶ ۷ الماس)');
+  // ⚠️ حیاتی: پرداخت‌کرده نرخِ **بهتر** می‌گیرد، نه نرخِ هدیه
+  ok(by[5]?.kind === 'paid', 'کاربرِ پرداخت‌کرده با نرخِ پرداخت تبدیل می‌شود');
+  ok(by[5]?.to === 1_340_000, '۲۰۰٬۰۰۰ تومانِ پرداخت‌کرده ⟶ ۱۳۴ الماس (نه ۳۴ الماسِ نرخِ هدیه)');
+  ok(!by[6], 'پرداخت‌کننده‌ی با موجودیِ صفر چیزی برای تبدیل ندارد');
+  ok(by[1].kind === 'gift', 'پرداختِ **ردشده** کسی را پرداخت‌کننده نمی‌کند');
 }
 
 console.log('\n▶ تصمیمِ موردیِ مالک بر همه‌چیز مقدم است');
@@ -105,13 +129,34 @@ console.log('\n▶ تصمیمِ موردیِ مالک بر همه‌چیز مق�
   ok(by[5]?.to === 120_000 && by[5].kind === 'manual', 'کاربرِ پرداخت‌کرده با عددِ اعلامیِ مالک ست می‌شود (۱۲ الماس)');
   ok(by[1]?.to === 0 && by[1].kind === 'manual', 'و SET_USER بر تبدیلِ خودکار مقدم است (حتی روی صفر)');
   ok(by[4]?.to === 0 && by[4].kind === 'zero', 'دوستِ تستی صفر می‌شود');
-  ok(by[4].kind !== 'auto', 'و صفرکردن بر تبدیلِ خودکار مقدم است');
+  ok(by[4].kind !== 'gift', 'و صفرکردن بر تبدیلِ خودکار مقدم است');
+}
+
+console.log('\n▶ 🚫 دوستِ تستی از **درآمد** هم بیرون می‌رود');
+{
+  // سناریوی صریحِ مالک: «سجاد یک رسیدِ الکی زده بود و من هم الکی تأییدش کردم.
+  // موجودی‌اش صفر شود و هر پرداختی که داشته در درآمد حساب نشود.»
+  const { plan, voidPays } = planFor(db, { zeroUser: parseIdList('5') });
+  ok(plan.find(p => p.id === 5)?.to === 0, 'موجودی‌اش صفر می‌شود');
+  ok(plan.find(p => p.id === 5)?.kind === 'zero', 'حتی با اینکه پرداختِ تأییدشده دارد');
+  ok(voidPays.length === 1 && voidPays[0].id === 1, 'پرداختِ تأییدشده‌اش برای حذف از درآمد علامت می‌خورد');
+  ok(voidPays[0].amount === 130_000, 'و مبلغش درست خوانده شده');
+  const other = planFor(db, { zeroUser: parseIdList('5') }).voidPays.filter(v => v.user_id !== 5);
+  ok(other.length === 0, 'و پرداختِ **هیچ کاربرِ دیگری** لمس نمی‌شود');
+  ok(planFor(db).voidPays.length === 0, 'بدونِ ZERO_USER هیچ پرداختی از درآمد حذف نمی‌شود');
+
+  const mig = require('fs').readFileSync(path.resolve('tools/coin-migration-tarot.mjs'), 'utf8');
+  // وضعیتِ `reversed` عمداً انتخاب شده: از قبل معنیِ «رسیدِ فیک» را دارد و همه‌ی
+  // کوئری‌های درآمد روی `status='approved'` می‌نشینند، پس خودکار حذف می‌شود.
+  ok(/UPDATE payments SET status='reversed' WHERE id=\? AND status='approved'/.test(mig),
+    'حذف از درآمد با گذارِ approved ⟶ reversed انجام می‌شود، نه با پاک‌کردنِ ردیف');
+  ok(!/DELETE FROM payments/.test(mig), 'هیچ پرداختی از دیتابیس پاک نمی‌شود (ردپا می‌ماند)');
 }
 
 console.log('\n▶ اجرای دوباره پولِ کاربران را باد نمی‌کند');
 {
   // این خطرناک‌ترین حالتِ ممکن است: خروجیِ تبدیل، خودش ورودیِ معتبرِ فرمول است.
-  const twice = coinsFor(newBalanceFor(30_000) / 1);
+  const twice = coinsFor(newBalanceFor(30_000));
   ok(twice !== 5, `اجرای دوم روی موجودیِ تبدیل‌شده عددِ متفاوتی می‌دهد (${twice}) — پس گاردِ marker حیاتی است`);
   const mig = require('fs').readFileSync(path.resolve('tools/coin-migration-tarot.mjs'), 'utf8');
   ok(/existsSync\(marker\) && !process\.argv\.includes\('--force'\)/.test(mig),
