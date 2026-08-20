@@ -28,7 +28,7 @@ console.log('▶ الگوی دو-پرچمیِ بند ۲ج-۲ (پرچمِ فیچ�
   for (const [flag, gate, helper, expectFlag, expectAdminOnly] of [
     ['READING_TONE_V2', 'READING_TONE_V2_ADMIN_ONLY', 'toneV2For', true, false], // v3.3.0: برای همه باز شد
     ['COIN_ECONOMY', 'COIN_ECONOMY_ADMIN_ONLY', 'coinsOn', false, true],         // پارک‌شده
-    ['UX_V2', 'UX_V2_ADMIN_ONLY', 'uxV2For', true, true],                        // v3.8.0: فعلاً فقط ادمین
+    ['UX_V2', 'UX_V2_ADMIN_ONLY', 'uxV2For', true, false],                       // v3.25.0: برای همه باز شد
   ]) {
     ok(new RegExp(`const ${flag}\\s*=\\s*${expectFlag}`).test(SRC),
       `${flag} === ${expectFlag} (${expectFlag ? 'روشن؛ رول‌بک = false کردنش' : 'پارک‌شده'})`);
