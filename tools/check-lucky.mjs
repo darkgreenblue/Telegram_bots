@@ -26,7 +26,8 @@ const db = new Database(':memory:');
 db.exec(`CREATE TABLE users (
   telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'idle', session_json TEXT NOT NULL DEFAULT '',
-  lucky_date TEXT NOT NULL DEFAULT '', lucky_hand TEXT NOT NULL DEFAULT '')`);
+  lucky_date TEXT NOT NULL DEFAULT '', lucky_hand TEXT NOT NULL DEFAULT '',
+  lucky_hands INTEGER NOT NULL DEFAULT 0)`);
 
 // SQLِ کلیدی **از خودِ index.js** خوانده می‌شود، پس این کپیِ منطق نیست.
 const sqlOf = (name) => {
@@ -35,6 +36,7 @@ const sqlOf = (name) => {
   return m[2];
 };
 const claimLucky = db.prepare(sqlOf('claimLucky'));
+const bumpLuckyHands = db.prepare(sqlOf('bumpLuckyHands'));
 const setLuckyHand = db.prepare(sqlOf('setLuckyHand'));
 const credit = db.prepare(sqlOf('credit'));
 const getUser = db.prepare('SELECT * FROM users WHERE telegram_id=?');
@@ -42,31 +44,70 @@ const setState = db.prepare('UPDATE users SET state=? WHERE telegram_id=?');
 const wipeSession = db.prepare("UPDATE users SET session_json='' WHERE telegram_id=?");
 
 const TODAY = '2026-08-19';
-const luckyCoinSlots = (uid, day, nonce = '') => {
-  const seed = `lucky:${uid}:${day}:${nonce}`;
-  return Array.from({ length: GRID_SIZE }, (_, i) => i)
-    .sort((a, b) => seedToInt(seed + a) - seedToInt(seed + b)).slice(0, LUCKY_COINS);
+
+/* ── منطقِ حساس **از خودِ index.js** برداشته و اجرا می‌شود، نه کپی ────────────────
+   چرا: نسخه‌ی اولِ این فایل چیدمان و منطقِ «کفِ دستِ اول» را دوباره در تست می‌نوشت.
+   نتیجه‌اش این بود که شبیه‌سازی مدلِ **من** را می‌سنجید نه کدِ محصول را؛ در تستِ جهش
+   ثابت شد: «کف را برای همه‌ی دست‌ها روشن کن» را اصلاً نمی‌دید چون کدِ محصول اجرا
+   نمی‌شد. حالا همان چهار قطعه‌ی حساس از سورس بریده و با `new Function` اجرا می‌شوند،
+   دقیقاً مثلِ کاری که `sqlOf` با SQL می‌کند. */
+const chunk = (start, end) => {
+  const i = SRC.indexOf(start);
+  if (i < 0) throw new Error(`قطعه‌ی «${start}» در index.js پیدا نشد`);
+  const j = SRC.indexOf(end, i);
+  if (j < 0) throw new Error(`پایانِ قطعه‌ی «${start}» پیدا نشد`);
+  return SRC.slice(i, j + end.length);
 };
-const readHand = (uid) => { try { const r = getUser.get(uid)?.lucky_hand; if (!r) return null; const h = JSON.parse(r); return (h && typeof h.d === 'string' && Array.isArray(h.p)) ? { d: h.d, n: String(h.n || ''), p: h.p.map(Number), f: Number(h.f) || 0 } : null; } catch { return null; } };
+const fstLines = SRC.match(/^\s*fst = .+;$/gm) || [];
+if (fstLines.length !== 1) throw new Error(`انتظارِ دقیقاً یک خطِ «fst = …» بود، ${fstLines.length} تا پیدا شد`);
+const REAL = new Function(
+  'GRID_SIZE', 'LUCKY_COINS', 'LUCKY_PICKS', 'LUCKY_FIRST_MIN', 'seedToInt', 'getUser', `
+${chunk('function luckyCoinSlots(', '\n}')}
+${chunk('const luckySlotsFor = ', '\n};')}
+${chunk('function forcedHit(', '\n}')}
+function firstFlag(uid) { let fst; ${fstLines[0].trim()} return fst; }
+function decide(uid, hand, fst, i, picks) {
+${chunk('  const h = { ...hand, fst };', 'const found = hand.f + (hit ? 1 : 0);')}
+  return { hit, x, coinSlots, found };
+}
+return { luckyCoinSlots, luckySlotsFor, forcedHit, firstFlag, decide };`
+)(GRID_SIZE, LUCKY_COINS, LUCKY_PICKS, num('LUCKY_FIRST_MIN'), seedToInt, (uid) => getUser.get(uid));
+
+const { luckyCoinSlots, luckySlotsFor: slotsFor, forcedHit, firstFlag, decide } = REAL;
+const readHand = (uid) => { try { const r = getUser.get(uid)?.lucky_hand; if (!r) return null; const h = JSON.parse(r); return (h && typeof h.d === 'string' && Array.isArray(h.p)) ? { d: h.d, n: String(h.n || ''), p: h.p.map(Number), f: Number(h.f) || 0, fst: h.fst ? 1 : 0, x: Array.isArray(h.x) ? h.x.map(Number) : [] } : null; } catch { return null; } };
+const LUCKY_FIRST_MIN = num('LUCKY_FIRST_MIN');
 const writeHand = (uid, h) => setLuckyHand.run(JSON.stringify(h), uid);
 const openHand = (uid, today = TODAY) => { const h = readHand(uid); return h && h.d === today && h.n && h.p.length < LUCKY_PICKS ? h : null; };
 
 const newUser = (uid) => db.prepare('INSERT INTO users (telegram_id) VALUES (?)').run(uid);
-const startHand = (uid, nonce) => { setState.run('lucky_pick', uid); writeHand(uid, { d: TODAY, n: nonce, p: [], f: 0 }); };
+const startHand = (uid, nonce) => { setState.run('lucky_pick', uid); writeHand(uid, { d: TODAY, n: nonce, p: [], f: 0, fst: 0, x: [] }); };
 /** دقیقاً همان ترتیبِ هندلرِ `lpick:`. خروجی: 'ok' | 'dup' | 'expired' | 'claimed' */
 function pick(uid, i, today = TODAY) {
   const hand = readHand(uid);
   if (!hand || hand.d !== today || !hand.n) return 'expired';
   const picks = hand.p.slice();
   if (picks.includes(i) || picks.length >= LUCKY_PICKS) return 'dup';
-  if (!picks.length && claimLucky.run(today, uid, today).changes === 0) { setState.run('idle', uid); return 'claimed'; }
-  const hit = luckyCoinSlots(uid, today, hand.n).includes(i);
-  picks.push(i);
-  const found = hand.f + (hit ? 1 : 0);
+  let fst = hand.fst;
+  if (!picks.length) {
+    if (claimLucky.run(today, uid, today).changes === 0) { setState.run('idle', uid); return 'claimed'; }
+    fst = firstFlag(uid);                    // ← همان خطِ خودِ index.js
+    bumpLuckyHands.run(uid);
+  }
+  // ← تصمیمِ «برد/اجبار/چیدمانِ مؤثر» عیناً همان بلوکِ خودِ هندلر است (بریده از سورس)
+  const { hit, x, found } = decide(uid, hand, fst, i, picks);
   setState.run(picks.length >= LUCKY_PICKS ? 'idle' : 'lucky_pick', uid);
-  writeHand(uid, { d: today, n: hand.n, p: picks, f: found });
+  writeHand(uid, { d: today, n: hand.n, p: picks, f: found, fst, x });
   if (hit) credit.run(LUCKY_COIN_VALUE, uid);
   return 'ok';
+}
+/** یک دستِ کامل: سه انتخابِ شبه‌تصادفی. خروجی: {found, faces} — faces همان چیزی که
+ *  گرید به کاربر **نشان می‌دهد** (از چیدمانِ مؤثرِ نهایی). */
+function playHand(uid, day, seed) {
+  const order = [...Array(GRID_SIZE).keys()].sort((a, b) => seedToInt(seed + a) - seedToInt(seed + b));
+  for (let k = 0; k < LUCKY_PICKS; k++) pick(uid, order[k], day);
+  const h = readHand(uid);
+  const finalSlots = slotsFor(uid, h);
+  return { found: h.f, picks: h.p, faces: h.p.map(i => finalSlots.includes(i)) };
 }
 
 console.log('▶ ثابت‌ها و ریاضیِ پایه');
@@ -146,6 +187,127 @@ console.log('\n▶ ریاضی و پول: شبیه‌سازیِ ۱۰٬۰۰۰ دس
   ok(luckyCoinSlots(7, TODAY, 'h1').join(',') === a, 'ولی داخلِ یک دست ثابت است (بستن/بازکردنِ چت بی‌اثر)');
 }
 
+console.log('\n▶ 🎁 کفِ دستِ اول: هر کاربر در اولین تجربه‌اش حتماً ۲ الماس می‌گیرد');
+{
+  ok(LUCKY_FIRST_MIN === 2, `کف روی ${LUCKY_FIRST_MIN} الماس تنظیم شده`);
+
+  // ── شبیه‌سازیِ ۵۰۰۰ کاربرِ تازه، هر کدام دو دستِ کامل در دو روزِ متفاوت ──
+  const first = [0, 0, 0, 0], second = [0, 0, 0, 0];
+  let faceMismatch = 0, firstBelowMin = 0, forcedOnPick1 = 0;
+  const DAY2 = '2026-08-20';
+  for (let u = 0; u < 5000; u++) {
+    const id = 100000 + u;
+    newUser(id);
+
+    // دستِ اول
+    setState.run('lucky_pick', id);
+    writeHand(id, { d: TODAY, n: `h1-${u}`, p: [], f: 0, fst: 0, x: [] });
+    const r1 = playHand(id, TODAY, `s1-${u}`);
+    first[r1.found]++;
+    if (r1.found < LUCKY_FIRST_MIN) firstBelowMin++;
+    // 🔒 نامرئی بودن: چیزی که گرید نشان می‌دهد باید **دقیقاً** با تعدادِ الماسِ
+    // واریزشده بخواند. اگر کارتی 💎 حساب شده ولی 🍂 رندر شود، کاربر تناقض می‌بیند.
+    if (r1.faces.filter(Boolean).length !== r1.found) faceMismatch++;
+    // انتخابِ **اول** هرگز نباید دستکاری شود (شرطِ صریحِ مالک)
+    const h1 = readHand(id);
+    if (h1.x.includes(h1.p[0])) forcedOnPick1++;
+
+    // دستِ دوم، روزِ بعد — باید کاملاً شانسی باشد
+    setState.run('lucky_pick', id);
+    writeHand(id, { d: DAY2, n: `h2-${u}`, p: [], f: 0, fst: 0, x: [] });
+    const r2 = playHand(id, DAY2, `s2-${u}`);
+    second[r2.found]++;
+    if (r2.faces.filter(Boolean).length !== r2.found) faceMismatch++;
+  }
+
+  ok(firstBelowMin === 0, `هیچ کاربری در دستِ اول زیرِ ${LUCKY_FIRST_MIN} الماس نگرفت (۵۰۰۰ نمونه)`);
+  ok(first[0] === 0 && first[1] === 0, 'دستِ اول هرگز صفر یا یک الماس نمی‌دهد');
+  ok(forcedOnPick1 === 0, 'انتخابِ **اول** هرگز دستکاری نمی‌شود (کاملاً شانسی، شرطِ مالک)');
+  ok(faceMismatch === 0,
+    '🔒 نامرئی: هر کارتی که الماس حساب شده روی گرید هم 💎 رندر می‌شود (هیچ تناقضی دیده نمی‌شود)');
+
+  // توزیعِ دستِ اول: تئوری می‌گوید ۳ الماس فقط وقتی رخ می‌دهد که کاربر **خودش**
+  // هر سه را طبیعی برده باشد: (8/24)(7/23)(6/22) ≈ ۲.۷۷٪
+  const p3 = first[3] / 5000;
+  const theory3 = (LUCKY_COINS / GRID_SIZE) * ((LUCKY_COINS - 1) / (GRID_SIZE - 1)) * ((LUCKY_COINS - 2) / (GRID_SIZE - 2));
+  ok(Math.abs(p3 - theory3) < 0.02,
+    `نرخِ «هر سه الماس» در دستِ اول با تئوری می‌خواند (${(p3 * 100).toFixed(1)}٪ در برابرِ ${(theory3 * 100).toFixed(1)}٪)`);
+  const meanFirst = (2 * first[2] + 3 * first[3]) / 5000;
+  ok(meanFirst > 2 && meanFirst < 2.1,
+    `امیدِ ریاضیِ دستِ اول ≈ ${meanFirst.toFixed(3)} (هزینه: حدودِ یک الماسِ اضافه، یک‌بار در عمرِ هر کاربر)`);
+
+  // ── دستِ دوم دست‌نخورده است ──
+  const meanSecond = second.reduce((a, c, k) => a + k * c, 0) / 5000;
+  ok(Math.abs(meanSecond - 1) < 0.06, `دستِ دوم کاملاً شانسی ماند (میانگین ${meanSecond.toFixed(3)} ≈ ۱)`);
+  ok(second[0] > 0, 'و در دستِ دوم «صفر الماس» دوباره ممکن است (هیچ کفی نیست)');
+  ok(second.every(x => x > 0), 'هر چهار خروجیِ ۰ تا ۳ در دستِ دوم دیده می‌شود');
+
+  // ── سناریوهای صریحِ اسپکِ مالک، تک‌به‌تک ──
+  // ⚠️ تخته را **دستکاری نمی‌کنیم**؛ به‌جایش خانه‌هایی را انتخاب می‌کنیم که طبیعتاً
+  //    وضعیتِ خواسته‌شده را دارند: برای «طبیعتاً الماس» یکی از خانه‌های `luckyCoinSlots`
+  //    و برای «طبیعتاً پوچ» یکی از بقیه. (نسخه‌ی اولِ این هِلپر `x` را از قبل می‌نوشت
+  //    که غلط بود: `x` دفترِ الماسِ **تضمینی** است و فقط می‌تواند الماس **اضافه** کند،
+  //    پس هرگز نمی‌تواند خانه‌ای را پوچ کند.)
+  let scId = 900000;
+  const scenario = (want) => {                 // want = آرایه‌ی سه‌تاییِ «طبیعتاً الماس؟»
+    const id = ++scId;
+    newUser(id);
+    setState.run('lucky_pick', id);
+    const nonce = 'sc';
+    const base = luckyCoinSlots(id, TODAY, nonce);
+    const coins = base.slice();
+    const blanks = [...Array(GRID_SIZE).keys()].filter(i => !base.includes(i));
+    const idxs = want.map(w => (w ? coins.shift() : blanks.shift()));
+    writeHand(id, { d: TODAY, n: nonce, p: [], f: 0, fst: 0, x: [] });
+    const hits = [];
+    for (const i of idxs) { const before = readHand(id).f; pick(id, i); hits.push(readHand(id).f > before); }
+    const h = readHand(id);
+    const finalSlots = slotsFor(id, h);
+    return { hits, found: h.f, forced: h.x, faces: h.p.map(i => finalSlots.includes(i)) };
+  };
+  const sameFaces = (s) => s.faces.every((f, k) => f === s.hits[k]);
+
+  // سناریو ۱: انتخابِ اول پوچ → دوم و سوم باید الماس شوند
+  const s1 = scenario([false, false, false]);
+  ok(s1.hits[0] === false && s1.hits[1] === true && s1.hits[2] === true && s1.found === 2,
+    'سناریو ۱: اولی پوچ → دومی و سومی تضمینی الماس (نتیجه ۲)');
+  ok(sameFaces(s1), 'سناریو ۱: گرید هم همان دو الماس را نشان می‌دهد (نامرئی می‌ماند)');
+
+  // سناریو ۲ب: اولی الماس، دومی پوچ → سومی باید الماس شود
+  const s2 = scenario([true, false, false]);
+  ok(s2.hits[0] === true && s2.hits[1] === false && s2.hits[2] === true && s2.found === 2,
+    'سناریو ۲ب: اولی الماس، دومی پوچ → سومی تضمینی (نتیجه ۲)');
+  ok(s2.forced.length === 1, 'و فقط **یک** خانه تضمینی شده، نه بیشتر (کمترین دخالت)');
+
+  // سناریو ۲الف: اولی و دومی طبیعتاً الماس → سومی کاملاً رها می‌شود
+  const s2a = scenario([true, true, false]);
+  ok(s2a.hits[2] === false && s2a.found === 2 && s2a.forced.length === 0,
+    'سناریو ۲الف: دو الماسِ طبیعی → سومی دست‌نخورده می‌ماند (پوچ می‌شود، هیچ دخالتی نیست)');
+
+  // سناریو ۳: کاربر خودش هر سه را می‌برد → هیچ دخالتی
+  const s3 = scenario([true, true, true]);
+  ok(s3.found === 3 && s3.forced.length === 0, 'سناریو ۳: سه الماسِ طبیعی، بدونِ هیچ دخالتی');
+
+  // و دستِ **دوم** هیچ کفی ندارد، حتی اگر هر سه پوچ باشند
+  {
+    const id = ++scId;
+    newUser(id);
+    setState.run('lucky_pick', id);
+    writeHand(id, { d: TODAY, n: 'sc', p: [], f: 0, fst: 0, x: [] });
+    const base = luckyCoinSlots(id, TODAY, 'sc');
+    const blanks = [...Array(GRID_SIZE).keys()].filter(i => !base.includes(i));
+    for (const i of blanks.slice(0, LUCKY_PICKS)) pick(id, i);          // دستِ اول (کف‌دار)
+    setState.run('lucky_pick', id);
+    writeHand(id, { d: DAY2, n: 'sc2', p: [], f: 0, fst: 0, x: [] });
+    const b2 = luckyCoinSlots(id, DAY2, 'sc2');
+    const bl2 = [...Array(GRID_SIZE).keys()].filter(i => !b2.includes(i));
+    for (const i of bl2.slice(0, LUCKY_PICKS)) pick(id, i);             // دستِ دوم
+    const h2 = readHand(id);
+    ok(h2.f === 0 && h2.x.length === 0,
+      'دستِ دوم با سه انتخابِ پوچ واقعاً صفر می‌شود (کف فقط یک‌بار در عمرِ کاربر)');
+  }
+}
+
 console.log('\n▶ سیم‌کشیِ کد');
 {
   const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -169,6 +331,24 @@ console.log('\n▶ سیم‌کشیِ کد');
   ok(/if \(!h\) return false;/.test(g), 'اگر دستی برای ادامه نباشد گارد فعال نمی‌شود');
   ok((CODE.match(/blockDuringOpenLucky\(ctx/g) || []).length >= 6,
     `گارد روی نقاطِ ورودِ منو سیم شده (${(CODE.match(/blockDuringOpenLucky\(ctx/g) || []).length} نقطه)`);
+  // سیم‌کشیِ کفِ دستِ اول
+  ok(/ALTER TABLE users ADD COLUMN lucky_hands INTEGER NOT NULL DEFAULT 0/.test(SRC),
+    'شمارنده‌ی دست‌ها ستونِ افزایشی است (بند ۲ج/۱)');
+  ok(/const forced = forcedHit\(h, picks\.length, natural\);/.test(lp), 'هر انتخاب از منطقِ کف رد می‌شود');
+  ok(/const hit = natural \|\| forced;/.test(lp), 'و «برد» یا طبیعی است یا اجباری');
+  ok(/const coinSlots = forced \? \[\.\.\.slots, i\] : slots;/.test(lp),
+    '🔒 گرید از **همان** مجموعه‌ی مؤثر رندر می‌شود (وگرنه کارتِ الماس‌شده 🍂 دیده می‌شد)');
+  ok(lp.indexOf('bumpLuckyHands') > lp.indexOf('claimLucky'),
+    'شمارنده **بعد از** گاردِ اتمیکِ روز بالا می‌رود (پس دقیقاً یک بار)');
+  ok(!/await/.test(lp.slice(0, lp.indexOf('writeLuckyHand'))),
+    'کلِ تصمیمِ کف قبل از اولین await است (ضدِ دوبار-تپ)');
+  const fh = CODE.slice(CODE.indexOf('function forcedHit'), CODE.indexOf('\n}', CODE.indexOf('function forcedHit')));
+  ok(/if \(!h\.fst \|\| naturalHit\) return false;/.test(fh),
+    'فقط دستِ اول، و فقط وقتی کارت طبیعتاً الماس نبوده');
+  ok(/h\.f \+ remainingAfterThis < LUCKY_FIRST_MIN/.test(fh),
+    'و فقط وقتی بدونِ دخالت به کف نمی‌رسیدیم (کمینه‌ترین دخالتِ ممکن)');
+  ok(/first: fst/.test(CODE), 'رویدادِ lucky_card propِ افزایشیِ first را دارد (قابلِ اندازه‌گیری)');
+
   const cancel = CODE.slice(CODE.indexOf("bot.action('lucky:cancel'"), CODE.indexOf("async function luckyCard"));
   ok(!/setLuckyHand|writeLuckyHand/.test(cancel),
     '«بی‌خیال» دستِ کاربر را پاک نمی‌کند (انتخاب‌های باقی‌مانده حقِ اوست تا آخرِ روز)');
