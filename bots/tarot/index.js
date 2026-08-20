@@ -170,7 +170,7 @@ const TEST_PHASE = false;
 // 3.5.4: دورِ سوم — ریشه‌ی باگِ «پارسال» (فالِ قبلی تاریخ نداشت) با داده حل شد،
 //        خوانشِ کارت‌ها یک بلوکِ پیوسته شد (نه ایموجی per کارت)، سؤالِ بازخورد با
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
-const PRODUCT_VERSION = '3.20.0';
+const PRODUCT_VERSION = '3.21.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -440,6 +440,9 @@ const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_V
 const LUCKY_PICKS = 3;                    // چند کارت انتخاب می‌کند
 const LUCKY_COINS = 8;                    // پشتِ چند کارت از GRID_SIZE الماس هست
 const LUCKY_COIN_VALUE = 1 * COIN_VALUE;  // ارزشِ هر کارتِ الماس‌دار
+// 🎁 کفِ الماسِ **دستِ اولِ عمرِ هر کاربر** (تصمیمِ صریحِ مالک). فقط همان یک دست؛ از
+// دستِ دوم به بعد هیچ دخالتی نیست. جزئیات و هزینه‌اش کنارِ `forcedHit` پایین.
+const LUCKY_FIRST_MIN = 2;
 // تخفیفِ اولین پرداخت (v2.0.0): ۲۰٪، **فقط روی فالِ رزروشده‌ی همان لحظه** و بدون سقف.
 // دیگر کدی کپی نمی‌شود: دکمه‌ی «تخفیف می‌خوام» یک پیامِ کوتاهِ اطلاع‌رسانی می‌دهد و بلافاصله
 // خودِ فاکتورِ تخفیف‌خورده را می‌فرستد. شارژِ کیف‌پول عمداً تخفیف نمی‌گیرد (فرایندِ جداست).
@@ -597,6 +600,9 @@ try { db.prepare('ALTER TABLE users ADD COLUMN lucky_reminder_on INTEGER NOT NUL
 // `onboard_allspreads` سال‌ها گاردِ فال را نداشت). پس خودِ داده از دسترسِ آن‌ها بیرون رفت.
 // یک ستونِ JSON، نه چهار ستون: نوشتنش اتمیک است و اضافه‌کردنِ فیلد مهاجرت نمی‌خواهد.
 try { db.prepare("ALTER TABLE users ADD COLUMN lucky_hand TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// شمارنده‌ی دست‌های واقعیِ کارت شانس (فقط با **اولین انتخاب** بالا می‌رود، نه با دیدنِ
+// گرید). تنها مصرفش تشخیصِ «دستِ اولِ عمرِ کاربر» است — پایین، بخشِ کفِ دستِ اول.
+try { db.prepare('ALTER TABLE users ADD COLUMN lucky_hands INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN last_lucky_reminder_at INTEGER').run(); } catch {}
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
@@ -737,6 +743,7 @@ const stmts = {
   claimLucky: db.prepare("UPDATE users SET lucky_date=? WHERE telegram_id=? AND COALESCE(lucky_date,'') <> ?"),
   setLuckyReminder: db.prepare('UPDATE users SET lucky_reminder_on=? WHERE telegram_id=?'),
   setLuckyHand: db.prepare('UPDATE users SET lucky_hand=? WHERE telegram_id=?'),
+  bumpLuckyHands: db.prepare('UPDATE users SET lucky_hands = lucky_hands + 1 WHERE telegram_id=?'),
   setLuckyReminded: db.prepare('UPDATE users SET last_lucky_reminder_at=unixepoch() WHERE telegram_id=?'),
   dueLuckyReminder: db.prepare(`
     SELECT telegram_id FROM users
@@ -2188,10 +2195,51 @@ function readLuckyHand(uid) {
     if (!raw) return null;
     const h = JSON.parse(raw);
     if (!h || typeof h.d !== 'string' || !Array.isArray(h.p)) return null;
-    return { d: h.d, n: String(h.n || ''), p: h.p.map(Number).filter(Number.isInteger), f: Number(h.f) || 0 };
+    return {
+      d: h.d, n: String(h.n || ''),
+      p: h.p.map(Number).filter(Number.isInteger),
+      f: Number(h.f) || 0,
+      fst: h.fst ? 1 : 0,                                   // دستِ اولِ عمرِ کاربر؟
+      x: Array.isArray(h.x) ? h.x.map(Number).filter(Number.isInteger) : [],  // خانه‌های الماس‌شده‌ی دستی
+    };
   } catch { return null; }
 }
 const writeLuckyHand = (uid, h) => { try { stmts.setLuckyHand.run(JSON.stringify(h), uid); } catch {} };
+/* 🎁 **کفِ دستِ اول** (تصمیمِ صریحِ مالک): اولین باری که هر کاربر کارت شانس می‌کشد
+   باید دستِ خالی نرود؛ کف **دو الماس**. از دستِ دوم به بعد هیچ دخالتی نیست.
+
+   چرا: اولین تجربه اگر «سه پوچ» باشد (احتمالش ۲۷.۷٪ است، یعنی از هر چهار کاربرِ تازه
+   بیشتر از یکی) کاربر همان‌جا حکم می‌دهد که این بازی چیزی نمی‌دهد و دیگر برنمی‌گردد.
+   قلابِ روزانه‌ی رایگان با همان یک تجربه می‌میرد.
+
+   ⚠️ قاعده‌ی نامرئی بودن: هیچ چیزی در فلو، متن، دکمه یا ترتیب عوض نمی‌شود. تنها کاری
+   که می‌کنیم این است که خانه‌ی **همان کارتی که خودِ کاربر زد** به مجموعه‌ی الماس‌ها
+   اضافه شود. چون گرید فقط کارت‌های **انتخاب‌شده** را رو می‌کند، کاربر هیچ‌وقت نمی‌تواند
+   تعدادِ الماسِ تخته را بشمارد و تناقضی ببیند. برای همین خانه‌های اضافه‌شده در خودِ
+   دست ذخیره می‌شوند (`x`) و **هم قضاوتِ برد و هم رندرِ گرید** از همان یک مجموعه
+   می‌خوانند — وگرنه کارتی که 💎 حساب شده بود روی صفحه 🍂 نشان داده می‌شد.
+
+   **کمینه‌ترین دخالتِ ممکن:** فقط وقتی که بدونِ دخالت، حتی با بردنِ همه‌ی انتخاب‌های
+   باقی‌مانده هم به کف نمی‌رسیدیم. یعنی:
+     • انتخابِ اول: هرگز دستکاری نمی‌شود (کاملاً شانسی).
+     • انتخابِ دوم: فقط اگر اولی پوچ بود.
+     • انتخابِ سوم: فقط اگر تا این‌جا یک الماس داریم.
+   نتیجه: دستِ اول همیشه ۲ الماس، و با احتمالِ ~۲.۸٪ سه‌تا (وقتی کاربر خودش هر سه را
+   طبیعی برده باشد). امیدِ ریاضیِ دستِ اول ~۲.۰۳ به‌جای ۱.۰۰ — یعنی هزینه‌ی این تصمیم
+   حدودِ **یک الماسِ اضافه، یک‌بار در عمرِ هر کاربر**. */
+const luckySlotsFor = (uid, h) => {
+  const base = luckyCoinSlots(uid, h.d, h.n);
+  return h.x.length ? [...new Set([...base, ...h.x])] : base;
+};
+/** آیا این انتخاب باید به‌زور الماس شود؟ `idx` = چندمین انتخاب (۰-پایه). */
+function forcedHit(h, idx, naturalHit) {
+  if (!h.fst || naturalHit) return false;
+  const remainingAfterThis = LUCKY_PICKS - 1 - idx;
+  // بدترین حالت اگر این یکی پوچ بماند: همه‌ی باقی‌مانده‌ها ببرند. اگر باز هم به کف
+  // نرسیم، همین یکی باید ببرد.
+  return h.f + remainingAfterThis < LUCKY_FIRST_MIN;
+}
+
 /** دستی که **همین امروز** باز است و هنوز انتخابِ نکشیده دارد. */
 function openLuckyHand(uid) {
   const h = readLuckyHand(uid);
@@ -2200,8 +2248,7 @@ function openLuckyHand(uid) {
 /** گریدِ همان دست را دوباره جلوی کاربر می‌گذارد (ادامه‌ی بازی). */
 async function resumeLuckyHand(ctx, uid, h) {
   setState(uid, 'lucky_pick');
-  const slots = luckyCoinSlots(uid, h.d, h.n);
-  await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS - h.p.length), luckyGridKb(h.p, slots));
+  await ctx.reply(L.lucky.pickPrompt(LUCKY_PICKS - h.p.length), luckyGridKb(h.p, luckySlotsFor(uid, h)));
 }
 
 // 🎲 گاردِ «دستِ بازِ کارت شانس» — دوقلوی `blockDuringOpenReading`. با اینکه دست دیگر
@@ -2293,7 +2340,7 @@ bot.action('lucky_stop', async (ctx) => {
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
   // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
   const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
-  writeLuckyHand(uid, { d: today, n: luckyNonce, p: [], f: 0 });
+  writeLuckyHand(uid, { d: today, n: luckyNonce, p: [], f: 0, fst: 0, x: [] });
   // فقط شناسه‌ی پیامِ وضعیت در سشن می‌ماند (جزئیاتِ نمایشی؛ گم شدنش فقط یک پیامِ تازه می‌سازد)
   patchSession(uid, { luckyStatusMsgId: 0 });
   const msgId = getSession(uid).luckyMsgId;
@@ -2318,17 +2365,34 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
     return ctx.answerCbQuery().catch(() => {});
   }
   // روز فقط با **اولین** انتخاب سوخته می‌شود، و آن هم اتمیک (شرطِ روز داخلِ UPDATE).
-  if (!picks.length && stmts.claimLucky.run(today, uid, today).changes === 0) {
-    setState(uid, 'idle');
-    return ctx.answerCbQuery().catch(() => {});
+  let fst = hand.fst;
+  if (!picks.length) {
+    if (stmts.claimLucky.run(today, uid, today).changes === 0) {
+      setState(uid, 'idle');
+      return ctx.answerCbQuery().catch(() => {});
+    }
+    // 🎁 «دستِ اولِ عمرِ کاربر» دقیقاً همین‌جا تعیین و در خودِ دست فریز می‌شود: بعد از
+    // claimLucky (که اتمیک است و روزی یک بار رد می‌شود) و قبل از اولین await. شمارنده
+    // با **اولین انتخاب** بالا می‌رود نه با دیدنِ گرید، پس کسی که فقط نگاه کرد و بست
+    // دستِ اولش را از دست نمی‌دهد.
+    fst = (getUser(uid)?.lucky_hands || 0) === 0 ? 1 : 0;
+    stmts.bumpLuckyHands.run(uid);
   }
-  const coinSlots = luckyCoinSlots(uid, today, hand.n);
-  const hit = coinSlots.includes(i);
+
+  const h = { ...hand, fst };
+  const slots = luckySlotsFor(uid, h);
+  const natural = slots.includes(i);
+  const forced = forcedHit(h, picks.length, natural);
+  const hit = natural || forced;
+  // خانه‌ی اجباری در خودِ دست ثبت می‌شود تا **رندرِ گرید** هم همان را 💎 ببیند،
+  // وگرنه کارتی که الماس حساب شده روی صفحه 🍂 نشان داده می‌شد.
+  const x = forced ? [...hand.x, i] : hand.x;
+  const coinSlots = forced ? [...slots, i] : slots;
   picks.push(i);
   const found = hand.f + (hit ? 1 : 0);
   const done = picks.length >= LUCKY_PICKS;
   setState(uid, done ? 'idle' : 'lucky_pick');
-  writeLuckyHand(uid, { d: today, n: hand.n, p: picks, f: found });
+  writeLuckyHand(uid, { d: today, n: hand.n, p: picks, f: found, fst, x });
 
   // واریزِ همان لحظه (نه آخرِ بازی): ری‌استارتِ وسطِ کار نباید الماسِ برده‌شده را بخورد.
   if (hit) {
@@ -2343,7 +2407,7 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   await showLuckyStatus(ctx, uid, counter);
   if (!done) return;
 
-  track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS });
+  track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS, first: fst });
   await sleep(PACE_S);
   const reminderOn = !!getUser(uid)?.lucky_reminder_on;
   // نتیجه روی **همان** پیامِ وضعیت می‌نشیند (خطِ شمارنده بالایش می‌ماند تا «۳ از ۳» دیده شود).
