@@ -122,6 +122,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-ganjineh.mjs
 
+      # مهاجرتِ تومان ⟶ الماس: یک‌بار روی دیتابیسِ ربات زنده اجرا می‌شود و مستقیم به
+      # موجودیِ کاربران دست می‌زند، پس منطقش قبل از اجرا اثبات می‌شود نه بعدش (بند ۹ ریشه).
+      - name: Coin migration check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-coin-migration.mjs
+
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs

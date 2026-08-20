@@ -684,7 +684,18 @@ const idxText = stripCommentsOnly(IDX);
 const flagUses = (idxCode.match(/\bVIDEO_REEL_ENABLED\b/g) || []).length;
 eq(flagUses, 2, 'پرچمِ VIDEO_REEL_ENABLED دقیقاً دو بار استفاده شده (تعریف + گاردِ دستور)');
 ok(/const\s+VIDEO_REEL_ENABLED\s*=\s*(true|false)\s*;/.test(idxCode), 'پرچم یک ثابتِ بولینِ یک‌خطی است (رول‌بکِ یک‌خطی)');
-ok(/const\s+PRODUCT_VERSION\s*=\s*['"`]3\.22\.0['"`]/.test(idxText), 'PRODUCT_VERSION روی 3.22.0 بامپ شده (بند ۲ج/۴)');
+// ⚠️ این ادعا عمداً **کف** است، نه تساوی. نسخه‌ی اولش `=== '3.22.0'` بود و همان روز
+// با اولین PR بعدی قرمز شد: هر تغییرِ رفتاریِ بعدی باید نسخه را بالا ببرد (بند ۲ج/۴)،
+// پس پین کردنِ عددِ دقیق یعنی این چک هر بار جلوی رعایتِ همان قاعده را می‌گیرد.
+{
+  const v = (idxText.match(/const\s+PRODUCT_VERSION\s*=\s*['"`]([\d.]+)['"`]/) || [])[1] || '0';
+  const cmp = (a, b) => {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+    return 0;
+  };
+  ok(cmp(v, '3.22.0') >= 0, `PRODUCT_VERSION دستِ‌کم روی 3.22.0 بامپ شده (فعلی: ${v} — بند ۲ج/۴)`);
+}
 
 const cmdIdx = IDX.indexOf("bot.command('reel'");
 ok(cmdIdx >= 0, "دستور bot.command('reel', ...) ثبت شده است");
