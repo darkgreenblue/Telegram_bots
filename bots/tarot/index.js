@@ -172,7 +172,7 @@ const TEST_PHASE = false;
 //        ادعای ۸۶٪ هم‌راستا شد، و دو تکنیکِ تحقیق ۲ به‌شکلِ لنگرخورده اضافه شدند.
 // 3.22.0: دستورِ فقط-ادمینِ /reel — ساختِ ویدیوی ریلز از یک فالِ ناشناس. رفتارِ هیچ
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
-const PRODUCT_VERSION = '3.22.0';
+const PRODUCT_VERSION = '3.23.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -743,14 +743,6 @@ const stmts = {
   setPush:    db.prepare('UPDATE users SET last_push_at=unixepoch(), next_milestone_at=NULL WHERE telegram_id=?'),
   // هدیه‌ی خوش‌آمد: گاردِ write-once داخل خودِ UPDATE (changes=0 یعنی قبلاً گرفته)
   claimWelcomeBonus: db.prepare('UPDATE users SET welcome_bonus_at=unixepoch() WHERE telegram_id=? AND welcome_bonus_at IS NULL'),
-  // یادآوریِ کارت روز: کسانی که امروز کارتشان را ندیده‌اند، انصراف نداده‌اند و امروز یادآوری نگرفته‌اند
-  dueDailyReminder: db.prepare(`
-    SELECT telegram_id FROM users
-     WHERE welcomed=1 AND daily_reminder_off=0
-       AND COALESCE(last_daily_date,'') <> ?
-       AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
-     LIMIT 200`),
-  setDailyReminded: db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
   // 🍀 کارت شانس. `claimLucky` گاردِ اتمیکِ «روزی یک بار» است: شرطِ روز داخلِ خودِ UPDATE
   // نشسته، پس دو تپِ هم‌زمان فقط یک بار changes=1 می‌دهد (همان الگوی claimWelcomeBonus).
@@ -1662,9 +1654,9 @@ async function isChannelMember(ctx, uid) {
 const statFirstFor = (uid) => variant(db, uid, AB_INTRO_ORDER) === 'stat_first';
 
 // نمایشِ گیت: پیامِ معرفی (کاهشِ dropِ لحظه‌ی ورود) و بعد دعوت به عضویت.
-async function showGate(ctx, uid, refBonus = false) {
+async function showGate(ctx, uid) {
   setState(uid, 'gate_join');
-  setSession(uid, { refBonus }); // وعده‌ی رفرال باید از گیت جان سالم به در ببرد
+  setSession(uid, null); // چیزی از فلوی قبلی نباید وارد آنبوردینگ شود
   await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), gateKeyboard());
@@ -1672,14 +1664,14 @@ async function showGate(ctx, uid, refBonus = false) {
 
 // بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
 // گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
-async function startOnboarding(ctx, uid, refBonus) {
+async function startOnboarding(ctx, uid) {
   grantWelcomeBonus(uid);
   await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
   setState(uid, 'onboard_name');
-  setSession(uid, { refBonus });
+  setSession(uid, null);
   await ctx.reply(L.onboarding.askName(uxV2For(uid)), { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
 }
 
@@ -1701,13 +1693,11 @@ async function handleStart(ctx) {
 
   // رفرال: /start ref_<id>
   const refMatch = payload.match(/^ref_(\d+)$/);
-  let refBonus = false;
   if (refMatch && isNew) {
     const refId = parseInt(refMatch[1], 10);
     if (refId !== uid && getUser(refId)) {
       stmts.insertReferral.run(refId, uid);
       stmts.setReferredBy.run(refId, uid);
-      refBonus = true;
     }
   }
 
@@ -1717,12 +1707,12 @@ async function handleStart(ctx) {
     // (needsGate روی هدیه‌ی گرفته‌نشده شرط دارد).
     if (needsGate(user)) {
       track(db, uid, 'gate_shown', { ch: GATE_CHANNEL });
-      return showGate(ctx, uid, refBonus);
+      return showGate(ctx, uid);
     }
     // v2.0.0 — اول ارزش، بعد اسم: پیامِ اول خوش‌آمد + هدیه‌ی اعتبار (دقیقاً بهای یک فالِ
     // کامل) را می‌دهد، پیامِ دوم تازه نام را می‌پرسد. قبلاً اولین چیزی که کاربر می‌دید یک
     // درخواست بود، نه یک ارزش.
-    return startOnboarding(ctx, uid, refBonus);
+    return startOnboarding(ctx, uid);
   }
 
   // کاربر برگشتی
@@ -1760,7 +1750,7 @@ bot.action('gate:check', async (ctx) => {
   if (!stmts.claimGate.run(uid).changes) return; // ضدِ دوبار-تپ (یکی از دو تپ برنده است)
   track(db, uid, 'gate_passed', { ch: GATE_CHANNEL });
   try { await ctx.editMessageReplyMarkup(undefined); } catch {} // دکمه‌ها بعد از عبور می‌روند
-  return startOnboarding(ctx, uid, getSession(uid)?.refBonus === true);
+  return startOnboarding(ctx, uid);
 });
 
 /* 🔑 میدل‌ورِ گیت — عمداً یک نقطه، نه گارد روی تک‌تکِ هندلرها.
@@ -1822,7 +1812,6 @@ async function finishNameOnboarding(ctx, rawName) {
   const name = cleanName(rawName);
   if (!name) return ctx.reply(L.onboarding.askNameRetry);
   stmts.setDisplayName.run(name, uid);
-  const refBonus = getSession(uid).refBonus;
   stmts.setWelcomed.run(uid);
   setSession(uid, null);
   // همان شاخه‌ی intro_order: بلوکی که در پیامِ اول نیامده این‌جا می‌آید (مکملِ هم، نه تکرار)
@@ -1834,8 +1823,9 @@ async function finishNameOnboarding(ctx, rawName) {
   //      کیبوردِ تایپِ گوشی را باز نگه می‌داشت و نصفِ صفحه را می‌گرفت. کیبوردِ سفارشی از
   //      قبل در `askName` برداشته شده، پس این تکرار بی‌اثر ولی پرعارضه بود.
   await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)));
-  // پاداش دعوت لحظه‌ی ورود واریز نمی‌شود؛ فقط وعده — واریز هر دو طرف بعد از اولین فال کامل
-  if (refBonus) await ctx.reply(L.share.referralWelcome(referralBonusFor(uid), curOf(uid)));
+  // ⚠️ این‌جا قبلاً به دعوت‌شده وعده‌ی «هدیه‌ی دعوت» داده می‌شد. آن وعده از پایه غلط بود:
+  // پاداشِ دعوت فقط مالِ دعوت‌کننده است. حالا که چیزی برای گفتن نیست، پیام هم حذف شد؛
+  // یک پیامِ کمتر در آنبوردینگ، و هیچ وعده‌ای که بعداً عمل نشود.
   await typing(ctx, PACE_S);
   // UX v2: ماهِ تولد جای حوزه‌ی تمرکز را گرفت. حوزه‌ی تمرکز کاربر را از همان اول به یک
   // موضوع بایاس می‌کرد؛ ماهِ تولد عوض نمی‌شود و کارتِ روز را برای همیشه شخصی می‌کند.
@@ -3798,21 +3788,19 @@ async function finishReading(ctx, uid, readingId) {
   setState(uid, 'idle');
   setSession(uid, null);
 
-  // پاداش رفرال: فقط بعد از اولین فال کاملِ دعوت‌شده (نه لحظه‌ی ورود) —
-  // هر دو طرف واریز و به هر دو اطلاع داده می‌شود
+  // پاداش رفرال: فقط بعد از اولین فال کاملِ دعوت‌شده (نه لحظه‌ی ورود).
+  // ⚠️ پاداش **فقط به دعوت‌کننده** می‌رسد (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۲۹). دعوت‌شده از
+  // بابتِ دعوت‌شدن هیچ چیزی نمی‌گیرد؛ هدیه‌ی خوش‌آمدِ او همان لحظه‌ی /start واریز شده و
+  // کاملاً مستقل است (کاربرِ ارگانیک هم دقیقاً همان را می‌گیرد). نسخه‌ی قبلی به هر دو طرف
+  // واریز می‌کرد و متن‌ها هم همین را وعده می‌دادند؛ هر دو با هم اصلاح شدند.
   try {
     const ref = stmts.getReferralByReferee.get(uid);
     if (ref && !ref.rewarded && stmts.countDelivered.get(uid).c === 1) {
       stmts.setReferralRewarded.run(ref.id);
-      // هر طرف طبق اقتصادِ **خودش** هدیه می‌گیرد: دعوت‌کننده و دعوت‌شده ممکن است در دو
-      // دنیای متفاوت باشند (فعلاً فقط ادمین الماس دارد)، و هیچ‌کدام نباید عددِ آن یکی را ببیند.
+      // پاداش طبق اقتصادِ **دعوت‌کننده** حساب می‌شود، چون تنها اوست که چیزی می‌گیرد.
       const refAmt = referralBonusFor(ref.referrer_id);
-      const meAmt  = referralBonusFor(uid);
       stmts.credit.run(refAmt, ref.referrer_id);
-      stmts.credit.run(meAmt, uid);
       track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
-      track(db, uid, 'credit_granted', { amount: meAmt, kind: 'referral' });
-      await ctx.reply(L.share.refereeReward(meAmt, curOf(uid)));
       const referee = getUser(uid);
       await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), refAmt, curOf(ref.referrer_id))).catch(() => {});
     }
@@ -3949,7 +3937,7 @@ bot.hears(WALLET_LABELS, showWallet);   // UX v2: همان صفحه، نامِ �
 // (switch_inline_query حذف شد: اگر کاربر روی نتیجه‌ی اینلاین تپ نمی‌کرد فقط @botname ارسال می‌شد)
 function shareUrlFor(uid) {
   const link = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
-  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText(referralBonusFor(uid), curOf(uid)))}`;
+  return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(L.share.shareText())}`;
 }
 
 // دعوت دوستان: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان. یک تابع، دو ورودی
@@ -4879,46 +4867,27 @@ bot.on('photo', async (ctx) => {
   await processReceipt(ctx, uid, paymentId, fileId, null, recovered);
 });
 
-/* ---------- یادآوریِ کارت روز (تنها قلاب بازگشت — v2.0.0) ----------
-   پوشِ milestone دوهفته‌ای کاملاً حذف شد. به‌جایش هر شب ساعت ۲۲ به وقت تهران، به کسانی که
-   کارتِ امروزشان را ندیده‌اند یک یادآوری می‌رود: تا نیمه‌شب فرصت دارند (تقویمِ کارت روز سرِ
-   ساعت ۰۰:۰۰ تهران ریست می‌شود). هر کاربر می‌تواند برای همیشه انصراف بدهد.
-   جارو هر ۱۵ دقیقه بیدار می‌شود ولی فقط داخلِ همان ساعت کار می‌کند؛ گاردِ ۱۸ساعته‌ی
-   last_daily_reminder_at جلوی پیامِ تکراری بعد از ری‌استارت را می‌گیرد. */
-const DAILY_REMINDER_HOUR = 22;
-setInterval(async () => {
-  try {
-    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
-    }).format(new Date()), 10);
-    if (hour !== DAILY_REMINDER_HOUR) return;
-    const today = tehranToday();
-    for (const { telegram_id } of stmts.dueDailyReminder.all(today)) {
-      // UX v2.1 (تصمیمِ صریحِ مالک): یادآوریِ کارتِ روز متوقف شد و جایش را یادآوریِ
-      // **کارت شانس** گرفت — آن یکی opt-in است و جایزه‌ی ملموس دارد. دو یادآوریِ شبانه
-      // در یک ساعت هم یعنی دو پیامِ پشت‌سرهم، که خودش دلیلِ بلاک‌شدن است.
-      if (uxV2For(telegram_id)) continue;
-      stmts.setDailyReminded.run(telegram_id);
-      const ok = await bot.telegram.sendMessage(telegram_id, L.daily.reminder, {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback(L.buttons.dailyInCatalog, 'daily_go')],
-          [Markup.button.callback(L.buttons.dailyReminderOff, 'dailyoff')],
-        ]).reply_markup,
-      }).then(() => true).catch(() => false);
-      if (ok) track(db, telegram_id, 'daily_reminder_sent', {});
-      await sleep(300);
-    }
-  } catch (e) { logErr('daily reminder sweep:', e.message); }
-}, 15 * 60 * 1000);
+/* ---------- یادآوریِ کارت روز: **حذف شد** (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۲۹) ----------
+   تا امروز این یادآوری opt-**out** بود: هر شب ساعت ۲۲ به هر کسی که کارتِ روزش را نگرفته
+   بود می‌رفت، مگر اینکه خودش انصراف داده باشد. از v3.9.0 برای دنیای الماس خاموش شده بود
+   و فقط کاربرانِ تومانی می‌گرفتندش؛ حالا کاملاً برداشته شد.
+   چرا حذف و نه یک پرچم: تنها یادآوریِ شبانه‌ی ربات از این به بعد کارتِ شانس است که
+   opt-**in** است. نگه‌داشتنِ یک جاروی خاموش یعنی کدِ مرده‌ای که هر بار باید توضیح داده
+   شود (بند ۹/۰ ریشه). برگرداندنش = revert همین کامیت.
+   ⚠️ هندلرهای `dailyoff*` عمداً **می‌مانند**: دکمه‌ی «🔕 دیگه یادآوری نکن» در چتِ
+   کاربرانی که این پیام را گرفته‌اند زنده است و نباید بی‌جواب بماند (بند ۲ج/۶). */
 
-/* 🍀 یادآوریِ کارت شانس — همان ساعت ۲۲، ولی **opt-in**: فقط کسی که خودش دکمه‌ی
-   «فردا یادآوری کن» را زده. همان گاردِ ۱۸ساعته ضدِ پیامِ تکراری بعد از ری‌استارت. */
+/* 🍀 یادآوریِ کارت شانس — ساعت ۲۲ تهران و **تنها یادآوریِ شبانه‌ی ربات**. کاملاً
+   opt-in: شرطِ `lucky_reminder_on=1` در خودِ کوئری است، پس کسی که هرگز دکمه‌ی «فردا
+   یادآوری کن» را نزده هیچ‌وقت پیامی نمی‌گیرد (پیش‌فرضِ ستون صفر است). همان گاردِ
+   ۱۸ساعته ضدِ پیامِ تکراری بعد از ری‌استارت. */
+const REMINDER_HOUR = 22;
 setInterval(async () => {
   try {
     const hour = parseInt(new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
     }).format(new Date()), 10);
-    if (hour !== DAILY_REMINDER_HOUR) return;
+    if (hour !== REMINDER_HOUR) return;
     const today = tehranToday();
     for (const { telegram_id } of stmts.dueLuckyReminder.all(today)) {
       if (!uxV2For(telegram_id)) continue;
