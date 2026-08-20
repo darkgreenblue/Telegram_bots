@@ -161,7 +161,12 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
   const h = SRC.slice(SRC.indexOf("bot.action(/^lpick:"), SRC.indexOf("bot.action(/^lremind:"));
   ok(/claimLucky\.run\(today, uid, today\)\.changes === 0/.test(h),
     'روز اتمیک سوخته می‌شود (شرطِ روز داخلِ خودِ UPDATE، ضدِ دوبار-تپ)');
-  ok(/if \(!picks\.length && stmts\.claimLucky/.test(h),
+  // ⚠️ این ادعا قبلاً شکلِ `if (!picks.length && stmts.claimLucky...)` را قفل می‌کرد.
+  // از v3.21.0 همان شرط یک بلوک شد (چون تعیینِ «دستِ اولِ عمر» هم باید داخلش بیفتد)،
+  // پس به‌جای شکلِ نوشتاری، **همان رفتار** قفل می‌شود: ادعای روز فقط داخلِ شاخه‌ی
+  // «هیچ انتخابی نشده» صدا زده می‌شود.
+  ok(/if \(!picks\.length\)\s*\{[\s\S]*?stmts\.claimLucky\.run/.test(h)
+     && h.split('stmts.claimLucky.run').length === 2,
     'روز با **اولین** انتخاب سوخته می‌شود، نه با دیدنِ گرید');
   ok(h.indexOf('stmts.credit.run(LUCKY_COIN_VALUE') < h.indexOf('if (!done)'),
     'الماس لحظه‌ی برگشتنِ هر کارت واریز می‌شود، نه آخرِ بازی (ری‌استارت پول را نمی‌خورد)');
@@ -631,6 +636,22 @@ console.log('\n▶ نشانگرِ انتظار: پنج طرح، ضرب‌آهن�
   ok(!liars.length, `ادعای keepsLabel با رفتار می‌خواند${liars.length ? ' — دروغ: ' + liars.join(',') : ''}`);
   ok(LOADERS.phases.keepsLabel === false, 'و طرحِ مرحله‌محور صادقانه اعلام می‌کند که متن را عوض می‌کند');
 
+  // 🚶 هم‌گامی — ایرادِ صریحِ مالک روی چتِ واقعی: «یه نوار می‌رفت جلو بعدش یه ماه بعد یه
+  // نوار بعد ماه». نسخه‌ی اول نوار را هر **دو** فریم جلو می‌برد و حرکتِ ناهم‌زمان
+  // حسِ لِنگ می‌داد. حالا هر فریم **هر دو** دقیقاً یک پله جلو می‌روند.
+  const hyb = LOADERS.hybrid.frames(LBL);
+  const fill = (s) => (s.match(/⬛/g) || []).length;
+  const moonOf = (s) => s.slice(0, 2);
+  let lagging = 0;
+  for (let i = 0; i < 24; i++) {
+    const a = hyb(i), b = hyb(i + 1);
+    if (moonOf(a) === moonOf(b) || fill(a) === fill(b)) lagging++;
+  }
+  ok(lagging === 0, 'ماه و نوار در هر فریم **با هم** یک پله جلو می‌روند (حسِ لِنگِ نسخه‌ی قبلی رفع شد)');
+  // و عرضِ فریم‌ها ثابت می‌ماند، وگرنه پیام در هر ادیت جابه‌جا می‌شود
+  const widths = new Set(Array.from({ length: 24 }, (_, i) => [...hyb(i)].length));
+  ok(widths.size === 1, `عرضِ همه‌ی فریم‌ها یکی است (${[...widths].join('/')} نویسه)`);
+
   // 🧪 دستورِ موقتِ `/loading` — هر پنج طرح را زنده در تلگرام نشان می‌دهد.
   // ⚠️ مهم‌ترین ادعا: هیچ کاربرِ واقعی‌ای نباید ببیندش.
   const CODE2 = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -729,9 +750,12 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
   ok(/function luckyCoinSlots\(uid, today, nonce = ''\)/.test(SRC), 'تابعِ چیدمان nonce می‌گیرد');
   // ⚠️ از v3.19.0 دست در **ردیفِ کاربر** می‌نشیند نه در سشن: سشن در شش نقطه پاک می‌شود
   // و همان باعثِ سوختنِ انتخاب‌های باقی‌مانده بود (جزئیات در check-lucky.mjs).
-  ok(/writeLuckyHand\(uid, \{ d: today, n: luckyNonce, p: \[\], f: 0 \}\)/.test(SRC),
+  ok(/writeLuckyHand\(uid, \{ d: today, n: luckyNonce, p: \[\], f: 0[,\s}]/.test(SRC),
     'nonce لحظه‌ی باز شدنِ گرید ساخته و روی ردیفِ کاربر ذخیره می‌شود');
-  ok(/luckyCoinSlots\(uid, today, hand\.n\)/.test(SRC), 'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
+  // از v3.21.0 چیدمان از یک نقطه‌ی واحد می‌آید (`luckySlotsFor`) تا رندرِ گرید و قضاوتِ
+  // «برد» هرگز دو مجموعه‌ی متفاوت نبینند؛ nonce همان‌جا از خودِ دست خوانده می‌شود.
+  ok(/const luckySlotsFor = \(uid, h\) => \{\s*\n\s*const base = luckyCoinSlots\(uid, h\.d, h\.n\);/.test(SRC),
+    'هر انتخاب چیدمان را با nonceِ همان دست حساب می‌کند');
   ok(!/luckyCoinSlots\(uid, today\)(?!,)/.test(SRC.replace(/function luckyCoinSlots[\s\S]*?\n\}/, '')),
     'هیچ فراخوانیِ بدونِ nonce نمانده');
 
