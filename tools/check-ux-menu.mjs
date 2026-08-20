@@ -630,6 +630,22 @@ console.log('\n▶ نشانگرِ انتظار: پنج طرح، ضرب‌آهن�
     .map(([k]) => k);
   ok(!liars.length, `ادعای keepsLabel با رفتار می‌خواند${liars.length ? ' — دروغ: ' + liars.join(',') : ''}`);
   ok(LOADERS.phases.keepsLabel === false, 'و طرحِ مرحله‌محور صادقانه اعلام می‌کند که متن را عوض می‌کند');
+
+  // 🧪 دستورِ موقتِ `/loading` — هر پنج طرح را زنده در تلگرام نشان می‌دهد.
+  // ⚠️ مهم‌ترین ادعا: هیچ کاربرِ واقعی‌ای نباید ببیندش.
+  const CODE2 = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const lab = CODE2.slice(CODE2.indexOf("bot.command('loading'"), CODE2.indexOf("bot.command('reset'"));
+  ok(/if \(!LOADING_LAB \|\| !isTester\(uid\)\) return;/.test(lab),
+    '`/loading` فقط برای تستر/ادمین است و پشتِ یک پرچمِ خاموش‌شدنی');
+  ok(!/isAdmin\(uid\)/.test(lab), 'و اختیارِ ادمینی لازم ندارد (تستر هم می‌تواند ببیند)');
+  ok(/const LOADING_LAB = true;/.test(CODE2), 'پرچمِ دستورِ موقت تعریف شده (خاموشی = یک خط)');
+  ok(/pace\(Date\.now\(\) - startedAt\)/.test(lab),
+    'با **همان** ضرب‌آهنگِ واقعیِ ربات پخش می‌کند، نه یک سرعتِ ساختگی');
+  ok(/429|Too Many Requests/.test(lab), 'و ۴۲۹ را گزارش می‌کند (نکته‌ی اصلیِ همین آزمایش)');
+  ok(/def\.frames\(label\)/.test(lab) && /L\.reading\.loadingLabel/.test(lab),
+    'هر طرح را با متنِ واقعیِ locale نشان می‌دهد');
+  ok(/keepsLabel \? '' : '  ⚠️ متن را عوض می‌کند'/.test(lab),
+    'و طرحی که متن را عوض می‌کند صریح علامت می‌خورد');
 }
 
 console.log('\n▶ نامِ بسته‌ی وسط');
