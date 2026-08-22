@@ -128,6 +128,34 @@ export function assertReady(dataDir, src) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/* ⌨️ کیبوردِ ماندگارِ نسل جدید — **دقیقاً** همان ترتیبِ `mainKeyboard` دنیای الماس.
+ * چرا این‌جا هم لازم است: تلگرام کیبوردِ reply را روی گوشیِ کاربر تا **اولین جایگزینی**
+ * نگه می‌دارد. مالک با اکانتِ تازه تست کرد: آپدیت آمده بود ولی منوی پایین همان نسل قبل
+ * ماند تا وقتی `/start` زد. پس این پیامِ انبوه تنها فرصتی است که می‌توانیم منوی همه را
+ * **یک‌جا** به‌روز کنیم؛ وگرنه هر کاربر باید تصادفاً به یکی از دو نقطه‌ی قراردادِ صدور
+ * برسد که ممکن است هفته‌ها طول بکشد.
+ * ⚠️ تلگرام در هر پیام فقط یک `reply_markup` می‌پذیرد و پیامِ اصلی سه دکمه‌ی inline دارد،
+ * پس کیبورد روی یک پیامِ کوتاهِ دوم می‌رود. */
+export const MENU_KEYBOARD = {
+  keyboard: [
+    [{ text: '🔮 فال بگیر' }],
+    [{ text: '🎲 کارت شانس (استخراج الماس)' }],
+    [{ text: '🎴 فال تک کارت امروز (رایگان)' }],
+    [{ text: '💎 ذخایر الماس' }, { text: '📤 دعوت دوستان' }],
+    [{ text: '💬 پشتیبانی' }],
+  ],
+  resize_keyboard: true,
+};
+export const MENU_NOTE = 'منوی پایین هم به‌روز شد 👇';
+
+async function sendKeyboard(token, chatId) {
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: MENU_NOTE, reply_markup: MENU_KEYBOARD }),
+  }).catch(() => {});
+}
+
 async function send(token, chatId, text) {
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
@@ -184,7 +212,12 @@ async function run(file, { token, only, sendReal }) {
       failed++;
       break;
     }
-    if (ok) { log.run(ANNOUNCE_KEY, p.id); sent++; }
+    if (ok) {
+      // پیامِ دومِ کوتاه که فقط حاملِ کیبوردِ جدید است. شکستش هرگز کلِ ارسال را
+      // نمی‌شکند و در دفتر هم ثبت نمی‌شود (دفتر برای پیامِ اصلی است).
+      await sendKeyboard(token, p.id);
+      log.run(ANNOUNCE_KEY, p.id); sent++;
+    }
     // ~۲۰ پیام در ثانیه: خیلی زیرِ سقفِ ۳۰تاییِ تلگرام برای پیامِ انبوه.
     await sleep(50);
     if ((sent + failed) % 25 === 0) console.log(`   … ${fa(sent)} فرستاده شد، ${fa(failed)} نرسید`);

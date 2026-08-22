@@ -25,6 +25,10 @@ on:
         description: 'کوئری SQL فقط-خواندنی (برای db-query) — مثل SELECT count(*) FROM users'
         required: false
         default: ''
+      only:
+        description: 'فقط این آی‌دی‌ها (announce-*) — کاماجدا. خالی = همه‌ی کاربران'
+        required: false
+        default: ''
 
 jobs:
   ops:
@@ -37,11 +41,12 @@ jobs:
           OPS_APP:    ${{ inputs.app }}
           OPS_LINES:  ${{ inputs.lines }}
           OPS_QUERY:  ${{ inputs.query }}
+          OPS_ONLY:   ${{ inputs.only }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY
+          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY,OPS_ONLY
           script: |
             set -e
             cd ~/voice2text
@@ -130,8 +135,11 @@ jobs:
                 # ⚠️ عمداً `if` صریح و نه `[ … ] && SEND=…`: زیرِ `set -e` یک AND-listِ
                 # ناموفق روی سرورِ زنده ریسکِ بی‌دلیل است، و این مسیر به ~۱۰۰ کاربر پیام می‌دهد.
                 if [ "$OPS_ACTION" = "announce-send" ]; then SEND="--send"; else SEND=""; fi
-                echo "===== announce $SEND ====="
-                node tools/announce-tarot.mjs bots/tarot/data $SEND
+                # ضد تزریق: لیستِ آی‌دی فقط رقم و کاما. اسکریپت خودش `ANNOUNCE_ONLY` را
+                # می‌خواند؛ خالی یعنی همه‌ی کاربران.
+                case "$OPS_ONLY" in (*[!0-9,]*) echo "❌ لیستِ آی‌دی نامعتبر"; exit 1;; esac
+                echo "===== announce $SEND ${OPS_ONLY:+(فقط: $OPS_ONLY)} ====="
+                ANNOUNCE_ONLY="$OPS_ONLY" node tools/announce-tarot.mjs bots/tarot/data $SEND
                 ;;
               tunnel-url)
                 # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)
