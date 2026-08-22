@@ -16,12 +16,16 @@
 // جدا توضیح داد ولی برای هر دو **همان نسبت** را خواست. پس عملاً یک قاعده است و لازم
 // نیست منشأِ هر ریال ردیابی شود؛ همین ساده‌بودن، خودش ضامنِ درستی است.
 //
-// ── چه کسانی مهاجرت می‌کنند و چه کسانی نه ────────────────────────────────────
-//   ✅ کاربری که **هیچ پرداختِ تأییدشده‌ای** ندارد → خودکار تبدیل می‌شود.
-//   ⛔️ کاربری که پرداختِ واقعی داشته → **دست نمی‌خورد** و در گزارش می‌آید تا مالک
-//      تک‌تک تصمیم بگیرد (خواسته‌ی صریحش). پولِ واقعیِ کاربر با یک فرمولِ کلی جابه‌جا
-//      نمی‌شود (بند ۹ ریشه: پول مقدس‌ترین چیزِ ریپوست).
+// ── چه کسانی مهاجرت می‌کنند و با چه نرخی ─────────────────────────────────────
+//   ✅ هدیه‌بگیر (هیچ پرداختِ تأییدشده‌ای ندارد) → نرخِ ۶٬۰۰۰ تومان = ۱ الماس.
+//   ✅ پرداخت‌کرده (حداقل یک `payments.status='approved'`) → نرخِ ۱٬۵۰۰ تومان = ۱ الماس،
+//      یعنی ارزان‌ترین نرخِ فروشگاه (بسته‌ی جادویی). تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۳۰.
 //   ⛔️ موجودیِ صفر → کاری لازم نیست.
+//   ⚠️ `ZERO_USER` بر همه‌ی این‌ها مقدم است و `SET_USER` بر تشخیصِ خودکار.
+//
+// ⚠️ این پاراگراف قبلاً می‌گفت «پرداخت‌کرده دست نمی‌خورد» که **دیگر درست نیست** و از
+// طراحیِ اولیه مانده بود. روی اسکریپتی که پولِ واقعی را بازنویسی می‌کند و غیرتعاملی با
+// `--apply` اجرا می‌شود، هدرِ غلط خودش یک خطر است نه یک اشتباهِ تایپی.
 //
 // ── اجرا ─────────────────────────────────────────────────────────────────────
 //   node tools/coin-migration-tarot.mjs <dataDir>            ← گزارش (dry-run، پیش‌فرض)
@@ -92,6 +96,31 @@ export function parseIdList(raw) {
 /* ═══════ خودِ مهاجرت ═══════ */
 const fa = (n) => n.toLocaleString('fa-IR');
 
+/* 🔒 مهرِ «این دیتابیس یک بار تبدیل شده» — **داخلِ خودِ دیتابیس**، نه یک فایل کنارش.
+ *
+ * ⚠️ باگی که این را ساخت (بازتولیدشده، نه فرضی): مهرِ قبلی یک فایل روی دیسک بود که
+ * **بعد از** commit نوشته می‌شد. بینِ commit و نوشتنِ فایل یک پنجره‌ی محافظت‌نشده بود؛
+ * و چون این اسکریپت از روی SSH اجرا می‌شود، قطعِ ساده‌ی SSH کافی بود. نتیجه‌ی واقعیِ
+ * تست: موجودیِ ۲۰۰٬۰۰۰ تومان در اجرای دوم به **۸۹۴ الماس** رسید (۸۹۴ فالِ رایگان)،
+ * با exit code صفر و بدونِ هیچ خطایی.
+ *
+ * حالا مهر یک ردیف در همان تراکنشِ تبدیل است، پس یا **هر دو** انجام می‌شوند یا
+ * **هیچ‌کدام**. اتمیک بودنش را خودِ SQLite تضمین می‌کند، نه ترتیبِ خطوطِ ما.
+ * فایلِ marker هنوز نوشته می‌شود ولی فقط برای «رد شدنِ سریعِ دیپلوی»؛ منبعِ حقیقت این است. */
+export const MIGRATIONS_TABLE = 'migrations';
+export const MIGRATION_KEY = 'coin_v2';
+
+/** جدولِ مهر را می‌سازد (افزایشی، بند ۲ج/۱: فقط CREATE IF NOT EXISTS). */
+export function ensureMigrations(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
+    key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)`);
+}
+/** آیا این دیتابیس قبلاً تبدیل شده؟ */
+export function migrationDone(db) {
+  ensureMigrations(db);
+  return !!db.prepare(`SELECT 1 FROM ${MIGRATIONS_TABLE} WHERE key=?`).get(MIGRATION_KEY);
+}
+
 export function planFor(db, { setUser = new Map(), zeroUser = [], autoOff = false } = {}) {
   const payers = new Set(
     db.prepare("SELECT DISTINCT user_id FROM payments WHERE status='approved'").all().map(r => r.user_id));
@@ -124,6 +153,12 @@ export function planFor(db, { setUser = new Map(), zeroUser = [], autoOff = fals
 function run(file, opts) {
   const db = new Database(file);
   db.pragma('busy_timeout = 5000');
+  // 🔒 گاردِ اتمیک: اگر این دیتابیس قبلاً تبدیل شده، تبدیلِ **خودکار** خاموش می‌شود.
+  // تصمیم‌های صریحِ مالک (SET_USER/ZERO_USER) همچنان اجرا می‌شوند، چون آن‌ها عمدی‌اند.
+  if (migrationDone(db) && !opts.autoOff) {
+    console.log(`\n📄 ${path.basename(file)}\n   ⏭ این دیتابیس قبلاً تبدیل شده (مهر در جدولِ ${MIGRATIONS_TABLE}) — تبدیلِ خودکار رد شد.`);
+    opts = { ...opts, autoOff: true };
+  }
   const { plan, payers, voidPays } = planFor(db, opts);
 
   console.log(`\n📄 ${path.basename(file)}`);
@@ -153,10 +188,21 @@ function run(file, opts) {
   if (!apply) { console.log('   ℹ️ dry-run — چیزی نوشته نشد (برای اعمال: --apply)'); db.close(); return plan.length; }
   if (!plan.length && !voidPays.length) { console.log('   ℹ️ چیزی برای تغییر نیست'); db.close(); return 0; }
 
+  // 💾 بکاپ — **هرگز بازنویسی نمی‌شود.**
+  // ⚠️ نسخه‌ی اول `rmSync(bak)` می‌کرد و بعد دوباره می‌گرفت. یعنی اجرای دومِ اسکریپت،
+  // بکاپِ «قبل از تبدیل» را با وضعیتِ **بعد از تبدیل** جایگزین می‌کرد و تنها نسخه‌ی
+  // موجودیِ تومانیِ اصلی برای همیشه از بین می‌رفت. با خوابیدنِ بکاپِ شبانه‌ی Actions،
+  // این فایل تنها کپیِ حقیقتِ قبل از مهاجرت است.
   const bak = `${file}.pre-coins.bak`;
-  if (existsSync(bak)) rmSync(bak);
-  db.prepare('VACUUM INTO ?').run(bak);
-  console.log(`   💾 بکاپ: ${path.basename(bak)}`);
+  if (existsSync(bak)) {
+    // اولین بکاپ دست‌نخورده می‌ماند؛ اجرای بعدی نسخه‌ی زمان‌دارِ خودش را می‌گیرد.
+    const extra = `${file}.pre-coins.${Date.now()}.bak`;
+    db.prepare('VACUUM INTO ?').run(extra);
+    console.log(`   💾 بکاپِ قبلی حفظ شد؛ بکاپِ این اجرا: ${path.basename(extra)}`);
+  } else {
+    db.prepare('VACUUM INTO ?').run(bak);
+    console.log(`   💾 بکاپ: ${path.basename(bak)}`);
+  }
 
   const setBalance = db.prepare('UPDATE users SET balance=? WHERE telegram_id=?');
   const hasEvents = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").get();
@@ -165,6 +211,8 @@ function run(file, opts) {
     : null;
 
   const voidPay = db.prepare("UPDATE payments SET status='reversed' WHERE id=? AND status='approved'");
+  const stampDone = db.prepare(
+    `INSERT OR IGNORE INTO ${MIGRATIONS_TABLE} (key, done_at) VALUES (?, unixepoch())`);
 
   db.transaction(() => {
     for (const p of plan) {
@@ -175,6 +223,9 @@ function run(file, opts) {
       voidPay.run(v.id);
       logEvent?.run(v.user_id, JSON.stringify({ kind: 'void_payment', payment_id: v.id, amount: v.amount }));
     }
+    // 🔒 مهرِ «انجام شد» **داخلِ همان تراکنش**. جزئیات و باگی که این را ساخت، بالای
+    // `migrationDone` توضیح داده شده.
+    stampDone.run(MIGRATION_KEY);
   })();
   console.log(`   ✅ ${fa(plan.length)} ردیفِ موجودی${voidPays.length ? ` و ${fa(voidPays.length)} پرداخت` : ''} به‌روز شد`);
   db.close();

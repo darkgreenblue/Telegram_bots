@@ -23,6 +23,22 @@ cd "$(dirname "$0")/.."
 BOTS=("$@")
 [ ${#BOTS[@]} -eq 0 ] && BOTS=(tarot)
 
+# 🛟 تورِ ایمنی: هر خروجِ ناموفق (از جمله `npm ci` که روی این سرور می‌تواند به
+# registry.npmjs.org نرسد) نباید رباتِ **زنده و درآمدزا** را خاموش رها کند.
+# بدونِ این trap، مسیرِ واقعی این بود: مهاجرت موفق ⟶ ربات stop ⟶ npm ci شکست ⟶
+# `set -e` خروج ⟶ هیچ پروسه‌ای بالا نیست، و بدتر: گاردِ ارسالِ پیام همچنان سبز است،
+# پس پیامِ انبوه با سه دکمه به یک رباتِ مرده اشاره می‌کرد.
+restore_on_fail() {
+  local code=$?
+  [ $code -eq 0 ] && exit 0
+  echo "❌ اسکریپت با کدِ $code شکست خورد — تلاش برای بالا نگه‌داشتنِ ربات‌ها"
+  pm2 start ecosystem.config.cjs --only "$(IFS=,; echo "${BOTS[*]}")" 2>/dev/null || true
+  pm2 list || true
+  echo "⚠️ وضعیتِ بالا را چک کن. تا وقتی ربات online نیست، **پیامِ اطلاع‌رسانی را نفرست.**"
+  exit $code
+}
+trap restore_on_fail EXIT
+
 echo "📍 $(pwd)  ·  HEAD=$(git rev-parse --short HEAD)"
 
 # ── ۱) مهاجرتِ یک‌باره‌ی موجودیِ تومانی به الماس ──────────────────────────────
@@ -34,13 +50,17 @@ echo "📍 $(pwd)  ·  HEAD=$(git rev-parse --short HEAD)"
 if [ -f bots/tarot/.env ] && [ ! -f bots/tarot/data/.coin-migration-done ]; then
   echo "💎 مهاجرتِ موجودی به الماس (ربات موقتاً متوقف می‌شود)..."
   pm2 stop tarot 2>/dev/null || true
-  if ZERO_USER="409581917" node tools/coin-migration-tarot.mjs bots/tarot/data --apply; then
-    echo "✅ مهاجرت انجام شد"
-  else
-    echo "❌ مهاجرت شکست خورد — ربات را برمی‌گردانم و متوقف می‌شوم"
-    pm2 start ecosystem.config.cjs --only tarot 2>/dev/null || true
+  # ⚠️ خروجی را نگه می‌داریم تا «هیچ دیتابیسی پیدا نشد» (cwdِ غلط) را که با کدِ صفر
+  # برمی‌گردد، به‌اشتباه «موفق» گزارش نکنیم.
+  MIG_OUT=$(ZERO_USER="409581917" node tools/coin-migration-tarot.mjs bots/tarot/data --apply 2>&1) || {
+    echo "$MIG_OUT"; echo "❌ مهاجرت شکست خورد"; exit 1;
+  }
+  echo "$MIG_OUT"
+  if echo "$MIG_OUT" | grep -q "دیتابیسی پیدا نشد"; then
+    echo "❌ هیچ دیتابیسی پیدا نشد — مسیر اشتباه است، متوقف شدم"
     exit 1
   fi
+  echo "✅ مهاجرت انجام شد"
 else
   echo "⏭ مهاجرت لازم نیست (قبلاً انجام شده یا .env نیست)"
 fi
