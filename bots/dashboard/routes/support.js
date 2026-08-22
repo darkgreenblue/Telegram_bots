@@ -1,6 +1,6 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, walletText } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText } from '../lib/bots.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
@@ -63,7 +63,9 @@ function profileCard(inst, u) {
     .map(([k, v]) => {
       let val = String(v ?? '');
       if (/_at$|^last_seen$|^created/.test(k) && /^\d{9,}$/.test(val)) val = tehranDateTime(Number(val));
-      if (k === 'balance') val = fmt(v) + ' ت';
+      // 💎 موجودی = اعتبار، پس همیشه به واحدِ خودِ ربات. این همان جایی بود که مالک
+      // «۹۶۰٬۰۰۰ تومان» می‌دید در حالی که کاربر ۹۶ الماس داشت.
+      if (k === 'balance') val = creditText(inst.bot, v);
       if (val.length > TRUNC) val = val.slice(0, TRUNC) + '…';
       return stat(k, esc(val || '-'));
     }).join('');
@@ -104,18 +106,21 @@ function buildTimeline(db, botKey, uid) {
   const m = moneyOf(botKey);
   if (hasTable(db, m.table)) {
     for (const p of rows(db, `SELECT * FROM ${m.table} WHERE user_id=? ORDER BY id DESC LIMIT 100`, [uid])) {
-      const amt = toToman(botKey, p[m.amountCol]);
-      const orig = p.original_amount != null ? toToman(botKey, p.original_amount) : null;
+      // ⚠️ دو واحدِ متفاوت در یک خط: `amount` پولِ واقعی (تومان) و `original_amount`
+      // اعتبار (الماس در tarot). هرگز با هم مقایسه یا هم‌فرمت نمی‌شوند.
+      const amt = moneyText(botKey, p[m.amountCol]);
+      const credit = p.original_amount != null && p.original_amount !== p[m.amountCol]
+        ? creditText(botKey, p.original_amount) : null;
       items.push({
         ts: toUnix(p.created_at), icon: '💳',
-        label: `پرداخت #${p.id} — ${fmt(amt)} ت` + (orig && orig !== amt ? ` (اصل ${fmt(orig)})` : '') + (p.tier ? ` · اشتراک ${p.tier}` : ''),
+        label: `پرداخت #${p.id} — ${amt}` + (credit ? ` (اعتبار ${credit})` : '') + (p.tier ? ` · اشتراک ${p.tier}` : ''),
         detail: `${p.status}${p.step ? ` · مرحله: ${p.step}` : ''}`, status: p.status,
       });
     }
   }
   if (botKey === 'tarot' && hasTable(db, 'readings')) {
     for (const r of rows(db, 'SELECT * FROM readings WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
-      items.push({ ts: r.created_at, icon: '🔮', label: `فال ${r.type} — ${fmt(r.price)} ت`, detail: `${r.status}${r.feedback ? ` · بازخورد: ${r.feedback.slice(0, 60)}` : ''}`, status: r.status });
+      items.push({ ts: r.created_at, icon: '🔮', label: `فال ${r.type} — ${creditText(botKey, r.price)}`, detail: `${r.status}${r.feedback ? ` · بازخورد: ${r.feedback.slice(0, 60)}` : ''}`, status: r.status });
     }
   }
   if (botKey === 'voice2text') {
@@ -214,7 +219,7 @@ function openStateCard(inst, uid) {
       `#${p.id}`,
       `${fmt(toToman(inst.bot, p.amount))} ت` +
         (p.original_amount && p.original_amount !== p.amount
-          ? ` <span class="muted">(اعتبار ${esc(walletText(inst.bot, p.original_amount))})</span>` : ''),
+          ? ` <span class="muted">(اعتبار ${esc(creditText(inst.bot, p.original_amount))})</span>` : ''),
       statusBadge(p.status),
       esc(p.step || '-'),
       tehranDateTime(p.t),
@@ -307,7 +312,7 @@ export function supportAction(body) {
         throw new Error('برای این فال یک اقدام در صف است؛ صبر کن');
       }
       ins.run(0, act, uid, r.price, rid, note);
-      msg = `فال #${rid} (${fmt(r.price)} تومان) در صف بازکردن قرار گرفت`;
+      msg = `فال #${rid} (${creditText(inst.bot, r.price)}) در صف بازکردن قرار گرفت`;
     } else {
       // 💎 ورودی به زبانِ همان ربات است: برای رباتِ الماسی عدد = تعدادِ الماس و همین‌جا
       // به واحدِ داخلی تبدیل می‌شود. تبدیل عمداً **این‌جا** انجام می‌شود نه در sweepِ ربات:

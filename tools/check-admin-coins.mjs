@@ -10,7 +10,7 @@
 // کلاسِ باگ (واحدِ پول) قبلاً یک بار پولِ واقعی خورده بود (ریال/تومانِ ۱۴۰۵/۰۵/۱۲).
 //
 // اجرا: node tools/check-admin-coins.mjs
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import path from 'path';
 
 const L = (await import('../bots/tarot/locales/fa.js')).default;
@@ -106,12 +106,12 @@ console.log('\n▶ 💎 پنلِ داشبورد به الماس شارژ می‌
   ok(botCoin === 10_000, `COIN_VALUE ربات خوانده شد (${botCoin})`);
   ok(dashCoin === botCoin, `coinValue داشبورد با COIN_VALUE ربات یکی است (${dashCoin})`);
 
-  const { coinOf, walletText } = await import('../bots/dashboard/lib/bots.js');
+  const { coinOf, creditText } = await import('../bots/dashboard/lib/bots.js');
   const c = coinOf('tarot');
   ok(c && c.value === botCoin, 'coinOf(tarot) واحدِ الماس را می‌دهد');
   ok(coinOf('voice2text') === null, 'و رباتِ تومانی null می‌گیرد (رفتارش دقیقاً مثل قبل)');
-  ok(walletText('tarot', 1_000_000) === '۱۰۰💎', 'اعتبارِ ۱٬۰۰۰٬۰۰۰ به «۱۰۰💎» رندر می‌شود');
-  ok(/تومان/.test(walletText('voice2text', 50_000)), 'و رباتِ تومانی همان «تومان» را می‌گیرد');
+  ok(creditText('tarot', 1_000_000) === '۱۰۰💎', 'اعتبارِ ۱٬۰۰۰٬۰۰۰ به «۱۰۰💎» رندر می‌شود');
+  ok(/تومان/.test(creditText('voice2text', 50_000)), 'و رباتِ تومانی همان «تومان» را می‌گیرد');
 
   // تبدیل باید **در داشبورد** باشد نه در sweepِ ربات، وگرنه ردیف‌های قدیمیِ در صف
   // (که واحدِ داخلی دارند) با تبدیلِ دوباره چند برابر می‌شدند.
@@ -122,6 +122,67 @@ console.log('\n▶ 💎 پنلِ داشبورد به الماس شارژ می‌
   // سقفِ ایمنی باید روی مقدارِ **تبدیل‌شده** بنشیند، وگرنه ۵٬۰۰۰٬۰۰۰ الماس هم قبول می‌شد.
   ok(/const maxIn = coin \? Math\.floor\(MAX_MANUAL \/ coin\.value\) : MAX_MANUAL;/.test(SUPPORT),
     'سقفِ ایمنی هم به همان واحد تبدیل می‌شود (۵۰۰ الماس، نه ۵٬۰۰۰٬۰۰۰)');
+}
+
+console.log('\n▶ 💎 دو helperِ جدا: اعتبار در برابر پولِ واقعی');
+{
+  const B = await import('../bots/dashboard/lib/bots.js');
+  // ⚠️ helperِ مبهم نباید وجود داشته باشد. `walletText` معنی‌اش به نیتِ صداکننده بستگی
+  // داشت و دقیقاً به همین دلیل `users.balance` جا ماند و مالک «۹۶۰٬۰۰۰ تومان» دید.
+  ok(B.walletText === undefined, 'helperِ مبهمِ walletText دیگر وجود ندارد');
+  ok(typeof B.creditText === 'function' && typeof B.moneyText === 'function',
+    'دو helperِ صریح هست: creditText (اعتبار) و moneyText (پولِ واقعی)');
+
+  ok(B.creditText('tarot', 1_970_000) === '۱۹۷💎', 'اعتبارِ tarot الماس رندر می‌شود');
+  ok(B.creditNum('tarot', 1_970_000) === 197, 'و عددِ خامش برای CSV/جمع درست است');
+  ok(B.moneyText('tarot', 150_000) === '۱۵۰٬۰۰۰ تومان', 'ولی پولِ واقعیِ tarot تومان می‌ماند');
+  ok(!/💎/.test(B.moneyText('tarot', 150_000)), 'و هرگز الماسی نمی‌شود (درآمد تومانی است)');
+
+  // ربات‌های دیگر باید بیت‌به‌بیت مثل قبل بمانند.
+  ok(B.creditText('voice2text', 50_000) === '۵۰٬۰۰۰ تومان', 'اعتبارِ voice2text دقیقاً مثل قبل تومان است');
+  ok(B.coinOf('voice2text') === null && B.coinOf('tabir-khab') === null,
+    'هیچ رباتِ دیگری الماسی نشده');
+  ok(B.moneyText('tabir-khab', 500_000) === '۵۰٬۰۰۰ تومان', 'ریالِ tabir مثل قبل به تومان نمایش داده می‌شود');
+
+  // moneyText نباید به coinOf وابسته باشد — گاردِ ساختاری، نه ادعای شفاهی.
+  const libSrc = readFileSync(path.resolve('bots/dashboard/lib/bots.js'), 'utf8');
+  const mtBody = libSrc.slice(libSrc.indexOf('export const moneyText'), libSrc.indexOf('const fmtNum'));
+  ok(!/coinOf|coinValue/.test(mtBody), 'moneyText اصلاً به واحدِ الماس کاری ندارد');
+}
+
+console.log('\n▶ 🔒 هیچ مسیری اعتبار را دوباره تومانی نمی‌کند');
+{
+  // ستون‌هایی که **اعتبار**اند. هر جا اسمشان کنارِ یک برچسبِ تومانیِ خام بیاید، همان باگ
+  // برگشته. عمداً روی سورسِ همه‌ی routeها اجرا می‌شود تا مسیرِ **آینده** هم پوشش بگیرد.
+  const dir = path.resolve('bots/dashboard/routes');
+  const files = readdirSync(dir).filter(f => f.endsWith('.js'));
+  ok(files.length >= 5, `فایل‌های route خوانده شدند (${files.length})`);
+  const bad = [];
+  for (const f of files) {
+    const src = readFileSync(path.join(dir, f), 'utf8');
+    src.split('\n').forEach((ln, i) => {
+      if (/^\s*(\/\/|\*)/.test(ln)) return;                       // کامنت مهم نیست
+      if (!/balance|original_amount|r\.price/.test(ln)) return;
+      // برچسبِ تومانیِ خام کنارِ یک ستونِ اعتباری
+      if (/(' ت'|" ت"|تومان)/.test(ln) && !/creditText|creditNum|moneyText/.test(ln)) {
+        bad.push(`${f}:${i + 1} ${ln.trim().slice(0, 80)}`);
+      }
+    });
+  }
+  ok(bad.length === 0, `هیچ ستونِ اعتباری با برچسبِ تومانِ خام رندر نمی‌شود${bad.length ? `\n     ${bad.join('\n     ')}` : ''}`);
+}
+
+console.log('\n▶ 🧮 «خالص» دیگر اعتبارِ مجانی را از درآمد کم نمی‌کند');
+{
+  // اعتبارِ مجانی پولِ نقد نیست (بدهیِ تبلیغاتی است)، پس تفریقش از درآمد عددی می‌ساخت
+  // که نه جریانِ نقدی بود نه سود و زیان. فقط تخفیف درآمدِ ازدست‌رفته‌ی واقعی است.
+  const fin = readFileSync(path.resolve('bots/dashboard/routes/finance.js'), 'utf8');
+  ok(/const net = sum\.rev - sum\.gift - sum\.disc;/.test(fin),
+    'خالص = درآمد − اعتبارِ تومانیِ ربات‌های غیرالماسی − تخفیف');
+  ok(!/sum\.giftCoins.*net|net.*sum\.giftCoins/.test(fin),
+    'الماسِ هدیه‌شده هرگز واردِ محاسبه‌ی تومانیِ خالص نمی‌شود');
+  ok(/giftCoins/.test(fin), 'الماسِ هدیه‌شده سطلِ جدای خودش را دارد');
+  ok(/function coinEconomy/.test(fin), 'کارتِ اقتصادِ الماس (هدیه/خرید/مصرف/مانده) وجود دارد');
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);

@@ -35,11 +35,15 @@ export const BOTS = [
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
     receiptQueue: true,
-    // 💎 واحدِ نمایشیِ کیف. `users.balance` و `payments.original_amount` تومان‌اند، ولی
-    // این ربات آن‌ها را به‌عنوان الماس نشان می‌دهد (۱ الماس = ۱۰٬۰۰۰). داشبورد باید همان
-    // زبان را حرف بزند، وگرنه مالک برای دادنِ ۱۰۰ الماس باید ۱٬۰۰۰٬۰۰۰ تایپ کند و هر
-    // اعتباری در جدول‌ها عددی بی‌معنی به نظر برسد. باید با COIN_VALUE ربات یکی بماند
-    // (چکِ CI: tools/check-dashboard-coins.mjs).
+    /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
+     *
+     * ⚠️ عددی که در `users.balance` و `payments.original_amount` نشسته یک **فرمتِ
+     * ذخیره‌سازیِ بازمانده از دوره‌ی تومانی** است (هر الماس ×۱۰٬۰۰۰)، نه یک قیمت.
+     * اثباتش از خودِ بسته‌ها: ۳۰٬۰۰۰÷۱۰ = ۳٬۰۰۰ · ۶۰٬۰۰۰÷۳۰ = ۲٬۰۰۰ ·
+     * ۱۵۰٬۰۰۰÷۱۰۰ = ۱٬۵۰۰ تومان برای هر الماس. یعنی **هیچ نرخِ واحدی وجود ندارد**
+     * و هر تبدیلِ الماس→تومان نه‌فقط بدسلیقگی، بلکه از نظرِ حسابی **غلط** است.
+     * پس این عدد فقط برای **دیکود کردنِ همان فرمتِ ذخیره‌سازی** به کار می‌رود و
+     * هیچ‌جا به‌عنوان «قیمت» یا «نرخ» استفاده نمی‌شود. */
     coinValue: 10_000, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
@@ -90,18 +94,42 @@ export function instances() {
 /* ---- helperهای پروفایل: هر route به‌جای مقدار hardcode این‌ها را صدا می‌زند ---- */
 export const abSupported = (bot) => !!botByKey(bot)?.abSupport;
 export const receiptQueueSupported = (bot) => !!botByKey(bot)?.receiptQueue;
-/* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی است و همه‌چیز دقیقاً مثل قبل می‌ماند —
- * پس هر ربات دیگری بدونِ تغییر رفتار می‌کند و این فقط یک لایه‌ی **نمایشی** است. */
+/* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی/ریالی است و همه‌چیز دقیقاً مثل قبل
+ * می‌ماند — پس voice2text و tabir-khab بیت‌به‌بیت بدونِ تغییر رفتار می‌کنند. */
 export const coinOf = (bot) => {
   const b = botByKey(bot);
   return b?.coinValue ? { value: b.coinValue, name: b.coinName || 'الماس', emoji: b.coinEmoji || '💎' } : null;
 };
-/** مبلغِ داخلی ⟶ متنِ خوانا به زبانِ همان ربات (الماس یا تومان). */
-export const walletText = (bot, amount) => {
+
+/* ══════════════════════════════════════════════════════════════════════════
+   دو دنیای جدا، دو helper جدا. **هرگز یکی را جای دیگری استفاده نکن.**
+
+   `creditText`  = اعتبار / موجودی / کیف / هدیه / کسر  ⟶ واحدِ خودِ ربات (الماس)
+   `moneyText`   = پول واقعی / پرداخت / درآمد          ⟶ تومان (یا ریالِ tabir)
+
+   چرا دو تا و نه یکی: helperی که معنی‌اش به نیتِ صداکننده بستگی دارد، دقیقاً همان
+   چیزی است که باعث شد `users.balance` جا بماند و مالک «۹۶۰٬۰۰۰ تومان» ببیند به‌جای
+   «۹۶💎». حالا انتخابِ helper خودش اعلامِ نیت است و چکِ CI هر ستون را به helperِ
+   درستش قفل کرده.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** عددِ خامِ اعتبار به واحدِ خودِ ربات (برای CSV، مرتب‌سازی و جمع — بدونِ فرمت). */
+export const creditNum = (bot, stored) => {
   const c = coinOf(bot);
-  const n = Number(amount) || 0;
-  return c ? `${fmtNum(Math.round(n / c.value))}${c.emoji}` : `${fmtNum(toToman(bot, n))} تومان`;
+  const n = Number(stored) || 0;
+  return c ? Math.round(n / c.value) : toToman(bot, n);
 };
+
+/** اعتبار ⟶ متنِ خوانا به زبانِ همان ربات: «۹۶💎» یا «۵۰٬۰۰۰ تومان». */
+export const creditText = (bot, stored) => {
+  const c = coinOf(bot);
+  // رباتِ بی‌الماس: عیناً همان چیزی که تا امروز می‌دید (ریالِ tabir با toToman نمایشی می‌شود).
+  return c ? `${fmtNum(creditNum(bot, stored))}${c.emoji}` : `${fmtNum(toToman(bot, stored))} تومان`;
+};
+
+/** پولِ واقعی ⟶ متنِ خوانا. عمداً به `coinOf` کاری ندارد: درآمد هرگز الماسی نمی‌شود. */
+export const moneyText = (bot, amount) => `${fmtNum(toToman(bot, amount))} تومان`;
+
 const fmtNum = (n) => Number(n).toLocaleString('fa-IR');
 export const userPk = (bot) => botByKey(bot)?.userPk || 'telegram_id';
 export const userNameCol = (bot) => botByKey(bot)?.userNameCol || 'name';

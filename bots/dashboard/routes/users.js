@@ -5,8 +5,7 @@
 // با PRAGMA چک می‌شود؛ جمعِ پرداخت و شمارشِ رویداد از پروفایلِ مالیِ همان ربات می‌آید.
 import {
   instances, instancesOf, BOTS, withDb, hasTable, rows,
-  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, toToman,
-} from '../lib/bots.js';
+  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, toToman, creditText, creditNum } from '../lib/bots.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec } from '../lib/util.js';
 import { table } from '../lib/html.js';
@@ -86,7 +85,11 @@ function collectUsers(f) {
           instId: inst.id, instTitle: inst.title, bot: inst.bot,
           uid: u.id, name: u.nm || '', username: u.un || '',
           created: u.created || 0, state: u.st || '',
-          balance: u.bal == null ? null : toToman(inst.bot, u.bal),
+          // عددِ خام برای مرتب‌سازی می‌ماند (یکنواخت است، پس ترتیب عوض نمی‌شود)؛
+          // نمایش و CSV از creditText/creditNum می‌آیند تا واحدِ هر ربات درست بماند.
+          balanceRaw: u.bal,
+          balance: u.bal == null ? null : creditNum(inst.bot, u.bal),
+          balanceText: u.bal == null ? null : creditText(inst.bot, u.bal),
           lastSeen: Math.max(Number(u.seen) || 0, Number(u.ev_last) || 0),
           events: Number(u.ev) || 0,
           paid: toToman(inst.bot, u.paid || 0), paidCount: Number(u.paid_n) || 0,
@@ -151,7 +154,7 @@ export function usersBody(url) {
     u.lastSeen ? tehranDateTime(u.lastSeen) : '-',
     fmt(u.events),
     u.paidCount ? `${fmt(u.paidCount)} × <b>${fmt(u.paid)}</b> ت` : '<span class="muted">-</span>',
-    u.balance == null ? '-' : fmt(u.balance) + ' ت',
+    u.balanceText ?? '-',
     u.state ? `<span class="badge">${esc(u.state)}</span>` : '-',
     `<a href="/support/user?inst=${encodeURIComponent(u.instId)}&id=${u.uid}">journey ←</a>`,
   ]);
@@ -175,7 +178,7 @@ export function usersCsv(url) {
   const f = readFilters(url);
   const all = collectUsers(f).slice(0, 5000);
   audit('export.csv', 'users', `bot=${f.bot || 'all'} q=${f.q || '-'} sort=${f.sort} days=${f.days} rows=${all.length}`);
-  const header = 'bot_instance,user_id,name,username,created_at,last_activity,events,payments_count,paid_toman,balance_toman,state';
+  const header = 'bot_instance,user_id,name,username,created_at,last_activity,events,payments_count,paid_toman,credit,state';
   const lines = all.map(u => [
     u.instId, u.uid, u.name, u.username, u.created || '', u.lastSeen || '',
     u.events, u.paidCount, u.paid, u.balance ?? '', u.state,

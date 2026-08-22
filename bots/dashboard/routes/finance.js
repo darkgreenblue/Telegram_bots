@@ -1,7 +1,7 @@
 // مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
 // هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
 // این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, walletText} from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, scalar, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, creditText, creditNum, coinOf } from '../lib/bots.js';
 import { listAudit, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
@@ -51,7 +51,7 @@ function collectPayments({ instId, status, days }) {
           // 💎 متنِ خوانای اعتبار به زبانِ همان ربات. برای پرداختِ بسته، original_amount
           // اعتبار به واحدِ داخلی است (۱۰۰ الماس = ۱٬۰۰۰٬۰۰۰) و چاپش به‌عنوان تومان
           // عددِ بی‌معنی می‌داد. ستونِ CSV عمداً خام می‌ماند (دیتای تحلیل).
-          originalText: p.original_amount != null ? walletText(inst.bot, p.original_amount) : null,
+          originalText: p.original_amount != null ? creditText(inst.bot, p.original_amount) : null,
           status: p.status,
           step: p.step ?? (p.tier ? `اشتراک ${p.tier}` : null), // tabir: به‌جای مرحله، نوع اشتراک
           pendingAction: pendingActs.get(p.id) || null, // approve|reject در صف، یا null
@@ -173,7 +173,7 @@ const COST_KINDS = { welcome: 'خوش‌آمد', streak: 'استریک', referra
 function collectDaily(days) {
   const since = tehranDayStart(-(days - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, gift, disc, kinds:{} }
-  const at = (d) => { if (!day.has(d)) day.set(d, { rev: 0, gift: 0, disc: 0, kinds: {} }); return day.get(d); };
+  const at = (d) => { if (!day.has(d)) day.set(d, { rev: 0, gift: 0, giftCoins: 0, disc: 0, kinds: {} }); return day.get(d); };
   for (const inst of instances()) {
     withDb(inst.file, (db) => {
       const m = moneyOf(inst.bot);
@@ -185,16 +185,18 @@ function collectDaily(days) {
           at(tehranDayStr(r.t)).rev += toToman(inst.bot, r.a) || 0;
         }
       }
-      // اعتبارِ هدیه‌شده
+      // اعتبارِ هدیه‌شده. ⚠️ برای رباتِ الماسی این عدد **الماس** است و هرگز با تومان
+      // جمع نمی‌شود (سطلِ جدا). دلیلِ حسابداری‌اش در کامنتِ costsBody پایین.
       if (hasTable(db, 'events')) {
+        const coin = coinOf(inst.bot);
         for (const r of rows(db, `SELECT created_at AS t,
                COALESCE(json_extract(props,'$.amount'), 0) AS a,
                COALESCE(json_extract(props,'$.kind'), '') AS k
              FROM events WHERE event='credit_granted' AND created_at >= ?`, [since])) {
           const d = at(tehranDayStr(r.t));
-          const v = toToman(inst.bot, r.a) || 0;
-          d.gift += v;
-          d.kinds[r.k] = (d.kinds[r.k] || 0) + v;
+          if (coin) { d.giftCoins += creditNum(inst.bot, r.a) || 0; }
+          else { d.gift += toToman(inst.bot, r.a) || 0; }
+          d.kinds[r.k] = (d.kinds[r.k] || 0) + (creditNum(inst.bot, r.a) || 0);
         }
       }
       // تخفیفِ داده‌شده (درآمدِ ازدست‌رفته)
@@ -208,7 +210,38 @@ function collectDaily(days) {
   const out = [];
   for (let i = 0; i < days; i++) {
     const d = tehranDayStr(tehranDayStart(-i));
-    out.push({ d, ...(day.get(d) || { rev: 0, gift: 0, disc: 0, kinds: {} }) });
+    out.push({ d, ...(day.get(d) || { rev: 0, gift: 0, giftCoins: 0, disc: 0, kinds: {} }) });
+  }
+  return out;
+}
+
+/* اقتصادِ الماس (تجمعی، نه روزانه): چهار عددی که با هم یک ترازنامه‌ی ساده می‌سازند.
+   صادرشده(هدیه) + خریداری‌شده = واردشده ؛ مصرف‌شده = بازخریدشده ؛ مانده = بدهیِ معوق. */
+function coinEconomy() {
+  const out = [];
+  for (const inst of instances()) {
+    const coin = coinOf(inst.bot);
+    if (!coin) continue;
+    withDb(inst.file, (db) => {
+      const g = hasTable(db, 'events')
+        ? scalar(db, "SELECT COALESCE(SUM(COALESCE(json_extract(props,'$.amount'),0)),0) FROM events WHERE event='credit_granted'")
+        : 0;
+      const m = moneyOf(inst.bot);
+      const bought = hasTable(db, m.table)
+        ? scalar(db, `SELECT COALESCE(SUM(COALESCE(original_amount, ${m.amountCol})),0) FROM ${m.table} WHERE status=?`, [m.successStatus])
+        : 0;
+      const spent = hasTable(db, 'readings')
+        ? scalar(db, "SELECT COALESCE(SUM(price),0) FROM readings WHERE status='delivered'")
+        : 0;
+      const held = scalar(db, 'SELECT COALESCE(SUM(balance),0) FROM users');
+      out.push({
+        inst, coin,
+        gifted: creditNum(inst.bot, g),
+        bought: creditNum(inst.bot, bought),
+        spent: creditNum(inst.bot, spent),
+        held: creditNum(inst.bot, held),
+      });
+    });
   }
   return out;
 }
@@ -216,22 +249,46 @@ function collectDaily(days) {
 export function costsBody(url) {
   const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 7), 180);
   const series = collectDaily(days);
-  const sum = series.reduce((a, r) => ({ rev: a.rev + r.rev, gift: a.gift + r.gift, disc: a.disc + r.disc }), { rev: 0, gift: 0, disc: 0 });
-  const cost = sum.gift + sum.disc;
-  const net = sum.rev - cost;
+  const sum = series.reduce((a, r) => ({
+    rev: a.rev + r.rev, gift: a.gift + r.gift, giftCoins: a.giftCoins + r.giftCoins, disc: a.disc + r.disc,
+  }), { rev: 0, gift: 0, giftCoins: 0, disc: 0 });
+
+  /* 💡 چرا «خالص» دیگر اعتبارِ هدیه را کم نمی‌کند (بازطراحیِ ۱۴۰۵/۰۵/۳۰):
+     اعتبارِ مجانی **پولِ نقد نیست**؛ یک بدهیِ تبلیغاتی است، دقیقاً مثل کارتِ هدیه یا
+     امتیازِ وفاداری. لحظه‌ی دادنش هیچ ریالی از جیب نمی‌رود. هزینه‌ی واقعی وقتی رخ
+     می‌دهد که کاربر **خرجش کند** و ما یک فال تحویل بدهیم، و اندازه‌اش هم ارزشِ اسمیِ
+     الماس نیست، بلکه **هزینه‌ی خدمت‌رسانی** است (فراخوانیِ مدل). ضمناً بخشِ بزرگی از
+     اعتبارِ داده‌شده هرگز خرج نمی‌شود (سوخت/breakage).
+     پس کم‌کردنِ ارزشِ اسمیِ اعتبار از درآمد، عددی می‌ساخت که نه جریانِ نقدی بود نه
+     سود و زیان. حالا فقط چیزی از درآمد کم می‌شود که **واقعاً درآمدِ ازدست‌رفته** است:
+     تخفیف. اقتصادِ الماس جدا و به واحدِ خودش گزارش می‌شود. */
+  const net = sum.rev - sum.gift - sum.disc;
   const kinds = {};
   for (const r of series) for (const [k, v] of Object.entries(r.kinds)) kinds[k] = (kinds[k] || 0) + v;
+  const econ = coinEconomy();
 
   const max = Math.max(1, ...series.map(r => Math.max(r.rev, r.gift + r.disc)));
   const px = (v) => Math.round((v / max) * 220);
   const rowsHtml = series.map(r => [
     r.d,
     `${fmt(r.rev)} ت <span class="bar" style="width:${px(r.rev)}px"></span>`,
-    `${fmt(r.gift)} ت`,
     `${fmt(r.disc)} ت`,
-    `<span class="${r.rev - r.gift - r.disc < 0 ? 'drop' : ''}">${fmt(r.rev - r.gift - r.disc)} ت</span>` +
-      ` <span class="bar" style="width:${px(r.gift + r.disc)}px;background:var(--bad,#c0392b)"></span>`,
+    `<span class="${r.rev - r.disc < 0 ? 'drop' : ''}">${fmt(r.rev - r.disc)} ت</span>` +
+      ` <span class="bar" style="width:${px(r.disc)}px;background:var(--bad,#c0392b)"></span>`,
+    r.giftCoins ? `${fmt(r.giftCoins)}💎` : '-',
   ]);
+
+  const econCards = econ.map(e => `<div class="card"><h2>💎 اقتصادِ الماس — ${esc(e.inst.title)}</h2>
+      <div class="stats">
+        ${stat('هدیه‌شده (کلِ عمر)', `${fmt(e.gifted)}💎`)}
+        ${stat('خریداری‌شده', `${fmt(e.bought)}💎`)}
+        ${stat('مصرف‌شده (فالِ تحویل‌شده)', `${fmt(e.spent)}💎`)}
+        ${stat('ماندهٔ کیفِ کاربران', `${fmt(e.held)}💎`)}
+      </div>
+      <p class="muted">«هدیه‌شده» جوابِ «چقدر الماس بذل و بخشش کردیم» است، به واحدِ خودش.
+        این عدد <b>هزینه‌ی نقدی نیست</b>؛ یک بدهیِ تبلیغاتی است که فقط وقتی خرج می‌شود
+        هزینه می‌سازد. «ماندهٔ کیف» یعنی هنوز خرج نشده، و اختلافش با «مصرف‌شده» همان
+        نرخِ سوختِ اعتبار است.</p></div>`).join('');
 
   return `
     <h1>هزینه‌ها و درآمد</h1>
@@ -242,18 +299,19 @@ export function costsBody(url) {
     </form>
     <div class="stats">
       ${stat('درآمدِ تأییدشده', `${fmt(sum.rev)} ت`)}
-      ${stat('اعتبارِ هدیه‌شده', `${fmt(sum.gift)} ت`)}
       ${stat('تخفیفِ داده‌شده', `${fmt(sum.disc)} ت`)}
-      ${stat('خالص (درآمد منهای هزینه)', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`)}
+      ${sum.gift ? stat('اعتبارِ مجانیِ تومانی', `${fmt(sum.gift)} ت`) : ''}
+      ${stat('درآمدِ خالص (منهای تخفیف)', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`)}
     </div>
-    <p class="muted">${net < 0
-      ? '⚠️ در این بازه، هزینه‌ی هدیه و تخفیف از درآمد بیشتر بوده.'
-      : 'در این بازه درآمد از هزینه‌ی هدیه و تخفیف بیشتر بوده.'}</p>
-    <h2>تفکیک اعتبارِ هدیه</h2>
-    ${table(['نوع', 'مبلغ'], Object.entries(kinds).sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => [esc(COST_KINDS[k] || k || 'سایر'), `${fmt(v)} ت`]), 'هنوز هدیه‌ای داده نشده')}
+    <p class="muted">فقط <b>تخفیف</b> از درآمد کم می‌شود، چون تنها چیزی است که واقعاً
+      درآمدِ ازدست‌رفته است. اعتبارِ مجانی پولِ نقد نیست و پایین‌تر، به واحدِ خودش، گزارش می‌شود.</p>
+    ${econCards}
+    <h2>تفکیک اعتبارِ هدیه (به واحدِ خودِ ربات)</h2>
+    ${table(['نوع', 'مقدار'], Object.entries(kinds).sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => [esc(COST_KINDS[k] || k || 'سایر'), fmt(v)]), 'هنوز هدیه‌ای داده نشده')}
     <h2>روزانه</h2>
-    ${table(['روز', 'درآمد', 'هدیه', 'تخفیف', 'خالص'], rowsHtml)}
-    <p class="muted">⚠️ هزینه‌ی LLM در این اعداد نیست: مصرفِ توکن هیچ‌جا ثبت نمی‌شود.
-      این صفحه فقط پولی را نشان می‌دهد که واقعاً از جیبِ درآمد رفته (اعتبارِ مجانی + تخفیف).</p>`;
+    ${table(['روز', 'درآمد', 'تخفیف', 'خالص', 'الماسِ هدیه'], rowsHtml)}
+    <p class="muted">⚠️ <b>هزینه‌ی واقعیِ خدمت‌رسانی (فراخوانیِ مدل) در این اعداد نیست.</b>
+      هیچ ربات این ریپو مصرفِ توکن را ثبت نمی‌کند، پس عددی که نداریم ساخته نمی‌شود.
+      تا وقتی ثبت نشود، «سودِ واقعی» قابلِ محاسبه نیست — فقط درآمد منهای تخفیف.</p>`;
 }
