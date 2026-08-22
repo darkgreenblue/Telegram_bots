@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, tunnel-url]
+        options: [status, logs, errors, restart, env-check, db-query, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -120,6 +120,18 @@ jobs:
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
                 "
+                ;;
+              announce-dry|announce-send)
+                # 📣 پیامِ اطلاع‌رسانیِ آپدیت. عمداً از خودِ دیپلوی جداست تا مالک **اول**
+                # وضعیتِ ربات را چشمی تأیید کند و بعد پیامِ برگشت‌ناپذیر به ~۱۰۰ کاربر برود.
+                # گاردِ `assertReady` داخلِ خودِ اسکریپت جلوی ارسالِ زودهنگام را می‌گیرد
+                # (تا مهاجرت اجرا نشده و دنیای الماس باز نشده، ارسالِ واقعی رد می‌شود).
+                cd ~/voice2text
+                # ⚠️ عمداً `if` صریح و نه `[ … ] && SEND=…`: زیرِ `set -e` یک AND-listِ
+                # ناموفق روی سرورِ زنده ریسکِ بی‌دلیل است، و این مسیر به ~۱۰۰ کاربر پیام می‌دهد.
+                if [ "$OPS_ACTION" = "announce-send" ]; then SEND="--send"; else SEND=""; fi
+                echo "===== announce $SEND ====="
+                node tools/announce-tarot.mjs bots/tarot/data $SEND
                 ;;
               tunnel-url)
                 # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)
