@@ -27,10 +27,14 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs
 
 console.log('▶ قرارداد با خودِ ربات (وگرنه مهاجرت با دنیای جدید نمی‌خواند)');
 {
-  const botCoinValue = Number((SRC.match(/const COIN_VALUE = ([0-9_]+)/) || [])[1]?.replace(/_/g, ''));
+  // ⚠️ این مهاجرت **تاریخی** است: قبلاً اجرا شد و بلوکش از deploy برداشته شده. ربات دیگر
+  // COIN_VALUE ندارد (مهاجرتِ «الماسِ بومی» ضریب را از کد و از دیتا پاک کرد)، پس قرارداد
+  // با ثابتِ همان مهاجرتِ بعدی سنجیده می‌شود — هر دو یک فرمتِ میراثی را توصیف می‌کنند.
+  const { SCALE } = await import('./coins-native-tarot.mjs');
+  const botCoinValue = SCALE;
   const botWelcomeCoins = Number((SRC.match(/const WELCOME_BONUS_COINS_V2 = (\d+)/) || [])[1]);
   const botWelcomeToman = Number((SRC.match(/const WELCOME_BONUS\s+= ([0-9_]+)/) || [])[1]?.replace(/_/g, ''));
-  ok(botCoinValue === COIN_VALUE, `ارزشِ الماس با ربات یکی است (${COIN_VALUE})`);
+  ok(botCoinValue === COIN_VALUE, `ضریبِ میراثی با مهاجرتِ بعدی یکی است (${COIN_VALUE})`);
   ok(botWelcomeCoins === NEW_WELCOME_COINS, `هدیه‌ی خوش‌آمدِ جدید با ربات یکی است (${NEW_WELCOME_COINS} الماس)`);
   ok(botWelcomeToman === OLD_WELCOME_TOMAN, `هدیه‌ی خوش‌آمدِ قدیم با ربات یکی است (${OLD_WELCOME_TOMAN} تومان)`);
   ok(TOMAN_PER_COIN_GIFT === 6000, 'نرخِ هدیه‌بگیر دقیقاً ۶٬۰۰۰ تومان به ازای هر الماس است');
