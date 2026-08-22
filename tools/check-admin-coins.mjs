@@ -99,29 +99,26 @@ console.log('\n▶ سیم‌کشی در index.js (هیچ نقطه‌ای packOf 
 
 console.log('\n▶ 💎 پنلِ داشبورد به الماس شارژ می‌کند');
 {
-  // ⚠️ اگر این عدد با COIN_VALUE ربات یکی نماند، مالک فکر می‌کند ۱۰۰ الماس داده ولی
-  // عددِ دیگری در کیفِ کاربر می‌نشیند — یعنی دقیقاً همان کلاسِ باگِ واحدِ پول.
-  const botCoin = Number((SRC.match(/const COIN_VALUE = ([0-9_]+)/) || [])[1]?.replace(/_/g, ''));
+  // بعد از مهاجرتِ «الماسِ بومی» ضریبی وجود ندارد: عددِ دیتابیس خودِ تعدادِ الماس است.
+  ok(!/\bCOIN_VALUE\b/.test(SRC), 'ضریب از کدِ ربات حذف شده');
   const dashCoin = Number((DASH.match(/coinValue: ([0-9_]+)/) || [])[1]?.replace(/_/g, ''));
-  ok(botCoin === 10_000, `COIN_VALUE ربات خوانده شد (${botCoin})`);
-  ok(dashCoin === botCoin, `coinValue داشبورد با COIN_VALUE ربات یکی است (${dashCoin})`);
+  ok(dashCoin === 1, `coinValue داشبورد ۱ است (بدونِ تبدیل) — دیده شد ${dashCoin}`);
 
   const { coinOf, creditText } = await import('../bots/dashboard/lib/bots.js');
-  const c = coinOf('tarot');
-  ok(c && c.value === botCoin, 'coinOf(tarot) واحدِ الماس را می‌دهد');
+  ok(coinOf('tarot')?.value === 1, 'coinOf(tarot) واحدِ الماس با ضریبِ ۱');
   ok(coinOf('voice2text') === null, 'و رباتِ تومانی null می‌گیرد (رفتارش دقیقاً مثل قبل)');
-  ok(creditText('tarot', 1_000_000) === '۱۰۰💎', 'اعتبارِ ۱٬۰۰۰٬۰۰۰ به «۱۰۰💎» رندر می‌شود');
+  ok(creditText('tarot', 197) === '۱۹۷💎', 'موجودیِ ۱۹۷ به «۱۹۷💎» رندر می‌شود');
   ok(/تومان/.test(creditText('voice2text', 50_000)), 'و رباتِ تومانی همان «تومان» را می‌گیرد');
 
-  // تبدیل باید **در داشبورد** باشد نه در sweepِ ربات، وگرنه ردیف‌های قدیمیِ در صف
-  // (که واحدِ داخلی دارند) با تبدیلِ دوباره چند برابر می‌شدند.
+  // ورودیِ پنل دیگر ضرب نمی‌شود، ولی سقفِ ایمنی باید به واحدِ الماس باشد نه تومان.
   ok(/const amount = coin \? raw \* coin\.value : raw;/.test(SUPPORT),
-    'ورودیِ الماس در داشبورد به واحدِ داخلی تبدیل می‌شود');
+    'ورودیِ الماس مستقیم ثبت می‌شود (ضریب ۱)');
+  ok(/const MAX_MANUAL_COINS = 1_000;/.test(SUPPORT),
+    'سقفِ ایمنیِ الماسیِ جدا تعریف شده');
+  ok(/const maxIn = coin \? MAX_MANUAL_COINS : MAX_MANUAL;/.test(SUPPORT),
+    'و سقف از همان می‌آید، نه از تقسیمِ سقفِ تومانی (وگرنه ۵٬۰۰۰٬۰۰۰ الماس قبول می‌شد)');
   ok(!/coinValue|coinOf/.test(SRC.slice(SRC.indexOf("act.action === 'credit'"), SRC.indexOf("act.action === 'unlock_reading'"))),
     'و sweepِ ربات دست‌نخورده مانده (ریلِ پول تک‌منبع)');
-  // سقفِ ایمنی باید روی مقدارِ **تبدیل‌شده** بنشیند، وگرنه ۵٬۰۰۰٬۰۰۰ الماس هم قبول می‌شد.
-  ok(/const maxIn = coin \? Math\.floor\(MAX_MANUAL \/ coin\.value\) : MAX_MANUAL;/.test(SUPPORT),
-    'سقفِ ایمنی هم به همان واحد تبدیل می‌شود (۵۰۰ الماس، نه ۵٬۰۰۰٬۰۰۰)');
 }
 
 console.log('\n▶ 💎 دو helperِ جدا: اعتبار در برابر پولِ واقعی');
@@ -133,8 +130,8 @@ console.log('\n▶ 💎 دو helperِ جدا: اعتبار در برابر پو�
   ok(typeof B.creditText === 'function' && typeof B.moneyText === 'function',
     'دو helperِ صریح هست: creditText (اعتبار) و moneyText (پولِ واقعی)');
 
-  ok(B.creditText('tarot', 1_970_000) === '۱۹۷💎', 'اعتبارِ tarot الماس رندر می‌شود');
-  ok(B.creditNum('tarot', 1_970_000) === 197, 'و عددِ خامش برای CSV/جمع درست است');
+  ok(B.creditText('tarot', 197) === '۱۹۷💎', 'اعتبارِ tarot الماس رندر می‌شود (بدونِ تبدیل)');
+  ok(B.creditNum('tarot', 197) === 197, 'و عددِ خامش برای CSV/جمع همان است');
   ok(B.moneyText('tarot', 150_000) === '۱۵۰٬۰۰۰ تومان', 'ولی پولِ واقعیِ tarot تومان می‌ماند');
   ok(!/💎/.test(B.moneyText('tarot', 150_000)), 'و هرگز الماسی نمی‌شود (درآمد تومانی است)');
 

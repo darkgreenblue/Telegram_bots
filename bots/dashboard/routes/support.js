@@ -192,7 +192,10 @@ const SUPPORT_ACTIONS = {
   debit: 'کسرِ اعتبار',
   unlock_reading: 'بازکردنِ فالِ رزروشده',
 };
-const MAX_MANUAL = 5_000_000;   // سقفِ ایمنیِ یک اقدامِ دستی (ضدِ صفرِ اضافه)
+const MAX_MANUAL = 5_000_000;   // سقفِ ایمنیِ یک اقدامِ دستیِ **تومانی** (ضدِ صفرِ اضافه)
+// سقفِ جدا برای رباتِ الماسی: بعد از مهاجرتِ الماسِ بومی ضریب ۱ شد، پس اگر سقف از
+// روی MAX_MANUAL ساخته می‌شد، ۵٬۰۰۰٬۰۰۰ **الماس** هم قبول می‌شد.
+const MAX_MANUAL_COINS = 1_000;
 
 // وضعیت‌های بازِ کاربر: چیزی که پشتیبانی باید در یک نگاه ببیند و بتواند تعیین تکلیف کند
 function openStateCard(inst, uid) {
@@ -258,7 +261,7 @@ function openStateCard(inst, uid) {
 
       <h3 style="margin-top:14px;font-size:13px">شارژ یا کسرِ دستی</h3>
       <form method="post" action="/support/action" class="inline">${hidden}
-        <label>${coin ? `تعداد ${coin.name}` : 'مبلغ (تومان)'}<input type="number" name="amount" min="1" max="${coin ? Math.floor(MAX_MANUAL / coin.value) : MAX_MANUAL}" required style="width:140px"></label>
+        <label>${coin ? `تعداد ${coin.name}` : 'مبلغ (تومان)'}<input type="number" name="amount" min="1" max="${coin ? MAX_MANUAL_COINS : MAX_MANUAL}" required style="width:140px"></label>
         <label>یادداشت<input type="text" name="note" maxlength="120" placeholder="دلیل (در دفتر ممیزی می‌ماند)"></label>
         <button name="act" value="credit" type="submit">➕ شارژ کن</button>
         <button name="act" value="debit" type="submit" class="ghost">➖ کسر کن</button>
@@ -321,7 +324,7 @@ export function supportAction(body) {
       const coin = coinOf(inst.bot);
       const raw = parseInt(body.get('amount'), 10);
       const unit = coin ? coin.name : 'تومان';
-      const maxIn = coin ? Math.floor(MAX_MANUAL / coin.value) : MAX_MANUAL;
+      const maxIn = coin ? MAX_MANUAL_COINS : MAX_MANUAL;
       if (!Number.isFinite(raw) || raw < 1 || raw > maxIn) {
         throw new Error(`عدد باید بین ۱ و ${fmt(maxIn)} ${unit} باشد`);
       }

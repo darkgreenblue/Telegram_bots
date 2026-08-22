@@ -132,16 +132,17 @@ console.log('\n▶ نامِ «جای موجودی»: کیف‌پول در دنی
     'آزمایشِ نامِ واحد در DB صراحتاً stop می‌شود (نه «در حال اجرا»ی دروغین)');
 }
 
-console.log('\n▶ ریاضیِ سکه: هر کارت = ۱ سکه = ۱۰٬۰۰۰ تومان، بدونِ هیچ عددِ دومی');
+console.log('\n▶ ریاضیِ الماس: هر کارت = ۱ الماس، بدونِ هیچ ضریبی');
 {
-  ok(new RegExp(`const COIN_VALUE\\s*=\\s*10_000`).test(SRC), 'COIN_VALUE برابرِ ۱۰٬۰۰۰ است');
+  // مهاجرتِ «الماسِ بومی»: ضریب باید از کد **حذف** شده باشد، وگرنه دوباره ضرب می‌شود.
+  ok(!/\bCOIN_VALUE\b/.test(SRC), 'هیچ ضریبی در کد نمانده (عددِ دیتابیس خودِ الماس است)');
   const all = [...SPREADS, ...SPREADS_V2, ...OPEN_SPREADS];
-  const bad = all.filter(s => s.price !== s.size * COIN_VALUE);
-  ok(bad.length === 0, `قیمتِ همه‌ی چیدمان‌ها = تعدادِ کارت × ۱۰٬۰۰۰ (${all.length} چیدمان)`);
+  const bad = all.filter(s => s.price !== s.size);
+  ok(bad.length === 0, `قیمتِ همه‌ی چیدمان‌ها = تعدادِ کارت (${all.length} چیدمان)`);
   const badPos = all.filter(s => s.positions.length !== s.size);
   ok(badPos.length === 0, 'تعدادِ جایگاه‌ها با تعدادِ کارت‌ها می‌خواند');
   // یعنی «قیمت به سکه» هرگز نباید جداگانه نوشته شود
-  ok(all.every(s => Math.round(s.price / COIN_VALUE) === s.size), 'قیمتِ سکه‌ای دقیقاً برابرِ تعدادِ کارت درمی‌آید');
+  ok(all.every(s => s.price === s.size), 'قیمتِ الماسی دقیقاً برابرِ تعدادِ کارت است');
 }
 
 console.log('\n▶ بسته‌های خریدِ سکه');
@@ -167,8 +168,8 @@ console.log('\n▶ بسته‌های خریدِ سکه');
   ok(/ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''/.test(SRC), 'ستونِ pkg افزایشی با پیش‌فرضِ خالی');
   // فاکتورِ بسته باید مبلغِ **پرداختی** را نشان بدهد نه ارزشِ سکه‌ها
   ok(/L\.wallet\.invoice\(pack\.toman, CARD_NUMBER, CARD_OWNER\)/.test(SRC), 'فاکتور، قیمتِ واقعیِ بسته را نشان می‌دهد');
-  ok(/stmts\.claimAmount\.run\(pack\.coins \* COIN_VALUE, s\.paymentId\)/.test(SRC),
-    'اعتبارِ داده‌شده = ارزشِ سکه‌های بسته (original_amount)');
+  ok(/stmts\.claimAmount\.run\(pack\.coins, s\.paymentId\)/.test(SRC),
+    'اعتبارِ داده‌شده = خودِ تعدادِ الماسِ بسته (original_amount)');
 }
 
 console.log('\n▶ ریلِ پولِ بسته: با SQLِ واقعیِ index.js روی یک DB موقت');
@@ -187,13 +188,13 @@ console.log('\n▶ ریلِ پولِ بسته: با SQLِ واقعیِ index.js 
   ok(!!S.claimAmount && !!S.setPaymentPackage, 'SQLِ واقعیِ claimAmount و setPaymentPackage از index.js خوانده شد');
   const pack = { key: 'magic', coins: 100, toman: 150_000 };
   const id = Number(db.prepare('INSERT INTO payments (user_id) VALUES (?)').run(7).lastInsertRowid);
-  db.prepare(S.claimAmount).run(pack.coins * COIN_VALUE, id);
+  db.prepare(S.claimAmount).run(pack.coins, id);
   db.prepare(S.setPaymentPackage).run(pack.key, pack.toman, id);
   const p = db.prepare('SELECT * FROM payments WHERE id=?').get(id);
   ok(p.amount === pack.toman, `مبلغِ پرداختی = قیمتِ بسته (${p.amount})`);
-  ok(p.original_amount === pack.coins * COIN_VALUE, `اعتبارِ داده‌شده = ارزشِ سکه‌ها (${p.original_amount})`);
+  ok(p.original_amount === pack.coins, `اعتبارِ داده‌شده = تعدادِ الماس (${p.original_amount})`);
   const creditAmount = p.original_amount || p.amount;
-  ok(Math.round(creditAmount / COIN_VALUE) === pack.coins, `کاربر دقیقاً ${pack.coins} سکه می‌گیرد، نه کمتر`);
+  ok(creditAmount === pack.coins, `کاربر دقیقاً ${pack.coins} الماس می‌گیرد، نه کمتر`);
   ok(p.pkg === pack.key, 'کلیدِ بسته ثبت شد (گاردِ هدیه و گاردِ اصلاحِ خودکار به همین وابسته‌اند)');
   // دوبار-تپ روی دو بسته‌ی متفاوت نباید بسته را عوض کند (claimAmount اتمیک است)
   const id2 = Number(db.prepare('INSERT INTO payments (user_id) VALUES (?)').run(8).lastInsertRowid);

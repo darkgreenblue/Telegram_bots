@@ -96,15 +96,20 @@ ok(/startOnboarding/.test(gateCheckSrc), 'بعد از تأییدِ عضویت، 
 
 // ── ۶) قرارداد: فالِ «محبوب‌ترین» باید با اعتبارِ هدیه قابلِ گرفتن باشد ───────
 const { default: SPREADS, SPREAD_BY_ID } = await import(join(root, 'bots/tarot/spreads.js'));
-const WELCOME_BONUS = Number(idx.match(/const WELCOME_BONUS\s*=\s*([\d_]+)/)?.[1]?.replace(/_/g, '') || 0);
-ok(WELCOME_BONUS > 0, 'WELCOME_BONUS از index.js خوانده شد');
+// ⚠️ هدیه‌ی خوش‌آمد از ثابتِ **الماسیِ** فعال خوانده می‌شود. `WELCOME_BONUS` تومانی
+// بازمانده‌ی نسلِ مرده است (`coinsOn` برای همه true است، پس هرگز اجرا نمی‌شود) و سنجیدنِ
+// قیمتِ الماسی با آن، عددِ تومان را با عددِ الماس مقایسه می‌کرد.
+const WELCOME_BONUS = Number(idx.match(/const WELCOME_BONUS_COINS_V2\s*=\s*(\d+)/)?.[1] || 0);
+ok(WELCOME_BONUS > 0, 'هدیه‌ی خوش‌آمدِ الماسی از index.js خوانده شد');
 
 const badge = loc.match(/catalogBadges:\s*\{\s*(\w+):\s*'محبوب‌ترین'/)?.[1];
 ok(badge, 'بَجِ «محبوب‌ترین» در locale پیدا شد');
 const popular = SPREAD_BY_ID[badge];
 ok(popular, `فالِ محبوب (${badge}) در spreads.js وجود دارد`);
-ok(popular?.price === WELCOME_BONUS,
-   `قرارداد: فالِ محبوب باید دقیقاً هم‌اندازه‌ی هدیه‌ی خوش‌آمد باشد تا کاربرِ تازه بتواند با اعتبارِ هدیه بگیردش (فال: ${popular?.price}، هدیه: ${WELCOME_BONUS})`);
+// قراردادِ اصلی: کاربرِ تازه باید بتواند فالِ محبوب را **با هدیه و بدونِ پرداخت** بگیرد.
+// در نسلِ الماسی هدیه ۵ و فالِ محبوب ۳ است، پس برابری دیگر لازم نیست — کفایت لازم است.
+ok(popular?.price > 0 && popular.price <= WELCOME_BONUS,
+   `قرارداد: هدیه‌ی خوش‌آمد باید کفافِ فالِ محبوب را بدهد (فال: ${popular?.price}💎، هدیه: ${WELCOME_BONUS}💎)`);
 ok(SPREADS[0]?.id === badge, 'فالِ محبوب باید اولین گزینه‌ی کاتالوگ باشد');
 ok(new RegExp(`startPopular[\\s\\S]{0,80}${popular?.fa}`).test(loc),
    'دکمه‌ی CTAِ پایانِ آنبوردینگ باید همان فالِ محبوب را نام ببرد');
@@ -154,7 +159,7 @@ ok(/UPDATE experiments SET status='stopped'[\s\S]*?gate_intro_ai/.test(idx),
 
 // قانونِ قیمت (بدونِ استثنا): هر کارت ۱۰٬۰۰۰ تومان
 for (const s of SPREADS) {
-  ok(s.price === s.size * 10_000, `قیمتِ «${s.fa}» باید size×۱۰٬۰۰۰ باشد (${s.price})`);
+  ok(s.price === s.size, `قیمتِ «${s.fa}» باید برابرِ تعدادِ کارت باشد (${s.price}💎)`);
   ok(s.positions.length === s.size, `تعدادِ جایگاه‌های «${s.fa}» باید با size یکی باشد`);
 }
 

@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.26.2';
+const PRODUCT_VERSION = '3.27.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -353,7 +353,7 @@ const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isTester(uid));
 // 🪙 اقتصادِ سکه (v3.0.0)
 // ───────────────────────────────────────────────────────────────────────────
 // موجودیِ داخلی **همچنان تومان** است (منبعِ حقیقتِ پول عوض نمی‌شود؛ بند ۹ ریشه). الماس فقط
-// واحدِ نمایش است: هر کارت = ۱ الماس = COIN_VALUE تومان. چون قانونِ قیمت از قبل «هر کارت
+// واحدِ نمایش است: هر کارت = ۱ الماس. چون قانونِ قیمت از قبل «هر کارت
 // ۱۰٬۰۰۰ تومان» بود، `coins = spread.size` بدونِ هیچ عددِ جدیدی درمی‌آید و هیچ قیمتی دو
 // جا نوشته نمی‌شود. هدیه‌ی خوش‌آمدِ ۳۰٬۰۰۰ هم دقیقاً ۳ الماس است، یعنی یک فالِ کامل.
 //
@@ -368,10 +368,22 @@ const uxV2For = (uid) => UX_V2 && (!UX_V2_ADMIN_ONLY || isTester(uid));
 // «فال‌گیر» کلاً حذف است** — آزمایشِ نامِ واحد منحل شد.
 const COIN_ECONOMY = false;
 const COIN_ECONOMY_ADMIN_ONLY = true;
-const COIN_VALUE = 10_000;   // ارزشِ داخلیِ هر الماس به تومان (= قیمتِ یک کارت)
+// 💎 دیگر هیچ ضریبی وجود ندارد: عددِ داخلِ دیتابیس **خودِ تعدادِ الماس** است.
+// (مهاجرتِ `tools/coins-native-tarot.mjs`، ۱۴۰۵/۰۵/۳۰). دلیلِ حذف: قیمتِ هر الماس به
+// بسته بستگی دارد (۳٬۰۰۰ / ۲٬۰۰۰ / ۱٬۵۰۰ تومان)، پس هیچ نرخِ واحدی وجود نداشت و آن
+// ضریب یک دروغِ ماندگار در دیتا بود.
 // UX v2 ذاتاً الماسی است (کاتالوگ و الماس‌فروشی هر دو به الماس حرف می‌زنند)، پس پرچمِ
 // جداگانه‌ی الماس را هم روشن می‌کند. پرچمِ قدیم برای دنیای قبل سرِ جایش می‌ماند.
 const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isTester(uid)));
+
+/* 🛑 مسیرهای پرداختِ **نسلِ تومانی** بسته‌اند.
+ * `setRechargeAmount` و `invoiceForReading` هر دو فرض می‌کنند «تومانِ پرداختی = اعتبارِ
+ * داده‌شده» (نسبتِ ۱:۱ دنیای تومانی). در دنیای الماس این فرض غلط است: فاکتور تومان است
+ * ولی اعتبار الماس. بعد از مهاجرتِ «الماسِ بومی» این‌ها فعالانه خطرناک شدند — یک دکمه‌ی
+ * کش‌شده‌ی `ramt:50000` در چتِ یک کاربرِ قدیمی یعنی فاکتورِ ۵۰٬۰۰۰ **الماس**.
+ * از UI امروز هیچ‌کدام ساخته نمی‌شوند (کیف فقط بسته می‌فروشد)، ولی دکمه‌ی کهنه سال‌ها
+ * زنده می‌ماند (بند ۲ج/۶)، پس به‌جای مرگِ بی‌صدا پیامِ مودبانه می‌گیرد. */
+const legacyTomanPay = (uid) => coinsOn(uid);
 
 // آزمایشِ نامِ واحد (الماس در برابر فال‌گیر) **منحل شد**: «فال‌گیر» در عمل بد جا می‌افتاد.
 // واحد از این به بعد فقط «الماس 🪙» است. کلید را نگه می‌داریم تا بتوانیم آزمایش را در DB
@@ -381,9 +393,9 @@ const AB_COIN_NAME = 'coin_name';
 const TOMAN_CUR = { on: false, value: 1, name: 'تومان', emoji: '' };
 function curOf(uid) {
   if (!coinsOn(uid)) return TOMAN_CUR;
-  return { on: true, value: COIN_VALUE, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
+  return { on: true, value: 1, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
 }
-// سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند؛ `coins × COIN_VALUE` همان
+// سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند و `coins` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
 // 🎨 رنگِ بسته‌ها: «بسته ویژه» (وسط) سبز است تا مسیرِ پیشنهادی برجسته شود و «بسته‌ی
@@ -434,7 +446,9 @@ const WELCOME_BONUS    = 30_000;
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
 const MIN_RECHARGE     = 10_000;  // کف‌گیرِ اشتباهِ تایپی (پایین‌تر از ارزان‌ترین فال)
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
-const RECHARGE_BONUS   = [{ min: 200_000, bonus: 50_000 }];
+// 🛑 هدیه‌ی شارژِ نسلِ تومانی. در دنیای الماس مسیرِ شارژِ آزاد بسته است (فقط بسته)
+// و این آستانه‌ها تومانی‌اند، پس روی عددِ الماسی بی‌معنی می‌شدند. خالی = خاموش.
+const RECHARGE_BONUS   = [];
 const bonusFor = (amount) => RECHARGE_BONUS.find(t => amount >= t.min)?.bonus || 0;
 const STREAK_EVERY     = 7;       // هر ۷ روز پیاپیِ کارت روز → جایزه
 const STREAK_REWARD    = 5_000;
@@ -445,11 +459,11 @@ const REFERRAL_BONUS   = 10_000;
 // می‌گیرد و پاداشِ اضافه ندارد (تصمیمِ صریحِ مالک).
 const REFERRAL_BONUS_COINS = 3;
 const REFERRAL_BONUS_COINS_V2 = 10;
-const referralBonusFor = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2 * COIN_VALUE
-  : coinsOn(uid) ? REFERRAL_BONUS_COINS * COIN_VALUE : REFERRAL_BONUS);
+const referralBonusFor = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
+  : coinsOn(uid) ? REFERRAL_BONUS_COINS : REFERRAL_BONUS);
 // هدیه‌ی خوش‌آمد: ۵ الماس در UX v2 (به‌جای ۳۰٬۰۰۰ تومان که ۳ الماس بود)
 const WELCOME_BONUS_COINS_V2 = 5;
-const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_VALUE : WELCOME_BONUS);
+const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 : WELCOME_BONUS);
 // جایزه‌ی کارتِ روز: ۱ الماس، روزی یک بار. اهرمِ عادتِ روزانه (بند ۱۰ ریشه: قلابِ بازگشت
 // باید در خودِ محصول باشد نه فقط در پوش).
 
@@ -469,7 +483,7 @@ const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 * COIN_V
 // تستِ CI همین تساوی را اجرا می‌کند، پس دست‌کاریِ هر عدد بدونِ دیدنِ اثرش ممکن نیست.
 const LUCKY_PICKS = 3;                    // چند کارت انتخاب می‌کند
 const LUCKY_COINS = 8;                    // پشتِ چند کارت از GRID_SIZE الماس هست
-const LUCKY_COIN_VALUE = 1 * COIN_VALUE;  // ارزشِ هر کارتِ الماس‌دار
+const LUCKY_COIN_VALUE = 1;  // هر کارتِ الماس‌دار = ۱ الماس
 // 🎁 کفِ الماسِ **دستِ اولِ عمرِ هر کاربر** (تصمیمِ صریحِ مالک). فقط همان یک دست؛ از
 // دستِ دوم به بعد هیچ دخالتی نیست. جزئیات و هزینه‌اش کنارِ `forcedHit` پایین.
 const LUCKY_FIRST_MIN = 2;
@@ -661,7 +675,7 @@ try { db.prepare('ALTER TABLE discount_codes ADD COLUMN max_discount_amount INTE
 try { db.prepare('ALTER TABLE users ADD COLUMN birth_month INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // ⚠️ ستونِ `coins` عمداً ساخته **نشد**. اولین طرح یک ستونِ جدا داشت، ولی ماشینِ الماسِ
 // v3.0.0 از قبل جواب را داشت: موجودی همیشه **تومان** می‌ماند و الماس فقط واحدِ نمایش است
-// (`coins = balance / COIN_VALUE`). بسته‌ها هم با کرِدیتِ `coins × COIN_VALUE` و پرداختِ
+// (`coins = balance`). بسته‌ها هم با کرِدیتِ `coins` و پرداختِ
 // کمتر، تخفیفشان را می‌سازند. ستونِ دومِ پول یعنی دو منبعِ حقیقتِ پول، و بند ۹ ریشه
 // دقیقاً همین را ممنوع کرده.
 // یادآوری رسید معطل + صف اکشن ادمینِ داشبورد (مثل voice2text)
@@ -975,8 +989,8 @@ const approvedMsg = (uid, creditAmount, bonus) => {
   const cur = curOf(uid);
   if (!cur.on) return L.wallet.approved(creditAmount, getBalance(uid), bonus);
   return L.wallet.coinsApproved(
-    Math.round((creditAmount + bonus) / COIN_VALUE),
-    Math.round(getBalance(uid) / COIN_VALUE),
+    creditAmount + bonus,
+    getBalance(uid),
     cur,
   );
 };
@@ -985,6 +999,8 @@ const approvedMsg = (uid, creditAmount, bonus) => {
 // (یا ۲۰٪ کمتر با تخفیفِ اولین پرداخت)، ولی اعتبارِ داده‌شده هنگام تأیید همان قیمتِ کاملِ فال
 // است (`original_amount`) تا فال دقیقاً باز شود — همان ریاضیِ جاافتاده‌ی تخفیف، بدونِ منطقِ نو.
 async function invoiceForReading(ctx, uid, readingId, withDiscount) {
+  // 🛑 مسیرِ تومانیِ کهنه — بالا را ببین. کاربرِ الماسی به‌جایش فروشگاهِ بسته را می‌بیند.
+  if (legacyTomanPay(uid)) return showWallet(ctx);
   const r = stmts.getReading.get(readingId);
   if (!r || r.user_id !== uid || r.status !== 'pending_payment') {
     return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
@@ -4099,6 +4115,8 @@ bot.action('recharge', async (ctx) => {
 });
 
 async function setRechargeAmount(ctx, uid, amount) {
+  // 🛑 مسیرِ تومانیِ کهنه — بالا را ببین. در دنیای الماس هرگز اجرا نمی‌شود.
+  if (legacyTomanPay(uid)) return showWallet(ctx);
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id));
   // حداقلِ مبلغ: کاربری «۸» نوشت و سیستم جدی گرفت، کدِ تخفیفِ ۱۰۰٬۰۰۰ رویش خرج شد و
@@ -4138,7 +4156,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
   // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
-  if (stmts.claimAmount.run(pack.coins * COIN_VALUE, s.paymentId).changes === 0) return;
+  if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
   stmts.setPaymentPackage.run(pack.key, pack.toman, s.paymentId);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   setState(uid, 'pay_receipt');
@@ -4563,7 +4581,7 @@ bot.action(/^cardrev:(\d+)$/, async (ctx) => {
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
   await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser(curOf(done.p.user_id))).catch(() => {});
   await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back,
-    packOf(done.p) ? Math.round(done.back / COIN_VALUE) : null)).catch(() => {});
+    packOf(done.p) ? done.back : null)).catch(() => {});
 });
 bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
