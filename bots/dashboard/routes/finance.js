@@ -1,7 +1,7 @@
 // مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
 // هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
 // این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, walletText} from '../lib/bots.js';
 import { listAudit, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
@@ -48,6 +48,10 @@ function collectPayments({ instId, status, days }) {
           inst, id: p.id, userId: p.user_id,
           amount: toToman(inst.bot, p[m.amountCol]),
           original: p.original_amount != null ? toToman(inst.bot, p.original_amount) : null,
+          // 💎 متنِ خوانای اعتبار به زبانِ همان ربات. برای پرداختِ بسته، original_amount
+          // اعتبار به واحدِ داخلی است (۱۰۰ الماس = ۱٬۰۰۰٬۰۰۰) و چاپش به‌عنوان تومان
+          // عددِ بی‌معنی می‌داد. ستونِ CSV عمداً خام می‌ماند (دیتای تحلیل).
+          originalText: p.original_amount != null ? walletText(inst.bot, p.original_amount) : null,
           status: p.status,
           step: p.step ?? (p.tier ? `اشتراک ${p.tier}` : null), // tabir: به‌جای مرحله، نوع اشتراک
           pendingAction: pendingActs.get(p.id) || null, // approve|reject در صف، یا null
@@ -98,7 +102,7 @@ export function financeBody(url) {
       esc(p.inst.title),
       `#${p.id}`,
       `<a href="/support/user?inst=${encodeURIComponent(p.inst.id)}&id=${p.userId}" class="mono">${p.userId}</a>`,
-      fmt(p.amount) + ' ت' + (p.original && p.original !== p.amount ? ` <span class="muted">(اصل ${fmt(p.original)})</span>` : ''),
+      fmt(p.amount) + ' ت' + (p.original && p.original !== p.amount ? ` <span class="muted">(اعتبار ${esc(p.originalText)})</span>` : ''),
       statusBadge(p.status),
       esc(p.step || '-'),
       tehranDateTime(p.created),
