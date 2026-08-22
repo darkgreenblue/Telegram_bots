@@ -133,6 +133,14 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-announce.mjs
 
+      # واحدِ پول در پیام‌های ادمین و پنل. `original_amount` برای پرداختِ بسته اعتبارِ
+      # داخلی است نه تومان؛ چاپش با برچسبِ تومان باگِ واقعیِ رسیدِ #۱۵۳ بود.
+      - name: Admin coin unit check
+        if: matrix.bot == 'tarot'
+        run: |
+          cd bots/dashboard && npm ci --silent && cd ../..
+          node tools/check-admin-coins.mjs
+
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs

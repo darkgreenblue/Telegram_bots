@@ -1,6 +1,6 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman } from '../lib/bots.js';
+import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, walletText } from '../lib/bots.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
@@ -192,6 +192,7 @@ const MAX_MANUAL = 5_000_000;   // سقفِ ایمنیِ یک اقدامِ دس�
 // وضعیت‌های بازِ کاربر: چیزی که پشتیبانی باید در یک نگاه ببیند و بتواند تعیین تکلیف کند
 function openStateCard(inst, uid) {
   const m = moneyOf(inst.bot);
+  const coin = coinOf(inst.bot);   // null = ربات تومانی → فرم دقیقاً مثل قبل
   if (!inst.bot || !hasTable) return '';
   return withDb(inst.file, (db) => {
     if (!hasTable(db, 'admin_actions')) {
@@ -213,7 +214,7 @@ function openStateCard(inst, uid) {
       `#${p.id}`,
       `${fmt(toToman(inst.bot, p.amount))} ت` +
         (p.original_amount && p.original_amount !== p.amount
-          ? ` <span class="muted">(اعتبار ${fmt(toToman(inst.bot, p.original_amount))})</span>` : ''),
+          ? ` <span class="muted">(اعتبار ${esc(walletText(inst.bot, p.original_amount))})</span>` : ''),
       statusBadge(p.status),
       esc(p.step || '-'),
       tehranDateTime(p.t),
@@ -252,12 +253,14 @@ function openStateCard(inst, uid) {
 
       <h3 style="margin-top:14px;font-size:13px">شارژ یا کسرِ دستی</h3>
       <form method="post" action="/support/action" class="inline">${hidden}
-        <label>مبلغ (تومان)<input type="number" name="amount" min="1" max="${MAX_MANUAL}" required style="width:140px"></label>
+        <label>${coin ? `تعداد ${coin.name}` : 'مبلغ (تومان)'}<input type="number" name="amount" min="1" max="${coin ? Math.floor(MAX_MANUAL / coin.value) : MAX_MANUAL}" required style="width:140px"></label>
         <label>یادداشت<input type="text" name="note" maxlength="120" placeholder="دلیل (در دفتر ممیزی می‌ماند)"></label>
         <button name="act" value="credit" type="submit">➕ شارژ کن</button>
         <button name="act" value="debit" type="submit" class="ghost">➖ کسر کن</button>
       </form>
-      <p class="muted">شارژِ دستی به کاربر پیام می‌دهد («مبلغ X توسط پشتیبانی اضافه شد») و اگر فالِ
+      <p class="muted">${coin
+        ? `عدد را به <b>${coin.name}</b> بنویس، نه تومان (این ربات کیفش ${coin.name}ی است). داشبورد خودش به واحدِ داخلی تبدیل می‌کند.`
+        : ''} شارژِ دستی به کاربر پیام می‌دهد («مبلغ X توسط پشتیبانی اضافه شد») و اگر فالِ
         رزروشده داشته باشد خودکار ادامه‌اش می‌دهد. کسر بی‌صدا و با کفِ صفر است. هیچ‌کدام ردیفِ
         <code>payments</code> نمی‌سازند، پس درآمد را آلوده نمی‌کنند.</p>
     </div>`;
@@ -306,12 +309,20 @@ export function supportAction(body) {
       ins.run(0, act, uid, r.price, rid, note);
       msg = `فال #${rid} (${fmt(r.price)} تومان) در صف بازکردن قرار گرفت`;
     } else {
-      const amount = parseInt(body.get('amount'), 10);
-      if (!Number.isFinite(amount) || amount < 1 || amount > MAX_MANUAL) {
-        throw new Error(`مبلغ باید بین ۱ و ${fmt(MAX_MANUAL)} تومان باشد`);
+      // 💎 ورودی به زبانِ همان ربات است: برای رباتِ الماسی عدد = تعدادِ الماس و همین‌جا
+      // به واحدِ داخلی تبدیل می‌شود. تبدیل عمداً **این‌جا** انجام می‌شود نه در sweepِ ربات:
+      // ریلِ پول دست‌نخورده می‌ماند (بند ۹ ریشه) و `admin_actions.amount` همان معنیِ
+      // همیشگی‌اش را دارد، پس ردیف‌های قدیمیِ در صف هم درست اجرا می‌شوند.
+      const coin = coinOf(inst.bot);
+      const raw = parseInt(body.get('amount'), 10);
+      const unit = coin ? coin.name : 'تومان';
+      const maxIn = coin ? Math.floor(MAX_MANUAL / coin.value) : MAX_MANUAL;
+      if (!Number.isFinite(raw) || raw < 1 || raw > maxIn) {
+        throw new Error(`عدد باید بین ۱ و ${fmt(maxIn)} ${unit} باشد`);
       }
+      const amount = coin ? raw * coin.value : raw;
       ins.run(0, act, uid, amount, null, note);
-      msg = `«${SUPPORT_ACTIONS[act]}» به مبلغ ${fmt(amount)} تومان برای کاربر ${uid} در صف قرار گرفت`;
+      msg = `«${SUPPORT_ACTIONS[act]}» به مقدار ${fmt(raw)} ${unit} برای کاربر ${uid} در صف قرار گرفت`;
     }
   });
   audit('support.action', `${inst.id}/${uid}`, `${act} ${note}`.trim());

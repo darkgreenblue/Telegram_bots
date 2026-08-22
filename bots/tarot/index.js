@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.26.1';
+const PRODUCT_VERSION = '3.26.2';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -408,6 +408,10 @@ const COIN_PACKAGES = [
   { key: 'magic',  fa: 'بسته‌ی جادویی', emoji: '🪄', coins: 100, toman: 150_000 },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
+// بسته‌ی یک پرداخت (null = پرداختِ غیربسته‌ای). تنها راهِ رسیدنِ نامِ بسته و تعدادِ الماس
+// به پیام‌های ادمین؛ چون `payments.original_amount` برای بسته **واحدِ داخلی** است نه تومان
+// و بدونِ این، ادمین عددِ بی‌معنی می‌بیند (باگِ رسیدِ #۱۵۳، ۱۴۰۵/۰۵/۳۰).
+const packOf = (p) => (p && p.pkg ? PACKAGE_BY_KEY[p.pkg] || null : null);
 
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
@@ -4286,7 +4290,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
   const caption = (note ? `${note}\n\n` : '')
-    + L.wallet.adminNotify(p, user) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+    + L.wallet.adminNotify(p, user, packOf(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.approve(paymentId), `approve:${paymentId}`),
     Markup.button.callback(L.buttons.reject(paymentId), `reject:${paymentId}`),
@@ -4417,7 +4421,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
 // overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
 async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
-  let caption = L.wallet.adminAutoApproved(p, user, reasonFa);
+  let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packOf(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${p.id}`),
@@ -4431,7 +4435,7 @@ async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expected
 }
 // یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
 async function notifyAdminAuto(p, user, note, photoFileId) {
-  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' })}`;
+  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packOf(p))}`;
   for (const adminId of ADMIN_IDS) {
     try {
       if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption });
@@ -4558,7 +4562,8 @@ bot.action(/^cardrev:(\d+)$/, async (ctx) => {
   const done = await reversePayment(parseInt(ctx.match[1], 10));
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
   await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser(curOf(done.p.user_id))).catch(() => {});
-  await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back)).catch(() => {});
+  await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back,
+    packOf(done.p) ? Math.round(done.back / COIN_VALUE) : null)).catch(() => {});
 });
 bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});

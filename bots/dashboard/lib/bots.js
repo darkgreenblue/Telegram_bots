@@ -35,6 +35,12 @@ export const BOTS = [
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
     receiptQueue: true,
+    // 💎 واحدِ نمایشیِ کیف. `users.balance` و `payments.original_amount` تومان‌اند، ولی
+    // این ربات آن‌ها را به‌عنوان الماس نشان می‌دهد (۱ الماس = ۱۰٬۰۰۰). داشبورد باید همان
+    // زبان را حرف بزند، وگرنه مالک برای دادنِ ۱۰۰ الماس باید ۱٬۰۰۰٬۰۰۰ تایپ کند و هر
+    // اعتباری در جدول‌ها عددی بی‌معنی به نظر برسد. باید با COIN_VALUE ربات یکی بماند
+    // (چکِ CI: tools/check-dashboard-coins.mjs).
+    coinValue: 10_000, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
   {
@@ -84,6 +90,19 @@ export function instances() {
 /* ---- helperهای پروفایل: هر route به‌جای مقدار hardcode این‌ها را صدا می‌زند ---- */
 export const abSupported = (bot) => !!botByKey(bot)?.abSupport;
 export const receiptQueueSupported = (bot) => !!botByKey(bot)?.receiptQueue;
+/* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی است و همه‌چیز دقیقاً مثل قبل می‌ماند —
+ * پس هر ربات دیگری بدونِ تغییر رفتار می‌کند و این فقط یک لایه‌ی **نمایشی** است. */
+export const coinOf = (bot) => {
+  const b = botByKey(bot);
+  return b?.coinValue ? { value: b.coinValue, name: b.coinName || 'الماس', emoji: b.coinEmoji || '💎' } : null;
+};
+/** مبلغِ داخلی ⟶ متنِ خوانا به زبانِ همان ربات (الماس یا تومان). */
+export const walletText = (bot, amount) => {
+  const c = coinOf(bot);
+  const n = Number(amount) || 0;
+  return c ? `${fmtNum(Math.round(n / c.value))}${c.emoji}` : `${fmtNum(toToman(bot, n))} تومان`;
+};
+const fmtNum = (n) => Number(n).toLocaleString('fa-IR');
 export const userPk = (bot) => botByKey(bot)?.userPk || 'telegram_id';
 export const userNameCol = (bot) => botByKey(bot)?.userNameCol || 'name';
 export const moneyOf = (bot) => botByKey(bot)?.money || MONEY_WALLET;
