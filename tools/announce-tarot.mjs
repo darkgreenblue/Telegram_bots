@@ -31,7 +31,11 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const Database = require(path.resolve('bots/tarot/node_modules/better-sqlite3'));
 
-export const ANNOUNCE_KEY = 'v3.25.0';
+// ⚠️ کلید = نسخه‌ی **متنِ** پیام، نه نسخه‌ی ربات. با هر بازنویسیِ متن بالا می‌رود، پس
+// دفترِ `announce_log` تاریخچه را نگه می‌دارد ولی نسخه‌ی تازه دوباره به همه می‌رسد.
+// تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۳۰: متن عوض شد (عددِ الماس با ایموجی) و پیام باید به
+// **همه** برود، حتی آی‌دی‌های تستی که نسخه‌ی v3.25.0 را گرفته بودند.
+export const ANNOUNCE_KEY = 'v3.26.0';
 const COIN_VALUE = 10_000;
 
 /* ═══════ متنِ پیام — تک‌منبع، و در چکِ CI ادعا می‌شود ═══════ */
@@ -66,7 +70,10 @@ export const balanceLines = (coins, paid) => [
   paid
     ? 'موجودی قبلیت با بالاترین نرخ تبدیل، به الماس تبدیل شده.'
     : 'موجودی قبلیت هم به الماس تبدیل شده.',
-  `موجودی ذخایر الماس: ${faNum(coins)} الماس`,
+  // ⚠️ واحد **ایموجی** است نه کلمه (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۳۰): داخلِ ربات همه‌جا
+  // `۵💎` نوشته می‌شود و این پیام باید عیناً همان شکل را نشان بدهد، وگرنه کاربر یک عدد
+  // را در دو نگارشِ متفاوت می‌بیند.
+  `موجودی ذخایر الماس: ${faNum(coins)}💎`,
 ].join('\n');
 
 /** متنِ کاملِ یک کاربر. `coins === 0` یعنی دسته‌ی C: هیچ خطی درباره‌ی موجودی. */
@@ -135,7 +142,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
  * **یک‌جا** به‌روز کنیم؛ وگرنه هر کاربر باید تصادفاً به یکی از دو نقطه‌ی قراردادِ صدور
  * برسد که ممکن است هفته‌ها طول بکشد.
  * ⚠️ تلگرام در هر پیام فقط یک `reply_markup` می‌پذیرد و پیامِ اصلی سه دکمه‌ی inline دارد،
- * پس کیبورد روی یک پیامِ کوتاهِ دوم می‌رود. */
+ * پس کیبورد ناچار روی یک پیامِ دوم می‌رود.
+ *
+ * 🫥 **ولی آن پیامِ دوم دیده نمی‌شود** (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۳۰: «پیامی در این
+ * زمینه نیاز نیست»). حامل بی‌صدا (`disable_notification`) فرستاده و **بلافاصله حذف**
+ * می‌شود. کیبوردِ reply یک حالتِ سطحِ **چت** است نه یک ضمیمه‌ی پیام: حذفِ پیامی که
+ * آورده‌اش، کیبورد را برنمی‌دارد. نتیجه دقیقاً چیزی است که مالک خواست — فقط پیامِ
+ * اطلاع‌رسانی دیده می‌شود و منوی پایین خودبه‌خود درست می‌شود. */
 export const MENU_KEYBOARD = {
   keyboard: [
     [{ text: '🔮 فال بگیر' }],
@@ -146,14 +159,32 @@ export const MENU_KEYBOARD = {
   ],
   resize_keyboard: true,
 };
-export const MENU_NOTE = 'منوی پایین هم به‌روز شد 👇';
+// متنِ حامل. کاربر نباید ببیندش، ولی اگر روزی `deleteMessage` شکست بخورد این تنها
+// چیزی است که می‌ماند، پس یک جمله‌ی سالم است نه یک نویسه‌ی بی‌معنی.
+export const MENU_NOTE = 'منوی پایین به‌روز شد 👇';
 
-async function sendKeyboard(token, chatId) {
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: MENU_NOTE, reply_markup: MENU_KEYBOARD }),
-  }).catch(() => {});
+/** کیبوردِ تازه را بی‌صدا می‌رساند و ردِ پیامش را پاک می‌کند.
+ *  هر دو مرحله best-effort اند: شکستشان نه کلِ ارسال را می‌شکند و نه در دفتر می‌نشیند
+ *  (دفتر مالِ پیامِ اصلی است). بدترین حالتِ ممکن این است که کاربر منوی نسل قبل را نگه
+ *  دارد تا دفعه‌ی بعد که سراغِ ربات بیاید و پنجره‌ی یک‌باره‌ی `ensureMenu` بگیردش. */
+export async function sendKeyboard(token, chatId) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId, text: MENU_NOTE, reply_markup: MENU_KEYBOARD, disable_notification: true,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    const mid = j?.result?.message_id;
+    if (!mid) return;
+    await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, message_id: mid }),
+    });
+  } catch { /* best-effort */ }
 }
 
 async function send(token, chatId, text) {

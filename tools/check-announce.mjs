@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
-import { BODY, CTA, KEYBOARD, MENU_KEYBOARD, MENU_NOTE, balanceLines, messageFor, planFor, groupOf, assertReady, ANNOUNCE_KEY } from './announce-tarot.mjs';
+import { BODY, CTA, KEYBOARD, MENU_KEYBOARD, MENU_NOTE, sendKeyboard, balanceLines, messageFor, planFor, groupOf, assertReady, ANNOUNCE_KEY } from './announce-tarot.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require(path.resolve('bots/tarot/node_modules/better-sqlite3'));
@@ -44,11 +44,11 @@ console.log('\n▶ ساختارِ سه نسخه');
   ok(!/بالاترین نرخ تبدیل/.test(b), 'نسخه‌ی B آن را **ندارد** (خواسته‌ی صریحِ مالک)');
   ok(!/بالاترین نرخ تبدیل/.test(c), 'نسخه‌ی C هم ندارد');
 
-  ok(/موجودی ذخایر الماس: ۷ الماس/.test(a), 'نسخه‌ی A عددِ الماس را می‌گوید');
+  ok(/موجودی ذخایر الماس: ۷💎/.test(a), 'نسخه‌ی A عددِ الماس را با ایموجی می‌گوید');
   // ⚠️ ارقام باید **فارسی** باشند، چون کلِ ربات با toLocaleString('fa-IR') عدد می‌دهد.
   // نسخه‌ی اول عددِ خام می‌گذاشت و کاربر «7 الماس» در پیام و «۷💎» داخلِ ربات می‌دید.
   ok(!/[0-9]/.test(a) && !/[0-9]/.test(b), 'هیچ رقمِ لاتینی در متنِ رو-به-کاربر نیست');
-  ok(/موجودی ذخایر الماس: ۵ الماس/.test(b), 'نسخه‌ی B هم عددِ الماس را می‌گوید');
+  ok(/موجودی ذخایر الماس: ۵💎/.test(b), 'نسخه‌ی B هم عددِ الماس را با ایموجی می‌گوید');
   // ⚠️ مهم‌ترین ادعای این فایل: کسی که موجودی ندارد **هیچ** خطی درباره‌ی الماس نبیند.
   ok(!/موجودی/.test(c), 'نسخه‌ی C هیچ خطی درباره‌ی موجودی ندارد');
   ok(!/الماس تبدیل/.test(c), 'و هیچ حرفی از تبدیل شدن نمی‌زند');
@@ -58,8 +58,11 @@ console.log('\n▶ ساختارِ سه نسخه');
   // ترتیب: بدنه، بعد موجودی، بعد CTA (خواسته‌ی مالک در بند ۶).
   ok(a.indexOf('موجودی ذخایر') > a.indexOf('واحد جدید') && a.indexOf('موجودی ذخایر') < a.indexOf(CTA),
     'خطِ موجودی بینِ بدنه و CTA می‌نشیند');
-  ok(b.split('\n').filter(Boolean).at(-2) === 'موجودی ذخایر الماس: ۵ الماس',
-    'و خطِ «موجودی ذخایر» دقیقاً بعد از خطِ تبدیل می‌آید');
+  // ⚠️ واحد **ایموجی** است نه کلمه (تصمیمِ صریحِ مالک): داخلِ ربات همه‌جا `۵💎` نوشته
+  // می‌شود و این پیام باید عیناً همان شکل باشد. عددِ فارسی هم اجباری است.
+  ok(b.split('\n').filter(Boolean).at(-2) === 'موجودی ذخایر الماس: ۵💎',
+    'خطِ موجودی با ایموجیِ الماس می‌آید، نه کلمه، و بلافاصله بعد از خطِ تبدیل');
+  ok(!/\d/.test(b), 'هیچ رقمِ لاتینی در متن نیست (همان قراردادِ fa-IR کلِ ربات)');
 }
 
 console.log('\n▶ دکمه‌ها');
@@ -96,8 +99,73 @@ console.log('\n▶ ⌨️ کیبوردِ ماندگارِ پیامِ انبوه'
   ok(!/[0-9]/.test(MENU_NOTE) && MENU_NOTE.length < 40, 'پیامِ حاملِ کیبورد کوتاه است');
   const src = readFileSync(path.resolve('tools/announce-tarot.mjs'), 'utf8');
   ok(/await sendKeyboard\(token, p\.id\);/.test(src), 'کیبورد بعد از پیامِ اصلی فرستاده می‌شود');
-  ok(/\.catch\(\(\) => \{\}\)/.test(src.slice(src.indexOf('async function sendKeyboard'), src.indexOf('async function send('))),
-    'و شکستش کلِ ارسال را نمی‌شکند');
+
+  // 🫥 حاملِ کیبورد **دیده نمی‌شود** (تصمیمِ صریحِ مالک: «پیامی در این زمینه نیاز نیست»).
+  //    سه شرط با هم این را می‌سازند و هر سه جدا ادعا می‌شوند، چون افتادنِ هرکدام یک
+  //    نقصِ متفاوت است: بی‌صدا نبودن = پینگِ دوم، حذف‌نشدن = پیامِ ناخواسته، نبودِ
+  //    try/catch = شکستنِ کلِ ارسالِ ۱۰۲ نفره به‌خاطرِ یک چتِ بسته.
+  // ⚠️ این بلوک عمداً **رفتاری** است، نه رجکسی. نسخه‌ی اولش فقط وجودِ رشته‌ی
+  //    `deleteMessage` را در سورس می‌دید و در تستِ جهش معلوم شد یک `return`ِ زودهنگام
+  //    قبل از آن را **اصلاً نمی‌گیرد** — یعنی خطرناک‌ترین حالت (پیامِ ناخواسته برای
+  //    ۱۰۲ نفر) بی‌محافظ بود. حالا خودِ تابع با یک fetchِ قلابی **اجرا** می‌شود.
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opt) => {
+    calls.push({ url: String(url), body: JSON.parse(opt.body) });
+    return { json: async () => ({ ok: true, result: { message_id: 4242 } }) };
+  };
+  try {
+    await sendKeyboard('TOK', 777);
+    const sendCall = calls.find(c => c.url.endsWith('/sendMessage'));
+    const delCall = calls.find(c => c.url.endsWith('/deleteMessage'));
+    ok(!!sendCall, 'حاملِ کیبورد واقعاً فرستاده می‌شود');
+    ok(sendCall?.body.disable_notification === true, 'بی‌صدا می‌رود (کاربر پینگِ دوم نمی‌گیرد)');
+    ok(!!sendCall?.body.reply_markup?.keyboard, 'و کیبوردِ ماندگار را حمل می‌کند');
+    ok(!!delCall, 'و بلافاصله حذف می‌شود، پس کاربر هیچ پیامِ اضافه‌ای نمی‌بیند');
+    ok(delCall?.body.message_id === 4242, 'حذف روی شناسه‌ی همان پیامِ تازه‌فرستاده انجام می‌شود');
+    ok(delCall?.body.chat_id === 777, 'و در چتِ همان کاربر');
+    ok(calls.indexOf(sendCall) < calls.indexOf(delCall), 'اول فرستاده می‌شود، بعد حذف');
+
+    // شکستِ شبکه نباید کلِ ارسالِ ۱۰۲ نفره را بشکند.
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    let threw = false;
+    await sendKeyboard('TOK', 777).catch(() => { threw = true; });
+    ok(!threw, 'شکستِ شبکه بالا نمی‌زند (کلِ ارسال را نمی‌شکند)');
+
+    // پاسخِ بدونِ message_id (مثلاً چتِ بسته): نباید حذفِ بی‌هدف بزند.
+    calls.length = 0;
+    globalThis.fetch = async (url, opt) => {
+      calls.push({ url: String(url), body: JSON.parse(opt.body) });
+      return { json: async () => ({ ok: false, description: 'bot was blocked' }) };
+    };
+    await sendKeyboard('TOK', 777);
+    ok(!calls.some(c => c.url.endsWith('/deleteMessage')), 'اگر پیام نرفت، حذفِ بی‌هدف هم نمی‌زند');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // ⚠️ دفتر باید مالِ پیامِ **اصلی** بماند: اگر حذف/ارسالِ کیبورد در مسیرِ ثبت بنشیند،
+  //    یک چتِ بسته می‌تواند کاربر را از دفتر بیرون بگذارد و اجرای بعدی دوبار پیام بدهد.
+  ok(/await sendKeyboard\(token, p\.id\);\s*\n\s*log\.run\(ANNOUNCE_KEY, p\.id\); sent\+\+;/.test(src),
+    'ثبت در دفتر به موفقیتِ پیامِ اصلی گره خورده، نه به کیبورد');
+}
+
+console.log('\n▶ 🔑 کلیدِ دفتر به متن گره خورده');
+{
+  // ⚠️ چرا این ادعا هست: `announce_log` هرکسی را که کلیدِ فعلی را گرفته رد می‌کند. پس
+  //    اگر متن عوض شود ولی کلید همان بماند، **نسخه‌ی تازه هرگز به کسی که نسخه‌ی قبلی
+  //    را گرفته نمی‌رسد** و این بی‌صدا اتفاق می‌افتد (اجرا سبز تمام می‌شود، فقط
+  //    گیرنده‌ها کمترند). دقیقاً همان چیزی که مالک خواست جلویش گرفته شود.
+  //    راه‌حل: اثرانگشتِ متن کنارِ کلید پین می‌شود. عوض کردنِ متن بدونِ بامپِ کلید ⟶ قرمز.
+  const { createHash } = await import('crypto');
+  const fingerprint = createHash('sha256')
+    .update([BODY, CTA, balanceLines(5, true), balanceLines(5, false)].join(' '))
+    .digest('hex').slice(0, 12);
+  const PINNED = { key: 'v3.26.0', fingerprint: 'ded495602f4c' };
+  ok(ANNOUNCE_KEY === PINNED.key,
+    `کلیدِ دفتر همان نسخه‌ی پین‌شده است (${ANNOUNCE_KEY})`);
+  ok(fingerprint === PINNED.fingerprint,
+    `متن عوض نشده بدونِ بامپِ کلید\n     اثرانگشتِ فعلی: ${fingerprint}\n     ` +
+    `اگر متن را عمداً عوض کرده‌ای: هم ANNOUNCE_KEY را بامپ کن، هم PINNED را در همین فایل به‌روز کن`);
 }
 
 console.log('\n▶ تفکیکِ دسته‌ها از دیتای واقعی، نه از لیستِ دستی');
