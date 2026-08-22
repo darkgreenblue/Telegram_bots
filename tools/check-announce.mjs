@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
-import { BODY, CTA, KEYBOARD, balanceLines, messageFor, planFor, groupOf, assertReady, ANNOUNCE_KEY } from './announce-tarot.mjs';
+import { BODY, CTA, KEYBOARD, MENU_KEYBOARD, MENU_NOTE, balanceLines, messageFor, planFor, groupOf, assertReady, ANNOUNCE_KEY } from './announce-tarot.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require(path.resolve('bots/tarot/node_modules/better-sqlite3'));
@@ -75,6 +75,29 @@ console.log('\n▶ دکمه‌ها');
     const cb = r[0].callback_data;
     ok(new RegExp(`bot\\.action\\('${cb}'`).test(SRC), `هندلرِ «${cb}» در ربات ثبت شده`);
   }
+}
+
+console.log('\n▶ ⌨️ کیبوردِ ماندگارِ پیامِ انبوه');
+{
+  // مالک با اکانتِ تازه تست کرد و منوی پایین نسل قبل مانده بود تا وقتی /start زد.
+  // این پیامِ انبوه تنها فرصتِ به‌روز کردنِ منوی **همه** با هم است.
+  const L = (await import('../bots/tarot/locales/fa.js')).default;
+  const flat = MENU_KEYBOARD.keyboard.flat().map(b => b.text);
+  const want = [
+    L.buttons.reading, L.buttons.luckyMain, L.buttons.dailyOneCard,
+    L.buttons.coinShop, L.buttons.inviteMain, L.support.button,
+  ];
+  ok(flat.join('|') === want.join('|'),
+    `کیبوردِ پیامِ انبوه دقیقاً همان mainKeyboard دنیای الماس است\n     دیده شد: ${flat.join(' | ')}`);
+  ok(MENU_KEYBOARD.keyboard[0][0].text === L.buttons.reading, 'ردیفِ اول: فال بگیر');
+  ok(MENU_KEYBOARD.keyboard[1][0].text === L.buttons.luckyMain, 'ردیفِ دوم: کارت شانس');
+  ok(MENU_KEYBOARD.keyboard[2][0].text === L.buttons.dailyOneCard, 'ردیفِ سوم: فال تک کارت');
+  ok(MENU_KEYBOARD.resize_keyboard === true, 'resize_keyboard روشن است');
+  ok(!/[0-9]/.test(MENU_NOTE) && MENU_NOTE.length < 40, 'پیامِ حاملِ کیبورد کوتاه است');
+  const src = readFileSync(path.resolve('tools/announce-tarot.mjs'), 'utf8');
+  ok(/await sendKeyboard\(token, p\.id\);/.test(src), 'کیبورد بعد از پیامِ اصلی فرستاده می‌شود');
+  ok(/\.catch\(\(\) => \{\}\)/.test(src.slice(src.indexOf('async function sendKeyboard'), src.indexOf('async function send('))),
+    'و شکستش کلِ ارسال را نمی‌شکند');
 }
 
 console.log('\n▶ تفکیکِ دسته‌ها از دیتای واقعی، نه از لیستِ دستی');

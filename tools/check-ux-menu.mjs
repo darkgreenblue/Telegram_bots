@@ -729,7 +729,10 @@ console.log('\n▶ نامِ بسته‌ی وسط');
   // ⚠️ کلیدِ `gold` روی ردیف‌های واقعیِ `payments` نشسته؛ عوض کردنش معنیِ داده‌ی موجود
   // را تغییر می‌دهد (بند ۲ج/۱).
   ok(/key: 'gold'/.test(SRC), 'کلیدِ داخلی دست‌نخورده ماند (دیتای پرداختِ کاربرانِ واقعی به آن اشاره دارد)');
-  ok(/PACK_STYLE = \{ gold: 'success' \}/.test(SRC), 'رنگِ سبزش هم به همان کلید بسته است، نه به نام');
+  ok(/PACK_STYLE = \{ gold: 'success', magic: 'primary' \}/.test(SRC),
+    'رنگ‌ها به کلیدِ بسته بسته‌اند نه به نام (ویژه سبز، جادویی آبی)');
+  // ⚠️ Bot API 9.4 بنفش ندارد. مالک بنفش خواست؛ آبی نزدیک‌ترین رنگِ متمایزِ ممکن است.
+  ok(!/PACK_STYLE[^;]*purple/.test(SRC), 'هیچ رنگِ نامعتبری (مثل purple) در PACK_STYLE نیست');
 }
 
 /* ═══════ 🎁 پاداشِ دعوت: فقط دعوت‌کننده ═══════
@@ -980,8 +983,22 @@ console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style
   ok(/styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}:a`\), topicStyle\(t\.key\)\)/.test(SRC),
     'لیستِ کامل هم همان رنگ را اعمال می‌کند (وگرنه دو منو دو شکل می‌شدند)');
 
-  // ۳) بسته‌ی الماسی سبز
-  ok(/const PACK_STYLE = \{ gold: 'success' \};/.test(SRC), 'بسته‌ی الماسی سبز است');
+  // ۳) رنگِ بسته‌ها. ادعای «چه رنگی» بالاتر (بلوکِ نامِ بسته‌ها) پین شده؛ این‌جا **رفتار**
+  //    سنجیده می‌شود: هر کلیدی که در `PACK_STYLE` می‌آید باید یک بسته‌ی واقعی باشد، و دو
+  //    بسته‌ی رنگی نباید هم‌رنگ باشند. بدونِ این، یک تایپو در کلید (`magick`) بی‌صدا رنگ را
+  //    می‌خوراند و هیچ ادعای رجکسی نمی‌گرفتش.
+  {
+    const styleSrc = SRC.match(/const PACK_STYLE = (\{[^;]*\});/)?.[1];
+    ok(!!styleSrc, 'جدولِ PACK_STYLE پیدا شد');
+    const style = new Function(`return ${styleSrc}`)();
+    const packKeys = [...SRC.matchAll(/\{ key: '([a-z]+)',\s+fa: 'بسته/g)].map(m => m[1]);
+    ok(packKeys.length >= 3, `کلیدِ بسته‌ها از سورس خوانده شد (${packKeys.join(', ')})`);
+    const orphan = Object.keys(style).filter(k => !packKeys.includes(k));
+    ok(orphan.length === 0, `هر کلیدِ PACK_STYLE یک بسته‌ی واقعی است (یتیم: ${orphan.join(', ') || 'ندارد'})`);
+    const colors = Object.values(style);
+    ok(new Set(colors).size === colors.length, 'دو بسته‌ی رنگی هم‌رنگ نیستند');
+    ok(style.magic && style.magic !== style.gold, 'بسته‌ی جادویی رنگِ خودش را دارد، متمایز از بسته ویژه');
+  }
   ok(/styled\(Markup\.button\.callback\(L\.buttons\.coinPack\(p, cur\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
     'رنگِ بسته از جدولِ PACK_STYLE می‌آید، نه شرطِ درجا');
 }
