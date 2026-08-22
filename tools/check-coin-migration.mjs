@@ -6,7 +6,7 @@
 // پس منطقش باید قبل از اجرا اثبات شود، نه بعدش.
 //
 // اجرا: node tools/check-coin-migration.mjs
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
@@ -15,6 +15,7 @@ import {
   TOMAN_PER_COIN_GIFT, TOMAN_PER_COIN_PAID,
   coinsFor, coinsForPaid, newBalanceFor, newBalanceForPaid,
   parseSetUser, parseIdList, planFor,
+  ensureMigrations, migrationDone, MIGRATIONS_TABLE, MIGRATION_KEY,
 } from './coin-migration-tarot.mjs';
 
 const require = createRequire(import.meta.url);
@@ -183,6 +184,57 @@ console.log('\n▶ ایمنیِ نوشتن');
 
 db.close();
 rmSync(dir, { recursive: true, force: true });
+
+
+console.log('\n▶ 🔒 گاردِ اتمیکِ ضدِ تبدیلِ دوباره (باگِ بازتولیدشده)');
+{
+  // ⚠️ این بلوک منطق را **اجرا** می‌کند، نه اینکه رجکس بخواند. نسخه‌ی قبلی فقط وجودِ
+  // چکِ فایلِ marker را رجکس می‌کرد و همین باعث شد باگ تا لحظه‌ی دیپلوی زنده بماند:
+  // marker **بعد از** commit نوشته می‌شد، پس قطعِ SSH وسطِ کار = تبدیلِ دوباره.
+  const dir = mkdtempSync(path.join(tmpdir(), 'mig2-'));
+  const f = path.join(dir, 'bot-fa.db');
+  const db = new Database(f);
+  db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, name TEXT DEFAULT '', username TEXT DEFAULT '', balance INTEGER DEFAULT 0);
+           CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER, status TEXT);
+           INSERT INTO users VALUES (1,'g','g',30000);
+           INSERT INTO users VALUES (2,'p','p',200000);
+           INSERT INTO payments VALUES (1,2,50000,'approved');`);
+
+  ok(!migrationDone(db), 'دیتابیسِ تازه مهرِ مهاجرت ندارد');
+
+  // شبیه‌سازیِ همان کاری که run() در تراکنش می‌کند
+  const apply = () => {
+    const plan = planFor(db, {}).plan;
+    db.transaction(() => {
+      for (const p of plan) db.prepare('UPDATE users SET balance=? WHERE telegram_id=?').run(p.to, p.id);
+      db.prepare(`INSERT OR IGNORE INTO ${MIGRATIONS_TABLE} (key, done_at) VALUES (?, unixepoch())`).run(MIGRATION_KEY);
+    })();
+    return plan.length;
+  };
+  ensureMigrations(db);
+  apply();
+  const after1 = db.prepare('SELECT telegram_id, balance FROM users ORDER BY telegram_id').all();
+  ok(after1[0].balance === 50_000 && after1[1].balance === 1_340_000,
+    `دورِ اول درست تبدیل کرد (۵ و ۱۳۴ الماس)`);
+  ok(migrationDone(db), 'و مهر **در همان تراکنش** ثبت شد');
+
+  // دورِ دوم: چون مهر هست، planFor با autoOff هیچ تبدیلی نمی‌دهد
+  const again = planFor(db, { autoOff: true }).plan;
+  ok(again.length === 0, 'اجرای دوباره هیچ تبدیلِ خودکاری تولید نمی‌کند (پولِ کاربر باد نمی‌کند)');
+  const after2 = db.prepare('SELECT telegram_id, balance FROM users ORDER BY telegram_id').all();
+  ok(after2[1].balance === 1_340_000, 'و موجودی دست‌نخورده ماند (نه ۸۹۴ الماس)');
+
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+
+  // بکاپ هرگز بازنویسی نمی‌شود
+  const src = readFileSync(path.resolve('tools/coin-migration-tarot.mjs'), 'utf8');
+  ok(!/if \(existsSync\(bak\)\) rmSync\(bak\);/.test(src),
+    '🔒 بکاپِ قبلی دیگر پاک نمی‌شود (تنها نسخه‌ی موجودیِ تومانیِ اصلی است)');
+  ok(/pre-coins\.\$\{Date\.now\(\)\}\.bak/.test(src), 'و اجرای بعدی بکاپِ زمان‌دارِ خودش را می‌گیرد');
+  ok(/stampDone\.run\(MIGRATION_KEY\);/.test(src) && src.indexOf('stampDone.run') < src.indexOf('})();'),
+    'مهر داخلِ بلوکِ تراکنش زده می‌شود');
+}
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 process.exit(errs.length ? 1 : 0);
