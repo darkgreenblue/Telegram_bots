@@ -84,9 +84,9 @@
 | `idFromFile` | برچسب instance از نام فایل (locale/platform) | — |
 | `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
 | `receiptQueue` | ربات جدول `admin_actions` + sweep دارد؟ (دکمه‌ی تأیید/رد رسید از داشبورد فعال) | false (voice2text/tarot: true) |
-| `coinValue` | واحدِ نمایشیِ کیف (۱ الماس = چند واحدِ داخلی). ست بودنش = فرمِ شارژ به الماس + رندرِ اعتبار به الماس | null (tarot: 10000) |
+| `coinValue` | دیکودِ فرمتِ ذخیره‌سازیِ اعتبار (۱ الماس = چند واحدِ داخلی). **نرخِ تبدیل نیست** — قیمتِ هر الماس به بسته بستگی دارد | null (tarot: 10000) |
 
-helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`, `receiptQueueSupported`, `coinOf`/`walletText` (واحدِ کیف). جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
+helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`, `receiptQueueSupported`, `coinOf`/`creditText`/`creditNum` (اعتبار) و `moneyText` (پولِ واقعی). جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
 
 ## env
 `DASHBOARD_TOKEN`* (توکن ورود — همان Secret)، `PORT` (پیش‌فرض 8787). Secrets مرتبط دیپلوی: `DASHBOARD_TOKEN`*, `CLOUDFLARE_TUNNEL_TOKEN` (اختیاری)، `OWNER_TELEGRAM_ID` (گیرنده‌ی آدرس تونل).
