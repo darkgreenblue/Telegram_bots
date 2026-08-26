@@ -304,9 +304,21 @@ jobs:
             chmod +x tools/marketing/vps-daily-post.sh 2>/dev/null || true
             NODE_BIN="$(command -v node || echo /usr/bin/node)"
             CRON_LINE="30 * * * * PATH=$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin REPO_DIR=$HOME/voice2text $HOME/voice2text/tools/marketing/vps-daily-post.sh >> $HOME/taroot-daypost.log 2>&1"
-            # خطِ قبلی را (هر شکلی که داشته) بردار و خطِ تازه را بگذار؛ اجرای دوباره no-op است
-            ( crontab -l 2>/dev/null | grep -v 'vps-daily-post.sh' ; echo "$CRON_LINE" ) | crontab -
-            echo "🗓 کرونِ انتشارِ روزانه نصب/به‌روز شد (هر ساعت چک می‌کند، ۱۰ صبح تهران منتشر می‌کند)"
+            # خطِ قبلی را (هر شکلی که داشته) بردار و خطِ تازه را بگذار؛ اجرای دوباره no-op است.
+            #
+            # ⚠️ `|| true` روی grep حیاتی است و نبودنش یک بار کرون را بی‌صدا خراب کرد:
+            # وقتی crontab خالی است، grep ورودی‌ای نمی‌گیرد و با کدِ ۱ برمی‌گردد؛ زیرِ
+            # `set -e` ساب‌شل همان‌جا می‌مرد، `echo` هرگز اجرا نمی‌شد و `crontab -`
+            # ورودیِ **خالی** می‌گرفت. یعنی کرون نصب نمی‌شد ولی چون خودِ `crontab -`
+            # موفق بود، پیامِ «نصب شد» چاپ می‌شد. خرابیِ بی‌صدا با گزارشِ موفقیت.
+            EXISTING="$(crontab -l 2>/dev/null | grep -v 'vps-daily-post.sh' || true)"
+            printf '%s\n%s\n' "$EXISTING" "$CRON_LINE" | sed '/^$/d' | crontab -
+            # هرگز موفقیت را فرض نکن؛ از خودِ crontab بپرس
+            if crontab -l 2>/dev/null | grep -q 'vps-daily-post.sh'; then
+              echo "🗓 کرونِ انتشارِ روزانه نصب/به‌روز شد (هر ساعت چک می‌کند، ۱۰ صبح تهران منتشر می‌کند)"
+            else
+              echo "❌ نصبِ کرونِ انتشارِ روزانه شکست خورد"; exit 1
+            fi
 
             pm2 save
             echo "---- وضعیت نهایی ----"
