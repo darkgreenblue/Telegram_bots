@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, tunnel-url, announce-dry, announce-send]
+        options: [status, logs, errors, restart, env-check, db-query, daypost, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -140,6 +140,20 @@ jobs:
                 case "$OPS_ONLY" in (*[!0-9,]*) echo "❌ لیستِ آی‌دی نامعتبر"; exit 1;; esac
                 echo "===== announce $SEND ${OPS_ONLY:+(فقط: $OPS_ONLY)} ====="
                 ANNOUNCE_ONLY="$OPS_ONLY" node tools/announce-tarot.mjs bots/tarot/data $SEND
+                ;;
+              daypost)
+                # سلامتِ کرونِ انتشارِ روزانه‌ی کانال (مسیرِ بحرانیِ جدید، مستقل از Actions).
+                # بدونِ این، تنها راهِ فهمیدنِ خرابی «پست نیامد» بود، یعنی بعد از از‌دست‌رفتنِ روز.
+                echo "---- سرویسِ cron ----"
+                systemctl is-active cron 2>/dev/null || systemctl is-active crond 2>/dev/null || echo "⚠️ سرویسِ cron فعال نیست"
+                echo "---- خطِ crontab ----"
+                crontab -l 2>/dev/null | grep 'vps-daily-post' || echo "❌ کرون در crontab نیست"
+                echo "---- ساعتِ سرور و تهران ----"
+                echo "server: $(date '+%F %H:%M %Z')  |  Tehran: $(TZ=Asia/Tehran date '+%F %H:%M')"
+                echo "---- مارکرهای اخیر (روزهای منتشرشده) ----"
+                ls -1t ~/.cache/taroot-daypost 2>/dev/null | head -10 || echo "(هنوز هیچ مارکری نیست)"
+                echo "---- ۳۰ خطِ آخرِ لاگ ----"
+                tail -n 30 ~/taroot-daypost.log 2>/dev/null || echo "(لاگ هنوز ساخته نشده؛ یعنی کرون هنوز یک بار هم اجرا نشده)"
                 ;;
               tunnel-url)
                 # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)
