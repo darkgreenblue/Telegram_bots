@@ -195,8 +195,14 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
   ok(/won: \(coins\) => `[^`]*فردا دوباره/.test(LOC) && /lost: '[^']*فردا دوباره/.test(LOC),
     'هم در برد و هم در باخت گفته می‌شود که فردا دوباره می‌شود');
   ok(/luckyRemindOn: '🔔 فردا یادآوری کن'/.test(LOC), 'دکمه‌ی «فردا یادآوری کن» هست');
-  ok(/dueLuckyReminder/.test(SRC) && /lucky_reminder_on=1/.test(SRC),
-    'یادآوریِ کارت شانس opt-in است (فقط کسی که دکمه را زده)');
+  // 🌙 از v3.28.0 یادآوریِ شبانه یک آزمایشِ A/B و **opt-out** است (تصمیمِ صریحِ مالک):
+  // جاروی opt-inِ کارتِ شانس با آن جایگزین شد. دکمه‌ی `lremind:` زنده مانده (بند ۲ج/۶)
+  // و نیتِ کاربر را به همان ستونی می‌برد که جارو واقعاً می‌خواند.
+  ok(!/stmts\.dueLuckyReminder/.test(SRC), 'جاروی opt-inِ قدیمی حذف شده (جایش A/B آمد)');
+  ok(/dueNightReminder/.test(SRC) && /daily_reminder_off=0/.test(SRC),
+    'یادآوریِ شبانه opt-out است و انصرافِ قبلیِ کاربر را محترم می‌شمارد');
+  ok(/if \(on\) stmts\.setDailyReminderOn\.run\(uid\); else stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC),
+    'دکمه‌ی یادآوریِ کارت شانس همان ستونِ جارو را می‌نویسد');
   // ⚠️ v3.22.0: یادآوریِ کارتِ روز **کاملاً حذف شد** (تصمیمِ مالک). قبلاً فقط برای دنیای
   // الماس خاموش بود. حالا تنها یادآوریِ شبانه‌ی ربات کارت شانسِ opt-in است، پس کاربر
   // هرگز پیامِ شبانه‌ی نخواسته نمی‌گیرد. سه ادعا، چون «حذف» را باید از سه سمت قفل کرد:
@@ -779,7 +785,11 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
 {
   ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[rechargeBtn\(uid\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
     'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
-  ok(/inviteWithBonus\(referralBonusFor\(uid\), cur\), 'invite_go'/.test(SRC), 'دکمه‌ی معرفیِ دوستان با مبلغِ پاداش');
+  // از v3.28.0 هر سه نقطه‌ی دعوت از تک‌منبعِ `inviteRow` می‌خوانند تا همه‌شان اول پیامِ
+  // توضیحیِ دعوت را نشان بدهند (باگ: یکی‌شان مستقیم مخاطبینِ کاربر را باز می‌کرد).
+  ok(/rows\.push\(inviteRow\(uid\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
+  ok(/const inviteRow = \(uid\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), 'invite_go'\)\];/.test(SRC),
+    'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار و همان مقصدِ invite_go را دارد');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
     'دکمه‌ی کارت شانس فقط وقتی سهمیه‌ی امروز باز است نشان داده می‌شود (بن‌بست نمی‌سازد)');
   ok(/bot\.action\('invite_go', async \(ctx\) => \{ await ctx\.answerCbQuery\(\)\.catch\(\(\) => \{\}\); return showInvite\(ctx\); \}\);/.test(SRC),
@@ -1127,8 +1137,13 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // removeKeyboard اینجا کیبوردِ تایپِ گوشی را باز نگه می‌داشت (ایرادِ صریحِ مالک: «نصف
   // صفحه رو اشغال می‌کنه»). کیبوردِ سفارشی از askName برداشته شده، پس برداشتنِ دوباره
   // بی‌اثر ولی پرعارضه بود.
-  ok(/await ctx\.reply\(L\.onboarding\.welcome\(name, statFirstFor\(uid\), uxV2For\(uid\)\)\);/.test(nameFn),
-    'پیامِ «خوش اومدی» هیچ reply_markup ای ندارد (نه منو، نه removeKeyboard)');
+  // ⚠️ ادعا عمداً امضای تابع را پین نمی‌کند (نسخه‌ی قبلی می‌کرد و با بسته‌شدنِ آزمایشِ
+  // intro_order الکی قرمز شد). چیزی که واقعاً محافظت می‌شود این است: این `ctx.reply`
+  // آرگومانِ دومی ندارد، یعنی هیچ reply_markup ای به آن چسبانده نشده.
+  const welcomeCall = nameFn.match(/await ctx\.reply\(L\.onboarding\.welcome\([^;]*\);/)?.[0] || '';
+  ok(!!welcomeCall, 'پیامِ «خوش اومدی» در آنبوردینگ فرستاده می‌شود');
+  ok(/^await ctx\.reply\(L\.onboarding\.welcome\((?:[^()]|\([^()]*\))*\)\);$/.test(welcomeCall),
+    `پیامِ «خوش اومدی» هیچ reply_markup ای ندارد (نه منو، نه removeKeyboard) — شد: ${welcomeCall}`);
   // روی **کد** سنجیده می‌شود نه کامنت: خودِ کامنتِ توضیحیِ بالای همین خط اسمِ
   // removeKeyboard را می‌برد و نسخه‌ی اولِ این assert به همان کامنت گیر کرد.
   const nameCode = nameFn.replace(/\/\/.*$/gm, '');
@@ -1211,6 +1226,83 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
   ok(/bot\.hears\(INVITE_LABELS, showInvite\)/.test(SRC), 'هندلرِ دعوت هر دو برچسب را می‌گیرد');
   ok(/'📤 معرفی دوستان', '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),
     'برچسب‌های کهنه در KB_LABELS هستند (تپِ دکمه در قیف گم نشود)');
+}
+
+console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جواب نمی‌ماند');
+{
+  // ⚠️ منطق **از سورس بریده و اجرا** می‌شود، نه بازنویسی. یک ادعای رجکسی («رشته‌ی
+  // pickClosed در فایل هست») همان چیزی را نمی‌بیند که این باگ بود: شاخه‌ای که زودتر
+  // return می‌کند. الگوی مرجع: check-lucky.mjs.
+  const start = SRC.indexOf('bot.action(/^pick:(\\d+)$/');
+  const open = SRC.indexOf('{', SRC.indexOf('=>', start));
+  let depth = 0, end = open;
+  for (let p = open; p < SRC.length; p++) {
+    if (SRC[p] === '{') depth++;
+    else if (SRC[p] === '}') { depth--; if (depth === 0) { end = p; break; } }
+  }
+  const body = SRC.slice(open + 1, end);
+  ok(start > 0 && end > open, 'هندلرِ pick: از سورس استخراج شد');
+
+  // گاردِ ضدِ race باید **قبل از اولین await** بنشیند، وگرنه دو تپِ پشت‌سرهم هر دو رد شوند.
+  // ⚠️ کامنت‌ها اول حذف می‌شوند: نسخه‌ی اولِ همین ادعا کلمه‌ی `await` را داخلِ یک کامنت
+  // پیدا کرد و قرمزِ کاذب داد. سنجه‌ای که خودش را روی متنِ کامنت می‌سنجد، سنجه نیست.
+  const code = body.replace(/\/\/[^\n]*/g, '');
+  ok(code.indexOf("setState(uid, 'confirm_pay')") < code.indexOf('await'),
+    'قفلِ confirm_pay قبل از اولین await است (ضدِ دوبار-تپ)');
+
+  const run = new Function('ctx', 'deps', `
+    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, finishPicking } = deps;
+    return (async () => {${body}})();
+  `);
+  const scenario = async (state, picks, need, tap) => {
+    const log = { cb: [], editKb: 0, editText: null, finished: false, state, session: { picks: [...picks], need } };
+    const ctx = {
+      from: { id: 7 }, match: [null, String(tap)],
+      answerCbQuery: (text, extra) => { log.cb.push({ text, extra }); return Promise.resolve(); },
+      editMessageReplyMarkup: () => { log.editKb++; return Promise.resolve(); },
+      editMessageText: (t) => { log.editText = t; return Promise.resolve(); },
+    };
+    await run(ctx, {
+      getState: () => log.state, getSession: () => log.session,
+      setState: (_u, v) => { log.state = v; }, setSession: (_u, v) => { log.session = v; },
+      L, USER_PICKS: 3, pickGridKb: () => ({ reply_markup: 'KB' }),
+      finishPicking: async () => { log.finished = true; },
+    });
+    return log;
+  };
+  const said = (r) => r.cb[0]?.text;
+
+  // ۱) گریدِ کهنه/تمام‌شده: پاپ‌آپِ صریح، نه سکوت. این خودِ باگ بود.
+  const stale = await scenario('revealing', [1, 2, 3], 3, 9);
+  ok(said(stale) === L.reading.pickClosed && stale.cb[0]?.extra?.show_alert === true,
+    'تپ روی گریدِ تمام‌شده پاپ‌آپِ صریح می‌گیرد (نه answerCbQuery خالی)');
+  ok(!stale.finished && stale.editKb === 0, 'تپِ کهنه هیچ عوارضی ندارد');
+
+  // ۲) کارتِ تکراری: toast می‌گیرد (متن دارد) و انتخاب دوباره ثبت نمی‌شود.
+  const dup = await scenario('picking', [4], 3, 4);
+  ok(said(dup) === L.reading.pickAlready, 'کارتِ تکراری toast می‌گیرد، نه سکوت');
+  ok(dup.session.picks.length === 1, 'کارتِ تکراری دوباره ثبت نمی‌شود');
+
+  // ۳) انتخابِ عادیِ وسطِ راه: گرید به‌روز می‌شود و متن دست نمی‌خورد.
+  const mid = await scenario('picking', [4], 3, 8);
+  ok(said(mid) === '✨' && mid.editKb === 1 && mid.editText === null,
+    'انتخابِ وسطِ راه فقط کیبورد را به‌روز می‌کند');
+  ok(!mid.finished && mid.state === 'picking', 'وسطِ راه هنوز picking است');
+
+  // ۴) آخرین انتخاب: **کیبورد برداشته می‌شود** (متن جایگزین می‌شود) تا گریدِ مرده در چت
+  //    نماند. بدونِ این، همان ۲۲۳ تپِ هدررفته دوباره تولید می‌شود.
+  const last = await scenario('picking', [4, 8], 3, 1);
+  ok(last.editText === L.reading.pickProgress(3, 3),
+    'با آخرین انتخاب، متنِ گرید به «۳ از ۳ کارت انتخاب شد» تبدیل می‌شود');
+  ok(last.editKb === 0, 'با آخرین انتخاب کیبوردِ گرید دیگر رندر نمی‌شود (برداشته می‌شود)');
+  ok(last.finished && last.state === 'confirm_pay', 'آخرین انتخاب فلو را ادامه می‌دهد');
+
+  // ۵) فالِ ده‌کارتی: قاعده به عددِ ۳ گره نخورده باشد.
+  const big = await scenario('picking', [0, 1, 2, 3, 4, 5, 6, 7, 8], 10, 11);
+  ok(big.finished && big.editText === L.reading.pickProgress(10, 10),
+    'همین رفتار در فالِ ده‌کارتی هم برقرار است');
+
+  ok(!/answerCbQuery\(\)\s*\.catch/.test(body), 'هیچ answerCbQuery خالی‌ای در این هندلر نمانده');
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);

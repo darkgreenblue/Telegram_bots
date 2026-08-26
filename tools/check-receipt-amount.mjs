@@ -63,9 +63,25 @@ for (const bot of ['tarot', 'voice2text']) {
   // همان بدونِ واحدِ چاپ‌شده: چون در هر دو خوانش کافی است، بی‌خطر و قابلِ تأیید
   ok(decideReceipt(seen(1000000, null), 100000).action === 'approve',
      t('عددِ ≥ ده‌برابرِ فاکتور بدونِ واحد هم بی‌خطر است و تأیید می‌شود'));
-  // رسیدی که واقعاً تومانی است و واحدش چاپ شده
-  ok(decideReceipt(seen(100000, 'toman'), 100000).action === 'approve',
-     t('رسیدِ صریحاً تومانی با مبلغِ برابرِ فاکتور باید تأیید شود'));
+  // ── رسیدی که مدل واحدش را «تومان» خوانده ───────────────────────────────────
+  // 🐛 باگِ دومِ واقعی (گزارشِ مالک ۱۴۰۵/۰۶/۰۴): کاربر برای بسته‌ی جادویی (۱۵۰٬۰۰۰ تومان)
+  // مبلغِ ۱۵۰٬۰۰۰ **ریال** واریز کرد، مدل عددِ چاپ‌شده را «تومان» برچسب زد، paid == exp
+  // شد و ربات **خودکار تأیید کرد**. گاردِ amount_unit_suspect هم نگرفتش چون شرطش
+  // `paid < exp` است و در آن خوانش paid دقیقاً برابرِ exp شده بود.
+  //
+  // ⚠️ واگراییِ **عمدی** از این‌جا به بعد: tarot دیگر برچسبِ واحدِ مدل را در حساب دخالت
+  // نمی‌دهد (رسیدِ بانکیِ ایرانی بلااستثنا ریال است، تصمیمِ صریحِ مالک)، پس این حالت به
+  // تصمیمِ انسانی می‌رود. voice2text عمداً دست‌نخورده ماند (بند ۶ ریشه: تغییرِ آن ربات
+  // فقط با تصمیمِ صریح) و همان رفتارِ قبلی را دارد.
+  const tomanLabeled = decideReceipt(seen(100000, 'toman'), 100000);
+  if (bot === 'tarot') {
+    ok(tomanLabeled.action === 'review',
+       t(`برچسبِ «تومان» نباید تأییدِ خودکار بدهد؛ باید انسانی شود (شد: ${tomanLabeled.action})`));
+    ok(tomanLabeled.action !== 'approve', t('باگِ دوم: عددِ یک‌دهمی با برچسبِ تومان هرگز تأیید نشود'));
+  } else {
+    ok(tomanLabeled.action === 'approve',
+       t('رسیدِ صریحاً تومانی با مبلغِ برابرِ فاکتور باید تأیید شود (رفتارِ عمدیِ این ربات)'));
+  }
 
   // ── ۳) مبلغِ تومانِ محاسبه‌شده باید درست باشد (نه فقط تصمیم) ────────────────
   const okPay = decideReceipt(seen(1000000, 'rial'), 100000);
@@ -97,11 +113,47 @@ for (const bot of ['tarot', 'voice2text']) {
   // ── ۷) resolvePaidToman خالص و مستقیم ──────────────────────────────────────
   ok(resolvePaidToman({ amount_raw: 500000, amount_currency: 'ریال' }, 50000).toman === 50000,
      t('واحدِ فارسیِ «ریال» باید شناخته شود'));
-  ok(resolvePaidToman({ amount_raw: 50000, amount_currency: 'تومان' }, 50000).toman === 50000,
-     t('واحدِ فارسیِ «تومان» باید شناخته شود'));
-  ok(resolvePaidToman({ amount_raw: 50000, amount_currency: null }, 50000).basis === 'ambiguous',
-     t('واحدِ نامعلوم با عددِ کمتر از ده‌برابر باید مبهم بماند'));
   ok(resolvePaidToman({}, 50000).basis === 'none', t('رسیدِ بدونِ مبلغ باید basis=none بدهد'));
+  if (bot === 'tarot') {
+    // قاعده‌ی «همه‌چیز ریال است»: برچسبِ واحد روی حساب اثر ندارد، فقط در basis ثبت می‌شود.
+    const lbl = resolvePaidToman({ amount_raw: 50000, amount_currency: 'تومان' }, 50000);
+    ok(lbl.toman === 5000, t(`برچسبِ «تومان» نباید تقسیم بر ۱۰ را لغو کند (شد: ${lbl.toman})`));
+    ok(lbl.basis === 'rial_assumed_toman_label', t('برچسبِ تومان باید در basis ثبت شود (برای پیامِ ادمین)'));
+    ok(resolvePaidToman({ amount_raw: 50000, amount_currency: null }, 50000).basis === 'rial_assumed',
+       t('نبودِ واحد یعنی ریالِ فرض‌شده، نه مبهم'));
+    ok(resolvePaidToman({ amount_raw: 50000, amount_currency: null }, 0).toman === 5000,
+       t('حساب نباید به مبلغِ فاکتور وابسته باشد (یک تقسیم، بس)'));
+  } else {
+    ok(resolvePaidToman({ amount_raw: 50000, amount_currency: 'تومان' }, 50000).toman === 50000,
+       t('واحدِ فارسیِ «تومان» باید شناخته شود'));
+    ok(resolvePaidToman({ amount_raw: 50000, amount_currency: null }, 50000).basis === 'ambiguous',
+       t('واحدِ نامعلوم با عددِ کمتر از ده‌برابر باید مبهم بماند'));
+  }
+}
+
+// ── ۷ب) سه بسته‌ی واقعیِ tarot با تعدادِ صفرِ دقیق (خواسته‌ی صریحِ مالک) ────────
+// عددهای ریالی از `COIN_PACKAGES` مشتق می‌شوند (تومان×۱۰)، پس اگر روزی قیمتِ بسته‌ای
+// عوض شود این جدول هم باید همان‌جا عوض شود و این چک یادآوری می‌کند.
+{
+  const { decideReceipt } = await import(join(root, 'bots/tarot/cardpay.js'));
+  const PACKS = [
+    { fa: 'جادویی', toman: 150000, rial: 1500000 },
+    { fa: 'ویژه',   toman: 60000,  rial: 600000  },
+    { fa: 'معمولی', toman: 30000,  rial: 300000  },
+  ];
+  for (const p of PACKS) {
+    ok(p.rial === p.toman * 10, `بسته‌ی ${p.fa}: عددِ ریالی باید دقیقاً ده‌برابرِ تومانی باشد`);
+    ok(decideReceipt(seen(p.rial, 'rial'), p.toman).action === 'approve',
+       `بسته‌ی ${p.fa}: رسیدِ ${p.rial} ریال باید تأیید شود`);
+    ok(decideReceipt(seen(p.rial, null), p.toman).action === 'approve',
+       `بسته‌ی ${p.fa}: رسیدِ درست بدونِ واحدِ چاپ‌شده هم باید تأیید شود`);
+    // یک صفر کمتر — همان چیزی که واقعاً اتفاق افتاد
+    for (const cur of ['rial', 'toman', null]) {
+      const d = decideReceipt(seen(p.toman, cur), p.toman);
+      ok(d.action !== 'approve',
+         `بسته‌ی ${p.fa}: رسیدِ ${p.toman} (یک صفر کمتر، واحد=${cur}) هرگز نباید تأیید شود (شد: ${d.action})`);
+    }
+  }
 }
 
 // ── ۸) هم‌قراردادیِ سه کپی (JS×۲ و پایتون) ───────────────────────────────────

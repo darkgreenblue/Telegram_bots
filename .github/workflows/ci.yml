@@ -169,6 +169,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-ux-menu.mjs
 
+      # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
+      # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
+      - name: Night reminder A/B + invite + referral reward check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-night-reminder.mjs
+
       # آزمایشگاهِ خوانش در حالتِ fake: **کلِ** مسیر واقعاً اجرا می‌شود — ساختِ پرامپت،
       # callbackِ پذیرش، رندرِ متنِ نهایی، همه‌ی سنجه‌ها و گزارش — فقط پاسخِ مدل از یک
       # استابِ محلی می‌آید. صفر شبکه، صفر هزینه.

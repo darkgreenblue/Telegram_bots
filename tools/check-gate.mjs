@@ -116,44 +116,45 @@ ok(new RegExp(`startPopular[\\s\\S]{0,80}${popular?.fa}`).test(loc),
 ok(new RegExp(`startPopular\\(\\),\\s*'spread:${badge}'`).test(idx),
    `دکمه‌ی CTA باید به spread:${badge} وصل باشد، نه فالِ دیگری`);
 
-// ── ۷) آزمایشِ ترتیبِ آنبوردینگ: هر کاربر هر دو بلوک را دقیقاً یک‌بار ببیند ──
-// این آزمایش فقط **جای** دو بلوک را عوض می‌کند. اگر خودِ متن‌ها هم بین دو نسخه فرق کنند،
-// آزمایش دو متغیره می‌شود و نتیجه تفسیرپذیر نیست؛ و اگر هر پیام نسخه‌ی خودش را داشته باشد،
-// کاربر می‌تواند یک بلوک را دو بار یا هیچ‌کدام را نبیند. پس هر دو پیام باید از **یک منبع**
-// (ثابت‌های module-level) بخوانند.
-ok(/const INTRO_EXPERIENCE\s*=/.test(loc) && /const INTRO_STAT\s*=/.test(loc),
-   'دو بلوکِ محتوایی باید ثابتِ module-level باشند (تک‌منبع برای هر دو پیام)');
-const gateIntroSrc = loc.match(/gateIntro:\s*\(statFirst\)[\s\S]*?,\n/)?.[0] || '';
-// UX v2.1: welcome() یک پارامترِ سومِ اختیاری (v2) گرفت تا نسخه‌ی تازه‌ی INTRO_EXPERIENCE
-// را انتخاب کند؛ امضا دیگر دقیقاً `(name, statFirst)` نیست، پس رجکس باید پارامترهای
-// اضافه را هم بپذیرد — ولی همچنان باید مطمئن شود اسمِ اولین دو پارامتر عوض نشده.
-const welcomeSrc = loc.match(/welcome:\s*\(name, statFirst(?:, \w+)*\)[\s\S]*?,\n/)?.[0] || '';
-ok(gateIntroSrc && welcomeSrc, 'هر دو پیامِ آنبوردینگ باید statFirst بگیرند');
-ok(/statFirst \? INTRO_STAT : INTRO_EXPERIENCE/.test(gateIntroSrc),
-   'پیامِ اول: در شاخه‌ی stat_first باید آمار بیاید و در control تجربه');
-// UX v2.1: شاخه‌ی true حالا خودش یک انشعابِ v2 دارد (`v2 ? INTRO_EXPERIENCE_V2 :
-// INTRO_EXPERIENCE`) ولی جوهرِ قرارداد دست‌نخورده است: وقتی گیت STAT نشان داده،
-// این‌جا باید از **خانواده‌ی EXPERIENCE** چیزی بیاید (کدام نسخه فرقی به حالِ آزمایش
-// نمی‌کند، چون v2 خودش یک متغیرِ مستقلِ دیگر است، نه شاخه‌ی این آزمایش).
-ok(/statFirst \? \(v2 \? INTRO_EXPERIENCE_V2 : INTRO_EXPERIENCE\) : INTRO_STAT/.test(welcomeSrc),
-   'پیامِ بعد از نام باید **مکملِ** پیامِ اول باشد (برعکسِ همان شرط)، نه تکرارش');
-// دنیای قدیم (v2 نادرست/نبود) باید بیت‌به‌بیت به رفتارِ قبلی برگردد
-ok(/const INTRO_EXPERIENCE_V2\s*=/.test(loc),
-   'نسخه‌ی UX v2.1 پیام هم ثابتِ module-level جدا دارد (تکرارِ همان الگوی تک‌منبع)');
+// ── ۷) آنبوردینگ بعد از بسته‌شدنِ آزمایشِ ترتیب ────────────────────────────────
+// 🔴 آزمایشِ `intro_order` در ۴ شهریور ۱۴۰۵ بسته شد. ترتیبِ کنترل ماند (تجربه اول، آمار
+// بعد) و متنِ تجربه برای همه به نسخه‌ی تازه رفت.
+//
+// ⚠️ درسی که این آزمایش داد و این‌جا ثبت می‌شود: نسخه‌ی قبلیِ همین چک ادعا می‌کرد
+// «کدام نسخه‌ی متن بیاید فرقی به حالِ آزمایش نمی‌کند، چون v2 یک متغیرِ مستقلِ دیگر است».
+// این **غلط** بود: از v3.25.0 که `uxV2For` برای همه true شد، شاخه‌ی stat_first متنِ V2
+// می‌گرفت و control متنِ v1، پس دو شاخه هم ترتیب هم متنشان فرق داشت و نتیجه تفسیرناپذیر
+// شد. کامنتِ بالای همین بلوک از اول همین را ممنوع کرده بود، ولی به‌شکلِ **کامنت** بود نه
+// **ادعا**. هر آزمایشِ بعدی باید تقارنِ شاخه‌هایش یک assert داشته باشد، نه یک کامنت
+// (نمونه‌ی درست: تقارنِ طولِ دو CTA در `check-night-reminder.mjs`).
+ok(/const INTRO_EXPERIENCE\s*=/.test(loc) && /const INTRO_STAT\s*=/.test(loc)
+   && /const INTRO_EXPERIENCE_V2\s*=/.test(loc),
+   'هر سه بلوکِ محتوایی ثابتِ module-level اند (تک‌منبع برای هر دو پیام)');
+const gateIntroSrc = loc.match(/gateIntro:\s*\(v2\)[\s\S]*?,\n/)?.[0] || '';
+const welcomeSrc = loc.match(/welcome:\s*\(name, v2\)[\s\S]*?,\n/)?.[0] || '';
+ok(gateIntroSrc && welcomeSrc, 'هیچ‌کدام از دو پیامِ آنبوردینگ دیگر پارامترِ شاخه نمی‌گیرد');
+ok(/v2 \? INTRO_EXPERIENCE_V2 : INTRO_EXPERIENCE/.test(gateIntroSrc),
+   'پیامِ اول همیشه بلوکِ تجربه است (نسخه‌ی تازه در دنیای الماس، v1 در دنیای تومانی)');
+ok(/\+ INTRO_STAT,/.test(welcomeSrc) && !/INTRO_EXPERIENCE/.test(welcomeSrc),
+   'پیامِ بعد از نام همیشه بلوکِ آمار است (مکملِ پیامِ اول، نه تکرارش)');
+// هر کاربر باید **هر دو** بلوک را دقیقاً یک‌بار ببیند؛ همان قراردادِ همیشگی، بدونِ شاخه
+ok(!/statFirst/.test(loc) && !/statFirst/.test(idx),
+   'شاخه‌ی آزمایش کاملاً پاک شده (کدِ مرده نمی‌ماند)');
+ok(!/const statFirstFor =/.test(idx), 'helperِ شاخه هم حذف شده');
 // مکانیکِ محصول عمداً توضیح داده نمی‌شود (کاربر چند ثانیه بعد خودش می‌بیند)
 ok(!/از دک برمی‌داری|انتخاب می‌کنی/.test(loc.match(/const INTRO_EXPERIENCE[\s\S]*?;\n/)?.[0] || ''),
    'بلوکِ تجربه نباید مکانیکِ محصول را توضیح دهد');
 // موضع‌گیریِ «هوش مصنوعی» از فلو برداشته شد (بیرون از ربات تست می‌شود). نامِ کانال استثناست
-// چون مقصدِ واقعیِ کاربر است، نه ادعای محصولی.
 const aiHits = [...loc.matchAll(/^.*هوش مصنوعی.*$/gm)].map(m => m[0]);
 for (const line of aiHits) {
   ok(/کانال/.test(line), `«هوش مصنوعی» فقط به‌عنوانِ نامِ کانال مجاز است، نه ادعای محصولی: ${line.trim().slice(0, 70)}`);
 }
-ok(/variant\(db, uid, AB_INTRO_ORDER\)/.test(idx), 'شاخه‌ی A/B باید از variant() بخواند');
-ok(/const statFirstFor =/.test(idx),
-   'هر دو نقطه باید از یک helper بخوانند تا شاخه‌شان هرگز از هم جدا نشود');
-ok(/INSERT OR IGNORE INTO experiments/.test(idx),
-   'seedِ آزمایش باید idempotent باشد تا کنترلِ داشبورد را بازنویسی نکند');
+// آزمایشِ بسته‌شده باید صراحتاً stop شود و **seedش برداشته شده باشد**، وگرنه هر بوت
+// دوباره running می‌سازدش و بعد stop می‌کند (پینگ‌پنگِ بی‌معنی در گزارشِ داشبورد).
+ok(/UPDATE experiments SET status='stopped'[\s\S]{0,400}AB_INTRO_ORDER/.test(idx),
+   'آزمایشِ ترتیب صراحتاً stop می‌شود');
+ok(!/INSERT OR IGNORE INTO experiments[\s\S]{0,300}AB_INTRO_ORDER/.test(idx),
+   'و seedش برداشته شده (آزمایشِ بسته دوباره running نمی‌شود)');
 ok(/UPDATE experiments SET status='stopped'[\s\S]*?gate_intro_ai/.test(idx),
    'آزمایشِ بازنشسته باید صراحتاً stop شود، نه اینکه در داشبورد «در حال اجرا»ی دروغین بماند');
 
