@@ -50,6 +50,13 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-env.mjs
 
+      # همان قاعده از زاویه‌ی دوم: چکِ بالا فقط پینگ‌پنگِ .env را می‌بیند. این یکی
+      # بلوک‌های **یک‌باره** را می‌بیند — بلوکی که شرطش همیشه درست است و در هر مرج
+      # رباتِ زنده را `pm2 stop` می‌کند (باگِ واقعیِ ۵ شهریور ۱۴۰۵ روی tarot).
+      - name: Deploy one-time block guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-deploy-onetime.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
