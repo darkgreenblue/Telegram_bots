@@ -107,6 +107,35 @@ ok('جاروی opt-inِ قدیمیِ کارتِ شانس حذف شده', !/stmts
 ok('مهرِ زمانِ جاروی قدیمی هم حذف شده', !/stmts\.setLuckyReminded/.test(SRC));
 ok('ستونِ lucky_reminder_on هنوز روی DB هست (بند ۲ج/۱)', /ADD COLUMN lucky_reminder_on/.test(SRC));
 
+/* ═══════ ۴ب) seedِ آزمایش: با دیپلوی فعال می‌شود، ولی داشبورد همچنان ارباب است ═══════ */
+{
+  // بلوکِ seedِ همین آزمایش (نه آزمایشِ همسایه‌ی intro_order)
+  const nightSeedAt = SRC.indexOf('    NIGHT_EXP,');
+  const seed = SRC.slice(SRC.lastIndexOf('db.prepare(', nightSeedAt), SRC.indexOf('  );', nightSeedAt) + 4);
+  ok('آزمایش با INSERT OR IGNORE ساخته می‌شود، نه upsert', /INSERT OR IGNORE INTO experiments/.test(seed));
+  // ربات مشروعاً آزمایش‌های **بازنشسته** را stop می‌کند (نامِ واحد، gate_intro_ai)؛ چیزی
+  // که نباید باشد یک UPDATE روی همین آزمایش است، وگرنه stopِ مالک از داشبورد را نقض می‌کند.
+  ok('هیچ UPDATE ای این آزمایش را دستکاری نمی‌کند (stopِ داشبورد باید دوام بیاورد)',
+     !/UPDATE experiments[\s\S]{0,300}night_reminder/.test(SRC)
+     && !/UPDATE experiments[\s\S]{0,300}NIGHT_EXP/.test(SRC));
+  // TDZ: بلوکِ seed لحظه‌ی بارگذاریِ ماژول اجرا می‌شود، پس کلید باید **قبلش** تعریف شده باشد
+  ok('کلیدِ آزمایش قبل از بلوکِ seed تعریف شده (وگرنه بوت می‌میرد)',
+     SRC.indexOf("const NIGHT_EXP = 'night_reminder';") < SRC.indexOf('INSERT OR IGNORE INTO experiments'));
+  ok('مستقیم running ساخته می‌شود (خواسته‌ی مالک)', /'running'/.test(seed));
+  ok('متریکِ اصلی مشترک است، نه اقدامِ خودِ یک شاخه',
+     /EVENTS\.PRODUCT_DELIVERED/.test(seed) && !/night_reminder_sent/.test(seed));
+  ok('گاردریلِ انصراف از یادآوری هست', /daily_reminder_off/.test(seed));
+  ok('وزن‌ها ۵۰/۵۰ اند',
+     /\{ key: 'control', weight: 50 \}, \{ key: 'lucky', weight: 50 \}/.test(seed));
+  ok('کلیدِ آزمایش همان ثابتی است که جارو می‌خواند (نه رشته‌ی کپی‌شده)',
+     /NIGHT_EXP,/.test(seed) && /const NIGHT_EXP = 'night_reminder';/.test(SRC));
+  // نامِ واریانت باید دقیقاً با کلیدِ شاخه در NIGHT_ARMS یکی باشد، وگرنه انتساب به
+  // شاخه‌ی ناموجود می‌افتد و فالبکِ control همه را می‌بلعد (آزمایشِ مرده‌ی بی‌صدا).
+  ok('نامِ واریانتِ دوم دقیقاً کلیدِ همان شاخه است', !!ARMS.lucky && /'lucky', weight: 50/.test(seed));
+  ok('seed در try/catch است (خرابیِ آزمایش نباید بوتِ ربات را بشکند)',
+     /catch \(e\) \{ logErr\('ab seed:'/.test(SRC));
+}
+
 /* ═══════ ۵) پیشنهادِ کارتِ شانس در پایانِ فلوِ کارتِ روز ═══════ */
 const offer = block(SRC, 'async function offerLuckyAfterDaily');
 ok('تابعِ offerLuckyAfterDaily وجود دارد', !!offer);

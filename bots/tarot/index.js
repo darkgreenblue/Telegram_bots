@@ -693,7 +693,7 @@ db.exec(`
 `);
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
-// A/B تست: جدول‌های experiments/ab_exposures (config توسط داشبورد نوشته می‌شود؛ ربات فقط می‌خواند)
+// A/B تست: جدول‌های experiments/ab_exposures (چرخه‌ی عمر را داشبورد کنترل می‌کند)
 ensureAb(db);
 
 // 🅰️/🅱️ آزمایشِ «ترتیبِ دو پیامِ آنبوردینگ» (v2.8.0).
@@ -708,6 +708,9 @@ ensureAb(db);
 // روشن‌شدنِ آزمایش بیاید برای همیشه از نمونه بیرون می‌ماند. `INSERT OR IGNORE` است، پس
 // داشبورد همچنان تنها مرجعِ کنترل می‌ماند (هر stop/kill/تغییرِ وزن از آن‌جا باقی می‌ماند).
 const AB_INTRO_ORDER = 'intro_order';
+// کلیدِ آزمایشِ یادآوریِ شبانه. عمداً **این بالا** تعریف شده و نه کنارِ خودِ جارو: بلوکِ
+// seedِ پایین لحظه‌ی بارگذاریِ ماژول اجرا می‌شود، پس تعریفِ پایین‌تر یعنی TDZ و مرگِ بوت.
+const NIGHT_EXP = 'night_reminder';
 try {
   db.prepare(`
     INSERT OR IGNORE INTO experiments
@@ -721,6 +724,24 @@ try {
     JSON.stringify([{ key: 'control', weight: 50 }, { key: 'stat_first', weight: 50 }]),
     EVENTS.PRODUCT_DELIVERED,
     JSON.stringify([]),
+  );
+  // 🌙 آزمایشِ یادآوریِ شبانه (v3.28.0) — همان الگو و به همان دلیل: شاخه‌هایش در **کد**
+  // است، پس بدونِ ردیف عملاً مرده می‌ماند و شاخه‌ی دوم به هیچ کاربری نمی‌رسد.
+  // متریکِ اصلی عمداً **مشترک** است، نه اقدامِ خودِ هر شاخه: با `daily_card` یا
+  // `lucky_card` هر شاخه در متریکِ خودش بی‌زحمت برنده می‌شد و مقایسه بی‌معنی بود.
+  // سؤالِ واقعی این است که کدام یادآوری کاربر را تا **ارزشِ اصلی** برمی‌گرداند.
+  db.prepare(`
+    INSERT OR IGNORE INTO experiments
+      (key, name, hypothesis, mode, metric_kind, variants_json, status,
+       primary_metric, guardrails_json, started_at)
+    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
+  `).run(
+    NIGHT_EXP,
+    'یادآوری شبانه: کارت روز یا کارت شانس؟',
+    'کدام قلابِ رایگانِ شبانه کاربر را برمی‌گرداند؟ control همان یادآوریِ کارتِ روزِ نسلِ قبل است و شاخه‌ی lucky یادآوریِ کارتِ شانس.',
+    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'lucky', weight: 50 }]),
+    EVENTS.PRODUCT_DELIVERED,
+    JSON.stringify(['daily_reminder_off']),
   );
   // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
   // می‌شود تا در داشبورد «در حال اجرا»ی دروغین نماند. idempotent است.
@@ -5044,7 +5065,6 @@ bot.on('photo', async (ctx) => {
    محترم بماند. یادآوریِ opt-inِ کارتِ شانس (`lucky_reminder_on`) با همین جایگزین شد؛
    ستون و دکمه‌اش می‌مانند (بند ۲ج/۶) ولی دیگر مخاطبِ جارو را تعیین نمی‌کنند. */
 const REMINDER_HOUR = 22;
-const NIGHT_EXP = 'night_reminder';
 // هر شاخه: شرطِ «هنوز امروز انجامش نداده»، متن، و دکمه‌ی CTA. دکمه‌ها عمداً هم‌شکل و
 // هم‌اندازه‌اند و فقط محتوایشان فرق دارد (خواسته‌ی مالک)، وگرنه آزمایش به‌جای «کدام قلاب»
 // دارد «کدام دکمه چشم‌گیرتر است» را می‌سنجد.
