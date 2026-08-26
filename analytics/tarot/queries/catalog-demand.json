@@ -1,0 +1,32 @@
+{
+  "note": "کوئری‌های تحلیلِ «تقاضای کاتالوگ»: کدام موضوعِ فال کلیک می‌گیرد و کاربرها واقعاً دنبالِ جوابِ چه سؤالاتی‌اند. همه روی اتصالِ readonly از workflow `Ops` اکشن `db-query` اجرا می‌شوند (کاربر SSH ندارد). قاعده‌ی آهنین: هیچ عددی از حافظه.",
+  "excludeUsers": "مالک و حساب‌های تست — همان لیستِ state.json",
+  "excludeSnippet": "user_id NOT IN (429557996,409581917,100257975,5725984933)",
+
+  "biasWarning": "شمارشِ خامِ topic_selected بیشتر «کدام جایگاه» را می‌سنجد تا «کدام موضوع»: منوی کوتاه فقط ۳ موضوع نشان می‌دهد (پینِ ثابتِ personal + دو جایگاهِ آزمایشِ menu_slots) و پیشنهادِ بعد از فال هم با امتیازِ محبوبیت انتخاب می‌شود، یعنی یک حلقه‌ی خودتقویت‌شونده. تنها جایی که هر ۹ موضوع نمایشِ برابر دارند لیستِ «مشاهده همه فال‌ها» است، و کلیکِ آن مسیر در رویدادِ خامِ `act` با پسوندِ `topic:<key>:a` قابلِ تفکیک است. هر تحلیلی که این تفکیک را نکند روی نویز تصمیم می‌گیرد.",
+
+  "queries": {
+    "topicClicksRaw": "SELECT json_extract(props,'$.topic') topic, COUNT(*) n, COUNT(DISTINCT user_id) u FROM events WHERE event='topic_selected' AND user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY n DESC",
+
+    "topicClicksBySource": "SELECT json_extract(props,'$.d') d, COUNT(*) n, COUNT(DISTINCT user_id) u FROM events WHERE event='act' AND json_extract(props,'$.d') LIKE 'topic:%' AND user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY n DESC",
+
+    "allTopicsListViews": "SELECT COUNT(*) n, COUNT(DISTINCT user_id) u FROM events WHERE event='act' AND json_extract(props,'$.d')='catalog_go' AND user_id NOT IN (429557996,409581917,100257975,5725984933)",
+
+    "spreadClicksByTopicSize": "SELECT json_extract(props,'$.topic') topic, json_extract(props,'$.size') size, COUNT(*) n, COUNT(DISTINCT user_id) u FROM events WHERE event='spread_selected' AND user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1,2 ORDER BY n DESC",
+
+    "readingsByTypeStatus": "SELECT type, status, COUNT(*) n FROM readings WHERE user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1,2 ORDER BY n DESC",
+
+    "questionModeSplit": "SELECT CASE WHEN question<>'' THEN 'text' WHEN question_audio<>'' THEN 'voice_only' ELSE 'none' END mode, COUNT(*) n FROM readings WHERE user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY n DESC",
+
+    "questionsDump": "SELECT id/40 AS b, COUNT(*) n, group_concat(id || ' ~ ' || type || ' ~ ' || status || ' ~ ' || replace(replace(replace(question, char(10),' '), char(13),' '), ' ~ ',' - '), ' ||| ') qs FROM readings WHERE question<>'' AND user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY 1",
+
+    "focusAreaDist": "SELECT focus_area, COUNT(*) n FROM readings WHERE user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY n DESC",
+
+    "deliveryRateBySize": "SELECT json_extract(props,'$.size') size, COUNT(*) picked FROM events WHERE event='spread_selected' AND user_id NOT IN (429557996,409581917,100257975,5725984933) GROUP BY 1 ORDER BY 1"
+  },
+
+  "knownDataGaps": [
+    "سؤالِ **ویسی** هرگز رونویسی و ذخیره نمی‌شود: با AUDIO_DIRECT_ENABLED=true فایلِ صوتی مستقیم کنارِ پرامپت به مدل می‌رود و ستونِ readings.question خالی می‌ماند. پس دیتاستِ متنیِ سؤال‌ها فقط سؤال‌های **تایپ‌شده** را دارد و سهمِ ویس باید جدا گزارش شود (questionModeSplit).",
+    "propهای topic/size روی spread_selected برای چیدمان‌های نسل‌های قبل (three/celtic/daily/open3/open5) خالی برمی‌گردند، چون topicOf() برای آن‌ها موضوع ندارد. ردیفِ topic='' یعنی همین، نه یک موضوعِ ناشناخته."
+  ]
+}
