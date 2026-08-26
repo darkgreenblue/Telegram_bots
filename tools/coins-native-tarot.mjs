@@ -75,6 +75,30 @@ export function survey(db) {
   return out;
 }
 
+/**
+ * 🛑 «این دیتابیس از قبل بومی است» — گاردِ ضدِ صفرکردنِ اعتبارِ کاربران.
+ *
+ * مهر (`migrations.coins_native`) فقط دیتابیسی را می‌شناسد که **خودمان** مهاجرت داده‌ایم.
+ * دیتابیسی که کدِ **امروز** ساخته باشد (سرورِ تازه، locale جدید) مهر ندارد ولی عددهایش
+ * از قبل الماسِ بومی‌اند؛ اجرای مهاجرت رویش هر موجودی را ÷۱۰٬۰۰۰ و عملاً **صفر** می‌کند،
+ * بعد مهر می‌زند، پس خرابی هم دائمی است و هم بی‌صدا.
+ *
+ * تشخیص: در دنیای تومانی هر موجودیِ غیرصفر مضربِ SCALE بود (کمینه‌اش ۱۰٬۰۰۰). پس اگر
+ * بزرگ‌ترین عددِ دیتا از SCALE کوچک‌تر باشد، این دیتا تومانی نیست و نباید لمس شود.
+ */
+export function looksNative(db) {
+  const maxOf = (t, c) => {
+    if (!hasCol(db, t, c)) return 0;
+    return Number(db.prepare(`SELECT MAX(ABS(${c})) m FROM ${t}`).get()?.m || 0);
+  };
+  const peak = Math.max(
+    maxOf('users', 'balance'),
+    maxOf('readings', 'price'),
+    maxOf('payments', 'original_amount'),
+  );
+  return peak > 0 && peak < SCALE;
+}
+
 /** خودِ مهاجرت. همه‌چیز در **یک** تراکنش، و مهر داخلِ همان تراکنش. */
 export function migrate(db) {
   ensureMigrations(db);
@@ -128,6 +152,17 @@ if (isMain) {
     db.pragma('busy_timeout = 5000');
 
     if (migrationDone(db)) { console.log(`⏭ ${f} — قبلاً مهاجرت کرده`); db.close(); continue; }
+
+    // بدونِ مهر ولی با عددهای بومی = دیتابیسی که کدِ امروز ساخته. اجرا روی آن یعنی
+    // صفرکردنِ اعتبارِ همه‌ی کاربران. عمداً exit 1 است نه رد کردنِ بی‌صدا، چون این
+    // یعنی کسی اسکریپت را جایی اجرا کرده که نباید.
+    if (looksNative(db)) {
+      console.error(`❌ ${f} — عددهایش از قبل الماسِ بومی‌اند (بزرگ‌ترین مقدار < ${fa(SCALE)}).`);
+      console.error('   این دیتابیس را کدِ امروز ساخته و مهاجرت لازم ندارد؛ اجرا هر موجودی را صفر می‌کرد.');
+      console.error('   اگر واقعاً یک بکاپِ تومانیِ قدیمی است، اول با Ops یک نمونه‌ی balance را ببین.');
+      db.close();
+      process.exit(1);
+    }
 
     const s = survey(db);
     console.log(`\n📄 ${f}`);

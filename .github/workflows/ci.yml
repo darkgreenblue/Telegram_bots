@@ -52,7 +52,7 @@ jobs:
 
       # همان قاعده از زاویه‌ی دوم: چکِ بالا فقط پینگ‌پنگِ .env را می‌بیند. این یکی
       # بلوک‌های **یک‌باره** را می‌بیند — بلوکی که شرطش همیشه درست است و در هر مرج
-      # رباتِ زنده را `pm2 stop` می‌کند (باگِ واقعیِ ۵ شهریور ۱۴۰۵ روی tarot).
+      # رباتِ زنده را `pm2 stop` می‌کند (باگِ واقعیِ ۴ شهریور ۱۴۰۵ روی tarot).
       - name: Deploy one-time block guard
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-onetime.mjs
