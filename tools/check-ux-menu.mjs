@@ -1228,5 +1228,82 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     'برچسب‌های کهنه در KB_LABELS هستند (تپِ دکمه در قیف گم نشود)');
 }
 
+console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جواب نمی‌ماند');
+{
+  // ⚠️ منطق **از سورس بریده و اجرا** می‌شود، نه بازنویسی. یک ادعای رجکسی («رشته‌ی
+  // pickClosed در فایل هست») همان چیزی را نمی‌بیند که این باگ بود: شاخه‌ای که زودتر
+  // return می‌کند. الگوی مرجع: check-lucky.mjs.
+  const start = SRC.indexOf('bot.action(/^pick:(\\d+)$/');
+  const open = SRC.indexOf('{', SRC.indexOf('=>', start));
+  let depth = 0, end = open;
+  for (let p = open; p < SRC.length; p++) {
+    if (SRC[p] === '{') depth++;
+    else if (SRC[p] === '}') { depth--; if (depth === 0) { end = p; break; } }
+  }
+  const body = SRC.slice(open + 1, end);
+  ok(start > 0 && end > open, 'هندلرِ pick: از سورس استخراج شد');
+
+  // گاردِ ضدِ race باید **قبل از اولین await** بنشیند، وگرنه دو تپِ پشت‌سرهم هر دو رد شوند.
+  // ⚠️ کامنت‌ها اول حذف می‌شوند: نسخه‌ی اولِ همین ادعا کلمه‌ی `await` را داخلِ یک کامنت
+  // پیدا کرد و قرمزِ کاذب داد. سنجه‌ای که خودش را روی متنِ کامنت می‌سنجد، سنجه نیست.
+  const code = body.replace(/\/\/[^\n]*/g, '');
+  ok(code.indexOf("setState(uid, 'confirm_pay')") < code.indexOf('await'),
+    'قفلِ confirm_pay قبل از اولین await است (ضدِ دوبار-تپ)');
+
+  const run = new Function('ctx', 'deps', `
+    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, finishPicking } = deps;
+    return (async () => {${body}})();
+  `);
+  const scenario = async (state, picks, need, tap) => {
+    const log = { cb: [], editKb: 0, editText: null, finished: false, state, session: { picks: [...picks], need } };
+    const ctx = {
+      from: { id: 7 }, match: [null, String(tap)],
+      answerCbQuery: (text, extra) => { log.cb.push({ text, extra }); return Promise.resolve(); },
+      editMessageReplyMarkup: () => { log.editKb++; return Promise.resolve(); },
+      editMessageText: (t) => { log.editText = t; return Promise.resolve(); },
+    };
+    await run(ctx, {
+      getState: () => log.state, getSession: () => log.session,
+      setState: (_u, v) => { log.state = v; }, setSession: (_u, v) => { log.session = v; },
+      L, USER_PICKS: 3, pickGridKb: () => ({ reply_markup: 'KB' }),
+      finishPicking: async () => { log.finished = true; },
+    });
+    return log;
+  };
+  const said = (r) => r.cb[0]?.text;
+
+  // ۱) گریدِ کهنه/تمام‌شده: پاپ‌آپِ صریح، نه سکوت. این خودِ باگ بود.
+  const stale = await scenario('revealing', [1, 2, 3], 3, 9);
+  ok(said(stale) === L.reading.pickClosed && stale.cb[0]?.extra?.show_alert === true,
+    'تپ روی گریدِ تمام‌شده پاپ‌آپِ صریح می‌گیرد (نه answerCbQuery خالی)');
+  ok(!stale.finished && stale.editKb === 0, 'تپِ کهنه هیچ عوارضی ندارد');
+
+  // ۲) کارتِ تکراری: toast می‌گیرد (متن دارد) و انتخاب دوباره ثبت نمی‌شود.
+  const dup = await scenario('picking', [4], 3, 4);
+  ok(said(dup) === L.reading.pickAlready, 'کارتِ تکراری toast می‌گیرد، نه سکوت');
+  ok(dup.session.picks.length === 1, 'کارتِ تکراری دوباره ثبت نمی‌شود');
+
+  // ۳) انتخابِ عادیِ وسطِ راه: گرید به‌روز می‌شود و متن دست نمی‌خورد.
+  const mid = await scenario('picking', [4], 3, 8);
+  ok(said(mid) === '✨' && mid.editKb === 1 && mid.editText === null,
+    'انتخابِ وسطِ راه فقط کیبورد را به‌روز می‌کند');
+  ok(!mid.finished && mid.state === 'picking', 'وسطِ راه هنوز picking است');
+
+  // ۴) آخرین انتخاب: **کیبورد برداشته می‌شود** (متن جایگزین می‌شود) تا گریدِ مرده در چت
+  //    نماند. بدونِ این، همان ۲۲۳ تپِ هدررفته دوباره تولید می‌شود.
+  const last = await scenario('picking', [4, 8], 3, 1);
+  ok(last.editText === L.reading.pickProgress(3, 3),
+    'با آخرین انتخاب، متنِ گرید به «۳ از ۳ کارت انتخاب شد» تبدیل می‌شود');
+  ok(last.editKb === 0, 'با آخرین انتخاب کیبوردِ گرید دیگر رندر نمی‌شود (برداشته می‌شود)');
+  ok(last.finished && last.state === 'confirm_pay', 'آخرین انتخاب فلو را ادامه می‌دهد');
+
+  // ۵) فالِ ده‌کارتی: قاعده به عددِ ۳ گره نخورده باشد.
+  const big = await scenario('picking', [0, 1, 2, 3, 4, 5, 6, 7, 8], 10, 11);
+  ok(big.finished && big.editText === L.reading.pickProgress(10, 10),
+    'همین رفتار در فالِ ده‌کارتی هم برقرار است');
+
+  ok(!/answerCbQuery\(\)\s*\.catch/.test(body), 'هیچ answerCbQuery خالی‌ای در این هندلر نمانده');
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

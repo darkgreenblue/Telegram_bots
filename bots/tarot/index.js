@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.29.0';
+const PRODUCT_VERSION = '3.30.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -3261,20 +3261,37 @@ async function startPicking(ctx, uid, shuffleMsgId) {
 bot.action(/^pick:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   const i = parseInt(ctx.match[1], 10);
-  if (getState(uid) !== 'picking') return ctx.answerCbQuery().catch(() => {});
+  // 🔇 تپِ روی گریدی که دیگر کاری نمی‌کند **هرگز بی‌جواب نمی‌ماند.** تا v3.29.0 هر سه
+  // شاخه‌ی زیر `answerCbQuery()` خالی می‌دادند، یعنی تلگرام هیچ چیزی نشان نمی‌داد و کاربر
+  // فکر می‌کرد ربات خراب است و دوباره می‌زد. دیتای واقعی: ۶۶ کاربر و ۲۲۳ تپِ هدررفته از
+  // ۸ مرداد ۱۴۰۵ (یکی‌شان ۲۱ تپ در ۴۰ ثانیه). دقیقاً همان اصلاحی است که در v3.17.0 برای
+  // گریدِ کارتِ روز (`dpick:`) انجام شد و این مسیر از قلم افتاده بود.
+  if (getState(uid) !== 'picking') {
+    return ctx.answerCbQuery(L.reading.pickClosed, { show_alert: true }).catch(() => {});
+  }
   // ثبت همگام قبل از هر await — ضد race در کلیک‌های پشت‌سرهم
   const s = getSession(uid);
   const need = s.need || USER_PICKS;
-  if (!s.picks || s.picks.includes(i) || s.picks.length >= need) {
-    return ctx.answerCbQuery().catch(() => {});
+  if (!s.picks || s.picks.length >= need) {
+    return ctx.answerCbQuery(L.reading.pickClosed, { show_alert: true }).catch(() => {});
   }
+  // کارتِ تکراری فقط یک toast می‌گیرد نه پاپ‌آپ: خودِ خانه از قبل ✨ است، پس کاربر
+  // اشتباهش را می‌بیند و یک هشدارِ تمام‌صفحه وسطِ آیین بی‌دلیل است.
+  if (s.picks.includes(i)) return ctx.answerCbQuery(L.reading.pickAlready).catch(() => {});
   s.picks.push(i);
   const done = s.picks.length >= need;
   if (done) setState(uid, 'confirm_pay'); // قفل فوری قبل از await
   setSession(uid, s);
 
   await ctx.answerCbQuery('✨').catch(() => {});
-  try { await ctx.editMessageReplyMarkup(pickGridKb(s.picks).reply_markup); } catch {}
+  // ⚠️ با آخرین انتخاب، **خودِ کیبورد برداشته می‌شود** نه اینکه فقط ✨ بخورد. تا قبل از
+  // این، گریدِ مرده در چت می‌ماند و تنها دعوتِ روی صفحه بود، در حالی که ربات چند ثانیه
+  // در سکوتِ عمدیِ آیین (`sleep` + typing + آپلودِ عکس) بود؛ نتیجه همان تپ‌های پیاپی.
+  // متنِ جایگزین از `pickProgress` می‌آید که از قبل نوشته شده بود و هیچ‌جا مصرف نداشت.
+  try {
+    if (done) await ctx.editMessageText(L.reading.pickProgress(need, need));
+    else await ctx.editMessageReplyMarkup(pickGridKb(s.picks).reply_markup);
+  } catch {}
   if (!done) return;
   await finishPicking(ctx, uid, s);
 });
