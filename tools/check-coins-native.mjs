@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
-import { SCALE, MIGRATION_KEY, migrate, migrationDone, survey } from './coins-native-tarot.mjs';
+import { SCALE, MIGRATION_KEY, migrate, migrationDone, survey, looksNative } from './coins-native-tarot.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require(path.resolve('bots/tarot/node_modules/better-sqlite3'));
@@ -135,6 +135,40 @@ try {
       const ci = body.indexOf('claimAmount');
       ok(gi > 0 && (ci === -1 || gi < ci), `${fn} قبل از هر ادعای مبلغ گارد می‌شود`);
     }
+  }
+
+  // ── گاردِ «دیتابیسِ از قبل بومی» ─────────────────────────────────────────────
+  // سناریوی واقعی: سرورِ تازه یا locale جدید. دیتابیس مهر ندارد (چون ما مهاجرتش
+  // نداده‌ایم) ولی عددهایش از قبل الماس‌اند. بدونِ این گارد، اجرا هر موجودی را
+  // ÷۱۰٬۰۰۰ و صفر می‌کرد و بعد مهر می‌زد، یعنی خرابیِ دائمی و بی‌صدا.
+  {
+    const nat = new Database(path.join(dir, 'bot-en.db'));
+    nat.exec(`
+      CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE readings (id INTEGER PRIMARY KEY, price INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO users VALUES (11, 5), (12, 42), (13, 0);
+      INSERT INTO readings VALUES (1, 3);`);
+    ok(!migrationDone(nat), 'دیتابیسِ تازه مهر ندارد');
+    ok(looksNative(nat), 'ولی «از قبل بومی» تشخیص داده می‌شود (بزرگ‌ترین مقدار ۴۲ < ۱۰٬۰۰۰)');
+    // و اثباتِ اینکه بدونِ گارد واقعاً فاجعه بود:
+    migrate(nat);
+    const wiped = nat.prepare('SELECT balance b FROM users WHERE telegram_id=12').get().b;
+    ok(wiped === 0, 'اثبات: اجرای مهاجرت روی دیتای بومی موجودیِ ۴۲ را صفر می‌کند');
+    nat.close();
+
+    // و برعکس: دیتای واقعاً تومانی نباید «بومی» تشخیص داده شود (ضدِ سخت‌گیریِ بی‌جا).
+    const leg = new Database(path.join(dir, 'bot-ar.db'));
+    leg.exec(`
+      CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO users VALUES (21, 50000), (22, 0);`);
+    ok(!looksNative(leg), 'دیتای تومانیِ واقعی «بومی» تشخیص داده نمی‌شود');
+    leg.close();
+
+    // و دیتابیسِ کاملاً خالی هم نباید رد شود (چیزی برای خراب کردن ندارد).
+    const empty = new Database(path.join(dir, 'bot-ru.db'));
+    empty.exec('CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0);');
+    ok(!looksNative(empty), 'دیتابیسِ خالی «بومی» شمرده نمی‌شود');
+    empty.close();
   }
 
   console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
