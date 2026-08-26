@@ -1,0 +1,162 @@
+#!/usr/bin/env node
+// 🌙 چکِ «یادآوریِ شبانه‌ی A/B» + دو اصلاحِ هم‌خانواده‌اش (دکمه‌ی دعوت، خبرِ پاداشِ رفرال).
+//
+// روشِ کار مثلِ بقیه‌ی چک‌های رفتاریِ این ریپو: قطعه‌های حساس **از خودِ سورس بریده و
+// اجرا** می‌شوند، نه اینکه منطق در تست بازنویسی شود. درسِ `check-lucky`: تستی که کدِ
+// محصول را اجرا نکند، جهش را نمی‌بیند.
+//
+// اجرا: node tools/check-night-reminder.mjs
+import { readFileSync } from 'fs';
+
+const SRC = readFileSync('bots/tarot/index.js', 'utf8');
+const LOC = readFileSync('bots/tarot/locales/fa.js', 'utf8');
+
+let pass = 0;
+const fails = [];
+const ok = (name, cond) => { if (cond) pass++; else fails.push(name); };
+
+/** یک بلوکِ متوازنِ `{...}` را از سورس درمی‌آورد (از اولین `{` بعد از نشانه). */
+function block(src, marker) {
+  const i = src.indexOf(marker);
+  if (i === -1) return null;
+  const s = src.indexOf('{', i);
+  if (s === -1) return null;
+  let d = 0;
+  for (let j = s; j < src.length; j++) {
+    if (src[j] === '{') d++;
+    else if (src[j] === '}') { d--; if (!d) return src.slice(s, j + 1); }
+  }
+  return null;
+}
+
+/* ═══════ ۱) شاخه‌های A/B: شرطِ «امروز انجام نشده» واقعاً اجرا می‌شود ═══════ */
+const armsSrc = block(SRC, 'const NIGHT_ARMS =');
+ok('جدولِ NIGHT_ARMS در سورس هست', !!armsSrc);
+
+// stubهایی که فقط شکلِ فراخوانی را نگه می‌دارند؛ هدف سنجشِ `due` است.
+const L = { daily: { nightReminder: 'D' }, lucky: { nightReminder: 'K' },
+            buttons: { nightDaily: 'BD', nightLucky: 'BL' } };
+const Markup = { button: { callback: (t, d) => ({ t, d }) } };
+const ARMS = new Function('L', 'Markup', `return (${armsSrc});`)(L, Markup);
+
+ok('دو شاخه دارد: control و lucky',
+   !!ARMS.control && !!ARMS.lucky && Object.keys(ARMS).length === 2);
+// `cta()` یک **ردیف** برمی‌گرداند (آرایه‌ی دکمه)، چون مستقیم داخلِ inlineKeyboard می‌نشیند.
+ok('هر شاخه یک ردیفِ تک‌دکمه‌ای می‌دهد',
+   Array.isArray(ARMS.control.cta()) && ARMS.control.cta().length === 1
+   && Array.isArray(ARMS.lucky.cta()) && ARMS.lucky.cta().length === 1);
+ok('control همان کارتِ روز است (کنترل = رفتارِ قبلی)', ARMS.control.cta()[0].d === 'daily_go');
+ok('شاخه‌ی دوم کارتِ شانس است', ARMS.lucky.cta()[0].d === 'lucky_go');
+
+const TODAY = '2026-08-26', OTHER = '2026-08-25';
+// control فقط وقتی که کارتِ روزِ امروز کشیده **نشده**
+ok('control: کارتِ روزِ نکشیده → یادآوری می‌گیرد',
+   ARMS.control.due({ last_daily_date: OTHER }, TODAY) === true);
+ok('control: کارتِ روزِ امروز کشیده‌شده → یادآوری نمی‌گیرد',
+   ARMS.control.due({ last_daily_date: TODAY }, TODAY) === false);
+ok('control: کاربرِ بدونِ سابقه → یادآوری می‌گیرد',
+   ARMS.control.due({}, TODAY) === true);
+// lucky قرینه‌ی همان، روی ستونِ خودش
+ok('lucky: سهمیه‌ی دست‌نخورده → یادآوری می‌گیرد',
+   ARMS.lucky.due({ lucky_date: OTHER }, TODAY) === true);
+ok('lucky: سهمیه‌ی مصرف‌شده‌ی امروز → یادآوری نمی‌گیرد',
+   ARMS.lucky.due({ lucky_date: TODAY }, TODAY) === false);
+// ⚠️ هر شاخه باید ستونِ **خودش** را ببیند، وگرنه آزمایش بی‌معنی می‌شود
+ok('control به ستونِ کارتِ شانس کاری ندارد',
+   ARMS.control.due({ last_daily_date: OTHER, lucky_date: TODAY }, TODAY) === true);
+ok('lucky به ستونِ کارتِ روز کاری ندارد',
+   ARMS.lucky.due({ lucky_date: OTHER, last_daily_date: TODAY }, TODAY) === true);
+
+/* ═══════ ۲) دو CTA باید هم‌شکل باشند، وگرنه آزمایش دکمه را می‌سنجد نه قلاب را ═══════ */
+const nd = (LOC.match(/nightDaily:\s*'([^']*)'/) || [])[1] || '';
+const nl = (LOC.match(/nightLucky:\s*'([^']*)'/) || [])[1] || '';
+ok('هر دو برچسبِ CTA تعریف شده‌اند', !!nd && !!nl);
+ok(`طولِ دو CTA نزدیک است (${nd.length} و ${nl.length})`, Math.abs(nd.length - nl.length) <= 3);
+ok('هر دو CTA با ایموجی شروع می‌شوند', /^\p{Extended_Pictographic}/u.test(nd) && /^\p{Extended_Pictographic}/u.test(nl));
+ok('دو CTA یکی نیستند', nd !== nl);
+const dTxt = (LOC.match(/nightReminder:\s*'([^']*)'/g) || []);
+ok('هر دو متنِ یادآوری تعریف شده‌اند', dTxt.length === 2);
+
+/* ═══════ ۳) خودِ جارو: ترتیب و گاردها ═══════ */
+const sweep = SRC.slice(SRC.indexOf('const REMINDER_HOUR'), SRC.indexOf("}, 15 * 60 * 1000);", SRC.indexOf('const REMINDER_HOUR')));
+ok('جارو ساعت را به وقتِ تهران می‌سنجد', /Asia\/Tehran/.test(sweep));
+ok('جارو فقط در ساعتِ REMINDER_HOUR کار می‌کند', /hour !== REMINDER_HOUR\) return/.test(sweep));
+ok('ساعتِ یادآوری ۲۲ است (۱۰ شب)', /const REMINDER_HOUR = 22;/.test(SRC));
+ok('انتسابِ شاخه از variant() می‌آید (نه شرطِ دستی)', /variant\(db, uid, NIGHT_EXP\)/.test(sweep));
+ok('شاخه‌ی ناشناخته به control فالبک می‌کند', /\|\| NIGHT_ARMS\.control/.test(sweep));
+// ⚠️ مهم‌ترین ترتیب: اگر کاربر امروز کارش را کرده، **قبل از** مهرِ زمان رد می‌شود
+const iDue = sweep.indexOf('arm.due(u, today)');
+const iStamp = sweep.indexOf('setNightReminded');
+ok('گاردِ «امروز انجام شده» قبل از مهرِ زمان است', iDue !== -1 && iStamp !== -1 && iDue < iStamp);
+// و رویداد فقط بعد از ارسالِ موفق (تا «مهرخورده بدونِ رویداد» = بلاک قابلِ شمارش بماند)
+ok('رویداد فقط بعد از ارسالِ موفق ثبت می‌شود', /if \(ok\) track\(db, uid, 'night_reminder_sent'/.test(sweep));
+ok('مهرِ زمان قبل از ارسال زده می‌شود (ضدِ تکرار بعد از ری‌استارت)',
+   iStamp < sweep.indexOf('sendMessage'));
+ok('هر پیام دکمه‌ی «دیگه یادآوری نکن» دارد', /nightRemindOff/.test(sweep));
+ok('دکمه‌ی انصراف به تأییدِ دومرحله‌ای می‌رود', /'dailyoff'\)/.test(sweep));
+
+/* ═══════ ۴) opt-out: از همان ستونی می‌خواند که کاربر خاموشش کرده ═══════ */
+ok('کوئریِ مخاطب فقط کاربرانِ خاموش‌نکرده را می‌گیرد', /daily_reminder_off=0/.test(SRC));
+ok('کوئریِ مخاطب گاردِ ۱۸ساعته دارد', /last_daily_reminder_at < unixepoch\(\)-64800/.test(SRC));
+ok('کوئری فقط کاربرِ آنبوردشده را می‌گیرد', /dueNightReminder[\s\S]{0,200}welcomed=1/.test(SRC));
+ok('انصرافِ کاربر همان ستونِ جارو را می‌نویسد', /setDailyReminderOff: db\.prepare\('UPDATE users SET daily_reminder_off=1/.test(SRC));
+ok('دکمه‌ی lremind:0 هم opt-outِ شبانه را ست می‌کند', /if \(on\) stmts\.setDailyReminderOn\.run\(uid\); else stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC));
+// جاروی opt-inِ قدیمی نباید بماند، وگرنه کاربرِ شاخه‌ی lucky دو پیام می‌گیرد
+// نامش در یک کامنتِ توضیحی مانده؛ چیزی که نباید بماند **مصرفش** است.
+ok('جاروی opt-inِ قدیمیِ کارتِ شانس حذف شده', !/stmts\.dueLuckyReminder/.test(SRC));
+ok('مهرِ زمانِ جاروی قدیمی هم حذف شده', !/stmts\.setLuckyReminded/.test(SRC));
+ok('ستونِ lucky_reminder_on هنوز روی DB هست (بند ۲ج/۱)', /ADD COLUMN lucky_reminder_on/.test(SRC));
+
+/* ═══════ ۵) پیشنهادِ کارتِ شانس در پایانِ فلوِ کارتِ روز ═══════ */
+const offer = block(SRC, 'async function offerLuckyAfterDaily');
+ok('تابعِ offerLuckyAfterDaily وجود دارد', !!offer);
+ok('فقط وقتی سهمیه‌ی امروز دست‌نخورده است پیشنهاد می‌دهد',
+   !!offer && /lucky_date === tehranToday\(\)\) return/.test(offer));
+ok('دنیای قدیم دست‌نخورده می‌ماند', !!offer && /if \(!uxV2For\(uid\)\) return/.test(offer));
+ok('دکمه‌اش همان ورودیِ کارتِ شانس است', !!offer && /'lucky_go'/.test(offer));
+ok('در **هر دو** مسیرِ کارتِ روز صدا زده می‌شود',
+   (SRC.match(/await offerLuckyAfterDaily\(ctx, uid\);/g) || []).length === 2);
+ok('متنِ پیشنهاد در locale است، نه در index', /alsoLucky:/.test(LOC) && !/کارتِ شانسِ امروزت رو هم/.test(SRC));
+
+/* ═══════ ۶) دکمه‌ی دعوت: هیچ‌جا جز خودِ صفحه‌ی دعوت مستقیم به مخاطبین نمی‌رود ═══════ */
+// خطی می‌سنجیم نه با رجکسِ تودرتو: آرگومانِ اولِ این دکمه خودش دو سطح پرانتز دارد
+// (`L.buttons.share(referralBonusFor(uid), curOf(uid))`) و هر رجکسِ «پرانتزِ متوازن» روی
+// آن شکننده است. سؤالِ واقعی ساده است: کدام خط‌ها هم `button.url` دارند هم `shareUrlFor`؟
+const urlInviteLines = SRC.split('\n')
+  .filter(l => l.includes('Markup.button.url') && l.includes('shareUrlFor('));
+ok(`فقط یک دکمه‌ی url به اشتراک‌گذاری مانده (شد: ${urlInviteLines.length})`, urlInviteLines.length === 1);
+const showInvite = block(SRC, 'async function showInvite');
+ok('و آن یکی داخلِ خودِ showInvite است (پیامِ توضیحی)',
+   !!showInvite && urlInviteLines.length === 1 && showInvite.includes(urlInviteLines[0].trim()));
+ok('ردیفِ دعوت تک‌منبع است', /const inviteRow = \(uid\) => \[Markup\.button\.callback\(/.test(SRC));
+ok('ردیفِ دعوت به invite_go می‌رود (پیامِ توضیحی)', /inviteRow[\s\S]{0,160}'invite_go'/.test(SRC));
+const inviteUses = (SRC.match(/inviteRow\(/g) || []).length;
+ok(`هر سه نقطه‌ی دعوت از تک‌منبع می‌خوانند (تعریف + ${inviteUses - 1} مصرف)`, inviteUses >= 4);
+
+/* ═══════ ۷) خبرِ پاداشِ رفرال: مبلغ، موجودی، و دکمه‌های ادامه ═══════ */
+const reward = SRC.slice(SRC.indexOf('پاداش رفرال:'), SRC.indexOf('یادگاری: مدیاگروپ'));
+ok('پاداش فقط یک بار واریز می‌شود', (reward.match(/stmts\.credit\.run/g) || []).length === 1);
+ok('گیرنده‌ی پاداش دعوت‌کننده است', /stmts\.credit\.run\(refAmt, ref\.referrer_id\)/.test(reward));
+ok('خبر به چتِ خودِ دعوت‌کننده می‌رود', /sendMessage\(\s*ref\.referrer_id/.test(reward));
+ok('موجودیِ تازه در پیام می‌آید', /getBalance\(ref\.referrer_id\)/.test(reward));
+ok('پیام دکمه‌های ادامه دارد', /reply_markup: refKb\.reply_markup/.test(reward));
+ok('دکمه‌ها همان پیشنهادهای پایانِ فال‌اند', /recoRows\(ref\.referrer_id, null\)/.test(reward));
+ok('و دکمه‌ی دعوت هم دارد', /inviteRow\(ref\.referrer_id\)/.test(reward));
+// متنِ locale واقعاً موجودی را چاپ می‌کند
+ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referralReward:\s*\(name, bonus, cur, balance/.test(LOC));
+
+/* ═══════ ۸) قواعدِ کپیِ ریشه (بند ۱۰) ═══════ */
+for (const [k, v] of Object.entries({ nightDaily: nd, nightLucky: nl })) {
+  ok(`${k} خط تیره‌ی بلند ندارد`, !v.includes('—') && !v.includes('--'));
+}
+const newTexts = [...LOC.matchAll(/(?:nightReminder|alsoLucky):\s*'([^']*)'/g)].map(m => m[1]);
+ok('هر سه متنِ تازه در locale پیدا شدند', newTexts.length === 3);
+for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ندارد', !t.includes('—') && !t.includes('--'));
+
+/* ═══════ نتیجه ═══════ */
+if (fails.length) {
+  console.error(`❌ چکِ یادآوریِ شبانه: ${fails.length} ادعا شکست خورد`);
+  for (const f of fails) console.error(`   • ${f}`);
+  process.exit(1);
+}
+console.log(`✅ چکِ یادآوریِ شبانه و دعوت و پاداشِ رفرال: ${pass} ادعا سبز.`);

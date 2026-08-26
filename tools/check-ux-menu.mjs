@@ -195,8 +195,14 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
   ok(/won: \(coins\) => `[^`]*فردا دوباره/.test(LOC) && /lost: '[^']*فردا دوباره/.test(LOC),
     'هم در برد و هم در باخت گفته می‌شود که فردا دوباره می‌شود');
   ok(/luckyRemindOn: '🔔 فردا یادآوری کن'/.test(LOC), 'دکمه‌ی «فردا یادآوری کن» هست');
-  ok(/dueLuckyReminder/.test(SRC) && /lucky_reminder_on=1/.test(SRC),
-    'یادآوریِ کارت شانس opt-in است (فقط کسی که دکمه را زده)');
+  // 🌙 از v3.28.0 یادآوریِ شبانه یک آزمایشِ A/B و **opt-out** است (تصمیمِ صریحِ مالک):
+  // جاروی opt-inِ کارتِ شانس با آن جایگزین شد. دکمه‌ی `lremind:` زنده مانده (بند ۲ج/۶)
+  // و نیتِ کاربر را به همان ستونی می‌برد که جارو واقعاً می‌خواند.
+  ok(!/stmts\.dueLuckyReminder/.test(SRC), 'جاروی opt-inِ قدیمی حذف شده (جایش A/B آمد)');
+  ok(/dueNightReminder/.test(SRC) && /daily_reminder_off=0/.test(SRC),
+    'یادآوریِ شبانه opt-out است و انصرافِ قبلیِ کاربر را محترم می‌شمارد');
+  ok(/if \(on\) stmts\.setDailyReminderOn\.run\(uid\); else stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC),
+    'دکمه‌ی یادآوریِ کارت شانس همان ستونِ جارو را می‌نویسد');
   // ⚠️ v3.22.0: یادآوریِ کارتِ روز **کاملاً حذف شد** (تصمیمِ مالک). قبلاً فقط برای دنیای
   // الماس خاموش بود. حالا تنها یادآوریِ شبانه‌ی ربات کارت شانسِ opt-in است، پس کاربر
   // هرگز پیامِ شبانه‌ی نخواسته نمی‌گیرد. سه ادعا، چون «حذف» را باید از سه سمت قفل کرد:
@@ -779,7 +785,11 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
 {
   ok(/function walletRows\(uid\) \{\s*\n\s*const rows = \[\[rechargeBtn\(uid\)\]\];\s*\n\s*if \(!uxV2For\(uid\)\) return rows;/.test(SRC),
     'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
-  ok(/inviteWithBonus\(referralBonusFor\(uid\), cur\), 'invite_go'/.test(SRC), 'دکمه‌ی معرفیِ دوستان با مبلغِ پاداش');
+  // از v3.28.0 هر سه نقطه‌ی دعوت از تک‌منبعِ `inviteRow` می‌خوانند تا همه‌شان اول پیامِ
+  // توضیحیِ دعوت را نشان بدهند (باگ: یکی‌شان مستقیم مخاطبینِ کاربر را باز می‌کرد).
+  ok(/rows\.push\(inviteRow\(uid\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
+  ok(/const inviteRow = \(uid\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), 'invite_go'\)\];/.test(SRC),
+    'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار و همان مقصدِ invite_go را دارد');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
     'دکمه‌ی کارت شانس فقط وقتی سهمیه‌ی امروز باز است نشان داده می‌شود (بن‌بست نمی‌سازد)');
   ok(/bot\.action\('invite_go', async \(ctx\) => \{ await ctx\.answerCbQuery\(\)\.catch\(\(\) => \{\}\); return showInvite\(ctx\); \}\);/.test(SRC),

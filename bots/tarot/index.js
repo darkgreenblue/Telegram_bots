@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.27.0';
+const PRODUCT_VERSION = '3.28.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -774,19 +774,29 @@ const stmts = {
   // هدیه‌ی خوش‌آمد: گاردِ write-once داخل خودِ UPDATE (changes=0 یعنی قبلاً گرفته)
   claimWelcomeBonus: db.prepare('UPDATE users SET welcome_bonus_at=unixepoch() WHERE telegram_id=? AND welcome_bonus_at IS NULL'),
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
+  setDailyReminderOn:  db.prepare('UPDATE users SET daily_reminder_off=0 WHERE telegram_id=?'),
+  setNightReminded:    db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
+  // 🌙 مخاطبِ یادآوریِ شبانه (A/B). عمداً از **همان** ستون‌های یادآوریِ قدیمیِ کارتِ روز
+  // می‌خواند (`daily_reminder_off` و `last_daily_reminder_at`) و ستونِ تازه نمی‌سازد:
+  // کسی که قبلاً گفته «دیگه یادآوری نکن» باید همچنان خاموش بماند. برگرداندنِ یادآوری
+  // نباید opt-outِ کاربر را بی‌اثر کند.
+  // شرطِ «امروز هنوز کاری نکرده» عمداً این‌جا نیست: هر شاخه‌ی A/B شرطِ **خودش** را دارد
+  // (A: کارتِ روز، B: کارتِ شانس) و در خودِ جارو چک می‌شود، وگرنه کوئری باید هر دو را
+  // با OR می‌گرفت و کاربرِ شاخه‌ی اشتباه هم بی‌دلیل بیدار می‌شد.
+  dueNightReminder: db.prepare(`
+    SELECT telegram_id, last_daily_date, lucky_date FROM users
+     WHERE welcomed=1 AND daily_reminder_off=0
+       AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
+     LIMIT 400`),
   // 🍀 کارت شانس. `claimLucky` گاردِ اتمیکِ «روزی یک بار» است: شرطِ روز داخلِ خودِ UPDATE
   // نشسته، پس دو تپِ هم‌زمان فقط یک بار changes=1 می‌دهد (همان الگوی claimWelcomeBonus).
   claimLucky: db.prepare("UPDATE users SET lucky_date=? WHERE telegram_id=? AND COALESCE(lucky_date,'') <> ?"),
   setLuckyReminder: db.prepare('UPDATE users SET lucky_reminder_on=? WHERE telegram_id=?'),
   setLuckyHand: db.prepare('UPDATE users SET lucky_hand=? WHERE telegram_id=?'),
   bumpLuckyHands: db.prepare('UPDATE users SET lucky_hands = lucky_hands + 1 WHERE telegram_id=?'),
-  setLuckyReminded: db.prepare('UPDATE users SET last_lucky_reminder_at=unixepoch() WHERE telegram_id=?'),
-  dueLuckyReminder: db.prepare(`
-    SELECT telegram_id FROM users
-     WHERE welcomed=1 AND lucky_reminder_on=1
-       AND COALESCE(lucky_date,'') <> ?
-       AND (last_lucky_reminder_at IS NULL OR last_lucky_reminder_at < unixepoch()-64800)
-     LIMIT 200`),
+  // ⚠️ `setLuckyReminded`/`dueLuckyReminder` با آمدنِ یادآوریِ شبانه‌ی A/B حذف شدند (کدِ
+  // مرده، بند ۹/۰ ریشه). ستون‌های `lucky_reminder_on` و `last_lucky_reminder_at` طبق بند
+  // ۲ج/۱ روی دیتابیس می‌مانند و دکمه‌ی `lremind:` هم زنده است.
   // اصلاحِ فاکتور به مبلغِ واقعاً پرداخت‌شده (پرداختِ کمتر). original_amount هم برابر می‌شود
   // تا اعتبارِ approvePayment دقیقاً همان چیزی باشد که کاربر داده، نه بیشتر.
   adjustPaymentAmount: db.prepare(
@@ -2084,8 +2094,27 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   }
   await sleep(PACE_M);
   await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await offerLuckyAfterDaily(ctx, uid);
   await ensureMenu(ctx, uid);
 });
+
+/* 🎲 پیشنهادِ کارتِ شانس در **پایانِ** فلوِ کارتِ روز (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۰۴).
+   کاربری که تازه کارتِ روزش را گرفته دقیقاً در حالتِ «یک کارِ رایگانِ دیگر هم هست» است،
+   و دادهٔ دورِ ۷ می‌گوید کارتِ شانس قوی‌ترین قلابِ روزانه است (۶۵٪ کوهورت). عمداً یک
+   **پیامِ جدا** است نه یک ردیفِ اضافه زیرِ پیشنهادِ فال: زیرِ آن پیام سه دکمه‌ی فالِ پولی
+   هست و دکمه‌ی چهارمِ رایگان آن‌جا گم می‌شود.
+   ⚠️ فقط وقتی می‌آید که سهمیه‌ی امروز **دست‌نخورده** باشد. دکمه‌ای که به «امروز استفاده
+   کردی» ختم شود یک بن‌بستِ کوچک است (بند ۹ب ریشه) — همان قاعده‌ای که `walletRows` دارد.
+   دستِ نیمه‌تمام هم «دست‌نخورده» حساب نمی‌شود؛ خودِ `lucky_date` لحظه‌ی اولین انتخاب مهر
+   می‌خورد، پس همین یک شرط هر دو حالت را می‌پوشاند. */
+async function offerLuckyAfterDaily(ctx, uid) {
+  if (!uxV2For(uid)) return;                       // دنیای قدیم دقیقاً مثل قبل
+  if (getUser(uid)?.lucky_date === tehranToday()) return;
+  await sleep(PACE_S);
+  await ctx.reply(L.lucky.alsoLucky, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
+  ]));
+}
 
 /* ---------- کارت روز (رایگان، روزی یک‌بار) ---------- */
 async function dailyCard(ctx) {
@@ -2144,6 +2173,7 @@ async function dailyCard(ctx) {
   }
   await sleep(PACE_M);
   await ctx.reply(uxV2For(uid) ? L.daily.upsellV3 : L.daily.upsell, Markup.inlineKeyboard(recoRows(uid, null)));
+  await offerLuckyAfterDaily(ctx, uid);
   await ensureMenu(ctx, uid);
 }
 // ⚠️ **همه‌ی** برچسب‌هایی که کیبورد در طولِ عمرش زده است، نه فقط برچسبِ امروز — همان
@@ -2472,6 +2502,10 @@ bot.action(/^lremind:([01])$/, async (ctx) => {
   const on = ctx.match[1] === '1';
   await ctx.answerCbQuery().catch(() => {});
   stmts.setLuckyReminder.run(on ? 1 : 0, uid);
+  // 🌙 از v3.28.0 یادآوریِ شبانه opt-**out** است و از `daily_reminder_off` می‌خواند. کاربری
+  // که این‌جا «دیگه یادآوری نکن» می‌زند منظورش کلِ یادآوریِ شبانه است، نه فقط یک ستونِ
+  // بازنشسته؛ پس نیتش به همان ستونی می‌رود که جارو واقعاً می‌خواند. برعکسش هم درست است.
+  if (on) stmts.setDailyReminderOn.run(uid); else stmts.setDailyReminderOff.run(uid);
   track(db, uid, 'lucky_reminder', { on: on ? 1 : 0 });
   try { await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([luckyReminderRow(on)]).reply_markup); } catch {}
   await ctx.reply(on ? L.lucky.remindOn : L.lucky.remindOff);
@@ -3708,6 +3742,20 @@ function recoRows(uid, currentType) {
   ];
 }
 
+// ردیفِ «دعوت دوستان» — **تک‌منبعِ همه‌ی نقاطِ دعوت** (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۰۴).
+//
+// 🐛 باگی که این تابع از آن آمد: دکمه‌ی دعوتِ زیرِ پیامِ پایانِ فال یک `button.url` مستقیم
+// به `t.me/share/url` بود، یعنی با یک تپ **لیستِ مخاطبینِ کاربر باز می‌شد** و پیامِ توضیحیِ
+// دعوت هرگز دیده نمی‌شد. آن پیام تنها جایی است که می‌گوید «پاداش وقتی می‌رسد که دوستت یک
+// فالِ کامل بگیرد»؛ کاربری که ندیده باشدش بعداً نمی‌فهمد چرا الماسش نیامده (شکایتِ واقعیِ
+// کاربر #TRT-6036130129). دکمه‌ی دعوتِ صفحه‌ی «ذخایر الماس» از اول درست بود و از
+// `invite_go` می‌رفت؛ حالا هر سه نقطه از همین یک ردیف می‌خوانند.
+//
+// یعنی `button.url(shareUrlFor(...))` از این به بعد **فقط** داخلِ خودِ `showInvite` مجاز
+// است، که همان پیامِ توضیحی است. چکِ CI همین را قفل کرده.
+const inviteRow = (uid) => [Markup.button.callback(
+  L.buttons.inviteWithBonus(referralBonusFor(uid), curOf(uid)), 'invite_go')];
+
 // پیامِ عمومیِ «ادامه‌ی کار با ربات» (UX v2.1، تصمیمِ صریحِ مالک): همان متن و دکمه‌هایی که
 // بعد از تحویلِ فال نشان می‌دهیم («هر سؤال دیگه‌ای داری…» + recoRows + دعوت)، حالا هر
 // جایی که یک فرآیند تمام یا لغو می‌شود هم می‌آید — به‌جای جمله‌ی صرفاً محاوره‌ایِ قدیمی
@@ -3720,7 +3768,7 @@ function recoRows(uid, currentType) {
 async function sendContinuePrompt(ctx, uid) {
   await ctx.reply(L.reading.nextOffersV3, Markup.inlineKeyboard([
     ...recoRows(uid, null),
-    [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
+    inviteRow(uid),
   ]));
   await ensureMenu(ctx, uid);
 }
@@ -3881,7 +3929,21 @@ async function finishReading(ctx, uid, readingId) {
       stmts.credit.run(refAmt, ref.referrer_id);
       track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
       const referee = getUser(uid);
-      await bot.telegram.sendMessage(ref.referrer_id, L.share.referralReward(dispName(referee), refAmt, curOf(ref.referrer_id))).catch(() => {});
+      // 📣 خبرِ پاداش با **همان دکمه‌های پایانِ فال** می‌رود (خواسته‌ی صریحِ مالک): این پیام
+      // دقیقاً همان لحظه‌ای می‌رسد که دعوت‌کننده یک خبرِ خوب می‌گیرد، یعنی بهترین نقطه‌ی
+      // ممکن برای برگرداندنِ او به محصول. خبرِ بدونِ قدمِ بعدی یک بن‌بست است (بند ۹ب/۱).
+      // ⚠️ گیرنده **دعوت‌کننده** است نه صاحبِ ctx، پس نه `ctx.reply` و نه `sendContinuePrompt`
+      // (که روی ctx می‌نویسد) به کار نمی‌آید؛ کیبورد دستی ساخته و با telegram.sendMessage
+      // به چتِ خودِ او می‌رود. `recoRows` هم فقط از DB می‌خواند، پس برای uid دیگر امن است.
+      const refKb = Markup.inlineKeyboard([
+        ...recoRows(ref.referrer_id, null),
+        inviteRow(ref.referrer_id),
+      ]);
+      await bot.telegram.sendMessage(
+        ref.referrer_id,
+        L.share.referralReward(dispName(referee), refAmt, curOf(ref.referrer_id), getBalance(ref.referrer_id)),
+        { reply_markup: refKb.reply_markup },
+      ).catch(() => {});
     }
   } catch (e) { logErr('referral reward:', e.message); }
 
@@ -3920,7 +3982,7 @@ async function finishReading(ctx, uid, readingId) {
       : OPEN_TOPIC_ENABLED ? L.reading.nextOffersOpen : L.reading.nextOffers;
     await ctx.reply(nextText, Markup.inlineKeyboard([
       ...recoRows(uid, r.type),
-      [Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))],
+      inviteRow(uid),
     ]));
     await ensureMenu(ctx, uid);
   }
@@ -3985,7 +4047,7 @@ function walletRows(uid) {
   const rows = [[rechargeBtn(uid)]];
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
-  rows.push([Markup.button.callback(L.buttons.inviteWithBonus(referralBonusFor(uid), cur), 'invite_go')]);
+  rows.push(inviteRow(uid));   // همان تک‌منبعِ دعوت که پیامِ ادامه هم از آن می‌خواند
   if (getUser(uid)?.lucky_date !== tehranToday()) {
     rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
   }
@@ -4372,7 +4434,12 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   try {
     const verdict = await analyzeReceipt({
       apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
-      expected: { amount_toman: amountToman, recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4 },
+      // `amount_rial` صریح داده می‌شود (نه استنتاجی در خودِ پرامپت): این تنها عددی است
+      // که مدل باید روی رسید دنبالش بگردد، و شمردنِ صفرهایش کلِ کارِ اوست.
+      expected: {
+        amount_toman: amountToman, amount_rial: amountToman * 10,
+        recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4,
+      },
       imageBuffer, imageMime: 'image/jpeg', text: textBody,
     });
     decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
@@ -4960,11 +5027,39 @@ bot.on('photo', async (ctx) => {
    ⚠️ هندلرهای `dailyoff*` عمداً **می‌مانند**: دکمه‌ی «🔕 دیگه یادآوری نکن» در چتِ
    کاربرانی که این پیام را گرفته‌اند زنده است و نباید بی‌جواب بماند (بند ۲ج/۶). */
 
-/* 🍀 یادآوریِ کارت شانس — ساعت ۲۲ تهران و **تنها یادآوریِ شبانه‌ی ربات**. کاملاً
-   opt-in: شرطِ `lucky_reminder_on=1` در خودِ کوئری است، پس کسی که هرگز دکمه‌ی «فردا
-   یادآوری کن» را نزده هیچ‌وقت پیامی نمی‌گیرد (پیش‌فرضِ ستون صفر است). همان گاردِ
-   ۱۸ساعته ضدِ پیامِ تکراری بعد از ری‌استارت. */
+/* 🌙 یادآوریِ شبانه — ساعت ۲۲ تهران، **آزمایشِ A/B** (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۰۴).
+   یادآوریِ شبانه که در v3.23.0 حذف شده بود برمی‌گردد، این بار به‌عنوان یک فرضیه‌ی
+   قابلِ اندازه‌گیری: کدام قلابِ رایگان کاربر را شب برمی‌گرداند؟
+
+   شاخه‌ها (`night_reminder`):
+     control = 🎴 کارتِ روز   ← دقیقاً همان یادآوریِ قدیمی؛ یعنی «کنترل» واقعاً رفتارِ قبلی است
+     lucky   = 🎲 کارتِ شانس
+
+   ⚠️ `variant()` تا وقتی آزمایش از داشبورد `running` نشود همیشه `control` می‌دهد، پس با
+   همین دیپلوی **یادآوریِ کارتِ روز برای همه برمی‌گردد** و شاخه‌ی دوم با یک اقدام در
+   داشبورد باز می‌شود. این عمدی است: قراردادِ ریپو می‌گوید کنترل = رفتارِ قبلی.
+
+   opt-**out** است (مثل یادآوریِ قدیمیِ کارتِ روز، خواسته‌ی مالک: «دقیقاً مشابه فیچری که
+   قبلاً داشتیم»)، و از همان ستونِ `daily_reminder_off` می‌خواند تا انصرافِ قبلیِ کاربران
+   محترم بماند. یادآوریِ opt-inِ کارتِ شانس (`lucky_reminder_on`) با همین جایگزین شد؛
+   ستون و دکمه‌اش می‌مانند (بند ۲ج/۶) ولی دیگر مخاطبِ جارو را تعیین نمی‌کنند. */
 const REMINDER_HOUR = 22;
+const NIGHT_EXP = 'night_reminder';
+// هر شاخه: شرطِ «هنوز امروز انجامش نداده»، متن، و دکمه‌ی CTA. دکمه‌ها عمداً هم‌شکل و
+// هم‌اندازه‌اند و فقط محتوایشان فرق دارد (خواسته‌ی مالک)، وگرنه آزمایش به‌جای «کدام قلاب»
+// دارد «کدام دکمه چشم‌گیرتر است» را می‌سنجد.
+const NIGHT_ARMS = {
+  control: {
+    due: (u, today) => (u.last_daily_date || '') !== today,
+    text: () => L.daily.nightReminder,
+    cta: () => [Markup.button.callback(L.buttons.nightDaily, 'daily_go')],
+  },
+  lucky: {
+    due: (u, today) => (u.lucky_date || '') !== today,
+    text: () => L.lucky.nightReminder,
+    cta: () => [Markup.button.callback(L.buttons.nightLucky, 'lucky_go')],
+  },
+};
 setInterval(async () => {
   try {
     const hour = parseInt(new Intl.DateTimeFormat('en-US', {
@@ -4972,19 +5067,27 @@ setInterval(async () => {
     }).format(new Date()), 10);
     if (hour !== REMINDER_HOUR) return;
     const today = tehranToday();
-    for (const { telegram_id } of stmts.dueLuckyReminder.all(today)) {
-      if (!uxV2For(telegram_id)) continue;
-      stmts.setLuckyReminded.run(telegram_id);
-      const ok = await bot.telegram.sendMessage(telegram_id, L.lucky.reminder, {
+    for (const u of stmts.dueNightReminder.all()) {
+      const uid = u.telegram_id;
+      if (!uxV2For(uid)) continue;
+      const arm = NIGHT_ARMS[variant(db, uid, NIGHT_EXP)] || NIGHT_ARMS.control;
+      // کاربری که همین امروز کارِ همان شاخه را کرده پیام نمی‌گیرد — و **مهرِ زمان هم
+      // نمی‌خورد**، وگرنه فردا شبش هم رد می‌شد (گاردِ ۱۸ساعته او را می‌بلعید).
+      if (!arm.due(u, today)) continue;
+      stmts.setNightReminded.run(uid);
+      const ok = await bot.telegram.sendMessage(uid, arm.text(), {
         reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback(L.buttons.luckyStart, 'lucky_go')],
-          [Markup.button.callback(L.buttons.luckyRemindOff, 'lremind:0')],
+          arm.cta(),
+          [Markup.button.callback(L.buttons.nightRemindOff, 'dailyoff')],
         ]).reply_markup,
       }).then(() => true).catch(() => false);
-      if (ok) track(db, telegram_id, 'lucky_reminder_sent', {});
+      // مهر **قبل** از ارسال زده می‌شود و رویداد **بعد** از موفقیت: همان الگوی قدیمی که
+      // «مهرخورده ولی بدونِ رویداد» را به معنیِ بلاک‌شدنِ کاربر قابلِ شمارش می‌کند
+      // (بند ۲.۵ اسکیلِ تحلیلِ جرنی).
+      if (ok) track(db, uid, 'night_reminder_sent', { arm: arm === NIGHT_ARMS.lucky ? 'lucky' : 'control' });
       await sleep(300);
     }
-  } catch (e) { logErr('lucky reminder sweep:', e.message); }
+  } catch (e) { logErr('night reminder sweep:', e.message); }
 }, 15 * 60 * 1000);
 
 // انصراف از یادآوری — تأییدِ دومرحله‌ای تا با یک تپِ اشتباه قلاب بازگشت را از دست ندهیم
@@ -4999,6 +5102,10 @@ bot.action('dailyoff_yes', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   stmts.setDailyReminderOff.run(uid);
+  // «دیگه یادآوری نکن» یعنی هیچ یادآوریِ شبانه‌ای، پس پرچمِ opt-inِ بازنشسته‌ی کارتِ شانس
+  // هم خاموش می‌شود تا اگر روزی دوباره خوانده شد، نیتِ کاربر را نقض نکند.
+  stmts.setLuckyReminder.run(0, uid);
+  // نامِ رویداد عمداً همان `daily_reminder_off` ماند (بند ۲ج/۳: نامِ رویداد تغییرناپذیر است)
   track(db, uid, 'daily_reminder_off', {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.daily.reminderOffDone, mainKeyboard(uid));

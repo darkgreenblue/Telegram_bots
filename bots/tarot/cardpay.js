@@ -25,15 +25,15 @@ EXPECTED:
 - recipient_name: ${expected.recipient || '(unknown)'}
 - dest_card_last4: ${expected.dest_last4 || '(unknown)'}
 
-CURRENCY RULE (the most important rule here, read it twice):
-Iranian bank receipts print RIAL. The invoice we showed the user is in TOMAN. 1 Toman = 10 Rial.
-**Never convert anything yourself.** Report only what is printed:
-- extracted.amount_raw = the amount EXACTLY as printed on the receipt (plain digits, no separators, NO conversion)
-- extracted.amount_currency = "rial" if the receipt shows ریال/IRR, "toman" if it shows تومان/تومن, null if no unit is printed or you cannot read it
-The server does the Rial↔Toman arithmetic and re-checks your verdict. If you convert, you will be wrong.
-The exact mistake to avoid: a receipt printed «۱۰۰,۰۰۰ ریال» is only 10,000 Toman. Correct output is amount_raw=100000 with amount_currency="rial". Calling it 100,000 Toman would approve a payment that is TEN TIMES too small.
+AMOUNT RULE (the most important rule here, read it twice):
+**Iranian bank receipts print RIAL, without exception.** So the ONE number that matters is: does the receipt show **${rial}** (or more)? That is ${toman} Toman written in Rial, i.e. exactly one more zero.
+Do not reason about units and do not convert anything. Just read the digits:
+- extracted.amount_raw = the amount EXACTLY as printed on the receipt (plain digits, no separators, NO conversion, NO added or removed zeros)
+- extracted.amount_currency = "rial" if the receipt shows ریال/IRR, "toman" if it shows تومان/تومن, null if no unit is printed or you cannot read it. This is only recorded; the server does NOT use it for the arithmetic.
+**Count the zeros carefully — that is the whole job.** ${rial} and ${toman} look alike at a glance and differ by one zero, and confusing them means the user paid one tenth.
+The exact mistake to avoid: a receipt printed «${toman}» is only one tenth of what we are owed, no matter which unit word appears next to it. Report amount_raw=${String(expected.amount_toman || 0)} and let the server reject it. Do not "helpfully" read it as Toman to make it match.
 
-DECISION RULES (in order). Compare paid vs expected in the SAME unit, using amount_rial when the receipt is in Rial:
+DECISION RULES (in order). Compare the printed amount against amount_rial (${rial}):
 1. If the input is NOT a payment receipt at all (random text, unrelated photo, a sentence, a greeting) → verdict "reject", reason_code "not_a_receipt".
 2. If it IS a receipt and you can read the amount and the PAID amount is STRICTLY LESS than expected → verdict "reject", reason_code "amount_too_low".
 3. If it IS a genuine-looking SUCCESSFUL receipt AND paid >= expected AND (recipient_name matches OR dest_card_last4 matches) AND no strong forgery signal → verdict "approve", reason_code "ok".
@@ -86,24 +86,50 @@ function parse(raw) {
 const RIAL_WORDS = new Set(['rial', 'rials', 'irr', 'ریال']);
 const TOMAN_WORDS = new Set(['toman', 'tomans', 'tuman', 'tumans', 'irt', 'تومان', 'تومن']);
 
-// resolvePaidToman: عددِ چاپ‌شده‌ی رسید → مبلغِ واقعی به **تومان**.
-// basis می‌گوید این عدد از کجا آمد: واحدِ صریحِ رسید، استنتاج، یا اصلاً معلوم نیست.
-// وقتی واحد چاپ نشده و عدد آن‌قدر بزرگ نیست که قطعاً ریال باشد → `ambiguous`، چون هر دو
-// حدس خطرناک است: حدسِ «تومان» ما را سرِ ۹۰٪ پول می‌گذارد، و حدسِ «ریال» اعتبارِ کاربری
-// را که درست پرداخت کرده یک‌دهم می‌کند. مبهم یعنی تصمیمِ انسانی، نه قرعه‌کشی.
-function resolvePaidToman(ext, expectedToman) {
+// ── قاعده‌ی «همه‌چیز ریال است» (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۰۴) ─────────────────
+// نسخه‌ی قبلی واحد را از خودِ مدل می‌گرفت و اگر مدل می‌گفت «تومان»، عددِ چاپ‌شده را
+// همان‌طور تومان حساب می‌کرد. دقیقاً همین یک خط سوراخِ باگِ دوم بود: کاربری برای بسته‌ی
+// جادویی (۱۵۰٬۰۰۰ تومان) مبلغِ ۱۵۰٬۰۰۰ **ریال** (=۱۵٬۰۰۰ تومان) واریز کرد، مدل عددِ
+// چاپ‌شده را «تومان» برچسب زد، `paid == expected` شد و ربات **خودکار تأیید کرد**.
+// گاردِ `amount_unit_suspect` هم نگرفتش، چون آن گارد شرطِ `paid < exp` دارد و در این
+// خوانش paid دقیقاً برابرِ exp شده بود.
+//
+// درمان همان چیزی است که مالک گفت و از قضا ساده‌ترین هم هست: **رسیدِ بانکیِ ایرانی
+// بلااستثنا ریال چاپ می‌کند**، پس عددِ چاپ‌شده همیشه ریال خوانده می‌شود و برچسبِ واحدِ
+// مدل فقط **ثبت** می‌شود، نه اینکه در حساب دخالت کند. یعنی حساب‌وکتاب دیگر هیچ ورودیِ
+// احتمالاتی ندارد: یک تقسیم بر ۱۰، تمام.
+//
+// ⚠️ حالتِ «رسید واقعاً تومانی» به **رد** نمی‌رسد: عددِ چاپ‌شده‌ای که دقیقاً برابرِ
+// فاکتورِ تومانی است در گاردِ `amount_unit_suspect` می‌افتد و به **تصمیمِ انسانی** می‌رود.
+// پس نه پرداختِ یک‌دهمی خودکار تأیید می‌شود، نه پرداختِ درست خودکار رد.
+//
+// ⚠️ این قاعده عمداً **فقط در tarot** است. voice2text ربات زنده‌ی دیگری با قیمت‌های خودش
+// است و مالک درباره‌اش تصمیمی نگرفته (بند ۶ ریشه: تغییرش فقط با تصمیمِ صریح). واگراییِ
+// عمدیِ دو کپی در `tools/check-receipt-amount.mjs` قفل شده تا سهوی نماند.
+const RIAL_PER_TOMAN = 10;
+
+// resolvePaidToman: عددِ چاپ‌شده‌ی رسید → مبلغِ واقعی به **تومان**. یک تقسیم، بس.
+// `basis` فقط می‌گوید واحد روی رسید صریح بود (`rial`) یا نه (`rial_assumed`)؛ روی خودِ
+// حساب اثری ندارد و برای لاگ و پیامِ ادمین نگه داشته می‌شود.
+// آرگومانِ دومِ `expectedToman` دیگر در حساب نقشی ندارد ولی در امضا مانده، چون این تابع
+// export شده و هر دو کپیِ دیگرِ ایجنت با همان امضا صدایش می‌زنند.
+function resolvePaidToman(ext, _expectedToman) {
   const printed = Number(ext.amount_raw);
   const legacy = Number(ext.amount_toman); // پاسخِ قدیمیِ مدل (قبل از amount_raw)
   const raw = (Number.isFinite(printed) && printed > 0) ? printed
             : ((Number.isFinite(legacy) && legacy > 0) ? legacy : null);
   if (raw === null) return { raw: null, toman: null, basis: 'none' };
   const cur = String(ext.amount_currency ?? '').trim().toLowerCase();
-  if (RIAL_WORDS.has(cur)) return { raw, toman: Math.floor(raw / 10), basis: 'rial' };
-  if (TOMAN_WORDS.has(cur)) return { raw, toman: raw, basis: 'toman' };
-  const exp = Number(expectedToman) || 0;
-  // واحد چاپ نشده ولی عدد ≥ ده‌برابرِ فاکتور است: در هر دو خوانش کافی است، پس بی‌خطر
-  if (exp > 0 && raw >= exp * 10) return { raw, toman: Math.floor(raw / 10), basis: 'rial_inferred' };
-  return { raw, toman: null, basis: 'ambiguous' };
+  const explicitRial = RIAL_WORDS.has(cur);
+  // ⚠️ TOMAN_WORDS عمداً دیگر مسیرِ حساب ندارد؛ فقط برای لاگ نگه داشته شده تا در پیامِ
+  // ادمین بشود گفت «مدل واحد را تومان خوانده بود». اگر روزی حذفش کردی، `basis` هم
+  // معنیِ تشخیصی‌اش را از دست می‌دهد.
+  const labeledToman = TOMAN_WORDS.has(cur);
+  return {
+    raw,
+    toman: Math.floor(raw / RIAL_PER_TOMAN),
+    basis: explicitRial ? 'rial' : (labeledToman ? 'rial_assumed_toman_label' : 'rial_assumed'),
+  };
 }
 
 // decideReceipt: خروجیِ خامِ ایجنت را به یک «تصمیمِ قطعی» تبدیل می‌کند و گاردِ مبلغ می‌زند.
@@ -124,7 +150,10 @@ function decideReceipt(verdict, expectedToman) {
 
   const { raw, toman: paid, basis } = resolvePaidToman(ext, exp);
   const hasPaid = Number.isFinite(paid) && paid > 0;
-  // واحدِ مبلغ مبهم است → هیچ تصمیمِ خودکاری (نه تأیید، نه رد، نه اصلاحِ فاکتور)
+  // ⚠️ حالتِ `ambiguous` دیگر تولید نمی‌شود (از ۱۴۰۵/۰۶/۰۴ عدد همیشه ریال خوانده می‌شود).
+  // خودِ شرط عمداً مانده چون یک گاردِ ارزان روی مقدارِ غیرمنتظره است: اگر روزی
+  // `resolvePaidToman` دوباره حالتِ مبهم برگرداند، مسیر به تصمیمِ انسانی می‌رود نه به
+  // یک تأییدِ ناخواسته.
   if (basis === 'ambiguous') return out('review', { reason_code: 'amount_ambiguous', basis });
 
   let v = verdict.verdict;
