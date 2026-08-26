@@ -1,0 +1,67 @@
+{
+  "note": "کوئری‌های استانداردِ دورِ ۷ (اسکیل product-journey-analysis، قاعده‌ی آهنین ۱: هیچ عددی از حافظه). همه روی اتصالِ readonly از workflow `Ops` اکشن `db-query` اجرا می‌شوند. مرزِ زمانی در ثابتِ BOUNDARY است؛ دورِ بعد فقط همین را جابه‌جا کن تا مقایسه سیب‌به‌سیب بماند.",
+  "boundary": {
+    "v3.25.0": "2026-08-21 00:16:00",
+    "v3.27.0": "2026-08-26 00:00:00",
+    "prevRoundEnd": "2026-08-15 15:35:00"
+  },
+  "excludeSnippet": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933))",
+  "tehranDay": "date(created_at,'unixepoch','+3 hours','+30 minutes')",
+  "queries": {
+    "volume": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT 'users_total' k, COUNT(*) v FROM users WHERE telegram_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'new_since_boundary', COUNT(*) FROM users WHERE telegram_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-21 00:16:00')",
+
+    "newUsersPerDay": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT date(created_at,'unixepoch','+3 hours','+30 minutes') d, COUNT(*) n FROM users WHERE telegram_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-15') GROUP BY d ORDER BY d",
+
+    "dauPerDay": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT date(created_at,'unixepoch','+3 hours','+30 minutes') d, COUNT(DISTINCT user_id) dau, COUNT(*) ev FROM events WHERE user_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-15') GROUP BY d ORDER BY d",
+
+    "funnelSinceBoundary": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT event, COUNT(DISTINCT user_id) u, COUNT(*) n FROM events WHERE user_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-21 00:16:00') GROUP BY event ORDER BY u DESC",
+
+    "funnelPrevWindow": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT event, COUNT(DISTINCT user_id) u, COUNT(*) n FROM events WHERE user_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-15 15:35:00') AND created_at < strftime('%s','2026-08-21 00:16:00') GROUP BY event ORDER BY u DESC",
+
+    "satisfaction": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT COALESCE(NULLIF(feedback,''),'none') f, COUNT(*) n FROM readings WHERE user_id NOT IN (SELECT id FROM x) AND status='delivered' AND created_at >= strftime('%s','2026-08-21 00:16:00') GROUP BY f ORDER BY n DESC",
+
+    "satisfactionByReadingIndex": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT rn, COUNT(*) n, ROUND(AVG(CAST(substr(feedback,6) AS REAL)),2) mean FROM (SELECT feedback, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at) rn FROM readings WHERE user_id NOT IN (SELECT id FROM x) AND status='delivered' AND feedback LIKE 'rate:%') GROUP BY rn ORDER BY rn",
+
+    "luckyHandsPerUser": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT hands, COUNT(*) users FROM (SELECT user_id, COUNT(*) hands FROM events WHERE event='lucky_card' AND user_id NOT IN (SELECT id FROM x) GROUP BY user_id) GROUP BY hands ORDER BY hands",
+
+    "luckyDistribution": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT COALESCE(json_extract(props,'$.first'),0) first_hand, json_extract(props,'$.coins') coins, COUNT(*) n FROM events WHERE event='lucky_card' AND user_id NOT IN (SELECT id FROM x) GROUP BY 1,2 ORDER BY 1,2",
+
+    "luckyReminderFunnel": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT 'opt_in_on' k, COUNT(DISTINCT user_id) v FROM events WHERE event='lucky_reminder' AND json_extract(props,'$.on')=1 AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'opt_in_off', COUNT(DISTINCT user_id) FROM events WHERE event='lucky_reminder' AND json_extract(props,'$.on')=0 AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'reminders_sent_users', COUNT(DISTINCT user_id) FROM events WHERE event='lucky_reminder_sent' AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'reminders_sent_total', COUNT(*) FROM events WHERE event='lucky_reminder_sent' AND user_id NOT IN (SELECT id FROM x)",
+
+    "reminderOptInWithoutSend": "SELECT o.user_id, MIN(o.created_at) opted_in, COUNT(s.created_at) sends FROM events o LEFT JOIN events s ON s.user_id=o.user_id AND s.event='lucky_reminder_sent' AND s.created_at>o.created_at WHERE o.event='lucky_reminder' GROUP BY o.user_id ORDER BY sends ASC",
+
+    "diamondEconomy": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT COALESCE(json_extract(props,'$.kind'),'?') kind, COUNT(*) events, COUNT(DISTINCT user_id) users, SUM(json_extract(props,'$.amount')) diamonds FROM events WHERE event='credit_granted' AND user_id NOT IN (SELECT id FROM x) GROUP BY kind ORDER BY diamonds DESC",
+
+    "diamondLedger": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT 'granted' k, SUM(json_extract(props,'$.amount')) v FROM events WHERE event='credit_granted' AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'purchased', SUM(original_amount) FROM payments WHERE status='approved' AND pkg<>'' AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'consumed', SUM(price) FROM readings WHERE status='delivered' AND user_id NOT IN (SELECT id FROM x) UNION ALL SELECT 'held', SUM(balance) FROM users WHERE telegram_id NOT IN (SELECT id FROM x)",
+
+    "balanceBuckets": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT CASE WHEN balance=0 THEN '0' WHEN balance<=5 THEN '1-5' WHEN balance<=15 THEN '6-15' WHEN balance<=40 THEN '16-40' ELSE '41+' END b, COUNT(*) users, SUM(balance) diamonds FROM users WHERE telegram_id NOT IN (SELECT id FROM x) GROUP BY b",
+
+    "payments": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT status, COALESCE(NULLIF(pkg,''),'(none)') pkg, COUNT(*) n, COUNT(DISTINCT user_id) users, SUM(amount) toman FROM payments WHERE user_id NOT IN (SELECT id FROM x) GROUP BY status, pkg ORDER BY status, n DESC",
+
+    "readingsByStatus": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT status, COUNT(*) n, COUNT(DISTINCT user_id) users, SUM(price) diamonds FROM readings WHERE user_id NOT IN (SELECT id FROM x) GROUP BY status ORDER BY n DESC",
+
+    "deliveriesPerUser": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT n, COUNT(*) users FROM (SELECT user_id, COUNT(*) n FROM readings WHERE status='delivered' AND user_id NOT IN (SELECT id FROM x) GROUP BY user_id) GROUP BY n ORDER BY n",
+
+    "topicAndSize": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT json_extract(props,'$.topic') topic, json_extract(props,'$.size') size, COUNT(*) n, COUNT(DISTINCT user_id) users FROM events WHERE event='spread_selected' AND user_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-21 00:16:00') GROUP BY 1,2 ORDER BY n DESC",
+
+    "referral": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT 'rows' k, COUNT(*) v FROM referrals UNION ALL SELECT 'referrers', COUNT(DISTINCT referrer_id) FROM referrals UNION ALL SELECT 'rewarded', COUNT(*) FROM referrals WHERE rewarded=1",
+
+    "newUserSources": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT COALESCE(NULLIF(first_source,''),'(empty)') src, COUNT(*) n FROM users WHERE telegram_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-21 00:16:00') GROUP BY src ORDER BY n DESC",
+
+    "activeDays": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT days, COUNT(*) users FROM (SELECT user_id, COUNT(DISTINCT date(created_at,'unixepoch','+3 hours','+30 minutes')) days FROM events WHERE user_id NOT IN (SELECT id FROM x) AND created_at >= strftime('%s','2026-08-21 00:16:00') GROUP BY user_id) GROUP BY days ORDER BY days",
+
+    "lastEventOfDormant": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)), l AS (SELECT user_id, MAX(created_at) mx FROM events WHERE user_id NOT IN (SELECT id FROM x) GROUP BY user_id) SELECT e.event, COUNT(*) n FROM l JOIN events e ON e.user_id=l.user_id AND e.created_at=l.mx WHERE l.mx < unixepoch()-86400 GROUP BY e.event ORDER BY n DESC",
+
+    "currentStates": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT state, COUNT(*) n FROM users WHERE telegram_id NOT IN (SELECT id FROM x) GROUP BY state ORDER BY n DESC",
+
+    "strandedLegacyCheck": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT CASE WHEN created_at < strftime('%s','2026-08-21 00:16:00') THEN 'before_launch' ELSE 'after_launch' END era, COUNT(*) n FROM readings WHERE status='pending_payment' AND user_id NOT IN (SELECT id FROM x) GROUP BY era",
+
+    "lovesItSignal": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)) SELECT COUNT(*) users FROM (SELECT user_id FROM readings WHERE status='delivered' AND user_id NOT IN (SELECT id FROM x) GROUP BY user_id HAVING COUNT(*)>=2 AND MAX(CASE WHEN feedback='rate:5' THEN 1 ELSE 0 END)=1)",
+
+    "ghostUsers": "SELECT COUNT(DISTINCT user_id) ghosts FROM events WHERE user_id NOT IN (SELECT telegram_id FROM users)",
+
+    "abExposures": "SELECT experiment_key, variant, COUNT(DISTINCT user_id) n FROM ab_exposures GROUP BY 1,2 ORDER BY 1,2",
+
+    "supportOutreachCandidates": "WITH x(id) AS (VALUES(429557996),(409581917),(100257975),(5725984933)), del AS (SELECT user_id, COUNT(*) n, MAX(CASE WHEN feedback LIKE 'rate:%' THEN CAST(substr(feedback,6) AS INTEGER) END) best FROM readings WHERE status='delivered' GROUP BY user_id), la AS (SELECT user_id, MAX(created_at) mx FROM events GROUP BY user_id), b AS (SELECT u.telegram_id id, u.username un, u.balance bal, u.state st, u.created_at cr, COALESCE(d.n,0) dn, COALESCE(d.best,0) bst, COALESCE(l.mx,0) lt FROM users u LEFT JOIN del d ON d.user_id=u.telegram_id LEFT JOIN la l ON l.user_id=u.telegram_id WHERE u.telegram_id NOT IN (SELECT id FROM x) AND u.username<>'') SELECT seg, id, un, bal, dn, bst, st, ROUND((unixepoch()-lt)/3600.0,1) hrs, ROUND((unixepoch()-cr)/3600.0,1) age FROM (SELECT CASE WHEN dn>=2 AND bst=5 THEN 'A_lover' WHEN dn=1 AND bst>=4 THEN 'B_happy_once' WHEN dn=0 AND st='gate_join' THEN 'D_gate' WHEN dn=0 AND cr>=strftime('%s','2026-08-21 00:16:00') THEN 'C_no_delivery' ELSE 'Z' END seg, * FROM b) WHERE seg<>'Z' ORDER BY seg, hrs LIMIT 90"
+  }
+}
