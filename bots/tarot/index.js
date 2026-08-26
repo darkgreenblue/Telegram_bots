@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.28.0';
+const PRODUCT_VERSION = '3.29.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -712,19 +712,19 @@ const AB_INTRO_ORDER = 'intro_order';
 // seedِ پایین لحظه‌ی بارگذاریِ ماژول اجرا می‌شود، پس تعریفِ پایین‌تر یعنی TDZ و مرگِ بوت.
 const NIGHT_EXP = 'night_reminder';
 try {
+  // 🔴 آزمایشِ ترتیبِ آنبوردینگ **بسته شد** (۴ شهریور ۱۴۰۵، تصمیمِ مالک با دیتا).
+  // نتیجه: روی متریکِ اصلی هیچ اثری نداشت (۷۲.۲٪ در برابر ۷۳.۲٪، CTW=۵۷٪ در برابرِ
+  // آستانه‌ی ۸۵٪). ولی عددِ تجمیعی گمراه‌کننده بود: از v3.25.0 شاخه‌ی stat_first متنِ
+  // `INTRO_EXPERIENCE_V2` می‌گرفت و control متنِ v1، یعنی آزمایش دیگر «فقط ترتیب» نبود.
+  // شکستنِ دیتا روی همان مرز علامتِ اثر را برعکس می‌کند (−۱۲.۳pp پیش از مرز، +۷.۱pp پس
+  // از آن، اثرِ متقابل p=۰.۰۸۹). ضمناً از اول زیرِ توان بود: برای دیدنِ اثرِ ۵ واحدی
+  // ~۱٬۱۸۴ کاربر در هر شاخه لازم بود و ۱۴۶ داشتیم.
   db.prepare(`
-    INSERT OR IGNORE INTO experiments
-      (key, name, hypothesis, mode, metric_kind, variants_json, status,
-       primary_metric, guardrails_json, started_at)
-    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
-  `).run(
-    AB_INTRO_ORDER,
-    'ترتیبِ دو پیامِ آنبوردینگ (تجربه یا آمار، کدام اول)',
-    'اگر شاهدِ اجتماعی (۸۶٪) را قبل از وعده‌ی تجربه نشان دهیم، کاربرِ بیشتری تا تحویلِ فال جلو می‌رود.',
-    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'stat_first', weight: 50 }]),
-    EVENTS.PRODUCT_DELIVERED,
-    JSON.stringify([]),
-  );
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='inconclusive — بدونِ اثر روی متریکِ اصلی (CTW ۵۷٪) و از v3.25.0 دومتغیره شده بود (ترتیب + متنِ V2). کنترل ماند، ولی متنِ تجربه برای همه به V2 رفت.'
+    WHERE key=? AND status<>'stopped'
+  `).run(AB_INTRO_ORDER);
+
   // 🌙 آزمایشِ یادآوریِ شبانه (v3.28.0) — همان الگو و به همان دلیل: شاخه‌هایش در **کد**
   // است، پس بدونِ ردیف عملاً مرده می‌ماند و شاخه‌ی دوم به هیچ کاربری نمی‌رسد.
   // متریکِ اصلی عمداً **مشترک** است، نه اقدامِ خودِ هر شاخه: با `daily_card` یا
@@ -1717,13 +1717,12 @@ async function isChannelMember(ctx, uid) {
 // آیا این کاربر در شاخه‌ی «اول آمار» است؟ (آزمایشِ intro_order)
 // variant() به‌خاطرِ ab_exposures چسبنده است، پس صدا زدنش در دو نقطه‌ی فلو همیشه یک جواب
 // می‌دهد و کاربر هرگز یک بلوک را دو بار یا هیچ‌کدام را نمی‌بیند.
-const statFirstFor = (uid) => variant(db, uid, AB_INTRO_ORDER) === 'stat_first';
 
 // نمایشِ گیت: پیامِ معرفی (کاهشِ dropِ لحظه‌ی ورود) و بعد دعوت به عضویت.
 async function showGate(ctx, uid) {
   setState(uid, 'gate_join');
   setSession(uid, null); // چیزی از فلوی قبلی نباید وارد آنبوردینگ شود
-  await ctx.reply(L.onboarding.gateIntro(statFirstFor(uid)), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.gateIntro(uxV2For(uid)), Markup.removeKeyboard());
   await typing(ctx, PACE_S);
   await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), gateKeyboard());
 }
@@ -1888,7 +1887,7 @@ async function finishNameOnboarding(ctx, rawName) {
   //      «کیبوردِ سفارشی را برمی‌دارد و letter-keyboard پیش‌فرض را نشان می‌دهد» — یعنی
   //      کیبوردِ تایپِ گوشی را باز نگه می‌داشت و نصفِ صفحه را می‌گرفت. کیبوردِ سفارشی از
   //      قبل در `askName` برداشته شده، پس این تکرار بی‌اثر ولی پرعارضه بود.
-  await ctx.reply(L.onboarding.welcome(name, statFirstFor(uid), uxV2For(uid)));
+  await ctx.reply(L.onboarding.welcome(name, uxV2For(uid)));
   // ⚠️ این‌جا قبلاً به دعوت‌شده وعده‌ی «هدیه‌ی دعوت» داده می‌شد. آن وعده از پایه غلط بود:
   // پاداشِ دعوت فقط مالِ دعوت‌کننده است. حالا که چیزی برای گفتن نیست، پیام هم حذف شد؛
   // یک پیامِ کمتر در آنبوردینگ، و هیچ وعده‌ای که بعداً عمل نشود.

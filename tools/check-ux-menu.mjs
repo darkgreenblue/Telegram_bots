@@ -1137,8 +1137,13 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // removeKeyboard اینجا کیبوردِ تایپِ گوشی را باز نگه می‌داشت (ایرادِ صریحِ مالک: «نصف
   // صفحه رو اشغال می‌کنه»). کیبوردِ سفارشی از askName برداشته شده، پس برداشتنِ دوباره
   // بی‌اثر ولی پرعارضه بود.
-  ok(/await ctx\.reply\(L\.onboarding\.welcome\(name, statFirstFor\(uid\), uxV2For\(uid\)\)\);/.test(nameFn),
-    'پیامِ «خوش اومدی» هیچ reply_markup ای ندارد (نه منو، نه removeKeyboard)');
+  // ⚠️ ادعا عمداً امضای تابع را پین نمی‌کند (نسخه‌ی قبلی می‌کرد و با بسته‌شدنِ آزمایشِ
+  // intro_order الکی قرمز شد). چیزی که واقعاً محافظت می‌شود این است: این `ctx.reply`
+  // آرگومانِ دومی ندارد، یعنی هیچ reply_markup ای به آن چسبانده نشده.
+  const welcomeCall = nameFn.match(/await ctx\.reply\(L\.onboarding\.welcome\([^;]*\);/)?.[0] || '';
+  ok(!!welcomeCall, 'پیامِ «خوش اومدی» در آنبوردینگ فرستاده می‌شود');
+  ok(/^await ctx\.reply\(L\.onboarding\.welcome\((?:[^()]|\([^()]*\))*\)\);$/.test(welcomeCall),
+    `پیامِ «خوش اومدی» هیچ reply_markup ای ندارد (نه منو، نه removeKeyboard) — شد: ${welcomeCall}`);
   // روی **کد** سنجیده می‌شود نه کامنت: خودِ کامنتِ توضیحیِ بالای همین خط اسمِ
   // removeKeyboard را می‌برد و نسخه‌ی اولِ این assert به همان کامنت گیر کرد.
   const nameCode = nameFn.replace(/\/\/.*$/gm, '');
