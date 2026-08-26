@@ -205,6 +205,29 @@ jobs:
 
             deploy_bot voice2text
             deploy_bot tarot
+
+            # ---------- گاردِ «تاروت حتماً بالا باشد» ----------
+            # بلوکِ مهاجرتِ بالا **بی‌قید و شرط** `pm2 stop tarot` می‌زند، ولی `deploy_bot`
+            # فقط وقتی کدِ ربات عوض شده باشد آن را برمی‌گرداند. یعنی هر دیپلویی که
+            # tarot در آن تغییر نکرده باشد، رباتِ زنده را متوقف می‌گذارد و بدتر:
+            # `pm2 save` همان وضعیتِ stopped را ماندگار می‌کند، پس ری‌بوت هم نجاتش نمی‌دهد.
+            # این دقیقاً ۴ شهریور ۱۴۰۵ روی رباتِ درآمدزا اتفاق افتاد.
+            TRT_STATUS=$(pm2 jlist | node -e "
+              const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              const p = a.find(x => x.name === 'tarot');
+              console.log(p ? p.pm2_env.status : 'missing');" 2>/dev/null || echo unknown)
+            if [ "$TRT_STATUS" != "online" ]; then
+              echo "⚠️ tarot بعد از مهاجرت online نبود (status=$TRT_STATUS) — بالا آورده می‌شود"
+              pm2 start ecosystem.config.cjs --only tarot 2>/dev/null || pm2 restart tarot || true
+              sleep 3
+              pm2 jlist | node -e "
+                const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const p = a.find(x => x.name === 'tarot');
+                const s = p ? p.pm2_env.status : 'missing';
+                console.log(s === 'online' ? '✅ tarot بالا آمد' : '❌ tarot هنوز بالا نیست: ' + s);
+                if (s !== 'online') process.exit(1);"
+            fi
+
             deploy_bot daily-brief
             deploy_bot dashboard
 
