@@ -297,6 +297,17 @@ jobs:
               esac
             fi
 
+            # ---------- کرونِ انتشارِ روزانه‌ی کانال روی خودِ سرور (idempotent) ----------
+            # چرا روی سرور و نه GitHub Actions: سقفِ دقیقه‌ی Actions ریپوی خصوصی تمام‌شدنی
+            # است و وقتی تمام شد هیچ workflow ای اجرا نمی‌شود؛ ۲۲ تا ۲۶ مرداد ۱۴۰۵ دقیقاً
+            # این‌طور از دست رفت. سرور نه سقفِ دقیقه دارد نه به بیلینگِ گیت‌هاب وصل است.
+            chmod +x tools/marketing/vps-daily-post.sh 2>/dev/null || true
+            NODE_BIN="$(command -v node || echo /usr/bin/node)"
+            CRON_LINE="30 * * * * PATH=$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin REPO_DIR=$HOME/voice2text $HOME/voice2text/tools/marketing/vps-daily-post.sh >> $HOME/taroot-daypost.log 2>&1"
+            # خطِ قبلی را (هر شکلی که داشته) بردار و خطِ تازه را بگذار؛ اجرای دوباره no-op است
+            ( crontab -l 2>/dev/null | grep -v 'vps-daily-post.sh' ; echo "$CRON_LINE" ) | crontab -
+            echo "🗓 کرونِ انتشارِ روزانه نصب/به‌روز شد (هر ساعت چک می‌کند، ۱۰ صبح تهران منتشر می‌کند)"
+
             pm2 save
             echo "---- وضعیت نهایی ----"
             pm2 ls

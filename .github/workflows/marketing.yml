@@ -14,21 +14,16 @@
 name: Marketing
 
 on:
-  # انتشارِ روزانه‌ی «روزِ کامل» (قرارداد: marketing/tarot/strategy.md بند ۱).
-  # هدف ۱۰:۰۰ تهران = ۰۶:۳۰ UTC (ایران ساعت تابستانی ندارد).
+  # ⚠️ زمان‌بندی عمداً حذف شد (۴ شهریور ۱۴۰۵).
+  # انتشارِ روزانه از GitHub Actions به **کرونِ خودِ VPS** منتقل شد:
+  # tools/marketing/vps-daily-post.sh که deploy.yml نصبش می‌کند.
+  # دلیل: سقفِ دقیقه‌ی Actions ریپوی خصوصی تمام‌شدنی است و وقتی تمام شد هیچ
+  # workflow ای اجرا نمی‌شود؛ ۲۲ تا ۲۶ مرداد ۱۴۰۵ پنج روز پست دقیقاً به همین
+  # دلیل از دست رفت. VPS نه سقفِ دقیقه دارد، نه به بیلینگِ گیت‌هاب وصل است.
   #
-  # چرا چهار cron و نه یکی: زمان‌بندیِ GitHub Actions تضمینِ دقت ندارد و روی همین ریپو
-  # عملاً ۱ تا ۴ ساعت تأخیر دیده شده (کرونِ */30 جابِ Health در یک روز ساعت‌های
-  # 03:17 و 06:44 و 10:44 و 13:42 فایر شد). با یک cron یعنی «شاید ۱۰ صبح، شاید ۲ بعدازظهر».
-  # پس چهار پنجره می‌گذاریم و انتشار را **idempotent** می‌کنیم: اولین اجرایی که موفق شد
-  # یک مارکرِ روز در کشِ Actions می‌گذارد و بقیه‌ی اجراهای همان روز بی‌صدا رد می‌شوند.
-  # فقط آخرین پنجره اگر فایلِ روز را پیدا نکند جاب را قرمز و به مالک تلگرام می‌زند،
-  # وگرنه هر روز چهار هشدارِ کاذب می‌آمد.
-  schedule:
-    - cron: '30 6 * * *'   # ۱۰:۰۰ تهران — پنجره‌ی اصلی
-    - cron: '30 7 * * *'   # ۱۱:۰۰ تهران — جبرانِ تأخیرِ کرون
-    - cron: '30 8 * * *'   # ۱۲:۰۰ تهران
-    - cron: '30 9 * * *'   # ۱۳:۰۰ تهران — آخرین تلاش؛ از اینجا نبودنِ فایل = خطا
+  # اینجا هیچ cron ای نباید برگردد: اگر برگردد، بعد از ریست‌شدنِ سهمیه هم Actions
+  # منتشر می‌کند هم کرونِ سرور، و روز **دوبار** پست می‌شود (مارکرِ کشِ Actions و
+  # مارکرِ روی سرور از هم بی‌خبرند). انتشارِ دستی با workflow_dispatch باقی است.
   workflow_dispatch:
     inputs:
       action:
@@ -65,145 +60,6 @@ on:
         default: ''
 
 jobs:
-  # انتشارِ خودکارِ روزِ کامل: هدر + دوازده پستِ تصویری (فروردین تا اسفند)
-  # فایلِ روز: marketing/<bot>/posts/<تاریخ تهران>-day.json
-  day-post:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # اگر دو پنجره به‌خاطر تأخیرِ کرون نزدیکِ هم فایر شدند، صف می‌شوند نه هم‌زمان؛
-    # وگرنه هر دو مارکر را «نبود» می‌دیدند و روز دوبار منتشر می‌شد.
-    concurrency:
-      group: day-post
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Tehran date
-        id: d
-        run: echo "today=$(date -u -d '+3 hours +30 minutes' +%F)" >> "$GITHUB_OUTPUT"
-
-      # مارکرِ idempotency: اگر همین روز قبلاً منتشر شده، کلیدِ کش وجود دارد و رد می‌شویم.
-      - name: Restore publish marker
-        id: marker
-        uses: actions/cache/restore@v4
-        with:
-          path: .daypost-marker
-          key: daypost-${{ steps.d.outputs.today }}
-
-      - name: Already published today
-        if: steps.marker.outputs.cache-hit == 'true'
-        run: echo "⏭ روزِ ${{ steps.d.outputs.today }} قبلاً در یک پنجره‌ی زودتر منتشر شده"
-
-      - name: Publish today's full day
-        id: publish
-        if: steps.marker.outputs.cache-hit != 'true'
-        env:
-          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
-          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
-          TODAY:      ${{ steps.d.outputs.today }}
-          LAST_TRY:   ${{ github.event.schedule == '30 9 * * *' }}
-        run: |
-          set -e
-          FOUND=0
-          for F in marketing/*/posts/${TODAY}-day.json; do
-            [ -f "$F" ] || continue
-            BOT=$(echo "$F" | cut -d/ -f2)
-            case "$BOT" in
-              tarot)      TOKEN="$T_TAROT";;
-              tabir-khab) TOKEN="$T_TABIR_FA";;
-              *) echo "⏭ $F: نگاشت توکن برای «$BOT» نیست"; continue;;
-            esac
-            [ -n "$TOKEN" ] || { echo "⏭ $F: Secret توکن ست نیست"; continue; }
-            echo "📤 انتشار روز از $F"
-            TELEGRAM_TOKEN="$TOKEN" node tools/marketing/publish-day.mjs --file "$F"
-            FOUND=1
-          done
-          if [ "$FOUND" = "1" ]; then
-            date -u +%FT%TZ > .daypost-marker
-            echo "published=1" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$LAST_TRY" = "true" ]; then
-            echo "❌ فایلِ روزِ $TODAY تا آخرین پنجره هم روی main نیامد — روتینِ تولید محتوا اجرا نشده یا پوش نکرده"
-            exit 1
-          fi
-          echo "⏳ فایلِ روزِ $TODAY هنوز روی main نیست؛ پنجره‌ی بعدی یک ساعت دیگر تلاش می‌کند"
-
-      # فقط بعد از انتشارِ واقعی مارکر ذخیره می‌شود، وگرنه پنجره‌های بعدی هم باید تلاش کنند.
-      - name: Save publish marker
-        if: steps.publish.outputs.published == '1'
-        uses: actions/cache/save@v4
-        with:
-          path: .daypost-marker
-          key: daypost-${{ steps.d.outputs.today }}
-
-      - name: Telegram alert to owner on failure
-        if: failure()
-        env:
-          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
-          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
-          TODAY:   ${{ steps.d.outputs.today }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ -z "$T_TAROT" ] || [ -z "$OWNER" ]; then exit 0; fi
-          IFS=',' read -ra OWNERS <<< "$OWNER"
-          for id in "${OWNERS[@]}"; do
-            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
-            curl -fsS -X POST "https://api.telegram.org/bot${T_TAROT}/sendMessage" -d chat_id="$id" \
-              --data-urlencode text="⚠️ فالِ روزانه‌ی کانال منتشر نشد (روزِ $TODAY)
-          $RUN_URL" >/dev/null || true
-          done
-
-  # پایشِ موجودیِ بافرِ محتوا.
-  #
-  # چرا وجود دارد: تولیدِ محتوا دستِ یک سشنِ Claude است و آن سشن ممکن است
-  # اصلاً اجرا نشود. اگر تنها هشدارِ ما «امروز فایل نبود» باشد، همیشه دیر
-  # می‌فهمیم (سه روزِ ۶ تا ۸ مرداد دقیقاً همین‌طور از دست رفت). این جاب
-  # **چند روز جلوتر** خبر می‌دهد که بافر دارد ته می‌کشد، تا وقتِ واکنش باشد.
-  buffer-check:
-    # فقط یک بار در روز، روی پنجره‌ی اولِ انتشار (تا برای واکنش وقت باشد)
-    if: github.event_name == 'schedule' && github.event.schedule == '30 6 * * *'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Count future day files
-        env:
-          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
-          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
-          LOW_AT:  '4'
-        run: |
-          set -e
-          TODAY=$(date -u -d '+3 hours +30 minutes' +%F)
-          DAYS=0
-          for F in marketing/tarot/posts/*-day.json; do
-            [ -f "$F" ] || continue
-            D=$(basename "$F" -day.json)
-            [[ "$D" > "$TODAY" || "$D" == "$TODAY" ]] && DAYS=$((DAYS+1))
-          done
-          echo "📦 بافرِ فال: $DAYS روزِ آماده (از $TODAY به بعد)"
-          if [ "$DAYS" -gt "$LOW_AT" ]; then
-            echo "✅ کافی است؛ هشداری لازم نیست"
-            exit 0
-          fi
-          echo "⚠️ بافر کم است ($DAYS روز)"
-          if [ -z "$T_TAROT" ] || [ -z "$OWNER" ]; then exit 0; fi
-          IFS=',' read -ra OWNERS <<< "$OWNER"
-          for id in "${OWNERS[@]}"; do
-            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
-            curl -fsS -X POST "https://api.telegram.org/bot${T_TAROT}/sendMessage" -d chat_id="$id" \
-              --data-urlencode text="📦 بافرِ فالِ کانال رو به اتمام است: فقط $DAYS روز محتوای آماده مانده.
-          به Claude بگو «بافر فال رو پر کن» تا روزهای بعدی ساخته شوند." >/dev/null || true
-          done
-
   marketing:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
