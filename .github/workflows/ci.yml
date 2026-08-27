@@ -68,6 +68,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-reco.mjs
 
+      # آزمایشِ `love_slot`: اعتبارش به یک بند است، اینکه کاربرِ قدیمی هرگز exposure نگیرد.
+      # اگر آن گارد بشکند آزمایش قرمز نمی‌شود، فقط نتیجه‌ای می‌دهد که غلط است — پس رفتاری
+      # سنجیده می‌شود، با همان variant() واقعی روی DBِ در-حافظه.
+      - name: Love-slot experiment check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-love-slot.mjs
+
       # مسیرِ پول: کسر در لحظه‌ی انتخابِ اندازه. رفتاری است (روی DB واقعیِ در-حافظه اجرا
       # می‌شود)، چون هر مسیرِ لغو که جا بماند بی‌صدا پولِ کاربر را می‌خورد.
       - name: Pay-at-size money check

@@ -15,7 +15,7 @@
 import { readFileSync } from 'fs';
 import { seedToInt } from '../bots/tarot/reading-core.js';
 import {
-  TOPICS_V3, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
+  TOPICS_V3, RETIRED_TOPICS, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
 } from '../bots/tarot/spreads.js';
 // locale واقعاً import می‌شود (نه فقط به‌عنوان متن خوانده): برای تطبیقِ برچسبِ کیبورد با
 // هندلر باید **مقدارِ** رشته را داشته باشیم، نه نامِ کلید.
@@ -40,8 +40,19 @@ console.log('▶ موضوع × اندازه (قیمت فقط از تعدادِ �
     (readFileSync(new URL('../bots/tarot/spreads.js', import.meta.url), 'utf8')
       .match(/const PER_CARD = ([0-9_]+);/) || [])[1]?.replace(/_/g, ''));
   ok(SIZES_V3.length === 3 && SIZES_V3.join(',') === '3,5,10', 'سه عمق: ۳ و ۵ و ۱۰ کارت');
-  ok(TOPIC_SPREADS.length === TOPICS_V3.length * SIZES_V3.length,
-    `هر موضوع هر سه عمق را دارد (${TOPIC_SPREADS.length} ترکیب)`);
+  // TOPIC_SPREADS از موضوع‌های **زنده و بازنشسته** ساخته می‌شود، وگرنه حذفِ یک موضوع از
+  // منو یعنی ناپدید شدنِ `money3`/`choice5` از SPREAD_BY_ID و شکستنِ دکمه‌های کهنه (۲ج/۶).
+  ok(TOPIC_SPREADS.length === (TOPICS_V3.length + RETIRED_TOPICS.length) * SIZES_V3.length,
+    `هر موضوعِ زنده و بازنشسته هر سه عمق را دارد (${TOPIC_SPREADS.length} ترکیب)`);
+  // ...ولی بازنشسته‌ها هرگز نباید در منو دیده شوند.
+  const retiredKeys = RETIRED_TOPICS.map(t => t.key);
+  ok(retiredKeys.length > 0 && !TOPICS_V3.some(t => retiredKeys.includes(t.key)),
+    `موضوعِ بازنشسته در منو نیست (${retiredKeys.join('، ')})`);
+  let retiredResolves = true;
+  for (const t of RETIRED_TOPICS) for (const size of SIZES_V3) {
+    if (!SPREAD_BY_ID[spreadIdOf(t.key, size)]) retiredResolves = false;
+  }
+  ok(retiredResolves, 'چیدمانِ موضوعِ بازنشسته هنوز resolve می‌شود (خوانشِ ثبت‌شده نمی‌شکند)');
   let priceOk = true, posOk = true, idOk = true;
   for (const t of TOPICS_V3) for (const size of SIZES_V3) {
     const s = SPREAD_BY_ID[spreadIdOf(t.key, size)];
@@ -55,7 +66,9 @@ console.log('▶ موضوع × اندازه (قیمت فقط از تعدادِ �
   // فالِ تقابلی باید دو سمتِ تصمیم را در خودِ جایگاه‌ها داشته باشد، وگرنه مدل کارت‌ها را
   // مثل خطِ زمانی می‌خواند و خروجیِ verdict به هیچ جایگاهی لنگر نمی‌خورد.
   const commit3 = SPREAD_BY_ID['commit3'];
-  ok(commit3.positions[0].fa === 'تعهد' && commit3.positions[1].fa === 'خیانت',
+  const commitLabels = TOPIC_BY_KEY['commit'].choiceLabels;
+  ok(Array.isArray(commitLabels) && commitLabels.length === 2
+    && commit3.positions[0].fa === commitLabels[0] && commit3.positions[1].fa === commitLabels[1],
     'فالِ تقابلی برچسبِ خودش را روی جایگاه‌ها می‌گذارد، نه «مسیر اول/دوم»');
   ok(SPREAD_BY_ID['choice3'].positions.map(p => p.key).join() === 'pathA,pathB,guide',
     'دوراهیِ سه‌کارتی همان pathA/pathB/guide را دارد (verdict.js از این می‌خواند)');
@@ -80,8 +93,16 @@ console.log('\n▶ تمرکزِ موضوع‌ها (تصمیمِ مالک: فقط
   }
   const love = TOPICS_V3.filter(t => t.focus === 'love').map(t => t.key);
   ok(love.includes('love') && love.includes('crush') && love.includes('feel') && love.includes('commit'),
-    'چهار موضوعِ عاطفی: عشق، کراش، حس طرف مقابل، تعهد یا خیانت');
-  ok(keys.includes('career') && keys.includes('money'), 'شغل و پول هر دو هستند');
+    'چهار موضوعِ عاطفی: عشق، کراش، حس طرف مقابل، خیانت');
+  // موضوع‌های تازه‌ی نسل پنجم (از دیتای ۴ شهریور ۱۴۰۵). اگر یکی‌شان بی‌صدا حذف شود،
+  // پرتقاضاترین نیت‌های واقعیِ کاربر دوباره بی‌خانه می‌شوند.
+  for (const [k, why] of [['exback', 'بازگشتِ اکس، ۱۸.۱٪ سؤال‌ها'], ['study', 'درس و کنکور، ۱۰.۰٪'],
+    ['marriage', 'ازدواج، ۴.۸٪'], ['soulmate', 'کی به آدمم می‌رسم'], ['apply', 'اپلای و مهاجرت']]) {
+    ok(keys.includes(k), `موضوعِ «${k}» در منو هست (${why})`);
+  }
+  ok(keys.includes('career') && !keys.includes('money'),
+    'کار و پول یک دکمه‌ی واحد است (پول با ۶ کلیک در ۳۵ روز از منو برداشته شد)');
+  ok(!keys.includes('choice'), '«دوراهی» از منو برداشته شد (تکرارِ معناییِ بله/خیر)');
   // ترتیب: عاطفی‌ها قبل از شغل/پول (خواسته‌ی صریحِ مالک برای لیستِ کامل)
   ok(Math.max(...love.map(k => keys.indexOf(k))) < keys.indexOf('career'),
     'ترتیبِ لیست: عاطفی‌ها قبل از شغل و پول');
