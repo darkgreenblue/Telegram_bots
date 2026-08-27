@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.31.0';
+const PRODUCT_VERSION = '3.32.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2273,8 +2273,15 @@ async function showLuckyStatus(ctx, uid, text, extra) {
   if (m) patchSession(uid, { luckyStatusMsgId: m.message_id });
 }
 
-const luckyReminderRow = (on) => [Markup.button.callback(
-  on ? L.buttons.luckyRemindOff : L.buttons.luckyRemindOn, on ? 'lremind:0' : 'lremind:1')];
+/* 🔔 دکمه‌ی «فردا یادآوری کن» فقط زیرِ **پایانِ دستِ کارت شانس** و فقط وقتی کاربر هنوز
+   opt-in نکرده. دو قاعده‌ی صریحِ مالک (۱۴۰۵/۰۶/۰۵) این‌جا قفل شده‌اند:
+     ۱) نسخه‌ی «🔕 دیگه یادآوری نکن» **هرگز** از این ردیف ساخته نمی‌شود. آن دکمه فقط و
+        فقط زیرِ پیامِ یادآوریِ شبانه‌ی ساعت ۲۲ دیده می‌شود (callback `dailyoff`)، چون
+        تنها جایی است که کاربر واقعاً یک پیامِ ناخواسته گرفته و باید راهِ خاموشی داشته باشد.
+        پیشنهادِ خاموشی زیرِ پیامی که خودِ کاربر بازش کرده، دعوت به انصراف است.
+     ۲) بعد از تپ، دکمه **حذف** می‌شود، نه اینکه به دکمه‌ی دیگری تبدیل شود. */
+const luckyReminderRow = (on) => (on ? [] :
+  [[Markup.button.callback(L.buttons.luckyRemindOn, 'lremind:1')]]);
 
 /* دستِ در جریان: `{ d: روز, n: nonce, p: [انتخاب‌ها], f: تعدادِ الماسِ پیداشده }`.
    خواندن fail-safe است: هر JSON خرابی مثل «دستی وجود ندارد» رفتار می‌کند، نه کرش. */
@@ -2392,7 +2399,9 @@ async function luckyCard(ctx) {
   const open = openLuckyHand(uid);
   if (open) return resumeLuckyHand(ctx, uid, open);
   if (user.lucky_date === today) {
-    return ctx.reply(L.lucky.already, Markup.inlineKeyboard([luckyReminderRow(!!user.lucky_reminder_on)]));
+    // بدونِ هیچ دکمه‌ی یادآوری (تصمیمِ صریحِ مالک): این پیام جوابِ یک تپِ خودِ کاربر است،
+    // نه یک پیامِ ناخواسته، پس نه جای پیشنهادِ خاموشی است و نه جای opt-in.
+    return ctx.reply(L.lucky.already);
   }
   setState(uid, 'lucky_shuffle');
   await ctx.reply(L.lucky.intro(LUCKY_PICKS, LUCKY_COINS, GRID_SIZE));
@@ -2509,7 +2518,7 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   const reminderOn = !!getUser(uid)?.lucky_reminder_on;
   // نتیجه روی **همان** پیامِ وضعیت می‌نشیند (خطِ شمارنده بالایش می‌ماند تا «۳ از ۳» دیده شود).
   await showLuckyStatus(ctx, uid, `${counter}\n\n${found ? L.lucky.won(found) : L.lucky.lost}`,
-    Markup.inlineKeyboard([luckyReminderRow(reminderOn)]));
+    Markup.inlineKeyboard(luckyReminderRow(reminderOn)));
   // UX v2.1 (تصمیمِ صریحِ مالک): بعد از کشیدنِ کارتِ شانس، کاربر دعوت می‌شود سؤالِ
   // بعدی‌اش را از تاروت بپرسد — چه سکه برده باشد چه نه، همیشه یک قدمِ بعدیِ روشن دارد.
   await sleep(PACE_S);
@@ -2520,15 +2529,19 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
 bot.action(/^lremind:([01])$/, async (ctx) => {
   const uid = ctx.from.id;
   const on = ctx.match[1] === '1';
-  await ctx.answerCbQuery().catch(() => {});
+  // پاسخِ صریح روی خودِ دکمه، چون از این به بعد هیچ پیامی فرستاده نمی‌شود و کاربر
+  // بدونِ این هیچ نشانه‌ای نمی‌گرفت که تپش کار کرد (همان درسِ گریدِ بی‌جواب، v3.30.0).
+  await ctx.answerCbQuery(on ? L.lucky.remindOnToast : L.lucky.remindOffToast).catch(() => {});
   stmts.setLuckyReminder.run(on ? 1 : 0, uid);
   // 🌙 از v3.28.0 یادآوریِ شبانه opt-**out** است و از `daily_reminder_off` می‌خواند. کاربری
   // که این‌جا «دیگه یادآوری نکن» می‌زند منظورش کلِ یادآوریِ شبانه است، نه فقط یک ستونِ
   // بازنشسته؛ پس نیتش به همان ستونی می‌رود که جارو واقعاً می‌خواند. برعکسش هم درست است.
   if (on) stmts.setDailyReminderOn.run(uid); else stmts.setDailyReminderOff.run(uid);
   track(db, uid, 'lucky_reminder', { on: on ? 1 : 0 });
-  try { await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([luckyReminderRow(on)]).reply_markup); } catch {}
-  await ctx.reply(on ? L.lucky.remindOn : L.lucky.remindOff);
+  // دکمه **حذف** می‌شود، نه اینکه به «دیگه یادآوری نکن» تبدیل شود (تصمیمِ صریحِ مالک).
+  // `luckyReminderRow(true)` آرایه‌ی خالی می‌دهد، پس این یک کیبوردِ خالیِ واقعی است.
+  try { await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(luckyReminderRow(on)).reply_markup); } catch {}
+  // ⚠️ هیچ پیامی فرستاده نمی‌شود (خواسته‌ی صریحِ مالک): تأییدِ کار روی خودِ دکمه آمد.
 });
 
 /* ---------- 🎁 منوی سرگرمی‌های رایگان + 📜 فال حافظ (رایگان، روزی یک‌بار، بدون LLM) ----------
@@ -2811,7 +2824,7 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 const MENU_PIN = 'personal';                 // جایگاهِ اولِ ثابت
 const MENU_SLOTS_DEFAULT = ['yesno', 'love'];
 
-// ═══ آزمایشِ `love_slot` (v3.31.0) — کدام دکمه‌ی عاطفی جایگاهِ سوم را بگیرد ═══
+// ═══ آزمایشِ `love_slot` (v3.32.0) — کدام دکمه‌ی عاطفی جایگاهِ سوم را بگیرد ═══
 // فرضیه از دیتای ۴ شهریور ۱۴۰۵: در منوی کوتاه «عشق و رابطه» ۳۳.۶٪ کلیک می‌گیرد، ولی در
 // لیستِ کامل که هر موضوع نمایشِ برابر دارد به ۱۲.۷٪ می‌افتد و «حس طرف مقابل» با ۲۱.۱٪
 // اول می‌شود. یعنی عددِ منوی کوتاه ممکن است **جایگاه** را بسنجد نه **موضوع**.
