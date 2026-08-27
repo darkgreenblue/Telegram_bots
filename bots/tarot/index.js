@@ -20,7 +20,7 @@ import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
 import SPREADS, {
   DAILY, SPREAD_BY_ID, SPREADS_V3, spreadsFor, faOf,
-  TOPICS_V3, TOPIC_BY_KEY, SIZES_V3, spreadIdOf, topicOf,
+  TOPICS_V3, TOPIC_BY_KEY, SIZES_V3, spreadIdOf, topicOf, topicForAnalytics,
 } from './spreads.js';
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
@@ -174,7 +174,7 @@ const TEST_PHASE = false;
 //         کاربرِ واقعی‌ای عوض نمی‌شود، ولی طبق بند ۲ج/۴ فیچرِ فقط-ادمین هم نسخه می‌گیرد.
 // 3.24.0: نگارشِ انبوهِ گنجینه تمام شد — ۹۳۶ متن (۱۲ ماه × ۷۸ کارت × ۱ نسخه)،
 //         دیگر هیچ کاربری به پیامِ «گنجینه‌ی این ماه آماده نیست» نمی‌خورد.
-const PRODUCT_VERSION = '3.30.0';
+const PRODUCT_VERSION = '3.31.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -2810,17 +2810,57 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
 // آزمایش از داشبورد running نشود، `variant()` همیشه control می‌دهد = همین جفتِ پیش‌فرض.
 const MENU_PIN = 'personal';                 // جایگاهِ اولِ ثابت
 const MENU_SLOTS_DEFAULT = ['yesno', 'love'];
-// نسخه‌های آزمایشِ `menu_slots`. control عمداً اولین ردیف است تا خاموش‌بودنِ آزمایش
-// دقیقاً یعنی «همان چیزی که مالک برای شروع خواست».
+
+// ═══ آزمایشِ `love_slot` (v3.31.0) — کدام دکمه‌ی عاطفی جایگاهِ سوم را بگیرد ═══
+// فرضیه از دیتای ۴ شهریور ۱۴۰۵: در منوی کوتاه «عشق و رابطه» ۳۳.۶٪ کلیک می‌گیرد، ولی در
+// لیستِ کامل که هر موضوع نمایشِ برابر دارد به ۱۲.۷٪ می‌افتد و «حس طرف مقابل» با ۲۱.۱٪
+// اول می‌شود. یعنی عددِ منوی کوتاه ممکن است **جایگاه** را بسنجد نه **موضوع**.
+//
+// طراحی عمداً تک‌متغیره است: جایگاه ۱ (پین) و جایگاه ۲ (`yesno`) در هر سه شاخه یکسان‌اند و
+// فقط جایگاه سوم عوض می‌شود. اگر جایِ دکمه هم بین شاخه‌ها فرق می‌کرد، تفاوتِ نتیجه قابلِ
+// نسبت‌دادن به نام نبود — همان اشتباهی که گزارش هشدارش را داده بود.
+//
+// `control` = دقیقاً رفتارِ امروز. هر خطا، هر شاخه‌ی ناشناخته و هر حالتِ non-running به
+// همین برمی‌گردد، پس kill از داشبورد (بند ۲ج/۸) رفتار را بی‌کم‌وکاست به قبل می‌برد.
+const LOVE_SLOT_EXP = 'love_slot';
 const MENU_SLOT_VARIANTS = {
-  control: MENU_SLOTS_DEFAULT,
-  love_first: ['love', 'yesno'],
-  crush_money: ['crush', 'money'],
-  feel_career: ['feel', 'career'],
+  control: MENU_SLOTS_DEFAULT,      // 💞 عشق و رابطه
+  feel:    ['yesno', 'feel'],       // 💓 حس طرف مقابل
+  exback:  ['yesno', 'exback'],     // ❤️‍🩹 بازگشت اکس
 };
+
+/* 🎯 دامنه‌ی آزمایش: **فقط کاربرانی که بعد از شروعِ آزمایش ثبت‌نام کرده‌اند.**
+ *
+ * درخواستِ صریحِ مالک، و دلیلش هم درست است: کاربری که قبلاً منوی قدیم را دیده، ترجیحش
+ * از قبل لنگر خورده و واردکردنش نتیجه را آلوده می‌کند.
+ *
+ * چرا `created_at` و نه «هنوز فال نگرفته»: معیار باید **تغییرناپذیر** باشد. اگر شرط
+ * «فال نگرفته» بود، کاربر بعد از اولین فالش از دامنه بیرون می‌افتاد و چون این گارد
+ * **قبل از** `variant()` اجرا می‌شود، شاخه‌اش وسطِ راه به control برمی‌گشت — یعنی همان
+ * کاربر دو منوی متفاوت می‌دید و exposureاش بی‌معنی می‌شد.
+ *
+ * چرا `started_at` و نه یک ثابتِ زمانیِ دستی: مالک آزمایش را از داشبورد و در زمانی که
+ * خودش می‌خواهد start می‌کند. اگر تاریخ را این‌جا hardcode می‌کردیم، کاربرانِ بینِ deploy
+ * و start «واجد شرایط» می‌شدند در حالی که منوی control را دیده بودند.
+ *
+ * جدولِ `experiments` را خودِ همین ربات با `ensureAb` ساخته، پس خواندنش از این‌جا
+ * لایه‌شکنی نیست؛ عمداً محلی است تا `shared/` دست نخورد و voice2text بی‌دلیل ری‌استارت نشود.
+ * هر خطا → خارج از دامنه → control (هم‌جهت با قاعده‌ی fail-safe خودِ shared/ab.js). */
+const expStartedAt = db.prepare("SELECT started_at FROM experiments WHERE key=? AND status IN ('running','draining')");
+function inLoveSlotAudience(uid) {
+  try {
+    const startedAt = expStartedAt.get(LOVE_SLOT_EXP)?.started_at;
+    if (!startedAt) return false;                       // آزمایش شروع نشده = هیچ‌کس در دامنه نیست
+    const u = getUser(uid);
+    return !!u && Number(u.created_at) >= Number(startedAt);
+  } catch (e) { logErr('loveSlot audience:', e.message); return false; }
+}
+
 const menuSlotsFor = (uid) => {
-  try { return MENU_SLOT_VARIANTS[variant(db, uid, 'menu_slots')] || MENU_SLOTS_DEFAULT; }
-  catch { return MENU_SLOTS_DEFAULT; }
+  try {
+    if (!inLoveSlotAudience(uid)) return MENU_SLOTS_DEFAULT;
+    return MENU_SLOT_VARIANTS[variant(db, uid, LOVE_SLOT_EXP)] || MENU_SLOTS_DEFAULT;
+  } catch { return MENU_SLOTS_DEFAULT; }
 };
 
 // «سؤال شخصی خودم» (پینِ منو) همیشه **آبی** است (تصمیمِ صریحِ مالک) — پرتکرارترین
@@ -3000,7 +3040,9 @@ bot.action(/^spread:(\w+)$/, async (ctx) => {
   // propهای `topic` و `size` افزایشی‌اند (بند ۲ج/۳): `spread` دست‌نخورده می‌ماند تا
   // تحلیلِ تاریخی نشکند، ولی حالا می‌شود «کدام موضوع» را جدا از «چه عمقی» سنجید —
   // و همین ورودیِ آزمایشِ چرخشیِ جایگاه‌های منوست.
-  track(db, uid, 'spread_selected', { spread: spread.id, topic: topicOf(spread.id) || '', size: spread.size });
+  // `topicForAnalytics` و نه `topicOf`: چیدمان‌های بازنشسته (three/celtic/…) موضوعِ نسل
+  // جدید ندارند و تا امروز زیرِ کلیدِ خالی گم می‌شدند. حالا `legacy:<id>` می‌گیرند.
+  track(db, uid, 'spread_selected', { spread: spread.id, topic: topicForAnalytics(spread.id), size: spread.size });
 
   // 🪙 UX v2.6: کسرِ اعتبار **همین‌جا** (قبل از پرسیدنِ سؤال)، نه در پی‌والِ بعد از
   // انتخابِ کارت‌ها. اگر موفق شد، بقیه‌ی فلو دقیقاً مثل قبل ادامه می‌دهد ولی دیگر
