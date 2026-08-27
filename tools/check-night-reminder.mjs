@@ -7,6 +7,9 @@
 //
 // اجرا: node tools/check-night-reminder.mjs
 import { readFileSync } from 'fs';
+// ⚠️ `L` پایین‌تر یک **stub** است (فقط شکلِ فراخوانی را نگه می‌دارد). هرجا مقدارِ
+// واقعیِ متن لازم است باید از `REAL` خوانده شود، نه از آن stub.
+import REAL from '../bots/tarot/locales/fa.js';
 
 const SRC = readFileSync('bots/tarot/index.js', 'utf8');
 const LOC = readFileSync('bots/tarot/locales/fa.js', 'utf8');
@@ -173,6 +176,57 @@ ok('دکمه‌ها همان پیشنهادهای پایانِ فال‌اند',
 ok('و دکمه‌ی دعوت هم دارد', /inviteRow\(ref\.referrer_id\)/.test(reward));
 // متنِ locale واقعاً موجودی را چاپ می‌کند
 ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referralReward:\s*\(name, bonus, cur, balance/.test(LOC));
+
+/* ═══════ ۷.۵) «🔕 دیگه یادآوری نکن» فقط زیرِ یادآوریِ شبانه ═══════
+   قاعده‌ی صریحِ مالک (۱۴۰۵/۰۶/۰۵). پیشنهادِ خاموشی زیرِ پیامی که خودِ کاربر بازش کرده،
+   دعوت به انصراف است؛ فقط جایی مجاز است که کاربر یک پیامِ **ناخواسته** گرفته باشد. */
+{
+  // ردیفِ کارت شانس از سورس بریده و **اجرا** می‌شود، نه رجکس روی نامش.
+  // ⚠️ تا انتهای **همان دستور** بریده می‌شود (اولین `;` در پایانِ خط)، نه تا یک الگوی
+  // نقطه‌ایِ `]]);`: نسخه‌ی اول به علامت‌گذاریِ دقیق گره خورده بود و یک تغییرِ بی‌ضررِ
+  // شکلِ کد به‌جای شکستِ تمیزِ ادعا، کلِ چک را با خطای سینتکس می‌ترکاند.
+  const rowSrc = (SRC.match(/const luckyReminderRow = [\s\S]*?;\n/) || [])[0] || '';
+  ok('ردیفِ یادآوریِ کارت شانس از سورس استخراج شد', !!rowSrc);
+  let row = null;
+  try {
+    row = new Function('L', 'Markup', `${rowSrc} return luckyReminderRow;`)(
+      REAL, { button: { callback: (t, d) => ({ t, d }) } });
+  } catch { /* پایین به‌صورتِ ادعای شکست‌خورده گزارش می‌شود، نه کرش */ }
+  ok('ردیفِ استخراج‌شده اجرا شد', typeof row === 'function');
+  const off = row ? row(false) : null, on = row ? row(true) : null;
+  ok('کاربرِ opt-in‌نکرده دکمه‌ی «فردا یادآوری کن» می‌بیند',
+     !!off && off.length === 1 && off[0][0].d === 'lremind:1'
+     && off[0][0].t === REAL.buttons.luckyRemindOn);
+  ok('بعد از opt-in هیچ دکمه‌ای نمی‌ماند (حذف، نه تبدیل)', Array.isArray(on) && on.length === 0);
+  ok('این ردیف هرگز دکمه‌ی خاموشی نمی‌سازد',
+     !JSON.stringify([off, on]).includes('lremind:0'));
+
+  // تنها مصرف‌کننده‌ی مجازِ nightRemindOff همان جاروی شبانه است.
+  ok('«دیگه یادآوری نکن» فقط یک بار در کلِ سورس ساخته می‌شود',
+     (SRC.match(/nightRemindOff/g) || []).length === 1);
+  ok('و همان یک بار داخلِ جاروی شبانه است', /nightRemindOff/.test(sweep));
+  ok('برچسبِ تکراریِ luckyRemindOff از locale حذف شده', !/luckyRemindOff/.test(LOC));
+
+  // پیامِ «امروز استفاده کردی» هیچ کیبوردی ندارد.
+  const already = (SRC.match(/if \(user\.lucky_date === today\) \{[\s\S]*?\n  \}/) || [])[0] || '';
+  ok('شاخه‌ی «امروز استفاده کردی» پیدا شد', !!already);
+  ok('پیامِ «امروز استفاده کردی» هیچ دکمه‌ای ندارد',
+     /ctx\.reply\(L\.lucky\.already\);/.test(already) && !/Markup/.test(already));
+
+  // تپِ «فردا یادآوری کن» هیچ پیامی نمی‌فرستد.
+  const lrem = (SRC.match(/bot\.action\(\/\^lremind:[\s\S]*?\n\}\);/) || [])[0] || '';
+  ok('هندلرِ lremind پیدا شد', !!lrem);
+  ok('تپِ یادآوری هیچ پیامی نمی‌فرستد', !/ctx\.reply\(/.test(lrem));
+  ok('به‌جایش روی خودِ دکمه toast می‌دهد', /answerCbQuery\(on \? L\.lucky\.remindOnToast/.test(lrem));
+  ok('و کیبورد را با همان تک‌منبع خالی می‌کند',
+     /editMessageReplyMarkup\(Markup\.inlineKeyboard\(luckyReminderRow\(on\)\)/.test(lrem));
+}
+
+/* ═══════ ۷.۶) CTAی شبانه = همان برچسبِ کیبورد ═══════
+   عمدی است (کاربر همان دکمه‌ی آشنا را می‌بیند)، ولی چون تغییرِ برچسبِ کیبورد می‌تواند
+   **یک شاخه** را عوض کند و آزمایش را آلوده کند (درسِ intro_order)، برابری قفل می‌شود. */
+ok('CTAی شاخه‌ی control = برچسبِ کیبوردِ فال تک کارت', REAL.buttons.nightDaily === REAL.buttons.dailyOneCard);
+ok('CTAی شاخه‌ی lucky = برچسبِ کیبوردِ کارت شانس', REAL.buttons.nightLucky === REAL.buttons.luckyMain);
 
 /* ═══════ ۸) قواعدِ کپیِ ریشه (بند ۱۰) ═══════ */
 for (const [k, v] of Object.entries({ nightDaily: nd, nightLucky: nl })) {
