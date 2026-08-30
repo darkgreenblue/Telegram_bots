@@ -180,7 +180,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.36.0';
+const PRODUCT_VERSION = '3.37.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -954,6 +954,14 @@ const stmts = {
   setReferralRewarded:  db.prepare('UPDATE referrals SET rewarded=1 WHERE id=?'),
 
   setMemory: db.prepare('UPDATE users SET memory_json=? WHERE telegram_id=?'),
+  // 🧹 ریستِ مشخصات (فقط ادمین، /resetprofile). عمداً **یک** UPDATE است نه چند تا: یا همه‌ی
+  // فیلدها با هم پاک می‌شوند یا هیچ‌کدام، پس کاربر هرگز در حالتِ نیمه‌ریست (مثلاً اسمِ پاک‌شده
+  // ولی welcomed=1) گیر نمی‌کند که خودش یک بن‌بستِ تازه می‌ساخت (بند ۹ب).
+  // ⚠️ `balance` و `welcome_bonus_at` عمداً دست نمی‌خورند: موجودی مالِ کاربر است (تصمیمِ صریحِ
+  // مالک) و write-once بودنِ هدیه یعنی ریست نباید هدیه‌ی دوم بدهد.
+  // ⚠️ عمداً یک رشته‌ی واحد است (نه الحاقِ چندتکه) تا `sqlOf` در چکِ CI بتواند **همین**
+  // SQL را از سورس ببرد و اجرا کند؛ تستی که از روی کد کپی شده باشد چیزی را تضمین نمی‌کند.
+  resetProfile: db.prepare(`UPDATE users SET display_name='', birth_month=0, memory_json='', welcomed=0, state='onboard_name', session_json='' WHERE telegram_id=?`),
   getDailyText: db.prepare('SELECT text FROM daily_texts WHERE card_key=? AND reversed=? AND focus=?'),
   setDailyText: db.prepare('INSERT OR REPLACE INTO daily_texts (card_key, reversed, focus, text) VALUES (?,?,?,?)'),
   getCardFile: db.prepare('SELECT file_id FROM card_files WHERE card_key=?'),
@@ -1815,9 +1823,16 @@ async function showGate(ctx, uid) {
 // بعد از تأییدِ عضویت: دقیقاً همان آنبوردینگِ قبلی (هدیه → پرسیدنِ نام). تک‌منبع، تا مسیرِ
 // گیت‌دار و مسیرِ بدونِ گیت هرگز از هم واگرا نشوند.
 async function startOnboarding(ctx, uid) {
-  grantWelcomeBonus(uid);
-  await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), Markup.removeKeyboard());
-  await typing(ctx, PACE_S);
+  // ⚠️ خروجیِ grantWelcomeBonus تا امروز دور ریخته می‌شد و پیامِ هدیه بی‌قید می‌رفت. برای هر
+  // کاربرِ واقعیِ امروز فرقی نمی‌کند (اولین آنبوردینگ همیشه granted=true است)، ولی از وقتی
+  // /resetprofile اضافه شد، کاربرِ ریست‌شده دوباره به این مسیر می‌رسد در حالی که هدیه‌اش را
+  // قبلاً گرفته (welcome_bonus_at ماندگار است). بدونِ این شرط، پیام می‌گفت «۵ الماس اضافه شد»
+  // بدونِ اینکه چیزی اضافه شده باشد — یعنی ربات به کاربر دروغ می‌گفت.
+  const granted = grantWelcomeBonus(uid);
+  if (granted) {
+    await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), Markup.removeKeyboard());
+    await typing(ctx, PACE_S);
+  }
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
   setState(uid, 'onboard_name');
@@ -5067,6 +5082,69 @@ bot.command('loading', async (ctx) => {
   await ctx.reply(rate
     ? `⚠️ ${rate} بار 429 گرفتیم. ضرب‌آهنگ باید آرام‌تر شود (FAST_MS در bots/tarot/loading.js).`
     : `✅ هیچ 429ای نگرفتیم؛ ضرب‌آهنگِ فعلی امن است.\n\nطرحِ فعال: ${ACTIVE}. برای عوض کردنش اسمش را به من بگو.`);
+});
+
+// 🧹 /resetprofile USER_ID — ریستِ مشخصاتِ یک کاربر به‌دستِ ادمین (فقط ادمین)
+//
+// چرا لازم شد (تیکت‌های #TRT-8186025542 و #TRT-664050176، ۱۴۰۵/۰۶/۰۸): دو کاربرِ واقعی
+// اسم و ماهِ تولدشان را اشتباه وارد کرده بودند (اکانتِ پدر با نامِ دختر ساخته شده بود) و
+// **هیچ راهی برای اصلاحش نداشتند**. نامِ اشتباه در سرخطِ هر فال چاپ می‌شود و ماهِ تولدِ
+// اشتباه متنِ کارتِ روز را از گنجینه‌ی ماهِ دیگری می‌آورد، یعنی یک بن‌بستِ دائمی روی
+// خروجیِ اصلیِ محصول (بند ۹ب: هیچ صفحه‌ای بن‌بست نیست).
+//
+// ⚠️ دامنه عمداً باریک است (تصمیمِ صریحِ مالک): فقط نام، ماهِ تولد و حافظه پاک می‌شوند.
+// موجودی، فال‌ها، دعوت‌ها و پرداخت‌ها **دست نمی‌خورند**. دلیلِ فنیِ نگه‌داشتنِ فال‌ها و
+// دعوت‌ها هم هست، نه فقط سلیقه: شرطِ پاداشِ دعوت `countDelivered === 1` است، پس پاک‌کردنِ
+// تاریخچه‌ی فالِ کسی که دعوت‌شده‌ی دیگری است، با اولین فالِ بعدی‌اش پاداشِ همان دعوت را
+// **دوباره** واریز می‌کند (بند ۹: پول).
+//
+// تأیید دو مرحله‌ای است، مثل مسیرِ برگشتِ رسیدِ فیک (`cardsms` → `cardrev`): یک آی‌دیِ
+// اشتباه‌تایپ‌شده یعنی ریستِ برگشت‌ناپذیرِ یک کاربرِ بی‌گناه، پس قبل از اجرا دقیقاً نشان
+// داده می‌شود چه کسی و با چه مشخصاتی ریست می‌شود.
+//
+// این مسیرِ موقتِ ادمین است؛ راهِ درست، فیچرِ خودسرویسِ «تغییر اسم و ماه تولد» است که در
+// دستورِ کار قرار گرفت تا کاربر اصلاً نیازی به پشتیبانی نداشته باشد (بند ۶ب).
+bot.command('resetprofile', (ctx) => {
+  if (!isAdmin(ctx.from.id)) return;                 // مثل /stats: سکوتِ کامل برای غیرادمین
+  const raw = (ctx.message.text.trim().split(/\s+/)[1] || '');
+  const target = parseInt(normalizeDigits(raw).replace(/[^\d]/g, ''), 10);
+  if (!target) return ctx.reply(L.reset.profUsage);
+  const u = getUser(target);
+  if (!u) return ctx.reply(L.reset.profNotFound(target));
+  return ctx.reply(
+    L.reset.profConfirm(target, dispName(u), u.birth_month ? monthFa(u.birth_month) : '', u.balance, curOf(target).emoji),
+    Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.profResetYes, `rprof:${target}`)],
+      [Markup.button.callback(L.buttons.profResetNo, 'rprof_no')],
+    ]));
+});
+
+bot.action(/^rprof:(\d+)$/, async (ctx) => {
+  // گاردِ دوم: دکمه در چتِ ادمین می‌ماند و callback ها سال‌ها زنده‌اند (بند ۲ج/۶)
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery().catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  const target = parseInt(ctx.match[1], 10);
+  const u = getUser(target);
+  if (!u) return ctx.editMessageText(L.reset.profNotFound(target)).catch(() => {});
+  const before = dispName(u);
+  stmts.resetProfile.run(target);
+  console.log(`🧹 RESETPROFILE user=${target} by=${ctx.from.id} name="${before}"`);
+  await ctx.editMessageText(L.reset.profDone(target, before)).catch(() => {});
+  // کاربر باید بفهمد چه شد، وگرنه دفعه‌ی بعد که پیام می‌دهد گیج می‌شود. استیتش الان
+  // `onboard_name` است، پس هر متنی که بفرستد مستقیم به‌عنوان نام ثبت می‌شود.
+  try {
+    await ctx.telegram.sendMessage(target, L.reset.profUserNote,
+      { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
+  } catch (e) {
+    logErr('resetprofile notify:', e.message);
+    await ctx.reply(L.reset.profNoticeFailed(target)).catch(() => {});
+  }
+});
+
+bot.action('rprof_no', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery().catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  return ctx.editMessageText(L.reset.profCanceled).catch(() => {});
 });
 
 bot.command('reset', doReset);
