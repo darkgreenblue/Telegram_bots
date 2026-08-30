@@ -6,11 +6,29 @@ on:
   pull_request:
 
 jobs:
+  # کدام ربات‌ها واقعاً باید چک شوند؟ (بند ۳ج ریشه — سهمیه‌ی Actions)
+  # گیت‌هاب per **جاب** و رند به بالا حساب می‌کند، پس ماتریسِ ثابتِ ۶تایی یعنی یک تغییرِ
+  # تک‌خطی در یک ربات، پنج دقیقه‌ی کامل برای رباتی خرج می‌کند که فایلش عوض نشده.
+  # منطق و گاردش: tools/ci-changed-bots.mjs و tools/check-ci-changed.mjs (fail-open).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      bots:  ${{ steps.f.outputs.bots }}
+      tabir: ${{ steps.f.outputs.tabir }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: node tools/ci-changed-bots.mjs
+
   check:
+    needs: changes
+    if: needs.changes.outputs.bots != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        bot: [voice2text, resume-tailor, tarot, dashboard, daily-brief]
+        bot: ${{ fromJSON(needs.changes.outputs.bots) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +67,13 @@ jobs:
       - name: Deploy idempotency check
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-env.mjs
+
+      # فیلترِ مسیرِ خودِ CI: تصمیم می‌گیرد چه چیزی **اجرا نشود**، پس اشتباهش قرمز
+      # نمی‌شود و فقط ساکت یک محافظ را برمی‌دارد. ادعای مرکزی: هر مسیرِ ناشناخته
+      # همه را روشن کند (fail-open)، نه اینکه صرفه‌جویی حداکثر شود.
+      - name: CI path filter check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-ci-changed.mjs
 
       # همان قاعده از زاویه‌ی دوم: چکِ بالا فقط پینگ‌پنگِ .env را می‌بیند. این یکی
       # بلوک‌های **یک‌باره** را می‌بیند — بلوکی که شرطش همیشه درست است و در هر مرج
@@ -239,6 +264,8 @@ jobs:
 
   # tabir-khab پایتونی است (استثنای مونوریپو) — جدا از ماتریس Node چک می‌شود
   check-tabir-khab:
+    needs: changes
+    if: needs.changes.outputs.tabir == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
