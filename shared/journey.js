@@ -9,6 +9,7 @@
 // دو رویدادِ جدید (افزایشی — هیچ رویداد/قراردادِ موجودی عوض نمی‌شود):
 //   view  props: { k, t, n?, adm? }        k = کلیدِ صفحه، t = msg|photo|edit، n = طولِ متنِ محتوایی
 //   act   props: { a, d?, s?, n?, adm? }   a = کلیدِ اکشن، d = دیتای کامل، s = صفحه‌ای که دکمه رویش بود
+//                                         (برای a='my_chat_member'، d = وضعیتِ تازه: kicked|member|…)
 //
 // قوانین shared: بدون import از npm؛ db و isAdmin و... با dependency injection می‌آیند.
 // خطای این ماژول هرگز نباید فلو را بشکند: همه‌چیز در try/catch و در بدترین حالت فقط logErr.
@@ -224,7 +225,15 @@ function logAct(o, ctx) {
   } else if (msg?.photo) props.a = 'photo';
   else if (msg?.document) props.a = 'doc';
   else if (ctx.inlineQuery) props.a = 'inline';
-  else props.a = ctx.updateType || 'other';
+  else if (ctx.myChatMember) {
+    // آپدیتِ سرویسیِ تلگرام، نه اقدامی داخلِ فلو. در چتِ خصوصی دقیقاً یعنی: کاربر ربات را
+    // بلاک کرد (`kicked`) یا آنبلاک/استارت کرد (`member`). این پرتکرارترین «آخرین ردپا»ی
+    // کاربرانِ ریخته است، پس بدونِ وضعیت فقط یک نامِ خامِ بی‌معنی در گزارشِ خروج می‌ماند.
+    // کلیدِ `a` عمداً همان `my_chat_member` قبلی مانده (بند ۲ج/۳: رویدادِ موجود تغییر
+    // نمی‌کند) و وضعیت در propِ **جدیدِ** `d` می‌نشیند — کاملاً افزایشی.
+    props.a = 'my_chat_member';
+    props.d = String(ctx.myChatMember.new_chat_member?.status || '').slice(0, 16);
+  } else props.a = ctx.updateType || 'other';
 
   if (o.isAdmin(uid)) props.adm = 1;
   track(o.db, uid, JOURNEY_EVENTS.ACT, props);

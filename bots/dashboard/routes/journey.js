@@ -11,14 +11,26 @@ import { table, cohortCount } from '../lib/html.js';
 const validBot = (b) => (Object.prototype.hasOwnProperty.call(FUNNELS, b) ? b : '');
 const intOf = (url, k, d = 0) => { const v = parseInt(url.searchParams.get(k) ?? '', 10); return Number.isFinite(v) ? v : d; };
 
-/* محتوای سلولِ «قدم»: متنِ واقعیِ پیام یا برچسبِ اکشن + متادیتای کمکی (بدونِ تگِ td) */
+/* محتوای سلولِ «قدم»: متنِ واقعیِ پیام یا برچسبِ اکشن + متادیتای کمکی (بدونِ تگِ td).
+   `note` توضیحِ کوتاهِ ردیف‌هایی است که از اسمشان فهمیده نمی‌شوند (رویدادِ داخلی، آپدیتِ
+   سرویسیِ تلگرام) — همان چیزی که قبلاً باید از سورس درمی‌آمد. */
 function stepCell(ev, key, screens) {
   const l = stepLabel(ev, key, screens);
-  const meta = ev === 'act'
-    ? 'اکشنِ کاربر'
-    : (l.kind === 'content' ? 'متنِ تولیدشده (طولش متغیر است)' : (l.buttons ? `دکمه‌ها: ${l.buttons}` : 'بدون دکمه'));
+  const meta = l.kind === 'act' ? 'اکشنِ کاربر'
+    : l.kind === 'event' ? 'رویدادِ قیف (پیامِ صفحه نیست)'
+    : l.kind === 'content' ? 'متنِ تولیدشده (طولش متغیر است)'
+    : (l.buttons ? `دکمه‌ها: ${l.buttons}` : 'بدون دکمه');
   return `${l.icon} <span class="step-txt">${esc(l.text)}</span>`
-    + `<span class="step-meta">${esc(meta)}</span>`;
+    + `<span class="step-meta">${esc(meta)}</span>`
+    + (l.note ? `<span class="step-meta">${esc(l.note)}</span>` : '');
+}
+
+/* سلولِ «قدمِ قبلی»: فشرده و بدونِ note (ستونِ کمکی است، نه ردیفِ اصلی). */
+function prevCell(prev, screens) {
+  if (!prev) return '<span class="muted">-</span>';
+  const l = stepLabel(prev.ev, prev.k, screens);
+  return `${l.icon} <span class="step-txt">${esc(l.text)}</span>`
+    + `<span class="step-meta">${fmt(prev.n)} نفر از این راه رسیدند</span>`;
 }
 
 /* ═══ قطعه‌ی بازشو: قدم‌های ریزِ بینِ دو مرحله‌ی قیف ═══ */
@@ -60,25 +72,30 @@ export function funnelStepsFragment(url) {
 }
 
 /* ═══ کارتِ «کجا ریختند؟» — آخرین کارِ کسانی که دیگر برنگشتند ═══ */
-export function exitCard(botKey, { since, ch, ver }) {
-  const { list, total, idleBefore } = exitPoints(botKey, { since, ch, ver });
+// `now` فقط برای تست است (چکِ CI باید بتواند «۲۴ ساعت بعد» را شبیه‌سازی کند)؛ صفر = همین حالا.
+export function exitCard(botKey, { since, ch, ver, now = 0 }) {
+  const { list, total, idleBefore, blocks } = exitPoints(botKey, { since, ch, ver, now });
   if (!list.length) return '';
   const screens = screenMap(botKey);
-  const body = list.map((r) => {
-    const known = r.ev === 'view' || r.ev === 'act';
-    const cell = known
-      ? stepCell(r.ev, r.k, screens)
-      : `🏁 <span class="step-txt">${esc(r.ev)}</span><span class="step-meta">رویدادِ قیف</span>`;
-    return [
-      cell,
-      cohortCount(r.n, { k: 'exit', bot: botKey, ev: r.ev, key: r.k, since: String(since), idle: String(idleBefore) }),
-      `<span class="muted">${total ? Math.round(r.n / total * 100) : 0}٪</span>`,
-    ];
-  });
+  const body = list.map((r) => [
+    stepCell(r.ev, r.k, screens),
+    prevCell(r.prev, screens),
+    cohortCount(r.n, { k: 'exit', bot: botKey, ev: r.ev, key: r.k, since: String(since), idle: String(idleBefore) }),
+    `<span class="muted">${total ? Math.round(r.n / total * 100) : 0}٪</span>`,
+  ]);
+  // تفکیکِ بلاک از آنبلاک — فقط وقتی چنین ردیفی در جدول هست
+  const kicked = blocks?.get('kicked') || 0;
+  const rejoined = [...(blocks || new Map())].filter(([k]) => k && k !== 'kicked').reduce((t, [, n]) => t + n, 0);
+  const blockNote = (kicked || rejoined)
+    ? `<p class="muted">از ردیفِ «بلاک/آنبلاک»: <b>${fmt(kicked)}</b> نفر ربات را بلاک کردند`
+      + (rejoined ? ` و <b>${fmt(rejoined)}</b> نفر آنبلاک/استارت کردند ولی بعدش هیچ کاری نکردند` : '')
+      + `.</p>` : '';
   return `<div class="card"><h2>${esc(FUNNELS[botKey]?.title || botKey)} — کجا ریختند؟</h2>
     <p class="muted">${fmt(total)} کاربر که بیش از ۲۴ ساعت است برنگشته‌اند؛ این آخرین چیزی است که دیدند یا زدند.
-      این جدول مستقیم می‌گوید کدام پیام «آخرِ خط» بوده. روی عدد بزن تا لیستشان باز شود (برای پرسیدن از پشتیبانی).</p>
-    ${table(['آخرین قدم', 'کاربر', 'سهم'], body)}</div>`;
+      این جدول مستقیم می‌گوید کدام پیام «آخرِ خط» بوده. وقتی خودِ آخرین ردپا علت نیست (بلاک‌کردنِ ربات، یا یک
+      رویدادِ داخلی)، ستونِ «قدمِ قبلی» علتِ واقعی را نشان می‌دهد. روی عدد بزن تا لیستشان باز شود (برای پرسیدن از پشتیبانی).</p>
+    ${blockNote}
+    ${table(['آخرین قدم', 'قدمِ قبلی (پرتکرارترین)', 'کاربر', 'سهم'], body)}</div>`;
 }
 
 /* ═══ صفحه‌ی «صفحه‌ها»: کاتالوگِ همه‌ی پیام‌های ربات + نرخِ عبور ═══ */

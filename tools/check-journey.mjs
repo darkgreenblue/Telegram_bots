@@ -223,6 +223,75 @@ const sess = J.groupSessions([{ ts: 1000 }, { ts: 1100 }, { ts: 1000 + 3 * 3600 
 check('دو سشنِ جدا تشخیص داده شد', sess.length === 2, `→ ${sess.length}`);
 check('جدیدترین سشن اول است', sess[0].start > sess[1].start);
 
+/* ───── ۷) آپدیتِ سرویسیِ my_chat_member: وضعیتش هم ثبت می‌شود ───── */
+// چرا: این پرتکرارترین «آخرین ردپا»ی کاربرانِ ریخته است. بدونِ وضعیت، گزارشِ خروج فقط یک
+// نامِ خامِ بی‌معنی نشان می‌داد و معلوم نبود کاربر بلاک کرده یا آنبلاک (باگِ ۹ شهریور ۱۴۰۵).
+console.log('\n▶ آپدیتِ سرویسیِ تلگرام (بلاک/آنبلاک)');
+db.prepare('INSERT INTO users (telegram_id, name, display_name) VALUES (?,?,?)').run(5, 'e', 'نازنین');
+db.prepare('INSERT INTO users (telegram_id, name, display_name) VALUES (?,?,?)').run(6, 'f', 'پویا');
+await run(5, { updateType: 'message', message: { text: '/start' } }, async (c) => { await c.reply('سلام'); });
+await run(5, { updateType: 'my_chat_member', myChatMember: { new_chat_member: { status: 'kicked' } } });
+await run(6, { updateType: 'my_chat_member', myChatMember: { new_chat_member: { status: 'member' } } });
+const mcm = db.prepare(`SELECT user_id, json_extract(props,'$.a') a, json_extract(props,'$.d') d
+  FROM events WHERE event='act' AND json_extract(props,'$.a')='my_chat_member' ORDER BY id`).all();
+check('آپدیتِ my_chat_member به‌عنوان اکشن ثبت شد', mcm.length === 2, JSON.stringify(mcm));
+check('کلیدِ اکشن همان my_chat_member قبلی مانده (بند ۲ج/۳)', mcm.every(r => r.a === 'my_chat_member'));
+check('بلاک با وضعیتِ kicked ثبت شد', mcm[0]?.d === 'kicked', mcm[0]?.d);
+check('آنبلاک با وضعیتِ member ثبت شد', mcm[1]?.d === 'member', mcm[1]?.d);
+
+/* ───── ۸) گزارشِ خروج: قدمِ قبلی و تفکیکِ بلاک ───── */
+console.log('\n▶ گزارشِ خروج: قدمِ قبلی');
+const ex2 = J.exitPoints('tarot', { now: Math.floor(Date.now() / 1000) + 48 * 3600 });
+const blockRow = ex2.list.find(r => r.ev === 'act' && r.k === 'my_chat_member');
+check('ردیفِ بلاک/آنبلاک در نقاطِ خروج هست', !!blockRow);
+// همان چیزی که کلِ این تغییر برایش است: «آخرین ردپا» علت نیست، قدمِ قبلی است.
+check('ردیفِ بلاک قدمِ قبلی‌اش را می‌داند', !!blockRow?.prev, JSON.stringify(blockRow));
+check('قدمِ قبلیِ کاربرِ بلاک‌کننده همان پیامی است که دید', blockRow?.prev?.ev === 'view');
+check('بلاک از آنبلاک تفکیک شده', ex2.blocks?.get('kicked') === 1 && ex2.blocks?.get('member') === 1,
+  JSON.stringify([...(ex2.blocks || [])]));
+// عددِ هر ردیف نباید با آمدنِ ستونِ قدمِ قبلی عوض شود (LEFT JOIN، نه INNER)
+check('کاربرِ بدونِ رویدادِ قبلی از شمارش نیفتاده', ex2.total === 5, `→ ${ex2.total}`);
+check('رویدادِ قیف برچسبِ فارسی می‌گیرد',
+  J.stepLabel('ab_exposure', '', new Map()).text === 'واردِ آزمایشِ A/B شد');
+check('اکشنِ my_chat_member برچسبِ فارسی می‌گیرد',
+  /بلاک/.test(J.stepLabel('act', 'my_chat_member', new Map()).text));
+// خودِ رندر هم اجرا می‌شود: یک شناسه‌ی جاافتاده در HTML بی‌صدا می‌ماند تا لحظه‌ی بازکردنِ صفحه
+const { exitCard } = await import(path.join(ROOT, 'bots/dashboard/routes/journey.js'));
+const html = exitCard('tarot', { since: 0, ch: 0, ver: '', now: Math.floor(Date.now() / 1000) + 48 * 3600 });
+check('کارتِ «کجا ریختند؟» بدونِ خطا رندر شد', typeof html === 'string' && html.includes('کجا ریختند'));
+check('ستونِ قدمِ قبلی در HTML هست', html.includes('قدمِ قبلی'));
+check('برچسبِ فارسیِ بلاک در HTML نشسته (نه نامِ خامِ کد)',
+  html.includes('بلاک/آنبلاک کردنِ ربات') && !html.includes('>my_chat_member<'));
+check('جمله‌ی تفکیکِ بلاک/آنبلاک چاپ شده', /ربات را بلاک کردند/.test(html));
+
+/* ───── ۹) A/B: exposure یعنی «دید»، نه «حساب شد» ───── */
+// باگِ واقعی: جاروی یادآوریِ شبانه شاخه را حساب می‌کرد و بعد ممکن بود هیچ پیامی نفرستد،
+// پس آزمایش با کاربرانی پر می‌شد که چیزی ندیده بودند. peekVariant/expose همین را جدا می‌کند.
+console.log('\n▶ A/B: جداییِ «خواندنِ شاخه» از «ثبتِ exposure»');
+const { ensureAb, variant, peekVariant, expose } = await import(path.join(ROOT, 'shared/ab.js'));
+ensureAb(db);
+db.prepare(`INSERT INTO experiments (key, status, variants_json, started_at)
+  VALUES (?,?,?,unixepoch())`).run('t_exp', 'running',
+  JSON.stringify([{ key: 'control', weight: 50 }, { key: 'b', weight: 50 }]));
+const nExp = () => db.prepare("SELECT COUNT(*) c FROM ab_exposures WHERE experiment_key='t_exp'").get().c;
+const nEv = () => db.prepare("SELECT COUNT(*) c FROM events WHERE event='ab_exposure' AND json_extract(props,'$.exp')='t_exp'").get().c;
+
+const p1 = peekVariant(db, 11, 't_exp');
+check('peekVariant یک شاخه‌ی معتبر می‌دهد', p1 === 'control' || p1 === 'b', p1);
+check('peekVariant هیچ exposureای نمی‌نویسد', nExp() === 0 && nEv() === 0, `${nExp()}/${nEv()}`);
+check('peekVariant قطعی است (دو بار = یک جواب)', peekVariant(db, 11, 't_exp') === p1);
+check('expose همان شاخه‌ی peek را می‌دهد', expose(db, 11, 't_exp') === p1);
+check('expose دقیقاً یک exposure و یک رویداد می‌نویسد', nExp() === 1 && nEv() === 1, `${nExp()}/${nEv()}`);
+expose(db, 11, 't_exp');
+check('expose idempotent است (دوبار صدا زدن دوبار نمی‌نویسد)', nExp() === 1 && nEv() === 1, `${nExp()}/${nEv()}`);
+// سازگاریِ عقب‌رو: variant() دقیقاً مثلِ قبل، همان‌جا ثبت می‌کند
+variant(db, 12, 't_exp');
+check('variant() مثلِ قبل بلافاصله ثبت می‌کند (سازگاریِ عقب‌رو)', nExp() === 2 && nEv() === 2, `${nExp()}/${nEv()}`);
+// آزمایشِ غیرفعال: نه peek نه expose چیزی نمی‌نویسند
+check('آزمایشِ ناموجود → control و بدونِ نوشتن',
+  peekVariant(db, 13, 'nope') === 'control' && expose(db, 13, 'nope') === 'control'
+  && db.prepare("SELECT COUNT(*) c FROM ab_exposures WHERE experiment_key='nope'").get().c === 0);
+
 console.log(`\n${bad ? '❌' : '✅'} نتیجه: ${ok} پاس، ${bad} خطا\n`);
 db.close();
 rmSync(DATA, { recursive: true, force: true }); // فیکسچر هرگز روی دیسک نمی‌ماند
