@@ -57,6 +57,14 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-onetime.mjs
 
+      # زاویه‌ی سوم روی همان مسیرِ دیپلوی: کلونِ سرور آینه‌ی فقط-خواندنیِ main است.
+      # یک ورک‌فلویِ فقط-خواندنی با `git checkout <ref> -- <path>` درختِ کار را کثیف کرد
+      # و از آن لحظه **هر** دیپلوی می‌شکست (۹ شهریور ۱۴۰۵) — خرابیِ ماندگار، بدونِ راهِ
+      # پاک‌کردنِ دستی چون مالک SSH ندارد.
+      - name: Server worktree cleanliness guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-server-worktree.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check

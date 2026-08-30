@@ -52,5 +52,13 @@ jobs:
             cd ~/voice2text
             # ضد تزریق: فیلتر فقط حروفِ کوچک، عدد و خط تیره
             case "$NEWS_FILTER" in (*[!a-z0-9-]*) echo "❌ فیلترِ نامعتبر"; exit 1;; esac
-            git fetch --quiet origin main && git checkout --quiet -f origin/main -- tools/news || true
-            node tools/news/probe.mjs "$NEWS_FILTER"
+            # ⚠️ درختِ کارِ کلونِ سرور را **لمس نکن**. نسخه‌ی اول اینجا
+            # `git checkout -f origin/main -- tools/news` می‌زد و همان یک خط، فایل را در
+            # درختِ کار و index نشاند در حالی که HEAD عقب بود؛ از آن لحظه **هر دیپلوی**
+            # با «local changes would be overwritten by merge» می‌شکست (۹ شهریور ۱۴۰۵).
+            # کدِ تازه در یک پوشه‌ی موقت باز می‌شود؛ کلونِ سرور دست‌نخورده می‌ماند.
+            TMP=$(mktemp -d)
+            trap 'rm -rf "$TMP"' EXIT
+            git fetch --quiet origin main && REF=origin/main || REF=HEAD
+            git archive "$REF" tools/news | tar -x -C "$TMP"
+            node "$TMP/tools/news/probe.mjs" "$NEWS_FILTER"
