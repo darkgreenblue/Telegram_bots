@@ -180,7 +180,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.34.0';
+const PRODUCT_VERSION = '3.35.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -617,6 +617,14 @@ db.exec(`
 // ویس فرستاده و هنوز پرداخت نکرده نباید سؤالش را از دست بدهد (بند ۹ب/۵).
 try { db.prepare("ALTER TABLE readings ADD COLUMN question_audio TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare("ALTER TABLE readings ADD COLUMN question_audio_fmt TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// migration (v3.35.0): پیشرفتِ افشا **روی خودِ فال**، نه فقط در سشن.
+// باگِ واقعی (#215، فالِ #872 در ۱۴۰۵/۰۶/۰۸): `readingId` و `revealIdx` فقط داخلِ
+// `session_json` زندگی می‌کردند و `setSession(uid, null)` در سیزده نقطه صدایش می‌زنند
+// (از جمله `/start` که هیچ گاردی ندارد). یعنی یک فالِ **پرداخت‌شده** با متنِ کاملِ
+// تولیدشده می‌ماند و هیچ مسیری به آن برنمی‌گردد: نه ریفاند، نه پیام، نه دکمه.
+// جاروی یتیم‌ها هم عمداً ردش می‌کند چون فقط `llm_json=''` را نجات می‌دهد.
+// با این ستون، رکوردِ خودِ فال می‌داند کاربر تا کجا دیده و بازیابی از DB ممکن می‌شود.
+try { db.prepare('ALTER TABLE readings ADD COLUMN reveal_idx INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
@@ -878,6 +886,14 @@ const stmts = {
   getReading:    db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingLlm: db.prepare('UPDATE readings SET llm_json=?, summary=? WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
+  // پیشرفتِ افشا روی خودِ رکورد (#215). فقط جلو می‌رود: یک دکمه‌ی کهنه که ایندکسِ
+  // کوچک‌تری می‌فرستد نباید پیشرفت را عقب ببرد.
+  setRevealIdx: db.prepare('UPDATE readings SET reveal_idx=? WHERE id=? AND reveal_idx<?'),
+  // 🔁 بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل، **مستقل از سشن**. تنها راهِ برگشتِ کاربری
+  // که سشنش پاک شده (مثلاً با `/start`). عمداً `llm_json<>''`: فالی که هنوز متن ندارد
+  // کارِ `recoverOrphanReadings` است (ریفاند)، نه ادامه.
+  resumableReading: db.prepare(
+    "SELECT * FROM readings WHERE user_id=? AND status='started' AND llm_json<>'' AND cards_json<>'' ORDER BY id DESC LIMIT 1"),
   // ادعای اتمیکِ استیت — گاردِ دوبار-تپ روی دکمه‌ی اندازه. `setState` بی‌قید است و
   // دو تپِ سریع هر دو رد می‌شدند؛ این یکی فقط برای **اولین** تپ changes=1 می‌دهد.
   claimState: db.prepare('UPDATE users SET state=? WHERE telegram_id=? AND state<>?'),
@@ -1332,7 +1348,10 @@ const READING_INPROGRESS = ['confirm_focus', 'await_question', 'breathing', 'shu
 function revealResumeRow(uid) {
   const s = getSession(uid) || {};
   const rid = s.readingId;
-  if (!rid) return null;
+  // سشن پاک شده؟ (#215) از خودِ جدولِ readings بازیابی کن. سشن حافظه نیست، ولی
+  // `setSession(uid, null)` در سیزده نقطه ردیفش را خالی می‌کند و `/start` گارد ندارد؛
+  // پس سشن **منبعِ حقیقت نیست**، فقط کشِ قدمِ فعلی است (بند ۹ب/۵).
+  if (!rid) return resumeRowFromDb(uid);
   const r = stmts.getReading.get(rid);
   if (!r || r.user_id !== uid || !r.cards_json) return null;   // مالکیتِ رکورد (بند ۹)
   let n;
@@ -1341,6 +1360,24 @@ function revealResumeRow(uid) {
   if (idx < n) return [Markup.button.callback(L.buttons.nextCard, `next:${rid}:${idx}`)];
   if (v4For(uid)) return [Markup.button.callback(L.buttons.finalAnswer, `final:${rid}`)];
   return null;   // نسل قدیم بعد از کارتِ آخر خودکار جمع‌بندی می‌کند؛ چیزی برای ادامه نمانده
+}
+
+/** بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل از **دیتابیس** وقتی سشن دیگر به آن اشاره نمی‌کند (#215).
+ *  سشن را هم بازمی‌سازد تا گاردهای ضدِ دوبار-تپِ `next:`/`final:` (که ایندکس را با سشن
+ *  می‌سنجند) دقیقاً مثلِ حالتِ عادی کار کنند. برمی‌گرداند: ردیفِ دکمه، یا null. */
+function resumeRowFromDb(uid) {
+  const r = stmts.resumableReading.get(uid);
+  if (!r) return null;
+  let n;
+  try { n = JSON.parse(r.cards_json).length; } catch { return null; }
+  const idx = Math.min(r.reveal_idx || 0, n);
+  // بازسازیِ سشن با همان شکلی که `startReveal` می‌سازد. `state` هم برمی‌گردد چون
+  // گاردِ `next:` روی `revealing` بودن اصرار دارد.
+  setSession(uid, { spreadId: r.type, readingId: r.id, revealIdx: idx, fbDone: true });
+  setState(uid, 'revealing');
+  if (idx < n) return [Markup.button.callback(L.buttons.nextCard, `next:${r.id}:${idx}`)];
+  if (v4For(uid)) return [Markup.button.callback(L.buttons.finalAnswer, `final:${r.id}`)];
+  return null;
 }
 
 // 🔒 فالِ **در حالِ تحویل** (پول داده شده، `status='started'`) هرگز با یک تپ از سشن پاک
@@ -1843,6 +1880,16 @@ async function handleStart(ctx) {
   }
   stmts.setKbShown.run(uid);
   await ctx.reply(msg, mainKeyboard(ctx.from.id));
+
+  // 🔁 فالِ پرداخت‌شده‌ی نیمه‌تحویل (#215). `/start` عمداً **بلاک نمی‌شود** — راهِ فرارِ
+  // کاربرِ گیرکرده باید همیشه باز بماند (بند ۹ب) — ولی `setSession(uid, null)`ِ بالا
+  // اشاره‌گرِ فال را برد، پس همین‌جا از DB بازیابی و به‌صورتِ یک دکمه‌ی اختیاری پیشنهاد
+  // می‌شود. اگر چیزی برای ادامه نباشد، هیچ پیامِ اضافه‌ای نمی‌رود.
+  try {
+    const row = resumeRowFromDb(uid);
+    if (row) await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+    else { setState(uid, 'idle'); setSession(uid, null); }   // بازیابی نشد → همان حالتِ قبل
+  } catch (e) { logErr('resume offer:', e.message); }
 }
 bot.start(handleStart);
 
@@ -3650,6 +3697,9 @@ async function revealNext(ctx, uid, readingId) {
   const card = cards[idx];
   const info = CARD_BY_KEY[card.key];
   patchSession(uid, { revealIdx: idx + 1 }); // قبل از await — دکمه‌ی تکراری دوباره همین کارت را نفرستد
+  // همان پیشرفت روی **خودِ فال** هم مهر می‌خورد (#215): سشن را سیزده نقطه پاک می‌کنند،
+  // این ستون را هیچ‌کس. تنها چیزی است که بعد از `/start` می‌گوید کاربر تا کجا دیده.
+  stmts.setRevealIdx.run(idx + 1, readingId, idx + 1);
 
   await typing(ctx, PACE_S, 'upload_photo');
   // در v4 کپشن هم مثل متن، برچسبِ **ترتیبی** می‌گیرد نه نامِ جایگاه — وگرنه کاربر هم‌زمان
