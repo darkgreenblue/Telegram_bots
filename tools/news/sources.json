@@ -7,64 +7,359 @@
     "تازه است یا ماه‌هاست آپدیت نشده. نتیجه‌ی تأیید در همین فایل به‌صورت ستونِ status می‌نشیند."
   ],
   "sources": [
-    { "id": "irna",         "cat": "ir-general",  "lang": "fa", "url": "https://www.irna.ir/rss" },
-    { "id": "isna",         "cat": "ir-general",  "lang": "fa", "url": "https://www.isna.ir/rss" },
-    { "id": "mehr",         "cat": "ir-general",  "lang": "fa", "url": "https://www.mehrnews.com/rss" },
-    { "id": "tasnim",       "cat": "ir-general",  "lang": "fa", "url": "https://www.tasnimnews.com/fa/rss/feed/0" },
-    { "id": "fars",         "cat": "ir-general",  "lang": "fa", "url": "https://www.farsnews.ir/rss" },
-    { "id": "khabaronline", "cat": "ir-general",  "lang": "fa", "url": "https://www.khabaronline.ir/rss" },
-    { "id": "entekhab",     "cat": "ir-general",  "lang": "fa", "url": "https://www.entekhab.ir/fa/rss/allnews" },
-    { "id": "asriran",      "cat": "ir-general",  "lang": "fa", "url": "https://www.asriran.com/fa/rss/allnews" },
-
-    { "id": "donyaeqtesad", "cat": "ir-economy",  "lang": "fa", "url": "https://donya-e-eqtesad.com/rss" },
-    { "id": "eghtesadnews", "cat": "ir-economy",  "lang": "fa", "url": "https://www.eghtesadnews.com/fa/rss/allnews" },
-    { "id": "tejaratnews",  "cat": "ir-economy",  "lang": "fa", "url": "https://tejaratnews.com/feed" },
-
-    { "id": "zoomit",       "cat": "ir-tech",     "lang": "fa", "url": "https://www.zoomit.ir/feed/" },
-    { "id": "digiato",      "cat": "ir-tech",     "lang": "fa", "url": "https://digiato.com/feed" },
-
-    { "id": "varzesh3",     "cat": "ir-sport",    "lang": "fa", "url": "https://www.varzesh3.com/rss/all" },
-
-    { "id": "bbc-persian",  "cat": "ir-diaspora", "lang": "fa", "url": "https://feeds.bbci.co.uk/persian/rss.xml" },
-    { "id": "dw-persian",   "cat": "ir-diaspora", "lang": "fa", "url": "https://rss.dw.com/rdf/rss-per-all" },
-    { "id": "euronews-fa",  "cat": "ir-diaspora", "lang": "fa", "url": "https://parsi.euronews.com/rss" },
-    { "id": "iranintl",     "cat": "ir-diaspora", "lang": "fa", "url": "https://www.iranintl.com/feed" },
-
-    { "id": "bbc-world",    "cat": "world",       "lang": "en", "url": "https://feeds.bbci.co.uk/news/world/rss.xml" },
-    { "id": "aljazeera",    "cat": "world",       "lang": "en", "url": "https://www.aljazeera.com/xml/rss/all.xml" },
-    { "id": "guardian-world","cat": "world",      "lang": "en", "url": "https://www.theguardian.com/world/rss" },
-    { "id": "nyt-world",    "cat": "world",       "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml" },
-    { "id": "france24",     "cat": "world",       "lang": "en", "url": "https://www.france24.com/en/rss" },
-    { "id": "dw-en",        "cat": "world",       "lang": "en", "url": "https://rss.dw.com/rdf/rss-en-all" },
-    { "id": "apnews-gn",    "cat": "world",       "lang": "en", "url": "https://news.google.com/rss/search?q=when:1d+site:apnews.com&hl=en-US&gl=US&ceid=US:en" },
-    { "id": "reuters-gn",   "cat": "world",       "lang": "en", "url": "https://news.google.com/rss/search?q=when:1d+site:reuters.com&hl=en-US&gl=US&ceid=US:en" },
-
-    { "id": "hn",           "cat": "tech",        "lang": "en", "url": "https://news.ycombinator.com/rss" },
-    { "id": "techmeme",     "cat": "tech",        "lang": "en", "url": "https://www.techmeme.com/feed.xml" },
-    { "id": "techcrunch",   "cat": "tech",        "lang": "en", "url": "https://techcrunch.com/feed/" },
-    { "id": "verge",        "cat": "tech",        "lang": "en", "url": "https://www.theverge.com/rss/index.xml" },
-    { "id": "arstechnica",  "cat": "tech",        "lang": "en", "url": "https://feeds.arstechnica.com/arstechnica/index" },
-    { "id": "mit-tr",       "cat": "tech",        "lang": "en", "url": "https://www.technologyreview.com/feed/" },
-    { "id": "arxiv-ai",     "cat": "tech",        "lang": "en", "url": "https://rss.arxiv.org/rss/cs.AI" },
-
-    { "id": "bbc-football", "cat": "sport",       "lang": "en", "url": "https://feeds.bbci.co.uk/sport/football/rss.xml" },
-    { "id": "guardian-football","cat": "sport",   "lang": "en", "url": "https://www.theguardian.com/football/rss" },
-    { "id": "skysports",    "cat": "sport",       "lang": "en", "url": "https://www.skysports.com/rss/12040" },
-    { "id": "espn-soccer",  "cat": "sport",       "lang": "en", "url": "https://www.espn.com/espn/rss/soccer/news" },
-
-    { "id": "cnbc-econ",    "cat": "economy",     "lang": "en", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258" },
-    { "id": "guardian-biz", "cat": "economy",     "lang": "en", "url": "https://www.theguardian.com/uk/business/rss" },
-
-    { "id": "statnews",     "cat": "health",      "lang": "en", "url": "https://www.statnews.com/feed/" },
-    { "id": "nature",       "cat": "health",      "lang": "en", "url": "https://www.nature.com/nature.rss" },
-
-    { "id": "gdelt-iran",   "cat": "aggregator",  "lang": "en", "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=Iran&mode=artlist&maxrecords=10&format=json&timespan=1d", "kind": "json" },
-    { "id": "gnews-rss-ir", "cat": "aggregator",  "lang": "fa", "url": "https://news.google.com/rss/search?q=%D8%A7%DB%8C%D8%B1%D8%A7%D9%86+when:1d&hl=fa&gl=IR&ceid=IR:fa" },
-    { "id": "hn-firebase",  "cat": "aggregator",  "lang": "en", "url": "https://hacker-news.firebaseio.com/v0/topstories.json", "kind": "json" },
-    { "id": "reddit-worldnews", "cat": "aggregator", "lang": "en", "url": "https://www.reddit.com/r/worldnews/top/.rss?t=day" },
-
-    { "id": "tg-tasnim",    "cat": "telegram",    "lang": "fa", "url": "https://t.me/s/Tasnimnews", "kind": "html" },
-    { "id": "tg-varzesh3",  "cat": "telegram",    "lang": "fa", "url": "https://t.me/s/varzesh3", "kind": "html" },
-    { "id": "tg-zoomit",    "cat": "telegram",    "lang": "fa", "url": "https://t.me/s/zoomit", "kind": "html" }
-  ]
+    {
+      "id": "irna",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.irna.ir/rss",
+      "status": "ok"
+    },
+    {
+      "id": "isna",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.isna.ir/rss",
+      "status": "ok"
+    },
+    {
+      "id": "mehr",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.mehrnews.com/rss",
+      "status": "ok"
+    },
+    {
+      "id": "tasnim",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.tasnimnews.com/fa/rss/feed/0",
+      "status": "broken-dns"
+    },
+    {
+      "id": "fars",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.farsnews.ir/rss",
+      "status": "broken-404"
+    },
+    {
+      "id": "khabaronline",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.khabaronline.ir/rss",
+      "status": "ok"
+    },
+    {
+      "id": "entekhab",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.entekhab.ir/fa/rss/allnews",
+      "status": "ok"
+    },
+    {
+      "id": "asriran",
+      "cat": "ir-general",
+      "lang": "fa",
+      "url": "https://www.asriran.com/fa/rss/allnews",
+      "status": "ok"
+    },
+    {
+      "id": "donyaeqtesad",
+      "cat": "ir-economy",
+      "lang": "fa",
+      "url": "https://donya-e-eqtesad.com/rss",
+      "status": "ok"
+    },
+    {
+      "id": "eghtesadnews",
+      "cat": "ir-economy",
+      "lang": "fa",
+      "url": "https://www.eghtesadnews.com/fa/rss/allnews",
+      "status": "broken-404"
+    },
+    {
+      "id": "tejaratnews",
+      "cat": "ir-economy",
+      "lang": "fa",
+      "url": "https://tejaratnews.com/feed",
+      "status": "ok"
+    },
+    {
+      "id": "zoomit",
+      "cat": "ir-tech",
+      "lang": "fa",
+      "url": "https://www.zoomit.ir/feed/",
+      "status": "ok"
+    },
+    {
+      "id": "digiato",
+      "cat": "ir-tech",
+      "lang": "fa",
+      "url": "https://digiato.com/feed",
+      "status": "ok"
+    },
+    {
+      "id": "varzesh3",
+      "cat": "ir-sport",
+      "lang": "fa",
+      "url": "https://www.varzesh3.com/rss/all",
+      "status": "ok"
+    },
+    {
+      "id": "bbc-persian",
+      "cat": "ir-diaspora",
+      "lang": "fa",
+      "url": "https://feeds.bbci.co.uk/persian/rss.xml",
+      "status": "ok"
+    },
+    {
+      "id": "dw-persian",
+      "cat": "ir-diaspora",
+      "lang": "fa",
+      "url": "https://rss.dw.com/rdf/rss-per-all",
+      "status": "ok"
+    },
+    {
+      "id": "euronews-fa",
+      "cat": "ir-diaspora",
+      "lang": "fa",
+      "url": "https://parsi.euronews.com/rss",
+      "status": "ok"
+    },
+    {
+      "id": "iranintl",
+      "cat": "ir-diaspora",
+      "lang": "fa",
+      "url": "https://www.iranintl.com/feed",
+      "status": "ok"
+    },
+    {
+      "id": "bbc-world",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "status": "ok"
+    },
+    {
+      "id": "aljazeera",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "status": "ok"
+    },
+    {
+      "id": "guardian-world",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://www.theguardian.com/world/rss",
+      "status": "ok"
+    },
+    {
+      "id": "nyt-world",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+      "status": "ok"
+    },
+    {
+      "id": "france24",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://www.france24.com/en/rss",
+      "status": "ok"
+    },
+    {
+      "id": "dw-en",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://rss.dw.com/rdf/rss-en-all",
+      "status": "ok"
+    },
+    {
+      "id": "apnews-gn",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://news.google.com/rss/search?q=when:1d+site:apnews.com&hl=en-US&gl=US&ceid=US:en",
+      "status": "ok"
+    },
+    {
+      "id": "reuters-gn",
+      "cat": "world",
+      "lang": "en",
+      "url": "https://news.google.com/rss/search?q=when:1d+site:reuters.com&hl=en-US&gl=US&ceid=US:en",
+      "status": "ok"
+    },
+    {
+      "id": "hn",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://news.ycombinator.com/rss",
+      "status": "ok"
+    },
+    {
+      "id": "techmeme",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://www.techmeme.com/feed.xml",
+      "status": "ok"
+    },
+    {
+      "id": "techcrunch",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://techcrunch.com/feed/",
+      "status": "ok"
+    },
+    {
+      "id": "verge",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "status": "ok"
+    },
+    {
+      "id": "arstechnica",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "status": "ok"
+    },
+    {
+      "id": "mit-tr",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://www.technologyreview.com/feed/",
+      "status": "slow"
+    },
+    {
+      "id": "arxiv-ai",
+      "cat": "tech",
+      "lang": "en",
+      "url": "https://rss.arxiv.org/rss/cs.AI",
+      "status": "broken-empty"
+    },
+    {
+      "id": "bbc-football",
+      "cat": "sport",
+      "lang": "en",
+      "url": "https://feeds.bbci.co.uk/sport/football/rss.xml",
+      "status": "ok"
+    },
+    {
+      "id": "guardian-football",
+      "cat": "sport",
+      "lang": "en",
+      "url": "https://www.theguardian.com/football/rss",
+      "status": "ok"
+    },
+    {
+      "id": "skysports",
+      "cat": "sport",
+      "lang": "en",
+      "url": "https://www.skysports.com/rss/12040",
+      "status": "ok-nodate"
+    },
+    {
+      "id": "espn-soccer",
+      "cat": "sport",
+      "lang": "en",
+      "url": "https://www.espn.com/espn/rss/soccer/news",
+      "status": "ok-vps-only"
+    },
+    {
+      "id": "cnbc-econ",
+      "cat": "economy",
+      "lang": "en",
+      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+      "status": "ok"
+    },
+    {
+      "id": "guardian-biz",
+      "cat": "economy",
+      "lang": "en",
+      "url": "https://www.theguardian.com/uk/business/rss",
+      "status": "ok"
+    },
+    {
+      "id": "statnews",
+      "cat": "health",
+      "lang": "en",
+      "url": "https://www.statnews.com/feed/",
+      "status": "slow"
+    },
+    {
+      "id": "nature",
+      "cat": "health",
+      "lang": "en",
+      "url": "https://www.nature.com/nature.rss",
+      "status": "slow"
+    },
+    {
+      "id": "gdelt-iran",
+      "cat": "aggregator",
+      "lang": "en",
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=Iran&mode=artlist&maxrecords=10&format=json&timespan=1d",
+      "kind": "json",
+      "status": "unreachable"
+    },
+    {
+      "id": "gnews-rss-ir",
+      "cat": "aggregator",
+      "lang": "fa",
+      "url": "https://news.google.com/rss/search?q=%D8%A7%DB%8C%D8%B1%D8%A7%D9%86+when:1d&hl=fa&gl=IR&ceid=IR:fa",
+      "status": "ok"
+    },
+    {
+      "id": "hn-firebase",
+      "cat": "aggregator",
+      "lang": "en",
+      "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+      "kind": "json",
+      "status": "blocked-from-vps"
+    },
+    {
+      "id": "reddit-worldnews",
+      "cat": "aggregator",
+      "lang": "en",
+      "url": "https://www.reddit.com/r/worldnews/top/.rss?t=day",
+      "status": "ok"
+    },
+    {
+      "id": "tg-tasnim",
+      "cat": "telegram",
+      "lang": "fa",
+      "url": "https://t.me/s/Tasnimnews",
+      "kind": "html",
+      "status": "broken-channel"
+    },
+    {
+      "id": "tg-varzesh3",
+      "cat": "telegram",
+      "lang": "fa",
+      "url": "https://t.me/s/varzesh3",
+      "kind": "html",
+      "status": "ok"
+    },
+    {
+      "id": "tg-zoomit",
+      "cat": "telegram",
+      "lang": "fa",
+      "url": "https://t.me/s/zoomit",
+      "kind": "html",
+      "status": "broken-channel"
+    }
+  ],
+  "_verified_at": "1405-06-08 (News probe: VPS + GitHub runner)",
+  "_status_legend": {
+    "ok": "در دسترس و تازه (زیرِ ۲۴ ساعت)",
+    "ok-nodate": "کار می‌کند ولی فید تاریخ ندارد؛ تازگی را باید از زمانِ fetch حساب کرد",
+    "ok-vps-only": "از سرورِ ما کار می‌کند ولی از رانرِ گیت‌هاب نه",
+    "slow": "کار می‌کند ولی کند به‌روز می‌شود (بیش از ۲۴ ساعت)",
+    "broken-dns": "دامنه resolve نشد",
+    "broken-404": "مسیرِ فید عوض شده",
+    "broken-empty": "۲۰۰ می‌دهد ولی آیتم ندارد",
+    "broken-channel": "نامِ کانال غلط یا کانال مرده",
+    "unreachable": "از هیچ‌کدام از دو نقطه در دسترس نبود",
+    "blocked-from-vps": "از سرورِ ما بسته است"
+  }
 }
