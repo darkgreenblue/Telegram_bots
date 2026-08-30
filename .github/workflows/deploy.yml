@@ -54,7 +54,46 @@ jobs:
             set -e
             cd ~/voice2text
             OLD_HEAD=$(git rev-parse HEAD)
-            git pull --ff-only
+
+            # ---------- همگام‌سازیِ مقاوم با main (باگِ واقعیِ ۹ شهریور ۱۴۰۵) ----------
+            # کلونِ سرور یکی است ولی چند چیز هم‌زمان رویش گیت می‌زنند: خودِ دیپلوی، کرونِ
+            # ساعتیِ vps-daily-post.sh، و ورک‌فلوهایی که از سرور چیزی می‌خوانند. دو دیپلویِ
+            # پشت‌سرهم با دو شکلِ خرابی قرمز شدند و هر دو اینجا مهار می‌شوند:
+            #
+            #  ۱) «cannot lock ref refs/remotes/origin/main: is at X but expected Y» — یک
+            #     گیتِ دیگر در همان ثانیه fetch می‌کرد (ورک‌فلوی News probe دقیقاً هم‌زمان
+            #     dispatch شده بود). قفلِ ref موقتی است؛ تنها راهش تلاشِ دوباره است.
+            #
+            #  ۲) «Your local changes ... would be overwritten by merge» — همان ورک‌فلو با
+            #     `git checkout origin/main -- tools/news` فایلی را در درختِ کار و index
+            #     نشانده بود. این یکی **خودش پاک نمی‌شد**: از آن لحظه هر دیپلویِ بعدی
+            #     می‌مرد و مالک هم SSH ندارد که دستی تمیزش کند.
+            #
+            # درمان: به‌جای `git pull` که جلوی هر ناخالصی می‌ایستد، صریحاً درخت را با
+            # origin/main یکی می‌کنیم. کلونِ سرور آینه‌ی فقط-خواندنیِ main است (گاردِ CI:
+            # tools/check-server-worktree.mjs)، پس چیزی برای از دست دادن ندارد و
+            # `reset --hard` هم فایلِ نیمه‌کاره‌ی staged را برمی‌دارد و هم فایلِ untracked
+            # ای را که با محتوای تازه تصادم دارد. فایل‌های ignore شده (`.env`، `data/`،
+            # `node_modules/`, `.env.bak`) اصلاً لمس نمی‌شوند.
+            FETCH_OK=0
+            for attempt in 1 2 3; do
+              if git fetch --quiet origin main; then FETCH_OK=1; break; fi
+              echo "⚠️ تلاشِ $attempt برای git fetch نشد (احتمالاً گیتِ هم‌زمان روی همین کلون) — ۱۰ ثانیه دیگر دوباره"
+              sleep 10
+            done
+            if [ "$FETCH_OK" != "1" ]; then echo "❌ git fetch بعد از ۳ تلاش شکست خورد"; exit 1; fi
+            # همان ضمانتِ --ff-only: اگر main فرزندِ HEADِ سرور نباشد، چیزی روی سرور هست
+            # که در main نیست. آن‌وقت باید آدم نگاه کند، نه اینکه reset چیزی را دور بریزد.
+            if ! git merge-base --is-ancestor HEAD origin/main; then
+              echo "❌ origin/main فست‌فوروارد نیست (HEADِ سرور: $OLD_HEAD) — دیپلوی متوقف شد"
+              exit 1
+            fi
+            if ! git diff --quiet HEAD --; then
+              echo "⚠️ درختِ کارِ سرور تغییرِ محلیِ ناخواسته داشت — دور انداخته شد:"
+              git status --porcelain --untracked-files=no | head -20
+            fi
+            git reset --hard --quiet origin/main
+
             NEW_HEAD=$(git rev-parse HEAD)
             CHANGED_FILES=$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD" || echo "")
             # تغییر زیرساخت مشترک → همه‌ی ربات‌ها ری‌دیپلوی می‌شوند
