@@ -59,6 +59,7 @@ const TARGETS = [
   'tools/marketing/perf.mjs',
   'tools/marketing/pick-cards.mjs',
   'tools/marketing/publish-day.mjs',
+  'tools/news/probe.mjs',
 ];
 
 const GLOBALS = new Set([

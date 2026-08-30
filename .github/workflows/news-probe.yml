@@ -1,0 +1,56 @@
+# News probe — سنجشِ در دسترس بودن و تازگیِ منابعِ خبری.
+#
+# دو جا اجرا می‌شود چون جوابشان می‌تواند فرق کند و همین تفاوت خودش داده است:
+#   - vps: همان ماشینی که ربات روی آن اجرا می‌شود (تصمیمِ نهایی با این است).
+#   - runner: رانرِ گیت‌هاب در آمریکا، فقط برای مقایسه. اگر منبعی روی رانر باز باشد و
+#     روی سرورِ ما نه، یعنی مسئله geo-block است نه خرابیِ منبع، و راهش پروکسی است.
+#
+# فقط می‌خواند و هیچ‌چیز را ری‌استارت نمی‌کند.
+name: News probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'فقط یک دسته یا شناسه (خالی = همه). مثل ir-general یا zoomit'
+        required: false
+        default: ''
+      where:
+        description: 'کجا سنجیده شود؟'
+        required: false
+        type: choice
+        options: [both, vps, runner]
+        default: both
+
+jobs:
+  runner:
+    if: ${{ inputs.where == 'both' || inputs.where == 'runner' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Probe from GitHub runner (US)
+        run: node tools/news/probe.mjs "${{ inputs.filter }}"
+
+  vps:
+    if: ${{ inputs.where == 'both' || inputs.where == 'vps' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe from our VPS
+        uses: appleboy/ssh-action@v1
+        env:
+          NEWS_FILTER: ${{ inputs.filter }}
+        with:
+          host: 185.204.171.170
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: NEWS_FILTER
+          command_timeout: 20m
+          script: |
+            set -e
+            cd ~/voice2text
+            # ضد تزریق: فیلتر فقط حروفِ کوچک، عدد و خط تیره
+            case "$NEWS_FILTER" in (*[!a-z0-9-]*) echo "❌ فیلترِ نامعتبر"; exit 1;; esac
+            git fetch --quiet origin main && git checkout --quiet -f origin/main -- tools/news || true
+            node tools/news/probe.mjs "$NEWS_FILTER"
