@@ -30,6 +30,7 @@
 // را نمی‌شناسد بی‌صدا سبز بماند.
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const WF_DIR = '.github/workflows';
@@ -93,4 +94,59 @@ if (offenders.length) {
   process.exit(1);
 }
 
-console.log(`✅ درختِ کارِ سرور امن است (${scanned} فایلِ سرورمحور بررسی شد؛ هیچ دستورِ کثیف‌کننده‌ای نیست).`);
+// ── بخشِ دوم: `chmod +x`ِ دیپلوی نباید خودش درخت را کثیف کند ──────────────────
+// باگِ واقعیِ ۸ شهریور ۱۴۰۵: `tools/marketing/vps-daily-post.sh` در گیت با مودِ
+// 100644 کامیت شده بود و deploy.yml روی سرور `chmod +x`ش می‌کرد. یعنی بعد از هر
+// دیپلوی، گیتِ سرور یک «تغییرِ محلی» داشت (فقط تغییرِ مود)؛ دیپلویِ بعدی دورش
+// می‌انداخت، همان هشدار را چاپ می‌کرد، و دوباره chmod می‌زد. پینگ‌پنگِ ابدی.
+//
+// خرابی‌اش سکوتِ خودِ هشدار است: سیگنالی که قرار بود بگوید «یک چیزی درخت را کثیف
+// می‌کند» در **هر** دیپلوی شلیک می‌شد، پس یک فایلِ کثیفِ واقعی لای نویز گم می‌شد.
+// (هم‌خانواده‌ی پینگ‌پنگِ `ADMIN_IDS` در بند ۳ ریشه: چیزی بیرون از تک‌منبعِ حقیقت
+// روی همان چیزی می‌نویسد که دیپلوی با آن مقایسه می‌کند.)
+//
+// قاعده: هر فایلی که دیپلوی روی سرور اجراییِ‌اش می‌کند، باید **در گیت** اجرایی
+// باشد. آن‌وقت `chmod +x` واقعاً no-op است. عمداً لیست هاردکد نیست: مسیرها از خودِ
+// ورک‌فلو استخراج می‌شوند تا `chmod +x`ِ فردا هم خودکار پوشش بگیرد.
+const CHMOD_X = /\bchmod\s+(?:-\S+\s+)*\+x\s+(\S+)/g;
+const chmodTargets = new Set();
+for (const f of workflows) {
+  const p = join(WF_DIR, f);
+  const text = readFileSync(p, 'utf8');
+  if (!text.includes(VPS_HOST)) continue;
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    for (const m of t.matchAll(CHMOD_X)) {
+      const target = m[1].replace(/^["']|["']$/g, '');
+      if (target.startsWith('$') || target.includes('*')) continue;   // مسیرِ پویا: قابلِ سنجش نیست
+      chmodTargets.add(target);
+    }
+  }
+}
+
+const modeOffenders = [];
+for (const target of chmodTargets) {
+  let row;
+  try {
+    row = execFileSync('git', ['ls-files', '-s', '--', target], { encoding: 'utf8' }).trim();
+  } catch {
+    modeOffenders.push(`${target} — «git ls-files» اجرا نشد`);
+    continue;
+  }
+  if (!row) continue;                                   // در گیت نیست (مثلاً فایلِ ساخته‌شده روی سرور)
+  const mode = row.split(/\s+/)[0];
+  if (mode !== '100755') modeOffenders.push(`${target} — مودِ گیت ${mode} است، نه 100755`);
+}
+
+if (modeOffenders.length) {
+  console.error('❌ دیپلوی روی سرور `chmod +x` می‌زند ولی فایل در گیت اجرایی نیست:\n');
+  for (const o of modeOffenders) console.error(`   • ${o}`);
+  console.error('\n   نتیجه: بعد از هر دیپلوی، درختِ کارِ سرور فقط به‌خاطرِ تغییرِ مود «کثیف» می‌شود و');
+  console.error('   هشدارِ خودترمیمی در هر دیپلوی بی‌دلیل شلیک می‌کند، پس کثیفیِ واقعی لای نویز گم می‌شود.');
+  console.error('   درمان (یک دستور، بدونِ تغییرِ محتوای فایل):');
+  console.error('       git update-index --chmod=+x <path>');
+  process.exit(1);
+}
+
+console.log(`✅ درختِ کارِ سرور امن است (${scanned} فایلِ سرورمحور + ${chmodTargets.size} هدفِ chmod بررسی شد؛ نه دستورِ کثیف‌کننده‌ای هست نه مودِ ناهم‌خوان).`);
