@@ -66,9 +66,16 @@ export function screenText(s, key, maxLen = 90) {
   return sample.slice(0, maxLen) || `صفحه ${key}`;
 }
 
-/* برچسبِ خوانای یک قدمِ ریز برای نمایش در جدول */
+/* برچسبِ خوانای یک قدمِ ریز برای نمایش در جدول.
+   سه جنسِ ردیف: پیامِ ربات (view)، اکشنِ کاربر (act)، و رویدادِ milestone (هر نامِ دیگر —
+   فقط در گزارشِ خروج دیده می‌شود، چون «آخرین ردپا» می‌تواند یک رویدادِ قیف باشد). */
 export function stepLabel(ev, key, screens) {
-  if (ev === 'act') return { icon: '👆', text: ACT_LABELS[key] || key || 'اکشن', kind: 'act' };
+  if (ev === 'act') {
+    return { icon: '👆', text: ACT_LABELS[key] || key || 'اکشن', kind: 'act', note: ACT_NOTES[key] || '' };
+  }
+  if (ev && ev !== 'view') {
+    return { icon: '🏁', text: EVENT_LABELS[ev]?.text || ev, kind: 'event', note: EVENT_LABELS[ev]?.note || '' };
+  }
   if (key === 'content') return { icon: '📄', text: 'متنِ محتوا (خروجی مدل)', kind: 'content' };
   const s = screens.get(key);
   return {
@@ -84,6 +91,37 @@ export function stepLabel(ev, key, screens) {
 const ACT_LABELS = {
   cmd: 'دستور', kb: 'دکمه‌ی منوی پایین', text: 'نوشتنِ متن',
   voice: 'فرستادنِ ویس', photo: 'فرستادنِ عکس', doc: 'فرستادنِ فایل', inline: 'اشتراک‌گذاری اینلاین',
+  my_chat_member: 'بلاک/آنبلاک کردنِ ربات',
+};
+const ACT_NOTES = {
+  my_chat_member: 'آپدیتِ سرویسیِ تلگرام، نه اقدامی داخلِ ربات. وقتی آخرین ردپا باشد یعنی کاربر ربات را بلاک کرده. «قدمِ قبلی» می‌گوید چه چیزی او را به این‌جا رساند.',
+};
+
+/* ═══ برچسبِ رویدادهای قیف ═══
+   بدونِ این نگاشت، گزارشِ خروج نامِ خامِ کد را نشان می‌دهد و خواننده باید سورس بخواند تا
+   بفهمد کاربر چه دیده. باگِ واقعیِ ۹ شهریور ۱۴۰۵: صدرِ جدولِ ریزش `ab_exposure` و
+   `my_chat_member` بود و هیچ‌کدام «صفحه» نبودند، پس گزارش عملاً کور بود.
+   فقط رویدادهای مشترکِ shared/analytics.js + دو یادآوریِ push این‌جا نام دارند؛ بقیه با
+   نامِ خودشان می‌آیند (که snake_case و نسبتاً خوانا است). */
+export const EVENT_LABELS = {
+  start: { text: 'استارت زد' },
+  onboard_done: { text: 'آنبوردینگ را تمام کرد' },
+  first_value: { text: 'اولین ارزش را گرفت' },
+  paywall_shown: { text: 'پی‌وال را دید' },
+  recharge_started: { text: 'شارژ را شروع کرد' },
+  receipt_submitted: { text: 'رسید فرستاد' },
+  payment_approved: { text: 'پرداختش تأیید شد' },
+  payment_rejected: { text: 'پرداختش رد شد' },
+  product_delivered: { text: 'محصول تحویل گرفت' },
+  refund: { text: 'جبرانِ خودکار گرفت' },
+  feedback: { text: 'بازخورد داد' },
+  reset: { text: 'حسابش را ریست کرد' },
+  ab_exposure: {
+    text: 'واردِ آزمایشِ A/B شد',
+    note: 'یک رویدادِ **داخلی** است، نه پیامی که کاربر دیده باشد. اگر بالای این جدول باشد یعنی جایی شاخه‌ی آزمایش حساب شده ولی پیامِ متناظرش رویدادی ثبت نکرده؛ آن پیام را باید ثبت‌پذیر کرد.',
+  },
+  night_reminder_sent: { text: 'یادآوریِ شبانه برایش رفت', note: 'پیامِ push ساعت ۲۲؛ کاربر آن را دید و دیگر برنگشت.' },
+  lucky_reminder_sent: { text: 'یادآوریِ کارتِ شانس برایش رفت', note: 'پیامِ push؛ کاربر آن را دید و دیگر برنگشت.' },
 };
 
 /* شرطِ مشترکِ چنل/نسخه/ادمین (همان قراردادِ صفحه‌ی فانل‌ها) */
@@ -147,33 +185,74 @@ export function microSteps(botKey, { stageEv, nextEv = '', since = 0, ch = 0, ve
   return { steps: list, stageUsers, channel: s.label };
 }
 
-/* ═══ ۲) نقاطِ خروج: کسانی که دیگر برنگشتند، آخرین کارشان چه بود؟ ═══ */
+/* ═══ ۲) نقاطِ خروج: کسانی که دیگر برنگشتند، آخرین کارشان چه بود؟ ═══
+   هر ردیف **قدمِ قبلی**اش را هم می‌آورد: پرتکرارترین رویدادی که بلافاصله قبل از آخرین ردپا
+   آمده. چرا لازم است: بعضی «آخرین ردپا»ها خودشان علت نیستند، فقط درِ خروجی‌اند (بلاک‌کردنِ
+   ربات، یا یک رویدادِ داخلی مثل exposure). علتِ واقعی همیشه یک قدم عقب‌تر است، و بدونِ این
+   ستون باید برای هر ردیف دستی تایم‌لاینِ کاربران را باز کرد. */
 export function exitPoints(botKey, { since = 0, ch = 0, ver = '', includeAdmin = false, limit = 25, now = 0 } = {}) {
   const s = slice({ ch, ver, includeAdmin });
   const pk = userPk(botKey);
   const idleBefore = (now || Math.floor(Date.now() / 1000)) - EXIT_IDLE_S;
   const agg = new Map();
+  const blocks = new Map(); // وضعیتِ my_chat_member (kicked|member|…) → تعداد
 
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'events') || !hasTable(db, 'users')) return;
+      /* یک کوئری هم شمارشِ ردیف را می‌دهد هم قدمِ قبلی را. `LEFT JOIN` عمدی است: کاربری که
+         هیچ رویدادِ قبلی ندارد (اولین و آخرین ردپایش یکی است) نباید از شمارش بیفتد، وگرنه
+         عددِ این جدول با لیستِ کوهورتِ پشتش یکی نمی‌ماند (قراردادِ «هیچ عددی بن‌بست نیست»). */
       const sql = `
-        WITH last AS (SELECT user_id, MAX(id) mid FROM events WHERE created_at>=? GROUP BY user_id)
-        SELECT e.event ev, ${KEY_EXPR('e')} kk, COUNT(*) n
-        FROM events e
-        JOIN last ON last.mid = e.id
-        JOIN users u ON u.${pk} = e.user_id
-        WHERE e.created_at < ? AND ${s.cond}
-        GROUP BY ev, kk`;
+        WITH last AS (SELECT user_id, MAX(id) mid FROM events WHERE created_at>=? GROUP BY user_id),
+             ex AS (
+               SELECT e.user_id uid, e.id eid, e.event ev, ${KEY_EXPR('e')} kk
+               FROM events e
+               JOIN last ON last.mid = e.id
+               JOIN users u ON u.${pk} = e.user_id
+               WHERE e.created_at < ? AND ${s.cond}
+             ),
+             pv AS (
+               SELECT ex.ev ev, ex.kk kk, p.event pev, ${KEY_EXPR('p')} pkk,
+                      ROW_NUMBER() OVER (PARTITION BY ex.uid ORDER BY p.id DESC) rn
+               FROM ex LEFT JOIN events p ON p.user_id = ex.uid AND p.id < ex.eid
+             )
+        SELECT ev, kk, COALESCE(pev,'') pev, COALESCE(pkk,'') pkk, COUNT(*) n
+        FROM pv WHERE rn = 1 GROUP BY ev, kk, pev, pkk`;
       for (const r of rows(db, sql, [since, idleBefore, ...s.params])) {
         const id = `${r.ev}|${r.kk}`;
-        agg.set(id, { ev: r.ev, k: r.kk, n: (agg.get(id)?.n || 0) + r.n });
+        const cur = agg.get(id) || { ev: r.ev, k: r.kk, n: 0, prevs: new Map() };
+        cur.n += r.n;
+        if (r.pev) {
+          const pid = `${r.pev}|${r.pkk}`;
+          cur.prevs.set(pid, (cur.prevs.get(pid) || 0) + r.n);
+        }
+        agg.set(id, cur);
+      }
+      /* تفکیکِ بلاک از آنبلاک. عمداً یک کوئریِ جداست و در کلیدِ گروه‌بندی نمی‌نشیند: کلیدِ
+         گروه (KEY_EXPR) بین این گزارش و lib/cohorts.js مشترک است و دست‌زدن به آن، عدد را از
+         لیستِ کاربرانِ پشتش جدا می‌کند. */
+      for (const r of rows(db, `
+        SELECT COALESCE(json_extract(e.props,'$.d'),'') st, COUNT(*) n
+        FROM events e
+        JOIN (SELECT user_id, MAX(id) mid FROM events WHERE created_at>=? GROUP BY user_id) last ON last.mid = e.id
+        JOIN users u ON u.${pk} = e.user_id
+        WHERE e.created_at < ? AND e.event='act'
+          AND json_extract(e.props,'$.a')='my_chat_member' AND ${s.cond}
+        GROUP BY st`, [since, idleBefore, ...s.params])) {
+        blocks.set(r.st, (blocks.get(r.st) || 0) + r.n);
       }
     });
   }
-  const list = [...agg.values()].sort((a, b) => b.n - a.n);
+  const list = [...agg.values()]
+    .map((r) => {
+      const top = [...r.prevs.entries()].sort((a, b) => b[1] - a[1])[0];
+      const [pev, pkk] = top ? top[0].split('|') : ['', ''];
+      return { ev: r.ev, k: r.k, n: r.n, prev: top ? { ev: pev, k: pkk, n: top[1] } : null };
+    })
+    .sort((a, b) => b.n - a.n);
   const total = list.reduce((t, r) => t + r.n, 0);
-  return { list: list.slice(0, limit), total, idleBefore };
+  return { list: list.slice(0, limit), total, idleBefore, blocks };
 }
 
 /* ═══ ۳) گزارشِ صفحه‌ها: هر پیام چقدر دیده شده و چند درصد بعدش اقدام کردند ═══

@@ -85,14 +85,31 @@ const sweep = SRC.slice(SRC.indexOf('const REMINDER_HOUR'), SRC.indexOf("}, 15 *
 ok('جارو ساعت را به وقتِ تهران می‌سنجد', /Asia\/Tehran/.test(sweep));
 ok('جارو فقط در ساعتِ REMINDER_HOUR کار می‌کند', /hour !== REMINDER_HOUR\) return/.test(sweep));
 ok('ساعتِ یادآوری ۲۲ است (۱۰ شب)', /const REMINDER_HOUR = 22;/.test(SRC));
-ok('انتسابِ شاخه از variant() می‌آید (نه شرطِ دستی)', /variant\(db, uid, NIGHT_EXP\)/.test(sweep));
+ok('انتسابِ شاخه از peekVariant() می‌آید (نه شرطِ دستی)', /peekVariant\(db, uid, NIGHT_EXP\)/.test(sweep));
 ok('شاخه‌ی ناشناخته به control فالبک می‌کند', /\|\| NIGHT_ARMS\.control/.test(sweep));
+/* ⚠️ گران‌ترین اشتباهِ این جارو: ثبتِ exposure **قبل از** گاردِ `arm.due`.
+   باگِ واقعیِ ۹ شهریور ۱۴۰۵ — از ۳۹۵ exposureِ ثبت‌شده، ۹۵ تا کاربرانی بودند که هیچ پیامی
+   نگرفتند (یا گاردِ due ردشان کرد، یا ارسال شکست خورد چون ربات را بلاک کرده بودند). چون
+   شرطِ `due` در دو شاخه دو ستونِ متفاوت را می‌خواند، این رقیق‌شدن **نامتقارن** بود: سوگیریِ
+   سیستماتیک روی نتیجه‌ی آزمایش، نه نویز. پس این ترتیب قفل می‌شود. */
+ok('جارو exposure را زودهنگام ثبت نمی‌کند (هیچ variant() خامی در جارو نیست)',
+   !/[^k]variant\(db, uid, NIGHT_EXP\)/.test(sweep));
+ok('exposure فقط داخلِ شاخه‌ی ارسالِ موفق ثبت می‌شود',
+   /if \(ok\) \{[\s\S]{0,400}expose\(db, uid, NIGHT_EXP\)/.test(sweep));
+{
+  const iPeek = sweep.indexOf('peekVariant(db, uid, NIGHT_EXP)');
+  const iExpose = sweep.indexOf('expose(db, uid, NIGHT_EXP)');
+  const iSend = sweep.indexOf('sendMessage');
+  ok('ثبتِ exposure بعد از گاردِ due است', iExpose > sweep.indexOf('arm.due(u, today)'));
+  ok('ثبتِ exposure بعد از خودِ ارسال است', iExpose > iSend && iPeek < iSend);
+}
 // ⚠️ مهم‌ترین ترتیب: اگر کاربر امروز کارش را کرده، **قبل از** مهرِ زمان رد می‌شود
 const iDue = sweep.indexOf('arm.due(u, today)');
 const iStamp = sweep.indexOf('setNightReminded');
 ok('گاردِ «امروز انجام شده» قبل از مهرِ زمان است', iDue !== -1 && iStamp !== -1 && iDue < iStamp);
 // و رویداد فقط بعد از ارسالِ موفق (تا «مهرخورده بدونِ رویداد» = بلاک قابلِ شمارش بماند)
-ok('رویداد فقط بعد از ارسالِ موفق ثبت می‌شود', /if \(ok\) track\(db, uid, 'night_reminder_sent'/.test(sweep));
+ok('رویداد فقط بعد از ارسالِ موفق ثبت می‌شود',
+   /if \(ok\) \{[\s\S]{0,400}track\(db, uid, 'night_reminder_sent'/.test(sweep));
 ok('مهرِ زمان قبل از ارسال زده می‌شود (ضدِ تکرار بعد از ری‌استارت)',
    iStamp < sweep.indexOf('sendMessage'));
 ok('هر پیام دکمه‌ی «دیگه یادآوری نکن» دارد', /nightRemindOff/.test(sweep));

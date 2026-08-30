@@ -25,7 +25,7 @@ import SPREADS, {
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
-import { ensureAb, variant } from '../../shared/ab.js';
+import { ensureAb, variant, peekVariant, expose } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
 import { registerSupport, supportRow, supportReply } from '../../shared/support.js';
 import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
@@ -180,7 +180,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.35.0';
+const PRODUCT_VERSION = '3.36.0';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -5259,7 +5259,13 @@ setInterval(async () => {
     for (const u of stmts.dueNightReminder.all()) {
       const uid = u.telegram_id;
       if (!uxV2For(uid)) continue;
-      const arm = NIGHT_ARMS[variant(db, uid, NIGHT_EXP)] || NIGHT_ARMS.control;
+      // ⚠️ `peekVariant` نه `variant`: شاخه را می‌خوانیم ولی exposure را **ثبت نمی‌کنیم**.
+      // دلیل: گاردِ `arm.due` پایین ممکن است هیچ پیامی نفرستد، و شرطِ آن گارد per شاخه
+      // فرق می‌کند (control به `last_daily_date` نگاه می‌کند، lucky به `lucky_date`). با
+      // ثبتِ زودهنگام، هر دو شاخه با کاربرانی پر می‌شدند که هیچ‌وقت چیزی ندیدند — و چون
+      // نرخِ آن دو گارد یکی نیست، این رقیق‌شدن **متقارن هم نبود**: سوگیریِ سیستماتیک،
+      // نه نویز. exposure پایین و فقط بعد از رسیدنِ واقعیِ پیام ثبت می‌شود.
+      const arm = NIGHT_ARMS[peekVariant(db, uid, NIGHT_EXP)] || NIGHT_ARMS.control;
       // کاربری که همین امروز کارِ همان شاخه را کرده پیام نمی‌گیرد — و **مهرِ زمان هم
       // نمی‌خورد**، وگرنه فردا شبش هم رد می‌شد (گاردِ ۱۸ساعته او را می‌بلعید).
       if (!arm.due(u, today)) continue;
@@ -5272,8 +5278,12 @@ setInterval(async () => {
       }).then(() => true).catch(() => false);
       // مهر **قبل** از ارسال زده می‌شود و رویداد **بعد** از موفقیت: همان الگوی قدیمی که
       // «مهرخورده ولی بدونِ رویداد» را به معنیِ بلاک‌شدنِ کاربر قابلِ شمارش می‌کند
-      // (بند ۲.۵ اسکیلِ تحلیلِ جرنی).
-      if (ok) track(db, uid, 'night_reminder_sent', { arm: arm === NIGHT_ARMS.lucky ? 'lucky' : 'control' });
+      // (بند ۲.۵ اسکیلِ تحلیلِ جرنی). ارسالِ ناموفق یعنی کاربر ربات را بلاک کرده، پس
+      // نه exposure می‌گیرد نه رویداد: او هیچ‌وقت این شاخه را ندید.
+      if (ok) {
+        expose(db, uid, NIGHT_EXP); // ← نقطه‌ی واقعیِ دیدنِ treatment
+        track(db, uid, 'night_reminder_sent', { arm: arm === NIGHT_ARMS.lucky ? 'lucky' : 'control' });
+      }
       await sleep(300);
     }
   } catch (e) { logErr('night reminder sweep:', e.message); }
