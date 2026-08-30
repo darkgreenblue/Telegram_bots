@@ -119,13 +119,15 @@ export const repairUser = (hits) =>
  * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
  * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
-export async function repairDefects(llm, call, { tag = '' } = {}) {
+export async function repairDefects(llm, call, { tag = '', meta = null } = {}) {
   const hits = findDefects(llm);
   if (!hits.length) return { llm, fired: false, repaired: false };
 
   let res = null;
   try {
     res = await call(REPAIR_SYSTEM, repairUser(hits), {
+      // برچسبِ حسابداریِ مصرفِ مدل (اختیاری؛ نبودنش دقیقاً رفتارِ قبلی است)
+      ...(meta || {}),
       maxTokens: 600,
       temperature: 0.4,   // پایین‌تر از خودِ خوانش: اینجا خلاقیت نمی‌خواهیم، دقت می‌خواهیم
       validate: (out) => {

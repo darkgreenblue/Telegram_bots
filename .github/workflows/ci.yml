@@ -101,6 +101,14 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-receipt-amount.mjs
 
+      # داشبوردِ اصلی (BI): سنجه‌ها روی یک دیتابیسِ **واقعیِ** موقت اجرا می‌شوند و عددِ
+      # چاپ‌شده با لیستِ کاربرانِ پشتش مقایسه می‌شود. اگر این دو واگرا شوند هیچ خطایی
+      # رخ نمی‌دهد — فقط مالک روی عددی تصمیم می‌گیرد که لیستش چیزِ دیگری است.
+      # روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
+      - name: Master dashboard metrics check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-dash.mjs
+
       # ریلِ پرداخت: SQL واقعیِ index.js را روی DB موقت اجرا می‌کند (اتمیک بودنِ مبلغ،
       # ریاضیِ تخفیف، و قفل‌نشدنِ کد با فاکتورِ رهاشده). روی جابِ dashboard چون
       # better-sqlite3 آن‌جا نصب است.
@@ -164,6 +172,14 @@ jobs:
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs
+
+      # حسابداریِ مصرفِ مدل روی همان مسیری نشسته که فالِ کاربرِ پولی از آن رد می‌شود، پس
+      # شرطِ صریحِ مالک «هیچ تأثیری روی کیفیت فال نداشته باشد» این‌جا **اجرا** می‌شود:
+      # بدنه‌ی ریکوئست بجز پرچمِ حسابداری بیت‌به‌بیت همان قبلی است، و سینکِ ترکیده هم
+      # نمی‌تواند متنِ فال را بشکند. صفر شبکه (fetch استاب می‌شود).
+      - name: LLM usage accounting check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-llm-usage.mjs
 
       - name: Reading v4 structure check
         if: matrix.bot == 'tarot'

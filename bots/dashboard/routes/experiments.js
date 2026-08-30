@@ -1,6 +1,7 @@
 // تست‌ها (A/B): ساخت/اجرا/توقف نرم/kill/تصمیم + نتایج آماری صادقانه برای نمونه‌ی کم.
 // config آزمایش در DB خود ربات نوشته می‌شود (ربات با کش ۶۰ثانیه‌ای می‌خواند — توقف بدون deploy).
-import { instances, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { ensureAb } from '../../../shared/ab.js';
 import { chanceToWin, rateCI, srmCheck, meanSE, MIN_SAMPLE, SHIP_CTW } from '../lib/stats.js';
 import { audit, listCampaigns } from '../lib/platform.js';
@@ -11,9 +12,9 @@ import { FUNNELS } from './funnels.js';
 const STATUS_FA = { draft: 'پیش‌نویس', running: 'در حال اجرا', draining: 'توقف نرم (drain)', stopped: 'متوقف' };
 const DECISION_FA = { shipped: 'اجرا شد (ship)', rolled_back: 'برگشت خورد', inconclusive: 'بی‌نتیجه' };
 
-function listExperiments() {
+function listExperiments(botKey) {
   const out = [];
-  for (const inst of instances()) {
+  for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'experiments')) return;
       for (const e of rows(db, 'SELECT * FROM experiments ORDER BY created_at DESC')) out.push({ inst, e });
@@ -23,11 +24,12 @@ function listExperiments() {
 }
 
 /* ---------- صفحه‌ی فهرست + فرم ساخت ---------- */
-export function experimentsBody() {
+export function experimentsBody(url) {
+  const bot = scopeBot(url);
   // فقط ربات‌هایی که variant() را سیم‌کشی کرده‌اند (abSupport) قابل تست‌اند
-  const abInstances = instances().filter(i => abSupported(i.bot));
+  const abInstances = instancesOf(bot).filter(i => abSupported(i.bot));
   const instOptions = abInstances.map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join('')
-    || '<option value="">(هیچ رباتی هنوز A/B را سیم‌کشی نکرده)</option>';
+    || '<option value="">(این ربات هنوز A/B را سیم‌کشی نکرده)</option>';
   const form = `<div class="card"><h2>➕ آزمایش جدید</h2>
   <form method="post" action="/experiments/create" class="inline">
     <label>ربات<select name="inst">${instOptions}</select></label>
@@ -52,7 +54,7 @@ export function experimentsBody() {
 
   const list = table(
     ['آزمایش', 'ربات', 'حالت/متریک', 'وضعیت', 'تصمیم', 'شروع', ''],
-    listExperiments().map(({ inst, e }) => [
+    listExperiments(bot).map(({ inst, e }) => [
       `<b>${esc(e.name || e.key)}</b><div class="muted mono">${esc(e.key)}</div>`,
       esc(inst.title),
       `${esc(e.mode)} / ${esc(e.metric_kind)}`,

@@ -1,6 +1,7 @@
 // ریتنشن: مثلث هفتگی (کوهورت = هفته‌ی ورود کاربر؛ بازگشت = هر رویدادی در هفته‌های بعد)
 // + خلاصه‌ی lifecycle هفته‌ی جاری (جدید/برگشتی/خفته). هفته‌ها تقویم تهران، شروع از شنبه.
-import { instancesOf, BOTS, withDb, hasTable, rows, userPk, userCreatedExpr } from '../lib/bots.js';
+import { instancesOf, botByKey, withDb, hasTable, rows, userPk, userCreatedExpr } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { fmt, esc, weekIdx, weekExpr, weekLabel } from '../lib/util.js';
 import { table, stat, cohortCount } from '../lib/html.js';
 
@@ -44,10 +45,11 @@ function botRetention(botKey, weeksBack = 8) {
   return { cohorts, cohortSize, activeSets, nowW, weeksBack, lifecycle: { active: thisWeekActive.size, newUsers: thisWeekNew, dormant } };
 }
 
-export function retentionBody() {
+export function retentionBody(url) {
+  const bot = scopeBot(url);
   let out = `<div class="card"><p class="muted">هر ردیف = کاربران واردشده در آن هفته؛ ستون‌ها = ٪ برگشت در هفته‌های بعد (هر رویدادی = فعال). مبنای فعالیت جدول events است، پس از زمان نصب آنالیتیکس معتبر است. هفته‌ها شنبه‌محور به وقت تهران.</p></div>`;
-  for (const b of BOTS) {
-    if (!instancesOf(b.key).length) continue;
+  for (const b of [botByKey(bot)].filter(Boolean)) {
+    if (!instancesOf(b.key).length) { out += `<div class="card"><p class="muted">برای این ربات دیتابیسی پیدا نشد.</p></div>`; continue; }
     const r = botRetention(b.key);
     if (!r.cohorts.length) continue;
     const headers = ['هفته‌ی ورود', 'کاربر', ...Array.from({ length: r.weeksBack }, (_, i) => `+${i}`)];

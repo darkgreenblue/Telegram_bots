@@ -19,6 +19,10 @@ export function tehranDateTime(unixSec) {
   }).format(new Date(unixSec * 1000));
 }
 
+// شماره‌ی روزِ تهرانیِ یک ستون/عبارتِ unix — به‌صورت عبارتِ SQL (گروه‌بندیِ روزانه).
+// مرزِ روز نیمه‌شبِ تهران است نه UTC (باگِ کلاسیکِ شیفتِ ۳.۵ ساعته در هر تجمیعِ روزانه).
+export const tehranDayExpr = (col) => `CAST((${col} + ${TEHRAN_OFFSET_S}) / 86400 AS INTEGER)`;
+
 /* هفته‌های شنبه‌محورِ تهران (ریتنشن + کوهورت‌ها) — epoch یونیکس پنجشنبه است؛ +۲ روز → مرز شنبه */
 export const WEEK = 7 * 86400;
 export const weekIdx = (unixSec) => Math.floor((unixSec + TEHRAN_OFFSET_S - 2 * 86400) / WEEK);

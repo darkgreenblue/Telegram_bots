@@ -1,5 +1,6 @@
 // نمای کلی: وضعیت هر ربات (کاربر/فعال/درآمد به وقت تهران) + سلامت عملیاتی (صف رسید، حجم DB)
-import { instances, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman } from '../lib/bots.js';
+import { instancesOf, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman, botByKey } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
 import { stat, cohortCount } from '../lib/html.js';
 import { EVENTS } from '../../../shared/analytics.js';
@@ -14,12 +15,15 @@ const KNOWN_EVENTS = new Set([
 
 const mb = (bytes) => (bytes / 1048576).toFixed(1);
 
-export function overviewBody() {
+export function overviewBody(url) {
+  // داشبورد per ربات است: فقط instanceهای رباتِ انتخاب‌شده (منوی کشوییِ بالای منو)
+  const bot = scopeBot(url);
   const today = tehranDayStart();
   const week = tehranDayStart(-6);
   const month = nowSec() - 30 * 86400;
-  const insts = instances();
-  if (!insts.length) return `<div class="card"><p class="muted">هیچ دیتابیسی پیدا نشد. این صفحه روی سرور (کنار دیتابیس ربات‌ها) معنا دارد.</p></div>`;
+  const insts = instancesOf(bot);
+  if (!insts.length) return `<div class="card"><h2>${esc(botByKey(bot)?.title || bot)}</h2>`
+    + `<p class="muted">برای این ربات دیتابیسی پیدا نشد. این صفحه روی سرور (کنار دیتابیس ربات‌ها) معنا دارد.</p></div>`;
 
   let out = '';
   for (const inst of insts) {
@@ -70,6 +74,6 @@ export function overviewBody() {
   if (unknown.length) {
     out += `<div class="note">⚠️ رویدادهای خارج از واژه‌نامه (drift قرارداد آنالیتیکس؟): ${unknown.map(esc).join(' · ')}</div>`;
   }
-  out += `<p class="muted">درآمد = مبلغ واقعاً پرداخت‌شده (بعد از تخفیف)، تأییدشده. مرز «امروز» = نیمه‌شب تهران. tabir-khab در فاز بعدی به داشبورد وصل می‌شود.</p>`;
+  out += `<p class="muted">درآمد = مبلغ واقعاً پرداخت‌شده (بعد از تخفیف)، تأییدشده. مرز «امروز» = نیمه‌شب تهران. برای دیدنِ ربات دیگر، از منوی کشوییِ بالای منو عوضش کن.</p>`;
   return out;
 }

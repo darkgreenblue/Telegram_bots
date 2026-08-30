@@ -31,7 +31,9 @@ export const BOTS = [
     receiptQueue: true, // جدول admin_actions دارد؛ داشبورد تأیید/رد را enqueue می‌کند
   },
   {
-    key: 'tarot', title: '🔮 تاروت', dataDir: '../tarot/data', pattern: /^bot-[a-z-]+\.db$/,
+    // `envDir` فقط برای تست: چکِ CI مسیرِ دیتابیس را به یک فیکسچرِ موقت می‌برد تا
+    // «عدد» و «لیستِ کاربرانِ پشتِ عدد» را روی دیتای واقعی مقایسه کند. روی سرور ست نیست.
+    key: 'tarot', title: '🔮 تاروت', dataDir: '../tarot/data', envDir: 'TAROT_DB_DIR', pattern: /^bot-[a-z-]+\.db$/,
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
     receiptQueue: true,

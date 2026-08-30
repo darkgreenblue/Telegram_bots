@@ -29,15 +29,48 @@ export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
 // استفاده می‌کند و در گزارشِ OpenRouter از هم جدا نمی‌شوند.
 const keyOf = () => process.env.OPENROUTER_API_KEY;
 
-export async function orRequest(body) {
+/* ═══ حسابداریِ مصرفِ مدل — «چقدر خرج شد» بدونِ ذره‌ای دست‌زدن به «چه چیزی تولید شد» ═══
+ *
+ * چرا: تا امروز هزینه‌ی واقعیِ OpenRouter در هیچ دیتابیسی ثبت نمی‌شد و
+ * `bots/dashboard/CLAUDE.md` خودش آن را «مهم‌ترین عددِ گمشده» نامیده بود. بدونش نه
+ * هزینه‌ی هر فال معلوم است نه سودِ واقعی.
+ *
+ * ⚠️ قاعده‌ی آهنینِ این بخش (شرطِ صریحِ مالک): **کیفیتِ فال نباید ذره‌ای به این لایه
+ * حساس باشد.** طراحی طوری است که این شرط نه با دقت، بلکه **ساختاراً** برقرار بماند:
+ *
+ *   ۱) **بدنه‌ی ریکوئست بایت‌به‌بایت همان قبلی است.** هیچ فیلدی اضافه نمی‌شود.
+ *      OpenRouter از خودش `usage.cost` (هزینه‌ی دلاریِ همان درخواست) را در **هر**
+ *      پاسخ برمی‌گرداند و پارامترِ قدیمیِ `usage:{include:true}` را رسماً منسوخ و
+ *      بی‌اثر اعلام کرده. پس هزینه «خواندنِ چیزی است که از قبل می‌آمد و دور می‌ریختیم»،
+ *      نه چیزی که ما از سرور بخواهیم. یعنی صفر تغییر روی سیم = صفر ریسک برای خروجی.
+ *   ۲) **ثبت هرگز به مسیرِ تولید برنمی‌گردد:** بعد از استخراجِ متن و داخلِ try/catch
+ *      صدا زده می‌شود، پس حتی اگر نوشتن در دیتابیس بترکد، فال سالم تحویل می‌شود.
+ *   ۳) **برچسبِ حسابداری از مسیرِ opts می‌رود، نه بدنه** — پس نمی‌تواند به سیم برسد.
+ *   ۴) **رول‌بکِ یک‌خطی:** `USAGE_ACCOUNTING = false` → هیچ ردیفی ثبت نمی‌شود.
+ *
+ * `USAGE_INCLUDE_FLAG` دریچه‌ی اضطراری است و **عمداً خاموش**: اگر روزی معلوم شد در
+ * مسیری (مثلاً BYOK) هزینه بدونِ آن پرچم نمی‌آید، یک `true` کافی است. تا آن روز
+ * روشن‌کردنش فقط یک فیلدِ منسوخ به ریکوئست اضافه می‌کند بدونِ هیچ فایده‌ای.
+ * چکِ CI: `tools/check-llm-usage.mjs` (هر چهار ادعا را واقعاً اجرا می‌کند). */
+export const USAGE_ACCOUNTING = true;
+export const USAGE_INCLUDE_FLAG = false;
+
+let usageSink = null;
+/** ثبت‌کننده‌ی مصرف را تزریق می‌کند (ربات: نوشتن در `llm_usage`؛ آزمایشگاه: هیچ). */
+export const setUsageSink = (fn) => { usageSink = typeof fn === 'function' ? fn : null; };
+
+export async function orRequest(body, meta = null) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
   const t0 = Date.now();
   try {
+    // با پرچمِ خاموش (پیش‌فرض) این دقیقاً همان `body` است: `JSON.stringify` کلیدی را
+    // که مقدارش undefined باشد اصلاً نمی‌نویسد، پس رشته‌ی نهایی بایت‌به‌بایت همان قبلی است.
+    const wire = { ...body, usage: USAGE_INCLUDE_FLAG ? { include: true } : undefined };
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${keyOf()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(wire),
       signal: ctrl.signal,
     });
     if (!res.ok) {
@@ -49,6 +82,24 @@ export async function orRequest(body) {
     const text = data.choices?.[0]?.message?.content?.trim() || '';
     const u = data.usage || {};
     log(`✅ ${body.model} in ${Date.now() - t0}ms | tok(in/out)=${u.prompt_tokens ?? '?'}/${u.completion_tokens ?? '?'}`);
+    // ثبت **بعد از** استخراجِ متن و کاملاً بلعیده‌شده: هیچ خطایی از این‌جا به فال نمی‌رسد.
+    if (usageSink && USAGE_ACCOUNTING) {
+      try {
+        usageSink({
+          model: body.model || '',
+          kind: meta?.kind || '',
+          refId: Number(meta?.refId) || 0,
+          userId: Number(meta?.userId) || 0,
+          promptTokens: Number(u.prompt_tokens) || 0,
+          completionTokens: Number(u.completion_tokens) || 0,
+          totalTokens: Number(u.total_tokens) || 0,
+          // `cost` را خودِ OpenRouter در هر پاسخ می‌گذارد؛ اگر روزی نیامد یعنی صفر،
+          // نه یک عددِ حدسی (هیچ جدولِ قیمتی این‌جا نگه داشته نمی‌شود که کهنه شود).
+          costUsd: Number(u.cost) || 0,
+          ms: Date.now() - t0,
+        });
+      } catch (e) { logErr('usage sink:', e.message); }
+    }
     return { text, usage: u };
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('TIMEOUT');
@@ -67,7 +118,9 @@ export function orChat(system, user, opts = {}) {
     // خروجی JSON وسط رشته بریده می‌شود (Unterminated string) — دیده‌شده در لاگ پروداکشن
     reasoning: { enabled: false },
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-  });
+  // برچسبِ حسابداری (کدام مسیر، کدام رکورد، کدام کاربر). عمداً **بیرونِ** بدنه‌ی ریکوئست
+  // است تا هیچ‌وقت به سیم نرود و نتواند رفتارِ مدل را عوض کند.
+  }, { kind: opts.kind, refId: opts.refId, userId: opts.userId });
 }
 
 // فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
@@ -89,14 +142,14 @@ export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FL
   return null;
 }
 
-export async function orTranscribe(audioBuffer, format) {
+export async function orTranscribe(audioBuffer, format, meta = null) {
   const { text } = await orRequest({
     model: FLASH,
     messages: [{ role: 'user', content: [
       { type: 'text', text: 'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.' },
       { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
     ] }],
-  });
+  }, meta);
   return text;
 }
 

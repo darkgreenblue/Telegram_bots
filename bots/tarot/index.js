@@ -41,7 +41,7 @@ import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, countOf as
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
 import {
   FLASH, FALLBACK_MODEL, OR_TIMEOUT_MS,
-  orChatResilient, orTranscribe, parseJsonLoose,
+  orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4,
@@ -697,6 +697,26 @@ db.exec(`
     source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL DEFAULT (unixepoch()), done_at INTEGER
   );
 `);
+// 🧾 دفترِ مصرفِ مدل: هزینه‌ی واقعیِ OpenRouter per فراخوانی (بند «هزینه‌ها» داشبورد).
+// جدولِ **جدید** است، پس هیچ داده‌ی قدیمی‌ای معنی‌اش عوض نمی‌شود (بند ۲ج/۱ ریشه).
+// `cost_usd` همان عددی است که خودِ OpenRouter برمی‌گرداند (اعتبارِ دلاری)؛ هیچ جدولِ
+// قیمتی این‌جا نگه داشته نمی‌شود که کهنه شود و هیچ تبدیلِ ارزی در این لایه انجام نمی‌شود.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS llm_usage (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER NOT NULL DEFAULT 0,
+    kind              TEXT    NOT NULL DEFAULT '',
+    ref_id            INTEGER NOT NULL DEFAULT 0,
+    model             TEXT    NOT NULL DEFAULT '',
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens      INTEGER NOT NULL DEFAULT 0,
+    cost_usd          REAL    NOT NULL DEFAULT 0,
+    ms                INTEGER NOT NULL DEFAULT 0,
+    created_at        INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
+`);
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (چرخه‌ی عمر را داشبورد کنترل می‌کند)
@@ -922,7 +942,25 @@ const stmts = {
   setDailyText: db.prepare('INSERT OR REPLACE INTO daily_texts (card_key, reversed, focus, text) VALUES (?,?,?,?)'),
   getCardFile: db.prepare('SELECT file_id FROM card_files WHERE card_key=?'),
   setCardFile: db.prepare('INSERT INTO card_files (card_key, file_id, updated_at) VALUES (?,?,unixepoch()) ON CONFLICT(card_key) DO UPDATE SET file_id=excluded.file_id, updated_at=unixepoch()'),
+  insertLlmUsage: db.prepare(`INSERT INTO llm_usage
+    (user_id, kind, ref_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, ms)
+    VALUES (?,?,?,?,?,?,?,?,?)`),
 };
+
+/* 🧾 ثبتِ مصرفِ مدل. **تنها مصرف‌کننده‌ی این تابع، لایه‌ی حسابداری است، نه فلوی فال.**
+ * سه گاردِ عمدی: خودش try/catch دارد (خطای نوشتن هرگز به خوانش نمی‌رسد)، بعد از
+ * استخراجِ متن صدا زده می‌شود، و اگر جدول به هر دلیلی نبود فقط یک لاگ می‌دهد.
+ * ⚠️ عمداً در `wipeUser` پاک **نمی‌شود**: این دفترِ هزینه است، نه دیتای کاربر؛ ریستِ
+ * تستیِ ادمین نباید تاریخچه‌ی هزینه‌ی ربات را قیچی کند. */
+setUsageSink((u) => {
+  try {
+    stmts.insertLlmUsage.run(
+      u.userId || 0, u.kind || '', u.refId || 0, u.model || '',
+      u.promptTokens || 0, u.completionTokens || 0, u.totalTokens || 0,
+      u.costUsd || 0, u.ms || 0,
+    );
+  } catch (e) { logErr('llm_usage insert:', e.message); }
+});
 
 /* ===== 3) هلپرهای کاربر/سشن ===== */
 function upsertUser(ctx) {
@@ -1482,7 +1520,8 @@ async function callReadingLLM(readingId) {
     } else if (fetched) {
       // پرچم خاموش: به مسیرِ رونویسی برمی‌گردیم. دو فراخوانی می‌شود ولی هر دو **بعد از**
       // پرداخت‌اند، پس قاعده‌ی هزینه نمی‌شکند (رول‌بک نباید قاعده را هم برگرداند).
-      const txt = await orTranscribe(Buffer.from(fetched.data, 'base64'), fetched.format)
+      const txt = await orTranscribe(Buffer.from(fetched.data, 'base64'), fetched.format,
+        { kind: 'transcribe', refId: readingId, userId: r.user_id })
         .catch(e => { logErr(`reading#${readingId} رونویسیِ فالبک شکست خورد:`, e.message); return null; });
       if (txt?.trim()) {
         r.question = txt.trim().slice(0, 1500);
@@ -1535,6 +1574,8 @@ async function callReadingLLM(readingId) {
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
   let headlineTries = 0;
   const res = await orChatResilient(systemFinal, userMsg, {
+    // برچسبِ حسابداری (بیرونِ بدنه‌ی ریکوئست؛ به سیم نمی‌رود)
+    kind: 'reading', refId: readingId, userId: r.user_id,
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
@@ -1570,7 +1611,8 @@ async function callReadingLLM(readingId) {
     if (soft.length) log(`reading#${readingId} فیلدِ اختیاریِ جامانده: ${soft.join(', ')}`);
     if (!headlineOk(parsed.headline)) log(`reading#${readingId} سرخط فرمول را ندارد (پذیرفته شد)`);
     // تعمیرِ نقطه‌ای: فقط اگر تشخیصِ هاردکد چیزی پیدا کند، و فقط یک فراخوانیِ کوچک.
-    const rep = await repairDefects(parsed, orChatResilient, { tag: `reading#${readingId}` });
+    const rep = await repairDefects(parsed, orChatResilient, {
+      tag: `reading#${readingId}`, meta: { kind: 'repair', refId: readingId, userId: r.user_id } });
     parsed = rep.llm;
     const evLeft = evasionIn(v4Text(parsed));
     if (evLeft) logErr(`reading#${readingId} طفره‌رفتن «${evLeft}» بعد از تعمیر هم ماند (پذیرفته شد)`);
@@ -2172,7 +2214,7 @@ async function dailyCard(ctx) {
     ? Promise.resolve(cached)
     : orChatResilient(L.prompts.dailySystem, L.prompts.dailyContext({
         focusFa: L.focusFa[user.focus_area] || '-', card: info, reversed: card.reversed,
-      }), { maxTokens: DAILY.maxTokens }, [FLASH, FLASH, FALLBACK_MODEL])
+      }), { maxTokens: DAILY.maxTokens, kind: 'daily_card', userId: user.telegram_id }, [FLASH, FLASH, FALLBACK_MODEL])
         .then(r => {
           if (r?.out) stmts.setDailyText.run(card.key, card.reversed ? 1 : 0, focusKey, r.out);
           return r?.out || null;
@@ -3705,7 +3747,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
       card: CARD_BY_KEY[cards[midIdx]?.key]?.fa || '',
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
-    }), { maxTokens: 300 }, [FLASH, FALLBACK_MODEL])
+    }), { maxTokens: 300, kind: 'feedback', refId: readingId, userId: uid }, [FLASH, FALLBACK_MODEL])
       .then(res => res?.out || null).catch(e => { logErr('feedback LLM:', e.message); return null; });
     await ctx.reply(recal || L.reading.recalFallback);
   } else {

@@ -3,7 +3,8 @@
 import { randomBytes, timingSafeEqual, createHash } from 'crypto';
 
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // ۳۰ روز؛ ری‌استارت پروسه = ورود دوباره (قابل قبول برای تک‌ادمین)
-const sessions = new Map(); // sid -> expireAt(ms)
+// sid -> { exp, createdAt, ip } — createdAt/ip فقط برای نمایشِ «ورود از …» در کارتِ ادمینِ منو
+const sessions = new Map();
 const attempts = new Map(); // ip  -> { count, resetAt }
 
 export function tokenMatches(input, expected) {
@@ -13,18 +14,20 @@ export function tokenMatches(input, expected) {
   return timingSafeEqual(a, b);
 }
 
-export function newSession() {
+export function newSession(ip = '') {
   const sid = randomBytes(32).toString('hex');
-  sessions.set(sid, Date.now() + SESSION_TTL_MS);
+  sessions.set(sid, { exp: Date.now() + SESSION_TTL_MS, createdAt: Date.now(), ip });
   return sid;
 }
 export function validSession(sid) {
   if (!sid) return false;
-  const exp = sessions.get(sid);
-  if (!exp) return false;
-  if (Date.now() > exp) { sessions.delete(sid); return false; }
+  const s = sessions.get(sid);
+  if (!s) return false;
+  if (Date.now() > s.exp) { sessions.delete(sid); return false; }
   return true;
 }
+/** اطلاعاتِ سشنِ جاری برای کارتِ ادمینِ منو (هیچ داده‌ی حساسی: فقط زمانِ ورود و IP). */
+export const sessionInfo = (sid) => sessions.get(sid) || null;
 export function dropSession(sid) { sessions.delete(sid); }
 
 // حداکثر ۵ تلاش ورود در دقیقه per IP

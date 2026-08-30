@@ -12,9 +12,10 @@ import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { esc } from './lib/util.js';
 import { layout, loginPage } from './lib/html.js';
 import {
-  tokenMatches, newSession, validSession, dropSession, loginRateLimited,
+  tokenMatches, newSession, validSession, sessionInfo, dropSession, loginRateLimited,
   parseCookies, sameOrigin, clientIp, sessionCookie, clearCookie,
 } from './lib/auth.js';
+import { DEFAULT_BOT, validBotKey, botCookie } from './lib/nav.js';
 import { audit } from './lib/platform.js';
 import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
@@ -28,6 +29,7 @@ import { journalBody, journalVersion, journalInsight } from './routes/journal.js
 import { cohortBody, cohortFragment } from './routes/cohort.js';
 import { funnelStepsFragment, screensBody } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
+import { dashBody, dashRate } from './routes/dash.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 
 /* ===== ENV ===== */
@@ -56,6 +58,7 @@ const redirect = (res, to, extraHeaders = {}) => { res.writeHead(303, { Location
 /* ===== صفحات GET (بعد از احراز هویت) ===== */
 const PAGES = {
   '/': (url) => ['نمای کلی', overviewBody(url)],
+  '/dash': (url) => ['آمار تحلیلی', dashBody(url)],
   '/marketing': (url) => ['مارکتینگ', marketingBody(url)],
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
@@ -63,11 +66,11 @@ const PAGES = {
   '/costs': (url) => ['هزینه‌ها', costsBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
   '/screens': (url) => ['صفحه‌ها', screensBody(url)],
-  '/discounts': () => ['کد تخفیف', discountsBody()],
-  '/experiments': () => ['تست‌ها', experimentsBody()],
+  '/discounts': (url) => ['کد تخفیف', discountsBody(url)],
+  '/experiments': (url) => ['تست‌ها', experimentsBody(url)],
   '/experiments/view': (url) => ['تست‌ها', experimentViewBody(url), '/experiments'],
-  '/retention': () => ['ریتنشن', retentionBody()],
-  '/journal': () => ['ژورنال', journalBody()],
+  '/retention': (url) => ['ریتنشن', retentionBody(url)],
+  '/journal': (url) => ['ژورنال', journalBody(url)],
   '/users': (url) => ['کاربران', usersBody(url)],
   // «کاربرانِ پشتِ یک عدد» — نسخه‌ی صفحه‌ی کامل (قطعه‌ی کشویی پایین‌تر، خارج از PAGES)
   '/cohort': (url) => ['کاربران', cohortBody(url), '/users'],
@@ -93,6 +96,7 @@ const ACTIONS = {
   '/experiments/decide': { fn: experimentDecide, backTo: '/experiments' },
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
+  '/dash/rate': { fn: dashRate, backTo: '/dash' },
 };
 
 const server = http.createServer(async (req, res) => {
@@ -107,7 +111,7 @@ const server = http.createServer(async (req, res) => {
         if (loginRateLimited(ip)) { audit('login.ratelimited', ip); return send(res, 429, loginPage('تلاش زیاد؛ یک دقیقه صبر کن.')); }
         const body = await readBody(req);
         if (tokenMatches(body.get('token'), DASHBOARD_TOKEN)) {
-          const sid = newSession();
+          const sid = newSession(ip);
           audit('login.ok', ip);
           return redirect(res, '/', { 'Set-Cookie': sessionCookie(sid, req) });
         }
@@ -118,8 +122,21 @@ const server = http.createServer(async (req, res) => {
     }
 
     /* ---- گارد سشن ---- */
-    const sid = parseCookies(req).dash_sid;
+    const cookies = parseCookies(req);
+    const sid = cookies.dash_sid;
     if (!validSession(sid)) return redirect(res, '/login');
+
+    /* ---- اسکوپِ ربات (تک‌نقطه‌ی resolve) ----
+       داشبورد per ربات است. اولویت: پارامترِ صریحِ URL → کوکیِ چسبندگی → پیش‌فرض (تاروت).
+       مقدارِ نهایی روی خودِ `url` می‌نشیند تا **هر** route فقط `scopeBot(url)` را صدا بزند
+       و هیچ‌کدام لازم نباشد کوکی/پیش‌فرض را دوباره پیاده کند. کلید همیشه از whitelist
+       می‌آید (`validBotKey`)، پس هیچ رشته‌ی خامی از URL/کوکی جلوتر نمی‌رود. */
+    const decode = (v) => { try { return decodeURIComponent(v || ''); } catch { return ''; } };
+    const askedBot = validBotKey(url.searchParams.get('bot'));
+    const cookieBot = validBotKey(decode(cookies.dash_bot));
+    const bot = askedBot || cookieBot || DEFAULT_BOT;
+    url.searchParams.set('bot', bot);
+    const stickyCookie = askedBot && askedBot !== cookieBot ? { 'Set-Cookie': botCookie(bot) } : {};
 
     if (path === '/logout' && req.method === 'POST') {
       dropSession(sid);
@@ -138,7 +155,9 @@ const server = http.createServer(async (req, res) => {
       // backTo می‌تواند تابع باشد تا اکشن به همان صفحه‌ای که از آن آمده برگردد
       // (مثلاً اقدامِ پشتیبانی → پروفایلِ همان کاربر، نه صفحه‌ی جستجو).
       const back = typeof action.backTo === 'function' ? action.backTo(body) : action.backTo;
-      return redirect(res, `${back}?msg=${encodeURIComponent(msg || '')}`);
+      // اسکوپِ ربات باید از اکشن هم رد شود، وگرنه بعد از هر POST به رباتِ پیش‌فرض برمی‌گشتیم
+      const sep = back.includes('?') ? '&' : '?';
+      return redirect(res, `${back}${sep}bot=${encodeURIComponent(bot)}&msg=${encodeURIComponent(msg || '')}`);
     }
 
     /* ---- CSV (export — در خود handler در audit ثبت می‌شود) ---- */
@@ -167,9 +186,11 @@ const server = http.createServer(async (req, res) => {
 
     /* ---- صفحات ---- */
     const page = PAGES[path];
-    if (!page) return send(res, 404, layout('یافت نشد', '', '<div class="card"><p>صفحه‌ای این‌جا نیست.</p></div>'));
+    const chrome = { bot, session: sessionInfo(sid), path, query: url.searchParams };
+    if (!page) return send(res, 404, layout('یافت نشد', '', '<div class="card"><p>صفحه‌ای این‌جا نیست.</p></div>', chrome));
     const [title, body, activeOverride] = page(url);
-    return send(res, 200, layout(title, activeOverride || path, body, { msg: url.searchParams.get('msg') || '' }));
+    return send(res, 200, layout(title, activeOverride || path, body,
+      { ...chrome, msg: url.searchParams.get('msg') || '' }), stickyCookie);
   } catch (e) {
     logErr('❌ GLOBAL dashboard:', path, e.stack || e.message);
     try { send(res, 500, layout('خطا', '', `<div class="card"><p>خطای داخلی: ${esc(e.message)}</p></div>`)); } catch {}

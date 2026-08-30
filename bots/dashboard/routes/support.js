@@ -1,6 +1,7 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText } from '../lib/bots.js';
+import { instances, instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
@@ -12,12 +13,14 @@ const showTime = (v) => (typeof v === 'string' ? v : tehranDateTime(v));
 const toUnix = (v) => (typeof v === 'string' ? Math.floor(Date.parse(v) / 1000) || 0 : (v || 0));
 
 export function supportBody(url) {
+  const bot = scopeBot(url);
   const q = (url.searchParams.get('q') || '').trim();
   // کدِ پیگیریِ پشتیبانی (#TRT-123456789) که کاربر در چتِ پشتیبانی فرستاده: کلِ پیامش را هم
   // می‌شود paste کرد؛ کد از داخلش بیرون کشیده و به آی‌دیِ عددی تبدیل می‌شود (shared/support.js).
   const code = parseSupportCode(q);
   const form = `<div class="card"><h2>🔎 جستجوی کاربر</h2>
   <form method="get" action="/support" class="inline">
+    <input type="hidden" name="bot" value="${esc(bot)}">
     <label>آی‌دی عددی، یوزرنیم، یا کد پشتیبانی<input name="q" dir="ltr" value="${esc(q)}" autofocus></label>
     <button type="submit">بگرد</button>
   </form>
@@ -30,7 +33,10 @@ export function supportBody(url) {
   const numeric = code ? true : /^\d+$/.test(q.replace(/^@/, ''));
   const uname = code ? String(code.userId) : q.replace(/^@/, '');
   const results = [];
-  for (const inst of instances()) {
+  // جستجو در رباتِ انتخاب‌شده. اگر کدِ پشتیبانی ربات دیگری را نشان بدهد، همان ربات
+  // جستجو می‌شود (کد خودش مبدأ را می‌گوید و کاربر نباید دستی اسکوپ را عوض کند).
+  const searchBot = (code?.bot && instancesOf(code.bot).length) ? code.bot : bot;
+  for (const inst of instancesOf(searchBot)) {
     withDb(inst.file, (db) => {
       const pk = userPk(inst.bot);
       const nameCol = userNameCol(inst.bot);

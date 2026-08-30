@@ -3,6 +3,7 @@
 import { microSteps, exitPoints, screensReport, screenMap, stepLabel } from '../lib/journey.js';
 import { FUNNELS } from '../lib/funnels-def.js';
 import { instancesOf } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { esc, fmt, nowSec } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
 
@@ -82,12 +83,14 @@ export function exitCard(botKey, { since, ch, ver }) {
 
 /* ═══ صفحه‌ی «صفحه‌ها»: کاتالوگِ همه‌ی پیام‌های ربات + نرخِ عبور ═══ */
 export function screensBody(url) {
+  const bot = scopeBot(url);
   const days = Math.max(0, intOf(url, 'days', 30));
   const since = days ? nowSec() - days * 86400 : 0;
   const sort = ['pass', 'imps', 'users'].includes(url.searchParams.get('sort') || '') ? url.searchParams.get('sort') : 'pass';
   const minImps = Math.max(1, intOf(url, 'min', 20));
 
   let out = `<div class="card"><form method="get" action="/screens" class="inline">
+    <input type="hidden" name="bot" value="${esc(bot)}">
     <label>بازه<select name="days">
       ${[['7', '۷ روز'], ['30', '۳۰ روز'], ['90', '۹۰ روز'], ['0', 'همه']].map(([v, l]) =>
         `<option value="${v}" ${Number(v) === days ? 'selected' : ''}>${l}</option>`).join('')}
@@ -103,7 +106,8 @@ export function screensBody(url) {
     ظرف نیم‌ساعت اقدامی کرد. نرخِ عبورِ پایین روی پیامی که زیاد دیده می‌شود = گران‌ترین نقطه‌ی بهبود.
     پیام‌های محتوایی (خروجی مدل) زیرِ یک ردیفِ مشترک جمع شده‌اند.</p></div>`;
 
-  for (const botKey of Object.keys(FUNNELS)) {
+  let any = false;
+  for (const botKey of Object.keys(FUNNELS).filter(k => k === bot)) {
     if (!instancesOf(botKey).length) continue;
     const screens = screenMap(botKey);
     let rowsData = screensReport(botKey, { since }).filter(r => r.imps >= minImps);
@@ -121,8 +125,11 @@ export function screensBody(url) {
         r.avgSec === null ? '<span class="muted">-</span>' : `<span class="muted">${fmt(r.avgSec)} ثانیه</span>`,
       ];
     });
+    any = true;
     out += `<div class="card"><h2>${esc(FUNNELS[botKey].title)} — صفحه‌ها</h2>
       ${table(['پیام', 'نمایش', 'کاربر یکتا', 'نرخ عبور', 'میانگین زمان تا اقدام'], body)}</div>`;
   }
+  if (!any) out += `<div class="card"><p class="muted">برای این ربات هنوز رویدادِ ریزِ صفحه‌ای ثبت نشده `
+    + `(مسیرِ ریزِ کاربر فعلاً فقط روی تاروت روشن است — <span class="mono">JOURNEY_ENABLED</span>).</p></div>`;
   return out;
 }
