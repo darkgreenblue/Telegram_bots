@@ -180,7 +180,10 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.37.0';
+const PRODUCT_VERSION = '3.38.0';
+// ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
+// نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
+const SETTINGS_ENABLED = true;
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -664,6 +667,14 @@ try { db.prepare('ALTER TABLE users ADD COLUMN lucky_hands INTEGER NOT NULL DEFA
 try { db.prepare('ALTER TABLE users ADD COLUMN last_lucky_reminder_at INTEGER').run(); } catch {}
 // migration: حافظه‌ی انباشتی کاربر (پروفایل شناختی برای پیوستگی بین جلسات)
 try { db.prepare("ALTER TABLE users ADD COLUMN memory_json TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// 🧠 ریستِ حافظه از منوی تنظیمات (v3.38.0). قاعده‌ی صریحِ مالک: «چیزی رو پاک نکنیم، فقط
+// اسمش رو عوض کنیم که توی سیستم دیگه نیاد ولی بعدا برای خودمون قابل بازیابی باشه».
+//   memory_archive  ← حافظه‌ی قبلی این‌جا بایگانی می‌شود (با مهرِ زمان)، هرگز پاک نمی‌شود
+//   memory_reset_at ← خطِ آب: ریکالِ «فال‌های قبلی» فقط فال‌های بعد از این لحظه را می‌بیند
+// ⚠️ هیچ ردیفی از readings حذف نمی‌شود: پاداشِ دعوت (countDelivered)، آمار، فیدبک و
+// موجودی همه دست‌نخورده می‌مانند. فقط **کانتکستِ مدل** فراموش می‌کند.
+try { db.prepare("ALTER TABLE users ADD COLUMN memory_archive TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('ALTER TABLE users ADD COLUMN memory_reset_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: شمارنده‌ی روزهای پیاپی کارت روز (موتور عادت روزانه)
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration: نام فارسیِ خودِ کاربر (جدا از first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد و مدل تکرارش کند)
@@ -843,6 +854,14 @@ const stmts = {
      WHERE welcomed=1 AND daily_reminder_off=0
        AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
      LIMIT 400`),
+  // 🌙 همان کوئری، ولی برای **بعد از پایانِ آزمایش** که دو یادآوری مستقل می‌شوند و کاربر
+  // می‌تواند فقط کارتِ شانس را روشن نگه دارد. عمداً یک statement جداست و بالایی
+  // دست‌نخورده ماند: تا وقتی آزمایش running است باید رفتار بیت‌به‌بیت همان امروز بماند.
+  dueNightReminderFree: db.prepare(`
+    SELECT telegram_id, last_daily_date, lucky_date, daily_reminder_off, lucky_reminder_on FROM users
+     WHERE welcomed=1 AND (daily_reminder_off=0 OR lucky_reminder_on=1)
+       AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
+     LIMIT 400`),
   // 🍀 کارت شانس. `claimLucky` گاردِ اتمیکِ «روزی یک بار» است: شرطِ روز داخلِ خودِ UPDATE
   // نشسته، پس دو تپِ هم‌زمان فقط یک بار changes=1 می‌دهد (همان الگوی claimWelcomeBonus).
   claimLucky: db.prepare("UPDATE users SET lucky_date=? WHERE telegram_id=? AND COALESCE(lucky_date,'') <> ?"),
@@ -902,6 +921,10 @@ const stmts = {
   // فالِ پرداخت‌شده‌ای که کاربر هرگز کارت‌هایش را نکشید (کهنه‌تر از یک شبانه‌روز).
   setReadingFeedback: db.prepare('UPDATE readings SET feedback=? WHERE id=?'),
   lastDelivered: db.prepare("SELECT * FROM readings WHERE user_id=? AND status='delivered' ORDER BY id DESC LIMIT ?"),
+  // همان کوئری، ولی فقط فال‌های **بعد از** ریستِ حافظه. عمداً یک statement جداست و
+  // `lastDelivered` دست‌نخورده ماند: آن یکی در پیامِ خوش‌آمدِ کاربرِ برگشتی هم استفاده
+  // می‌شود و ربطی به حافظه‌ی مدل ندارد. فیلتر فقط روی کانتکستِ مدل معنی دارد.
+  lastDeliveredSince: db.prepare("SELECT * FROM readings WHERE user_id=? AND status='delivered' AND created_at > ? ORDER BY id DESC LIMIT ?"),
   countReadingsToday: db.prepare('SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND created_at >= unixepoch()-86400'),
   countDelivered: db.prepare("SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND status='delivered'"),
   countPaidDelivered: db.prepare("SELECT COUNT(*) AS c FROM readings WHERE user_id=? AND status='delivered' AND price>0"),
@@ -954,6 +977,10 @@ const stmts = {
   setReferralRewarded:  db.prepare('UPDATE referrals SET rewarded=1 WHERE id=?'),
 
   setMemory: db.prepare('UPDATE users SET memory_json=? WHERE telegram_id=?'),
+  // 🧠 ریستِ حافظه: یک UPDATE اتمیک که حافظه‌ی فعلی را **بایگانی** می‌کند، خالی‌اش می‌کند و
+  // خطِ آب را مهر می‌زند. حافظه‌ی خالی چیزی به بایگانی اضافه نمی‌کند (ریستِ دوباره، بایگانی
+  // را با خطِ خالی کثیف نمی‌کند). عمداً یک رشته‌ی واحد است تا `sqlOf` در چکِ CI اجرایش کند.
+  archiveMemory: db.prepare(`UPDATE users SET memory_archive = CASE WHEN memory_json='' THEN memory_archive ELSE memory_archive || CASE WHEN memory_archive='' THEN '' ELSE char(10) END || '[' || unixepoch() || '] ' || memory_json END, memory_json='', memory_reset_at=unixepoch() WHERE telegram_id=?`),
   // 🧹 ریستِ مشخصات (فقط ادمین، /resetprofile). عمداً **یک** UPDATE است نه چند تا: یا همه‌ی
   // فیلدها با هم پاک می‌شوند یا هیچ‌کدام، پس کاربر هرگز در حالتِ نیمه‌ریست (مثلاً اسمِ پاک‌شده
   // ولی welcomed=1) گیر نمی‌کند که خودش یک بن‌بستِ تازه می‌ساخت (بند ۹ب).
@@ -1222,6 +1249,8 @@ function mainKeyboard(uid) {
     ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
   rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
+  // ⚙️ تنظیمات — زیرِ پشتیبانی (تصمیمِ صریحِ مالک). برای همه‌ی کاربران، همیشه.
+  if (SETTINGS_ENABLED) rows.push([L.buttons.settings]);
   if (isTester(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست: ادمین‌ها و تسترها، همیشه
   return Markup.keyboard(rows).resize();
 }
@@ -1288,6 +1317,7 @@ const INTENT = {
   INVITE:  'invite',
   LUCKY:   'lucky',
   READING: 'reading',
+  SETTINGS: 'settings',
 };
 function setIntent(uid, key) {
   try { patchSession(uid, { intent: key, intentAt: Math.floor(Date.now() / 1000) }); } catch {}
@@ -1311,6 +1341,7 @@ const INTENT_REPLAY = {
   [INTENT.INVITE]:  (ctx) => showInvite(ctx),
   [INTENT.LUCKY]:   (ctx) => luckyCard(ctx),
   [INTENT.READING]: (ctx) => showCatalog(ctx),
+  [INTENT.SETTINGS]: (ctx) => showSettings(ctx),
 };
 // صفحه‌ی پشتیبانی از **همان** سازنده‌ی shared می‌آید که خودِ دکمه استفاده می‌کند، تا
 // بازپخشِ نیت هیچ‌وقت با تپِ واقعیِ دکمه واگرا نشود (بند ۶ج: تک‌منبع).
@@ -1479,8 +1510,10 @@ function readingCtxFor(user, spread, question, cards, focusKey) {
     name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
     kbOn: toneV2For(user.telegram_id),
     hideName: uxV2For(user.telegram_id),
-    // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست
-    prev: stmts.lastDelivered.all(user.telegram_id, 4),
+    // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست.
+    // ⚠️ از خطِ آبِ ریستِ حافظه رد نمی‌شود: کاربری که حافظه‌اش را ریست کرده باید از نظرِ
+    // **خروجیِ فال** انگار اولین فالش است. رکوردها سرِ جایشان‌اند، فقط مدل نمی‌بیندشان.
+    prev: stmts.lastDeliveredSince.all(user.telegram_id, Number(user.memory_reset_at) || 0, 4),
   });
 }
 
@@ -5147,6 +5180,164 @@ bot.action('rprof_no', async (ctx) => {
   return ctx.editMessageText(L.reset.profCanceled).catch(() => {});
 });
 
+/* ═══════════ ⚙️ منوی تنظیماتِ کاربر (v3.38.0) ═══════════
+   از دو تیکتِ پشتیبانیِ ۱۴۰۵/۰۶/۰۸ آمد: کاربر اسم و ماهِ تولدش را اشتباه وارد کرده بود و
+   هیچ راهی برای اصلاحش نداشت، پس مجبور بود به پشتیبانی پیام بدهد و ادمین دستی ریست کند.
+   این منو همان کلاسِ تیکت را برای همیشه می‌بندد (بند ۹ب: هیچ صفحه‌ای بن‌بست نیست).
+
+   قاعده‌ی مشترکِ کلِ این درخت: **هیچ‌چیز از دیتابیس پاک نمی‌شود.** تغییرِ اسم و ماهِ تولد
+   فقط وقتی نوشته می‌شوند که مقدارِ جدید واقعاً رسیده باشد، پس تا لحظه‌ی آخر دیتای قدیمی
+   معتبر است و «انصراف» چیزی را از دست نمی‌دهد. ریستِ حافظه هم بایگانی می‌کند، نه حذف. */
+
+// 🔔 ردیفِ یادآوری‌ها فقط وقتی ظاهر می‌شود که آزمایشِ `night_reminder` **فعال نباشد**.
+// چرا خودکار و نه یک فلگِ دستی: تا وقتی آزمایش running است هر کاربر در یکی از دو شاخه
+// است و فقط یک یادآوری می‌گیرد؛ دادنِ دو کلیدِ مستقل به او هم آزمایش را آلوده می‌کند و هم
+// می‌تواند دو پیام در ساعت ۲۲ بفرستد (که خودش دلیلِ بلاک‌شدن است، درسِ v3.9.0). با این
+// گیت، همان لحظه که مالک آزمایش را از داشبورد stop کند این بخش **بدونِ دیپلوی** زنده
+// می‌شود و لازم نیست کسی یادش بماند اضافه‌اش کند.
+const nightExpActive = () => {
+  try { return !!expStartedAt.get(NIGHT_EXP); } catch { return true; }  // شک = پنهان بماند
+};
+const remindersUnlocked = () => SETTINGS_ENABLED && !nightExpActive();
+
+function settingsRows(uid) {
+  const rows = [];
+  if (remindersUnlocked()) rows.push([Markup.button.callback(L.buttons.setReminders, 'set:rem')]);
+  rows.push([Markup.button.callback(L.buttons.setName, 'set:name')]);
+  rows.push([Markup.button.callback(L.buttons.setMonth, 'set:month')]);
+  rows.push([Markup.button.callback(L.buttons.setMemory, 'set:mem')]);
+  rows.push([Markup.button.callback(L.buttons.setBackMain, 'nav:menu')]);
+  return rows;
+}
+
+// هر صفحه‌ی این درخت **روی همان پیام ادیت می‌شود**. اگر ادیت نشد (پیامِ خیلی قدیمی یا
+// حذف‌شده) به پیامِ تازه برمی‌گردیم تا کاربر هرگز بی‌جواب نماند.
+async function editOrSend(ctx, text, rows, extra = {}) {
+  const markup = Markup.inlineKeyboard(rows);
+  try { await ctx.editMessageText(text, { ...markup, ...extra }); }
+  catch { await ctx.reply(text, { ...markup, ...extra }).catch(() => {}); }
+}
+
+async function showSettings(ctx) {
+  upsertUser(ctx);
+  // همان مجموعه‌ی گاردِ بقیه‌ی نقاطِ ورودِ منو: تنظیمات نباید فلوی بازِ کاربر را یتیم کند.
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.SETTINGS)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.SETTINGS)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.SETTINGS)) return;
+  setState(ctx.from.id, 'idle');
+  await ctx.reply(L.settings.home, Markup.inlineKeyboard(settingsRows(ctx.from.id)));
+}
+if (SETTINGS_ENABLED) bot.hears(L.buttons.settings, showSettings);
+
+// بازگشت به ریشه‌ی تنظیمات (از هر زیرشاخه‌ای) — همیشه ادیت، هرگز پیامِ تازه
+bot.action('set:home', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  setState(ctx.from.id, 'idle');   // اگر وسطِ «تغییر اسم» بود، از آن استیت درمی‌آید
+  await editOrSend(ctx, L.settings.home, settingsRows(ctx.from.id));
+});
+
+/* ── ✏️ تغییر اسم ────────────────────────────────────────────────────────────
+   ⚠️ استیتِ ورودی است و قرارداد ۹ب می‌گوید چنین استیتی دکمه‌ی درون-پیام ندارد. این‌جا
+   عمداً استثنا شده (خواسته‌ی صریحِ مالک): برخلافِ آنبوردینگ، این‌جا کاربر از قبل اسم دارد
+   و باید بتواند بی‌آنکه چیزی عوض کند برگردد. دیتای قدیمی تا لحظه‌ی رسیدنِ اسمِ جدید
+   دست‌نخورده است، پس انصراف واقعاً بی‌هزینه است. */
+bot.action('set:name', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  setState(uid, 'settings_name');
+  await editOrSend(ctx, L.settings.askName(dispName(getUser(uid))),
+    [[Markup.button.callback(L.buttons.setCancel, 'set:home')]], { parse_mode: 'Markdown' });
+});
+
+/* ── 🎂 تغییر ماه تولد ─────────────────────────────────────────────────────── */
+bot.action('set:month', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const u = getUser(uid);
+  const rows = [];
+  for (let i = 0; i < 12; i += BMONTH_COLS) {
+    rows.push(Array.from({ length: BMONTH_COLS }, (_, d) => i + d)
+      .map((k) => Markup.button.callback(L.buttons.birthMonths[k], `smonth:${k + 1}`)));
+  }
+  rows.push([Markup.button.callback(L.buttons.setCancel, 'set:home')]);
+  await editOrSend(ctx, L.settings.askMonth(u?.birth_month ? monthFa(u.birth_month) : ''), rows);
+});
+
+// عمداً `smonth:` و نه `bmonth:` — آن یکی مالِ آنبوردینگ است و بعد از خودش
+// `finishOnboarding`/`replayIntent` را صدا می‌زند. قاطی‌کردنشان یعنی کاربری که فقط
+// می‌خواست ماهش را عوض کند، وسطِ فلوی دیگری پرت می‌شود.
+bot.action(/^smonth:(\d{1,2})$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const m = parseInt(ctx.match[1], 10);
+  if (!(m >= 1 && m <= 12)) return;
+  stmts.setBirthMonth.run(m, uid);
+  track(db, uid, 'settings_changed', { what: 'month' });
+  await editOrSend(ctx, L.settings.monthSaved(monthFa(m)),
+    [[Markup.button.callback(L.buttons.setBack, 'set:home')]]);
+});
+
+/* ── 🧠 ریست حافظه ─────────────────────────────────────────────────────────── */
+bot.action('set:mem', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await editOrSend(ctx, L.settings.memoryConfirm, [
+    [Markup.button.callback(L.buttons.setMemoryYes, 'set:mem_yes')],
+    [Markup.button.callback(L.buttons.setCancel, 'set:home')],
+  ]);
+});
+
+bot.action('set:mem_yes', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  // بایگانی + خالی‌کردن + مهرِ خطِ آب، همه در یک UPDATE. هیچ ردیفی پاک نمی‌شود: فال‌ها،
+  // پاداشِ دعوت، فیدبک‌ها و موجودی دست‌نخورده‌اند و فقط کانتکستِ مدل فراموش می‌کند.
+  stmts.archiveMemory.run(uid);
+  track(db, uid, 'settings_changed', { what: 'memory_reset' });
+  await editOrSend(ctx, L.settings.memoryDone,
+    [[Markup.button.callback(L.buttons.setBack, 'set:home')]]);
+});
+
+/* ── 🔔 یادآوری‌های روزانه ─────────────────────────────────────────────────── */
+const remindersState = (uid) => {
+  const u = getUser(uid) || {};
+  return { daily: !u.daily_reminder_off, lucky: !!u.lucky_reminder_on };
+};
+
+function remindersScreen(uid) {
+  const { daily, lucky } = remindersState(uid);
+  return [L.settings.reminders(daily, lucky), [
+    [Markup.button.callback(L.buttons.remDaily(daily), 'set:rt:daily')],
+    [Markup.button.callback(L.buttons.remLucky(lucky), 'set:rt:lucky')],
+    [Markup.button.callback(L.buttons.setBack, 'set:home')],
+  ]];
+}
+
+bot.action('set:rem', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  // گاردِ دوم: دکمه در چتِ کاربر می‌ماند و اگر آزمایش دوباره running شود نباید کار کند
+  if (!remindersUnlocked()) return editOrSend(ctx, L.settings.home, settingsRows(ctx.from.id));
+  const [text, rows] = remindersScreen(ctx.from.id);
+  await editOrSend(ctx, text, rows);
+});
+
+bot.action(/^set:rt:(daily|lucky)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (!remindersUnlocked()) return editOrSend(ctx, L.settings.home, settingsRows(uid));
+  const which = ctx.match[1];
+  const cur = remindersState(uid);
+  if (which === 'daily') {
+    // ستونِ موجود معنی‌اش «خاموش» است، پس روشن‌کردن یعنی صفر کردنش (هیچ ستونِ تازه‌ای لازم نیست)
+    if (cur.daily) stmts.setDailyReminderOff.run(uid); else stmts.setDailyReminderOn.run(uid);
+  } else {
+    stmts.setLuckyReminder.run(cur.lucky ? 0 : 1, uid);
+  }
+  track(db, uid, 'settings_changed', { what: `reminder_${which}`, on: which === 'daily' ? !cur.daily : !cur.lucky });
+  const [text, rows] = remindersScreen(uid);
+  await editOrSend(ctx, text, rows);
+});
+
 bot.command('reset', doReset);
 
 // 💬 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
@@ -5175,6 +5366,19 @@ bot.on('text', async (ctx) => {
   const state = getState(uid);
   try {
     if (state === 'onboard_name') return await finishNameOnboarding(ctx, text);
+    // ⚙️ تغییرِ اسم از منوی تنظیمات. عمداً استیتِ جدا از `onboard_name` است: آن یکی بعد از
+    // خودش کلِ آنبوردینگ (ماهِ تولد، منوی فال) را ادامه می‌دهد، و کاربری که فقط اسمش را
+    // عوض می‌کند نباید دوباره آنبورد شود. نامِ نامعتبر استیت را نمی‌شکند: کاربر در همان
+    // مرحله می‌ماند و **اسمِ قبلی‌اش هنوز دست‌نخورده است** (هیچ‌چیز پاک نمی‌شود).
+    if (state === 'settings_name') {
+      const nm = cleanName(text);
+      if (!nm) return ctx.reply(L.onboarding.askNameRetry);
+      stmts.setDisplayName.run(nm, uid);
+      setState(uid, 'idle');
+      track(db, uid, 'settings_changed', { what: 'name' });
+      return ctx.reply(L.settings.nameSaved(nm), Markup.inlineKeyboard(
+        [[Markup.button.callback(L.buttons.setBack, 'set:home')]]));
+    }
     // در مرحله‌ی حوزه‌ی تمرکز، ورودی متنی را نمی‌گیریم؛ کاربر باید از دکمه‌ها انتخاب کند (نه رد کردن مرحله).
     if (state === 'onboard_focus') {
       return ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
@@ -5334,9 +5538,33 @@ setInterval(async () => {
     }).format(new Date()), 10);
     if (hour !== REMINDER_HOUR) return;
     const today = tehranToday();
-    for (const u of stmts.dueNightReminder.all()) {
+    // 🔀 دو رژیم. تا وقتی آزمایش فعال است هیچ‌چیزِ این مسیر عوض نشده؛ بعد از stop شدنش،
+    // دو یادآوری مستقل می‌شوند و کاربر از منوی تنظیمات هرکدام را جدا کنترل می‌کند.
+    const expOn = nightExpActive();
+    for (const u of (expOn ? stmts.dueNightReminder.all() : stmts.dueNightReminderFree.all())) {
       const uid = u.telegram_id;
       if (!uxV2For(uid)) continue;
+      if (!expOn) {
+        // بعد از آزمایش: هر یادآوری فقط اگر خودش روشن باشد و کارِ امروزش نشده باشد.
+        const wanted = [];
+        if (!u.daily_reminder_off && NIGHT_ARMS.control.due(u, today)) wanted.push(['control', NIGHT_ARMS.control]);
+        if (u.lucky_reminder_on && NIGHT_ARMS.lucky.due(u, today)) wanted.push(['lucky', NIGHT_ARMS.lucky]);
+        if (!wanted.length) continue;
+        // مهر **یک بار** و قبل از اولین ارسال: گاردِ ۱۸ساعته per کاربر است نه per یادآوری،
+        // پس اگر بعد از ارسالِ اولی ری‌استارت شود، دومی فردا شب دوباره تلاش نمی‌کند.
+        stmts.setNightReminded.run(uid);
+        for (const [name, a] of wanted) {
+          const sent = await bot.telegram.sendMessage(uid, a.text(), {
+            reply_markup: Markup.inlineKeyboard([
+              a.cta(),
+              [Markup.button.callback(L.buttons.nightRemindOff, 'dailyoff')],
+            ]).reply_markup,
+          }).then(() => true).catch(() => false);
+          if (sent) track(db, uid, 'night_reminder_sent', { arm: name, solo: 1 });
+          await sleep(300);
+        }
+        continue;
+      }
       // ⚠️ `peekVariant` نه `variant`: شاخه را می‌خوانیم ولی exposure را **ثبت نمی‌کنیم**.
       // دلیل: گاردِ `arm.due` پایین ممکن است هیچ پیامی نفرستد، و شرطِ آن گارد per شاخه
       // فرق می‌کند (control به `last_daily_date` نگاه می‌کند، lucky به `lucky_date`). با

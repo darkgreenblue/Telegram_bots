@@ -96,22 +96,50 @@ ok('جارو exposure را زودهنگام ثبت نمی‌کند (هیچ varia
    !/[^k]variant\(db, uid, NIGHT_EXP\)/.test(sweep));
 ok('exposure فقط داخلِ شاخه‌ی ارسالِ موفق ثبت می‌شود',
    /if \(ok\) \{[\s\S]{0,400}expose\(db, uid, NIGHT_EXP\)/.test(sweep));
+/* از v3.38.0 جارو **دو مسیر** دارد: تا وقتی آزمایش فعال است مسیرِ A/B (دست‌نخورده)، و
+   بعد از stop شدنش مسیرِ دو-یادآوریِ مستقل که کاربر از تنظیمات کنترلشان می‌کند.
+   ⚠️ ادعاهای ترتیبیِ زیر باید روی **مسیرِ آزمایش** بنشینند، نه روی کلِ جارو: با indexOf
+   روی کلِ متن، اولین تطابق از مسیرِ آزادِ بالاتر می‌آمد و ادعا بی‌آنکه چیزی خراب شده باشد
+   قرمز می‌شد (و بدتر، می‌شد با یک تغییرِ ترتیب سبزِ دروغین گرفت). */
+const iFree = sweep.indexOf('if (!expOn) {');
+const freePath = iFree < 0 ? '' : sweep.slice(iFree, sweep.indexOf('\n      }', iFree));
+const expPath = iFree < 0 ? sweep : sweep.slice(0, iFree) + sweep.slice(sweep.indexOf('\n      }', iFree));
+ok('مسیرِ آزادِ بعد از آزمایش پیدا شد', !!freePath);
 {
-  const iPeek = sweep.indexOf('peekVariant(db, uid, NIGHT_EXP)');
-  const iExpose = sweep.indexOf('expose(db, uid, NIGHT_EXP)');
-  const iSend = sweep.indexOf('sendMessage');
-  ok('ثبتِ exposure بعد از گاردِ due است', iExpose > sweep.indexOf('arm.due(u, today)'));
+  const iPeek = expPath.indexOf('peekVariant(db, uid, NIGHT_EXP)');
+  const iExpose = expPath.indexOf('expose(db, uid, NIGHT_EXP)');
+  const iSend = expPath.indexOf('sendMessage');
+  ok('ثبتِ exposure بعد از گاردِ due است', iExpose > expPath.indexOf('arm.due(u, today)'));
   ok('ثبتِ exposure بعد از خودِ ارسال است', iExpose > iSend && iPeek < iSend);
 }
 // ⚠️ مهم‌ترین ترتیب: اگر کاربر امروز کارش را کرده، **قبل از** مهرِ زمان رد می‌شود
-const iDue = sweep.indexOf('arm.due(u, today)');
-const iStamp = sweep.indexOf('setNightReminded');
+const iDue = expPath.indexOf('arm.due(u, today)');
+const iStamp = expPath.indexOf('setNightReminded');
 ok('گاردِ «امروز انجام شده» قبل از مهرِ زمان است', iDue !== -1 && iStamp !== -1 && iDue < iStamp);
+
+/* ── مسیرِ آزاد هم باید همان قواعد را نگه دارد ───────────────────────────── */
+// اگر این‌جا exposure ثبت شود، آزمایشِ تمام‌شده با دیتای بعد از خودش آلوده می‌شود
+ok('مسیرِ آزاد هیچ exposure ای ثبت نمی‌کند', !!freePath && !/expose\(/.test(freePath));
+ok('مسیرِ آزاد شاخه‌ی A/B را هم نمی‌خواند', !!freePath && !/peekVariant/.test(freePath));
+{
+  const fDue = freePath.indexOf('.due(u, today)');
+  const fStamp = freePath.indexOf('setNightReminded');
+  ok('در مسیرِ آزاد هم گاردِ «امروز انجام شده» قبل از مهرِ زمان است',
+     fDue !== -1 && fStamp !== -1 && fDue < fStamp);
+  // مهر per **کاربر** است نه per یادآوری: اگر بعد از پیامِ اول ری‌استارت شود، دومی نباید
+  // فردا شب دوباره شلیک کند. پس دقیقاً یک بار و قبل از حلقه‌ی ارسال زده می‌شود.
+  ok('مهرِ زمان در مسیرِ آزاد دقیقاً یک بار زده می‌شود',
+     (freePath.match(/setNightReminded/g) || []).length === 1);
+  ok('مهرِ زمان قبل از حلقه‌ی ارسالِ مسیرِ آزاد است', fStamp < freePath.indexOf('sendMessage'));
+}
+// هر یادآوری فقط اگر کلیدِ خودش روشن باشد (کاربر از تنظیمات کنترلش می‌کند)
+ok('کارتِ روز در مسیرِ آزاد به کلیدِ خودش بسته است', /!u\.daily_reminder_off/.test(freePath));
+ok('کارتِ شانس در مسیرِ آزاد به کلیدِ خودش بسته است', /u\.lucky_reminder_on/.test(freePath));
 // و رویداد فقط بعد از ارسالِ موفق (تا «مهرخورده بدونِ رویداد» = بلاک قابلِ شمارش بماند)
 ok('رویداد فقط بعد از ارسالِ موفق ثبت می‌شود',
    /if \(ok\) \{[\s\S]{0,400}track\(db, uid, 'night_reminder_sent'/.test(sweep));
 ok('مهرِ زمان قبل از ارسال زده می‌شود (ضدِ تکرار بعد از ری‌استارت)',
-   iStamp < sweep.indexOf('sendMessage'));
+   iStamp < expPath.indexOf('sendMessage'));
 ok('هر پیام دکمه‌ی «دیگه یادآوری نکن» دارد', /nightRemindOff/.test(sweep));
 ok('دکمه‌ی انصراف به تأییدِ دومرحله‌ای می‌رود', /'dailyoff'\)/.test(sweep));
 
@@ -219,9 +247,12 @@ ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referra
      !JSON.stringify([off, on]).includes('lremind:0'));
 
   // تنها مصرف‌کننده‌ی مجازِ nightRemindOff همان جاروی شبانه است.
-  ok('«دیگه یادآوری نکن» فقط یک بار در کلِ سورس ساخته می‌شود',
-     (SRC.match(/nightRemindOff/g) || []).length === 1);
-  ok('و همان یک بار داخلِ جاروی شبانه است', /nightRemindOff/.test(sweep));
+  // نیتِ این ادعا «یک بار» نبود، «فقط زیرِ پیامِ ناخواسته‌ی شبانه» بود. از v3.38.0 جارو دو
+  // مسیر دارد پس دو بار ساخته می‌شود؛ چیزی که باید قفل بماند این است که **هیچ مصرفی بیرون
+  // از خودِ جارو** نداشته باشد، وگرنه دکمه‌ی خاموشی زیرِ پیامی می‌رود که کاربر خودش خواسته.
+  ok('«دیگه یادآوری نکن» فقط داخلِ جاروی شبانه ساخته می‌شود',
+     (SRC.match(/nightRemindOff/g) || []).length === (sweep.match(/nightRemindOff/g) || []).length);
+  ok('و در هر دو مسیرِ جارو هست', (sweep.match(/nightRemindOff/g) || []).length === 2);
   ok('برچسبِ تکراریِ luckyRemindOff از locale حذف شده', !/luckyRemindOff/.test(LOC));
 
   // پیامِ «امروز استفاده کردی» هیچ کیبوردی ندارد.
