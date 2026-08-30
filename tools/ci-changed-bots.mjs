@@ -127,7 +127,13 @@ function changedFiles() {
     if (!before || /^0+$/.test(before)) return null;        // اولین پوش → مبنایی برای مقایسه نیست
     return run(['diff', '--name-only', `${before}..HEAD`]).split('\n').filter(Boolean);
   } catch (e) {
-    console.log(`⚠️ محاسبه‌ی diff نشد (${e.message.split('\n')[0]})`);
+    // ⚠️ این حالت **باید دیده شود**. fail-open امن است (هیچ چکی رد نمی‌شود) ولی اگر
+    // همیشه بیفتد یعنی صرفه‌جویی بی‌صدا مرده. دقیقاً همین رخ داد: کلونِ shallowِ
+    // پیش‌فرضِ checkout باعث می‌شد merge-base همیشه شکست بخورد و هیچ‌کس خبردار نشود.
+    // `::warning::` در خلاصه‌ی رانِ گیت‌هاب دیده می‌شود، پس تکرارش قابلِ تشخیص است.
+    const msg = e.message.split('\n')[0];
+    console.log(`⚠️ محاسبه‌ی diff نشد (${msg})`);
+    console.log(`::warning title=فیلترِ CI کار نکرد::${msg} — همه‌ی جاب‌ها اجرا شدند (fail-open). اگر تکرار شد یعنی صرفه‌جویی مرده است.`);
     return null;
   }
 }

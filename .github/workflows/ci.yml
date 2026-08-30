@@ -16,7 +16,12 @@ jobs:
       bots:  ${{ steps.f.outputs.bots }}
       tabir: ${{ steps.f.outputs.tabir }}
     steps:
+      # ⚠️ fetch-depth: 0 اجباری است. پیش‌فرضِ checkout یک کلونِ shallow (عمقِ ۱) است و
+      # آن‌وقت `HEAD` هیچ جدِ مشترکی با main ندارد، پس `git merge-base` شکست می‌خورد و
+      # فیلتر همیشه به fail-open می‌افتد — یعنی صفر صرفه‌جویی، **بی‌صدا**. این دقیقاً
+      # همان اتفاقی بود که در اولین اجرای واقعی (کامیت 5883169) لاگ نشانش داد.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - id: f
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
