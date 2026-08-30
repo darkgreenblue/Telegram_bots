@@ -5,6 +5,7 @@
 // استفاده:
 //   node tools/support-log.mjs add '<json>'     یک تیکت (JSON) اضافه می‌کند و id می‌سازد
 //   node tools/support-log.mjs add --file x.json
+//   node tools/support-log.mjs update <id> '<json>'  بازنگریِ تیکت (خطِ تازه، تاریخچه می‌ماند)
 //   node tools/support-log.mjs user <uid>       سابقه‌ی کاملِ یک کاربر
 //   node tools/support-log.mjs show <id>        یک تیکت
 //   node tools/support-log.mjs list [n]         n تیکتِ آخر (پیش‌فرض ۲۰)
@@ -22,7 +23,8 @@ const CATEGORIES = ['payment', 'credit', 'reading', 'bug', 'question', 'feature'
 const VERDICTS = ['confirmed_bug', 'partial', 'user_error', 'no_issue', 'info', 'pending'];
 const STATUSES = ['answered', 'awaiting_user', 'in_progress', 'closed'];
 
-export function load() {
+/** همه‌ی خط‌ها، شاملِ بازنگری‌ها (هر بازنگری یک خطِ تازه با همان id است). */
+export function loadRaw() {
   if (!existsSync(FILE)) return [];
   return readFileSync(FILE, 'utf8')
     .split('\n')
@@ -30,6 +32,18 @@ export function load() {
     .map((l, i) => {
       try { return JSON.parse(l); } catch { throw new Error(`خطِ ${i + 1} در tickets.jsonl معتبر نیست`); }
     });
+}
+
+/** وضعیتِ **فعلی** هر تیکت: آخرین بازنگریِ هر id، به ترتیبِ اولین ثبت.
+ *  دفتر append-only می‌ماند (ردپای تصمیم‌ها پاک نمی‌شود) ولی تیکت می‌تواند تکامل پیدا کند:
+ *  یک تیکت معمولاً چند مرحله دارد (بررسی → جواب رفت → کاربر دوباره نوشت → بسته شد). */
+export function load() {
+  const byId = new Map();
+  for (const t of loadRaw()) {
+    const prev = byId.get(t.id);
+    byId.set(t.id, prev ? { ...prev, ...t, rev: (prev.rev || 0) + 1 } : t);
+  }
+  return [...byId.values()];
 }
 
 // تاریخِ تهران بدونِ وابستگی: Intl با timeZone (پایه‌ی همه‌ی تجمیع‌های ریپو)
@@ -65,6 +79,8 @@ export function addTicket(input) {
     bug_ref: input.bug_ref || '',
     status: input.status || 'answered',
     notes: input.notes || '',
+    // فقط روی بازنگری‌ها: ts ثبتِ قبلی، تا زنجیره‌ی تاریخچه دنبال‌شدنی بماند
+    ...(input.rev_of ? { rev_of: input.rev_of } : {}),
   };
   if (!CATEGORIES.includes(t.category)) throw new Error(`category نامعتبر: ${t.category} (${CATEGORIES.join('|')})`);
   if (!VERDICTS.includes(t.verdict)) throw new Error(`verdict نامعتبر: ${t.verdict} (${VERDICTS.join('|')})`);
@@ -73,6 +89,15 @@ export function addTicket(input) {
   mkdirSync(dirname(FILE), { recursive: true });
   appendFileSync(FILE, JSON.stringify(t) + '\n', 'utf8');
   return t;
+}
+
+/** بازنگریِ یک تیکتِ موجود: فقط فیلدهای داده‌شده عوض می‌شوند، بقیه از آخرین وضعیت می‌آیند.
+ *  خطِ تازه append می‌شود (تاریخچه پاک نمی‌شود) و همان گاردهای addTicket دوباره اجرا می‌شوند. */
+export function updateTicket(id, patch) {
+  const cur = load().find((t) => t.id === id);
+  if (!cur) throw new Error(`تیکتِ «${id}» پیدا نشد`);
+  const now = Math.floor(Date.now() / 1000);
+  return addTicket({ ...cur, ...patch, id, ts: now, rev_of: cur.ts });
 }
 
 const short = (s, n = 90) => (String(s).length > n ? String(s).slice(0, n) + '…' : String(s));
@@ -85,6 +110,12 @@ function main() {
     const raw = args[0] === '--file' ? readFileSync(args[1], 'utf8') : args[0] || readFileSync(0, 'utf8');
     const t = addTicket(JSON.parse(raw));
     console.log('✅ ثبت شد: ' + t.id);
+    return;
+  }
+  if (cmd === 'update') {
+    const raw = args[1] === '--file' ? readFileSync(args[2], 'utf8') : args[1];
+    const t = updateTicket(args[0], JSON.parse(raw));
+    console.log(`✅ بازنگری ثبت شد: ${t.id}`);
     return;
   }
   if (cmd === 'user') {
@@ -102,7 +133,11 @@ function main() {
   }
   if (cmd === 'show') {
     const t = all.find((x) => x.id === args[0]);
-    return console.log(t ? JSON.stringify(t, null, 1) : '(پیدا نشد)');
+    if (!t) return console.log('(پیدا نشد)');
+    const revs = loadRaw().filter((x) => x.id === args[0]);
+    console.log(JSON.stringify(t, null, 1));
+    if (revs.length > 1) console.log(`\n📜 ${revs.length} بازنگری: ` + revs.map((r) => r.date).join('  →  '));
+    return;
   }
   if (cmd === 'stats') {
     const by = (k) => all.reduce((a, t) => ((a[t[k]] = (a[t[k]] || 0) + 1), a), {});
