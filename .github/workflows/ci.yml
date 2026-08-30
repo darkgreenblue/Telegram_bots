@@ -113,6 +113,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-love-slot.mjs
 
+      # تنها نقطه‌ی **نوشتنِ** Ops روی DBِ رباتِ زنده. یک اشتباه این‌جا به جدولِ پول و
+      # کاربر می‌رسد، پس دامنه‌ی نوشتن رفتاری سنجیده می‌شود، نه با خواندنِ سورس.
+      - name: Ops experiment-control check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-ops-exp.mjs
+
       # مسیرِ پول: کسر در لحظه‌ی انتخابِ اندازه. رفتاری است (روی DB واقعیِ در-حافظه اجرا
       # می‌شود)، چون هر مسیرِ لغو که جا بماند بی‌صدا پولِ کاربر را می‌خورد.
       - name: Pay-at-size money check

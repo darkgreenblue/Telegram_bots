@@ -236,6 +236,7 @@ curl -s "https://api.github.com/repos/darkgreenblue/Telegram_bots/actions/runs?p
    - `action`: `status` (وضعیت pm2 همه + چک pm2-startup برای reboot سرور) | `logs` (out+error) | `errors` | `restart` | `env-check` (وجود .envها بدون محتوا) | **`db-query`**
    - `app`: نام اپ pm2 (برای logs/errors/restart/db-query)؛ `lines`: تعداد خطوط (پیش‌فرض ۱۰۰)
    - `query`: برای db-query — SQL **فقط-خواندنی** روی SQLite همان ربات (اتصال readonly؛ حداکثر ۲۰۰ ردیف چاپ می‌شود). سؤال‌های دیتابیسی کاربر («چند نفر خریدند؟»، «موجودی فلان کاربر؟») را از همین راه سریع جواب بده.
+   - **`exp`**: کنترلِ آزمایشِ A/B بدونِ داشبورد (`tools/ops-exp.mjs`). `query` این‌جا **اسپکِ JSON** است نه SQL: `{"op":"create"|"status"|"list", "key":"…", …}`. تنها نقطه‌ی **نوشتنِ** Ops است و عمداً تنگ: فقط جدولِ `experiments`، همه‌ی کوئری‌ها prepared، و همان جدولِ گذارهای مجازِ داشبورد. تا قبل از این، آزمایشی که Claude می‌ساخت را فقط مالک از داشبورد می‌توانست start کند — یعنی یک قدمِ دستیِ اجباری، خلافِ بند ۷.
 2. چند ثانیه صبر کن، run جدید را با `actions_list` پیدا و خروجی را با `get_job_logs` بخوان (خروجی دستورها مستقیم در لاگ جاب است).
 3. تشخیص → فیکس → commit → PR → merge → رصد Deploy → دوباره `Ops` برای تأیید. **کل حلقه بدون دخالت کاربر.**
 

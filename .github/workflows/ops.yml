@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, daypost, tunnel-url, announce-dry, announce-send]
+        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -22,7 +22,7 @@ on:
         required: false
         default: '100'
       query:
-        description: 'کوئری SQL فقط-خواندنی (برای db-query) — مثل SELECT count(*) FROM users'
+        description: 'db-query: کوئری SQL فقط-خواندنی. exp: اسپکِ JSON (نه SQL) مثل {"op":"status","key":"love_slot","to":"running"}'
         required: false
         default: ''
       only:
@@ -125,6 +125,23 @@ jobs:
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
                 "
+                ;;
+              exp)
+                # 🧪 کنترلِ آزمایشِ A/B بدونِ داشبورد (تنها نقطه‌ی **نوشتنِ** Ops).
+                # تا امروز تنها نویسنده‌ی جدولِ experiments داشبورد بود و داشبورد فقط از
+                # مرورگرِ مالک پشتِ تونل باز می‌شود، پس هر آزمایشی یک قدمِ دستیِ اجباری
+                # داشت — خلافِ بند ۷ ریشه.
+                # منطق عمداً در tools/ops-exp.mjs است نه این‌جا: SQLاش کاراکترهایی دارد
+                # که شل داخلِ رشته‌ی دابل‌کوت تفسیر می‌کند (جانشینیِ دستور و بسطِ متغیر).
+                # نسخه‌ی درون‌خطیِ همین کار با همان خطا شکست، پس الگوی announce-tarot.mjs
+                # را گرفت. چکِ tools/check-ops-exp.mjs همین را قفل کرده.
+                [ -n "$OPS_APP" ]   || { echo "❌ app لازم است"; exit 1; }
+                [ -n "$OPS_QUERY" ] || { echo "❌ اسپکِ JSON لازم است"; exit 1; }
+                cd "bots/$OPS_APP"
+                DBFILE=$(ls data/*.db 2>/dev/null | head -1)
+                [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
+                echo "===== exp روی $OPS_APP/$DBFILE ====="
+                node ../../tools/ops-exp.mjs "$DBFILE"
                 ;;
               announce-dry|announce-send)
                 # 📣 پیامِ اطلاع‌رسانیِ آپدیت. عمداً از خودِ دیپلوی جداست تا مالک **اول**
