@@ -2,7 +2,8 @@
 // منطق validate خودِ ربات‌ها دست نمی‌خورد؛ سازگاری کامل با schema هر ربات + گارد schema قبل از هر write.
 // نکته‌ی voice2text: اگر نه سگمنت و نه لیست کاربر ست شود، کد برای هیچ‌کس معتبر نیست → فرم حداقل یکی را اجبار می‌کند.
 import { randomBytes } from 'crypto';
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, parseJsonSafe } from '../lib/util.js';
 import { table } from '../lib/html.js';
@@ -14,7 +15,7 @@ const V2T_SEGMENTS = {
   high_usage: 'پرمصرف (۱۰+)', low_balance: 'موجودی کم',
 };
 
-const discountInstances = () => instances().filter(i => withDb(i.file, db => hasTable(db, 'discount_codes'), false));
+const discountInstances = (botKey) => instancesOf(botKey).filter(i => withDb(i.file, db => hasTable(db, 'discount_codes'), false));
 
 function genCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -24,9 +25,9 @@ function genCode() {
   return `DASH-${s}`;
 }
 
-export function discountsBody() {
-  const insts = discountInstances();
-  if (!insts.length) return `<div class="card"><p class="muted">هیچ رباتی با جدول کد تخفیف در دسترس نیست.</p></div>`;
+export function discountsBody(url) {
+  const insts = discountInstances(scopeBot(url));
+  if (!insts.length) return `<div class="card"><p class="muted">این ربات جدول کد تخفیف ندارد (یا دیتابیسش در دسترس نیست).</p></div>`;
 
   const instOptions = insts.map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join('');
   const segBoxes = Object.entries(V2T_SEGMENTS)

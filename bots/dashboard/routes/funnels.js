@@ -3,7 +3,8 @@
 //    فقط از زمان نصب آنالیتیکس دیتا دارد — برای voice2text یعنی رفتار کاربران قدیمی را نشان نمی‌دهد.
 // ۲) توزیع وضعیت رکوردهای قطعی per-entity (readings/voice_flows/payments.step): بدون بایاس snapshot،
 //    شامل کاربران قبل از آنالیتیکس. (هیچ عددی از users.state ساخته نمی‌شود — state فقط «الان» را می‌گوید.)
-import { instances, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf } from '../lib/bots.js';
+import { instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf, botByKey } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { fmt, esc, nowSec } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
 // تعریفِ قیف‌ها/چنل‌ها یک‌جا در lib است تا عددِ جدول و لیستِ کاربرانِ پشتِ آن از یک منبع بیایند
@@ -15,9 +16,9 @@ import { exitCard } from './journey.js';
 export { FUNNELS }; // سازگاری: overview.js واژه‌نامه‌ی رویدادها را از همین‌جا می‌خواند
 
 // همه‌ی نسخه‌هایی که کاربری با آن‌ها وارد شده (برای انتخابگر کوهورت)
-function allVersions() {
+function allVersions(botKey) {
   const set = new Set();
-  for (const inst of instances()) {
+  for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'users')) return;
       for (const r of rows(db, "SELECT DISTINCT first_version v FROM users WHERE first_version != ''")) set.add(r.v);
@@ -121,9 +122,10 @@ function funnelTable(botKey, steps, since, ver, { drill = true } = {}) {
 }
 
 export function funnelsBody(url) {
+  const bot = scopeBot(url);
   const days = Math.max(0, parseInt(url.searchParams.get('days') || '30', 10) || 0);
   const since = days ? nowSec() - days * 86400 : 0;
-  const versions = allVersions();
+  const versions = allVersions(bot);
   const ver = ['', '_pre', ...versions].includes(url.searchParams.get('ver')) ? (url.searchParams.get('ver') || '') : '';
 
   const verOptions = [
@@ -132,6 +134,7 @@ export function funnelsBody(url) {
     `<option value="_pre" ${ver === '_pre' ? 'selected' : ''}>قبل از ردیابی نسخه</option>`,
   ].join('');
   const filter = `<div class="card"><form method="get" action="/funnels" class="inline">
+    <input type="hidden" name="bot" value="${esc(bot)}">
     <label>بازه<select name="days">
       ${[['7', '۷ روز'], ['30', '۳۰ روز'], ['90', '۹۰ روز'], ['0', 'همه']].map(([v, l]) => `<option value="${v}" ${Number(v) === days ? 'selected' : ''}>${l}</option>`).join('')}
     </select></label>
@@ -141,7 +144,8 @@ export function funnelsBody(url) {
   <p class="muted">اعداد = کاربر یکتا در هر مرحله؛ درصد نسبت به مرحله‌ی اول؛ (−n) = دراپ نسبت به مرحله‌ی قبل. فانل رویدادی از زمان نصب آنالیتیکس معتبر است. «کوهورت نسخه» = فقط کاربرانی که با آن PRODUCT_VERSION وارد شده‌اند (فیلتر روی قیف‌های رویدادی اعمال می‌شود، نه جدول‌های رکورد قطعی) — برای مقایسه‌ی قبل/بعدِ یک تغییر، همین صفحه را با دو نسخه ببین؛ برای آزمون علمی از صفحه‌ی تست‌ها (A/B) استفاده کن.</p></div>`;
 
   let out = filter;
-  for (const [botKey, f] of Object.entries(FUNNELS)) {
+  // فقط رباتِ انتخاب‌شده (داشبورد per ربات است)
+  for (const [botKey, f] of Object.entries(FUNNELS).filter(([k]) => k === bot)) {
     if (!instancesOf(botKey).length) continue;
     out += `<div class="card"><h2>${esc(f.title)} — قیف اصلی</h2>${funnelTable(botKey, f.steps, since, ver)}
       <p class="muted" style="margin-top:8px">زیرِ هر مرحله، «قدم‌های ریز» را باز کن تا ببینی کاربر بینِ آن مرحله و
@@ -169,6 +173,10 @@ export function funnelsBody(url) {
       ]), 'رکوردی نیست.')}
       <p class="muted" style="margin-top:8px">«تعداد رکورد» ممکن است از «کاربران» بیشتر باشد (یک کاربر چند رکورد دارد). روی عددِ ستون کاربران بزن تا لیستشان باز شود.</p></div>`;
     }
+  }
+  if (out === filter) {
+    out += `<div class="card"><p class="muted">برای «${esc(botByKey(bot)?.title || bot)}» قیفی تعریف نشده یا دیتابیسی پیدا نشد. `
+      + `تعریفِ قیف‌ها در <span class="mono">lib/funnels-def.js</span> است.</p></div>`;
   }
   return out;
 }

@@ -4,8 +4,9 @@
 // schema-agnostic: هر ستونی که ممکن است در یک ربات نباشد (balance/state/last_seen) قبل از استفاده
 // با PRAGMA چک می‌شود؛ جمعِ پرداخت و شمارشِ رویداد از پروفایلِ مالیِ همان ربات می‌آید.
 import {
-  instances, instancesOf, BOTS, withDb, hasTable, rows,
+  instancesOf, withDb, hasTable, rows,
   userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, toToman, creditText, creditNum } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec } from '../lib/util.js';
 import { table } from '../lib/html.js';
@@ -24,7 +25,8 @@ const SORTS = [
 ];
 
 function readFilters(url) {
-  const bot = BOTS.some(b => b.key === url.searchParams.get('bot')) ? url.searchParams.get('bot') : '';
+  // تب کاربران هم per ربات است (اسکوپِ سراسری؛ منوی کشوییِ بالای منو)
+  const bot = scopeBot(url);
   const sortKey = SORTS.some(([k]) => k === url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'new';
   const days = Math.max(0, parseInt(url.searchParams.get('days') || '0', 10) || 0);
   const payers = url.searchParams.get('payers') === '1';
@@ -38,7 +40,7 @@ function readFilters(url) {
 // یک ردیفِ نرمالِ کاربر از هر ربات (ستون‌های نبود = null)
 function collectUsers(f) {
   const since = f.days ? nowSec() - f.days * 86400 : 0;
-  const targets = f.bot ? instancesOf(f.bot) : instances();
+  const targets = instancesOf(f.bot);
   const out = [];
   for (const inst of targets) {
     withDb(inst.file, (db) => {
@@ -129,9 +131,7 @@ export function usersBody(url) {
   };
 
   const filterForm = `<form method="get" action="/users" class="inline">
-    <label>ربات<select name="bot"><option value="">همه‌ی ربات‌ها</option>
-      ${BOTS.map(b => `<option value="${esc(b.key)}" ${b.key === f.bot ? 'selected' : ''}>${esc(b.title)}</option>`).join('')}
-    </select></label>
+    <input type="hidden" name="bot" value="${esc(f.bot)}">
     <label>جستجو (آی‌دی / یوزرنیم / نام)<input name="q" dir="ltr" value="${esc(f.q)}" placeholder="مثلاً 100257975 یا ali"></label>
     <label>ورود در<select name="days">
       ${[['0', 'همه‌ی زمان‌ها'], ['1', 'امروز'], ['7', '۷ روز'], ['30', '۳۰ روز'], ['90', '۹۰ روز']]

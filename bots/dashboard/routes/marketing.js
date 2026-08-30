@@ -1,6 +1,7 @@
 // مارکتینگ: ساخت لینک کمپین (t.me/<bot>?start=c_<code>) + قیفِ تا-درآمد هر کمپین + مقایسه‌ی چنل‌ها
 //           + اتریبیوشن در سطحِ پستِ کانال (payload لینکِ پست: c_<code>_<postref>)
-import { BOTS, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman } from '../lib/bots.js';
+import { BOTS, botByKey, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, postRefLabel } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
@@ -153,9 +154,9 @@ export function postStats(botKey) {
 }
 
 // کارتِ «پست‌های کانال» — تا وقتی هیچ لینکِ سطحِ پستی استفاده نشده، هیچ‌چیزی رندر نمی‌شود
-function postsCards(campaigns) {
+function postsCards(campaigns, only) {
   let out = '';
-  for (const b of BOTS) {
+  for (const b of BOTS.filter(x => x.key === only)) {
     const { list, hasPayments } = postStats(b.key);
     if (!list.length) continue;
     const shown = list.slice(0, POST_ROWS);
@@ -183,10 +184,13 @@ function postsCards(campaigns) {
   return out;
 }
 
-export function marketingBody() {
-  const campaigns = listCampaigns();
+export function marketingBody(url) {
+  // مارکتینگ per ربات: کمپین‌ها، پست‌ها و چنل‌های ورودیِ همان رباتِ انتخاب‌شده
+  const bot = scopeBot(url);
+  const botTitle = botByKey(bot)?.title || bot;
+  const campaigns = listCampaigns().filter(c => c.bot === bot);
 
-  const botOptions = BOTS.map(b => `<option value="${b.key}">${esc(b.title)}</option>`).join('');
+  const botOptions = `<option value="${esc(bot)}">${esc(botTitle)}</option>`;
   const createForm = `<div class="card"><h2>➕ لینک کمپین جدید</h2>
   <form method="post" action="/marketing/create" class="inline">
     <label>ربات<select name="bot">${botOptions}</select></label>
@@ -239,7 +243,7 @@ export function marketingBody() {
   <p class="muted">«کاربر جدید» = first-touch با همین کمپین. «کلیک برگشتی» = /start کاربرِ ازقبل‌موجود با این لینک (کمپین‌های re-engagement این‌جا دیده می‌شوند).</p></div>`;
 
   let channels = '';
-  for (const b of BOTS) {
+  for (const b of BOTS.filter(x => x.key === bot)) {
     const list = channelSummary(b.key);
     if (!list.length) continue;
     channels += `<div class="card"><h2>🛣 چنل‌های ورودی — ${esc(b.title)}</h2>
@@ -261,7 +265,7 @@ export function marketingBody() {
     }))}</div>`;
   }
 
-  return createForm + campaignsCard + postsCards(campaigns) + channels + unameForm;
+  return createForm + campaignsCard + postsCards(campaigns, bot) + channels + unameForm;
 }
 
 export function marketingCreate(body) {

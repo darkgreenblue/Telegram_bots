@@ -15,6 +15,12 @@ import {
 import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
 // شرط‌های مسیرِ ریز از همان‌جایی می‌آیند که عددها ساخته می‌شوند (تک‌منبع؛ ضدِ واگراییِ عدد و لیست)
 import { KEY_EXPR, notAdmin } from './journey.js';
+// شرط‌های «درگیری و ماندگاری» از همان‌جایی می‌آیند که عددهای داشبوردِ اصلی ساخته می‌شوند
+import {
+  DONE, notAdminReadings, READ_BUCKETS, RET_DAYS, SATISFIED_MIN_AVG,
+  activeUsersSql, readerUsersSql, repeatUsersSql, satisfiedUsersSql, ratersUsersSql,
+  successfulReferrersSql, bucketUsersSql, retainedUsersSql,
+} from './engage.js';
 import { weekIdx, weekExpr, weekLabel, nowSec, postRefLabel } from './util.js';
 
 // سقفِ لیست: داشبورد ابزارِ تماس‌گرفتن است نه export انبوه (برای انبوه، تب «کاربران» + CSV هست).
@@ -332,6 +338,62 @@ export function resolveCohort(url) {
       const users = attrCohort(targets, botKey, 'first_payload', pl, mode);
       const post = pl.slice(pl.indexOf('_', 2) + 1);
       return done(`پستِ ${postRefLabel(post)} · ${ATTR_LABEL[mode] || 'کاربر جدید'}`, users);
+    }
+
+    /* ═══ سنجه‌های داشبوردِ اصلیِ تاروت ═══
+       هر زیرنوع دقیقاً همان SQL ای را صدا می‌زند که عددش را ساخته (`lib/engage.js`)،
+       پس عدد و لیست هرگز از هم نمی‌پاشند. زیرنوع از whitelist انتخاب می‌شود و هیچ
+       رشته‌ای از URL داخل SQL نمی‌رود. */
+    case 'tarot': {
+      const t = url.searchParams.get('t') || '';
+      const aw = Math.min(7, Math.max(1, intParam(url, 'aw', 7)));
+      const now = nowSec();
+      const LABEL = {
+        active: `کاربران فعال (پنجره‌ی ${aw} روز)`,
+        readers: 'کاربرانی که حداقل یک فالِ کامل گرفته‌اند',
+        repeat: 'کاربرانِ برگشتی (فال در ≥۲ روزِ متفاوت)',
+        satisfied: `کاربران راضی (میانگین نمره > ${SATISFIED_MIN_AVG})`,
+        raters: 'کاربرانی که به فال نمره داده‌اند',
+        referrer: 'دعوت‌کننده‌های موفق',
+        churn: 'ریزشِ هفتگی (هفته‌ی قبل فال گرفت، این هفته نه)',
+        bucket: 'کاربرانِ این سطلِ تعدادِ فال',
+        ret: 'کاربرانی که بعد از این تعداد روز دوباره فال گرفتند',
+      };
+      if (!LABEL[t]) return { error: 'نوع سنجه نامعتبر است.' };
+
+      const users = collect(targets, botKey, (db, { pk, nameCol }) => {
+        if (!hasTable(db, 'readings') && t !== 'referrer') return null;
+        const ev = hasTable(db, 'events');
+        let inner = null;
+        if (t === 'active') inner = activeUsersSql(now, aw, ev);
+        else if (t === 'readers') inner = readerUsersSql(ev);
+        else if (t === 'repeat') inner = repeatUsersSql(ev);
+        else if (t === 'satisfied') inner = satisfiedUsersSql(ev);
+        else if (t === 'raters') inner = ratersUsersSql(ev);
+        else if (t === 'referrer') { if (!hasTable(db, 'referrals')) return null; inner = successfulReferrersSql(); }
+        else if (t === 'bucket') inner = bucketUsersSql(Math.max(0, intParam(url, 'i', -1)), ev);
+        else if (t === 'ret') {
+          const d = RET_DAYS.includes(intParam(url, 'd', 0)) ? intParam(url, 'd', 0) : 0;
+          if (!d) return null;
+          inner = retainedUsersSql(d, now, ev);
+        } else if (t === 'churn') {
+          inner = {
+            sql: `SELECT r.user_id AS uid FROM readings r
+                  WHERE ${DONE}${notAdminReadings(ev)} AND r.created_at >= ? AND r.created_at < ?
+                  GROUP BY r.user_id
+                  HAVING r.user_id NOT IN (SELECT user_id FROM readings WHERE status='delivered' AND price>0 AND created_at >= ?)`,
+            params: [now - 14 * 86400, now - 7 * 86400, now - 7 * 86400],
+          };
+        }
+        if (!inner) return null;
+        return {
+          sql: `SELECT ${sel(pk, nameCol)} FROM users u WHERE u.${pk} IN (${inner.sql}) ORDER BY u.${pk}${lim}`,
+          params: inner.params,
+        };
+      });
+      const extra = t === 'bucket' ? ` · ${READ_BUCKETS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}`
+        : t === 'ret' ? ` · D+${intParam(url, 'd', 0)}` : '';
+      return done(LABEL[t] + extra, users);
     }
 
     default:

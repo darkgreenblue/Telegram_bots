@@ -1,7 +1,8 @@
 // مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
 // هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
 // این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
-import { instances, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, scalar, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, creditText, creditNum, coinOf } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, scalar, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, creditText, creditNum, coinOf } from '../lib/bots.js';
+import { scopeBot } from '../lib/nav.js';
 import { listAudit, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { table, statusBadge, stat } from '../lib/html.js';
@@ -19,16 +20,20 @@ const STATUS_LEGEND = [
 ];
 
 function readFilters(url) {
-  const instId = url.searchParams.get('inst') || '';
+  const bot = scopeBot(url);
+  // instance فقط وقتی معتبر است که به همان رباتِ انتخاب‌شده تعلق داشته باشد
+  // (وگرنه یک instId کهنه در URL، صفحه را روی رباتِ دیگری باز می‌کرد).
+  const asked = url.searchParams.get('inst') || '';
+  const instId = getInstance(asked)?.bot === bot ? asked : '';
   const status = STATUSES.includes(url.searchParams.get('status')) ? url.searchParams.get('status') : '';
   const days = Math.max(0, parseInt(url.searchParams.get('days') || '30', 10) || 0); // 0 = همه
-  return { instId, status, days };
+  return { bot, instId, status, days };
 }
 
 // یک رکورد نرمالِ مشترک برای همه‌ی ربات‌ها (مبلغ به تومان)
-function collectPayments({ instId, status, days }) {
+function collectPayments({ bot, instId, status, days }) {
   const since = days ? nowSec() - days * 86400 : 0;
-  const targets = instId ? [getInstance(instId)].filter(Boolean) : instances();
+  const targets = instId ? [getInstance(instId)].filter(Boolean) : instancesOf(bot);
   const all = [];
   for (const inst of targets) {
     withDb(inst.file, (db) => {
@@ -76,17 +81,18 @@ export function financeBody(url) {
   const totalsHtml = Object.entries(totals)
     .map(([s, t]) => stat(s, `${fmt(t.c)} پرداخت / ${fmt(t.s)} ت`)).join('') || '<p class="muted">پرداختی در این بازه نیست.</p>';
 
-  const instOptions = ['<option value="">همه‌ی ربات‌ها</option>',
-    ...instances().map(i => `<option value="${esc(i.id)}" ${i.id === f.instId ? 'selected' : ''}>${esc(i.title)}</option>`)].join('');
+  const instOptions = ['<option value="">همه‌ی نسخه‌های این ربات</option>',
+    ...instancesOf(f.bot).map(i => `<option value="${esc(i.id)}" ${i.id === f.instId ? 'selected' : ''}>${esc(i.title)}</option>`)].join('');
   const statusOptions = STATUSES.map(s => `<option value="${s}" ${s === f.status ? 'selected' : ''}>${s || 'همه‌ی وضعیت‌ها'}</option>`).join('');
   const filterForm = `<form method="get" action="/finance" class="inline">
-    <label>ربات<select name="inst">${instOptions}</select></label>
+    <input type="hidden" name="bot" value="${esc(f.bot)}">
+    <label>نسخه<select name="inst">${instOptions}</select></label>
     <label>وضعیت<select name="status">${statusOptions}</select></label>
     <label>بازه<select name="days">
       ${[['7', '۷ روز'], ['30', '۳۰ روز'], ['90', '۹۰ روز'], ['0', 'همه']].map(([v, l]) => `<option value="${v}" ${Number(v) === f.days ? 'selected' : ''}>${l}</option>`).join('')}
     </select></label>
     <button type="submit">فیلتر</button>
-    <a href="/finance.csv?inst=${encodeURIComponent(f.instId)}&status=${f.status}&days=${f.days}"><button type="button" class="ghost">⬇ CSV</button></a>
+    <a href="/finance.csv?bot=${encodeURIComponent(f.bot)}&inst=${encodeURIComponent(f.instId)}&status=${f.status}&days=${f.days}"><button type="button" class="ghost">⬇ CSV</button></a>
   </form>`;
 
   const rowsHtml = all.slice(0, 150).map((p) => {
@@ -170,11 +176,11 @@ export function financeCsv(url) {
    نداریم را نمی‌سازیم. برای واردکردنش یا باید per-call هزینه ثبت شود یا از OpenRouter خوانده. */
 const COST_KINDS = { welcome: 'خوش‌آمد', streak: 'استریک', referral: 'رفرال', '': 'سایر' };
 
-function collectDaily(days) {
+function collectDaily(days, botKey) {
   const since = tehranDayStart(-(days - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, gift, disc, kinds:{} }
   const at = (d) => { if (!day.has(d)) day.set(d, { rev: 0, gift: 0, giftCoins: 0, disc: 0, kinds: {} }); return day.get(d); };
-  for (const inst of instances()) {
+  for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       const m = moneyOf(inst.bot);
       // درآمدِ تأییدشده — از تک‌منبعِ revenueWhere (فیلترِ پرداختِ شبیه‌سازی‌شده‌ی tabir هم داخلش است)
@@ -217,9 +223,9 @@ function collectDaily(days) {
 
 /* اقتصادِ الماس (تجمعی، نه روزانه): چهار عددی که با هم یک ترازنامه‌ی ساده می‌سازند.
    صادرشده(هدیه) + خریداری‌شده = واردشده ؛ مصرف‌شده = بازخریدشده ؛ مانده = بدهیِ معوق. */
-function coinEconomy() {
+function coinEconomy(botKey) {
   const out = [];
-  for (const inst of instances()) {
+  for (const inst of instancesOf(botKey)) {
     const coin = coinOf(inst.bot);
     if (!coin) continue;
     withDb(inst.file, (db) => {
@@ -247,8 +253,9 @@ function coinEconomy() {
 }
 
 export function costsBody(url) {
+  const bot = scopeBot(url);
   const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 7), 180);
-  const series = collectDaily(days);
+  const series = collectDaily(days, bot);
   const sum = series.reduce((a, r) => ({
     rev: a.rev + r.rev, gift: a.gift + r.gift, giftCoins: a.giftCoins + r.giftCoins, disc: a.disc + r.disc,
   }), { rev: 0, gift: 0, giftCoins: 0, disc: 0 });
@@ -265,7 +272,7 @@ export function costsBody(url) {
   const net = sum.rev - sum.gift - sum.disc;
   const kinds = {};
   for (const r of series) for (const [k, v] of Object.entries(r.kinds)) kinds[k] = (kinds[k] || 0) + v;
-  const econ = coinEconomy();
+  const econ = coinEconomy(bot);
 
   const max = Math.max(1, ...series.map(r => Math.max(r.rev, r.gift + r.disc)));
   const px = (v) => Math.round((v / max) * 220);
@@ -293,6 +300,7 @@ export function costsBody(url) {
   return `
     <h1>هزینه‌ها و درآمد</h1>
     <form method="get" action="/costs" class="inline">
+      <input type="hidden" name="bot" value="${esc(bot)}">
       <label>بازه<select name="days">
         ${[7, 30, 90, 180].map(v => `<option value="${v}" ${v === days ? 'selected' : ''}>${v} روز</option>`).join('')}
       </select></label><button type="submit">اعمال</button>
