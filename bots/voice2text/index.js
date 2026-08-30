@@ -75,7 +75,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
 // 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
-const PRODUCT_VERSION = '1.3.0';
+const PRODUCT_VERSION = '1.4.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -1201,10 +1201,20 @@ async function notionCreatePage(parentId, title, content) {
 // زیرصفحه‌ی «Voice Inbox»ِ صفحه‌ی انتخابی می‌رود. عنوان/آیکون دقیقاً مطابق Notion.
 // inbox = آی‌دیِ صفحه‌ی «Voice Inbox» داخل هر صفحه‌ی اصلی.
 const NOTION_QUICK_TARGETS = [
-  { icon: '✏️', title: 'منشی شخصی',  inbox: '39f6db84-2315-8120-849e-f5e634f01d84' },
-  { icon: '🥎', title: 'صف پرامپت‌ها', inbox: '39f6db84-2315-8092-8d72-fcc2fd13bb40' },
-  { icon: '🎤', title: 'Meetings',    inbox: '39f6db84-2315-8099-9a4e-ea1238dc8ae9' },
+  { key: 'monshi',   icon: '✏️', title: 'منشی شخصی',   inbox: '39f6db84-2315-8120-849e-f5e634f01d84' },
+  { key: 'prompts',  icon: '🥎', title: 'صف پرامپت‌ها',  inbox: '39f6db84-2315-8092-8d72-fcc2fd13bb40' },
+  { key: 'thoughts', icon: '🧠', title: 'آرشیو افکار',   inbox: '3cc6db84-2315-8134-a96c-e71602d334cc' },
+  { key: 'meetings', icon: '🎤', title: 'Meetings',     inbox: '39f6db84-2315-8099-9a4e-ea1238dc8ae9' },
 ];
+
+// دکمه‌های قدیمی در چت مالک هنوز `ntn:quick:<index>` می‌فرستند و ایندکسِ آن زمان را دارند؛
+// با افزودنِ مقصدِ جدید در وسطِ آرایه، ایندکس‌ها جابه‌جا می‌شوند، پس ترتیبِ قدیم اینجا قفل شده
+// تا دکمه‌ی کش‌شده به صفحه‌ی اشتباه نرود. دکمه‌های جدید `ntn:q:<key>` می‌فرستند.
+const NOTION_LEGACY_INDEX = ['monshi', 'prompts', 'meetings'];
+
+function notionTargetByKey(key) {
+  return NOTION_QUICK_TARGETS.find(t => t.key === key) || null;
+}
 
 async function generateNotionTitle(text) {
   try {
@@ -3086,14 +3096,16 @@ bot.on('callback_query', async (ctx) => {
         await ctx.answerCbQuery();
         await editNotionMsg(
           'به کدوم بخش بفرستم؟',
-          NOTION_QUICK_TARGETS.map((t, i) => [{ text: `${t.icon} ${t.title}`, callback_data: `ntn:quick:${i}` }])
+          NOTION_QUICK_TARGETS.map(t => [{ text: `${t.icon} ${t.title}`, callback_data: `ntn:q:${t.key}` }])
         );
         return;
       }
 
-      if (data.startsWith('ntn:quick:')) {
+      if (data.startsWith('ntn:q:') || data.startsWith('ntn:quick:')) {
         await ctx.answerCbQuery('در حال ارسال...');
-        const target = NOTION_QUICK_TARGETS[parseInt(data.slice('ntn:quick:'.length), 10)];
+        const target = data.startsWith('ntn:q:')
+          ? notionTargetByKey(data.slice('ntn:q:'.length))
+          : notionTargetByKey(NOTION_LEGACY_INDEX[parseInt(data.slice('ntn:quick:'.length), 10)]);
         if (!target) return editNotionMsg('❌ گزینه نامعتبر است.', []);
         await editNotionMsg('⏳ در حال ارسال به نوشن...', []);
         try {
