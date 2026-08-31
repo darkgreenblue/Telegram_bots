@@ -35,7 +35,7 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
-import { monthFa, eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
+import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
@@ -63,6 +63,11 @@ const L = (await import(`./locales/${LOCALE}.js`)).default;
  * رول‌بکِ یک‌خطی: `starsRail = false` → رفتار دقیقاً مثلِ قبل برای همه‌ی زبان‌ها. */
 const PAY_RAIL = LOCALE === 'fa' ? 'card' : 'stars';
 const starsRail = PAY_RAIL === 'stars';
+/* برچسبِ ماهِ تولد از خودِ locale می‌آید، نه از ganjineh.js. ایندکس ۱..۱۲ بینِ همه‌ی
+ * زبان‌ها یکی است (روی `users.birth_month` کاربرانِ واقعی نشسته)، ولی **برچسبش**
+ * زبانی است: فارسی ماهِ شمسی می‌گوید و زبانی که تقویمِ دیگری دارد می‌تواند همان
+ * ایندکس را با نامِ برجِ متناظر نشان بدهد، بدونِ اینکه دیتای گنجینه جابه‌جا شود. */
+const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
 const fmt = L.fmt;
 // فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
@@ -2128,7 +2133,7 @@ bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
   // تأیید **روی همان پیامِ سؤال** ادیت می‌شود، نه یک پیامِ جدید (تصمیمِ مالک): دوازده
   // دکمه محو می‌شوند و جایشان یک خطِ کوتاه می‌نشیند، پس چت شلوغ نمی‌ماند.
   // اگر ادیت نشد (پیامِ خیلی قدیمی یا حذف‌شده) به پیامِ جدا برمی‌گردیم تا کاربر بی‌جواب نماند.
-  const saved = L.onboarding.birthMonthSaved(monthFa(m));
+  const saved = L.onboarding.birthMonthSaved(monthLabel(m));
   try { await ctx.editMessageText(saved); }
   catch { await ctx.reply(saved).catch(() => {}); }
   // 🎯 خارج از آنبوردینگ، ماهِ تولد فقط یک قدمِ میانی بوده که جلوی نیتِ کاربر را گرفت.
@@ -2224,7 +2229,7 @@ async function dailyCardV2(ctx, uid, user, today) {
     // نسخه‌ی قبلی این‌جا یک صفحه‌ی بدونِ هیچ قدمِ بعدی می‌ساخت (بند ۹ب/۱). حالا همان
     // پیشنهادهایی می‌آید که شاخه‌ی خواهرش («امروز گرفتی») از قبل داشت.
     track(db, uid, 'daily_ganjineh_empty', { month: user.birth_month });
-    return ctx.reply(L.daily.ganjinehEmpty(monthFa(user.birth_month)),
+    return ctx.reply(L.daily.ganjinehEmpty(monthLabel(user.birth_month)),
       Markup.inlineKeyboard(recoRows(uid, null)));
   }
   // seed قطعی per کاربر per روز: بعد از این لحظه ترتیبِ حوضچه ثابت است، حتی بعد از
@@ -2273,7 +2278,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   // اگر ارسال شکست بخورد، استیت به `daily_pick` برمی‌گردد تا کاربر بتواند دوباره بزند.
   await typing(ctx, PACE_M, 'upload_photo');
   try {
-    await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthFa(month)));
+    await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthLabel(month)));
   } catch (e) {
     logErr('dailyCardV2 photo:', e.message);
     setState(uid, 'daily_pick');   // روز نسوخت؛ همان گرید هنوز معتبر است
@@ -5295,7 +5300,7 @@ bot.command('resetprofile', (ctx) => {
   const u = getUser(target);
   if (!u) return ctx.reply(L.reset.profNotFound(target));
   return ctx.reply(
-    L.reset.profConfirm(target, dispName(u), u.birth_month ? monthFa(u.birth_month) : '', u.balance, curOf(target).emoji),
+    L.reset.profConfirm(target, dispName(u), u.birth_month ? monthLabel(u.birth_month) : '', u.balance, curOf(target).emoji),
     Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.profResetYes, `rprof:${target}`)],
       [Markup.button.callback(L.buttons.profResetNo, 'rprof_no')],
@@ -5411,7 +5416,7 @@ bot.action('set:month', async (ctx) => {
       .map((k) => Markup.button.callback(L.buttons.birthMonths[k], `smonth:${k + 1}`)));
   }
   rows.push([Markup.button.callback(L.buttons.setCancel, 'set:home')]);
-  await editOrSend(ctx, L.settings.askMonth(u?.birth_month ? monthFa(u.birth_month) : ''), rows);
+  await editOrSend(ctx, L.settings.askMonth(u?.birth_month ? monthLabel(u.birth_month) : ''), rows);
 });
 
 // عمداً `smonth:` و نه `bmonth:` — آن یکی مالِ آنبوردینگ است و بعد از خودش
@@ -5424,7 +5429,7 @@ bot.action(/^smonth:(\d{1,2})$/, async (ctx) => {
   if (!(m >= 1 && m <= 12)) return;
   stmts.setBirthMonth.run(m, uid);
   track(db, uid, 'settings_changed', { what: 'month' });
-  await editOrSend(ctx, L.settings.monthSaved(monthFa(m)),
+  await editOrSend(ctx, L.settings.monthSaved(monthLabel(m)),
     [[Markup.button.callback(L.buttons.setBack, 'set:home')]]);
 });
 
