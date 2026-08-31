@@ -53,8 +53,16 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
+import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay } from './starspay.js';
+
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 const L = (await import(`./locales/${LOCALE}.js`)).default;
+/* 💳 ریلِ پرداخت per زبان (بند ۲و ریشه). فارسی کارت‌به‌کارت می‌ماند و بقیه استارز،
+ * چون تلگرام فروشِ کالای دیجیتال در بات را روی موبایل اجباراً به استارز محدود کرده.
+ * این تنها واگراییِ ساختاریِ مجاز بینِ زبان‌هاست؛ بقیه‌ی UI و UX یکی می‌ماند.
+ * رول‌بکِ یک‌خطی: `starsRail = false` → رفتار دقیقاً مثلِ قبل برای همه‌ی زبان‌ها. */
+const PAY_RAIL = LOCALE === 'fa' ? 'card' : 'stars';
+const starsRail = PAY_RAIL === 'stars';
 const fmt = L.fmt;
 // فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
@@ -651,6 +659,8 @@ try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFA
 // قدیمی دقیقاً مثلِ قبل رفتار می‌کند. خالی نبودنش یعنی «این پرداخت یک بسته است»، و همین
 // یک بیت هم هدیه‌ی شارژ را خاموش می‌کند هم اصلاحِ خودکارِ مبلغ را.
 try { db.prepare("ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// ⭐ شناسه‌ی شارژِ استارز — تنها کلیدِ `refundStarPayment`. برای فارسی همیشه خالی می‌ماند.
+try { db.prepare("ALTER TABLE payments ADD COLUMN charge_id TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.2.0): صفِ اقدامِ پشتیبانی فراتر از تأیید/ردِ رسید (شارژ دستی، بازکردنِ فال).
 // payment_id در اقدام‌های غیرپرداختی صفر می‌ماند (ستون NOT NULL است و تغییرش غیرافزایشی بود).
 try { db.prepare('ALTER TABLE admin_actions ADD COLUMN user_id INTEGER').run(); } catch {}
@@ -954,6 +964,7 @@ const stmts = {
 
   insertPayment: db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')"),
   getPayment:    db.prepare('SELECT * FROM payments WHERE id=?'),
+  setPaymentCharge: db.prepare('UPDATE payments SET charge_id=? WHERE id=?'),
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
   // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
   claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
@@ -4554,6 +4565,28 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
   stmts.setPaymentPackage.run(pack.key, pack.toman, s.paymentId);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+
+  /* ⭐ ریلِ استارز: دکمه‌ی بسته **مستقیماً** فاکتورِ تلگرام را می‌فرستد. هیچ فاکتورِ
+   * دست‌ساز و هیچ مرحله‌ی رسیدی در کار نیست، چون خودِ تلگرام قبل از کسر یک صفحه‌ی
+   * تأییدِ بومی نشان می‌دهد و پرداخت را خودش تأیید می‌کند.
+   * استیت عمداً روی `pay_receipt` نمی‌رود: در این ریل چیزی برای «فرستادن» وجود ندارد،
+   * پس کاربر نباید در حالتی گیر کند که منتظرِ عکسِ رسید است. گاردِ فلوی باز از روی
+   * خودِ رکوردِ `pending` کار می‌کند، نه از روی استیت. */
+  if (starsRail) {
+    const stars = starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT)));
+    if (!stars) { logErr('stars: no price for pack', pack.key); return; }
+    try {
+      return await ctx.replyWithInvoice(buildInvoice({
+        pack, stars, paymentId: s.paymentId, userId: uid,
+        title: L.wallet.starsInvoiceTitle(pack),
+        description: L.wallet.starsInvoiceDesc(pack, stars),
+      }));
+    } catch (e) {
+      logErr('stars sendInvoice:', e.message);
+      return ctx.reply(L.errors.generic).catch(() => {});
+    }
+  }
+
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
   await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER), {
@@ -4954,6 +4987,25 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
 });
+/* ⭐ سیم‌کشیِ ریلِ استارز. عمداً **بعد از** `approvePayment` و `afterApproval` می‌نشیند
+ * تا از همان دو تابعِ همیشگی استفاده کند و هیچ منطقِ پولیِ موازی ساخته نشود:
+ * واریز، رویدادِ payment_approved، پیامِ موفقیت و ادامه‌ی خودکارِ فالِ رزروشده،
+ * همه دقیقاً همان مسیرِ کارت‌به‌کارت‌اند. تنها تفاوت این است که «تأییدکننده» به‌جای
+ * ادمین یا ایجنتِ رسید، خودِ تلگرام است.
+ * روی فارسی هیچ‌وقت ثبت نمی‌شود، پس رباتِ زنده حتی یک هندلرِ اضافه هم نمی‌گیرد. */
+if (starsRail) {
+  registerStarsPay(bot, {
+    getPayment: (id) => stmts.getPayment.get(id),
+    approve: (id) => approvePayment(id),
+    saveCharge: (chargeId, id) => stmts.setPaymentCharge.run(chargeId, id),
+    onCredited: async (uid, { p, creditAmount, bonus }) => {
+      await bot.telegram.sendMessage(uid, approvedMsg(uid, creditAmount, bonus)).catch(() => {});
+      await afterApproval(p.user_id);
+    },
+    log, logErr,
+  });
+}
+
 bot.action(/^reject:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
   const p = rejectPaymentDb(parseInt(ctx.match[1], 10));
