@@ -71,6 +71,46 @@ for (const file of files) {
     if (hit) fail(`«${bad}» در متنِ رو-به-کاربر پیدا شد (بند ۱۰ ریشه): ${hit.slice(0, 60)}`);
   }
 
+  /* 🚨 هر تابعِ locale واقعاً **اجرا** می‌شود.
+   *
+   * 🐛 باگی که این را لازم کرد (پیدا شده حینِ ساختِ پرتغالی، روی locale روسی): سه ثابتِ
+   * `INTRO_EXPERIENCE`، `INTRO_EXPERIENCE_V2` و `INTRO_STAT` در پورتِ روسی جا افتاده
+   * بودند ولی هر دو مصرف‌کننده‌شان زنده مانده بود. یعنی `gateIntro` و `welcome` در
+   * زمانِ اجرا `ReferenceError` می‌دادند — **اولین پیامی که هر کاربرِ روسِ تازه می‌بیند**
+   * و پیامِ بلافاصله بعد از گرفتنِ نامش. این چک تا امروز فقط `toString()` می‌گرفت، پس
+   * متنِ تابع را می‌دید ولی هرگز صدایش نمی‌زد و باگ کاملاً نامرئی بود.
+   * دقیقاً همان کلاسِ باگِ `decideReceipt` (بند ۸ ریشه)، این‌بار در لایه‌ی locale.
+   *
+   * ⚠️ فقط `ReferenceError` خطا حساب می‌شود، نه هر استثنایی: شناسه‌ی تعریف‌نشده مستقل
+   * از آرگومان‌ها می‌ترکد، ولی `TypeError` معمولاً یعنی آرگومانِ ساختگیِ ما شکلِ درستی
+   * نداشته که ایرادِ خودِ locale نیست. این تفکیک عمدی است تا چک نویزِ کاذب ندهد. */
+  {
+    const ARGS = [
+      [], ['x'], ['x', 1], ['x', true], ['x', 1, true], ['x', 'y', 'z'],
+      [1], [1, 2], [true], [[]], [{}], [{ on: true, name: 'x', emoji: '💎' }],
+    ];
+    const broken = [];
+    const walk = (v, pathStr) => {
+      if (typeof v === 'function') {
+        let refErr = null, anyOk = false;
+        for (const a of ARGS) {
+          try { v(...a); anyOk = true; break; }
+          catch (e) { if (e instanceof ReferenceError && !refErr) refErr = e; }
+        }
+        if (!anyOk && refErr) broken.push(`${pathStr}: ${refErr.message}`);
+      } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${pathStr}[${i}]`));
+      else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(x, `${pathStr}.${k}`));
+    };
+    Object.entries(mod).forEach(([k, v]) => walk(v, k));
+    if (broken.length) {
+      failures++;
+      console.log(`  ❌ ${broken.length} تابع در زمانِ اجرا ReferenceError می‌دهد (شناسه‌ی تعریف‌نشده):`);
+      broken.slice(0, 8).forEach(b => console.log(`     - ${b}`));
+    } else {
+      console.log('  ✓ همه‌ی توابع اجرا می‌شوند (هیچ شناسه‌ی تعریف‌نشده‌ای نمانده)');
+    }
+  }
+
   if (!failures) console.log('  ✓ شکل، نوع‌ها، code و قواعدِ کپی سالم‌اند');
 }
 
