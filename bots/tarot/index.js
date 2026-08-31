@@ -33,7 +33,7 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
-import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
+import { normalizeVerdict, decisiveMode, headlineOk, evasionIn, configureVerdict } from './verdict.js';
 import { repairDefects } from './repair.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
@@ -44,7 +44,7 @@ import {
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
-  buildReadingCtx, renderV4,
+  buildReadingCtx, renderV4, configureSeparator,
 } from './reading-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -68,6 +68,13 @@ const starsRail = PAY_RAIL === 'stars';
  * زبانی است: فارسی ماهِ شمسی می‌گوید و زبانی که تقویمِ دیگری دارد می‌تواند همان
  * ایندکس را با نامِ برجِ متناظر نشان بدهد، بدونِ اینکه دیتای گنجینه جابه‌جا شود. */
 const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
+
+/* ⚖️ دادهٔ زبانیِ حکمِ قاطع و جداکننده‌ی خط‌تیره را از همین locale به دو ماژولِ خالص
+ * تزریق می‌کند. **قبل از هر خوانشی** و یک‌بار موقعِ boot اجرا می‌شود.
+ * بدونِ این، رباتِ غیرفارسی خرابیِ بی‌صدا می‌گرفت: `normalizeVerdict` برای جوابِ
+ * روسی null می‌داد و بلوکِ جواب بی‌هیچ خطایی از خوانش حذف می‌شد (بند ۱۰). */
+configureVerdict(L.verdict);
+configureSeparator(L.verdict?.dashReplacement);
 const fmt = L.fmt;
 // فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
