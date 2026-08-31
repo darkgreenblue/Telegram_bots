@@ -19,8 +19,19 @@ import { readFileSync, readdirSync } from 'fs';
 let pass = 0; const errs = [];
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
 
-const DIR = new URL('../bots/tarot/', import.meta.url);
-const DOCS = readdirSync(DIR).filter(f => /^I18N-.*\.md$/.test(f)).sort();
+/* دامنه عمداً **کلِ اسنادِ تحقیقِ ریپو** است، نه فقط جایی که باگ اتفاق افتاد. قاعده‌ی
+ * بند ۹/۰الف ریشه سراسری است و هر سندِ تحقیقی مشمولش می‌شود. */
+const ROOT = new URL('../', import.meta.url);
+const SCAN_DIRS = ['bots/tarot/', 'bots/voice2text/', 'bots/tabir-khab/',
+  'bots/daily-brief/', 'bots/dashboard/', 'marketing/', 'benchmark/'];
+const DOCS = [];
+for (const d of SCAN_DIRS) {
+  let files = [];
+  try { files = readdirSync(new URL(d, ROOT)); } catch { continue; }
+  for (const f of files) if (/\.md$/.test(f)) DOCS.push(d + f);
+}
+DOCS.sort();
+const readDoc = (rel) => readFileSync(new URL(rel, ROOT), 'utf8');
 
 /* عبارت‌هایی که ادعا را به یک منبعِ رسمی می‌چسبانند. اگر یکی از این‌ها در سند باشد،
  * سند باید جایی وضعیتِ دسترسی را هم گفته باشد. عمداً کوچک و صریح است: هدف گرفتنِ
@@ -28,21 +39,36 @@ const DOCS = readdirSync(DIR).filter(f => /^I18N-.*\.md$/.test(f)).sort();
 const CITES = [/طبق\s+صفحه/, /طبق\s+مستندات/, /بر\s?اساسِ?\s+صفحه/];
 /* نشانه‌های صداقتِ منبع: یا گفته چه چیزی خوانده نشده، یا برچسبِ snippet دارد، یا
  * بخشِ محدودیت دارد. */
-const HONEST = [/خوانده\s?نشد/, /snippet-only/, /محدودیت/, /تأییدنشده/, /باز نشد/, /بسته\s+است/];
+/* ⚠️ الگوها باید شکستِ خطِ مارک‌داون را تحمل کنند: «هرگز خوانده\n> نشده بود» در
+ * نقلِ بلوکی به «خوانده» و «> نشده» می‌شکند و نسخه‌ی اولِ همین لیست به‌غلط قرمز کرد. */
+const HONEST = [/خوانده[\s>]*نشد/, /snippet-only/, /محدودیت/, /باز[\s>]*نشد/,
+  /تأییدنشده/, /بسته[\s>]*است/, /پراکسی/, /می‌بندد/];
 
 console.log('▶ ادعاهای منبع‌دار وضعیتِ دسترسی را می‌گویند');
+/* ⚠️ سنجش **per ادعا** است، نه per سند. نسخه‌ی اولِ همین چک سندی را قبول می‌کرد که
+ * هرجایش کلمه‌ی «محدودیت» آمده باشد، یعنی یک ادعای تازه‌ی بی‌منبع در سندی که قبلاً
+ * بخشِ محدودیت داشت **بی‌صدا رد می‌شد**. با جهش تست شد و رد نشد، و همان جهش لوش داد.
+ * حالا برچسبِ صداقت باید در همان **پنجره‌ی نزدیکِ** خودِ ادعا باشد. */
+const NEAR = 6;   // چند خط بالا و پایینِ ادعا دنبالِ برچسب بگرد
 for (const f of DOCS) {
-  const t = readFileSync(new URL(f, DIR), 'utf8');
-  if (!CITES.some(r => r.test(t))) { continue; }
-  ok(HONEST.some(r => r.test(t)),
-    `${f}: به یک صفحه‌ی مرجع استناد می‌کند و وضعیتِ دسترسی را هم گفته`);
+  const lines = readDoc(f).split('\n');
+  const bad = [];
+  lines.forEach((line, i) => {
+    if (!CITES.some(r => r.test(line))) return;
+    const win = lines.slice(Math.max(0, i - NEAR), i + NEAR + 1).join('\n');
+    if (!HONEST.some(r => r.test(win))) bad.push(i + 1);
+  });
+  if (!lines.some(l => CITES.some(r => r.test(l)))) continue;
+  ok(bad.length === 0,
+    `${f}: هر استنادِ صفحه‌ای وضعیتِ دسترسی را کنارِ خودش دارد`
+    + (bad.length ? ` (خطوط: ${bad.slice(0, 4).join(', ')})` : ''));
 }
 
 /* و ادعای مشخصی که ما را گاز گرفت: هیچ سندی نباید دوباره بگوید مدلِ رباتِ زنده
  * تاریخِ بازنشستگی دارد، مگر اینکه صریحاً بگوید آن ادعای قبلی غلط بود. */
 console.log('\n▶ ادعای باطل‌شده‌ی بازنشستگی برنگشته');
-for (const f of [...DOCS, 'CLAUDE.md']) {
-  const t = readFileSync(new URL(f, DIR), 'utf8');
+for (const f of [...DOCS, 'bots/tarot/CLAUDE.md', 'CLAUDE.md']) {
+  const t = readDoc(f);
   const lines = t.split('\n');
   const bad = lines.filter((l) => /gemini-2\.5-flash/.test(l)
     && /بازنشست|تاریخِ انقضا|منقضی/.test(l)
