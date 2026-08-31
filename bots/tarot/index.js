@@ -4580,9 +4580,22 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (!pack) return;
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
+  /* ⭐ قیمتِ **واقعیِ پرداختی** قبل از هر نوشتنی حساب می‌شود.
+   *
+   * 🐛 باگی که این را لازم کرد: `setPaymentPackage` عددِ `pack.toman` را در ستونِ
+   * `amount` می‌نشاند، یعنی روی ریلِ استارز **قیمتِ تومانیِ فارسی** به‌عنوان «پولی که
+   * کاربر داد» ثبت می‌شد. کاربرِ روس تومان نمی‌دهد، استارز می‌دهد. نتیجه: درآمدِ هر
+   * زبانِ غیرفارسی در داشبورد یک عددِ ساختگی بود و بند ۹ ریشه («هر ریالِ ورودی ردپای
+   * DB دارد تا قابلِ حسابرسی باشد») نقض می‌شد. `original_amount` (تعدادِ الماس) درست
+   * بود، پس واریز هرگز خراب نبود — فقط دفترِ درآمد.
+   *
+   * محاسبه عمداً **قبل از** `claimAmount` است: بستهٔ بی‌قیمت باید قبل از هر تغییرِ
+   * وضعیتی رد شود، وگرنه فاکتور claim می‌شد و بعد بدونِ ارسالِ چیزی رها می‌ماند. */
+  const stars = starsRail ? starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT))) : null;
+  if (starsRail && !stars) { logErr('stars: no price for pack', pack.key); return; }
   // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
   if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
-  stmts.setPaymentPackage.run(pack.key, pack.toman, s.paymentId);
+  stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, s.paymentId);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
 
   /* ⭐ ریلِ استارز: دکمه‌ی بسته **مستقیماً** فاکتورِ تلگرام را می‌فرستد. هیچ فاکتورِ
@@ -4592,8 +4605,6 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * پس کاربر نباید در حالتی گیر کند که منتظرِ عکسِ رسید است. گاردِ فلوی باز از روی
    * خودِ رکوردِ `pending` کار می‌کند، نه از روی استیت. */
   if (starsRail) {
-    const stars = starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT)));
-    if (!stars) { logErr('stars: no price for pack', pack.key); return; }
     try {
       return await ctx.replyWithInvoice(buildInvoice({
         pack, stars, paymentId: s.paymentId, userId: uid,
