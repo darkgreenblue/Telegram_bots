@@ -251,6 +251,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-starspay.mjs
 
+      # 🌍 شکلِ locale (بند ۲و: یک کدبیس، N ربات). یک کلیدِ جاافتاده در زبانِ تازه در
+      # زمانِ اجرا `undefined` یا «is not a function» می‌دهد، آن‌هم روی مسیرهای سرد که
+      # ممکن است هفته‌ها ساکت بمانند. این چک فقط **شکل** را قفل می‌کند، نه کیفیتِ ترجمه.
+      - name: Locale shape check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-locale-shape.mjs
+
       # ⚙️ منوی تنظیماتِ کاربر: «ریست حافظه» نباید چیزی پاک کند (حذفِ readings پاداشِ دعوت
       # را دوباره واریز می‌کند)، خطِ آب باید فقط کانتکستِ مدل را ببُرد نه منطقِ پاداش، و
       # ردیفِ یادآوری‌ها تا پایانِ آزمایشِ night_reminder نباید دیده شود.
