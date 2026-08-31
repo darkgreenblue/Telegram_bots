@@ -73,8 +73,14 @@ export const modelText = v4Text;
 // جمله‌ای که به هیچ‌کدام نخورد، جمله‌ای است که می‌شود عیناً برای هر کسِ دیگری فرستاد.
 // نرخش را می‌شماریم؛ عدد است، نه سلیقه.
 const STOP = new Set(LANG.stop);
-const contentWords = (s) => words(s).map(w => w.replace(/[،.؛:!؟«»(),;:"'?!]/g, ''))
+const clean1 = (w) => w.replace(/[،.؛:!؟«»(),;:"'?!]/g, '');
+const contentWords = (s) => words(s).map(clean1)
   .filter(w => w.length >= LANG.minWordLen && !STOP.has(w));
+/* ریشه‌یابی از lang می‌آید. برای فارسی همانی است (اسم صرفِ حالت نمی‌شود)، برای روسی
+ * پسوندهای صرفی را می‌بُرد. بدونِ این، هر ارجاعِ صرف‌شده به کارت یا به سؤال «بی‌لنگر»
+ * شمرده می‌شد و عددِ سنجه بی‌معنی بود. */
+const stem = (w) => (LANG.stem ? LANG.stem(w) : w);
+const stemsOf = (s) => new Set(contentWords(s).map(stem));
 
 // جمله‌های فارسی: نقطه، علامت سؤال، و خطِ جدید. «؛» و «،» جمله را نمی‌شکنند.
 const sentences = (t) => String(t || '').split(/[.!؟?\n]+/).map(x => x.trim()).filter(x => words(x).length >= 4);
@@ -83,9 +89,12 @@ export function anchorScore({ llm, cards, ctx }) {
   // 🌍 نامِ کارت از هسته می‌آید نه از `CARD_BY_KEY[..].fa`، وگرنه روی هر زبانِ
   // غیرفارسی این سنجه همیشه صفر می‌داد (مدلِ روسی «Шут» می‌نویسد نه «دیوانه»).
   const cardNames = cards.map(c => cardName(c.key));
-  const qWords = new Set(contentWords(ctx.question));
-  const memWords = new Set([...contentWords(ctx.memory),
-    ...(ctx.previous || []).flatMap(p => contentWords(p[LANG.summaryKey]))]);
+  // نامِ کارت چندکلمه‌ای است («Тройка Кубков»)، پس ریشه‌ی **همه‌ی** کلمه‌های معنادارش
+  // باید در جمله باشد؛ یک کلمه‌ی مشترک («Кубков») به‌تنهایی لنگر نیست.
+  const cardStems = cardNames.map(n => words(n).map(clean1).filter(Boolean).map(stem)).filter(a => a.length);
+  const qWords = new Set(contentWords(ctx.question).map(stem));
+  const memWords = new Set([...contentWords(ctx.memory).map(stem),
+    ...(ctx.previous || []).flatMap(p => contentWords(p[LANG.summaryKey]).map(stem))]);
 
   // فقط متنِ **تفسیری** سنجیده می‌شود. تیزرها عمداً بیرون‌اند: کارشان معرفیِ خودِ کارت
   // است و طبیعتاً عمومی‌اند؛ انداختنشان در این شمارش عدد را بی‌معنی می‌کرد.
@@ -94,8 +103,10 @@ export function anchorScore({ llm, cards, ctx }) {
 
   const all = sentences(body);
   const loose = all.filter((sent) => {
-    if (cardNames.some(n => sent.includes(n))) return false;
-    const w = contentWords(sent);
+    if (cardNames.some(n => sent.includes(n))) return false;   // تطبیقِ عینی (سریع‌ترین مسیر)
+    const sw = stemsOf(sent);
+    if (cardStems.some(parts => parts.every(x => sw.has(x)))) return false;
+    const w = contentWords(sent).map(stem);
     if (w.some(x => qWords.has(x))) return false;
     if (w.some(x => memWords.has(x))) return false;
     return true;
