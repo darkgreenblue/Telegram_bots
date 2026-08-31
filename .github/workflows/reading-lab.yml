@@ -25,6 +25,10 @@ on:
         description: 'مدلِ فالبک (خالی = پیش‌فرضِ محصول)'
         required: false
         default: ''
+      arms:
+        description: 'مقایسه‌ی جفت‌شده‌ی چند مدل در یک اجرا، با کاما. مثل: google/gemini-2.5-flash,google/gemini-3.5-flash-lite'
+        required: false
+        default: ''
       list_models:
         description: 'فقط فهرستِ مدل‌ها و قیمتِ واقعیِ OpenRouter را چاپ کن و تمام'
         type: boolean
@@ -99,6 +103,8 @@ jobs:
           # یک دورِ سه‌پاسه بی‌صدا تک‌پاسه اجرا می‌شد — یعنی گزارشِ «نویز سنجیده شد»
           # می‌دادیم بدونِ اینکه اصلاً چند پاس گرفته باشیم.
           [ -n "${{ inputs.reps }}" ] && ARGS="$ARGS --reps ${{ inputs.reps }}"
+          # بازوهای چندگانه: یک اجرا، کارت و سؤالِ یکسان، گزارشِ جفت‌شده
+          [ -n "${{ inputs.arms }}" ] && ARGS="$ARGS --arms ${{ inputs.arms }}"
           if [ "${{ inputs.probe }}" = "true" ]; then
             node tools/reading-lab.mjs $ARGS --probe
           else

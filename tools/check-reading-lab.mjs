@@ -287,8 +287,13 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
   const LAB = readFileSync(new URL('./reading-lab.mjs', import.meta.url), 'utf8');
   ok(/repairDefects\([\s\S]{0,400}?plan: \[MODEL\]/.test(LAB),
     'مسیرِ تعمیر هم با همان مدلِ بازو اجرا می‌شود');
-  ok(/const PLAN = \[MODEL, MODEL, MODEL, FALLBACK, FALLBACK\];/.test(LAB),
+  // `const` یا `let` هر دو قبول‌اند: حالتِ چندبازویی عمداً `let` کرد تا بینِ بازوها عوض شود.
+  ok(/(const|let) PLAN = \[MODEL, MODEL, MODEL, FALLBACK, FALLBACK\];/.test(LAB),
     'برنامه‌ی خوانش از همان بازو ساخته می‌شود');
+  /* و اگر `let` شد، باید سرِ **هر** بازو دوباره ساخته شود؛ وگرنه بازوی دوم با برنامه‌ی
+   * بازوی اول اجرا می‌شود و کلِ مقایسه بی‌معنی است، بدونِ هیچ خطایی. */
+  ok(!/let PLAN =/.test(LAB) || /MODEL = arm; PLAN = \[MODEL, MODEL, MODEL, FALLBACK, FALLBACK\];/.test(LAB),
+    'با تعویضِ بازو، برنامه‌ی خوانش هم همان‌جا بازساخته می‌شود');
 
   /* 💵 هزینه باید **واقعی** باشد، نه توکن ضربدرِ یک قیمتِ هاردکد.
    * 🐛 دورِ ۹ این را لو داد: گزارش دلار را با نرخِ ثابتِ Gemini Flash حساب می‌کرد، پس
@@ -310,6 +315,28 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
     'دورِ زبانی که verdict ندارد قبل از خرجِ پول متوقف می‌شود');
   ok(/\['yes', 'no', 'direction', 'evasion', 'but'\]/.test(LAB),
     'پیش‌پرواز همان کلیدهایی را می‌خواهد که گاردِ سرخط لازم دارد');
+}
+
+/* 🅰️🅱️ مقایسه‌ی جفت‌شده: تنها راهِ دیدنِ تفاوتِ مدل زیرِ نویزِ ۱۳ واحدی. */
+{
+  console.log('\n▶ مقایسه‌ی جفت‌شده‌ی بازوها');
+  const LAB = readFileSync(new URL('./reading-lab.mjs', import.meta.url), 'utf8');
+  ok(/--arms|ARM_LIST/.test(LAB), 'لابراتوار حالتِ چندبازویی دارد');
+  ok(/let MODEL = val\('model'/.test(LAB),
+    'MODEL بینِ بازوها قابلِ تعویض است (`let` نه `const`)');
+  ok(/arm: MODEL/.test(LAB), 'نامِ بازو روی هر ردیفِ نتیجه ثبت می‌شود');
+  ok(/میانگینِ تفاضلِ per سناریو/.test(LAB),
+    'گزارش تفاضلِ per سناریو می‌دهد، نه فقط دو درصدِ تجمیعی');
+  ok(/قطعی نیست/.test(LAB),
+    'وقتی الگو یک‌دست نیست، گزارش صریحاً می‌گوید تفاوت قطعی نیست');
+  /* ⚠️ ادعای اول ساده‌لوحانه بود: کلِ فایل را می‌گشت و به **کامنتی** می‌خورد که توضیح
+   * می‌داد چرا p-value چاپ نمی‌کنیم. یعنی چک به توضیحِ خودش گیر کرده بود. حالا فقط
+   * خطوطِ چاپ سنجیده می‌شوند. */
+  const printed = LAB.split('\n').filter(l => /console\.log/.test(l)).join('\n');
+  ok(!/p-value|pValue/.test(printed),
+    'p-value چاپ نمی‌شود (با ۹ سناریو فقط اعتمادِ کاذب می‌سازد)');
+  const wf = readFileSync(new URL('../.github/workflows/reading-lab.yml', import.meta.url), 'utf8');
+  ok(/inputs\.arms/.test(wf), 'ورک‌فلو ورودیِ arms را پاس می‌دهد');
 }
 
 /* ═══ سنجه‌ی «لنگر» خودش تست می‌شود، نه فقط کدش خوانده می‌شود ═══

@@ -91,9 +91,25 @@ const OUT = val('out', '');
  * اجرا بدونِ این پرچم‌ها عیناً پروداکشن را می‌سنجد. برنامه‌ی retry همان شکلِ همیشگی را
  * نگه می‌دارد (۳ تلاشِ مدلِ اصلی، بعد ۲ تلاشِ فالبک) تا مقایسه‌ی بین مدل‌ها منصفانه
  * بماند: اگر یکی سه شانس بگیرد و دیگری یکی، داریم برنامه‌ی retry را می‌سنجیم نه مدل را. */
-const MODEL = val('model', FLASH);
+/* ⚠️ `let` نه `const`: در حالتِ چندبازویی (`--arms`) بینِ بازوها عوض می‌شود.
+ * `runStep` این‌ها را از closure می‌خواند، پس مقدارِ لحظه‌ی فراخوانی را می‌بیند. */
+let MODEL = val('model', FLASH);
 const FALLBACK = val('fallback', FALLBACK_MODEL);
-const PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+let PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+/* 🅰️🅱️ مقایسه‌ی **جفت‌شده‌ی** چند مدل در یک اجرا.
+ *
+ * چرا لازم شد (اندازه‌گیریِ ۱۴۰۵/۰۶/۰۹): یک دورِ سه‌پاسه‌ی فارسی روی کارت و سؤالِ
+ * **کاملاً یکسان** نرخِ بی‌لنگرِ ۳۲ / ۱۹ / ۳۰ داد. یعنی نویزِ نمونه‌برداریِ خودِ مدل
+ * ۱۳ واحد است، در حالی که تفاوتِ دو مدلی که می‌خواهیم تشخیص بدهیم ~۵ واحد است.
+ * با این نسبت، مقایسه‌ی دو **اجرای جدا** عملاً سکه انداختن است.
+ *
+ * درمان، مقایسه‌ی جفت‌شده است: چون seed از `lab:<persona>:<step>` ساخته می‌شود و
+ * `rep` در آن نیست، همه‌ی بازوها **عینِ همان کارت‌ها و همان سؤال‌ها** را می‌گیرند. پس
+ * می‌شود اثرِ سناریو را (که تا ۵۰ واحد است: یک سناریو ۵٪ بی‌لنگر می‌دهد و دیگری ۵۵٪)
+ * از معادله حذف کرد و فقط تفاوتِ per سناریو را نگاه کرد. همان کاری که آزمایشِ جفتی
+ * در آمار می‌کند، و تنها راهی است که با این بودجه به سیگنال می‌رسیم. */
+const ARMS = (val('arms', '') || '').split(',').map(x => x.trim()).filter(Boolean);
+const ARM_LIST = ARMS.length ? ARMS : [MODEL];
 
 /* 🌍 سناریوها per زبان. `fa` نامِ تاریخیِ خودش را نگه می‌دارد تا دیف صفر بماند.
  * ⚠️ عمداً به فارسی fallback **نمی‌کند**: یک اجرای روسی با سؤال‌های فارسی سبز تمام
@@ -358,6 +374,13 @@ const all = [];
 // دورِ پنجم در واقع نویز بود. بدونِ این پرچم، لوپِ بهبود دارد به خودش دروغ می‌گوید.
 const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
 
+for (const arm of ARM_LIST) {
+if (ARM_LIST.length > 1) {
+  MODEL = arm; PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+  console.log(`\n${'▓'.repeat(72)}`);
+  console.log(`🅰️ بازو: ${arm}  (همان کارت‌ها و همان سؤال‌های بازوهای دیگر)`);
+  console.log('▓'.repeat(72));
+}
 for (let rep = 0; rep < REPS; rep++) {
 if (REPS > 1) {
   console.log(`\n${'█'.repeat(72)}`);
@@ -376,7 +399,7 @@ for (const persona of personas) {
   for (let i = 0; i < persona.steps.length; i++) {
     const step = persona.steps[i];
     const r = await runStep(persona, step, i, state);
-    all.push({ persona: persona.id, i, rep, step, ...r });
+    all.push({ persona: persona.id, i, rep, arm: MODEL, step, ...r });
 
     const head = `\n── ${persona.id}.${i + 1} «${spreadName(r.spread.fa)}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
   // دلیلِ هر تلاشِ ردشده — گران‌ترین سیگنالِ هر دور، و تا امروز چاپ نمی‌شد
@@ -412,6 +435,7 @@ for (const persona of personas) {
   }
 }
 }
+}  // ← پایانِ حلقه‌ی بازوها (`--arms`)
 
 /* ═══════════════ تکرارِ بین‌فالی: مهم‌ترین سنجه ═══════════════ */
 // تحقیق ۱ دلیلِ شماره‌یکِ رهاکردنِ محصولاتِ AI را «تکراری و قالبی» می‌داند، و دو بار هم
@@ -525,6 +549,56 @@ if (!DRY) {
     const tag = repsSeen.length > 1 ? `پ${r.rep + 1} ` : '';
     console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${spreadName(r.spread.fa)}${pct}`);
     r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
+  }
+}
+
+/* ═══ 🅰️🅱️ مقایسه‌ی جفت‌شده‌ی بازوها ═══
+ *
+ * چرا جفت‌شده و نه فقط دو درصدِ کلی: اثرِ **سناریو** تا ۵۰ واحد است (یک سناریو ۵٪
+ * بی‌لنگر می‌دهد و دیگری ۵۵٪) و نویزِ نمونه‌برداریِ مدل ۱۳ واحد، در حالی که تفاوتی که
+ * دنبالش هستیم ~۵ واحد است. اگر دو عددِ تجمیعی را مقایسه کنی، سیگنال زیرِ این دو
+ * منبعِ واریانس دفن می‌شود. چون همه‌ی بازوها **عینِ همان کارت و همان سؤال** را
+ * گرفته‌اند، می‌شود per سناریو تفاضل گرفت و اثرِ سناریو کاملاً حذف می‌شود.
+ *
+ * ⚠️ عمداً p-value چاپ نمی‌شود: با ۹ سناریو، آزمونِ علامت توانِ کافی ندارد و یک
+ * عددِ آماریِ خوش‌قیافه فقط اعتمادِ کاذب می‌سازد. به‌جایش «چند سناریو را برد» و
+ * «میانگینِ تفاضل» می‌آید، که هر دو خام و قابلِ بازبینی‌اند. */
+if (!DRY && ARM_LIST.length > 1) {
+  const done = all.filter(r => r.llm);
+  const key = (r) => `${r.persona}.${r.i + 1}`;
+  const scen = [...new Set(done.map(key))];
+  const rate = (rows) => {
+    const lo = rows.reduce((x, r) => x + (r.check?.anchor?.loose || 0), 0);
+    const to = rows.reduce((x, r) => x + (r.check?.anchor?.total || 0), 0);
+    return to ? (lo * 100 / to) : null;
+  };
+  const base = ARM_LIST[0];
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log('🅰️🅱️ مقایسه‌ی جفت‌شده (هر سناریو با کارت و سؤالِ یکسان بینِ بازوها)');
+  console.log('═'.repeat(72));
+  for (const other of ARM_LIST.slice(1)) {
+    const diffs = [], rowsOut = [];
+    for (const sc of scen) {
+      const a = rate(done.filter(r => key(r) === sc && r.arm === base));
+      const b = rate(done.filter(r => key(r) === sc && r.arm === other));
+      if (a == null || b == null) continue;
+      diffs.push(b - a);
+      rowsOut.push(`   ${sc.padEnd(7)} ${base.split('/').pop().slice(0, 22).padEnd(23)}${a.toFixed(0).padStart(3)}٪   →  ${b.toFixed(0).padStart(3)}٪   (${(b - a) >= 0 ? '+' : ''}${(b - a).toFixed(0)})`);
+    }
+    if (!diffs.length) { console.log('   (دادهٔ قابلِ جفت‌شدن نبود)'); continue; }
+    const mean = diffs.reduce((x, y) => x + y, 0) / diffs.length;
+    const better = diffs.filter(d => d < 0).length;   // کمتر یعنی بهتر (بی‌لنگرِ کمتر)
+    const worse = diffs.filter(d => d > 0).length;
+    console.log(`\n   🅱️ ${other}  در برابرِ  🅰️ ${base}`);
+    rowsOut.forEach(x => console.log(x));
+    console.log(`   ─────`);
+    console.log(`   میانگینِ تفاضلِ per سناریو: ${mean >= 0 ? '+' : ''}${mean.toFixed(1)} واحد` +
+      ` (منفی یعنی «${other}» بهتر است)`);
+    console.log(`   بردِ سناریویی: ${better} بهتر / ${worse} بدتر / ${diffs.length - better - worse} مساوی`);
+    const decisive = Math.abs(mean) >= 5 && (better >= diffs.length * 0.7 || worse >= diffs.length * 0.7);
+    console.log(decisive
+      ? `   ✅ الگو یک‌دست است، این تفاوت قابلِ اتکاست`
+      : `   ⚠️ الگو یک‌دست نیست؛ با ${diffs.length} سناریو این تفاوت **قطعی نیست**، پاسِ بیشتر لازم است`);
   }
 }
 
