@@ -28,5 +28,7 @@ import './repair.js';
 
 export function configureLocale(L) {
   configureVerdict(L?.verdict);
-  configureSeparator(L?.verdict?.dashReplacement);
+  // آرگومانِ دوم جداکننده‌ی نام از سرخط است؛ نبودنش یعنی «همان ویرگولِ همین زبان»،
+  // پس یک زبان نمی‌تواند نصفه پیکربندی شود و «Аня، …» دوباره برگردد.
+  configureSeparator(L?.verdict?.dashReplacement, L?.verdict?.nameSeparator);
 }

@@ -13,6 +13,23 @@ name: Reading lab
 on:
   workflow_dispatch:
     inputs:
+      locale:
+        description: 'زبان (fa | ru | …). سناریوها و سنجه‌ها per زبان اند.'
+        required: false
+        default: 'fa'
+      model:
+        description: 'مدلِ تحتِ آزمایش (خالی = همان مدلِ محصول). مثل: openai/gpt-5-mini'
+        required: false
+        default: ''
+      fallback:
+        description: 'مدلِ فالبک (خالی = پیش‌فرضِ محصول)'
+        required: false
+        default: ''
+      list_models:
+        description: 'فقط فهرستِ مدل‌ها و قیمتِ واقعیِ OpenRouter را چاپ کن و تمام'
+        type: boolean
+        required: false
+        default: false
       only:
         description: 'پرسوناها (خالی = همه). مثل: P1,P2'
         required: false
@@ -48,7 +65,15 @@ jobs:
 
       # آزمایشگاه هیچ وابستگیِ npm ندارد (فقط ماژول‌های داخلیِ Node)، پس نه npm ci لازم
       # است نه کشِ node_modules. اگر روزی وابستگی اضافه شد، همین‌جا نصبش کن.
+      # 🔎 فهرستِ مدل‌ها: endpointِ رایگانِ OpenRouter، بدونِ کلید و بدونِ هزینه. این‌جا
+      # اجرا می‌شود چون محیطِ توسعه خروجیِ شبکه به openrouter.ai ندارد و slug و قیمت
+      # هرگز نباید حدس زده شوند.
+      - name: فهرستِ مدل‌ها
+        if: inputs.list_models
+        run: node tools/or-models.mjs
+
       - name: گاردِ کلید
+        if: '!inputs.list_models'
         env:
           KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
         run: |
@@ -58,10 +83,16 @@ jobs:
           fi
 
       - name: اجرای آزمایشگاه
+        if: '!inputs.list_models'
         env:
           OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # زبان از env می‌رود چون `reading-core.js` مسیرِ فایل‌های per زبان را
+          # لحظه‌ی بارگذاریِ ماژول می‌خواند؛ `--locale` هم همین را ست می‌کند.
+          LOCALE: ${{ inputs.locale }}
         run: |
-          ARGS=""
+          ARGS="--locale ${{ inputs.locale }}"
+          [ -n "${{ inputs.model }}" ] && ARGS="$ARGS --model ${{ inputs.model }}"
+          [ -n "${{ inputs.fallback }}" ] && ARGS="$ARGS --fallback ${{ inputs.fallback }}"
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ "${{ inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
           # `reps` در **هر دو** حالت پاس داده می‌شود. قبلاً فقط به probe می‌رسید و
@@ -69,17 +100,17 @@ jobs:
           # می‌دادیم بدونِ اینکه اصلاً چند پاس گرفته باشیم.
           [ -n "${{ inputs.reps }}" ] && ARGS="$ARGS --reps ${{ inputs.reps }}"
           if [ "${{ inputs.probe }}" = "true" ]; then
-            node tools/reading-lab.mjs --probe --reps "${{ inputs.reps }}"
+            node tools/reading-lab.mjs $ARGS --probe
           else
             node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
           fi
 
       # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
-        if: always() && inputs.probe != true
+        if: always() && inputs.probe != true && inputs.list_models != true
         uses: actions/upload-artifact@v4
         with:
-          name: reading-lab
+          name: reading-lab-${{ inputs.locale }}
           path: reading-lab-out.json
           retention-days: 30
           if-no-files-found: ignore

@@ -297,7 +297,16 @@ export function stripCardLabel(t) {
  * می‌خواهد و روسی ویرگولِ لاتین. تا قبل از این «، » هاردکد بود، یعنی متنِ روسی یک
  * کاراکترِ بیگانه‌ی عربی وسطش می‌گرفت. `configureSeparator` موقعِ boot صدا زده می‌شود. */
 let DASH_TO = '، ';
-export function configureSeparator(sep) { if (typeof sep === 'string' && sep) DASH_TO = sep; }
+/* جداکننده‌ی نام از سرخط. ⚠️ این هم مثل `DASH_TO` یک ویرگولِ **عربی** بود، پس هر فالِ
+ * روسی با «Аня، …» شروع می‌شد: یک نویسه‌ی فارسی در **اولین خطِ** محصولِ پولی، در هر
+ * فال. سنجه‌ی تازه‌ی نویسه‌ی بیگانه دقیقاً همین را گرفت. */
+let NAME_SEP = '، ';
+export function configureSeparator(sep, nameSep) {
+  if (typeof sep === 'string' && sep) DASH_TO = sep;
+  // پیش‌فرضِ جداکننده‌ی نام همان جداکننده‌ی خط‌تیره است: هر دو «ویرگولِ همان زبان» اند،
+  // پس یک زبان با ست‌کردنِ یکی، دومی را هم درست می‌گیرد و نمی‌تواند نصفه بماند.
+  NAME_SEP = (typeof nameSep === 'string' && nameSep) ? nameSep : DASH_TO;
+}
 export const noDash = (t) => String(t).replace(/\s*—\s*/g, DASH_TO).replace(/\s*--\s*/g, DASH_TO);
 
 // ⏱ `agoFa` (فاصله‌ی زمانی به فارسیِ گفتاری) حذف شد. تاریخچه‌ی کوتاهش درس دارد:
@@ -438,7 +447,7 @@ export function renderV4(llm, cards, labels, { name = '' } = {}) {
   // نامِ مخاطب **دقیقاً یک بار** و از کد، نه از مدل. تضمینِ ساختاری به‌جای دستورِ
   // پرامپتی که سه دور جواب نداد.
   const head = llm.headline
-    ? `${SECT.headline} ${name ? `${name}، ` : ''}${noDash(llm.headline)}`
+    ? `${SECT.headline} ${name ? `${name}${NAME_SEP}` : ''}${noDash(llm.headline)}`
     : '';
   return {
     headline: head,

@@ -43,10 +43,11 @@ const { headlineOk } = await import('../bots/tarot/verdict.js');
 const { repairDefects } = await import('../bots/tarot/repair.js');
 const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
-  orChat, orChatResilient, parseJsonLoose, FLASH, FALLBACK_MODEL,
+  orChat, orChatResilient, parseJsonLoose, FLASH, FALLBACK_MODEL, cardName, spreadName,
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
 const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
 const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
 const L = (await import(`../bots/tarot/locales/${LOCALE}.js`)).default;
@@ -95,14 +96,22 @@ const PROBE_NAME = SCEN.probe?.name || SCEN.personas?.[0]?.name || '';
 // خروجیِ ساختگی ولی **معتبر**: باید از checkV4Shape و headlineOk رد شود تا مسیرِ
 // «پذیرش» اجرا شود. متنش عمداً به کارت‌ها و سؤال لنگر می‌خورد تا سنجه‌ها هم کار کنند.
 function fakeOut(spread, cards, ctx) {
-  const names = cards.map(c => CARD_BY_KEY[c.key].fa);
-  const q = String(ctx.question || '').split(/\s+/).slice(0, 3).join(' ');
+  // 🌍 نامِ کارت و متن هر دو از زبانِ جاری می‌آیند، وگرنه استاب روی رباتِ روسی متنِ
+  // فارسی می‌ساخت و سنجه‌های زبانی همه‌شان قرمزِ دروغین می‌دادند.
+  const names = cards.map(c => cardName(c.key));
+  // ⚠️ سؤال عیناً در متنِ استاب بازتاب می‌شود، و یکی از سناریوهای روسی عمداً سؤالِ
+  // **انگلیسی** دارد (تستِ لغزشِ زبان). بدونِ این پاک‌سازی، خودِ استاب نویسه‌ی بیگانه
+  // تولید می‌کرد و `--fake` قرمزِ دروغین می‌داد؛ یعنی ابزارِ تشخیص، خودش منبعِ خطا.
+  const alienRe = (LANG.alien || []).map(a => a.re.source).join('|');
+  const strip = (t) => (alienRe ? t.replace(new RegExp(alienRe, 'gu'), '') : t);
+  const q = strip(String(ctx.question || '')).split(/\s+/).filter(Boolean).slice(0, 3).join(' ');
+  const F = LANG.fake;
   return JSON.stringify({
-    cards: names.map(n => ({ teaser: `کارتِ ${n}، کارتِ نمونه است. تصویرش یک صحنه‌ی ساختگی دارد.` })),
-    headline: `بله با احتمالِ زیاد پیش می‌ره، ولی باید بهای صبر رو بدی.`,
-    pattern: `ترکیبِ ${names[0]} و ${names[names.length - 1]} درباره‌ی «${q}» یک جهت نشان می‌دهد.`,
-    reads: names.map(n => ({ text: `${n} می‌گه این بخش از «${q}» دارد جابه‌جا می‌شود.` })),
-    callback: (ctx.previous || []).length ? `دفعه‌ی قبل هم حولِ همین موضوع بودی.` : '',
+    cards: names.map(n => ({ teaser: F.teaser(n) })),
+    headline: F.headline,
+    pattern: F.pattern(names[0], names[names.length - 1], q),
+    reads: names.map(n => ({ text: F.read(n, q) })),
+    callback: (ctx.previous || []).length ? F.callback : '',
     // ⚠️ عمداً در **یک** چیدمانِ مشخص طفره‌رفتن تزریق می‌شود تا حالتِ fake کلِ مسیرِ
     // تعمیر را واقعاً اجرا کند (تشخیص، فراخوانی، اعتبارسنجی، جایگذاری). بدونِ این،
     // `--fake` سبز رد می‌شد در حالی که آن مسیر هرگز لمس نشده بود — همان اشتباهی که
@@ -111,9 +120,9 @@ function fakeOut(spread, cards, ctx) {
     // (مثل عبورِ `yesno` به `yesno3` در نسل چهارم) این تزریق بی‌صدا خاموش می‌شود و
     // `--fake` دوباره سبزِ دروغین می‌دهد.
     closing: topicOf(spread.id) === 'yesno' || spread.id === 'yesno'
-      ? `در کل، «${q}» بستگی داره به خودت، ولی ${names[0]} می‌گه صبر کن.`
-      : `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
-    summary: 'خلاصه‌ی ساختگی', memory: 'حافظه‌ی ساختگی',
+      ? F.closingEvasive(names[0], q)
+      : F.closing(names[0], q),
+    summary: F.summary, memory: F.memory,
   });
 }
 
@@ -121,7 +130,9 @@ function fakeOut(spread, cards, ctx) {
 // جایگذاری) واقعاً اجرا شود، بدونِ شبکه. تعدادِ fixes از خودِ ورودی شمرده می‌شود.
 function fakeRepair(sys, usr, opts) {
   const n = (usr.match(/^\d+\)/gm) || []).length || 1;
-  const out = JSON.stringify({ fixes: Array.from({ length: n }, () => 'بیشتر به این سمت می‌خوره که پیش بره، ولی صبر می‌خواد.') });
+  // 🌍 به زبانِ جاری، وگرنه استابِ تعمیر روی رباتِ روسی متنِ فارسی جایگزین می‌کرد و
+  // `--fake` قرمزِ دروغین می‌داد — همان دامی که خودِ سنجه‌ی نویسه‌ی بیگانه لو داد.
+  const out = JSON.stringify({ fixes: Array.from({ length: n }, () => LANG.fake.repairFix) });
   return opts.validate(out) ? { out, model: 'fake', attempts: 1, usages: [{ prompt_tokens: 0, completion_tokens: 0 }] } : null;
 }
 
@@ -273,7 +284,7 @@ async function probe(reps) {
       // بریدگیِ خروجی: اگر به سقفِ توکن خورده باشیم مسئله «شکلِ خروجی» نیست، «جا نشدن» است
       if ((usage.completion_tokens || 0) >= spread.maxTokens - 40) trunc++;
     }
-    rows.push({ id, fa: spread.fa, size: spread.size, okShape, okHeadline, reps, tally,
+    rows.push({ id, fa: spreadName(spread.fa), size: spread.size, okShape, okHeadline, reps, tally,
       avgOut: Math.round(outTok / reps), max: spread.maxTokens, trunc });
   }
   console.log('\nچیدمان            کارت  شکلِ سالم  سرخطِ سالم  میانگینِ توکنِ خروجی (سقف)  بریدگی');
@@ -329,7 +340,7 @@ for (const persona of personas) {
     const r = await runStep(persona, step, i, state);
     all.push({ persona: persona.id, i, rep, step, ...r });
 
-    const head = `\n── ${persona.id}.${i + 1} «${r.spread.fa}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
+    const head = `\n── ${persona.id}.${i + 1} «${spreadName(r.spread.fa)}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
     console.log(head);
     console.log(`   سؤال: ${step.question}`);
     console.log(`   چالش: ${step.expect}`);
@@ -440,7 +451,7 @@ if (!DRY) {
     const a = r.check.anchor;
     const pct = a?.total ? ` | بی‌لنگر ${a.loose}/${a.total}` : '';
     const tag = repsSeen.length > 1 ? `پ${r.rep + 1} ` : '';
-    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${r.spread.fa}${pct}`);
+    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${spreadName(r.spread.fa)}${pct}`);
     r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
   }
 }
