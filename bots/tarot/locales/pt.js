@@ -86,20 +86,18 @@ const INTRO_EXPERIENCE_V2 =
   '🔮 Pra responder aquelas perguntas que você não sabe responder sozinho, eu estou sempre aqui!\n\n' +
   'É a mesma experiência de sentar com uma taróloga de verdade;\n' +
   'com a diferença de que agora ela vive no seu bolso! 📱';
-/* 🚫 O «86%» da versão persa **não vem para o português**, e isso é uma decisão, não um
- * esquecimento. Aquele número sai da coluna `feedback` da tabela `readings` de usuários
- * reais em persa. No dia do lançamento em português esse dado não existe, então repetir
- * a frase seria inventar uma prova social para um público novo, e a regra de ferro do
- * repositório é «a afirmação não passa na frente do dado» (bloco ۱۰ do CLAUDE.md raiz).
- * A primeira pessoa que perguntasse «de onde saiu esse número?» levaria embora a
- * confiança no produto inteiro.
- * O lugar, o tamanho e o trabalho emocional do bloco continuam os mesmos: criar
- * expectativa e passar a vez para a pessoa. O que muda é a fonte da credibilidade:
- * em vez de uma estatística, a promessa concreta do que vai acontecer a seguir.
- * 🔜 Quando houver dado próprio em português (mesma query, mesma regra), esta frase
- *    pode virar um número de verdade. */
+/* 📊 O «86%» vem sim para o português, e isso é uma decisão explícita do dono
+ * (۱۴۰۵/۰۶/۰۹), tomada depois de levantarem a dúvida de que o número nasceu da coluna
+ * `feedback` de usuários persas e não de dados em português.
+ * A decisão registrada, na palavra dele: o número tem um valor de marketing, teve
+ * origem em algo real, e a falta de lastro exato nesse detalhe não é problema; pode ser
+ * mostrado inclusive para o primeiro usuário. Por isso a frase é a **mesma** em todos
+ * os idiomas (regra padrão do bloco ۲و: toda mudança vale para todos os idiomas).
+ * ⚠️ Não remova isto de novo por conta própria. Se voltar a parecer um problema, é uma
+ * conversa com o dono, não uma limpeza silenciosa. */
 const INTRO_STAT =
-  'Cada leitura é feita na hora, em cima da sua pergunta: o baralho embaralha com ela, você escolhe as suas cartas, e a resposta nasce daí.\n\n' +
+  'Um número que veio dos próprios usuários:\n' +
+  '86% de quem já tirou uma leitura disse que a resposta chegou perto do que estava vivendo de verdade!\n\n' +
   'Agora é a sua vez ✨';
 
 /* ---- فال‌های تصمیم‌محور: بلوکِ «جوابِ قاطع» در پرامپت (spreads.js → decisive) ----

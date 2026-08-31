@@ -122,18 +122,21 @@ export function anchorScore({ llm, cards, ctx }) {
     ...(llm.reads || []).map(readText)].filter(Boolean).join('\n');
 
   const all = sentences(body);
-  const loose = all.filter((sent) => {
+  /* `strict` مسیرِ **قدیمیِ** نامِ کارت را هم می‌سنجد (با فیلترِ طول)، فقط برای گزارش.
+   * چرا می‌ماند: تفاوتِ این دو عدد می‌گوید «خط‌کش چقدر کج بود». بدونِ آن، مقایسه‌ی
+   * دورِ قبل و بعد از فیکس با نویزِ اجرا قاطی می‌شود و نمی‌شود فهمید کدام است. */
+  const isLoose = (sent, strict) => {
     if (cardNames.some(n => sent.includes(n))) return false;   // تطبیقِ عینی (سریع‌ترین مسیر)
-    // نامِ کارت با مجموعه‌ی **بدونِ فیلترِ طول** سنجیده می‌شود (بالا توضیح داده شد).
-    const cardSw = allStemsOf(sent);
+    const cardSw = strict ? stemsOf(sent) : allStemsOf(sent);
     if (cardStems.some(parts => parts.every(x => cardSw.has(x)))) return false;
-    const sw = stemsOf(sent);
     const w = contentWords(sent).map(stem);
     if (w.some(x => qWords.has(x))) return false;
     if (w.some(x => memWords.has(x))) return false;
     return true;
-  });
-  return { total: all.length, loose: loose.length, pct: all.length ? Math.round(loose.length * 100 / all.length) : 0, samples: loose.slice(0, 3) };
+  };
+  const loose = all.filter((s2) => isLoose(s2, false));
+  const looseStrict = all.filter((s2) => isLoose(s2, true)).length;
+  return { total: all.length, loose: loose.length, looseStrict, pct: all.length ? Math.round(loose.length * 100 / all.length) : 0, samples: loose.slice(0, 3) };
 }
 
 export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
