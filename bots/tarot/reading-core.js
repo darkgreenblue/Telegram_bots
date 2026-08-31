@@ -16,8 +16,76 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // دانشِ دست‌نویسِ کارت‌ها (نماد، تصویر، تفسیرِ مستقیم و معکوس). fail-safe: اگر فایل
 // نباشد یا خراب باشد، خوانش دقیقاً مثل قبل کار می‌کند، فقط بدونِ این لایه‌ی دانش.
-export const CARD_KB = await import('./card-knowledge.fa.json', { with: { type: 'json' } })
+//
+// 🌍 per زبان (بند ۲و): مسیر قبلاً `card-knowledge.fa.json` هاردکد بود، یعنی رباتِ روسی
+// ۷۸ ردیف **متنِ فارسی** را داخلِ یک پرامپتِ روسی تزریق می‌کرد. همان الگوی `ganjineh.js`:
+// نبودنِ فایلِ یک زبان فقط این لایه را برای همان زبان خاموش می‌کند.
+const LOCALE = process.env.LOCALE?.trim() || 'fa';
+export const CARD_KB = await import(`./card-knowledge.${LOCALE}.json`, { with: { type: 'json' } })
   .then(m => m.default).catch(() => ({}));
+
+/* 🌍 دادهٔ زبانیِ ساختاری (نامِ کارت/جایگاه/چیدمان، کلیدواژه‌ها، پرامپتِ تعمیر).
+ *
+ * ⚠️ چرا فایلِ داده و نه داخلِ `locales/<code>.js`: `check-locale-shape` شکلِ هر locale
+ * را با فارسی **دقیقاً** مقایسه می‌کند (کلیدِ اضافه هم خطاست). این جدول‌ها برای فارسی
+ * اصلاً وجود ندارند (از `cards.js`/`spreads.js` می‌آیند)، پس گذاشتنشان در locale یا
+ * چک را می‌شکست یا مجبورمان می‌کرد ۷۸ کلیدِ بی‌مصرف به فارسی اضافه کنیم. الگوی مرجع
+ * همان دو فایلِ per زبانِ موجود است: `card-knowledge.<locale>.json` و
+ * `daily-ganjineh.<locale>.json`. کلیدها رشته‌ی **فارسیِ canonical** اند. */
+export const LANG_DATA = await import(`./langdata.${LOCALE}.json`, { with: { type: 'json' } })
+  .then(m => m.default).catch(() => ({}));
+
+/* 🌍 نامِ کارت، جایگاه و چیدمان — دادهٔ زبانی که تا امروز فارسیِ هاردکد بود.
+ *
+ * ⚠️ چرا این حیاتی است و نه یک تمیزکاری: `readingContext` در locale از قبل کلیدهای
+ * روسی داشت، ولی **مقدارها** هنوز فارسی بودند (`c.fa`، `c.positionFa`، `ctx.spreadFa`).
+ * یعنی مدلِ روسی برچسبِ روسی می‌گرفت که به محتوای فارسی اشاره می‌کرد. دو ضرر داشت:
+ *   ۱) کاربرِ روسی در کپشنِ رو شدنِ کارت نامِ جایگاهِ **فارسی** می‌دید (باگِ رو-به-کاربر).
+ *   ۲) مهم‌تر: سنجه‌ی «لنگر» آزمایشگاه خروجی را با `CARD_BY_KEY[key].fa` مقایسه می‌کند،
+ *      و مدلِ روسی «Шут» می‌نویسد نه «دیوانه». یعنی مرکزی‌ترین متریکِ کیفیت برای هر
+ *      زبانِ غیرفارسی **صفر** گزارش می‌شد و کلِ حلقه‌ی بهبود روی عددِ بی‌معنی می‌نشست.
+ *
+ * fa هیچ‌کدام از این جدول‌ها را ندارد، پس دقیقاً به همان فیلدهای هاردکدِ قبلی fallback
+ * می‌کند و رفتارش بیت‌به‌بیت دست‌نخورده است. */
+let NAMES = { cards: {}, positions: {}, spreads: {}, keywords: {} };
+// ⚠️ برچسبِ «کارتِ بی‌جایگاه» عمداً پیش‌فرضِ فارسی دارد و از locale override می‌شود.
+// اگر به‌جایش یک رشته‌ی خنثی می‌گذاشتیم، فارسی بی‌صدا عوض می‌شد: این fallback واقعاً
+// شلیک می‌کند، چون فال‌های ۵کارتیِ ثبت‌شده‌ی نسل قبل از تعدادِ جایگاه‌های چیدمانِ
+// امروز بیشترند (همان سازگاریِ با گذشته‌ای که بند ۲ج/۱ واجب می‌داند).
+let POS_FALLBACK = (i) => `کارت ${i + 1}`;
+export function configureCardData(d) {
+  if (!d || typeof d !== 'object') return;
+  NAMES = {
+    cards: d.cardNames || {},
+    positions: d.positionNames || {},
+    spreads: d.spreadNames || {},
+    keywords: d.cardKeywords || {},
+  };
+  // قالبِ رشته‌ای است نه تابع، چون از JSON می‌آید. `%n` = شماره‌ی کارت (از ۱).
+  if (typeof d.positionFallback === 'string' && d.positionFallback.includes('%n')) {
+    POS_FALLBACK = (i) => d.positionFallback.replace('%n', String(i + 1));
+  }
+}
+// خودِ ماژول از فایلِ زبان پیکربندی می‌شود، پس هیچ مصرف‌کننده‌ای (ربات یا آزمایشگاه)
+// نمی‌تواند صدا زدنش را جا بیندازد. برای `fa` فایل وجود ندارد و همه‌چیز پیش‌فرض می‌ماند.
+configureCardData(LANG_DATA);
+/** نامِ کارت به زبانِ جاری (fallback: نامِ فارسیِ `cards.js`). */
+export const cardName = (key) => NAMES.cards[key] || CARD_BY_KEY[key]?.fa || '';
+/** نامِ جایگاه؛ کلید خودِ رشته‌ی فارسی است، چون همان برچسبِ canonical است. */
+export const positionName = (fa, i = 0) => NAMES.positions[fa] || fa || POS_FALLBACK(i);
+/** نامِ چیدمان (همان‌طور: کلید رشته‌ی فارسی). */
+export const spreadName = (fa) => NAMES.spreads[fa] || fa || '';
+/** برچسبِ دو سمتِ فالِ تقابلی، به زبانِ جاری.
+ * ⚠️ اینها مستقیم **جوابِ نهایی** می‌شوند (`verdict.js` عیناً چاپشان می‌کند)، پس بدونِ
+ * ترجمه کاربرِ روسی «Ответ: موندن» می‌گرفت. همان جدولِ جایگاه‌ها کلیدشان است. */
+export const choiceLabelsFor = (spread) =>
+  Array.isArray(spread?.choiceLabels) ? spread.choiceLabels.map((l, i) => positionName(l, i)) : undefined;
+
+/** کلیدواژه‌های مستقیم/معکوسِ کارت به زبانِ جاری. */
+export const cardKeywords = (key) => NAMES.keywords[key] || {
+  up: CARD_BY_KEY[key]?.up || [], down: CARD_BY_KEY[key]?.down || [],
+};
+
 
 /* ═══ مدل‌ها و کلاینتِ OpenRouter ═══ */
 export const FLASH          = 'google/gemini-2.5-flash';
@@ -272,14 +340,14 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
     hideName, // UX v2: نام اصلاً به مدل نمی‌رود و کد خودش یک بار می‌چسباند
     focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
-    spreadFa: spread.fa,
+    spreadFa: spreadName(spread.fa),
     cards: cards.map((c, i) => ({
-      positionFa: spread.positions[i]?.fa || `کارت ${i + 1}`,
-      fa: CARD_BY_KEY[c.key].fa,
+      positionFa: positionName(spread.positions[i]?.fa, i),
+      fa: cardName(c.key),
       en: CARD_BY_KEY[c.key].en,
       reversed: c.reversed,
-      up: CARD_BY_KEY[c.key].up,
-      down: CARD_BY_KEY[c.key].down,
+      up: cardKeywords(c.key).up,
+      down: cardKeywords(c.key).down,
       // دانشِ همین کارت (فقط در لحنِ جدید). مهم‌ترین تکه‌اش `image` است: cards.js فقط
       // کلیدواژه‌ی انتزاعی دارد («آغاز تازه»)، پس تا امروز مدل مجبور بود نمادِ تصویریِ
       // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.

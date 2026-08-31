@@ -25,20 +25,35 @@ import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID, topicOf } from '../bots/tarot/spreads.js';
 import { CARD_BY_KEY } from '../bots/tarot/cards.js';
+
+/* ⚠️ ترتیبِ این بلوک عمدی و شکننده است: `reading-core.js` مسیرِ جدولِ دانشِ کارت را
+ * **لحظه‌ی بارگذاریِ ماژول** از `process.env.LOCALE` می‌خواند. اگر `--locale` بعد از
+ * یک `import` ایستا خوانده شود، هسته از قبل با زبانِ اشتباه بار شده. برای همین
+ * پرچم‌ها این‌جا و قبل از هر importِ وابسته‌به‌زبان پارس می‌شوند و آن import ها
+ * پویا هستند. (`spreads.js` و `cards.js` به زبان کاری ندارند، پس ایستا مانده‌اند.) */
+const argvEarly = process.argv.slice(2);
+const earlyVal = (n, d) => { const i = argvEarly.indexOf(`--${n}`); return i >= 0 ? argvEarly[i + 1] : d; };
+const LOCALE = earlyVal('locale', process.env.LOCALE?.trim() || 'fa');
+process.env.LOCALE = LOCALE;
 // ⚠️ سنجه‌ها که به checks.mjs منتقل شدند، این import با آن‌ها رفت — ولی خودِ آزمایشگاه
 // هنوز در شرطِ پذیرشِ ریکوئست و در probe از آن استفاده می‌کند. نتیجه: ReferenceError
 // داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
 // تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
-import { headlineOk } from '../bots/tarot/verdict.js';
-import { repairDefects } from '../bots/tarot/repair.js';
-import {
+const { headlineOk } = await import('../bots/tarot/verdict.js');
+const { repairDefects } = await import('../bots/tarot/repair.js');
+const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
-  orChat, orChatResilient, parseJsonLoose,
-} from '../bots/tarot/reading-core.js';
+  orChat, orChatResilient, parseJsonLoose, FLASH, FALLBACK_MODEL,
+} = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
-import { checkReading, modelText, ngrams } from './reading-lab/checks.mjs';
+const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
-const L = (await import('../bots/tarot/locales/fa.js')).default;
+const L = (await import(`../bots/tarot/locales/${LOCALE}.js`)).default;
+// 🌍 **همان** تابعی که ربات سرِ boot صدا می‌زند. بدونِ این، `headlineOk` هر سرخطِ
+// غیرفارسی را رد می‌کرد و هر ۵ تلاشِ هر فال می‌سوخت: یک دورِ صفر با هزینه‌ی کامل که
+// شبیهِ «مدل بد است» به نظر می‌رسید.
+configureLocale(L);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const argv = process.argv.slice(2);
@@ -54,8 +69,27 @@ const DRY = flag('dry');
 const FAKE = flag('fake');
 const ONLY = (val('only', '') || '').split(',').filter(Boolean);
 const OUT = val('out', '');
+/* 🤖 مدلِ تحتِ آزمایش. پیش‌فرض دقیقاً همان چیزی است که محصول استفاده می‌کند، پس یک
+ * اجرا بدونِ این پرچم‌ها عیناً پروداکشن را می‌سنجد. برنامه‌ی retry همان شکلِ همیشگی را
+ * نگه می‌دارد (۳ تلاشِ مدلِ اصلی، بعد ۲ تلاشِ فالبک) تا مقایسه‌ی بین مدل‌ها منصفانه
+ * بماند: اگر یکی سه شانس بگیرد و دیگری یکی، داریم برنامه‌ی retry را می‌سنجیم نه مدل را. */
+const MODEL = val('model', FLASH);
+const FALLBACK = val('fallback', FALLBACK_MODEL);
+const PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
 
-const SCEN = JSON.parse(fs.readFileSync(path.join(HERE, 'reading-lab', 'scenarios.json'), 'utf8'));
+/* 🌍 سناریوها per زبان. `fa` نامِ تاریخیِ خودش را نگه می‌دارد تا دیف صفر بماند.
+ * ⚠️ عمداً به فارسی fallback **نمی‌کند**: یک اجرای روسی با سؤال‌های فارسی سبز تمام
+ * می‌شد و ما فکر می‌کردیم روسی را سنجیده‌ایم. خرابیِ بی‌صدا بدتر از خطاست. */
+const SCEN_FILE = path.join(HERE, 'reading-lab', LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`);
+if (!fs.existsSync(SCEN_FILE)) {
+  console.error(`❌ سناریویی برای زبانِ «${LOCALE}» نیست: ${SCEN_FILE}`);
+  console.error('   سناریوی هر زبان باید به همان زبان نوشته شود، نه ترجمه‌ی خودکارِ فارسی.');
+  process.exit(1);
+}
+const SCEN = JSON.parse(fs.readFileSync(SCEN_FILE, 'utf8'));
+// ورودیِ حالتِ probe از همان فایل می‌آید تا هم‌زبان بماند (پیش‌فرض: اولین قدمِ اولین پرسونا).
+const PROBE_Q = SCEN.probe?.question || SCEN.personas?.[0]?.steps?.[0]?.question || '';
+const PROBE_NAME = SCEN.probe?.name || SCEN.personas?.[0]?.name || '';
 
 /* ═══════════════ استابِ پاسخِ مدل (حالتِ fake) ═══════════════ */
 // خروجیِ ساختگی ولی **معتبر**: باید از checkV4Shape و headlineOk رد شود تا مسیرِ
@@ -139,15 +173,18 @@ async function runStep(persona, step, i, state) {
       parsed = obj;
       return true;
     },
-  });
+  }, PLAN);
   if (!parsed && fallback) parsed = fallback;
   if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
 
   // تعمیرِ نقطه‌ای — **همان کدِ ربات**. اینجا اجرا می‌شود تا آزمایشگاه دقیقاً همان
   // چیزی را بسنجد که کاربر می‌گیرد، و هزینه/تأخیرِ واقعیِ این مسیر اندازه گرفته شود.
   const t0 = Date.now();
+  // ⚠️ `meta` به‌صورت opts به کلاینت می‌رسد، پس `model` این‌جا مسیرِ تعمیر را هم روی
+  // **مدلِ تحتِ آزمایش** می‌نشاند. بدونِ این، بازوی GPT یک تعمیرِ Gemini می‌گرفت و
+  // مقایسه دیگر مقایسه‌ی دو مدل نبود.
   const rep = await repairDefects(parsed, FAKE ? fakeRepair : orChatResilient,
-    { tag: `${persona.id}.${i + 1}` });
+    { tag: `${persona.id}.${i + 1}`, meta: { model: MODEL } });
   parsed = rep.llm;
   const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
 
@@ -215,14 +252,16 @@ async function probe(reps) {
       const cards = drawCards(`probe:${id}:${k}`, [k % 24, (k + 7) % 24, (k + 13) % 24], spread.size);
       const ctx = buildReadingCtx({
         user: { telegram_id: 1, memory_json: '', focus_area: spread.focus || 'question' },
-        spread, question: 'این روزها حس می‌کنم سرِ یه دوراهیِ مهمم و نمی‌دونم کدوم طرف برم.',
-        cards, focusKey: spread.focus || 'question', L, name: 'آرش', kbOn: true, prev: [],
+        // سؤال و نام از سناریوهای همان زبان می‌آیند، وگرنه probe روی رباتِ روسی یک
+        // سؤالِ فارسی می‌پرسید و شکلِ خروجی را در شرایطی می‌سنجید که هرگز رخ نمی‌دهد.
+        spread, question: PROBE_Q, cards,
+        focusKey: spread.focus || 'question', L, name: PROBE_NAME, kbOn: true, prev: [],
       });
       const labels = L.prompts.cardLabels(cards.length);
       let out = null, usage = {};
       try {
         const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
-          { maxTokens: spread.maxTokens });
+          { maxTokens: spread.maxTokens, model: MODEL });
         out = r.text; usage = r.usage || {};
       } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
       const obj = parseJsonLoose(out);

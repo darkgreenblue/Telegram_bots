@@ -33,8 +33,9 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 import { registerJourney } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
-import { normalizeVerdict, decisiveMode, headlineOk, evasionIn, configureVerdict } from './verdict.js';
+import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
+import { configureLocale } from './locale-boot.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
@@ -44,7 +45,7 @@ import {
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
-  buildReadingCtx, renderV4, configureSeparator,
+  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor,
 } from './reading-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -73,8 +74,11 @@ const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
  * تزریق می‌کند. **قبل از هر خوانشی** و یک‌بار موقعِ boot اجرا می‌شود.
  * بدونِ این، رباتِ غیرفارسی خرابیِ بی‌صدا می‌گرفت: `normalizeVerdict` برای جوابِ
  * روسی null می‌داد و بلوکِ جواب بی‌هیچ خطایی از خوانش حذف می‌شد (بند ۱۰). */
-configureVerdict(L.verdict);
-configureSeparator(L.verdict?.dashReplacement);
+/* 🌍 تک‌نقطه‌ی پیکربندیِ زبان: حکمِ قاطع، جداکننده‌ی «—»، و نامِ کارت/جایگاه/چیدمان.
+ * آزمایشگاه هم **همین** تابع را صدا می‌زند تا آن‌چه سنجیده می‌شود با آن‌چه کاربر
+ * می‌بیند یکی بماند. برای `fa` هیچ‌کدام از این جدول‌ها در locale نیستند، پس هسته به
+ * همان فیلدهای هاردکدِ `cards.js`/`spreads.js` fallback می‌کند و فارسی دست‌نخورده است. */
+configureLocale(L);
 const fmt = L.fmt;
 // فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
 const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
@@ -1723,7 +1727,7 @@ async function callReadingLLM(readingId) {
       }
       const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
       if (!usable) return false;
-      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: spread?.choiceLabels })) { fallback = obj; return false; }
+      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: choiceLabelsFor(spread) })) { fallback = obj; return false; }
       parsed = obj;
       return true;
     },
@@ -3838,7 +3842,7 @@ async function revealNext(ctx, uid, readingId) {
   // «کارت قلب تو» و «کارت اولت» را می‌بیند و تناقض حس می‌کند.
   await sendCardPhoto(ctx, card.key, v4For(uid)
     ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
-    : L.reading.revealCaption(spread.positions[idx]?.fa || `کارت ${idx + 1}`, info, card.reversed));
+    : L.reading.revealCaption(positionName(spread.positions[idx]?.fa, idx), info, card.reversed));
   await sleep(PACE_REVEAL);
   await typing(ctx, PACE_S);
 
@@ -3926,7 +3930,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
     const recal = await orChatResilient(L.prompts.feedbackSystem, L.prompts.feedbackContext({
       confirmationQuestion: llm?.confirmation_question || '',
       userAnswer: freeText || 'نه دقیقاً',
-      card: CARD_BY_KEY[cards[midIdx]?.key]?.fa || '',
+      card: cardName(cards[midIdx]?.key),
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
     }), { maxTokens: 300, kind: 'feedback', refId: readingId, userId: uid }, [FLASH, FALLBACK_MODEL])
@@ -4205,7 +4209,7 @@ async function sendVerdict(ctx, llm, spread) {
     const toneV2 = toneV2For(ctx.from.id);
     const mode = decisiveMode(spread, toneV2);
     if (!mode) return;
-    const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: spread?.choiceLabels });
+    const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: choiceLabelsFor(spread) });
     if (!v) return;
     await sleep(PACE_M);
     await typing(ctx, PACE_S);
