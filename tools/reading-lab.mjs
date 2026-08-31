@@ -430,7 +430,12 @@ if (!DRY) {
   console.log('═'.repeat(72));
   const tokIn = done.reduce((a, r) => a + r.usage.in, 0), tokOut = done.reduce((a, r) => a + r.usage.out, 0);
   const bad = done.filter(r => r.check.issues.length);
-  console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${done.reduce((a, r) => a + (r.attempts - 1), 0)}`);
+  /* ⚠️ `attempts` روی فالی که خطا داده undefined است، و `undefined - 1` کلِ جمع را
+   * `NaN` می‌کند. در اجرای تک‌پاسه هرگز دیده نشد و در دورِ ۱۰ (سه‌پاسه، ۲۷ فال) به‌صورتِ
+   * «تلاشِ اضافه: NaN» بیرون زد. عددِ NaN در گزارشی که مبنای تصمیمِ مدل است، یعنی یکی از
+   * دو سنجه‌ی هزینه‌ی همان دور خوانده نمی‌شود. */
+  const extra = done.reduce((a, r) => a + Math.max(0, (Number(r.attempts) || 1) - 1), 0);
+  console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${extra}`);
   // متریکِ کیفیِ اصلی برای مقایسه‌ی دورها: چند درصد از جمله‌ها به هیچ چیزِ مخصوصِ
   // همین فال گره نخورده‌اند. هرچه کمتر، خوانش شخصی‌تر و کمتر Barnum.
   const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
