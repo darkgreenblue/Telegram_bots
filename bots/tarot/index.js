@@ -2448,14 +2448,36 @@ async function showLuckyStatus(ctx, uid, text, extra) {
   if (m) patchSession(uid, { luckyStatusMsgId: m.message_id });
 }
 
-/* 🔔 دکمه‌ی «فردا یادآوری کن» فقط زیرِ **پایانِ دستِ کارت شانس** و فقط وقتی کاربر هنوز
-   opt-in نکرده. دو قاعده‌ی صریحِ مالک (۱۴۰۵/۰۶/۰۵) این‌جا قفل شده‌اند:
-     ۱) نسخه‌ی «🔕 دیگه یادآوری نکن» **هرگز** از این ردیف ساخته نمی‌شود. آن دکمه فقط و
-        فقط زیرِ پیامِ یادآوریِ شبانه‌ی ساعت ۲۲ دیده می‌شود (callback `dailyoff`)، چون
-        تنها جایی است که کاربر واقعاً یک پیامِ ناخواسته گرفته و باید راهِ خاموشی داشته باشد.
-        پیشنهادِ خاموشی زیرِ پیامی که خودِ کاربر بازش کرده، دعوت به انصراف است.
-     ۲) بعد از تپ، دکمه **حذف** می‌شود، نه اینکه به دکمه‌ی دیگری تبدیل شود. */
-const luckyReminderRow = (on) => (on ? [] :
+/* 🔔 دکمه‌ی «فردا یادآوری کن» فقط زیرِ **پایانِ دستِ کارت شانس** و فقط وقتی کاربر واقعاً
+   یادآوریِ کارتِ شانس **نمی‌گیرد**. باگی که مالک دید (۱۴۰۵/۰۶/۰۷): دکمه به کسی نشان
+   داده می‌شد که هر شب یادآوری می‌گرفت، یعنی پیشنهادِ روشن‌کردنِ چیزی که از قبل روشن بود.
+
+   قاعده‌ی «پوشیده بودن» (`luckyReminderCovered`) عمداً چهار حالت را از هم جدا می‌کند:
+     • یادآوریِ کلی خاموش است            → پوشیده نیست، دکمه لازم است (راهِ برگشت)
+     • خودش قبلاً opt-in کرده             → پوشیده، دیگر نپرس
+     • شاخه‌اش `lucky` است                → پوشیده، همان یادآوری را می‌گیرد
+     • شاخه‌اش `control` است              → پوشیده **نیست**: او یادآوریِ کارتِ روز می‌گیرد نه
+       کارتِ شانس، پس حق دارد بخواهد. تپش هم دیتای باارزشی است (خواسته‌ی صریحِ مالک:
+       بدانیم گروهِ کارتِ روز چقدر کارتِ شانس می‌خواهد). چون بعد از کارتِ روز کارتِ شانس
+       هم پیشنهاد می‌شود، عملاً به خواسته‌اش می‌رسد بدونِ اینکه از آزمایش خارج شود.
+     • هنوز وارد آزمایش نشده (بدونِ exposure) → **پوشیده در نظر گرفته می‌شود**. یادآوری‌اش
+       طبق پیش‌فرض روشن است و هنوز هیچ پیامِ شبانه‌ای نگرفته؛ نشان دادنِ دکمه به او دقیقاً
+       همان باگی است که مالک گزارش کرد.
+
+   ⚠️ عمداً `variant()` صدا زده **نمی‌شود**: آن تابع exposure می‌سازد و کاربری را که شاید
+   هرگز یادآوری نگیرد وارد آزمایش می‌کند، یعنی مخرجِ آزمایش را باد می‌کند. این‌جا فقط
+   انتسابِ **قبلاً ثبت‌شده** خوانده می‌شود. */
+const stAssignedArm = db.prepare('SELECT variant FROM ab_exposures WHERE experiment_key=? AND user_id=?');
+const assignedNightArm = (uid) => {
+  try { return stAssignedArm.get(NIGHT_EXP, uid)?.variant || null; } catch { return null; }
+};
+function luckyReminderCovered(uid) {
+  const u = getUser(uid);
+  if (!u || u.daily_reminder_off) return false;
+  if (u.lucky_reminder_on) return true;
+  return assignedNightArm(uid) !== 'control';
+}
+const luckyReminderRow = (covered) => (covered ? [] :
   [[Markup.button.callback(L.buttons.luckyRemindOn, 'lremind:1')]]);
 
 /* دستِ در جریان: `{ d: روز, n: nonce, p: [انتخاب‌ها], f: تعدادِ الماسِ پیداشده }`.
@@ -2688,12 +2710,13 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   await showLuckyStatus(ctx, uid, counter);
   if (!done) return;
 
-  track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS, first: fst });
+  track(db, uid, 'lucky_card', { coins: found, picks: LUCKY_PICKS, first: fst,
+    remind_btn: luckyReminderCovered(uid) ? 0 : 1 });
   await sleep(PACE_S);
-  const reminderOn = !!getUser(uid)?.lucky_reminder_on;
+  const covered = luckyReminderCovered(uid);
   // نتیجه روی **همان** پیامِ وضعیت می‌نشیند (خطِ شمارنده بالایش می‌ماند تا «۳ از ۳» دیده شود).
   await showLuckyStatus(ctx, uid, `${counter}\n\n${found ? L.lucky.won(found) : L.lucky.lost}`,
-    Markup.inlineKeyboard(luckyReminderRow(reminderOn)));
+    Markup.inlineKeyboard(luckyReminderRow(covered)));
   // UX v2.1 (تصمیمِ صریحِ مالک): بعد از کشیدنِ کارتِ شانس، کاربر دعوت می‌شود سؤالِ
   // بعدی‌اش را از تاروت بپرسد — چه سکه برده باشد چه نه، همیشه یک قدمِ بعدیِ روشن دارد.
   await sleep(PACE_S);
@@ -2712,10 +2735,13 @@ bot.action(/^lremind:([01])$/, async (ctx) => {
   // که این‌جا «دیگه یادآوری نکن» می‌زند منظورش کلِ یادآوریِ شبانه است، نه فقط یک ستونِ
   // بازنشسته؛ پس نیتش به همان ستونی می‌رود که جارو واقعاً می‌خواند. برعکسش هم درست است.
   if (on) stmts.setDailyReminderOn.run(uid); else stmts.setDailyReminderOff.run(uid);
-  track(db, uid, 'lucky_reminder', { on: on ? 1 : 0 });
+  track(db, uid, 'lucky_reminder', { on: on ? 1 : 0, arm: assignedNightArm(uid) || '' });
   // دکمه **حذف** می‌شود، نه اینکه به «دیگه یادآوری نکن» تبدیل شود (تصمیمِ صریحِ مالک).
   // `luckyReminderRow(true)` آرایه‌ی خالی می‌دهد، پس این یک کیبوردِ خالیِ واقعی است.
-  try { await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(luckyReminderRow(on)).reply_markup); } catch {}
+  try {
+    await ctx.editMessageReplyMarkup(
+      Markup.inlineKeyboard(luckyReminderRow(luckyReminderCovered(uid))).reply_markup);
+  } catch {}
   // ⚠️ هیچ پیامی فرستاده نمی‌شود (خواسته‌ی صریحِ مالک): تأییدِ کار روی خودِ دکمه آمد.
 });
 

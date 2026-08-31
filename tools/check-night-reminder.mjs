@@ -222,6 +222,16 @@ ok('و دکمه‌ی دعوت هم دارد', /inviteRow\(ref\.referrer_id\)/.te
 // متنِ locale واقعاً موجودی را چاپ می‌کند
 ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referralReward:\s*\(name, bonus, cur, balance/.test(LOC));
 
+const USERS = {
+  1: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // پیش‌فرض، بدونِ exposure
+  2: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // شاخه‌ی lucky
+  3: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // شاخه‌ی control
+  4: { daily_reminder_off: 1, lucky_reminder_on: 0 }, // خودش خاموش کرده
+  5: { daily_reminder_off: 0, lucky_reminder_on: 1 }, // قبلاً opt-in کرده (شاخه‌ی control)
+  6: { daily_reminder_off: 1, lucky_reminder_on: 1 }, // حالتِ متناقضِ قدیمی
+};
+const ARM_BY_UID = { 2: 'lucky', 3: 'control', 5: 'control', 6: 'control' };
+
 /* ═══════ ۷.۵) «🔕 دیگه یادآوری نکن» فقط زیرِ یادآوریِ شبانه ═══════
    قاعده‌ی صریحِ مالک (۱۴۰۵/۰۶/۰۵). پیشنهادِ خاموشی زیرِ پیامی که خودِ کاربر بازش کرده،
    دعوت به انصراف است؛ فقط جایی مجاز است که کاربر یک پیامِ **ناخواسته** گرفته باشد. */
@@ -239,6 +249,39 @@ ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referra
   } catch { /* پایین به‌صورتِ ادعای شکست‌خورده گزارش می‌شود، نه کرش */ }
   ok('ردیفِ استخراج‌شده اجرا شد', typeof row === 'function');
   const off = row ? row(false) : null, on = row ? row(true) : null;
+
+  /* «پوشیده بودن» خودش هم از سورس بریده و روی هر پنج حالت اجرا می‌شود. این منطق تعیین
+     می‌کند دکمه به چه کسی نشان داده شود، و باگی که مالک دید دقیقاً همین‌جا بود. */
+  const covSrc = (SRC.match(/const stAssignedArm = [\s\S]*?\n\}\n/) || [])[0] || '';
+  ok('منطقِ «پوشیده بودن» از سورس استخراج شد', /function luckyReminderCovered/.test(covSrc));
+  let covered = null;
+  try {
+    covered = new Function('db', 'NIGHT_EXP', 'getUser', `${covSrc} return luckyReminderCovered;`)(
+      { prepare: () => ({ get: (_k, uid) => (ARM_BY_UID[uid] ? { variant: ARM_BY_UID[uid] } : undefined) }) },
+      'night_reminder', (uid) => USERS[uid]);
+  } catch { /* پایین ادعای شکست‌خورده می‌شود */ }
+  ok('منطقِ «پوشیده بودن» اجرا شد', typeof covered === 'function');
+  if (covered) {
+    // ۱) پیش‌فرض: یادآوری روشن، هنوز هیچ پیامی نگرفته → دکمه **نباید** دیده شود (خودِ باگ)
+    ok('کاربرِ پیش‌فرضِ بدونِ exposure دکمه نمی‌بیند', covered(1) === true);
+    // ۲) شاخه‌ی lucky: همان یادآوری را می‌گیرد → دکمه لازم نیست
+    ok('کاربرِ شاخه‌ی lucky دکمه نمی‌بیند', covered(2) === true);
+    // ۳) شاخه‌ی control: یادآوریِ کارتِ روز می‌گیرد نه کارتِ شانس → دکمه می‌بیند (دیتای تحلیل)
+    ok('کاربرِ شاخه‌ی control دکمه می‌بیند', covered(3) === false);
+    // ۴) خودش خاموش کرده → دکمه می‌بیند (راهِ برگشت)
+    ok('کاربرِ خاموش‌کرده دکمه می‌بیند', covered(4) === false);
+    // ۵) قبلاً opt-in کرده → دیگر پرسیده نمی‌شود، حتی در شاخه‌ی control
+    ok('کاربرِ opt-in‌کرده دیگر دکمه نمی‌بیند', covered(5) === true);
+    // ۶) خاموش‌بودنِ کلی بر opt-inِ قدیمی مقدم است
+    ok('خاموشیِ کلی بر opt-inِ قدیمی مقدم است', covered(6) === false);
+  }
+  // ⚠️ مهم‌ترین ادعا: این مسیر نباید کسی را وارد آزمایش کند
+  ok('مسیرِ کارت شانس هیچ exposure تازه‌ای نمی‌سازد (variant صدا زده نمی‌شود)',
+     !/variant\(db, uid, NIGHT_EXP\)/.test(covSrc));
+  ok('فقط انتسابِ ثبت‌شده خوانده می‌شود', /SELECT variant FROM ab_exposures/.test(covSrc));
+  // دیتای تحلیل: مخرج (چند نفر دکمه را دیدند) و صورت (چه کسی زد، در کدام شاخه)
+  ok('رویدادِ lucky_card مخرجِ دکمه را ثبت می‌کند', /remind_btn: luckyReminderCovered\(uid\) \? 0 : 1/.test(SRC));
+  ok('رویدادِ lucky_reminder شاخه را ثبت می‌کند', /'lucky_reminder', \{ on: on \? 1 : 0, arm:/.test(SRC));
   ok('کاربرِ opt-in‌نکرده دکمه‌ی «فردا یادآوری کن» می‌بیند',
      !!off && off.length === 1 && off[0][0].d === 'lremind:1'
      && off[0][0].t === REAL.buttons.luckyRemindOn);
@@ -266,8 +309,8 @@ ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referra
   ok('هندلرِ lremind پیدا شد', !!lrem);
   ok('تپِ یادآوری هیچ پیامی نمی‌فرستد', !/ctx\.reply\(/.test(lrem));
   ok('به‌جایش روی خودِ دکمه toast می‌دهد', /answerCbQuery\(on \? L\.lucky\.remindOnToast/.test(lrem));
-  ok('و کیبورد را با همان تک‌منبع خالی می‌کند',
-     /editMessageReplyMarkup\(Markup\.inlineKeyboard\(luckyReminderRow\(on\)\)/.test(lrem));
+  ok('و کیبورد را با همان تک‌منبعِ «پوشیده بودن» بازرندر می‌کند',
+     /editMessageReplyMarkup\(\s*Markup\.inlineKeyboard\(luckyReminderRow\(luckyReminderCovered\(uid\)\)\)/.test(lrem));
 }
 
 /* ═══════ ۷.۶) CTAی شبانه = همان برچسبِ کیبورد ═══════
