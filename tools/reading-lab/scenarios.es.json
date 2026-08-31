@@ -1,0 +1,132 @@
+{
+  "_note": "Escenarios del laboratorio de lecturas, versión en español neutro de América Latina. Escritos desde cero para México, Argentina, Colombia y Perú, no traducidos del portugués ni del persa: el objetivo no es paridad con fa, sino cazar bugs del pipeline en español. Cada persona es un usuario totalmente nuevo (memoria vacía) que saca varias lecturas seguidas; memoria y lecturas anteriores pasan entre los pasos igual que en el bot. `afterMinutes` define solo el orden y la distancia del escenario, ningún dato de tiempo llega al modelo. `picks` son las elecciones del usuario en la grilla de 24 cartas. `expect` describe qué prueba ese paso y se imprime junto al resultado. Los tres riesgos específicos del español que estos escenarios persiguen son: (1) concordancia de género hacia quien lee, que en español aparece hasta en presente («estás cansada»), y que se dispara sobre todo cuando la propia persona se describe en femenino o masculino; (2) deriva de registro, o sea caer en «usted», en «vos tenés» o en vocabulario de España; (3) evasión en preguntas decisivas, que es la que rompe la promesa del producto.",
+  "probe": {
+    "name": "Camila",
+    "question": "Siento que estoy en un punto de quiebre y no sé para qué lado ir. ¿Qué muestran las cartas?"
+  },
+  "personas": [
+    {
+      "id": "P1",
+      "name": "Camila",
+      "focus": "love",
+      "why": "Camino más común del bot: tres lecturas de pareja seguidas. Prueba memoria acumulada, referencia con contenido a la sesión anterior, y que tres lecturas de la misma persona no salgan parecidas. Riesgo propio del español: la persona se describe en femenino en su propia pregunta y el modelo copia esa marca hacia quien lee («estás sola», «te quedaste cansada»). El paso 3 además mete una pregunta decisiva dentro de un tema emocional, que es donde la evasión aparece más.",
+      "steps": [
+        {
+          "spread": "love3",
+          "picks": [
+            3,
+            11,
+            19
+          ],
+          "afterMinutes": 0,
+          "question": "Llevamos casi dos años juntos, pero estos últimos meses me siento muy sola dentro de la relación. ¿Todavía hay futuro acá?",
+          "expect": "Fórmula del título con «pero» o «aunque». Es la primera lectura, así que no puede haber ninguna referencia al pasado. Trato de «tú», nunca «usted» ni «vos». Y aunque ella se describa en femenino, el texto no puede asumir su género en sus propias frases."
+        },
+        {
+          "spread": "feel3",
+          "picks": [
+            7,
+            2,
+            22
+          ],
+          "afterMinutes": 40,
+          "question": "¿Él siente algo por mí todavía o son ideas mías?",
+          "expect": "La referencia a la lectura anterior tiene que tener contenido y no puede marcar tiempo. Prueba el camino del ancla de memoria. El «él» de la pregunta sí puede llevar género; quien lee, no."
+        },
+        {
+          "spread": "exback3",
+          "picks": [
+            15,
+            5,
+            9
+          ],
+          "afterMinutes": 90,
+          "question": "Si terminamos ahora, ¿él vuelve después?",
+          "expect": "Pregunta decisiva: necesita dirección clara, sin devolverle la decisión a la persona («depende de ti», «solo tú sabes»). Y las tres lecturas no pueden repetir las mismas frases."
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "Andrés",
+      "focus": "career",
+      "why": "Persona directa que quiere respuesta, no interpretación. Prueba el veredicto decisivo y la prohibición de evadir. Riesgo extra en español: cuando el tema es de trabajo y dinero el texto se pone serio, y ahí es donde el modelo se va a «usted» o mete palabras de España («vale», «ordenador», «coger el trabajo»). El paso 2 manda una pregunta casi vacía para ver si inventa contexto que nunca recibió.",
+      "steps": [
+        {
+          "spread": "yesno3",
+          "picks": [
+            1,
+            13,
+            20
+          ],
+          "afterMinutes": 0,
+          "question": "¿Me conviene renunciar este mes y aceptar la propuesta nueva?",
+          "expect": "Tiene que salir un sí o un no sin rodeo. Nada de «depende de ti». Español neutro de la región: sin «usted», sin «vosotros», sin «vale» ni «coger»."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            8,
+            17,
+            4
+          ],
+          "afterMinutes": 30,
+          "question": "Mi pregunta personal",
+          "expect": "Pregunta libre y cortísima: prueba si el modelo inventa contexto que no recibió. No puede citar fechas ni momentos pasados, y el ancla tiene que salir de los nombres de las cartas."
+        },
+        {
+          "spread": "money3",
+          "picks": [
+            21,
+            6,
+            12
+          ],
+          "afterMinutes": 120,
+          "question": "¿Alcanzo a juntar la plata para mudarme antes de fin de año?",
+          "expect": "Respuesta con dirección y plazo hacia el futuro, anclada en los nombres de las cartas. Referencia a la lectura anterior sin marcar tiempo. «Plata» en la pregunta no debe empujar al modelo a un registro regional cerrado."
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Valeria",
+      "focus": "inner",
+      "why": "Llega frágil y con preguntas abiertas. Prueba tono firme y acogedor sin promesas, ausencia de emoji, y el caso más difícil del español: frases sobre el estado de quien lee, que es justo donde el género se marca con más fuerza y donde el guardián `genero` de langdata.es.json debería disparar si el modelo resbala. El paso 3 cambia de tema a una decisión concreta para ver si el tono suave se lleva puesta la dirección.",
+      "steps": [
+        {
+          "spread": "personal3",
+          "picks": [
+            10,
+            18,
+            23
+          ],
+          "afterMinutes": 0,
+          "question": "Ando muy ansiosa y sin saber qué estoy haciendo con mi vida. ¿Por dónde empiezo?",
+          "expect": "Tono firme y acogedor, sin prometer nada. Aunque ella se describa en femenino, el texto no puede asumir su género («estás perdida», «te sientes sola»); tiene que resolverlo con sustantivo, infinitivo o forma impersonal."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            0,
+            14,
+            16
+          ],
+          "afterMinutes": 45,
+          "question": "Mi pregunta personal",
+          "expect": "Referencia con contenido a la lectura anterior. Sin marcas de tiempo, sin «la última vez» con fecha, y sin repetir frases de la primera lectura."
+        },
+        {
+          "spread": "study3",
+          "picks": [
+            2,
+            20,
+            7
+          ],
+          "afterMinutes": 150,
+          "question": "¿Voy a pasar el examen de admisión que doy el mes que viene?",
+          "expect": "Decisiva otra vez pero en otro tema: la dirección tiene que quedar clara pese al tono suave del paso anterior, con plazo hacia el futuro y sin repetir frases de las lecturas previas."
+        }
+      ]
+    }
+  ]
+}

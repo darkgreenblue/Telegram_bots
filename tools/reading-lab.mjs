@@ -363,6 +363,33 @@ if (flag('probe')) {
 
 /* ═══════════════ اجرا ═══════════════ */
 const personas = SCEN.personas.filter(p => !ONLY.length || ONLY.includes(p.id));
+
+/* 🚦 پیش‌پروازِ سناریوها — **قبل از** خرجِ پول.
+ *
+ * 🐛 باگی که این را لازم کرد (۱۴۰۵/۰۶/۰۹، در سناریوهای پرتغالیِ خودم): `focus` مقدارِ
+ * `work` و `self` داشت که در `focusFa` هیچ locale ای وجود ندارند. `buildReadingCtx`
+ * با `focusFa[k] || k` fallback می‌کند، پس به‌جای خطا **عینِ همان کلمه‌ی انگلیسی**
+ * وارد پرامپتِ پرتغالی می‌شد. یعنی یک دورِ کاملِ پولی با پرامپتِ آلوده اجرا شد و
+ * هیچ خطایی هم نداد؛ دقیقاً همان چیزی که گاردِ `ingles` برای گرفتنش ساخته شده، ولی
+ * یک لایه بالاتر و بیرون از دیدش.
+ *
+ * `spread` هم این‌جا سنجیده می‌شود چون شناسه‌ی غلط وسطِ دور می‌ترکد، یعنی بعد از
+ * اینکه بخشی از پول خرج شده. */
+{
+  const badFocus = [...new Set(personas.map(p => p.focus).filter(f => f && !L?.focusFa?.[f]))];
+  const validSpreads = new Set(Object.keys(SPREAD_BY_ID));
+  const badSpread = [...new Set(personas.flatMap(p => p.steps.map(x => x.spread))
+    .filter(x => x && !validSpreads.has(x)))];
+  if (badFocus.length || badSpread.length) {
+    if (badFocus.length) {
+      console.error(`❌ سناریو: focus ناشناخته → ${badFocus.join(', ')}`);
+      console.error(`   مقادیرِ معتبر: ${Object.keys(L?.focusFa || {}).join(', ')}`);
+      console.error('   ⚠️ این خطا نمی‌دهد، بی‌صدا همان کلمه را داخلِ پرامپت می‌گذارد.');
+    }
+    if (badSpread.length) console.error(`❌ سناریو: چیدمانِ ناشناخته → ${badSpread.join(', ')}`);
+    process.exit(1);
+  }
+}
 const all = [];
 
 // چند **پاسِ کامل** روی همان سناریوها با همان کارت‌ها. تنها متغیرِ بین پاس‌ها
