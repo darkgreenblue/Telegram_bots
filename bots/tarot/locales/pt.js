@@ -83,7 +83,7 @@ const INTRO_EXPERIENCE =
   'Aqui é a mesma experiência de sentar com uma taróloga de verdade; só que agora ela vive no seu bolso.\n\n' +
   '🎴 E todo dia você tem uma carta grátis.';
 const INTRO_EXPERIENCE_V2 =
-  '🔮 Pra responder aquelas perguntas que você não sabe responder sozinho, eu estou sempre aqui!\n\n' +
+  '🔮 Pra aquelas perguntas que você não sabe responder, eu estou sempre aqui!\n\n' +
   'É a mesma experiência de sentar com uma taróloga de verdade;\n' +
   'com a diferença de que agora ela vive no seu bolso! 📱';
 /* 📊 O «86%» vem sim para o português, e isso é uma decisão explícita do dono
@@ -773,7 +773,7 @@ export default {
     deliverableCaption: (summary) => `🔮 A sua leitura\n\n${summary}`,
     nextOffers: 'Duas sugestões pra seguir, com base nesta leitura:',
     nextOffersOpen: 'Duas sugestões pra seguir; mas dá pra perguntar qualquer outra coisa também:',
-    nextOffersV3: '🔮 Pra responder aquelas perguntas que você não sabe responder sozinho, eu estou sempre aqui!',
+    nextOffersV3: '🔮 Pra aquelas perguntas que você não sabe responder, eu estou sempre aqui!',
     refunded: (cur) => `Hoje a energia não colaborou e a leitura não fechou 🙏 O valor voltou inteiro pra você.\n\nAs cartas que você tirou continuam guardadas; tente de novo quando quiser:`,
     recalFallback: 'Obrigado pela sinceridade 🤲 Então vamos olhar o resto das cartas por esse ângulo novo. Seguindo...',
     canceled: 'Beleza, estou aqui quando você quiser 🌙',
