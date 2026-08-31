@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { SPREAD_BY_ID, DAILY } from '../bots/tarot/spreads.js';
 
 const DIR = 'bots/tarot/locales';
 const REF = 'fa';
@@ -83,21 +84,49 @@ for (const file of files) {
    *
    * ⚠️ فقط `ReferenceError` خطا حساب می‌شود، نه هر استثنایی: شناسه‌ی تعریف‌نشده مستقل
    * از آرگومان‌ها می‌ترکد، ولی `TypeError` معمولاً یعنی آرگومانِ ساختگیِ ما شکلِ درستی
-   * نداشته که ایرادِ خودِ locale نیست. این تفکیک عمدی است تا چک نویزِ کاذب ندهد. */
+   * نداشته که ایرادِ خودِ locale نیست. این تفکیک عمدی است تا چک نویزِ کاذب ندهد.
+   *
+   * 🐛 **دورِ دومِ همین باگ، و دو نقطه‌کورِ خودِ این چک** (۱۴۰۵/۰۶/۰۹، باز هم حینِ
+   * ساختِ پرتغالی): `decisiveBlock` و `decisiveField` هم در پورتِ روسی جا افتاده بودند
+   * و `readerSystem`/`readerSystemV2` هر دو صدایشان می‌زدند. این چک با اینکه توابع را
+   * واقعاً اجرا می‌کرد، ندیدشان. دو دلیلِ مستقل داشت و هر دو اصلاح شد:
+   *   ۱) **خطا پشتِ خطا پنهان می‌شد.** در همان template literal، `spread.positions.map(...)`
+   *      قبل از `decisiveBlock(...)` ارزیابی می‌شود و با آرگومانِ ساختگی `TypeError`
+   *      می‌داد، که عمداً نادیده گرفته می‌شود؛ پس اجرا هرگز به شناسه‌ی تعریف‌نشده
+   *      نمی‌رسید. درمان: آرگومانِ **واقعی** از خودِ `spreads.js` (نه ساختگی)، که هر
+   *      سه حالتِ `decisive` را هم پوشش می‌دهد. از منبع استخراج می‌شود نه لیستِ دستی،
+   *      پس چیدمانِ تازه خودبه‌خود پوشش می‌گیرد.
+   *   ۲) **حلقه سرِ اولین موفقیت می‌شکست.** اگر یک آرگومانِ ساده تابع را بی‌خطا رد
+   *      می‌کرد، بقیه‌ی آرگومان‌ها امتحان نمی‌شدند و شاخه‌ی عمیق‌تر هرگز اجرا نمی‌شد.
+   *      حالا **همه‌ی** آرگومان‌ها امتحان می‌شوند و هر `ReferenceError`ی گزارش می‌شود.
+   *      این ایمن است چون شناسه‌ی تعریف‌نشده به مقدارِ آرگومان ربطی ندارد: اگر با یک
+   *      آرگومان `ReferenceError` بدهد، آن شناسه واقعاً در scope نیست. */
   {
+    /* چیدمان‌های واقعی از `spreads.js`، یکی per حالتِ `decisive` (+ یکی بدونِ آن).
+     * بدونِ این، شاخه‌های تصمیم‌محورِ پرامپت اصلاً اجرا نمی‌شوند. */
+    const real = Object.values(SPREAD_BY_ID);
+    const byMode = new Map();
+    for (const sp of real) if (!byMode.has(sp.decisive || '')) byMode.set(sp.decisive || '', sp);
+    const SPREADS = [...byMode.values(), ...(DAILY ? [DAILY] : [])];
+
     const ARGS = [
       [], ['x'], ['x', 1], ['x', true], ['x', 1, true], ['x', 'y', 'z'],
       [1], [1, 2], [true], [[]], [{}], [{ on: true, name: 'x', emoji: '💎' }],
+      // آرگومان‌های دامنه‌ای: چیدمانِ واقعی در جایگاهِ اول، با دنباله‌های محتمل.
+      ...SPREADS.flatMap((sp) => [
+        [sp], [sp, 'x'], [sp, {}], [sp, 'x', 'y'], [sp, [], 'x'], [sp, 'x', {}, 'y'],
+      ]),
     ];
     const broken = [];
     const walk = (v, pathStr) => {
       if (typeof v === 'function') {
-        let refErr = null, anyOk = false;
+        let refErr = null;
+        // ⚠️ عمداً `break` ندارد: موفق شدن با یک آرگومان ثابت نمی‌کند شاخه‌های دیگر سالم‌اند.
         for (const a of ARGS) {
-          try { v(...a); anyOk = true; break; }
+          try { v(...a); }
           catch (e) { if (e instanceof ReferenceError && !refErr) refErr = e; }
         }
-        if (!anyOk && refErr) broken.push(`${pathStr}: ${refErr.message}`);
+        if (refErr) broken.push(`${pathStr}: ${refErr.message}`);
       } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${pathStr}[${i}]`));
       else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(x, `${pathStr}.${k}`));
     };

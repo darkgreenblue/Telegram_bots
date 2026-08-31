@@ -80,10 +80,15 @@ const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
  * همان فیلدهای هاردکدِ `cards.js`/`spreads.js` fallback می‌کند و فارسی دست‌نخورده است. */
 configureLocale(L);
 const fmt = L.fmt;
-// فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
-const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
-// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale)
-const QUIZ = await import(`./quiz.js`).then(m => m.default.personalities).catch(() => ({}));
+// فال حافظ: دیتای استاتیکِ **per زبان** (امروز فقط `hafez.fa.js`). زبانی که فایلِ خودش را
+// ندارد آرایه‌ی خالی می‌گیرد و فیچر خودکار خاموش می‌شود (`if (HAFEZ.length)` سرِ هر مسیر).
+// ⚠️ نامِ فایل حتماً `${LOCALE}` داشته باشد: قبلاً `./hafez.js` بی‌قید import می‌شد و
+// کامنتش ادعا می‌کرد «زبان‌های دیگر بدون فایل»، در حالی که هر زبانی همان غزل‌های فارسی را
+// می‌گرفت. چون `FREE_MENU_ENABLED` خاموش بود کسی ندیدش؛ تله‌ی خفته بود، نه باگِ زنده.
+const HAFEZ = await import(`./hafez.${LOCALE}.js`).then(m => m.default.ghazals).catch(() => []);
+// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale).
+// این هم **پروزِ فارسی** است نه منطق، پس مثل حافظ per زبان است.
+const QUIZ = await import(`./quiz.${LOCALE}.js`).then(m => m.default.personalities).catch(() => ({}));
 // 📚 جدولِ دانشِ کارت (فارسی، تولیدِ آفلاین از منبعِ آموزشی — tools/build-card-knowledge.mjs).
 // **RAG نیست و لازم هم نیست:** کلیدِ بازیابی قطعی است (می‌دانیم کدام کارت کشیده شده)، پس یک
 // lookup کافی است — بدونِ embedding، بدونِ شبکه، زیر یک میلی‌ثانیه.
