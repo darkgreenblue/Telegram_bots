@@ -612,7 +612,12 @@ if (!DRY && ARM_LIST.length > 1) {
 
 if (OUT) {
   fs.writeFileSync(OUT, JSON.stringify(all.map(r => ({
-    persona: r.persona, step: r.i, rep: r.rep, spread: r.spread?.id, question: r.step?.question,
+    /* ⚠️ `arm` حتماً این‌جا بماند. این map فیلدها را **صریح** انتخاب می‌کند، پس
+     * افزودنِ یک فیلد به `all` خودبه‌خود به JSON نمی‌رسد. نسخه‌ی اولِ حالتِ چندبازویی
+     * دقیقاً همین را جا انداخت: مقایسه‌ی درون‌پروسه درست کار می‌کرد ولی خلاصه‌ی
+     * انتهای لاگ همه‌ی بازوها را در یک سطلِ «(پیش‌فرض)» می‌ریخت، یعنی تفکیکی که کلِ
+     * تصمیم روی آن است بی‌صدا گم می‌شد. */
+    persona: r.persona, step: r.i, rep: r.rep, arm: r.arm || '', spread: r.spread?.id, question: r.step?.question,
     cards: r.cards?.map(c => c.key + (c.reversed ? '↕' : '')),
     inputChars: r.inputChars, llm: r.llm, rendered: r.rendered, check: r.check,
   })), null, 2));
