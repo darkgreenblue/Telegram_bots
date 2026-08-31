@@ -102,6 +102,35 @@ for (const file of files) {
       else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(x, `${pathStr}.${k}`));
     };
     Object.entries(mod).forEach(([k, v]) => walk(v, k));
+
+    /* گامِ دوم: «نترکید» کافی نیست. تابعی که به‌جای متن `undefined` یا رشته‌ی خالی
+     * برگرداند هم پیامِ خالی به کاربر می‌دهد و هیچ خطایی نمی‌سازد. سنجه **مقایسه‌ای**
+     * است تا نویزِ کاذب ندهد: با **همان آرگومان‌هایی** که مرجعِ فارسی متنِ ناخالی
+     * می‌دهد، این زبان هم باید متنِ ناخالی بدهد. */
+    const empty = [];
+    const pick = (fn) => {
+      for (const a of ARGS) {
+        try { const r = fn(...a); if (typeof r === 'string' && r.trim()) return a; } catch {}
+      }
+      return null;
+    };
+    const walk2 = (refV, v, pathStr) => {
+      if (typeof refV === 'function' && typeof v === 'function') {
+        const a = pick(refV);
+        if (!a) return;                       // مرجع با این آرگومان‌ها متن نمی‌دهد: قضاوت نکن
+        let r; try { r = v(...a); } catch { return; }   // ترکیدن را گامِ اول گزارش کرده
+        if (typeof r !== 'string' || !r.trim()) empty.push(pathStr);
+      } else if (refV && typeof refV === 'object' && v && typeof v === 'object' && !Array.isArray(refV)) {
+        Object.entries(refV).forEach(([k, rv]) => walk2(rv, v[k], `${pathStr}.${k}`));
+      }
+    };
+    if (mod !== ref) Object.entries(ref).forEach(([k, rv]) => walk2(rv, mod[k], k));
+    if (empty.length) {
+      failures++;
+      console.log(`  ❌ ${empty.length} تابع با همان آرگومانِ مرجع، متنِ خالی می‌دهد:`);
+      empty.slice(0, 8).forEach(b => console.log(`     - ${b}`));
+    }
+
     if (broken.length) {
       failures++;
       console.log(`  ❌ ${broken.length} تابع در زمانِ اجرا ReferenceError می‌دهد (شناسه‌ی تعریف‌نشده):`);
