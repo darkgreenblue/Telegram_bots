@@ -46,6 +46,52 @@ export const DEFECTS = [
   },
 ];
 
+/* 🌍 ضعف‌های **مخصوصِ یک زبان** از `langdata.<locale>.json` می‌آیند.
+ *
+ * ⚠️ چرا کد و نه پرامپت: پرامپتِ روسی از قبل صریحاً می‌گوید «Всегда ты, никогда вы»
+ * و «Не навязывай человеку пол». با این حال دورِ دومِ آزمایشگاه ۲ فال با «вы»ی رسمی و
+ * ۳ فال با صرفِ جنسیت‌دار داد، یعنی **۵ از ۹**. این دقیقاً همان درسی است که ریپو سه
+ * بار ثبت کرده (زمان، کارتِ نیامده، عبارت‌های ممنوع): قاعده‌ی پرامپتیِ تکرارشده جواب
+ * نمی‌دهد و هرچه کد می‌تواند تضمین کند نباید به مدل سپرده شود. پس به‌جای لایه‌ی دومِ
+ * وصله روی پرامپت، همان مکانیزمِ موجود یک ردیف بیشتر می‌گیرد.
+ *
+ * ⚠️ چرا برای فارسی خطر ندارد: فارسی فایلِ زبان ندارد، پس این آرایه خالی می‌ماند و
+ * `DEFECTS` بیت‌به‌بیت همان دوتای قبلی است.
+ *
+ * `except` استثنای همان الگوست (مثلاً «вы» وقتی واقعاً دو نفر را خطاب می‌کند) و در
+ * **همان جمله** سنجیده می‌شود، نه در کلِ متن؛ وگرنه یک استثنا در جای دیگر کلِ فال را
+ * معاف می‌کرد. */
+function sentenceAround(text, idx) {
+  const start = Math.max(0, text.lastIndexOf('\n', idx), text.lastIndexOf('.', idx));
+  let end = text.length;
+  for (const ch of ['.', '\n', '؟', '?', '!']) {
+    const j = text.indexOf(ch, idx);
+    if (j !== -1 && j < end) end = j;
+  }
+  return text.slice(start, end + 1);
+}
+
+for (const d of (LANG_DATA.defects || [])) {
+  let re, exceptRe = null;
+  try {
+    re = new RegExp(d.pattern, d.flags || '');
+    // استثنا همیشه بی‌توجه به بزرگی/کوچکیِ حرف کامپایل می‌شود: عبارتِ «вы оба» در
+    // ابتدای جمله «Вы оба» است و با فلگِ خودِ الگو (که ممکن است case-sensitive باشد)
+    // رد می‌شد. اولین تستِ واقعی همین را گرفت.
+    if (d.except) exceptRe = new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`);
+  } catch { continue; } // الگوی خراب فقط همان ردیف را حذف می‌کند، نه کلِ تعمیر را
+  DEFECTS.push({
+    id: d.id,
+    hint: d.hint || '',
+    find: (t) => {
+      const m = String(t || '').match(re);
+      if (!m) return null;
+      if (exceptRe && exceptRe.test(sentenceAround(String(t), m.index))) return null;
+      return m[0].trim();
+    },
+  });
+}
+
 export function findDefects(llm) {
   const hits = [];
   const push = (path, text) => {

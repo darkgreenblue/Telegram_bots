@@ -91,6 +91,27 @@ for (const file of FILES) {
     ok(new Set(dup).size === dup.length, `نامِ هر ۷۸ کارت یکتاست${new Set(dup).size !== dup.length ? ' (نامِ تکراری یعنی مدل دو کارت را یکی می‌بیند)' : ''}`);
   }
 
+  console.log('\n▶ ضعف‌های زبانیِ مسیرِ تعمیر');
+  {
+    /* ⚠️ چرا این ادعاها لازم‌اند: پرامپتِ روسی از قبل صریحاً «ты» را اجباری و حدسِ
+     * جنسیت را ممنوع می‌کند، و مدل هر دو را در ۵ فال از ۹ شکست. یعنی این گارد تنها
+     * چیزی است که بینِ کاربر و آن خطا ایستاده. الگوی خراب یا استثنای غلط بی‌صدا
+     * خاموشش می‌کند، پس خودِ الگو **اجرا** می‌شود نه فقط خوانده. */
+    const defs = d.defects || [];
+    ok(Array.isArray(defs) && defs.length > 0, `ضعف‌های زبانی تعریف شده‌اند (${defs.length})`);
+    let allOk = true;
+    for (const df of defs) {
+      if (!df.id || !df.pattern || !df.hint) { allOk = false; continue; }
+      try { new RegExp(df.pattern, df.flags || ''); if (df.except) new RegExp(df.except, 'i'); }
+      catch { allOk = false; }
+    }
+    ok(allOk, 'هر ضعف id و الگوی معتبر و hint دارد');
+    // hint به **زبانِ خودِ مدل** است، چون مستقیم داخلِ پرامپتِ تعمیر می‌نشیند؛
+    // یک hintِ فارسی داخلِ پرامپتِ روسی همان باگی است که این PR بست.
+    const faHint = defs.filter((df) => /[؀-ۿ]/.test(df.hint || '')).map((df) => df.id);
+    ok(faHint.length === 0, `hintها به زبانِ همان locale اند${faHint.length ? ` (فارسی در: ${faHint.join(',')})` : ''}`);
+  }
+
   console.log('\n▶ هم‌خوانی با جدولِ دانش');
   {
     // دو فایلِ per زبان هر دو نامِ کارت دارند. واگراییشان یعنی مدل در یک جای پرامپت
@@ -115,6 +136,14 @@ console.log('\n▶ سیم‌کشیِ runtime');
   // ⚠️ اگر این دو جا برچسبِ خام را پاس بدهند، جوابِ قاطع به فارسی چاپ می‌شود
   ok(!/choiceLabels: spread\?\.choiceLabels/.test(BOT), 'برچسبِ تقابلی از مسیرِ ترجمه می‌رود، نه خام');
   ok((BOT.match(/choiceLabelsFor\(spread\)/g) || []).length === 2, 'هر دو نقطه‌ی verdict برچسبِ ترجمه‌شده می‌گیرند');
+  const REP = readFileSync(new URL('repair.js', DIR), 'utf8');
+  ok(/LANG_DATA\.defects/.test(REP), 'مسیرِ تعمیر ضعف‌های زبانی را از فایلِ زبان می‌خواند');
+  // استثنا باید بی‌توجه به بزرگیِ حرف کامپایل شود، وگرنه «Вы оба» در ابتدای جمله
+  // به‌عنوان خطابِ رسمی تعمیر می‌شود در حالی که جمعِ درستِ دو نفره است.
+  ok(/replace\('i', ''\)\}i`/.test(REP), 'استثنای ضعف case-insensitive کامپایل می‌شود');
+  // سنجه‌ی آزمایشگاه باید از **همان** فایل بخواند، وگرنه گارد و سنجه واگرا می‌شوند
+  const LAB = readFileSync(new URL('../../tools/reading-lab/lang/ru.mjs', DIR), 'utf8');
+  ok(/langdata\.ru\.json/.test(LAB), 'سنجه‌ی آزمایشگاه الگوها را از همان فایلِ گارد می‌خواند');
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ دادهٔ زبانی: ${pass} پاس، 0 خطا`);
