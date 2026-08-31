@@ -202,9 +202,12 @@ ok('متنِ پیشنهاد در locale است، نه در index', /alsoLucky:/.
 const urlInviteLines = SRC.split('\n')
   .filter(l => l.includes('Markup.button.url') && l.includes('shareUrlFor('));
 ok(`فقط یک دکمه‌ی url به اشتراک‌گذاری مانده (شد: ${urlInviteLines.length})`, urlInviteLines.length === 1);
+const inviteScreen = block(SRC, 'const inviteScreen = (uid) =>');
+ok('و آن یکی داخلِ رندرِ خودِ صفحه‌ی دعوت است (پیامِ توضیحی)',
+   !!inviteScreen && urlInviteLines.length === 1 && inviteScreen.includes(urlInviteLines[0].trim()));
+// و خودِ showInvite باید از همان تک‌منبع بخواند، نه یک کیبوردِ دستِ دوم بسازد.
 const showInvite = block(SRC, 'async function showInvite');
-ok('و آن یکی داخلِ خودِ showInvite است (پیامِ توضیحی)',
-   !!showInvite && urlInviteLines.length === 1 && showInvite.includes(urlInviteLines[0].trim()));
+ok('showInvite از همان تک‌منبع رندر می‌کند', !!showInvite && /inviteScreen\(uid\)/.test(showInvite));
 ok('ردیفِ دعوت تک‌منبع است', /const inviteRow = \(uid\) => \[Markup\.button\.callback\(/.test(SRC));
 ok('ردیفِ دعوت به invite_go می‌رود (پیامِ توضیحی)', /inviteRow[\s\S]{0,160}'invite_go'/.test(SRC));
 const inviteUses = (SRC.match(/inviteRow\(/g) || []).length;

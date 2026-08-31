@@ -193,7 +193,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.39.0';
+const PRODUCT_VERSION = '3.40.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1015,7 +1015,26 @@ const stmts = {
 
   insertReferral: db.prepare('INSERT OR IGNORE INTO referrals (referrer_id, referee_id) VALUES (?,?)'),
   getReferralByReferee: db.prepare('SELECT * FROM referrals WHERE referee_id=?'),
-  setReferralRewarded:  db.prepare('UPDATE referrals SET rewarded=1 WHERE id=?'),
+  // مبلغِ پاداش روی خودِ ردیف مهر می‌خورد و شرطِ `rewarded=0` ادعا را اتمیک می‌کند
+  // (گاردِ جاوااسکریپتی از قبل بود، ولی این‌جا مسیرِ پول است و ارزانی‌اش رایگان است).
+  setReferralRewarded:  db.prepare('UPDATE referrals SET rewarded=1 WHERE id=? AND rewarded=0'),
+
+  // ── وضعیتِ دعوت‌ها (v3.40.0) ──
+  // «چند نفر آمدند» و «چند نفر کامل کردند» از خودِ جدولِ دعوت می‌آیند.
+  // روی دیتای زنده تأیید شد که `rewarded=1` دقیقاً معادلِ «دعوت‌شده اولین فالش را
+  // تحویل گرفته» است (صفر ردیفِ rewarded=0 با فالِ delivered)، پس همین یک شمارش
+  // هر دو سؤال را جواب می‌دهد و لازم نیست به readings join بزنیم.
+  refCounts: db.prepare(
+    'SELECT COUNT(*) AS total, COALESCE(SUM(rewarded),0) AS done FROM referrals WHERE referrer_id=?'),
+  // ⚠️ «چقدر گرفتی» عمداً از **دفترِ رویداد** خوانده می‌شود، نه از ضربِ تعداد در پاداشِ
+  // امروز. مبلغِ پاداش در تاریخِ ربات عوض شده: روی دیتای زنده دو مقدارِ متمایز دیده شد
+  // (۱ و ۱۰)، پس `done × referralBonusFor(uid)` به کاربرانِ قدیمی عددِ غلط نشان می‌داد.
+  // دفترِ رویداد همان چیزی است که واقعاً به موجودی اضافه شده، و پوششش هم سنجیده شد:
+  // صفر ردیفِ rewarded=1 بدونِ رویدادِ متناظر.
+  // 🛑 پس تا وقتی این عدد رو-به-کاربر است، `events_retention_days` نباید روشن شود
+  // (هرس کردنِ رویدادهای قدیمی این عدد را کم نشان می‌دهد). در CLAUDE.md ثبت شد.
+  refRewardSum: db.prepare(`SELECT COALESCE(SUM(json_extract(props,'$.amount')),0) AS s
+    FROM events WHERE user_id=? AND event='credit_granted' AND json_extract(props,'$.kind')='referral'`),
 
   setMemory: db.prepare('UPDATE users SET memory_json=? WHERE telegram_id=?'),
   // 🧠 ریستِ حافظه: یک UPDATE اتمیک که حافظه‌ی فعلی را **بایگانی** می‌کند، خالی‌اش می‌کند و
@@ -4275,9 +4294,11 @@ async function finishReading(ctx, uid, readingId) {
   try {
     const ref = stmts.getReferralByReferee.get(uid);
     if (ref && !ref.rewarded && stmts.countDelivered.get(uid).c === 1) {
-      stmts.setReferralRewarded.run(ref.id);
       // پاداش طبق اقتصادِ **دعوت‌کننده** حساب می‌شود، چون تنها اوست که چیزی می‌گیرد.
+      // محاسبه قبل از ادعا آمد (فقط خواندنِ پرچم است و هیچ await ای وسط نیست)، ولی
+      // ترتیبِ حیاتی دست‌نخورده ماند: **ادعا قبل از واریز**، ضدِ پرداختِ دوباره.
       const refAmt = referralBonusFor(ref.referrer_id);
+      stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(refAmt, ref.referrer_id);
       track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
       const referee = getUser(uid);
@@ -4436,6 +4457,34 @@ function shareUrlFor(uid) {
 
 // دعوت دوستان: لینک اختصاصی قابل کپی + دکمه‌ی ارسال مستقیم به دوستان. یک تابع، دو ورودی
 // (کیبورد اصلی + دکمه‌ی اینلاینِ «معرفی دوستان» زیرِ صفحه‌ی کیف الماس) تا رفتار یکی بماند.
+//
+// تک‌منبعِ «متن + دکمه‌ها»ی صفحه‌ی دعوت، تا هم خودِ صفحه و هم دکمه‌ی بازگشتِ صفحه‌ی وضعیت
+// دقیقاً یک چیز را رندر کنند (همان الگوی walletScreen/falMenuScreen).
+// 🎨 دکمه‌ی اشتراک‌گذاری سبز است (Bot API 9.4، تصمیمِ صریحِ مالک): اقدامِ اصلیِ این صفحه
+// باید در یک نگاه از دکمه‌ی اطلاعاتیِ زیرش جدا باشد.
+const inviteScreen = (uid) => {
+  const cur = curOf(uid);
+  const bonus = referralBonusFor(uid);
+  return [L.share.invitePrompt(BOT_USERNAME, uid, bonus, cur), {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [styled(Markup.button.url(L.buttons.share(bonus, cur), shareUrlFor(uid)), 'success')],
+      [Markup.button.callback(L.buttons.inviteStatus, 'invite_stat')],
+    ]),
+  }];
+};
+
+// صفحه‌ی «وضعیت دعوت‌ها و هدیه‌ها» — از همان پیام باز می‌شود و به همان پیام برمی‌گردد.
+const inviteStatusScreen = (uid) => {
+  const c = stmts.refCounts.get(uid) || { total: 0, done: 0 };
+  const total = Number(c.total) || 0;
+  const done = Number(c.done) || 0;
+  const got = Number(stmts.refRewardSum.get(uid)?.s) || 0;
+  return [L.share.inviteStatus(total, done, got, total - done, curOf(uid)), {
+    ...Markup.inlineKeyboard([[Markup.button.callback(L.buttons.inviteBack, 'invite_back')]]),
+  }];
+};
+
 async function showInvite(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
@@ -4444,10 +4493,8 @@ async function showInvite(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.INVITE)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.INVITE)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  await ctx.reply(L.share.invitePrompt(BOT_USERNAME, uid, referralBonusFor(uid), curOf(uid)), {
-    parse_mode: 'Markdown',
-    reply_markup: Markup.inlineKeyboard([[Markup.button.url(L.buttons.share(referralBonusFor(uid), curOf(uid)), shareUrlFor(uid))]]).reply_markup,
-  });
+  const [text, extra] = inviteScreen(uid);
+  await ctx.reply(text, extra);
 }
 // برچسبِ این دکمه در v3.9.2 به «معرفی دوستان» رفت و در v2.3 به «دعوت دوستان» برگشت. کیبوردِ
 // reply روی گوشیِ کاربر تا اولین جایگزینی می‌ماند، پس کاربری که کیبوردش هنوز برچسبِ میانی را
@@ -4456,6 +4503,23 @@ async function showInvite(ctx) {
 const INVITE_LABELS = [L.buttons.inviteMain, '📤 معرفی دوستان'];
 bot.hears(INVITE_LABELS, showInvite);
 bot.action('invite_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showInvite(ctx); });
+
+// وضعیتِ دعوت‌ها ⇄ خودِ صفحه‌ی دعوت: هر دو **همان پیام** را ادیت می‌کنند، پس چتِ کاربر
+// شلوغ نمی‌شود. هیچ‌کدام state را دست نمی‌زنند و هیچ چیزی نمی‌نویسند (فقط خواندن)، پس
+// عمداً پشتِ گاردهای فلوی باز نرفتند: یک دکمه‌ی کهنه در چتِ کاربرِ وسطِ فال هم بی‌ضرر است.
+bot.action('invite_stat', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  const [text, extra] = inviteStatusScreen(ctx.from.id);
+  await ctx.editMessageText(text, extra).catch(() => {});
+});
+bot.action('invite_back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  const [text, extra] = inviteScreen(ctx.from.id);
+  await ctx.editMessageText(text, extra).catch(() => {});
+});
 
 // «تخفیف می‌خوام» — شاخه‌ی اختیاریِ کنارِ مسیر اصلی؛ استیت را دست نمی‌زند تا فالِ رزروشده
 // و پرداختِ در جریان سالم بمانند. اولین شارژ → کدِ شخصیِ ۵۰٪ (دستی وارد می‌شود، هرگز خودکار)؛

@@ -280,6 +280,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-ux-menu.mjs
 
+      # وضعیتِ دعوت‌ها و هدیه‌ها: عددها روی SQLite واقعی اجرا می‌شوند. مهم‌ترین ادعا این
+      # است که «چقدر گرفتی» از دفترِ رویداد بیاید نه از «تعداد × پاداشِ امروز» — مبلغِ
+      # پاداش در تاریخِ ربات عوض شده و آن فرمول به کاربرانِ قدیمی عددِ غلط می‌داد.
+      - name: Invite status check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-invite-stats.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check
