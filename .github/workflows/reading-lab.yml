@@ -131,17 +131,25 @@ jobs:
             const fs = require("fs");
             if (!fs.existsSync("reading-lab-out.json")) { console.log("بدونِ خروجی"); process.exit(0); }
             const a = JSON.parse(fs.readFileSync("reading-lab-out.json", "utf8"));
-            const sum = (f) => a.reduce((s, r) => s + (f(r) || 0), 0);
-            const lo = sum(r => r.check?.anchor?.loose), to = sum(r => r.check?.anchor?.total);
-            const ls = sum(r => r.check?.anchor?.looseStrict ?? r.check?.anchor?.loose);
-            const bad = a.filter(r => (r.check?.issues || []).length).length;
-            const pct = (x) => (to ? Math.round(x * 100 / to) : 0);
+            const sum = (rows, f) => rows.reduce((s, r) => s + (f(r) || 0), 0);
             console.log("═══ خلاصه ═══");
-            console.log(`فال: ${a.length} | ایرادناک: ${bad}`);
-            console.log(`بی‌لنگر: ${lo}/${to} (${pct(lo)}٪)`);
-            console.log(ls === lo
-              ? "سنجه‌ی قدیمی: همان عدد (صفر جمله‌ی نجات‌یافته)"
-              : `سنجه‌ی قدیمی: ${ls}/${to} (${pct(ls)}٪) → فیکسِ ریشه‌یابی ${ls - lo} جمله نجات داد`);
-            for (const r of a) if ((r.check?.issues || []).length)
-              console.log(`  ❌ ${r.persona}/${r.step}${r.rep ? "/پ" + r.rep : ""}: ${r.check.issues.join(" | ")}`);
+            /* ⚠️ per بازو، نه تجمیعی. نسخه‌ی اولِ این خلاصه فقط جمعِ کل را چاپ می‌کرد و
+             * در یک اجرای چندبازویی عملاً بی‌مصرف بود: نمی‌شد فهمید کدام بازو کدام ایراد
+             * را داد. دقیقاً همان اشتباهی که خودِ سنجه هم داشت (درصدِ تجمیعی اثر را
+             * پنهان می‌کند)، این‌بار در لایه‌ی گزارش. */
+            const arms = [...new Set(a.map(r => r.arm || ""))];
+            for (const arm of arms) {
+              const rows = a.filter(r => (r.arm || "") === arm);
+              const lo = sum(rows, r => r.check?.anchor?.loose);
+              const to = sum(rows, r => r.check?.anchor?.total);
+              const ls = sum(rows, r => r.check?.anchor?.looseStrict ?? r.check?.anchor?.loose);
+              const bad = rows.filter(r => (r.check?.issues || []).length);
+              const pct = (x) => (to ? Math.round(x * 100 / to) : 0);
+              console.log(`\n── ${arm || "(پیش‌فرض)"}`);
+              console.log(`   فال: ${rows.length} | ایرادناک: ${bad.length}`);
+              console.log(`   بی‌لنگر: ${lo}/${to} (${pct(lo)}٪)` +
+                (ls === lo ? "" : ` | سنجه‌ی قدیمی ${pct(ls)}٪ (${ls - lo} جمله نجات یافت)`));
+              for (const r of bad)
+                console.log(`   ❌ ${r.persona}/${r.step}${r.rep ? "/پ" + r.rep : ""}: ${r.check.issues.join(" | ")}`);
+            }
           '
