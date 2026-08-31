@@ -13,7 +13,10 @@ import { BOTS, botByKey, instancesOf } from './bots.js';
 export const DEFAULT_BOT = 'tarot';
 
 /** ربات‌هایی که «داشبوردِ اصلیِ BI» برایشان پیاده شده. بقیه همان صفحه‌های موجود را دارند. */
-export const MASTER_DASH_BOTS = new Set(['tarot']);
+/* ⚠️ `tarot-intl` هم داخل است: همان کدِ ربات و **همان قرارداد رویدادها** را دارد، پس
+ * هر کوئریِ BI بدونِ تغییر رویش کار می‌کند. تنها چیزی که فرق دارد واحدِ پول است و آن
+ * از پروفایلِ خودِ ربات می‌آید (`moneyText`)، نه از این صفحه. */
+export const MASTER_DASH_BOTS = new Set(['tarot', 'tarot-intl']);
 
 export const NAV = [
   {
