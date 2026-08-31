@@ -9,6 +9,7 @@
 // روشِ این تست: برای هر سنجه دو حالت — یکی که **باید** قرمز کند و یکی که **نباید**.
 // سنجه‌ای که فقط حالتِ سالم را ببیند هیچ‌چیز را تضمین نمی‌کند؛ همان درسی که در این ریپو
 // با «صحتش با برگرداندنِ عمدیِ باگ تأیید شد» تکرار شده.
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { renderV4 } from '../bots/tarot/reading-core.js';
 import { checkReading } from './reading-lab/checks.mjs';
@@ -309,6 +310,52 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
     'دورِ زبانی که verdict ندارد قبل از خرجِ پول متوقف می‌شود');
   ok(/\['yes', 'no', 'direction', 'evasion', 'but'\]/.test(LAB),
     'پیش‌پرواز همان کلیدهایی را می‌خواهد که گاردِ سرخط لازم دارد');
+}
+
+/* ═══ سنجه‌ی «لنگر» خودش تست می‌شود، نه فقط کدش خوانده می‌شود ═══
+ *
+ * 🐛 باگِ ۱۴۰۵/۰۶/۰۹: جمله‌ای که صریحاً نامِ کارتِ کشیده‌شده را در حالتِ **صرف‌شده**
+ * برده بود، «بی‌لنگر» شمرده می‌شد. دو گلوگاهِ مستقل با هم: `minWordLen` کلمه‌ی کوتاه را
+ * قبل از ریشه‌یابی دور می‌ریخت، و کفِ طولِ ریشه‌ی خودِ استمر ۴ بود پس «Туз» و «Туза»
+ * به یک ریشه نمی‌رسیدند. اثرش **نامتقارن** بود: فارسی صرف نمی‌کند پس از مسیرِ تطبیقِ
+ * عینی رد می‌شد و دست‌نخورده ماند، ولی روسی کاملاً به مسیرِ ریشه وابسته بود. یعنی
+ * «شکافِ کیفیتِ فارسی و روسی» روی خط‌کشِ کج اندازه‌گیری شده بود.
+ *
+ * درس: خواندنِ کدِ سنجه کافی نیست، باید **اجرا** شود. این بلوک همان کاری را با سنجه
+ * می‌کند که `check-locale-shape` با locale کرد. */
+{
+  console.log('\n▶ سنجه‌ی لنگر واقعاً اجرا می‌شود (ضدِ خط‌کشِ کج)');
+  const CASES = [
+    ['ru', [['Туза Кубков тут говорит о начале нежности в твоей жизни', false],
+            ['Луны в этом раскладе достаточно чтобы понять твою тревогу', false],
+            ['У Тройки Кубков есть своя радость которую ты давно не чувствовала', false],
+            ['Ты сильная женщина и у тебя все обязательно получится в жизни', true]]],
+    ['fa', [['آس جام این‌جا از شروعِ یک مهربانیِ تازه حرف می‌زنه برات', false],
+            ['ماه نشون می‌ده که ابهام هنوز هست و باید صبر کنی کمی', false],
+            ['تو آدمِ قوی‌ای هستی و حتماً همه چیز درست می‌شه برات', true]]],
+  ];
+  const cards = [{ key: 'c01' }, { key: 'm18' }, { key: 'c03' }];
+  const ctx = { question: 'x', memory: '', previous: [] };
+  for (const [loc, cases] of CASES) {
+    const prev = process.env.LOCALE;
+    process.env.LOCALE = loc;
+    // هر زبان در یک پروسه‌ی جدا اجرا می‌شود: ماژولِ سنجه زبان را در زمانِ import قفل می‌کند.
+    const src = `
+      process.env.LOCALE=${JSON.stringify(loc)};
+      const { anchorScore } = await import(${JSON.stringify(new URL('../tools/reading-lab/checks.mjs', import.meta.url).href)});
+      const cards=${JSON.stringify(cards)}, ctx=${JSON.stringify(ctx)};
+      const out=${JSON.stringify(cases)}.map(([t,e])=>{
+        const l=anchorScore({llm:{headline:'',pattern:t,callback:'',closing:'',reads:[]},cards,ctx}).loose>0;
+        return l===e;});
+      console.log(JSON.stringify(out));`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', src], { encoding: 'utf8' });
+    process.env.LOCALE = prev;
+    let res = null;
+    try { res = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch {}
+    ok(Array.isArray(res) && res.length === cases.length && res.every(Boolean),
+      `سنجه‌ی لنگر روی «${loc}» هر ${cases.length} حالت را درست می‌گوید` +
+      (Array.isArray(res) ? ` (${res.filter(Boolean).length}/${res.length})` : ' (اجرا نشد)'));
+  }
 }
 
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }
