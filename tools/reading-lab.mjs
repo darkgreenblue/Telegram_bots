@@ -448,11 +448,18 @@ if (!DRY) {
   const done = all.filter(r => r.llm);
   // ⚠️ مقایسه فقط **داخلِ هر پاس**. اگر پاس‌ها با هم مخلوط شوند، همان سناریو با همان
   // کارت‌ها در دو پاس طبیعتاً شبیهِ خودش درمی‌آید و عددِ تکرار را الکی باد می‌کند.
+  /* ⚠️ گروه‌بندی باید **بازو و پاس** را با هم ببیند، نه فقط پاس. با دو بازو، پاسِ ۱ـِ
+   * بازوی A و پاسِ ۱ـِ بازوی B در یک سطل می‌افتادند و یک ۶کلمه‌ایِ مشترکِ
+   * `A/R1.1` و `B/R1.2` به‌عنوان «تکرارِ بین‌فالی» شمرده می‌شد، در حالی که اصلاً دو
+   * مدلِ متفاوت‌اند و این عدد قرار است بگوید **یک** مدل خودش را تکرار می‌کند یا نه. */
+  const groupsSeen = [...new Set(done.map(r => `${r.arm || ''}\u0000${r.rep}`))].sort();
   const repsSeen = [...new Set(done.map(r => r.rep))].sort();
   const perRep = [];
-  for (const rp of repsSeen) {
+  for (const gk of groupsSeen) {
+    const [gArm, gRep] = gk.split('\u0000');
+    const rp = Number(gRep);
     const seen = new Map();
-    for (const r of done.filter(x => x.rep === rp)) {
+    for (const r of done.filter(x => String(x.arm || '') === gArm && x.rep === rp)) {
       for (const g of new Set(ngrams(modelText(r.llm), 6))) {
         if (!seen.has(g)) seen.set(g, new Set());
         seen.get(g).add(`${r.persona}.${r.i + 1}`);
@@ -460,9 +467,10 @@ if (!DRY) {
     }
     const rr = [...seen.entries()].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
     perRep.push(rr);
-    if (repsSeen.length > 1) console.log(`\n   ── پاسِ ${rp + 1}: ${rr.length} تکرار`);
+    const label = (ARM_LIST.length > 1 ? `${gArm} / ` : '') + `پاسِ ${rp + 1}`;
+    if (repsSeen.length > 1 || ARM_LIST.length > 1) console.log(`\n   ── ${label}: ${rr.length} تکرار`);
     if (!rr.length) console.log('   ✅ هیچ ۶کلمه‌ای در دو فالِ متفاوت تکرار نشده');
-    else for (const [g, s] of rr.slice(0, repsSeen.length > 1 ? 8 : 25)) console.log(`      [${[...s].join(', ')}] «${g}»`);
+    else for (const [g, s2] of rr.slice(0, groupsSeen.length > 1 ? 8 : 25)) console.log(`      [${[...s2].join(', ')}] «${g}»`);
   }
   const repeatCounts = perRep.map(x => x.length);
 
