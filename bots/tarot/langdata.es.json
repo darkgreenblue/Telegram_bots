@@ -1110,7 +1110,8 @@
       "id": "formal",
       "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:usted(?:es)?|vosotros|vuestr[oa]s?|hab[ée]is|ten[ée]is|sois|vos\\s+(?:ten[ée]s|pod[ée]s|quer[ée]s|sab[ée]s|sos))(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
       "flags": "i",
-      "hint": "Trato formal o regional. Usa «tú»: «tú tienes», «tú puedes», nunca «usted», «vos» ni «vosotros»."
+      "hint": "Trato formal o regional. Usa «tú»: «tú tienes», «tú puedes», nunca «usted», «vos» ni «vosotros».",
+      "except": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:ustedes\\s+(?:dos|mismos|mismas)|entre\\s+ustedes|los\\s+dos|las\\s+dos|ambos|ambas)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])"
     },
     {
       "id": "genero",
