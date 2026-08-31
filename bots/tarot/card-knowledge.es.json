@@ -1,0 +1,626 @@
+{
+  "m00": {
+    "name": "El Loco",
+    "image": "Joven distraído al borde del acantilado; atado en el bastón, rosa blanca en la mano, un perro blanco a sus pies.",
+    "up": "Empezar de cero con el corazón liviano; dar el paso sin plan.",
+    "down": "Imprudencia, o al revés: miedo al primer paso.",
+    "love": "Comienzo nuevo, o relación sin compromiso claro.",
+    "work": "Riesgo nuevo, camino sin señales todavía."
+  },
+  "m01": {
+    "name": "El Mago",
+    "image": "Hombre tras la mesa con bastón, copa, espada y moneda; una mano al cielo, otra a la tierra, el infinito encima.",
+    "up": "Ya tienes todas las herramientas; solo falta ponerlas a trabajar.",
+    "down": "Talento parado, o juego de manipulación y engaño.",
+    "love": "Atracción fuerte; el primer paso es tuyo.",
+    "work": "Habilidad y oportunidad, las dos ya están."
+  },
+  "m02": {
+    "name": "La Sacerdotisa",
+    "image": "Mujer sentada entre una columna negra y otra blanca, velo detrás, la luna bajo el pie y un rollo en el regazo.",
+    "up": "Algo sigue oculto; la respuesta viene de adentro, no de afuera.",
+    "down": "Ignorar lo que sientes, o un secreto que sale a la luz.",
+    "love": "Sentimiento callado, relación en secreto.",
+    "work": "Información que todavía no te dieron."
+  },
+  "m03": {
+    "name": "La Emperatriz",
+    "image": "Mujer recostada en almohadones en un trigal, corona de doce estrellas y un escudo de Venus al lado.",
+    "up": "Abundancia y fertilidad; algo está creciendo de verdad.",
+    "down": "Descuidarte a ti, o un cariño que asfixia.",
+    "love": "Relación cálida que alimenta, embarazo.",
+    "work": "Un proyecto que empieza a dar fruto."
+  },
+  "m04": {
+    "name": "El Emperador",
+    "image": "Hombre imponente en trono de piedra con cabezas de carnero, cetro en la mano y montañas secas detrás.",
+    "up": "Estructura y autoridad; aquí el control llega por el orden.",
+    "down": "Terquedad fuera de lugar, o abuso de poder.",
+    "love": "Relación con reglas, o un hombre que manda.",
+    "work": "Gestión, ley, un puesto firme."
+  },
+  "m05": {
+    "name": "El Hierofante",
+    "image": "Sacerdote en el trono del templo, tiara de tres pisos, dos discípulos a sus pies y dos llaves cruzadas.",
+    "up": "Tradición y regla asentada; guía de alguien con más camino.",
+    "down": "Romper la norma, o aferrarse a una regla sin alma.",
+    "love": "Matrimonio, compromiso formal.",
+    "work": "Institución tradicional, hora de aprender."
+  },
+  "m06": {
+    "name": "Los Enamorados",
+    "image": "Hombre y mujer desnudos bajo un ángel; detrás de él un árbol en llamas, detrás de ella el de la serpiente.",
+    "up": "Un vínculo profundo, o una elección de valores que te toca a ti.",
+    "down": "Desencuentro, o una elección tomada por miedo.",
+    "love": "Vínculo verdadero, o encrucijada del corazón.",
+    "work": "Asociarse, o elegir entre dos caminos."
+  },
+  "m07": {
+    "name": "El Carro",
+    "image": "Guerrero en un carro tirado por dos esfinges, una negra y una blanca; arriba, un palio de estrellas.",
+    "up": "Victoria por voluntad; si sostienes las riendas, llegas.",
+    "down": "Perder el control, o avanzar sin rumbo.",
+    "love": "La relación avanza, pero con esfuerzo.",
+    "work": "Progreso, viaje, competencia."
+  },
+  "m08": {
+    "name": "La Fuerza",
+    "image": "Mujer serena cierra con las dos manos la mandíbula de un león; el infinito sobre su cabeza.",
+    "up": "Fuerza suave; esto se doma con paciencia, no con presión.",
+    "down": "Dudar de ti, o una rabia sin freno.",
+    "love": "El cariño paciente es lo que sostiene.",
+    "work": "La insistencia calma es la que rinde."
+  },
+  "m09": {
+    "name": "El Ermitaño",
+    "image": "Anciano solo en la cima del monte, farol con estrella de seis puntas en una mano y bastón en la otra.",
+    "up": "Retirarse para entender; la respuesta aparece en silencio.",
+    "down": "Aislamiento de más, o huir de la soledad que hace falta.",
+    "love": "Distancia, o una relación que pide silencio.",
+    "work": "Trabajo solitario, especialidad profunda."
+  },
+  "m10": {
+    "name": "La Rueda de la Fortuna",
+    "image": "Rueda llena de símbolos en el cielo, con serpiente, chacal y esfinge; cuatro seres alados en las esquinas.",
+    "up": "La suerte gira; algo cambia sin depender de ti.",
+    "down": "Girar en el mismo ciclo de siempre, demora.",
+    "love": "Punto de giro en la relación.",
+    "work": "Una oportunidad que llega de afuera."
+  },
+  "m11": {
+    "name": "La Justicia",
+    "image": "Mujer en el trono entre dos columnas, balanza en la izquierda y espada de doble filo en la derecha.",
+    "up": "Cosechas lo que sembraste; decisión justa.",
+    "down": "Injusticia, o escapar de asumir tu parte.",
+    "love": "El equilibrio, o su falta, queda a la vista.",
+    "work": "Contrato, asunto legal."
+  },
+  "m12": {
+    "name": "El Colgado",
+    "image": "Hombre colgado boca abajo de un pie en un árbol, manos atrás y un halo en la cabeza; se ve tranquilo.",
+    "up": "Pausa obligada; al cambiar el ángulo, el camino se abre.",
+    "down": "Insistir por terquedad, o un sacrificio que no sirve.",
+    "love": "Relación en suspenso, espera.",
+    "work": "Un proyecto que quedó frenado."
+  },
+  "m13": {
+    "name": "La Muerte",
+    "image": "Esqueleto con armadura en un caballo blanco, bandera negra con rosa blanca; al fondo el sol entre dos torres.",
+    "up": "Fin definitivo de una etapa; eso mismo abre espacio a lo nuevo.",
+    "down": "Aferrarte a algo que ya terminó.",
+    "love": "Fin o cambio profundo de la relación.",
+    "work": "Se cierra una etapa de trabajo."
+  },
+  "m14": {
+    "name": "La Templanza",
+    "image": "Ángel pasa el agua de una copa a otra, un pie en el agua y otro en tierra; detrás, un sendero al sol.",
+    "up": "Medida y mezcla justa; esto va a llevar su tiempo.",
+    "down": "Exceso, impaciencia, desequilibrio interno.",
+    "love": "Relación que se acomoda con calma.",
+    "work": "Colaboración, ajustar el ritmo."
+  },
+  "m15": {
+    "name": "El Diablo",
+    "image": "Figura mitad cabra mitad humana con alas de murciélago en un pedestal; abajo, una pareja con cadenas flojas.",
+    "up": "Dependencia: la jaula se sostiene porque tú sujetas la cadena.",
+    "down": "Romper la cadena, ver de qué dependes.",
+    "love": "Atracción fuerte, pero nada sana.",
+    "work": "Contrato que asfixia, dinero que ata."
+  },
+  "m16": {
+    "name": "La Torre",
+    "image": "Torre en lo alto del acantilado: un rayo tumba la corona y todo arde; dos personas caen de las ventanas.",
+    "up": "Se derrumba de golpe lo que tenía la base floja.",
+    "down": "Postergar un derrumbe que va a pasar igual.",
+    "love": "Ruptura brusca, o una verdad que salió.",
+    "work": "Pérdida repentina del trabajo."
+  },
+  "m17": {
+    "name": "La Estrella",
+    "image": "Mujer en la orilla, un pie en el agua, vierte dos jarras en la tierra y en el lago; una estrella grande arriba.",
+    "up": "Esperanza y cura después del golpe; el camino está claro.",
+    "down": "Desánimo, o no confiar en lo que viene.",
+    "love": "Cura y esperanza otra vez.",
+    "work": "Inspiración, un camino que se aclaró."
+  },
+  "m18": {
+    "name": "La Luna",
+    "image": "Un camino se aleja entre dos torres; un perro y un lobo aúllan, un cangrejo sale del agua, la luna arriba.",
+    "up": "Niebla e ilusión; la cosa no es lo que parece.",
+    "down": "La niebla se levanta y la verdad se aclara.",
+    "love": "Duda, secreto, un miedo sin nombre.",
+    "work": "Información a medias, juego sucio."
+  },
+  "m19": {
+    "name": "El Sol",
+    "image": "Niño en un caballo blanco con bandera roja, detrás un muro de girasoles y un sol enorme en el cielo.",
+    "up": "Claridad y éxito a la vista; la mejor carta del mazo.",
+    "down": "Alegría postergada, optimismo sin base.",
+    "love": "Relación liviana y feliz.",
+    "work": "Un éxito que todos ven."
+  },
+  "m20": {
+    "name": "El Juicio",
+    "image": "Un ángel toca la trompeta y la gente se levanta de los ataúdes con los brazos en alto.",
+    "up": "Un llamado que no se puede ignorar; se cierra la cuenta del pasado.",
+    "down": "No escuchar el llamado, quedarte en el arrepentimiento.",
+    "love": "Perdón, o alguien del pasado que vuelve.",
+    "work": "Decisión grande, un llamado nuevo."
+  },
+  "m21": {
+    "name": "El Mundo",
+    "image": "Mujer bailando dentro de una corona de hojas, un bastón en cada mano; cuatro criaturas en las esquinas.",
+    "up": "Ciclo completo; llegaste adonde querías llegar.",
+    "down": "Quedó algo por la mitad, sin cerrar.",
+    "love": "Una relación que quedó completa.",
+    "work": "Un proyecto que termina bien."
+  },
+  "w01": {
+    "name": "As de Bastos",
+    "image": "Una mano sale de la nube y ofrece un bastón con hojas nuevas; a lo lejos, un castillo en las colinas.",
+    "up": "La chispa de un comienzo; la energía ya está, solo hay que aprovecharla.",
+    "down": "Chispa que se apagó, o un arranque que quedó para después.",
+    "love": "Comienzo con fuego, atracción nueva.",
+    "work": "Idea nueva, propuesta de trabajo."
+  },
+  "w02": {
+    "name": "Dos de Bastos",
+    "image": "Hombre en la muralla sostiene un globo y mira el horizonte; un bastón en la mano, otro sujeto a la pared.",
+    "up": "El plan está listo y el pie no se movió; hora de decidir.",
+    "down": "Miedo a salir de la zona cómoda, plan que no arranca.",
+    "love": "Decisión sobre el futuro de la relación.",
+    "work": "Planificar, ampliar el negocio."
+  },
+  "w03": {
+    "name": "Tres de Bastos",
+    "image": "Hombre de espaldas, en lo alto, mira los barcos en el mar; tres bastones clavados a su lado.",
+    "up": "Lo que sembraste ya viene en camino; el horizonte se abrió.",
+    "down": "Resultado que se atrasa, o mirada demasiado corta.",
+    "love": "Esperar una buena noticia de la otra persona.",
+    "work": "Expansión, socios más lejos."
+  },
+  "w04": {
+    "name": "Cuatro de Bastos",
+    "image": "Arco de flores entre cuatro bastones; dos personas levantan ramos y al fondo se ve el castillo.",
+    "up": "Fiesta y alivio; una etapa se cerró bien.",
+    "down": "Festejo postergado, casa sin paz.",
+    "love": "Compromiso, boda, casa compartida.",
+    "work": "Puesto asegurado, equipo unido."
+  },
+  "w05": {
+    "name": "Cinco de Bastos",
+    "image": "Cinco muchachos levantan sus bastones y los cruzan en el aire, cada uno tirando para su lado.",
+    "up": "Roce y disputa; todavía no ganó nadie.",
+    "down": "Fin de la pelea, o esquivar un choque necesario.",
+    "love": "Discusión y terquedad.",
+    "work": "Competencia, equipo desafinado."
+  },
+  "w06": {
+    "name": "Seis de Bastos",
+    "image": "Jinete con corona de laurel en un caballo blanco, gente alrededor; su bastón también lleva corona.",
+    "up": "Victoria a la vista; tu trabajo queda reconocido.",
+    "down": "Victoria sin aplauso, u orgullo antes de tiempo.",
+    "love": "Tu lugar en la relación se reconoce.",
+    "work": "Ascenso, elogio en público."
+  },
+  "w07": {
+    "name": "Siete de Bastos",
+    "image": "Hombre en lo alto se defiende con un solo bastón; desde abajo, seis bastones vienen hacia él.",
+    "up": "Vas a tener que sostener tu posición; se puede defender.",
+    "down": "Cansancio de defenderse, o ceder ante la presión.",
+    "love": "Defender la relación de quien se mete.",
+    "work": "Sostener tu lugar frente al competidor."
+  },
+  "w08": {
+    "name": "Ocho de Bastos",
+    "image": "Ocho bastones vuelan paralelos por el aire y bajan hacia la tierra; el cielo está despejado.",
+    "up": "Todo se mueve rápido; una noticia o un hecho está cerca.",
+    "down": "Lentitud y demora, o apuro sin sentido.",
+    "love": "Mensaje o paso repentino de la otra persona.",
+    "work": "Aceleración, noticia urgente."
+  },
+  "w09": {
+    "name": "Nueve de Bastos",
+    "image": "Hombre herido, venda en la frente, se apoya en su bastón y vigila; detrás, ocho bastones en fila.",
+    "up": "Cansancio, pero la llegada está muy cerca; falta un empujón.",
+    "down": "Rendirse casi al final, o desconfiar sin motivo.",
+    "love": "Cautela después de una herida vieja.",
+    "work": "Firmeza en la última etapa."
+  },
+  "w10": {
+    "name": "Diez de Bastos",
+    "image": "Hombre carga los diez bastones de una vez y camina encorvado hacia una casa a lo lejos.",
+    "up": "Cargaste más peso del que aguantas; se llega igual, pero cuesta.",
+    "down": "Bajar la carga, o pasar la tarea a otro.",
+    "love": "Todo el peso de la relación sobre una sola persona.",
+    "work": "Demasiado trabajo, agotamiento."
+  },
+  "w11": {
+    "name": "Sota de Bastos",
+    "image": "Joven de ropa colorida observa su bastón que echa brotes; detrás, un desierto con pirámides.",
+    "up": "Noticia o idea nueva; curiosidad cruda, pero bien viva.",
+    "down": "Inquietud, algo que se empieza y se deja.",
+    "love": "Enamoramiento nuevo y sin experiencia.",
+    "work": "Pasantía, noticia de un empleo."
+  },
+  "w12": {
+    "name": "Caballero de Bastos",
+    "image": "Jinete con armadura amarilla sobre un caballo encabritado; una pluma roja le sale del yelmo.",
+    "up": "Movimiento con fuego y apuro; alguien que entra de golpe.",
+    "down": "Correr sin pensar, o quedarse atrás.",
+    "love": "Enamorado ardiente, pero sin constancia.",
+    "work": "Traslado, proyecto a toda velocidad."
+  },
+  "w13": {
+    "name": "Reina de Bastos",
+    "image": "Mujer en un trono de piedra, girasol en una mano y bastón en la otra; un gato negro a sus pies.",
+    "up": "Confianza cálida; una mujer atractiva y firme a la vez.",
+    "down": "Celos o altibajos, confianza que tiembla.",
+    "love": "Una mujer cálida y segura en esta historia.",
+    "work": "Un liderazgo que inspira."
+  },
+  "w14": {
+    "name": "Rey de Bastos",
+    "image": "Hombre en el trono con símbolos de león y salamandra, bastón largo en la mano y la mirada de lado.",
+    "up": "Liderazgo y visión grande; alguien que abre camino.",
+    "down": "Autoritarismo, o promesa que no se cumple.",
+    "love": "Hombre ambicioso, de los que van adelante.",
+    "work": "Emprender, decisión estratégica."
+  },
+  "c01": {
+    "name": "As de Copas",
+    "image": "Una mano sale de la nube con una copa que se desborda; una paloma baja con la hostia y caen cinco chorros de agua.",
+    "up": "Empieza un sentimiento nuevo; el corazón se abre.",
+    "down": "Un corazón que quedó cerrado, o emoción que te tragaste.",
+    "love": "Amor nuevo, una confesión sincera.",
+    "work": "Un comienzo que nace del corazón."
+  },
+  "c02": {
+    "name": "Dos de Copas",
+    "image": "Un hombre y una mujer intercambian sus copas; arriba, un bastón en espiral con cabeza de león alado.",
+    "up": "Vínculo de ida y vuelta; dos personas eligiéndose.",
+    "down": "Desencuentro, o un lazo que quedó de un solo lado.",
+    "love": "Relación mutua, reconciliación.",
+    "work": "Sociedad entre iguales."
+  },
+  "c03": {
+    "name": "Tres de Copas",
+    "image": "Tres mujeres levantan sus copas y bailan juntas; hay frutas y flores en el suelo.",
+    "up": "Alegría en grupo y apoyo de los tuyos; hay motivo para celebrar.",
+    "down": "Grupo frío, chisme, festejo que se pasó de la raya.",
+    "love": "Amigos que apoyan la relación, celebración.",
+    "work": "Triunfo del equipo."
+  },
+  "c04": {
+    "name": "Cuatro de Copas",
+    "image": "Un joven sentado bajo el árbol, brazos cruzados, ignora tres copas; una mano en la nube le ofrece la cuarta.",
+    "up": "Desgano y aburrimiento; tienes una oportunidad enfrente y no la ves.",
+    "down": "Salir de la apatía, ver lo que ya está ahí.",
+    "love": "Indiferencia con la relación que ya tienes.",
+    "work": "Falta de ganas en el trabajo."
+  },
+  "c05": {
+    "name": "Cinco de Copas",
+    "image": "Un hombre de capa negra mira tres copas volcadas y no ve las dos enteras detrás; a lo lejos, un puente.",
+    "up": "Duelo y arrepentimiento; quedó algo entero que todavía no miras.",
+    "down": "Aceptar la pérdida y seguir, o quedarte en el reproche.",
+    "love": "La tristeza de un final, arrepentimiento.",
+    "work": "Pérdida de dinero, decepción."
+  },
+  "c06": {
+    "name": "Seis de Copas",
+    "image": "Un niño le entrega una copa con flores a otro más pequeño; casas antiguas y un guardia al fondo.",
+    "up": "Pasado y memoria; alguien o algo de antes está volviendo.",
+    "down": "Vivir del recuerdo, o por fin soltarlo.",
+    "love": "El regreso de alguien de otra época.",
+    "work": "Volver a un camino ya conocido."
+  },
+  "c07": {
+    "name": "Siete de Copas",
+    "image": "Un hombre en la sombra mira siete copas en la nube; dentro hay corona, joyas, un dragón, un castillo y una figura velada.",
+    "up": "Demasiadas opciones y mucha fantasía; hora de volver real una de ellas.",
+    "down": "La elección se aclara, o la ilusión se cae.",
+    "love": "Varias opciones, o una imagen idealizada de esa persona.",
+    "work": "Elegir entre propuestas."
+  },
+  "c08": {
+    "name": "Ocho de Copas",
+    "image": "Un hombre con bastón da la espalda a ocho copas y sube hacia las montañas; la luna lo observa.",
+    "up": "Dejar lo que ya no te llena e irte.",
+    "down": "Quedarte en la duda, o volver al mismo lugar.",
+    "love": "Salir de una relación que no avanza.",
+    "work": "Dejar un trabajo sin sentido."
+  },
+  "c09": {
+    "name": "Nueve de Copas",
+    "image": "Un hombre satisfecho, brazos cruzados, sentado en un banco; nueve copas alineadas detrás.",
+    "up": "Satisfacción y deseo cumplido; eso que pidió tu corazón.",
+    "down": "Conformidad de superficie, o un deseo que aún no llega.",
+    "love": "Felicidad en la relación.",
+    "work": "Llegar a la meta, satisfacción con el resultado."
+  },
+  "c10": {
+    "name": "Diez de Copas",
+    "image": "Una pareja abrazada por la cintura, dos niños bailando y diez copas en un arcoíris.",
+    "up": "Felicidad en familia y una paz que se sostiene.",
+    "down": "Casa tensa, o una felicidad de fachada.",
+    "love": "Familia, un amor que se volvió hogar.",
+    "work": "Equilibrio entre trabajo y vida."
+  },
+  "c11": {
+    "name": "Sota de Copas",
+    "image": "Un joven bien vestido sostiene una copa de la que asoma un pez; el mar con olas detrás.",
+    "up": "Llega una noticia o un mensaje del corazón; curiosidad tierna.",
+    "down": "Emoción algo infantil, o un aviso que no llegó.",
+    "love": "Mensaje enamorado, un comienzo delicado.",
+    "work": "Una idea que nace del sentimiento."
+  },
+  "c12": {
+    "name": "Caballero de Copas",
+    "image": "Un caballero de yelmo alado avanza con la copa al frente; su caballo blanco va al paso hacia el río.",
+    "up": "Una propuesta que viene del sentimiento; alguien se acerca.",
+    "down": "Promesa vacía, o emoción de puro teatro.",
+    "love": "Un pretendiente, una invitación romántica.",
+    "work": "Una propuesta que suena atractiva."
+  },
+  "c13": {
+    "name": "Reina de Copas",
+    "image": "Una mujer en su trono a la orilla del agua mira una copa cerrada y muy adornada; los pies del trono en el agua.",
+    "up": "Empatía profunda; alguien que te entiende sin que hables.",
+    "down": "Ahogarte en la emoción, o una frialdad de golpe.",
+    "love": "Una mujer cariñosa e intuitiva cerca de ti.",
+    "work": "Trabajo de cuidado y de escucha."
+  },
+  "c14": {
+    "name": "Rey de Copas",
+    "image": "Un hombre en un trono que flota en el mar agitado, copa en mano y cara serena; un pez y un barco alrededor.",
+    "up": "Calma en medio de emociones pesadas; alguien que se sostiene.",
+    "down": "Emoción reprimida, o manipulación afectiva.",
+    "love": "Un hombre maduro y tranquilo.",
+    "work": "Liderar con calma y criterio."
+  },
+  "s01": {
+    "name": "As de Espadas",
+    "image": "Una mano sale de la nube levantando una espada; en la punta, una corona con ramas de olivo y palma.",
+    "up": "Una verdad que sale a la luz; la decisión certera.",
+    "down": "Cabeza confusa, o una verdad dicha a medias.",
+    "love": "La conversación franca que aclara todo.",
+    "work": "Decisión clara, la idea que gana."
+  },
+  "s02": {
+    "name": "Dos de Espadas",
+    "image": "Una mujer con los ojos vendados cruza dos espadas sobre el pecho; detrás, el mar con rocas y la luna creciente.",
+    "up": "Decisión trabada; estás cerrando los ojos a un lado de la historia.",
+    "down": "Se cae la venda y aparece la verdad.",
+    "love": "Relación en suspenso, sin definir.",
+    "work": "Postergar la elección una y otra vez."
+  },
+  "s03": {
+    "name": "Tres de Espadas",
+    "image": "Un corazón rojo atravesado por tres espadas; detrás, nube oscura y lluvia cayendo.",
+    "up": "Corazón partido; la verdad dolió, pero se dijo.",
+    "down": "Empieza la cura, o el dolor que no sueltas.",
+    "love": "Traición, separación, palabra dura.",
+    "work": "Mala noticia en el trabajo."
+  },
+  "s04": {
+    "name": "Cuatro de Espadas",
+    "image": "Un caballero de piedra yace sobre una tumba, manos en oración; tres espadas en la pared y una debajo de él.",
+    "up": "Descanso obligado; necesitas parar para recuperarte.",
+    "down": "Volver a la actividad, o no lograr descansar.",
+    "love": "Un tiempo aparte para enfriar la cabeza.",
+    "work": "Vacaciones, pausa necesaria."
+  },
+  "s05": {
+    "name": "Cinco de Espadas",
+    "image": "Un hombre con sonrisa burlona sostiene tres espadas y mira a dos figuras que se van; dos quedaron en el suelo.",
+    "up": "Victoria que salió cara; ganar así deja un vacío.",
+    "down": "Reconciliación, o el rencor que queda.",
+    "love": "Una pelea donde los dos perdieron.",
+    "work": "Una competencia que no vale el precio."
+  },
+  "s06": {
+    "name": "Seis de Espadas",
+    "image": "Una barca lleva a una mujer y a un niño, el barquero empuja con la vara; seis espadas clavadas en el fondo.",
+    "up": "Atravesar una etapa dura hacia un agua más calma.",
+    "down": "No poder soltar el pasado, o un viaje que se atrasó.",
+    "love": "Alejarte de un clima pesado.",
+    "work": "Cambio de lugar, otro ambiente."
+  },
+  "s07": {
+    "name": "Siete de Espadas",
+    "image": "Un hombre se lleva cinco espadas sin hacer ruido y deja dos clavadas; detrás quedó el campamento.",
+    "up": "Secreto o picardía; alguien no está contando todo.",
+    "down": "Se cae el disfraz, o llega la confesión.",
+    "love": "Mentira, algo escondido en la relación.",
+    "work": "Juego por debajo de la mesa."
+  },
+  "s08": {
+    "name": "Ocho de Espadas",
+    "image": "Una mujer atada y con los ojos vendados entre ocho espadas clavadas; tiene los pies libres y el piso es de barro.",
+    "up": "Sentir que estás en una trampa, casi toda inventada; la salida está abierta.",
+    "down": "Soltarte, o aceptar el papel de víctima.",
+    "love": "Sensación de encierro dentro de la relación.",
+    "work": "Sensación de callejón sin salida en la carrera."
+  },
+  "s09": {
+    "name": "Nueve de Espadas",
+    "image": "Alguien se sienta en la cama de madrugada con la cara entre las manos; nueve espadas en la pared.",
+    "up": "Ansiedad y noche sin dormir; miedo a algo que todavía no pasó.",
+    "down": "Salir de la pesadilla, o hundirte del todo en ella.",
+    "love": "Preocupación de madrugada por esa persona.",
+    "work": "Estrés fuerte en el trabajo."
+  },
+  "s10": {
+    "name": "Diez de Espadas",
+    "image": "Un hombre caído boca abajo con diez espadas en la espalda; el cielo está negro, pero el horizonte aclara.",
+    "up": "Fondo del pozo; lo peor ya pasó y no baja más.",
+    "down": "Levantarte despacio, o insistir con un dolor ya terminado.",
+    "love": "Un final amargo, pero definitivo.",
+    "work": "El fracaso de un camino."
+  },
+  "s11": {
+    "name": "Sota de Espadas",
+    "image": "Un joven con la espada en alto sobre la colina, mirando a los costados; el viento arrastra las nubes.",
+    "up": "Curiosidad y antena prendida; ojo y oído en todo.",
+    "down": "Chisme, palabra dicha sin pensar.",
+    "love": "Un mensaje que cambia todo.",
+    "work": "Noticia del trabajo, aprendizaje nuevo."
+  },
+  "s12": {
+    "name": "Caballero de Espadas",
+    "image": "Un caballero con la espada en alto galopa a toda velocidad; el caballo y la capa estirados por el viento.",
+    "up": "Embestida directa y sin aviso; velocidad por encima de todo.",
+    "down": "Apuro que arruina, o malos modos.",
+    "love": "Alguien que entra rápido y se va rápido.",
+    "work": "Decisión veloz y arriesgada."
+  },
+  "s13": {
+    "name": "Reina de Espadas",
+    "image": "Una mujer en el trono, una mano con la espada en alto y la otra extendida al frente; nubes duras y un pájaro.",
+    "up": "Franqueza sin vueltas; alguien que maduró en el dolor.",
+    "down": "Frialdad y amargura de más, o crítica que corta.",
+    "love": "Una mujer directa e independiente cerca de ti.",
+    "work": "Juicio filoso y sin rodeos."
+  },
+  "s14": {
+    "name": "Rey de Espadas",
+    "image": "Un hombre en el trono de piedra con la espada algo inclinada; mirada directa y nubes juntándose arriba.",
+    "up": "Lógica y autoridad de la razón; la sentencia sale de la cabeza, no del pecho.",
+    "down": "Usar la palabra para dominar, o demasiada dureza.",
+    "love": "Un hombre racional y algo frío.",
+    "work": "Decisión legal, jefatura exigente."
+  },
+  "p01": {
+    "name": "As de Oros",
+    "image": "Una mano sale de la nube con una moneda grande; abajo, un jardín con arco de flores y un camino a la montaña.",
+    "up": "Oportunidad real de dinero o trabajo; algo arranca firme.",
+    "down": "Se pasó la ocasión, o un comienzo que se atrasó.",
+    "love": "Una relación con base sólida.",
+    "work": "Propuesta de empleo, ingreso nuevo."
+  },
+  "p02": {
+    "name": "Dos de Oros",
+    "image": "Un joven baila haciendo girar dos monedas en una cinta con forma de infinito; detrás, dos barcos en las olas.",
+    "up": "Haciendo equilibrio entre dos cosas; por ahora las sostienes.",
+    "down": "Perder el equilibrio, demasiado al mismo tiempo.",
+    "love": "Repartir el tiempo entre la relación y todo lo demás.",
+    "work": "Varios frentes a la vez."
+  },
+  "p03": {
+    "name": "Tres de Oros",
+    "image": "Un escultor trabaja de pie sobre un banco de madera y dos personas miran el plano; la escena es una iglesia en obra.",
+    "up": "Trabajo en equipo y talento reconocido; construir algo que dura.",
+    "down": "Equipo desalineado, o un esmero que nadie nota.",
+    "love": "Construir algo entre los dos.",
+    "work": "Sociedad, proyecto en conjunto."
+  },
+  "p04": {
+    "name": "Cuatro de Oros",
+    "image": "Un hombre aprieta una moneda contra el pecho, otra bajo la corona y dos bajo los pies; la ciudad detrás.",
+    "up": "Mano cerrada sobre lo que ya tienes; hay seguridad, pero nada se mueve.",
+    "down": "Abrir la mano, o gastar todo de golpe.",
+    "love": "Miedo a abrir el corazón.",
+    "work": "Ahorrar, cuidar mucho las cuentas."
+  },
+  "p05": {
+    "name": "Cinco de Oros",
+    "image": "Dos personas harapientas, una con muletas, pasan en la nieve frente al vitral encendido de la iglesia sin mirar adentro.",
+    "up": "Falta y sensación de quedar afuera; hay una ayuda que no viste.",
+    "down": "La cosa mejora, o sigues con esa sensación de carencia.",
+    "love": "Sensación de rechazo, de quedar afuera.",
+    "work": "Aprieto de dinero, quedarte sin trabajo."
+  },
+  "p06": {
+    "name": "Seis de Oros",
+    "image": "Un mercader sostiene la balanza en una mano y con la otra da monedas a dos mendigos de rodillas.",
+    "up": "Llega una ayuda, pero quien da y quien recibe no están al mismo nivel.",
+    "down": "Ayuda con segunda intención, deuda desigual.",
+    "love": "Un lado da bastante más que el otro.",
+    "work": "Préstamo, apoyo económico."
+  },
+  "p07": {
+    "name": "Siete de Oros",
+    "image": "Un labrador apoya el mentón en la azada y mira con calma un arbusto cargado de monedas.",
+    "up": "Pausa para evaluar; ya sembraste, pero no es hora de cosechar.",
+    "down": "Apuro, o un esfuerzo que no rindió.",
+    "love": "Evaluar si esta relación vale lo que cuesta.",
+    "work": "Esperar el retorno de la inversión."
+  },
+  "p08": {
+    "name": "Ocho de Oros",
+    "image": "Un artesano graba una moneda con el martillo; seis ya listas cuelgan del poste y otra quedó en el suelo.",
+    "up": "Práctica y repetición; la habilidad se está construyendo.",
+    "down": "Trabajo repetido y sin alma, o algo hecho de cualquier manera.",
+    "love": "Esfuerzo constante para construir la relación.",
+    "work": "Estudio, especialización, trabajo bien hecho."
+  },
+  "p09": {
+    "name": "Nueve de Oros",
+    "image": "Una mujer en el viñedo con un halcón en la mano; nueve monedas entre las vides y una casa grande a lo lejos.",
+    "up": "Independencia y cosecha del propio esfuerzo; sin depender de nadie.",
+    "down": "Dependencia económica, o una soledad no buscada.",
+    "love": "Alguien que ya se basta.",
+    "work": "Ingreso propio, el fruto de años de trabajo."
+  },
+  "p10": {
+    "name": "Diez de Oros",
+    "image": "Un anciano con dos perros, una pareja joven y un niño bajo el arco de una casa antigua; diez monedas en la escena.",
+    "up": "Riqueza y raíz de familia; eso que permanece.",
+    "down": "Pelea por una herencia, o una raíz que se aflojó.",
+    "love": "Compromiso de largo plazo, patrimonio compartido.",
+    "work": "Estabilidad económica, negocio de familia."
+  },
+  "p11": {
+    "name": "Sota de Oros",
+    "image": "Un joven sostiene una moneda en alto y se queda absorto mirándola; campo verde y árboles detrás.",
+    "up": "Estudio y plan nuevo; el primer paso dado con cuidado.",
+    "down": "Falta de ánimo, o un estudio que quedó por la mitad.",
+    "love": "Un comienzo tranquilo y cuidadoso.",
+    "work": "Noticia de trabajo, empezar a aprender algo."
+  },
+  "p12": {
+    "name": "Caballero de Oros",
+    "image": "Un caballero quieto sobre un caballo negro y pesado, moneda en la mano y el campo arado enfrente.",
+    "up": "Avance lento y seguro; alguien que cumple lo que promete.",
+    "down": "Lentitud que irrita, o estancamiento.",
+    "love": "Alguien fiel, pero con poco fuego.",
+    "work": "Trabajo firme y de confianza."
+  },
+  "p13": {
+    "name": "Reina de Oros",
+    "image": "Una mujer en un trono rodeado de flores sostiene una moneda en la falda; un conejo salta en la esquina.",
+    "up": "Cuidado práctico y manos a la obra; contiene y construye a la vez.",
+    "down": "Perderte en la rutina, o dejar de mirarte a ti.",
+    "love": "Una mujer cálida y presente.",
+    "work": "Gestión práctica, cuentas al día."
+  },
+  "p14": {
+    "name": "Rey de Oros",
+    "image": "Un hombre en un trono cubierto de racimos de uva, moneda en la mano y un castillo detrás; armadura bajo el manto.",
+    "up": "Riqueza y seguridad construidas; alguien que ya llegó.",
+    "down": "Codicia, o apego a lo que tiene.",
+    "love": "Un hombre estable y de confianza.",
+    "work": "Éxito económico, negocio consolidado."
+  }
+}
