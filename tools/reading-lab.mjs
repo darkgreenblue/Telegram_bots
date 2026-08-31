@@ -166,6 +166,10 @@ async function runStep(persona, step, i, state) {
   if (DRY) return { spread, cards, ctx, inputChars, dry: true };
 
   let parsed = null, fallback = null;
+  // ⚠️ `orChatResilient` فقط «LLM invalid output» لاگ می‌کند و **دلیل** را نمی‌گوید.
+  // دورِ اولِ روسی ۵ تلاشِ اضافه داشت و هیچ‌جا معلوم نبود شکلِ JSON رد شده یا سرخط —
+  // یعنی گران‌ترین سیگنالِ هر دور خوانده‌نشده می‌ماند. حالا خودِ validate ثبتش می‌کند.
+  const rejects = [];
   // در حالتِ fake همان callbackِ validate اجرا می‌شود، فقط ورودی‌اش از استاب می‌آید.
   const call = FAKE
     ? (sys, usr, opts) => {
@@ -179,14 +183,23 @@ async function runStep(persona, step, i, state) {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
-      if (!checkV4Shape(obj, cards.length)) return false;
-      if (!headlineOk(obj.headline)) { fallback = obj; return false; }
+      if (!obj) { rejects.push('JSON خراب'); return false; }
+      if (!checkV4Shape(obj, cards.length)) {
+        const n = Array.isArray(obj.reads) ? obj.reads.length : 'ندارد';
+        rejects.push(`شکلِ خروجی (reads: ${n}/${cards.length})`);
+        return false;
+      }
+      if (!headlineOk(obj.headline)) {
+        rejects.push(`سرخط فرمول را ندارد: «${String(obj.headline || '').slice(0, 80)}»`);
+        fallback = obj;
+        return false;
+      }
       parsed = obj;
       return true;
     },
   }, PLAN);
   if (!parsed && fallback) parsed = fallback;
-  if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
+  if (!parsed) return { spread, cards, ctx, inputChars, rejects, failed: true };
 
   // تعمیرِ نقطه‌ای — **همان کدِ ربات**. اینجا اجرا می‌شود تا آزمایشگاه دقیقاً همان
   // چیزی را بسنجد که کاربر می‌گیرد، و هزینه/تأخیرِ واقعیِ این مسیر اندازه گرفته شود.
@@ -217,7 +230,7 @@ async function runStep(persona, step, i, state) {
   });
 
   return {
-    spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair,
+    spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair, rejects,
     model: res?.model, attempts: res?.attempts,
     usage: (res?.usages || []).reduce((a, u) => ({
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
@@ -341,6 +354,8 @@ for (const persona of personas) {
     all.push({ persona: persona.id, i, rep, step, ...r });
 
     const head = `\n── ${persona.id}.${i + 1} «${spreadName(r.spread.fa)}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
+  // دلیلِ هر تلاشِ ردشده — گران‌ترین سیگنالِ هر دور، و تا امروز چاپ نمی‌شد
+  if (r.rejects?.length) for (const why of r.rejects) console.log(`   ↻ تلاشِ ردشده: ${why}`);
     console.log(head);
     console.log(`   سؤال: ${step.question}`);
     console.log(`   چالش: ${step.expect}`);
