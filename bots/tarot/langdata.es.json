@@ -1,0 +1,1128 @@
+{
+  "_note": "دادهٔ زبانیِ اسپانیایی (بند ۲و). `cardNames` از `card-knowledge.es.json` تولید می‌شود تا واگرا نشود.",
+  "positionFallback": "Carta %n",
+  "cardNames": {
+    "m00": "El Loco",
+    "m01": "El Mago",
+    "m02": "La Sacerdotisa",
+    "m03": "La Emperatriz",
+    "m04": "El Emperador",
+    "m05": "El Hierofante",
+    "m06": "Los Enamorados",
+    "m07": "El Carro",
+    "m08": "La Fuerza",
+    "m09": "El Ermitaño",
+    "m10": "La Rueda de la Fortuna",
+    "m11": "La Justicia",
+    "m12": "El Colgado",
+    "m13": "La Muerte",
+    "m14": "La Templanza",
+    "m15": "El Diablo",
+    "m16": "La Torre",
+    "m17": "La Estrella",
+    "m18": "La Luna",
+    "m19": "El Sol",
+    "m20": "El Juicio",
+    "m21": "El Mundo",
+    "w01": "As de Bastos",
+    "w02": "Dos de Bastos",
+    "w03": "Tres de Bastos",
+    "w04": "Cuatro de Bastos",
+    "w05": "Cinco de Bastos",
+    "w06": "Seis de Bastos",
+    "w07": "Siete de Bastos",
+    "w08": "Ocho de Bastos",
+    "w09": "Nueve de Bastos",
+    "w10": "Diez de Bastos",
+    "w11": "Sota de Bastos",
+    "w12": "Caballero de Bastos",
+    "w13": "Reina de Bastos",
+    "w14": "Rey de Bastos",
+    "c01": "As de Copas",
+    "c02": "Dos de Copas",
+    "c03": "Tres de Copas",
+    "c04": "Cuatro de Copas",
+    "c05": "Cinco de Copas",
+    "c06": "Seis de Copas",
+    "c07": "Siete de Copas",
+    "c08": "Ocho de Copas",
+    "c09": "Nueve de Copas",
+    "c10": "Diez de Copas",
+    "c11": "Sota de Copas",
+    "c12": "Caballero de Copas",
+    "c13": "Reina de Copas",
+    "c14": "Rey de Copas",
+    "s01": "As de Espadas",
+    "s02": "Dos de Espadas",
+    "s03": "Tres de Espadas",
+    "s04": "Cuatro de Espadas",
+    "s05": "Cinco de Espadas",
+    "s06": "Seis de Espadas",
+    "s07": "Siete de Espadas",
+    "s08": "Ocho de Espadas",
+    "s09": "Nueve de Espadas",
+    "s10": "Diez de Espadas",
+    "s11": "Sota de Espadas",
+    "s12": "Caballero de Espadas",
+    "s13": "Reina de Espadas",
+    "s14": "Rey de Espadas",
+    "p01": "As de Oros",
+    "p02": "Dos de Oros",
+    "p03": "Tres de Oros",
+    "p04": "Cuatro de Oros",
+    "p05": "Cinco de Oros",
+    "p06": "Seis de Oros",
+    "p07": "Siete de Oros",
+    "p08": "Ocho de Oros",
+    "p09": "Nueve de Oros",
+    "p10": "Diez de Oros",
+    "p11": "Sota de Oros",
+    "p12": "Caballero de Oros",
+    "p13": "Reina de Oros",
+    "p14": "Rey de Oros"
+  },
+  "cardKeywords": {
+    "m00": {
+      "up": [
+        "Comenzar de nuevo",
+        "Espontaneidad",
+        "Confiar en el camino",
+        "Libertad"
+      ],
+      "down": [
+        "Imprudencia",
+        "Miedo a empezar",
+        "Decisión apresurada"
+      ]
+    },
+    "m01": {
+      "up": [
+        "Voluntad creadora",
+        "Talento y recursos",
+        "Hacer que pase",
+        "Confianza"
+      ],
+      "down": [
+        "Talento parado",
+        "Engaño",
+        "Dudar de tu fuerza"
+      ]
+    },
+    "m02": {
+      "up": [
+        "Intuición",
+        "Saber callado",
+        "Misterio",
+        "Escuchar por dentro"
+      ],
+      "down": [
+        "Ignorar la intuición",
+        "Secretos",
+        "Desconexión"
+      ]
+    },
+    "m03": {
+      "up": [
+        "Abundancia",
+        "Cuidar y crear",
+        "Placer",
+        "Fertilidad"
+      ],
+      "down": [
+        "Vaciarte por otros",
+        "Bloqueo creativo",
+        "Descuido de ti"
+      ]
+    },
+    "m04": {
+      "up": [
+        "Estructura",
+        "Estabilidad",
+        "Autoridad serena",
+        "Cumplir la palabra"
+      ],
+      "down": [
+        "Rigidez",
+        "Control excesivo",
+        "Terquedad"
+      ]
+    },
+    "m05": {
+      "up": [
+        "Guía",
+        "Valores y tradición",
+        "Enseñar",
+        "Pertenencia"
+      ],
+      "down": [
+        "Dogma",
+        "Rigidez moral",
+        "Rechazo a lo nuevo"
+      ]
+    },
+    "m06": {
+      "up": [
+        "Elección del corazón",
+        "Unión",
+        "Valores compartidos",
+        "Atracción sincera"
+      ],
+      "down": [
+        "Duda entre dos",
+        "Desalineación",
+        "Elegir por miedo"
+      ]
+    },
+    "m07": {
+      "up": [
+        "Avanzar con voluntad",
+        "Control del rumbo",
+        "Victoria",
+        "Determinación"
+      ],
+      "down": [
+        "Forzar el paso",
+        "Perder el rumbo",
+        "Agotamiento"
+      ]
+    },
+    "m08": {
+      "up": [
+        "Fuerza suave",
+        "Valor tranquilo",
+        "Dominio propio",
+        "Paciencia"
+      ],
+      "down": [
+        "Dureza contigo",
+        "Impulso sin freno",
+        "Inseguridad"
+      ]
+    },
+    "m09": {
+      "up": [
+        "Silencio que enseña",
+        "Búsqueda de sentido",
+        "Sabiduría",
+        "Mirar adentro"
+      ],
+      "down": [
+        "Aislarte de más",
+        "Distancia",
+        "Negarte a la ayuda"
+      ]
+    },
+    "m10": {
+      "up": [
+        "Giro del destino",
+        "Ciclo que cambia",
+        "Oportunidad",
+        "Movimiento"
+      ],
+      "down": [
+        "Repetir el ciclo",
+        "Mala racha",
+        "Resistirse al cambio"
+      ]
+    },
+    "m11": {
+      "up": [
+        "Equilibrio",
+        "Verdad",
+        "Responsabilidad",
+        "Decisión justa"
+      ],
+      "down": [
+        "Injusticia",
+        "Evadir la responsabilidad",
+        "Desequilibrio"
+      ]
+    },
+    "m12": {
+      "up": [
+        "Otra mirada",
+        "Pausa a propósito",
+        "Soltar el control",
+        "Entrega"
+      ],
+      "down": [
+        "Espera estéril",
+        "Sacrificio inútil",
+        "Estancamiento"
+      ]
+    },
+    "m13": {
+      "up": [
+        "Final necesario",
+        "Transformación",
+        "Cerrar un ciclo",
+        "Renacer"
+      ],
+      "down": [
+        "Aferrarte",
+        "Miedo al final",
+        "Cambio postergado"
+      ]
+    },
+    "m14": {
+      "up": [
+        "Medida justa",
+        "Paciencia",
+        "Mezcla armoniosa",
+        "Sanar de a poco"
+      ],
+      "down": [
+        "Excesos",
+        "Impaciencia",
+        "Desequilibrio interno"
+      ]
+    },
+    "m15": {
+      "up": [
+        "Deseo intenso",
+        "Ver la atadura",
+        "Apego",
+        "Placer terrenal"
+      ],
+      "down": [
+        "Dependencia",
+        "Ataduras que pesan",
+        "Autoengaño"
+      ]
+    },
+    "m16": {
+      "up": [
+        "Sacudida que libera",
+        "Verdad de golpe",
+        "Caída de lo falso"
+      ],
+      "down": [
+        "Crisis evitada",
+        "Miedo al derrumbe",
+        "Aferrarte a lo que cae"
+      ]
+    },
+    "m17": {
+      "up": [
+        "Esperanza",
+        "Calma después",
+        "Fe renovada",
+        "Inspiración"
+      ],
+      "down": [
+        "Desánimo",
+        "Perder la fe",
+        "Duda de ti"
+      ]
+    },
+    "m18": {
+      "up": [
+        "Intuición profunda",
+        "Lo que no se ve claro",
+        "Sueños",
+        "Sensibilidad"
+      ],
+      "down": [
+        "Confusión",
+        "Miedo sin nombre",
+        "Autoengaño"
+      ]
+    },
+    "m19": {
+      "up": [
+        "Claridad",
+        "Alegría",
+        "Éxito visible",
+        "Vitalidad"
+      ],
+      "down": [
+        "Optimismo forzado",
+        "Brillo apagado",
+        "Ego"
+      ]
+    },
+    "m20": {
+      "up": [
+        "Despertar",
+        "Llamado interior",
+        "Perdón",
+        "Balance del pasado"
+      ],
+      "down": [
+        "Juzgarte duro",
+        "No escuchar el llamado",
+        "Culpa vieja"
+      ]
+    },
+    "m21": {
+      "up": [
+        "Cierre pleno",
+        "Logro",
+        "Integración",
+        "Nuevo horizonte"
+      ],
+      "down": [
+        "Ciclo sin cerrar",
+        "Meta a medias",
+        "Quedarte a un paso"
+      ]
+    },
+    "w10": {
+      "up": [
+        "Impulso",
+        "Cierre del ciclo",
+        "Carga completa"
+      ],
+      "down": [
+        "Exceso de carga",
+        "Final duro"
+      ]
+    },
+    "w11": {
+      "up": [
+        "Impulso",
+        "Mensaje",
+        "Curiosidad"
+      ],
+      "down": [
+        "Distracción",
+        "Noticia demorada"
+      ]
+    },
+    "w12": {
+      "up": [
+        "Impulso",
+        "Movimiento decidido",
+        "Ir tras algo"
+      ],
+      "down": [
+        "Prisa sin rumbo",
+        "Freno"
+      ]
+    },
+    "w13": {
+      "up": [
+        "Impulso",
+        "Madurez",
+        "Cuidado"
+      ],
+      "down": [
+        "Frialdad",
+        "Exceso de control"
+      ]
+    },
+    "w14": {
+      "up": [
+        "Impulso",
+        "Autoridad",
+        "Dominio del tema"
+      ],
+      "down": [
+        "Rigidez",
+        "Poder mal usado"
+      ]
+    },
+    "w01": {
+      "up": [
+        "Impulso",
+        "Comienzo fuerte",
+        "Chispa nueva"
+      ],
+      "down": [
+        "Comienzo trabado",
+        "Chispa apagada"
+      ]
+    },
+    "w02": {
+      "up": [
+        "Impulso",
+        "Dos partes",
+        "Elección"
+      ],
+      "down": [
+        "Desequilibrio",
+        "Indecisión"
+      ]
+    },
+    "w03": {
+      "up": [
+        "Impulso",
+        "Crecer",
+        "Primer fruto"
+      ],
+      "down": [
+        "Demora",
+        "Fruto que no llega"
+      ]
+    },
+    "w04": {
+      "up": [
+        "Impulso",
+        "Estabilidad",
+        "Descanso"
+      ],
+      "down": [
+        "Estancamiento",
+        "Aferrarte"
+      ]
+    },
+    "w05": {
+      "up": [
+        "Impulso",
+        "Prueba",
+        "Falta"
+      ],
+      "down": [
+        "Salir de la prueba",
+        "Reconciliación"
+      ]
+    },
+    "w06": {
+      "up": [
+        "Impulso",
+        "Alivio",
+        "Avance"
+      ],
+      "down": [
+        "Retroceso",
+        "Ayuda que no llega"
+      ]
+    },
+    "w07": {
+      "up": [
+        "Impulso",
+        "Evaluar",
+        "Esperar el momento"
+      ],
+      "down": [
+        "Impaciencia",
+        "Estrategia fallida"
+      ]
+    },
+    "w08": {
+      "up": [
+        "Impulso",
+        "Movimiento",
+        "Oficio"
+      ],
+      "down": [
+        "Prisa",
+        "Trabajo sin alma"
+      ]
+    },
+    "w09": {
+      "up": [
+        "Impulso",
+        "Casi ahí",
+        "Fruto propio"
+      ],
+      "down": [
+        "Cansancio",
+        "Soledad"
+      ]
+    },
+    "c10": {
+      "up": [
+        "Sentir",
+        "Cierre del ciclo",
+        "Carga completa"
+      ],
+      "down": [
+        "Exceso de carga",
+        "Final duro"
+      ]
+    },
+    "c11": {
+      "up": [
+        "Sentir",
+        "Mensaje",
+        "Curiosidad"
+      ],
+      "down": [
+        "Distracción",
+        "Noticia demorada"
+      ]
+    },
+    "c12": {
+      "up": [
+        "Sentir",
+        "Movimiento decidido",
+        "Ir tras algo"
+      ],
+      "down": [
+        "Prisa sin rumbo",
+        "Freno"
+      ]
+    },
+    "c13": {
+      "up": [
+        "Sentir",
+        "Madurez",
+        "Cuidado"
+      ],
+      "down": [
+        "Frialdad",
+        "Exceso de control"
+      ]
+    },
+    "c14": {
+      "up": [
+        "Sentir",
+        "Autoridad",
+        "Dominio del tema"
+      ],
+      "down": [
+        "Rigidez",
+        "Poder mal usado"
+      ]
+    },
+    "c01": {
+      "up": [
+        "Sentir",
+        "Comienzo fuerte",
+        "Chispa nueva"
+      ],
+      "down": [
+        "Comienzo trabado",
+        "Chispa apagada"
+      ]
+    },
+    "c02": {
+      "up": [
+        "Sentir",
+        "Dos partes",
+        "Elección"
+      ],
+      "down": [
+        "Desequilibrio",
+        "Indecisión"
+      ]
+    },
+    "c03": {
+      "up": [
+        "Sentir",
+        "Crecer",
+        "Primer fruto"
+      ],
+      "down": [
+        "Demora",
+        "Fruto que no llega"
+      ]
+    },
+    "c04": {
+      "up": [
+        "Sentir",
+        "Estabilidad",
+        "Descanso"
+      ],
+      "down": [
+        "Estancamiento",
+        "Aferrarte"
+      ]
+    },
+    "c05": {
+      "up": [
+        "Sentir",
+        "Prueba",
+        "Falta"
+      ],
+      "down": [
+        "Salir de la prueba",
+        "Reconciliación"
+      ]
+    },
+    "c06": {
+      "up": [
+        "Sentir",
+        "Alivio",
+        "Avance"
+      ],
+      "down": [
+        "Retroceso",
+        "Ayuda que no llega"
+      ]
+    },
+    "c07": {
+      "up": [
+        "Sentir",
+        "Evaluar",
+        "Esperar el momento"
+      ],
+      "down": [
+        "Impaciencia",
+        "Estrategia fallida"
+      ]
+    },
+    "c08": {
+      "up": [
+        "Sentir",
+        "Movimiento",
+        "Oficio"
+      ],
+      "down": [
+        "Prisa",
+        "Trabajo sin alma"
+      ]
+    },
+    "c09": {
+      "up": [
+        "Sentir",
+        "Casi ahí",
+        "Fruto propio"
+      ],
+      "down": [
+        "Cansancio",
+        "Soledad"
+      ]
+    },
+    "s10": {
+      "up": [
+        "Pensar",
+        "Cierre del ciclo",
+        "Carga completa"
+      ],
+      "down": [
+        "Exceso de carga",
+        "Final duro"
+      ]
+    },
+    "s11": {
+      "up": [
+        "Pensar",
+        "Mensaje",
+        "Curiosidad"
+      ],
+      "down": [
+        "Distracción",
+        "Noticia demorada"
+      ]
+    },
+    "s12": {
+      "up": [
+        "Pensar",
+        "Movimiento decidido",
+        "Ir tras algo"
+      ],
+      "down": [
+        "Prisa sin rumbo",
+        "Freno"
+      ]
+    },
+    "s13": {
+      "up": [
+        "Pensar",
+        "Madurez",
+        "Cuidado"
+      ],
+      "down": [
+        "Frialdad",
+        "Exceso de control"
+      ]
+    },
+    "s14": {
+      "up": [
+        "Pensar",
+        "Autoridad",
+        "Dominio del tema"
+      ],
+      "down": [
+        "Rigidez",
+        "Poder mal usado"
+      ]
+    },
+    "s01": {
+      "up": [
+        "Pensar",
+        "Comienzo fuerte",
+        "Chispa nueva"
+      ],
+      "down": [
+        "Comienzo trabado",
+        "Chispa apagada"
+      ]
+    },
+    "s02": {
+      "up": [
+        "Pensar",
+        "Dos partes",
+        "Elección"
+      ],
+      "down": [
+        "Desequilibrio",
+        "Indecisión"
+      ]
+    },
+    "s03": {
+      "up": [
+        "Pensar",
+        "Crecer",
+        "Primer fruto"
+      ],
+      "down": [
+        "Demora",
+        "Fruto que no llega"
+      ]
+    },
+    "s04": {
+      "up": [
+        "Pensar",
+        "Estabilidad",
+        "Descanso"
+      ],
+      "down": [
+        "Estancamiento",
+        "Aferrarte"
+      ]
+    },
+    "s05": {
+      "up": [
+        "Pensar",
+        "Prueba",
+        "Falta"
+      ],
+      "down": [
+        "Salir de la prueba",
+        "Reconciliación"
+      ]
+    },
+    "s06": {
+      "up": [
+        "Pensar",
+        "Alivio",
+        "Avance"
+      ],
+      "down": [
+        "Retroceso",
+        "Ayuda que no llega"
+      ]
+    },
+    "s07": {
+      "up": [
+        "Pensar",
+        "Evaluar",
+        "Esperar el momento"
+      ],
+      "down": [
+        "Impaciencia",
+        "Estrategia fallida"
+      ]
+    },
+    "s08": {
+      "up": [
+        "Pensar",
+        "Movimiento",
+        "Oficio"
+      ],
+      "down": [
+        "Prisa",
+        "Trabajo sin alma"
+      ]
+    },
+    "s09": {
+      "up": [
+        "Pensar",
+        "Casi ahí",
+        "Fruto propio"
+      ],
+      "down": [
+        "Cansancio",
+        "Soledad"
+      ]
+    },
+    "p10": {
+      "up": [
+        "Trabajo",
+        "Cierre del ciclo",
+        "Carga completa"
+      ],
+      "down": [
+        "Exceso de carga",
+        "Final duro"
+      ]
+    },
+    "p11": {
+      "up": [
+        "Trabajo",
+        "Mensaje",
+        "Curiosidad"
+      ],
+      "down": [
+        "Distracción",
+        "Noticia demorada"
+      ]
+    },
+    "p12": {
+      "up": [
+        "Trabajo",
+        "Movimiento decidido",
+        "Ir tras algo"
+      ],
+      "down": [
+        "Prisa sin rumbo",
+        "Freno"
+      ]
+    },
+    "p13": {
+      "up": [
+        "Trabajo",
+        "Madurez",
+        "Cuidado"
+      ],
+      "down": [
+        "Frialdad",
+        "Exceso de control"
+      ]
+    },
+    "p14": {
+      "up": [
+        "Trabajo",
+        "Autoridad",
+        "Dominio del tema"
+      ],
+      "down": [
+        "Rigidez",
+        "Poder mal usado"
+      ]
+    },
+    "p01": {
+      "up": [
+        "Trabajo",
+        "Comienzo fuerte",
+        "Chispa nueva"
+      ],
+      "down": [
+        "Comienzo trabado",
+        "Chispa apagada"
+      ]
+    },
+    "p02": {
+      "up": [
+        "Trabajo",
+        "Dos partes",
+        "Elección"
+      ],
+      "down": [
+        "Desequilibrio",
+        "Indecisión"
+      ]
+    },
+    "p03": {
+      "up": [
+        "Trabajo",
+        "Crecer",
+        "Primer fruto"
+      ],
+      "down": [
+        "Demora",
+        "Fruto que no llega"
+      ]
+    },
+    "p04": {
+      "up": [
+        "Trabajo",
+        "Estabilidad",
+        "Descanso"
+      ],
+      "down": [
+        "Estancamiento",
+        "Aferrarte"
+      ]
+    },
+    "p05": {
+      "up": [
+        "Trabajo",
+        "Prueba",
+        "Falta"
+      ],
+      "down": [
+        "Salir de la prueba",
+        "Reconciliación"
+      ]
+    },
+    "p06": {
+      "up": [
+        "Trabajo",
+        "Alivio",
+        "Avance"
+      ],
+      "down": [
+        "Retroceso",
+        "Ayuda que no llega"
+      ]
+    },
+    "p07": {
+      "up": [
+        "Trabajo",
+        "Evaluar",
+        "Esperar el momento"
+      ],
+      "down": [
+        "Impaciencia",
+        "Estrategia fallida"
+      ]
+    },
+    "p08": {
+      "up": [
+        "Trabajo",
+        "Movimiento",
+        "Oficio"
+      ],
+      "down": [
+        "Prisa",
+        "Trabajo sin alma"
+      ]
+    },
+    "p09": {
+      "up": [
+        "Trabajo",
+        "Casi ahí",
+        "Fruto propio"
+      ],
+      "down": [
+        "Cansancio",
+        "Soledad"
+      ]
+    }
+  },
+  "spreadNames": {
+    "عشق و رابطه": "Amor y pareja",
+    "گذشته، حال، آینده": "Pasado, presente, futuro",
+    "کار و مسیر": "Trabajo y camino",
+    "پول و فراوانی": "Dinero y abundancia",
+    "حال درونی": "Cómo estás por dentro",
+    "خانواده و نزدیکان": "Familia y personas cercanas",
+    "مهاجرت و تغییر بزرگ": "Migrar y cambiar de vida",
+    "آری یا نه": "Sí o no",
+    "دوراهی": "Entre dos caminos",
+    "صلیب سلتی (کامل)": "Cruz celta completa",
+    "موندن یا جدایی": "Quedarme o separarme",
+    "عشق یا نفرت": "Amor u odio",
+    "تعهد یا خیانت": "Fidelidad o engaño",
+    "کراش": "Ese amor platónico",
+    "قلب شکسته": "Corazón roto",
+    "موضوع دلخواه": "El tema que quieras",
+    "سؤال سفارشی": "Tu propia pregunta",
+    "فال سه کارتی": "Lectura de tres cartas",
+    "موضوع دلخواه (عمیق‌تر)": "El tema que quieras, más a fondo",
+    "سؤال سفارشی (عمیق‌تر)": "Tu propia pregunta, más a fondo",
+    "فال پنج کارتی": "Lectura de cinco cartas",
+    "فال کامل ده کارتی": "Lectura completa de diez cartas",
+    "سؤال شخصی خودم": "Mi pregunta personal",
+    "بله و خیر قطعی": "Un sí o un no claro",
+    "حس طرف مقابل": "Lo que siente esa persona",
+    "بازگشت اکس": "¿Vuelve mi ex?",
+    "فال کراش": "Lectura del amor platónico",
+    "بهم خیانت کرده؟": "¿Me engañó?",
+    "فال ازدواج": "Lectura de matrimonio",
+    "کی به آدمم می‌رسم؟": "¿Cuándo llega mi persona?",
+    "کار و پول": "Trabajo y dinero",
+    "درس و کنکور": "Estudios y exámenes",
+    "اپلای و مهاجرت": "Postular y migrar",
+    "پول و درآمد بیشتر": "Más dinero y más ingresos",
+    "کارت روز": "Carta del día"
+  },
+  "positionNames": {
+    "قلب تو": "Tu corazón",
+    "قلب او": "El corazón de esa persona",
+    "مسیر رابطه": "Hacia dónde va la relación",
+    "گذشته": "Pasado",
+    "حال": "Presente",
+    "آینده": "Futuro",
+    "جایگاه فعلی": "Dónde estás ahora",
+    "مانع": "El obstáculo",
+    "برآیند مسیر": "A dónde lleva este camino",
+    "وضعیت مالی الان": "Tu dinero hoy",
+    "نشتی انرژی و پول": "Por dónde se te escapa",
+    "مسیر فراوانی": "El camino a la abundancia",
+    "حال درونی الان": "Cómo estás por dentro hoy",
+    "ریشه‌ی ناآرامی": "La raíz de la inquietud",
+    "مسیر آرامش": "El camino a la calma",
+    "فضای الان": "El ambiente de ahora",
+    "ریشه‌ی تنش": "La raíz de la tensión",
+    "مسیر نزدیک‌تر شدن": "Cómo acercarse",
+    "جایگاه الان": "Tu lugar ahora",
+    "مانع یا ریسک": "El obstáculo o el riesgo",
+    "چراغ تصمیم": "La luz para decidir",
+    "قلب ماجرا": "El corazón del asunto",
+    "جهت انرژی": "Hacia dónde va la energía",
+    "مسیر اول": "El primer camino",
+    "مسیر دوم": "El segundo camino",
+    "چراغ راهنما": "La luz que guía",
+    "موقعیت فعلی": "La situación actual",
+    "چالش": "El desafío",
+    "ریشه": "La raíz",
+    "هدف آگاهانه": "Lo que buscas a conciencia",
+    "آینده‌ی نزدیک": "El futuro cercano",
+    "خودت": "Tú",
+    "محیط و اطرافیان": "Tu entorno",
+    "امیدها و ترس‌ها": "Esperanzas y miedos",
+    "برآیند": "El resultado",
+    "اگه بمونی": "Si te quedas",
+    "اگه جدا شی": "Si te separas",
+    "موندن": "Quedarte",
+    "جدایی": "Separarte",
+    "چیزی که به تو می‌ده": "Lo que te da",
+    "چیزی که ازت می‌گیره": "Lo que te quita",
+    "حقیقتِ حسش": "La verdad de lo que siente",
+    "عشق": "Amor",
+    "نفرت": "Odio",
+    "چیزی که نشونت می‌ده": "Lo que te muestra",
+    "چیزی که پنهون مونده": "Lo que quedó oculto",
+    "حقیقتِ ماجرا": "La verdad del asunto",
+    "تعهد": "Fidelidad",
+    "خیانت": "Engaño",
+    "تو رو چطور می‌بینه": "Cómo te ve",
+    "شانسِ شروع شدن": "Las chances de que empiece",
+    "قدمی که باید برداری": "El paso que te toca dar",
+    "زخمی که مونده": "La herida que quedó",
+    "چیزی که رهات نمی‌کنه": "Lo que no te suelta",
+    "مسیرِ خوب شدن": "El camino para sanar",
+    "ریشه‌ی ماجرا": "La raíz del asunto",
+    "وضعیت الان": "Cómo está hoy",
+    "مسیر پیش رو": "El camino por delante",
+    "نیروی پنهان": "La fuerza escondida",
+    "مانع پیش رو": "El obstáculo por delante",
+    "آنچه گذشت": "Lo que ya pasó",
+    "آنچه می‌دانی": "Lo que ya sabes",
+    "آنچه نزدیک است": "Lo que está por llegar",
+    "اطرافیان": "Quienes te rodean",
+    "امید و ترس": "Esperanza y miedo",
+    "وفادار بوده": "Te fue fiel",
+    "خیانت کرده": "Te engañó",
+    "نیروی پشتِ وفادار بوده": "Lo que sostiene que te fue fiel",
+    "نیروی پشتِ خیانت کرده": "Lo que sostiene que te engañó",
+    "نیروی پشتِ مسیر اول": "Lo que sostiene el primer camino",
+    "نیروی پشتِ مسیر دوم": "Lo que sostiene el segundo camino"
+  },
+  "repair": {
+    "system": "Eres editor de un texto de tarot en español latinoamericano neutro.\n\nCada frase que recibes tiene un problema puntual, indicado al lado. Corrige solo ese problema.\n\nReglas:\n- No toques el resto de la frase. El largo, el tono y el sentido general siguen igual.\n- Habla cercano y sencillo, siempre de «tú», nunca «usted», nunca «vos», nunca «vosotros».\n- Español neutro para México, Argentina, Colombia y Perú. Nada de palabras de España.\n- Nunca supongas si quien lee es hombre o mujer: sin «cansado» ni «cansada», usa formas que sirvan para cualquiera.\n- Sin raya larga, sin emoji, sin agregar frases nuevas.\n- Nunca prometas nada con certeza; «probablemente» y «todo indica que» sí se pueden usar.\n\nResponde solo con un JSON válido, sin code fence:\n{\"fixes\": [\"frase corregida 1\", \"frase corregida 2\"]}\nEn el mismo orden y en la misma cantidad.",
+    "hints": {
+      "evasion": "La decisión quedó devuelta a la propia persona. Da una dirección: di qué lado pesa más.",
+      "pastTime": "Hay una referencia a un momento pasado, pero no tenemos la fecha de las lecturas anteriores. Quita la marca de tiempo y deja solo el tema.",
+      "formal": "Aparece un trato formal o de España. Cámbialo por «tú», sin «usted», «vos» ni «vosotros».",
+      "genero": "La frase da por sentado el género de quien lee. Reescríbela para que sirva igual para cualquier persona, con infinitivo, forma impersonal o un sustantivo.",
+      "ingles": "Hay una palabra en inglés. Cámbiala por su equivalente natural en español."
+    },
+    "item": "%i) [problema: %hint]\n[la expresión «%phrase» no puede aparecer en la respuesta]\n%text"
+  },
+  "defects": [
+    {
+      "id": "formal",
+      "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:usted(?:es)?|vosotros|vuestr[oa]s?|hab[ée]is|ten[ée]is|sois|vos\\s+(?:ten[ée]s|pod[ée]s|quer[ée]s|sab[ée]s|sos))(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "flags": "i",
+      "hint": "Trato formal o regional. Usa «tú»: «tú tienes», «tú puedes», nunca «usted», «vos» ni «vosotros»."
+    },
+    {
+      "id": "genero",
+      "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:t[úu]\\s+)?(?:est[áa]s|eres|sigues|te\\s+sientes|te\\s+ves|te\\s+quedas|andas|te\\s+not[aá]s)(?:\\s+(?:muy|tan|ya|un\\s+poco|bastante|siempre|todav[íi]a|medio|re))*\\s+(?![A-Za-zÀ-ÖØ-öø-ÿ]*(?:ando|iendo|yendo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))(?!(?:cerca|fuera|dentro|arriba|abajo|ahora|nunca|siempre|contra|encima|cuidado|pecado|pasado|mercado|resultado|significado|sentido|olvido|ruido|nido|vestido|partido|camino|momento|proceso|periodo|tiempo|riesgo|miedo|deseo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))([A-Za-zÀ-ÖØ-öø-ÿ]{3,}[oa])(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "flags": "i",
+      "hint": "La frase da por sentado si quien lee es hombre o mujer. Reescríbela para que sirva para cualquiera: infinitivo, forma impersonal o un sustantivo."
+    },
+    {
+      "id": "ingles",
+      "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:the|and|your|you|with|love|card|reading|energy|feeling|future|past|heart|money|work|light|shadow|power)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "flags": "i",
+      "hint": "Hay una palabra en inglés dentro de un texto en español. Cámbiala por su equivalente natural."
+    }
+  ]
+}
