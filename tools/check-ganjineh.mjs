@@ -10,12 +10,16 @@ import { readFileSync } from 'fs';
 import { CARD_BY_KEY } from '../bots/tarot/cards.js';
 import {
   eligibleCards, pickVariant, countOf, hasText, textOf, stats,
-  NO_REPEAT_DRAWS, VARIANTS, MONTHS_FA,
+  NO_REPEAT_DRAWS, VARIANTS,
 } from '../bots/tarot/ganjineh.js';
 
 const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
 const GAN = readFileSync(new URL('../bots/tarot/ganjineh.js', import.meta.url), 'utf8');
 const DATA = JSON.parse(readFileSync(new URL('../bots/tarot/daily-ganjineh.fa.json', import.meta.url), 'utf8'));
+
+// نامِ ماه از locale می‌آید، نه از ganjineh.js (بند ۲و: نامِ ماه یک متنِ رو-به-کاربر است).
+const FA_LOCALE = (await import('../bots/tarot/locales/fa.js')).default;
+const MONTH_LABEL = (m) => FA_LOCALE.buttons.birthMonths[m - 1] || String(m);
 
 let pass = 0; const errs = [];
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
@@ -189,7 +193,7 @@ console.log('\n▶ اعتبارِ محتوای گنجینه');
   const full = [], partial = [], tooSmall = [];
   for (const m of Object.keys(monthCounts)) {
     const n = Object.keys(DATA[m]).filter(k => CARD_BY_KEY[k]).length;
-    if (n === ALL.length) full.push(m); else { partial.push(`${MONTHS_FA[m - 1]}:${n}`); if (n < 24) tooSmall.push(`${MONTHS_FA[m - 1]}:${n}`); }
+    if (n === ALL.length) full.push(m); else { partial.push(`${MONTH_LABEL(m)}:${n}`); if (n < 24) tooSmall.push(`${MONTH_LABEL(m)}:${n}`); }
   }
   console.log(`  ℹ️ ماهِ کامل: ${full.length}/12${partial.length ? ` | ناقص: ${partial.join(', ')}` : ''}`);
   ok(true, `گزارشِ پیشرفت چاپ شد (${stats().texts} متن در ${stats().months} ماه)`);

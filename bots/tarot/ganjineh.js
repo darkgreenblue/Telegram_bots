@@ -25,9 +25,18 @@
 import { readFileSync } from 'node:fs';
 import { logErr } from '../../shared/logger.js';
 
+/* 🌍 گنجینه per زبان است، نه مشترک (بند ۲و/۶). دیتای فارسی صریحاً به تقویمِ ایرانی
+ * و برجِ همان ماه گره خورده («تو فروردینی»، «ترازو نشانِ خودِ ماهته»)، پس **هرگز**
+ * نباید به زبانِ دیگری سرو شود. زبانی که فایلِ خودش را ندارد `DATA` خالی می‌گیرد و
+ * فیچر خودکار خاموش می‌شود؛ همان الگوی `hafez.js` و کاملاً graceful (مسیرِ
+ * `ganjinehEmpty` از قبل پیام و دکمه‌های قدمِ بعدی دارد).
+ * ⚠️ قبل از این، مسیر `daily-ganjineh.fa.json` هاردکد بود، یعنی رباتِ روسی متنِ
+ * **فارسی** نشان می‌داد. */
+const LOCALE = process.env.LOCALE?.trim() || 'fa';
+
 let DATA = {};
 try {
-  DATA = JSON.parse(readFileSync(new URL('./daily-ganjineh.fa.json', import.meta.url), 'utf8'));
+  DATA = JSON.parse(readFileSync(new URL(`./daily-ganjineh.${LOCALE}.json`, import.meta.url), 'utf8'));
 } catch (e) {
   // fail-safe: نبودنِ فایل نباید ربات را بکشد. نتیجه‌اش «هیچ کارتی واجد شرایط نیست» است
   // که خودِ کارتِ روز با پیامِ مؤدبانه هندلش می‌کند.
@@ -47,11 +56,9 @@ export const VARIANTS = 3;
 // انتخابِ دوباره‌اش کاملاً درست است.
 export const NO_REPEAT_DRAWS = 7;
 
-export const MONTHS_FA = [
-  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند',
-];
-export const monthFa = (m) => MONTHS_FA[Number(m) - 1] || '';
+/* نامِ ماه عمداً این‌جا نیست: یک متنِ رو-به-کاربر است و از `L.onboarding.birthMonths`
+ * همان locale می‌آید (بند ۲و). ایندکسِ ۱..۱۲ بینِ همه‌ی زبان‌ها یکی می‌ماند چون
+ * `birth_month` کاربرانِ واقعی رویش نشسته و دیتای گنجینه با همان کلید ذخیره شده. */
 
 /** آیا برای این ماه و این کارت متنی نوشته شده؟ */
 export const hasText = (month, cardKey) =>

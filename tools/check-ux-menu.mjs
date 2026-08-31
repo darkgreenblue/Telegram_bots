@@ -344,7 +344,7 @@ console.log('\n▶ بعد از کشیدنِ کارت شانس، دعوت به ف
 console.log('\n▶ تأییدِ ماهِ تولد روی همان پیامِ سؤال ادیت می‌شود (نه پیامِ جدا)');
 {
   const bmonth = SRC.slice(SRC.indexOf('bot.action(/^bmonth:'), SRC.indexOf('bot.action(/^focus:'));
-  ok(/const saved = L\.onboarding\.birthMonthSaved\(monthFa\(m\)\);/.test(bmonth), 'متنِ تأیید از قبل ساخته می‌شود');
+  ok(/const saved = L\.onboarding\.birthMonthSaved\(monthLabel\(m\)\);/.test(bmonth), 'متنِ تأیید از قبل ساخته می‌شود');
   ok(/try \{ await ctx\.editMessageText\(saved\); \}/.test(bmonth), 'روی همان پیام ادیت می‌شود');
   ok(/catch \{ await ctx\.reply\(saved\)\.catch\(\(\) => \{\}\); \}/.test(bmonth),
     'اگر ادیت نشد (پیامِ کهنه) به پیامِ جدا برمی‌گردیم تا کاربر بی‌جواب نماند');
@@ -561,7 +561,7 @@ console.log('\n▶ فلوی «فال تک کارت» — سه باگی که تس
 
   // ۱) گنجینه‌ی خالی دیگر صفحه‌ی بی‌دکمه نیست. امروز فقط ۲ ماه از ۱۲ گنجینه دارند،
   //    پس این پرتکرارترین پایانِ مسیرِ رایگان است.
-  ok(/ganjinehEmpty\(monthFa\(user\.birth_month\)\),\s*\n?\s*Markup\.inlineKeyboard\(recoRows\(uid, null\)\)\)/.test(v2),
+  ok(/ganjinehEmpty\(monthLabel\(user\.birth_month\)\),\s*\n?\s*Markup\.inlineKeyboard\(recoRows\(uid, null\)\)\)/.test(v2),
     'شاخه‌ی «گنجینه خالی» همان پیشنهادهای شاخه‌ی خواهرش را دارد (بن‌بست نیست)');
   ok(!/ganjinehEmpty[\s\S]{0,120}ensureMenu/.test(v2),
     'دیگر به ensureMenu تکیه نمی‌کند (در دنیای الماس no-op است، یعنی هیچ‌چیز نمی‌فرستاد)');
