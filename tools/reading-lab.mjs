@@ -234,12 +234,18 @@ async function runStep(persona, step, i, state) {
   return {
     spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair, rejects,
     model: res?.model, attempts: res?.attempts,
+    /* ⚠️ `usd` هزینه‌ی **واقعیِ** همان درخواست است که OpenRouter در هر پاسخ برمی‌گرداند
+     * (همان عددی که ربات در `llm_usage` می‌نویسد). لازم شد چون گزارشِ قبلی دلار را از
+     * روی توکن با قیمتِ **هاردکدِ Gemini Flash** حساب می‌کرد؛ روی یک بازوی مدلِ دیگر
+     * آن عدد دیگر پول نیست، فقط «حجمِ توکن با نرخِ Gemini». دورِ ۹ همین را لو داد:
+     * DeepSeek که per توکن چند برابر ارزان‌تر است «گران‌ترین» گزارش شده بود. */
     usage: (res?.usages || []).reduce((a, u) => ({
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
-    }), { in: 0, out: 0 }),
+      usd: a.usd + (Number(u?.cost) || 0),
+    }), { in: 0, out: 0, usd: 0 }),
     // هزینه‌ی تعمیر **جدا** شمرده می‌شود، وگرنه در هزینه‌ی کلی گم می‌شود و
     // نمی‌فهمیم این مسیر واقعاً ارزان است یا فقط ادعا کرده‌ایم.
-    repairUsage: { in: rep.usage?.prompt_tokens || 0, out: rep.usage?.completion_tokens || 0 },
+    repairUsage: { in: rep.usage?.prompt_tokens || 0, out: rep.usage?.completion_tokens || 0, usd: Number(rep.usage?.cost) || 0 },
   };
 }
 
@@ -444,7 +450,11 @@ if (!DRY) {
     console.log(`   🔁 تکرارِ بین‌فالی per پاس: ${repeatCounts.join(' , ')}`);
     console.log(`   ❌ فالِ ایرادناک per پاس: ${badPer.join(' , ')}`);
   }
-  console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  const usd = done.reduce((a, r) => a + (r.usage?.usd || 0), 0);
+  // عددِ دلاری فقط وقتی چاپ می‌شود که **واقعی** باشد؛ نبودنش (مثلاً حالتِ fake) یعنی
+  // سکوت، نه یک تخمینِ ساختگی که بعداً به‌عنوان «هزینه» نقل شود.
+  console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی`
+    + (usd > 0 ? ` | هزینه‌ی واقعی: $${usd.toFixed(4)} (per فال: $${(usd / done.length).toFixed(5)})` : ''));
   // مسیرِ تعمیر جدا گزارش می‌شود: چند بار شلیک کرد، چقدر طول کشید، چقدر خرج برداشت.
   // هر سه عدد لازم است — «ارزان» بدونِ تأخیر بی‌معناست و برعکس.
   {
@@ -461,11 +471,11 @@ if (!DRY) {
     const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
     const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
     const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
-    const cost = rin / 1e6 * 0.30 + rout / 1e6 * 2.50;
+    const cost = done.reduce((a, r) => a + (r.repairUsage?.usd || 0), 0);
     console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
       (failed.length ? ` (${failed.length} ناموفق${dead.length ? `، ${dead.length} تای آن **اصلاً به مدل نرسید**` : ''})` : '') +
       (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
-        ` | توکن ${rin}+${rout} ≈ $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : ''));
+        ` | توکن ${rin}+${rout}` + (cost > 0 ? ` | هزینه‌ی واقعی $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : '') : ''));
     if (dead.length === fired.length && fired.length) {
       console.log('   ⚠️ مسیرِ تعمیر روی این مدل **کاملاً مرده بود** (صفر توکن در همه‌ی فراخوانی‌ها).'
         + ' عددِ «فالِ ایرادناک» این دور با مدل‌هایی که تعمیرشان کار کرده قابلِ مقایسه نیست.');
