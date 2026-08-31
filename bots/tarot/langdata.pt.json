@@ -1112,10 +1112,10 @@
     },
     {
       "id": "europeu",
-      "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:est(?:á|ou|ás|ão|amos|ava|avam|ávamos)\\s+a\\s+[a-zà-ÿ]{1,}(?:ar|er|ir)|tu\\s+(?:és|estás|tens|podes|queres|sabes|deves|vais|fazes|precisas|sentes|vês|escolhes|consegues|ficas))(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "pattern": "(?:(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:est(?:á|ou|ás|ão|amos|ava|avam|ávamos)\\s+a\\s+[a-zà-ÿ]{1,}(?:ar|er|ir)|tu\\s+(?:és|estás|tens|podes|queres|sabes|deves|vais|fazes|precisas|sentes|vês|escolhes|consegues|ficas)|fact(?:o|os)|ac(?:ção|ções)|direc(?:ção|ções)|sec(?:ção|ções)|objectivos?|activ(?:o|a|os|as|idade|idades)|exact[oa]s?|contact(?:o|os)|óptim[oa]s?|adoptar|baptismo|electrónic[oa]s?|eléctric[oa]s?|fenómenos?|económic[oa]s?|tónic[oa]s?|cómic[oa]s?|oxigénio|bebés?|ténis|ecrã|telemóve(?:l|is)|autocarro|comboio|frigorífico|casa\\s+de\\s+banho|pequeno-almoço|chávenas?|talho|boleia|utilizador(?:es|a|as)?|raparigas?|gajos?|miúd[oa]s?|percebes)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])|(?:[ao]|d[ao]|n[ao]|su[ao]|ess[ao]|est[ao]|um[ao]?)\\s+(?:equipa|controlo))",
       "except": "a par\\b|a fim de|a caminho|a favor|a cargo|a ponto de|a partir de|a seguir",
       "flags": "i",
-      "hint": "Construção de português de Portugal. O público é do Brasil. Reescreva em português brasileiro: «está a mudar» vira «está mudando», «tu tens» vira «você tem»."
+      "hint": "Português europeu. Reescreva em português do Brasil: equipe, controle, fato, ação, objetivo, contato, ótimo, eletrônico, fenômeno, econômico, bebê, tela, celular, usuário. E nunca use «rapariga», «gajo» ou «miúdo»: no Brasil soam errado ou ofensivo."
     },
     {
       "id": "genero",
