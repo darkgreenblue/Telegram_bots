@@ -1,6 +1,6 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText } from '../lib/bots.js';
+import { instances, instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText, familyOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
@@ -124,7 +124,7 @@ function buildTimeline(db, botKey, uid) {
       });
     }
   }
-  if (botKey === 'tarot' && hasTable(db, 'readings')) {
+  if (familyOf(botKey) === 'tarot' && hasTable(db, 'readings')) {
     for (const r of rows(db, 'SELECT * FROM readings WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
       items.push({ ts: r.created_at, icon: '🔮', label: `فال ${r.type} — ${creditText(botKey, r.price)}`, detail: `${r.status}${r.feedback ? ` · بازخورد: ${r.feedback.slice(0, 60)}` : ''}`, status: r.status });
     }

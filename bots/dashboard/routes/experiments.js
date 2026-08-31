@@ -1,6 +1,6 @@
 // تست‌ها (A/B): ساخت/اجرا/توقف نرم/kill/تصمیم + نتایج آماری صادقانه برای نمونه‌ی کم.
 // config آزمایش در DB خود ربات نوشته می‌شود (ربات با کش ۶۰ثانیه‌ای می‌خواند — توقف بدون deploy).
-import { instancesOf, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported, familyOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { ensureAb } from '../../../shared/ab.js';
 import { chanceToWin, rateCI, srmCheck, meanSE, MIN_SAMPLE, SHIP_CTW } from '../lib/stats.js';
@@ -191,7 +191,7 @@ export function experimentViewBody(url) {
   ]))}</div>` : '';
 
   /* --- فانل per variant --- */
-  const funnelDef = FUNNELS[inst.bot];
+  const funnelDef = FUNNELS[familyOf(inst.bot)];
   const funnelCard = funnelDef ? `<div class="card"><h2>🔻 فانل به تفکیک variant</h2>${variantFunnel(inst, e, funnelDef.steps)}</div>` : '';
 
   /* --- کنترل چرخه --- */

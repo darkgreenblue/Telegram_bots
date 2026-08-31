@@ -2,7 +2,7 @@
 // منطق و کوئری‌ها در lib/journey.js است؛ این‌جا فقط رندر و اعتبارسنجیِ ورودی.
 import { microSteps, exitPoints, screensReport, screenMap, stepLabel } from '../lib/journey.js';
 import { FUNNELS } from '../lib/funnels-def.js';
-import { instancesOf } from '../lib/bots.js';
+import { instancesOf, familyOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { esc, fmt, nowSec } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
@@ -90,7 +90,7 @@ export function exitCard(botKey, { since, ch, ver, now = 0 }) {
     ? `<p class="muted">از ردیفِ «بلاک/آنبلاک»: <b>${fmt(kicked)}</b> نفر ربات را بلاک کردند`
       + (rejoined ? ` و <b>${fmt(rejoined)}</b> نفر آنبلاک/استارت کردند ولی بعدش هیچ کاری نکردند` : '')
       + `.</p>` : '';
-  return `<div class="card"><h2>${esc(FUNNELS[botKey]?.title || botKey)} — کجا ریختند؟</h2>
+  return `<div class="card"><h2>${esc(FUNNELS[familyOf(botKey)]?.title || botKey)} — کجا ریختند؟</h2>
     <p class="muted">${fmt(total)} کاربر که بیش از ۲۴ ساعت است برنگشته‌اند؛ این آخرین چیزی است که دیدند یا زدند.
       این جدول مستقیم می‌گوید کدام پیام «آخرِ خط» بوده. وقتی خودِ آخرین ردپا علت نیست (بلاک‌کردنِ ربات، یا یک
       رویدادِ داخلی)، ستونِ «قدمِ قبلی» علتِ واقعی را نشان می‌دهد. روی عدد بزن تا لیستشان باز شود (برای پرسیدن از پشتیبانی).</p>
@@ -143,7 +143,7 @@ export function screensBody(url) {
       ];
     });
     any = true;
-    out += `<div class="card"><h2>${esc(FUNNELS[botKey].title)} — صفحه‌ها</h2>
+    out += `<div class="card"><h2>${esc(FUNNELS[familyOf(botKey)].title)} — صفحه‌ها</h2>
       ${table(['پیام', 'نمایش', 'کاربر یکتا', 'نرخ عبور', 'میانگین زمان تا اقدام'], body)}</div>`;
   }
   if (!any) out += `<div class="card"><p class="muted">برای این ربات هنوز رویدادِ ریزِ صفحه‌ای ثبت نشده `

@@ -73,6 +73,13 @@ export const BOTS = [
      * `MASTER_DASH_BOTS` همه رویش نشسته‌اند و عوض‌کردنش یعنی شکستنِ آن‌ها. */
     key: 'tarot-intl', title: '🌍 تاروت زبان‌های دیگر', dataDir: '../tarot/data', envDir: 'TAROT_DB_DIR',
     pattern: /^bot-(?!fa\.db$)[a-z-]+\.db$/,
+    /* 🧬 «کدِ محصولش همان است». هر چیزی که به **رفتارِ محصول** گره خورده (تعریفِ قیف،
+     * جدول‌های تایم‌لاینِ پشتیبانی) باید از این بخواند، نه از کلیدِ ربات.
+     * ⚠️ بدونِ این، تفکیکِ داشبورد چهار چیز را **بی‌صدا** خاموش می‌کرد: تایم‌لاینِ
+     * فال‌ها در پروفایلِ پشتیبانی، صفحه‌ی فانل‌ها، قیفِ صفحه‌ی «کجا ریختند؟» و قیفِ
+     * per variant صفحه‌ی آزمایش‌ها — چون همه‌شان روی کلیدِ `tarot` نشسته بودند و
+     * کلیدِ تازه در هیچ‌کدام نبود. هیچ خطایی هم نمی‌داد، فقط خالی می‌شد. */
+    family: 'tarot',
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_STARS,
     abSupport: true,          // همان کدِ ربات است، پس variant() را دارد
     receiptQueue: false,      // ریلِ استارز رسید ندارد؛ تلگرام خودش تأیید می‌کند
@@ -99,6 +106,9 @@ export const BOTS = [
   },
 ];
 export const botByKey = (key) => BOTS.find(b => b.key === key);
+/** «خانواده‌ی محصول» — کلیدی که رفتارِ ربات را می‌شناسد. برای ربات‌های تک‌زبانه خودِ
+ *  کلید است؛ برای زبان‌های دیگرِ تاروت همان `tarot`، چون دقیقاً همان کدِ ربات است. */
+export const familyOf = (key) => botByKey(key)?.family || key;
 
 const dirOf = (b) => (b.envDir && process.env[b.envDir]) || b.dataDir;
 

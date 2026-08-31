@@ -20,8 +20,10 @@ const dataDir = path.join(root, 'tarotdata');
 mkdirSync(dataDir, { recursive: true });
 process.env.TAROT_DB_DIR = dataDir;
 
-const { BOTS, botByKey, instancesOf, moneyText, moneyOf, toToman, receiptQueueSupported, abSupported } =
+const { BOTS, botByKey, instancesOf, moneyText, moneyOf, toToman, receiptQueueSupported, abSupported, familyOf } =
   await import('../bots/dashboard/lib/bots.js');
+const { FUNNELS } = await import('../bots/dashboard/lib/funnels-def.js');
+import { readFileSync } from 'node:fs';
 const { MASTER_DASH_BOTS, DEFAULT_BOT } = await import('../bots/dashboard/lib/nav.js');
 
 let pass = 0; const errs = [];
@@ -94,6 +96,29 @@ ok(toToman('tarot-intl', 250) === 250, 'هیچ تبدیلی روی عددِ اس
 ok(receiptQueueSupported('tarot') === true, 'صفِ رسید برای فارسی روشن است');
 ok(receiptQueueSupported('tarot-intl') === false, 'صفِ رسید برای زبان‌های دیگر خاموش است (استارز رسید ندارد)');
 ok(abSupported('tarot-intl') === true, 'صفحه‌ی A/B برای زبان‌های دیگر هم فعال است (همان کدِ ربات)');
+
+/* ── ۵ب) «کدِ محصولش همان است» — گاردِ خاموشیِ بی‌صدا ──────────────────────────
+ * 🐛 باگی که خودِ همین تفکیک ساخت: چهار چیز روی **کلیدِ ربات** نشسته بودند نه روی
+ * رفتارِ محصول، پس کلیدِ تازه در هیچ‌کدام نبود و بی‌صدا خالی می‌شد — تایم‌لاینِ
+ * فال‌ها در پروفایلِ پشتیبانی، صفحه‌ی فانل‌ها، قیفِ «کجا ریختند؟» و قیفِ per
+ * variant صفحه‌ی آزمایش‌ها. هیچ خطایی نمی‌دادند؛ فقط کاربرِ روس بدونِ فال دیده
+ * می‌شد. حالا همه از `familyOf` می‌خوانند. */
+ok(familyOf('tarot-intl') === 'tarot', 'تاروتِ زبان‌های دیگر همان خانواده‌ی محصولِ فارسی است');
+ok(familyOf('tarot') === 'tarot' && familyOf('voice2text') === 'voice2text',
+  'رباتِ تک‌زبانه خانواده‌اش خودش است (رفتارِ قبلی دست‌نخورده)');
+ok(!!FUNNELS[familyOf('tarot-intl')], 'صفحه‌ی فانل‌ها برای زبان‌های دیگر تعریفِ قیف پیدا می‌کند');
+{
+  // هر مصرف‌کننده‌ای که قیف/تایم‌لاین را per ربات پیدا می‌کند باید از خانواده بخواند،
+  // وگرنه همان خاموشیِ بی‌صدا از در دیگری برمی‌گردد.
+  const src = (f) => readFileSync(new URL(`../bots/dashboard/${f}`, import.meta.url), 'utf8');
+  const raw = [
+    ['lib/cohorts.js', /FUNNELS\[botKey\]/],
+    ['routes/experiments.js', /FUNNELS\[inst\.bot\]/],
+    ['routes/journey.js', /FUNNELS\[botKey\]/],
+    ['routes/support.js', /botKey === 'tarot'/],
+  ].filter(([f, re]) => re.test(src(f))).map(([f]) => f);
+  ok(raw.length === 0, `هیچ مصرف‌کننده‌ای قیف/تایم‌لاین را با کلیدِ خام پیدا نمی‌کند${raw.length ? ` (${raw.join(', ')})` : ''}`);
+}
 
 // ── ۶) واحدِ اعتبار در هر دو ریل الماس است ─────────────────────────────────
 // پول فرق دارد، **الماس نه**: هر دو همان کاتالوگِ ۱۰/۳۰/۱۰۰ الماس را می‌فروشند.

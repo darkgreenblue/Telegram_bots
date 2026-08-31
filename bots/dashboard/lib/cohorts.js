@@ -10,8 +10,7 @@
 //  - انتخابِ چنل/نسخه/نوع از لیستِ whitelist ایندکس می‌شود، نه از متنِ خام.
 import {
   instancesOf, getInstance, withDb, hasTable, rows,
-  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr,
-} from './bots.js';
+  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, familyOf } from './bots.js';
 import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
 // شرط‌های مسیرِ ریز از همان‌جایی می‌آیند که عددها ساخته می‌شوند (تک‌منبع؛ ضدِ واگراییِ عدد و لیست)
 import { KEY_EXPR, notAdmin } from './journey.js';
@@ -135,7 +134,7 @@ export function resolveCohort(url) {
 
     /* وضعیت رکوردهای قطعی (readings/voice_flows/dreams): کاربرانِ رکوردهایی با آن وضعیت */
     case 'entity': {
-      const entity = FUNNELS[botKey]?.entity;
+      const entity = FUNNELS[familyOf(botKey)]?.entity;
       if (!entity) return { error: 'این ربات جدول رکورد قطعی ندارد.' };
       const st = url.searchParams.get('st') || '';
       const statusExpr = entity.statusExpr || 't.status';
