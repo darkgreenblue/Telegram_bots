@@ -450,14 +450,26 @@ if (!DRY) {
   {
     const fired = done.filter(r => r.repair?.fired);
     const failed = fired.filter(r => !r.repair.ok);
+    /* ⚠️ «شلیک کرد و نشد» با «اصلاً به مدل نرسید» یکی نیست، و تفکیکشان از یک دورِ
+     * واقعی درآمد: بازوی `gpt-5-mini` شش تعمیرِ «ناموفق» داشت با **صفر توکن** و
+     * تأخیرِ ~۵۰ms، یعنی هر شش فراخوانی قبل از رسیدن به مدل رد شده بودند (احتمالاً
+     * یک پارامترِ ناسازگار). آن دور شش فالِ ایرادناک گزارش کرد در حالی که مسیرِ
+     * تعمیرش عملاً **وجود نداشت** — یعنی عددِ کیفیتِ آن مدل بدترِ واقعیت نمایش داده
+     * می‌شد و علتش در گزارش نامرئی بود. هر مدلِ تازه‌ای می‌تواند همین را بدهد، پس
+     * تشخیصش باید ساختاری باشد نه چشمی. */
+    const dead = fired.filter(r => !r.repair.ok && !(r.repairUsage?.in || r.repairUsage?.out));
     const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
     const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
     const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
     const cost = rin / 1e6 * 0.30 + rout / 1e6 * 2.50;
     console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
-      (failed.length ? ` (${failed.length} ناموفق)` : '') +
+      (failed.length ? ` (${failed.length} ناموفق${dead.length ? `، ${dead.length} تای آن **اصلاً به مدل نرسید**` : ''})` : '') +
       (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
         ` | توکن ${rin}+${rout} ≈ $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : ''));
+    if (dead.length === fired.length && fired.length) {
+      console.log('   ⚠️ مسیرِ تعمیر روی این مدل **کاملاً مرده بود** (صفر توکن در همه‌ی فراخوانی‌ها).'
+        + ' عددِ «فالِ ایرادناک» این دور با مدل‌هایی که تعمیرشان کار کرده قابلِ مقایسه نیست.');
+    }
   }
   // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
   // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
