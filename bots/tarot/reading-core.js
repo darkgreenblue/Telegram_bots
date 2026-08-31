@@ -69,6 +69,15 @@ export function configureCardData(d) {
 // خودِ ماژول از فایلِ زبان پیکربندی می‌شود، پس هیچ مصرف‌کننده‌ای (ربات یا آزمایشگاه)
 // نمی‌تواند صدا زدنش را جا بیندازد. برای `fa` فایل وجود ندارد و همه‌چیز پیش‌فرض می‌ماند.
 configureCardData(LANG_DATA);
+
+/* کلیدهای آبجکتِ «فال‌های قبلی» در کانتکست. پیش‌فرض فارسی است تا `fa` که فایلِ زبانی
+ * ندارد دقیقاً مثل قبل بماند. */
+const CTX_KEYS = {
+  type: LANG_DATA?.ctxKeys?.type || 'نوع فال',
+  summary: LANG_DATA?.ctxKeys?.summary || 'خلاصه',
+  feedback: LANG_DATA?.ctxKeys?.feedback || 'بازخورد کاربر',
+};
+export const CONTEXT_KEYS = CTX_KEYS;
 /** نامِ کارت به زبانِ جاری (fallback: نامِ فارسیِ `cards.js`). */
 export const cardName = (key) => NAMES.cards[key] || CARD_BY_KEY[key]?.fa || '';
 /** نامِ جایگاه؛ کلید خودِ رشته‌ی فارسی است، چون همان برچسبِ canonical است. */
@@ -381,10 +390,20 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
       kb: (kbOn && CARD_KB[c.key]) || undefined,
     })),
     // بدونِ هیچ فیلدِ زمانی: مرتب‌شده از تازه‌ترین، و همین کافی است.
+    /* 🌍 کلیدهای این آبجکت هم **متنِ پرامپت** اند، نه فقط ساختارِ داخلی: عیناً داخلِ
+     * JSONِ ورودیِ مدل می‌روند. تا امروز فارسیِ هاردکد بودند، پس رباتِ روسی یک آبجکتِ
+     * با کلیدِ فارسی می‌گرفت. دو ضرر داشت و هر دو بی‌صدا بودند:
+     *   ۱) نویسه‌ی فارسی داخلِ پرامپتِ غیرفارسی، دقیقاً همان چیزی که
+     *      `check-card-knowledge` برای دادهٔ کارت ممنوع کرده.
+     *   ۲) سنجه‌ی «لنگرِ حافظه» در آزمایشگاه با `summaryKey`ِ همان زبان دنبالِ خلاصه
+     *      می‌گشت و `undefined` می‌گرفت، پس جمله‌ای که به فالِ قبلی لنگر داشت
+     *      **بی‌لنگر** شمرده می‌شد و نرخِ روسی الکی بالا می‌رفت.
+     * برای `fa` این کلیدها عیناً همان‌های قبلی‌اند (پیش‌فرضِ زیر)، پس رفتارِ رباتِ
+     * زنده بیت‌به‌بیت دست‌نخورده است. */
     previous: prev.map(r => ({
-      'نوع فال': r.type,
-      'خلاصه': r.summary,
-      'بازخورد کاربر': r.feedback || '-',
+      [CTX_KEYS.type]: r.type,
+      [CTX_KEYS.summary]: r.summary,
+      [CTX_KEYS.feedback]: r.feedback || '-',
     })),
     today: tehranToday(),
   };

@@ -66,6 +66,25 @@ for (const file of FILES) {
     ok(missP.length === 0, `هر ${positionNames.size} نامِ جایگاه و برچسبِ تقابلی ترجمه دارد${missP.length ? ` (جامانده: ${missP.slice(0, 4).join(' | ')})` : ''}`);
     ok(typeof d.positionFallback === 'string' && d.positionFallback.includes('%n'),
       'برچسبِ کارتِ بی‌جایگاه قالبِ %n دارد');
+    /* 🌍 کلیدهای کانتکستِ «فال‌های قبلی» هم متنِ پرامپت‌اند و باید per زبان باشند.
+     * 🐛 باگی که این را لازم کرد: این کلیدها فارسیِ هاردکد بودند، پس هر زبانِ دیگری
+     * آبجکتی با کلیدِ فارسی می‌گرفت. علاوه بر نشتِ نویسه‌ی فارسی به پرامپتِ غیرفارسی،
+     * سنجه‌ی «لنگرِ حافظه» آزمایشگاه با `summaryKey`ِ همان زبان دنبالِ خلاصه می‌گشت،
+     * `undefined` می‌گرفت، و جمله‌ای که واقعاً به فالِ قبلی لنگر داشت «بی‌لنگر»
+     * شمرده می‌شد. یعنی نرخِ زبانِ غیرفارسی الکی بالا می‌رفت. */
+    const ck = d.ctxKeys || {};
+    ok(!!ck.type && !!ck.summary && !!ck.feedback,
+      'کلیدهای کانتکستِ فال‌های قبلی ترجمه دارند (`ctxKeys`)');
+    ok(!/[؀-ۿ]/.test(`${ck.type}${ck.summary}${ck.feedback}`),
+      'کلیدهای کانتکست نویسه‌ی فارسی ندارند (وگرنه فارسی وارد پرامپتِ این زبان می‌شود)');
+    /* و ماژولِ سنجه‌ی آزمایشگاه باید **همان** کلید را بخواند. دو کپیِ جدا یعنی سنجه
+     * دنبالِ کلیدی می‌گردد که در کانتکست نیست، و بی‌صدا صفر برمی‌گرداند. */
+    if (existsSync(new URL(`../tools/reading-lab/lang/${lang}.mjs`, import.meta.url))) {
+      const labSrc = readFileSync(new URL(`../tools/reading-lab/lang/${lang}.mjs`, import.meta.url), 'utf8');
+      const m = /summaryKey:\s*'([^']+)'/.exec(labSrc);
+      ok(!!m && m[1] === ck.summary,
+        `summaryKeyِ آزمایشگاه با ctxKeys.summary یکی است (${m ? m[1] : 'نبود'} = ${ck.summary})`);
+    }
     ok(!!d.repair?.system && !!d.repair?.hints?.evasion && !!d.repair?.hints?.pastTime && String(d.repair?.item || '').includes('%text'),
       'پرامپتِ تعمیر کامل است (system + دو hint + قالبِ item)');
   }

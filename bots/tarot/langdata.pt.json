@@ -1123,5 +1123,10 @@
       "flags": "i",
       "hint": "Um adjetivo ou particípio marca o gênero da pessoa, e nós não sabemos o gênero dela. Reescreva sem marcar gênero, mantendo o sentido. Exemplos: «você está cansada» vira «você está sem energia»; «você se sente perdido» vira «você se sente sem rumo»; «você está preparada» vira «você já tem preparo»; «você foi deixado» vira «a outra pessoa foi embora». Use substantivo, expressão neutra ou vire a frase."
     }
-  ]
+  ],
+  "ctxKeys": {
+    "type": "tipo de leitura",
+    "summary": "resumo",
+    "feedback": "retorno da pessoa"
+  }
 }

@@ -1124,5 +1124,10 @@
       "flags": "i",
       "hint": "Hay una palabra en inglés dentro de un texto en español. Cámbiala por su equivalente natural."
     }
-  ]
+  ],
+  "ctxKeys": {
+    "type": "tipo de lectura",
+    "summary": "resumen",
+    "feedback": "comentario de la persona"
+  }
 }
