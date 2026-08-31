@@ -1114,9 +1114,10 @@
     },
     {
       "id": "genero",
-      "pattern": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:t[úu]\\s+)?(?:est[áa]s|eres|sigues|te\\s+sientes|te\\s+ves|te\\s+quedas|andas|te\\s+not[aá]s)(?:\\s+(?:muy|tan|ya|un\\s+poco|bastante|siempre|todav[íi]a|medio|re))*\\s+(?![A-Za-zÀ-ÖØ-öø-ÿ]*(?:ando|iendo|yendo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))(?!(?:cerca|fuera|dentro|arriba|abajo|ahora|nunca|siempre|contra|encima|cuidado|pecado|pasado|mercado|resultado|significado|sentido|olvido|ruido|nido|vestido|partido|camino|momento|proceso|periodo|tiempo|riesgo|miedo|deseo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))([A-Za-zÀ-ÖØ-öø-ÿ]{3,}[oa])(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "pattern": "(?:(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:t[úu]\\s+)?(?:est[áa]s|eres|sigues|te\\s+sientes|te\\s+ves|te\\s+quedas|andas|te\\s+not[aá]s)(?:\\s+(?:muy|tan|ya|un\\s+poco|bastante|siempre|todav[íi]a|medio|re))*\\s+(?![A-Za-zÀ-ÖØ-öø-ÿ]*(?:ando|iendo|yendo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))(?!(?:cerca|fuera|dentro|arriba|abajo|ahora|nunca|siempre|contra|encima|cuidado|pecado|pasado|mercado|resultado|significado|sentido|olvido|ruido|nido|vestido|partido|camino|momento|proceso|periodo|tiempo|riesgo|miedo|deseo)(?![A-Za-zÀ-ÖØ-öø-ÿ]))([A-Za-zÀ-ÖØ-öø-ÿ]{3,}[oa])(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])|(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:sabes|puedes|quieres|tienes|necesitas|debes|logras|consigues|sientes|ves)(?:[^.!?;]{0,40}?)(sol[oa]|cansad[oa]|perdid[oa]|list[oa]|preparad[oa]|segur[oa]|hart[oa]|tranquil[oa]|dispuest[oa]|abiert[oa])(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ]))",
       "flags": "i",
-      "hint": "La frase da por sentado si quien lee es hombre o mujer. Reescríbela para que sirva para cualquiera: infinitivo, forma impersonal o un sustantivo."
+      "hint": "La frase da por sentado si quien lee es hombre o mujer. Reescríbela para que sirva para cualquiera: infinitivo, forma impersonal o un sustantivo.",
+      "except": "(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(?:él|ella|ellos|ellas|esa persona|esta persona|la otra persona|tu ex|tu pareja)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])"
     },
     {
       "id": "ingles",
