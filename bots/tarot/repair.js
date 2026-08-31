@@ -94,13 +94,34 @@ for (const d of (LANG_DATA.defects || [])) {
 
 export function findDefects(llm) {
   const hits = [];
+  /* ⚠️ **همه‌ی** ضعف‌های یک فیلد با هم جمع می‌شوند، نه فقط اولی.
+   *
+   * 🐛 باگی که دورِ ۶ آزمایشگاهِ روسی لو داد: نسخه‌ی قبلی روی اولین ضعف `return`
+   * می‌کرد، پس مدل فقط hintِ **یکی** را می‌دید؛ ولی `validate` پایین متنِ تعمیرشده
+   * را در برابرِ **همه‌ی** انواع می‌سنجد. یعنی فیلدی که دو ضعف داشت تقریباً همیشه
+   * شکست می‌خورد: مدل «вы» را برمی‌داشت، «Two of Cups» سرِ جایش می‌ماند، و تعمیر
+   * رد می‌شد. عدد: از ۵ تعمیرِ شلیک‌شده‌ی آن دور **۳ تا ناموفق** بودند. خرابی هم
+   * بی‌صداست چون متنِ اصلی تحویل می‌شود و کاربر هر دو ضعف را می‌گیرد.
+   *
+   * هر فیلد همچنان **یک** hit می‌دهد (وگرنه دو fix برای یک فیلد به هم می‌خورند و
+   * `applyFixes` بر اساسِ ایندکس کار می‌کند)؛ فقط hint و عبارت‌ها با هم می‌آیند.
+   * جداکننده عمداً خنثی است: ویرگولِ فارسی این‌جا یعنی یک نویسه‌ی بیگانه داخلِ
+   * پرامپتِ روسی. */
   const push = (path, text) => {
     const t = String(text || '').trim();
     if (!t) return;
+    const found = [];
     for (const d of DEFECTS) {
       const phrase = d.find(t);
-      if (phrase) { hits.push({ path, text: t, phrase, kind: d.id, hint: d.hint }); return; }
+      if (phrase) found.push({ phrase, kind: d.id, hint: d.hint });
     }
+    if (!found.length) return;
+    hits.push({
+      path, text: t,
+      phrase: found.map((f) => f.phrase).join(' / '),
+      kind: found.map((f) => f.kind).join('+'),
+      hint: found.map((f) => f.hint).join(' '),
+    });
   };
   push('headline', llm?.headline);
   push('pattern', llm?.pattern);

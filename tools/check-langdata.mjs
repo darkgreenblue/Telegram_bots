@@ -198,6 +198,49 @@ console.log('\n▶ گاردِ سرخط per زبان');
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ▶ یک فیلد، همه‌ی ضعف‌هایش — تقارنِ hint و validate
+
+   🐛 دورِ ۶ روسی: از ۵ تعمیرِ شلیک‌شده **۳ تا ناموفق**. علت یک عدمِ تقارن بود:
+   `findDefects` روی **اولین** ضعفِ هر فیلد متوقف می‌شد، پس مدل فقط یک hint
+   می‌دید؛ ولی `validate` متنِ تعمیرشده را در برابرِ **همه‌ی** انواع می‌سنجید.
+   فیلدی با دو ضعف عملاً محکوم به شکست بود، و شکستش بی‌صداست (متنِ اصلی با هر
+   دو ضعف تحویل می‌شود).
+   ══════════════════════════════════════════════════════════════════════════ */
+console.log('\n▶ یک فیلد، همه‌ی ضعف‌هایش');
+{
+  const { findDefects, DEFECTS } = await import('../bots/tarot/repair.js');
+
+  // فارسی (پیش‌فرضِ ماژول): طفره + زمانِ گذشته در یک جمله
+  const faHits = findDefects({ headline: 'x', callback: '', pattern: '',
+    reads: ['پارسال بستگی به خودت داره که چی می‌خوای'], closing: '' });
+  ok(faHits.length === 1, `فیلدِ دوضعفی همچنان **یک** hit می‌دهد (applyFixes ایندکسی است) — شد ${faHits.length}`);
+  ok(/evasion/.test(faHits[0]?.kind || '') && /pastTime/.test(faHits[0]?.kind || ''),
+    `هر دو نوع گزارش می‌شوند (شد: ${faHits[0]?.kind})`);
+  const faHint = faHits[0]?.hint || '';
+  ok(DEFECTS.filter((d) => faHits[0].kind.includes(d.id)).every((d) => !d.hint || faHint.includes(d.hint)),
+    'hintِ هر دو ضعف به مدل می‌رسد، نه فقط اولی');
+
+  // ⚠️ جداکننده باید **خنثی** باشد: ویرگولِ فارسی این‌جا یعنی یک نویسه‌ی بیگانه که
+  // مستقیم داخلِ پرامپتِ روسی می‌نشیند (همان کلاسِ باگِ `renderV4` با «، »).
+  ok(faHits[0].phrase.includes(' / '),
+    `عبارت‌ها با جداکننده‌ی خنثی به هم می‌چسبند (شد: ${faHits[0].phrase})`);
+
+  /* روسی: همان جمله‌ی واقعیِ دورِ ۶ که تعمیرش شکست خورد. هر دو ضعف باید دیده شوند،
+   * وگرنه مدل «вы» را برمی‌دارد و «Two of Cups» می‌ماند و کلِ تعمیر رد می‌شود. */
+  const ruFile = new URL('../bots/tarot/langdata.ru.json', import.meta.url);
+  if (existsSync(ruFile)) {
+    const ruData = JSON.parse(readFileSync(ruFile, 'utf8'));
+    const ids = (ruData.defects || []).map((d) => d.id);
+    ok(ids.includes('latin'),
+      `ضعفِ «لاتین در متنِ روسی» تعمیرشدنی است، نه فقط یک نکته‌ی گزارشی (${ids.join(', ')})`);
+    // سنجه‌ی آزمایشگاه باید همان الگو را از همین فایل بردارد (قاعده‌ی تک‌منبع)
+    const LAB_RU = readFileSync(new URL('../tools/reading-lab/lang/ru.mjs', import.meta.url), 'utf8');
+    ok(/id: 'latin', re: reOf\('latin'\)/.test(LAB_RU),
+      'سنجه‌ی لاتین الگو را از همان فایلِ گارد می‌خواند، نه یک کپیِ جدا');
+  }
+}
+
 console.log('\n▶ سیم‌کشیِ runtime');
 {
   const SRC = readFileSync(new URL('reading-core.js', DIR), 'utf8');
