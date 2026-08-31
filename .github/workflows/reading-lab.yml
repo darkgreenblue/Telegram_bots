@@ -114,3 +114,28 @@ jobs:
           path: reading-lab-out.json
           retention-days: 30
           if-no-files-found: ignore
+
+      # 📋 خلاصه‌ی فشرده در **انتهای** لاگ. لاگِ کاملِ یک دور ~۱۴۰۰ خط است و خلاصه‌اش
+      # وسطش گم می‌شود، پس خواندنش از بیرون گران و خطاپذیر بود. این قدم بعد از آپلود
+      # اجرا می‌شود تا همیشه آخرین چیزِ لاگ باشد و با یک tail کوتاه دیده شود.
+      - name: خلاصه
+        if: always() && inputs.probe != true && inputs.list_models != true
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (!fs.existsSync("reading-lab-out.json")) { console.log("بدونِ خروجی"); process.exit(0); }
+            const a = JSON.parse(fs.readFileSync("reading-lab-out.json", "utf8"));
+            const sum = (f) => a.reduce((s, r) => s + (f(r) || 0), 0);
+            const lo = sum(r => r.check?.anchor?.loose), to = sum(r => r.check?.anchor?.total);
+            const ls = sum(r => r.check?.anchor?.looseStrict ?? r.check?.anchor?.loose);
+            const bad = a.filter(r => (r.check?.issues || []).length).length;
+            const pct = (x) => (to ? Math.round(x * 100 / to) : 0);
+            console.log("═══ خلاصه ═══");
+            console.log(`فال: ${a.length} | ایرادناک: ${bad}`);
+            console.log(`بی‌لنگر: ${lo}/${to} (${pct(lo)}٪)`);
+            console.log(ls === lo
+              ? "سنجه‌ی قدیمی: همان عدد (صفر جمله‌ی نجات‌یافته)"
+              : `سنجه‌ی قدیمی: ${ls}/${to} (${pct(ls)}٪) → فیکسِ ریشه‌یابی ${ls - lo} جمله نجات داد`);
+            for (const r of a) if ((r.check?.issues || []).length)
+              console.log(`  ❌ ${r.persona}/${r.step}${r.rep ? "/پ" + r.rep : ""}: ${r.check.issues.join(" | ")}`);
+          '
