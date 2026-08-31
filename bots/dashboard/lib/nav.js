@@ -7,7 +7,7 @@
 //     نیست خودش کوکی/پیش‌فرض بخواند — همه فقط `scopeBot(url)` را صدا می‌زنند.
 //  ۲) **منو درختی است.** آیتمِ ریشه‌ی «آمار تحلیلی» خودش یک صفحه دارد (داشبوردِ اصلی)
 //     و زیرمنوهایش بقیه‌ی صفحه‌های تحلیلی‌اند، تا همه‌ی آمار در یک بخش متمرکز بماند.
-import { BOTS, botByKey, instancesOf } from './bots.js';
+import { BOTS, botByKey, instancesOf, baseKey, langOfKey, langsOf } from './bots.js';
 
 /** تمرکزِ فعلیِ محصول (خواسته‌ی صریحِ مالک): تاروت پیش‌فرضِ داشبورد است. */
 export const DEFAULT_BOT = 'tarot';
@@ -43,14 +43,33 @@ export const NAV = [
 const GROUP_PATHS = new Set(NAV.flatMap(n => (n.children || []).map(([h]) => h)));
 export const inGroup = (path) => GROUP_PATHS.has(path);
 
-/** ربات فعال. هرگز خطا نمی‌دهد: کلیدِ ناشناخته → پیش‌فرض. */
+/** ربات فعال (شاید با فیلترِ زبان: `tarot-intl@ru`). کلیدِ ناشناخته → پیش‌فرض. */
 export function scopeBot(url) {
   const k = url?.searchParams?.get('bot') || '';
-  return botByKey(k) ? k : DEFAULT_BOT;
+  return validBotKey(k) || DEFAULT_BOT;
 }
 
-/** کلیدِ معتبر از ورودیِ خام (query یا کوکی) — `index.js` برای resolve کردنِ اسکوپ. */
-export const validBotKey = (raw) => (botByKey(String(raw || '')) ? String(raw) : '');
+/** کلیدِ معتبر از ورودیِ خام (query یا کوکی) — `index.js` برای resolve کردنِ اسکوپ.
+ * ⚠️ زبانِ ناشناخته **بی‌صدا حذف** می‌شود و کلیدِ پایه می‌ماند، نه اینکه کلِ اسکوپ به
+ * پیش‌فرض بپرد: کاربری که لینکِ `?bot=tarot-intl@ru` را از دیروز باز می‌کند و آن زبان
+ * دیگر دیتابیس ندارد، باید نمای تجمیعیِ همان ربات را ببیند نه تاروتِ فارسی را. */
+export const validBotKey = (raw) => {
+  const k = String(raw || '');
+  // شکلِ مجاز عمداً تنگ است: یک کلید، حداکثر یک پسوندِ زبان. `a@b@c` یا هر نویسه‌ی
+  // دیگری رد می‌شود، وگرنه `baseKey` بی‌صدا تکه‌ی اولش را برمی‌داشت و یک ورودیِ
+  // بدشکل به یک اسکوپِ معتبر تبدیل می‌شد.
+  if (!/^[a-z0-9-]+(@[a-z0-9-]+)?$/.test(k)) return '';
+  if (!botByKey(k)) return '';
+  const lang = langOfKey(k);
+  if (lang && !langsOf(k).includes(lang)) return baseKey(k);
+  return k;
+};
+
+/** زبان‌های قابلِ فیلترِ اسکوپِ فعلی (خالی = این ربات فیلترِ زبان لازم ندارد). */
+export const langPicker = (bot) => {
+  const langs = langsOf(bot);
+  return langs.length > 1 ? langs : [];
+};
 
 /** لینکِ داخلیِ داشبورد که اسکوپ را حفظ می‌کند. */
 export function link(href, bot, extra = {}) {

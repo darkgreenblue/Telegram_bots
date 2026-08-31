@@ -1,6 +1,6 @@
 // رندر HTML سمت سرور — RTL فارسی، بدون build step و بدون هیچ منبع خارجی (self-contained)
 import { esc, fmt, tehranDateTime } from './util.js';
-import { NAV, inGroup, link, botsForPicker } from './nav.js';
+import { NAV, inGroup, link, botsForPicker, langPicker } from './nav.js';
 
 const CSS = `
   :root { --bg:#f6f7fb; --card:#fff; --line:#e3e6ef; --text:#1d2333; --dim:#6b7280; --accent:#4f46e5; --ok:#0a7d33; --bad:#b42318; --warn:#92400e; }
@@ -147,10 +147,23 @@ export function layout(title, active, body, { msg = '', bot = '', session = null
   const DROP = new Set(['bot', 'inst', 'id', 'q', 'key', 'pl', 'code', 'page']);
   const keep = [...(query || [])].filter(([k]) => !DROP.has(k))
     .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('');
+  /* 🌍 فیلترِ زبان — فقط برای رباتی که واقعاً چند زبان دارد (بند ۲و/۷: نمای پیش‌فرضِ
+   * تجمیعی، با امکانِ تفکیک). مقدارش روی **همان** پارامترِ `bot` سوار می‌شود
+   * (`tarot-intl@ru`)، نه یک پارامترِ جدا؛ این‌طور فیلتر خودکار روی همه‌ی صفحه‌ها و
+   * همه‌ی لینک‌های داخلی می‌ماند بدونِ اینکه هیچ route ای عوض شود. */
+  const langs = langPicker(bot);
+  const curLang = String(bot).split('@')[1] || '';
+  const base = String(bot).split('@')[0];
+  const langSelect = langs.length ? `<select name="bot" data-autosubmit style="margin-top:6px">
+      <option value="${esc(base)}" ${curLang ? '' : 'selected'}>همه‌ی زبان‌ها</option>
+      ${langs.map(l => `<option value="${esc(base)}@${esc(l)}" ${l === curLang ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+    </select>` : '';
+
   const picker = `<form class="botpick" method="get" action="${esc(path || '/')}">
     <span class="lbl">داشبوردِ کدام ربات؟</span>${keep}
     <select name="bot" data-autosubmit>${botsForPicker().map(b =>
-      `<option value="${esc(b.key)}" ${b.key === bot ? 'selected' : ''}>${esc(b.title)}${b.hasDb ? '' : ' (بدون دیتابیس)'}</option>`).join('')}</select>
+      `<option value="${esc(b.key)}" ${b.key === String(bot).split('@')[0] ? 'selected' : ''}>${esc(b.title)}${b.hasDb ? '' : ' (بدون دیتابیس)'}</option>`).join('')}</select>
+    ${langSelect}
     <noscript><button type="submit" style="margin-top:6px">برو</button></noscript>
   </form>`;
 

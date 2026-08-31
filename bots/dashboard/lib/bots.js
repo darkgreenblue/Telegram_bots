@@ -105,7 +105,19 @@ export const BOTS = [
     },
   },
 ];
-export const botByKey = (key) => BOTS.find(b => b.key === key);
+/* 🌍 «کلیدِ اسکوپ‌دار»: `tarot-intl` یعنی همه‌ی زبان‌ها، `tarot-intl@ru` یعنی فقط روسی.
+ *
+ * چرا این شکل و نه یک پارامترِ جدای `lang`: تنها نقطه‌ی شمارشِ دیتابیس‌ها `instancesOf`
+ * است، ولی سی جای مختلف صدایش می‌زنند و بیشترشان داخلِ helperهایی هستند که فقط
+ * `botKey` می‌گیرند. رساندنِ یک پارامترِ تازه به همه‌ی آن‌ها یعنی سی نقطه‌ی لمس روی یک
+ * ابزارِ کارکنِ ادمین. با سوارکردنِ فیلتر روی خودِ کلید، **هیچ route ای عوض نمی‌شود**:
+ * اسکوپ همان‌جایی resolve می‌شود که همیشه می‌شد و از همان‌جا به همه می‌رسد.
+ * `botByKey` پسوند را می‌بُرد، پس پروفایل (پول، ستون‌ها، خانواده) دست‌نخورده کار می‌کند. */
+export const baseKey = (key) => String(key || '').split('@')[0];
+export const langOfKey = (key) => String(key || '').split('@')[1] || '';
+export const scopedKey = (key, lang) => (lang ? `${baseKey(key)}@${lang}` : baseKey(key));
+
+export const botByKey = (key) => BOTS.find(b => b.key === baseKey(key));
 /** «خانواده‌ی محصول» — کلیدی که رفتارِ ربات را می‌شناسد. برای ربات‌های تک‌زبانه خودِ
  *  کلید است؛ برای زبان‌های دیگرِ تاروت همان `tarot`، چون دقیقاً همان کدِ ربات است. */
 export const familyOf = (key) => botByKey(key)?.family || key;
@@ -196,7 +208,16 @@ export function revenueWhere(bot, sinceParamIdx = '?') {
   };
 }
 export const getInstance = (id) => instances().find(i => i.id === id) || null;
-export const instancesOf = (botKey) => instances().filter(i => i.bot === botKey);
+/* ⚠️ `id` و `i.bot` عمداً **کلیدِ پایه** می‌مانند: لینک‌های `?inst=` و مقایسه‌های
+ * موجود نباید با فیلترِ زبان بشکنند. فیلتر فقط جمعیت را کم می‌کند، هویت را نه. */
+export const instancesOf = (botKey) => {
+  const lang = langOfKey(botKey), base = baseKey(botKey);
+  return instances().filter(i => i.bot === base
+    && (!lang || (i.title.match(/\(([^)]+)\)\s*$/)?.[1] || '') === lang));
+};
+/** زبان‌های موجودِ یک ربات (برچسبِ instance)، برای منوی کشوییِ فیلتر. */
+export const langsOf = (botKey) => instancesOf(baseKey(botKey))
+  .map(i => i.title.match(/\(([^)]+)\)\s*$/)?.[1] || '').filter(Boolean);
 
 // اجرای یک تابع روی اتصال readonly کوتاه‌عمر؛ خطا (نبود فایل و...) → fallback
 export function withDb(file, fn, fallback = null) {

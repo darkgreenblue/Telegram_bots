@@ -20,11 +20,11 @@ const dataDir = path.join(root, 'tarotdata');
 mkdirSync(dataDir, { recursive: true });
 process.env.TAROT_DB_DIR = dataDir;
 
-const { BOTS, botByKey, instancesOf, moneyText, moneyOf, toToman, receiptQueueSupported, abSupported, familyOf } =
+const { BOTS, botByKey, instancesOf, moneyText, moneyOf, toToman, receiptQueueSupported, abSupported, familyOf, baseKey, langOfKey } =
   await import('../bots/dashboard/lib/bots.js');
 const { FUNNELS } = await import('../bots/dashboard/lib/funnels-def.js');
 import { readFileSync } from 'node:fs';
-const { MASTER_DASH_BOTS, DEFAULT_BOT } = await import('../bots/dashboard/lib/nav.js');
+const { MASTER_DASH_BOTS, DEFAULT_BOT, validBotKey, langPicker } = await import('../bots/dashboard/lib/nav.js');
 
 let pass = 0; const errs = [];
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
@@ -119,6 +119,28 @@ ok(!!FUNNELS[familyOf('tarot-intl')], 'صفحه‌ی فانل‌ها برای ز
   ].filter(([f, re]) => re.test(src(f))).map(([f]) => f);
   ok(raw.length === 0, `هیچ مصرف‌کننده‌ای قیف/تایم‌لاین را با کلیدِ خام پیدا نمی‌کند${raw.length ? ` (${raw.join(', ')})` : ''}`);
 }
+
+/* ── ۵ج) فیلترِ per زبان روی نمای تجمیعی (خواسته‌ی صریحِ بند ۲و/۷) ──────────────
+ * فیلتر روی خودِ کلیدِ اسکوپ سوار است (`tarot-intl@ru`) نه یک پارامترِ جدا، چون
+ * `instancesOf` سی جای مختلف صدا زده می‌شود و بیشترشان فقط `botKey` می‌گیرند. این
+ * شکل یعنی **هیچ route ای عوض نشد** و فیلتر خودکار روی همه‌ی صفحه‌ها می‌ماند. */
+ok(langPicker('tarot-intl').length >= 2, `نمای تجمیعی فیلترِ زبان دارد (${langPicker('tarot-intl').join(',')})`);
+ok(langPicker('tarot').length === 0, 'رباتِ تک‌زبانه فیلترِ زبان نمی‌گیرد (بی‌معنی است)');
+ok(instancesOf('tarot-intl@ru').length === 1 && instancesOf('tarot-intl').length === 2,
+  'فیلتر جمعیت را کم می‌کند و نمای پیش‌فرض تجمیعی می‌ماند');
+// پروفایل با کلیدِ اسکوپ‌دار نباید گم شود، وگرنه واحدِ پول و خانواده بی‌صدا عوض می‌شوند
+ok(moneyOf('tarot-intl@ru').unit === 'star' && familyOf('tarot-intl@ru') === 'tarot'
+  && receiptQueueSupported('tarot-intl@ru') === false,
+  'پروفایل با کلیدِ فیلترشده دست‌نخورده کار می‌کند');
+ok(instancesOf('tarot-intl@ru').every(i => i.bot === 'tarot-intl' && !i.id.includes('@')),
+  'هویتِ instance (id و bot) کلیدِ پایه می‌ماند، پس لینک‌های `?inst=` نمی‌شکنند');
+// امنیت + سازگاری: زبانِ ناشناخته باید به نمای تجمیعی برگردد، نه به رباتِ دیگری
+ok(validBotKey('tarot-intl@nope') === 'tarot-intl',
+  'زبانِ ناشناخته بی‌صدا به نمای تجمیعی برمی‌گردد، نه به رباتِ پیش‌فرض');
+ok(validBotKey('../etc@ru') === '' && validBotKey('tarot@x@y') === '',
+  'کلیدِ مخرب رد می‌شود');
+ok(baseKey('tarot-intl@ru') === 'tarot-intl' && langOfKey('tarot-intl') === '',
+  'برش و خواندنِ پسوند درست است');
 
 // ── ۶) واحدِ اعتبار در هر دو ریل الماس است ─────────────────────────────────
 // پول فرق دارد، **الماس نه**: هر دو همان کاتالوگِ ۱۰/۳۰/۱۰۰ الماس را می‌فروشند.
