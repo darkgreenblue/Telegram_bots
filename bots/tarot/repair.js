@@ -193,7 +193,7 @@ export const repairUser = (hits) =>
  * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
  * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
-export async function repairDefects(llm, call, { tag = '', meta = null } = {}) {
+export async function repairDefects(llm, call, { tag = '', meta = null, plan = null } = {}) {
   const hits = findDefects(llm);
   if (!hits.length) return { llm, fired: false, repaired: false };
 
@@ -216,7 +216,11 @@ export async function repairDefects(llm, call, { tag = '', meta = null } = {}) {
         });
       },
     // فقط یک تلاش: بودجه‌ی این مسیر عمداً سخت‌گیرانه است.
-    }, [undefined]);
+    // ⚠️ `plan` فقط برای آزمایشگاه است و پیش‌فرضش `[undefined]` یعنی مدلِ پیش‌فرضِ
+    // ربات — دقیقاً رفتارِ قبلی. لازم شد چون بازوی مدلِ آزمایشگاه (`--model`) تا امروز
+    // فقط خوانش را عوض می‌کرد و تعمیر همچنان روی مدلِ محصول می‌رفت؛ یعنی مقایسه‌ی
+    // مدل‌ها «کلِ خطِ لوله» را نمی‌سنجید. آرایه باید تک‌عضوی بماند (یک تلاش).
+    }, plan && plan.length === 1 ? plan : [undefined]);
   } catch (e) {
     logErr(`${tag} تعمیرِ طفره‌رفتن خطا داد: ${e.message}`);
   }

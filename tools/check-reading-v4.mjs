@@ -108,7 +108,27 @@ console.log('\n▶ چیزهایی که عمداً **رد** شدند (تناقض�
   ok(/export const DEFECTS/.test(RP) && rp.DEFECTS.length >= 2,
     'تعمیر چندنوعی است (افزودنِ نوعِ بعدی = یک ردیف، نه مسیرِ جدید)');
   ok(/export function pastTimeIn/.test(VD), 'تشخیصِ زمانِ گذشته هم تک‌منبع در verdict.js است');
-  ok(/\}, \[undefined\]\);/.test(RP), 'تعمیر دقیقاً یک فراخوانی دارد (planِ تک‌عضوی)');
+  /* ⚠️ این ادعا قبلاً یک رجکس روی سورس بود (`}, [undefined]);`) و به‌محضِ اینکه
+   * آزمایشگاه توانست مدلِ تعمیر را عوض کند شکست — بدونِ اینکه رفتار خراب شده باشد.
+   * حالا **اجرا** می‌شود: هر سه حالت باید دقیقاً یک فراخوانی با planِ تک‌عضوی بدهند،
+   * از جمله planِ چندتاییِ خصمانه که باید به پیش‌فرض برگردانده شود. */
+  {
+    const bad = { headline: 'x', callback: '', pattern: '', reads: ['بستگی به خودت داره'], closing: '' };
+    const plans = []; let calls = 0;
+    const stub = async (_s, _u, _o, plan) => {
+      calls++; plans.push(plan);
+      return { out: JSON.stringify({ fixes: ['جوابِ روشن، بدونِ طفره'] }), usages: [{}] };
+    };
+    for (const opt of [{}, { plan: ['ARM'] }, { plan: ['A', 'B', 'C'] }]) {
+      await rp.repairDefects(bad, stub, { tag: 'chk', ...opt });
+    }
+    ok(calls === 3, `تعمیر per فال دقیقاً یک فراخوانی دارد (شد: ${calls} در ۳ فال)`);
+    ok(plans.every((p) => Array.isArray(p) && p.length === 1),
+      `planِ تعمیر همیشه تک‌عضوی است (شد: ${JSON.stringify(plans)})`);
+    ok(plans[0][0] === undefined && plans[2][0] === undefined,
+      'بدونِ plan و با planِ چندتایی، مدلِ پیش‌فرضِ ربات می‌ماند (رفتارِ محصول دست‌نخورده)');
+    ok(plans[1][0] === 'ARM', 'بازوی مدلِ آزمایشگاه به تعمیر هم می‌رسد (مقایسه‌ی کلِ خطِ لوله)');
+  }
   // ادعا «هیچ for ی نباشد» نبود — پیمایشِ انواعِ ضعف طبیعتاً حلقه دارد. ادعای واقعی
   // این است که **حلقه‌ی تلاشِ دوباره** نباشد: تعمیر دقیقاً یک بار مدل را صدا می‌زند.
   ok([...RP.matchAll(/await call\(/g)].length === 1, 'مدل دقیقاً یک بار در مسیرِ تعمیر صدا زده می‌شود');

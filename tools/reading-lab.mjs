@@ -208,7 +208,9 @@ async function runStep(persona, step, i, state) {
   // **مدلِ تحتِ آزمایش** می‌نشاند. بدونِ این، بازوی GPT یک تعمیرِ Gemini می‌گرفت و
   // مقایسه دیگر مقایسه‌ی دو مدل نبود.
   const rep = await repairDefects(parsed, FAKE ? fakeRepair : orChatResilient,
-    { tag: `${persona.id}.${i + 1}`, meta: { model: MODEL } });
+    // بازوی مدل باید **کلِ خطِ لوله** را بپوشاند، نه فقط خوانش: تا قبل از این تعمیر
+    // همیشه روی مدلِ پیش‌فرضِ محصول می‌رفت و مقایسه‌ی مدل‌ها ناقص بود.
+    { tag: `${persona.id}.${i + 1}`, meta: { model: MODEL }, plan: [MODEL] });
   parsed = rep.llm;
   const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
 
