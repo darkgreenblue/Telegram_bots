@@ -55,6 +55,23 @@ const L = (await import(`../bots/tarot/locales/${LOCALE}.js`)).default;
 // غیرفارسی را رد می‌کرد و هر ۵ تلاشِ هر فال می‌سوخت: یک دورِ صفر با هزینه‌ی کامل که
 // شبیهِ «مدل بد است» به نظر می‌رسید.
 configureLocale(L);
+
+/* 🚦 پیش‌پرواز: زبانی که بلوکِ `verdict` ندارد، **یک دورِ کاملِ پولی را می‌سوزاند**
+ * بدونِ اینکه خطایی بدهد. `configureVerdict` ورودیِ خالی را بی‌صدا نادیده می‌گیرد، پس
+ * ماژول فارسی می‌ماند و `headlineOk` هر سرخطِ آن زبان را رد می‌کند: هر ۵ تلاشِ هر فال
+ * می‌سوزد، بلوکِ جوابِ قاطع غایب می‌شود، و گزارش شبیهِ «این مدل برای این زبان بد است»
+ * درمی‌آید. دقیقاً همان چیزی که سرِ روسی رخ داد. یک ثانیه چک، به‌جای یک دور هزینه. */
+{
+  const v = L?.verdict;
+  const missing = ['yes', 'no', 'direction', 'evasion', 'but'].filter(k => !Array.isArray(v?.[k]) || !v[k].length);
+  if (missing.length) {
+    console.error(`❌ locale «${LOCALE}» بلوکِ verdict کامل ندارد (${missing.join(', ')}).`);
+    console.error('   بدونِ آن هر سرخط رد می‌شود و کلِ دور با هزینه‌ی کامل می‌سوزد.');
+    console.error('   اول `bots/tarot/locales/' + LOCALE + '.js` را کامل کن، بعد دور بگیر.');
+    process.exit(1);
+  }
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const argv = process.argv.slice(2);
