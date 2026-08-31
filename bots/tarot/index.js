@@ -180,10 +180,27 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.38.0';
+const PRODUCT_VERSION = '3.39.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
+
+/* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
+   مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
+   سمتِ سرور تازه‌اش کند؛ تنها چیزی که عوضش می‌کند فرستادنِ یک ReplyKeyboardMarkup تازه
+   است. نقاطِ صدورِ فعلی (/start، بازگشت به منو، تشکرِ بعد از نمره، انصراف) هیچ‌کدام
+   تضمین نمی‌کنند کاربر **به‌زودی** به آن‌جا برسد، پس یک دکمه‌ی تازه می‌توانست هفته‌ها
+   نادیده بماند. (لانچِ v3.25.0 همین را با `KB_V2_EPOCH` حل کرد، ولی آن یک‌باره بود.)
+
+   ⚠️ هر تغییری در ردیف‌ها یا برچسب‌های `mainKeyboard` باید `KB_REV` را در **همان PR**
+   یک واحد بالا ببرد. فراموش‌کردنش یعنی آپدیت به کاربرِ فعلی نمی‌رسد — و چون هیچ خطایی
+   نمی‌دهد، بی‌صدا. برای همین اثرانگشتِ شکلِ کیبورد در چکِ CI کنارِ همین عدد پین شده
+   (`tools/check-kb-rev.mjs`): ویرایشِ کیبورد بدونِ بامپ، CI را قرمز می‌کند. */
+const KB_REV = 1;
+// اثرانگشتِ شکلِ فعلیِ کیبورد. `tools/check-kb-rev.mjs` دوباره حسابش می‌کند و با این
+// مقایسه می‌کند؛ ناهم‌خوانی یعنی کیبورد عوض شده و KB_REV بامپ نشده. عددِ تازه را خودِ
+// همان چک در پیامِ خطا چاپ می‌کند.
+const KB_SHAPE_FINGERPRINT = '2f4e434197b4';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -642,6 +659,8 @@ try { db.prepare('ALTER TABLE admin_actions ADD COLUMN ref_id INTEGER').run(); }
 try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // migration (v2.1.0): آخرین باری که کیبوردِ منو واقعاً برای کاربر فرستاده شد (ضدِ «منو ناپدید شد»)
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
+// ⌨️ آخرین نسخه‌ی کیبوردی که این کاربر گرفته (بند ۹ب-۲ ریشه). صفر = هنوز هیچ نسخه‌ای.
+try { db.prepare('ALTER TABLE users ADD COLUMN kb_rev INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.0.0): هدیه‌ی خوش‌آمد write-once + انصراف از یادآوریِ کارت روز
 try { db.prepare('ALTER TABLE users ADD COLUMN welcome_bonus_at INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_reminder_off INTEGER NOT NULL DEFAULT 0').run(); } catch {}
@@ -885,6 +904,9 @@ const stmts = {
   setPaymentPackage: db.prepare(
     "UPDATE payments SET pkg=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=? AND step='receipt' AND status='pending'"),
   setKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=?'),
+  // گاردِ `kb_rev<?` داخلِ خودِ UPDATE است: دو آپدیتِ هم‌زمانِ کاربر فقط یک بار changes=1
+  // می‌دهند، پس کیبورد دو بار فرستاده نمی‌شود (همان الگوی claimWelcomeBonus).
+  claimKbRev: db.prepare('UPDATE users SET kb_rev=? WHERE telegram_id=? AND kb_rev<?'),
   // پیشنهاددهنده: آخرین باری که کاربر هر نوع فال را **تحویل گرفته** (منبعِ جریمه‌ی تازگی)
   lastByType: db.prepare("SELECT type, MAX(created_at) AS last FROM readings WHERE user_id=? AND status='delivered' GROUP BY type"),
   // اقبال عمومی: چند بار هر نوع فال در کلِ ربات تحویل شده
@@ -1248,9 +1270,12 @@ function mainKeyboard(uid) {
       [L.buttons.wallet, L.buttons.inviteMain],
     ];
   if (FREE_MENU_ENABLED && HAFEZ.length) rows.splice(1, 0, [L.buttons.freeMenu]);
-  rows.push(...supportRow(L.support)); // 💬 پشتیبانی — برای همه، همیشه (خالی می‌شود اگر SUPPORT.enabled=false)
-  // ⚙️ تنظیمات — زیرِ پشتیبانی (تصمیمِ صریحِ مالک). برای همه‌ی کاربران، همیشه.
-  if (SETTINGS_ENABLED) rows.push([L.buttons.settings]);
+  // 💬 پشتیبانی + ⚙️ تنظیمات **کنارِ هم در یک ردیف** (تصمیمِ صریحِ مالک): زیرِ هم بودنشان
+  // ارتفاعِ منوی اصلی را بی‌دلیل زیاد می‌کرد. `supportRow` صفر یا یک ردیف می‌دهد (بسته به
+  // SUPPORT.enabled)، پس تنظیمات یا کنارش می‌نشیند یا ردیفِ خودش را می‌گیرد.
+  const sup = supportRow(L.support)[0] || [];
+  const tail = [...sup, ...(SETTINGS_ENABLED ? [L.buttons.settings] : [])];
+  if (tail.length) rows.push(tail);
   if (isTester(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست: ادمین‌ها و تسترها، همیشه
   return Markup.keyboard(rows).resize();
 }
@@ -1976,7 +2001,14 @@ if (JOIN_GATE_ENABLED) {
   const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
   const GATE_FREE_TEXT = new Set(
     [L.support?.button, L.buttons.resetTest, '🔄 ریست ربات (تست)'].filter(Boolean));
-  bot.use(async (ctx, next) => {
+  // ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
+// می‌شود تا `logAct` اقدامِ کاربر را عادی ثبت کرده باشد، و هرگز چیزی را بلاک نمی‌کند.
+bot.use(async (ctx, next) => {
+  if (ctx.message || ctx.callbackQuery) await refreshKeyboardIfStale(ctx, ctx.from?.id);
+  return next();
+});
+
+bot.use(async (ctx, next) => {
     try {
       const uid = ctx.from?.id;
       if (!uid) return next();
@@ -4040,6 +4072,43 @@ const KB_REFRESH_DAYS = 3;
 db.exec("CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)");
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('ux_v2_launch', unixepoch())").run();
 const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_launch'").get()?.done_at || 0;
+/* ⌨️ تازه‌سازیِ بی‌صدای کیبورد وقتی نسخه‌اش عقب است (بند ۹ب-۲ ریشه).
+
+   چطور کار می‌کند: یک پیامِ کوتاهِ **بی‌صدا** با کیبوردِ تازه فرستاده و بلافاصله حذف
+   می‌شود. کیبوردِ reply یک حالتِ سطحِ **چت** است نه ضمیمه‌ی پیام، پس حذفِ پیامِ حامل
+   کیبورد را برنمی‌دارد (همان مکانیزمی که در v3.26.1 برای پیامِ اطلاع‌رسانی ثابت شد).
+   نتیجه: کاربر هیچ پیامی نمی‌بیند ولی منوی پایینش به‌روز می‌شود.
+
+   ⚠️ **چرا `ctx.telegram.sendMessage` و نه `ctx.reply` — این نکته‌ی اصلیِ طراحی است:**
+   میدل‌ورِ جرنی فقط `reply`/`replyWithPhoto`/`editMessageText` را روی خودِ ctx رپ می‌کند.
+   با `ctx.reply` این حاملِ فنی یک رویدادِ `view` می‌ساخت و یک «صفحه»ی جعلی وارد کاتالوگِ
+   `screens` و قیف‌ها می‌شد — یعنی دیتای جرنی از اعتبار می‌افتاد. `ctx.telegram.*` رپ
+   نمی‌شود، پس این مسیر **صفر** رویدادِ view می‌سازد. اقدامِ خودِ کاربر مثل همیشه ثبت
+   می‌شود (`logAct`)، چون این تابع چیزی را بلاک نمی‌کند.
+
+   هزینه: دو فراخوانیِ API، **دقیقاً یک بار per کاربر per نسخه**، پخش‌شده روی فعالیتِ
+   طبیعیِ کاربر (نه یک برودکست). */
+async function refreshKeyboardIfStale(ctx, uid) {
+  try {
+    if (!KB_REV) return;
+    const u = getUser(uid);
+    // کاربرِ نیمه‌آنبورد کیبورد نمی‌گیرد: وسطِ آنبوردینگ عمداً کیبوردی در کار نیست
+    // (قراردادِ v3.16.0) و فرستادنش همان‌جا مرحله را به هم می‌ریزد.
+    if (!u?.welcomed || ONBOARDING_STATES.includes(getState(uid))) return;
+    if ((u.kb_rev || 0) >= KB_REV) return;
+    // گاردِ اتمیک **قبل از** ارسال: دو آپدیتِ هم‌زمان دو پیام نفرستند.
+    if (!stmts.claimKbRev.run(KB_REV, uid, KB_REV).changes) return;
+    const m = await ctx.telegram.sendMessage(uid, L.onboarding.kbRefresh, {
+      disable_notification: true, ...mainKeyboard(uid),
+    });
+    await ctx.telegram.deleteMessage(uid, m.message_id).catch(() => {});
+  } catch (e) {
+    // شکست (کاربر بلاک کرده، شبکه) نباید اقدامِ کاربر را بشکند. مهر از قبل خورده، پس
+    // دوباره تلاش نمی‌شود؛ او در اولین نقطه‌ی صدورِ عادیِ کیبورد به‌روز می‌شود.
+    logErr('kb refresh:', e.message);
+  }
+}
+
 async function ensureMenu(ctx, uid) {
   try {
     // UX v2.4: در دنیای الماس این پیام اصلاً وجود ندارد (تصمیمِ صریحِ مالک: «نقشش اضافیه»).
