@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, tunnel-url, announce-dry, announce-send]
+        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -160,13 +160,40 @@ jobs:
                 ;;
               channel-overlap)
                 # چند نفر فقط عضوِ کانال‌اند و هرگز وارد ربات نشده‌اند؟
-                # روی سرور اجرا می‌شود چون هم دیتابیس اینجاست هم توکن در .env.
+                #
+                # ⚠️ **detached** اجرا می‌شود و رانر منتظر نمی‌ماند. دلیل: این کار برای
+                # هر کاربرِ ربات یک getChatMember می‌زند و با احترام به نرخِ تلگرام
+                # ده‌ها دقیقه طول می‌کشد. اگر رانر منتظر بماند، همان ده‌ها دقیقه از
+                # سهمیه‌ی Actions می‌سوزد در حالی که هیچ کاری روی رانر انجام نمی‌شود
+                # (سهمیه‌ی همین ریپو یک بار تمام شد و پنج روز پستِ کانال را برد).
+                # نتیجه با `channel-overlap-read` خوانده می‌شود؛ آن یکی چند ثانیه است.
                 [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
                 [ -n "$OPS_QUERY" ] || { echo "❌ query = نامِ کانال (مثل @taroot_fa)"; exit 1; }
                 case "$OPS_QUERY" in (@[A-Za-z0-9_]*) ;; (*) echo "❌ نامِ کانال نامعتبر"; exit 1;; esac
                 TOKEN=$(grep -m1 '^BOT_TOKEN=' "bots/$OPS_APP/.env" | cut -d= -f2-)
                 [ -n "$TOKEN" ] || { echo "❌ BOT_TOKEN در .env نیست"; exit 1; }
-                TELEGRAM_TOKEN="$TOKEN" node tools/marketing/channel-overlap.mjs "bots/$OPS_APP/data" "$OPS_QUERY"
+                OUT="$HOME/channel-overlap.log"
+                if pgrep -f 'channel-overlap.mjs' >/dev/null 2>&1; then
+                  echo "⏳ یک اجرا از قبل در جریان است؛ اجرای تازه شروع نشد"
+                else
+                  : > "$OUT"
+                  TELEGRAM_TOKEN="$TOKEN" nohup node tools/marketing/channel-overlap.mjs \
+                    "bots/$OPS_APP/data" "$OPS_QUERY" >> "$OUT" 2>&1 &
+                  disown
+                  echo "🚀 سنجش در پس‌زمینه‌ی سرور شروع شد (رانر منتظر نمی‌ماند)"
+                fi
+                sleep 3
+                echo "---- شروعِ خروجی ----"; head -n 20 "$OUT" 2>/dev/null
+                echo; echo "برای دیدنِ نتیجه: Ops → channel-overlap-read"
+                ;;
+              channel-overlap-read)
+                OUT="$HOME/channel-overlap.log"
+                if pgrep -f 'channel-overlap.mjs' >/dev/null 2>&1; then
+                  echo "⏳ هنوز در حال اجراست. آخرین خطوط:"
+                else
+                  echo "✅ اجرا تمام شده. خروجیِ کامل:"
+                fi
+                tail -n 40 "$OUT" 2>/dev/null || echo "(هنوز خروجی‌ای نیست)"
                 ;;
               daypost)
                 # سلامتِ کرونِ انتشارِ روزانه‌ی کانال (مسیرِ بحرانیِ جدید، مستقل از Actions).
