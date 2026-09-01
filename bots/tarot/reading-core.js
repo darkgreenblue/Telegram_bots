@@ -98,6 +98,13 @@ export const cardKeywords = (key) => NAMES.keywords[key] || {
 
 /* ═══ مدل‌ها و کلاینتِ OpenRouter ═══ */
 export const FLASH          = 'google/gemini-2.5-flash';
+/* 🌍 مدلِ **خوانش** per زبان. عمداً از `FLASH` جداست و جایگزینش نمی‌شود:
+ * `FLASH` هنوز مدلِ عمومیِ صداشنو است و مسیرهای دیگر (رونویسیِ ویس، ایجنتِ رسید،
+ * کارتِ روز) باید روی همان بمانند. اگر یک ثابت هر دو کار را می‌کرد، عوض‌کردنِ مدلِ
+ * خوانشِ روسی بی‌صدا رونویسیِ ویس را هم می‌برد روی مدلی که صدا نمی‌فهمد.
+ * از env می‌آید چون هر زبان یک اپِ pm2 با `.env` خودش است (همان الگوی `GATE_CHANNEL`)،
+ * پس کد فورک نمی‌شود. نبودنِ متغیر یعنی دقیقاً رفتارِ امروز، پس فارسی دست‌نخورده است. */
+export const READING_MODEL  = (process.env.READING_MODEL || '').trim() || FLASH;
 export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
 export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
 
@@ -203,7 +210,7 @@ export function orChat(system, user, opts = {}) {
 // فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
 // `usage` و شماره‌ی تلاش هم برمی‌گردند تا آزمایشگاه بتواند هزینه و نرخِ retry را گزارش کند
 // (ربات فقط `out` و `model` را می‌خواند، پس این افزودنی چیزی را عوض نمی‌کند).
-export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FLASH, FLASH, FALLBACK_MODEL, FALLBACK_MODEL]) {
+export async function orChatResilient(system, user, opts = {}, plan = [READING_MODEL, READING_MODEL, READING_MODEL, FALLBACK_MODEL, FALLBACK_MODEL]) {
   const usages = [];
   for (let i = 0; i < plan.length; i++) {
     try {

@@ -41,7 +41,7 @@ import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjineh
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
 import {
-  FLASH, FALLBACK_MODEL, OR_TIMEOUT_MS,
+  FLASH, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
@@ -383,7 +383,7 @@ const AUDIO_DIRECT_ENABLED = true;
  * حدسِ اشتباه در این جهت فقط یک فراخوانیِ ارزانِ اضافه است، ولی در جهتِ دیگر یک
  * فالِ پول‌داده‌ی شکسته. */
 const AUDIO_CAPABLE = [/^google\/gemini/i];
-const READER_HEARS_AUDIO = AUDIO_CAPABLE.some((re) => re.test(FLASH));
+const READER_HEARS_AUDIO = AUDIO_CAPABLE.some((re) => re.test(READING_MODEL));
 const audioDirectOn = () => AUDIO_DIRECT_ENABLED && READER_HEARS_AUDIO;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isTester(uid));
 
@@ -1729,7 +1729,7 @@ async function callReadingLLM(readingId) {
     ? [{ type: 'text', text: textPart }, { type: 'input_audio', input_audio: { data: audio.data, format: audio.format } }]
     : textPart;
   // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند.
-  const plan = audio ? [FLASH, FLASH, FLASH] : undefined;
+  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL] : undefined;
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،

@@ -15,6 +15,7 @@ import fs from 'node:fs';
 
 const SRC = fs.readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
 const LOC = fs.readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
+const CORE = fs.readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
 
 let pass = 0; const errs = [];
 const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } else { errs.push(msg); console.log(`  ❌ ${msg}`); } };
@@ -118,8 +119,14 @@ console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو
   // خودِ فایل به مدل می‌رود
   ok(/type: 'input_audio', input_audio: \{ data: audio\.data, format: audio\.format \}/.test(SRC),
     'فایلِ صوتی به‌عنوان content-part کنارِ پرامپت می‌رود');
-  ok(/const plan = audio \? \[FLASH, FLASH, FLASH\] : undefined;/.test(SRC),
-    'برای ورودی صوتی فقط مدل‌های شنوا در برنامه‌ی retry می‌مانند (DeepSeek صدا نمی‌فهمد)');
+  /* ⚠️ ادعا از «حتماً FLASH» به «حتماً بدونِ فالبکِ ناشنوا» تغییر کرد، چون مدلِ
+   * خوانش حالا per زبان است (`READING_MODEL`). چیزی که باید تضمین شود همان است که
+   * از اول بود: در ورودیِ صوتی هیچ مدلِ ناشنوایی وارد برنامه‌ی retry نشود. حالا دو
+   * لایه این را تضمین می‌کنند: برنامه فقط از `READING_MODEL` ساخته می‌شود (نه
+   * `FALLBACK_MODEL` که DeepSeek است)، و `audio` اصلاً غیرِ null نمی‌شود مگر
+   * `READING_MODEL` صداشنو باشد (گاردِ `audioDirectOn`). */
+  ok(/const plan = audio \? \[READING_MODEL, READING_MODEL, READING_MODEL\] : undefined;/.test(SRC),
+    'برنامه‌ی retryِ صوتی فقط از READING_MODEL ساخته می‌شود و فالبکِ ناشنوا داخلش نیست');
 
   // نشتِ ویسِ فالِ قبلی به فالِ بعدی — باگی که موقعِ همین تغییر پیدا و بسته شد
   const hq = bodyOf(SRC, 'async function handleQuestion(');
@@ -168,9 +175,16 @@ console.log('\n▶ شبکه‌ی ایمنی بعد از پرداخت');
   ok(!!m, 'بلوکِ تشخیصِ صداشنو بودنِ مدل در index.js هست');
   if (m) {
     const run = (model, flag) =>
-      new Function('FLASH', 'AUDIO_DIRECT_ENABLED', `${m[0]}; return audioDirectOn();`)(model, flag);
+      new Function('READING_MODEL', 'AUDIO_DIRECT_ENABLED', `${m[0]}; return audioDirectOn();`)(model, flag);
     ok(run('google/gemini-2.5-flash', true) === true,
       'مدلِ زنده‌ی فارسی صداشنو است، پس مسیرِ تک‌فراخوانی دست‌نخورده می‌ماند');
+    /* 🌍 گاردِ جداییِ دو مدل: `READING_MODEL` per زبان عوض می‌شود ولی `FLASH` که
+     * رونویسیِ ویس و ایجنتِ رسید روی آن‌اند نباید همراهش برود. اگر یکی می‌شدند،
+     * عوض‌کردنِ مدلِ خوانشِ روسی بی‌صدا رونویسی را هم می‌برد روی مدلی که صدا نمی‌فهمد. */
+    ok(/model: FLASH,/.test(CORE) && /export const READING_MODEL/.test(CORE),
+      'رونویسی روی FLASH می‌ماند و READING_MODEL جداگانه تعریف شده');
+    ok(/const READER_HEARS_AUDIO = AUDIO_CAPABLE\.some\(\(re\) => re\.test\(READING_MODEL\)\)/.test(SRC),
+      'گاردِ صدا از READING_MODEL می‌خواند، نه از FLASH');
     for (const bad of ['openai/gpt-5.6-luna', 'deepseek/deepseek-v3.2', 'some/unknown-model'])
       ok(run(bad, true) === false, `«${bad}» صداشنو حساب نمی‌شود`);
     ok(run('google/gemini-2.5-flash', false) === false,
