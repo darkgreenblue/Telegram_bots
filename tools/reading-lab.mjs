@@ -43,7 +43,7 @@ const { headlineOk } = await import('../bots/tarot/verdict.js');
 const { repairDefects } = await import('../bots/tarot/repair.js');
 const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
-  orChat, orChatResilient, parseJsonLoose, FLASH, FALLBACK_MODEL, cardName, spreadName,
+  orChat, orChatResilient, parseJsonLoose, READING_MODEL, FALLBACK_MODEL, cardName, spreadName,
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
 const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
@@ -93,7 +93,11 @@ const OUT = val('out', '');
  * بماند: اگر یکی سه شانس بگیرد و دیگری یکی، داریم برنامه‌ی retry را می‌سنجیم نه مدل را. */
 /* ⚠️ `let` نه `const`: در حالتِ چندبازویی (`--arms`) بینِ بازوها عوض می‌شود.
  * `runStep` این‌ها را از closure می‌خواند، پس مقدارِ لحظه‌ی فراخوانی را می‌بیند. */
-let MODEL = val('model', FLASH);
+/* پیش‌فرض = **همان مدلی که محصول برای همین زبان اجرا می‌کند** (`READING_MODEL`)، نه یک
+ * ثابتِ جدا. قبلاً `FLASH` بود و تا وقتی همه‌ی زبان‌ها روی Flash بودند فرقی نداشت؛ از
+ * لحظه‌ای که مدلِ خوانش per زبان شد، «دورِ بدونِ --arms» می‌توانست بی‌صدا مدلی را
+ * بسنجد که هیچ کاربری نمی‌بیند. همان تله‌ای که سه دورِ واقعی را سوزاند، از درِ دیگر. */
+let MODEL = val('model', READING_MODEL);
 const FALLBACK = val('fallback', FALLBACK_MODEL);
 let PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
 /* 🅰️🅱️ مقایسه‌ی **جفت‌شده‌ی** چند مدل در یک اجرا.

@@ -11,8 +11,11 @@
 //
 // مغز فالگیر: google/gemini-2.5-flash (OpenRouter) — تک‌فراخوانی per فال، پیش‌فراخوانی بعد از انتخاب کارت سوم.
 // چندزبانه: همه‌ی متن‌ها/پرامپت‌ها از locales/<LOCALE>.js؛ هر زبان بعداً یک اپ pm2 جدا با ENV_FILE خودش.
-import dotenv from 'dotenv';
-dotenv.config({ path: process.env.ENV_FILE || '.env' });
+// ⚠️ **اولین import و باید اول بماند.** `.env` را بار می‌کند تا ماژول‌هایی که سرِ
+// بارگذاری از `process.env` می‌خوانند (`LOCALE` در `reading-core.js` و `ganjineh.js`)
+// مقدارِ درست را ببینند. در ESM importهای ایستا قبل از بدنه اجرا می‌شوند، پس
+// صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
+import './env-boot.js';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';

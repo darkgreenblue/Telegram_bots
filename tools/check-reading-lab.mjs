@@ -429,7 +429,9 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
     [['--arms', 'openai/gpt-5.6-luna'], 'openai/gpt-5.6-luna', 'بازوی تک‌عضوی'],
     [['--arms', 'openai/gpt-5.6-luna@nopast'], 'openai/gpt-5.6-luna@nopast', 'بازوی تک‌عضوی با واریانت'],
     [['--model', 'deepseek/deepseek-v3.2'], 'deepseek/deepseek-v3.2', '`--model` بدونِ arms'],
-    [[], 'google/gemini-2.5-flash', 'بدونِ arms و بدونِ model (پیش‌فرض)'],
+    // پیش‌فرض = مدلِ خودِ محصول برای همین زبان. این دور با `--locale ru` اجرا می‌شود،
+    // پس انتظار همان چیزی است که رباتِ روسی واقعاً روی آن فال می‌سازد.
+    [[], 'openai/gpt-5.6-luna', 'بدونِ arms و بدونِ model (پیش‌فرضِ همان زبان)'],
   ];
   for (const [args, want, label] of cases) {
     const out = `/tmp/armchk-${Math.random().toString(36).slice(2)}.json`;
