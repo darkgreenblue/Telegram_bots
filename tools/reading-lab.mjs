@@ -735,8 +735,20 @@ if (!DRY) {
     const a = r.check.anchor;
     const pct = a?.total ? ` | بی‌لنگر ${a.loose}/${a.total}` : '';
     const tag = repsSeen.length > 1 ? `پ${r.rep + 1} ` : '';
-    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${spreadName(r.spread.fa)}${pct}`);
+    /* نمره‌ی داور و بزرگ‌ترین ضعفش کنارِ همان فال. عمدی: نمره‌ی تجمیعی می‌گوید «چقدر»
+     * ولی نمی‌گوید «کجا»، و بدونِ «کجا» نمی‌شود پرامپت را درست کرد. */
+    const rb = r.rubric && !r.rubric.error && r.rubric.max ? ` | 🎯 ${r.rubric.pct}٪` : '';
+    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${spreadName(r.spread.fa)}${pct}${rb}`);
     r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
+    if (r.rubric?.items) {
+      // ⚠️ شاهد چاپ می‌شود، نه فقط نمره. داوری که نتواند نقلِ قول بدهد توهم کرده، و
+      // بدونِ دیدنِ شاهد در لاگ هیچ راهی برای ممیزیِ خودِ داور نداریم.
+      const weak = Object.entries(r.rubric.items).filter(([, v]) => v.score < 2)
+        .sort((x, y) => x[1].score - y[1].score).slice(0, 3)
+        .map(([k, v]) => `${k}=${v.score}`).join(' ');
+      if (weak) console.log(`        🎯 ضعف: ${weak}${r.rubric.note ? ` — ${r.rubric.note}` : ''}`);
+      if (r.rubric.faked?.length) console.log(`        ⚠️ شاهدِ ساختگی رد شد: ${r.rubric.faked.join(', ')}`);
+    }
   }
 }
 
