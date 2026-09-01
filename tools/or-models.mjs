@@ -69,3 +69,11 @@ for (const r of audio) {
   console.log(`   ${pad(r.id, 44)} $/M in ${pad(r.inM.toFixed(3), 9)} $/M out ${pad(r.outM.toFixed(3), 9)} صدا/واحد ${r.aud ?? '—'}`);
 }
 if (!audio.length) console.log('   (هیچ‌کدام — یعنی رونویسی باید بیرون از OpenRouter انجام شود)');
+
+/* 🔎 و یک جوابِ صریح به سؤالی که هر بار پرسیده می‌شود: «مدلِ اختصاصیِ رونویسی
+ * (whisper و هم‌خانواده) روی OpenRouter هست یا نه؟» عمداً روی **کلِ** data می‌گردد،
+ * نه روی `rows`، چون قیمتِ چنین مدلی per ثانیه است و از هر فیلترِ توکنی رد می‌شود.
+ * بدونِ این خط، «نبودش» یک استنباط از یک لیستِ فیلترشده می‌ماند، نه یک مشاهده. */
+const STT = data.filter(m => /whisper|transcrib|speech-to-text|\bstt\b|voxtral|deepgram|assembly/i.test(m.id + ' ' + (m.name || '')));
+console.log(`\n🔎 مدلِ اختصاصیِ رونویسی روی OpenRouter: ${STT.length ? STT.length + ' مورد' : 'هیچ‌کدام'}`);
+for (const m of STT) console.log(`   ${m.id}  | ${JSON.stringify(m.pricing)}`);
