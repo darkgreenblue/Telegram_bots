@@ -29,10 +29,6 @@ on:
         description: 'مقایسه‌ی جفت‌شده‌ی چند مدل در یک اجرا، با کاما. مثل: google/gemini-2.5-flash,google/gemini-3.5-flash-lite. واریانتِ پرامپت با @ مثل model@nopast'
         required: false
         default: ''
-      judge:
-        description: 'مدلِ داورِ کیفیت طبقِ STYLE.md (خالی = خاموش). عمداً باید بیرونِ بازوهای تحتِ آزمایش باشد، وگرنه سوگیریِ خودپسندی دارد.'
-        required: false
-        default: ''
       set:
         description: 'مجموعه‌ی سناریو (خالی = اصلی). مثل b یا c — سؤال‌های متفاوت برای دورِ متنوع'
         required: false
@@ -123,7 +119,6 @@ jobs:
           # بازوهای چندگانه: یک اجرا، کارت و سؤالِ یکسان، گزارشِ جفت‌شده
           [ -n "${{ inputs.arms }}" ] && ARGS="$ARGS --arms ${{ inputs.arms }}"
           [ -n "${{ inputs.set }}" ] && ARGS="$ARGS --set ${{ inputs.set }}"
-          [ -n "${{ inputs.judge }}" ] && ARGS="$ARGS --judge ${{ inputs.judge }}"
           if [ "${{ inputs.probe }}" = "true" ]; then
             node tools/reading-lab.mjs $ARGS --probe
           else
