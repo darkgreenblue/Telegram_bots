@@ -9,6 +9,13 @@ const reOf = (id) => { const d = defectOf(id); return d.pattern ? new RegExp(d.p
 const exceptOf = (id) => { const d = defectOf(id); return d.except ? new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`) : null; };
 
 export default {
+  // 🏷 همان نشتِ برچسب، به پرتغالی
+  labelLeak: /sentimento n[ãa]o dito|seu sinal [ée]|o que voc[êe] n[ãa]o disse/i,
+  /* 🗣 ⚠️ پرتغالی مرزِ گفتاری/کتابیِ تمیز **ندارد** («está» هر دو است)، پس این الگو
+   * عمداً فقط اداری‌نویسیِ آشکار را می‌گیرد. آستانه ۲ است چون این فرم‌ها نادرند و
+   * حتی دو تایشان یعنی متن از لحنِ محاوره‌ای بیرون زده. سیگنالش ضعیف‌تر از فارسی
+   * است و هر مقایسه‌ی بین‌زبانی روی این ستون باید همین را بداند. */
+  bookish: { min: 2, re: /encontra-se|faz-se necess[áa]rio|outrossim|por conseguinte|deve-se|h[áa] de se|no tocante a|cumpre (?:ressaltar|notar)/gi },
   formal: reOf('formal'),
   pluralCouple: exceptOf('formal'),
   register: ['universo', 'energia do universo', 'vibração do universo'],

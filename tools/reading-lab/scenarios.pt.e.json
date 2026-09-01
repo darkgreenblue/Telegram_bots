@@ -1,0 +1,137 @@
+{
+  "_note": "مجموعه‌ی «ه» — دستِ ده‌کارتی، سه فالِ پیاپی روی یک موضوع، و ورودیِ خیلی کم در برابرِ خیلی زیاد. ساختار عیناً همان مجموعه‌ی فارسی است.",
+  "personas": [
+    {
+      "id": "E1",
+      "name": "Marcelo",
+      "focus": "question",
+      "why": "دستِ ده‌کارتی: جایی که مدل به فهرست‌کردن می‌افتد و سنتز را از دست می‌دهد.",
+      "steps": [
+        {
+          "spread": "personal10",
+          "picks": [
+            1,
+            3,
+            5,
+            7,
+            9,
+            11,
+            13,
+            15,
+            17,
+            19
+          ],
+          "afterMinutes": 0,
+          "question": "Quero ver o quadro inteiro da minha vida. Onde eu estou e pra onde eu tô indo?"
+        },
+        {
+          "spread": "career10",
+          "picks": [
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20
+          ],
+          "afterMinutes": 180,
+          "question": "Como é o meu caminho profissional nos próximos dez anos?"
+        },
+        {
+          "spread": "open3",
+          "picks": [
+            21,
+            22,
+            23
+          ],
+          "afterMinutes": 900,
+          "question": "De tudo isso, me diz uma frase pra eu levar."
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "name": "Bruna",
+      "focus": "love",
+      "why": "سه فالِ پیاپی روی یک موضوع: آزمونِ حافظه و تکرارِ بین‌فالی.",
+      "steps": [
+        {
+          "spread": "feel3",
+          "picks": [
+            2,
+            9,
+            16
+          ],
+          "afterMinutes": 0,
+          "question": "O que ele sente por mim? Fala a verdade."
+        },
+        {
+          "spread": "feel5",
+          "picks": [
+            4,
+            11,
+            18,
+            6,
+            20
+          ],
+          "afterMinutes": 20,
+          "question": "Se ele sente, por que age tão frio?"
+        },
+        {
+          "spread": "commit3",
+          "picks": [
+            1,
+            13,
+            24
+          ],
+          "afterMinutes": 45,
+          "question": "Ele vai decidir alguma hora ou vai me deixar nesse limbo?"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "name": "Diego",
+      "focus": "question",
+      "why": "ورودیِ خیلی کوتاه در برابرِ خیلی بلند: آزمونِ لنگر وقتی مواد کم است و وقتی زیاد.",
+      "steps": [
+        {
+          "spread": "open3",
+          "picks": [
+            5,
+            12,
+            19
+          ],
+          "afterMinutes": 0,
+          "question": "O que me espera?"
+        },
+        {
+          "spread": "personal5",
+          "picks": [
+            3,
+            8,
+            15,
+            21,
+            10
+          ],
+          "afterMinutes": 75,
+          "question": "Olha, eu tenho trinta e um anos, trabalho há sete numa empresa que eu detesto mas é estável e eu tenho financiamento da casa; em paralelo faz dois anos que estudo outra coisa à noite, e tem uma pessoa me chamando pra uma startup sem salário nos primeiros seis meses, e meus pais dizem pra eu não fazer besteira. O que eu faço?"
+        },
+        {
+          "spread": "yesno3",
+          "picks": [
+            7,
+            17,
+            22
+          ],
+          "afterMinutes": 300,
+          "question": "Começo?"
+        }
+      ]
+    }
+  ]
+}

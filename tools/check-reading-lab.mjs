@@ -64,6 +64,57 @@ console.log('\n▶ سرخط');
   ok(!has(run(base()), 'سرخط فرمول را ندارد'), 'سرخطِ درست گرفته نمی‌شود');
 }
 
+/* 🌍 دو سنجه‌ی کیفیت باید در **هر چهار زبان** الگو داشته باشند (بند ۲و/۱).
+ *
+ * ⚠️ چرا این بلوک لازم شد: تا ۱۴۰۵/۰۶/۱۰ «نشتِ برچسب» و «لحنِ کتابی» فقط الگوی
+ * فارسی داشتند و هاردکد بودند. یعنی سه زبانِ دیگر روی این دو محور **همیشه صفر**
+ * گزارش می‌شدند و حکمِ مدلشان روی نیمی از تعریفِ کیفیت گرفته شده بود — دقیقاً همان
+ * شکافی که این دو سنجه برای بستنش ساخته شده بودند، یک لایه بالاتر.
+ *
+ * هر زبان **هم** نمونه‌ی مثبت دارد هم منفی. اگر فقط منفی داشت، یک الگوی خرابِ
+ * `undefined` هم سبز رد می‌شد (همان درسِ `genderedPast` در check-langdata). */
+console.log('\n▶ الگوهای کیفیت per زبان');
+{
+  const SAMPLES = {
+    fa: {
+      leakBad:  'حسِ ناگفته‌ات اینه که منتظری یکی جات تصمیم بگیره.',
+      leakOk:   'انگار منتظری یکی جات تصمیم بگیره، و همین نگهت داشته.',
+      bookBad:  'این کارت نشان می‌دهد که مسیر باز است و تلاشِ تو نتیجه می‌دهد.',
+      bookOk:   'این کارت می‌گه مسیر بازه و تلاشت جواب می‌ده، فقط یکم دیرتر.',
+    },
+    ru: {
+      leakBad:  'Твоё невысказанное чувство в том, что ты ждёшь решения от других.',
+      leakOk:   'Похоже, ты ждёшь, что решение примет кто-то за тебя.',
+      bookBad:  'Данная карта является указанием, в связи с чем необходимо действовать.',
+      bookOk:   'Эта карта говорит, что путь открыт, только не так быстро.',
+    },
+    pt: {
+      leakBad:  'O seu sentimento não dito é que você está esperando alguém decidir.',
+      leakOk:   'Parece que você está esperando alguém decidir no seu lugar.',
+      bookBad:  'Encontra-se aqui um caminho, e faz-se necessário deve-se agir.',
+      bookOk:   'Essa carta diz que o caminho tá aberto, só que não tão rápido.',
+    },
+    es: {
+      leakBad:  'Tu sentimiento no dicho es que estás esperando que alguien decida.',
+      leakOk:   'Parece que estás esperando a que alguien decida por ti.',
+      bookBad:  'Se encuentra aquí un camino; asimismo resulta necesario actuar, por ende decide.',
+      bookOk:   'Esta carta dice que el camino está abierto, solo que no tan pronto.',
+    },
+  };
+  for (const [code, sm] of Object.entries(SAMPLES)) {
+    const L = (await import(`./reading-lab/lang/${code}.mjs`)).default;
+    ok(!!L.labelLeak, `«${code}» الگوی نشتِ برچسب دارد`);
+    ok(!!L.bookish?.re, `«${code}» الگوی لحنِ کتابی دارد`);
+    if (!L.labelLeak || !L.bookish?.re) continue;
+    ok(L.labelLeak.test(sm.leakBad), `«${code}» نشتِ برچسب را می‌گیرد`);
+    ok(!L.labelLeak.test(sm.leakOk), `«${code}» جمله‌ی سالم را نشت نمی‌شمارد`);
+    const count = (t) => { L.bookish.re.lastIndex = 0; return (t.match(L.bookish.re) || []).length; };
+    const min = L.bookish.min || 3;
+    ok(count(sm.bookBad) >= min, `«${code}» متنِ کتابی را می‌گیرد (${count(sm.bookBad)} ≥ ${min})`);
+    ok(count(sm.bookOk) < min, `«${code}» متنِ گفتاری را کتابی نمی‌شمارد (${count(sm.bookOk)} < ${min})`);
+  }
+}
+
 console.log('\n▶ لحنِ رسمی');
 {
   const llm = base();

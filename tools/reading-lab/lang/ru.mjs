@@ -18,6 +18,10 @@ const reOf = (id) => { const d = defectOf(id); return d.pattern ? new RegExp(d.p
 const exceptOf = (id) => { const d = defectOf(id); return d.except ? new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`) : null; };
 
 export default {
+  // 🏷 همان نشتِ برچسب، به روسی: «твоё невысказанное чувство в том, что…»
+  labelLeak: /невысказанн\w*\s+чувств|тво[её]\s+невысказанн|твой знак это|чего ты не сказал/i,
+  /* 🗣 канцелярит: روسی هم مرزِ تمیزی دارد و این فرم‌ها در گفتارِ زنده اصلاً نمی‌آیند. */
+  bookish: { min: 3, re: /явля(?:ется|ются|ется)|осуществля\w*|представля(?:ет|ют) собой|в связи с|необходимо\b|следует отметить|в случае если|данн(?:ый|ая|ое|ые)\s/gi },
   formal: reOf('formal'),
   pluralCouple: exceptOf('formal'),
   register: ['вселенная', 'Вселенная', 'энергия вселенной'],

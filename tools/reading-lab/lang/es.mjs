@@ -8,6 +8,11 @@ const reOf = (id) => { const d = defectOf(id); return d.pattern ? new RegExp(d.p
 const exceptOf = (id) => { const d = defectOf(id); return d.except ? new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`) : null; };
 
 export default {
+  // 🏷 همان نشتِ برچسب، به اسپانیایی
+  labelLeak: /sentimiento no dicho|tu se[ñn]al es|lo que no dijiste/i,
+  /* 🗣 ⚠️ همان محدودیتِ پرتغالی: اسپانیایی مرزِ صرفیِ گفتاری/کتابی ندارد، پس فقط
+   * اداری‌نویسیِ آشکار گرفته می‌شود. آستانه ۲. */
+  bookish: { min: 2, re: /se encuentra|resulta necesario|asimismo|por ende|no obstante|cabe (?:destacar|se[ñn]alar)|debe considerarse|en virtud de/gi },
   formal: reOf('formal'),
   pluralCouple: exceptOf('formal'),
   register: ['universo', 'energía del universo', 'vibración del universo'],
