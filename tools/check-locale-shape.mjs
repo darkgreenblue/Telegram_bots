@@ -172,6 +172,41 @@ for (const file of files) {
   if (!failures) console.log('  ✓ شکل، نوع‌ها، code و قواعدِ کپی سالم‌اند');
 }
 
+/* ── دو قاعده‌ای که پرامپتِ خوانشِ **هر** زبان باید داشته باشد (بند ۲و/۱) ──
+ *
+ * هر دو از خواندنِ خروجیِ واقعی درآمدند، نه از تئوری (۱۴۰۵/۰۶/۱۰، ۹۰ فالِ فارسی):
+ *   ۱) **نشتِ برچسب** — مدل به‌جای گفتنِ خودِ حس، نامِ کارِ ما را چاپ می‌کرد
+ *      («حسِ ناگفته‌ات اینه که…»). STYLE.md قاعده‌ی ۴ صریحاً همین را ممنوع کرده بود
+ *      ولی پرامپت هرگز نگفته بود، پس مدل برچسب را از خودِ پرامپت تقلید می‌کرد.
+ *   ۲) **شکستِ لحن** — متن وسطِ جمله از گفتاری به کتابی می‌افتاد
+ *      («هشدار می‌ده … نگه دارد»). قاعده‌ی «گفتاری بنویس» بود ولی بدونِ مثالِ تبدیل،
+ *      و درسِ ثبت‌شده‌ی جنسیتِ روسی می‌گوید قاعده‌ی بی‌مثال جواب نمی‌دهد.
+ *
+ * چک عمداً **per زبان** الگوی خودش را دارد: قاعده‌ای که فقط در فارسی نوشته شود یعنی
+ * سه رباتِ دیگر همان دو ایراد را دارند و هیچ‌کس خبردار نمی‌شود. زبانِ تازه‌ای که ردیف
+ * نداشته باشد هم قرمز می‌شود، وگرنه این جدول بی‌صدا کهنه می‌شود. */
+{
+  console.log('\nقواعدِ اجباریِ پرامپتِ خوانش (نشتِ برچسب + لحنِ گفتاری):');
+  const V4_RULES = {
+    fa: { label: /برچسبش را ننویس/, register: /فعلِ کتابی ممنوع/ },
+    ru: { label: /Не пиши сам ярлык/, register: /Никакого канцелярита/ },
+    pt: { label: /Não escreva o rótulo/, register: /Nada de forma escrita/ },
+    es: { label: /No escribas la etiqueta/, register: /Nada de forma escrita/ },
+  };
+  const spread = SPREAD_BY_ID.three || Object.values(SPREAD_BY_ID)[0];
+  for (const file of files) {
+    const code = path.basename(file, '.js');
+    const rules = V4_RULES[code];
+    if (!rules) { fail(`زبانِ «${code}» در جدولِ قواعدِ پرامپت ردیف ندارد`); continue; }
+    const mod = (await import(`../${DIR}/${file}`)).default;
+    let p = '';
+    try { p = mod.prompts.readerSystemV4(spread, {}); } catch { fail(`«${code}»: readerSystemV4 اجرا نشد`); continue; }
+    if (!rules.label.test(p)) fail(`«${code}»: پرامپت نشتِ برچسبِ حسِ ناگفته را ممنوع نمی‌کند`);
+    if (!rules.register.test(p)) fail(`«${code}»: پرامپت لحنِ کتابی را با مثالِ تبدیل ممنوع نمی‌کند`);
+  }
+  if (!failures) console.log(`  ✓ هر ${files.length} زبان هر دو قاعده را دارند`);
+}
+
 if (files.length === 1) console.log('(فعلاً فقط locale مرجع هست؛ چک وقتی زبانِ دوم بیاید معنا پیدا می‌کند)');
 assert.equal(failures, 0, `${failures} خطای شکلِ locale`);
 console.log(`\n✅ شکلِ locale: ${files.length} فایل سالم`);
