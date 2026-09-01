@@ -30,7 +30,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [post, day-post, campaign-add, getme, delete]
+        options: [post, day-post, campaign-add, getme, chat-info, delete]
       bot:
         description: 'کلید ربات در marketing/registry.json (مثل tarot یا tabir-khab)'
         required: true
@@ -208,6 +208,30 @@ jobs:
         with:
           path: .daypost-marker
           key: daypost-${{ steps.manual_day.outputs.day }}
+
+      # تعدادِ ممبرِ کانال. Bot API هیچ متدی برای **لیست‌کردنِ** ممبرهای کانال ندارد
+      # (نه getChatMembers، نه چیزی معادلش)؛ فقط شمارشِ کل و وضعیتِ یک کاربرِ مشخص.
+      # پس همپوشانیِ «کانال در برابر ربات» فقط در سطحِ عدد قابل‌محاسبه است، نه لیست.
+      - name: Chat info (chat-info)
+        if: inputs.action == 'chat-info'
+        env:
+          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          MKT_BOT:    ${{ inputs.bot }}
+          MKT_CHAT:   ${{ inputs.chat }}
+        run: |
+          set -e
+          case "$MKT_BOT" in
+            tarot)      TOKEN="$T_TAROT";;
+            tabir-khab) TOKEN="$T_TABIR_FA";;
+            *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
+          esac
+          [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
+          case "$MKT_CHAT" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ chat نامعتبر: «$MKT_CHAT»"; exit 1;; esac
+          CNT=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChatMemberCount" -d chat_id="$MKT_CHAT")
+          echo "getChatMemberCount($MKT_CHAT): $(printf '%s' "$CNT" | jq -r 'if .ok then .result else ("❌ " + (.description // "خطا")) end')"
+          INF=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChat" -d chat_id="$MKT_CHAT")
+          printf '%s' "$INF" | jq -r 'if .ok then "title: \(.result.title // "-")   type: \(.result.type)" else ("❌ " + (.description // "خطا")) end'
 
       - name: Get bot username (getme)
         if: inputs.action == 'getme'
