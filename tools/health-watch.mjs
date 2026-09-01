@@ -116,9 +116,17 @@ async function checkPm2() {
     const eco = (await import(pathToFileURL(join(ROOT, 'ecosystem.config.cjs')).href)).default;
     const up = new Set(list.map((p) => p.name));
     for (const app of eco.apps || []) {
-      // اپی که هنوز .env ندارد یعنی هنوز سکرتش ست نشده و انتظارِ اجرا نداریم.
+      /* اپی که هنوز فایلِ envش ساخته نشده یعنی سکرتش ست نشده و انتظارِ اجرا نداریم.
+       *
+       * ⚠️ نامِ فایل از خودِ `ENV_FILE` می‌آید، نه `.env` ثابت.
+       * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۱: سه اپِ زبانیِ تاروت `cwd` مشترکِ `bots/tarot` دارند و
+       * فقط `ENV_FILE` فرقشان است. گارد `.env` **فارسی** را می‌دید که همیشه وجود دارد،
+       * پس هر سه «ست‌شده» حساب می‌شدند و چون سکرت نداشتند و دیپلوی ردشان می‌کرد، هر
+       * ۵ دقیقه سه هشدارِ کاذب می‌رفت. ضررش خودِ پیام نیست، بی‌معنا شدنِ هشدار است:
+       * خرابیِ واقعی لای این نویز گم می‌شود (همان درسِ پینگ‌پنگِ chmod). */
       const needsEnv = String(app.cwd || '').startsWith('bots/');
-      if (needsEnv && !existsSync(join(ROOT, app.cwd, '.env'))) continue;
+      const envName = app.env?.ENV_FILE || '.env';
+      if (needsEnv && !existsSync(join(ROOT, app.cwd, envName))) continue;
       if (!up.has(app.name)) {
         out.push({ key: `pm2:missing:${app.name}`, text: `🔴 «${app.name}» اصلاً در pm2 نیست (ریبوتِ سرور بدونِ resurrect؟ با Ops restart یا دیپلوی برگردان)` });
       }

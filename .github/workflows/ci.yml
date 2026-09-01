@@ -98,6 +98,14 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-server-worktree.mjs
 
+      # ناظرِ سلامت: هر دو جهتِ خطا گران است. منفیِ کاذب یعنی رباتِ زنده خوابیده و
+      # کسی خبر ندارد؛ مثبتِ کاذب یعنی هشدار هر ۵ دقیقه شلیک می‌کند و بی‌معنا می‌شود،
+      # پس خرابیِ واقعی لای نویزش گم می‌شود (باگِ واقعیِ ۱۱ شهریور ۱۴۰۵: سه اپِ زبانیِ
+      # هم‌cwd که با `.env` فارسی «ست‌شده» حساب می‌شدند).
+      - name: Health watcher guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-health-watch.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
