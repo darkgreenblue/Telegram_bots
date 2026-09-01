@@ -53,9 +53,13 @@ on:
         required: false
         default: false
       reps:
-        description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان'
+        description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان. در حالتِ arena: چند بار هر ورودی به هر بازو داده شود'
         required: false
         default: '1'
+      arena_runs:
+        description: '🛠 حالتِ آرِنای تعمیر: شناسه‌ی runهای قبلیِ همین ورک‌فلو با کاما. هیچ فالی تولید نمی‌شود؛ فقط مسیرِ تعمیر روی خروجیِ ذخیره‌شده‌ی آن‌ها با هر بازو تکرار می‌شود.'
+        required: false
+        default: ''
 
 # ⚠️ گروهِ همزمانی per **زبان و مجموعه‌ی سناریو** است، نه یک گروهِ واحد و نه فقط per
 # زبان: پنج دورِ فارسی روی پنج مجموعه‌ی متفاوت با گروهِ per-زبان همدیگر را می‌کشتند. با گروهِ واحد فقط یک اجرای
@@ -73,6 +77,10 @@ concurrency:
 jobs:
   lab:
     runs-on: ubuntu-latest
+    # `actions: read` فقط برای حالتِ آرِنا لازم است (دانلودِ artifact های runهای قبلی).
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -99,8 +107,49 @@ jobs:
             exit 1
           fi
 
+      # ═══ 🛠 حالتِ آرِنای تعمیر ═══
+      # چرا داخلِ همین ورک‌فلو و نه یک فایلِ جدا: `workflow_dispatch` فقط برای فایلی
+      # کار می‌کند که روی برنچِ **پیش‌فرض** هم باشد، پس یک ورک‌فلوی تازه تا merge نشدن
+      # اصلاً قابلِ اجرا نیست. ضمناً هر دو حالت یک سکرت و یک ابزارِ مشترک دارند و
+      # نگه‌داشتنِ دو فایل برای یک کار خلافِ بند ۹/۰ است.
+      #
+      # هر run در پوشه‌ی خودش باز می‌شود، وگرنه `reading-lab-out.json`ها روی هم
+      # می‌افتند و عملاً فقط آخرین run سنجیده می‌شود — خطایی بی‌صدا که عدد را کوچک
+      # می‌کند بدونِ اینکه چیزی قرمز شود.
+      - name: برداشتنِ خروجیِ خامِ دورهای قبل
+        if: inputs.arena_runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.arena_runs }}
+          LOC: ${{ inputs.locale }}
+        run: |
+          set -euo pipefail
+          mkdir -p arena
+          n=0
+          for id in $(echo "$RUNS" | tr ',' ' '); do
+            case "$id" in ''|*[!0-9]*) echo "::error::شناسه‌ی نامعتبر: $id"; exit 1;; esac
+            tmp="$(mktemp -d)"
+            if gh run download "$id" -n "reading-lab-$LOC" -D "$tmp" -R "$GITHUB_REPOSITORY"; then
+              cp "$tmp/reading-lab-out.json" "arena/$id.json"; n=$((n+1))
+            else
+              echo "::warning::artifact دورِ $id برداشته نشد (منقضی یا نامِ متفاوت)"
+            fi
+          done
+          echo "برداشته شد: $n فایل"
+          if [ "$n" = "0" ]; then echo "::error::هیچ ورودی‌ای برداشته نشد"; exit 1; fi
+
+      - name: اجرای آرِنای تعمیر
+        if: inputs.arena_runs
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+          LOCALE: ${{ inputs.locale }}
+        run: |
+          node tools/repair-arena.mjs --dir arena \
+            ${{ inputs.arms && format('--arms {0}', inputs.arms) || '' }} \
+            --reps "${{ inputs.reps }}"
+
       - name: اجرای آزمایشگاه
-        if: '!inputs.list_models'
+        if: '!inputs.list_models && !inputs.arena_runs'
         env:
           OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
           # زبان از env می‌رود چون `reading-core.js` مسیرِ فایل‌های per زبان را
@@ -127,7 +176,7 @@ jobs:
 
       # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
-        if: always() && inputs.probe != true && inputs.list_models != true
+        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs
         uses: actions/upload-artifact@v4
         with:
           name: reading-lab-${{ inputs.locale }}
@@ -139,7 +188,7 @@ jobs:
       # وسطش گم می‌شود، پس خواندنش از بیرون گران و خطاپذیر بود. این قدم بعد از آپلود
       # اجرا می‌شود تا همیشه آخرین چیزِ لاگ باشد و با یک tail کوتاه دیده شود.
       - name: خلاصه
-        if: always() && inputs.probe != true && inputs.list_models != true
+        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs
         run: |
           node -e '
             const fs = require("fs");
