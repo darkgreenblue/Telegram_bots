@@ -25,8 +25,13 @@ if (!res.ok) { console.error(`❌ OpenRouter جواب نداد: ${res.status}`);
 const { data } = await res.json();
 console.log(`مدل‌های در دسترس: ${data.length}\n`);
 
+/* هر مدلی که **صدا می‌فهمد** بی‌قید می‌ماند، حتی اگر با هیچ needle نخواند: سؤالِ
+ * محصولیِ «چه چیزی می‌تواند ویس را بشنود یا رونویسی کند» دقیقاً همین است، و اگر
+ * جواب به یک لیستِ حدسیِ نام گره بخورد، همان حدس‌زدنی می‌شود که این ابزار برای
+ * حذفش ساخته شد. */
+const hearsAudio = (m) => (m.architecture?.input_modalities || []).includes('audio');
 const rows = data
-  .filter(m => NEEDLES.some(n => m.id.toLowerCase().includes(n.toLowerCase())))
+  .filter(m => hearsAudio(m) || NEEDLES.some(n => m.id.toLowerCase().includes(n.toLowerCase())))
   .map(m => {
     const p = m.pricing || {};
     const pin = Number(p.prompt) || 0, pout = Number(p.completion) || 0;
