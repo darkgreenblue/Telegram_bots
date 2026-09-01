@@ -1,0 +1,66 @@
+name: Send to owner
+
+# فرستادنِ فایل/متن به تلگرامِ مالک، از روی فایل‌های خودِ ریپو.
+#
+# چرا وجود دارد: سشنِ Claude هیچ راهِ مستقیمی به تلگرام ندارد، و تا امروز تنها
+# مسیرهای ارسال، مخصوصِ یک کار بودند (هشدارِ Health، ویدیوی ریلز، پستِ کانال).
+# وقتی مالک می‌خواهد چیزی را روی گوشی‌اش ببیند (مثلِ آواتارِ پیشنهادیِ ربات‌ها)
+# هیچ‌کدام جواب نمی‌داد.
+#
+# 💰 هزینه (بند ۳ج): فقط dispatch، یک جاب، چند اجرا در ماه. عملاً صفر.
+# 🔒 هیچ سکرتِ تازه‌ای لازم ندارد: از توکنِ voice2text و آی‌دیِ مالک استفاده می‌کند.
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: 'پیامِ متنی (اختیاری) — قبل از فایل‌ها فرستاده می‌شود'
+        required: false
+        default: ''
+      items:
+        description: 'هر خط یک فایل: «مسیر::کپشن» (کپشن اختیاری)'
+        required: false
+        default: ''
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send to owner
+        env:
+          TOKEN: ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          OWNER: ${{ secrets.OWNER_TELEGRAM_ID }}
+          MSG:   ${{ inputs.text }}
+          ITEMS: ${{ inputs.items }}
+        run: |
+          set -eu
+          [ -n "$TOKEN" ] || { echo "::error::VOICE2TEXT_BOT_TOKEN ست نیست"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::OWNER_TELEGRAM_ID ست نیست"; exit 1; }
+          # ADMIN_IDS می‌تواند چندتایی باشد؛ گیرنده اولین آی‌دی است.
+          CHAT="${OWNER%%,*}"
+          API="https://api.telegram.org/bot${TOKEN}"
+
+          if [ -n "$MSG" ]; then
+            curl -fsS -X POST "$API/sendMessage" \
+              --form-string "chat_id=$CHAT" \
+              --form-string "text=$MSG" >/dev/null
+            echo "✅ پیامِ متنی فرستاده شد"
+          fi
+
+          printf '%s\n' "$ITEMS" | while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            path="${line%%::*}"
+            cap=""
+            case "$line" in *"::"*) cap="${line#*::}";; esac
+            # مسیر باید داخلِ خودِ ریپو بماند و واقعاً وجود داشته باشد.
+            case "$path" in
+              /*|*..*) echo "::error::مسیرِ نامعتبر: $path"; exit 1;;
+            esac
+            [ -f "$path" ] || { echo "::error::فایل نیست: $path"; exit 1; }
+            curl -fsS -X POST "$API/sendPhoto" \
+              --form-string "chat_id=$CHAT" \
+              --form-string "caption=$cap" \
+              -F "photo=@$path" >/dev/null
+            echo "✅ فرستاده شد: $path"
+          done
