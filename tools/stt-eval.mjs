@@ -566,10 +566,12 @@ async function main() {
   const best = summary.filter(s => s.wer != null).sort((a, b) => a.wer - b.wer)[0];
   if (best && cheapest) {
     console.log(`\nبهترین WER: ${best.model} (${(best.wer * 100).toFixed(1)}٪)   |   ارزان‌ترین: ${cheapest.model} ($${cheapest.perMin.toFixed(5)}/دقیقه)`);
-    if (best.model !== cheapest.model) {
+    if (best.model !== cheapest.model && cheapest.perMin > 0) {
       const gap = ((cheapest.wer - best.wer) * 100).toFixed(1);
-      const times = (cheapest.perMin ? best.perMin / cheapest.perMin : 0).toFixed(1);
+      const times = (best.perMin / cheapest.perMin).toFixed(1);
       console.log(`تصمیم: ارزان‌ترین ${gap} واحد WER بدتر است و ${times} برابر ارزان‌تر. با حجمِ ویسِ ماهانه ضرب کن، بعد انتخاب کن.`);
+    } else if (best.model !== cheapest.model) {
+      console.log('⚠️ هزینه‌ی ارزان‌ترین مدل صفر گزارش شد (احتمالاً `usage.cost` نیامده). نسبتِ هزینه قابلِ محاسبه نیست.');
     }
   }
 
