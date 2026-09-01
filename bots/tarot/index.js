@@ -277,8 +277,21 @@ const JOURNEY_ENABLED = true;
 // Rollback فوری: false کن → گیت و میدل‌ورش کاملاً محو، فلو دقیقاً مثل قبل (کاربرانی که
 // gate را رد کرده‌اند بی‌ضرر می‌مانند؛ callbackِ gate:check ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد).
 const JOIN_GATE_ENABLED = true;
-const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim() || '@taroot_fa';
-const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || 'https://t.me/taroot_fa';
+/* 🌍 کانالِ گیت **per زبان**. تا قبل از این پیش‌فرض `@taroot_fa` هاردکد بود و
+ * `write_env` برای زبان‌های تازه چیزی نمی‌نوشت، یعنی اولین چیزی که یک کاربرِ روس یا
+ * برزیلی می‌دید «عضوِ این کانالِ فارسی شو» بود — و چون هدیه‌ی خوش‌آمد لحظه‌ی تأییدِ
+ * عضویت واریز می‌شود، عملاً پشتِ یک کانالِ بی‌ربط قفل می‌شد.
+ *
+ * پیش‌فرضِ صادقانه برای زبانی که هنوز کانال ندارد **خاموش بودنِ گیت** است، نه
+ * فرستادنش به کانالِ زبانِ دیگر. روزی که کانالِ آن زبان ساخته شد، یک ردیف این‌جا
+ * (یا `GATE_CHANNEL` در `.env.<lang>`) گیتش را روشن می‌کند. */
+const GATE_BY_LOCALE = {
+  fa: { ch: '@taroot_fa', url: 'https://t.me/taroot_fa' },
+};
+const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim()     || GATE_BY_LOCALE[LOCALE]?.ch  || '';
+const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || GATE_BY_LOCALE[LOCALE]?.url || '';
+// هر دو لازم‌اند: کانالِ بدونِ لینک یعنی دکمه‌ی خرابِ «عضو شو» وسطِ اجباری‌ترین مسیرِ ربات.
+const gateOn = () => JOIN_GATE_ENABLED && !!GATE_CHANNEL && !!GATE_CHANNEL_URL;
 // وضعیت‌هایی که یعنی «عضو است». `restricted` فقط وقتی عضو است که is_member هم true باشد.
 const GATE_OK_STATUS = new Set(['member', 'administrator', 'creator']);
 
@@ -1910,7 +1923,7 @@ function grantWelcomeBonus(uid) {
 // «هدیه‌ی خوش‌آمد را گرفته یا نه» گذاشتیم، نه welcomed: کاربری که وسط آنبوردینگ رها کرده
 // هم هدیه‌اش را گرفته، پس نباید حالا بابتِ هدیه‌ای که دارد دوباره شرط بگذاریم.
 function needsGate(user) {
-  if (!JOIN_GATE_ENABLED) return false;
+  if (!gateOn()) return false;
   if (!user) return false;
   return !user.joined_gate_at && !user.welcome_bonus_at && !user.welcomed;
 }
@@ -2067,7 +2080,7 @@ bot.action('gate:check', async (ctx) => {
    این استثنا ادمینی که وسطِ گیت است نمی‌تواند ریست کند و گیت را دوباره تست کند — دقیقاً
    همان چیزی که مالک دید (به‌جای ریست، پیامِ یادآوریِ گیت گرفت). بند ۶ب می‌گوید این دکمه
    «همیشه» در دسترسِ ادمین است. برای کاربرِ عادی بی‌خطر است چون `doReset` خودش `isAdmin` را چک می‌کند. */
-if (JOIN_GATE_ENABLED) {
+if (gateOn()) {
   // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
   const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
   const GATE_FREE_TEXT = new Set(

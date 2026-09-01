@@ -26,13 +26,13 @@ const needsGateSrc = idx.match(/function needsGate\(user\)\s*\{[\s\S]*?\n\}/)?.[
 ok(needsGateSrc, 'تابعِ needsGate پیدا شد');
 ok(/!user\.welcome_bonus_at/.test(needsGateSrc),
    'needsGate باید روی «هدیه‌ی خوش‌آمد را نگرفته» شرط بگذارد، وگرنه کاربرِ فعلی هم گیت می‌خورد');
-ok(/!JOIN_GATE_ENABLED\)\s*return false/.test(needsGateSrc),
-   'فلگِ خاموشی باید اولین شرطِ needsGate باشد (رول‌بکِ یک‌خطی)');
+ok(/!gateOn\(\)\)\s*return false/.test(needsGateSrc),
+   'گاردِ خاموشی باید اولین شرطِ needsGate باشد (رول‌بکِ یک‌خطی)');
 
 // شبیه‌سازیِ واقعیِ همان تابع روی کاربرهای نمونه
-const needsGate = new Function('JOIN_GATE_ENABLED', `return (${needsGateSrc.replace(/^function /, 'function ')});`);
+const needsGate = new Function('gateOn', `return (${needsGateSrc.replace(/^function /, 'function ')});`);
 for (const enabled of [true, false]) {
-  const fn = needsGate(enabled);
+  const fn = needsGate(() => enabled);
   const t = (m) => `${enabled ? 'روشن' : 'خاموش'}: ${m}`;
   ok(fn({ joined_gate_at: null, welcome_bonus_at: null, welcomed: 0 }) === enabled,
      t('کاربرِ کاملاً جدید باید گیت بخورد (و با فلگِ خاموش، نخورد)'));
@@ -164,8 +164,48 @@ for (const s of SPREADS) {
   ok(s.positions.length === s.size, `تعدادِ جایگاه‌های «${s.fa}» باید با size یکی باشد`);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ▶ گیتِ عضویت per زبان — زبانی که کانال ندارد نباید به کانالِ زبانِ دیگر برود
+
+   🐛 باگی که این بلوک از آن ساخته شد: `GATE_CHANNEL` پیش‌فرضِ هاردکدِ `@taroot_fa`
+   داشت و `write_env` برای زبان‌های تازه چیزی نمی‌نوشت. یعنی اولین چیزی که یک
+   کاربرِ روس یا برزیلی می‌دید «عضوِ این کانالِ فارسی شو» بود — و چون هدیه‌ی
+   خوش‌آمد لحظه‌ی تأییدِ عضویت واریز می‌شود، عملاً پشتِ یک کانالِ بی‌ربط قفل می‌شد.
+   هیچ خطایی هم نمی‌داد: ربات واقعاً ادمینِ آن کانال است، پس چکِ عضویت «درست» کار
+   می‌کرد و کاربر را درست بلاک می‌کرد.
+
+   پیش‌فرضِ صادقانه برای زبانِ بی‌کانال **خاموش بودنِ گیت** است. این‌جا خودِ منطق
+   از سورس بریده و **اجرا** می‌شود، نه اینکه شکلِ جدول خوانده شود.
+   ══════════════════════════════════════════════════════════════════════════ */
+{
+  const src = [
+    idx.match(/const GATE_BY_LOCALE = \{[\s\S]*?\n\};/)?.[0],
+    idx.match(/^const GATE_CHANNEL {5}=.*$/m)?.[0],
+    idx.match(/^const GATE_CHANNEL_URL =.*$/m)?.[0],
+    idx.match(/^const gateOn = .*$/m)?.[0],
+  ];
+  ok(src.every(Boolean), 'هر چهار قطعه‌ی گیتِ per زبان پیدا شدند');
+  const run = (locale, env = {}) => {
+    try {
+      return new Function('LOCALE', 'process', 'JOIN_GATE_ENABLED',
+        `${src.join('\n')}; return { on: gateOn(), ch: GATE_CHANNEL };`)(locale, { env }, true);
+    } catch { return null; }
+  };
+  const fa = run('fa');
+  ok(fa?.on === true && fa?.ch === '@taroot_fa', 'فارسی همان کانالِ همیشگی‌اش را دارد و گیتش روشن است');
+  for (const l of ['ru', 'pt', 'es'])
+    ok(run(l)?.on === false, `«${l}» بدونِ کانالِ اختصاصی اصلاً گیت نمی‌شود (نه اینکه به کانالِ فارسی برود)`);
+  ok(run('ru')?.ch !== '@taroot_fa', 'زبانِ بی‌کانال هرگز کانالِ فارسی را به ارث نمی‌برد');
+  // روزی که کانالِ آن زبان ساخته شد، فقط دو متغیرِ env گیتش را روشن می‌کنند
+  const ruEnv = run('ru', { GATE_CHANNEL: '@taroot_ru', GATE_CHANNEL_URL: 'https://t.me/taroot_ru' });
+  ok(ruEnv?.on === true && ruEnv?.ch === '@taroot_ru', 'ست‌کردنِ کانالِ همان زبان گیتش را روشن می‌کند');
+  // کانالِ بدونِ لینک = دکمه‌ی خراب وسطِ اجباری‌ترین مسیرِ ربات
+  ok(run('ru', { GATE_CHANNEL: '@taroot_ru' })?.on === false, 'کانال بدونِ لینک گیت را روشن نمی‌کند');
+}
+
 if (fails) {
   console.error(`\n${fails} ادعا شکست خورد.`);
   process.exit(1);
 }
+
 console.log(`✅ چکِ گیتِ عضویت و فالِ محبوب: ${passes} ادعا، همه سبز.`);
