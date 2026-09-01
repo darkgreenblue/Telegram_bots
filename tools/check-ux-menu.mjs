@@ -1018,9 +1018,12 @@ console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style
   // ۲) «سؤال شخصی خودم» آبی، در **هر دو** منویی که ساخته می‌شود
   ok(/const topicStyle = \(key\) => \(key === MENU_PIN \? 'primary' : undefined\);/.test(SRC),
     '«سؤال شخصی خودم» آبی است (از روی MENU_PIN، نه رشته‌ی دستی)');
-  ok(/topicRow = \(key\) => \{[\s\S]{0,220}styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}`\), topicStyle\(key\)\)/.test(SRC),
+  // ⚠️ آرگومان‌های `L.buttons.topic(...)` عمداً باز گذاشته شده‌اند: از ۱۴۰۵/۰۶/۱۱ نامِ
+  // ترجمه‌شده هم پاس می‌شود. چیزی که این‌جا سنجیده می‌شود **رنگ** است نه شکلِ برچسب؛
+  // درستیِ خودِ آرگومان‌ها را `check-no-persian.mjs` گارد می‌کند.
+  ok(/topicRow = \(key\) => \{[\s\S]{0,260}styled\(Markup\.button\.callback\(L\.buttons\.topic\(.*?\), `topic:\$\{t\.key\}`\), topicStyle\(key\)\)/.test(SRC),
     'منوی کوتاه رنگ را اعمال می‌کند');
-  ok(/styled\(Markup\.button\.callback\(L\.buttons\.topic\(t\), `topic:\$\{t\.key\}:a`\), topicStyle\(t\.key\)\)/.test(SRC),
+  ok(/styled\(Markup\.button\.callback\(L\.buttons\.topic\(.*?\), `topic:\$\{t\.key\}:a`\), topicStyle\(t\.key\)\)/.test(SRC),
     'لیستِ کامل هم همان رنگ را اعمال می‌کند (وگرنه دو منو دو شکل می‌شدند)');
 
   // ۳) رنگِ بسته‌ها. ادعای «چه رنگی» بالاتر (بلوکِ نامِ بسته‌ها) پین شده؛ این‌جا **رفتار**
@@ -1039,7 +1042,8 @@ console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style
     ok(new Set(colors).size === colors.length, 'دو بسته‌ی رنگی هم‌رنگ نیستند');
     ok(style.magic && style.magic !== style.gold, 'بسته‌ی جادویی رنگِ خودش را دارد، متمایز از بسته ویژه');
   }
-  ok(/styled\(Markup\.button\.callback\(L\.buttons\.coinPack\(p, cur\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
+  // چندخطی شد وقتی قیمتِ واقعیِ استارز به دکمه اضافه شد، پس فاصله‌ها آزاد است.
+  ok(/styled\(Markup\.button\.callback\([\s\S]{0,120}?L\.buttons\.coinPack\(.*?\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
     'رنگِ بسته از جدولِ PACK_STYLE می‌آید، نه شرطِ درجا');
 }
 

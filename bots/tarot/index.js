@@ -48,7 +48,7 @@ import {
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
-  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor,
+  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName,
 } from './reading-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.44.0';
+const PRODUCT_VERSION = '3.45.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1176,7 +1176,7 @@ function firstDiscountAvailable(uid) {
 }
 
 // نامِ فارسیِ چیدمان (برای خطِ «هزینه‌ی فال «...»»). اگر چیدمان پیدا نشد، متنِ عمومی.
-const spreadFaOf = (r, uid) => faOf(SPREAD_BY_ID[r?.type], coinsOn(uid)) || L.reading.spreadFallbackFa;
+const spreadFaOf = (r, uid) => spreadName(faOf(SPREAD_BY_ID[r?.type], coinsOn(uid))) || L.reading.spreadFallbackFa;
 // پیامِ یکسانِ «موجودی کافی نیست» در همه‌ی نقاطِ پی‌وال (شخصی‌شده با نام کاربر).
 // موجودی و نامِ فال هم نشان داده می‌شوند تا کاربر کسری را خودش ببیند.
 // ⚠️ در دنیای الماس این متن HTML است (باکسِ نقل‌قولِ موجودی)، پس هر مقدارِ کاربرساخته باید
@@ -3185,7 +3185,7 @@ const menuSlotsFor = (uid) => {
 const topicStyle = (key) => (key === MENU_PIN ? 'primary' : undefined);
 const topicRow = (key) => {
   const t = TOPIC_BY_KEY[key];
-  return t ? [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}`), topicStyle(key))] : null;
+  return t ? [styled(Markup.button.callback(L.buttons.topic(t, spreadName(t.fa)), `topic:${t.key}`), topicStyle(key))] : null;
 };
 
 /** منوی کوتاهِ فال: پین + دو جایگاهِ آزمایشی + «همه‌ی فال‌ها». */
@@ -3203,7 +3203,7 @@ function falMenuKb(uid) {
 // حالت را در session نمی‌گذاریم چون showCatalog/nav:menu آن را پاک می‌کنند و دکمه‌ی کهنه
 // هم باید سال‌ها بعد درست کار کند؛ callback_data تنها جای مطمئن است (سقف ۶۴ بایت، این ۱۶).
 const allTopicsKb = () => [
-  ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t), `topic:${t.key}:a`), topicStyle(t.key))]),
+  ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t, spreadName(t.fa)), `topic:${t.key}:a`), topicStyle(t.key))]),
   ...navMenuRow(),
 ];
 
@@ -4002,7 +4002,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
     const cards = JSON.parse(r.cards_json);
     const recal = await orChatResilient(L.prompts.feedbackSystem, L.prompts.feedbackContext({
       confirmationQuestion: llm?.confirmation_question || '',
-      userAnswer: freeText || 'نه دقیقاً',
+      userAnswer: freeText || L.prompts.feedbackNoAnswer,
       card: cardName(cards[midIdx]?.key),
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
@@ -4640,12 +4640,31 @@ bot.action('recharge', async (ctx) => {
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const text = L.wallet.coinPacks(cur);
+    /* ⭐ قیمتِ روی دکمه باید **همان عددی** باشد که تلگرام کسر می‌کند.
+     *
+     * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۱ (مالک روی رباتِ روسی دید): این دکمه قیمت را نمی‌گرفت،
+     * پس locale ناچار `p.toman` را چاپ می‌کرد و کنارش کلمه‌ی «استارز» می‌گذاشت. یعنی
+     * منو می‌گفت «۳۰٬۰۰۰ ستاره» و فاکتور ۱۰۰ ستاره کسر می‌کرد: دروغِ ۳۰۰ برابری روی
+     * قیمت. دقیقاً همان خانواده‌ی باگِ ریال/تومانِ رسید (بند ۹ ریشه): عدد درست بود،
+     * **واحد** دروغ بود. قاعده همان است: هر جا عدد و واحد از دو جا می‌آیند، یکی‌شان
+     * دیر یا زود عوض می‌شود و آن یکی ساکت می‌ماند. حالا قیمت از همان تک‌منبعی می‌آید
+     * که فاکتور از آن می‌خواند (`starsFor` + همان نردبان).
+     *
+     * ⚠️ `peekVariant` و نه `variant`: از این لحظه قیمت **دیده می‌شود**، پس exposure
+     * باید بعد از رسیدنِ واقعیِ پیام ثبت شود نه قبلش (قاعده‌ی آهنینِ بند ۲الف ریشه).
+     * تا امروز exposure سرِ تپِ بسته ثبت می‌شد، که با منوی بی‌قیمت درست بود؛ با منوی
+     * قیمت‌دار دیگر نیست: کاربری که قیمت را دید و تپ نکرد هم treatment را دیده. */
+    const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
     const extra = Markup.inlineKeyboard([
-      ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(L.buttons.coinPack(p, cur), `pkg:${p.key}`), PACK_STYLE[p.key])]),
+      ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(
+        L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`), PACK_STYLE[p.key])]),
       [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
     ]);
-    try { return await ctx.editMessageText(text, extra); } catch {}
-    return ctx.reply(text, extra);
+    const seen = () => { if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} } };
+    try { const r = await ctx.editMessageText(text, extra); seen(); return r; } catch {}
+    const r = await ctx.reply(text, extra);
+    seen();
+    return r;
   }
   // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
   // همین فال» بهتر انجام می‌دهد. این‌جا فقط نردبانِ قیمتِ کیف‌پول است.
@@ -4723,15 +4742,33 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * پس کاربر نباید در حالتی گیر کند که منتظرِ عکسِ رسید است. گاردِ فلوی باز از روی
    * خودِ رکوردِ `pending` کار می‌کند، نه از روی استیت. */
   if (starsRail) {
+    const base = {
+      pack, stars, paymentId: s.paymentId, userId: uid,
+      title: L.wallet.starsInvoiceTitle(pack),
+      description: L.wallet.starsInvoiceDesc(pack, stars),
+    };
+    /* دو تلاش، عمداً به این ترتیب:
+     *   ۱) فاکتور با کیبوردِ سفارشی (دکمه‌ی پرداخت + انصراف، و رنگِ سبز روی پرداخت).
+     *   ۲) اگر تلگرام آن کیبورد را نپذیرفت، **فاکتورِ ساده‌ی همیشگی**.
+     * دلیلِ وجودِ پله‌ی دوم: `style` یک فیلدِ تازه است و در تایپینگِ نسخه‌ای که ربات با
+     * آن اجرا می‌شود وجود ندارد، پس پذیرفته‌شدنش روی دکمه‌ی `pay` تأییدنشده است. بدونِ
+     * این پله، یک فیلدِ ناشناخته می‌توانست کلِ خریدِ همه‌ی کاربران را ببندد و ما فقط از
+     * روی افتِ درآمد می‌فهمیدیم. بدترین حالتِ ممکن حالا «همان فاکتورِ دیروز» است. */
     try {
       return await ctx.replyWithInvoice(buildInvoice({
-        pack, stars, paymentId: s.paymentId, userId: uid,
-        title: L.wallet.starsInvoiceTitle(pack),
-        description: L.wallet.starsInvoiceDesc(pack, stars),
+        ...base,
+        payLabel: L.wallet.starsPayBtn(stars),
+        cancelLabel: L.buttons.cancel,
+        payStyle: 'success',
       }));
     } catch (e) {
-      logErr('stars sendInvoice:', e.message);
-      return ctx.reply(L.errors.generic).catch(() => {});
+      logErr('stars sendInvoice (کیبوردِ سفارشی رد شد، فاکتورِ ساده فرستاده می‌شود):', e.message);
+      try {
+        return await ctx.replyWithInvoice(buildInvoice(base));
+      } catch (e2) {
+        logErr('stars sendInvoice:', e2.message);
+        return ctx.reply(L.errors.generic).catch(() => {});
+      }
     }
   }
 
@@ -5151,6 +5188,7 @@ if (starsRail) {
       await afterApproval(p.user_id);
     },
     log, logErr,
+    texts: { staleInvoice: L.wallet.starsStaleInvoice, tempError: L.wallet.starsTempError },
   });
 }
 

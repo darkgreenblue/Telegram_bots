@@ -263,7 +263,10 @@ export default {
     openCardsCovered: '🔮 Destapar las cartas',
     recharge: '➕ Cargar saldo',
     buyCoins: (cur) => `💰 Comprar ${cur.name}${cur.emoji}`,
-    coinPack: (p, cur) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji} | ${starsN(p.toman)}`,
+    // ⭐ `stars` = lo que de verdad se cobra (misma fuente que el pedido).
+    // Si no hay precio, el botón va sin precio: mejor nada que un número equivocado.
+    coinPack: (p, cur, stars) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji}`
+      + (stars == null ? '' : ` | ${starsN(stars)}`),
     rechargeAmount: (a, bonus) => (bonus ? `${starsN(a)} (+${fmt(bonus)} de regalo 🎁)` : starsN(a)),
     customAmount: '✏️ Otro monto',
     discountHave: '🎟️ Tengo un cupón',
@@ -329,7 +332,7 @@ export default {
     ],
     spreadV3: (s) => `${s.emoji} ${s.faV3} · ${coins(s.size)}`,
     // el botón del tema no lleva precio: el precio depende del tamaño, que todavía no se eligió
-    topic: (t) => `${t.emoji} ${t.fa}`,
+    topic: (t, name) => `${t.emoji} ${name || t.fa}`,
     // botón del tamaño: aquí se define el precio, por eso ➖ y el monto del cobro
     topicSize: (size, price, cur) => `${cardsN(size)} (➖${moneyTight(price, cur)})`,
     allSpreadsV2: '🗂 Todas las lecturas',
@@ -838,6 +841,10 @@ export default {
      * están **vivas**: quedan en la pantalla nativa de confirmación, la última antes del
      * cobro. El título tiene límite de 32 caracteres y tiene que decir solo qué se está
      * comprando; la descripción tiene que decir cuántas estrellas salen. */
+    // Botón de pago: el monto va en el propio botón, sin adivinar.
+    starsPayBtn: (stars) => `⭐ Pagar ${stars}`,
+    starsStaleInvoice: 'Este pedido ya no vale. Abre el pago otra vez.',
+    starsTempError: 'Falla temporal. Inténtalo de nuevo.',
     starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)}`,
     starsInvoiceDesc: (p, starsQty) => `${coins(p.coins)} para tus lecturas. Salen ${starsN(starsQty)} de tu cuenta.`,
     coinsApproved: (n, balanceCoins, cur) =>
@@ -1164,6 +1171,9 @@ Agrega al mismo JSON una clave más: "question_text" con el texto exacto de la p
 
     feedbackSystem: 'Eres el mismo tarotista que en medio de la lectura hizo una pregunta de confirmación, y la persona respondió que tu interpretación no encaja del todo con lo que está viviendo (o dio una explicación escrita). Como un tarotista de verdad, sin defenderte y sin disculpas exageradas, corrige con empatía tu ángulo sobre el símbolo de la carta: muestra cómo esa misma carta, por otro lado, encaja con lo que dijo, y qué aclara ese dato nuevo sobre el camino que viene. Máximo 4 frases, en un español latinoamericano cercano, tratando de «tú». No le impongas un género a la persona: evita adjetivos y participios con marca de género dirigidos a ella. Escribe todo en español neutro de América Latina, nunca de España. Nunca uses raya larga ni dos guiones seguidos; en su lugar usa coma, punto y coma, dos puntos o una frase nueva. Devuelve solo texto simple.',
 
+    // Respuesta por defecto de quien tocó «no fue así» sin escribir nada.
+    // Va directo al prompt, así que debe ir en el idioma de la lectura.
+    feedbackNoAnswer: 'no fue así',
     feedbackContext: (ctx) => JSON.stringify({
       'la pregunta de confirmación que hiciste': ctx.confirmationQuestion,
       'respuesta de la persona': ctx.userAnswer,
