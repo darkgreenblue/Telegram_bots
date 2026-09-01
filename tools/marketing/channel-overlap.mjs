@@ -47,11 +47,39 @@ async function tg(method, params) {
   return { __err: 'بعد از چند تلاش هم نشد' };
 }
 
-const dbFile = readdirSync(dataDir).find((f) => /^bot.*\.db$/.test(f));
-if (!dbFile) { console.error(`هیچ .db در ${dataDir} نیست`); process.exit(1); }
-const db = new Database(join(dataDir, dbFile), { readonly: true, fileMustExist: true });
+// انتخابِ دیتابیس: تاروت **چنددیتابیسی** است (یکی per زبان: bot-fa.db, bot-ru.db …).
+// نسخه‌ی اول اولین فایلِ readdir را برمی‌داشت که می‌توانست دیتابیسِ خالیِ زبانِ دیگری
+// باشد؛ نتیجه «۰ کاربرِ ربات» شد و اسکریپت با اطمینان گفت همه‌ی ۴۲۰ ممبر بیرونِ رباتند.
+// حالا صریح: فایلِ خواسته‌شده، وگرنه پرجمعیت‌ترین. و همیشه چاپ می‌شود کدام فایل و چند
+// کاربر، چون همان چیزی که چاپ نمی‌شد باعث شد خطا نامرئی بماند.
+const wanted = process.env.OVERLAP_DB || '';
+const candidates = readdirSync(dataDir).filter((f) => /\.db$/.test(f));
+if (!candidates.length) { console.error(`هیچ .db در ${dataDir} نیست`); process.exit(1); }
 
-const users = db.prepare('SELECT telegram_id FROM users').all().map((r) => r.telegram_id);
+function usersOf(file) {
+  try {
+    const d = new Database(join(dataDir, file), { readonly: true, fileMustExist: true });
+    const rows = d.prepare('SELECT telegram_id FROM users').all().map((r) => r.telegram_id);
+    d.close();
+    return rows;
+  } catch { return null; }
+}
+
+console.log(`دیتابیس‌های موجود در ${dataDir}:`);
+const loaded = [];
+for (const f of candidates) {
+  const rows = usersOf(f);
+  console.log(`   ${f.padEnd(18)} ${rows === null ? 'خوانده نشد' : rows.length + ' کاربر'}`);
+  if (rows) loaded.push({ file: f, rows });
+}
+let chosen = wanted ? loaded.find((x) => x.file === wanted) : null;
+if (!chosen) chosen = loaded.slice().sort((a, b) => b.rows.length - a.rows.length)[0];
+if (!chosen || !chosen.rows.length) { console.error('هیچ دیتابیسی با کاربر پیدا نشد'); process.exit(1); }
+
+const dbFile = chosen.file;
+const users = chosen.rows;
+console.log(`\n▶ دیتابیسِ انتخاب‌شده: ${dbFile} (${users.length} کاربر)\n`);
+
 const total = await tg('getChatMemberCount', { chat_id: channel });
 if (total?.__err) { console.error(`getChatMemberCount شکست خورد: ${total.__err}`); process.exit(1); }
 
