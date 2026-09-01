@@ -138,6 +138,36 @@ const PROMPT_VARIANTS = {
     + 'родом в его адрес тоже под запретом: вместо «ты одинока» пиши «одиночество рядом». '
     + 'К третьим лицам в его истории это не относится.\n',
   ),
+
+  /* 🇧🇷🇪🇸 همان فرضیه‌ی «حذف به‌جای آموزش»، ولی شکلش برای پرتغالی و اسپانیایی فرق
+   * می‌کند و این تفاوت **ساختاری** است، نه سلیقه‌ای: روسی جنسیت را فقط در زمانِ
+   * گذشته صرف می‌کند، پس آن‌جا «گذشته خطابش نکن» کلِ کلاسِ خطا را می‌بندد. ولی
+   * پرتغالی و اسپانیایی صفت را در **زمانِ حال** هم جنسیت‌دار می‌کنند
+   * («estás cansado/cansada»)، پس همان قاعده این‌جا هیچ‌چیز را نمی‌بندد.
+   * معادلِ درست، ممنوع‌کردنِ خودِ **ساختِ توصیفی** است: «تو ... هستی» + صفت.
+   * قاعده‌ی فعلی می‌گوید «صفتِ جنسیت‌دار نگو»، که از مدل می‌خواهد بداند کدام صفت
+   * جنسیت دارد؛ این یکی می‌گوید اصلاً صفت به او نچسبان و از رویداد حرف بزن. */
+  noadj: (sys) => sys
+    .replace(
+      /- \*\*Não imponha um gênero à pessoa\.\*\*[^\n]*\n/,
+      '- **Nunca descreva a pessoa com adjetivo nem particípio.** Não escreva «você está ...» '
+      + 'nem «você se sente ...» seguido de adjetivo, em nenhum tempo verbal. Em português o '
+      + 'adjetivo carrega gênero, e você não sabe o gênero de quem lê, então toda frase desse '
+      + 'tipo é um palpite. Fale do que acontece, não de como a pessoa é: em vez de «você está '
+      + 'cansada» escreva «o cansaço aparece»; em vez de «você se sente perdido» escreva «falta '
+      + 'rumo agora»; em vez de «você ficou sozinha» escreva «a solidão pesa». Isso não vale '
+      + 'para terceiros na história dela nem para as figuras das cartas.\n',
+    )
+    .replace(
+      /- \*\*No le impongas un género a la persona\.\*\*[^\n]*\n/,
+      '- **Nunca describas a la persona con adjetivo ni participio.** No escribas «estás ...» '
+      + 'ni «te sientes ...» seguido de adjetivo, en ningún tiempo verbal. En español el '
+      + 'adjetivo lleva género, y no sabes el género de quien lee, así que toda frase de ese '
+      + 'tipo es una apuesta. Habla de lo que pasa, no de cómo es la persona: en vez de «estás '
+      + 'cansada» escribe «el cansancio aparece»; en vez de «te sientes perdido» escribe «ahora '
+      + 'falta rumbo»; en vez de «te quedaste sola» escribe «la soledad pesa». Esto no vale para '
+      + 'terceros de su historia ni para las figuras de las cartas.\n',
+    ),
 };
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
