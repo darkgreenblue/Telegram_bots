@@ -242,6 +242,10 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs
 
+      - name: Fallback chain check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-fallbacks.mjs
+
       # حسابداریِ مصرفِ مدل روی همان مسیری نشسته که فالِ کاربرِ پولی از آن رد می‌شود، پس
       # شرطِ صریحِ مالک «هیچ تأثیری روی کیفیت فال نداشته باشد» این‌جا **اجرا** می‌شود:
       # بدنه‌ی ریکوئست بجز پرچمِ حسابداری بیت‌به‌بیت همان قبلی است، و سینکِ ترکیده هم

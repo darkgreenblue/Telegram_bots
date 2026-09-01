@@ -115,20 +115,26 @@ export const FLASH          = 'google/gemini-2.5-flash';
  * سشن دقیقاً همین بود: «آن‌چه گزارش شد و آن‌چه واقعاً اجرا شد یکی نبودند».
  * `process.env.READING_MODEL` همچنان override می‌کند (برای آزمایشِ موردی).
  *
- * `fa` عمداً در جدول **نیست**: به `FLASH` می‌افتد، یعنی رباتِ زنده بیت‌به‌بیت
- * دست‌نخورده. سوییچِ فارسی تصمیمِ جداگانه‌ی مالک است (بند «حکمِ مدل» در CLAUDE.md).
+ * ✅ `fa` هم از ۱۴۰۵/۰۶/۱۰ در جدول است (تصمیمِ صریحِ مالک). پیش از آن عمداً بیرون
+ * بود تا رباتِ زنده دست‌نخورده بماند؛ سوییچ بعد از دو دورِ ۹۰فالیِ جفت‌شده انجام شد
+ * که در دورِ دوم `luna` روی **هر دو** محور جلو افتاد: بی‌لنگر ۱۰٫۴٪ در برابرِ ۳۰٫۷٪،
+ * و صفر ایرادِ سختِ STYLE.md در برابرِ ۶ (بخشِ «حکمِ فارسی برگشت» در CLAUDE.md).
  *
  * 🎙 مسیرِ ویس خودش را تطبیق می‌دهد و لازم نیست کسی یادش باشد: `luna` صدا نمی‌فهمد،
  * پس `READER_HEARS_AUDIO` در `index.js` false می‌شود و ویس اول با `orTranscribe`
- * (که روی `FLASH` می‌ماند) به متن تبدیل می‌شود. رول‌بکِ یک‌خطی: خالی‌کردنِ این جدول. */
+ * (که روی مدل‌های صداشنو می‌ماند) به متن تبدیل می‌شود. یعنی حالا **هر چهار زبان**
+ * مسیرِ دو-فراخوانی دارند و آن واگرایی از جدولِ استثناها برداشته شد.
+ * رول‌بکِ یک‌خطی: برداشتنِ ردیفِ `fa` از این جدول. */
+export const LUNA = 'openai/gpt-5.6-luna';
 const READING_MODEL_BY_LOCALE = {
-  ru: 'openai/gpt-5.6-luna',
-  pt: 'openai/gpt-5.6-luna',
-  es: 'openai/gpt-5.6-luna',
+  fa: LUNA,
+  ru: LUNA,
+  pt: LUNA,
+  es: LUNA,
 };
 export const READING_MODEL  = (process.env.READING_MODEL || '').trim()
   || READING_MODEL_BY_LOCALE[LOCALE] || FLASH;
-export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
+export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // آخرین پله‌ی زنجیره (پایین‌تر، `READING_PLAN`)
 export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
 
 // کلید از env خوانده می‌شود، نه از پارامتر: هم ربات و هم آزمایشگاه همان `OPENROUTER_API_KEY`
@@ -233,7 +239,19 @@ export function orChat(system, user, opts = {}) {
 // فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
 // `usage` و شماره‌ی تلاش هم برمی‌گردند تا آزمایشگاه بتواند هزینه و نرخِ retry را گزارش کند
 // (ربات فقط `out` و `model` را می‌خواند، پس این افزودنی چیزی را عوض نمی‌کند).
-export async function orChatResilient(system, user, opts = {}, plan = [READING_MODEL, READING_MODEL, READING_MODEL, FALLBACK_MODEL, FALLBACK_MODEL]) {
+/* 🔗 زنجیره‌ی فالبکِ خوانش (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۰): سه تلاش روی مدلِ خودِ
+ * زبان، بعد **جمنای**، بعد **دیپ‌سیک**.
+ *
+ * چرا ترتیب عوض شد: تا امروز فالبک مستقیم دیپ‌سیک بود، چون مدلِ اصلی خودش جمنای
+ * بود و فالبکِ هم‌خانواده بی‌معنی است. حالا که هر چهار زبان روی `luna` اند، جمنای
+ * از «همان مدل» به «نزدیک‌ترین مدلِ سنجیده‌شده‌ی دیگر» تبدیل شده: تنها مدلی که در
+ * این ریپو روی هر چهار زبان اندازه‌گیری شده و **صدا هم می‌فهمد**. دیپ‌سیک یک پله
+ * عقب‌تر می‌ماند چون در دورِ ۹ روسی هم بی‌لنگرِ بدتری داد و هم دُمِ تأخیرِ ۳۱ثانیه‌ای.
+ *
+ * ⚠️ اگر `READING_MODEL` دوباره `FLASH` شود (رول‌بک)، این آرایه به چهار تلاشِ جمنای
+ * به‌علاوه‌ی یک دیپ‌سیک تبدیل می‌شود. بی‌ضرر است و عمداً ساده نگه داشته شده. */
+export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH, FALLBACK_MODEL];
+export async function orChatResilient(system, user, opts = {}, plan = READING_PLAN) {
   const usages = [];
   for (let i = 0; i < plan.length; i++) {
     try {
@@ -257,15 +275,92 @@ export async function orChatResilient(system, user, opts = {}, plan = [READING_M
   return null;
 }
 
-export async function orTranscribe(audioBuffer, format, meta = null) {
-  const { text } = await orRequest({
-    model: FLASH,
-    messages: [{ role: 'user', content: [
-      { type: 'text', text: 'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.' },
-      { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
-    ] }],
-  }, meta);
-  return text;
+/* 🎙 ═══ مسیرِ رونویسیِ ویس ═══
+ *
+ * از ۱۴۰۵/۰۶/۱۰ هر چهار زبان روی `luna` اند و `luna` صدا نمی‌فهمد، پس **همه‌ی**
+ * زبان‌ها از این مسیر رد می‌شوند. تا دیروز فارسی و روسی صدا را مستقیم به مدلِ خوانش
+ * می‌دادند و این مسیر فقط یک شاخه‌ی فرعی بود؛ حالا تنها راهِ ورودِ ویس به محصول است.
+ * یعنی یک نقطه‌ی خرابیِ بی‌فالبک وسطِ مسیرِ **پول‌داده‌شده** — که دقیقاً همان چیزی است
+ * که این پلن می‌بندد (تصمیمِ صریحِ مالک).
+ *
+ * چرا دو تلاش روی جمنای و بعد ویسپر، نه مستقیم ویسپر:
+ *   - شایع‌ترین خرابی خطای گذرا یا شلوغیِ لحظه‌ای است و تلاشِ دومِ همان مدل می‌گیردش،
+ *     با هزینه‌ی ~$۰٫۰۰۰۷ per دقیقه.
+ *   - ویسپر **مسیرِ واقعاً مستقل** است (وندورِ دیگر و endpointِ دیگر)، پس قطعیِ کاملِ
+ *     جمنای را هم پوشش می‌دهد. ولی طبقِ اندازه‌گیریِ خودمان **۸٫۸ برابر** گران‌تر است
+ *     ($۰٫۰۰۶ per دقیقه)، پس جایش پله‌ی آخر است نه اول. جزئیات: I18N-ES-STT-RESEARCH.md.
+ *   - ⚠️ و شواهدی که جمع کردیم می‌گویند ویسپر روی اسپانیاییِ لاتین **بهتر نیست**؛
+ *     این‌جا نقشش «در دسترس بودن» است نه «دقتِ بیشتر». اگر روزی خواستیم روی کیفیت
+ *     انتخابش کنیم، اول `tools/stt-eval.mjs` روی صدای واقعی اجرا شود.
+ *
+ * `:stt` یعنی endpointِ اختصاصیِ رونویسی (`/audio/transcriptions`) نه chat completions.
+ * ⚠️ آن endpoint برچسبِ فرمت را جدی می‌گیرد و بایتِ ogg با برچسبِ mp3 را رد می‌کند —
+ * برای همین باگِ برچسبِ فرمت در `index.js` باید **قبل از** روشن‌شدنِ این پله درست
+ * می‌شد، و شد. */
+export const TRANSCRIBE_MODEL    = FLASH;
+export const TRANSCRIBE_FALLBACK = 'openai/whisper-1:stt';
+export const TRANSCRIBE_PLAN     = [TRANSCRIBE_MODEL, TRANSCRIBE_MODEL, TRANSCRIBE_FALLBACK];
+export const TRANSCRIBE_PROMPT   =
+  'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.';
+
+// endpointِ اختصاصیِ رونویسی. جدا از `orRequest` است چون نه `messages` می‌گیرد نه
+// `choices` برمی‌گرداند؛ ولی حسابداریِ مصرف عیناً از همان سینک می‌رود تا هزینه‌ی این
+// پله هم در `llm_usage` دیده شود (وگرنه گران‌ترین پله نامرئی‌ترین هم می‌شد).
+async function sttRequest(model, dataB64, format, meta) {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${keyOf()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input_audio: { data: dataB64, format } }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      logErr(`❌ OpenRouter STT ${res.status} (${model}):`, errBody.slice(0, 300));
+      throw new Error(`OpenRouter STT error ${res.status}`);
+    }
+    const data = await res.json();
+    const u = data.usage || {};
+    if (usageSink && USAGE_ACCOUNTING) {
+      try {
+        usageSink({
+          model, kind: meta?.kind || '', refId: Number(meta?.refId) || 0, userId: Number(meta?.userId) || 0,
+          promptTokens: 0, completionTokens: 0, totalTokens: 0,
+          costUsd: Number(u.cost) || 0, ms: Date.now() - t0,
+        });
+      } catch (e) { logErr('usage sink:', e.message); }
+    }
+    return String(data.text || '').trim();
+  } finally { clearTimeout(timer); }
+}
+
+export async function orTranscribe(audioBuffer, format, meta = null, plan = TRANSCRIBE_PLAN) {
+  const dataB64 = audioBuffer.toString('base64');
+  for (let i = 0; i < plan.length; i++) {
+    const entry = plan[i];
+    const isStt = entry.endsWith(':stt');
+    const model = isStt ? entry.slice(0, -4) : entry;
+    try {
+      const text = isStt
+        ? await sttRequest(model, dataB64, format, meta)
+        : (await orRequest({
+            model,
+            messages: [{ role: 'user', content: [
+              { type: 'text', text: TRANSCRIBE_PROMPT },
+              { type: 'input_audio', input_audio: { data: dataB64, format } },
+            ] }],
+          }, meta)).text;
+      if (text && text.trim()) return text;
+      logErr(`TRANSCRIBE خروجیِ خالی (تلاشِ ${i + 1}، ${entry})`);
+    } catch (e) {
+      logErr(`TRANSCRIBE خطا (تلاشِ ${i + 1}، ${entry}):`, e.message);
+    }
+    if (i < plan.length - 1) await sleep(1500);
+  }
+  return null;   // همه‌ی پله‌ها سوختند؛ صدا زننده خودش fail-safe است (خوانش نمی‌شکند)
 }
 
 export function parseJsonLoose(s) {

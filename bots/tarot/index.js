@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.41.0';
+const PRODUCT_VERSION = '3.42.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -399,6 +399,22 @@ const AUDIO_DIRECT_ENABLED = true;
  * حدسِ اشتباه در این جهت فقط یک فراخوانیِ ارزانِ اضافه است، ولی در جهتِ دیگر یک
  * فالِ پول‌داده‌ی شکسته. */
 const AUDIO_CAPABLE = [/^google\/gemini/i];
+/* 🐛 برچسبِ فرمتِ صدا. تا ۱۴۰۵/۰۶/۱۰ این یک خط بود:
+ *     fmt: /wav/i.test(mime) ? 'wav' : 'mp3'
+ * یعنی ویسِ تلگرام که همیشه **ogg/opus** است با برچسبِ **mp3** فرستاده می‌شد. روی
+ * مسیرِ chat completionsِ جمنای ظاهراً کار می‌کرد (بایت را خودش می‌شناسد)، پس سال‌ها
+ * بی‌صدا ماند. ولی endpointِ اختصاصیِ رونویسی برچسب را جدی می‌گیرد و بایتِ ogg با
+ * برچسبِ mp3 را رد یا بد-دیکد می‌کند. یعنی لحظه‌ای که پله‌ی ویسپر روشن شود، فالبک
+ * **همیشه** شکست می‌خورد و هیچ‌کس نمی‌فهمد — همان کلاسِ «فالبکِ مرده‌ی بی‌صدا» که
+ * دورِ هشتمِ روسی هم داشت. این باگ در I18N-ES-STT-RESEARCH.md بندِ ۹ ثبت شده بود
+ * به‌عنوانِ «بمبِ ساعتیِ خاموش»؛ حالا که ساعتش رسید، خنثی شد. */
+const AUDIO_FORMATS = [
+  // نگاشت روی **ظرف** است نه کدک: `audio/webm; codecs=opus` باید webm بدهد نه ogg.
+  [/ogg/i, 'ogg'], [/wav/i, 'wav'], [/mpeg|mp3/i, 'mp3'],
+  [/mp4|m4a|aac/i, 'm4a'], [/webm/i, 'webm'], [/flac/i, 'flac'],
+];
+// پیش‌فرض ogg است نه mp3: ویسِ تلگرام همیشه ogg/opus است و این مسیر فقط ویس می‌گیرد.
+const audioFormatOf = (mime) => AUDIO_FORMATS.find(([re]) => re.test(mime || ''))?.[1] || 'ogg';
 const READER_HEARS_AUDIO = AUDIO_CAPABLE.some((re) => re.test(READING_MODEL));
 const audioDirectOn = () => AUDIO_DIRECT_ENABLED && READER_HEARS_AUDIO;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isTester(uid));
@@ -5737,7 +5753,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     const mime = media.mime_type || 'audio/ogg';
     await typing(ctx, PACE_S);
     // متنِ سؤال خالی می‌ماند؛ بعد از خوانش از `question_text` خودِ مدل پر می‌شود.
-    return await handleQuestion(ctx, '', { id: media.file_id, fmt: /wav/i.test(mime) ? 'wav' : 'mp3' });
+    return await handleQuestion(ctx, '', { id: media.file_id, fmt: audioFormatOf(mime) });
   } catch (e) {
     logErr('voice handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
