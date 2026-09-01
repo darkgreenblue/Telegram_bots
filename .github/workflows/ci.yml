@@ -106,6 +106,13 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-health-watch.mjs
 
+      # زاویه‌ی چهارم روی دیپلوی: سکرتی که در `env:` تعریف شده ولی به `envs:` اضافه
+      # نشده، روی سرور **خالی** می‌رسد و دیپلوی با کدِ صفر و یک پیامِ دوستانه ردش
+      # می‌کند (باگِ واقعیِ ۱۱ شهریور ۱۴۰۵: شش سکرتِ زبان‌های تاروت).
+      - name: Deploy secret forwarding guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-deploy-envs.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
