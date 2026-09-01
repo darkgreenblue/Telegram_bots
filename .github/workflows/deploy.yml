@@ -184,6 +184,14 @@ jobs:
                 write_env "tarot-$lang" \
                   "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s' "$tok" "$key" "$lang")" \
                   "bots/tarot/.env.$lang"
+              else
+                # ⚠️ نامِ سکرتِ خالی صریح چاپ می‌شود، وگرنه تنها نشانه یک «ℹ️ .env نبود»
+                # است که هم برای «هنوز نساختیمش» و هم برای «ساختی ولی نامش فرق دارد»
+                # یکسان به نظر می‌رسد. مقدار هرگز چاپ نمی‌شود، فقط نام.
+                miss=""
+                [ -z "$tok" ] && miss="TAROT_${upper}_BOT_TOKEN"
+                [ -z "$key" ] && miss="$miss TAROT_${upper}_OPENROUTER_KEY"
+                echo "⚠️ سکرتِ خالی روی رانر:$miss — تا ست نشدنش tarot-$lang بالا نمی‌آید"
               fi
             done
             if [ -n "$DAILY_BRIEF_BOT_TOKEN" ] && [ -n "$DAILY_BRIEF_OPENROUTER_KEY" ]; then
