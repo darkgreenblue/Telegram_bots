@@ -113,6 +113,12 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-envs.mjs
 
+      # ابزارِ «ارسال به مالک»: شکستِ **نیمه‌کاره** بدترین حالتش است (بعضی فایل‌ها
+      # رفته‌اند و بعضی نه). کپشنِ چندخطی و اعتبارسنجیِ قبل از اولین ارسال قفل‌اند.
+      - name: Send-to-owner guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-send-owner.mjs
+
       # قرارداد «مسیر ریز» (shared/journey.js + تحلیلِ داشبورد): پایداریِ کلیدِ صفحه، حذفِ ادمین،
       # و یکی‌بودنِ هر عدد با لیستِ کاربرانش. روی جابِ dashboard چون better-sqlite3 آن‌جا نصب است.
       - name: Journey contract check
