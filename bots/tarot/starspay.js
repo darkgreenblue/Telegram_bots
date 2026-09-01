@@ -62,10 +62,10 @@ export function parsePayload(payload) {
  *   • `provider_token` برای استارز **خالی** است (هیچ سکرتِ پرداختی لازم نیست).
  *   • `prices` باید **دقیقاً یک آیتم** داشته باشد و `amount` خودِ تعدادِ استارز است،
  *     نه سِنت و نه ضرب‌درِ صد. */
-export function buildInvoice({ pack, stars, paymentId, userId, title, description }) {
+export function buildInvoice({ pack, stars, paymentId, userId, title, description, payLabel, cancelLabel, payStyle }) {
   if (!Number.isInteger(stars) || stars <= 0) throw new Error('starspay: invalid stars');
   if (!pack || !pack.key) throw new Error('starspay: invalid pack');
-  return {
+  const inv = {
     title,
     description,
     payload: buildPayload(paymentId, userId),
@@ -73,6 +73,31 @@ export function buildInvoice({ pack, stars, paymentId, userId, title, descriptio
     currency: 'XTR',
     prices: [{ label: title, amount: stars }],
   };
+  /* 🔘 کیبوردِ سفارشی — تنها راهِ داشتنِ دکمه‌ی انصراف روی فاکتور.
+   *
+   * قرارداد Bot API (از تایپینگِ همین نسخه‌ی `@telegraf/types` که ربات با آن اجرا
+   * می‌شود): «If empty, one 'Pay total price' button will be shown. If not empty,
+   * the first button must be a Pay button.» یعنی دکمه‌ی پرداخت باید **اولین** دکمه
+   * بماند و انصراف زیرِ آن بنشیند.
+   *
+   * ⚠️ بدونِ این کیبورد، فاکتور فقط یک دکمه‌ی «Pay» داشت و کاربری که پشیمان می‌شد
+   * هیچ راهِ خروجی نداشت جز رها کردنِ فاکتور — که فاکتورِ `pending` را باز نگه می‌داشت
+   * و `blockDuringOpenPay` او را پشتِ همان فاکتور قفل می‌کرد. یعنی نقضِ قانونِ ۱ از
+   * بند ۹ب ریشه: «هیچ صفحه‌ای بن‌بست نیست».
+   *
+   * `payStyle` اختیاری است چون رنگِ دکمه یک فیلدِ **تازه**ی Bot API است و در تایپینگِ
+   * این نسخه اصلاً وجود ندارد؛ پس صحتش را نمی‌شود از روی منبعِ باز شده تضمین کرد.
+   * فراخوان موظف است در صورتِ خطا فاکتورِ ساده را دوباره بفرستد (مسیرِ بازگشت در
+   * `index.js`)، وگرنه یک فیلدِ ناشناخته می‌تواند کلِ مسیرِ پرداخت را ببندد. */
+  if (payLabel && cancelLabel) {
+    inv.reply_markup = {
+      inline_keyboard: [
+        [{ text: payLabel, pay: true, ...(payStyle ? { style: payStyle } : {}) }],
+        [{ text: cancelLabel, callback_data: `pay_cancel:${paymentId}` }],
+      ],
+    };
+  }
+  return inv;
 }
 
 /* سیم‌کشیِ دو آپدیتِ پرداخت.
@@ -85,7 +110,10 @@ export function buildInvoice({ pack, stars, paymentId, userId, title, descriptio
  *   log / logErr
  */
 export function registerStarsPay(bot, deps) {
-  const { getPayment, approve, saveCharge, onCredited, log, logErr } = deps;
+  /* 🌍 `texts` از locale می‌آید. تا امروز این دو پیام فارسیِ هاردکد بودند و چون این
+   * ماژول **فقط** روی ریلِ استارز (یعنی زبان‌های غیرفارسی) اجرا می‌شود، تنها کاربری
+   * که می‌توانست ببیندشان دقیقاً کسی بود که فارسی نمی‌داند. */
+  const { getPayment, approve, saveCharge, onCredited, log, logErr, texts = {} } = deps;
 
   /* ⏱ ددلاینِ ۱۰ ثانیه‌ایِ تلگرام. اگر جواب ندهیم پرداختِ کاربر شکست می‌خورد، پس
    * این‌جا هیچ کارِ کند و هیچ فراخوانیِ شبکه‌ای انجام نمی‌شود: فقط یک خواندنِ
@@ -102,12 +130,12 @@ export function registerStarsPay(bot, deps) {
         && p.user_id === q.from.id
         && p.status === 'pending',          // فاکتورِ کهنه یا قبلاً تأییدشده رد می‌شود
       );
-      await ctx.answerPreCheckoutQuery(ok, ok ? undefined : 'این فاکتور دیگر معتبر نیست.');
+      await ctx.answerPreCheckoutQuery(ok, ok ? undefined : (texts.staleInvoice || 'این فاکتور دیگر معتبر نیست.'));
       if (!ok) log?.('stars pre_checkout rejected:', q.invoice_payload);
     } catch (e) {
       logErr?.('stars pre_checkout:', e.message);
       // در خطا هم باید جواب برود، وگرنه کاربر پشتِ یک اسپینرِ ابدی می‌ماند
-      await ctx.answerPreCheckoutQuery(false, 'خطای موقت. دوباره تلاش کن.').catch(() => {});
+      await ctx.answerPreCheckoutQuery(false, texts.tempError || 'خطای موقت. دوباره تلاش کن.').catch(() => {});
     }
   });
 
