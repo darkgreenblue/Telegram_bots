@@ -209,6 +209,14 @@ export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FL
     try {
       const { text: out, usage } = await orChat(system, user, { ...opts, model: plan[i] });
       usages.push(usage);
+      /* ⚠️ گزارشِ «یک فراخوانی واقعاً به مدل رسید»، مستقل از اینکه validate قبولش کند
+       * یا نه. بدونِ این، مسیرِ شکست (`return null` پایین) کلِ `usages` را دور می‌ریزد و
+       * از بیرون هیچ راهی نیست بفهمی مدل جواب داد ولی جوابش رد شد، یا اصلاً فراخوانی
+       * نشد. آزمایشگاه دقیقاً همین دو را از هم جدا می‌کند و با نبودِ این callback
+       * «ردِ validate» را به‌غلط «به مدل نرسید» گزارش می‌کرد.
+       * روی ربات بی‌اثر است: `onUsage` را فقط آزمایشگاه پاس می‌دهد، و `orChat` بدنه‌ی
+       * ریکوئست را فیلدبه‌فیلد می‌سازد پس این گزینه هرگز به سیم نمی‌رود. */
+      try { opts.onUsage?.(usage); } catch { /* هرگز نباید فال را بشکند */ }
       if (!opts.validate || opts.validate(out)) return { out, model: plan[i], attempts: i + 1, usages };
       logErr(`LLM invalid output (attempt ${i + 1}, ${plan[i]})`);
     } catch (e) {

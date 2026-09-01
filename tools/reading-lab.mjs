@@ -244,6 +244,12 @@ function fakeRepair(sys, usr, opts) {
   // 🌍 به زبانِ جاری، وگرنه استابِ تعمیر روی رباتِ روسی متنِ فارسی جایگزین می‌کرد و
   // `--fake` قرمزِ دروغین می‌داد — همان دامی که خودِ سنجه‌ی نویسه‌ی بیگانه لو داد.
   const out = JSON.stringify({ fixes: Array.from({ length: n }, () => LANG.fake.repairFix) });
+  // ⚠️ استاب باید **قراردادِ** کلاینتِ واقعی را کامل تقلید کند، نه فقط شکلِ خروجی‌اش:
+  // `orChatResilient` برای هر فراخوانیِ رسیده `onUsage` را صدا می‌زند و آزمایشگاه از
+  // همان «به مدل رسید» را از «رد شد» جدا می‌کند. بدونِ این خط، هر تعمیرِ ردشده در
+  // حالتِ fake به‌غلط «اصلاً به مدل نرسید» گزارش می‌شد — همان دامی که دو خط بالاتر
+  // برای زبانِ خروجیِ استاب ثبت شده، این‌بار روی قراردادِ فراخوانی.
+  opts.onUsage?.({ prompt_tokens: 0, completion_tokens: 0 });
   return opts.validate(out) ? { out, model: 'fake', attempts: 1, usages: [{ prompt_tokens: 0, completion_tokens: 0 }] } : null;
 }
 
@@ -335,7 +341,7 @@ async function runStep(persona, step, i, state) {
     // همیشه روی مدلِ پیش‌فرضِ محصول می‌رفت و مقایسه‌ی مدل‌ها ناقص بود.
     { tag: `${persona.id}.${i + 1}`, meta: { model: MODEL }, plan: [MODEL] });
   parsed = rep.llm;
-  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
+  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null, calls: rep.calls || 0 };
 
   const rendered = renderV4(parsed, cards, labels, { name: persona.name });
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
@@ -650,13 +656,22 @@ if (!DRY) {
      * تعمیرش عملاً **وجود نداشت** — یعنی عددِ کیفیتِ آن مدل بدترِ واقعیت نمایش داده
      * می‌شد و علتش در گزارش نامرئی بود. هر مدلِ تازه‌ای می‌تواند همین را بدهد، پس
      * تشخیصش باید ساختاری باشد نه چشمی. */
-    const dead = fired.filter(r => !r.repair.ok && !(r.repairUsage?.in || r.repairUsage?.out));
+    /* 🐛 نسخه‌ی اولِ این تشخیص **غلط بود** و یک ادعای غلط تولید کرد. ملاکش «صفر توکن»
+     * بود، ولی `orChatResilient` در مسیرِ شکست `return null` می‌زند و کلِ `usages` را
+     * دور می‌ریزد. یعنی وقتی مدل جواب می‌داد و `validate` جوابش را رد می‌کرد، توکن هم
+     * صفر گزارش می‌شد و این خط آن را «اصلاً به مدل نرسید» می‌خواند. این دو کاملاً
+     * متفاوتند: ردِ validate یعنی مدل نتوانست ایراد را برطرف کند (سیگنالِ **کیفیت**)،
+     * ولی نرسیدن یعنی مسیرِ تعمیر **وجود ندارد** (سیگنالِ **زیرساخت**).
+     * حالا ملاک شمارشِ صریحِ فراخوانی است (`calls`)، نه استنتاج از توکن. */
+    const dead = fired.filter(r => !r.repair.ok && !r.repair.calls);
+    const rejected = fired.filter(r => !r.repair.ok && r.repair.calls);
     const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
     const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
     const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
     const cost = done.reduce((a, r) => a + (r.repairUsage?.usd || 0), 0);
     console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
-      (failed.length ? ` (${failed.length} ناموفق${dead.length ? `، ${dead.length} تای آن **اصلاً به مدل نرسید**` : ''})` : '') +
+      (failed.length ? ` (${failed.length} ناموفق: ${rejected.length} مدل جواب داد ولی رد شد` +
+        `${dead.length ? `، ${dead.length} **اصلاً به مدل نرسید**` : ''})` : '') +
       (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
         ` | توکن ${rin}+${rout}` + (cost > 0 ? ` | هزینه‌ی واقعی $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : '') : ''));
     if (dead.length === fired.length && fired.length) {

@@ -219,8 +219,12 @@ export async function repairDefects(llm, call, { tag = '', meta = null, plan = n
   if (!hits.length) return { llm, fired: false, repaired: false };
 
   let res = null;
+  /* شمارشِ فراخوانی‌هایی که واقعاً به مدل رسیدند (چه قبول شوند چه رد). مصرفش
+   * تشخیصِ «مسیرِ تعمیر روی این مدل مرده است» در آزمایشگاه است. */
+  let calls = 0;
   try {
     res = await call(repairSystem(), repairUser(hits), {
+      onUsage: () => { calls += 1; },
       // برچسبِ حسابداریِ مصرفِ مدل (اختیاری؛ نبودنش دقیقاً رفتارِ قبلی است)
       ...(meta || {}),
       maxTokens: 600,
@@ -249,8 +253,8 @@ export async function repairDefects(llm, call, { tag = '', meta = null, plan = n
   const obj = res && parseJsonLoose(res.out);
   if (!obj?.fixes) {
     logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (${hits[0].kind}: «${hits[0].phrase}»)`);
-    return { llm, fired: true, repaired: false };
+    return { llm, fired: true, repaired: false, calls };
   }
   log(`${tag} تعمیر شد: ${hits.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
-  return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0] };
+  return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0], calls };
 }
