@@ -10,7 +10,7 @@
 // سنجه‌ای که فقط حالتِ سالم را ببیند هیچ‌چیز را تضمین نمی‌کند؛ همان درسی که در این ریپو
 // با «صحتش با برگرداندنِ عمدیِ باگ تأیید شد» تکرار شده.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import { renderV4 } from '../bots/tarot/reading-core.js';
 import { checkReading } from './reading-lab/checks.mjs';
 
@@ -414,6 +414,34 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
     ok(Array.isArray(res) && res.length === cases.length && res.every(Boolean),
       `سنجه‌ی لنگر روی «${loc}» هر ${cases.length} حالت را درست می‌گوید` +
       (Array.isArray(res) ? ` (${res.filter(Boolean).length}/${res.length})` : ' (اجرا نشد)'));
+  }
+}
+
+/* 🅰️ بازوی تک‌عضوی باید واقعاً اعمال شود — ادعای **رفتاری**، نه شکلِ کد.
+ * 🐛 باگِ واقعی: انتسابِ `MODEL = armModel(arm)` داخلِ شرطِ `ARM_LIST.length > 1`
+ * بود، پس `--arms <یک مدل>` بی‌صدا نادیده گرفته می‌شد و کلِ دور روی مدلِ پیش‌فرض
+ * اجرا می‌شد، در حالی که گزارش همان بازوی خواسته‌شده را چاپ می‌کرد. سه دورِ واقعی
+ * به همین شکل سوختند. رجکس این را نمی‌گرفت چون خودِ رشته سرِ جایش بود؛ فقط
+ * **اجرا** لوش می‌دهد. */
+{
+  console.log('\n▶ بازوی تک‌عضوی واقعاً اعمال می‌شود');
+  const cases = [
+    [['--arms', 'openai/gpt-5.6-luna'], 'openai/gpt-5.6-luna', 'بازوی تک‌عضوی'],
+    [['--arms', 'openai/gpt-5.6-luna@nopast'], 'openai/gpt-5.6-luna@nopast', 'بازوی تک‌عضوی با واریانت'],
+    [['--model', 'deepseek/deepseek-v3.2'], 'deepseek/deepseek-v3.2', '`--model` بدونِ arms'],
+    [[], 'google/gemini-2.5-flash', 'بدونِ arms و بدونِ model (پیش‌فرض)'],
+  ];
+  for (const [args, want, label] of cases) {
+    const out = `/tmp/armchk-${Math.random().toString(36).slice(2)}.json`;
+    const r = spawnSync(process.execPath, [
+      new URL('../tools/reading-lab.mjs', import.meta.url).pathname,
+      '--locale', 'ru', '--set', 'c', '--fake', '--only', 'C1', '--out', out, ...args,
+    ], { encoding: 'utf8', env: { ...process.env, LOCALE: 'ru' } });
+    let arms = [];
+    try { arms = [...new Set(JSON.parse(readFileSync(out, 'utf8')).map(x => x.arm))]; } catch {}
+    try { unlinkSync(out); } catch {}
+    ok(arms.length === 1 && arms[0] === want,
+      `${label} → «${want}»` + (arms.length ? ` (گرفت: ${arms.join(',')})` : ' (اجرا نشد)'));
   }
 }
 

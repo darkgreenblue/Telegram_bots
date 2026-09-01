@@ -498,9 +498,15 @@ const all = [];
 const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
 
 for (const arm of ARM_LIST) {
-if (ARM_LIST.length > 1) {
+/* 🐛 این انتساب قبلاً داخلِ شرطِ `ARM_LIST.length > 1` بود و یک **اجرای کاملاً
+ * اشتباه** می‌ساخت: با `--arms <یک مدل>` بازو نادیده گرفته می‌شد و کلِ دور روی
+ * مدلِ پیش‌فرض اجرا می‌شد، در حالی که گزارش هم همان بازو را چاپ می‌کرد. سه دورِ
+ * واقعی به همین شکل سوختند (به‌جای مدلِ خواسته‌شده، مدلِ پیش‌فرض سنجیده شد).
+ * انتساب حالا بی‌قید است و برای حالتِ «بدونِ --arms» هم no-op می‌ماند، چون
+ * `ARM_LIST` آن‌وقت دقیقاً `[MODEL]` است. فقط **چاپِ سرصفحه** مشروط ماند. */
   MODEL = armModel(arm); VARIANT = armVariant(arm);
   PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+if (ARM_LIST.length > 1) {
   console.log(`\n${'▓'.repeat(72)}`);
   console.log(`🅰️ بازو: ${arm}  (همان کارت‌ها و همان سؤال‌های بازوهای دیگر)`);
   console.log('▓'.repeat(72));
