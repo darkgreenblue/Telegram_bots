@@ -1,0 +1,91 @@
+name: Repair arena
+
+# 🛠 «اگر مسیرِ تعمیر را هم به مدلِ بهتر بدهیم چه می‌شود؟»
+#
+# قیدِ صریحِ مالک: **هیچ فالی از اول گرفته نمی‌شود.** این ورک‌فلو خروجیِ خامِ دورهای
+# قبلِ آزمایشگاه را از artifact های همان run ها برمی‌دارد، فال‌هایی را که ایرادشان از
+# تعمیر جان سالم به در برده جدا می‌کند، و فقط همان یک فراخوانیِ تعمیر را روی چند مدل
+# تکرار می‌کند. هزینه‌اش حدودِ یک‌دهمِ یک دورِ کاملِ آزمایشگاه است.
+#
+# ⚠️ artifact ها ۳۰ روز می‌مانند. بعد از آن این ورک‌فلو ورودی ندارد و باید دورِ
+# آزمایشگاه دوباره اجرا شود.
+
+on:
+  workflow_dispatch:
+    inputs:
+      locale:
+        description: 'زبان (fa | ru | pt | es) — DEFECTS per زبان است، پس هر زبان یک اجرا'
+        required: true
+        default: 'ru'
+      runs:
+        description: 'شناسه‌ی runهای آزمایشگاه با کاما (artifact شان reading-lab-<locale> است)'
+        required: true
+      arms:
+        description: 'مدل‌های تعمیر با کاما (خالی = جمنای در برابرِ luna)'
+        required: false
+        default: ''
+      reps:
+        description: 'چند بار هر ورودی به هر بازو داده شود (تعمیر تصادفی است، یک بار کافی نیست)'
+        required: false
+        default: '3'
+
+# ⚠️ گروهِ همزمانی per زبان: دو اجرای هم‌زمانِ یک زبان روی یک کلید هزینه‌ی دوبرابر
+# می‌دهد بدونِ اطلاعاتِ بیشتر.
+concurrency:
+  group: repair-arena-${{ inputs.locale }}
+  cancel-in-progress: false
+
+jobs:
+  arena:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read        # فقط برای دانلودِ artifact های runهای قبلی
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: نصبِ وابستگی‌های tarot
+        run: npm ci --prefix bots/tarot
+
+      - name: گاردِ کلید
+        env:
+          KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::سکرتِ TAROT_OPENROUTER_KEY ست نشده."
+            exit 1
+          fi
+
+      # هر run در پوشه‌ی خودش، وگرنه `reading-lab-out.json`ها روی هم می‌افتند و
+      # عملاً فقط آخرین run سنجیده می‌شود — یک خطای بی‌صدا که عدد را کوچک می‌کند.
+      - name: برداشتنِ خروجیِ خامِ دورهای قبل
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs }}
+          LOC: ${{ inputs.locale }}
+        run: |
+          set -euo pipefail
+          mkdir -p arena
+          n=0
+          for id in $(echo "$RUNS" | tr ',' ' '); do
+            case "$id" in ''|*[!0-9]*) echo "::error::شناسه‌ی نامعتبر: $id"; exit 1;; esac
+            tmp="$(mktemp -d)"
+            if gh run download "$id" -n "reading-lab-$LOC" -D "$tmp" -R "$GITHUB_REPOSITORY"; then
+              cp "$tmp/reading-lab-out.json" "arena/$id.json"
+              n=$((n+1))
+            else
+              echo "::warning::artifact دورِ $id برداشته نشد (منقضی یا نام متفاوت)"
+            fi
+          done
+          echo "برداشته شد: $n فایل"
+          if [ "$n" = "0" ]; then echo "::error::هیچ ورودی‌ای برداشته نشد"; exit 1; fi
+
+      - name: اجرای آرِنا
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+          LOCALE: ${{ inputs.locale }}
+        run: |
+          node tools/repair-arena.mjs --dir arena \
+            ${{ inputs.arms && format('--arms {0}', inputs.arms) || '' }} \
+            --reps "${{ inputs.reps }}"
