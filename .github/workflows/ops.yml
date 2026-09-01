@@ -178,12 +178,11 @@ jobs:
                 # «اگر در جریان است شروع نکن» یک بار قفلمان کرد: پروسه‌ی یک اجرای
                 # کنسل‌شده روی سرور زنده مانده بود و چون stdoutش به کانالِ SSHِ مرده
                 # می‌رفت، هم بلاک می‌کرد هم هیچ خروجی‌ای نداشت.
-                pkill -f 'channel-overlap.mjs' 2>/dev/null && echo "🧹 اجرای قبلی متوقف شد" || true
+                pkill -f '[c]hannel-overlap.mjs' 2>/dev/null && echo "🧹 اجرای قبلی متوقف شد" || true
                 sleep 1
                 : > "$OUT"
                 TELEGRAM_TOKEN="$TOKEN" nohup node tools/marketing/channel-overlap.mjs \
                   "bots/$OPS_APP/data" "$OPS_QUERY" >> "$OUT" 2>&1 &
-                disown
                 echo "🚀 سنجش در پس‌زمینه‌ی سرور شروع شد (رانر منتظر نمی‌ماند)"
                 sleep 3
                 echo "---- شروعِ خروجی ----"; head -n 20 "$OUT" 2>/dev/null
@@ -191,7 +190,7 @@ jobs:
                 ;;
               channel-overlap-read)
                 OUT="$HOME/channel-overlap.log"
-                if pgrep -f 'channel-overlap.mjs' >/dev/null 2>&1; then
+                if pgrep -f '[c]hannel-overlap.mjs' >/dev/null 2>&1; then
                   echo "⏳ هنوز در حال اجراست. آخرین خطوط:"
                 else
                   echo "✅ اجرا تمام شده. خروجیِ کامل:"
