@@ -191,16 +191,40 @@ for (const s of SPREADS) {
         `${src.join('\n')}; return { on: gateOn(), ch: GATE_CHANNEL };`)(locale, { env }, true);
     } catch { return null; }
   };
-  const fa = run('fa');
-  ok(fa?.on === true && fa?.ch === '@taroot_fa', 'فارسی همان کانالِ همیشگی‌اش را دارد و گیتش روشن است');
-  for (const l of ['ru', 'pt', 'es'])
-    ok(run(l)?.on === false, `«${l}» بدونِ کانالِ اختصاصی اصلاً گیت نمی‌شود (نه اینکه به کانالِ فارسی برود)`);
-  ok(run('ru')?.ch !== '@taroot_fa', 'زبانِ بی‌کانال هرگز کانالِ فارسی را به ارث نمی‌برد');
-  // روزی که کانالِ آن زبان ساخته شد، فقط دو متغیرِ env گیتش را روشن می‌کنند
-  const ruEnv = run('ru', { GATE_CHANNEL: '@taroot_ru', GATE_CHANNEL_URL: 'https://t.me/taroot_ru' });
-  ok(ruEnv?.on === true && ruEnv?.ch === '@taroot_ru', 'ست‌کردنِ کانالِ همان زبان گیتش را روشن می‌کند');
-  // کانالِ بدونِ لینک = دکمه‌ی خراب وسطِ اجباری‌ترین مسیرِ ربات
-  ok(run('ru', { GATE_CHANNEL: '@taroot_ru' })?.on === false, 'کانال بدونِ لینک گیت را روشن نمی‌کند');
+  /* ⚠️ هر زبانی که کانال دارد باید به کانالِ **خودش** وصل باشد.
+   * نامِ کانالِ روسی و اسپانیایی دو «o» دارد (`TAROOT_*`) و پرتغالی یک «o»
+   * (`TAROT_PT`) — عمدی است، چون یوزرنیمِ تک-oی آن دو گرفته شده بود. یک تایپوی
+   * تک‌حرفی یعنی گیت به کانالی اشاره می‌کند که وجود ندارد، و چون `isChannelMember`
+   * عمداً **fail-open** است خطا کاربر را رد نمی‌کند: گیت بی‌صدا تزئینی می‌شود و
+   * هیچ‌کس نمی‌فهمد. همان کلاسِ خرابیِ خاموشی که این ریپو بارها ثبت کرده. */
+  const EXPECT = { fa: '@taroot_fa', ru: '@TAROOT_RU', pt: '@TAROT_PT', es: '@TAROOT_ES' };
+  const seen = new Set();
+  for (const [loc, ch] of Object.entries(EXPECT)) {
+    const g = run(loc);
+    ok(g?.on === true, `گیتِ «${loc}» روشن است`);
+    ok(g?.ch === ch, `«${loc}» به کانالِ خودش وصل است (انتظار ${ch}، شد ${g?.ch})`);
+    ok(!seen.has(String(g?.ch).toLowerCase()), `کانالِ «${loc}» با زبانِ دیگری مشترک نیست`);
+    seen.add(String(g?.ch).toLowerCase());
+  }
+  /* لینک و یوزرنیم باید **یک** کانال را بگویند، وگرنه دکمه‌ی «عضو شو» کاربر را جایی
+   * می‌برد که چکِ عضویت آن‌جا را نمی‌سنجد: کاربر عضو می‌شود و باز هم رد می‌شود. */
+  {
+    const tbl = src.join('\n').match(/const GATE_BY_LOCALE = \{[\s\S]*?\n\};/)[0];
+    const T = new Function(`${tbl}; return GATE_BY_LOCALE;`)();
+    for (const [loc, row] of Object.entries(T)) {
+      const fromUrl = `@${String(row.url || '').split('/').pop()}`;
+      ok(fromUrl.toLowerCase() === String(row.ch || '').toLowerCase(),
+        `«${loc}» لینک و یوزرنیمش یکی است (${row.url} در برابرِ ${row.ch})`);
+    }
+  }
+  // زبانی که هنوز کانال ندارد نباید کانالِ زبانِ دیگری را به ارث ببرد.
+  ok(run('de')?.on === false, 'زبانِ بی‌کانال اصلاً گیت نمی‌شود');
+  ok(run('de')?.ch !== '@taroot_fa', 'زبانِ بی‌کانال هرگز کانالِ فارسی را به ارث نمی‌برد');
+  // و روزی که کانالش ساخته شد، دو متغیرِ env بدونِ تغییرِ کد گیتش را روشن می‌کنند
+  const deEnv = run('de', { GATE_CHANNEL: '@taroot_de', GATE_CHANNEL_URL: 'https://t.me/taroot_de' });
+  ok(deEnv?.on === true && deEnv?.ch === '@taroot_de', 'ست‌کردنِ کانال از env گیت را روشن می‌کند');
+  // کانال بدونِ لینک = دکمه‌ی خراب وسطِ اجباری‌ترین مسیرِ ربات
+  ok(run('de', { GATE_CHANNEL: '@taroot_de' })?.on === false, 'کانال بدونِ لینک گیت را روشن نمی‌کند');
 }
 
 if (fails) {

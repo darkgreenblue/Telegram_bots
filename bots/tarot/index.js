@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.43.0';
+const PRODUCT_VERSION = '3.44.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -287,6 +287,12 @@ const JOIN_GATE_ENABLED = true;
  * (یا `GATE_CHANNEL` در `.env.<lang>`) گیتش را روشن می‌کند. */
 const GATE_BY_LOCALE = {
   fa: { ch: '@taroot_fa', url: 'https://t.me/taroot_fa' },
+  // ⚠️ نامِ کانالِ روسی و اسپانیایی دو «o» دارد و پرتغالی یک «o». عمدی است، نه تایپو:
+  // یوزرنیمِ تک-oی آن دو در تلگرام گرفته شده بود. اشتباه‌نوشتنش یعنی گیت به کانالی
+  // اشاره می‌کند که وجود ندارد، و چون چکِ عضویت fail-open است **بی‌صدا** بی‌اثر می‌شود.
+  ru: { ch: '@TAROOT_RU', url: 'https://t.me/TAROOT_RU' },
+  pt: { ch: '@TAROT_PT',  url: 'https://t.me/TAROT_PT'  },
+  es: { ch: '@TAROOT_ES', url: 'https://t.me/TAROOT_ES' },
 };
 const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim()     || GATE_BY_LOCALE[LOCALE]?.ch  || '';
 const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || GATE_BY_LOCALE[LOCALE]?.url || '';
