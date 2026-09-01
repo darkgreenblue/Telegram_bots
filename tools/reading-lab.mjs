@@ -111,10 +111,58 @@ let PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
 const ARMS = (val('arms', '') || '').split(',').map(x => x.trim()).filter(Boolean);
 const ARM_LIST = ARMS.length ? ARMS : [MODEL];
 
+/* 🧪 واریانتِ **پرامپت** به‌عنوان یک بُعدِ دیگرِ بازو.
+ *
+ * چرا این‌جا و نه در locale: فرضیه‌ی پرامپت باید **جفت‌شده** سنجیده شود (همان کارت،
+ * همان سؤال، همان مدل) وگرنه با نویزِ ۱۳ واحدیِ نمونه‌برداری قاطی می‌شود. ولی
+ * دست‌کاریِ `locales/<lang>.js` برای هر فرضیه یعنی کدِ محصول را وسطِ آزمایش عوض
+ * کنیم؛ اگر فرضیه رد شود باید برش گردانیم و اگر یادمان برود، یک تغییرِ آزمایشی
+ * ناخواسته منتشر می‌شود. پس واریانت این‌جا زندگی می‌کند و **فقط روی رشته‌ی پرامپتِ
+ * همین اجرا** اثر می‌گذارد. برنده که معلوم شد، در یک PR جدا به locale می‌رود.
+ *
+ * شکلِ بازو: `model` یا `model@variant`. */
+const PROMPT_VARIANTS = {
+  /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
+   * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
+   * که از مدل می‌خواهد یک کارِ ظریفِ صرفی را درست انجام دهد. ولی ما **هیچ داده‌ای**
+   * از گذشته‌ی کاربر به مدل نمی‌دهیم، پس هیچ حرفِ مشروعی در زمانِ گذشته خطاب به او
+   * وجود ندارد. قاعده‌ی ساده‌تر: **اصلاً گذشته خطابش نکن.** قاعده‌ی ساده بهتر
+   * رعایت می‌شود، و این همان بند ۹/۰ ریشه است (حذف، نه وصله). */
+  nopast: (sys) => sys.replace(
+    /- \*\*Не навязывай человеку пол\.\*\*[^\n]*\n/,
+    '- **Никогда не обращайся к человеку в прошедшем времени.** Не пиши «ты решил», '
+    + '«ты решила», «ты почувствовал», «ты ждала». У тебя вообще нет данных о его прошлом, '
+    + 'поэтому такие фразы это выдумка, и заодно они навязывают ему пол. Пиши только в '
+    + 'настоящем, будущем, через инфинитив или безлично. Вместо «ты долго ждала ответа» '
+    + 'пиши «ожидание ответа затянулось» или «ты всё ещё ждёшь ответа». Прилагательные с '
+    + 'родом в его адрес тоже под запретом: вместо «ты одинока» пиши «одиночество рядом». '
+    + 'К третьим лицам в его истории это не относится.\n',
+  ),
+};
+const armModel = (a) => String(a).split('@')[0];
+const armVariant = (a) => String(a).split('@')[1] || '';
+{
+  const bad = ARM_LIST.map(armVariant).filter(v => v && !PROMPT_VARIANTS[v]);
+  if (bad.length) {
+    console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join(', ')}`);
+    console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join(', ') || '(هیچ)'}`);
+    process.exit(1);
+  }
+}
+let VARIANT = '';
+
 /* 🌍 سناریوها per زبان. `fa` نامِ تاریخیِ خودش را نگه می‌دارد تا دیف صفر بماند.
  * ⚠️ عمداً به فارسی fallback **نمی‌کند**: یک اجرای روسی با سؤال‌های فارسی سبز تمام
  * می‌شد و ما فکر می‌کردیم روسی را سنجیده‌ایم. خرابیِ بی‌صدا بدتر از خطاست. */
-const SCEN_FILE = path.join(HERE, 'reading-lab', LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`);
+/* 🎲 مجموعه‌ی سناریو. چرا لازم شد (تذکرِ مالک): سه **پاس** روی همان ۹ سؤال تنوع نیست،
+ * فقط تکرار است. یک دور می‌تواند شانسی خوب دربیاید، پس هر زبان باید با **سؤال‌های
+ * متفاوت** هم سنجیده شود وگرنه داریم روی همان ۹ سؤال overfit می‌کنیم و نمی‌فهمیم.
+ * `--set b` فایلِ `scenarios.<locale>.b.json` را برمی‌دارد. */
+const SET = (val('set', '') || '').trim().toLowerCase();
+const scenName = LOCALE === 'fa'
+  ? (SET ? `scenarios.${SET}.json` : 'scenarios.json')
+  : (SET ? `scenarios.${LOCALE}.${SET}.json` : `scenarios.${LOCALE}.json`);
+const SCEN_FILE = path.join(HERE, 'reading-lab', scenName);
 if (!fs.existsSync(SCEN_FILE)) {
   console.error(`❌ سناریویی برای زبانِ «${LOCALE}» نیست: ${SCEN_FILE}`);
   console.error('   سناریوی هر زبان باید به همان زبان نوشته شود، نه ترجمه‌ی خودکارِ فارسی.');
@@ -192,7 +240,19 @@ async function runStep(persona, step, i, state) {
   });
 
   const labels = L.prompts.cardLabels(cards.length);
-  const system = L.prompts.readerSystemV4(spread, labels);
+  /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
+  let system = L.prompts.readerSystemV4(spread, labels);
+  if (VARIANT) {
+    const before = system;
+    system = PROMPT_VARIANTS[VARIANT](system);
+    /* ⚠️ اگر جایگزینی هیچ اثری نداشت یعنی الگو دیگر با متنِ locale نمی‌خواند و ما
+     * داریم «واریانت» را با کنترل مقایسه می‌کنیم بدونِ اینکه چیزی عوض شده باشد،
+     * یعنی یک دورِ کاملاً بی‌معنی با هزینه‌ی کامل. بلند شکست بخور. */
+    if (system === before) {
+      console.error(`❌ واریانتِ «${VARIANT}» هیچ تغییری در پرامپت نداد (الگو دیگر نمی‌خواند).`);
+      process.exit(1);
+    }
+  }
   const userMsg = L.prompts.readingContext(ctx);
   const inputChars = system.length + userMsg.length;
 
@@ -403,7 +463,8 @@ const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
 
 for (const arm of ARM_LIST) {
 if (ARM_LIST.length > 1) {
-  MODEL = arm; PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+  MODEL = armModel(arm); VARIANT = armVariant(arm);
+  PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
   console.log(`\n${'▓'.repeat(72)}`);
   console.log(`🅰️ بازو: ${arm}  (همان کارت‌ها و همان سؤال‌های بازوهای دیگر)`);
   console.log('▓'.repeat(72));
@@ -426,7 +487,7 @@ for (const persona of personas) {
   for (let i = 0; i < persona.steps.length; i++) {
     const step = persona.steps[i];
     const r = await runStep(persona, step, i, state);
-    all.push({ persona: persona.id, i, rep, arm: MODEL, step, ...r });
+    all.push({ persona: persona.id, i, rep, arm: VARIANT ? `${MODEL}@${VARIANT}` : MODEL, step, ...r });
 
     const head = `\n── ${persona.id}.${i + 1} «${spreadName(r.spread.fa)}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
   // دلیلِ هر تلاشِ ردشده — گران‌ترین سیگنالِ هر دور، و تا امروز چاپ نمی‌شد

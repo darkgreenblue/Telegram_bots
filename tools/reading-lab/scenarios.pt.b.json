@@ -1,0 +1,132 @@
+{
+  "_note": "Conjunto B de cenários. Perguntas diferentes do conjunto principal: o objetivo não é repetir a rodada, e sim checar se não nos ajustamos demais àquelas nove perguntas. Aqui entram uma persona masculina, uma pergunta de dinheiro sem romance, e alguém que se descreve no masculino, pra pegar espelhamento de gênero.",
+  "probe": {
+    "name": "Léo",
+    "question": "Sinto que estou parado no mesmo lugar faz tempo e não sei o que mudar. O que as cartas dizem?"
+  },
+  "personas": [
+    {
+      "id": "B1",
+      "name": "Léo",
+      "focus": "career",
+      "why": "Persona masculina que se descreve no masculino. Teste direto de espelhamento: o modelo tende a pegar «estou cansado» e devolver «você está cansado», sem saber o gênero de quem lê.",
+      "steps": [
+        {
+          "spread": "career3",
+          "picks": [
+            4,
+            12,
+            20
+          ],
+          "afterMinutes": 0,
+          "question": "Estou cansado do meu trabalho, me sinto travado faz um ano. Peço demissão ou isso passa?",
+          "expect": "A pessoa se descreveu no masculino. Mesmo assim o texto não pode assumir o gênero de quem lê. Fórmula do título, tratamento por «você»."
+        },
+        {
+          "spread": "money3",
+          "picks": [
+            9,
+            1,
+            17
+          ],
+          "afterMinutes": 50,
+          "question": "Se eu sair, meu dinheiro segura seis meses?",
+          "expect": "Referência com conteúdo à leitura anterior, sem marcar tempo. Resposta com direção, nada de «depende de você»."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            22,
+            6,
+            14
+          ],
+          "afterMinutes": 120,
+          "question": "Minha pergunta pessoal",
+          "expect": "Pergunta livre e curta: o modelo não pode inventar contexto que não recebeu."
+        }
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "Cris",
+      "focus": "family",
+      "why": "Tema de família em vez de amor. Checa se o tom se mantém e se o modelo não escorrega pro formal falando de parentes, onde o plural é natural.",
+      "steps": [
+        {
+          "spread": "personal3",
+          "picks": [
+            2,
+            18,
+            7
+          ],
+          "afterMinutes": 0,
+          "question": "Eu e minha mãe quase não nos falamos há meses. Dá pra consertar isso?",
+          "expect": "Tema sobre terceiros. O tratamento de quem lê continua «você», nunca «o senhor»."
+        },
+        {
+          "spread": "yesno3",
+          "picks": [
+            13,
+            5,
+            21
+          ],
+          "afterMinutes": 40,
+          "question": "Devo dar o primeiro passo?",
+          "expect": "Pergunta decisiva: precisa de resposta clara, sem devolver a decisão."
+        },
+        {
+          "spread": "study3",
+          "picks": [
+            10,
+            0,
+            16
+          ],
+          "afterMinutes": 150,
+          "question": "Consigo terminar o curso que comecei?",
+          "expect": "Decisiva de novo, outro assunto. As frases não podem repetir as anteriores."
+        }
+      ]
+    },
+    {
+      "id": "B3",
+      "name": "Dani",
+      "focus": "inner",
+      "why": "Pergunta existencial sem detalhe. O caso mais difícil pra frase ancorada: é onde mais se escorrega pra frase genérica que serve pra qualquer pessoa.",
+      "steps": [
+        {
+          "spread": "personal3",
+          "picks": [
+            8,
+            15,
+            3
+          ],
+          "afterMinutes": 0,
+          "question": "Tenho trinta e dois anos e não sei pra onde minha vida está indo. Por onde começo?",
+          "expect": "Risco máximo de frase genérica. Cada frase tem que se prender a uma carta ou às palavras dela."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            19,
+            11,
+            23
+          ],
+          "afterMinutes": 60,
+          "question": "Minha pergunta pessoal",
+          "expect": "Referência com conteúdo à leitura anterior, sem marca de tempo."
+        },
+        {
+          "spread": "love3",
+          "picks": [
+            6,
+            20,
+            1
+          ],
+          "afterMinutes": 180,
+          "question": "E no amor, vai rolar alguma coisa pra mim?",
+          "expect": "Vira pro amor depois do tema interno. Registro e gênero sob controle."
+        }
+      ]
+    }
+  ]
+}
