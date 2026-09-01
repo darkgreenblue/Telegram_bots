@@ -82,7 +82,35 @@ ok('هر دو متنِ یادآوری تعریف شده‌اند', dTxt.length =
 
 /* ═══════ ۳) خودِ جارو: ترتیب و گاردها ═══════ */
 const sweep = SRC.slice(SRC.indexOf('const REMINDER_HOUR'), SRC.indexOf("}, 15 * 60 * 1000);", SRC.indexOf('const REMINDER_HOUR')));
-ok('جارو ساعت را به وقتِ تهران می‌سنجد', /Asia\/Tehran/.test(sweep));
+/* 🌍 ساعتِ جارو باید به وقتِ **همان ربات** باشد، نه تهرانِ هاردکد.
+ * 🐛 چرا: همین کد سه رباتِ زبانِ دیگر را هم اجرا می‌کند. ساعت ۲۲ تهران برای کاربرِ
+ * برزیلی ۱۵:۳۰ بعدازظهر است، یعنی «یادآوریِ شبانه» نه شبانه بود نه یادآوری —
+ * فقط یک پیامِ ناخواسته وسطِ روز، که خودش دلیلِ بلاک شدن است (درسِ v3.9.0).
+ * منطقه‌ی زمانی این‌جا **اجرا** می‌شود، نه اینکه شکلش خوانده شود. */
+ok('جارو ساعت را به وقتِ همان ربات می‌سنجد، نه تهرانِ هاردکد',
+   /botHour\(\)/.test(sweep) && !/Asia\/Tehran/.test(sweep));
+{
+  const core = readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
+  const src = [
+    core.match(/const TZ_BY_LOCALE = \{[\s\S]*?\n\};/)?.[0],
+    core.match(/^export const BOT_TZ = .*$/m)?.[0]?.replace('export ', ''),
+  ];
+  ok('جدولِ منطقه‌ی زمانیِ per زبان پیدا شد', src.every(Boolean));
+  const tzOf = (locale) => {
+    try {
+      return new Function('LOCALE', 'process', `${src.join('\n')}; return BOT_TZ;`)(locale, { env: {} });
+    } catch { return null; }
+  };
+  ok('فارسی همان Asia/Tehran می‌ماند (رباتِ زنده دست‌نخورده)', tzOf('fa') === 'Asia/Tehran');
+  for (const [l, tz] of [['ru', 'Europe/Moscow'], ['pt', 'America/Sao_Paulo'], ['es', 'America/Mexico_City']])
+    ok(`«${l}» منطقه‌ی زمانیِ خودش را دارد (${tz})`, tzOf(l) === tz);
+  ok('هیچ زبانی بی‌صدا منطقه‌ی زمانیِ فارسی را به ارث نمی‌برد',
+     ['ru', 'pt', 'es'].every((l) => tzOf(l) !== 'Asia/Tehran'));
+  // مرزِ روز واقعاً با منطقه‌ی زمانی عوض می‌شود، وگرنه جدول تزئینی است
+  const at = (tz, iso) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(iso));
+  ok('مرزِ روز واقعاً per زبان فرق می‌کند (۲۱:۰۰ UTC)',
+     at('Asia/Tehran', '2026-03-10T21:00:00Z') !== at('America/Sao_Paulo', '2026-03-10T21:00:00Z'));
+}
 ok('جارو فقط در ساعتِ REMINDER_HOUR کار می‌کند', /hour !== REMINDER_HOUR\) return/.test(sweep));
 ok('ساعتِ یادآوری ۲۲ است (۱۰ شب)', /const REMINDER_HOUR = 22;/.test(SRC));
 ok('انتسابِ شاخه از peekVariant() می‌آید (نه شرطِ دستی)', /peekVariant\(db, uid, NIGHT_EXP\)/.test(sweep));
@@ -188,7 +216,7 @@ ok('ستونِ lucky_reminder_on هنوز روی DB هست (بند ۲ج/۱)', /A
 const offer = block(SRC, 'async function offerLuckyAfterDaily');
 ok('تابعِ offerLuckyAfterDaily وجود دارد', !!offer);
 ok('فقط وقتی سهمیه‌ی امروز دست‌نخورده است پیشنهاد می‌دهد',
-   !!offer && /lucky_date === tehranToday\(\)\) return/.test(offer));
+   !!offer && /lucky_date === botToday\(\)\) return/.test(offer));
 ok('دنیای قدیم دست‌نخورده می‌ماند', !!offer && /if \(!uxV2For\(uid\)\) return/.test(offer));
 ok('دکمه‌اش همان ورودیِ کارتِ شانس است', !!offer && /'lucky_go'/.test(offer));
 ok('در **هر دو** مسیرِ کارتِ روز صدا زده می‌شود',

@@ -382,8 +382,36 @@ export const noDash = (t) => stripMarkup(String(t).replace(/\s*—\s*/g, DASH_TO
 // بوده، می‌خواهد بداند یادش هست چه پرسیده. پس خودِ داده حذف شد و مسئله از بین رفت.
 // (بازه‌ی زمانیِ **آینده** در جمع‌بندی سرِ جایش است؛ آن‌جا واقعاً ارزش دارد.)
 
-export const tehranToday = (d = new Date()) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(d);
+/* 🌍 مرزِ «روز» و ساعتِ یادآوری per زبان. تا امروز `Asia/Tehran` هاردکد بود و برای
+ * رباتِ فارسی درست؛ ولی همان کد سه رباتِ دیگر را هم اجرا می‌کند و آن‌جا یعنی:
+ *   • کارتِ رایگانِ روزانه‌ی کاربرِ برزیلی ساعتِ ۱۷:۳۰ بعدازظهرِ **روزِ قبل** ری‌ست
+ *     می‌شد (نیمه‌شبِ تهران)، یعنی مهم‌ترین قلابِ رایگانِ محصول سرِ ساعتِ بی‌ربط.
+ *   • «یادآوریِ شبانه»ی ساعت ۲۲ برای او ۱۵:۳۰ بعدازظهر می‌رسید — یعنی نه شبانه بود
+ *     نه یادآوری، فقط یک پیامِ ناخواسته وسطِ روز (و دلیلِ بلاک شدن).
+ * استریک هم روی همین مرز حساب می‌شود، پس اشتباه بودنش یعنی استریکِ اشتباه.
+ *
+ * `fa` عمداً همان `Asia/Tehran` است، پس رباتِ زنده بیت‌به‌بیت دست‌نخورده می‌ماند.
+ * ⚠️ اسپانیاییِ آمریکای لاتین چند منطقه‌ی زمانی دارد و انتخابِ یک منطقه یک **تصمیم**
+ * است نه یک حقیقت: بزرگ‌ترین بازار (مکزیک) انتخاب شد. اگر روزی دیتای واقعیِ کاربر
+ * خلافش را گفت، همین یک ردیف عوض می‌شود. */
+const TZ_BY_LOCALE = {
+  fa: 'Asia/Tehran',
+  ru: 'Europe/Moscow',
+  pt: 'America/Sao_Paulo',
+  es: 'America/Mexico_City',
+};
+export const BOT_TZ = process.env.BOT_TZ?.trim() || TZ_BY_LOCALE[LOCALE] || 'Asia/Tehran';
+
+// «امروز» به وقتِ همان ربات. نامش عمداً دیگر «tehran» نیست: یک نامِ دروغ روی مسیرِ
+// پول و استریک، همان چیزی است که شش ماه بعد کسی را گمراه می‌کند.
+export const botToday = (d = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: BOT_TZ }).format(d);
+// n روز قبل، به وقتِ همان ربات (پنجره‌ی «۷ روزِ اخیر» و محاسبه‌ی استریک).
+export const botDaysAgo = (n) => botToday(new Date(Date.now() - n * 86400_000));
+// ساعتِ فعلیِ همان ربات، برای جاروی یادآوری.
+export const botHour = () => parseInt(new Intl.DateTimeFormat('en-US', {
+  timeZone: BOT_TZ, hour: '2-digit', hour12: false,
+}).format(new Date()), 10);
 
 /* ═══ «کارتِ سنگینی که نیامده» — حذف شد (۱۴۰۵/۰۵/۲۷) ═══ */
 // تاریخچه، چون درسش عمومی است: خوانشِ واقعیِ انسانی یک جمله‌ی مشخص داشت («کارت
@@ -443,7 +471,7 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
       [CTX_KEYS.summary]: r.summary,
       [CTX_KEYS.feedback]: r.feedback || '-',
     })),
-    today: tehranToday(),
+    today: botToday(),
   };
 }
 

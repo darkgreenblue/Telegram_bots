@@ -46,7 +46,7 @@ import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjineh
 import {
   FLASH, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
-  seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
+  seedToInt, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor,
 } from './reading-core.js';
@@ -1291,7 +1291,7 @@ function wipeUser(uid) {
 function normalizeDigits(s) {
   return String(s).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 }
-// tehranToday در reading-core.js است (کانتکستِ خوانش هم از آن استفاده می‌کند).
+// botToday در reading-core.js است (کانتکستِ خوانش هم از آن استفاده می‌کند).
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /* ===== 4) OpenRouter و موتور دک ===== */
@@ -2032,7 +2032,7 @@ async function handleStart(ctx) {
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
-  } else if (user.last_daily_date !== tehranToday()) {
+  } else if (user.last_daily_date !== botToday()) {
     msg += L.returning.dailyReminder;
   }
   stmts.setKbShown.run(uid);
@@ -2256,9 +2256,6 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
      ۳) متن به **ماهِ تولد** گره خورده، نه به «حوزه‌ی تمرکز» که دیگر پرسیده نمی‌شود.
    عدم‌تکرار در دو لایه: کارت (۷ روز) و نسخه‌ی تفسیر (۳ نسخه per کارت per ماه). */
 
-// روزِ تهران، n روز قبل. برای پنجره‌ی «۷ روزِ اخیر».
-const tehranDaysAgo = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' })
-  .format(new Date(Date.now() - n * 86400_000));
 
 // گریدِ رو-به-پشتِ کارتِ روز. اندازه‌اش به اندازه‌ی حوضچه‌ی واجدِ شرایط است (سقفِ ۲۴)،
 // چون دکمه‌ای که به هیچ کارتی نمی‌رسد یعنی دروغ گفتن به کاربر.
@@ -2315,7 +2312,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const order = s.dailyOrder || [];
   const i = parseInt(ctx.match[1], 10);
   const key = order[i];
-  const today = tehranToday();
+  const today = botToday();
   // گاردِ دوبار-تپ **قبل** از اولین await، و گاردِ روزِ کهنه (سشنِ دیروز در چت مانده).
   // پاسخ عمداً **صریح** است نه سکوت: تپِ بی‌جواب روی یک دکمه، کاربر را وادار می‌کند
   // چند بار دیگر هم بزند و فکر کند ربات خراب است (بند ۹ب/۱).
@@ -2332,7 +2329,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const text = ganjinehText(month, key, variant);
   const info = CARD_BY_KEY[key];
 
-  const yesterday = tehranDaysAgo(1);
+  const yesterday = botDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
 
   // 🐛 تا v3.17.0 روز **قبل از** تحویل مهر می‌خورد و بینِ مهر تا رسیدنِ عکس حدود ۶ ثانیه
@@ -2388,7 +2385,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
    می‌خورد، پس همین یک شرط هر دو حالت را می‌پوشاند. */
 async function offerLuckyAfterDaily(ctx, uid) {
   if (!uxV2For(uid)) return;                       // دنیای قدیم دقیقاً مثل قبل
-  if (getUser(uid)?.lucky_date === tehranToday()) return;
+  if (getUser(uid)?.lucky_date === botToday()) return;
   await sleep(PACE_S);
   await ctx.reply(L.lucky.alsoLucky, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
@@ -2404,14 +2401,14 @@ async function dailyCard(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.DAILY)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.DAILY)) return;
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   if (user.last_daily_date === today) {
     await ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard(recoRows(uid, null)));
     return ensureMenu(ctx, uid);
   }
   if (uxV2For(uid)) return dailyCardV2(ctx, uid, user, today);
-  // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
-  const yesterday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(Date.now() - 86400_000));
+  // استریک: اگر دیروزِ همان ربات هم کارت گرفته → +۱، وگرنه از ۱ شروع
+  const yesterday = botDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
   stmts.setDaily.run(today, streak, uid);
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
@@ -2620,7 +2617,7 @@ function forcedHit(h, idx, naturalHit) {
 /** دستی که **همین امروز** باز است و هنوز انتخابِ نکشیده دارد. */
 function openLuckyHand(uid) {
   const h = readLuckyHand(uid);
-  return h && h.d === tehranToday() && h.n && h.p.length < LUCKY_PICKS ? h : null;
+  return h && h.d === botToday() && h.n && h.p.length < LUCKY_PICKS ? h : null;
 }
 /** گریدِ همان دست را دوباره جلوی کاربر می‌گذارد (ادامه‌ی بازی). */
 async function resumeLuckyHand(ctx, uid, h) {
@@ -2673,7 +2670,7 @@ async function luckyCard(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.LUCKY)) return;
   if (await blockDuringPendingReading(ctx)) return;
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   // 🔁 دستِ نیمه‌تمامِ همین امروز **ادامه** داده می‌شود. تا قبل از این، کاربری که کارتِ
   // اولش را کشیده بود و بعد بیرون رفته بود، پیامِ «امروز استفاده کردی» می‌گرفت در حالی
   // که هنوز دو انتخاب طلبکار بود.
@@ -2723,7 +2720,7 @@ bot.action('lucky_stop', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery('✋').catch(() => {});
   if (getState(uid) !== 'lucky_shuffle') return;
-  const today = tehranToday();
+  const today = botToday();
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
   // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
   const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
@@ -2738,7 +2735,7 @@ bot.action('lucky_stop', async (ctx) => {
 bot.action(/^lpick:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   const i = parseInt(ctx.match[1], 10);
-  const today = tehranToday();
+  const today = botToday();
   // ⚠️ دست از **ردیفِ کاربر** خوانده می‌شود، نه از سشن و نه از استیت. یعنی نه
   // `setSession(uid, null)` هیچ‌کدام از شش نقطه‌اش، و نه یک `setState` در مسیرِ دیگر،
   // نمی‌تواند انتخاب‌های باقی‌ماندهٔ کاربر را از بین ببرد. استیت فقط برای UX ست می‌شود.
@@ -2858,7 +2855,7 @@ async function hafezFaal(ctx, via) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.hafezCta, 'opentopic')]]);
   if (user.last_hafez_date === today) return ctx.reply(L.hafez.alreadyUsed, ctaKb);
   stmts.setHafez.run(today, uid);
@@ -2884,7 +2881,7 @@ async function estekhareFaal(ctx, via) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   const ctaKb = Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.estekhareYesno, 'spread:yesno')],
     [Markup.button.callback(L.buttons.estekhareChoice, 'spread:choice')],
@@ -2932,7 +2929,7 @@ async function quizStart(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   if (user.last_quiz_date) {
     const days = Math.floor((new Date(today) - new Date(user.last_quiz_date)) / 86400000);
     if (days >= 0 && days < QUIZ_COOLDOWN_DAYS) {
@@ -2970,7 +2967,7 @@ bot.action(/^quiz:(\d+)$/, async (ctx) => {
   const tied = keys.filter(k => (votes[k] || 0) === maxV);
   const best = tied[seedToInt(`quiz:${answers}`) % tied.length];
   const card = CARD_BY_KEY[best];
-  stmts.setQuiz.run(tehranToday(), uid);
+  stmts.setQuiz.run(botToday(), uid);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await typing(ctx, PACE_M, 'upload_photo');
   await sendCardPhoto(ctx, best, L.quiz.resultHead(card), { spoiler: false });
@@ -3002,7 +2999,7 @@ async function coffeeStart(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]);
-  if (getUser(uid).last_coffee_date === tehranToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
+  if (getUser(uid).last_coffee_date === botToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
   const { text, rows } = coffeeQuestionView('');
   await ctx.reply(L.coffee.intro);
   await ctx.reply(text, Markup.inlineKeyboard(rows));
@@ -3021,7 +3018,7 @@ bot.action(/^coffee:(\d+)$/, async (ctx) => {
   }
   const uid = ctx.from.id;
   upsertUser(ctx);
-  const today = tehranToday();
+  const today = botToday();
   // اگر همین امروز خوانده، دوباره نده (گاردِ روزی‌یک‌بار روی خودِ نتیجه هم)
   if (getUser(uid).last_coffee_date === today) {
     try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -4437,7 +4434,7 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // یک تجربه‌ی کاملِ مثبت گرفته و بهترین لحظه برای معرفیِ آیینِ روزانه‌ی بعدی است.
   // اگر همان روز کارت شانسش را قبلاً کشیده (نادر، ولی ممکن)، همان تشکرِ همیشگی می‌ماند.
   const isFirstReading = stmts.countDelivered.get(uid).c === 1;
-  const luckyAvailable = getUser(uid)?.lucky_date !== tehranToday();
+  const luckyAvailable = getUser(uid)?.lucky_date !== botToday();
   // تشکر **همیشه** اول می‌آید، و کیبوردِ اصلی روی همین پیام سوار می‌شود: این تنها پیامِ
   // این نقطه است که کیبوردِ inline ندارد، پس تنها چیزی است که می‌تواند حاملش باشد —
   // و دقیقاً همان لحظه‌ای است که مالک خواست منو صادر شود (هم‌زمان با قدمِ بعدی).
@@ -4467,7 +4464,7 @@ function walletRows(uid) {
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
   rows.push(inviteRow(uid));   // همان تک‌منبعِ دعوت که پیامِ ادامه هم از آن می‌خواند
-  if (getUser(uid)?.lucky_date !== tehranToday()) {
+  if (getUser(uid)?.lucky_date !== botToday()) {
     rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
   }
   return rows;
@@ -5809,11 +5806,9 @@ const NIGHT_ARMS = {
 };
 setInterval(async () => {
   try {
-    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
-    }).format(new Date()), 10);
+    const hour = botHour();
     if (hour !== REMINDER_HOUR) return;
-    const today = tehranToday();
+    const today = botToday();
     // 🔀 دو رژیم. تا وقتی آزمایش فعال است هیچ‌چیزِ این مسیر عوض نشده؛ بعد از stop شدنش،
     // دو یادآوری مستقل می‌شوند و کاربر از منوی تنظیمات هرکدام را جدا کنترل می‌کند.
     const expOn = nightExpActive();

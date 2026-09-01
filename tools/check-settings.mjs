@@ -193,7 +193,7 @@ ok(/bot\.action\(\/\^smonth:/.test(SRC), 'ماهِ تولدِ تنظیمات cal
 
 /* ══ ۵) جاروی شبانه: مسیرِ آزمایش دست‌نخورده ═══════════════════════════════ */
 console.log('\n  — 🌙 جاروی شبانه:');
-const sweep = bodyOf('    const today = tehranToday();', '}, 15 * 60 * 1000);');
+const sweep = bodyOf('    const today = botToday();', '}, 15 * 60 * 1000);');
 ok(!!sweep, 'جاروی شبانه پیدا شد');
 ok(sweep ? /const expOn = nightExpActive\(\)/.test(sweep) : false, 'جارو رژیمش را از وضعیتِ آزمایش می‌گیرد');
 ok(sweep ? /expOn \? stmts\.dueNightReminder\.all\(\) : stmts\.dueNightReminderFree\.all\(\)/.test(sweep) : false,
