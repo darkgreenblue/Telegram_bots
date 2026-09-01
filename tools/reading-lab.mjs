@@ -47,6 +47,8 @@ const {
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
 const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+// 🎯 داورِ کیفیت بر اساسِ STYLE.md (اختیاری، با --judge). جزئیات در خودِ ماژول.
+const { judgePrompt, judgeUser, scoreOf, RUBRIC, MAX: RUBRIC_MAX } = await import('./reading-lab/rubric.mjs');
 const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
 const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
@@ -98,6 +100,10 @@ const OUT = val('out', '');
  * لحظه‌ای که مدلِ خوانش per زبان شد، «دورِ بدونِ --arms» می‌توانست بی‌صدا مدلی را
  * بسنجد که هیچ کاربری نمی‌بیند. همان تله‌ای که سه دورِ واقعی را سوزاند، از درِ دیگر. */
 let MODEL = val('model', READING_MODEL);
+/* 🎯 داورِ کیفیت. خاموش مگر `--judge <model>`.
+ * ⚠️ مدلِ داور عمداً **بیرونِ** دو بازوی تحتِ آزمایش انتخاب می‌شود: داوری که خودش یکی
+ * از دو طرف باشد سوگیریِ خودپسندی دارد و کلِ مقایسه را بی‌اعتبار می‌کند. */
+const JUDGE = val('judge', '');
 const FALLBACK = val('fallback', FALLBACK_MODEL);
 let PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
 /* 🅰️🅱️ مقایسه‌ی **جفت‌شده‌ی** چند مدل در یک اجرا.
@@ -357,6 +363,21 @@ async function runStep(persona, step, i, state) {
     check = { issues: [`خطای خودِ سنجه: ${e.message}`], notes: [], stats: { chars: 0, perCard: 0, named: 0, cards: cards.length } };
   }
 
+  /* 🎯 داوریِ کیفیت: «آیا این فال طبقِ STYLE.md خوب است؟» — جدا از سنجه‌های نقص.
+   * کور اجرا می‌شود (نامِ مدل به داور نمی‌رود) و هر نقلِ قولِ اثبات‌نشده صفر می‌شود.
+   * شکستِ داور هرگز فال را از بین نمی‌برد؛ فقط `rubric` خالی می‌ماند. */
+  let rubric = null;
+  if (JUDGE) {
+    try {
+      const jt = await orChat(judgePrompt(), judgeUser({
+        question: step.question,
+        cardNames: cards.map(c => cardName(c.key)),
+        text: [rendered.headline, rendered.body, rendered.closing].filter(Boolean).join('\n\n'),
+      }), { model: JUDGE, temperature: 0, maxTokens: 1400 });
+      rubric = scoreOf(parseJsonLoose(jt.text), [rendered.headline, rendered.body, rendered.closing].filter(Boolean).join('\n\n'));
+    } catch (e) { rubric = { error: e.message }; }
+  }
+
   // حافظه و تاریخچه دقیقاً مثل ربات به قدمِ بعد منتقل می‌شوند
   if (typeof parsed.memory === 'string' && parsed.memory.trim()) state.memory = parsed.memory.trim().slice(0, 1200);
   state.prev.unshift({
@@ -366,6 +387,7 @@ async function runStep(persona, step, i, state) {
 
   return {
     spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair, rejects,
+    rubric,
     model: res?.model, attempts: res?.attempts,
     /* ⚠️ `usd` هزینه‌ی **واقعیِ** همان درخواست است که OpenRouter در هر پاسخ برمی‌گرداند
      * (همان عددی که ربات در `llm_usage` می‌نویسد). لازم شد چون گزارشِ قبلی دلار را از
@@ -689,6 +711,21 @@ if (!DRY) {
         + ' عددِ «فالِ ایرادناک» این دور با مدل‌هایی که تعمیرشان کار کرده قابلِ مقایسه نیست.');
     }
   }
+  /* 🎯 نمره‌ی کیفیت (فقط با --judge). این تنها ستونی است که «خوب بودن» را می‌سنجد،
+   * نه «نبودِ نقص». ضعیف‌ترین معیارها جدا چاپ می‌شوند چون همان‌ها می‌گویند پرامپت
+   * کجا باید عوض شود؛ درصدِ کلی به‌تنهایی راهنمای عمل نیست. */
+  const judged = done.filter(r => r.rubric && !r.rubric.error && r.rubric.max);
+  if (judged.length) {
+    const avg = Math.round(judged.reduce((a, r) => a + r.rubric.pct, 0) / judged.length);
+    const faked = judged.reduce((a, r) => a + (r.rubric.faked?.length || 0), 0);
+    console.log(`   🎯 نمره‌ی کیفیت (STYLE.md): ${avg}٪ از ${judged.length} فال`
+      + (faked ? ` | ⚠️ ${faked} نقلِ قولِ اثبات‌نشده رد شد` : ''));
+    const per = RUBRIC.map((it) => {
+      const got = judged.reduce((a, r) => a + (r.rubric.items?.[it.id]?.score || 0), 0);
+      return { id: it.id, title: it.title, pct: Math.round(got * 100 / (judged.length * 2)) };
+    }).sort((x, y) => x.pct - y.pct);
+    for (const it of per) console.log(`        ${String(it.pct).padStart(3)}٪  ${it.title}`);
+  }
   // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
   // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
   // خط است؛ بدونِ این خلاصه برای فهمیدنِ «کدام فال چه ایرادی داشت» باید کلِ لاگ خوانده
@@ -763,6 +800,7 @@ if (OUT) {
     persona: r.persona, step: r.i, rep: r.rep, arm: r.arm || '', spread: r.spread?.id, question: r.step?.question,
     cards: r.cards?.map(c => c.key + (c.reversed ? '↕' : '')),
     inputChars: r.inputChars, llm: r.llm, rendered: r.rendered, check: r.check,
+    rubric: r.rubric,
   })), null, 2));
   console.log(`\n💾 خروجیِ خام: ${OUT}`);
 }
