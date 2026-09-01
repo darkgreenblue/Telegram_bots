@@ -287,6 +287,8 @@ export default {
     rate: (n) => ['1', '2', '3', '4', '5'][n - 1],
     retry: '🔁 Intentar de nuevo',
     inviteMain: '📤 Invitar amigos',
+    inviteStatus: '📊 Invitaciones y premios',
+    inviteBack: '◀️ Volver',
     allSpreads: '🗂 Todas las lecturas',
     openTopic: (v2) => (v2 ? '🌀 Mi pregunta (la que quieras)' : '🌀 Lectura sobre mi tema (cualquiera)'),
     freeMenu: '🎁 Gratis cada día',
@@ -805,6 +807,12 @@ export default {
       `Este es tu link de invitación; mándaselo a tus amigos:\n\n\`https://t.me/${botUsername}?start=ref_${refId}\`\n(toca el link para copiarlo)\n\nPor cada amigo que entre por ahí y termine su primera lectura, ${moneyLong(bonus, cur)} caen en tu cuenta 🎁`,
     // La novedad del premio. El saldo nuevo viene junto a propósito: la persona tiene que
     // ver el resultado de un vistazo, y no salir a buscarlo a otro lado.
+    inviteStatus: (total, done, got, pending, cur) =>
+      `👥 Tus invitaciones: ${fmt(total)} ${plural(total, ['persona entró', 'personas entraron'])} al bot, `
+      + `${fmt(done)} ${plural(done, ['completó', 'completaron'])} su primera tirada y por eso ya ganaste ${moneyTight(got, cur)}.`
+      + (pending > 0
+        ? `\n\n${fmt(pending)} todavía no ${plural(pending, ['completó', 'completaron'])} su primera tirada. Apenas la completen, tu premio llega al toque 🎁`
+        : ''),
     referralReward: (name, bonus, cur, balance = null) =>
       `🎉 ¡El amigo que invitaste${name ? ` (${name})` : ''} terminó una lectura completa!\n`
       + `${moneyLong(bonus, cur)} de regalo en tu cuenta.\n\n`
