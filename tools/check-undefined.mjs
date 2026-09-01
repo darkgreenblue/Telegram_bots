@@ -60,6 +60,7 @@ const TARGETS = [
   'tools/marketing/perf.mjs',
   'tools/marketing/pick-cards.mjs',
   'tools/marketing/publish-day.mjs',
+  'tools/marketing/channel-overlap.mjs',
   'tools/news/probe.mjs',
 ];
 

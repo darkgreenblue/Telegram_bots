@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, tunnel-url, announce-dry, announce-send]
+        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -157,6 +157,16 @@ jobs:
                 case "$OPS_ONLY" in (*[!0-9,]*) echo "❌ لیستِ آی‌دی نامعتبر"; exit 1;; esac
                 echo "===== announce $SEND ${OPS_ONLY:+(فقط: $OPS_ONLY)} ====="
                 ANNOUNCE_ONLY="$OPS_ONLY" node tools/announce-tarot.mjs bots/tarot/data $SEND
+                ;;
+              channel-overlap)
+                # چند نفر فقط عضوِ کانال‌اند و هرگز وارد ربات نشده‌اند؟
+                # روی سرور اجرا می‌شود چون هم دیتابیس اینجاست هم توکن در .env.
+                [ -n "$OPS_APP" ] || { echo "❌ app لازم است"; exit 1; }
+                [ -n "$OPS_QUERY" ] || { echo "❌ query = نامِ کانال (مثل @taroot_fa)"; exit 1; }
+                case "$OPS_QUERY" in (@[A-Za-z0-9_]*) ;; (*) echo "❌ نامِ کانال نامعتبر"; exit 1;; esac
+                TOKEN=$(grep -m1 '^BOT_TOKEN=' "bots/$OPS_APP/.env" | cut -d= -f2-)
+                [ -n "$TOKEN" ] || { echo "❌ BOT_TOKEN در .env نیست"; exit 1; }
+                TELEGRAM_TOKEN="$TOKEN" node tools/marketing/channel-overlap.mjs "bots/$OPS_APP/data" "$OPS_QUERY"
                 ;;
               daypost)
                 # سلامتِ کرونِ انتشارِ روزانه‌ی کانال (مسیرِ بحرانیِ جدید، مستقل از Actions).
