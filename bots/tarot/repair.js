@@ -214,6 +214,28 @@ export const repairUser = (hits) =>
  * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
  * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
+/* ⚠️ **یک تکه‌ی تعمیرنشدنی نباید تعمیرهای سالمِ همان فال را هم دور بریزد.**
+ *
+ * 🐛 باگی که آرِنای تعمیر لو داد (۱۴۰۵/۰۶/۱۱): `validate` قبلاً `every` بود، یعنی اگر
+ * **یکی** از تکه‌ها بعد از تعمیر باز هم ایراد داشت، کلِ خروجی رد می‌شد و **همه‌ی**
+ * تکه‌های سالم هم با آن دور ریخته می‌شدند. فالِ اسپانیاییِ C1.1 سه تکه داشت که یکی‌شان
+ * («te has guardado») اصلاً ایرادِ واقعی نبود: در زمانِ مرکبِ اسپانیایی صفتِ مفعولیِ بعد
+ * از `haber` **بی‌تغییر** است و هیچ رونویسیِ درستی نمی‌تواند از آن الگو فرار کند. پس آن
+ * یک تکه هر شش تلاش (هر دو مدل × سه تکرار) را کشت و دو ایرادِ **واقعیِ** همان فال هم
+ * تعمیرنشده به کاربر می‌رسید. عدد در گزارش: `genero 0/9` برای هر دو بازو — که شبیهِ
+ * «هیچ مدلی نمی‌تواند» بود، در حالی که خرابیِ **ابزار** بود، نه مدل (بند ۹/۰ب).
+ *
+ * حالا هر تکه جدا سنجیده می‌شود و تکه‌ی رد‌شده فقط خودش می‌ماند. این تنها راهی است که
+ * یک الگوی مثبتِ کاذب بتواند بی‌ضرر بماند: هزینه‌اش یک تکه‌ی جاافتاده است، نه یک فالِ
+ * کاملاً تعمیرنشده.
+ *
+ * رول‌بکِ یک‌خطی: `REPAIR_PARTIAL = false` → دقیقاً رفتارِ قبلی (همه یا هیچ). */
+export const REPAIR_PARTIAL = true;
+const isCleanFix = (f) => {
+  const t = String(f || '').trim();
+  return !!t && !DEFECTS.some((d) => d.find(t));
+};
+
 export const REPAIR_FALLBACK = LUNA;
 export const REPAIR_PLAN = [FLASH, REPAIR_FALLBACK];
 
@@ -235,13 +257,10 @@ export async function repairDefects(llm, call, { tag = '', meta = null, plan = n
       validate: (out) => {
         const obj = parseJsonLoose(out);
         if (!obj || !Array.isArray(obj.fixes) || obj.fixes.length !== hits.length) return false;
-        // اگر تعمیر خودش طفره‌رفتن داشته باشد، تعمیر نشده. ولی **دوباره نمی‌پرسیم** —
-        // یک فراخوانی یعنی یک فراخوانی؛ خروجیِ اصلی تحویل می‌شود.
-        // تعمیر نباید خودش همان ایراد را دوباره داشته باشد — هیچ‌کدام از انواع.
-        return obj.fixes.every((f, i) => {
-          const t = String(f || '').trim();
-          return t && !DEFECTS.some((d) => d.find(t));
-        });
+        // اگر تعمیر خودش همان ایراد را دوباره داشته باشد، آن **تکه** تعمیر نشده. ولی
+        // **دوباره نمی‌پرسیم** — یک فراخوانی یعنی یک فراخوانی.
+        // تکه‌ی سالم کافی است تا این پله موفق حساب شود؛ سنجشِ تکه‌به‌تکه پایین است.
+        return REPAIR_PARTIAL ? obj.fixes.some(isCleanFix) : obj.fixes.every(isCleanFix);
       },
     /* 🔗 دو پله، نه یکی (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۰): جمنای، بعد `luna`.
      *
@@ -268,10 +287,19 @@ export async function repairDefects(llm, call, { tag = '', meta = null, plan = n
   }
 
   const obj = res && parseJsonLoose(res.out);
-  if (!obj?.fixes) {
+  /* فقط تکه‌های سالم جایگذاری می‌شوند؛ تکه‌ی رد‌شده متنِ اصلیِ خودش را نگه می‌دارد.
+   * `applyFixes` رشته‌ی خالی را رد می‌کند، پس همین کافی است. */
+  const usable = obj?.fixes ? obj.fixes.map((f) => (isCleanFix(f) ? f : '')) : [];
+  const applied = usable.filter(Boolean).length;
+  if (!applied) {
     logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (${hits[0].kind}: «${hits[0].phrase}»)`);
     return { llm, fired: true, repaired: false, calls };
   }
-  log(`${tag} تعمیر شد: ${hits.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
-  return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0], calls };
+  const done = hits.filter((_, i) => usable[i]);
+  log(`${tag} تعمیر شد (${applied}/${hits.length}): ${done.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
+  return {
+    llm: applyFixes(llm, hits, usable), fired: true, repaired: true,
+    partial: applied < hits.length, applied, hitCount: hits.length,
+    usage: res.usages?.[0], calls,
+  };
 }

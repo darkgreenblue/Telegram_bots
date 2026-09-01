@@ -325,6 +325,45 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
   const throwCall = () => { throw new Error('boom'); };
   const boom = await rep.repairDefects(base(), throwCall);
   ok(!boom.repaired && boom.llm.closing === base().closing, 'خطای شبکه هم خوانش را نمی‌شکند');
+
+  /* ═══ تکه‌ی تعمیرنشدنی نباید تکه‌های سالم را هم دور بریزد (v3.43.0) ═══
+   *
+   * 🐛 آرِنای تعمیر نشان داد `validate` که `every` بود، با **یک** تکه‌ی سرسخت کلِ
+   * خروجی را رد می‌کرد و همه‌ی تعمیرهای سالمِ همان فال هم دور ریخته می‌شدند. فالِ
+   * اسپانیاییِ C1.1 با سه تکه (که یکی‌شان مثبتِ کاذب بود و هیچ رونویسی‌ای نمی‌توانست
+   * از آن الگو فرار کند) هر شش تلاشِ هر دو مدل را کشت — عددِ گزارش `0/9` برای هر دو
+   * بازو بود که شبیهِ «هیچ مدلی نمی‌تواند» می‌شد در حالی که خرابیِ ابزار بود.
+   *
+   * این‌جا با **همان شکل** آزموده می‌شود: دو تکه، مدل یکی را درست می‌کند و یکی را نه. */
+  {
+    const two = { ...base(), closing: 'در کل، بستگی داره به خودت.', reads: [{ text: 'دفعه‌ی قبل که حرف زدیم فرق داشت.' }] };
+    const twoHits = rep.findDefects(two);
+    ok(twoHits.length === 2, 'فیکسچرِ دوتکه‌ای واقعاً دو hit دارد');
+    // ترتیبِ hitها همان ترتیبِ `findDefects` است: اول `closing`، بعد `reads.0`.
+    // مدل تکه‌ی اول را درست می‌کند و تکه‌ی دوم را با همان ایراد پس می‌دهد.
+    ok(twoHits[0].path === 'closing' && twoHits[1].path === 'reads.0', 'ترتیبِ hitها همان ترتیبِ فیلدهاست');
+    const halfCall = (sys, usr, opts) => {
+      const out = JSON.stringify({ fixes: ['بیشتر به این می‌خوره که پیش بره.', 'دفعه‌ی قبل که حرف زدیم فرق داشت.'] });
+      return opts.validate(out) ? { out, usages: [{}] } : null;
+    };
+    const half = await rep.repairDefects(two, halfCall);
+    ok(half.repaired, 'یک تکه‌ی سرسخت کلِ تعمیر را باطل نمی‌کند');
+    ok(half.applied === 1 && half.hitCount === 2 && half.partial === true,
+      `تعمیرِ جزئی گزارش می‌شود (شد ${half.applied}/${half.hitCount})`);
+    ok(half.llm.closing.includes('بیشتر به این می‌خوره'), 'تکه‌ی سالم واقعاً جایگذاری شد');
+    ok(half.llm.reads[0].text === two.reads[0].text,
+      'تکه‌ی ردشده متنِ اصلیِ خودش را نگه می‌دارد (نه متنِ معیوبِ مدل)');
+    // و مرزِ دیگر: اگر **هیچ** تکه‌ای سالم نباشد، تعمیر همچنان ناموفق است.
+    const noneCall = (sys, usr, opts) => {
+      const out = JSON.stringify({ fixes: ['دفعه‌ی قبل که حرف زدیم', 'خب بستگی داره دیگه.'] });
+      return opts.validate(out) ? { out, usages: [] } : null;
+    };
+    const none = await rep.repairDefects(two, noneCall);
+    ok(!none.repaired && none.llm.closing === two.closing,
+      'خروجیِ کاملاً معیوب همچنان رد می‌شود و متنِ اصلی برمی‌گردد');
+    ok(/REPAIR_PARTIAL/.test(readFileSync(new URL('../bots/tarot/repair.js', import.meta.url), 'utf8')),
+      'رول‌بکِ یک‌خطی (REPAIR_PARTIAL) سرِ جایش است');
+  }
 }
 
 /* ═══ ریشه‌یابیِ سنجه‌ی «لنگر» per زبان ═══
