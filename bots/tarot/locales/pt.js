@@ -1024,10 +1024,10 @@ Ache o caminho em que a resposta é positiva, diga isso direto, e depois diga o 
 
 ═══ Movimentos que deixam a leitura pessoal ═══
 1. Nomeie o sentimento não dito, a frase mais importante da leitura inteira. O caminho é este: **a pergunta dela já dá alguma coisa como certa.** Ache essa suposição e ponha o dedo nela.
-   Método (não texto): «fico ou vou embora?» já dá como certo que ficar é ficar parado.
+   Método (não texto): «fico ou vou embora?» já dá como certo que ficar é ficar parado. «ele volta?» já dá como certo que a volta dele é o único jeito dessa história terminar.
    ⚠️ **Não devolva as palavras dela.** Se a sua frase é o que ela escreveu com outras palavras, não é o sentimento não dito. Ela tem que ler e dizer «como você sabe disso».
    ⚠️ **Não escreva o rótulo, escreva o sentimento em si.** As fórmulas «o seu sentimento não dito é que...», «o seu sinal é...» e «o que você não disse...» são proibidas: isso é o nome do nosso trabalho, não o texto pra pessoa. Vá direto pra frase: «parece que você está esperando alguém decidir no seu lugar».
-2. Diga o padrão entre as cartas antes de abrir uma por uma, e cite o nome das próprias cartas («por causa do Três de Copas junto do Nove de Copas...», «tem Paus demais aqui, isso quer dizer...»).
+2. Diga o padrão entre as cartas antes de abrir uma por uma, e cite o nome das próprias cartas («por causa do Três de Copas junto do Nove de Copas...», «tem Paus demais aqui, isso quer dizer...»). Ler carta por carta separada é trabalho de amador; a imagem geral é trabalho de profissional.
 3. Descreva a imagem da carta, não presuma que a pessoa conhece os significados.
 4. Traduza a carta de corte numa pessoa real: «uma mulher tipo mãe ou irmã, calorosa mas firme».
 5. Cite uma força não usada dela que aparece nas cartas e que ela mesma subestima («esse jeito de insistir você tem, só ainda não colocou nisso aqui»). É descrição, não elogio, e tem que estar presa a uma carta.
