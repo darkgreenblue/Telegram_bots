@@ -4,6 +4,7 @@
 // `node --check` فقط سینتکس را می‌بیند و تستِ دودِ boot به این مسیرِ سرد نمی‌رسد
 // (درسِ `decideReceipt` — بند ۸ ریشه).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   STAR_LADDERS, LADDER_RATIO, STARS_EXPERIMENT,
   ladderFor, starsFor, buildPayload, parsePayload, buildInvoice,
@@ -101,6 +102,29 @@ ok('فاکتورِ بدونِ بسته ساخته نمی‌شود', () => {
 
 ok('نامِ آزمایش ثابت است (کلیدِ داشبورد رویش نشسته)', () => {
   assert.equal(STARS_EXPERIMENT, 'stars_price_v1');
+});
+
+/* 💰 ستونِ `amount` باید **پولی که کاربر واقعاً داد** را نگه دارد.
+ *
+ * 🐛 باگِ واقعی: مسیرِ بسته `pack.toman` را در `amount` می‌نشاند، یعنی روی ریلِ استارز
+ * قیمتِ تومانیِ **فارسی** ثبت می‌شد در حالی که کاربرِ روس استارز داده. `original_amount`
+ * (تعدادِ الماس) درست بود پس واریز هرگز خراب نبود، ولی دفترِ درآمدِ هر زبانِ غیرفارسی
+ * یک عددِ ساختگی می‌شد و بند ۹ ریشه («هر ریالِ ورودی ردپای DB دارد تا قابلِ حسابرسی
+ * باشد») نقض می‌شد. */
+const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+
+ok('مبلغِ ثبت‌شده روی ریلِ استارز خودِ استارز است، نه قیمتِ تومانیِ فارسی', () => {
+  const m = SRC.match(/stmts\.setPaymentPackage\.run\(([^)]*)\)/);
+  assert.ok(m, 'فراخوانیِ setPaymentPackage پیدا نشد');
+  assert.match(m[1], /starsRail \? stars : pack\.toman/,
+    `مبلغ باید per ریل انتخاب شود (الان: ${m[1].trim()})`);
+});
+
+ok('قیمتِ استارز قبل از claimAmount حساب می‌شود (فاکتورِ یتیم نمی‌ماند)', () => {
+  const iStars = SRC.indexOf('const stars = starsRail ?');
+  const iClaim = SRC.indexOf('stmts.claimAmount.run(pack.coins');
+  assert.ok(iStars > 0 && iClaim > 0, 'هر دو نقطه باید وجود داشته باشند');
+  assert.ok(iStars < iClaim, 'قیمت باید قبل از claim حساب شود');
 });
 
 console.log(`\n✅ starspay: ${n} ادعا سبز`);

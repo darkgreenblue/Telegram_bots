@@ -1,0 +1,132 @@
+{
+  "_note": "Cenários do laboratório de leituras, versão em português do Brasil. Escritos do zero para o mercado brasileiro, não traduzidos do persa: o objetivo não é paridade com fa, e sim caçar bugs do pipeline em português. Cada persona é um usuário totalmente novo (memória vazia) que tira várias leituras seguidas; memória e leituras anteriores passam entre os passos exatamente como no bot. `afterMinutes` define só a ordem e a distância do cenário, nenhum dado de tempo vai para o modelo. `picks` são as escolhas do usuário na grade de 24 cartas. `expect` descreve o que aquele passo testa e é impresso junto do resultado.",
+  "probe": {
+    "name": "Bia",
+    "question": "Sinto que estou num ponto de virada e não sei para que lado ir. O que as cartas mostram?"
+  },
+  "personas": [
+    {
+      "id": "P1",
+      "name": "Bia",
+      "focus": "love",
+      "why": "Caminho comum: três leituras seguidas. Testa memória acumulada, referência com conteúdo à sessão anterior, e que três leituras da mesma pessoa não saiam parecidas. Especificidade do português: em leitura de amor o modelo escorrega para o gênero de quem lê («cansada», «sozinha») e para o registro formal.",
+      "steps": [
+        {
+          "spread": "love3",
+          "picks": [
+            3,
+            11,
+            19
+          ],
+          "afterMinutes": 0,
+          "question": "Estamos juntos há quase dois anos, mas nos últimos meses eu me sinto sozinha dentro da relação. Ainda tem futuro aqui?",
+          "expect": "Fórmula do título; é a primeira leitura, então não pode haver referência ao passado. Tratamento por «você», nunca «o senhor». E nada de supor o gênero de quem lê."
+        },
+        {
+          "spread": "feel3",
+          "picks": [
+            7,
+            2,
+            22
+          ],
+          "afterMinutes": 40,
+          "question": "Ele sente alguma coisa por mim ainda ou é só impressão minha?",
+          "expect": "A referência à leitura anterior tem que ter conteúdo e não pode marcar tempo. Testa o caminho da âncora de memória."
+        },
+        {
+          "spread": "exback3",
+          "picks": [
+            15,
+            5,
+            9
+          ],
+          "afterMinutes": 90,
+          "question": "Se a gente terminar agora, ele volta depois?",
+          "expect": "Pergunta decisiva: precisa de direção clara, sem devolver a decisão para a pessoa. E as três leituras não podem repetir as mesmas frases."
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "Rafa",
+      "focus": "career",
+      "why": "Pessoa direta que quer resposta, não interpretação. Testa o veredito decisivo e a proibição de evasão. Em português o risco extra é o modelo cair em português europeu quando o texto fica mais formal.",
+      "steps": [
+        {
+          "spread": "yesno3",
+          "picks": [
+            1,
+            13,
+            20
+          ],
+          "afterMinutes": 0,
+          "question": "Vale a pena pedir demissão esse mês e ir para a proposta nova?",
+          "expect": "Tem que sair um sim ou um não sem rodeio. Nada de «depende de você». Português do Brasil, sem «estar a fazer» nem «equipa»."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            8,
+            17,
+            4
+          ],
+          "afterMinutes": 30,
+          "question": "Minha pergunta pessoal",
+          "expect": "Pergunta livre e curta: testa se o modelo inventa contexto que não recebeu. Não pode citar data nem momento passado."
+        },
+        {
+          "spread": "money3",
+          "picks": [
+            21,
+            6,
+            12
+          ],
+          "afterMinutes": 120,
+          "question": "Consigo juntar dinheiro suficiente até o fim do ano?",
+          "expect": "Resposta com direção e prazo, ancorada nos nomes das cartas. Referência à leitura anterior sem marcar tempo."
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Duda",
+      "focus": "inner",
+      "why": "Usuária que chega fragilizada e faz perguntas abertas. Testa tom acolhedor sem promessa, ausência de emoji, e o caso mais difícil do português: frases sobre o estado de quem lê, onde o gênero aparece com mais força.",
+      "steps": [
+        {
+          "spread": "personal3",
+          "picks": [
+            10,
+            18,
+            23
+          ],
+          "afterMinutes": 0,
+          "question": "Ando muito ansiosa e sem saber o que estou fazendo da minha vida. Por onde eu começo?",
+          "expect": "Tom firme e acolhedor, sem prometer nada. Mesmo com a pessoa se descrevendo no feminino, o texto não pode assumir o gênero dela nas próprias frases."
+        },
+        {
+          "spread": "personal3",
+          "picks": [
+            0,
+            14,
+            16
+          ],
+          "afterMinutes": 45,
+          "question": "Minha pergunta pessoal",
+          "expect": "Referência com conteúdo à leitura anterior. Sem marcação de tempo, sem «da última vez» com data."
+        },
+        {
+          "spread": "study3",
+          "picks": [
+            2,
+            20,
+            7
+          ],
+          "afterMinutes": 150,
+          "question": "Consigo passar na prova que vou fazer?",
+          "expect": "Pergunta decisiva de novo, mas em outro assunto: a direção tem que ser clara e as frases não podem repetir as das leituras anteriores."
+        }
+      ]
+    }
+  ]
+}

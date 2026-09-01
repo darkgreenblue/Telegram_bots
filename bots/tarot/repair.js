@@ -16,7 +16,7 @@
 //   • شکستِ تعمیر هرگز خوانش را نمی‌شکند: متنِ اصلی برمی‌گردد.
 //   • تعمیر فقط فیلدهای معیوب را عوض می‌کند؛ بقیه‌ی خوانش بیت‌به‌بیت دست‌نخورده می‌ماند.
 import { evasionIn, pastTimeIn } from './verdict.js';
-import { parseJsonLoose, readText } from './reading-core.js';
+import { parseJsonLoose, readText, LANG_DATA, FLASH, LUNA } from './reading-core.js';
 import { log, logErr } from '../../shared/logger.js';
 
 // همه‌ی فیلدهای رو-به-کاربر، **دقیقاً همان‌هایی که `v4Text` می‌بیند**.
@@ -35,25 +35,93 @@ export const DEFECTS = [
   {
     id: 'evasion',
     find: evasionIn,
-    // متنِ راهنما برای همان تکه؛ کوتاه چون در ورودی تکرار می‌شود
-    hint: 'تصمیم را به خودِ مخاطب پس داده. جهت بده: بگو کدام سمت سنگین‌تر است.',
+    // متنِ راهنما برای همان تکه؛ کوتاه چون در ورودی تکرار می‌شود.
+    // 🌍 از locale می‌آید (`hintOf`)؛ پیش‌فرضِ فارسی این‌جاست تا نبودِ locale چیزی نشکند.
+    get hint() { return RLEX.hints.evasion; },
   },
   {
     id: 'pastTime',
     find: pastTimeIn,
-    hint: 'به زمانِ گذشته اشاره کرده در حالی که تاریخِ جلسه‌های قبل را نداریم. خودِ اشاره‌ی زمانی را بردار و فقط موضوع را نگه دار.',
+    get hint() { return RLEX.hints.pastTime; },
   },
 ];
 
+/* 🌍 ضعف‌های **مخصوصِ یک زبان** از `langdata.<locale>.json` می‌آیند.
+ *
+ * ⚠️ چرا کد و نه پرامپت: پرامپتِ روسی از قبل صریحاً می‌گوید «Всегда ты, никогда вы»
+ * و «Не навязывай человеку пол». با این حال دورِ دومِ آزمایشگاه ۲ فال با «вы»ی رسمی و
+ * ۳ فال با صرفِ جنسیت‌دار داد، یعنی **۵ از ۹**. این دقیقاً همان درسی است که ریپو سه
+ * بار ثبت کرده (زمان، کارتِ نیامده، عبارت‌های ممنوع): قاعده‌ی پرامپتیِ تکرارشده جواب
+ * نمی‌دهد و هرچه کد می‌تواند تضمین کند نباید به مدل سپرده شود. پس به‌جای لایه‌ی دومِ
+ * وصله روی پرامپت، همان مکانیزمِ موجود یک ردیف بیشتر می‌گیرد.
+ *
+ * ⚠️ چرا برای فارسی خطر ندارد: فارسی فایلِ زبان ندارد، پس این آرایه خالی می‌ماند و
+ * `DEFECTS` بیت‌به‌بیت همان دوتای قبلی است.
+ *
+ * `except` استثنای همان الگوست (مثلاً «вы» وقتی واقعاً دو نفر را خطاب می‌کند) و در
+ * **همان جمله** سنجیده می‌شود، نه در کلِ متن؛ وگرنه یک استثنا در جای دیگر کلِ فال را
+ * معاف می‌کرد. */
+function sentenceAround(text, idx) {
+  const start = Math.max(0, text.lastIndexOf('\n', idx), text.lastIndexOf('.', idx));
+  let end = text.length;
+  for (const ch of ['.', '\n', '؟', '?', '!']) {
+    const j = text.indexOf(ch, idx);
+    if (j !== -1 && j < end) end = j;
+  }
+  return text.slice(start, end + 1);
+}
+
+for (const d of (LANG_DATA.defects || [])) {
+  let re, exceptRe = null;
+  try {
+    re = new RegExp(d.pattern, d.flags || '');
+    // استثنا همیشه بی‌توجه به بزرگی/کوچکیِ حرف کامپایل می‌شود: عبارتِ «вы оба» در
+    // ابتدای جمله «Вы оба» است و با فلگِ خودِ الگو (که ممکن است case-sensitive باشد)
+    // رد می‌شد. اولین تستِ واقعی همین را گرفت.
+    if (d.except) exceptRe = new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`);
+  } catch { continue; } // الگوی خراب فقط همان ردیف را حذف می‌کند، نه کلِ تعمیر را
+  DEFECTS.push({
+    id: d.id,
+    hint: d.hint || '',
+    find: (t) => {
+      const m = String(t || '').match(re);
+      if (!m) return null;
+      if (exceptRe && exceptRe.test(sentenceAround(String(t), m.index))) return null;
+      return m[0].trim();
+    },
+  });
+}
+
 export function findDefects(llm) {
   const hits = [];
+  /* ⚠️ **همه‌ی** ضعف‌های یک فیلد با هم جمع می‌شوند، نه فقط اولی.
+   *
+   * 🐛 باگی که دورِ ۶ آزمایشگاهِ روسی لو داد: نسخه‌ی قبلی روی اولین ضعف `return`
+   * می‌کرد، پس مدل فقط hintِ **یکی** را می‌دید؛ ولی `validate` پایین متنِ تعمیرشده
+   * را در برابرِ **همه‌ی** انواع می‌سنجد. یعنی فیلدی که دو ضعف داشت تقریباً همیشه
+   * شکست می‌خورد: مدل «вы» را برمی‌داشت، «Two of Cups» سرِ جایش می‌ماند، و تعمیر
+   * رد می‌شد. عدد: از ۵ تعمیرِ شلیک‌شده‌ی آن دور **۳ تا ناموفق** بودند. خرابی هم
+   * بی‌صداست چون متنِ اصلی تحویل می‌شود و کاربر هر دو ضعف را می‌گیرد.
+   *
+   * هر فیلد همچنان **یک** hit می‌دهد (وگرنه دو fix برای یک فیلد به هم می‌خورند و
+   * `applyFixes` بر اساسِ ایندکس کار می‌کند)؛ فقط hint و عبارت‌ها با هم می‌آیند.
+   * جداکننده عمداً خنثی است: ویرگولِ فارسی این‌جا یعنی یک نویسه‌ی بیگانه داخلِ
+   * پرامپتِ روسی. */
   const push = (path, text) => {
     const t = String(text || '').trim();
     if (!t) return;
+    const found = [];
     for (const d of DEFECTS) {
       const phrase = d.find(t);
-      if (phrase) { hits.push({ path, text: t, phrase, kind: d.id, hint: d.hint }); return; }
+      if (phrase) found.push({ phrase, kind: d.id, hint: d.hint });
     }
+    if (!found.length) return;
+    hits.push({
+      path, text: t,
+      phrase: found.map((f) => f.phrase).join(' / '),
+      kind: found.map((f) => f.kind).join('+'),
+      hint: found.map((f) => f.hint).join(' '),
+    });
   };
   push('headline', llm?.headline);
   push('pattern', llm?.pattern);
@@ -85,9 +153,15 @@ export function applyFixes(llm, hits, fixes) {
   return out;
 }
 
-// پرامپتِ تعمیر: عمداً کوتاه. هرچه بلندتر شود، هم گران‌تر می‌شود و هم مدل بیشتر
-// وسوسه می‌شود متن را بازنویسی کند، در حالی که ما فقط یک جراحیِ کوچک می‌خواهیم.
-export const REPAIR_SYSTEM = `تو ویراستارِ یک متنِ تاروتِ فارسی هستی.
+/* 🌍 دادهٔ زبانیِ مسیرِ تعمیر (بند ۲و).
+ *
+ * ⚠️ چرا لازم بود: `REPAIR_SYSTEM` با جمله‌ی «تو ویراستارِ یک متنِ تاروتِ **فارسی**
+ * هستی» شروع می‌شد. روی رباتِ روسی این یعنی یک پرامپتِ فارسی که به مدل می‌گوید متنِ
+ * فارسی را ویرایش کن، در حالی که متنِ ورودی روسی است. بدترین حالتش سکوت نیست:
+ * تعمیر ممکن بود جمله را به فارسی برگرداند و آن را وسطِ فالِ روسیِ یک کاربرِ پولی
+ * بنشاند. پیش‌فرض‌ها فارسی می‌مانند تا اگر کسی configure نکرد رفتار عوض نشود. */
+const FA_REPAIR = {
+  system: `تو ویراستارِ یک متنِ تاروتِ فارسی هستی.
 
 هر جمله‌ای که می‌گیری یک ایرادِ مشخص دارد که کنارش نوشته شده. فقط همان ایراد را برطرف کن.
 
@@ -99,18 +173,39 @@ export const REPAIR_SYSTEM = `تو ویراستارِ یک متنِ تاروتِ
 
 خروجی فقط یک JSON معتبر، بدونِ code fence:
 {"fixes": ["جمله‌ی تعمیرشده‌ی ۱", "جمله‌ی تعمیرشده‌ی ۲"]}
-به همان ترتیبِ ورودی و با همان تعداد.`;
+به همان ترتیبِ ورودی و با همان تعداد.`,
+  hints: {
+    evasion: 'تصمیم را به خودِ مخاطب پس داده. جهت بده: بگو کدام سمت سنگین‌تر است.',
+    pastTime: 'به زمانِ گذشته اشاره کرده در حالی که تاریخِ جلسه‌های قبل را نداریم. خودِ اشاره‌ی زمانی را بردار و فقط موضوع را نگه دار.',
+  },
+  item: (i, hint, phrase, text) => `${i + 1}) [ایراد: ${hint}]\n[عبارتِ «${phrase}» نباید در جوابت باشد]\n${text}`,
+};
+let RLEX = FA_REPAIR;
+/** دادهٔ زبانیِ مسیرِ تعمیر را از فایلِ زبان می‌گیرد؛ خودِ ماژول صدایش می‌زند. */
+export function configureRepair(lex) {
+  if (!lex || typeof lex !== 'object') return;
+  // `item` قالبِ رشته‌ای است چون از JSON می‌آید (`%i %hint %phrase %text`).
+  const tpl = typeof lex.item === 'string' ? lex.item : null;
+  RLEX = {
+    system: lex.system || FA_REPAIR.system,
+    hints: { ...FA_REPAIR.hints, ...(lex.hints || {}) },
+    item: tpl
+      ? (i, hint, phrase, text) => tpl
+          .replace('%i', String(i + 1)).replace('%hint', hint)
+          .replace('%phrase', phrase).replace('%text', text)
+      : FA_REPAIR.item,
+  };
+}
+configureRepair(LANG_DATA.repair);
+export const repairSystem = () => RLEX.system;
 
 // هر تکه با **ایرادِ خودش** می‌رود، پس یک فراخوانی می‌تواند چند نوع ضعف را با هم
 // بردارد و مدل دقیقاً می‌داند چه چیزی را باید عوض کند.
+// عبارتِ دقیق **صریح** نام برده می‌شود. دورِ پانزدهم یک تعمیرِ ناموفق داشت: مدل
+// جمله را بازنویسی کرد ولی همان عبارت را دوباره آورد. چون بودجه یک فراخوانی است و
+// بس، تنها راهِ بالابردنِ شانسِ همان یک بار، روشن‌ترکردنِ خواسته است، نه یک تلاشِ دیگر.
 export const repairUser = (hits) =>
-  hits.map((h, i) =>
-    // عبارتِ دقیق **صریح** نام برده می‌شود. دورِ پانزدهم یک تعمیرِ ناموفق داشت: مدل
-    // جمله را بازنویسی کرد ولی همان عبارت را دوباره آورد. چون بودجه یک فراخوانی
-    // است و بس، تنها راهِ بالابردنِ شانسِ همان یک بار، روشن‌ترکردنِ خواسته است —
-    // نه یک تلاشِ دیگر.
-    `${i + 1}) [ایراد: ${h.hint}]\n[عبارتِ «${h.phrase}» نباید در جوابت باشد]\n${h.text}`)
-    .join('\n\n');
+  hits.map((h, i) => RLEX.item(i, h.hint, h.phrase, h.text)).join('\n\n');
 
 /**
  * یک بار تلاش برای تعمیرِ طفره‌رفتن. `call` تزریق می‌شود تا ربات و آزمایشگاه **همین**
@@ -119,13 +214,42 @@ export const repairUser = (hits) =>
  * `fired` یعنی تشخیص چیزی پیدا کرد و فراخوانی رفت؛ `repaired` یعنی نتیجه‌اش هم پذیرفته شد.
  * تفکیکشان لازم است وگرنه «شلیک‌نکرد» و «شلیک کرد و نشد» در گزارش یکی می‌شوند.
  */
-export async function repairDefects(llm, call, { tag = '', meta = null } = {}) {
+/* ⚠️ **یک تکه‌ی تعمیرنشدنی نباید تعمیرهای سالمِ همان فال را هم دور بریزد.**
+ *
+ * 🐛 باگی که آرِنای تعمیر لو داد (۱۴۰۵/۰۶/۱۱): `validate` قبلاً `every` بود، یعنی اگر
+ * **یکی** از تکه‌ها بعد از تعمیر باز هم ایراد داشت، کلِ خروجی رد می‌شد و **همه‌ی**
+ * تکه‌های سالم هم با آن دور ریخته می‌شدند. فالِ اسپانیاییِ C1.1 سه تکه داشت که یکی‌شان
+ * («te has guardado») اصلاً ایرادِ واقعی نبود: در زمانِ مرکبِ اسپانیایی صفتِ مفعولیِ بعد
+ * از `haber` **بی‌تغییر** است و هیچ رونویسیِ درستی نمی‌تواند از آن الگو فرار کند. پس آن
+ * یک تکه هر شش تلاش (هر دو مدل × سه تکرار) را کشت و دو ایرادِ **واقعیِ** همان فال هم
+ * تعمیرنشده به کاربر می‌رسید. عدد در گزارش: `genero 0/9` برای هر دو بازو — که شبیهِ
+ * «هیچ مدلی نمی‌تواند» بود، در حالی که خرابیِ **ابزار** بود، نه مدل (بند ۹/۰ب).
+ *
+ * حالا هر تکه جدا سنجیده می‌شود و تکه‌ی رد‌شده فقط خودش می‌ماند. این تنها راهی است که
+ * یک الگوی مثبتِ کاذب بتواند بی‌ضرر بماند: هزینه‌اش یک تکه‌ی جاافتاده است، نه یک فالِ
+ * کاملاً تعمیرنشده.
+ *
+ * رول‌بکِ یک‌خطی: `REPAIR_PARTIAL = false` → دقیقاً رفتارِ قبلی (همه یا هیچ). */
+export const REPAIR_PARTIAL = true;
+const isCleanFix = (f) => {
+  const t = String(f || '').trim();
+  return !!t && !DEFECTS.some((d) => d.find(t));
+};
+
+export const REPAIR_FALLBACK = LUNA;
+export const REPAIR_PLAN = [FLASH, REPAIR_FALLBACK];
+
+export async function repairDefects(llm, call, { tag = '', meta = null, plan = null } = {}) {
   const hits = findDefects(llm);
   if (!hits.length) return { llm, fired: false, repaired: false };
 
   let res = null;
+  /* شمارشِ فراخوانی‌هایی که واقعاً به مدل رسیدند (چه قبول شوند چه رد). مصرفش
+   * تشخیصِ «مسیرِ تعمیر روی این مدل مرده است» در آزمایشگاه است. */
+  let calls = 0;
   try {
-    res = await call(REPAIR_SYSTEM, repairUser(hits), {
+    res = await call(repairSystem(), repairUser(hits), {
+      onUsage: () => { calls += 1; },
       // برچسبِ حسابداریِ مصرفِ مدل (اختیاری؛ نبودنش دقیقاً رفتارِ قبلی است)
       ...(meta || {}),
       maxTokens: 600,
@@ -133,25 +257,54 @@ export async function repairDefects(llm, call, { tag = '', meta = null } = {}) {
       validate: (out) => {
         const obj = parseJsonLoose(out);
         if (!obj || !Array.isArray(obj.fixes) || obj.fixes.length !== hits.length) return false;
-        // اگر تعمیر خودش طفره‌رفتن داشته باشد، تعمیر نشده. ولی **دوباره نمی‌پرسیم** —
-        // یک فراخوانی یعنی یک فراخوانی؛ خروجیِ اصلی تحویل می‌شود.
-        // تعمیر نباید خودش همان ایراد را دوباره داشته باشد — هیچ‌کدام از انواع.
-        return obj.fixes.every((f, i) => {
-          const t = String(f || '').trim();
-          return t && !DEFECTS.some((d) => d.find(t));
-        });
+        // اگر تعمیر خودش همان ایراد را دوباره داشته باشد، آن **تکه** تعمیر نشده. ولی
+        // **دوباره نمی‌پرسیم** — یک فراخوانی یعنی یک فراخوانی.
+        // تکه‌ی سالم کافی است تا این پله موفق حساب شود؛ سنجشِ تکه‌به‌تکه پایین است.
+        return REPAIR_PARTIAL ? obj.fixes.some(isCleanFix) : obj.fixes.every(isCleanFix);
       },
-    // فقط یک تلاش: بودجه‌ی این مسیر عمداً سخت‌گیرانه است.
-    }, [undefined]);
+    /* 🔗 دو پله، نه یکی (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۰): جمنای، بعد `luna`.
+     *
+     * تا امروز عمداً **یک** فراخوانی بود، با این استدلال که کاربرِ پول‌داده نباید دو
+     * بار معطل شود. آن استدلال هنوز درست است، ولی دورِ هشتمِ روسی نشان داد هزینه‌ی
+     * نداشتنِ فالبک بزرگ‌تر است: کلِ مسیرِ تعمیر روی یک مدل با **صفر توکن** مرده بود
+     * و کسی نفهمید، چون مسیر fail-safe است و متنِ اصلی تحویل می‌شود. یعنی گاردِ
+     * زبانی بی‌صدا از دست می‌رفت.
+     *
+     * بهای واقعی‌اش کوچک است: تعمیر روی ~۴٪ فال‌های فارسی شلیک می‌کند و تأخیرِ هر
+     * پله ~۱٫۱ ثانیه، پس بدترین حالت ~۲٫۲ ثانیه روی همان ۴٪. و پله‌ی دوم فقط وقتی
+     * اجرا می‌شود که پله‌ی اول **واقعاً** شکست خورده باشد.
+     *
+     * چرا `luna` و نه یک جمنایِ دیگر: فالبکِ هم‌خانواده قطعیِ خودِ خانواده را پوشش
+     * نمی‌دهد. `luna` حالا مدلِ خوانشِ هر چهار زبان است، یعنی سنجیده‌شده‌ترین مدلِ
+     * غیرجمناییِ سبدِ ما.
+     *
+     * ⚠️ `plan` را آزمایشگاه پاس می‌دهد تا بازوی مدل را **تک‌مدلی** بسنجد (وگرنه
+     * مقایسه‌ی دو بازو آلوده می‌شود). پس هر پلنی که داده شود عیناً اجرا می‌شود و
+     * پیش‌فرض همان چیزی است که محصول اجرا می‌کند. */
+    }, plan && plan.length ? plan : REPAIR_PLAN);
   } catch (e) {
     logErr(`${tag} تعمیرِ طفره‌رفتن خطا داد: ${e.message}`);
   }
 
   const obj = res && parseJsonLoose(res.out);
-  if (!obj?.fixes) {
+  /* فقط تکه‌های سالم جایگذاری می‌شوند؛ تکه‌ی رد‌شده متنِ اصلیِ خودش را نگه می‌دارد.
+   * `applyFixes` رشته‌ی خالی را رد می‌کند، پس همین کافی است. */
+  const usable = obj?.fixes ? obj.fixes.map((f) => (isCleanFix(f) ? f : '')) : [];
+  const applied = usable.filter(Boolean).length;
+  if (!applied) {
     logErr(`${tag} تعمیر نشد، متنِ اصلی تحویل می‌شود (${hits[0].kind}: «${hits[0].phrase}»)`);
-    return { llm, fired: true, repaired: false };
+    return { llm, fired: true, repaired: false, calls };
   }
-  log(`${tag} تعمیر شد: ${hits.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
-  return { llm: applyFixes(llm, hits, obj.fixes), fired: true, repaired: true, usage: res.usages?.[0] };
+  const done = hits.filter((_, i) => usable[i]);
+  log(`${tag} تعمیر شد (${applied}/${hits.length}): ${done.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
+  /* ⚠️ `appliedFlags` هم‌ترتیبِ `hits` است و **لازم** است، نه تزئینی: با سنجشِ
+   * تکه‌به‌تکه دیگر «repaired» معنیِ «کلِ فال تمیز شد» نمی‌دهد، پس هر شمارنده‌ای که
+   * از روی `repaired` تکه‌ها را حساب کند بی‌صدا بیش‌شماری می‌کند (همان کلاسِ باگی که
+   * ستونِ «هزینه» را دلارِ غیرواقعی کرده بود: واحد عوض شد و مصرف‌کننده نفهمید). */
+  return {
+    llm: applyFixes(llm, hits, usable), fired: true, repaired: true,
+    partial: applied < hits.length, applied, hitCount: hits.length,
+    hits, appliedFlags: usable.map(Boolean),
+    usage: res.usages?.[0], calls,
+  };
 }

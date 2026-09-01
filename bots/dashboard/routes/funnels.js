@@ -3,7 +3,7 @@
 //    فقط از زمان نصب آنالیتیکس دیتا دارد — برای voice2text یعنی رفتار کاربران قدیمی را نشان نمی‌دهد.
 // ۲) توزیع وضعیت رکوردهای قطعی per-entity (readings/voice_flows/payments.step): بدون بایاس snapshot،
 //    شامل کاربران قبل از آنالیتیکس. (هیچ عددی از users.state ساخته نمی‌شود — state فقط «الان» را می‌گوید.)
-import { instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf, botByKey } from '../lib/bots.js';
+import { instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, unixOf, botByKey , familyOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { fmt, esc, nowSec } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
@@ -145,7 +145,8 @@ export function funnelsBody(url) {
 
   let out = filter;
   // فقط رباتِ انتخاب‌شده (داشبورد per ربات است)
-  for (const [botKey, f] of Object.entries(FUNNELS).filter(([k]) => k === bot)) {
+  for (const [, f] of Object.entries(FUNNELS).filter(([k]) => k === familyOf(bot))) {
+    const botKey = bot;   // کوئری‌ها روی **همان** رباتِ اسکوپ‌شده می‌نشینند، نه روی خانواده
     if (!instancesOf(botKey).length) continue;
     out += `<div class="card"><h2>${esc(f.title)} — قیف اصلی</h2>${funnelTable(botKey, f.steps, since, ver)}
       <p class="muted" style="margin-top:8px">زیرِ هر مرحله، «قدم‌های ریز» را باز کن تا ببینی کاربر بینِ آن مرحله و

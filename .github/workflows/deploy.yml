@@ -34,6 +34,14 @@ jobs:
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
           # PATِ ریزدانه‌ی گیت‌هاب تا دستورِ /reel بتواند ورک‌فلوی Tarot video را صدا بزند
           TAROT_VIDEO_DISPATCH_TOKEN:   ${{ secrets.TAROT_VIDEO_DISPATCH_TOKEN }}
+          # 🌍 تاروتِ per زبان (بند ۲و). کلیدِ OpenRouter عمداً جداست تا هزینه و درآمدِ
+          # هر زبان مستقل اندازه‌گیری شود. نبودنِ هرکدام یعنی همان زبان دیپلوی نمی‌شود.
+          TAROT_RU_BOT_TOKEN:           ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          TAROT_RU_OPENROUTER_KEY:      ${{ secrets.TAROT_RU_OPENROUTER_KEY }}
+          TAROT_PT_BOT_TOKEN:           ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          TAROT_PT_OPENROUTER_KEY:      ${{ secrets.TAROT_PT_OPENROUTER_KEY }}
+          TAROT_ES_BOT_TOKEN:           ${{ secrets.TAROT_ES_BOT_TOKEN }}
+          TAROT_ES_OPENROUTER_KEY:      ${{ secrets.TAROT_ES_OPENROUTER_KEY }}
           # daily-brief (پادکست روزانه): دو تای اول اجباری، Notion اختیاری
           # (بدون Notion ربات بالا می‌آید ولی رودمپ ندارد). موتورهای صدا هم از همان کلیدِ OpenRouter می‌آیند.
           DAILY_BRIEF_BOT_TOKEN:        ${{ secrets.DAILY_BRIEF_BOT_TOKEN }}
@@ -120,9 +128,14 @@ jobs:
             # می‌کند → ENV_CHANGED → upsert دوباره ADMIN_IDS را می‌گذارد → ENV_CHANGED. یعنی
             # **هر دیپلوی، حتی وقتی هیچ کدِ رباتی عوض نشده، ربات‌های زنده را ری‌استارت می‌کند**
             # (باگِ واقعی؛ در لاگ به‌شکلِ «دلیل: env» روی PRِ صرفاً مستنداتی دیده شد).
-            ADMIN_BOTS=" voice2text tarot daily-brief "
-            write_env() { # $1=bot ، $2=محتوای کامل .env (بدونِ ADMIN_IDS — خودش اضافه می‌کند)
-              mkdir -p "bots/$1"
+            ADMIN_BOTS=" voice2text tarot tarot-ru tarot-pt tarot-es daily-brief "
+            # $1=نامِ اپِ pm2 ، $2=محتوای .env (بدونِ ADMIN_IDS) ، $3=مسیرِ فایل (اختیاری)
+            # آرگومانِ سوم برای تاروتِ چندزبانه لازم شد: چند اپِ pm2 روی **یک** پوشه‌ی کد
+            # می‌نشینند و هرکدام `.env.<locale>` خودش را دارد. بدونِ آن، هر زبان یک کپیِ
+            # کامل از کدِ ربات می‌خواست، یعنی دقیقاً همان «N فورک» که بند ۲و ممنوع می‌کند.
+            write_env() {
+              envpath="${3:-bots/$1/.env}"
+              mkdir -p "$(dirname "$envpath")"
               content="$2"
               case "$ADMIN_BOTS" in
                 *" $1 "*)
@@ -131,13 +144,13 @@ jobs:
                   fi
                   ;;
               esac
-              ( umask 077; printf '%s\n' "$content" > "bots/$1/.env.new" )
-              if [ ! -f "bots/$1/.env" ] || ! cmp -s "bots/$1/.env.new" "bots/$1/.env"; then
-                mv "bots/$1/.env.new" "bots/$1/.env"
+              ( umask 077; printf '%s\n' "$content" > "$envpath.new" )
+              if [ ! -f "$envpath" ] || ! cmp -s "$envpath.new" "$envpath"; then
+                mv "$envpath.new" "$envpath"
                 ENV_CHANGED="$ENV_CHANGED $1"
-                echo "🔑 $1/.env از روی secrets نوشته/به‌روز شد"
+                echo "🔑 $envpath از روی secrets نوشته/به‌روز شد"
               else
-                rm -f "bots/$1/.env.new"
+                rm -f "$envpath.new"
               fi
             }
             if [ -n "$VOICE2TEXT_BOT_TOKEN" ] && [ -n "$VOICE2TEXT_OPENROUTER_KEY" ]; then
@@ -158,6 +171,21 @@ jobs:
               [ -n "$TAROT_VIDEO_DISPATCH_TOKEN" ] && TRT_ENV="$(printf '%s\nVIDEO_DISPATCH_TOKEN=%s' "$TRT_ENV" "$TAROT_VIDEO_DISPATCH_TOKEN")"
               write_env tarot "$TRT_ENV"
             fi
+            # 🌍 یک بلوک per زبان. هرکدام کاملاً مستقل است: نبودِ سکرتِ یک زبان فقط
+            # همان زبان را رد می‌کند و به فارسی و بقیه کاری ندارد.
+            # ⚠️ `VIDEO_DISPATCH_TOKEN` عمداً **فقط** به فارسی داده می‌شود؛ دستورِ /reel
+            # ابزارِ محتوای کانالِ فارسی است و هر کلیدِ اضافه در .env یعنی یک سطحِ حمله‌ی
+            # بی‌دلیل روی سروری که ربات‌های زنده رویش‌اند (همان استدلالِ TAROT_NOTION_TOKEN).
+            for lang in ru pt es; do
+              upper="$(echo "$lang" | tr '[:lower:]' '[:upper:]')"
+              eval "tok=\${TAROT_${upper}_BOT_TOKEN:-}"
+              eval "key=\${TAROT_${upper}_OPENROUTER_KEY:-}"
+              if [ -n "$tok" ] && [ -n "$key" ]; then
+                write_env "tarot-$lang" \
+                  "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s' "$tok" "$key" "$lang")" \
+                  "bots/tarot/.env.$lang"
+              fi
+            done
             if [ -n "$DAILY_BRIEF_BOT_TOKEN" ] && [ -n "$DAILY_BRIEF_OPENROUTER_KEY" ]; then
               # کلیدهای اختیاری داخلِ همین بلوک append می‌شوند، وگرنه cmp هر دیپلوی فرق می‌بیند
               # و ربات بی‌دلیل ری‌استارت می‌شود (همان باگِ پینگ‌پنگِ ADMIN_IDS — بالا).
@@ -200,17 +228,21 @@ jobs:
 
             # ---------- دیپلوی انتخابی: فقط ربات‌هایی که واقعاً تغییر کرده‌اند ----------
             # خط قرمز: merge ای که به یک ربات ربطی ندارد نباید ربات‌های دیگر (خصوصاً voice2text) را ری‌استارت کند.
+            # $1=نامِ اپِ pm2 ، $2=پوشه‌ی کد (پیش‌فرض bots/$1) ، $3=مسیرِ .env (پیش‌فرض bots/$1/.env)
+            # دو آرگومانِ اختیاری برای تاروتِ چندزبانه‌اند: چند اپ روی یک پوشه‌ی کد.
             deploy_bot() {
               name="$1"
-              if [ ! -f "bots/$name/.env" ]; then
-                echo "ℹ️ bots/$name/.env نبود — $name رد شد (بدون اثر روی بقیه)"
+              srcdir="${2:-bots/$1}"
+              envpath="${3:-bots/$1/.env}"
+              if [ ! -f "$envpath" ]; then
+                echo "ℹ️ $envpath نبود — $name رد شد (بدون اثر روی بقیه)"
                 return
               fi
               reason=""
               [ "$FORCE_ALL" = "true" ] && reason="force"
               [ -z "$reason" ] && [ "$INFRA_CHANGED" = "1" ] && reason="infra"
               # تغییر کد خود ربات (تغییر مستندات .md و .env.example ری‌استارت لازم ندارد)
-              if [ -z "$reason" ] && echo "$CHANGED_FILES" | grep -E "^bots/$name/" | grep -vE '\.(md|example)$' | grep -q .; then reason="code"; fi
+              if [ -z "$reason" ] && echo "$CHANGED_FILES" | grep -E "^$srcdir/" | grep -vE '\.(md|example)$' | grep -q .; then reason="code"; fi
               case " $ENV_CHANGED " in *" $name "*) [ -z "$reason" ] && reason="env";; esac
               # اگر ربات اصلاً در pm2 نیست (ربات تازه) → استارت
               if [ -z "$reason" ] && ! pm2 jlist | grep -q "\"name\":\"$name\""; then reason="new-app"; fi
@@ -218,7 +250,7 @@ jobs:
                 echo "⏭ $name بدون تغییر — دست نخورد (ری‌استارت نشد)"
                 return
               fi
-              npm ci --prefix "bots/$name" --omit=dev
+              npm ci --prefix "$srcdir" --omit=dev
               pm2 startOrReload ecosystem.config.cjs --update-env --only "$name"
               echo "✅ $name دیپلوی شد (دلیل: $reason)"
             }
@@ -233,6 +265,11 @@ jobs:
 
             deploy_bot voice2text
             deploy_bot tarot
+            # 🌍 هر زبان جدا؛ همان پوشه‌ی کد، `.env` خودش. زبانی که سکرت ندارد بی‌صدا رد
+            # می‌شود، پس این حلقه تا قبل از ساختِ سکرت‌ها کاملاً بی‌اثر است.
+            for lang in ru pt es; do
+              deploy_bot "tarot-$lang" bots/tarot "bots/tarot/.env.$lang"
+            done
 
             # ---------- گاردِ «تاروت حتماً بالا باشد» ----------
             # ⚠️ این گارد **عمداً ماند** با اینکه علتِ تاریخی‌اش (بلوکِ یک‌باره‌ی بالا) رفته:

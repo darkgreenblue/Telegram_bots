@@ -13,6 +13,31 @@ name: Reading lab
 on:
   workflow_dispatch:
     inputs:
+      locale:
+        description: 'زبان (fa | ru | …). سناریوها و سنجه‌ها per زبان اند.'
+        required: false
+        default: 'fa'
+      model:
+        description: 'مدلِ تحتِ آزمایش (خالی = همان مدلِ محصول). مثل: openai/gpt-5-mini'
+        required: false
+        default: ''
+      fallback:
+        description: 'مدلِ فالبک (خالی = پیش‌فرضِ محصول)'
+        required: false
+        default: ''
+      arms:
+        description: 'مقایسه‌ی جفت‌شده‌ی چند مدل در یک اجرا، با کاما. مثل: google/gemini-2.5-flash,google/gemini-3.5-flash-lite. واریانتِ پرامپت با @ مثل model@nopast'
+        required: false
+        default: ''
+      set:
+        description: 'مجموعه‌ی سناریو (خالی = اصلی). مثل b یا c — سؤال‌های متفاوت برای دورِ متنوع'
+        required: false
+        default: ''
+      list_models:
+        description: 'فقط فهرستِ مدل‌ها و قیمتِ واقعیِ OpenRouter را چاپ کن و تمام'
+        type: boolean
+        required: false
+        default: false
       only:
         description: 'پرسوناها (خالی = همه). مثل: P1,P2'
         required: false
@@ -28,17 +53,34 @@ on:
         required: false
         default: false
       reps:
-        description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان'
+        description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان. در حالتِ arena: چند بار هر ورودی به هر بازو داده شود'
         required: false
         default: '1'
+      arena_runs:
+        description: '🛠 حالتِ آرِنای تعمیر: شناسه‌ی runهای قبلیِ همین ورک‌فلو با کاما. هیچ فالی تولید نمی‌شود؛ فقط مسیرِ تعمیر روی خروجیِ ذخیره‌شده‌ی آن‌ها با هر بازو تکرار می‌شود.'
+        required: false
+        default: ''
 
+# ⚠️ گروهِ همزمانی per **زبان و مجموعه‌ی سناریو** است، نه یک گروهِ واحد و نه فقط per
+# زبان: پنج دورِ فارسی روی پنج مجموعه‌ی متفاوت با گروهِ per-زبان همدیگر را می‌کشتند. با گروهِ واحد فقط یک اجرای
+# معلق نگه داشته می‌شد و دیسپچِ سوم بی‌صدا دومی را می‌کشت (یک بار همین اتفاق افتاد و
+# یک دورِ کاملِ مقایسه از دست رفت). دورهای زبان‌های مختلف هیچ حالتِ مشترکی ندارند، پس
+# موازی اجرا شدنشان بی‌خطر است و سه برابر سریع‌تر.
+# ⚠️ ولی هر سه از **یک** کلیدِ OpenRouter می‌خوانند: هر اجرا حدودِ ۷ فال در دقیقه
+# می‌زند، یعنی سه اجرای موازی ~۲۱ در دقیقه. اگر روزی به سقفِ نرخ خوردیم، نشانه‌اش
+# «تلاشِ ردشده»ی زیاد یا رسیدن به فالبک است، نه افتِ کیفیت. آن عدد را در گزارش ببین
+# قبل از اینکه نتیجه‌ی یک دورِ موازی را به مدل نسبت بدهی (درسِ «اول ابزار مقصر است»).
 concurrency:
-  group: reading-lab
+  group: reading-lab-${{ inputs.locale }}-${{ inputs.set }}
   cancel-in-progress: false
 
 jobs:
   lab:
     runs-on: ubuntu-latest
+    # `actions: read` فقط برای حالتِ آرِنا لازم است (دانلودِ artifact های runهای قبلی).
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +90,15 @@ jobs:
 
       # آزمایشگاه هیچ وابستگیِ npm ندارد (فقط ماژول‌های داخلیِ Node)، پس نه npm ci لازم
       # است نه کشِ node_modules. اگر روزی وابستگی اضافه شد، همین‌جا نصبش کن.
+      # 🔎 فهرستِ مدل‌ها: endpointِ رایگانِ OpenRouter، بدونِ کلید و بدونِ هزینه. این‌جا
+      # اجرا می‌شود چون محیطِ توسعه خروجیِ شبکه به openrouter.ai ندارد و slug و قیمت
+      # هرگز نباید حدس زده شوند.
+      - name: فهرستِ مدل‌ها
+        if: inputs.list_models
+        run: node tools/or-models.mjs
+
       - name: گاردِ کلید
+        if: '!inputs.list_models'
         env:
           KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
         run: |
@@ -57,29 +107,112 @@ jobs:
             exit 1
           fi
 
-      - name: اجرای آزمایشگاه
+      # ═══ 🛠 حالتِ آرِنای تعمیر ═══
+      # چرا داخلِ همین ورک‌فلو و نه یک فایلِ جدا: `workflow_dispatch` فقط برای فایلی
+      # کار می‌کند که روی برنچِ **پیش‌فرض** هم باشد، پس یک ورک‌فلوی تازه تا merge نشدن
+      # اصلاً قابلِ اجرا نیست. ضمناً هر دو حالت یک سکرت و یک ابزارِ مشترک دارند و
+      # نگه‌داشتنِ دو فایل برای یک کار خلافِ بند ۹/۰ است.
+      #
+      # هر run در پوشه‌ی خودش باز می‌شود، وگرنه `reading-lab-out.json`ها روی هم
+      # می‌افتند و عملاً فقط آخرین run سنجیده می‌شود — خطایی بی‌صدا که عدد را کوچک
+      # می‌کند بدونِ اینکه چیزی قرمز شود.
+      - name: برداشتنِ خروجیِ خامِ دورهای قبل
+        if: inputs.arena_runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.arena_runs }}
+          LOC: ${{ inputs.locale }}
+        run: |
+          set -euo pipefail
+          mkdir -p arena
+          n=0
+          for id in $(echo "$RUNS" | tr ',' ' '); do
+            case "$id" in ''|*[!0-9]*) echo "::error::شناسه‌ی نامعتبر: $id"; exit 1;; esac
+            tmp="$(mktemp -d)"
+            if gh run download "$id" -n "reading-lab-$LOC" -D "$tmp" -R "$GITHUB_REPOSITORY"; then
+              cp "$tmp/reading-lab-out.json" "arena/$id.json"; n=$((n+1))
+            else
+              echo "::warning::artifact دورِ $id برداشته نشد (منقضی یا نامِ متفاوت)"
+            fi
+          done
+          echo "برداشته شد: $n فایل"
+          if [ "$n" = "0" ]; then echo "::error::هیچ ورودی‌ای برداشته نشد"; exit 1; fi
+
+      - name: اجرای آرِنای تعمیر
+        if: inputs.arena_runs
         env:
           OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+          LOCALE: ${{ inputs.locale }}
         run: |
-          ARGS=""
+          node tools/repair-arena.mjs --dir arena \
+            ${{ inputs.arms && format('--arms {0}', inputs.arms) || '' }} \
+            --reps "${{ inputs.reps }}"
+
+      - name: اجرای آزمایشگاه
+        if: '!inputs.list_models && !inputs.arena_runs'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.TAROT_OPENROUTER_KEY }}
+          # زبان از env می‌رود چون `reading-core.js` مسیرِ فایل‌های per زبان را
+          # لحظه‌ی بارگذاریِ ماژول می‌خواند؛ `--locale` هم همین را ست می‌کند.
+          LOCALE: ${{ inputs.locale }}
+        run: |
+          ARGS="--locale ${{ inputs.locale }}"
+          [ -n "${{ inputs.model }}" ] && ARGS="$ARGS --model ${{ inputs.model }}"
+          [ -n "${{ inputs.fallback }}" ] && ARGS="$ARGS --fallback ${{ inputs.fallback }}"
           [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
           [ "${{ inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
           # `reps` در **هر دو** حالت پاس داده می‌شود. قبلاً فقط به probe می‌رسید و
           # یک دورِ سه‌پاسه بی‌صدا تک‌پاسه اجرا می‌شد — یعنی گزارشِ «نویز سنجیده شد»
           # می‌دادیم بدونِ اینکه اصلاً چند پاس گرفته باشیم.
           [ -n "${{ inputs.reps }}" ] && ARGS="$ARGS --reps ${{ inputs.reps }}"
+          # بازوهای چندگانه: یک اجرا، کارت و سؤالِ یکسان، گزارشِ جفت‌شده
+          [ -n "${{ inputs.arms }}" ] && ARGS="$ARGS --arms ${{ inputs.arms }}"
+          [ -n "${{ inputs.set }}" ] && ARGS="$ARGS --set ${{ inputs.set }}"
           if [ "${{ inputs.probe }}" = "true" ]; then
-            node tools/reading-lab.mjs --probe --reps "${{ inputs.reps }}"
+            node tools/reading-lab.mjs $ARGS --probe
           else
             node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
           fi
 
       # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
-        if: always() && inputs.probe != true
+        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs
         uses: actions/upload-artifact@v4
         with:
-          name: reading-lab
+          name: reading-lab-${{ inputs.locale }}
           path: reading-lab-out.json
           retention-days: 30
           if-no-files-found: ignore
+
+      # 📋 خلاصه‌ی فشرده در **انتهای** لاگ. لاگِ کاملِ یک دور ~۱۴۰۰ خط است و خلاصه‌اش
+      # وسطش گم می‌شود، پس خواندنش از بیرون گران و خطاپذیر بود. این قدم بعد از آپلود
+      # اجرا می‌شود تا همیشه آخرین چیزِ لاگ باشد و با یک tail کوتاه دیده شود.
+      - name: خلاصه
+        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (!fs.existsSync("reading-lab-out.json")) { console.log("بدونِ خروجی"); process.exit(0); }
+            const a = JSON.parse(fs.readFileSync("reading-lab-out.json", "utf8"));
+            const sum = (rows, f) => rows.reduce((s, r) => s + (f(r) || 0), 0);
+            console.log("═══ خلاصه ═══");
+            /* ⚠️ per بازو، نه تجمیعی. نسخه‌ی اولِ این خلاصه فقط جمعِ کل را چاپ می‌کرد و
+             * در یک اجرای چندبازویی عملاً بی‌مصرف بود: نمی‌شد فهمید کدام بازو کدام ایراد
+             * را داد. دقیقاً همان اشتباهی که خودِ سنجه هم داشت (درصدِ تجمیعی اثر را
+             * پنهان می‌کند)، این‌بار در لایه‌ی گزارش. */
+            const arms = [...new Set(a.map(r => r.arm || ""))];
+            for (const arm of arms) {
+              const rows = a.filter(r => (r.arm || "") === arm);
+              const lo = sum(rows, r => r.check?.anchor?.loose);
+              const to = sum(rows, r => r.check?.anchor?.total);
+              const ls = sum(rows, r => r.check?.anchor?.looseStrict ?? r.check?.anchor?.loose);
+              const bad = rows.filter(r => (r.check?.issues || []).length);
+              const pct = (x) => (to ? Math.round(x * 100 / to) : 0);
+              console.log(`\n── ${arm || "(پیش‌فرض)"}`);
+              console.log(`   فال: ${rows.length} | ایرادناک: ${bad.length}`);
+              console.log(`   بی‌لنگر: ${lo}/${to} (${pct(lo)}٪)` +
+                (ls === lo ? "" : ` | سنجه‌ی قدیمی ${pct(ls)}٪ (${ls - lo} جمله نجات یافت)`));
+              for (const r of bad)
+                console.log(`   ❌ ${r.persona}/${r.step}${r.rep ? "/پ" + r.rep : ""}: ${r.check.issues.join(" | ")}`);
+            }
+          '

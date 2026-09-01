@@ -16,12 +16,125 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // دانشِ دست‌نویسِ کارت‌ها (نماد، تصویر، تفسیرِ مستقیم و معکوس). fail-safe: اگر فایل
 // نباشد یا خراب باشد، خوانش دقیقاً مثل قبل کار می‌کند، فقط بدونِ این لایه‌ی دانش.
-export const CARD_KB = await import('./card-knowledge.fa.json', { with: { type: 'json' } })
+//
+// 🌍 per زبان (بند ۲و): مسیر قبلاً `card-knowledge.fa.json` هاردکد بود، یعنی رباتِ روسی
+// ۷۸ ردیف **متنِ فارسی** را داخلِ یک پرامپتِ روسی تزریق می‌کرد. همان الگوی `ganjineh.js`:
+// نبودنِ فایلِ یک زبان فقط این لایه را برای همان زبان خاموش می‌کند.
+const LOCALE = process.env.LOCALE?.trim() || 'fa';
+export const CARD_KB = await import(`./card-knowledge.${LOCALE}.json`, { with: { type: 'json' } })
   .then(m => m.default).catch(() => ({}));
+
+/* 🌍 دادهٔ زبانیِ ساختاری (نامِ کارت/جایگاه/چیدمان، کلیدواژه‌ها، پرامپتِ تعمیر).
+ *
+ * ⚠️ چرا فایلِ داده و نه داخلِ `locales/<code>.js`: `check-locale-shape` شکلِ هر locale
+ * را با فارسی **دقیقاً** مقایسه می‌کند (کلیدِ اضافه هم خطاست). این جدول‌ها برای فارسی
+ * اصلاً وجود ندارند (از `cards.js`/`spreads.js` می‌آیند)، پس گذاشتنشان در locale یا
+ * چک را می‌شکست یا مجبورمان می‌کرد ۷۸ کلیدِ بی‌مصرف به فارسی اضافه کنیم. الگوی مرجع
+ * همان دو فایلِ per زبانِ موجود است: `card-knowledge.<locale>.json` و
+ * `daily-ganjineh.<locale>.json`. کلیدها رشته‌ی **فارسیِ canonical** اند. */
+export const LANG_DATA = await import(`./langdata.${LOCALE}.json`, { with: { type: 'json' } })
+  .then(m => m.default).catch(() => ({}));
+
+/* 🌍 نامِ کارت، جایگاه و چیدمان — دادهٔ زبانی که تا امروز فارسیِ هاردکد بود.
+ *
+ * ⚠️ چرا این حیاتی است و نه یک تمیزکاری: `readingContext` در locale از قبل کلیدهای
+ * روسی داشت، ولی **مقدارها** هنوز فارسی بودند (`c.fa`، `c.positionFa`، `ctx.spreadFa`).
+ * یعنی مدلِ روسی برچسبِ روسی می‌گرفت که به محتوای فارسی اشاره می‌کرد. دو ضرر داشت:
+ *   ۱) کاربرِ روسی در کپشنِ رو شدنِ کارت نامِ جایگاهِ **فارسی** می‌دید (باگِ رو-به-کاربر).
+ *   ۲) مهم‌تر: سنجه‌ی «لنگر» آزمایشگاه خروجی را با `CARD_BY_KEY[key].fa` مقایسه می‌کند،
+ *      و مدلِ روسی «Шут» می‌نویسد نه «دیوانه». یعنی مرکزی‌ترین متریکِ کیفیت برای هر
+ *      زبانِ غیرفارسی **صفر** گزارش می‌شد و کلِ حلقه‌ی بهبود روی عددِ بی‌معنی می‌نشست.
+ *
+ * fa هیچ‌کدام از این جدول‌ها را ندارد، پس دقیقاً به همان فیلدهای هاردکدِ قبلی fallback
+ * می‌کند و رفتارش بیت‌به‌بیت دست‌نخورده است. */
+let NAMES = { cards: {}, positions: {}, spreads: {}, keywords: {} };
+// ⚠️ برچسبِ «کارتِ بی‌جایگاه» عمداً پیش‌فرضِ فارسی دارد و از locale override می‌شود.
+// اگر به‌جایش یک رشته‌ی خنثی می‌گذاشتیم، فارسی بی‌صدا عوض می‌شد: این fallback واقعاً
+// شلیک می‌کند، چون فال‌های ۵کارتیِ ثبت‌شده‌ی نسل قبل از تعدادِ جایگاه‌های چیدمانِ
+// امروز بیشترند (همان سازگاریِ با گذشته‌ای که بند ۲ج/۱ واجب می‌داند).
+let POS_FALLBACK = (i) => `کارت ${i + 1}`;
+export function configureCardData(d) {
+  if (!d || typeof d !== 'object') return;
+  NAMES = {
+    cards: d.cardNames || {},
+    positions: d.positionNames || {},
+    spreads: d.spreadNames || {},
+    keywords: d.cardKeywords || {},
+  };
+  // قالبِ رشته‌ای است نه تابع، چون از JSON می‌آید. `%n` = شماره‌ی کارت (از ۱).
+  if (typeof d.positionFallback === 'string' && d.positionFallback.includes('%n')) {
+    POS_FALLBACK = (i) => d.positionFallback.replace('%n', String(i + 1));
+  }
+}
+// خودِ ماژول از فایلِ زبان پیکربندی می‌شود، پس هیچ مصرف‌کننده‌ای (ربات یا آزمایشگاه)
+// نمی‌تواند صدا زدنش را جا بیندازد. برای `fa` فایل وجود ندارد و همه‌چیز پیش‌فرض می‌ماند.
+configureCardData(LANG_DATA);
+
+/* کلیدهای آبجکتِ «فال‌های قبلی» در کانتکست. پیش‌فرض فارسی است تا `fa` که فایلِ زبانی
+ * ندارد دقیقاً مثل قبل بماند. */
+const CTX_KEYS = {
+  type: LANG_DATA?.ctxKeys?.type || 'نوع فال',
+  summary: LANG_DATA?.ctxKeys?.summary || 'خلاصه',
+  feedback: LANG_DATA?.ctxKeys?.feedback || 'بازخورد کاربر',
+};
+export const CONTEXT_KEYS = CTX_KEYS;
+/** نامِ کارت به زبانِ جاری (fallback: نامِ فارسیِ `cards.js`). */
+export const cardName = (key) => NAMES.cards[key] || CARD_BY_KEY[key]?.fa || '';
+/** نامِ جایگاه؛ کلید خودِ رشته‌ی فارسی است، چون همان برچسبِ canonical است. */
+export const positionName = (fa, i = 0) => NAMES.positions[fa] || fa || POS_FALLBACK(i);
+/** نامِ چیدمان (همان‌طور: کلید رشته‌ی فارسی). */
+export const spreadName = (fa) => NAMES.spreads[fa] || fa || '';
+/** برچسبِ دو سمتِ فالِ تقابلی، به زبانِ جاری.
+ * ⚠️ اینها مستقیم **جوابِ نهایی** می‌شوند (`verdict.js` عیناً چاپشان می‌کند)، پس بدونِ
+ * ترجمه کاربرِ روسی «Ответ: موندن» می‌گرفت. همان جدولِ جایگاه‌ها کلیدشان است. */
+export const choiceLabelsFor = (spread) =>
+  Array.isArray(spread?.choiceLabels) ? spread.choiceLabels.map((l, i) => positionName(l, i)) : undefined;
+
+/** کلیدواژه‌های مستقیم/معکوسِ کارت به زبانِ جاری. */
+export const cardKeywords = (key) => NAMES.keywords[key] || {
+  up: CARD_BY_KEY[key]?.up || [], down: CARD_BY_KEY[key]?.down || [],
+};
+
 
 /* ═══ مدل‌ها و کلاینتِ OpenRouter ═══ */
 export const FLASH          = 'google/gemini-2.5-flash';
-export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // هم‌سطح Flash و ارزان‌تر — وقتی Flash بعد از ۳ تلاش جواب نداد
+/* 🌍 مدلِ **خوانش** per زبان. عمداً از `FLASH` جداست و جایگزینش نمی‌شود:
+ * `FLASH` هنوز مدلِ عمومیِ صداشنو است و مسیرهای دیگر (رونویسیِ ویس، ایجنتِ رسید،
+ * کارتِ روز) باید روی همان بمانند. اگر یک ثابت هر دو کار را می‌کرد، عوض‌کردنِ مدلِ
+ * خوانشِ روسی بی‌صدا رونویسیِ ویس را هم می‌برد روی مدلی که صدا نمی‌فهمد.
+ * از env می‌آید چون هر زبان یک اپِ pm2 با `.env` خودش است (همان الگوی `GATE_CHANNEL`)،
+ * پس کد فورک نمی‌شود. نبودنِ متغیر یعنی دقیقاً رفتارِ امروز، پس فارسی دست‌نخورده است. */
+/* 🌍 پیش‌فرضِ **اندازه‌گیری‌شده‌ی** هر زبان، نه یک حدس و نه یک رشته در deploy.yml.
+ * آزمایشگاه هر زبان را روی سه مجموعه‌ی سناریوی **متفاوت** و در مقایسه‌ی **جفت‌شده**
+ * سنجید (همان کارت‌ها و همان سؤال‌ها برای هر دو بازو) و `luna` در هر سه مجموعه‌ی هر
+ * زبان روی سنجه‌ی مرکزیِ «جمله‌ی بی‌لنگر» برنده شد. اعداد و روش: I18N-MODEL-RESEARCH.md.
+ *
+ * ⚠️ چرا این‌جا و نه در `.env` که دیپلوی بنویسد: عددِ این تصمیم از یک حلقه‌ی
+ * اندازه‌گیری آمده و باید همان‌جایی بنشیند که خوانده و تست می‌شود. یک نامِ مدل در
+ * یک YAMLِ دیپلوی نه چکِ CI می‌بیندش نه کسی که کدِ ربات را می‌خواند — و درسِ همین
+ * سشن دقیقاً همین بود: «آن‌چه گزارش شد و آن‌چه واقعاً اجرا شد یکی نبودند».
+ * `process.env.READING_MODEL` همچنان override می‌کند (برای آزمایشِ موردی).
+ *
+ * ✅ `fa` هم از ۱۴۰۵/۰۶/۱۰ در جدول است (تصمیمِ صریحِ مالک). پیش از آن عمداً بیرون
+ * بود تا رباتِ زنده دست‌نخورده بماند؛ سوییچ بعد از دو دورِ ۹۰فالیِ جفت‌شده انجام شد
+ * که در دورِ دوم `luna` روی **هر دو** محور جلو افتاد: بی‌لنگر ۱۰٫۴٪ در برابرِ ۳۰٫۷٪،
+ * و صفر ایرادِ سختِ STYLE.md در برابرِ ۶ (بخشِ «حکمِ فارسی برگشت» در CLAUDE.md).
+ *
+ * 🎙 مسیرِ ویس خودش را تطبیق می‌دهد و لازم نیست کسی یادش باشد: `luna` صدا نمی‌فهمد،
+ * پس `READER_HEARS_AUDIO` در `index.js` false می‌شود و ویس اول با `orTranscribe`
+ * (که روی مدل‌های صداشنو می‌ماند) به متن تبدیل می‌شود. یعنی حالا **هر چهار زبان**
+ * مسیرِ دو-فراخوانی دارند و آن واگرایی از جدولِ استثناها برداشته شد.
+ * رول‌بکِ یک‌خطی: برداشتنِ ردیفِ `fa` از این جدول. */
+export const LUNA = 'openai/gpt-5.6-luna';
+const READING_MODEL_BY_LOCALE = {
+  fa: LUNA,
+  ru: LUNA,
+  pt: LUNA,
+  es: LUNA,
+};
+export const READING_MODEL  = (process.env.READING_MODEL || '').trim()
+  || READING_MODEL_BY_LOCALE[LOCALE] || FLASH;
+export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // آخرین پله‌ی زنجیره (پایین‌تر، `READING_PLAN`)
 export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
 
 // کلید از env خوانده می‌شود، نه از پارامتر: هم ربات و هم آزمایشگاه همان `OPENROUTER_API_KEY`
@@ -126,12 +239,32 @@ export function orChat(system, user, opts = {}) {
 // فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
 // `usage` و شماره‌ی تلاش هم برمی‌گردند تا آزمایشگاه بتواند هزینه و نرخِ retry را گزارش کند
 // (ربات فقط `out` و `model` را می‌خواند، پس این افزودنی چیزی را عوض نمی‌کند).
-export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FLASH, FLASH, FALLBACK_MODEL, FALLBACK_MODEL]) {
+/* 🔗 زنجیره‌ی فالبکِ خوانش (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۰): سه تلاش روی مدلِ خودِ
+ * زبان، بعد **جمنای**، بعد **دیپ‌سیک**.
+ *
+ * چرا ترتیب عوض شد: تا امروز فالبک مستقیم دیپ‌سیک بود، چون مدلِ اصلی خودش جمنای
+ * بود و فالبکِ هم‌خانواده بی‌معنی است. حالا که هر چهار زبان روی `luna` اند، جمنای
+ * از «همان مدل» به «نزدیک‌ترین مدلِ سنجیده‌شده‌ی دیگر» تبدیل شده: تنها مدلی که در
+ * این ریپو روی هر چهار زبان اندازه‌گیری شده و **صدا هم می‌فهمد**. دیپ‌سیک یک پله
+ * عقب‌تر می‌ماند چون در دورِ ۹ روسی هم بی‌لنگرِ بدتری داد و هم دُمِ تأخیرِ ۳۱ثانیه‌ای.
+ *
+ * ⚠️ اگر `READING_MODEL` دوباره `FLASH` شود (رول‌بک)، این آرایه به چهار تلاشِ جمنای
+ * به‌علاوه‌ی یک دیپ‌سیک تبدیل می‌شود. بی‌ضرر است و عمداً ساده نگه داشته شده. */
+export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH, FALLBACK_MODEL];
+export async function orChatResilient(system, user, opts = {}, plan = READING_PLAN) {
   const usages = [];
   for (let i = 0; i < plan.length; i++) {
     try {
       const { text: out, usage } = await orChat(system, user, { ...opts, model: plan[i] });
       usages.push(usage);
+      /* ⚠️ گزارشِ «یک فراخوانی واقعاً به مدل رسید»، مستقل از اینکه validate قبولش کند
+       * یا نه. بدونِ این، مسیرِ شکست (`return null` پایین) کلِ `usages` را دور می‌ریزد و
+       * از بیرون هیچ راهی نیست بفهمی مدل جواب داد ولی جوابش رد شد، یا اصلاً فراخوانی
+       * نشد. آزمایشگاه دقیقاً همین دو را از هم جدا می‌کند و با نبودِ این callback
+       * «ردِ validate» را به‌غلط «به مدل نرسید» گزارش می‌کرد.
+       * روی ربات بی‌اثر است: `onUsage` را فقط آزمایشگاه پاس می‌دهد، و `orChat` بدنه‌ی
+       * ریکوئست را فیلدبه‌فیلد می‌سازد پس این گزینه هرگز به سیم نمی‌رود. */
+      try { opts.onUsage?.(usage); } catch { /* هرگز نباید فال را بشکند */ }
       if (!opts.validate || opts.validate(out)) return { out, model: plan[i], attempts: i + 1, usages };
       logErr(`LLM invalid output (attempt ${i + 1}, ${plan[i]})`);
     } catch (e) {
@@ -142,15 +275,92 @@ export async function orChatResilient(system, user, opts = {}, plan = [FLASH, FL
   return null;
 }
 
-export async function orTranscribe(audioBuffer, format, meta = null) {
-  const { text } = await orRequest({
-    model: FLASH,
-    messages: [{ role: 'user', content: [
-      { type: 'text', text: 'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.' },
-      { type: 'input_audio', input_audio: { data: audioBuffer.toString('base64'), format } },
-    ] }],
-  }, meta);
-  return text;
+/* 🎙 ═══ مسیرِ رونویسیِ ویس ═══
+ *
+ * از ۱۴۰۵/۰۶/۱۰ هر چهار زبان روی `luna` اند و `luna` صدا نمی‌فهمد، پس **همه‌ی**
+ * زبان‌ها از این مسیر رد می‌شوند. تا دیروز فارسی و روسی صدا را مستقیم به مدلِ خوانش
+ * می‌دادند و این مسیر فقط یک شاخه‌ی فرعی بود؛ حالا تنها راهِ ورودِ ویس به محصول است.
+ * یعنی یک نقطه‌ی خرابیِ بی‌فالبک وسطِ مسیرِ **پول‌داده‌شده** — که دقیقاً همان چیزی است
+ * که این پلن می‌بندد (تصمیمِ صریحِ مالک).
+ *
+ * چرا دو تلاش روی جمنای و بعد ویسپر، نه مستقیم ویسپر:
+ *   - شایع‌ترین خرابی خطای گذرا یا شلوغیِ لحظه‌ای است و تلاشِ دومِ همان مدل می‌گیردش،
+ *     با هزینه‌ی ~$۰٫۰۰۰۷ per دقیقه.
+ *   - ویسپر **مسیرِ واقعاً مستقل** است (وندورِ دیگر و endpointِ دیگر)، پس قطعیِ کاملِ
+ *     جمنای را هم پوشش می‌دهد. ولی طبقِ اندازه‌گیریِ خودمان **۸٫۸ برابر** گران‌تر است
+ *     ($۰٫۰۰۶ per دقیقه)، پس جایش پله‌ی آخر است نه اول. جزئیات: I18N-ES-STT-RESEARCH.md.
+ *   - ⚠️ و شواهدی که جمع کردیم می‌گویند ویسپر روی اسپانیاییِ لاتین **بهتر نیست**؛
+ *     این‌جا نقشش «در دسترس بودن» است نه «دقتِ بیشتر». اگر روزی خواستیم روی کیفیت
+ *     انتخابش کنیم، اول `tools/stt-eval.mjs` روی صدای واقعی اجرا شود.
+ *
+ * `:stt` یعنی endpointِ اختصاصیِ رونویسی (`/audio/transcriptions`) نه chat completions.
+ * ⚠️ آن endpoint برچسبِ فرمت را جدی می‌گیرد و بایتِ ogg با برچسبِ mp3 را رد می‌کند —
+ * برای همین باگِ برچسبِ فرمت در `index.js` باید **قبل از** روشن‌شدنِ این پله درست
+ * می‌شد، و شد. */
+export const TRANSCRIBE_MODEL    = FLASH;
+export const TRANSCRIBE_FALLBACK = 'openai/whisper-1:stt';
+export const TRANSCRIBE_PLAN     = [TRANSCRIBE_MODEL, TRANSCRIBE_MODEL, TRANSCRIBE_FALLBACK];
+export const TRANSCRIBE_PROMPT   =
+  'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.';
+
+// endpointِ اختصاصیِ رونویسی. جدا از `orRequest` است چون نه `messages` می‌گیرد نه
+// `choices` برمی‌گرداند؛ ولی حسابداریِ مصرف عیناً از همان سینک می‌رود تا هزینه‌ی این
+// پله هم در `llm_usage` دیده شود (وگرنه گران‌ترین پله نامرئی‌ترین هم می‌شد).
+async function sttRequest(model, dataB64, format, meta) {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${keyOf()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input_audio: { data: dataB64, format } }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      logErr(`❌ OpenRouter STT ${res.status} (${model}):`, errBody.slice(0, 300));
+      throw new Error(`OpenRouter STT error ${res.status}`);
+    }
+    const data = await res.json();
+    const u = data.usage || {};
+    if (usageSink && USAGE_ACCOUNTING) {
+      try {
+        usageSink({
+          model, kind: meta?.kind || '', refId: Number(meta?.refId) || 0, userId: Number(meta?.userId) || 0,
+          promptTokens: 0, completionTokens: 0, totalTokens: 0,
+          costUsd: Number(u.cost) || 0, ms: Date.now() - t0,
+        });
+      } catch (e) { logErr('usage sink:', e.message); }
+    }
+    return String(data.text || '').trim();
+  } finally { clearTimeout(timer); }
+}
+
+export async function orTranscribe(audioBuffer, format, meta = null, plan = TRANSCRIBE_PLAN) {
+  const dataB64 = audioBuffer.toString('base64');
+  for (let i = 0; i < plan.length; i++) {
+    const entry = plan[i];
+    const isStt = entry.endsWith(':stt');
+    const model = isStt ? entry.slice(0, -4) : entry;
+    try {
+      const text = isStt
+        ? await sttRequest(model, dataB64, format, meta)
+        : (await orRequest({
+            model,
+            messages: [{ role: 'user', content: [
+              { type: 'text', text: TRANSCRIBE_PROMPT },
+              { type: 'input_audio', input_audio: { data: dataB64, format } },
+            ] }],
+          }, meta)).text;
+      if (text && text.trim()) return text;
+      logErr(`TRANSCRIBE خروجیِ خالی (تلاشِ ${i + 1}، ${entry})`);
+    } catch (e) {
+      logErr(`TRANSCRIBE خطا (تلاشِ ${i + 1}، ${entry}):`, e.message);
+    }
+    if (i < plan.length - 1) await sleep(1500);
+  }
+  return null;   // همه‌ی پله‌ها سوختند؛ صدا زننده خودش fail-safe است (خوانش نمی‌شکند)
 }
 
 export function parseJsonLoose(s) {
@@ -225,7 +435,39 @@ export function stripCardLabel(t) {
 
 // خط تیره‌ی بلند امضای متنِ ماشینی است (بند ۱۰ ریشه). پرامپت ممنوعش کرده، ولی این
 // شبکه‌ی ایمنیِ قطعی است: چیزی که کد می‌تواند تضمین کند نباید فقط به مدل سپرده شود.
-export const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*--\s*/g, '، ');
+/* جداکننده‌ای که جای خط‌تیره می‌نشیند. per زبان است: فارسی ویرگولِ فارسی («،»)
+ * می‌خواهد و روسی ویرگولِ لاتین. تا قبل از این «، » هاردکد بود، یعنی متنِ روسی یک
+ * کاراکترِ بیگانه‌ی عربی وسطش می‌گرفت. `configureSeparator` موقعِ boot صدا زده می‌شود. */
+let DASH_TO = '، ';
+/* جداکننده‌ی نام از سرخط. ⚠️ این هم مثل `DASH_TO` یک ویرگولِ **عربی** بود، پس هر فالِ
+ * روسی با «Аня، …» شروع می‌شد: یک نویسه‌ی فارسی در **اولین خطِ** محصولِ پولی، در هر
+ * فال. سنجه‌ی تازه‌ی نویسه‌ی بیگانه دقیقاً همین را گرفت. */
+let NAME_SEP = '، ';
+export function configureSeparator(sep, nameSep) {
+  if (typeof sep === 'string' && sep) DASH_TO = sep;
+  // پیش‌فرضِ جداکننده‌ی نام همان جداکننده‌ی خط‌تیره است: هر دو «ویرگولِ همان زبان» اند،
+  // پس یک زبان با ست‌کردنِ یکی، دومی را هم درست می‌گیرد و نمی‌تواند نصفه بماند.
+  NAME_SEP = (typeof nameSep === 'string' && nameSep) ? nameSep : DASH_TO;
+}
+/* نشانه‌گذاریِ مارک‌داون که مدل خودسرانه تولید می‌کند.
+ *
+ * ⚠️ چرا این یک باگِ **رو-به-کاربر** است و نه زیبایی‌شناسی: متنِ v4 عمداً **بدونِ**
+ * `parse_mode` فرستاده می‌شود (کامنتِ `deliverReading`), پس تلگرام هیچ نشانه‌گذاری‌ای
+ * را تفسیر نمی‌کند و کاربر عیناً ستاره‌ها را می‌بیند. کامنتِ قبلی می‌گفت «خروجیِ v4
+ * هیچ قالب‌بندی‌ای ندارد» — ولی این یک **فرض** درباره‌ی رفتارِ مدل بود، نه چیزی که
+ * تضمین شده باشد. دورِ اولِ آزمایشگاهِ روسی خلافش را نشان داد: سرخطِ یک فال با
+ * `**очень вероятно**` تحویل شد. زبانش هم مهم نیست، پس گارد برای **هر دو** است.
+ *
+ * فقط نشانه‌ها برداشته می‌شوند، نه متنِ داخلشان. `_` تکی عمداً دست نمی‌خورد چون در
+ * وسطِ کلمه رایج است و برداشتنش متن را خراب‌تر می‌کند تا درست‌تر. */
+const stripMarkup = (t) => String(t)
+  .replace(/\*\*(.+?)\*\*/gs, '$1')      // **بولد**
+  .replace(/__(.+?)__/gs, '$1')          // __بولد__
+  .replace(/(^|\s)\*(\S(?:.*?\S)?)\*(?=\s|$)/gs, '$1$2') // *ایتالیک*
+  .replace(/`+/g, '')                    // بک‌تیک و بلوکِ کد
+  .replace(/^\s{0,3}#{1,6}\s+/gm, '');   // تیترِ مارک‌داون
+
+export const noDash = (t) => stripMarkup(String(t).replace(/\s*—\s*/g, DASH_TO).replace(/\s*--\s*/g, DASH_TO));
 
 // ⏱ `agoFa` (فاصله‌ی زمانی به فارسیِ گفتاری) حذف شد. تاریخچه‌ی کوتاهش درس دارد:
 // اول مدل زمانِ فال‌های قبلی را از خودش می‌ساخت («پارسال» برای فالی که ۱۰ دقیقه قبل
@@ -235,8 +477,36 @@ export const noDash = (t) => String(t).replace(/\s*—\s*/g, '، ').replace(/\s*
 // بوده، می‌خواهد بداند یادش هست چه پرسیده. پس خودِ داده حذف شد و مسئله از بین رفت.
 // (بازه‌ی زمانیِ **آینده** در جمع‌بندی سرِ جایش است؛ آن‌جا واقعاً ارزش دارد.)
 
-export const tehranToday = (d = new Date()) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(d);
+/* 🌍 مرزِ «روز» و ساعتِ یادآوری per زبان. تا امروز `Asia/Tehran` هاردکد بود و برای
+ * رباتِ فارسی درست؛ ولی همان کد سه رباتِ دیگر را هم اجرا می‌کند و آن‌جا یعنی:
+ *   • کارتِ رایگانِ روزانه‌ی کاربرِ برزیلی ساعتِ ۱۷:۳۰ بعدازظهرِ **روزِ قبل** ری‌ست
+ *     می‌شد (نیمه‌شبِ تهران)، یعنی مهم‌ترین قلابِ رایگانِ محصول سرِ ساعتِ بی‌ربط.
+ *   • «یادآوریِ شبانه»ی ساعت ۲۲ برای او ۱۵:۳۰ بعدازظهر می‌رسید — یعنی نه شبانه بود
+ *     نه یادآوری، فقط یک پیامِ ناخواسته وسطِ روز (و دلیلِ بلاک شدن).
+ * استریک هم روی همین مرز حساب می‌شود، پس اشتباه بودنش یعنی استریکِ اشتباه.
+ *
+ * `fa` عمداً همان `Asia/Tehran` است، پس رباتِ زنده بیت‌به‌بیت دست‌نخورده می‌ماند.
+ * ⚠️ اسپانیاییِ آمریکای لاتین چند منطقه‌ی زمانی دارد و انتخابِ یک منطقه یک **تصمیم**
+ * است نه یک حقیقت: بزرگ‌ترین بازار (مکزیک) انتخاب شد. اگر روزی دیتای واقعیِ کاربر
+ * خلافش را گفت، همین یک ردیف عوض می‌شود. */
+const TZ_BY_LOCALE = {
+  fa: 'Asia/Tehran',
+  ru: 'Europe/Moscow',
+  pt: 'America/Sao_Paulo',
+  es: 'America/Mexico_City',
+};
+export const BOT_TZ = process.env.BOT_TZ?.trim() || TZ_BY_LOCALE[LOCALE] || 'Asia/Tehran';
+
+// «امروز» به وقتِ همان ربات. نامش عمداً دیگر «tehran» نیست: یک نامِ دروغ روی مسیرِ
+// پول و استریک، همان چیزی است که شش ماه بعد کسی را گمراه می‌کند.
+export const botToday = (d = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: BOT_TZ }).format(d);
+// n روز قبل، به وقتِ همان ربات (پنجره‌ی «۷ روزِ اخیر» و محاسبه‌ی استریک).
+export const botDaysAgo = (n) => botToday(new Date(Date.now() - n * 86400_000));
+// ساعتِ فعلیِ همان ربات، برای جاروی یادآوری.
+export const botHour = () => parseInt(new Intl.DateTimeFormat('en-US', {
+  timeZone: BOT_TZ, hour: '2-digit', hour12: false,
+}).format(new Date()), 10);
 
 /* ═══ «کارتِ سنگینی که نیامده» — حذف شد (۱۴۰۵/۰۵/۲۷) ═══ */
 // تاریخچه، چون درسش عمومی است: خوانشِ واقعیِ انسانی یک جمله‌ی مشخص داشت («کارت
@@ -267,26 +537,36 @@ export function buildReadingCtx({ user, spread, question, cards, focusKey, L, pr
     hideName, // UX v2: نام اصلاً به مدل نمی‌رود و کد خودش یک بار می‌چسباند
     focusFa: L.focusFa[focusKey] || focusKey || L.focusFa[user.focus_area] || '-',
     question,
-    spreadFa: spread.fa,
+    spreadFa: spreadName(spread.fa),
     cards: cards.map((c, i) => ({
-      positionFa: spread.positions[i]?.fa || `کارت ${i + 1}`,
-      fa: CARD_BY_KEY[c.key].fa,
+      positionFa: positionName(spread.positions[i]?.fa, i),
+      fa: cardName(c.key),
       en: CARD_BY_KEY[c.key].en,
       reversed: c.reversed,
-      up: CARD_BY_KEY[c.key].up,
-      down: CARD_BY_KEY[c.key].down,
+      up: cardKeywords(c.key).up,
+      down: cardKeywords(c.key).down,
       // دانشِ همین کارت (فقط در لحنِ جدید). مهم‌ترین تکه‌اش `image` است: cards.js فقط
       // کلیدواژه‌ی انتزاعی دارد («آغاز تازه»)، پس تا امروز مدل مجبور بود نمادِ تصویریِ
       // کارت را از خودش بسازد — و دقیقاً همان‌جا خروجی بی‌ربط می‌شد.
       kb: (kbOn && CARD_KB[c.key]) || undefined,
     })),
     // بدونِ هیچ فیلدِ زمانی: مرتب‌شده از تازه‌ترین، و همین کافی است.
+    /* 🌍 کلیدهای این آبجکت هم **متنِ پرامپت** اند، نه فقط ساختارِ داخلی: عیناً داخلِ
+     * JSONِ ورودیِ مدل می‌روند. تا امروز فارسیِ هاردکد بودند، پس رباتِ روسی یک آبجکتِ
+     * با کلیدِ فارسی می‌گرفت. دو ضرر داشت و هر دو بی‌صدا بودند:
+     *   ۱) نویسه‌ی فارسی داخلِ پرامپتِ غیرفارسی، دقیقاً همان چیزی که
+     *      `check-card-knowledge` برای دادهٔ کارت ممنوع کرده.
+     *   ۲) سنجه‌ی «لنگرِ حافظه» در آزمایشگاه با `summaryKey`ِ همان زبان دنبالِ خلاصه
+     *      می‌گشت و `undefined` می‌گرفت، پس جمله‌ای که به فالِ قبلی لنگر داشت
+     *      **بی‌لنگر** شمرده می‌شد و نرخِ روسی الکی بالا می‌رفت.
+     * برای `fa` این کلیدها عیناً همان‌های قبلی‌اند (پیش‌فرضِ زیر)، پس رفتارِ رباتِ
+     * زنده بیت‌به‌بیت دست‌نخورده است. */
     previous: prev.map(r => ({
-      'نوع فال': r.type,
-      'خلاصه': r.summary,
-      'بازخورد کاربر': r.feedback || '-',
+      [CTX_KEYS.type]: r.type,
+      [CTX_KEYS.summary]: r.summary,
+      [CTX_KEYS.feedback]: r.feedback || '-',
     })),
-    today: tehranToday(),
+    today: botToday(),
   };
 }
 
@@ -365,7 +645,7 @@ export function renderV4(llm, cards, labels, { name = '' } = {}) {
   // نامِ مخاطب **دقیقاً یک بار** و از کد، نه از مدل. تضمینِ ساختاری به‌جای دستورِ
   // پرامپتی که سه دور جواب نداد.
   const head = llm.headline
-    ? `${SECT.headline} ${name ? `${name}، ` : ''}${noDash(llm.headline)}`
+    ? `${SECT.headline} ${name ? `${name}${NAME_SEP}` : ''}${noDash(llm.headline)}`
     : '';
   return {
     headline: head,

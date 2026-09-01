@@ -42,24 +42,72 @@ function norm(s) {
 
 const tokens = (s) => norm(s).split(' ').filter(Boolean);
 
-const YES = new Set(['اره', 'بله', 'اری', 'مثبت', 'یس', 'yes', 'y', 'true']);
-const NO = new Set(['نه', 'خیر', 'منفی', 'نو', 'no', 'n', 'false']);
-const FIRST = new Set(['اول', 'اولی', 'اولین', 'یک', 'یکم', '1', 'a', 'الف', 'patha']);
-const SECOND = new Set(['دوم', 'دومی', 'دومین', 'دو', 'دویی', '2', 'b', 'ب', 'pathb']);
+/* 🌍 دادهٔ زبانیِ این ماژول از locale می‌آید (بند ۲و).
+ *
+ * ⚠️ چرا این لازم شد: تا اینجا همه‌ی مجموعه‌ها فارسیِ هاردکد بودند، یعنی روی یک
+ * رباتِ روسی `normalizeVerdict` برای «Да» **null** برمی‌گرداند و `headlineOk` هر
+ * سرخطِ روسی را رد می‌کرد. نتیجه‌اش خرابیِ بی‌صدا بود: بلوکِ جوابِ قاطع، که تمایزِ
+ * اصلیِ محصول است (بند ۱۰)، بی‌هیچ خطایی از خوانش حذف می‌شد.
+ *
+ * پیش‌فرض‌ها فارسی می‌مانند تا اگر کسی `configureVerdict` را صدا نزد رفتار عوض
+ * نشود، ولی index.js همیشه از روی locale صدایش می‌زند تا فارسی هم تک‌منبع باشد.
+ * الگوی مرجع: `setUsageSink` در همین ربات. */
+let LEX = {
+  answers: { YES: 'آره', NO: 'نه', FIRST: 'مسیر اول', SECOND: 'مسیر دوم' },
+  yes: ['اره', 'بله', 'اری', 'مثبت', 'یس', 'yes', 'y', 'true'],
+  no: ['نه', 'خیر', 'منفی', 'نو', 'no', 'n', 'false'],
+  first: ['اول', 'اولی', 'اولین', 'یک', 'یکم', '1', 'a', 'الف', 'patha'],
+  second: ['دوم', 'دومی', 'دومین', 'دو', 'دویی', '2', 'b', 'ب', 'pathb'],
+  ambiguous: [
+    'هر دو', 'هردو', 'هیچ کدام', 'هیچکدام', 'هیچ کدوم', 'هیچکدوم',
+    'فرقی', 'شاید', 'بستگی', 'نامشخص', 'مشخص نیست', 'نمی دونم', 'نمیدونم', 'معلوم نیست',
+  ],
+  direction: [
+    'بله', 'اره', 'اری', 'نه', 'خیر', 'محتمل', 'احتمال', 'احتمالا',
+    'می شه', 'میشه', 'می رسی', 'میرسی', 'هست', 'نیست',
+  ],
+  evasion: [
+    'بستگی به خودت', 'بستگی داره', 'شاید اره شاید نه', 'هم این هم اون',
+    'فقط خودت می دونی', 'فقط خودت میدونی', 'به شهودت',
+  ],
+  register: ['کائنات'],
+  but: ['اما', 'ولی', 'اگر', 'اگه', 'مگر', 'مگه'],
+  pastTime: /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پیش|ماهِ? ?(پیش|گذشته)|ماه‌ها پیش|ماه‌های قبل|هفتهٔ? ?(پیش|گذشته)|هفته‌ی (پیش|گذشته)|هفته‌ها پیش|هفته‌های قبل|روزهای قبل|چند وقت پیش|دفعه‌ی قبل که|بارِ? قبل که)/,
+};
+
+/** دادهٔ زبانیِ ماژول را از locale می‌گیرد. یک‌بار موقعِ boot صدا زده می‌شود. */
+export function configureVerdict(lex) {
+  if (!lex || typeof lex !== 'object') return;
+  LEX = { ...LEX, ...lex };
+  // الگوی زمانی به‌صورت رشته می‌آید (تا شکلِ locale قابلِ مقایسه بماند) و این‌جا کامپایل می‌شود
+  if (lex.pastTimePattern) { try { LEX.pastTime = new RegExp(lex.pastTimePattern); } catch { /* الگوی خراب: همان قبلی می‌ماند */ } }
+  // ⚠️ `EVASION`، `BINARY_ANSWERS` و `CHOICE_ANSWERS` از بیرون import می‌شوند (index.js
+  // و دو چکِ CI)، پس **در جا** پر می‌شوند نه جایگزین. اگر به‌جایش دوباره تعریفشان
+  // می‌کردیم، هر کسی که قبلاً import کرده بود به نسخه‌ی فارسیِ کهنه چسبیده می‌ماند.
+  if (lex.evasion) { EVASION.length = 0; EVASION.push(...lex.evasion); }
+  if (lex.answers) {
+    if (lex.answers.YES) BINARY_ANSWERS.YES = lex.answers.YES;
+    if (lex.answers.NO) BINARY_ANSWERS.NO = lex.answers.NO;
+    if (lex.answers.FIRST) CHOICE_ANSWERS.FIRST = lex.answers.FIRST;
+    if (lex.answers.SECOND) CHOICE_ANSWERS.SECOND = lex.answers.SECOND;
+  }
+}
+
+const YES = () => new Set(LEX.yes);
+const NO = () => new Set(LEX.no);
+const FIRST = () => new Set(LEX.first);
+const SECOND = () => new Set(LEX.second);
 
 // عبارت‌هایی که خودشان یعنی «جواب ندادم». باید **قبل از** تطبیقِ توکنی چک شوند،
 // وگرنه دامی مثل «هر دو» به‌خاطر کلمه‌ی «دو» به‌اشتباه «مسیر دوم» خوانده می‌شود.
-const AMBIGUOUS = [
-  'هر دو', 'هردو', 'هیچ کدام', 'هیچکدام', 'هیچ کدوم', 'هیچکدوم',
-  'فرقی', 'شاید', 'بستگی', 'نامشخص', 'مشخص نیست', 'نمی دونم', 'نمیدونم', 'معلوم نیست',
-];
+const AMBIGUOUS = () => LEX.ambiguous;
 
 // یکی از دو سمت را انتخاب می‌کند؛ اگر هر دو یا هیچ‌کدام دیده شوند یعنی جواب مبهم است.
 // (پرامپت صریحاً یک کلمه می‌خواهد و شرط/زمان‌بندی جای خودش را در فیلدِ nuance دارد،
 // پس «هم آره هم نه» یعنی مدل دستور را نادیده گرفته و باید دوباره تلاش شود.)
 function pickSide(value, setA, setB, outA, outB) {
   const flat = norm(value);
-  if (AMBIGUOUS.some((p) => flat.includes(p))) return null;
+  if (AMBIGUOUS().some((p) => flat.includes(p))) return null;
   const t = tokens(value);
   if (!t.length) return null;
   const hasA = t.some((w) => setA.has(w));
@@ -78,8 +126,8 @@ function labelSets(labels) {
   if (!a.length || !b.length) return null;
   if (a.some((w) => b.includes(w))) return null;
   return {
-    setA: new Set([...FIRST, ...a]),
-    setB: new Set([...SECOND, ...b]),
+    setA: new Set([...FIRST(), ...a]),
+    setB: new Set([...SECOND(), ...b]),
     outA: String(labels[0]).trim(),
     outB: String(labels[1]).trim(),
   };
@@ -102,18 +150,18 @@ export function normalizeVerdict(raw, mode, opts = {}) {
 
   let answer = null;
   if (mode === VERDICT_MODES.BINARY) {
-    answer = pickSide(raw.answer, YES, NO, BINARY_ANSWERS.YES, BINARY_ANSWERS.NO);
+    answer = pickSide(raw.answer, YES(), NO(), BINARY_ANSWERS.YES, BINARY_ANSWERS.NO);
   } else if (mode === VERDICT_MODES.CHOICE) {
     const cl = labelSets(opts.choiceLabels);
     answer = cl
       ? pickSide(raw.answer, cl.setA, cl.setB, cl.outA, cl.outB)
-      : pickSide(raw.answer, FIRST, SECOND, CHOICE_ANSWERS.FIRST, CHOICE_ANSWERS.SECOND);
+      : pickSide(raw.answer, FIRST(), SECOND(), CHOICE_ANSWERS.FIRST, CHOICE_ANSWERS.SECOND);
   } else if (mode === VERDICT_MODES.DIRECT) {
     // متنِ آزاد، ولی همان سخت‌گیری: جوابی که خودش «جواب ندادم» است رد می‌شود.
     // یک جمله‌ی کوتاه هم لازم است (تک‌کلمه‌ای مثل «بله» بدونِ ادامه، جوابِ سؤالِ باز نیست).
     const v = clean(raw.answer, VERDICT_LIMITS.answer);
     const flat = norm(v);
-    if (v && !AMBIGUOUS.some((p) => flat.includes(p)) && tokens(v).length >= 3) answer = v;
+    if (v && !AMBIGUOUS().some((p) => flat.includes(p)) && tokens(v).length >= 3) answer = v;
   }
   if (!answer) return null;
 
@@ -157,10 +205,42 @@ export const decisiveMode = (spread, toneV2 = false) =>
 // «ولی» نرم‌کننده نیست، خودِ ارزش است: هم جواب را باورپذیر می‌کند و هم چیزی را
 // باز می‌گذارد که دلیلِ طبیعیِ برگشتن می‌شود.
 
-const DIRECTION = [
-  'بله', 'اره', 'اری', 'نه', 'خیر', 'محتمل', 'احتمال', 'احتمالا',
-  'می شه', 'میشه', 'می رسی', 'میرسی', 'هست', 'نیست',
-];
+const DIRECTION = () => LEX.direction;
+
+/* 🌍 **چطور** تطبیق داده شود، per زبان — نه چه چیزی.
+ *
+ * ⚠️ باگی که آزمایشگاهِ روسی (دورِ ۵) لو داد: فارسی فعل و صفت را برای این کار صرف
+ * نمی‌کند، پس `includes` روی کلمه‌ی کامل جواب می‌داد. روسی می‌کند: فهرست
+ * «вероятно» داشت و مدل «вероятен» می‌نوشت، «получится» داشت و مدل «решится».
+ * نتیجه: از ۱۰ تلاشِ ردشده‌ی آن دور، **۸ تا سرخطِ کاملاً درست** بودند که گارد
+ * نشناخت — یعنی هر بار یک فالِ کاملِ دوباره‌تولیدشده (~$۰.۰۰۵) دور ریخته شد و دو
+ * فال تا فالبکِ ارزان‌تر عقب رفتند. خرابی هم بی‌صدا بود: کاربر خوانشِ سالم می‌گرفت،
+ * فقط ما پول و کیفیت می‌سوزاندیم.
+ * بدتر اینکه رد کردن **تصادفی** بود نه سخت‌گیرانه: `да` به‌عنوان زیررشته داخلِ
+ * «когда» و «правда» و «даже» می‌افتد، پس سرخطی که اتفاقاً یکی از آن‌ها را داشت
+ * رد نمی‌شد. یعنی گارد نه سخت بود نه شل، **نویز** بود.
+ *
+ * درمان per زبان است نه سراسری: `directionStem: true` یعنی «تطبیق سرِ توکن
+ * می‌نشیند»، و در آن حالت خودِ ردیف می‌گوید چطور: ستاره‌ی آخر (`вероят*`) یعنی
+ * **ریشه**، و بدونِ ستاره (`да`) یعنی **کلمه‌ی کامل**. این تفکیک لازم است، نه
+ * تزئینی: `да` یک ذرهٔ دوحرفی است و به‌عنوان ریشه داخلِ «давно» و «даже» می‌افتد،
+ * یعنی همان نویزِ بالا از در دیگری برمی‌گشت. عبارتِ چندکلمه‌ای در هر حالت
+ * `includes` می‌ماند، چون ریشه‌گیری روی توکن برایش بی‌معنی است.
+ * فارسی این پرچم را ندارد، پس رفتارش بیت‌به‌بیت همان `includes`ِ قبلی می‌ماند و
+ * رباتِ زنده اصلاً لمس نمی‌شود. */
+const hasDirection = (t) => {
+  const list = DIRECTION();
+  if (!LEX.directionStem) return list.some((d) => t.includes(norm(d)));
+  const words = t.split(' ').filter(Boolean);
+  return list.some((d) => {
+    const star = String(d).endsWith('*');
+    const n = norm(star ? String(d).slice(0, -1) : d);
+    if (!n) return false;
+    if (n.includes(' ')) return t.includes(n);          // عبارتِ چندکلمه‌ای
+    return star ? words.some((w) => w.startsWith(n))    // ریشه
+      : words.includes(n);                              // کلمه‌ی کامل
+  });
+};
 // عبارت‌هایی که یعنی «جواب ندادم» — حتی اگر «ولی» هم داشته باشند.
 // این‌ها **قولِ اصلیِ محصول** را می‌شکنند: کاربر آمده جواب بگیرد و اینها جواب را به
 // خودش پس می‌دهند. بازخوردِ واقعیِ کاربر همین بود: «اون جوابی که می‌خواستم رو آخر
@@ -172,13 +252,13 @@ export const EVASION = [
 // «کائنات» از جنسِ دیگری است: طفره‌رفتن نیست، فقط واژگانِ عمومیِ نامطلوب است. در سرخط
 // رد می‌شود (سرخط کوتاه است و یک کلمه‌ی این‌شکلی کلش را خراب می‌کند) ولی در متنِ بلند
 // ارزشِ یک بازتولیدِ کامل را ندارد — تفکیکشان عمدی است، نه سهو.
-const REGISTER = ['کائنات'];
-const NO_DIRECTION = [...EVASION, ...REGISTER];
+const REGISTER = () => LEX.register;
+const NO_DIRECTION = () => [...EVASION, ...LEX.register];
 
 // اشاره‌ی زمانی به **گذشته**: مدل تاریخِ جلسه‌های قبل را ندارد، پس هر «پارسال» و
 // «هفته‌ی پیش» ساخته‌ی خودش است — یعنی به کاربر دروغ می‌گوید. اینجاست نه در
 // آزمایشگاه، چون گارد و سنجه باید از **یک** تعریف بخوانند (درسِ گافِ تیزر).
-const PAST_TIME = /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پیش|ماهِ? ?(پیش|گذشته)|ماه‌ها پیش|ماه‌های قبل|هفتهٔ? ?(پیش|گذشته)|هفته‌ی (پیش|گذشته)|هفته‌ها پیش|هفته‌های قبل|روزهای قبل|چند وقت پیش|دفعه‌ی قبل که|بارِ? قبل که)/;
+const PAST_TIME = () => LEX.pastTime;
 
 /**
  * اشاره‌ی زمانیِ ساختگی به گذشته. برخلاف `evasionIn` روی متنِ **خام** کار می‌کند
@@ -186,7 +266,7 @@ const PAST_TIME = /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پ
  * @returns {string|null}
  */
 export function pastTimeIn(raw) {
-  const m = String(raw || '').match(PAST_TIME);
+  const m = String(raw || '').match(PAST_TIME());
   return m ? m[0] : null;
 }
 
@@ -201,7 +281,7 @@ export function evasionIn(raw) {
   const t = norm(raw);
   return EVASION.find((p) => t.includes(norm(p))) || null;
 }
-const BUT = ['اما', 'ولی', 'اگر', 'اگه', 'مگر', 'مگه'];
+const BUT = () => LEX.but;
 
 /**
  * سرخط را اعتبارسنجی می‌کند. `false` یعنی دوباره تلاش کن.
@@ -211,7 +291,7 @@ const BUT = ['اما', 'ولی', 'اگر', 'اگه', 'مگر', 'مگه'];
 export function headlineOk(raw) {
   const t = norm(raw);
   if (!t || t.split(' ').filter(Boolean).length < 4) return false;
-  if (NO_DIRECTION.some((p) => t.includes(norm(p)))) return false;
-  if (!DIRECTION.some((d) => t.includes(norm(d)))) return false;
-  return BUT.some((b) => t.split(' ').includes(norm(b)));
+  if (NO_DIRECTION().some((p) => t.includes(norm(p)))) return false;
+  if (!hasDirection(t)) return false;
+  return BUT().some((b) => t.split(' ').includes(norm(b)));
 }

@@ -13,18 +13,40 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import CARDS from '../bots/tarot/cards.js';
 
-const P = new URL('../bots/tarot/card-knowledge.fa.json', import.meta.url);
 let pass = 0; const errs = [];
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
 
-if (!existsSync(P)) {
-  console.log('⏭ card-knowledge.fa.json هنوز ساخته نشده — فیچر fail-safe است، رد می‌شویم.');
+/* 🌍 هر زبان جدولِ خودش را دارد (`card-knowledge.<locale>.json`). این چک **همه‌شان** را
+ * می‌گردد، نه فقط فارسی: یک جدولِ روسیِ نصفه یا آلوده دقیقاً همان سه خطرِ بالا را دارد،
+ * فقط برای کاربرِ روسی. زبانی که فایل ندارد fail-safe است و رد می‌شود. */
+const DIR = new URL('../bots/tarot/', import.meta.url);
+const FILES = readdirSync(DIR).filter(f => /^card-knowledge\.[a-z-]+\.json$/.test(f)).sort();
+if (!FILES.length) {
+  console.log('⏭ هیچ جدولِ دانشی ساخته نشده — فیچر fail-safe است، رد می‌شویم.');
   process.exit(0);
 }
-
-const kb = JSON.parse(readFileSync(P, 'utf8'));
-const keys = Object.keys(kb);
 const LIMITS = { image: 160, up: 120, down: 120, love: 100, work: 100 };
+/* نویسه‌ی بیگانه per زبان. متنِ این جدول مستقیم وارد پرامپت می‌شود، پس یک نویسه‌ی
+ * بیگانه یعنی مدل زیرِ فشار به آن زبان می‌لغزد و کاربر جوابِ نصفه‌زبان می‌گیرد.
+ * CJK مخصوصاً برای روسی مهم است: پرگزارش‌ترین خرابیِ مدل‌های چینی روی متنِ روسی. */
+const FA = [/[؀-ۿ]/, 'نویسه‌ی فارسی/عربی'];
+const CJK = [/[　-鿿＀-￯]/, 'نویسه‌ی CJK'];
+const LATIN = [/[A-Za-z]{3,}/, 'کلمه‌ی لاتین'];
+const CYR = [/[А-Яа-яЁё]{2,}/, 'نویسه‌ی سیریلیک'];
+const ALIEN = {
+  fa: [LATIN],
+  ru: [LATIN, FA, CJK],
+  /* پیش‌فرض = زبانِ **لاتین‌نویس** (pt، es، …): سیریلیک هم برایش بیگانه است.
+   * ⚠️ زبانِ سیریلیک‌نویسِ تازه (مثلاً اوکراینی) باید ردیفِ خودش را بگیرد، وگرنه این
+   * پیش‌فرض کلِ متنش را بیگانه اعلام می‌کند. الگویش همان ردیفِ `ru` بالاست. */
+  _: [FA, CJK, CYR],
+};
+
+for (const file of FILES) {
+const LANG = file.replace(/^card-knowledge\.|\.json$/g, '');
+console.log(`\n${'━'.repeat(60)}\n🌍 زبان: ${LANG}  (${file})\n${'━'.repeat(60)}`);
+const kb = JSON.parse(readFileSync(new URL(file, DIR), 'utf8'));
+const keys = Object.keys(kb);
 
 console.log('▶ پوششِ کارت‌ها');
 {
@@ -40,15 +62,17 @@ console.log('\n▶ کامل بودنِ هر ردیف');
   ok(bad.length === 0, `هر ردیف تصویر و معنیِ مستقیم و معکوس دارد${bad.length ? ` (ناقص: ${bad.slice(0, 8).join(',')})` : ''}`);
 }
 
-console.log('\n▶ فارسیِ خالص (هیچ انگلیسی‌ای وارد پرامپت نمی‌شود)');
+console.log('\n▶ تک‌زبانه بودن (هیچ نویسه‌ی بیگانه‌ای وارد پرامپت نمی‌شود)');
 {
-  const latin = [];
-  for (const [k, v] of Object.entries(kb)) {
-    for (const [f, val] of Object.entries(v)) {
-      if (typeof val === 'string' && /[A-Za-z]{3,}/.test(val)) latin.push(`${k}.${f}`);
+  for (const [re, label] of (ALIEN[LANG] || ALIEN._)) {
+    const hits = [];
+    for (const [k, v] of Object.entries(kb)) {
+      for (const [f, val] of Object.entries(v)) {
+        if (typeof val === 'string' && re.test(val)) hits.push(`${k}.${f}`);
+      }
     }
+    ok(hits.length === 0, `هیچ ${label}ی در متن‌ها نیست${hits.length ? ` (${hits.slice(0, 6).join(', ')})` : ''}`);
   }
-  ok(latin.length === 0, `هیچ کلمه‌ی لاتینی در متن‌ها نیست${latin.length ? ` (${latin.slice(0, 6).join(', ')})` : ''}`);
   // قاعده‌ی سراسریِ بند ۱۰ ریشه
   const dash = keys.filter(k => /[—–]|--/.test(JSON.stringify(kb[k])));
   ok(dash.length === 0, `هیچ خط تیره‌ی بلندی نیست${dash.length ? ` (${dash.slice(0, 6).join(',')})` : ''}`);
@@ -71,6 +95,8 @@ console.log('\n▶ سقفِ اندازه (ضدِ تورمِ پرامپت)');
   ok(max <= 800, `چاق‌ترین ردیف ${max} کاراکتر (سقف ۸۰۰)`);
 }
 
+} // ← پایانِ حلقه‌ی زبان‌ها
+
 console.log('\n▶ ترجمه دستی است، نه ماشینی');
 {
   // قاعده‌ی صریحِ مالک (۱۴۰۵/۰۵/۲۴): کلیدِ OpenRouter **فقط** برای خودِ محصول است و
@@ -88,6 +114,8 @@ console.log('\n▶ سیم‌کشیِ runtime');
   const SRC = readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
   const LOC = readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
   ok(/CARD_KB\[c\.key\]/.test(SRC), 'فقط ردیفِ کارتِ کشیده‌شده خوانده می‌شود (نه کلِ جدول)');
+  // 🌍 مسیر باید پویا باشد، وگرنه رباتِ روسی ۷۸ ردیفِ متنِ فارسی را در پرامپتِ روسی می‌ریزد
+  ok(/card-knowledge\.\$\{LOCALE\}\.json/.test(SRC), 'جدولِ دانش per زبان بار می‌شود، نه فارسیِ هاردکد');
   ok(/kbOn && CARD_KB/.test(SRC), 'دانش فقط در لحنِ جدید تزریق می‌شود');
   const BOT = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
   ok(/kbOn: toneV2For\(user\.telegram_id\)/.test(BOT), 'پرچمِ لحن از خودِ ربات می‌آید، نه از هسته');

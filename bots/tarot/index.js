@@ -11,8 +11,11 @@
 //
 // مغز فالگیر: google/gemini-2.5-flash (OpenRouter) — تک‌فراخوانی per فال، پیش‌فراخوانی بعد از انتخاب کارت سوم.
 // چندزبانه: همه‌ی متن‌ها/پرامپت‌ها از locales/<LOCALE>.js؛ هر زبان بعداً یک اپ pm2 جدا با ENV_FILE خودش.
-import dotenv from 'dotenv';
-dotenv.config({ path: process.env.ENV_FILE || '.env' });
+// ⚠️ **اولین import و باید اول بماند.** `.env` را بار می‌کند تا ماژول‌هایی که سرِ
+// بارگذاری از `process.env` می‌خوانند (`LOCALE` در `reading-core.js` و `ganjineh.js`)
+// مقدارِ درست را ببینند. در ESM importهای ایستا قبل از بدنه اجرا می‌شوند، پس
+// صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
+import './env-boot.js';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
@@ -35,16 +38,17 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
+import { configureLocale } from './locale-boot.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
 import {
-  FLASH, FALLBACK_MODEL, OR_TIMEOUT_MS,
+  FLASH, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
-  seedToInt, shuffledDeck, drawCards, tehranToday, GRID_SIZE,
+  seedToInt, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
-  buildReadingCtx, renderV4,
+  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor,
 } from './reading-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -68,11 +72,26 @@ const starsRail = PAY_RAIL === 'stars';
  * زبانی است: فارسی ماهِ شمسی می‌گوید و زبانی که تقویمِ دیگری دارد می‌تواند همان
  * ایندکس را با نامِ برجِ متناظر نشان بدهد، بدونِ اینکه دیتای گنجینه جابه‌جا شود. */
 const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
+
+/* ⚖️ دادهٔ زبانیِ حکمِ قاطع و جداکننده‌ی خط‌تیره را از همین locale به دو ماژولِ خالص
+ * تزریق می‌کند. **قبل از هر خوانشی** و یک‌بار موقعِ boot اجرا می‌شود.
+ * بدونِ این، رباتِ غیرفارسی خرابیِ بی‌صدا می‌گرفت: `normalizeVerdict` برای جوابِ
+ * روسی null می‌داد و بلوکِ جواب بی‌هیچ خطایی از خوانش حذف می‌شد (بند ۱۰). */
+/* 🌍 تک‌نقطه‌ی پیکربندیِ زبان: حکمِ قاطع، جداکننده‌ی «—»، و نامِ کارت/جایگاه/چیدمان.
+ * آزمایشگاه هم **همین** تابع را صدا می‌زند تا آن‌چه سنجیده می‌شود با آن‌چه کاربر
+ * می‌بیند یکی بماند. برای `fa` هیچ‌کدام از این جدول‌ها در locale نیستند، پس هسته به
+ * همان فیلدهای هاردکدِ `cards.js`/`spreads.js` fallback می‌کند و فارسی دست‌نخورده است. */
+configureLocale(L);
 const fmt = L.fmt;
-// فال حافظ: دیتای استاتیک (فقط fa؛ زبان‌های دیگر بدون فایل = فیچر خودکار غیرفعال)
-const HAFEZ = await import(`./hafez.js`).then(m => m.default.ghazals).catch(() => []);
-// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale)
-const QUIZ = await import(`./quiz.js`).then(m => m.default.personalities).catch(() => ({}));
+// فال حافظ: دیتای استاتیکِ **per زبان** (امروز فقط `hafez.fa.js`). زبانی که فایلِ خودش را
+// ندارد آرایه‌ی خالی می‌گیرد و فیچر خودکار خاموش می‌شود (`if (HAFEZ.length)` سرِ هر مسیر).
+// ⚠️ نامِ فایل حتماً `${LOCALE}` داشته باشد: قبلاً `./hafez.js` بی‌قید import می‌شد و
+// کامنتش ادعا می‌کرد «زبان‌های دیگر بدون فایل»، در حالی که هر زبانی همان غزل‌های فارسی را
+// می‌گرفت. چون `FREE_MENU_ENABLED` خاموش بود کسی ندیدش؛ تله‌ی خفته بود، نه باگِ زنده.
+const HAFEZ = await import(`./hafez.${LOCALE}.js`).then(m => m.default.ghazals).catch(() => []);
+// کوییز «کدام کارتِ تاروتی؟»: متنِ شخصیتی per کارتِ آرکانای بزرگ (سؤال‌ها/امتیازدهی در locale).
+// این هم **پروزِ فارسی** است نه منطق، پس مثل حافظ per زبان است.
+const QUIZ = await import(`./quiz.${LOCALE}.js`).then(m => m.default.personalities).catch(() => ({}));
 // 📚 جدولِ دانشِ کارت (فارسی، تولیدِ آفلاین از منبعِ آموزشی — tools/build-card-knowledge.mjs).
 // **RAG نیست و لازم هم نیست:** کلیدِ بازیابی قطعی است (می‌دانیم کدام کارت کشیده شده)، پس یک
 // lookup کافی است — بدونِ embedding، بدونِ شبکه، زیر یک میلی‌ثانیه.
@@ -193,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.40.0';
+const PRODUCT_VERSION = '3.43.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -258,8 +277,21 @@ const JOURNEY_ENABLED = true;
 // Rollback فوری: false کن → گیت و میدل‌ورش کاملاً محو، فلو دقیقاً مثل قبل (کاربرانی که
 // gate را رد کرده‌اند بی‌ضرر می‌مانند؛ callbackِ gate:check ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد).
 const JOIN_GATE_ENABLED = true;
-const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim() || '@taroot_fa';
-const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || 'https://t.me/taroot_fa';
+/* 🌍 کانالِ گیت **per زبان**. تا قبل از این پیش‌فرض `@taroot_fa` هاردکد بود و
+ * `write_env` برای زبان‌های تازه چیزی نمی‌نوشت، یعنی اولین چیزی که یک کاربرِ روس یا
+ * برزیلی می‌دید «عضوِ این کانالِ فارسی شو» بود — و چون هدیه‌ی خوش‌آمد لحظه‌ی تأییدِ
+ * عضویت واریز می‌شود، عملاً پشتِ یک کانالِ بی‌ربط قفل می‌شد.
+ *
+ * پیش‌فرضِ صادقانه برای زبانی که هنوز کانال ندارد **خاموش بودنِ گیت** است، نه
+ * فرستادنش به کانالِ زبانِ دیگر. روزی که کانالِ آن زبان ساخته شد، یک ردیف این‌جا
+ * (یا `GATE_CHANNEL` در `.env.<lang>`) گیتش را روشن می‌کند. */
+const GATE_BY_LOCALE = {
+  fa: { ch: '@taroot_fa', url: 'https://t.me/taroot_fa' },
+};
+const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim()     || GATE_BY_LOCALE[LOCALE]?.ch  || '';
+const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || GATE_BY_LOCALE[LOCALE]?.url || '';
+// هر دو لازم‌اند: کانالِ بدونِ لینک یعنی دکمه‌ی خرابِ «عضو شو» وسطِ اجباری‌ترین مسیرِ ربات.
+const gateOn = () => JOIN_GATE_ENABLED && !!GATE_CHANNEL && !!GATE_CHANNEL_URL;
 // وضعیت‌هایی که یعنی «عضو است». `restricted` فقط وقتی عضو است که is_member هم true باشد.
 const GATE_OK_STATUS = new Set(['member', 'administrator', 'creator']);
 
@@ -355,6 +387,36 @@ const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isTester(uid));
 // Rollback یک‌خطی: false → برمی‌گردیم به مسیرِ رونویسی، ولی **همچنان بعد از پرداخت**
 // (قاعده‌ی هزینه پایین‌تر مستقل از این پرچم است و با آن رول‌بک نمی‌شود).
 const AUDIO_DIRECT_ENABLED = true;
+/* 🎙 ولی «مسیرِ مستقیمِ صدا» فقط وقتی ممکن است که مدلِ خوانش **واقعاً صدا بفهمد**.
+ * این یک تضمینِ ساختاری است، نه یک قاعده‌ای که کسی باید یادش بماند: از خودِ مدلِ
+ * پیکربندی‌شده مشتق می‌شود، پس روزی که مدل عوض شود مسیر خودبه‌خود درست می‌ماند.
+ * ⚠️ چرا لازم شد: آزمایشگاه `openai/gpt-5.6-luna` را برای زبان‌های غیرفارسی برنده
+ * کرد و آن مدل ورودیِ صوتی نمی‌گیرد. بدونِ این گارد، اولین فالِ صوتیِ روسی **بعد
+ * از کسرِ اعتبار** به مدلی می‌رفت که نمی‌تواند بشنود؛ یعنی خرابی دقیقاً در گران‌ترین
+ * نقطه‌ی ممکن. با این گارد، همان کاربر بی‌سروصدا به مسیرِ «رونویسی بعد خوانش»
+ * می‌رود که از قبل ساخته شده و آزموده است.
+ * فهرست عمداً allowlist است نه denylist: مدلِ ناشناخته «نمی‌شنود» فرض می‌شود، چون
+ * حدسِ اشتباه در این جهت فقط یک فراخوانیِ ارزانِ اضافه است، ولی در جهتِ دیگر یک
+ * فالِ پول‌داده‌ی شکسته. */
+const AUDIO_CAPABLE = [/^google\/gemini/i];
+/* 🐛 برچسبِ فرمتِ صدا. تا ۱۴۰۵/۰۶/۱۰ این یک خط بود:
+ *     fmt: /wav/i.test(mime) ? 'wav' : 'mp3'
+ * یعنی ویسِ تلگرام که همیشه **ogg/opus** است با برچسبِ **mp3** فرستاده می‌شد. روی
+ * مسیرِ chat completionsِ جمنای ظاهراً کار می‌کرد (بایت را خودش می‌شناسد)، پس سال‌ها
+ * بی‌صدا ماند. ولی endpointِ اختصاصیِ رونویسی برچسب را جدی می‌گیرد و بایتِ ogg با
+ * برچسبِ mp3 را رد یا بد-دیکد می‌کند. یعنی لحظه‌ای که پله‌ی ویسپر روشن شود، فالبک
+ * **همیشه** شکست می‌خورد و هیچ‌کس نمی‌فهمد — همان کلاسِ «فالبکِ مرده‌ی بی‌صدا» که
+ * دورِ هشتمِ روسی هم داشت. این باگ در I18N-ES-STT-RESEARCH.md بندِ ۹ ثبت شده بود
+ * به‌عنوانِ «بمبِ ساعتیِ خاموش»؛ حالا که ساعتش رسید، خنثی شد. */
+const AUDIO_FORMATS = [
+  // نگاشت روی **ظرف** است نه کدک: `audio/webm; codecs=opus` باید webm بدهد نه ogg.
+  [/ogg/i, 'ogg'], [/wav/i, 'wav'], [/mpeg|mp3/i, 'mp3'],
+  [/mp4|m4a|aac/i, 'm4a'], [/webm/i, 'webm'], [/flac/i, 'flac'],
+];
+// پیش‌فرض ogg است نه mp3: ویسِ تلگرام همیشه ogg/opus است و این مسیر فقط ویس می‌گیرد.
+const audioFormatOf = (mime) => AUDIO_FORMATS.find(([re]) => re.test(mime || ''))?.[1] || 'ogg';
+const READER_HEARS_AUDIO = AUDIO_CAPABLE.some((re) => re.test(READING_MODEL));
+const audioDirectOn = () => AUDIO_DIRECT_ENABLED && READER_HEARS_AUDIO;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isTester(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1245,7 +1307,7 @@ function wipeUser(uid) {
 function normalizeDigits(s) {
   return String(s).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 }
-// tehranToday در reading-core.js است (کانتکستِ خوانش هم از آن استفاده می‌کند).
+// botToday در reading-core.js است (کانتکستِ خوانش هم از آن استفاده می‌کند).
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /* ===== 4) OpenRouter و موتور دک ===== */
@@ -1656,7 +1718,7 @@ async function callReadingLLM(readingId) {
   let audio = null;
   if (r.question_audio && !r.question) {
     const fetched = await fetchQuestionAudio(r); // یک دانلود، نه بیشتر
-    if (fetched && AUDIO_DIRECT_ENABLED) {
+    if (fetched && audioDirectOn()) {
       audio = fetched;                           // مسیرِ اصلی: یک فراخوانی برای کلِ کار
     } else if (fetched) {
       // پرچم خاموش: به مسیرِ رونویسی برمی‌گردیم. دو فراخوانی می‌شود ولی هر دو **بعد از**
@@ -1699,7 +1761,7 @@ async function callReadingLLM(readingId) {
     ? [{ type: 'text', text: textPart }, { type: 'input_audio', input_audio: { data: audio.data, format: audio.format } }]
     : textPart;
   // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند.
-  const plan = audio ? [FLASH, FLASH, FLASH] : undefined;
+  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL] : undefined;
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
@@ -1735,7 +1797,7 @@ async function callReadingLLM(readingId) {
       }
       const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
       if (!usable) return false;
-      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: spread?.choiceLabels })) { fallback = obj; return false; }
+      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: choiceLabelsFor(spread) })) { fallback = obj; return false; }
       parsed = obj;
       return true;
     },
@@ -1877,7 +1939,7 @@ function grantWelcomeBonus(uid) {
 // «هدیه‌ی خوش‌آمد را گرفته یا نه» گذاشتیم، نه welcomed: کاربری که وسط آنبوردینگ رها کرده
 // هم هدیه‌اش را گرفته، پس نباید حالا بابتِ هدیه‌ای که دارد دوباره شرط بگذاریم.
 function needsGate(user) {
-  if (!JOIN_GATE_ENABLED) return false;
+  if (!gateOn()) return false;
   if (!user) return false;
   return !user.joined_gate_at && !user.welcome_bonus_at && !user.welcomed;
 }
@@ -1986,7 +2048,7 @@ async function handleStart(ctx) {
   const last = stmts.lastDelivered.all(uid, 1)[0];
   if (user.next_milestone_at && user.next_milestone_at <= Date.now() / 1000 && last?.summary) {
     try { msg += L.returning.milestoneHook(JSON.parse(last.llm_json)?.next_milestone?.text || last.summary); } catch {}
-  } else if (user.last_daily_date !== tehranToday()) {
+  } else if (user.last_daily_date !== botToday()) {
     msg += L.returning.dailyReminder;
   }
   stmts.setKbShown.run(uid);
@@ -2034,7 +2096,7 @@ bot.action('gate:check', async (ctx) => {
    این استثنا ادمینی که وسطِ گیت است نمی‌تواند ریست کند و گیت را دوباره تست کند — دقیقاً
    همان چیزی که مالک دید (به‌جای ریست، پیامِ یادآوریِ گیت گرفت). بند ۶ب می‌گوید این دکمه
    «همیشه» در دسترسِ ادمین است. برای کاربرِ عادی بی‌خطر است چون `doReset` خودش `isAdmin` را چک می‌کند. */
-if (JOIN_GATE_ENABLED) {
+if (gateOn()) {
   // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
   const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
   const GATE_FREE_TEXT = new Set(
@@ -2210,9 +2272,6 @@ bot.action(/^focus:(\w+)$/, async (ctx) => {
      ۳) متن به **ماهِ تولد** گره خورده، نه به «حوزه‌ی تمرکز» که دیگر پرسیده نمی‌شود.
    عدم‌تکرار در دو لایه: کارت (۷ روز) و نسخه‌ی تفسیر (۳ نسخه per کارت per ماه). */
 
-// روزِ تهران، n روز قبل. برای پنجره‌ی «۷ روزِ اخیر».
-const tehranDaysAgo = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' })
-  .format(new Date(Date.now() - n * 86400_000));
 
 // گریدِ رو-به-پشتِ کارتِ روز. اندازه‌اش به اندازه‌ی حوضچه‌ی واجدِ شرایط است (سقفِ ۲۴)،
 // چون دکمه‌ای که به هیچ کارتی نمی‌رسد یعنی دروغ گفتن به کاربر.
@@ -2269,7 +2328,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const order = s.dailyOrder || [];
   const i = parseInt(ctx.match[1], 10);
   const key = order[i];
-  const today = tehranToday();
+  const today = botToday();
   // گاردِ دوبار-تپ **قبل** از اولین await، و گاردِ روزِ کهنه (سشنِ دیروز در چت مانده).
   // پاسخ عمداً **صریح** است نه سکوت: تپِ بی‌جواب روی یک دکمه، کاربر را وادار می‌کند
   // چند بار دیگر هم بزند و فکر کند ربات خراب است (بند ۹ب/۱).
@@ -2286,7 +2345,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const text = ganjinehText(month, key, variant);
   const info = CARD_BY_KEY[key];
 
-  const yesterday = tehranDaysAgo(1);
+  const yesterday = botDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
 
   // 🐛 تا v3.17.0 روز **قبل از** تحویل مهر می‌خورد و بینِ مهر تا رسیدنِ عکس حدود ۶ ثانیه
@@ -2342,7 +2401,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
    می‌خورد، پس همین یک شرط هر دو حالت را می‌پوشاند. */
 async function offerLuckyAfterDaily(ctx, uid) {
   if (!uxV2For(uid)) return;                       // دنیای قدیم دقیقاً مثل قبل
-  if (getUser(uid)?.lucky_date === tehranToday()) return;
+  if (getUser(uid)?.lucky_date === botToday()) return;
   await sleep(PACE_S);
   await ctx.reply(L.lucky.alsoLucky, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
@@ -2358,14 +2417,14 @@ async function dailyCard(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.DAILY)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.DAILY)) return;
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   if (user.last_daily_date === today) {
     await ctx.reply(L.daily.alreadyUsed, Markup.inlineKeyboard(recoRows(uid, null)));
     return ensureMenu(ctx, uid);
   }
   if (uxV2For(uid)) return dailyCardV2(ctx, uid, user, today);
-  // استریک: اگر دیروزِ تهران هم کارت گرفته → +۱، وگرنه از ۱ شروع
-  const yesterday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(Date.now() - 86400_000));
+  // استریک: اگر دیروزِ همان ربات هم کارت گرفته → +۱، وگرنه از ۱ شروع
+  const yesterday = botDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
   stmts.setDaily.run(today, streak, uid);
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
@@ -2574,7 +2633,7 @@ function forcedHit(h, idx, naturalHit) {
 /** دستی که **همین امروز** باز است و هنوز انتخابِ نکشیده دارد. */
 function openLuckyHand(uid) {
   const h = readLuckyHand(uid);
-  return h && h.d === tehranToday() && h.n && h.p.length < LUCKY_PICKS ? h : null;
+  return h && h.d === botToday() && h.n && h.p.length < LUCKY_PICKS ? h : null;
 }
 /** گریدِ همان دست را دوباره جلوی کاربر می‌گذارد (ادامه‌ی بازی). */
 async function resumeLuckyHand(ctx, uid, h) {
@@ -2627,7 +2686,7 @@ async function luckyCard(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.LUCKY)) return;
   if (await blockDuringPendingReading(ctx)) return;
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   // 🔁 دستِ نیمه‌تمامِ همین امروز **ادامه** داده می‌شود. تا قبل از این، کاربری که کارتِ
   // اولش را کشیده بود و بعد بیرون رفته بود، پیامِ «امروز استفاده کردی» می‌گرفت در حالی
   // که هنوز دو انتخاب طلبکار بود.
@@ -2677,7 +2736,7 @@ bot.action('lucky_stop', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery('✋').catch(() => {});
   if (getState(uid) !== 'lucky_shuffle') return;
-  const today = tehranToday();
+  const today = botToday();
   setState(uid, 'lucky_pick'); // قبل از هر await — گاردِ دوبار-تپ
   // nonceِ همین دست: از این لحظه تا آخرِ دست ثابت می‌ماند و در session (یعنی DB) می‌نشیند.
   const luckyNonce = `${Date.now()}:${Math.floor(Math.random() * 1e9)}`;
@@ -2692,7 +2751,7 @@ bot.action('lucky_stop', async (ctx) => {
 bot.action(/^lpick:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   const i = parseInt(ctx.match[1], 10);
-  const today = tehranToday();
+  const today = botToday();
   // ⚠️ دست از **ردیفِ کاربر** خوانده می‌شود، نه از سشن و نه از استیت. یعنی نه
   // `setSession(uid, null)` هیچ‌کدام از شش نقطه‌اش، و نه یک `setState` در مسیرِ دیگر،
   // نمی‌تواند انتخاب‌های باقی‌ماندهٔ کاربر را از بین ببرد. استیت فقط برای UX ست می‌شود.
@@ -2812,7 +2871,7 @@ async function hafezFaal(ctx, via) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.hafezCta, 'opentopic')]]);
   if (user.last_hafez_date === today) return ctx.reply(L.hafez.alreadyUsed, ctaKb);
   stmts.setHafez.run(today, uid);
@@ -2838,7 +2897,7 @@ async function estekhareFaal(ctx, via) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   const ctaKb = Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.estekhareYesno, 'spread:yesno')],
     [Markup.button.callback(L.buttons.estekhareChoice, 'spread:choice')],
@@ -2886,7 +2945,7 @@ async function quizStart(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const user = getUser(uid);
-  const today = tehranToday();
+  const today = botToday();
   if (user.last_quiz_date) {
     const days = Math.floor((new Date(today) - new Date(user.last_quiz_date)) / 86400000);
     if (days >= 0 && days < QUIZ_COOLDOWN_DAYS) {
@@ -2924,7 +2983,7 @@ bot.action(/^quiz:(\d+)$/, async (ctx) => {
   const tied = keys.filter(k => (votes[k] || 0) === maxV);
   const best = tied[seedToInt(`quiz:${answers}`) % tied.length];
   const card = CARD_BY_KEY[best];
-  stmts.setQuiz.run(tehranToday(), uid);
+  stmts.setQuiz.run(botToday(), uid);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await typing(ctx, PACE_M, 'upload_photo');
   await sendCardPhoto(ctx, best, L.quiz.resultHead(card), { spoiler: false });
@@ -2956,7 +3015,7 @@ async function coffeeStart(ctx) {
   const uid = ctx.from.id;
   upsertUser(ctx);
   const ctaKb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.coffeeCta, 'opentopic')]]);
-  if (getUser(uid).last_coffee_date === tehranToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
+  if (getUser(uid).last_coffee_date === botToday()) return ctx.reply(L.coffee.alreadyUsed, ctaKb);
   const { text, rows } = coffeeQuestionView('');
   await ctx.reply(L.coffee.intro);
   await ctx.reply(text, Markup.inlineKeyboard(rows));
@@ -2975,7 +3034,7 @@ bot.action(/^coffee:(\d+)$/, async (ctx) => {
   }
   const uid = ctx.from.id;
   upsertUser(ctx);
-  const today = tehranToday();
+  const today = botToday();
   // اگر همین امروز خوانده، دوباره نده (گاردِ روزی‌یک‌بار روی خودِ نتیجه هم)
   if (getUser(uid).last_coffee_date === today) {
     try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -3850,7 +3909,7 @@ async function revealNext(ctx, uid, readingId) {
   // «کارت قلب تو» و «کارت اولت» را می‌بیند و تناقض حس می‌کند.
   await sendCardPhoto(ctx, card.key, v4For(uid)
     ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
-    : L.reading.revealCaption(spread.positions[idx]?.fa || `کارت ${idx + 1}`, info, card.reversed));
+    : L.reading.revealCaption(positionName(spread.positions[idx]?.fa, idx), info, card.reversed));
   await sleep(PACE_REVEAL);
   await typing(ctx, PACE_S);
 
@@ -3938,7 +3997,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
     const recal = await orChatResilient(L.prompts.feedbackSystem, L.prompts.feedbackContext({
       confirmationQuestion: llm?.confirmation_question || '',
       userAnswer: freeText || 'نه دقیقاً',
-      card: CARD_BY_KEY[cards[midIdx]?.key]?.fa || '',
+      card: cardName(cards[midIdx]?.key),
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
     }), { maxTokens: 300, kind: 'feedback', refId: readingId, userId: uid }, [FLASH, FALLBACK_MODEL])
@@ -4217,7 +4276,7 @@ async function sendVerdict(ctx, llm, spread) {
     const toneV2 = toneV2For(ctx.from.id);
     const mode = decisiveMode(spread, toneV2);
     if (!mode) return;
-    const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: spread?.choiceLabels });
+    const v = normalizeVerdict(llm?.verdict, mode, { choiceLabels: choiceLabelsFor(spread) });
     if (!v) return;
     await sleep(PACE_M);
     await typing(ctx, PACE_S);
@@ -4391,7 +4450,7 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // یک تجربه‌ی کاملِ مثبت گرفته و بهترین لحظه برای معرفیِ آیینِ روزانه‌ی بعدی است.
   // اگر همان روز کارت شانسش را قبلاً کشیده (نادر، ولی ممکن)، همان تشکرِ همیشگی می‌ماند.
   const isFirstReading = stmts.countDelivered.get(uid).c === 1;
-  const luckyAvailable = getUser(uid)?.lucky_date !== tehranToday();
+  const luckyAvailable = getUser(uid)?.lucky_date !== botToday();
   // تشکر **همیشه** اول می‌آید، و کیبوردِ اصلی روی همین پیام سوار می‌شود: این تنها پیامِ
   // این نقطه است که کیبوردِ inline ندارد، پس تنها چیزی است که می‌تواند حاملش باشد —
   // و دقیقاً همان لحظه‌ای است که مالک خواست منو صادر شود (هم‌زمان با قدمِ بعدی).
@@ -4421,7 +4480,7 @@ function walletRows(uid) {
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
   rows.push(inviteRow(uid));   // همان تک‌منبعِ دعوت که پیامِ ادامه هم از آن می‌خواند
-  if (getUser(uid)?.lucky_date !== tehranToday()) {
+  if (getUser(uid)?.lucky_date !== botToday()) {
     rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
   }
   return rows;
@@ -4633,9 +4692,22 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (!pack) return;
   const s = getSession(uid);
   if (!s.paymentId) return ctx.reply(L.errors.stateLost, mainKeyboard(uid));
+  /* ⭐ قیمتِ **واقعیِ پرداختی** قبل از هر نوشتنی حساب می‌شود.
+   *
+   * 🐛 باگی که این را لازم کرد: `setPaymentPackage` عددِ `pack.toman` را در ستونِ
+   * `amount` می‌نشاند، یعنی روی ریلِ استارز **قیمتِ تومانیِ فارسی** به‌عنوان «پولی که
+   * کاربر داد» ثبت می‌شد. کاربرِ روس تومان نمی‌دهد، استارز می‌دهد. نتیجه: درآمدِ هر
+   * زبانِ غیرفارسی در داشبورد یک عددِ ساختگی بود و بند ۹ ریشه («هر ریالِ ورودی ردپای
+   * DB دارد تا قابلِ حسابرسی باشد») نقض می‌شد. `original_amount` (تعدادِ الماس) درست
+   * بود، پس واریز هرگز خراب نبود — فقط دفترِ درآمد.
+   *
+   * محاسبه عمداً **قبل از** `claimAmount` است: بستهٔ بی‌قیمت باید قبل از هر تغییرِ
+   * وضعیتی رد شود، وگرنه فاکتور claim می‌شد و بعد بدونِ ارسالِ چیزی رها می‌ماند. */
+  const stars = starsRail ? starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT))) : null;
+  if (starsRail && !stars) { logErr('stars: no price for pack', pack.key); return; }
   // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
   if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
-  stmts.setPaymentPackage.run(pack.key, pack.toman, s.paymentId);
+  stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, s.paymentId);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
 
   /* ⭐ ریلِ استارز: دکمه‌ی بسته **مستقیماً** فاکتورِ تلگرام را می‌فرستد. هیچ فاکتورِ
@@ -4645,8 +4717,6 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * پس کاربر نباید در حالتی گیر کند که منتظرِ عکسِ رسید است. گاردِ فلوی باز از روی
    * خودِ رکوردِ `pending` کار می‌کند، نه از روی استیت. */
   if (starsRail) {
-    const stars = starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT)));
-    if (!stars) { logErr('stars: no price for pack', pack.key); return; }
     try {
       return await ctx.replyWithInvoice(buildInvoice({
         pack, stars, paymentId: s.paymentId, userId: uid,
@@ -5683,7 +5753,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     const mime = media.mime_type || 'audio/ogg';
     await typing(ctx, PACE_S);
     // متنِ سؤال خالی می‌ماند؛ بعد از خوانش از `question_text` خودِ مدل پر می‌شود.
-    return await handleQuestion(ctx, '', { id: media.file_id, fmt: /wav/i.test(mime) ? 'wav' : 'mp3' });
+    return await handleQuestion(ctx, '', { id: media.file_id, fmt: audioFormatOf(mime) });
   } catch (e) {
     logErr('voice handler:', e.message);
     return ctx.reply(L.errors.generic).catch(() => {});
@@ -5752,11 +5822,9 @@ const NIGHT_ARMS = {
 };
 setInterval(async () => {
   try {
-    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
-    }).format(new Date()), 10);
+    const hour = botHour();
     if (hour !== REMINDER_HOUR) return;
-    const today = tehranToday();
+    const today = botToday();
     // 🔀 دو رژیم. تا وقتی آزمایش فعال است هیچ‌چیزِ این مسیر عوض نشده؛ بعد از stop شدنش،
     // دو یادآوری مستقل می‌شوند و کاربر از منوی تنظیمات هرکدام را جدا کنترل می‌کند.
     const expOn = nightExpActive();

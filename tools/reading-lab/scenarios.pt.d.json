@@ -1,0 +1,125 @@
+{
+  "_note": "مجموعه‌ی «د» — سؤال‌هایی که سنجه‌های مکانیکی را راضی می‌کنند ولی کیفیت را می‌شکنند: بارِ عاطفیِ سنگین، سؤالِ عملیاتیِ تاریخ‌دار، و سؤالِ دوپاره‌ی متناقض. ساختار (چیدمان، picks، فاصله‌ی زمانی) **عیناً** همان مجموعه‌ی فارسی است تا مقایسه‌ی بین‌زبانی روی همان اسکلت بنشیند.",
+  "personas": [
+    {
+      "id": "D1",
+      "name": "Cristiane",
+      "focus": "inner",
+      "why": "بارِ عاطفیِ سنگین: مدل یا شیرین‌کاری می‌کند یا می‌ترساند؛ هر دو خلافِ قاعده‌ی سختِ ۴.",
+      "steps": [
+        {
+          "spread": "personal5",
+          "picks": [
+            3,
+            10,
+            14,
+            19,
+            23
+          ],
+          "afterMinutes": 0,
+          "question": "Faz seis meses que perdi minha mãe e até hoje não consegui voltar pra minha vida. Quando esse peso vai começar a aliviar?"
+        },
+        {
+          "spread": "family",
+          "picks": [
+            1,
+            7,
+            18
+          ],
+          "afterMinutes": 90,
+          "question": "Briguei com a minha irmã por causa da casa da minha mãe. Essa relação ainda tem conserto ou é hora de soltar?"
+        },
+        {
+          "spread": "inner",
+          "picks": [
+            5,
+            11,
+            21
+          ],
+          "afterMinutes": 400,
+          "question": "Sinto que estou me afastando de mim mesma e já não sei o que eu quero. O que você vê?"
+        }
+      ]
+    },
+    {
+      "id": "D2",
+      "name": "Rafael",
+      "focus": "career",
+      "why": "سؤالِ عملیاتیِ تاریخ‌دار: جوابِ بی‌ابهام با بهای **مشخص** لازم است، نه «ولی»ِ تزئینی.",
+      "steps": [
+        {
+          "spread": "yesno3",
+          "picks": [
+            2,
+            13,
+            20
+          ],
+          "afterMinutes": 0,
+          "question": "Se eu pedir demissão até o fim de março e for pro meu projeto, chego a ter renda até o meio do ano?"
+        },
+        {
+          "spread": "money5",
+          "picks": [
+            4,
+            9,
+            16,
+            22,
+            6
+          ],
+          "afterMinutes": 120,
+          "question": "Coloco minha reserva no projeto daquele amigo ou seguro? Qual das duas exatamente?"
+        },
+        {
+          "spread": "choice3",
+          "picks": [
+            8,
+            15,
+            24
+          ],
+          "afterMinutes": 600,
+          "question": "Tenho duas propostas: uma paga mais e o trabalho é repetitivo, a outra paga menos mas eu aprendo. Qual eu pego?"
+        }
+      ]
+    },
+    {
+      "id": "D3",
+      "name": "Juliana",
+      "focus": "love",
+      "why": "سؤالِ دوپاره‌ی متناقض: آزمونِ «سر و ته داشتن» و ممنوعیتِ طفره.",
+      "steps": [
+        {
+          "spread": "love5",
+          "picks": [
+            1,
+            6,
+            12,
+            17,
+            23
+          ],
+          "afterMinutes": 0,
+          "question": "Eu quero ficar e ao mesmo tempo sei que não devia ficar. Só não me diz «a decisão é sua», é por isso que eu vim."
+        },
+        {
+          "spread": "yesno3",
+          "picks": [
+            3,
+            10,
+            19
+          ],
+          "afterMinutes": 30,
+          "question": "Se eu terminar isso hoje à noite, daqui seis meses eu vou me arrepender?"
+        },
+        {
+          "spread": "exback3",
+          "picks": [
+            7,
+            14,
+            21
+          ],
+          "afterMinutes": 260,
+          "question": "Se ele voltar e disser que mudou, eu acredito?"
+        }
+      ]
+    }
+  ]
+}

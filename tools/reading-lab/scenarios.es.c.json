@@ -1,0 +1,133 @@
+{
+  "_note": "Conjunto C. Tercera ronda independiente. Los conjuntos A y B eran casi todos de tres cartas, así que el texto largo nunca se midió: fue justo ahí donde la versión persa produjo más frase genérica. Acá cinco de las nueve tiradas son de cinco cartas, y las tiradas son las que no salieron ni en A ni en B (matrimonio, alma gemela, crush, irse del país, vuelta del ex). La tercera persona hace preguntas cortísimas: mientras menos palabras, menos apoyo tiene el modelo, y más honesta queda la medida de anclaje. `picks` son las elecciones en la grilla de 24 cartas.",
+  "probe": {
+    "name": "Marina",
+    "question": "Llevamos mucho tiempo juntos y siento que nada avanza. ¿Qué dicen las cartas?"
+  },
+  "personas": [
+    {
+      "id": "C1",
+      "name": "Marina",
+      "focus": "marriage",
+      "why": "Tema matrimonio, cinco cartas. Respuesta larga a una pregunta personal: sirve para ver si el anclaje en las cartas aguanta cuando el texto crece.",
+      "steps": [
+        {
+          "spread": "marriage5",
+          "picks": [
+            2,
+            7,
+            13,
+            19,
+            22
+          ],
+          "afterMinutes": 0,
+          "question": "Llevamos cuatro años juntos, vivimos juntos, y él nunca sacó el tema del matrimonio ni una vez. ¿Esto va a llegar a algo o estoy esperando algo que no va a pasar?"
+        },
+        {
+          "spread": "soulmate3",
+          "picks": [
+            1,
+            9,
+            16
+          ],
+          "afterMinutes": 45,
+          "question": "¿Y si con él no funciona, voy a encontrar a mi persona o eso se va a demorar mucho?"
+        },
+        {
+          "spread": "crush3",
+          "picks": [
+            4,
+            11,
+            21
+          ],
+          "afterMinutes": 180,
+          "question": "Hay alguien del trabajo y me descubro pensando en esa persona. ¿Qué es esto de mi lado?"
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Rodrigo",
+      "focus": "migration",
+      "why": "Irse del país más dos tiradas de cinco cartas. Hombre que habla de sí mismo en masculino: otra vez la prueba de espejo de género, ahora en texto largo, donde hay más ocasiones de resbalar.",
+      "steps": [
+        {
+          "spread": "apply3",
+          "picks": [
+            0,
+            8,
+            17
+          ],
+          "afterMinutes": 0,
+          "question": "Mandé los papeles para irme del país y llevo cinco meses esperando respuesta. Ya estoy cansado de esperar. ¿Vale la pena seguir aguantando esto?"
+        },
+        {
+          "spread": "personal5",
+          "picks": [
+            3,
+            6,
+            12,
+            18,
+            23
+          ],
+          "afterMinutes": 120,
+          "question": "Quiero ver el cuadro completo. ¿Qué está pasando en mi vida ahora y para dónde va todo esto?"
+        },
+        {
+          "spread": "exback5",
+          "picks": [
+            5,
+            10,
+            14,
+            20,
+            2
+          ],
+          "afterMinutes": 300,
+          "question": "Terminamos justo antes de que mandara los papeles. No le he escrito desde entonces. ¿Ella vuelve si al final me quedo?"
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Alex",
+      "focus": "question",
+      "why": "Preguntas cortísimas y un nombre que no marca género. Es el peor caso para el anclaje: casi no hay apoyo en la pregunta, así que todo lo concreto que diga el modelo tiene que venir de las cartas. De paso mide si se inventa el género de quien pregunta.",
+      "steps": [
+        {
+          "spread": "personal5",
+          "picks": [
+            1,
+            5,
+            11,
+            15,
+            21
+          ],
+          "afterMinutes": 0,
+          "question": "¿Y ahora qué?"
+        },
+        {
+          "spread": "feel5",
+          "picks": [
+            0,
+            7,
+            13,
+            18,
+            22
+          ],
+          "afterMinutes": 60,
+          "question": "¿Qué siente por mí?"
+        },
+        {
+          "spread": "marriage3",
+          "picks": [
+            3,
+            9,
+            19
+          ],
+          "afterMinutes": 240,
+          "question": "¿Me voy a casar?"
+        }
+      ]
+    }
+  ]
+}

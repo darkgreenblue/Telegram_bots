@@ -25,20 +25,56 @@ import { fileURLToPath } from 'node:url';
 
 import { SPREAD_BY_ID, topicOf } from '../bots/tarot/spreads.js';
 import { CARD_BY_KEY } from '../bots/tarot/cards.js';
+
+/* ⚠️ ترتیبِ این بلوک عمدی و شکننده است: `reading-core.js` مسیرِ جدولِ دانشِ کارت را
+ * **لحظه‌ی بارگذاریِ ماژول** از `process.env.LOCALE` می‌خواند. اگر `--locale` بعد از
+ * یک `import` ایستا خوانده شود، هسته از قبل با زبانِ اشتباه بار شده. برای همین
+ * پرچم‌ها این‌جا و قبل از هر importِ وابسته‌به‌زبان پارس می‌شوند و آن import ها
+ * پویا هستند. (`spreads.js` و `cards.js` به زبان کاری ندارند، پس ایستا مانده‌اند.) */
+const argvEarly = process.argv.slice(2);
+const earlyVal = (n, d) => { const i = argvEarly.indexOf(`--${n}`); return i >= 0 ? argvEarly[i + 1] : d; };
+const LOCALE = earlyVal('locale', process.env.LOCALE?.trim() || 'fa');
+process.env.LOCALE = LOCALE;
 // ⚠️ سنجه‌ها که به checks.mjs منتقل شدند، این import با آن‌ها رفت — ولی خودِ آزمایشگاه
 // هنوز در شرطِ پذیرشِ ریکوئست و در probe از آن استفاده می‌کند. نتیجه: ReferenceError
 // داخلِ callbackِ validate که orChatResilient به‌عنوان «خطای LLM» می‌بلعید، پس هر ۴۵
 // تلاش شکست خورد و کلِ دور با صفر فال تمام شد (درسِ decideReceipt، بارِ دوم).
-import { headlineOk } from '../bots/tarot/verdict.js';
-import { repairDefects } from '../bots/tarot/repair.js';
-import {
+const { headlineOk } = await import('../bots/tarot/verdict.js');
+const { repairDefects } = await import('../bots/tarot/repair.js');
+const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
-  orChat, orChatResilient, parseJsonLoose,
-} from '../bots/tarot/reading-core.js';
+  orChat, orChatResilient, parseJsonLoose, READING_MODEL, FALLBACK_MODEL, cardName, spreadName,
+} = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
-import { checkReading, modelText, ngrams } from './reading-lab/checks.mjs';
+const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+// 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت (از STYLE.md). ارزیابی کارِ همان سشنی است که
+// اسناد را خوانده؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
+const { RUBRIC } = await import('./reading-lab/rubric.mjs');
+const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
+const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
-const L = (await import('../bots/tarot/locales/fa.js')).default;
+const L = (await import(`../bots/tarot/locales/${LOCALE}.js`)).default;
+// 🌍 **همان** تابعی که ربات سرِ boot صدا می‌زند. بدونِ این، `headlineOk` هر سرخطِ
+// غیرفارسی را رد می‌کرد و هر ۵ تلاشِ هر فال می‌سوخت: یک دورِ صفر با هزینه‌ی کامل که
+// شبیهِ «مدل بد است» به نظر می‌رسید.
+configureLocale(L);
+
+/* 🚦 پیش‌پرواز: زبانی که بلوکِ `verdict` ندارد، **یک دورِ کاملِ پولی را می‌سوزاند**
+ * بدونِ اینکه خطایی بدهد. `configureVerdict` ورودیِ خالی را بی‌صدا نادیده می‌گیرد، پس
+ * ماژول فارسی می‌ماند و `headlineOk` هر سرخطِ آن زبان را رد می‌کند: هر ۵ تلاشِ هر فال
+ * می‌سوزد، بلوکِ جوابِ قاطع غایب می‌شود، و گزارش شبیهِ «این مدل برای این زبان بد است»
+ * درمی‌آید. دقیقاً همان چیزی که سرِ روسی رخ داد. یک ثانیه چک، به‌جای یک دور هزینه. */
+{
+  const v = L?.verdict;
+  const missing = ['yes', 'no', 'direction', 'evasion', 'but'].filter(k => !Array.isArray(v?.[k]) || !v[k].length);
+  if (missing.length) {
+    console.error(`❌ locale «${LOCALE}» بلوکِ verdict کامل ندارد (${missing.join(', ')}).`);
+    console.error('   بدونِ آن هر سرخط رد می‌شود و کلِ دور با هزینه‌ی کامل می‌سوزد.');
+    console.error('   اول `bots/tarot/locales/' + LOCALE + '.js` را کامل کن، بعد دور بگیر.');
+    process.exit(1);
+  }
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const argv = process.argv.slice(2);
@@ -54,21 +90,146 @@ const DRY = flag('dry');
 const FAKE = flag('fake');
 const ONLY = (val('only', '') || '').split(',').filter(Boolean);
 const OUT = val('out', '');
+/* 🤖 مدلِ تحتِ آزمایش. پیش‌فرض دقیقاً همان چیزی است که محصول استفاده می‌کند، پس یک
+ * اجرا بدونِ این پرچم‌ها عیناً پروداکشن را می‌سنجد. برنامه‌ی retry همان شکلِ همیشگی را
+ * نگه می‌دارد (۳ تلاشِ مدلِ اصلی، بعد ۲ تلاشِ فالبک) تا مقایسه‌ی بین مدل‌ها منصفانه
+ * بماند: اگر یکی سه شانس بگیرد و دیگری یکی، داریم برنامه‌ی retry را می‌سنجیم نه مدل را. */
+/* ⚠️ `let` نه `const`: در حالتِ چندبازویی (`--arms`) بینِ بازوها عوض می‌شود.
+ * `runStep` این‌ها را از closure می‌خواند، پس مقدارِ لحظه‌ی فراخوانی را می‌بیند. */
+/* پیش‌فرض = **همان مدلی که محصول برای همین زبان اجرا می‌کند** (`READING_MODEL`)، نه یک
+ * ثابتِ جدا. قبلاً `FLASH` بود و تا وقتی همه‌ی زبان‌ها روی Flash بودند فرقی نداشت؛ از
+ * لحظه‌ای که مدلِ خوانش per زبان شد، «دورِ بدونِ --arms» می‌توانست بی‌صدا مدلی را
+ * بسنجد که هیچ کاربری نمی‌بیند. همان تله‌ای که سه دورِ واقعی را سوزاند، از درِ دیگر. */
+let MODEL = val('model', READING_MODEL);
+const FALLBACK = val('fallback', FALLBACK_MODEL);
+let PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+/* 🅰️🅱️ مقایسه‌ی **جفت‌شده‌ی** چند مدل در یک اجرا.
+ *
+ * چرا لازم شد (اندازه‌گیریِ ۱۴۰۵/۰۶/۰۹): یک دورِ سه‌پاسه‌ی فارسی روی کارت و سؤالِ
+ * **کاملاً یکسان** نرخِ بی‌لنگرِ ۳۲ / ۱۹ / ۳۰ داد. یعنی نویزِ نمونه‌برداریِ خودِ مدل
+ * ۱۳ واحد است، در حالی که تفاوتِ دو مدلی که می‌خواهیم تشخیص بدهیم ~۵ واحد است.
+ * با این نسبت، مقایسه‌ی دو **اجرای جدا** عملاً سکه انداختن است.
+ *
+ * درمان، مقایسه‌ی جفت‌شده است: چون seed از `lab:<persona>:<step>` ساخته می‌شود و
+ * `rep` در آن نیست، همه‌ی بازوها **عینِ همان کارت‌ها و همان سؤال‌ها** را می‌گیرند. پس
+ * می‌شود اثرِ سناریو را (که تا ۵۰ واحد است: یک سناریو ۵٪ بی‌لنگر می‌دهد و دیگری ۵۵٪)
+ * از معادله حذف کرد و فقط تفاوتِ per سناریو را نگاه کرد. همان کاری که آزمایشِ جفتی
+ * در آمار می‌کند، و تنها راهی است که با این بودجه به سیگنال می‌رسیم. */
+const ARMS = (val('arms', '') || '').split(',').map(x => x.trim()).filter(Boolean);
+const ARM_LIST = ARMS.length ? ARMS : [MODEL];
 
-const SCEN = JSON.parse(fs.readFileSync(path.join(HERE, 'reading-lab', 'scenarios.json'), 'utf8'));
+/* 🧪 واریانتِ **پرامپت** به‌عنوان یک بُعدِ دیگرِ بازو.
+ *
+ * چرا این‌جا و نه در locale: فرضیه‌ی پرامپت باید **جفت‌شده** سنجیده شود (همان کارت،
+ * همان سؤال، همان مدل) وگرنه با نویزِ ۱۳ واحدیِ نمونه‌برداری قاطی می‌شود. ولی
+ * دست‌کاریِ `locales/<lang>.js` برای هر فرضیه یعنی کدِ محصول را وسطِ آزمایش عوض
+ * کنیم؛ اگر فرضیه رد شود باید برش گردانیم و اگر یادمان برود، یک تغییرِ آزمایشی
+ * ناخواسته منتشر می‌شود. پس واریانت این‌جا زندگی می‌کند و **فقط روی رشته‌ی پرامپتِ
+ * همین اجرا** اثر می‌گذارد. برنده که معلوم شد، در یک PR جدا به locale می‌رود.
+ *
+ * شکلِ بازو: `model` یا `model@variant`. */
+const PROMPT_VARIANTS = {
+  /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
+   * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
+   * که از مدل می‌خواهد یک کارِ ظریفِ صرفی را درست انجام دهد. ولی ما **هیچ داده‌ای**
+   * از گذشته‌ی کاربر به مدل نمی‌دهیم، پس هیچ حرفِ مشروعی در زمانِ گذشته خطاب به او
+   * وجود ندارد. قاعده‌ی ساده‌تر: **اصلاً گذشته خطابش نکن.** قاعده‌ی ساده بهتر
+   * رعایت می‌شود، و این همان بند ۹/۰ ریشه است (حذف، نه وصله). */
+  nopast: (sys) => sys.replace(
+    /- \*\*Не навязывай человеку пол\.\*\*[^\n]*\n/,
+    '- **Никогда не обращайся к человеку в прошедшем времени.** Не пиши «ты решил», '
+    + '«ты решила», «ты почувствовал», «ты ждала». У тебя вообще нет данных о его прошлом, '
+    + 'поэтому такие фразы это выдумка, и заодно они навязывают ему пол. Пиши только в '
+    + 'настоящем, будущем, через инфинитив или безлично. Вместо «ты долго ждала ответа» '
+    + 'пиши «ожидание ответа затянулось» или «ты всё ещё ждёшь ответа». Прилагательные с '
+    + 'родом в его адрес тоже под запретом: вместо «ты одинока» пиши «одиночество рядом». '
+    + 'К третьим лицам в его истории это не относится.\n',
+  ),
+
+  /* 🇧🇷🇪🇸 همان فرضیه‌ی «حذف به‌جای آموزش»، ولی شکلش برای پرتغالی و اسپانیایی فرق
+   * می‌کند و این تفاوت **ساختاری** است، نه سلیقه‌ای: روسی جنسیت را فقط در زمانِ
+   * گذشته صرف می‌کند، پس آن‌جا «گذشته خطابش نکن» کلِ کلاسِ خطا را می‌بندد. ولی
+   * پرتغالی و اسپانیایی صفت را در **زمانِ حال** هم جنسیت‌دار می‌کنند
+   * («estás cansado/cansada»)، پس همان قاعده این‌جا هیچ‌چیز را نمی‌بندد.
+   * معادلِ درست، ممنوع‌کردنِ خودِ **ساختِ توصیفی** است: «تو ... هستی» + صفت.
+   * قاعده‌ی فعلی می‌گوید «صفتِ جنسیت‌دار نگو»، که از مدل می‌خواهد بداند کدام صفت
+   * جنسیت دارد؛ این یکی می‌گوید اصلاً صفت به او نچسبان و از رویداد حرف بزن. */
+  noadj: (sys) => sys
+    .replace(
+      /- \*\*Não imponha um gênero à pessoa\.\*\*[^\n]*\n/,
+      '- **Nunca descreva a pessoa com adjetivo nem particípio.** Não escreva «você está ...» '
+      + 'nem «você se sente ...» seguido de adjetivo, em nenhum tempo verbal. Em português o '
+      + 'adjetivo carrega gênero, e você não sabe o gênero de quem lê, então toda frase desse '
+      + 'tipo é um palpite. Fale do que acontece, não de como a pessoa é: em vez de «você está '
+      + 'cansada» escreva «o cansaço aparece»; em vez de «você se sente perdido» escreva «falta '
+      + 'rumo agora»; em vez de «você ficou sozinha» escreva «a solidão pesa». Isso não vale '
+      + 'para terceiros na história dela nem para as figuras das cartas.\n',
+    )
+    .replace(
+      /- \*\*No le impongas un género a la persona\.\*\*[^\n]*\n/,
+      '- **Nunca describas a la persona con adjetivo ni participio.** No escribas «estás ...» '
+      + 'ni «te sientes ...» seguido de adjetivo, en ningún tiempo verbal. En español el '
+      + 'adjetivo lleva género, y no sabes el género de quien lee, así que toda frase de ese '
+      + 'tipo es una apuesta. Habla de lo que pasa, no de cómo es la persona: en vez de «estás '
+      + 'cansada» escribe «el cansancio aparece»; en vez de «te sientes perdido» escribe «ahora '
+      + 'falta rumbo»; en vez de «te quedaste sola» escribe «la soledad pesa». Esto no vale para '
+      + 'terceros de su historia ni para las figuras de las cartas.\n',
+    ),
+};
+const armModel = (a) => String(a).split('@')[0];
+const armVariant = (a) => String(a).split('@')[1] || '';
+{
+  const bad = ARM_LIST.map(armVariant).filter(v => v && !PROMPT_VARIANTS[v]);
+  if (bad.length) {
+    console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join(', ')}`);
+    console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join(', ') || '(هیچ)'}`);
+    process.exit(1);
+  }
+}
+let VARIANT = '';
+
+/* 🌍 سناریوها per زبان. `fa` نامِ تاریخیِ خودش را نگه می‌دارد تا دیف صفر بماند.
+ * ⚠️ عمداً به فارسی fallback **نمی‌کند**: یک اجرای روسی با سؤال‌های فارسی سبز تمام
+ * می‌شد و ما فکر می‌کردیم روسی را سنجیده‌ایم. خرابیِ بی‌صدا بدتر از خطاست. */
+/* 🎲 مجموعه‌ی سناریو. چرا لازم شد (تذکرِ مالک): سه **پاس** روی همان ۹ سؤال تنوع نیست،
+ * فقط تکرار است. یک دور می‌تواند شانسی خوب دربیاید، پس هر زبان باید با **سؤال‌های
+ * متفاوت** هم سنجیده شود وگرنه داریم روی همان ۹ سؤال overfit می‌کنیم و نمی‌فهمیم.
+ * `--set b` فایلِ `scenarios.<locale>.b.json` را برمی‌دارد. */
+const SET = (val('set', '') || '').trim().toLowerCase();
+const scenName = LOCALE === 'fa'
+  ? (SET ? `scenarios.${SET}.json` : 'scenarios.json')
+  : (SET ? `scenarios.${LOCALE}.${SET}.json` : `scenarios.${LOCALE}.json`);
+const SCEN_FILE = path.join(HERE, 'reading-lab', scenName);
+if (!fs.existsSync(SCEN_FILE)) {
+  console.error(`❌ سناریویی برای زبانِ «${LOCALE}» نیست: ${SCEN_FILE}`);
+  console.error('   سناریوی هر زبان باید به همان زبان نوشته شود، نه ترجمه‌ی خودکارِ فارسی.');
+  process.exit(1);
+}
+const SCEN = JSON.parse(fs.readFileSync(SCEN_FILE, 'utf8'));
+// ورودیِ حالتِ probe از همان فایل می‌آید تا هم‌زبان بماند (پیش‌فرض: اولین قدمِ اولین پرسونا).
+const PROBE_Q = SCEN.probe?.question || SCEN.personas?.[0]?.steps?.[0]?.question || '';
+const PROBE_NAME = SCEN.probe?.name || SCEN.personas?.[0]?.name || '';
 
 /* ═══════════════ استابِ پاسخِ مدل (حالتِ fake) ═══════════════ */
 // خروجیِ ساختگی ولی **معتبر**: باید از checkV4Shape و headlineOk رد شود تا مسیرِ
 // «پذیرش» اجرا شود. متنش عمداً به کارت‌ها و سؤال لنگر می‌خورد تا سنجه‌ها هم کار کنند.
 function fakeOut(spread, cards, ctx) {
-  const names = cards.map(c => CARD_BY_KEY[c.key].fa);
-  const q = String(ctx.question || '').split(/\s+/).slice(0, 3).join(' ');
+  // 🌍 نامِ کارت و متن هر دو از زبانِ جاری می‌آیند، وگرنه استاب روی رباتِ روسی متنِ
+  // فارسی می‌ساخت و سنجه‌های زبانی همه‌شان قرمزِ دروغین می‌دادند.
+  const names = cards.map(c => cardName(c.key));
+  // ⚠️ سؤال عیناً در متنِ استاب بازتاب می‌شود، و یکی از سناریوهای روسی عمداً سؤالِ
+  // **انگلیسی** دارد (تستِ لغزشِ زبان). بدونِ این پاک‌سازی، خودِ استاب نویسه‌ی بیگانه
+  // تولید می‌کرد و `--fake` قرمزِ دروغین می‌داد؛ یعنی ابزارِ تشخیص، خودش منبعِ خطا.
+  const alienRe = (LANG.alien || []).map(a => a.re.source).join('|');
+  const strip = (t) => (alienRe ? t.replace(new RegExp(alienRe, 'gu'), '') : t);
+  const q = strip(String(ctx.question || '')).split(/\s+/).filter(Boolean).slice(0, 3).join(' ');
+  const F = LANG.fake;
   return JSON.stringify({
-    cards: names.map(n => ({ teaser: `کارتِ ${n}، کارتِ نمونه است. تصویرش یک صحنه‌ی ساختگی دارد.` })),
-    headline: `بله با احتمالِ زیاد پیش می‌ره، ولی باید بهای صبر رو بدی.`,
-    pattern: `ترکیبِ ${names[0]} و ${names[names.length - 1]} درباره‌ی «${q}» یک جهت نشان می‌دهد.`,
-    reads: names.map(n => ({ text: `${n} می‌گه این بخش از «${q}» دارد جابه‌جا می‌شود.` })),
-    callback: (ctx.previous || []).length ? `دفعه‌ی قبل هم حولِ همین موضوع بودی.` : '',
+    cards: names.map(n => ({ teaser: F.teaser(n) })),
+    headline: F.headline,
+    pattern: F.pattern(names[0], names[names.length - 1], q),
+    reads: names.map(n => ({ text: F.read(n, q) })),
+    callback: (ctx.previous || []).length ? F.callback : '',
     // ⚠️ عمداً در **یک** چیدمانِ مشخص طفره‌رفتن تزریق می‌شود تا حالتِ fake کلِ مسیرِ
     // تعمیر را واقعاً اجرا کند (تشخیص، فراخوانی، اعتبارسنجی، جایگذاری). بدونِ این،
     // `--fake` سبز رد می‌شد در حالی که آن مسیر هرگز لمس نشده بود — همان اشتباهی که
@@ -77,9 +238,9 @@ function fakeOut(spread, cards, ctx) {
     // (مثل عبورِ `yesno` به `yesno3` در نسل چهارم) این تزریق بی‌صدا خاموش می‌شود و
     // `--fake` دوباره سبزِ دروغین می‌دهد.
     closing: topicOf(spread.id) === 'yesno' || spread.id === 'yesno'
-      ? `در کل، «${q}» بستگی داره به خودت، ولی ${names[0]} می‌گه صبر کن.`
-      : `در کل، «${q}» تو این چند هفته روشن‌تر می‌شه، ولی به شرطی که ${names[0]} را جدی بگیری.`,
-    summary: 'خلاصه‌ی ساختگی', memory: 'حافظه‌ی ساختگی',
+      ? F.closingEvasive(names[0], q)
+      : F.closing(names[0], q),
+    summary: F.summary, memory: F.memory,
   });
 }
 
@@ -87,7 +248,15 @@ function fakeOut(spread, cards, ctx) {
 // جایگذاری) واقعاً اجرا شود، بدونِ شبکه. تعدادِ fixes از خودِ ورودی شمرده می‌شود.
 function fakeRepair(sys, usr, opts) {
   const n = (usr.match(/^\d+\)/gm) || []).length || 1;
-  const out = JSON.stringify({ fixes: Array.from({ length: n }, () => 'بیشتر به این سمت می‌خوره که پیش بره، ولی صبر می‌خواد.') });
+  // 🌍 به زبانِ جاری، وگرنه استابِ تعمیر روی رباتِ روسی متنِ فارسی جایگزین می‌کرد و
+  // `--fake` قرمزِ دروغین می‌داد — همان دامی که خودِ سنجه‌ی نویسه‌ی بیگانه لو داد.
+  const out = JSON.stringify({ fixes: Array.from({ length: n }, () => LANG.fake.repairFix) });
+  // ⚠️ استاب باید **قراردادِ** کلاینتِ واقعی را کامل تقلید کند، نه فقط شکلِ خروجی‌اش:
+  // `orChatResilient` برای هر فراخوانیِ رسیده `onUsage` را صدا می‌زند و آزمایشگاه از
+  // همان «به مدل رسید» را از «رد شد» جدا می‌کند. بدونِ این خط، هر تعمیرِ ردشده در
+  // حالتِ fake به‌غلط «اصلاً به مدل نرسید» گزارش می‌شد — همان دامی که دو خط بالاتر
+  // برای زبانِ خروجیِ استاب ثبت شده، این‌بار روی قراردادِ فراخوانی.
+  opts.onUsage?.({ prompt_tokens: 0, completion_tokens: 0 });
   return opts.validate(out) ? { out, model: 'fake', attempts: 1, usages: [{ prompt_tokens: 0, completion_tokens: 0 }] } : null;
 }
 
@@ -114,13 +283,29 @@ async function runStep(persona, step, i, state) {
   });
 
   const labels = L.prompts.cardLabels(cards.length);
-  const system = L.prompts.readerSystemV4(spread, labels);
+  /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
+  let system = L.prompts.readerSystemV4(spread, labels);
+  if (VARIANT) {
+    const before = system;
+    system = PROMPT_VARIANTS[VARIANT](system);
+    /* ⚠️ اگر جایگزینی هیچ اثری نداشت یعنی الگو دیگر با متنِ locale نمی‌خواند و ما
+     * داریم «واریانت» را با کنترل مقایسه می‌کنیم بدونِ اینکه چیزی عوض شده باشد،
+     * یعنی یک دورِ کاملاً بی‌معنی با هزینه‌ی کامل. بلند شکست بخور. */
+    if (system === before) {
+      console.error(`❌ واریانتِ «${VARIANT}» هیچ تغییری در پرامپت نداد (الگو دیگر نمی‌خواند).`);
+      process.exit(1);
+    }
+  }
   const userMsg = L.prompts.readingContext(ctx);
   const inputChars = system.length + userMsg.length;
 
   if (DRY) return { spread, cards, ctx, inputChars, dry: true };
 
   let parsed = null, fallback = null;
+  // ⚠️ `orChatResilient` فقط «LLM invalid output» لاگ می‌کند و **دلیل** را نمی‌گوید.
+  // دورِ اولِ روسی ۵ تلاشِ اضافه داشت و هیچ‌جا معلوم نبود شکلِ JSON رد شده یا سرخط —
+  // یعنی گران‌ترین سیگنالِ هر دور خوانده‌نشده می‌ماند. حالا خودِ validate ثبتش می‌کند.
+  const rejects = [];
   // در حالتِ fake همان callbackِ validate اجرا می‌شود، فقط ورودی‌اش از استاب می‌آید.
   const call = FAKE
     ? (sys, usr, opts) => {
@@ -134,22 +319,36 @@ async function runStep(persona, step, i, state) {
     maxTokens: spread.maxTokens,
     validate: (out) => {
       const obj = parseJsonLoose(out);
-      if (!checkV4Shape(obj, cards.length)) return false;
-      if (!headlineOk(obj.headline)) { fallback = obj; return false; }
+      if (!obj) { rejects.push('JSON خراب'); return false; }
+      if (!checkV4Shape(obj, cards.length)) {
+        const n = Array.isArray(obj.reads) ? obj.reads.length : 'ندارد';
+        rejects.push(`شکلِ خروجی (reads: ${n}/${cards.length})`);
+        return false;
+      }
+      if (!headlineOk(obj.headline)) {
+        rejects.push(`سرخط فرمول را ندارد: «${String(obj.headline || '').slice(0, 80)}»`);
+        fallback = obj;
+        return false;
+      }
       parsed = obj;
       return true;
     },
-  });
+  }, PLAN);
   if (!parsed && fallback) parsed = fallback;
-  if (!parsed) return { spread, cards, ctx, inputChars, failed: true };
+  if (!parsed) return { spread, cards, ctx, inputChars, rejects, failed: true };
 
   // تعمیرِ نقطه‌ای — **همان کدِ ربات**. اینجا اجرا می‌شود تا آزمایشگاه دقیقاً همان
   // چیزی را بسنجد که کاربر می‌گیرد، و هزینه/تأخیرِ واقعیِ این مسیر اندازه گرفته شود.
   const t0 = Date.now();
+  // ⚠️ `meta` به‌صورت opts به کلاینت می‌رسد، پس `model` این‌جا مسیرِ تعمیر را هم روی
+  // **مدلِ تحتِ آزمایش** می‌نشاند. بدونِ این، بازوی GPT یک تعمیرِ Gemini می‌گرفت و
+  // مقایسه دیگر مقایسه‌ی دو مدل نبود.
   const rep = await repairDefects(parsed, FAKE ? fakeRepair : orChatResilient,
-    { tag: `${persona.id}.${i + 1}` });
+    // بازوی مدل باید **کلِ خطِ لوله** را بپوشاند، نه فقط خوانش: تا قبل از این تعمیر
+    // همیشه روی مدلِ پیش‌فرضِ محصول می‌رفت و مقایسه‌ی مدل‌ها ناقص بود.
+    { tag: `${persona.id}.${i + 1}`, meta: { model: MODEL }, plan: [MODEL] });
   parsed = rep.llm;
-  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null };
+  const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null, calls: rep.calls || 0 };
 
   const rendered = renderV4(parsed, cards, labels, { name: persona.name });
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
@@ -169,14 +368,20 @@ async function runStep(persona, step, i, state) {
   });
 
   return {
-    spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair,
+    spread, cards, ctx, inputChars, llm: parsed, rendered, check, repair, rejects,
     model: res?.model, attempts: res?.attempts,
+    /* ⚠️ `usd` هزینه‌ی **واقعیِ** همان درخواست است که OpenRouter در هر پاسخ برمی‌گرداند
+     * (همان عددی که ربات در `llm_usage` می‌نویسد). لازم شد چون گزارشِ قبلی دلار را از
+     * روی توکن با قیمتِ **هاردکدِ Gemini Flash** حساب می‌کرد؛ روی یک بازوی مدلِ دیگر
+     * آن عدد دیگر پول نیست، فقط «حجمِ توکن با نرخِ Gemini». دورِ ۹ همین را لو داد:
+     * DeepSeek که per توکن چند برابر ارزان‌تر است «گران‌ترین» گزارش شده بود. */
     usage: (res?.usages || []).reduce((a, u) => ({
       in: a.in + (u?.prompt_tokens || 0), out: a.out + (u?.completion_tokens || 0),
-    }), { in: 0, out: 0 }),
+      usd: a.usd + (Number(u?.cost) || 0),
+    }), { in: 0, out: 0, usd: 0 }),
     // هزینه‌ی تعمیر **جدا** شمرده می‌شود، وگرنه در هزینه‌ی کلی گم می‌شود و
     // نمی‌فهمیم این مسیر واقعاً ارزان است یا فقط ادعا کرده‌ایم.
-    repairUsage: { in: rep.usage?.prompt_tokens || 0, out: rep.usage?.completion_tokens || 0 },
+    repairUsage: { in: rep.usage?.prompt_tokens || 0, out: rep.usage?.completion_tokens || 0, usd: Number(rep.usage?.cost) || 0 },
   };
 }
 
@@ -215,14 +420,16 @@ async function probe(reps) {
       const cards = drawCards(`probe:${id}:${k}`, [k % 24, (k + 7) % 24, (k + 13) % 24], spread.size);
       const ctx = buildReadingCtx({
         user: { telegram_id: 1, memory_json: '', focus_area: spread.focus || 'question' },
-        spread, question: 'این روزها حس می‌کنم سرِ یه دوراهیِ مهمم و نمی‌دونم کدوم طرف برم.',
-        cards, focusKey: spread.focus || 'question', L, name: 'آرش', kbOn: true, prev: [],
+        // سؤال و نام از سناریوهای همان زبان می‌آیند، وگرنه probe روی رباتِ روسی یک
+        // سؤالِ فارسی می‌پرسید و شکلِ خروجی را در شرایطی می‌سنجید که هرگز رخ نمی‌دهد.
+        spread, question: PROBE_Q, cards,
+        focusKey: spread.focus || 'question', L, name: PROBE_NAME, kbOn: true, prev: [],
       });
       const labels = L.prompts.cardLabels(cards.length);
       let out = null, usage = {};
       try {
         const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
-          { maxTokens: spread.maxTokens });
+          { maxTokens: spread.maxTokens, model: MODEL });
         out = r.text; usage = r.usage || {};
       } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
       const obj = parseJsonLoose(out);
@@ -234,7 +441,7 @@ async function probe(reps) {
       // بریدگیِ خروجی: اگر به سقفِ توکن خورده باشیم مسئله «شکلِ خروجی» نیست، «جا نشدن» است
       if ((usage.completion_tokens || 0) >= spread.maxTokens - 40) trunc++;
     }
-    rows.push({ id, fa: spread.fa, size: spread.size, okShape, okHeadline, reps, tally,
+    rows.push({ id, fa: spreadName(spread.fa), size: spread.size, okShape, okHeadline, reps, tally,
       avgOut: Math.round(outTok / reps), max: spread.maxTokens, trunc });
   }
   console.log('\nچیدمان            کارت  شکلِ سالم  سرخطِ سالم  میانگینِ توکنِ خروجی (سقف)  بریدگی');
@@ -259,6 +466,33 @@ if (flag('probe')) {
 
 /* ═══════════════ اجرا ═══════════════ */
 const personas = SCEN.personas.filter(p => !ONLY.length || ONLY.includes(p.id));
+
+/* 🚦 پیش‌پروازِ سناریوها — **قبل از** خرجِ پول.
+ *
+ * 🐛 باگی که این را لازم کرد (۱۴۰۵/۰۶/۰۹، در سناریوهای پرتغالیِ خودم): `focus` مقدارِ
+ * `work` و `self` داشت که در `focusFa` هیچ locale ای وجود ندارند. `buildReadingCtx`
+ * با `focusFa[k] || k` fallback می‌کند، پس به‌جای خطا **عینِ همان کلمه‌ی انگلیسی**
+ * وارد پرامپتِ پرتغالی می‌شد. یعنی یک دورِ کاملِ پولی با پرامپتِ آلوده اجرا شد و
+ * هیچ خطایی هم نداد؛ دقیقاً همان چیزی که گاردِ `ingles` برای گرفتنش ساخته شده، ولی
+ * یک لایه بالاتر و بیرون از دیدش.
+ *
+ * `spread` هم این‌جا سنجیده می‌شود چون شناسه‌ی غلط وسطِ دور می‌ترکد، یعنی بعد از
+ * اینکه بخشی از پول خرج شده. */
+{
+  const badFocus = [...new Set(personas.map(p => p.focus).filter(f => f && !L?.focusFa?.[f]))];
+  const validSpreads = new Set(Object.keys(SPREAD_BY_ID));
+  const badSpread = [...new Set(personas.flatMap(p => p.steps.map(x => x.spread))
+    .filter(x => x && !validSpreads.has(x)))];
+  if (badFocus.length || badSpread.length) {
+    if (badFocus.length) {
+      console.error(`❌ سناریو: focus ناشناخته → ${badFocus.join(', ')}`);
+      console.error(`   مقادیرِ معتبر: ${Object.keys(L?.focusFa || {}).join(', ')}`);
+      console.error('   ⚠️ این خطا نمی‌دهد، بی‌صدا همان کلمه را داخلِ پرامپت می‌گذارد.');
+    }
+    if (badSpread.length) console.error(`❌ سناریو: چیدمانِ ناشناخته → ${badSpread.join(', ')}`);
+    process.exit(1);
+  }
+}
 const all = [];
 
 // چند **پاسِ کامل** روی همان سناریوها با همان کارت‌ها. تنها متغیرِ بین پاس‌ها
@@ -270,6 +504,20 @@ const all = [];
 // دورِ پنجم در واقع نویز بود. بدونِ این پرچم، لوپِ بهبود دارد به خودش دروغ می‌گوید.
 const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
 
+for (const arm of ARM_LIST) {
+/* 🐛 این انتساب قبلاً داخلِ شرطِ `ARM_LIST.length > 1` بود و یک **اجرای کاملاً
+ * اشتباه** می‌ساخت: با `--arms <یک مدل>` بازو نادیده گرفته می‌شد و کلِ دور روی
+ * مدلِ پیش‌فرض اجرا می‌شد، در حالی که گزارش هم همان بازو را چاپ می‌کرد. سه دورِ
+ * واقعی به همین شکل سوختند (به‌جای مدلِ خواسته‌شده، مدلِ پیش‌فرض سنجیده شد).
+ * انتساب حالا بی‌قید است و برای حالتِ «بدونِ --arms» هم no-op می‌ماند، چون
+ * `ARM_LIST` آن‌وقت دقیقاً `[MODEL]` است. فقط **چاپِ سرصفحه** مشروط ماند. */
+  MODEL = armModel(arm); VARIANT = armVariant(arm);
+  PLAN = [MODEL, MODEL, MODEL, FALLBACK, FALLBACK];
+if (ARM_LIST.length > 1) {
+  console.log(`\n${'▓'.repeat(72)}`);
+  console.log(`🅰️ بازو: ${arm}  (همان کارت‌ها و همان سؤال‌های بازوهای دیگر)`);
+  console.log('▓'.repeat(72));
+}
 for (let rep = 0; rep < REPS; rep++) {
 if (REPS > 1) {
   console.log(`\n${'█'.repeat(72)}`);
@@ -288,9 +536,11 @@ for (const persona of personas) {
   for (let i = 0; i < persona.steps.length; i++) {
     const step = persona.steps[i];
     const r = await runStep(persona, step, i, state);
-    all.push({ persona: persona.id, i, rep, step, ...r });
+    all.push({ persona: persona.id, i, rep, arm: VARIANT ? `${MODEL}@${VARIANT}` : MODEL, step, ...r });
 
-    const head = `\n── ${persona.id}.${i + 1} «${r.spread.fa}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
+    const head = `\n── ${persona.id}.${i + 1} «${spreadName(r.spread.fa)}» (${r.spread.size} کارت) ${step.afterMinutes ? `+${step.afterMinutes} دقیقه` : 'قدمِ اول'}`;
+  // دلیلِ هر تلاشِ ردشده — گران‌ترین سیگنالِ هر دور، و تا امروز چاپ نمی‌شد
+  if (r.rejects?.length) for (const why of r.rejects) console.log(`   ↻ تلاشِ ردشده: ${why}`);
     console.log(head);
     console.log(`   سؤال: ${step.question}`);
     console.log(`   چالش: ${step.expect}`);
@@ -322,6 +572,7 @@ for (const persona of personas) {
   }
 }
 }
+}  // ← پایانِ حلقه‌ی بازوها (`--arms`)
 
 /* ═══════════════ تکرارِ بین‌فالی: مهم‌ترین سنجه ═══════════════ */
 // تحقیق ۱ دلیلِ شماره‌یکِ رهاکردنِ محصولاتِ AI را «تکراری و قالبی» می‌داند، و دو بار هم
@@ -334,11 +585,18 @@ if (!DRY) {
   const done = all.filter(r => r.llm);
   // ⚠️ مقایسه فقط **داخلِ هر پاس**. اگر پاس‌ها با هم مخلوط شوند، همان سناریو با همان
   // کارت‌ها در دو پاس طبیعتاً شبیهِ خودش درمی‌آید و عددِ تکرار را الکی باد می‌کند.
+  /* ⚠️ گروه‌بندی باید **بازو و پاس** را با هم ببیند، نه فقط پاس. با دو بازو، پاسِ ۱ـِ
+   * بازوی A و پاسِ ۱ـِ بازوی B در یک سطل می‌افتادند و یک ۶کلمه‌ایِ مشترکِ
+   * `A/R1.1` و `B/R1.2` به‌عنوان «تکرارِ بین‌فالی» شمرده می‌شد، در حالی که اصلاً دو
+   * مدلِ متفاوت‌اند و این عدد قرار است بگوید **یک** مدل خودش را تکرار می‌کند یا نه. */
+  const groupsSeen = [...new Set(done.map(r => `${r.arm || ''}\u0000${r.rep}`))].sort();
   const repsSeen = [...new Set(done.map(r => r.rep))].sort();
   const perRep = [];
-  for (const rp of repsSeen) {
+  for (const gk of groupsSeen) {
+    const [gArm, gRep] = gk.split('\u0000');
+    const rp = Number(gRep);
     const seen = new Map();
-    for (const r of done.filter(x => x.rep === rp)) {
+    for (const r of done.filter(x => String(x.arm || '') === gArm && x.rep === rp)) {
       for (const g of new Set(ngrams(modelText(r.llm), 6))) {
         if (!seen.has(g)) seen.set(g, new Set());
         seen.get(g).add(`${r.persona}.${r.i + 1}`);
@@ -346,9 +604,10 @@ if (!DRY) {
     }
     const rr = [...seen.entries()].filter(([, s]) => s.size > 1).sort((a, b) => b[1].size - a[1].size);
     perRep.push(rr);
-    if (repsSeen.length > 1) console.log(`\n   ── پاسِ ${rp + 1}: ${rr.length} تکرار`);
+    const label = (ARM_LIST.length > 1 ? `${gArm} / ` : '') + `پاسِ ${rp + 1}`;
+    if (repsSeen.length > 1 || ARM_LIST.length > 1) console.log(`\n   ── ${label}: ${rr.length} تکرار`);
     if (!rr.length) console.log('   ✅ هیچ ۶کلمه‌ای در دو فالِ متفاوت تکرار نشده');
-    else for (const [g, s] of rr.slice(0, repsSeen.length > 1 ? 8 : 25)) console.log(`      [${[...s].join(', ')}] «${g}»`);
+    else for (const [g, s2] of rr.slice(0, groupsSeen.length > 1 ? 8 : 25)) console.log(`      [${[...s2].join(', ')}] «${g}»`);
   }
   const repeatCounts = perRep.map(x => x.length);
 
@@ -357,12 +616,28 @@ if (!DRY) {
   console.log('═'.repeat(72));
   const tokIn = done.reduce((a, r) => a + r.usage.in, 0), tokOut = done.reduce((a, r) => a + r.usage.out, 0);
   const bad = done.filter(r => r.check.issues.length);
-  console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${done.reduce((a, r) => a + (r.attempts - 1), 0)}`);
+  /* ⚠️ `attempts` روی فالی که خطا داده undefined است، و `undefined - 1` کلِ جمع را
+   * `NaN` می‌کند. در اجرای تک‌پاسه هرگز دیده نشد و در دورِ ۱۰ (سه‌پاسه، ۲۷ فال) به‌صورتِ
+   * «تلاشِ اضافه: NaN» بیرون زد. عددِ NaN در گزارشی که مبنای تصمیمِ مدل است، یعنی یکی از
+   * دو سنجه‌ی هزینه‌ی همان دور خوانده نمی‌شود. */
+  const extra = done.reduce((a, r) => a + Math.max(0, (Number(r.attempts) || 1) - 1), 0);
+  console.log(`   فال‌ها: ${done.length} | با ایراد: ${bad.length} | تلاشِ اضافه: ${extra}`);
   // متریکِ کیفیِ اصلی برای مقایسه‌ی دورها: چند درصد از جمله‌ها به هیچ چیزِ مخصوصِ
   // همین فال گره نخورده‌اند. هرچه کمتر، خوانش شخصی‌تر و کمتر Barnum.
   const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
   const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
   console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
+  /* 📏 «خط‌کش چقدر کج بود»: همان متن، با مسیرِ **قدیمیِ** نامِ کارت. تفاوتِ این دو عدد
+   * اثرِ فیکسِ ریشه‌یابی را **بدونِ نویزِ اجرا** نشان می‌دهد، چون روی عینِ همان جمله‌ها
+   * حساب می‌شود. برای فارسی همیشه صفر است (صرف ندارد) و همین صفر، خودش تأییدِ
+   * ادعای «سوگیری فقط روی زبانِ صرفی بود» است. */
+  const lsAll = done.reduce((s2, r) => s2 + (r.check.anchor?.looseStrict ?? r.check.anchor?.loose ?? 0), 0);
+  if (lsAll !== lo) {
+    console.log(`   📏 با سنجه‌ی قدیمی همین متن: ${lsAll}/${to} (${to ? Math.round(lsAll * 100 / to) : 0}٪)`
+      + ` → فیکسِ ریشه‌یابی ${lsAll - lo} جمله را از «بی‌لنگر» نجات داد`);
+  } else {
+    console.log('   📏 سنجه‌ی قدیمی و جدید روی این متن یکی شدند (صفر جمله‌ی نجات‌یافته)');
+  }
   // پراکندگیِ بین پاس‌ها = واحدِ سنجشِ نویز. بدونِ این عدد نمی‌شود فهمید یک تفاوتِ
   // چندواحدی «بهبود» است یا فقط شانسِ نمونه‌برداریِ مدل (یافته‌ی دورِ هفتم).
   if (repsSeen.length > 1) {
@@ -377,20 +652,45 @@ if (!DRY) {
     console.log(`   🔁 تکرارِ بین‌فالی per پاس: ${repeatCounts.join(' , ')}`);
     console.log(`   ❌ فالِ ایرادناک per پاس: ${badPer.join(' , ')}`);
   }
-  console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی ≈ $${(tokIn / 1e6 * 0.30 + tokOut / 1e6 * 2.50).toFixed(4)}`);
+  const usd = done.reduce((a, r) => a + (r.usage?.usd || 0), 0);
+  // عددِ دلاری فقط وقتی چاپ می‌شود که **واقعی** باشد؛ نبودنش (مثلاً حالتِ fake) یعنی
+  // سکوت، نه یک تخمینِ ساختگی که بعداً به‌عنوان «هزینه» نقل شود.
+  console.log(`   توکن: ${tokIn} ورودی + ${tokOut} خروجی`
+    + (usd > 0 ? ` | هزینه‌ی واقعی: $${usd.toFixed(4)} (per فال: $${(usd / done.length).toFixed(5)})` : ''));
   // مسیرِ تعمیر جدا گزارش می‌شود: چند بار شلیک کرد، چقدر طول کشید، چقدر خرج برداشت.
   // هر سه عدد لازم است — «ارزان» بدونِ تأخیر بی‌معناست و برعکس.
   {
     const fired = done.filter(r => r.repair?.fired);
     const failed = fired.filter(r => !r.repair.ok);
+    /* ⚠️ «شلیک کرد و نشد» با «اصلاً به مدل نرسید» یکی نیست، و تفکیکشان از یک دورِ
+     * واقعی درآمد: بازوی `gpt-5-mini` شش تعمیرِ «ناموفق» داشت با **صفر توکن** و
+     * تأخیرِ ~۵۰ms، یعنی هر شش فراخوانی قبل از رسیدن به مدل رد شده بودند (احتمالاً
+     * یک پارامترِ ناسازگار). آن دور شش فالِ ایرادناک گزارش کرد در حالی که مسیرِ
+     * تعمیرش عملاً **وجود نداشت** — یعنی عددِ کیفیتِ آن مدل بدترِ واقعیت نمایش داده
+     * می‌شد و علتش در گزارش نامرئی بود. هر مدلِ تازه‌ای می‌تواند همین را بدهد، پس
+     * تشخیصش باید ساختاری باشد نه چشمی. */
+    /* 🐛 نسخه‌ی اولِ این تشخیص **غلط بود** و یک ادعای غلط تولید کرد. ملاکش «صفر توکن»
+     * بود، ولی `orChatResilient` در مسیرِ شکست `return null` می‌زند و کلِ `usages` را
+     * دور می‌ریزد. یعنی وقتی مدل جواب می‌داد و `validate` جوابش را رد می‌کرد، توکن هم
+     * صفر گزارش می‌شد و این خط آن را «اصلاً به مدل نرسید» می‌خواند. این دو کاملاً
+     * متفاوتند: ردِ validate یعنی مدل نتوانست ایراد را برطرف کند (سیگنالِ **کیفیت**)،
+     * ولی نرسیدن یعنی مسیرِ تعمیر **وجود ندارد** (سیگنالِ **زیرساخت**).
+     * حالا ملاک شمارشِ صریحِ فراخوانی است (`calls`)، نه استنتاج از توکن. */
+    const dead = fired.filter(r => !r.repair.ok && !r.repair.calls);
+    const rejected = fired.filter(r => !r.repair.ok && r.repair.calls);
     const rin = done.reduce((a, r) => a + (r.repairUsage?.in || 0), 0);
     const rout = done.reduce((a, r) => a + (r.repairUsage?.out || 0), 0);
     const msList = fired.map(r => r.repair.ms).sort((a, b) => a - b);
-    const cost = rin / 1e6 * 0.30 + rout / 1e6 * 2.50;
+    const cost = done.reduce((a, r) => a + (r.repairUsage?.usd || 0), 0);
     console.log(`   🔧 تعمیرِ نقطه‌ای: ${fired.length}/${done.length} فال` +
-      (failed.length ? ` (${failed.length} ناموفق)` : '') +
+      (failed.length ? ` (${failed.length} ناموفق: ${rejected.length} مدل جواب داد ولی رد شد` +
+        `${dead.length ? `، ${dead.length} **اصلاً به مدل نرسید**` : ''})` : '') +
       (fired.length ? ` | تأخیر ${msList[0]} تا ${msList[msList.length - 1]}ms` +
-        ` | توکن ${rin}+${rout} ≈ $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : ''));
+        ` | توکن ${rin}+${rout}` + (cost > 0 ? ` | هزینه‌ی واقعی $${cost.toFixed(5)} (per فالِ کلِ دور: $${(cost / done.length).toFixed(6)})` : '') : ''));
+    if (dead.length === fired.length && fired.length) {
+      console.log('   ⚠️ مسیرِ تعمیر روی این مدل **کاملاً مرده بود** (صفر توکن در همه‌ی فراخوانی‌ها).'
+        + ' عددِ «فالِ ایرادناک» این دور با مدل‌هایی که تعمیرشان کار کرده قابلِ مقایسه نیست.');
+    }
   }
   // متنِ ایراد و درصدِ لنگرِ هر فال **همین‌جا** چاپ می‌شود، نه فقط بالاتر در بلوکِ خودش.
   // دلیلِ عملیاتی: خواندنِ لاگِ Actions فقط از **انتها** ممکن است و بلوکِ هر فال ده‌ها
@@ -401,14 +701,90 @@ if (!DRY) {
     const a = r.check.anchor;
     const pct = a?.total ? ` | بی‌لنگر ${a.loose}/${a.total}` : '';
     const tag = repsSeen.length > 1 ? `پ${r.rep + 1} ` : '';
-    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${r.spread.fa}${pct}`);
+    console.log(`   ${n ? '❌' : '✅'} ${tag}${r.persona}.${r.i + 1} ${spreadName(r.spread.fa)}${pct}`);
     r.check.issues.forEach(x => console.log(`        ↳ ${x}`));
   }
 }
 
+/* ═══ 📄 رونوشتِ کاملِ فال‌ها ═══
+ *
+ * چرا در **انتهای** لاگ و یک‌جا: ارزیابیِ کیفیت کارِ خواندنِ خودِ متن است، نه خواندنِ
+ * یک عدد. لاگِ Actions فقط از انتها قابلِ برداشت است و بلوکِ هر فال ده‌ها خط بالاتر
+ * لای خروجیِ سنجه‌ها گم می‌شود. این بلوک همه‌ی متن‌ها را فشرده و پشتِ سرِ هم می‌گذارد
+ * تا با یک tail خوانده شوند. */
+function dumpTranscripts(rows) {
+  console.log('\n' + '═'.repeat(72));
+  console.log('📄 رونوشتِ کاملِ فال‌ها (برای ارزیابیِ دستیِ کیفیت)');
+  console.log('═'.repeat(72));
+  for (const r of rows) {
+    if (!r.rendered) continue;
+    console.log(`\n▓ ${r.arm || '-'} | ${r.persona}.${r.i + 1}${r.rep ? ` پ${r.rep + 1}` : ''} | ${spreadName(r.spread.fa)}`);
+    console.log(`؟ ${r.step.question}`);
+    console.log(`🃏 ${r.cards.map(c => cardName(c.key) + (c.reversed ? '↕' : '')).join('، ')}`);
+    console.log([r.rendered.headline, r.rendered.body, r.rendered.closing].filter(Boolean).join('\n'));
+  }
+}
+
+/* ═══ 🅰️🅱️ مقایسه‌ی جفت‌شده‌ی بازوها ═══
+ *
+ * چرا جفت‌شده و نه فقط دو درصدِ کلی: اثرِ **سناریو** تا ۵۰ واحد است (یک سناریو ۵٪
+ * بی‌لنگر می‌دهد و دیگری ۵۵٪) و نویزِ نمونه‌برداریِ مدل ۱۳ واحد، در حالی که تفاوتی که
+ * دنبالش هستیم ~۵ واحد است. اگر دو عددِ تجمیعی را مقایسه کنی، سیگنال زیرِ این دو
+ * منبعِ واریانس دفن می‌شود. چون همه‌ی بازوها **عینِ همان کارت و همان سؤال** را
+ * گرفته‌اند، می‌شود per سناریو تفاضل گرفت و اثرِ سناریو کاملاً حذف می‌شود.
+ *
+ * ⚠️ عمداً p-value چاپ نمی‌شود: با ۹ سناریو، آزمونِ علامت توانِ کافی ندارد و یک
+ * عددِ آماریِ خوش‌قیافه فقط اعتمادِ کاذب می‌سازد. به‌جایش «چند سناریو را برد» و
+ * «میانگینِ تفاضل» می‌آید، که هر دو خام و قابلِ بازبینی‌اند. */
+if (!DRY && ARM_LIST.length > 1) {
+  const done = all.filter(r => r.llm);
+  const key = (r) => `${r.persona}.${r.i + 1}`;
+  const scen = [...new Set(done.map(key))];
+  const rate = (rows) => {
+    const lo = rows.reduce((x, r) => x + (r.check?.anchor?.loose || 0), 0);
+    const to = rows.reduce((x, r) => x + (r.check?.anchor?.total || 0), 0);
+    return to ? (lo * 100 / to) : null;
+  };
+  const base = ARM_LIST[0];
+  console.log(`\n${'═'.repeat(72)}`);
+  console.log('🅰️🅱️ مقایسه‌ی جفت‌شده (هر سناریو با کارت و سؤالِ یکسان بینِ بازوها)');
+  console.log('═'.repeat(72));
+  for (const other of ARM_LIST.slice(1)) {
+    const diffs = [], rowsOut = [];
+    for (const sc of scen) {
+      const a = rate(done.filter(r => key(r) === sc && r.arm === base));
+      const b = rate(done.filter(r => key(r) === sc && r.arm === other));
+      if (a == null || b == null) continue;
+      diffs.push(b - a);
+      rowsOut.push(`   ${sc.padEnd(7)} ${base.split('/').pop().slice(0, 22).padEnd(23)}${a.toFixed(0).padStart(3)}٪   →  ${b.toFixed(0).padStart(3)}٪   (${(b - a) >= 0 ? '+' : ''}${(b - a).toFixed(0)})`);
+    }
+    if (!diffs.length) { console.log('   (دادهٔ قابلِ جفت‌شدن نبود)'); continue; }
+    const mean = diffs.reduce((x, y) => x + y, 0) / diffs.length;
+    const better = diffs.filter(d => d < 0).length;   // کمتر یعنی بهتر (بی‌لنگرِ کمتر)
+    const worse = diffs.filter(d => d > 0).length;
+    console.log(`\n   🅱️ ${other}  در برابرِ  🅰️ ${base}`);
+    rowsOut.forEach(x => console.log(x));
+    console.log(`   ─────`);
+    console.log(`   میانگینِ تفاضلِ per سناریو: ${mean >= 0 ? '+' : ''}${mean.toFixed(1)} واحد` +
+      ` (منفی یعنی «${other}» بهتر است)`);
+    console.log(`   بردِ سناریویی: ${better} بهتر / ${worse} بدتر / ${diffs.length - better - worse} مساوی`);
+    const decisive = Math.abs(mean) >= 5 && (better >= diffs.length * 0.7 || worse >= diffs.length * 0.7);
+    console.log(decisive
+      ? `   ✅ الگو یک‌دست است، این تفاوت قابلِ اتکاست`
+      : `   ⚠️ الگو یک‌دست نیست؛ با ${diffs.length} سناریو این تفاوت **قطعی نیست**، پاسِ بیشتر لازم است`);
+  }
+}
+
+dumpTranscripts(all);
+
 if (OUT) {
   fs.writeFileSync(OUT, JSON.stringify(all.map(r => ({
-    persona: r.persona, step: r.i, rep: r.rep, spread: r.spread?.id, question: r.step?.question,
+    /* ⚠️ `arm` حتماً این‌جا بماند. این map فیلدها را **صریح** انتخاب می‌کند، پس
+     * افزودنِ یک فیلد به `all` خودبه‌خود به JSON نمی‌رسد. نسخه‌ی اولِ حالتِ چندبازویی
+     * دقیقاً همین را جا انداخت: مقایسه‌ی درون‌پروسه درست کار می‌کرد ولی خلاصه‌ی
+     * انتهای لاگ همه‌ی بازوها را در یک سطلِ «(پیش‌فرض)» می‌ریخت، یعنی تفکیکی که کلِ
+     * تصمیم روی آن است بی‌صدا گم می‌شد. */
+    persona: r.persona, step: r.i, rep: r.rep, arm: r.arm || '', spread: r.spread?.id, question: r.step?.question,
     cards: r.cards?.map(c => c.key + (c.reversed ? '↕' : '')),
     inputChars: r.inputChars, llm: r.llm, rendered: r.rendered, check: r.check,
   })), null, 2));

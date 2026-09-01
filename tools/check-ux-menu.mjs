@@ -311,7 +311,7 @@ console.log('\n▶ اولین فالِ کاربر: پیشنهادِ فالِ ج�
   ok(iIsFirst2 > iIsFirst1, 'fbr: هم isFirstReading را دوباره (مستقل) محاسبه می‌کند');
   const iFbr = SRC.indexOf('bot.action(/^fbr:');
   const fbrBlock = SRC.slice(iFbr, SRC.indexOf('bot.action(', iFbr + 20));
-  ok(/luckyAvailable = getUser\(uid\)\?\.lucky_date !== tehranToday\(\)/.test(fbrBlock),
+  ok(/luckyAvailable = getUser\(uid\)\?\.lucky_date !== botToday\(\)/.test(fbrBlock),
     'تبلیغِ کارت شانس فقط اگر سهمیه‌ی امروز هنوز مصرف نشده نشان داده می‌شود');
   ok(/if \(uxV2For\(uid\) && isFirstReading && luckyAvailable\) \{/.test(fbrBlock),
     'شرطِ نمایشِ تبلیغ: دنیای الماس + اولین فال + سهمیه‌ی کارت شانس باز');
@@ -816,7 +816,7 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
   ok(/rows\.push\(inviteRow\(uid\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
   ok(/const inviteRow = \(uid\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), 'invite_go'\)\];/.test(SRC),
     'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار و همان مقصدِ invite_go را دارد');
-  ok(/if \(getUser\(uid\)\?\.lucky_date !== tehranToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
+  ok(/if \(getUser\(uid\)\?\.lucky_date !== botToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
     'دکمه‌ی کارت شانس فقط وقتی سهمیه‌ی امروز باز است نشان داده می‌شود (بن‌بست نمی‌سازد)');
   ok(/bot\.action\('invite_go', async \(ctx\) => \{ await ctx\.answerCbQuery\(\)\.catch\(\(\) => \{\}\); return showInvite\(ctx\); \}\);/.test(SRC),
     'دکمه‌ی معرفیِ دوستانِ داخلِ کیف، همان تابعِ hears اصلی را صدا می‌زند (بدونِ کپیِ منطق)');

@@ -1,0 +1,74 @@
+[
+  {
+    "persona": "F1",
+    "step": 0,
+    "arm": "google/gemini-2.5-flash",
+    "spread": "yesno3",
+    "question": "برم یا بمونم؟",
+    "llm": {
+      "headline": "آره، محتمله، ولی بهاش صبره.",
+      "pattern": "شمشیر و جام کنار هم.",
+      "callback": "",
+      "reads": [
+        {
+          "text": "کارت اول می‌گه بستگی به خودت داره که چی می‌خوای."
+        }
+      ],
+      "closing": "در کل جلو می‌ری، ولی نه به این زودی."
+    }
+  },
+  {
+    "persona": "F2",
+    "step": 0,
+    "arm": "openai/gpt-5.6-luna",
+    "spread": "three",
+    "question": "چی در انتظارمه؟",
+    "llm": {
+      "headline": "آره، ولی یواش.",
+      "pattern": "حسِ ناگفته‌ات اینه که منتظری.",
+      "callback": "",
+      "reads": [
+        {
+          "text": "ماه می‌گه ابهام هست، ولی مسیر بازه."
+        }
+      ],
+      "closing": "در کل خوبه."
+    }
+  },
+  {
+    "persona": "F3",
+    "step": 0,
+    "arm": "openai/gpt-5.6-luna",
+    "spread": "three",
+    "question": "چی در انتظارمه؟",
+    "llm": {
+      "headline": "نه به این شکل، ولی راهِ دیگه‌ای هست.",
+      "pattern": "سه جام و نه جام.",
+      "callback": "",
+      "reads": [
+        {
+          "text": "جام‌ها می‌گن دورِ تو آدمِ کم نیست."
+        }
+      ],
+      "closing": "در کل تا آخرِ فصل روشن می‌شه."
+    }
+  },
+  {
+    "persona": "F4",
+    "step": 0,
+    "arm": "google/gemini-2.5-flash",
+    "spread": "three",
+    "question": "چی می‌شه؟",
+    "llm": {
+      "headline": "آره، محتمله، ولی زمان می‌بره.",
+      "pattern": "دو کارتِ هم‌خانواده.",
+      "callback": "",
+      "reads": [
+        {
+          "text": "دفعه‌ی قبل که حرف زدیم فرق داشت."
+        }
+      ],
+      "closing": "در کل بستگی داره به خودت."
+    }
+  }
+]

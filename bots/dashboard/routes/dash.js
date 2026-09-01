@@ -11,7 +11,7 @@
 //     «فعالِ روزانه» و با ۷ روز «فعالِ هفتگی» را می‌بینی.
 import {
   instancesOf, withDb, hasTable, scalar, rows, botByKey,
-  moneyOf, revenueWhere, toToman, moneyText, creditText, coinOf,
+  moneyOf, revenueWhere, toToman, moneyText, creditText, coinOf, baseKey,
 } from '../lib/bots.js';
 import { scopeBot, MASTER_DASH_BOTS } from '../lib/nav.js';
 import { getSetting, setSetting, audit } from '../lib/platform.js';
@@ -229,7 +229,7 @@ function gather(botKey, { since, activeWindow }) {
 export function dashBody(url) {
   const bot = scopeBot(url);
   const title = botByKey(bot)?.title || bot;
-  if (!MASTER_DASH_BOTS.has(bot)) {
+  if (!MASTER_DASH_BOTS.has(baseKey(bot))) {
     return `<div class="card"><h2>📊 داشبورد اصلی</h2>
       <p>داشبوردِ تحلیلیِ جامع فعلاً فقط برای <b>🔮 تاروت</b> ساخته شده (تمرکزِ فعلیِ محصول).</p>
       <p class="muted">برای «${esc(title)}» بقیه‌ی صفحه‌های تحلیلی (فانل‌ها، ریتنشن، مارکتینگ، مالی، کاربران)
