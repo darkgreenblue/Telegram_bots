@@ -11,6 +11,7 @@
 //
 // این چک درباره‌ی **کیفیتِ ترجمه** ادعایی ندارد؛ فقط پوشش و تک‌زبانه بودن را قفل می‌کند.
 import { readFileSync, readdirSync, existsSync } from 'fs';
+import { spawnSync } from 'child_process';
 import CARDS from '../bots/tarot/cards.js';
 import { SPREAD_BY_ID, DAILY } from '../bots/tarot/spreads.js';
 
@@ -293,6 +294,96 @@ console.log('\n▶ سیم‌کشیِ runtime');
   // سنجه‌ی آزمایشگاه باید از **همان** فایل بخواند، وگرنه گارد و سنجه واگرا می‌شوند
   const LAB = readFileSync(new URL('../../tools/reading-lab/lang/ru.mjs', DIR), 'utf8');
   ok(/langdata\.ru\.json/.test(LAB), 'سنجه‌ی آزمایشگاه الگوها را از همان فایلِ گارد می‌خواند');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ▶ گاردِ جنسیت: **تصمیم** سنجیده می‌شود، نه اینکه الگو کامپایل می‌شود
+
+   🐛 شکافی که این بلوک از آن ساخته شد: تا امروز تنها ادعای این چک درباره‌ی
+   `defects` این بود که «id و hint دارد و رجکسش کامپایل می‌شود». یعنی یک الگو
+   می‌توانست کاملاً معتبر باشد و همچنان جمله‌ی درست را ایراد بگیرد یا جمله‌ی
+   غلط را رد کند، و هیچ‌کس نمی‌فهمید.
+
+   و همین شد: در دورِ تأییدِ اسپانیایی، **۲ تا از ۴ ایرادِ گزارش‌شده غلط بودند**
+   («te cobra demasiado»، «puedes abrir ingresos rápido»). هر دو قید بودند نه
+   صفتِ جنسیت‌دار — `demasiado` و `rápido` صرفاً به `-ado/-ido` ختم می‌شوند و
+   قاعده‌ی عمومیِ اسمِ مفعول بلعیده بودشان. پرتغالی هم همین را داشت
+   («te paga rápido»). ضررش دوتاست: عددِ ایرادِ هر مدل قابلِ اتکا نیست، و در
+   محصول یک فراخوانیِ تعمیر روی متنِ **سالم** شلیک می‌شود.
+
+   قاعده‌ی زبانیِ فیکس: بعد از فعلِ ربطی («eres rápido») همان کلمه صفتِ
+   جنسیت‌دارِ واقعی است، ولی بعد از فعلِ غیرربطی («abrir ingresos rápido») قید
+   است. پس استثنا per **شاخه** گذاشته شد، نه یک لیستِ سراسری.
+
+   ⚠️ محدودیتِ صادقانه: این پیکره از جمله‌های **واقعیِ** فلگ‌شده‌ی دورهای اخیر
+   به‌علاوه‌ی چند نمونه‌ی ساخته‌شده است، نه یک نمونه‌گیریِ تصادفی از کلِ خروجی.
+   یعنی نبودِ خطا این‌جا یعنی «این کلاس‌ها درست‌اند»، نه «هیچ کلاسِ ناشناخته‌ای
+   نمانده». هر کلاسِ تازه‌ای که در دورهای بعد دیده شد باید همین‌جا ردیف بگیرد.
+   ══════════════════════════════════════════════════════════════════════════ */
+console.log('\n▶ گاردِ جنسیت: تصمیمِ واقعی روی جمله‌های واقعی');
+{
+  /* شناسه‌ی ضعفِ جنسیت per زبان — روسی «genderedPast» است چون آن‌جا جنسیت فقط در
+   * زمانِ گذشته صرف می‌شود. ⚠️ صریح نوشته شده و وجودش هم ادعا دارد: نسخه‌ی اولِ همین
+   * بلوک `genero` را در هر سه زبان می‌گشت، برای روسی `undefined` می‌گرفت و همه‌ی
+   * جمله‌ها را «بی‌ایراد» می‌دید. اگر فقط نمونه‌ی منفی داشتم، **سبزِ دروغین** می‌داد. */
+  const DEFECT_ID = { ru: 'genderedPast', es: 'genero', pt: 'genero' };
+  const CASES = {
+    ru: [
+      ['Ты получил то, что просил.', true],
+      ['Ты спрашивал об этом раньше.', true],
+      ['Ты застряла на одном месте.', true],
+      ['Тебе казалось, что всё решено.', false],
+      ['У тебя не получалось отпустить.', false],
+      ['Тебя не отпускало это чувство.', false],
+      ['Вы оба ждали слишком долго.', false],
+    ],
+    es: [
+      // سه‌تای اول عیناً از خروجیِ دورهای واقعی
+      ['Ahora te tiene trabado en el mismo punto.', true],
+      ['Hace meses que estás quieto ahí.', true],
+      ['Antes te sentías estancada con eso.', true],
+      ['Ya te has ocupado de todo sin ayuda.', true],
+      ['Estás sosteniendo sola la esperanza.', true],
+      ['Eres rápido para decidir.', true],           // بعد از فعلِ ربطی = صفت
+      ['Estás demasiado cansado para insistir.', true],
+      // دو موردِ زیر ایرادهای **کاذبِ** واقعیِ همان دور بودند
+      ['Ese vínculo te cobra demasiado.', false],
+      ['Puedes abrir ingresos rápido.', false],       // بعد از فعلِ غیرربطی = قید
+      ['Sales seguido con esa persona.', false],
+      ['Tienes un buen resultado por delante.', false],
+      ['Esa persona está cansada de esperar.', false],
+    ],
+    pt: [
+      ['Você tá carregando muita coisa sozinha.', true],   // از خروجیِ دورِ واقعی
+      ['Você está cansada disso.', true],
+      ['Você se sente perdido no meio.', true],
+      ['Isso te deixa cansado.', true],
+      ['Você já está preparada pra isso.', true],
+      ['Esse trabalho te paga rápido.', false],            // همان کلاسِ کاذبِ اسپانیایی
+      ['Você resolve rápido quando quer.', false],
+      ['Você tem um bom resultado pela frente.', false],
+      ['A outra pessoa está cansada de esperar.', false],
+    ],
+  };
+  for (const [lang, cases] of Object.entries(CASES)) {
+    // ⚠️ از **خودِ مسیرِ محصول** خوانده می‌شود (`repair.js` → `DEFECTS`)، نه با
+    // کامپایلِ دوباره‌ی الگو در همین فایل. یک کپیِ محلی دقیقاً همان drift ای را
+    // می‌سازد که این چک قرار است جلویش را بگیرد.
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const { DEFECTS } = await import('${new URL('repair.js', DIR).pathname}');
+      const g = DEFECTS.find(d => d.id === '${DEFECT_ID[lang]}');
+      if (!g) { console.log('MISSING'); process.exit(0); }
+      const cases = ${JSON.stringify(cases)};
+      console.log(JSON.stringify(cases.map(([t]) => !!(g && g.find(t)))));
+    `], { encoding: 'utf8', env: { ...process.env, LOCALE: lang } });
+    let got = [];
+    try { got = JSON.parse(r.stdout.trim().split('\n').pop()); } catch {}
+    const wrong = cases.filter((c, i) => got[i] !== c[1]).map(c => `«${c[0]}» ${c[1] ? 'گرفته نشد' : 'ایرادِ کاذب'}`);
+    ok(!/MISSING/.test(r.stdout), `ضعفِ «${DEFECT_ID[lang]}» در langdata.${lang} وجود دارد`);
+    ok(got.length === cases.length && wrong.length === 0,
+      `گاردِ جنسیتِ «${lang}» هر ${cases.length} جمله را درست تصمیم می‌گیرد` +
+      (wrong.length ? ` — ${wrong.join(' | ')}` : got.length ? '' : ' (اجرا نشد)'));
+  }
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ دادهٔ زبانی: ${pass} پاس، 0 خطا`);
