@@ -352,6 +352,13 @@ console.log('\n▶ گاردِ جنسیت: تصمیمِ واقعی روی جمل�
       ['Sales seguido con esa persona.', false],
       ['Tienes un buen resultado por delante.', false],
       ['Esa persona está cansada de esperar.', false],
+      /* ⚠️ کلاسِ کاذبِ سومِ اسپانیایی، از دورِ ۱۴۰۵/۰۶/۱۰ و **عیناً** از خروجیِ واقعی:
+       * کمّی‌ساز با **اسمِ بعدش** می‌خواند، نه با خواننده. `demasiada` مؤنث است چون
+       * `energía` مؤنث است؛ هیچ چیزی درباره‌ی جنسیتِ مخاطب نمی‌گوید. */
+      ['Estás poniendo demasiada energía en eso.', false],
+      /* و ادعای معکوس: خودِ صفتِ جنسیت‌دار بعد از همان ساختار باید همچنان گرفته شود،
+       * وگرنه «رفعِ ایرادِ کاذب» بی‌صدا به یک **منفیِ کاذب** تبدیل می‌شود. */
+      ['Te habían dejado sola con todo.', true],
     ],
     pt: [
       ['Você tá carregando muita coisa sozinha.', true],   // از خروجیِ دورِ واقعی
