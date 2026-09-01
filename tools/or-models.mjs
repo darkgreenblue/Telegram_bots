@@ -59,3 +59,13 @@ for (const r of rows) {
   console.log(`${pad(r.id, 44)} ${pad(r.inM.toFixed(3), 9)} ${pad(r.outM.toFixed(3), 9)} ${pad(r.per.toFixed(5), 10)} ${pad(r.ctx, 9)} ${pad(r.mods, 22)} ${r.aud === null ? '' : `صدا: ${r.aud}`}`);
 }
 console.log(`\n(هزینه = ${IN_TOK} توکن ورودی + ${OUT_TOK} خروجی. «ورودی‌ها» می‌گوید مدل صدا می‌فهمد یا نه — مسیرِ ویسِ ما به image/audio نیاز دارد.)`);
+
+/* 🎙 و در **انتها** یک بلوکِ فشرده فقط از مدل‌های صداشنو. جایش عمدی است: لاگِ
+ * Actions از انتها خوانده می‌شود و این فهرست وسطِ صد ردیفِ دیگر گم می‌شد. سؤالی که
+ * جواب می‌دهد یکی است و همیشه همان: «مسیرِ رونویسیِ ویس چه گزینه‌ای دارد؟» */
+const audio = rows.filter(r => r.mods.includes('audio'));
+console.log(`\n🎙 مدل‌هایی که صدا می‌فهمند (${audio.length}):`);
+for (const r of audio) {
+  console.log(`   ${pad(r.id, 44)} $/M in ${pad(r.inM.toFixed(3), 9)} $/M out ${pad(r.outM.toFixed(3), 9)} صدا/واحد ${r.aud ?? '—'}`);
+}
+if (!audio.length) console.log('   (هیچ‌کدام — یعنی رونویسی باید بیرون از OpenRouter انجام شود)');
