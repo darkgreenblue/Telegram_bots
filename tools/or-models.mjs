@@ -36,15 +36,21 @@ const rows = data
       per: pin * IN_TOK + pout * OUT_TOK,
       ctx: m.context_length || 0,
       mods: (m.architecture?.input_modalities || []).join('+'),
+      /* ⚠️ مدلِ رونویسی (whisper و هم‌خانواده‌هایش) per **ثانیه‌ی صدا** قیمت دارد نه
+       * per توکن، پس `prompt`/`completion` اش صفر است. فیلترِ قبلی دقیقاً همان‌ها را
+       * دور می‌ریخت — یعنی ابزاری که برای «حدس نزن، بپرس» ساخته شده بود، در سؤالِ
+       * «چه مدلِ رونویسی‌ای هست؟» ساکت می‌ماند. حالا قیمتِ خامِ صدا هم چاپ می‌شود. */
+      aud: p.input_audio_tokens ?? p.audio ?? null,
     };
   })
-  .filter(r => r.per > 0)
+  // مدلِ صداشنو حتی با قیمتِ توکنیِ صفر می‌ماند (قیمتش per ثانیه است)
+  .filter(r => r.per > 0 || r.mods.includes('audio'))
   .sort((a, b) => a.per - b.per);
 
 const pad = (s, n) => String(s).padEnd(n);
 console.log(`${pad('model id', 44)} ${pad('$/M in', 9)} ${pad('$/M out', 9)} ${pad('$/فال', 10)} ${pad('ctx', 9)} ورودی‌ها`);
 console.log('─'.repeat(110));
 for (const r of rows) {
-  console.log(`${pad(r.id, 44)} ${pad(r.inM.toFixed(3), 9)} ${pad(r.outM.toFixed(3), 9)} ${pad(r.per.toFixed(5), 10)} ${pad(r.ctx, 9)} ${r.mods}`);
+  console.log(`${pad(r.id, 44)} ${pad(r.inM.toFixed(3), 9)} ${pad(r.outM.toFixed(3), 9)} ${pad(r.per.toFixed(5), 10)} ${pad(r.ctx, 9)} ${pad(r.mods, 22)} ${r.aud === null ? '' : `صدا: ${r.aud}`}`);
 }
 console.log(`\n(هزینه = ${IN_TOK} توکن ورودی + ${OUT_TOK} خروجی. «ورودی‌ها» می‌گوید مدل صدا می‌فهمد یا نه — مسیرِ ویسِ ما به image/audio نیاز دارد.)`);
