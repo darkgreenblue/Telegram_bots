@@ -158,5 +158,29 @@ console.log('\n▶ شبکه‌ی ایمنی بعد از پرداخت');
   ok(/REFUND path/.test(SRC), 'مسیرِ ریفاندِ شکستِ کاملِ LLM سرِ جایش است');
 }
 
+/* 🎙 گاردِ «مسیرِ مستقیمِ صدا فقط با مدلِ صداشنو».
+ * 🐛 چرا: آزمایشگاه `gpt-5.6-luna` را برای زبان‌های غیرفارسی برنده کرد و آن مدل
+ * ورودیِ صوتی نمی‌گیرد. بدونِ این گارد، اولین فالِ صوتیِ روسی **بعد از کسرِ
+ * اعتبار** به مدلی می‌رفت که نمی‌تواند بشنود. این ادعا **رفتاری** است: بلوک از
+ * سورس بریده و با چند مدل اجرا می‌شود، چون صرفِ وجودِ رشته چیزی را ثابت نمی‌کند. */
+{
+  const m = SRC.match(/const AUDIO_CAPABLE = \[[\s\S]*?const audioDirectOn = \(\) => AUDIO_DIRECT_ENABLED && READER_HEARS_AUDIO;/);
+  ok(!!m, 'بلوکِ تشخیصِ صداشنو بودنِ مدل در index.js هست');
+  if (m) {
+    const run = (model, flag) =>
+      new Function('FLASH', 'AUDIO_DIRECT_ENABLED', `${m[0]}; return audioDirectOn();`)(model, flag);
+    ok(run('google/gemini-2.5-flash', true) === true,
+      'مدلِ زنده‌ی فارسی صداشنو است، پس مسیرِ تک‌فراخوانی دست‌نخورده می‌ماند');
+    for (const bad of ['openai/gpt-5.6-luna', 'deepseek/deepseek-v3.2', 'some/unknown-model'])
+      ok(run(bad, true) === false, `«${bad}» صداشنو حساب نمی‌شود`);
+    ok(run('google/gemini-2.5-flash', false) === false,
+      'کلیدِ خاموشیِ دستیِ AUDIO_DIRECT_ENABLED هنوز کار می‌کند');
+    ok(/if \(fetched && audioDirectOn\(\)\)/.test(SRC),
+      'شاخه‌ی ویس از همین helper شاخه می‌گیرد، نه از پرچمِ خام');
+  }
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
+
+
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

@@ -371,6 +371,20 @@ const v4For = (uid) => READING_V4 && (!READING_V4_ADMIN_ONLY || isTester(uid));
 // Rollback یک‌خطی: false → برمی‌گردیم به مسیرِ رونویسی، ولی **همچنان بعد از پرداخت**
 // (قاعده‌ی هزینه پایین‌تر مستقل از این پرچم است و با آن رول‌بک نمی‌شود).
 const AUDIO_DIRECT_ENABLED = true;
+/* 🎙 ولی «مسیرِ مستقیمِ صدا» فقط وقتی ممکن است که مدلِ خوانش **واقعاً صدا بفهمد**.
+ * این یک تضمینِ ساختاری است، نه یک قاعده‌ای که کسی باید یادش بماند: از خودِ مدلِ
+ * پیکربندی‌شده مشتق می‌شود، پس روزی که مدل عوض شود مسیر خودبه‌خود درست می‌ماند.
+ * ⚠️ چرا لازم شد: آزمایشگاه `openai/gpt-5.6-luna` را برای زبان‌های غیرفارسی برنده
+ * کرد و آن مدل ورودیِ صوتی نمی‌گیرد. بدونِ این گارد، اولین فالِ صوتیِ روسی **بعد
+ * از کسرِ اعتبار** به مدلی می‌رفت که نمی‌تواند بشنود؛ یعنی خرابی دقیقاً در گران‌ترین
+ * نقطه‌ی ممکن. با این گارد، همان کاربر بی‌سروصدا به مسیرِ «رونویسی بعد خوانش»
+ * می‌رود که از قبل ساخته شده و آزموده است.
+ * فهرست عمداً allowlist است نه denylist: مدلِ ناشناخته «نمی‌شنود» فرض می‌شود، چون
+ * حدسِ اشتباه در این جهت فقط یک فراخوانیِ ارزانِ اضافه است، ولی در جهتِ دیگر یک
+ * فالِ پول‌داده‌ی شکسته. */
+const AUDIO_CAPABLE = [/^google\/gemini/i];
+const READER_HEARS_AUDIO = AUDIO_CAPABLE.some((re) => re.test(FLASH));
+const audioDirectOn = () => AUDIO_DIRECT_ENABLED && READER_HEARS_AUDIO;
 const toneV2For = (uid) => READING_TONE_V2 && (!READING_TONE_V2_ADMIN_ONLY || isTester(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1672,7 +1686,7 @@ async function callReadingLLM(readingId) {
   let audio = null;
   if (r.question_audio && !r.question) {
     const fetched = await fetchQuestionAudio(r); // یک دانلود، نه بیشتر
-    if (fetched && AUDIO_DIRECT_ENABLED) {
+    if (fetched && audioDirectOn()) {
       audio = fetched;                           // مسیرِ اصلی: یک فراخوانی برای کلِ کار
     } else if (fetched) {
       // پرچم خاموش: به مسیرِ رونویسی برمی‌گردیم. دو فراخوانی می‌شود ولی هر دو **بعد از**
