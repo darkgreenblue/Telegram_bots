@@ -297,9 +297,14 @@ export async function repairDefects(llm, call, { tag = '', meta = null, plan = n
   }
   const done = hits.filter((_, i) => usable[i]);
   log(`${tag} تعمیر شد (${applied}/${hits.length}): ${done.map((h) => `${h.kind}«${h.phrase}»`).join('، ')}`);
+  /* ⚠️ `appliedFlags` هم‌ترتیبِ `hits` است و **لازم** است، نه تزئینی: با سنجشِ
+   * تکه‌به‌تکه دیگر «repaired» معنیِ «کلِ فال تمیز شد» نمی‌دهد، پس هر شمارنده‌ای که
+   * از روی `repaired` تکه‌ها را حساب کند بی‌صدا بیش‌شماری می‌کند (همان کلاسِ باگی که
+   * ستونِ «هزینه» را دلارِ غیرواقعی کرده بود: واحد عوض شد و مصرف‌کننده نفهمید). */
   return {
     llm: applyFixes(llm, hits, usable), fired: true, repaired: true,
     partial: applied < hits.length, applied, hitCount: hits.length,
+    hits, appliedFlags: usable.map(Boolean),
     usage: res.usages?.[0], calls,
   };
 }

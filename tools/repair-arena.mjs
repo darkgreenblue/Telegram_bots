@@ -81,9 +81,15 @@ core.setUsageSink((u) => {
 
 // استابِ آفلاین: هر ایراد را با یک عبارتِ خنثی جایگزین می‌کند تا کلِ خطِ لوله در CI
 // واقعاً اجرا شود (درسِ `--dry` که یک دورِ پولی را سوزاند).
+/* ⚠️ وقتی بیش از یک تکه هست، تکه‌ی **آخر** عمداً معیوب برمی‌گردد.
+ * دلیلش تستِ جهش است: با پاسخِ همیشه-سالم، «تعمیرِ جزئی» هرگز در `--fake` رخ نمی‌داد و
+ * شمارنده‌ی per نوع (که باید پرچمِ **خودِ تکه** را ببیند، نه نتیجه‌ی کلِ فراخوانی)
+ * بی‌آزمون می‌ماند — دقیقاً همان بیش‌شماری‌ای که با سنجشِ تکه‌به‌تکه ممکن شد. */
 const fakeRepair = async (_s, user) => {
   const n = (String(user).match(/\n\s*\d+[).]/g) || ['1']).length;
-  return { out: JSON.stringify({ fixes: Array.from({ length: n }, () => 'متنِ تعمیرشده‌ی خنثی') }), usages: [{}] };
+  const fixes = Array.from({ length: n }, () => 'متنِ تعمیرشده‌ی خنثی');
+  if (n > 1) fixes[n - 1] = 'خب بستگی داره دیگه.';   // همچنان طفره → رد می‌شود
+  return { out: JSON.stringify({ fixes }), usages: [{}] };
 };
 
 /* ═══ آرِنا ═══ */
@@ -94,7 +100,10 @@ const fakeRepair = async (_s, user) => {
  * به‌جایش خودِ **خاصیت** در `check-repair-arena.mjs` ادعا شد: اگر روزی `applyFixes`
  * ورودی را عوض کند، آن ادعا قرمز می‌شود — وگرنه آرِنا بی‌صدا شروع می‌کرد به تقلب
  * (تلاشِ دوم روی متنِ تعمیرشده‌ی تلاشِ اول). */
-const tally = new Map(arms.map(a => [a, { fired: 0, fixed: 0, dead: 0, ms: [], byKind: new Map() }]));
+/* ⚠️ `clean` و `some` عمداً جدا شمرده می‌شوند. با سنجشِ تکه‌به‌تکه (v3.43.0)
+ * `repaired` یعنی «دستِ‌کم یک تکه تعمیر شد»، نه «فال تمیز شد». اگر گزارش فقط
+ * یکی از این دو را چاپ کند، خواننده عددی می‌بیند که معنی‌اش عوض شده و نمی‌داند. */
+const tally = new Map(arms.map(a => [a, { fired: 0, clean: 0, some: 0, dead: 0, ms: [], byKind: new Map() }]));
 
 for (const c of picked) {
   for (const arm of arms) {
@@ -106,13 +115,16 @@ for (const c of picked) {
         { tag: `${c.persona}.${(c.step ?? 0) + 1}`, plan: [arm] });
       t.ms.push(Date.now() - t0);
       if (res.fired) t.fired += 1;
-      if (res.repaired) t.fixed += 1;
+      if (res.repaired) t.some += 1;
+      if (res.repaired && !res.partial) t.clean += 1;
       if (!FAKE && bill.calls === before) t.dead += 1;   // به مدل نرسید
-      for (const h of c.hits) {
+      /* هر تکه با پرچمِ **خودش** شمرده می‌شود، نه با نتیجه‌ی کلِ فراخوانی. */
+      const flags = res.appliedFlags || [];
+      (res.hits || c.hits).forEach((h, i) => {
         const k = t.byKind.get(h.kind) || { n: 0, ok: 0 };
-        k.n += 1; if (res.repaired) k.ok += 1;
+        k.n += 1; if (flags[i]) k.ok += 1;
         t.byKind.set(h.kind, k);
-      }
+      });
     }
   }
 }
@@ -124,7 +136,8 @@ for (const arm of arms) {
   const t = tally.get(arm);
   const n = picked.length * REPS;
   console.log(`\n── ${arm}`);
-  console.log(`   شلیک: ${t.fired}/${n} | تعمیرِ موفق: ${t.fixed}/${n} (${Math.round(t.fixed * 100 / n)}٪) | تأخیرِ میانه: ${med(t.ms)}ms`);
+  console.log(`   شلیک: ${t.fired}/${n} | فالِ کاملاً تمیز: ${t.clean}/${n} (${Math.round(t.clean * 100 / n)}٪)` +
+    ` | دستِ‌کم یک تکه: ${t.some}/${n} | تأخیرِ میانه: ${med(t.ms)}ms`);
   if (t.dead) console.log(`   ⚠️ ${t.dead} فراخوانی اصلاً به مدل نرسید — عددِ این بازو قابلِ مقایسه نیست`);
   for (const [kind, k] of t.byKind)
     console.log(`   • ${kind}: ${k.ok}/${k.n} (${Math.round(k.ok * 100 / k.n)}٪)`);
