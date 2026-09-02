@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.45.0';
+const PRODUCT_VERSION = '3.46.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -4625,6 +4625,25 @@ bot.action('want_discount', async (ctx) => {
   ]));
 });
 
+/* 🧾 تک‌منبعِ صفحه‌ی «کدام بسته؟» — متن و کیبورد با هم.
+ *
+ * دو مصرف‌کننده دارد و برای همین جدا شد: ورودِ عادی (`recharge`) و **بازگشت بعد از
+ * انصراف از فاکتور**. اگر هرکدام کیبوردِ خودش را می‌ساخت، دیر یا زود یکی قیمتِ استارز
+ * یا دکمه‌ی بازگشت را جا می‌انداخت و همان صفحه در دو مسیر دو شکل می‌شد.
+ *
+ * ⚠️ `peekVariant` و نه `variant`: قیمت این‌جا **دیده** می‌شود، پس exposure را فراخوان
+ * بعد از رسیدنِ واقعیِ پیام ثبت می‌کند (قاعده‌ی آهنینِ بند ۲الف ریشه). */
+function packMenuScreen(uid, paymentId) {
+  const cur = curOf(uid);
+  const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
+  return [L.wallet.coinPacks(cur), Markup.inlineKeyboard([
+    ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(
+      L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`), PACK_STYLE[p.key])]),
+    // دکمه‌ی بازگشت **همیشه** هست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست) و به کیف برمی‌گردد.
+    [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
+  ])];
+}
+
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
@@ -4635,31 +4654,10 @@ bot.action('recharge', async (ctx) => {
   patchSession(uid, { paymentId });
   // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
   if (coinsOn(uid)) {
-    const cur = curOf(uid);
     // UX v2.3: صفحه‌ی بسته‌ها **روی همان پیامِ کیف** ادیت می‌شود (زیرمنو، نه پیامِ تازه) و
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
-    const text = L.wallet.coinPacks(cur);
-    /* ⭐ قیمتِ روی دکمه باید **همان عددی** باشد که تلگرام کسر می‌کند.
-     *
-     * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۱ (مالک روی رباتِ روسی دید): این دکمه قیمت را نمی‌گرفت،
-     * پس locale ناچار `p.toman` را چاپ می‌کرد و کنارش کلمه‌ی «استارز» می‌گذاشت. یعنی
-     * منو می‌گفت «۳۰٬۰۰۰ ستاره» و فاکتور ۱۰۰ ستاره کسر می‌کرد: دروغِ ۳۰۰ برابری روی
-     * قیمت. دقیقاً همان خانواده‌ی باگِ ریال/تومانِ رسید (بند ۹ ریشه): عدد درست بود،
-     * **واحد** دروغ بود. قاعده همان است: هر جا عدد و واحد از دو جا می‌آیند، یکی‌شان
-     * دیر یا زود عوض می‌شود و آن یکی ساکت می‌ماند. حالا قیمت از همان تک‌منبعی می‌آید
-     * که فاکتور از آن می‌خواند (`starsFor` + همان نردبان).
-     *
-     * ⚠️ `peekVariant` و نه `variant`: از این لحظه قیمت **دیده می‌شود**، پس exposure
-     * باید بعد از رسیدنِ واقعیِ پیام ثبت شود نه قبلش (قاعده‌ی آهنینِ بند ۲الف ریشه).
-     * تا امروز exposure سرِ تپِ بسته ثبت می‌شد، که با منوی بی‌قیمت درست بود؛ با منوی
-     * قیمت‌دار دیگر نیست: کاربری که قیمت را دید و تپ نکرد هم treatment را دیده. */
-    const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
-    const extra = Markup.inlineKeyboard([
-      ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(
-        L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`), PACK_STYLE[p.key])]),
-      [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
-    ]);
+    const [text, extra] = packMenuScreen(uid, paymentId);
     const seen = () => { if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} } };
     try { const r = await ctx.editMessageText(text, extra); seen(); return r; } catch {}
     const r = await ctx.reply(text, extra);
@@ -4828,6 +4826,29 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
     delete s.paymentId;
     setSession(uid, s);
     setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  }
+  /* ◀️ بازگشتِ یک‌قدمی به «کدام بسته؟» — خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۱).
+   *
+   * 🐛 چه چیزی اشتباه بود: انصراف کاربر را به پیامِ عمومیِ «من همیشه اینجام» می‌برد،
+   * یعنی دو قدم عقب و بیرون از فلو. کاربری که فقط می‌خواست بستهٔ دیگری را ببیند،
+   * کلِ مسیر را از دست می‌داد. ساختار باید درختی باشد: هر انصراف **یک** قدم عقب.
+   *
+   * ⚠️ پیامِ فاکتور **پاک** می‌شود، ادیت نمی‌شود: فاکتورِ استارز یک پیامِ ویژه است و
+   * `editMessageText` رویش کار نمی‌کند. اگر پاک نشود، یک فاکتورِ مرده با دکمه‌ی
+   * پرداختِ بی‌اثر در چت می‌ماند.
+   *
+   * فاکتورِ قبلی همین بالا `canceled` شد، پس یک ردیفِ تازه لازم است تا دکمه‌ی بازگشتِ
+   * صفحه‌ی بسته‌ها به فاکتورِ زنده اشاره کند. عمداً `recharge_started` دوباره ثبت
+   * نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه، و شمردنش قیف را باد می‌کند. */
+  if (coinsOn(uid)) {
+    try { await ctx.deleteMessage(); } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+    const fresh = Number(stmts.insertPayment.run(uid).lastInsertRowid);
+    setState(uid, 'pay_amount');
+    patchSession(uid, { paymentId: fresh });
+    const [text, extra] = packMenuScreen(uid, fresh);
+    await ctx.reply(text, extra).catch(() => {});
+    if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
+    return;
   }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await replyCanceled(ctx, uid);
@@ -5470,6 +5491,44 @@ bot.command('loading', async (ctx) => {
 //
 // این مسیرِ موقتِ ادمین است؛ راهِ درست، فیچرِ خودسرویسِ «تغییر اسم و ماه تولد» است که در
 // دستورِ کار قرار گرفت تا کاربر اصلاً نیازی به پشتیبانی نداشته باشد (بند ۶ب).
+/* 🧪 `/paytest` — فقط ادمین، فقط ریلِ استارز. سه شکلِ دکمه‌ی پرداخت را کنار هم می‌فرستد
+ * تا با **چشم** معلوم شود کدامشان لوگوی واقعیِ Stars تلگرام را نشان می‌دهد.
+ *
+ * چرا لازم شد: مالک لوگوی اصلیِ Stars را می‌خواهد، ولی کیبوردِ سفارشی (که دکمه‌ی
+ * انصراف را ممکن می‌کند) متنِ ما را عیناً چاپ می‌کند و ایموجیِ ⭐ لوگوی Stars نیست.
+ * در تایپینگِ منتشرشده‌ی امروز (@telegraf/types@9.2.1) هیچ قاعده‌ای درباره‌ی جایگزینیِ
+ * «⭐» یا «XTR» با آیکونِ Stars نوشته نشده، و صفحه‌ی رسمی از این محیط باز نمی‌شود؛
+ * پس این سؤال از روی سند قابلِ جواب نیست و فقط با دیدن جواب می‌دهد (بند ۹/۰الف).
+ *
+ * ⚠️ ایمنی: payload عمداً به فاکتورِ شماره‌ی صفر اشاره می‌کند که هرگز وجود ندارد، پس
+ * `pre_checkout_query` قطعاً ردش می‌کند و حتی اگر ادمین روی پرداخت بزند یک استارز هم
+ * کسر نمی‌شود. این یک نمایشِ بصری است، نه یک خریدِ واقعی.
+ *
+ * 🗑 بعد از تصمیمِ مالک این دستور حذف می‌شود (بند ۹/۰: کدِ مرده همان لحظه پاک شود). */
+bot.command('paytest', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return;
+  if (!starsRail) return ctx.reply('این دستور فقط روی ریلِ استارز معنی دارد (زبان‌های غیرفارسی).');
+  const uid = ctx.from.id;
+  const pack = COIN_PACKAGES[1];
+  const stars = starsFor(pack.key, ladderFor('control'));
+  const base = { pack, stars, paymentId: 0, userId: uid };
+  const cases = [
+    ['۱) بدونِ کیبوردِ سفارشی — دکمه را خودِ تلگرام می‌سازد', {}],
+    ['۲) کیبوردِ سفارشی با «⭐» در متن', { payLabel: `⭐ ${stars}`, cancelLabel: L.buttons.cancel, payStyle: 'success' }],
+    ['۳) کیبوردِ سفارشی با «XTR» در متن', { payLabel: `XTR ${stars}`, cancelLabel: L.buttons.cancel, payStyle: 'success' }],
+  ];
+  for (const [label, extra] of cases) {
+    try {
+      await ctx.replyWithInvoice(buildInvoice({
+        ...base, ...extra,
+        title: label.slice(0, 32),
+        description: 'تستِ ظاهرِ دکمه. قابلِ پرداخت نیست و هیچ استارزی کسر نمی‌شود.',
+      }));
+    } catch (e) { await ctx.reply(`${label} → رد شد: ${e.message}`).catch(() => {}); }
+  }
+  await ctx.reply('کدام دکمه لوگوی واقعیِ Stars را نشان می‌دهد؟ همان را نگه می‌داریم.').catch(() => {});
+});
+
 bot.command('resetprofile', (ctx) => {
   if (!isAdmin(ctx.from.id)) return;                 // مثل /stats: سکوتِ کامل برای غیرادمین
   const raw = (ctx.message.text.trim().split(/\s+/)[1] || '');

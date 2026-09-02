@@ -257,7 +257,7 @@ export default {
     // ⭐ `stars` = o que realmente sai da conta (mesma fonte do pedido).
     // Sem preço, o botão fica sem preço: melhor nada do que um número errado.
     coinPack: (p, cur, stars) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji}`
-      + (stars == null ? '' : ` | ${starsN(stars)}`),
+      + (stars == null ? '' : ` | ⭐ ${fmt(stars)} Stars`),
     rechargeAmount: (a, bonus) => (bonus ? `${starsN(a)} (+${fmt(bonus)} de bônus 🎁)` : starsN(a)),
     customAmount: '✏️ Outro valor',
     discountHave: '🎟️ Tenho um cupom',
@@ -824,7 +824,9 @@ export default {
     // Quanto maior o pacote, mais barato sai cada diamante (escada de ARPU).
     coinPacks: (cur) =>
       '🛒 Escolha entre os três pacotes abaixo o que combina com você:\n\n' +
-      `Quanto maior o pacote, mais barato sai cada ${plural(1, ['diamante', 'diamante'])}! 🧮`,
+      `Quanto maior o pacote, mais barato sai cada ${plural(1, ['diamante', 'diamante'])}! 🧮\n\n` +
+      // O nome da moeda vem por extenso: com a estrelinha ao lado, se reconhece de cara.
+      'O pagamento é em Telegram Stars ⭐',
     // ☠️ Trilho de transferência bancária: não aparece na versão em português.
     coinPackChosen: (p, cur) => `${p.emoji} *${packName(p)}*: ➕${fmt(p.coins)} ${cur.emoji}`,
     /* ⭐ Título e descrição da fatura do Telegram Stars. Em português estas linhas são
