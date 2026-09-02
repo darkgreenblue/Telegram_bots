@@ -850,7 +850,6 @@ export default {
      * cobro. El título tiene límite de 32 caracteres y tiene que decir solo qué se está
      * comprando; la descripción tiene que decir cuántas estrellas salen. */
     // Botón de pago: el monto va en el propio botón, sin adivinar.
-    starsPayBtn: (stars) => `⭐ Pagar ${stars}`,
     starsStaleInvoice: 'Este pedido ya no vale. Abre el pago otra vez.',
     starsTempError: 'Falla temporal. Inténtalo de nuevo.',
     starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)}`,

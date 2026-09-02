@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.47.0';
+const PRODUCT_VERSION = '3.48.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -4703,9 +4703,17 @@ bot.action('recharge', async (ctx) => {
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const [text, extra] = packMenuScreen(uid, paymentId);
     const seen = () => { if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} } };
-    try { const r = await ctx.editMessageText(text, extra); seen(); return r; } catch {}
+    // شناسه‌ی این پیام نگه داشته می‌شود تا انصراف بتواند **همین** را برگرداند و
+    // پیامِ تازه‌ی تکراری نسازد (باگی که مالک در اسکرین‌شات گرفت).
+    try {
+      const r = await ctx.editMessageText(text, extra);
+      seen();
+      patchSession(uid, { packMsgId: r?.message_id || ctx.callbackQuery?.message?.message_id });
+      return r;
+    } catch {}
     const r = await ctx.reply(text, extra);
     seen();
+    patchSession(uid, { packMsgId: r?.message_id });
     return r;
   }
   // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
@@ -4780,7 +4788,19 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
   if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
   stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, s.paymentId);
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  /* کیبوردِ صفحه‌ی بسته‌ها **حذف** نمی‌شود، به یک دکمه‌ی «انصراف» تبدیل می‌شود.
+   *
+   * چرا: فاکتورِ استارز باید دکمه‌ی **بومیِ** تلگرام را داشته باشد تا لوگوی واقعیِ
+   * Stars بیاید (تستِ `/paytest` نشان داد کیبوردِ سفارشی متن را عیناً چاپ می‌کند و
+   * لوگو نمی‌گیرد). ولی دکمه‌ی بومی جا برای «انصراف» نمی‌گذارد، پس انصراف یک پیام
+   * بالاتر می‌نشیند: همان‌جا که کاربر بسته را انتخاب کرد. */
+  const packMsgId = ctx.callbackQuery?.message?.message_id;
+  if (packMsgId) patchSession(uid, { packMsgId });
+  try {
+    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(
+      [[Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)]],
+    ).reply_markup);
+  } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
 
   /* ⭐ ریلِ استارز: دکمه‌ی بسته **مستقیماً** فاکتورِ تلگرام را می‌فرستد. هیچ فاکتورِ
    * دست‌ساز و هیچ مرحله‌ی رسیدی در کار نیست، چون خودِ تلگرام قبل از کسر یک صفحه‌ی
@@ -4794,28 +4814,21 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
       title: L.wallet.starsInvoiceTitle(pack),
       description: L.wallet.starsInvoiceDesc(pack, stars),
     };
-    /* دو تلاش، عمداً به این ترتیب:
-     *   ۱) فاکتور با کیبوردِ سفارشی (دکمه‌ی پرداخت + انصراف، و رنگِ سبز روی پرداخت).
-     *   ۲) اگر تلگرام آن کیبورد را نپذیرفت، **فاکتورِ ساده‌ی همیشگی**.
-     * دلیلِ وجودِ پله‌ی دوم: `style` یک فیلدِ تازه است و در تایپینگِ نسخه‌ای که ربات با
-     * آن اجرا می‌شود وجود ندارد، پس پذیرفته‌شدنش روی دکمه‌ی `pay` تأییدنشده است. بدونِ
-     * این پله، یک فیلدِ ناشناخته می‌توانست کلِ خریدِ همه‌ی کاربران را ببندد و ما فقط از
-     * روی افتِ درآمد می‌فهمیدیم. بدترین حالتِ ممکن حالا «همان فاکتورِ دیروز» است. */
+    /* ⭐ **بدونِ `reply_markup`** — عمدی و آزمایش‌شده.
+     *
+     * تستِ `/paytest` (۱۴۰۵/۰۶/۱۲، سه شکل کنار هم روی گوشیِ مالک) قطعی نشان داد:
+     *   • بدونِ کیبوردِ سفارشی → «Pay ⭐100» با **لوگوی واقعیِ Stars**
+     *   • با «⭐» در متن       → ایموجیِ زردِ معمولی، نه لوگو
+     *   • با «XTR» در متن      → متنِ خامِ «XTR 100»
+     * یعنی هیچ جایگزینی‌ای وجود ندارد و لوگو فقط روی دکمه‌ی خودساخته‌ی تلگرام می‌آید.
+     * پس کیبوردِ سفارشی (و رنگِ سبزش) کنار گذاشته شد و انصراف یک پیام بالاتر رفت. */
     try {
-      return await ctx.replyWithInvoice(buildInvoice({
-        ...base,
-        payLabel: L.wallet.starsPayBtn(stars),
-        cancelLabel: L.buttons.cancel,
-        payStyle: 'success',
-      }));
+      const inv = await ctx.replyWithInvoice(buildInvoice(base));
+      if (inv?.message_id) patchSession(uid, { invoiceMsgId: inv.message_id });
+      return inv;
     } catch (e) {
-      logErr('stars sendInvoice (کیبوردِ سفارشی رد شد، فاکتورِ ساده فرستاده می‌شود):', e.message);
-      try {
-        return await ctx.replyWithInvoice(buildInvoice(base));
-      } catch (e2) {
-        logErr('stars sendInvoice:', e2.message);
-        return ctx.reply(L.errors.generic).catch(() => {});
-      }
+      logErr('stars sendInvoice:', e.message);
+      return ctx.reply(L.errors.generic).catch(() => {});
     }
   }
 
@@ -4890,12 +4903,35 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
    * صفحه‌ی بسته‌ها به فاکتورِ زنده اشاره کند. عمداً `recharge_started` دوباره ثبت
    * نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه، و شمردنش قیف را باد می‌کند. */
   if (coinsOn(uid)) {
-    try { await ctx.deleteMessage(); } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+    const s0 = getSession(uid);
     const fresh = Number(stmts.insertPayment.run(uid).lastInsertRowid);
     setState(uid, 'pay_amount');
-    patchSession(uid, { paymentId: fresh });
+    patchSession(uid, { paymentId: fresh, invoiceMsgId: null });
     const [text, extra] = packMenuScreen(uid, fresh);
-    await ctx.reply(text, extra).catch(() => {});
+    const here = ctx.callbackQuery?.message?.message_id;
+    const packId = s0.packMsgId;
+
+    /* 🐛 باگی که مالک در اسکرین‌شات گرفت: انصراف پیامِ فاکتور را پاک می‌کرد ولی صفحه‌ی
+     * بسته‌های **قبلی** سرِ جایش می‌ماند، بعد یک صفحه‌ی بسته‌های تازه هم می‌فرستاد؛
+     * نتیجه دو پیامِ کاملاً یکسان پشتِ سرِ هم. حالا همان پیامِ قبلی **ادیت** می‌شود و
+     * هیچ پیامِ تازه‌ای ساخته نمی‌شود. */
+    if (s0.invoiceMsgId && s0.invoiceMsgId !== packId) {
+      try { await ctx.telegram.deleteMessage(ctx.chat.id, s0.invoiceMsgId); } catch {}
+    }
+    if (here && here !== packId) { try { await ctx.deleteMessage(); } catch {} }
+
+    let restored = false;
+    if (packId) {
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, packId, undefined, text, extra);
+        restored = true;
+      } catch {}
+    }
+    if (!restored) {
+      // پیامِ قدیمی قابلِ ادیت نبود (خیلی کهنه، پاک‌شده، یا ورودِ غیرِ دکمه‌ای)
+      const m = await ctx.reply(text, extra).catch(() => null);
+      if (m?.message_id) patchSession(uid, { packMsgId: m.message_id });
+    }
     if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
     return;
   }
@@ -5540,44 +5576,6 @@ bot.command('loading', async (ctx) => {
 //
 // این مسیرِ موقتِ ادمین است؛ راهِ درست، فیچرِ خودسرویسِ «تغییر اسم و ماه تولد» است که در
 // دستورِ کار قرار گرفت تا کاربر اصلاً نیازی به پشتیبانی نداشته باشد (بند ۶ب).
-/* 🧪 `/paytest` — فقط ادمین، فقط ریلِ استارز. سه شکلِ دکمه‌ی پرداخت را کنار هم می‌فرستد
- * تا با **چشم** معلوم شود کدامشان لوگوی واقعیِ Stars تلگرام را نشان می‌دهد.
- *
- * چرا لازم شد: مالک لوگوی اصلیِ Stars را می‌خواهد، ولی کیبوردِ سفارشی (که دکمه‌ی
- * انصراف را ممکن می‌کند) متنِ ما را عیناً چاپ می‌کند و ایموجیِ ⭐ لوگوی Stars نیست.
- * در تایپینگِ منتشرشده‌ی امروز (@telegraf/types@9.2.1) هیچ قاعده‌ای درباره‌ی جایگزینیِ
- * «⭐» یا «XTR» با آیکونِ Stars نوشته نشده، و صفحه‌ی رسمی از این محیط باز نمی‌شود؛
- * پس این سؤال از روی سند قابلِ جواب نیست و فقط با دیدن جواب می‌دهد (بند ۹/۰الف).
- *
- * ⚠️ ایمنی: payload عمداً به فاکتورِ شماره‌ی صفر اشاره می‌کند که هرگز وجود ندارد، پس
- * `pre_checkout_query` قطعاً ردش می‌کند و حتی اگر ادمین روی پرداخت بزند یک استارز هم
- * کسر نمی‌شود. این یک نمایشِ بصری است، نه یک خریدِ واقعی.
- *
- * 🗑 بعد از تصمیمِ مالک این دستور حذف می‌شود (بند ۹/۰: کدِ مرده همان لحظه پاک شود). */
-bot.command('paytest', async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return;
-  if (!starsRail) return ctx.reply('این دستور فقط روی ریلِ استارز معنی دارد (زبان‌های غیرفارسی).');
-  const uid = ctx.from.id;
-  const pack = COIN_PACKAGES[1];
-  const stars = starsFor(pack.key, ladderFor('control'));
-  const base = { pack, stars, paymentId: 0, userId: uid };
-  const cases = [
-    ['۱) بدونِ کیبوردِ سفارشی — دکمه را خودِ تلگرام می‌سازد', {}],
-    ['۲) کیبوردِ سفارشی با «⭐» در متن', { payLabel: `⭐ ${stars}`, cancelLabel: L.buttons.cancel, payStyle: 'success' }],
-    ['۳) کیبوردِ سفارشی با «XTR» در متن', { payLabel: `XTR ${stars}`, cancelLabel: L.buttons.cancel, payStyle: 'success' }],
-  ];
-  for (const [label, extra] of cases) {
-    try {
-      await ctx.replyWithInvoice(buildInvoice({
-        ...base, ...extra,
-        title: label.slice(0, 32),
-        description: 'تستِ ظاهرِ دکمه. قابلِ پرداخت نیست و هیچ استارزی کسر نمی‌شود.',
-      }));
-    } catch (e) { await ctx.reply(`${label} → رد شد: ${e.message}`).catch(() => {}); }
-  }
-  await ctx.reply('کدام دکمه لوگوی واقعیِ Stars را نشان می‌دهد؟ همان را نگه می‌داریم.').catch(() => {});
-});
-
 bot.command('resetprofile', (ctx) => {
   if (!isAdmin(ctx.from.id)) return;                 // مثل /stats: سکوتِ کامل برای غیرادمین
   const raw = (ctx.message.text.trim().split(/\s+/)[1] || '');

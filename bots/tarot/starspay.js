@@ -62,7 +62,7 @@ export function parsePayload(payload) {
  *   • `provider_token` برای استارز **خالی** است (هیچ سکرتِ پرداختی لازم نیست).
  *   • `prices` باید **دقیقاً یک آیتم** داشته باشد و `amount` خودِ تعدادِ استارز است،
  *     نه سِنت و نه ضرب‌درِ صد. */
-export function buildInvoice({ pack, stars, paymentId, userId, title, description, payLabel, cancelLabel, payStyle }) {
+export function buildInvoice({ pack, stars, paymentId, userId, title, description }) {
   if (!Number.isInteger(stars) || stars <= 0) throw new Error('starspay: invalid stars');
   if (!pack || !pack.key) throw new Error('starspay: invalid pack');
   const inv = {
@@ -73,30 +73,10 @@ export function buildInvoice({ pack, stars, paymentId, userId, title, descriptio
     currency: 'XTR',
     prices: [{ label: title, amount: stars }],
   };
-  /* 🔘 کیبوردِ سفارشی — تنها راهِ داشتنِ دکمه‌ی انصراف روی فاکتور.
-   *
-   * قرارداد Bot API (از تایپینگِ همین نسخه‌ی `@telegraf/types` که ربات با آن اجرا
-   * می‌شود): «If empty, one 'Pay total price' button will be shown. If not empty,
-   * the first button must be a Pay button.» یعنی دکمه‌ی پرداخت باید **اولین** دکمه
-   * بماند و انصراف زیرِ آن بنشیند.
-   *
-   * ⚠️ بدونِ این کیبورد، فاکتور فقط یک دکمه‌ی «Pay» داشت و کاربری که پشیمان می‌شد
-   * هیچ راهِ خروجی نداشت جز رها کردنِ فاکتور — که فاکتورِ `pending` را باز نگه می‌داشت
-   * و `blockDuringOpenPay` او را پشتِ همان فاکتور قفل می‌کرد. یعنی نقضِ قانونِ ۱ از
-   * بند ۹ب ریشه: «هیچ صفحه‌ای بن‌بست نیست».
-   *
-   * `payStyle` اختیاری است چون رنگِ دکمه یک فیلدِ **تازه**ی Bot API است و در تایپینگِ
-   * این نسخه اصلاً وجود ندارد؛ پس صحتش را نمی‌شود از روی منبعِ باز شده تضمین کرد.
-   * فراخوان موظف است در صورتِ خطا فاکتورِ ساده را دوباره بفرستد (مسیرِ بازگشت در
-   * `index.js`)، وگرنه یک فیلدِ ناشناخته می‌تواند کلِ مسیرِ پرداخت را ببندد. */
-  if (payLabel && cancelLabel) {
-    inv.reply_markup = {
-      inline_keyboard: [
-        [{ text: payLabel, pay: true, ...(payStyle ? { style: payStyle } : {}) }],
-        [{ text: cancelLabel, callback_data: `pay_cancel:${paymentId}` }],
-      ],
-    };
-  }
+  /* ⭐ عمداً **بدونِ `reply_markup`**: فقط دکمه‌ی خودساخته‌ی تلگرام لوگوی واقعیِ Stars
+   * را نشان می‌دهد. با کیبوردِ سفارشی متنِ ما عیناً چاپ می‌شود («⭐ 100» یا «XTR 100»)
+   * و لوگو نمی‌آید — با تستِ `/paytest` روی گوشیِ مالک، سه شکل کنار هم، اثبات شد.
+   * دکمه‌ی انصراف به همین دلیل یک پیام بالاتر (صفحه‌ی انتخابِ بسته) نشسته است. */
   return inv;
 }
 

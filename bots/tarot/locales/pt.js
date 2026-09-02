@@ -838,7 +838,6 @@ export default {
      * tem limite de 32 caracteres e precisa dizer sozinho o que está sendo comprado;
      * a descrição precisa dizer quantas estrelas saem. */
     // Botão de pagar: o valor fica no próprio botão, sem adivinhação.
-    starsPayBtn: (stars) => `⭐ Pagar ${stars}`,
     starsStaleInvoice: 'Este pedido não vale mais. Abre o pagamento de novo.',
     starsTempError: 'Falha temporária. Tenta de novo.',
     starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)}`,
