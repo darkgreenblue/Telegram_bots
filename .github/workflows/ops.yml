@@ -109,8 +109,23 @@ jobs:
                 [ -n "$OPS_APP" ]   || { echo "❌ app لازم است"; exit 1; }
                 [ -n "$OPS_QUERY" ] || { echo "❌ query لازم است"; exit 1; }
                 cd "bots/$OPS_APP"
-                DBFILE=$(ls data/*.db 2>/dev/null | head -1)
+                # 🐛 باگِ واقعیِ ۱۲ شهریور ۱۴۰۵: این‌جا `ls data/*.db | head -1` بود، یعنی
+                # **اولین فایل به ترتیبِ الفبا**. از وقتی تاروت چنددیتابیسی شد آن فایل
+                # `bot-es.db`ِ خالی است، پس هر کوئریِ تاروت با اطمینان «rows: 0» می‌داد در
+                # حالی که دیتای واقعی در `bot-fa.db` بود. هم‌خانواده‌ی دقیقِ باگِ
+                # `channel-overlap` (همان `readdirSync` که دیتابیسِ خالیِ زبانِ دیگری را برداشت).
+                #
+                # حالا بزرگ‌ترین فایل انتخاب می‌شود (پرجمعیت‌ترین)، و **همه‌ی نامزدها با
+                # اندازه‌شان چاپ می‌شوند** تا انتخابِ اشتباه دیده شود نه اینکه بی‌صدا بماند.
+                # `OPS_ONLY` نامِ فایلِ دلخواه را تحمیل می‌کند (مثلاً `bot-ru.db`).
+                if [ -n "$OPS_ONLY" ] && [ -f "data/$OPS_ONLY" ]; then
+                  DBFILE="data/$OPS_ONLY"
+                else
+                  DBFILE=$(ls -S data/*.db 2>/dev/null | head -1)
+                fi
                 [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
+                echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
+                ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
                 echo "===== db-query روی $OPS_APP/$DBFILE ====="
                 DBFILE="$DBFILE" node -e "
                   const path = require('path');
