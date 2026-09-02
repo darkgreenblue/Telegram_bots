@@ -174,8 +174,10 @@ export default {
     answers: { YES: 'Sim', NO: 'Não', FIRST: 'Primeiro caminho', SECOND: 'Segundo caminho' },
     yes: ['sim', 'claro', 'positivo', 'afirmativo', 'yes', 'y', 'true'],
     no: ['não', 'nao', 'negativo', 'nunca', 'n', 'false'],
-    first: ['primeiro', 'primeira', 'um', 'uma', '1', 'patha'],
-    second: ['segundo', 'segunda', 'dois', 'duas', '2', 'b', 'pathb'],
+    // ⚠️ 'um'/'uma' e 'dois'/'duas' saíram: são artigos e numerais do dia a dia,
+    // e 'uma separação' virava 'Ficar', o oposto. Só ordinais discriminam.
+    first: ['primeiro', 'primeira', '1', 'patha'],
+    second: ['segundo', 'segunda', '2', 'b', 'pathb'],
     ambiguous: [
       'os dois', 'as duas', 'ambos', 'ambas', 'nenhum', 'nenhuma',
       'tanto faz', 'talvez', 'depende', 'não sei', 'nao sei',
@@ -194,7 +196,7 @@ export default {
       'sim', 'não', 'nao', 'com certeza', 'sem dúvida', 'tudo indica',
       'provave*', 'prováve*', 'possive*', 'possíve*', 'certamente', 'dificilmente',
       'vai', 'vão', 'irá', 'ira', 'será', 'sera', 'seria', 'serão',
-      'acontec*', 'consegu*', 'volt*', 'funcion*', 'tend*', 'rol*', 'dá', 'da',
+      'acontec*', 'consegu*', 'volt*', 'funcion*', 'tend*', 'rol*', 'dá',
       'chanc*', 'positiv*', 'negativ*', 'melhor*', 'pior*',
     ],
     evasion: [
@@ -257,7 +259,7 @@ export default {
     // ⭐ `stars` = o que realmente sai da conta (mesma fonte do pedido).
     // Sem preço, o botão fica sem preço: melhor nada do que um número errado.
     coinPack: (p, cur, stars) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji}`
-      + (stars == null ? '' : ` | ${starsN(stars)}`),
+      + (stars == null ? '' : ` | ⭐ ${fmt(stars)} Stars`),
     rechargeAmount: (a, bonus) => (bonus ? `${starsN(a)} (+${fmt(bonus)} de bônus 🎁)` : starsN(a)),
     customAmount: '✏️ Outro valor',
     discountHave: '🎟️ Tenho um cupom',
@@ -682,7 +684,9 @@ export default {
     allTopics: 'Escolha uma das leituras 🔮',
     pickSize: (balance, cur) =>
       '🔮 Leitura de quantas cartas?\n\n' +
-      'Mais cartas ◀️◀️ análise mais completa e mais funda\n\n' +
+      // ⚠️ As setas eram ◀️◀️, herança do layout RTL do persa: numa língua da esquerda
+      // para a direita elas apontavam para trás, contra o sentido da frase.
+      'Mais cartas ▶️▶️ análise mais completa e mais funda\n\n' +
       purseQuote(balance, cur),
     startWhere: 'Por onde a gente começa? 📌',
     guideTitle: '📖 Como escolher a sua leitura',
@@ -824,7 +828,9 @@ export default {
     // Quanto maior o pacote, mais barato sai cada diamante (escada de ARPU).
     coinPacks: (cur) =>
       '🛒 Escolha entre os três pacotes abaixo o que combina com você:\n\n' +
-      `Quanto maior o pacote, mais barato sai cada ${plural(1, ['diamante', 'diamante'])}! 🧮`,
+      `Quanto maior o pacote, mais barato sai cada ${plural(1, ['diamante', 'diamante'])}! 🧮\n\n` +
+      // O nome da moeda vem por extenso: com a estrelinha ao lado, se reconhece de cara.
+      'O pagamento é em Telegram Stars ⭐',
     // ☠️ Trilho de transferência bancária: não aparece na versão em português.
     coinPackChosen: (p, cur) => `${p.emoji} *${packName(p)}*: ➕${fmt(p.coins)} ${cur.emoji}`,
     /* ⭐ Título e descrição da fatura do Telegram Stars. Em português estas linhas são

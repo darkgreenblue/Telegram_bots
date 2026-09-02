@@ -35,6 +35,10 @@ const PROBE = String.raw`
 const FA = /[؀-ۿ]/;
 const S  = await import('./bots/tarot/spreads.js');
 const RC = await import('./bots/tarot/reading-core.js');
+// ⚠️ CARD_BY_KEY از cards.js می‌آید، نه reading-core. قبلاً این‌جا RC.CARD_BY_KEY با
+// فالبکِ || {} خوانده می‌شد، یعنی حلقه‌ی نامِ کارت‌ها **هیچ‌وقت اجرا نمی‌شد** و ادعا
+// بی‌صدا پوچ بود. فالبک عمداً برداشته شد تا اگر مسیر عوض شد، چک بترکد نه اینکه سبز بماند.
+const { CARD_BY_KEY } = await import('./bots/tarot/cards.js');
 const L  = (await import('./bots/tarot/locales/' + process.env.LOCALE + '.js')).default;
 const bad = [];
 const check = (where, s) => { if (typeof s === 'string' && FA.test(s)) bad.push(where + ' → ' + s); };
@@ -48,7 +52,23 @@ for (const sp of Object.values(S.SPREAD_BY_ID)) {
   const cl = RC.choiceLabelsFor(sp);
   if (cl) cl.forEach((l, i) => check('choiceLabel(' + sp.id + '[' + i + '])', l));
 }
-for (const k of Object.keys(RC.CARD_BY_KEY || {})) check('cardName(' + k + ')', RC.cardName(k));
+for (const k of Object.keys(CARD_BY_KEY)) check('cardName(' + k + ')', RC.cardName(k));
+
+/* 🃏 خودِ **فراخوانِ کپشن**، نه فقط تابعِ نام.
+ * 🐛 باگی که این تکه از دلش درآمد: index.js آبجکتِ خامِ CARD_BY_KEY را به locale
+ * می‌داد و locale داخلش card.fa را چاپ می‌کرد، پس کاربرِ روس در لحظه‌ی افشای کارتِ
+ * فالِ **پولی** می‌دید: «Первая карта: دیوانه». نسخه‌ی قبلیِ همین چک فقط
+ * cardName(key) را می‌سنجید که درست بود، یعنی آینه‌ی خودش را می‌دید نه مسیرِ واقعی.
+ * ⚠️ در این بلوک بک‌تیک ننویس: کلِ PROBE خودش یک template literal است. */
+const locCard = (key) => ({ ...CARD_BY_KEY[key], fa: RC.cardName(key), ...RC.cardKeywords(key) });
+for (const k of ['m00', 'm13', 'c05']) {
+  if (!CARD_BY_KEY[k]) continue;
+  const lc = locCard(k);
+  check('revealCaptionV4(' + k + ')', L.reading.revealCaptionV4(L.prompts.cardLabels(3)[0], lc, false));
+  check('revealCaption(' + k + ')', L.reading.revealCaption('X', lc, true));
+  if (L.library?.card) check('library.card(' + k + ')', L.library.card(lc));
+  if (L.quiz?.resultHead) check('quiz.resultHead(' + k + ')', L.quiz.resultHead(lc));
+}
 
 /* هر رشته‌ی ایستا و هر تابعِ locale. آرگومان‌های ساختگی عمداً **هیچ فارسی‌ای ندارند**،
  * پس هر فارسیِ خروجی حتماً از خودِ locale آمده و قرمزِ کاذب نمی‌سازد. */
@@ -91,6 +111,15 @@ ok(calls.length > 0, `${calls.length} فراخوانیِ L.buttons.topic پید�
 const bare = calls.filter(a => !a.includes(','));
 ok(bare.length === 0, bare.length ? `تک‌آرگومان (فارسی برمی‌گردد): ${bare.join(' | ')}` : 'هیچ فراخوانیِ تک‌آرگومانی نیست');
 ok(/spreadName\(faOf\(/.test(SRC), 'spreadFaOf نامِ چیدمان را از جدولِ زبان می‌گیرد');
+
+/* هیچ آبجکتِ خامِ کارتی نباید به locale برود. عدد **پین** شده است، دقیقاً مثل شمارشِ
+ * استفاده‌های خامِ پرچم در `check-coins.mjs`: هر استفاده‌ی تازه عمداً این را قرمز
+ * می‌کند تا نویسنده‌اش تصمیم بگیرد، نه اینکه بی‌صدا رد شود. */
+const RAW = [...SRC.matchAll(/CARD_BY_KEY\[/g)].length;
+ok(/const locCard = \(key\) =>/.test(SRC), 'helperِ locCard تعریف شده است');
+ok(RAW === 3, RAW === 3
+  ? `فقط ۳ استفاده‌ی خامِ CARD_BY_KEY مانده (هر سه برای مسیرِ فایلِ عکس، نه متن)`
+  : `تعدادِ استفاده‌ی خامِ CARD_BY_KEY ${RAW} شد (انتظار ۳). اگر مسیرِ تازه‌ای کارت را به locale می‌دهد، از locCard(key) استفاده کن؛ اگر واقعاً فقط فایل/کلید می‌خواهد، همین عدد را به‌روز کن.`);
 
 /* ── ۳) قیمتِ استارز: عددِ روی دکمه = عددی که کسر می‌شود ─────────────────────
  * 🐛 باگِ همان روز: دکمه `p.toman` را با برچسبِ «ستاره» چاپ می‌کرد («۳۰٬۰۰۰ ستاره»)

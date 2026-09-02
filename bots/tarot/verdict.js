@@ -80,7 +80,10 @@ export function configureVerdict(lex) {
   if (!lex || typeof lex !== 'object') return;
   LEX = { ...LEX, ...lex };
   // الگوی زمانی به‌صورت رشته می‌آید (تا شکلِ locale قابلِ مقایسه بماند) و این‌جا کامپایل می‌شود
-  if (lex.pastTimePattern) { try { LEX.pastTime = new RegExp(lex.pastTimePattern); } catch { /* الگوی خراب: همان قبلی می‌ماند */ } }
+  // ⚠️ پرچمِ `i` اجباری است: در زبان‌های لاتین و سیریلیک عبارتِ زمانی معمولاً **اولِ**
+  // جمله می‌آید و با حرفِ بزرگ شروع می‌شود («В прошлом году…»). بدونِ `i` دقیقاً همان
+  // حالتی که بیشتر رخ می‌دهد از گارد رد می‌شد. فارسی حرفِ بزرگ ندارد، پس بی‌اثر است.
+  if (lex.pastTimePattern) { try { LEX.pastTime = new RegExp(lex.pastTimePattern, 'i'); } catch { /* الگوی خراب: همان قبلی می‌ماند */ } }
   // ⚠️ `EVASION`، `BINARY_ANSWERS` و `CHOICE_ANSWERS` از بیرون import می‌شوند (index.js
   // و دو چکِ CI)، پس **در جا** پر می‌شوند نه جایگزین. اگر به‌جایش دوباره تعریفشان
   // می‌کردیم، هر کسی که قبلاً import کرده بود به نسخه‌ی فارسیِ کهنه چسبیده می‌ماند.
@@ -102,12 +105,32 @@ const SECOND = () => new Set(LEX.second);
 // وگرنه دامی مثل «هر دو» به‌خاطر کلمه‌ی «دو» به‌اشتباه «مسیر دوم» خوانده می‌شود.
 const AMBIGUOUS = () => LEX.ambiguous;
 
+/* آیا متن یکی از عبارت‌های «مبهم» را دارد؟
+ *
+ * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۲ (ممیزیِ QA): این بررسی زیررشته‌ای بود، پس در روسی کلمه‌ی
+ * «обе» داخلِ «ос-ОБЕ-нно» و «ОБЕ-щает» پیدا می‌شد. یعنی جوابِ کاملاً سالمِ
+ * «Да, скорее всего, особенно если…» مبهم شمرده می‌شد، بلوکِ جوابِ قاطع بی‌صدا حذف
+ * می‌شد و کلِ فال با هزینه‌ی کاملِ مدل دوباره تولید می‌شد.
+ *
+ * عبارتِ **چندکلمه‌ای** همچنان زیررشته‌ای می‌ماند (باید داخلِ جمله پیدا شود)، ولی
+ * تک‌کلمه‌ای فقط وقتی می‌شمارد که **خودش یک توکن** باشد. این تمایز زبان‌مستقل است. */
+function hasAmbiguous(value) {
+  const flat = norm(value);
+  if (!flat) return false;
+  const t = flat.split(' ').filter(Boolean);
+  return AMBIGUOUS().some((p) => {
+    const q = norm(p);
+    if (!q) return false;
+    return q.includes(' ') ? flat.includes(q) : t.includes(q);
+  });
+}
+
 // یکی از دو سمت را انتخاب می‌کند؛ اگر هر دو یا هیچ‌کدام دیده شوند یعنی جواب مبهم است.
 // (پرامپت صریحاً یک کلمه می‌خواهد و شرط/زمان‌بندی جای خودش را در فیلدِ nuance دارد،
 // پس «هم آره هم نه» یعنی مدل دستور را نادیده گرفته و باید دوباره تلاش شود.)
 function pickSide(value, setA, setB, outA, outB) {
   const flat = norm(value);
-  if (AMBIGUOUS().some((p) => flat.includes(p))) return null;
+  if (hasAmbiguous(value)) return null;
   const t = tokens(value);
   if (!t.length) return null;
   const hasA = t.some((w) => setA.has(w));
@@ -161,7 +184,7 @@ export function normalizeVerdict(raw, mode, opts = {}) {
     // یک جمله‌ی کوتاه هم لازم است (تک‌کلمه‌ای مثل «بله» بدونِ ادامه، جوابِ سؤالِ باز نیست).
     const v = clean(raw.answer, VERDICT_LIMITS.answer);
     const flat = norm(v);
-    if (v && !AMBIGUOUS().some((p) => flat.includes(p)) && tokens(v).length >= 3) answer = v;
+    if (v && !hasAmbiguous(v) && tokens(v).length >= 3) answer = v;
   }
   if (!answer) return null;
 
