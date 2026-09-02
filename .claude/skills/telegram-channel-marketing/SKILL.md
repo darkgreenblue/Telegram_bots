@@ -18,7 +18,7 @@ description: >-
 > منبع حقیقت وضعیت: `marketing/registry.json` (ربات‌ها، کانال‌ها، کد کمپین هر کانال، status).
 > تاریخچه‌ی پست‌های هر ربات: `marketing/<bot>/log.jsonl` (ضد تکرار موضوع).
 > بازوی اجرایی: workflow `Marketing` (`.github/workflows/marketing.yml`) با اکشن‌های
-> `post` / `campaign-add` / `getme` — از GitHub MCP (`actions_run_trigger`) اجرا و لاگش را بخوان.
+> `post` / `poll` / `campaign-add` / `getme` — از GitHub MCP (`actions_run_trigger`) اجرا و لاگش را بخوان.
 
 ## قواعد آهنین (در هر دو حالت)
 1. **هر پست CTA دارد**: پایان هر پست یک معرفی یک‌خطی ربات + دعوت صریح، و دکمه‌ی inline با لینک
