@@ -174,8 +174,10 @@ export default {
     answers: { YES: 'Sim', NO: 'Não', FIRST: 'Primeiro caminho', SECOND: 'Segundo caminho' },
     yes: ['sim', 'claro', 'positivo', 'afirmativo', 'yes', 'y', 'true'],
     no: ['não', 'nao', 'negativo', 'nunca', 'n', 'false'],
-    first: ['primeiro', 'primeira', 'um', 'uma', '1', 'patha'],
-    second: ['segundo', 'segunda', 'dois', 'duas', '2', 'b', 'pathb'],
+    // ⚠️ 'um'/'uma' e 'dois'/'duas' saíram: são artigos e numerais do dia a dia,
+    // e 'uma separação' virava 'Ficar', o oposto. Só ordinais discriminam.
+    first: ['primeiro', 'primeira', '1', 'patha'],
+    second: ['segundo', 'segunda', '2', 'b', 'pathb'],
     ambiguous: [
       'os dois', 'as duas', 'ambos', 'ambas', 'nenhum', 'nenhuma',
       'tanto faz', 'talvez', 'depende', 'não sei', 'nao sei',
@@ -194,7 +196,7 @@ export default {
       'sim', 'não', 'nao', 'com certeza', 'sem dúvida', 'tudo indica',
       'provave*', 'prováve*', 'possive*', 'possíve*', 'certamente', 'dificilmente',
       'vai', 'vão', 'irá', 'ira', 'será', 'sera', 'seria', 'serão',
-      'acontec*', 'consegu*', 'volt*', 'funcion*', 'tend*', 'rol*', 'dá', 'da',
+      'acontec*', 'consegu*', 'volt*', 'funcion*', 'tend*', 'rol*', 'dá',
       'chanc*', 'positiv*', 'negativ*', 'melhor*', 'pior*',
     ],
     evasion: [
@@ -682,7 +684,9 @@ export default {
     allTopics: 'Escolha uma das leituras 🔮',
     pickSize: (balance, cur) =>
       '🔮 Leitura de quantas cartas?\n\n' +
-      'Mais cartas ◀️◀️ análise mais completa e mais funda\n\n' +
+      // ⚠️ As setas eram ◀️◀️, herança do layout RTL do persa: numa língua da esquerda
+      // para a direita elas apontavam para trás, contra o sentido da frase.
+      'Mais cartas ▶️▶️ análise mais completa e mais funda\n\n' +
       purseQuote(balance, cur),
     startWhere: 'Por onde a gente começa? 📌',
     guideTitle: '📖 Como escolher a sua leitura',

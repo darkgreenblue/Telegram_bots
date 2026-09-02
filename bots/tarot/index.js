@@ -48,7 +48,7 @@ import {
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
-  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName,
+  buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName, cardKeywords,
 } from './reading-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -212,7 +212,7 @@ const TEST_PHASE = false;
 // 3.34.0: نسخه‌ی سومِ گنجینه تمام شد — ۹۳۶ متنِ تازه‌ی دیگر اضافه شد (۱۲ ماه × ۷۸ کارت)،
 //         یعنی الان ۲۸۰۸ متن در کل، هر خانه دقیقاً ۳ نسخه. طبقِ برنامه‌ی تدریجیِ
 //         GANJINEH.md همچنان نقشِ نسخه‌ها «پشتیبانِ تکرار» است، نه چرخشِ اصلی.
-const PRODUCT_VERSION = '3.46.0';
+const PRODUCT_VERSION = '3.47.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1315,6 +1315,13 @@ function normalizeDigits(s) {
 }
 // botToday در reading-core.js است (کانتکستِ خوانش هم از آن استفاده می‌کند).
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/* همتای `esc` برای پیام‌های `parse_mode: 'Markdown'`.
+ *
+ * 🐛 ممیزیِ QA (۱۴۰۵/۰۶/۱۲): نامِ نمایشیِ کاربر مستقیم داخلِ یک پیامِ مارک‌داون
+ * می‌رفت و `cleanName` فقط `<>` را می‌گرفت. کاربری به نامِ «Ан_я» یعنی یک آندرلاینِ
+ * تک: تلگرام کلِ پیام را رد می‌کند، `editOrSend` خطا را می‌بلعد، و کاربر روی صفحه‌ی
+ * تنظیماتِ نام گیر می‌کند بدونِ اینکه **هیچ چیزی** ببیند. رباتِ فارسیِ زنده هم داشت. */
+const mdEsc = (s) => String(s ?? '').replace(/([_*`\[\]])/g, '\\$1');
 
 /* ===== 4) OpenRouter و موتور دک ===== */
 // کلاینتِ OpenRouter (orRequest/orChat/orChatResilient/orTranscribe/parseJsonLoose) و
@@ -1332,6 +1339,41 @@ async function replyLong(ctx, text, extra) {
   }
 }
 // ارسال عکس کارت با کش file_id (اولین بار از فایل، بعد از آن از file_id تلگرام)
+/* 🌍 نمای زبانیِ چیدمان — دوقلوی `locCard` برای پرامپت.
+ *
+ * 🐛 ممیزیِ QA (۱۴۰۵/۰۶/۱۲): پرامپتِ خوانش `spread.fa` و `p.fa` خام را می‌خواند،
+ * پس مدلِ روسی این را می‌گرفت: «Расклад: «عشق و رابطه» … 1) قلب تو, 2) قلب او».
+ * دو ضرر: نویسه‌ی فارسی وسطِ پرامپتِ غیرفارسی (همان چیزی که `check-card-knowledge`
+ * برای دادهٔ کارت ممنوع کرده)، و مدل همان حقیقت را **دو بار** می‌گرفت، یک بار فارسی
+ * از پرامپت و یک بار ترجمه‌شده از `buildReadingCtx`.
+ *
+ * مثلِ `locCard` عمداً تک‌نقطه است تا هر نسلِ **بعدیِ** پرامپت هم خودبه‌خود درست بماند.
+ */
+const locSpread = (sp) => (sp ? {
+  ...sp,
+  fa: spreadName(sp.fa) || sp.fa,
+  positions: (sp.positions || []).map((q, i) => ({ ...q, fa: positionName(q?.fa, i) })),
+} : sp);
+
+/* 🌍 نمای زبانیِ کارت — تنها شکلی که حق دارد به locale برود.
+ *
+ * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۲ (ممیزیِ QA پیدایش کرد): `CARD_BY_KEY` دادهٔ canonical
+ * است و فیلدِ `fa` و کلیدواژه‌هایش **فارسی**اند. هر جا این آبجکتِ خام به locale می‌رفت،
+ * کاربرِ غیرفارسی نامِ فارسیِ کارت را می‌دید. بدترینش لحظه‌ی افشای کارت بود:
+ * «🃏 Первая карта: «دیوانه»» — یعنی مهم‌ترین لحظه‌ی محصولِ پولی.
+ *
+ * ⚠️ چرا `check-no-persian` نگرفتش: آن چک `cardName(key)` را می‌سنجید که درست
+ * بود، نه **فراخوانِ کپشن** را. همان تله‌ی «گاردِ آینه‌ای فقط آینه‌ی خودش را می‌سنجد»
+ * که در هدرِ خودِ آن فایل هشدار داده شده بود.
+ *
+ * راه‌حل عمداً در یک نقطه است، نه وصله سرِ هر فراخوان: هر مسیرِ **آینده‌ای** هم که
+ * کارت را به locale بدهد، خودبه‌خود ترجمه‌شده می‌دهد.
+ */
+const locCard = (key) => {
+  const c = CARD_BY_KEY[key];
+  return c ? { ...c, fa: cardName(key), ...cardKeywords(key) } : c;
+};
+
 async function sendCardPhoto(ctx, cardKey, caption, { spoiler = true } = {}) {
   const cached = stmts.getCardFile.get(cardKey)?.file_id;
   const media = cached || { source: `./assets/cards/${cardKey === 'back' ? 'back.jpg' : CARD_BY_KEY[cardKey].file}` };
@@ -1753,11 +1795,12 @@ async function callReadingLLM(readingId) {
   // (`headlineOk`) همان قانونِ نشکستنی است — جوابِ بی‌جهت نمایش داده نمی‌شود.
   const wantVerdict = v4 ? null : (DECISIVE_VERDICT_ENABLED ? decisiveMode(spread, toneV2) : null);
   const labels = L.prompts.cardLabels(cards.length);
+  const lsp = locSpread(spread);
   const system = v4
-    ? L.prompts.readerSystemV4(spread, labels)
+    ? L.prompts.readerSystemV4(lsp, labels)
     : toneV2
-      ? L.prompts.readerSystemV2(spread, wantVerdict)
-      : L.prompts.readerSystem(wantVerdict ? spread : { ...spread, decisive: null });
+      ? L.prompts.readerSystemV2(lsp, wantVerdict)
+      : L.prompts.readerSystem(wantVerdict ? lsp : { ...lsp, decisive: null });
   // وقتی صدا همراه است، سؤال از خودِ فایل شنیده می‌شود؛ یک بلوکِ کوتاه به پرامپت اضافه
   // می‌شود که می‌گوید صدا **داده است نه دستور** (گاردِ prompt-injection، بند ۹ ریشه) و
   // متنِ سؤال را در `question_text` برگردان تا رکوردِ فال بدونِ فراخوانیِ دوم کامل شود.
@@ -2146,7 +2189,8 @@ function cleanName(raw) {
   return String(raw || '')
     .split('\n')[0]
     .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, '')
-    .replace(/[<>]/g, '')
+    // `<>` برای HTML و ``_*`[]`` برای مارک‌داون: نامِ کاربر در هر دو حالت رندر می‌شود.
+    .replace(/[<>_*`\[\]]/g, '')
     .trim()
     .slice(0, 32)
     .trim();
@@ -2349,7 +2393,7 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   const seen = stmts.seenDailyVariants.all(uid, key).map(r => r.variant);
   const variant = pickVariant(seen, ganjinehCount(month, key));
   const text = ganjinehText(month, key, variant);
-  const info = CARD_BY_KEY[key];
+  const info = locCard(key);
 
   const yesterday = botDaysAgo(1);
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
@@ -2434,7 +2478,7 @@ async function dailyCard(ctx) {
   const streak = user.last_daily_date === yesterday ? (user.daily_streak || 0) + 1 : 1;
   stmts.setDaily.run(today, streak, uid);
   const [card] = shuffledDeck(`daily:${uid}:${today}`);
-  const info = CARD_BY_KEY[card.key];
+  const info = locCard(card.key);
 
   // کش دائمی تفسیر روزانه بر اساس (کارت × جهت × حوزه‌ی تمرکز):
   // حداکثر ۷۸×۲×۵ ترکیب در کل عمر ربات → هزینه‌ی LLM کارت روز در هر مقیاسی تقریباً صفر می‌ماند.
@@ -2988,7 +3032,7 @@ bot.action(/^quiz:(\d+)$/, async (ctx) => {
   const maxV = Math.max(...keys.map(k => votes[k] || 0));
   const tied = keys.filter(k => (votes[k] || 0) === maxV);
   const best = tied[seedToInt(`quiz:${answers}`) % tied.length];
-  const card = CARD_BY_KEY[best];
+  const card = locCard(best);
   stmts.setQuiz.run(botToday(), uid);
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await typing(ctx, PACE_M, 'upload_photo');
@@ -3086,7 +3130,7 @@ bot.action(/^lib:l:(\d+):(\d+)$/, async (ctx) => {
   const cards = libCards(grp.g);
   const pages = Math.max(1, Math.ceil(cards.length / LIB_PAGE));
   const p = Math.max(0, Math.min(Number(ctx.match[2]), pages - 1));
-  const rows = cards.slice(p * LIB_PAGE, (p + 1) * LIB_PAGE).map(c => [Markup.button.callback(c.fa, `lib:c:${c.key}`)]);
+  const rows = cards.slice(p * LIB_PAGE, (p + 1) * LIB_PAGE).map(c => [Markup.button.callback(cardName(c.key), `lib:c:${c.key}`)]);
   const nav = [];
   if (p > 0) nav.push(Markup.button.callback(L.library.btnPrev, `lib:l:${gi}:${p - 1}`));
   if (p < pages - 1) nav.push(Markup.button.callback(L.library.btnNext, `lib:l:${gi}:${p + 1}`));
@@ -3099,7 +3143,7 @@ bot.action(/^lib:c:([a-z]\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   if (!FREE_MENU_ENABLED) return;
   const key = ctx.match[1];
-  const c = CARD_BY_KEY[key];
+  const c = locCard(key);
   if (!c) return;
   const uid = ctx.from.id;
   upsertUser(ctx);
@@ -3904,7 +3948,7 @@ async function revealNext(ctx, uid, readingId) {
   if (idx >= cards.length) return finishReading(ctx, uid, readingId);
 
   const card = cards[idx];
-  const info = CARD_BY_KEY[card.key];
+  const info = locCard(card.key);
   patchSession(uid, { revealIdx: idx + 1 }); // قبل از await — دکمه‌ی تکراری دوباره همین کارت را نفرستد
   // همان پیشرفت روی **خودِ فال** هم مهر می‌خورد (#215): سشن را سیزده نقطه پاک می‌کنند،
   // این ستون را هیچ‌کس. تنها چیزی است که بعد از `/start` می‌گوید کاربر تا کجا دیده.
@@ -4727,7 +4771,12 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * محاسبه عمداً **قبل از** `claimAmount` است: بستهٔ بی‌قیمت باید قبل از هر تغییرِ
    * وضعیتی رد شود، وگرنه فاکتور claim می‌شد و بعد بدونِ ارسالِ چیزی رها می‌ماند. */
   const stars = starsRail ? starsFor(pack.key, ladderFor(variant(db, uid, STARS_EXPERIMENT))) : null;
-  if (starsRail && !stars) { logErr('stars: no price for pack', pack.key); return; }
+  // ⚠️ سکوت ممنوع: این تپ روی **مسیرِ پول** است. قبلاً بی‌صدا return می‌کرد، یعنی
+  // کاربر روی بسته می‌زد و هیچ اتفاقی نمی‌افتاد و هیچ توضیحی هم نمی‌گرفت.
+  if (starsRail && !stars) {
+    logErr('stars: no price for pack', pack.key);
+    return ctx.reply(L.errors.generic).catch(() => {});
+  }
   // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
   if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
   stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, s.paymentId);
@@ -5638,7 +5687,7 @@ bot.action('set:name', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   setState(uid, 'settings_name');
-  await editOrSend(ctx, L.settings.askName(dispName(getUser(uid))),
+  await editOrSend(ctx, L.settings.askName(mdEsc(dispName(getUser(uid)))),
     [[Markup.button.callback(L.buttons.setCancel, 'set:home')]], { parse_mode: 'Markdown' });
 });
 

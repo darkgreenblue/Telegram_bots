@@ -178,10 +178,14 @@ export default {
    *    «sin embargo» عمداً نیامده و پرامپت صریحاً «pero» یا «aunque» می‌خواهد. */
   verdict: {
     answers: { YES: 'Sí', NO: 'No', FIRST: 'Primer camino', SECOND: 'Segundo camino' },
-    yes: ['sí', 'si', 'claro', 'positivo', 'afirmativo', 'yes', 'y', 'true'],
+    // ⚠️ 'y' se quitó: es la conjunción más común del español, y hacía que
+    // «No, y no tan pronto» contara como sí y no a la vez → veredicto descartado.
+    yes: ['sí', 'si', 'claro', 'positivo', 'afirmativo', 'yes', 'true'],
     no: ['no', 'negativo', 'nunca', 'jamás', 'jamas', 'n', 'false'],
-    first: ['primer', 'primero', 'primera', 'uno', 'una', '1', 'patha'],
-    second: ['segundo', 'segunda', 'dos', '2', 'b', 'pathb'],
+    // ⚠️ 'uno'/'una' y 'dos' se quitaron: son artículos y numerales corrientes,
+    // y 'una separación' daba 'Quedarte', lo contrario. Solo los ordinales sirven.
+    first: ['primer', 'primero', 'primera', '1', 'patha'],
+    second: ['segundo', 'segunda', '2', 'b', 'pathb'],
     ambiguous: [
       'los dos', 'las dos', 'ambos', 'ambas', 'ninguno', 'ninguna',
       'da igual', 'tal vez', 'quizá', 'quizas', 'quizás', 'depende',
@@ -692,7 +696,9 @@ export default {
     allTopics: 'Elige una de las lecturas 🔮',
     pickSize: (balance, cur) =>
       '🔮 ¿Lectura de cuántas cartas?\n\n' +
-      'Más cartas ◀️◀️ análisis más completo y más hondo\n\n' +
+      // ⚠️ Las flechas eran ◀️◀️, herencia del RTL del persa: en una lengua de izquierda
+      // a derecha apuntaban hacia atrás, en contra del sentido de la frase.
+      'Más cartas ▶️▶️ análisis más completo y más hondo\n\n' +
       purseQuote(balance, cur),
     startWhere: '¿Por dónde empezamos? 📌',
     guideTitle: '📖 Cómo elegir tu lectura',
