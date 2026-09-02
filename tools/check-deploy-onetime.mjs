@@ -46,7 +46,11 @@ export const SCANNED = [
 export const LIVE_BOTS = ['voice2text', 'tarot'];
 
 /** هدف‌هایی که خواباندنشان بی‌خطر است — بازنشسته یا ابزارِ داخلی. */
-export const SAFE_TARGETS = ['resume-tailor'];
+// `voice2text-ops`: اپِ روحِ pm2 که به `~/voice2text/ops-server.js` اشاره می‌کرد.
+// آن فایل **هرگز در ریپو نبوده** (نه در درخت، نه در تاریخچه، نه هیچ ارجاعی)، در
+// `ecosystem.config.cjs` هم نیست و هیچ کاربری را سرو نمی‌کند؛ فقط ثانیه‌ای چند بار
+// کرش می‌کرد و CPU می‌خورد. پس خواباندنش به هیچ‌کس آسیب نمی‌زند.
+export const SAFE_TARGETS = ['resume-tailor', 'voice2text-ops'];
 
 /** اسکریپت‌های یک‌باره‌ای که اجرا و مهر خورده‌اند و نباید از هیچ مسیرِ دیپلویی صدا شوند. */
 export const RETIRED_ONETIME = [

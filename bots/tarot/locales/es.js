@@ -852,8 +852,9 @@ export default {
     // Botón de pago: el monto va en el propio botón, sin adivinar.
     starsStaleInvoice: 'Este pedido ya no vale. Abre el pago otra vez.',
     starsTempError: 'Falla temporal. Inténtalo de nuevo.',
-    starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)}`,
-    starsInvoiceDesc: (p, starsQty) => `${coins(p.coins)} para tus lecturas. Salen ${starsN(starsQty)} de tu cuenta.`,
+    // 💎 y ⭐ junto al nombre de la moneda: la unidad se reconoce al instante.
+    starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)} 💎`,
+    starsInvoiceDesc: (p, starsQty) => `${coins(p.coins)} 💎 para tus lecturas. Salen ${starsN(starsQty)} ⭐ de tu cuenta.`,
     coinsApproved: (n, balanceCoins, cur) =>
       `✅ ¡${coins(n)} ${cur.emoji} en tu cuenta!\n\n` +
       `💠 Saldo nuevo: ${coins(balanceCoins)} ${cur.emoji}`,

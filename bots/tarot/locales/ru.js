@@ -839,8 +839,9 @@ export default {
   // Кнопка оплаты: сумма прямо на кнопке, чтобы решение принималось без догадок.
   starsStaleInvoice: 'Этот счёт уже неактуален. Открой оплату заново.',
   starsTempError: 'Временный сбой. Попробуй ещё раз.',
-  starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)}`,
-  starsInvoiceDesc: (p, stars) => `${coins(p.coins)} для твоих раскладов. С твоего счёта спишется ${fmt(stars)} ${plural(stars, ['звезда', 'звезды', 'звёзд'])}.`,
+  // 💎 и ⭐ рядом с названием валюты: единицу узнают с одного взгляда.
+  starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}: ${coins(p.coins)} 💎`,
+  starsInvoiceDesc: (p, stars) => `${coins(p.coins)} 💎 для твоих раскладов. С твоего счёта спишется ${fmt(stars)} ${plural(stars, ['звезда', 'звезды', 'звёзд'])} ⭐.`,
   // ⚠️ Параметр `coins` перекрывает helper coins(), поэтому здесь склонение через plural().
   coinsApproved: (coins, balanceCoins, cur) =>
     `✅ ${fmt(coins)} ${plural(coins, ['алмаз', 'алмаза', 'алмазов'])} ${cur.emoji} уже на твоём счету!\n\n` +
