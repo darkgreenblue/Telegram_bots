@@ -48,15 +48,29 @@ const payForSpread = db.transaction((uid, spread, focusKey) => {
   stmts.setReadingStatus.run('paid', id);
   return id;
 });
-function cancelReading(uid, readingId) {
-  const r = readingId && stmts.getReading.get(readingId);
-  if (!r || r.user_id !== uid) return 0;
-  if (r.status === 'pending_payment') { stmts.setReadingStatus.run('canceled', readingId); return 0; }
-  if (r.status !== 'paid') return 0;
-  if (r.price > 0) stmts.credit.run(r.price, uid);
-  stmts.setReadingStatus.run('refunded', readingId);
-  return r.price;
+/* ⚠️ `cancelReading` عمداً **کپی نمی‌شود**: از خودِ `index.js` بریده و اجرا می‌شود.
+   کپیِ محلیِ منطق دقیقاً همان تله‌ای است که ریپو بارها ثبت کرده (`check-lucky`,
+   `check-announce`): تست سبز می‌ماند در حالی که کدِ محصول عوض شده. این‌طوری پرچمِ
+   `REFUND_ON_CANCEL` هم واقعاً در هر دو حالت اجرا می‌شود، نه اینکه ادعا شود. */
+function bodyOf(src, header) {
+  const i = src.indexOf(header);
+  if (i < 0) return null;
+  let d = 0, started = false;
+  for (let j = src.indexOf('{', i); j < src.length; j++) {
+    if (src[j] === '{') { d++; started = true; }
+    else if (src[j] === '}') { d--; if (started && d === 0) return src.slice(i, j + 1); }
+  }
+  return null;
 }
+const CANCEL_SRC = bodyOf(SRC, 'function cancelReading(');
+const events = [];   // هر track که کدِ محصول می‌زند این‌جا ثبت می‌شود
+const trackSpy = (_db, uid, name, props) => events.push({ uid, name, props });
+/** همان تابعِ واقعیِ ربات، با پرچمِ دلخواه. */
+const makeCancel = (refundOnCancel) => new Function(
+  'stmts', 'track', 'db', 'EVENTS', 'REFUND_ON_CANCEL',
+  `${CANCEL_SRC}; return cancelReading;`,
+)(stmts, trackSpy, db, { REFUND: 'refund' }, refundOnCancel);
+const cancelReading = makeCancel(false);          // رفتارِ زنده‌ی امروز
 const SP3 = { id: 'love3', price: 30_000, size: 3 };
 const SP10 = { id: 'love10', price: 100_000, size: 10 };
 
@@ -105,18 +119,43 @@ console.log('\n▶ گاردِ دوبار-تپ (باگی که `deduct` تنها �
     'و دو فالِ پرداخت‌شده‌ی موازی می‌ساخت');
 }
 
-console.log('\n▶ لغو = ریفاندِ کامل (نه فقط canceled)');
+/* 💎 v3.54.0 — تصمیمِ صریحِ مالک: انصرافِ **خودِ کاربر** بعد از کسر، پول را برنمی‌گرداند.
+   این بلوک جای بلوکِ «لغو = ریفاندِ کامل» را گرفت. عمداً هر دو جهت سنجیده می‌شود: هم
+   اینکه پول نمی‌رود، هم اینکه رول‌بکِ یک‌خطی واقعاً رفتارِ قبلی را برمی‌گرداند. */
+console.log('\n▶ لغو = فالِ terminal، ولی پول برنمی‌گردد (v3.54.0)');
 {
   mkUser(4, 50_000);
   const id = payForSpread(4, SP3, 'love');
   ok(bal(4) === 20_000, 'اول پول کم شد');
+  events.length = 0;
   const back = cancelReading(4, id);
-  ok(back === SP3.price, 'مبلغِ برگشتی دقیقاً قیمتِ فال است');
-  ok(bal(4) === 50_000, 'موجودی کامل برگشت');
-  ok(stmts.getReading.get(id).status === 'refunded', 'وضعیت refunded شد');
-  // دوبار-لغو نباید دوبار پول بدهد
-  const again = cancelReading(4, id);
-  ok(again === 0 && bal(4) === 50_000, 'لغوِ دوباره پولِ اضافه نمی‌دهد');
+  ok(back === 0, 'خروجی صفر است، پس هیچ نقطه‌ای پیامِ «پولت برگشت» نمی‌فرستد');
+  ok(bal(4) === 20_000, 'موجودی دست‌نخورده ماند (پول برنگشت)');
+  ok(stmts.getReading.get(id).status === 'canceled',
+    'فال terminal شد (canceled) — کاربر پشتِ گاردِ «فالِ باز» گیر نمی‌کند');
+  ok(events.length === 1 && events[0].name === 'reading_forfeited',
+    `دقیقاً یک رویداد، و نامش reading_forfeited است (${events.map(e => e.name).join(',') || 'هیچ'})`);
+  ok(events[0].props?.amount === SP3.price && events[0].props?.reason === 'cancel',
+    'مبلغِ سوخته و دلیلش ثبت می‌شود (برای گزارشِ درآمدِ بدونِ تحویل)');
+  ok(!events.some(e => e.name === 'refund'),
+    'هیچ رویدادِ refund ثبت نمی‌شود (وگرنه داشبورد پولی را برگشتی می‌شمرد که نرفته)');
+  // دوبار-لغو هم نه پول می‌دهد نه رویدادِ دوم
+  events.length = 0;
+  ok(cancelReading(4, id) === 0 && bal(4) === 20_000 && events.length === 0,
+    'لغوِ دوباره بی‌اثر است (نه پول، نه رویدادِ تکراری)');
+}
+
+console.log('\n▶ رول‌بکِ یک‌خطی: REFUND_ON_CANCEL = true دقیقاً رفتارِ قبلی را برمی‌گرداند');
+{
+  ok(/const REFUND_ON_CANCEL = false;/.test(SRC), 'پرچم در ربات هست و خاموش است');
+  const cancelWithRefund = makeCancel(true);
+  mkUser(41, 50_000);
+  const id = payForSpread(41, SP3, 'love');
+  events.length = 0;
+  const back = cancelWithRefund(41, id);
+  ok(back === SP3.price && bal(41) === 50_000, 'با پرچمِ روشن، پولِ کامل برمی‌گردد');
+  ok(stmts.getReading.get(id).status === 'refunded', 'و وضعیت refunded می‌شود');
+  ok(events.length === 1 && events[0].name === 'refund', 'و رویدادِ refund دوباره ثبت می‌شود');
 }
 
 console.log('\n▶ فالِ پول‌داده‌ی در جریان هرگز با لغو دست نمی‌خورد');
@@ -149,8 +188,16 @@ console.log('\n▶ نوشتنِ کارت‌ها فقط یک بار (ضدِ کش�
   ok(stmts.getReading.get(id).seed === 'seed-1', 'کارت‌های اصلی دست‌نخورده ماندند');
 }
 
-console.log('\n▶ جاروی فالِ رهاشده: فقط کهنه‌ترها، و فقط یک بار');
+console.log('\n▶ جاروی فالِ رهاشده: با پرچمِ خاموش کاملاً no-op است');
 {
+  const sweep = bodyOf(SRC, 'function sweepAbandonedPaidReadings(');
+  ok(!!sweep, 'تابعِ جارو پیدا شد');
+  ok(/^\s*if \(!REFUND_ON_CANCEL\) return;/m.test(sweep),
+    'اولین خطِ جارو گاردِ پرچم است — پس با پرچمِ خاموش هیچ ردیفی لمس نمی‌شود');
+  const iGuard = sweep.indexOf('if (!REFUND_ON_CANCEL) return;');
+  ok(iGuard > 0 && iGuard < sweep.indexOf('stmts.credit.run'),
+    'گارد **قبل از** هر واریزی می‌آید (گاردِ بعد از خرجِ پول بی‌فایده است)');
+  // و با پرچمِ روشن، همان انتخابِ ۲۴ساعته‌ی قبلی سرِ جایش است
   mkUser(9, 100_000);   // کافی برای هر دو خرید، وگرنه دومی اصلاً ساخته نمی‌شود
   const fresh = payForSpread(9, SP3, 'love');            // همین الان
   const oldId = payForSpread(9, SP3, 'love');            // رهاشده
@@ -159,9 +206,29 @@ console.log('\n▶ جاروی فالِ رهاشده: فقط کهنه‌ترها�
   const rows = q.all();
   ok(oldId > 0 && rows.length === 1 && rows[0].id === oldId,
     `فقط رکوردِ کهنه‌تر از ۲۴ ساعت انتخاب می‌شود (${rows.length} مورد)`);
-  ok(!rows.some(r => r.id === fresh), 'کاربرِ وسطِ نوشتنِ سؤال ریفاند نمی‌شود (فالش از زیرِ پایش کشیده نمی‌شود)');
-  for (const r of rows) { stmts.credit.run(r.price, r.user_id); stmts.setReadingStatus.run('refunded', r.id); }
-  ok(q.all().length === 0, 'اجرای دوم چیزی برای ریفاند پیدا نمی‌کند (پولِ دوباره نمی‌دهد)');
+  ok(!rows.some(r => r.id === fresh), 'کاربرِ وسطِ نوشتنِ سؤال لمس نمی‌شود (فالش از زیرِ پایش کشیده نمی‌شود)');
+  // 💎 و با پرچمِ خاموش، رکوردِ رهاشده عمداً `paid` می‌ماند: تنها راهی که کاربرِ برگشته
+  // می‌تواند فالِ پول‌داده‌اش را تمام کند. نبودنِ ریفاند نباید به نابودیِ رکورد هم برسد.
+  ok(stmts.getReading.get(oldId).status === 'paid',
+    'رکوردِ رهاشده باز می‌ماند تا کاربرِ برگشته بتواند فالش را تمام کند');
+}
+
+/* 🛟 مرزِ اصلیِ این تغییر: ریفاند حذف نشد، فقط از «انصرافِ کاربر» برداشته شد.
+   خرابیِ **خودمان** باید هنوز کاملاً برگردد، وگرنه پولِ کاربر بابتِ باگِ ما می‌سوزد. */
+console.log('\n▶ ریفاندِ خرابیِ خودمان دست‌نخورده است (به پرچم وصل نیست)');
+{
+  const recover = bodyOf(SRC, 'function recoverOrphanReadings(');
+  ok(!!recover && /stmts\.credit\.run\(r\.price, r\.user_id\)/.test(recover),
+    'یتیمِ ری‌استارتِ وسطِ فراخوانی هنوز واریز می‌شود');
+  ok(!/REFUND_ON_CANCEL/.test(recover || ''),
+    'و عمداً به REFUND_ON_CANCEL وصل نیست (باگِ ما ربطی به انصرافِ کاربر ندارد)');
+  ok(/status='started' AND llm_json=''/.test(recover || ''),
+    'دامنه‌اش همان فالِ بی‌متنِ started است');
+  // شکستِ کاملِ مدل بعد از همه‌ی فالبک‌ها هم باید ریفاند بدهد
+  const reveal = bodyOf(SRC, 'async function startReveal(');
+  ok(!!reveal && /stmts\.credit\.run\(r\.price, uid\)/.test(reveal),
+    'شکستِ کاملِ مدل هنوز پولِ کاربر را کامل برمی‌گرداند');
+  ok(!/REFUND_ON_CANCEL/.test(reveal || ''), 'و آن هم به پرچم وصل نیست');
 }
 
 console.log('\n▶ سینکِ منطقِ این تست با خودِ ربات');
@@ -189,9 +256,15 @@ console.log('\n▶ سینکِ منطقِ این تست با خودِ ربات');
   ok(/WHERE id=\? AND cards_json=''/.test(SRC), 'شرطِ یک‌بار-نوشتنِ کارت‌ها در ربات هست');
   ok(/status='paid' AND created_at < unixepoch\(\)-86400/.test(SRC), 'جاروی رهاشده همان بازه را دارد');
 
-  // هر سه مسیرِ لغو باید از تابعِ ریفاند رد شوند، نه از setReadingStatus مستقیم
+  // هر سه مسیرِ لغو باید از همین تک‌تابع رد شوند، نه از setReadingStatus مستقیم
   const cancels = (SRC.match(/cancelReading\(uid, /g) || []).length;
-  ok(cancels >= 3, `هر سه نقطه‌ی لغو ریفاند می‌کنند (${cancels} مورد)`);
+  ok(cancels >= 3, `هر سه نقطه‌ی لغو از تک‌تابعِ لغو رد می‌شوند (${cancels} مورد)`);
+  // ⚠️ و هر سه باید پیامِ ریفاند را **مشروط** بفرستند. این تنها چیزی است که نگه می‌دارد
+  // «هیچ متنی عوض نشد»: با خروجیِ صفر، جمله‌ی «پولت برگشت» خودبه‌خود نمی‌رود. اگر روزی
+  // یکی‌شان بی‌قید بفرستد، ربات به کاربر دروغ می‌گوید.
+  const guarded = (SRC.match(/if \(back\) await ctx\.reply\(L\.reading\.refundedOnCancel\(/g) || []).length;
+  ok(guarded === (SRC.match(/L\.reading\.refundedOnCancel\(back/g) || []).length && guarded >= 3,
+    `هر ${guarded} پیامِ ریفاند پشتِ شرطِ if (back) است (هیچ‌کدام بی‌قید نیست)`);
   ok(!/r\.status === 'pending_payment'\) stmts\.setReadingStatus\.run\('canceled'/.test(SRC),
     'هیچ مسیرِ لغوی دیگر مستقیم canceled نمی‌کند (وگرنه پولِ paid را می‌خورد)');
 

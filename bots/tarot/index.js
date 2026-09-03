@@ -46,7 +46,7 @@ import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjineh
 import {
   FLASH, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
-  seedToInt, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
+  seedToInt, mulberry32, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName, cardKeywords,
 } from './reading-core.js';
@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.54.0';
+const PRODUCT_VERSION = '3.56.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -264,6 +264,16 @@ const NAV_GUARD_ENABLED = true;
 // (insert در finishPicking + پی‌وال + کسر در unlock:) بدونِ اینکه بقیه‌ی UX v2 خاموش شود.
 const PAY_AT_SIZE = true;
 const payAtSizeFor = (uid) => PAY_AT_SIZE && uxV2For(uid);
+
+/* 💎 انصرافِ کاربر بعد از کسر، پول را برنمی‌گرداند (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۱۲).
+   «کاربر با دادنِ الماس ربات را استخدام کرده»: از همان لحظه محصول رزرو شده و از v3.53.0
+   کارت‌ها کشیده و مدل هم اغلب هزینه‌اش را گرفته است. پس منصرف‌شدنِ **خودِ کاربر** دلیلِ
+   برگرداندنِ پول نیست.
+   ⚠️ ریفاند حذف نشد، فقط به جای درستش محدود شد: **خرابیِ خودمان** همچنان کامل برمی‌گردد —
+   شکستِ کاملِ مدل بعد از همه‌ی فالبک‌ها (`startReveal`) و یتیمِ ری‌استارتِ وسطِ فراخوانی
+   (`recoverOrphanReadings`). آن دو مسیر عمداً به این پرچم وصل **نیستند**.
+   رول‌بکِ یک‌خطی: `true` → دقیقاً رفتارِ v3.53.0 (ریفاندِ لغو + جاروی ۲۴ساعته‌ی رهاشده). */
+const REFUND_ON_CANCEL = false;
 
 // 🧭 ثبتِ خودکارِ مسیرِ ریزِ کاربر (shared/journey.js): هر پیامِ خروجی (`view`) و هر اکشنِ ورودی
 // (`act`) ثبت می‌شود تا در داشبورد بشود دید کاربر دقیقاً پشتِ کدام پیام/دکمه ریخته است.
@@ -645,6 +655,14 @@ const LOADING_MIN_MS = 10_000;
 // انتخابِ گرید فقط آیین است. رول‌بکِ یک‌خطی: `false` → کارت‌ها مثل قبل از انتخابِ گرید
 // می‌آیند و خوانش بعد از انتخابِ آخر شروع می‌شود.
 const PREFETCH_AFTER_QUESTION = true;
+// ⏱ فاصله‌ی «پیامِ خوش‌آمد (که فکتِ ۸۶٪ در آن است) ← سؤالِ ماهِ تولد» (v3.55.0).
+// خواسته‌ی مالک: کاربر فرصتِ خواندنِ آن متن را داشته باشد. عمداً یک ثابتِ **جدا** است و
+// نه بالا بردنِ `PACE_S`؛ آن یکی در ده‌ها نقطه‌ی دیگر هم استفاده می‌شود. کلِ فاصله با
+// نشانگرِ typing پوشیده می‌شود (بند «مکثِ بی‌نشانه تأخیر خوانده می‌شود»، v3.53.0).
+const PACE_WELCOME = 4200;
+// ⏱ فاصله‌ی «دریافت شد ← حالا باید نیت کنی» (v3.55.0). تا v3.54.0 `PACE_M` بود (۲٫۵s) و
+// مالک هنوز زیادش می‌دانست؛ یک ثانیه کم شد. باز هم ثابتِ جدا، چون `PACE_M` مشترک است.
+const PACE_BREATH = 1500;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
@@ -1705,7 +1723,8 @@ async function resendCurrentStep(ctx, uid) {
     return ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
   }
   if (state === 'picking') {
-    return ctx.reply(L.reading.pickPrompt(s?.need || USER_PICKS), pickGridKb(s?.picks || []));
+    const need = s?.need || USER_PICKS;
+    return ctx.reply(L.reading.pickPrompt(need), pickGridKb(s?.picks || [], pickHearts(s?.seed, need)));
   }
   if (state === 'shuffling') {
     const m = await ctx.reply(L.reading.shuffleFrames[0], Markup.inlineKeyboard([[Markup.button.callback(L.buttons.stopShuffle, 'shuffle_stop')]]));
@@ -1776,13 +1795,24 @@ const payForSpread = db.transaction((uid, spread, focusKey) => {
   return id;
 });
 
-/** لغوِ یک فالِ نیمه‌کاره. اگر پول داده شده، **کامل** برمی‌گردد. فالِ started/delivered
- *  هرگز دست نمی‌خورد. خروجی: مبلغی که برگشت (۰ یعنی چیزی برنگشت). */
+/** لغوِ یک فالِ نیمه‌کاره. فالِ هنوز-پرداخت‌نشده فقط canceled می‌شود؛ فالِ **پرداخت‌شده**
+ *  terminal می‌شود ولی پولش برنمی‌گردد (`REFUND_ON_CANCEL`). فالِ started/delivered هرگز
+ *  دست نمی‌خورد. خروجی: مبلغی که برگشت — با پرچمِ فعلی همیشه ۰، پس هر سه نقطه‌ی لغو که
+ *  شرطِ `if (back)` دارند خودبه‌خود دیگر پیامِ «پولت برگشت» نمی‌فرستند (هیچ متنی عوض نشد). */
 function cancelReading(uid, readingId) {
   const r = readingId && stmts.getReading.get(readingId);
   if (!r || r.user_id !== uid) return 0;
   if (r.status === 'pending_payment') { stmts.setReadingStatus.run('canceled', readingId); return 0; }
   if (r.status !== 'paid') return 0;
+  // 💎 پولِ کسرشده مالِ ماست، ولی خودِ فال حتماً باید terminal شود: کاربر بعد از تپِ
+  // «انصراف» نباید پشتِ گاردِ «یه فالِ باز داری» گیر کند (بند ۹ب: هیچ صفحه‌ای بن‌بست نیست).
+  // رویدادِ **افزایشیِ** `reading_forfeited` جای `refund` را می‌گیرد، وگرنه شمارنده‌ی ریفاندِ
+  // داشبورد پولی را گزارش می‌کرد که هرگز برنگشته (بند ۲ج/۳: فقط اضافه کن).
+  if (!REFUND_ON_CANCEL) {
+    stmts.setReadingStatus.run('canceled', readingId);
+    track(db, uid, 'reading_forfeited', { reading_id: readingId, amount: r.price, reason: 'cancel' });
+    return 0;
+  }
   if (r.price > 0) stmts.credit.run(r.price, uid);
   stmts.setReadingStatus.run('refunded', readingId);
   track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'cancel' });
@@ -2020,20 +2050,27 @@ function recoverOrphanReadings() {
 // عمداً **فقط رکوردهای کهنه‌تر از یک شبانه‌روز** ریفاند می‌شوند — نه در بوت و نه زودتر —
 // چون استیت و سشن در DB اند و کاربرِ وسطِ نوشتنِ سؤال بعد از ری‌استارت ادامه می‌دهد؛
 // ریفاندِ زودهنگام فالش را از زیرِ پایش می‌کشید و بعد فالِ مجانی تحویل می‌داد.
-function refundAbandonedPaidReadings() {
+//
+// 💎 با `REFUND_ON_CANCEL = false` این جارو کاملاً no-op است، و این عمدی است نه فراموشی:
+// تنها کارش برگرداندنِ پول بود. حالا که پولِ رهاشده هم برنمی‌گردد، **بستنِ** آن رکورد
+// هیچ سودی ندارد و یک ضرر دارد — رکوردِ `paid` تنها چیزی است که کاربرِ برگشته می‌تواند
+// از سرش بگیرد و فالش را تمام کند (کارت‌ها و اغلب متنِ مدل از قبل رویش نشسته). یعنی
+// نبودنِ ریفاند با **حفظِ** حقِ کاربر جبران می‌شود، نه با نابود کردنش.
+function sweepAbandonedPaidReadings() {
+  if (!REFUND_ON_CANCEL) return;
   let rows = [];
   try {
     rows = db.prepare(
       "SELECT id, user_id, price FROM readings WHERE status='paid' AND created_at < unixepoch()-86400",
     ).all();
-  } catch (e) { logErr('refundAbandoned query:', e.message); return; }
+  } catch (e) { logErr('sweepAbandoned query:', e.message); return; }
   for (const r of rows) {
     try {
       if (r.price > 0) stmts.credit.run(r.price, r.user_id);
       stmts.setReadingStatus.run('refunded', r.id);
       track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'abandoned' });
       bot.telegram.sendMessage(r.user_id, L.reading.refundedOnCancel(r.price, curOf(r.user_id))).catch(() => {});
-    } catch (e) { logErr('refundAbandoned reading#' + r.id, e.message); }
+    } catch (e) { logErr('sweepAbandoned reading#' + r.id, e.message); }
   }
   if (rows.length) log(`♻️ ${rows.length} فالِ پرداخت‌شده‌ی رهاشده ریفاند شد`);
 }
@@ -2316,7 +2353,9 @@ async function finishNameOnboarding(ctx, rawName) {
   // ⚠️ این‌جا قبلاً به دعوت‌شده وعده‌ی «هدیه‌ی دعوت» داده می‌شد. آن وعده از پایه غلط بود:
   // پاداشِ دعوت فقط مالِ دعوت‌کننده است. حالا که چیزی برای گفتن نیست، پیام هم حذف شد؛
   // یک پیامِ کمتر در آنبوردینگ، و هیچ وعده‌ای که بعداً عمل نشود.
-  await typing(ctx, PACE_S);
+  // ⏱ مکثِ عمدیِ خواندن: پیامِ بالا فکتِ ۸۶٪ را دارد و بلافاصله پرسیدنِ ماهِ تولد یعنی
+  // کاربر آن را رد می‌کند. کلِ مکث با نشانگرِ typing پر می‌شود.
+  await typing(ctx, PACE_WELCOME);
   // UX v2: ماهِ تولد جای حوزه‌ی تمرکز را گرفت. حوزه‌ی تمرکز کاربر را از همان اول به یک
   // موضوع بایاس می‌کرد؛ ماهِ تولد عوض نمی‌شود و کارتِ روز را برای همیشه شخصی می‌کند.
   if (uxV2For(uid)) {
@@ -3700,7 +3739,7 @@ async function handleQuestion(ctx, question, audio = null) {
     // به‌درستی «تأخیر» دید. بازمانده‌ی یک پیامِ حذف‌شده بود، نه یک تصمیمِ آیینی.
     if (!toneV2For(uid)) { await typing(ctx, PACE_M); await ctx.reply(L.reading.atmosphere2); }
   }
-  await typing(ctx, PACE_M);
+  await typing(ctx, PACE_BREATH);
   await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
 }
 
@@ -3740,12 +3779,37 @@ bot.action('shuffle_stop', async (ctx) => {
   await startPicking(ctx, uid, getSession(uid).shuffleMsgId);
 });
 
-function pickGridKb(picks) {
+// 💗 پالتِ قلب‌های انتخابِ کارت (v3.55.0، خواسته‌ی صریحِ مالک). تا v3.54.0 هر کارتِ
+// انتخاب‌شده ✨ می‌گرفت؛ حالا هر کدام یک قلبِ **رنگِ متفاوت**. دقیقاً ده رنگ است، پس
+// فالِ ده‌کارتی هر ده رنگ را می‌گیرد و فال‌های کوچک‌تر یک زیرمجموعه‌ی تصادفی.
+const PICK_HEARTS = ['🩷', '💚', '❤️', '🩵', '🩶', '🧡', '💙', '🤍', '💛', '💜'];
+
+// انتخابِ رنگ‌ها **قطعی** است (مثل خودِ دک): از seedِ همان دست مشتق می‌شود، پس رندرِ
+// دوباره‌ی گرید (ادیت بعد از هر تپ، یا `resendCurrentStep` بعد از ری‌استارت) هرگز رنگِ
+// کارتی را که کاربر همین حالا دیده عوض نمی‌کند. `need` هم داخلِ seed است تا دو فالِ
+// هم‌seed با اندازه‌های متفاوت به هم گره نخورند.
+// n-امین انتخابِ کاربر رنگِ n-امِ این آرایه را می‌گیرد (`picks.indexOf`)، پس ترتیبِ رنگ‌ها
+// به ترتیبِ **انتخاب** بسته است نه به شماره‌ی خانه.
+function pickHearts(seed, need) {
+  const a = PICK_HEARTS.slice();
+  const rnd = mulberry32(seedToInt(`hearts:${seed || ''}:${need}`));
+  for (let i = a.length - 1; i > 0; i--) {           // Fisher-Yates
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, Math.min(need || 0, a.length));
+}
+
+function pickGridKb(picks, hearts = []) {
   const rows = [];
   for (let r = 0; r < 6; r++) {
     rows.push(Array.from({ length: 4 }, (_, c) => {
       const i = r * 4 + c;
-      return Markup.button.callback(picks.includes(i) ? '✨' : '🂠', `pick:${i}`);
+      const at = picks.indexOf(i);
+      // فالبکِ ✨ فقط وقتی می‌آید که رنگی برای آن نوبت نباشد (دستِ در جریانِ لحظه‌ی
+      // دیپلوی که seed دارد ولی رنگش هنوز حساب نشده) — هرگز دکمه‌ی بی‌متن نمی‌سازد.
+      const face = at < 0 ? '🂠' : (hearts[at] || '✨');
+      return Markup.button.callback(face, `pick:${i}`);
     }));
   }
   return Markup.inlineKeyboard(rows);
@@ -3767,7 +3831,7 @@ async function startPicking(ctx, uid, shuffleMsgId) {
   if (shuffleMsgId) {
     try { await ctx.telegram.editMessageText(ctx.chat.id, shuffleMsgId, undefined, '🂠 ✋'); } catch {}
   }
-  await ctx.reply(L.reading.pickPrompt(need), pickGridKb([]));
+  await ctx.reply(L.reading.pickPrompt(need), pickGridKb([], pickHearts(seed, need)));
 }
 
 bot.action(/^pick:(\d+)$/, async (ctx) => {
@@ -3795,14 +3859,16 @@ bot.action(/^pick:(\d+)$/, async (ctx) => {
   if (done) setState(uid, 'confirm_pay'); // قفل فوری قبل از await
   setSession(uid, s);
 
-  await ctx.answerCbQuery('✨').catch(() => {});
-  // ⚠️ با آخرین انتخاب، **خودِ کیبورد برداشته می‌شود** نه اینکه فقط ✨ بخورد. تا قبل از
+  const hearts = pickHearts(s.seed, need);
+  // toast هم همان قلبی را نشان می‌دهد که روی خانه نشست، نه یک ایموجیِ سومِ بی‌ربط.
+  await ctx.answerCbQuery(hearts[s.picks.length - 1] || '✨').catch(() => {});
+  // ⚠️ با آخرین انتخاب، **خودِ کیبورد برداشته می‌شود** نه اینکه فقط قلب بخورد. تا قبل از
   // این، گریدِ مرده در چت می‌ماند و تنها دعوتِ روی صفحه بود، در حالی که ربات چند ثانیه
   // در سکوتِ عمدیِ آیین (`sleep` + typing + آپلودِ عکس) بود؛ نتیجه همان تپ‌های پیاپی.
   // متنِ جایگزین از `pickProgress` می‌آید که از قبل نوشته شده بود و هیچ‌جا مصرف نداشت.
   try {
     if (done) await ctx.editMessageText(L.reading.pickProgress(need, need));
-    else await ctx.editMessageReplyMarkup(pickGridKb(s.picks).reply_markup);
+    else await ctx.editMessageReplyMarkup(pickGridKb(s.picks, hearts).reply_markup);
   } catch {}
   if (!done) return;
   await finishPicking(ctx, uid, s);
@@ -3875,8 +3941,8 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   const readingId = parseInt(ctx.match[1], 10);
-  // 🪙 فالِ پرداخت‌شده (paid) این‌جا **ریفاند** می‌شود، نه فقط canceled — وگرنه از v2.6
-  // به بعد هر انصراف پولِ کاربر را می‌خورد.
+  // 🪙 فالِ پرداخت‌شده (paid) این‌جا terminal می‌شود ولی پولش برنمی‌گردد (v3.54.0،
+  // `REFUND_ON_CANCEL`). `back` صفر می‌ماند، پس پیامِ «پولت برگشت» هم نمی‌رود.
   const back = cancelReading(uid, readingId);
   setState(uid, 'idle');
   setSession(uid, null);
@@ -6290,9 +6356,9 @@ function launch() {
     .then(() => {
       log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
       recoverOrphanReadings();
-      refundAbandonedPaidReadings();
+      sweepAbandonedPaidReadings();
       // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
-      setInterval(refundAbandonedPaidReadings, 6 * 3600 * 1000);
+      setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
     })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
