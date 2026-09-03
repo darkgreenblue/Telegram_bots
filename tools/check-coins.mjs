@@ -320,7 +320,8 @@ console.log('\n▶ قواعدِ کپیِ پرامپتِ جدید (منبع: bots
 
   // جمله‌های اضافه‌ی وسطِ جرنی فقط در لحنِ قدیم می‌مانند
   ok(/if \(!toneV2For\(uid\)\) \{[\s\S]{0,200}empowerClose/.test(SRC), 'شعارِ پایانی در لحنِ جدید نمی‌رود');
-  ok(/if \(!toneV2For\(uid\)\) await ctx\.reply\(L\.reading\.atmosphere2\)/.test(SRC),
+  // v3.53.0: مکثِ قبلِ همین جمله هم پشتِ همان شرط رفت (وگرنه بدونِ جمله می‌ماند و تأخیرِ کور می‌شد)
+  ok(/if \(!toneV2For\(uid\)\) \{ await typing\(ctx, PACE_M\); await ctx\.reply\(L\.reading\.atmosphere2\); \}/.test(SRC),
     'جمله‌ی «کارت‌ها قرار نیست بترسوننت» در لحنِ جدید نمی‌رود');
   ok(/expectations: \(toneV2\) => \(toneV2/.test(LOC), 'جمله‌ی «انتخاب دست خودته» در لحنِ جدید نمی‌رود');
 }

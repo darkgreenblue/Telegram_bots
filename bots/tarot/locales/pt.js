@@ -711,7 +711,7 @@ export default {
     atmosphere1: 'Recebido 🤲',
     atmosphere2: 'Lembre: as cartas não vêm pra assustar, vêm pra clarear.',
     breathing: '🔮 Agora faça o seu pedido:\n\n' +
-      '1️⃣ Primeiro, três respirações fundas... 🌬️\n\n' +
+      '1️⃣ Primeiro, respire fundo até o corpo relaxar... 🌬️\n\n' +
       '2️⃣ Depois concentre a energia e a cabeça na sua pergunta e, quando sentir que está pronto, diga:',
     shuffleCaption: 'O baralho está embaralhando com a energia da sua pergunta... 🌀\n\nQuando sentir que é a hora, pare ele:',
     shuffleFrames: ['🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠'],
@@ -754,7 +754,10 @@ export default {
       `🃏 Carta «${posFa}»:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToque na imagem pra virar ✨`,
     revealCaptionV4: (label, card, reversed) =>
       `🃏 ${label}: «${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToque na imagem pra virar ✨`,
-    flowIntro: () => 'As suas cartas estão prontas 🕯️\n\nVire uma por uma e veja rapidinho o que cada uma diz. Depois vem a resposta e a leitura completa.',
+    flowIntro: () => 'As suas cartas estão prontas. 🕯️\n\n' +
+      'Primeiro, as cartas são lidas com calma e atenção. 🔍\n\n' +
+      'Depois elas aparecem uma por uma, e você sente um pouco o clima de cada uma. 🃏\n\n' +
+      'E no final vem a resposta e a leitura completa! ✨',
     positiveBridges: [
       'É isso mesmo 🤲 As cartas estão falando certeiro. Vamos em frente...',
       'Que bom que você confirma: a gente está na mesma sintonia 🌊 Seguindo...',

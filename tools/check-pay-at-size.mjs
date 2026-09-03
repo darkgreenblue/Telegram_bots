@@ -195,11 +195,17 @@ console.log('\n▶ سینکِ منطقِ این تست با خودِ ربات');
   ok(!/r\.status === 'pending_payment'\) stmts\.setReadingStatus\.run\('canceled'/.test(SRC),
     'هیچ مسیرِ لغوی دیگر مستقیم canceled نمی‌کند (وگرنه پولِ paid را می‌خورد)');
 
-  // گاردِ هزینه: فالِ `paid` هنوز کارت ندارد، پس فراخوانیِ LLM رویش ممنوع است
+  // گاردِ هزینه (v3.53.0): `paid` یعنی پول کسر شده، پس فراخوانی مجاز است؛ چیزی که `paid`
+  // ممکن است نداشته باشد **کارت** است و آن گاردِ جداگانه در callReadingLLM دارد.
   const guard = SRC.slice(SRC.indexOf('function paidForReading('), SRC.indexOf('async function callReadingLLM('));
   const paidFor = new Function(`${guard}; return paidForReading;`)();
-  ok(paidFor({ price: 30_000, status: 'paid' }) === false, 'فالِ paid هنوز اجازه‌ی فراخوانیِ LLM ندارد (کارت ندارد)');
-  ok(paidFor({ price: 30_000, status: 'started' }) === true, 'بعد از کشیدنِ کارت‌ها (started) مجاز می‌شود');
+  ok(paidFor({ price: 30_000, status: 'paid' }) === true, 'فالِ paid (پول کسر شده) اجازه‌ی فراخوانیِ LLM دارد');
+  ok(paidFor({ price: 30_000, status: 'started' }) === true, 'بعد از کشیدنِ کارت‌ها (started) هم مجاز است');
+  ok(paidFor({ price: 30_000, status: 'pending_payment' }) === false, 'فالِ پرداخت‌نشده همچنان ممنوع');
+  const callBody = SRC.slice(SRC.indexOf('async function callReadingLLM('), SRC.indexOf('// ⛔️ `startPrefetch` حذف شد'));
+  ok(/if \(!r\.cards_json\) \{[\s\S]{0,220}return null;/.test(callBody)
+    && callBody.indexOf('if (!r.cards_json)') < callBody.indexOf('JSON.parse(r.cards_json)'),
+    'فالِ بی‌کارت قبل از JSON.parse و قبل از هر فراخوانی متوقف می‌شود');
 
   // رول‌بکِ یک‌خطی
   ok(/const PAY_AT_SIZE = true;/.test(SRC) && /payAtSizeFor = \(uid\) => PAY_AT_SIZE && uxV2For\(uid\)/.test(SRC),
