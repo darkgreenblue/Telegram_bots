@@ -13,7 +13,7 @@
 //
 // اجرا: node tools/check-ux-menu.mjs
 import { readFileSync } from 'fs';
-import { seedToInt } from '../bots/tarot/reading-core.js';
+import { seedToInt, mulberry32 } from '../bots/tarot/reading-core.js';
 import {
   TOPICS_V3, RETIRED_TOPICS, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
 } from '../bots/tarot/spreads.js';
@@ -1260,6 +1260,129 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     'برچسب‌های کهنه در KB_LABELS هستند (تپِ دکمه در قیف گم نشود)');
 }
 
+console.log('\n▶ دو مکثِ تنظیم‌شده‌ی v3.55.0 (هر دو با نشانگرِ typing)');
+{
+  // ⚠️ `PACE_S` و `PACE_M` در **یک** دستور تعریف شده‌اند، پس helperِ `num` (که دنبالِ
+  // `const <name> =` می‌گردد) برای دومی NaN می‌داد و ادعا بی‌صدا از کار می‌افتاد.
+  const paceLine = (SRC.match(/const PACE_S = (\d+), PACE_M = (\d+)/) || []);
+  const PACE_S = Number(paceLine[1]), PACE_M = Number(paceLine[2]);
+  const WELCOME = num('PACE_WELCOME'), BREATH = num('PACE_BREATH');
+  // ⚠️ مهم‌ترین ادعای این بلوک: `PACE_S`/`PACE_M` **مشترک**اند (ده‌ها نقطه‌ی دیگر)، پس
+  // تنظیمِ این دو مکث هرگز نباید از راهِ عوض‌کردنِ آن‌ها انجام شود. اگر روزی کسی به‌جای
+  // ثابتِ اختصاصی همان‌ها را بالا/پایین ببرد، ریتمِ کلِ ربات بی‌صدا عوض می‌شود.
+  ok(PACE_S === 1200 && PACE_M === 2500, 'ثابت‌های مشترکِ ریتم دست‌نخورده‌اند (۱۲۰۰ و ۲۵۰۰)');
+  ok(WELCOME === PACE_S + 3000, `مکثِ خوش‌آمد دقیقاً ۳ ثانیه بیشتر از قبل است (${WELCOME}ms)`);
+  ok(BREATH === PACE_M - 1000, `مکثِ «دریافت شد ← نیت کن» دقیقاً ۱ ثانیه کمتر شد (${BREATH}ms)`);
+
+  // ✅ «با تایپینگ پر بشه» خواسته‌ی صریحِ مالک بود، پس سنجیده می‌شود: `typing` نشانگر
+  // می‌فرستد و بعد صبر می‌کند؛ `sleep` همان زمان را **بدونِ هیچ نشانه‌ای** می‌گذراند و
+  // کاربر آن را «تأخیر» می‌خواند نه «مکث» (درسِ ثبت‌شده‌ی v3.53.0).
+  const welcomeGap = SRC.slice(SRC.indexOf('L.onboarding.welcome(name'),
+                               SRC.indexOf('return askBirthMonth(ctx)'));
+  ok(/await typing\(ctx, PACE_WELCOME\);/.test(welcomeGap),
+    'فاصله‌ی «خوش‌آمد ← ماهِ تولد» با نشانگرِ typing پر می‌شود');
+  ok(!/\bsleep\(/.test(welcomeGap), 'در این فاصله هیچ مکثِ کورِ sleep نمانده');
+  ok((welcomeGap.match(/await typing\(/g) || []).length === 1,
+    'دقیقاً یک مکث در این فاصله است (مکث‌ها روی هم جمع نمی‌شوند)');
+
+  const breathGap = SRC.slice(SRC.indexOf('L.reading.atmosphereShort'),
+                              SRC.indexOf('L.reading.breathing, Markup.inlineKeyboard'));
+  ok(/await typing\(ctx, PACE_BREATH\);\s*\n\s*await ctx\.reply\(L\.reading\.breathing/
+    .test(SRC), 'مکثِ PACE_BREATH بلافاصله قبل از پیامِ «نیت کن» است');
+  ok(!/\bsleep\(/.test(breathGap), 'فاصله‌ی «دریافت شد ← نیت کن» هم مکثِ کور ندارد');
+  // مکثِ داخلِ شاخه‌ی لحنِ قدیم باید همان `PACE_M` بماند (رول‌بکِ سالم، v3.53.0).
+  ok(/if \(!toneV2For\(uid\)\) \{ await typing\(ctx, PACE_M\);/.test(SRC),
+    'مکثِ لحنِ قدیم دست‌نخورده مانده (PACE_M)');
+}
+
+// 💗 قلب‌های رنگیِ گریدِ انتخاب (v3.55.0). عمداً **رفتاری**: خودِ `PICK_HEARTS` و
+// `pickHearts` و `pickGridKb` از سورس بریده و اجرا می‌شوند. یک ادعای رجکسی («ده ایموجی
+// در فایل هست») سه چیزی را که واقعاً مهم‌اند نمی‌بیند: یکتاییِ رنگ‌ها در یک دست، قطعی
+// بودنشان بینِ دو رندر (وگرنه رنگِ کارتی که کاربر همین حالا دیده وسطِ کار عوض می‌شود)،
+// و اینکه رنگ به **نوبتِ انتخاب** بچسبد نه به شماره‌ی خانه.
+const HEARTS = (() => {
+  const from = SRC.indexOf('const PICK_HEARTS = [');
+  const fnAt = SRC.indexOf('function pickGridKb(', from);
+  const open = SRC.indexOf('{', fnAt);
+  let depth = 0, end = open;
+  for (let p = open; p < SRC.length; p++) {
+    if (SRC[p] === '{') depth++;
+    else if (SRC[p] === '}') { depth--; if (depth === 0) { end = p; break; } }
+  }
+  if (from < 0 || fnAt < 0 || end <= open) return null;
+  const slab = SRC.slice(from, end + 1);
+  const Markup = { button: { callback: (text, data) => ({ text, callback_data: data }) },
+                   inlineKeyboard: (rows) => ({ reply_markup: { inline_keyboard: rows } }) };
+  return new Function('mulberry32', 'seedToInt', 'Markup',
+    `${slab}\nreturn { PICK_HEARTS, pickHearts, pickGridKb };`)(mulberry32, seedToInt, Markup);
+})();
+
+console.log('\n▶ قلب‌های رنگیِ گریدِ انتخابِ کارت');
+{
+  ok(!!HEARTS, 'پالت و دو تابعِ گرید از سورس استخراج شدند');
+  const { PICK_HEARTS, pickHearts, pickGridKb } = HEARTS || {};
+  const WANT = ['🩷', '💚', '❤️', '🩵', '🩶', '🧡', '💙', '🤍', '💛', '💜'];
+  ok(PICK_HEARTS.length === 10 && new Set(PICK_HEARTS).size === 10,
+    'پالت دقیقاً ده رنگِ یکتا دارد');
+  ok(WANT.every(h => PICK_HEARTS.includes(h)) && PICK_HEARTS.every(h => WANT.includes(h)),
+    'پالت دقیقاً همان ده رنگِ خواسته‌شده است');
+  ok(PICK_HEARTS.every(h => /\p{Extended_Pictographic}/u.test(h)),
+    'هر عضوِ پالت یک ایموجی است (نه رشته‌ی خالی یا متن)');
+
+  // اندازه‌ی دست ⟵ تعدادِ رنگ. ۳ کارت = ۳ رنگ، ۵ = ۵، ۱۰ = هر ده رنگ.
+  let sizeOk = true, uniqOk = true, subsetOk = true;
+  for (const need of [3, 5, 10]) for (const u of [11, 22, 33, 44]) {
+    const a = pickHearts(`r:${u}:1:2`, need);
+    if (a.length !== need) sizeOk = false;
+    if (new Set(a).size !== need) uniqOk = false;
+    if (!a.every(h => PICK_HEARTS.includes(h))) subsetOk = false;
+  }
+  ok(sizeOk, 'تعدادِ رنگ‌ها دقیقاً برابرِ تعدادِ کارت‌هاست (۳/۵/۱۰)');
+  ok(uniqOk, 'رنگ‌های یک دست هرگز تکراری نیستند');
+  ok(subsetOk, 'هر رنگ از خودِ پالت می‌آید');
+  ok(new Set(pickHearts('x', 10)).size === 10, 'فالِ ده‌کارتی هر ده رنگ را می‌گیرد');
+
+  // قطعی بودن: همان seed ⟵ همان رنگ‌ها. این ادعا از رنگ‌عوض‌شدنِ خانه‌ای که کاربر همین
+  // حالا دیده جلوگیری می‌کند (گرید بعد از هر تپ دوباره رندر می‌شود، و `resendCurrentStep`
+  // بعد از ری‌استارت هم دوباره می‌سازدش).
+  ok(pickHearts('r:7:9:1', 5).join('') === pickHearts('r:7:9:1', 5).join(''),
+    'همان seed همیشه همان رنگ‌ها را می‌دهد (قطعی، ری‌استارت‌پذیر)');
+  // ...ولی دو دستِ متفاوت نباید همیشه یک چیدمان بگیرند، وگرنه «رنگِ تصادفی» تزئینی است.
+  const spreadOut = new Set([...Array(40).keys()].map(i => pickHearts(`r:${i}:1:1`, 3).join('')));
+  ok(spreadOut.size > 5, `دست‌های متفاوت چیدمان‌های متفاوت می‌گیرند (${spreadOut.size} از ۴۰)`);
+
+  // رنگ به **نوبتِ انتخاب** می‌چسبد نه به شماره‌ی خانه: انتخابِ اولِ کاربر همیشه رنگِ اول.
+  const h3 = pickHearts('s1', 3);
+  const face = (picks) => {
+    const kb = pickGridKb(picks, h3).reply_markup.inline_keyboard.flat();
+    return (i) => kb[i].text;
+  };
+  ok(face([9])(9) === h3[0] && face([9, 2])(2) === h3[1] && face([9, 2, 5])(5) === h3[2],
+    'n-امین انتخاب رنگِ n-ام را می‌گیرد (مستقل از شماره‌ی خانه)');
+  ok(face([9, 2])(9) === h3[0], 'رنگِ انتخابِ قبلی با انتخابِ تازه عوض نمی‌شود');
+  const kb0 = pickGridKb([], h3).reply_markup.inline_keyboard;
+  ok(kb0.length === 6 && kb0.every(r => r.length === 4) && kb0.flat().every(b => b.text === '🂠'),
+    'گریدِ دست‌نخورده هنوز ۶×۴ کارتِ پشت‌رو است');
+  ok(kb0.flat().every((b, i) => b.callback_data === `pick:${i}`),
+    'callback_data خانه‌ها دست‌نخورده است (دکمه‌ی کهنه نمی‌میرد)');
+  // ✨ دیگر نشانه‌ی انتخاب نیست، فقط فالبکِ دستِ بی‌رنگ (لحظه‌ی دیپلوی).
+  ok(pickGridKb([9], []).reply_markup.inline_keyboard.flat()[9].text === '✨',
+    'دستِ بدونِ رنگ (وسطِ دیپلوی) به ✨ برمی‌گردد، نه دکمه‌ی بی‌متن');
+  ok(!/picks\.includes\(i\)\s*\?\s*'✨'/.test(SRC),
+    'نشانه‌ی ثابتِ ✨ از گریدِ فالِ پولی برداشته شده');
+  // گریدِ **کارتِ روزِ رایگان** عمداً دست‌نخورده است (خواسته‌ی مالک فقط گریدِ فال بود).
+  ok(/dpick:/.test(SRC) && /=== picked \? '✨'/.test(SRC),
+    'گریدِ کارتِ روز عمداً همان ✨ را نگه داشته');
+
+  // هر سه نقطه‌ی رندرِ گرید باید رنگ بگیرند، وگرنه یکی‌شان ✨ نشان می‌دهد.
+  // ⚠️ خودِ **تعریفِ** تابع از شمارش بیرون است، وگرنه امضایش به‌عنوان یک نقطه‌ی رندر
+  // شمرده می‌شود و عددِ ادعا بی‌معنی می‌ماند.
+  const calls = (SRC.match(/(?<!function )pickGridKb\([^)]*\)/g) || []);
+  ok(calls.length === 3, `دقیقاً سه نقطه‌ی رندرِ گرید (${calls.length})`);
+  ok(calls.every(c => /pickHearts\(|hearts\)/.test(c)),
+    'هر سه نقطه رنگ‌ها را پاس می‌دهند (هیچ مسیری ✨ نمی‌ماند)');
+}
+
 console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جواب نمی‌ماند');
 {
   // ⚠️ منطق **از سورس بریده و اجرا** می‌شود، نه بازنویسی. یک ادعای رجکسی («رشته‌ی
@@ -1283,11 +1406,12 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
     'قفلِ confirm_pay قبل از اولین await است (ضدِ دوبار-تپ)');
 
   const run = new Function('ctx', 'deps', `
-    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, finishPicking } = deps;
+    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, pickHearts, finishPicking } = deps;
     return (async () => {${body}})();
   `);
   const scenario = async (state, picks, need, tap) => {
-    const log = { cb: [], editKb: 0, editText: null, finished: false, state, session: { picks: [...picks], need } };
+    const log = { cb: [], editKb: 0, editText: null, finished: false, state,
+                  session: { picks: [...picks], need, seed: 'r:7:1:1' } };
     const ctx = {
       from: { id: 7 }, match: [null, String(tap)],
       answerCbQuery: (text, extra) => { log.cb.push({ text, extra }); return Promise.resolve(); },
@@ -1298,6 +1422,9 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
       getState: () => log.state, getSession: () => log.session,
       setState: (_u, v) => { log.state = v; }, setSession: (_u, v) => { log.session = v; },
       L, USER_PICKS: 3, pickGridKb: () => ({ reply_markup: 'KB' }),
+      // ⚠️ `pickHearts`ِ **واقعی** پاس داده می‌شود، نه یک استاب: ادعای «toast همان رنگی
+      // است که روی خانه نشست» فقط با تابعِ تولیدی معنی دارد.
+      pickHearts: HEARTS.pickHearts,
       finishPicking: async () => { log.finished = true; },
     });
     return log;
@@ -1317,8 +1444,9 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
 
   // ۳) انتخابِ عادیِ وسطِ راه: گرید به‌روز می‌شود و متن دست نمی‌خورد.
   const mid = await scenario('picking', [4], 3, 8);
-  ok(said(mid) === '✨' && mid.editKb === 1 && mid.editText === null,
-    'انتخابِ وسطِ راه فقط کیبورد را به‌روز می‌کند');
+  // toast دیگر ✨ نیست: **همان قلبی** است که روی خانه نشست (نوبتِ دوم ⟵ رنگِ دوم).
+  ok(said(mid) === HEARTS.pickHearts('r:7:1:1', 3)[1] && mid.editKb === 1 && mid.editText === null,
+    'انتخابِ وسطِ راه فقط کیبورد را به‌روز می‌کند و toast همان رنگِ نشسته است');
   ok(!mid.finished && mid.state === 'picking', 'وسطِ راه هنوز picking است');
 
   // ۴) آخرین انتخاب: **کیبورد برداشته می‌شود** (متن جایگزین می‌شود) تا گریدِ مرده در چت
