@@ -336,6 +336,10 @@ console.log('\n▶ گاردِ جنسیت: تصمیمِ واقعی روی جمل�
       ['У тебя не получалось отпустить.', false],
       ['Тебя не отпускало это чувство.', false],
       ['Вы оба ждали слишком долго.', false],
+      /* دو کلاسی که تا ۱۴۰۵/۰۶/۱۲ نامرئی بودند و ممیزیِ محتوا نمونه‌ی واقعی‌شان را
+       * در گنجینه پیدا کرد، در حالی که CI سبز بود (بند ۲و/۶ب-۲ ریشه). */
+      ['Напомни себе, чего ты добиваешься сам.', true],       // فعل بینِ «ты» و واژه‌ی جنسیت‌دار
+      ['Он добился всего сам.', false],                       // «сам» که به کسِ دیگری برمی‌گردد
     ],
     es: [
       // سه‌تای اول عیناً از خروجیِ دورهای واقعی
@@ -359,12 +363,40 @@ console.log('\n▶ گاردِ جنسیت: تصمیمِ واقعی روی جمل�
       /* و ادعای معکوس: خودِ صفتِ جنسیت‌دار بعد از همان ساختار باید همچنان گرفته شود،
        * وگرنه «رفعِ ایرادِ کاذب» بی‌صدا به یک **منفیِ کاذب** تبدیل می‌شود. */
       ['Te habían dejado sola con todo.', true],
+      /* ⚠️ کلاس‌هایی که تا ۱۴۰۵/۰۶/۱۲ گارد **ساختاراً** نمی‌دیدشان و ممیزیِ محتوا
+       * ۴۹ نمونه‌ی واقعی‌شان را در گنجینه پیدا کرد، در حالی که CI سبز بود. هرکدام
+       * عیناً از فایلِ واقعی برداشته شده. اگر الگو دوباره تنگ شود، این‌ها قرمز می‌دهند. */
+      ['Sentirte atrapado no es algo que soportes.', true],   // مصدرِ انعکاسی
+      ['Quedarte quieto no te resulta natural.', true],
+      ['Sigues empujando aunque estés agotado.', true],       // وجهِ التزامی
+      ['La jaula existe porque tú mismo sostienes la cadena.', true],
+      ['Dedica ese cuidado hacia ti mismo.', true],
+      ['Esa idea que te tiene tan entusiasmado.', true],      // قید بینِ فعل و صفت
+      ['Odias sentirte atado a algo.', true],                 // صفتِ کوتاه: at+ad+o
+      ['Prefieres cargar tú solo con todo.', true],           // «tú solo» نه «solo»ی قیدی
+      ['Quédate abierto a un mensaje inesperado.', true],     // امر
+      /* و سه ادعای معکوس، وگرنه پهن‌کردنِ الگو بی‌صدا به قرمزِ کاذب تبدیل می‌شود.
+       * «firme» در اسپانیایی بی‌جنسیت است و یک بار همین‌جا قرمزِ کاذب داد. */
+      ['Mantente firme en la posición que tomaste.', false],
+      ['Quieres resolver rápido cada asunto.', false],        // «rápido» قیدی
+      ['Quédate con lo que ya funciona.', false],
     ],
     pt: [
       ['Você tá carregando muita coisa sozinha.', true],   // از خروجیِ دورِ واقعی
       ['Você está cansada disso.', true],
       ['Você se sente perdido no meio.', true],
       ['Isso te deixa cansado.', true],
+      /* همان کلاسِ نامرئی در پرتغالی (۱۴۰۵/۰۶/۱۲). عمداً فقط شکل‌های **بدونِ ابهام**
+       * اضافه شدند: شاخه‌ی عمومیِ «ficar/estar + صفت» روی فایلِ واقعی ۲۹ قرمزِ کاذب
+       * می‌داد چون فاعلش شیء بود، و این الگوها در پروداکشن هم اجرا می‌شوند. */
+      ['A corrente foi você mesmo quem colocou.', true],
+      ['Ele cobra de si mesmo o mesmo tanto.', true],
+      ['Você odeia se sentir amarrado.', true],
+      ['Mesmo cansado, não solta a guarda.', true],
+      // ادعاهای معکوس: فاعلِ صفت شیء است، نه خواننده
+      ['Uma decisão está travada há semanas.', false],
+      ['A rotina fica parada demais.', false],
+      ['Responda a mensagem que está parada.', false],
       ['Você já está preparada pra isso.', true],
       ['Esse trabalho te paga rápido.', false],            // همان کلاسِ کاذبِ اسپانیایی
       ['Você resolve rápido quando quer.', false],
@@ -391,6 +423,33 @@ console.log('\n▶ گاردِ جنسیت: تصمیمِ واقعی روی جمل�
       `گاردِ جنسیتِ «${lang}» هر ${cases.length} جمله را درست تصمیم می‌گیرد` +
       (wrong.length ? ` — ${wrong.join(' | ')}` : got.length ? '' : ' (اجرا نشد)'));
   }
+
+  /* ⚠️ «رسمی بودن» در روسی دو شکل دارد و گارد تا ۱۴۰۵/۰۶/۱۲ فقط یکی را می‌دید.
+   * شکلِ دوم هیچ ضمیری ندارد («цените»)، پس یک نقضِ صریحِ قاعده‌ی «همیشه ты» در
+   * فایلِ گنجینه نشسته بود و CI سبز بود. جدولِ بالا این را نمی‌گیرد چون آن‌جا فقط
+   * ضعفِ genderedPast اجرا می‌شود. */
+  const FORMAL_RU = [
+    ['Скажи прямо, что цените в этих отношениях.', true],
+    ['Сегодня подумайте об этом ещё раз.', true],
+    ['Вы уже знаете ответ.', true],
+    ['Скажи это вслух сегодня.', false],
+    ['Ты ценишь эти отношения.', false],
+    ['Между вами двумя всё честно.', false],
+  ];
+  const rf = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const { DEFECTS } = await import('${new URL('repair.js', DIR).pathname}');
+    const g = DEFECTS.find(d => d.id === 'formal');
+    if (!g) { console.log('MISSING'); process.exit(0); }
+    const cases = ${JSON.stringify(FORMAL_RU)};
+    console.log(JSON.stringify(cases.map(([t]) => !!(g && g.find(t)))));
+  `], { encoding: 'utf8', env: { ...process.env, LOCALE: 'ru' } });
+  let gotF = [];
+  try { gotF = JSON.parse(rf.stdout.trim().split('\n').pop()); } catch {}
+  const wrongF = FORMAL_RU.filter((c, i) => gotF[i] !== c[1])
+    .map(c => `«${c[0]}» ${c[1] ? 'گرفته نشد' : 'ایرادِ کاذب'}`);
+  ok(gotF.length === FORMAL_RU.length && wrongF.length === 0,
+    `گاردِ «formal» روسی هر ${FORMAL_RU.length} جمله را درست تصمیم می‌گیرد` +
+    (wrongF.length ? ` — ${wrongF.join(' | ')}` : gotF.length ? '' : ' (اجرا نشد)'));
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ دادهٔ زبانی: ${pass} پاس، 0 خطا`);
