@@ -36,7 +36,7 @@ on:
         description: 'کلید ربات در marketing/registry.json (مثل tarot یا tabir-khab)'
         required: true
       chat:
-        description: 'مقصد پست: @channelusername یا آی‌دی عددی (برای post؛ خالی = فیلد chat خود فایل پست)'
+        description: 'مقصد: @channelusername یا آی‌دی عددی (برای post/poll؛ خالی = فیلد chat خود فایل). برای chat-info می‌شود چند کانال با کاما داد'
         required: false
         default: ''
       path:
@@ -315,11 +315,28 @@ jobs:
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
           esac
           [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
-          case "$MKT_CHAT" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ chat نامعتبر: «$MKT_CHAT»"; exit 1;; esac
-          CNT=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChatMemberCount" -d chat_id="$MKT_CHAT")
-          echo "getChatMemberCount($MKT_CHAT): $(printf '%s' "$CNT" | jq -r 'if .ok then .result else ("❌ " + (.description // "خطا")) end')"
-          INF=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChat" -d chat_id="$MKT_CHAT")
-          printf '%s' "$INF" | jq -r 'if .ok then "title: \(.result.title // "-")   type: \(.result.type)" else ("❌ " + (.description // "خطا")) end'
+          # چند کانال با کاما: یک جاب به‌جای N جاب (سهمیه‌ی Actions per **جاب** حساب می‌شود، بند ۳ج).
+          ME=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getMe" | jq -r '.result.id // empty')
+          IFS=',' read -ra CHATS <<< "$MKT_CHAT"
+          for C in "${CHATS[@]}"; do
+            C="$(printf '%s' "$C" | tr -d '[:space:]')"
+            case "$C" in (@[A-Za-z0-9_]*|-100[0-9]*) ;; (*) echo "❌ chat نامعتبر: «$C»"; continue;; esac
+            echo "───────── $C ─────────"
+            CNT=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChatMemberCount" -d chat_id="$C")
+            echo "  ممبر: $(printf '%s' "$CNT" | jq -r 'if .ok then .result else ("❌ " + (.description // "خطا")) end')"
+            INF=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChat" -d chat_id="$C")
+            printf '%s' "$INF" | jq -r 'if .ok then
+                "  عنوان: \(.result.title // "-")\n  نوع: \(.result.type)\n  یوزرنیم: @\(.result.username // "-")\n  بایو: \(.result.description // "(خالی)")"
+              else ("❌ " + (.description // "خطا")) end'
+            # حقوقِ خودِ ربات: بدونِ can_change_info نه عنوان قابلِ تغییر است نه بایو، و
+            # setChatTitle/setChatDescription بی‌صدا خطا می‌دهند. بهتر است **قبل** از قول دادن بدانیم.
+            if [ -n "$ME" ]; then
+              MEM=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChatMember" -d chat_id="$C" -d user_id="$ME")
+              printf '%s' "$MEM" | jq -r 'if .ok then
+                  "  ربات: \(.result.status)   can_change_info=\(.result.can_change_info // false)   can_post=\(.result.can_post_messages // false)   can_invite=\(.result.can_invite_users // false)"
+                else ("  ربات: ❌ " + (.description // "خطا")) end'
+            fi
+          done
 
       - name: Get bot username (getme)
         if: inputs.action == 'getme'
