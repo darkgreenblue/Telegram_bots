@@ -63,6 +63,12 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-support-sync.mjs
 
+      # امضای initData مینی‌اپ: تنها دروازه‌ی هویت در مسیرِ وب. بیشترِ ادعاهایش منفی‌اند،
+      # چون ضعیف‌شدنِ سهویِ این تابع هیچ خطا و هیچ لاگی نمی‌سازد.
+      - name: Mini App initData signature check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-initdata.mjs
+
       # شناسه‌های تعریف‌نشده: `node --check` فقط سینتکس را می‌بیند و boot smoke test فقط تا
       # گاردِ ENV می‌رود، پس یک import گمشده روی مسیرِ سرد (رسید، ریفاند، ادمین) تا لحظه‌ی
       # اجرا نامرئی می‌ماند. باگِ واقعی: decideReceipt که یک روز تأییدِ خودکارِ رسید را خواباند.
