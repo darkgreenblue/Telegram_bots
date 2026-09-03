@@ -172,7 +172,11 @@ console.log('\n▶ بسته‌های خریدِ سکه');
   ok(/ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''/.test(SRC), 'ستونِ pkg افزایشی با پیش‌فرضِ خالی');
   // فاکتورِ بسته باید مبلغِ **پرداختی** را نشان بدهد نه ارزشِ سکه‌ها
   ok(/L\.wallet\.invoice\(pack\.toman, CARD_NUMBER, CARD_OWNER\)/.test(SRC), 'فاکتور، قیمتِ واقعیِ بسته را نشان می‌دهد');
-  ok(/stmts\.claimAmount\.run\(pack\.coins, s\.paymentId\)/.test(SRC),
+  // ⚠️ شناسه‌ی فاکتور در v3.51.0 از `s.paymentId` به متغیرِ محلیِ `payId` رفت (چون مسیر
+  // حالا روی ردیفِ مرده یک ردیفِ زنده باز می‌کند). چیزی که این ادعا واقعاً قفل می‌کند
+  // **آرگومانِ اولِ** claimAmount است، یعنی همان عددی که به اعتبارِ کاربر تبدیل می‌شود؛
+  // پس فقط نامِ شناسه آزاد شد و نیمه‌ی پولی سفت ماند.
+  ok(/stmts\.claimAmount\.run\(pack\.coins, \w+\)/.test(SRC),
     'اعتبارِ داده‌شده = خودِ تعدادِ الماسِ بسته (original_amount)');
 }
 

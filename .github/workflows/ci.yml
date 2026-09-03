@@ -263,6 +263,10 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-llm-cost.mjs
 
+      - name: Payment row lifetime check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-pay-rows.mjs
+
       - name: Fallback chain check
         if: matrix.bot == 'tarot'
         run: node tools/check-fallbacks.mjs

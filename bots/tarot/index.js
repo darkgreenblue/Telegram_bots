@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.50.0';
+const PRODUCT_VERSION = '3.51.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -560,6 +560,23 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 const WELCOME_BONUS    = 30_000;
 const QUICK_AMOUNTS    = [50_000, 100_000, 200_000];
 const MIN_RECHARGE     = 10_000;  // کف‌گیرِ اشتباهِ تایپی (پایین‌تر از ارزان‌ترین فال)
+
+/* ♻️ عمرِ ردیفِ پرداخت — دو عدد با دو معنیِ کاملاً متفاوت.
+ *
+ * `PAY_ROW_REUSE_SEC`: تا این مدت، تپِ دوباره‌ی «خرید الماس» **همان** ردیف را ادامه
+ * می‌دهد و ردیفِ نو نمی‌سازد. تا امروز هر تپ یک `INSERT` بود، پس کاربری که منو را باز
+ * می‌کرد و برمی‌گشت، پشتِ سرش ردیف‌های `pending/amount` با `amount=0` جا می‌گذاشت که
+ * هیچ مسیری دیگر سراغشان نمی‌رفت. روی دیتای زنده اندازه‌گیری شد: از ۲۵۱ ردیفِ پرداخت،
+ * ۲۵ تا دقیقاً همین بودند (هر ۲۵ تا `amount=0`).
+ *
+ * `RECEIPT_RECOVERY_SEC`: پنجره‌ای که رسیدِ بی‌استیت (کاربر بعد از فاکتور /start زده)
+ * هنوز به فاکتورش وصل می‌شود. **تک‌منبع است** و هم مسیرِ بازیابیِ رسید از آن می‌خواند
+ * هم جاروی ردیف‌های مرده. اگر دو عددِ جدا بودند، پهن‌کردنِ پنجره‌ی بازیابی بی‌صدا باعث
+ * می‌شد جارو ردیف‌هایی را بکشد که هنوز قابلِ استفاده‌اند، یعنی پولِ واریزشده‌ی کاربر در
+ * سیاه‌چاله بیفتد. همین جفت‌بودن است که جارو را اثباتاً بی‌خطر می‌کند: چیزی که جارو
+ * می‌بندد، آن کوئری از قبل پیدایش نمی‌کند. */
+const PAY_ROW_REUSE_SEC    = 15 * 60;
+const RECEIPT_RECOVERY_SEC = 3 * 24 * 3600;
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
 // 🛑 هدیه‌ی شارژِ نسلِ تومانی. در دنیای الماس مسیرِ شارژِ آزاد بسته است (فقط بسته)
 // و این آستانه‌ها تومانی‌اند، پس روی عددِ الماسی بی‌معنی می‌شدند. خالی = خاموش.
@@ -1059,7 +1076,15 @@ const stmts = {
   // کسرِ اعتبارِ برگشتی، اما هرگز زیرِ صفر (مصرف‌شده تا آن لحظه اشکالی ندارد)
   clawback: db.prepare('UPDATE users SET balance = MAX(0, balance - ?) WHERE telegram_id=?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
-  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-259200 ORDER BY id DESC LIMIT 1"),
+  pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-? ORDER BY id DESC LIMIT 1"),
+  /* ♻️ ردیفی که می‌شود دوباره ادامه‌اش داد: همین کاربر، تازه، هنوز روی قدمِ انتخابِ
+   * بسته و دست‌نخورده (`amount=0`). شرطِ `amount=0` اضافه است ولی عمدی: هیچ ردیفی که
+   * عددِ پولی رویش نشسته نباید هرگز از این مسیر برگردد. */
+  reusablePending: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='amount' AND amount=0 AND created_at > unixepoch()-? ORDER BY id DESC LIMIT 1"),
+  /* 🧹 جاروی ردیف‌های مرده. هر دو کوئری فقط `status='pending'` را می‌بندند، پس
+   * `waiting_review` / `approved` / `rejected` / `reversed` **هرگز** لمس نمی‌شوند. */
+  sweepDeadAmountRows: db.prepare("UPDATE payments SET status='canceled', updated_at=unixepoch() WHERE status='pending' AND step='amount' AND amount=0 AND created_at < unixepoch()-?"),
+  sweepDeadReceiptRows: db.prepare("UPDATE payments SET status='canceled', updated_at=unixepoch() WHERE status='pending' AND step='receipt' AND receipt_file_id IS NULL AND created_at < unixepoch()-?"),
   staleReceipts: db.prepare("SELECT * FROM payments WHERE status='waiting_review' AND updated_at < unixepoch()-7200 AND (reminded_at IS NULL OR reminded_at < unixepoch()-14400) ORDER BY id"),
   setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
   pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
@@ -4682,6 +4707,19 @@ bot.action('want_discount', async (ctx) => {
  *
  * ⚠️ `peekVariant` و نه `variant`: قیمت این‌جا **دیده** می‌شود، پس exposure را فراخوان
  * بعد از رسیدنِ واقعیِ پیام ثبت می‌کند (قاعده‌ی آهنینِ بند ۲الف ریشه). */
+/** ♻️ ردیفِ پرداختِ باز برای این کاربر: اگر ردیفِ تازه و دست‌نخورده‌ای هست همان،
+ *  وگرنه یک ردیفِ نو. برمی‌گرداند `{ id, fresh }`.
+ *
+ *  ⚠️ `fresh` فقط برای **رویداد** است، نه برای رفتار: `recharge_started` تنها وقتی
+ *  ثبت می‌شود که واقعاً یک تلاشِ تازه شروع شده باشد. این دقیقاً همان قاعده‌ای است که
+ *  `pay_cancel` از قبل داشت («این ادامه‌ی همان تلاش است، نه یک شروعِ تازه، و شمردنش
+ *  قیف را باد می‌کند») و حالا مسیرِ `recharge` هم همان را رعایت می‌کند. */
+function openPaymentRow(uid) {
+  const reuse = stmts.reusablePending.get(uid, PAY_ROW_REUSE_SEC);
+  if (reuse) return { id: reuse.id, fresh: false };
+  return { id: Number(stmts.insertPayment.run(uid).lastInsertRowid), fresh: true };
+}
+
 function packMenuScreen(uid, paymentId) {
   const cur = curOf(uid);
   const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
@@ -4697,8 +4735,8 @@ bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
-  const paymentId = Number(stmts.insertPayment.run(uid).lastInsertRowid);
-  track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
+  const { id: paymentId, fresh } = openPaymentRow(uid);
+  if (fresh) track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
   patchSession(uid, { paymentId });
   // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
@@ -4790,9 +4828,25 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     logErr('stars: no price for pack', pack.key);
     return ctx.reply(L.errors.generic).catch(() => {});
   }
-  // ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت)
-  if (stmts.claimAmount.run(pack.coins, s.paymentId).changes === 0) return;
-  stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, s.paymentId);
+  /* ادعای اتمیک قبل از هر await (ضدِ دوبار-تپ روی دو بسته‌ی متفاوت).
+   *
+   * ⚠️ شکستِ ادعا **دو معنیِ کاملاً متفاوت** دارد و تا امروز هر دو یک `return`ِ بی‌صدا
+   * می‌گرفتند. معنیِ اول واقعاً باید ساکت بماند (تپِ هم‌زمانِ دوم). معنیِ دوم یعنی ردیف
+   * دیگر زنده نیست (جاروی ردیف‌های کهنه بسته‌اش، یا صفحه‌ی بسته‌ها از دیروز باز مانده)؛
+   * آن‌جا سکوت یعنی کاربر روی بسته می‌زند و هیچ اتفاقی نمی‌افتد و هیچ توضیحی هم نمی‌گیرد.
+   * پس به‌جای سکوت، یک ردیفِ زنده باز می‌شود و همان تپ کامل می‌شود. */
+  let payId = s.paymentId;
+  if (stmts.claimAmount.run(pack.coins, payId).changes === 0) {
+    const cur = stmts.getPayment.get(payId);
+    if (cur && cur.user_id === uid && cur.status === 'pending' && cur.step === 'receipt') return;
+    payId = openPaymentRow(uid).id;
+    patchSession(uid, { paymentId: payId });
+    if (stmts.claimAmount.run(pack.coins, payId).changes === 0) {
+      logErr('pkg: claim failed on fresh row', payId);
+      return ctx.reply(L.errors.generic).catch(() => {});
+    }
+  }
+  stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, payId);
   /* کیبوردِ صفحه‌ی بسته‌ها **حذف** نمی‌شود، به یک دکمه‌ی «انصراف» تبدیل می‌شود.
    *
    * چرا: فاکتورِ استارز باید دکمه‌ی **بومیِ** تلگرام را داشته باشد تا لوگوی واقعیِ
@@ -4803,7 +4857,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (packMsgId) patchSession(uid, { packMsgId });
   try {
     await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(
-      [[Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)]],
+      [[Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)]],
     ).reply_markup);
   } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
 
@@ -4815,7 +4869,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * خودِ رکوردِ `pending` کار می‌کند، نه از روی استیت. */
   if (starsRail) {
     const base = {
-      pack, stars, paymentId: s.paymentId, userId: uid,
+      pack, stars, paymentId: payId, userId: uid,
       title: L.wallet.starsInvoiceTitle(pack),
       description: L.wallet.starsInvoiceDesc(pack, stars),
     };
@@ -4843,7 +4897,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
-      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)],
     ]).reply_markup,
   });
 });
@@ -4909,7 +4963,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
    * نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه، و شمردنش قیف را باد می‌کند. */
   if (coinsOn(uid)) {
     const s0 = getSession(uid);
-    const fresh = Number(stmts.insertPayment.run(uid).lastInsertRowid);
+    const { id: fresh } = openPaymentRow(uid);
     setState(uid, 'pay_amount');
     patchSession(uid, { paymentId: fresh, invoiceMsgId: null });
     const [text, extra] = packMenuScreen(uid, fresh);
@@ -5417,8 +5471,41 @@ setInterval(async () => {
       stmts.markActionDone.run(act.id);
     }
     for (const p of stmts.staleReceipts.all()) await resendReceiptToAdmins(p);
+    sweepDeadPaymentRows();
   } catch (e) { logErr('payment sweep:', e.message); }
 }, 60_000);
+
+/* 🧹 بستنِ ردیف‌های پرداختی که **هیچ مسیری دیگر به آن‌ها نمی‌رسد**.
+ *
+ * چرا لازم شد: تا امروز ردیفِ `pending` هرگز بسته نمی‌شد مگر با انصرافِ صریحِ کاربر،
+ * پس جدول پر از فاکتورِ رهاشده می‌ماند. اندازه‌گیری روی دیتای زنده (۲۵۱ ردیف): ۲۱ ردیفِ
+ * `amount` بالای ۲۴ ساعت و ۱۹ ردیفِ `receipt` بالای ۷۲ ساعت، یعنی حدودِ ۱۸٪ جدول مرده
+ * بود. ضررش فقط شلوغی نیست: سه کاربر هم‌زمان بیش از یک ردیفِ باز داشتند، و مسیرِ
+ * بازیابیِ رسید «آخرین» را برمی‌دارد.
+ *
+ * 🔒 چرا اثباتاً بی‌خطر است (نه «احتمالاً»):
+ *   • فقط `status='pending'` بسته می‌شود. `waiting_review` (رسیدِ ثبت‌شده‌ی منتظرِ
+ *     تأیید)، `approved`، `rejected` و `reversed` **هرگز** لمس نمی‌شوند — همان قاعده‌ی
+ *     بند ۹ب/۳ که می‌گوید رسیدِ ثبت‌شده با یک تپ لغو نمی‌شود، چه رسد به یک جارو.
+ *   • شاخه‌ی `amount`: شرطِ `amount=0` یعنی هیچ ردیفی که عددِ پولی رویش نشسته انتخاب
+ *     نمی‌شود. این ردیف‌ها حتی به مرحله‌ی دیدنِ قیمت هم نرسیده‌اند.
+ *   • شاخه‌ی `receipt`: مرزش **همان** `RECEIPT_RECOVERY_SEC` است که `pendingReceiptPayment`
+ *     با آن می‌گردد، پس هر ردیفی که این‌جا بسته می‌شود از قبل برای آن کوئری نامرئی بوده.
+ *     یعنی صفر ردیفِ قابلِ استفاده کشته می‌شود، نه «کم». به‌علاوه `receipt_file_id IS NULL`:
+ *     اگر کاربر عکسی فرستاده باشد، ردیف اصلاً کاندیدِ جارو نیست.
+ *   • تپِ کاربر روی یک صفحه‌ی کهنه دیگر بی‌صدا نمی‌میرد: مسیرِ `pkg:` حالا ردیفِ مرده را
+ *     تشخیص می‌دهد و یک ردیفِ زنده باز می‌کند.
+ *
+ * رول‌بک: `PAY_ROW_SWEEP = false`. */
+const PAY_ROW_SWEEP = true;
+function sweepDeadPaymentRows() {
+  if (!PAY_ROW_SWEEP) return;
+  try {
+    const a = stmts.sweepDeadAmountRows.run(24 * 3600).changes;
+    const r = stmts.sweepDeadReceiptRows.run(RECEIPT_RECOVERY_SEC).changes;
+    if (a || r) log(`🧹 ردیفِ پرداختِ مرده بسته شد: ${a} انتخابِ بسته، ${r} فاکتورِ بی‌رسید`);
+  } catch (e) { logErr('pay row sweep:', e.message); }
+}
 
 /* ---------- ادمین: /stats و /newcode ---------- */
 bot.command('stats', (ctx) => {
@@ -5925,7 +6012,7 @@ bot.on('photo', async (ctx) => {
   let paymentId = (getState(uid) === 'pay_receipt' && s?.paymentId) ? s.paymentId : null;
   let recovered = false;
   if (!paymentId) {
-    const pend = stmts.pendingReceiptPayment.get(uid);
+    const pend = stmts.pendingReceiptPayment.get(uid, RECEIPT_RECOVERY_SEC);
     if (!pend) return; // عکسِ بی‌ربط به پرداخت — نادیده
     paymentId = pend.id; recovered = true;
   }
