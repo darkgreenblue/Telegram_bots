@@ -941,6 +941,9 @@ export default {
     draft: (code) => `${code}\n\nPor favor no borres este código y escribe tu mensaje abajo 👇\n`,
     // Corto y directo: solo el CTA y el código.
     body: (code) => `💬 Toca el botón de abajo y escribe tu mensaje; no borres este código:\n<code>${code}</code>`,
+    // 🧾 /paysupport — مسیرِ اختصاصیِ مشکلاتِ پرداخت. همان دکمه و همان کدِ پیگیری،
+    // فقط جمله‌ی اولش می‌گوید موضوع پول است تا کاربر مطمئن شود جای درستی آمده.
+    payBody: (code) => `🧾 ¿Algún problema con el pago? Toca el botón de abajo y cuéntanos qué pasó; no borres este código:\n<code>${code}</code>`,
   },
 
   // ⚙️ Menú de ajustes (v3.38.0) — todas las pantallas editan **un** solo mensaje, así el

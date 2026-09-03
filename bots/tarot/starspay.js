@@ -42,6 +42,38 @@ export function starsFor(packKey, ladder) {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+/** ⭐ برگرداندنِ استارزِ یک پرداخت به کاربر (`refundStarPayment`).
+ *
+ * چرا این جدا از `reversePayment` است: آن مسیر برای پرداختِ **جعلی** ساخته شده و
+ * کاربر را هم `distrust` می‌کند. ریفاندِ قانونی عکسِ آن است — کاربر کارِ اشتباهی
+ * نکرده، فقط پولش را پس می‌خواهد.
+ *
+ * ⚠️ ترتیب عمدی است: **اول تلگرام، بعد دیتابیس.** اگر اول اعتبار را پس بگیریم و
+ * بعد ریفاند شکست بخورد، کاربر هم الماسش را از دست داده هم استارزش را. با این
+ * ترتیب، بدترین حالت این است که استارز برگشته ولی الماس هم دستش مانده؛ یعنی
+ * شکست به نفعِ کاربر تمام می‌شود، نه به ضررش (بند ۹ ریشه: پولِ کاربر هرگز در
+ * حالتِ نامعلوم نمی‌ماند).
+ *
+ * برمی‌گرداند: `{ ok: true, p }` یا `{ ok: false, reason }`.
+ */
+export async function refundStars(telegram, { getPayment, markRefunded, paymentId }) {
+  const p = getPayment(paymentId);
+  if (!p) return { ok: false, reason: 'not_found' };
+  if (p.status !== 'approved') return { ok: false, reason: `status:${p.status}` };
+  if (!p.charge_id) return { ok: false, reason: 'no_charge_id' };
+  try {
+    await telegram.callApi('refundStarPayment', {
+      user_id: p.user_id,
+      telegram_payment_charge_id: p.charge_id,
+    });
+  } catch (e) {
+    return { ok: false, reason: `telegram:${e.message}` };
+  }
+  // تلگرام استارز را برگرداند؛ حالا دفترِ خودمان را هم‌راستا کن.
+  const done = markRefunded(p.id);
+  return { ok: true, p, clawed: done?.back ?? 0, ledger: !!done };
+}
+
 /* payload تنها ریسمانِ بینِ فاکتور و کالِ‌بکِ پرداخت است. عمداً کوتاه و ساختاریافته
  * است (سقفِ ۱۲۸ بایتِ تلگرام) و **شناسه‌ی کاربر را هم در خود دارد**، چون هنگام
  * successful_payment باید مالکیتِ رکورد را چک کنیم و نه فقط وجودش را (بند ۹). */

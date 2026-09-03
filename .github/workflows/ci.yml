@@ -264,6 +264,7 @@ jobs:
         run: |
           cd bots/dashboard && npm ci --silent && cd ../..
           node tools/check-admin-coins.mjs
+          node tools/check-marketing-scope.mjs
 
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
@@ -277,6 +278,11 @@ jobs:
       - name: Stars payment parity check
         if: matrix.bot == 'tarot'
         run: node tools/check-pay-parity.mjs
+
+      # ریفاندِ استارز: ترتیبِ «اول تلگرام، بعد دفتر» + /paysupport در هر چهار زبان
+      - name: Stars refund and paysupport check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-refund.mjs
 
       - name: Fallback chain check
         if: matrix.bot == 'tarot'
