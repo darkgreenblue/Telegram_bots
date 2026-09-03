@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.53.0';
+const PRODUCT_VERSION = '3.54.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -264,6 +264,16 @@ const NAV_GUARD_ENABLED = true;
 // (insert در finishPicking + پی‌وال + کسر در unlock:) بدونِ اینکه بقیه‌ی UX v2 خاموش شود.
 const PAY_AT_SIZE = true;
 const payAtSizeFor = (uid) => PAY_AT_SIZE && uxV2For(uid);
+
+/* 💎 انصرافِ کاربر بعد از کسر، پول را برنمی‌گرداند (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۱۲).
+   «کاربر با دادنِ الماس ربات را استخدام کرده»: از همان لحظه محصول رزرو شده و از v3.53.0
+   کارت‌ها کشیده و مدل هم اغلب هزینه‌اش را گرفته است. پس منصرف‌شدنِ **خودِ کاربر** دلیلِ
+   برگرداندنِ پول نیست.
+   ⚠️ ریفاند حذف نشد، فقط به جای درستش محدود شد: **خرابیِ خودمان** همچنان کامل برمی‌گردد —
+   شکستِ کاملِ مدل بعد از همه‌ی فالبک‌ها (`startReveal`) و یتیمِ ری‌استارتِ وسطِ فراخوانی
+   (`recoverOrphanReadings`). آن دو مسیر عمداً به این پرچم وصل **نیستند**.
+   رول‌بکِ یک‌خطی: `true` → دقیقاً رفتارِ v3.53.0 (ریفاندِ لغو + جاروی ۲۴ساعته‌ی رهاشده). */
+const REFUND_ON_CANCEL = false;
 
 // 🧭 ثبتِ خودکارِ مسیرِ ریزِ کاربر (shared/journey.js): هر پیامِ خروجی (`view`) و هر اکشنِ ورودی
 // (`act`) ثبت می‌شود تا در داشبورد بشود دید کاربر دقیقاً پشتِ کدام پیام/دکمه ریخته است.
@@ -1776,13 +1786,24 @@ const payForSpread = db.transaction((uid, spread, focusKey) => {
   return id;
 });
 
-/** لغوِ یک فالِ نیمه‌کاره. اگر پول داده شده، **کامل** برمی‌گردد. فالِ started/delivered
- *  هرگز دست نمی‌خورد. خروجی: مبلغی که برگشت (۰ یعنی چیزی برنگشت). */
+/** لغوِ یک فالِ نیمه‌کاره. فالِ هنوز-پرداخت‌نشده فقط canceled می‌شود؛ فالِ **پرداخت‌شده**
+ *  terminal می‌شود ولی پولش برنمی‌گردد (`REFUND_ON_CANCEL`). فالِ started/delivered هرگز
+ *  دست نمی‌خورد. خروجی: مبلغی که برگشت — با پرچمِ فعلی همیشه ۰، پس هر سه نقطه‌ی لغو که
+ *  شرطِ `if (back)` دارند خودبه‌خود دیگر پیامِ «پولت برگشت» نمی‌فرستند (هیچ متنی عوض نشد). */
 function cancelReading(uid, readingId) {
   const r = readingId && stmts.getReading.get(readingId);
   if (!r || r.user_id !== uid) return 0;
   if (r.status === 'pending_payment') { stmts.setReadingStatus.run('canceled', readingId); return 0; }
   if (r.status !== 'paid') return 0;
+  // 💎 پولِ کسرشده مالِ ماست، ولی خودِ فال حتماً باید terminal شود: کاربر بعد از تپِ
+  // «انصراف» نباید پشتِ گاردِ «یه فالِ باز داری» گیر کند (بند ۹ب: هیچ صفحه‌ای بن‌بست نیست).
+  // رویدادِ **افزایشیِ** `reading_forfeited` جای `refund` را می‌گیرد، وگرنه شمارنده‌ی ریفاندِ
+  // داشبورد پولی را گزارش می‌کرد که هرگز برنگشته (بند ۲ج/۳: فقط اضافه کن).
+  if (!REFUND_ON_CANCEL) {
+    stmts.setReadingStatus.run('canceled', readingId);
+    track(db, uid, 'reading_forfeited', { reading_id: readingId, amount: r.price, reason: 'cancel' });
+    return 0;
+  }
   if (r.price > 0) stmts.credit.run(r.price, uid);
   stmts.setReadingStatus.run('refunded', readingId);
   track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'cancel' });
@@ -2020,20 +2041,27 @@ function recoverOrphanReadings() {
 // عمداً **فقط رکوردهای کهنه‌تر از یک شبانه‌روز** ریفاند می‌شوند — نه در بوت و نه زودتر —
 // چون استیت و سشن در DB اند و کاربرِ وسطِ نوشتنِ سؤال بعد از ری‌استارت ادامه می‌دهد؛
 // ریفاندِ زودهنگام فالش را از زیرِ پایش می‌کشید و بعد فالِ مجانی تحویل می‌داد.
-function refundAbandonedPaidReadings() {
+//
+// 💎 با `REFUND_ON_CANCEL = false` این جارو کاملاً no-op است، و این عمدی است نه فراموشی:
+// تنها کارش برگرداندنِ پول بود. حالا که پولِ رهاشده هم برنمی‌گردد، **بستنِ** آن رکورد
+// هیچ سودی ندارد و یک ضرر دارد — رکوردِ `paid` تنها چیزی است که کاربرِ برگشته می‌تواند
+// از سرش بگیرد و فالش را تمام کند (کارت‌ها و اغلب متنِ مدل از قبل رویش نشسته). یعنی
+// نبودنِ ریفاند با **حفظِ** حقِ کاربر جبران می‌شود، نه با نابود کردنش.
+function sweepAbandonedPaidReadings() {
+  if (!REFUND_ON_CANCEL) return;
   let rows = [];
   try {
     rows = db.prepare(
       "SELECT id, user_id, price FROM readings WHERE status='paid' AND created_at < unixepoch()-86400",
     ).all();
-  } catch (e) { logErr('refundAbandoned query:', e.message); return; }
+  } catch (e) { logErr('sweepAbandoned query:', e.message); return; }
   for (const r of rows) {
     try {
       if (r.price > 0) stmts.credit.run(r.price, r.user_id);
       stmts.setReadingStatus.run('refunded', r.id);
       track(db, r.user_id, EVENTS.REFUND, { reading_id: r.id, amount: r.price, reason: 'abandoned' });
       bot.telegram.sendMessage(r.user_id, L.reading.refundedOnCancel(r.price, curOf(r.user_id))).catch(() => {});
-    } catch (e) { logErr('refundAbandoned reading#' + r.id, e.message); }
+    } catch (e) { logErr('sweepAbandoned reading#' + r.id, e.message); }
   }
   if (rows.length) log(`♻️ ${rows.length} فالِ پرداخت‌شده‌ی رهاشده ریفاند شد`);
 }
@@ -3875,8 +3903,8 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   const readingId = parseInt(ctx.match[1], 10);
-  // 🪙 فالِ پرداخت‌شده (paid) این‌جا **ریفاند** می‌شود، نه فقط canceled — وگرنه از v2.6
-  // به بعد هر انصراف پولِ کاربر را می‌خورد.
+  // 🪙 فالِ پرداخت‌شده (paid) این‌جا terminal می‌شود ولی پولش برنمی‌گردد (v3.54.0،
+  // `REFUND_ON_CANCEL`). `back` صفر می‌ماند، پس پیامِ «پولت برگشت» هم نمی‌رود.
   const back = cancelReading(uid, readingId);
   setState(uid, 'idle');
   setSession(uid, null);
@@ -6245,9 +6273,9 @@ function launch() {
     .then(() => {
       log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
       recoverOrphanReadings();
-      refundAbandonedPaidReadings();
+      sweepAbandonedPaidReadings();
       // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
-      setInterval(refundAbandonedPaidReadings, 6 * 3600 * 1000);
+      setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
     })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
