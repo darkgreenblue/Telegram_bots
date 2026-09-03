@@ -7,6 +7,7 @@
 #   post          انتشار یک پست merge شده (marketing/<bot>/posts/*.json) در کانال با توکن خود ربات
 #   day-post      انتشار دستیِ «روزِ کامل» (هدر + ۱۲ پستِ تصویری) از فایل <YYYY-MM-DD>-day.json
 #   campaign-add  ثبت idempotent کد کمپین در platform.db داشبورد (تا در صفحه‌ی مارکتینگ قابل‌سنجش شود)
+#   set-info      ست کردنِ عنوان و بایوی کانال از marketing/<bot>/channel/*.json (نیازمندِ ادمینیِ ربات با Change Info)
 #   poll          انتشار نظرسنجی در کانال (marketing/<bot>/polls/*.json): متنِ زمینه‌ی اختیاری + sendPoll
 #   getme         چاپ username واقعی ربات (برای پر کردن رجیستری بدون حدس)
 #   delete        حذف پیام‌های خودِ ربات از کانال (Bot API فقط تا ۴۸ ساعت)
@@ -31,7 +32,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [post, day-post, poll, campaign-add, getme, chat-info, delete]
+        options: [post, day-post, poll, set-info, campaign-add, getme, chat-info, delete]
       bot:
         description: 'کلید ربات: tarot | tarot-ru | tarot-pt | tarot-es | tabir-khab (نگاشتِ توکن پایینِ همین فایل)'
         required: true
@@ -40,7 +41,7 @@ on:
         required: false
         default: ''
       path:
-        description: 'مسیر فایل در ریپو: پستِ marketing/<bot>/posts/*.json (برای post) یا نظرسنجیِ marketing/<bot>/polls/*.json (برای poll)'
+        description: 'مسیر فایل در ریپو: posts/*.json (post) | polls/*.json (poll) | channel/*.json (set-info)'
         required: false
         default: ''
       code:
@@ -66,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (main — فایل پست باید merge شده باشد)
-        if: inputs.action == 'post' || inputs.action == 'day-post' || inputs.action == 'poll'
+        if: inputs.action == 'post' || inputs.action == 'day-post' || inputs.action == 'poll' || inputs.action == 'set-info'
         uses: actions/checkout@v4
         with:
           ref: main
@@ -238,6 +239,78 @@ jobs:
             exit 1
           fi
           echo "✅ نظرسنجی منتشر شد: chat=$CHAT message_id=$(printf '%s' "$RESP" | jq -r '.result.message_id')"
+
+      # عنوان و بایوی کانال از یک فایلِ merge شده در ریپو، نه از ورودیِ آزادِ workflow.
+      # دلیل: متنِ رو-به-کاربر باید ریویو و نسخه‌بندی شود و بشود فهمید کِی و چرا عوض شد؛
+      # ورودیِ آزاد هیچ ردی در گیت نمی‌گذارد. مثل publish-day و poll، کلِ فایل قبل از
+      # ارسالِ اولین درخواست اعتبارسنجی می‌شود.
+      - name: Set channel title and description (set-info)
+        if: inputs.action == 'set-info'
+        env:
+          T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
+          T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
+          MKT_BOT:    ${{ inputs.bot }}
+          MKT_CHAT:   ${{ inputs.chat }}
+          MKT_PATH:   ${{ inputs.path }}
+        run: |
+          set -e
+          case "$MKT_BOT" in (*[!a-z0-9-]*|'') echo "❌ bot نامعتبر"; exit 1;; esac
+          case "$MKT_PATH" in
+            marketing/*/channel/*.json) ;;
+            *) echo "❌ path باید marketing/<bot>/channel/<file>.json باشد"; exit 1;;
+          esac
+          case "$MKT_PATH" in (*..*) echo "❌ path نامعتبر"; exit 1;; esac
+          [ -f "$MKT_PATH" ] || { echo "❌ فایل در main نیست: $MKT_PATH (اول merge کن)"; exit 1; }
+
+          case "$MKT_BOT" in
+            tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
+            tabir-khab) TOKEN="$T_TABIR_FA";;
+            *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده (این فایل را آپدیت کن)"; exit 1;;
+          esac
+          [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
+
+          CHAT="${MKT_CHAT:-$(jq -r '.chat // empty' "$MKT_PATH")}"
+          case "$CHAT" in
+            @[A-Za-z0-9_]*|-100[0-9]*) ;;
+            *) echo "❌ chat نامعتبر: «$CHAT»"; exit 1;;
+          esac
+
+          # ---- اعتبارسنجیِ کامل قبل از هر نوشتنی ----
+          TITLE=$(jq -r '.title // empty' "$MKT_PATH")
+          DESC=$(jq -r '.description // empty' "$MKT_PATH")
+          [ -n "$TITLE" ] || { echo "❌ فیلد title خالی است"; exit 1; }
+          TLEN=$(printf '%s' "$TITLE" | wc -m)
+          [ "$TLEN" -le 128 ] || { echo "❌ عنوان $TLEN کاراکتر است (سقف تلگرام 128)"; exit 1; }
+          DLEN=$(printf '%s' "$DESC" | wc -m)
+          [ "$DLEN" -le 255 ] || { echo "❌ بایو $DLEN کاراکتر است (سقف تلگرام 255)"; exit 1; }
+          echo "✔ اعتبارسنجی گذشت: عنوان $TLEN کاراکتر، بایو $DLEN کاراکتر، مقصد $CHAT"
+
+          # وضعیتِ قبلی چاپ می‌شود تا اگر لازم شد بشود دستی برگرداند (این تغییر رول‌بکِ خودکار ندارد)
+          OLD=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getChat" -d chat_id="$CHAT")
+          printf '%s' "$OLD" | jq -r 'if .ok then "قبلی → عنوان: \(.result.title // "-")\nقبلی → بایو: \(.result.description // "(خالی)")" else ("❌ getChat: " + (.description // "خطا")) end'
+
+          RESP=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/setChatTitle" \
+            -d chat_id="$CHAT" --data-urlencode title="$TITLE") || { echo "❌ خطای شبکه در setChatTitle"; exit 1; }
+          if [ "$(printf '%s' "$RESP" | jq -r '.ok')" != "true" ]; then
+            echo "❌ تلگرام عنوان را رد کرد: $(printf '%s' "$RESP" | jq -r '.description // .')"
+            echo "   (اگر می‌گوید not enough rights، ربات باید در کانال ادمین با «Change Info» باشد)"
+            exit 1
+          fi
+          echo "✅ عنوان ست شد: $TITLE"
+
+          RESP=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/setChatDescription" \
+            -d chat_id="$CHAT" --data-urlencode description="$DESC") || { echo "❌ خطای شبکه در setChatDescription"; exit 1; }
+          if [ "$(printf '%s' "$RESP" | jq -r '.ok')" != "true" ]; then
+            echo "❌ تلگرام بایو را رد کرد: $(printf '%s' "$RESP" | jq -r '.description // .')"
+            exit 1
+          fi
+          echo "✅ بایو ست شد"
 
       # حذفِ پیام‌های خودِ ربات از کانال (Bot API فقط پیامِ خودش را و فقط تا ۴۸ ساعت می‌تواند پاک کند)
       - name: Delete messages
