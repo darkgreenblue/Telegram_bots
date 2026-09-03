@@ -452,17 +452,22 @@ jobs:
           MKT_BOT:    ${{ inputs.bot }}
         run: |
           set -e
-          case "$MKT_BOT" in
-            tarot)      TOKEN="$T_TAROT";;
-            tarot-ru)   TOKEN="$T_TAROT_RU";;
-            tarot-pt)   TOKEN="$T_TAROT_PT";;
-            tarot-es)   TOKEN="$T_TAROT_ES";;
-            tabir-khab) TOKEN="$T_TABIR_FA";;
-            *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
-          esac
-          [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
-          RESP=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getMe")
-          echo "getMe($MKT_BOT): username=@$(printf '%s' "$RESP" | jq -r '.result.username') id=$(printf '%s' "$RESP" | jq -r '.result.id')"
+          # چند ربات با کاما: یک جاب به‌جای N جاب (سهمیه‌ی Actions per **جاب** حساب می‌شود، بند ۳ج).
+          IFS=',' read -ra BOTS <<< "$MKT_BOT"
+          for B in "${BOTS[@]}"; do
+            B="$(printf '%s' "$B" | tr -d '[:space:]')"
+            case "$B" in
+              tarot)      TOKEN="$T_TAROT";;
+              tarot-ru)   TOKEN="$T_TAROT_RU";;
+              tarot-pt)   TOKEN="$T_TAROT_PT";;
+              tarot-es)   TOKEN="$T_TAROT_ES";;
+              tabir-khab) TOKEN="$T_TABIR_FA";;
+              *) echo "❌ نگاشت توکن برای «$B» تعریف نشده"; continue;;
+            esac
+            [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $B ست نیست"; continue; }
+            RESP=$(curl -sS "https://api.telegram.org/bot${TOKEN}/getMe")
+            echo "getMe($B): username=@$(printf '%s' "$RESP" | jq -r '.result.username') id=$(printf '%s' "$RESP" | jq -r '.result.id') name=$(printf '%s' "$RESP" | jq -r '.result.first_name')"
+          done
 
       - name: Register campaign code on VPS (campaign-add)
         if: inputs.action == 'campaign-add'
