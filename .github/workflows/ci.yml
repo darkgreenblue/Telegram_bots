@@ -273,6 +273,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-pay-rows.mjs
 
+      # یک فلو و یک سبک در هر سه زبانِ ریلِ استارز (مرجع: ru، که مالک تستش کرده)
+      - name: Stars payment parity check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-pay-parity.mjs
+
       - name: Fallback chain check
         if: matrix.bot == 'tarot'
         run: node tools/check-fallbacks.mjs

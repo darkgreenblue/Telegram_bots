@@ -839,7 +839,7 @@ export default {
     // La persona no escribe números ni saca cuentas: un toque y aparece el pago.
     // Mientras más grande el paquete, más barato sale cada diamante (escalera de ARPU).
     coinPacks: (cur) =>
-      '🛒 Elige el paquete que mejor te quede:\n\n' +
+      '🛒 Elige de los tres paquetes de abajo el que mejor te quede:\n\n' +
       '¡Mientras más grande el paquete, más barato te sale cada diamante! 🧮\n\n' +
       // El nombre de la moneda va completo: con la estrellita al lado se reconoce al instante.
       'El pago es en Telegram Stars ⭐',
