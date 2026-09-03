@@ -49,6 +49,9 @@ console.log('▶ گاردِ هزینه: هیچ فراخوانیِ پولی قب�
       'فالِ پولیِ پرداخت‌نشده → فراخوانی ممنوع');
     ok(paidFor({ price: 30000, status: 'started' }) === true,
       'فالِ پولی بعد از کسرِ اعتبار (started) → فراخوانی مجاز');
+    // v3.53.0: `paid` = پول همین حالا کسر شده (payForSpread در یک تراکنش)، پس مجاز است
+    ok(paidFor({ price: 30000, status: 'paid' }) === true,
+      'فالِ پولی که در لحظه‌ی انتخابِ اندازه کسر شده (paid) → فراخوانی مجاز');
     ok(paidFor({ price: 30000, status: 'canceled' }) === false, 'فالِ لغوشده → ممنوع');
     ok(paidFor({ price: 30000, status: 'refunded' }) === false,
       'فالِ ریفاندشده → ممنوع (تا retry دوباره کسر نکند)');
@@ -106,6 +109,59 @@ console.log('\n▶ نقاطی که قبلاً قاعده را می‌شکستن�
   const defined = /function orTranscribe\(/.test(SRC) ? 1 : 0;
   ok(transcribeCallers - defined === inReading,
     `orTranscribe فقط از داخلِ callReadingLLM صدا زده می‌شود (${inReading} مورد)`);
+}
+
+/* 🚀 پیش‌فراخوانیِ بعد از سؤال (v3.53.0) — **رفتاری**.
+ * این همان چیزی است که v3.4.0 حذفش کرد، ولی این‌بار پشتِ کسر است نه جلویش: فقط فالی که
+ * `paid` است (payForSpread همین حالا پولش را کم کرده) پیش‌فراخوانی می‌شود. تابع از سورس
+ * بریده و با استاب اجرا می‌شود تا ثابت شود روی هر وضعیتِ دیگری **هیچ** فراخوانی و هیچ
+ * نوشتنی رخ نمی‌دهد. */
+console.log('\n▶ پیش‌فراخوانی بعد از سؤال: فقط روی فالِ کسرشده');
+{
+  const pf = bodyOf(SRC, 'function prefetchReadingLLM(');
+  ok(!!pf, 'تابعِ prefetchReadingLLM وجود دارد');
+  ok(/const PREFETCH_AFTER_QUESTION = true;/.test(SRC), 'پرچمِ رول‌بکِ یک‌خطی هست و روشن است');
+  for (const c of PAID_CALLS) ok(!pf.includes(c), `خودِ prefetchReadingLLM هیچ «${c}» ندارد (فقط awaitReadingLLM را صدا می‌زند)`);
+  ok(pf.indexOf("r.status !== 'paid'") > 0 && pf.indexOf("r.status !== 'paid'") < pf.indexOf('awaitReadingLLM('),
+    'شرطِ status=paid قبل از هر فراخوانی است');
+  ok(pf.indexOf('setReadingCards') < pf.indexOf('awaitReadingLLM('),
+    'کارت‌ها قبل از فراخوانی روی رکورد نوشته می‌شوند (مدل روی کارتِ واقعی می‌نویسد)');
+  const hq = bodyOf(SRC, 'async function handleQuestion(');
+  ok(hq.indexOf('patchSession(') < hq.indexOf('prefetchReadingLLM('),
+    'پیش‌فراخوانی بعد از ثبتِ سؤال در سشن است');
+  ok(!/await prefetchReadingLLM/.test(hq), 'پیش‌فراخوانی await نمی‌شود (پیامِ نیت معطل نمی‌ماند)');
+  if (pf) {
+    const rgp = bodyOf(SRC, 'function randomGridPicks(');
+    const run = (row) => {
+      const calls = [];
+      const writes = [];
+      const stmts = { getReading: { get: () => row }, setReadingCards: { run: (...a) => { writes.push(a); return { changes: 1 }; } } };
+      const fn = new Function('PREFETCH_AFTER_QUESTION', 'stmts', 'SPREAD_BY_ID', 'drawCards', 'GRID_SIZE', 'randomInt',
+        'getUser', 'patchSession', 'awaitReadingLLM', 'logErr',
+        `${pf}\n${rgp}\nreturn prefetchReadingLLM(7, 42, { question: 'q' });`);
+      const res = fn(true, stmts, { open3: { size: 3 } }, (seed, picks, size) => picks.slice(0, size).map(i => ({ key: 'k' + i })),
+        24, (a, b) => a, () => ({}), () => {}, (uid, id) => { calls.push(id); return Promise.resolve(null); }, () => {});
+      return { res, calls, writes };
+    };
+    const okRow = { id: 42, user_id: 7, status: 'paid', cards_json: '', type: 'open3' };
+    const a = run(okRow);
+    ok(a.res === true && a.calls.length === 1 && a.writes.length === 1, 'فالِ paidِ بی‌کارت → یک بار کارت نوشته و یک بار فراخوانی می‌شود');
+    ok(JSON.parse(a.writes[0][1]).length === 3, 'دقیقاً به اندازه‌ی چیدمان کارت کشیده می‌شود');
+    for (const st of ['pending_payment', 'started', 'refunded', 'canceled', 'delivered']) {
+      const b = run({ ...okRow, status: st });
+      ok(b.res === false && b.calls.length === 0 && b.writes.length === 0, `وضعیتِ ${st} → نه کارت، نه فراخوانی`);
+    }
+    const c = run({ ...okRow, cards_json: '[{"key":"x"}]' });
+    ok(c.res === false && c.calls.length === 0 && c.writes.length === 0, 'فالِ کارت‌دار دوباره کشیده نمی‌شود');
+    const d = run({ ...okRow, user_id: 8 });
+    ok(d.res === false && d.calls.length === 0, 'رکوردِ کاربرِ دیگر رد می‌شود');
+    // انتخابِ تصادفیِ گرید: یکتا و داخلِ بازه، روی هر سه اندازه
+    const picksOf = new Function('GRID_SIZE', 'randomInt', `${rgp}; return randomGridPicks;`)(24, (lo, hi) => lo + Math.floor(Math.random() * (hi - lo)));
+    for (const n of [3, 5, 10]) {
+      const p = picksOf(n);
+      ok(p.length === n && new Set(p).size === n && p.every(i => i >= 0 && i < 24), `${n} خانه‌ی یکتا از گریدِ ۲۴تایی`);
+    }
+  }
 }
 
 console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو تا');

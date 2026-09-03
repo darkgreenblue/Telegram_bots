@@ -723,7 +723,7 @@ export default {
     atmosphere1: 'Recibido 🤲',
     atmosphere2: 'Recuerda: las cartas no vienen a asustar, vienen a aclarar.',
     breathing: '🔮 Ahora pide tu deseo:\n\n' +
-      '1️⃣ Primero, tres respiraciones hondas... 🌬️\n\n' +
+      '1️⃣ Primero, respira hondo hasta que el cuerpo se relaje... 🌬️\n\n' +
       '2️⃣ Después concentra la energía y la cabeza en tu pregunta y, cuando sientas que es el momento, di:',
     shuffleCaption: 'El mazo se está barajando con la energía de tu pregunta... 🌀\n\nCuando sientas que es el momento, detenlo:',
     shuffleFrames: ['🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠'],
@@ -766,7 +766,10 @@ export default {
       `🃏 Carta «${posFa}»:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToca la imagen para destaparla ✨`,
     revealCaptionV4: (label, card, reversed) =>
       `🃏 ${label}: «${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToca la imagen para destaparla ✨`,
-    flowIntro: () => 'Tus cartas están listas 🕯️\n\nDestápalas una por una y mira rapidito qué dice cada una. Después viene la respuesta y la lectura completa.',
+    flowIntro: () => 'Tus cartas están listas. 🕯️\n\n' +
+      'Primero, las cartas se leen con calma y atención. 🔍\n\n' +
+      'Después aparecen una por una, y sientes un poco el clima de cada una. 🃏\n\n' +
+      '¡Y al final viene la respuesta y la lectura completa! ✨',
     positiveBridges: [
       'Así es 🤲 Las cartas están dando en el clavo. Seguimos...',
       'Qué bueno que lo confirmas: vamos en la misma sintonía 🌊 Sigamos...',

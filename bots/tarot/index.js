@@ -17,7 +17,7 @@
 // صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
 import './env-boot.js';
 import { mkdirSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.52.0';
+const PRODUCT_VERSION = '3.53.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -630,6 +630,21 @@ const PUSH_COOLDOWN_S  = 7 * 24 * 3600; // حداکثر یک پوش پیشگیر
 const USER_PICKS       = 3;  // حداکثر تعداد انتخاب کاربر از گرید (فال کوچک‌تر = به تعداد خودش)
 
 const PACE_S = 1200, PACE_M = 2500, PACE_REVEAL = 3500;
+// ⏱ فاصله‌ی «عکسِ کارت ← تیزرِ همان کارت» (v3.53.0). قبلاً `sleep(PACE_REVEAL)` +
+// `typing(PACE_S)` بود، یعنی ~۴٫۷ ثانیه که ۳٫۵ ثانیه‌اش **بدونِ هیچ نشانه‌ی زنده‌ای** می‌گذشت
+// و مالک آن را «تأخیر» دید نه «مکث». حالا یک عدد است و کلِ آن با نشانگرِ typing پوشیده
+// می‌شود؛ تنظیمش یک ثابت است.
+const PACE_TEASER = 2000;
+// ⏳ کفِ نمایشِ «در حال تفسیر کارت‌ها» (خواسته‌ی صریحِ مالک): حتی اگر جواب از قبل آماده
+// باشد (پیش‌فراخوانیِ بعد از سؤال)، نشانگر کمتر از این نمی‌ماند. انتظارِ طراحی‌شده بخشی از
+// آیین است؛ جوابی که «آنی» برسد حسِ تفسیر نمی‌دهد.
+const LOADING_MIN_MS = 10_000;
+// 🚀 پیش‌فراخوانیِ خوانش بلافاصله بعد از سؤال (v3.53.0). فقط برای فالی که پولش **همان
+// لحظه‌ی انتخابِ اندازه** کسر شده (`paid`)، پس قاعده‌ی آهنینِ هزینه (بند ۹ ریشه) سرِ جایش
+// است: هیچ فراخوانی قبل از کسر نیست. کارت‌ها همان‌جا از بک‌اند کشیده می‌شوند و بُر و
+// انتخابِ گرید فقط آیین است. رول‌بکِ یک‌خطی: `false` → کارت‌ها مثل قبل از انتخابِ گرید
+// می‌آیند و خوانش بعد از انتخابِ آخر شروع می‌شود.
+const PREFETCH_AFTER_QUESTION = true;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
@@ -1774,8 +1789,12 @@ function cancelReading(uid, readingId) {
   return r.price;
 }
 
+// `paid` هم مجاز است (v3.53.0): در آن وضعیت پول **همین حالا** از موجودی کم شده
+// (`payForSpread` کسر و insert را در یک تراکنش می‌کند)، پس قاعده‌ی «هیچ فراخوانی قبل از
+// کسر» دست‌نخورده می‌ماند. چیزی که `paid` ندارد کارت است، و آن گاردِ جداگانه‌ی خودش را
+// در `callReadingLLM` دارد (فالِ بی‌کارت هرگز به مدل نمی‌رود).
 function paidForReading(r) {
-  return r.price === 0 || r.status === 'started';
+  return r.price === 0 || r.status === 'started' || r.status === 'paid';
 }
 
 async function callReadingLLM(readingId) {
@@ -1783,6 +1802,10 @@ async function callReadingLLM(readingId) {
   if (!r) return null;
   if (!paidForReading(r)) {
     logErr(`❌ COST_GUARD reading#${readingId} status=${r.status} — فراخوانیِ LLM قبل از کسرِ اعتبار متوقف شد`);
+    return null;
+  }
+  if (!r.cards_json) {
+    logErr(`❌ COST_GUARD reading#${readingId} status=${r.status} — فال هنوز کارت ندارد؛ فراخوانی متوقف شد`);
     return null;
   }
   const user = getUser(r.user_id);
@@ -1915,14 +1938,61 @@ async function callReadingLLM(readingId) {
 // جایش: خوانش در `awaitReadingLLM` صدا زده می‌شود که فقط از مسیرِ بعد از کسرِ اعتبار
 // می‌آید، و انتظارِ کاربر با همان لودینگِ زنده‌ی `waitLLMWithLoading` پوشانده می‌شود.
 // نتیجه‌ی LLM (منبع حقیقت readings.llm_json؛ اگر ری‌استارت شده بود دوباره صدا می‌زند)
+// 🔁 فراخوانیِ در جریان per فال. وقتی خوانش بعد از سؤال پیش‌فراخوانی می‌شود و کاربر قبل از
+// رسیدنِ جواب به افشا می‌رسد، همین Map جلوی **فراخوانیِ دوم** را می‌گیرد: افشا به همان
+// promise می‌چسبد. فقط کش است؛ حقیقت `readings.llm_json` است (ری‌استارت = فراخوانیِ دوباره).
+const llmInflight = new Map();
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
-  const result = await callReadingLLM(readingId);
+  let p = llmInflight.get(readingId);
+  if (!p) {
+    p = callReadingLLM(readingId).finally(() => llmInflight.delete(readingId));
+    llmInflight.set(readingId, p);
+  }
+  const result = await p;
   if (result) return result;
   const r2 = stmts.getReading.get(readingId);
   if (r2?.llm_json) { try { return JSON.parse(r2.llm_json); } catch {} }
   return null;
+}
+
+/* 🚀 پیش‌فراخوانیِ خوانش بلافاصله بعد از سؤال (v3.53.0).
+   شرطِ ورود عمداً روی **وضعیتِ رکورد** است نه روی پرچم‌های UI: فقط فالی که `paid` است
+   (یعنی `payForSpread` همین حالا پولش را کسر کرده) و هنوز کارت ندارد. هر مسیرِ دیگری
+   (دنیای تومانی که رکوردش تازه در `finishPicking` ساخته می‌شود، فالِ رایگان، فالِ
+   ری‌استارت‌شده که کارت دارد) بی‌صدا رد می‌شود و رفتارِ قبلی را می‌گیرد.
+   کارت‌ها همین‌جا از بک‌اند کشیده می‌شوند: N خانه‌ی **یکتا و تصادفی** از همان گریدِ
+   ۲۴تایی، روی یک seedِ تازه، و با همان `drawCards` که انتخابِ گرید هم از آن رد می‌شود؛
+   یعنی توزیعِ کارت و جهت (REVERSAL_PROB) دقیقاً همان است، فقط دستِ انتخاب‌کننده عوض شده.
+   نوشتنِ کارت‌ها با همان شرطِ `cards_json=''` است، پس هرگز روی فالِ کارت‌دار نمی‌نشیند.
+   خودِ فراخوانی await نمی‌شود: کاربر باید بی‌معطلی پیامِ نیت را بگیرد؛ نتیجه در
+   `readings.llm_json` می‌نشیند و افشا از همان می‌خواند (یا به promise در جریان می‌چسبد). */
+function prefetchReadingLLM(uid, readingId, s) {
+  if (!PREFETCH_AFTER_QUESTION || !readingId) return false;
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid || r.status !== 'paid' || r.cards_json) return false;
+  const spread = SPREAD_BY_ID[r.type];
+  if (!spread) return false;
+  const seed = `r:${uid}:q:${readingId}:${Date.now()}`;
+  const picks = randomGridPicks(spread.size);
+  const cards = drawCards(seed, picks, spread.size);
+  const focusArea = s.focusKey || getUser(uid)?.focus_area || '';
+  const wrote = stmts.setReadingCards.run(seed, JSON.stringify(cards), focusArea, s.question || '',
+    s.questionAudio || '', s.questionAudioFmt || '', readingId).changes;
+  if (!wrote) return false;
+  patchSession(uid, { seed, prefetched: true });
+  awaitReadingLLM(uid, readingId).catch((e) => logErr(`reading#${readingId} پیش‌فراخوانی شکست خورد:`, e?.message));
+  return true;
+}
+/** N خانه‌ی یکتا از گریدِ ۲۴تایی، با اعدادِ تصادفیِ رمزنگاری‌شده (نه Math.random). */
+function randomGridPicks(n) {
+  const pool = Array.from({ length: GRID_SIZE }, (_, i) => i);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = randomInt(0, i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, Math.min(n, GRID_SIZE));
 }
 
 // بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
@@ -3610,16 +3680,25 @@ async function handleQuestion(ctx, question, audio = null) {
   });
   setState(uid, 'breathing');
   track(db, uid, 'question_submitted', { spread: spread.id, voice: !!(ctx.message?.voice || ctx.message?.audio) });
+  // 🚀 پول کسر شده و سؤال رسیده: کارت‌ها همین‌جا کشیده و خوانش همین‌جا شروع می‌شود
+  // (بدونِ await). تا کاربر نیت کند و بُر بزند و انتخاب کند، جواب معمولاً آماده است.
+  // ⚠️ بعد از `patchSession` است چون کارت و سؤال با هم روی رکورد نوشته می‌شوند.
+  if (payAtSizeFor(uid)) {
+    try { prefetchReadingLLM(uid, getSession(uid).readingId, getSession(uid)); }
+    catch (e) { logErr('prefetch after question:', e.message); }
+  }
   await typing(ctx, PACE_S);
   // مشتری ثابت (۲+ فال کامل) آیین کوتاه‌تر می‌گیرد — مثل تاروت‌خوان واقعی با مشتری آشنا
   if (stmts.countDelivered.get(uid).c >= 2) {
     await ctx.reply(L.reading.atmosphereShort);
   } else {
     await ctx.reply(L.reading.atmosphere1);
-    await typing(ctx, PACE_M);
     // «کارت‌ها قرار نیست بترسوننت» یک جمله‌ی دلداریِ اضافه است که در لحنِ جدید حذف می‌شود
     // (تصمیمِ مالک: این جمله‌ها در طولِ جرنی پراکنده‌اند و باید بروند).
-    if (!toneV2For(uid)) await ctx.reply(L.reading.atmosphere2);
+    // ⏱ مکثِ قبلش هم فقط برای همان جمله بود. تا v3.52.0 آن مکث **بدونِ جمله** می‌ماند و
+    // با مکثِ بعدی جمع می‌شد: پنج ثانیه سکوت بینِ «دریافت شد» و «نیت کن» که مالک
+    // به‌درستی «تأخیر» دید. بازمانده‌ی یک پیامِ حذف‌شده بود، نه یک تصمیمِ آیینی.
+    if (!toneV2For(uid)) { await typing(ctx, PACE_M); await ctx.reply(L.reading.atmosphere2); }
   }
   await typing(ctx, PACE_M);
   await ctx.reply(L.reading.breathing, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.ready, 'ready_breath')]]));
@@ -3732,19 +3811,23 @@ bot.action(/^pick:(\d+)$/, async (ctx) => {
 async function finishPicking(ctx, uid, s) {
   const spread = SPREAD_BY_ID[s.spreadId];
   const user = getUser(uid);
-  const cards = drawCards(s.seed, s.picks, spread.size);
   const focusArea = s.focusKey || user.focus_area || '';
 
   // 🪙 UX v2.6: اگر لحظه‌ی انتخابِ اندازه پول داده شده، رکورد از قبل هست و فقط کارت‌هایش
   // نوشته می‌شود (شرطِ `cards_json=''` جلوی کشیدنِ دوباره‌ی کارت‌های یک فالِ پرداخت‌شده
   // را می‌گیرد). وگرنه دقیقاً مثل قبل یک رکوردِ تازه ساخته می‌شود.
-  const prepaid = payAtSizeFor(uid) && s.readingId
-    && stmts.getReading.get(s.readingId)?.status === 'paid' ? s.readingId : 0;
+  const prepaidRow = payAtSizeFor(uid) && s.readingId ? stmts.getReading.get(s.readingId) : null;
+  const prepaid = prepaidRow?.status === 'paid' ? s.readingId : 0;
+  // 🚀 اگر کارت‌ها بعد از سؤال از بک‌اند کشیده شده‌اند (`prefetchReadingLLM`)، همان‌ها
+  // فال‌اند و انتخابِ گرید فقط آیین بوده؛ کشیدنِ دوباره یعنی خوانشی که مدل روی کارت‌های
+  // دیگری نوشته. وگرنه (پیش‌فراخوانی خاموش یا رد شده) مثل قبل از انتخاب‌های کاربر می‌آید.
+  const preDrawn = prepaid && prepaidRow.cards_json ? JSON.parse(prepaidRow.cards_json) : null;
+  const cards = preDrawn || drawCards(s.seed, s.picks, spread.size);
   const readingId = prepaid || Number(stmts.insertReading.run(
     uid, spread.id, spread.price, focusArea, s.question || '', s.seed, JSON.stringify(cards),
     s.questionAudio || '', s.questionAudioFmt || ''
   ).lastInsertRowid);
-  if (prepaid) {
+  if (prepaid && !preDrawn) {
     stmts.setReadingCards.run(s.seed, JSON.stringify(cards), focusArea, s.question || '',
       s.questionAudio || '', s.questionAudioFmt || '', readingId);
   }
@@ -3882,8 +3965,10 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
 
 // پیام لودینگ پویا تا آماده‌شدن LLM (اگر پیش‌فراخوانی هنوز نرسیده باشد)
 async function waitLLMWithLoading(ctx, uid, readingId) {
-  const r = stmts.getReading.get(readingId);
-  if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
+  // ⏳ حتی اگر جواب از قبل آماده باشد (پیش‌فراخوانیِ بعد از سؤال) نشانگر می‌آید و دستِ‌کم
+  // `LOADING_MIN_MS` می‌ماند (خواسته‌ی صریحِ مالک). تا v3.52.0 جوابِ آماده یعنی «بدونِ
+  // هیچ نشانگری» و افشا آنی شروع می‌شد؛ با پیش‌فراخوانی این حالت **حالتِ عادی** می‌شد و
+  // حسِ «تفسیر» از بین می‌رفت.
   const frame = loadingFrame(L.reading.loadingLabel);
   const msg = await ctx.reply(frame(0));
   let i = 1, done = false;
@@ -3903,6 +3988,9 @@ async function waitLLMWithLoading(ctx, uid, readingId) {
     }
   })().catch(() => {});
   const result = await awaitReadingLLM(uid, readingId);
+  // کفِ نمایش: اگر جواب زودتر از کف رسید، انیمیشن تا رسیدن به کف ادامه می‌دهد.
+  const remain = LOADING_MIN_MS - (Date.now() - startedAt);
+  if (remain > 0) await sleep(remain);
   done = true;
   try { await ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id); } catch {}
   return result;
@@ -3990,8 +4078,8 @@ async function revealNext(ctx, uid, readingId) {
   await sendCardPhoto(ctx, card.key, v4For(uid)
     ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
     : L.reading.revealCaption(positionName(spread.positions[idx]?.fa, idx), info, card.reversed));
-  await sleep(PACE_REVEAL);
-  await typing(ctx, PACE_S);
+  // ⏱ v3.53.0: مکثِ کور (`sleep`) حذف شد؛ کلِ فاصله تا تیزر با نشانگرِ typing می‌گذرد.
+  await typing(ctx, PACE_TEASER);
 
   // v4: در مرحله‌ی افشا فقط یک تیزرِ کوتاه درباره‌ی خودِ کارت می‌آید تا تعلیق حفظ شود و
   // کاربر در ساختنِ روایت همراه شود. تحلیلِ کامل و جواب، در متنِ نهایی می‌آید.
