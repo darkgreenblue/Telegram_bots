@@ -33,7 +33,7 @@ on:
         type: choice
         options: [post, day-post, poll, campaign-add, getme, chat-info, delete]
       bot:
-        description: 'کلید ربات در marketing/registry.json (مثل tarot یا tabir-khab)'
+        description: 'کلید ربات: tarot | tarot-ru | tarot-pt | tarot-es | tabir-khab (نگاشتِ توکن پایینِ همین فایل)'
         required: true
       chat:
         description: 'مقصد: @channelusername یا آی‌دی عددی (برای post/poll؛ خالی = فیلد chat خود فایل). برای chat-info می‌شود چند کانال با کاما داد'
@@ -80,6 +80,9 @@ jobs:
         if: inputs.action == 'post'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           OWNER:      ${{ secrets.OWNER_TELEGRAM_ID }}
           MKT_BOT:    ${{ inputs.bot }}
@@ -98,6 +101,9 @@ jobs:
 
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده (این فایل را آپدیت کن)"; exit 1;;
           esac
@@ -149,6 +155,9 @@ jobs:
         if: inputs.action == 'poll'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           OWNER:      ${{ secrets.OWNER_TELEGRAM_ID }}
           MKT_BOT:    ${{ inputs.bot }}
@@ -166,6 +175,9 @@ jobs:
 
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده (این فایل را آپدیت کن)"; exit 1;;
           esac
@@ -232,6 +244,9 @@ jobs:
         if: inputs.action == 'delete'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           MKT_BOT:    ${{ inputs.bot }}
           MKT_CHAT:   ${{ inputs.chat }}
@@ -240,6 +255,9 @@ jobs:
           set -e
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
           esac
@@ -264,6 +282,9 @@ jobs:
         if: inputs.action == 'day-post'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           MKT_BOT:    ${{ inputs.bot }}
           MKT_PATH:   ${{ inputs.path }}
@@ -271,6 +292,9 @@ jobs:
           set -e
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
           esac
@@ -304,6 +328,9 @@ jobs:
         if: inputs.action == 'chat-info'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           MKT_BOT:    ${{ inputs.bot }}
           MKT_CHAT:   ${{ inputs.chat }}
@@ -311,6 +338,9 @@ jobs:
           set -e
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
           esac
@@ -342,12 +372,18 @@ jobs:
         if: inputs.action == 'getme'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           MKT_BOT:    ${{ inputs.bot }}
         run: |
           set -e
           case "$MKT_BOT" in
             tarot)      TOKEN="$T_TAROT";;
+            tarot-ru)   TOKEN="$T_TAROT_RU";;
+            tarot-pt)   TOKEN="$T_TAROT_PT";;
+            tarot-es)   TOKEN="$T_TAROT_ES";;
             tabir-khab) TOKEN="$T_TABIR_FA";;
             *) echo "❌ نگاشت توکن برای «$MKT_BOT» تعریف نشده"; exit 1;;
           esac
@@ -392,6 +428,9 @@ jobs:
         if: failure()
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
+          T_TAROT_RU: ${{ secrets.TAROT_RU_BOT_TOKEN }}
+          T_TAROT_PT: ${{ secrets.TAROT_PT_BOT_TOKEN }}
+          T_TAROT_ES: ${{ secrets.TAROT_ES_BOT_TOKEN }}
           T_TABIR_FA: ${{ secrets.TABIR_TELEGRAM_BOT_TOKEN_FA }}
           OWNER:      ${{ secrets.OWNER_TELEGRAM_ID }}
           MKT_ACTION: ${{ inputs.action }}
