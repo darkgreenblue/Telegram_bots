@@ -1,12 +1,47 @@
 // مارکتینگ: ساخت لینک کمپین (t.me/<bot>?start=c_<code>) + قیفِ تا-درآمد هر کمپین + مقایسه‌ی چنل‌ها
 //           + اتریبیوشن در سطحِ پستِ کانال (payload لینکِ پست: c_<code>_<postref>)
-import { BOTS, botByKey, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman } from '../lib/bots.js';
+import { BOTS, botByKey, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman,
+  baseKey, langOfKey, scopedKey, langsOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, postRefLabel } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
 
 const usernameKey = (botKey) => `username:${botKey}`;
+
+/* 🌍 «اسکوپِ کمپین» = واحدی که یک لینکِ کمپین به آن تعلق دارد.
+ *
+ * ⚠️ چرا این با `BOTS` یکی نیست: هر زبانِ تاروت یک **رباتِ جدا با @username جدا** است،
+ * ولی در `BOTS` همه‌شان زیرِ یک ردیفِ تجمیعی (`tarot-intl`) نشسته‌اند، چون آن ردیف برای
+ * **تحلیل** ساخته شده نه برای **لینک**. تا امروز نتیجه‌اش دو خرابیِ بی‌صدا بود:
+ *   ۱) ساختِ کمپین برای یک زبانِ مشخص با «ربات نامعتبر» رد می‌شد (اعتبارسنجی کلیدِ خام
+ *      را با `BOTS` می‌سنجید و `tarot-intl@ru` در آن نیست).
+ *   ۲) فرمِ یوزرنیم یک فیلد برای هر سه زبان می‌داد، پس لینکِ کمپینِ اسپانیایی به
+ *      رباتِ روسی اشاره می‌کرد. عددِ اتریبیوشن درست جمع می‌شد ولی **کاربر به رباتِ
+ *      اشتباه می‌رفت** — از همان خانواده‌ی «عددِ درست، واحدِ دروغ» (بند ۶ج ریشه).
+ *
+ * پس اسکوپ‌ها = کلیدِ پایه برای ربات‌های تک‌زبانه، و یک کلیدِ زبان‌دار per زبان برای
+ * ربات‌های چندزبانه. کلیدِ تجمیعی هم می‌ماند، چون دیدنِ مجموع همچنان مفید است. */
+export function campaignScopes() {
+  const out = [];
+  for (const b of BOTS) {
+    const langs = langsOf(b.key);
+    out.push({ key: b.key, title: b.title, aggregate: langs.length > 1 });
+    for (const l of langs.length > 1 ? langs : []) {
+      out.push({ key: scopedKey(b.key, l), title: `${b.title} — ${l}`, aggregate: false });
+    }
+  }
+  return out;
+}
+/** اسکوپی که می‌شود رویش کمپین ساخت: کلیدِ پایه، یا کلیدِ پایه + زبانِ واقعاً موجود. */
+export const validScope = (raw) => {
+  const k = String(raw || '');
+  if (!/^[a-z0-9-]+(@[a-z0-9-]+)?$/.test(k)) return '';
+  if (!botByKey(k)) return '';
+  const lang = langOfKey(k);
+  if (lang && !langsOf(k).includes(lang)) return '';
+  return k;
+};
 
 // آمار یک کمپین: جمع روی همه‌ی instance های همان ربات (tarot چند locale دارد)
 export function campaignStats(c) {
@@ -188,9 +223,17 @@ export function marketingBody(url) {
   // مارکتینگ per ربات: کمپین‌ها، پست‌ها و چنل‌های ورودیِ همان رباتِ انتخاب‌شده
   const bot = scopeBot(url);
   const botTitle = botByKey(bot)?.title || bot;
-  const campaigns = listCampaigns().filter(c => c.bot === bot);
+  /* اسکوپِ زبان‌دار فقط خودش را می‌بیند؛ اسکوپِ پایه خودش **و** زبان‌هایش را، وگرنه
+   * کمپینی که برای یک زبان ساخته شده از نمای تجمیعی ناپدید می‌شود. */
+  const inScope = (cb) => (langOfKey(bot) ? cb === bot : baseKey(cb) === bot);
+  const campaigns = listCampaigns().filter(c => inScope(c.bot));
 
-  const botOptions = `<option value="${esc(bot)}">${esc(botTitle)}</option>`;
+  /* گزینه‌های سلکت = خودِ اسکوپِ فعلی و (اگر تجمیعی است) هر زبانش، تا بدونِ عوض‌کردنِ
+   * اسکوپِ داشبورد بشود کمپینِ یک زبانِ مشخص ساخت. */
+  const scopeOpts = campaignScopes().filter(sc => baseKey(sc.key) === baseKey(bot)
+    && (!langOfKey(bot) || sc.key === bot));
+  const botOptions = (scopeOpts.length ? scopeOpts : [{ key: bot, title: botTitle }])
+    .map(sc => `<option value="${esc(sc.key)}"${sc.key === bot ? ' selected' : ''}>${esc(sc.title)}</option>`).join('');
   const createForm = `<div class="card"><h2>➕ لینک کمپین جدید</h2>
   <form method="post" action="/marketing/create" class="inline">
     <label>ربات<select name="bot">${botOptions}</select></label>
@@ -208,7 +251,7 @@ export function marketingBody(url) {
 
   const unameForm = `<div class="card"><h2>⚙️ یوزرنیم ربات‌ها (برای ساخت لینک)</h2>
   <form method="post" action="/marketing/usernames" class="inline">
-    ${BOTS.map(b => `<label>${esc(b.title)}<input name="u_${b.key}" dir="ltr" placeholder="بدون @" value="${esc(getSetting(usernameKey(b.key)))}"></label>`).join('')}
+    ${campaignScopes().filter(sc => !sc.aggregate).map(sc => `<label>${esc(sc.title)}<input name="u_${esc(sc.key)}" dir="ltr" placeholder="بدون @" value="${esc(getSetting(usernameKey(sc.key)))}"></label>`).join('')}
     <button type="submit">ذخیره</button>
   </form></div>`;
 
@@ -269,7 +312,7 @@ export function marketingBody(url) {
 }
 
 export function marketingCreate(body) {
-  const bot = BOTS.find(b => b.key === body.get('bot'))?.key;
+  const bot = validScope(body.get('bot'));
   if (!bot) throw new Error('ربات نامعتبر');
   const c = createCampaign({
     bot,
@@ -291,9 +334,12 @@ export function marketingToggle(body) {
 }
 
 export function marketingUsernames(body) {
-  for (const b of BOTS) {
-    const v = (body.get(`u_${b.key}`) || '').trim().replace(/^@/, '').slice(0, 64);
-    if (/^[A-Za-z0-9_]*$/.test(v)) setSetting(usernameKey(b.key), v);
+  for (const sc of campaignScopes()) {
+    if (sc.aggregate) continue;   // ردیفِ تجمیعی ربات نیست، پس @username ندارد
+    const raw = body.get(`u_${sc.key}`);
+    if (raw == null) continue;    // فیلدی که در فرم نبود نباید مقدارِ ذخیره‌شده را پاک کند
+    const v = raw.trim().replace(/^@/, '').slice(0, 64);
+    if (/^[A-Za-z0-9_]*$/.test(v)) setSetting(usernameKey(sc.key), v);
   }
   audit('settings.usernames', '', '');
   return 'یوزرنیم‌ها ذخیره شد';

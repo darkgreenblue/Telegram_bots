@@ -929,6 +929,9 @@ export default {
     draft: (code) => `${code}\n\nPor favor, não apague este código e escreva a sua mensagem abaixo 👇\n`,
     // Curto e direto: só o CTA e o código.
     body: (code) => `💬 Toque no botão abaixo e escreva a sua mensagem; não apague este código:\n<code>${code}</code>`,
+    // 🧾 /paysupport — مسیرِ اختصاصیِ مشکلاتِ پرداخت. همان دکمه و همان کدِ پیگیری،
+    // فقط جمله‌ی اولش می‌گوید موضوع پول است تا کاربر مطمئن شود جای درستی آمده.
+    payBody: (code) => `🧾 Algum problema com o pagamento? Toque no botão abaixo e conte o que houve; não apague este código:\n<code>${code}</code>`,
   },
 
   // ⚙️ Menu de ajustes (v3.38.0) — todas as telas editam **uma** mensagem só, então o

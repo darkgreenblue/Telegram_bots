@@ -57,7 +57,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
 
-import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay } from './starspay.js';
+import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay, refundStars } from './starspay.js';
 
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 const L = (await import(`./locales/${LOCALE}.js`)).default;
@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.53.0';
+const PRODUCT_VERSION = '3.54.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -5974,6 +5974,51 @@ registerSupport(bot, {
     if (await blockDuringOpenReading(ctx, INTENT.SUPPORT)) return;
     await blockDuringOpenPay(ctx, INTENT.SUPPORT);
   },
+});
+
+/* 🧾 `/paysupport` — مسیرِ رسمیِ مشکلاتِ پرداخت.
+ *
+ * چرا وجود دارد: شرایطِ توسعه‌دهندگانِ تلگرام (که خودم نتوانستم بازش کنم، پس
+ * «خوانده‌نشده» است — جزئیات در `bots/tarot/CLAUDE.md`) طبق چند منبعِ ثانویه‌ی هم‌رأی
+ * می‌گوید رباتی که کالای دیجیتال با استارز می‌فروشد باید به `/paysupport` جواب بدهد و
+ * درخواست‌های پرداخت را رسیدگی کند. مستقل از اینکه اجباری باشد یا نه، این پنج خط
+ * ارزانِ درست است: کاربری که پول داده و مشکل دارد باید یک درِ مشخص داشته باشد.
+ *
+ * ⚠️ عمداً **هیچ گاردی** ندارد و در هر چهار زبان کار می‌کند — دقیقاً مثل خودِ دکمه‌ی
+ * پشتیبانی، چون راهِ فرارِ کاربرِ گیرکرده هرگز نباید بسته باشد. */
+bot.command('paysupport', async (ctx) => {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const r = supportReply('TRT', uid, { ...L.support, body: L.support.payBody });
+  await ctx.reply(r.text, r.extra).catch(() => {});
+});
+
+/* ⭐ `/refund <شناسه‌ی پرداخت>` — برگرداندنِ استارزِ یک پرداختِ واقعی (فقط ادمین).
+ *
+ * جدا از `cardrev:` است و عمداً کاربر را بی‌اعتماد **نمی‌کند**: آن مسیر برای پرداختِ
+ * جعلی است، این یکی برای کاربری که کارِ اشتباهی نکرده و فقط پولش را پس می‌خواهد. */
+bot.command('refund', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return;
+  const pid = parseInt(normalizeDigits((ctx.message.text.split(/\s+/)[1] || '')), 10);
+  if (!pid) return ctx.reply('فرمت: /refund <payment_id>').catch(() => {});
+  const res = await refundStars(bot.telegram, {
+    getPayment: (id) => stmts.getPayment.get(id),
+    // برگشتِ دفتر، **بدونِ** setDistrust: ریفاندِ قانونی جرم نیست.
+    markRefunded: (id) => {
+      if (stmts.markPaymentReversed.run(id).changes === 0) return null;
+      const p = stmts.getPayment.get(id);
+      const creditAmount = p.original_amount || p.amount;
+      const back = creditAmount + (p.pkg ? 0 : bonusFor(creditAmount));
+      stmts.clawback.run(back, p.user_id);
+      track(db, p.user_id, 'payment_refunded', { payment_id: id, amount: p.amount, clawed: back });
+      return { back };
+    },
+    paymentId: pid,
+  });
+  if (!res.ok) return ctx.reply(`❌ ریفاند نشد (#${pid}): ${res.reason}`).catch(() => {});
+  await bot.telegram.sendMessage(res.p.user_id, L.wallet.reversedUser(curOf(res.p.user_id))).catch(() => {});
+  await ctx.reply(`✅ استارزِ پرداخت #${pid} به کاربر ${res.p.user_id} برگشت` +
+    (res.ledger ? ` و ${fmt(res.clawed)} از اعتبارش کسر شد.` : ' ولی ⚠️ دفترِ اعتبار عوض نشد (قبلاً برگشته بود).')).catch(() => {});
 });
 
 /* ---------- هندلر متن (state machine) ---------- */
