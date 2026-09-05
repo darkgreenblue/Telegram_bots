@@ -209,6 +209,66 @@ ok(exitFn ? !/openPaymentRow/.test(exitFn) : false,
   'pay_exit هیچ ردیفِ پرداختِ تازه‌ای باز نمی‌کند (وگرنه دوباره همان حلقه)');
 ok(exitFn ? !/'pay_amount'/.test(exitFn) : false, 'و کاربر را به pay_amount برنمی‌گرداند');
 
+/* ══ ۴) جاروی خودکار: کسی که از قبل گیر افتاده نباید کاری بکند ══════════ */
+// فیکسِ دکمه یک تپ می‌خواهد؛ کسی که هفته‌ی پیش گیر افتاده و رفته، هرگز آن تپ را نمی‌زند.
+// این بخش ثابت می‌کند جارو دقیقاً همان‌ها را آزاد می‌کند و به پول دست نمی‌زند.
+console.log('\n  — 🧹 جاروی فلوی رهاشده:');
+const sweepSql = sqlOf('stuckPayCandidates');
+if (sweepSql) {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, state TEXT, session_json TEXT,
+      balance INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending', updated_at INTEGER NOT NULL DEFAULT 0);`);
+  const OLD = Math.floor(Date.now() / 1000) - 7200;   // دو ساعت پیش
+  const NEW = Math.floor(Date.now() / 1000);          // همین حالا
+  // uid, state, payment(status, amount, updated_at), آیا باید آزاد شود؟
+  const cases = [
+    [1, 'pay_amount',   'pending',        0,   OLD, true,  'ردیفِ خالیِ پارک‌شده'],
+    [2, 'pay_amount',   'canceled',       0,   OLD, true,  'فاکتورِ مرده (همان ۱۹ نفرِ دیتای زنده)'],
+    [3, 'pay_receipt',  'canceled',       50,  OLD, true,  'رسیدِ لغوشده‌ی کهنه'],
+    [4, 'pay_discount', 'refunded',       0,   OLD, true,  'ریفاندشده'],
+    [5, 'pay_receipt',  'waiting_review', 100, OLD, false, '💰 رسیدِ در انتظارِ بررسی'],
+    [6, 'pay_receipt',  'approved',       100, OLD, false, '💰 پرداختِ تأییدشده'],
+    [7, 'pay_receipt',  'pending',        100, OLD, false, '💰 فاکتورِ زنده‌ی مبلغ‌دار'],
+    [8, 'pay_amount',   'pending',        0,   NEW, false, 'کاربرِ همین‌حالا وسطِ کار'],
+    [9, 'idle',         'pending',        0,   OLD, false, 'کاربری که اصلاً در فلو نیست'],
+  ];
+  for (const [uid, st, pst, amt, ts] of cases) {
+    db.prepare('INSERT INTO users VALUES (?,?,?,?)').run(uid, st, JSON.stringify({ paymentId: uid * 10 }), 7);
+    db.prepare('INSERT INTO payments VALUES (?,?,?,?,?)').run(uid * 10, uid, amt, pst, ts);
+  }
+  const PAY = PAY_STATES;
+  const picked = new Set(db.prepare(sweepSql).all(1800)
+    .filter(r => PAY.includes(r.state))     // همان فیلترِ جاوااسکریپتیِ خودِ جارو
+    .map(r => r.uid));
+  for (const [uid, , , , , want, label] of cases) {
+    ok(picked.has(uid) === want, `${want ? 'آزاد می‌شود' : 'دست نمی‌خورد'}: ${label}`);
+  }
+  ok(!/balance/i.test(sweepSql), 'کوئریِ جارو اصلاً کلمه‌ی balance را ندارد');
+  db.close();
+}
+
+const sweep = bodyOf('function sweepStuckPayFlows() {', '\n}');
+ok(!!sweep, 'تابعِ جارو پیدا شد');
+ok(sweep ? /PAY_STATES\.includes\(getState\(r\.uid\)\)/.test(sweep) : false,
+  'فیلترِ استیت از خودِ PAY_STATES می‌آید و وضعیتِ **الانِ** کاربر را می‌خواند نه عکسِ لحظه‌ای');
+// درسِ v3.59.1، این‌بار روی جارو: ربات حین اجرای جارو زنده است، پس کاربری که در همین
+// فاصله فلوی تازه‌ای باز کرده نباید کوبیده شود.
+ok(sweep ? /Number\(s\.paymentId\) !== r\.pid/.test(sweep) : false,
+  'اگر کاربر در این فاصله سراغِ فاکتورِ دیگری رفته باشد، رد می‌شود');
+ok(sweep ? /r\.pstatus === 'pending'/.test(sweep) : false,
+  'فقط ردیفِ pending لغو می‌شود (ردیفِ مرده دوباره دست نمی‌خورد)');
+ok(sweep ? /delete s\.paymentId/.test(sweep) && /setSession\(r\.uid, s\)/.test(sweep) : false,
+  'paymentId از سشن پاک و ذخیره می‌شود');
+ok(sweep ? /setState\(r\.uid, s\.readingId \? 'confirm_pay' : 'idle'\)/.test(sweep) : false,
+  'استیت بیرونِ PAY_STATES می‌رود و فالِ رزروشده حفظ می‌شود');
+ok(sweep ? /catch \(e\)/.test(sweep) : false, 'خطای یک کاربر بقیه‌ی جارو را نمی‌شکند');
+ok(sweep ? !/credit|deduct|balance/.test(sweep) : false, 'جارو به موجودی دست نمی‌زند');
+ok(/sweepStuckPayFlows\(\);/.test(SRC), 'در بوت صدا زده می‌شود');
+ok(/setInterval\(sweepStuckPayFlows,/.test(SRC),
+  'و دوره‌ای هم اجرا می‌شود (کسی که ظهر برمی‌گردد تا ری‌استارتِ بعدی منتظر نمی‌ماند)');
+
 /* ══ ۴) دکمه‌های قدیمی نمی‌میرند (بند ۲ج/۶) ═════════════════════════════ */
 console.log('\n  — 🕰 سازگاری با دکمه‌های کهنه:');
 for (const a of ['pay_cancel', 'pay_back']) {
