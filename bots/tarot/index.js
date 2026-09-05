@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.59.0';
+const PRODUCT_VERSION = '3.59.1';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -5301,8 +5301,21 @@ bot.action(/^pay_exit:(\d+)$/, async (ctx) => {
   const pid = Number(s.paymentId) || parseInt(ctx.match[1], 10);
   const p = stmts.getPayment.get(pid);
   if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
-  if (s.paymentId) { delete s.paymentId; setSession(uid, s); }
-  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  // ⚠️ استیت **فقط** وقتی عوض می‌شود که واقعاً یک فلوی پرداختِ باز را بسته باشیم.
+  // 🐛 نسخه‌ی اولِ همین فیکس (v3.59.0) این خط را بی‌قید داشت، و در همان تیکت دیده شد که
+  // کاربر **چند** پیامِ گارد می‌گیرد؛ `editMessageReplyMarkup` فقط دکمه‌ی پیامی را که
+  // تپ شده برمی‌دارد، پس بقیه زنده می‌مانند. تپ روی یکی از آن‌ها **بعد از** خروج (وقتی
+  // دیگر paymentId ای در سشن نیست) کاربری را که حالا وسطِ انتخابِ کارت یا افشای فالِ
+  // پول‌داده است به `confirm_pay` پرت می‌کرد: گریدش می‌مرد و گاردِ `blockDuringDelivering`
+  // (v3.17.0) دور زده می‌شد. `pay_cancel` دقیقاً همین را با `s.paymentId === pid` می‌بندد.
+  // چون `pid` این‌جا وقتی سشن paymentId دارد از خودِ آن مشتق می‌شود، همان شرط این‌جا
+  // «سشن paymentId داشت» است. شکستنِ قفل دست‌نخورده می‌ماند: کاربرِ واقعاً گیرکرده
+  // همیشه paymentId دارد (گارد بدونش اصلاً فعال نمی‌شود).
+  if (s.paymentId) {
+    delete s.paymentId;
+    setSession(uid, s);
+    setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await replyCanceled(ctx, uid);          // نیتِ ذخیره‌شده همین‌جا برمی‌گردد
   await offerPendingReading(ctx, uid);    // فالِ رزروشده سرگردان نماند
