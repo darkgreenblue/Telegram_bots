@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.59.1';
+const PRODUCT_VERSION = '3.61.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -802,6 +802,9 @@ try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAUL
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // ⌨️ آخرین نسخه‌ی کیبوردی که این کاربر گرفته (بند ۹ب-۲ ریشه). صفر = هنوز هیچ نسخه‌ای.
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_rev INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// مهرِ «جارو آزادش کرد». هم رکوردِ عملیاتی است و هم مارکرِ یک‌بارِ پیامِ اطلاع‌رسانی:
+// شرطِ ارسال «اولین باری که آزاد می‌شود» است، پس هیچ‌کس دو بار پیام نمی‌گیرد.
+try { db.prepare('ALTER TABLE users ADD COLUMN pay_unstuck_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // 👣 آخرین اقدامِ واقعیِ کاربر (v3.56.0). تنها چیزی که می‌گوید یک «فلوی باز» هنوز **زنده**
 // است یا کاربر رهایش کرده. NULL برای ردیف‌های قبل از این نسخه یعنی «خیلی وقت است خبری
 // نیست»، که همان تفسیرِ درست است.
@@ -1122,6 +1125,19 @@ const stmts = {
   // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
   claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
+
+  /* 🚪 کاربرانی که در فلوی پرداخت پارک شده‌اند و فاکتورشان دیگر معنایی ندارد.
+   * فیلترِ استیت عمداً این‌جا نیست و در جاوااسکریپت با خودِ PAY_STATES انجام می‌شود،
+   * وگرنه لیستِ استیت‌ها دو جا تکرار می‌شد و روزی بی‌صدا از هم واگرا می‌شدند.
+   * ⚠️ دو شرطِ پول مقدس‌اند: رسیدِ ثبت‌شده و پرداختِ تأییدشده هرگز، و فاکتورِ **زنده‌ی
+   * مبلغ‌دار** هم نه — کاربر شماره‌کارت و مبلغ را دیده و شاید همین حالا واریز کرده. */
+  markUnstuck: db.prepare('UPDATE users SET pay_unstuck_at=unixepoch() WHERE telegram_id=? AND pay_unstuck_at=0'),
+  stuckPayCandidates: db.prepare(`SELECT u.telegram_id AS uid, u.state AS state,
+      p.id AS pid, p.status AS pstatus
+    FROM users u JOIN payments p ON p.id = json_extract(u.session_json,'$.paymentId')
+    WHERE p.status NOT IN ('waiting_review','approved')
+      AND NOT (p.status='pending' AND p.amount>0)
+      AND p.updated_at < unixepoch()-?`),
   setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
   // ذخیره‌ی خودِ رسید بدونِ تغییرِ وضعیت (مسیرِ auto-approve/reject؛ waiting_review را sendReceiptToAdmin می‌زند)
   saveReceiptFile: db.prepare('UPDATE payments SET receipt_file_id=?, updated_at=unixepoch() WHERE id=?'),
@@ -2077,6 +2093,74 @@ function randomGridPicks(n) {
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   return pool.slice(0, Math.min(n, GRID_SIZE));
+}
+
+/* 🚪 جاروی «فلوی پرداختِ رهاشده» — بند ۹ب/۱ ریشه: هیچ صفحه‌ای بن‌بست نیست.
+ *
+ * چرا لازم است، حتی بعد از فیکسِ v3.59.0: آن فیکس دکمه‌ی انصراف را درست کرد، ولی
+ * کاربری که از قبل گیر افتاده هنوز باید **یک کاری بکند** تا آزاد شود. تصمیمِ صریحِ
+ * مالک: مشکلشان بدونِ هیچ اقدامی از طرفِ خودشان حل شود.
+ *
+ * روی دیتای زنده در لحظه‌ی نوشتن: ۳۵ کاربر در PAY_STATES پارک بودند و **هیچ‌کدام**
+ * پرداختِ waiting_review یا approved نداشتند؛ ۱۹ نفرشان paymentId ای در سشن داشتند که
+ * به فاکتورِ مرده (لغوشده) اشاره می‌کرد، یعنی گارد برایشان صرفاً نویز بود.
+ *
+ * پنجره‌ی `STUCK_PAY_SEC` تنها چیزی است که کاربرِ **همین‌حالا-وسطِ-کار** را مصون نگه
+ * می‌دارد؛ بدونِ آن، ری‌استارت می‌توانست وسطِ انتخابِ بسته آزادش کند.
+ *
+ * دوره‌ای است نه فقط بوتی (الگوی sweepAbandonedPaidReadings): کسی که صبح رها کرده و
+ * ظهر برمی‌گردد نباید تا ری‌استارتِ بعدی پیامِ «فاکتور باز داری» بگیرد. */
+const STUCK_PAY_SEC = 1800;   // ۳۰ دقیقه
+/* 📣 پنجره‌ی اطلاع‌رسانی (تصمیمِ صریحِ مالک: خبردار بشوند).
+ * خودِ جارو **دائمی و ساکت** است؛ این پیام مالِ همان موجِ کاربرانی است که بابتِ باگِ
+ * v3.59.0 گیر افتاده بودند. با گذشتنِ این تاریخ جارو برای همیشه ساکت می‌شود، بدونِ
+ * اینکه کسی لازم باشد چیزی را یادش بماند یا PR دومی بزند. کسی که ماه‌ها بعد یک
+ * صفحه‌ی بسته را رها کند، آزاد می‌شود ولی پیامِ «مشکل حل شد» نمی‌گیرد — چون برای او
+ * مشکلی رخ نداده بود و آن جمله بی‌معنا می‌شد. */
+const STUCK_NOTICE_UNTIL = 1789257600;   // ۲۰۲۶/۰۹/۱۳
+function sweepStuckPayFlows() {
+  let rows = [];
+  const notify = [];
+  try { rows = stmts.stuckPayCandidates.all(STUCK_PAY_SEC); }
+  catch (e) { logErr('sweepStuckPay query:', e.message); return; }
+  let freed = 0;
+  for (const r of rows) {
+    try {
+      /* ⚠️ ردیف‌ها یک **عکسِ لحظه‌ای**اند و ربات در همین فاصله زنده است. پس قبل از
+       * دست‌زدن به کسی، وضعیتِ **الان**ش دوباره خوانده می‌شود: کاربری که در این چند
+       * میلی‌ثانیه خودش ادامه داده یا فلوی تازه‌ای باز کرده نباید کوبیده شود.
+       * همان درسِ v3.59.1: استیت فقط وقتی عوض شود که واقعاً همان فلو را بسته باشیم. */
+      if (!PAY_STATES.includes(getState(r.uid))) continue;   // تک‌منبعِ لیستِ استیت‌ها
+      const s = getSession(r.uid);
+      if (Number(s.paymentId) !== r.pid) continue;           // کاربر رفته سراغِ فاکتورِ دیگر
+      if (r.pstatus === 'pending') stmts.setPaymentStatus.run('canceled', r.pid);
+      delete s.paymentId;
+      setSession(r.uid, s);
+      setState(r.uid, s.readingId ? 'confirm_pay' : 'idle');
+      freed++;
+      /* ⚠️ ترتیب عمدی است: **اول** آزادسازی در دیتابیس، بعد پیام. اگر ارسال بشکند
+       * (کاربر ربات را بلاک کرده، چت پاک شده) کاربر همچنان آزاد شده است. عکسش یعنی
+       * کسی پیامِ «حل شد» بگیرد و روی دکمه‌اش هنوز گیر باشد. */
+      if (stmts.markUnstuck.run(r.uid).changes && Math.floor(Date.now() / 1000) < STUCK_NOTICE_UNTIL) notify.push(r.uid);
+    } catch (e) { logErr('sweepStuckPay uid#' + r.uid, e.message); }
+  }
+  if (freed) log(`🚪 جاروی پرداخت: ${freed} کاربر از فلوی پرداختِ رهاشده آزاد شدند`);
+  if (notify.length) sendUnstuckNotices(notify);
+}
+
+/* پیامِ اطلاع‌رسانیِ موجِ گیرکرده‌ها. جدا از جارو نوشته شده تا شکستِ ارسال هیچ‌وقت
+ * نتواند آزادسازی را نصفه بگذارد. با فاصله‌ی کوچک می‌رود (سقفِ تلگرام ~۳۰ پیام در
+ * ثانیه است و این موج ده‌ها نفر است، نه هزاران). هر خطا بی‌صدا رد می‌شود: کاربری که
+ * ربات را بلاک کرده خطای دائمی می‌دهد و تلاشِ دوباره بی‌فایده است. */
+async function sendUnstuckNotices(uids) {
+  const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.reading, 'reading_go')]]);
+  for (const uid of uids) {
+    try {
+      await bot.telegram.sendMessage(uid, L.unstuck.notice, { reply_markup: kb.reply_markup });
+    } catch (e) { logErr('unstuck notice uid#' + uid, e.message); }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  log(`📣 پیامِ «مشکل حل شد» برای ${uids.length} کاربر فرستاده شد`);
 }
 
 // بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
@@ -6635,9 +6719,11 @@ function launch() {
     .then(() => {
       log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
       recoverOrphanReadings();
+      sweepStuckPayFlows();
       sweepAbandonedPaidReadings();
       // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
       setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
+      setInterval(sweepStuckPayFlows, 3600 * 1000);
     })
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
