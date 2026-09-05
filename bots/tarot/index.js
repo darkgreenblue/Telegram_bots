@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.58.0';
+const PRODUCT_VERSION = '3.59.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1654,8 +1654,13 @@ async function blockDuringOpenPay(ctx, intent) {
   const pid = getSession(uid)?.paymentId;
   if (!pid) return false; // بدون paymentId نمی‌توان انصراف را وصل کرد → بگذار رد شود (مسیر بازیابیِ رسید)
   if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
+  // ⚠️ عمداً `pay_exit` است نه `pay_cancel`. آن یکی از ۱۴۰۵/۰۶/۱۱ معنیِ دیگری گرفت:
+  // «یک قدم عقب به صفحه‌ی بسته‌ها»، که برای کاربرِ الماسی یک ردیفِ پرداختِ **تازه** باز
+  // می‌کند و دوباره به `pay_amount` برمی‌گردد. یعنی همان چیزی که این گارد رویش حساس است.
+  // نتیجه یک حلقه‌ی بی‌پایان بود: هر تپِ منو گارد را می‌آورد، هر انصراف کاربر را داخلِ
+  // فلو نگه می‌داشت (تیکتِ #TRT-8976388520 با شش ردیفِ خالیِ لغوشده پشتِ سرِ هم).
   await ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
-    [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+    [Markup.button.callback(L.buttons.cancel, `pay_exit:${pid}`)],
   ]));
   return true;
 }
@@ -5274,6 +5279,33 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   await replyCanceled(ctx, uid);
   // اگر فال رزروشده‌ای منتظر است، دکمه‌هایش را دوباره جلوی کاربر بگذار تا سرگردان نماند
   await offerPendingReading(ctx, uid);
+});
+
+/* 🚪 خروجِ واقعی از فلوی پرداخت — تنها دکمه‌ی گاردِ «فاکتور باز داری».
+ *
+ * چرا جدا از `pay_cancel` و `pay_back`:
+ *   • `pay_cancel` = دکمه‌ی زیرِ خودِ فاکتور، و برای کاربرِ الماسی معنیش «یک قدم عقب به
+ *     صفحه‌ی بسته‌ها»ست؛ عمداً ردیفِ تازه باز می‌کند و در `pay_amount` می‌ماند.
+ *   • `pay_back`  = دکمه‌ی زیرِ صفحه‌ی بسته‌ها، که به **کیف** برمی‌گردد.
+ *   • این یکی      = «من را از این فلو بیرون بیاور»، پس نیتِ ذخیره‌شده را برمی‌گرداند،
+ *     یعنی کاربر دقیقاً همان‌جایی می‌رسد که وقتی گارد جلویش را گرفت می‌خواست برود.
+ *
+ * فاکتورِ **فعلیِ سشن** بسته می‌شود نه هرچه در دکمه نوشته: هدفِ این دکمه شکستنِ قفل است،
+ * پس باید همان فلویی را ببندد که کاربر همین حالا در آن گیر کرده، حتی اگر روی یک پیامِ
+ * گاردِ کهنه‌تر تپ کند. فقط پرداختِ `pending` لغو می‌شود؛ رسیدِ ثبت‌شده هرگز (بند ۹ب/۳)
+ * — که در عمل هم پیش نمی‌آید، چون `processReceipt` استیت را از PAY_STATES بیرون می‌برد. */
+bot.action(/^pay_exit:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const s = getSession(uid);
+  const pid = Number(s.paymentId) || parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
+  if (s.paymentId) { delete s.paymentId; setSession(uid, s); }
+  setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await replyCanceled(ctx, uid);          // نیتِ ذخیره‌شده همین‌جا برمی‌گردد
+  await offerPendingReading(ctx, uid);    // فالِ رزروشده سرگردان نماند
 });
 
 // ◀️ بازگشتِ یک‌قدمی از صفحه‌ی بسته‌ها به خودِ کیف. دقیقاً همان پاک‌سازیِ pay_cancel را
