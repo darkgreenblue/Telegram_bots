@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.61.0';
+const PRODUCT_VERSION = '3.62.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -6714,17 +6714,32 @@ bot.action('dailyoff_no', async (ctx) => {
 
 /* ===== Launch ===== */
 if (!existsSync('./assets/cards/back.jpg')) logErr('⚠️ assets/cards ناقص است — تصاویر کارت‌ها را کامیت/دانلود کن');
+// کارهایی که باید دقیقاً یک بار، لحظه‌ی بالا آمدنِ ربات اجرا شوند. `launch` بعد از خطا
+// دوباره تلاش می‌کند، پس گاردِ یک‌بار لازم است وگرنه با هر تلاشِ موفق یک `setInterval`
+// تازه ثبت می‌شد و جاروها چند برابر تیک می‌زدند.
+let bootDone = false;
+function onLaunched() {
+  log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
+  if (bootDone) return;
+  bootDone = true;
+  recoverOrphanReadings();
+  sweepStuckPayFlows();
+  sweepAbandonedPaidReadings();
+  // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
+  setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
+  setInterval(sweepStuckPayFlows, 3600 * 1000);
+}
 function launch() {
-  bot.launch({ dropPendingUpdates: true })
-    .then(() => {
-      log(`✅ tarot bot started (long polling, locale=${LOCALE})`);
-      recoverOrphanReadings();
-      sweepStuckPayFlows();
-      sweepAbandonedPaidReadings();
-      // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
-      setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
-      setInterval(sweepStuckPayFlows, 3600 * 1000);
-    })
+  // ⚠️ کارِ بوت در قلابِ **onLaunch** است، نه در `.then()`.
+  //
+  // 🐛 باگی که این را ساخت (۱۴ شهریور ۱۴۰۵): برای long polling، `launch()` داخلش
+  // `await startPolling()` دارد، یعنی promise اش تا **توقفِ** ربات resolve نمی‌شود.
+  // پس `.then()` لحظه‌ی خاموش شدن اجرا می‌شد نه لحظه‌ی بالا آمدن: هر کارِ بوت یک
+  // ری‌استارت دیر می‌رسید و `setInterval`ها عملاً هیچ‌وقت تیک نمی‌زدند. کاملاً بی‌صدا
+  // بود چون هیچ خطایی نمی‌داد و رویدادهای ریفاند هم بالاخره ثبت می‌شدند.
+  // `onLaunch` بعد از `getMe()` و **قبل از** شروعِ polling صدا زده می‌شود، پس هم
+  // اتصال تأیید شده (پیام‌ها می‌رسند) و هم واقعاً لحظه‌ی شروع است.
+  bot.launch({ dropPendingUpdates: true }, onLaunched)
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
