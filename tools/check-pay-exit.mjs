@@ -306,6 +306,46 @@ console.log('\n  — 📣 پیامِ «مشکل حل شد»:');
     'خودِ حلقه‌ی جارو هیچ پیامی نمی‌فرستد (ارسال بعد از تمام‌شدنِ کلِ آزادسازی، با فاصله‌ی نرخ)');
 }
 
+/* ══ ۶) کارِ بوت باید واقعاً لحظه‌ی بوت اجرا شود ═════════════════════════ */
+// 🐛 باگی که این بخش از آن آمد: جارو مرج و دیپلوی شد ولی روی سرور **هیچ‌کس را آزاد
+// نکرد**. علت در خودِ جارو نبود، در جای صدا زدنش بود: `bot.launch()` برای long polling
+// داخلش `await startPolling()` دارد، پس `.then()` لحظه‌ی **توقفِ** ربات اجرا می‌شود نه
+// شروعش. کارِ بوت یک ری‌استارت دیر می‌رسید و `setInterval`ها هیچ‌وقت تیک نمی‌زدند.
+//
+// این ادعا با **خودِ کتابخانه** سنجیده می‌شود، نه با خواندنِ سورس: اگر روزی telegraf
+// معناشناسی‌اش را عوض کند، همین‌جا قرمز می‌شود.
+console.log('\n  — 🚀 لحظه‌ی اجرای کارِ بوت:');
+{
+  const { Telegraf } = await import('../bots/tarot/node_modules/telegraf/lib/index.js');
+  const t = new Telegraf('1:fake');
+  t.telegram.getMe = async () => ({ id: 1, username: 'fake', is_bot: true });
+  t.telegram.deleteWebhook = async () => true;
+  let stopPolling;
+  t.startPolling = () => new Promise((r) => { stopPolling = r; });
+  let atStart = false, atStop = false;
+  t.launch({ dropPendingUpdates: true }, () => { atStart = true; }).then(() => { atStop = true; });
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+  await tick();
+  ok(atStart, 'قلابِ onLaunch در لحظه‌ی **شروع** صدا زده می‌شود');
+  ok(!atStop, '…و promise ی launch هنوز resolve نشده (پس .then هنوز اجرا نشده)');
+  stopPolling();                       // یعنی ربات متوقف شد
+  await tick();
+  ok(atStop, 'و .then فقط بعد از **توقفِ** ربات اجرا می‌شود — پس جای کارِ بوت نیست');
+}
+
+const boot = bodyOf('function onLaunched() {', '\n}');
+ok(!!boot, 'کارِ بوت در تابعِ onLaunched جمع شده');
+for (const fn of ['recoverOrphanReadings', 'sweepStuckPayFlows', 'sweepAbandonedPaidReadings']) {
+  ok(boot ? boot.includes(`${fn}();`) : false, `${fn} در قلابِ بوت صدا زده می‌شود`);
+}
+ok(boot ? /setInterval\(sweepStuckPayFlows,/.test(boot) : false, 'و اینتروال هم همان‌جا ثبت می‌شود');
+ok(boot ? /if \(bootDone\) return;/.test(boot) : false,
+  'گاردِ یک‌بار هست (launch بعد از خطا دوباره تلاش می‌کند و اینتروال نباید چند بار ثبت شود)');
+ok(/bot\.launch\(\{ dropPendingUpdates: true \}, onLaunched\)/.test(SRC),
+  'قلاب به خودِ launch پاس داده شده');
+ok(!/bot\.launch\([\s\S]{0,80}\)\s*\n?\s*\.then\(/.test(SRC),
+  'هیچ کارِ بوتی روی .then ی launch آویزان نیست');
+
 /* ══ ۴) دکمه‌های قدیمی نمی‌میرند (بند ۲ج/۶) ═════════════════════════════ */
 console.log('\n  — 🕰 سازگاری با دکمه‌های کهنه:');
 for (const a of ['pay_cancel', 'pay_back']) {
