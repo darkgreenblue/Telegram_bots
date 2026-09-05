@@ -136,9 +136,16 @@ ok('exposure فقط داخلِ شاخه‌ی ارسالِ موفق ثبت می�
    ⚠️ ادعاهای ترتیبیِ زیر باید روی **مسیرِ آزمایش** بنشینند، نه روی کلِ جارو: با indexOf
    روی کلِ متن، اولین تطابق از مسیرِ آزادِ بالاتر می‌آمد و ادعا بی‌آنکه چیزی خراب شده باشد
    قرمز می‌شد (و بدتر، می‌شد با یک تغییرِ ترتیب سبزِ دروغین گرفت). */
-const iFree = sweep.indexOf('if (!expOn) {');
-const freePath = iFree < 0 ? '' : sweep.slice(iFree, sweep.indexOf('\n      }', iFree));
-const expPath = iFree < 0 ? sweep : sweep.slice(0, iFree) + sweep.slice(sweep.indexOf('\n      }', iFree));
+/* ⚠️ ادعاهای **ترتیبی** روی بدنه‌ی خودِ حلقه می‌نشینند، نه روی `sweep` که کلِ ناحیه است
+   (از `REMINDER_HOUR` تا انتهای `setInterval`، شاملِ همه‌ی توابعِ کمکیِ بالای آن).
+   v3.57.0 دو تابعِ کمکیِ تازه به آن ناحیه اضافه کرد که خودشان `sendMessage` و
+   `setNightReminded` دارند، و همان باعث شد `indexOf` دو ادعای کاملاً سالم را قرمز کند —
+   همان کلاسِ خطای کامنتِ بالا، این‌بار از سمتِ **دامنه** به‌جای سمتِ متن. */
+const loop = decomment(block(SRC, 'setInterval(async () => {\n  try {\n    const hour = botHour();') || '');
+ok('بدنه‌ی حلقه‌ی جارو استخراج شد', !!loop);
+const iFree = loop.indexOf('if (!expOn) {');
+const freePath = iFree < 0 ? '' : loop.slice(iFree, loop.indexOf('\n      }', iFree));
+const expPath = iFree < 0 ? loop : loop.slice(0, iFree) + loop.slice(loop.indexOf('\n      }', iFree));
 ok('مسیرِ آزادِ بعد از آزمایش پیدا شد', !!freePath);
 {
   const iPeek = expPath.indexOf('peekVariant(db, uid, NIGHT_EXP)');
@@ -445,6 +452,146 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
   //    نتیجه سوگیری می‌گیرد (درسِ ثبت‌شده‌ی بند ۲الف ریشه).
   ok('گارد به شاخه‌ی A/B نگاه نمی‌کند',
     !!src && !/variant|arm|NIGHT_ARMS|lucky_date|last_daily_date/.test(src));
+}
+
+/* ═══════ ۱۰) یادآوریِ فالِ نیمه‌کاره (v3.57.0) ═══════
+   تصمیمِ صریحِ مالک: فلوی رهاشده‌ی بیش از ۲۴ ساعت هر شب یادآوریِ **مخصوصِ خودش** را با
+   دکمه‌ی انصراف می‌گیرد؛ انصراف = بازگشت به حالت طبیعی، بی‌تفاوتی = تکرارِ هر شب.
+   بلوک عمداً **رفتاری** است: هر دو تابع از سورس بریده و اجرا می‌شوند. */
+{
+  const bodyOfFn = (marker) => {
+    const i = SRC.indexOf(marker);
+    if (i < 0) return null;
+    const s = SRC.indexOf('{', i);
+    let d = 0;
+    for (let j = s; j < SRC.length; j++) {
+      if (SRC[j] === '{') d++;
+      else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(s, j + 1); }
+    }
+    return null;
+  };
+  const iSet = SRC.indexOf('const STUCK_READING_STATES = new Set([');
+  const setSrc = iSet > -1 ? SRC.slice(SRC.indexOf('[', iSet), SRC.indexOf(']);', iSet) + 1) : null;
+  ok('STUCK_READING_STATES از سورس استخراج شد', !!setSrc);
+  const stuckSet = new Function(`return new Set(${setSrc});`)();
+  ok('استیت‌های فالِ ناتمام پوشش داده شده‌اند',
+    ['await_question', 'breathing', 'shuffling', 'picking', 'confirm_pay', 'revealing', 'confirm_focus']
+      .every((s) => stuckSet.has(s)));
+  // ⚠️ `feedback` عمداً نیست: فال **تحویل شده** و کاربر فقط نمره نداده؛ چیزی برای «ادامه»
+  // یا «انصراف» نمانده. `idle` هم طبعاً نه.
+  ok('استیتِ feedback یادآوریِ فالِ ناتمام نمی‌گیرد', !stuckSet.has('feedback'));
+  ok('استیتِ idle یادآوریِ فالِ ناتمام نمی‌گیرد', !stuckSet.has('idle'));
+
+  const forSrc = bodyOfFn('function stuckReadingFor(u)');
+  ok('stuckReadingFor از سورس استخراج شد', !!forSrc);
+  const mkFor = (row) => new Function('STUCK_READING_STATES', 'stmts',
+    `return function stuckReadingFor(u)${forSrc};`)(stuckSet, { latestOpenReading: { get: () => row } });
+
+  ok('استیتِ غیرِ فلو هیچ یادآوریِ ناتمام نمی‌گیرد',
+    mkFor({ id: 1, status: 'paid' })({ telegram_id: 7, state: 'idle' }) === null);
+  ok('استیتِ فلو ولی بدونِ هیچ فالِ ناتمام → یادآوری ندارد',
+    mkFor(undefined)({ telegram_id: 7, state: 'await_question' }) === null);
+  {
+    const paid = mkFor({ id: 9, status: 'paid' })({ telegram_id: 7, state: 'await_question' });
+    ok('فالِ paid یادآوری و دکمه‌ی انصراف می‌گیرد', !!paid && paid.canCancel === true && paid.r.id === 9);
+    const pend = mkFor({ id: 4, status: 'pending_payment' })({ telegram_id: 7, state: 'confirm_pay' });
+    ok('فالِ pending_payment هم انصراف می‌گیرد', !!pend && pend.canCancel === true);
+    // 🔑 محصول دارد تحویل می‌شود: انصراف یعنی پس‌گرفتنِ چیزی که کاربر همین حالا دارد
+    // می‌گیرد (همان تصمیمِ blockDuringDelivering در v3.17.0).
+    const started = mkFor({ id: 5, status: 'started' })({ telegram_id: 7, state: 'revealing' });
+    ok('فالِ در حالِ افشا (started) دکمه‌ی انصراف نمی‌گیرد', !!started && started.canCancel === false);
+  }
+
+  // ── SQL: فقط فالِ واقعاً ناتمام ──────────────────────────────────────────
+  {
+    const i = SRC.indexOf('latestOpenReading: db.prepare(');
+    const sql = i > -1 ? SRC.slice(i, SRC.indexOf('`)', i)) : '';
+    ok('کوئری هر سه وضعیتِ ناتمام را می‌گیرد',
+      /'pending_payment','paid','started'/.test(sql.replace(/\s+/g, '')));
+    for (const bad of ['delivered', 'canceled', 'refunded'])
+      ok(`کوئری وضعیتِ ${bad} را نمی‌گیرد`, !sql.includes(`'${bad}'`));
+    ok('تازه‌ترین فال برداشته می‌شود', /ORDER BY id DESC LIMIT 1/.test(sql));
+    ok('کوئری به کاربرِ خودش محدود است (مالکیتِ رکورد)', /user_id=\?/.test(sql));
+  }
+
+  // ── رفتارِ ارسال ─────────────────────────────────────────────────────────
+  const sendSrc = bodyOfFn('async function sendStuckReadingReminder(u)');
+  ok('sendStuckReadingReminder از سورس استخراج شد', !!sendSrc);
+  const runSend = (row, state, revealRow = ['REVEAL']) => {
+    const log = { text: null, kb: null, stamped: 0, tracked: null, kbEnsured: 0, sent: 0 };
+    const fn = new Function('deps', `
+      const { stuckReadingFor, revealResumeRow, Markup, L, stmts, bot, track, db, ensureKeyboard } = deps;
+      return async function sendStuckReadingReminder(u)${sendSrc};`)({
+      stuckReadingFor: mkFor(row), revealResumeRow: () => revealRow,
+      Markup: { button: { callback: (t, d) => ({ t, d }) }, inlineKeyboard: (r) => ({ reply_markup: r }) },
+      L: { buttons: { resumeReading: 'RESUME', stuckCancel: 'CANCEL' },
+           reading: { stuckReading: (c) => `MSG:${c}` } },
+      stmts: { setNightReminded: { run: () => { log.stamped++; } } },
+      bot: { telegram: { sendMessage: (_i, t, o) => { log.sent++; log.text = t; log.kb = o.reply_markup; return Promise.resolve({}); } } },
+      track: (_d, _u, name, props) => { log.tracked = { name, props }; }, db: {},
+      ensureKeyboard: () => { log.kbEnsured++; return Promise.resolve(); },
+    });
+    return fn({ telegram_id: 7, state }).then((r) => ({ ...log, ret: r }));
+  };
+
+  {
+    const r = await runSend({ id: 9, status: 'paid' }, 'await_question');
+    ok('فالِ ناتمام پیامِ مخصوصِ خودش را می‌گیرد', r.ret === true && r.sent === 1);
+    ok('متن حالتِ «انصراف ممکن است» را می‌گیرد', r.text === 'MSG:true');
+    ok('دو دکمه: ادامه و انصراف', r.kb.length === 2);
+    ok('دکمه‌ی ادامه از مسیرِ موجودِ reading:resume می‌رود', r.kb[0][0].d === 'reading:resume');
+    // انصراف عمداً `rcancel:` است: هندلرِ موجود که مالکیتِ رکورد را چک می‌کند و طبقِ
+    // v3.54.0 رکورد را terminal می‌کند. هیچ مسیرِ لغوِ دومی ساخته نشد.
+    ok('دکمه‌ی انصراف از هندلرِ موجودِ rcancel می‌رود', r.kb[1][0].d === 'rcancel:9');
+    ok('مهرِ شبانه قبل از ارسال زده می‌شود (یک پیام در شب)', r.stamped === 1);
+    ok('رویدادِ افزایشیِ stuck_reading_reminder ثبت می‌شود', r.tracked?.name === 'stuck_reading_reminder');
+    ok('رویداد فال و استیت را ثبت می‌کند', r.tracked?.props?.reading_id === 9 && r.tracked?.props?.state === 'await_question');
+    ok('منوی گم‌شده‌ی همین کاربر هم ترمیم می‌شود', r.kbEnsured === 1);
+  }
+  {
+    const r = await runSend({ id: 5, status: 'started' }, 'revealing');
+    ok('وسطِ افشا فقط دکمه‌ی ادامه می‌آید (بدونِ انصراف)', r.kb.length === 1);
+    ok('دکمه‌ی ادامه‌ی افشا از revealResumeRow می‌آید', r.kb[0][0] === 'REVEAL');
+    ok('متنِ وسطِ افشا جمله‌ی انصراف را ندارد', r.text === 'MSG:false');
+  }
+  {
+    const r = await runSend({ id: 5, status: 'started' }, 'revealing', null);
+    ok('اگر چیزی برای ادامه نمانده، یادآوریِ ناتمام نمی‌رود', r.ret === false && r.sent === 0);
+    ok('و مهرِ شبانه هم نمی‌خورد (یادآوریِ عادی سرِ جایش)', r.stamped === 0);
+  }
+  {
+    const r = await runSend(undefined, 'idle');
+    ok('کاربرِ بدونِ فالِ ناتمام به مسیرِ یادآوریِ عادی می‌رود', r.ret === false && r.stamped === 0);
+  }
+
+  // ── جای فراخوانی در جارو ─────────────────────────────────────────────────
+  {
+    const sw = decomment(bodyOfFn('setInterval(async () => {\n  try {\n    const hour = botHour();') || '');
+    const iCall = sw.indexOf('sendStuckReadingReminder(u)');
+    ok('جارو یادآوریِ فالِ ناتمام را صدا می‌زند', iCall > -1);
+    ok('بعد از گاردِ فلوی زنده است (فلوی تازه هنوز ساکت می‌ماند)',
+      sw.indexOf('reminderBlocked(u, today)') < iCall);
+    ok('قبل از peekVariant است (این کاربر exposure نمی‌گیرد)', iCall < sw.indexOf('peekVariant('));
+    ok('قبل از هر دو رژیمِ آزمایش است', iCall < sw.indexOf('if (!expOn)'));
+    ok('بعد از ارسالِ ناتمام، یادآوریِ عادی فرستاده نمی‌شود (continue)',
+      /sendStuckReadingReminder\(u\)\) \{ await sleep\(\d+\); continue; \}/.test(sw));
+  }
+
+  // ── کپی در هر چهار زبان ──────────────────────────────────────────────────
+  for (const loc of ['fa', 'ru', 'pt', 'es']) {
+    const M = (await import(`../bots/tarot/locales/${loc}.js`)).default;
+    const withC = M.reading?.stuckReading?.(true), noC = M.reading?.stuckReading?.(false);
+    ok(`${loc}: متنِ فالِ ناتمام وجود دارد`, typeof withC === 'string' && withC.length > 20);
+    ok(`${loc}: برچسبِ دکمه‌ی انصراف وجود دارد`, typeof M.buttons?.stuckCancel === 'string');
+    // جمله‌ی هشدارِ الماس فقط وقتی می‌آید که انصراف واقعاً ممکن باشد.
+    ok(`${loc}: نسخه‌ی بدونِ انصراف کوتاه‌تر است`, noC.length < withC.length);
+    ok(`${loc}: نسخه‌ی بدونِ انصراف پیشوندِ همان متن است`, withC.startsWith(noC));
+    // 🔑 صداقت: کاربر باید **قبل** از تپ بداند انصراف الماس را برنمی‌گرداند (v3.54.0
+    // خودش این را کم‌هزینه‌ترین درمانِ «دکمه‌ی انصرافِ مخرب» نامیده بود).
+    ok(`${loc}: نسخه‌ی انصراف‌دار درباره‌ی الماس صریح است`, /💎/.test(withC));
+    for (const t of [withC, noC, M.buttons.stuckCancel])
+      ok(`${loc}: بدونِ خط تیره‌ی بلند (بند ۱۰)`, !t.includes('—') && !t.includes('--'));
+  }
 }
 
 /* ═══════ نتیجه ═══════ */

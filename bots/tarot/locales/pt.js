@@ -272,6 +272,7 @@ export default {
     backToInvoice: '◀️ Voltar ao pedido',
     backOneStep: '◀️ Voltar',
     resumeReading: '🔮 Continuar aquela leitura',
+    stuckCancel: '❌ Cancelar a leitura',
     dailyAfterOnboard: '🎴 Ver a minha carta de hoje (grátis)',
     gateOpenChannel: '📢 Abrir o canal da carta do dia',
     gateCheck: '✅ Já me inscrevi, pode conferir',
@@ -791,6 +792,8 @@ export default {
     canceled: 'Beleza, estou aqui quando você quiser 🌙',
     backToMenu: 'Voltamos ao menu principal 🌳',
     openReadingGuard: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela ou deixar pra lá?',
+    stuckReading: (canCancel) => 'Você tem uma leitura que ficou pela metade! 🌙\n\nAs suas cartas continuam te esperando; volta nelas quando quiser.'
+      + (canCancel ? '\n\n💎 Se não quiser mais, é só cancelar; só lembra que os diamantes não voltam.' : ''),
   },
 
   share: {
