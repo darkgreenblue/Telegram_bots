@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.60.0';
+const PRODUCT_VERSION = '3.61.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -802,6 +802,9 @@ try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAUL
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // ⌨️ آخرین نسخه‌ی کیبوردی که این کاربر گرفته (بند ۹ب-۲ ریشه). صفر = هنوز هیچ نسخه‌ای.
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_rev INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// مهرِ «جارو آزادش کرد». هم رکوردِ عملیاتی است و هم مارکرِ یک‌بارِ پیامِ اطلاع‌رسانی:
+// شرطِ ارسال «اولین باری که آزاد می‌شود» است، پس هیچ‌کس دو بار پیام نمی‌گیرد.
+try { db.prepare('ALTER TABLE users ADD COLUMN pay_unstuck_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // 👣 آخرین اقدامِ واقعیِ کاربر (v3.56.0). تنها چیزی که می‌گوید یک «فلوی باز» هنوز **زنده**
 // است یا کاربر رهایش کرده. NULL برای ردیف‌های قبل از این نسخه یعنی «خیلی وقت است خبری
 // نیست»، که همان تفسیرِ درست است.
@@ -1128,6 +1131,7 @@ const stmts = {
    * وگرنه لیستِ استیت‌ها دو جا تکرار می‌شد و روزی بی‌صدا از هم واگرا می‌شدند.
    * ⚠️ دو شرطِ پول مقدس‌اند: رسیدِ ثبت‌شده و پرداختِ تأییدشده هرگز، و فاکتورِ **زنده‌ی
    * مبلغ‌دار** هم نه — کاربر شماره‌کارت و مبلغ را دیده و شاید همین حالا واریز کرده. */
+  markUnstuck: db.prepare('UPDATE users SET pay_unstuck_at=unixepoch() WHERE telegram_id=? AND pay_unstuck_at=0'),
   stuckPayCandidates: db.prepare(`SELECT u.telegram_id AS uid, u.state AS state,
       p.id AS pid, p.status AS pstatus
     FROM users u JOIN payments p ON p.id = json_extract(u.session_json,'$.paymentId')
@@ -2107,8 +2111,16 @@ function randomGridPicks(n) {
  * دوره‌ای است نه فقط بوتی (الگوی sweepAbandonedPaidReadings): کسی که صبح رها کرده و
  * ظهر برمی‌گردد نباید تا ری‌استارتِ بعدی پیامِ «فاکتور باز داری» بگیرد. */
 const STUCK_PAY_SEC = 1800;   // ۳۰ دقیقه
+/* 📣 پنجره‌ی اطلاع‌رسانی (تصمیمِ صریحِ مالک: خبردار بشوند).
+ * خودِ جارو **دائمی و ساکت** است؛ این پیام مالِ همان موجِ کاربرانی است که بابتِ باگِ
+ * v3.59.0 گیر افتاده بودند. با گذشتنِ این تاریخ جارو برای همیشه ساکت می‌شود، بدونِ
+ * اینکه کسی لازم باشد چیزی را یادش بماند یا PR دومی بزند. کسی که ماه‌ها بعد یک
+ * صفحه‌ی بسته را رها کند، آزاد می‌شود ولی پیامِ «مشکل حل شد» نمی‌گیرد — چون برای او
+ * مشکلی رخ نداده بود و آن جمله بی‌معنا می‌شد. */
+const STUCK_NOTICE_UNTIL = 1789257600;   // ۲۰۲۶/۰۹/۱۳
 function sweepStuckPayFlows() {
   let rows = [];
+  const notify = [];
   try { rows = stmts.stuckPayCandidates.all(STUCK_PAY_SEC); }
   catch (e) { logErr('sweepStuckPay query:', e.message); return; }
   let freed = 0;
@@ -2126,9 +2138,29 @@ function sweepStuckPayFlows() {
       setSession(r.uid, s);
       setState(r.uid, s.readingId ? 'confirm_pay' : 'idle');
       freed++;
+      /* ⚠️ ترتیب عمدی است: **اول** آزادسازی در دیتابیس، بعد پیام. اگر ارسال بشکند
+       * (کاربر ربات را بلاک کرده، چت پاک شده) کاربر همچنان آزاد شده است. عکسش یعنی
+       * کسی پیامِ «حل شد» بگیرد و روی دکمه‌اش هنوز گیر باشد. */
+      if (stmts.markUnstuck.run(r.uid).changes && Math.floor(Date.now() / 1000) < STUCK_NOTICE_UNTIL) notify.push(r.uid);
     } catch (e) { logErr('sweepStuckPay uid#' + r.uid, e.message); }
   }
   if (freed) log(`🚪 جاروی پرداخت: ${freed} کاربر از فلوی پرداختِ رهاشده آزاد شدند`);
+  if (notify.length) sendUnstuckNotices(notify);
+}
+
+/* پیامِ اطلاع‌رسانیِ موجِ گیرکرده‌ها. جدا از جارو نوشته شده تا شکستِ ارسال هیچ‌وقت
+ * نتواند آزادسازی را نصفه بگذارد. با فاصله‌ی کوچک می‌رود (سقفِ تلگرام ~۳۰ پیام در
+ * ثانیه است و این موج ده‌ها نفر است، نه هزاران). هر خطا بی‌صدا رد می‌شود: کاربری که
+ * ربات را بلاک کرده خطای دائمی می‌دهد و تلاشِ دوباره بی‌فایده است. */
+async function sendUnstuckNotices(uids) {
+  const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.reading, 'reading_go')]]);
+  for (const uid of uids) {
+    try {
+      await bot.telegram.sendMessage(uid, L.unstuck.notice, { reply_markup: kb.reply_markup });
+    } catch (e) { logErr('unstuck notice uid#' + uid, e.message); }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  log(`📣 پیامِ «مشکل حل شد» برای ${uids.length} کاربر فرستاده شد`);
 }
 
 // بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)

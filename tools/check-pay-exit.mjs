@@ -269,6 +269,43 @@ ok(/sweepStuckPayFlows\(\);/.test(SRC), 'در بوت صدا زده می‌شود
 ok(/setInterval\(sweepStuckPayFlows,/.test(SRC),
   'و دوره‌ای هم اجرا می‌شود (کسی که ظهر برمی‌گردد تا ری‌استارتِ بعدی منتظر نمی‌ماند)');
 
+/* ══ ۵) پیامِ یک‌باره: نه دو بار، نه به آدمِ اشتباه، نه قبل از رفعِ مشکل ═══ */
+console.log('\n  — 📣 پیامِ «مشکل حل شد»:');
+{
+  // مارکرِ یک‌بار بودن روی SQLite واقعی: دومین اجرا نباید کسی را دوباره پیام بدهد.
+  const mark = sqlOf('markUnstuck');
+  if (mark) {
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, pay_unstuck_at INTEGER NOT NULL DEFAULT 0);');
+    db.prepare('INSERT INTO users (telegram_id) VALUES (1)').run();
+    const first = db.prepare(mark).run(1).changes;
+    const second = db.prepare(mark).run(1).changes;
+    ok(first === 1, 'اولین آزادسازی مهر می‌خورد (پس پیام می‌رود)');
+    ok(second === 0, 'دومین بار مهر نمی‌خورد، پس کاربر پیامِ تکراری نمی‌گیرد');
+    ok(/pay_unstuck_at=0/.test(mark), 'یک‌بار بودن داخلِ خودِ UPDATE است، نه در جاوااسکریپت');
+    db.close();
+  }
+  const notice = sweep || '';
+  // ⚠️ مهم‌ترین ادعای این بخش: پیام بعد از آزادسازیِ واقعی می‌رود.
+  const iFree = notice.indexOf('setState(r.uid');
+  const iMark = notice.indexOf('markUnstuck');
+  ok(iFree > -1 && iMark > iFree,
+    'مهر و پیام **بعد از** آزادسازیِ دیتابیس‌اند (کسی پیامِ «حل شد» نگیرد در حالی که هنوز گیر است)');
+  ok(/STUCK_NOTICE_UNTIL/.test(notice),
+    'پیام پشتِ پنجره‌ی زمانی است، پس جارو بعد از آن موج برای همیشه ساکت می‌شود');
+  ok(/const STUCK_NOTICE_UNTIL = \d{10};/.test(SRC), 'پنجره یک تاریخِ صریح است، نه فلگِ دستی');
+
+  const sender = bodyOf('async function sendUnstuckNotices(uids) {', '\n}');
+  ok(!!sender, 'فرستنده جدا از خودِ جارو است');
+  ok(sender ? /catch \(e\)/.test(sender) : false,
+    'شکستِ ارسالِ یک کاربر بقیه را نمی‌شکند (بلاک‌کرده‌ها خطای دائمی می‌دهند)');
+  ok(sender ? /setTimeout/.test(sender) : false, 'با فاصله می‌فرستد (سقفِ نرخِ تلگرام)');
+  ok(sender ? /L\.unstuck\.notice/.test(sender) : false, 'متن از locale می‌آید نه از index');
+  ok(sender ? /'reading_go'/.test(sender) : false, 'دکمه‌ی پیام کاربر را به منوی فال برمی‌گرداند');
+  ok(!/telegram\.send/.test(sweep || ''),
+    'خودِ حلقه‌ی جارو هیچ پیامی نمی‌فرستد (ارسال بعد از تمام‌شدنِ کلِ آزادسازی، با فاصله‌ی نرخ)');
+}
+
 /* ══ ۴) دکمه‌های قدیمی نمی‌میرند (بند ۲ج/۶) ═════════════════════════════ */
 console.log('\n  — 🕰 سازگاری با دکمه‌های کهنه:');
 for (const a of ['pay_cancel', 'pay_back']) {
