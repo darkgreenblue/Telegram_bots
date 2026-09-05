@@ -78,13 +78,45 @@ if (setStatus) {
   ok(db.prepare("SELECT COUNT(*) c FROM payments WHERE status='canceled' AND amount=0").get().c === 5,
     'و پنج ردیفِ خالیِ لغوشده جا می‌گذارد — همان اثرانگشتی که در دیتای زنده دیده شد');
 
-  // رفتارِ تازه = pay_exit
-  const payExit = (s) => {
-    cancelPending(s.session.paymentId);
-    const sess = { ...s.session }; delete sess.paymentId;
-    return { state: sess.readingId ? 'confirm_pay' : 'idle', session: sess };
+  /* رفتارِ تازه = **خودِ هندلرِ pay_exit، بریده از سورس و اجراشده**.
+     ⚠️ نسخه‌ی اولِ این چک این‌جا یک بازنویسیِ محلی داشت (`payExit` سه‌خطی) و با چند
+     ادعای رجکسی جبرانش می‌کرد. همان تله‌ی ثبت‌شده‌ی `check-lucky`/`check-announce`:
+     مدل «طراحی» را اثبات می‌کند نه «کد» را، و رجکس شکلِ خط را می‌بیند نه شرطی که آن خط
+     زیرش نشسته. نتیجه: تپِ دکمه‌ی گاردِ **کهنه** (که استیت را بی‌قید عوض می‌کرد)
+     کاملاً نامرئی بود. حالا هیچ کپی‌ای در کار نیست. */
+  const exitBody = (() => {
+    const i = SRC.indexOf('bot.action(/^pay_exit:(\\d+)$/');
+    const s0 = SRC.indexOf('{', SRC.indexOf('=>', i));
+    let d = 0;
+    for (let j = s0; j < SRC.length; j++) {
+      if (SRC[j] === '{') d++;
+      else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(s0 + 1, j); }
+    }
+    return null;
+  })();
+  ok(!!exitBody, 'هندلرِ pay_exit از سورس استخراج شد (بدونِ کپیِ محلی)');
+
+  /** هندلرِ واقعی را روی همان SQLite اجرا می‌کند و استیت/سشنِ نهایی را برمی‌گرداند. */
+  // ⚠️ async است چون خودِ هندلر از اولین خط `await` دارد؛ نسخه‌ی اولِ این wrapper
+  // همگام بود و `log` را **قبل از** تمام‌شدنِ بدنه برمی‌گرداند، یعنی همه‌ی ادعاها روی
+  // حالتِ دست‌نخورده می‌نشستند. دقیقاً همان کلاسِ «تستی که کدِ واقعی را اجرا نمی‌کند».
+  const payExit = async (s, tapPid) => {
+    const log = { state: s.state, session: { ...s.session } };
+    const fn = new Function('ctx', 'deps', `
+      const { getSession, setSession, setState, stmts, replyCanceled, offerPendingReading } = deps;
+      return (async () => {${exitBody}})();`);
+    const p = fn({ from: { id: UID }, match: [null, String(tapPid ?? s.session.paymentId ?? 0)],
+         answerCbQuery: () => Promise.resolve(), editMessageReplyMarkup: () => Promise.resolve() },
+       { getSession: () => log.session,
+         setSession: (_u, v) => { log.session = v; },
+         setState: (_u, v) => { log.state = v; },
+         stmts: { getPayment: { get: (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id) },
+                  setPaymentStatus: { run: (stt, id) => db.prepare(setStatus).run(stt, id) } },
+         replyCanceled: () => Promise.resolve(), offerPendingReading: () => Promise.resolve() });
+    await p;
+    return log;
   };
-  const after = payExit(st);
+  const after = await payExit(st);
   ok(!blocked(after), '✅ با pay_exit یک بار انصراف کافی است و قفل می‌شکند');
   ok(!PAY_STATES.includes(after.state), `استیت از PAY_STATES بیرون می‌رود (${after.state})`);
   ok(!after.session.paymentId, 'paymentId از سشن پاک می‌شود');
@@ -92,9 +124,41 @@ if (setStatus) {
     'هیچ ردیفِ پرداختِ بازی جا نمی‌ماند');
 
   // فالِ رزروشده: استیت باید به confirm_pay برود نه idle
-  const withReading = payExit({ state: 'pay_receipt', session: { paymentId: openRow(), readingId: 7 } });
+  const withReading = await payExit({ state: 'pay_receipt', session: { paymentId: openRow(), readingId: 7 } });
   ok(withReading.state === 'confirm_pay', 'کاربری که فالِ رزروشده دارد به confirm_pay می‌رود، نه idle');
   ok(!blocked(withReading), 'و او هم دیگر بلاک نمی‌شود');
+
+  /* 🕰 تپِ دکمه‌ی گاردِ **کهنه** (v3.59.1).
+     کاربرِ تیکت **چند** پیامِ گارد گرفته بود، و `editMessageReplyMarkup` فقط دکمه‌ی
+     پیامی را که تپ شده برمی‌دارد؛ بقیه زنده می‌مانند. پس تپ روی یکی از آن‌ها بعد از
+     خروج یک سناریوی واقعی است، نه فرضی. آن‌جا هیچ فلوی پرداختِ بازی وجود ندارد و این
+     دکمه **هیچ کاری** نباید بکند. */
+  console.log('\n  — 🕰 تپِ گاردِ کهنه بعد از خروج:');
+  {
+    const dead = openRow(); db.prepare(setStatus).run('canceled', dead);
+    const mid = await payExit({ state: 'picking', session: { readingId: 5, picks: [1], need: 3 } }, dead);
+    ok(mid.state === 'picking',
+      'کاربرِ وسطِ انتخابِ کارت سرِ جایش می‌ماند (گریدش نمی‌میرد)', `شد: ${mid.state}`);
+    // فالِ در حالِ تحویل: پول داده و محصولش دارد می‌رسد (گاردِ blockDuringDelivering، v3.17.0)
+    const rev = await payExit({ state: 'revealing', session: { readingId: 9, revealIdx: 2 } }, dead);
+    ok(rev.state === 'revealing',
+      'کاربرِ وسطِ افشای فالِ پول‌داده از فلویش بیرون انداخته نمی‌شود', `شد: ${rev.state}`);
+    ok(rev.session.readingId === 9, 'و سشنِ فالش دست‌نخورده می‌ماند');
+    const idle = await payExit({ state: 'idle', session: {} }, dead);
+    ok(idle.state === 'idle', 'کاربرِ idle هم دست‌نخورده می‌ماند');
+    // ...ولی کسی که واقعاً گیر کرده باید همچنان آزاد شود، حتی با تپ روی پیامِ کهنه.
+    const stuckPid = openRow();
+    const stuck = await payExit({ state: 'pay_amount', session: { paymentId: stuckPid } }, dead);
+    ok(!blocked(stuck) && stuck.state === 'idle',
+      '⚠️ و کاربرِ واقعاً گیرکرده هنوز با همان دکمه آزاد می‌شود (قفل‌شکن نشکسته)');
+    // 🔑 و **فاکتورِ سشن** بسته می‌شود نه هرچه روی دکمه نوشته. اگر دکمه برنده می‌شد،
+    // ردیفِ زنده‌ی کاربر `pending` جا می‌ماند و بعداً مسیرِ بازیابیِ رسید دوباره پیدایش
+    // می‌کرد — یک نشتِ خاموش، دقیقاً همان کلاسی که این تیکت از آن آمد.
+    ok(db.prepare('SELECT status FROM payments WHERE id=?').get(stuckPid).status === 'canceled',
+      'فاکتورِ فعلیِ سشن بسته می‌شود، نه ردیفی که روی دکمه‌ی کهنه نوشته شده');
+    ok(db.prepare("SELECT COUNT(*) c FROM payments WHERE status='pending'").get().c === 0,
+      'و هیچ ردیفِ pending ای پشتِ سر نمی‌ماند');
+  }
 
   console.log('\n  — 💰 چیزی که نباید لمس شود:');
   // رسیدِ ثبت‌شده و پرداختِ تأییدشده هرگز با یک تپِ کاربر لغو نمی‌شوند (بند ۹ب/۳)
@@ -135,6 +199,11 @@ ok(exitFn ? /delete s\.paymentId/.test(exitFn) && /setSession\(uid, s\)/.test(ex
   'paymentId واقعاً از سشن پاک و ذخیره می‌شود (نه فقط در مدلِ این تست)');
 ok(exitFn ? /setState\(uid, s\.readingId \? 'confirm_pay' : 'idle'\)/.test(exitFn) : false,
   'استیت واقعاً بیرونِ PAY_STATES نوشته می‌شود، و فالِ رزروشده به confirm_pay می‌رود');
+// ⚠️ و آن نوشتن باید **زیرِ شرطِ** «واقعاً یک پرداختِ باز بستیم» باشد، نه بی‌قید (v3.59.1).
+// خودِ سناریو بالا اجرا می‌شود؛ این ادعا شکلِ ساختاری‌اش را هم قفل می‌کند تا اگر روزی
+// خط از داخلِ if بیرون بیاید، پیامِ خطا بگوید چرا.
+ok(exitFn ? /if \(s\.paymentId\) \{[\s\S]*?setState\(uid, s\.readingId/.test(exitFn) : false,
+  'تغییرِ استیت زیرِ شرطِ داشتنِ paymentId است (تپِ گاردِ کهنه بی‌اثر می‌ماند)');
 // ⚠️ قلبِ فیکس: این اکشن هرگز نباید ردیفِ پرداختِ تازه باز کند.
 ok(exitFn ? !/openPaymentRow/.test(exitFn) : false,
   'pay_exit هیچ ردیفِ پرداختِ تازه‌ای باز نمی‌کند (وگرنه دوباره همان حلقه)');
