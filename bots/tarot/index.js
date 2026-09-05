@@ -802,6 +802,10 @@ try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAUL
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // ⌨️ آخرین نسخه‌ی کیبوردی که این کاربر گرفته (بند ۹ب-۲ ریشه). صفر = هنوز هیچ نسخه‌ای.
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_rev INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// 👣 آخرین اقدامِ واقعیِ کاربر (v3.56.0). تنها چیزی که می‌گوید یک «فلوی باز» هنوز **زنده**
+// است یا کاربر رهایش کرده. NULL برای ردیف‌های قبل از این نسخه یعنی «خیلی وقت است خبری
+// نیست»، که همان تفسیرِ درست است.
+try { db.prepare('ALTER TABLE users ADD COLUMN last_seen_at INTEGER').run(); } catch {}
 // migration (v2.0.0): هدیه‌ی خوش‌آمد write-once + انصراف از یادآوریِ کارت روز
 try { db.prepare('ALTER TABLE users ADD COLUMN welcome_bonus_at INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE users ADD COLUMN daily_reminder_off INTEGER NOT NULL DEFAULT 0').run(); } catch {}
@@ -1009,8 +1013,12 @@ const stmts = {
   // شرطِ «امروز هنوز کاری نکرده» عمداً این‌جا نیست: هر شاخه‌ی A/B شرطِ **خودش** را دارد
   // (A: کارتِ روز، B: کارتِ شانس) و در خودِ جارو چک می‌شود، وگرنه کوئری باید هر دو را
   // با OR می‌گرفت و کاربرِ شاخه‌ی اشتباه هم بی‌دلیل بیدار می‌شد.
+  // ⚠️ `state`/`last_seen_at`/`created_at` از v3.56.0 برداشته می‌شوند تا جارو بتواند
+  // «وسطِ فلوی زنده» و «روزِ اولِ کاربر» را رد کند. خودِ شرطِ SQL عوض نشد؛ فیلترِ تازه
+  // در JS است چون مرزِ روز **منطقه‌ی زمانیِ هر زبان** را می‌خواهد (`botToday`) و SQLite
+  // آن را نمی‌داند.
   dueNightReminder: db.prepare(`
-    SELECT telegram_id, last_daily_date, lucky_date FROM users
+    SELECT telegram_id, last_daily_date, lucky_date, state, last_seen_at, created_at FROM users
      WHERE welcomed=1 AND daily_reminder_off=0
        AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
      LIMIT 400`),
@@ -1018,7 +1026,8 @@ const stmts = {
   // می‌تواند فقط کارتِ شانس را روشن نگه دارد. عمداً یک statement جداست و بالایی
   // دست‌نخورده ماند: تا وقتی آزمایش running است باید رفتار بیت‌به‌بیت همان امروز بماند.
   dueNightReminderFree: db.prepare(`
-    SELECT telegram_id, last_daily_date, lucky_date, daily_reminder_off, lucky_reminder_on FROM users
+    SELECT telegram_id, last_daily_date, lucky_date, daily_reminder_off, lucky_reminder_on,
+           state, last_seen_at, created_at FROM users
      WHERE welcomed=1 AND (daily_reminder_off=0 OR lucky_reminder_on=1)
        AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
      LIMIT 400`),
@@ -1048,6 +1057,12 @@ const stmts = {
   // گاردِ `kb_rev<?` داخلِ خودِ UPDATE است: دو آپدیتِ هم‌زمانِ کاربر فقط یک بار changes=1
   // می‌دهند، پس کیبورد دو بار فرستاده نمی‌شود (همان الگوی claimWelcomeBonus).
   claimKbRev: db.prepare('UPDATE users SET kb_rev=? WHERE telegram_id=? AND kb_rev<?'),
+  // ⌨️ ادعای اتمیکِ «کیبورد را من می‌فرستم» برای مسیرِ **کهنگی** (v3.56.0). دوقلوی
+  // `claimKbRev`: مهر **قبل** از ارسال می‌خورد، پس دو آپدیتِ هم‌زمان دو حامل نمی‌سازند.
+  claimKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=? AND COALESCE(kb_shown_at,0)<?'),
+  // 👣 مهرِ آخرین اقدام. روی **هر** پیام و تپ می‌خورد و تنها مصرفش تشخیصِ «فلوی رهاشده»
+  // در جاروی یادآوریِ شبانه است.
+  touchSeen: db.prepare('UPDATE users SET last_seen_at=unixepoch() WHERE telegram_id=?'),
   // پیشنهاددهنده: آخرین باری که کاربر هر نوع فال را **تحویل گرفته** (منبعِ جریمه‌ی تازگی)
   lastByType: db.prepare("SELECT type, MAX(created_at) AS last FROM readings WHERE user_id=? AND status='delivered' GROUP BY type"),
   // اقبال عمومی: چند بار هر نوع فال در کلِ ربات تحویل شده
@@ -1493,6 +1508,33 @@ function mainKeyboard(uid) {
 
 // تا پایان آنبوردینگ (نوشتن نام + پاسخ به حوزه‌ی تمرکز)، کاربر نباید بتواند با دکمه‌ها مرحله را رد کند.
 const ONBOARDING_STATES = ['onboard_name', 'onboard_focus', 'onboard_month'];
+
+/* 🚦 دو دسته‌بندیِ استیت که از v3.56.0 تک‌منبع شدند. هر دو **صریح** اند و نه «هرچه idle
+   نیست»: یک استیتِ تازه‌ی فراموش‌شده باید رفتارِ محافظه‌کارانه بگیرد (پیام برود، کیبورد
+   برود)، نه اینکه بی‌صدا وارد یک دسته‌ی رفتاری شود که کسی برایش تصمیم نگرفته.
+
+   `OPEN_FLOW_STATES` = «کاربر وسطِ یک فلوی نیمه‌تمام است». مصرفش گاردِ یادآوریِ شبانه است.
+   ⚠️ `choose_spread` عمداً **نیست**: آن‌جا فقط کاتالوگ روی صفحه است و هیچ فالی رزرو نشده
+   (همان تفکیکی که v3.17.0 برای گاردهای فلو گذاشت). `idle` هم طبعاً نیست. */
+const OPEN_FLOW_STATES = new Set([
+  ...ONBOARDING_STATES, 'gate_join',
+  'confirm_focus', 'await_question', 'breathing', 'shuffling', 'picking', 'confirm_pay',
+  'revealing', 'feedback',
+  'pay_amount', 'pay_receipt', 'pay_discount',
+  'daily_pick', 'lucky_shuffle', 'lucky_pick',
+  'settings_name',
+]);
+
+/* ⌨️ `KB_QUIET_STATES` = استیت‌هایی که در آن‌ها **هرگز** کیبوردِ reply فرستاده نمی‌شود.
+   دلیلش فنی است نه سلیقه‌ای: طبقِ مستنداتِ Bot API (و درسِ ثبت‌شده‌ی v3.17.0) تنها چیزی
+   که ناحیه‌ی ورودیِ کاربر را از کیبوردِ **تایپ** به کیبوردِ سفارشی سوییچ می‌کند، فرستادنِ
+   یک ReplyKeyboardMarkup است. یعنی درست وقتی از کاربر خواسته‌ایم چیزی **بنویسد** (سؤال
+   فال، نام، مبلغ، کد تخفیف)، فرستادنِ کیبورد صفحه‌کلیدش را از زیرِ دستش می‌کشد.
+   این دقیقاً همان «استثنای مقدسِ استیت‌های ورودی» بند ۹ب ریشه است. */
+const KB_QUIET_STATES = new Set([
+  ...ONBOARDING_STATES,
+  'await_question', 'pay_amount', 'pay_receipt', 'pay_discount', 'settings_name',
+]);
 // اگر کاربر وسط آنبوردینگ روی یک دکمه‌ی اصلی زد (کیبوردِ کش‌شده یا تایپِ دستی)، به‌جای اجرا،
 // همان قدمِ فعلیِ آنبوردینگ دوباره یادآوری می‌شود. خروجی true = بلاک شد.
 async function blockDuringOnboarding(ctx) {
@@ -2290,7 +2332,13 @@ if (gateOn()) {
   // ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
 // می‌شود تا `logAct` اقدامِ کاربر را عادی ثبت کرده باشد، و هرگز چیزی را بلاک نمی‌کند.
 bot.use(async (ctx, next) => {
-  if (ctx.message || ctx.callbackQuery) await refreshKeyboardIfStale(ctx, ctx.from?.id);
+  if (ctx.message || ctx.callbackQuery) {
+    // 👣 مهرِ «هنوز زنده است» قبل از هر چیز. تنها مصرفش گاردِ فلوی رهاشده در جاروی
+    // یادآوریِ شبانه است، و چون در همین میدل‌ور می‌نشیند هیچ مسیرِ آینده‌ای از قلم
+    // نمی‌افتد (درسِ بند ۸ ریشه: گاردِ پراکنده دیر یا زود یکی را جا می‌گذارد).
+    try { if (ctx.from?.id) stmts.touchSeen.run(ctx.from.id); } catch {}
+    await ensureKeyboard(ctx.telegram, ctx.from?.id);
+  }
   return next();
 });
 
@@ -4445,24 +4493,56 @@ const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_
 
    هزینه: دو فراخوانیِ API، **دقیقاً یک بار per کاربر per نسخه**، پخش‌شده روی فعالیتِ
    طبیعیِ کاربر (نه یک برودکست). */
-async function refreshKeyboardIfStale(ctx, uid) {
+/* 🩹 و از v3.56.0 همین مکانیزم **دو** کار می‌کند، نه یکی.
+
+   🐛 باگی که مالک با اسکرین‌شات گرفت: اکانتی که مدتی سر نزده بود **هیچ منوی پایینی
+   نداشت** (در تلگرام حتی آیکنِ ⊞ هم کنارِ باکسِ تایپ نبود، یعنی برای آن چت اصلاً کیبوردی
+   ذخیره نیست). چنین کاربری هیچ راهی برای پیدا کردنِ منو ندارد.
+
+   **ریشه:** کیبوردِ reply روی گوشیِ کاربر ذخیره است و ربات فقط در چند نقطه‌ی معدود
+   می‌فرستدش (`/start`، بازگشت به منو، تشکرِ بعد از نمره، پایانِ آنبوردینگ). هیچ‌کدام
+   تضمین نمی‌کنند کاربر به‌زودی آن‌جا برسد؛ و `askName` عمداً `removeKeyboard` می‌زند، پس
+   کسی که آنبوردینگ را نیمه‌کاره رها کند **هرگز** کیبورد نمی‌گیرد. `ensureMenu` هم در
+   دنیای الماس بعد از پنجره‌ی یک‌باره‌ی لانچ کاملاً no-op است. یعنی برای این کوهورت هیچ
+   مسیرِ ترمیمی وجود نداشت — و مثل همیشه **بی‌صدا**، چون هیچ خطایی نمی‌دهد.
+
+   **درمان:** همان حاملِ بی‌صدا حالا با یک شرطِ دوم هم شلیک می‌کند: «از آخرین باری که
+   کیبورد واقعاً فرستاده شده بیش از `KB_ENSURE_HOURS` گذشته» (و `0`/NULL یعنی هرگز، پس
+   اولین اقدامِ کاربر ترمیمش می‌کند). هر دو نقطه‌ی صدورِ قراردادی از قبل `setKbShown`
+   می‌زنند، پس این تور فقط وقتی فعال می‌شود که واقعاً لازم باشد.
+
+   ⚠️ **چرا این قراردادِ «کیبورد فقط در دو نقطه» را نمی‌شکند:** آن قرارداد درباره‌ی
+   پیامِ **دیده‌شدنیِ** اضافه است. این مسیر پیامی نشان نمی‌دهد (بی‌صدا، و بلافاصله حذف)
+   و صفر رویدادِ جرنی می‌سازد. */
+const KB_ENSURE_HOURS = 24;
+async function ensureKeyboard(tg, uid) {
   try {
-    if (!KB_REV) return;
+    if (!uid) return;
     const u = getUser(uid);
     // کاربرِ نیمه‌آنبورد کیبورد نمی‌گیرد: وسطِ آنبوردینگ عمداً کیبوردی در کار نیست
-    // (قراردادِ v3.16.0) و فرستادنش همان‌جا مرحله را به هم می‌ریزد.
-    if (!u?.welcomed || ONBOARDING_STATES.includes(getState(uid))) return;
-    if ((u.kb_rev || 0) >= KB_REV) return;
-    // گاردِ اتمیک **قبل از** ارسال: دو آپدیتِ هم‌زمان دو پیام نفرستند.
-    if (!stmts.claimKbRev.run(KB_REV, uid, KB_REV).changes) return;
-    const m = await ctx.telegram.sendMessage(uid, L.onboarding.kbRefresh, {
+    // (قراردادِ v3.16.0) و فرستادنش همان‌جا مرحله را به هم می‌ریزد. استیت‌های **ورودی**
+    // هم همین‌طور، به دلیلِ فنیِ نوشته‌شده روی `KB_QUIET_STATES`.
+    if (!u?.welcomed || KB_QUIET_STATES.has(getState(uid))) return;
+    const cutoff = Math.floor(Date.now() / 1000) - KB_ENSURE_HOURS * 3600;
+    // گاردِ اتمیک **قبل از** ارسال: دو آپدیتِ هم‌زمان دو پیام نفرستند. هر دو مسیر ادعای
+    // خودشان را دارند و با `|` (نه `||`) جمع می‌شوند تا هر دو مهر واقعاً زده شود.
+    const bumpedRev   = !!KB_REV && (u.kb_rev || 0) < KB_REV
+                        && stmts.claimKbRev.run(KB_REV, uid, KB_REV).changes > 0;
+    // ⚠️ `KB_ENSURE_HOURS > 0` رول‌بکِ یک‌خطیِ همین تور است و **لازم** است: با صفر،
+    // `cutoff` برابرِ همین لحظه می‌شود و شرطِ کهنگی برای تقریباً همه درست — یعنی صفر
+    // به‌جای خاموش‌کردن، تور را روی هر اقدام شلیک می‌کرد. دقیقاً همان کلاسِ «پرچمی که
+    // در جهتِ عکس کار می‌کند».
+    const bumpedStale = KB_ENSURE_HOURS > 0 && (u.kb_shown_at || 0) < cutoff
+                        && stmts.claimKbShown.run(uid, cutoff).changes > 0;
+    if (!bumpedRev && !bumpedStale) return;
+    const m = await tg.sendMessage(uid, L.onboarding.kbRefresh, {
       disable_notification: true, ...mainKeyboard(uid),
     });
-    await ctx.telegram.deleteMessage(uid, m.message_id).catch(() => {});
+    await tg.deleteMessage(uid, m.message_id).catch(() => {});
   } catch (e) {
     // شکست (کاربر بلاک کرده، شبکه) نباید اقدامِ کاربر را بشکند. مهر از قبل خورده، پس
-    // دوباره تلاش نمی‌شود؛ او در اولین نقطه‌ی صدورِ عادیِ کیبورد به‌روز می‌شود.
-    logErr('kb refresh:', e.message);
+    // بلافاصله دوباره تلاش نمی‌شود؛ تورِ کهنگی در دورِ بعد خودش برمی‌گردد.
+    logErr('kb ensure:', e.message);
   }
 }
 
@@ -6261,6 +6341,38 @@ const NIGHT_ARMS = {
     cta: () => [Markup.button.callback(L.buttons.nightLucky, 'lucky_go')],
   },
 };
+/* 🚧 دو گاردی که از v3.56.0 **قبل از هر شاخه‌ای** اجرا می‌شوند (هر دو از مشاهده‌ی مستقیمِ
+   مالک آمدند). عمداً مستقل از شاخه‌ی A/B اند — فقط به ویژگی‌های خودِ کاربر نگاه می‌کنند —
+   پس مخرجِ آزمایش را **متقارن** کوچک می‌کنند و بین دو بازو سوگیری نمی‌سازند (دقیقاً همان
+   چیزی که رقیق‌شدنِ نامتقارنِ ثبت‌شده‌ی بند ۲الف ریشه را خطرناک می‌کرد). و چون exposure
+   فقط بعد از ارسالِ موفق ثبت می‌شود، کاربرِ ردشده هیچ اثری روی آزمایش نمی‌گذارد.
+
+   ۱) **روزِ اولِ کاربر پیام نمی‌گیرد** (خواسته‌ی صریحِ مالک: «از روز دوم، یعنی از فرداش»).
+      کسی که همین امروز ثبت‌نام کرده تازه فلوی خودش را دارد می‌رود؛ «فرصتت داره تموم
+      می‌شه» در همان روز هم بی‌معنی است هم مزاحم. مرزِ روز با `botToday` یعنی منطقه‌ی
+      زمانیِ **همان زبان** (بند «مرزِ روز per زبان»)، نه UTC.
+
+   ۲) **کاربرِ وسطِ یک فلوی زنده پیام نمی‌گیرد.** 🐛 باگی که مالک دید: ساعت ۲۲ وسطِ
+      نوشتنِ سؤالِ فالش پیامِ «فرصت کارت امروزت داره تموم می‌شه» گرفت. یعنی ربات وسطِ
+      مهم‌ترین قدمِ یک فالِ **پول‌داده** حواسش را پرت کرد.
+      «زنده» یعنی هم استیتش یک فلوی باز است، هم **اخیراً اقدام کرده**. فلویی که
+      `FLOW_STALE_HOURS` رها شده دیگر مانع نیست (خواسته‌ی مالک: «اگر ۲۴ ساعت ادامه‌اش
+      ندهد، عملاً انصراف داده شده، پس از اولین ساعت ۱۰ شبِ نزدیک بهش یادآوری بفرست»).
+      ⚠️ عمداً فقط **گاردِ یادآوری** است و هیچ رکوردی را لغو نمی‌کند: از v3.54.0 لغوِ
+      یک فالِ `paid` الماسِ کاربر را می‌سوزاند، پس یک جاروی خودکار که فلو را «انصراف»
+      بدهد، پولِ کاربر را بی‌خبر از او خاکستر می‌کرد (بند ۹ ریشه: دیتا و پولِ کاربر
+      مقدس است). رکوردِ رهاشده مثل امروز `paid` می‌ماند و کاربر می‌تواند تمامش کند. */
+const FLOW_STALE_HOURS = 24;
+function reminderBlocked(u, today) {
+  // روزِ اول: `created_at` یونیکس است و مرزِ روز per زبان حساب می‌شود.
+  if (!u.created_at || botToday(new Date(u.created_at * 1000)) === today) return 'day1';
+  if (!OPEN_FLOW_STATES.has(u.state || '')) return '';
+  // فلوی باز، ولی رها شده؟ `last_seen_at` خالی (ردیفِ قبل از این نسخه) یعنی خیلی وقت
+  // است خبری نیست، پس مانع نیست.
+  const seen = u.last_seen_at || 0;
+  if (!seen) return '';
+  return (Date.now() / 1000 - seen) < FLOW_STALE_HOURS * 3600 ? 'flow' : '';
+}
 setInterval(async () => {
   try {
     const hour = botHour();
@@ -6272,6 +6384,10 @@ setInterval(async () => {
     for (const u of (expOn ? stmts.dueNightReminder.all() : stmts.dueNightReminderFree.all())) {
       const uid = u.telegram_id;
       if (!uxV2For(uid)) continue;
+      // ⚠️ **بدونِ مهرِ زمان** رد می‌شود (همان الگوی گاردِ `arm.due` پایین): اگر این‌جا
+      // `setNightReminded` می‌خورد، گاردِ ۱۸ساعته فردا شبِ او را هم می‌بلعید و کاربری که
+      // فقط امروز وسطِ فلو بود، برای همیشه یک شب عقب می‌افتاد.
+      if (reminderBlocked(u, today)) continue;
       if (!expOn) {
         // بعد از آزمایش: هر یادآوری فقط اگر خودش روشن باشد و کارِ امروزش نشده باشد.
         const wanted = [];
@@ -6291,6 +6407,11 @@ setInterval(async () => {
           if (sent) track(db, uid, 'night_reminder_sent', { arm: name, solo: 1 });
           await sleep(300);
         }
+        // ⌨️ همان کاربرِ خوابیده که این پیام را می‌گیرد، محتمل‌ترین کسی است که منوی
+        // پایینش گم شده (دقیقاً اکانتِ اسکرین‌شاتِ مالک). چون همین حالا در حالِ پیام
+        // دادن به او هستیم، ترمیمش این‌جا رایگان‌ترین جای ممکن است و لازم نیست منتظر
+        // بمانیم تا خودش اقدامی بکند. تابع خودش کهنگی را می‌سنجد، پس no-op است اگر لازم نباشد.
+        await ensureKeyboard(bot.telegram, uid);
         continue;
       }
       // ⚠️ `peekVariant` نه `variant`: شاخه را می‌خوانیم ولی exposure را **ثبت نمی‌کنیم**.
@@ -6317,6 +6438,10 @@ setInterval(async () => {
       if (ok) {
         expose(db, uid, NIGHT_EXP); // ← نقطه‌ی واقعیِ دیدنِ treatment
         track(db, uid, 'night_reminder_sent', { arm: arm === NIGHT_ARMS.lucky ? 'lucky' : 'control' });
+        // ⌨️ ترمیمِ منوی گم‌شده در همان لحظه‌ای که به این کاربرِ خوابیده پیام می‌دهیم
+        // (توضیحِ کامل در شاخه‌ی بالا). فقط بعد از ارسالِ موفق، چون شکستِ ارسال یعنی
+        // کاربر ربات را بلاک کرده و تلاشِ دوم بی‌فایده است.
+        await ensureKeyboard(bot.telegram, uid);
       }
       await sleep(300);
     }

@@ -81,7 +81,14 @@ const dTxt = (LOC.match(/nightReminder:\s*'([^']*)'/g) || []);
 ok('هر دو متنِ یادآوری تعریف شده‌اند', dTxt.length === 2);
 
 /* ═══════ ۳) خودِ جارو: ترتیب و گاردها ═══════ */
-const sweep = SRC.slice(SRC.indexOf('const REMINDER_HOUR'), SRC.indexOf("}, 15 * 60 * 1000);", SRC.indexOf('const REMINDER_HOUR')));
+/* ⚠️ کامنت‌ها **قبل از** هر ادعای ترتیبی حذف می‌شوند. این دقیقاً همان تله‌ای است که
+   v3.30.0 روی «قفل قبل از await» ثبت کرد و این‌جا دوباره شلیک کرد: کامنتی که نامِ
+   `setNightReminded` را توضیحی برده بود، `indexOf` را صدها کاراکتر جلوتر انداخت و یک
+   ادعای کاملاً سالم را قرمز کرد. سنجه‌ای که خودش را روی متنِ کامنت می‌سنجد، سنجه نیست.
+   جداکننده‌ی `(^|\s)` عمداً هست تا `https://` را کامنت نبیند. */
+const decomment = (s) => s.replace(/(^|\s)\/\/[^\n]*/g, '$1');
+const sweep = decomment(
+  SRC.slice(SRC.indexOf('const REMINDER_HOUR'), SRC.indexOf("}, 15 * 60 * 1000);", SRC.indexOf('const REMINDER_HOUR'))));
 /* 🌍 ساعتِ جارو باید به وقتِ **همان ربات** باشد، نه تهرانِ هاردکد.
  * 🐛 چرا: همین کد سه رباتِ زبانِ دیگر را هم اجرا می‌کند. ساعت ۲۲ تهران برای کاربرِ
  * برزیلی ۱۵:۳۰ بعدازظهر است، یعنی «یادآوریِ شبانه» نه شبانه بود نه یادآوری —
@@ -357,6 +364,88 @@ for (const [k, v] of Object.entries({ nightDaily: nd, nightLucky: nl })) {
 const newTexts = [...LOC.matchAll(/(?:nightReminder|alsoLucky):\s*'([^']*)'/g)].map(m => m[1]);
 ok('هر سه متنِ تازه در locale پیدا شدند', newTexts.length === 3);
 for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ندارد', !t.includes('—') && !t.includes('--'));
+
+/* ═══════ ۹) گاردِ «روزِ اول» و «وسطِ فلوی زنده» (v3.56.0) ═══════
+   هر دو از مشاهده‌ی مستقیمِ مالک آمدند: ساعت ۲۲ وسطِ نوشتنِ سؤالِ فالِ **پول‌داده** پیامِ
+   «فرصت کارت امروزت داره تموم می‌شه» گرفت. بلوک عمداً **رفتاری** است: خودِ
+   `reminderBlocked` از سورس بریده و اجرا می‌شود، نه یک کپیِ محلی. */
+{
+  const src = block(SRC, 'function reminderBlocked(u, today)');
+  ok('reminderBlocked از سورس استخراج شد', !!src);
+  // ⚠️ عمداً با `block` گرفته نمی‌شود: آن helper اولین `{` را می‌گیرد و این یک آرایه‌ی
+  // `[...]` است، پس تا آکولادِ بی‌ربطِ بعدیِ فایل جلو می‌رفت.
+  const iSet = SRC.indexOf('const OPEN_FLOW_STATES = new Set([');
+  const OPEN = iSet > -1 ? SRC.slice(SRC.indexOf('[', iSet), SRC.indexOf(']);', iSet) + 1) : null;
+  ok('OPEN_FLOW_STATES از سورس استخراج شد', !!OPEN);
+  const TZ = 'Asia/Tehran';
+  const botToday = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+  const openSet = new Function('ONBOARDING_STATES', `return new Set(${OPEN});`)(
+    ['onboard_name', 'onboard_focus', 'onboard_month']);
+  const blocked = new Function('OPEN_FLOW_STATES', 'FLOW_STALE_HOURS', 'botToday',
+    `return function reminderBlocked(u, today)${src};`)(openSet, 24, botToday);
+
+  const today = botToday();
+  const NOW = Math.floor(Date.now() / 1000);
+  const older = NOW - 5 * 86400;   // کاربرِ پنج‌روزه
+  const U = (o) => ({ created_at: older, state: 'idle', last_seen_at: NOW, ...o });
+
+  // ۱) روزِ اول
+  ok('کاربری که همین امروز ثبت‌نام کرده پیام نمی‌گیرد',
+    blocked(U({ created_at: NOW }), today) === 'day1');
+  ok('کاربرِ دیروزی پیام می‌گیرد (از روز دوم)',
+    blocked(U({ created_at: NOW - 86400 * 1.5 }), today) === '');
+  ok('created_at خالی محافظه‌کارانه بلاک می‌شود', blocked(U({ created_at: 0 }), today) === 'day1');
+
+  // ۲) وسطِ فلوی زنده — همان استیتی که مالک در اسکرین‌شات داشت
+  ok('وسطِ «سؤالت رو بنویس» پیام نمی‌رود',
+    blocked(U({ state: 'await_question' }), today) === 'flow');
+  ok('وسطِ فرستادنِ رسیدِ پرداخت هم پیام نمی‌رود',
+    blocked(U({ state: 'pay_receipt' }), today) === 'flow');
+  ok('وسطِ افشای فال هم پیام نمی‌رود', blocked(U({ state: 'revealing' }), today) === 'flow');
+  ok('کاربرِ idle پیام می‌گیرد', blocked(U({ state: 'idle' }), today) === '');
+  // کاتالوگِ باز فلوی باز **نیست** (هیچ فالی رزرو نشده) — همان تفکیکِ v3.17.0
+  ok('کاتالوگِ باز مانع نیست', blocked(U({ state: 'choose_spread' }), today) === '');
+
+  // ۳) فلوی رهاشده بعد از ۲۴ ساعت دیگر مانع نیست (خواسته‌ی صریحِ مالک)
+  ok('فلوی رهاشده‌ی ۲۵ساعته دیگر مانع نیست',
+    blocked(U({ state: 'await_question', last_seen_at: NOW - 25 * 3600 }), today) === '');
+  ok('فلوی ۲۳ساعته هنوز زنده حساب می‌شود',
+    blocked(U({ state: 'await_question', last_seen_at: NOW - 23 * 3600 }), today) === 'flow');
+  ok('ردیفِ قدیمیِ بدونِ last_seen_at مانع نیست (مهاجرتِ نرم)',
+    blocked(U({ state: 'await_question', last_seen_at: null }), today) === '');
+
+  // ۴) هر استیتِ آنبوردینگ هم فلوی باز است: `welcomed=1` از `onboard_month` به بعد ست
+  //    می‌شود، پس بدونِ این کاربرِ وسطِ آنبوردینگ یادآوری می‌گرفت.
+  for (const st of ['onboard_name', 'onboard_month', 'onboard_focus', 'gate_join'])
+    ok(`استیتِ «${st}» فلوی باز حساب می‌شود`, blocked(U({ state: st }), today) === 'flow');
+
+  // ۵) ترتیب و بی‌مهر بودن: گارد قبل از هر شاخه‌ای، و **بدونِ** setNightReminded
+  const sweep = decomment(block(SRC, 'setInterval(async () => {\n  try {\n    const hour = botHour();') || '');
+  ok('گارد داخلِ جاروی شبانه صدا زده می‌شود', !!sweep && /if \(reminderBlocked\(u, today\)\) continue;/.test(sweep));
+  ok('گارد قبل از peekVariant است (کاربرِ ردشده exposure نمی‌گیرد)',
+    !!sweep && sweep.indexOf('reminderBlocked(') < sweep.indexOf('peekVariant('));
+  ok('گارد قبل از هر دو رژیمِ آزمایش است',
+    !!sweep && sweep.indexOf('reminderBlocked(') < sweep.indexOf('if (!expOn)'));
+  {
+    // ⚠️ مهم: ردشدن نباید مهرِ ۱۸ساعته بخورد، وگرنه کاربری که فقط امروز وسطِ فلو بود
+    // فردا شبش را هم از دست می‌داد.
+    const i = sweep ? sweep.indexOf('if (reminderBlocked(u, today)) continue;') : -1;
+    const before = i > -1 ? sweep.slice(sweep.indexOf('for (const u of'), i) : 'x';
+    ok('ردشدن بدونِ مهرِ زمان انجام می‌شود', !/setNightReminded/.test(before));
+  }
+  // ۶) هر دو کوئری ستون‌های لازم را برمی‌دارند، وگرنه گارد روی undefined کار می‌کند و
+  //    بی‌صدا همه را رد می‌کند (کلاسِ «گاردی که با نبودِ داده سبز می‌ماند»).
+  for (const q of ['dueNightReminder', 'dueNightReminderFree']) {
+    const sql = SRC.slice(SRC.indexOf(`${q}: db.prepare(`), SRC.indexOf('LIMIT 400', SRC.indexOf(`${q}: db.prepare(`)));
+    ok(`${q} ستونِ state را برمی‌دارد`, /\bstate\b/.test(sql));
+    ok(`${q} ستونِ last_seen_at را برمی‌دارد`, /last_seen_at/.test(sql));
+    ok(`${q} ستونِ created_at را برمی‌دارد`, /created_at/.test(sql));
+  }
+  // ۷) گارد باید **مستقل از شاخه** باشد، وگرنه مخرجِ آزمایش نامتقارن کوچک می‌شود و
+  //    نتیجه سوگیری می‌گیرد (درسِ ثبت‌شده‌ی بند ۲الف ریشه).
+  ok('گارد به شاخه‌ی A/B نگاه نمی‌کند',
+    !!src && !/variant|arm|NIGHT_ARMS|lucky_date|last_daily_date/.test(src));
+}
 
 /* ═══════ نتیجه ═══════ */
 if (fails.length) {
