@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.57.0';
+const PRODUCT_VERSION = '3.58.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2295,9 +2295,44 @@ async function handleStart(ctx) {
   // می‌شود. اگر چیزی برای ادامه نباشد، هیچ پیامِ اضافه‌ای نمی‌رود.
   try {
     const row = resumeRowFromDb(uid);
-    if (row) await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
-    else { setState(uid, 'idle'); setSession(uid, null); }   // بازیابی نشد → همان حالتِ قبل
+    // فالِ نیمه‌تحویل بر منو مقدم است: کاربر پولش را داده و ادامه‌اش تنها چیزی است که
+    // باید ببیند. منوی فال آن‌جا فقط حواسش را پرت می‌کرد.
+    if (row) return await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+    setState(uid, 'idle'); setSession(uid, null);   // بازیابی نشد → همان حالتِ قبل
   } catch (e) { logErr('resume offer:', e.message); }
+
+  await sendStartMenu(ctx, uid);
+}
+
+/* 🎴 منوی فال بلافاصله بعد از `/start` (v3.58.0 — خواسته‌ی صریحِ مالک).
+   🐛 چه چیزی عوض شد: پیامِ خوش‌آمدِ کاربرِ برگشتی **هیچ دکمه‌ی درون‌پیامی نداشت**. متن
+   می‌گفت «کارت امروزت هنوز مونده» ولی هیچ راهی برای گرفتنش کنارش نبود، و کاربر باید
+   خودش کیبوردِ پایین را پیدا می‌کرد. حالا منو خودکار باز می‌شود و اگر کارتِ امروز هنوز
+   نرفته باشد، دکمه‌اش **بالای** منو می‌نشیند.
+
+   ⚠️ چرا پیامِ دوم و نه دکمه روی همان خوش‌آمد: تلگرام در هر پیام فقط **یک** `reply_markup`
+   می‌پذیرد و پیامِ خوش‌آمد حاملِ کیبوردِ ماندگار است (`/start` یکی از نقاطِ صدورِ
+   قراردادیِ کیبورد است و `setKbShown` را هم می‌زند). پس دکمه‌های inline ناچار پیامِ
+   بعدی‌اند — همان الگوی پایانِ آنبوردینگ.
+
+   ⚠️ دکمه‌ی کارتِ روز **مشروط** است: اگر کاربر امروز کارتش را گرفته باشد نمی‌آید، وگرنه
+   دکمه‌ای می‌ساخت که به «امروز استفاده کردی» ختم می‌شود — همان بن‌بستِ کوچکی که بند ۹ب
+   ممنوع کرده. شرطش عیناً همان شرطی است که خطِ «کارت امروزت هنوز مونده» را می‌سازد، پس
+   متن و دکمه هرگز نمی‌توانند از هم واگرا شوند.
+
+   ⚠️ و منو از **همان** سازنده‌های تک‌منبع می‌آید (`falMenuKb`/`catalogKb`)، نه یک کپیِ
+   دوم؛ وگرنه منوی `/start` و منوی «🔮 فال بگیر» دیر یا زود از هم واگرا می‌شدند. */
+async function sendStartMenu(ctx, uid) {
+  try {
+    const dailyDue = getUser(uid)?.last_daily_date !== botToday();
+    // در دنیای قدیم `catalogKb` خودش ردیفِ کارتِ روز را دارد، پس ردیفِ دوم ساخته نمی‌شود.
+    const lead = (dailyDue && uxV2For(uid))
+      ? [[Markup.button.callback(L.buttons.dailyOneCard, 'daily_go')]] : [];
+    const rows = uxV2For(uid) ? falMenuKb(uid) : catalogKb(uid);
+    const text = uxV2For(uid) ? L.reading.catalogV3 : L.reading.catalog;
+    setState(uid, 'choose_spread');   // کاتالوگ روی صفحه است؛ فلوی باز نیست (v3.17.0)
+    await ctx.reply(text, Markup.inlineKeyboard([...lead, ...rows]));
+  } catch (e) { logErr('start menu:', e.message); }   // منو هرگز `/start` را نمی‌شکند
 }
 bot.start(handleStart);
 
