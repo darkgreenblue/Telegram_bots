@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.56.0';
+const PRODUCT_VERSION = '3.57.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1006,6 +1006,13 @@ const stmts = {
   setDailyReminderOff: db.prepare('UPDATE users SET daily_reminder_off=1 WHERE telegram_id=?'),
   setDailyReminderOn:  db.prepare('UPDATE users SET daily_reminder_off=0 WHERE telegram_id=?'),
   setNightReminded:    db.prepare('UPDATE users SET last_daily_reminder_at=unixepoch() WHERE telegram_id=?'),
+  // 🌙 تازه‌ترین فالِ **ناتمامِ** کاربر، برای یادآوریِ شبانه‌ی فالِ نیمه‌کاره (v3.57.0).
+  // سه وضعیت عمداً: `pending_payment` (کارت انتخاب شده، منتظرِ پرداخت)، `paid` (پول رفته،
+  // کارت هنوز نه) و `started` (وسطِ افشا). `delivered`/`canceled`/`refunded` ناتمام نیستند.
+  latestOpenReading: db.prepare(`
+    SELECT id, status, price FROM readings
+     WHERE user_id=? AND status IN ('pending_payment','paid','started')
+     ORDER BY id DESC LIMIT 1`),
   // 🌙 مخاطبِ یادآوریِ شبانه (A/B). عمداً از **همان** ستون‌های یادآوریِ قدیمیِ کارتِ روز
   // می‌خواند (`daily_reminder_off` و `last_daily_reminder_at`) و ستونِ تازه نمی‌سازد:
   // کسی که قبلاً گفته «دیگه یادآوری نکن» باید همچنان خاموش بماند. برگرداندنِ یادآوری
@@ -6363,6 +6370,69 @@ const NIGHT_ARMS = {
       بدهد، پولِ کاربر را بی‌خبر از او خاکستر می‌کرد (بند ۹ ریشه: دیتا و پولِ کاربر
       مقدس است). رکوردِ رهاشده مثل امروز `paid` می‌ماند و کاربر می‌تواند تمامش کند. */
 const FLOW_STALE_HOURS = 24;
+
+/* 🌙 یادآوریِ فالِ نیمه‌کاره (v3.57.0 — تصمیمِ صریحِ مالک).
+   «برای این کاربرها بعد از ۲۴ ساعت هر شب ساعت ۱۰ یادآوریِ فالِ نیمه‌کاره فرستاده بشه به
+    همراه دکمه‌ی انصراف از فال؛ اگه انصراف داد که برمی‌گرده به حالت طبیعی، اگه هم انصراف
+    نداد هر شب همین یادآوری رو می‌گیره.»
+
+   جای این پیام دقیقاً همان خلائی است که v3.56.0 باز گذاشت: فلوی رهاشده دیگر مانعِ
+   یادآوری نبود، ولی کاربر پیامِ **عمومیِ** کارتِ روز می‌گرفت در حالی که یک فالِ
+   **پول‌داده‌ی** ناتمام داشت. حالا به‌جای آن پیامِ عمومی، پیامِ مخصوصِ خودش را می‌گیرد.
+
+   ⚠️ **یک پیام در شب، نه دو تا.** این یادآوری جایگزینِ یادآوریِ عادی می‌شود، اضافه بر آن
+   نه. دو پیامِ شبانه در یک ساعت همان چیزی است که v3.9.0 دلیلِ بلاک‌شدن نامیدش.
+
+   حلقه‌ی بسته‌ی خواسته‌ی مالک بدونِ هیچ ستون یا جاروی تازه‌ای بسته می‌شود:
+     • تپِ «ادامه» → `last_seen_at` تازه می‌شود → فردا شب `reminderBlocked` می‌گوید
+       فلو زنده است → سکوت. کاربر ۲۴ ساعتِ دیگر فرصت دارد.
+     • تپِ «انصراف» → `rcancel:` رکورد را terminal و استیت را `idle` می‌کند → از فردا
+       یادآوریِ عادی برمی‌گردد («برمی‌گرده به حالت طبیعی»).
+     • هیچ‌کدام → فلو رها می‌ماند و هر شب همین پیام می‌آید. */
+const STUCK_READING_STATES = new Set([
+  'confirm_focus', 'await_question', 'breathing', 'shuffling', 'picking', 'confirm_pay', 'revealing',
+]);
+function stuckReadingFor(u) {
+  if (!STUCK_READING_STATES.has(u.state || '')) return null;
+  const r = stmts.latestOpenReading.get(u.telegram_id);
+  if (!r) return null;
+  // ⚠️ فالِ `started` دکمه‌ی انصراف **نمی‌گیرد**: محصول دارد تحویل داده می‌شود و «انصراف»
+  // یعنی پس‌گرفتنِ چیزی که کاربر همین حالا دارد می‌گیرد. عیناً همان تصمیمِ
+  // `blockDuringDelivering` در v3.17.0، نه یک قاعده‌ی تازه.
+  return { r, canCancel: r.status !== 'started' };
+}
+
+/** خروجی: آیا این کاربر امشب پیامِ فالِ نیمه‌کاره را گرفت (یعنی یادآوریِ عادی نگیرد). */
+async function sendStuckReadingReminder(u) {
+  const hit = stuckReadingFor(u);
+  if (!hit) return false;
+  const uid = u.telegram_id;
+  const rows = [];
+  if (u.state === 'revealing') {
+    // وسطِ افشا، «ادامه» یعنی همان دکمه‌ی کارتِ بعدی/جمع‌بندی. `resendCurrentStep` این
+    // استیت را پوشش نمی‌دهد و به کاتالوگ می‌افتد، پس این‌جا از تک‌منبعِ خودش می‌آید.
+    const row = revealResumeRow(uid);
+    if (!row) return false;                 // چیزی برای ادامه نمانده → یادآوریِ عادی
+    rows.push(row);
+  } else {
+    rows.push([Markup.button.callback(L.buttons.resumeReading, 'reading:resume')]);
+  }
+  if (hit.canCancel) rows.push([Markup.button.callback(L.buttons.stuckCancel, `rcancel:${hit.r.id}`)]);
+  // مهر **قبل** از ارسال و رویداد **بعد** از موفقیت: همان الگویی که «مهرخورده بدونِ
+  // رویداد» را به معنیِ بلاک‌شدنِ کاربر قابلِ شمارش می‌کند (بند ۲.۵ اسکیلِ جرنی).
+  stmts.setNightReminded.run(uid);
+  const ok = await bot.telegram.sendMessage(uid, L.reading.stuckReading(hit.canCancel), {
+    reply_markup: Markup.inlineKeyboard(rows).reply_markup,
+  }).then(() => true).catch(() => false);
+  if (ok) {
+    track(db, uid, 'stuck_reading_reminder',
+      { reading_id: hit.r.id, state: u.state, cancelable: hit.canCancel ? 1 : 0 });
+    await ensureKeyboard(bot.telegram, uid);
+  }
+  // حتی اگر ارسال شکست بخورد `true` برمی‌گردد: مهر خورده و نباید پیامِ دومی برود.
+  return true;
+}
+
 function reminderBlocked(u, today) {
   // روزِ اول: `created_at` یونیکس است و مرزِ روز per زبان حساب می‌شود.
   if (!u.created_at || botToday(new Date(u.created_at * 1000)) === today) return 'day1';
@@ -6388,6 +6458,10 @@ setInterval(async () => {
       // `setNightReminded` می‌خورد، گاردِ ۱۸ساعته فردا شبِ او را هم می‌بلعید و کاربری که
       // فقط امروز وسطِ فلو بود، برای همیشه یک شب عقب می‌افتاد.
       if (reminderBlocked(u, today)) continue;
+      // 🌙 فالِ نیمه‌کاره‌ی رهاشده پیامِ **مخصوصِ خودش** را می‌گیرد، نه یادآوریِ عادی را.
+      // عمداً قبل از هر دو رژیم و قبل از `peekVariant` است: این کاربر treatment را
+      // نمی‌بیند، پس نباید exposure هم بگیرد.
+      if (await sendStuckReadingReminder(u)) { await sleep(300); continue; }
       if (!expOn) {
         // بعد از آزمایش: هر یادآوری فقط اگر خودش روشن باشد و کارِ امروزش نشده باشد.
         const wanted = [];
