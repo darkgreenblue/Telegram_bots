@@ -30,6 +30,14 @@ jobs:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: node tools/ci-changed-bots.mjs
 
+      # گاردِ تنوعِ محتوای کانال. عمداً **همین‌جا** و نه در ماتریسِ ربات‌ها: مسیرِ
+      # `marketing/` در IGNORED است (هیچ جابی لازم ندارد و نباید داشته باشد)، پس اگر این
+      # چک در جابِ tarot می‌نشست، یک بافرِ تازه که فقط `marketing/` را عوض می‌کند هرگز
+      # سنجیده نمی‌شد. جابِ `changes` روی هر push اجرا می‌شود و این چک نه نصبی می‌خواهد
+      # نه شبکه‌ای، پس هزینه‌ی اضافه‌اش صفر جاب است (بند ۳ج ریشه).
+      - name: Channel content diversity guard
+        run: node tools/marketing/check-day-diversity.mjs
+
   check:
     needs: changes
     if: needs.changes.outputs.bots != '[]'
