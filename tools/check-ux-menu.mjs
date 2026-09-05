@@ -1465,5 +1465,103 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
   ok(!/answerCbQuery\(\)\s*\.catch/.test(body), 'هیچ answerCbQuery خالی‌ای در این هندلر نمانده');
 }
 
+console.log('\n▶ منوی خودکارِ بعد از /start (v3.58.0)');
+{
+  // 🐛 پیامِ خوش‌آمدِ کاربرِ برگشتی هیچ دکمه‌ای نداشت: متن می‌گفت «کارت امروزت هنوز
+  // مونده» ولی هیچ راهی برای گرفتنش کنارش نبود. بلوک عمداً **رفتاری** است.
+  const fnOf = (marker) => {
+    const i = SRC.indexOf(marker);
+    if (i < 0) return null;
+    const s = SRC.indexOf('{', i);
+    let d = 0;
+    for (let j = s; j < SRC.length; j++) {
+      if (SRC[j] === '{') d++;
+      else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(s, j + 1); }
+    }
+    return null;
+  };
+  const body = fnOf('async function sendStartMenu(ctx, uid)');
+  ok(!!body, 'sendStartMenu از سورس استخراج شد');
+
+  const TODAY = '2026-09-05';
+  const run = async (lastDaily, { v2 = true, boom = false } = {}) => {
+    const log = { text: null, rows: null, state: null, threw: false };
+    const fn = new Function('deps', `
+      const { getUser, botToday, uxV2For, Markup, L, falMenuKb, catalogKb, setState, logErr } = deps;
+      return async function sendStartMenu(ctx, uid)${body};`)({
+      getUser: () => { if (boom) throw new Error('db gone'); return { last_daily_date: lastDaily }; },
+      botToday: () => TODAY, uxV2For: () => v2,
+      Markup: { button: { callback: (t, d) => ({ t, d }) }, inlineKeyboard: (r) => ({ kb: r }) },
+      L: { buttons: { dailyOneCard: 'DAILY' }, reading: { catalogV3: 'MENU_V2', catalog: 'MENU_OLD' } },
+      falMenuKb: () => [['topic1'], ['topic2'], ['ALL']],
+      catalogKb: () => [['legacy_daily'], ['legacy_spread']],
+      setState: (_u, s) => { log.state = s; },
+      logErr: () => {},
+    });
+    try {
+      await fn({ reply: (t, m) => { log.text = t; log.rows = m.kb; return Promise.resolve(); } }, 7);
+    } catch { log.threw = true; }
+    return log;
+  };
+
+  const due = await run('2026-09-01');
+  ok(due.rows?.[0]?.[0]?.d === 'daily_go',
+    'وقتی کارتِ امروز نرفته، دکمه‌ی کارتِ روز **بالای** منو می‌آید');
+  ok(due.rows?.[0]?.[0]?.t === 'DAILY', 'برچسبِ دکمه همان برچسبِ کیبوردِ کارتِ روز است');
+  ok(due.rows.length === 4, 'دکمه‌ی کارتِ روز به منو اضافه می‌شود، جایگزینش نمی‌شود');
+  ok(due.text === 'MENU_V2', 'متنِ منو از همان تک‌منبعِ منوی فال می‌آید');
+  ok(due.state === 'choose_spread', 'استیت روی کاتالوگ می‌نشیند (فلوی باز نیست)');
+
+  // ⚠️ دکمه‌ای که به «امروز استفاده کردی» ختم شود بن‌بستِ کوچک است (بند ۹ب).
+  const taken = await run(TODAY);
+  ok(!taken.rows.some((r) => r.some((b) => b.d === 'daily_go')),
+    'کاربری که کارتِ امروزش را گرفته دکمه‌ی کارتِ روز نمی‌بیند');
+  ok(taken.rows.length === 3, 'منوی او دقیقاً همان منوی فال است، بدونِ ردیفِ اضافه');
+
+  // شرطِ دکمه باید **همان** شرطِ خطِ «کارت امروزت هنوز مونده» باشد، وگرنه متن و دکمه
+  // روزی از هم واگرا می‌شوند (کلاسِ «شرطِ نمایش ≠ شرطِ پذیرش»).
+  ok(/user\.last_daily_date !== botToday\(\)/.test(SRC) &&
+     /getUser\(uid\)\?\.last_daily_date !== botToday\(\)/.test(SRC),
+    'شرطِ دکمه با شرطِ متنِ یادآوریِ کارتِ روز یکی است');
+
+  // دنیای قدیم: `catalogKb` خودش ردیفِ کارتِ روز را دارد، پس ردیفِ دومی ساخته نمی‌شود.
+  const legacy = await run('2026-09-01', { v2: false });
+  ok(legacy.rows.length === 2 && legacy.text === 'MENU_OLD',
+    'در دنیای قدیم ردیفِ تکراریِ کارتِ روز اضافه نمی‌شود');
+
+  // ⚠️ نسخه‌ی اولِ همین ادعا **پوچ** بود: استابِ «خراب» هیچ استثنایی پرتاب نمی‌کرد، پس
+  // برداشتنِ try/catch را نمی‌گرفت و سبز می‌ماند. حالا خودِ استاب می‌ترکد.
+  const broke = await run('2026-09-01', { boom: true });
+  ok(broke.threw === false, 'خطای منو هرگز /start را نمی‌شکند');
+  ok(broke.text === null, 'و در آن حالت هیچ پیامِ نصفه‌ای هم نمی‌رود');
+  // ارسالِ ناموفق (کاربرِ بلاک‌کرده) هم نباید بیرون بزند.
+  {
+    const fn2 = new Function('deps', `
+      const { getUser, botToday, uxV2For, Markup, L, falMenuKb, catalogKb, setState, logErr } = deps;
+      return async function sendStartMenu(ctx, uid)${body};`)({
+      getUser: () => ({ last_daily_date: '2026-09-01' }), botToday: () => TODAY, uxV2For: () => true,
+      Markup: { button: { callback: (t, d) => ({ t, d }) }, inlineKeyboard: (r) => ({ kb: r }) },
+      L: { buttons: { dailyOneCard: 'DAILY' }, reading: { catalogV3: 'M', catalog: 'M' } },
+      falMenuKb: () => [['x']], catalogKb: () => [['y']], setState: () => {}, logErr: () => {},
+    });
+    let threw = false;
+    await fn2({ reply: () => Promise.reject(new Error('blocked')) }, 7).catch(() => { threw = true; });
+    ok(!threw, 'شکستِ ارسالِ منو (کاربرِ بلاک‌کرده) استثنا بیرون نمی‌دهد');
+  }
+
+  // ── جای فراخوانی در handleStart ─────────────────────────────────────────
+  const hs = (fnOf('async function handleStart(ctx)') || '').replace(/\/\/[^\n]*/g, '');
+  ok(/await sendStartMenu\(ctx, uid\)/.test(hs), 'handleStart منو را باز می‌کند');
+  ok(hs.indexOf('mainKeyboard(ctx.from.id)') < hs.indexOf('sendStartMenu'),
+    'اول خوش‌آمد با کیبوردِ ماندگار، بعد منو (تلگرام در هر پیام یک reply_markup می‌دهد)');
+  ok(/stmts\.setKbShown\.run\(uid\);/.test(hs),
+    '/start همچنان نقطه‌ی صدورِ کیبورد است (پنجره‌ی مهاجرت بسته می‌شود)');
+  // فالِ نیمه‌تحویل بر منو مقدم است: کاربر پول داده و ادامه‌اش تنها چیزِ مهم است.
+  ok(/if \(row\) return await ctx\.reply\(L\.reading\.openReadingGuard/.test(hs),
+    'با فالِ نیمه‌تحویل، منو باز نمی‌شود (پیشنهادِ ادامه تنها چیزی است که می‌آید)');
+  ok(hs.indexOf('resumeRowFromDb') < hs.indexOf('sendStartMenu'),
+    'گاردِ فالِ نیمه‌تحویل قبل از منو اجرا می‌شود');
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }
