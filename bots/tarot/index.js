@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.62.0';
+const PRODUCT_VERSION = '3.62.1';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1134,7 +1134,16 @@ const stmts = {
   markUnstuck: db.prepare('UPDATE users SET pay_unstuck_at=unixepoch() WHERE telegram_id=? AND pay_unstuck_at=0'),
   stuckPayCandidates: db.prepare(`SELECT u.telegram_id AS uid, u.state AS state,
       p.id AS pid, p.status AS pstatus
-    FROM users u JOIN payments p ON p.id = json_extract(u.session_json,'$.paymentId')
+    FROM users u JOIN payments p
+      /* CASE اجباری است. users.session_json پیش‌فرضش رشته‌ی **خالی** است (نه {}) و
+       * json_extract روی رشته‌ی نامعتبر خطا پرتاب می‌کند، نه NULL. چون فیلترِ استیت
+       * عمداً در جاوااسکریپت است (تک‌منبعِ PAY_STATES)، این عبارت برای **همه‌ی**
+       * کاربران اجرا می‌شود نه فقط آن‌هایی که داخلِ فلواند.
+       * نسخه‌ی اول json_extract خام داشت و روی سرور با «malformed JSON» ترکید: جارو
+       * هیچ‌وقت اجرا نشد و ۳۵ کاربر گیر ماندند. CASE تنها ساختاری است که SQLite
+       * تنبل بودنش را تضمین می‌کند. */
+      ON p.id = CASE WHEN json_valid(u.session_json)
+                     THEN json_extract(u.session_json,'$.paymentId') END
     WHERE p.status NOT IN ('waiting_review','approved')
       AND NOT (p.status='pending' AND p.amount>0)
       AND p.updated_at < unixepoch()-?`),

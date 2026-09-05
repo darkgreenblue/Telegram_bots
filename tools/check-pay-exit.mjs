@@ -238,8 +238,23 @@ if (sweepSql) {
     db.prepare('INSERT INTO users VALUES (?,?,?,?)').run(uid, st, JSON.stringify({ paymentId: uid * 10 }), 7);
     db.prepare('INSERT INTO payments VALUES (?,?,?,?,?)').run(uid * 10, uid, amt, pst, ts);
   }
+  /* 🐛 کاربرانی با session_json نامعتبر — همان چیزی که فیکسچرِ تمیزِ نسخه‌ی اول نداشت.
+   * پیش‌فرضِ ستون رشته‌ی **خالی** است و json_extract روی آن خطا پرتاب می‌کند. روی سرور
+   * جارو با «malformed JSON» ترکید و هیچ‌وقت اجرا نشد؛ ۳۵ کاربر گیر ماندند و این تست
+   * سبز بود، چون در فیکسچرش همه‌ی کاربران JSON سالم داشتند. اکثریتِ کاربرانِ واقعی
+   * اصلاً وارد فلوی پرداخت نشده‌اند، پس session_json خالی **حالتِ عادی** است نه لبه. */
+  for (const [i, bad] of ['', 'not json', '{', '[1,2', 'null'].entries()) {
+    db.prepare('INSERT INTO users VALUES (?,?,?,?)').run(900 + i, 'idle', bad, 0);
+  }
   const PAY = PAY_STATES;
-  const picked = new Set(db.prepare(sweepSql).all(1800)
+  // اول از همه: کوئری اصلاً نباید بترکد. این ادعا مقدم بر درستیِ انتخاب است.
+  let rowsOrErr;
+  try { rowsOrErr = db.prepare(sweepSql).all(1800); }
+  catch (e) { rowsOrErr = e; }
+  ok(!(rowsOrErr instanceof Error),
+    'کوئریِ جارو روی session_json نامعتبر نمی‌ترکد (خالی، ناقص، غیرJSON)',
+    rowsOrErr instanceof Error ? rowsOrErr.message : '');
+  const picked = new Set((Array.isArray(rowsOrErr) ? rowsOrErr : [])
     .filter(r => PAY.includes(r.state))     // همان فیلترِ جاوااسکریپتیِ خودِ جارو
     .map(r => r.uid));
   for (const [uid, , , , , want, label] of cases) {
