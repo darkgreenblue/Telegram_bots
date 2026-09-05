@@ -49,15 +49,18 @@ ok(pinned === fp,
 
 /* ══ ۲) حاملِ تازه‌سازی نباید جرنی را آلوده کند ═══════════════════════════ */
 console.log('\n  — 🧪 سلامتِ دیتای جرنی:');
-const fn = bodyOf('async function refreshKeyboardIfStale(ctx, uid) {');
+const fn = bodyOf('async function ensureKeyboard(tg, uid) {');
 ok(!!fn, 'تابعِ تازه‌سازی پیدا شد');
 // ⚠️ مهم‌ترین ادعای این فایل. میدل‌ورِ جرنی `reply`/`replyWithPhoto`/`editMessageText` را
-// روی ctx رپ می‌کند؛ `ctx.telegram.*` رپ نمی‌شود.
-ok(fn ? /ctx\.telegram\.sendMessage\(/.test(fn) : false,
-  'حامل از ctx.telegram.sendMessage می‌رود (رپ نمی‌شود → صفر رویدادِ view)');
-ok(fn ? !/ctx\.reply\(/.test(fn) : false,
-  'حامل هرگز از ctx.reply نمی‌رود (وگرنه یک صفحه‌ی جعلی وارد قیف و کاتالوگِ screens می‌شد)');
-ok(fn ? /ctx\.telegram\.deleteMessage\(/.test(fn) : false, 'حامل بلافاصله حذف می‌شود');
+// روی ctx رپ می‌کند؛ `ctx.telegram.*` رپ نمی‌شود. از v3.56.0 خودِ آبجکتِ telegram پاس
+// داده می‌شود (چون جاروی شبانه ctx ندارد)، پس ادعا روی همان است.
+ok(fn ? /tg\.sendMessage\(/.test(fn) : false,
+  'حامل از tg.sendMessage می‌رود (رپ نمی‌شود → صفر رویدادِ view)');
+ok(fn ? !/ctx\./.test(fn) : false,
+  'حامل هرگز به ctx دست نمی‌زند (وگرنه یک صفحه‌ی جعلی وارد قیف و کاتالوگِ screens می‌شد)');
+ok(/await ensureKeyboard\(ctx\.telegram, ctx\.from\?\.id\)/.test(SRC),
+  'میدل‌ور همان ctx.telegram را پاس می‌دهد، نه خودِ ctx');
+ok(fn ? /tg\.deleteMessage\(/.test(fn) : false, 'حامل بلافاصله حذف می‌شود');
 ok(fn ? /disable_notification: true/.test(fn) : false, 'حامل بی‌صدا می‌رود');
 // و همین ادعا روی کلِ سورس: هیچ‌جای دیگری نباید حاملِ دومی بسازد
 ok((SRC.match(/kbRefresh/g) || []).length === 1, 'متنِ حامل فقط یک مصرف دارد');
@@ -73,18 +76,120 @@ ok(/kb_rev<\?/.test(claim), 'شرطِ «نسخه‌ی عقب» داخلِ خود
   const iSend = fn ? fn.indexOf('sendMessage') : -1;
   ok(iClaim > -1 && iSend > -1 && iClaim < iSend, 'مهر قبل از ارسال زده می‌شود');
 }
-ok(fn ? /ONBOARDING_STATES\.includes\(getState\(uid\)\)/.test(fn) : false,
-  'کاربرِ وسطِ آنبوردینگ کیبورد نمی‌گیرد (قراردادِ v3.16.0 نمی‌شکند)');
+ok(fn ? /KB_QUIET_STATES\.has\(getState\(uid\)\)/.test(fn) : false,
+  'کاربرِ وسطِ آنبوردینگ یا یک استیتِ ورودی کیبورد نمی‌گیرد (قراردادِ v3.16.0 نمی‌شکند)');
 ok(fn ? /!u\?\.welcomed/.test(fn) : false, 'کاربرِ آنبوردنشده هم نمی‌گیرد');
 ok(fn ? /catch \(e\)/.test(fn) : false, 'شکستِ ارسال اقدامِ کاربر را نمی‌شکند');
+
+/* ══ ۳ب) تورِ کهنگی: منوی گم‌شده خودش برمی‌گردد (v3.56.0) ════════════════
+   🐛 اکانتی که مدتی سر نزده بود **هیچ منوی پایینی نداشت** و هیچ مسیرِ ترمیمی هم وجود
+   نداشت: `ensureMenu` در دنیای الماس no-op است و دو نقطه‌ی صدورِ قراردادی ممکن است
+   هفته‌ها نرسند. حالا همان حاملِ بی‌صدا با شرطِ کهنگی هم شلیک می‌کند. */
+console.log('\n  — 🩹 تورِ کهنگی:');
+ok(fn ? /claimKbShown\.run\(uid, cutoff\)\.changes/.test(fn) : false,
+  'مسیرِ کهنگی هم ادعای اتمیکِ خودش را دارد (ضدِ دو حاملِ هم‌زمان)');
+const claimShown = SRC.match(/claimKbShown: db\.prepare\('([^']+)'\)/)?.[1] || '';
+ok(/COALESCE\(kb_shown_at,0\)<\?/.test(claimShown),
+  'شرطِ کهنگی داخلِ خودِ UPDATE است، نه در جاوااسکریپت', claimShown);
+ok(/kb_shown_at=unixepoch\(\)/.test(claimShown), 'ادعا همان لحظه مهرِ تازه می‌زند');
+{
+  const hrs = Number(SRC.match(/const KB_ENSURE_HOURS = (\d+);/)?.[1]);
+  ok(Number.isInteger(hrs) && hrs > 0 && hrs <= 48,
+    `پنجره‌ی کهنگی یک عددِ معقول است (${hrs} ساعت)`);
+  // ⚠️ `|` نه `||`: با short-circuit، وقتی نسخه عقب بود مهرِ کهنگی زده نمی‌شد و کاربر
+  // بلافاصله دوباره کاندیدِ حامل می‌ماند.
+  ok(fn ? /const bumpedStale = /.test(fn) && /if \(!bumpedRev && !bumpedStale\) return;/.test(fn) : false,
+    'هر دو مسیر مستقل ادعا می‌کنند و ارسال فقط با یکی از آن دو انجام می‌شود');
+}
+
+/* ══ ۳ج) رفتاری: خودِ تابع از سورس اجرا می‌شود ═══════════════════════════ */
+console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
+{
+  const src = bodyOf('const KB_ENSURE_HOURS =');
+  const run = src ? new Function('deps', `
+    const { getUser, getState, stmts, mainKeyboard, L, KB_REV, KB_QUIET_STATES, logErr } = deps;
+    ${src}}
+    return ensureKeyboard;`) : null;
+  const NOW = Math.floor(Date.now() / 1000);
+  const scenario = async (u, state) => {
+    const log = { sent: 0, deleted: 0, silent: null, revClaims: 0, shownClaims: 0 };
+    const fnR = run({
+      getUser: () => u, getState: () => state, mainKeyboard: () => ({ reply_markup: 'KB' }),
+      L: { onboarding: { kbRefresh: 'x' } }, KB_REV: 1,
+      KB_QUIET_STATES: new Set(['onboard_name', 'await_question', 'pay_receipt']),
+      logErr: () => {},
+      stmts: {
+        claimKbRev: { run: () => { log.revClaims++; return { changes: (u.kb_rev || 0) < 1 ? 1 : 0 }; } },
+        claimKbShown: { run: (_uid, cut) => { log.shownClaims++; return { changes: (u.kb_shown_at || 0) < cut ? 1 : 0 }; } },
+      },
+    });
+    await fnR({
+      sendMessage: (_id, _t, o) => { log.sent++; log.silent = o.disable_notification; return Promise.resolve({ message_id: 5 }); },
+      deleteMessage: () => { log.deleted++; return Promise.resolve(); },
+    }, 7);
+    return log;
+  };
+  const base = { welcomed: 1, kb_rev: 1 };
+  ok((await scenario({ ...base, kb_shown_at: 0 }, 'idle')).sent === 1,
+    'کاربری که **هرگز** کیبورد نگرفته، در اولین اقدام می‌گیردش (خودِ باگِ گزارش‌شده)');
+  ok((await scenario({ ...base, kb_shown_at: NOW - 40 * 86400 }, 'idle')).sent === 1,
+    'کاربرِ خوابیده‌ی چهل‌روزه هم می‌گیردش');
+  ok((await scenario({ ...base, kb_shown_at: NOW - 60 }, 'idle')).sent === 0,
+    'کاربری که همین الان گرفته دوباره نمی‌گیرد (تور اسپم نمی‌سازد)');
+  const fresh = await scenario({ ...base, kb_shown_at: NOW - 40 * 86400 }, 'idle');
+  ok(fresh.silent === true && fresh.deleted === 1, 'حامل بی‌صدا می‌رود و بلافاصله حذف می‌شود');
+  // 🔑 ادعای مرکزیِ استیتِ ورودی: وسطِ «سؤالت رو بنویس» کیبورد نمی‌رود، چون فرستادنش
+  // ناحیه‌ی ورودی را از کیبوردِ تایپ به کیبوردِ سفارشی سوییچ می‌کند.
+  for (const st of ['await_question', 'pay_receipt', 'onboard_name']) {
+    ok((await scenario({ ...base, kb_shown_at: 0 }, st)).sent === 0,
+      `در استیتِ ورودیِ «${st}» هیچ کیبوردی فرستاده نمی‌شود`);
+  }
+  ok((await scenario({ welcomed: 0, kb_rev: 1, kb_shown_at: 0 }, 'idle')).sent === 0,
+    'کاربرِ آنبوردنشده هیچ‌وقت نمی‌گیرد');
+  ok((await scenario({ welcomed: 1, kb_rev: 0, kb_shown_at: NOW - 60 }, 'idle')).sent === 1,
+    'نسخه‌ی عقبِ کیبورد هنوز مثل قبل حامل می‌فرستد (رفتارِ v3.39.0 نشکسته)');
+  // 🔙 رول‌بکِ ادعاشده باید واقعاً کار کند. با صفر، `cutoff` همین لحظه می‌شود و بدونِ
+  // گاردِ صریح، تور به‌جای خاموش شدن روی **هر** اقدام شلیک می‌کرد.
+  {
+    const src0 = bodyOf('const KB_ENSURE_HOURS =');
+    const off = new Function('deps', `
+      const { getUser, getState, stmts, mainKeyboard, L, KB_REV, KB_QUIET_STATES, logErr } = deps;
+      ${src0.replace(/const KB_ENSURE_HOURS = \d+;/, 'const KB_ENSURE_HOURS = 0;')}}
+      return ensureKeyboard;`)({
+      getUser: () => ({ welcomed: 1, kb_rev: 1, kb_shown_at: NOW - 40 * 86400 }),
+      getState: () => 'idle', mainKeyboard: () => ({}), L: { onboarding: { kbRefresh: 'x' } },
+      KB_REV: 1, KB_QUIET_STATES: new Set(), logErr: () => {},
+      stmts: { claimKbRev: { run: () => ({ changes: 0 }) }, claimKbShown: { run: () => ({ changes: 1 }) } },
+    });
+    let sent = 0;
+    await off({ sendMessage: () => { sent++; return Promise.resolve({ message_id: 1 }); }, deleteMessage: () => Promise.resolve() }, 7);
+    ok(sent === 0, 'رول‌بکِ KB_ENSURE_HOURS=0 واقعاً تور را خاموش می‌کند (نه اینکه شلیکش کند)');
+  }
+  // شکستِ ارسال نباید استثنا بیرون بدهد (اقدامِ کاربر را می‌شکست).
+  {
+    const fnR = run({
+      getUser: () => ({ welcomed: 1, kb_rev: 1, kb_shown_at: 0 }), getState: () => 'idle',
+      mainKeyboard: () => ({}), L: { onboarding: { kbRefresh: 'x' } }, KB_REV: 1,
+      KB_QUIET_STATES: new Set(), logErr: () => {},
+      stmts: { claimKbRev: { run: () => ({ changes: 0 }) }, claimKbShown: { run: () => ({ changes: 1 }) } },
+    });
+    let threw = false;
+    await fnR({ sendMessage: () => Promise.reject(new Error('blocked')) }, 7).catch(() => { threw = true; });
+    ok(!threw, 'شکستِ ارسال (کاربرِ بلاک‌کرده) استثنا بیرون نمی‌دهد');
+  }
+}
 
 /* ══ ۴) میدل‌ور: بعد از جرنی، و بدونِ بلاک ═══════════════════════════════ */
 console.log('\n  — 🧭 جای میدل‌ور:');
 const iJourney = SRC.indexOf('registerJourney(bot,');
-const iMw = SRC.indexOf('refreshKeyboardIfStale(ctx, ctx.from?.id)');
+const iMw = SRC.indexOf('ensureKeyboard(ctx.telegram, ctx.from?.id)');
 ok(iJourney > -1 && iMw > iJourney, 'میدل‌ورِ کیبورد بعد از میدل‌ورِ جرنی ثبت می‌شود (logAct عادی ثبت شود)');
-const mw = bodyOf('  if (ctx.message || ctx.callbackQuery) await refreshKeyboardIfStale', '\n});');
+const mw = bodyOf('bot.use(async (ctx, next) => {\n  if (ctx.message || ctx.callbackQuery) {', '\n});');
 ok(mw ? /return next\(\)/.test(mw) : false, 'میدل‌ور همیشه next() را صدا می‌زند (هیچ فلویی بلاک نمی‌شود)');
+ok(mw ? /stmts\.touchSeen\.run\(ctx\.from\.id\)/.test(mw) : false,
+  'همان میدل‌ور مهرِ «آخرین اقدام» را هم می‌زند (تک‌نقطه، هیچ مسیری جا نمی‌ماند)');
+ok(mw ? /try \{[^}]*touchSeen[^}]*\} catch/.test(mw) : false,
+  'شکستِ مهرِ زمان اقدامِ کاربر را نمی‌شکند');
 ok(/if \(ctx\.message \|\| ctx\.callbackQuery\)/.test(SRC),
   'فقط روی اقدامِ واقعیِ کاربر اجرا می‌شود، نه آپدیت‌های سرویسیِ تلگرام');
 
