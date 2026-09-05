@@ -285,8 +285,17 @@ console.log('\n▶ پیامِ عمومیِ «ادامه» جایگزینِ جم�
   ok(/async function replyCanceled\(ctx, uid\) \{[\s\S]{0,400}?if \(await replayIntent\(ctx, uid\)\) return;\s*\n\s*if \(uxV2For\(uid\)\) return sendContinuePrompt\(ctx, uid\);\s*\n\s*return ctx\.reply\(L\.reading\.canceled, mainKeyboard\(uid\)\);/.test(SRC),
     'replyCanceled: اول نیتِ معلق، بعد دنیای الماس → پیامِ ادامه، دنیای قدیم → همان جمله‌ی قبلی');
   // v3.19.0: نقطه‌ی چهارم `lucky:cancel` اضافه شد (کنارگذاشتنِ دستِ کارت شانس).
+  // v3.59.0: نقطه‌ی پنجم `pay_exit` — دکمه‌ی خروجِ گاردِ «فاکتور باز داری». عددِ پین‌شده
+  // بالا رفت ولی **ادعا همان است**: هیچ نقطه‌ی لغوی نباید پیامِ خودش را بسازد. برای اینکه
+  // این ادعا با بالا رفتنِ عدد رقیق نشود، خودِ لیستِ نقاط هم سنجیده می‌شود.
+  const CANCEL_POINTS = ['rcancel', 'reading:cancel', 'pay_cancel', 'lucky:cancel', 'pay_exit'];
   const callers = [...SRC.matchAll(/await replyCanceled\(ctx, uid\)/g)].length;
-  ok(callers === 4, `چهار نقطه‌ی لغو (rcancel/reading:cancel/pay_cancel/lucky:cancel) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
+  ok(callers === CANCEL_POINTS.length,
+    `${CANCEL_POINTS.length} نقطه‌ی لغو (${CANCEL_POINTS.join('/')}) از replyCanceled استفاده می‌کنند (یافت شد: ${callers})`);
+  for (const a of CANCEL_POINTS) {
+    ok(SRC.includes(`bot.action(/^${a}`) || SRC.includes(`bot.action('${a}'`),
+      `نقطه‌ی لغوِ ${a} هنوز وجود دارد (عددِ بالا از یک نقطه‌ی حذف‌شده پر نشده)`);
+  }
   ok(/async function sendContinuePrompt\(ctx, uid\) \{\s*\n\s*await ctx\.reply\(L\.reading\.nextOffersV3, Markup\.inlineKeyboard\(\[\s*\n\s*\.\.\.recoRows\(uid, null\)/.test(SRC),
     'sendContinuePrompt همان متن و ساختارِ CTAی پایانِ فال را می‌فرستد (یک منبع)');
 }
