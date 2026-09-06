@@ -188,9 +188,6 @@ console.log('\n▶ ۱۱) هزینه‌ی قبل از ثبت پخش می‌شود
   ok(before.length > 1, `روی بیش از یک روز پخش شد (${before.length} روز)، نه همه روی یک روز`);
 }
 
-console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
-if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
-
 console.log('\n▶ ۱۰) پرداختِ حساب‌های تستی از درآمد بیرون است، و هیچ مسیری جا نمی‌ماند');
 {
   /* ⚠️ گاردِ **ساختاری**، نه آینه‌ای: خطرِ واقعی این نیست که `revenueWhere` فیلتر را
@@ -226,3 +223,49 @@ console.log('\n▶ ۱۰) پرداختِ حساب‌های تستی از درآم
   ok(miss.length === 0,
     `هیچ کوئریِ پولی بدونِ فیلترِ حسابِ تستی نمانده${miss.length ? `\n     ${miss.join('\n     ')}` : ''}`);
 }
+
+console.log('\n▶ ۱۲) پرداختِ سرگردان: حسابداریِ سه وضعیت');
+{
+  /* ⚠️ خطرِ واقعی این‌جا «خطا دادن» نیست، **بی‌صدا غلط شمردن** است. دو جهتِ خرابی هر دو
+     ممکن‌اند و هیچ‌کدام خطایی نمی‌دهند:
+       • `resolved_late` اگر در درآمد بماند → یک پول **دو بار** شمرده می‌شود (ردیفِ
+         واقعی‌اش حالا در `payments` ربات هم هست).
+       • `resolved_support` اگر از درآمد برود → پولی که واقعاً به حساب آمده **ناپدید**
+         می‌شود (هیچ‌وقت در ربات ثبت نشد).
+     پس هر دو جهت صریح سنجیده می‌شوند، نه فقط یکی. */
+  const { addOrphan, resolveOrphan, orphanRevenueByDay, ORPHAN_REVENUE_STATES } =
+    await import(`file://${base}/lib/platform.js`);
+  const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+  const when = at(1);
+  const base0 = sum(orphanRevenueByDay('tarot', 0));
+
+  addOrphan({ bot: 'tarot', amount: 11_000, paidAt: when, coins: 3 });
+  const idLate = addOrphan({ bot: 'tarot', amount: 22_000, paidAt: when, coins: 5 });
+  const idSupp = addOrphan({ bot: 'tarot', amount: 33_000, paidAt: when, coins: 7 });
+  ok(sum(orphanRevenueByDay('tarot', 0)) === base0 + 66_000,
+    'هر سه ردیفِ تازه (هنوز باز) در درآمد می‌آیند');
+
+  resolveOrphan(idLate, 'resolved_late');
+  ok(sum(orphanRevenueByDay('tarot', 0)) === base0 + 44_000,
+    '«رسید را دیر فرستاد» از درآمد **خارج** شد (وگرنه دوباره‌شماری)');
+
+  resolveOrphan(idSupp, 'resolved_support', 555);
+  ok(sum(orphanRevenueByDay('tarot', 0)) === base0 + 44_000,
+    '«از راه پشتیبانی» در درآمد **ماند** (وگرنه پول ناپدید می‌شد)');
+
+  ok(resolveOrphan(idSupp, 'resolved_late') === 0,
+    'گذارِ دوباره روی ردیفِ حل‌شده بی‌اثر است (ضدِ دوبار-تپ)');
+  ok(ORPHAN_REVENUE_STATES.includes('orphan') && ORPHAN_REVENUE_STATES.includes('resolved_support')
+     && !ORPHAN_REVENUE_STATES.includes('resolved_late'),
+    'فهرستِ وضعیت‌های درآمدی دقیقاً همان دو تاست');
+
+  // و واقعاً به سریِ سود می‌رسد، نه فقط در جدولِ خودش بماند
+  const pr = profitDaily('tarot', { days: 5, usdToman: RATE });
+  ok(pr.totals.orphan === base0 + 44_000,
+    `سهمِ سرگردان در سریِ سود جدا گزارش می‌شود (${pr.totals.orphan})`);
+  ok(pr.totals.rev - pr.totals.orphan === 500_000,
+    `درآمدِ عادی دست‌نخورده ماند (${pr.totals.rev - pr.totals.orphan})`);
+}
+
+console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
+if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }

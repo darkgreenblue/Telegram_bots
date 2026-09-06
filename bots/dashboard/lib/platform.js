@@ -48,6 +48,34 @@ pdb.exec(`
     created_at     INTEGER NOT NULL DEFAULT (unixepoch())
   );
   -- rollup ماهیانه/روزانه‌ی رویدادها (سیاست retention — جارو در lib/maintenance.js)
+  /* 🧾 پرداخت‌های سرگردان — پولی که کارت‌به‌کارت رسیده ولی کاربر رسیدش را به ربات
+     نفرستاده، پس در جدولِ payments ربات **هیچ ردیفی ندارد** و از درآمد غایب است.
+     ⚠️ عمداً این‌جاست نه در دیتابیسِ ربات: ردیفی با user_id جعلی در جدولِ پولِ ربات
+     هر گزارشِ کاربرمحوری را بی‌صدا خراب می‌کند (ARPU، خریداران، تایم‌لاین). این دیتای
+     **مدیریتیِ داشبورد** است و ربات هرگز نمی‌خواندش.
+     status سه حالت دارد و تفاوتشان حسابداری است نه توصیفی:
+       orphan            صاحبش پیدا نشده — در درآمد **می‌آید**
+       resolved_support  به پشتیبانی پیام داد و الماسش را گرفت — در درآمد **می‌ماند**
+                           (پرداختش هیچ‌وقت در ربات ثبت نشد؛ حذفش یعنی پول ناپدید شود)
+       resolved_late     رسید را دیر به ربات فرستاد — از درآمد **خارج می‌شود**
+                           (ردیفِ واقعی‌اش حالا در payments ربات است؛ ماندنش دوباره‌شماری) */
+  CREATE TABLE IF NOT EXISTS orphan_payments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot         TEXT    NOT NULL,
+    amount      INTEGER NOT NULL,
+    paid_at     INTEGER NOT NULL,
+    pkg         TEXT    NOT NULL DEFAULT '',
+    coins       INTEGER NOT NULL DEFAULT 0,
+    ref         TEXT    NOT NULL DEFAULT '',
+    note        TEXT    NOT NULL DEFAULT '',
+    shot        TEXT    NOT NULL DEFAULT '',
+    status      TEXT    NOT NULL DEFAULT 'orphan',
+    owner_id    INTEGER,
+    resolved_at INTEGER,
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_orphan_bot ON orphan_payments(bot, status);
+
   CREATE TABLE IF NOT EXISTS events_rollup (
     bot   TEXT    NOT NULL,
     day   TEXT    NOT NULL,
@@ -111,3 +139,42 @@ export const addInsight = (bot, text, experimentKey) =>
     .run(bot || '', text.slice(0, 2000), (experimentKey || '').slice(0, 64));
 export const listInsights = (limit = 100) =>
   pdb.prepare('SELECT * FROM insights ORDER BY id DESC LIMIT ?').all(limit);
+
+/* ═══ 🧾 پرداخت‌های سرگردان ═══
+   جزئیاتِ حسابداری و معنیِ سه وضعیت، بالای تعریفِ جدول. */
+
+/** وضعیت‌هایی که در درآمد شمرده می‌شوند (سرگردان + حل‌شده از راهِ پشتیبانی). */
+export const ORPHAN_REVENUE_STATES = ['orphan', 'resolved_support'];
+
+export const addOrphan = ({ bot, amount, paidAt, pkg = '', coins = 0, ref = '', note = '', shot = '' }) =>
+  pdb.prepare(`INSERT INTO orphan_payments (bot, amount, paid_at, pkg, coins, ref, note, shot)
+               VALUES (?,?,?,?,?,?,?,?)`)
+    .run(bot, amount, paidAt, pkg, coins, ref, note, shot).lastInsertRowid;
+
+export const listOrphans = (bot, { status = '' } = {}) => (status
+  ? pdb.prepare('SELECT * FROM orphan_payments WHERE bot=? AND status=? ORDER BY paid_at DESC, id DESC').all(bot, status)
+  : pdb.prepare('SELECT * FROM orphan_payments WHERE bot=? ORDER BY paid_at DESC, id DESC').all(bot));
+
+export const getOrphan = (id) => pdb.prepare('SELECT * FROM orphan_payments WHERE id=?').get(id);
+
+/** گذارِ اتمیک به یک وضعیتِ حل‌شده — فقط از `orphan`، پس دوبار زدنِ دکمه بی‌اثر است. */
+export const resolveOrphan = (id, status, ownerId = null) =>
+  pdb.prepare(`UPDATE orphan_payments SET status=?, owner_id=?, resolved_at=unixepoch()
+               WHERE id=? AND status='orphan'`).run(status, ownerId, id).changes;
+
+export const deleteOrphan = (id) => pdb.prepare('DELETE FROM orphan_payments WHERE id=?').run(id).changes;
+
+/* درآمدِ سرگردانِ یک ربات در یک بازه، گروه‌شده per روزِ تهران.
+   ⚠️ خروجی عمداً `Map` از «روز → تومان» است، نه یک عددِ کل: مصرف‌کننده‌اش سریِ روزانه‌ی
+   سود است و اگر عددِ کل می‌داد، باید به یک روزِ دلبخواه می‌چسبید. */
+export function orphanRevenueByDay(bot, sinceSec = 0) {
+  const q = ORPHAN_REVENUE_STATES.map(() => '?').join(',');
+  const out = new Map();
+  for (const r of pdb.prepare(
+    `SELECT paid_at, amount FROM orphan_payments
+      WHERE bot=? AND status IN (${q}) AND paid_at >= ?`).all(bot, ...ORPHAN_REVENUE_STATES, sinceSec)) {
+    const d = new Date((r.paid_at + 12600) * 1000).toISOString().slice(0, 10);
+    out.set(d, (out.get(d) || 0) + (Number(r.amount) || 0));
+  }
+  return out;
+}
