@@ -77,8 +77,12 @@ ok(/kb_rev<\?/.test(claim), 'شرطِ «نسخه‌ی عقب» داخلِ خود
   ok(iClaim > -1 && iSend > -1 && iClaim < iSend, 'مهر قبل از ارسال زده می‌شود');
 }
 ok(fn ? /KB_QUIET_STATES\.has\(getState\(uid\)\)/.test(fn) : false,
-  'کاربرِ وسطِ آنبوردینگ یا یک استیتِ ورودی کیبورد نمی‌گیرد (قراردادِ v3.16.0 نمی‌شکند)');
+  'استیتِ ورودی هنوز گاردِ خودش را دارد (قراردادِ v3.16.0 نمی‌شکند)');
 ok(fn ? /!u\?\.welcomed/.test(fn) : false, 'کاربرِ آنبوردنشده هم نمی‌گیرد');
+// 🔒 گاردِ ساختاریِ بند ۹ب-۳: گاردِ استیتِ ورودی **نباید** بی‌قید باشد، وگرنه کاربری که
+// هیچ کیبوردی ندارد داخلِ یک استیتِ ورودی برای همیشه بی‌منو می‌ماند (باگِ ۱۴۰۵/۰۶/۱۵).
+ok(fn ? /if \(!neverHadKb && KB_QUIET_STATES\.has\(getState\(uid\)\)\) return;/.test(fn) : false,
+  'گاردِ استیتِ ورودی فقط برای کسی است که از قبل کیبورد دارد، نه برای کسی که هیچ ندارد');
 ok(fn ? /catch \(e\)/.test(fn) : false, 'شکستِ ارسال اقدامِ کاربر را نمی‌شکند');
 
 /* ══ ۳ب) تورِ کهنگی: منوی گم‌شده خودش برمی‌گردد (v3.56.0) ════════════════
@@ -105,6 +109,22 @@ ok(/kb_shown_at=unixepoch\(\)/.test(claimShown), 'ادعا همان لحظه م�
 /* ══ ۳ج) رفتاری: خودِ تابع از سورس اجرا می‌شود ═══════════════════════════ */
 console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
 {
+  /* ⚠️ لیستِ استیت‌های ساکت از **خودِ سورس** ساخته می‌شود، نه یک کپیِ محلی. نسخه‌ی قبلیِ
+     همین تست سه استیت را دستی نوشته بود، پس `pay_amount`/`pay_discount`/`settings_name`
+     اصلاً سنجیده نمی‌شدند و اضافه شدنِ یک استیتِ ساکتِ تازه هم بی‌صدا از پوشش بیرون
+     می‌ماند (همان تله‌ی ثبت‌شده‌ی «کپیِ منطق در تست»). */
+  const listOf = (name) => (SRC.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`))?.[1] || '')
+    .match(/'([a-z_]+)'/g)?.map((s) => s.slice(1, -1)) || [];
+  const ONB = listOf('ONBOARDING_STATES');
+  const quietTail = (SRC.match(/const KB_QUIET_STATES = new Set\(\[([\s\S]*?)\]\)/)?.[1] || '')
+    .match(/'([a-z_]+)'/g)?.map((s) => s.slice(1, -1)) || [];
+  const REAL_QUIET = new Set([...ONB, ...quietTail]);
+  ok(ONB.length === 3, `ONBOARDING_STATES از سورس خوانده شد (${ONB.join(', ')})`);
+  ok(REAL_QUIET.size >= 8, `KB_QUIET_STATES از سورس خوانده شد (${[...REAL_QUIET].join(', ')})`);
+  for (const st of ['await_question', 'pay_amount', 'pay_receipt', 'pay_discount', 'settings_name']) {
+    ok(REAL_QUIET.has(st), `«${st}» واقعاً یک استیتِ ساکت است (وگرنه ادعای زیرش پوچ می‌شد)`);
+  }
+
   const src = bodyOf('const KB_ENSURE_HOURS =');
   const run = src ? new Function('deps', `
     const { getUser, getState, stmts, mainKeyboard, L, KB_REV, KB_QUIET_STATES, logErr } = deps;
@@ -116,8 +136,7 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
     const fnR = run({
       getUser: () => u, getState: () => state, mainKeyboard: () => ({ reply_markup: 'KB' }),
       L: { onboarding: { kbRefresh: 'x' } }, KB_REV: 1,
-      KB_QUIET_STATES: new Set(['onboard_name', 'await_question', 'pay_receipt']),
-      logErr: () => {},
+      KB_QUIET_STATES: REAL_QUIET, logErr: () => {},
       stmts: {
         claimKbRev: { run: () => { log.revClaims++; return { changes: (u.kb_rev || 0) < 1 ? 1 : 0 }; } },
         claimKbShown: { run: (_uid, cut) => { log.shownClaims++; return { changes: (u.kb_shown_at || 0) < cut ? 1 : 0 }; } },
@@ -138,32 +157,56 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
     'کاربری که همین الان گرفته دوباره نمی‌گیرد (تور اسپم نمی‌سازد)');
   const fresh = await scenario({ ...base, kb_shown_at: NOW - 40 * 86400 }, 'idle');
   ok(fresh.silent === true && fresh.deleted === 1, 'حامل بی‌صدا می‌رود و بلافاصله حذف می‌شود');
-  // 🔑 ادعای مرکزیِ استیتِ ورودی: وسطِ «سؤالت رو بنویس» کیبورد نمی‌رود، چون فرستادنش
-  // ناحیه‌ی ورودی را از کیبوردِ تایپ به کیبوردِ سفارشی سوییچ می‌کند.
-  for (const st of ['await_question', 'pay_receipt', 'onboard_name']) {
-    ok((await scenario({ ...base, kb_shown_at: 0 }, st)).sent === 0,
-      `در استیتِ ورودیِ «${st}» هیچ کیبوردی فرستاده نمی‌شود`);
+  /* 🔑 دو ادعای **مخالفِ هم** روی استیت‌های ورودی — و تفاوتشان کلِ فیکسِ بند ۹ب-۳ است.
+     الف) کسی که کیبورد **دارد**: وسطِ «سؤالت رو بنویس» چیزی نمی‌گیرد، چون فرستادنش
+          ناحیه‌ی ورودی را از کیبوردِ تایپ به کیبوردِ سفارشی سوییچ می‌کند (قاعده‌ی قدیمی).
+     ب) کسی که **هیچ** کیبوردی ندارد: همان‌جا می‌گیرد، چون بدونش هیچ راهی برای دستور
+          دادن به ربات ندارد و آن بن‌بست از یک سوییچِ یک‌باره‌ی کیبورد بدتر است. */
+  for (const st of ['await_question', 'pay_receipt', 'pay_amount', 'pay_discount', 'settings_name']) {
+    ok((await scenario({ ...base, kb_shown_at: NOW - 40 * 86400 }, st)).sent === 0,
+      `استیتِ ورودیِ «${st}»: کاربرِ کیبورددار تازه‌سازی نمی‌گیرد (کیبوردِ تایپش نمی‌پرد)`);
   }
-  ok((await scenario({ welcomed: 0, kb_rev: 1, kb_shown_at: 0 }, 'idle')).sent === 0,
-    'کاربرِ آنبوردنشده هیچ‌وقت نمی‌گیرد');
+  for (const st of ['await_question', 'pay_receipt', 'pay_amount', 'pay_discount', 'settings_name']) {
+    ok((await scenario({ ...base, kb_shown_at: 0 }, st)).sent === 1,
+      `استیتِ ورودیِ «${st}»: کاربرِ بی‌کیبورد همان‌جا کیبورد می‌گیرد (بن‌بستِ بند ۹ب-۳)`);
+  }
+  // تنها استثنای مجازِ بند ۹ب-۳: خودِ آنبوردینگ. استیت‌های آنبوردینگ هم welcomed=0 دارند
+  // هم در KB_QUIET_STATES اند، پس با **هر دو** گارد باید ساکت بمانند.
+  for (const st of ['onboard_name', 'onboard_month', 'idle']) {
+    ok((await scenario({ welcomed: 0, kb_rev: 1, kb_shown_at: 0 }, st)).sent === 0,
+      `کاربرِ آنبوردنشده در «${st}» هیچ‌وقت نمی‌گیرد (تنها استثنای مجاز)`);
+  }
   ok((await scenario({ welcomed: 1, kb_rev: 0, kb_shown_at: NOW - 60 }, 'idle')).sent === 1,
     'نسخه‌ی عقبِ کیبورد هنوز مثل قبل حامل می‌فرستد (رفتارِ v3.39.0 نشکسته)');
   // 🔙 رول‌بکِ ادعاشده باید واقعاً کار کند. با صفر، `cutoff` همین لحظه می‌شود و بدونِ
   // گاردِ صریح، تور به‌جای خاموش شدن روی **هر** اقدام شلیک می‌کرد.
   {
     const src0 = bodyOf('const KB_ENSURE_HOURS =');
-    const off = new Function('deps', `
+    const offFor = (u) => new Function('deps', `
       const { getUser, getState, stmts, mainKeyboard, L, KB_REV, KB_QUIET_STATES, logErr } = deps;
       ${src0.replace(/const KB_ENSURE_HOURS = \d+;/, 'const KB_ENSURE_HOURS = 0;')}}
       return ensureKeyboard;`)({
-      getUser: () => ({ welcomed: 1, kb_rev: 1, kb_shown_at: NOW - 40 * 86400 }),
+      getUser: () => u,
       getState: () => 'idle', mainKeyboard: () => ({}), L: { onboarding: { kbRefresh: 'x' } },
-      KB_REV: 1, KB_QUIET_STATES: new Set(), logErr: () => {},
-      stmts: { claimKbRev: { run: () => ({ changes: 0 }) }, claimKbShown: { run: () => ({ changes: 1 }) } },
+      KB_REV: 1, KB_QUIET_STATES: REAL_QUIET, logErr: () => {},
+      stmts: {
+        claimKbRev: { run: () => ({ changes: 0 }) },
+        claimKbShown: { run: (_uid, cut) => ({ changes: (u.kb_shown_at || 0) < cut ? 1 : 0 }) },
+      },
     });
-    let sent = 0;
-    await off({ sendMessage: () => { sent++; return Promise.resolve({ message_id: 1 }); }, deleteMessage: () => Promise.resolve() }, 7);
-    ok(sent === 0, 'رول‌بکِ KB_ENSURE_HOURS=0 واقعاً تور را خاموش می‌کند (نه اینکه شلیکش کند)');
+    const countSends = async (u) => {
+      let sent = 0;
+      await offFor(u)({
+        sendMessage: () => { sent++; return Promise.resolve({ message_id: 1 }); },
+        deleteMessage: () => Promise.resolve(),
+      }, 7);
+      return sent;
+    };
+    ok(await countSends({ welcomed: 1, kb_rev: 1, kb_shown_at: NOW - 40 * 86400 }) === 0,
+      'رول‌بکِ KB_ENSURE_HOURS=0 تازه‌سازیِ دوره‌ای را واقعاً خاموش می‌کند (نه اینکه شلیکش کند)');
+    // 🔒 ولی رول‌بکِ یک بهینه‌سازی نباید خودِ تضمینِ بند ۹ب-۳ را هم ببرد.
+    ok(await countSends({ welcomed: 1, kb_rev: 1, kb_shown_at: 0 }) === 1,
+      'همان رول‌بک، کاربرِ **بی‌کیبورد** را همچنان ترمیم می‌کند (تضمین رول‌بک‌پذیر نیست)');
   }
   // شکستِ ارسال نباید استثنا بیرون بدهد (اقدامِ کاربر را می‌شکست).
   {
@@ -177,6 +220,53 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
     await fnR({ sendMessage: () => Promise.reject(new Error('blocked')) }, 7).catch(() => { threw = true; });
     ok(!threw, 'شکستِ ارسال (کاربرِ بلاک‌کرده) استثنا بیرون نمی‌دهد');
   }
+}
+
+/* ══ ۳د) بند ۹ب-۳: بعد از آنبوردینگ، منو هرگز از دسترس خارج نمی‌شود ══════
+   🐛 باگِ ۱۴۰۵/۰۶/۱۵: آنبوردینگ **هیچ‌وقت** کیبورد را صادر نمی‌کرد. کامنتِ داخلِ
+   `finishOnboarding` می‌گفت «روی پیامِ خوش اومدی تحویل شده»، ولی `finishNameOnboarding`
+   صریحاً می‌گوید آن پیام عمداً هیچ reply_markup ای ندارد. یعنی هر کاربر با `kb_shown_at=0`
+   و بدونِ منو از آنبوردینگ بیرون می‌آمد (۱۰۶ کاربرِ واقعی در دیتای زنده). */
+console.log('\n  — 🔒 تضمینِ بند ۹ب-۳:');
+{
+  const fin = bodyOf('async function finishOnboarding(ctx, uid, props) {');
+  ok(!!fin, 'تابع finishOnboarding پیدا شد');
+  ok(fin ? /await ensureKeyboard\(ctx\.telegram, uid\)/.test(fin) : false,
+    'آنبوردینگ در پایانش کیبورد را صادر می‌کند (تنها نقطه‌ای که تضمینش می‌کند)');
+  // و **بعد** از پیامِ منو، تا آخرین چیزی که کاربر می‌بیند خودِ منو باشد.
+  const iMenu = fin ? fin.lastIndexOf('ctx.reply(') : -1;
+  const iKb = fin ? fin.indexOf('ensureKeyboard') : -1;
+  ok(iMenu > -1 && iKb > iMenu, 'حاملِ کیبورد بعد از پیامِ منو می‌رود، نه قبلش');
+  // هر دو نسلِ آنبوردینگ (دنیای الماس و مسیرِ رول‌بکِ تومانی) باید پوشش بگیرند، پس
+  // فراخوانی بیرونِ هر دو شاخه است نه داخلِ یکی.
+  ok(fin ? /\}\s*else\s*\{/.test(fin) && (fin.indexOf('ensureKeyboard') > fin.indexOf('} else {')) : false,
+    'فراخوانی بیرونِ شاخه‌هاست، پس مسیرِ رول‌بک هم پوشش دارد');
+}
+console.log('\n  — 🧹 برداشتنِ کیبورد همیشه ثبت می‌شود:');
+{
+  // ⚠️ اگر جایی کیبورد را بردارد ولی مهرش را صفر نکند، `kb_shown_at` دروغ می‌گوید و تورِ
+  // ترمیم کور می‌شود — دقیقاً حفره‌ای که `/resetprofile` داشت.
+  /* ⚠️ کامنت‌ها **قبل** از شمارش حذف می‌شوند. نسخه‌ی اولِ همین ادعا با یک فیلترِ
+     خط‌به‌خط نوشته شده بود و کامنتِ توضیحیِ خودِ `dropKeyboard` را (که همین عبارت را
+     نقل می‌کند) به‌عنوان کدِ واقعی می‌شمرد: یک قرمزِ کاذب. همان تله‌ی ثبت‌شده‌ی کامنت
+     در v3.56.0/v3.57.0، این‌بار روی شمارش. */
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const raw = CODE.split('\n').filter((l) => /Markup\.removeKeyboard\(\)/.test(l));
+  ok(raw.length === 1,
+    'تنها یک نقطه در کلِ سورس `Markup.removeKeyboard()` خام دارد (خودِ dropKeyboard)',
+    raw.join('\n     '));
+  const drop = bodyOf('const dropKeyboard = (uid) => {');
+  ok(drop ? /stmts\.clearKbShown\.run\(uid\)/.test(drop) : false,
+    'dropKeyboard مهرِ کیبورد را صفر می‌کند');
+  ok(drop ? /try \{[\s\S]*\} catch/.test(drop) : false,
+    'شکستِ ثبت، خودِ برداشتنِ کیبورد را نمی‌شکند');
+  const clear = SRC.match(/clearKbShown: db\.prepare\('([^']+)'\)/)?.[1] || '';
+  ok(/SET kb_shown_at=0/.test(clear), 'clearKbShown واقعاً صفر می‌کند', clear);
+  // و هر پنج نقطه‌ی برداشتن باید uid بدهند، وگرنه مهر برای کاربرِ اشتباهی صفر می‌شود.
+  const calls = SRC.match(/dropKeyboard\(([^)]*)\)/g) || [];
+  ok(calls.length >= 5, `همه‌ی نقاطِ برداشتنِ کیبورد از dropKeyboard می‌روند (${calls.length} فراخوانی)`);
+  ok(calls.every((c) => !/dropKeyboard\(\)/.test(c)),
+    'هیچ فراخوانی‌ای بدونِ uid نیست', calls.join(' '));
 }
 
 /* ══ ۴) میدل‌ور: بعد از جرنی، و بدونِ بلاک ═══════════════════════════════ */

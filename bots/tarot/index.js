@@ -1076,6 +1076,11 @@ const stmts = {
   // ⌨️ ادعای اتمیکِ «کیبورد را من می‌فرستم» برای مسیرِ **کهنگی** (v3.56.0). دوقلوی
   // `claimKbRev`: مهر **قبل** از ارسال می‌خورد، پس دو آپدیتِ هم‌زمان دو حامل نمی‌سازند.
   claimKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=? AND COALESCE(kb_shown_at,0)<?'),
+  // 🧹 قرینه‌ی `setKbShown`: هر جا کیبورد را **عمداً** برمی‌داریم مهرش هم صفر می‌شود، تا
+  // `kb_shown_at` دقیقاً یک معنی داشته باشد: «روی گوشیِ کاربر کیبوردی از ما هست».
+  // بدونِ این، مهرِ باقی‌مانده از قبلِ ریست به تورِ ترمیم دروغ می‌گفت و کاربری که تازه
+  // `removeKeyboard` گرفته بود «کیبورد دارد» حساب می‌شد (بند ۹ب-۳ ریشه).
+  clearKbShown: db.prepare('UPDATE users SET kb_shown_at=0 WHERE telegram_id=?'),
   // 👣 مهرِ آخرین اقدام. روی **هر** پیام و تپ می‌خورد و تنها مصرفش تشخیصِ «فلوی رهاشده»
   // در جاروی یادآوریِ شبانه است.
   touchSeen: db.prepare('UPDATE users SET last_seen_at=unixepoch() WHERE telegram_id=?'),
@@ -1558,6 +1563,17 @@ function mainKeyboard(uid) {
   return Markup.keyboard(rows).resize();
 }
 
+/* 🧹 تنها راهِ مجازِ برداشتنِ کیبوردِ ماندگار (بند ۹ب-۳ ریشه).
+   `Markup.removeKeyboard()` خام دیگر هیچ‌جا استفاده نمی‌شود، چون برداشتنِ کیبورد بدونِ
+   ثبتِ آن یعنی `kb_shown_at` دروغ می‌گوید و تورِ ترمیم کور می‌شود: کاربری که همین الان
+   کیبوردش را گرفته‌ایم، با مهرِ قدیمیِ باقی‌مانده «کیبورد دارد» حساب می‌شد.
+   نمونه‌ی واقعی‌اش `/resetprofile` بود: کاربر را به آنبوردینگ برمی‌گرداند و کیبوردش را
+   برمی‌داشت، ولی `kb_shown_at`ِ تازه‌اش دست‌نخورده می‌ماند. */
+const dropKeyboard = (uid) => {
+  try { if (uid) stmts.clearKbShown.run(uid); } catch (e) { logErr('kb drop:', e.message); }
+  return Markup.removeKeyboard();
+};
+
 // تا پایان آنبوردینگ (نوشتن نام + پاسخ به حوزه‌ی تمرکز)، کاربر نباید بتواند با دکمه‌ها مرحله را رد کند.
 const ONBOARDING_STATES = ['onboard_name', 'onboard_focus', 'onboard_month'];
 
@@ -1593,7 +1609,7 @@ async function blockDuringOnboarding(ctx) {
   const st = getState(ctx.from.id);
   if (!ONBOARDING_STATES.includes(st)) return false;
   if (st === 'onboard_name') {
-    await ctx.reply(L.onboarding.askNameRetry, Markup.removeKeyboard());
+    await ctx.reply(L.onboarding.askNameRetry, dropKeyboard(ctx.from.id));
   } else if (st === 'onboard_month') {
     await askBirthMonth(ctx);
   } else {
@@ -2372,7 +2388,7 @@ async function isChannelMember(ctx, uid) {
 async function showGate(ctx, uid) {
   setState(uid, 'gate_join');
   setSession(uid, null); // چیزی از فلوی قبلی نباید وارد آنبوردینگ شود
-  await ctx.reply(L.onboarding.gateIntro(uxV2For(uid)), Markup.removeKeyboard());
+  await ctx.reply(L.onboarding.gateIntro(uxV2For(uid)), dropKeyboard(uid));
   await typing(ctx, PACE_S);
   await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), gateKeyboard());
 }
@@ -2387,14 +2403,14 @@ async function startOnboarding(ctx, uid) {
   // بدونِ اینکه چیزی اضافه شده باشد — یعنی ربات به کاربر دروغ می‌گفت.
   const granted = grantWelcomeBonus(uid);
   if (granted) {
-    await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), Markup.removeKeyboard());
+    await ctx.reply(L.onboarding.welcomeGift(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), dropKeyboard(uid));
     await typing(ctx, PACE_S);
   }
   // قدم صفر آنبوردینگ: نام فارسیِ خودِ کاربر (نام تلگرام ممکن است انگلیسی/نامفهوم باشد و
   // مدل تکرارش کند). استیتِ ورودی است، پس عمداً هیچ دکمه‌ای ندارد (قرارداد ۹ب).
   setState(uid, 'onboard_name');
   setSession(uid, null);
-  await ctx.reply(L.onboarding.askName(uxV2For(uid)), { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
+  await ctx.reply(L.onboarding.askName(uxV2For(uid)), { parse_mode: 'Markdown', ...dropKeyboard(uid) });
 }
 
 async function handleStart(ctx) {
@@ -2634,17 +2650,36 @@ async function finishOnboarding(ctx, uid, props) {
   if (uxV2For(uid)) {
     setState(uid, 'choose_spread');
     // UX v2.5: دوباره **یک پیام** — چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟ 📌» می‌نشینند و
-    // «کدوم فال رو انتخاب می‌کنی؟» این‌جا (و فقط این‌جا) نمی‌آید. کیبوردِ ماندگار جلوتر، روی
-    // پیامِ «خوش اومدی»، تحویل شده است.
-    return ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
+    // «کدوم فال رو انتخاب می‌کنی؟» این‌جا (و فقط این‌جا) نمی‌آید.
+    await ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
+  } else {
+    const ctaRows = [
+      [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
+      [Markup.button.callback(L.buttons.startPopular(), 'spread:love')],
+    ];
+    if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
+    ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
+    await ctx.reply(L.onboarding.expectations(toneV2For(uid)), Markup.inlineKeyboard(ctaRows));
   }
-  const ctaRows = [
-    [Markup.button.callback(L.buttons.dailyAfterOnboard, 'daily_go')],
-    [Markup.button.callback(L.buttons.startPopular(), 'spread:love')],
-  ];
-  if (variant(db, uid, 'onboard_cta_order') === 'reading_first') ctaRows.reverse();
-  ctaRows.push([Markup.button.callback(L.buttons.allSpreads, 'onboard_allspreads')]);
-  await ctx.reply(L.onboarding.expectations(toneV2For(uid)), Markup.inlineKeyboard(ctaRows));
+  /* ⌨️ **لحظه‌ی تحویلِ منوی پایین** (بند ۹ب-۳ ریشه) — و این تنها نقطه‌ای است که
+     می‌تواند تضمینش کند.
+
+     🐛 باگی که مالک گزارش کرد و دیتای زنده تأییدش کرد: تا امروز آنبوردینگ **هیچ‌وقت**
+     کیبورد را صادر نمی‌کرد. کامنتِ همین‌جا می‌گفت «کیبوردِ ماندگار جلوتر روی پیامِ خوش
+     اومدی تحویل شده است»، ولی `finishNameOnboarding` صریحاً می‌گوید آن پیام عمداً هیچ
+     `reply_markup` ای ندارد. آن جمله بازمانده‌ی v3.11.1 بود و v3.16.0 باطلش کرد بدونِ
+     اینکه کسی کامنت را به‌روز کند. یعنی هر کاربری که آنبوردینگ را تمام می‌کرد با
+     `kb_shown_at=0` و **بدونِ هیچ منوی پایینی** بیرون می‌آمد. اندازه‌گیریِ ۱۴۰۵/۰۶/۱۵ روی
+     دیتای زنده: ۱۰۶ کاربرِ آنبوردشده با `kb_shown_at=0` — از جمله خودِ اکانتِ مالک،
+     سه دقیقه بعد از ریست.
+
+     چرا این‌جا و نه یک پیامِ دیده‌شدنی: تلگرام در هر پیام فقط **یک** `reply_markup`
+     می‌پذیرد و هر دو پیامِ این نقطه کیبوردِ inline دارند. `ensureKeyboard` همان حاملِ
+     بی‌صدای اثبات‌شده است (ارسال + حذفِ فوری، صفر رویدادِ جرنی)، پس قراردادِ «کیبورد
+     فقط در دو نقطه‌ی دیده‌شدنی» v3.16.0 هم نمی‌شکند.
+
+     ترتیب عمدی است: **بعد** از پیامِ منو، تا آخرین چیزی که کاربر می‌بیند خودِ منو باشد. */
+  await ensureKeyboard(ctx.telegram, uid);
 }
 
 bot.action(/^bmonth:(\d{1,2})$/, async (ctx) => {
@@ -4726,20 +4761,40 @@ async function ensureKeyboard(tg, uid) {
     if (!uid) return;
     const u = getUser(uid);
     // کاربرِ نیمه‌آنبورد کیبورد نمی‌گیرد: وسطِ آنبوردینگ عمداً کیبوردی در کار نیست
-    // (قراردادِ v3.16.0) و فرستادنش همان‌جا مرحله را به هم می‌ریزد. استیت‌های **ورودی**
-    // هم همین‌طور، به دلیلِ فنیِ نوشته‌شده روی `KB_QUIET_STATES`.
-    if (!u?.welcomed || KB_QUIET_STATES.has(getState(uid))) return;
-    const cutoff = Math.floor(Date.now() / 1000) - KB_ENSURE_HOURS * 3600;
+    // (قراردادِ v3.16.0). این **تنها استثنای مجازِ** بند ۹ب-۳ ریشه است.
+    if (!u?.welcomed) return;
+    /* 🆘 «هرگز کیبوردی نگرفته» با «کیبوردش کهنه است» دو چیزِ کاملاً متفاوت‌اند، و یک
+       گارد گرفتنشان همان باگی بود که مالک گزارش کرد.
+
+       گاردِ `KB_QUIET_STATES` دلیلِ فنیِ درستی دارد: فرستادنِ ReplyKeyboardMarkup وسطِ
+       «سؤالت رو بنویس» ناحیه‌ی ورودی را از کیبوردِ **تایپ** به کیبوردِ سفارشی سوییچ
+       می‌کند. ولی آن استدلال فقط برای کسی برقرار است که **از قبل کیبورد دارد**: برایش
+       یک ناراحتیِ ظاهری است. برای کسی که هیچ کیبوردی ندارد، همان گارد یعنی «هیچ راهی
+       برای دستور دادن به ربات نداری» — و بینِ یک بار سوییچِ کیبوردِ تایپ و بن‌بستِ
+       دائمی، انتخاب روشن است.
+
+       اندازه‌ی واقعیِ این حفره (دیتای زنده ۱۴۰۵/۰۶/۱۵): از ۱۰۶ کاربرِ آنبوردشده‌ی
+       بی‌کیبورد، **۲۱ نفر** داخلِ یک استیتِ ورودی پارک بودند، یعنی تور برایشان **هرگز**
+       شلیک نمی‌کرد؛ و ۴۹ نفر از همان ۱۰۶ نفر فالِ تحویل‌شده داشتند، یعنی ارزش را گرفته
+       بودند و بعد بی‌منو مانده بودند.
+       مسیرِ خودِ مالک هم دقیقاً همین بود: ریست ← آنبوردینگ (که کیبورد نمی‌داد) ←
+       رفتن سرِ تستِ رسید (`pay_amount`/`pay_receipt`، هر دو ساکت) ← بدونِ منو. */
+    const neverHadKb = (u.kb_shown_at || 0) === 0;
+    if (!neverHadKb && KB_QUIET_STATES.has(getState(uid))) return;
+    const cutoff = Math.floor(Date.now() / 1000) - Math.max(KB_ENSURE_HOURS, 0) * 3600;
     // گاردِ اتمیک **قبل از** ارسال: دو آپدیتِ هم‌زمان دو پیام نفرستند. هر دو مسیر ادعای
     // خودشان را دارند و با `|` (نه `||`) جمع می‌شوند تا هر دو مهر واقعاً زده شود.
     const bumpedRev   = !!KB_REV && (u.kb_rev || 0) < KB_REV
                         && stmts.claimKbRev.run(KB_REV, uid, KB_REV).changes > 0;
-    // ⚠️ `KB_ENSURE_HOURS > 0` رول‌بکِ یک‌خطیِ همین تور است و **لازم** است: با صفر،
+    // ⚠️ `KB_ENSURE_HOURS > 0` رول‌بکِ یک‌خطیِ **تورِ کهنگی** است و لازم است: با صفر،
     // `cutoff` برابرِ همین لحظه می‌شود و شرطِ کهنگی برای تقریباً همه درست — یعنی صفر
     // به‌جای خاموش‌کردن، تور را روی هر اقدام شلیک می‌کرد. دقیقاً همان کلاسِ «پرچمی که
     // در جهتِ عکس کار می‌کند».
-    const bumpedStale = KB_ENSURE_HOURS > 0 && (u.kb_shown_at || 0) < cutoff
-                        && stmts.claimKbShown.run(uid, cutoff).changes > 0;
+    // ⚠️ ولی `neverHadKb` عمداً **بیرونِ** آن پرچم است: رول‌بکِ یک بهینه‌سازی نباید
+    // خودِ تضمینِ بند ۹ب-۳ را هم خاموش کند. با `KB_ENSURE_HOURS = 0` فقط تازه‌سازیِ
+    // دوره‌ای می‌خوابد و کاربرِ بی‌کیبورد همچنان ترمیم می‌شود.
+    const stale = neverHadKb || (KB_ENSURE_HOURS > 0 && (u.kb_shown_at || 0) < cutoff);
+    const bumpedStale = stale && stmts.claimKbShown.run(uid, cutoff).changes > 0;
     if (!bumpedRev && !bumpedStale) return;
     const m = await tg.sendMessage(uid, L.onboarding.kbRefresh, {
       disable_notification: true, ...mainKeyboard(uid),
@@ -6328,7 +6383,7 @@ bot.action(/^rprof:(\d+)$/, async (ctx) => {
   // `onboard_name` است، پس هر متنی که بفرستد مستقیم به‌عنوان نام ثبت می‌شود.
   try {
     await ctx.telegram.sendMessage(target, L.reset.profUserNote,
-      { parse_mode: 'Markdown', ...Markup.removeKeyboard() });
+      { parse_mode: 'Markdown', ...dropKeyboard(target) });
   } catch (e) {
     logErr('resetprofile notify:', e.message);
     await ctx.reply(L.reset.profNoticeFailed(target)).catch(() => {});
