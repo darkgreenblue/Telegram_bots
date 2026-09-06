@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, announce-dry, announce-send]
+        options: [status, sys, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -225,6 +225,78 @@ jobs:
                 ls -1t ~/.cache/taroot-daypost 2>/dev/null | head -10 || echo "(هنوز هیچ مارکری نیست)"
                 echo "---- ۳۰ خطِ آخرِ لاگ ----"
                 tail -n 30 ~/taroot-daypost.log 2>/dev/null || echo "(لاگ هنوز ساخته نشده؛ یعنی کرون هنوز یک بار هم اجرا نشده)"
+                ;;
+              sys)
+                # 📟 عکسِ فوریِ منابعِ سرور — برای جواب‌دادن به «سرور ضعیف است یا معماری؟»
+                # بدونِ SSH. هیچ ورودیِ کاربری نمی‌گیرد، پس سطحِ تزریق ندارد.
+                echo "---- ساعت ----"
+                echo "server: $(date '+%F %H:%M:%S %Z')  |  Tehran: $(TZ=Asia/Tehran date '+%F %H:%M:%S')"
+                uptime || true
+                echo
+                echo "---- CPU: بار باید با تعدادِ هسته سنجیده شود، نه مطلق ----"
+                echo "cores:   $(nproc)"
+                echo "loadavg: $(cat /proc/loadavg)"
+                echo "(سه عددِ اول = بارِ ۱/۵/۱۵ دقیقه. سالم یعنی کمتر از تعدادِ هسته.)"
+                echo
+                echo "---- steal time: آیا هاستِ VPS ما را خفه می‌کند؟ ----"
+                if command -v vmstat >/dev/null 2>&1; then
+                  vmstat 1 5
+                  echo "(ردیفِ اول میانگینِ از-بوت است و گمراه‌کننده؛ چهار ردیفِ بعدی نمونه‌ی زنده‌اند.)"
+                  echo "(st = درصدِ CPU که هایپروایزر از ما گرفته. پایدار بالای ۵ یعنی سرور oversold؛ نزدیکِ صفر یعنی مشکل از هاست نیست.)"
+                  echo "(wa = انتظارِ I/O. بالا یعنی دیسک گلوگاه است. r = صفِ آماده‌به‌اجرا.)"
+                else
+                  echo "(vmstat نصب نیست — بسته‌ی procps لازم است)"
+                fi
+                echo
+                echo "---- حافظه ----"
+                free -m || true
+                echo
+                echo "---- دیسک ----"
+                df -h / 2>/dev/null || true
+                echo
+                echo "---- فشارِ منابع (PSI) — صفر یعنی هیچ‌کس منتظرِ منبع نمانده ----"
+                for f in /proc/pressure/cpu /proc/pressure/io /proc/pressure/memory; do
+                  if [ -r "$f" ]; then echo "$f -> $(head -1 "$f")"; fi
+                done
+                echo
+                echo "---- سهمِ واقعیِ CPU هر ربات از عمرِ خودش ----"
+                echo "(عددِ پایین یعنی پروسه CPU-bound نیست و دارد پشتِ await/I-O منتظر می‌ماند،"
+                echo " یعنی ارتقای سرور کمکی نمی‌کند. عددِ نزدیک به ۱۰۰ یعنی یک هسته اشباع است.)"
+                pm2 jlist | node -e "
+                  const fs = require('fs');
+                  const a = JSON.parse(fs.readFileSync(0, 'utf8'));
+                  const HZ = 100;
+                  const upt = parseFloat(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]);
+                  for (const p of a) {
+                    try {
+                      const st = fs.readFileSync('/proc/' + p.pid + '/stat', 'utf8');
+                      const f = st.slice(st.lastIndexOf(')') + 2).split(' ');
+                      const cpuSec = (Number(f[11]) + Number(f[12])) / HZ;
+                      const ageSec = upt - Number(f[19]) / HZ;
+                      console.log(
+                        p.name.padEnd(14),
+                        'cpu_share=' + (100 * cpuSec / ageSec).toFixed(1) + '%',
+                        'cpu_sec=' + cpuSec.toFixed(0),
+                        'age_min=' + Math.round(ageSec / 60),
+                        'threads=' + f[17]
+                      );
+                    } catch (e) { console.log(p.name.padEnd(14), '(خوانده نشد: ' + e.message + ')'); }
+                  }"
+                echo
+                echo "---- ۱۰ پروسه‌ی پرمصرف (pcpu = میانگینِ کلِ عمر، نه لحظه‌ای) ----"
+                ps -eo pid,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -11 || true
+                echo
+                echo "---- سوکت‌ها ----"
+                ss -s 2>/dev/null | head -6 || true
+                echo
+                echo "---- تأخیرِ شبکه به تلگرام (۵ نمونه، بدونِ توکن) ----"
+                for i in 1 2 3 4 5; do
+                  out=$(curl -s -o /dev/null --max-time 10 \
+                    -w "  dns %{time_namelookup}s | tcp %{time_connect}s | tls %{time_appconnect}s | total %{time_total}s | http %{http_code}" \
+                    https://api.telegram.org/ 2>&1) || true
+                  echo "${out:-  (نمونه شکست خورد)}"
+                done
+                echo "(http=200/404 یعنی رسیدیم؛ http=000 یعنی اصلاً وصل نشد. tls بالا یعنی دست‌دادنِ کند.)"
                 ;;
               tunnel-url)
                 # آدرس فعلی تونل داشبورد (quick tunnel بعد از هر ری‌استارت عوض می‌شود)
