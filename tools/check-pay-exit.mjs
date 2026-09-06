@@ -399,12 +399,27 @@ console.log('\n  — 🧾 فقط انصرافِ صریح فاکتور را می�
   const exit = body('pay_exit');
   ok(back && exit, 'هر دو هندلر پیدا شدند');
 
-  const guard = /status === 'pending' && p\.step === 'receipt'/;
-  ok(guard.test(back), 'pay_back فاکتورِ صادرشده (step=receipt) را cancel نمی‌کند');
-  ok(!guard.test(exit), 'pay_exit همان گارد را **ندارد** (انصرافِ صریح باید همیشه کار کند)');
+  ok(/const live = issuedInvoiceOf\(uid\)/.test(back),
+    'pay_back روی **فاکتورِ زنده‌ی سشن** تصمیم می‌گیرد، نه هر ردیفی که روی دکمه نوشته شده');
+  ok(/L\.errors\.openInvoice/.test(back), 'و به‌جای cancel پیامِ «یا تکمیل یا انصراف» می‌دهد');
+  ok(/pay_exit:\$\{live\.id\}/.test(back),
+    'دکمه‌ی انصراف به همان فاکتورِ **زنده** وصل است');
+  ok(/p\.step !== 'receipt'/.test(back),
+    'و ردیفِ صادرشده هرگز از این مسیر cancel نمی‌شود (فقط ردیفِ هنوز-بی‌بسته)');
+  ok(!/const live = issuedInvoiceOf/.test(exit),
+    'pay_exit این گارد را **ندارد** (انصرافِ صریح باید همیشه کار کند)');
   ok(/setPaymentStatus\.run\('canceled'/.test(exit), 'pay_exit هنوز واقعاً cancel می‌کند');
-  ok(/L\.errors\.openInvoice/.test(back), 'pay_back به‌جای cancel پیامِ «یا تکمیل یا انصراف» می‌دهد');
-  ok(/pay_exit:\$\{p\.id\}/.test(back), 'دکمه‌ی انصرافِ آن پیام به **همان** فاکتور وصل است، نه به سشن');
+
+  /* ⚠️ **چرا ادعای «به همان فاکتور وصل است» به‌تنهایی دروغ بود.**
+     نسخه‌ی اولِ این بخش فقط `callback_data` را می‌خواند و سبز می‌شد. ولی تصمیمِ واقعی
+     داخلِ `pay_exit` گرفته می‌شود و آن عمداً `s.paymentId` را به عددِ روی دکمه **ترجیح
+     می‌دهد**. یعنی اگر گارد روی یک ردیفِ کهنه نشان داده می‌شد، دکمه‌اش در عمل فاکتورِ
+     زنده را می‌کشت — همان باگی که این PR قرار بود ببندد، از درِ پشتی.
+     پس این ادعا حالا **رفتاری** است: هر دو سرِ زنجیره با هم سنجیده می‌شوند. */
+  ok(/Number\(s\.paymentId\) \|\| parseInt\(ctx\.match\[1\], 10\)/.test(exit),
+    'pay_exit فاکتورِ سشن را به عددِ دکمه ترجیح می‌دهد (رفتارِ عمدیِ «قفل را بشکن»)');
+  ok(/pay_exit:\$\{live\.id\}/.test(back) && /const live = issuedInvoiceOf\(uid\)/.test(back),
+    '⇒ و چون گارد فقط روی فاکتورِ سشن فعال می‌شود، این دو هرگز به دو ردیفِ متفاوت اشاره نمی‌کنند');
 }
 
 console.log('\n  — 📸 رسید هیچ‌وقت بی‌صدا دور ریخته نمی‌شود:');
@@ -489,6 +504,39 @@ console.log('\n  — 🧭 nav:menu گاردِ کپی‌شده ندارد:');
     'و پیامِ گارد را خودش دوباره نمی‌سازد');
   ok(nav ? !/pay_cancel:/.test(nav) : false,
     'و به pay_cancel وصل نیست (همان باگی که حلقه را می‌ساخت)');
+}
+
+console.log('\n  — ♻️ سه رگرسیونی که خودِ همین PR نزدیک بود بسازد:');
+{
+  /* هر سه از یک ریشه‌اند: یک فیکس روی مسیرِ فارسی نوشته شد و اثرش روی مسیرهای دیگر
+     (منوی کهنه، ریلِ استارز) دیده نشد. ادعاها این‌جا هستند تا اگر روزی گاردها
+     ساده‌سازی شوند، همان اثرِ جانبی دوباره بی‌صدا برنگردد. */
+  const pkg = (() => {
+    const at = SRC.indexOf('bot.action(/^pkg:');
+    const next = SRC.indexOf('\nbot.action(', at + 10);
+    return at < 0 ? '' : SRC.slice(at, next < 0 ? SRC.length : next);
+  })();
+  ok(!!pkg, 'هندلرِ pkg پیدا شد');
+  ok(!/if \(getState\(uid\) !== 'pay_amount'\) return;/.test(pkg),
+    'تپ روی بسته دیگر به‌خاطرِ استیتِ پاک‌شده بی‌صدا نمی‌میرد');
+  ok(!/if \(!s\.paymentId\) return ctx\.reply\(L\.errors\.stateLost/.test(pkg),
+    'و پیامِ بی‌ربطِ «حالتت گم شد» هم نمی‌دهد');
+  ok(/openPaymentRow\(uid\)/.test(pkg) && /setState\(uid, 'pay_amount'\)/.test(pkg),
+    'به‌جایش ردیفِ تازه باز می‌کند و تپِ کاربر کامل می‌شود (نیت روشن است)');
+
+  const photo = (() => {
+    const at = SRC.indexOf("bot.on('photo'");
+    return at < 0 ? '' : SRC.slice(at, SRC.indexOf('\n});', at));
+  })();
+  ok(/if \(starsRail\) return;/.test(photo),
+    'ریلِ استارز اصلاً واردِ مسیرِ رسید نمی‌شود (نه پیامِ بی‌ربط، نه احیای فاکتور)');
+  /* ⚠️ کامنت‌ها پاک می‌شوند وگرنه خودِ کامنتِ توضیحی (که `receiptNoInvoice` را نام
+     می‌برد) قبل از گارد می‌افتد و ادعای «ترتیب» را الکی قرمز می‌کند. */
+  const photoCode = photo.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const starsAt = photoCode.indexOf('if (starsRail) return;');
+  const receiptAt = photoCode.indexOf('receiptNoInvoice');
+  ok(starsAt >= 0 && receiptAt > starsAt,
+    'و این گارد **قبل از** هر منطقِ رسیدی است، نه بعدش');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} راهِ خروجِ پرداخت: ${pass} پاس، ${fail} خطا\n`);
