@@ -5580,7 +5580,40 @@ async function applyDiscount(ctx, uid, codeText) {
   const s = getSession(uid);
   const p = s.paymentId && stmts.getPayment.get(s.paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
-  const v = validateDiscount(codeText, uid, p.original_amount || p.amount, p.id);
+  /* 💥 **پایه‌ی تخفیف = پولی که کاربر واقعاً باید بدهد، نه `original_amount`.**
+   *
+   * 🐛 باگِ واقعی و شدید (کشف‌شده ۱۴۰۵/۰۶/۱۵ در ممیزیِ مسیرِ پول): در دنیای الماس
+   * `original_amount` **تعدادِ الماس** است نه قیمت. `claimAmount` اول `amount=30`
+   * (الماس) می‌گذارد و بعد `setPaymentPackage` با
+   * `original_amount = COALESCE(original_amount, amount)` همان ۳۰ را در
+   * `original_amount` قفل می‌کند و `amount` را روی قیمتِ واقعی (۶۰٬۰۰۰ تومان) می‌نشاند.
+   * پس `p.original_amount || p.amount` برابرِ **۳۰** بود، نه ۶۰٬۰۰۰.
+   *
+   * نتیجه‌ی زنجیره‌ای، همه در یک خط:
+   *   • تخفیفِ ۲۰٪ روی ۳۰ ⇒ `finalAmount = 24` ⇒ فاکتورِ ۶۰٬۰۰۰ تومانی **۲۴ تومان** شد،
+   *     در حالی که `approvePayment` همچنان `creditAmount = original_amount = 30` الماسِ
+   *     کامل می‌دهد. یعنی کلِ بسته به قیمتِ ۲۴ تومان.
+   *   • `max_discount_amount` (سقفِ تومانی) با عددِ الماسی مقایسه می‌شد، پس **هرگز**
+   *     نمی‌بست.
+   *   • کدِ ۱۰۰٪ ⇒ `finalAmount = 0` ⇒ **تأییدِ خودکار بدونِ هیچ رسیدی**.
+   *   • و `discount_uses.discount_amount` عددِ الماسی می‌گرفت، پس دفترِ تخفیف هم خراب بود.
+   * دقیقاً هم‌خانواده‌ی باگِ ریال/تومانِ رسید (بند ۹ ریشه): **عدد درست بود، واحد دروغ**.
+   *
+   * مسیرِ رسیدنش هم فرضی نیست: هندلرِ متن در استیتِ `pay_receipt` هر متنی را که یک کدِ
+   * تخفیفِ موجود باشد به همین تابع می‌فرستد، و کدِ «اولین خرید» در دنیای الماس فعال است.
+   *
+   * پایه‌ی درست تک‌منبع دارد و مبهم نیست: قیمتِ خودِ بسته از کاتالوگ. اگر بسته‌ای در کار
+   * نباشد (مسیرِ تومانیِ قدیمی) همان رفتارِ قبلی می‌ماند. */
+  const pk = packOf(p);
+  const base = pk ? (starsRail ? (p.amount || pk.toman) : pk.toman) : (p.original_amount || p.amount);
+  /* و گاردِ دوباره‌زدن: `setPaymentDiscount` روی فاکتوری که از قبل تخفیف خورده،
+     تخفیفِ دوم را روی مبلغِ تخفیف‌خورده می‌نشاند (انباشتِ ناخواسته). یک فاکتور، یک کد. */
+  if (p.discount_code_id) {
+    return ctx.reply(L.wallet.usedDiscount, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${p.id}`)],
+    ]));
+  }
+  const v = validateDiscount(codeText, uid, base, p.id);
   if (!v.ok) {
     // کدِ اشتباه کاربر را از مرحله‌ی کد بیرون نمی‌اندازد. قبلاً state به pay_receipt برمی‌گشت و
     // تلاشِ دومِ کاربر به‌عنوان «رسیدِ متنی» بلعیده می‌شد → پرداختی که هرگز انجام نشده بود به
@@ -5591,7 +5624,9 @@ async function applyDiscount(ctx, uid, codeText) {
   }
   stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, p.id);
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoiceDiscounted(p.original_amount || p.amount, v.finalAmount, v.dc.code), { parse_mode: 'Markdown' });
+  // ⚠️ عددِ نمایشی هم از **همان پایه** می‌آید، نه `original_amount` (بند ۶ج: عدد و
+  // واحد هرگز از دو منبعِ مختلف).
+  await ctx.reply(L.wallet.invoiceDiscounted(base, v.finalAmount, v.dc.code), { parse_mode: 'Markdown' });
   if (v.finalAmount === 0) {
     // کد ۱۰۰٪ → تأیید خودکار بدون رسید
     await approvePayment(p.id, null);
@@ -5805,7 +5840,12 @@ function approvePayment(paymentId, allowRejected = false) {
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
   if (p.discount_code_id) {
     stmts.incDiscountUses.run(p.discount_code_id);
-    stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, (p.original_amount || p.amount) - p.amount);
+    /* ⚠️ مبلغِ تخفیف هم باید **تومانی** ثبت شود، نه اختلافِ الماسی. در دنیای الماس
+       `original_amount` تعدادِ الماس است، پس `original_amount - amount` عددی بی‌معنی
+       می‌ساخت و دفترِ تخفیفِ داشبورد را خراب می‌کرد (همان ریشه‌ی باگِ پایه‌ی تخفیف). */
+    const dpk = packOf(p);
+    const dbase = dpk ? dpk.toman : (p.original_amount || p.amount);
+    stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, Math.max(0, dbase - p.amount));
   }
   return { p, creditAmount, bonus };
 }

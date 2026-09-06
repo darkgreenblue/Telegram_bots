@@ -227,6 +227,81 @@ console.log('\n▶ کدِ غیرفعال اصلاً پیدا نمی‌شود (ge
   db.prepare("UPDATE discount_codes SET is_active=1 WHERE id=?").run(CODE_ID);
 }
 
+
+/* ═══ 💥 پایه‌ی تخفیف باید **پول** باشد، نه تعدادِ الماس ═══════════════════
+ *
+ * 🐛 باگِ واقعی و شدید (۱۴۰۵/۰۶/۱۵). ترتیبِ دو UPDATE در دنیای الماس این است:
+ *   claimAmount        → amount = 30 (تعدادِ الماس)، step='receipt'
+ *   setPaymentPackage  → original_amount = COALESCE(original_amount, amount) = 30
+ *                        amount = 60000 (قیمتِ واقعی)
+ * پس `original_amount` **الماس** است و `amount` **تومان**. `applyDiscount` پایه را
+ * `p.original_amount || p.amount` می‌گرفت، یعنی ۳۰ به‌جای ۶۰٬۰۰۰:
+ *   • تخفیفِ ۲۰٪ ⇒ فاکتور ۲۴ تومان، ولی الماسِ کامل داده می‌شد
+ *   • `max_discount_amount` (تومانی) روی عددِ الماسی هرگز نمی‌بست
+ *   • کدِ ۱۰۰٪ ⇒ تأییدِ خودکار بدونِ رسید
+ * ادعاها عمداً با **SQLِ خوانده‌شده از خودِ index.js** اجرا می‌شوند تا اگر روزی ترتیبِ
+ * این دو UPDATE عوض شود، همین‌جا قرمز شود.
+ */
+console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
+{
+  const claim = sqlOf('claimAmount');
+  const setPkg = sqlOf('setPaymentPackage');
+  const setDisc = sqlOf('setPaymentDiscount');
+  ok(!!(claim && setPkg && setDisc), 'SQLهای مسیر از سورس برداشته شدند');
+
+  const d2 = new Database(':memory:');
+  d2.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
+    amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, pkg TEXT,
+    discount_code_id INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);`);
+  const pid = Number(d2.prepare("INSERT INTO payments (user_id, amount, step) VALUES (7, 0, 'amount')").run().lastInsertRowid);
+  d2.prepare(claim).run(30, pid);              // ۳۰ الماس
+  d2.prepare(setPkg).run('gold', 60000, pid);  // قیمتِ واقعی
+  const row = d2.prepare('SELECT * FROM payments WHERE id=?').get(pid);
+  ok(row.original_amount === 30 && row.amount === 60000,
+    `بعد از انتخابِ بسته: original_amount=${row.original_amount} (الماس)، amount=${row.amount} (تومان)`);
+  ok(row.original_amount !== row.amount,
+    '⇒ پس این دو ستون **هم‌واحد نیستند** و یکی‌گرفتنشان باگِ واحد می‌سازد');
+
+  // پایه‌ی غلطِ قدیمی، و آنچه می‌ساخت
+  const disc = (base, pct, cap) => { let d = Math.round(base * pct / 100); if (cap != null && d > cap) d = cap; return Math.max(0, base - d); };
+  const oldBase = row.original_amount || row.amount;
+  ok(disc(oldBase, 20, 50000) === 24,
+    `🐛 با پایه‌ی قدیمی، تخفیفِ ۲۰٪ فاکتورِ ۶۰٬۰۰۰ را ${disc(oldBase, 20, 50000)} تومان می‌کرد`);
+  ok(disc(oldBase, 100, null) === 0,
+    '🐛 و کدِ ۱۰۰٪ به تأییدِ خودکارِ بدونِ رسید می‌رسید');
+
+  // و پایه‌ی درست
+  const src = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const packs = [...src.matchAll(/\{ key: '([a-z]+)',[^}]*coins: ([\d_]+),\s*toman: ([\d_]+)/g)]
+    .map((m) => ({ key: m[1], coins: Number(m[2].replace(/_/g, '')), toman: Number(m[3].replace(/_/g, '')) }));
+  ok(packs.length >= 2, `کاتالوگِ بسته‌ها از سورس خوانده شد (${packs.map((p) => p.key).join(', ')})`);
+  const gold = packs.find((p) => p.toman === 60000) || packs[packs.length - 1];
+  ok(disc(gold.toman, 20, 50000) === Math.round(gold.toman * 0.8),
+    `✅ با پایه‌ی قیمتِ بسته، ۲۰٪ ⇒ ${disc(gold.toman, 20, 50000)} تومان`);
+
+  // و اینکه کد واقعاً همین را می‌کند (ساختاری، نه فقط ریاضی)
+  const applyBody = (() => {
+    const at = src.indexOf('async function applyDiscount(');
+    return at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+  })();
+  ok(/const pk = packOf\(p\)/.test(applyBody) && /pk\.toman/.test(applyBody),
+    'applyDiscount پایه را از قیمتِ خودِ بسته می‌گیرد');
+  ok(!/validateDiscount\(codeText, uid, p\.original_amount \|\| p\.amount/.test(applyBody),
+    'و دیگر original_amount را به‌عنوان پایه نمی‌دهد');
+  ok(/if \(p\.discount_code_id\)/.test(applyBody),
+    'و یک فاکتور بیش از یک کد نمی‌گیرد (ضدِ انباشتِ تخفیف)');
+
+  // دفترِ تخفیف هم تومانی ثبت شود
+  const approveBody = (() => {
+    const at = src.indexOf('function approvePayment(');
+    return at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+  })();
+  ok(/dbase - p\.amount/.test(approveBody),
+    'مبلغِ ثبت‌شده در دفترِ تخفیف هم تومانی است، نه اختلافِ الماسی');
+  d2.close();
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);
