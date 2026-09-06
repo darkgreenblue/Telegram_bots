@@ -167,7 +167,10 @@ export function orphanResolve(body) {
     if (!hasTable(db, 'admin_actions')) throw new Error('این ربات صفِ اقدامِ داشبوردی ندارد');
     assertColumns(db, 'admin_actions', ['payment_id', 'action', 'user_id', 'amount', 'ref_id', 'note']);
     db.prepare('INSERT INTO admin_actions (payment_id, action, user_id, amount, ref_id, note) VALUES (?,?,?,?,?,?)')
-      .run(0, 'credit', uid, coin ? r.coins * coin.value : r.coins, null, `پرداختِ سرگردان #${id}`);
+      .run(0, 'credit_paid', uid, coin ? r.coins * coin.value : r.coins, null, `پرداختِ سرگردان #${id}`);
+    /* ⚠️ `credit_paid` نه `credit`: این کاربر **خریده**، هدیه نگرفته. اکشنِ جدا وجود
+       دارد چون تنها فرقشان **پیامی** است که به کاربر می‌رود، و شارژِ دستیِ معمولی باید
+       همان «توسط پشتیبانی اضافه شد» را نگه دارد. */
   });
   if (!resolveOrphan(id, 'resolved_support', uid)) throw new Error('گذار انجام نشد');
   audit('orphan.resolve', `${r.bot}/${id}`, `support uid=${uid} coins=${r.coins}`);

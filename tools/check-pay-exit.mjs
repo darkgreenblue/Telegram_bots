@@ -367,5 +367,45 @@ for (const a of ['pay_cancel', 'pay_back']) {
   ok(SRC.includes(`bot.action(/^${a}:`), `الگوی ${a} هنوز ثبت است (دکمه‌ی کهنه در چت خطا نمی‌دهد)`);
 }
 
+console.log('\n  — 🧾 فقط انصرافِ صریح فاکتور را می‌کشد:');
+{
+  /* 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۵ (فاکتور #۵۵۴، ۶۰٬۰۰۰ تومان): `pay_back` فاکتورِ **صادرشده**
+     را cancel کرد، بعد رسیدِ کاربر به هیچ فاکتوری نچسبید و بی‌صدا دور ریخته شد.
+     قاعده‌ی تثبیت‌شده: هیچ مسیری جز انصرافِ صریح نباید فاکتوری را که `step='receipt'`
+     دارد بکشد.
+
+     ⚠️ این چک **هر دو جهت** را می‌سنجد، و جهتِ دوم از خودِ نوشتنِ همین فیکس آمد: نسخه‌ی
+     اولش اشتباهاً روی `pay_exit` نشست، یعنی دکمه‌ی انصرافِ صریح هم گارد می‌گرفت و
+     انصراف **غیرممکن** می‌شد — دقیقاً همان حلقه‌ی بی‌پایانِ تیکتِ #TRT-8976388520 از
+     سمتِ مقابل. پس «گارد هست» به‌تنهایی کافی نیست؛ «گارد جای درستی هست» هم لازم است. */
+  const body = (name) => {
+    const at = SRC.indexOf(`bot.action(/^${name}:`);
+    if (at < 0) return '';
+    const next = SRC.indexOf('\nbot.action(', at + 10);
+    return SRC.slice(at, next < 0 ? SRC.length : next);
+  };
+  const back = body('pay_back');
+  const exit = body('pay_exit');
+  ok(back && exit, 'هر دو هندلر پیدا شدند');
+
+  const guard = /status === 'pending' && p\.step === 'receipt'/;
+  ok(guard.test(back), 'pay_back فاکتورِ صادرشده (step=receipt) را cancel نمی‌کند');
+  ok(!guard.test(exit), 'pay_exit همان گارد را **ندارد** (انصرافِ صریح باید همیشه کار کند)');
+  ok(/setPaymentStatus\.run\('canceled'/.test(exit), 'pay_exit هنوز واقعاً cancel می‌کند');
+  ok(/L\.errors\.openInvoice/.test(back), 'pay_back به‌جای cancel پیامِ «یا تکمیل یا انصراف» می‌دهد');
+  ok(/pay_exit:\$\{p\.id\}/.test(back), 'دکمه‌ی انصرافِ آن پیام به **همان** فاکتور وصل است، نه به سشن');
+}
+
+console.log('\n  — 📸 رسید هیچ‌وقت بی‌صدا دور ریخته نمی‌شود:');
+{
+  const at = SRC.indexOf("bot.on('photo'");
+  const ph = at < 0 ? '' : SRC.slice(at, SRC.indexOf('\n});', at));
+  ok(ph, 'هندلرِ عکس پیدا شد');
+  ok(!/if \(!pend\) return;/.test(ph), 'returnِ خالیِ قدیمی (سیاه‌چاله) دیگر نیست');
+  ok(/receiptNoInvoice/.test(ph), 'وقتی هیچ فاکتوری پیدا نشد، به کاربر گفته می‌شود');
+  ok(/canceledReceiptPayment/.test(ph) && /revivePayment/.test(ph),
+    'فاکتورِ لغوشده‌ی تازه هم بازیابی و **احیا** می‌شود (وگرنه approve بعداً بی‌صدا شکست می‌خورد)');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} راهِ خروجِ پرداخت: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);

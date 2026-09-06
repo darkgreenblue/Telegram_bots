@@ -33,7 +33,7 @@ import { ensureAb, variant, peekVariant, expose } from '../../shared/ab.js';
 import { registerSupport, supportRow, supportReply } from '../../shared/support.js';
 import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
-import { registerJourney } from '../../shared/journey.js';
+import { registerJourney, logPush } from '../../shared/journey.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
@@ -217,7 +217,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.63.0';
+const PRODUCT_VERSION = '3.64.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -587,6 +587,8 @@ const MIN_RECHARGE     = 10_000;  // کف‌گیرِ اشتباهِ تایپی (
  * می‌بندد، آن کوئری از قبل پیدایش نمی‌کند. */
 const PAY_ROW_REUSE_SEC    = 15 * 60;
 const RECEIPT_RECOVERY_SEC = 3 * 24 * 3600;
+// پنجره‌ی کوتاه‌ترِ احیای فاکتورِ لغوشده (لغو گاهی عمدی است؛ رسیدِ همان روز عمدی نیست)
+const CANCELED_RECOVERY_SEC = 12 * 3600;
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
 // 🛑 هدیه‌ی شارژِ نسلِ تومانی. در دنیای الماس مسیرِ شارژِ آزاد بسته است (فقط بسته)
 // و این آستانه‌ها تومانی‌اند، پس روی عددِ الماسی بی‌معنی می‌شدند. خالی = خاموش.
@@ -1157,6 +1159,11 @@ const stmts = {
   clawback: db.prepare('UPDATE users SET balance = MAX(0, balance - ?) WHERE telegram_id=?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
   pendingReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='pending' AND step='receipt' AND created_at > unixepoch()-? ORDER BY id DESC LIMIT 1"),
+  /* فاکتورِ **لغوشده‌ی تازه** که کاربر بعدش رسید فرستاده. پنجره‌اش عمداً کوتاه‌تر از
+     بازیابیِ عادی است: لغو گاهی عمدی است، ولی کسی که همان چند ساعت رسید می‌فرستد
+     واقعاً پول داده. رسید به هر حال به بازبینی می‌رود، پس این احیا خطری نمی‌سازد. */
+  canceledReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='canceled' AND step='receipt' AND created_at > unixepoch()-? ORDER BY id DESC LIMIT 1"),
+  revivePayment: db.prepare("UPDATE payments SET status='pending', updated_at=unixepoch() WHERE id=? AND status='canceled'"),
   /* ♻️ ردیفی که می‌شود دوباره ادامه‌اش داد: همین کاربر، تازه، هنوز روی قدمِ انتخابِ
    * بسته و دست‌نخورده (`amount=0`). شرطِ `amount=0` اضافه است ولی عمدی: هیچ ردیفی که
    * عددِ پولی رویش نشسته نباید هرگز از این مسیر برگردد. */
@@ -5422,6 +5429,30 @@ bot.action(/^pay_back:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const p = stmts.getPayment.get(pid);
+  /* 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۵ (کاربر 6149194760، فاکتور #۵۵۴، ۶۰٬۰۰۰ تومان):
+     این دکمه هر فاکتورِ `pending` را cancel می‌کرد، حتی وقتی فاکتور از قبل **صادر شده**
+     بود و کاربر داشت همان لحظه واریز می‌کرد. سناریو: «◀️ بازگشت» روی پیامِ **قدیمیِ
+     منوی بسته‌ها** است که بالای چت می‌ماند؛ کاربر بعد از دیدنِ فاکتور اسکرول کرد بالا و
+     زدش (برای دیدنِ دوباره‌ی بسته‌ها، نه انصراف). فاکتور cancel شد، یک دقیقه بعد رسید
+     را فرستاد، و چون مسیرِ بازیابی فقط دنبالِ `pending` می‌گشت عکس بی‌صدا دور ریخته شد.
+     پول رسیده بود و کاربر هیچ‌وقت الماسش را نگرفت.
+
+     ⚠️ راه‌حل عمداً «گاردِ بازیابی را پهن‌تر کن» **نیست** (تصمیمِ صریحِ مالک): آن فقط
+     علامت را درمان می‌کرد. ریشه این است که **هیچ مسیری جز انصرافِ صریحِ کاربر نباید
+     فاکتور را بکشد** — همان قاعده‌ی ۹ب/۲ (گاردِ فلوی باز) که این دکمه از کنارش رد
+     می‌شد. پس حالا اگر فاکتور صادر شده باشد، به‌جای cancelِ خاموش، همان گاردِ
+     «یا تکمیلش کن یا انصراف بده» می‌آید و کاربر خودش تصمیم می‌گیرد. */
+  if (p && p.user_id === uid && p.status === 'pending' && p.step === 'receipt') {
+    /* ⚠️ عمداً `blockDuringOpenPay` صدا زده **نمی‌شود**: آن گارد شرطِ استیت و
+       `session.paymentId` دارد، و دقیقاً در همین سناریو (دکمه‌ی کهنه‌ی یک پیامِ قدیمی)
+       ممکن است هیچ‌کدام برقرار نباشد. آن‌وقت `false` برمی‌گرداند و کاربر **هیچ** جوابی
+       نمی‌گیرد — بدتر از قبل. پس همان پیام این‌جا مستقیم ساخته می‌شود و انصراف به
+       **همین** فاکتور وصل است، نه به هرچه در سشن باشد. */
+    await ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.cancel, `pay_exit:${p.id}`)],
+    ])).catch(() => {});
+    return;
+  }
   if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
   // ⚠️ استیت/سشن فقط وقتی دست بخورد که این دکمه به **همان** فاکتوری اشاره کند که کاربر
   // الان درگیرش است. دکمه‌ی کهنه‌ی یک فاکتورِ رهاشده نباید فاکتورِ زنده‌ی فعلی را از سشن
@@ -5838,10 +5869,18 @@ setInterval(async () => {
       try {
         if (act.action === 'approve' || act.action === 'force_approve') {
           const done = approvePayment(act.payment_id, act.action === 'force_approve');
-          if (done) { await bot.telegram.sendMessage(done.p.user_id, approvedMsg(done.p.user_id, done.creditAmount, done.bonus)).catch(() => {}); await afterApproval(done.p.user_id); }
+          if (done) {
+            const m = approvedMsg(done.p.user_id, done.creditAmount, done.bonus);
+            await bot.telegram.sendMessage(done.p.user_id, m).catch(() => {});
+            logPush(db, done.p.user_id, m, { isAdmin: isAdmin(done.p.user_id), label: 'تأیید پرداخت' });
+            await afterApproval(done.p.user_id);
+          }
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
-          if (p) await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+          if (p) {
+            await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+            logPush(db, p.user_id, L.wallet.rejected, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
+          }
         } else if (act.action === 'approve_accounting') {
           // «فقط حسابداری»: پولی که واقعاً رسیده ولی کاربر ارزشش را از راهِ دیگری گرفته
           // (جبرانِ دستی، کدِ هدیه). وضعیت به approved می‌رود تا SUM(amount) درآمدِ واقعی را
@@ -5860,13 +5899,27 @@ setInterval(async () => {
             if (take > 0) stmts.credit.run(-take, uid2);
             track(db, uid2, 'credit_adjusted', { amount: -take, kind: 'support' });
           }
-        } else if (act.action === 'credit') {
-          // شارژِ دستیِ پشتیبانی — بدونِ کدِ تخفیف و بدونِ ردیفِ payments (هدیه است نه درآمد)
+        } else if (act.action === 'credit' || act.action === 'credit_paid') {
+          /* دو اکشن، یک منطقِ اعتبار و **دو پیامِ متفاوت** — و این تفاوت عمدی است:
+             `credit`      = شارژِ دستیِ پشتیبانی. کاربر پولی نداده، این یک هدیه/جبران
+                             است، پس «توسط پشتیبانی اضافه شد» درست است.
+             `credit_paid` = کاربر **واقعاً خریده** ولی پرداختش از مسیرِ ربات ثبت نشده
+                             (پرداختِ سرگردان: واریز کرد، رسید نفرستاد). از دیدِ او این
+                             یک خرید است نه هدیه، پس باید **همان پیامِ تأییدِ خرید** را
+                             بگیرد. گفتنِ «پشتیبانی بهت اضافه کرد» به کسی که پول داده،
+                             تجربه‌اش را از خرید به صدقه تغییر می‌دهد (خواسته‌ی صریحِ
+                             مالک ۱۴۰۵/۰۶/۱۵ بعد از دیدنِ یک موردِ واقعی).
+             منطقِ اعتبار عمداً یکی ماند: دو مسیرِ کسر/افزایشِ جدا یعنی ریلِ پول دوتا شود. */
           const uid2 = act.user_id, amt = act.amount;
+          const paid = act.action === 'credit_paid';
           if (uid2 && amt > 0 && getUser(uid2)) {
             stmts.credit.run(amt, uid2);
-            track(db, uid2, 'credit_granted', { amount: amt, kind: 'support' });
-            await bot.telegram.sendMessage(uid2, L.wallet.supportCredited(amt, getBalance(uid2), curOf(uid2))).catch(() => {});
+            track(db, uid2, 'credit_granted', { amount: amt, kind: paid ? 'orphan_paid' : 'support' });
+            const msg = paid
+              ? approvedMsg(uid2, amt, 0)
+              : L.wallet.supportCredited(amt, getBalance(uid2), curOf(uid2));
+            await bot.telegram.sendMessage(uid2, msg).catch(() => {});
+            logPush(db, uid2, msg, { isAdmin: isAdmin(uid2), label: paid ? 'تأیید پرداخت' : 'شارژ پشتیبانی' });
             await afterApproval(uid2); // اگر فالِ رزروشده دارد، خودکار ادامه پیدا کند
           }
         } else if (act.action === 'unlock_reading') {
@@ -6472,8 +6525,23 @@ bot.on('photo', async (ctx) => {
   let recovered = false;
   if (!paymentId) {
     const pend = stmts.pendingReceiptPayment.get(uid, RECEIPT_RECOVERY_SEC);
-    if (!pend) return; // عکسِ بی‌ربط به پرداخت — نادیده
-    paymentId = pend.id; recovered = true;
+    if (pend) { paymentId = pend.id; recovered = true; }
+  }
+  /* لایه‌ی دومِ بازیابی: فاکتورِ **لغوشده‌ی تازه**. اگر کاربر رسید می‌فرستد یعنی واقعاً
+     پول داده، پس فاکتور احیا می‌شود؛ وگرنه `approvePayment` بعداً روی وضعیتِ `canceled`
+     بی‌صدا شکست می‌خورد و ادمین فکر می‌کند تأیید کرده. */
+  if (!paymentId) {
+    const dead = stmts.canceledReceiptPayment.get(uid, CANCELED_RECOVERY_SEC);
+    if (dead && stmts.revivePayment.run(dead.id).changes) {
+      paymentId = dead.id; recovered = true;
+      logErr(`receipt: revived canceled payment #${dead.id} for ${uid}`);
+    }
+  }
+  /* ⚠️ و اگر باز هم چیزی پیدا نشد، **سکوت ممنوع**. نسخه‌ی قبلی این‌جا `return` خالی
+     داشت: کاربری که واریز کرده و رسید فرستاده هیچ جوابی نمی‌گرفت و پولش در سکوت گم
+     می‌شد. یک جمله‌ی صادقانه به‌مراتب بهتر از هیچ است. */
+  if (!paymentId) {
+    return ctx.reply(L.wallet.receiptNoInvoice, mainKeyboard(uid)).catch(() => {});
   }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   await processReceipt(ctx, uid, paymentId, fileId, null, recovered);
