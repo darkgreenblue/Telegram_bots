@@ -1818,6 +1818,13 @@ setInterval(async () => {
       try {
         if (act.action === 'approve') { const r = approvePaymentDb(act.payment_id); if (r) await notifyApproved(r.payment, r.creditAmount); }
         else if (act.action === 'reject') { const r = rejectPaymentDb(act.payment_id); if (r) await notifyRejected(r.payment); }
+        /* ⚠️ اکشنی که این ربات نمی‌شناسد **بی‌صدا** done نشود. رفتار عمداً عوض نشده
+           (ردیف مثل قبل done می‌شود تا حلقه نچرخد)، ولی یک خطِ قابل‌grep می‌گذارد.
+           چرا لازم شد: داشبورد اکشن‌های اعتباری (`credit`, `credit_paid`) را برای
+           ربات‌هایی صف می‌کند که آن‌ها را اجرا می‌کنند؛ اگر روزی یکی این‌جا بیفتد،
+           کاربر پول داده و هیچ اعتباری نمی‌گیرد و هیچ ردی هم نمی‌ماند. حالا می‌ماند.
+           گاردِ اصلی سمتِ داشبورد است (`creditQueueSupported`)؛ این لایه‌ی دوم است. */
+        else logErr(`❌ ADMIN_ACTION_UNKNOWN id=${act.id} action=${act.action} — این ربات این اکشن را اجرا نمی‌کند`);
       } catch (e) { logErr('admin_action exec:', act.id, e.message); }
       stmts.markActionDone.run(act.id); // چه اجرا شده چه (رسید دیگر waiting_review نبوده) → done تا دوباره پردازش نشود
     }

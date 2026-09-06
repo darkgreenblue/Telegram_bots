@@ -6014,6 +6014,12 @@ setInterval(async () => {
             }).catch(() => {});
           }
         }
+        /* ⚠️ اکشنی که این ربات نمی‌شناسد **بی‌صدا** done نشود. رفتار عمداً عوض نشده
+           (ردیف مثل قبل done می‌شود تا حلقه نچرخد و لاگ پر نشود)، ولی یک خطِ
+           قابل‌grep می‌گذارد. بدونِ آن، هر اکشنِ آینده‌ای که داشبورد صف کند و این‌جا
+           هندلر نداشته باشد، پولِ کاربر را در سکوت می‌بلعد — بدونِ خطا، بدونِ رد.
+           گاردِ اصلی سمتِ داشبورد است (`creditQueueSupported`)؛ این لایه‌ی دوم است. */
+        else logErr(`❌ ADMIN_ACTION_UNKNOWN id=${act.id} action=${act.action} — هندلری برای این اکشن نیست`);
       } catch (e) { logErr('admin_action exec:', act.id, e.message); }
       stmts.markActionDone.run(act.id);
     }

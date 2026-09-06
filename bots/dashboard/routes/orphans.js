@@ -17,7 +17,7 @@
 //
 // دادنِ الماس از مسیرِ موجود می‌رود (`admin_actions` + sweepِ خودِ ربات)، نه مستقیم:
 // داشبورد هرگز پول و اعتبار را دست نمی‌زند (قراردادِ بند ۹ ریشه).
-import { botByKey, instancesOf, getInstance, withWritableDb, assertColumns, hasTable, coinOf, creditText } from '../lib/bots.js';
+import { botByKey, instancesOf, getInstance, withWritableDb, assertColumns, hasTable, coinOf, creditText, creditQueueSupported } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { fmt, esc, nowSec, tehranDayStr } from '../lib/util.js';
 import { stat, table, cardHead } from '../lib/html.js';
@@ -109,13 +109,17 @@ function ownerForm(bot, r, coin) {
       <button type="submit" class="ghost">رسید را دیر به ربات فرستاد</button>
       <span class="muted">(ردیف از درآمد خارج می‌شود)</span>
     </form>
-    <form method="post" action="/orphans/resolve" class="inline" style="margin-top:6px">
+    ${creditQueueSupported(bot) ? `<form method="post" action="/orphans/resolve" class="inline" style="margin-top:6px">
       <input type="hidden" name="bot" value="${esc(bot)}"><input type="hidden" name="id" value="${r.id}">
       <input type="hidden" name="kind" value="support">
       <label>آی‌دی کاربر<input name="uid" type="number" min="1" required placeholder="عددی"></label>
       <button type="submit">به پشتیبانی پیام داد → ${fmt(r.coins)} ${esc(unit)} بده</button>
     </form>
-    ${r.coins ? '' : '<p class="muted">⚠️ الماسِ متناظرِ این ردیف صفر است، پس گزینه‌ی پشتیبانی چیزی نمی‌دهد.</p>'}
+    ${r.coins ? '' : '<p class="muted">⚠️ الماسِ متناظرِ این ردیف صفر است، پس گزینه‌ی پشتیبانی چیزی نمی‌دهد.</p>'}`
+    : `<p class="muted" style="margin-top:6px">⚠️ «${esc(botByKey(bot)?.title || bot)}» اکشنِ اعتباریِ
+      داشبورد را اجرا نمی‌کند (sweepش فقط تأیید/ردِ رسید را می‌فهمد). پس دکمه‌ی «به پشتیبانی
+      پیام داد» این‌جا نیست: اگر بود، الماس در صف می‌نشست، ربات بی‌صدا done علامتش می‌زد و
+      ردیف «حل‌شده» می‌شد بدونِ اینکه کاربر چیزی بگیرد. اعتبار را از خودِ ربات بده.</p>`}
   </details>`;
 }
 
@@ -160,6 +164,15 @@ export function orphanResolve(body) {
   /* الماس از مسیرِ موجود می‌رود: enqueue در `admin_actions` و اجرا توسط sweepِ خودِ ربات.
      ⚠️ گذارِ ردیف **بعد از** enqueue انجام می‌شود: اگر enqueue خطا بدهد، ردیف سرگردان
      می‌ماند و می‌شود دوباره تلاش کرد. ترتیبِ برعکس یعنی ردیف بسته شود و الماس نرود. */
+  /* ⛔ قبل از هر چیز: آیا این ربات اصلاً اکشنِ اعتباری را **اجرا می‌کند**؟
+     نبودِ این چک یعنی ردیف در صف بنشیند، sweepِ ربات بی‌صدا done علامتش بزند، و ردیفِ
+     سرگردان «حل‌شده» شود بدونِ اینکه کاربر یک الماس بگیرد. خطای صریح بی‌نهایت بهتر از
+     یک موفقیتِ دروغین است. */
+  if (!creditQueueSupported(r.bot)) {
+    throw new Error(`«${botByKey(r.bot)?.title || r.bot}» اکشنِ اعتباریِ داشبورد را اجرا نمی‌کند، `
+      + 'پس این الماس هرگز به کاربر نمی‌رسید. اعتبارش را از خودِ ربات بده و بعد این ردیف را '
+      + '«رسید را دیر فرستاد» ببند، یا اول sweepِ آن ربات را برای credit_paid سیم‌کشی کن.');
+  }
   const inst = instancesOf(r.bot)[0];
   if (!inst) throw new Error('دیتابیسِ این ربات پیدا نشد');
   const coin = coinOf(r.bot);
