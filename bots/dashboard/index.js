@@ -17,7 +17,6 @@ import {
 } from './lib/auth.js';
 import { DEFAULT_BOT, validBotKey, botCookie } from './lib/nav.js';
 import { audit } from './lib/platform.js';
-import { overviewBody } from './routes/overview.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody, supportAction } from './routes/support.js';
 import { financeBody, financeCsv, financeAction, costsBody } from './routes/finance.js';
@@ -60,7 +59,6 @@ const redirect = (res, to, extraHeaders = {}) => { res.writeHead(303, { Location
 
 /* ===== صفحات GET (بعد از احراز هویت) ===== */
 const PAGES = {
-  '/': (url) => ['نمای کلی', overviewBody(url)],
   '/dash': (url) => ['آمار تحلیلی', dashBody(url)],
   '/engagement': (url) => ['درگیری و چسبندگی', engagementBody(url)],
   '/acquisition': (url) => ['جذب و کانال‌ها', acquisitionBody(url)],
@@ -120,7 +118,7 @@ const server = http.createServer(async (req, res) => {
         if (tokenMatches(body.get('token'), DASHBOARD_TOKEN)) {
           const sid = newSession(ip);
           audit('login.ok', ip);
-          return redirect(res, '/', { 'Set-Cookie': sessionCookie(sid, req) });
+          return redirect(res, '/dash', { 'Set-Cookie': sessionCookie(sid, req) });
         }
         audit('login.fail', ip);
         return send(res, 401, loginPage('توکن اشتباه است.'));
@@ -144,6 +142,14 @@ const server = http.createServer(async (req, res) => {
     const bot = askedBot || cookieBot || DEFAULT_BOT;
     url.searchParams.set('bot', bot);
     const stickyCookie = askedBot && askedBot !== cookieBot ? { 'Set-Cookie': botCookie(bot) } : {};
+
+    /* ⚠️ `/` دیگر صفحه نیست، ری‌دایرکت است. قبلاً یک «نمای کلی»ِ دومِ یتیم بود که در
+       منو هم نیامده بود: کاربر بعد از لاگین رویش می‌افتاد، اعدادش با `/dash` هم‌پوشانی
+       داشت و هیچ‌کدام کامل نبود. حالا یک نمای کلی داریم و همین‌جا به آن می‌رود، پس
+       بوکمارک‌ها و لینک‌های قدیمی هم نمی‌شکنند. اسکوپ با خودش حمل می‌شود. */
+    if (path === '/' || path === '') {
+      return redirect(res, `/dash?bot=${encodeURIComponent(bot)}`, stickyCookie);
+    }
 
     if (path === '/logout' && req.method === 'POST') {
       dropSession(sid);

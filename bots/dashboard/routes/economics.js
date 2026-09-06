@@ -3,13 +3,14 @@
 // همه‌ی اعدادِ پولیِ **تحلیلی** این‌جاست؛ صفِ رسید و تأییدِ پرداخت در «اقدام‌ها ← مالی».
 import { instancesOf, withDb, hasTable, scalar, rows, botByKey, moneyText, revenueWhere, toToman } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
-import { fmt, esc, nowSec, rangeOf, rangeSince, RANGES, tehranDayStart } from '../lib/util.js';
+import { fmt, esc, nowSec, rangeOf, rangeSince, RANGES, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { stat, table, cardHead, rangePicker } from '../lib/html.js';
 import { hbars } from '../lib/charts.js';
 import { getSetting } from '../lib/platform.js';
 import { costPerDiamond } from '../lib/cpa.js';
 import { costsBody } from './finance.js';
-import { USD_RATE_KEY } from './acquisition.js';
+import { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from './acquisition.js';
+import { profitDaily } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 
@@ -111,5 +112,78 @@ export function economicsBody(url) {
 
   return `<div class="card"><h2 style="margin:0">💰 اقتصاد و هزینه — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">هزینه‌ی واقعیِ مدل، اقتصادِ الماس، و آنچه از درآمد می‌ماند.</p></div>
-    ${costCard}${cpdCard}${revCard}${costsBody(url)}`;
+    ${profitCard(url, bot)}${costCard}${cpdCard}${revCard}${costsBody(url)}`;
+}
+
+/* ═══ 📈 سودِ خالص — «کی مثبت شدم و چقدر؟» ═══
+   خواسته‌ی صریحِ مالک: این عدد باید **روزانه** رصد شود، نه یک عددِ تکیِ کلِ عمر. پس
+   کارت هم سرخط را می‌دهد هم سریِ روزانه و نقطه‌ی سربه‌سر.
+   محاسبه در `lib/profit.js` است تا عددِ این‌جا و عددِ نمای کلی هرگز واگرا نشوند. */
+export function profitCard(url, bot) {
+  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
+  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  const rk = rangeOf(url, 'rProfit', 'month');
+  const days = RANGES[rk].days || 90;
+  const p = profitDaily(bot, { days, usdToman: rate, campaignUsdPerUser: campUsd });
+
+  if (!rate) {
+    return `<div class="card">${cardHead('📈 سودِ خالص')}
+      <p>هزینه‌ی مدل دلاری است و درآمد تومانی، پس بدونِ <b>نرخِ دلار</b> این دو قابلِ
+        کم‌کردن از هم نیستند و هیچ عددی ساخته نمی‌شود.</p>
+      <p class="muted">نرخ را در صفحه‌ی «جذب و کانال‌ها» وارد کن تا این کارت زنده شود.</p></div>`;
+  }
+  if (!p.costSince) {
+    return `<div class="card">${cardHead('📈 سودِ خالص')}
+      <p class="muted">هنوز هیچ هزینه‌ی مدلی ثبت نشده، پس سود قابلِ محاسبه نیست.</p></div>`;
+  }
+
+  /* ⚠️ صداقتِ بازه: ثبتِ هزینه از `costSince` شروع شده. اگر بازه‌ی انتخابی از آن
+     عقب‌تر برود، روزهای قبلش **هزینه ندارند** و سودشان مصنوعاً برابرِ کلِ درآمد است.
+     به‌جای پنهان‌کردنش، همان روزها علامت می‌خورند و از تجمعی بیرون می‌مانند. */
+  const startStr = tehranDayStr(p.costSince);
+  const covered = p.series.filter(r => r.d >= startStr);
+  let cum = 0;
+  const rowsCov = covered.map((r) => { cum += r.net; return { ...r, cum }; });
+  const tot = rowsCov.reduce((a, r) => ({
+    rev: a.rev + r.rev, cost: a.cost + r.costToman, net: a.net + r.net,
+  }), { rev: 0, cost: 0, net: 0 });
+  let breakEven = null;
+  for (let i = 0; i < rowsCov.length; i++) {
+    if (rowsCov[i].cum > 0 && rowsCov.slice(i).every(x => x.cum > 0)) { breakEven = rowsCov[i].d; break; }
+  }
+  const uncovered = p.series.length - covered.length;
+  const t = (v) => `${fmt(v)} ت`;
+  const marginPct = tot.rev ? Math.round((tot.net / tot.rev) * 1000) / 10 : 0;
+
+  const daily = rowsCov.slice().reverse().map(r => [
+    r.d,
+    t(r.rev),
+    `${t(r.costToman)} <span class="muted">(${usd(r.costUsd)})</span>`,
+    `<span class="${r.net < 0 ? 'drop' : ''}"><b>${t(r.net)}</b></span>`,
+    `<span class="${r.cum < 0 ? 'drop' : ''}">${t(r.cum)}</span>`,
+  ]);
+
+  return `<div class="card">
+    ${cardHead('📈 سودِ خالص', rangePicker(url, 'rProfit', rk))}
+    <div class="grid">
+      ${stat('سودِ خالصِ این بازه', `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
+      ${stat('درآمدِ دریافتی', t(tot.rev))}
+      ${stat('هزینه‌ی واقعی (مدل + تبلیغ)', t(tot.cost))}
+      ${stat('حاشیه‌ی سود', `${fmt(marginPct)}٪`)}
+      ${stat('نقطه‌ی سربه‌سر', breakEven
+        ? `<b>${esc(breakEven)}</b>`
+        : `<span class="muted">${tot.net < 0 ? 'هنوز نرسیده' : 'در کلِ بازه مثبت بوده'}</span>`)}
+    </div>
+    <p class="muted">سود = <b>درآمدِ دریافتی − هزینه‌ی مدل − هزینه‌ی تبلیغ</b>.
+      تخفیف کم نمی‌شود (از قبل داخلِ درآمد است) و اعتبارِ هدیه هم کم نمی‌شود
+      (پولِ نقد نیست؛ هزینه‌اش وقتی خرج شود در همان هزینه‌ی مدل می‌آید).</p>
+    ${uncovered > 0 ? `<div class="note">⚠️ ثبتِ هزینه‌ی مدل از <b>${esc(startStr)}</b> شروع شده،
+      ولی درآمد از روزِ اول ثبت است. پس ${fmt(uncovered)} روزِ ابتدایی این بازه از محاسبه
+      <b>کنار گذاشته شد</b> — نه پنهان شد، بلکه واردِ سود نشد، چون درآمدِ بدونِ هزینه سودِ
+      ساختگی می‌سازد.</div>` : ''}
+    <h3 class="ch">روزانه (جدیدترین بالا)</h3>
+    ${table(['روز', 'درآمد', 'هزینه', 'سودِ روز', 'تجمعی'], daily, 'هنوز روزی با دیتا نیست')}
+    <p class="muted">«تجمعی» از اولین روزِ ثبتِ هزینه جمع می‌شود. «نقطه‌ی سربه‌سر» اولین
+      روزی است که تجمعی مثبت شد <b>و دیگر منفی نشد</b> — یک روزِ پرفروشِ تنها که فردا
+      برمی‌گردد، سربه‌سر نیست.</p></div>`;
 }

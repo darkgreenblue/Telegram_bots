@@ -14,6 +14,8 @@ import {
   moneyOf, revenueWhere, toToman, moneyText, creditText, coinOf, baseKey,
 } from '../lib/bots.js';
 import { scopeBot, MASTER_DASH_BOTS } from '../lib/nav.js';
+import { profitSinceTracking, USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
+import { opsBlock } from './overview.js';
 import { getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
 import { stat, cohortCount, table, cardHead } from '../lib/html.js';
@@ -43,7 +45,6 @@ const RANGES = {
   all: { label: 'کل عمر ربات', days: 0 },
 };
 const GROWTH_DAYS = 30;
-const USD_RATE_KEY = 'usd_toman';
 
 const pctOf = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
 const usd = (n) => `$${(Number(n) || 0).toFixed(Number(n) && Number(n) < 1 ? 4 : 2)}`;
@@ -230,11 +231,14 @@ export function dashBody(url) {
   const bot = scopeBot(url);
   const title = botByKey(bot)?.title || bot;
   if (!MASTER_DASH_BOTS.has(baseKey(bot))) {
-    return `<div class="card"><h2>📊 داشبورد اصلی</h2>
-      <p>داشبوردِ تحلیلیِ جامع فعلاً فقط برای <b>🔮 تاروت</b> ساخته شده (تمرکزِ فعلیِ محصول).</p>
-      <p class="muted">برای «${esc(title)}» بقیه‌ی صفحه‌های تحلیلی (فانل‌ها، ریتنشن، مارکتینگ، مالی، کاربران)
-        همچنان کار می‌کنند؛ فقط این صفحه هنوز سنجه‌های اختصاصیِ این ربات را ندارد.
-        اضافه‌کردنش = یک ردیف در <span class="mono">MASTER_DASH_BOTS</span> به‌علاوه‌ی سنجه‌های همان محصول.</p></div>`;
+    /* ⚠️ قبلاً این‌جا فقط یک پیامِ «هنوز نداریم» بود و صفحه‌ی `/` جداگانه اعدادِ عملیاتی
+       را نشان می‌داد — یعنی رباتِ غیرتاروت **دو** نمای کلی داشت که هیچ‌کدام کامل نبود.
+       حالا نمای کلی برای همه یکی است و برای این ربات‌ها همان بلوکِ عملیاتی می‌آید. */
+    return `<div class="card"><h2>🏠 نمای کلی — ${esc(title)}</h2>
+      <p class="muted">سنجه‌های تحلیلیِ عمیق (درگیری، ماندگاری، رضایت، سود) فعلاً فقط برای
+        <b>🔮 تاروت</b> ساخته شده. بقیه‌ی صفحه‌ها (فانل‌ها، ریتنشن، مارکتینگ، مالی، کاربران)
+        برای این ربات هم کار می‌کنند.</p></div>
+      ${opsBlock(bot, { full: true })}`;
   }
   if (!instancesOf(bot).length) {
     return `<div class="card"><h2>📊 داشبورد اصلی</h2><p class="muted">دیتابیسِ این ربات پیدا نشد.
@@ -272,7 +276,23 @@ export function dashBody(url) {
   /* ── ردیفِ ثابت: اعدادِ درشتِ مستقل از بازه ── */
   const satRatio = pctOf(a.satisfied, a.readers);
   const satOfRaters = pctOf(a.satisfied, a.raters);
+  /* 💰 سودِ خالص — خواسته‌ی صریحِ مالک که این عدد سرخط باشد، نه لای صفحه‌ی هزینه.
+     محاسبه‌اش در `lib/profit.js` است (همان تک‌منبعی که صفحه‌ی اقتصاد از آن می‌خواند)،
+     پس این عدد و عددِ آن‌جا نمی‌توانند واگرا شوند. */
+  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  const pf = profitSinceTracking(bot, { usdToman: rate, campaignUsdPerUser: campUsd });
+  const profitHero = (() => {
+    if (!rate) return hero('سودِ خالص', '<span class="muted">نرخِ دلار لازم است</span>',
+      'هزینه دلاری است و درآمد تومانی');
+    if (!pf.ok) return hero('سودِ خالص', '<span class="muted">هنوز هزینه‌ای ثبت نشده</span>',
+      'از روزِ روشن‌شدنِ ثبتِ هزینه پر می‌شود');
+    const net = pf.totals.net;
+    return hero('سودِ خالص', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`,
+      `از ${esc(tehranDayStr(pf.costSince))} (شروعِ ثبتِ هزینه) · ${pf.breakEven ? `سربه‌سر: ${esc(pf.breakEven)}` : net < 0 ? 'هنوز سربه‌سر نشده' : 'از ابتدا مثبت'}`);
+  })();
+
   const heroes = `<div class="heroes">
+    ${profitHero}
     ${hero('کاربر فعال', cohortCount(a.active, { ...co, t: 'active' }),
       `درگیر و حفظ‌شده · پنجره‌ی ${fmt(aw)} روز`, true)}
     ${hero('کل کاربران فعال‌شده', cohortCount(a.users, { k: 'users', bot }), 'هرکس که وارد ربات شده')}
@@ -482,7 +502,8 @@ export function dashBody(url) {
   return `<div class="card dash-head"><h2 style="margin:0">📊 نمای کلی — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">سرخطِ اعداد. تمرکزِ این فاز درگیری و ماندگاریِ کاربر است، نه درآمد.
         هر بخش انتخابگرِ بازه‌ی خودش را دارد و جزئیاتش یک کلیک آن‌طرف‌تر است.</p></div>
-    ${filters}${heroes}${jump}${engagement}${satisfaction}${readingsCard}${charts}${usersCard}${revenueCard}`;
+    ${filters}${heroes}${jump}${engagement}${satisfaction}${readingsCard}${charts}${usersCard}${revenueCard}
+    ${opsBlock(bot, { full: false })}`;
 }
 
 const hero = (k, v, sub = '', big = false) => `<div class="hero${big ? ' big' : ''}">

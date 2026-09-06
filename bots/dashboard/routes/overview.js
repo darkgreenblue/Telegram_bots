@@ -1,6 +1,8 @@
-// نمای کلی: وضعیت هر ربات (کاربر/فعال/درآمد به وقت تهران) + سلامت عملیاتی (صف رسید، حجم DB)
+// بلوکِ عملیاتیِ نمای کلی: وضعیت هر instance (کاربر/فعال/درآمد به وقت تهران) + سلامتِ
+// عملیاتی (صف رسید، حجم DB+WAL) + ویجتِ driftِ واژه‌نامه‌ی رویدادها.
+// ⚠️ این فایل دیگر خودش یک **صفحه** نیست: مسیرِ `/` به `/dash` ری‌دایرکت می‌شود و
+// `dashBody` این بلوک را مصرف می‌کند. یک نمای کلی، نه دو تا.
 import { instancesOf, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman, botByKey } from '../lib/bots.js';
-import { scopeBot } from '../lib/nav.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
 import { stat, cohortCount } from '../lib/html.js';
 import { EVENTS } from '../../../shared/analytics.js';
@@ -15,9 +17,19 @@ const KNOWN_EVENTS = new Set([
 
 const mb = (bytes) => (bytes / 1048576).toFixed(1);
 
-export function overviewBody(url) {
-  // داشبورد per ربات است: فقط instanceهای رباتِ انتخاب‌شده (منوی کشوییِ بالای منو)
-  const bot = scopeBot(url);
+/* 🏠 بلوکِ عملیاتیِ نمای کلی — «ربات سرِ پاست و دیتاش سالم است؟»
+ *
+ * ⚠️ این تابع عمداً `bot` می‌گیرد نه `url`: از دو جا صدا زده می‌شود (نمای کلیِ `/dash`
+ * و پوسته‌ی `/`)، و اگر هرکدام اسکوپ را خودش دوباره resolve می‌کرد، دیر یا زود یکی
+ * کوکی را می‌دید و دیگری نه. اسکوپ یک‌بار بالا حل می‌شود و به این‌جا **پاس داده** می‌شود.
+ *
+ * `full` تعیین می‌کند اعدادِ کاربری (کاربر/DAU/درآمد) هم بیایند یا نه، و این تنها راهِ
+ * درست بود: رباتی که سنجه‌های تحلیلیِ اختصاصی ندارد (voice2text، tabir) اگر این اعداد
+ * را هم نگیرد نمای کلیِ خالی می‌بیند؛ ولی برای تاروت همین اعداد از قبل بالاترِ همان
+ * صفحه هستند و تکرارشان یعنی دو عدد که هیچ‌کس نمی‌داند کدام درست است.
+ * پس: `full=false` برای رباتِ داشبوردِ کامل (فقط سلامتِ عملیاتی که جای دیگری نیست)،
+ * `full=true` برای بقیه. */
+export function opsBlock(bot, { full = true } = {}) {
   const today = tehranDayStart();
   const week = tehranDayStart(-6);
   const month = nowSec() - 30 * 86400;
@@ -49,6 +61,7 @@ export function overviewBody(url) {
     const sizes = dbSizes(inst.file);
     if (!s) { out += `<div class="card"><h2>${esc(inst.title)}</h2><p class="muted">دیتابیس در دسترس نیست.</p></div>`; continue; }
     out += `<div class="card"><h2>${esc(inst.title)} <span class="muted mono">${esc(inst.id)}</span></h2><div class="grid">
+      ${full ? `
       ${stat('کاربران', cohortCount(s.users, { k: 'users', bot: inst.bot, inst: inst.id }))}
       ${stat('جدید امروز', cohortCount(s.newToday, { k: 'users', bot: inst.bot, inst: inst.id, since: String(today) }))}
       ${stat('جدید ۷ روز', cohortCount(s.newWeek, { k: 'users', bot: inst.bot, inst: inst.id, since: String(week) }))}
@@ -56,7 +69,7 @@ export function overviewBody(url) {
       ${s.wau !== null ? stat('فعال ۷ روز (WAU)', cohortCount(s.wau, { k: 'actives', bot: inst.bot, inst: inst.id, since: String(week) })) : ''}
       ${s.revToday !== null ? stat('درآمد امروز', fmt(s.revToday) + ' ت') : ''}
       ${s.revMonth !== null ? stat('درآمد ۳۰ روز', fmt(s.revMonth) + ' ت') : ''}
-      ${s.revTotal !== null ? stat('درآمد کل', fmt(s.revTotal) + ' ت') : ''}
+      ${s.revTotal !== null ? stat('درآمد کل', fmt(s.revTotal) + ' ت') : ''}` : ''}
       ${s.waitingReview ? stat('⏳ رسید در انتظار تأیید', fmt(s.waitingReview)) : ''}
       ${stat('حجم DB', `${mb(sizes.db)}MB` + (sizes.wal ? ` <span class="muted">(+${mb(sizes.wal)}MB WAL)</span>` : ''))}
     </div></div>`;
@@ -74,6 +87,9 @@ export function overviewBody(url) {
   if (unknown.length) {
     out += `<div class="note">⚠️ رویدادهای خارج از واژه‌نامه (drift قرارداد آنالیتیکس؟): ${unknown.map(esc).join(' · ')}</div>`;
   }
-  out += `<p class="muted">درآمد = مبلغ واقعاً پرداخت‌شده (بعد از تخفیف)، تأییدشده. مرز «امروز» = نیمه‌شب تهران. برای دیدنِ ربات دیگر، از منوی کشوییِ بالای منو عوضش کن.</p>`;
+  out += full
+    ? `<p class="muted">درآمد = مبلغ واقعاً پرداخت‌شده (بعد از تخفیف)، تأییدشده. مرز «امروز» = نیمه‌شب تهران. برای دیدنِ ربات دیگر، از منوی کشوییِ بالای منو عوضش کن.</p>`
+    : `<p class="muted">حجمِ DB و صفِ رسید سلامتِ عملیاتی‌اند، نه سنجه‌ی محصولی — برای همین پایینِ صفحه‌اند.</p>`;
   return out;
 }
+

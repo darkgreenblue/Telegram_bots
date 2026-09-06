@@ -12,8 +12,11 @@ import { channelCosts, CHANNELS } from '../lib/cpa.js';
 import { successfulReferrersSql } from '../lib/engage.js';
 import { campaignStats, channelSummary, postsCards } from './marketing.js';
 
-export const USD_RATE_KEY = 'usd_toman';
-export const CAMPAIGN_CPA_KEY = 'cpa_campaign_usd';
+/* ⚠️ تک‌منبع: تعریفِ این دو کلید در `lib/profit.js` است، چون سه صفحه (جذب، اقتصاد،
+   نمای کلی) رویشان می‌نشینند و سه تعریفِ جدا یعنی دیر یا زود یکی عوض شود و بقیه ساکت
+   بمانند. این‌جا فقط re-export می‌شود تا مصرف‌کننده‌های قبلی نشکنند. */
+export { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
+import { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 const pctOf = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
