@@ -18,30 +18,48 @@ export const DEFAULT_BOT = 'tarot';
  * از پروفایلِ خودِ ربات می‌آید (`moneyText`)، نه از این صفحه. */
 export const MASTER_DASH_BOTS = new Set(['tarot', 'tarot-intl']);
 
+/* ═══ ساختارِ منو — بازطراحیِ ۱۴۰۵/۰۶/۰۹ ═══
+ *
+ * ایرادِ صریحِ مالک: «دسته‌بندی‌ها گنگ‌اند». مشکلِ ساختارِ قبلی این بود که **دیدن** و
+ * **کردن** قاطی بودند: «مارکتینگ» هم فرمِ ساختِ کمپین بود هم گزارشِ کانال‌ها؛ «مالی» هم
+ * صفِ رسید بود هم درآمد. پس هر آیتم دو ارباب داشت و هیچ‌کدام را خوب خدمت نمی‌کرد.
+ *
+ * ساختارِ جدید دو محور دارد، همان چیزی که ابزارهای استانداردِ آنالیتیکس (GA4، Amplitude،
+ * Mixpanel) هم می‌کنند:
+ *   ۱) **تحلیل** بر اساسِ چرخه‌ی عمرِ کاربر (AARRR: جذب ← درگیری ← ماندگاری ← درآمد).
+ *      هر صفحه یک سؤالِ مشخص دارد، نه یک انبارِ عدد.
+ *   ۲) **اقدام** جدا: هرجا فرم و دکمه‌ای هست که چیزی را عوض می‌کند.
+ * قاعده‌ی تصمیم: «این صفحه را باز می‌کنم که بفهمم، یا که کاری بکنم؟» */
 export const NAV = [
   {
-    href: '/dash', label: 'آمار تحلیلی', icon: '📊',
+    key: 'analytics', href: '/dash', label: 'آمار تحلیلی', icon: '📊',
     children: [
-      ['/dash', 'داشبورد اصلی'],
-      ['/funnels', 'فانل‌ها'],
-      ['/retention', 'ریتنشن و کوهورت'],
-      ['/screens', 'صفحه‌ها'],
-      ['/marketing', 'مارکتینگ'],
-      ['/experiments', 'تست‌های A/B'],
+      ['/dash', '🏠 نمای کلی'],
+      ['/acquisition', '📥 جذب و کانال‌ها'],
+      ['/engagement', '🔥 درگیری و چسبندگی'],
+      ['/retention', '🔁 ماندگاری و کوهورت'],
+      ['/funnels', '🕳 قیف و جرنی'],
+      ['/screens', '💬 صفحه‌ها'],
+      ['/economics', '💰 اقتصاد و هزینه'],
+      ['/experiments', '🧪 نتایج تست‌ها'],
     ],
   },
-  { href: '/', label: 'نمای کلی', icon: '🏠' },
-  { href: '/users', label: 'کاربران', icon: '👥' },
-  { href: '/support', label: 'پشتیبانی', icon: '💬' },
-  { href: '/finance', label: 'مالی', icon: '💳' },
-  { href: '/costs', label: 'هزینه و درآمد', icon: '🧮' },
-  { href: '/discounts', label: 'کد تخفیف', icon: '🏷' },
-  { href: '/journal', label: 'ژورنال محصول', icon: '📓' },
+  {
+    key: 'actions', href: '/users', label: 'اقدام‌ها', icon: '🛠',
+    children: [
+      ['/users', '👥 کاربران'],
+      ['/support', '💬 پشتیبانی'],
+      ['/finance', '💳 مالی و رسیدها'],
+      ['/marketing', '📣 کمپین‌ساز'],
+      ['/discounts', '🏷 کد تخفیف'],
+      ['/journal', '📓 ژورنال محصول'],
+    ],
+  },
 ];
 
-/** همه‌ی مسیرهایی که زیرِ گروهِ «آمار تحلیلی» می‌نشینند (برای فعال‌شدنِ ریشه). */
-const GROUP_PATHS = new Set(NAV.flatMap(n => (n.children || []).map(([h]) => h)));
-export const inGroup = (path) => GROUP_PATHS.has(path);
+/** مسیرهای هر گروه (برای فعال‌شدنِ ریشه‌ی همان گروه، نه همه‌ی گروه‌ها). */
+const GROUP_PATHS = new Map(NAV.map(n => [n.key, new Set((n.children || []).map(([h]) => h))]));
+export const inGroup = (groupKey, path) => !!GROUP_PATHS.get(groupKey)?.has(path);
 
 /** ربات فعال (شاید با فیلترِ زبان: `tarot-intl@ru`). کلیدِ ناشناخته → پیش‌فرض. */
 export function scopeBot(url) {

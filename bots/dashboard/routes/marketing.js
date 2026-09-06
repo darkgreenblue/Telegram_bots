@@ -77,20 +77,27 @@ const CH_EXPR = `CASE
   WHEN first_source = 'organic' THEN 'ارگانیک'
   ELSE 'نامشخص (قبل از اتریبیوشن)' END`;
 
-function channelSummary(botKey) {
+export function channelSummary(botKey) {
   const merged = new Map(); // ch -> {users, payers, revenue}
   const pk = userPk(botKey);
   const mn = moneyOf(botKey);
   const testClause = mn.testFilter ? ` AND p.${mn.testFilter}` : '';
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
-      for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(*) c FROM users GROUP BY ch`)) {
+      /* حذفِ ادمین — همان قراردادِ بقیه‌ی سنجه‌های محصولی. تا قبل از ۱۴۰۵/۰۶/۰۹ این‌جا
+         اعمال نمی‌شد و همین باعث شد جدولِ چنل‌ها یک نفر بیشتر از جدولِ CPA نشان بدهد؛
+         دو عددِ ناهم‌خوان روی یک صفحه، اعتماد به هر دو را از بین می‌برد. */
+      const adm = hasTable(db, 'events')
+        ? `WHERE ${pk} NOT IN (SELECT user_id FROM events WHERE json_extract(props,'$.adm') = 1)` : '';
+      const admJoin = hasTable(db, 'events')
+        ? ` AND u.${pk} NOT IN (SELECT user_id FROM events WHERE json_extract(props,'$.adm') = 1)` : '';
+      for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(*) c FROM users ${adm} GROUP BY ch`)) {
         const m = merged.get(r.ch) || { users: 0, payers: 0, revenue: 0 };
         m.users += r.c; merged.set(r.ch, m);
       }
       if (hasTable(db, mn.table)) {
         for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(DISTINCT p.user_id) payers, COALESCE(SUM(p.${mn.amountCol}),0) rev
-            FROM ${mn.table} p JOIN users u ON u.${pk}=p.user_id WHERE p.status='${mn.successStatus}'${testClause} GROUP BY ch`)) {
+            FROM ${mn.table} p JOIN users u ON u.${pk}=p.user_id WHERE p.status='${mn.successStatus}'${testClause}${admJoin} GROUP BY ch`)) {
           const m = merged.get(r.ch) || { users: 0, payers: 0, revenue: 0 };
           m.payers += r.payers; m.revenue += toToman(botKey, r.rev); merged.set(r.ch, m);
         }
@@ -189,7 +196,7 @@ export function postStats(botKey) {
 }
 
 // کارتِ «پست‌های کانال» — تا وقتی هیچ لینکِ سطحِ پستی استفاده نشده، هیچ‌چیزی رندر نمی‌شود
-function postsCards(campaigns, only) {
+export function postsCards(campaigns, only) {
   let out = '';
   for (const b of BOTS.filter(x => x.key === only)) {
     const { list, hasPayments } = postStats(b.key);

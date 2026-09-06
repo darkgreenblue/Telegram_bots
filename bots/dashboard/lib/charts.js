@@ -77,13 +77,18 @@ export function hbars(items, { color = CAT[0], showPct = true, empty = 'داده
 
 /* ── ستونیِ ترتیبی: مقادیرِ مرتب (نمره‌ی ۱ تا ۵، ماندگاریِ D1..D30).
       رمپِ تک‌رنگ روشن→تیره، پس ترتیب با رنگ هم دیده می‌شود، نه فقط با جای ستون. ── */
-export function ordinalBars(items, { height = 132, suffix = '' } = {}) {
+export function ordinalBars(items, { height = 132, suffix = '', color = null } = {}) {
   const data = items.map(d => ({ ...d, value: num(d.value) }));
   const max = Math.max(1, ...data.map(d => d.value));
   if (!data.some(d => d.value)) return '<p class="muted">داده‌ای برای این بازه نیست.</p>';
+  /* رمپ روی **تعدادِ واقعیِ** ستون‌ها پخش می‌شود، نه clamp روی پله‌ی آخر. با clamp، هر
+     ستونِ بعد از پنجمی هم‌رنگِ پنجمی می‌شد و رنگ دیگر «جایگاه در ترتیب» را نمی‌گفت
+     (دیده‌شده روی هفت سطلِ کدنس). با یک سریِ تکی، رنگِ ثابت هم پذیرفته می‌شود. */
+  const step = (i) => (data.length <= 1 ? ORD[ORD.length - 1]
+    : ORD[Math.round((i / (data.length - 1)) * (ORD.length - 1))]);
   return `<div class="cols" style="--h:${height}px">${data.map((d, i) => {
     const h = Math.max(2, Math.round(d.value / max * height));
-    const col = d.color || ORD[Math.min(i, ORD.length - 1)];
+    const col = d.color || color || step(i);
     return `<div class="col" title="${esc(d.label)}: ${fmt(d.value)}${esc(suffix)}">
       <b class="col-v">${fmt(d.value)}${esc(suffix)}</b>
       <span class="col-b" style="height:${h}px;background:${col}"></span>

@@ -30,6 +30,9 @@ import { cohortBody, cohortFragment } from './routes/cohort.js';
 import { funnelStepsFragment, screensBody } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
 import { dashBody, dashRate } from './routes/dash.js';
+import { engagementBody } from './routes/engagement.js';
+import { acquisitionBody, acquisitionSettings } from './routes/acquisition.js';
+import { economicsBody } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 
 /* ===== ENV ===== */
@@ -59,6 +62,9 @@ const redirect = (res, to, extraHeaders = {}) => { res.writeHead(303, { Location
 const PAGES = {
   '/': (url) => ['نمای کلی', overviewBody(url)],
   '/dash': (url) => ['آمار تحلیلی', dashBody(url)],
+  '/engagement': (url) => ['درگیری و چسبندگی', engagementBody(url)],
+  '/acquisition': (url) => ['جذب و کانال‌ها', acquisitionBody(url)],
+  '/economics': (url) => ['اقتصاد و هزینه', economicsBody(url)],
   '/marketing': (url) => ['مارکتینگ', marketingBody(url)],
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
@@ -97,6 +103,7 @@ const ACTIONS = {
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
   '/dash/rate': { fn: dashRate, backTo: '/dash' },
+  '/acquisition/settings': { fn: acquisitionSettings, backTo: '/acquisition' },
 };
 
 const server = http.createServer(async (req, res) => {

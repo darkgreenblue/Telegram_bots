@@ -16,7 +16,7 @@ import {
 import { scopeBot, MASTER_DASH_BOTS } from '../lib/nav.js';
 import { getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
-import { stat, cohortCount, table } from '../lib/html.js';
+import { stat, cohortCount, table, cardHead } from '../lib/html.js';
 import { donut, hbars, ordinalBars, timeChart, CAT } from '../lib/charts.js';
 import {
   DONE, RDAY, RATED, RATE_EXPR, RET_DAYS, READ_BUCKETS, SATISFIED_MIN_AVG,
@@ -253,13 +253,14 @@ export function dashBody(url) {
   const toman = (usdVal) => (rate ? `<span class="muted"> ≈ ${fmt(Math.round(usdVal * rate))} ت</span>` : '');
   const co = { k: 'tarot', bot, aw: String(aw) }; // پارامترهای پایه‌ی کوهورت‌های این صفحه
 
-  /* ── فیلترها ── */
-  const rangeTabs = Object.entries(RANGES).map(([k, v]) =>
-    `<a href="?bot=${esc(bot)}&range=${k}&aw=${aw}&g=${growthMode}" class="pill ${k === rk ? 'on' : ''}">${esc(v.label)}</a>`).join('');
+  /* ── فیلترها ──
+     ⚠️ فیلترِ **سراسریِ** بازه عمداً حذف شد (ایرادِ مالک): حالا هر کارت انتخابگرِ خودش را
+     دارد و عوض‌کردنِ یکی، بقیه را ریست نمی‌کند. این‌جا فقط پنجره‌ی «کاربر فعال» مانده،
+     چون تعریفِ خودِ سنجه است نه یک بازه‌ی نمایشی. */
   const awOptions = [1, 2, 3, 4, 5, 6, 7].map(d =>
     `<option value="${d}" ${d === aw ? 'selected' : ''}>${fmt(d)} روز</option>`).join('');
   const filters = `<div class="card dash-filters">
-    <div class="pills">${rangeTabs}</div>
+    <span class="muted">این صفحه فقط سرخطِ اعداد است؛ جزئیاتِ هر بخش در صفحه‌ی خودش.</span>
     <form method="get" action="/dash" class="inline" style="margin-inline-start:auto">
       <input type="hidden" name="bot" value="${esc(bot)}">
       <input type="hidden" name="range" value="${esc(rk)}">
@@ -287,7 +288,9 @@ export function dashBody(url) {
   const readingsPerDay = Math.round((a.readings / lifeDays) * 10) / 10;
   const ttfvMedian = a.ttfv.length ? a.ttfv.sort((x, y) => x - y)[Math.floor(a.ttfv.length / 2)] : null;
 
-  const engagement = `<div class="card"><h2>🔥 درگیری و ماندگاری</h2>
+  const more = (href, txt) => `<a href="${href}?bot=${esc(bot)}" class="pill" style="margin-inline-start:auto">${txt} ←</a>`;
+  const engagement = `<div class="card">
+    ${cardHead('🔥 درگیری و ماندگاری', more('/engagement', 'جزئیات و کدنسِ چسبندگی'))}
     <div class="grid">
       ${stat('کاربران فال‌گرفته (حداقل ۱ فال)', cohortCount(a.readers, { ...co, t: 'readers' }))}
       ${stat('برگشتی (در ۲ روزِ متفاوت فال گرفته)', cohortCount(a.repeat, { ...co, t: 'repeat' })
@@ -461,11 +464,25 @@ export function dashBody(url) {
     ]))}
     <p class="muted">همان آدم‌هایی که ارزشِ پرسیدن دارند: چرا برمی‌گردند، و چه چیزی نگهشان داشته.</p></div>` : '';
 
-  return `<div class="card dash-head"><h2 style="margin:0">📊 داشبورد اصلی — ${esc(title)}</h2>
-      <p class="muted" style="margin:6px 0 0">تمرکزِ این صفحه درگیری و ماندگاریِ کاربر است، نه درآمد.
-        اعدادِ ردیفِ بالا مستقل از بازه‌اند؛ بقیه با فیلترِ بازه عوض می‌شوند.</p></div>
-    ${filters}${heroes}${engagement}${retentionCard}${depthCard}${streakCard}
-    ${satisfaction}${readingsCard}${charts}${usersCard}${referral}${costCard}${revenueCard}${power}`;
+  /* ═══ چیدمانِ نمای کلی ═══
+     خواسته‌ی مالک: این صفحه «پارامترهای کلی و مهم» باشد و با دیتای زیاد شلوغ نشود.
+     پس هر کارتِ جزئی به صفحه‌ی خودش رفت و این‌جا فقط سرخط ماند، با یک لینک به عمق:
+       عمقِ استفاده / استریک / کدنس / وفادارترین‌ها → `/engagement`
+       هزینه‌ی مدل / اقتصادِ الماس / حاشیه           → `/economics`
+       دعوت / کانال‌ها / CPA / کمپین‌ها               → `/acquisition`
+     چیزی حذف نشد؛ فقط سرِ جای درستش نشست. */
+  const jump = `<div class="card"><div class="pills">
+    <a class="pill" href="/engagement?bot=${esc(bot)}">🔥 درگیری و چسبندگی</a>
+    <a class="pill" href="/retention?bot=${esc(bot)}">🔁 ماندگاری و کوهورت</a>
+    <a class="pill" href="/acquisition?bot=${esc(bot)}">📥 جذب و کانال‌ها</a>
+    <a class="pill" href="/economics?bot=${esc(bot)}">💰 اقتصاد و هزینه</a>
+    <a class="pill" href="/funnels?bot=${esc(bot)}">🕳 قیف و جرنی</a>
+  </div></div>`;
+
+  return `<div class="card dash-head"><h2 style="margin:0">📊 نمای کلی — ${esc(title)}</h2>
+      <p class="muted" style="margin:6px 0 0">سرخطِ اعداد. تمرکزِ این فاز درگیری و ماندگاریِ کاربر است، نه درآمد.
+        هر بخش انتخابگرِ بازه‌ی خودش را دارد و جزئیاتش یک کلیک آن‌طرف‌تر است.</p></div>
+    ${filters}${heroes}${jump}${engagement}${satisfaction}${readingsCard}${charts}${usersCard}${revenueCard}`;
 }
 
 const hero = (k, v, sub = '', big = false) => `<div class="hero${big ? ' big' : ''}">
