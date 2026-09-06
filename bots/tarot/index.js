@@ -1679,12 +1679,59 @@ async function replayIntent(ctx, uid) {
 // اگر کاربر فاکتورِ باز دارد، دکمه‌های منو نباید آن را بی‌صدا یتیم کنند؛ به‌جای اجرا «فاکتور باز داری»
 // + دکمه‌ی انصراف نشان بده و اکشن را متوقف کن. خروجی true = بلاک شد.
 const PAY_STATES = ['pay_amount', 'pay_receipt', 'pay_discount'];
+
+/* 🧾 **تعریفِ «فاکتور» رکوردی است، نه استیتی** — تک‌منبعِ هر سه گاردِ پرداخت.
+ *
+ * 🐛 باگی که مالک گرفت (۱۴۰۵/۰۶/۱۵): پیامِ «یه فاکتور شارژِ باز داری، مبلغ رو واریز کن
+ * و رسید بفرست» وقتی می‌آمد که کاربر **هنوز حتی بسته‌اش را انتخاب نکرده بود**. چون گارد
+ * روی *استیت* می‌نشست و `pay_amount` (صفحه‌ی انتخابِ بسته) هم داخلِ PAY_STATES است، در
+ * حالی که در آن لحظه ردیفِ پرداخت `amount=0, step='amount'` است: هیچ مبلغی وجود ندارد
+ * که واریز شود و هیچ رسیدی که فرستاده شود. پیام صریحاً دروغ می‌گفت و کاربر را وسطِ
+ * انتخابِ بسته قفل می‌کرد.
+ *
+ * تعریفِ درست از خودِ رکورد می‌آید و دقیقاً همانی است که `claimAmount` می‌سازد:
+ * `status='pending' AND step='receipt'`. همین تعریف برای ریلِ **استارز** هم درست کار
+ * می‌کند و از تعریفِ استیتی بهتر است: آن‌جا استیت عمداً روی `pay_amount` می‌ماند، ولی
+ * رکورد `step='receipt'` می‌شود، پس فاکتورِ استارز هم حالا محافظت می‌شود (قبلاً
+ * تعریفِ استیتی هم آن را می‌گرفت، ولی به دلیلِ اشتباه). */
+function issuedInvoiceOf(uid) {
+  const pid = getSession(uid)?.paymentId;
+  if (!pid) return null;
+  const p = stmts.getPayment.get(pid);
+  return (p && p.user_id === uid && p.status === 'pending' && p.step === 'receipt') ? p : null;
+}
+
+/* ردیفِ پرداختی که **اثباتاً** فاکتور نیست را رها کن: کاربر صفحه‌ی بسته‌ها را باز کرده
+ * و بدونِ انتخاب رفته. این نقضِ قاعده‌ی «فقط انصرافِ صریح فاکتور را می‌کشد» نیست، چون
+ * چیزی صادر نشده که کشته شود (`amount=0, step='amount'` — همان شرطی که خودِ `pay_back`
+ * از قبل رویش cancel می‌کرد).
+ *
+ * پاک‌کردنِ **استیت** هم لازم است نه اختیاری: اگر `pay_amount` بماند، کاربری که رفته
+ * سراغِ کارِ دیگری و بعد چیزی تایپ می‌کند به شاخه‌ی «مبلغ را بخوان» می‌افتد و پیامِ
+ * بی‌ربطِ «مبلغ نامعتبر» می‌گیرد. */
+function dropUnissuedPay(uid) {
+  const s = getSession(uid) || {};
+  const pid = s.paymentId;
+  if (pid) {
+    const p = stmts.getPayment.get(pid);
+    if (p && p.user_id === uid && p.status === 'pending' && p.step === 'amount' && !p.amount) {
+      stmts.setPaymentStatus.run('canceled', p.id);
+    }
+    delete s.paymentId;
+    setSession(uid, s);
+  }
+  if (PAY_STATES.includes(getState(uid))) setState(uid, s.readingId ? 'confirm_pay' : 'idle');
+}
+
 async function blockDuringOpenPay(ctx, intent) {
   if (!NAV_GUARD_ENABLED) return false;
   const uid = ctx.from.id;
   if (!PAY_STATES.includes(getState(uid))) return false;
-  const pid = getSession(uid)?.paymentId;
-  if (!pid) return false; // بدون paymentId نمی‌توان انصراف را وصل کرد → بگذار رد شود (مسیر بازیابیِ رسید)
+  const p = issuedInvoiceOf(uid);
+  // هنوز بسته‌ای انتخاب نشده → فاکتوری در کار نیست → چیزی برای محافظت نیست. استیتِ
+  // کهنه پاک می‌شود و اکشنِ کاربر عادی ادامه پیدا می‌کند.
+  if (!p) { dropUnissuedPay(uid); return false; }
+  const pid = p.id;
   if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
   // ⚠️ عمداً `pay_exit` است نه `pay_cancel`. آن یکی از ۱۴۰۵/۰۶/۱۱ معنیِ دیگری گرفت:
   // «یک قدم عقب به صفحه‌ی بسته‌ها»، که برای کاربرِ الماسی یک ردیفِ پرداختِ **تازه** باز
@@ -4152,12 +4199,12 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
 bot.action('nav:menu', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
-  const pid = getSession(uid)?.paymentId;
-  if (PAY_STATES.includes(getState(uid)) && pid) {
-    return ctx.reply(L.errors.openInvoice, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
-    ]));
-  }
+  /* ⚠️ این‌جا قبلاً یک **کپیِ دستیِ** گارد بود، و هر دو ایرادِ نسخه‌ی اصلی را داشت:
+     روی *استیت* می‌نشست (پس در صفحه‌ی انتخابِ بسته هم دروغ می‌گفت) و دکمه‌ی انصرافش به
+     `pay_cancel` وصل بود — همان چیزی که در `blockDuringOpenPay` باگِ حلقه‌ی بی‌پایانِ
+     تیکتِ #TRT-8976388520 را ساخت و از آن‌جا حذف شد ولی این کپی جا ماند. گاردِ کپی‌شده
+     دیر یا زود از اصل عقب می‌افتد؛ پس حالا **همان** تابع صدا زده می‌شود. */
+  if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringDelivering(ctx)) return;
   if (await blockDuringOpenLucky(ctx)) return;   // فالِ پول‌داده‌ی وسطِ افشا پاک نمی‌شود
   const s = getSession(uid);

@@ -44,10 +44,21 @@ const guard = bodyOf('async function blockDuringOpenPay(ctx, intent) {', '\n}');
 ok(PAY_STATES.length > 0, `PAY_STATES از سورس خوانده شد (${PAY_STATES.join(', ')})`);
 ok(guard ? /PAY_STATES\.includes\(getState\(uid\)\)/.test(guard) : false,
   'گارد روی PAY_STATES تصمیم می‌گیرد');
-ok(guard ? /const pid = getSession\(uid\)\?\.paymentId/.test(guard) : false,
-  'و روی paymentId سشن');
-// مدلِ وفادار به همان دو شرط
-const blocked = (st) => PAY_STATES.includes(st.state) && !!st.session.paymentId;
+ok(guard ? /issuedInvoiceOf\(uid\)/.test(guard) : false,
+  'و روی **فاکتورِ صادرشده**، نه صرفاً وجودِ paymentId در سشن');
+ok(guard ? /dropUnissuedPay\(uid\)/.test(guard) : false,
+  'و اگر فاکتوری صادر نشده، استیتِ کهنه را پاک می‌کند و رد می‌شود');
+const issued = bodyOf('function issuedInvoiceOf(uid) {', '\n}');
+ok(issued ? /status === 'pending' && p\.step === 'receipt'/.test(issued) : false,
+  'تعریفِ «فاکتور» رکوردی است: pending + step=receipt');
+
+/* دو مدل، عمداً جدا:
+   `blockedOld` رفتارِ **تاریخی** است (استیت + وجودِ paymentId) و فقط برای بازتولیدِ
+   حلقه‌ی تیکتِ #TRT-8976388520 می‌ماند. `blockedNow` رفتارِ **امروز** است. یکی‌کردنشان
+   یعنی یا بازتولیدِ باگ را از دست بدهیم یا رفتارِ فعلی را اشتباه مدل کنیم. */
+const blockedOld = (st) => PAY_STATES.includes(st.state) && !!st.session.paymentId;
+const blockedNow = (st) => PAY_STATES.includes(st.state) && !!st.invoiceIssued;
+const blocked = blockedOld;
 
 /* ══ ۲) خودِ حلقه، اجراشده روی SQLite واقعی ══════════════════════════════ */
 console.log('\n  — 🔁 بازتولیدِ حلقه:');
@@ -405,6 +416,79 @@ console.log('\n  — 📸 رسید هیچ‌وقت بی‌صدا دور ریخت
   ok(/receiptNoInvoice/.test(ph), 'وقتی هیچ فاکتوری پیدا نشد، به کاربر گفته می‌شود');
   ok(/canceledReceiptPayment/.test(ph) && /revivePayment/.test(ph),
     'فاکتورِ لغوشده‌ی تازه هم بازیابی و **احیا** می‌شود (وگرنه approve بعداً بی‌صدا شکست می‌خورد)');
+}
+
+console.log('\n  — 🧾 «فاکتور باز داری» فقط وقتی فاکتوری هست:');
+{
+  /* 🐛 باگی که مالک گرفت (۱۴۰۵/۰۶/۱۵): پیامِ «یه فاکتور شارژِ باز داری — مبلغ رو واریز
+     کن، رسید رو بفرست» وقتی می‌آمد که کاربر **هنوز بسته‌اش را انتخاب نکرده بود**. در آن
+     لحظه ردیف `amount=0, step='amount'` است: نه مبلغی هست که واریز شود، نه رسیدی که
+     برود. گارد روی *استیت* می‌نشست و `pay_amount` هم داخلِ PAY_STATES است.
+
+     این بخش هر سه حالت را روی SQLite واقعی و با SQLِ **برداشته‌شده از سورس** اجرا
+     می‌کند تا مدل نتواند از کد واگرا شود. */
+  const insert = sqlOf('insertPayment');
+  const claim = sqlOf('claimAmount');
+  const setSt = sqlOf('setPaymentStatus');
+  ok(!!(insert && claim && setSt), 'SQLهای لازم از سورس برداشته شدند');
+  if (insert && claim && setSt) {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending', amount INTEGER NOT NULL DEFAULT 0,
+      step TEXT NOT NULL DEFAULT 'amount', updated_at INTEGER NOT NULL DEFAULT 0);`);
+    const UID = 6149194760;
+    const pid = Number(db.prepare(insert).run(UID).lastInsertRowid);
+    const rowOf = (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+    // همان تعریفِ تابعِ سورس، ولی روی این دیتابیس
+    const issuedOf = (id) => {
+      const p = rowOf(id);
+      return (p && p.user_id === UID && p.status === 'pending' && p.step === 'receipt') ? p : null;
+    };
+
+    // ۱) کاربر روی صفحه‌ی بسته‌هاست: هیچ فاکتوری صادر نشده
+    ok(!issuedOf(pid), 'قبل از انتخابِ بسته: فاکتوری صادر نشده');
+    ok(!blockedNow({ state: 'pay_amount', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ گارد فعال **نمی‌شود** (باگِ مالک)');
+    ok(blockedOld({ state: 'pay_amount', session: { paymentId: pid } }),
+      '🐛 و با مدلِ قدیمی فعال **می‌شد** — یعنی این چک واقعاً باگ را می‌دید');
+
+    // ۲) بسته انتخاب شد → فاکتور صادر شد
+    ok(db.prepare(claim).run(30, pid).changes === 1, 'claimAmount فاکتور را صادر کرد');
+    ok(rowOf(pid).step === 'receipt', 'و رکورد به step=receipt رفت');
+    ok(blockedNow({ state: 'pay_receipt', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ حالا گارد فعال می‌شود (کارت‌به‌کارت)');
+
+    // ۳) ریلِ استارز: استیت عمداً روی pay_amount می‌ماند ولی رکورد صادر شده
+    ok(blockedNow({ state: 'pay_amount', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ فاکتورِ استارز هم محافظت می‌شود، با اینکه استیت هنوز pay_amount است');
+
+    // ۴) بعد از لغو، دیگر فاکتوری نیست
+    db.prepare(setSt).run('canceled', pid);
+    ok(!blockedNow({ state: 'pay_receipt', invoiceIssued: !!issuedOf(pid) }),
+      'بعد از لغو، گارد کاربر را زندانی نمی‌کند');
+
+    // ۵) dropUnissuedPay فقط ردیفِ اثباتاً بی‌فاکتور را می‌کشد
+    const drop = bodyOf('function dropUnissuedPay(uid) {', '\n}');
+    ok(drop ? /step === 'amount' && !p\.amount/.test(drop) : false,
+      'dropUnissuedPay فقط ردیفِ amount=0 و step=amount را لغو می‌کند، نه فاکتور');
+    ok(drop ? /setState\(uid, s\.readingId \? 'confirm_pay' : 'idle'\)/.test(drop) : false,
+      'و استیتِ کهنه را پاک می‌کند (وگرنه تایپِ بعدیِ کاربر «مبلغ نامعتبر» می‌گیرد)');
+  }
+}
+
+console.log('\n  — 🧭 nav:menu گاردِ کپی‌شده ندارد:');
+{
+  /* گاردِ کپی‌شده دیر یا زود از اصل عقب می‌افتد. اثباتِ زنده: وقتی `blockDuringOpenPay`
+     از `pay_cancel` به `pay_exit` رفت (فیکسِ حلقه)، کپیِ داخلِ `nav:menu` جا ماند و
+     همان حلقه را از مسیرِ «بازگشت به منو» زنده نگه داشت. */
+  const nav = bodyOf("bot.action('nav:menu'", '\n});');
+  ok(!!nav, 'هندلرِ nav:menu پیدا شد');
+  ok(nav ? /blockDuringOpenPay\(ctx\)/.test(nav) : false,
+    'nav:menu همان تک‌منبعِ گارد را صدا می‌زند');
+  ok(nav ? !/L\.errors\.openInvoice/.test(nav) : false,
+    'و پیامِ گارد را خودش دوباره نمی‌سازد');
+  ok(nav ? !/pay_cancel:/.test(nav) : false,
+    'و به pay_cancel وصل نیست (همان باگی که حلقه را می‌ساخت)');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} راهِ خروجِ پرداخت: ${pass} پاس، ${fail} خطا\n`);
