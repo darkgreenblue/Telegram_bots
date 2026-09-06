@@ -20,6 +20,7 @@ import { audit } from './lib/platform.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody, supportAction } from './routes/support.js';
 import { financeBody, financeCsv, financeAction, costsBody } from './routes/finance.js';
+import { orphansBody, orphanAdd, orphanResolve, orphanDelete } from './routes/orphans.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
@@ -67,6 +68,7 @@ const PAGES = {
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
+  '/orphans': (url) => ['پرداخت‌های سرگردان', orphansBody(url)],
   '/costs': (url) => ['هزینه‌ها', costsBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
   '/screens': (url) => ['صفحه‌ها', screensBody(url)],
@@ -101,7 +103,10 @@ const ACTIONS = {
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
   '/dash/rate': { fn: dashRate, backTo: '/dash' },
-  '/acquisition/settings': { fn: acquisitionSettings, backTo: '/acquisition' },
+  '/acquisition/settings': { fn: acquisitionSettings, backTo: '/economics' },
+  '/orphans/add':     { fn: orphanAdd,     backTo: '/orphans' },
+  '/orphans/resolve': { fn: orphanResolve, backTo: '/orphans' },
+  '/orphans/delete':  { fn: orphanDelete,  backTo: '/orphans' },
 };
 
 const server = http.createServer(async (req, res) => {

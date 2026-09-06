@@ -153,7 +153,8 @@ export function profitCard(url, bot) {
     ${cardHead('📈 سودِ خالص', rangePicker(url, 'rProfit', rk))}
     <div class="grid">
       ${stat(`سودِ خالص (${esc(RANGES[rk].label)})`, `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
-      ${stat('درآمدِ دریافتی', t(tot.rev))}
+      ${stat('درآمدِ دریافتی', t(tot.rev) + (tot.orphan
+        ? ` <span class="muted">(${fmt(tot.orphan)} ت سرگردان)</span>` : ''))}
       ${stat('هزینه‌ی واقعی', `${t(tot.costToman)} <span class="muted">(${usd(tot.llmUsd + tot.adUsd)})</span>`)}
       ${stat('حاشیه‌ی سود', `${fmt(margin)}٪`)}
       ${stat('نقطه‌ی سربه‌سر', p.breakEven
@@ -163,7 +164,8 @@ export function profitCard(url, bot) {
     <p class="muted">سود = <b>درآمدِ دریافتی − هزینه‌ی مدل − هزینه‌ی تبلیغ</b>.
       تخفیف کم نمی‌شود (از قبل داخلِ درآمد است)، اعتبارِ هدیه هم نه (پولِ نقد نیست؛
       هزینه‌اش وقتی خرج شود در همان هزینه‌ی مدل می‌آید)، و پرداخت‌های تستی اصلاً
-      واردِ درآمد نمی‌شوند.${preUsd ? ` هزینه‌ی ${usd(preUsd)}ِ دوره‌ی قبل از ثبتِ خودکار
+      واردِ درآمد نمی‌شوند.${tot.orphan ? ` <b>${fmt(tot.orphan)} تومان</b> از این درآمد
+      «پرداختِ سرگردان» است: پولی که به حساب رسیده ولی کاربرش رسید نفرستاده و دستی ثبت شده.` : ''}${preUsd ? ` هزینه‌ی ${usd(preUsd)}ِ دوره‌ی قبل از ثبتِ خودکار
       روی روزهای همان دوره پخش شده، پس «کل عمر» کامل است.` : ''}</p>
     <h3 class="ch">روزانه (جدیدترین بالا)</h3>
     ${table(['روز', 'درآمد', 'هزینه', 'سودِ روز', 'تجمعی'], daily, 'در این بازه دیتایی نیست')}

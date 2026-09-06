@@ -38,6 +38,7 @@ import { instancesOf, withDb, hasTable, rows, scalar, revenueWhere, toToman, mon
 import { tehranDayStart, tehranDayStr, nowSec } from './util.js';
 // شماره‌ی روزِ تهران تک‌منبع است (`engage.js`): دو تعریفِ جدا دیر یا زود سرِ مرزِ روز واگرا می‌شوند.
 import { tehranDayNo } from './engage.js';
+import { orphanRevenueByDay } from './platform.js';
 
 /** ورودی‌های انسانی که سود بدونشان کامل نیست (کلیدهای جدولِ settings). */
 export const USD_RATE_KEY = 'usd_toman';
@@ -85,7 +86,7 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   const since = tehranDayStart(-(n - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, llmUsd, adUsd }
   const at = (d) => {
-    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0 });
+    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 });
     return day.get(d);
   };
 
@@ -120,6 +121,20 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
     });
   }
 
+  /* ═══ 🧾 درآمدِ سرگردان ═══
+     پولی که کارت‌به‌کارت رسیده ولی کاربر رسیدش را نفرستاده، پس در جدولِ `payments`
+     ربات هیچ ردیفی ندارد. اگر این‌جا اضافه نشود، پولِ واقعیِ داخلِ حساب از سود غایب
+     می‌ماند. ردیف‌های `resolved_late` عمداً **نمی‌آیند**: پرداختشان حالا از مسیرِ خودِ
+     ربات ثبت شده و آوردنشان دوباره‌شماری بود. `orphanRev` جدا نگه داشته می‌شود تا کارت
+     بتواند سهمش را صریح نشان بدهد و این عدد هیچ‌وقت بی‌صدا داخلِ درآمد گم نشود. */
+  let orphanRev = 0;
+  for (const [d, amt] of orphanRevenueByDay(botKey, since)) {
+    const cell = at(d);
+    cell.rev += amt;
+    cell.orphan = (cell.orphan || 0) + amt;
+    orphanRev += amt;
+  }
+
   /* ═══ هزینه‌ی دوره‌ی قبل از ثبت، پخش‌شده روی روزهای همان دوره ═══
      ⚠️ نسخه‌ی اول این عدد را کنار می‌گذاشت و بالای کارت یک هشدار می‌نوشت که «۸۲ روز
      از محاسبه خارج شد». آن راه‌حل نبود، اعلامِ مسئله بود: کاربر یک عددِ ناقص می‌دید
@@ -149,19 +164,19 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   let cum = 0;
   for (let i = n - 1; i >= 0; i--) {
     const d = tehranDayStr(tehranDayStart(-i));
-    const v = day.get(d) || { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0 };
+    const v = day.get(d) || { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 };
     const costUsd = v.llmUsd + v.adUsd;
     const costToman = usdToman ? Math.round(costUsd * usdToman) : 0;
     const net = v.rev - costToman;
     cum += net;
-    series.push({ d, ...v, costUsd, costToman, net, cum });
+    series.push({ d, orphan: 0, ...v, costUsd, costToman, net, cum });
   }
 
   const totals = series.reduce((a, r) => ({
     rev: a.rev + r.rev, llmUsd: a.llmUsd + r.llmUsd, adUsd: a.adUsd + r.adUsd,
     costToman: a.costToman + r.costToman, net: a.net + r.net,
-    campaignUsers: a.campaignUsers + r.campaignUsers,
-  }), { rev: 0, llmUsd: 0, adUsd: 0, costToman: 0, net: 0, campaignUsers: 0 });
+    campaignUsers: a.campaignUsers + r.campaignUsers, orphan: a.orphan + (r.orphan || 0),
+  }), { rev: 0, llmUsd: 0, adUsd: 0, costToman: 0, net: 0, campaignUsers: 0, orphan: 0 });
 
   /* نقطه‌ی سربه‌سر = اولین روزی که تجمعی از صفر رد شد و **دیگر برنگشت**.
    * عمداً «اولین باری که مثبت شد» نیست: یک روزِ پرفروش می‌تواند تجمعی را لحظه‌ای مثبت
