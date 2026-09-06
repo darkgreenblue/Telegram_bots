@@ -4,7 +4,7 @@
 // الگوهای دست‌ساز و جوابِ **از پیش حساب‌شده** اجرا می‌شوند.
 //
 // اجرا: node tools/check-engage-cpa.mjs   (بدون شبکه)
-import { mkdtempSync, mkdirSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
@@ -203,6 +203,65 @@ console.log('\n▶ ۸) هزینه‌ی دستیِ کمپین روی هر کار�
   const b = channelCosts('tarot', { sinceSec: 0, campaignUsdPerUser: 0.02 }).channels.campaign;
   ok(a.users === b.users, 'تعدادِ کاربرِ کمپین به هزینه‌ی دستی حساس نیست');
   ok(near(b.costUsd - a.costUsd, 0.02 * a.users, 1e-9), 'هزینه‌ی دستی دقیقاً × تعدادِ کاربرِ کمپین اضافه می‌شود');
+}
+
+console.log('\n▶ ۹) «اکشنِ مفید» فیچرِ خاموش و دُمِ فلوی دیگر را نمی‌شمارد');
+{
+  /* ⚠️ این بخش عمداً **ساختاری** است، نه آینه‌ای. یک ادعای آینه‌ای («فلان اسم در
+     لیست نیست») فقط خودش را می‌سنجد و اگر فردا کسی اسمِ تازه‌ای از یک فیچرِ خاموش
+     اضافه کند ساکت می‌ماند. پس به‌جای لیستِ ثابت، **سورسِ خودِ ربات** خوانده می‌شود:
+     هر پرچمی که `= false` است پیدا می‌شود، بعد هر رویدادی که فقط داخلِ بلوکِ گاردشده
+     با آن پرچم `track` می‌شود «دست‌نیافتنی» علامت می‌خورد. اگر چنین رویدادی در
+     USEFUL_EVENTS باشد، سنجه چیزی را می‌شمارد که کاربر اصلاً نمی‌بیند. */
+  // مسیر نسبت به خودِ اسکریپت، نه cwd — این چک cwd را عوض می‌کند.
+  const src = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+  const lines = src.split('\n');
+
+  const offFlags = [...src.matchAll(/^const\s+([A-Z0-9_]+)\s*=\s*false\s*;/gm)].map(m => m[1]);
+  ok(offFlags.length > 0, `پرچمِ خاموش در سورسِ tarot پیدا شد (${offFlags.join(', ') || '—'})`);
+
+  // بلوک‌های سطحِ بالا: از خطی که در ستونِ ۰ شروع می‌شود تا خطی که دقیقاً بسته می‌شود.
+  const blocks = [];
+  let cur = null;
+  for (const ln of lines) {
+    if (/^(async\s+)?function\s|^const\s+\w+\s*=\s*(async\s*)?\(|^bot\.(action|hears|command|on)\(/.test(ln)) {
+      if (cur) blocks.push(cur);
+      cur = [ln];
+    } else if (cur) {
+      cur.push(ln);
+      if (/^(\}|\}\);|\}\)\.catch)/.test(ln)) { blocks.push(cur); cur = null; }
+    }
+  }
+  if (cur) blocks.push(cur);
+
+  const unreachable = new Set();
+  for (const b of blocks) {
+    const text = b.join('\n');
+    if (!offFlags.some(f => new RegExp(`if\\s*\\(\\s*!${f}\\b`).test(text))) continue;
+    for (const m of text.matchAll(/track\(\s*db\s*,\s*\w+\s*,\s*'([a-z0-9_]+)'/g)) unreachable.add(m[1]);
+  }
+  ok(unreachable.size > 0, `رویدادهای پشتِ پرچمِ خاموش شناسایی شدند (${unreachable.size} تا)`);
+
+  const { USEFUL_EVENTS } = eng;
+  const leaked = USEFUL_EVENTS.filter(e => unreachable.has(e));
+  ok(leaked.length === 0,
+    `هیچ رویدادِ پشتِ پرچمِ خاموش در USEFUL_EVENTS نیست${leaked.length ? ` — نشتی: ${leaked.join(', ')}` : ''}`);
+
+  // ادعای آینه‌ایِ مکمل: «دُمِ فلوی دیگر» با سورس قابلِ تشخیص نیست، پس صریح گفته می‌شود.
+  ok(!USEFUL_EVENTS.includes('feedback'),
+    'نمره‌دادن (feedback) اکشنِ مفید نیست: دُمِ فالِ پولی است، نه بازگشتِ مستقل');
+
+  // و گاردِ معکوس: هرچه در لیست هست باید واقعاً در سورسِ ربات ثبت شود.
+  const tracked = new Set([...src.matchAll(/track(Once)?\(\s*db\s*,\s*\w+\s*,\s*'([a-z0-9_]+)'/g)].map(m => m[2]));
+  // ثابت‌های EVENTS در shared/analytics.js تعریف شده‌اند، نه در سورسِ ربات.
+  const evSrc = readFileSync(new URL('../shared/analytics.js', import.meta.url), 'utf8');
+  for (const m of src.matchAll(/track(Once)?\(\s*db\s*,\s*\w+\s*,\s*EVENTS\.([A-Z_]+)/g)) {
+    const c = evSrc.match(new RegExp(`${m[2]}:\\s*'([a-z0-9_]+)'`));
+    if (c) tracked.add(c[1]);
+  }
+  const ghosts = USEFUL_EVENTS.filter(e => !tracked.has(e));
+  ok(ghosts.length === 0,
+    `هر رویدادِ USEFUL_EVENTS واقعاً در ربات ثبت می‌شود${ghosts.length ? ` — بی‌ریشه: ${ghosts.join(', ')}` : ''}`);
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
