@@ -1153,7 +1153,16 @@ const stmts = {
     WHERE p.status NOT IN ('waiting_review','approved')
       AND NOT (p.status='pending' AND p.amount>0)
       AND p.updated_at < unixepoch()-?`),
-  setPaymentReceipt: db.prepare('UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=?'),
+  /* ⚠️ گاردِ `status IN ('pending','waiting_review')` **اتمیک و اجباری** است.
+     🐛 بدونش این تنها گذارِ وضعیتِ بی‌گارد بود و یک پرداختِ **تأییدشده** را به
+     `waiting_review` برمی‌گرداند ⇒ ادمین دوباره در صف می‌دیدش ⇒ تأییدِ دوم ⇒
+     **دو بار اعتبار به یک پرداخت**.
+     مسیرش هم فرضی نیست: `sendReceiptToAdmin` بعد از چند `await` (ارسال به هر ادمین) و
+     در مسیرِ داوری بعد از یک فراخوانیِ LLM (۵ تا ۲۰ ثانیه) این خط را می‌زند. کاربری که
+     دو عکس پشتِ سرِ هم بفرستد (آلبوم)، عکسِ دوم `paymentId` را قبل از پاک‌شدنِ استیت
+     برمی‌دارد و بعد از تأییدِ عکسِ اول همین‌جا می‌رسد.
+     گارد در **خودِ UPDATE** است نه در جاوااسکریپت، چون مسئله دقیقاً یک مسابقه است. */
+  setPaymentReceipt: db.prepare("UPDATE payments SET receipt_file_id=?, admin_message_id=?, status=?, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
   // ذخیره‌ی خودِ رسید بدونِ تغییرِ وضعیت (مسیرِ auto-approve/reject؛ waiting_review را sendReceiptToAdmin می‌زند)
   saveReceiptFile: db.prepare('UPDATE payments SET receipt_file_id=?, updated_at=unixepoch() WHERE id=?'),
   // برگشتِ پرداخت — فقط از approved (idempotent، ضدِ دوبار). changes==1 یعنی همین حالا برگشت خورد.
@@ -5683,9 +5692,22 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
 //   reject   → رد + پیام با دلیل (مگر «اصلاً رسید نیست» که فقط راهنمایی و پرداخت باز می‌ماند)
 //   review   → کلِ رسید با دکمه‌های تأیید/رد به ادمین (تصمیمِ انسانی)
 // auto-approve خاموش (کلید سراسری) یا کاربرِ بی‌اعتماد → همیشه review (بدونِ خرجِ ایجنت).
+/** وضعیت‌هایی که هنوز «در جریان» اند و رسیدِ تازه رویشان معنی دارد. */
+const RECEIPT_LIVE_STATES = ['pending', 'waiting_review'];
+
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
   const p = stmts.getPayment.get(paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
+  /* پرداختی که از قبل تعیین‌تکلیف شده، رسیدِ دوم نمی‌گیرد. گاردِ اتمیکِ
+     `setPaymentReceipt` جلوی خرابیِ **پول** را می‌گیرد؛ این‌یکی جلوی سه چیزِ دیگر:
+       • یک فراخوانیِ **پولیِ** هدررفته‌ی LLM روی رسیدی که تکلیفش روشن است (بند ۹)
+       • پیامِ گیج‌کننده‌ی «رسید جدید» به ادمین برای پرداختی که خودش تأیید کرده
+       • و پیامِ «رسیدت رسید ✅» به کاربری که پرداختش از قبل تأیید شده
+     ترتیب عمدی است: اول این‌جا، قبل از هر کارِ پرهزینه. */
+  if (!RECEIPT_LIVE_STATES.includes(p.status)) {
+    setState(uid, getSession(uid)?.readingId ? 'confirm_pay' : 'idle');
+    return ctx.reply(L.wallet.receiptAlreadyDone, mainKeyboard(uid)).catch(() => {});
+  }
   const s = getSession(uid);
   const nextState = s?.readingId ? 'confirm_pay' : 'idle';
   track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });

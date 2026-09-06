@@ -320,6 +320,71 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
   d2.close();
 }
 
+
+/* ═══ 🔁 پرداختِ تأییدشده با رسیدِ دوم زنده نمی‌شود ═══════════════════════
+ *
+ * 🐛 `setPaymentReceipt` تنها گذارِ وضعیت بود که **هیچ گاردی روی status نداشت** و
+ * بی‌قید `waiting_review` می‌نوشت. یعنی یک پرداختِ `approved` به صف برمی‌گشت، ادمین
+ * دوباره تأییدش می‌کرد، و **دو بار اعتبار** به یک پرداخت می‌رسید.
+ *
+ * مسیرش فرضی نیست: `sendReceiptToAdmin` بعد از چند `await` (ارسال به هر ادمین) و در
+ * مسیرِ داوری بعد از یک فراخوانیِ LLM این خط را می‌زند. کاربری که آلبومِ دو عکسی
+ * بفرستد، عکسِ دوم `paymentId` را قبل از پاک‌شدنِ استیت برمی‌دارد و بعد از تأییدِ
+ * عکسِ اول دقیقاً همان‌جا می‌رسد.
+ */
+console.log('\n▶ رسیدِ دوم پرداختِ تأییدشده را زنده نمی‌کند');
+{
+  const setRcpt = sqlOf('setPaymentReceipt');
+  const setSt = sqlOf('setPaymentStatus');
+  ok(!!(setRcpt && setSt), 'SQLها از سورس برداشته شدند');
+  if (setRcpt && setSt) {
+    const d3 = new Database(':memory:');
+    d3.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending', amount INTEGER NOT NULL DEFAULT 0,
+      receipt_file_id TEXT, admin_message_id INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);`);
+    const mk = (st) => Number(d3.prepare("INSERT INTO payments (user_id, amount, status) VALUES (9, 60000, ?)").run(st).lastInsertRowid);
+    const statusOf = (id) => d3.prepare('SELECT status FROM payments WHERE id=?').get(id).status;
+
+    // مسیرِ عادی هنوز کار می‌کند
+    const live = mk('pending');
+    ok(d3.prepare(setRcpt).run('f1', 11, 'waiting_review', live).changes === 1,
+      'رسید روی پرداختِ زنده مثل قبل می‌نشیند');
+    ok(statusOf(live) === 'waiting_review', 'و وضعیت به بازبینی می‌رود');
+
+    // رسیدِ بهترِ دوم وقتی هنوز در صف است، هنوز مجاز است
+    ok(d3.prepare(setRcpt).run('f2', 12, 'waiting_review', live).changes === 1,
+      'رسیدِ دومِ همان پرداختِ در صف هم می‌نشیند (کاربر عکسِ واضح‌تر می‌فرستد)');
+
+    // و سه وضعیتِ تعیین‌تکلیف‌شده **زنده نمی‌شوند**
+    for (const dead of ['approved', 'rejected', 'canceled']) {
+      const id = mk(dead);
+      const ch = d3.prepare(setRcpt).run('fx', 99, 'waiting_review', id).changes;
+      ok(ch === 0 && statusOf(id) === dead,
+        `پرداختِ «${dead}» با رسیدِ تازه به صف برنمی‌گردد (changes=${ch})`);
+    }
+    d3.close();
+  }
+
+  // و گاردِ زودهنگام که فراخوانیِ پولیِ LLM را هدر نمی‌دهد
+  const src3 = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const proc = (() => {
+    const at = src3.indexOf('async function processReceipt(');
+    const body = at < 0 ? '' : src3.slice(at, at + 2500);
+    return body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  })();
+  ok(/RECEIPT_LIVE_STATES\.includes\(p\.status\)/.test(proc),
+    'processReceipt پرداختِ تعیین‌تکلیف‌شده را زودهنگام رد می‌کند');
+  const guardAt = proc.indexOf('RECEIPT_LIVE_STATES');
+  const replyAt = proc.indexOf('receiptSent');
+  ok(guardAt >= 0 && replyAt > guardAt,
+    'و این گارد **قبل از** پیامِ «رسیدت رسید» و قبل از کارِ پرهزینه است');
+  ok(/receiptAlreadyDone/.test(proc), 'و کاربر بی‌جواب نمی‌ماند');
+  for (const loc of ['fa', 'ru', 'es', 'pt']) {
+    const ls = readFileSync(path.resolve(`bots/tarot/locales/${loc}.js`), 'utf8');
+    ok(/receiptAlreadyDone:/.test(ls), `پیامش در locale «${loc}» هست`);
+  }
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);

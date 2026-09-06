@@ -896,6 +896,7 @@ export default {
     receiptReceivedRecovered: 'Comprovante recebido ✅ (liguei ele ao seu pedido em aberto) Assim que for confirmado, eu te aviso.',
     receiptSent: 'Comprovante recebido ✅ Mandei pra conferência do admin; assim que confirmarem, o saldo entra e eu te aviso 🙏',
     receiptNoInvoice: 'Esta foto não ficou ligada a nenhuma fatura aberta 🙏\n\nSe você já pagou, abra «Diamantes», escolha o pacote de novo e envie o comprovante ali.\nSe algo der errado, fale com o suporte que a gente confere na mão.',
+    receiptAlreadyDone: 'Este pagamento já foi conferido 🙏\n\nSe achar que algo não bate, fala com o suporte que a gente olha na mão.',
     overpaidNote: (expected, paid) => `A pessoa pagou a mais: cerca de ${fmt(paid)} em vez de ${fmt(expected)}. Se quiser, credite a diferença na mão.`,
     // Aviso sobre a unidade do valor, em cima do comprovante que foi pra conferência humana.
     adminAmountNote: (reasonCode, expected, paid) => {
