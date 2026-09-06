@@ -38,6 +38,11 @@ const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
 const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
 const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
 const MIN_RECHARGE = 50_000;  // تومان
+/* سقفِ بالا — عمداً خیلی بالاتر از هر شارژِ واقعی، چون هدفش رد کردنِ کاربرِ عادی نیست.
+ * بند ۹ ریشه: «برای هر ورودی کاربر سقف بگذار… بالاتر از الگوی مصرف واقعی». بدونِ سقف،
+ * ورودیِ آزادِ مبلغ هر عددی را می‌پذیرفت و هر باگِ دیگری در مسیرِ تخفیف/اعتبار به همان
+ * نسبت بزرگ می‌شد (نمونه‌ی واقعی: کدِ «۱۰۰٪ تا سقفِ X» که اعتبارِ بی‌سقف می‌داد). */
+const MAX_RECHARGE = 50_000_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
 const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
 
@@ -1917,6 +1922,16 @@ bot.on('text', async (ctx) => {
         payCancelKb(state.paymentId));
       return;
     }
+    // سقفِ بالا: پیامش عمداً مودبانه و راهنماست، نه اتهام — کاربرِ عادی هرگز به این‌جا
+    // نمی‌رسد و کسی که می‌رسد احتمالاً اشتباهِ تایپی کرده (چند صفرِ اضافه).
+    if (amount > MAX_RECHARGE) {
+      await ctx.reply(
+        `❌ این مبلغ خیلی بزرگ است. شاید چند صفر اضافه تایپ شده؟\n\n` +
+        `حداکثر شارژ در هر بار ${MAX_RECHARGE.toLocaleString('fa-IR')} تومان است. ` +
+        `اگر واقعاً بیشتر لازم داری، چند بار شارژ کن یا به پشتیبانی پیام بده.`,
+        payCancelKb(state.paymentId));
+      return;
+    }
     await applyRechargeAmount(ctx, userId, state.paymentId, amount);
     return;
   }
@@ -1932,8 +1947,20 @@ bot.on('text', async (ctx) => {
     stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
     userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: state.invoiceMsgId, discountCodeId: result.dc.id });
 
-    // Auto-approve فقط برای تخفیف واقعیِ ۱۰۰٪ روی مبلغ مثبت — گارد ضد credit(NULL)/credit(0)
-    if ((result.dc.discount_percent === 100 || result.finalAmount === 0) && payment.amount > 0) {
+    /* Auto-approve **فقط** وقتی فاکتور واقعاً صفر شده.
+     *
+     * 🐛 شرطِ قبلی `(discount_percent === 100 || finalAmount === 0)` بود و آن `||`
+     * یک اعتبارِ رایگانِ بی‌سقف می‌ساخت: کدِ «۱۰۰٪ **تا سقفِ** ۵۰٬۰۰۰» (چیزی که هر
+     * ادمینی طبیعتاً می‌سازد و فرمِ ادمین هم می‌پذیردش) درصدش ۱۰۰ است ولی
+     * `max_discount_amount` تخفیفِ واقعی را می‌بُرد. پس روی شارژِ ۵۰۰٬۰۰۰ تومانی
+     * `finalAmount = 450,000` می‌شد — یعنی کاربر ۴۵۰ هزار بدهکار بود — و این شاخه
+     * باز هم فعال می‌شد و **کلِ ۵۰۰ هزار را رایگان** به کیفش می‌ریخت. با مبلغِ
+     * بزرگ‌تر، رقم بزرگ‌تر؛ سقفِ کد عملاً هیچ اثری نداشت.
+     *
+     * `finalAmount === 0` دقیقاً و تنها یعنی «فاکتور کامل پوشش داده شد»، که همان
+     * چیزی است که این شاخه ادعایش را دارد. `payment.amount > 0` هم می‌ماند (گاردِ
+     * ضدِ credit(0) روی فاکتورِ خالی). */
+    if (result.finalAmount === 0 && payment.amount > 0) {
       stmts.setPaymentStatus.run('approved', state.paymentId);
       stmts.credit.run(payment.amount, userId); // credit original amount
       track(userId, 'payment_approved', { payment_id: state.paymentId, amount: 0, credited: payment.amount, auto: true });
