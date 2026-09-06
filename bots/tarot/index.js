@@ -794,6 +794,10 @@ try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFA
 try { db.prepare("ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // ⭐ شناسه‌ی شارژِ استارز — تنها کلیدِ `refundStarPayment`. برای فارسی همیشه خالی می‌ماند.
 try { db.prepare("ALTER TABLE payments ADD COLUMN charge_id TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// مبلغِ تخفیف به **واحدِ پول** (نه الماس). لحظه‌ی اعمال نوشته می‌شود چون فقط همان‌جا
+// پایه‌ی قبل از تخفیف در دسترس است؛ بازسازی‌اش از `original_amount` غلط بود چون آن
+// ستون در دنیای الماس تعدادِ الماس را نگه می‌دارد.
+try { db.prepare('ALTER TABLE payments ADD COLUMN discount_toman INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.2.0): صفِ اقدامِ پشتیبانی فراتر از تأیید/ردِ رسید (شارژ دستی، بازکردنِ فال).
 // payment_id در اقدام‌های غیرپرداختی صفر می‌ماند (ستون NOT NULL است و تغییرش غیرافزایشی بود).
 try { db.prepare('ALTER TABLE admin_actions ADD COLUMN user_id INTEGER').run(); } catch {}
@@ -1176,7 +1180,7 @@ const stmts = {
   setReminded:   db.prepare('UPDATE payments SET reminded_at=unixepoch() WHERE id=?'),
   pendingActions: db.prepare('SELECT * FROM admin_actions WHERE done_at IS NULL ORDER BY id LIMIT 20'),
   markActionDone: db.prepare('UPDATE admin_actions SET done_at=unixepoch() WHERE id=?'),
-  setPaymentDiscount: db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=?'),
+  setPaymentDiscount: db.prepare('UPDATE payments SET discount_code_id=?, original_amount=COALESCE(original_amount, amount), amount=?, discount_toman=?, updated_at=unixepoch() WHERE id=?'),
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
   totalRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved'"),
@@ -1701,25 +1705,24 @@ function issuedInvoiceOf(uid) {
   return (p && p.user_id === uid && p.status === 'pending' && p.step === 'receipt') ? p : null;
 }
 
-/* ردیفِ پرداختی که **اثباتاً** فاکتور نیست را رها کن: کاربر صفحه‌ی بسته‌ها را باز کرده
- * و بدونِ انتخاب رفته. این نقضِ قاعده‌ی «فقط انصرافِ صریح فاکتور را می‌کشد» نیست، چون
- * چیزی صادر نشده که کشته شود (`amount=0, step='amount'` — همان شرطی که خودِ `pay_back`
- * از قبل رویش cancel می‌کرد).
+/* کاربر صفحه‌ی بسته‌ها را باز کرده و بدونِ انتخاب رفته سراغِ کارِ دیگری. این تابع
+ * **فقط استیتِ کهنه را پاک می‌کند**، و عمداً هیچ کاری با ردیفِ دیتابیس ندارد.
  *
- * پاک‌کردنِ **استیت** هم لازم است نه اختیاری: اگر `pay_amount` بماند، کاربری که رفته
- * سراغِ کارِ دیگری و بعد چیزی تایپ می‌کند به شاخه‌ی «مبلغ را بخوان» می‌افتد و پیامِ
- * بی‌ربطِ «مبلغ نامعتبر» می‌گیرد. */
+ * چرا استیت لازم است: اگر `pay_amount` بماند، کاربری که بعداً چیزی تایپ کند به شاخه‌ی
+ * «مبلغ را بخوان» می‌افتد و پیامِ بی‌ربطِ «مبلغ نامعتبر» می‌گیرد.
+ *
+ * ⚠️ چرا ردیف را **نمی‌کشد** (ساده‌سازیِ آگاهانه، بند ۹/۰): نسخه‌ی اولِ این تابع ردیفِ
+ * `amount=0, step='amount'` را cancel می‌کرد. دو ایراد داشت و هیچ سودی نداشت:
+ *   • `sweepDeadAmountRows` از قبل همین ردیف‌ها را بعد از ۲۴ ساعت می‌بندد، پس چرخه‌ی
+ *     عمرِ ردیف از قبل صاحب داشت و این یک صاحبِ دوم بود.
+ *   • و ردیفِ «canceled با مبلغِ صفر» دقیقاً **اثرانگشتِ** حلقه‌ی بی‌پایانِ تیکتِ
+ *     #TRT-8976388520 است (بند ۹ب/۶). ساختنِ آن ردیف‌ها در مسیرِ عادی یعنی آن سیگنالِ
+ *     تشخیصی را برای همیشه بی‌معنا کنیم — همان «هشداری که مدام دروغ می‌گوید».
+ * ردیفِ دست‌نخورده هم ضرری ندارد: `reusablePending` تا ۱۵ دقیقه دوباره از آن استفاده
+ * می‌کند و بعد جارو می‌بنددش. */
 function dropUnissuedPay(uid) {
   const s = getSession(uid) || {};
-  const pid = s.paymentId;
-  if (pid) {
-    const p = stmts.getPayment.get(pid);
-    if (p && p.user_id === uid && p.status === 'pending' && p.step === 'amount' && !p.amount) {
-      stmts.setPaymentStatus.run('canceled', p.id);
-    }
-    delete s.paymentId;
-    setSession(uid, s);
-  }
+  if (s.paymentId) { delete s.paymentId; setSession(uid, s); }
   if (PAY_STATES.includes(getState(uid))) setState(uid, s.readingId ? 'confirm_pay' : 'idle');
 }
 
@@ -5604,10 +5607,22 @@ async function applyDiscount(ctx, uid, codeText) {
    *
    * پایه‌ی درست تک‌منبع دارد و مبهم نیست: قیمتِ خودِ بسته از کاتالوگ. اگر بسته‌ای در کار
    * نباشد (مسیرِ تومانیِ قدیمی) همان رفتارِ قبلی می‌ماند. */
-  const pk = packOf(p);
-  const base = pk ? (starsRail ? (p.amount || pk.toman) : pk.toman) : (p.original_amount || p.amount);
-  /* و گاردِ دوباره‌زدن: `setPaymentDiscount` روی فاکتوری که از قبل تخفیف خورده،
-     تخفیفِ دوم را روی مبلغِ تخفیف‌خورده می‌نشاند (انباشتِ ناخواسته). یک فاکتور، یک کد. */
+  /* **پایه = `p.amount`، همین و بس.** این عدد در هر سه ریل «پولی که کاربر باید بدهد»
+   * است: تومانِ تایپ‌شده در مسیرِ قدیمی، `pack.toman` بعد از `setPaymentPackage` در
+   * دنیای الماس، و عددِ استارز روی ریلِ استارز.
+   *
+   * ⚠️ نسخه‌ی اولِ همین فیکس پایه را از **کاتالوگ** می‌گرفت
+   * (`packOf(p).toman`) و یک سطرِ شرطیِ سه‌شاخه داشت. هم پیچیده‌تر بود و هم یک سوراخ
+   * داشت: اگر روزی کلیدِ بسته‌ای از کاتالوگ برداشته شود، `packOf` نال می‌دهد و کد به
+   * `p.original_amount` برمی‌گردد — یعنی **دقیقاً همان باگِ الماس/تومان دوباره زنده
+   * می‌شود**، آن هم بی‌صدا. پایه‌ای که از خودِ رکورد می‌آید چنین سوراخی ندارد.
+   *
+   * درستیِ `p.amount` به گاردِ زیر وابسته است (یک فاکتور، یک کد): تا وقتی تخفیفِ دومی
+   * روی مبلغِ تخفیف‌خورده ننشیند، `p.amount` همیشه مبلغِ **قبل از تخفیف** است. */
+  const base = p.amount;
+  /* گاردِ «یک فاکتور، یک کد» — و این **پیش‌شرطِ درستیِ پایه‌ی بالاست**، نه یک احتیاطِ
+     جانبی: `setPaymentDiscount` مبلغِ تخفیف‌خورده را در `amount` می‌نشاند، پس کدِ دوم
+     روی مبلغِ از قبل تخفیف‌خورده حساب می‌شد (انباشتِ ناخواسته). */
   if (p.discount_code_id) {
     return ctx.reply(L.wallet.usedDiscount, Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${p.id}`)],
@@ -5622,7 +5637,7 @@ async function applyDiscount(ctx, uid, codeText) {
       [Markup.button.callback(L.buttons.backToInvoice, `disc_back:${p.id}`)],
     ]));
   }
-  stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, p.id);
+  stmts.setPaymentDiscount.run(v.dc.id, v.finalAmount, Math.max(0, base - v.finalAmount), p.id);
   setState(uid, 'pay_receipt');
   // ⚠️ عددِ نمایشی هم از **همان پایه** می‌آید، نه `original_amount` (بند ۶ج: عدد و
   // واحد هرگز از دو منبعِ مختلف).
@@ -5840,12 +5855,12 @@ function approvePayment(paymentId, allowRejected = false) {
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
   if (p.discount_code_id) {
     stmts.incDiscountUses.run(p.discount_code_id);
-    /* ⚠️ مبلغِ تخفیف هم باید **تومانی** ثبت شود، نه اختلافِ الماسی. در دنیای الماس
-       `original_amount` تعدادِ الماس است، پس `original_amount - amount` عددی بی‌معنی
-       می‌ساخت و دفترِ تخفیفِ داشبورد را خراب می‌کرد (همان ریشه‌ی باگِ پایه‌ی تخفیف). */
-    const dpk = packOf(p);
-    const dbase = dpk ? dpk.toman : (p.original_amount || p.amount);
-    stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, Math.max(0, dbase - p.amount));
+    /* مبلغِ تخفیف از ستونِ **خودش** خوانده می‌شود، نه بازسازی از `original_amount`.
+       دلیل: در دنیای الماس `original_amount` تعدادِ الماس است، پس
+       `original_amount - amount` عددی بی‌معنی می‌ساخت و دفترِ تخفیفِ داشبورد را خراب
+       می‌کرد. لحظه‌ی **اعمالِ** تخفیف عددِ درست را می‌دانیم؛ همان‌جا ذخیره می‌شود و
+       این‌جا فقط خوانده. ستون افزایشی است (بند ۲ج/۱) و ردیف‌های قدیمی صفر می‌مانند. */
+    stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, Math.max(0, p.discount_toman || 0));
   }
   return { p, creditAmount, bonus };
 }

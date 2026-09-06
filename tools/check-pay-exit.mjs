@@ -484,8 +484,17 @@ console.log('\n  — 🧾 «فاکتور باز داری» فقط وقتی فا�
 
     // ۵) dropUnissuedPay فقط ردیفِ اثباتاً بی‌فاکتور را می‌کشد
     const drop = bodyOf('function dropUnissuedPay(uid) {', '\n}');
-    ok(drop ? /step === 'amount' && !p\.amount/.test(drop) : false,
-      'dropUnissuedPay فقط ردیفِ amount=0 و step=amount را لغو می‌کند، نه فاکتور');
+    /* ⚠️ ادعا **معکوس** شد (ساده‌سازیِ آگاهانه، بند ۹/۰). نسخه‌ی اولِ این تابع ردیفِ
+       `amount=0` را cancel می‌کرد و ادعا همان را پین می‌کرد. ولی آن cancel هم زائد بود
+       (`sweepDeadAmountRows` از قبل صاحبِ چرخه‌ی عمرِ این ردیف‌هاست) و هم مضر: ردیفِ
+       «canceled با مبلغِ صفر» اثرانگشتِ حلقه‌ی #TRT-8976388520 است، و ساختنش در مسیرِ
+       عادی آن سیگنالِ تشخیصی را برای همیشه بی‌معنا می‌کرد. حالا ادعا این است که این
+       تابع **هیچ ردیفی را دست نمی‌زند**. */
+    ok(!!drop, 'dropUnissuedPay پیدا شد');
+    ok(drop ? !/setPaymentStatus|db\.prepare|stmts\./.test(drop) : false,
+      'dropUnissuedPay هیچ ردیفِ دیتابیسی را دست نمی‌زند (فقط استیت)');
+    ok(/sweepDeadAmountRows/.test(SRC),
+      'و چرخه‌ی عمرِ ردیفِ رهاشده از قبل صاحب دارد: sweepDeadAmountRows');
     ok(drop ? /setState\(uid, s\.readingId \? 'confirm_pay' : 'idle'\)/.test(drop) : false,
       'و استیتِ کهنه را پاک می‌کند (وگرنه تایپِ بعدیِ کاربر «مبلغ نامعتبر» می‌گیرد)');
   }

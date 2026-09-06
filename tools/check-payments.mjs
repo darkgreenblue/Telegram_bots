@@ -34,6 +34,7 @@ db.exec(`
   CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, discount_code_id INTEGER,
+    discount_toman INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
     adjust_note TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
@@ -83,10 +84,12 @@ console.log('\n▶ ریاضیِ تخفیفِ فال: اعتبارِ داده‌�
   const price = 30_000, payAmount = 24_000;   // ۲۰٪ تخفیف
   const p = newPayment();
   claim(price, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, payAmount, p);
-  const row = db.prepare('SELECT amount, original_amount FROM payments WHERE id=?').get(p);
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, payAmount, price - payAmount, p);
+  const row = db.prepare('SELECT amount, original_amount, discount_toman FROM payments WHERE id=?').get(p);
   ok(row.original_amount === price, 'original_amount = قیمتِ کاملِ فال');
   ok(row.amount === payAmount, 'amount = مبلغی که کاربر واقعاً می‌پردازد');
+  ok(row.discount_toman === price - payAmount,
+    `مبلغِ تخفیف در ستونِ خودش ثبت شد (${row.discount_toman}) — نه بازسازی از دو ستونِ ناهم‌واحد`);
   const credited = row.original_amount || row.amount;   // همان چیزی که approvePayment می‌کند
   ok(credited === price, 'اعتبارِ لحظه‌ی تأیید دقیقاً کفافِ فال را می‌دهد (فال باز می‌شود)');
   setStatus('canceled', p);
@@ -96,7 +99,7 @@ console.log('\n▶ باگِ واقعی: فاکتورِ رهاشده نباید �
 {
   const p = newPayment();
   claim(100_000, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, 80_000, p);   // کد روی یک فاکتور نشست
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, 80_000, 0, p);   // کد روی یک فاکتور نشست
   ok(held(0) === 0, 'فاکتورِ pendingِ رهاشده کد را نگه نمی‌دارد');
   const p2 = newPayment();
   claim(30_000, p2);
@@ -109,7 +112,7 @@ console.log('\n▶ ولی رسیدِ در انتظارِ تأیید باید ک�
 {
   const p = newPayment();
   claim(50_000, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, 40_000, p);
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, 40_000, 0, p);
   setStatus('waiting_review', p);
   const p2 = newPayment();
   ok(held(p2) === 1, 'کد روی رسیدِ منتظرِ تأیید قفل است');
@@ -253,7 +256,8 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
   d2.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, pkg TEXT,
-    discount_code_id INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);`);
+    discount_code_id INTEGER, discount_toman INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0);`);
   const pid = Number(d2.prepare("INSERT INTO payments (user_id, amount, step) VALUES (7, 0, 'amount')").run().lastInsertRowid);
   d2.prepare(claim).run(30, pid);              // ۳۰ الماس
   d2.prepare(setPkg).run('gold', 60000, pid);  // قیمتِ واقعی
@@ -283,10 +287,19 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
   // و اینکه کد واقعاً همین را می‌کند (ساختاری، نه فقط ریاضی)
   const applyBody = (() => {
     const at = src.indexOf('async function applyDiscount(');
-    return at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+    const body = at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+    // ⚠️ کامنت‌ها پاک می‌شوند: خودِ کامنتِ توضیحی نامِ `packOf(p)` را می‌برد (تا بگوید
+    // چرا استفاده **نمی‌شود**) و ادعای «به کاتالوگ وابسته نیست» را الکی قرمز می‌کرد.
+    return body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   })();
-  ok(/const pk = packOf\(p\)/.test(applyBody) && /pk\.toman/.test(applyBody),
-    'applyDiscount پایه را از قیمتِ خودِ بسته می‌گیرد');
+  /* ⚠️ ادعا عمداً روی **سادگی** هم می‌نشیند، نه فقط درستی: پایه باید مستقیم از رکورد
+     بیاید. نسخه‌ی اولِ فیکس آن را از کاتالوگ می‌گرفت (`packOf(p).toman`) و یک سوراخ
+     داشت — کلیدِ بسته‌ای که از کاتالوگ برداشته شود ⇒ `packOf` نال ⇒ برگشت به
+     `original_amount` ⇒ **همان باگِ الماس/تومان، بی‌صدا**. `p.amount` آن سوراخ را ندارد. */
+  ok(/const base = p\.amount;/.test(applyBody),
+    'applyDiscount پایه را مستقیم از رکورد می‌گیرد (بدونِ وابستگی به کاتالوگ)');
+  ok(!/packOf\(p\)/.test(applyBody),
+    'و به کاتالوگ وابسته نیست (کلیدِ حذف‌شده نباید باگ را برگرداند)');
   ok(!/validateDiscount\(codeText, uid, p\.original_amount \|\| p\.amount/.test(applyBody),
     'و دیگر original_amount را به‌عنوان پایه نمی‌دهد');
   ok(/if \(p\.discount_code_id\)/.test(applyBody),
@@ -297,8 +310,13 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
     const at = src.indexOf('function approvePayment(');
     return at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
   })();
-  ok(/dbase - p\.amount/.test(approveBody),
-    'مبلغِ ثبت‌شده در دفترِ تخفیف هم تومانی است، نه اختلافِ الماسی');
+  ok(/p\.discount_toman/.test(approveBody),
+    'مبلغِ دفترِ تخفیف از ستونِ اختصاصیِ خودش خوانده می‌شود، نه بازسازی از original_amount');
+  const src2 = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  ok(/ALTER TABLE payments ADD COLUMN discount_toman INTEGER NOT NULL DEFAULT 0/.test(src2),
+    'و ستونش افزایشی است با DEFAULT (ردیف‌های قدیمی معتبر می‌مانند — بند ۲ج/۱)');
+  ok(/setPaymentDiscount\.run\(v\.dc\.id, v\.finalAmount, Math\.max\(0, base - v\.finalAmount\), p\.id\)/.test(applyBody),
+    'و لحظه‌ی اعمال نوشته می‌شود، جایی که پایه واقعاً در دسترس است');
   d2.close();
 }
 
