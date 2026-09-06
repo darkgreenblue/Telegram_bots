@@ -54,6 +54,12 @@ export const BOTS = [
     // بعد از مهاجرتِ «الماسِ بومی» (۱۴۰۵/۰۵/۳۰) عددِ داخلِ دیتابیس **خودِ تعدادِ الماس**
     // است، پس ضریب ۱ است. این فیلد دیگر «دیکودِ فرمت» نیست، فقط اعلامِ واحد.
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
+    /* 🧪 حساب‌های تستی که رسیدشان **الکی تأیید شده** (فهرستِ صریحِ مالک ۱۴۰۵/۰۶/۱۵:
+     * رفقا و تست‌کننده‌های دوره‌ی راه‌اندازی). پولی واقعاً جابه‌جا نشده، پس ماندنشان
+     * در درآمد یعنی هر سنجه‌ی مالی — سود، ARPU، حاشیه، CPA — با پولِ خیالی حساب شود.
+     * ⚠️ عمداً فقط **درآمد** را فیلتر می‌کند، نه خودِ کاربر را: رفتارشان (فال، رویداد)
+     * واقعی بوده و حذفشان از سنجه‌های محصولی دیتای درست را دور می‌ریخت. */
+    testUsers: [409581917, 100257975, 5725984933, 429557996],
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
   {
@@ -203,9 +209,18 @@ export function revenueWhere(bot, sinceParamIdx = '?') {
   const test = m.testFilter ? ` AND ${m.testFilter}` : '';
   return {
     table: m.table, amountCol: m.amountCol,
-    where: `status='${m.successStatus}' AND ${unixOf(m.createdKind, 'created_at')} >= ${sinceParamIdx}${test}`,
+    where: `status='${m.successStatus}' AND ${unixOf(m.createdKind, 'created_at')} >= ${sinceParamIdx}${test}${testUserClause(bot)}`,
     testClause: test,
   };
+}
+
+/* حذفِ حساب‌های تستی از **درآمد**. عددها از رجیستری می‌آیند نه از ورودی، و با
+ * `Number()` پاک می‌شوند، پس هیچ رشته‌ای واردِ SQL نمی‌شود (قراردادِ امنیتیِ داشبورد).
+ * ⚠️ این تابع تک‌نقطه‌ی اعمال است: هر جای دیگری که خودش `status='approved'` بنویسد
+ * از این فیلتر جا می‌ماند و عددش با بقیه فرق می‌کند — چکِ CI همین را می‌گردد. */
+export function testUserClause(bot, col = 'user_id') {
+  const ids = (botByKey(bot)?.testUsers || []).map(Number).filter(Number.isFinite);
+  return ids.length ? ` AND ${col} NOT IN (${ids.join(',')})` : '';
 }
 export const getInstance = (id) => instances().find(i => i.id === id) || null;
 /* ⚠️ `id` و `i.bot` عمداً **کلیدِ پایه** می‌مانند: لینک‌های `?inst=` و مقایسه‌های

@@ -5,7 +5,7 @@
 // با PRAGMA چک می‌شود؛ جمعِ پرداخت و شمارشِ رویداد از پروفایلِ مالیِ همان ربات می‌آید.
 import {
   instancesOf, withDb, hasTable, rows,
-  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, toToman, creditText, creditNum } from '../lib/bots.js';
+  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, toToman, creditText, creditNum, testUserClause } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec } from '../lib/util.js';
@@ -60,8 +60,8 @@ function collectUsers(f) {
       const seenCol = has('last_seen') ? 'u.last_seen' : 'NULL';
       const evCount = hasEvents ? `(SELECT COUNT(*) FROM events e WHERE e.user_id = u.${pk})` : '0';
       const evLast = hasEvents ? `(SELECT MAX(e.created_at) FROM events e WHERE e.user_id = u.${pk})` : 'NULL';
-      const paidSum = hasMoney ? `(SELECT COALESCE(SUM(p.${m.amountCol}),0) FROM ${m.table} p WHERE p.user_id = u.${pk} AND p.status='${m.successStatus}'${test})` : '0';
-      const paidCnt = hasMoney ? `(SELECT COUNT(*) FROM ${m.table} p WHERE p.user_id = u.${pk} AND p.status='${m.successStatus}'${test})` : '0';
+      const paidSum = hasMoney ? `(SELECT COALESCE(SUM(p.${m.amountCol}),0) FROM ${m.table} p WHERE p.user_id = u.${pk} AND p.status='${m.successStatus}'${test}${testUserClause(b.key, 'p.user_id')})` : '0';
+      const paidCnt = hasMoney ? `(SELECT COUNT(*) FROM ${m.table} p WHERE p.user_id = u.${pk} AND p.status='${m.successStatus}'${test}${testUserClause(b.key, 'p.user_id')})` : '0';
 
       const conds = [];
       const params = [];

@@ -15,8 +15,8 @@ import { campaignStats, channelSummary, postsCards } from './marketing.js';
 /* ⚠️ تک‌منبع: تعریفِ این دو کلید در `lib/profit.js` است، چون سه صفحه (جذب، اقتصاد،
    نمای کلی) رویشان می‌نشینند و سه تعریفِ جدا یعنی دیر یا زود یکی عوض شود و بقیه ساکت
    بمانند. این‌جا فقط re-export می‌شود تا مصرف‌کننده‌های قبلی نشکنند. */
-export { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
-import { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
+export { USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 const pctOf = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -63,24 +63,12 @@ export function acquisitionBody(url) {
       (حتی اگر دعوت‌کننده از کانالِ دیگری آمده باشد) و بینِ دعوت‌هایش تقسیم می‌شود.
       <b>کمپین:</b> علاوه بر الماسِ خوش‌آمد، هزینه‌ی دستیِ تبلیغ هم روی هر کاربر می‌نشیند.</p></div>`;
 
-  /* ── ورودی‌های دستی ── */
-  const settingsCard = `<div class="card">
-    ${cardHead('⚙️ ورودی‌های دستیِ هزینه')}
-    <form method="post" action="/acquisition/settings" class="inline">
-      <input type="hidden" name="bot" value="${esc(bot)}">
-      <label>هزینه‌ی تبلیغ به ازای هر کاربرِ جدید (دلار)
-        <input name="camp" type="number" step="0.0001" min="0" value="${campUsd || ''}" placeholder="مثلاً 0.02"></label>
-      <label>نرخ دلار به تومان
-        <input name="rate" type="number" min="0" value="${rate || ''}" placeholder="مثلاً 90000"></label>
-      <button type="submit">ذخیره</button>
-    </form>
-    <p class="muted" style="margin-top:8px">
-      ${campUsd && rate ? `الان: هر کاربرِ کمپین <b>${usd(campUsd)}</b> ≈ <b>${fmt(Math.round(campUsd * rate))} تومان</b>. ` : ''}
-      ورودی عمداً دلاری است تا با هزینه‌ی مدل هم‌واحد بماند؛ تومانش خودکار حساب می‌شود.
-      <br>🔎 <b>اتوماسیون:</b> <span class="mono">ads.telegram.org</span> API عمومی برای خواندنِ هزینه‌ی
-      کمپینِ خودت ندارد (فقط داشبوردِ وبی). سرویس‌های ثالثی هستند که export می‌دهند، ولی همه نیازمندِ
-      دسترسی‌دادن به حسابِ تبلیغاتی‌اند — برای یک عدد در ماه صرف نمی‌کند. پس ورودی دستی می‌ماند.</p></div>`;
-
+  /* ⚠️ کارتِ «ورودی‌های دستیِ هزینه» از این صفحه **رفت** به ابتدای «اقتصاد و هزینه»
+     (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۵). دلیلِ ساختاری‌اش همان قاعده‌ی «تحلیل جدا از اقدام» است:
+     یک **فرم** بود وسطِ صفحه‌ی گزارشی، و هر سه ورودی‌اش (نرخِ دلار، هزینه‌ی تبلیغ،
+     هزینه‌ی قبل از ثبت) ورودیِ محاسبه‌ی **اقتصاد** اند نه فقط جذب.
+     `costInputsCard` در `economics.js` است و اکشنش همان `/acquisition/settings` ماند
+     تا لینکِ فرم و تاریخچه‌ی audit نشکند. */
   /* ── نرخِ هزینه‌ی هر الماس (ورودیِ محاسبه‌ی بالا) ── */
   const cpdCard = `<div class="card">
     ${cardHead('💎 هزینه‌ی هر الماس (ورودیِ محاسبه‌ی CPA)')}
@@ -162,16 +150,18 @@ export function acquisitionBody(url) {
 
   return `<div class="card"><h2 style="margin:0">📥 جذب و کانال‌ها — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">از کجا می‌آیند، چقدر هزینه دارند، و کدام کانال به پول می‌رسد.</p></div>
-    ${cpaCard}${settingsCard}${cpdCard}${chCard}${refCard}${campCard}${postsCards(campaigns, bot)}`;
+    ${cpaCard}${cpdCard}${chCard}${refCard}${campCard}${postsCards(campaigns, bot)}`;
 }
 
 /** ورودی‌های دستیِ هزینه (نرخِ دلار + هزینه‌ی تبلیغ per کاربر). */
 export function acquisitionSettings(body) {
   const camp = Math.max(0, Number(body.get('camp')) || 0);
   const rate = Math.max(0, parseInt(body.get('rate') || '0', 10) || 0);
-  if (camp > 1000 || rate > 100_000_000) throw new Error('مقدار نامعتبر است');
+  const pre  = Math.max(0, Number(body.get('pre')) || 0);
+  if (camp > 1000 || rate > 100_000_000 || pre > 1_000_000) throw new Error('مقدار نامعتبر است');
   setSetting(CAMPAIGN_CPA_KEY, String(camp));
   setSetting(USD_RATE_KEY, String(rate));
-  audit('acquisition.costs', '', `camp=${camp} rate=${rate}`);
+  setSetting(PRE_TRACK_COST_KEY, String(pre));
+  audit('acquisition.costs', '', `camp=${camp} rate=${rate} pre=${pre}`);
   return 'ورودی‌های هزینه ذخیره شد';
 }

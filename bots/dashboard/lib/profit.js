@@ -40,6 +40,10 @@ import { tehranDayStart, tehranDayStr, nowSec } from './util.js';
 /** ورودی‌های انسانی که سود بدونشان کامل نیست (کلیدهای جدولِ settings). */
 export const USD_RATE_KEY = 'usd_toman';
 export const CAMPAIGN_CPA_KEY = 'cpa_campaign_usd';
+/* هزینه‌ی دلاریِ مدل **قبل از** روشن‌شدنِ ثبتِ خودکار، خوانده‌شده از داشبوردِ خودِ
+ * OpenRouter و واردشده به‌صورتِ دستی. بدونِ این، «سودِ کلِ عمر» یعنی درآمدِ دو ماه
+ * منهای هزینه‌ی یک هفته؛ با این، همان شکاف با یک عددِ واقعی پر می‌شود. */
+export const PRE_TRACK_COST_KEY = 'llm_cost_pretrack_usd';
 
 /** اولین لحظه‌ای که هزینه‌ی مدل ثبت شده — مرزِ اعتبارِ هر عددِ تجمعی. */
 export function costTrackingSince(botKey) {
@@ -145,4 +149,34 @@ export function profitSinceTracking(botKey, { usdToman = 0, campaignUsdPerUser =
   const days = Math.max(1, Math.ceil((nowSec() - start) / 86400) + 1);
   const p = profitDaily(botKey, { days, usdToman, campaignUsdPerUser });
   return { ok: true, ...p, days };
+}
+
+/* 💰 سودِ **کلِ عمر** — درآمدِ روزِ اول تا امروز، منهای هزینه‌ی ثبت‌شده، منهای
+ * هزینه‌ی دستیِ دوره‌ی قبل از ثبت.
+ *
+ * ⚠️ عمداً از `profitDaily` جداست. آن یکی سریِ روزانه می‌سازد و روزهای بی‌هزینه را
+ * نمی‌تواند درست کند؛ این یکی می‌داند که کلِ آن دوره **یک عددِ دستی** دارد که به هیچ
+ * روزِ مشخصی نمی‌چسبد. مخلوط‌کردنشان یعنی یا هزینه‌ی دستی به یک روزِ دلبخواه بچسبد و
+ * نمودارِ روزانه دروغ بگوید، یا کلاً بیفتد و سود بیش‌برآورد شود. */
+export function profitLifetime(botKey, { usdToman = 0, preTrackUsd = 0 } = {}) {
+  let rev = 0, trackedUsd = 0;
+  for (const inst of instancesOf(botKey)) {
+    withDb(inst.file, (db) => {
+      const rw = revenueWhere(inst.bot, '0');
+      if (hasTable(db, rw.table)) {
+        rev += toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${rw.amountCol}),0) FROM ${rw.table} WHERE ${rw.where}`)) || 0;
+      }
+      if (hasTable(db, 'llm_usage')) {
+        trackedUsd += Number(scalar(db, 'SELECT COALESCE(SUM(cost_usd),0) FROM llm_usage')) || 0;
+      }
+    });
+  }
+  const pre = Math.max(0, Number(preTrackUsd) || 0);
+  const costUsd = trackedUsd + pre;
+  const costToman = usdToman ? Math.round(costUsd * usdToman) : 0;
+  return {
+    rev, trackedUsd, preTrackUsd: pre, costUsd, costToman,
+    net: rev - costToman, hasRate: !!usdToman,
+    costSince: costTrackingSince(botKey),
+  };
 }

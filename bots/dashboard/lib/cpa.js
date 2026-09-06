@@ -20,7 +20,7 @@
 //      همان کانال = CPA.
 //
 // امنیت: هیچ رشته‌ای از URL وارد SQL نمی‌شود؛ همه‌ی ورودی‌ها عددِ بازه‌اند و bound.
-import { withDb, hasTable, rows, scalar, instancesOf } from './bots.js';
+import { withDb, hasTable, rows, scalar, instancesOf, testUserClause } from './bots.js';
 
 /* سطل‌های هدیه‌ای که **هزینه‌ی جذبِ خودِ کاربر** حساب می‌شوند.
  * ⚠️ عمداً فقط `welcome`: پاداشِ `referral` هم هزینه‌ی جذب است، ولی جذبِ **کاربرِ
@@ -131,7 +131,7 @@ export function channelCosts(botKey, { sinceSec = 0, campaignUsdPerUser = 0 } = 
       }
       if (hasTable(db, 'payments')) {
         for (const p of rows(db, `SELECT user_id AS uid, created_at AS t,
-              COALESCE(original_amount, amount) AS amt FROM payments WHERE status='approved'`)) {
+              COALESCE(original_amount, amount) AS amt FROM payments WHERE status='approved'${testUserClause(inst.bot)}`)) {
           users.get(p.uid)?.credits.push({ t: p.t, kind: 'purchase', amt: Math.max(0, p.amt) });
         }
       }
@@ -171,7 +171,7 @@ export function channelCosts(botKey, { sinceSec = 0, campaignUsdPerUser = 0 } = 
           }
           if (hasTable(db, 'payments')) {
             for (const p of rows(db, `SELECT created_at AS t, COALESCE(original_amount, amount) AS amt
-                FROM payments WHERE status='approved' AND user_id=?`, [ref])) {
+                FROM payments WHERE status='approved'${testUserClause(inst.bot)} AND user_id=?`, [ref])) {
               credits.push({ t: p.t, kind: 'purchase', amt: Math.max(0, p.amt) });
             }
           }

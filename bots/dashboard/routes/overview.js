@@ -2,7 +2,7 @@
 // عملیاتی (صف رسید، حجم DB+WAL) + ویجتِ driftِ واژه‌نامه‌ی رویدادها.
 // ⚠️ این فایل دیگر خودش یک **صفحه** نیست: مسیرِ `/` به `/dash` ری‌دایرکت می‌شود و
 // `dashBody` این بلوک را مصرف می‌کند. یک نمای کلی، نه دو تا.
-import { instancesOf, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman, botByKey } from '../lib/bots.js';
+import { instancesOf, withDb, hasTable, scalar, rows, dbSizes, userCreatedExpr, moneyOf, revenueWhere, toToman, botByKey, testUserClause } from '../lib/bots.js';
 import { tehranDayStart, nowSec, fmt, esc } from '../lib/util.js';
 import { stat, cohortCount } from '../lib/html.js';
 import { EVENTS } from '../../../shared/analytics.js';
@@ -54,7 +54,7 @@ export function opsBlock(bot, { full = true } = {}) {
         wau: ev ? scalar(db, 'SELECT COUNT(DISTINCT user_id) c FROM events WHERE created_at >= ?', [week]) : null,
         revToday: pay ? rev(today) : null,
         revMonth: pay ? rev(month) : null,
-        revTotal: pay ? toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${m.amountCol}),0) s FROM ${m.table} WHERE status='${m.successStatus}'${m.testFilter ? ` AND ${m.testFilter}` : ''}`)) : null,
+        revTotal: pay ? toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${m.amountCol}),0) s FROM ${m.table} WHERE status='${m.successStatus}'${m.testFilter ? ` AND ${m.testFilter}` : ''}${testUserClause(inst.bot)}`)) : null,
         waitingReview: pay ? scalar(db, `SELECT COUNT(*) c FROM ${m.table} WHERE status='${m.pendingStatus}'`) : null,
       };
     });
