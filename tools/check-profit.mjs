@@ -79,7 +79,7 @@ db.close();
 process.chdir(root);
 const base = path.resolve(import.meta.dirname, '../bots/dashboard');
 process.env.TAROT_DB_DIR = dataDir;
-const { profitDaily, profitSinceTracking, costTrackingSince } = await import(`file://${base}/lib/profit.js`);
+const { profitDaily, costTrackingSince, profitFor, lifetimeDays, botStartSec } = await import(`file://${base}/lib/profit.js`);
 
 const RATE = 200_000; // نرخِ گردِ تست تا ریاضی با چشم قابلِ بررسی بماند
 
@@ -159,12 +159,49 @@ console.log('\n▶ ۸) پنجره‌ی بی‌هزینه سودِ ساختگی �
   ok(netCovered === 300_000, `سودِ پوشش‌دار = ۳۰۰٬۰۰۰، نه ۸۰۰٬۰۰۰ خوش‌بینانه (شد ${netCovered})`);
 }
 
-console.log('\n▶ ۹) خلاصه‌ی «از شروعِ ثبتِ هزینه» با محاسبه‌ی مستقیم یکی است');
+console.log('\n▶ ۹) نمای کلی و صفحه‌ی اقتصاد ساختاراً یک عدد می‌دهند');
 {
-  const s = profitSinceTracking('tarot', { usdToman: RATE });
-  ok(s.ok === true, 'وقتی هزینه ثبت شده، خلاصه ok می‌دهد');
-  const direct = profitDaily('tarot', { days: s.days, usdToman: RATE });
-  ok(s.totals.net === direct.totals.net, 'عددِ سرخطِ نمای کلی = همان محاسبه‌ی صفحه‌ی اقتصاد (تک‌منبع)');
+  /* 🐛 ایرادِ صریحِ مالک (۱۴۰۵/۰۶/۱۵): «توی نمای کلی یک عدد می‌بینم، توی اقتصاد و
+     هزینه یک عددِ دیگه». ریشه‌اش دو **فرمولِ** متفاوت بود، نه یک اختلافِ گرد کردن:
+     نمای کلی `profitSinceTracking` را صدا می‌زد (پنجره از «شروعِ ثبتِ هزینه»، و لُختِ
+     دوره‌ی قبل **اصلاً پاس داده نمی‌شد**) و صفحه‌ی اقتصاد `profitDaily` را با بازه‌ی
+     «کل عمر» و لُخت. دو تابع، دو جواب.
+
+     پس این بخش عمداً دو ادعای **متفاوت** دارد: یکی عددی، یکی ساختاری. ادعای عددی
+     به‌تنهایی کافی نیست — اگر فردا کسی دوباره در `dash.js` حسابِ محلی بنویسد که
+     امروز اتفاقی همان عدد را بدهد، ادعای عددی سبز می‌ماند. */
+  const life = profitFor('tarot', 'all');
+  const direct = profitDaily('tarot', {
+    days: lifetimeDays('tarot'), usdToman: life.rate,
+    campaignUsdPerUser: life.campUsd, preTrackUsd: life.preUsd,
+  });
+  ok(life.totals.net === direct.totals.net,
+    `profitFor('all') = محاسبه‌ی مستقیمِ کل عمر (${life.totals.net})`);
+
+  const { readFileSync } = await import('fs');
+  /* ⚠️ کامنت‌ها **قبل از** سنجش پاک می‌شوند. یک جهشِ واقعی این را نشان داد: جایگزینیِ
+     `'all'` با `'month'` اول به کامنتِ بالای همان خط خورد و ادعا سبز ماند، در حالی که
+     کد دست‌نخورده بود. ادعایی که کامنت را هم می‌بیند، عملاً مستندات را می‌سنجد نه کد. */
+  const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const dashSrc = strip(readFileSync(`${base}/routes/dash.js`, 'utf8'));
+  ok(/profitFor\(bot, 'all'\)/.test(dashSrc),
+    'نمای کلی دقیقاً همان profitFor را با همان بازه صدا می‌زند');
+  ok(!/profitSinceTracking/.test(dashSrc), 'و دیگر هیچ مسیرِ دومی برای محاسبه‌ی سود ندارد');
+  ok(!/costSince|شروعِ ثبتِ هزینه/.test(dashSrc),
+    'و مفهومِ «شروعِ ثبتِ هزینه» را به کاربر نشان نمی‌دهد (خواسته‌ی صریحِ مالک)');
+
+  const econNoComments = strip(readFileSync(`${base}/routes/economics.js`, 'utf8'));
+  ok(/profitFor\(bot, rk\)/.test(econNoComments),
+    'صفحه‌ی اقتصاد هم از همان تابع می‌خواند، فقط با بازه‌ی انتخابیِ کاربر');
+  /* «شروعِ ثبت» فقط جایی مجاز است که کاربر **ورودی** می‌دهد (باید بداند چه عددی وارد
+     کند). هرجای دیگر — برچسبِ یک عدد، سرتیترِ یک کارت، یا هشدار — همان چیزی است که
+     مالک گفت بی‌خیالش شویم. پس دامنه سنجیده می‌شود، نه صرفِ وجود. */
+  const inputsAt = econNoComments.indexOf('export function costInputsCard');
+  const outsideInputs = inputsAt < 0 ? econNoComments : econNoComments.slice(0, inputsAt);
+  ok(!/شروعِ ثبت/.test(outsideInputs),
+    'و «شروعِ ثبت» بیرون از فرمِ ورودی، برچسبِ هیچ عددی نیست');
+  ok(/شروعِ ثبت/.test(econNoComments.slice(Math.max(0, inputsAt))),
+    'ولی در خودِ فرمِ ورودی هست (کاربر باید بداند چه عددی وارد کند)');
 }
 
 console.log('\n▶ ۱۱) هزینه‌ی قبل از ثبت پخش می‌شود، نه کنار گذاشته');
@@ -172,20 +209,46 @@ console.log('\n▶ ۱۱) هزینه‌ی قبل از ثبت پخش می‌شود
   /* دیتای فیکسچر: ۵ روزِ اخیر هزینه‌ی ثبت‌شده دارند، ۵ روزِ قبلش فقط درآمد.
      با لُختِ $2 روی آن دوره، «کل عمر» باید **دقیقاً** هر دو را جمع بزند. */
   const PRE = 2;
-  const wide = profitDaily('tarot', { days: 30, usdToman: RATE, preTrackUsd: PRE });
-  const without = profitDaily('tarot', { days: 30, usdToman: RATE, preTrackUsd: 0 });
-  const delta = wide.totals.llmUsd - without.totals.llmUsd;
+  /* ⚠️ بازه عمداً **کلِ عمر** است، نه یک عددِ گرد مثل ۳۰ روز. نسخه‌ی اولِ همین چک
+     `days: 30` داشت و بعد از اینکه مرزِ «کل عمر» از «اولین درآمد» به «اولین کاربر»
+     منتقل شد، $۱٫۹۲ از $۲ را دید و قرمز شد. آن قرمز **درست** بود و باگ نبود: دوره‌ی
+     پخش از پنجره‌ی ۳۰روزه بیرون زده بود. ادعای معنادار این است که **کلِ عمر** کلِ
+     لُخت را می‌گیرد؛ ادعای «هر بازه‌ای کلش را می‌گیرد» اصلاً درست نیست. */
+  const LIFE = lifetimeDays('tarot');
+  const wide = profitDaily('tarot', { days: LIFE, usdToman: RATE, preTrackUsd: PRE });
+  const without = profitDaily('tarot', { days: LIFE, usdToman: RATE, preTrackUsd: 0 });
+  const delta = wide.totals.costUsd - without.totals.costUsd;
   ok(Math.abs(delta - PRE) < 1e-6,
     `کلِ لُختِ دستی دقیقاً یک‌بار وارد شد ($${delta.toFixed(4)} = $${PRE})`);
-  ok(wide.totals.net === without.totals.net - Math.round(PRE * RATE),
-    'سود دقیقاً به اندازه‌ی لُخت کم شد، نه بیشتر و نه کمتر');
+  /* ⚠️ تلورانس عمدی و کوچک است، و دلیلش یک تصمیمِ طراحی: تومانِ **هر روز** جدا گرد
+     می‌شود و جمع از همان‌ها ساخته می‌شود، نه از گردکردنِ جمعِ دلاری. یعنی جدولِ روزانه
+     دقیقاً به عددِ «هزینه‌ی کل» جمع می‌زند — که برای کاربری که دارد با ماشین‌حساب چک
+     می‌کند از یک اختلافِ چندریالیِ نامرئی مهم‌تر است. خطای انباشته حداکثر نصفِ تعدادِ
+     روزهاست. */
+  const expected = Math.round(PRE * RATE);
+  const drop = without.totals.net - wide.totals.net;
+  ok(Math.abs(drop - expected) <= wide.series.length,
+    `سود به اندازه‌ی لُخت کم شد (${drop} ≈ ${expected}، خطای گردکردنِ روزانه)`);
   // و روی روزهای قبل از شروعِ ثبت نشسته باشد، نه روی یک روزِ دلبخواه
   const startStr = new Date((costTrackingSince('tarot') + 12600) * 1000).toISOString().slice(0, 10);
   const before = wide.series.filter(r => r.d < startStr);
-  const spread = before.reduce((a, r) => a + r.llmUsd, 0);
+  const spread = before.reduce((a, r) => a + r.preUsd, 0);
   ok(Math.abs(spread - PRE) < 1e-6,
     `لُخت روی روزهای **قبل از** شروعِ ثبت پخش شد ($${spread.toFixed(4)})`);
+  // و در سطلِ خودش نشسته، نه قاطیِ هزینه‌ی ثبت‌شده — وگرنه کارتِ تفکیک نمی‌تواند
+  // این دو را از هم جدا نشان بدهد و همان «نصفِ داستان»ِ قبلی برمی‌گردد.
+  ok(Math.abs(wide.totals.preUsd - PRE) < 1e-6, 'لُخت در سطلِ preUsd است، نه داخلِ llmUsd');
+  ok(Math.abs(wide.totals.llmUsd - without.totals.llmUsd) < 1e-9,
+    'و هزینه‌ی ثبت‌شده دست‌نخورده ماند');
   ok(before.length > 1, `روی بیش از یک روز پخش شد (${before.length} روز)، نه همه روی یک روز`);
+
+  /* و طرفِ دیگرِ همان قاعده: بازه‌ی کوتاه **سهمِ خودش** را می‌گیرد، نه کلِ لُخت را.
+     اگر این نبود، «روزانه» و «هفتگی» یک هزینه‌ی نجومیِ ساختگی نشان می‌دادند. */
+  const week = profitDaily('tarot', { days: 7, usdToman: RATE, preTrackUsd: PRE });
+  ok(week.totals.preUsd < PRE,
+    `بازه‌ی کوتاه فقط سهمِ خودش را می‌گیرد ($${week.totals.preUsd.toFixed(4)} < $${PRE})`);
+  ok(botStartSec('tarot') !== null && botStartSec('tarot') <= costTrackingSince('tarot'),
+    'مرزِ «کل عمر» از اولین روزِ ربات است، نه از اولین روزِ ثبتِ هزینه');
 }
 
 console.log('\n▶ ۱۰) پرداختِ حساب‌های تستی از درآمد بیرون است، و هیچ مسیری جا نمی‌ماند');
@@ -265,6 +328,52 @@ console.log('\n▶ ۱۲) پرداختِ سرگردان: حسابداریِ سه 
     `سهمِ سرگردان در سریِ سود جدا گزارش می‌شود (${pr.totals.orphan})`);
   ok(pr.totals.rev - pr.totals.orphan === 500_000,
     `درآمدِ عادی دست‌نخورده ماند (${pr.totals.rev - pr.totals.orphan})`);
+}
+
+console.log('\n▶ ۱۳) اعدادِ کارتِ تفکیکِ هزینه واقعاً جمع می‌زنند');
+{
+  /* 🐛 خواسته‌ی صریحِ مالک: «من دستی حساب کردم و با عددِ پنل نمی‌خواند». پس صرفِ درست
+     بودنِ محاسبه کافی نیست؛ چیزی که **روی صفحه** است باید جمع بزند. یک گردکردنِ
+     ناهماهنگ (اجزا جدا گرد شوند ولی جمع از کلِ دلار ساخته شود) دقیقاً همان شکایت را
+     دوباره می‌سازد، و هیچ خطایی هم نمی‌دهد.
+
+     این بخش هم دیتا را می‌سنجد هم **HTMLِ رندرشده** را — چون خطا می‌تواند در هرکدام
+     باشد و ادعای یکی، دیگری را ثابت نمی‌کند. */
+  const { setSetting } = await import(`file://${base}/lib/platform.js`);
+  setSetting('usd_toman', String(RATE));
+  setSetting('llm_cost_pretrack_usd', '2');
+  const { economicsBody } = await import(`file://${base}/routes/economics.js`);
+
+  for (const rk of ['day', 'week', 'month', 'all']) {
+    const p = profitFor('tarot', rk);
+    const parts = p.totals.llmToman + p.totals.preToman + p.totals.adToman;
+    ok(parts === p.totals.costToman,
+      `[${rk}] اجزای تومانی دقیقاً به جمع می‌رسند (${parts} = ${p.totals.costToman})`);
+    ok(p.totals.net === p.totals.rev - p.totals.costToman,
+      `[${rk}] سود = درآمد − هزینه، بدونِ هیچ جمله‌ی پنهانی`);
+    const seriesCost = p.series.reduce((a, r) => a + r.costToman, 0);
+    ok(seriesCost === p.totals.costToman,
+      `[${rk}] جدولِ روزانه هم به همان جمع می‌رسد (${seriesCost})`);
+  }
+
+  // و همان چیزی که کاربر می‌بیند
+  const html = economicsBody(new URL('http://x/economics?bot=tarot&rEcon=all'));
+  const at = html.indexOf('هزینه‌ها به تفکیک');
+  ok(at > 0, 'کارتِ تفکیک رندر شد');
+  const toNum = (x) => Number(String(x).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[^\d-]/g, '')) || 0;
+  const trs = html.slice(at).split('<tr>').slice(1, 8);
+  const money = trs.map((tr) => {
+    const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m2) => m2[1]);
+    return { label: (tds[0] || '').replace(/<[^>]*>/g, ''), toman: toNum(tds[2] || '') };
+  });
+  const comps = money.filter((r) => /هزینه‌ی مدل|هزینه‌ی تبلیغ/.test(r.label));
+  const totalRow = money.find((r) => /جمعِ هزینه/.test(r.label));
+  ok(comps.length >= 2 && !!totalRow, `ردیف‌های هزینه و ردیفِ جمع در HTML پیدا شدند (${comps.length} جزء)`);
+  if (totalRow) {
+    const sum = comps.reduce((a, r) => a + r.toman, 0);
+    ok(sum === totalRow.toman,
+      `ستونِ تومانِ HTML واقعاً جمع می‌زند (${comps.map((r) => r.toman).join(' + ')} = ${totalRow.toman})`);
+  }
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
