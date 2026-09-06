@@ -175,6 +175,14 @@ def decide_receipt(verdict: dict, expected_toman: float) -> dict:
         return out("review", reason_code="amount_ambiguous", basis=basis)
 
     v = verdict.get("verdict")
+    # مبلغِ ناخوانا = تصمیمِ انسانی — عیناً همان گاردِ دو کپیِ JS (هر سه هم‌قرارداد
+    # می‌مانند). همه‌ی گاردهای مبلغ داخلِ `if has_paid and exp > 0` بودند، پس اگر مدل
+    # «approve» می‌داد ولی هیچ عددی در نمی‌آورد، پرداخت با صفر راستی‌آزماییِ مبلغ
+    # خودکار تأیید می‌شد. بند ۹ ریشه: گاردِ مبلغ باید هر دو جهت را ببیند — ردِ اشتباه
+    # و تأییدِ اشتباه. مبلغِ ناخوانا از واحدِ مبهم هم کم‌اطلاع‌تر است.
+    if v == "approve" and not has_paid and exp > 0:
+        return out("review", reason_code="amount_unreadable", basis=basis)
+
     if has_paid and exp > 0:
         # مدل اشتباه رد کرده در حالی که پول کافی رسیده → تأیید
         if paid >= exp and v == "reject" and rc == "amount_too_low":

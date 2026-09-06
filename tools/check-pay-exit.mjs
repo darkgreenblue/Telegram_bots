@@ -44,10 +44,21 @@ const guard = bodyOf('async function blockDuringOpenPay(ctx, intent) {', '\n}');
 ok(PAY_STATES.length > 0, `PAY_STATES از سورس خوانده شد (${PAY_STATES.join(', ')})`);
 ok(guard ? /PAY_STATES\.includes\(getState\(uid\)\)/.test(guard) : false,
   'گارد روی PAY_STATES تصمیم می‌گیرد');
-ok(guard ? /const pid = getSession\(uid\)\?\.paymentId/.test(guard) : false,
-  'و روی paymentId سشن');
-// مدلِ وفادار به همان دو شرط
-const blocked = (st) => PAY_STATES.includes(st.state) && !!st.session.paymentId;
+ok(guard ? /issuedInvoiceOf\(uid\)/.test(guard) : false,
+  'و روی **فاکتورِ صادرشده**، نه صرفاً وجودِ paymentId در سشن');
+ok(guard ? /dropUnissuedPay\(uid\)/.test(guard) : false,
+  'و اگر فاکتوری صادر نشده، استیتِ کهنه را پاک می‌کند و رد می‌شود');
+const issued = bodyOf('function issuedInvoiceOf(uid) {', '\n}');
+ok(issued ? /status === 'pending' && p\.step === 'receipt'/.test(issued) : false,
+  'تعریفِ «فاکتور» رکوردی است: pending + step=receipt');
+
+/* دو مدل، عمداً جدا:
+   `blockedOld` رفتارِ **تاریخی** است (استیت + وجودِ paymentId) و فقط برای بازتولیدِ
+   حلقه‌ی تیکتِ #TRT-8976388520 می‌ماند. `blockedNow` رفتارِ **امروز** است. یکی‌کردنشان
+   یعنی یا بازتولیدِ باگ را از دست بدهیم یا رفتارِ فعلی را اشتباه مدل کنیم. */
+const blockedOld = (st) => PAY_STATES.includes(st.state) && !!st.session.paymentId;
+const blockedNow = (st) => PAY_STATES.includes(st.state) && !!st.invoiceIssued;
+const blocked = blockedOld;
 
 /* ══ ۲) خودِ حلقه، اجراشده روی SQLite واقعی ══════════════════════════════ */
 console.log('\n  — 🔁 بازتولیدِ حلقه:');
@@ -358,6 +369,25 @@ ok(boot ? /if \(bootDone\) return;/.test(boot) : false,
   'گاردِ یک‌بار هست (launch بعد از خطا دوباره تلاش می‌کند و اینتروال نباید چند بار ثبت شود)');
 ok(/bot\.launch\(\{ dropPendingUpdates: true \}, onLaunched\)/.test(SRC),
   'قلاب به خودِ launch پاس داده شده');
+
+/* ⚠️ **همین قرارداد برای voice2text هم لازم است، و آن‌جا پولی‌تر است.**
+   `recoverOrphanFlows` اعتبارِ **کسرشده**ی فلوهای یتیم را برمی‌گرداند. روی `.then()`
+   دو خرابی در دو جهتِ مخالف می‌ساخت: در مسیرِ کرش (`uncaughtException` مستقیم
+   `process.exit(1)` می‌زند) هرگز اجرا نمی‌شد و اعتبار برنمی‌گشت؛ و در خاموشیِ عادی
+   پیش‌شرطِ خودِ تابع («هیچ پردازشی در جریان نیست») نقض می‌شد چون هندلرهای در جریان
+   هنوز می‌دوند ⇒ احتمالِ اعتبارِ دوبار.
+   ادعا این‌جاست چون همین فایل **خودِ telegraf را می‌دواند** و معناشناسیِ زمان‌بندی را
+   بالاتر اثبات کرده؛ گذاشتنش جای دیگر یعنی اثبات و ادعا از هم جدا بیفتند. */
+{
+  const v2t = readFileSync('bots/voice2text/index.js', 'utf8');
+  const code = v2t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/bot\.launch\(\{ dropPendingUpdates: true \}, onLaunched\)/.test(code),
+    'voice2text هم کارِ بوت را در قلابِ onLaunch می‌دهد، نه .then');
+  ok(!/\.then\(\(\) => \{[^}]*recoverOrphanFlows/.test(code),
+    'و ریفاندِ فلوهای یتیم دیگر روی .then آویزان نیست');
+  ok(/let bootDone = false;/.test(code) && /if \(bootDone\) return;/.test(code),
+    'و گاردِ یک‌بار دارد (launch بعد از خطا دوباره تلاش می‌کند)');
+}
 ok(!/bot\.launch\([\s\S]{0,80}\)\s*\n?\s*\.then\(/.test(SRC),
   'هیچ کارِ بوتی روی .then ی launch آویزان نیست');
 
@@ -365,6 +395,176 @@ ok(!/bot\.launch\([\s\S]{0,80}\)\s*\n?\s*\.then\(/.test(SRC),
 console.log('\n  — 🕰 سازگاری با دکمه‌های کهنه:');
 for (const a of ['pay_cancel', 'pay_back']) {
   ok(SRC.includes(`bot.action(/^${a}:`), `الگوی ${a} هنوز ثبت است (دکمه‌ی کهنه در چت خطا نمی‌دهد)`);
+}
+
+console.log('\n  — 🧾 فقط انصرافِ صریح فاکتور را می‌کشد:');
+{
+  /* 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۵ (فاکتور #۵۵۴، ۶۰٬۰۰۰ تومان): `pay_back` فاکتورِ **صادرشده**
+     را cancel کرد، بعد رسیدِ کاربر به هیچ فاکتوری نچسبید و بی‌صدا دور ریخته شد.
+     قاعده‌ی تثبیت‌شده: هیچ مسیری جز انصرافِ صریح نباید فاکتوری را که `step='receipt'`
+     دارد بکشد.
+
+     ⚠️ این چک **هر دو جهت** را می‌سنجد، و جهتِ دوم از خودِ نوشتنِ همین فیکس آمد: نسخه‌ی
+     اولش اشتباهاً روی `pay_exit` نشست، یعنی دکمه‌ی انصرافِ صریح هم گارد می‌گرفت و
+     انصراف **غیرممکن** می‌شد — دقیقاً همان حلقه‌ی بی‌پایانِ تیکتِ #TRT-8976388520 از
+     سمتِ مقابل. پس «گارد هست» به‌تنهایی کافی نیست؛ «گارد جای درستی هست» هم لازم است. */
+  const body = (name) => {
+    const at = SRC.indexOf(`bot.action(/^${name}:`);
+    if (at < 0) return '';
+    const next = SRC.indexOf('\nbot.action(', at + 10);
+    return SRC.slice(at, next < 0 ? SRC.length : next);
+  };
+  const back = body('pay_back');
+  const exit = body('pay_exit');
+  ok(back && exit, 'هر دو هندلر پیدا شدند');
+
+  ok(/const live = issuedInvoiceOf\(uid\)/.test(back),
+    'pay_back روی **فاکتورِ زنده‌ی سشن** تصمیم می‌گیرد، نه هر ردیفی که روی دکمه نوشته شده');
+  ok(/L\.errors\.openInvoice/.test(back), 'و به‌جای cancel پیامِ «یا تکمیل یا انصراف» می‌دهد');
+  ok(/pay_exit:\$\{live\.id\}/.test(back),
+    'دکمه‌ی انصراف به همان فاکتورِ **زنده** وصل است');
+  ok(/p\.step !== 'receipt'/.test(back),
+    'و ردیفِ صادرشده هرگز از این مسیر cancel نمی‌شود (فقط ردیفِ هنوز-بی‌بسته)');
+  ok(!/const live = issuedInvoiceOf/.test(exit),
+    'pay_exit این گارد را **ندارد** (انصرافِ صریح باید همیشه کار کند)');
+  ok(/setPaymentStatus\.run\('canceled'/.test(exit), 'pay_exit هنوز واقعاً cancel می‌کند');
+
+  /* ⚠️ **چرا ادعای «به همان فاکتور وصل است» به‌تنهایی دروغ بود.**
+     نسخه‌ی اولِ این بخش فقط `callback_data` را می‌خواند و سبز می‌شد. ولی تصمیمِ واقعی
+     داخلِ `pay_exit` گرفته می‌شود و آن عمداً `s.paymentId` را به عددِ روی دکمه **ترجیح
+     می‌دهد**. یعنی اگر گارد روی یک ردیفِ کهنه نشان داده می‌شد، دکمه‌اش در عمل فاکتورِ
+     زنده را می‌کشت — همان باگی که این PR قرار بود ببندد، از درِ پشتی.
+     پس این ادعا حالا **رفتاری** است: هر دو سرِ زنجیره با هم سنجیده می‌شوند. */
+  ok(/Number\(s\.paymentId\) \|\| parseInt\(ctx\.match\[1\], 10\)/.test(exit),
+    'pay_exit فاکتورِ سشن را به عددِ دکمه ترجیح می‌دهد (رفتارِ عمدیِ «قفل را بشکن»)');
+  ok(/pay_exit:\$\{live\.id\}/.test(back) && /const live = issuedInvoiceOf\(uid\)/.test(back),
+    '⇒ و چون گارد فقط روی فاکتورِ سشن فعال می‌شود، این دو هرگز به دو ردیفِ متفاوت اشاره نمی‌کنند');
+}
+
+console.log('\n  — 📸 رسید هیچ‌وقت بی‌صدا دور ریخته نمی‌شود:');
+{
+  const at = SRC.indexOf("bot.on('photo'");
+  const ph = at < 0 ? '' : SRC.slice(at, SRC.indexOf('\n});', at));
+  ok(ph, 'هندلرِ عکس پیدا شد');
+  ok(!/if \(!pend\) return;/.test(ph), 'returnِ خالیِ قدیمی (سیاه‌چاله) دیگر نیست');
+  ok(/receiptNoInvoice/.test(ph), 'وقتی هیچ فاکتوری پیدا نشد، به کاربر گفته می‌شود');
+  ok(/canceledReceiptPayment/.test(ph) && /revivePayment/.test(ph),
+    'فاکتورِ لغوشده‌ی تازه هم بازیابی و **احیا** می‌شود (وگرنه approve بعداً بی‌صدا شکست می‌خورد)');
+}
+
+console.log('\n  — 🧾 «فاکتور باز داری» فقط وقتی فاکتوری هست:');
+{
+  /* 🐛 باگی که مالک گرفت (۱۴۰۵/۰۶/۱۵): پیامِ «یه فاکتور شارژِ باز داری — مبلغ رو واریز
+     کن، رسید رو بفرست» وقتی می‌آمد که کاربر **هنوز بسته‌اش را انتخاب نکرده بود**. در آن
+     لحظه ردیف `amount=0, step='amount'` است: نه مبلغی هست که واریز شود، نه رسیدی که
+     برود. گارد روی *استیت* می‌نشست و `pay_amount` هم داخلِ PAY_STATES است.
+
+     این بخش هر سه حالت را روی SQLite واقعی و با SQLِ **برداشته‌شده از سورس** اجرا
+     می‌کند تا مدل نتواند از کد واگرا شود. */
+  const insert = sqlOf('insertPayment');
+  const claim = sqlOf('claimAmount');
+  const setSt = sqlOf('setPaymentStatus');
+  ok(!!(insert && claim && setSt), 'SQLهای لازم از سورس برداشته شدند');
+  if (insert && claim && setSt) {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending', amount INTEGER NOT NULL DEFAULT 0,
+      step TEXT NOT NULL DEFAULT 'amount', updated_at INTEGER NOT NULL DEFAULT 0);`);
+    const UID = 6149194760;
+    const pid = Number(db.prepare(insert).run(UID).lastInsertRowid);
+    const rowOf = (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+    // همان تعریفِ تابعِ سورس، ولی روی این دیتابیس
+    const issuedOf = (id) => {
+      const p = rowOf(id);
+      return (p && p.user_id === UID && p.status === 'pending' && p.step === 'receipt') ? p : null;
+    };
+
+    // ۱) کاربر روی صفحه‌ی بسته‌هاست: هیچ فاکتوری صادر نشده
+    ok(!issuedOf(pid), 'قبل از انتخابِ بسته: فاکتوری صادر نشده');
+    ok(!blockedNow({ state: 'pay_amount', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ گارد فعال **نمی‌شود** (باگِ مالک)');
+    ok(blockedOld({ state: 'pay_amount', session: { paymentId: pid } }),
+      '🐛 و با مدلِ قدیمی فعال **می‌شد** — یعنی این چک واقعاً باگ را می‌دید');
+
+    // ۲) بسته انتخاب شد → فاکتور صادر شد
+    ok(db.prepare(claim).run(30, pid).changes === 1, 'claimAmount فاکتور را صادر کرد');
+    ok(rowOf(pid).step === 'receipt', 'و رکورد به step=receipt رفت');
+    ok(blockedNow({ state: 'pay_receipt', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ حالا گارد فعال می‌شود (کارت‌به‌کارت)');
+
+    // ۳) ریلِ استارز: استیت عمداً روی pay_amount می‌ماند ولی رکورد صادر شده
+    ok(blockedNow({ state: 'pay_amount', invoiceIssued: !!issuedOf(pid) }),
+      '✔️ فاکتورِ استارز هم محافظت می‌شود، با اینکه استیت هنوز pay_amount است');
+
+    // ۴) بعد از لغو، دیگر فاکتوری نیست
+    db.prepare(setSt).run('canceled', pid);
+    ok(!blockedNow({ state: 'pay_receipt', invoiceIssued: !!issuedOf(pid) }),
+      'بعد از لغو، گارد کاربر را زندانی نمی‌کند');
+
+    // ۵) dropUnissuedPay فقط ردیفِ اثباتاً بی‌فاکتور را می‌کشد
+    const drop = bodyOf('function dropUnissuedPay(uid) {', '\n}');
+    /* ⚠️ ادعا **معکوس** شد (ساده‌سازیِ آگاهانه، بند ۹/۰). نسخه‌ی اولِ این تابع ردیفِ
+       `amount=0` را cancel می‌کرد و ادعا همان را پین می‌کرد. ولی آن cancel هم زائد بود
+       (`sweepDeadAmountRows` از قبل صاحبِ چرخه‌ی عمرِ این ردیف‌هاست) و هم مضر: ردیفِ
+       «canceled با مبلغِ صفر» اثرانگشتِ حلقه‌ی #TRT-8976388520 است، و ساختنش در مسیرِ
+       عادی آن سیگنالِ تشخیصی را برای همیشه بی‌معنا می‌کرد. حالا ادعا این است که این
+       تابع **هیچ ردیفی را دست نمی‌زند**. */
+    ok(!!drop, 'dropUnissuedPay پیدا شد');
+    ok(drop ? !/setPaymentStatus|db\.prepare|stmts\./.test(drop) : false,
+      'dropUnissuedPay هیچ ردیفِ دیتابیسی را دست نمی‌زند (فقط استیت)');
+    ok(/sweepDeadAmountRows/.test(SRC),
+      'و چرخه‌ی عمرِ ردیفِ رهاشده از قبل صاحب دارد: sweepDeadAmountRows');
+    ok(drop ? /setState\(uid, s\.readingId \? 'confirm_pay' : 'idle'\)/.test(drop) : false,
+      'و استیتِ کهنه را پاک می‌کند (وگرنه تایپِ بعدیِ کاربر «مبلغ نامعتبر» می‌گیرد)');
+  }
+}
+
+console.log('\n  — 🧭 nav:menu گاردِ کپی‌شده ندارد:');
+{
+  /* گاردِ کپی‌شده دیر یا زود از اصل عقب می‌افتد. اثباتِ زنده: وقتی `blockDuringOpenPay`
+     از `pay_cancel` به `pay_exit` رفت (فیکسِ حلقه)، کپیِ داخلِ `nav:menu` جا ماند و
+     همان حلقه را از مسیرِ «بازگشت به منو» زنده نگه داشت. */
+  const nav = bodyOf("bot.action('nav:menu'", '\n});');
+  ok(!!nav, 'هندلرِ nav:menu پیدا شد');
+  ok(nav ? /blockDuringOpenPay\(ctx\)/.test(nav) : false,
+    'nav:menu همان تک‌منبعِ گارد را صدا می‌زند');
+  ok(nav ? !/L\.errors\.openInvoice/.test(nav) : false,
+    'و پیامِ گارد را خودش دوباره نمی‌سازد');
+  ok(nav ? !/pay_cancel:/.test(nav) : false,
+    'و به pay_cancel وصل نیست (همان باگی که حلقه را می‌ساخت)');
+}
+
+console.log('\n  — ♻️ سه رگرسیونی که خودِ همین PR نزدیک بود بسازد:');
+{
+  /* هر سه از یک ریشه‌اند: یک فیکس روی مسیرِ فارسی نوشته شد و اثرش روی مسیرهای دیگر
+     (منوی کهنه، ریلِ استارز) دیده نشد. ادعاها این‌جا هستند تا اگر روزی گاردها
+     ساده‌سازی شوند، همان اثرِ جانبی دوباره بی‌صدا برنگردد. */
+  const pkg = (() => {
+    const at = SRC.indexOf('bot.action(/^pkg:');
+    const next = SRC.indexOf('\nbot.action(', at + 10);
+    return at < 0 ? '' : SRC.slice(at, next < 0 ? SRC.length : next);
+  })();
+  ok(!!pkg, 'هندلرِ pkg پیدا شد');
+  ok(!/if \(getState\(uid\) !== 'pay_amount'\) return;/.test(pkg),
+    'تپ روی بسته دیگر به‌خاطرِ استیتِ پاک‌شده بی‌صدا نمی‌میرد');
+  ok(!/if \(!s\.paymentId\) return ctx\.reply\(L\.errors\.stateLost/.test(pkg),
+    'و پیامِ بی‌ربطِ «حالتت گم شد» هم نمی‌دهد');
+  ok(/openPaymentRow\(uid\)/.test(pkg) && /setState\(uid, 'pay_amount'\)/.test(pkg),
+    'به‌جایش ردیفِ تازه باز می‌کند و تپِ کاربر کامل می‌شود (نیت روشن است)');
+
+  const photo = (() => {
+    const at = SRC.indexOf("bot.on('photo'");
+    return at < 0 ? '' : SRC.slice(at, SRC.indexOf('\n});', at));
+  })();
+  ok(/if \(starsRail\) return;/.test(photo),
+    'ریلِ استارز اصلاً واردِ مسیرِ رسید نمی‌شود (نه پیامِ بی‌ربط، نه احیای فاکتور)');
+  /* ⚠️ کامنت‌ها پاک می‌شوند وگرنه خودِ کامنتِ توضیحی (که `receiptNoInvoice` را نام
+     می‌برد) قبل از گارد می‌افتد و ادعای «ترتیب» را الکی قرمز می‌کند. */
+  const photoCode = photo.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const starsAt = photoCode.indexOf('if (starsRail) return;');
+  const receiptAt = photoCode.indexOf('receiptNoInvoice');
+  ok(starsAt >= 0 && receiptAt > starsAt,
+    'و این گارد **قبل از** هر منطقِ رسیدی است، نه بعدش');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} راهِ خروجِ پرداخت: ${pass} پاس، ${fail} خطا\n`);

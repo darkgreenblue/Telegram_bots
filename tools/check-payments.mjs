@@ -34,6 +34,7 @@ db.exec(`
   CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, discount_code_id INTEGER,
+    discount_toman INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
     adjust_note TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
@@ -83,10 +84,12 @@ console.log('\n▶ ریاضیِ تخفیفِ فال: اعتبارِ داده‌�
   const price = 30_000, payAmount = 24_000;   // ۲۰٪ تخفیف
   const p = newPayment();
   claim(price, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, payAmount, p);
-  const row = db.prepare('SELECT amount, original_amount FROM payments WHERE id=?').get(p);
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, payAmount, price - payAmount, p);
+  const row = db.prepare('SELECT amount, original_amount, discount_toman FROM payments WHERE id=?').get(p);
   ok(row.original_amount === price, 'original_amount = قیمتِ کاملِ فال');
   ok(row.amount === payAmount, 'amount = مبلغی که کاربر واقعاً می‌پردازد');
+  ok(row.discount_toman === price - payAmount,
+    `مبلغِ تخفیف در ستونِ خودش ثبت شد (${row.discount_toman}) — نه بازسازی از دو ستونِ ناهم‌واحد`);
   const credited = row.original_amount || row.amount;   // همان چیزی که approvePayment می‌کند
   ok(credited === price, 'اعتبارِ لحظه‌ی تأیید دقیقاً کفافِ فال را می‌دهد (فال باز می‌شود)');
   setStatus('canceled', p);
@@ -96,7 +99,7 @@ console.log('\n▶ باگِ واقعی: فاکتورِ رهاشده نباید �
 {
   const p = newPayment();
   claim(100_000, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, 80_000, p);   // کد روی یک فاکتور نشست
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, 80_000, 0, p);   // کد روی یک فاکتور نشست
   ok(held(0) === 0, 'فاکتورِ pendingِ رهاشده کد را نگه نمی‌دارد');
   const p2 = newPayment();
   claim(30_000, p2);
@@ -109,7 +112,7 @@ console.log('\n▶ ولی رسیدِ در انتظارِ تأیید باید ک�
 {
   const p = newPayment();
   claim(50_000, p);
-  db.prepare(S.setPaymentDiscount).run(CODE_ID, 40_000, p);
+  db.prepare(S.setPaymentDiscount).run(CODE_ID, 40_000, 0, p);
   setStatus('waiting_review', p);
   const p2 = newPayment();
   ok(held(p2) === 1, 'کد روی رسیدِ منتظرِ تأیید قفل است');
@@ -225,6 +228,161 @@ console.log('\n▶ کدِ غیرفعال اصلاً پیدا نمی‌شود (ge
   db.prepare("UPDATE discount_codes SET is_active=0 WHERE id=?").run(CODE_ID);
   ok(!db.prepare(S.getDiscountCode).get('T50X'), 'کدِ غیرفعال برنمی‌گردد');
   db.prepare("UPDATE discount_codes SET is_active=1 WHERE id=?").run(CODE_ID);
+}
+
+
+/* ═══ 💥 پایه‌ی تخفیف باید **پول** باشد، نه تعدادِ الماس ═══════════════════
+ *
+ * 🐛 باگِ واقعی و شدید (۱۴۰۵/۰۶/۱۵). ترتیبِ دو UPDATE در دنیای الماس این است:
+ *   claimAmount        → amount = 30 (تعدادِ الماس)، step='receipt'
+ *   setPaymentPackage  → original_amount = COALESCE(original_amount, amount) = 30
+ *                        amount = 60000 (قیمتِ واقعی)
+ * پس `original_amount` **الماس** است و `amount` **تومان**. `applyDiscount` پایه را
+ * `p.original_amount || p.amount` می‌گرفت، یعنی ۳۰ به‌جای ۶۰٬۰۰۰:
+ *   • تخفیفِ ۲۰٪ ⇒ فاکتور ۲۴ تومان، ولی الماسِ کامل داده می‌شد
+ *   • `max_discount_amount` (تومانی) روی عددِ الماسی هرگز نمی‌بست
+ *   • کدِ ۱۰۰٪ ⇒ تأییدِ خودکار بدونِ رسید
+ * ادعاها عمداً با **SQLِ خوانده‌شده از خودِ index.js** اجرا می‌شوند تا اگر روزی ترتیبِ
+ * این دو UPDATE عوض شود، همین‌جا قرمز شود.
+ */
+console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
+{
+  const claim = sqlOf('claimAmount');
+  const setPkg = sqlOf('setPaymentPackage');
+  const setDisc = sqlOf('setPaymentDiscount');
+  ok(!!(claim && setPkg && setDisc), 'SQLهای مسیر از سورس برداشته شدند');
+
+  const d2 = new Database(':memory:');
+  d2.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
+    amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, pkg TEXT,
+    discount_code_id INTEGER, discount_toman INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0);`);
+  const pid = Number(d2.prepare("INSERT INTO payments (user_id, amount, step) VALUES (7, 0, 'amount')").run().lastInsertRowid);
+  d2.prepare(claim).run(30, pid);              // ۳۰ الماس
+  d2.prepare(setPkg).run('gold', 60000, pid);  // قیمتِ واقعی
+  const row = d2.prepare('SELECT * FROM payments WHERE id=?').get(pid);
+  ok(row.original_amount === 30 && row.amount === 60000,
+    `بعد از انتخابِ بسته: original_amount=${row.original_amount} (الماس)، amount=${row.amount} (تومان)`);
+  ok(row.original_amount !== row.amount,
+    '⇒ پس این دو ستون **هم‌واحد نیستند** و یکی‌گرفتنشان باگِ واحد می‌سازد');
+
+  // پایه‌ی غلطِ قدیمی، و آنچه می‌ساخت
+  const disc = (base, pct, cap) => { let d = Math.round(base * pct / 100); if (cap != null && d > cap) d = cap; return Math.max(0, base - d); };
+  const oldBase = row.original_amount || row.amount;
+  ok(disc(oldBase, 20, 50000) === 24,
+    `🐛 با پایه‌ی قدیمی، تخفیفِ ۲۰٪ فاکتورِ ۶۰٬۰۰۰ را ${disc(oldBase, 20, 50000)} تومان می‌کرد`);
+  ok(disc(oldBase, 100, null) === 0,
+    '🐛 و کدِ ۱۰۰٪ به تأییدِ خودکارِ بدونِ رسید می‌رسید');
+
+  // و پایه‌ی درست
+  const src = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const packs = [...src.matchAll(/\{ key: '([a-z]+)',[^}]*coins: ([\d_]+),\s*toman: ([\d_]+)/g)]
+    .map((m) => ({ key: m[1], coins: Number(m[2].replace(/_/g, '')), toman: Number(m[3].replace(/_/g, '')) }));
+  ok(packs.length >= 2, `کاتالوگِ بسته‌ها از سورس خوانده شد (${packs.map((p) => p.key).join(', ')})`);
+  const gold = packs.find((p) => p.toman === 60000) || packs[packs.length - 1];
+  ok(disc(gold.toman, 20, 50000) === Math.round(gold.toman * 0.8),
+    `✅ با پایه‌ی قیمتِ بسته، ۲۰٪ ⇒ ${disc(gold.toman, 20, 50000)} تومان`);
+
+  // و اینکه کد واقعاً همین را می‌کند (ساختاری، نه فقط ریاضی)
+  const applyBody = (() => {
+    const at = src.indexOf('async function applyDiscount(');
+    const body = at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+    // ⚠️ کامنت‌ها پاک می‌شوند: خودِ کامنتِ توضیحی نامِ `packOf(p)` را می‌برد (تا بگوید
+    // چرا استفاده **نمی‌شود**) و ادعای «به کاتالوگ وابسته نیست» را الکی قرمز می‌کرد.
+    return body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  })();
+  /* ⚠️ ادعا عمداً روی **سادگی** هم می‌نشیند، نه فقط درستی: پایه باید مستقیم از رکورد
+     بیاید. نسخه‌ی اولِ فیکس آن را از کاتالوگ می‌گرفت (`packOf(p).toman`) و یک سوراخ
+     داشت — کلیدِ بسته‌ای که از کاتالوگ برداشته شود ⇒ `packOf` نال ⇒ برگشت به
+     `original_amount` ⇒ **همان باگِ الماس/تومان، بی‌صدا**. `p.amount` آن سوراخ را ندارد. */
+  ok(/const base = p\.amount;/.test(applyBody),
+    'applyDiscount پایه را مستقیم از رکورد می‌گیرد (بدونِ وابستگی به کاتالوگ)');
+  ok(!/packOf\(p\)/.test(applyBody),
+    'و به کاتالوگ وابسته نیست (کلیدِ حذف‌شده نباید باگ را برگرداند)');
+  ok(!/validateDiscount\(codeText, uid, p\.original_amount \|\| p\.amount/.test(applyBody),
+    'و دیگر original_amount را به‌عنوان پایه نمی‌دهد');
+  ok(/if \(p\.discount_code_id\)/.test(applyBody),
+    'و یک فاکتور بیش از یک کد نمی‌گیرد (ضدِ انباشتِ تخفیف)');
+
+  // دفترِ تخفیف هم تومانی ثبت شود
+  const approveBody = (() => {
+    const at = src.indexOf('function approvePayment(');
+    return at < 0 ? '' : src.slice(at, src.indexOf('\n}', at));
+  })();
+  ok(/p\.discount_toman/.test(approveBody),
+    'مبلغِ دفترِ تخفیف از ستونِ اختصاصیِ خودش خوانده می‌شود، نه بازسازی از original_amount');
+  const src2 = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  ok(/ALTER TABLE payments ADD COLUMN discount_toman INTEGER NOT NULL DEFAULT 0/.test(src2),
+    'و ستونش افزایشی است با DEFAULT (ردیف‌های قدیمی معتبر می‌مانند — بند ۲ج/۱)');
+  ok(/setPaymentDiscount\.run\(v\.dc\.id, v\.finalAmount, Math\.max\(0, base - v\.finalAmount\), p\.id\)/.test(applyBody),
+    'و لحظه‌ی اعمال نوشته می‌شود، جایی که پایه واقعاً در دسترس است');
+  d2.close();
+}
+
+
+/* ═══ 🔁 پرداختِ تأییدشده با رسیدِ دوم زنده نمی‌شود ═══════════════════════
+ *
+ * 🐛 `setPaymentReceipt` تنها گذارِ وضعیت بود که **هیچ گاردی روی status نداشت** و
+ * بی‌قید `waiting_review` می‌نوشت. یعنی یک پرداختِ `approved` به صف برمی‌گشت، ادمین
+ * دوباره تأییدش می‌کرد، و **دو بار اعتبار** به یک پرداخت می‌رسید.
+ *
+ * مسیرش فرضی نیست: `sendReceiptToAdmin` بعد از چند `await` (ارسال به هر ادمین) و در
+ * مسیرِ داوری بعد از یک فراخوانیِ LLM این خط را می‌زند. کاربری که آلبومِ دو عکسی
+ * بفرستد، عکسِ دوم `paymentId` را قبل از پاک‌شدنِ استیت برمی‌دارد و بعد از تأییدِ
+ * عکسِ اول دقیقاً همان‌جا می‌رسد.
+ */
+console.log('\n▶ رسیدِ دوم پرداختِ تأییدشده را زنده نمی‌کند');
+{
+  const setRcpt = sqlOf('setPaymentReceipt');
+  const setSt = sqlOf('setPaymentStatus');
+  ok(!!(setRcpt && setSt), 'SQLها از سورس برداشته شدند');
+  if (setRcpt && setSt) {
+    const d3 = new Database(':memory:');
+    d3.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending', amount INTEGER NOT NULL DEFAULT 0,
+      receipt_file_id TEXT, admin_message_id INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);`);
+    const mk = (st) => Number(d3.prepare("INSERT INTO payments (user_id, amount, status) VALUES (9, 60000, ?)").run(st).lastInsertRowid);
+    const statusOf = (id) => d3.prepare('SELECT status FROM payments WHERE id=?').get(id).status;
+
+    // مسیرِ عادی هنوز کار می‌کند
+    const live = mk('pending');
+    ok(d3.prepare(setRcpt).run('f1', 11, 'waiting_review', live).changes === 1,
+      'رسید روی پرداختِ زنده مثل قبل می‌نشیند');
+    ok(statusOf(live) === 'waiting_review', 'و وضعیت به بازبینی می‌رود');
+
+    // رسیدِ بهترِ دوم وقتی هنوز در صف است، هنوز مجاز است
+    ok(d3.prepare(setRcpt).run('f2', 12, 'waiting_review', live).changes === 1,
+      'رسیدِ دومِ همان پرداختِ در صف هم می‌نشیند (کاربر عکسِ واضح‌تر می‌فرستد)');
+
+    // و سه وضعیتِ تعیین‌تکلیف‌شده **زنده نمی‌شوند**
+    for (const dead of ['approved', 'rejected', 'canceled']) {
+      const id = mk(dead);
+      const ch = d3.prepare(setRcpt).run('fx', 99, 'waiting_review', id).changes;
+      ok(ch === 0 && statusOf(id) === dead,
+        `پرداختِ «${dead}» با رسیدِ تازه به صف برنمی‌گردد (changes=${ch})`);
+    }
+    d3.close();
+  }
+
+  // و گاردِ زودهنگام که فراخوانیِ پولیِ LLM را هدر نمی‌دهد
+  const src3 = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const proc = (() => {
+    const at = src3.indexOf('async function processReceipt(');
+    const body = at < 0 ? '' : src3.slice(at, at + 2500);
+    return body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  })();
+  ok(/RECEIPT_LIVE_STATES\.includes\(p\.status\)/.test(proc),
+    'processReceipt پرداختِ تعیین‌تکلیف‌شده را زودهنگام رد می‌کند');
+  const guardAt = proc.indexOf('RECEIPT_LIVE_STATES');
+  const replyAt = proc.indexOf('receiptSent');
+  ok(guardAt >= 0 && replyAt > guardAt,
+    'و این گارد **قبل از** پیامِ «رسیدت رسید» و قبل از کارِ پرهزینه است');
+  ok(/receiptAlreadyDone/.test(proc), 'و کاربر بی‌جواب نمی‌ماند');
+  for (const loc of ['fa', 'ru', 'es', 'pt']) {
+    const ls = readFileSync(path.resolve(`bots/tarot/locales/${loc}.js`), 'utf8');
+    ok(/receiptAlreadyDone:/.test(ls), `پیامش در locale «${loc}» هست`);
+  }
 }
 
 db.close();

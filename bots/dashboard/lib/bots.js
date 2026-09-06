@@ -42,6 +42,10 @@ export const BOTS = [
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
     receiptQueue: true,
+    // ربات اکشنِ اعتباریِ صف را **واقعاً اجرا می‌کند** (`credit` / `credit_paid`).
+    // ⚠️ این با `receiptQueue` یکی نیست: voice2text صفِ اکشن دارد ولی sweepش فقط
+    // approve/reject را می‌شناسد و هر اکشنِ دیگری را **بی‌صدا done** می‌کند.
+    creditQueue: true,
     /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
      *
      * ⚠️ عددی که در `users.balance` و `payments.original_amount` نشسته یک **فرمتِ
@@ -154,6 +158,15 @@ export function instances() {
 /* ---- helperهای پروفایل: هر route به‌جای مقدار hardcode این‌ها را صدا می‌زند ---- */
 export const abSupported = (bot) => !!botByKey(bot)?.abSupport;
 export const receiptQueueSupported = (bot) => !!botByKey(bot)?.receiptQueue;
+/* 💸 آیا این ربات اکشنِ **اعتباری** صف را اجرا می‌کند؟
+ *
+ * 🐛 چرا لازم شد (تأییدشده روی سورس، ۱۴۰۵/۰۶/۱۵): sweepِ voice2text فقط `approve` و
+ * `reject` را می‌شناسد و بعدِ `if/else` بی‌قید `markActionDone` می‌زند. یعنی اگر
+ * داشبورد برایش `credit`/`credit_paid` صف کند، ردیف **بی‌صدا done** می‌شود، کاربر هیچ
+ * اعتباری نمی‌گیرد، و ردیفِ پرداختِ سرگردان در داشبورد «حل‌شده» علامت می‌خورد. یعنی
+ * پول در سکوت ناپدید می‌شود — دقیقاً همان چیزی که بند ۹ ریشه ممنوع می‌کند.
+ * پس داشبورد باید **قبل از** صف‌کردن بداند ربات آن اکشن را می‌فهمد یا نه. */
+export const creditQueueSupported = (bot) => !!botByKey(bot)?.creditQueue;
 /* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی/ریالی است و همه‌چیز دقیقاً مثل قبل
  * می‌ماند — پس voice2text و tabir-khab بیت‌به‌بیت بدونِ تغییر رفتار می‌کنند. */
 export const coinOf = (bot) => {

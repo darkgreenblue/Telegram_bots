@@ -38,6 +38,11 @@ const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
 const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
 const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
 const MIN_RECHARGE = 50_000;  // تومان
+/* سقفِ بالا — عمداً خیلی بالاتر از هر شارژِ واقعی، چون هدفش رد کردنِ کاربرِ عادی نیست.
+ * بند ۹ ریشه: «برای هر ورودی کاربر سقف بگذار… بالاتر از الگوی مصرف واقعی». بدونِ سقف،
+ * ورودیِ آزادِ مبلغ هر عددی را می‌پذیرفت و هر باگِ دیگری در مسیرِ تخفیف/اعتبار به همان
+ * نسبت بزرگ می‌شد (نمونه‌ی واقعی: کدِ «۱۰۰٪ تا سقفِ X» که اعتبارِ بی‌سقف می‌داد). */
+const MAX_RECHARGE = 50_000_000;  // تومان
 const WELCOME_GIFT = 10_000;  // تومان
 const RECHARGE_PRESETS = [50_000, 100_000, 200_000, 500_000]; // دکمه‌های مبلغ پیش‌فرض شارژ
 
@@ -1377,6 +1382,21 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   // داکیومنت غیرصوتی → ورودی نامعتبر، منوی اصلی نمایش داده شود
   if (ctx.message.document && !isAudioDocument(ctx.message.document)) {
     upsertUser(userId, ctx.from.first_name, ctx.from.username);
+    /* ⚠️ مگر اینکه فیشِ واریز باشد که **به‌صورت فایل** فرستاده شده.
+       تلگرام روی دسکتاپ خیلی راحت عکس را «به‌عنوان فایل» می‌فرستد، و آن‌وقت این پیام
+       به هندلرِ ویس می‌آید نه به هندلرِ عکس. تا امروز فقط منوی اصلی می‌گرفت: کاربری که
+       پول واریز کرده بود، فیشش را می‌فرستاد و **هیچ توضیحی** نمی‌گرفت.
+       گاردِ حافظه‌ای (`rstate`) بالاتر این حالت را می‌گیرد، ولی `userStates` در حافظه
+       است و با هر ری‌استارت پاک می‌شود — دقیقاً همان لحظه‌ای که کاربر سرگردان است. پس
+       اینجا از **دیتابیس** می‌پرسیم، نه از حافظه. */
+    const pend = stmts.pendingReceiptPayment.get(userId);
+    if (pend) {
+      await ctx.reply(
+        '📸 این فایل به‌عنوان **عکس** فرستاده نشده، برای همین نتونستم به شارژت وصلش کنم.\n\n' +
+        'لطفاً همون تصویرِ فیش رو دوباره و این بار **به‌صورت عکس** بفرست (نه فایل).',
+        { parse_mode: 'Markdown', ...payCancelKb(pend.id) });
+      return;
+    }
     await sendMainMenu(ctx);
     return;
   }
@@ -1538,7 +1558,7 @@ bot.on('photo', async (ctx) => {
 
   const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   const payment = stmts.getPayment.get(paymentId);
-  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+  if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
 
   await processReceipt(ctx, userId, paymentId, fileId, null, recovered);
 });
@@ -1668,9 +1688,26 @@ const rejectPaymentAuto = db.transaction((paymentId) => {
 //   reject   → رد + پیام با دلیل (مگر «اصلاً رسید نیست» که فقط راهنمایی و پرداخت باز می‌ماند)
 //   review   → مسیرِ قدیمیِ sendReceiptToAdmin (تصمیمِ انسانی)
 // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → همیشه review (بدونِ خرجِ ایجنت). fail-safe: هر خطا → review.
+/* 🔇 پرداختی که دیگر `pending` نیست: **هرگز بی‌صدا**.
+ *
+ * 🐛 این شرط در چهار نقطه‌ی مسیرِ پول تکرار شده بود و هر چهار تا `return` خالی داشتند:
+ * ورودیِ `processReceipt`، رسیدِ عکسی، رسیدِ متنی، و واردکردنِ کدِ تخفیف. یعنی کاربری
+ * که پول داده و پرداختش تعیین‌تکلیف شده (تأیید/رد/لغو) هر کاری می‌کرد **هیچ جوابی**
+ * نمی‌گرفت — نه خطایی، نه لاگی، نه ردی. بند ۸ ریشه این را ممنوع می‌کند.
+ *
+ * یک helper به‌جای چهار بلوکِ درون‌خطی: متنِ پیام تک‌منبع می‌ماند و نقطه‌ی پنجمی که
+ * فردا اضافه شود هم همین را صدا می‌زند، نه یک نسخه‌ی کمی متفاوت. */
+async function payNotOpen(ctx, userId, payment) {
+  userStates.delete(userId);
+  const msg = payment && payment.status !== 'pending'
+    ? '🙏 این پرداخت از قبل بررسی شده.\n\nاگه فکر می‌کنی چیزی درست نیست، به پشتیبانی پیام بده.'
+    : '🙏 این به هیچ شارژِ بازی وصل نشد.\n\nاگه واریز کردی، از منوی شارژ دوباره شروع کن و همون‌جا فیش رو بفرست.';
+  await ctx.reply(msg).catch(() => {});
+}
+
 async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, recovered) {
   const payment = stmts.getPayment.get(paymentId);
-  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+  if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
   track(userId, 'receipt_submitted', { payment_id: paymentId });
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
 
@@ -1818,6 +1855,13 @@ setInterval(async () => {
       try {
         if (act.action === 'approve') { const r = approvePaymentDb(act.payment_id); if (r) await notifyApproved(r.payment, r.creditAmount); }
         else if (act.action === 'reject') { const r = rejectPaymentDb(act.payment_id); if (r) await notifyRejected(r.payment); }
+        /* ⚠️ اکشنی که این ربات نمی‌شناسد **بی‌صدا** done نشود. رفتار عمداً عوض نشده
+           (ردیف مثل قبل done می‌شود تا حلقه نچرخد)، ولی یک خطِ قابل‌grep می‌گذارد.
+           چرا لازم شد: داشبورد اکشن‌های اعتباری (`credit`, `credit_paid`) را برای
+           ربات‌هایی صف می‌کند که آن‌ها را اجرا می‌کنند؛ اگر روزی یکی این‌جا بیفتد،
+           کاربر پول داده و هیچ اعتباری نمی‌گیرد و هیچ ردی هم نمی‌ماند. حالا می‌ماند.
+           گاردِ اصلی سمتِ داشبورد است (`creditQueueSupported`)؛ این لایه‌ی دوم است. */
+        else logErr(`❌ ADMIN_ACTION_UNKNOWN id=${act.id} action=${act.action} — این ربات این اکشن را اجرا نمی‌کند`);
       } catch (e) { logErr('admin_action exec:', act.id, e.message); }
       stmts.markActionDone.run(act.id); // چه اجرا شده چه (رسید دیگر waiting_review نبوده) → done تا دوباره پردازش نشود
     }
@@ -1910,13 +1954,23 @@ bot.on('text', async (ctx) => {
         payCancelKb(state.paymentId));
       return;
     }
+    // سقفِ بالا: پیامش عمداً مودبانه و راهنماست، نه اتهام — کاربرِ عادی هرگز به این‌جا
+    // نمی‌رسد و کسی که می‌رسد احتمالاً اشتباهِ تایپی کرده (چند صفرِ اضافه).
+    if (amount > MAX_RECHARGE) {
+      await ctx.reply(
+        `❌ این مبلغ خیلی بزرگ است. شاید چند صفر اضافه تایپ شده؟\n\n` +
+        `حداکثر شارژ در هر بار ${MAX_RECHARGE.toLocaleString('fa-IR')} تومان است. ` +
+        `اگر واقعاً بیشتر لازم داری، چند بار شارژ کن یا به پشتیبانی پیام بده.`,
+        payCancelKb(state.paymentId));
+      return;
+    }
     await applyRechargeAmount(ctx, userId, state.paymentId, amount);
     return;
   }
 
   if (state.step === 'waiting_discount_code') {
     const payment = stmts.getPayment.get(state.paymentId);
-    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
     const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount, ctx.from.username);
     if (!result.ok) {
       await ctx.reply(result.err + '\nدوباره امتحان کن:', payCancelKb(state.paymentId));
@@ -1925,8 +1979,20 @@ bot.on('text', async (ctx) => {
     stmts.setPaymentDiscount.run(result.dc.id, payment.amount, result.finalAmount, state.paymentId);
     userStates.set(userId, { step: 'waiting_receipt', paymentId: state.paymentId, invoiceMsgId: state.invoiceMsgId, discountCodeId: result.dc.id });
 
-    // Auto-approve فقط برای تخفیف واقعیِ ۱۰۰٪ روی مبلغ مثبت — گارد ضد credit(NULL)/credit(0)
-    if ((result.dc.discount_percent === 100 || result.finalAmount === 0) && payment.amount > 0) {
+    /* Auto-approve **فقط** وقتی فاکتور واقعاً صفر شده.
+     *
+     * 🐛 شرطِ قبلی `(discount_percent === 100 || finalAmount === 0)` بود و آن `||`
+     * یک اعتبارِ رایگانِ بی‌سقف می‌ساخت: کدِ «۱۰۰٪ **تا سقفِ** ۵۰٬۰۰۰» (چیزی که هر
+     * ادمینی طبیعتاً می‌سازد و فرمِ ادمین هم می‌پذیردش) درصدش ۱۰۰ است ولی
+     * `max_discount_amount` تخفیفِ واقعی را می‌بُرد. پس روی شارژِ ۵۰۰٬۰۰۰ تومانی
+     * `finalAmount = 450,000` می‌شد — یعنی کاربر ۴۵۰ هزار بدهکار بود — و این شاخه
+     * باز هم فعال می‌شد و **کلِ ۵۰۰ هزار را رایگان** به کیفش می‌ریخت. با مبلغِ
+     * بزرگ‌تر، رقم بزرگ‌تر؛ سقفِ کد عملاً هیچ اثری نداشت.
+     *
+     * `finalAmount === 0` دقیقاً و تنها یعنی «فاکتور کامل پوشش داده شد»، که همان
+     * چیزی است که این شاخه ادعایش را دارد. `payment.amount > 0` هم می‌ماند (گاردِ
+     * ضدِ credit(0) روی فاکتورِ خالی). */
+    if (result.finalAmount === 0 && payment.amount > 0) {
       stmts.setPaymentStatus.run('approved', state.paymentId);
       stmts.credit.run(payment.amount, userId); // credit original amount
       track(userId, 'payment_approved', { payment_id: state.paymentId, amount: 0, credited: payment.amount, auto: true });
@@ -1960,7 +2026,7 @@ bot.on('text', async (ctx) => {
 
   if (state.step === 'waiting_receipt') {
     const payment = stmts.getPayment.get(state.paymentId);
-    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
     await processReceipt(ctx, userId, state.paymentId, null, ctx.message.text, false);
   }
 });
@@ -3154,9 +3220,38 @@ function recoverOrphanFlows() {
   } catch (e) { logErr('recoverOrphanFlows:', e.message); }
 }
 
+/* کارِ بوت — **در قلابِ `onLaunch`، نه در `.then()`**.
+ *
+ * 🐛 چه چیزی اشتباه بود (همان باگی که در tarot اثبات شد، v3.62.0): در telegraf ۴ برای
+ * long polling، `launch()` داخلش `await startPolling()` دارد، پس promise اش تا
+ * **توقفِ** ربات resolve نمی‌شود. یعنی این دو خط لحظه‌ی **خاموش شدن** اجرا می‌شدند:
+ *   • لاگِ «✅ Bot started» عملاً لاگِ خاموش‌شدن بود — گمراه‌کننده در هر دیباگی.
+ *   • و مهم‌تر: `recoverOrphanFlows` اعتبارِ **کسرشده**ی فلوهای یتیم را برمی‌گرداند.
+ *
+ * دو خرابیِ واقعیِ پولی از این زمان‌بندی می‌آمد، در دو جهتِ مخالف:
+ *   ۱) **مسیرِ کرش:** هندلرِ `uncaughtException` مستقیم `process.exit(1)` می‌زند و
+ *      هیچ‌وقت `bot.stop()` صدا زده نمی‌شود، پس promise هرگز resolve نمی‌شد و ریفاند
+ *      **هیچ‌وقت** اجرا نمی‌شد. ردیف‌های `active/processing` با `reserved>0` برای
+ *      همیشه می‌ماندند و اعتبارِ کاربر برنمی‌گشت — و دقیقاً کرش همان جایی است که
+ *      بیشترین فلوی یتیم ساخته می‌شود.
+ *   ۲) **مسیرِ خاموشیِ عادی:** خودِ تابع در کامنتش می‌گوید «در لحظه‌ی بوت هیچ پردازشی
+ *      در جریان نیست پس هر active/processing قطعاً یتیم است». آن پیش‌شرط لحظه‌ی
+ *      **توقف** برقرار **نیست**: `bot.stop()` پولینگ را می‌بندد ولی هندلرهای در جریان
+ *      هنوز می‌دوند. پس ریفاند می‌توانست روی فلویی بنشیند که خودش هم دارد تمام
+ *      می‌شود ⇒ اعتبارِ دوبار.
+ *
+ * `onLaunch` بعد از `getMe()` و **قبل از** شروعِ polling صدا زده می‌شود: هم اتصال
+ * تأیید شده و هم واقعاً لحظه‌ی شروع است، یعنی همان پیش‌شرطی که تابع رویش حساب کرده.
+ * گاردِ یک‌بار لازم است چون `launch` بعد از خطا دوباره تلاش می‌کند. */
+let bootDone = false;
+function onLaunched() {
+  if (bootDone) return;
+  bootDone = true;
+  log('✅ Bot started (long polling)');
+  recoverOrphanFlows();
+}
 function launch() {
-  bot.launch({ dropPendingUpdates: true })
-    .then(() => { log('✅ Bot started (long polling)'); recoverOrphanFlows(); })
+  bot.launch({ dropPendingUpdates: true }, onLaunched)
     .catch(err => {
       logErr('❌ Bot launch error, retrying in 5s:', err.message);
       setTimeout(launch, 5000);
