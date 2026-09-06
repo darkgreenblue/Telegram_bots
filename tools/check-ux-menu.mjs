@@ -1161,12 +1161,14 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   ok(/stmts\.setKbShown\.run\(uid\);\s*\n\s*await ctx\.reply\(L\.onboarding\.keyboardReveal/.test(ens),
     'و در پنجره‌ی مهاجرت **قبل از** ارسال مهر می‌زند (پس دوبار نمی‌فرستد)');
   ok(/L\.onboarding\.keyboardReveal/.test(ens), 'دنیای تومانی همان تورِ ایمنیِ قبلی را دارد (دست‌نخورده)');
-  // v2.5: پایانِ آنبوردینگ دوباره **یک پیام** است (چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟»)،
-  // و کیبوردِ ماندگار یک قدم جلوتر روی پیامِ «خوش اومدی» تحویل می‌شود — تنها پیامِ آنبوردینگ
-  // که کیبوردِ inline ندارد، پس تنها جایی است که می‌تواند حاملش باشد.
+  // v2.5: پایانِ آنبوردینگ دوباره **یک پیامِ دیده‌شدنی** است (چهار دکمه زیرِ خودِ «از کجا
+  // شروع کنیم؟»).
+  // ⚠️ کامنتِ قبلیِ همین‌جا می‌گفت «کیبوردِ ماندگار روی پیامِ خوش اومدی تحویل می‌شود» و
+  // **غلط** بود (v3.64.0): آن پیام عمداً هیچ reply_markup ای ندارد و ادعای دو خط پایین‌تر
+  // خودش همین را می‌سنجد. کیبورد حالا با حاملِ بی‌صدای `ensureKeyboard` می‌رود (بند ۹ب-۳).
   const fin = SRC.slice(SRC.indexOf('async function finishOnboarding'), SRC.indexOf('bot.action(/^bmonth:'));
-  ok(/return ctx\.reply\(L\.reading\.startWhere, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\);/.test(fin),
-    'پایانِ آنبوردینگ یک پیام است: چهار دکمه زیرِ «از کجا شروع کنیم؟»');
+  ok(/await ctx\.reply\(L\.reading\.startWhere, Markup\.inlineKeyboard\(falMenuKb\(uid\)\)\);/.test(fin),
+    'پایانِ آنبوردینگ یک پیامِ دیده‌شدنی است: چهار دکمه زیرِ «از کجا شروع کنیم؟»');
   ok(!/catalogV3/.test(fin), 'متنِ «کدوم فال رو انتخاب می‌کنی؟» در آنبوردینگ نمی‌آید (استثنای عمدی)');
   const nameStart = SRC.indexOf('async function finishNameOnboarding');
   const nameFn = SRC.slice(nameStart, SRC.indexOf('\n}', nameStart));
@@ -1190,7 +1192,10 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   const nameCode = nameFn.replace(/\/\/.*$/gm, '');
   ok(!/removeKeyboard/.test(nameCode),
     'removeKeyboard از پیامِ «خوش اومدی» برداشته شد (وگرنه کیبوردِ تایپ را باز نگه می‌داشت)');
-  ok(/Markup\.removeKeyboard\(\)/.test(SRC.slice(SRC.indexOf('L.onboarding.askName('), SRC.indexOf('L.onboarding.askName(') + 200)),
+  // از v3.64.0 برداشتنِ کیبورد فقط از `dropKeyboard(uid)` می‌رود (که مهرِ `kb_shown_at` را
+  // هم صفر می‌کند، بند ۹ب-۳ ریشه). رفتارِ رو-به-کاربر عوض نشده: کیبورد همچنان برداشته
+  // می‌شود تا کاربر بتواند نامش را تایپ کند.
+  ok(/dropKeyboard\(uid\)/.test(SRC.slice(SRC.indexOf('L.onboarding.askName('), SRC.indexOf('L.onboarding.askName(') + 200)),
     'ولی خودِ پرسشِ نام همچنان کیبوردِ سفارشی را برمی‌دارد (کاربر باید بتواند تایپ کند)');
   ok(!/mainKeyboard/.test(nameFn) && !/setKbShown/.test(nameFn),
     'مسیرِ ثبتِ نام نه کیبوردِ اصلی می‌دهد نه مهرِ نمایشِ کیبورد می‌زند');
