@@ -65,9 +65,7 @@ function gather(botKey, { winDays }) {
 }
 
 const EVENT_FA = {
-  daily_card: '🎴 کارت روز', lucky_card: '🎲 کارت شانس', hafez_taken: '📜 فال حافظ',
-  estekhare_taken: '🤲 استخاره', quiz_done: '🧩 کوییز کارت', coffee_taken: '☕ فال قهوه',
-  card_meaning_viewed: '📚 کتابخانه کارت', product_delivered: '🔮 فال کامل (پولی)', feedback: '⭐ نمره دادن',
+  daily_card: '🎴 کارت روز', lucky_card: '🎲 کارت شانس', product_delivered: '🔮 فال کامل (پولی)',
 };
 
 export function engagementBody(url) {
