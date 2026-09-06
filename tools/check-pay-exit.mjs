@@ -369,6 +369,25 @@ ok(boot ? /if \(bootDone\) return;/.test(boot) : false,
   'گاردِ یک‌بار هست (launch بعد از خطا دوباره تلاش می‌کند و اینتروال نباید چند بار ثبت شود)');
 ok(/bot\.launch\(\{ dropPendingUpdates: true \}, onLaunched\)/.test(SRC),
   'قلاب به خودِ launch پاس داده شده');
+
+/* ⚠️ **همین قرارداد برای voice2text هم لازم است، و آن‌جا پولی‌تر است.**
+   `recoverOrphanFlows` اعتبارِ **کسرشده**ی فلوهای یتیم را برمی‌گرداند. روی `.then()`
+   دو خرابی در دو جهتِ مخالف می‌ساخت: در مسیرِ کرش (`uncaughtException` مستقیم
+   `process.exit(1)` می‌زند) هرگز اجرا نمی‌شد و اعتبار برنمی‌گشت؛ و در خاموشیِ عادی
+   پیش‌شرطِ خودِ تابع («هیچ پردازشی در جریان نیست») نقض می‌شد چون هندلرهای در جریان
+   هنوز می‌دوند ⇒ احتمالِ اعتبارِ دوبار.
+   ادعا این‌جاست چون همین فایل **خودِ telegraf را می‌دواند** و معناشناسیِ زمان‌بندی را
+   بالاتر اثبات کرده؛ گذاشتنش جای دیگر یعنی اثبات و ادعا از هم جدا بیفتند. */
+{
+  const v2t = readFileSync('bots/voice2text/index.js', 'utf8');
+  const code = v2t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/bot\.launch\(\{ dropPendingUpdates: true \}, onLaunched\)/.test(code),
+    'voice2text هم کارِ بوت را در قلابِ onLaunch می‌دهد، نه .then');
+  ok(!/\.then\(\(\) => \{[^}]*recoverOrphanFlows/.test(code),
+    'و ریفاندِ فلوهای یتیم دیگر روی .then آویزان نیست');
+  ok(/let bootDone = false;/.test(code) && /if \(bootDone\) return;/.test(code),
+    'و گاردِ یک‌بار دارد (launch بعد از خطا دوباره تلاش می‌کند)');
+}
 ok(!/bot\.launch\([\s\S]{0,80}\)\s*\n?\s*\.then\(/.test(SRC),
   'هیچ کارِ بوتی روی .then ی launch آویزان نیست');
 

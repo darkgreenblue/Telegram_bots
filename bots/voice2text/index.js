@@ -3161,9 +3161,38 @@ function recoverOrphanFlows() {
   } catch (e) { logErr('recoverOrphanFlows:', e.message); }
 }
 
+/* کارِ بوت — **در قلابِ `onLaunch`، نه در `.then()`**.
+ *
+ * 🐛 چه چیزی اشتباه بود (همان باگی که در tarot اثبات شد، v3.62.0): در telegraf ۴ برای
+ * long polling، `launch()` داخلش `await startPolling()` دارد، پس promise اش تا
+ * **توقفِ** ربات resolve نمی‌شود. یعنی این دو خط لحظه‌ی **خاموش شدن** اجرا می‌شدند:
+ *   • لاگِ «✅ Bot started» عملاً لاگِ خاموش‌شدن بود — گمراه‌کننده در هر دیباگی.
+ *   • و مهم‌تر: `recoverOrphanFlows` اعتبارِ **کسرشده**ی فلوهای یتیم را برمی‌گرداند.
+ *
+ * دو خرابیِ واقعیِ پولی از این زمان‌بندی می‌آمد، در دو جهتِ مخالف:
+ *   ۱) **مسیرِ کرش:** هندلرِ `uncaughtException` مستقیم `process.exit(1)` می‌زند و
+ *      هیچ‌وقت `bot.stop()` صدا زده نمی‌شود، پس promise هرگز resolve نمی‌شد و ریفاند
+ *      **هیچ‌وقت** اجرا نمی‌شد. ردیف‌های `active/processing` با `reserved>0` برای
+ *      همیشه می‌ماندند و اعتبارِ کاربر برنمی‌گشت — و دقیقاً کرش همان جایی است که
+ *      بیشترین فلوی یتیم ساخته می‌شود.
+ *   ۲) **مسیرِ خاموشیِ عادی:** خودِ تابع در کامنتش می‌گوید «در لحظه‌ی بوت هیچ پردازشی
+ *      در جریان نیست پس هر active/processing قطعاً یتیم است». آن پیش‌شرط لحظه‌ی
+ *      **توقف** برقرار **نیست**: `bot.stop()` پولینگ را می‌بندد ولی هندلرهای در جریان
+ *      هنوز می‌دوند. پس ریفاند می‌توانست روی فلویی بنشیند که خودش هم دارد تمام
+ *      می‌شود ⇒ اعتبارِ دوبار.
+ *
+ * `onLaunch` بعد از `getMe()` و **قبل از** شروعِ polling صدا زده می‌شود: هم اتصال
+ * تأیید شده و هم واقعاً لحظه‌ی شروع است، یعنی همان پیش‌شرطی که تابع رویش حساب کرده.
+ * گاردِ یک‌بار لازم است چون `launch` بعد از خطا دوباره تلاش می‌کند. */
+let bootDone = false;
+function onLaunched() {
+  if (bootDone) return;
+  bootDone = true;
+  log('✅ Bot started (long polling)');
+  recoverOrphanFlows();
+}
 function launch() {
-  bot.launch({ dropPendingUpdates: true })
-    .then(() => { log('✅ Bot started (long polling)'); recoverOrphanFlows(); })
+  bot.launch({ dropPendingUpdates: true }, onLaunched)
     .catch(err => {
       logErr('❌ Bot launch error, retrying in 5s:', err.message);
       setTimeout(launch, 5000);
