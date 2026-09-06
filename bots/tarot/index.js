@@ -6739,6 +6739,28 @@ bot.on(['voice', 'audio'], async (ctx) => {
 });
 
 /* ---------- عکس (رسید پرداخت) ---------- */
+/* 📎 رسیدی که **به‌عنوان فایل** فرستاده شده.
+ *
+ * 🐛 تا امروز tarot هیچ هندلرِ `document` نداشت، یعنی چنین پیامی **کاملاً بی‌صدا** دور
+ * ریخته می‌شد: نه پیامی، نه لاگی، نه ردی. و این حالتِ نادری نیست — تلگرام روی دسکتاپ
+ * با یک درگ‌ودراپ عکس را «به‌عنوان فایل» می‌فرستد و کاربر اصلاً متوجه فرقش نمی‌شود.
+ * برای کسی که همین الان پول واریز کرده، این همان سیاه‌چاله‌ی رسید است از درِ دیگر.
+ *
+ * ⚠️ عمداً فایل را **قبول نمی‌کنیم**، فقط راهنمایی می‌کنیم. قبول‌کردنش یعنی یک مسیرِ
+ * رسانه‌ای تازه از داوریِ ایجنت تا `sendPhoto`ِ ادمین که با `file_id`ِ داکیومنت رفتار
+ * تضمین‌شده‌ای ندارد (PDF اصلاً عکس نیست). ساده‌ترین راه‌حلِ درست این است که کاربر
+ * بداند چه کند — همان یک جمله کلِ ضررِ مالی را می‌بندد، بدونِ افزودنِ مسیرِ شکننده. */
+bot.on('document', async (ctx) => {
+  if (starsRail) return;                    // ریلِ استارز اصلاً رسید ندارد
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const s2 = getSession(uid);
+  const live = ((getState(uid) === 'pay_receipt' && s2?.paymentId) ? stmts.getPayment.get(s2.paymentId) : null)
+    || stmts.pendingReceiptPayment.get(uid, RECEIPT_RECOVERY_SEC);
+  if (!live) return;                        // هیچ فاکتوری در کار نیست → پیامِ بی‌ربط ندهیم
+  return ctx.reply(L.wallet.receiptAsFile, mainKeyboard(uid)).catch(() => {});
+});
+
 bot.on('photo', async (ctx) => {
   const uid = ctx.from.id;
   upsertUser(ctx);

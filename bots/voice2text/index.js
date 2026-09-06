@@ -1382,6 +1382,21 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
   // داکیومنت غیرصوتی → ورودی نامعتبر، منوی اصلی نمایش داده شود
   if (ctx.message.document && !isAudioDocument(ctx.message.document)) {
     upsertUser(userId, ctx.from.first_name, ctx.from.username);
+    /* ⚠️ مگر اینکه فیشِ واریز باشد که **به‌صورت فایل** فرستاده شده.
+       تلگرام روی دسکتاپ خیلی راحت عکس را «به‌عنوان فایل» می‌فرستد، و آن‌وقت این پیام
+       به هندلرِ ویس می‌آید نه به هندلرِ عکس. تا امروز فقط منوی اصلی می‌گرفت: کاربری که
+       پول واریز کرده بود، فیشش را می‌فرستاد و **هیچ توضیحی** نمی‌گرفت.
+       گاردِ حافظه‌ای (`rstate`) بالاتر این حالت را می‌گیرد، ولی `userStates` در حافظه
+       است و با هر ری‌استارت پاک می‌شود — دقیقاً همان لحظه‌ای که کاربر سرگردان است. پس
+       اینجا از **دیتابیس** می‌پرسیم، نه از حافظه. */
+    const pend = stmts.pendingReceiptPayment.get(userId);
+    if (pend) {
+      await ctx.reply(
+        '📸 این فایل به‌عنوان **عکس** فرستاده نشده، برای همین نتونستم به شارژت وصلش کنم.\n\n' +
+        'لطفاً همون تصویرِ فیش رو دوباره و این بار **به‌صورت عکس** بفرست (نه فایل).',
+        { parse_mode: 'Markdown', ...payCancelKb(pend.id) });
+      return;
+    }
     await sendMainMenu(ctx);
     return;
   }
@@ -1543,7 +1558,7 @@ bot.on('photo', async (ctx) => {
 
   const fileId  = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   const payment = stmts.getPayment.get(paymentId);
-  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+  if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
 
   await processReceipt(ctx, userId, paymentId, fileId, null, recovered);
 });
@@ -1673,9 +1688,26 @@ const rejectPaymentAuto = db.transaction((paymentId) => {
 //   reject   → رد + پیام با دلیل (مگر «اصلاً رسید نیست» که فقط راهنمایی و پرداخت باز می‌ماند)
 //   review   → مسیرِ قدیمیِ sendReceiptToAdmin (تصمیمِ انسانی)
 // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → همیشه review (بدونِ خرجِ ایجنت). fail-safe: هر خطا → review.
+/* 🔇 پرداختی که دیگر `pending` نیست: **هرگز بی‌صدا**.
+ *
+ * 🐛 این شرط در چهار نقطه‌ی مسیرِ پول تکرار شده بود و هر چهار تا `return` خالی داشتند:
+ * ورودیِ `processReceipt`، رسیدِ عکسی، رسیدِ متنی، و واردکردنِ کدِ تخفیف. یعنی کاربری
+ * که پول داده و پرداختش تعیین‌تکلیف شده (تأیید/رد/لغو) هر کاری می‌کرد **هیچ جوابی**
+ * نمی‌گرفت — نه خطایی، نه لاگی، نه ردی. بند ۸ ریشه این را ممنوع می‌کند.
+ *
+ * یک helper به‌جای چهار بلوکِ درون‌خطی: متنِ پیام تک‌منبع می‌ماند و نقطه‌ی پنجمی که
+ * فردا اضافه شود هم همین را صدا می‌زند، نه یک نسخه‌ی کمی متفاوت. */
+async function payNotOpen(ctx, userId, payment) {
+  userStates.delete(userId);
+  const msg = payment && payment.status !== 'pending'
+    ? '🙏 این پرداخت از قبل بررسی شده.\n\nاگه فکر می‌کنی چیزی درست نیست، به پشتیبانی پیام بده.'
+    : '🙏 این به هیچ شارژِ بازی وصل نشد.\n\nاگه واریز کردی، از منوی شارژ دوباره شروع کن و همون‌جا فیش رو بفرست.';
+  await ctx.reply(msg).catch(() => {});
+}
+
 async function processReceipt(ctx, userId, paymentId, photoFileId, textBody, recovered) {
   const payment = stmts.getPayment.get(paymentId);
-  if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+  if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
   track(userId, 'receipt_submitted', { payment_id: paymentId });
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
 
@@ -1938,7 +1970,7 @@ bot.on('text', async (ctx) => {
 
   if (state.step === 'waiting_discount_code') {
     const payment = stmts.getPayment.get(state.paymentId);
-    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
     const result = validateDiscount(ctx.message.text.trim(), userId, payment.amount, ctx.from.username);
     if (!result.ok) {
       await ctx.reply(result.err + '\nدوباره امتحان کن:', payCancelKb(state.paymentId));
@@ -1994,7 +2026,7 @@ bot.on('text', async (ctx) => {
 
   if (state.step === 'waiting_receipt') {
     const payment = stmts.getPayment.get(state.paymentId);
-    if (!payment || payment.status !== 'pending') { userStates.delete(userId); return; }
+    if (!payment || payment.status !== 'pending') return payNotOpen(ctx, userId, payment);
     await processReceipt(ctx, userId, state.paymentId, null, ctx.message.text, false);
   }
 });

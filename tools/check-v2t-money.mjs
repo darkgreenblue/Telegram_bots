@@ -96,5 +96,49 @@ console.log('\n▶ ۴) صفِ admin_actions ردی از اکشنِ ناشناخ�
     'و دو اکشنی که این ربات واقعاً می‌فهمد هنوز هندل می‌شوند');
 }
 
+/* ══ ۵) هیچ مسیرِ رسانه‌ایِ رسید بی‌صدا نمی‌ماند ══════════════════════════
+ * دو سکوتِ واقعی این‌جا بود، هر دو روی مسیرِ پول:
+ *   • **فیشِ فرستاده‌شده به‌عنوان فایل** به هندلرِ ویس می‌رفت و فقط منوی اصلی می‌گرفت.
+ *     گاردِ حافظه‌ای بالاتر این را می‌گیرد، ولی `userStates` با هر ری‌استارت پاک می‌شود
+ *     — دقیقاً همان لحظه‌ای که کاربر سرگردان است. پس پرسش باید از **DB** باشد.
+ *   • **عکس روی پرداختِ غیرِ pending** یک `return` خالی داشت: هیچ جوابی، هیچ ردی. */
+console.log('\n▶ ۵) هیچ مسیرِ رسانه‌ایِ رسید بی‌صدا نمی‌ماند');
+{
+  const docBranch = CODE.slice(CODE.indexOf('ctx.message.document && !isAudioDocument'));
+  ok(/stmts\.pendingReceiptPayment\.get\(userId\)/.test(docBranch.slice(0, 900)),
+    'فایلِ غیرصوتی: وجودِ فاکتور از **دیتابیس** پرسیده می‌شود، نه از حافظه');
+  ok(/\*\*به‌صورت عکس\*\*/.test(docBranch.slice(0, 900)),
+    'و به کاربر گفته می‌شود دوباره به‌صورت عکس بفرستد');
+
+  /* ⚠️ ادعا **سراسری** است، نه فقط روی هندلرِ عکس. نسخه‌ی اولش فقط `bot.on('photo')` را
+     می‌دید و قرمز شد — ولی به دلیلِ درست: همان `return` خالی در **سه نقطه‌ی دیگرِ** مسیرِ
+     پول هم بود (ورودیِ processReceipt، رسیدِ متنی، واردکردنِ کدِ تخفیف). یعنی ادعای
+     محدود، سه سکوتِ دیگر را نمی‌دید. حالا کلِ فایل سنجیده می‌شود. */
+  ok(!/userStates\.delete\(userId\); return; \}/.test(CODE),
+    'هیچ‌جای مسیرِ پول `return` خالی روی پرداختِ غیرِ pending نمانده');
+  const sites = (CODE.match(/return payNotOpen\(ctx, userId, payment\)/g) || []).length;
+  ok(sites >= 4, `همه‌ی نقطه‌ها از یک helper رد می‌شوند (${sites} نقطه)`);
+  ok(/async function payNotOpen\(/.test(CODE) && /از قبل بررسی شده/.test(CODE),
+    'و آن helper واقعاً به کاربر جواب می‌دهد (متنِ پیام تک‌منبع است)');
+}
+
+/* ══ ۶) tarot هم هندلرِ document دارد ═══════════════════════════════════
+ * تا امروز اصلاً نداشت، یعنی رسیدِ فایلی **کاملاً** بی‌صدا دور ریخته می‌شد. */
+console.log('\n▶ ۶) tarot هم رسیدِ فایلی را بی‌صدا دور نمی‌ریزد');
+{
+  const t = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const tc = t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/bot\.on\('document'/.test(tc), 'هندلرِ document ثبت شده');
+  const body = tc.slice(tc.indexOf("bot.on('document'"), tc.indexOf("bot.on('photo'"));
+  ok(/if \(starsRail\) return;/.test(body), 'و روی ریلِ استارز فعال نیست (آن‌جا رسید معنا ندارد)');
+  ok(/if \(!live\) return;/.test(body),
+    'و اگر هیچ فاکتوری در کار نیست ساکت می‌ماند (پیامِ بی‌ربط به کاربرِ عادی نمی‌دهد)');
+  ok(/L\.wallet\.receiptAsFile/.test(body), 'و وقتی فاکتور هست، راهنمایی می‌کند');
+  for (const loc of ['fa', 'ru', 'es', 'pt']) {
+    const ls = readFileSync(path.resolve(`bots/tarot/locales/${loc}.js`), 'utf8');
+    ok(/receiptAsFile:/.test(ls), `پیامش در locale «${loc}» هست`);
+  }
+}
+
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
