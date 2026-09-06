@@ -36,6 +36,8 @@
 // امنیت: هیچ رشته‌ای از URL وارد SQL نمی‌شود؛ همه‌ی ورودی‌ها عددی و bound اند.
 import { instancesOf, withDb, hasTable, rows, scalar, revenueWhere, toToman, moneyOf, unixOf } from './bots.js';
 import { tehranDayStart, tehranDayStr, nowSec } from './util.js';
+// شماره‌ی روزِ تهران تک‌منبع است (`engage.js`): دو تعریفِ جدا دیر یا زود سرِ مرزِ روز واگرا می‌شوند.
+import { tehranDayNo } from './engage.js';
 
 /** ورودی‌های انسانی که سود بدونشان کامل نیست (کلیدهای جدولِ settings). */
 export const USD_RATE_KEY = 'usd_toman';
@@ -44,6 +46,20 @@ export const CAMPAIGN_CPA_KEY = 'cpa_campaign_usd';
  * OpenRouter و واردشده به‌صورتِ دستی. بدونِ این، «سودِ کلِ عمر» یعنی درآمدِ دو ماه
  * منهای هزینه‌ی یک هفته؛ با این، همان شکاف با یک عددِ واقعی پر می‌شود. */
 export const PRE_TRACK_COST_KEY = 'llm_cost_pretrack_usd';
+
+/** اولین لحظه‌ی درآمدِ واقعی — ابتدای دوره‌ای که لُختِ دستی رویش پخش می‌شود. */
+export function firstRevenueSec(botKey) {
+  let min = null;
+  for (const inst of instancesOf(botKey)) {
+    withDb(inst.file, (db) => {
+      const rw = revenueWhere(inst.bot, '0');
+      if (!hasTable(db, rw.table)) return;
+      const t = scalar(db, `SELECT MIN(${unixOf(moneyOf(inst.bot).createdKind, 'created_at')}) FROM ${rw.table} WHERE ${rw.where}`);
+      if (t && (min === null || t < min)) min = t;
+    });
+  }
+  return min;
+}
 
 /** اولین لحظه‌ای که هزینه‌ی مدل ثبت شده — مرزِ اعتبارِ هر عددِ تجمعی. */
 export function costTrackingSince(botKey) {
@@ -64,8 +80,8 @@ export function costTrackingSince(botKey) {
  * تاریخچه ندارد، هر تجمعی که از قبلِ `costSince` شروع شود سودِ ساختگی می‌سازد.
  * مصرف‌کننده باید بازه را طوری بدهد که داخلِ دوره‌ی ثبتِ هزینه بماند (یا خودش بگوید
  * که بخشی از بازه هزینه ندارد). */
-export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUser = 0 } = {}) {
-  const n = Math.min(Math.max(parseInt(days, 10) || 30, 1), 365);
+export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUser = 0, preTrackUsd = 0 } = {}) {
+  const n = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
   const since = tehranDayStart(-(n - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, llmUsd, adUsd }
   const at = (d) => {
@@ -102,6 +118,30 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
         }
       }
     });
+  }
+
+  /* ═══ هزینه‌ی دوره‌ی قبل از ثبت، پخش‌شده روی روزهای همان دوره ═══
+     ⚠️ نسخه‌ی اول این عدد را کنار می‌گذاشت و بالای کارت یک هشدار می‌نوشت که «۸۲ روز
+     از محاسبه خارج شد». آن راه‌حل نبود، اعلامِ مسئله بود: کاربر یک عددِ ناقص می‌دید
+     به‌علاوه‌ی یک متنِ نگران‌کننده. حالا لُختِ دلاری روی روزهایی که واقعاً پوشش می‌دهد
+     (از اولین روزِ درآمد تا شروعِ ثبتِ خودکار) **یکنواخت** پخش می‌شود، پس هر بازه‌ای
+     بدونِ استثنا حساب می‌شود و هیچ هشداری لازم نیست.
+     صداقتِ روش: برای بازه‌ای که کلِ آن دوره را در بر می‌گیرد (مثلِ «کل عمر») جمع
+     **دقیق** است. فقط بازه‌ای که وسطِ آن دوره بریده شود تقریبی می‌گیرد، و تقریبِ
+     یکنواخت تنها انتخابِ ممکن است چون تفکیکِ روزانه‌اش اصلاً وجود ندارد. */
+  const pre = Math.max(0, Number(preTrackUsd) || 0);
+  if (pre > 0) {
+    const trackStart = costTrackingSince(botKey);
+    const firstRev = firstRevenueSec(botKey);
+    if (trackStart && firstRev && firstRev < trackStart) {
+      const d0 = tehranDayNo(firstRev), d1 = tehranDayNo(trackStart);
+      const span = Math.max(1, d1 - d0);          // روزهای پوشش‌دادهٔ لُخت (تا روزِ قبل از ثبت)
+      const perDay = pre / span;
+      for (let d = d0; d < d1; d++) {
+        const key = tehranDayStr(d * 86400 + 12 * 3600);
+        if (day.has(key) || (d * 86400 >= since - 86400)) at(key).llmUsd += perDay;
+      }
+    }
   }
 
   /* قدیمی→جدید، تا `cum` معنیِ «تا این روز» بدهد و نقطه‌ی سربه‌سر درست پیدا شود. */
@@ -149,34 +189,4 @@ export function profitSinceTracking(botKey, { usdToman = 0, campaignUsdPerUser =
   const days = Math.max(1, Math.ceil((nowSec() - start) / 86400) + 1);
   const p = profitDaily(botKey, { days, usdToman, campaignUsdPerUser });
   return { ok: true, ...p, days };
-}
-
-/* 💰 سودِ **کلِ عمر** — درآمدِ روزِ اول تا امروز، منهای هزینه‌ی ثبت‌شده، منهای
- * هزینه‌ی دستیِ دوره‌ی قبل از ثبت.
- *
- * ⚠️ عمداً از `profitDaily` جداست. آن یکی سریِ روزانه می‌سازد و روزهای بی‌هزینه را
- * نمی‌تواند درست کند؛ این یکی می‌داند که کلِ آن دوره **یک عددِ دستی** دارد که به هیچ
- * روزِ مشخصی نمی‌چسبد. مخلوط‌کردنشان یعنی یا هزینه‌ی دستی به یک روزِ دلبخواه بچسبد و
- * نمودارِ روزانه دروغ بگوید، یا کلاً بیفتد و سود بیش‌برآورد شود. */
-export function profitLifetime(botKey, { usdToman = 0, preTrackUsd = 0 } = {}) {
-  let rev = 0, trackedUsd = 0;
-  for (const inst of instancesOf(botKey)) {
-    withDb(inst.file, (db) => {
-      const rw = revenueWhere(inst.bot, '0');
-      if (hasTable(db, rw.table)) {
-        rev += toToman(inst.bot, scalar(db, `SELECT COALESCE(SUM(${rw.amountCol}),0) FROM ${rw.table} WHERE ${rw.where}`)) || 0;
-      }
-      if (hasTable(db, 'llm_usage')) {
-        trackedUsd += Number(scalar(db, 'SELECT COALESCE(SUM(cost_usd),0) FROM llm_usage')) || 0;
-      }
-    });
-  }
-  const pre = Math.max(0, Number(preTrackUsd) || 0);
-  const costUsd = trackedUsd + pre;
-  const costToman = usdToman ? Math.round(costUsd * usdToman) : 0;
-  return {
-    rev, trackedUsd, preTrackUsd: pre, costUsd, costToman,
-    net: rev - costToman, hasRate: !!usdToman,
-    costSince: costTrackingSince(botKey),
-  };
 }

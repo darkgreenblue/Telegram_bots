@@ -9,7 +9,7 @@ import { hbars } from '../lib/charts.js';
 import { getSetting } from '../lib/platform.js';
 import { costPerDiamond } from '../lib/cpa.js';
 import { costsBody } from './finance.js';
-import { profitDaily, profitLifetime, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { profitDaily, firstRevenueSec, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 
@@ -111,52 +111,39 @@ export function economicsBody(url) {
 
   return `<div class="card"><h2 style="margin:0">💰 اقتصاد و هزینه — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">هزینه‌ی واقعیِ مدل، اقتصادِ الماس، و آنچه از درآمد می‌ماند.</p></div>
-    ${costInputsCard(bot)}${lifetimeCard(bot)}${profitCard(url, bot)}${costCard}${cpdCard}${revCard}${costsBody(url)}`;
+    ${costInputsCard(bot)}${profitCard(url, bot)}${costCard}${cpdCard}${costsBody(url)}`;
 }
 
-/* ═══ 📈 سودِ خالص — «کی مثبت شدم و چقدر؟» ═══
-   خواسته‌ی صریحِ مالک: این عدد باید **روزانه** رصد شود، نه یک عددِ تکیِ کلِ عمر. پس
-   کارت هم سرخط را می‌دهد هم سریِ روزانه و نقطه‌ی سربه‌سر.
-   محاسبه در `lib/profit.js` است تا عددِ این‌جا و عددِ نمای کلی هرگز واگرا نشوند. */
+/* ═══ 📈 سودِ خالص — تنها کارتِ سودِ این صفحه ═══
+   ⚠️ قبلاً **دو** کارت بود (سودِ بازه + سودِ کلِ عمر) و ایرادِ درستِ مالک همین بود:
+   یک سنجه با دو کارت یعنی خواننده باید حدس بزند کدام «واقعی» است. حالا یک کارت با
+   انتخابگرِ بازه (روز / هفته / ماه / کل عمر، پیش‌فرض **کل عمر**) هر چهار جواب را
+   می‌دهد. هزینه‌ی دوره‌ی قبل از ثبت هم در `profitDaily` روی روزهایش پخش می‌شود، پس
+   دیگر نه استثنایی هست نه هشداری. */
 export function profitCard(url, bot) {
   const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
   const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
-  const rk = rangeOf(url, 'rProfit', 'month');
-  const days = RANGES[rk].days || 90;
-  const p = profitDaily(bot, { days, usdToman: rate, campaignUsdPerUser: campUsd });
+  const preUsd = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
+  const rk = rangeOf(url, 'rProfit', 'all');
 
   if (!rate) {
     return `<div class="card">${cardHead('📈 سودِ خالص')}
       <p>هزینه‌ی مدل دلاری است و درآمد تومانی، پس بدونِ <b>نرخِ دلار</b> این دو قابلِ
         کم‌کردن از هم نیستند و هیچ عددی ساخته نمی‌شود.</p>
-      <p class="muted">نرخ را در صفحه‌ی «جذب و کانال‌ها» وارد کن تا این کارت زنده شود.</p></div>`;
-  }
-  if (!p.costSince) {
-    return `<div class="card">${cardHead('📈 سودِ خالص')}
-      <p class="muted">هنوز هیچ هزینه‌ی مدلی ثبت نشده، پس سود قابلِ محاسبه نیست.</p></div>`;
+      <p class="muted">نرخ را در کارتِ بالا وارد کن تا این کارت زنده شود.</p></div>`;
   }
 
-  /* ⚠️ صداقتِ بازه: ثبتِ هزینه از `costSince` شروع شده. اگر بازه‌ی انتخابی از آن
-     عقب‌تر برود، روزهای قبلش **هزینه ندارند** و سودشان مصنوعاً برابرِ کلِ درآمد است.
-     به‌جای پنهان‌کردنش، همان روزها علامت می‌خورند و از تجمعی بیرون می‌مانند. */
-  const startStr = tehranDayStr(p.costSince);
-  const covered = p.series.filter(r => r.d >= startStr);
-  let cum = 0;
-  const rowsCov = covered.map((r) => { cum += r.net; return { ...r, cum }; });
-  const tot = rowsCov.reduce((a, r) => ({
-    rev: a.rev + r.rev, cost: a.cost + r.costToman, net: a.net + r.net,
-  }), { rev: 0, cost: 0, net: 0 });
-  let breakEven = null;
-  for (let i = 0; i < rowsCov.length; i++) {
-    if (rowsCov[i].cum > 0 && rowsCov.slice(i).every(x => x.cum > 0)) { breakEven = rowsCov[i].d; break; }
-  }
-  const uncovered = p.series.length - covered.length;
+  /* «کل عمر» = از اولین روزِ درآمد تا امروز. بقیه‌ی بازه‌ها همان پنجره‌ی خودشان. */
+  const firstRev = firstRevenueSec(bot);
+  const lifeDays = firstRev ? Math.ceil((nowSec() - firstRev) / 86400) + 1 : 30;
+  const days = RANGES[rk].days || lifeDays;
+  const p = profitDaily(bot, { days, usdToman: rate, campaignUsdPerUser: campUsd, preTrackUsd: preUsd });
+
   const t = (v) => `${fmt(v)} ت`;
-  const marginPct = tot.rev ? Math.round((tot.net / tot.rev) * 1000) / 10 : 0;
-
-  const daily = rowsCov.slice().reverse().map(r => [
-    r.d,
-    t(r.rev),
+  const tot = p.totals;
+  const margin = tot.rev ? Math.round((tot.net / tot.rev) * 1000) / 10 : 0;
+  const daily = p.series.slice().reverse().filter(r => r.rev || r.costToman).map(r => [
+    r.d, t(r.rev),
     `${t(r.costToman)} <span class="muted">(${usd(r.costUsd)})</span>`,
     `<span class="${r.net < 0 ? 'drop' : ''}"><b>${t(r.net)}</b></span>`,
     `<span class="${r.cum < 0 ? 'drop' : ''}">${t(r.cum)}</span>`,
@@ -165,26 +152,23 @@ export function profitCard(url, bot) {
   return `<div class="card">
     ${cardHead('📈 سودِ خالص', rangePicker(url, 'rProfit', rk))}
     <div class="grid">
-      ${stat('سودِ خالصِ این بازه', `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
+      ${stat(`سودِ خالص (${esc(RANGES[rk].label)})`, `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
       ${stat('درآمدِ دریافتی', t(tot.rev))}
-      ${stat('هزینه‌ی واقعی (مدل + تبلیغ)', t(tot.cost))}
-      ${stat('حاشیه‌ی سود', `${fmt(marginPct)}٪`)}
-      ${stat('نقطه‌ی سربه‌سر', breakEven
-        ? `<b>${esc(breakEven)}</b>`
-        : `<span class="muted">${tot.net < 0 ? 'هنوز نرسیده' : 'در کلِ بازه مثبت بوده'}</span>`)}
+      ${stat('هزینه‌ی واقعی', `${t(tot.costToman)} <span class="muted">(${usd(tot.llmUsd + tot.adUsd)})</span>`)}
+      ${stat('حاشیه‌ی سود', `${fmt(margin)}٪`)}
+      ${stat('نقطه‌ی سربه‌سر', p.breakEven
+        ? `<b>${esc(p.breakEven)}</b>`
+        : `<span class="muted">${tot.net < 0 ? 'هنوز نرسیده' : 'از ابتدا مثبت'}</span>`)}
     </div>
     <p class="muted">سود = <b>درآمدِ دریافتی − هزینه‌ی مدل − هزینه‌ی تبلیغ</b>.
-      تخفیف کم نمی‌شود (از قبل داخلِ درآمد است) و اعتبارِ هدیه هم کم نمی‌شود
-      (پولِ نقد نیست؛ هزینه‌اش وقتی خرج شود در همان هزینه‌ی مدل می‌آید).</p>
-    ${uncovered > 0 ? `<div class="note">⚠️ ثبتِ هزینه‌ی مدل از <b>${esc(startStr)}</b> شروع شده،
-      ولی درآمد از روزِ اول ثبت است. پس ${fmt(uncovered)} روزِ ابتدایی این بازه از محاسبه
-      <b>کنار گذاشته شد</b> — نه پنهان شد، بلکه واردِ سود نشد، چون درآمدِ بدونِ هزینه سودِ
-      ساختگی می‌سازد.</div>` : ''}
+      تخفیف کم نمی‌شود (از قبل داخلِ درآمد است)، اعتبارِ هدیه هم نه (پولِ نقد نیست؛
+      هزینه‌اش وقتی خرج شود در همان هزینه‌ی مدل می‌آید)، و پرداخت‌های تستی اصلاً
+      واردِ درآمد نمی‌شوند.${preUsd ? ` هزینه‌ی ${usd(preUsd)}ِ دوره‌ی قبل از ثبتِ خودکار
+      روی روزهای همان دوره پخش شده، پس «کل عمر» کامل است.` : ''}</p>
     <h3 class="ch">روزانه (جدیدترین بالا)</h3>
-    ${table(['روز', 'درآمد', 'هزینه', 'سودِ روز', 'تجمعی'], daily, 'هنوز روزی با دیتا نیست')}
-    <p class="muted">«تجمعی» از اولین روزِ ثبتِ هزینه جمع می‌شود. «نقطه‌ی سربه‌سر» اولین
-      روزی است که تجمعی مثبت شد <b>و دیگر منفی نشد</b> — یک روزِ پرفروشِ تنها که فردا
-      برمی‌گردد، سربه‌سر نیست.</p></div>`;
+    ${table(['روز', 'درآمد', 'هزینه', 'سودِ روز', 'تجمعی'], daily, 'در این بازه دیتایی نیست')}
+    <p class="muted">«نقطه‌ی سربه‌سر» اولین روزی است که تجمعی مثبت شد <b>و دیگر منفی
+      نشد</b> — یک روزِ پرفروشِ تنها که فردا برمی‌گردد، سربه‌سر نیست.</p></div>`;
 }
 
 /* ⚙️ ورودی‌های دستیِ هزینه — **اولین کارتِ این صفحه** (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۵).
@@ -214,29 +198,7 @@ export function costInputsCard(bot) {
       ${campUsd && rate ? `الان: هر کاربرِ کمپین <b>${usd(campUsd)}</b> ≈ <b>${fmt(Math.round(campUsd * rate))} تومان</b>. ` : ''}
       هزینه‌ی تبلیغ عمداً <b>دلاری</b> است تا با هزینه‌ی مدل هم‌واحد بماند؛ تومانش خودکار می‌آید.
       <br>«هزینه‌ی قبل از شروعِ ثبت» را از داشبوردِ خودِ OpenRouter بخوان: ثبتِ خودکار تاریخچه
-      ندارد و بدونِ این عدد، سودِ کلِ عمر درآمدِ همه‌ی روزها را با هزینه‌ی چند روزِ آخر مقایسه می‌کند.
+      ندارد و بدونِ این عدد، سود در بازه‌ی «کل عمر» درآمدِ همه‌ی روزها را با هزینه‌ی چند روزِ آخر مقایسه می‌کند.
       <br>🔎 <b>اتوماسیون:</b> <span class="mono">ads.telegram.org</span> API عمومی برای خواندنِ هزینه‌ی
       کمپینِ خودت ندارد (فقط داشبوردِ وبی)، پس این ورودی دستی می‌ماند.</p></div>`;
-}
-
-/* 💰 سودِ کلِ عمر — تنها جایی که هزینه‌ی دستیِ قبل از ثبت وارد محاسبه می‌شود. */
-export function lifetimeCard(bot) {
-  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const pre = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
-  const lt = profitLifetime(bot, { usdToman: rate, preTrackUsd: pre });
-  if (!lt.hasRate) return '';
-  const margin = lt.rev ? Math.round((lt.net / lt.rev) * 1000) / 10 : 0;
-  return `<div class="card">
-    ${cardHead('💰 سودِ کلِ عمر')}
-    <div class="grid">
-      ${stat('سودِ خالصِ کل', `<b class="${lt.net < 0 ? 'drop' : ''}">${fmt(lt.net)} ت</b>`)}
-      ${stat('درآمدِ کل', `${fmt(lt.rev)} ت`)}
-      ${stat('هزینه‌ی کل', `${usd(lt.costUsd)} ≈ ${fmt(lt.costToman)} ت`)}
-      ${stat('حاشیه‌ی سود', `${fmt(margin)}٪`)}
-    </div>
-    <p class="muted">هزینه = ${usd(lt.trackedUsd)} ثبت‌شده${lt.preTrackUsd
-      ? ` + ${usd(lt.preTrackUsd)} دستی (قبل از ${esc(tehranDayStr(lt.costSince || 0))})`
-      : ''}.
-      ${lt.preTrackUsd ? '' : '⚠️ هزینه‌ی قبل از شروعِ ثبت وارد نشده، پس این سود <b>بیش‌برآورد</b> است.'}
-      درآمد بدونِ پرداخت‌های تستی حساب می‌شود.</p></div>`;
 }
