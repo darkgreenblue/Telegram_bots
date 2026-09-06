@@ -39,6 +39,7 @@ import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
 import { configureLocale } from './locale-boot.js';
+import { installSerialDispatch } from './dispatch.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
@@ -217,7 +218,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.65.0';
+const PRODUCT_VERSION = '3.66.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2303,6 +2304,11 @@ function sweepAbandonedPaidReadings() {
   }
   if (rows.length) log(`♻️ ${rows.length} فالِ پرداخت‌شده‌ی رهاشده ریفاند شد`);
 }
+
+/* 🚦 تحویلِ آپدیت با صفِ per کاربر (v3.65.0). `false` → دقیقاً رفتارِ قبلی، بدونِ دیپلوی.
+   چرایی و مرزها: `bots/tarot/dispatch.js`. سقف از دیتای زنده آمده (بیشینه‌ی فالِ هم‌زمان ۴). */
+const SERIAL_DISPATCH   = true;
+const DISPATCH_MAX      = 128;
 
 /* ===== 8) Bot ===== */
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: OR_TIMEOUT_MS });
@@ -7049,6 +7055,9 @@ function launch() {
   bot.launch({ dropPendingUpdates: true }, onLaunched)
     .catch((err) => { logErr('❌ launch error, retrying in 5s:', err.message); setTimeout(launch, 5000); });
 }
+// 🚦 **قبل از** launch نصب می‌شود، وگرنه پولر با `handleUpdate`ِ اصلی شروع می‌کند و
+// این پیچیدن هیچ اثری ندارد (هم‌خانواده‌ی درسِ بند ۹ب/۷: زمانِ نصب به‌اندازه‌ی خودِ کار مهم است).
+if (SERIAL_DISPATCH) installSerialDispatch(bot, { maxInflight: DISPATCH_MAX, log, logErr });
 bot.telegram.getMe().then(me => { BOT_USERNAME = me.username; }).catch(() => {});
 launch();
 registerGlobalErrorHandlers('tarot');
