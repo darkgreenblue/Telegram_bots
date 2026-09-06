@@ -128,6 +128,13 @@ function decideReceipt(verdict, expectedToman) {
   if (basis === 'ambiguous') return out('review', { reason_code: 'amount_ambiguous', basis });
 
   let v = verdict.verdict;
+  /* 💰 **مبلغِ ناخوانا = تصمیمِ انسانی** — عیناً همان گاردِ tarot (سه کپیِ ایجنت
+   * هم‌قرارداد می‌مانند). همه‌ی گاردهای مبلغ داخلِ `if (hasPaid && exp > 0)` بودند، پس
+   * اگر مدل «approve» می‌داد ولی هیچ عددی در نمی‌آورد، پرداخت با **صفر** راستی‌آزماییِ
+   * مبلغ خودکار تأیید می‌شد. بند ۹ ریشه: گاردِ مبلغ باید **هر دو جهت** را ببیند. */
+  if (v === 'approve' && !hasPaid && exp > 0) {
+    return out('review', { reason_code: 'amount_unreadable', basis });
+  }
   if (hasPaid && exp > 0) {
     // مدل اشتباه رد کرده در حالی که پول کافی رسیده → تأیید (پرداختِ بیشتر همیشه قبول است)
     if (paid >= exp && v === 'reject' && rc === 'amount_too_low') v = 'approve';

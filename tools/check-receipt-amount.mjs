@@ -129,6 +129,30 @@ for (const bot of ['tarot', 'voice2text']) {
     ok(resolvePaidToman({ amount_raw: 50000, amount_currency: null }, 50000).basis === 'ambiguous',
        t('واحدِ نامعلوم با عددِ کمتر از ده‌برابر باید مبهم بماند'));
   }
+
+  /* ══ 💰 مبلغِ ناخوانا = تصمیمِ انسانی ═══════════════════════════════════
+   *
+   * 🐛 همه‌ی گاردهای مبلغ داخلِ `if (hasPaid && exp > 0)` بودند. پس اگر مدل «approve»
+   * می‌داد ولی هیچ عددی در نمی‌آورد (رسیدِ تار، لِی‌اوتِ ناآشنا، اسکرین‌شاتِ کراپ‌شده)،
+   * هیچ‌کدام اجرا نمی‌شدند و پرداخت با **صفر** راستی‌آزماییِ مبلغ خودکار تأیید می‌شد.
+   * بند ۹ ریشه بعد از باگِ ریال/تومان الزامی کرد که گاردِ مبلغ **هر دو جهت** را ببیند —
+   * ردِ اشتباه و تأییدِ اشتباه. و مبلغِ ناخوانا از واحدِ مبهم کم‌اطلاع‌تر است، پس اگر آن
+   * یکی به بازبینیِ انسانی می‌رود، این یکی به‌طریقِ‌اولی. */
+  {
+    const noAmt = { verdict: 'approve', reason_code: 'ok', reason_fa: '', extracted: {} };
+    const r = decideReceipt(noAmt, 100_000);
+    ok(r.action === 'review', t('مدل approve داد ولی مبلغ ناخوانا بود ⇒ بازبینیِ انسانی'));
+    ok(r.reason_code === 'amount_unreadable', t('و دلیلش صریح ثبت می‌شود (amount_unreadable)'));
+    ok(r.paid === null, t('و هیچ مبلغی از خودش نمی‌سازد'));
+
+    // و سه رفتارِ درست که **نباید** عوض شده باشند
+    ok(decideReceipt({ verdict: 'approve', reason_code: 'ok', extracted: { amount_raw: 1_000_000, amount_currency: 'rial' } }, 100_000).action === 'approve',
+      t('پرداختِ کافیِ خوانا مثل قبل خودکار تأیید می‌شود'));
+    ok(decideReceipt({ verdict: 'reject', reason_code: 'not_a_receipt', extracted: {} }, 100_000).action === 'not_a_receipt',
+      t('«اصلاً رسید نیست» دست‌نخورده می‌ماند'));
+    ok(decideReceipt({ verdict: 'reject', reason_code: 'bad', extracted: {} }, 100_000).action === 'reject',
+      t('و ردِ بدونِ مبلغ به review تبدیل نمی‌شود (گارد فقط جهتِ تأیید را می‌بندد)'));
+  }
 }
 
 // ── ۷ب) سه بسته‌ی واقعیِ tarot با تعدادِ صفرِ دقیق (خواسته‌ی صریحِ مالک) ────────
@@ -158,7 +182,10 @@ for (const bot of ['tarot', 'voice2text']) {
 
 // ── ۸) هم‌قراردادیِ سه کپی (JS×۲ و پایتون) ───────────────────────────────────
 // اگر کسی یکی را عوض کند و بقیه را نه، همان‌جا دوباره واگرا می‌شویم.
-const MARKERS = ['amount_raw', 'amount_currency', 'rial', 'toman'];
+// `amount_unreadable` در این لیست است تا **کپیِ پایتونی** هم نتواند بی‌صدا واگرا شود:
+// دو کپیِ JS با اجرای واقعی سنجیده می‌شوند، ولی این چک پایتون را اجرا نمی‌کند و تنها
+// راهِ ارزانِ قفل‌کردنش همین مارکر است.
+const MARKERS = ['amount_raw', 'amount_currency', 'rial', 'toman', 'amount_unreadable'];
 const sources = {
   'bots/tarot/cardpay.js': readFileSync(join(root, 'bots/tarot/cardpay.js'), 'utf8'),
   'bots/voice2text/cardpay.js': readFileSync(join(root, 'bots/voice2text/cardpay.js'), 'utf8'),
