@@ -1,5 +1,5 @@
 // رندر HTML سمت سرور — RTL فارسی، بدون build step و بدون هیچ منبع خارجی (self-contained)
-import { esc, fmt, tehranDateTime } from './util.js';
+import { esc, fmt, tehranDateTime, RANGES, RANGE_KEYS } from './util.js';
 import { NAV, inGroup, link, botsForPicker, langPicker } from './nav.js';
 
 const CSS = `
@@ -24,9 +24,14 @@ const CSS = `
   .side nav a { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; color:var(--text); }
   .side nav a:hover { background:#f2f4fb; }
   .side nav a.active { background:var(--accent); color:#fff; }
-  .side nav .sub { display:flex; flex-direction:column; gap:2px; margin:2px 0 6px; margin-inline-start:15px;
+  .side nav .grp { display:flex; flex-direction:column; }
+  /* عنوانِ گروه عمداً لینک نیست: کلیک‌کردنش قبلاً کاربر را به یک صفحه‌ی دلبخواه می‌برد
+     و «ریشه» با «اولین زیرمنو» قاطی می‌شد. حالا فقط برچسبِ دسته است. */
+  .side nav .grp-t { padding:9px 10px 5px; font-size:11px; font-weight:700; color:var(--dim); letter-spacing:.02em; }
+  .side nav .grp-t.on { color:var(--accent); }
+  .side nav .sub { display:flex; flex-direction:column; gap:2px; margin:0 0 8px; margin-inline-start:9px;
     border-inline-start:2px solid var(--line); padding-inline-start:7px; }
-  .side nav .sub a { padding:6px 9px; font-size:13px; color:var(--dim); }
+  .side nav .sub a { padding:7px 9px; font-size:13px; color:var(--text); }
   .side nav .sub a.active { background:#eef0ff; color:var(--accent); font-weight:700; }
   .side .foot { margin-top:auto; padding-top:8px; }
   main { flex:1; min-width:0; max-width:1180px; padding:20px; }
@@ -90,6 +95,13 @@ const CSS = `
   .drill-body table { font-size:13px; }
   td.step { white-space:normal; max-width:520px; }
   .step-txt { display:block; color:var(--text); }
+  /* بازشویِ «متنِ کاملِ پیام» زیرِ هر قدمِ جرنی */
+  details.msg > summary { cursor:pointer; list-style:none; font-size:11px; color:var(--accent);
+    margin-top:3px; text-decoration:underline dotted; text-underline-offset:2px; }
+  details.msg > summary::-webkit-details-marker { display:none; }
+  .msgfull { margin-top:6px; padding:8px 10px; background:#fbfcff; border:1px solid var(--line);
+    border-radius:8px; white-space:pre-wrap; font-size:12px; max-width:560px; line-height:1.7; }
+  .msgbtn { margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); color:var(--dim); font-size:11px; }
   .step-meta { display:block; color:var(--dim); font-size:11px; margin-top:2px; }
   .bar { display:inline-block; height:6px; border-radius:3px; background:var(--accent); vertical-align:middle; min-width:2px; }
   .drop { color:var(--bad); font-weight:700; }
@@ -110,6 +122,11 @@ const CSS = `
   .hero.big .v { font-size:38px; color:var(--accent); }
   .hero .v details.cohort > summary { font-weight:800; }
   h3.ch { font-size:13px; color:var(--dim); font-weight:600; margin:0 0 10px; }
+  /* سرصفحه‌ی کارت + انتخابگرِ بازه‌ی همان کارت (per بخش، نه سراسری) */
+  .cardhead { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  .cardhead h2 { margin:0; }
+  .rangepick { margin-inline-start:auto; display:flex; align-items:center; gap:7px; font-size:12px; }
+  .rangepick .pills .pill { padding:4px 10px; font-size:12px; }
   .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:22px; }
   /* میله‌ی افقی (مقایسه‌ی دسته‌ها) */
   .hbars { display:flex; flex-direction:column; gap:7px; }
@@ -135,10 +152,10 @@ export function layout(title, active, body, { msg = '', bot = '', session = null
     `<a href="${link(href, bot)}" class="${cls}${active === href ? ' active' : ''}">${esc(label)}</a>`;
   const nav = NAV.map((n) => {
     if (!n.children) return navLink([n.href, `${n.icon} ${n.label}`]);
-    // ریشه‌ی گروه وقتی فعال است که یا خودش باز باشد یا یکی از زیرمنوهایش
-    const on = active === n.href || inGroup(active);
-    return `<a href="${link(n.href, bot)}" class="${on ? 'active' : ''}">${esc(`${n.icon} ${n.label}`)}</a>`
-      + `<span class="sub">${n.children.map(c => navLink(c)).join('')}</span>`;
+    // ریشه‌ی گروه وقتی فعال است که یکی از زیرمنوهای **همان گروه** باز باشد
+    const on = inGroup(n.key, active);
+    return `<span class="grp"><span class="grp-t${on ? ' on' : ''}">${esc(`${n.icon} ${n.label}`)}</span>`
+      + `<span class="sub">${n.children.map(c => navLink(c)).join('')}</span></span>`;
   }).join('');
 
   // منوی کشوییِ ربات: با تغییر، همان صفحه با اسکوپِ جدید باز می‌شود. فیلترهای صفحه حفظ
@@ -271,3 +288,19 @@ export function statusBadge(s) {
     : s === 'waiting_review' || s === 'pending' || s === 'pending_payment' ? 'warn' : '';
   return `<span class="badge ${cls}">${esc(s)}</span>`;
 }
+
+/* انتخابگرِ بازه‌ی **یک بخش** — لینک‌هایی که فقط پارامترِ خودشان را عوض می‌کنند و بقیه‌ی
+   فیلترهای صفحه را دست‌نخورده نگه می‌دارند. بدونِ جاوااسکریپت، پس با back/forward مرورگر
+   و با اشتراک‌گذاریِ لینک هم درست کار می‌کند. */
+export function rangePicker(url, name, cur, { keys = RANGE_KEYS, label = 'بازه' } = {}) {
+  const pills = keys.map((k) => {
+    const q = new URLSearchParams(url.searchParams);
+    q.set(name, k);
+    return `<a href="${esc(url.pathname)}?${esc(q.toString())}" class="pill ${k === cur ? 'on' : ''}">${esc(RANGES[k].label)}</a>`;
+  }).join('');
+  return `<span class="rangepick"><span class="muted">${esc(label)}:</span><span class="pills">${pills}</span></span>`;
+}
+
+/** سرصفحه‌ی کارت با انتخابگرِ بازه‌ی اختصاصیِ همان کارت. */
+export const cardHead = (title, picker = '') =>
+  `<div class="cardhead"><h2>${title}</h2>${picker}</div>`;

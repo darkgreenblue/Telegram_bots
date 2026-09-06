@@ -87,6 +87,10 @@ process.env.TAROT_DB_DIR = dataDir;
 process.chdir(root);                       // platform.db داشبورد در پوشه‌ی موقت ساخته شود
 const base = path.resolve(import.meta.dirname, '../bots/dashboard');
 const { dashBody } = await import(`file://${base}/routes/dash.js`);
+/* بعد از بازطراحیِ ساختار (۱۴۰۵/۰۶/۰۹) هر عدد سرِ صفحه‌ی خودش رفت: دعوت به «جذب» و
+   هزینه‌ی مدل به «اقتصاد». ادعاها همان‌اند، فقط روی صفحه‌ی درست سنجیده می‌شوند. */
+const { acquisitionBody } = await import(`file://${base}/routes/acquisition.js`);
+const { economicsBody } = await import(`file://${base}/routes/economics.js`);
 const { resolveCohort } = await import(`file://${base}/lib/cohorts.js`);
 const { instancesOf } = await import(`file://${base}/lib/bots.js`);
 
@@ -94,6 +98,8 @@ ok(instancesOf('tarot').length === 1, 'فیکسچرِ تاروت دیده شد')
 
 const U = (q) => new URL(`http://x/dash?${q}`);
 const html = dashBody(U('bot=tarot&range=all&aw=7'));
+const acqHtml = acquisitionBody(U('bot=tarot'));
+const econHtml = economicsBody(U('bot=tarot&rEcon=all'));
 const fa = (n) => Number(n).toLocaleString('fa-IR');
 
 console.log('▶ ۱) اعدادِ کلیدی همان چیزی‌اند که با دست حساب می‌شود');
@@ -129,16 +135,17 @@ console.log('\n▶ ۳) عدد و لیستِ کاربرانش هرگز از هم 
   ];
   // عدد از خودِ HTML بیرون کشیده می‌شود (همان چیزی که مالک می‌بیند). عددِ کاربرمحور داخلِ
   // <details class="cohort"> می‌نشیند، پس اولین رشته‌ی رقمِ فارسی بعد از برچسب برداشته می‌شود.
-  const shownFor = (label) => {
+  const shownFor = (label, page = html) => {
     const marker = `<div class="k">${label}</div>`;
-    const at = html.indexOf(marker);
+    const at = page.indexOf(marker);
     if (at < 0) return -1;
-    const m = /[\u06F0-\u06F9\u066C]+/.exec(html.slice(at + marker.length, at + marker.length + 400));
+    const m = /[\u06F0-\u06F9\u066C]+/.exec(page.slice(at + marker.length, at + marker.length + 400));
     return m ? Number(m[0].replace(/\u066C/g, '').replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))) : -1;
   };
   for (const [t, label] of CASES) {
     const list = resolveCohort(U(`k=tarot&bot=tarot&t=${t}`)).users.length;
-    const shown = shownFor(label);
+    const page = t === 'referrer' ? acqHtml : html;
+    const shown = shownFor(label, page);
     ok(shown === list, `«${label}»: عددِ صفحه ${shown} = تعدادِ لیست ${list}`);
   }
   for (const i of [0, 1, 2, 3, 4, 5]) {
@@ -173,8 +180,8 @@ console.log('\n▶ ۶) دعوتِ موفق فقط ردیفِ پاداش‌داد
 {
   const refs = resolveCohort(U('k=tarot&bot=tarot&t=referrer')).users.map(x => Number(x.uid));
   ok(JSON.stringify(refs) === '[1]', `فقط کاربرِ ۱ دعوت‌کننده‌ی موفق است (دیده شد: ${refs.join(',')})`);
-  ok(html.includes('<div class="k">بیشترین دعوت توسط یک کاربر</div><div class="v">' + fa(2) + '</div>'),
-    'بیشترین دعوت توسط یک کاربر = ۲');
+  ok(acqHtml.includes('<div class="k">بیشترین دعوت توسط یک کاربر</div><div class="v">' + fa(2) + '</div>'),
+    'بیشترین دعوت توسط یک کاربر = ۲ (صفحه‌ی جذب)');
 }
 
 console.log('\n▶ ۷) ورودیِ مخرب به SQL نمی‌رسد');
@@ -197,8 +204,8 @@ console.log('\n▶ ۷) ورودیِ مخرب به SQL نمی‌رسد');
 
 console.log('\n▶ ۸) هزینه‌ی مدل از جدولِ llm_usage خوانده می‌شود');
 {
-  ok(/\$0\.50/.test(html), 'هزینه‌ی کل ($0.50) روی صفحه هست');
-  ok(html.includes('تعداد فراخوانیِ ثبت‌شده'), 'تعدادِ فراخوانی هم گزارش می‌شود');
+  ok(/\$0\.50/.test(econHtml), 'هزینه‌ی کل ($0.50) در صفحه‌ی اقتصاد هست');
+  ok(econHtml.includes('فراخوانیِ ثبت‌شده'), 'تعدادِ فراخوانی هم گزارش می‌شود');
 }
 
 console.log('\n▶ ۹) رباتِ بدونِ داشبوردِ اصلی، پیامِ صادقانه می‌دهد (نه عددِ ساختگی)');

@@ -20,9 +20,19 @@ function stepCell(ev, key, screens) {
     : l.kind === 'event' ? 'رویدادِ قیف (پیامِ صفحه نیست)'
     : l.kind === 'content' ? 'متنِ تولیدشده (طولش متغیر است)'
     : (l.buttons ? `دکمه‌ها: ${l.buttons}` : 'بدون دکمه');
+  /* 🔎 «این پیام دقیقاً چه بود؟» (ایرادِ صریحِ مالک: اکشن‌های جرنی مبهم‌اند).
+     برچسبِ کوتاه برای اسکنِ سریعِ جدول لازم است، ولی برای تحلیلِ نقطه‌ی دراپ باید
+     **متنِ کاملِ همان پیام و دکمه‌هایش** در دسترس باشد. پس متنِ کامل پشتِ یک بازشوی
+     درجا می‌آید — بدونِ ترکِ صفحه و بدونِ ریکوئستِ اضافه (دیتا از قبل در دست است).
+     ⚠️ اعدادِ داخلِ متن با `⋯` ماسک‌اند: نمونه‌ی ذخیره‌شده مالِ **اولین** کاربری است که
+     آن صفحه را دید، پس عددش برای بقیه غلط است (باگِ واقعیِ فاکتورِ ۱۰۰٬۰۰۰ تومانی). */
+  const hasMore = l.full && (l.full.length > l.text.length || l.buttons);
+  const detail = hasMore ? `<details class="msg"><summary>متنِ کامل پیام</summary>
+      <div class="msgfull">${esc(l.full)}${l.buttons ? `<div class="msgbtn">🔘 دکمه‌ها: ${esc(l.buttons)}</div>` : ''}</div></details>` : '';
   return `${l.icon} <span class="step-txt">${esc(l.text)}</span>`
     + `<span class="step-meta">${esc(meta)}</span>`
-    + (l.note ? `<span class="step-meta">${esc(l.note)}</span>` : '');
+    + (l.note ? `<span class="step-meta">${esc(l.note)}</span>` : '')
+    + detail;
 }
 
 /* سلولِ «قدمِ قبلی»: فشرده و بدونِ note (ستونِ کمکی است، نه ردیفِ اصلی). */

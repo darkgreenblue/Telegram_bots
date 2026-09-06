@@ -59,3 +59,26 @@ export function postRefLabel(ref) {
     return `${day} · اسلات ${fmt(slot)}`;
   } catch { return raw; }
 }
+
+/* ═══ بازه‌های زمانیِ استاندارد داشبورد ═══
+   خواسته‌ی مالک: انتخابگرِ بازه به‌جای یک فیلترِ کلیِ بالای صفحه، **per بخش** باشد تا
+   بشود مثلاً ماندگاری را ماهانه و هزینه را روزانه دید، بدونِ اینکه یکی دیگری را عوض کند.
+   هر بخش پارامترِ query خودش را دارد (`rEng`, `rCost`, …) و همین باعث می‌شود عوض‌کردنِ
+   یکی، بقیه را ریست نکند. */
+export const RANGES = {
+  day:   { label: 'روزانه', days: 1 },
+  week:  { label: 'هفتگی', days: 7 },
+  month: { label: 'ماهانه', days: 30 },
+  all:   { label: 'کل', days: 0 },
+};
+export const RANGE_KEYS = Object.keys(RANGES);
+/** کلیدِ بازه از URL — همیشه از whitelist، هرگز از متنِ خام. */
+export const rangeOf = (url, name, def = 'week') => {
+  const k = url?.searchParams?.get(name) || '';
+  return RANGES[k] ? k : def;
+};
+/** لحظه‌ی شروعِ بازه (۰ = از ابتدای عمرِ ربات). */
+export const rangeSince = (key) => {
+  const d = RANGES[key]?.days || 0;
+  return d ? tehranDayStart(-(d - 1)) : 0;
+};

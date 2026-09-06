@@ -19,6 +19,7 @@ import {
   DONE, notAdminReadings, READ_BUCKETS, RET_DAYS, SATISFIED_MIN_AVG,
   activeUsersSql, readerUsersSql, repeatUsersSql, satisfiedUsersSql, ratersUsersSql,
   successfulReferrersSql, bucketUsersSql, retainedUsersSql,
+  CADENCE_DAYS, spendCadenceSql, usefulCadenceSql, negativeUsersSql, NEGATIVE_EVENTS,
 } from './engage.js';
 import { weekIdx, weekExpr, weekLabel, nowSec, postRefLabel } from './util.js';
 
@@ -62,6 +63,7 @@ const CHAN_CONDS = {
   other: { cond: "first_source LIKE 'other:%'", label: 'سایر payload' },
   unknown: { cond: "first_source IS NULL OR first_source = ''", label: 'نامشخص (قبل از اتریبیوشن)' },
   campaign: { cond: 'first_source = ?', label: 'کمپین' }, // مقدار bound می‌شود
+  campaign_any: { cond: "first_source LIKE 'campaign:%'", label: 'همه‌ی کمپین‌ها' },
 };
 
 /* قیفِ اتریبیوشن — مشترکِ «کمپین» و «پستِ کانال»: هر دو یک ستونِ write-onceِ users را با یک مقدار
@@ -357,11 +359,13 @@ export function resolveCohort(url) {
         churn: 'ریزشِ هفتگی (هفته‌ی قبل فال گرفت، این هفته نه)',
         bucket: 'کاربرانِ این سطلِ تعدادِ فال',
         ret: 'کاربرانی که بعد از این تعداد روز دوباره فال گرفتند',
+        cadence: 'کاربرانِ این کدنسِ چسبندگی',
+        negative: 'کاربرانی که این سیگنالِ منفی را داده‌اند',
       };
       if (!LABEL[t]) return { error: 'نوع سنجه نامعتبر است.' };
 
       const users = collect(targets, botKey, (db, { pk, nameCol }) => {
-        if (!hasTable(db, 'readings') && t !== 'referrer') return null;
+        if (!hasTable(db, 'readings') && !['referrer', 'negative', 'cadence'].includes(t)) return null;
         const ev = hasTable(db, 'events');
         let inner = null;
         if (t === 'active') inner = activeUsersSql(now, aw, ev);
@@ -375,6 +379,17 @@ export function resolveCohort(url) {
           const d = RET_DAYS.includes(intParam(url, 'd', 0)) ? intParam(url, 'd', 0) : 0;
           if (!d) return null;
           inner = retainedUsersSql(d, now, ev);
+        } else if (t === 'cadence') {
+          // کدنس: هم شمارشِ صفحه هم این لیست از **همان** تابعِ lib/engage.js می‌آیند
+          const n = CADENCE_DAYS.includes(intParam(url, 'n', 0)) ? intParam(url, 'n', 0) : 0;
+          if (!n) return null;
+          const win = Math.max(0, intParam(url, 'win', 0));
+          const layer = url.searchParams.get('layer') === 'useful' ? 'useful' : 'spend';
+          if (layer === 'useful' && !ev) return null;
+          inner = (layer === 'useful' ? usefulCadenceSql : spendCadenceSql)(n, now, ev, { windowDays: win });
+        } else if (t === 'negative') {
+          if (!ev) return null;
+          inner = negativeUsersSql(Math.max(0, intParam(url, 'i', -1)), ev);
         } else if (t === 'churn') {
           inner = {
             sql: `SELECT r.user_id AS uid FROM readings r
@@ -391,7 +406,9 @@ export function resolveCohort(url) {
         };
       });
       const extra = t === 'bucket' ? ` · ${READ_BUCKETS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}`
-        : t === 'ret' ? ` · D+${intParam(url, 'd', 0)}` : '';
+        : t === 'ret' ? ` · D+${intParam(url, 'd', 0)}`
+        : t === 'cadence' ? ` · حداقل هر ${intParam(url, 'n', 0)} روز · ${url.searchParams.get('layer') === 'useful' ? 'اکشنِ مفید' : 'خرجِ الماس'}`
+        : t === 'negative' ? ` · ${NEGATIVE_EVENTS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}` : '';
       return done(LABEL[t] + extra, users);
     }
 
