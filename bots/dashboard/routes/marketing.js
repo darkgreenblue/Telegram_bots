@@ -1,7 +1,7 @@
 // مارکتینگ: ساخت لینک کمپین (t.me/<bot>?start=c_<code>) + قیفِ تا-درآمد هر کمپین + مقایسه‌ی چنل‌ها
 //           + اتریبیوشن در سطحِ پستِ کانال (payload لینکِ پست: c_<code>_<postref>)
 import { BOTS, botByKey, instancesOf, withDb, hasTable, scalar, rows, userPk, moneyOf, toToman,
-  baseKey, langOfKey, scopedKey, langsOf } from '../lib/bots.js';
+  baseKey, langOfKey, scopedKey, langsOf, testUserClause } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, postRefLabel } from '../lib/util.js';
@@ -61,8 +61,8 @@ export function campaignStats(c) {
       agg.newUsers += scalar(db, 'SELECT COUNT(*) c FROM users WHERE first_source=?', [src]);
       if (hasTable(db, m.table)) {
         agg.hasPayments = true;
-        agg.payers += scalar(db, `SELECT COUNT(DISTINCT p.user_id) c FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}`, [src]);
-        agg.revenue += toToman(c.bot, scalar(db, `SELECT COALESCE(SUM(p.${m.amountCol}),0) s FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}`, [src]));
+        agg.payers += scalar(db, `SELECT COUNT(DISTINCT p.user_id) c FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}${testUserClause(c.bot, 'p.user_id')}`, [src]);
+        agg.revenue += toToman(c.bot, scalar(db, `SELECT COALESCE(SUM(p.${m.amountCol}),0) s FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}${testUserClause(c.bot, 'p.user_id')}`, [src]));
       }
     });
   }
@@ -97,7 +97,7 @@ export function channelSummary(botKey) {
       }
       if (hasTable(db, mn.table)) {
         for (const r of rows(db, `SELECT ${CH_EXPR} ch, COUNT(DISTINCT p.user_id) payers, COALESCE(SUM(p.${mn.amountCol}),0) rev
-            FROM ${mn.table} p JOIN users u ON u.${pk}=p.user_id WHERE p.status='${mn.successStatus}'${testClause}${admJoin} GROUP BY ch`)) {
+            FROM ${mn.table} p JOIN users u ON u.${pk}=p.user_id WHERE p.status='${mn.successStatus}'${testClause}${testUserClause(inst.bot, 'p.user_id')}${admJoin} GROUP BY ch`)) {
           const m = merged.get(r.ch) || { users: 0, payers: 0, revenue: 0 };
           m.payers += r.payers; m.revenue += toToman(botKey, r.rev); merged.set(r.ch, m);
         }
@@ -181,7 +181,7 @@ export function postStats(botKey) {
         for (const r of rows(db, `SELECT u.first_payload pl, COUNT(DISTINCT p.user_id) payers,
               COALESCE(SUM(p.${m.amountCol}),0) rev
             FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
-            WHERE u.first_payload GLOB ? AND p.status='${m.successStatus}'${testClause}
+            WHERE u.first_payload GLOB ? AND p.status='${m.successStatus}'${testClause}${testUserClause(inst.bot, 'p.user_id')}
             GROUP BY pl LIMIT ${POST_SCAN_LIMIT}`, [POST_PAYLOAD_GLOB])) {
           const e = rowOfPayload(r.pl);
           if (!e) continue;

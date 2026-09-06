@@ -9,8 +9,7 @@ import { hbars } from '../lib/charts.js';
 import { getSetting } from '../lib/platform.js';
 import { costPerDiamond } from '../lib/cpa.js';
 import { costsBody } from './finance.js';
-import { USD_RATE_KEY, CAMPAIGN_CPA_KEY } from './acquisition.js';
-import { profitDaily } from '../lib/profit.js';
+import { profitDaily, profitLifetime, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 
@@ -112,7 +111,7 @@ export function economicsBody(url) {
 
   return `<div class="card"><h2 style="margin:0">💰 اقتصاد و هزینه — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">هزینه‌ی واقعیِ مدل، اقتصادِ الماس، و آنچه از درآمد می‌ماند.</p></div>
-    ${profitCard(url, bot)}${costCard}${cpdCard}${revCard}${costsBody(url)}`;
+    ${costInputsCard(bot)}${lifetimeCard(bot)}${profitCard(url, bot)}${costCard}${cpdCard}${revCard}${costsBody(url)}`;
 }
 
 /* ═══ 📈 سودِ خالص — «کی مثبت شدم و چقدر؟» ═══
@@ -186,4 +185,58 @@ export function profitCard(url, bot) {
     <p class="muted">«تجمعی» از اولین روزِ ثبتِ هزینه جمع می‌شود. «نقطه‌ی سربه‌سر» اولین
       روزی است که تجمعی مثبت شد <b>و دیگر منفی نشد</b> — یک روزِ پرفروشِ تنها که فردا
       برمی‌گردد، سربه‌سر نیست.</p></div>`;
+}
+
+/* ⚙️ ورودی‌های دستیِ هزینه — **اولین کارتِ این صفحه** (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۵).
+   قبلاً وسطِ صفحه‌ی «جذب» بود، ولی هر سه ورودی‌اش ورودیِ محاسبه‌ی اقتصادند و بدونشان
+   هیچ عددِ تومانی‌ای در این صفحه ساخته نمی‌شود. پس اول صفحه، جایی که اگر خالی باشد
+   بلافاصله دیده شود. اکشن عمداً همان `/acquisition/settings` ماند تا audit نشکند. */
+export function costInputsCard(bot) {
+  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
+  const campUsd = Number(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  const pre = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
+  const missing = [!rate && 'نرخ دلار', !campUsd && 'هزینه‌ی تبلیغ'].filter(Boolean);
+  return `<div class="card">
+    ${cardHead('⚙️ ورودی‌های دستیِ هزینه')}
+    ${missing.length ? `<div class="note">⚠️ تا ${esc(missing.join(' و '))} وارد نشود،
+      بخشی از اعدادِ این صفحه ساخته نمی‌شود. داشبورد هیچ نرخی از خودش حدس نمی‌زند.</div>` : ''}
+    <form method="post" action="/acquisition/settings" class="inline">
+      <input type="hidden" name="bot" value="${esc(bot)}">
+      <label>نرخ دلار به تومان
+        <input name="rate" type="number" min="0" value="${rate || ''}" placeholder="مثلاً 225000"></label>
+      <label>هزینه‌ی تبلیغ per کاربرِ کمپین (دلار)
+        <input name="camp" type="number" step="0.00001" min="0" value="${campUsd || ''}" placeholder="مثلاً 0.00756"></label>
+      <label>هزینه‌ی مدل قبل از شروعِ ثبت (دلار)
+        <input name="pre" type="number" step="0.01" min="0" value="${pre || ''}" placeholder="مثلاً 4.19"></label>
+      <button type="submit">ذخیره</button>
+    </form>
+    <p class="muted" style="margin-top:8px">
+      ${campUsd && rate ? `الان: هر کاربرِ کمپین <b>${usd(campUsd)}</b> ≈ <b>${fmt(Math.round(campUsd * rate))} تومان</b>. ` : ''}
+      هزینه‌ی تبلیغ عمداً <b>دلاری</b> است تا با هزینه‌ی مدل هم‌واحد بماند؛ تومانش خودکار می‌آید.
+      <br>«هزینه‌ی قبل از شروعِ ثبت» را از داشبوردِ خودِ OpenRouter بخوان: ثبتِ خودکار تاریخچه
+      ندارد و بدونِ این عدد، سودِ کلِ عمر درآمدِ همه‌ی روزها را با هزینه‌ی چند روزِ آخر مقایسه می‌کند.
+      <br>🔎 <b>اتوماسیون:</b> <span class="mono">ads.telegram.org</span> API عمومی برای خواندنِ هزینه‌ی
+      کمپینِ خودت ندارد (فقط داشبوردِ وبی)، پس این ورودی دستی می‌ماند.</p></div>`;
+}
+
+/* 💰 سودِ کلِ عمر — تنها جایی که هزینه‌ی دستیِ قبل از ثبت وارد محاسبه می‌شود. */
+export function lifetimeCard(bot) {
+  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
+  const pre = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
+  const lt = profitLifetime(bot, { usdToman: rate, preTrackUsd: pre });
+  if (!lt.hasRate) return '';
+  const margin = lt.rev ? Math.round((lt.net / lt.rev) * 1000) / 10 : 0;
+  return `<div class="card">
+    ${cardHead('💰 سودِ کلِ عمر')}
+    <div class="grid">
+      ${stat('سودِ خالصِ کل', `<b class="${lt.net < 0 ? 'drop' : ''}">${fmt(lt.net)} ت</b>`)}
+      ${stat('درآمدِ کل', `${fmt(lt.rev)} ت`)}
+      ${stat('هزینه‌ی کل', `${usd(lt.costUsd)} ≈ ${fmt(lt.costToman)} ت`)}
+      ${stat('حاشیه‌ی سود', `${fmt(margin)}٪`)}
+    </div>
+    <p class="muted">هزینه = ${usd(lt.trackedUsd)} ثبت‌شده${lt.preTrackUsd
+      ? ` + ${usd(lt.preTrackUsd)} دستی (قبل از ${esc(tehranDayStr(lt.costSince || 0))})`
+      : ''}.
+      ${lt.preTrackUsd ? '' : '⚠️ هزینه‌ی قبل از شروعِ ثبت وارد نشده، پس این سود <b>بیش‌برآورد</b> است.'}
+      درآمد بدونِ پرداخت‌های تستی حساب می‌شود.</p></div>`;
 }

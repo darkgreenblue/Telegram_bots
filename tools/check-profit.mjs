@@ -169,3 +169,39 @@ console.log('\n▶ ۹) خلاصه‌ی «از شروعِ ثبتِ هزینه» �
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
+
+console.log('\n▶ ۱۰) پرداختِ حساب‌های تستی از درآمد بیرون است، و هیچ مسیری جا نمی‌ماند');
+{
+  /* ⚠️ گاردِ **ساختاری**، نه آینه‌ای: خطرِ واقعی این نیست که `revenueWhere` فیلتر را
+     جا بیندازد (یک خط است و پیداست)، بلکه این است که یک صفحه‌ی دیگر خودش
+     `status='approved'` بنویسد و از فیلتر بی‌خبر بماند. آن‌وقت درآمدِ دو صفحه با هم
+     فرق می‌کند و هیچ خطایی هم رخ نمی‌دهد. پس سورسِ همه‌ی routeها گشته می‌شود. */
+  const { readFileSync, readdirSync } = await import('fs');
+  const { testUserClause } = await import(`file://${base}/lib/bots.js`);
+
+  ok(/NOT IN \(409581917/.test(testUserClause('tarot')),
+    'شرطِ کاربرِ تستیِ tarot ساخته می‌شود');
+  ok(testUserClause('voice2text') === '',
+    'رباتِ بدونِ حساب تستی هیچ شرطی نمی‌گیرد (رفتارِ قبلی دست‌نخورده)');
+  ok(!/[a-z]'/i.test(testUserClause('tarot').replace(/NOT IN \([\d,]+\)/, '')),
+    'هیچ رشته‌ای در شرط نیست؛ فقط عددِ پاک‌شده (قراردادِ امنیتی)');
+
+  const dirs = [`${base}/routes`, `${base}/lib`];
+  const miss = [];
+  for (const d of dirs) {
+    for (const f of readdirSync(d).filter(x => x.endsWith('.js'))) {
+      const src = readFileSync(`${d}/${f}`, 'utf8');
+      for (const line of src.split('\n')) {
+        // خطی که خودش وضعیتِ موفقِ پول را می‌نویسد ولی نه از revenueWhere می‌آید نه فیلتر دارد
+        const t = line.trim();
+        // خطِ کامنت خودش کوئری نیست (نسخه‌ی اولِ همین گارد روی کامنتِ توضیحیِ خودش قرمز داد)
+        if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue;
+        if (!/successStatus\}'|status='approved'/.test(line)) continue;
+        if (/testUserClause|revenueWhere|rw\.where/.test(line)) continue;
+        miss.push(`${f}: ${line.trim().slice(0, 70)}`);
+      }
+    }
+  }
+  ok(miss.length === 0,
+    `هیچ کوئریِ پولی بدونِ فیلترِ حسابِ تستی نمانده${miss.length ? `\n     ${miss.join('\n     ')}` : ''}`);
+}

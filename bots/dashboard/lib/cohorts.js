@@ -10,7 +10,7 @@
 //  - انتخابِ چنل/نسخه/نوع از لیستِ whitelist ایندکس می‌شود، نه از متنِ خام.
 import {
   instancesOf, getInstance, withDb, hasTable, rows,
-  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, familyOf } from './bots.js';
+  userPk, userNameCol, moneyOf, unixOf, userCreatedExpr, familyOf, testUserClause } from './bots.js';
 import { FUNNELS, CHANNELS, verCond } from './funnels-def.js';
 // شرط‌های مسیرِ ریز از همان‌جایی می‌آیند که عددها ساخته می‌شوند (تک‌منبع؛ ضدِ واگراییِ عدد و لیست)
 import { KEY_EXPR, notAdmin } from './journey.js';
@@ -91,7 +91,7 @@ function attrCohort(targets, botKey, col, val, mode) {
       if (!hasTable(db, m.table)) return null;
       return {
         sql: `SELECT DISTINCT u.${pk} id, u.${nameCol} nm, u.username un FROM ${m.table} p JOIN users u ON u.${pk} = p.user_id
-              WHERE u.${col} = ? AND p.status = '${m.successStatus}'${test} ORDER BY u.${pk}${lim}`,
+              WHERE u.${col} = ? AND p.status = '${m.successStatus}'${test}${testUserClause(bot, 'p.user_id')} ORDER BY u.${pk}${lim}`,
         params: [val],
       };
     }
