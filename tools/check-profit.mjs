@@ -167,6 +167,27 @@ console.log('\n▶ ۹) خلاصه‌ی «از شروعِ ثبتِ هزینه» �
   ok(s.totals.net === direct.totals.net, 'عددِ سرخطِ نمای کلی = همان محاسبه‌ی صفحه‌ی اقتصاد (تک‌منبع)');
 }
 
+console.log('\n▶ ۱۱) هزینه‌ی قبل از ثبت پخش می‌شود، نه کنار گذاشته');
+{
+  /* دیتای فیکسچر: ۵ روزِ اخیر هزینه‌ی ثبت‌شده دارند، ۵ روزِ قبلش فقط درآمد.
+     با لُختِ $2 روی آن دوره، «کل عمر» باید **دقیقاً** هر دو را جمع بزند. */
+  const PRE = 2;
+  const wide = profitDaily('tarot', { days: 30, usdToman: RATE, preTrackUsd: PRE });
+  const without = profitDaily('tarot', { days: 30, usdToman: RATE, preTrackUsd: 0 });
+  const delta = wide.totals.llmUsd - without.totals.llmUsd;
+  ok(Math.abs(delta - PRE) < 1e-6,
+    `کلِ لُختِ دستی دقیقاً یک‌بار وارد شد ($${delta.toFixed(4)} = $${PRE})`);
+  ok(wide.totals.net === without.totals.net - Math.round(PRE * RATE),
+    'سود دقیقاً به اندازه‌ی لُخت کم شد، نه بیشتر و نه کمتر');
+  // و روی روزهای قبل از شروعِ ثبت نشسته باشد، نه روی یک روزِ دلبخواه
+  const startStr = new Date((costTrackingSince('tarot') + 12600) * 1000).toISOString().slice(0, 10);
+  const before = wide.series.filter(r => r.d < startStr);
+  const spread = before.reduce((a, r) => a + r.llmUsd, 0);
+  ok(Math.abs(spread - PRE) < 1e-6,
+    `لُخت روی روزهای **قبل از** شروعِ ثبت پخش شد ($${spread.toFixed(4)})`);
+  ok(before.length > 1, `روی بیش از یک روز پخش شد (${before.length} روز)، نه همه روی یک روز`);
+}
+
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
 

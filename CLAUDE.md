@@ -22,7 +22,9 @@
 | `bots/daily-brief` | pm2: `daily-brief` | پادکستِ آموزشیِ روزانه‌ی شخصی: رودمپِ Notion → متن با LLM → صدا با TTS → ارسالِ صبحگاهی | 🧪 تست شخصی — **فقط ادمین** (کاربر دیگری نمی‌تواند استفاده کند)؛ بدون پرداخت | `bots/daily-brief/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
-مدل‌ها (همه از **OpenRouter**): پیش‌فرض `google/gemini-2.5-flash`؛ کارهای دقیق `google/gemini-2.5-pro`؛ فالبک ارزان `deepseek/deepseek-v3.2`.
+مدل‌ها (همه از **OpenRouter**): فالبکِ ارزانِ آخرِ زنجیره `deepseek/deepseek-v3.2`.
+
+⚠️ **مدلِ خوانشِ tarot دیگر جمنای نیست.** پیش‌فرض قبلاً `google/gemini-2.5-flash` بود و بعد به **`openai/gpt-5.6-luna`** منتقل شد (تک‌منبع: `READING_MODEL_BY_LOCALE` در `bots/tarot/reading-core.js` — هر چهار زبان روی luna). این فایل تا ۱۴۰۵/۰۶/۱۵ آپدیت نشده بود و هنوز جمنای می‌گفت؛ اگر جایی «پیش‌فرض جمنای» دیدی، همین‌جا را ملاک بگیر نه آن را. `FLASH` فقط به‌عنوان fallback در زنجیره مانده و مسیرِ **ویس** هم خودش تطبیق می‌دهد چون luna صدا نمی‌فهمد.
 
 ## ۲الف) آنالیتیکس، اتریبیوشن و داشبورد (زیرساخت رشد)
 - **رویدادها:** هر ربات Node جدول `events` + ستون‌های write-once `users.first_source/first_payload/first_version` دارد (`shared/analytics.js`، نسخه‌ی قرارداد `ANALYTICS_SCHEMA_VERSION=3` — voice2text کپی محلی هم‌قرارداد با چک CI: `tools/check-analytics-sync.mjs`). ثبت با ثابت‌های `EVENTS` (هسته: start, onboard_done, first_value, paywall_shown, recharge_started, receipt_submitted, payment_approved, payment_rejected, product_delivered, refund, feedback, reset, ab_exposure) — string خام ممنوع. track ها fail-safe اند و هرگز فلو را نمی‌شکنند. ریست تست جدول events همان کاربر را هم پاک می‌کند.
