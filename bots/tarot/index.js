@@ -34,6 +34,7 @@ import { registerSupport, supportRow, supportReply } from '../../shared/support.
 import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney, logPush } from '../../shared/journey.js';
+import { startHeartbeat } from '../../shared/heartbeat.js';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
@@ -677,6 +678,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /* ===== 2) Database ===== */
 mkdirSync('./data', { recursive: true });
 const db = new Database(`./data/bot-${LOCALE}.db`);
+// مسیرِ ضربان per اپ است نه per پوشه: چهار اپِ زبانیِ تاروت `cwd` مشترک دارند و فقط
+// LOCALE فرقشان است، پس یک فایلِ مشترک باعث می‌شد یک اپِ سالم، مرگِ سه‌تای دیگر را
+// بپوشاند (هم‌خانواده‌ی باگِ ۱۱ شهریور: گاردی که `.env` فارسی را برای هر سه می‌دید).
+const HEARTBEAT_FILE = `./data/heartbeat-${LOCALE}.txt`;
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.exec(`
@@ -7147,6 +7152,10 @@ function onLaunched() {
   // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
   setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
   setInterval(sweepStuckPayFlows, 3600 * 1000);
+  // 💓 ضربانِ زنده بودن. عمداً همین‌جاست: `onLaunch` بعد از getMe و قبل از شروعِ polling
+  // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
+  // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
+  startHeartbeat(HEARTBEAT_FILE, { logErr });
 }
 function launch() {
   // ⚠️ کارِ بوت در قلابِ **onLaunch** است، نه در `.then()`.
