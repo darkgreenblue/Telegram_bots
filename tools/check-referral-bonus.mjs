@@ -218,8 +218,17 @@ ok(L.buttons.inviteWithBonus(10, cur).includes(TEN),
 
 /* ══ ۸) نسخه بامپ شده (بند ۲ج/۴ ریشه) ════════════════════════════════════ */
 console.log('\n۸) نسخه');
-const ver = SRC.match(/const PRODUCT_VERSION = '([\d.]+)'/)?.[1] || '';
-ok(ver >= '3.69.0', `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
+// ⚠️ کف، نه عددِ دقیق — و مقایسه‌ی **عددی** نه رشته‌ای. درسِ همین PR: نسخه‌ی پین‌شده‌ی
+// `check-recover-readings` با اولین بامپِ بعدی قرمز شد، یعنی چکی که قرار بود رعایتِ
+// بند ۲ج/۴ را تضمین کند خودش جلوی همان قاعده را می‌گرفت. مقایسه‌ی رشته‌ای هم روزی
+// '3.100.0' را کوچک‌تر از '3.69.0' می‌خواند.
+const ver = SRC.match(/const PRODUCT_VERSION = '([\d.]+)'/)?.[1] || '0';
+const cmpVer = (a, b) => {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+};
+ok(cmpVer(ver, '3.69.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} پاس، ${fail} خطا\n`);
 if (fail) process.exit(1);
