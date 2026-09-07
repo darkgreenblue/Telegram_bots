@@ -666,6 +666,12 @@ const PACE_WELCOME = 4200;
 // ⏱ فاصله‌ی «دریافت شد ← حالا باید نیت کنی» (v3.55.0). تا v3.54.0 `PACE_M` بود (۲٫۵s) و
 // مالک هنوز زیادش می‌دانست؛ یک ثانیه کم شد. باز هم ثابتِ جدا، چون `PACE_M` مشترک است.
 const PACE_BREATH = 1500;
+// ⏱ مکثِ «قلبِ آخر دیده شود» (v3.67.0 — خواسته‌ی مالک). با آخرین انتخاب، گرید بلافاصله
+// جای خودش را به خطِ پیشرفت می‌داد، پس رنگِ قلبی که همان لحظه روی خانه نشسته بود **اصلاً
+// دیده نمی‌شد**؛ کاربر ده بار انتخاب می‌کرد و نُه رنگ می‌دید. حالا گرید یک ثانیه با
+// نشانگرِ typing سرِ جایش می‌ماند و بعد عوض می‌شود. مثل بقیه‌ی مکث‌ها ثابتِ **جدا** است،
+// چون `PACE_S` در ده‌ها نقطه‌ی دیگر هم هست.
+const PACE_PICK_LAST = 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
@@ -4172,9 +4178,18 @@ bot.action(/^pick:(\d+)$/, async (ctx) => {
   // این، گریدِ مرده در چت می‌ماند و تنها دعوتِ روی صفحه بود، در حالی که ربات چند ثانیه
   // در سکوتِ عمدیِ آیین (`sleep` + typing + آپلودِ عکس) بود؛ نتیجه همان تپ‌های پیاپی.
   // متنِ جایگزین از `pickProgress` می‌آید که از قبل نوشته شده بود و هیچ‌جا مصرف نداشت.
+  // 💗 **قلبِ آخر باید دیده شود** (v3.67.0). تا قبل از این، تپِ آخر مستقیم به
+  // `editMessageText` می‌رفت و گرید همان لحظه جای خودش را به خطِ پیشرفت می‌داد، پس رنگی
+  // که روی خانه‌ی آخر نشسته بود **هرگز رندر نمی‌شد**: کاربرِ فالِ ده‌کارتی ده بار انتخاب
+  // می‌کرد و نُه رنگ می‌دید. حالا ترتیب سه‌تایی است — اول خودِ گرید با قلبِ آخر، بعد یک
+  // مکثِ کوتاهِ عمدی، و بعد جایگزینی. مکث با نشانگرِ typing پر می‌شود، وگرنه طبقِ درسِ
+  // v3.53.0 «تأخیر» خوانده می‌شود نه «مکث».
   try {
-    if (done) await ctx.editMessageText(L.reading.pickProgress(need, need));
-    else await ctx.editMessageReplyMarkup(pickGridKb(s.picks, hearts).reply_markup);
+    await ctx.editMessageReplyMarkup(pickGridKb(s.picks, hearts).reply_markup);
+    if (done) {
+      await typing(ctx, PACE_PICK_LAST);
+      await ctx.editMessageText(L.reading.pickProgress(need, need));
+    }
   } catch {}
   if (!done) return;
   await finishPicking(ctx, uid, s);
