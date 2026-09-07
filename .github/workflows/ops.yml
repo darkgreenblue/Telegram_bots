@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, sys, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, announce-dry, announce-send]
+        options: [status, sys, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, recover-dry, recover-send, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -157,6 +157,16 @@ jobs:
                 [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
                 echo "===== exp روی $OPS_APP/$DBFILE ====="
                 node ../../tools/ops-exp.mjs "$DBFILE"
+                ;;
+              recover-dry|recover-send)
+                # 🔮 بازیابیِ فال‌های نیمه‌تمام. پیش‌فرضِ `recover-dry` هیچ پیامی نمی‌فرستد و
+                # هیچ الماسی جابه‌جا نمی‌کند؛ فقط چاپ می‌کند چه کسی چه متنی می‌گیرد.
+                # ریفاند **قبل از** ارسال ثبت می‌شود، پس پیامِ نرسیده پول را نمی‌سوزاند.
+                cd ~/voice2text
+                if [ "$OPS_ACTION" = "recover-send" ]; then SEND="--send"; else SEND=""; fi
+                case "$OPS_ONLY" in (*[!0-9,]*) echo "❌ لیستِ آی‌دی نامعتبر"; exit 1;; esac
+                echo "===== recover $SEND ${OPS_ONLY:+(فقط: $OPS_ONLY)} ====="
+                RECOVER_ONLY="$OPS_ONLY" node tools/recover-stuck-readings.mjs bots/tarot/data $SEND
                 ;;
               announce-dry|announce-send)
                 # 📣 پیامِ اطلاع‌رسانیِ آپدیت. عمداً از خودِ دیپلوی جداست تا مالک **اول**
