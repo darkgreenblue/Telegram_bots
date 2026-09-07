@@ -252,7 +252,12 @@ export function diamondCard(bot, p, rk) {
       ${stat('خریداری‌شده', `${fmt(e.bought)}💎`)}
       ${stat('مصرف‌شده (فالِ تحویل‌شده)', `${fmt(e.spent)}💎`)}
       ${stat('ماندهٔ کیفِ کاربران', `${fmt(e.held)}💎`)}
-    </div>`).join('');
+    </div>
+    ${e.legacyRows ? `<p class="muted">🕰 به‌علاوه <b>${fmt(e.legacyRows)}</b> شارژِ
+      <b>پیش از دوره‌ی الماس</b> به ارزشِ ${fmt(e.legacyToman)} تومان، که در عددِ بالا
+      <b>نیامده</b>: آن روزها ستونِ اعتبار <b>تومان</b> بود نه الماس، و جمع‌کردنشان یعنی
+      دو واحدِ متفاوت را با هم بریزیم. (همین باعث شده بود این کارت
+      <span class="mono">${fmt(e.bought + e.legacyToman)}💎</span> نشان بدهد.)</p>` : ''}`).join('');
 
   return `<div class="card">
     ${cardHead('💎 اقتصادِ الماس و بذل‌وبخشش')}
