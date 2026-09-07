@@ -21,6 +21,11 @@
 //
 // امنیت: هیچ رشته‌ای از URL وارد SQL نمی‌شود؛ همه‌ی ورودی‌ها عددِ بازه‌اند و bound.
 import { withDb, hasTable, rows, scalar, instancesOf, testUserClause } from './bots.js';
+/* ⚠️ نرخِ تبلیغ **per روز** از همان تک‌منبعی می‌آید که صفحه‌ی اقتصاد استفاده می‌کند.
+   خواندنِ مستقلِ `cpa_campaign_usd` این‌جا یعنی صفحه‌ی «جذب» و صفحه‌ی «اقتصاد» دو
+   هزینه‌ی تبلیغِ متفاوت بسازند — دقیقاً همان کلاسِ باگی که PR قبلی رفعش کرد. */
+import { campaignCostModel } from './profit.js';
+import { tehranDayStr } from './util.js';
 
 /* سطل‌های هدیه‌ای که **هزینه‌ی جذبِ خودِ کاربر** حساب می‌شوند.
  * ⚠️ عمداً فقط `welcome`: پاداشِ `referral` هم هزینه‌ی جذب است، ولی جذبِ **کاربرِ
@@ -100,7 +105,8 @@ function fifoConsume(credits, totalSpent) {
 /* ═══ قدم ۳: جمع‌بندی per کانال ═══
    `sinceSec` کوهورتِ **ورود** را می‌برد (کاربرانی که در آن بازه ثبت‌نام کردند)، چون CPA
    ذاتاً یک سنجه‌ی کوهورتِ جذب است: «کاربرانی که این ماه آمدند چقدر خرج برداشتند». */
-export function channelCosts(botKey, { sinceSec = 0, campaignUsdPerUser = 0 } = {}) {
+export function channelCosts(botKey, { sinceSec = 0, campaign = null } = {}) {
+  const cam = campaign || campaignCostModel(botKey);
   const cpd = costPerDiamond(botKey);
   const out = {};
   for (const c of CHANNELS) out[c.key] = { users: 0, costUsd: 0, spenders: 0, diamonds: 0 };
@@ -116,7 +122,7 @@ export function channelCosts(botKey, { sinceSec = 0, campaignUsdPerUser = 0 } = 
       const users = new Map();
       for (const u of rows(db, 'SELECT telegram_id AS uid, first_source AS src, created_at AS t FROM users WHERE created_at >= ?', [sinceSec])) {
         if (admin.has(u.uid)) continue;
-        users.set(u.uid, { ch: channelOf(u.src), credits: [], spent: 0, costAll: 0 });
+        users.set(u.uid, { ch: channelOf(u.src), t: u.t, credits: [], spent: 0, costAll: 0 });
       }
       if (!users.size) return;
 
@@ -193,8 +199,9 @@ export function channelCosts(botKey, { sinceSec = 0, campaignUsdPerUser = 0 } = 
         for (const k of Object.keys(consumed)) if (SELF_ACQ_KINDS.has(k)) acq += consumed[k];
         if (acq > 0) { bucket.spenders += 1; bucket.diamonds += acq; }
         bucket.costUsd += acq * userCpd + (refShare.get(uid) || 0);
-        // کمپین: هزینه‌ی تبلیغِ دستی هم روی همان کاربر می‌نشیند
-        if (u.ch === 'campaign') bucket.costUsd += campaignUsdPerUser;
+        /* کمپین: هزینه‌ی تبلیغِ دستیِ **روزِ ورودِ همان کاربر** روی خودش می‌نشیند.
+           تا ۱۴۰۵/۰۶/۱۶ یک نرخِ ثابت بود؛ حالا روزی که وارد شده نرخِ خودش را دارد. */
+        if (u.ch === 'campaign') bucket.costUsd += cam.rateFor(tehranDayStr(u.t));
       }
     });
   }

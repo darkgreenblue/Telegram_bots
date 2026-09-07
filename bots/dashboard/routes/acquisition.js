@@ -16,7 +16,7 @@ import { campaignStats, channelSummary, postsCards } from './marketing.js';
    نمای کلی) رویشان می‌نشینند و سه تعریفِ جدا یعنی دیر یا زود یکی عوض شود و بقیه ساکت
    بمانند. این‌جا فقط re-export می‌شود تا مصرف‌کننده‌های قبلی نشکنند. */
 export { USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
-import { USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY, campaignCostModel } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 const pctOf = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -30,10 +30,13 @@ export function acquisitionBody(url) {
   const rk = rangeOf(url, 'rCpa', 'all');
   const since = rangeSince(rk);
   const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const campUsd = Number(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  /* نرخِ تبلیغ حالا per روز است؛ `avgUsd` فقط برای ردیف‌هایی که تفکیکِ روزانه ندارند
+     (مثلِ سودِ هر کمپین که کوهورتِ چندروزه است) به‌عنوان **میانگین** به‌کار می‌رود. */
+  const cam = campaignCostModel(bot);
+  const campUsd = cam.avgUsd;
   const toman = (u) => (rate ? `<span class="muted"> ≈ ${fmt(Math.round(u * rate))} ت</span>` : '');
 
-  const { cpd, channels } = channelCosts(bot, { sinceSec: since, campaignUsdPerUser: campUsd });
+  const { cpd, channels } = channelCosts(bot, { sinceSec: since, campaign: cam });
   const totalUsers = CHANNELS.reduce((a, c) => a + channels[c.key].users, 0);
 
   /* ── جدولِ CPA ── */
@@ -155,13 +158,17 @@ export function acquisitionBody(url) {
 
 /** ورودی‌های دستیِ هزینه (نرخِ دلار + هزینه‌ی تبلیغ per کاربر). */
 export function acquisitionSettings(body) {
-  const camp = Math.max(0, Number(body.get('camp')) || 0);
   const rate = Math.max(0, parseInt(body.get('rate') || '0', 10) || 0);
   const pre  = Math.max(0, Number(body.get('pre')) || 0);
-  if (camp > 1000 || rate > 100_000_000 || pre > 1_000_000) throw new Error('مقدار نامعتبر است');
-  setSetting(CAMPAIGN_CPA_KEY, String(camp));
+  if (rate > 100_000_000 || pre > 1_000_000) throw new Error('مقدار نامعتبر است');
   setSetting(USD_RATE_KEY, String(rate));
   setSetting(PRE_TRACK_COST_KEY, String(pre));
-  audit('acquisition.costs', '', `camp=${camp} rate=${rate} pre=${pre}`);
+  /* ⚠️ `cpa_campaign_usd` عمداً این‌جا **نوشته نمی‌شود**.
+     از ۱۴۰۵/۰۶/۱۶ هزینه‌ی تبلیغ per روز ثبت می‌شود (`/economics/cpa-day`) و این کلید
+     فقط یک فالبکِ **منجمد** است برای وقتی هنوز هیچ روزی وارد نشده. اگر این‌جا
+     می‌ماند، فرمِ ورودی‌ها دیگر فیلدِ `camp` ندارد، پس `Number(undefined) || 0`
+     صفر می‌شد و اولین «ذخیره» فالبک را بی‌صدا صفر می‌کرد — یعنی هزینه‌ی تبلیغ برای
+     همه‌ی روزها ناپدید و سود یک‌باره خوش‌بینانه. حذفِ نوشتن، خودِ گارد است. */
+  audit('acquisition.costs', '', `rate=${rate} pre=${pre}`);
   return 'ورودی‌های هزینه ذخیره شد';
 }

@@ -38,7 +38,7 @@ import { instancesOf, withDb, hasTable, rows, scalar, revenueWhere, toToman, mon
 import { tehranDayStart, tehranDayStr, nowSec, RANGES } from './util.js';
 // شماره‌ی روزِ تهران تک‌منبع است (`engage.js`): دو تعریفِ جدا دیر یا زود سرِ مرزِ روز واگرا می‌شوند.
 import { tehranDayNo } from './engage.js';
-import { orphanRevenueByDay, getSetting } from './platform.js';
+import { orphanRevenueByDay, getSetting, campaignCostDays } from './platform.js';
 
 /** ورودی‌های انسانی که سود بدونشان کامل نیست (کلیدهای جدولِ settings). */
 export const USD_RATE_KEY = 'usd_toman';
@@ -104,18 +104,85 @@ export function costTrackingSince(botKey) {
   return min;
 }
 
+/* 👥 تعدادِ کاربرِ کمپینِ هر روز (مرزِ تهران)، بدونِ ادمین.
+ *
+ * تک‌منبع است چون **دو** مصرف‌کننده دارد که اگر واگرا شوند هیچ خطایی نمی‌دهند و فقط
+ * دو عددِ متفاوت می‌سازند: سریِ سود (هزینه‌ی روز) و میانگینِ وزنیِ زیر. */
+export function campaignUsersByDay(botKey, sinceSec = 0) {
+  const out = new Map();
+  for (const inst of instancesOf(botKey)) {
+    withDb(inst.file, (db) => {
+      if (!hasTable(db, 'users')) return;
+      const admin = hasTable(db, 'events')
+        ? new Set(rows(db, "SELECT DISTINCT user_id FROM events WHERE json_extract(props,'$.adm') = 1").map(r => r.user_id))
+        : new Set();
+      for (const u of rows(db, "SELECT telegram_id AS uid, created_at AS t FROM users WHERE created_at >= ? AND first_source LIKE 'campaign:%'", [sinceSec])) {
+        if (admin.has(u.uid)) continue;
+        const d = tehranDayStr(u.t);
+        out.set(d, (out.get(d) || 0) + 1);
+      }
+    });
+  }
+  return out;
+}
+
+/* 📣 **مدلِ هزینه‌ی تبلیغ** — تک‌منبعِ «نرخِ هر روز چقدر بود؟».
+ *
+ * خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۶): «هزینه‌ی تبلیغ per کاربرِ کمپین یک چیزِ ثابت
+ * نیست. کمپین‌ها هر روز ران‌اند و من بعضی روزها بهینه‌شان می‌کنم.»
+ *
+ * سه لایه، به همین ترتیب:
+ *   ۱) اگر آن روز **ردیفِ دستی** دارد → همان نرخ. (منبعِ حقیقت)
+ *   ۲) وگرنه → **میانگینِ وزنی** روزهای واردشده.
+ *   ۳) و اگر هنوز هیچ روزی وارد نشده → عددِ ثابتِ قدیمی (`cpa_campaign_usd`).
+ *
+ * ⚠️ چرا میانگین **وزنیِ کاربر** است و نه میانگینِ ساده‌ی نرخ‌ها: سؤالی که این عدد
+ * جواب می‌دهد «به‌طور کلی هر کاربرِ کمپین چقدر برایم آب خورده؟» است، یعنی
+ * `کلِ خرج ÷ کلِ کاربر`. میانگینِ ساده به روزی که ۲ کاربر آورده همان وزنِ روزی را
+ * می‌دهد که ۲۰۰ کاربر آورده، و آن عدد هیچ سؤالِ واقعی‌ای را جواب نمی‌دهد.
+ *
+ * ⚠️ و لایه‌ی ۳ عمداً مانده: بدونش، لحظه‌ی انتشارِ این تغییر هزینه‌ی تبلیغ **صفر**
+ * می‌شد و سود بی‌صدا می‌پرید بالا — همان کلاسِ «عددی که بی‌خبر عوض شد» که این چند
+ * PR برای رفعش بود. با ثبتِ اولین روز، خودش کنار می‌رود.
+ */
+export function campaignCostModel(botKey) {
+  const rates = campaignCostDays(botKey);            // روزهای واردشده‌ی دستی
+  const users = campaignUsersByDay(botKey);          // کاربرِ کمپینِ هر روز
+  let spentUsd = 0, coveredUsers = 0;
+  for (const [d, rate] of rates) {
+    const n = users.get(d) || 0;
+    spentUsd += rate * n;
+    coveredUsers += n;
+  }
+  /* اگر روزهای واردشده هیچ کاربری نداشتند، وزن‌دهی ممکن نیست و میانگینِ ساده تنها
+     چیزی است که باقی می‌ماند (بهتر از صفر، که یعنی «تبلیغ مجانی بود»). */
+  const simple = rates.size ? [...rates.values()].reduce((a, b) => a + b, 0) / rates.size : 0;
+  const legacy = Number(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  const avgUsd = coveredUsers > 0 ? spentUsd / coveredUsers : (rates.size ? simple : legacy);
+  return {
+    rates, users, avgUsd, legacy,
+    usingLegacy: rates.size === 0,
+    enteredDays: rates.size,
+    coveredUsers,
+    spentUsd,
+    /** نرخِ یک روزِ مشخص، با همان سه لایه. */
+    rateFor: (day) => (rates.has(day) ? rates.get(day) : avgUsd),
+  };
+}
+
 /* سریِ روزانه‌ی سود روی `days` روزِ اخیر (مرزِ روزِ تهران).
  *
  * `cum` عمداً **از اولین روزِ سری** جمع می‌شود، نه از ابتدای عمرِ ربات: چون هزینه
  * تاریخچه ندارد، هر تجمعی که از قبلِ `costSince` شروع شود سودِ ساختگی می‌سازد.
  * مصرف‌کننده باید بازه را طوری بدهد که داخلِ دوره‌ی ثبتِ هزینه بماند (یا خودش بگوید
  * که بخشی از بازه هزینه ندارد). */
-export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUser = 0, preTrackUsd = 0 } = {}) {
+export function profitDaily(botKey, { days = 30, usdToman = 0, campaign = null, preTrackUsd = 0 } = {}) {
   const n = Math.min(Math.max(parseInt(days, 10) || 30, 1), 3650);
+  const cam = campaign || campaignCostModel(botKey);
   const since = tehranDayStart(-(n - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, llmUsd, adUsd }
   const at = (d) => {
-    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 });
+    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, adExact: 0, orphan: 0 });
     return day.get(d);
   };
 
@@ -135,16 +202,20 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
           at(tehranDayStr(r.t)).llmUsd += Number(r.c) || 0;
         }
       }
-      /* ── هزینه‌ی تبلیغ: روزِ **ورودِ** کاربرِ کمپین (لحظه‌ای که پولِ تبلیغ خرج شد) ── */
-      if (campaignUsdPerUser > 0 && hasTable(db, 'users')) {
+      /* ── هزینه‌ی تبلیغ: روزِ **ورودِ** کاربرِ کمپین (لحظه‌ای که پولِ تبلیغ خرج شد) ──
+         نرخ **per روز** از `campaign.rateFor(day)` می‌آید، نه یک ثابت: روزِ اولِ یک
+         کمپینِ بهینه‌نشده و روزِ دهمش دو قیمتِ کاملاً متفاوت‌اند. */
+      if (cam && hasTable(db, 'users')) {
         const admin = hasTable(db, 'events')
           ? new Set(rows(db, "SELECT DISTINCT user_id FROM events WHERE json_extract(props,'$.adm') = 1").map(r => r.user_id))
           : new Set();
         for (const u of rows(db, "SELECT telegram_id AS uid, created_at AS t FROM users WHERE created_at >= ? AND first_source LIKE 'campaign:%'", [since])) {
           if (admin.has(u.uid)) continue;
-          const d = at(tehranDayStr(u.t));
+          const key = tehranDayStr(u.t);
+          const d = at(key);
           d.campaignUsers += 1;
-          d.adUsd += campaignUsdPerUser;
+          d.adUsd += cam.rateFor(key);
+          if (cam.rates.has(key)) d.adExact += 1;     // این روز نرخِ دستی داشت، نه میانگین
         }
       }
     });
@@ -198,7 +269,7 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   let cum = 0;
   for (let i = n - 1; i >= 0; i--) {
     const d = tehranDayStr(tehranDayStart(-i));
-    const v = day.get(d) || { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 };
+    const v = day.get(d) || { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, adExact: 0, orphan: 0 };
     const costUsd = v.llmUsd + v.preUsd + v.adUsd;
     /* 🧮 **هر جزء جدا گرد می‌شود و جمعِ هزینه از همان‌ها ساخته می‌شود.**
      * نه یک وسواس: کارتِ «هزینه‌ها به تفکیک» سه ردیف دارد و یک ردیفِ جمع. اگر جمع از
@@ -219,9 +290,10 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
     adUsd: a.adUsd + r.adUsd, costUsd: a.costUsd + r.costUsd,
     llmToman: a.llmToman + r.llmToman, preToman: a.preToman + r.preToman, adToman: a.adToman + r.adToman,
     costToman: a.costToman + r.costToman, net: a.net + r.net,
-    campaignUsers: a.campaignUsers + r.campaignUsers, orphan: a.orphan + (r.orphan || 0),
+    campaignUsers: a.campaignUsers + r.campaignUsers, adExact: a.adExact + (r.adExact || 0),
+    orphan: a.orphan + (r.orphan || 0),
   }), { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, costUsd: 0, llmToman: 0, preToman: 0, adToman: 0,
-        costToman: 0, net: 0, campaignUsers: 0, orphan: 0 });
+        costToman: 0, net: 0, campaignUsers: 0, adExact: 0, orphan: 0 });
 
   /* نقطه‌ی سربه‌سر = اولین روزی که تجمعی از صفر رد شد و **دیگر برنگشت**.
    * عمداً «اولین باری که مثبت شد» نیست: یک روزِ پرفروش می‌تواند تجمعی را لحظه‌ای مثبت
@@ -237,6 +309,7 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
     breakEven,
     costSince: costTrackingSince(botKey),
     hasRate: !!usdToman,
+    campaign: cam,
     // بازه‌ای که هزینه‌اش ثبت نشده = بخشی از سری که سودش خوش‌بینانه است
     seriesStart: tehranDayStr(since),
   };
@@ -255,9 +328,12 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
  * «کل عمر» همه یک جا هستند و ساختاراً نمی‌توانند واگرا شوند. */
 export function profitFor(botKey, rangeKey = 'all') {
   const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
   const preUsd = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
+  /* مدلِ تبلیغ **یک بار** ساخته می‌شود و به همه‌ی مصرف‌کننده‌ها پاس داده می‌شود
+     (سریِ سود، کارتِ تفکیک، صفحه‌ی جذب). ساختنِ دوباره‌اش در هر جا هم کند است هم
+     دعوت‌نامه‌ی واگرایی. */
+  const campaign = campaignCostModel(botKey);
   const days = RANGES[rangeKey]?.days || lifetimeDays(botKey);
-  const p = profitDaily(botKey, { days, usdToman: rate, campaignUsdPerUser: campUsd, preTrackUsd: preUsd });
-  return { ...p, rate, campUsd, preUsd, days, rangeKey };
+  const p = profitDaily(botKey, { days, usdToman: rate, campaign, preTrackUsd: preUsd });
+  return { ...p, rate, campUsd: campaign.avgUsd, preUsd, days, rangeKey };
 }
