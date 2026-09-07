@@ -713,7 +713,7 @@ export default {
     atmosphere2: 'Lembre: as cartas não vêm pra assustar, vêm pra clarear.',
     breathing: '🔮 Agora faça o seu pedido:\n\n' +
       '1️⃣ Primeiro, respire fundo até o corpo relaxar... 🌬️\n\n' +
-      '2️⃣ Depois concentre a energia e a cabeça na sua pergunta e, quando sentir que está pronto, diga:',
+      '2️⃣ Depois concentre a energia e a cabeça na sua pergunta e, quando sentir que chegou a hora, diga:',
     shuffleCaption: 'O baralho está embaralhando com a energia da sua pergunta... 🌀\n\nQuando sentir que é a hora, pare ele:',
     shuffleFrames: ['🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠', '🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠 🂠'],
     pickPrompt: (n) => `Baralho cortado ✋\n\n❤️ Agora escolha ${cardsN(n)} com o coração:`,
