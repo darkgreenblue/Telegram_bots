@@ -876,8 +876,13 @@ export default {
   supportUnlocked: 'Поддержка оплатила твой расклад ✅\nОткрывай карты, когда захочешь 👇',
   // ☠️ Ниже до самого конца объекта идёт рельс карт: счёт с номером карты, чек,
   // проверка админом, откат фальшивого чека. В русской версии всё это недостижимо.
-  invoice: (amount, card, owner) =>
-    `🧾 Счёт на оплату\n\nСумма: *${fmt(amount)}*\n\nПеревод на:\n\`${card}\`\n${owner}\n\nПосле оплаты пришли сюда фото чека 📸`,
+  invoice: (amount, card, owner, purchase = null, cur = null) =>
+    `🧾 Счёт на оплату\n\n`
+    + (purchase
+      ? `Покупка${packName(purchase.pack) ? ` набора *${packName(purchase.pack)}*` : ''}: `
+        + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
+      : '')
+    + `Сумма: *${fmt(amount)}*\n\nПеревод на:\n\`${card}\`\n${owner}\n\nПосле оплаты пришли сюда фото чека 📸`,
   invoiceDiscounted: (orig, amount, code) =>
     `🎟️ Код «${code}» применён: ${fmt(orig)} ← *${fmt(amount)}*`,
   firstDiscountOffer: (percent, cap, code) =>

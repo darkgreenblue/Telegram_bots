@@ -874,8 +874,13 @@ export default {
     // ☠️ Daqui até o fim do objeto é o trilho de transferência bancária: fatura com o
     // número do cartão, comprovante, conferência do admin, estorno de comprovante falso.
     // Na versão em português nada disso é alcançável.
-    invoice: (amount, card, owner) =>
-      `🧾 Pedido de pagamento\n\nValor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
+    invoice: (amount, card, owner, purchase = null, cur = null) =>
+      `🧾 Pedido de pagamento\n\n`
+      + (purchase
+        ? `Compra${packName(purchase.pack) ? ` do pacote *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
+        : '')
+      + `Valor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupom «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
     firstDiscountOffer: (percent, cap, code) =>

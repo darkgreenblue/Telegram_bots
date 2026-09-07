@@ -385,6 +385,114 @@ console.log('\n▶ رسیدِ دوم پرداختِ تأییدشده را زند
   }
 }
 
+/* ══ 💎 «بابت خرید بسته‌ی فلان، فلان الماس» روی فاکتور ═══════════════════════
+ *
+ * خواسته‌ی مالک: کاربر همان اولِ فاکتور ببیند چه می‌خرد. ولی این یک خطِ تزئینی نیست،
+ * یک **ادعای مالی** است: عددی که آن‌جا می‌نویسیم باید دقیقاً همان عددی باشد که موقعِ
+ * تأیید به حسابش می‌نشیند. اگر این دو از دو جای مختلف بیایند، یکی‌شان دیر یا زود عوض
+ * می‌شود و آن یکی ساکت می‌ماند — همان کلاسِ باگِ ریال/تومان (بند ۹ ریشه) و باگِ
+ * «۶۰٬۰۰۰ ستاره» (بند ۲و/۶ج).
+ *
+ * و خطرناک‌ترین حالت این‌جا **واحدِ دروغ** است: در مسیرِ تومانیِ کهنه همان ستونِ
+ * `original_amount` تومان است، پس چاپِ بی‌قیدش «۵۰٬۰۰۰ الماس» می‌شد. پس ادعای مرکزیِ
+ * این بلوک این است که بدونِ اثباتِ الماس بودن، **هیچ عددی چاپ نشود**. */
+console.log('\n💎 خطِ «بابت خرید» روی فاکتور');
+{
+  const bodyOf = (marker, end) => {
+    const a = SRC.indexOf(marker);
+    if (a < 0) return null;
+    const b = SRC.indexOf(end, a);
+    return b < 0 ? null : SRC.slice(a, b + end.length);
+  };
+  const credFn = bodyOf('const creditForPayment = (p) => {', '\n};');
+  const purchFn = bodyOf('const invoicePurchaseFor = (uid, paymentId) => {', '\n};');
+  ok(!!credFn, '`creditForPayment` از سورس بریده شد');
+  ok(!!purchFn, '`invoicePurchaseFor` از سورس بریده شد');
+
+  // تک‌منبع بودن: خودِ `approvePayment` هم باید از همین تابع بخواند، نه از یک کپیِ عبارت.
+  const approve = bodyOf('function approvePayment(paymentId, allowRejected = false) {', '\n}');
+  const approveCode = (approve || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  ok(/creditForPayment\(p\)/.test(approveCode),
+    '`approvePayment` هم از همان `creditForPayment` می‌خواند (تک‌منبعِ مبلغ)');
+  ok(!/bonusFor\(/.test(approveCode),
+    'و کپیِ دومِ حسابِ هدیه در `approvePayment` نمانده');
+
+  const d2 = new Database(':memory:');
+  d2.exec(`CREATE TABLE payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, pkg TEXT,
+    amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount')`);
+  const ins = d2.prepare('INSERT INTO payments (user_id, pkg, amount, original_amount) VALUES (?,?,?,?)');
+  // بسته‌ی ویژه: ۳۰ الماس در `original_amount`، ۶۰٬۰۰۰ تومان در `amount` (قراردادِ setPaymentPackage)
+  const pkgId = Number(ins.run(1, 'gold', 60_000, 30).lastInsertRowid);
+  // مسیرِ تومانیِ کهنه: بدونِ pkg، و `original_amount` خالی ⟵ عدد **تومان** است
+  const tomanId = Number(ins.run(1, null, 50_000, null).lastInsertRowid);
+
+  const stmtsStub = { getPayment: d2.prepare('SELECT * FROM payments WHERE id=?') };
+  const build = (curOn) => new Function('stmts', 'curOf', 'packOf', 'bonusFor', 'logErr', `
+    ${credFn}
+    ${purchFn}
+    return { creditForPayment, invoicePurchaseFor };
+  `)(stmtsStub, () => ({ on: curOn }), (p) => (p?.pkg ? { key: p.pkg, coins: 30, emoji: '💠' } : null),
+     () => 0, () => {});
+
+  const m = build(true);
+  const got = m.invoicePurchaseFor(1, pkgId);
+  ok(got && got.coins === 30, 'ردیفِ بسته ⟵ ۳۰ الماس', `دیدم: ${JSON.stringify(got)}`);
+  ok(got && got.pack && got.pack.key === 'gold', 'و نامِ بسته هم همراهش می‌آید');
+
+  // 🔴 مهم‌ترین ادعای این بلوک.
+  ok(m.invoicePurchaseFor(1, tomanId) === null,
+    'ردیفِ تومانیِ کهنه ⟵ **هیچ عددی** (وگرنه «۵۰٬۰۰۰ الماس» چاپ می‌شد)');
+  ok(build(false).invoicePurchaseFor(1, pkgId) === null,
+    'دنیای تومانی ⟵ هیچ عددی، حتی روی ردیفِ بسته');
+  ok(m.invoicePurchaseFor(1, 99_999) === null, 'پرداختِ ناموجود ⟵ هیچ عددی');
+  ok(m.invoicePurchaseFor(1, null) === null, 'بدونِ شناسه‌ی پرداخت ⟵ هیچ عددی');
+
+  // fail-safe: خطای دیتابیس نباید فاکتور را بشکند.
+  const boom = new Function('stmts', 'curOf', 'packOf', 'bonusFor', 'logErr', `
+    ${credFn}
+    ${purchFn}
+    return invoicePurchaseFor;
+  `)({ getPayment: { get() { throw new Error('db down'); } } }, () => ({ on: true }),
+     () => null, () => 0, () => {});
+  ok(boom(1, pkgId) === null, 'خطای دیتابیس ⟵ هیچ عددی، نه استثنا (فاکتور نمی‌شکند)');
+
+  // 🔗 عددِ نمایشی == عددی که واقعاً واریز می‌شود.
+  const row = stmtsStub.getPayment.get(pkgId);
+  ok(m.creditForPayment(row) === got.coins,
+    'عددِ روی فاکتور دقیقاً همان چیزی است که `approvePayment` واریز می‌کند');
+
+  // و همان عدد روی متنِ واقعیِ فارسی می‌نشیند.
+  const L = (await import('../bots/tarot/locales/fa.js')).default;
+  const cur = { on: true, value: 1, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
+  const text = L.wallet.invoice(60_000, '6219861904145405', 'مالک', got, cur);
+  ok(text.includes('۳۰'), 'متنِ فاکتور عددِ ۳۰ را نشان می‌دهد', text);
+  ok(text.includes('بابت خرید'), 'و با عبارتِ «بابت خرید» شروع می‌شود');
+  ok(text.indexOf('بابت خرید') < text.indexOf('مبلغ:'),
+    'خطِ خرید **قبل از** مبلغ می‌آید (ترتیبِ خواسته‌ی مالک)');
+  ok(text.indexOf('مبلغ:') < text.indexOf('کارت‌به‌کارت'),
+    'و مبلغ قبل از شماره‌ی کارت');
+  const legacy = L.wallet.invoice(50_000, '6219861904145405', 'مالک');
+  ok(!legacy.includes('💎') && !legacy.includes('بابت خرید'),
+    'فاکتورِ بدونِ خرید بیت‌به‌بیت همان قبلی است (نه خطِ خرید، نه ایموجیِ الماس)');
+  ok(!/—|--/.test(text), 'بدونِ خط تیره‌ی بلند (بند ۱۰ ریشه)');
+
+  // چهار زبان باید هم‌شکل باشند، وگرنه اولین locale که امضایش عقب بماند بی‌صدا خطا می‌دهد.
+  for (const loc of ['fa', 'ru', 'es', 'pt']) {
+    const LL = (await import(`../bots/tarot/locales/${loc}.js`)).default;
+    const c2 = { on: true, value: 1, name: LL.coinUnit.name, emoji: LL.coinUnit.emoji };
+    let withP = '', without = '';
+    try {
+      withP = LL.wallet.invoice(1, 'c', 'o', { pack: { key: 'gold' }, coins: 30 }, c2);
+      without = LL.wallet.invoice(1, 'c', 'o');
+    } catch (e) { /* پایین قرمز می‌شود */ }
+    ok(withP.includes('30') || withP.includes('۳۰'), `locale «${loc}»: عدد را چاپ می‌کند`);
+    ok(!!without && !without.includes('💎'), `locale «${loc}»: بدونِ خرید، خطِ الماس نمی‌آید`);
+  }
+  d2.close();
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);

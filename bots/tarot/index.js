@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.69.0';
+const PRODUCT_VERSION = '3.70.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1314,6 +1314,45 @@ const stmts = {
     VALUES (?,?,?,?,?,?,?,?,?)`),
 };
 
+/* 💎 تک‌منبعِ «چقدر اعتبار به این پرداخت تعلق می‌گیرد».
+ *
+ * دو مصرف‌کننده دارد و همین دلیلِ وجودش است: `approvePayment` لحظه‌ی **واریز**، و
+ * فاکتور لحظه‌ی **نمایش**. اگر این عبارت دو کپی داشته باشد، دیر یا زود عددی که به
+ * کاربر وعده داده‌ایم با عددی که واقعاً واریز می‌شود واگرا می‌شود — همان کلاسِ باگی که
+ * بند ۲و/۶ج ریشه ثبتش کرده («عدد و واحد از دو جای مختلف بیایند، یکی‌شان دیر یا زود
+ * عوض می‌شود و آن یکی ساکت می‌ماند»). */
+const creditForPayment = (p) => {
+  const amount = p.original_amount || p.amount;
+  // بسته‌ی الماس خودش تخفیفِ ذاتی دارد؛ هدیه‌ی شارژِ تومانی رویش اعمال نمی‌شود.
+  return amount + (p.pkg ? 0 : bonusFor(amount));
+};
+
+/* 💎 تعدادِ الماسی که این فاکتور می‌خرد — **فقط وقتی اثباتاً الماس است**.
+ *
+ * اثبات = ردیف یک `pkg` دارد، یعنی `setPaymentPackage` اجرا شده و طبقِ قراردادِ همان
+ * statement، `original_amount` تعدادِ الماس است و `amount` پولِ تومانی.
+ *
+ * ⚠️ چرا اثبات لازم است و «هر پرداختی» کافی نیست: در مسیرِ تومانیِ کهنه
+ * (`setRechargeAmount`) همان ستون **تومان** است، پس چاپِ بی‌قیدش یعنی «➕۵۰٬۰۰۰ الماس»
+ * روی فاکتورِ ۵۰٬۰۰۰ تومانی. آن مسیر امروز پشتِ `legacyTomanPay` بسته است، ولی گاردی
+ * که به بسته بودنِ یک مسیرِ دیگر تکیه کند یک تله‌ی خفته است. **عددِ درست با واحدِ
+ * دروغ بدترین گزینه است؛ اگر اثبات نبود هیچ عددی چاپ نمی‌شود** (بند ۲و/۶ج ریشه).
+ *
+ * خروجی `{ pack, coins }` است یا `null`. ⚠️ `pack` می‌تواند `null` باشد در حالی که
+ * `coins` معتبر است: اگر روزی کلیدِ بسته‌ای از کاتالوگ برداشته شود `packOf` نال می‌دهد
+ * (همان سوراخِ ثبت‌شده‌ی v3.66.0). آن‌وقت **نام** حذف می‌شود ولی **عدد** می‌ماند، چون
+ * عدد همان چیزی است که کاربر بابتش پول می‌دهد. */
+const invoicePurchaseFor = (uid, paymentId) => {
+  try {
+    if (!curOf(uid)?.on) return null;           // دنیای تومانی: اعتبار الماس نیست
+    const p = paymentId && stmts.getPayment.get(paymentId);
+    if (!p || !p.pkg) return null;
+    const coins = creditForPayment(p);
+    if (!Number.isFinite(coins) || coins <= 0) return null;
+    return { pack: packOf(p), coins };
+  } catch (e) { logErr('invoice purchase:', e.message); return null; }
+};
+
 /* 🧾 ثبتِ مصرفِ مدل. **تنها مصرف‌کننده‌ی این تابع، لایه‌ی حسابداری است، نه فلوی فال.**
  * سه گاردِ عمدی: خودش try/catch دارد (خطای نوشتن هرگز به خوانش نمی‌رسد)، بعد از
  * استخراجِ متن صدا زده می‌شود، و اگر جدول به هر دلیلی نبود فقط یک لاگ می‌دهد.
@@ -1463,7 +1502,7 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   setState(uid, 'pay_receipt');
   // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
   if (dc) await ctx.reply(L.wallet.discountApplied(price, payAmount, dc.discount_percent), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5391,7 +5430,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   const payAmount = amount;
 
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5517,7 +5556,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
 
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5823,7 +5862,7 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER), {
+    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([cardCopyRow()]).reply_markup,
     });
@@ -6037,7 +6076,9 @@ function approvePayment(paymentId, allowRejected = false) {
   const creditAmount = p.original_amount || p.amount;
   // بسته‌ی الماس خودش تخفیفِ ذاتی دارد؛ هدیه‌ی شارژِ ۲۰۰k رویش اعمال نمی‌شود (وگرنه بسته‌ی
   // بزرگ دو بار تخفیف می‌گرفت و نردبانِ قیمت بی‌معنی می‌شد).
-  const bonus = p.pkg ? 0 : bonusFor(creditAmount);
+  // ⚠️ عددِ نهایی از `creditForPayment` می‌آید، همان تابعی که **فاکتور** هم از آن
+  // می‌خواند. دو کپی از این حساب یعنی وعده‌ی فاکتور و واریزِ واقعی روزی واگرا می‌شوند.
+  const bonus = creditForPayment(p) - creditAmount;
   stmts.setPaymentStatus.run('approved', paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });

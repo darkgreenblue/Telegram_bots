@@ -886,8 +886,13 @@ export default {
     // ☠️ De aquí al final del objeto es el riel de transferencia bancaria: factura con el
     // número de tarjeta, comprobante, revisión del admin, reverso de comprobante falso.
     // En la versión en español nada de esto es alcanzable.
-    invoice: (amount, card, owner) =>
-      `🧾 Pedido de pago\n\nMonto: *${fmt(amount)}*\n\nTransfiere a:\n\`${card}\`\n${owner}\n\nDespués de pagar, manda aquí la foto del comprobante 📸`,
+    invoice: (amount, card, owner, purchase = null, cur = null) =>
+      `🧾 Pedido de pago\n\n`
+      + (purchase
+        ? `Compra${packName(purchase.pack) ? ` del paquete *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
+        : '')
+      + `Monto: *${fmt(amount)}*\n\nTransfiere a:\n\`${card}\`\n${owner}\n\nDespués de pagar, manda aquí la foto del comprobante 📸`,
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupón «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
     firstDiscountOffer: (percent, cap, code) =>
