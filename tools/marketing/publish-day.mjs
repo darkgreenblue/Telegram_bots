@@ -13,14 +13,16 @@
 // اگر تفسیر بلندتر شد باید کوتاه شود، وگرنه تلگرام کلِ پست را رد می‌کند.
 
 import { readFileSync, existsSync } from 'node:fs';
+import { signs as signsOf, hashtag } from './locales.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CAPTION_MAX = 1024;
 const GAP_MS = 2500; // فاصله‌ی بین پست‌ها؛ سیزده پیام در ~۳۵ ثانیه، خیلی زیر سقفِ نرخِ تلگرام
-const MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-                'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+// ⚠️ فهرستِ ماه‌ها دیگر این‌جا هاردکد نیست: از `locales.mjs` می‌آید که خودش از
+// `bots/tarot/locales/<loc>.js` می‌خواند. فایلِ روزِ بدونِ `locale` فارسی فرض می‌شود
+// تا ۴۲ فایلِ موجود بیت‌به‌بیت معتبر بمانند.
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -39,9 +41,15 @@ function fail(msg) {
 }
 
 /** اعتبارسنجیِ کاملِ فایلِ روز — قبل از ارسالِ حتی یک پیام */
-export function validateDay(day) {
+export async function validateDay(day) {
   const errs = [];
   if (!day || typeof day !== 'object') return ['فایل روز آبجکت نیست'];
+  const loc = day.locale || 'fa';
+  let MONTHS;
+  try { MONTHS = await signsOf(loc); }
+  catch (e) { return [`زبانِ «${loc}» شناخته نشد: ${e.message}`]; }
+  // برچسبِ تاریخ: نامِ تازه `dateLabel`، با فالبک به `jalali` برای فایل‌های قدیمیِ فارسی
+  const dateStr = day.dateLabel || day.jalali;
   if (!/^(@[A-Za-z0-9_]+|-100\d+)$/.test(String(day.chat || ''))) errs.push(`chat نامعتبر: «${day.chat}»`);
   if (!day.header || typeof day.header !== 'string' || !day.header.trim()) errs.push('هدر خالی است');
   else if (day.header.length > 4096) errs.push(`هدر ${day.header.length} کاراکتر است (سقف ۴۰۹۶)`);
@@ -52,10 +60,11 @@ export function validateDay(day) {
   const seenCards = new Set();
   posts.forEach((p, i) => {
     const tag = `پست ${i + 1}`;
-    if (p.month !== MONTHS[i]) errs.push(`${tag}: ماه «${p.month}» است ولی باید «${MONTHS[i]}» باشد (ترتیب فروردین تا اسفند)`);
+    if (p.month !== MONTHS[i]) errs.push(`${tag}: ماه «${p.month}» است ولی باید «${MONTHS[i]}» باشد (ترتیبِ اندیسِ ۱ تا ۱۲ زبانِ ${loc})`);
     if (!p.caption || !p.caption.trim()) errs.push(`${tag}: کپشن خالی`);
     else if (p.caption.length > CAPTION_MAX) errs.push(`${tag}: کپشن ${p.caption.length} کاراکتر (سقف ${CAPTION_MAX})`);
-    if (p.caption && !p.caption.includes(`#${p.month}`)) errs.push(`${tag}: هشتگ #${p.month} در کپشن نیست`);
+    const tagWanted = hashtag(loc, p.month);
+    if (p.caption && !p.caption.includes(tagWanted)) errs.push(`${tag}: هشتگ ${tagWanted} در کپشن نیست`);
     // تگِ اسپویلر (متنِ شطرنجی که با یک تپ باز می‌شود) باید متوازن باشد؛ تگِ نیمه‌باز
     // یعنی تلگرام کلِ پست را رد می‌کند و روز نصفه منتشر می‌ماند.
     if (p.caption) {
@@ -65,8 +74,8 @@ export function validateDay(day) {
     }
     // تاریخِ روز باید در هر کپشن باشد (خواسته‌ی صریح: هر پست خودش تاریخ‌دار باشد،
     // چون پست‌ها جدا فوروارد می‌شوند و باید معلوم باشد مالِ چه روزی‌اند)
-    if (day.jalali && p.caption && !p.caption.includes(day.jalali))
-      errs.push(`${tag}: تاریخِ «${day.jalali}» در کپشن نیست`);
+    if (dateStr && p.caption && !p.caption.includes(dateStr))
+      errs.push(`${tag}: تاریخِ «${dateStr}» در کپشن نیست`);
     if (!p.file) errs.push(`${tag}: فیلد file ندارد`);
     else if (!existsSync(join(ROOT, 'bots/tarot/assets/cards', p.file))) errs.push(`${tag}: تصویر «${p.file}» پیدا نشد`);
     if (p.key) {
@@ -100,7 +109,7 @@ async function main() {
   try { day = JSON.parse(readFileSync(path, 'utf8')); }
   catch (e) { fail(`JSON نامعتبر: ${e.message}`); }
 
-  const errs = validateDay(day);
+  const errs = await validateDay(day);
   if (errs.length) {
     console.error(`❌ اعتبارسنجیِ فایلِ روز شکست خورد (${errs.length} ایراد):`);
     for (const e of errs) console.error(`   • ${e}`);

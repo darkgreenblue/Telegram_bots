@@ -5,7 +5,7 @@
 #
 # اکشن‌ها:
 #   post          انتشار یک پست merge شده (marketing/<bot>/posts/*.json) در کانال با توکن خود ربات
-#   day-post      انتشار دستیِ «روزِ کامل» (هدر + ۱۲ پستِ تصویری) از فایل <YYYY-MM-DD>-day.json
+#   day-post      انتشار دستیِ «روزِ کامل» (هدر + ۱۲ پستِ تصویری) از posts/<locale>/<YYYY-MM-DD>-day.json
 #   campaign-add  ثبت idempotent کد کمپین در platform.db داشبورد (تا در صفحه‌ی مارکتینگ قابل‌سنجش شود)
 #   set-info      ست کردنِ عنوان و بایوی کانال از marketing/<bot>/channel/*.json (نیازمندِ ادمینیِ ربات با Change Info)
 #   poll          انتشار نظرسنجی در کانال (marketing/<bot>/polls/*.json): متنِ زمینه‌ی اختیاری + sendPoll
@@ -94,8 +94,8 @@ jobs:
           # ضد تزریق و ضد path traversal: فقط الگوهای امن
           case "$MKT_BOT" in (*[!a-z0-9-]*|'') echo "❌ bot نامعتبر"; exit 1;; esac
           case "$MKT_PATH" in
-            marketing/*/posts/*.json) ;;
-            *) echo "❌ path باید marketing/<bot>/posts/<file>.json باشد"; exit 1;;
+            marketing/*/posts/*.json|marketing/*/posts/*/*.json) ;;
+            *) echo "❌ path باید marketing/<bot>/posts/[<locale>/]<file>.json باشد"; exit 1;;
           esac
           case "$MKT_PATH" in (*..*) echo "❌ path نامعتبر"; exit 1;; esac
           [ -f "$MKT_PATH" ] || { echo "❌ فایل پست در main نیست: $MKT_PATH (اول merge کن)"; exit 1; }
@@ -351,7 +351,6 @@ jobs:
 
       # انتشارِ دستیِ روزِ کامل (همان منطقِ جابِ زمان‌بندی‌شده)
       - name: Day post (manual)
-        id: manual_day
         if: inputs.action == 'day-post'
         env:
           T_TAROT:    ${{ secrets.TAROT_BOT_TOKEN }}
@@ -373,26 +372,23 @@ jobs:
           esac
           [ -n "$TOKEN" ] || { echo "❌ Secret توکن ربات $MKT_BOT ست نیست"; exit 1; }
           case "$MKT_PATH" in
-            marketing/*/posts/*-day.json) ;;
-            *) echo "❌ مسیر باید marketing/<bot>/posts/<YYYY-MM-DD>-day.json باشد"; exit 1;;
+            marketing/*/posts/*/*-day.json|marketing/*/offschedule/*/*-day.json) ;;
+            *) echo "❌ مسیر باید marketing/<bot>/{posts|offschedule}/<locale>/<YYYY-MM-DD>-day.json باشد"; exit 1;;
           esac
           case "$MKT_PATH" in *..*) echo "❌ مسیر نامعتبر"; exit 1;; esac
           TELEGRAM_TOKEN="$TOKEN" node tools/marketing/publish-day.mjs --file "$MKT_PATH"
-          # تاریخِ روز از نامِ فایل، برای گذاشتنِ همان مارکرِ idempotency که جابِ زمان‌بندی‌شده
-          # می‌خواند. بدون این، انتشارِ دستی «نامرئی» می‌ماند و پنجره‌ی بعدیِ همان روز دوباره منتشر می‌کرد.
-          DAY=$(basename "$MKT_PATH" -day.json)
-          case "$DAY" in
-            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) date -u +%FT%TZ > .daypost-marker
-              echo "day=$DAY" >> "$GITHUB_OUTPUT";;
-            *) echo "⚠️ تاریخ از نامِ فایل درنیامد؛ مارکر گذاشته نشد";;
-          esac
 
-      - name: Save publish marker (manual)
-        if: steps.manual_day.outputs.day != ''
-        uses: actions/cache/save@v4
-        with:
-          path: .daypost-marker
-          key: daypost-${{ steps.manual_day.outputs.day }}
+          # ⚠️ این انتشارِ دستی **جلوی کرونِ سرور را نمی‌گیرد.** زمان‌بندی از ۴ شهریور روی
+          # VPS است و مارکرهایش در `~/.cache/taroot-daypost` می‌نشیند، جایی که رانرِ
+          # گیت‌هاب اصلاً دسترسی ندارد. قبلاً این‌جا یک مارکرِ کشِ Actions گذاشته می‌شد که
+          # از همان روز بی‌اثر شده بود و فقط **وعده‌ی دروغِ** idempotency می‌داد؛ حذف شد.
+          #
+          # پس قاعده: روزی که دستی منتشر می‌شود باید فایلش در
+          # `marketing/tarot/offschedule/<locale>/` باشد نه `posts/<locale>/`. کرون فقط
+          # داخلِ `posts/` را نگاه می‌کند، پس دوباره‌فرستادن ساختاراً ممکن نیست.
+          case "$MKT_PATH" in
+            marketing/*/posts/*) echo "⚠️ این فایل داخلِ posts/ است؛ کرونِ سرور ساعتِ ۱۰ محلی دوباره منتشرش می‌کند. برای انتشارِ دستی از offschedule/ استفاده کن.";;
+          esac
 
       # تعدادِ ممبرِ کانال. Bot API هیچ متدی برای **لیست‌کردنِ** ممبرهای کانال ندارد
       # (نه getChatMembers، نه چیزی معادلش)؛ فقط شمارشِ کل و وضعیتِ یک کاربرِ مشخص.
