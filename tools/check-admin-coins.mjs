@@ -179,18 +179,48 @@ console.log('\n▶ 🧮 «خالص» نه اعتبارِ مجانی را کم م
      ⚠️ نسخه‌ی قبلیِ همین ادعا دقیقاً فرمولِ باگ‌دار را **پین کرده بود** — یعنی چک از
      باگ محافظت می‌کرد. درسش: ادعایی که یک خطِ کد را عیناً تکرار می‌کند، درستیِ آن خط
      را ثابت نمی‌کند؛ فقط تغییرش را سخت می‌کند. برای همین کنارش ادعای **معکوس** هست. */
+  /* 📍 محلِ «خالص» از ۱۴۰۵/۰۶/۱۵ عوض شد: `costsBody` (که یک صفحه‌ی درآمدِ دومِ
+     تکراری بود) حذف شد و تک‌منبعِ سود `lib/profit.js` است. ادعاها هم با آن جابه‌جا
+     شدند، نه اینکه حذف شوند — وگرنه دقیقاً همان دوباره‌شماری می‌توانست بی‌صدا برگردد. */
+  const prof = readFileSync(path.resolve('bots/dashboard/lib/profit.js'), 'utf8');
+  const econ = readFileSync(path.resolve('bots/dashboard/routes/economics.js'), 'utf8');
   const fin = readFileSync(path.resolve('bots/dashboard/routes/finance.js'), 'utf8');
-  ok(/const net = sum\.rev;/.test(fin),
-    'خالص = خودِ درآمدِ دریافتی (تخفیف از قبل داخلش است، هدیه پولِ نقد نیست)');
-  ok(!/const net = [^;]*sum\.disc/.test(fin),
-    'تخفیف دوباره از خالص کم نمی‌شود (دوباره‌شماری)');
-  ok(!/const net = [^;]*sum\.gift/.test(fin),
-    'اعتبارِ مجانی از خالص کم نمی‌شود');
-  ok(/تخفیفِ داده‌شده/.test(fin), 'تخفیف همچنان **گزارش** می‌شود، فقط از خالص کم نمی‌شود');
-  ok(!/sum\.giftCoins.*net|net.*sum\.giftCoins/.test(fin),
-    'الماسِ هدیه‌شده هرگز واردِ محاسبه‌ی تومانیِ خالص نمی‌شود');
-  ok(/giftCoins/.test(fin), 'الماسِ هدیه‌شده سطلِ جدای خودش را دارد');
-  ok(/function coinEconomy/.test(fin), 'کارتِ اقتصادِ الماس (هدیه/خرید/مصرف/مانده) وجود دارد');
+
+  ok(/const net = v\.rev - costToman;/.test(prof),
+    'خالص = درآمدِ دریافتی منهای هزینه‌ی واقعی (تخفیف از قبل داخلِ درآمد است)');
+  ok(!/net = [^;\n]*disc/.test(prof), 'تخفیف دوباره از خالص کم نمی‌شود (دوباره‌شماری)');
+  ok(!/net = [^;\n]*gift/.test(prof), 'اعتبارِ مجانی از خالص کم نمی‌شود');
+  ok(!/costUsd\s*=\s*[^;\n]*gift/.test(prof), 'و واردِ سمتِ هزینه هم نمی‌شود');
+  ok(/تخفیفِ داده‌شده/.test(econ), 'تخفیف همچنان **گزارش** می‌شود، فقط از خالص کم نمی‌شود');
+  ok(/giftCoins/.test(econ), 'الماسِ هدیه‌شده سطلِ جدای خودش را دارد');
+  ok(/export function coinEconomy/.test(fin), 'کارتِ اقتصادِ الماس (هدیه/خرید/مصرف/مانده) وجود دارد');
+  ok(/coinEconomy/.test(econ), 'و در صفحه‌ی اقتصاد رندر می‌شود');
+
+  /* 🚫 و ادعای معکوسِ ساختاری: هیچ صفحه‌ای حق ندارد «خالص/سود» را خودش دوباره حساب
+     کند. این همان چیزی است که نمای کلی می‌کرد و دو عددِ متناقض ساخت. */
+  const dupes = [];
+  for (const f2 of readdirSync(path.resolve('bots/dashboard/routes'))) {
+    if (!f2.endsWith('.js')) continue;
+    const src = readFileSync(path.resolve('bots/dashboard/routes', f2), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    /* فقط **محاسبه** ممنوع است، نه خواندن. `const net = pf.totals.net;` یعنی صفحه
+       دارد عددِ تک‌منبع را بازتاب می‌دهد — دقیقاً همان چیزی که می‌خواهیم. چیزی که
+       ممنوع است RHSِ حساب‌دار است (`rev - cost`).
+
+       ⚠️ اینجا عمداً **RHS جدا استخراج می‌شود** و با یک negative lookahead در همان
+       رجکس تصمیم گرفته نمی‌شود. نسخه‌ی اولش این بود:
+         /(const|let)\s+net\s*=\s*(?!\w[\w.]*\s*;)/
+       و روی خطِ کاملاً سالمِ `const net = pf.totals.net;` هم قرمز می‌داد، چون موتورِ
+       رجکس `\s*` را تا صفر عقب می‌کشد و lookahead را روی خودِ **فاصله** می‌سنجد.
+       درسِ عمومی: هر جای یک رجکس که `\s*` بلافاصله قبل از یک lookahead بیاید، عملاً
+       lookahead را بی‌اثر می‌کند. */
+    for (const ln of src.split('\n')) {
+      const m = ln.match(/(?:const|let)\s+net\s*=\s*([^;]*);/);
+      if (m && !/^[A-Za-z_$][\w$]*(?:\.[\w$]+)*$/.test(m[1].trim())) { dupes.push(`${f2}: ${m[1].trim()}`); }
+    }
+  }
+  ok(dupes.length === 0,
+    `هیچ صفحه‌ای سود را خودش دوباره حساب نمی‌کند${dupes.length ? ` (${dupes.join(', ')})` : ''}`);
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);

@@ -174,9 +174,9 @@ export function financeCsv(url) {
    و جدولِ `discount_uses`. مرزِ روز همیشه تهران است (قرارداد بند ۲الف ریشه).
    ⚠️ هزینه‌ی LLM این‌جا نیست: هیچ ربات این ریپو مصرفِ توکن را ثبت نمی‌کند، پس عددی که
    نداریم را نمی‌سازیم. برای واردکردنش یا باید per-call هزینه ثبت شود یا از OpenRouter خوانده. */
-const COST_KINDS = { welcome: 'خوش‌آمد', streak: 'استریک', referral: 'رفرال', '': 'سایر' };
+export const COST_KINDS = { welcome: 'خوش‌آمد', streak: 'استریک', referral: 'رفرال', '': 'سایر' };
 
-function collectDaily(days, botKey) {
+export function collectDaily(days, botKey) {
   const since = tehranDayStart(-(days - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, gift, disc, kinds:{} }
   const at = (d) => { if (!day.has(d)) day.set(d, { rev: 0, gift: 0, giftCoins: 0, disc: 0, kinds: {} }); return day.get(d); };
@@ -223,7 +223,7 @@ function collectDaily(days, botKey) {
 
 /* اقتصادِ الماس (تجمعی، نه روزانه): چهار عددی که با هم یک ترازنامه‌ی ساده می‌سازند.
    صادرشده(هدیه) + خریداری‌شده = واردشده ؛ مصرف‌شده = بازخریدشده ؛ مانده = بدهیِ معوق. */
-function coinEconomy(botKey) {
+export function coinEconomy(botKey) {
   const out = [];
   for (const inst of instancesOf(botKey)) {
     const coin = coinOf(inst.bot);
@@ -252,86 +252,13 @@ function coinEconomy(botKey) {
   return out;
 }
 
-export function costsBody(url) {
-  const bot = scopeBot(url);
-  const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 7), 180);
-  const series = collectDaily(days, bot);
-  const sum = series.reduce((a, r) => ({
-    rev: a.rev + r.rev, gift: a.gift + r.gift, giftCoins: a.giftCoins + r.giftCoins, disc: a.disc + r.disc,
-  }), { rev: 0, gift: 0, giftCoins: 0, disc: 0 });
-
-  /* 💡 چرا «خالص» دیگر اعتبارِ هدیه را کم نمی‌کند (بازطراحیِ ۱۴۰۵/۰۵/۳۰):
-     اعتبارِ مجانی **پولِ نقد نیست**؛ یک بدهیِ تبلیغاتی است، دقیقاً مثل کارتِ هدیه یا
-     امتیازِ وفاداری. لحظه‌ی دادنش هیچ ریالی از جیب نمی‌رود. هزینه‌ی واقعی وقتی رخ
-     می‌دهد که کاربر **خرجش کند** و ما یک فال تحویل بدهیم، و اندازه‌اش هم ارزشِ اسمیِ
-     الماس نیست، بلکه **هزینه‌ی خدمت‌رسانی** است (فراخوانیِ مدل). ضمناً بخشِ بزرگی از
-     اعتبارِ داده‌شده هرگز خرج نمی‌شود (سوخت/breakage).
-     پس کم‌کردنِ ارزشِ اسمیِ اعتبار از درآمد، عددی می‌ساخت که نه جریانِ نقدی بود نه
-     سود و زیان. اقتصادِ الماس جدا و به واحدِ خودش گزارش می‌شود.
-
-     🐛 و اصلاحِ دومِ ۱۴۰۵/۰۶/۱۵ — **تخفیف هم دو بار کم می‌شد.** خطِ قبلی
-     `rev - gift - disc` بود، در حالی که `rev` از `SUM(amount)` می‌آید و آن ستون در
-     خودِ ربات **بعد از** تخفیف نوشته شده (`setPaymentDiscount` در tarot:
-     `original_amount=قیمتِ اصلی, amount=تخفیف‌خورده`)، و `discount_uses.discount_amount`
-     دقیقاً همان اختلاف است. یعنی تخفیف یک‌بار در خودِ درآمد لحاظ شده بود و یک‌بار
-     دوباره کم می‌شد؛ «خالص» به اندازه‌ی کلِ تخفیف‌ها کم‌برآورد می‌شد.
-     دو چارچوبِ درست وجود دارد و قاطی‌شدنشان همین را ساخت: یا از **درآمدِ ناخالص**
-     شروع کن و تخفیف را کم کن، یا از **پولِ واقعاً دریافتی**. ما دومی را داریم، پس
-     تخفیف فقط **گزارش** می‌شود (ستونِ جدا) و از خالص کم نمی‌شود.
-     و `gift` هم که کامنتِ بالا سال‌ها می‌گفت نباید کم شود، بالاخره واقعاً کم نشد. */
-  const net = sum.rev;
-  const kinds = {};
-  for (const r of series) for (const [k, v] of Object.entries(r.kinds)) kinds[k] = (kinds[k] || 0) + v;
-  const econ = coinEconomy(bot);
-
-  const max = Math.max(1, ...series.map(r => Math.max(r.rev, r.gift + r.disc)));
-  const px = (v) => Math.round((v / max) * 220);
-  const rowsHtml = series.map(r => [
-    r.d,
-    `${fmt(r.rev)} ت <span class="bar" style="width:${px(r.rev)}px"></span>`,
-    `${fmt(r.disc)} ت`,
-    r.giftCoins ? `${fmt(r.giftCoins)}💎` : '-',
-  ]);
-
-  const econCards = econ.map(e => `<div class="card"><h2>💎 اقتصادِ الماس — ${esc(e.inst.title)}</h2>
-      <div class="stats">
-        ${stat('هدیه‌شده (کلِ عمر)', `${fmt(e.gifted)}💎`)}
-        ${stat('خریداری‌شده', `${fmt(e.bought)}💎`)}
-        ${stat('مصرف‌شده (فالِ تحویل‌شده)', `${fmt(e.spent)}💎`)}
-        ${stat('ماندهٔ کیفِ کاربران', `${fmt(e.held)}💎`)}
-      </div>
-      <p class="muted">«هدیه‌شده» جوابِ «چقدر الماس بذل و بخشش کردیم» است، به واحدِ خودش.
-        این عدد <b>هزینه‌ی نقدی نیست</b>؛ یک بدهیِ تبلیغاتی است که فقط وقتی خرج می‌شود
-        هزینه می‌سازد. «ماندهٔ کیف» یعنی هنوز خرج نشده، و اختلافش با «مصرف‌شده» همان
-        نرخِ سوختِ اعتبار است.</p></div>`).join('');
-
-  return `
-    <h1>هزینه‌ها و درآمد</h1>
-    <form method="get" action="/costs" class="inline">
-      <input type="hidden" name="bot" value="${esc(bot)}">
-      <label>بازه<select name="days">
-        ${[7, 30, 90, 180].map(v => `<option value="${v}" ${v === days ? 'selected' : ''}>${v} روز</option>`).join('')}
-      </select></label><button type="submit">اعمال</button>
-    </form>
-    <div class="stats">
-      ${stat('درآمدِ تأییدشده', `${fmt(sum.rev)} ت`)}
-      ${stat('تخفیفِ داده‌شده', `${fmt(sum.disc)} ت`)}
-      ${sum.gift ? stat('اعتبارِ مجانیِ تومانی', `${fmt(sum.gift)} ت`) : ''}
-      ${stat('درآمدِ دریافتی (همان بالا)', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`)}
-    </div>
-    <p class="muted">🐛 <b>تخفیف عمداً از درآمد کم نمی‌شود</b> و این یک اصلاح است، نه سهو:
-      ستونِ <span class="mono">amount</span> در خودِ ربات از قبل <b>بعد از</b> تخفیف نوشته
-      می‌شود، پس کم‌کردنِ دوباره‌اش تخفیف را دو بار می‌شمرد و خالص را کم‌برآورد می‌کرد.
-      تخفیف این‌جا فقط <b>گزارش</b> می‌شود تا بدانی چقدر دادی. اعتبارِ مجانی هم پولِ نقد
-      نیست و پایین‌تر به واحدِ خودش می‌آید.</p>
-    ${econCards}
-    <h2>تفکیک اعتبارِ هدیه (به واحدِ خودِ ربات)</h2>
-    ${table(['نوع', 'مقدار'], Object.entries(kinds).sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => [esc(COST_KINDS[k] || k || 'سایر'), fmt(v)]), 'هنوز هدیه‌ای داده نشده')}
-    <h2>روزانه</h2>
-    ${table(['روز', 'درآمدِ دریافتی', 'تخفیفِ داده‌شده', 'الماسِ هدیه'], rowsHtml)}
-    <p class="muted">این کارت فقط <b>درآمد و بذل‌وبخشش</b> را نشان می‌دهد.
-      <b>سودِ خالص</b> (درآمد منهای هزینه‌ی مدل و تبلیغ) کارتِ جداگانه‌ای بالاترِ همین
-      صفحه دارد، چون هزینه‌ی واقعی از <span class="mono">llm_usage</span> می‌آید و
-      تاریخچه‌اش از درآمد کوتاه‌تر است.</p>`;
-}
+/* 🗑 `costsBody` حذف شد (۱۴۰۵/۰۶/۱۵ — ایرادِ صریحِ مالک: «چرا الان دو قسمت داره؟»).
+   یک صفحه‌ی کاملِ دومِ «هزینه‌ها و درآمد» بود که داخلِ صفحه‌ی اقتصاد embed می‌شد، با
+   `<h1>` خودش، **انتخابگرِ بازه‌ی جداگانه‌ی خودش** (۷/۳۰/۹۰/۱۸۰ روز، پیش‌فرض ۳۰) و
+   عددِ «درآمدِ دریافتی»ِ خودش. یعنی یک صفحه، سه عددِ درآمد، سه بازه‌ی مستقل. کاربر
+   حق داشت گیج شود؛ این تعریفِ ساختاریِ تناقض است، نه یک باگِ نمایشی.
+   محتوای ارزشمندش (اقتصادِ الماس، تفکیکِ هدیه، تخفیفِ گزارشی) به کارت‌های
+   `economics.js` منتقل شد و همان‌جا از **همان** بازه‌ی صفحه پیروی می‌کند.
+   مسیرِ `/costs` هم حذف شد (در منو نبود و فقط با تایپِ دستیِ URL دیده می‌شد)، ولی
+   به‌جای ۴۰۴ به `/economics` **ریدایرکت** می‌شود: بوکمارکِ کهنه‌ای که ۴۰۴ بدهد به مالک
+   می‌گوید «داشبورد خراب شد»، نه «محتوا جابه‌جا شد». */

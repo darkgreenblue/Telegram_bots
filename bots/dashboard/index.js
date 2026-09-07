@@ -19,7 +19,7 @@ import { DEFAULT_BOT, validBotKey, botCookie } from './lib/nav.js';
 import { audit } from './lib/platform.js';
 import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } from './routes/marketing.js';
 import { supportBody, supportUserBody, supportAction } from './routes/support.js';
-import { financeBody, financeCsv, financeAction, costsBody } from './routes/finance.js';
+import { financeBody, financeCsv, financeAction } from './routes/finance.js';
 import { orphansBody, orphanAdd, orphanResolve, orphanDelete } from './routes/orphans.js';
 import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
@@ -29,7 +29,7 @@ import { journalBody, journalVersion, journalInsight } from './routes/journal.js
 import { cohortBody, cohortFragment } from './routes/cohort.js';
 import { funnelStepsFragment, screensBody } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
-import { dashBody, dashRate } from './routes/dash.js';
+import { dashBody } from './routes/dash.js';
 import { engagementBody } from './routes/engagement.js';
 import { acquisitionBody, acquisitionSettings } from './routes/acquisition.js';
 import { economicsBody } from './routes/economics.js';
@@ -69,7 +69,6 @@ const PAGES = {
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
   '/orphans': (url) => ['پرداخت‌های سرگردان', orphansBody(url)],
-  '/costs': (url) => ['هزینه‌ها', costsBody(url)],
   '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
   '/screens': (url) => ['صفحه‌ها', screensBody(url)],
   '/discounts': (url) => ['کد تخفیف', discountsBody(url)],
@@ -102,7 +101,6 @@ const ACTIONS = {
   '/experiments/decide': { fn: experimentDecide, backTo: '/experiments' },
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
-  '/dash/rate': { fn: dashRate, backTo: '/dash' },
   '/acquisition/settings': { fn: acquisitionSettings, backTo: '/economics' },
   '/orphans/add':     { fn: orphanAdd,     backTo: '/orphans' },
   '/orphans/resolve': { fn: orphanResolve, backTo: '/orphans' },
@@ -201,6 +199,13 @@ const server = http.createServer(async (req, res) => {
     if (path === '/funnel.steps.fragment') {
       return send(res, 200, funnelStepsFragment(url));
     }
+
+    /* ---- 🔀 بوکمارکِ کهنه‌ی صفحه‌ی حذف‌شده‌ی «هزینه‌ها» ----
+       `/costs` در ۱۴۰۵/۰۶/۱۵ حذف شد چون یک صفحه‌ی درآمدِ **دوم** بود با انتخابگرِ
+       بازه‌ی جدا و عددی که با صفحه‌ی اقتصاد نمی‌خواند (همان چیزی که مالک گزارش کرد).
+       ولی مالک ماه‌ها از همان آدرس استفاده می‌کرد؛ ۴۰۴ دادن به بوکمارکش یعنی فکر کند
+       داشبورد خراب شده. یک ریدایرکت به جایی که محتوا واقعاً رفته، صادق‌تر است. */
+    if (path === '/costs') return redirect(res, `/economics${url.search || ''}`);
 
     /* ---- صفحات ---- */
     const page = PAGES[path];

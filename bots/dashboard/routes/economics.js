@@ -1,37 +1,59 @@
-// 💰 اقتصاد و هزینه — «هر فال چقدر آب می‌خورد و آخرِ ماه چه می‌ماند؟»
+// 💰 اقتصاد و هزینه — «چقدر در آوردیم، چقدر خرج کردیم، آخرش چه ماند؟»
 //
-// همه‌ی اعدادِ پولیِ **تحلیلی** این‌جاست؛ صفِ رسید و تأییدِ پرداخت در «اقدام‌ها ← مالی».
-import { instancesOf, withDb, hasTable, scalar, rows, botByKey, moneyText, revenueWhere, toToman } from '../lib/bots.js';
+// ═══ چرا این صفحه یک انتخابگرِ بازه دارد، نه چند تا ═══
+// قاعده‌ی بند ۲الفِ CLAUDE.md ریشه می‌گوید «انتخابگرِ بازه per بخش است، نه سراسری»، و
+// آن قاعده درست است: کسی که ماندگاری را ماهانه و هزینه را روزانه می‌بیند دو **سؤالِ
+// متفاوت** دارد. ولی این صفحه یک سؤال دارد با سه نما: سود، تفکیکِ هزینه، و سریِ روزانه
+// همگی خروجیِ **یک محاسبه**اند. سه انتخابگر برای یک محاسبه نمی‌تواند چیزی جز تناقض
+// بسازد، و دقیقاً همان چیزی بود که مالک دید (۱۴۰۵/۰۶/۱۵):
+//   • کارتِ سود روی «کل عمر» بود
+//   • کارتِ هزینه‌ی مدل روی «ماهانه»
+//   • و بلوکِ سومِ embed شده (`costsBody`) روی «۳۰ روز» با کنترلِ کاملاً جدا
+// یعنی سه عددِ درآمد روی یک صفحه که هیچ‌کدام با دیگری نمی‌خواند.
+// پس: **یک انتخابگر برای خانواده‌ی سنجه‌های پول** (`rEcon`، پیش‌فرض «کل»). این فیلترِ
+// سراسری نیست؛ یک محاسبه است که یک بازه دارد. کارتِ اقتصادِ الماس عمداً بیرونِ آن است
+// چون **مانده** است نه جریان (کلِ عمر معنی می‌دهد، «هفتگی» نه) و خودش این را می‌گوید.
+//
+// ═══ و چرا «شروع ثبت هزینه» دیگر هیچ‌جای این صفحه نیست ═══
+// خواسته‌ی صریحِ مالک: «قرار بود کلاً مفهوم شروع ثبت هزینه را بی‌خیال شویم». روشش هم
+// خودش داده: عددِ تجمعیِ دوره‌ی قبل روی روزهای همان دوره پخش می‌شود (`profitDaily`)،
+// پس هر بازه‌ای هزینه‌ی کامل دارد و هیچ استثنا و هیچ هشداری لازم نیست.
+import { instancesOf, withDb, hasTable, scalar, rows, botByKey } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
-import { fmt, esc, nowSec, rangeOf, rangeSince, RANGES, tehranDayStart, tehranDayStr } from '../lib/util.js';
+import { fmt, esc, rangeOf, rangeSince, RANGES } from '../lib/util.js';
 import { stat, table, cardHead, rangePicker } from '../lib/html.js';
 import { hbars } from '../lib/charts.js';
 import { getSetting } from '../lib/platform.js';
 import { costPerDiamond } from '../lib/cpa.js';
-import { costsBody } from './finance.js';
-import { profitDaily, firstRevenueSec, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { coinEconomy, collectDaily, COST_KINDS } from './finance.js';
+import { profitFor, lifetimeDays, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
+const t = (n) => `${fmt(Math.round(Number(n) || 0))} ت`;
+const pct = (part, whole) => (whole ? Math.round((part / whole) * 1000) / 10 : 0);
 
 const KIND_FA = {
   reading: '🔮 خوانشِ فال', repair: '🔧 تعمیرِ نقطه‌ای', daily_card: '🎴 کارت روز',
   feedback: '💬 تصحیحِ بازخورد', transcribe: '🎙 رونویسیِ ویس',
 };
 
-function modelCost(botKey, since) {
-  const out = { total: 0, inRange: 0, rows: 0, rowsInRange: 0, byKind: new Map(), days: 0, has: false, readings: 0 };
+/* تفکیکِ مسیرِ هزینه‌ی مدل و شمارشِ فراخوانی — فقط برای **نمایشِ جزئیات**.
+ * ⚠️ جمعِ این اعداد عمداً هیچ‌جا به‌عنوانِ «هزینه‌ی کل» استفاده نمی‌شود: هزینه‌ی کل
+ * فقط از `profitFor` می‌آید، وگرنه همان دو-عددیِ قبلی برمی‌گردد. */
+function modelDetail(botKey, rangeKey) {
+  // ⚠️ مرزِ بازه از همان helperِ مشترک می‌آید (مرزِ روزِ تهران)، نه یک حسابِ محلی —
+  // وگرنه این کارت یک روز با کارتِ سودِ بالایش اختلاف پیدا می‌کند.
+  const since = rangeSince(rangeKey);
+  const out = { rowsInRange: 0, byKind: new Map(), readings: 0, has: false, usdInRange: 0 };
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'llm_usage')) return;
       out.has = true;
-      out.total += scalar(db, 'SELECT COALESCE(SUM(cost_usd),0) s FROM llm_usage');
-      out.inRange += scalar(db, 'SELECT COALESCE(SUM(cost_usd),0) s FROM llm_usage WHERE created_at >= ?', [since]);
-      out.rows += scalar(db, 'SELECT COUNT(*) c FROM llm_usage');
       out.rowsInRange += scalar(db, 'SELECT COUNT(*) c FROM llm_usage WHERE created_at >= ?', [since]);
-      out.days = Math.max(out.days, scalar(db, "SELECT COUNT(DISTINCT CAST((created_at + 12600)/86400 AS INTEGER)) c FROM llm_usage"));
       for (const r of rows(db, 'SELECT kind, SUM(cost_usd) s, COUNT(*) c FROM llm_usage WHERE created_at >= ? GROUP BY kind', [since])) {
         const cur = out.byKind.get(r.kind) || { usd: 0, calls: 0 };
         cur.usd += r.s || 0; cur.calls += r.c; out.byKind.set(r.kind, cur);
+        out.usdInRange += r.s || 0;
       }
       if (hasTable(db, 'readings')) {
         out.readings += scalar(db, "SELECT COUNT(*) c FROM readings WHERE status='delivered' AND price>0 AND created_at >= ?", [since]);
@@ -41,17 +63,15 @@ function modelCost(botKey, since) {
   return out;
 }
 
-function revenue(botKey, since) {
-  let inRange = 0, total = 0;
-  for (const inst of instancesOf(botKey)) {
-    withDb(inst.file, (db) => {
-      const rw = revenueWhere(botKey);
-      if (!hasTable(db, rw.table)) return;
-      const q = (s) => toToman(botKey, scalar(db, `SELECT COALESCE(SUM(${rw.amountCol}),0) s FROM ${rw.table} WHERE ${rw.where}`, [s]));
-      inRange += q(since); total += q(0);
-    });
+/** تخفیف و هدیه در همان بازه — **گزارشی**، نه هزینه. */
+function giving(botKey, days) {
+  const series = collectDaily(days || lifetimeDays(botKey), botKey);
+  const sum = { disc: 0, giftCoins: 0, kinds: {} };
+  for (const r of series) {
+    sum.disc += r.disc; sum.giftCoins += r.giftCoins;
+    for (const [k, v] of Object.entries(r.kinds)) sum.kinds[k] = (sum.kinds[k] || 0) + v;
   }
-  return { inRange, total };
+  return sum;
 }
 
 export function economicsBody(url) {
@@ -60,86 +80,34 @@ export function economicsBody(url) {
   if (!instancesOf(bot).length) {
     return `<div class="card"><h2>💰 اقتصاد و هزینه</h2><p class="muted">دیتابیسِ این ربات پیدا نشد.</p></div>`;
   }
-  const rk = rangeOf(url, 'rEcon', 'month');
-  const since = rangeSince(rk);
-  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const toman = (u) => (rate ? `<span class="muted"> ≈ ${fmt(Math.round(u * rate))} ت</span>` : '');
+  const rk = rangeOf(url, 'rEcon', 'all');
+  const p = profitFor(bot, rk);        // ← تک‌منبعِ همه‌ی اعدادِ پولیِ این صفحه و نمای کلی
 
-  const mc = modelCost(bot, since);
-  const rev = revenue(bot, since);
-  const cpd = costPerDiamond(bot);
-  const avgDaily = mc.days ? mc.total / mc.days : 0;
-  const perReading = mc.readings ? mc.inRange / mc.readings : 0;
+  const head = `<div class="card">
+    ${cardHead(`💰 اقتصاد و هزینه — ${esc(title)}`, rangePicker(url, 'rEcon', rk))}
+    <p class="muted" style="margin:6px 0 0">همه‌ی کارت‌های این صفحه از <b>همین یک بازه</b>
+      پیروی می‌کنند، چون همه خروجیِ یک محاسبه‌اند. تنها استثنا «اقتصادِ الماس» است که
+      <b>مانده</b> است نه جریان، پس همیشه کلِ عمر را می‌گوید.</p></div>`;
 
-  const costCard = `<div class="card">
-    ${cardHead('🧾 هزینه‌ی مدل (OpenRouter)', rangePicker(url, 'rEcon', rk))}
-    ${mc.has ? `<div class="grid">
-      ${stat(`هزینه در ${esc(RANGES[rk].label)}`, usd(mc.inRange) + toman(mc.inRange))}
-      ${stat('هزینه‌ی کل (از شروعِ ثبت)', usd(mc.total) + toman(mc.total))}
-      ${stat('میانگین هزینه‌ی روزانه', usd(avgDaily) + toman(avgDaily))}
-      ${stat('هزینه به ازای هر فال', usd(perReading) + toman(perReading))}
-      ${stat('فراخوانیِ ثبت‌شده در بازه', fmt(mc.rowsInRange))}
-      ${stat('کلِ فراخوانیِ ثبت‌شده', fmt(mc.rows))}
-    </div>` : ''}
-    ${mc.rows ? '' : `<div class="note">ثبتِ هزینه تازه روشن شده و هنوز ردیفی ندارد. این عدد از لحظه‌ی
-      انتشار به بعد پر می‌شود و <b>برای گذشته قابلِ بازسازی نیست</b>.</div>`}
-    ${mc.byKind.size ? `<div style="margin-top:14px"><h3 class="ch">هزینه به تفکیکِ مسیر (${esc(RANGES[rk].label)})</h3>
-      ${hbars([...mc.byKind.entries()].sort((a, b) => b[1].usd - a[1].usd)
-        .map(([k, v]) => ({ label: `${KIND_FA[k] || k} (${fmt(v.calls)} فراخوانی)`, value: Math.round(v.usd * 10000) / 10000 })), { showPct: true })}</div>` : ''}
-    <p class="muted" style="margin-top:8px">هزینه همان عددی است که خودِ OpenRouter در هر پاسخ برمی‌گرداند.
-      ⚠️ داوریِ رسید (<span class="mono">cardpay.js</span>) هنوز شمرده نمی‌شود.</p></div>`;
+  /* ⚠️ نبودِ نرخِ دلار کلِ صفحه را خاموش **نمی‌کند** — فقط سودِ تومانی را. نسخه‌ی اولِ
+     این بازسازی زودهنگام return می‌کرد و صفحه‌ای که تا دیروز هزینه‌ی دلاری‌اش را نشان
+     می‌داد یک‌باره خالی می‌شد. هزینه ذاتاً دلاری است و بدونِ هیچ نرخی هم معنی دارد؛
+     چیزی که بدونِ نرخ ساخته نمی‌شود فقط تبدیل به تومان و در نتیجه «سود» است. */
+  const profit = p.rate ? profitCard(url, bot, p, rk) : `<div class="card">
+    ${cardHead('📈 سودِ خالص')}
+    <p>هزینه دلاری است و درآمد تومانی، پس بدونِ <b>نرخِ دلار</b> این دو قابلِ کم‌کردن از
+      هم نیستند و سود ساخته نمی‌شود. بقیه‌ی اعدادِ این صفحه (که دلاری‌اند) سرِ جایشان‌اند.</p>
+    <p class="muted">نرخ را در کارتِ بالا وارد کن تا سود هم زنده شود.</p></div>`;
 
-  const cpdCard = cpd.hasData ? `<div class="card">
-    ${cardHead('💎 هزینه‌ی هر الماس per اندازه‌ی فال')}
-    ${table(['اندازه', 'فال', 'الماس', 'هزینه', 'هزینه‌ی هر الماس'], cpd.sizes.map(s => [
-      `${fmt(s.size)} کارتی`, fmt(s.readings), `${fmt(s.diamonds)}💎`, usd(s.usd), `<b>${usd(s.cpd)}</b>${toman(s.cpd)}`]))}
-    <p class="muted">همین نرخ‌ها ورودیِ محاسبه‌ی CPA در صفحه‌ی «جذب و کانال‌ها» هستند.</p></div>` : '';
-
-  const marginUsd = rate ? (rev.inRange / rate) - mc.inRange : 0;
-  const revCard = `<div class="card">
-    ${cardHead('💳 درآمد و حاشیه')}
-    <div class="grid">
-      ${stat(`درآمد ${esc(RANGES[rk].label)}`, moneyText(bot, rev.inRange))}
-      ${stat('درآمد کل', moneyText(bot, rev.total))}
-      ${rate ? stat(`حاشیه‌ی ناخالص ${esc(RANGES[rk].label)}`,
-        `<b class="${marginUsd >= 0 ? '' : 'drop'}">${moneyText(bot, Math.round(marginUsd * rate))}</b>`) : ''}
-      ${rate && rev.inRange ? stat('سهمِ هزینه‌ی مدل از درآمد',
-        `${fmt(Math.round((mc.inRange * rate / rev.inRange) * 1000) / 10)}٪`) : ''}
-    </div>
-    <p class="muted">${rate ? 'حاشیه = درآمد − هزینه‌ی مدل (هزینه‌ی تبلیغ در صفحه‌ی جذب می‌آید).'
-      : 'برای مقایسه‌ی دلار با تومان، نرخِ دلار را در صفحه‌ی «جذب و کانال‌ها» وارد کن.'}</p></div>`;
-
-  return `<div class="card"><h2 style="margin:0">💰 اقتصاد و هزینه — ${esc(title)}</h2>
-      <p class="muted" style="margin:6px 0 0">هزینه‌ی واقعیِ مدل، اقتصادِ الماس، و آنچه از درآمد می‌ماند.</p></div>
-    ${costInputsCard(bot)}${profitCard(url, bot)}${costCard}${cpdCard}${costsBody(url)}`;
+  return `${head}${costInputsCard(bot)}${profit}
+    ${costBreakdownCard(bot, p, rk)}${modelCard(bot, p, rk)}${diamondCard(bot, p, rk)}`;
 }
 
-/* ═══ 📈 سودِ خالص — تنها کارتِ سودِ این صفحه ═══
-   ⚠️ قبلاً **دو** کارت بود (سودِ بازه + سودِ کلِ عمر) و ایرادِ درستِ مالک همین بود:
-   یک سنجه با دو کارت یعنی خواننده باید حدس بزند کدام «واقعی» است. حالا یک کارت با
-   انتخابگرِ بازه (روز / هفته / ماه / کل عمر، پیش‌فرض **کل عمر**) هر چهار جواب را
-   می‌دهد. هزینه‌ی دوره‌ی قبل از ثبت هم در `profitDaily` روی روزهایش پخش می‌شود، پس
-   دیگر نه استثنایی هست نه هشداری. */
-export function profitCard(url, bot) {
-  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
-  const preUsd = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
-  const rk = rangeOf(url, 'rProfit', 'all');
-
-  if (!rate) {
-    return `<div class="card">${cardHead('📈 سودِ خالص')}
-      <p>هزینه‌ی مدل دلاری است و درآمد تومانی، پس بدونِ <b>نرخِ دلار</b> این دو قابلِ
-        کم‌کردن از هم نیستند و هیچ عددی ساخته نمی‌شود.</p>
-      <p class="muted">نرخ را در کارتِ بالا وارد کن تا این کارت زنده شود.</p></div>`;
-  }
-
-  /* «کل عمر» = از اولین روزِ درآمد تا امروز. بقیه‌ی بازه‌ها همان پنجره‌ی خودشان. */
-  const firstRev = firstRevenueSec(bot);
-  const lifeDays = firstRev ? Math.ceil((nowSec() - firstRev) / 86400) + 1 : 30;
-  const days = RANGES[rk].days || lifeDays;
-  const p = profitDaily(bot, { days, usdToman: rate, campaignUsdPerUser: campUsd, preTrackUsd: preUsd });
-
-  const t = (v) => `${fmt(v)} ت`;
+/* ═══ 📈 سودِ خالص — سرخطِ صفحه، و **همان عددی که نمای کلی نشان می‌دهد** ═══ */
+export function profitCard(url, bot, pIn, rkIn) {
+  const rk = rkIn || rangeOf(url, 'rEcon', 'all');
+  const p = pIn || profitFor(bot, rk);
+  if (!p.rate) return '';
   const tot = p.totals;
   const margin = tot.rev ? Math.round((tot.net / tot.rev) * 1000) / 10 : 0;
   const daily = p.series.slice().reverse().filter(r => r.rev || r.costToman).map(r => [
@@ -150,27 +118,156 @@ export function profitCard(url, bot) {
   ]);
 
   return `<div class="card">
-    ${cardHead('📈 سودِ خالص', rangePicker(url, 'rProfit', rk))}
+    ${cardHead(`📈 سودِ خالص — ${esc(RANGES[rk].label)}`)}
     <div class="grid">
-      ${stat(`سودِ خالص (${esc(RANGES[rk].label)})`, `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
+      ${stat('سودِ خالص', `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`)}
       ${stat('درآمدِ دریافتی', t(tot.rev) + (tot.orphan
         ? ` <span class="muted">(${fmt(tot.orphan)} ت سرگردان)</span>` : ''))}
-      ${stat('هزینه‌ی واقعی', `${t(tot.costToman)} <span class="muted">(${usd(tot.llmUsd + tot.adUsd)})</span>`)}
+      ${stat('هزینه‌ی کل', `${t(tot.costToman)} <span class="muted">(${usd(tot.costUsd)})</span>`)}
       ${stat('حاشیه‌ی سود', `${fmt(margin)}٪`)}
       ${stat('نقطه‌ی سربه‌سر', p.breakEven
         ? `<b>${esc(p.breakEven)}</b>`
         : `<span class="muted">${tot.net < 0 ? 'هنوز نرسیده' : 'از ابتدا مثبت'}</span>`)}
     </div>
     <p class="muted">سود = <b>درآمدِ دریافتی − هزینه‌ی مدل − هزینه‌ی تبلیغ</b>.
-      تخفیف کم نمی‌شود (از قبل داخلِ درآمد است)، اعتبارِ هدیه هم نه (پولِ نقد نیست؛
-      هزینه‌اش وقتی خرج شود در همان هزینه‌ی مدل می‌آید)، و پرداخت‌های تستی اصلاً
-      واردِ درآمد نمی‌شوند.${tot.orphan ? ` <b>${fmt(tot.orphan)} تومان</b> از این درآمد
-      «پرداختِ سرگردان» است: پولی که به حساب رسیده ولی کاربرش رسید نفرستاده و دستی ثبت شده.` : ''}${preUsd ? ` هزینه‌ی ${usd(preUsd)}ِ دوره‌ی قبل از ثبتِ خودکار
-      روی روزهای همان دوره پخش شده، پس «کل عمر» کامل است.` : ''}</p>
+      تخفیف کم نمی‌شود (از قبل داخلِ درآمد است) و اعتبارِ هدیه هم نه (پولِ نقد نیست؛
+      هزینه‌ی واقعی‌اش وقتی خرج شود در هزینه‌ی مدل می‌آید). پرداخت‌های تستی اصلاً واردِ
+      درآمد نمی‌شوند.${tot.orphan ? ` <b>${fmt(tot.orphan)} تومان</b> از این درآمد
+      «پرداختِ سرگردان» است: پولی که به حساب رسیده ولی کاربرش رسید نفرستاده و دستی ثبت شده.` : ''}</p>
     <h3 class="ch">روزانه (جدیدترین بالا)</h3>
     ${table(['روز', 'درآمد', 'هزینه', 'سودِ روز', 'تجمعی'], daily, 'در این بازه دیتایی نیست')}
     <p class="muted">«نقطه‌ی سربه‌سر» اولین روزی است که تجمعی مثبت شد <b>و دیگر منفی
-      نشد</b> — یک روزِ پرفروشِ تنها که فردا برمی‌گردد، سربه‌سر نیست.</p></div>`;
+      نشد</b> — یک روزِ پرفروشِ تنها که فردا برمی‌گردد، سربه‌سر نیست.
+      «تجمعی» از ابتدای همین بازه جمع می‌شود، پس در بازه‌ی «کل» یعنی از روزِ اولِ ربات.</p></div>`;
+}
+
+/* ═══ 🧾 تفکیکِ هزینه — کارتی که جوابِ «چرا حساب و کتابم با پنل نمی‌خواند» است ═══
+ *
+ * مالک هزینه‌ها را دستی جمع زد و به عددِ دیگری رسید. سه دلیل داشت و هر سه این‌جا
+ * صریح نشان داده می‌شوند:
+ *   ۱) صفحه‌ی «هزینه‌ی مدل» فقط بخشِ **ثبت‌شده** را می‌گفت («هزینه‌ی کل از شروعِ ثبت»)،
+ *      یعنی نصفِ داستان؛ دوره‌ی قبلش جای دیگری بود.
+ *   ۲) هزینه‌ی تبلیغ اصلاً در این صفحه نبود و باید از صفحه‌ی «جذب» برداشته می‌شد.
+ *   ۳) و بدترینش: عددی که در صفحه‌ی «جذب» جلوی «کمپین تبلیغاتی» می‌نشیند **هزینه‌ی
+ *      تبلیغ نیست**. آن ستون CPA است و در `lib/cpa.js` این‌طور ساخته می‌شود:
+ *        هزینه‌ی الماسِ خوش‌آمدِ مصرف‌شده (× نرخِ دلاریِ خدمت‌رسانی) + سهمِ پاداشِ دعوت
+ *        + هزینه‌ی تبلیغِ دستی
+ *      یعنی جزءِ اولش **از قبل داخلِ هزینه‌ی مدل هست**. جمع‌کردنش با هزینه‌ی مدل،
+ *      هزینه‌ی خدمت‌رسانیِ الماسِ هدیه را دو بار می‌شمارد.
+ * پس این کارت جمعِ نهایی را خودش نشان می‌دهد تا هیچ‌کس دیگر لازم نباشد دستی جمع بزند.
+ */
+export function costBreakdownCard(bot, p, rk) {
+  const tot = p.totals;
+  const rate = p.rate;
+  /* بدونِ نرخ، ستونِ تومان خالی می‌ماند — نه صفر. صفر یعنی «هزینه‌ای نبود»، که دروغ است.
+   * ⚠️ عددِ تومانِ هر ردیف از **خودِ سری** می‌آید (`totals.llmToman` و…)، نه از
+   * `round(دلارِ همان ردیف × نرخ)`. اگر دومی بود، سه ردیف به ردیفِ «جمع» نمی‌رسیدند و
+   * دقیقاً همان «اعدادت با هم نمی‌خوانَد»ی می‌شد که این بازسازی برای رفعش است. */
+  const tCol = (v) => (rate ? t(v) : '<span class="muted">-</span>');
+  const line = (label, u, tv, note = '') => [
+    label, usd(u), tCol(tv), `${fmt(pct(u, tot.costUsd))}٪`, note,
+  ];
+  const body = [
+    line('🤖 هزینه‌ی مدل — ثبتِ خودکار', tot.llmUsd, tot.llmToman,
+      '<span class="muted">از <span class="mono">llm_usage</span>، همان عددی که OpenRouter برمی‌گرداند</span>'),
+    ...(tot.preUsd ? [line('🤖 هزینه‌ی مدل — دوره‌ی قبل از ثبت', tot.preUsd, tot.preToman,
+      `<span class="muted">سهمِ این بازه از ${usd(p.preUsd)}ِ واردشده‌ی دستی، پخش‌شده روی روزهای همان دوره</span>`)] : []),
+    line('📣 هزینه‌ی تبلیغِ کمپین', tot.adUsd, tot.adToman,
+      tot.campaignUsers
+        ? `<span class="muted">${fmt(tot.campaignUsers)} کاربرِ کمپین × ${usd(p.campUsd)}</span>`
+        : '<span class="muted">کاربرِ کمپینی در این بازه نبود</span>'),
+  ];
+
+  return `<div class="card">
+    ${cardHead(`🧾 هزینه‌ها به تفکیک — ${esc(RANGES[rk].label)}`)}
+    ${table(['نوعِ هزینه', 'دلار', 'تومان', 'سهم', 'از کجا می‌آید'], [
+      ...body,
+      [`<b>جمعِ هزینه</b>`, `<b>${usd(tot.costUsd)}</b>`, `<b>${tCol(tot.costToman)}</b>`, '<b>۱۰۰٪</b>', ''],
+      [`<b>درآمدِ دریافتی</b>`, rate ? `<span class="muted">${usd(tot.rev / rate)}</span>` : '<span class="muted">-</span>', `<b>${t(tot.rev)}</b>`, '', ''],
+      ...(rate ? [[`<b>سودِ خالص</b>`, '', `<b class="${tot.net < 0 ? 'drop' : ''}">${t(tot.net)}</b>`, '', '']] : []),
+    ])}
+    <div class="note">🧮 <b>اگر دستی جمع می‌زنی، این نکته را از دست نده:</b> عددی که در
+      صفحه‌ی «📥 جذب و کانال‌ها» جلوی <b>کمپین تبلیغاتی</b> نوشته شده، <b>هزینه‌ی تبلیغ
+      نیست</b>. آن ستون <b>CPA</b> است و علاوه بر هزینه‌ی تبلیغ، <b>هزینه‌ی خدمت‌رسانیِ
+      الماسِ خوش‌آمد</b> را هم دارد — و آن بخش از قبل داخلِ «هزینه‌ی مدل» همین جدول هست.
+      جمع‌کردنِ آن دو یعنی یک هزینه را دو بار شمردن. هزینه‌ی تبلیغِ خالص، همان ردیفِ
+      📣 بالاست.</div>
+    <p class="muted">این جدول <b>همه‌ی</b> هزینه‌های ربات است. اگر هزینه‌ی دیگری هم داری
+      (سرور، دامنه، …) فعلاً هیچ‌جای داشبورد ثبت نمی‌شود و اگر لازم شد باید ورودیِ دستیِ
+      جدا بگیرد؛ داشبورد چیزی را که نمی‌داند حدس نمی‌زند.</p></div>`;
+}
+
+/* ═══ 🤖 جزئیاتِ هزینه‌ی مدل — «این دلار کجا خرج شد؟» ═══ */
+export function modelCard(bot, p, rk) {
+  const md = modelDetail(bot, rk);
+  if (!md.has) {
+    return `<div class="card">${cardHead('🤖 جزئیاتِ هزینه‌ی مدل')}
+      <div class="note">ثبتِ خودکارِ هزینه هنوز ردیفی ندارد.</div></div>`;
+  }
+  const tot = p.totals;
+  const perReading = md.readings ? md.usdInRange / md.readings : 0;
+  const perCall = md.rowsInRange ? md.usdInRange / md.rowsInRange : 0;
+  const avgDaily = p.series.length ? tot.costUsd / p.series.length : 0;
+  const toman = (u) => (p.rate ? `<span class="muted"> ≈ ${fmt(Math.round(u * p.rate))} ت</span>` : '');
+
+  return `<div class="card">
+    ${cardHead(`🤖 جزئیاتِ هزینه‌ی مدل — ${esc(RANGES[rk].label)}`)}
+    <div class="grid">
+      ${stat('میانگینِ هزینه‌ی روزانه (کلِ هزینه)', usd(avgDaily) + toman(avgDaily))}
+      ${stat('هزینه به ازای هر فال', usd(perReading) + toman(perReading))}
+      ${stat('هزینه به ازای هر فراخوانی', usd(perCall) + toman(perCall))}
+      ${stat('فراخوانیِ ثبت‌شده در بازه', fmt(md.rowsInRange))}
+      ${stat('فالِ تحویل‌شده در بازه', fmt(md.readings))}
+    </div>
+    ${md.byKind.size ? `<div style="margin-top:14px"><h3 class="ch">هزینه به تفکیکِ مسیر</h3>
+      ${hbars([...md.byKind.entries()].sort((a, b) => b[1].usd - a[1].usd)
+        .map(([k, v]) => ({ label: `${KIND_FA[k] || k} (${fmt(v.calls)} فراخوانی)`, value: Math.round(v.usd * 10000) / 10000 })), { showPct: true })}</div>` : ''}
+    <p class="muted" style="margin-top:8px">این تفکیک فقط روی بخشِ <b>ثبتِ خودکار</b>
+      ممکن است؛ دوره‌ی قبلش یک عددِ تجمعی است و تفکیکِ مسیر ندارد، پس در نمودارِ بالا
+      نیست ولی در «هزینه‌ی کل» هست.
+      ⚠️ داوریِ رسید (<span class="mono">cardpay.js</span>) هنوز شمرده نمی‌شود.</p></div>`;
+}
+
+/* ═══ 💎 اقتصادِ الماس — عمداً «کلِ عمر»، چون **مانده** است نه جریان ═══ */
+export function diamondCard(bot, p, rk) {
+  const cpd = costPerDiamond(bot);
+  const econ = coinEconomy(bot);
+  const give = giving(bot, RANGES[rk].days || p.days);
+  const toman = (u) => (p.rate ? `<span class="muted"> ≈ ${fmt(Math.round(u * p.rate))} ت</span>` : '');
+
+  const cpdTable = cpd.hasData ? `<h3 class="ch">هزینه‌ی هر الماس per اندازه‌ی فال</h3>
+    ${table(['اندازه', 'فال', 'الماس', 'هزینه', 'هزینه‌ی هر الماس'], cpd.sizes.map(s => [
+      `${fmt(s.size)} کارتی`, fmt(s.readings), `${fmt(s.diamonds)}💎`, usd(s.usd), `<b>${usd(s.cpd)}</b>${toman(s.cpd)}`]))}` : '';
+
+  const stocks = econ.map(e => `<h3 class="ch">${esc(e.inst.title)} — کلِ عمر</h3>
+    <div class="grid">
+      ${stat('هدیه‌شده', `${fmt(e.gifted)}💎`)}
+      ${stat('خریداری‌شده', `${fmt(e.bought)}💎`)}
+      ${stat('مصرف‌شده (فالِ تحویل‌شده)', `${fmt(e.spent)}💎`)}
+      ${stat('ماندهٔ کیفِ کاربران', `${fmt(e.held)}💎`)}
+    </div>`).join('');
+
+  return `<div class="card">
+    ${cardHead('💎 اقتصادِ الماس و بذل‌وبخشش')}
+    ${stocks}
+    <p class="muted">این چهار عدد <b>مانده</b> هستند نه جریان، پس همیشه کلِ عمر را
+      می‌گویند و انتخابگرِ بازه‌ی صفحه رویشان اثر ندارد. «هدیه‌شده» هزینه‌ی نقدی نیست؛
+      بدهیِ تبلیغاتی است که فقط وقتی خرج شود هزینه می‌سازد، و آن هزینه از قبل در
+      «هزینه‌ی مدل» آمده. اختلافِ «ماندهٔ کیف» با «مصرف‌شده» همان نرخِ سوختِ اعتبار است.</p>
+    <h3 class="ch">در بازه‌ی ${esc(RANGES[rk].label)} — گزارشی، نه هزینه</h3>
+    <div class="grid">
+      ${stat('تخفیفِ داده‌شده', t(give.disc))}
+      ${stat('الماسِ هدیه‌شده', `${fmt(give.giftCoins)}💎`)}
+    </div>
+    ${Object.keys(give.kinds).length ? table(['نوعِ هدیه', 'مقدار'],
+      Object.entries(give.kinds).sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => [esc(COST_KINDS[k] || k || 'سایر'), fmt(v)])) : ''}
+    <p class="muted">🐛 <b>تخفیف عمداً از سود کم نمی‌شود</b> و این یک اصلاح است نه سهو:
+      ستونِ <span class="mono">amount</span> در خودِ ربات از قبل <b>بعد از</b> تخفیف نوشته
+      می‌شود، پس کم‌کردنِ دوباره‌اش تخفیف را دو بار می‌شمرد. این‌جا فقط <b>گزارش</b>
+      می‌شود تا بدانی چقدر دادی.</p>
+    ${cpdTable}
+    ${cpd.hasData ? '<p class="muted">همین نرخ‌ها ورودیِ محاسبه‌ی CPA در صفحه‌ی «جذب و کانال‌ها» هستند.</p>' : ''}</div>`;
 }
 
 /* ⚙️ ورودی‌های دستیِ هزینه — **اولین کارتِ این صفحه** (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۵).
@@ -199,8 +296,9 @@ export function costInputsCard(bot) {
     <p class="muted" style="margin-top:8px">
       ${campUsd && rate ? `الان: هر کاربرِ کمپین <b>${usd(campUsd)}</b> ≈ <b>${fmt(Math.round(campUsd * rate))} تومان</b>. ` : ''}
       هزینه‌ی تبلیغ عمداً <b>دلاری</b> است تا با هزینه‌ی مدل هم‌واحد بماند؛ تومانش خودکار می‌آید.
-      <br>«هزینه‌ی قبل از شروعِ ثبت» را از داشبوردِ خودِ OpenRouter بخوان: ثبتِ خودکار تاریخچه
-      ندارد و بدونِ این عدد، سود در بازه‌ی «کل عمر» درآمدِ همه‌ی روزها را با هزینه‌ی چند روزِ آخر مقایسه می‌کند.
+      <br>«هزینه‌ی قبل از شروعِ ثبت» را از داشبوردِ خودِ OpenRouter بخوان. این عدد روی
+      <b>همه‌ی روزهای پیش از شروعِ ثبت</b> پخش می‌شود، پس هر بازه‌ای (از جمله «کل»)
+      هزینه‌ی کامل دارد و مفهومِ «شروعِ ثبت» هیچ‌جای اعداد دیده نمی‌شود.
       <br>🔎 <b>اتوماسیون:</b> <span class="mono">ads.telegram.org</span> API عمومی برای خواندنِ هزینه‌ی
       کمپینِ خودت ندارد (فقط داشبوردِ وبی)، پس این ورودی دستی می‌ماند.</p></div>`;
 }
