@@ -1412,6 +1412,15 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
   const body = SRC.slice(open + 1, end);
   ok(start > 0 && end > open, 'هندلرِ pick: از سورس استخراج شد');
 
+  // ⏱ مکثِ «قلبِ آخر دیده شود» — عدد از **خودِ سورس** خوانده می‌شود نه هاردکد، وگرنه
+  // عوض‌شدنش در index.js این ادعا را بی‌صدا پوچ می‌کرد.
+  const PICK_LAST_MS = Number(SRC.match(/const PACE_PICK_LAST = (\d+);/)?.[1]);
+  ok(Number.isInteger(PICK_LAST_MS) && PICK_LAST_MS >= 600 && PICK_LAST_MS <= 3000,
+    `PACE_PICK_LAST یک مکثِ معقول است (${PICK_LAST_MS}ms)`);
+  // و ثابتِ مشترک دست‌نخورده مانده: میان‌بر زدن از راهِ `PACE_S` ریتمِ کلِ ربات را
+  // بی‌صدا جابه‌جا می‌کند (همان درسِ v3.55.0).
+  ok(/const PACE_S = 1200,/.test(SRC), 'PACE_S مشترک دست‌نخورده است (مکث از ثابتِ جدا می‌آید)');
+
   // گاردِ ضدِ race باید **قبل از اولین await** بنشیند، وگرنه دو تپِ پشت‌سرهم هر دو رد شوند.
   // ⚠️ کامنت‌ها اول حذف می‌شوند: نسخه‌ی اولِ همین ادعا کلمه‌ی `await` را داخلِ یک کامنت
   // پیدا کرد و قرمزِ کاذب داد. سنجه‌ای که خودش را روی متنِ کامنت می‌سنجد، سنجه نیست.
@@ -1420,17 +1429,20 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
     'قفلِ confirm_pay قبل از اولین await است (ضدِ دوبار-تپ)');
 
   const run = new Function('ctx', 'deps', `
-    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, pickHearts, finishPicking } = deps;
+    const { getState, getSession, setState, setSession, L, USER_PICKS, pickGridKb, pickHearts,
+            finishPicking, typing, PACE_PICK_LAST } = deps;
     return (async () => {${body}})();
   `);
   const scenario = async (state, picks, need, tap) => {
-    const log = { cb: [], editKb: 0, editText: null, finished: false, state,
+    // 🧾 `ops` **ترتیبِ واقعیِ عملیات** را ثبت می‌کند، نه فقط تعدادشان. ادعای v3.67.0
+    // دقیقاً درباره‌ی ترتیب است (گرید ← مکث ← جایگزینی) و یک شمارنده‌ی خالی آن را نمی‌دید.
+    const log = { cb: [], editKb: 0, editText: null, finished: false, state, ops: [], typedMs: [],
                   session: { picks: [...picks], need, seed: 'r:7:1:1' } };
     const ctx = {
       from: { id: 7 }, match: [null, String(tap)],
       answerCbQuery: (text, extra) => { log.cb.push({ text, extra }); return Promise.resolve(); },
-      editMessageReplyMarkup: () => { log.editKb++; return Promise.resolve(); },
-      editMessageText: (t) => { log.editText = t; return Promise.resolve(); },
+      editMessageReplyMarkup: () => { log.editKb++; log.ops.push('kb'); return Promise.resolve(); },
+      editMessageText: (t) => { log.editText = t; log.ops.push('text'); return Promise.resolve(); },
     };
     await run(ctx, {
       getState: () => log.state, getSession: () => log.session,
@@ -1440,6 +1452,8 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
       // است که روی خانه نشست» فقط با تابعِ تولیدی معنی دارد.
       pickHearts: HEARTS.pickHearts,
       finishPicking: async () => { log.finished = true; },
+      typing: async (_c, ms) => { log.ops.push('typing'); log.typedMs.push(ms); },
+      PACE_PICK_LAST: PICK_LAST_MS,
     });
     return log;
   };
@@ -1462,13 +1476,29 @@ console.log('\n▶ گریدِ انتخابِ کارت: هیچ تپی بی‌جو
   ok(said(mid) === HEARTS.pickHearts('r:7:1:1', 3)[1] && mid.editKb === 1 && mid.editText === null,
     'انتخابِ وسطِ راه فقط کیبورد را به‌روز می‌کند و toast همان رنگِ نشسته است');
   ok(!mid.finished && mid.state === 'picking', 'وسطِ راه هنوز picking است');
+  // ⚠️ مکث **فقط** مالِ تپِ آخر است: یک ثانیه تأخیر روی هر نُه تپِ یک فالِ ده‌کارتی،
+  // آیین را به کندی تبدیل می‌کند.
+  ok(JSON.stringify(mid.ops) === JSON.stringify(['kb']),
+    'انتخابِ وسطِ راه هیچ مکثی ندارد (مکث فقط برای تپِ آخر است)', mid.ops.join(' → '));
 
-  // ۴) آخرین انتخاب: **کیبورد برداشته می‌شود** (متن جایگزین می‌شود) تا گریدِ مرده در چت
-  //    نماند. بدونِ این، همان ۲۲۳ تپِ هدررفته دوباره تولید می‌شود.
+  /* ۴) آخرین انتخاب — سه‌گانه‌ی v3.67.0 (خواسته‌ی مالک):
+        اول گرید **با قلبِ آخر** رندر می‌شود، بعد یک مکثِ کوتاه تا رنگش دیده شود، و بعد
+        متن جایگزین می‌شود و کیبورد می‌رود.
+     🐛 تا v3.64.0 قدمِ اول اصلاً وجود نداشت و ادعای همین‌جا (`editKb === 0`) دقیقاً
+        همان رفتار را **قفل** کرده بود: کاربرِ فالِ ده‌کارتی ده بار انتخاب می‌کرد و
+        نُه رنگ می‌دید. */
   const last = await scenario('picking', [4, 8], 3, 1);
   ok(last.editText === L.reading.pickProgress(3, 3),
     'با آخرین انتخاب، متنِ گرید به «۳ از ۳ کارت انتخاب شد» تبدیل می‌شود');
-  ok(last.editKb === 0, 'با آخرین انتخاب کیبوردِ گرید دیگر رندر نمی‌شود (برداشته می‌شود)');
+  ok(last.editKb === 1, 'قلبِ آخر هم روی گرید رندر می‌شود (نه اینکه گرید بی‌درنگ برود)');
+  ok(JSON.stringify(last.ops) === JSON.stringify(['kb', 'typing', 'text']),
+    'ترتیب دقیقاً «گرید ← مکث ← جایگزینی» است', last.ops.join(' → '));
+  ok(last.typedMs.length === 1 && last.typedMs[0] === PICK_LAST_MS,
+    `مکث با نشانگرِ typing پر می‌شود و به‌اندازه‌ی PACE_PICK_LAST است (${last.typedMs[0]}ms)`);
+  // 🔒 و v3.30.0 نشکسته: در پایان همچنان متن جایگزین می‌شود، یعنی کیبوردِ گرید می‌رود و
+  // گریدِ مرده‌ای برای تپ کردن نمی‌ماند.
+  ok(last.ops[last.ops.length - 1] === 'text',
+    'آخرین عملیات جایگزینیِ متن است، پس گریدِ مرده در چت نمی‌ماند (v3.30.0 نشکسته)');
   ok(last.finished && last.state === 'confirm_pay', 'آخرین انتخاب فلو را ادامه می‌دهد');
 
   // ۵) فالِ ده‌کارتی: قاعده به عددِ ۳ گره نخورده باشد.
