@@ -218,7 +218,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.66.0';
+const PRODUCT_VERSION = '3.67.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1108,6 +1108,10 @@ const stmts = {
   // پیشرفتِ افشا روی خودِ رکورد (#215). فقط جلو می‌رود: یک دکمه‌ی کهنه که ایندکسِ
   // کوچک‌تری می‌فرستد نباید پیشرفت را عقب ببرد.
   setRevealIdx: db.prepare('UPDATE readings SET reveal_idx=? WHERE id=? AND reveal_idx<?'),
+  // 🔮 ادعای فالِ نیمه‌تمام برای نمایشِ دوباره (v3.67.0). عمداً هر دو حالت را می‌گیرد:
+  // `paid` (نمایش هرگز شروع نشد) و `started` (وسطش قطع شد). ولی `delivered` و `refunded`
+  // بیرون‌اند، پس دکمه‌ی کهنه هرگز فالِ تحویل‌شده را دوباره نمی‌فروشد یا تکرار نمی‌کند.
+  claimReadingForReview: db.prepare("UPDATE readings SET status='started' WHERE id=? AND status IN ('paid','started')"),
   // 🔁 بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل، **مستقل از سشن**. تنها راهِ برگشتِ کاربری
   // که سشنش پاک شده (مثلاً با `/start`). عمداً `llm_json<>''`: فالی که هنوز متن ندارد
   // کارِ `recoverOrphanReadings` است (ریفاند)، نه ادامه.
@@ -4391,6 +4395,43 @@ async function startReveal(ctx, uid, readingId) {
 }
 
 // تلاش مجدد بعد از refund: همان کارت‌ها و همان سؤال — فقط فراخوانی LLM از نو
+
+/* 🔮 «مشاهده فال» — فالی که پولش کم شده و خوانشش هم ساخته شده ولی نمایشش هرگز شروع نشد.
+ *
+ * دو حالتِ نیمه‌تمام را پوشش می‌دهد و هر دو پول گرفته‌اند:
+ *   · `paid`    — پول کم شد، کارت‌ها کشیده و خوانش ساخته شد، ولی نمایش **هرگز شروع نشد**.
+ *                 در هیچ توری نمی‌افتد: `recoverOrphanReadings` شرطِ `llm_json=''` دارد،
+ *                 `resumableReading` شرطِ `status='started'`، و جاروی رهاشده پشتِ
+ *                 `REFUND_ON_CANCEL=false` است. یعنی نه تحویل می‌شود نه ریفاند.
+ *   · `started` — نمایش شروع شد ولی وسطش قطع شد. کاربر **می‌تواند** با /start ادامه بدهد،
+ *                 ولی خبر ندارد؛ و اگر استیتش عوض شده باشد دکمه‌های `next:` هم کار نمی‌کنند.
+ *
+ * نمایش عمداً از **اول** پخش می‌شود نه از `reveal_idx`: پیام به کاربر قول داده «دوباره
+ * کاملش رو ببینی»، و برای کسی که فقط جمع‌بندی را ندیده هم تکرارِ کارت‌ها ضرری ندارد.
+ * `setRevealIdx` یکنواخت است (`WHERE reveal_idx<?`) پس شمارنده عقب نمی‌رود.
+ *
+ * ⚠️ **هیچ کسرِ دوباره‌ای نیست** — برخلافِ `retryr:` که فالِ ریفاندشده را دوباره می‌فروشد،
+ * این‌جا پول قبلاً گرفته شده و کسرِ دوباره یعنی دوبار فروختنِ یک فال.
+ */
+bot.action(/^rview:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  const readingId = parseInt(ctx.match[1], 10);
+  const r = stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid) return ctx.answerCbQuery().catch(() => {});
+  // گاردِ عمقی (همان درسِ `retryr:`): بدونِ کارت یا خوانش، `startReveal` می‌ترکد.
+  if (!r.cards_json || !r.llm_json) return ctx.answerCbQuery('✅').catch(() => {});
+  // ادعای اتمیک: دوبار زدن، یا دکمه‌ی کهنه‌ای که فالش قبلاً تحویل/ریفاند شده، فقط یک تیک می‌گیرد.
+  if (stmts.claimReadingForReview.run(readingId).changes === 0) {
+    return ctx.answerCbQuery('✅').catch(() => {});
+  }
+  track(db, uid, 'reading_started', { reading_id: readingId, price: r.price, recovered: true });
+  setState(uid, 'revealing');
+  setSession(uid, { spreadId: r.type, readingId, revealIdx: 0, fbDone: false });
+  await ctx.answerCbQuery('🔮').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await startReveal(ctx, uid, readingId);
+});
+
 bot.action(/^retryr:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   const readingId = parseInt(ctx.match[1], 10);
