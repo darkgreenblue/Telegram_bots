@@ -258,10 +258,31 @@ jobs:
                 echo "⏭ $name بدون تغییر — دست نخورد (ری‌استارت نشد)"
                 return
               fi
-              npm ci --prefix "$srcdir" --omit=dev
+              # 📦 **نصب فقط یک بار per پوشه‌ی کد، نه یک بار per اپ.**
+              #
+              # 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۱۶ که رباتِ زنده را خواباند: چهار اپِ زبانیِ تاروت
+              # `cwd` مشترکِ `bots/tarot` دارند و فقط `ENV_FILE`شان فرق می‌کند، پس این تابع
+              # چهار بار برای همان پوشه صدا زده می‌شد. و `npm ci` طبقِ تعریفش **اول
+              # `node_modules` را پاک می‌کند** و بعد از نو می‌سازد. یعنی سه اجرای آخر،
+              # `node_modules` را از زیرِ پای پروسه‌هایی می‌کشیدند که چند ثانیه قبل reload
+              # شده بودند: هر پروسه‌ای که در آن پنجره بوت می‌شد
+              # `ERR_MODULE_NOT_FOUND: telegraf` می‌گرفت، pm2 دوباره بالا می‌آورد، دوباره
+              # می‌مرد. نتیجه: کرش‌لوپ با ۱۷ ری‌استارت، در حالی که دیپلوی **سبز** تمام شد.
+              #
+              # سه اجرای آخر از اول هم بی‌فایده بودند: همان `package.json` و همان lockfile.
+              # پس این فقط رفعِ باگ نیست، حذفِ کارِ تکراری هم هست (بند ۹/۰).
+              case " $INSTALLED_DIRS " in
+                *" $srcdir "*)
+                  echo "↩︎ $srcdir از قبل در همین دیپلوی نصب شده — npm ci دوباره اجرا نمی‌شود" ;;
+                *)
+                  INSTALLED_DIRS="$INSTALLED_DIRS $srcdir"
+                  npm ci --prefix "$srcdir" --omit=dev ;;
+              esac
               pm2 startOrReload ecosystem.config.cjs --update-env --only "$name"
               echo "✅ $name دیپلوی شد (دلیل: $reason)"
             }
+            # پوشه‌هایی که در همین اجرا `npm ci` خورده‌اند (بالا توضیح داده شده).
+            INSTALLED_DIRS=""
             # بلوکِ یک‌باره‌ی «مهاجرتِ الماسِ بومی» این‌جا بود و **حذف شد**: مهاجرت روی
             # سرور اجرا و مهر خورد (ردیفِ `coins_native` در جدولِ `migrations`)، پس طبق
             # قاعده‌ی ثابتِ ریپو بلوکِ یک‌باره بعد از تأییدِ اجرا برداشته می‌شود.
@@ -326,6 +347,34 @@ jobs:
                 console.log(s === 'online' ? '✅ tarot بالا آمد' : '❌ tarot هنوز بالا نیست: ' + s);
                 if (s !== 'online') process.exit(1);"
             fi
+
+            # ---------- گاردِ کرش‌لوپ: «online» کافی نیست ----------
+            # 🐛 درسِ ۱۴۰۵/۰۶/۱۶: گاردِ بالا فقط `status` را می‌بیند، و اپی که هر چند ثانیه
+            # می‌میرد و pm2 دوباره بالایش می‌آورد **بینِ دو کرش `online` گزارش می‌شود**. آن
+            # روز دیپلوی با همین سبزِ دروغین تمام شد در حالی که هر چهار رباتِ تاروت
+            # کرش‌لوپ بودند، و مالک خودش فهمید نه ما. یعنی خرابی نه از پایش رد شد، از
+            # **تعریفِ سلامت** رد شد.
+            # تشخیص: شمارنده‌ی ری‌استارتِ pm2 را دو بار با فاصله می‌خوانیم. اپِ سالم بینِ دو
+            # نمونه ری‌استارت نمی‌شود؛ اپِ کرش‌لوپ حتماً می‌شود. جابِ قرمز = هشدارِ تلگرام.
+            echo "---- گاردِ کرش‌لوپ (نمونه‌ی اول) ----"
+            RESTARTS_BEFORE=$(pm2 jlist | node -e "
+              const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              console.log(a.filter(x => /^tarot|^voice2text|^dashboard/.test(x.name))
+                           .map(x => x.name + '=' + x.pm2_env.restart_time).join(' '));" 2>/dev/null || echo "")
+            sleep 12
+            RESTARTS_AFTER=$(pm2 jlist | node -e "
+              const a = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              console.log(a.filter(x => /^tarot|^voice2text|^dashboard/.test(x.name))
+                           .map(x => x.name + '=' + x.pm2_env.restart_time).join(' '));" 2>/dev/null || echo "")
+            echo "قبل : $RESTARTS_BEFORE"
+            echo "بعد : $RESTARTS_AFTER"
+            if [ -n "$RESTARTS_BEFORE" ] && [ "$RESTARTS_BEFORE" != "$RESTARTS_AFTER" ]; then
+              echo "❌ کرش‌لوپ: شمارنده‌ی ری‌استارت در ۱۲ ثانیه بالا رفت. اپ‌ها بوت نمی‌شوند."
+              echo "--- خطای تاروت ---"
+              tail -n 30 ~/.pm2/logs/tarot-error.log 2>/dev/null || true
+              exit 1
+            fi
+            echo "✅ هیچ اپی در پنجره‌ی ۱۲ ثانیه‌ای ری‌استارت نشد"
 
             deploy_bot daily-brief
             deploy_bot dashboard
