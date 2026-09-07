@@ -32,7 +32,7 @@ import { usersBody, usersCsv } from './routes/users.js';
 import { dashBody } from './routes/dash.js';
 import { engagementBody } from './routes/engagement.js';
 import { acquisitionBody, acquisitionSettings } from './routes/acquisition.js';
-import { economicsBody } from './routes/economics.js';
+import { economicsBody, cpaDaySet } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 
 /* ===== ENV ===== */
@@ -102,6 +102,7 @@ const ACTIONS = {
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
   '/acquisition/settings': { fn: acquisitionSettings, backTo: '/economics' },
+  '/economics/cpa-day': { fn: cpaDaySet, backTo: '/economics' },
   '/orphans/add':     { fn: orphanAdd,     backTo: '/orphans' },
   '/orphans/resolve': { fn: orphanResolve, backTo: '/orphans' },
   '/orphans/delete':  { fn: orphanDelete,  backTo: '/orphans' },

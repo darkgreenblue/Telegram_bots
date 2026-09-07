@@ -162,9 +162,11 @@ console.log('\n▶ ۵) هزینه‌ی هر الماس per اندازه‌ی ف�
   ok(!near(s3.cpd, s5.cpd), 'نرخِ دو اندازه عمداً یکی نیست (یک نرخِ واحد ساختن غلط بود)');
 }
 
+/** مدلِ «یک نرخِ ثابت برای همه‌ی روزها» — برای ادعاهایی که به per-روز کاری ندارند. */
+const flat = (u) => ({ rates: new Map(), avgUsd: u, rateFor: () => u });
 console.log('\n▶ ۶) FIFO و تخصیصِ کانال — با جوابِ دستی');
 {
-  const { channels } = channelCosts('tarot', { sinceSec: 0, campaignUsdPerUser: 0 });
+  const { channels } = channelCosts('tarot', { sinceSec: 0, campaign: flat(0) });
   /* دستی:
      A: اعتبار به ترتیب welcome5 → referral3 → purchase10 ؛ خرج ۱۴💎
         FIFO: welcome ۵ مصرف، referral ۳ مصرف، purchase ۶ مصرف.
@@ -191,7 +193,7 @@ console.log('\n▶ ۷) پاداشِ دعوت دو بار شمرده نمی‌ش�
 {
   ok(!SELF_ACQ_KINDS.has('referral'),
     'سطلِ referral در هزینه‌ی جذبِ **خودِ** دعوت‌کننده نمی‌آید (فقط از راهِ سهمِ دعوت‌شده)');
-  const { channels } = channelCosts('tarot', { sinceSec: 0, campaignUsdPerUser: 0 });
+  const { channels } = channelCosts('tarot', { sinceSec: 0, campaign: flat(0) });
   // اگر دوباره‌شماری برگردد، هزینه‌ی ارگانیک ۳ الماس بیشتر می‌شود
   const withBug = 5 * (0.019 / 14) + 3 * 0.001 + 3 * (0.019 / 14);
   ok(!near(channels.organic.costUsd, withBug, 1e-9), 'هزینه‌ی ارگانیک شاملِ پاداشِ دعوتِ A نیست');
@@ -199,10 +201,30 @@ console.log('\n▶ ۷) پاداشِ دعوت دو بار شمرده نمی‌ش�
 
 console.log('\n▶ ۸) هزینه‌ی دستیِ کمپین روی هر کاربرِ کمپین می‌نشیند');
 {
-  const a = channelCosts('tarot', { sinceSec: 0, campaignUsdPerUser: 0 }).channels.campaign;
-  const b = channelCosts('tarot', { sinceSec: 0, campaignUsdPerUser: 0.02 }).channels.campaign;
+  const a = channelCosts('tarot', { sinceSec: 0, campaign: flat(0) }).channels.campaign;
+  const b = channelCosts('tarot', { sinceSec: 0, campaign: flat(0.02) }).channels.campaign;
   ok(a.users === b.users, 'تعدادِ کاربرِ کمپین به هزینه‌ی دستی حساس نیست');
   ok(near(b.costUsd - a.costUsd, 0.02 * a.users, 1e-9), 'هزینه‌ی دستی دقیقاً × تعدادِ کاربرِ کمپین اضافه می‌شود');
+
+  /* ⚠️ و صفحه‌ی «جذب» باید **همان** نرخِ per روز را ببیند که صفحه‌ی اقتصاد می‌بیند.
+     تا ۱۴۰۵/۰۶/۱۶ این‌جا `cpa_campaign_usd` مستقل خوانده می‌شد؛ با per-روز شدنِ نرخ،
+     خواندنِ مستقل یعنی دو صفحه دو هزینه‌ی تبلیغِ متفاوت بسازند — همان کلاسِ باگی که
+     PR قبلی برای حذفش نوشته شد. پس این‌جا مدلِ **واقعی** پاس داده می‌شود، نه یک ثابت. */
+  const { campaignCostModel } = await import(`file://${base}/lib/profit.js`);
+  const { setCampaignCost, clearCampaignCost } = await import(`file://${base}/lib/platform.js`);
+  const users = campaignCostModel('tarot').users;
+  const days = [...users.keys()].sort();
+  if (days.length >= 2) {
+    setCampaignCost('tarot', days[0], 1);
+    setCampaignCost('tarot', days[1], 3);
+    const m = campaignCostModel('tarot');
+    const c = channelCosts('tarot', { sinceSec: 0, campaign: m }).channels.campaign;
+    const expect = a.costUsd + [...users.entries()].reduce((acc, [d, n]) => acc + m.rateFor(d) * n, 0);
+    ok(near(c.costUsd, expect, 1e-9),
+      `CPA از نرخِ روزِ ورودِ هر کاربر می‌آید، نه یک ثابت (${c.costUsd.toFixed(6)} ≈ ${expect.toFixed(6)})`);
+    ok(m.rateFor(days[0]) !== m.rateFor(days[1]), 'و دو روز واقعاً دو نرخِ متفاوت داشتند');
+    for (const d of days) clearCampaignCost('tarot', d);
+  } else ok(true, 'فیکسچر دو روزِ کمپینِ متفاوت ندارد؛ این ادعا رد شد');
 }
 
 console.log('\n▶ ۹) «اکشنِ مفید» فیچرِ خاموش و دُمِ فلوی دیگر را نمی‌شمارد');
