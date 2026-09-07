@@ -127,6 +127,14 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-envs.mjs
 
+      # زاویه‌ی پنجم: دو رانِ Deploy که روی هم بیفتند، دو `npm ci` هم‌زمان در همان
+      # پوشه می‌زنند و چون `npm ci` اول `node_modules` را پاک می‌کند، یکی پوشه را از
+      # زیرِ پای آن یکی می‌کشد (باگِ واقعیِ ۱۶ شهریور ۱۴۰۵: رباتِ زنده ۱۲ دقیقه خوابید).
+      # این چک علاوه بر پیکربندی، خودِ خرابی را با یک پروسه‌ی واقعی بازتولید می‌کند.
+      - name: Deploy concurrency guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-deploy-concurrency.mjs
+
       # ابزارِ «ارسال به مالک»: شکستِ **نیمه‌کاره** بدترین حالتش است (بعضی فایل‌ها
       # رفته‌اند و بعضی نه). کپشنِ چندخطی و اعتبارسنجیِ قبل از اولین ارسال قفل‌اند.
       - name: Send-to-owner guard
