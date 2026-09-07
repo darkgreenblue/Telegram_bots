@@ -42,7 +42,18 @@ for (const h of BLOCKED) {
 ok(BLOCKED.every((h) => decide({ hour: h, urgent: true, reason: 'x' }).go),
   'urgent در **همه‌ی** ساعت‌های ممنوع عبور می‌کند (وگرنه رباتِ خوابیده تا فردا می‌ماند)');
 ok(BLOCKED.every((h) => decide({ hour: h, commitMsg: `fix ${BYPASS_MARKER}` }).go),
-  `نشانگرِ ${BYPASS_MARKER} هم در همه‌ی ساعت‌های ممنوع عبور می‌کند`);
+  `نشانگرِ ${BYPASS_MARKER} در خطِ اول، در همه‌ی ساعت‌های ممنوع عبور می‌کند`);
+
+/* 🐛 باگِ واقعیِ اولین اجرا: کامیتی که این مکانیزم را **مستند می‌کرد** نشانگر را در
+ * بدنه داشت و گیت آن را دستور خواند. «ذکرِ یک دستور» با «صادر کردنش» یکی نیست؛
+ * وگرنه هر PR و هر مستندی که نامش را ببرد بی‌صدا گارد را خاموش می‌کند. */
+ok(!decide({ hour: 22, commitMsg: `fix something\n\nمستندات: نشانگرِ ${BYPASS_MARKER} پنجره را دور می‌زند.` }).go,
+  'نشانگر در **بدنه** دستور نیست — فقط ذکر شده');
+ok(!decide({ hour: 22, commitMsg: `عنوانِ عادی\nخطِ دوم ${BYPASS_MARKER}` }).go,
+  'حتی خطِ دومِ بلافاصله بعد هم دستور نیست');
+ok(decide({ hour: 22, commitMsg: `hotfix ${BYPASS_MARKER}\n\nبدنه‌ی توضیحی` }).go,
+  'ولی خطِ اول با بدنه‌ی بلند همچنان دستور است');
+ok(decide({ hour: 22, commitMsg: BYPASS_MARKER }).go, 'پیامِ تک‌خطیِ فقط-نشانگر هم دستور است');
 
 // دلیل اجباری است: استثنایی که ردّ مکتوب نداشته باشد، فردا قاعده می‌شود.
 const noReason = decide({ hour: 22, urgent: true, reason: '' });

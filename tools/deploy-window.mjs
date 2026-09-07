@@ -39,8 +39,20 @@ export function decide({ hour, urgent = false, reason = '', commitMsg = '' } = {
     }
     return { go: true, bypass: 'urgent', why: `پروتکلِ فوری (ساعتِ تهران ${hour}) — دلیل: ${String(reason).trim()}` };
   }
-  if (String(commitMsg).includes(BYPASS_MARKER)) {
-    return { go: true, bypass: 'deploy-now', why: `نشانگرِ ${BYPASS_MARKER} در پیامِ کامیت (ساعتِ تهران ${hour})` };
+  /* ⚠️ فقط **خطِ اولِ** پیامِ کامیت، نه کلِ آن.
+   *
+   * 🐛 باگی که اولین اجرای واقعی نشانش داد (۱۶ شهریور ۱۴۰۵، همان ساعتی که این کد
+   * مرج شد): کامیتی که خودِ این مکانیزم را **مستند می‌کرد** رشته‌ی `[deploy-now]` را
+   * در بدنه‌اش داشت، پس گیت آن را دستور خواند و پنجره را دور زد. ضرری نداشت (ساعتِ
+   * ۱۱ خودش امن بود) ولی مسیرش روشن است: هر PR، هر بحث و هر مستندی که این نشانگر را
+   * نام ببرد، بی‌صدا گارد را خاموش می‌کند — و چون دیپلویِ موفق هیچ خطایی نمی‌دهد،
+   * تا اولین دیپلویِ ساعتِ ۲۲ کسی خبردار نمی‌شود.
+   *
+   * خطِ اول چیزی است که آدم **عمداً برای همان مرج** می‌نویسد؛ بدنه پر از نقلِ‌قول و
+   * مستندات است. همان تفکیکی که «ذکرِ یک دستور» را از «صادر کردنش» جدا می‌کند. */
+  const subject = String(commitMsg).split('\n', 1)[0];
+  if (subject.includes(BYPASS_MARKER)) {
+    return { go: true, bypass: 'deploy-now', why: `نشانگرِ ${BYPASS_MARKER} در خطِ اولِ پیامِ کامیت (ساعتِ تهران ${hour})` };
   }
   if (SAFE_HOURS.includes(hour)) {
     return { go: true, bypass: '', why: `ساعتِ تهران ${hour} در بازه‌ی امن است` };
