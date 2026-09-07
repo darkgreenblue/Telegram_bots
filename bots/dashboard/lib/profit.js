@@ -34,11 +34,11 @@
 // حساب می‌شوند، نه از ابتدای عمرِ ربات. کارت موظف است این را به کاربر بگوید.
 //
 // امنیت: هیچ رشته‌ای از URL وارد SQL نمی‌شود؛ همه‌ی ورودی‌ها عددی و bound اند.
-import { instancesOf, withDb, hasTable, rows, scalar, revenueWhere, toToman, moneyOf, unixOf } from './bots.js';
-import { tehranDayStart, tehranDayStr, nowSec } from './util.js';
+import { instancesOf, withDb, hasTable, rows, scalar, revenueWhere, toToman, moneyOf, unixOf, userCreatedExpr } from './bots.js';
+import { tehranDayStart, tehranDayStr, nowSec, RANGES } from './util.js';
 // شماره‌ی روزِ تهران تک‌منبع است (`engage.js`): دو تعریفِ جدا دیر یا زود سرِ مرزِ روز واگرا می‌شوند.
 import { tehranDayNo } from './engage.js';
-import { orphanRevenueByDay } from './platform.js';
+import { orphanRevenueByDay, getSetting } from './platform.js';
 
 /** ورودی‌های انسانی که سود بدونشان کامل نیست (کلیدهای جدولِ settings). */
 export const USD_RATE_KEY = 'usd_toman';
@@ -48,7 +48,36 @@ export const CAMPAIGN_CPA_KEY = 'cpa_campaign_usd';
  * منهای هزینه‌ی یک هفته؛ با این، همان شکاف با یک عددِ واقعی پر می‌شود. */
 export const PRE_TRACK_COST_KEY = 'llm_cost_pretrack_usd';
 
-/** اولین لحظه‌ی درآمدِ واقعی — ابتدای دوره‌ای که لُختِ دستی رویش پخش می‌شود. */
+/* 🗓 **اولین روزِ عمرِ ربات** — مرزِ «کل عمر» و ابتدای دوره‌ای که لُختِ دستی رویش پخش
+ * می‌شود.
+ *
+ * ⚠️ عمداً اولینِ **کاربر** است، نه اولینِ **درآمد**. نسخه‌ی قبلی از `firstRevenueSec`
+ * استفاده می‌کرد و دو چیز را خراب می‌کرد: (۱) روزهایی که ربات کاربر داشت ولی هنوز
+ * فروشی نکرده بود از «کل عمر» بیرون می‌ماندند، در حالی که دقیقاً همان روزها هزینه‌ی
+ * مدل داشتند؛ (۲) لُختِ دوره‌ی قبل از ثبت روی بازه‌ی کوتاه‌تری پخش می‌شد، پس هزینه‌ی
+ * روزانه‌اش متورم می‌شد. روی دیتای واقعیِ tarot این شکاف ۱۶ روز بود. */
+export function botStartSec(botKey) {
+  let min = null;
+  for (const inst of instancesOf(botKey)) {
+    withDb(inst.file, (db) => {
+      if (!hasTable(db, 'users')) return;
+      // ⚠️ `userCreatedExpr` تک‌منبعِ واحدِ زمانِ ستونِ کاربر است (unix یا ISO per ربات).
+      const t = scalar(db, `SELECT MIN(${userCreatedExpr(inst.bot)}) FROM users`);
+      if (t && (min === null || t < min)) min = t;
+    });
+  }
+  const rev = firstRevenueSec(botKey);
+  if (rev && (min === null || rev < min)) min = rev;
+  return min;
+}
+
+/** تعدادِ روزِ «کل عمر» — تک‌منبع، تا نمای کلی و اقتصاد نتوانند واگرا شوند. */
+export function lifetimeDays(botKey) {
+  const start = botStartSec(botKey);
+  return start ? Math.max(1, Math.ceil((nowSec() - start) / 86400) + 1) : 30;
+}
+
+/** اولین لحظه‌ی درآمدِ واقعی. */
 export function firstRevenueSec(botKey) {
   let min = null;
   for (const inst of instancesOf(botKey)) {
@@ -86,7 +115,7 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   const since = tehranDayStart(-(n - 1));
   const day = new Map(); // 'YYYY-MM-DD' → { rev, llmUsd, adUsd }
   const at = (d) => {
-    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 });
+    if (!day.has(d)) day.set(d, { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 });
     return day.get(d);
   };
 
@@ -145,16 +174,21 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
      **دقیق** است. فقط بازه‌ای که وسطِ آن دوره بریده شود تقریبی می‌گیرد، و تقریبِ
      یکنواخت تنها انتخابِ ممکن است چون تفکیکِ روزانه‌اش اصلاً وجود ندارد. */
   const pre = Math.max(0, Number(preTrackUsd) || 0);
+  let preSpreadPerDay = 0;
   if (pre > 0) {
     const trackStart = costTrackingSince(botKey);
-    const firstRev = firstRevenueSec(botKey);
-    if (trackStart && firstRev && firstRev < trackStart) {
-      const d0 = tehranDayNo(firstRev), d1 = tehranDayNo(trackStart);
+    const start = botStartSec(botKey);
+    if (trackStart && start && start < trackStart) {
+      const d0 = tehranDayNo(start), d1 = tehranDayNo(trackStart);
       const span = Math.max(1, d1 - d0);          // روزهای پوشش‌دادهٔ لُخت (تا روزِ قبل از ثبت)
-      const perDay = pre / span;
+      preSpreadPerDay = pre / span;
+      /* ⚠️ هیچ شرطِ اضافه‌ای این‌جا نیست، و این عمدی است. نسخه‌ی قبلی
+         `if (day.has(key) || d*86400 >= since - 86400)` داشت که هم لق بود (یک روز
+         اضافه به‌خاطرِ `- 86400`) و هم بی‌فایده: روزهای بیرونِ بازه در ساختِ سری
+         خودشان کنار می‌روند. حالا هر روزِ آن دوره سهمش را می‌گیرد و بازه تصمیم
+         می‌گیرد کدام‌ها دیده شوند — یعنی جمعِ هر بازه‌ای دقیق است. */
       for (let d = d0; d < d1; d++) {
-        const key = tehranDayStr(d * 86400 + 12 * 3600);
-        if (day.has(key) || (d * 86400 >= since - 86400)) at(key).llmUsd += perDay;
+        at(tehranDayStr(d * 86400 + 12 * 3600)).preUsd += preSpreadPerDay;
       }
     }
   }
@@ -164,19 +198,30 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   let cum = 0;
   for (let i = n - 1; i >= 0; i--) {
     const d = tehranDayStr(tehranDayStart(-i));
-    const v = day.get(d) || { rev: 0, llmUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 };
-    const costUsd = v.llmUsd + v.adUsd;
-    const costToman = usdToman ? Math.round(costUsd * usdToman) : 0;
+    const v = day.get(d) || { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, campaignUsers: 0, orphan: 0 };
+    const costUsd = v.llmUsd + v.preUsd + v.adUsd;
+    /* 🧮 **هر جزء جدا گرد می‌شود و جمعِ هزینه از همان‌ها ساخته می‌شود.**
+     * نه یک وسواس: کارتِ «هزینه‌ها به تفکیک» سه ردیف دارد و یک ردیفِ جمع. اگر جمع از
+     * `round(کلِ دلار × نرخ)` می‌آمد ولی ردیف‌ها هرکدام جدا گرد می‌شدند، ستونِ تومان
+     * چند ده تومان **جمع نمی‌شد** — و این صفحه دقیقاً برای کسی ساخته شده که دارد با
+     * ماشین‌حساب چک می‌کند و از نخواندنِ اعداد شاکی است. حالا در هر سطح (روز، جزء،
+     * جمع، سری) اعداد دقیقاً به هم می‌رسند. */
+    const r0 = (u) => (usdToman ? Math.round(u * usdToman) : 0);
+    const llmToman = r0(v.llmUsd), preToman = r0(v.preUsd), adToman = r0(v.adUsd);
+    const costToman = llmToman + preToman + adToman;
     const net = v.rev - costToman;
     cum += net;
-    series.push({ d, orphan: 0, ...v, costUsd, costToman, net, cum });
+    series.push({ d, orphan: 0, ...v, costUsd, llmToman, preToman, adToman, costToman, net, cum });
   }
 
   const totals = series.reduce((a, r) => ({
-    rev: a.rev + r.rev, llmUsd: a.llmUsd + r.llmUsd, adUsd: a.adUsd + r.adUsd,
+    rev: a.rev + r.rev, llmUsd: a.llmUsd + r.llmUsd, preUsd: a.preUsd + r.preUsd,
+    adUsd: a.adUsd + r.adUsd, costUsd: a.costUsd + r.costUsd,
+    llmToman: a.llmToman + r.llmToman, preToman: a.preToman + r.preToman, adToman: a.adToman + r.adToman,
     costToman: a.costToman + r.costToman, net: a.net + r.net,
     campaignUsers: a.campaignUsers + r.campaignUsers, orphan: a.orphan + (r.orphan || 0),
-  }), { rev: 0, llmUsd: 0, adUsd: 0, costToman: 0, net: 0, campaignUsers: 0, orphan: 0 });
+  }), { rev: 0, llmUsd: 0, preUsd: 0, adUsd: 0, costUsd: 0, llmToman: 0, preToman: 0, adToman: 0,
+        costToman: 0, net: 0, campaignUsers: 0, orphan: 0 });
 
   /* نقطه‌ی سربه‌سر = اولین روزی که تجمعی از صفر رد شد و **دیگر برنگشت**.
    * عمداً «اولین باری که مثبت شد» نیست: یک روزِ پرفروش می‌تواند تجمعی را لحظه‌ای مثبت
@@ -197,11 +242,22 @@ export function profitDaily(botKey, { days = 30, usdToman = 0, campaignUsdPerUse
   };
 }
 
-/** خلاصه‌ی «از شروعِ ثبتِ هزینه تا امروز» — عددِ سرخطِ نمای کلی. */
-export function profitSinceTracking(botKey, { usdToman = 0, campaignUsdPerUser = 0 } = {}) {
-  const start = costTrackingSince(botKey);
-  if (!start) return { ok: false, reason: 'no-usage', costSince: null };
-  const days = Math.max(1, Math.ceil((nowSec() - start) / 86400) + 1);
-  const p = profitDaily(botKey, { days, usdToman, campaignUsdPerUser });
-  return { ok: true, ...p, days };
+/* 📊 **تنها راهِ ورودِ هر صفحه به سود** — یک کلیدِ بازه می‌گیرد و همه‌ی ورودی‌های دستی
+ * را خودش از `settings` می‌خواند.
+ *
+ * ⚠️ این تابع جایگزینِ `profitSinceTracking` شد و حذفِ آن یکی عمدی بود، نه سلیقه‌ای.
+ * ایرادِ صریحِ مالک: «نمای کلی یک عدد می‌گفت، اقتصاد یک عددِ دیگر». دلیلش این بود که
+ * نمای کلی از پنجره‌ی «شروعِ ثبتِ هزینه» می‌خواند و لُختِ دوره‌ی قبل را **اصلاً پاس
+ * نمی‌داد**، ولی صفحه‌ی اقتصاد بازه‌ی «کل عمر» را با لُخت حساب می‌کرد. دو عدد از دو
+ * فرمول، روی یک صفحه‌نمایش.
+ *
+ * حالا هر صفحه‌ای فقط این را صدا می‌زند و بازه‌اش را می‌گوید؛ فرمول، ورودی‌ها و مرزِ
+ * «کل عمر» همه یک جا هستند و ساختاراً نمی‌توانند واگرا شوند. */
+export function profitFor(botKey, rangeKey = 'all') {
+  const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
+  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
+  const preUsd = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
+  const days = RANGES[rangeKey]?.days || lifetimeDays(botKey);
+  const p = profitDaily(botKey, { days, usdToman: rate, campaignUsdPerUser: campUsd, preTrackUsd: preUsd });
+  return { ...p, rate, campUsd, preUsd, days, rangeKey };
 }

@@ -14,7 +14,7 @@ import {
   moneyOf, revenueWhere, toToman, moneyText, creditText, coinOf, baseKey,
 } from '../lib/bots.js';
 import { scopeBot, MASTER_DASH_BOTS } from '../lib/nav.js';
-import { profitSinceTracking, USD_RATE_KEY, CAMPAIGN_CPA_KEY } from '../lib/profit.js';
+import { profitFor, USD_RATE_KEY } from '../lib/profit.js';
 import { opsBlock } from './overview.js';
 import { getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
@@ -76,8 +76,6 @@ function gather(botKey, { since, activeWindow }) {
     dau: 0, wau: 0, mau: 0,
     referrers: 0, referralsOk: 0, maxReferrals: 0,
     coinsSpent: 0,
-    costTotal: 0, costInRange: 0, costToday: 0, costWeek: 0, costMonth: 0,
-    costRows: 0, costDays: 0, hasCostTable: false,
     rateHist: new Map(), ratedReadings: 0, rateSum: 0,
     sizeCounts: new Map(), topicCounts: new Map(),
     buckets: READ_BUCKETS.map(() => 0),
@@ -198,19 +196,10 @@ function gather(botKey, { since, activeWindow }) {
         }
       }
 
-      /* ---- هزینه‌ی واقعیِ مدل (جدولِ llm_usage — از نسخه‌ی حسابداریِ مصرف به بعد) ---- */
-      if (hasTable(db, 'llm_usage')) {
-        agg.hasCostTable = true;
-        const c = (s) => scalar(db, 'SELECT COALESCE(SUM(cost_usd),0) s FROM llm_usage WHERE created_at >= ?', [s]);
-        agg.costTotal += c(0);
-        agg.costInRange += c(since);
-        agg.costToday += c(today);
-        agg.costWeek += c(week);
-        agg.costMonth += c(month);
-        agg.costRows += scalar(db, 'SELECT COUNT(*) c FROM llm_usage');
-        agg.costDays = Math.max(agg.costDays,
-          scalar(db, `SELECT COUNT(DISTINCT ${'CAST((created_at + 12600)/86400 AS INTEGER)'}) c FROM llm_usage`));
-      }
+      /* 🗑 تجمیعِ هزینه‌ی مدل از این‌جا برداشته شد (۱۴۰۵/۰۶/۱۵). نمای کلی دیگر هیچ
+         عددِ هزینه‌ای را خودش نمی‌سازد؛ همه از `profitFor` می‌آید که لُختِ دوره‌ی قبل
+         از ثبت و هزینه‌ی تبلیغ را هم دارد. نگه‌داشتنِ این تجمیع یعنی یک منبعِ دومِ
+         خاموش که دیر یا زود دوباره روی صفحه می‌نشیند. */
 
       // دعوت از دوستان
       if (hasTable(db, 'referrals')) {
@@ -279,16 +268,19 @@ export function dashBody(url) {
   /* 💰 سودِ خالص — خواسته‌ی صریحِ مالک که این عدد سرخط باشد، نه لای صفحه‌ی هزینه.
      محاسبه‌اش در `lib/profit.js` است (همان تک‌منبعی که صفحه‌ی اقتصاد از آن می‌خواند)،
      پس این عدد و عددِ آن‌جا نمی‌توانند واگرا شوند. */
-  const campUsd = parseFloat(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
-  const pf = profitSinceTracking(bot, { usdToman: rate, campaignUsdPerUser: campUsd });
+  /* ⚠️ عمداً `profitFor(bot, 'all')` — **دقیقاً همان فراخوانی‌ای که صفحه‌ی اقتصاد با
+     بازه‌ی پیش‌فرضش می‌زند**. تا قبل از ۱۴۰۵/۰۶/۱۵ این‌جا `profitSinceTracking` بود که
+     از پنجره‌ی «شروعِ ثبتِ هزینه» می‌خواند و لُختِ دوره‌ی قبل را اصلاً پاس نمی‌داد؛
+     یعنی دو فرمولِ متفاوت، دو عددِ متفاوت، و ایرادِ کاملاً درستِ مالک: «نمای کلی یک
+     عدد می‌گوید، اقتصاد یک عددِ دیگر». حالا نمای کلی **هیچ محاسبه‌ای از خودش ندارد**؛
+     فقط همان عدد را بازتاب می‌دهد. */
+  const pf = profitFor(bot, 'all');
   const profitHero = (() => {
     if (!rate) return hero('سودِ خالص', '<span class="muted">نرخِ دلار لازم است</span>',
       'هزینه دلاری است و درآمد تومانی');
-    if (!pf.ok) return hero('سودِ خالص', '<span class="muted">هنوز هزینه‌ای ثبت نشده</span>',
-      'از روزِ روشن‌شدنِ ثبتِ هزینه پر می‌شود');
     const net = pf.totals.net;
     return hero('سودِ خالص', `<span class="${net < 0 ? 'drop' : ''}">${fmt(net)} ت</span>`,
-      `از ${esc(tehranDayStr(pf.costSince))} (شروعِ ثبتِ هزینه) · ${pf.breakEven ? `سربه‌سر: ${esc(pf.breakEven)}` : net < 0 ? 'هنوز سربه‌سر نشده' : 'از ابتدا مثبت'}`);
+      `کلِ عمر · ${pf.breakEven ? `سربه‌سر: ${esc(pf.breakEven)}` : net < 0 ? 'هنوز سربه‌سر نشده' : 'از ابتدا مثبت'}`);
   })();
 
   const heroes = `<div class="heroes">
@@ -439,41 +431,51 @@ export function dashBody(url) {
     <p class="muted">«دعوتِ موفق» = دعوت‌شده وارد شد، فالِ کامل گرفت و پاداشِ دعوت‌کننده پرداخت شد
       (همان بیتی که خودِ ربات می‌زند؛ هیچ تعریفِ دومی ساخته نشده).</p></div>`;
 
-  /* ── هزینه و درآمد ── */
-  const avgDailyCost = a.costDays ? a.costTotal / a.costDays : 0;
-  const costPerReading = a.readings ? a.costTotal / a.readings : 0;
-  const costCard = `<div class="card"><h2>🧾 هزینه‌ی مدل (OpenRouter)</h2>
-    ${a.hasCostTable ? `<div class="grid">
-      ${stat('هزینه‌ی کل', usd(a.costTotal) + toman(a.costTotal))}
-      ${stat('هزینه‌ی ماه اخیر', usd(a.costMonth) + toman(a.costMonth))}
-      ${stat('هزینه‌ی هفته‌ی اخیر', usd(a.costWeek) + toman(a.costWeek))}
-      ${stat('هزینه‌ی امروز', usd(a.costToday) + toman(a.costToday))}
-      ${stat('میانگین هزینه‌ی روزانه', usd(avgDailyCost) + toman(avgDailyCost))}
-      ${stat('هزینه به ازای هر فال', usd(costPerReading) + toman(costPerReading))}
-      ${stat(`هزینه در ${esc(range.label)}`, usd(a.costInRange) + toman(a.costInRange))}
-      ${stat('تعداد فراخوانیِ ثبت‌شده', fmt(a.costRows))}
-    </div>` : ''}
-    ${a.costRows ? '' : `<div class="note">ثبتِ هزینه تازه روشن شده و هنوز ردیفی ندارد.
-      این عدد از لحظه‌ی انتشار به بعد پر می‌شود و <b>برای گذشته قابلِ بازسازی نیست</b> (هیچ‌جا ذخیره نشده بود).</div>`}
-    <form method="post" action="/dash/rate" class="inline" style="margin-top:12px">
-      <input type="hidden" name="bot" value="${esc(bot)}">
-      <label>نرخ دلار به تومان (برای مقایسه با درآمد)<input name="rate" type="number" min="0" value="${rate || ''}" placeholder="مثلاً 90000"></label>
-      <button type="submit">ذخیره</button>
-    </form>
-    <p class="muted">هزینه همان عددی است که خودِ OpenRouter برمی‌گرداند (اعتبارِ دلاری per فراخوانی). نرخِ ارز را
-      خودت وارد می‌کنی؛ داشبورد هیچ نرخی از خودش نمی‌سازد. مسیرِ داوریِ رسید هنوز در این عدد نیست.</p></div>`;
+  /* ── هزینه و درآمد — **بازتابِ صفحه‌ی اقتصاد، نه محاسبه‌ی دوم** ──
+   *
+   * 🐛 اینجا قبلاً سه بن‌بستِ عددی بود که مالک را گیج کرد (۱۴۰۵/۰۶/۱۵):
+   *   • «هزینه‌ی کل» فقط `llm_usage` بود؛ نه لُختِ دوره‌ی قبل از ثبت، نه هزینه‌ی تبلیغ.
+   *     یعنی همان صفحه هم‌زمان یک «سودِ خالص» با هزینه‌ی کامل و یک «هزینه‌ی کل» با
+   *     هزینه‌ی ناقص نشان می‌داد.
+   *   • «حاشیه‌ی ناخالص (درآمد کل − هزینه‌ی مدل)» یک **خطِ پایانیِ سوم** بود، متفاوت با
+   *     سودِ سرخط و متفاوت با صفحه‌ی اقتصاد.
+   *   • فرمِ نرخِ دلار این‌جا هم بود و هم در صفحه‌ی اقتصاد.
+   * قاعده‌ی مالک: «نمای کلی باید بازتابی از ریزجزئیاتِ تب‌های بعدی باشد و هیچ‌جایش با
+   * آن‌ها تناقض نداشته باشد». پس این کارت هیچ حسابی از خودش نمی‌کند؛ فقط `pf` را که
+   * از `profitFor(bot,'all')` آمده بازتاب می‌دهد و برای جزئیات لینک می‌دهد. */
+  const pt = pf.totals;
+  const costCard = rate ? `<div class="card">
+    ${cardHead('🧾 هزینه و سود (کلِ عمر)', more('/economics', 'تفکیکِ کامل و بازه‌های دیگر'))}
+    <div class="grid">
+      ${stat('درآمدِ دریافتی', moneyText(bot, pt.rev))}
+      ${stat('هزینه‌ی کل', `${moneyText(bot, pt.costToman)} <span class="muted">(${usd(pt.costUsd)})</span>`)}
+      ${stat('— هزینه‌ی مدل', `${usd(pt.llmUsd + pt.preUsd)}${toman(pt.llmUsd + pt.preUsd)}`)}
+      ${stat('— هزینه‌ی تبلیغ', `${usd(pt.adUsd)}${toman(pt.adUsd)}`)}
+      ${stat('سودِ خالص', `<b class="${pt.net < 0 ? 'drop' : ''}">${moneyText(bot, pt.net)}</b>`)}
+      ${stat('حاشیه‌ی سود', `${fmt(pt.rev ? Math.round((pt.net / pt.rev) * 1000) / 10 : 0)}٪`)}
+    </div>
+    <p class="muted">این اعداد <b>عیناً</b> همان‌هایی هستند که صفحه‌ی «💰 اقتصاد و هزینه»
+      با بازه‌ی «کل» نشان می‌دهد؛ نمای کلی هیچ محاسبه‌ی جداگانه‌ای ندارد. برای تفکیکِ
+      مسیرِ هزینه، سریِ روزانه و بازه‌های دیگر به همان صفحه برو.</p></div>`
+    : `<div class="card">
+    ${cardHead('🧾 هزینه و سود', more('/economics', 'ورودِ نرخِ دلار'))}
+    <div class="note">برای ساختنِ عددِ تومانیِ هزینه و سود، <b>نرخِ دلار</b> لازم است.
+      آن را در صفحه‌ی «💰 اقتصاد و هزینه» وارد کن — تک‌منبعِ ورودی‌های هزینه همان‌جاست.</div></div>`;
 
-  const revenueCard = `<div class="card"><h2>💳 درآمد</h2>
+  const revenueCard = `<div class="card">
+    ${cardHead('💳 درآمد', more('/finance', 'پرداخت‌ها و رسیدها'))}
     <div class="grid">
       ${stat(`درآمد ${esc(range.label)}`, moneyText(bot, a.revInRange))}
       ${stat('درآمد هفته', moneyText(bot, a.revWeek))}
       ${stat('درآمد ماه', moneyText(bot, a.revMonth))}
       ${stat('درآمد کل', moneyText(bot, a.revTotal))}
       ${stat('درآمد به ازای هر کاربر', moneyText(bot, a.users ? Math.round(a.revTotal / a.users) : 0))}
-      ${a.hasCostTable && rate ? stat('حاشیه‌ی ناخالص (درآمد کل − هزینه‌ی مدل)',
-        moneyText(bot, Math.round(a.revTotal - a.costTotal * rate))) : ''}
     </div>
-    <p class="muted">درآمد = مبلغِ واقعاً پرداخت‌شده و تأییدشده (بعد از تخفیف). واحدِ پول تومان است و هرگز با الماس قاطی نمی‌شود.</p></div>`;
+    <p class="muted">درآمد = مبلغِ واقعاً پرداخت‌شده و تأییدشده (بعد از تخفیف). واحدِ پول
+      تومان است و هرگز با الماس قاطی نمی‌شود.
+      ⚠️ «درآمد کل» این‌جا فقط ردیف‌های خودِ ربات است؛ عددِ «درآمدِ دریافتی» در کارتِ بالا
+      <b>پرداخت‌های سرگردان</b> را هم دارد (پولی که رسید نگرفت و دستی ثبت شد)، پس اگر
+      این دو با هم فرق داشتند یعنی ردیفِ سرگردان داری، نه اینکه عددی خراب است.</p></div>`;
 
   /* ── کاربرانِ وفادار ── */
   const power = a.powerUsers.length ? `<div class="card"><h2>🏅 وفادارترین کاربران</h2>
@@ -502,7 +504,7 @@ export function dashBody(url) {
   return `<div class="card dash-head"><h2 style="margin:0">📊 نمای کلی — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">سرخطِ اعداد. تمرکزِ این فاز درگیری و ماندگاریِ کاربر است، نه درآمد.
         هر بخش انتخابگرِ بازه‌ی خودش را دارد و جزئیاتش یک کلیک آن‌طرف‌تر است.</p></div>
-    ${filters}${heroes}${jump}${engagement}${satisfaction}${readingsCard}${charts}${usersCard}${revenueCard}
+    ${filters}${heroes}${jump}${engagement}${satisfaction}${readingsCard}${charts}${usersCard}${revenueCard}${costCard}
     ${opsBlock(bot, { full: false })}`;
 }
 
@@ -510,10 +512,6 @@ const hero = (k, v, sub = '', big = false) => `<div class="hero${big ? ' big' : 
   <div class="k">${esc(k)}</div><div class="v">${v}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div>`;
 
 /** نرخِ دلار (ورودیِ انسانی؛ داشبورد هیچ نرخی از خودش نمی‌سازد). */
-export function dashRate(body) {
-  const v = Math.max(0, parseInt(body.get('rate') || '0', 10) || 0);
-  if (v > 100_000_000) throw new Error('نرخ نامعتبر است');
-  setSetting(USD_RATE_KEY, String(v));
-  audit('dash.usd_rate', '', String(v));
-  return v ? `نرخ دلار ذخیره شد: ${fmt(v)} تومان` : 'نرخ دلار پاک شد';
-}
+/* 🗑 `dashRate` حذف شد: نرخِ دلار دو فرمِ ورودی داشت (نمای کلی و صفحه‌ی اقتصاد) و دو
+   جای ویرایشِ یک تنظیم یعنی کاربر نداند کدام «واقعی» است. تک‌منبعِ ورودی‌های هزینه
+   `costInputsCard` در صفحه‌ی اقتصاد است. */
