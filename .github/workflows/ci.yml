@@ -38,6 +38,12 @@ jobs:
       - name: Channel content diversity guard
         run: node tools/marketing/check-day-diversity.mjs
 
+      # گاردِ زبانیِ کپشن: همان الگوهای `defects` خودِ ربات (langdata.<loc>.json) روی
+      # متنِ کانال هم اجرا می‌شوند، به‌علاوه‌ی allowlistِ هشتگ. هم‌جا با گاردِ تنوع
+      # نشست چون آن هم نصب و شبکه نمی‌خواهد و هزینه‌اش صفر جابِ اضافه است.
+      - name: Channel caption language guard
+        run: node tools/marketing/check-day-language.mjs
+
   check:
     needs: changes
     if: needs.changes.outputs.bots != '[]'
