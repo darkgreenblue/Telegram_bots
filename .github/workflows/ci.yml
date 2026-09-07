@@ -222,6 +222,13 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-cpa-day.mjs
 
+      # ستونِ `payments.original_amount` دو واحد دارد (تومانِ دوره‌ی قبل و الماسِ حالا).
+      # جمع‌کردنشان هیچ خطایی نمی‌دهد و فقط یک عددِ بی‌معنیِ بزرگ می‌سازد — یک بار
+      # ۶۳۵٬۹۵۹💎 نشان داد. این چک جدایی‌شان و خالی‌بودنِ بازه‌ی مبهم را می‌سنجد.
+      - name: Coin unit boundary check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-coin-units.mjs
+
       # اکشنِ اعتباریِ صف: داشبورد فقط برای رباتی enqueue کند که واقعاً اجرایش می‌کند.
       # sweepِ ربات‌ها بعد از if/else بی‌قید `markActionDone` می‌زند، پس اکشنی که هندلر
       # ندارد **بی‌صدا** done می‌شود: ردیفِ سرگردان «حل‌شده» می‌شود، در درآمد می‌ماند، و

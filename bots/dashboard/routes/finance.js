@@ -1,7 +1,7 @@
 // مالی: پرداخت‌های همه‌ی ربات‌ها (schema-agnostic با پروفایل) + فیلتر + CSV (با audit) + دفتر ممیزی
 // هر ربات جدول/ستون/واحد مالی خودش را دارد (payments/امتیاز تومان vs transactions/amount_rial)؛
 // این‌جا همه به یک رکورد نرمالِ تومان تبدیل می‌شوند تا جدول و جمع‌ها قابل‌مقایسه بمانند.
-import { instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, scalar, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, creditText, creditNum, coinOf } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, scalar, moneyOf, unixOf, toToman, receiptQueueSupported, revenueWhere, creditText, creditNum, coinOf, coinLegacyFloorOf } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { listAudit, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, tehranDayStart, tehranDayStr } from '../lib/util.js';
@@ -233,9 +233,23 @@ export function coinEconomy(botKey) {
         ? scalar(db, "SELECT COALESCE(SUM(COALESCE(json_extract(props,'$.amount'),0)),0) FROM events WHERE event='credit_granted'")
         : 0;
       const m = moneyOf(inst.bot);
+      /* 💎 **فقط ردیف‌هایی که واحدشان واقعاً الماس است.**
+         🐛 گزارشِ مالک ۱۴۰۵/۰۶/۱۶: «خریداری‌شده ۶۳۵٬۹۵۹💎 — محاله». درست هم بود:
+         ستونِ `original_amount` در دوره‌ی تومانی **تومان** بود و در دوره‌ی الماس
+         **تعدادِ الماس**، و این جمع هر دو را با هم می‌ریخت. روی دیتای زنده:
+         ۱۳ ردیفِ تومانی جمعاً ۶۳۵٬۰۰۰ + ۳۸ ردیفِ الماسی جمعاً ۹۵۹ = همان ۶۳۵٬۹۵۹.
+         جداکننده `coinLegacyFloor` است (شکافِ ساختاریِ ۱۰۰ الماس ↔ ۱۰٬۰۰۰ تومان).
+         ردیف‌های تومانی **حذف نمی‌شوند، جدا گزارش می‌شوند** — عددی که بی‌صدا کنار
+         گذاشته شود همان‌قدر گمراه‌کننده است که عددی که بی‌صدا جمع شود. */
+      const floor = coinLegacyFloorOf(inst.bot);
+      const orig = `COALESCE(original_amount, ${m.amountCol})`;
+      const boughtWhere = floor ? ` AND ${orig} < ${floor}` : '';
       const bought = hasTable(db, m.table)
-        ? scalar(db, `SELECT COALESCE(SUM(COALESCE(original_amount, ${m.amountCol})),0) FROM ${m.table} WHERE status=?`, [m.successStatus])
+        ? scalar(db, `SELECT COALESCE(SUM(${orig}),0) FROM ${m.table} WHERE status=?${boughtWhere}`, [m.successStatus])
         : 0;
+      const legacy = (floor && hasTable(db, m.table))
+        ? db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(${orig}),0) s FROM ${m.table} WHERE status=? AND ${orig} >= ${floor}`).get(m.successStatus)
+        : { n: 0, s: 0 };
       const spent = hasTable(db, 'readings')
         ? scalar(db, "SELECT COALESCE(SUM(price),0) FROM readings WHERE status='delivered'")
         : 0;
@@ -246,6 +260,7 @@ export function coinEconomy(botKey) {
         bought: creditNum(inst.bot, bought),
         spent: creditNum(inst.bot, spent),
         held: creditNum(inst.bot, held),
+        legacyRows: legacy.n, legacyToman: legacy.s,
       });
     });
   }
