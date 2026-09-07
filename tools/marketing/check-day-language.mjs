@@ -27,6 +27,29 @@ const only = (() => { const i = argv.indexOf('--locale'); return i === -1 ? '' :
 // همان قاعده‌ی گاردِ تنوع: از تاریخِ شروعِ استانداردِ فعلی به بعد قضاوت می‌شود.
 const STANDARD_FROM = { fa: '2026-09-06', ru: '2026-09-07', pt: '2026-09-07', es: '2026-09-07' };
 
+// ⚠️ قرمزِ کاذبِ شناخته‌شده. الگوهای `genero` هم فعل را می‌گیرند هم صفت را، چون در این
+// زبان‌ها یک شکل هر دو کار را می‌کند. سه شکلِ زیر روی جمله‌ی واقعی خوانده و **تأیید**
+// شدند که نشتِ جنسیت نیستند:
+//   • `você segura <مفعول>` → فعلِ segurar است («نگه می‌داری»)، نه صفتِ «امن»
+//   • `sente rápido` → `rápido` این‌جا قید است، نه صفت
+//   • `entrada bem preparada` → صفت با اسمِ **مؤنثِ** قبلش می‌خواند، نه با خواننده
+// قاعده‌ی افزودن به این فهرست: اول جمله را بخوان. گاردی که مدام دروغ می‌گوید همان‌قدر
+// بی‌فایده است که گاردی که هیچ نمی‌گوید (بند ۲و/۶ب-۲ ریشه).
+// 📌 همین قرمزِ کاذب در گاردِ **خودِ ربات** هم هست و آن‌جا یک تعمیرِ بی‌دلیلِ مدل
+//    می‌سازد؛ عمداً این‌جا دست نخورد چون تغییرِ رفتارِ رباتِ زنده تصمیمِ جداست.
+const FALSE_POSITIVE = {
+  pt: [
+    // `segura` وقتی **مفعول** می‌گیرد فعلِ segurar است. صفتِ «امن» مفعول نمی‌گیرد؛
+    // شکلِ صفتی‌اش («está segura demais») با lookahead بیرون گذاشته شده تا اگر روزی
+    // نشتِ واقعی آمد، همچنان قرمز بدهد.
+    /\bsegura\s+(?!demais\b|muito\b|bem\b|o\s+suficiente)\p{L}/iu,
+    /\bsente\s+r[áa]pido\b/i,
+    /\b(?:entrada|sa[íi]da|conversa|resposta|decis[ãa]o|frase)\s+(?:bem\s+|j[áa]\s+)?preparada\b/i,
+  ],
+  es: [],
+  ru: [],
+};
+
 const problems = [];
 let captions = 0;
 
@@ -63,6 +86,9 @@ for (const loc of LOCALES) {
           const hit = body.match(re);
           if (!hit) continue;
           if (d.except) { try { if (new RegExp(d.except, d.flags || '').test(hit[0])) continue; } catch {} }
+          // متنِ اطراف را هم بده، چون تشخیصِ فعل از صفت به مفعولِ بعدش وابسته است
+          const around = body.slice(Math.max(0, hit.index - 20), hit.index + hit[0].length + 40);
+          if ((FALSE_POSITIVE[loc] || []).some((re) => re.test(around))) continue;
           problems.push(`[${loc}] ${f} ${p.month}: نقضِ «${d.id}» → «${hit[0].trim()}»  (${d.hint || ''})`);
         }
       }
