@@ -29,6 +29,7 @@ import { promisify } from 'node:util';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { heartbeatAgeSec } from '../shared/heartbeat.js';
 
 const run = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -41,6 +42,16 @@ const CREDITS_MIN_USD = 5;
 const DISK_FULL_PCT = 92;
 const CRASHLOOP_WINDOW_MS = 10 * 60 * 1000;
 const CRASHLOOP_RESTARTS = 5;
+
+/* آستانه‌ی کهنگیِ ضربان. ربات هر ۲۰ ثانیه می‌نویسد، پس ۵ دقیقه یعنی ۱۵ ضربانِ پشتِ‌سرهم
+ * از دست رفته — به‌قدرِ کافی بزرگ که کندیِ لحظه‌ای یا دیسکِ شلوغ هشدارِ کاذب نسازد، و
+ * به‌قدرِ کافی کوچک که خرابی قبل از رسیدنِ تیکتِ کاربر دیده شود. همین عدد برای «چقدر
+ * بعد از بوت شروع به سنجیدن کنیم» هم استفاده می‌شود تا اپِ تازه‌reload شده مهلت داشته باشد. */
+const HEARTBEAT_STALE_SEC = 5 * 60;
+/* نگاشتِ نامِ اپِ pm2 ⟵ locale. چهار اپِ تاروت `cwd` مشترک دارند و فقط LOCALE فرقشان
+ * است، پس هرکدام فایلِ ضربانِ خودش را دارد؛ یک فایلِ مشترک باعث می‌شد یک اپِ سالم مرگِ
+ * سه‌تای دیگر را بپوشاند. */
+const HEARTBEAT_APPS = [['tarot', 'fa'], ['tarot-ru', 'ru'], ['tarot-pt', 'pt'], ['tarot-es', 'es']];
 // ربات‌هایی که کلیدِ OpenRouterشان تمام‌شدنش یعنی قطعیِ کاملِ محصول.
 const CREDIT_BOTS = ['voice2text', 'tarot'];
 // سرویس‌های systemd که خارج از pm2 اند (استثناهای مستندِ مونوریپو).
@@ -132,6 +143,31 @@ async function checkPm2() {
       }
     }
   } catch (e) { logErr('❌ HEALTH_WATCH خواندنِ ecosystem:', e.message); }
+
+  /* 💓 ضربان: «online» و «ری‌استارت نشده» هیچ‌کدام ثابت نمی‌کنند ربات کار می‌کند.
+   * هر اپِ تاروت هر ۲۰ ثانیه فایلِ ضربانش را می‌نویسد؛ ضربانِ کهنه یعنی حلقه‌ی
+   * رویداد نمی‌چرخد، فارغ از این‌که pm2 چه می‌گوید.
+   *
+   * ⚠️ فقط برای اپی که **در pm2 آنلاین است** سنجیده می‌شود. اپِ آفلاین/گم‌شده از
+   * قبل هشدارِ خودش را دارد و دو هشدار برای یک خرابی یعنی نویز — و نویز همان چیزی
+   * است که هشدارِ واقعی را بی‌معنا می‌کند (درسِ پینگ‌پنگِ chmod و گاردِ ENV_FILE).
+   * ضربانِ **نبود** هم برای اپی که تازه بالا آمده طبیعی است، پس مثل کهنه‌بودن با
+   * همان آستانه سنجیده می‌شود نه فوری. */
+  try {
+    const online = new Map(list.filter((p) => (p.pm2_env || {}).status === 'online').map((p) => [p.name, p]));
+    for (const [name, loc] of HEARTBEAT_APPS) {
+      const p = online.get(name);
+      if (!p) continue;                                   // آفلاین/نبود ⇒ هشدارش بالا آمده
+      const upSec = (Date.now() - (p.pm2_env.pm_uptime || 0)) / 1000;
+      if (upSec < HEARTBEAT_STALE_SEC) continue;          // تازه بوت شده، هنوز فرصت دارد
+      const age = heartbeatAgeSec(join(ROOT, 'bots/tarot/data', `heartbeat-${loc}.txt`));
+      if (age === null) {
+        out.push({ key: `hb:none:${name}`, text: `🔴 «${name}» در pm2 online است ولی هیچ ضربانی ندارد (بوت نشده؟)` });
+      } else if (age > HEARTBEAT_STALE_SEC) {
+        out.push({ key: `hb:stale:${name}`, text: `🔴 «${name}» online است ولی ${Math.round(age / 60)} دقیقه است ضربان نزده (حلقه‌ی رویداد نمی‌چرخد)` });
+      }
+    }
+  } catch (e) { logErr('❌ HEALTH_WATCH ضربان:', e.message); }
   return out;
 }
 

@@ -29,8 +29,16 @@ ok(!!envsLine, 'لیستِ `envs:` در ورک‌فلو هست');
 
 if (envsLine) {
   const forwarded = new Set(envsLine[1].trim().split(',').map((x) => x.trim()).filter(Boolean));
-  // بلوکِ `env:` همان استپِ ssh-action، تا خودِ `envs:`.
-  const envBlock = WF.slice(WF.indexOf('        env:'), WF.indexOf('          envs:'));
+  /* بلوکِ `env:` همان استپِ ssh-action، تا خودِ `envs:`.
+   *
+   * ⚠️ `lastIndexOf` نه `indexOf`. استپ‌های **قبلِ** ssh-action هم می‌توانند `env:`
+   * داشته باشند (گیتِ پنجره‌ی امن دارد: COMMIT_MSG/URGENT/REASON). با `indexOf` برش
+   * از آن‌جا شروع می‌شد و متغیرهای آن استپ‌ها به‌عنوان «سکرتِ forward نشده» گزارش
+   * می‌شدند — یک قرمزِ کاذب که هیچ ربطی به قرارداد ندارد. و قرمزِ کاذب دقیقاً همان
+   * چیزی است که گارد را بی‌معنا می‌کند (بند ۶ب-۲ ریشه). `lastIndexOf` اکیداً
+   * دقیق‌تر است: آخرین `env:` قبل از `envs:` حتماً مالِ خودِ همان استپ است. */
+  const envsAt = WF.indexOf('          envs:');
+  const envBlock = WF.slice(WF.lastIndexOf('        env:', envsAt), envsAt);
   const declared = [...envBlock.matchAll(/^\s{10}([A-Z0-9_]+):\s*\$\{\{/gm)].map((m) => m[1]);
 
   ok(declared.length > 0, `بلوکِ env: پارس شد (${declared.length} کلید)`);

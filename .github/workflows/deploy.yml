@@ -10,6 +10,24 @@ on:
         description: 'دیپلوی اجباری همه‌ی ربات‌ها (حتی بدون تغییر)'
         type: boolean
         default: false
+      urgent:
+        description: '🚨 پروتکلِ فوری: دیپلوی خارج از ساعتِ امن (فقط با تشخیصِ مالک)'
+        type: boolean
+        default: false
+      reason:
+        description: 'دلیلِ فوریت — اجباری وقتی urgent روشن است؛ در تلگرام ثبت می‌شود'
+        type: string
+        default: ''
+
+  # ⏰ گرفتنِ دیپلویِ به‌تعویق‌افتاده در پنجره‌ی امن. کرونِ گیت‌هاب UTC است و تهران
+  # UTC+3:30 (ایران از ۲۰۲۲ ساعتِ تابستانی ندارد، پس این افست ثابت است).
+  #   04:35 UTC = 08:05 تهران   ·   05:35 UTC = 09:05 تهران
+  # دو پنجره چون زمان‌بندیِ Actions تضمینی نیست و روی همین ریپو ۱ تا ۴ ساعت تأخیر
+  # دیده شده (بند ۳ج). دیپلوی ذاتاً idempotent است: اگر چیزی عوض نشده باشد هیچ
+  # رباتی reload نمی‌شود، پس اجرای دوم بی‌ضرر است.
+  schedule:
+    - cron: '35 4 * * *'
+    - cron: '35 5 * * *'
 
 # 🔒 **دو دیپلوی هرگز هم‌زمان روی سرور نمی‌دوند.**
 #
@@ -44,7 +62,30 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # چک‌اوت لازم است چون گیتِ پنجره یک اسکریپتِ داخلِ ریپوست (تک‌منبعِ منطق).
+      - uses: actions/checkout@v4
+
+      # ⏰ ---------- پنجره‌ی امنِ دیپلوی ----------
+      # هر دیپلوی یعنی ری‌استارتِ رباتِ زنده، و ری‌استارت وسطِ اوج یعنی فلوی نیمه‌کاره‌ی
+      # کاربرِ واقعی. بند ۲ج/۲ می‌گفت «در ساعتِ کم‌ترافیک مرج کن» ولی اجرایش دستی و
+      # فراموش‌شدنی بود؛ حالا خودکار است. منطق و ساعت‌ها تک‌منبع‌اند در
+      # tools/deploy-window.mjs (هر دو جابِ دیپلوی همان را صدا می‌زنند).
+      #
+      # 🚨 پروتکلِ فوری (تشخیصِ مالک): `urgent: true` در اجرای دستی با یک دلیلِ اجباری،
+      # یا `[deploy-now]` در پیامِ کامیت. هر دو ساعت را دور می‌زنند و **در تلگرام ثبت
+      # می‌شوند** — استثنایی که بی‌صدا باشد خیلی زود قاعده می‌شود.
+      - name: پنجره‌ی امنِ دیپلوی
+        id: gate
+        env:
+          # ⚠️ پیامِ کامیت از راهِ env می‌آید نه ${{ }} داخلِ اسکریپت: درج مستقیمش یک
+          # تزریقِ کلاسیکِ Actions است (بند ۹: ورودی هرگز در shell interpolate نشود).
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          URGENT:     ${{ inputs.urgent }}
+          REASON:     ${{ inputs.reason }}
+        run: node tools/deploy-window.mjs
+
       - name: Deploy to VPS
+        if: steps.gate.outputs.go == 'true'
         uses: appleboy/ssh-action@v1
         # تک‌منبعِ حقیقت برای همه‌ی کلیدها = GitHub Secrets.
         # برای هر ربات جدید: دو خط اینجا اضافه کن، نامش را به envs اضافه کن،
@@ -90,6 +131,11 @@ jobs:
           script: |
             set -e
             cd ~/voice2text
+            # ⚠️ **قبل از** هر reload گرفته می‌شود. گاردِ ضربانِ پایین می‌پرسد «ضربانی
+            # تازه‌تر از این لحظه آمد؟»؛ اگر این مهر بعد از ری‌استارت گرفته می‌شد، ضربانِ
+            # کهنه‌ی پروسه‌ی قبلی به‌عنوان سلامتِ پروسه‌ی جدید خوانده می‌شد و گارد دقیقاً
+            # همان سبزِ دروغینی را می‌داد که برای حذفش ساخته شده.
+            DEPLOY_STARTED_AT=$(date +%s)
             OLD_HEAD=$(git rev-parse HEAD)
 
             # ---------- همگام‌سازیِ مقاوم با main (باگِ واقعیِ ۹ شهریور ۱۴۰۵) ----------
@@ -405,6 +451,42 @@ jobs:
             fi
             echo "✅ هیچ اپی در پنجره‌ی ۱۲ ثانیه‌ای ری‌استارت نشد"
 
+            # ---------- گاردِ ضربان: «ری‌استارت نشد» هم کافی نیست ----------
+            # گاردِ بالا نبودِ کرش‌لوپ را ثابت می‌کند، ولی پروسه‌ای که اصلاً بوت نشده و
+            # pm2 عقب‌نشینیِ نمایی کرده هم در یک پنجره‌ی ۱۲ثانیه‌ای ری‌استارت نمی‌شود، و
+            # پروسه‌ای که زنده و بی‌فایده است هم همین‌طور. تنها چیزی که «کار می‌کند» را
+            # ثابت می‌کند سیگنالی است که **خودِ حلقه‌ی رویدادِ ربات** تولید کند.
+            #
+            # هر اپِ تاروت هر ۲۰ ثانیه `data/heartbeat-<locale>.txt` را می‌نویسد. اگر بعد
+            # از reload ضربانی تازه‌تر از لحظه‌ی شروعِ دیپلوی نیامد، آن اپ بالا نیامده —
+            # فرقی نمی‌کند pm2 چه می‌گوید. جابِ قرمز = هشدارِ تلگرام به مالک.
+            echo "---- گاردِ ضربان ----"
+            HB_DEADLINE=$(( $(date +%s) + 90 ))
+            HB_BAD=""
+            for loc in fa ru pt es; do
+              envf=".env"; [ "$loc" = "fa" ] || envf=".env.$loc"
+              # اپی که سکرتش ست نشده عمداً دیپلوی نمی‌شود، پس ضربان هم ندارد و
+              # نبودنش خرابی نیست (درسِ ۱۱ شهریور: نامِ فایلِ env، نه `.env` ثابت).
+              [ -f "bots/tarot/$envf" ] || { echo "⏭ tarot-$loc سکرت ندارد — از گارد معاف"; continue; }
+              hb="bots/tarot/data/heartbeat-$loc.txt"
+              while :; do
+                beat=$(cat "$hb" 2>/dev/null || echo 0)
+                if [ "$beat" -ge "$DEPLOY_STARTED_AT" ] 2>/dev/null; then
+                  echo "✅ tarot-$loc ضربان دارد (سنِ $(( $(date +%s) - beat ))s)"; break
+                fi
+                if [ "$(date +%s)" -ge "$HB_DEADLINE" ]; then
+                  echo "❌ tarot-$loc بعد از دیپلوی هیچ ضربانی نزد"; HB_BAD="$HB_BAD tarot-$loc"; break
+                fi
+                sleep 5
+              done
+            done
+            if [ -n "$HB_BAD" ]; then
+              echo "❌ این اپ‌ها بوت نشدند:$HB_BAD"
+              echo "--- خطای تاروت ---"
+              tail -n 30 ~/.pm2/logs/tarot-error.log 2>/dev/null || true
+              exit 1
+            fi
+
             deploy_bot daily-brief
             deploy_bot dashboard
 
@@ -524,6 +606,27 @@ jobs:
             echo "---- وضعیت نهایی ----"
             pm2 ls
 
+      # استثنا باید دیده شود، وگرنه قاعده می‌شود. هر بار که ساعتِ امن دور زده شد،
+      # مالک همان لحظه می‌داند — چه خودش زده باشد چه یک سشن.
+      - name: Telegram notice on urgent bypass
+        if: steps.gate.outputs.bypass != '' && steps.gate.outputs.go == 'true'
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          WHY:     ${{ steps.gate.outputs.why }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then exit 0; fi
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="🚨 دیپلوی خارج از ساعتِ امن اجرا شد — $WHY" || true
+          done
+
       # اگر دیپلوی شکست بخورد، به تلگرام مالک پیام می‌رود (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
       - name: Telegram alert on failure
         if: failure()
@@ -558,6 +661,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # همان گیتِ پنجره‌ی امن، از همان تک‌منبع. دو کپیِ bash دیر یا زود واگرا می‌شوند
+      # و آن‌وقت نیمی از دیپلوی در ساعتِ امن می‌رود و نیمی نه — بی‌صدا.
+      - name: پنجره‌ی امنِ دیپلوی
+        id: gate
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          URGENT:     ${{ inputs.urgent }}
+          REASON:     ${{ inputs.reason }}
+        run: node tools/deploy-window.mjs
+
       - name: Check if tabir-khab changed
         id: changed
         env:
@@ -577,7 +690,8 @@ jobs:
           [ "$DEPLOY" = "1" ] && echo "🚀 tabir-khab دیپلوی می‌شود" || echo "⏭ tabir-khab بدون تغییر — ری‌استارت نشد"
 
       - name: Deploy tabir-khab (overlay + restart)
-        if: steps.changed.outputs.deploy == '1'
+        # گیتِ پنجره در کنارِ شرطِ «تغییر کرده؟» — هر دو باید سبز باشند.
+        if: steps.changed.outputs.deploy == '1' && steps.gate.outputs.go == 'true'
         env:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           # توکن‌های تلگرامِ per-language — هر کدام ست باشد در .env سرور upsert می‌شود؛

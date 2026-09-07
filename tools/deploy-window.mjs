@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+/* پنجره‌ی امنِ دیپلوی — «این دیپلوی الان برود یا صبر کند؟»
+ *
+ * چرا: هر دیپلوی یعنی ری‌استارتِ رباتِ زنده، و ری‌استارت وسطِ اوج یعنی فلوهای
+ * نیمه‌کاره‌ی کاربرِ واقعی (بند ۲ج/۲ ریشه). تحلیلِ ساعتیِ کلِ عمرِ ربات نشان داد ساعتِ
+ * ۲۲ به‌تنهایی ۵۶ برابرِ ساعتِ ۰۶ اکشن دارد. بند ۲ج/۲ می‌گفت «در ساعتِ کم‌ترافیک مرج
+ * کن» ولی اجرایش دستی و فراموش‌شدنی بود؛ این ماژول همان قاعده را خودکار می‌کند.
+ *
+ * ⚠️ چرا یک ماژولِ مشترک و نه دو بلوکِ bash: دو جابِ دیپلوی (`deploy` و
+ * `deploy-tabir-khab`) هر دو باید یک تصمیم بگیرند. دو کپیِ bash دیر یا زود واگرا
+ * می‌شوند و آن‌وقت نصفِ دیپلوی در ساعتِ امن می‌رود و نصفش نه — و چون هیچ خطایی
+ * نمی‌دهد، بی‌صدا. اضافه‌اش این است که چکِ CI **همین تابع** را صدا می‌زند، نه یک
+ * بازنویسیِ آینه‌ایِ منطق (بند ۶ب).
+ */
+
+/* نقشه‌ی ناحیه‌ای از تحلیلِ ساعتیِ ۱۶ شهریور ۱۴۰۵ (کلِ عمرِ رباتِ فارسی، r=۰٫۹۹):
+ *   ۰۸ و ۰۹ ⟵ پنجره‌ی هدف (۱٫۱٪ و ۱٫۰٪ فال‌ها، یعنی عملاً یک کاربر)
+ *   ۰۴–۰۷ و ۱۱ و ۱۲ و ۱۷ و ۱۸ ⟵ قابلِ قبول؛ فرودِ کرونِ تأخیری هم همین‌جاست
+ *   ۲۰–۰۳ ⟵ ممنوعِ مطلق   ·   ۱۰ و ۱۳–۱۶ و ۱۹ ⟵ پرهیز
+ * ساعتِ ۱۰ عمداً بیرون است: جهشِ ورودِ پستِ کانال آن‌جاست (سه برابرِ ۰۹). */
+export const SAFE_HOURS = [4, 5, 6, 7, 8, 9, 11, 12, 17, 18];
+export const PREFERRED_HOURS = [8, 9];
+export const BYPASS_MARKER = '[deploy-now]';
+
+/**
+ * تنها نقطه‌ی تصمیم. خالص است (هیچ I/O ای ندارد) تا چکِ CI بتواند هر ۲۴ ساعت و هر
+ * ترکیبِ ورودی را واقعاً اجرا کند، نه اینکه متنِ ورک‌فلو را بخواند.
+ */
+export function decide({ hour, urgent = false, reason = '', commitMsg = '' } = {}) {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    // ساعتِ نامعتبر یعنی خودِ سنجه خراب است. fail-open عمدی: جلوی دیپلوی را نگیر،
+    // چون یک گاردِ خرابِ بسته یعنی هیچ فیکسی به رباتِ زنده نمی‌رسد — که از دیپلویِ
+    // بدموقع خطرناک‌تر است. ولی ساکت هم نمی‌ماند.
+    return { go: true, bypass: '', why: `ساعتِ نامعتبر (${hour}) — گارد باز شد تا مسیرِ فیکس بسته نشود` };
+  }
+  if (urgent) {
+    if (!String(reason).trim()) {
+      return { go: false, error: true, why: 'پروتکلِ فوری بدونِ دلیل اجرا نمی‌شود — فیلدِ reason را پر کن' };
+    }
+    return { go: true, bypass: 'urgent', why: `پروتکلِ فوری (ساعتِ تهران ${hour}) — دلیل: ${String(reason).trim()}` };
+  }
+  if (String(commitMsg).includes(BYPASS_MARKER)) {
+    return { go: true, bypass: 'deploy-now', why: `نشانگرِ ${BYPASS_MARKER} در پیامِ کامیت (ساعتِ تهران ${hour})` };
+  }
+  if (SAFE_HOURS.includes(hour)) {
+    return { go: true, bypass: '', why: `ساعتِ تهران ${hour} در بازه‌ی امن است` };
+  }
+  return {
+    go: false,
+    bypass: '',
+    why: `ساعتِ تهران ${hour} بازه‌ی امن نیست — به تعویق افتاد`,
+  };
+}
+
+/** ساعتِ تهران. ایران از ۲۰۲۲ ساعتِ تابستانی ندارد، ولی از TZ استفاده می‌کنیم نه افستِ ثابت. */
+export function tehranHour(now = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran', hour: '2-digit', hour12: false,
+  }).format(now));
+}
+
+/* ---------- CLI (همان چیزی که ورک‌فلو صدا می‌زند) ---------- */
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
+  const { appendFileSync } = await import('node:fs');
+  const d = decide({
+    hour: tehranHour(),
+    urgent: process.env.URGENT === 'true',
+    reason: process.env.REASON || '',
+    commitMsg: process.env.COMMIT_MSG || '',
+  });
+  if (d.error) { console.log(`❌ ${d.why}`); process.exit(1); }
+  console.log(`${d.go ? (d.bypass ? '🚨' : '✅') : '⏸'} ${d.why}`);
+  if (!d.go) {
+    console.log('   کرونِ ۰۸:۰۵ تهران خودش mainِ همان لحظه را دیپلوی می‌کند (هیچ کامیتی جا نمی‌ماند).');
+    console.log(`   فوری است؟ Deploy را دستی با urgent=true و یک دلیل اجرا کن، یا ${BYPASS_MARKER} در پیامِ کامیت بگذار.`);
+  }
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `go=${d.go}\nbypass=${d.bypass || ''}\nwhy=${d.why}\n`);
+  }
+}
