@@ -567,5 +567,46 @@ console.log('\n  — ♻️ سه رگرسیونی که خودِ همین PR نز
     'و این گارد **قبل از** هر منطقِ رسیدی است، نه بعدش');
 }
 
+console.log('\n  — ♻️ احیای فاکتورِ لغوشده به منبعِ شناسه وابسته نیست:');
+{
+  /* ناهماهنگیِ خودم، بعد از مرجِ #274 پیدا شد: احیا فقط زیرِ `if (!paymentId)` بود،
+     یعنی فقط وقتی استیت چیزی نداده بود. اگر شناسه **از استیت** می‌آمد و همان فاکتور
+     meanwhile لغو شده بود، احیا رد می‌شد و گاردِ زودهنگام پیامِ «از قبل بررسی شده»
+     می‌داد — که برای یک فاکتورِ canceled نه درست است نه کمک‌کننده. دو مکانیزم که هر دو
+     مالِ خودم بودند، دو حرفِ متفاوت می‌زدند. */
+  const revive = sqlOf('revivePayment');
+  ok(!!revive, 'statement احیا از سورس برداشته شد');
+  if (revive) {
+    for (const cond of ['user_id=?', "status='canceled'", "step='receipt'", 'created_at > unixepoch()-?']) {
+      ok(revive.includes(cond), `شرطِ «${cond}» داخلِ خودِ UPDATE است، نه در جاوااسکریپت`);
+    }
+    const db2 = new Database(':memory:');
+    db2.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'receipt',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT 0);`);
+    const mk = (st, ageSec, uid = 7, step = 'receipt') => Number(db2.prepare(
+      "INSERT INTO payments (user_id, status, step, created_at) VALUES (?,?,?,unixepoch()-?)")
+      .run(uid, st, step, ageSec).lastInsertRowid);
+    const WIN = 12 * 3600;
+    const tryRevive = (id, uid = 7) => db2.prepare(revive).run(id, uid, WIN).changes;
+
+    ok(tryRevive(mk('canceled', 60)) === 1, 'فاکتورِ لغوشده‌ی تازه احیا می‌شود');
+    ok(tryRevive(mk('canceled', WIN + 60)) === 0, 'ولی لغوشده‌ی کهنه (بیرونِ پنجره) نه');
+    ok(tryRevive(mk('approved', 60)) === 0, 'و پرداختِ تأییدشده هرگز احیا نمی‌شود');
+    ok(tryRevive(mk('canceled', 60, 7, 'amount')) === 0, 'و ردیفِ بی‌فاکتور (step=amount) هم نه');
+    ok(tryRevive(mk('canceled', 60, 999)) === 0, 'و فاکتورِ کاربرِ دیگر هرگز (مالکیتِ رکورد)');
+    db2.close();
+  }
+
+  const ph = (() => {
+    const at = SRC.indexOf("bot.on('photo'");
+    return at < 0 ? '' : SRC.slice(at, SRC.indexOf('\n});', at));
+  })();
+  ok(/if \(paymentId && reviveIfFresh\(paymentId\)\) recovered = true;/.test(ph),
+    'شناسه‌ی آمده از **استیت** هم از مسیرِ احیا رد می‌شود');
+  ok((ph.match(/reviveIfFresh\(/g) || []).length >= 2,
+    'و هر دو مسیرِ شناسه از همان یک helper استفاده می‌کنند (نه دو کپیِ منطق)');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} راهِ خروجِ پرداخت: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);

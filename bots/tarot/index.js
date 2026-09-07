@@ -1182,7 +1182,14 @@ const stmts = {
      بازیابیِ عادی است: لغو گاهی عمدی است، ولی کسی که همان چند ساعت رسید می‌فرستد
      واقعاً پول داده. رسید به هر حال به بازبینی می‌رود، پس این احیا خطری نمی‌سازد. */
   canceledReceiptPayment: db.prepare("SELECT * FROM payments WHERE user_id=? AND status='canceled' AND step='receipt' AND created_at > unixepoch()-? ORDER BY id DESC LIMIT 1"),
-  revivePayment: db.prepare("UPDATE payments SET status='pending', updated_at=unixepoch() WHERE id=? AND status='canceled'"),
+  /* احیای فاکتورِ لغوشده‌ی تازه — **همه‌ی شرط‌ها داخلِ خودِ UPDATE**: مالکیتِ رکورد،
+     وضعیت، قدمِ فاکتور، و پنجره‌ی زمانی. یک عبارت، یک تصمیم، بدونِ مسابقه.
+     ⚠️ نسخه‌ی اولِ این فیکس سنِ ردیف را در جاوااسکریپت با `nowSec()` می‌سنجید — تابعی
+     که در این فایل **اصلاً تعریف نشده**. روی یک مسیرِ سرد بود، پس تا رسیدنِ کاربرِ
+     واقعی ساکت می‌ماند؛ دقیقاً همان خانواده‌ی باگی که `check-undefined` برایش ساخته شد
+     (و همان چک هم گرفتش). گذاشتنِ شرط در SQL هم آن تله را حذف می‌کند هم خواندنِ
+     جداگانه را. */
+  revivePayment: db.prepare("UPDATE payments SET status='pending', updated_at=unixepoch() WHERE id=? AND user_id=? AND status='canceled' AND step='receipt' AND created_at > unixepoch()-?"),
   /* ♻️ ردیفی که می‌شود دوباره ادامه‌اش داد: همین کاربر، تازه، هنوز روی قدمِ انتخابِ
    * بسته و دست‌نخورده (`amount=0`). شرطِ `amount=0` اضافه است ولی عمدی: هیچ ردیفی که
    * عددِ پولی رویش نشسته نباید هرگز از این مسیر برگردد. */
@@ -6781,19 +6788,33 @@ bot.on('photo', async (ctx) => {
   // پرداختِ منتظرِ رسید در DB هست → عکس را به همان وصل کن تا پول واقعی در سیاه‌چاله نیفتد.
   let paymentId = (getState(uid) === 'pay_receipt' && s?.paymentId) ? s.paymentId : null;
   let recovered = false;
+
+  /* ♻️ احیای فاکتورِ **لغوشده‌ی تازه** — عمداً یک تابع، و عمداً **مستقل از اینکه شناسه
+   * از کجا آمده**. اگر کاربر رسید می‌فرستد یعنی واقعاً پول داده، پس فاکتور برمی‌گردد؛
+   * وگرنه `approvePayment` بعداً روی وضعیتِ `canceled` بی‌صدا شکست می‌خورد و ادمین فکر
+   * می‌کند تأیید کرده.
+   *
+   * ⚠️ چرا مستقل از منبعِ شناسه (ناهماهنگیِ خودم که بعد از مرجِ #274 پیدا کردم):
+   * نسخه‌ی اول این احیا را فقط زیرِ `if (!paymentId)` داشت، یعنی فقط وقتی که استیت
+   * چیزی نداده بود. ولی اگر شناسه **از استیت** می‌آمد و همان فاکتور meanwhile لغو
+   * شده بود، احیا رد می‌شد و گاردِ زودهنگامِ `processReceipt` پیامِ «این پرداخت از قبل
+   * بررسی شده» می‌داد — که برای یک فاکتورِ `canceled` نه درست است نه کمک‌کننده.
+   * دو مکانیزمی که هر دو مالِ خودم بودند با هم حرفِ متفاوت می‌زدند؛ و همین که یکی از
+   * دو مسیر تصادفاً کار می‌کرد، دلیل نمی‌شود قرارداد دوتکه بماند. */
+  const reviveIfFresh = (pid) => {
+    if (!pid || !stmts.revivePayment.run(pid, uid, CANCELED_RECOVERY_SEC).changes) return false;
+    logErr(`receipt: revived canceled payment #${pid} for ${uid}`);
+    return true;
+  };
+
+  if (paymentId && reviveIfFresh(paymentId)) recovered = true;
   if (!paymentId) {
     const pend = stmts.pendingReceiptPayment.get(uid, RECEIPT_RECOVERY_SEC);
     if (pend) { paymentId = pend.id; recovered = true; }
   }
-  /* لایه‌ی دومِ بازیابی: فاکتورِ **لغوشده‌ی تازه**. اگر کاربر رسید می‌فرستد یعنی واقعاً
-     پول داده، پس فاکتور احیا می‌شود؛ وگرنه `approvePayment` بعداً روی وضعیتِ `canceled`
-     بی‌صدا شکست می‌خورد و ادمین فکر می‌کند تأیید کرده. */
   if (!paymentId) {
     const dead = stmts.canceledReceiptPayment.get(uid, CANCELED_RECOVERY_SEC);
-    if (dead && stmts.revivePayment.run(dead.id).changes) {
-      paymentId = dead.id; recovered = true;
-      logErr(`receipt: revived canceled payment #${dead.id} for ${uid}`);
-    }
+    if (dead && reviveIfFresh(dead.id)) { paymentId = dead.id; recovered = true; }
   }
   /* ⚠️ و اگر باز هم چیزی پیدا نشد، **سکوت ممنوع**. نسخه‌ی قبلی این‌جا `return` خالی
      داشت: کاربری که واریز کرده و رسید فرستاده هیچ جوابی نمی‌گرفت و پولش در سکوت گم
