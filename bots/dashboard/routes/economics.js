@@ -20,13 +20,13 @@
 // پس هر بازه‌ای هزینه‌ی کامل دارد و هیچ استثنا و هیچ هشداری لازم نیست.
 import { instancesOf, withDb, hasTable, scalar, rows, botByKey } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
-import { fmt, esc, rangeOf, rangeSince, RANGES } from '../lib/util.js';
+import { fmt, esc, rangeOf, rangeSince, RANGES, tehranDayStr, nowSec } from '../lib/util.js';
 import { stat, table, cardHead, rangePicker } from '../lib/html.js';
 import { hbars } from '../lib/charts.js';
-import { getSetting } from '../lib/platform.js';
+import { getSetting, setCampaignCost, clearCampaignCost, audit } from '../lib/platform.js';
 import { costPerDiamond } from '../lib/cpa.js';
 import { coinEconomy, collectDaily, COST_KINDS } from './finance.js';
-import { profitFor, lifetimeDays, USD_RATE_KEY, CAMPAIGN_CPA_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { profitFor, lifetimeDays, campaignCostModel, USD_RATE_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 const t = (n) => `${fmt(Math.round(Number(n) || 0))} ت`;
@@ -99,7 +99,7 @@ export function economicsBody(url) {
       هم نیستند و سود ساخته نمی‌شود. بقیه‌ی اعدادِ این صفحه (که دلاری‌اند) سرِ جایشان‌اند.</p>
     <p class="muted">نرخ را در کارتِ بالا وارد کن تا سود هم زنده شود.</p></div>`;
 
-  return `${head}${costInputsCard(bot)}${profit}
+  return `${head}${costInputsCard(bot, url)}${profit}
     ${costBreakdownCard(bot, p, rk)}${modelCard(bot, p, rk)}${diamondCard(bot, p, rk)}`;
 }
 
@@ -172,9 +172,16 @@ export function costBreakdownCard(bot, p, rk) {
       '<span class="muted">از <span class="mono">llm_usage</span>، همان عددی که OpenRouter برمی‌گرداند</span>'),
     ...(tot.preUsd ? [line('🤖 هزینه‌ی مدل — دوره‌ی قبل از ثبت', tot.preUsd, tot.preToman,
       `<span class="muted">سهمِ این بازه از ${usd(p.preUsd)}ِ واردشده‌ی دستی، پخش‌شده روی روزهای همان دوره</span>`)] : []),
+    /* ⚠️ توضیحِ این ردیف عمداً «N × یک نرخ» نیست: نرخ per **روز** است، پس نوشتنِ یک
+       ضربِ ساده همان دروغی می‌شد که این تغییر برای حذفش بود. به‌جایش می‌گوییم چند
+       کاربر با نرخِ **ثبت‌شده‌ی روزِ خودش** حساب شده و چند تا با میانگین. */
     line('📣 هزینه‌ی تبلیغِ کمپین', tot.adUsd, tot.adToman,
       tot.campaignUsers
-        ? `<span class="muted">${fmt(tot.campaignUsers)} کاربرِ کمپین × ${usd(p.campUsd)}</span>`
+        ? `<span class="muted">${fmt(tot.campaignUsers)} کاربرِ کمپین${tot.adExact === tot.campaignUsers
+            ? '، همه با نرخِ ثبت‌شده‌ی روزِ خودشان'
+            : tot.adExact
+              ? `؛ ${fmt(tot.adExact)} با نرخِ روزِ خودشان و ${fmt(tot.campaignUsers - tot.adExact)} با میانگین (${usd(p.campUsd)})`
+              : `، همه با میانگینِ ${usd(p.campUsd)} چون روزهایشان ثبت نشده`}</span>`
         : '<span class="muted">کاربرِ کمپینی در این بازه نبود</span>'),
   ];
 
@@ -274,31 +281,133 @@ export function diamondCard(bot, p, rk) {
    قبلاً وسطِ صفحه‌ی «جذب» بود، ولی هر سه ورودی‌اش ورودیِ محاسبه‌ی اقتصادند و بدونشان
    هیچ عددِ تومانی‌ای در این صفحه ساخته نمی‌شود. پس اول صفحه، جایی که اگر خالی باشد
    بلافاصله دیده شود. اکشن عمداً همان `/acquisition/settings` ماند تا audit نشکند. */
-export function costInputsCard(bot) {
+export function costInputsCard(bot, url = null) {
   const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
-  const campUsd = Number(getSetting(CAMPAIGN_CPA_KEY, '0')) || 0;
   const pre = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
-  const missing = [!rate && 'نرخ دلار', !campUsd && 'هزینه‌ی تبلیغ'].filter(Boolean);
-  return `<div class="card">
+  const cam = campaignCostModel(bot);
+
+  /* 📅 روزِ انتخاب‌شده. پیش‌فرض **امروزِ تهران**، و اگر آن روز ردیفی ندارد فیلد خالی
+     می‌ماند (نه صفر): خالی یعنی «هنوز وارد نکرده‌ام»، صفر یعنی «آن روز تبلیغ نداشتم».
+     این دو معنیِ متفاوت‌اند و یکی‌کردنشان هر روزِ واردنشده را بی‌صدا صفر می‌کند. */
+  const today = tehranDayStr(nowSec());
+  const raw = url?.searchParams.get('cpaDay') || '';
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : today;
+  const dayUsd = cam.rates.has(day) ? cam.rates.get(day) : null;
+  const dayUsers = cam.users.get(day) || 0;
+
+  const missing = [!rate && 'نرخ دلار', !cam.avgUsd && 'هزینه‌ی تبلیغ'].filter(Boolean);
+  const q = new URLSearchParams(url?.searchParams || '');
+  q.delete('cpaDay');
+  const keep = [...q.entries()].map(([k, v]) =>
+    `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('');
+
+  /* تاریخچه‌ی روزهای واردشده — جدیدترین بالا، با تعدادِ کاربر و خرجِ همان روز، چون
+     «نرخ» بدونِ «چند نفر» هیچ نمی‌گوید. */
+  const histRows = [...cam.rates.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([d, u]) => {
+    const n = cam.users.get(d) || 0;
+    return [
+      `<a href="?${new URLSearchParams({ ...Object.fromEntries(q), cpaDay: d })}#cpa">${esc(d)}</a>`,
+      usd(u), fmt(n), usd(u * n),
+      d === day ? '<span class="badge">در حالِ ویرایش</span>' : '',
+    ];
+  });
+
+  return `<div class="card" id="cpa">
     ${cardHead('⚙️ ورودی‌های دستیِ هزینه')}
     ${missing.length ? `<div class="note">⚠️ تا ${esc(missing.join(' و '))} وارد نشود،
       بخشی از اعدادِ این صفحه ساخته نمی‌شود. داشبورد هیچ نرخی از خودش حدس نمی‌زند.</div>` : ''}
+
     <form method="post" action="/acquisition/settings" class="inline">
       <input type="hidden" name="bot" value="${esc(bot)}">
       <label>نرخ دلار به تومان
         <input name="rate" type="number" min="0" value="${rate || ''}" placeholder="مثلاً 225000"></label>
-      <label>هزینه‌ی تبلیغ per کاربرِ کمپین (دلار)
-        <input name="camp" type="number" step="0.00001" min="0" value="${campUsd || ''}" placeholder="مثلاً 0.00756"></label>
       <label>هزینه‌ی مدل قبل از شروعِ ثبت (دلار)
         <input name="pre" type="number" step="0.01" min="0" value="${pre || ''}" placeholder="مثلاً 4.19"></label>
       <button type="submit">ذخیره</button>
     </form>
+
+    <h3 class="ch">📣 هزینه‌ی تبلیغ per کاربرِ کمپین — به تفکیکِ روز</h3>
+    <p class="muted" style="margin:0 0 8px">کمپین‌ها هر روز ران‌اند و نرخشان ثابت نیست،
+      پس هر روز عددِ خودش را می‌گیرد. تاریخ را انتخاب کن، دلارِ همان روز را بنویس و
+      <b>ثبت</b> بزن. تا ثبت نزنی چیزی ذخیره نمی‌شود.</p>
+
+    <form method="get" class="inline" style="margin-bottom:6px">${keep}
+      <label>تاریخ
+        <input name="cpaDay" type="date" value="${esc(day)}" max="${esc(today)}"
+          onchange="this.form.submit()"></label>
+      <noscript><button type="submit">نمایش</button></noscript>
+    </form>
+
+    <form method="post" action="/economics/cpa-day" class="inline">
+      <input type="hidden" name="bot" value="${esc(bot)}">
+      <input type="hidden" name="day" value="${esc(day)}">
+      <label>هزینه per کاربر در <b>${esc(day)}</b> (دلار)
+        <input name="usd" type="number" step="0.00001" min="0" value="${dayUsd ?? ''}"
+          placeholder="${dayUsd === null ? 'هنوز وارد نشده' : ''}"></label>
+      <button type="submit">ثبت</button>
+    </form>
+    <p class="muted" style="margin-top:6px">
+      ${dayUsers
+        ? `در این روز <b>${fmt(dayUsers)}</b> کاربرِ کمپین وارد شده‌اند${dayUsd !== null
+            ? `، پس خرجِ این روز <b>${usd(dayUsd * dayUsers)}</b> است.` : '.'}`
+        : 'در این روز هیچ کاربرِ کمپینی وارد نشده، پس عددش روی هیچ محاسبه‌ای اثر نمی‌گذارد.'}
+      <br>فیلد را <b>خالی</b> بگذار و ثبت بزن تا ردیفِ آن روز پاک شود و دوباره میانگین
+      بگیرد. <b>صفر</b> با خالی فرق دارد: صفر یعنی «آن روز واقعاً تبلیغی نداشتم».</p>
+
+    ${histRows.length ? `<h3 class="ch">روزهای ثبت‌شده</h3>
+    ${table(['روز', 'نرخ per کاربر', 'کاربرِ کمپین', 'خرجِ آن روز', ''], histRows, '')}` : ''}
+
+    <div class="grid" style="margin-top:10px">
+      ${stat('میانگینِ هزینه per کاربرِ کمپین', `<b>${usd(cam.avgUsd)}</b>${rate
+        ? ` <span class="muted">≈ ${fmt(Math.round(cam.avgUsd * rate))} ت</span>` : ''}`)}
+      ${stat('روزهای ثبت‌شده', fmt(cam.enteredDays))}
+      ${stat('کاربرِ پوشش‌داده‌شده', fmt(cam.coveredUsers))}
+      ${stat('خرجِ تبلیغِ ثبت‌شده', usd(cam.spentUsd))}
+    </div>
+    <p class="muted">این میانگین <b>قابلِ ویرایش نیست</b> و خودش ساخته می‌شود:
+      <b>کلِ خرجِ روزهای ثبت‌شده ÷ کلِ کاربرِ همان روزها</b> (وزنی، نه میانگینِ ساده —
+      روزی که ۲۰۰ کاربر آورده نباید هم‌وزنِ روزی باشد که ۲ کاربر آورده). هر روزی که
+      ثبت نکرده باشی، در محاسبات <b>همین میانگین</b> را می‌گیرد.
+      ${cam.usingLegacy ? `<br>⚠️ هنوز هیچ روزی ثبت نشده، پس فعلاً عددِ ثابتِ قدیمی
+        (<b>${usd(cam.legacy)}</b>) برای همه‌ی روزها به‌کار می‌رود. با ثبتِ اولین روز،
+        آن کنار می‌رود و دیگر هیچ‌جا استفاده نمی‌شود.` : ''}</p>
+
     <p class="muted" style="margin-top:8px">
-      ${campUsd && rate ? `الان: هر کاربرِ کمپین <b>${usd(campUsd)}</b> ≈ <b>${fmt(Math.round(campUsd * rate))} تومان</b>. ` : ''}
       هزینه‌ی تبلیغ عمداً <b>دلاری</b> است تا با هزینه‌ی مدل هم‌واحد بماند؛ تومانش خودکار می‌آید.
       <br>«هزینه‌ی قبل از شروعِ ثبت» را از داشبوردِ خودِ OpenRouter بخوان. این عدد روی
       <b>همه‌ی روزهای پیش از شروعِ ثبت</b> پخش می‌شود، پس هر بازه‌ای (از جمله «کل»)
       هزینه‌ی کامل دارد و مفهومِ «شروعِ ثبت» هیچ‌جای اعداد دیده نمی‌شود.
       <br>🔎 <b>اتوماسیون:</b> <span class="mono">ads.telegram.org</span> API عمومی برای خواندنِ هزینه‌ی
       کمپینِ خودت ندارد (فقط داشبوردِ وبی)، پس این ورودی دستی می‌ماند.</p></div>`;
+}
+
+/* ═══ 📣 ثبتِ هزینه‌ی تبلیغِ یک روز ═══
+ *
+ * ⚠️ «خالی» و «صفر» عمداً دو کارِ متفاوت می‌کنند و این هسته‌ی درستیِ محاسبه است:
+ *   خالی → ردیف **پاک** می‌شود، پس آن روز دوباره میانگین می‌گیرد («نمی‌دانم»).
+ *   صفر  → ردیف با مقدارِ ۰ می‌ماند («آن روز واقعاً تبلیغی نداشتم»).
+ * اگر این دو یکی می‌شدند، هر روزِ واردنشده بی‌صدا صفر حساب می‌شد و سود سیستماتیک
+ * خوش‌بینانه می‌شد — همان کلاسِ خطایی که کلِ این بازسازی برای حذفش بود.
+ *
+ * امنیت: `day` با رجکسِ سخت‌گیر اعتبارسنجی می‌شود و بعد به‌عنوان **پارامترِ bound**
+ * به SQL می‌رود (هیچ interpolation ای)، و ربات از فهرستِ رجیستری می‌آید نه از URL. */
+export function cpaDaySet(body) {
+  const bot = String(body.get('bot') || '');
+  if (!botByKey(bot)) throw new Error('ربات نامعتبر');
+  const day = String(body.get('day') || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('تاریخ نامعتبر است');
+  if (day > tehranDayStr(nowSec())) throw new Error('تاریخِ آینده نمی‌شود؛ هزینه‌ی روزی که نیامده وجود ندارد');
+
+  const raw = String(body.get('usd') ?? '').trim();
+  if (raw === '') {
+    clearCampaignCost(bot, day);
+    audit('economics.cpa_day', `${bot}/${day}`, 'cleared');
+    return `ردیفِ ${day} پاک شد؛ آن روز دوباره میانگین می‌گیرد`;
+  }
+  const usdVal = Number(raw);
+  if (!Number.isFinite(usdVal) || usdVal < 0) throw new Error('عدد نامعتبر است');
+  if (usdVal > 1000) throw new Error('عدد غیرمنطقی بزرگ است (سقف: ۱۰۰۰ دلار per کاربر)');
+  setCampaignCost(bot, day, usdVal);
+  audit('economics.cpa_day', `${bot}/${day}`, `usd=${usdVal}`);
+  return `هزینه‌ی ${day} روی ${usdVal} دلار per کاربر ثبت شد`;
 }

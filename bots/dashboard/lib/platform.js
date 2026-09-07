@@ -76,6 +76,22 @@ pdb.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_orphan_bot ON orphan_payments(bot, status);
 
+  /* 📣 هزینه‌ی تبلیغِ **per روز** — ورودیِ دستیِ مالک.
+     چرا روزانه و نه یک عددِ ثابت (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۱۶): کمپین‌ها هر روز
+     ران‌اند و مدام بهینه می‌شوند، پس هزینه‌ی جذبِ هر کاربر روزِ اولِ کمپین با روزِ دهم
+     یکی نیست. یک عددِ ثابت یعنی هزینه‌ی روزهای گران را کم و روزهای ارزان را زیاد
+     نشان بدهیم — و چون هر دو خطا در یک عددِ «میانگین» گم می‌شوند، هیچ‌وقت دیده نمی‌شود.
+     کلیدِ ردیف (bot, day) است چون هر ربات کمپینِ خودش را دارد. ستونِ day رشته‌ی
+     YYYY-MM-DD به **مرزِ روزِ تهران** است، دقیقاً همان کلیدی که سریِ سود با آن
+     ساخته می‌شود؛ هر واحدِ دیگری یعنی ردیف‌ها سرِ نیمه‌شب به روزِ اشتباه بچسبند. */
+  CREATE TABLE IF NOT EXISTS campaign_costs (
+    bot        TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    usd        REAL NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (bot, day)
+  );
+
   CREATE TABLE IF NOT EXISTS events_rollup (
     bot   TEXT    NOT NULL,
     day   TEXT    NOT NULL,
@@ -167,6 +183,30 @@ export const deleteOrphan = (id) => pdb.prepare('DELETE FROM orphan_payments WHE
 /* درآمدِ سرگردانِ یک ربات در یک بازه، گروه‌شده per روزِ تهران.
    ⚠️ خروجی عمداً `Map` از «روز → تومان» است، نه یک عددِ کل: مصرف‌کننده‌اش سریِ روزانه‌ی
    سود است و اگر عددِ کل می‌داد، باید به یک روزِ دلبخواه می‌چسبید. */
+/* ── 📣 هزینه‌ی تبلیغِ روزانه: خواندن، نوشتن، پاک‌کردن ──
+   ⚠️ «پاک‌کردن» عمداً با «صفر» یکی نیست و این تفاوت معنادار است: `usd = 0` یعنی
+   «آن روز تبلیغ نداشتم، پس هزینه‌اش واقعاً صفر بود»، ولی **نبودِ ردیف** یعنی «نمی‌دانم»
+   و آن روز میانگین را می‌گیرد. اگر این دو یکی می‌شدند، هر روزِ واردنشده بی‌صدا صفر
+   حساب می‌شد و سود سیستماتیک خوش‌بینانه می‌شد. */
+export const setCampaignCost = (bot, day, usd) =>
+  pdb.prepare(`INSERT INTO campaign_costs (bot, day, usd, updated_at) VALUES (?,?,?,unixepoch())
+    ON CONFLICT(bot, day) DO UPDATE SET usd=excluded.usd, updated_at=unixepoch()`).run(bot, day, usd).changes;
+
+export const clearCampaignCost = (bot, day) =>
+  pdb.prepare('DELETE FROM campaign_costs WHERE bot=? AND day=?').run(bot, day).changes;
+
+export const getCampaignCost = (bot, day) =>
+  pdb.prepare('SELECT usd FROM campaign_costs WHERE bot=? AND day=?').get(bot, day)?.usd ?? null;
+
+/** همه‌ی روزهای واردشده‌ی یک ربات، به‌صورتِ Map از `YYYY-MM-DD` به دلار. */
+export function campaignCostDays(bot) {
+  const out = new Map();
+  for (const r of pdb.prepare('SELECT day, usd FROM campaign_costs WHERE bot=? ORDER BY day').all(bot)) {
+    out.set(r.day, Number(r.usd) || 0);
+  }
+  return out;
+}
+
 export function orphanRevenueByDay(bot, sinceSec = 0) {
   const q = ORPHAN_REVENUE_STATES.map(() => '?').join(',');
   const out = new Map();

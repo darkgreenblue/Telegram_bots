@@ -120,12 +120,84 @@ console.log('\n▶ ۴) اعتبارِ هدیه هزینه شمرده نمی‌ش
 
 console.log('\n▶ ۵) هزینه‌ی تبلیغ per کاربرِ کمپین، با حذفِ ادمین');
 {
-  const a = profitDaily('tarot', { days: 5, usdToman: RATE, campaignUsdPerUser: 0 });
-  const b = profitDaily('tarot', { days: 5, usdToman: RATE, campaignUsdPerUser: 0.5 });
+  const flat = (u) => ({ rates: new Map(), avgUsd: u, rateFor: () => u });
+  const a = profitDaily('tarot', { days: 5, usdToman: RATE, campaign: flat(0) });
+  const b = profitDaily('tarot', { days: 5, usdToman: RATE, campaign: flat(0.5) });
   // دو کاربرِ کمپینِ غیرادمین در پنجره → $1.00 → ۲۰۰٬۰۰۰ ت
   ok(b.totals.campaignUsers === 2, `کاربرِ کمپینِ شمرده‌شده = ۲ (ادمین حذف شد؛ شد ${b.totals.campaignUsers})`);
   ok(Math.abs(b.totals.adUsd - 1.0) < 1e-9, `هزینه‌ی تبلیغ = $1.00 (شد $${b.totals.adUsd.toFixed(4)})`);
   ok(b.totals.net === a.totals.net - 200_000, 'سود دقیقاً به اندازه‌ی هزینه‌ی تبلیغ کم شد');
+}
+
+/* ══ ۵ب) نرخِ تبلیغ **per روز** ═══════════════════════════════════════════
+ *
+ * خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۶): «کمپین‌ها هر روز ران‌اند و من بعضی روزها
+ * بهینه‌شان می‌کنم، پس هزینه per کاربر یک عددِ ثابت نیست.»
+ *
+ * فیکسچر دو کاربرِ کمپین دارد: یکی روزِ ۱ و یکی روزِ ۳. اگر فقط **یکی** از آن دو روز
+ * نرخِ ثبت‌شده داشته باشد، آن یکی نرخِ خودش را می‌گیرد و دیگری میانگین را — و چون
+ * میانگین این‌جا از همان تک‌روز ساخته می‌شود، هر دو باید به همان نرخ برسند. بعد با
+ * ثبتِ نرخِ **متفاوت** برای روزِ دوم، جمع باید دقیقاً `r1 + r2` شود، نه `2 × میانگین`. */
+console.log('\n▶ ۵ب) نرخِ تبلیغ per روز، نه یک عددِ ثابت');
+{
+  const { setCampaignCost, clearCampaignCost } = await import(`file://${base}/lib/platform.js`);
+  const { campaignCostModel } = await import(`file://${base}/lib/profit.js`);
+  const dayOf = (d) => new Date((at(d) + 12600) * 1000).toISOString().slice(0, 10);
+  const [d1, d3] = [dayOf(1), dayOf(3)];
+
+  // فقط روزِ ۱ ثبت شود → آن روز نرخِ خودش، روزِ ۳ میانگین (که همان است)
+  setCampaignCost('tarot', d1, 2);
+  let m = campaignCostModel('tarot');
+  ok(m.enteredDays === 1, `یک روز ثبت شد (${m.enteredDays})`);
+  ok(Math.abs(m.rateFor(d1) - 2) < 1e-9, 'روزِ ثبت‌شده نرخِ خودش را می‌گیرد');
+  ok(Math.abs(m.rateFor(d3) - 2) < 1e-9, 'روزِ ثبت‌نشده میانگین را می‌گیرد');
+  let pr = profitDaily('tarot', { days: 5, usdToman: RATE, campaign: m });
+  ok(Math.abs(pr.totals.adUsd - 4) < 1e-9, `دو کاربر × $2 = $4 (شد $${pr.totals.adUsd})`);
+  ok(pr.totals.adExact === 1, `فقط یک کاربر نرخِ روزِ خودش را داشت (${pr.totals.adExact})`);
+
+  // حالا روزِ ۳ نرخِ **متفاوت** بگیرد → جمع باید 2 + 10 شود، نه 2 × میانگین
+  setCampaignCost('tarot', d3, 10);
+  m = campaignCostModel('tarot');
+  pr = profitDaily('tarot', { days: 5, usdToman: RATE, campaign: m });
+  /* ⚠️ این ادعا **جمع** را می‌سنجد و عمداً ضعیف است: چون میانگین وزنی است،
+     `avg × Σn = Σ(rate_d × n_d)` یک اتحاد است، پس جمعِ کل حتی اگر همه‌ی روزها
+     میانگین بگیرند هم همین می‌شود. ادعای **تمیزکننده** روی سریِ روزانه است و در
+     `tools/check-cpa-day.mjs` نشسته (آن‌جا فیکسچر کاربرِ نامتقارن per روز دارد).
+     این‌جا فقط می‌گوید جمع درست است و `adExact` روزهای دستی را می‌شمارد. */
+  ok(Math.abs(pr.totals.adUsd - 12) < 1e-9,
+    `هر روز نرخِ خودش: $2 + $10 = $12 (شد $${pr.totals.adUsd})`);
+  ok(pr.totals.adExact === 2, 'هر دو کاربر نرخِ روزِ خودشان را داشتند');
+
+  /* ⚠️ با یک کاربر در هر روز، میانگینِ **وزنی** و **ساده** هر دو ۶ می‌شوند، پس این
+     فیکسچر به‌تنهایی هیچ‌کدام را رد نمی‌کند — و ادعایی که نتواند غلط را رد کند، چیزی
+     ثابت نمی‌کند. پس یک کاربرِ کمپینِ موقت به روزِ ارزان اضافه می‌کنیم تا دو تعریف از
+     هم جدا شوند: وزنی = (2×2 + 10×1) ÷ 3 = ۴٫۶۶۷ ولی ساده = (2 + 10) ÷ 2 = ۶. */
+  /* اتصالِ فیکسچر بعد از ساختِ دیتا بسته شده (تا داشبورد readonly بخواند)، پس برای
+     این دستکاریِ موقت یک اتصالِ کوتاهِ خودمان باز می‌کنیم و بلافاصله می‌بندیم. */
+  const tmp = new Database(file);
+  tmp.prepare('INSERT INTO users(telegram_id,name,first_source,balance,created_at,last_seen) VALUES(?,?,?,?,?,?)')
+    .run(901, 'w', 'campaign:AB', 0, at(1), at(0));
+  tmp.close();
+  m = campaignCostModel('tarot');
+  ok(m.coveredUsers === 3, `سه کاربرِ کمپین پوشش داده شدند (${m.coveredUsers})`);
+  ok(Math.abs(m.avgUsd - 14 / 3) < 1e-9,
+    `میانگینِ **وزنی** = $${(14 / 3).toFixed(4)} (شد $${m.avgUsd.toFixed(4)})`);
+  ok(Math.abs(m.avgUsd - 6) > 1e-6, 'و عمداً با میانگینِ سادهٔ $6 برابر **نیست**');
+  const tmp2 = new Database(file);
+  tmp2.prepare('DELETE FROM users WHERE telegram_id=901').run();
+  tmp2.close();
+  m = campaignCostModel('tarot');
+  ok(Math.abs(m.avgUsd - 6) < 1e-9, 'با برداشتنِ کاربرِ موقت، میانگین به $6 برمی‌گردد');
+
+  // ⚠️ «خالی» ≠ «صفر»: پاک‌کردن باید روز را به میانگین برگرداند، نه صفرش کند
+  clearCampaignCost('tarot', d3);
+  m = campaignCostModel('tarot');
+  ok(m.enteredDays === 1, 'پاک‌کردن ردیف را حذف کرد');
+  ok(Math.abs(m.rateFor(d3) - 2) < 1e-9, 'و آن روز دوباره میانگین می‌گیرد، نه صفر');
+  setCampaignCost('tarot', d3, 0);
+  m = campaignCostModel('tarot');
+  ok(Math.abs(m.rateFor(d3) - 0) < 1e-9, 'ولی صفرِ صریح واقعاً صفر می‌ماند');
+  clearCampaignCost('tarot', d1); clearCampaignCost('tarot', d3);
 }
 
 console.log('\n▶ ۶) بدونِ نرخِ دلار، هیچ عددِ تومانی ساخته نمی‌شود');
@@ -173,7 +245,7 @@ console.log('\n▶ ۹) نمای کلی و صفحه‌ی اقتصاد ساختا�
   const life = profitFor('tarot', 'all');
   const direct = profitDaily('tarot', {
     days: lifetimeDays('tarot'), usdToman: life.rate,
-    campaignUsdPerUser: life.campUsd, preTrackUsd: life.preUsd,
+    campaign: life.campaign, preTrackUsd: life.preUsd,
   });
   ok(life.totals.net === direct.totals.net,
     `profitFor('all') = محاسبه‌ی مستقیمِ کل عمر (${life.totals.net})`);
