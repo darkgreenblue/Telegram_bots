@@ -90,11 +90,12 @@ export function dateLabel(loc, iso) {
   }).formatToParts(d);
   const g = (t) => parts.find((x) => x.type === t)?.value ?? '';
   if (loc === 'fa') return `${g('weekday')} ${g('day')} ${g('month')} ${g('year')}`;
-  // روسی/پرتغالی/اسپانیایی: ترتیبِ متعارفِ خودشان، با حرفِ بزرگ در ابتدای روزِ هفته
-  const wd = g('weekday');
-  const head = wd.charAt(0).toLocaleUpperCase(DATE_LOCALE[loc]) + wd.slice(1);
-  if (loc === 'ru') return `${head}, ${g('day')} ${g('month')} ${g('year')}`;
-  return `${head}, ${g('day')} de ${g('month')} de ${g('year')}`;
+  // ⚠️ روزِ هفته و نامِ ماه در هر سه زبان با حرفِ **کوچک** نوشته می‌شوند. بزرگ‌نویسیِ
+  // «Сентября» یا «Setembro» فوراً بوی ترجمه‌ی ماشینی می‌دهد و اولین چیزی است که
+  // خواننده‌ی بومی می‌بیند. (Intl خودش گاهی بزرگ می‌دهد، پس صریح کوچک می‌کنیم.)
+  const low = (x) => x.toLocaleLowerCase(DATE_LOCALE[loc]);
+  if (loc === 'ru') return `${low(g('weekday'))}, ${g('day')} ${low(g('month'))} ${g('year')}`;
+  return `${low(g('weekday'))}, ${g('day')} de ${low(g('month'))} de ${g('year')}`;
 }
 
 /** هشتگِ ماه/برج. تلگرام در هشتگ حرفِ یونیکد را قبول می‌کند، ولی نویسه‌های ترکیبی و
