@@ -339,6 +339,7 @@ export default {
     // el botón del tema no lleva precio: el precio depende del tamaño, que todavía no se eligió
     topic: (t, name) => `${t.emoji} ${name || t.fa}`,
     // botón del tamaño: aquí se define el precio, por eso ➖ y el monto del cobro
+    startSize: (size, price, cur) => `Empezar lectura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
     topicSize: (size, price, cur) => `${cardsN(size)} (➖${moneyTight(price, cur)})`,
     allSpreadsV2: '🗂 Todas las lecturas',
     /* 🎲 carta de la suerte: diamantes gratis una vez al día.
@@ -695,6 +696,13 @@ export default {
     // de tarotista y no todo el mundo sabe qué es. Siempre «lectura» o «las cartas».
     catalogV3: '¿Qué lectura eliges? 🔮',
     allTopics: 'Elige una de las lecturas 🔮',
+    // 🎯 Pantalla de tamaño en el onboarding: una sola opción (v3.71.0).
+    // ⚠️ La segunda línea es una afirmación («alcanza»). index.js solo arma este
+    // texto cuando el saldo realmente alcanza; si no, va la pantalla normal.
+    pickSizeOnboarding: (balance, cur, size) =>
+      `🔮 ¡Para empezar, quiero mostrarte mi fuerza con una lectura de ${cardsN(size)}!\n\n` +
+      `✅ ¡Quédate tranquilo, tu saldo alcanza para una lectura de ${cardsN(size)}!\n\n` +
+      purseQuote(balance, cur),
     pickSize: (balance, cur) =>
       '🔮 ¿Lectura de cuántas cartas?\n\n' +
       // ⚠️ Las flechas eran ◀️◀️, herencia del RTL del persa: en una lengua de izquierda

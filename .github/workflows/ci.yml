@@ -507,6 +507,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-referral-bonus.mjs
 
+      # هدیه‌ی خوش‌آمدِ ۳ الماسی و صفحه‌ی تک‌گزینه‌ایِ آنبوردینگ، که به هم وابسته‌اند:
+      # هدیه باید دقیقاً کفافِ همان یک گزینه را بدهد، وگرنه اولین برخوردِ کاربرِ تازه با
+      # محصول یا بن‌بست می‌شود یا متنِ صفحه («موجودیت کافیه») به او دروغ می‌گوید.
+      - name: Onboarding first spread check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-onboard-first.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check
