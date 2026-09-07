@@ -161,7 +161,10 @@ ok(/rewarded\s*=\s*0/.test(claim), 'ادعای پاداش اتمیک است (ش�
 {
   const i = SRC.indexOf('stmts.setReferralRewarded.run(ref.id)');
   const j = SRC.indexOf('stmts.credit.run(refAmt, ref.referrer_id)');
-  const k = SRC.indexOf('const refAmt = referralBonusFor(ref.referrer_id)');
+  // ⚠️ از v3.69.0 مبلغ از `referralPayoutFor(uid, ref)` می‌آید نه `referralBonusFor(uid)`:
+  // پاداش دیگر فقط تابعِ کاربر نیست، تابعِ **خودِ ردیفِ دعوت** هم هست (grandfathering).
+  // این‌جا فقط ترتیب مهم است؛ درستیِ خودِ مبلغ را `check-referral-bonus.mjs` می‌سنجد.
+  const k = SRC.indexOf('const refAmt = referralPayoutFor(ref.referrer_id, ref)');
   ok(i > -1 && j > -1 && i < j, 'ادعا قبل از واریز است (ضدِ پرداختِ دوباره)');
   ok(k > -1 && k < i, 'مبلغ قبل از ادعا حساب می‌شود');
   ok(SRC.indexOf('countDelivered.get(uid).c === 1') > -1,

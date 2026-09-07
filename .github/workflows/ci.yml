@@ -500,6 +500,13 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-invite-stats.mjs
 
+      # کاهشِ پاداشِ دعوت (۱۰ ⟵ ۵) که **فقط فارسی** است و grandfathering دارد: دعوتی که
+      # پیش از مرزِ دیپلوی ثبت شده باید همان ۱۰ وعده‌داده‌شده را بگیرد. هم استثنای زبانی
+      # سنجیده می‌شود، هم مرزِ `migrations` روی SQLite واقعی، هم عددی که به کاربر می‌رسد.
+      - name: Referral bonus check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-referral-bonus.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check

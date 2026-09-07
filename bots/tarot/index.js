@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.68.0';
+const PRODUCT_VERSION = '3.69.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -605,8 +605,38 @@ const REFERRAL_BONUS   = 10_000;
 // می‌گیرد و پاداشِ اضافه ندارد (تصمیمِ صریحِ مالک).
 const REFERRAL_BONUS_COINS = 3;
 const REFERRAL_BONUS_COINS_V2 = 10;
-const referralBonusFor = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
+// 💎 از ۱۴۰۵/۰۶/۱۷ پاداشِ دعوت در رباتِ **فارسی** ۵ الماس است (تصمیمِ صریحِ مالک).
+// استثنای زبانی است و در جدولِ «استثناهای زبانی» `bots/tarot/CLAUDE.md` ردیف گرفته
+// (بند ۲و/۲ ریشه). زبان‌های استارز دست‌نخورده روی ۱۰ می‌مانند.
+// **رول‌بکِ یک‌خطی:** `REFERRAL_5_LOCALES = []` → رفتار بیت‌به‌بیت همان قبل.
+const REFERRAL_BONUS_COINS_V3 = 5;
+const REFERRAL_5_LOCALES = ['fa'];
+const referral5On = () => REFERRAL_5_LOCALES.includes(LOCALE);
+// مرزِ «دعوتِ قدیم / دعوتِ جدید». عمداً یک تایم‌استمپِ هاردکد **نیست**، بلکه لحظه‌ی
+// اولین بوتِ همین نسخه روی همان دیتابیس است (همان الگوی `KB_V2_EPOCH`) — درسِ ثبت‌شده‌ی
+// v3.25.1: دیپلوی می‌تواند روزها بعد از نوشتنِ کد بیفتد و عددِ هاردکد بی‌صدا غلط شود.
+// پایین، کنارِ جدولِ `migrations` پر می‌شود؛ `let` است تا هیچ TDZ ای در کار نباشد.
+let REFERRAL_5_EPOCH = 0;
+// پاداشِ **قبل از این تغییر**، دست‌نخورده. تنها مصرفش grandfathering است.
+const referralBonusLegacy = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
   : coinsOn(uid) ? REFERRAL_BONUS_COINS : REFERRAL_BONUS);
+// عددی که روی دکمه‌ها و متن‌ها **نشان داده** می‌شود: وعده‌ی دعوت‌های از این به بعد.
+const referralBonusFor = (uid) => (referral5On() && uxV2For(uid))
+  ? REFERRAL_BONUS_COINS_V3 : referralBonusLegacy(uid);
+// عددی که واقعاً **واریز** می‌شود، برای یک ردیفِ دعوتِ مشخص.
+// ⚠️ قاعده: دعوتی که پیش از مرز ثبت شده همان ۱۰ وعده‌داده‌شده را می‌گیرد، حتی اگر
+// دوستش امروز فالش را کامل کند. وعده‌ای که داده‌ایم عقب‌گرد نمی‌کند (بند ۲ج/۵ ریشه:
+// فلوی pending با شرایطِ قبلی باید معتبر بماند). مرز روی `referrals.created_at` است،
+// یعنی لحظه‌ی اقدامِ خودِ دعوت‌کننده، نه لحظه‌ی فالِ دعوت‌شده.
+// ⚠️ و جهتِ fail-safe عمدی است: اگر مرز به هر دلیلی خوانده نشده باشد (`0`) یا ردیف
+// تاریخ نداشته باشد، **وعده‌ی قدیمی** پرداخت می‌شود. بینِ «چند الماسِ اضافه دادیم» و
+// «وعده‌ای که داده بودیم را نداریم»، اولی خطای ارزان‌تری است (بند ۹ ریشه).
+const referralPayoutFor = (uid, ref) => {
+  if (!referral5On()) return referralBonusFor(uid);
+  const created = Number(ref?.created_at) || 0;
+  const isOld = REFERRAL_5_EPOCH <= 0 || created <= 0 || created < REFERRAL_5_EPOCH;
+  return isOld ? referralBonusLegacy(uid) : referralBonusFor(uid);
+};
 // هدیه‌ی خوش‌آمد: ۵ الماس در UX v2 (به‌جای ۳۰٬۰۰۰ تومان که ۳ الماس بود)
 const WELCOME_BONUS_COINS_V2 = 5;
 const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 : WELCOME_BONUS);
@@ -4792,6 +4822,11 @@ const KB_REFRESH_DAYS = 3;
 db.exec("CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)");
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('ux_v2_launch', unixepoch())").run();
 const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_launch'").get()?.done_at || 0;
+// 💎 مرزِ کاهشِ پاداشِ دعوت (۱۰ ⟵ ۵، فقط فارسی). همان الگوی بالا و به همان دلیل: عددِ
+// هاردکد با تأخیرِ دیپلوی بی‌صدا غلط می‌شود، ولی مهرِ اولین بوت همیشه درست است. ردیفِ
+// دعوتِ قدیمی‌تر از این مهر همان ۱۰ وعده‌داده‌شده را می‌گیرد (`referralPayoutFor`).
+db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_5', unixepoch())").run();
+REFERRAL_5_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_5'").get()?.done_at || 0;
 /* ⌨️ تازه‌سازیِ بی‌صدای کیبورد وقتی نسخه‌اش عقب است (بند ۹ب-۲ ریشه).
 
    چطور کار می‌کند: یک پیامِ کوتاهِ **بی‌صدا** با کیبوردِ تازه فرستاده و بلافاصله حذف
@@ -5005,7 +5040,9 @@ async function finishReading(ctx, uid, readingId) {
       // پاداش طبق اقتصادِ **دعوت‌کننده** حساب می‌شود، چون تنها اوست که چیزی می‌گیرد.
       // محاسبه قبل از ادعا آمد (فقط خواندنِ پرچم است و هیچ await ای وسط نیست)، ولی
       // ترتیبِ حیاتی دست‌نخورده ماند: **ادعا قبل از واریز**، ضدِ پرداختِ دوباره.
-      const refAmt = referralBonusFor(ref.referrer_id);
+      // ⚠️ اینجا عمداً `referralPayoutFor` است نه `referralBonusFor`: دعوتی که پیش از
+      // مرزِ کاهش ثبت شده باید همان ۱۰ وعده‌داده‌شده را بگیرد، هرچند امروز کامل شده.
+      const refAmt = referralPayoutFor(ref.referrer_id, ref);
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(refAmt, ref.referrer_id);
       track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
