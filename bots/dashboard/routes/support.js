@@ -1,6 +1,6 @@
 // پشتیبانی: سرچ کاربر در همه‌ی ربات‌ها + پروفایل و تایم‌لاین معکوس (طلایی‌ترین صفحه‌ی دیباگ)
 // مرجع هویت همیشه telegram_id است؛ username فقط hint است (ممکن است عوض شده باشد).
-import { instances, instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText, familyOf } from '../lib/bots.js';
+import { instances, instancesOf, getInstance, withDb, withWritableDb, assertColumns, hasTable, rows, userPk, userNameCol, moneyOf, unixOf, toToman, coinOf, creditText, creditNum, moneyText, familyOf, adminActionSupported } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
@@ -224,6 +224,22 @@ function openStateCard(inst, uid) {
     const qFor = (a, id) => queued.some(q => q.action === a && (q.payment_id === id || q.ref_id === id));
 
     const hidden = `<input type="hidden" name="inst" value="${esc(inst.id)}"><input type="hidden" name="uid" value="${uid}">`;
+    /* 🛠 دکمه‌ای که ربات اجرایش نمی‌کند اصلاً رندر نمی‌شود.
+       🐛 چرا (۱۴۰۵/۰۶/۱۵، پیش از مرج): این صفحه شش اکشن صف می‌کرد و **هیچ گاردی**
+       نداشت — نه سرِ رندر، نه سرِ نوشتن. sweepِ voice2text فقط approve/reject را
+       می‌فهمد و بقیه را بی‌قید `markActionDone` می‌زند، پس «شارژ دستی» برای آن ربات
+       یعنی ردیفی که بی‌صدا done می‌شود و کاربر هیچ اعتباری نمی‌گیرد.
+       امروز `assertColumns` تصادفاً جلویش را می‌گیرد (voice2text ستون‌های
+       user_id/amount/ref_id/note را ندارد)، ولی آن یک گاردِ **اتفاقی** است: اولین
+       مهاجرتِ افزایشیِ بی‌ضررِ آینده سبزش می‌کند و سیاه‌چاله برمی‌گردد. پس گارد باید
+       روی خودِ قرارداد بنشیند، نه روی شکلِ جدول. */
+    const btns = (list, extra = '') => {
+      const on = list.filter(([a]) => adminActionSupported(inst.bot, a));
+      return on.length ? `<form method="post" action="/support/action" style="display:inline">${hidden}${extra}`
+        + on.map(([a, label, cls]) =>
+          `<button name="act" value="${a}" type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button>`).join('')
+        + '</form>' : '';
+    };
     const payRows = pays.map(p => [
       `#${p.id}`,
       `${fmt(toToman(inst.bot, p.amount))} ت` +
@@ -234,19 +250,16 @@ function openStateCard(inst, uid) {
       tehranDateTime(p.t),
       qFor('force_approve', p.id) || qFor('reject', p.id) || qFor('approve_accounting', p.id)
         ? '<span class="badge warn">در صف (تا ۱ دقیقه)</span>'
-        : `<form method="post" action="/support/action" style="display:inline">${hidden}
-             <input type="hidden" name="pid" value="${p.id}">
-             <button name="act" value="force_approve" type="submit">✅ تأیید + اعتبار</button>
-             <button name="act" value="approve_accounting" type="submit" class="ghost">🧾 فقط درآمد</button>
-             <button name="act" value="reject" type="submit" class="ghost">❌ رد</button></form>`,
+        : (btns([['force_approve', '✅ تأیید + اعتبار', ''], ['approve_accounting', '🧾 فقط درآمد', 'ghost'],
+          ['reject', '❌ رد', 'ghost']], `<input type="hidden" name="pid" value="${p.id}">`)
+          || '<span class="muted">این ربات اجرا نمی‌کند</span>'),
     ]);
     const readRows = reads.map(r => [
       `#${r.id}`, esc(r.type), `${fmt(r.price)} ت`, tehranDateTime(r.t),
       qFor('unlock_reading', r.id)
         ? '<span class="badge warn">در صف (تا ۱ دقیقه)</span>'
-        : `<form method="post" action="/support/action" style="display:inline">${hidden}
-             <input type="hidden" name="rid" value="${r.id}">
-             <button name="act" value="unlock_reading" type="submit">🔓 پرداختش کن</button></form>`,
+        : (btns([['unlock_reading', '🔓 پرداختش کن', '']], `<input type="hidden" name="rid" value="${r.id}">`)
+          || '<span class="muted">این ربات اجرا نمی‌کند</span>'),
     ]);
 
     return `<div class="card"><h2>🛠 اقدام‌های پشتیبانی</h2>
@@ -266,12 +279,14 @@ function openStateCard(inst, uid) {
       ${table(['شماره', 'نوع', 'قیمت', 'زمان', 'اقدام'], readRows, 'فالِ منتظرِ پرداختی نیست')}
 
       <h3 style="margin-top:14px;font-size:13px">شارژ یا کسرِ دستی</h3>
-      <form method="post" action="/support/action" class="inline">${hidden}
+      ${adminActionSupported(inst.bot, 'credit') || adminActionSupported(inst.bot, 'debit')
+        ? `<form method="post" action="/support/action" class="inline">${hidden}
         <label>${coin ? `تعداد ${coin.name}` : 'مبلغ (تومان)'}<input type="number" name="amount" min="1" max="${coin ? MAX_MANUAL_COINS : MAX_MANUAL}" required style="width:140px"></label>
         <label>یادداشت<input type="text" name="note" maxlength="120" placeholder="دلیل (در دفتر ممیزی می‌ماند)"></label>
-        <button name="act" value="credit" type="submit">➕ شارژ کن</button>
-        <button name="act" value="debit" type="submit" class="ghost">➖ کسر کن</button>
-      </form>
+        ${adminActionSupported(inst.bot, 'credit') ? '<button name="act" value="credit" type="submit">➕ شارژ کن</button>' : ''}
+        ${adminActionSupported(inst.bot, 'debit') ? '<button name="act" value="debit" type="submit" class="ghost">➖ کسر کن</button>' : ''}
+      </form>`
+        : '<p class="muted">sweepِ این ربات اکشنِ شارژ/کسرِ داشبوردی را اجرا نمی‌کند، پس فرمش نمایش داده نمی‌شود.</p>'}
       <p class="muted">${coin
         ? `عدد را به <b>${coin.name}</b> بنویس، نه تومان (این ربات کیفش ${coin.name}ی است). داشبورد خودش به واحدِ داخلی تبدیل می‌کند.`
         : ''} شارژِ دستی به کاربر پیام می‌دهد («مبلغ X توسط پشتیبانی اضافه شد») و اگر فالِ
@@ -288,6 +303,16 @@ export function supportAction(body) {
   if (!uid) throw new Error('کاربر نامعتبر');
   const act = body.get('act') || '';
   if (!SUPPORT_ACTIONS[act]) throw new Error('اقدام نامعتبر');
+  /* ⛔ گاردِ واقعی این‌جاست، نه سرِ رندر: فرمِ POST از هر جایی می‌آید (دکمه‌ی کهنه‌ی یک
+     تبِ باز، یا یک ربات که در فاصله‌ی رندر و ارسال عوض شده). نبودِ این خط یعنی ردیف در
+     صفِ رباتی بنشیند که آن را نمی‌فهمد، sweep بی‌صدا done علامتش بزند، و پیامِ سبزِ
+     «در صف قرار گرفت» به مالک بگوید کار انجام شد در حالی که کاربر هیچ‌وقت اعتبارش را
+     نمی‌گیرد. خطای صریح بی‌نهایت بهتر از موفقیتِ دروغین است (بند ۸ ریشه). */
+  if (!adminActionSupported(inst.bot, act)) {
+    throw new Error(`sweepِ «${inst.bot}» اکشنِ «${SUPPORT_ACTIONS[act]}» را اجرا نمی‌کند، `
+      + 'پس این ردیف بی‌صدا در صف می‌مرد. یا از خودِ ربات انجامش بده، یا اول یک شاخه برایش '
+      + 'در sweep بنویس و نامش را به `adminActions` در رجیستری اضافه کن.');
+  }
   const note = (body.get('note') || '').slice(0, 120);
 
   let msg = '';

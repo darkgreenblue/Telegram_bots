@@ -6157,6 +6157,13 @@ setInterval(async () => {
             await bot.telegram.sendMessage(r.user_id, L.wallet.supportUnlocked, {
               reply_markup: Markup.inlineKeyboard([coveredRow(r.id, r.price, r.user_id)]).reply_markup,
             }).catch(() => {});
+            /* پیامِ مالی هرگز نباید از تایم‌لاین غایب باشد (بند ۲الف ریشه): این پیام از
+               `bot.telegram` می‌رود و میدل‌ورِ جرنی فقط `ctx.*` را رپ می‌کند، پس بدونِ
+               این خط اعتبارِ داده‌شده در بازپخشِ مسیرِ کاربر **نامرئی** می‌ماند —
+               همان چیزی که مالک یک بار بابتش فکر کرد پیامِ شارژ نرفته. سه شاخه‌ی
+               دیگرِ همین sweep از قبل logPush داشتند و فقط این یکی جا افتاده بود. */
+            logPush(db, r.user_id, L.wallet.supportUnlocked,
+              { isAdmin: isAdmin(r.user_id), label: 'بازکردن فال' });
           }
         }
         /* ⚠️ اکشنی که این ربات نمی‌شناسد **بی‌صدا** done نشود. رفتار عمداً عوض نشده

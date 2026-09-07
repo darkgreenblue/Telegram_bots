@@ -46,6 +46,8 @@ console.log('▶ ۱) داشبورد قبل از صف‌کردن، توانِ ر�
 {
   const bots = read('bots/dashboard/lib/bots.js');
   ok(/export const creditQueueSupported/.test(bots), 'پرچمِ creditQueueSupported وجود دارد');
+  ok(/adminActionSupported\(bot, 'credit'\)[\s\S]{0,80}adminActionSupported\(bot, 'credit_paid'\)/.test(bots),
+    'و از همان فهرستِ adminActions مشتق می‌شود (نه یک بولینِ موازی که drift کند)');
 
   const orph = read('bots/dashboard/routes/orphans.js');
   const code = strip(orph);
@@ -64,51 +66,81 @@ console.log('▶ ۱) داشبورد قبل از صف‌کردن، توانِ ر�
     'و دکمه‌ی «به پشتیبانی پیام داد» برای رباتِ ناتوان اصلاً رندر نمی‌شود');
 }
 
-/* ══ ۲) سمتِ ربات: پرچم دروغ نمی‌گوید ════════════════════════════════════ */
-console.log('\n▶ ۲) هر ربات با پرچمِ creditQueue، اکشن‌ها را واقعاً هندل می‌کند');
+/* ══ ۲) سمتِ ربات: فهرست دروغ نمی‌گوید — در **هر دو جهت** ═══════════════════
+   نامِ بی‌شاخه: داشبورد اکشنی را صف می‌کند که sweep نمی‌فهمد ← پول در سکوت گم می‌شود.
+   شاخه‌ی بی‌نام: قابلیتی که ربات دارد، داشبورد بی‌دلیل می‌بندد ← باگ، فقط برعکس.
+   ⚠️ و «نتوانستم بررسی کنم» هرگز سبز نیست: نسخه‌ی اولِ همین چک وقتی
+   `bots/<key>/index.js` را پیدا نمی‌کرد بی‌صدا `continue` می‌زد، پس `tarot-intl` (که
+   کدش در `bots/tarot/` است) اصلاً سنجیده نمی‌شد و «بررسی‌نشده» با «سالم» یکی به نظر
+   می‌رسید — دقیقاً همان خطای «گاردی که با نبودِ قرمز سبز می‌شود» (بند ۶ب-۲ ریشه). */
+console.log('\n▶ ۲) فهرستِ adminActions با شاخه‌های sweep مو‌به‌مو می‌خواند');
 {
   const botsSrc = read('bots/dashboard/lib/bots.js');
-  /* کلیدِ هر ربات و اینکه پرچم را دارد یا نه، از خودِ رجیستری استخراج می‌شود — نه از
-     یک لیستِ هاردکد که با افزودنِ رباتِ بعدی کهنه شود. */
   const entries = [...botsSrc.matchAll(/key:\s*'([a-z0-9-]+)'[\s\S]*?(?=\n  \{|\n\];)/g)];
   ok(entries.length > 0, `ردیف‌های رجیستری خوانده شدند (${entries.length})`);
 
-  const flagged = entries.filter((m) => /creditQueue:\s*true/.test(m[0])).map((m) => m[1]);
-  ok(flagged.length > 0, `ربات‌های دارای پرچم: ${flagged.join(', ') || 'هیچ'}`);
+  /* مسیرِ سورس از خودِ رجیستری مشتق می‌شود (`dataDir: '../tarot/data'` → `bots/tarot`)
+     نه از کلید، چون چند ردیفِ رجیستری می‌توانند یک کدبیس داشته باشند (tarot و
+     tarot-intl همین‌اند: یک `index.js`، چند دیتابیس). */
+  const entryFile = (block, key) => {
+    const dd = (block.match(/dataDir:\s*'\.\.\/([a-z0-9-]+)\/data'/) || [])[1];
+    return `bots/${dd || key}/index.js`;
+  };
 
-  for (const key of flagged) {
-    const entry = `bots/${key}/index.js`;
-    if (!existsSync(path.resolve(entry))) {
-      ok(false, `${key}: فایلِ ورودی پیدا نشد (${entry})`);
+  for (const m of entries) {
+    const [block, key] = [m[0], m[1]];
+    const listed = [...(block.match(/adminActions:\s*\[([\s\S]*?)\]/) || ['', ''])[1]
+      .matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    const file = entryFile(block, key);
+
+    if (!existsSync(path.resolve(file))) {
+      // ربات پایتونی/بدونِ index.js: فقط وقتی مشکل است که ادعای اکشن داشته باشد
+      ok(listed.length === 0,
+        `${key}: سورسِ JS ندارد (${file})، پس نباید adminActions اعلام کند`);
       continue;
     }
-    const src = strip(read(entry));
-    for (const act of CREDIT_ACTIONS) {
-      ok(new RegExp(`action === '${act}'`).test(src),
-        `${key} اکشنِ «${act}» را در سورسش هندل می‌کند`);
+    const src = strip(read(file));
+    // هر `act.action === 'x'` که در sweep واقعاً هندل می‌شود
+    const handled = [...src.matchAll(/act\.action === '([a-z_]+)'/g)].map((x) => x[1]);
+    const uniq = [...new Set(handled)];
+
+    for (const a of listed) {
+      ok(uniq.includes(a), `${key}: «${a}» اعلام شده و در sweep هم هندل می‌شود`);
     }
+    for (const a of uniq) {
+      ok(listed.includes(a),
+        `${key}: «${a}» در sweep هندل می‌شود و در adminActions هم اعلام شده`);
+    }
+    if (!listed.length && !uniq.length) ok(true, `${key}: نه اعلامی دارد نه شاخه‌ای (سازگار)`);
   }
 }
 
-/* ══ ۳) ادعای معکوس: رباتِ بدونِ پرچم واقعاً آن را اجرا نمی‌کند ═══════════
-   اگر رباتی اکشن را هندل کند ولی پرچمش خاموش باشد، گارد یک قابلیتِ موجود را
-   بی‌دلیل می‌بندد. آن هم باگ است، فقط جهتش برعکس. */
-console.log('\n▶ ۳) و رباتِ بدونِ پرچم واقعاً اجرایش نمی‌کند (پرچم بی‌دلیل خاموش نیست)');
+/* ══ ۳) هیچ مسیرِ نوشتنِ داشبورد بی‌گارد نمانده ═══════════════════════════
+   🐛 باگی که این بخش را ساخت: گاردِ نسخه‌ی اول فقط روی `orphans.js` بود، چون بولینِ
+   `creditQueue` فقط دو اکشن را می‌شناخت. ولی `support.js` **شش** اکشن صف می‌کرد و
+   هیچ گاردی نداشت؛ تنها چیزی که voice2text را نجات می‌داد این بود که ستون‌های
+   user_id/amount/ref_id/note را ندارد و `assertColumns` خطا می‌داد — یک گاردِ
+   **اتفاقی** که اولین مهاجرتِ افزایشیِ بعدی خاموشش می‌کرد. */
+console.log('\n▶ ۳) هر مسیرِ enqueue قبل از INSERT گارد دارد');
 {
-  const botsSrc = read('bots/dashboard/lib/bots.js');
-  const entries = [...botsSrc.matchAll(/key:\s*'([a-z0-9-]+)'[\s\S]*?(?=\n  \{|\n\];)/g)];
-  const unflagged = entries.filter((m) => !/creditQueue:\s*true/.test(m[0])).map((m) => m[1]);
-  let checked = 0;
-  for (const key of unflagged) {
-    const entry = `bots/${key}/index.js`;
-    if (!existsSync(path.resolve(entry))) continue;
-    checked++;
-    const src = strip(read(entry));
-    const handles = CREDIT_ACTIONS.filter((a) => new RegExp(`action === '${a}'`).test(src));
-    ok(handles.length === 0,
-      `${key} بدونِ پرچم است و اکشنِ اعتباری هم هندل نمی‌کند${handles.length ? ` (ولی ${handles.join(', ')} را دارد!)` : ''}`);
+  for (const [file, guard] of [
+    ['bots/dashboard/routes/orphans.js', 'creditQueueSupported(r.bot)'],
+    ['bots/dashboard/routes/support.js', 'adminActionSupported(inst.bot, act)'],
+    ['bots/dashboard/routes/finance.js', 'receiptQueueSupported(inst.bot)'],
+  ]) {
+    const code = strip(read(file));
+    const g = code.indexOf(guard);
+    const ins = code.indexOf('INSERT INTO admin_actions');
+    ok(g >= 0, `${file.split('/').pop()}: گاردِ «${guard}» هست`);
+    ok(ins < 0 || (g >= 0 && g < ins),
+      `${file.split('/').pop()}: و **قبل از** INSERT است`);
   }
-  ok(checked > 0, `${checked} رباتِ بدونِ پرچم بررسی شد`);
+  // و دکمه‌ی اکشنِ پشتیبانی برای رباتِ ناتوان اصلاً رندر نمی‌شود
+  const sup = strip(read('bots/dashboard/routes/support.js'));
+  ok(/adminActionSupported\(inst\.bot, a\)/.test(sup),
+    'support: دکمه‌های اقدام از فیلترِ توانِ ربات رد می‌شوند');
+  ok(/adminActionSupported\(inst\.bot, 'credit'\)/.test(sup),
+    'support: فرمِ شارژ/کسرِ دستی هم گارد شده');
 }
 
 /* ══ ۴) لایه‌ی دوم: اکشنِ ناشناخته بی‌صدا دور ریخته نمی‌شود ═══════════════
@@ -134,6 +166,34 @@ console.log('\n▶ ۴) sweep اکشنِ ناشناخته را بی‌صدا دو
        یعنی ادعا چیزی را می‌سنجید که همیشه درست بود. مارکر باید **یکتا** باشد. */
     ok(/ADMIN_ACTION_UNKNOWN/.test(sweep),
       `${key}: اکشنِ ناشناخته مارکرِ صریحِ ADMIN_ACTION_UNKNOWN در لاگ می‌گذارد`);
+  }
+}
+
+/* ══ ۵) هر پیامِ مالیِ sweep در تایم‌لاینِ کاربر می‌نشیند ═════════════════════
+ *
+ * 🐛 گپِ واقعی (۱۴۰۵/۰۶/۱۵): شاخه‌ی `unlock_reading` اعتبار می‌داد و به کاربر پیام
+ * می‌فرستاد، ولی `logPush` نداشت — تنها شاخه‌ای از چهارتا که جا افتاده بود. یعنی
+ * الماسِ داده‌شده در بازپخشِ مسیرِ کاربر **نامرئی** بود.
+ *
+ * چرا این‌جا خطرناک‌تر از جاهای دیگر است: میدل‌ورِ جرنی فقط `ctx.*` را رپ می‌کند، پس
+ * هر پیامی که sweep با `bot.telegram.*` می‌فرستد ساختاراً از قیف بیرون است مگر
+ * صریح ثبت شود. قاعده‌ی بند ۲الف ریشه: «پیامِ مالی هرگز نباید از تایم‌لاین غایب
+ * باشد» — مالک یک بار فکر کرد پیامِ شارژ نرفته، در حالی که رفته بود و فقط ثبت نشده بود.
+ * تا امروز این قاعده هیچ گاردی نداشت، فقط یک ردیف در مستندات؛ و دقیقاً همان‌طور که
+ * انتظار می‌رفت، فراموش شد. */
+console.log('\n▶ ۵) هیچ پیامِ مالیِ sweep بدونِ logPush نیست');
+{
+  const src = strip(read('bots/tarot/index.js'));
+  const at = src.indexOf('pendingActions.all()');
+  const sweep = at < 0 ? '' : src.slice(at, src.indexOf('markActionDone.run(act.id)', at));
+  ok(sweep.length > 500, 'بدنه‌ی sweep پیدا شد');
+  const sends = [...sweep.matchAll(/bot\.telegram\.sendMessage\(/g)].map((m) => m.index);
+  ok(sends.length >= 4, `پیام‌های ctx-freeِ sweep شمرده شدند (${sends.length})`);
+  for (const i of sends) {
+    // متنِ پیام تا ۶۰۰ کاراکتر بعدش (کیبورد/آپشن‌ها) — logPush باید بلافاصله بیاید
+    const near = sweep.slice(i, i + 600);
+    const line = (sweep.slice(0, i).match(/[^\n]*$/) || [''])[0].trim().slice(0, 40);
+    ok(/logPush\(/.test(near), `پیامِ «…${line}» با logPush ثبت می‌شود`);
   }
 }
 

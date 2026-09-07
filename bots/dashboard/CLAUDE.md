@@ -255,9 +255,10 @@ per زبان برای چندزبانه‌ها. ردیفِ تجمیعی می‌م
 | `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
 | `family` | «کدِ محصولش همان کدامست» — قیف و تایم‌لاین از این خوانده می‌شوند نه از کلید | خودِ کلید (tarot-intl: `tarot`) |
 | `receiptQueue` | ربات جدول `admin_actions` + sweep دارد؟ (دکمه‌ی تأیید/رد رسید از داشبورد فعال) | false (voice2text/tarot: true) |
+| `adminActions` | **فهرستِ کاملِ** اکشن‌هایی که sweepِ ربات واقعاً اجرا می‌کند — تک‌منبعِ مجوزِ صف‌کردن. هیچ صفحه‌ای حق ندارد نامی بیرون از این فهرست را enqueue کند | `[]` (voice2text: `approve,reject` · tarot و tarot-intl: هر هشت‌تا) |
 | `coinValue` | دیکودِ فرمتِ ذخیره‌سازیِ اعتبار (۱ الماس = چند واحدِ داخلی). **نرخِ تبدیل نیست** — قیمتِ هر الماس به بسته بستگی دارد | null (tarot: **۱** — بعد از مهاجرتِ الماس، `users.balance` خودِ تعدادِ الماس است) |
 
-helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`, `receiptQueueSupported`, `coinOf`/`creditText`/`creditNum` (اعتبار) و `moneyText` (پولِ واقعی). جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
+helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `toToman` (ریال→تومان برای نمایش یکنواخت)، `revenueWhere`, `abSupported`, `receiptQueueSupported`, `adminActionSupported`/`adminActionsOf`/`creditQueueSupported` (که هر سه از **همان** فهرستِ `adminActions` مشتق می‌شوند، نه از بولین‌های موازی که drift کنند)، `coinOf`/`creditText`/`creditNum` (اعتبار) و `moneyText` (پولِ واقعی). جدول `events` همه‌جا یکسان است (created_at همیشه unix) → کوئری events هرگز پروفایل نمی‌خواهد. راهنمای کامل: بند ۵ CLAUDE.md ریشه.
 
 ## env
 `DASHBOARD_TOKEN`* (توکن ورود — همان Secret)، `PORT` (پیش‌فرض 8787). Secrets مرتبط دیپلوی: `DASHBOARD_TOKEN`*, `CLOUDFLARE_TUNNEL_TOKEN` (اختیاری)، `OWNER_TELEGRAM_ID` (گیرنده‌ی آدرس تونل).
@@ -404,7 +405,8 @@ helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `to
 - **دادن/بخشیدنِ اعتبار یا اشتراک به هر کاربر** (حتی بدون پرداخت) ✅ انجام شد (شارژِ دستی، و از v3.26.2 با واحدِ درستِ همان ربات: الماس برای tarot).
 - **لغو اشتراک / کسر اعتبارِ** یک کاربر.
 - **خواندنِ کاملِ دیتای هر کاربر** ✅ انجام شد (صفحه‌ی پشتیبانی + تب «کاربران» + کوهورتِ پشتِ هر عدد) + **ریست/حذفِ دیتای یک کاربر** از داشبورد (هنوز مانده).
-- الگوی امنِ اجرا: مثل تأیید رسید، از طریق صفِ `admin_actions` هر ربات enqueue شود و **sweepِ خودِ ربات** با منطق واقعی (اعتبار + پیام به کاربر) اجرا کند — داشبورد هرگز مستقیم پول/اشتراک را دست نزند (توکن ربات را ندارد و منطق پول تک‌منبع می‌ماند). یعنی برای هر اکشن جدید: یک نوع `action` در `admin_actions` + یک شاخه در sweep ربات + یک دکمه در داشبورد با `receiptQueue`-مانند.
+- الگوی امنِ اجرا: مثل تأیید رسید، از طریق صفِ `admin_actions` هر ربات enqueue شود و **sweepِ خودِ ربات** با منطق واقعی (اعتبار + پیام به کاربر) اجرا کند — داشبورد هرگز مستقیم پول/اشتراک را دست نزند (توکن ربات را ندارد و منطق پول تک‌منبع می‌ماند). یعنی برای هر اکشن جدید: یک نوع `action` در `admin_actions` + یک شاخه در sweep ربات + **نامش در `adminActions` رجیستری**.
+- ⛔ **هیچ صفحه‌ای بدونِ چکِ `adminActionSupported` در `admin_actions` نمی‌نویسد.** sweepِ هر ربات یک زنجیره‌ی `if/else` است و بعدش **بی‌قید** `markActionDone` می‌زند، پس اکشنی که هندلر ندارد بی‌صدا «انجام‌شده» می‌شود: کاربر پول داده، اعتباری نمی‌گیرد، و ردیفِ داشبورد «حل‌شده» می‌ماند. سه مسیرِ نوشتن و گاردشان: `/finance` → `receiptQueueSupported`، `/orphans` → `creditQueueSupported`، `/support` → `adminActionSupported(inst.bot, act)`. گاردِ رندر (دکمه دیده نشود) لازم است ولی **کافی نیست**؛ گاردِ واقعی سرِ POST است، چون فرم از یک تبِ کهنه هم می‌آید. چکِ CI: `tools/check-credit-queue.mjs` (هر سه مسیر + هر دو جهتِ فهرست + پوششِ `logPush`).
 
 ## تست لوکال
 ```

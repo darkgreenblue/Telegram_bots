@@ -34,6 +34,9 @@ export const BOTS = [
     key: 'voice2text', title: '🎙 ویس به متن', dataDir: '../voice2text/data', pattern: /^bot\.db$/,
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     receiptQueue: true, // جدول admin_actions دارد؛ داشبورد تأیید/رد را enqueue می‌کند
+    // ⚠️ فهرست **کامل** اکشن‌هایی که sweepِ این ربات واقعاً اجرا می‌کند. هرچه این‌جا
+    // نباشد، داشبورد اصلاً صف نمی‌کند. sweepِ voice2text فقط همین دو تا را می‌شناسد.
+    adminActions: ['approve', 'reject'],
   },
   {
     // `envDir` فقط برای تست: چکِ CI مسیرِ دیتابیس را به یک فیکسچرِ موقت می‌برد تا
@@ -42,10 +45,16 @@ export const BOTS = [
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_WALLET,
     abSupport: true, // ربات shared/ab.js را سیم‌کشی کرده و variant() صدا می‌زند
     receiptQueue: true,
-    // ربات اکشنِ اعتباریِ صف را **واقعاً اجرا می‌کند** (`credit` / `credit_paid`).
-    // ⚠️ این با `receiptQueue` یکی نیست: voice2text صفِ اکشن دارد ولی sweepش فقط
-    // approve/reject را می‌شناسد و هر اکشنِ دیگری را **بی‌صدا done** می‌کند.
-    creditQueue: true,
+    /* 🛠 فهرستِ **کامل** اکشن‌هایی که sweepِ این ربات اجرا می‌کند — تک‌منبعِ قرارداد.
+       ⚠️ این با `receiptQueue` یکی نیست: voice2text هم صفِ اکشن دارد ولی sweepش فقط
+       approve/reject را می‌شناسد و هر اکشنِ دیگری را **بی‌صدا done** می‌کند. پس
+       «جدول را دارد» هیچ‌وقت به‌تنهایی مجوزِ صف‌کردن نیست.
+       ⚠️ و عمداً یک **فهرست** است نه یک بولین: بولینِ قبلی (`creditQueue`) فقط دو
+       اکشن از هشت‌تا را می‌پوشاند، پس صفحه‌ی پشتیبانی که شش اکشن صف می‌کند از کنارش
+       رد می‌شد. هر شاخه‌ی تازه در sweep باید همین‌جا هم اضافه شود (چکِ CI هر دو جهت
+       را می‌سنجد: نامِ بی‌شاخه و شاخه‌ی بی‌نام هر دو قرمزند). */
+    adminActions: ['approve', 'force_approve', 'reject', 'approve_accounting',
+      'debit', 'credit', 'credit_paid', 'unlock_reading'],
     /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
      *
      * ⚠️ عددی که در `users.balance` و `payments.original_amount` نشسته یک **فرمتِ
@@ -93,6 +102,13 @@ export const BOTS = [
     userPk: 'telegram_id', userNameCol: 'name', userCreatedKind: 'unix', money: MONEY_STARS,
     abSupport: true,          // همان کدِ ربات است، پس variant() را دارد
     receiptQueue: false,      // ریلِ استارز رسید ندارد؛ تلگرام خودش تأیید می‌کند
+    /* 🛠 ولی sweepِ اقدام‌ها **همان کدِ tarot** است، پس دقیقاً همان هشت اکشن را اجرا
+       می‌کند. تا امروز اعلام نشده بود، یعنی داشبورد قابلیتی را که واقعاً وجود داشت
+       بی‌صدا می‌بست: هیچ اقدامِ پشتیبانی (شارژِ دستی، بازکردنِ فال، تأییدِ دستی) روی
+       کاربرانِ روسی/اسپانیایی/پرتغالی ممکن نبود. پرچمِ بی‌دلیل خاموش هم باگ است، فقط
+       جهتش برعکس (بند ۲الف ریشه) — و چکِ CI همین را گرفت. */
+    adminActions: ['approve', 'force_approve', 'reject', 'approve_accounting',
+      'debit', 'credit', 'credit_paid', 'unlock_reading'],
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
@@ -166,7 +182,12 @@ export const receiptQueueSupported = (bot) => !!botByKey(bot)?.receiptQueue;
  * اعتباری نمی‌گیرد، و ردیفِ پرداختِ سرگردان در داشبورد «حل‌شده» علامت می‌خورد. یعنی
  * پول در سکوت ناپدید می‌شود — دقیقاً همان چیزی که بند ۹ ریشه ممنوع می‌کند.
  * پس داشبورد باید **قبل از** صف‌کردن بداند ربات آن اکشن را می‌فهمد یا نه. */
-export const creditQueueSupported = (bot) => !!botByKey(bot)?.creditQueue;
+export const adminActionsOf = (bot) => botByKey(bot)?.adminActions || [];
+export const adminActionSupported = (bot, act) => adminActionsOf(bot).includes(act);
+/* هر دو اکشنِ اعتباری لازم است: صفحه‌ی پرداختِ سرگردان `credit_paid` می‌فرستد و
+   شارژِ دستیِ پشتیبانی `credit` — رباتی که فقط یکی را بفهمد نصفِ مسیر را می‌بلعد. */
+export const creditQueueSupported = (bot) =>
+  adminActionSupported(bot, 'credit') && adminActionSupported(bot, 'credit_paid');
 /* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی/ریالی است و همه‌چیز دقیقاً مثل قبل
  * می‌ماند — پس voice2text و tabir-khab بیت‌به‌بیت بدونِ تغییر رفتار می‌کنند. */
 export const coinOf = (bot) => {
