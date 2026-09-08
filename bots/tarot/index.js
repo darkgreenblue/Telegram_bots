@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.74.0';
+const PRODUCT_VERSION = '3.75.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -528,23 +528,34 @@ function curOf(uid) {
 // ⚠️ Bot API 9.4 فقط **سه** رنگ دارد: success (سبز)، primary (آبی)،
 // danger (قرمز). **بنفش وجود ندارد** — مالک بنفش خواست و نزدیک‌ترین رنگِ متمایزِ
 // باقی‌مانده آبی است، چون سبز روی «بسته ویژه» نشسته و قرمز معنیِ خطر می‌دهد.
-const PACK_STYLE = { gold: 'success', magic: 'primary' };
+// 🆕 v3.75.0: با اضافه‌شدنِ «افسانه‌ای» و «جاودان»، هر سه رنگِ Bot API مصرف شده‌اند
+// (سبز/آبی از قبل، قرمز حالا رویِ «افسانه‌ای»). برای «جاودان» رنگِ چهارمی وجود ندارد؛
+// تمایزش از راهِ خودِ متنِ دکمه می‌آید (`L.buttons.coinPack` — پیشوندِ 👑)، نه رنگ.
+const PACK_STYLE = { gold: 'success', magic: 'primary', legend: 'danger' };
 /* 📦 بسته‌ها فقط **داده** هستند: کلیدِ پایدار، ایموجی، تعدادِ الماس و قیمت.
  * نامِ نمایشی عمداً این‌جا نیست و در `locales/<lang>.js` نشسته، چون یک متنِ
  * رو-به-کاربر است و هر زبان باید مالِ خودش را داشته باشد (بند ۲و). */
 const COIN_PACKAGES = [
-  // ⚠️ قیمت‌های UX v2 (تصمیمِ مالک ۱۴۰۵/۰۵/۲۷). این یک **کاهشِ قیمتِ واقعی** است، نه
-  // فقط تغییرِ بسته‌بندی: هر الماس از ۱۰٬۰۰۰ تومان به ۳٬۰۰۰ / ۲٬۰۰۰ / ۱٬۵۰۰ می‌رسد، یعنی
-  // فالِ سه‌کارتی از ۳۰٬۰۰۰ به ۹٬۰۰۰ تا ۴٬۵۰۰ تومان. قبل از باز کردن برای کاربرِ واقعی
-  // این عدد باید دوباره دیده شود.
-  { key: 'basic',  emoji: '🥉', coins: 10,  toman: 30_000 },
+  // 💰 قیمت‌های تازه (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۸، v3.75.0). سه بسته‌ی قدیم افزایشِ
+  // قیمتِ واقعی گرفتند: ۳۰k/۶۰k/۱۵۰k ← ۵۰k/۹۰k/۱۹۰k. تعدادِ الماسِ هر بسته دست‌نخورده
+  // ماند (فقط تومانِ گیرنده‌ی همان الماس تغییر کرد)، پس قراردادِ «هدیه‌ی خوش‌آمد = بهای
+  // دقیقِ یک فالِ سه‌کارتی» (بند بالای WELCOME_BONUS_COINS_V2) به این ستون کاری ندارد.
+  { key: 'basic',  emoji: '🥉', coins: 10,  toman: 50_000 },
   // ایموجیِ بسته‌ی وسط 💠 است و عمداً **خودِ 💎 نیست**: در همان دکمه ایموجیِ واحد هم
   // می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود. نامش از «بسته‌ی الماسی» به «بسته ویژه»
   // رفت (تصمیمِ مالک): «الماسی» با واحدِ الماس اشتباه گرفته می‌شد، انگار فقط این یکی
   // بسته الماس می‌دهد. کلیدِ `gold` عوض نشد چون در `payments.package_key` کاربرانِ
   // واقعی نشسته و بند ۲ج/۱ تغییرِ معنیِ داده‌ی موجود را ممنوع کرده.
-  { key: 'gold',   emoji: '💠', coins: 30,  toman: 60_000 },
-  { key: 'magic',  emoji: '🪄', coins: 100, toman: 150_000 },
+  { key: 'gold',   emoji: '💠', coins: 30,  toman: 90_000 },
+  { key: 'magic',  emoji: '🪄', coins: 100, toman: 190_000 },
+  /* 🆕 دو بستهٔ تازه (v3.75.0، خواسته‌ی مالک) — عمداً **فقط ریلِ کارت** (`farsiOnly`):
+   * اقتصادِ استارزِ ru/pt/es (`STAR_LADDERS`/`LADDER_RATIO` در starspay.js) فقط سه
+   * بسته را می‌شناسد و خواسته‌ی مالک هم صراحتاً «قیمتِ فارسی» بود، نه استارز. اگر این
+   * دو بدونِ گارد به رندرِ استارز هم می‌رسیدند، تپِ کاربر روی دکمه با خطای عمومی رد
+   * می‌شد (`starsFor` نال می‌دهد) — یعنی یک دکمه‌ی دیده‌شده‌ی بی‌اثر روی مسیرِ پول.
+   * پس فیلترِ `farsiOnly` هم در رندر (`packMenuScreen`) هم در اکشنِ `pkg:` تکرار شده. */
+  { key: 'legend',  emoji: '🌌', coins: 300,  toman: 490_000,   farsiOnly: true },
+  { key: 'eternal', emoji: '👑', coins: 1000, toman: 1_490_000, farsiOnly: true },
 ];
 const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
 // بسته‌ی یک پرداخت (null = پرداختِ غیربسته‌ای). تنها راهِ رسیدنِ نامِ بسته و تعدادِ الماس
@@ -5501,12 +5512,42 @@ function openPaymentRow(uid) {
   return { id: Number(stmts.insertPayment.run(uid).lastInsertRowid), fresh: true };
 }
 
+/* 🧪 آزمایشِ نمایشِ بسته‌ها (v3.75.0، خواسته‌ی صریحِ مالک): با اضافه‌شدنِ «افسانه‌ای» و
+ * «جاودان» می‌شود پرسید همه‌ی پنج بسته را یک‌جا نشان بدهیم یا سه‌تای اول را با یک
+ * دکمه‌ی کشف. معیارِ موفقیت **درآمدِ مجموع** است، نه نرخ — پس ادعای CTWِ بیزیِ داشبورد
+ * این‌جا کار نمی‌کند و خواندنِ نتیجه یک کوئریِ دستیِ SUM(amount) روی ab_exposures است
+ * (بند ۲ب: مستندِ خودِ ربات همین را می‌گوید).
+ * شاخه‌ی **staged** (سه بسته + دکمه‌ی کشف) همان `control` است، نه یک کلیدِ دلبخواه:
+ * طبقِ `shared/ab.js` تا آزمایش از داشبورد `running` نشود، `peekVariant` همیشه literal
+ * `'control'` می‌دهد، پس اگر شاخه‌ی safe جز `control` نامی داشت، پیش از راه‌اندازیِ
+ * آزمایش همه‌ی کاربران بی‌قید هر پنج بسته را می‌دیدند — برعکسِ «کنترل = رفتارِ قبلی»ِ
+ * بند ۲ج/۴ ریشه. شاخه‌ی دوم (همه‌ی ۵ بسته یک‌جا) باید هنگامِ ساختِ آزمایش از داشبورد
+ * دقیقاً با کلیدِ `full` تعریف شود؛ کدِ پایین رویِ همین یک نام تصمیم می‌گیرد. */
+const PACK_REVEAL_EXPERIMENT = 'pack_reveal_v1';
+const packsRevealed = (uid) => {
+  try { return !!getSession(uid)?.packsRevealed; }
+  catch (e) { logErr('packs revealed:', e.message); return false; }
+};
+
 function packMenuScreen(uid, paymentId) {
   const cur = curOf(uid);
   const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
+  // ریلِ استارز اصلاً بسته‌ی farsiOnly را نمی‌شناسد (STAR_LADDERS دو تای تازه را ندارد).
+  const railPacks = starsRail ? COIN_PACKAGES.filter(p => !p.farsiOnly) : COIN_PACKAGES;
+  // ⚠️ شاخه‌ی `control` است که staged می‌ماند، نه `!== 'staged'`: طبقِ shared/ab.js تا
+  // آزمایش از داشبورد running نشود، `peekVariant` همیشه literal string 'control' می‌دهد
+  // (بند ۲الف ریشه: «کنترل = رفتارِ قبلی»). چک باید رویِ آرمِ **تیمار** (`full`) باشد،
+  // وگرنه پیش از راه‌اندازیِ آزمایش همه‌ی کاربران بی‌قید هر پنج بسته را می‌بینند —
+  // دقیقاً برعکسِ قراردادِ ریپو.
+  const staged = !starsRail && peekVariant(db, uid, PACK_REVEAL_EXPERIMENT) !== 'full' && !packsRevealed(uid);
+  const shown = staged ? railPacks.filter(p => !p.farsiOnly) : railPacks;
+  const rows = shown.map(p => [styled(Markup.button.callback(
+    L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`), PACK_STYLE[p.key])]);
+  // دکمه‌ی کشفِ دو بسته‌ی گران‌تر — عمداً بدونِ ایموجی (خواسته‌ی مالک: جلبِ توجه فقط
+  // رویِ سه بستهٔ اول بماند).
+  if (staged) rows.push([Markup.button.callback(L.buttons.revealMorePacks, `pack_reveal:${paymentId}`)]);
   return [L.wallet.coinPacks(cur), Markup.inlineKeyboard([
-    ...COIN_PACKAGES.map(p => [styled(Markup.button.callback(
-      L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`), PACK_STYLE[p.key])]),
+    ...rows,
     // دکمه‌ی بازگشت **همیشه** هست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست) و به کیف برمی‌گردد.
     [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
   ])];
@@ -5526,7 +5567,10 @@ bot.action('recharge', async (ctx) => {
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const [text, extra] = packMenuScreen(uid, paymentId);
-    const seen = () => { if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} } };
+    const seen = () => {
+      if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
+      else { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
+    };
     // شناسه‌ی این پیام نگه داشته می‌شود تا انصراف بتواند **همین** را برگرداند و
     // پیامِ تازه‌ی تکراری نسازد (باگی که مالک در اسکرین‌شات گرفت).
     try {
@@ -5548,6 +5592,24 @@ bot.action('recharge', async (ctx) => {
     [Markup.button.callback(L.buttons.customAmount, 'rcustom')],
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
   ]));
+});
+
+/* 🔎 دکمه‌ی «مشاهده بسته‌های به‌صرفه‌تر» (فقط شاخه‌ی `staged` می‌سازدش). exposure از
+ * قبل، در لحظه‌ی نمایشِ صفحه‌ی سه‌بسته‌ای، ثبت شده — این‌جا فقط نشانه‌ی «دیده شد» را
+ * برای همین کاربر می‌نشیند و همان صفحه را با ۵ بسته دوباره می‌سازد (ادیت، نه پیامِ تازه).
+ * نشانه در سشن است نه ستونِ DB (بند ۹/۰: چیزی که به هدف نزدیک نمی‌کند ساخته نشود) —
+ * دقیقاً هم‌الگوی `onbFirst` در v3.72.0. */
+bot.action(/^pack_reveal:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (starsRail || !coinsOn(uid)) return;   // این آزمایش اصلاً برای این ریل/دنیا نیست
+  const pid = parseInt(ctx.match[1], 10);
+  const s = getSession(uid);
+  if (s.paymentId !== pid) return;   // دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر — بی‌صدا رد شود
+  patchSession(uid, { packsRevealed: 1 });
+  const [text, extra] = packMenuScreen(uid, pid);
+  try { await ctx.editMessageText(text, extra); }
+  catch (e) { logErr('pack_reveal edit:', e.message); }
 });
 
 async function setRechargeAmount(ctx, uid, amount) {
@@ -5589,6 +5651,14 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (!coinsOn(uid)) return;
   const pack = PACKAGE_BY_KEY[ctx.match[1]];
   if (!pack) return;
+  // ⚠️ دفاعِ لایه‌ی دوم: packMenuScreen این بسته را برای ریلِ استارز اصلاً رندر نمی‌کند
+  // (STAR_LADDERS این دو کلید را نمی‌شناسد)، ولی دکمه‌ی inline نمی‌میرد (بند ۲ج/۶) —
+  // اگر روزی اقتصادِ سکه رویِ استارز هم باز شد، یک دکمه‌ی کهنه نباید کاربر را با خطای
+  // عمومیِ بی‌توضیح تنها بگذارد؛ پس خطا صریح لاگ می‌شود، نه سکوتِ محض.
+  if (pack.farsiOnly && starsRail) {
+    logErr('pkg: farsiOnly pack tapped on stars rail', pack.key);
+    return ctx.reply(L.errors.generic).catch(() => {});
+  }
   /* ♻️ **این تپ خودش را ترمیم می‌کند، نه اینکه بمیرد.**
    *
    * 🐛 رگرسیونی که همین PR نزدیک بود بسازد: `dropUnissuedPay` (گاردِ تازه) وقتی کاربر
@@ -5793,6 +5863,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
       if (m?.message_id) patchSession(uid, { packMsgId: m.message_id });
     }
     if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
+    else { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
     return;
   }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}

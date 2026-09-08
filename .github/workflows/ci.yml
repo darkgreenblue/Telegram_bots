@@ -519,6 +519,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-invoice-lifecycle.mjs
 
+      # آزمایشِ نمایشِ بسته‌ها (pack_reveal_v1): قراردادِ control، گاردِ ریلِ استارز.
+      - name: Pack reveal experiment check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-pack-reveal.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check

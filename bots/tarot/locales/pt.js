@@ -44,7 +44,9 @@ const moneyTight = (toman, cur) =>
  * نردبانِ «مشت → کیسه‌ی کوچک → صندوقچه» عیناً همان `Горсть/Мешочек/Сундук` روسی است.
  * ⚠️ `Saco` عمداً استفاده نشده: در برزیل هم «que saco!» (چه حوصله‌سربر) است و هم
  * عامیانه‌ی بدنی. مصغرِ `Saquinho` کاملاً بی‌خطر است، شکلِ پایه نه. */
-const PACK_NAMES = { basic: 'Punhado', gold: 'Saquinho', magic: 'Baú' };
+// legend/eternal (v3.75.0): inalcançáveis aqui (farsiOnly, só trilho de cartão), mas
+// as chaves existem pela forma única da locale — como todo o bloco invoice acima.
+const PACK_NAMES = { basic: 'Punhado', gold: 'Saquinho', magic: 'Baú', legend: 'Lendário', eternal: 'Eterno' };
 const packName = (p) => PACK_NAMES[p?.key] || '';
 
 /* Como se chama «o lugar onde está o saldo».
@@ -262,6 +264,8 @@ export default {
       + (stars == null ? '' : ` | ⭐ ${fmt(stars)} Stars`),
     rechargeAmount: (a, bonus) => (bonus ? `${starsN(a)} (+${fmt(bonus)} de bônus 🎁)` : starsN(a)),
     customAmount: '✏️ Outro valor',
+    // pack_reveal_v1 (v3.75.0) inalcançável aqui (só trilho de cartão), chave pela forma.
+    revealMorePacks: 'Ver pacotes mais vantajosos',
     discountHave: '🎟️ Tenho um cupom',
     wantDiscount: '🎁 Quero desconto',
     payThisReading: (price) => `💳 Pagar só esta leitura (${starsN(price)})`,

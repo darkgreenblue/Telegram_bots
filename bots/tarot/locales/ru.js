@@ -38,7 +38,9 @@ const moneyTight = (toman, cur) =>
 /* 📦 Отображаемые имена наборов. Ключи (`basic`/`gold`/`magic`) лежат в
  * `payments.package_key` у реальных пользователей и не меняются никогда;
  * переводится только отображаемое имя. */
-const PACK_NAMES = { basic: 'Горсть', gold: 'Мешочек', magic: 'Сундук' };
+// legend/eternal (v3.75.0): недостижимы здесь (farsiOnly, только рельс карт), но
+// ключи существуют ради единой формы locale — как и весь блок invoice выше.
+const PACK_NAMES = { basic: 'Горсть', gold: 'Мешочек', magic: 'Сундук', legend: 'Легендарный', eternal: 'Вечный' };
 const packName = (p) => PACK_NAMES[p?.key] || '';
 
 /* Как зовётся «место, где лежит баланс». Одна русская форма не может стоять во всех
@@ -642,6 +644,8 @@ export default {
     + (stars == null ? '' : ` | ⭐ ${fmt(stars)} Stars`),
   rechargeAmount: (a, bonus) => bonus ? `${fmt(a)} ${plural(a, ['звезда', 'звезды', 'звёзд'])} (+${fmt(bonus)} в подарок 🎁)` : `${fmt(a)} ${plural(a, ['звезда', 'звезды', 'звёзд'])}`,
   customAmount: '✏️ Своя сумма',
+  // pack_reveal_v1 (v3.75.0) недостижим здесь (только рельс карт), ключ ради формы.
+  revealMorePacks: 'Показать более выгодные наборы',
   discountHave: '🎟️ У меня есть промокод',
   wantDiscount: '🎁 Хочу скидку',
   payThisReading: (price) => `💳 Оплатить этот расклад (${fmt(price)} ${plural(price, ['звезда', 'звезды', 'звёзд'])})`,
