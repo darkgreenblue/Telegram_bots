@@ -892,6 +892,17 @@ export default {
       + `Valor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupom «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
+    // ⏱ Ciclo de vida do pedido (v3.74.0) — também inalcançável aqui (só trilho de
+    // transferência, ver acima), mas a chave precisa existir por causa da forma única
+    // da locale (check-locale-shape).
+    invoiceReminder: '⏳ Você ainda tem um pedido de pagamento aberto!\n\nConclua o pagamento ou cancele com o botão abaixo.',
+    invoiceExpired: (amount, cur, purchase = null) =>
+      `⌛️ Este pedido expirou\n\n`
+      + (purchase
+        ? `Compra${packName(purchase.pack) ? ` do pacote *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
+        : '')
+      + `Valor: *${fmt(amount)}*\n\nSe ainda quiser, comece de novo pelo menu de recarga.`,
     firstDiscountOffer: (percent, cap, code) =>
       `🎁 Na primeira compra você ganha ${fmt(percent)}% de desconto.\n\n` +
       `O teto é ${fmt(cap)}.\n\n` +

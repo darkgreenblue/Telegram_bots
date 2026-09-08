@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.73.0';
+const PRODUCT_VERSION = '3.74.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -591,6 +591,21 @@ const PAY_ROW_REUSE_SEC    = 15 * 60;
 const RECEIPT_RECOVERY_SEC = 3 * 24 * 3600;
 // پنجره‌ی کوتاه‌ترِ احیای فاکتورِ لغوشده (لغو گاهی عمدی است؛ رسیدِ همان روز عمدی نیست)
 const CANCELED_RECOVERY_SEC = 12 * 3600;
+/* ⏱ چرخه‌ی عمرِ فاکتور — v3.74.0، خواستهٔ صریحِ مالک («۱ ساعت یادآوری، ۲۴ ساعت انقضا»).
+ * فقط برای ریلِ کارت (`!starsRail`) فعال است: فاکتورِ استارزِ کارت‌به‌کارت اصلاً وجود
+ * ندارد، خودِ تلگرام پرداخت را همان لحظه تأیید/رد می‌کند و بند بالای `starspay.js` صریح
+ * می‌گوید «رسید در این ریل معنا ندارد» — پس چیزی برای یادآوری/ادیت نیست.
+ * ⚠️ این با `sweepDeadPaymentRows`/`RECEIPT_RECOVERY_SEC` (۷۲ ساعت، بالاتر) **جایگزین
+ * نمی‌شود، رویش می‌نشیند**: آن یکی همچنان به‌عنوان بک‌استاپِ عمیق برای هر ردیفی که
+ * به‌هر‌دلیل از این چرخه جا مانده (مثلاً `invoice_issued_at` قدیمی‌تر از این نسخه، که
+ * NULL می‌ماند و اصلاً کاندیدِ این کوئری‌ها نیست) دست‌نخورده باقی می‌ماند. سقفِ ۲۴ ساعتِ
+ * این‌جا همیشه زودتر از بک‌استاپِ ۷۲ ساعته می‌رسد، پس در عمل بک‌استاپ دیگر برای فاکتورهای
+ * تازه اجرا نمی‌شود — ولی حذفش نشد چون هنوز شبکه‌ی ایمنیِ ردیف‌های قدیمی‌تر است.
+ * انقضا وضعیت را به همان `canceled`ِ همیشگی می‌برد، نه یک وضعیتِ تازه: یعنی رسیدی که
+ * دیر برسد از همان مسیرِ اثبات‌شده‌ی `CANCELED_RECOVERY_SEC` (بالا) خودکار احیا می‌شود —
+ * بدونِ این، رسیدِ دیرِ کاربر بعد از انقضا بی‌صدا دور ریخته می‌شد (بند ۹ب/۹ ریشه). */
+const INVOICE_REMINDER_SEC = 3600;      // ۱ ساعت
+const INVOICE_EXPIRE_SEC   = 24 * 3600; // ۲۴ ساعت
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
 // 🛑 هدیه‌ی شارژِ نسلِ تومانی. در دنیای الماس مسیرِ شارژِ آزاد بسته است (فقط بسته)
 // و این آستانه‌ها تومانی‌اند، پس روی عددِ الماسی بی‌معنی می‌شدند. خالی = خاموش.
@@ -953,6 +968,19 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); }
 try { db.prepare('ALTER TABLE users ADD COLUMN pay_distrust INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // آخرین باری که حوزه‌ی تمرکز پرسیده شد (برای بازپرسیِ حداکثر هفته‌ای‌یک‌بار؛ نه هر فال)
 try { db.prepare('ALTER TABLE users ADD COLUMN focus_asked_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* ⏱ چرخه‌ی عمرِ فاکتور (v3.74.0، خواسته‌ی صریحِ مالک): سه ستونِ افزایشی برای یادآوری+
+ * انقضای فاکتورِ کارت‌به‌کارت. **جدا** از `reminded_at` بالا نگه داشته شدند چون آن ستون
+ * یادآوریِ رسیدِ معطل به **ادمین** است و این‌جا یادآوری به **کاربر** — قاطی‌کردنشان یعنی
+ * یک بیت دو معنیِ متفاوت می‌گیرد و دیر یا زود اشتباه خوانده می‌شود.
+ * `invoice_issued_at`: لحظه‌ی واقعیِ صدورِ فاکتور (نه ساختِ ردیف) — همان لحظه‌ای که
+ * `claimAmount` وضعیت را به step='receipt' می‌برد؛ نه `created_at` (که با تپِ اولِ
+ * «خرید الماس» ثبت می‌شود و ممکن است کاربر دقیقه‌ها روی صفحه‌ی بسته‌ها بماند). */
+try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_issued_at INTEGER').run(); } catch {}
+// شناسه‌ی خودِ پیامِ فاکتور (کارت‌به‌کارت) — تا انقضا بتواند **همان** پیام را ادیت کند،
+// نه یک پیامِ تازه بفرستد. عمداً روی ردیف است نه سشن: سشن ممکن است ساعت‌ها بعد از قبل
+// پاک شده باشد، ردیف نه (همان قاعده‌ای که `charge_id` را هم روی ردیف نشاند، نه سشن).
+try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_msg_id INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_reminded_at INTEGER').run(); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -1208,8 +1236,21 @@ const stmts = {
   setPaymentCharge: db.prepare('UPDATE payments SET charge_id=? WHERE id=?'),
   setPaymentAmount:  db.prepare("UPDATE payments SET amount=?, step=?, updated_at=unixepoch() WHERE id=?"),
   // ادعای اتمیک مبلغ: فقط اگر هنوز در مرحله‌ی «amount» است (ضد دابل‌تپِ دو مبلغِ متفاوت — دکمه یا متن)
-  claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
+  // ⚠️ `invoice_issued_at` عمداً در همین UPDATE می‌نشیند: این تنها نقطه‌ی گذار به step='receipt'
+  // است (چه مسیرِ تومانیِ آزاد، چه مسیرِ بسته)، پس هیچ فراخوانِ دومی لازم نیست و هیچ مسیری
+  // نمی‌تواند این را جا بیندازد.
+  claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch(), invoice_issued_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
+  setInvoiceMsgId: db.prepare('UPDATE payments SET invoice_msg_id=? WHERE id=?'),
+  /* ⏱ کاندیدِ یادآوری/انقضا: تعریفِ «فاکتورِ زنده» همان `issuedInvoiceOf` است
+   * (status='pending' AND step='receipt')، به‌علاوه‌ی مهرِ صدور. */
+  invoiceReminderCandidates: db.prepare(
+    "SELECT * FROM payments WHERE status='pending' AND step='receipt' AND invoice_issued_at IS NOT NULL " +
+    "AND invoice_issued_at < unixepoch()-? AND invoice_reminded_at IS NULL ORDER BY id"),
+  setInvoiceReminded: db.prepare('UPDATE payments SET invoice_reminded_at=unixepoch() WHERE id=?'),
+  invoiceExpiryCandidates: db.prepare(
+    "SELECT * FROM payments WHERE status='pending' AND step='receipt' AND invoice_issued_at IS NOT NULL " +
+    "AND invoice_issued_at < unixepoch()-? ORDER BY id"),
 
   /* 🚪 کاربرانی که در فلوی پرداخت پارک شده‌اند و فاکتورشان دیگر معنایی ندارد.
    * فیلترِ استیت عمداً این‌جا نیست و در جاوااسکریپت با خودِ PAY_STATES انجام می‌شود،
@@ -1530,13 +1571,15 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   setState(uid, 'pay_receipt');
   // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
   if (dc) await ctx.reply(L.wallet.discountApplied(price, payAmount, dc.discount_percent), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
     ]).reply_markup,
   });
+  // ⏱ برای چرخه‌ی عمرِ فاکتور (v3.74.0): بدونِ این، انقضا بعداً پیامِ درستی برای ادیت ندارد.
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, paymentId);
 }
 // کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
@@ -5523,7 +5566,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   const payAmount = amount;
 
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5531,6 +5574,7 @@ async function setRechargeAmount(ctx, uid, amount) {
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
     ]).reply_markup,
   });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, s.paymentId);
 }
 
 // خریدِ بسته‌ی الماس: مبلغِ پرداخت = قیمتِ بسته (تومانِ واقعی)، اعتباری که بعد از تأیید داده
@@ -5649,13 +5693,14 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
 
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)],
     ]).reply_markup,
   });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, payId);
 });
 
 bot.action(/^ramt:(\d+)$/, async (ctx) => {
@@ -5967,10 +6012,13 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
+    const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([cardCopyRow()]).reply_markup,
     });
+    // فاکتورِ تخفیف‌خورده جایگزینِ فاکتورِ قبلیِ همان ردیف است، پس شناسه‌ی «فاکتورِ فعلی»
+    // هم باید همین پیام باشد وگرنه انقضا پیامِ کهنه‌ای را ادیت می‌کند که مبلغش دیگر درست نیست.
+    if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, p.id);
   }
 }
 
@@ -6331,6 +6379,73 @@ async function resendReceiptToAdmins(p) {
   }
   stmts.setReminded.run(p.id);
 }
+
+/* ⏱ چرخه‌ی عمرِ فاکتورِ کارت‌به‌کارت (v3.74.0، خواسته‌ی صریحِ مالک). فقط ریلِ کارت
+ * (`!starsRail` — بالای این فایل) دارد؛ توضیحِ کامل کنارِ `INVOICE_REMINDER_SEC`. */
+
+// ۱ ساعت بعد از صدور: یک پیامِ **تازه** با دکمه‌ی همیشگیِ انصراف (بدونِ کالبکِ جدید).
+async function sendInvoiceReminder(p) {
+  try {
+    stmts.setInvoiceReminded.run(p.id);   // قبل از ارسال: شکستِ ارسال هرگز نباید دوباره‌کاری بسازد
+    await bot.telegram.sendMessage(p.user_id, L.wallet.invoiceReminder, {
+      reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)]]).reply_markup,
+    });
+    // پیامِ مالی هرگز نباید از تایم‌لاین غایب باشد (بند ۲الف ریشه) — این از bot.telegram
+    // می‌رود، میدل‌ورِ جرنی رپش نمی‌کند.
+    logPush(db, p.user_id, L.wallet.invoiceReminder, { label: 'یادآوریِ فاکتورِ باز' });
+    track(db, p.user_id, 'invoice_reminded', { payment_id: p.id });
+  } catch (e) { logErr('invoice reminder pay#' + p.id, e.message); }
+}
+
+/* ۲۴ ساعت بعد از صدور: خودِ پیامِ فاکتور ادیت می‌شود (نه پیامِ تازه)، بدونِ هیچ دکمه‌ای،
+ * و ردیف به همان `canceled` همیشگی می‌رود — نه یک وضعیتِ تازه.
+ *
+ * ⚠️ چرا نه یک وضعیتِ تازه: `canceled` تنها وضعیتی است که مسیرهای پایین‌دستی
+ * (رسیدِ رویِ رکوردِ لغوشده، صفحه‌ی «کاربران» داشبورد، …) از قبل می‌شناسند. یک وضعیتِ
+ * تازه (`expired`) یعنی دوباره‌نویسیِ همان مسیرها یا یک سیاه‌چاله‌ی تازه.
+ * ⚠️ ولی صادقانه بگویم: `CANCELED_RECOVERY_SEC` (۱۲ ساعت) رویِ `created_at` سنجیده
+ * می‌شود، و تا لحظه‌ی انقضا خودِ `created_at` قبلاً ~۲۴ ساعت سن دارد — یعنی احیای
+ * **خودکارِ** آن مسیر برای رسیدی که بعد از انقضا برسد عملاً هرگز اجرا نمی‌شود. راهِ
+ * نجاتِ رسیدِ دیررسیده، احیای خودکار نیست: مسیرِ صادقانه‌ی از قبل موجود است
+ * (`L.wallet.receiptNoInvoice` — «سکوت ممنوع»، بند ۷۱۷۵ همین فایل) که کاربر را به
+ * پشتیبانی می‌فرستد و ادمین از همان‌جا (رکورد هنوز در DB است، هیچ‌چیز پاک نشده)
+ * دستی تأیید می‌کند — همان مسیرِ «پرداختِ سرگردان» که پلتفرم برای این کلاسِ مسئله
+ * از قبل دارد. یعنی پول هرگز **بی‌صدا** گم نمی‌شود، ولی این‌جا خودکار هم برنمی‌گردد.
+ *
+ * ⚠️ ادعای اتمیک قبل از هر کاری: بینِ خواندنِ کاندیدها و رسیدنِ به این تابع، کاربر ممکن
+ * است همین حالا رسید فرستاده باشد یا خودش انصراف داده باشد؛ `WHERE status='pending'`
+ * دقیقاً همان گاردی است که `pay_cancel`/`sweepStuckPayFlows` هم دارند. */
+async function expireInvoice(p) {
+  try {
+    if (stmts.setPaymentStatus.run('canceled', p.id).changes === 0) return;
+    track(db, p.user_id, 'invoice_expired', { payment_id: p.id, amount: p.amount });
+    // کاربری که همین لحظه وسطِ همین فاکتور مانده آزاد شود (همان الگوی sweepStuckPayFlows)؛
+    // فاکتورِ دیگری که از این به بعد صادر شود دست‌نخورده می‌ماند.
+    const s = getSession(p.user_id);
+    if (Number(s.paymentId) === p.id) {
+      delete s.paymentId;
+      setSession(p.user_id, s);
+      setState(p.user_id, s.readingId ? 'confirm_pay' : 'idle');
+    }
+    const text = L.wallet.invoiceExpired(p.amount, curOf(p.user_id), invoicePurchaseFor(p.user_id, p.id));
+    if (p.invoice_msg_id) {
+      try { await bot.telegram.editMessageText(p.user_id, p.invoice_msg_id, undefined, text, { parse_mode: 'Markdown' }); return; }
+      catch (e) { logErr('invoice expire edit pay#' + p.id, e.message); }
+    }
+    // پیامِ اصلی گم/غیرِقابلِ‌ادیت بود (خیلی کهنه، کاربر پاکش کرده) — رسیدِ دور ریخته‌شده
+    // بدونِ توضیح بدترین حالت است (بند ۹ب/۹ ریشه)، پس یک پیامِ تازه جایگزینش می‌شود.
+    await bot.telegram.sendMessage(p.user_id, text, { parse_mode: 'Markdown' }).catch(() => {});
+  } catch (e) { logErr('invoice expire pay#' + p.id, e.message); }
+}
+
+function sweepInvoiceLifecycle() {
+  if (starsRail) return;   // فقط ریلِ کارت — فاکتورِ استارز اصلاً این‌جا وارد نمی‌شود
+  try {
+    for (const p of stmts.invoiceReminderCandidates.all(INVOICE_REMINDER_SEC)) sendInvoiceReminder(p);
+    for (const p of stmts.invoiceExpiryCandidates.all(INVOICE_EXPIRE_SEC)) expireInvoice(p);
+  } catch (e) { logErr('invoice lifecycle sweep:', e.message); }
+}
+
 // sweep پرداخت (۶۰ ثانیه): درین صف اکشن داشبورد + یادآوری رسیدهای معطل — همه fail-safe
 setInterval(async () => {
   try {
@@ -6421,6 +6536,7 @@ setInterval(async () => {
     }
     for (const p of stmts.staleReceipts.all()) await resendReceiptToAdmins(p);
     sweepDeadPaymentRows();
+    sweepInvoiceLifecycle();
   } catch (e) { logErr('payment sweep:', e.message); }
 }, 60_000);
 

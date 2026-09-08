@@ -495,7 +495,8 @@ console.log('\n  — 🧾 «فاکتور باز داری» فقط وقتی فا�
     const db = new Database(':memory:');
     db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
       status TEXT NOT NULL DEFAULT 'pending', amount INTEGER NOT NULL DEFAULT 0,
-      step TEXT NOT NULL DEFAULT 'amount', updated_at INTEGER NOT NULL DEFAULT 0);`);
+      step TEXT NOT NULL DEFAULT 'amount', updated_at INTEGER NOT NULL DEFAULT 0,
+      invoice_issued_at INTEGER);`);
     const UID = 6149194760;
     const pid = Number(db.prepare(insert).run(UID).lastInsertRowid);
     const rowOf = (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id);
