@@ -36,7 +36,7 @@ db.exec(`
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, discount_code_id INTEGER,
     discount_toman INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
-    adjust_note TEXT NOT NULL DEFAULT '',
+    adjust_note TEXT NOT NULL DEFAULT '', invoice_issued_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
   CREATE TABLE discount_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, discount_percent INTEGER NOT NULL,
@@ -257,7 +257,7 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'amount',
     amount INTEGER NOT NULL DEFAULT 0, original_amount INTEGER, pkg TEXT,
     discount_code_id INTEGER, discount_toman INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT 0);`);
+    invoice_issued_at INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);`);
   const pid = Number(d2.prepare("INSERT INTO payments (user_id, amount, step) VALUES (7, 0, 'amount')").run().lastInsertRowid);
   d2.prepare(claim).run(30, pid);              // ۳۰ الماس
   d2.prepare(setPkg).run('gold', 60000, pid);  // قیمتِ واقعی

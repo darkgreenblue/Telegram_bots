@@ -196,7 +196,8 @@ console.log('\n▶ ریلِ پولِ بسته: با SQLِ واقعیِ index.js 
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending', step TEXT DEFAULT 'amount', receipt_file_id TEXT, admin_message_id INTEGER,
     discount_code_id INTEGER, original_amount INTEGER, created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch()), adjust_note TEXT DEFAULT '', pkg TEXT NOT NULL DEFAULT '');`);
+    updated_at INTEGER DEFAULT (unixepoch()), adjust_note TEXT DEFAULT '', pkg TEXT NOT NULL DEFAULT '',
+    invoice_issued_at INTEGER, invoice_msg_id INTEGER, invoice_reminded_at INTEGER);`);
   ok(!!S.claimAmount && !!S.setPaymentPackage, 'SQLِ واقعیِ claimAmount و setPaymentPackage از index.js خوانده شد');
   const pack = { key: 'magic', coins: 100, toman: 150_000 };
   const id = Number(db.prepare('INSERT INTO payments (user_id) VALUES (?)').run(7).lastInsertRowid);

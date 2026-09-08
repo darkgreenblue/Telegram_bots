@@ -514,6 +514,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-onboard-first.mjs
 
+      # چرخه‌ی عمرِ فاکتورِ کارت‌به‌کارت: یادآوریِ ۱ساعته + انقضای ۲۴ساعته، فقط ریلِ کارت.
+      - name: Invoice lifecycle check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-invoice-lifecycle.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check

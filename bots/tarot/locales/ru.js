@@ -894,6 +894,16 @@ export default {
     + `Сумма: *${fmt(amount)}*\n\nПеревод на:\n\`${card}\`\n${owner}\n\nПосле оплаты пришли сюда фото чека 📸`,
   invoiceDiscounted: (orig, amount, code) =>
     `🎟️ Код «${code}» применён: ${fmt(orig)} ← *${fmt(amount)}*`,
+  // ⏱ Жизненный цикл счёта (v3.74.0) — тоже недостижим здесь (только рельс карт, см.
+  // выше), но ключ должен существовать ради единой формы locale (check-locale-shape).
+  invoiceReminder: '⏳ У тебя всё ещё открытый счёт!\n\nЗаверши оплату или отмени кнопкой ниже.',
+  invoiceExpired: (amount, cur, purchase = null) =>
+    `⌛️ Этот счёт истёк\n\n`
+    + (purchase
+      ? `Покупка${packName(purchase.pack) ? ` набора *${packName(purchase.pack)}*` : ''}: `
+        + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
+      : '')
+    + `Сумма: *${fmt(amount)}*\n\nЕсли всё ещё хочешь, начни заново из меню пополнения.`,
   firstDiscountOffer: (percent, cap, code) =>
     `🎁 На первое пополнение дарим скидку ${fmt(percent)}%.\n\n` +
     `Максимум ${fmt(cap)}.\n\n` +
