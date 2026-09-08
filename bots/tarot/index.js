@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.72.0';
+const PRODUCT_VERSION = '3.73.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -721,6 +721,16 @@ const PACE_PICK_LAST = 1000;
  * ⚠️ ثابتِ جدا، نه پایین‌آوردنِ `PACE_M` — همان استدلالِ v3.55.0: آن یکی در ده‌ها
  * نقطه‌ی دیگر است و عوض‌کردنش ریتمِ کلِ ربات را بی‌صدا جابه‌جا می‌کند. */
 const PACE_ONBOARD_MENU = 1000;
+/* ⏱ مکثِ بینِ **پیامِ اولِ کاربرِ جدید** («به ربات فال تاروت خوش اومدی») و درخواستِ
+ * عضویت (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۸: «دیلیِ عمدی که داره کمه، ۳ ثانیه اضافه بشه»).
+ * قبلاً `PACE_S` بود یعنی ۱٫۲ ثانیه؛ حالا همان به‌علاوه‌ی ۳ ثانیه.
+ * ⚠️ ثابتِ جدا، نه بالا بردنِ `PACE_S` — همان استدلالِ v3.55.0: آن یکی در ده‌ها
+ * نقطه‌ی دیگر است و عوض‌کردنش ریتمِ کلِ ربات را بی‌صدا جابه‌جا می‌کند.
+ * ⚠️ و چرا یک `sendChatAction` کافی است: نشانگرِ تایپِ تلگرام ~۵ ثانیه زنده می‌ماند،
+ * پس ۴٫۲ ثانیه کاملاً پوشیده است. اگر روزی این عدد از ۵۰۰۰ رد شد، باید نشانگر
+ * وسطِ مکث دوباره فرستاده شود وگرنه دمِ مکث **بی‌نشانه** می‌شود و تأخیر خوانده
+ * می‌شود، نه انتظار (بند v3.53.0). همین محدودیت روی `PACE_WELCOME` هم هست. */
+const PACE_GATE_INTRO = PACE_S + 3000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
@@ -2504,7 +2514,7 @@ async function showGate(ctx, uid) {
   setState(uid, 'gate_join');
   setSession(uid, null); // چیزی از فلوی قبلی نباید وارد آنبوردینگ شود
   await ctx.reply(L.onboarding.gateIntro(uxV2For(uid)), dropKeyboard(uid));
-  await typing(ctx, PACE_S);
+  await typing(ctx, PACE_GATE_INTRO);
   await ctx.reply(L.onboarding.gateJoin(welcomeBonusFor(uid), curOf(uid), uxV2For(uid)), gateKeyboard());
 }
 
