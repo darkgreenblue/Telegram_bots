@@ -581,51 +581,55 @@ const packOf = (p) => (p && p.pkg ? PACKAGE_BY_KEY[p.pkg] || null : null);
 
 /* ⭐ تبدیلِ تومان به استارز — فقط برای سوییچِ فارسی (بالا).
  *
- * فرمول: ۵۰ استارز ≈ $۰.۷۵ (نرخِ رسمیِ تلگرام) → هر استارز ≈ $۰.۰۱۵. با نرخِ زنده‌ی
- * دلار به تومان، مبلغِ تومانی تقسیم بر (نرخِ دلار × $۰.۰۱۵) استارزِ برابری می‌دهد.
- * ⚠️ **مارک‌آپِ عمدی** (خواسته‌ی مالک: کارت‌به‌کارت نباید بی‌دلیل به‌صرفه‌تر دیده شود):
- * نرخِ مؤثر با تقسیم بر `STARS_MARKUP` کاهش می‌یابد، یعنی به همان تومان استارزِ **بیشتری**
- * لازم است — کاربر چیزی گم نمی‌کند (واریزِ واقعی هنوز طبقِ Bot API محاسبه می‌شود)، فقط
- * انتخابِ کارت را واضح‌تر جذاب نگه می‌دارد. */
-const STARS_PER_USD = 50 / 0.75;
-const STARS_MARKUP = 1.2;
-// ⚠️ منبعِ نرخ: بازارِ آزادِ ایران (نه نرخِ رسمی/بانکِ مرکزی) چون قیمتِ واقعیِ کاربر
-// همین است. **صادقانه:** دقتِ کانترکتِ API این سرویس از محیطِ توسعه تأیید نشد (پراکسیِ
-// این محیط دامنه‌های ایرانی را می‌بندد) — کلید را ست کن و بعد از اولین دیپلوی از
-// `Ops logs app=tarot` مطمئن شو fetch واقعاً جواب می‌دهد؛ تا آن زمان نرخِ ثابتِ زیر
-// جایگزینِ امن است و هیچ‌وقت فاکتورِ اشتباه نمی‌سازد.
-const FX_API_KEY = process.env.NAVASAN_API_KEY || '';
-const FX_FALLBACK_TOMAN_PER_USD = Number(process.env.USD_TOMAN_RATE) || 220_000;
+ * ثابتِ تکی: هر استار = $۰.۰۱۸ (دلار/تتر، فرقی ندارد چون تتر به دلار قفل است).
+ * محاسبه یک‌مرحله‌ای است، بدونِ نرخِ رسمی/مارک‌آپِ جداگانه.
+ *
+ * منبعِ نرخ: قیمتِ لحظه‌ایِ تتر روی نوبیتکس (`market/stats`, `srcCurrency=usdt,
+ * dstCurrency=rls`) — API عمومی و بدونِ نیاز به کلید (سقفِ اعلام‌شده‌ی ۲۰
+ * ریکوئست/دقیقه؛ با کشِ ۶ساعته‌ی زیر عملاً هرگز نزدیکش نمی‌شویم، شاید چند ده‌بار
+ * در **روز** نه در دقیقه). ⚠️ **صادقانه (بند ۹/۰الف ریشه):** شکلِ دقیقِ پاسخ از
+ * این محیطِ توسعه تأیید نشد — کلِ دامنه‌ی nobitex.ir را پراکسیِ این محیط با
+ * policy denial رد می‌کند (نه فقط timeout؛ با curlِ مستقیم هم `403 connect_rejected`
+ * گرفتم). پارسِ زیر عمداً مقاوم است (چند شکلِ محتملِ کلید را امتحان می‌کند) و کف/سقف
+ * هر پاسخِ بدشکل را بی‌صدا رد می‌کند؛ fallbackِ ثابت همیشه امن است. بعد از اولین
+ * دیپلوی از `Ops logs app=tarot` مطمئن شو fetch واقعاً جواب می‌گیرد. */
+const USD_PER_STAR = 0.018;
+const NOBITEX_STATS_URL = 'https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls';
+const FX_FALLBACK_TOMAN_PER_USDT = Number(process.env.USDT_TOMAN_RATE) || 220_000;
 // کف/سقفِ معقول برای رد کردنِ پاسخِ بدشکل/خراب بدونِ اینکه فاکتور را با یک عددِ
 // مهمل بسازد — همیشه ایمن‌تر از fallback است تا اینکه یک عددِ باطل را قبول کنیم.
 const FX_SANITY_MIN = 50_000, FX_SANITY_MAX = 3_000_000;
 const FX_CACHE_MS = 6 * 3600 * 1000; // ۶ ساعت — نرخِ بازار آن‌قدر سریع عوض نمی‌شود
 let fxCache = { rate: 0, at: 0 };
-async function fetchLiveUsdToman() {
-  if (!FX_API_KEY) return 0;
+async function fetchLiveUsdtToman() {
   try {
-    const res = await fetch(`https://api.navasan.tech/latest/?api_key=${encodeURIComponent(FX_API_KEY)}&item=usd_sell`,
-      { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(NOBITEX_STATS_URL, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) throw new Error(`http ${res.status}`);
     const data = await res.json();
-    const raw = Number(data?.usd_sell?.value ?? data?.usd_sell);
-    if (!Number.isFinite(raw) || raw < FX_SANITY_MIN || raw > FX_SANITY_MAX) {
-      throw new Error(`out of sanity range: ${raw}`);
+    const stats = data?.stats;
+    const stat = stats?.['usdt-rls'] || stats?.['usdtrls']
+      || (stats && typeof stats === 'object'
+        ? Object.entries(stats).find(([k]) => /usdt/i.test(k))?.[1] : null);
+    const rial = Number(stat?.latest ?? stat?.last);
+    if (!Number.isFinite(rial) || rial <= 0) throw new Error(`no usable price: ${rial}`);
+    const toman = rial / 10; // نوبیتکس به ریال می‌دهد، ۱ تومان = ۱۰ ریال
+    if (toman < FX_SANITY_MIN || toman > FX_SANITY_MAX) {
+      throw new Error(`out of sanity range: ${toman}`);
     }
-    return raw;
+    return toman;
   } catch (e) { logErr('fx fetch:', e.message); return 0; }
 }
-async function usdTomanRate() {
+async function usdtTomanRate() {
   const now = Date.now();
   if (fxCache.rate && now - fxCache.at < FX_CACHE_MS) return fxCache.rate;
-  const live = await fetchLiveUsdToman();
+  const live = await fetchLiveUsdtToman();
   if (live > 0) { fxCache = { rate: live, at: now }; return live; }
-  return fxCache.rate || FX_FALLBACK_TOMAN_PER_USD;
+  return fxCache.rate || FX_FALLBACK_TOMAN_PER_USDT;
 }
-/** تومان ⟶ استارز، گردِ بالا. `usdToman` را از پیش با `usdTomanRate()` بگیر (async است). */
-function starsForToman(amountToman, usdToman) {
-  const tomanPerStarEffective = (usdToman / STARS_PER_USD) / STARS_MARKUP;
-  return Math.max(1, Math.ceil(amountToman / tomanPerStarEffective));
+/** تومان ⟶ استارز، گردِ بالا. `usdtToman` را از پیش با `usdtTomanRate()` بگیر (async است). */
+function starsForToman(amountToman, usdtToman) {
+  const tomanPerStar = usdtToman * USD_PER_STAR;
+  return Math.max(1, Math.ceil(amountToman / tomanPerStar));
 }
 
 const CARD_NUMBER = '6219861904145405';
@@ -5893,13 +5897,13 @@ bot.action(/^stars_toggle:(\d+)$/, async (ctx) => {
   if (!p || p.user_id !== uid || p.status !== 'pending' || p.step !== 'receipt') return;
   const pack = packOf(p);
   if (!pack) return;   // فاکتورِ بدونِ بسته — دکمه اصلاً نباید این‌جا برسد (دفاعِ دوم)
-  const rate = await usdTomanRate();
+  const rate = await usdtTomanRate();
   const stars = starsForToman(p.amount, rate);
   // ادعای اتمیک: اگر بینِ تپ و این لحظه کاربر رسید فرستاده یا انصراف داده، بی‌صدا برگرد.
   if (stmts.setStarsToggle.run(null, stars, pid).changes === 0) return;
   const cur = curOf(uid);
   try {
-    await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: pack.coins }, cur), {
+    await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: pack.coins }, cur, rate, p.amount), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.payWithCard, `card_toggle:${pid}`)],

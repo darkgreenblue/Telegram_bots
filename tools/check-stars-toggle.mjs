@@ -1,6 +1,6 @@
 // چکِ CI برای سوییچِ استارز per-فاکتورِ tarot (v3.76.0، خواسته‌ی صریحِ مالک، فقط-ادمین):
 // دکمه‌ی «پرداخت با استارز تلگرام» زیرِ فاکتورِ کارت‌به‌کارت، سوییچِ رفت‌وبرگشت، انقضای
-// ۳۰دقیقه‌ای، و قیمت‌گذاریِ استارز از نرخِ زنده‌ی دلار.
+// ۳۰دقیقه‌ای، و قیمت‌گذاریِ استارز از نرخِ زنده‌ی تتر (نوبیتکس، عمومی و بدونِ کلید).
 //
 // ⚠️ خطرناک‌ترین جهت این‌جا **دست‌خوردنِ payments.amount** است: اگر سوییچ مبلغِ تومانی
 // را با عددِ استارز جایگزین کند، SUM(amount) داشبوردِ فارسی (پروفایلِ MONEY_WALLET،
@@ -104,34 +104,38 @@ ok(/if \(p0\?\.stars_amount\)/.test(approveFn), 'stars_paid_amount فقط وقت
 
 /* ══ ۶) فرمولِ قیمت‌گذاریِ استارز — روی خودِ کد اجرا می‌شود ═══════════════ */
 console.log('\n۶) فرمولِ تومان⟶استارز (رفتاری)');
-const starsPerUsd = Number(SRC.match(/const STARS_PER_USD = ([^;]+);/)?.[1]?.replace(/\s/g, '').split('/').reduce((a, b) => a && eval(`${a}/${b}`), '') || 0)
-  || eval(SRC.match(/const STARS_PER_USD = ([^;]+);/)?.[1] || '0');
-const markup = Number(SRC.match(/const STARS_MARKUP = ([\d.]+);/)?.[1] || 0);
-ok(Math.abs(starsPerUsd - 50 / 0.75) < 1e-9, `STARS_PER_USD طبقِ نرخِ رسمیِ تلگرام است (۵۰ استارز=$۰.۷۵ ⟶ ${starsPerUsd.toFixed(3)})`);
-ok(markup > 1, `مارک‌آپ روی نرخِ برابری است (${markup}× — کارت‌به‌کارت نباید بی‌دلیل به‌صرفه‌تر دیده شود)`);
+const usdPerStar = Number(SRC.match(/const USD_PER_STAR = ([\d.]+);/)?.[1] || 0);
+ok(Math.abs(usdPerStar - 0.018) < 1e-9, `USD_PER_STAR ثابتِ تکی و تصمیمِ صریحِ مالک است (شد: ${usdPerStar})`);
+ok(!/STARS_MARKUP|STARS_PER_USD/.test(SRC), 'هیچ ثابتِ «مارک‌آپ»ِ جداگانه‌ای نمانده — فرمول یک‌مرحله‌ای است');
 // ⚠️ bodyOf متنِ **تا قبل از** مارکرِ پایان را می‌دهد (بدونِ خودِ `\n}`)، پس برای اجرای
 // واقعی باید آکولادِ بسته را دستی برگرداند — همان نکته‌ای که نسخه‌ی اولِ همین ادعا جا انداخت.
-const fnBodyRaw = bodyOf('function starsForToman(amountToman, usdToman) {', '\n}');
+const fnBodyRaw = bodyOf('function starsForToman(amountToman, usdtToman) {', '\n}');
 const fnBody = fnBodyRaw ? fnBodyRaw + '\n}' : '';
 if (fnBody) {
-  const starsForToman = new Function('STARS_PER_USD', 'STARS_MARKUP', 'amountToman', 'usdToman',
-    fnBody + '\nreturn starsForToman(amountToman, usdToman);');
-  const run = (t, usd) => starsForToman(starsPerUsd, markup, t, usd);
-  ok(run(90_000, 220_000) === 33, `۹۰٬۰۰۰ تومان با نرخِ ۲۲۰٬۰۰۰ ⟶ ۳۳ استارز (شد: ${run(90_000, 220_000)})`);
-  ok(run(1_490_000, 220_000) === 542, `۱٬۴۹۰٬۰۰۰ تومان ⟶ ۵۴۲ استارز (شد: ${run(1_490_000, 220_000)})`);
+  const starsForToman = new Function('USD_PER_STAR', 'amountToman', 'usdtToman',
+    fnBody + '\nreturn starsForToman(amountToman, usdtToman);');
+  const run = (t, usdt) => starsForToman(usdPerStar, t, usdt);
+  ok(run(90_000, 220_000) === 23, `۹۰٬۰۰۰ تومان با نرخِ ۲۲۰٬۰۰۰ ⟶ ۲۳ استارز (شد: ${run(90_000, 220_000)})`);
+  ok(run(1_490_000, 220_000) === 377, `۱٬۴۹۰٬۰۰۰ تومان ⟶ ۳۷۷ استارز (شد: ${run(1_490_000, 220_000)})`);
   ok(run(1, 220_000) >= 1, 'کف همیشه حداقلِ ۱ استارز است، هیچ‌وقت صفر یا منفی');
-  // یکنواختی: وقتی دلار گران‌تر می‌شود (تومان ضعیف‌تر)، همان مبلغِ تومانی از نظرِ
+  // یکنواختی: وقتی تتر گران‌تر می‌شود (تومان ضعیف‌تر)، همان مبلغِ تومانی از نظرِ
   // دلاری کمتر می‌ارزد، پس باید استارزِ **کمتری** بخرد — نه بیشتر.
   ok(run(90_000, 300_000) < run(90_000, 220_000),
-    `با گران‌شدنِ نرخِ دلار، همان مبلغِ تومانی استارزِ کمتری می‌شود (۲۲۰k⟶${run(90_000, 220_000)}، ۳۰۰k⟶${run(90_000, 300_000)})`);
+    `با گران‌شدنِ نرخِ تتر، همان مبلغِ تومانی استارزِ کمتری می‌شود (۲۲۰k⟶${run(90_000, 220_000)}، ۳۰۰k⟶${run(90_000, 300_000)})`);
 }
 
-/* ══ ۷) کف/سقفِ منطقیِ نرخِ زنده ═══════════════════════════════════════════ */
-console.log('\n۷) دفاع در برابرِ پاسخِ بدشکلِ API نرخِ ارز');
-const fetchFn = bodyOf('async function fetchLiveUsdToman() {', '\n}') || '';
+/* ══ ۷) منبعِ نرخ (نوبیتکس، عمومی بدونِ کلید) + کف/سقفِ منطقی ═══════════════ */
+console.log('\n۷) نرخِ زنده از نوبیتکس + دفاع در برابرِ پاسخِ بدشکل');
+ok(!/NAVASAN_API_KEY|FX_API_KEY|navasan\.tech/.test(SRC),
+  'هیچ ردی از سرویسِ کلید-محورِ قبلی نمانده — نوبیتکس کلید نمی‌خواهد');
+ok(/apiv2\.nobitex\.ir\/market\/stats/.test(SRC), 'endpoint نوبیتکسِ market/stats (عمومی، مستندِ خودِ سرویس)');
+ok(/srcCurrency=usdt.*dstCurrency=rls/.test(SRC), 'پارامترها: بازارِ usdt-rls');
+const fetchFn = bodyOf('async function fetchLiveUsdtToman() {', '\n}') || '';
+ok(!/FX_API_KEY/.test(fetchFn), 'فراخوانی بدونِ هیچ کلید/توکنی انجام می‌شود (API عمومی است)');
+ok(/rial \/ 10/.test(fetchFn), 'ریالِ نوبیتکس به تومان تبدیل می‌شود (÷۱۰) قبل از هر مقایسه‌ای');
 ok(/FX_SANITY_MIN/.test(fetchFn) && /FX_SANITY_MAX/.test(fetchFn), 'پاسخِ بیرونِ بازه‌ی معقول رد می‌شود، نه قبول');
-ok(/const FX_SANITY_MIN = 50_000, FX_SANITY_MAX = 3_000_000;/.test(SRC), 'بازه‌ی معقول: ۵۰هزار تا ۳میلیون تومان به‌ازای دلار');
-ok(/FX_FALLBACK_TOMAN_PER_USD/.test(SRC) && /process\.env\.USD_TOMAN_RATE/.test(SRC),
+ok(/const FX_SANITY_MIN = 50_000, FX_SANITY_MAX = 3_000_000;/.test(SRC), 'بازه‌ی معقول: ۵۰هزار تا ۳میلیون تومان به‌ازای تتر');
+ok(/FX_FALLBACK_TOMAN_PER_USDT/.test(SRC) && /process\.env\.USDT_TOMAN_RATE/.test(SRC),
   'fallback از env قابلِ تنظیم است، بدونِ دیپلوی');
 
 /* ══ ۸) جهش‌ها ═══════════════════════════════════════════════════════════ */
