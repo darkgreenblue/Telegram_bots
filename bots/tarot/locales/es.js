@@ -717,8 +717,9 @@ export default {
     openDepthPrompt: 'Sea cual sea tu tema, las cartas responden 🌀\n\n¿Hasta dónde quieres llegar?',
     /* Estado de entrada: sin ningún botón, y la última frase se separa con ⬇️ y negrita.
      * Un botón aquí haría que la persona crea que lo único posible es tocarlo. */
+    // 🕯️ Same prompt on every path since 2026-09-08 (owner's explicit call).
     askTopic: (toneV2) => (toneV2
-      ? 'Haz tu pregunta 🕯️\n\nLo que sea que no se te va de la cabeza: una decisión, una persona, algo que pasó, una angustia. Mientras más concreta la pregunta, más clara la respuesta.\n\n⬇️\n*Escribe tu pregunta aquí o manda un audio.*'
+      ? 'Ahora el paso más importante 🕯️\n\nMientras más concreta la pregunta, más clara la respuesta. Este es tu espacio seguro, y queda entre nosotros.\n\n⬇️\n*Escribe tu pregunta o manda un audio.*'
       : 'Cuéntame tu tema 🕯️\n\nLo que sea que no se te va de la cabeza: una decisión, una persona, algo que pasó, una angustia. Mientras más simple y sincero, más certera la lectura.\n\n⬇️\n*Escribe aquí o manda un audio.*'),
     spreadLine: (s, badge, cur, faName) =>
       `${s.emoji} ${faName || s.fa}${badge ? ` (${badge})` : ''}${cur?.on ? ` (${money(s.price, cur)})` : ''}\n${s.desc}`,

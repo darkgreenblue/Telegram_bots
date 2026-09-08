@@ -75,9 +75,9 @@ ok(!!decideSrc, '`onboardFirstSpread` از سورس بریده شد');
 
 const topic = TOPIC_BY_KEY.personal || Object.values(TOPIC_BY_KEY)[0];
 const build = ({ v2 = true, session = { onbFirst: 1 }, balance = 3 } = {}) =>
-  new Function('uxV2For', 'getSession', 'SPREAD_BY_ID', 'spreadIdOf', 'getBalance',
+  new Function('uxV2For', 'inOnboardFlow', 'SPREAD_BY_ID', 'spreadIdOf', 'getBalance',
     'ONBOARD_FIRST_SIZE', 'logErr', `${decideSrc} return onboardFirstSpread;`)(
-    () => v2, () => session, SPREAD_BY_ID, spreadIdOf, () => balance, onbSize, () => {});
+    () => v2, () => !!session?.onbFirst, SPREAD_BY_ID, spreadIdOf, () => balance, onbSize, () => {});
 
 ok(build()(1, topic)?.size === onbSize, 'نشانه + موجودیِ کافی ⟵ همان فالِ تک‌گزینه‌ای');
 ok(build({ session: {} })(1, topic) === null, 'بدونِ نشانه ⟵ صفحه‌ی عادی');
@@ -91,7 +91,7 @@ ok(build({ balance: 99 })(1, topic) !== null, 'موجودیِ بیشتر هم م
 ok(build()(1, { key: 'nope_not_a_topic' }) === null, 'موضوعِ ناشناخته ⟵ صفحه‌ی عادی، نه کرش');
 // fail-safe: هیچ خطایی نباید صفحه‌ی انتخابِ فال را بشکند.
 {
-  const boom = new Function('uxV2For', 'getSession', 'SPREAD_BY_ID', 'spreadIdOf', 'getBalance',
+  const boom = new Function('uxV2For', 'inOnboardFlow', 'SPREAD_BY_ID', 'spreadIdOf', 'getBalance',
     'ONBOARD_FIRST_SIZE', 'logErr', `${decideSrc} return onboardFirstSpread;`)(
     () => true, () => { throw new Error('db down'); }, SPREAD_BY_ID, spreadIdOf,
     () => 3, onbSize, () => {});
@@ -116,10 +116,11 @@ const runScreen = (first, balance = 3) =>
 {
   const [text, extra] = runScreen(onbSpread);
   const rows = extra.rows;
-  ok(rows.length === 2, `حالتِ آنبوردینگ: دقیقاً دو ردیف (دیدم: ${rows.length})`);
+  // ⚠️ از v3.72.0 **یک** ردیف، نه دو: دکمه‌ی بازگشت در آنبوردینگ برداشته شد
+  // (خواسته‌ی صریحِ مالک). جزئیاتش در بلوکِ ۴ب.
+  ok(rows.length === 1, `حالتِ آنبوردینگ: دقیقاً یک ردیف (دیدم: ${rows.length})`);
   ok(rows[0][0].data === `spread:${onbSpread.id}`,
-    'دکمه‌ی اول همان فالِ سه‌کارتیِ همان موضوع است', rows[0][0].data);
-  ok(/tback:/.test(rows[1][0].data), 'و ردیفِ دوم راهِ برگشت است (هیچ صفحه‌ای بن‌بست نیست)');
+    'و همان فالِ سه‌کارتیِ همان موضوع است', rows[0][0].data);
   ok(text.includes('۳'), 'متن عددِ اندازه را می‌گوید');
   ok(/کافیه/.test(text), 'و صریح می‌گوید موجودی کافی است');
   ok(extra.parse_mode === 'HTML', 'با HTML می‌رود (خطِ موجودی داخلِ باکسِ نقل‌قول است)');
@@ -130,6 +131,71 @@ const runScreen = (first, balance = 3) =>
   ok(extra.rows.length === SIZES_V3.length + 1,
     `حالتِ عادی: هر ${SIZES_V3.length} اندازه + بازگشت (دیدم: ${extra.rows.length})`);
   ok(!/کافیه/.test(text), 'و صفحه‌ی عادی آن ادعا را نمی‌کند');
+}
+
+/* ══ ۴ب) در آنبوردینگ هیچ دکمه‌ی خروجی نیست ══════════════════════════════
+ * خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۸): در اولین مواجهه‌ی کاربر با فال، هر دکمه‌ای که او را
+ * از مسیر بیرون می‌برد برداشته می‌شود. این یک استثنای **آگاهانه** بر بند ۹ب/۱ است، پس
+ * باید صریح سنجیده شود، وگرنه فردا کسی آن را «باگِ بن‌بست» می‌بیند و برش می‌گرداند. */
+console.log('\n۴ب) بدونِ دکمه‌ی خروج در آنبوردینگ');
+{
+  const [, extra] = runScreen(onbSpread);
+  ok(extra.rows.length === 1, `صفحه‌ی تک‌گزینه‌ای فقط یک ردیف دارد (دیدم: ${extra.rows.length})`);
+  ok(!JSON.stringify(extra.rows).includes('tback:'), 'و دکمه‌ی بازگشت ندارد');
+  ok(!JSON.stringify(extra.rows).includes('nav:menu'), 'و دکمه‌ی منوی اصلی هم نه');
+
+  // لیستِ کاملِ فال‌ها: همان قاعده. اجرای واقعیِ سازنده از سورس.
+  const kbSrc = bodyOf('const allTopicsKb = (uid) => [', '\n];');
+  ok(!!kbSrc, '`allTopicsKb` از سورس بریده شد');
+  const mkKb = (onb) => new Function('inOnboardFlow', 'TOPICS_V3', 'styled', 'Markup',
+    'L', 'spreadName', 'topicStyle', 'navMenuRow', `${kbSrc} return allTopicsKb;`)(
+    () => onb, [{ key: 'personal', fa: 'x' }], (b) => b, Markup, L, (x) => x,
+    () => undefined, () => [[btn('◀️ بازگشت به منوی اصلی', 'nav:menu')]])(1);
+  ok(!JSON.stringify(mkKb(true)).includes('nav:menu'),
+    'لیستِ کاملِ فال‌ها در آنبوردینگ دکمه‌ی «بازگشت به منوی اصلی» ندارد');
+  ok(JSON.stringify(mkKb(false)).includes('nav:menu'),
+    'ولی بیرون از آنبوردینگ همان دکمه سرِ جایش است (رفتارِ عادی نشکسته)');
+}
+
+/* ══ ۴ج) «مشاهده‌ی همه‌ی فال‌ها» خروج از آنبوردینگ نیست ══════════════════
+ * 🐛 باگی که مالک دید: `showCatalog` با `setSession(uid, null)` نشانه را هم می‌برد، پس
+ * کاربرِ وسطِ آنبوردینگ بعد از دیدنِ لیستِ کامل، صفحه‌ی **عادیِ** ۳/۵/۱۰ را می‌گرفت با
+ * موجودیِ ۳ الماس — یعنی دو گزینه‌ی نشدنی. */
+console.log('\n۴ج) لیستِ کامل، نشانه را نمی‌کشد');
+{
+  const cat = bodyOf('async function showCatalog(ctx, full = false, edit = false) {', '\n}');
+  const catCode = (cat || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  ok(!!cat, 'بدنه‌ی `showCatalog` پیدا شد');
+  ok(/const keepOnb = inOnboardFlow\(uid\)/.test(catCode) &&
+     /setSession\(uid, keepOnb \? \{ onbFirst: 1 \} : null\)/.test(catCode),
+    'نشانه‌ی آنبوردینگ از پاک‌سازیِ سشن عبور داده می‌شود');
+  ok(!/setSession\(uid, null\)/.test(catCode),
+    'و `setSession(uid, null)`ِ بی‌قید دیگر آن‌جا نیست');
+  // ⚠️ بقیه‌ی سشن **باید** پاک شود؛ نگه‌داشتنِ کلِ سشن یعنی فالِ رزروشده و paymentId
+  // سرگردان بمانند. این ادعا جلوی «راه‌حلِ آسانِ اشتباه» را می‌گیرد.
+  ok(!/const s = getSession\(uid\)[\s\S]{0,120}setSession\(uid, s\)/.test(catCode),
+    'ولی کلِ سشن نگه داشته نمی‌شود (فقط همان یک نشانه)');
+}
+
+/* ══ ۴د) متنِ خواستنِ سؤال در همه‌ی مسیرها یکی است ═══════════════════════ */
+console.log('\n۴د) یک متنِ سؤال در همه‌ی مسیرها');
+for (const loc of ['fa', 'ru', 'pt', 'es']) {
+  const LL = (await import(`../bots/tarot/locales/${loc}.js`)).default;
+  ok(LL.reading.askTopic(true) === LL.reading.askQuestion(true),
+    `«${loc}»: askTopic و askQuestion یک متن می‌دهند`);
+}
+
+/* ══ ۴ه) مکثِ پایانِ آنبوردینگ ═══════════════════════════════════════════ */
+console.log('\n۴ه) مکثِ «از کجا شروع کنیم؟»');
+{
+  const pace = Number(CODE.match(/const PACE_ONBOARD_MENU = (\d+);/)?.[1] || 0);
+  ok(pace > 0 && pace <= 1000, `مکث حداکثر ۱ ثانیه است (${pace}ms — خواسته‌ی مالک)`);
+  const fin = bodyOf('async function finishOnboarding(ctx, uid, props) {', '\n}') || '';
+  ok(/await typing\(ctx, PACE_ONBOARD_MENU\)/.test(fin),
+    'و `finishOnboarding` از همان ثابت استفاده می‌کند');
+  // ⚠️ ثابتِ مشترک نباید قربانی شده باشد (درسِ v3.55.0).
+  ok(/const PACE_S = 1200, PACE_M = 2500/.test(CODE),
+    'و `PACE_S`/`PACE_M`ِ مشترک دست‌نخورده‌اند');
 }
 
 /* ══ ۵) متن در هر چهار زبان ══════════════════════════════════════════════ */
@@ -157,7 +223,7 @@ const cmpVer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   return 0;
 };
-ok(cmpVer(ver, '3.71.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
+ok(cmpVer(ver, '3.72.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} پاس، ${fail} خطا\n`);
 if (fail) process.exit(1);

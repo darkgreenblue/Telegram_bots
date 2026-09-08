@@ -121,13 +121,13 @@ console.log('\n▶ قرارداد منوی فال (پین اول، «همه فا
   ok(/slice\(0, 3\)/.test(fn), 'منو دقیقاً سه موضوع دارد، بعد دکمه‌ی «همه فال‌ها»');
   ok(/allSpreadsV2, 'catalog_go'\)\],?\s*\n\s*\];/.test(fn), '«مشاهده همه فال‌ها» آخرین ردیف است');
   // لیستِ کامل باید همه‌ی موضوع‌ها را داشته باشد، نه یک زیرمجموعه
-  ok(/allTopicsKb = \(\) => \[\s*\n\s*\.\.\.TOPICS_V3\.map/.test(SRC),
+  ok(/allTopicsKb = \(uid\) => \[\s*\n\s*\.\.\.TOPICS_V3\.map/.test(SRC),
     'لیستِ کامل از خودِ TOPICS_V3 ساخته می‌شود (نه لیستِ دستیِ موازی)');
   // فالِ رایگان از منوی فال برداشته شد: تنها راهش کیبوردِ اصلی است
   const cat = SRC.slice(SRC.indexOf('function catalogKb('), SRC.indexOf('async function showCatalog('));
   ok(!/daily_go/.test(SRC.slice(SRC.indexOf('function falMenuKb('), SRC.indexOf('function catalogKb('))),
     'کارتِ روزِ رایگان در منوی فال نیست (فقط کیبوردِ اصلی)');
-  ok(/uxV2For\(uid\)\) return allTopicsKb\(\)/.test(cat), 'کاتالوگِ UX v2 همان لیستِ کاملِ موضوع‌هاست');
+  ok(/uxV2For\(uid\)\) return allTopicsKb\(uid\)/.test(cat), 'کاتالوگِ UX v2 همان لیستِ کاملِ موضوع‌هاست');
   // v2.4 (تصمیمِ صریحِ مالک): «فال بگیر» بالای «فال تک کارت» و هر دو **تمام‌عرض**.
   ok(/dailyOneCard: '🎴 فال تک کارت امروز \(رایگان\)'/.test(LOC),
     'کیبوردِ اصلی نامِ صریحِ «فال تک کارت امروز (رایگان)» را دارد');
