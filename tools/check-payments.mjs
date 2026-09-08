@@ -280,7 +280,10 @@ console.log('\n▶ پایه‌ی تخفیف: پول، نه الماس');
   const packs = [...src.matchAll(/\{ key: '([a-z]+)',[^}]*coins: ([\d_]+),\s*toman: ([\d_]+)/g)]
     .map((m) => ({ key: m[1], coins: Number(m[2].replace(/_/g, '')), toman: Number(m[3].replace(/_/g, '')) }));
   ok(packs.length >= 2, `کاتالوگِ بسته‌ها از سورس خوانده شد (${packs.map((p) => p.key).join(', ')})`);
-  const gold = packs.find((p) => p.toman === 60000) || packs[packs.length - 1];
+  // ⚠️ با کلید پیدا شود نه با قیمتِ هاردکد: قیمت‌ها در v3.75.0 عوض شدند و بستهٔ آخرِ
+  // آرایه هم دیگر «گلد» نیست (افسانه‌ای/جاودان اضافه شدند)، پس یک پایه‌ی متناسب لازم
+  // است — سقفِ ۵۰۰۰۰ فقط برای رقم‌های همان‌مقیاسِ «گلد» معنا دارد، نه بسته‌ی میلیونی.
+  const gold = packs.find((p) => p.key === 'gold') || packs[0];
   ok(disc(gold.toman, 20, 50000) === Math.round(gold.toman * 0.8),
     `✅ با پایه‌ی قیمتِ بسته، ۲۰٪ ⇒ ${disc(gold.toman, 20, 50000)} تومان`);
 

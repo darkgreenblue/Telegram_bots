@@ -49,7 +49,9 @@ const moneyTight = (toman, cur) =>
  * `Punhado/Saquinho/Baú` پرتغالی است: سه کلمه‌ی هم‌وزن که ترتیبِ صعودی را می‌رسانند.
  * ⚠️ `Bolsa` تنها استفاده نشد چون در چند بازار «bolsa» یعنی بورس؛ مصغرِ `Bolsita`
  * بی‌ابهام و ملموس است. */
-const PACK_NAMES = { basic: 'Puñado', gold: 'Bolsita', magic: 'Cofre' };
+// legend/eternal (v3.75.0): inalcanzables aquí (farsiOnly, solo riel de tarjeta), pero
+// las claves existen por la forma única de la locale — como todo el bloque invoice arriba.
+const PACK_NAMES = { basic: 'Puñado', gold: 'Bolsita', magic: 'Cofre', legend: 'Legendario', eternal: 'Eterno' };
 const packName = (p) => PACK_NAMES[p?.key] || '';
 
 /* Cómo se llama «el lugar donde está el saldo».
@@ -273,6 +275,8 @@ export default {
       + (stars == null ? '' : ` | ⭐ ${fmt(stars)} Stars`),
     rechargeAmount: (a, bonus) => (bonus ? `${starsN(a)} (+${fmt(bonus)} de regalo 🎁)` : starsN(a)),
     customAmount: '✏️ Otro monto',
+    // pack_reveal_v1 (v3.75.0) inalcanzable aquí (solo riel de tarjeta), clave por la forma.
+    revealMorePacks: 'Ver paquetes más convenientes',
     discountHave: '🎟️ Tengo un cupón',
     wantDiscount: '🎁 Quiero descuento',
     payThisReading: (price) => `💳 Pagar solo esta lectura (${starsN(price)})`,
