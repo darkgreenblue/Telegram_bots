@@ -104,6 +104,10 @@ jobs:
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
           # PATِ ریزدانه‌ی گیت‌هاب تا دستورِ /reel بتواند ورک‌فلوی Tarot video را صدا بزند
           TAROT_VIDEO_DISPATCH_TOKEN:   ${{ secrets.TAROT_VIDEO_DISPATCH_TOKEN }}
+          # ⭐ سوییچِ استارز فقط-ادمین (v3.76.0): هر دو اختیاری، بدونشان قیمت‌گذاریِ
+          # استارز رویِ fallbackِ ثابتِ کد می‌ماند (بند «قیمت‌گذاری» در bots/tarot/CLAUDE.md).
+          TAROT_NAVASAN_API_KEY:        ${{ secrets.TAROT_NAVASAN_API_KEY }}
+          TAROT_USD_TOMAN_RATE:         ${{ secrets.TAROT_USD_TOMAN_RATE }}
           # 🌍 تاروتِ per زبان (بند ۲و). کلیدِ OpenRouter عمداً جداست تا هزینه و درآمدِ
           # هر زبان مستقل اندازه‌گیری شود. نبودنِ هرکدام یعنی همان زبان دیپلوی نمی‌شود.
           TAROT_RU_BOT_TOKEN:           ${{ secrets.TAROT_RU_BOT_TOKEN }}
@@ -127,7 +131,7 @@ jobs:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
+          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_NAVASAN_API_KEY,TAROT_USD_TOMAN_RATE,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -244,6 +248,8 @@ jobs:
               # و رباتِ زنده بی‌دلیل ری‌استارت می‌شود (همان باگِ پینگ‌پنگِ ADMIN_IDS).
               TRT_ENV="$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
               [ -n "$TAROT_VIDEO_DISPATCH_TOKEN" ] && TRT_ENV="$(printf '%s\nVIDEO_DISPATCH_TOKEN=%s' "$TRT_ENV" "$TAROT_VIDEO_DISPATCH_TOKEN")"
+              [ -n "$TAROT_NAVASAN_API_KEY" ] && TRT_ENV="$(printf '%s\nNAVASAN_API_KEY=%s' "$TRT_ENV" "$TAROT_NAVASAN_API_KEY")"
+              [ -n "$TAROT_USD_TOMAN_RATE" ] && TRT_ENV="$(printf '%s\nUSD_TOMAN_RATE=%s' "$TRT_ENV" "$TAROT_USD_TOMAN_RATE")"
               write_env tarot "$TRT_ENV"
             fi
             # 🌍 یک بلوک per زبان. هرکدام کاملاً مستقل است: نبودِ سکرتِ یک زبان فقط

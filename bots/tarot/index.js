@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.75.0';
+const PRODUCT_VERSION = '3.76.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -500,6 +500,22 @@ const COIN_ECONOMY_ADMIN_ONLY = true;
 // جداگانه‌ی الماس را هم روشن می‌کند. پرچمِ قدیم برای دنیای قبل سرِ جایش می‌ماند.
 const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_ONLY || isTester(uid)));
 
+// ───────────────────────────────────────────────────────────────────────────
+// ⭐ سوییچِ استارز per-فاکتور — فقط فارسی (v3.76.0)
+// ───────────────────────────────────────────────────────────────────────────
+// خواسته‌ی صریحِ مالک: «به‌صورتِ آزمایشی اضافه شود تا میزانِ استقبال سنجیده شود».
+// طبقِ الگوی مستندِ بند ۲ج-۲ ریشه («اول فقط ادمین، بعد همه»): دو ثابتِ جدا، نه یکی.
+// باز کردن برای همه = `FEATURE_STARS_TOGGLE_ADMIN_ONLY = false` در یک PRِ جدا (بعد از
+// چند روز تستِ دستیِ مالک) + bump نسخه. رول‌بکِ فوری: `FEATURE_STARS_TOGGLE = false`.
+// ⚠️ این با `starsRail` **اصلاً همان چیز نیست**: `starsRail` یک ثابتِ سطحِ زبان است
+// (بند ۲و/۴ ریشه) و فقط برای ru/pt/es true می‌شود؛ این‌جا برعکس — دقیقاً برای رباتِ
+// فارسی (`starsRail === false`) یک مسیرِ **موازیِ اضافه** باز می‌شود، بدونِ اینکه هیچ
+// کدِ starsRail-محورِ موجود (پکِ farsiOnly، STARS_EXPERIMENT، …) لمس شود.
+const FEATURE_STARS_TOGGLE = true;
+const FEATURE_STARS_TOGGLE_ADMIN_ONLY = true;
+const starsToggleOn = (uid) => !starsRail && FEATURE_STARS_TOGGLE
+  && (!FEATURE_STARS_TOGGLE_ADMIN_ONLY || isAdmin(uid));
+
 /* 🛑 مسیرهای پرداختِ **نسلِ تومانی** بسته‌اند.
  * `setRechargeAmount` و `invoiceForReading` هر دو فرض می‌کنند «تومانِ پرداختی = اعتبارِ
  * داده‌شده» (نسبتِ ۱:۱ دنیای تومانی). در دنیای الماس این فرض غلط است: فاکتور تومان است
@@ -563,6 +579,55 @@ const PACKAGE_BY_KEY = Object.fromEntries(COIN_PACKAGES.map(p => [p.key, p]));
 // و بدونِ این، ادمین عددِ بی‌معنی می‌بیند (باگِ رسیدِ #۱۵۳، ۱۴۰۵/۰۵/۳۰).
 const packOf = (p) => (p && p.pkg ? PACKAGE_BY_KEY[p.pkg] || null : null);
 
+/* ⭐ تبدیلِ تومان به استارز — فقط برای سوییچِ فارسی (بالا).
+ *
+ * فرمول: ۵۰ استارز ≈ $۰.۷۵ (نرخِ رسمیِ تلگرام) → هر استارز ≈ $۰.۰۱۵. با نرخِ زنده‌ی
+ * دلار به تومان، مبلغِ تومانی تقسیم بر (نرخِ دلار × $۰.۰۱۵) استارزِ برابری می‌دهد.
+ * ⚠️ **مارک‌آپِ عمدی** (خواسته‌ی مالک: کارت‌به‌کارت نباید بی‌دلیل به‌صرفه‌تر دیده شود):
+ * نرخِ مؤثر با تقسیم بر `STARS_MARKUP` کاهش می‌یابد، یعنی به همان تومان استارزِ **بیشتری**
+ * لازم است — کاربر چیزی گم نمی‌کند (واریزِ واقعی هنوز طبقِ Bot API محاسبه می‌شود)، فقط
+ * انتخابِ کارت را واضح‌تر جذاب نگه می‌دارد. */
+const STARS_PER_USD = 50 / 0.75;
+const STARS_MARKUP = 1.2;
+// ⚠️ منبعِ نرخ: بازارِ آزادِ ایران (نه نرخِ رسمی/بانکِ مرکزی) چون قیمتِ واقعیِ کاربر
+// همین است. **صادقانه:** دقتِ کانترکتِ API این سرویس از محیطِ توسعه تأیید نشد (پراکسیِ
+// این محیط دامنه‌های ایرانی را می‌بندد) — کلید را ست کن و بعد از اولین دیپلوی از
+// `Ops logs app=tarot` مطمئن شو fetch واقعاً جواب می‌دهد؛ تا آن زمان نرخِ ثابتِ زیر
+// جایگزینِ امن است و هیچ‌وقت فاکتورِ اشتباه نمی‌سازد.
+const FX_API_KEY = process.env.NAVASAN_API_KEY || '';
+const FX_FALLBACK_TOMAN_PER_USD = Number(process.env.USD_TOMAN_RATE) || 220_000;
+// کف/سقفِ معقول برای رد کردنِ پاسخِ بدشکل/خراب بدونِ اینکه فاکتور را با یک عددِ
+// مهمل بسازد — همیشه ایمن‌تر از fallback است تا اینکه یک عددِ باطل را قبول کنیم.
+const FX_SANITY_MIN = 50_000, FX_SANITY_MAX = 3_000_000;
+const FX_CACHE_MS = 6 * 3600 * 1000; // ۶ ساعت — نرخِ بازار آن‌قدر سریع عوض نمی‌شود
+let fxCache = { rate: 0, at: 0 };
+async function fetchLiveUsdToman() {
+  if (!FX_API_KEY) return 0;
+  try {
+    const res = await fetch(`https://api.navasan.tech/latest/?api_key=${encodeURIComponent(FX_API_KEY)}&item=usd_sell`,
+      { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const data = await res.json();
+    const raw = Number(data?.usd_sell?.value ?? data?.usd_sell);
+    if (!Number.isFinite(raw) || raw < FX_SANITY_MIN || raw > FX_SANITY_MAX) {
+      throw new Error(`out of sanity range: ${raw}`);
+    }
+    return raw;
+  } catch (e) { logErr('fx fetch:', e.message); return 0; }
+}
+async function usdTomanRate() {
+  const now = Date.now();
+  if (fxCache.rate && now - fxCache.at < FX_CACHE_MS) return fxCache.rate;
+  const live = await fetchLiveUsdToman();
+  if (live > 0) { fxCache = { rate: live, at: now }; return live; }
+  return fxCache.rate || FX_FALLBACK_TOMAN_PER_USD;
+}
+/** تومان ⟶ استارز، گردِ بالا. `usdToman` را از پیش با `usdTomanRate()` بگیر (async است). */
+function starsForToman(amountToman, usdToman) {
+  const tomanPerStarEffective = (usdToman / STARS_PER_USD) / STARS_MARKUP;
+  return Math.max(1, Math.ceil(amountToman / tomanPerStarEffective));
+}
+
 const CARD_NUMBER = '6219861904145405';
 const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
 const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
@@ -576,6 +641,14 @@ const RECEIPT_MODEL = FLASH;
 // دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
 // هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
 const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
+// دکمه‌ی سوییچ به استارز، درست زیرِ دکمه‌ی کپیِ کارت (خواسته‌ی صریحِ مالک). آرایه‌ی
+// **ردیف‌ها** برمی‌گرداند (مثلِ الگوی `navMenuRow`) تا هر محلِ صدور با
+// `...starsToggleRow(uid, paymentId, hasPkg)` بی‌قید و شرط اسپرد کند.
+// ⚠️ `hasPkg` اجباری است: `buildInvoice` (starspay.js) بدونِ `pack.key` خطا می‌دهد، و
+// فاکتورِ بدونِ بسته (دنیای تومانیِ میراثی) اصلاً چیزی برای تبدیل به استارز ندارد — پس
+// دکمه فقط برای فاکتورِ **بسته‌ای** نشان داده می‌شود، نه هر فاکتوری.
+const starsToggleRow = (uid, paymentId, hasPkg) =>
+  (hasPkg && starsToggleOn(uid)) ? [[Markup.button.callback(L.buttons.payWithStars, `stars_toggle:${paymentId}`)]] : [];
 
 // 🎁 هدیه‌ی خوش‌آمد (v2.0.0): دقیقاً بهای یک فالِ کاملِ سه‌کارتی، تا کاربرِ جدید **قبل از
 // هر پی‌والی** ارزشِ واقعیِ محصول را ببیند (بند ۱۰ ریشه: اول ارزش، بعد پول). write-once با
@@ -617,6 +690,9 @@ const CANCELED_RECOVERY_SEC = 12 * 3600;
  * بدونِ این، رسیدِ دیرِ کاربر بعد از انقضا بی‌صدا دور ریخته می‌شد (بند ۹ب/۹ ریشه). */
 const INVOICE_REMINDER_SEC = 3600;      // ۱ ساعت
 const INVOICE_EXPIRE_SEC   = 24 * 3600; // ۲۴ ساعت
+// ⭐ سقفِ فاکتورِ استارزی (v3.76.0، خواسته‌ی صریحِ مالک): «چون نرخِ ارز متغیر است»،
+// ۳۰ دقیقه. مستقل از چرخه‌ی بالا — این‌جا هیچ‌وقت canceled نمی‌شود، فقط شکلِ نمایش عوض می‌شود.
+const STARS_INVOICE_EXPIRE_SEC = 30 * 60;
 // هدیه‌ی شارژ (ARPU بالاتر): فقط از ۲۰۰k به بالا، تا نردبان قیمت ساده و قابل‌فهم بماند
 // 🛑 هدیه‌ی شارژِ نسلِ تومانی. در دنیای الماس مسیرِ شارژِ آزاد بسته است (فقط بسته)
 // و این آستانه‌ها تومانی‌اند، پس روی عددِ الماسی بی‌معنی می‌شدند. خالی = خاموش.
@@ -992,6 +1068,23 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_issued_at INTEGER').ru
 // پاک شده باشد، ردیف نه (همان قاعده‌ای که `charge_id` را هم روی ردیف نشاند، نه سشن).
 try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_msg_id INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_reminded_at INTEGER').run(); } catch {}
+/* ⭐ سوییچِ استارز per-فاکتور برای فارسی (v3.76.0، خواسته‌ی صریحِ مالک، فعلاً فقط-ادمین).
+ * چهار ستونِ افزایشی، هیچ‌کدام روی `amount`/`original_amount` اثر نمی‌گذارند — آن دو
+ * همیشه **تومان** می‌مانند (منبعِ حقیقتِ درآمدِ داشبورد برای instance فارسی، که با
+ * پروفایلِ MONEY_WALLET یعنی «واحدش تومان است» — بند «تاروت فارسی/زبان‌های دیگر» در
+ * bots/dashboard/CLAUDE.md). اگر amount موقعِ پرداختِ استارز به عددِ استارز عوض می‌شد،
+ * SUM(amount) داشبوردِ فارسی توماناتِ واقعی را با استارز جمع می‌زد — همان خانواده‌ی
+ * باگِ «۶۳۵٬۹۵۹💎 محاله» (bots/dashboard/CLAUDE.md) که یک‌بار در همین ریپو رخ داد. */
+try { db.prepare('ALTER TABLE payments ADD COLUMN stars_invoice_msg_id INTEGER').run(); } catch {}
+try { db.prepare('ALTER TABLE payments ADD COLUMN stars_toggle_at INTEGER').run(); } catch {}
+// write-once per سوییچ: عددی که یک‌بار محاسبه و نمایش داده شد، دوباره محاسبه نمی‌شود
+// (بند ۹ ریشه: «مدل فقط می‌خواند، کد حساب می‌کند» — این‌جا حتی کد هم دوباره حساب نمی‌کند،
+// چون نرخِ ارز بینِ نمایش و پرداخت می‌تواند عوض شود و آن‌وقت عددِ فاکتور با عددِ کسرشده
+// فرق می‌کرد؛ گارد: ۶ج ریشه).
+try { db.prepare('ALTER TABLE payments ADD COLUMN stars_amount INTEGER').run(); } catch {}
+// فقط برای آمارِ استقبال (بند ۹ درخواستِ مالک: «میزان استقبال سنجیده شود») — در هیچ
+// SUM(amount) ای شرکت نمی‌کند.
+try { db.prepare('ALTER TABLE payments ADD COLUMN stars_paid_amount INTEGER').run(); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -1253,6 +1346,14 @@ const stmts = {
   claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch(), invoice_issued_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setInvoiceMsgId: db.prepare('UPDATE payments SET invoice_msg_id=? WHERE id=?'),
+  // سوییچِ استارز: مهرِ زمان + شناسه‌ی فاکتورِ نیتیو + عددِ محاسبه‌شده، هر سه با هم
+  // (بند ۶ج ریشه: عدد و مهرِ زمان از همان یک لحظه بیایند، نه دو نوشتنِ جدا).
+  setStarsToggle: db.prepare('UPDATE payments SET stars_invoice_msg_id=?, stars_toggle_at=unixepoch(), stars_amount=? WHERE id=? AND status=\'pending\''),
+  clearStarsToggle: db.prepare('UPDATE payments SET stars_invoice_msg_id=NULL, stars_toggle_at=NULL WHERE id=?'),
+  setStarsPaid: db.prepare('UPDATE payments SET stars_paid_amount=? WHERE id=?'),
+  // کاندیدهای انقضای ۳۰دقیقه‌ایِ فاکتورِ استارز — مستقل از چرخه‌ی ۲۴ساعته‌ی کارت.
+  starsExpiryCandidates: db.prepare(
+    "SELECT * FROM payments WHERE status='pending' AND stars_toggle_at IS NOT NULL AND stars_toggle_at < unixepoch()-?"),
   /* ⏱ کاندیدِ یادآوری/انقضا: تعریفِ «فاکتورِ زنده» همان `issuedInvoiceOf` است
    * (status='pending' AND step='receipt')، به‌علاوه‌ی مهرِ صدور. */
   invoiceReminderCandidates: db.prepare(
@@ -1582,6 +1683,9 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   setState(uid, 'pay_receipt');
   // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
   if (dc) await ctx.reply(L.wallet.discountApplied(price, payAmount, dc.discount_percent), { parse_mode: 'Markdown' });
+  // ⭐ سوییچِ استارز عمداً این‌جا نیست: این تابع فقط در دنیای تومانیِ میراثی اجرا می‌شود
+  // (بالا: `if (legacyTomanPay(uid))` یعنی `coinsOn(uid)` که این‌جا **رد** شده)، پس هیچ
+  // بسته‌ای پشتِ این فاکتور نیست و buildInvoice بدونِ pack.key خطا می‌دهد.
   const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
@@ -5628,6 +5732,8 @@ async function setRechargeAmount(ctx, uid, amount) {
   const payAmount = amount;
 
   setState(uid, 'pay_receipt');
+  // ⭐ سوییچِ استارز عمداً این‌جا نیست — همان دلیلِ invoiceForReading (دنیای تومانیِ
+  // میراثی، بدونِ بسته‌ی کاتالوگ).
   const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
@@ -5767,10 +5873,77 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
+      ...starsToggleRow(uid, payId, true),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)],
     ]).reply_markup,
   });
   if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, payId);
+});
+
+/* ⭐ سوییچ به پرداختِ استارز (v3.76.0، فقط-ادمین). فقط رویِ فاکتورِ **بسته‌ای** کار
+ * می‌کند (بند بالای `starsToggleRow`). دو کارِ جدا: (۱) پیامِ فاکتورِ تومانی را ادیت
+ * می‌کند به متنِ استارزی + دکمه‌ی «برگشت به کارت»، (۲) یک فاکتورِ **نیتیوِ** تلگرام
+ * می‌فرستد (دقیقاً همان `buildInvoice`ی که ru/pt/es از قبل استفاده می‌کنند). */
+bot.action(/^stars_toggle:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (!starsToggleOn(uid)) return;
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  if (!p || p.user_id !== uid || p.status !== 'pending' || p.step !== 'receipt') return;
+  const pack = packOf(p);
+  if (!pack) return;   // فاکتورِ بدونِ بسته — دکمه اصلاً نباید این‌جا برسد (دفاعِ دوم)
+  const rate = await usdTomanRate();
+  const stars = starsForToman(p.amount, rate);
+  // ادعای اتمیک: اگر بینِ تپ و این لحظه کاربر رسید فرستاده یا انصراف داده، بی‌صدا برگرد.
+  if (stmts.setStarsToggle.run(null, stars, pid).changes === 0) return;
+  const cur = curOf(uid);
+  try {
+    await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: pack.coins }, cur), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.payWithCard, `card_toggle:${pid}`)],
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+      ]).reply_markup,
+    });
+  } catch (e) { logErr('stars_toggle edit:', e.message); }
+  try {
+    const inv = await ctx.replyWithInvoice(buildInvoice({
+      pack, stars, paymentId: pid, userId: uid,
+      title: L.wallet.starsInvoiceTitle(pack),
+      description: L.wallet.starsInvoiceDesc(pack, stars),
+    }));
+    if (inv?.message_id) stmts.setStarsToggle.run(inv.message_id, stars, pid);
+  } catch (e) {
+    logErr('stars_toggle sendInvoice:', e.message);
+    await ctx.reply(L.errors.generic).catch(() => {});
+  }
+});
+
+/* ↩️ برگشت به کارت‌به‌کارت — دکمه‌ی زیرِ فاکتورِ استارزی. فاکتورِ نیتیو حذف می‌شود
+ * (روی آن `editMessageText` کار نمی‌کند — همان محدودیتِ starspay.js) و پیامِ اصلی به
+ * حالتِ تومانی برمی‌گردد، **همان یک ردیف**، بدونِ ساختنِ ردیفِ تازه. */
+bot.action(/^card_toggle:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  if (!p || p.user_id !== uid || p.status !== 'pending') return;
+  if (p.stars_invoice_msg_id) {
+    try { await ctx.telegram.deleteMessage(ctx.chat.id, p.stars_invoice_msg_id); } catch {}
+  }
+  stmts.clearStarsToggle.run(pid);
+  const pack = packOf(p);
+  try {
+    await ctx.editMessageText(L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, pid), curOf(uid)), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        cardCopyRow(),
+        ...starsToggleRow(uid, pid, !!pack),
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+      ]).reply_markup,
+    });
+  } catch (e) { logErr('card_toggle edit:', e.message); }
 });
 
 bot.action(/^ramt:(\d+)$/, async (ctx) => {
@@ -6085,7 +6258,7 @@ async function applyDiscount(ctx, uid, codeText) {
   } else {
     const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
       parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([cardCopyRow()]).reply_markup,
+      reply_markup: Markup.inlineKeyboard([cardCopyRow(), ...starsToggleRow(uid, p.id, !!p.pkg)]).reply_markup,
     });
     // فاکتورِ تخفیف‌خورده جایگزینِ فاکتورِ قبلیِ همان ردیف است، پس شناسه‌ی «فاکتورِ فعلی»
     // هم باید همین پیام باشد وگرنه انقضا پیامِ کهنه‌ای را ادیت می‌کند که مبلغش دیگر درست نیست.
@@ -6375,11 +6548,22 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
  * واریز، رویدادِ payment_approved، پیامِ موفقیت و ادامه‌ی خودکارِ فالِ رزروشده،
  * همه دقیقاً همان مسیرِ کارت‌به‌کارت‌اند. تنها تفاوت این است که «تأییدکننده» به‌جای
  * ادمین یا ایجنتِ رسید، خودِ تلگرام است.
- * روی فارسی هیچ‌وقت ثبت نمی‌شود، پس رباتِ زنده حتی یک هندلرِ اضافه هم نمی‌گیرد. */
-if (starsRail) {
+ *
+ * ⚠️ از v3.76.0 دیگر فقط `starsRail` نیست: سوییچِ per-فاکتورِ فارسی هم به همین دو
+ * هندلر (`pre_checkout_query`/`successful_payment`) نیاز دارد، چون بعد از فاکتورِ
+ * نیتیوِ تلگرام هم دقیقاً همین آپدیت‌ها می‌رسند. `getPayment`/`approve` عمداً همان
+ * تابع‌های همیشگی‌اند (`original_amount` دیامندهای اعتباری را مستقل از واحدِ `amount`
+ * نگه می‌دارد؛ بند «چرا amount هرگز عوض نمی‌شود» در CLAUDE.md ربات). تنها اضافه:
+ * `approve` قبل از واریز `stars_paid_amount` را می‌زند — فقط برای آمارِ استقبال،
+ * هرگز در SUM(amount) شرکت نمی‌کند. */
+if (starsRail || FEATURE_STARS_TOGGLE) {
   registerStarsPay(bot, {
     getPayment: (id) => stmts.getPayment.get(id),
-    approve: (id) => approvePayment(id),
+    approve: (id) => {
+      const p0 = stmts.getPayment.get(id);
+      if (p0?.stars_amount) { try { stmts.setStarsPaid.run(p0.stars_amount, id); } catch (e) { logErr('stars paid stamp:', e.message); } }
+      return approvePayment(id);
+    },
     saveCharge: (chargeId, id) => stmts.setPaymentCharge.run(chargeId, id),
     onCredited: async (uid, { p, creditAmount, bonus }) => {
       await bot.telegram.sendMessage(uid, approvedMsg(uid, creditAmount, bonus)).catch(() => {});
@@ -6509,11 +6693,45 @@ async function expireInvoice(p) {
   } catch (e) { logErr('invoice expire pay#' + p.id, e.message); }
 }
 
+/* ⭐ انقضای ۳۰دقیقه‌ایِ فاکتورِ استارزی (v3.76.0): پیامِ نیتیو حذف، ردیف به حالتِ
+ * تومانیِ عادی برمی‌گردد — status هرگز canceled نمی‌شود (بند ۹ب رول‌بک: فقط انصرافِ
+ * صریح یک فلوی پولی را می‌کشد)، فاکتور فقط شکلِ نمایشش عوض می‌شود، همان شماره می‌ماند. */
+async function expireStarsInvoice(p) {
+  try {
+    if (p.stars_invoice_msg_id) {
+      try { await bot.telegram.deleteMessage(p.user_id, p.stars_invoice_msg_id); } catch {}
+    }
+    stmts.clearStarsToggle.run(p.id);
+    track(db, p.user_id, 'stars_invoice_expired', { payment_id: p.id, stars: p.stars_amount });
+    const pack = packOf(p);
+    const cur = curOf(p.user_id);
+    // ⚠️ عمداً L.wallet.invoice() همیشگی صدا زده می‌شود، نه یک رندرِ موازی — بند ۶ج
+    // ریشه: مبلغ و بسته باید از همان یک منبع چاپ شوند که فاکتورِ اصلی هم ازش می‌آید.
+    const text = L.wallet.starsInvoiceExpiredNotice + '\n\n'
+      + L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(p.user_id, p.id), cur);
+    const kb = Markup.inlineKeyboard([
+      cardCopyRow(),
+      ...starsToggleRow(p.user_id, p.id, !!pack),
+      [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
+    ]).reply_markup;
+    if (p.invoice_msg_id) {
+      try {
+        await bot.telegram.editMessageText(p.user_id, p.invoice_msg_id, undefined, text, { parse_mode: 'Markdown', reply_markup: kb });
+        return;
+      } catch (e) { logErr('stars invoice expire edit pay#' + p.id, e.message); }
+    }
+    await bot.telegram.sendMessage(p.user_id, text, { parse_mode: 'Markdown', reply_markup: kb }).catch(() => {});
+  } catch (e) { logErr('stars invoice expire pay#' + p.id, e.message); }
+}
+
 function sweepInvoiceLifecycle() {
-  if (starsRail) return;   // فقط ریلِ کارت — فاکتورِ استارز اصلاً این‌جا وارد نمی‌شود
+  if (starsRail) return;   // فقط ریلِ کارت — فاکتورِ استارز (ru/pt/es) اصلاً این‌جا وارد نمی‌شود
   try {
     for (const p of stmts.invoiceReminderCandidates.all(INVOICE_REMINDER_SEC)) sendInvoiceReminder(p);
     for (const p of stmts.invoiceExpiryCandidates.all(INVOICE_EXPIRE_SEC)) expireInvoice(p);
+    if (FEATURE_STARS_TOGGLE) {
+      for (const p of stmts.starsExpiryCandidates.all(STARS_INVOICE_EXPIRE_SEC)) expireStarsInvoice(p);
+    }
   } catch (e) { logErr('invoice lifecycle sweep:', e.message); }
 }
 
