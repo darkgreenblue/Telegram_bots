@@ -162,7 +162,21 @@ ok(/bot\.action\(\/\^rview:\(\\d\+\)\$\//.test(SRC), 'هندلرِ `rview:` ثب
   ok(/!r\.cards_json \|\| !r\.llm_json/.test(body), 'گاردِ عمقی: بدونِ کارت یا خوانش اجرا نمی‌شود');
   ok(/startReveal\(ctx, uid, readingId\)/.test(body), 'تحویل از همان مسیرِ همیشگیِ افشا می‌رود');
 }
-ok(/const PRODUCT_VERSION = '3\.67\.\d+'/.test(SRC), 'PRODUCT_VERSION بامپ شد (بند ۲ج/۴)');
+/* ⚠️ عددِ دقیق پین **نمی‌شود**، فقط کف.
+   نسخه‌ی اولِ این ادعا `3.67.x` را عیناً می‌خواست و با اولین بامپِ بعدی (v3.69.0) قرمز
+   شد — یعنی چکی که قرار بود رعایتِ بند ۲ج/۴ را تضمین کند، خودش جلوی همان قاعده را
+   می‌گرفت. `check-tarot-video.mjs` همین درس را از قبل ثبت کرده بود و کف می‌گذاشت؛
+   این‌جا جا افتاده بود. مقایسه هم عددی است نه رشته‌ای، وگرنه '3.100.0' از '3.67.0'
+   کوچک‌تر خوانده می‌شد. */
+{
+  const v = (SRC.match(/const\s+PRODUCT_VERSION\s*=\s*['"`]([\d.]+)['"`]/) || [])[1] || '0';
+  const cmp = (a, b) => {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+    return 0;
+  };
+  ok(cmp(v, '3.67.0') >= 0, `PRODUCT_VERSION دستِ‌کم روی 3.67.0 بامپ شده (فعلی: ${v} — بند ۲ج/۴)`);
+}
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 process.exit(errs.length ? 1 : 0);

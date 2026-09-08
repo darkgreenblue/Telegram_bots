@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.68.0';
+const PRODUCT_VERSION = '3.71.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -605,10 +605,53 @@ const REFERRAL_BONUS   = 10_000;
 // می‌گیرد و پاداشِ اضافه ندارد (تصمیمِ صریحِ مالک).
 const REFERRAL_BONUS_COINS = 3;
 const REFERRAL_BONUS_COINS_V2 = 10;
-const referralBonusFor = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
+// 💎 از ۱۴۰۵/۰۶/۱۷ پاداشِ دعوت در رباتِ **فارسی** ۵ الماس است (تصمیمِ صریحِ مالک).
+// استثنای زبانی است و در جدولِ «استثناهای زبانی» `bots/tarot/CLAUDE.md` ردیف گرفته
+// (بند ۲و/۲ ریشه). زبان‌های استارز دست‌نخورده روی ۱۰ می‌مانند.
+// **رول‌بکِ یک‌خطی:** `REFERRAL_5_LOCALES = []` → رفتار بیت‌به‌بیت همان قبل.
+const REFERRAL_BONUS_COINS_V3 = 5;
+const REFERRAL_5_LOCALES = ['fa'];
+const referral5On = () => REFERRAL_5_LOCALES.includes(LOCALE);
+// مرزِ «دعوتِ قدیم / دعوتِ جدید». عمداً یک تایم‌استمپِ هاردکد **نیست**، بلکه لحظه‌ی
+// اولین بوتِ همین نسخه روی همان دیتابیس است (همان الگوی `KB_V2_EPOCH`) — درسِ ثبت‌شده‌ی
+// v3.25.1: دیپلوی می‌تواند روزها بعد از نوشتنِ کد بیفتد و عددِ هاردکد بی‌صدا غلط شود.
+// پایین، کنارِ جدولِ `migrations` پر می‌شود؛ `let` است تا هیچ TDZ ای در کار نباشد.
+let REFERRAL_5_EPOCH = 0;
+// پاداشِ **قبل از این تغییر**، دست‌نخورده. تنها مصرفش grandfathering است.
+const referralBonusLegacy = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
   : coinsOn(uid) ? REFERRAL_BONUS_COINS : REFERRAL_BONUS);
-// هدیه‌ی خوش‌آمد: ۵ الماس در UX v2 (به‌جای ۳۰٬۰۰۰ تومان که ۳ الماس بود)
-const WELCOME_BONUS_COINS_V2 = 5;
+// عددی که روی دکمه‌ها و متن‌ها **نشان داده** می‌شود: وعده‌ی دعوت‌های از این به بعد.
+const referralBonusFor = (uid) => (referral5On() && uxV2For(uid))
+  ? REFERRAL_BONUS_COINS_V3 : referralBonusLegacy(uid);
+// عددی که واقعاً **واریز** می‌شود، برای یک ردیفِ دعوتِ مشخص.
+// ⚠️ قاعده: دعوتی که پیش از مرز ثبت شده همان ۱۰ وعده‌داده‌شده را می‌گیرد، حتی اگر
+// دوستش امروز فالش را کامل کند. وعده‌ای که داده‌ایم عقب‌گرد نمی‌کند (بند ۲ج/۵ ریشه:
+// فلوی pending با شرایطِ قبلی باید معتبر بماند). مرز روی `referrals.created_at` است،
+// یعنی لحظه‌ی اقدامِ خودِ دعوت‌کننده، نه لحظه‌ی فالِ دعوت‌شده.
+// ⚠️ و جهتِ fail-safe عمدی است: اگر مرز به هر دلیلی خوانده نشده باشد (`0`) یا ردیف
+// تاریخ نداشته باشد، **وعده‌ی قدیمی** پرداخت می‌شود. بینِ «چند الماسِ اضافه دادیم» و
+// «وعده‌ای که داده بودیم را نداریم»، اولی خطای ارزان‌تری است (بند ۹ ریشه).
+const referralPayoutFor = (uid, ref) => {
+  if (!referral5On()) return referralBonusFor(uid);
+  const created = Number(ref?.created_at) || 0;
+  const isOld = REFERRAL_5_EPOCH <= 0 || created <= 0 || created < REFERRAL_5_EPOCH;
+  return isOld ? referralBonusLegacy(uid) : referralBonusFor(uid);
+};
+/* 🎁 هدیه‌ی خوش‌آمد: از ۱۴۰۵/۰۶/۱۷ **۳ الماس** (بود ۵؛ تصمیمِ صریحِ مالک، هم‌زمان با
+ * کاهشِ پاداشِ دعوت).
+ *
+ * ۳ عددِ دلبخواه نیست: دقیقاً بهای یک فالِ سه‌کارتی است (`price = size × PER_CARD`)، پس
+ * قراردادِ «اولین فالِ کاربر هیچ پی‌والی نمی‌بیند» (بند ۱۰ ریشه: اول ارزش، بعد پول)
+ * دست‌نخورده می‌ماند و `check-gate` هم همان را می‌سنجد. تفاوتش با ۵ این است که دیگر
+ * الماسِ اضافه نمی‌ماند، یعنی کاربر بعد از فالِ اول دقیقاً سرِ دیوارِ پی‌وال می‌ایستد —
+ * همان جایی که طبقِ بخشِ «اقتصادِ رایگان و پرداخت» بالای این فایل، **۸۵٪** پرداخت‌کننده‌ها
+ * از آن رد شده‌اند (نرخِ پرداختِ ۳٫۶۴٪ در برابرِ ۰٫۴۲٪ برای کسی که هرگز به دیوار نخورده).
+ *
+ * ⚠️ و چون موجودیِ کاربرِ تازه حالا دقیقاً ۳ است، منوی «۳ / ۵ / ۱۰ کارتی» در آنبوردینگ
+ * دو گزینه‌ی **نشدنی** نشان می‌داد. برای همین صفحه‌ی اندازه در آنبوردینگ تک‌گزینه‌ای شد
+ * (`onboardingSizeScreen` پایین). این دو تغییر به هم وابسته‌اند و با هم دیپلوی می‌شوند.
+ */
+const WELCOME_BONUS_COINS_V2 = 3;
 const welcomeBonusFor = (uid) => (uxV2For(uid) ? WELCOME_BONUS_COINS_V2 : WELCOME_BONUS);
 // جایزه‌ی کارتِ روز: ۱ الماس، روزی یک بار. اهرمِ عادتِ روزانه (بند ۱۰ ریشه: قلابِ بازگشت
 // باید در خودِ محصول باشد نه فقط در پوش).
@@ -1284,6 +1327,45 @@ const stmts = {
     VALUES (?,?,?,?,?,?,?,?,?)`),
 };
 
+/* 💎 تک‌منبعِ «چقدر اعتبار به این پرداخت تعلق می‌گیرد».
+ *
+ * دو مصرف‌کننده دارد و همین دلیلِ وجودش است: `approvePayment` لحظه‌ی **واریز**، و
+ * فاکتور لحظه‌ی **نمایش**. اگر این عبارت دو کپی داشته باشد، دیر یا زود عددی که به
+ * کاربر وعده داده‌ایم با عددی که واقعاً واریز می‌شود واگرا می‌شود — همان کلاسِ باگی که
+ * بند ۲و/۶ج ریشه ثبتش کرده («عدد و واحد از دو جای مختلف بیایند، یکی‌شان دیر یا زود
+ * عوض می‌شود و آن یکی ساکت می‌ماند»). */
+const creditForPayment = (p) => {
+  const amount = p.original_amount || p.amount;
+  // بسته‌ی الماس خودش تخفیفِ ذاتی دارد؛ هدیه‌ی شارژِ تومانی رویش اعمال نمی‌شود.
+  return amount + (p.pkg ? 0 : bonusFor(amount));
+};
+
+/* 💎 تعدادِ الماسی که این فاکتور می‌خرد — **فقط وقتی اثباتاً الماس است**.
+ *
+ * اثبات = ردیف یک `pkg` دارد، یعنی `setPaymentPackage` اجرا شده و طبقِ قراردادِ همان
+ * statement، `original_amount` تعدادِ الماس است و `amount` پولِ تومانی.
+ *
+ * ⚠️ چرا اثبات لازم است و «هر پرداختی» کافی نیست: در مسیرِ تومانیِ کهنه
+ * (`setRechargeAmount`) همان ستون **تومان** است، پس چاپِ بی‌قیدش یعنی «➕۵۰٬۰۰۰ الماس»
+ * روی فاکتورِ ۵۰٬۰۰۰ تومانی. آن مسیر امروز پشتِ `legacyTomanPay` بسته است، ولی گاردی
+ * که به بسته بودنِ یک مسیرِ دیگر تکیه کند یک تله‌ی خفته است. **عددِ درست با واحدِ
+ * دروغ بدترین گزینه است؛ اگر اثبات نبود هیچ عددی چاپ نمی‌شود** (بند ۲و/۶ج ریشه).
+ *
+ * خروجی `{ pack, coins }` است یا `null`. ⚠️ `pack` می‌تواند `null` باشد در حالی که
+ * `coins` معتبر است: اگر روزی کلیدِ بسته‌ای از کاتالوگ برداشته شود `packOf` نال می‌دهد
+ * (همان سوراخِ ثبت‌شده‌ی v3.66.0). آن‌وقت **نام** حذف می‌شود ولی **عدد** می‌ماند، چون
+ * عدد همان چیزی است که کاربر بابتش پول می‌دهد. */
+const invoicePurchaseFor = (uid, paymentId) => {
+  try {
+    if (!curOf(uid)?.on) return null;           // دنیای تومانی: اعتبار الماس نیست
+    const p = paymentId && stmts.getPayment.get(paymentId);
+    if (!p || !p.pkg) return null;
+    const coins = creditForPayment(p);
+    if (!Number.isFinite(coins) || coins <= 0) return null;
+    return { pack: packOf(p), coins };
+  } catch (e) { logErr('invoice purchase:', e.message); return null; }
+};
+
 /* 🧾 ثبتِ مصرفِ مدل. **تنها مصرف‌کننده‌ی این تابع، لایه‌ی حسابداری است، نه فلوی فال.**
  * سه گاردِ عمدی: خودش try/catch دارد (خطای نوشتن هرگز به خوانش نمی‌رسد)، بعد از
  * استخراجِ متن صدا زده می‌شود، و اگر جدول به هر دلیلی نبود فقط یک لاگ می‌دهد.
@@ -1433,7 +1515,7 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   setState(uid, 'pay_receipt');
   // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
   if (dc) await ctx.reply(L.wallet.discountApplied(price, payAmount, dc.discount_percent), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -2677,6 +2759,13 @@ async function finishOnboarding(ctx, uid, props) {
   // وگرنه اولین انتخابِ کاربرِ تازه همیشه رایگان می‌شود و هیچ‌وقت فالِ واقعی را نمی‌بیند.
   if (uxV2For(uid)) {
     setState(uid, 'choose_spread');
+    /* 🎯 نشانه‌ی «هنوز داخلِ همان مسیرِ هدایت‌شده‌ی آنبوردینگ» (v3.71.0).
+       تنها مصرفش `onboardFirstSpread` است: صفحه‌ی اندازه فقط تا وقتی این نشانه هست
+       تک‌گزینه‌ای می‌شود. عمداً در **سشن** است نه یک ستونِ تازه، چون دقیقاً همان چیزی
+       را می‌خواهیم که سشن از قبل می‌کند: هر مسیری که کاربر را از این جریان بیرون
+       می‌برد (`/start`، منوی اصلی، کاتالوگِ کامل، لغوِ فال) `setSession(uid, null)`
+       می‌زند و همین‌جا خودبه‌خود پاک می‌شود. */
+    patchSession(uid, { onbFirst: 1 });
     // UX v2.5: دوباره **یک پیام** — چهار دکمه زیرِ خودِ «از کجا شروع کنیم؟ 📌» می‌نشینند و
     // «کدوم فال رو انتخاب می‌کنی؟» این‌جا (و فقط این‌جا) نمی‌آید.
     await ctx.reply(L.reading.startWhere, Markup.inlineKeyboard(falMenuKb(uid)));
@@ -3938,8 +4027,45 @@ bot.action('catalog_go', async (ctx) => {
 // صفحه‌ی انتخابِ اندازه: متن + کیبورد در یک تابع، چون هم `topic:` آن را می‌سازد و هم
 // (در صورتِ نیاز) هر نقطه‌ی دیگری که بخواهد همین صفحه را دوباره رندر کند.
 // ⚠️ `parse_mode: 'HTML'` لازم است چون خطِ موجودی داخلِ باکسِ نقل‌قول می‌رود.
+/* 🎯 صفحه‌ی اندازه در **آنبوردینگ** تک‌گزینه‌ای است (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۱۷).
+ *
+ * چرا: هدیه‌ی خوش‌آمد از همین نسخه ۳ الماس است، یعنی دقیقاً بهای یک فالِ سه‌کارتی. نشان
+ * دادنِ منوی «۳ / ۵ / ۱۰» به کاربرِ تازه یعنی دو گزینه از سه‌تا **نشدنی** است و اولین
+ * برخوردش با محصول یک بن‌بست می‌شود.
+ *
+ * ⚠️ دامنه عمداً باریک است و دقیقاً همان چیزی که مالک خواست: فقط تا وقتی کاربر داخلِ
+ * همان مسیرِ هدایت‌شده‌ی آنبوردینگ است. «بیرون زدن» را جدا پیاده نکردیم چون سشن از قبل
+ * همین را می‌کند: هر مسیری که کاربر را از جریان بیرون می‌برد `setSession(uid, null)`
+ * می‌زند و نشانه با آن می‌رود، پس روالِ عادی برمی‌گردد.
+ *
+ * ⚠️ و شرطِ موجودی **جدا** لازم است، نه احتیاطِ اضافه: متنِ این صفحه صریحاً ادعا می‌کند
+ * «موجودیت کافیه». اگر به هر دلیلی نباشد (هدیه واریز نشده، ریستِ ادمین، تغییرِ قیمتِ
+ * آینده)، آن جمله به کاربر **دروغ** می‌گوید. در آن حالت صفحه‌ی عادی می‌آید که خودش
+ * مسیرِ کم‌موجودی را درست هندل می‌کند. ادعا هرگز از دیتا جلو نمی‌زند. */
+const ONBOARD_FIRST_SIZE = 3;
+const onboardFirstSpread = (uid, t) => {
+  try {
+    if (!uxV2For(uid)) return null;
+    if (!getSession(uid)?.onbFirst) return null;
+    const sp = SPREAD_BY_ID[spreadIdOf(t.key, ONBOARD_FIRST_SIZE)];
+    if (!sp) return null;
+    return getBalance(uid) >= sp.price ? sp : null;
+  } catch (e) { logErr('onboard first spread:', e.message); return null; }
+};
+
 function pickSizeScreen(uid, t, from) {
   const cur = curOf(uid);
+  const first = onboardFirstSpread(uid, t);
+  if (first) {
+    return [L.reading.pickSizeOnboarding(getBalance(uid), cur, first.size), {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.startSize(first.size, first.price, cur), `spread:${first.id}`)],
+        // راهِ برگشت می‌ماند: هیچ صفحه‌ای بن‌بست نیست (بند ۹ب/۱ ریشه).
+        [Markup.button.callback(L.buttons.backToMenu, `tback:${from}`)],
+      ]),
+    }];
+  }
   return [L.reading.pickSize(getBalance(uid), cur), {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
@@ -4792,6 +4918,11 @@ const KB_REFRESH_DAYS = 3;
 db.exec("CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)");
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('ux_v2_launch', unixepoch())").run();
 const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_launch'").get()?.done_at || 0;
+// 💎 مرزِ کاهشِ پاداشِ دعوت (۱۰ ⟵ ۵، فقط فارسی). همان الگوی بالا و به همان دلیل: عددِ
+// هاردکد با تأخیرِ دیپلوی بی‌صدا غلط می‌شود، ولی مهرِ اولین بوت همیشه درست است. ردیفِ
+// دعوتِ قدیمی‌تر از این مهر همان ۱۰ وعده‌داده‌شده را می‌گیرد (`referralPayoutFor`).
+db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_5', unixepoch())").run();
+REFERRAL_5_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_5'").get()?.done_at || 0;
 /* ⌨️ تازه‌سازیِ بی‌صدای کیبورد وقتی نسخه‌اش عقب است (بند ۹ب-۲ ریشه).
 
    چطور کار می‌کند: یک پیامِ کوتاهِ **بی‌صدا** با کیبوردِ تازه فرستاده و بلافاصله حذف
@@ -5005,7 +5136,9 @@ async function finishReading(ctx, uid, readingId) {
       // پاداش طبق اقتصادِ **دعوت‌کننده** حساب می‌شود، چون تنها اوست که چیزی می‌گیرد.
       // محاسبه قبل از ادعا آمد (فقط خواندنِ پرچم است و هیچ await ای وسط نیست)، ولی
       // ترتیبِ حیاتی دست‌نخورده ماند: **ادعا قبل از واریز**، ضدِ پرداختِ دوباره.
-      const refAmt = referralBonusFor(ref.referrer_id);
+      // ⚠️ اینجا عمداً `referralPayoutFor` است نه `referralBonusFor`: دعوتی که پیش از
+      // مرزِ کاهش ثبت شده باید همان ۱۰ وعده‌داده‌شده را بگیرد، هرچند امروز کامل شده.
+      const refAmt = referralPayoutFor(ref.referrer_id, ref);
       stmts.setReferralRewarded.run(ref.id);
       stmts.credit.run(refAmt, ref.referrer_id);
       track(db, ref.referrer_id, 'credit_granted', { amount: refAmt, kind: 'referral' });
@@ -5354,7 +5487,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   const payAmount = amount;
 
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5480,7 +5613,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
 
   setState(uid, 'pay_receipt');
   await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
-  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER), {
+  await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(),
@@ -5622,7 +5755,19 @@ bot.action(/^pay_exit:(\d+)$/, async (ctx) => {
     setSession(uid, s);
     setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   }
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  /* 🗑 پیامِ گارد **کامل حذف** می‌شود، نه فقط دکمه‌اش (گزارشِ مالک، ۱۴۰۵/۰۶/۱۷).
+   *
+   * تا امروز فقط `editMessageReplyMarkup` می‌خورد، پس متنِ «یه فاکتور شارژِ باز داری /
+   * ۱️⃣ مبلغ رو واریز کن / ۲️⃣ رسید رو بفرست» **بعد از انصراف** سرِ جایش می‌ماند و
+   * دستورالعملی را نشان می‌داد که کاربر همین حالا لغوش کرده. بدتر: چون هر تپِ منو یک
+   * گاردِ تازه می‌سازد، چند نسخه از همان متن بالای چت می‌ماند.
+   *
+   * ⚠️ این پیام مصرفِ دیگری ندارد و فقط همین دو نقطه می‌سازندش (هر دو `pay_exit`)، پس
+   * حذفش چیزی از تاریخچه‌ی کاربر نمی‌برد. فالبک عمداً همان رفتارِ قبلی است: تلگرام
+   * حذفِ پیامِ قدیمی‌تر از ۴۸ ساعت را رد می‌کند و آن‌وقت دستِ‌کم دکمه باید برداشته شود،
+   * وگرنه دکمه‌ی مرده روی پیام می‌ماند. */
+  try { await ctx.deleteMessage(); }
+  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
   await replyCanceled(ctx, uid);          // نیتِ ذخیره‌شده همین‌جا برمی‌گردد
   await offerPendingReading(ctx, uid);    // فالِ رزروشده سرگردان نماند
 });
@@ -5786,7 +5931,7 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER), {
+    await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([cardCopyRow()]).reply_markup,
     });
@@ -6000,7 +6145,9 @@ function approvePayment(paymentId, allowRejected = false) {
   const creditAmount = p.original_amount || p.amount;
   // بسته‌ی الماس خودش تخفیفِ ذاتی دارد؛ هدیه‌ی شارژِ ۲۰۰k رویش اعمال نمی‌شود (وگرنه بسته‌ی
   // بزرگ دو بار تخفیف می‌گرفت و نردبانِ قیمت بی‌معنی می‌شد).
-  const bonus = p.pkg ? 0 : bonusFor(creditAmount);
+  // ⚠️ عددِ نهایی از `creditForPayment` می‌آید، همان تابعی که **فاکتور** هم از آن
+  // می‌خواند. دو کپی از این حساب یعنی وعده‌ی فاکتور و واریزِ واقعی روزی واگرا می‌شوند.
+  const bonus = creditForPayment(p) - creditAmount;
   stmts.setPaymentStatus.run('approved', paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });

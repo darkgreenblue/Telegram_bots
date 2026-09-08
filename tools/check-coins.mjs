@@ -162,7 +162,11 @@ console.log('\n▶ بسته‌های خریدِ سکه');
   // هر بسته باید نسبت به قیمتِ اسمیِ سکه (۱۰k) تخفیف بدهد، وگرنه خریدنش بی‌معنی است
   ok(per.every(v => v < COIN_VALUE), 'هر سه بسته از قیمتِ اسمیِ هر سکه ارزان‌ترند');
   // هدیه‌ی شارژِ ۲۰۰k نباید روی بسته اعمال شود (وگرنه بسته‌ی بزرگ دو بار تخفیف می‌گیرد)
-  ok(/const bonus = p\.pkg \? 0 : bonusFor\(creditAmount\)/.test(SRC), 'هدیه‌ی شارژ به بسته نمی‌چسبد');
+  // ⚠️ از v3.70.0 این حساب در `creditForPayment` نشسته، چون **فاکتور** هم باید همان
+  // عدد را نشان بدهد که `approvePayment` واریز می‌کند. ادعا جابه‌جا شد، ضعیف نشد.
+  ok(/return amount \+ \(p\.pkg \? 0 : bonusFor\(amount\)\);/.test(SRC), 'هدیه‌ی شارژ به بسته نمی‌چسبد');
+  ok(/const bonus = creditForPayment\(p\) - creditAmount;/.test(SRC),
+    'و `approvePayment` از همان تک‌منبع می‌خواند، نه از کپیِ خودش');
   ok(/const back = creditAmount \+ \(p\.pkg \? 0 : bonusFor\(creditAmount\)\)/.test(SRC),
     'برگشتِ پرداخت هم دقیقاً همان مقدارِ داده‌شده را پس می‌گیرد (بدونِ هدیه‌ی نداده)');
   // اصلاحِ خودکارِ «پرداختِ کمتر» وعده‌ی بسته را می‌شکند → باید به تصمیمِ انسانی برود
@@ -171,7 +175,7 @@ console.log('\n▶ بسته‌های خریدِ سکه');
   // ستون افزایشی است و پیش‌فرضِ خالی دارد (بند ۲ج/۱)
   ok(/ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''/.test(SRC), 'ستونِ pkg افزایشی با پیش‌فرضِ خالی');
   // فاکتورِ بسته باید مبلغِ **پرداختی** را نشان بدهد نه ارزشِ سکه‌ها
-  ok(/L\.wallet\.invoice\(pack\.toman, CARD_NUMBER, CARD_OWNER\)/.test(SRC), 'فاکتور، قیمتِ واقعیِ بسته را نشان می‌دهد');
+  ok(/L\.wallet\.invoice\(pack\.toman, CARD_NUMBER, CARD_OWNER/.test(SRC), 'فاکتور، قیمتِ واقعیِ بسته را نشان می‌دهد');
   // ⚠️ شناسه‌ی فاکتور در v3.51.0 از `s.paymentId` به متغیرِ محلیِ `payId` رفت (چون مسیر
   // حالا روی ردیفِ مرده یک ردیفِ زنده باز می‌کند). چیزی که این ادعا واقعاً قفل می‌کند
   // **آرگومانِ اولِ** claimAmount است، یعنی همان عددی که به اعتبارِ کاربر تبدیل می‌شود؛
@@ -332,9 +336,26 @@ console.log('\n▶ متن‌ها: هیچ عددِ پولی دو جا نوشته 
   ok(/const money = \(toman, cur\)/.test(LOC) && /const moneyLong = \(toman, cur\)/.test(LOC),
     'تبدیلِ واحدِ نمایش فقط در یک تابع است');
   ok(/cur\?\.on \? .*cur\.value/.test(LOC), 'وقتی سکه خاموش است، خروجی دقیقاً تومانِ قبلی می‌ماند');
-  // پولِ واقعی (فاکتور) همیشه تومان می‌ماند
-  const inv = LOC.slice(LOC.indexOf('invoice: (amount, card, owner)'), LOC.indexOf('invoice: (amount, card, owner)') + 300);
-  ok(inv.includes('تومان') && !inv.includes('cur'), 'فاکتورِ کارت‌به‌کارت همیشه به تومان می‌ماند (پولِ واقعی)');
+  /* پولِ واقعیِ فاکتور همیشه تومان می‌ماند.
+     ⚠️ نسخه‌ی قبلیِ این ادعا «هیچ `cur` ای در بدنه‌ی فاکتور نباشد» بود. از v3.70.0 که
+     خطِ «بابت خرید … الماس» اضافه شد، آن **شکل** دیگر درست نیست، ولی خودِ **قاعده**
+     دست‌نخورده است: چیزی که اضافه شد یک عددِ دیگر است، نه واحدی تازه برای مبلغ. پس
+     ادعا تیزتر شد به‌جای اینکه برداشته شود، و حالا مستقیماً روی خودِ `amount` می‌نشیند. */
+  const inv = LOC.slice(LOC.indexOf('invoice: (amount, card, owner'), LOC.indexOf('invoiceDiscounted:'));
+  ok(/\$\{fmt\(amount\)\} تومان/.test(inv), 'مبلغِ فاکتور با واحدِ «تومان» چاپ می‌شود');
+  ok(!/money(Long|Tight)?\(\s*amount/.test(inv),
+    'و مبلغ از هیچ تابعِ تبدیلِ واحد رد نمی‌شود (پولِ واقعی هرگز به الماس تبدیل نمی‌شود)');
+  // و ادعای رفتاری: عوض‌شدنِ نرخِ واحدِ نمایش نباید مبلغِ فاکتور را تکان بدهد.
+  {
+    const L = (await import('../bots/tarot/locales/fa.js')).default;
+    const amountLine = (value) => L.wallet.invoice(60_000, 'C', 'O',
+      { pack: { key: 'gold' }, coins: 30 },
+      { on: true, value, name: L.coinUnit.name, emoji: L.coinUnit.emoji })
+      .split('\n').find(x => x.startsWith('مبلغ:'));
+    ok(!!amountLine(1) && amountLine(1).includes('تومان'), 'خطِ مبلغ در رندرِ واقعی تومانی است');
+    ok(amountLine(1) === amountLine(10_000),
+      'و با عوض‌شدنِ نرخِ واحدِ نمایش تکان نمی‌خورد (پولِ واقعی تبدیل نمی‌شود)');
+  }
 }
 
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);

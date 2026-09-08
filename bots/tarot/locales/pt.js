@@ -328,6 +328,7 @@ export default {
     // o botão do tema não tem preço: o preço depende do tamanho, que ainda não foi escolhido
     topic: (t, name) => `${t.emoji} ${name || t.fa}`,
     // botão do tamanho: é aqui que o preço é definido, por isso ➖ e o valor do débito
+    startSize: (size, price, cur) => `Começar leitura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
     topicSize: (size, price, cur) => `${cardsN(size)} (➖${moneyTight(price, cur)})`,
     allSpreadsV2: '🗂 Todas as leituras',
     /* 🎲 carta da sorte: diamantes grátis uma vez por dia.
@@ -683,6 +684,13 @@ export default {
     // de tarólogo e a maioria das pessoas não sabe o que é. Sempre «leitura» ou «jogo».
     catalogV3: 'Qual leitura você escolhe? 🔮',
     allTopics: 'Escolha uma das leituras 🔮',
+    // 🎯 Tela de tamanho no onboarding: uma única opção (v3.71.0).
+    // ⚠️ A segunda linha é uma afirmação («dá»). O index.js só monta este texto
+    // quando o saldo realmente dá; caso contrário vai a tela normal.
+    pickSizeOnboarding: (balance, cur, size) =>
+      `🔮 Pra começar, quero te mostrar minha força com uma leitura de ${cardsN(size)}!\n\n` +
+      `✅ Fica tranquilo: o seu saldo dá pra uma leitura de ${cardsN(size)}!\n\n` +
+      purseQuote(balance, cur),
     pickSize: (balance, cur) =>
       '🔮 Leitura de quantas cartas?\n\n' +
       // ⚠️ As setas eram ◀️◀️, herança do layout RTL do persa: numa língua da esquerda
@@ -874,8 +882,13 @@ export default {
     // ☠️ Daqui até o fim do objeto é o trilho de transferência bancária: fatura com o
     // número do cartão, comprovante, conferência do admin, estorno de comprovante falso.
     // Na versão em português nada disso é alcançável.
-    invoice: (amount, card, owner) =>
-      `🧾 Pedido de pagamento\n\nValor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
+    invoice: (amount, card, owner, purchase = null, cur = null) =>
+      `🧾 Pedido de pagamento\n\n`
+      + (purchase
+        ? `Compra${packName(purchase.pack) ? ` do pacote *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
+        : '')
+      + `Valor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupom «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
     firstDiscountOffer: (percent, cap, code) =>

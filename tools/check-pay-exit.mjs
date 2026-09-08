@@ -111,13 +111,18 @@ if (setStatus) {
   // ⚠️ async است چون خودِ هندلر از اولین خط `await` دارد؛ نسخه‌ی اولِ این wrapper
   // همگام بود و `log` را **قبل از** تمام‌شدنِ بدنه برمی‌گرداند، یعنی همه‌ی ادعاها روی
   // حالتِ دست‌نخورده می‌نشستند. دقیقاً همان کلاسِ «تستی که کدِ واقعی را اجرا نمی‌کند».
+  let deleteFails = false;   // شبیه‌سازیِ ردِ حذف توسطِ تلگرام (پیامِ کهنه)
   const payExit = async (s, tapPid) => {
-    const log = { state: s.state, session: { ...s.session } };
+    const log = { state: s.state, session: { ...s.session }, deleted: 0, kbCleared: 0 };
     const fn = new Function('ctx', 'deps', `
       const { getSession, setSession, setState, stmts, replyCanceled, offerPendingReading } = deps;
       return (async () => {${exitBody}})();`);
     const p = fn({ from: { id: UID }, match: [null, String(tapPid ?? s.session.paymentId ?? 0)],
-         answerCbQuery: () => Promise.resolve(), editMessageReplyMarkup: () => Promise.resolve() },
+         answerCbQuery: () => Promise.resolve(),
+         // 🗑 از v3.71.0 پیامِ گارد **کامل حذف** می‌شود. هر دو متد ثبت می‌شوند تا بشود
+         // هم مسیرِ عادی را سنجید و هم فالبک را (پیامِ قدیمی‌تر از ۴۸ ساعت).
+         deleteMessage: () => { log.deleted++; return deleteFails ? Promise.reject(new Error('too old')) : Promise.resolve(); },
+         editMessageReplyMarkup: () => { log.kbCleared++; return Promise.resolve(); } },
        { getSession: () => log.session,
          setSession: (_u, v) => { log.session = v; },
          setState: (_u, v) => { log.state = v; },
@@ -129,6 +134,27 @@ if (setStatus) {
   };
   const after = await payExit(st);
   ok(!blocked(after), '✅ با pay_exit یک بار انصراف کافی است و قفل می‌شکند');
+
+  /* 🗑 پیامِ گارد بعد از انصراف باید **کامل حذف** شود، نه فقط دکمه‌اش (گزارشِ مالک،
+     ۱۴۰۵/۰۶/۱۷). تا v3.70.0 فقط `editMessageReplyMarkup` می‌خورد، پس متنِ «یه فاکتور
+     شارژِ باز داری / مبلغ رو واریز کن / رسید رو بفرست» سرِ جایش می‌ماند و دستورالعملی
+     را نشان می‌داد که کاربر همین حالا لغوش کرده. و چون هر تپِ منو یک گاردِ تازه
+     می‌سازد، چند نسخه از همان متن بالای چت جمع می‌شد. */
+  ok(after.deleted === 1, '🗑 پیامِ گارد حذف می‌شود (نه فقط دکمه‌اش)');
+  ok(after.kbCleared === 0, 'و وقتی حذف موفق بود، دیگر لازم نیست کیبورد جدا برداشته شود');
+
+  /* فالبک: تلگرام حذفِ پیامِ قدیمی‌تر از ۴۸ ساعت را رد می‌کند. آن‌وقت دستِ‌کم دکمه باید
+     برداشته شود، وگرنه دکمه‌ی مرده روی پیام می‌ماند — یعنی رفتارِ قبلی، نه هیچ‌چیز. */
+  {
+    deleteFails = true;
+    db.prepare('UPDATE payments SET status=? WHERE id=?').run('pending', st.session.paymentId);
+    const old = await payExit(st);
+    ok(old.deleted === 1 && old.kbCleared === 1,
+      'اگر حذف ممکن نبود (پیامِ کهنه)، دستِ‌کم دکمه برداشته می‌شود');
+    ok(!blocked(old), 'و انصراف در آن حالت هم واقعاً کار می‌کند');
+    deleteFails = false;
+    db.prepare('UPDATE payments SET status=? WHERE id=?').run('canceled', st.session.paymentId);
+  }
   ok(!PAY_STATES.includes(after.state), `استیت از PAY_STATES بیرون می‌رود (${after.state})`);
   ok(!after.session.paymentId, 'paymentId از سشن پاک می‌شود');
   ok(db.prepare("SELECT COUNT(*) c FROM payments WHERE status='pending'").get().c === 0,
