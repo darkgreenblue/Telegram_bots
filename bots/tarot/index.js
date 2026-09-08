@@ -219,7 +219,7 @@ const TEST_PHASE = false;
 //         «کارتِ روزِ رایگان» برای هر چهار زبان محتوا دارد؛ قبلاً فقط fa پر بود و بقیه با
 //         `ganjineh.js` fail-safe خاموش می‌ماندند. نسخه‌ی دوم و سوم (طبقِ برنامه‌ی
 //         GANJINEH.md) دورهای بعدی‌اند.
-const PRODUCT_VERSION = '3.71.0';
+const PRODUCT_VERSION = '3.72.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -716,6 +716,11 @@ const PACE_BREATH = 1500;
 // نشانگرِ typing سرِ جایش می‌ماند و بعد عوض می‌شود. مثل بقیه‌ی مکث‌ها ثابتِ **جدا** است،
 // چون `PACE_S` در ده‌ها نقطه‌ی دیگر هم هست.
 const PACE_PICK_LAST = 1000;
+/* ⏱ مکثِ بینِ «فهمیدم، متولدِ …» و «از کجا شروع کنیم؟» (خواسته‌ی مالک ۱۴۰۵/۰۶/۱۸:
+ * «نهایتاً در حدِ ۱ ثانیه کافیه»). قبلاً `PACE_M` بود یعنی ۲٫۵ ثانیه.
+ * ⚠️ ثابتِ جدا، نه پایین‌آوردنِ `PACE_M` — همان استدلالِ v3.55.0: آن یکی در ده‌ها
+ * نقطه‌ی دیگر است و عوض‌کردنش ریتمِ کلِ ربات را بی‌صدا جابه‌جا می‌کند. */
+const PACE_ONBOARD_MENU = 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
@@ -2751,7 +2756,7 @@ async function finishNameOnboarding(ctx, rawName) {
 // همان مسیرِ پایانیِ آنبوردینگ برای هر دو نسل (حوزه‌ی تمرکز و ماهِ تولد): استیت، رویداد،
 // و دو دکمه‌ی ورود. عمداً یک تابع است تا اگر فردا این پایان عوض شد، یک جا عوض شود.
 async function finishOnboarding(ctx, uid, props) {
-  await typing(ctx, PACE_M);
+  await typing(ctx, PACE_ONBOARD_MENU);
   setState(uid, 'idle');
   track(db, uid, EVENTS.ONBOARD_DONE, props);
   // UX v2.1: بلافاصله بعد از ماهِ تولد، «از کجا شروع کنیم؟» با **همان** منوی فال.
@@ -3791,19 +3796,22 @@ function falMenuKb(uid) {
 // بازگشتش **یک قدم** عقب برود و همین لیست را برگرداند، نه منوی کوتاه را (UX v2.3).
 // حالت را در session نمی‌گذاریم چون showCatalog/nav:menu آن را پاک می‌کنند و دکمه‌ی کهنه
 // هم باید سال‌ها بعد درست کار کند؛ callback_data تنها جای مطمئن است (سقف ۶۴ بایت، این ۱۶).
-const allTopicsKb = () => [
+/* ⚠️ آرگومانِ `uid` از ۱۴۰۵/۰۶/۱۸ لازم شد: در آنبوردینگ ردیفِ «بازگشت به منوی اصلی»
+ * نمی‌آید (خواسته‌ی صریحِ مالک — هر دکمه‌ای که کاربر را از مسیرِ اولِ محصول بیرون
+ * می‌برد، در همان یک مسیر برداشته می‌شود). بیرون از آنبوردینگ بیت‌به‌بیت مثل قبل. */
+const allTopicsKb = (uid) => [
   ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t, spreadName(t.fa)), `topic:${t.key}:a`), topicStyle(t.key))]),
-  ...navMenuRow(),
+  ...(inOnboardFlow(uid) ? [] : navMenuRow()),
 ];
 
 // تک‌منبعِ «متن + کیبورد» هر صفحه‌ی ناوبری، تا showCatalog و دکمه‌های بازگشت دقیقاً یک چیز
 // را رندر کنند (همان الگوی cat_guide/cat_back که از قبل در همین فایل هست).
 const falMenuScreen = (uid) => [L.reading.catalogV3, Markup.inlineKeyboard(falMenuKb(uid))];
-const allTopicsScreen = () => [L.reading.allTopics, Markup.inlineKeyboard(allTopicsKb())];
-const topicMenuScreen = (uid, kind) => (kind === 'a' ? allTopicsScreen() : falMenuScreen(uid));
+const allTopicsScreen = (uid) => [L.reading.allTopics, Markup.inlineKeyboard(allTopicsKb(uid))];
+const topicMenuScreen = (uid, kind) => (kind === 'a' ? allTopicsScreen(uid) : falMenuScreen(uid));
 
 function catalogKb(uid) {
-  if (uxV2For(uid)) return allTopicsKb();
+  if (uxV2For(uid)) return allTopicsKb(uid);
   const v2 = coinsOn(uid);
   const cur = curOf(uid);
   // بَج‌های کوتاه روی دکمه‌ها: عشق و رابطه = محبوب‌ترین، صلیب سلتی = کامل‌ترین.
@@ -3833,9 +3841,16 @@ async function showCatalog(ctx, full = false, edit = false) {
   // setSession(uid, null) پایین‌تر readingId را دور می‌ریزد؛ پس قبلش فالِ رزروشده باید گارد شود
   if (await blockDuringPendingReading(ctx)) return;
   setState(uid, 'choose_spread');
-  setSession(uid, null);
+  /* 🐛 باگِ ۱۴۰۵/۰۶/۱۸ (مالک دید): «مشاهده‌ی همه‌ی فال‌ها» **خروج از آنبوردینگ نیست**،
+     ولی `setSession(uid, null)` نشانه‌ی `onbFirst` را هم با خودش می‌برد. نتیجه: کاربرِ
+     وسطِ آنبوردینگ که لیستِ کامل را باز می‌کرد و موضوعِ دیگری می‌زد، صفحه‌ی **عادیِ**
+     ۳/۵/۱۰ کارتی را می‌دید با موجودیِ ۳ الماس، یعنی دو گزینه‌ی نشدنی.
+     پاک‌کردنِ سشن این‌جا لازم است (فالِ رزروشده و paymentId نباید سرگردان بمانند)، پس
+     فقط همان یک نشانه عبور داده می‌شود. */
+  const keepOnb = inOnboardFlow(uid);
+  setSession(uid, keepOnb ? { onbFirst: 1 } : null);
   if (uxV2For(uid)) {
-    const [text, kb] = full ? allTopicsScreen() : falMenuScreen(uid);
+    const [text, kb] = full ? allTopicsScreen(uid) : falMenuScreen(uid);
     if (edit) { try { return await ctx.editMessageText(text, kb); } catch {} }
     return ctx.reply(text, kb);
   }
@@ -4043,10 +4058,19 @@ bot.action('catalog_go', async (ctx) => {
  * آینده)، آن جمله به کاربر **دروغ** می‌گوید. در آن حالت صفحه‌ی عادی می‌آید که خودش
  * مسیرِ کم‌موجودی را درست هندل می‌کند. ادعا هرگز از دیتا جلو نمی‌زند. */
 const ONBOARD_FIRST_SIZE = 3;
+/* 🎯 تک‌منبعِ «کاربر هنوز داخلِ مسیرِ هدایت‌شده‌ی آنبوردینگ است».
+ * سه مصرف‌کننده دارد و هر سه باید **یک** جواب بگیرند، وگرنه کاربر نیمی از صفحه‌ها را
+ * در حالتِ آنبوردینگ و نیمی را در حالتِ عادی می‌بیند — دقیقاً همان ناهماهنگی که مالک
+ * در ۱۴۰۵/۰۶/۱۸ دید: «مشاهده‌ی همه‌ی فال‌ها» نشانه را پاک می‌کرد، پس صفحه‌ی بعدی
+ * منوی عادیِ ۳/۵/۱۰ می‌شد. */
+const inOnboardFlow = (uid) => {
+  try { return !!getSession(uid)?.onbFirst; }
+  catch (e) { logErr('onboard flow:', e.message); return false; }
+};
 const onboardFirstSpread = (uid, t) => {
   try {
     if (!uxV2For(uid)) return null;
-    if (!getSession(uid)?.onbFirst) return null;
+    if (!inOnboardFlow(uid)) return null;
     const sp = SPREAD_BY_ID[spreadIdOf(t.key, ONBOARD_FIRST_SIZE)];
     if (!sp) return null;
     return getBalance(uid) >= sp.price ? sp : null;
@@ -4059,10 +4083,12 @@ function pickSizeScreen(uid, t, from) {
   if (first) {
     return [L.reading.pickSizeOnboarding(getBalance(uid), cur, first.size), {
       parse_mode: 'HTML',
+      /* ⚠️ عمداً **فقط یک دکمه** (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۱۸): در اولین مواجهه‌ی
+         کاربر با فال، هر دکمه‌ای که از مسیر بیرونش می‌برد برداشته می‌شود.
+         این یک استثنای آگاهانه بر بند ۹ب/۱ است، نه فراموشی: راهِ خروج از بین نرفته،
+         `/start` همیشه کار می‌کند و گاردِ آنبوردینگ هم سرِ جایش است. */
       ...Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.startSize(first.size, first.price, cur), `spread:${first.id}`)],
-        // راهِ برگشت می‌ماند: هیچ صفحه‌ای بن‌بست نیست (بند ۹ب/۱ ریشه).
-        [Markup.button.callback(L.buttons.backToMenu, `tback:${from}`)],
       ]),
     }];
   }
