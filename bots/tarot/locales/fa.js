@@ -5,6 +5,10 @@
 import { SUPPORT_CONTACT } from '../../../shared/support.js';
 
 const fmt = (n) => Number(n).toLocaleString('fa-IR');
+// تعدادِ الماسِ یک بسته یک **شمارش** است، نه پول؛ جداکننده‌ی هزارگان (٬) فقط برای
+// مبلغِ تومانی/استارزی معنی دارد. بدونش «بسته جاودان» (۱۰۰۰ الماس) عددش را با آن جداکننده
+// چاپ می‌کرد و شبیهِ یک مبلغِ پولی می‌شد (گزارشِ صریحِ مالک، v3.77.0).
+const coinsFmt = (n) => Number(n).toLocaleString('fa-IR', { useGrouping: false });
 
 /* 💰 خطِ مبلغِ همه‌ی پیام‌های ادمین — تک‌منبع (module-level تا هر سه پیامِ ادمین از یک
  * جا بخوانند؛ اگر هرکدام نسخه‌ی خودش را داشت، دوباره یکی‌شان از قلم می‌افتاد).
@@ -20,7 +24,7 @@ const fmt = (n) => Number(n).toLocaleString('fa-IR');
  * بسته هم می‌آید تا ادمین بداند دقیقاً چه چیزی فروخته شده.
  * `pack` را index.js از `PACKAGE_BY_KEY[p.pkg]` می‌دهد (null = پرداختِ غیربسته‌ای). */
 const adminMoney = (p, pack) => (pack
-  ? `مبلغ: ${fmt(p.amount)} تومان\nبابت: ${pack.emoji} ${packName(pack)} (${fmt(pack.coins)} الماس)`
+  ? `مبلغ: ${fmt(p.amount)} تومان\nبابت: ${pack.emoji} ${packName(pack)} (${coinsFmt(pack.coins)} الماس)`
   : `مبلغ: ${fmt(p.amount)} تومان${p.original_amount && p.original_amount !== p.amount
     ? ` (اعتبار: ${fmt(p.original_amount)} تومان)` : ''}`);
 
@@ -120,8 +124,11 @@ const moneyTight = (toman, cur) =>
 // تک‌منبع است، پس عوض‌کردنِ دوباره‌ی این کلمه هم یک خط خواهد بود.
 // نامِ نمایشیِ بسته از روی کلیدِ پایدارش. تک‌منبع، تا هر چهار جای مصرف یک چیز بخوانند.
 const PACK_NAMES = {
-  basic: 'بسته‌ی معمولی', gold: 'بسته ویژه', magic: 'بسته‌ی جادویی',
-  legend: 'بسته‌ی افسانه‌ای', eternal: 'بسته‌ی جاودان',
+  // magic/eternal عمداً بدونِ نیم‌فاصله‌ی «ی» اضافه‌اند (خواسته‌ی صریحِ مالک، v3.77.0):
+  // «بسته جادویی»/«بسته جاودان»، نه «بسته‌ی جادویی»/«بسته‌ی جاودان». basic/legend
+  // چون خواسته نشده دست‌نخورده ماندند.
+  basic: 'بسته‌ی معمولی', gold: 'بسته ویژه', magic: 'بسته جادویی',
+  legend: 'بسته‌ی افسانه‌ای', eternal: 'بسته جاودان',
 };
 const packName = (p) => PACK_NAMES[p?.key] || '';
 
@@ -248,9 +255,9 @@ export default {
     // دکمه‌ی هر بسته: نامِ بسته، تعدادِ سکه، و قیمتِ واقعی به تومان (پولِ واقعی همیشه تومان می‌ماند)
     // نگارشِ تصمیمِ مالک: «🥉 بسته‌ی معمولی: ➕۱۰💎 | ۳۰٬۰۰۰ تومان». خطِ تیره‌ی بلندِ قبلی
     // هم این‌جا رفت (بند ۱۰ ریشه: «—» امضای متنِ ماشینی است و در متنِ رو-به-کاربر ممنوع).
-    // 🆕 v3.75.0: «جاودان» رنگِ رسمی ندارد (سه رنگِ Bot API قبلاً مصرف شده‌اند)، پس
-    // تمایزش از پیشوندِ 👑 در خودِ متنِ دکمه می‌آید، نه استایل.
-    coinPack: (p, cur) => `${p.key === 'eternal' ? '👑 ' : ''}${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji} | ${fmt(p.toman)} تومان`,
+    // ⚠️ v3.75.0 این‌جا یک 👑 اضافه پیشوند می‌گذاشت روی ایموجیِ خودِ «جاودان» (که خودش
+    // 👑 است)، پس دکمه دو بار تاج نشان می‌داد. v3.77.0 حذفش کرد؛ ایموجیِ خودِ بسته کافی است.
+    coinPack: (p, cur) => `${p.emoji} ${packName(p)}: ➕${coinsFmt(p.coins)}${cur.emoji} | ${fmt(p.toman)} تومان`,
     rechargeAmount: (a, bonus) => bonus ? `${fmt(a)} تومان (+${fmt(bonus)} هدیه 🎁)` : `${fmt(a)} تومان`,
     customAmount: '✏️ مبلغ دلخواه',
     // ⚠️ عمداً بدونِ ایموجی (خواسته‌ی صریحِ مالک، v3.75.0 — آزمایشِ pack_reveal_v1):
@@ -931,7 +938,7 @@ export default {
     coinPacks: (cur) =>
       '🛒 از بین بسته‌های زیر، بسته‌ای که برات مناسبه رو انتخاب کن:\n\n' +
       `با انتخاب بسته‌های بزرگ‌تر، هزینه‌ی هر ${cur.name} برات خیلی ارزون‌تر تموم می‌شه! 🧮`,
-    coinPackChosen: (p, cur) => `${p.emoji} *${packName(p)}*: ➕${fmt(p.coins)} ${cur.name} ${cur.emoji}`,
+    coinPackChosen: (p, cur) => `${p.emoji} *${packName(p)}*: ➕${coinsFmt(p.coins)} ${cur.name} ${cur.emoji}`,
     /* ⭐ عنوان و توضیحِ فاکتورِ استارز. در فارسی **هرگز استفاده نمی‌شود** (ریلِ فارسی
      * کارت‌به‌کارت است)، ولی این‌جا می‌ماند تا شکلِ قرارداد کامل باشد و هر locale تازه
      * بداند دقیقاً چه کلیدهایی را باید پر کند. عنوان روی صفحه‌ی تأییدِ بومیِ تلگرام
@@ -941,7 +948,7 @@ export default {
     starsStaleInvoice: 'این فاکتور دیگر معتبر نیست.',
     starsTempError: 'خطای موقت. دوباره تلاش کن.',
     starsInvoiceTitle: (p) => `${p.emoji} ${packName(p)}`,
-    starsInvoiceDesc: (p, stars) => `${fmt(p.coins)} الماس برای فال‌هایت. ${fmt(stars)} ستاره از حسابت کم می‌شود.`,
+    starsInvoiceDesc: (p, stars) => `${coinsFmt(p.coins)} الماس برای فال‌هایت. ${fmt(stars)} ستاره از حسابت کم می‌شود.`,
     coinsApproved: (coins, balanceCoins, cur) =>
       `✅ ${fmt(coins)} ${cur.name} ${cur.emoji} به حسابت اضافه شد!\n\n` +
       `💠 موجودی جدید: ${fmt(balanceCoins)} ${cur.name} ${cur.emoji}`,
@@ -975,7 +982,7 @@ export default {
       `🧾 فاکتور شارژ\n\n`
       + (purchase
         ? `بابت خرید${packName(purchase.pack) ? ` بسته‌ی *${packName(purchase.pack)}*` : ''}: `
-          + `*${fmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n\n`
+          + `*${coinsFmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `مبلغ: *${fmt(amount)} تومان*\n\nکارت‌به‌کارت به:\n\`${card}\`\n${owner}\n\n`
       + `━━━━━━━━━━━━━\n`
@@ -994,7 +1001,7 @@ export default {
       `⌛️ این فاکتور منقضی شد\n\n`
       + (purchase
         ? `بابت خرید${packName(purchase.pack) ? ` بسته‌ی *${packName(purchase.pack)}*` : ''}: `
-          + `*${fmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n`
+          + `*${coinsFmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n`
         : '')
       + `مبلغ: *${fmt(amount)} تومان*\n\n`
       + `اگه هنوز مایلی، از منوی شارژِ ${purse(cur)}ت دوباره اقدام کن.`,
@@ -1004,7 +1011,7 @@ export default {
     invoiceStars: (stars, purchase, cur, rate, amountToman) =>
       `🧾 فاکتور شارژ (پرداخت با استارز)\n\n`
       + (purchase
-        ? `بابت خرید بسته‌ی *${packName(purchase.pack)}*: *${fmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n\n`
+        ? `بابت خرید بسته‌ی *${packName(purchase.pack)}*: *${coinsFmt(purchase.coins)} ${cur?.name || 'الماس'}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `مبلغ: *${fmt(amountToman)} تومان*\n`
       + (rate ? `نرخِ لحظه‌ایِ تتر: *${fmt(rate)} تومان*\n` : '')

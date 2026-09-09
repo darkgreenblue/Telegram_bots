@@ -157,6 +157,37 @@ console.log('\n۸) جهش‌های تأییدکننده');
     'و ادعای بخشِ ۳ روی نسخه‌ی سالم سبز و روی نسخه‌ی آلوده قرمز می‌شود (تفکیک واقعی است)');
 }
 
+/* ══ ۹) پاک‌سازیِ آرتیفکت‌ها روی انصراف/خروج (v3.77.0، گزارشِ مالک) ══════════
+   باگ: بعد از انصرافِ فاکتور، «بسته‌ی فلان: ➕n الماس 💎» و فاکتورِ نیتیوِ استارز
+   هر دو در چت می‌ماندند — هیچ‌کدام هیچ‌جا پاک نمی‌شدند، چون شناسه‌شان یا اصلاً
+   ذخیره نشده بود (پیامِ بسته) یا فقط توسطِ card_toggle خوانده می‌شد نه pay_cancel/
+   pay_exit. */
+console.log('\n۹) پاک‌سازیِ آرتیفکت‌های فاکتور روی انصراف/خروج');
+{
+  const chosenBlock = bodyOf('const pickedMsg = await ctx.reply(L.wallet.coinPackChosen', 'const invMsg = await ctx.reply(L.wallet.invoice(pack.toman') || '';
+  ok(!!chosenBlock, 'پیامِ «بسته‌ی فلان» شناسه‌اش را نگه می‌دارد');
+  ok(/patchSession\(uid, \{ pickedMsgId: pickedMsg\.message_id \}\)/.test(chosenBlock),
+    'و شناسه در سشن ذخیره می‌شود (dropInvoiceArtifacts بعداً از همین می‌خواند)');
+
+  const dropFn = bodyOf('async function dropInvoiceArtifacts(ctx, uid, p) {', '\n}') || '';
+  ok(/deleteMessage\(ctx\.chat\.id, p\.stars_invoice_msg_id\)/.test(dropFn), 'فاکتورِ نیتیوِ استارز حذف می‌شود');
+  ok(/deleteMessage\(ctx\.chat\.id, s\.pickedMsgId\)/.test(dropFn), 'و پیامِ «بسته‌ی فلان» هم حذف می‌شود');
+  ok(/patchSession\(uid, \{ pickedMsgId: null \}\)/.test(dropFn), 'و شناسه‌اش پاک می‌شود تا دوباره حذفِ بی‌اثر تلاش نشود');
+
+  for (const marker of ["bot.action(/^pay_cancel:(\\d+)$/, async (ctx) => {", "bot.action(/^pay_exit:(\\d+)$/, async (ctx) => {"]) {
+    const fn = bodyOf(marker, '\n});') || '';
+    ok(/await dropInvoiceArtifacts\(ctx, uid, p\);/.test(fn),
+      `«${marker.match(/\^([a-z_]+):/)[1]}» قبل از تغییرِ وضعیت آرتیفکت‌ها را پاک می‌کند`);
+  }
+
+  // جهشِ تأییدکننده: اگر dropInvoiceArtifacts واقعاً هر دو پیام را اجرا نکند (مثلاً
+  // فقط یکی را حذف کند)، ادعاهای بالا باید قرمز شوند — با شبیه‌سازیِ نسخه‌ی ناقص.
+  const halfFixed = dropFn.replace(/if \(s\.pickedMsgId\) \{[\s\S]*?\n  \}/, '');
+  ok(/deleteMessage\(ctx\.chat\.id, p\.stars_invoice_msg_id\)/.test(halfFixed) &&
+     !/deleteMessage\(ctx\.chat\.id, s\.pickedMsgId\)/.test(halfFixed),
+    'جهشِ «فقط فاکتورِ استارز پاک شود» ادعای پیامِ بسته را قرمز می‌کند (تفکیک واقعی است)');
+}
+
 /* ══ نتیجه ═══════════════════════════════════════════════════════════════ */
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا`);
 process.exit(fail ? 1 : 0);

@@ -115,7 +115,7 @@ if (setStatus) {
   const payExit = async (s, tapPid) => {
     const log = { state: s.state, session: { ...s.session }, deleted: 0, kbCleared: 0 };
     const fn = new Function('ctx', 'deps', `
-      const { getSession, setSession, setState, stmts, replyCanceled, offerPendingReading } = deps;
+      const { getSession, setSession, setState, stmts, replyCanceled, offerPendingReading, dropInvoiceArtifacts } = deps;
       return (async () => {${exitBody}})();`);
     const p = fn({ from: { id: UID }, match: [null, String(tapPid ?? s.session.paymentId ?? 0)],
          answerCbQuery: () => Promise.resolve(),
@@ -128,7 +128,8 @@ if (setStatus) {
          setState: (_u, v) => { log.state = v; },
          stmts: { getPayment: { get: (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id) },
                   setPaymentStatus: { run: (stt, id) => db.prepare(setStatus).run(stt, id) } },
-         replyCanceled: () => Promise.resolve(), offerPendingReading: () => Promise.resolve() });
+         replyCanceled: () => Promise.resolve(), offerPendingReading: () => Promise.resolve(),
+         dropInvoiceArtifacts: () => Promise.resolve() });
     await p;
     return log;
   };
