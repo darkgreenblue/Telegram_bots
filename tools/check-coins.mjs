@@ -362,5 +362,21 @@ console.log('\n▶ متن‌ها: هیچ عددِ پولی دو جا نوشته 
   }
 }
 
+console.log('\n▶ تعدادِ الماس بدونِ جداکننده‌ی هزارگان (v3.77.0، گزارشِ مالک)');
+{
+  // «بسته جاودان» تنها بسته‌ای است که تعدادِ الماسش از هزار رد می‌شود (۱۰۰۰). جداکننده‌ی
+  // هزارگانِ فارسی (٬) فقط برای مبلغ معنی دارد؛ روی یک شمارش، شبیهِ مبلغِ پولی می‌شود.
+  ok(/const coinsFmt = \(n\) => Number\(n\)\.toLocaleString\('fa-IR', \{ useGrouping: false \}\);/.test(LOC),
+    'coinsFmt بدونِ جداکننده تعریف شده');
+  const { default: L } = await import('../bots/tarot/locales/fa.js');
+  const eternal = { key: 'eternal', emoji: '👑', coins: 1000, toman: 1_490_000 };
+  const cur = { name: 'الماس', emoji: '💎' };
+  const btn = L.buttons.coinPack(eternal, cur);
+  ok(btn.includes('۱۰۰۰') && !btn.includes('۱٬۰۰۰'), `دکمه‌ی بسته: تعدادِ الماس بدونِ جداکننده (شد: «${btn}»)`);
+  ok(btn.includes('۱٬۴۹۰٬۰۰۰'), 'و مبلغِ تومانی همچنان جداکننده دارد (این عدد پول است)');
+  const desc = L.wallet.starsInvoiceDesc(eternal, 100);
+  ok(desc.includes('۱۰۰۰ الماس') && !desc.includes('۱٬۰۰۰'), `متنِ فاکتورِ استارز هم همین‌طور (شد: «${desc}»)`);
+}
+
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 process.exit(errs.length ? 1 : 0);
