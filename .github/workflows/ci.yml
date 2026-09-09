@@ -524,6 +524,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-pack-reveal.mjs
 
+      # سوییچِ استارز per-فاکتور (فقط فارسی، فقط-ادمین): amount هرگز دست‌خورده نمی‌شود.
+      - name: Stars toggle check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-stars-toggle.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check

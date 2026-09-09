@@ -267,6 +267,9 @@ export default {
     // pack_reveal_v1 (v3.75.0) inalcançável aqui (só trilho de cartão), chave pela forma.
     revealMorePacks: 'Ver pacotes mais vantajosos',
     discountHave: '🎟️ Tenho um cupom',
+    // Alternador de Stars (v3.76.0) inalcançável aqui (este trilho já é só Stars).
+    payWithStars: '⭐ Pagar com Stars do Telegram',
+    payWithCard: '↩️ Pagar por transferência',
     wantDiscount: '🎁 Quero desconto',
     payThisReading: (price) => `💳 Pagar só esta leitura (${starsN(price)})`,
     dailyReminderOffYes: 'Sim, pode desligar',
@@ -907,6 +910,12 @@ export default {
           + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
         : '')
       + `Valor: *${fmt(amount)}*\n\nSe ainda quiser, comece de novo pelo menu de recarga.`,
+    // Alternador de Stars (v3.76.0) inalcançável aqui (este trilho já é só Stars).
+    invoiceStars: (stars, purchase, cur) =>
+      `🧾 Pedido (pagamento com Stars)\n\n`
+      + (purchase ? `Compra do pacote *${packName(purchase.pack)}*: *${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n` : '')
+      + `Valor: *${fmt(stars)} Stars do Telegram* ⭐\n\nPague pelo botão na mensagem abaixo.`,
+    starsInvoiceExpiredNotice: '⌛️ Seu pedido com Stars expirou.\n\nO pedido voltou para pagamento por transferência.',
     firstDiscountOffer: (percent, cap, code) =>
       `🎁 Na primeira compra você ganha ${fmt(percent)}% de desconto.\n\n` +
       `O teto é ${fmt(cap)}.\n\n` +

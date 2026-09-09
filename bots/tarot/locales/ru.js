@@ -647,6 +647,9 @@ export default {
   // pack_reveal_v1 (v3.75.0) недостижим здесь (только рельс карт), ключ ради формы.
   revealMorePacks: 'Показать более выгодные наборы',
   discountHave: '🎟️ У меня есть промокод',
+  // Переключатель Stars (v3.76.0) недостижим здесь: этот рельс и так только Stars.
+  payWithStars: '⭐ Оплатить звёздами Telegram',
+  payWithCard: '↩️ Оплатить переводом на карту',
   wantDiscount: '🎁 Хочу скидку',
   payThisReading: (price) => `💳 Оплатить этот расклад (${fmt(price)} ${plural(price, ['звезда', 'звезды', 'звёзд'])})`,
   dailyReminderOffYes: 'Да, отключи',
@@ -908,6 +911,12 @@ export default {
         + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
       : '')
     + `Сумма: *${fmt(amount)}*\n\nЕсли всё ещё хочешь, начни заново из меню пополнения.`,
+  // Переключатель Stars (v3.76.0) недостижим здесь (этот рельс и так только Stars).
+  invoiceStars: (stars, purchase, cur) =>
+    `🧾 Счёт (оплата звёздами)\n\n`
+    + (purchase ? `Покупка набора *${packName(purchase.pack)}*: *${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n` : '')
+    + `Сумма: *${fmt(stars)} звёзд Telegram* ⭐\n\nОплати кнопкой в сообщении ниже.`,
+  starsInvoiceExpiredNotice: '⌛️ Счёт со Stars истёк.\n\nСчёт вернулся к оплате переводом на карту.',
   firstDiscountOffer: (percent, cap, code) =>
     `🎁 На первое пополнение дарим скидку ${fmt(percent)}%.\n\n` +
     `Максимум ${fmt(cap)}.\n\n` +
