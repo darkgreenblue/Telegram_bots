@@ -5875,7 +5875,13 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   }
 
   setState(uid, 'pay_receipt');
-  await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
+  // 🐛 v3.77.0 (گزارشِ مالک): این پیام مصرفِ دیگری ندارد و فقط این‌جا ساخته می‌شود، ولی
+  // شناسه‌اش هیچ‌جا ذخیره نمی‌شد. نتیجه: بعد از انصرافِ فاکتور، هم این پیام و هم فاکتورِ
+  // نیتیوِ استارز (اگر کاربر سوییچ کرده بود) بی‌صدا در چت می‌ماندند. حالا شناسه‌اش در
+  // سشن می‌رود تا `pay_cancel`/`pay_exit` بتوانند پاکش کنند. پیامِ پرداختِ **موفق** (که
+  // ارزشِ ماندنِ کاملاً عمدی دارد، بند v3.70.0) به این ردگیری کاری ندارد.
+  const pickedMsg = await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
+  if (pickedMsg?.message_id) patchSession(uid, { pickedMsgId: pickedMsg.message_id });
   const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
@@ -5985,11 +5991,26 @@ bot.action(/^disc_back:(\d+)$/, async (ctx) => {
     [Markup.button.callback(L.buttons.cancel, `pay_cancel:${ctx.match[1]}`)],
   ]));
 });
+/* 🗑 v3.77.0 (گزارشِ مالک): تنها نقطه‌ای که «پیامِ بسته‌ی انتخاب‌شده» (`pickedMsgId`
+ * در سشن) و فاکتورِ نیتیوِ استارز (`p.stars_invoice_msg_id`) را پاک می‌کند. هر دو
+ * پیام مصرفِ دیگری ندارند و فقط لحظه‌ی صدورِ فاکتور ساخته می‌شوند؛ بدونِ این پاک‌سازی،
+ * انصراف یا خروجِ صریح فاکتورِ اصلی را می‌بست ولی این دو در چت باقی می‌ماندند. */
+async function dropInvoiceArtifacts(ctx, uid, p) {
+  if (p?.stars_invoice_msg_id) {
+    try { await ctx.telegram.deleteMessage(ctx.chat.id, p.stars_invoice_msg_id); } catch {}
+  }
+  const s = getSession(uid);
+  if (s.pickedMsgId) {
+    try { await ctx.telegram.deleteMessage(ctx.chat.id, s.pickedMsgId); } catch {}
+    patchSession(uid, { pickedMsgId: null });
+  }
+}
 bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const p = stmts.getPayment.get(pid);
+  await dropInvoiceArtifacts(ctx, uid, p);
   if (p && p.user_id === uid && ['pending'].includes(p.status)) stmts.setPaymentStatus.run('canceled', p.id);
   // همان قاعده‌ی pay_back (باگِ از قبل موجود): تپِ یک دکمه‌ی انصرافِ کهنه نباید فاکتورِ
   // زنده‌ی فعلی را از سشن جدا کند. در مسیرِ عادی (p.id === s.paymentId) رفتار عوض نمی‌شود.
@@ -6071,6 +6092,7 @@ bot.action(/^pay_exit:(\d+)$/, async (ctx) => {
   const s = getSession(uid);
   const pid = Number(s.paymentId) || parseInt(ctx.match[1], 10);
   const p = stmts.getPayment.get(pid);
+  await dropInvoiceArtifacts(ctx, uid, p);
   if (p && p.user_id === uid && p.status === 'pending') stmts.setPaymentStatus.run('canceled', p.id);
   // ⚠️ استیت **فقط** وقتی عوض می‌شود که واقعاً یک فلوی پرداختِ باز را بسته باشیم.
   // 🐛 نسخه‌ی اولِ همین فیکس (v3.59.0) این خط را بی‌قید داشت، و در همان تیکت دیده شد که
