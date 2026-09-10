@@ -1044,6 +1044,7 @@ export default {
     stateLost: 'Tu sesión venció; empieza de nuevo desde el menú principal 🌙',
     openInvoice: 'Tienes un pedido de pago abierto 🧾 Termínalo o cancélalo primero, y seguimos.',
     voiceTooLong: (sec) => `No puedo recibir un audio de más de ${fmt(sec)} segundos 🙏 Manda uno más corto o escribe tu pregunta.`,
+    packRetired: 'Este paquete ya no está disponible 🙏 Elige uno de los de abajo 👇',
   },
 
   // ------------------------- پرامپت‌های LLM (locale-owned) -------------------------
