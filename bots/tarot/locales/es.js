@@ -850,11 +850,6 @@ export default {
       + (Number.isFinite(balance) ? `💠 ${purseLine(balance, cur)}` : ''),
   },
 
-  unstuck: {
-    notice: 'Hola 🌿 Si hace un tiempo algo se te quedó trabado en el bot, ya está resuelto.\n\n'
-      + 'Ahora todo funciona bien y tu lectura te espera cuando quieras ✨',
-  },
-
   milestone: {
     checkin: (summary) =>
       `Hola 🌙 Ya pasaron dos semanas de tu lectura.\n\n«${summary}»\n\n¿Cómo anda la energía de tu camino ahora? ¿Lo vemos con una carta rápida (gratis)?`,

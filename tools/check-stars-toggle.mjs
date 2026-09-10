@@ -77,7 +77,68 @@ console.log('\n۴) رفت‌وبرگشت و انقضای ۳۰دقیقه‌ای')
 const toggleOnFn = bodyOf("bot.action(/^stars_toggle:(\\d+)$/, async (ctx) => {", '\n});') || '';
 ok(/p\.user_id !== uid \|\| p\.status !== 'pending' \|\| p\.step !== 'receipt'/.test(toggleOnFn), 'مالکیت + وضعیت قبل از هر کاری چک می‌شود');
 ok(/if \(!pack\) return;/.test(toggleOnFn), 'و دفاعِ دومِ pack (حتی اگر hasPkg اشتباه صدا زده شود)');
-ok(/setStarsToggle\.run\(null, stars, pid\)\.changes === 0\) return;/.test(toggleOnFn), 'ادعای اتمیک قبل از هر ادیت/ارسال (ضدِ دوبار-تپ)');
+ok(/claimStarsToggle\.run\(stars, pid\)\.changes === 0\) return;/.test(toggleOnFn), 'ادعای اتمیک قبل از هر ادیت/ارسال (ضدِ دوبار-تپ)');
+ok(/setStarsInvoiceMsg\.run\(inv\.message_id, pid\)/.test(toggleOnFn),
+  'شناسه‌ی فاکتورِ نیتیو با statementِ **جدا** نوشته می‌شود (نه با همان ادعا، وگرنه ادعا بی‌اثر می‌شد)');
+ok(/clearStarsToggle\.run\(pid\)/.test(toggleOnFn),
+  'و شکستِ ارسالِ فاکتور ادعا را آزاد می‌کند (وگرنه ردیف «سوییچ‌شده ولی بدونِ فاکتور» گیر می‌ماند)');
+
+/* 🔁 ورودِ دوباره — رفتاری، روی SQLite واقعی و با SQLِ برداشته‌شده از سورس.
+ *
+ * 🐛 باگی که این بلوک قفلش می‌کند: نسخه‌ی اول شرطش فقط `status='pending'` بود و چون
+ * خودِ UPDATE وضعیت را عوض نمی‌کند، تپِ دوم هم `changes=1` می‌گرفت. صفِ per کاربر
+ * (v3.66.0) هم جلویش را نمی‌گرفت: آن هم‌زمانی را حذف می‌کند نه ورودِ دوباره را. */
+console.log('\n۴ب) ورودِ دوباره روی همان دکمه (رفتاری)');
+{
+  const claimSql = sqlOf('claimStarsToggle');
+  const setMsgSql = sqlOf('setStarsInvoiceMsg');
+  const clearSql = sqlOf('clearStarsToggle');
+  ok(!!claimSql && !!setMsgSql && !!clearSql, 'هر سه statement از سورس برداشته شدند');
+  ok(/stars_toggle_at IS NULL/.test(claimSql || ''), 'و شرطِ ضدِ ورودِ دوباره داخلِ خودِ SQL است، نه در جاوااسکریپت');
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT, step TEXT,
+    amount INTEGER, stars_invoice_msg_id INTEGER, stars_toggle_at INTEGER, stars_amount INTEGER)`);
+  const seed = () => {
+    db.exec('DELETE FROM payments');
+    db.prepare("INSERT INTO payments (id,user_id,status,step,amount) VALUES (1,7,'pending','receipt',50000)").run();
+  };
+  const claim = db.prepare(claimSql), setMsg = db.prepare(setMsgSql), clear = db.prepare(clearSql);
+  const row = () => db.prepare('SELECT * FROM payments WHERE id=1').get();
+
+  seed();
+  ok(claim.run(13, 1).changes === 1, 'تپِ اول ادعا را می‌گیرد');
+  setMsg.run(555, 1);
+  ok(row().stars_invoice_msg_id === 555, 'و شناسه‌ی فاکتورِ نیتیو می‌نشیند');
+  ok(claim.run(13, 1).changes === 0, '🔒 تپِ دوم رد می‌شود (فاکتورِ نیتیوِ دوم ساخته نمی‌شود)');
+  ok(row().stars_invoice_msg_id === 555, 'و شناسه‌ی فاکتورِ اول **بازنویسی نمی‌شود** (یتیم نمی‌ماند)');
+
+  // کنترلِ معکوس: با شرطِ نسخه‌ی قدیمی، همان سناریو واقعاً خراب می‌شد.
+  seed();
+  const oldClaim = db.prepare(claimSql.replace(" AND stars_toggle_at IS NULL", ''));
+  oldClaim.run(13, 1); setMsg.run(555, 1);
+  ok(oldClaim.run(13, 1).changes === 1 && row().stars_invoice_msg_id === null,
+    'کنترلِ معکوس: بدونِ آن شرط، تپِ دوم شناسه را NULL می‌کرد و فاکتورِ اول یتیم می‌شد');
+
+  // برگشت به کارت‌به‌کارت ادعا را آزاد می‌کند، پس سوییچِ دوباره ممکن می‌ماند.
+  seed();
+  claim.run(13, 1); setMsg.run(555, 1); clear.run(1);
+  ok(row().stars_toggle_at === null, 'برگشت به کارت (`clearStarsToggle`) ادعا را آزاد می‌کند');
+  ok(claim.run(13, 1).changes === 1, 'و سوییچِ دوباره‌ی مشروع همچنان کار می‌کند');
+
+  // ردیفی که دیگر pending نیست هرگز سوییچ نمی‌شود.
+  seed();
+  db.prepare("UPDATE payments SET status='waiting_review' WHERE id=1").run();
+  ok(claim.run(13, 1).changes === 0, 'رسیدِ ثبت‌شده (waiting_review) سوییچ نمی‌شود');
+  db.close();
+}
+
+/* ⏳ انقضای ۲۴ساعته‌ی کارت هم فاکتورِ نیتیو را می‌برد (رول‌بکِ پرچم یا شکستِ جاروی ۳۰دقیقه‌ای) */
+{
+  const expFn = bodyOf('async function expireInvoice(p) {', '\n}') || '';
+  ok(/p\.stars_invoice_msg_id/.test(expFn) && /deleteMessage/.test(expFn),
+    'انقضای ۲۴ساعته فاکتورِ نیتیوِ استارز را هم پاک می‌کند (کارتِ مرده روی مسیرِ پول نمی‌ماند)');
+  ok(/clearStarsToggle\.run\(p\.id\)/.test(expFn), 'و ستون‌های سوییچ را هم پاک می‌کند');
+}
 ok(/replyWithInvoice\(buildInvoice\(/.test(toggleOnFn), 'همان buildInvoice ی که ru/pt/es استفاده می‌کنند، نه یک کپی');
 
 const toggleOffFn = bodyOf("bot.action(/^card_toggle:(\\d+)$/, async (ctx) => {", '\n});') || '';
