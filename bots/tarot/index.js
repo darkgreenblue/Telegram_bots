@@ -221,7 +221,7 @@ const TEST_PHASE = false;
 //         GANJINEH.md) دورهای بعدی‌اند.
 // 3.77.0: بسته‌ی «جاودان» یک تاجِ اضافه داشت (👑👑) — رفع شد، فقط یک 👑. رنگِ دکمه‌اش
 //         هم به قرمزِ «افسانه‌ای» رفت (عمداً هم‌رنگ، Bot API رنگِ چهارمی ندارد).
-const PRODUCT_VERSION = '3.77.0';
+const PRODUCT_VERSION = '3.78.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1355,7 +1355,17 @@ const stmts = {
   setInvoiceMsgId: db.prepare('UPDATE payments SET invoice_msg_id=? WHERE id=?'),
   // سوییچِ استارز: مهرِ زمان + شناسه‌ی فاکتورِ نیتیو + عددِ محاسبه‌شده، هر سه با هم
   // (بند ۶ج ریشه: عدد و مهرِ زمان از همان یک لحظه بیایند، نه دو نوشتنِ جدا).
-  setStarsToggle: db.prepare('UPDATE payments SET stars_invoice_msg_id=?, stars_toggle_at=unixepoch(), stars_amount=? WHERE id=? AND status=\'pending\''),
+  /* ⚠️ ادعای **واقعاً اتمیک** برای سوییچ: شرطِ `stars_toggle_at IS NULL` تنها چیزی است
+   * که تپِ دومِ همان دکمه را می‌گیرد. نسخه‌ی اول فقط `status='pending'` داشت و چون خودِ
+   * این UPDATE وضعیت را عوض نمی‌کند، تپِ دوم هم موفق می‌شد: شناسه‌ی فاکتورِ نیتیوِ اول
+   * با NULL بازنویسی می‌شد، یک فاکتورِ نیتیوِ **دوم** ساخته می‌شود، و اولی برای همیشه
+   * یتیم در چت می‌ماند (نه `card_toggle` پاکش می‌کند نه انقضا، چون هر دو فقط شناسه‌ی
+   * ذخیره‌شده را می‌شناسند). صفِ per کاربر (v3.66.0) هم نجاتش نمی‌داد: آن هم‌زمانی را
+   * حذف می‌کند، نه ورودِ دوباره را. پول در خطر نبود (`pre_checkout_query` وضعیت را
+   * می‌سنجد و تلگرام روی جوابِ منفی چیزی کسر نمی‌کند)، ولی دو کارتِ پرداختِ زنده برای
+   * یک فاکتور دقیقاً همان ابهامی است که ریلِ پول نباید بسازد. */
+  claimStarsToggle: db.prepare("UPDATE payments SET stars_invoice_msg_id=NULL, stars_toggle_at=unixepoch(), stars_amount=? WHERE id=? AND status='pending' AND stars_toggle_at IS NULL"),
+  setStarsInvoiceMsg: db.prepare("UPDATE payments SET stars_invoice_msg_id=? WHERE id=? AND status='pending'"),
   clearStarsToggle: db.prepare('UPDATE payments SET stars_invoice_msg_id=NULL, stars_toggle_at=NULL WHERE id=?'),
   setStarsPaid: db.prepare('UPDATE payments SET stars_paid_amount=? WHERE id=?'),
   // کاندیدهای انقضای ۳۰دقیقه‌ایِ فاکتورِ استارز — مستقل از چرخه‌ی ۲۴ساعته‌ی کارت.
@@ -1376,7 +1386,6 @@ const stmts = {
    * وگرنه لیستِ استیت‌ها دو جا تکرار می‌شد و روزی بی‌صدا از هم واگرا می‌شدند.
    * ⚠️ دو شرطِ پول مقدس‌اند: رسیدِ ثبت‌شده و پرداختِ تأییدشده هرگز، و فاکتورِ **زنده‌ی
    * مبلغ‌دار** هم نه — کاربر شماره‌کارت و مبلغ را دیده و شاید همین حالا واریز کرده. */
-  markUnstuck: db.prepare('UPDATE users SET pay_unstuck_at=unixepoch() WHERE telegram_id=? AND pay_unstuck_at=0'),
   stuckPayCandidates: db.prepare(`SELECT u.telegram_id AS uid, u.state AS state,
       p.id AS pid, p.status AS pstatus
     FROM users u JOIN payments p
@@ -1963,6 +1972,28 @@ function takeIntent(uid) {
     return k;
   } catch { return null; }
 }
+/* 🧹 پاک‌کردنِ سشن **بدونِ بردنِ نیت** — دوقلوی جراحیِ `setSession(uid, null)`.
+ *
+ * 🐛 باگِ واقعیِ گزارش‌شده‌ی مالک (۱۴۰۵/۰۶/۱۹): وسطِ فال دکمه‌ی «ذخایر الماس» را زد،
+ * گاردِ «یه فالِ باز داری» آمد، «انصراف» را زد، و به‌جای کیفِ الماس پیامِ عمومیِ
+ * «برای جواب دادن به سؤالاتی که جوابش رو نمی‌دونی من همیشه اینجام» گرفت.
+ *
+ * ریشه: مکانیزمِ نیت درست کار می‌کرد و `showWallet` هم `INTENT.WALLET` را به هر سه گارد
+ * می‌داد؛ ولی `reading:cancel` (و دوقلویش `rcancel:`) یک `setSession(uid, null)`ِ
+ * **بی‌قید** می‌زدند که `intent`/`intentAt` را هم با خودش می‌برد، و `replyCanceled`
+ * چند خط بعد دیگر چیزی برای بازپخش پیدا نمی‌کرد. `pay_exit` از اول درست بود چون
+ * جراحی عمل می‌کند (فقط `paymentId` را حذف می‌کند).
+ *
+ * قاعده: **هر مسیرِ خروجی که بعدش `replyCanceled` صدا زده می‌شود باید از این تابع رد
+ * شود، نه از `setSession(uid, null)`.** همان کلاسِ باگِ `onbFirst` در v3.72.0 است:
+ * پاک‌کردنِ کلِ سشن برای بردنِ فلو، یک نشانه‌ی کوچکِ بی‌ربط را هم قربانی می‌کند. */
+function clearSessionKeepIntent(uid) {
+  const s = getSession(uid) || {};
+  const keep = {};
+  if (s.intent) { keep.intent = s.intent; keep.intentAt = s.intentAt || 0; }
+  setSession(uid, Object.keys(keep).length ? keep : null);
+}
+
 // جدولِ بازپخش عمداً **صریح** است، نه بازفرستادنِ آپدیتِ خام: بازفرستادن یعنی گاردها
 // دوباره اجرا شوند و کاربر در همان حلقه بیفتد.
 const INTENT_REPLAY = {
@@ -2487,16 +2518,25 @@ function randomGridPicks(n) {
  * دوره‌ای است نه فقط بوتی (الگوی sweepAbandonedPaidReadings): کسی که صبح رها کرده و
  * ظهر برمی‌گردد نباید تا ری‌استارتِ بعدی پیامِ «فاکتور باز داری» بگیرد. */
 const STUCK_PAY_SEC = 1800;   // ۳۰ دقیقه
-/* 📣 پنجره‌ی اطلاع‌رسانی (تصمیمِ صریحِ مالک: خبردار بشوند).
- * خودِ جارو **دائمی و ساکت** است؛ این پیام مالِ همان موجِ کاربرانی است که بابتِ باگِ
- * v3.59.0 گیر افتاده بودند. با گذشتنِ این تاریخ جارو برای همیشه ساکت می‌شود، بدونِ
- * اینکه کسی لازم باشد چیزی را یادش بماند یا PR دومی بزند. کسی که ماه‌ها بعد یک
- * صفحه‌ی بسته را رها کند، آزاد می‌شود ولی پیامِ «مشکل حل شد» نمی‌گیرد — چون برای او
- * مشکلی رخ نداده بود و آن جمله بی‌معنا می‌شد. */
-const STUCK_NOTICE_UNTIL = 1789257600;   // ۲۰۲۶/۰۹/۱۳
+/* 🔇 جارو **دائمی و کاملاً ساکت** است — هیچ پیامی به کاربر نمی‌فرستد.
+ *
+ * 🐛 تا v3.78.0 این‌جا یک پنجره‌ی اطلاع‌رسانی بود (`STUCK_NOTICE_UNTIL`) که به آزادشده‌ها
+ * پیامِ «مشکل حل شد» می‌داد. دیتای زنده نشان داد هدف‌گیری‌اش از روزِ اول غلط بود: از
+ * ۲۱۹ نفری که پیام گرفتند، **۱۸۲ نفر حتی یک بار هم پیامِ گارد را ندیده بودند** و فقط
+ * ۵ نفر الگوی حلقه‌ی واقعی (۴+ بار دیدنِ یک صفحه) داشتند. علتش ساده است: شرطِ جارو
+ * «ردیفِ پرداختِ مرده + ۳۰ دقیقه پارک» است، که دقیقاً **رهاکردنِ عادیِ صفحه‌ی بسته‌ها**
+ * را توصیف می‌کند، نه گیرکردن را. یعنی جارو هیچ‌وقت تشخیص‌دهنده‌ی «گیر» نبود و پیام به
+ * یک شرطِ بی‌ربط چسبیده بود. ضمناً `wipeUser` کلِ ردیفِ کاربر را DELETE می‌کند، پس
+ * `pay_unstuck_at` بعد از هر ریستِ ادمین صفر می‌شد و مالک هر بار دوباره پیام می‌گرفت.
+ *
+ * 📌 قاعده‌ی سراسری (تصمیمِ صریحِ مالک، بند «پیام‌های ناخواسته» در CLAUDE.md ریشه):
+ * **تشخیص و ترمیم می‌توانند خودکار باشند؛ ارتباط با کاربر هرگز.** هر پیامِ ناخواسته
+ * یک تصمیمِ انسانیِ per-case است، نه خروجیِ یک شرط در کد. ابزارِ درستِ موجِ دستی
+ * `tools/recover-stuck-readings.mjs` است که لیستِ گیرنده‌ها را قبل از ارسال چاپ می‌کند.
+ *
+ * ستونِ `pay_unstuck_at` طبق بند ۲ج/۱ روی دیتابیس می‌ماند (افزایشی و بی‌ضرر). */
 function sweepStuckPayFlows() {
   let rows = [];
-  const notify = [];
   try { rows = stmts.stuckPayCandidates.all(STUCK_PAY_SEC); }
   catch (e) { logErr('sweepStuckPay query:', e.message); return; }
   let freed = 0;
@@ -2514,29 +2554,9 @@ function sweepStuckPayFlows() {
       setSession(r.uid, s);
       setState(r.uid, s.readingId ? 'confirm_pay' : 'idle');
       freed++;
-      /* ⚠️ ترتیب عمدی است: **اول** آزادسازی در دیتابیس، بعد پیام. اگر ارسال بشکند
-       * (کاربر ربات را بلاک کرده، چت پاک شده) کاربر همچنان آزاد شده است. عکسش یعنی
-       * کسی پیامِ «حل شد» بگیرد و روی دکمه‌اش هنوز گیر باشد. */
-      if (stmts.markUnstuck.run(r.uid).changes && Math.floor(Date.now() / 1000) < STUCK_NOTICE_UNTIL) notify.push(r.uid);
     } catch (e) { logErr('sweepStuckPay uid#' + r.uid, e.message); }
   }
   if (freed) log(`🚪 جاروی پرداخت: ${freed} کاربر از فلوی پرداختِ رهاشده آزاد شدند`);
-  if (notify.length) sendUnstuckNotices(notify);
-}
-
-/* پیامِ اطلاع‌رسانیِ موجِ گیرکرده‌ها. جدا از جارو نوشته شده تا شکستِ ارسال هیچ‌وقت
- * نتواند آزادسازی را نصفه بگذارد. با فاصله‌ی کوچک می‌رود (سقفِ تلگرام ~۳۰ پیام در
- * ثانیه است و این موج ده‌ها نفر است، نه هزاران). هر خطا بی‌صدا رد می‌شود: کاربری که
- * ربات را بلاک کرده خطای دائمی می‌دهد و تلاشِ دوباره بی‌فایده است. */
-async function sendUnstuckNotices(uids) {
-  const kb = Markup.inlineKeyboard([[Markup.button.callback(L.buttons.reading, 'reading_go')]]);
-  for (const uid of uids) {
-    try {
-      await bot.telegram.sendMessage(uid, L.unstuck.notice, { reply_markup: kb.reply_markup });
-    } catch (e) { logErr('unstuck notice uid#' + uid, e.message); }
-    await new Promise(r => setTimeout(r, 60));
-  }
-  log(`📣 پیامِ «مشکل حل شد» برای ${uids.length} کاربر فرستاده شد`);
 }
 
 // بازیابیِ بوت: فال‌هایی که وسط فراخوانی LLM با ری‌استارت یتیم شدند (status=started ولی llm_json خالی)
@@ -4598,7 +4618,7 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
   // `REFUND_ON_CANCEL`). `back` صفر می‌ماند، پس پیامِ «پولت برگشت» هم نمی‌رود.
   const back = cancelReading(uid, readingId);
   setState(uid, 'idle');
-  setSession(uid, null);
+  clearSessionKeepIntent(uid);   // نیتی که گارد ثبت کرده باید تا `replyCanceled` زنده بماند
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
   await replyCanceled(ctx, uid);
@@ -4646,7 +4666,7 @@ bot.action('reading:cancel', async (ctx) => {
   const s = getSession(uid);
   const back = s?.readingId ? cancelReading(uid, s.readingId) : 0;
   setState(uid, 'idle');
-  setSession(uid, null);
+  clearSessionKeepIntent(uid);   // نیتی که گارد ثبت کرده باید تا `replyCanceled` زنده بماند
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   if (back) await ctx.reply(L.reading.refundedOnCancel(back, curOf(uid))).catch(() => {});
   await replyCanceled(ctx, uid);
@@ -5908,8 +5928,9 @@ bot.action(/^stars_toggle:(\d+)$/, async (ctx) => {
   if (!pack) return;   // فاکتورِ بدونِ بسته — دکمه اصلاً نباید این‌جا برسد (دفاعِ دوم)
   const rate = await usdtTomanRate();
   const stars = starsForToman(p.amount, rate);
-  // ادعای اتمیک: اگر بینِ تپ و این لحظه کاربر رسید فرستاده یا انصراف داده، بی‌صدا برگرد.
-  if (stmts.setStarsToggle.run(null, stars, pid).changes === 0) return;
+  // ادعای اتمیک: اگر بینِ تپ و این لحظه کاربر رسید فرستاده یا انصراف داده، **یا این
+  // فاکتور از قبل سوییچ شده** (تپِ دوم روی همان دکمه)، بی‌صدا برگرد.
+  if (stmts.claimStarsToggle.run(stars, pid).changes === 0) return;
   const cur = curOf(uid);
   try {
     await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: pack.coins }, cur, rate, p.amount), {
@@ -5926,9 +5947,13 @@ bot.action(/^stars_toggle:(\d+)$/, async (ctx) => {
       title: L.wallet.starsInvoiceTitle(pack),
       description: L.wallet.starsInvoiceDesc(pack, stars),
     }));
-    if (inv?.message_id) stmts.setStarsToggle.run(inv.message_id, stars, pid);
+    if (inv?.message_id) stmts.setStarsInvoiceMsg.run(inv.message_id, pid);
   } catch (e) {
     logErr('stars_toggle sendInvoice:', e.message);
+    /* 🔓 ادعا آزاد می‌شود، وگرنه ردیف در حالتِ «سوییچ‌شده ولی بدونِ فاکتور» گیر می‌کرد:
+     * تپِ دوباره را گاردِ بالا رد می‌کرد و ۳۰ دقیقه بعد جارو به کاربر خبرِ «فاکتورِ
+     * استارزی منقضی شد» می‌داد، برای فاکتوری که هرگز ساخته نشد. */
+    stmts.clearStarsToggle.run(pid);
     await ctx.reply(L.errors.generic).catch(() => {});
   }
 });
@@ -6703,6 +6728,16 @@ async function expireInvoice(p) {
   try {
     if (stmts.setPaymentStatus.run('canceled', p.id).changes === 0) return;
     track(db, p.user_id, 'invoice_expired', { payment_id: p.id, amount: p.amount });
+    /* ⭐ فاکتورِ نیتیوِ استارز هم با همین انقضا می‌رود. معمولاً انقضای ۳۰دقیقه‌ای زودتر
+     * پاکش کرده، ولی دو مسیر آن را دور می‌زنند: خاموش‌شدنِ `FEATURE_STARS_TOGGLE`
+     * (رول‌بک) و شکستِ همان جارو. آن‌وقت ردیف `canceled` می‌شود و یک کارتِ پرداختِ
+     * ظاهراً زنده در چت می‌ماند که تپش فقط خطای «این فاکتور دیگر معتبر نیست» می‌دهد.
+     * پول در خطر نیست (`pre_checkout_query` وضعیت را می‌سنجد)، ولی کارتِ مرده روی
+     * مسیرِ پول نباید بماند. */
+    if (p.stars_invoice_msg_id) {
+      try { await bot.telegram.deleteMessage(p.user_id, p.stars_invoice_msg_id); } catch {}
+      stmts.clearStarsToggle.run(p.id);
+    }
     // کاربری که همین لحظه وسطِ همین فاکتور مانده آزاد شود (همان الگوی sweepStuckPayFlows)؛
     // فاکتورِ دیگری که از این به بعد صادر شود دست‌نخورده می‌ماند.
     const s = getSession(p.user_id);

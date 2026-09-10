@@ -322,41 +322,124 @@ ok(/sweepStuckPayFlows\(\);/.test(SRC), 'در بوت صدا زده می‌شود
 ok(/setInterval\(sweepStuckPayFlows,/.test(SRC),
   'و دوره‌ای هم اجرا می‌شود (کسی که ظهر برمی‌گردد تا ری‌استارتِ بعدی منتظر نمی‌ماند)');
 
-/* ══ ۵) پیامِ یک‌باره: نه دو بار، نه به آدمِ اشتباه، نه قبل از رفعِ مشکل ═══ */
-console.log('\n  — 📣 پیامِ «مشکل حل شد»:');
+/* ══ ۵) جارو باید کاملاً **ساکت** باشد ══════════════════════════════════
+ *
+ * 🐛 تا v3.78.0 این‌جا یک پنجره‌ی اطلاع‌رسانی بود (`STUCK_NOTICE_UNTIL`) که به هر کسی
+ * که جارو آزادش می‌کرد پیامِ «مشکل حل شد» می‌داد. مالک آن را روی اکانتِ خودش، چند بار،
+ * دریافت کرد و درست هم گرفت: هدف‌گیری‌اش از روزِ اول غلط بود. دیتای زنده: از ۲۱۹ نفری
+ * که پیام گرفتند، **۱۸۲ نفر حتی یک بار هم پیامِ گارد را ندیده بودند** و فقط ۵ نفر
+ * الگوی حلقه‌ی واقعی داشتند. معیارِ جارو («ردیفِ مرده + ۳۰ دقیقه پارک در استیتِ
+ * پرداخت») رها کردنِ عادیِ صفحه‌ی بسته‌ها را توصیف می‌کند، نه گیر افتادن را.
+ *
+ * 📌 قاعده‌ی سراسری (تصمیمِ صریحِ مالک): **تشخیص و ترمیم می‌توانند خودکار باشند؛ ارتباط
+ * با کاربر هرگز.** هر پیامِ ناخواسته یک تصمیمِ انسانیِ per مورد است.
+ *
+ * پس ادعاهای این بخش **معکوس**‌اند: هیچ مسیرِ ارسالی نباید برگردد. */
+console.log('\n  — 🔇 جارو هیچ پیامی نمی‌فرستد:');
 {
-  // مارکرِ یک‌بار بودن روی SQLite واقعی: دومین اجرا نباید کسی را دوباره پیام بدهد.
-  const mark = sqlOf('markUnstuck');
-  if (mark) {
-    const db = new Database(':memory:');
-    db.exec('CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, pay_unstuck_at INTEGER NOT NULL DEFAULT 0);');
-    db.prepare('INSERT INTO users (telegram_id) VALUES (1)').run();
-    const first = db.prepare(mark).run(1).changes;
-    const second = db.prepare(mark).run(1).changes;
-    ok(first === 1, 'اولین آزادسازی مهر می‌خورد (پس پیام می‌رود)');
-    ok(second === 0, 'دومین بار مهر نمی‌خورد، پس کاربر پیامِ تکراری نمی‌گیرد');
-    ok(/pay_unstuck_at=0/.test(mark), 'یک‌بار بودن داخلِ خودِ UPDATE است، نه در جاوااسکریپت');
-    db.close();
+  ok(!/telegram\.send/.test(sweep || ''), 'خودِ حلقه‌ی جارو هیچ پیامی نمی‌فرستد');
+  ok(!/L\.unstuck/.test(SRC), 'متنِ «مشکل حل شد» از index حذف شده');
+  ok(!/sendUnstuckNotices/.test(SRC), 'فرستنده‌ی پیام حذف شده، نه فقط خاموش');
+  ok(!/STUCK_NOTICE_UNTIL\s*=/.test(SRC), 'پنجره‌ی زمانیِ ارسال دیگر تعریف نمی‌شود');
+  ok(!/markUnstuck\s*:/.test(SRC), 'statement مهرِ ارسال هم حذف شده');
+  // ⚠️ ستون طبق بند ۲ج/۱ روی دیتابیس می‌ماند (افزایشی و بی‌ضرر) — حذفش ممنوع است.
+  ok(/ALTER TABLE users ADD COLUMN pay_unstuck_at/.test(SRC),
+    'ولی ستونِ `pay_unstuck_at` می‌ماند (بند ۲ج/۱: هرگز DROP)');
+  // و همان متن در هیچ locale ای نمانده، وگرنه یک روز کسی دوباره صدایش می‌زند.
+  for (const loc of ['fa', 'ru', 'pt', 'es']) {
+    const src = readFileSync(`bots/tarot/locales/${loc}.js`, 'utf8');
+    ok(!/unstuck:/.test(src), `locale ${loc} هم بلوکِ unstuck را ندارد`);
   }
-  const notice = sweep || '';
-  // ⚠️ مهم‌ترین ادعای این بخش: پیام بعد از آزادسازیِ واقعی می‌رود.
-  const iFree = notice.indexOf('setState(r.uid');
-  const iMark = notice.indexOf('markUnstuck');
-  ok(iFree > -1 && iMark > iFree,
-    'مهر و پیام **بعد از** آزادسازیِ دیتابیس‌اند (کسی پیامِ «حل شد» نگیرد در حالی که هنوز گیر است)');
-  ok(/STUCK_NOTICE_UNTIL/.test(notice),
-    'پیام پشتِ پنجره‌ی زمانی است، پس جارو بعد از آن موج برای همیشه ساکت می‌شود');
-  ok(/const STUCK_NOTICE_UNTIL = \d{10};/.test(SRC), 'پنجره یک تاریخِ صریح است، نه فلگِ دستی');
+}
 
-  const sender = bodyOf('async function sendUnstuckNotices(uids) {', '\n}');
-  ok(!!sender, 'فرستنده جدا از خودِ جارو است');
-  ok(sender ? /catch \(e\)/.test(sender) : false,
-    'شکستِ ارسالِ یک کاربر بقیه را نمی‌شکند (بلاک‌کرده‌ها خطای دائمی می‌دهند)');
-  ok(sender ? /setTimeout/.test(sender) : false, 'با فاصله می‌فرستد (سقفِ نرخِ تلگرام)');
-  ok(sender ? /L\.unstuck\.notice/.test(sender) : false, 'متن از locale می‌آید نه از index');
-  ok(sender ? /'reading_go'/.test(sender) : false, 'دکمه‌ی پیام کاربر را به منوی فال برمی‌گرداند');
-  ok(!/telegram\.send/.test(sweep || ''),
-    'خودِ حلقه‌ی جارو هیچ پیامی نمی‌فرستد (ارسال بعد از تمام‌شدنِ کلِ آزادسازی، با فاصله‌ی نرخ)');
+/* ══ ۵ب) نیتِ معلق باید از انصرافِ گارد جانِ سالم به در ببرد ═════════════
+ *
+ * 🐛 باگِ گزارش‌شده‌ی مالک (۱۴۰۵/۰۶/۱۹): وسطِ فال دکمه‌ی «ذخایر الماس» را زد، گاردِ
+ * «یه فالِ باز داری» آمد، «انصراف» را زد، و به‌جای کیفِ الماس پیامِ عمومیِ «همیشه
+ * اینجام» گرفت.
+ *
+ * ریشه **مکانیزمِ نیت نبود** (درست کار می‌کرد و `showWallet` هم نیت را به هر سه گارد
+ * می‌داد): `reading:cancel` و `rcancel:` یک `setSession(uid, null)`ِ بی‌قید می‌زدند که
+ * `intent` را هم با خودش می‌برد، و `replyCanceled` چند خط بعد چیزی برای بازپخش
+ * پیدا نمی‌کرد. `pay_exit` از اول درست بود چون جراحی عمل می‌کند.
+ *
+ * قاعده‌ی مالک: «اگه به واسطه‌ی یه درخواستِ دیگه انصراف زدم، بعدش باید همون چیزی
+ * بیاد که به‌خاطرش انصراف زدم.» */
+console.log('\n  — 🎯 نیتِ معلق بعد از انصراف:');
+{
+  // ۱) ساختاری: هیچ‌کدام از دو مسیرِ انصرافِ گارد نباید سشن را بی‌قید پاک کند.
+  for (const [name, marker, end] of [
+    ['reading:cancel', "bot.action('reading:cancel', async (ctx) => {", '\n});'],
+    ['rcancel:', "bot.action(/^rcancel:(\\d+)$/, async (ctx) => {", '\n});'],
+  ]) {
+    const fn = bodyOf(marker, end) || '';
+    ok(fn.length > 0, `هندلرِ ${name} پیدا شد`);
+    ok(/clearSessionKeepIntent\(uid\)/.test(fn), `${name} از clearSessionKeepIntent رد می‌شود`);
+    ok(!/setSession\(uid, null\)/.test(fn), `${name} دیگر setSession(uid, null)ِ بی‌قید ندارد`);
+    ok(fn.indexOf('clearSessionKeepIntent') < fn.indexOf('replyCanceled'),
+      `${name}: پاک‌سازی قبل از replyCanceled است (ترتیبِ واقعیِ اجرا)`);
+  }
+  // و `pay_exit` که از اول درست بود همچنان جراحی می‌ماند (کنترلِ ثبات).
+  const exitFn = bodyOf("bot.action(/^pay_exit:(\\d+)$/, async (ctx) => {", '\n});') || '';
+  ok(/delete s\.paymentId/.test(exitFn) && !/setSession\(uid, null\)/.test(exitFn),
+    'pay_exit همچنان فقط paymentId را برمی‌دارد (الگوی مرجع)');
+
+  // ۲) رفتاری: خودِ توابع از سورس بریده و روی یک سشنِ ساختگی **اجرا** می‌شوند.
+  const src = [
+    bodyOf('function setIntent(uid, key) {', '\n}'),
+    bodyOf('function takeIntent(uid) {', '\n}'),
+    bodyOf('function clearSessionKeepIntent(uid) {', '\n}'),
+  ];
+  ok(src.every(Boolean), 'هر سه تابعِ نیت از سورس برداشته شدند');
+  const INTENT_TTL_S = Number((SRC.match(/const INTENT_TTL_S = ([^;]+);/) || [])[1]
+    ?.replace(/[^\d*]/g, '').split('*').reduce((a, b) => a * Number(b), 1)) || 1800;
+  const make = (clearBody) => {
+    const store = { s: {} };
+    const body = `
+      // ⚠️ کپی، نه ارجاع: getSession واقعی هر بار JSON.parse می‌کند و یک **اسنپ‌شات**
+      // می‌دهد. با ارجاعِ مشترک، patchSession داخلِ takeIntent همان آبجکتی را که تازه
+      // خوانده شده هم عوض می‌کرد و ادعا به دلیلِ اشتباه قرمز می‌شد (نقصِ خودِ هارنس).
+      const getSession = () => ({ ...store.s });
+      const setSession = (uid, v) => { store.s = v || {}; };
+      const patchSession = (uid, p) => { Object.assign(store.s, p); return store.s; };
+      ${src[0]}}
+      ${src[1]}}
+      ${clearBody}}
+      return { store, setIntent, takeIntent, clearSessionKeepIntent };`;
+    return new Function('store', 'INTENT_TTL_S', body)(store, INTENT_TTL_S);
+  };
+
+  const good = make(src[2]);
+  good.store.s = { readingId: 42, spreadId: 'love3', picks: [1, 2, 3] };
+  good.setIntent(1, 'wallet');
+  good.clearSessionKeepIntent(1);
+  ok(good.store.s.readingId === undefined && good.store.s.picks === undefined,
+    'فلوی فال واقعاً پاک می‌شود (کارِ اصلیِ انصراف انجام شده)');
+  ok(good.takeIntent(1) === 'wallet', '🎯 ولی نیت زنده می‌ماند، پس کیفِ الماس بعد از انصراف می‌آید');
+  ok(good.takeIntent(1) === null, 'و یک‌بارمصرف است (بازپخشِ دوباره نمی‌شود)');
+
+  // بدونِ نیت، سشن کاملاً خالی می‌شود (هیچ آشغالی جا نمی‌ماند).
+  good.store.s = { readingId: 7 };
+  good.clearSessionKeepIntent(1);
+  ok(Object.keys(good.store.s).length === 0, 'بدونِ نیت، سشن کاملاً خالی می‌شود');
+
+  // نیتِ کهنه (بیرونِ TTL) بازپخش نمی‌شود، حتی اگر حمل شده باشد.
+  good.store.s = { intent: 'wallet', intentAt: Math.floor(Date.now() / 1000) - INTENT_TTL_S - 60 };
+  good.clearSessionKeepIntent(1);
+  ok(good.takeIntent(1) === null, 'نیتِ کهنه‌تر از TTL بازپخش نمی‌شود (صفحه‌ی بی‌ربطِ ساعت‌ها بعد)');
+
+  // ۳) کنترلِ معکوس: با رفتارِ قبلی، همان سناریو واقعاً باگ می‌داد.
+  const bad = make('function clearSessionKeepIntent(uid) { setSession(uid, null);');
+  bad.store.s = { readingId: 42 };
+  bad.setIntent(1, 'wallet');
+  bad.clearSessionKeepIntent(1);
+  ok(bad.takeIntent(1) === null,
+    'کنترلِ معکوس: با setSession(uid, null)ِ قدیمی نیت گم می‌شد (همان باگِ گزارش‌شده)');
+
+  // ۴) و مقصدِ همان نیت واقعاً در جدولِ بازپخش هست، وگرنه حمل‌کردنش بی‌فایده است.
+  for (const k of ['WALLET', 'SUPPORT', 'DAILY', 'INVITE', 'LUCKY', 'READING', 'SETTINGS']) {
+    ok(new RegExp(`\\[INTENT\\.${k}\\]:`).test(SRC), `INTENT.${k} در جدولِ بازپخش ردیف دارد`);
+  }
 }
 
 /* ══ ۶) کارِ بوت باید واقعاً لحظه‌ی بوت اجرا شود ═════════════════════════ */
