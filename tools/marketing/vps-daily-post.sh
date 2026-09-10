@@ -27,6 +27,14 @@ STATE="$HOME/.cache/taroot-daypost"
 PUBLISH_HOUR=10          # ساعتِ هدف، به وقتِ محلیِ هر زبان
 LOW_BUFFER_AT=4          # زیرِ این تعداد روزِ آماده، هشدار می‌رود
 
+# ⚠️ هشدارِ کمبودِ بافر فعلاً فقط برای فارسی است — تصمیمِ صریحِ مالک (۱۴۰۵/۰۶/۲۰):
+# «تا اطلاعِ ثانوی برای کانال‌های دیگه تولید محتوا نداریم»، پس هشدارِ روزانه برای
+# زبان‌هایی که عمداً پر نمی‌شوند فقط نویز است (و مالک را «دیوونه» کرده بود). انتشارِ
+# روزانه‌ی خودِ ru/pt/es دست‌نخورده می‌ماند؛ فقط **هشدار** خاموش شده، نه پست‌گذاری.
+# رول‌بکِ یک‌خط: این آرایه را به `(fa ru pt es)` برگردان.
+BUFFER_ALERT_LOCALES=(fa)
+alert_wanted() { local x; for x in "${BUFFER_ALERT_LOCALES[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+
 # زبان → منطقه‌ی زمانی | فایلِ env | نامِ نمایشیِ کانال
 LOCALES=(fa ru pt es)
 tz_of()   { case "$1" in fa) echo Asia/Tehran;; ru) echo Europe/Moscow;; pt) echo America/Sao_Paulo;; es) echo America/Mexico_City;; esac; }
@@ -104,8 +112,10 @@ for LOC in "${LOCALES[@]}"; do
       [[ "$d" > "$TODAY" ]] && AHEAD=$((AHEAD+1))
     done
     echo "📦 [$LOC] بافر: $AHEAD روزِ آینده آماده است"
-    [ "$AHEAD" -le "$LOW_BUFFER_AT" ] && LOW_REPORT="${LOW_REPORT}
+    if alert_wanted "$LOC" && [ "$AHEAD" -le "$LOW_BUFFER_AT" ]; then
+      LOW_REPORT="${LOW_REPORT}
 • $LOC: $AHEAD روز"
+    fi
   fi
 done
 
