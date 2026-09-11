@@ -524,6 +524,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-pack-reveal.mjs
 
+      # آزمایشِ نردبانِ قیمت (price_ladder_p1/p2): سلامتِ نردبان در هر سه بازو،
+      # تک‌متغیره بودنِ هر پله، و اینکه عددِ دکمه با عددِ فاکتور و پیامِ ادمین یکی بماند.
+      - name: Price ladder experiment check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-price-ladder.mjs
+
       # سوییچِ استارز per-فاکتور (فقط فارسی، فقط-ادمین): amount هرگز دست‌خورده نمی‌شود.
       - name: Stars toggle check
         if: matrix.bot == 'tarot'

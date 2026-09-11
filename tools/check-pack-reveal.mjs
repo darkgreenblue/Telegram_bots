@@ -49,7 +49,10 @@ const flagMatch = SRC.match(/const EXTRA_PACKS_ENABLED = (true|false);/);
 ok(!!flagMatch, 'پرچمِ EXTRA_PACKS_ENABLED یک ثابتِ بولینِ صریح است');
 const EXTRA_ON = flagMatch?.[1] === 'true';
 console.log(`     ⟶ وضعیتِ فعلی: ${EXTRA_ON ? 'روشن' : 'خاموش'}`);
-ok(/const shopPackages = \(\) => \(EXTRA_PACKS_ENABLED \? \[\.\.\.COIN_PACKAGES, \.\.\.EXTRA_PACKAGES\] : COIN_PACKAGES\);/.test(SRC),
+// v3.80.0: امضا `(uid)` گرفت چون قیمت per بازوی آزمایشِ `price_ladder_*` است. خودِ
+// ادعا عوض نشد: هنوز **یک** helper تصمیم می‌گیرد چه چیزی در فروشگاه دیده می‌شود، و
+// `EXTRA_PACKS_ENABLED` هنوز تنها چیزی است که دو بسته‌ی گران را وارد/خارج می‌کند.
+ok(/const shopPackages = \(uid\) => \[[\s\S]{0,200}?EXTRA_PACKS_ENABLED \? EXTRA_PACKAGES : \[\]/.test(SRC),
   'تک‌منبعِ «چه چیزی در فروشگاه دیده می‌شود» یک helper است، نه شرطِ پخش‌شده');
 
 /* ══ ۲) داده: کاتالوگِ زنده و کاتالوگِ خاموش ═════════════════════════════ */
@@ -84,7 +87,7 @@ console.log('\n۳) نردبانِ قیمت (هر بسته‌ی بزرگ‌تر �
 
 /* ══ ۴) گاردِ ریلِ استارز ═══════════════════════════════════════════════ */
 console.log('\n۴) دفاع در برابرِ ریلِ استارز');
-ok(/const railPacks = starsRail \? shopPackages\(\)\.filter\(p => !p\.farsiOnly\) : shopPackages\(\);/.test(SRC),
+ok(/const railPacks = starsRail\s*\?\s*shopPackages\(uid\)\.filter\(p => !p\.farsiOnly\)\s*:\s*shopPackages\(uid\);/.test(SRC),
   'ریلِ استارز بسته‌های farsiOnly را از رندر حذف می‌کند');
 const pkgHandler = bodyOf("bot.action(/^pkg:([a-z]+)$/, async (ctx) => {", '\n});') || '';
 ok(/if \(pack\.farsiOnly && starsRail\)/.test(pkgHandler),
@@ -179,13 +182,22 @@ ok(/getSession\(uid\)\?\.packsRevealed/.test(packsRevealedFn), 'و همان کل
 console.log('\n۹) exposure (بند ۲الف/۶د ریشه: peek قبل، expose بعد از رسیدنِ پیام)');
 const rechargeFn = bodyOf("bot.action('recharge', async (ctx) => {", '\n});') || '';
 const payCancelFn = bodyOf("bot.action(/^pay_cancel:(\\d+)$/, async (ctx) => {", '\n});') || '';
+/* 🆕 v3.80.0: بدنه‌ی exposure از هر دو هندلر به تک‌منبعِ `exposePackScreen` رفت، چون با
+ * اضافه‌شدنِ آزمایشِ سومِ همین صفحه (`price_ladder_*`) دو کپیِ دستی دیر یا زود از هم
+ * واگرا می‌شدند. ادعا عوض نشده، فقط آدرسش: **هر دو نقطه‌ی رندر** باید همان یک helper را
+ * صدا بزنند، و خودِ helper باید هنوز pack_reveal را پشتِ پرچم و استارز را جدا نگه دارد. */
 for (const [name, fn] of [['recharge', rechargeFn], ['pay_back به کیف', payCancelFn]]) {
-  ok(/else if \(EXTRA_PACKS_ENABLED\) \{ try \{ expose\(db, uid, PACK_REVEAL_EXPERIMENT\); \} catch \{\} \}/.test(fn),
-    `«${name}» فقط وقتی پرچم روشن است exposure ثبت می‌کند (وگرنه آزمایشِ آینده با کاربرانی که هیچ‌وقت چیزی ندیدند رقیق می‌شود)`);
-  ok(/expose\(db, uid, STARS_EXPERIMENT\)/.test(fn), `و آزمایشِ استارزِ «${name}» دست‌نخورده ماند`);
+  ok(/exposePackScreen\(uid\)/.test(fn),
+    `«${name}» exposure را از تک‌منبعِ exposePackScreen می‌گیرد، نه کپیِ محلی`);
+  ok(!/expose\(db, uid, (STARS_EXPERIMENT|PACK_REVEAL_EXPERIMENT)\)/.test(fn),
+    `و «${name}» هیچ کپیِ دستی‌ای از فراخوانیِ expose ندارد`);
 }
-ok(/if \(starsRail\)[\s\S]{0,60}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,80}else if \(EXTRA_PACKS_ENABLED\)[\s\S]{0,60}expose\(db, uid, PACK_REVEAL_EXPERIMENT/.test(rechargeFn),
-  'دو آزمایش دوقلوی هم‌ساختارند: استارز فقط رویِ starsRail، pack_reveal فقط رویِ !starsRail');
+const exposeScreenFn = bodyOf('const exposePackScreen = (uid) => {', '\n};') || '';
+ok(/if \(EXTRA_PACKS_ENABLED\) \{ try \{ expose\(db, uid, PACK_REVEAL_EXPERIMENT\); \} catch \{\} \}/.test(exposeScreenFn),
+  'فقط وقتی پرچم روشن است exposureِ pack_reveal ثبت می‌شود (وگرنه آزمایشِ آینده با کاربرانی که هیچ‌وقت چیزی ندیدند رقیق می‌شود)');
+ok(/expose\(db, uid, STARS_EXPERIMENT\)/.test(exposeScreenFn), 'و آزمایشِ استارز دست‌نخورده ماند');
+ok(/if \(starsRail\)[\s\S]{0,90}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,40}return;/.test(exposeScreenFn),
+  'دو آزمایش دوقلوی هم‌ساختارند: استارز فقط رویِ starsRail (و همان‌جا return می‌کند)، pack_reveal فقط رویِ !starsRail');
 
 /* ══ ۱۰) جهش‌ها ══════════════════════════════════════════════════════════ */
 console.log('\n۱۰) جهش‌های تأییدکننده');

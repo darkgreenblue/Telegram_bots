@@ -226,7 +226,7 @@ const TEST_PHASE = false;
 //         ۳۰k/۶۰k/۱۵۰k برگشتند و دو بسته‌ی «افسانه‌ای»/«جاودان» به‌همراهِ آزمایشِ
 //         نمایششان بازنشسته شدند. کلیدهایشان زنده می‌مانند (ردیفِ پرداختِ باز +
 //         دکمه‌ی کهنه، بند ۲ج/۵ و ۶).
-const PRODUCT_VERSION = '3.79.0';
+const PRODUCT_VERSION = '3.80.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -621,13 +621,122 @@ const EXTRA_PACKAGES = [
   { key: 'legend',  emoji: '🌌', coins: 300,  toman: 490_000,   farsiOnly: true },
   { key: 'eternal', emoji: '👑', coins: 1000, toman: 1_490_000, farsiOnly: true },
 ];
-/* تنها منبعِ «چه بسته‌هایی در فروشگاه دیده می‌شوند». هر جای رندر از همین می‌خواند، پس
- * روشن/خاموش‌کردنِ پرچم هیچ مسیری را جا نمی‌گذارد (همان الگوی helperِ بند ۲ج-۲). */
-const shopPackages = () => (EXTRA_PACKS_ENABLED ? [...COIN_PACKAGES, ...EXTRA_PACKAGES] : COIN_PACKAGES);
 const PACKAGE_BY_KEY = Object.fromEntries(
   [...COIN_PACKAGES, ...EXTRA_PACKAGES].map(p => [p.key, p]));
 const EXTRA_PACK_KEYS = new Set(EXTRA_PACKAGES.map(p => p.key));
 const isRetiredPack = (key) => !EXTRA_PACKS_ENABLED && EXTRA_PACK_KEYS.has(key);
+
+/* ─────────────────────── 💰 آزمایشِ نردبانِ قیمت (v3.80.0) ───────────────────────
+ *
+ * سه نردبانِ کامل، نه سه «تخفیف». هر بازو یک کاتالوگِ مستقل است تا `pkg:` و فاکتور و
+ * دکمه همه از **یک** آبجکت بخوانند؛ محاسبه‌ی درجای قیمت یعنی دو منبعِ حقیقت و همان
+ * کلاسِ باگِ ثبت‌شده‌ی بند ۲و/۶ج («عدد و واحد از دو جا بیایند، یکی عوض می‌شود و آن یکی
+ * ساکت می‌ماند»).
+ *
+ * 🎯 دو متغیرِ **جدا**، هر کدام در یک پله — عمداً، وگرنه نتیجه تفسیرپذیر نیست:
+ *   control ⟶ floor : فقط **اندازه‌ی کوچک‌ترین بلیت** (۳۰k ⟶ ۱۵k). قیمتِ هر الماس در
+ *                     هر سه بسته **بیت‌به‌بیت** همان control است (۳۰۰۰/۲۰۰۰/۱۵۰۰)، پس
+ *                     این بازو فقط می‌پرسد «کفِ پایین‌تر خریدار می‌آورد؟» و هیچ ادعای
+ *                     ارزان‌تر بودنی نمی‌کند.
+ *   floor   ⟶ cheap : فقط **سطحِ قیمت**. تعدادِ الماسِ هر سه بسته با floor یکی است
+ *                     (۵/۳۰/۱۰۰) و فقط تومانش ~۳۰٪ پایین‌تر (۲۰۰۰/۱۵۰۰/۱۰۰۰).
+ * اگر بسته‌ی وسطِ cheap مثل پیشنهادِ اولیه ۲۰💎/۳۰k می‌شد، بینِ floor و cheap **هم**
+ * تعدادِ الماس عوض می‌شد **هم** قیمت، و افت/رشدِ فروش را نمی‌شد به هیچ‌کدام نسبت داد.
+ *
+ * ⚠️ ناوردای نردبان (`check-coins`) در **هر سه** بازو برقرار است: بسته‌ی بزرگ‌تر =
+ * هر الماس ارزان‌تر. `tools/check-price-ladder.mjs` هر سه را می‌سنجد، نه فقط کاتالوگِ
+ * زنده را. */
+const PRICE_LADDERS = {
+  control: COIN_PACKAGES,                                     // ۳۰۰۰ / ۲۰۰۰ / ۱۵۰۰ تومان per الماس
+  floor: [
+    { key: 'basic', emoji: '🥉', coins: 5,   toman: 15_000 },  // ۳۰۰۰ — دقیقاً نرخِ control
+    { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },  // ۲۰۰۰ — دست‌نخورده
+    { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 }, // ۱۵۰۰ — دست‌نخورده
+  ],
+  cheap: [
+    { key: 'basic', emoji: '🥉', coins: 5,   toman: 10_000 },  // ۲۰۰۰
+    { key: 'gold',  emoji: '💠', coins: 30,  toman: 45_000 },  // ۱۵۰۰
+    { key: 'magic', emoji: '🪄', coins: 100, toman: 100_000 }, // ۱۰۰۰
+  ],
+};
+
+/* 🔑 **دو کلید، نه یک کلید با وزنِ متغیر** — و این تصمیمِ روشیِ اصلیِ این PR است.
+ *
+ * خودِ `shared/ab.js` در هدرش نوشته «وزن‌ها بعد از start فریز می‌شوند؛ تغییر وزن =
+ * آزمایشِ جدید». دلیلش این‌جا کاملاً عملی است: `ab_exposures` **چسبنده** است، پس اگر
+ * فازِ دوم را با عوض‌کردنِ وزنِ همان کلید بزنیم، کاربرانِ فازِ اول شاخه‌شان را نگه
+ * می‌دارند و بازوی «برنده» ترکیبی از «۳ روز است این قیمت را می‌بیند» و «تازه رسیده»
+ * می‌شود، در حالی که بازوی مقابل کاملاً تازه است. این دقیقاً همان **سوگیریِ نامتقارن**
+ * است که بند ۲الف ریشه (جاروی یادآوریِ شبانه) ثبتش کرده — نه نویز، که با نمونه‌ی
+ * بیشتر پاک شود.
+ *
+ * با کلیدِ جدا، فازِ دوم یک تصادفی‌سازیِ **تمیز** است: هر دو بازو از صفر.
+ *
+ * ترتیبِ آرایه = اولویت (فازِ جدیدتر اول). کدام کلید فعال است از خودِ جدولِ
+ * `experiments` خوانده می‌شود، پس **ترتیبِ فازها یک تصمیمِ داشبورد است نه یک دیپلوی**:
+ * مالک فاز ۱ را stop و فاز ۲ را با وزنِ دلخواه start می‌کند و همان لحظه (≤۶۰ ثانیه)
+ * اثر می‌کند. اگر برنده‌ی فاز ۱ خودِ control بود، فاز ۲ وزنِ `control`/`cheap` می‌گیرد؛
+ * اگر `floor` بود، وزنِ `floor`/`cheap`. هیچ‌کدام کد لازم ندارد. */
+const PRICE_EXPERIMENTS = ['price_ladder_p2', 'price_ladder_p1'];
+let _priceExpStmt = null;
+let _priceExpCache = { at: 0, key: null };
+/* کلیدِ آزمایشِ قیمتی که همین حالا زنده است (یا null). کشِ ۶۰ثانیه‌ای عمداً هم‌اندازه‌ی
+ * کشِ خودِ `shared/ab.js` است تا kill switch در هر دو لایه یک تأخیر داشته باشد.
+ * ⚠️ statement تنبل ساخته می‌شود چون `db` چند صد خط پایین‌تر تعریف شده؛ این تابع فقط
+ * در زمانِ اجرا (بعد از بوت) صدا زده می‌شود. */
+const activePriceExperiment = () => {
+  const now = Date.now();
+  if (now - _priceExpCache.at < 60_000) return _priceExpCache.key;
+  let key = null;
+  try {
+    if (!_priceExpStmt) _priceExpStmt = db.prepare(
+      "SELECT key FROM experiments WHERE key=? AND status IN ('running','draining')");
+    for (const k of PRICE_EXPERIMENTS) if (_priceExpStmt.get(k)) { key = k; break; }
+  } catch (e) { logErr('price exp:', e.message); }
+  _priceExpCache = { at: now, key };
+  return key;
+};
+
+/* بازوی قیمتِ این کاربر. **هر خطا و هر ابهام → control**، یعنی دقیقاً قیمت‌های امروز
+ * (بند ۲ج/۴: کنترل = رفتارِ قبلی، و بدونِ آزمایشِ running هیچ‌کس از control بیرون نمی‌رود).
+ *
+ * ⚠️ `starsRail` (ru/pt/es) **همیشه** control است و این یک گاردِ ساختاری است نه احتیاط:
+ * اقتصادِ استارز نردبانِ خودش را دارد (`STAR_LADDERS` + آزمایشِ `stars_price_v1`) و با
+ * کلیدِ بسته کار می‌کند، پس یک `basic`ِ ۵ الماسی آن‌جا یعنی فاکتورِ استارز عددِ الماسِ
+ * دروغ چاپ کند. */
+const priceArm = (uid) => {
+  if (starsRail) return 'control';
+  try {
+    const key = activePriceExperiment();
+    if (!key) return 'control';
+    const v = peekVariant(db, uid, key);
+    return PRICE_LADDERS[v] ? v : 'control';
+  } catch (e) { logErr('price arm:', e.message); return 'control'; }
+};
+
+/* ثبتِ exposure — **فقط بعد از اینکه پیامِ قیمت‌ها واقعاً به کاربر رسید**.
+ * بند ۲و/۶د ریشه: «نمایشِ قیمت یعنی exposure». کاربری که قیمت‌ها را دید و منصرف شد هم
+ * treatment را دیده، پس باید شمرده شود؛ و کاربری که پیامش اصلاً نرفت نباید شمرده شود،
+ * وگرنه آزمایش با کسانی رقیق می‌شود که هیچ‌وقت چیزی ندیدند. برای همین مسیرِ رندر
+ * `peekVariant` می‌خواند و این تابع **بعد از** ارسالِ موفق صدا زده می‌شود. */
+const exposePrice = (uid) => {
+  if (starsRail) return;
+  try { const key = activePriceExperiment(); if (key) expose(db, uid, key); }
+  catch (e) { logErr('price expose:', e.message); }
+};
+
+/* تنها منبعِ «چه بسته‌هایی در فروشگاه دیده می‌شوند» — حالا per کاربر، چون قیمت per بازو
+ * است. هر جای رندر از همین می‌خواند، پس نه روشن/خاموش‌کردنِ `EXTRA_PACKS_ENABLED` مسیری
+ * را جا می‌گذارد و نه آزمایشِ قیمت (همان الگوی helperِ بند ۲ج-۲). */
+const shopPackages = (uid) => [
+  ...(PRICE_LADDERS[priceArm(uid)] || COIN_PACKAGES),
+  ...(EXTRA_PACKS_ENABLED ? EXTRA_PACKAGES : []),
+];
+/* بسته‌ای که **این کاربر** با این کلید می‌خرد. فالبک به `PACKAGE_BY_KEY` عمدی است و
+ * فقط یک مصرف دارد: کلیدِ بازنشسته (`legend`/`eternal`) که در هیچ نردبانی نیست ولی
+ * دکمه‌اش در چتِ کاربر زنده مانده و باید پیامِ مودبانه بگیرد نه سکوت (بند ۲ج/۶). */
+const packForUser = (uid, key) =>
+  shopPackages(uid).find(p => p.key === key) || PACKAGE_BY_KEY[key] || null;
 // بسته‌ی یک پرداخت (null = پرداختِ غیربسته‌ای). تنها راهِ رسیدنِ نامِ بسته و تعدادِ الماس
 // به پیام‌های ادمین؛ چون `payments.original_amount` برای بسته **واحدِ داخلی** است نه تومان
 // و بدونِ این، ادمین عددِ بی‌معنی می‌بیند (باگِ رسیدِ #۱۵۳، ۱۴۰۵/۰۵/۳۰).
@@ -1599,6 +1708,28 @@ const invoicePurchaseFor = (uid, paymentId) => {
     if (!Number.isFinite(coins) || coins <= 0) return null;
     return { pack: packOf(p), coins };
   } catch (e) { logErr('invoice purchase:', e.message); return null; }
+};
+
+/* 💳 بسته‌ی این پرداخت، با تعدادِ الماسِ **خودِ ردیف** نه کاتالوگ.
+ *
+ * 🐛 چرا لازم شد (v3.80.0، پیدا شده حینِ سیم‌کشیِ آزمایشِ قیمت): `adminMoney(p, pack)`
+ * در هر چهار locale عددِ الماس را از `pack.coins` می‌خواند، یعنی از **کاتالوگ**. تا
+ * امروز بی‌ضرر بود چون کاتالوگ یکی بود و `original_amount` همیشه با `pack.coins` برابر
+ * درمی‌آمد. ولی از لحظه‌ای که قیمت per بازو شد، `basic` برای یک کاربر ۱۰ الماس است و
+ * برای دیگری ۵؛ آن‌وقت پیامِ ادمین عددِ **پیش‌فرض** را چاپ می‌کرد نه چیزی که واقعاً
+ * فروخته شده — یک عددِ بی‌صدا غلط روی مسیرِ پول، دقیقاً هم‌خانواده‌ی باگِ رسیدِ #۱۵۳.
+ *
+ * درمان ساختاری است نه دقتی: `creditForPayment(p)` از قبل **تک‌منبعِ** «چقدر اعتبار به
+ * این ردیف تعلق می‌گیرد» بود (هم فاکتور هم `approvePayment` از آن می‌خوانند)؛ این تابع
+ * فقط همان عدد را روی آبجکتِ بسته می‌نشاند تا locale دست‌نخورده بماند و هیچ کپیِ دومی
+ * از این حساب ساخته نشود. */
+const packSoldIn = (p) => {
+  const pack = packOf(p);
+  if (!pack) return null;
+  try {
+    const coins = creditForPayment(p);
+    return Number.isFinite(coins) && coins > 0 ? { ...pack, coins } : pack;
+  } catch (e) { logErr('pack sold:', e.message); return pack; }
 };
 
 /* 🧾 ثبتِ مصرفِ مدل. **تنها مصرف‌کننده‌ی این تابع، لایه‌ی حسابداری است، نه فلوی فال.**
@@ -5715,7 +5846,12 @@ function packMenuScreen(uid, paymentId) {
   const cur = curOf(uid);
   const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
   // ریلِ استارز اصلاً بسته‌ی farsiOnly را نمی‌شناسد (STAR_LADDERS دو تای تازه را ندارد).
-  const railPacks = starsRail ? shopPackages().filter(p => !p.farsiOnly) : shopPackages();
+  // ⚠️ `shopPackages(uid)` و نه `shopPackages()`: قیمت per بازوی آزمایش است و این تنها
+  // نقطه‌ای است که کاربر قیمت‌ها را می‌بیند. `peekVariant` داخلش است (بدونِ نوشتن)؛
+  // ثبتِ exposure کارِ `exposePrice(uid)` است، بعد از رسیدنِ واقعیِ همین پیام.
+  const railPacks = starsRail
+    ? shopPackages(uid).filter(p => !p.farsiOnly)
+    : shopPackages(uid);
   // ⚠️ شاخه‌ی `control` است که staged می‌ماند، نه `!== 'staged'`: طبقِ shared/ab.js تا
   // آزمایش از داشبورد running نشود، `peekVariant` همیشه literal string 'control' می‌دهد
   // (بند ۲الف ریشه: «کنترل = رفتارِ قبلی»). چک باید رویِ آرمِ **تیمار** (`full`) باشد،
@@ -5739,6 +5875,20 @@ function packMenuScreen(uid, paymentId) {
   ])];
 }
 
+/* 👁 تک‌نقطه‌ی «صفحه‌ی بسته‌ها واقعاً روی صفحه‌ی کاربر نشست».
+ *
+ * فقط **بعد از** ارسال/ادیتِ موفق صدا زده می‌شود (بند ۲الف ریشه: exposure یعنی کاربر
+ * treatment را دید، نه اینکه کد شاخه‌اش را حساب کرد). سه آزمایش به همین یک صفحه وصل‌اند
+ * و هر سه از این‌جا می‌روند؛ دو نقطه‌ی رندر (`recharge` و بازگشتِ `pay_back`) قبلاً هر
+ * کدام کپیِ خودش را داشتند و با اضافه‌شدنِ آزمایشِ قیمت دیر یا زود از هم واگرا می‌شدند —
+ * همان تله‌ی «گاردِ کپی‌شده» که v3.66.0 روی `nav:menu` گرفت. */
+const exposePackScreen = (uid) => {
+  // ریلِ استارز نردبانِ خودش را دارد و آزمایشِ قیمتِ تومانی اصلاً به آن نمی‌رسد.
+  if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} return; }
+  exposePrice(uid);
+  if (EXTRA_PACKS_ENABLED) { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
+};
+
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
@@ -5753,13 +5903,9 @@ bot.action('recharge', async (ctx) => {
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
     const [text, extra] = packMenuScreen(uid, paymentId);
-    // ⚠️ exposure یعنی «کاربر treatment را دید» (بند ۲الف ریشه). با خاموش‌بودنِ دو
-    // بسته‌ی گران هیچ شاخه‌ای برای دیدن وجود ندارد، پس ثبتِ exposure فقط آزمایشِ
-    // آینده را با کاربرانی که هرگز چیزی ندیدند رقیق می‌کند.
-    const seen = () => {
-      if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
-      else if (EXTRA_PACKS_ENABLED) { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
-    };
+    // ⚠️ exposure یعنی «کاربر treatment را دید» (بند ۲الف ریشه) — تک‌نقطه‌اش
+    // `exposePackScreen` است، کنارِ `packMenuScreen`.
+    const seen = () => exposePackScreen(uid);
     // شناسه‌ی این پیام نگه داشته می‌شود تا انصراف بتواند **همین** را برگرداند و
     // پیامِ تازه‌ی تکراری نسازد (باگی که مالک در اسکرین‌شات گرفت).
     try {
@@ -5840,7 +5986,10 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   if (!coinsOn(uid)) return;
-  const pack = PACKAGE_BY_KEY[ctx.match[1]];
+  /* ⚠️ از بازوی **خودِ کاربر** خوانده می‌شود، نه از کاتالوگِ سراسری: قیمتی که روی دکمه
+   * دید باید دقیقاً همان قیمتی باشد که فاکتور می‌شود. چون `peekVariant` یک هشِ قطعی
+   * است، رندر و این تپ همیشه یک بازو می‌دهند. */
+  const pack = packForUser(uid, ctx.match[1]);
   if (!pack) return;
   // ⚠️ دفاعِ لایه‌ی دوم: packMenuScreen این بسته را برای ریلِ استارز اصلاً رندر نمی‌کند
   // (STAR_LADDERS این دو کلید را نمی‌شناسد)، ولی دکمه‌ی inline نمی‌میرد (بند ۲ج/۶) —
@@ -6004,7 +6153,7 @@ bot.action(/^stars_toggle:(\d+)$/, async (ctx) => {
   if (stmts.claimStarsToggle.run(stars, pid).changes === 0) return;
   const cur = curOf(uid);
   try {
-    await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: pack.coins }, cur, rate, p.amount), {
+    await ctx.editMessageText(L.wallet.invoiceStars(stars, { pack, coins: creditForPayment(p) }, cur, rate, p.amount), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
         [Markup.button.callback(L.buttons.payWithCard, `card_toggle:${pid}`)],
@@ -6159,8 +6308,7 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
       const m = await ctx.reply(text, extra).catch(() => null);
       if (m?.message_id) patchSession(uid, { packMsgId: m.message_id });
     }
-    if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} }
-    else if (EXTRA_PACKS_ENABLED) { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
+    exposePackScreen(uid);
     return;
   }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -6397,7 +6545,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
   const caption = (note ? `${note}\n\n` : '')
-    + L.wallet.adminNotify(p, user, packOf(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+    + L.wallet.adminNotify(p, user, packSoldIn(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.approve(paymentId), `approve:${paymentId}`),
     Markup.button.callback(L.buttons.reject(paymentId), `reject:${paymentId}`),
@@ -6546,7 +6694,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
 // overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
 async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
-  let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packOf(p));
+  let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packSoldIn(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${p.id}`),
@@ -6560,7 +6708,7 @@ async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expected
 }
 // یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
 async function notifyAdminAuto(p, user, note, photoFileId) {
-  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packOf(p))}`;
+  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packSoldIn(p))}`;
   for (const adminId of ADMIN_IDS) {
     try {
       if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption });

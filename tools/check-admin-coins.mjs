@@ -74,9 +74,29 @@ console.log('\n▶ هر سه پیامِ ادمین از همان تک‌منبع
     'و برای پرداختِ تومانی دقیقاً مثل قبل تومان می‌گوید');
 }
 
-console.log('\n▶ سیم‌کشی در index.js (هیچ نقطه‌ای packOf را جا نینداخته)');
+console.log('\n▶ سیم‌کشی در index.js (هیچ نقطه‌ای بسته را جا نینداخته)');
 {
   ok(/const packOf = \(p\) =>/.test(SRC), 'helperِ packOf تعریف شده');
+  /* 🆕 v3.80.0: دو پیامی که **عددِ الماس** چاپ می‌کنند دیگر از `packOf` نمی‌خوانند.
+   * `packOf` کاتالوگ را می‌دهد و از لحظه‌ای که قیمت per بازوی آزمایش شد، `pack.coins`
+   * دیگر لزوماً همان چیزی نیست که به این کاربر فروخته شده. `packSoldIn` همان بسته را
+   * با تعدادِ الماسِ **خودِ ردیف** (`creditForPayment`) برمی‌گرداند.
+   * ⚠️ `adminReversed` عمداً بیرون است: بسته را اصلاً نمی‌گیرد و `packOf` آن‌جا فقط یک
+   * تستِ بولینی است («بسته‌ای بود یا نه»)، پس عددی از کاتالوگ نمی‌خواند. */
+  ok(/const packSoldIn = \(p\) =>/.test(SRC), 'helperِ packSoldIn تعریف شده');
+  ok(/const packSoldIn = \(p\) => \{[\s\S]{0,400}?creditForPayment\(p\)/.test(SRC),
+    'packSoldIn تعدادِ الماس را از creditForPayment (یعنی از خودِ ردیف) می‌گیرد');
+  for (const name of ['adminAutoApproved', 'adminNotify']) {
+    const needle = `L.wallet.${name}(`;
+    let i = SRC.indexOf(needle), n = 0, allSold = true;
+    while (i !== -1) {
+      n++;
+      const win = SRC.slice(i, i + 260);
+      if (!/packSoldIn\(/.test(win)) allSold = false;
+      i = SRC.indexOf(needle, i + needle.length);
+    }
+    ok(n > 0 && allSold, `هر ${n} فراخوانیِ ${name} از packSoldIn می‌خواند، نه packOf`);
+  }
   // هر فراخوانیِ این سه پیام باید بسته را پاس بدهد، وگرنه همان نقطه دوباره باگ‌دار است.
   // ⚠️ عمداً **همه‌ی** وقوع‌ها شمرده می‌شوند، نه یک رجکسِ مرزدار: نسخه‌ی اولِ این چک با
   // یک رجکسِ `([^;]*?)` نوشته شده بود و یکی از چهار فراخوانی را ندید — یعنی دقیقاً همان
@@ -90,7 +110,8 @@ console.log('\n▶ سیم‌کشی در index.js (هیچ نقطه‌ای packOf 
       n++; total++;
       // آرگومان‌ها ممکن است چندخطی باشند؛ پنجره‌ی بعد از نامِ تابع کافی و پایدار است.
       const win = SRC.slice(i, i + 260);
-      ok(/packOf\(/.test(win), `${name} #${n} بسته را پاس می‌دهد`);
+      // `packOf` یا `packSoldIn` — ادعای تیزترِ «کدام‌یک» بالاتر و per پیام نشسته.
+      ok(/pack(Of|SoldIn)\(/.test(win), `${name} #${n} بسته را پاس می‌دهد`);
       i = SRC.indexOf(needle, i + needle.length);
     }
     ok(n > 0, `${name} در کد صدا زده می‌شود (${n} بار)`);
