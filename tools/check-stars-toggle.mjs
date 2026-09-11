@@ -36,12 +36,36 @@ console.log('۱) مهاجرت‌ها و پرچمِ فقط-ادمین');
 for (const col of ['stars_invoice_msg_id', 'stars_toggle_at', 'stars_amount', 'stars_paid_amount']) {
   ok(new RegExp(`ALTER TABLE payments ADD COLUMN ${col}`).test(SRC), `ستونِ \`${col}\` افزایشی اضافه شد`);
 }
-ok(/const FEATURE_STARS_TOGGLE = true;/.test(SRC), 'FEATURE_STARS_TOGGLE (کلیدِ خاموشیِ کل)');
-ok(/const FEATURE_STARS_TOGGLE_ADMIN_ONLY = true;/.test(SRC), 'فعلاً فقط-ادمین، طبقِ بند ۲ج-۲ ریشه');
+/* 🔇 v3.81.0: پرچم **خاموش** شد، با دیتا نه با حدس (صفر ردیفِ `stars_toggle_at` در کلِ
+ * عمرِ فیچر). کد عمداً سرِ جایش ماند — خواسته‌ی صریحِ مالک: «کدها را پاک نکن، باید
+ * بتوانیم سریع دوباره فعالش کنیم.» پس این ادعا **مقدارِ امروز** را پین می‌کند تا روشن
+ * شدنِ دوباره یک تصمیمِ صریح باشد نه یک سهو، و ساختارِ دو-پرچمیِ بند ۲ج-۲ دست‌نخورده
+ * بماند تا همان یک خط کافی باشد. */
+ok(/const FEATURE_STARS_TOGGLE = false;/.test(SRC), 'FEATURE_STARS_TOGGLE خاموش است (v3.81.0)');
+ok(/const FEATURE_STARS_TOGGLE_ADMIN_ONLY = true;/.test(SRC),
+  'ولی دامنه‌ی فقط-ادمین دست‌نخورده مانده، پس روشن‌کردنِ دوباره همان مسیرِ مرحله‌ای را می‌رود');
 const gateFn = bodyOf('const starsToggleOn = (uid) =>', ';') || '';
 ok(/!starsRail/.test(gateFn), 'گارد شاملِ !starsRail است — روی ru/pt/es هرگز روشن نمی‌شود');
 ok(/FEATURE_STARS_TOGGLE\b/.test(gateFn) && /FEATURE_STARS_TOGGLE_ADMIN_ONLY/.test(gateFn) && /isAdmin\(uid\)/.test(gateFn),
   'و هیچ‌جا پرچمِ خام صدا زده نمی‌شود، فقط از طریقِ همین helper');
+/* ⚠️ ادعای **رفتاری**، نه متنی: «پرچم false است» ثابت نمی‌کند دکمه واقعاً محو شده.
+ * گارد و ردیفِ دکمه هر دو از سورس بریده و با هر دو مقدارِ پرچم اجرا می‌شوند، پس
+ * کنترلِ مثبت هم دارد (بند ۶ب-۲: سبزِ حاصل از نبودِ قرمز هیچ چیز ثابت نمی‌کند). */
+{
+  const rowSrc = bodyOf('const starsToggleRow = (uid, paymentId, hasPkg) =>', ';') || '';
+  const run = (flagOn) => {
+    const fn = new Function('FEATURE_STARS_TOGGLE', 'FEATURE_STARS_TOGGLE_ADMIN_ONLY',
+      'starsRail', 'isAdmin', 'L', 'Markup', `
+      ${gateFn};
+      ${rowSrc};
+      return starsToggleRow(7, 1, true);`);
+    return fn(flagOn, true, false, () => true,
+      { buttons: { payWithStars: '⭐' } },
+      { button: { callback: (t, d) => ({ t, d }) } });
+  };
+  ok(run(false).length === 0, 'با پرچمِ خاموش، حتی برای ادمین هیچ دکمه‌ای ساخته نمی‌شود');
+  ok(run(true).length === 1, 'و کنترلِ مثبت: با پرچمِ روشن همان دکمه برمی‌گردد (ادعا واقعاً چیزی را می‌سنجد)');
+}
 
 /* ══ ۲) دکمه فقط رویِ فاکتورِ بسته‌ای ═══════════════════════════════════ */
 console.log('\n۲) دکمه فقط برای فاکتورِ بسته‌ای (buildInvoice بدونِ pack.key خطا می‌دهد)');
@@ -225,10 +249,16 @@ console.log('\n۸) جهش‌های تأییدکننده');
    pay_exit. */
 console.log('\n۹) پاک‌سازیِ آرتیفکت‌های فاکتور روی انصراف/خروج');
 {
-  const chosenBlock = bodyOf('const pickedMsg = await ctx.reply(L.wallet.coinPackChosen', 'const invMsg = await ctx.reply(L.wallet.invoice(pack.toman') || '';
-  ok(!!chosenBlock, 'پیامِ «بسته‌ی فلان» شناسه‌اش را نگه می‌دارد');
-  ok(/patchSession\(uid, \{ pickedMsgId: pickedMsg\.message_id \}\)/.test(chosenBlock),
-    'و شناسه در سشن ذخیره می‌شود (dropInvoiceArtifacts بعداً از همین می‌خواند)');
+  /* 🗑 v3.81.0: پیامِ «بسته‌ی فلان» دیگر **ساخته نمی‌شود** (عنوانِ فاکتور همان عدد را
+   * می‌گوید، پس تکرارِ خالص بود). ادعا **معکوس** شد، نه حذف:
+   *   • هیچ مسیری دیگر `coinPackChosen` را نمی‌فرستد؛
+   *   • ولی پاک‌سازی‌اش در `dropInvoiceArtifacts` عمداً می‌ماند، چون کاربرانی که لحظه‌ی
+   *     دیپلوی وسطِ فلواند یک `pickedMsgId` زنده در سشن دارند (بند ۲ج/۲: کدِ جدید روی
+   *     دیتای قدیم boot می‌شود). برداشتنش یعنی آن پیام برای همان‌ها یتیم بماند. */
+  ok(!/ctx\.reply\(L\.wallet\.coinPackChosen/.test(SRC),
+    'پیامِ «بسته‌ی فلان» دیگر فرستاده نمی‌شود (فاکتور خودش عدد را می‌گوید)');
+  ok(!/pickedMsgId: [a-zA-Z]+\.message_id/.test(SRC),
+    'و هیچ‌جا شناسه‌ی تازه‌ای برایش در سشن نوشته نمی‌شود');
 
   const dropFn = bodyOf('async function dropInvoiceArtifacts(ctx, uid, p) {', '\n}') || '';
   ok(/deleteMessage\(ctx\.chat\.id, p\.stars_invoice_msg_id\)/.test(dropFn), 'فاکتورِ نیتیوِ استارز حذف می‌شود');
