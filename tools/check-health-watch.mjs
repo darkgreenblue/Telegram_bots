@@ -104,6 +104,36 @@ console.log('\n▶ فرضِ تست هنوز با ecosystem واقعی می‌خ�
     'گارد نامِ فایل را از ENV_FILE می‌گیرد، نه `.env` ثابت');
 }
 
+/* ═══ دیپلوی باید هر ماژولی را که ناظر import می‌کند «کدِ ناظر» بداند ═══
+ *
+ * ناظر یک اپِ pm2 با `cwd: '.'` است و از `deploy_bot` رد نمی‌شود، پس شرطِ reloadش یک
+ * `grep` دستی روی فایل‌های عوض‌شده است. ماژولی که در آن grep نباشد، بی‌صدا جا می‌ماند:
+ * دیپلوی سبز، هیچ خطایی، و ناظر تا اولین تغییرِ `health-watch.mjs` نسخه‌ی قدیمی را
+ * اجرا می‌کند. (هم‌خانواده‌ی هر هشت باگِ دیپلویِ ثبت‌شده در بند ۳ ریشه: همه بی‌صدا.)
+ *
+ * ادعا **دوطرفه** است، طبقِ درسِ رجیستریِ صفِ اعتبار (بند ۲الف): هم importِ جامانده
+ * باگ است، هم ردیفِ بی‌مصرف در grep (یعنی ماژولی که دیگر import نمی‌شود ولی هنوز
+ * بی‌دلیل ناظر را ری‌استارت می‌کند). */
+console.log('\n▶ گرپِ دیپلوی همه‌ی importهای محلیِ ناظر را پوشش می‌دهد');
+{
+  const DEPLOY = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  const line = DEPLOY.split('\n').find((l) => /HW_REASON="code"/.test(l)) || '';
+  const covered = new Set((line.match(/\(([a-z-|]+)\)\\\.mjs/)?.[1] || '').split('|').filter(Boolean));
+  // importهای محلیِ خودِ ناظر از `tools/` (بقیه زیرِ shared/ اند و INFRA_CHANGED پوششش می‌دهد).
+  const imported = new Set([...SRC.matchAll(/from '\.\/([a-z-]+)\.mjs'/g)].map((m) => m[1]));
+  ok(covered.has('health-watch'), 'خودِ health-watch در گرپ هست');
+  for (const mod of imported) {
+    ok(covered.has(mod), `importِ محلیِ «${mod}» هم در گرپِ دیپلوی هست (وگرنه بی‌صدا جا می‌ماند)`);
+  }
+  for (const mod of covered) {
+    ok(mod === 'health-watch' || imported.has(mod),
+      `«${mod}» در گرپ هست و واقعاً import می‌شود (ردیفِ بی‌مصرف = ری‌استارتِ بی‌دلیل)`);
+  }
+  // 🔒 اگر روزی شکلِ گرپ عوض شد، این تست نباید با مجموعه‌ی **خالی** سبز بماند.
+  ok(covered.size >= 1 && imported.size >= 1,
+    'هر دو مجموعه از سورس واقعاً استخراج شدند (سبزِ حاصل از خالی بودن، بند ۶ب-۲)');
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
 for (const e of errs) console.log(`   - ${e}`);
 assert.equal(errs.length, 0, `${errs.length} خطای ناظرِ سلامت`);
