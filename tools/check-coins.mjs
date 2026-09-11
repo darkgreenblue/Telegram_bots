@@ -347,8 +347,13 @@ console.log('\n▶ متن‌ها: هیچ عددِ پولی دو جا نوشته 
      دست‌نخورده است: چیزی که اضافه شد یک عددِ دیگر است، نه واحدی تازه برای مبلغ. پس
      ادعا تیزتر شد به‌جای اینکه برداشته شود، و حالا مستقیماً روی خودِ `amount` می‌نشیند. */
   const inv = LOC.slice(LOC.indexOf('invoice: (amount, card, owner'), LOC.indexOf('invoiceDiscounted:'));
-  ok(/\$\{fmt\(amount\)\} تومان/.test(inv), 'مبلغِ فاکتور با واحدِ «تومان» چاپ می‌شود');
-  ok(!/money(Long|Tight)?\(\s*amount/.test(inv),
+  /* ⚠️ v3.81.0: خطِ مبلغ از `invoiceAmount(amount)` می‌آید نه از `fmt` درجا (چون حالا
+   * ایموجی و معادلِ حروفی هم دارد). قاعده عوض نشده، فقط جایش یک تابع بالاتر رفت — پس
+   * ادعا هم یک تابع بالاتر می‌رود، نه اینکه برداشته شود. */
+  ok(/\$\{invoiceAmount\(amount\)\}/.test(inv), 'مبلغِ فاکتور از تک‌منبعِ `invoiceAmount` می‌آید');
+  const amtFn = LOC.slice(LOC.indexOf('const invoiceAmount = '), LOC.indexOf('const invoiceAmount = ') + 400);
+  ok(/tomanShort\(n\)/.test(amtFn) && /تومان/.test(amtFn), 'و همان تابع واحدِ «تومان» را چاپ می‌کند');
+  ok(!/money(Long|Tight)?\(\s*(amount|n)\b/.test(inv + amtFn),
     'و مبلغ از هیچ تابعِ تبدیلِ واحد رد نمی‌شود (پولِ واقعی هرگز به الماس تبدیل نمی‌شود)');
   // و ادعای رفتاری: عوض‌شدنِ نرخِ واحدِ نمایش نباید مبلغِ فاکتور را تکان بدهد.
   {
@@ -356,7 +361,7 @@ console.log('\n▶ متن‌ها: هیچ عددِ پولی دو جا نوشته 
     const amountLine = (value) => L.wallet.invoice(60_000, 'C', 'O',
       { pack: { key: 'gold' }, coins: 30 },
       { on: true, value, name: L.coinUnit.name, emoji: L.coinUnit.emoji })
-      .split('\n').find(x => x.startsWith('مبلغ:'));
+      .split('\n').find(x => x.includes('مبلغ:'));
     ok(!!amountLine(1) && amountLine(1).includes('تومان'), 'خطِ مبلغ در رندرِ واقعی تومانی است');
     ok(amountLine(1) === amountLine(10_000),
       'و با عوض‌شدنِ نرخِ واحدِ نمایش تکان نمی‌خورد (پولِ واقعی تبدیل نمی‌شود)');

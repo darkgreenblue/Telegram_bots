@@ -226,7 +226,7 @@ const TEST_PHASE = false;
 //         ۳۰k/۶۰k/۱۵۰k برگشتند و دو بسته‌ی «افسانه‌ای»/«جاودان» به‌همراهِ آزمایشِ
 //         نمایششان بازنشسته شدند. کلیدهایشان زنده می‌مانند (ردیفِ پرداختِ باز +
 //         دکمه‌ی کهنه، بند ۲ج/۵ و ۶).
-const PRODUCT_VERSION = '3.80.0';
+const PRODUCT_VERSION = '3.81.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -518,7 +518,22 @@ const coinsOn = (uid) => uxV2For(uid) || (COIN_ECONOMY && (!COIN_ECONOMY_ADMIN_O
 // (بند ۲و/۴ ریشه) و فقط برای ru/pt/es true می‌شود؛ این‌جا برعکس — دقیقاً برای رباتِ
 // فارسی (`starsRail === false`) یک مسیرِ **موازیِ اضافه** باز می‌شود، بدونِ اینکه هیچ
 // کدِ starsRail-محورِ موجود (پکِ farsiOnly، STARS_EXPERIMENT، …) لمس شود.
-const FEATURE_STARS_TOGGLE = true;
+/* 🔇 خاموش از v3.81.0 — تصمیمِ مالک روی **دیتا**، نه حدس.
+ *
+ * این فیچر از v3.76.0 (۱۰ روز) فقط-ادمین زنده بود تا «میزانِ استقبال سنجیده شود».
+ * جوابِ دیتا قاطع بود: `stars_toggle_at IS NOT NULL` روی کلِ جدولِ `payments` **صفر**
+ * ردیف دارد — یعنی حتی یک بار هم زده نشد، نه توسط کاربر و نه توسط خودِ مالک روی
+ * فاکتورِ واقعی. پس آزمایش تمام شد و نتیجه‌اش «استفاده نشد» است.
+ *
+ * ⚠️ عمداً **حذف نشد** (خواسته‌ی صریحِ مالک: «کدها را پاک نکن»). این استثنای ثبت‌شده‌ی
+ * بند ۹/۰ است: مسیرِ برگشت کدِ مرده نیست تا وقتی تصمیمِ نهایی گرفته نشده. برگرداندن =
+ * همین یک خط `true`.
+ *
+ * و چرا این خاموشی روی مسیرِ پول امن است: صفر ردیفِ سوییچ‌شده یعنی هیچ فاکتورِ نیتیوِ
+ * استارزی در جریان نیست، پس خاموش شدنِ `registerStarsPay` برای fa هیچ پرداختِ معلقی را
+ * بی‌صاحب نمی‌گذارد. دکمه‌ی کش‌شده هم بی‌خطر است: خودِ هندلرِ `stars_toggle` اولین کارش
+ * `if (!starsToggleOn(uid)) return` است (بند ۲ج/۶). */
+const FEATURE_STARS_TOGGLE = false;
 const FEATURE_STARS_TOGGLE_ADMIN_ONLY = true;
 const starsToggleOn = (uid) => !starsRail && FEATURE_STARS_TOGGLE
   && (!FEATURE_STARS_TOGGLE_ADMIN_ONLY || isAdmin(uid));
@@ -6078,11 +6093,29 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * بالاتر می‌نشیند: همان‌جا که کاربر بسته را انتخاب کرد. */
   const packMsgId = ctx.callbackQuery?.message?.message_id;
   if (packMsgId) patchSession(uid, { packMsgId });
-  try {
-    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(
-      [[Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)]],
-    ).reply_markup);
-  } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  /* 🧹 صفحه‌ی فاکتور باید **تنها پیامِ روی صفحه** باشد (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۰:
+   * «تا حد ممکن ساده، سرراست، بدون حاشیه و خلوت»).
+   *
+   * دو ریل دو رفتارِ متفاوت دارند و این تنها واگراییِ ساختاریِ مجاز است (بند ۲و/۴):
+   *   • کارت‌به‌کارت (fa): صفحه‌ی بسته‌ها **پاک** می‌شود. انصرافش زیرِ خودِ فاکتور است،
+   *     پس نگه‌داشتنِ یک پیامِ بالاسری با دکمه‌ی انصرافِ تکراری فقط شلوغی است.
+   *   • استارز (ru/pt/es): همان پیام **می‌ماند** و کیبوردش به «انصراف» تبدیل می‌شود،
+   *     چون فاکتورِ بومیِ تلگرام جا برای دکمه‌ی سفارشی ندارد و این تنها راهِ انصراف
+   *     است. برداشتنش آن‌جا یعنی بن‌بست (بند ۹ب/۱). */
+  if (starsRail) {
+    try {
+      await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(
+        [[Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)]],
+      ).reply_markup);
+    } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  } else {
+    /* پاک می‌شود، و `packMsgId` هم صفر می‌شود تا `pay_cancel` دنبالِ پیامی که دیگر
+     * وجود ندارد نگردد و مستقیم مسیرِ «صفحه‌ی تازه» را برود. اگر پاک نشد (پیامِ خیلی
+     * کهنه) شناسه می‌ماند و همان مسیرِ ادیتِ قبلی کار می‌کند — هیچ حالتی بن‌بست نیست. */
+    let dropped = false;
+    try { await ctx.deleteMessage(); dropped = true; } catch {}
+    if (dropped) patchSession(uid, { packMsgId: null });
+  }
 
   /* ⭐ ریلِ استارز: دکمه‌ی بسته **مستقیماً** فاکتورِ تلگرام را می‌فرستد. هیچ فاکتورِ
    * دست‌ساز و هیچ مرحله‌ی رسیدی در کار نیست، چون خودِ تلگرام قبل از کسر یک صفحه‌ی
@@ -6115,13 +6148,12 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   }
 
   setState(uid, 'pay_receipt');
-  // 🐛 v3.77.0 (گزارشِ مالک): این پیام مصرفِ دیگری ندارد و فقط این‌جا ساخته می‌شود، ولی
-  // شناسه‌اش هیچ‌جا ذخیره نمی‌شد. نتیجه: بعد از انصرافِ فاکتور، هم این پیام و هم فاکتورِ
-  // نیتیوِ استارز (اگر کاربر سوییچ کرده بود) بی‌صدا در چت می‌ماندند. حالا شناسه‌اش در
-  // سشن می‌رود تا `pay_cancel`/`pay_exit` بتوانند پاکش کنند. پیامِ پرداختِ **موفق** (که
-  // ارزشِ ماندنِ کاملاً عمدی دارد، بند v3.70.0) به این ردگیری کاری ندارد.
-  const pickedMsg = await ctx.reply(L.wallet.coinPackChosen(pack, curOf(uid)), { parse_mode: 'Markdown' });
-  if (pickedMsg?.message_id) patchSession(uid, { pickedMsgId: pickedMsg.message_id });
+  /* 🗑 پیامِ «بسته‌ی X: ➕N الماس» (`coinPackChosen`) از v3.81.0 دیگر فرستاده نمی‌شود:
+   * عنوانِ خودِ فاکتور حالا همان عدد را می‌گوید («فاکتور خرید ۳۰ الماس»)، پس این پیام
+   * یک تکرارِ خالص بود (بند ۹/۰: چیزی که به هدف نزدیک نمی‌کند حذف می‌شود، نه تعمیر).
+   * ⚠️ `pickedMsgId` و پاک‌سازی‌اش در `dropInvoiceArtifacts` عمداً **می‌مانند**: کاربرانی
+   * که همین حالا وسطِ فلواند یک `pickedMsgId` زنده در سشن دارند و بعد از دیپلوی باید
+   * پیامشان درست پاک شود (بند ۲ج/۲: کدِ جدید روی حالتِ قدیمی اجرا می‌شود). */
   const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
