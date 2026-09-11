@@ -1,12 +1,22 @@
-// چکِ CI برای آزمایشِ نمایشِ بسته‌ها (tarot، pack_reveal_v1، v3.75.0): «۵ بسته یک‌جا»
-// در برابرِ «۳ بسته + دکمه‌ی کشف»، ۵۰/۵۰، معیارِ موفقیت = درآمدِ مجموع.
+// چکِ CI برای دو بسته‌ی گران («افسانه‌ای»/«جاودان») و آزمایشِ نمایششان (pack_reveal_v1).
 //
-// ⚠️ خطرناک‌ترین جهت این‌جا **معکوس‌شدنِ قراردادِ control** است: طبقِ shared/ab.js تا
-// آزمایش از داشبورد running نشود، peekVariant همیشه literal 'control' برمی‌گرداند. اگر
+// تاریخچه: v3.75.0 این دو را اضافه کرد و پشتِ یک آزمایشِ ۵۰/۵۰ گذاشت («۵ بسته یک‌جا»
+// در برابرِ «۳ بسته + دکمه‌ی کشف»). v3.78.0 هر دو را **خاموش** کرد، نه حذف: تعریفشان
+// در `EXTRA_PACKAGES` مانده و راهِ برگشت یک خط است (`EXTRA_PACKS_ENABLED = true`).
+//
+// پس این چک دو کار می‌کند و هر دو لازم‌اند:
+//   الف) حالتِ **امروز** (خاموش) واقعاً خاموش است: نه در فروشگاه دیده می‌شوند، نه
+//        دکمه‌ی کشف ساخته می‌شود، نه exposureای ثبت می‌شود، و تپ روی دکمه‌ی کهنه
+//        بی‌صدا نمی‌میرد.
+//   ب) حالتِ **فردا** (روشن) از قبل سالم است: قراردادِ control معکوس نشده، گاردِ ریلِ
+//      استارز سرِ جایش است، و مهم‌تر از همه نردبانِ قیمت نمی‌شکند.
+//
+// ⚠️ خطرناک‌ترین جهت در حالتِ روشن **معکوس‌شدنِ قراردادِ control** است: طبقِ shared/ab.js
+// تا آزمایش از داشبورد running نشود، peekVariant همیشه literal 'control' برمی‌گرداند. اگر
 // کد به‌جای «شاخه‌ی full استثناست» به «شاخه‌ی staged استثناست» نوشته شود، همه‌ی کاربران
-// پیش از راه‌اندازیِ آزمایش بی‌قید هر پنج بسته (شاملِ دو بسته‌ی گرانِ تازه) را می‌بینند —
-// دقیقاً برعکسِ «کنترل = رفتارِ قبلی» (بند ۲ج/۴ ریشه). این چک همین را با اجرای واقعیِ
-// منطقِ فیلتر روی SQLite واقعی اثبات می‌کند، نه فقط با خواندنِ رجکس.
+// پیش از راه‌اندازیِ آزمایش بی‌قید هر پنج بسته را می‌بینند — دقیقاً برعکسِ «کنترل =
+// رفتارِ قبلی» (بند ۲ج/۴ ریشه). این چک همین را با اجرای واقعیِ منطقِ فیلتر روی SQLite
+// واقعی اثبات می‌کند، نه فقط با خواندنِ رجکس.
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 import { ensureAb, peekVariant } from '../shared/ab.js';
@@ -24,22 +34,57 @@ function bodyOf(marker, end) {
   const to = SRC.indexOf(end, from);
   return to < 0 ? null : SRC.slice(from, to);
 }
+const parsePacks = (block) => [...(block || '').matchAll(
+  /key: '([a-z]+)',\s*emoji: '[^']+',\s*coins: ([\d_]+),\s*toman: ([\d_]+)(,\s*farsiOnly: true)?/g)]
+  .map(m => ({
+    key: m[1], coins: Number(m[2].replace(/_/g, '')),
+    toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4],
+  }));
 
-console.log('\n🎁 آزمایشِ نمایشِ بسته‌ها (pack_reveal_v1)\n');
+console.log('\n🎁 دو بسته‌ی گران و آزمایشِ نمایششان (pack_reveal_v1)\n');
 
-/* ══ ۱) داده: COIN_PACKAGES ═════════════════════════════════════════════ */
-console.log('۱) کاتالوگِ بسته‌ها');
-const packsBlock = bodyOf('const COIN_PACKAGES = [', '\n];') || '';
-const packs = [...packsBlock.matchAll(/key: '([a-z]+)',[^}]*coins: ([\d_]+),\s*toman: ([\d_]+)(,\s*farsiOnly: true)?/g)]
-  .map(m => ({ key: m[1], coins: Number(m[2].replace(/_/g, '')), toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4] }));
-ok(packs.length === 5, `پنج بسته خوانده شد (${packs.map(p => p.key).join(', ')})`);
-const farsiOnlyKeys = packs.filter(p => p.farsiOnly).map(p => p.key);
-ok(farsiOnlyKeys.join(',') === 'legend,eternal', `فقط legend و eternal علامتِ farsiOnly دارند (${farsiOnlyKeys.join(', ')})`);
-ok(packs.slice(0, 3).every(p => !p.farsiOnly), 'سه بسته‌ی اول (basic/gold/magic) عمومی‌اند');
+/* ══ ۱) پرچمِ واحد ═══════════════════════════════════════════════════════ */
+console.log('۱) پرچمِ روشن/خاموش');
+const flagMatch = SRC.match(/const EXTRA_PACKS_ENABLED = (true|false);/);
+ok(!!flagMatch, 'پرچمِ EXTRA_PACKS_ENABLED یک ثابتِ بولینِ صریح است');
+const EXTRA_ON = flagMatch?.[1] === 'true';
+console.log(`     ⟶ وضعیتِ فعلی: ${EXTRA_ON ? 'روشن' : 'خاموش'}`);
+ok(/const shopPackages = \(\) => \(EXTRA_PACKS_ENABLED \? \[\.\.\.COIN_PACKAGES, \.\.\.EXTRA_PACKAGES\] : COIN_PACKAGES\);/.test(SRC),
+  'تک‌منبعِ «چه چیزی در فروشگاه دیده می‌شود» یک helper است، نه شرطِ پخش‌شده');
 
-/* ══ ۲) گاردِ ریلِ استارز ═══════════════════════════════════════════════ */
-console.log('\n۲) دفاع در برابرِ ریلِ استارز');
-ok(/const railPacks = starsRail \? COIN_PACKAGES\.filter\(p => !p\.farsiOnly\) : COIN_PACKAGES;/.test(SRC),
+/* ══ ۲) داده: کاتالوگِ زنده و کاتالوگِ خاموش ═════════════════════════════ */
+console.log('\n۲) کاتالوگ');
+const live = parsePacks(bodyOf('const COIN_PACKAGES = [', '\n];'));
+const extra = parsePacks(bodyOf('const EXTRA_PACKAGES = [', '\n];'));
+ok(live.map(p => p.key).join(',') === 'basic,gold,magic',
+  `فروشگاه سه بسته دارد (${live.map(p => p.key).join(', ')})`);
+ok(extra.map(p => p.key).join(',') === 'legend,eternal',
+  `دو بسته‌ی گران هنوز در سورس تعریف‌شده‌اند و پاک نشده‌اند (${extra.map(p => p.key).join(', ')})`);
+ok(extra.every(p => p.farsiOnly), 'و هر دو علامتِ farsiOnly دارند (ریلِ استارز نمی‌شناسدشان)');
+ok(live.every(p => !p.farsiOnly), 'سه بسته‌ی فروشگاه عمومی‌اند');
+
+/* ⚠️ نردبانِ قیمت — همان تله‌ای که v3.78.0 را وادار به خاموش‌کردن (نه فقط قیمت‌گذاریِ
+ * دوباره) کرد: با قیمت‌های برگشته‌ی ۳۰k/۶۰k/۱۵۰k، بسته‌ی ۴۹۰k هر الماس را ۱٬۶۳۳ تومان
+ * می‌فروشد در حالی که بسته‌ی ۱۵۰k همان را ۱٬۵۰۰ می‌دهد. یعنی «بسته‌ی بزرگ‌تر گران‌تر
+ * است» — یک بدمعامله، نه یک گزینه‌ی لوکس. اگر کسی روزی پرچم را بدونِ بازچینیِ قیمت
+ * روشن کند، همین ادعا قرمز می‌شود. */
+console.log('\n۳) نردبانِ قیمت (هر بسته‌ی بزرگ‌تر باید هر الماس را ارزان‌تر کند)');
+{
+  const shown = EXTRA_ON ? [...live, ...extra] : live;
+  const per = shown.map(p => p.toman / p.coins);
+  const monotone = per.every((v, i) => i === 0 || v < per[i - 1]);
+  ok(monotone, `نردبانِ بسته‌های **دیده‌شده** نمی‌شکند (${per.map(v => Math.round(v)).join(' > ')})`);
+  const withExtra = [...live, ...extra].map(p => p.toman / p.coins);
+  const wouldBreak = !withExtra.every((v, i) => i === 0 || v < withExtra[i - 1]);
+  if (!EXTRA_ON) {
+    ok(wouldBreak, 'و اثباتِ اینکه چرا خاموش‌اند: با قیمتِ فعلی روشن‌کردنشان نردبان را می‌شکند '
+      + `(${withExtra.map(v => Math.round(v)).join(' > ')})`);
+  }
+}
+
+/* ══ ۴) گاردِ ریلِ استارز ═══════════════════════════════════════════════ */
+console.log('\n۴) دفاع در برابرِ ریلِ استارز');
+ok(/const railPacks = starsRail \? shopPackages\(\)\.filter\(p => !p\.farsiOnly\) : shopPackages\(\);/.test(SRC),
   'ریلِ استارز بسته‌های farsiOnly را از رندر حذف می‌کند');
 const pkgHandler = bodyOf("bot.action(/^pkg:([a-z]+)$/, async (ctx) => {", '\n});') || '';
 ok(/if \(pack\.farsiOnly && starsRail\)/.test(pkgHandler),
@@ -47,27 +92,53 @@ ok(/if \(pack\.farsiOnly && starsRail\)/.test(pkgHandler),
 ok(/return ctx\.reply\(L\.errors\.generic\)/.test(pkgHandler.slice(pkgHandler.indexOf('farsiOnly && starsRail'))),
   'و اگر رخ داد، کاربر پیامِ صریح می‌گیرد نه سکوتِ محض (مسیرِ پول)');
 
-/* ══ ۳) قراردادِ control ═══════════════════════════════════════════════ */
-console.log('\n۳) قراردادِ control = شاخه‌ی امن (staged)');
-const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n}') || '';
-ok(/staged = !starsRail && peekVariant\(db, uid, PACK_REVEAL_EXPERIMENT\) !== 'full'/.test(screenFn),
-  'شرط رویِ استثنا-بودنِ شاخه‌ی «full» است، نه شاخه‌ی «staged» — طبقِ قراردادِ control');
-ok(!/=== 'staged'/.test(screenFn), 'و هیچ‌جا منتظرِ literal رشته‌ی «staged» از peekVariant نیست');
+/* ══ ۵) دکمه‌ی کهنه‌ی یک بسته‌ی خاموش، بی‌صدا نمی‌میرد ═══════════════════ */
+console.log('\n۵) تپ روی بسته‌ی خاموش (بند ۲ج/۶ + ۹ب/۱)');
+ok(/const isRetiredPack = \(key\) => !EXTRA_PACKS_ENABLED && EXTRA_PACK_KEYS\.has\(key\);/.test(SRC),
+  '«بازنشسته» از خودِ پرچم مشتق می‌شود، نه از یک لیستِ دومِ دستی');
+ok(/const PACKAGE_BY_KEY = Object\.fromEntries\(\s*\[\.\.\.COIN_PACKAGES, \.\.\.EXTRA_PACKAGES\]/.test(SRC),
+  'کلیدِ بسته‌ی خاموش هنوز resolve می‌شود (ردیفِ پرداختِ باز نامش را از دست نمی‌دهد — بند ۲ج/۵)');
+ok(/if \(isRetiredPack\(pack\.key\)\) \{/.test(pkgHandler), 'اکشنِ pkg: حالتِ بسته‌ی خاموش را می‌شناسد');
+ok(/L\.errors\.packRetired/.test(pkgHandler), 'و پیامِ مودبانه‌ی اختصاصی می‌دهد، نه سکوت و نه خطای عمومی');
+{
+  // گاردِ ترتیب: بلوکِ خاموش باید **بعد از** ترمیمِ استیت بیاید، وگرنه `s.paymentId`
+  // نامعتبر است و دکمه‌ی «بازگشت»ِ کیبوردِ ضمیمه به یک شناسه‌ی مرده اشاره می‌کند.
+  const iRepair = pkgHandler.indexOf('patchSession(uid, { paymentId: revived })');
+  const iRetired = pkgHandler.indexOf('if (isRetiredPack(pack.key))');
+  ok(iRepair > -1 && iRetired > iRepair, 'و بعد از بلوکِ ترمیمِ استیت است (شناسه‌ی فاکتورِ معتبر برای دکمه‌ی بازگشت)');
+  ok(/packMenuScreen\(uid, s\.paymentId\)/.test(pkgHandler.slice(iRetired)),
+    'پیام با خودِ کیبوردِ فروشگاه می‌رود، پس کاربر همان‌جا بسته‌ی زنده انتخاب می‌کند (بن‌بست نیست)');
+}
+for (const loc of ['fa', 'ru', 'es', 'pt']) {
+  const t = readFileSync(`bots/tarot/locales/${loc}.js`, 'utf8');
+  ok(/\n\s*packRetired: '[^']+',/.test(t), `locale ${loc} رشته‌ی packRetired را دارد`);
+}
 
-/* ══ ۴) رفتار روی SQLite واقعی — با موتورِ واقعیِ shared/ab.js ═══════════ */
-console.log('\n۴) رفتارِ واقعی (قبل/بعد از راه‌اندازیِ آزمایش)');
+/* ══ ۶) قراردادِ control و گاردِ خاموشی در همان شرط ═════════════════════ */
+console.log('\n۶) شرطِ staged');
+const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n}') || '';
+ok(/staged = EXTRA_PACKS_ENABLED && !starsRail/.test(screenFn),
+  'وقتی دو بسته خاموش‌اند اصلاً staged نمی‌شود (دکمه‌ی کشفی که چیزی برای کشف ندارد ساخته نمی‌شود)');
+ok(/peekVariant\(db, uid, PACK_REVEAL_EXPERIMENT\) !== 'full'/.test(screenFn),
+  'و شرطِ آزمایش رویِ استثنا-بودنِ شاخه‌ی «full» است، نه شاخه‌ی «staged» — طبقِ قراردادِ control');
+ok(!/=== 'staged'/.test(screenFn), 'هیچ‌جا منتظرِ literal رشته‌ی «staged» از peekVariant نیست');
+
+/* ══ ۷) رفتار روی SQLite واقعی — با موتورِ واقعیِ shared/ab.js ═══════════ */
+console.log('\n۷) رفتارِ واقعیِ آزمایش (برای روزی که پرچم روشن شود)');
 {
   const db = new Database(':memory:');
   ensureAb(db);
-  const UID_A = 111, UID_B = 222;
+  const UID_A = 111;
   const EXP = 'pack_reveal_v1';
 
   // پیش از ساختِ آزمایش در داشبورد: باید literal 'control' برگردد (خودِ ab.js، نه مدل)
   ok(peekVariant(db, UID_A, EXP) === 'control', 'قبل از ساختن/اجرا: peekVariant literal «control» می‌دهد');
 
-  // شبیه‌سازیِ شرطِ کدِ واقعی برای این حالت
-  const stagedNow = (uid) => peekVariant(db, uid, EXP) !== 'full';
-  ok(stagedNow(UID_A) === true, '⇒ پیش از راه‌اندازیِ آزمایش، همه‌ی کاربران شاخه‌ی امن (سه‌بسته‌ای) می‌بینند');
+  // شبیه‌سازیِ شرطِ کدِ واقعی، **با همان پرچم** — یعنی امروز جوابش باید false باشد.
+  const stagedNow = (uid) => EXTRA_ON && peekVariant(db, uid, EXP) !== 'full';
+  ok(stagedNow(UID_A) === EXTRA_ON,
+    EXTRA_ON ? '⇒ با پرچمِ روشن، پیش از راه‌اندازیِ آزمایش همه شاخه‌ی امن (سه‌بسته‌ای) می‌بینند'
+      : '⇒ با پرچمِ خاموش، هیچ کاربری وارد شاخه‌ی staged نمی‌شود');
 
   // حالا آزمایش را از داشبورد «running» می‌کنیم، با دو شاخه‌ی درست‌نام‌گذاری‌شده.
   // ⚠️ روی یک دیتابیسِ **تازه**: shared/ab.js کشِ ۶۰ثانیه‌ای config دارد (`expCache`)
@@ -80,7 +151,6 @@ console.log('\n۴) رفتارِ واقعی (قبل/بعد از راه‌اندا
     VALUES (?, 'running', ?, unixepoch())`).run(EXP, JSON.stringify([
       { key: 'control', weight: 1 }, { key: 'full', weight: 1 },
     ]));
-  const stagedOn2 = (uid) => peekVariant(db2, uid, EXP) !== 'full';
   // هش قطعی است: همان uid همیشه یک جواب می‌دهد. برای پوششِ هر دو شاخه، چند آی‌دی
   // امتحان می‌شود تا هم یک نمونه‌ی control و هم یک نمونه‌ی full واقعاً دیده شود.
   const sample = Array.from({ length: 40 }, (_, i) => 1000 + i);
@@ -88,32 +158,39 @@ console.log('\n۴) رفتارِ واقعی (قبل/بعد از راه‌اندا
   const seenFull = sample.find(uid => peekVariant(db2, uid, EXP) === 'full');
   ok(seenControl !== undefined, 'بعد از running: حداقل یک کاربر شاخه‌ی control می‌گیرد');
   ok(seenFull !== undefined, 'و حداقل یک کاربر شاخه‌ی full می‌گیرد (تقسیمِ واقعی، نه فقط تعریف)');
-  ok(stagedOn2(seenControl) === true, 'کاربرِ شاخه‌ی control همچنان سه‌بسته‌ای می‌بیند');
-  ok(stagedOn2(seenFull) === false, 'کاربرِ شاخه‌ی full همان لحظه هر پنج بسته را می‌بیند');
+  // شرطِ کاملِ کد، شاملِ پرچم — همان چیزی که واقعاً اجرا می‌شود.
+  const stagedFull = (uid) => EXTRA_ON && peekVariant(db2, uid, EXP) !== 'full';
+  ok(stagedFull(seenControl) === EXTRA_ON, 'کاربرِ شاخه‌ی control فقط وقتی سه‌بسته‌ای می‌بیند که پرچم روشن باشد');
+  ok(stagedFull(seenFull) === false, 'کاربرِ شاخه‌ی full در هر حالت staged نیست');
 }
 
-/* ══ ۵) نشانه‌ی «دیده شد» (packsRevealed) ═════════════════════════════════ */
-console.log('\n۵) دکمه‌ی کشف و نشانه‌ی سشن');
+/* ══ ۸) نشانه‌ی «دیده شد» (packsRevealed) ═════════════════════════════════ */
+console.log('\n۸) دکمه‌ی کشف و نشانه‌ی سشن (کدش عمداً حفظ شده)');
 const revealFn = bodyOf('bot.action(/^pack_reveal:(\\d+)$/, async (ctx) => {', '\n});') || '';
 ok(/if \(starsRail \|\| !coinsOn\(uid\)\) return;/.test(revealFn), 'هندلر برای ریلِ استارز/دنیای تومانی هیچ کاری نمی‌کند');
 ok(/if \(s\.paymentId !== pid\) return;/.test(revealFn), 'مالکیتِ فاکتور چک می‌شود (دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر بی‌اثر است)');
 ok(/patchSession\(uid, \{ packsRevealed: 1 \}\)/.test(revealFn), 'نشانه در سشن می‌نشیند (نه ستونِ DB — بند ۹/۰: چیزی که لازم نیست ساخته نشود)');
+ok(/packMenuScreen\(uid, pid\)/.test(revealFn),
+  'و صفحه را دوباره می‌سازد — پس دکمه‌ی کهنه‌ی کشف در حالتِ خاموش هم خودترمیم است (منو بدونِ آن دکمه بازرندر می‌شود)');
 const packsRevealedFn = bodyOf('const packsRevealed = (uid) => {', '\n};') || '';
 ok(/getSession\(uid\)\?\.packsRevealed/.test(packsRevealedFn), 'و همان کلید در packsRevealed() خوانده می‌شود');
 
-/* ══ ۶) exposure دقیقاً هم‌زمان با رندرِ واقعی ═════════════════════════════ */
-console.log('\n۶) exposure (بند ۲الف/۶د ریشه: peek قبل، expose بعد از رسیدنِ پیام)');
+/* ══ ۹) exposure فقط وقتی چیزی برای دیدن هست ═════════════════════════════ */
+console.log('\n۹) exposure (بند ۲الف/۶د ریشه: peek قبل، expose بعد از رسیدنِ پیام)');
 const rechargeFn = bodyOf("bot.action('recharge', async (ctx) => {", '\n});') || '';
-ok(/expose\(db, uid, PACK_REVEAL_EXPERIMENT\)/.test(rechargeFn), '«recharge» بعد از رسیدنِ واقعیِ پیام expose می‌کند');
 const payCancelFn = bodyOf("bot.action(/^pay_cancel:(\\d+)$/, async (ctx) => {", '\n});') || '';
-ok(/expose\(db, uid, PACK_REVEAL_EXPERIMENT\)/.test(payCancelFn), 'و «pay_back به کیف» هم همان‌طور (مسیرِ دومِ رندر)');
-ok(/if \(starsRail\)[\s\S]{0,60}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,60}else[\s\S]{0,60}expose\(db, uid, PACK_REVEAL_EXPERIMENT/.test(rechargeFn),
+for (const [name, fn] of [['recharge', rechargeFn], ['pay_back به کیف', payCancelFn]]) {
+  ok(/else if \(EXTRA_PACKS_ENABLED\) \{ try \{ expose\(db, uid, PACK_REVEAL_EXPERIMENT\); \} catch \{\} \}/.test(fn),
+    `«${name}» فقط وقتی پرچم روشن است exposure ثبت می‌کند (وگرنه آزمایشِ آینده با کاربرانی که هیچ‌وقت چیزی ندیدند رقیق می‌شود)`);
+  ok(/expose\(db, uid, STARS_EXPERIMENT\)/.test(fn), `و آزمایشِ استارزِ «${name}» دست‌نخورده ماند`);
+}
+ok(/if \(starsRail\)[\s\S]{0,60}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,80}else if \(EXTRA_PACKS_ENABLED\)[\s\S]{0,60}expose\(db, uid, PACK_REVEAL_EXPERIMENT/.test(rechargeFn),
   'دو آزمایش دوقلوی هم‌ساختارند: استارز فقط رویِ starsRail، pack_reveal فقط رویِ !starsRail');
 
-/* ══ ۷) جهش‌ها ═══════════════════════════════════════════════════════════ */
-console.log('\n۷) جهش‌های تأییدکننده');
+/* ══ ۱۰) جهش‌ها ══════════════════════════════════════════════════════════ */
+console.log('\n۱۰) جهش‌های تأییدکننده');
 {
-  // جهش: شرط را برعکس بنویس (=== 'staged' به‌جای !== 'full') — دقیقاً باگی که این چک
+  // جهش ۱: شرط را برعکس بنویس (=== 'staged' به‌جای !== 'full') — دقیقاً باگی که این چک
   // برای جلوگیری‌اش ساخته شد.
   const mutated = screenFn.replace(
     "peekVariant(db, uid, PACK_REVEAL_EXPERIMENT) !== 'full'",
@@ -124,6 +201,16 @@ console.log('\n۷) جهش‌های تأییدکننده');
   ok(stagedMutated(999) === false,
     'جهشِ «=== staged» پیش از راه‌اندازیِ آزمایش staged را false می‌دهد (یعنی همه هر ۵ بسته می‌بینند — دقیقاً باگی که این چک می‌گیرد)');
   ok(mutated !== screenFn, 'و متنِ جهش‌یافته واقعاً با سورسِ اصلی فرق دارد (ادعا چیزی را بی‌معنا تست نمی‌کند)');
+
+  // جهش ۲: اگر کسی `shopPackages()` را با `COIN_PACKAGES` خام عوض کند، روشن‌کردنِ پرچم
+  // دیگر هیچ اثری ندارد — یک رول‌بکِ **بی‌صدا شکسته**. ادعای بند ۴ باید بگیردش.
+  ok(!/starsRail \? COIN_PACKAGES\.filter/.test(SRC),
+    'جهشِ «برگشت به COIN_PACKAGES خام در رندر» وجود ندارد (وگرنه پرچم بی‌اثر می‌شد)');
+
+  // جهش ۳: حذفِ گاردِ پرچم از شرطِ staged ⇒ دکمه‌ی کشفِ بی‌اثر برمی‌گردد.
+  const noFlag = screenFn.replace('staged = EXTRA_PACKS_ENABLED && !starsRail', 'staged = !starsRail');
+  ok(noFlag !== screenFn && !/staged = EXTRA_PACKS_ENABLED && !starsRail/.test(noFlag),
+    'جهشِ «حذفِ پرچم از شرطِ staged» قابلِ ساخت است و ادعای بند ۶ آن را قرمز می‌کند');
 }
 
 /* ══ نتیجه ═══════════════════════════════════════════════════════════════ */
