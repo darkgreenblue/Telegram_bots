@@ -138,7 +138,41 @@ function changedFiles() {
   }
 }
 
+/* 🔁 پوشی که **مرجِ یک PR** است، ماتریسِ ربات‌ها را دوباره اجرا نمی‌کند.
+ *
+ * چکِ PR روی نتیجه‌ی merge اجرا می‌شود، پس اجرای دومِ روی main تقریباً همان درخت را
+ * دوباره تست می‌کند. این از قبل در بند ۳ج ریشه به‌عنوان اتلاف ثبت شده بود؛ حالا
+ * اندازه‌گیری هم پشتش هست (۲۱ روزِ واقعی، ۲۲ شهریور تا ۱۱ مهر):
+ *   • ۱۳۶ اجرای CI روی push، که **۱۰۰تایش** مرجِ PR بود → ۹۹ سبز، ۱ قرمز.
+ *   • و آن یک قرمز در **جابِ `changes`** بود (گاردِ تنوعِ محتوای کانال)، نه در
+ *     ماتریسِ ربات‌ها. یعنی ماتریس در ۱۰۰ مرج **هیچ‌وقت** چیزی نگرفت.
+ *   • ۳۶ پوشِ مستقیم (بدونِ PR) ولی **۴ قرمز** داشتند — یعنی CI آن‌جا واقعاً کار
+ *     می‌کند و حذفِ بی‌قیدِ `push` یک تورِ ایمنیِ زنده را می‌بُرد.
+ * پس تفکیک لازم است، نه حذف: مرجِ PR ماتریس را رد می‌کند، پوشِ مستقیم نه.
+ *
+ * ⚠️ جابِ `changes` عمداً همچنان اجرا می‌شود: دو گاردِ مارکتینگش آن‌جا هستند و همان
+ * تنها چیزی است که در این ۱۰۰ مرج یک باگ گرفت. صرفه‌جویی از ماتریس می‌آید نه از این.
+ *
+ * ⚠️ و تشخیص عمداً fail-**open** است (هم‌راستا با کلِ این فایل): هر شکلِ ناشناخته‌ی
+ * پیامِ کامیت یعنی «مرج نیست» و ماتریس کامل اجرا می‌شود.
+ * فقط **خطِ اولِ** پیام سنجیده می‌شود، به همان دلیلِ ثبت‌شده‌ی گیتِ پنجره‌ی دیپلوی:
+ * بدنه پر از نقلِ‌قول است و یک PR که این مکانیزم را مستند کند نباید خودش را خاموش کند.
+ */
+export function isPrMergePush(eventName, headMsg) {
+  if (eventName !== 'push') return false;
+  const first = String(headMsg || '').split('\n')[0].trim();
+  if (!first) return false;
+  return /\(#\d+\)$/.test(first)              // squash merge: «… (#305)»
+      || /^Merge pull request #\d+\b/.test(first);  // merge commit
+}
+
 function main() {
+  if (isPrMergePush(process.env.GITHUB_EVENT_NAME, process.env.HEAD_COMMIT_MSG)) {
+    console.log('↩︎ این پوش مرجِ یک PR است — ماتریسِ ربات‌ها روی همان درخت قبلاً سبز شده.');
+    console.log(`   💾 حدودِ ${NODE_BOTS.length + 1} جاب اجرا نمی‌شود (گاردهای همین جاب سرِ جایشان‌اند).`);
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'bots=[]\ntabir=false\n');
+    return;
+  }
   const files = changedFiles();
   const out = files === null ? { ...ALL, reason: 'diff قابلِ محاسبه نبود (fail-open)' } : decide(files);
   if (files) console.log(`فایل‌های عوض‌شده (${files.length}):\n` + files.slice(0, 50).map((f) => '  ' + f).join('\n'));

@@ -8,6 +8,19 @@ on:
   # دوباره‌زدنش یک کامیتِ خالی بود، که قاعده‌ی ریپو صریحاً ممنوعش می‌کند.
   workflow_dispatch:
 
+# 🚫 پوشِ تازه روی یک PR، اجرای قبلیِ همان PR را لغو می‌کند.
+#
+# اندازه‌گیریِ ۲۱ روزِ واقعی: از ۱۷۳ اجرای CI روی PR، **۳۲تا (۱۸٪)** ظرفِ کمتر از ۵
+# دقیقه با یک پوشِ تازه منسوخ شدند — یعنی تا آخر دویدند تا نتیجه‌شان دور ریخته شود.
+#
+# ⚠️ گروه عمداً `github.ref` است نه نامِ برنچ: روی PR این `refs/pull/<n>/merge` است،
+# پس دو PR هم‌زمان هم‌دیگر را نمی‌کشند. و روی `push`/`schedule` هر ران گروهِ یکتای
+# خودش را می‌گیرد (`github.run_id`)، چون آن‌جا لغو کردن یعنی نبودنِ چک روی کامیتی که
+# به main رسیده — دقیقاً همان چیزی که نباید بشود.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # کدام ربات‌ها واقعاً باید چک شوند؟ (بند ۳ج ریشه — سهمیه‌ی Actions)
   # گیت‌هاب per **جاب** و رند به بالا حساب می‌کند، پس ماتریسِ ثابتِ ۶تایی یعنی یک تغییرِ
@@ -28,6 +41,9 @@ jobs:
       - id: f
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          # پیامِ کامیت برای تشخیصِ «این پوش مرجِ یک PR است» (بند ۳ج ریشه). از env
+          # می‌رود نه interpolation مستقیم در shell — پیامِ کامیت ورودیِ کاربر است.
+          HEAD_COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: node tools/ci-changed-bots.mjs
 
       # گاردِ تنوعِ محتوای کانال. عمداً **همین‌جا** و نه در ماتریسِ ربات‌ها: مسیرِ
@@ -102,6 +118,12 @@ jobs:
       - name: CI path filter check
         if: matrix.bot == 'voice2text'
         run: node tools/check-ci-changed.mjs
+
+      # دو صرفه‌جوییِ سهمیه که بی‌صدا می‌میرند: ردکردنِ ماتریس روی مرجِ PR، و لغوِ
+      # اجرای منسوخِ PR. هر دو رفتاری سنجیده می‌شوند (بند ۳ج ریشه).
+      - name: Actions budget guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-actions-budget.mjs
 
       # همان قاعده از زاویه‌ی دوم: چکِ بالا فقط پینگ‌پنگِ .env را می‌بیند. این یکی
       # بلوک‌های **یک‌باره** را می‌بیند — بلوکی که شرطش همیشه درست است و در هر مرج
