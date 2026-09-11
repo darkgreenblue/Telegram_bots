@@ -54,6 +54,21 @@ jobs:
             case "$OPS_APP"   in (*[!a-z0-9-]*) echo "❌ نام اپ نامعتبر"; exit 1;; esac
             case "$OPS_LINES" in (*[!0-9]*|'') OPS_LINES=100;; esac
 
+            # 🗄 تک‌منبعِ «کدام فایلِ .db». عمداً یک تابع است نه دو خطِ کپی‌شده.
+            # 🐛 باگِ واقعیِ ۲۰ شهریور ۱۴۰۵: همین انتخاب در ۱۲ شهریور برای `db-query` از
+            # «اولین به ترتیبِ الفبا» به «بزرگ‌ترین» اصلاح شد، ولی **دوقلویش در `exp` جا
+            # ماند**. نتیجه: آزمایشِ `price_ladder_p1` به‌جای `bot-fa.db` در `bot-es.db`
+            # ساخته شد — یعنی یک آزمایشِ کاملاً بی‌اثر روی رباتی که اصلاً ریلِ قیمتش
+            # تومانی نیست، بدونِ هیچ خطایی. دقیقاً همان «فیکس در یک نقطه، دوقلویش عقب
+            # می‌ماند»ی که ریپو بارها ثبتش کرده. حالا یک تابع، دو مصرف‌کننده.
+            pick_db() {
+              if [ -n "$OPS_ONLY" ] && [ -f "data/$OPS_ONLY" ]; then
+                echo "data/$OPS_ONLY"
+              else
+                ls -S data/*.db 2>/dev/null | head -1
+              fi
+            }
+
             case "$OPS_ACTION" in
               status)
                 pm2 ls
@@ -118,11 +133,7 @@ jobs:
                 # حالا بزرگ‌ترین فایل انتخاب می‌شود (پرجمعیت‌ترین)، و **همه‌ی نامزدها با
                 # اندازه‌شان چاپ می‌شوند** تا انتخابِ اشتباه دیده شود نه اینکه بی‌صدا بماند.
                 # `OPS_ONLY` نامِ فایلِ دلخواه را تحمیل می‌کند (مثلاً `bot-ru.db`).
-                if [ -n "$OPS_ONLY" ] && [ -f "data/$OPS_ONLY" ]; then
-                  DBFILE="data/$OPS_ONLY"
-                else
-                  DBFILE=$(ls -S data/*.db 2>/dev/null | head -1)
-                fi
+                DBFILE=$(pick_db)
                 [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
                 echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
                 ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
@@ -153,8 +164,12 @@ jobs:
                 [ -n "$OPS_APP" ]   || { echo "❌ app لازم است"; exit 1; }
                 [ -n "$OPS_QUERY" ] || { echo "❌ اسپکِ JSON لازم است"; exit 1; }
                 cd "bots/$OPS_APP"
-                DBFILE=$(ls data/*.db 2>/dev/null | head -1)
+                DBFILE=$(pick_db)
                 [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
+                # نامزدها همیشه چاپ می‌شوند تا انتخابِ اشتباه **دیده** شود، نه اینکه مثل
+                # دفعه‌ی قبل بی‌صدا بماند و آزمایش در دیتابیسِ زبانِ دیگری ساخته شود.
+                echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
+                ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
                 echo "===== exp روی $OPS_APP/$DBFILE ====="
                 node ../../tools/ops-exp.mjs "$DBFILE"
                 ;;
