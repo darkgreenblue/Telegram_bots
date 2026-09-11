@@ -161,7 +161,6 @@ export default {
    * que chocaría con el propio texto de la lectura.
    * ⚠️ `name` es solo una etiqueta de reserva: las frases con cantidad pasan por coins(). */
   coinUnit: { name: 'diamantes', emoji: '💎' },
-  packs: { basic: 'Puñado', gold: 'Bolsita', magic: 'Cofre' },
   /* ⚖️ واژگانِ «حکمِ قاطع» و جداکننده. هم‌شکلِ fa، ولی توکن‌ها اسپانیایی‌اند.
    * ⚠️ بدونِ این بلوک، `normalizeVerdict` برای «Sí» مقدارِ null می‌داد و بلوکِ جواب
    * **بی‌هیچ خطایی** از خوانش حذف می‌شد، و `headlineOk` هر سرخطِ اسپانیایی را رد می‌کرد
