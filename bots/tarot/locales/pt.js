@@ -158,7 +158,6 @@ export default {
    * que colidiria com o próprio texto da leitura.
    * ⚠️ `name` é só um rótulo de reserva: as frases com contagem passam por coins(). */
   coinUnit: { name: 'diamantes', emoji: '💎' },
-  packs: { basic: 'Punhado', gold: 'Saquinho', magic: 'Baú' },
   /* ⚖️ واژگانِ «حکمِ قاطع» و جداکننده. هم‌شکلِ fa، ولی توکن‌ها پرتغالی‌اند.
    * ⚠️ بدونِ این بلوک، `normalizeVerdict` برای «Sim» مقدارِ null می‌داد و بلوکِ جواب
    * **بی‌هیچ خطایی** از خوانش حذف می‌شد، و `headlineOk` هر سرخطِ پرتغالی را رد می‌کرد
