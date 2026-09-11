@@ -30,6 +30,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { heartbeatAgeSec } from '../shared/heartbeat.js';
+import { stuckCycle } from './stuck-detect.mjs';
 
 const run = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,6 +39,10 @@ const STATE_FILE = join(ROOT, 'data', 'health-watch.json');
 const CHECK_EVERY_MS = 5 * 60 * 1000;
 const REMIND_EVERY_MS = 6 * 60 * 60 * 1000;   // یادآوریِ مشکلِ پابرجا
 const CREDITS_EVERY_MS = 6 * 60 * 60 * 1000;  // چکِ موجودیِ OpenRouter
+/* 🔁 تشخیصِ «چند کاربر در یک صفحه حلقه می‌زنند». هر ۳۰ دقیقه، نه هر دور: پنجره‌ی
+ * رفتاری‌اش ۶ ساعت است، پس اسکنِ هر ۵ دقیقه ۸۸٪ همان ردیف‌ها را دوباره می‌خواند و
+ * هیچ یافته‌ای را زودتر پیدا نمی‌کند. */
+const STUCK_EVERY_MS = 30 * 60 * 1000;
 const CREDITS_MIN_USD = 5;
 const DISK_FULL_PCT = 92;
 const CRASHLOOP_WINDOW_MS = 10 * 60 * 1000;
@@ -223,6 +228,39 @@ async function checkCredits() {
   return out;
 }
 
+/* 🔁 «چند کاربر در یک صفحه گیر کرده‌اند» — تشخیصِ رفتاری از جدولِ journey.
+ *
+ * ⚠️ عمداً **جزوِ `problems` نیست** و مسیرِ باز/رفع‌شده را نمی‌رود. آن ماشین برای
+ * خرابیِ پایدار است که یک روز برطرف می‌شود؛ این یک **مشاهده‌ی لحظه‌ای** است. اگر
+ * داخلش می‌رفت، هر بار که حلقه‌ی کاربران تمام می‌شد یک «✅ رفع شد» می‌رفت که هیچ‌کس
+ * رفعش نکرده بود، و کول‌داونِ خودش هم با یادآوریِ ۶ساعته تداخل می‌کرد.
+ *
+ * و طبقِ بند ۹ب-۴ ریشه، این مسیر **هیچ پیامی به کاربر نمی‌فرستد** — فقط به مالک. */
+async function checkStuck(state, now = Date.now()) {
+  if (now - (state.stuckAt || 0) < STUCK_EVERY_MS) return;
+  state.stuckAt = now;
+  let Database;
+  try {
+    // better-sqlite3 وابستگیِ خودِ این ناظر نیست (هیچ package.json ای ندارد)؛ از نصبِ
+    // تاروت قرض گرفته می‌شود. نبودنش یعنی این قابلیت بی‌صدا خاموش است، نه کرشِ ناظر.
+    Database = (await import(pathToFileURL(
+      join(ROOT, 'bots/tarot/node_modules/better-sqlite3/lib/index.js')).href)).default;
+  } catch (e) { logErr('❌ HEALTH_WATCH better-sqlite3 در دسترس نیست:', e.message); return; }
+
+  for (const [name, loc] of HEARTBEAT_APPS) {
+    const file = join(ROOT, 'bots/tarot/data', `bot-${loc}.db`);
+    if (!existsSync(file)) continue;
+    let db;
+    try {
+      // readonly اجباری است: این ناظر هرگز نباید روی دیتابیسِ رباتِ زنده بنویسد.
+      db = new Database(file, { readonly: true, fileMustExist: true });
+      const found = stuckCycle(db, name, state, { now: Math.floor(now / 1000) });
+      if (found) await tg(found.text);
+    } catch (e) { logErr('❌ HEALTH_WATCH تشخیصِ گیر افتادن:', name, e.message); }
+    finally { try { db?.close(); } catch { /* بی‌اهمیت */ } }
+  }
+}
+
 /* ═══════════════ حالت و هشدار ═══════════════ */
 // حالت روی دیسک می‌ماند نه در حافظه: هر دیپلوی این پروسه را ری‌استارت می‌کند و بدونِ آن،
 // هر دیپلوی یک موجِ هشدارِ تکراری برای مشکلی می‌فرستاد که مالک از قبل خبر داشت.
@@ -275,6 +313,9 @@ async function cycle(state) {
     next[p.key] = { text: p.text, notifiedAt: renotified ? now : wasNotified };
   }
   state.open = next;
+  // بعد از هشدارهای خرابی: یک مشاهده‌ی محصولی است، نه یک خرابی، و هرگز نباید جلوی
+  // آن‌ها را بگیرد یا کلِ دور را با خطای خودش بشکند.
+  try { await checkStuck(state, now); } catch (e) { logErr('❌ HEALTH_WATCH stuck:', e.message); }
   saveState(state);
   log(problems.length ? `⚠️ ${problems.length} مشکل: ${problems.map((p) => p.key).join(', ')}` : '✅ همه‌چیز سالم');
 }
