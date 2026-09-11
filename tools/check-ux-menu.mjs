@@ -1240,8 +1240,24 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // `wallet` — یعنی همان‌جایی که این PR دست زد. (کامنت‌ها و پرامپت‌ها بیرونِ دامنه‌اند؛
   // چند «—» داخلِ خودِ پرامپت‌های خوانش از قبل هست و پاک‌کردنشان تغییرِ رفتاریِ جداست.)
   const walletBlock = LOC.slice(LOC.indexOf('  wallet: {'), LOC.indexOf('  wallet: {') + 3000);
+  /* ⚠️ کامنت‌ها باید **قبل از** شمارش کنار بروند، وگرنه توضیحِ خودِ ما قرمزِ کاذب می‌دهد.
+   * دقیقاً همین افتاد (۱۴۰۵/۰۶/۲۰): کامنتِ بلوکیِ v3.81.0 هم واژه‌ی `coinPackChosen` را
+   * داشت و هم یک «—»، پس یک ادعای کاملاً سالم قرمز شد. نسخه‌ی قبلی فقط `//` را رد
+   * می‌کرد و خطوطِ داخلِ کامنتِ **بلوکی** را کد حساب می‌کرد. هم‌خانواده‌ی تله‌های ثبت‌شده‌ی
+   * v3.56.0 و v3.64.0 و check-price-ladder. */
+  const codeLines = (block) => {
+    const out = []; let inBlock = false;
+    for (const raw of block.split('\n')) {
+      const l = raw.trim();
+      if (inBlock) { if (l.includes('*/')) inBlock = false; continue; }
+      if (l.startsWith('//')) continue;
+      if (l.startsWith('/*')) { if (!l.includes('*/')) inBlock = true; continue; }
+      out.push(raw);
+    }
+    return out;
+  };
   for (const [name, block] of [['coinPack', LOC], ['بلوکِ کیف', walletBlock]]) {
-    const lines = block.split('\n').filter(l => /coinPack/.test(l) && !l.trim().startsWith('//'));
+    const lines = codeLines(block).filter(l => /coinPack/.test(l));
     ok(lines.length > 0 && !lines.some(l => l.includes('—')), `«${name}» خطِ تیره‌ی بلند ندارد`);
   }
 }

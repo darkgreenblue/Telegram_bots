@@ -566,6 +566,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-stars-toggle.mjs
 
+      # صفحه‌ی فاکتور (v3.81.0): عنوانِ داینامیک، تطابقِ حروفِ مبلغ با خودِ عدد، و
+      # اینکه پاک‌شدنِ صفحه‌ی بسته‌ها فقط روی ریلِ کارت بیفتد نه روی استارز.
+      - name: Invoice page check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-invoice-page.mjs
+
       # یادآوریِ شبانه‌ی A/B (شرطِ هر شاخه، ترتیبِ مهر و رویداد، دکمه‌ی انصراف)، به‌علاوه‌ی
       # دو اصلاحِ هم‌خانواده: دکمه‌ی دعوت که مستقیم مخاطبین را باز نکند، و خبرِ پاداشِ رفرال.
       - name: Night reminder A/B + invite + referral reward check
