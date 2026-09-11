@@ -629,7 +629,7 @@ export default {
   // хватает баланса: цену с кнопки убираем, она есть в тексте (paywallCovered)
   openCardsCovered: '🔮 Открыть карты',
   recharge: '➕ Пополнить кошелёк',
-  buyCoins: (cur) => `💰 Купить ${cur.name}${cur.emoji}`,
+  buyCoins: (cur) => `💰 Купить ${cur.name}${cur.emoji} (быстро, выгодно)`,
   // ⭐ `stars` = сколько СПИШЕТСЯ на самом деле (приходит из того же источника, что и счёт).
   // Если цены нет, кнопка остаётся без цены: лучше ничего, чем неверное число.
   coinPack: (p, cur, stars) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji}`
