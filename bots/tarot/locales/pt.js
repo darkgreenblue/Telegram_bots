@@ -256,7 +256,7 @@ export default {
     // saldo suficiente: o preço sai do botão, ele já está no texto (paywallCovered)
     openCardsCovered: '🔮 Virar as cartas',
     recharge: '➕ Colocar saldo',
-    buyCoins: (cur) => `💰 Comprar ${cur.name}${cur.emoji}`,
+    buyCoins: (cur) => `💰 Comprar ${cur.name}${cur.emoji} (fácil, barato)`,
     // ⭐ `stars` = o que realmente sai da conta (mesma fonte do pedido).
     // Sem preço, o botão fica sem preço: melhor nada do que um número errado.
     coinPack: (p, cur, stars) => `${p.emoji} ${packName(p)}: ➕${fmt(p.coins)}${cur.emoji}`
