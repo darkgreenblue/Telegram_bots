@@ -616,15 +616,19 @@ console.log('\n▶ فلوی «فال تک کارت» — سه باگی که تس
 console.log('\n▶ نیتِ معلق: بعد از انصراف، همان چیزی که می‌خواستیم می‌آید (v3.17.0)');
 {
   const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  ok(/function takeIntent\(uid\)/.test(CODE) && /patchSession\(uid, \{ intent: '', intentAt: 0 \}\)/.test(CODE),
-    'نیت یک‌بارمصرف است (خوانده که شد پاک می‌شود)');
+  ok(/function takeIntent\(uid\)/.test(CODE) && /patchSession\(uid, \{ intent: '', intentAt: 0, intentArg: 0 \}\)/.test(CODE),
+    'نیت یک‌بارمصرف است (خوانده که شد پاک می‌شود، با شناسه‌اش)');
   ok(/INTENT_TTL_S/.test(CODE), 'نیتِ کهنه منقضی می‌شود (انصرافِ ساعت‌ها بعد صفحه‌ی بی‌ربط نمی‌آورد)');
   ok(/patchSession\(uid, \{ intent: key/.test(CODE), 'در سشن (یعنی DB) ذخیره می‌شود، نه حافظه (بند ۹ب/۵)');
 
   // فقط هنگامِ بلاکِ واقعی ثبت می‌شود — مسیرِ عادی هیچ نیتی جا نمی‌گذارد
   for (const g of ['blockDuringOpenPay', 'blockDuringOpenReading']) {
-    const b = CODE.slice(CODE.indexOf(`async function ${g}(ctx, intent)`), CODE.indexOf('\n}', CODE.indexOf(`async function ${g}(ctx, intent)`)));
-    ok(/if \(intent\) setIntent\(uid, intent\);/.test(b), `${g} فقط وقتی بلاک می‌کند نیت را ثبت می‌کند`);
+    // ⚠️ امضا از v3.84.0 آرگومانِ سومِ `intentArg` گرفت (گفتگو باید بداند کدام فال).
+    // ادعا **تیزتر** شد نه خفه: حالا عبورِ همان آرگومان را هم می‌سنجد، چون نیتِ بدونِ
+    // شناسه یعنی بازپخش روی فالِ صفر می‌افتد (همان کلاسِ باگِ v3.78.0).
+    const sig = `async function ${g}(ctx, intent, intentArg = 0)`;
+    const b = CODE.slice(CODE.indexOf(sig), CODE.indexOf('\n}', CODE.indexOf(sig)));
+    ok(/if \(intent\) setIntent\(uid, intent, intentArg\);/.test(b), `${g} فقط وقتی بلاک می‌کند نیت را ثبت می‌کند (با شناسه)`);
     const iSet = b.indexOf('setIntent'); const iRet = b.indexOf('return false');
     ok(iSet > iRet, `${g}: ثبتِ نیت **بعد از** همه‌ی returnهای زودهنگام است`);
   }

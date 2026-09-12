@@ -110,7 +110,11 @@ console.log('\n▶ ۵) دفترِ هزینه دیتای کاربر نیست و �
 {
   ok(/CREATE TABLE IF NOT EXISTS llm_usage/.test(SRC), 'جدولِ llm_usage ساخته می‌شود');
   ok(/idx_llm_usage_created/.test(SRC), 'ایندکسِ زمانی دارد (کوئریِ بازه‌ایِ داشبورد)');
-  const wipe = SRC.slice(SRC.indexOf('function wipeUser('), SRC.indexOf('function wipeUser(') + 1800);
+  // ⚠️ کامنت‌ها **قبل از** سنجش حذف می‌شوند: بدونِ این، اولین کامنتی که نامِ جدول را
+  // توضیحی ببرد یک ادعای کاملاً سالم را قرمزِ کاذب می‌کند. این ششمین بارِ ثبت‌شده‌ی
+  // همین تله در این ریپوست (v3.56.0، v3.64.0، check-price-ladder، check-invoice-page…).
+  const wipeRaw = SRC.slice(SRC.indexOf('function wipeUser('), SRC.indexOf('function wipeUser(') + 1800);
+  const wipe = wipeRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/llm_usage/.test(wipe), 'wipeUser به دفترِ هزینه دست نمی‌زند');
   // ثبت باید خودش گاردِ دوم داشته باشد، نه اینکه فقط به try/catchِ هسته تکیه کند
   const sink = SRC.slice(SRC.indexOf('setUsageSink((u) =>'), SRC.indexOf('setUsageSink((u) =>') + 700);
