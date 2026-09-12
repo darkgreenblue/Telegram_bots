@@ -149,4 +149,97 @@ if (modeOffenders.length) {
   process.exit(1);
 }
 
-console.log(`✅ درختِ کارِ سرور امن است (${scanned} فایلِ سرورمحور + ${chmodTargets.size} هدفِ chmod بررسی شد؛ نه دستورِ کثیف‌کننده‌ای هست نه مودِ ناهم‌خوان).`);
+// ── بخشِ سوم: `git fetch`ِ سرور باید اعتبارنامه‌ی خودش را همراه ببرد ───────────
+// باگِ واقعیِ ۱۴۰۵/۰۶/۲۱: کلونِ سرور ریموتِ HTTPS دارد و مخزن private است، پس گیت
+// پسورد می‌خواهد. تا آن روز هیچ اعتبارنامه‌ای از ران همراه نمی‌رفت و fetch به هرچه
+// روی **خودِ سرور** بود تکیه می‌کرد؛ لحظه‌ای که آن از کار افتاد، هر دیپلوی روی
+// `fatal: could not read Password` مرد و دو نسخه‌ی مرج‌شده‌ی رباتِ زنده ۲۴ ساعت
+// روی سرور ننشستند.
+//
+// ⚠️ چرا این بخش لازم است با اینکه فیکس مرج شده: خرابی‌اش **از سمتِ ریپو کاملاً
+// بی‌صداست**. CI سبز بود، مرج سبز بود، و حتی جابِ Deploy سبز بود — چون بیرونِ
+// پنجره‌ی امن مرحله‌ی SSH را `skip` می‌کند و جاب همچنان `success` می‌شود. یعنی
+// سبزیِ جابِ Deploy هیچ چیزی درباره‌ی سرور ثابت نمی‌کند. تنها جایی که معلوم
+// می‌شود، لاگِ یک رانِ واقعی است که کسی باید بازش کند.
+//
+// ادعاها عمداً روی **هر حلقه‌ی زنجیره** می‌نشینند، چون شکستنِ هرکدام همان خرابیِ
+// بی‌صدا را برمی‌گرداند: توکن در `env:` باشد ولی در `envs:` نه (باگِ ثبت‌شده‌ی
+// ۱۱ شهریور)، یا askpass ساخته شود ولی export نشود، یا مجوزِ جاب محدود باشد.
+const AUTH_FAILS = [];
+const wf = readFileSync('.github/workflows/deploy.yml', 'utf8');
+
+if (!/GH_FETCH_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}/.test(wf)) {
+  AUTH_FAILS.push('`GH_FETCH_TOKEN` در بلوکِ `env:` تعریف نشده');
+}
+const envsRow = wf.match(/^\s*envs:\s*(.+)$/m)?.[1] || '';
+if (!envsRow.split(',').map((x) => x.trim()).includes('GH_FETCH_TOKEN')) {
+  AUTH_FAILS.push('`GH_FETCH_TOKEN` در `envs:` نیست — پس روی سرور **خالی** می‌رسد (باگِ ۱۱ شهریور)');
+}
+if (!/export\s+GIT_ASKPASS="\$GIT_ASKPASS_FILE"/.test(wf)) {
+  AUTH_FAILS.push('`GIT_ASKPASS` export نمی‌شود — helperِ ساخته‌شده‌ی بدونِ export یعنی هیچ');
+}
+if (!/chmod\s+700\s+"\$GIT_ASKPASS_FILE"/.test(wf)) {
+  AUTH_FAILS.push('فایلِ askpass اجرایی نمی‌شود — گیت helperِ غیرِاجرایی را **بی‌صدا** نادیده می‌گیرد');
+}
+if (!/export GIT_TERMINAL_PROMPT=0/.test(wf)) {
+  AUTH_FAILS.push('`GIT_TERMINAL_PROMPT=0` نیست — نبودِ اعتبارنامه به‌جای «احراز هویت نشد» می‌شود «No such device or address»');
+}
+if (!/trap\s+'rm -f "\$GIT_ASKPASS_FILE"'\s+EXIT/.test(wf)) {
+  AUTH_FAILS.push('فایلِ askpass پاک نمی‌شود — توکن روی دیسکِ سرور جا می‌ماند');
+}
+
+// مجوزِ صریح: توکنِ بی‌مجوز یک رشته‌ی بی‌اثر است، و مجوزِ پیش‌فرض یک تنظیمِ سطحِ
+// ریپوست که بیرونِ گیت عوض می‌شود — پس محدودشدنش هیچ دیفی نشان نمی‌دهد.
+const deployJob = wf.slice(wf.indexOf('\n  deploy:'), wf.indexOf('\n  deploy-tabir-khab:'));
+if (!/^\s{4}permissions:\s*$/m.test(deployJob) || !/^\s{6}contents:\s*read\s*$/m.test(deployJob)) {
+  AUTH_FAILS.push('جابِ `deploy` مجوزِ صریحِ `permissions: { contents: read }` ندارد — توکنِ بی‌مجوز بی‌صدا بی‌اثر است');
+}
+
+// ⚠️ دو ادعای **معکوس**: توکن نباید ماندگار شود. کلِ ارزشِ این طراحی این است که
+// اعتبارنامه با پایانِ جاب باطل شود؛ `remote set-url` با توکن یا
+// `credential.helper store` دقیقاً همان وابستگیِ ماندگاری را برمی‌گرداند که این
+// فیکس برای حذفش نوشته شد (چیزی که وجود ندارد نمی‌تواند منقضی شود).
+if (/git\s+remote\s+set-url[^\n]*GH_FETCH_TOKEN/.test(wf) || /credential\.helper[^\n]*store/.test(wf)) {
+  AUTH_FAILS.push('توکن روی دیسکِ سرور ماندگار می‌شود (remote set-url یا credential.helper store)');
+}
+// و نباید در آرگومانِ گیت بنشیند: آن‌جا در `ps` هر کاربرِ سرور دیده می‌شود.
+if (/https:\/\/[^\s"']*\$GH_FETCH_TOKEN@/.test(wf) || /extraheader[^\n]*GH_FETCH_TOKEN/.test(wf)) {
+  AUTH_FAILS.push('توکن در URL یا آرگومانِ گیت می‌نشیند — در `ps` سرور دیده می‌شود (askpass دقیقاً برای همین انتخاب شد)');
+}
+
+// ── ادعای رفتاری: خودِ helper اجرا می‌شود ────────────────────────────────────
+// رجکس فقط می‌گوید «خطی شبیهِ این هست». چیزی که واقعاً اهمیت دارد این است که
+// helper با ورودیِ واقعیِ گیت **جوابِ درست** بدهد. یک نقلِ‌قولِ جابه‌جا در آن
+// printf کافی است که رشته‌ی خالی برگردد و fetch دوباره بمیرد — بی‌صدا.
+const printfLine = wf.split('\n').find((l) => l.includes('GIT_ASKPASS_FILE') && l.includes('printf'));
+if (!printfLine) {
+  AUTH_FAILS.push('خطِ ساختِ helperِ askpass پیدا نشد');
+} else {
+  try {
+    const script = printfLine.trim().replace(/^printf\s+/, '').replace(/\s*>\s*"\$GIT_ASKPASS_FILE"\s*$/, '');
+    // helper را با یک توکنِ ساختگی می‌سازیم و همان دو سؤالی را می‌پرسیم که گیت می‌پرسد.
+    const out = execFileSync('sh', ['-c',
+      `set -e; f=$(mktemp); printf ${script} > "$f"; chmod 700 "$f"; ` +
+      `GH_FETCH_TOKEN=SENTINEL_TOK "$f" "Username for 'https://github.com': "; ` +
+      `GH_FETCH_TOKEN=SENTINEL_TOK "$f" "Password for 'https://x@github.com': "; rm -f "$f"`,
+    ], { encoding: 'utf8' }).trim().split('\n').map((s) => s.trim());
+    if (out[0] !== 'x-access-token') {
+      AUTH_FAILS.push(`helperِ askpass برای Username باید «x-access-token» بدهد، داد: «${out[0]}»`);
+    }
+    if (out[1] !== 'SENTINEL_TOK') {
+      AUTH_FAILS.push(`helperِ askpass برای Password باید خودِ توکن را بدهد، داد: «${out[1]}»`);
+    }
+  } catch (e) {
+    AUTH_FAILS.push(`اجرای helperِ askpass شکست خورد: ${e.message.split('\n')[0]}`);
+  }
+}
+
+if (AUTH_FAILS.length) {
+  console.error('❌ زنجیره‌ی احرازِ هویتِ `git fetch`ِ سرور شکسته است:\n');
+  for (const f of AUTH_FAILS) console.error(`   • ${f}`);
+  console.error('\n   نتیجه: دیپلوی دوباره به اعتبارنامه‌ی سمتِ سرور وابسته می‌شود و روزی که آن از کار');
+  console.error('   بیفتد **هر** دیپلوی می‌میرد — بی‌صدا، چون جابِ Deploy در ساعتِ غیرِامن هم سبز است.');
+  process.exit(1);
+}
+
+console.log(`✅ درختِ کارِ سرور امن است (${scanned} فایلِ سرورمحور + ${chmodTargets.size} هدفِ chmod بررسی شد؛ نه دستورِ کثیف‌کننده‌ای هست نه مودِ ناهم‌خوان) و زنجیره‌ی احرازِ هویتِ fetch سالم است (helper واقعاً اجرا شد).`);
