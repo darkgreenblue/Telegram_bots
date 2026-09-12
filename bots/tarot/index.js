@@ -226,7 +226,10 @@ const TEST_PHASE = false;
 //         ۳۰k/۶۰k/۱۵۰k برگشتند و دو بسته‌ی «افسانه‌ای»/«جاودان» به‌همراهِ آزمایشِ
 //         نمایششان بازنشسته شدند. کلیدهایشان زنده می‌مانند (ردیفِ پرداختِ باز +
 //         دکمه‌ی کهنه، بند ۲ج/۵ و ۶).
-const PRODUCT_VERSION = '3.81.3';
+// v3.82.0 — پاداشِ دعوت ۵ ⟵ ۳ الماس برای فارسی (پله‌ی سومِ `REFERRAL_3_LOCALES`)، با
+//           حفظِ وعده‌ی هر دو نسلِ قبلی؛ به‌علاوه‌ی دو ستونِ افزایشیِ `llm_usage` برای
+//           سنجشِ کشِ پرامپت. تنها تغییرِ رو-به-کاربر همان عددِ پاداش است.
+const PRODUCT_VERSION = '3.82.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -896,6 +899,30 @@ const REFERRAL_BONUS_COINS_V2 = 10;
 const REFERRAL_BONUS_COINS_V3 = 5;
 const REFERRAL_5_LOCALES = ['fa'];
 const referral5On = () => REFERRAL_5_LOCALES.includes(LOCALE);
+/* 💎 و از ۱۴۰۵/۰۶/۲۱ پله‌ی سوم: **۳ الماس** برای فارسی (تصمیمِ صریحِ مالک).
+ *
+ * چرا ۳ و نه ۲ (خواسته‌ی صریح: «۲ هنوز زوده»): اثرِ کاهشِ ۱۰⟵۵ هنوز در دیتا ننشسته
+ * (v3.69.0 فقط چهار روز پیش رفت)، پس یک پله‌ی دیگر با همان اندازه هم صرفه‌جویی می‌دهد
+ * هم اجازه می‌دهد اثرِ هر دو پله جدا دیده شود.
+ *
+ * چرا این تصمیم با دیتا می‌خواند: تحلیلِ اتریبیوشنِ نسلی
+ * (`analytics/tarot/reports/2026-09-11-generational-attribution.md`) نشان داد نرخِ
+ * پرداخت با هر لایه‌ی دعوت تقریباً **نصف** می‌شود (۲٫۳۸٪ ⟵ ۰٫۶۷٪ ⟵ ۰٫۳۶٪ ⟵ ۰٫۲۹٪ و
+ * از لایه ۵ صفرِ مطلق) و **هیچ لایه‌ای سودده نیست**. یعنی امتیازِ نسلی — که قرار بود
+ * رفرال را نجات بدهد — دقیقاً نشان داد چرا نباید.
+ *
+ * ⚠️ این باز هم یک **سوییچِ سخت** است نه A/B، به همان دلیلِ v3.69.0: تصمیمِ صریحِ مالک،
+ * و اندازه‌ی اثر (~۱٬۴۰۰٬۰۰۰ تومان در ماه) از توانِ تشخیصِ یک آزمایشِ سه‌روزه بزرگ‌تر
+ * است. بند ۲ج/۴ ریشه A/B را **پیش‌فرض** می‌داند نه اجبار.
+ *
+ * **رول‌بکِ یک‌خطی:** `REFERRAL_3_LOCALES = []` → بیت‌به‌بیت به رفتارِ ۵ الماسی برمی‌گردد
+ * (نه به ۱۰: آن پله‌ی خودش را دارد و دست‌نخورده است). */
+const REFERRAL_BONUS_COINS_V4 = 3;
+const REFERRAL_3_LOCALES = ['fa'];
+const referral3On = () => REFERRAL_3_LOCALES.includes(LOCALE);
+// مرزِ پله‌ی سوم. عیناً همان الگوی `REFERRAL_5_EPOCH`: لحظه‌ی اولین بوتِ همین نسخه،
+// نه یک تایم‌استمپِ هاردکد (درسِ v3.25.1؛ دیپلوی می‌تواند روزها بعد بیفتد).
+let REFERRAL_3_EPOCH = 0;
 // مرزِ «دعوتِ قدیم / دعوتِ جدید». عمداً یک تایم‌استمپِ هاردکد **نیست**، بلکه لحظه‌ی
 // اولین بوتِ همین نسخه روی همان دیتابیس است (همان الگوی `KB_V2_EPOCH`) — درسِ ثبت‌شده‌ی
 // v3.25.1: دیپلوی می‌تواند روزها بعد از نوشتنِ کد بیفتد و عددِ هاردکد بی‌صدا غلط شود.
@@ -904,9 +931,12 @@ let REFERRAL_5_EPOCH = 0;
 // پاداشِ **قبل از این تغییر**، دست‌نخورده. تنها مصرفش grandfathering است.
 const referralBonusLegacy = (uid) => (uxV2For(uid) ? REFERRAL_BONUS_COINS_V2
   : coinsOn(uid) ? REFERRAL_BONUS_COINS : REFERRAL_BONUS);
-// عددی که روی دکمه‌ها و متن‌ها **نشان داده** می‌شود: وعده‌ی دعوت‌های از این به بعد.
-const referralBonusFor = (uid) => (referral5On() && uxV2For(uid))
+// پاداشِ پله‌ی دوم (۵ الماس، v3.69.0). حالا خودش هم یک پله‌ی میانیِ grandfathering است.
+const referralBonusV3For = (uid) => (referral5On() && uxV2For(uid))
   ? REFERRAL_BONUS_COINS_V3 : referralBonusLegacy(uid);
+// عددی که روی دکمه‌ها و متن‌ها **نشان داده** می‌شود: وعده‌ی دعوت‌های از این به بعد.
+const referralBonusFor = (uid) => (referral3On() && uxV2For(uid))
+  ? REFERRAL_BONUS_COINS_V4 : referralBonusV3For(uid);
 // عددی که واقعاً **واریز** می‌شود، برای یک ردیفِ دعوتِ مشخص.
 // ⚠️ قاعده: دعوتی که پیش از مرز ثبت شده همان ۱۰ وعده‌داده‌شده را می‌گیرد، حتی اگر
 // دوستش امروز فالش را کامل کند. وعده‌ای که داده‌ایم عقب‌گرد نمی‌کند (بند ۲ج/۵ ریشه:
@@ -915,11 +945,20 @@ const referralBonusFor = (uid) => (referral5On() && uxV2For(uid))
 // ⚠️ و جهتِ fail-safe عمدی است: اگر مرز به هر دلیلی خوانده نشده باشد (`0`) یا ردیف
 // تاریخ نداشته باشد، **وعده‌ی قدیمی** پرداخت می‌شود. بینِ «چند الماسِ اضافه دادیم» و
 // «وعده‌ای که داده بودیم را نداریم»، اولی خطای ارزان‌تری است (بند ۹ ریشه).
+// ⚠️ حالا **سه پله** است و ترتیبِ بررسی از نو به کهنه می‌رود. هر پله فقط وقتی مطالبه
+// می‌شود که مرزش **خوانده شده** و تاریخِ ردیف **معلوم** باشد؛ در غیرِ این صورت به پله‌ی
+// قبلی (سخاوتمندانه‌تر) می‌افتد. یعنی fail-safe در هر دو مرز یک جهت دارد.
 const referralPayoutFor = (uid, ref) => {
-  if (!referral5On()) return referralBonusFor(uid);
   const created = Number(ref?.created_at) || 0;
+  // پله ۳ (۳ الماس): دعوتِ ثبت‌شده از مرزِ `referral_3` به بعد.
+  if (referral3On() && uxV2For(uid)
+      && REFERRAL_3_EPOCH > 0 && created > 0 && created >= REFERRAL_3_EPOCH) {
+    return REFERRAL_BONUS_COINS_V4;
+  }
+  // پله ۲ (۵ الماس) — بیت‌به‌بیت منطقِ v3.69.0، دست‌نخورده.
+  if (!referral5On()) return referralBonusV3For(uid);
   const isOld = REFERRAL_5_EPOCH <= 0 || created <= 0 || created < REFERRAL_5_EPOCH;
-  return isOld ? referralBonusLegacy(uid) : referralBonusFor(uid);
+  return isOld ? referralBonusLegacy(uid) : referralBonusV3For(uid);
 };
 /* 🎁 هدیه‌ی خوش‌آمد: از ۱۴۰۵/۰۶/۱۷ **۳ الماس** (بود ۵؛ تصمیمِ صریحِ مالک، هم‌زمان با
  * کاهشِ پاداشِ دعوت).
@@ -1293,6 +1332,21 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
 `);
+/* 🔎 دو ستونِ افزایشی برای پاسخ‌دادن به یک سؤالِ بازِ اقتصادی: **آیا کشِ پرامپت اصلاً
+ * فعال است؟**
+ *
+ * تحلیلِ هزینه (`analytics/tarot/reports/2026-09-11-generational-attribution.md`، بندِ
+ * ۷) نشان داد پیشوندِ ثابتِ پرامپتِ سیستم ۴۲٪ توکنِ ورودی است، یعنی سقفِ خوش‌بینانه‌ی
+ * کشِ آن ~۱۰٪ کلِ صورت‌حساب. ولی **نمی‌دانیم کش از قبل فعال است یا نه** و صفحه‌ی
+ * مستنداتش از این محیط باز نمی‌شود (بند ۹/۰الف ریشه: از منبعِ نخوانده نقل نکن). پس
+ * به‌جای حدس‌زدن، عدد را از خودِ پاسخ می‌خوانیم و چند روز نگاه می‌کنیم.
+ *
+ * ⚠️ بدنه‌ی ریکوئست **بایت‌به‌بایت دست‌نخورده** است — این دو عدد فقط از پاسخ خوانده
+ * می‌شوند، دقیقاً همان قاعده‌ای که خودِ `llm_usage` رویش ساخته شد (بند ۲الف ریشه:
+ * لایه‌ی حسابداری هرگز نباید روی خروجیِ مدل اثر بگذارد). رول‌بک همان
+ * `USAGE_ACCOUNTING = false`ِ موجود است. */
+try { db.prepare('ALTER TABLE llm_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+try { db.prepare('ALTER TABLE llm_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
 // A/B تست: جدول‌های experiments/ab_exposures (چرخه‌ی عمر را داشبورد کنترل می‌کند)
@@ -1682,8 +1736,8 @@ const stmts = {
   getCardFile: db.prepare('SELECT file_id FROM card_files WHERE card_key=?'),
   setCardFile: db.prepare('INSERT INTO card_files (card_key, file_id, updated_at) VALUES (?,?,unixepoch()) ON CONFLICT(card_key) DO UPDATE SET file_id=excluded.file_id, updated_at=unixepoch()'),
   insertLlmUsage: db.prepare(`INSERT INTO llm_usage
-    (user_id, kind, ref_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, ms)
-    VALUES (?,?,?,?,?,?,?,?,?)`),
+    (user_id, kind, ref_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, ms, cached_tokens, reasoning_tokens)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
 };
 
 /* 💎 تک‌منبعِ «چقدر اعتبار به این پرداخت تعلق می‌گیرد».
@@ -1758,6 +1812,11 @@ setUsageSink((u) => {
       u.userId || 0, u.kind || '', u.refId || 0, u.model || '',
       u.promptTokens || 0, u.completionTokens || 0, u.totalTokens || 0,
       u.costUsd || 0, u.ms || 0,
+      // دو ستونِ تازه (v3.82.0). صفر دو معنی دارد و این عمدی است: «مدل این عدد را
+      // برنگرداند» و «واقعاً صفر بود». تفکیکشان از لاگِ یک‌باره‌ی `USAGE_SHAPE` می‌آید،
+      // نه از دیتابیس — چون یک ستونِ nullable روی مسیرِ حسابداری فقط هر کوئریِ آینده را
+      // پیچیده می‌کند بدونِ اینکه تصمیمی را عوض کند.
+      u.cachedTokens || 0, u.reasoningTokens || 0,
     );
   } catch (e) { logErr('llm_usage insert:', e.message); }
 });
@@ -5341,6 +5400,10 @@ const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_
 // دعوتِ قدیمی‌تر از این مهر همان ۱۰ وعده‌داده‌شده را می‌گیرد (`referralPayoutFor`).
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_5', unixepoch())").run();
 REFERRAL_5_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_5'").get()?.done_at || 0;
+// 💎 مرزِ پله‌ی سوم (۵ ⟵ ۳). کلیدِ **جدا** از `referral_5`، وگرنه یک مرز نمی‌تواند دو
+// وعده‌ی متفاوت را از هم تفکیک کند و کاربری که ۵ وعده گرفته بود ۳ می‌گرفت.
+db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_3', unixepoch())").run();
+REFERRAL_3_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_3'").get()?.done_at || 0;
 /* ⌨️ تازه‌سازیِ بی‌صدای کیبورد وقتی نسخه‌اش عقب است (بند ۹ب-۲ ریشه).
 
    چطور کار می‌کند: یک پیامِ کوتاهِ **بی‌صدا** با کیبوردِ تازه فرستاده و بلافاصله حذف

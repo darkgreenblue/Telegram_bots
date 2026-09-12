@@ -172,6 +172,61 @@ let usageSink = null;
 /** ثبت‌کننده‌ی مصرف را تزریق می‌کند (ربات: نوشتن در `llm_usage`؛ آزمایشگاه: هیچ). */
 export const setUsageSink = (fn) => { usageSink = typeof fn === 'function' ? fn : null; };
 
+/* 🔎 توکنِ کش‌شده و توکنِ استدلال — دو عددی که از قبل در پاسخ بودند و دور می‌ریختیم.
+ *
+ * چرا لازم شد: تحلیلِ هزینه (`analytics/tarot/reports/2026-09-11-unit-economics.md`)
+ * نشان داد هزینه‌ی مدل ۱٫۵ برابرِ درآمد است و ۹۸٪ آن مالِ خودِ فال است. اولین گزینه‌ی
+ * کاهشِ هزینه «کشِ پرامپت» است، ولی **بدونِ این عدد نمی‌دانیم امروز چقدرش از قبل
+ * کش می‌شود** — یعنی نمی‌شود گفت ۱۰٪ صرفه‌جویی روی میز است یا صفر. اندازه‌گیری قبل از
+ * بهینه‌سازی (بند ۹/۰ب ریشه: اول ابزار، بعد نتیجه‌گیری).
+ *
+ * ⚠️ **نامِ دقیقِ این فیلدها در پاسخِ OpenRouter تأییدنشده است** (بند ۹/۰الف ریشه:
+ * صفحه‌ی مستنداتش از این محیط باز نمی‌شود و از هیچ منبعِ خوانده‌نشده‌ای نقل نمی‌کنیم).
+ * پس دو کارِ هم‌زمان: استخراج **چند شکلِ محتمل** را امتحان می‌کند، و یک لاگِ **یک‌باره**
+ * شکلِ واقعیِ `usage` را چاپ می‌کند تا با اولین فراخوانیِ زنده نامِ درست معلوم شود.
+ * اگر معلوم شد اسمی جا افتاده، افزودنش یک ردیف در همین آرایه است.
+ *
+ * ⚠️ و این هیچ چیزی به بدنه‌ی ریکوئست اضافه نمی‌کند: فقط چیزی که **از قبل** در پاسخ
+ * هست خوانده می‌شود. قاعده‌ی آهنینِ بالا («صفر تغییر روی سیم») دست‌نخورده می‌ماند. */
+const CACHED_PATHS = [
+  ['prompt_tokens_details', 'cached_tokens'],
+  ['prompt_tokens_details', 'cache_read_tokens'],
+  ['cache_read_input_tokens'],
+  ['prompt_cache_hit_tokens'],
+  ['cached_tokens'],
+];
+const REASONING_PATHS = [
+  ['completion_tokens_details', 'reasoning_tokens'],
+  ['reasoning_tokens'],
+];
+const pickNum = (obj, paths) => {
+  for (const path of paths) {
+    let cur = obj;
+    for (const key of path) cur = (cur && typeof cur === 'object') ? cur[key] : undefined;
+    const n = Number(cur);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+};
+
+let usageShapeLogged = false;
+/* یک بار در عمرِ پروسه، **کلیدهای** آبجکتِ usage را چاپ می‌کند (نه محتوای کاربر —
+ * این آبجکت فقط شمارنده‌ی توکن و هزینه دارد). تنها راهِ فهمیدنِ نامِ واقعیِ فیلدها
+ * وقتی مستندات در دسترس نیست. بعد از اولین دیپلوی، `Ops logs app=tarot` را با
+ * مارکرِ `USAGE_SHAPE` بگرد. */
+function logUsageShape(u) {
+  if (usageShapeLogged) return;
+  usageShapeLogged = true;
+  try {
+    const flat = [];
+    for (const [k, v] of Object.entries(u)) {
+      if (v && typeof v === 'object') for (const k2 of Object.keys(v)) flat.push(`${k}.${k2}`);
+      else flat.push(k);
+    }
+    log(`🔎 USAGE_SHAPE ${flat.sort().join(',').slice(0, 500)}`);
+  } catch { /* لاگِ تشخیصی هرگز نباید مسیرِ فال را لمس کند */ }
+}
+
 export async function orRequest(body, meta = null) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
@@ -198,6 +253,7 @@ export async function orRequest(body, meta = null) {
     // ثبت **بعد از** استخراجِ متن و کاملاً بلعیده‌شده: هیچ خطایی از این‌جا به فال نمی‌رسد.
     if (usageSink && USAGE_ACCOUNTING) {
       try {
+        logUsageShape(u);
         usageSink({
           model: body.model || '',
           kind: meta?.kind || '',
@@ -210,6 +266,8 @@ export async function orRequest(body, meta = null) {
           // نه یک عددِ حدسی (هیچ جدولِ قیمتی این‌جا نگه داشته نمی‌شود که کهنه شود).
           costUsd: Number(u.cost) || 0,
           ms: Date.now() - t0,
+          cachedTokens: pickNum(u, CACHED_PATHS),
+          reasoningTokens: pickNum(u, REASONING_PATHS),
         });
       } catch (e) { logErr('usage sink:', e.message); }
     }

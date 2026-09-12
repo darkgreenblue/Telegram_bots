@@ -124,6 +124,170 @@ console.log('\n▶ ۶) همه‌ی مسیرهای مدلِ تاروت برچسب
   }
 }
 
+/* ══ ۷) توکنِ کش‌شده و توکنِ استدلال (v3.82.0) ═══════════════════════════════
+ *
+ * چرا این بخش هست: بدونِ عددِ کشِ پرامپت نمی‌دانیم «۱۰٪ صرفه‌جویی روی میز است» یا
+ * «صفر». ولی این عدد روی همان مسیری خوانده می‌شود که فالِ کاربرِ پولی از آن رد
+ * می‌شود، پس همان شرطِ صریحِ مالک این‌جا هم برقرار است: **صفر تغییر روی سیم**.
+ *
+ * ⚠️ و نکته‌ی روشیِ این بخش: نامِ دقیقِ فیلدها **تأییدنشده** است (مستنداتِ OpenRouter
+ * از این محیط باز نمی‌شود، بند ۹/۰الف ریشه). پس چک نمی‌تواند بگوید «نامِ درست همین
+ * است»؛ چیزی که می‌تواند بگوید این است که استخراج‌کننده **چند شکلِ محتمل** را می‌بیند،
+ * نامِ ناشناخته را به‌جای حدس‌زدن صفر می‌کند، و لاگِ تشخیصی یک بار شلیک می‌شود.
+ */
+console.log('\n▶ ۷) توکنِ کش‌شده و استدلال: خوانده می‌شوند، ولی چیزی از سرور خواسته نمی‌شود');
+{
+  const seen = [];
+  core.setUsageSink((u) => seen.push(u));
+  const prevFetch = globalThis.fetch;
+  const withUsage = (usage) => async (url, init) => {
+    sent.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }], usage }) };
+  };
+  const shapes = [
+    ['سبکِ تودرتوی OpenAI/OpenRouter', { prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 64 } }, 64],
+    ['سبکِ تختِ Anthropic', { prompt_tokens: 100, cache_read_input_tokens: 55 }, 55],
+    ['سبکِ DeepSeek', { prompt_tokens: 100, prompt_cache_hit_tokens: 33 }, 33],
+    ['کلیدِ تختِ ساده', { prompt_tokens: 100, cached_tokens: 22 }, 22],
+  ];
+  for (const [name, usage, want] of shapes) {
+    seen.length = 0;
+    globalThis.fetch = withUsage(usage);
+    await core.orChat('S', 'U', {});
+    ok(seen[0]?.cachedTokens === want, `${name}: عددِ کش (${want}) خوانده شد`, );
+  }
+  // استدلال، هر دو شکل
+  for (const [name, usage, want] of [
+    ['تودرتو', { completion_tokens_details: { reasoning_tokens: 77 } }, 77],
+    ['تخت', { reasoning_tokens: 12 }, 12],
+  ]) {
+    seen.length = 0;
+    globalThis.fetch = withUsage(usage);
+    await core.orChat('S', 'U', {});
+    ok(seen[0]?.reasoningTokens === want, `توکنِ استدلال، شکلِ ${name} (${want}) خوانده شد`);
+  }
+  // ⚠️ کنترلِ منفی: نامِ ناشناخته **حدس زده نمی‌شود**. بدونِ این ادعا، یک استخراج‌کننده‌ی
+  // بیش‌ازحد پهن (مثلاً «هر کلیدی که cache در آن باشد») هم سبز رد می‌شد.
+  seen.length = 0;
+  globalThis.fetch = withUsage({ prompt_tokens: 100, some_unknown_cache_field: 999, cost: 0.1 });
+  await core.orChat('S', 'U', {});
+  ok(seen[0]?.cachedTokens === 0 && seen[0]?.reasoningTokens === 0,
+    'نامِ ناشناخته ⟵ صفر، نه حدس');
+  ok(seen[0]?.costUsd === 0.1, 'و بقیه‌ی ثبت دست‌نخورده کار می‌کند (کنترلِ مثبت)');
+  // نبودِ کلِ فیلدها هم صفر است، نه undefined (وگرنه ستونِ NOT NULL می‌ترکد)
+  seen.length = 0;
+  globalThis.fetch = withUsage({ prompt_tokens: 5 });
+  await core.orChat('S', 'U', {});
+  ok(seen[0]?.cachedTokens === 0 && seen[0]?.reasoningTokens === 0, 'نبودِ فیلد ⟵ صفرِ عددی');
+
+  // 🔒 مهم‌ترین ادعای این بخش: با وجودِ خواندنِ دو عددِ تازه، بدنه **هنوز** همان است.
+  sent.length = 0;
+  globalThis.fetch = withUsage({ prompt_tokens: 9, prompt_tokens_details: { cached_tokens: 4 } });
+  await core.orChat('SYS', 'USR', { model: core.FLASH, maxTokens: 1600, temperature: 0.9 });
+  const keys2 = Object.keys(sent[0].body).sort().join(',');
+  ok(keys2 === 'max_tokens,messages,model,reasoning,temperature',
+    `بدنه بعد از افزودنِ این دو عدد هم بایت‌به‌بایت همان است (دیده شد: ${keys2})`);
+  globalThis.fetch = prevFetch;
+}
+
+console.log('\n▶ ۷ب) لاگِ تشخیصیِ شکلِ usage دقیقاً یک بار در عمرِ پروسه شلیک می‌شود');
+{
+  // ماژولِ **تازه** (کش‌شکنیِ ESM) تا شمارنده‌ی یک‌باره از صفر شروع شود.
+  const fresh = await import('../bots/tarot/reading-core.js?shape=1');
+  fresh.setUsageSink(() => {});
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...a) => { lines.push(a.join(' ')); };
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({
+    choices: [{ message: { content: 'x' } }],
+    usage: { prompt_tokens: 9, prompt_tokens_details: { cached_tokens: 4 }, cost: 0.001 },
+  }) });
+  await fresh.orChat('S', 'U', {});
+  await fresh.orChat('S', 'U', {});
+  globalThis.fetch = prevFetch;
+  console.log = realLog;
+  const hits = lines.filter(l => l.includes('USAGE_SHAPE'));
+  ok(hits.length === 1, `دقیقاً یک بار (دیده شد: ${hits.length})`);
+  ok(hits[0]?.includes('prompt_tokens_details.cached_tokens'),
+    'کلیدِ تودرتو هم در لاگ باز می‌شود (وگرنه نامِ واقعی هرگز معلوم نمی‌شود)');
+  ok(!hits[0]?.includes('"'), 'فقط کلیدها لاگ می‌شوند، نه محتوای پاسخ');
+}
+
+console.log('\n▶ ۸) ستون‌های تازه: مهاجرتِ افزایشی و هم‌خوانیِ INSERT با جدول');
+{
+  const { default: Database } = await import('../bots/tarot/node_modules/better-sqlite3/lib/index.js');
+  // CREATE + ALTERها + خودِ INSERT، همه **از سورس**. اگر یکی‌شان با بقیه واگرا شود،
+  // ثبت در پروداکشن می‌ترکد و چون داخلِ try/catch است **بی‌صدا** کلِ دفتر را می‌خشکاند.
+  const create = SRC.slice(SRC.indexOf('CREATE TABLE IF NOT EXISTS llm_usage'));
+  const createSql = create.slice(0, create.indexOf(');') + 2);
+  const alters = [...SRC.matchAll(/db\.prepare\('(ALTER TABLE llm_usage ADD COLUMN [^']+)'\)/g)].map(m => m[1]);
+  ok(alters.length === 2, `دو ستونِ افزایشی در سورس هست (دیده شد: ${alters.length})`);
+  ok(alters.every(a => /NOT NULL DEFAULT 0/.test(a)),
+    'هر دو ستون `NOT NULL DEFAULT 0` اند (ردیف‌های قدیمی معتبر می‌مانند، بند ۲ج/۱)');
+  ok(alters.some(a => /cached_tokens/.test(a)) && alters.some(a => /reasoning_tokens/.test(a)),
+    'نامِ هر دو ستون همان‌هایی است که سینک می‌نویسد');
+
+  const db = new Database(':memory:');
+  db.exec(createSql);
+  // ردیفِ «قدیمی» قبل از مهاجرت، تا معتبر ماندنش اثبات شود.
+  db.prepare("INSERT INTO llm_usage (user_id, kind, ref_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, ms) VALUES (1,'reading',5,'m',10,20,30,0.5,100)").run();
+  for (const a of alters) db.prepare(a).run();
+  ok(db.prepare('SELECT cached_tokens c FROM llm_usage WHERE user_id=1').get().c === 0,
+    'ردیفِ قبل از مهاجرت صفر می‌گیرد، نه NULL');
+  // اجرای دوباره (ری‌استارت) باید خطا بدهد و کد آن را بلعیده باشد — یعنی idempotent.
+  let threw = false;
+  try { db.prepare(alters[0]).run(); } catch { threw = true; }
+  ok(threw, 'ALTERِ تکراری خطا می‌دهد (پس گاردِ try/catchِ سورس واقعاً لازم است)');
+  ok(/try \{ db\.prepare\('ALTER TABLE llm_usage ADD COLUMN cached_tokens[^\n]*catch \{\}/.test(SRC),
+    'و همان گارد در سورس هست (ری‌استارت بوت را نمی‌شکند)');
+
+  // خودِ INSERTِ واقعیِ ربات با ۱۱ پارامتر روی همین جدول اجرا می‌شود.
+  const insSql = SRC.match(/insertLlmUsage:\s*db\.prepare\(`([\s\S]*?)`\)/)?.[1];
+  ok(!!insSql, 'SQLِ ثبت از سورس بریده شد');
+  ok(insSql && /cached_tokens/.test(insSql) && /reasoning_tokens/.test(insSql),
+    'INSERT هر دو ستونِ تازه را می‌نویسد');
+  if (insSql) {
+    const cols = insSql.match(/\(([^)]*)\)\s*VALUES/)?.[1].split(',').length;
+    const marks = (insSql.match(/VALUES\s*\(([^)]*)\)/)?.[1].match(/\?/g) || []).length;
+    ok(cols === marks, `تعدادِ ستون و placeholder یکی است (${cols} / ${marks})`);
+    db.prepare(insSql).run(2, 'reading', 6, 'm', 100, 50, 150, 0.002, 900, 64, 0);
+    const row = db.prepare('SELECT cached_tokens c, reasoning_tokens r FROM llm_usage WHERE user_id=2').get();
+    ok(row.c === 64 && row.r === 0, 'ثبتِ واقعی روی جدولِ واقعی می‌نشیند');
+  }
+
+  /* 🔌 سیمِ بینِ استخراج‌کننده و SQL — تنها جایی که «مقدار وجود دارد» با «مقدار
+   * می‌رسد» فرق می‌کند (بند ۲و/۶ب ریشه). بدونِ این ادعا، هاردکد کردنِ `0, 0` در سینک
+   * از همه‌ی ادعاهای بالا سبز رد می‌شد: هم استخراج درست بود، هم جدول، هم INSERT —
+   * و ستونِ کش برای همیشه صفر می‌ماند بدونِ هیچ خطایی. (این جهش واقعاً زنده ماند تا
+   * وقتی این ادعا اضافه شد.) */
+  const sinkSrc = SRC.slice(SRC.indexOf('setUsageSink((u) => {'));
+  const sinkBody = sinkSrc.slice(0, sinkSrc.indexOf('\n});') + 4);
+  ok(!!sinkBody && sinkBody.length < 1500, 'بدنه‌ی سینک از سورس بریده شد');
+  const got = [];
+  const fakeStmts = { insertLlmUsage: { run: (...a) => got.push(a) } };
+  new Function('setUsageSink', 'stmts', 'logErr', sinkBody)(
+    (fn) => fn({
+      userId: 7, kind: 'reading', refId: 3, model: 'm',
+      promptTokens: 100, completionTokens: 50, totalTokens: 150,
+      costUsd: 0.002, ms: 900, cachedTokens: 64, reasoningTokens: 12,
+    }),
+    fakeStmts, () => {},
+  );
+  ok(got.length === 1, 'سینک دقیقاً یک بار می‌نویسد');
+  const args = got[0] || [];
+  ok(args.length === 11, `سینک ۱۱ آرگومان پاس می‌دهد (دیده شد: ${args.length})`);
+  ok(args[9] === 64, `عددِ کش واقعاً به SQL می‌رسد (دیده شد: ${args[9]})`);
+  ok(args[10] === 12, `عددِ استدلال واقعاً به SQL می‌رسد (دیده شد: ${args[10]})`);
+  // و همان آرگومان‌ها روی جدولِ واقعی همان ستون‌ها را پر می‌کنند (ترتیب هم درست است).
+  if (insSql) {
+    db.prepare(insSql).run(...args);
+    const r2 = db.prepare('SELECT cached_tokens c, reasoning_tokens r FROM llm_usage WHERE user_id=7').get();
+    ok(r2.c === 64 && r2.r === 12, 'و در ستونِ درست می‌نشینند (ترتیبِ آرگومان‌ها سالم است)');
+  }
+  db.close();
+}
+
 globalThis.fetch = realFetch;
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
