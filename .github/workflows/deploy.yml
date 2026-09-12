@@ -91,6 +91,14 @@ jobs:
         # برای هر ربات جدید: دو خط اینجا اضافه کن، نامش را به envs اضافه کن،
         # یک بلوک write_env و یک deploy_bot در اسکریپت پایین بگذار.
         env:
+          # 🔑 توکنِ موقتِ خودِ همین ران، فقط برای `git fetch` روی کلونِ سرور.
+          # کلونِ سرور ریموتِ HTTPS دارد و مخزن **private** است، پس گیت پسورد می‌خواهد
+          # و بدونِ credential شکست می‌خورد. تا وقتی مخزن موقتاً public بود (بند ۳ج ریشه)
+          # fetchِ ناشناس کار می‌کرد و همین باعث شد این وابستگی ماه‌ها نامرئی بماند؛ با
+          # private شدنِ دوباره، هر دیپلوی روی `could not read Password` مرد.
+          # ⚠️ این توکن با پایانِ همین جاب باطل می‌شود و هرگز روی دیسکِ سرور یا در
+          # `.git/config` نمی‌نشیند (از راهِ GIT_ASKPASS خوانده می‌شود، نه از URL).
+          GH_FETCH_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
           # voice2text (اختیاری: تا وقتی این secretها تنظیم نشوند، .env فعلی روی سرور استفاده می‌شود)
           VOICE2TEXT_BOT_TOKEN:         ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
           VOICE2TEXT_OPENROUTER_KEY:    ${{ secrets.VOICE2TEXT_OPENROUTER_KEY }}
@@ -131,7 +139,7 @@ jobs:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_USDT_TOMAN_RATE,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
+          envs: GH_FETCH_TOKEN,VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_USDT_TOMAN_RATE,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -162,10 +170,26 @@ jobs:
             # `reset --hard` هم فایلِ نیمه‌کاره‌ی staged را برمی‌دارد و هم فایلِ untracked
             # ای را که با محتوای تازه تصادم دارد. فایل‌های ignore شده (`.env`، `data/`،
             # `node_modules/`, `.env.bak`) اصلاً لمس نمی‌شوند.
+            # احرازِ هویتِ fetch (باگِ واقعیِ ۱۴۰۵/۰۶/۲۱): ریموتِ کلونِ سرور HTTPS است و
+            # مخزن private، پس گیت پسورد می‌خواهد. توکن از راهِ **askpass** به گیت داده
+            # می‌شود نه از راهِ URL یا آرگومان، پس نه در `.git/config` می‌نشیند و نه در
+            # `ps` دیده می‌شود. فایلِ موقت با پایانِ اسکریپت پاک می‌شود.
+            # نبودِ توکن (مثلاً مخزنِ public یا اجرای دستی) مسیر را نمی‌شکند: askpass
+            # رشته‌ی خالی می‌دهد و fetchِ ناشناس مثل قبل انجام می‌شود.
+            export GIT_TERMINAL_PROMPT=0
+            GIT_ASKPASS_FILE=$(mktemp)
+            printf '#!/bin/sh\ncase "$1" in Username*) echo x-access-token ;; *) echo "$GH_FETCH_TOKEN" ;; esac\n' > "$GIT_ASKPASS_FILE"
+            chmod 700 "$GIT_ASKPASS_FILE"
+            export GIT_ASKPASS="$GIT_ASKPASS_FILE"
+            trap 'rm -f "$GIT_ASKPASS_FILE"' EXIT
+
             FETCH_OK=0
             for attempt in 1 2 3; do
               if git fetch --quiet origin main; then FETCH_OK=1; break; fi
-              echo "⚠️ تلاشِ $attempt برای git fetch نشد (احتمالاً گیتِ هم‌زمان روی همین کلون) — ۱۰ ثانیه دیگر دوباره"
+              # ⚠️ متنِ قبلی بی‌قید می‌گفت «احتمالاً گیتِ هم‌زمان»، و همان حدسِ چسبیده به
+              # پیام یک بار تشخیص را منحرف کرد: علتِ واقعی نبودِ credential بود که با
+              # هیچ تعدادی تلاشِ دوباره درست نمی‌شود. حالا فقط خودِ خطا گزارش می‌شود.
+              echo "⚠️ تلاشِ $attempt برای git fetch نشد — ۱۰ ثانیه دیگر دوباره (اگر خطا Password است، مسئله credential است نه هم‌زمانی)"
               sleep 10
             done
             if [ "$FETCH_OK" != "1" ]; then echo "❌ git fetch بعد از ۳ تلاش شکست خورد"; exit 1; fi
