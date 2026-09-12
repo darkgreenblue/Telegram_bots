@@ -1,17 +1,21 @@
-// چکِ CI برای کاهشِ پاداشِ دعوت (tarot v3.69.0): ۱۰ ⟵ ۵ الماس، **فقط فارسی**.
+// چکِ CI برای کاهشِ پاداشِ دعوت در tarot، **فقط فارسی**. حالا **سه پله**:
+// ۱۰ (تا v3.68.0) ⟵ ۵ (v3.69.0) ⟵ **۳ (v3.82.0)**.
 //
 // چرا این چک لازم است، و چرا رفتاری است نه رجکسی:
 //
 // ۱) این یک استثنای **زبانی** است (بند ۲و ریشه). یک تغییرِ بی‌دقت می‌تواند بی‌صدا هر
 //    چهار زبان را بزند، و چون هیچ خطایی نمی‌دهد فقط با اسکرین‌شاتِ یک کاربرِ روس معلوم
 //    می‌شود — دقیقاً همان کلاسِ باگی که بند ۲و/۶ب ثبتش کرده.
-// ۲) این یک تغییرِ **پولی** است با grandfathering: دعوتی که قبل از مرز ثبت شده باید
-//    همان ۱۰ وعده‌داده‌شده را بگیرد. «کد درست است» را نمی‌شود از روی شکلِ کد فهمید؛
-//    باید خودِ تابع با ردیف‌های واقعیِ دو طرفِ مرز اجرا شود.
-// ۳) مرز روی `referrals.created_at` می‌نشیند و از جدولِ `migrations` خوانده می‌شود.
+// ۲) این یک تغییرِ **پولی** است با grandfathering: دعوتی که قبل از هر مرز ثبت شده باید
+//    همان عددِ وعده‌داده‌شده‌ی **همان دوره** را بگیرد. «کد درست است» را نمی‌شود از روی
+//    شکلِ کد فهمید؛ باید خودِ تابع با ردیف‌های واقعیِ هر سه دوره اجرا شود.
+//    ⚠️ و با دو مرز، یک کلاسِ خطای تازه ممکن شد: پله‌ی نو می‌تواند پله‌ی میانی را
+//    **ببلعد** و کاربری که ۵ وعده گرفته بود ۳ بگیرد. بخشِ ۱ب دقیقاً همین را می‌سنجد.
+// ۳) مرزها روی `referrals.created_at` می‌نشینند و از جدولِ `migrations` خوانده می‌شوند.
 //    هر دو باید روی SQLite واقعی اجرا شوند، وگرنه یک `SELECT` باریک‌شده یا یک
 //    `INSERT` بدونِ `OR IGNORE` مرز را در هر ری‌استارت جابه‌جا می‌کند و کلِ
-//    grandfathering بی‌صدا از بین می‌رود.
+//    grandfathering بی‌صدا از بین می‌رود. و **دو کلیدِ جدا** لازم است: یک کلید نمی‌تواند
+//    دو وعده‌ی متفاوت را از هم تفکیک کند.
 // ۴) و آخرین لایه: عددی که **به کاربر می‌رسد**. رشته‌های locale واقعاً رندر می‌شوند،
 //    چون «پارامتری بودن» با «عددِ درست روی صفحه» یکی نیست (بند ۲و/۶ج ریشه).
 import { readFileSync } from 'fs';
@@ -41,7 +45,7 @@ function sqlOf(name) {
   return m[2];
 }
 
-console.log('\n💎 پاداشِ دعوت: ۱۰ ⟵ ۵ (فقط فارسی)\n');
+console.log('\n💎 پاداشِ دعوت: ۱۰ ⟵ ۵ ⟵ ۳ (فقط فارسی)\n');
 
 /* ══ ۱) خودِ resolverها از سورس بریده و اجرا می‌شوند ══════════════════════ */
 console.log('۱) رفتارِ resolverها');
@@ -49,99 +53,177 @@ console.log('۱) رفتارِ resolverها');
 const BLOCK = slice('const REFERRAL_BONUS_COINS = 3;', 'const WELCOME_BONUS_COINS_V2');
 ok(!!BLOCK, 'بلوکِ ثابت‌ها و resolverهای دعوت از سورس بریده شد');
 
-// بلوک را با یک EPOCHِ تزریقی و یک LOCALEِ تزریقی اجرا می‌کند. هیچ منطقی این‌جا
+// بلوک را با دو EPOCHِ تزریقی و یک LOCALEِ تزریقی اجرا می‌کند. هیچ منطقی این‌جا
 // بازنویسی نمی‌شود؛ فقط ورودی‌های محیطی پارامتر می‌شوند.
-function build(locale, epoch, { localesLiteral = null } = {}) {
+function build(e5, e3, { locale = 'fa', l5 = null, l3 = null } = {}) {
   if (!BLOCK) return null;
-  let body = BLOCK.replace('let REFERRAL_5_EPOCH = 0;', 'let REFERRAL_5_EPOCH = __EPOCH;');
-  if (localesLiteral !== null) {
-    body = body.replace('const REFERRAL_5_LOCALES = [\'fa\'];',
-      `const REFERRAL_5_LOCALES = ${localesLiteral};`);
-  }
-  if (body === BLOCK && localesLiteral === null) return null; // جایگزینیِ EPOCH نگرفت
-  const fn = new Function('LOCALE', '__EPOCH', 'uxV2For', 'coinsOn', 'REFERRAL_BONUS', `
+  let body = BLOCK
+    .replace('let REFERRAL_5_EPOCH = 0;', 'let REFERRAL_5_EPOCH = __E5;')
+    .replace('let REFERRAL_3_EPOCH = 0;', 'let REFERRAL_3_EPOCH = __E3;');
+  if (body === BLOCK) return null; // هیچ‌کدام از دو جایگزینی نگرفت
+  if (!body.includes('__E5') || !body.includes('__E3')) return null; // یکی‌شان نگرفت
+  if (l5 !== null) body = body.replace("const REFERRAL_5_LOCALES = ['fa'];", `const REFERRAL_5_LOCALES = ${l5};`);
+  if (l3 !== null) body = body.replace("const REFERRAL_3_LOCALES = ['fa'];", `const REFERRAL_3_LOCALES = ${l3};`);
+  const fn = new Function('LOCALE', '__E5', '__E3', 'uxV2For', 'coinsOn', 'REFERRAL_BONUS', `
     ${body}
-    return { referralBonusFor, referralPayoutFor, referralBonusLegacy, referral5On,
-             REFERRAL_BONUS_COINS_V2, REFERRAL_BONUS_COINS_V3 };
+    return { referralBonusFor, referralPayoutFor, referralBonusLegacy, referralBonusV3For,
+             referral5On, referral3On,
+             REFERRAL_BONUS_COINS_V2, REFERRAL_BONUS_COINS_V3, REFERRAL_BONUS_COINS_V4 };
   `);
   // دنیای امروزِ ربات: UX v2 برای همه باز است.
-  return fn(locale, epoch, () => true, () => true, 10_000);
+  return fn(locale, e5, e3, () => true, () => true, 10_000);
 }
 
-const EPOCH = 1_790_000_000;
-const fa = build('fa', EPOCH);
-ok(!!fa, 'بلوک با موفقیت اجرا شد (EPOCH تزریق شد)');
+// دو مرزِ واقعیِ پروداکشن: `referral_5` چند روز زودتر مهر خورده و `referral_3` امروز.
+const E5 = 1_790_000_000;
+const E3 = E5 + 86_400 * 4;
+const fa = build(E5, E3);
+ok(!!fa, 'بلوک با موفقیت اجرا شد (هر دو EPOCH تزریق شدند)');
 
 if (fa) {
-  ok(fa.REFERRAL_BONUS_COINS_V3 === 5, 'پاداشِ تازه ۵ الماس است', `دیدم: ${fa.REFERRAL_BONUS_COINS_V3}`);
+  ok(fa.REFERRAL_BONUS_COINS_V4 === 3, 'پاداشِ تازه ۳ الماس است', `دیدم: ${fa.REFERRAL_BONUS_COINS_V4}`);
+  ok(fa.REFERRAL_BONUS_COINS_V3 === 5, 'پاداشِ پله‌ی میانی هنوز ۵ است (لازمِ grandfathering)');
   ok(fa.REFERRAL_BONUS_COINS_V2 === 10, 'پاداشِ قدیمی هنوز ۱۰ است (لازمِ grandfathering)');
-  ok(fa.referral5On() === true, 'فارسی مشمولِ کاهش است');
-  ok(fa.referralBonusFor(1) === 5, 'عددِ نمایشیِ فارسی ۵ است', `دیدم: ${fa.referralBonusFor(1)}`);
+  ok(fa.referral3On() === true, 'فارسی مشمولِ پله‌ی سوم است');
+  ok(fa.referral5On() === true, 'پله‌ی دوم هم هنوز برای فارسی روشن است');
+  ok(fa.referralBonusFor(1) === 3, 'عددِ نمایشیِ فارسی ۳ است', `دیدم: ${fa.referralBonusFor(1)}`);
+  ok(fa.referralBonusV3For(1) === 5, 'resolverِ پله‌ی دوم هنوز ۵ می‌دهد (منبعِ grandfathering)');
 
-  // grandfathering — قلبِ این تغییر.
-  ok(fa.referralPayoutFor(1, { created_at: EPOCH - 1 }) === 10,
-    'دعوتِ یک ثانیه قبل از مرز ⟵ همان ۱۰ وعده‌داده‌شده');
-  ok(fa.referralPayoutFor(1, { created_at: EPOCH - 86_400 * 30 }) === 10,
+  // grandfathering — قلبِ این تغییر، حالا با سه دوره.
+  ok(fa.referralPayoutFor(1, { created_at: E5 - 1 }) === 10,
+    'دعوتِ یک ثانیه قبل از مرزِ اول ⟵ همان ۱۰ وعده‌داده‌شده');
+  ok(fa.referralPayoutFor(1, { created_at: E5 - 86_400 * 30 }) === 10,
     'دعوتِ یک ماه پیش ⟵ ۱۰');
-  ok(fa.referralPayoutFor(1, { created_at: EPOCH }) === 5,
-    'دعوتِ دقیقاً روی مرز ⟵ ۵');
-  ok(fa.referralPayoutFor(1, { created_at: EPOCH + 1 }) === 5,
-    'دعوتِ بعد از مرز ⟵ ۵');
+  ok(fa.referralPayoutFor(1, { created_at: E5 }) === 5,
+    'دعوتِ دقیقاً روی مرزِ اول ⟵ ۵');
+  ok(fa.referralPayoutFor(1, { created_at: E3 - 1 }) === 5,
+    'دعوتِ یک ثانیه قبل از مرزِ دوم ⟵ همان ۵ وعده‌داده‌شده');
+  ok(fa.referralPayoutFor(1, { created_at: E3 }) === 3,
+    'دعوتِ دقیقاً روی مرزِ دوم ⟵ ۳');
+  ok(fa.referralPayoutFor(1, { created_at: E3 + 1 }) === 3,
+    'دعوتِ بعد از مرزِ دوم ⟵ ۳');
 
-  // fail-safe: ابهام همیشه به نفعِ وعده‌ی قدیمی تمام می‌شود.
+  // fail-safe: ابهام همیشه به نفعِ وعده‌ی قدیمی‌تر (سخاوتمندانه‌تر) تمام می‌شود.
   ok(fa.referralPayoutFor(1, { created_at: 0 }) === 10, 'ردیفِ بدونِ تاریخ ⟵ ۱۰ (fail-safe)');
   ok(fa.referralPayoutFor(1, {}) === 10, 'ردیفِ بی‌فیلد ⟵ ۱۰ (fail-safe)');
   ok(fa.referralPayoutFor(1, null) === 10, 'ردیفِ null ⟵ ۱۰ (fail-safe)');
 
-  const noEpoch = build('fa', 0);
-  ok(noEpoch && noEpoch.referralPayoutFor(1, { created_at: EPOCH + 1 }) === 10,
-    'مرزِ خوانده‌نشده (۰) ⟵ همه ۱۰ می‌گیرند، نه ۵ (fail-safe به نفعِ کاربر)');
+  // fail-safe در **هر دو** مرز، جدا. مرزِ نو که خوانده نشده باشد نباید پله‌ی میانی را
+  // هم با خودش ببرد؛ و مرزِ کهنه که خوانده نشده باشد همه را به سخاوتمندانه‌ترین می‌برد.
+  const noE3 = build(E5, 0);
+  ok(noE3 && noE3.referralPayoutFor(1, { created_at: E3 + 1 }) === 5,
+    'مرزِ سومِ خوانده‌نشده (۰) ⟵ ۵ می‌دهد نه ۳ (fail-safe به نفعِ کاربر)');
+  ok(noE3 && noE3.referralPayoutFor(1, { created_at: E5 - 1 }) === 10,
+    'و پله‌ی اول همان‌جا دست‌نخورده می‌ماند');
+  const noEpoch = build(0, 0);
+  ok(noEpoch && noEpoch.referralPayoutFor(1, { created_at: E3 + 1 }) === 10,
+    'هر دو مرزِ خوانده‌نشده ⟵ همه ۱۰ می‌گیرند (fail-safe به نفعِ کاربر)');
+
+  // دیتابیسِ **تازه** (زبان یا سرورِ نو): هر دو مرز در یک ثانیه مهر می‌خورند.
+  const fresh = build(E5, E5);
+  ok(fresh && fresh.referralPayoutFor(1, { created_at: E5 + 10 }) === 3,
+    'دیتابیسِ تازه (دو مرزِ هم‌زمان) ⟵ دعوتِ بعدش ۳ می‌گیرد');
+}
+
+/* ══ ۱ب) پله‌ی نو، پله‌ی میانی را نمی‌بلعد ═══════════════════════════════ */
+// کلاسِ خطایی که با افزودنِ مرزِ دوم ممکن شد: اگر شرطِ پله‌ی سوم مرزِ خودش را چک نکند
+// (یا با مرزِ اول اشتباه گرفته شود)، **همه‌ی** دعوت‌های بعد از v3.69.0 به ۳ می‌افتند و
+// کاربری که ۵ وعده گرفته بود بی‌صدا ۳ می‌گیرد.
+console.log('\n۱ب) پله‌ی میانی زنده است');
+if (fa) {
+  const mid = [E5, E5 + 1, E5 + 3600, E3 - 3600, E3 - 1];
+  const allFive = mid.every(t => fa.referralPayoutFor(1, { created_at: t }) === 5);
+  ok(allFive, 'کلِ بازه‌ی بینِ دو مرز ۵ می‌گیرد، نه ۳',
+    mid.map(t => `${t - E5}s→${fa.referralPayoutFor(1, { created_at: t })}`).join(' '));
+  // و کنترلِ مثبت: همان تابع با مرزِ سومِ عقب‌رفته واقعاً ۳ می‌دهد. بدونِ این، ادعای
+  // بالا می‌توانست صرفاً یعنی «این تابع هیچ‌وقت ۳ نمی‌دهد».
+  const early = build(E5, E5 + 1);
+  ok(early && early.referralPayoutFor(1, { created_at: E5 + 3600 }) === 3,
+    'کنترلِ مثبت: با مرزِ سومِ زودتر، همان تاریخ ۳ می‌گیرد');
 }
 
 /* ══ ۲) سه زبانِ دیگر باید کاملاً دست‌نخورده بمانند ═══════════════════════ */
 console.log('\n۲) استثنای زبانی — فقط فارسی');
 for (const loc of ['ru', 'pt', 'es']) {
-  const m = build(loc, EPOCH);
+  const m = build(E5, E3, { locale: loc });
   if (!m) { ok(false, `بلوک برای ${loc} اجرا نشد`); continue; }
-  ok(m.referral5On() === false, `${loc}: مشمولِ کاهش نیست`);
+  ok(m.referral5On() === false, `${loc}: مشمولِ پله‌ی دوم نیست`);
+  ok(m.referral3On() === false, `${loc}: مشمولِ پله‌ی سوم هم نیست`);
   ok(m.referralBonusFor(1) === 10, `${loc}: عددِ نمایشی همچنان ۱۰ است`, `دیدم: ${m.referralBonusFor(1)}`);
-  ok(m.referralPayoutFor(1, { created_at: EPOCH + 999 }) === 10,
-    `${loc}: دعوتِ بعد از مرز هم ۱۰ می‌گیرد (مرز اصلاً اعمال نمی‌شود)`);
-  ok(m.referralPayoutFor(1, { created_at: EPOCH - 999 }) === 10,
-    `${loc}: دعوتِ قبل از مرز هم ۱۰ می‌گیرد`);
+  ok(m.referralPayoutFor(1, { created_at: E3 + 999 }) === 10,
+    `${loc}: دعوتِ بعد از هر دو مرز هم ۱۰ می‌گیرد (مرزها اصلاً اعمال نمی‌شوند)`);
+  ok(m.referralPayoutFor(1, { created_at: E5 - 999 }) === 10,
+    `${loc}: دعوتِ قبل از مرزها هم ۱۰ می‌گیرد`);
 }
 
-/* ══ ۳) رول‌بکِ یک‌خطی واقعاً کار می‌کند ══════════════════════════════════ */
+/* ══ ۳) هر دو رول‌بکِ یک‌خطی واقعاً کار می‌کنند ═══════════════════════════ */
 console.log('\n۳) رول‌بک');
-const rolled = build('fa', EPOCH, { localesLiteral: '[]' });
-if (!rolled) ok(false, 'ساختِ نسخه‌ی رول‌بک‌شده شکست خورد');
+const rolled3 = build(E5, E3, { l3: '[]' });
+if (!rolled3) ok(false, 'ساختِ نسخه‌ی رول‌بکِ پله‌ی سوم شکست خورد');
 else {
-  ok(rolled.referralBonusFor(1) === 10, 'با `REFERRAL_5_LOCALES = []` عددِ نمایشیِ فارسی به ۱۰ برمی‌گردد');
-  ok(rolled.referralPayoutFor(1, { created_at: EPOCH + 999 }) === 10,
-    'و پرداختش هم بیت‌به‌بیت همان قبل است');
+  ok(rolled3.referralBonusFor(1) === 5,
+    'با `REFERRAL_3_LOCALES = []` عددِ نمایشیِ فارسی به ۵ برمی‌گردد، نه ۱۰');
+  ok(rolled3.referralPayoutFor(1, { created_at: E3 + 999 }) === 5,
+    'و پرداختش هم بیت‌به‌بیت به v3.69.0 برمی‌گردد');
+  ok(rolled3.referralPayoutFor(1, { created_at: E5 - 999 }) === 10,
+    'و grandfatheringِ پله‌ی اول هنوز سرِ جایش است');
+}
+const rolledAll = build(E5, E3, { l5: '[]', l3: '[]' });
+if (!rolledAll) ok(false, 'ساختِ نسخه‌ی رول‌بکِ کامل شکست خورد');
+else {
+  ok(rolledAll.referralBonusFor(1) === 10, 'با خالی‌کردنِ هر دو آرایه، فارسی به ۱۰ برمی‌گردد');
+  ok(rolledAll.referralPayoutFor(1, { created_at: E3 + 999 }) === 10,
+    'و پرداختش هم بیت‌به‌بیت همان v3.68.0 است');
 }
 
-/* ══ ۴) مرز روی SQLite واقعی: ساخته می‌شود و **جابه‌جا نمی‌شود** ══════════ */
-console.log('\n۴) مرزِ migrations روی SQLite واقعی');
-const insLine = CODE.split('\n').find(l => l.includes("VALUES ('referral_5'"));
-const selLine = CODE.split('\n').find(l => l.includes("WHERE key='referral_5'"));
-ok(!!insLine, 'خطِ ثبتِ مرزِ `referral_5` در سورس هست');
-ok(!!selLine, 'خطِ خواندنِ مرزِ `referral_5` در سورس هست');
-ok(!!insLine && /INSERT\s+OR\s+IGNORE/i.test(insLine),
-  'ثبتِ مرز `INSERT OR IGNORE` است (وگرنه هر ری‌استارت مرز را جلو می‌برد)');
+/* ══ ۴) هر دو مرز روی SQLite واقعی: ساخته می‌شوند و **جابه‌جا نمی‌شوند** ══ */
+console.log('\n۴) مرزهای migrations روی SQLite واقعی');
+const lineOf = (needle) => CODE.split('\n').find(l => l.includes(needle));
+const sqlIn = (line) => line?.match(/db\.prepare\((["'`])([\s\S]*?)\1\)/)?.[2];
+const boundarySql = {};
+for (const key of ['referral_5', 'referral_3']) {
+  const insLine = lineOf(`VALUES ('${key}'`);
+  const selLine = lineOf(`WHERE key='${key}'`);
+  ok(!!insLine, `خطِ ثبتِ مرزِ \`${key}\` در سورس هست`);
+  ok(!!selLine, `خطِ خواندنِ مرزِ \`${key}\` در سورس هست`);
+  ok(!!insLine && /INSERT\s+OR\s+IGNORE/i.test(insLine),
+    `ثبتِ \`${key}\` با \`INSERT OR IGNORE\` است (وگرنه هر ری‌استارت مرز را جلو می‌برد)`);
+  boundarySql[key] = { ins: sqlIn(insLine), sel: sqlIn(selLine) };
+}
+// ⚠️ دو کلیدِ **جدا**. یک کلیدِ مشترک یعنی مرزِ دوم اصلاً وجود ندارد و کاربری که ۵
+// وعده گرفته بود ۳ می‌گیرد (یا برعکس، بسته به اینکه کدام زودتر مهر خورده باشد).
+ok(boundarySql.referral_5.ins && boundarySql.referral_3.ins
+   && boundarySql.referral_5.ins !== boundarySql.referral_3.ins,
+  'دو مرز دو کلیدِ متفاوت در `migrations` دارند');
 
-if (insLine && selLine) {
-  const insSql = insLine.match(/db\.prepare\((["'`])([\s\S]*?)\1\)/)?.[2];
-  const selSql = selLine.match(/db\.prepare\((["'`])([\s\S]*?)\1\)/)?.[2];
+if (boundarySql.referral_5.ins && boundarySql.referral_3.ins) {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)');
-  db.prepare(insSql).run();
-  const first = db.prepare(selSql).get()?.done_at || 0;
-  ok(first > 1_700_000_000, 'اولین بوت مرز را با زمانِ واقعی مهر می‌زند', `دیدم: ${first}`);
-  // بوتِ دوم (شبیه‌سازیِ ری‌استارت). مرز نباید تکان بخورد.
-  db.prepare(insSql).run();
-  const second = db.prepare(selSql).get()?.done_at || 0;
-  ok(second === first, 'ری‌استارت مرز را جابه‌جا نمی‌کند', `${first} ⟵ ${second}`);
+  // بوتِ اول: هر دو مرز مهر می‌خورند.
+  for (const k of ['referral_5', 'referral_3']) db.prepare(boundarySql[k].ins).run();
+  const first = {};
+  for (const k of ['referral_5', 'referral_3']) first[k] = db.prepare(boundarySql[k].sel).get()?.done_at || 0;
+  ok(first.referral_5 > 1_700_000_000 && first.referral_3 > 1_700_000_000,
+    'اولین بوت هر دو مرز را با زمانِ واقعی مهر می‌زند', JSON.stringify(first));
+  ok(db.prepare('SELECT COUNT(*) c FROM migrations').get().c === 2,
+    'دو ردیفِ مستقل ساخته شد، نه یکی');
+  // بوتِ دوم (شبیه‌سازیِ ری‌استارت). هیچ‌کدام نباید تکان بخورند.
+  for (const k of ['referral_5', 'referral_3']) db.prepare(boundarySql[k].ins).run();
+  for (const k of ['referral_5', 'referral_3']) {
+    const now = db.prepare(boundarySql[k].sel).get()?.done_at || 0;
+    ok(now === first[k], `ری‌استارت مرزِ \`${k}\` را جابه‌جا نمی‌کند`, `${first[k]} ⟵ ${now}`);
+  }
+  // و سناریوی واقعیِ ارتقا: دیتابیسی که از قبل `referral_5` دارد نباید مرزِ کهنه‌اش
+  // بازنویسی شود، وگرنه کاربرانِ ۱۰ الماسی بی‌صدا به ۵ می‌افتند.
+  const up = new Database(':memory:');
+  up.exec('CREATE TABLE migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)');
+  up.prepare("INSERT INTO migrations (key, done_at) VALUES ('referral_5', 1789000000)").run();
+  for (const k of ['referral_5', 'referral_3']) up.prepare(boundarySql[k].ins).run();
+  ok(up.prepare(boundarySql.referral_5.sel).get()?.done_at === 1789000000,
+    'ارتقا: مرزِ `referral_5`ِ موجود دست‌نخورده می‌ماند');
+  ok((up.prepare(boundarySql.referral_3.sel).get()?.done_at || 0) > 1789000000,
+    'ارتقا: مرزِ `referral_3` تازه و بعد از آن مهر می‌خورد');
+  up.close();
   db.close();
 }
 
@@ -163,12 +245,14 @@ if (createRef && getRef) {
   // **همان ردیف** با دو مرزِ متفاوت دو نتیجه‌ی متفاوت می‌دهد.
   if (row) {
     const born = Number(row.created_at);
-    const atBoundary = build('fa', born);        // مرز = لحظه‌ی ثبتِ همین ردیف
-    const afterBoundary = build('fa', born + 1); // مرز یک ثانیه بعدتر
-    ok(atBoundary && atBoundary.referralPayoutFor(1, row) === 5,
-      'همان ردیف با مرزِ ≤ تاریخِ خودش ⟵ ۵');
-    ok(afterBoundary && afterBoundary.referralPayoutFor(1, row) === 10,
-      'همان ردیف با مرزِ بعد از تاریخِ خودش ⟵ ۱۰ (ستون واقعاً تصمیم‌ساز است)');
+    // **همان ردیف** با سه چیدمانِ مرز، سه نتیجه‌ی متفاوت می‌دهد.
+    const tier3 = build(born - 2, born);     // هر دو مرز گذشته‌اند
+    const tier2 = build(born - 1, born + 1); // فقط مرزِ اول گذشته
+    const tier1 = build(born + 1, born + 2); // هیچ مرزی هنوز نرسیده
+    ok(tier3 && tier3.referralPayoutFor(1, row) === 3, 'همان ردیف با هر دو مرزِ گذشته ⟵ ۳');
+    ok(tier2 && tier2.referralPayoutFor(1, row) === 5, 'همان ردیف با فقط مرزِ اولِ گذشته ⟵ ۵');
+    ok(tier1 && tier1.referralPayoutFor(1, row) === 10,
+      'همان ردیف با مرزهای آینده ⟵ ۱۰ (ستون واقعاً تصمیم‌ساز است)');
   }
   db.close();
 }
@@ -200,21 +284,26 @@ ok(!!inviteRowSrc && !/referralPayoutFor/.test(inviteRowSrc),
 console.log('\n۷) رندرِ واقعیِ متنِ فارسی');
 const L = (await import('../bots/tarot/locales/fa.js')).default;
 const cur = { on: true, value: 1, name: L.coinUnit.name, emoji: L.coinUnit.emoji };
-const FIVE = '۵', TEN = '۱۰';
+const THREE = '۳', FIVE = '۵', TEN = '۱۰';
+const show = fa ? fa.referralBonusFor(1) : 0;
+ok(show === 3, 'عددی که به رندر می‌رود همان خروجیِ resolver است', `دیدم: ${show}`);
 const rendered = {
-  'دکمه‌ی دعوتِ اینلاین': L.buttons.inviteWithBonus(5, cur),
-  'دکمه‌ی اشتراک‌گذاری': L.buttons.share(5, cur),
-  'متنِ صفحه‌ی دعوت': L.share.invitePrompt('tg_bot', 42, 5, cur),
-  'خبرِ پاداش': L.share.referralReward('سارا', 5, cur, 12),
+  'دکمه‌ی دعوتِ اینلاین': L.buttons.inviteWithBonus(show, cur),
+  'دکمه‌ی اشتراک‌گذاری': L.buttons.share(show, cur),
+  'متنِ صفحه‌ی دعوت': L.share.invitePrompt('tg_bot', 42, show, cur),
+  'خبرِ پاداش': L.share.referralReward('سارا', show, cur, 12),
 };
 for (const [name, text] of Object.entries(rendered)) {
-  ok(text.includes(FIVE), `${name}: عددِ ۵ در متن هست`, text);
+  ok(text.includes(THREE), `${name}: عددِ ۳ در متن هست`, text);
+  ok(!text.includes(FIVE), `${name}: هیچ ۵ ای در متن نمانده`, text);
   ok(!text.includes(TEN), `${name}: هیچ ۱۰ ای در متن نمانده`, text);
 }
-// کنترلِ معکوس: اگر عدد ۱۰ پاس داده شود باید ۱۰ چاپ شود. بدونِ این، ادعای بالا
+// کنترلِ معکوس: اگر عدد دیگری پاس داده شود باید همان چاپ شود. بدونِ این، ادعای بالا
 // می‌توانست صرفاً یعنی «این رشته اصلاً عددی چاپ نمی‌کند».
 ok(L.buttons.inviteWithBonus(10, cur).includes(TEN),
   'کنترلِ معکوس: همان رشته با ورودیِ ۱۰ عددِ ۱۰ را چاپ می‌کند');
+ok(L.buttons.inviteWithBonus(5, cur).includes(FIVE),
+  'کنترلِ معکوس: و با ورودیِ ۵ عددِ ۵ را');
 
 /* ══ ۸) نسخه بامپ شده (بند ۲ج/۴ ریشه) ════════════════════════════════════ */
 console.log('\n۸) نسخه');
@@ -228,7 +317,7 @@ const cmpVer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   return 0;
 };
-ok(cmpVer(ver, '3.69.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
+ok(cmpVer(ver, '3.83.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} پاس، ${fail} خطا\n`);
 if (fail) process.exit(1);
