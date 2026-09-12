@@ -10,6 +10,7 @@ import { readFileSync } from 'fs';
 // ⚠️ `L` پایین‌تر یک **stub** است (فقط شکلِ فراخوانی را نگه می‌دارد). هرجا مقدارِ
 // واقعیِ متن لازم است باید از `REAL` خوانده شود، نه از آن stub.
 import REAL from '../bots/tarot/locales/fa.js';
+import DB from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 
 const SRC = readFileSync('bots/tarot/index.js', 'utf8');
 const LOC = readFileSync('bots/tarot/locales/fa.js', 'utf8');
@@ -338,9 +339,28 @@ const ARM_BY_UID = { 2: 'lucky', 3: 'control', 5: 'control', 6: 'control' };
   // نیتِ این ادعا «یک بار» نبود، «فقط زیرِ پیامِ ناخواسته‌ی شبانه» بود. از v3.38.0 جارو دو
   // مسیر دارد پس دو بار ساخته می‌شود؛ چیزی که باید قفل بماند این است که **هیچ مصرفی بیرون
   // از خودِ جارو** نداشته باشد، وگرنه دکمه‌ی خاموشی زیرِ پیامی می‌رود که کاربر خودش خواسته.
-  ok('«دیگه یادآوری نکن» فقط داخلِ جاروی شبانه ساخته می‌شود',
-     (SRC.match(/nightRemindOff/g) || []).length === (sweep.match(/nightRemindOff/g) || []).length);
+  /* از v3.82.0 یک مصرف‌کننده‌ی دومِ **مجاز** هست: `chainDailyReminder`، یعنی یادآوریِ
+   * کارتِ روز که به پایانِ فلوی کارتِ شانس زنجیر می‌شود. نیتِ این ادعا عوض نشد — همان
+   * «فقط زیرِ پیامِ ناخواسته» — و پیامِ زنجیره‌ای هم ناخواسته است (کاربر آن را نخواسته،
+   * از روی کلیدِ روشنش می‌آید). پس دامنه **صریح** پهن شد، نه اینکه شمارش خفه شود. */
+  const chainBody = (() => {
+    const i = SRC.indexOf('async function chainDailyReminder');
+    if (i < 0) return '';
+    const s = SRC.indexOf('{', i);
+    let d = 0;
+    for (let j = s; j < SRC.length; j++) {
+      if (SRC[j] === '{') d++;
+      else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(s, j + 1); }
+    }
+    return '';
+  })();
+  const chain = chainBody;
+  ok('تابعِ زنجیره‌ی یادآوریِ کارتِ روز پیدا شد', !!chain);
+  ok('«دیگه یادآوری نکن» فقط در جارو و زنجیره ساخته می‌شود',
+     (SRC.match(/nightRemindOff/g) || []).length
+       === (sweep.match(/nightRemindOff/g) || []).length + (chain.match(/nightRemindOff/g) || []).length);
   ok('و در هر دو مسیرِ جارو هست', (sweep.match(/nightRemindOff/g) || []).length === 2);
+  ok('و دقیقاً یک بار در زنجیره', (chain.match(/nightRemindOff/g) || []).length === 1);
   ok('برچسبِ تکراریِ luckyRemindOff از locale حذف شده', !/luckyRemindOff/.test(LOC));
 
   // پیامِ «امروز استفاده کردی» هیچ کیبوردی ندارد.
@@ -592,6 +612,89 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
     for (const t of [withC, noC, M.buttons.stuckCancel])
       ok(`${loc}: بدونِ خط تیره‌ی بلند (بند ۱۰)`, !t.includes('—') && !t.includes('--'));
   }
+}
+
+/* ═══════ ۱۱) دیفالتِ تازه‌ی یادآوری: کارتِ شانس برنده شد (v3.82.0) ═══════
+   نتیجه‌ی آزمایشِ `night_reminder` روی دیتای زنده: فالِ تحویل‌شده در ۶ ساعتِ بعد از پیام
+   ۵٫۸۷٪ (کارتِ روز) در برابرِ ۷٫۱۰٪ (کارتِ شانس)، CTW ۹۷٪ خام و ۹۳ تا ۹۶٪ بعد از تصحیحِ
+   خوشه‌بندی، با گاردریلِ انصرافِ ۱٫۸۲٪ در برابرِ ۰٫۳۱٪.
+
+   بلوک عمداً **رفتاری** است: SQLِ مهاجرت از خودِ سورس بریده و روی SQLite واقعی اجرا
+   می‌شود، نه یک رجکس روی متن. */
+{
+  const fnBody = (marker) => {
+    const i = SRC.indexOf(marker);
+    if (i < 0) return '';
+    const st = SRC.indexOf('{', i);
+    let d = 0;
+    for (let j = st; j < SRC.length; j++) {
+      if (SRC[j] === '{') d++;
+      else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(st, j + 1); }
+    }
+    return '';
+  };
+  const chainBody = fnBody('async function chainDailyReminder');
+  const iMig = SRC.indexOf("const NIGHT_DEFAULT_KEY");
+  const mig = iMig > -1 ? SRC.slice(iMig, SRC.indexOf('night default migration', iMig)) : '';
+  ok('بلوکِ مهاجرتِ دیفالتِ یادآوری پیدا شد', !!mig);
+
+  const luckySql = (mig.match(/UPDATE users SET lucky_reminder_on=1[\s\S]*?\)\s*`/) || [''])[0].replace(/`$/, '');
+  ok('SQLِ روشن‌کردنِ کارتِ شانس از سورس استخراج شد', /NOT IN/.test(luckySql));
+
+  /* ⚠️ مهم‌ترین ادعای این بلوک: **ترتیبِ** دو UPDATE.
+     شرطِ «کارتِ شانس را رد کرده بود» روی `daily_reminder_off` می‌نشیند، پس باید قبل از
+     خاموش‌کردنِ سراسریِ کارتِ روز خوانده شود. برعکسش یک باگِ کاملاً بی‌صداست: همه‌ی
+     کاربران «انصراف‌داده» به نظر می‌رسند و کلِ شاخه‌ی lucky بی‌یادآوری می‌ماند. */
+  const iL = mig.indexOf('lucky_reminder_on=1'), iD = mig.indexOf('SET daily_reminder_off=1');
+  ok('کارتِ شانس **قبل از** خاموش‌کردنِ سراسریِ کارتِ روز نوشته می‌شود', iL > -1 && iD > -1 && iL < iD);
+
+  const mkDb = () => {
+    const d = new DB(':memory:');
+    d.exec(`CREATE TABLE users(telegram_id INTEGER PRIMARY KEY, daily_reminder_off INT DEFAULT 0, lucky_reminder_on INT DEFAULT 0);
+            CREATE TABLE ab_exposures(experiment_key TEXT, user_id INT, variant TEXT);`);
+    let id = 1;
+    const add = (off, arm) => {
+      d.prepare('INSERT INTO users(telegram_id,daily_reminder_off) VALUES(?,?)').run(id, off);
+      if (arm) d.prepare("INSERT INTO ab_exposures VALUES('night_reminder',?,?)").run(id, arm);
+      id++;
+    };
+    for (let i = 0; i < 5; i++) add(1, 'lucky');    // کارتِ شانس را رد کرد → باید خاموش بماند
+    for (let i = 0; i < 11; i++) add(1, 'control'); // کارتِ روز را رد کرد  → باید روشن شود
+    for (let i = 0; i < 5; i++) add(1, null);       // انصرافِ قبل از آزمایش → باید روشن شود
+    for (let i = 0; i < 20; i++) add(0, 'lucky');   // بدونِ انصراف          → باید روشن شود
+    for (let i = 0; i < 30; i++) add(0, null);
+    return d;
+  };
+  const dOn = mkDb();
+  dOn.transaction(() => { dOn.prepare(luckySql).run(); dOn.prepare('UPDATE users SET daily_reminder_off=1').run(); })();
+  const off = dOn.prepare('SELECT COUNT(*) c FROM users WHERE lucky_reminder_on=0').get().c;
+  ok('فقط کسانی خاموش می‌مانند که خودِ کارتِ شانس را رد کرده بودند (۵ نفر)', off === 5);
+  ok('بقیه کارتِ شانس روشن می‌گیرند', dOn.prepare('SELECT COUNT(*) c FROM users WHERE lucky_reminder_on=1').get().c === 66);
+  ok('کارتِ روز برای همه خاموش می‌شود (از این به بعد opt-in)',
+     dOn.prepare('SELECT COUNT(*) c FROM users WHERE daily_reminder_off=0').get().c === 0);
+
+  // 🔬 کنترلِ منفی: با ترتیبِ برعکس، کلِ شاخه‌ی lucky بی‌یادآوری می‌ماند.
+  const dBad = mkDb();
+  dBad.transaction(() => { dBad.prepare('UPDATE users SET daily_reminder_off=1').run(); dBad.prepare(luckySql).run(); })();
+  ok('کنترلِ منفی: ترتیبِ برعکس واقعاً کلِ شاخه‌ی lucky را خاموش می‌کند',
+     dBad.prepare('SELECT COUNT(*) c FROM users WHERE lucky_reminder_on=0').get().c === 25);
+
+  // کاربرِ تازه باید با همین دیفالت متولد شود، وگرنه مهاجرت فقط کوهورتِ امروز را می‌گیرد.
+  ok('کاربرِ تازه با کارتِ شانسِ روشن و کارتِ روزِ خاموش ساخته می‌شود',
+     /INSERT INTO users \(telegram_id, name, username, daily_reminder_off, lucky_reminder_on\) VALUES \(\?, \?, \?, 1, 1\)/.test(SRC));
+
+  /* حداکثر یک پیام در ساعتِ ۲۲: شاخه‌ی بعد-از-آزمایش باید `else if` باشد نه دو `if`.
+     نسخه‌ی قبلی هر دو یادآوریِ روشن را پشتِ سرِ هم می‌فرستاد — همان چیزی که v3.9.0
+     دلیلِ بلاک‌شدن ثبتش کرده بود و چون آزمایش running بود هرگز اجرا نشده بود. */
+  const post = sweep.slice(sweep.indexOf('const wanted = []'), sweep.indexOf('if (!wanted.length)'));
+  ok('شاخه‌ی بعد-از-آزمایش پیدا شد', !!post);
+  ok('کارتِ شانس اولویت دارد و کارتِ روز با else if می‌آید (حداکثر یک پیام در شب)',
+     /lucky_reminder_on[\s\S]*?else if[\s\S]*?daily_reminder_off/.test(post));
+  ok('و هرگز هر دو با هم push نمی‌شوند', (post.match(/wanted\.push/g) || []).length === 2 && /else if/.test(post));
+
+  // زنجیره فقط وقتی شلیک می‌کند که کاربر واقعاً امشب یادآوری گرفته باشد.
+  ok('زنجیره پنجره‌ی زمانی دارد (وگرنه پیامِ بی‌موقعِ بعدازظهر)', /REMIND_CHAIN_SEC/.test(chainBody || ''));
+  ok('زنجیره fail-safe است و فلوی کارتِ شانس را نمی‌شکند', /catch \(e\)/.test(chainBody || ''));
 }
 
 /* ═══════ نتیجه ═══════ */

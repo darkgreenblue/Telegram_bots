@@ -317,7 +317,7 @@ const cmpVer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   return 0;
 };
-ok(cmpVer(ver, '3.82.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
+ok(cmpVer(ver, '3.83.0') >= 0, `PRODUCT_VERSION برای این تغییرِ رفتاری بامپ شده (${ver})`);
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} پاس، ${fail} خطا\n`);
 if (fail) process.exit(1);

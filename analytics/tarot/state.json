@@ -1,1544 +1,1614 @@
 {
-  "bot": "tarot",
-  "note": "حافظه‌ی لوپِ تحلیل جرنی. اسکیل product-journey-analysis این فایل را در شروع می‌خواند و در پایان به‌روز می‌کند. دستی ویرایش نکن مگر برای اصلاح.",
-  "excludeUsers": [
-    429557996,
-    409581917,
-    100257975,
-    5725984933
-  ],
-  "excludeReason": "مالک و حساب‌های تست/ادمین — جرنی‌شان نماینده‌ی کاربر واقعی نیست و ریست ادمین هم دیتایشان را پاک می‌کند",
-  "standingRules": {
-    "referralValueIsGenerational": {
-      "rule": "هر حسابِ «منفعتِ رفرال» نسلی است، نه مسطح: پدر ⟵ لایه ۲ ⟵ لایه ۳ ⟵ …",
-      "decidedBy": "تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۰ («رویکردِ پدر و لایه‌ی دوم و سوم و اینا رو حفظ کن و خاطرت بمونه»). زیرِ اختیارِ سشن نیست.",
-      "scope": [
-        "حکمِ بستن/ادامه‌ی هر کمپین",
-        "مقایسه‌ی کانال‌های جذب",
-        "CPA",
-        "ارزشِ عمرِ یک دعوت‌کننده",
-        "هر تصمیمی درباره‌ی اندازه‌ی پاداشِ دعوت"
-      ],
-      "how": "referrals.referee_id یکتاست ⟵ هر کاربر دقیقاً یک پدر دارد ⟵ CTEِ بازگشتی جنگل را بدونِ دوباره‌شماری می‌سازد. ریشه = کاربرِ بدونِ یالِ ورودی؛ کانالِ کلِ زیردرخت از users.first_source همان ریشه.",
-      "alwaysReport": "هم جمعِ زیردرخت، هم توزیعِ per لایه. جمع به‌تنهایی پنهان می‌کند ارزش از کجا آمده.",
-      "doubleCountTrap": "پاداشِ دعوت الماسی است که خودِ دعوت‌کننده خرج می‌کند، پس در llm_usageِ همان گره است و از قبل داخلِ درخت. جداگانه اضافه‌اش نکن.",
-      "whyItMatters": "مدلِ مسطح دو حکمِ کمپین را وارونه گزارش کرد: dMoYW از −۲۲۴٬۰۳۶ به +۶۹٬۵۰۰ رفت (نگهش دار) و i2kUp به −۶۴۲٬۶۰۰ (بدترینِ جدول).",
-      "reference": "analytics/tarot/reports/2026-09-11-generational-attribution.md"
-    }
+ "bot": "tarot",
+ "note": "حافظه‌ی لوپِ تحلیل جرنی. اسکیل product-journey-analysis این فایل را در شروع می‌خواند و در پایان به‌روز می‌کند. دستی ویرایش نکن مگر برای اصلاح.",
+ "excludeUsers": [
+  429557996,
+  409581917,
+  100257975,
+  5725984933
+ ],
+ "excludeReason": "مالک و حساب‌های تست/ادمین — جرنی‌شان نماینده‌ی کاربر واقعی نیست و ریست ادمین هم دیتایشان را پاک می‌کند",
+ "standingRules": {
+  "referralValueIsGenerational": {
+   "rule": "هر حسابِ «منفعتِ رفرال» نسلی است، نه مسطح: پدر ⟵ لایه ۲ ⟵ لایه ۳ ⟵ …",
+   "decidedBy": "تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۰ («رویکردِ پدر و لایه‌ی دوم و سوم و اینا رو حفظ کن و خاطرت بمونه»). زیرِ اختیارِ سشن نیست.",
+   "scope": [
+    "حکمِ بستن/ادامه‌ی هر کمپین",
+    "مقایسه‌ی کانال‌های جذب",
+    "CPA",
+    "ارزشِ عمرِ یک دعوت‌کننده",
+    "هر تصمیمی درباره‌ی اندازه‌ی پاداشِ دعوت"
+   ],
+   "how": "referrals.referee_id یکتاست ⟵ هر کاربر دقیقاً یک پدر دارد ⟵ CTEِ بازگشتی جنگل را بدونِ دوباره‌شماری می‌سازد. ریشه = کاربرِ بدونِ یالِ ورودی؛ کانالِ کلِ زیردرخت از users.first_source همان ریشه.",
+   "alwaysReport": "هم جمعِ زیردرخت، هم توزیعِ per لایه. جمع به‌تنهایی پنهان می‌کند ارزش از کجا آمده.",
+   "doubleCountTrap": "پاداشِ دعوت الماسی است که خودِ دعوت‌کننده خرج می‌کند، پس در llm_usageِ همان گره است و از قبل داخلِ درخت. جداگانه اضافه‌اش نکن.",
+   "whyItMatters": "مدلِ مسطح دو حکمِ کمپین را وارونه گزارش کرد: dMoYW از −۲۲۴٬۰۳۶ به +۶۹٬۵۰۰ رفت (نگهش دار) و i2kUp به −۶۴۲٬۶۰۰ (بدترینِ جدول).",
+   "reference": "analytics/tarot/reports/2026-09-11-generational-attribution.md"
+  }
+ },
+ "dbPath": "bots/tarot/data/bot-fa.db",
+ "opsApp": "tarot",
+ "lastAnalyzedAt": "2026-08-26T07:10:00Z",
+ "lastReport": "analytics/tarot/reports/2026-08-26-round7-ux-v2-launch.md",
+ "windowStartUsedLastTime": "2026-08-15T15:35:00Z",
+ "versionTimeline": [
+  {
+   "v": "1.2.0",
+   "mergedAt": "2026-07-24T22:02:00Z",
+   "what": "بازطراحی آنبوردینگ + حذف سؤال تکراری حوزه + کاتالوگ کوتاه"
   },
-  "dbPath": "bots/tarot/data/bot-fa.db",
-  "opsApp": "tarot",
-  "lastAnalyzedAt": "2026-08-26T07:10:00Z",
-  "lastReport": "analytics/tarot/reports/2026-08-26-round7-ux-v2-launch.md",
-  "windowStartUsedLastTime": "2026-08-15T15:35:00Z",
-  "versionTimeline": [
-    {
-      "v": "1.2.0",
-      "mergedAt": "2026-07-24T22:02:00Z",
-      "what": "بازطراحی آنبوردینگ + حذف سؤال تکراری حوزه + کاتالوگ کوتاه"
-    },
-    {
-      "v": "1.6.0",
-      "mergedAt": "2026-07-25T08:59:00Z",
-      "what": "پی‌وال کم‌موجودی: پیام کوتاه شخصی، تخفیف پشت دکمه، ۳۵٪→۵۰٪ با کد"
-    },
-    {
-      "v": "2.0.0",
-      "mergedAt": "2026-07-31T15:22:00Z",
-      "deployedAt": "2026-07-31T15:26:00Z",
-      "what": "هدیه‌ی خوش‌آمد ۳۰k + بک‌فیل به کاربران قدیمی با پیام، اولین فال بدون پی‌وال، دکمه‌ی «پرداخت هزینه‌ی همین فال»، تخفیف ۵۰٪→۲۰٪ بدون کد، نردبان شارژ ۵۰/۱۰۰/۲۰۰k، حذف پوش ۱۴روزه به نفع یادآوری شبانه‌ی کارت روز",
-      "isMainBoundary": true
-    },
-    {
-      "v": "2.1.0",
-      "mergedAt": "2026-07-31T16:47:00Z",
-      "what": "پیشنهاددهنده‌ی امتیازی + کیبورد منو که گم نمی‌شود"
-    },
-    {
-      "v": "2.2.0",
-      "mergedAt": "2026-07-31T19:53:00Z",
-      "what": "صف اقدام پشتیبانی (تأیید دستی، شارژ/کسر) + حداقل مبلغ شارژ"
-    },
-    {
-      "v": "2.3.0",
-      "mergedAt": "2026-07-31T20:33:00Z",
-      "what": "پرداخت کمتر از فاکتور: اصلاح فاکتور به‌جای رد"
-    },
-    {
-      "v": "2.4.0",
-      "mergedAt": "2026-07-31T21:33:00Z",
-      "what": "جواب قاطع + نشونه برای فال‌های تصمیم‌محور (yesno, choice)"
-    },
-    {
-      "v": "2.5.0",
-      "mergedAt": "2026-07-31T22:47:00Z",
-      "what": "صفحه‌ی «موجودی کافیه» به‌جای صفحه‌ی قیمت‌دار برای کاربرِ دارای اعتبار"
-    },
-    {
-      "v": "2.5.0-copy",
-      "mergedAt": "2026-07-31T23:16:00Z",
-      "what": "بازنویسی کپیِ دو صفحه‌ی نقطه‌ی تصمیم (موجودی + نامِ فال در متن، حذف جمله‌ی امری)",
-      "isMainBoundary": true
-    },
-    {
-      "v": "2.7.0",
-      "mergedAt": "2026-08-04T17:40:00Z",
-      "what": "گیتِ عضویت کانال برای کاربر جدید + فال عشق سه‌کارتی ۳۰k (هم‌اندازه‌ی هدیه) و اولِ کاتالوگ",
-      "isMainBoundary": true
-    },
-    {
-      "v": "2.7.1",
-      "mergedAt": "2026-08-04T18:06:00Z",
-      "what": "حذفِ تکرارِ معرفی بعد از نام + فکتِ ۸۶٪"
-    },
-    {
-      "v": "2.7.2",
-      "mergedAt": "2026-08-04T18:23:00Z",
-      "what": "سه فیکسِ گیت: my_chat_member، ریستِ ادمین، payloadِ اتریبیوشن"
-    },
-    {
-      "v": "2.7.3",
-      "mergedAt": "2026-08-04T18:40:00Z",
-      "what": "بازنویسیِ پیامِ اول + آزمایشِ gate_intro_ai (بعداً متوقف شد)"
-    },
-    {
-      "v": "2.8.0",
-      "mergedAt": "2026-08-04T19:18:00Z",
-      "what": "آزمایشِ intro_order (ترتیبِ دو بلوکِ آنبوردینگ) + حذفِ موضعِ هوش مصنوعی از فلو",
-      "isMainBoundary": true
-    },
-    {
-      "v": "2.9.0",
-      "mergedAt": "2026-08-08T08:30:00Z",
-      "what": "کاتالوگ با هدیه هم‌تراز شد: فال‌های موضوعیِ ۵کارتی/۵۰k و دوراهی به ۳کارتی/۳۰k (قانونِ ۱۰k per کارت دست‌نخورده). صلیب سلتی ۱۰کارتی/۱۰۰k به‌عنوان تنها لنگرِ پریمیوم ماند.",
-      "isMainBoundary": true
-    },
-    {
-      "v": "2.9.1",
-      "mergedAt": "2026-08-15T13:00:00Z",
-      "what": "کپی: «دو مورد اول» ← «دو تا پیشنهاد اول» در پیشنهادِ فالِ بعدی"
-    },
-    {
-      "v": "3.0.0",
-      "mergedAt": "2026-08-15T17:01:10Z",
-      "adminOnly": true,
-      "what": "لحنِ صریحِ خوانش (پرامپتِ v2) + اقتصادِ سکه + کاتالوگِ عشق‌محور. ⚠️ فقط اکانتِ ادمین، پس روی دیتای کاربرِ واقعی هیچ اثری ندارد."
-    },
-    {
-      "v": "3.0.1",
-      "mergedAt": "2026-08-15T19:52:54Z",
-      "adminOnly": true,
-      "what": "بازنویسیِ صدای خوانش از روی شش خوانشِ واقعیِ یک تاروت‌خوانِ انسان. ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.1.0",
-      "mergedAt": "2026-08-15T20:29:21Z",
-      "adminOnly": true,
-      "what": "پارکِ اقتصادِ سکه و کاتالوگِ نسل دوم (COIN_ECONOMY=false) + انحلالِ آزمایشِ نامِ واحد + فشرده‌سازیِ پرامپت به ~۳٬۶۰۰ کاراکتر. لحن هنوز ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.2.0",
-      "mergedAt": "2026-08-15T21:20:18Z",
-      "adminOnly": true,
-      "what": "حذفِ «سه قدم عملی» از پایانِ خوانش + جدولِ دانشِ ۷۸ کارت (ترجمه‌ی دستی از کورپوسِ کراول‌شده، بدونِ RAG). ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.3.0",
-      "mergedAt": "2026-08-16T10:15:40Z",
-      "isMainBoundary": true,
-      "what": "لحنِ جدیدِ خوانش برای **همه‌ی کاربران** باز شد (تا اینجا فقط ادمین بود). محتوای واقعیِ تغییر = مجموعِ v3.0.0 تا v3.2.0 که یک‌جا به کاربرِ واقعی رسید: پرامپتِ v2 با صدای تاروت‌خوانِ انسان، جوابِ قاطع در پایانِ هر فال با دلیلِ لنگرخورده به نامِ کارت‌ها، جدولِ دانشِ ۷۸ کارت در پرامپت، حذفِ سه قدمِ عملی و شعارِ پایانی و جمله‌های دلداریِ وسطِ جرنی، حداکثر یک ایموجی، و پرسشِ «سؤالت چیه» به‌جای «موضوعت چیه».",
-      "measure": "ریتنشن (نرخِ فالِ دوم و بازگشت در ۷ و ۱۴ روز) + کیفیتِ feedback وسطِ خوانش + نرخِ product_delivered. مقایسه‌ی کوهورتِ first_version 3.3.0 با 2.9.x.",
-      "tzNote": "مُهرِ زمانی با git log --date=iso-strict-local برداشته شد. پیش‌فرضِ %ad روی این محیط UTC+05:00 است و یک‌بار همین ردیف‌ها را ۵ ساعت جلوتر ثبت کرد."
-    },
-    {
-      "v": "3.4.0",
-      "mergedAt": "2026-08-16T17:00:36Z",
-      "what": "قاعده‌ی هزینه: هیچ فراخوانیِ پولی قبل از کسرِ اعتبار + سؤالِ صوتی در یک فراخوانی به‌جای دو تا"
-    },
-    {
-      "v": "3.5.0",
-      "mergedAt": "2026-08-16T18:00:52Z",
-      "adminOnly": true,
-      "what": "ساختارِ خوانشِ v4 (تیزر، جوابِ اول، نمره‌ی ۱ تا ۵ در آخر). ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.5.1-3.6.7",
-      "mergedAt": "2026-08-18T13:48:29Z",
-      "adminOnly": true,
-      "what": "۱۶ دورِ آزمایشگاهِ خوانش روی ~۳۰۰ فال: حذفِ «کارتِ نیامده» و «قدمِ بعدی»، تیزرِ دو جمله‌ای، گاردِ طفره‌رفتنِ کلِ متن، تعمیرِ نقطه‌ای به‌جای بازتولید. متریکِ Barnum ۲۴٪ ← ۱۸٪."
-    },
-    {
-      "v": "3.7.0",
-      "mergedAt": "2026-08-18T14:10:52Z",
-      "isMainBoundary": true,
-      "what": "خوانشِ v4 برای **همه‌ی کاربران** باز شد.",
-      "measure": "میانگینِ نمره‌ی ۱ تا ۵ و نرخِ پاسخ به نظرسنجی"
-    },
-    {
-      "v": "3.8.0",
-      "mergedAt": "2026-08-18T16:35:35Z",
-      "adminOnly": true,
-      "what": "UX v2: ماهِ تولد به‌جای حوزه، کاتالوگِ اندازه‌محور، الماس، سه بسته، کاربر همه‌ی کارت‌ها را می‌چیند. ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.9.0",
-      "mergedAt": "2026-08-18T17:31:41Z",
-      "adminOnly": true,
-      "what": "UX v2.1: منوی موضوع×اندازه، کارتِ شانس (۳ از ۲۴، ۸ برنده)، حذفِ کلمه‌ی «خوانش». ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.9.1-3.11.1",
-      "mergedAt": "2026-08-19T04:35:52Z",
-      "adminOnly": true,
-      "what": "واحد «سکه» ← «الماس»، حذفِ «کیف‌پول»، ناوبریِ یک‌قدمیِ ادیت-در-جا، پیامِ «ادامه»، تبلیغِ کارتِ شانس بعدِ اولین فال. ⚠️ فقط ادمین."
-    },
-    {
-      "v": "3.13.0",
-      "mergedAt": "2026-08-19T05:38:28Z",
-      "adminOnly": true,
-      "what": "کسرِ اعتبار در لحظه‌ی انتخابِ اندازه (PAY_AT_SIZE) — پی‌والِ بعد از انتخابِ کارت‌ها حذف شد. ⚠️ فقط ادمین.",
-      "measure": "تعدادِ فالِ سرگردانِ pending_payment (قبل ۶۳، بعد ۳)"
-    },
-    {
-      "v": "3.14.0-3.16.0",
-      "mergedAt": "2026-08-19T14:12:12Z",
-      "adminOnly": true,
-      "what": "ترتیبِ پایانِ فال (نمره ← تشکر ← قدمِ بعدی)، تسترِ بدونِ اختیارِ ادمین، قراردادِ دو-نقطه‌ایِ کیبوردِ ماندگار."
-    },
-    {
-      "v": "3.17.0-3.19.0",
-      "mergedAt": "2026-08-19T21:52:24Z",
-      "adminOnly": true,
-      "what": "تعمیرِ کاملِ فلوی فال تک کارت، نیتِ معلق، نشانگرِ انتظارِ تازه، دستِ کارت شانس از سشن بیرون آمد."
-    },
-    {
-      "v": "3.20.0-3.22.0",
-      "mergedAt": "2026-08-20T22:51:47Z",
-      "adminOnly": true,
-      "what": "دستورِ /loading، تضمینِ دو الماس در دستِ اولِ کارت شانس (LUCKY_FIRST_MIN)، پایپ‌لاین ویدیوی ریلز."
-    },
-    {
-      "v": "3.23.0",
-      "mergedAt": "2026-08-20T23:09:31Z",
-      "what": "پاداشِ دعوت **فقط** به دعوت‌کننده (قبلاً هر دو طرف می‌گرفتند = باگ) + **حذفِ کاملِ یادآوریِ شبانه‌ی کارتِ روز** (که opt-out بود و به کاربرِ تومانی هم می‌رفت).",
-      "measure": "کاربرِ بازگشتیِ روزانه بعد از حذفِ یادآور؛ سهمِ رفرال از کاربرانِ جدید"
-    },
-    {
-      "v": "3.24.0",
-      "mergedAt": "2026-08-20T23:20:06Z",
-      "what": "نگارشِ کاملِ گنجینه: ۹۳۶ متنِ کارتِ روز (۱۲ ماه × ۷۸ کارت). دیگر هیچ کاربری به «گنجینه آماده نیست» نمی‌خورد."
-    },
-    {
-      "v": "3.25.0",
-      "mergedAt": "2026-08-21T00:16:45Z",
-      "isMainBoundary": true,
-      "what": "**مرزِ اصلیِ دورِ ۷.** UX v2 برای همه‌ی کاربران باز شد + مهاجرتِ موجودیِ تومانی به الماس + پنجره‌ی یک‌باره‌ی کیبورد. رباتِ تولید حین مهاجرت pm2 stop بود، پس روزِ ۲۱ اوت عملاً خاموش است.",
-      "measure": "کلِ قیف، رضایت، اقتصادِ الماس، ریتنشن — همه در گزارشِ دورِ ۷"
-    },
-    {
-      "v": "3.25.1",
-      "mergedAt": "2026-08-22T13:30:41Z",
-      "what": "سه باگِ بحرانیِ ممیزیِ پیش‌از-پرواز (تبدیلِ دوباره‌ی موجودی، KB_V2_EPOCH، رهاشدنِ رباتِ خاموش در manual-deploy)"
-    },
-    {
-      "v": "3.26.0-3.26.2",
-      "mergedAt": "2026-08-22T16:51:11Z",
-      "what": "پیامِ اطلاع‌رسانیِ آپدیت به همه‌ی کاربران (حاملِ نامرئیِ کیبورد) + رنگِ بسته‌ها + الماسی‌شدنِ سمتِ ادمین و پنل.",
-      "broadcast": "ارسالِ انبوه ~۲۲ اوت بلافاصله بعد از v3.26.1: ۱۱۰ تحویل، ۸۳ بلاک/چت‌بسته. ⚠️ مهرِ زمانیِ دقیق باید از announce_log دوباره کوئری شود (عددِ ثبت‌شده‌ی ۱۲:۴۴ زودتر از خودِ نسخه است)."
-    },
-    {
-      "v": "3.27.0",
-      "mergedAt": "2026-08-22T18:02:05Z",
-      "what": "الماس واحدِ **واقعیِ** ذخیره‌سازی شد: ضریبِ ۱۰٬۰۰۰ از کد و دیتا پاک شد (balance/price/original_amount/admin_actions + propهای credit_granted). ⚠️ رویدادهای اعتبارِ قبل از این تاریخ هم بازنویسی شده‌اند، پس واحدِ کلِ تاریخِ رویدادها یکنواخت است.",
-      "dataNote": "هر تحلیلِ آینده روی props.amount نیازی به تبدیل ندارد؛ عدد = خودِ تعدادِ الماس."
-    },
-    {
-      "v": "3.43.0",
-      "mergedAt": "2026-09-01T15:30:49Z",
-      "deployedAt": "2026-09-01T15:45:00Z",
-      "what": "مدلِ خوانشِ **فارسی** به openai/gpt-5.6-luna رفت و مسیرِ ویس از تک‌فراخوانی به «رونویسی، بعد خوانش» تبدیل شد. به‌علاوه تعمیرِ نقطه‌ای تکه‌به‌تکه شد و سه زنجیره‌ی فالبک تعریف شدند.",
-      "dataNote": "⚠️ مرزِ تحلیلِ قبل/بعد برای رضایت و هزینه. بخشِ regressionWatch را ببین؛ رصدش خواسته‌ی صریحِ مالک است."
-    },
-    {
-      "v": "—",
-      "external": true,
-      "mergedAt": "2026-09-07T16:30:24Z",
-      "what": "🖼 اینتروی ربات GIF گرفت (متن دست‌نخورده). تغییر در BotFather، بیرون از ریپو ⇒ نه کامیتی دارد نه PRODUCT_VERSION. جزئیات و خطِ پایه در کلیدِ measurementMarkers، شناسه intro_gif_2026_09_07."
-    },
-    {
-      "v": "3.75.0",
-      "mergedAt": "2026-09-08T15:43:00Z",
-      "deployedAt": "2026-09-09T03:01:00Z",
-      "what": "💰 افزایشِ قیمتِ سه بسته (۳۰k/۶۰k/۱۵۰k ⟵ ۵۰k/۹۰k/۱۹۰k) + دو بسته‌ی گرانِ تازه (افسانه‌ای ۴۹۰k، جاودان ۱٬۴۹۰k) + دکمه‌ی «مشاهده بسته‌های به‌صرفه‌تر».",
-      "dataNote": "⚠️ مرزِ مرج با مرزِ زنده‌شدن یکی **نیست**: پنجره‌ی امنِ دیپلوی مرج را عقب انداخت و تغییر ۹ سپ ۰۶:۳۱ تهران (۰۳:۰۱Z) با دیپلویِ دستیِ مالک زنده شد. هر مقایسه‌ی قبل/بعد باید روی deployedAt بسته شود نه mergedAt، وگرنه ۲۱ ساعت از رژیمِ قبلی داخلِ «بعد» می‌افتد. تحلیل: analytics/tarot/reports/2026-09-11-revenue-drop-recheck.md"
-    },
-    {
-      "v": "3.79.0",
-      "mergedAt": "2026-09-11T00:43:00Z",
-      "deployedAt": "2026-09-11T00:45:00Z",
-      "what": "🔙 رول‌بکِ قیمت به ۳۰k/۶۰k/۱۵۰k + خاموشیِ «افسانه‌ای»/«جاودان» (و آزمایشِ pack_reveal_v1 با همان پرچم).",
-      "dataNote": "مرج و دیپلوی در همان دقیقه (ساعتِ ۰۴:۱۳ تهران، داخلِ پنجره‌ی امن)، پس mergedAt و deployedAt عملاً یکی‌اند. تحلیلِ تصمیم: analytics/tarot/reports/2026-09-11-revenue-drop-recheck.md"
-    },
-    {
-      "v": "3.80.0",
-      "what": "💰 سیم‌کشیِ آزمایشِ نردبانِ قیمت (price_ladder_p1/p2، سه بازو) + فیکسِ packSoldIn. ⚠️ **رفتارِ رو-به-کاربر تا لحظه‌ی start شدنِ آزمایش از داشبورد صفر است**؛ همه control می‌بینند.",
-      "dataNote": "مرزِ تحلیل، مرجِ این نسخه **نیست** — مرزِ واقعی `experiments.started_at` هر فاز است. هر مقایسه‌ی قبل/بعد باید روی آن بسته شود."
-    },
-    {
-      "v": "3.82.0",
-      "what": "💎 پاداشِ دعوت ۵ ⟵ ۳ الماس (فقط fa، پله‌ی سومِ grandfathering با مرزِ referral_3) + دو ستونِ افزایشیِ llm_usage برای سنجشِ کشِ پرامپت.",
-      "dataNote": "سه دوره‌ی پاداش هم‌زمان زنده‌اند و مرزشان referrals.created_at است، نه تاریخِ فال: قبل از referral_5 ⟵ ۱۰، بین دو مرز ⟵ ۵، بعد از referral_3 ⟵ ۳. هر مقایسه‌ی «هزینه‌ی پاداشِ دعوت» باید per دوره بسته شود. ⚠️ cached_tokens/reasoning_tokens تاریخچه ندارند و تا تأییدِ نامِ فیلد از لاگِ USAGE_SHAPE، صفر بودنشان دو معنی دارد."
-    }
-  ],
-  "keyMetrics": {
-    "2026-07-28-report1": {
-      "windowEnd": "2026-07-28",
-      "users": 37,
-      "paywallReachedUsers": 26,
-      "paidUsers": 3,
-      "deliveredReadings": 3,
-      "revenueToman": 199500,
-      "paywallToPayPct": 8
-    },
-    "2026-07-31-report2": {
-      "windowStart": "2026-07-31T15:26:00Z",
-      "windowEnd": "2026-07-31T22:04:00Z",
-      "windowHours": 6.6,
-      "usersTotal": 51,
-      "usersNewInWindow": 7,
-      "revenueTotalToman": 239500,
-      "revenueInWindowToman": 40000,
-      "note": "پنجره ۶.۶ ساعته و آلوده به دو کمپین یک‌باره (بک‌فیل هدیه + اولین یادآوری شبانه). نرخ ۶۹٪ بیش‌برآورد است.",
-      "realActorsInWindow": 25,
-      "newUsersInWindow": 10,
-      "unlockRatePreP": 13,
-      "unlockRatePostP": 69,
-      "everDeliveredUsers": 13,
-      "everPaidUsers": 4,
-      "giftRecipients": 38,
-      "giftThenActed": 13,
-      "giftThenDelivered": 7,
-      "unspentGiftUsers": 37,
-      "unspentGiftToman": 1110000,
-      "reminded": 23,
-      "remindedThenDaily": 7,
-      "remindedThenReading": 5,
-      "realPaymentAttempts": 5,
-      "realPaymentsApproved": 1
-    },
-    "2026-08-03-report3": {
-      "windowStart": "2026-07-31T23:16:00Z",
-      "windowEnd": "2026-08-03T14:27:00Z",
-      "windowHours": 63,
-      "usersTotal": 68,
-      "newUsersInWindow": 17,
-      "realActorsInWindow": 30,
-      "decisionPointUsers": 14,
-      "unlockedUsers": 8,
-      "unlockRatePct": 57,
-      "revenueInWindowToman": 180000,
-      "revenueTotalToman": 419500,
-      "payersTotal": 5,
-      "affordSeenPre": 8,
-      "affordUnlockedPre": 8,
-      "affordSeenPost": 8,
-      "affordUnlockedPost": 8,
-      "shortSeen": 10,
-      "shortUnlocked": 4,
-      "unspentGiftUsers": 46,
-      "unspentGiftToman": 1380000,
-      "giftedTotal": 64,
-      "giftedWithDelivery": 18,
-      "realPaymentAttempts": 5,
-      "realPaymentsConverted": 1,
-      "newUsersReturnedDay2": 4,
-      "remindedUsers": 36,
-      "dailyCardUsers": 23,
-      "newUserSources": {
-        "organic": 16,
-        "referral": 1
-      },
-      "note": "بدون هیچ کمپین تبلیغاتی (کانال‌ها pending). نزدیک‌ترین دور به حالت پایدار."
-    },
-    "2026-08-03-report4-pmf": {
-      "windowStart": "2026-07-31T23:16:00Z",
-      "windowEnd": "2026-08-03T15:07:00Z",
-      "scope": "قیف در پنجره، ولی تحلیل PMF روی کلِ تاریخِ ربات",
-      "usersTotal": 68,
-      "fullExperienceUsers": 21,
-      "payersTotal": 5,
-      "revenueTotalToman": 419500,
-      "payerConversionOfExperiencersPct": 24,
-      "arppuToman": 83900,
-      "revenuePerRegisteredUserToman": 6170,
-      "payersBoughtWithinFirstHour": 5,
-      "payersBoughtLater": 0,
-      "freeRidersAllTookExactlyOneReading": 16,
-      "cacMeasured": false,
-      "reminderScorecard": {
-        "nights": 3,
-        "sentPerNight": [
-          23,
-          31,
-          31
-        ],
-        "uniqueReached": 36,
-        "actedWithin6h": 18,
-        "actedPct": 50,
-        "tookDailyCard": 14,
-        "startedReading": 4,
-        "optOutClicks": 0,
-        "directRevenueToman": 0,
-        "sendFailedLikelyBlocked": 18,
-        "blockedButAlreadyGoneBeforeFirstReminder": 14,
-        "blockedPossiblyDueToReminder": 4
-      },
-      "openInvoicesToman": [
-        80000,
-        30000
-      ],
-      "note": "پیام‌های پشتیبانیِ دور قبل: ۱۰ ارسال، ۱ جواب. متد دور چهارم: یک سؤال در هر پیام، کوتاه‌تر، اولویت با فعالانِ دو روز اخیر."
-    },
-    "2026-08-08-report5": {
-      "windowStart": "2026-08-03T15:07:00Z",
-      "windowEnd": "2026-08-08T07:59:00Z",
-      "windowHours": 113,
-      "note": "اولین دور با ترافیکِ تبلیغ. تبلیغ لینکِ اختصاصی نداشت پس همه organic ثبت شدند و CAC باز هم اندازه‌گیری نشد.",
-      "usersTotal": 110,
-      "newUsersInWindow": 42,
-      "realActorsInWindow": 70,
-      "experiencersAll": 40,
-      "payersTotal": 6,
-      "revenueInWindowToman": 200000,
-      "revenueTotalToman": 619500,
-      "payerConversionOfExperiencersPct": 15,
-      "revenuePerRegisteredUserToman": 5632,
-      "revenuePerRegisteredUserAdjustedToman": 4160,
-      "revenuePerNewUserInWindowToman": 4760,
-      "funnelWindow": {
-        "start": 43,
-        "gate_shown": 36,
-        "gate_passed": 34,
-        "onboard_done": 39,
-        "spread_selected": 42,
-        "paywall_shown": 41,
-        "reading_started": 21,
-        "product_delivered": 20,
-        "payment_approved": 2
-      },
-      "paymentsWindow": {
-        "created": 22,
-        "approved": 3,
-        "pending": 7,
-        "canceled": 8,
-        "rejected": 3,
-        "approvedRatePct": 14,
-        "invoicesOnFloorToman": 1130000
-      },
-      "priceVsGift": {
-        "cheapSelected": 28,
-        "cheapDelivered": 20,
-        "cheapRatePct": 71,
-        "expensiveSelected": 30,
-        "expensiveDelivered": 2,
-        "expensiveRatePct": 7,
-        "paywallCantAfford": 30,
-        "paywallCanAfford": 21
-      },
-      "spreadSelections": {
-        "love": 21,
-        "three": 9,
-        "celtic": 8,
-        "yesno": 6,
-        "career": 6,
-        "choice": 4,
-        "inner": 4,
-        "family": 3,
-        "migration": 3
-      },
-      "unspentGiftUsers": 66,
-      "unspentGiftToman": 1980000,
-      "gateDropped": 2,
-      "reminderStamped": 97,
-      "reminderDelivered": 61,
-      "reminderOptOut": 1,
-      "newUserSources": {
-        "organic": 40,
-        "campaign": 1,
-        "referral": 1
-      }
-    },
-    "2026-08-15-report6": {
-      "windowStart": "2026-08-08T07:59:00Z",
-      "windowEnd": "2026-08-15T15:35:00Z",
-      "windowHours": 175,
-      "note": "مرزِ v2.9.0 در ۲۰۲۶-۰۸-۰۸ ۱۰:۳۶ است، پس تقریباً کلِ پنجره «بعد از هم‌ترازیِ کاتالوگ» است.",
-      "usersTotal": 145,
-      "newUsersInWindow": 35,
-      "realActorsInWindow": 87,
-      "experiencersAll": 71,
-      "payersTotal": 9,
-      "revenueInWindowToman": 84000,
-      "revenueTotalToman": 703500,
-      "payerConversionOfExperiencersPct": 12.7,
-      "revenuePerRegisteredUserToman": 4852,
-      "revenuePerRegisteredUserAdjustedToman": 3734,
-      "funnelWindow": {
-        "start": 38,
-        "gate_shown": 35,
-        "gate_check": 34,
-        "gate_passed": 34,
-        "onboard_done": 33,
-        "spread_selected": 39,
-        "question_submitted": 38,
-        "cards_picked": 38,
-        "paywall_shown": 38,
-        "reading_started": 33,
-        "product_delivered": 31,
-        "feedback": 31,
-        "daily_card": 48,
-        "first_value": 32,
-        "credit_granted": 39,
-        "recharge_started": 24,
-        "receipt_submitted": 4,
-        "payment_approved": 3,
-        "payment_rejected": 2,
-        "daily_reminder_sent": 79,
-        "daily_reminder_off": 3
-      },
-      "paywallToUnlockPct": 87,
-      "paymentsWindow": {
-        "created": 35,
-        "approved": 3,
-        "pending": 4,
-        "canceled": 19,
-        "rejected": 2,
-        "approvedRatePct": 8.6,
-        "invoicesOnFloorToman": 1164000
-      },
-      "expensiveSpreadsPostAlignment": {
-        "celticSelected": 8,
-        "celticDelivered": 0,
-        "open5Selected": 6,
-        "open5Delivered": 0
-      },
-      "affordAtPaywall": {
-        "cantAfford": 29,
-        "canAfford": 31
-      },
-      "statesNow": {
-        "idle": 73,
-        "confirm_pay": 35,
-        "pay_receipt": 9,
-        "choose_spread": 9,
-        "await_question": 7,
-        "onboard_name": 6,
-        "gate_join": 3,
-        "feedback": 2,
-        "pay_amount": 1
-      },
-      "unspentGiftUsers": 68,
-      "unspentGiftToman": 2050000,
-      "reminderStamped": 133,
-      "reminderDelivered": 89,
-      "reminderBlockedPct": 33,
-      "reminderOptOut": 3,
-      "spreadSelectionsTop": {
-        "love": 31,
-        "loveDelivered": 25
-      },
-      "newUserSources": {
-        "organic": 31,
-        "referral": 3,
-        "empty": 1
-      },
-      "freeRidersOneReading": 60,
-      "freeRidersTwoReadings": 2,
-      "hoursToFirstPayment": [
-        0,
-        0.1,
-        0.1,
-        0.2,
-        0,
-        140.3,
-        192.1,
-        0.1,
-        0.1
-      ]
-    },
-    "2026-08-26-report7": {
-      "windowStart": "2026-08-21T00:16:00Z",
-      "windowEnd": "2026-08-26T06:59:00Z",
-      "windowHours": 126,
-      "note": "مرز = v3.25.0 (باز شدنِ UX v2 برای همه). پنجره ۵.۳ روز. ⚠️ سه آلودگی: روزِ لانچ ربات خاموش بود، برودکستِ ۲۲ اوت با لانچ یک رویدادِ واحد است، و ۷۹٪ کاربرانِ جدید در دو روزِ آخر آمدند (سانسورِ راست).",
-      "usersTotal": 347,
-      "newUsersInWindow": 175,
-      "newUsersSinceLastRound": 203,
-      "activeUsersInWindow": 295,
-      "experiencersAll": 226,
-      "payersTotal": 13,
-      "revenueTotalToman": 982500,
-      "revenueInWindowToman": 240000,
-      "packagePaymentsApproved": 3,
-      "funnelWindowUniqueUsers": {
-        "start": 182,
-        "gate_shown": 175,
-        "gate_check": 159,
-        "gate_passed": 156,
-        "onboard_done": 147,
-        "topic_selected": 158,
-        "spread_selected": 157,
-        "question_submitted": 147,
-        "cards_picked": 146,
-        "reading_paid": 142,
-        "reading_started": 147,
-        "product_delivered": 145,
-        "feedback": 123,
-        "first_value": 137,
-        "daily_card": 68,
-        "lucky_card": 118,
-        "lucky_reminder": 38,
-        "lucky_reminder_sent": 13,
-        "credit_granted": 174,
-        "paywall_shown": 67,
-        "recharge_started": 32,
-        "receipt_submitted": 3,
-        "payment_approved": 3,
-        "ab_exposure": 175
-      },
-      "startToDeliveredPct": 79.7,
-      "satisfaction": {
-        "ratings": 188,
-        "mean": 3.98,
-        "pct4or5": 67.6,
-        "pct1or2": 11.2,
-        "responseRatePct": 82,
-        "dist": {
-          "1": 16,
-          "2": 5,
-          "3": 40,
-          "4": 32,
-          "5": 95,
-          "none": 42
-        }
-      },
-      "lucky": {
-        "hands": 154,
-        "users": 118,
-        "repeatUsersPct": 17.8,
-        "firstHandMean": 2.02,
-        "firstHandDesign": 2.03,
-        "nonFirstHands": 36,
-        "nonFirstMean": 0.94,
-        "chiSq": 2.61,
-        "df": 3,
-        "p": 0.46,
-        "diamondsGranted": 272,
-        "optInOn": 34,
-        "remindedUsers": 13,
-        "playedAfterReminder": 9
-      },
-      "economy": {
-        "grantedTotal": 2084,
-        "purchased": 140,
-        "consumed": 1255,
-        "held": 1263,
-        "giftFundedPct": 93.7,
-        "unspentPctOfIssued": 50.2,
-        "unexplainedGap": -294,
-        "ghostUserIds": 22,
-        "byKind": {
-          "welcome": 1251,
-          "lucky": 272,
-          "referral": 450,
-          "streak": 11,
-          "support": 100
-        }
-      },
-      "readings": {
-        "delivered": 335,
-        "deliveredUsers": 226,
-        "repeat2plusUsers": 71,
-        "exactlyOneUsers": 155,
-        "canceled": 72,
-        "pending_payment": 66,
-        "pendingBeforeLaunch": 63,
-        "pendingAfterLaunch": 3,
-        "started": 7,
-        "paid": 3,
-        "refunded": 3
-      },
-      "sizeMix": {
-        "3": 135,
-        "5": 84,
-        "10": 10,
-        "2": 1
-      },
-      "referral": {
-        "rows": 61,
-        "referrers": 36,
-        "rewarded": 49,
-        "shareOfNewUsersPct": 29,
-        "prevRoundSharePct": 8.6,
-        "inviteCoefficient": 0.18
-      },
-      "retention": {
-        "multiDayUsers": 51,
-        "multiDayPct": 17.3,
-        "active24h": 138,
-        "active48h": 176,
-        "activeDays": {
-          "1": 244,
-          "2": 37,
-          "3": 2,
-          "4": 8,
-          "5": 4
-        }
-      },
-      "lovesItUsers": 38,
-      "currentStates": {
-        "idle": 186,
-        "choose_spread": 49,
-        "confirm_pay": 39,
-        "gate_join": 24,
-        "onboard_name": 13,
-        "await_question": 11,
-        "pay_receipt": 11,
-        "pay_amount": 6
-      },
-      "legacyStranding": {
-        "confirm_payBeforeLaunch": 38,
-        "confirm_payAfterLaunch": 1,
-        "note": "سرگردانیِ فلوی قدیم است، نه ساخته‌ی نسخه‌ی جدید"
-      }
-    },
-    "2026-09-11-unit-economics": {
-      "report": "analytics/tarot/reports/2026-09-11-unit-economics.md",
-      "scope": "اقتصادِ واحد per کانالِ جذب (سؤالِ صریحِ مالک: هر کانال چقدر خرج می‌سازد و چقدر برمی‌گرداند)",
-      "costWindowStart": "2026-08-30T11:16:00Z",
-      "costWindowEnd": "2026-09-11T08:40:00Z",
-      "costWindowDays": 11.89,
-      "note": "⚠️ هرجا هزینه و درآمد کنارِ هم آمده، هر دو از همین پنجره‌ی ۱۱٫۸۹ روزه خوانده شده‌اند. llm_usage تاریخچه ندارد و قبل از ۳۰ اوت هیچ ردیفی نیست، پس مقایسه‌ی «درآمدِ ۶۵ روز» با «هزینه‌ی ۱۲ روز» ممنوع است.",
-      "monthlyRunRateToman": {
-        "revenue": 10433137,
-        "modelCost": -9323687,
-        "adCost": -6194553,
-        "net": -5085103
-      },
-      "modelCostUsdPerMonth": 39.5,
-      "channelPnlMonthlyToman": {
-        "campaign": -2788151,
-        "organic": -48293,
-        "referral": -2278847,
-        "referralWithReferrerReward": -4042892
-      },
-      "cleanCohortByChannel": {
-        "campaign": {
-          "users": 1514,
-          "payers": 31,
-          "payRatePct": 2.05,
-          "revenueToman": 2640000,
-          "modelCostToman": 1289929,
-          "marginPerUserToman": 892
-        },
-        "organic": {
-          "users": 551,
-          "payers": 7,
-          "payRatePct": 1.27,
-          "revenueToman": 480000,
-          "modelCostToman": 499140,
-          "marginPerUserToman": -35
-        }
-      },
-      "diamondSupply": {
-        "free": 44231,
-        "sold": 2194,
-        "freePct": 95.3,
-        "revenuePerSoldDiamondToman": 2429,
-        "costToServePerDiamondToman": 132,
-        "grossMarginPct": 94.6
-      },
-      "retry": {
-        "readingsNeedingSecondCallPct": 6.4,
-        "retryShareOfAllReadingCallsPct": 6.37,
-        "wastedSpendUsd": 0.875,
-        "wastedSharePct": 5.69,
-        "deliveredHeadlinesPassingConnectiveTest": "7391/7391",
-        "verdict": "هر retryِ سرخط در نهایت موفق شده؛ حذفِ گارد ~۲۰۰k تومان در ماه می‌دهد در برابرِ انتشارِ ~۲۰۰ سرخطِ قاعده‌شکن. توصیه: دست نزن."
-      },
-      "promptCache": {
-        "constantPrefixChars": 4059,
-        "shareOfSystemPromptPct": 66,
-        "shareOfTotalInputPct": "37 تا 57",
-        "optimisticCeilingTomanPerMonth": 470000,
-        "note": "جدولِ دانشِ کارت هرگز کامل فرستاده نمی‌شود (فقط کارت‌های کشیده‌شده، ~۹٪ ورودی) و ذاتاً per فال فرق می‌کند، پس کش‌شدنی نیست. تنها پیشوندِ ثابت، پرامپتِ سیستمِ خودمان است. ⚠️ مکانیزم/نرخِ کشِ OpenRouter تأییدنشده است (صفحه‌اش از این محیط باز نمی‌شود)."
-      },
-      "leversMonthlyToman": {
-        "referralRewardFiveToTwo": 2096000,
-        "closeLosingCampaigns": 3033199,
-        "reviewLuckyCard": "1300000 تا 2000000",
-        "welcomeGiftThreeToTwo": 1468000,
-        "systemPromptCache": 470000,
-        "dropHeadlineRetry": 200000,
-        "invoiceCloseRateDoubling": 10400000
-      },
-      "caveat": "⚠️ کلِ حکمِ کمپین‌ها روی ۷ روز نرخِ تبلیغِ دستیِ خودِ مالک ($۰٫۰۰۳۵ تا $۰٫۰۱۶۹ per کاربر) ایستاده. تأییدش لازم است."
-    },
-    "2026-09-11-generational": {
-      "report": "analytics/tarot/reports/2026-09-11-generational-attribution.md",
-      "scope": "اتریبیوشنِ نسلی (درختی) per کانالِ جذب — سؤالِ صریحِ مالک: کاربری که خودش خرج نمی‌کند ولی دعوت‌کننده‌ی یک پرداخت‌کننده است، به نفعِ کانالش شمرده شود (لایه ۲، ۳، ۴)",
-      "method": "درخت از referrals ساخته می‌شود (referee_id یکتاست ⟵ هر کاربر دقیقاً یک پدر، صفر دوباره‌شماری). ریشه = کاربرِ بدونِ ردیفِ دعوت‌شدگی؛ کانالش از users.first_source.",
-      "usdToToman": 236043,
-      "payRateByDepth": {
-        "0": 2.38,
-        "1": 0.67,
-        "2": 0.36,
-        "3": 0.29,
-        "4": 0.81,
-        "5plus": 0.0
-      },
-      "usersByDepth": {
-        "0": 2441,
-        "1": 1194,
-        "2": 552,
-        "3": 350,
-        "4": 248,
-        "5": 127,
-        "6": 65,
-        "7": 14,
-        "8": 2
-      },
-      "revenueByDepthToman": {
-        "0": 4557500,
-        "1": 485000,
-        "2": 150000,
-        "3": 60000,
-        "4": 120000,
-        "5plus": 0
-      },
-      "referralLayers": {
-        "referredUsersTotal": 2552,
-        "depth2plusUsers": 1358,
-        "depth2plusSharePct": 53,
-        "depth2plusRevenueToman": 330000,
-        "depth2plusNetToman": -665300,
-        "allLayersNetExclRewardsToman": -966000,
-        "verdict": "امتیازِ نسلی رفرال را نجات نمی‌دهد: هیچ لایه‌ای سودده نیست و نرخِ پرداخت با هر لایه تقریباً نصف می‌شود. حکمِ «پاداشِ دعوت را کم کن» تقویت شد."
-      },
-      "campaignVerdictChanges": {
-        "dMoYW": "−۲۲۴٬۰۰۰ (مسطح) ⟵ +۶۹٬۵۰۰ (درختی). نگه داشته شود — حکمِ گزارشِ قبلی غلط بود.",
-        "i2kUp": "−۳۲۴٬۰۰۰ ⟵ −۶۴۲٬۶۰۰. بدترینِ جدول. بیشترین تکثیر (۳۰۱ ریشه ⟵ ۸۵۰ نفر) با تقریباً صفر درآمدِ نسلی: کارخانه‌ی رفرال.",
-        "VAH75": "+۱۴۸٬۰۰۰ ⟵ −۲۱٬۶۰۰ (نسبت ۰٫۹۸، عملاً سربه‌سر).",
-        "organic": "−۳۵ تومان per کاربر ⟵ +۵۱۹٬۶۰۰ با نسل."
-      },
-      "modelCostStructure": {
-        "readingShareOfBillPct": 98.2,
-        "repairShareOfBillPct": 0.7,
-        "transcribeShareOfBillPct": 1.1,
-        "dailyCardCalls": 0,
-        "costPerDeliveredReadingUsd": 0.002083,
-        "costPerDeliveredReadingToman": 492,
-        "derivedRateUsdPerMtokIn": 0.14,
-        "derivedRateUsdPerMtokOut": 1.26,
-        "outputShareOfBillPct": 74,
-        "mixPct": {
-          "3card": 72.9,
-          "5card": 23.6,
-          "10card": 3.5
-        },
-        "avgOutputTokens": 1140,
-        "note": "خروجی ۹ برابرِ ورودی قیمت دارد و ~۷۴٪ صورت‌حساب است ⟵ هر راهی که طولِ خروجی را کم نکند حداکثر یک‌چهارمِ صورت‌حساب را لمس می‌کند. luna از gemini-2.5-flash دو برابر ارزان‌تر است، پس سوییچِ مدل احتمالاً هزینه را بالا می‌برد."
-      }
-    }
+  {
+   "v": "1.6.0",
+   "mergedAt": "2026-07-25T08:59:00Z",
+   "what": "پی‌وال کم‌موجودی: پیام کوتاه شخصی، تخفیف پشت دکمه، ۳۵٪→۵۰٪ با کد"
   },
-  "featureVerdicts": {
-    "rule": "هر ابداع یکی از سه حکم را می‌گیرد: مفید ⟶ دوباره در همان جهت سرمایه‌گذاری کن و ابداعِ بعدی را از همان خانواده انتخاب کن؛ مضر ⟶ متوقفش کن؛ بی‌تفاوت ⟶ لازم نیست برداشته شود ولی تمرکزِ بیشتر هم نمی‌گیرد. اگر نمونه کافی نیست حکم نده و بنویس چه عددی لازم است.",
-    "investmentDirection": "دورِ ۷ خانواده‌ی برنده را عوض کرد: «برداشتنِ مانع از جلسه‌ی اول» به سقفش رسیده (۸۰٪ استارت تا تحویل، در حجمِ ۵ برابر). گلوگاه حالا **فالِ دوم** است (۱۵۵ نفر از ۲۲۶ نفر دقیقاً یک فال گرفتند). پس خانواده‌ی سرمایه‌گذاریِ دورِ بعد «دلیلِ برگشتن» است: قلابِ یادآوریِ کارآمد، و بستنِ ناهماهنگیِ هدیه‌ی ۵ الماس با کفِ قیمتِ ۳ الماس (باقی‌مانده‌ی ۲ هیچ چیزی نمی‌خرد).",
-    "items": [
-      {
-        "feature": "هدیه‌ی خوش‌آمد ۳۰k",
-        "version": "2.0.0",
-        "verdict": "useful",
-        "evidence": "نرخِ عبور ۱۳٪ ← ۵۷٪؛ تجربه‌کننده‌ی کامل ۳ ← ۲۱",
-        "nextAction": "سرمایه‌گذاری بیشتر در همان جهت: تستِ A/B هدیه‌ی دوفالی (H13)"
-      },
-      {
-        "feature": "حذفِ مرحله‌ی «چقدر شارژ کنم»",
-        "version": "2.0.0",
-        "verdict": "useful",
-        "evidence": "ریزشِ مرحله‌ی amount عملاً صفر شد",
-        "nextAction": "همان جهت: حذفِ هر مرحله‌ی دیگرِ قابلِ حذف در مسیرِ پرداخت"
-      },
-      {
-        "feature": "یادآوریِ شبانه‌ی کارت روز",
-        "version": "2.0.0",
-        "verdict": "useful-for-retention-only",
-        "evidence": "۱۳۳ مهر / ۸۹ تحویل (۳۳٪ بلاک)، ۴۸ کارت روز، اولین انصراف‌ها (۳ نفر)، هنوز ۰ ریال درآمدِ مستقیم",
-        "nextAction": "بیشتر کردنش غلط است، بهتر کردنش درست: پیامِ متفاوت برای کاربرِ دارای فاکتورِ باز یا فالِ ناتمام (P2)"
-      },
-      {
-        "feature": "تخفیفِ ۲۰٪ بدونِ کد",
-        "version": "2.0.0",
-        "verdict": "neutral",
-        "evidence": "۳ فاکتورِ تخفیف‌دار، هر سه سرِ رسید مرد",
-        "nextAction": "نگه‌داشتن بدونِ سرمایه‌گذاری؛ مسیرِ تخفیفِ جدید ساخته نشود"
-      },
-      {
-        "feature": "صفحه‌ی «موجودی کافیه»",
-        "version": "2.5.0",
-        "verdict": "neutral",
-        "evidence": "can_afford: ۸ از ۸ عبور در هر دو نسخه (قبل و بعد)",
-        "nextAction": "نگه‌داشتن (متن شفاف‌تر است) ولی وقتِ بیشتری روی کپیِ این صفحه صرف نشود"
-      },
-      {
-        "feature": "پیشنهاددهنده‌ی امتیازی",
-        "version": "2.1.0",
-        "verdict": "unmeasurable",
-        "evidence": "رویدادی که منبعِ انتخابِ فال را تفکیک کند وجود ندارد",
-        "nextAction": "اول ابزار: پراپِ منبعِ انتخابِ فال (پیشنهاد در برابر کاتالوگ) اضافه شود"
-      },
-      {
-        "feature": "جوابِ قاطع + نشونه",
-        "version": "2.4.0",
-        "verdict": "insufficient-sample",
-        "evidence": "فقط ۲ فالِ تصمیم‌محور در پنجره",
-        "nextAction": "دورِ بعد دوباره سنجیده شود؛ حدنصاب: ۱۰ فالِ تصمیم‌محور"
-      },
-      {
-        "feature": "فال عشق سه‌کارتی ۳۰k (هم‌اندازه‌ی هدیه)",
-        "version": "2.7.0",
-        "verdict": "useful",
-        "evidence": "۳۱ انتخاب و ۲۵ تحویل — همچنان پرانتخاب‌ترین و پرتحویل‌ترین فال",
-        "nextAction": "تثبیت‌شده؛ الگویش روی کلِ کاتالوگ اجرا شد"
-      },
-      {
-        "feature": "گیتِ عضویت کانال",
-        "version": "2.7.0",
-        "verdict": "useful",
-        "evidence": "۳۵ دیدند، ۳۴ رد شدند (۱ ریزش)",
-        "nextAction": "نگه‌داشتن؛ گیتِ دوم اضافه نشود"
-      },
-      {
-        "feature": "آزمایشِ intro_order",
-        "version": "2.8.0",
-        "verdict": "insufficient-sample",
-        "evidence": "تجمعی CTW ۹۶.۰٪ به نفع control، ولی در برشِ بعد از هم‌ترازیِ کاتالوگ CTW ۸۲.۰٪ یعنی زیرِ آستانه",
-        "nextAction": "ادامه تا ~۲۰ تحویل per شاخه در برشِ پس از هم‌ترازی (الان ۱۸ و ۱۱)"
-      },
-      {
-        "feature": "فکتِ ۸۶٪",
-        "version": "2.7.1",
-        "verdict": "unmeasurable",
-        "evidence": "در هر دو شاخه‌ی آزمایش حاضر بود، پس اثرِ خودش جدا نشد",
-        "nextAction": "آزمایشِ با/بدونِ فکت، نه جابه‌جایی‌اش"
-      },
-      {
-        "feature": "موضعِ هوش مصنوعی در فلو",
-        "version": "2.7.3",
-        "verdict": "unmeasurable",
-        "evidence": "آزمایش پیش از نمونه‌ی معنادار با تصمیمِ مالک متوقف شد",
-        "nextAction": "بیرون از فلو، روی بنر تبلیغاتی"
-      },
-      {
-        "feature": "هم‌ترازیِ کاتالوگ با هدیه (v2.9.0)",
-        "version": "2.9.0",
-        "verdict": "useful",
-        "evidence": "عبور از پی‌وال ۵۱٪ ← ۸۷٪؛ تجربه‌کننده‌ی کامل ۴۰ ← ۷۱",
-        "nextAction": "همان جهت، ولی دیگر بالادست نه: مانعِ بعدی رسید است"
-      },
-      {
-        "feature": "لنگرِ پریمیوم (صلیب سلتی ۱۰۰k + open5 ۵۰k)",
-        "version": "2.9.0",
-        "verdict": "harmful",
-        "evidence": "صلیب سلتی ۸ انتخاب / ۰ تحویل؛ open5 ۶ انتخاب / ۰ تحویل. ۱۴ کاربر به بن‌بست رفتند.",
-        "nextAction": "P1: کوچک‌سازی طبق قانونِ ۱۰k per کارت یا بیرون بردن از کاتالوگِ پیش‌فرض",
-        "selfCorrection": "دورِ قبل خودم استدلال کرده بودم که لنگر بماند چون پرسونای پرداخت‌کننده می‌خرد. دیتا این را رد کرد."
-      },
-      {
-        "feature": "UX v2 برای همه (v3.25.0)",
-        "version": "3.25.0",
-        "verdict": "useful",
-        "evidence": "قیفِ استارت تا تحویل ۸۰٪ در حجمِ ۵ برابر (دورِ ۶: ۸۲٪ روی ۳۳ استارت). ۱۳۵ نفر از ۱۷۵ کاربرِ جدید (۷۷٪) فالِ تحویل‌شده گرفتند.",
-        "nextAction": "همان جهت، ولی گلوگاه دیگر جلسه‌ی اول نیست؛ سراغِ فالِ دوم برو."
-      },
-      {
-        "feature": "کسرِ اعتبار در لحظه‌ی انتخابِ اندازه (PAY_AT_SIZE)",
-        "version": "3.13.0",
-        "verdict": "useful",
-        "evidence": "فالِ سرگردانِ pending_payment: ۶۳ تا قبل از لانچ، فقط ۳ تا بعدش. مسیرِ «کارت‌ها را بچین بعد پول بده» عملاً حذف شد.",
-        "nextAction": "همان جهت: حذفِ باقیِ نقاطِ تصمیمِ دیرهنگام."
-      },
-      {
-        "feature": "کارتِ شانس + کفِ دو الماسِ دستِ اول",
-        "version": "3.9.0 / 3.21.0",
-        "verdict": "useful",
-        "evidence": "۱۱۸ از ۱۷۵ کاربرِ جدید (۶۵٪) بازی کردند. کف دقیقاً طبقِ طراحی کار کرد (میانگینِ دستِ اول ۲.۰۲ در برابرِ طراحیِ ۲.۰۳) و دست‌های غیرِ اول از هایپرژئومتریک قابلِ تفکیک نیستند (χ²=۲.۶۱، df=۳، p≈۰.۴۶، n=۳۶ کم‌توان).",
-        "caveat": "فقط ۱۸٪ بیش از یک دست بازی کردند. یعنی جذبِ اول عالی است، تکرار نه.",
-        "nextAction": "همان خانواده: برداشتنِ «صفر» از دستِ دوم به بعد (هزینه‌ی این پنجره ۱۳ الماس بود) و بردنِ نردبانِ استریک داخلِ همان مکانیک."
-      },
-      {
-        "feature": "رفرالِ ۱۰ الماس فقط به دعوت‌کننده",
-        "version": "3.8.0 / 3.23.0",
-        "verdict": "useful",
-        "evidence": "سهمِ رفرال از کاربرانِ جدید ۸.۶٪ ← ۲۹٪ (۵۱ از ۱۷۵). ۶۱ دعوت از ۳۶ دعوت‌کننده، ۸۰٪ پاداش‌گرفته. ضریبِ دعوت ۰.۱۸.",
-        "caveat": "۱۲ دعوت (۲۰٪) پاداش نگرفته‌اند؛ دلیلش (دعوت‌شده هنوز فال نگرفته، یا ردِ بی‌صدای isNew) در دیتا تفکیک نشده.",
-        "nextAction": "همان جهت: برچسبِ دکمه شرط را بگوید، و ردِ بی‌صدا دیده شود."
-      },
-      {
-        "feature": "حذفِ یادآوریِ شبانه‌ی کارتِ روز",
-        "version": "3.23.0",
-        "verdict": "harmful",
-        "evidence": "تنها استدلالِ زمانیِ تمیزِ دیتاست: کاربرِ بازگشتیِ روزانه دقیقاً از روزِ حذف افت کرد. جانشینش (یادآورِ opt-inِ کارتِ شانس) فقط به ۱۳ نفر از ۳۴ نفرِ آپت-این رسیده.",
-        "nextAction": "متوقفش کن یعنی برگردان: اول باگِ ارسالِ یادآورِ کارتِ شانس را پیدا کن (۶۲٪ آپت-این‌ها هیچ‌وقت پیام نگرفته‌اند)، بعد opt-in را به بعد از اولین دستِ برنده منتقل کن."
-      },
-      {
-        "feature": "یادآورِ opt-inِ کارتِ شانس",
-        "version": "3.9.0",
-        "verdict": "unmeasurable",
-        "evidence": "فقط ۱۳ کاربر پیام گرفته‌اند (۲۵ ارسال). از همان ۱۳ نفر، ۹ نفر (۶۹٪) ظرفِ ۱۸ ساعت بازی کردند — امیدوارکننده ولی زیرِ آستانه.",
-        "needed": "n≥۳۰ کاربرِ پیام‌گرفته تا حکم بگیرد. تا آن موقع عددِ ۶۹٪ نقل نشود."
-      },
-      {
-        "feature": "فالِ ۱۰ کارتی در کاتالوگِ اندازه‌محور",
-        "version": "3.9.0",
-        "verdict": "harmful",
-        "evidence": "۵۰ انتخاب، ۱۰ تحویل (۲۰٪) — بدترین نرخِ محصول. حداکثر ۸.۹٪ کاربران اصلاً ۱۰ الماس دارند، پس ۲۸ نفر بزرگ‌ترین گزینه را زدند و دست‌خالی برگشتند.",
-        "nextAction": "با variant(): یا قیمت به ۷، یا خاکستری‌کردن تا موجودی کافی نشود، یا حذف از کاتالوگِ کاربرِ کم‌موجودی."
-      },
-      {
-        "feature": "گیتِ عضویتِ کانال",
-        "version": "2.7.0",
-        "verdict": "costly-but-not-decided",
-        "evidence": "۱۹ نفر (۱۱٪ استارت‌ها) در گیت ماندند و ۱۶ نفرشان (۸۴٪) اصلاً دکمه‌ی بررسی را نزدند — یعنی مسئله CTA است نه مقاومت در برابرِ عضویت.",
-        "caveat": "ارزشِ عضوِ کانال (دلیلِ وجودِ گیت) در این حساب لحاظ نشده، پس «حذفش کن» توصیه‌ی یک‌طرفه است.",
-        "nextAction": "اول کپیِ صفحه را عوض کن؛ اگر ریزش ماند، آن‌وقت حذف با variant()."
-      },
-      {
-        "feature": "گنجینه‌ی ۹۳۶ متنِ کارتِ روز",
-        "version": "3.24.0",
-        "verdict": "unmeasurable",
-        "evidence": "فقط ۶۸ کاربر کارتِ روز گرفتند (۸۴ رویداد) در حالی که کارتِ شانس ۱۱۸ کاربر گرفت. بن‌بستِ «گنجینه آماده نیست» حذف شد ولی خودِ فیچر ترافیکِ کمی دارد.",
-        "needed": "تفکیکِ «چند نفر دکمه را دیدند» از «چند نفر زدند»؛ امروز اولی ثبت نمی‌شود."
-      },
-      {
-        "feature": "خوانشِ v4 + لحنِ v2",
-        "version": "3.7.0 / 3.3.0",
-        "verdict": "useful",
-        "evidence": "میانگینِ نمره ۳.۹۸ از ۱۸۸ رأی با نرخِ پاسخِ ۸۲٪ — نرخِ پاسخ خودش نشانه‌ی درگیری است. ۶۷.۶٪ نمره‌ی ۴ یا ۵.",
-        "caveat": "پایه‌ی مقایسه‌ی قبل از لانچ فقط ۱۱ رأی دارد، پس «بهتر شد» اثبات‌پذیر نیست؛ فقط «خوب است» اثبات‌پذیر است.",
-        "nextAction": "نمره را per شماره‌ی فال بشکن (اول در برابرِ دوم و سوم) تا معلوم شود اثرِ تازگی است یا کیفیتِ پایدار."
-      }
-    ]
+  {
+   "v": "2.0.0",
+   "mergedAt": "2026-07-31T15:22:00Z",
+   "deployedAt": "2026-07-31T15:26:00Z",
+   "what": "هدیه‌ی خوش‌آمد ۳۰k + بک‌فیل به کاربران قدیمی با پیام، اولین فال بدون پی‌وال، دکمه‌ی «پرداخت هزینه‌ی همین فال»، تخفیف ۵۰٪→۲۰٪ بدون کد، نردبان شارژ ۵۰/۱۰۰/۲۰۰k، حذف پوش ۱۴روزه به نفع یادآوری شبانه‌ی کارت روز",
+   "isMainBoundary": true
   },
-  "personas": {
-    "status": "hypothesis-low-sample-two-payer-types",
-    "payer": {
-      "name": "تصمیم‌گیرِ فوری",
-      "definingTrait": "با یک سؤالِ واقعی و فوری وارد می‌شود و در همان نشست تمامش می‌کند",
-      "evidence": "۷ از ۹ پرداخت‌کننده زیر ۱۲ دقیقه — دیگر «صفر استثنا» نیست",
-      "notPredictiveBy": [
-        "حوزه‌ی تمرکز",
-        "نوع فال",
-        "زمانِ ورود"
-      ]
-    },
-    "nonPayer": {
-      "name": "رایگان‌گیرِ یک‌باره",
-      "definingTrait": "دقیقاً یک فال (اندازه‌ی هدیه) مصرف می‌کند و برنمی‌گردد",
-      "evidence": "۶۰ از ۶۲ رایگان‌گیر دقیقاً یک فال"
-    },
-    "caveat": "با ۵ پرداخت‌کننده این پرسونا فرضیه است نه یافته؛ رفتاری است نه جمعیت‌شناختی، پس مستقیم قابلِ هدف‌گیری در تبلیغات نیست.",
-    "payerReturning": {
-      "name": "بازگشتیِ چندروزه",
-      "definingTrait": "چند روز بعد از ثبت‌نام برمی‌گردد و همان‌موقع می‌خرد",
-      "evidence": "۲ از ۹ پرداخت‌کننده (۱۴۰.۳ و ۱۹۲.۱ ساعت)؛ هیچ‌کدام یوزرنیمِ عمومی ندارند",
-      "note": "وجودِ این دسته H12 را باطل کرد"
-    },
-    "round7": {
-      "note": "با ۱۳ پرداخت‌کننده در کلِ عمرِ محصول، پرسونای پولی همچنان **فرضیه** است. ولی این دور برای اولین بار یک پرسونای غیرِپولیِ قابلِ اندازه‌گیری داریم که هدفِ فعلیِ مالک (درگیری، نه پول) دقیقاً روی آن می‌نشیند.",
-      "lover": {
-        "size": 38,
-        "definition": "هم نمره‌ی ۵ داده و هم ≥۲ فالِ تحویل‌شده دارد",
-        "why": "قوی‌ترین سیگنالِ «دوستش دارد» در کلِ دیتاست. مستقل از پرداخت.",
-        "action": "همین گروه باید منبعِ مصاحبه و منبعِ رفرال باشد."
-      },
-      "oneAndDone": {
-        "size": 155,
-        "definition": "دقیقاً یک فالِ تحویل‌شده دارد",
-        "why": "۶۹٪ همه‌ی تجربه‌کننده‌ها. بزرگ‌ترین گلوگاهِ محصول.",
-        "action": "دلیلِ برگشتن بساز، نه ارزشِ بیشتر در جلسه‌ی اول."
-      },
-      "giftRider": {
-        "size": 199,
-        "definition": "موجودیِ ۱ تا ۵ الماس",
-        "why": "۵۱٪ کاربران روی مبلغی نشسته‌اند که ممکن است هیچ فالی نخرد (کفِ قیمت ۳ الماس است).",
-        "action": "هیستوگرامِ داخلِ سطلِ ۱ تا ۵؛ اگر توده روی ۲ باشد، هدیه یا کفِ قیمت باید جابه‌جا شود."
-      },
-      "payer": {
-        "size": 13,
-        "definition": "حداقل یک پرداختِ approved",
-        "why": "۳ پرداختِ بسته‌ای در کلِ پنجره. هر نسبتی با مخرجِ پرداخت بی‌معناست.",
-        "action": "این دور عمداً هدف نیست (تصمیمِ صریحِ مالک: هدف درگیری است نه درآمد)."
-      }
-    }
+  {
+   "v": "2.1.0",
+   "mergedAt": "2026-07-31T16:47:00Z",
+   "what": "پیشنهاددهنده‌ی امتیازی + کیبورد منو که گم نمی‌شود"
   },
-  "hypotheses": [
-    {
-      "id": "H1",
-      "text": "مشکل قیمت نیست، مکانیک پرداخت است (کارت‌به‌کارت)",
-      "from": "report1",
-      "status": "very-strongly-supported",
-      "note": "پنجمین دور. این هفته ۳۵ فاکتور ساخته شد و ۳ تأیید (۸.۶٪)، ۱٬۱۶۴٬۰۰۰ تومان روی زمین. تنها دیوارِ باقی‌مانده."
-    },
-    {
-      "id": "H2",
-      "text": "مدل کیف‌پول یک تصمیم ناخواسته اضافه می‌کند",
-      "from": "report1",
-      "status": "confirmed-and-fixed",
-      "note": "مرحله‌ی amount عملاً حذف شد؛ در پنجره هیچ ریزشِ واقعی در amount نبود"
-    },
-    {
-      "id": "H3",
-      "text": "بازطراحی تخفیف v1.6.0 کانورژن را پایین آورد",
-      "from": "report1",
-      "status": "improved-not-solved",
-      "note": "۱۴ درخواست/۰ پرداخت ← ۳ درخواست/۱ پرداخت. مسیر کوتاه شد ولی به دیوارِ رسید می‌خورد"
-    },
-    {
-      "id": "H4",
-      "text": "لیدهای داغ یخ‌زده و کسی سراغشان نمی‌رود",
-      "from": "report1",
-      "status": "open"
-    },
-    {
-      "id": "H5",
-      "text": "کارت روز نمونه است نه عادت",
-      "from": "report1",
-      "status": "improved",
-      "note": "یادآوری شبانه ۳۰٪ نرخ باز شدن در اولین اجرا"
-    },
-    {
-      "id": "H6",
-      "text": "پرسیدن نام قبل از ارزش، اصطکاک بی‌دلیل است",
-      "from": "report1",
-      "status": "partially-addressed",
-      "note": "v2.0.0 آنبوردینگ را دو پیامی کرد (اول ارزش، بعد نام) ولی نام هنوز قبل از اولین فال پرسیده می‌شود"
-    },
-    {
-      "id": "H7",
-      "text": "کسی که پول می‌دهد برمی‌گردد",
-      "from": "report1",
-      "status": "confirmed"
-    },
-    {
-      "id": "H8",
-      "text": "هدیه mis-size شده: ۳۰k اندازه‌ی سه‌کارتی است ولی تقاضا سمت پنج‌کارتیِ ۵۰k می‌رود",
-      "from": "report2",
-      "status": "superseded-by-H11",
-      "evidence": "۴ کاربر دقیقاً ۲۰٬۰۰۰ کسری دارند"
-    },
-    {
-      "id": "H9",
-      "text": "صفحه‌ی باز کردن کارت‌ها حتی با موجودیِ کافی هم می‌ریزد (مسئله‌ی UI نه پول)",
-      "from": "report2",
-      "status": "REJECTED",
-      "evidence": "۴ کاربر با موجودی دقیقاً کافی در confirm_pay مانده‌اند",
-      "note": "با can_afford سنجیده شد: هر دو نسخه ۱۰۰٪ عبور (۸ از ۸). صفحه هیچ‌وقت برای کاربرِ دارای اعتبار مشکل نداشت؛ کاربرانِ گیرکرده صرفاً بعد از رسیدنِ هدیه برنگشته بودند. v2.5.0 مشکلِ ناموجود را حل کرد."
-    },
-    {
-      "id": "H10",
-      "text": "۱٬۱۱۰٬۰۰۰ تومان اعتبارِ خوابیده بزرگ‌ترین فرصت فوری است",
-      "from": "report2",
-      "status": "reinterpreted-priority-lowered",
-      "evidence": "۶۸ کاربر / ۲٬۰۵۰٬۰۰۰ تومان",
-      "note": "رشدِ ساختاری ادامه دارد. بخشی از آن حالا با H14 توضیح دارد (هدیه دارند ولی فالِ گران انتخاب کرده‌اند) و همان بخش قابلِ نجات است."
-    },
-    {
-      "id": "H11",
-      "text": "هدیه‌ی ۳۰k با تقاضای واقعی هم‌تراز نیست (تقاضا سمت فال ۵۰k)",
-      "from": "report3",
-      "status": "open",
-      "evidence": "۸ از ۱۶ کاربر گیرکرده دقیقاً ۲۰٬۰۰۰ کسری دارند"
-    },
-    {
-      "id": "H12",
-      "text": "خرید فقط در جلسه‌ی اول اتفاق می‌افتد؛ کسی که در شصت دقیقه‌ی اول نخرید، هرگز نمی‌خرد",
-      "from": "report4",
-      "status": "REJECTED",
-      "evidence": "فاصله تا اولین پرداخت (ساعت): ۰.۰ ۰.۱ ۰.۱ ۰.۲ ۰.۰ ۱۴۰.۳ ۱۹۲.۱ ۰.۱ ۰.۱ — دو نفر بعد از شش و هشت روز خریدند.",
-      "ifTrue": "تمامِ بودجه‌ی مهندسی به شصت دقیقه‌ی اول برود؛ کمپینِ بازگشتی فقط برای عادت است نه درآمد",
-      "howItBreaks": "اولین پرداختی که فاصله‌اش از ثبت‌نام بیش از یک روز باشد",
-      "caveat": "قدیمی‌ترین کاربر ۹ روزه است، پس ممکن است اثرِ نوپاییِ محصول باشد نه قانونِ رفتاری",
-      "note": "شرطِ شکستِ ثبت‌شده‌ی خودم («اولین پرداختی با فاصله‌ی بیش از یک روز») دقیقاً محقق شد. نتیجه‌ی عملیِ قبلی («کلِ بودجه به شصت دقیقه‌ی اول») باطل است؛ مسیرِ بازگشت ارزشِ درآمدی دارد."
-    },
-    {
-      "id": "H13",
-      "text": "هدیه سقفِ رفتار را تعیین می‌کند: هدیه اندازه‌ی یک فال است، پس دقیقاً یک فال مصرف می‌شود",
-      "from": "report4",
-      "status": "weakened-still-mostly-true",
-      "evidence": "۶۰ رایگان‌گیر با دقیقاً یک فال، ۲ نفر با دو فال (قبلاً ۳۴ از ۳۴ مطلق بود)",
-      "ifTrue": "اگر هدف چشاندنِ عادت است، هدیه باید دو تجربه بدهد؛ با A/B قابلِ آزمایش است"
-    },
-    {
-      "id": "H14",
-      "text": "فالِ گران‌تر از هدیه عملاً تحویل نمی‌شود؛ نصفِ تقاضا روی فال‌هایی است که کاربرِ تازه نمی‌تواند بازشان کند",
-      "from": "report5",
-      "status": "CONFIRMED",
-      "evidence": "عبور از پی‌وال ۵۱٪ ← ۸۷٪ بعد از هم‌ترازی. و برعکسش هم صادق: فال‌های بالای هدیه (celtic، open5) ۱۴ انتخاب و ۰ تحویل.",
-      "ifTrue": "کاتالوگ با هدیه هم‌تراز شود (فال‌های موضوعیِ ۵۰k به سه‌کارتیِ ۳۰k)",
-      "howItBreaks": "اگر بعد از هم‌قیمت‌کردن نرخِ تحویلشان بالا نرود، مشکل قیمت نبوده",
-      "note": "استثنایی که خودم برای لنگرِ پریمیوم قائل شده بودم هم رد شد."
-    },
-    {
-      "id": "H15",
-      "text": "آخرین جمله‌ی قبل از ورود به فلو، قابِ ذهنیِ پرداخت را می‌سازد",
-      "from": "report5",
-      "status": "open-medium",
-      "evidence": "در A/B هر دو گروه پی‌وال دیدند؛ آن‌که آخرین جمله‌اش «کارت رایگان» بود ۴۰٪ عبور کرد و آن‌که «حالا نوبتِ توئه» بود ۸۵٪",
-      "ifTrue": "جمله‌ی کارت رایگان از انتهای پیامِ اول برداشته/جابه‌جا شود (آزمایشِ تک‌متغیرِ بعدی)"
-    },
-    {
-      "id": "H16",
-      "text": "دو پرسونای پرداخت‌کننده داریم، نه یکی: «تصمیم‌گیرِ فوری» و «بازگشتیِ چندروزه»",
-      "from": "report6",
-      "status": "open-low-sample",
-      "evidence": "۷ از ۹ پرداخت زیر ۱۲ دقیقه، ۲ نفر بعد از ۱۴۰ و ۱۹۲ ساعت",
-      "ifTrue": "مسیرِ بازگشت (یادآوری، فاکتورِ باز) بودجه‌ی مهندسی می‌گیرد، نه فقط بودجه‌ی عادت‌سازی",
-      "howItBreaks": "اگر تا دو دورِ بعد هیچ پرداختِ دیرهنگامِ دیگری نیاید، این دو استثنا بوده‌اند نه پرسونا"
-    },
-    {
-      "id": "H17",
-      "text": "ریتنشنِ پایین از **کیفیتِ جوابِ فال** می‌آید، نه از قیمت یا فلو؛ خوانشِ صریح و جواب‌دار کاربر را برمی‌گرداند",
-      "from": "owner-decision + v3.3.0",
-      "status": "open",
-      "evidence": "هنوز صفر. تا ۲۵ مرداد فقط ادمین لحن را دیده بود، پس هیچ دیتای کاربرِ واقعی وجود ندارد.",
-      "ifTrue": "سرمایه‌گذاریِ بعدی روی عمقِ خوانش می‌رود (حافظه، پیگیریِ فالِ قبلی، شخصی‌سازی)، نه روی قیف و قیمت",
-      "howItBreaks": "اگر کوهورتِ 3.3.0 در نرخِ فالِ دوم با کوهورتِ 2.9.x تفاوتِ معنادار نداشته باشد، مشکلِ ریتنشن جای دیگری است"
-    }
-  ],
-  "gotchas": [
-    "git log بدونِ TZ=UTC تاریخِ محلی می‌دهد — مرزِ نسخه را با `TZ=UTC git log --date=format-local` بگیر، وگرنه چند ساعت از پنجره در سطلِ اشتباه می‌افتد (یک‌بار همین اتفاق افتاد و کل قیف را جابه‌جا کرد).",
-    "«کاربر فعال» را با رویدادِ act بشمار، نه با هر رویدادی — daily_reminder_sent و credit_granted ربات‌فرست‌اند و کاربرِ منفعل را فعال نشان می‌دهند.",
-    "از «موجودیِ لحظه‌ای» (users.state) نتیجه‌ی «جریانی» نگیر. H9 دقیقاً از همین اشتباه آمد: کاربرانی که در confirm_pay با موجودی کافی مانده بودند، اصلاً صفحه را با آن موجودی ندیده بودند. برای سنجش عبور از یک صفحه، همیشه رویدادِ همان صفحه را با propهایش بخوان (اینجا paywall_shown.can_afford).",
-    "`GROUP BY 1` وقتی ستونِ ۱ شاملِ aggregate است خطا می‌دهد — دو بار در این پروژه توش افتادم. همیشه با زیرکوئریِ تودرتو بنویس (اول GROUP BY، بعد رشته‌سازی).",
-    "متنِ صفحه‌ها در تایم‌لاینِ داشبورد **نمونه‌ی اولین کاربر** است نه پیامِ همین کاربر (screens.sample با INSERT OR IGNORE). از ۱۴۰۵/۰۵/۱۳ اعدادش ماسک می‌شود؛ برای عددِ واقعی همیشه به ردیفِ payments نگاه کن.",
-    "در Ops db-query، ORDER BY قبل از UNION ALL خطا می‌دهد. هر شاخه را داخل `SELECT * FROM (…)` بپیچ تا ORDER BY/LIMIT محلی بماند.",
-    "قضاوتِ کیفیِ خودم («لنگرِ پریمیوم لازم است») دو دور بدونِ عدد زنده ماند و بعد رد شد. هر استثنایی که به یک قانونِ دیتامحور می‌زنم باید همان دور یک متریکِ سنجش داشته باشد.",
-    "منوی فال از v3.9.0 «موضوع» و «اندازه» را جدا می‌پرسد. پس `spread_selected.spread` حالا `<topic><size>` است (مثل `love5`) نه یک نامِ ثابت. برای مقایسه با دورهای قبل از propهای **افزایشیِ** `topic` و `size` استفاده کن، نه از پارس‌کردنِ رشته‌ی `spread`.",
-    "⛔ هر کوئریِ Ops که به جدولِ `events` **جوین** بزند عملاً اجراناپذیر است: روی `bot-fa.db` بیش از ۹ دقیقه دوید و لغو شد (چند میلیون ردیف، بدونِ ایندکس روی `event`/`user_id`). قیفِ per کانال با همین مرد. یا ایندکس اضافه کن، یا از `users`/`readings`/`payments` بپرس، یا کوئری را به چند دیسپچِ کوچک بشکن.",
-    "`campaign_costs.usd` **نرخ per کاربرِ همان روز** است، نه خرجِ کلِ آن روز. `campaignCostModel` آن را در تعدادِ کاربرِ روز ضرب می‌کند. خواندنش به‌عنوان «جمعِ خرج» عددِ تبلیغ را چند ده برابر کوچک می‌کند.",
-    "اتریبیوشنِ نسلی: پاداشِ دعوت الماسی است که **خودِ دعوت‌کننده** خرج می‌کند، پس هزینه‌اش در llm_usageِ همان گره است و از قبل داخلِ درخت. اضافه‌کردنِ جداگانه‌اش دوباره‌شماری است (همان قاعده‌ی lib/cpa.js).",
-    "مقایسه‌ی درآمد و هزینه‌ی مدل همیشه بی‌قرینه است: درآمد کلِ عمر (~۶۵ روز) ولی llm_usage فقط از ۳۰ اوت. رتبه‌بندیِ کانال‌ها معتبر است (همه یک بی‌قرینگی دارند)، سطحِ مطلقِ «خالص» خوش‌بینانه است.",
-    "ستونِ cached_tokens صفر دو معنیِ کاملاً متفاوت دارد: «کشِ پرامپت خاموش است» یا «نامِ فیلد را اشتباه گرفته‌ایم» (مستنداتِ OpenRouter از این محیط باز نمی‌شود، بند ۹/۰الف). قبل از هر تصمیمِ هزینه‌ای، نامِ واقعی را از لاگِ یک‌باره‌ی USAGE_SHAPE تأیید کن.",
-    "هزینه‌ی پاداشِ دعوت از v3.82.0 سه نرخِ هم‌زمان دارد (۱۰/۵/۳ بر اساسِ referrals.created_at). یک نرخِ واحد در هیچ کوئریِ بازه‌ای درست نیست."
-  ],
-  "openQuestionsNextRound": [
-    "💸 [نسلی ۱۴۰۵/۰۶/۲۰] توزیعِ فالِ رایگان per کاربر گرفته نشده — برای تصمیم درباره‌ی «سقفِ روزانه‌ی فالِ رایگان» (گزینه‌ی P3) لازم است. بدونش نمی‌دانیم دمِ پرمصرف چقدر بزرگ است.",
-    "💸 [نسلی ۱۴۰۵/۰۶/۲۰] قبل از هر ادعایی درباره‌ی کشِ پرامپت، `cached_tokens`/`reasoning_tokens` به llm_usage اضافه شود (از خودِ پاسخ، بدنه‌ی ریکوئست دست‌نخورده). ممکن است ۱۰٪ از قبل رایگان باشد یا اصلاً ممکن نباشد.",
-    "💸 [نسلی ۱۴۰۵/۰۶/۲۰] دورِ آزمایشگاه با **بودجه‌ی طولِ صریح در پرامپت** (خروجی ۱٬۱۴۰ ⟵ ~۸۰۰ توکن): اگر بی‌لنگر و rubric و رضایت تکان نخورند، ۲٬۰۵۰٬۰۰۰ تومان در ماه رایگان است. هزینه‌ی خودِ دور ~$۰٫۱.",
-    "💸 [اقتصادِ واحد ۱۴۰۵/۰۶/۲۰] نرخِ تبلیغِ واردشده را مالک تأیید کند: فقط ۷ روز در `campaign_costs` هست ($۰٫۰۰۳۵ تا $۰٫۰۱۶۹ per کاربر) و کلِ حکمِ per کمپین رویش ایستاده.",
-    "💸 [اقتصادِ واحد ۱۴۰۵/۰۶/۲۰] قیفِ per کانال هنوز جواب ندارد: **چرا** کاربرِ رفرالی با نرخِ ۰٫۵۲٪ پرداخت می‌کند و ارگانیک ۲٫۸۲٪؟ کوئریِ جوینِ events بیش از ۹ دقیقه دوید و لغو شد.",
-    "🖼 [مارکرِ اینترو ۱۴۰۵/۰۶/۱۶] بعد از افزودنِ GIF به اینترو (مرز 1788798624)، دو سنجه را بسنج: (الف) `starts/views` per پستِ کانال برای پست‌های ≥۴۸ ساعت، (ب) `onboard_done ÷ start` روزانه. ⚠️ «کاربرِ جدید در روز» را خام مقایسه نکن — ترافیک در همان روزها ۸٫۶ برابر شد. و ⚠️ سمتِ «قبل» متریکِ اول خطِ پایه‌ی ذخیره‌شده ندارد چون ویوها هرگز اسکرپ نشده‌اند. جزئیات: measurementMarkers[intro_gif_2026_09_07].",
-    "🚨 [رصدِ اجباری، خواسته‌ی صریحِ مالک] نرخِ رضایت بعد از v3.43.0 چه شد؟ خطِ پایه ۴٫۰۴ از ۵ (n=۷۵۰). میانگین و سهمِ نمره‌های ۱ و ۲ را با مرزِ 2026-09-01T15:45:00Z مقایسه کن. افتِ محسوس = زنگ خطر و پیشنهادِ رول‌بک. جزئیات در کلیدِ regressionWatch.",
-    "🚨 [رصدِ اجباری، خواسته‌ی صریحِ مالک] هزینه‌ی هر فال بعد از v3.43.0 چه شد؟ خطِ پایه $۰٫۰۰۳۹ (n=۴۱۱ فال). تفکیکِ متنی/صوتی و per kind لازم است چون دو تغییر هم‌زمان رفتند. افزایشِ محسوس = زنگ خطر. جزئیات در کلیدِ regressionWatch.",
-    "۹۸ کاربرِ ۲۵ اوت (۵۶٪ کلِ کوهورت) از کجا آمدند؟ تفکیکِ first_source per روز. تا این جواب نیامده، هیچ ادعایی درباره‌ی «رشد» نکن.",
-    "آزمایشِ A/B زنده چیست و چه می‌گوید؟ ۱۷۵ exposure یعنی ۱۰۰٪ کوهورتِ جدید تخصیص گرفته‌اند و هیچ‌کس نتیجه را نخوانده. تنها منبعِ شواهدِ علّیِ موجود است.",
-    "میدل‌ورِ journey از چه تاریخی روشن شده؟ ۷۷.۶٪ رویدادهای پنجره view/act اند، پس جهشِ حجمِ رویداد شاهدِ درگیری نیست تا وقتی این معلوم نشود.",
-    "ریتنشنِ کوهورتیِ D1/D3/D7 فقط روی کاربرانی که ≥۴۸ ساعت فرصت داشته‌اند (۳ تا ۵ روزِ دیگر قابلِ سنجش است).",
-    "نمره‌ی رضایت per شماره‌ی فال (اول در برابرِ دوم و سوم): ۳.۹۸ اثرِ تازگی است یا کیفیتِ پایدار؟",
-    "پی‌وال روی کدام اندازه شلیک می‌شود؟ اگر size در propهای paywall_shown نیست، همین شکافِ ابزار است و باید افزوده شود.",
-    "آن ۱۲۷ کاربری که آخرین رویدادشان view یا act بود روی کدام صفحه ایستادند؟ باارزش‌ترین کوئریِ تشخیصیِ نزده.",
-    "شکافِ ۲۹۴ الماسیِ دفترِ کل: هر مسیری که مستقیم روی balance می‌نویسد باید رویداد بنویسد. تا بسته نشود، هیچ عددِ اقتصادِ الماس قابلِ استناد نیست.",
-    "چرا ۱۲ دعوت از ۶۱ دعوت پاداش نگرفته‌اند؟ (دعوت‌شده هنوز فال نگرفته، یا ردِ بی‌صدای isNew؟)",
-    "مهرِ زمانیِ دقیقِ برودکستِ v3.26 از announce_log: عددِ ثبت‌شده‌ی ۱۲:۴۴ زودتر از خودِ نسخه است و باید اصلاح شود.",
-    "هزینه‌ی واقعیِ OpenRouter per فال هیچ‌جا ثبت نمی‌شود. بدونِ آن «هزینه‌ی فالِ رایگان» قابلِ محاسبه نیست (سؤالِ صریحِ مالک در بازطراحیِ صفحه‌ی هزینه‌ها).",
-    "🔔 تصمیمِ معلقِ «دیفالتِ یادآوری» (مالک، ۱۴۰۵/۰۶/۰۷): وقتی آزمایشِ night_reminder بسته شد، باید صریح تصمیم گرفته شود کدام یادآوری (کارت روز یا کارت شانس) به‌صورت پیش‌فرض برای کاربران روشن بماند، و کلِ مکانیزمِ opt-in/opt-out دوباره بازطراحی شود. مالک خواسته همان موقع این سؤال دوباره جلویش گذاشته شود. تا آن زمان: پیش‌فرض روشن، و دکمه‌ی «فردا یادآوری کن» فقط به کسی که یادآوریِ کارتِ شانس نمی‌گیرد.",
-    "اثرِ دو پله‌ی کاهشِ پاداشِ دعوت (۱۰⟵۵ در v3.69.0 و ۵⟵۳ در v3.82.0) روی **حجمِ** دعوت: تعدادِ دعوتِ موفق per کاربرِ جدید، قبل و بعد از هر مرز. اندازه‌ی صرفه‌جویی سنجیده شده، اثرش روی حجم نه.",
-    "نرخِ کشِ پرامپت از llm_usage.cached_tokens (بعد از تأییدِ نامِ فیلد): سهمِ توکنِ کش‌شده از کلِ ورودی، و اینکه آیا ۱۰٪ صرفه‌جوییِ تخمینی روی میز هست یا از قبل گرفته شده."
-  ],
-  "abResults": [
-    {
-      "key": "intro_order",
-      "period": "2026-08-04T19:18:00Z → 2026-08-15T15:35:00Z",
-      "primaryMetric": "product_delivered",
-      "control": {
-        "exposed": 39,
-        "product_delivered": 29,
-        "deliveredRatePct": 74.4,
-        "gate_passed": 36,
-        "gatePassedRatePct": 92.3
-      },
-      "variant": {
-        "key": "stat_first",
-        "exposed": 33,
-        "product_delivered": 18,
-        "deliveredRatePct": 54.5,
-        "gate_passed": 33,
-        "gatePassedRatePct": 100
-      },
-      "ctwControlWinsPct": 96,
-      "srmOk": true,
-      "lowSample": true,
-      "decision": "ادامه دارد. عددِ تجمعی از آستانه رد می‌شود ولی برشِ پس از هم‌ترازی نه؛ تصمیمِ نهایی وقتی گرفته شود که برشِ پس از هم‌ترازی به ~۲۰ تحویل per شاخه برسد.",
-      "insight": "فاصله در دنیای جدید (کاتالوگِ هم‌تراز) از ۲۰ واحد به ۱۲ واحد کم شد. یعنی بخشی از برتریِ control محصولِ دنیایی بود که در آن قیمت مانع بود.",
-      "secondaryObjective": "عضویت کانال — stat_first ۱۰۰٪ (۳۳/۳۳) در برابر ۹۲.۳٪ (۳۶/۳۹)، CTW ۹۲.۱٪",
-      "methodNote": "⚠️ کاتالوگ در v2.9.0 وسطِ آزمایش عوض شد (همه‌ی فال‌ها به ۳۰k). تصادفی‌سازی سالم است پس مقایسه بی‌طرف می‌ماند، ولی نرخِ مطلقِ هر دو شاخه بعد از این تاریخ جابه‌جا می‌شود. دورِ بعد اگر نمونه اجازه داد، exposureهای بعد از ۲۰۲۶-۰۸-۰۸ را جدا هم بخوان و با هم pool نکن.",
-      "postCatalogSlice": {
-        "note": "فقط exposureهای بعد از v2.9.0 — طبق هشدارِ متدولوژیکِ دور قبل جدا خوانده شد",
-        "control": {
-          "delivered": 18,
-          "exposed": 21,
-          "ratePct": 85.7
-        },
-        "variant": {
-          "delivered": 11,
-          "exposed": 15,
-          "ratePct": 73.3
-        },
-        "ctwControlWinsPct": 82,
-        "belowShipThreshold": true
-      }
-    },
-    {
-      "key": "intro_order",
-      "closedAt": "2026-08-26",
-      "verdict": "inconclusive",
-      "decision": "کنترل ماند (تجربه اول، آمار بعد)، ولی متنِ تجربه برای همه به INTRO_EXPERIENCE_V2 رفت (تصمیمِ صریحِ مالک).",
-      "primaryMetric": "product_delivered (حداقل یک فالِ تحویل‌شده)",
-      "pooled": {
-        "control": "104/144 = 72.2%",
-        "stat_first": "109/149 = 73.2%",
-        "deltaPP": 0.9,
-        "z": 0.18,
-        "p": 0.858,
-        "ctwPct": 57
-      },
-      "srm": "سالم (۱۴۴ در برابر ۱۴۹، chi2=0.085)",
-      "contamination": "⚠️ مهم‌ترین یافته: از v3.25.0 که uxV2For برای همه true شد، شاخه‌ی stat_first متنِ INTRO_EXPERIENCE_V2 می‌گرفت و control متنِ v1. یعنی آزمایش دیگر «فقط ترتیب» نبود و نتیجه‌ی تجمیعی تفسیرناپذیر است.",
-      "eraSplit": {
-        "pre_v3.25 (ترتیبِ خالص)": {
-          "control": "36/51 = 70.6%",
-          "stat_first": "28/48 = 58.3%",
-          "deltaPP": -12.3,
-          "p": 0.202
-        },
-        "post_v3.25 (آلوده)": {
-          "control": "68/93 = 73.1%",
-          "stat_first": "81/101 = 80.2%",
-          "deltaPP": 7.1,
-          "p": 0.243
-        },
-        "interaction": {
-          "deltaOfDeltasPP": 19.3,
-          "z": 1.7,
-          "p": 0.089,
-          "note": "علامتِ اثر بین دو دوره برعکس می‌شود؛ عددِ تجمیعی میانگینِ دو اثرِ متضاد است."
-        }
-      },
-      "power": "از اول زیرِ توان بود: برای دیدنِ اثرِ ۵ واحدی ~۱٬۱۸۴ کاربر در هر شاخه لازم بود، ۱۰ واحدی ~۲۷۵، و ما ~۱۴۶ داشتیم.",
-      "lessons": [
-        "متغیرِ دومی که **بعداً** به یک شاخه اضافه شود، آزمایشِ در جریان را بی‌صدا می‌کشد. این‌جا INTRO_EXPERIENCE_V2 در v3.9.3 فقط به شاخه‌ی stat_first سیم شد.",
-        "گارد به‌شکلِ **کامنت** بود نه **ادعا**: کامنتِ بالای همان بلوک دقیقاً همین را ممنوع کرده بود، و خودِ چکِ CI هم آن را rationalize کرد («v2 یک متغیرِ مستقلِ دیگر است») که غلط بود. هر آزمایشِ بعدی باید تقارنِ شاخه‌هایش assert داشته باشد (نمونه: تقارنِ طولِ CTA در check-night-reminder).",
-        "با ترافیکِ فعلی، آزمایشِ کپیِ آنبوردینگ ماه‌ها طول می‌کشد تا جواب بدهد. گلوگاهِ واقعیِ محصول طبقِ گزارشِ دورِ ۷ فالِ **دوم** است، نه آنبوردینگ."
-      ],
-      "nextCandidate": "اگر روزی خواستیم: آزمایشِ تک‌متغیره‌ی متنِ تجربه (v1 در برابر v2) با ترتیبِ ثابت. فعلاً باز نشد چون ترافیک کفاف نمی‌دهد و اولویت جای دیگری است."
-    }
-  ],
-  "experimentQueue": [
-    {
-      "id": "H19",
-      "key": "price_ladder_p1 / price_ladder_p2",
-      "status": "phase1-running",
-      "hypothesis": "کفِ پایین‌ترِ بسته (۱۵k به‌جای ۳۰k، با همان قیمتِ هر الماس) خریدارِ تازه می‌آورد؛ و اگر آورد، سطحِ قیمتِ پایین‌تر (~۳۰٪) بیشتر می‌آورد.",
-      "design": "دو فازِ ۳روزه، هر کدام ۵۰/۵۰، با **کلیدِ جدا** (وزنِ متغیر روی یک کلید = سوگیریِ نامتقارن به‌خاطرِ چسبندگیِ ab_exposures). فاز ۱: control در برابرِ floor. فاز ۲: برنده در برابرِ cheap. exposure سرِ نمایشِ صفحه‌ی پلن‌ها ثبت می‌شود. متریکِ اصلی payment_approved (rate).",
-      "power": "⚠️ ~۲۲۰ کاربر و ~۱۴ پرداخت per بازو در ۳ روز ⇒ MDE حدودِ +۱۰۰٪، در حالی که نقطه‌ی سربه‌سرِ floor فقط +۱۴٫۵٪ و cheap +۶۲٪ است. یعنی ۳ روز یک **غربالِ جهت‌دار** است نه آزمونِ معنادار. قاعده‌ی تصمیم از قبل ثبت شده: زیرِ دو برابر شدن ⟶ پیش‌فرض ماندن روی control.",
-      "note": "فاز ۱ زنده است: price_ladder_p1 روی bot-fa.db، control/floor با وزنِ ۵۰/۵۰. ⚠️ مرزِ تحلیل started_at است نه تاریخِ مرج. ⛔ اگر floor برنده شد، فاز ۲ به یک تغییرِ کوچک در ops-exp.mjs نیاز دارد (وزنِ صفر برای شاخه‌های غیرِ اول) — جزئیات در bots/tarot/CLAUDE.md.",
-      "startedAt": "2026-09-11T07:47:20Z (unix 1789112840) — ۱۱:۱۷ تهران"
-    },
-    {
-      "id": "H15",
-      "key": "intro_free_line",
-      "status": "queued-not-started",
-      "hypothesis": "جمله‌ی «🎴 هر روز هم یه کارت رایگان داری» در انتهای پیامِ اول، قابِ ذهنیِ «رایگان» می‌سازد و نرخِ بازکردنِ فال را پایین می‌آورد.",
-      "evidence": "در آزمایشِ intro_order هر دو گروه پی‌وال دیدند؛ گروهی که آخرین جمله‌اش همین بود ۴۰٪ عبور کرد و گروهی که آخرین جمله‌اش «حالا نوبتِ توئه» بود ۸۵٪.",
-      "design": "تک‌متغیره: همان control، فقط بدونِ آن خط (یا با انتقالش به وسطِ پیام). متریکِ اصلی product_delivered.",
-      "blockedBy": "آزمایشِ intro_order هنوز در حال اجراست؛ دو آزمایشِ هم‌زمان روی همان نقطه‌ی فلو نتیجه را درهم می‌کند.",
-      "note": "تصمیمِ مالک: در صف بماند تا فراموش نشود، ولی فعلاً شروع نشود."
-    },
-    {
-      "id": "H18",
-      "key": "menu_slots",
-      "status": "built-not-running",
-      "hypothesis": "ترتیب و انتخابِ دو موضوعِ جایگاه ۲ و ۳ در منوی فال، نرخِ شروعِ فال را جابه‌جا می‌کند. جایگاه ۱ («سؤال شخصی خودم») و جایگاه ۴ («مشاهده همه فال‌ها») ثابت‌اند و آزمایش نمی‌شوند.",
-      "design": "چهار شاخه در `shared/ab.js`: control=[yesno,love] · love_first=[love,yesno] · crush_money=[crush,money] · feel_career=[feel,career]. متریکِ اصلی `product_delivered`؛ متریکِ کمکی نرخِ کلیک per موضوع از `topic_selected`.",
-      "blockedBy": "حجم. یک تستِ چهارشاخه‌ای با ترافیکِ فعلی ماه‌ها طول می‌کشد تا معنادار شود (آستانه‌ی داشبورد: ۲۰۰ exposure per شاخه).",
-      "decisionRuleUntilThen": "چرخشِ **دستیِ** هفتگی: رتبه‌بندیِ کلیکِ موضوع‌ها را از `topic_selected` بگیر و جفتِ بازنده را با یک کاندیدای تازه عوض کن. آزمایشِ رسمی فقط وقتی running شود که حجم به آستانه برسد.",
-      "gotcha": "⚠️ بایاسِ جایگاه: شمردنِ خامِ کلیک، بیشتر «کدام **جایگاه**» را می‌سنجد تا «کدام **موضوع**» — جایگاه ۲ ذاتاً بیشتر از ۳ کلیک می‌گیرد. برای همین شاخه‌ی `love_first` عمداً همان دو موضوع با ترتیبِ برعکس است: مقایسه‌ی control با love_first اثرِ جایگاه را جدا می‌کند. هر تحلیلی که این را لحاظ نکند روی نویز تصمیم می‌گیرد.",
-      "note": "تا running نشود `variant()` همیشه control می‌دهد، یعنی رفتارِ فعلی = همان جفتِ پیش‌فرض. فعلاً فقط روی اکانتِ ادمین (UX_V2_ADMIN_ONLY=true)، پس دیتای کاربرِ واقعی از لحظه‌ی باز شدن برای همه شروع می‌شود."
-    }
-  ],
-  "supportOutreach": {
-    "round5": {
-      "sent": 7,
-      "variants": 3,
-      "sentAt": "2026-08-08",
-      "users": [
-        "@zwartebadge",
-        "@kianrzj",
-        "@Houstatlantvegas",
-        "@Niian16",
-        "@Moradi_82k",
-        "@ShhalHa",
-        "@upiojoq"
-      ],
-      "result": "نرخِ جواب پایین ماند — طبق تصمیمِ ثبت‌شده متن‌ها برای دور ششم بازنویسی شدند"
-    },
-    "history": {
-      "round4": {
-        "sent": 10,
-        "replied": 1
-      }
-    },
-    "learningForNextRound": "نرخِ جوابِ تاکنون خیلی پایین است (۱ از ۱۰ در دور چهارم). اگر دور پنجم هم پایین بود، **متن باید بازنویسی شود**: تصمیمِ مالک این است که با «ما یه تیمِ کوچیکیم که تازه شروع کردیم» شروع شود — قبلاً همین قالب یک‌بار جواب گرفته بود. یعنی اول «ما کی هستیم و چرا مزاحم شدیم»، بعد سؤال.",
-    "round6": {
-      "plannedAt": "2026-08-15",
-      "variants": 3,
-      "users": 13,
-      "excludedBecauseAlreadyContacted": [
-        "@Moradi_82k",
-        "@upiojoq"
-      ],
-      "unreachableNoUsername": [
-        6609640206,
-        8386009829
-      ],
-      "textChange": "شروع با «ما یه تیمِ کوچیکیم که تازه شروع کردیم» طبق تصمیمِ مالک",
-      "result": "در انتظار"
-    },
-    "round7": {
-      "note": "طبق قاعده‌ی اسکیل، وضعیتِ همین کاربران لحظه‌ی ارسال دوباره کوئری شود. کوئری: queries/round7.json → supportOutreachCandidates.",
-      "segments": {
-        "A_lover": "≥۲ فالِ تحویل‌شده و نمره‌ی ۵ — منبعِ مصاحبه‌ی کیفی و رفرال",
-        "B_happy_once": "دقیقاً یک فال، نمره‌ی ۴ یا ۵، برنگشته — بزرگ‌ترین فرصتِ همین‌امروز",
-        "C_no_delivery": "از لانچ به بعد آمده و هیچ فالی تحویل نگرفته",
-        "D_gate": "در گیتِ عضویت مانده (state=gate_join)"
-      }
-    }
+  {
+   "v": "2.2.0",
+   "mergedAt": "2026-07-31T19:53:00Z",
+   "what": "صف اقدام پشتیبانی (تأیید دستی، شارژ/کسر) + حداقل مبلغ شارژ"
   },
-  "queriesFile": "analytics/tarot/queries/round7.json",
-  "regressionWatch": {
-    "why": "خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۱) بعد از سوییچِ مدلِ فارسی. این دو سنجه از لحظه‌ی مرزِ زیر باید در **هر** دورِ تحلیل دیده شوند تا وقتی مالک صریحاً ببنددشان. اگر هرکدام از آستانه رد شد، پیشنهادِ رول‌بک بده.",
-    "change": "v3.43.0 — مدلِ خوانشِ فارسی از google/gemini-2.5-flash به openai/gpt-5.6-luna، و مسیرِ ویس از تک‌فراخوانی به «رونویسی، بعد خوانش».",
-    "boundaryUnix": 1788277500,
-    "boundaryUtc": "2026-09-01T15:45:00Z",
-    "rollback": "افزودن/برداشتنِ ردیفِ fa در READING_MODEL_BY_LOCALE در bots/tarot/reading-core.js — یک ردیف، بدونِ مهاجرت.",
-    "metrics": [
-      {
-        "id": "satisfaction",
-        "what": "میانگینِ نمره‌ی رضایت (۱ تا ۵) از readings.feedback با پیشوندِ rate:",
-        "sql": "SELECT COUNT(*) n, AVG(CAST(SUBSTR(feedback,6) AS REAL)) mean, AVG(CASE WHEN CAST(SUBSTR(feedback,6) AS REAL)<=2 THEN 1.0 ELSE 0 END) badShare FROM readings WHERE feedback LIKE 'rate:%' AND created_at >= <window> AND user_id NOT IN (excludeUsers)",
-        "baseline": {
-          "mean": 4.036,
-          "n": 750,
-          "window": "همه‌ی تاریخِ مقیاسِ rate تا مرز"
-        },
-        "baseline14d": {
-          "mean": 4.039,
-          "n": 748
-        },
-        "direction": "بالاتر بهتر. ترجیحِ مالک: میانگین دستِ‌کم ثابت بماند، ایده‌آل رو به افزایش.",
-        "alarmIf": "میانگینِ بعد از مرز ۰٫۲۰ واحد یا بیشتر پایین‌تر از خطِ پایه با n≥۲۰۰، یا ۰٫۳۰ واحد با n≥۱۰۰. یا سهمِ نمره‌های ۱ و ۲ بیش از ۵۰٪ نسبی بالا برود.",
-        "whyBadShare": "میانگین می‌تواند یک جابه‌جاییِ دوقطبی را پنهان کند (چند نمره‌ی ۵ جبرانِ چند نمره‌ی ۱ را می‌کند)، پس سهمِ نمره‌های ۱ و ۲ جدا دیده می‌شود."
-      },
-      {
-        "id": "costPerReading",
-        "what": "هزینه‌ی واقعیِ دلاریِ هر فال از جدولِ llm_usage (cost_usd مستقیماً از OpenRouter)",
-        "sql": "SELECT COUNT(DISTINCT ref_id) readings, SUM(cost_usd)/COUNT(DISTINCT ref_id) perReading FROM llm_usage WHERE ref_id>0 AND created_at >= <window> AND user_id NOT IN (excludeUsers)",
-        "baseline": {
-          "perReadingUsd": 0.0039,
-          "readings": 411
-        },
-        "breakdownBaseline": {
-          "reading_rows": 426,
-          "reading_usd": 1.5976,
-          "repair_rows": 27,
-          "repair_usd": 0.01003
-        },
-        "direction": "پایین‌تر بهتر. ثابت‌ماندن هم قابلِ قبول است.",
-        "alarmIf": "هزینه‌ی هر فال ۲۵٪ یا بیشتر بالا برود (یعنی از ~$۰٫۰۰۴۹ رد شود) و روی دستِ‌کم ۱۰۰ فالِ بعد از مرز پایدار بماند.",
-        "splitBy": "kind (reading/repair/transcribe) و متنی در برابرِ صوتی. مسیرِ ویس عمداً از یک فراخوانی به دو تا رفت، پس اگر کل بالا رفت باید معلوم شود از مدلِ گران‌ترِ خوانش است یا از فراخوانیِ دومِ رونویسی."
-      }
+  {
+   "v": "2.3.0",
+   "mergedAt": "2026-07-31T20:33:00Z",
+   "what": "پرداخت کمتر از فاکتور: اصلاح فاکتور به‌جای رد"
+  },
+  {
+   "v": "2.4.0",
+   "mergedAt": "2026-07-31T21:33:00Z",
+   "what": "جواب قاطع + نشونه برای فال‌های تصمیم‌محور (yesno, choice)"
+  },
+  {
+   "v": "2.5.0",
+   "mergedAt": "2026-07-31T22:47:00Z",
+   "what": "صفحه‌ی «موجودی کافیه» به‌جای صفحه‌ی قیمت‌دار برای کاربرِ دارای اعتبار"
+  },
+  {
+   "v": "2.5.0-copy",
+   "mergedAt": "2026-07-31T23:16:00Z",
+   "what": "بازنویسی کپیِ دو صفحه‌ی نقطه‌ی تصمیم (موجودی + نامِ فال در متن، حذف جمله‌ی امری)",
+   "isMainBoundary": true
+  },
+  {
+   "v": "2.7.0",
+   "mergedAt": "2026-08-04T17:40:00Z",
+   "what": "گیتِ عضویت کانال برای کاربر جدید + فال عشق سه‌کارتی ۳۰k (هم‌اندازه‌ی هدیه) و اولِ کاتالوگ",
+   "isMainBoundary": true
+  },
+  {
+   "v": "2.7.1",
+   "mergedAt": "2026-08-04T18:06:00Z",
+   "what": "حذفِ تکرارِ معرفی بعد از نام + فکتِ ۸۶٪"
+  },
+  {
+   "v": "2.7.2",
+   "mergedAt": "2026-08-04T18:23:00Z",
+   "what": "سه فیکسِ گیت: my_chat_member، ریستِ ادمین، payloadِ اتریبیوشن"
+  },
+  {
+   "v": "2.7.3",
+   "mergedAt": "2026-08-04T18:40:00Z",
+   "what": "بازنویسیِ پیامِ اول + آزمایشِ gate_intro_ai (بعداً متوقف شد)"
+  },
+  {
+   "v": "2.8.0",
+   "mergedAt": "2026-08-04T19:18:00Z",
+   "what": "آزمایشِ intro_order (ترتیبِ دو بلوکِ آنبوردینگ) + حذفِ موضعِ هوش مصنوعی از فلو",
+   "isMainBoundary": true
+  },
+  {
+   "v": "2.9.0",
+   "mergedAt": "2026-08-08T08:30:00Z",
+   "what": "کاتالوگ با هدیه هم‌تراز شد: فال‌های موضوعیِ ۵کارتی/۵۰k و دوراهی به ۳کارتی/۳۰k (قانونِ ۱۰k per کارت دست‌نخورده). صلیب سلتی ۱۰کارتی/۱۰۰k به‌عنوان تنها لنگرِ پریمیوم ماند.",
+   "isMainBoundary": true
+  },
+  {
+   "v": "2.9.1",
+   "mergedAt": "2026-08-15T13:00:00Z",
+   "what": "کپی: «دو مورد اول» ← «دو تا پیشنهاد اول» در پیشنهادِ فالِ بعدی"
+  },
+  {
+   "v": "3.0.0",
+   "mergedAt": "2026-08-15T17:01:10Z",
+   "adminOnly": true,
+   "what": "لحنِ صریحِ خوانش (پرامپتِ v2) + اقتصادِ سکه + کاتالوگِ عشق‌محور. ⚠️ فقط اکانتِ ادمین، پس روی دیتای کاربرِ واقعی هیچ اثری ندارد."
+  },
+  {
+   "v": "3.0.1",
+   "mergedAt": "2026-08-15T19:52:54Z",
+   "adminOnly": true,
+   "what": "بازنویسیِ صدای خوانش از روی شش خوانشِ واقعیِ یک تاروت‌خوانِ انسان. ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.1.0",
+   "mergedAt": "2026-08-15T20:29:21Z",
+   "adminOnly": true,
+   "what": "پارکِ اقتصادِ سکه و کاتالوگِ نسل دوم (COIN_ECONOMY=false) + انحلالِ آزمایشِ نامِ واحد + فشرده‌سازیِ پرامپت به ~۳٬۶۰۰ کاراکتر. لحن هنوز ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.2.0",
+   "mergedAt": "2026-08-15T21:20:18Z",
+   "adminOnly": true,
+   "what": "حذفِ «سه قدم عملی» از پایانِ خوانش + جدولِ دانشِ ۷۸ کارت (ترجمه‌ی دستی از کورپوسِ کراول‌شده، بدونِ RAG). ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.3.0",
+   "mergedAt": "2026-08-16T10:15:40Z",
+   "isMainBoundary": true,
+   "what": "لحنِ جدیدِ خوانش برای **همه‌ی کاربران** باز شد (تا اینجا فقط ادمین بود). محتوای واقعیِ تغییر = مجموعِ v3.0.0 تا v3.2.0 که یک‌جا به کاربرِ واقعی رسید: پرامپتِ v2 با صدای تاروت‌خوانِ انسان، جوابِ قاطع در پایانِ هر فال با دلیلِ لنگرخورده به نامِ کارت‌ها، جدولِ دانشِ ۷۸ کارت در پرامپت، حذفِ سه قدمِ عملی و شعارِ پایانی و جمله‌های دلداریِ وسطِ جرنی، حداکثر یک ایموجی، و پرسشِ «سؤالت چیه» به‌جای «موضوعت چیه».",
+   "measure": "ریتنشن (نرخِ فالِ دوم و بازگشت در ۷ و ۱۴ روز) + کیفیتِ feedback وسطِ خوانش + نرخِ product_delivered. مقایسه‌ی کوهورتِ first_version 3.3.0 با 2.9.x.",
+   "tzNote": "مُهرِ زمانی با git log --date=iso-strict-local برداشته شد. پیش‌فرضِ %ad روی این محیط UTC+05:00 است و یک‌بار همین ردیف‌ها را ۵ ساعت جلوتر ثبت کرد."
+  },
+  {
+   "v": "3.4.0",
+   "mergedAt": "2026-08-16T17:00:36Z",
+   "what": "قاعده‌ی هزینه: هیچ فراخوانیِ پولی قبل از کسرِ اعتبار + سؤالِ صوتی در یک فراخوانی به‌جای دو تا"
+  },
+  {
+   "v": "3.5.0",
+   "mergedAt": "2026-08-16T18:00:52Z",
+   "adminOnly": true,
+   "what": "ساختارِ خوانشِ v4 (تیزر، جوابِ اول، نمره‌ی ۱ تا ۵ در آخر). ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.5.1-3.6.7",
+   "mergedAt": "2026-08-18T13:48:29Z",
+   "adminOnly": true,
+   "what": "۱۶ دورِ آزمایشگاهِ خوانش روی ~۳۰۰ فال: حذفِ «کارتِ نیامده» و «قدمِ بعدی»، تیزرِ دو جمله‌ای، گاردِ طفره‌رفتنِ کلِ متن، تعمیرِ نقطه‌ای به‌جای بازتولید. متریکِ Barnum ۲۴٪ ← ۱۸٪."
+  },
+  {
+   "v": "3.7.0",
+   "mergedAt": "2026-08-18T14:10:52Z",
+   "isMainBoundary": true,
+   "what": "خوانشِ v4 برای **همه‌ی کاربران** باز شد.",
+   "measure": "میانگینِ نمره‌ی ۱ تا ۵ و نرخِ پاسخ به نظرسنجی"
+  },
+  {
+   "v": "3.8.0",
+   "mergedAt": "2026-08-18T16:35:35Z",
+   "adminOnly": true,
+   "what": "UX v2: ماهِ تولد به‌جای حوزه، کاتالوگِ اندازه‌محور، الماس، سه بسته، کاربر همه‌ی کارت‌ها را می‌چیند. ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.9.0",
+   "mergedAt": "2026-08-18T17:31:41Z",
+   "adminOnly": true,
+   "what": "UX v2.1: منوی موضوع×اندازه، کارتِ شانس (۳ از ۲۴، ۸ برنده)، حذفِ کلمه‌ی «خوانش». ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.9.1-3.11.1",
+   "mergedAt": "2026-08-19T04:35:52Z",
+   "adminOnly": true,
+   "what": "واحد «سکه» ← «الماس»، حذفِ «کیف‌پول»، ناوبریِ یک‌قدمیِ ادیت-در-جا، پیامِ «ادامه»، تبلیغِ کارتِ شانس بعدِ اولین فال. ⚠️ فقط ادمین."
+  },
+  {
+   "v": "3.13.0",
+   "mergedAt": "2026-08-19T05:38:28Z",
+   "adminOnly": true,
+   "what": "کسرِ اعتبار در لحظه‌ی انتخابِ اندازه (PAY_AT_SIZE) — پی‌والِ بعد از انتخابِ کارت‌ها حذف شد. ⚠️ فقط ادمین.",
+   "measure": "تعدادِ فالِ سرگردانِ pending_payment (قبل ۶۳، بعد ۳)"
+  },
+  {
+   "v": "3.14.0-3.16.0",
+   "mergedAt": "2026-08-19T14:12:12Z",
+   "adminOnly": true,
+   "what": "ترتیبِ پایانِ فال (نمره ← تشکر ← قدمِ بعدی)، تسترِ بدونِ اختیارِ ادمین، قراردادِ دو-نقطه‌ایِ کیبوردِ ماندگار."
+  },
+  {
+   "v": "3.17.0-3.19.0",
+   "mergedAt": "2026-08-19T21:52:24Z",
+   "adminOnly": true,
+   "what": "تعمیرِ کاملِ فلوی فال تک کارت، نیتِ معلق، نشانگرِ انتظارِ تازه، دستِ کارت شانس از سشن بیرون آمد."
+  },
+  {
+   "v": "3.20.0-3.22.0",
+   "mergedAt": "2026-08-20T22:51:47Z",
+   "adminOnly": true,
+   "what": "دستورِ /loading، تضمینِ دو الماس در دستِ اولِ کارت شانس (LUCKY_FIRST_MIN)، پایپ‌لاین ویدیوی ریلز."
+  },
+  {
+   "v": "3.23.0",
+   "mergedAt": "2026-08-20T23:09:31Z",
+   "what": "پاداشِ دعوت **فقط** به دعوت‌کننده (قبلاً هر دو طرف می‌گرفتند = باگ) + **حذفِ کاملِ یادآوریِ شبانه‌ی کارتِ روز** (که opt-out بود و به کاربرِ تومانی هم می‌رفت).",
+   "measure": "کاربرِ بازگشتیِ روزانه بعد از حذفِ یادآور؛ سهمِ رفرال از کاربرانِ جدید"
+  },
+  {
+   "v": "3.24.0",
+   "mergedAt": "2026-08-20T23:20:06Z",
+   "what": "نگارشِ کاملِ گنجینه: ۹۳۶ متنِ کارتِ روز (۱۲ ماه × ۷۸ کارت). دیگر هیچ کاربری به «گنجینه آماده نیست» نمی‌خورد."
+  },
+  {
+   "v": "3.25.0",
+   "mergedAt": "2026-08-21T00:16:45Z",
+   "isMainBoundary": true,
+   "what": "**مرزِ اصلیِ دورِ ۷.** UX v2 برای همه‌ی کاربران باز شد + مهاجرتِ موجودیِ تومانی به الماس + پنجره‌ی یک‌باره‌ی کیبورد. رباتِ تولید حین مهاجرت pm2 stop بود، پس روزِ ۲۱ اوت عملاً خاموش است.",
+   "measure": "کلِ قیف، رضایت، اقتصادِ الماس، ریتنشن — همه در گزارشِ دورِ ۷"
+  },
+  {
+   "v": "3.25.1",
+   "mergedAt": "2026-08-22T13:30:41Z",
+   "what": "سه باگِ بحرانیِ ممیزیِ پیش‌از-پرواز (تبدیلِ دوباره‌ی موجودی، KB_V2_EPOCH، رهاشدنِ رباتِ خاموش در manual-deploy)"
+  },
+  {
+   "v": "3.26.0-3.26.2",
+   "mergedAt": "2026-08-22T16:51:11Z",
+   "what": "پیامِ اطلاع‌رسانیِ آپدیت به همه‌ی کاربران (حاملِ نامرئیِ کیبورد) + رنگِ بسته‌ها + الماسی‌شدنِ سمتِ ادمین و پنل.",
+   "broadcast": "ارسالِ انبوه ~۲۲ اوت بلافاصله بعد از v3.26.1: ۱۱۰ تحویل، ۸۳ بلاک/چت‌بسته. ⚠️ مهرِ زمانیِ دقیق باید از announce_log دوباره کوئری شود (عددِ ثبت‌شده‌ی ۱۲:۴۴ زودتر از خودِ نسخه است)."
+  },
+  {
+   "v": "3.27.0",
+   "mergedAt": "2026-08-22T18:02:05Z",
+   "what": "الماس واحدِ **واقعیِ** ذخیره‌سازی شد: ضریبِ ۱۰٬۰۰۰ از کد و دیتا پاک شد (balance/price/original_amount/admin_actions + propهای credit_granted). ⚠️ رویدادهای اعتبارِ قبل از این تاریخ هم بازنویسی شده‌اند، پس واحدِ کلِ تاریخِ رویدادها یکنواخت است.",
+   "dataNote": "هر تحلیلِ آینده روی props.amount نیازی به تبدیل ندارد؛ عدد = خودِ تعدادِ الماس."
+  },
+  {
+   "v": "3.43.0",
+   "mergedAt": "2026-09-01T15:30:49Z",
+   "deployedAt": "2026-09-01T15:45:00Z",
+   "what": "مدلِ خوانشِ **فارسی** به openai/gpt-5.6-luna رفت و مسیرِ ویس از تک‌فراخوانی به «رونویسی، بعد خوانش» تبدیل شد. به‌علاوه تعمیرِ نقطه‌ای تکه‌به‌تکه شد و سه زنجیره‌ی فالبک تعریف شدند.",
+   "dataNote": "⚠️ مرزِ تحلیلِ قبل/بعد برای رضایت و هزینه. بخشِ regressionWatch را ببین؛ رصدش خواسته‌ی صریحِ مالک است."
+  },
+  {
+   "v": "—",
+   "external": true,
+   "mergedAt": "2026-09-07T16:30:24Z",
+   "what": "🖼 اینتروی ربات GIF گرفت (متن دست‌نخورده). تغییر در BotFather، بیرون از ریپو ⇒ نه کامیتی دارد نه PRODUCT_VERSION. جزئیات و خطِ پایه در کلیدِ measurementMarkers، شناسه intro_gif_2026_09_07."
+  },
+  {
+   "v": "3.75.0",
+   "mergedAt": "2026-09-08T15:43:00Z",
+   "deployedAt": "2026-09-09T03:01:00Z",
+   "what": "💰 افزایشِ قیمتِ سه بسته (۳۰k/۶۰k/۱۵۰k ⟵ ۵۰k/۹۰k/۱۹۰k) + دو بسته‌ی گرانِ تازه (افسانه‌ای ۴۹۰k، جاودان ۱٬۴۹۰k) + دکمه‌ی «مشاهده بسته‌های به‌صرفه‌تر».",
+   "dataNote": "⚠️ مرزِ مرج با مرزِ زنده‌شدن یکی **نیست**: پنجره‌ی امنِ دیپلوی مرج را عقب انداخت و تغییر ۹ سپ ۰۶:۳۱ تهران (۰۳:۰۱Z) با دیپلویِ دستیِ مالک زنده شد. هر مقایسه‌ی قبل/بعد باید روی deployedAt بسته شود نه mergedAt، وگرنه ۲۱ ساعت از رژیمِ قبلی داخلِ «بعد» می‌افتد. تحلیل: analytics/tarot/reports/2026-09-11-revenue-drop-recheck.md"
+  },
+  {
+   "v": "3.79.0",
+   "mergedAt": "2026-09-11T00:43:00Z",
+   "deployedAt": "2026-09-11T00:45:00Z",
+   "what": "🔙 رول‌بکِ قیمت به ۳۰k/۶۰k/۱۵۰k + خاموشیِ «افسانه‌ای»/«جاودان» (و آزمایشِ pack_reveal_v1 با همان پرچم).",
+   "dataNote": "مرج و دیپلوی در همان دقیقه (ساعتِ ۰۴:۱۳ تهران، داخلِ پنجره‌ی امن)، پس mergedAt و deployedAt عملاً یکی‌اند. تحلیلِ تصمیم: analytics/tarot/reports/2026-09-11-revenue-drop-recheck.md"
+  },
+  {
+   "v": "3.80.0",
+   "what": "💰 سیم‌کشیِ آزمایشِ نردبانِ قیمت (price_ladder_p1/p2، سه بازو) + فیکسِ packSoldIn. ⚠️ **رفتارِ رو-به-کاربر تا لحظه‌ی start شدنِ آزمایش از داشبورد صفر است**؛ همه control می‌بینند.",
+   "dataNote": "مرزِ تحلیل، مرجِ این نسخه **نیست** — مرزِ واقعی `experiments.started_at` هر فاز است. هر مقایسه‌ی قبل/بعد باید روی آن بسته شود."
+  },
+  {
+   "v": "3.83.0",
+   "what": "💎 پاداشِ دعوت ۵ ⟵ ۳ الماس (فقط fa، پله‌ی سومِ grandfathering با مرزِ referral_3) + دو ستونِ افزایشیِ llm_usage برای سنجشِ کشِ پرامپت.",
+   "dataNote": "سه دوره‌ی پاداش هم‌زمان زنده‌اند و مرزشان referrals.created_at است، نه تاریخِ فال: قبل از referral_5 ⟵ ۱۰، بین دو مرز ⟵ ۵، بعد از referral_3 ⟵ ۳. هر مقایسه‌ی «هزینه‌ی پاداشِ دعوت» باید per دوره بسته شود. ⚠️ cached_tokens/reasoning_tokens تاریخچه ندارند و تا تأییدِ نامِ فیلد از لاگِ USAGE_SHAPE، صفر بودنشان دو معنی دارد."
+  }
+ ],
+ "keyMetrics": {
+  "2026-07-28-report1": {
+   "windowEnd": "2026-07-28",
+   "users": 37,
+   "paywallReachedUsers": 26,
+   "paidUsers": 3,
+   "deliveredReadings": 3,
+   "revenueToman": 199500,
+   "paywallToPayPct": 8
+  },
+  "2026-07-31-report2": {
+   "windowStart": "2026-07-31T15:26:00Z",
+   "windowEnd": "2026-07-31T22:04:00Z",
+   "windowHours": 6.6,
+   "usersTotal": 51,
+   "usersNewInWindow": 7,
+   "revenueTotalToman": 239500,
+   "revenueInWindowToman": 40000,
+   "note": "پنجره ۶.۶ ساعته و آلوده به دو کمپین یک‌باره (بک‌فیل هدیه + اولین یادآوری شبانه). نرخ ۶۹٪ بیش‌برآورد است.",
+   "realActorsInWindow": 25,
+   "newUsersInWindow": 10,
+   "unlockRatePreP": 13,
+   "unlockRatePostP": 69,
+   "everDeliveredUsers": 13,
+   "everPaidUsers": 4,
+   "giftRecipients": 38,
+   "giftThenActed": 13,
+   "giftThenDelivered": 7,
+   "unspentGiftUsers": 37,
+   "unspentGiftToman": 1110000,
+   "reminded": 23,
+   "remindedThenDaily": 7,
+   "remindedThenReading": 5,
+   "realPaymentAttempts": 5,
+   "realPaymentsApproved": 1
+  },
+  "2026-08-03-report3": {
+   "windowStart": "2026-07-31T23:16:00Z",
+   "windowEnd": "2026-08-03T14:27:00Z",
+   "windowHours": 63,
+   "usersTotal": 68,
+   "newUsersInWindow": 17,
+   "realActorsInWindow": 30,
+   "decisionPointUsers": 14,
+   "unlockedUsers": 8,
+   "unlockRatePct": 57,
+   "revenueInWindowToman": 180000,
+   "revenueTotalToman": 419500,
+   "payersTotal": 5,
+   "affordSeenPre": 8,
+   "affordUnlockedPre": 8,
+   "affordSeenPost": 8,
+   "affordUnlockedPost": 8,
+   "shortSeen": 10,
+   "shortUnlocked": 4,
+   "unspentGiftUsers": 46,
+   "unspentGiftToman": 1380000,
+   "giftedTotal": 64,
+   "giftedWithDelivery": 18,
+   "realPaymentAttempts": 5,
+   "realPaymentsConverted": 1,
+   "newUsersReturnedDay2": 4,
+   "remindedUsers": 36,
+   "dailyCardUsers": 23,
+   "newUserSources": {
+    "organic": 16,
+    "referral": 1
+   },
+   "note": "بدون هیچ کمپین تبلیغاتی (کانال‌ها pending). نزدیک‌ترین دور به حالت پایدار."
+  },
+  "2026-08-03-report4-pmf": {
+   "windowStart": "2026-07-31T23:16:00Z",
+   "windowEnd": "2026-08-03T15:07:00Z",
+   "scope": "قیف در پنجره، ولی تحلیل PMF روی کلِ تاریخِ ربات",
+   "usersTotal": 68,
+   "fullExperienceUsers": 21,
+   "payersTotal": 5,
+   "revenueTotalToman": 419500,
+   "payerConversionOfExperiencersPct": 24,
+   "arppuToman": 83900,
+   "revenuePerRegisteredUserToman": 6170,
+   "payersBoughtWithinFirstHour": 5,
+   "payersBoughtLater": 0,
+   "freeRidersAllTookExactlyOneReading": 16,
+   "cacMeasured": false,
+   "reminderScorecard": {
+    "nights": 3,
+    "sentPerNight": [
+     23,
+     31,
+     31
     ],
-    "honestLimits": [
-      "خطِ پایه‌ی **هزینه** فقط ~۲ روز دیتا دارد: llm_usage از 2026-08-30T11:16:25Z شروع شده و قبلش هیچ‌جا ثبت نمی‌شد. پس نوسانِ روزانه هنوز شناخته نیست و یک جهشِ کوچک ممکن است نویز باشد.",
-      "خطِ پایه‌ی هزینه با مرزِ 2026-09-01T17:00:00Z گرفته شد، نه دقیقاً 15:45. یعنی ~۷۵ دقیقه از دیتای **بعد از** سوییچ داخلِ خطِ پایه است. اثرش کوچک است ولی اگر عددها نزدیک بودند، خطِ پایه را با مرزِ دقیق دوباره حساب کن.",
-      "دو تغییر هم‌زمان رفتند (مدلِ خوانش و شکلِ مسیرِ ویس)، پس اگر هزینه تکان خورد، تفکیکِ متنی/صوتی تنها راهِ نسبت‌دادنِ درست است.",
-      "مقایسه‌ی رضایت باید per کوهورتِ نسخه هم دیده شود (users.first_version)، چون کاربرِ تازه و کاربرِ قدیمی ممکن است متفاوت نمره بدهند."
-    ]
+    "uniqueReached": 36,
+    "actedWithin6h": 18,
+    "actedPct": 50,
+    "tookDailyCard": 14,
+    "startedReading": 4,
+    "optOutClicks": 0,
+    "directRevenueToman": 0,
+    "sendFailedLikelyBlocked": 18,
+    "blockedButAlreadyGoneBeforeFirstReminder": 14,
+    "blockedPossiblyDueToReminder": 4
+   },
+   "openInvoicesToman": [
+    80000,
+    30000
+   ],
+   "note": "پیام‌های پشتیبانیِ دور قبل: ۱۰ ارسال، ۱ جواب. متد دور چهارم: یک سؤال در هر پیام، کوتاه‌تر، اولویت با فعالانِ دو روز اخیر."
   },
-  "measurementMarkers": [
-    {
-      "id": "intro_gif_2026_09_07",
-      "kind": "external-botfather",
-      "what": "اینتروی ربات (صفحه‌ای که تلگرام قبل از فشردنِ Start نشان می‌دهد) یک GIF گرفت. متن دست‌نخورده ماند.",
-      "changedBy": "مالک، مستقیم در BotFather — **بیرون از ریپو**",
-      "boundaryUnix": 1788798624,
-      "boundaryUtc": "2026-09-07T16:30:24Z",
-      "boundaryTehran": "2026-09-07 20:00 (۱۴۰۵/۰۶/۱۶ ساعت ۲۰:۰۰)",
-      "boundaryPrecision": "مالک گفت «همین الان»؛ مهرِ دقیق لحظه‌ی ثبت است، پس مرزِ واقعی تا ~۵ دقیقه قبل‌تر است. برای تحلیل از `created_at >= 1788798624` استفاده کن و ساعتِ ۱۹:۳۰–۲۰:۰۰ تهران را بافر بگیر.",
-      "whyNoProductVersion": "این تغییر در کد نیست، پس `PRODUCT_VERSION` بامپ نمی‌شود و `users.first_version` هم آن را نمی‌گیرد. همین فایل تنها ردِ آن است — اگر این ردیف پاک شود، تغییر برای همیشه نامرئی می‌شود.",
-      "⚠️ measurabilityLimit": "«نرخِ کانورژنِ دکمه‌ی Start» به معنیِ «چند نفر ربات را باز کردند و Start نزدند» **قابلِ اندازه‌گیری نیست**. تلگرام تا قبل از اولین /start هیچ آپدیتی به ربات نمی‌دهد؛ نه ویو، نه بازدید، نه هیچ. این محدودیتِ Bot API است نه کمبودِ ابزارِ ما، و با هیچ کدی در ربات حل نمی‌شود.",
-      "measurableProxy": {
-        "primary": "ویوِ پستِ کانال ← استارت. هر پستِ روزانه CTA با `?start=c_<code>_<post>` دارد و `props.post` روی رویدادِ start می‌نشیند؛ `tools/marketing/perf.mjs` از قبل `startRate = starts / views` را per پست حساب می‌کند. این تنها جایی است که **مخرجِ واقعی** داریم، و دقیقاً همان قدمی است که اینترو در آن نشسته.",
-        "blocker": "⚠️ `marketing/tarot/performance.md` هنوز ساخته نشده، یعنی ویوها هرگز اسکرپ و ذخیره نشده‌اند. سمتِ «قبل» این متریک **خطِ پایه‌ی ذخیره‌شده ندارد**. ویو از `t.me/s/taroot_fa` می‌آید که از محیطِ سشن بسته است (http=000) و باید از رانرِ گیت‌هاب (ورک‌فلوی Benchmark) گرفته شود.",
-        "secondary": "نرخِ تکمیلِ آنبوردینگ (`onboard_done ÷ start`) — مخرج‌دار و نسبت‌محور، پس نسبت به حجمِ ترافیک مقاوم‌تر است. اگر GIF انتظار را بهتر بسازد باید بالا برود؛ اگر فقط کنجکاوی جذب کند، پایین می‌آید."
-      },
-      "baselineFrozenAt": "2026-09-07T16:31:56Z",
-      "baseline": {
-        "newUsersPerDay": {
-          "2026-08-25..09-04": 67,
-          "2026-09-05..09-06": 570,
-          "note": "میانگین"
-        },
-        "onboardCompletionPct": {
-          "2026-08-25..09-04": 46.5,
-          "n_starts": 1422,
-          "2026-09-05..09-06": 51.8,
-          "n_starts_spike": 1975
-        },
-        "startsAttributedToChannelPost": {
-          "last21d": 434,
-          "ofTotalStarts": 4619,
-          "sharePct": 9.4,
-          "perDayExample": {
-            "260905": {
-              "posts": 11,
-              "starts": 81,
-              "median": 5,
-              "max": 37
-            },
-            "260906": {
-              "posts": 12,
-              "starts": 129,
-              "median": 7,
-              "max": 58
-            }
-          }
-        },
-        "startsBySource": {
-          "referral": 2102,
-          "campaign": 1428,
-          "organic": 1089,
-          "window": "کلِ عمر"
-        }
-      },
-      "🚨 confound": "**بدترین لحظه‌ی ممکن برای اندازه‌گیریِ قبل/بعد.** کاربرِ جدید در سه روزِ اخیر ۸٫۶ برابر شده (۶۷ ⟵ ۵۷۰ در روز). هر تغییری در نرخِ ورود در روزهای آینده به‌احتمالِ زیاد اثرِ همین موجِ ترافیک است نه اثرِ GIF. ⇒ مقایسه‌ی خامِ «کاربرِ جدید در روز» قبل/بعد **بی‌اعتبار** است. فقط سنجه‌های **نسبتی با مخرجِ هم‌دوره** (startRate per پست، و onboard÷start) قابلِ استنادند.",
-      "howToAnalyze": [
-        "۱) per پست: `starts/views` را برای پست‌های ≥۴۸ ساعت، قبل و بعد از مرز مقایسه کن. هر پست یک نمونه است، پس n = تعدادِ پست نه تعدادِ کاربر.",
-        "۲) `onboard_done ÷ start` روزانه، با مرزِ 1788798624.",
-        "۳) ترکیبِ منبعِ ورود (`kind`) را هم‌زمان گزارش کن — اگر سهمِ رفرال/کمپین عوض شده باشد، هر تفاوتی می‌تواند اثرِ ترکیب باشد نه اثرِ اینترو.",
-        "۴) حداقل ۱۰ تا ۱۴ روزِ بعد از مرز صبر کن، و ترجیحاً تا وقتی موجِ ترافیکِ ۵ تا ۷ سپتامبر فروکش کند."
-      ]
+  "2026-08-08-report5": {
+   "windowStart": "2026-08-03T15:07:00Z",
+   "windowEnd": "2026-08-08T07:59:00Z",
+   "windowHours": 113,
+   "note": "اولین دور با ترافیکِ تبلیغ. تبلیغ لینکِ اختصاصی نداشت پس همه organic ثبت شدند و CAC باز هم اندازه‌گیری نشد.",
+   "usersTotal": 110,
+   "newUsersInWindow": 42,
+   "realActorsInWindow": 70,
+   "experiencersAll": 40,
+   "payersTotal": 6,
+   "revenueInWindowToman": 200000,
+   "revenueTotalToman": 619500,
+   "payerConversionOfExperiencersPct": 15,
+   "revenuePerRegisteredUserToman": 5632,
+   "revenuePerRegisteredUserAdjustedToman": 4160,
+   "revenuePerNewUserInWindowToman": 4760,
+   "funnelWindow": {
+    "start": 43,
+    "gate_shown": 36,
+    "gate_passed": 34,
+    "onboard_done": 39,
+    "spread_selected": 42,
+    "paywall_shown": 41,
+    "reading_started": 21,
+    "product_delivered": 20,
+    "payment_approved": 2
+   },
+   "paymentsWindow": {
+    "created": 22,
+    "approved": 3,
+    "pending": 7,
+    "canceled": 8,
+    "rejected": 3,
+    "approvedRatePct": 14,
+    "invoicesOnFloorToman": 1130000
+   },
+   "priceVsGift": {
+    "cheapSelected": 28,
+    "cheapDelivered": 20,
+    "cheapRatePct": 71,
+    "expensiveSelected": 30,
+    "expensiveDelivered": 2,
+    "expensiveRatePct": 7,
+    "paywallCantAfford": 30,
+    "paywallCanAfford": 21
+   },
+   "spreadSelections": {
+    "love": 21,
+    "three": 9,
+    "celtic": 8,
+    "yesno": 6,
+    "career": 6,
+    "choice": 4,
+    "inner": 4,
+    "family": 3,
+    "migration": 3
+   },
+   "unspentGiftUsers": 66,
+   "unspentGiftToman": 1980000,
+   "gateDropped": 2,
+   "reminderStamped": 97,
+   "reminderDelivered": 61,
+   "reminderOptOut": 1,
+   "newUserSources": {
+    "organic": 40,
+    "campaign": 1,
+    "referral": 1
+   }
+  },
+  "2026-08-15-report6": {
+   "windowStart": "2026-08-08T07:59:00Z",
+   "windowEnd": "2026-08-15T15:35:00Z",
+   "windowHours": 175,
+   "note": "مرزِ v2.9.0 در ۲۰۲۶-۰۸-۰۸ ۱۰:۳۶ است، پس تقریباً کلِ پنجره «بعد از هم‌ترازیِ کاتالوگ» است.",
+   "usersTotal": 145,
+   "newUsersInWindow": 35,
+   "realActorsInWindow": 87,
+   "experiencersAll": 71,
+   "payersTotal": 9,
+   "revenueInWindowToman": 84000,
+   "revenueTotalToman": 703500,
+   "payerConversionOfExperiencersPct": 12.7,
+   "revenuePerRegisteredUserToman": 4852,
+   "revenuePerRegisteredUserAdjustedToman": 3734,
+   "funnelWindow": {
+    "start": 38,
+    "gate_shown": 35,
+    "gate_check": 34,
+    "gate_passed": 34,
+    "onboard_done": 33,
+    "spread_selected": 39,
+    "question_submitted": 38,
+    "cards_picked": 38,
+    "paywall_shown": 38,
+    "reading_started": 33,
+    "product_delivered": 31,
+    "feedback": 31,
+    "daily_card": 48,
+    "first_value": 32,
+    "credit_granted": 39,
+    "recharge_started": 24,
+    "receipt_submitted": 4,
+    "payment_approved": 3,
+    "payment_rejected": 2,
+    "daily_reminder_sent": 79,
+    "daily_reminder_off": 3
+   },
+   "paywallToUnlockPct": 87,
+   "paymentsWindow": {
+    "created": 35,
+    "approved": 3,
+    "pending": 4,
+    "canceled": 19,
+    "rejected": 2,
+    "approvedRatePct": 8.6,
+    "invoicesOnFloorToman": 1164000
+   },
+   "expensiveSpreadsPostAlignment": {
+    "celticSelected": 8,
+    "celticDelivered": 0,
+    "open5Selected": 6,
+    "open5Delivered": 0
+   },
+   "affordAtPaywall": {
+    "cantAfford": 29,
+    "canAfford": 31
+   },
+   "statesNow": {
+    "idle": 73,
+    "confirm_pay": 35,
+    "pay_receipt": 9,
+    "choose_spread": 9,
+    "await_question": 7,
+    "onboard_name": 6,
+    "gate_join": 3,
+    "feedback": 2,
+    "pay_amount": 1
+   },
+   "unspentGiftUsers": 68,
+   "unspentGiftToman": 2050000,
+   "reminderStamped": 133,
+   "reminderDelivered": 89,
+   "reminderBlockedPct": 33,
+   "reminderOptOut": 3,
+   "spreadSelectionsTop": {
+    "love": 31,
+    "loveDelivered": 25
+   },
+   "newUserSources": {
+    "organic": 31,
+    "referral": 3,
+    "empty": 1
+   },
+   "freeRidersOneReading": 60,
+   "freeRidersTwoReadings": 2,
+   "hoursToFirstPayment": [
+    0,
+    0.1,
+    0.1,
+    0.2,
+    0,
+    140.3,
+    192.1,
+    0.1,
+    0.1
+   ]
+  },
+  "2026-08-26-report7": {
+   "windowStart": "2026-08-21T00:16:00Z",
+   "windowEnd": "2026-08-26T06:59:00Z",
+   "windowHours": 126,
+   "note": "مرز = v3.25.0 (باز شدنِ UX v2 برای همه). پنجره ۵.۳ روز. ⚠️ سه آلودگی: روزِ لانچ ربات خاموش بود، برودکستِ ۲۲ اوت با لانچ یک رویدادِ واحد است، و ۷۹٪ کاربرانِ جدید در دو روزِ آخر آمدند (سانسورِ راست).",
+   "usersTotal": 347,
+   "newUsersInWindow": 175,
+   "newUsersSinceLastRound": 203,
+   "activeUsersInWindow": 295,
+   "experiencersAll": 226,
+   "payersTotal": 13,
+   "revenueTotalToman": 982500,
+   "revenueInWindowToman": 240000,
+   "packagePaymentsApproved": 3,
+   "funnelWindowUniqueUsers": {
+    "start": 182,
+    "gate_shown": 175,
+    "gate_check": 159,
+    "gate_passed": 156,
+    "onboard_done": 147,
+    "topic_selected": 158,
+    "spread_selected": 157,
+    "question_submitted": 147,
+    "cards_picked": 146,
+    "reading_paid": 142,
+    "reading_started": 147,
+    "product_delivered": 145,
+    "feedback": 123,
+    "first_value": 137,
+    "daily_card": 68,
+    "lucky_card": 118,
+    "lucky_reminder": 38,
+    "lucky_reminder_sent": 13,
+    "credit_granted": 174,
+    "paywall_shown": 67,
+    "recharge_started": 32,
+    "receipt_submitted": 3,
+    "payment_approved": 3,
+    "ab_exposure": 175
+   },
+   "startToDeliveredPct": 79.7,
+   "satisfaction": {
+    "ratings": 188,
+    "mean": 3.98,
+    "pct4or5": 67.6,
+    "pct1or2": 11.2,
+    "responseRatePct": 82,
+    "dist": {
+     "1": 16,
+     "2": 5,
+     "3": 40,
+     "4": 32,
+     "5": 95,
+     "none": 42
     }
+   },
+   "lucky": {
+    "hands": 154,
+    "users": 118,
+    "repeatUsersPct": 17.8,
+    "firstHandMean": 2.02,
+    "firstHandDesign": 2.03,
+    "nonFirstHands": 36,
+    "nonFirstMean": 0.94,
+    "chiSq": 2.61,
+    "df": 3,
+    "p": 0.46,
+    "diamondsGranted": 272,
+    "optInOn": 34,
+    "remindedUsers": 13,
+    "playedAfterReminder": 9
+   },
+   "economy": {
+    "grantedTotal": 2084,
+    "purchased": 140,
+    "consumed": 1255,
+    "held": 1263,
+    "giftFundedPct": 93.7,
+    "unspentPctOfIssued": 50.2,
+    "unexplainedGap": -294,
+    "ghostUserIds": 22,
+    "byKind": {
+     "welcome": 1251,
+     "lucky": 272,
+     "referral": 450,
+     "streak": 11,
+     "support": 100
+    }
+   },
+   "readings": {
+    "delivered": 335,
+    "deliveredUsers": 226,
+    "repeat2plusUsers": 71,
+    "exactlyOneUsers": 155,
+    "canceled": 72,
+    "pending_payment": 66,
+    "pendingBeforeLaunch": 63,
+    "pendingAfterLaunch": 3,
+    "started": 7,
+    "paid": 3,
+    "refunded": 3
+   },
+   "sizeMix": {
+    "3": 135,
+    "5": 84,
+    "10": 10,
+    "2": 1
+   },
+   "referral": {
+    "rows": 61,
+    "referrers": 36,
+    "rewarded": 49,
+    "shareOfNewUsersPct": 29,
+    "prevRoundSharePct": 8.6,
+    "inviteCoefficient": 0.18
+   },
+   "retention": {
+    "multiDayUsers": 51,
+    "multiDayPct": 17.3,
+    "active24h": 138,
+    "active48h": 176,
+    "activeDays": {
+     "1": 244,
+     "2": 37,
+     "3": 2,
+     "4": 8,
+     "5": 4
+    }
+   },
+   "lovesItUsers": 38,
+   "currentStates": {
+    "idle": 186,
+    "choose_spread": 49,
+    "confirm_pay": 39,
+    "gate_join": 24,
+    "onboard_name": 13,
+    "await_question": 11,
+    "pay_receipt": 11,
+    "pay_amount": 6
+   },
+   "legacyStranding": {
+    "confirm_payBeforeLaunch": 38,
+    "confirm_payAfterLaunch": 1,
+    "note": "سرگردانیِ فلوی قدیم است، نه ساخته‌ی نسخه‌ی جدید"
+   }
+  },
+  "2026-09-11-unit-economics": {
+   "report": "analytics/tarot/reports/2026-09-11-unit-economics.md",
+   "scope": "اقتصادِ واحد per کانالِ جذب (سؤالِ صریحِ مالک: هر کانال چقدر خرج می‌سازد و چقدر برمی‌گرداند)",
+   "costWindowStart": "2026-08-30T11:16:00Z",
+   "costWindowEnd": "2026-09-11T08:40:00Z",
+   "costWindowDays": 11.89,
+   "note": "⚠️ هرجا هزینه و درآمد کنارِ هم آمده، هر دو از همین پنجره‌ی ۱۱٫۸۹ روزه خوانده شده‌اند. llm_usage تاریخچه ندارد و قبل از ۳۰ اوت هیچ ردیفی نیست، پس مقایسه‌ی «درآمدِ ۶۵ روز» با «هزینه‌ی ۱۲ روز» ممنوع است.",
+   "monthlyRunRateToman": {
+    "revenue": 10433137,
+    "modelCost": -9323687,
+    "adCost": -6194553,
+    "net": -5085103
+   },
+   "modelCostUsdPerMonth": 39.5,
+   "channelPnlMonthlyToman": {
+    "campaign": -2788151,
+    "organic": -48293,
+    "referral": -2278847,
+    "referralWithReferrerReward": -4042892
+   },
+   "cleanCohortByChannel": {
+    "campaign": {
+     "users": 1514,
+     "payers": 31,
+     "payRatePct": 2.05,
+     "revenueToman": 2640000,
+     "modelCostToman": 1289929,
+     "marginPerUserToman": 892
+    },
+    "organic": {
+     "users": 551,
+     "payers": 7,
+     "payRatePct": 1.27,
+     "revenueToman": 480000,
+     "modelCostToman": 499140,
+     "marginPerUserToman": -35
+    }
+   },
+   "diamondSupply": {
+    "free": 44231,
+    "sold": 2194,
+    "freePct": 95.3,
+    "revenuePerSoldDiamondToman": 2429,
+    "costToServePerDiamondToman": 132,
+    "grossMarginPct": 94.6
+   },
+   "retry": {
+    "readingsNeedingSecondCallPct": 6.4,
+    "retryShareOfAllReadingCallsPct": 6.37,
+    "wastedSpendUsd": 0.875,
+    "wastedSharePct": 5.69,
+    "deliveredHeadlinesPassingConnectiveTest": "7391/7391",
+    "verdict": "هر retryِ سرخط در نهایت موفق شده؛ حذفِ گارد ~۲۰۰k تومان در ماه می‌دهد در برابرِ انتشارِ ~۲۰۰ سرخطِ قاعده‌شکن. توصیه: دست نزن."
+   },
+   "promptCache": {
+    "constantPrefixChars": 4059,
+    "shareOfSystemPromptPct": 66,
+    "shareOfTotalInputPct": "37 تا 57",
+    "optimisticCeilingTomanPerMonth": 470000,
+    "note": "جدولِ دانشِ کارت هرگز کامل فرستاده نمی‌شود (فقط کارت‌های کشیده‌شده، ~۹٪ ورودی) و ذاتاً per فال فرق می‌کند، پس کش‌شدنی نیست. تنها پیشوندِ ثابت، پرامپتِ سیستمِ خودمان است. ⚠️ مکانیزم/نرخِ کشِ OpenRouter تأییدنشده است (صفحه‌اش از این محیط باز نمی‌شود)."
+   },
+   "leversMonthlyToman": {
+    "referralRewardFiveToTwo": 2096000,
+    "closeLosingCampaigns": 3033199,
+    "reviewLuckyCard": "1300000 تا 2000000",
+    "welcomeGiftThreeToTwo": 1468000,
+    "systemPromptCache": 470000,
+    "dropHeadlineRetry": 200000,
+    "invoiceCloseRateDoubling": 10400000
+   },
+   "caveat": "⚠️ کلِ حکمِ کمپین‌ها روی ۷ روز نرخِ تبلیغِ دستیِ خودِ مالک ($۰٫۰۰۳۵ تا $۰٫۰۱۶۹ per کاربر) ایستاده. تأییدش لازم است."
+  },
+  "2026-09-11-generational": {
+   "report": "analytics/tarot/reports/2026-09-11-generational-attribution.md",
+   "scope": "اتریبیوشنِ نسلی (درختی) per کانالِ جذب — سؤالِ صریحِ مالک: کاربری که خودش خرج نمی‌کند ولی دعوت‌کننده‌ی یک پرداخت‌کننده است، به نفعِ کانالش شمرده شود (لایه ۲، ۳، ۴)",
+   "method": "درخت از referrals ساخته می‌شود (referee_id یکتاست ⟵ هر کاربر دقیقاً یک پدر، صفر دوباره‌شماری). ریشه = کاربرِ بدونِ ردیفِ دعوت‌شدگی؛ کانالش از users.first_source.",
+   "usdToToman": 236043,
+   "payRateByDepth": {
+    "0": 2.38,
+    "1": 0.67,
+    "2": 0.36,
+    "3": 0.29,
+    "4": 0.81,
+    "5plus": 0.0
+   },
+   "usersByDepth": {
+    "0": 2441,
+    "1": 1194,
+    "2": 552,
+    "3": 350,
+    "4": 248,
+    "5": 127,
+    "6": 65,
+    "7": 14,
+    "8": 2
+   },
+   "revenueByDepthToman": {
+    "0": 4557500,
+    "1": 485000,
+    "2": 150000,
+    "3": 60000,
+    "4": 120000,
+    "5plus": 0
+   },
+   "referralLayers": {
+    "referredUsersTotal": 2552,
+    "depth2plusUsers": 1358,
+    "depth2plusSharePct": 53,
+    "depth2plusRevenueToman": 330000,
+    "depth2plusNetToman": -665300,
+    "allLayersNetExclRewardsToman": -966000,
+    "verdict": "امتیازِ نسلی رفرال را نجات نمی‌دهد: هیچ لایه‌ای سودده نیست و نرخِ پرداخت با هر لایه تقریباً نصف می‌شود. حکمِ «پاداشِ دعوت را کم کن» تقویت شد."
+   },
+   "campaignVerdictChanges": {
+    "dMoYW": "−۲۲۴٬۰۰۰ (مسطح) ⟵ +۶۹٬۵۰۰ (درختی). نگه داشته شود — حکمِ گزارشِ قبلی غلط بود.",
+    "i2kUp": "−۳۲۴٬۰۰۰ ⟵ −۶۴۲٬۶۰۰. بدترینِ جدول. بیشترین تکثیر (۳۰۱ ریشه ⟵ ۸۵۰ نفر) با تقریباً صفر درآمدِ نسلی: کارخانه‌ی رفرال.",
+    "VAH75": "+۱۴۸٬۰۰۰ ⟵ −۲۱٬۶۰۰ (نسبت ۰٫۹۸، عملاً سربه‌سر).",
+    "organic": "−۳۵ تومان per کاربر ⟵ +۵۱۹٬۶۰۰ با نسل."
+   },
+   "modelCostStructure": {
+    "readingShareOfBillPct": 98.2,
+    "repairShareOfBillPct": 0.7,
+    "transcribeShareOfBillPct": 1.1,
+    "dailyCardCalls": 0,
+    "costPerDeliveredReadingUsd": 0.002083,
+    "costPerDeliveredReadingToman": 492,
+    "derivedRateUsdPerMtokIn": 0.14,
+    "derivedRateUsdPerMtokOut": 1.26,
+    "outputShareOfBillPct": 74,
+    "mixPct": {
+     "3card": 72.9,
+     "5card": 23.6,
+     "10card": 3.5
+    },
+    "avgOutputTokens": 1140,
+    "note": "خروجی ۹ برابرِ ورودی قیمت دارد و ~۷۴٪ صورت‌حساب است ⟵ هر راهی که طولِ خروجی را کم نکند حداکثر یک‌چهارمِ صورت‌حساب را لمس می‌کند. luna از gemini-2.5-flash دو برابر ارزان‌تر است، پس سوییچِ مدل احتمالاً هزینه را بالا می‌برد."
+   }
+  }
+ },
+ "featureVerdicts": {
+  "rule": "هر ابداع یکی از سه حکم را می‌گیرد: مفید ⟶ دوباره در همان جهت سرمایه‌گذاری کن و ابداعِ بعدی را از همان خانواده انتخاب کن؛ مضر ⟶ متوقفش کن؛ بی‌تفاوت ⟶ لازم نیست برداشته شود ولی تمرکزِ بیشتر هم نمی‌گیرد. اگر نمونه کافی نیست حکم نده و بنویس چه عددی لازم است.",
+  "investmentDirection": "دورِ ۷ خانواده‌ی برنده را عوض کرد: «برداشتنِ مانع از جلسه‌ی اول» به سقفش رسیده (۸۰٪ استارت تا تحویل، در حجمِ ۵ برابر). گلوگاه حالا **فالِ دوم** است (۱۵۵ نفر از ۲۲۶ نفر دقیقاً یک فال گرفتند). پس خانواده‌ی سرمایه‌گذاریِ دورِ بعد «دلیلِ برگشتن» است: قلابِ یادآوریِ کارآمد، و بستنِ ناهماهنگیِ هدیه‌ی ۵ الماس با کفِ قیمتِ ۳ الماس (باقی‌مانده‌ی ۲ هیچ چیزی نمی‌خرد).",
+  "items": [
+   {
+    "feature": "هدیه‌ی خوش‌آمد ۳۰k",
+    "version": "2.0.0",
+    "verdict": "useful",
+    "evidence": "نرخِ عبور ۱۳٪ ← ۵۷٪؛ تجربه‌کننده‌ی کامل ۳ ← ۲۱",
+    "nextAction": "سرمایه‌گذاری بیشتر در همان جهت: تستِ A/B هدیه‌ی دوفالی (H13)"
+   },
+   {
+    "feature": "حذفِ مرحله‌ی «چقدر شارژ کنم»",
+    "version": "2.0.0",
+    "verdict": "useful",
+    "evidence": "ریزشِ مرحله‌ی amount عملاً صفر شد",
+    "nextAction": "همان جهت: حذفِ هر مرحله‌ی دیگرِ قابلِ حذف در مسیرِ پرداخت"
+   },
+   {
+    "feature": "یادآوریِ شبانه‌ی کارت روز",
+    "version": "2.0.0",
+    "verdict": "useful-for-retention-only",
+    "evidence": "۱۳۳ مهر / ۸۹ تحویل (۳۳٪ بلاک)، ۴۸ کارت روز، اولین انصراف‌ها (۳ نفر)، هنوز ۰ ریال درآمدِ مستقیم",
+    "nextAction": "بیشتر کردنش غلط است، بهتر کردنش درست: پیامِ متفاوت برای کاربرِ دارای فاکتورِ باز یا فالِ ناتمام (P2)"
+   },
+   {
+    "feature": "تخفیفِ ۲۰٪ بدونِ کد",
+    "version": "2.0.0",
+    "verdict": "neutral",
+    "evidence": "۳ فاکتورِ تخفیف‌دار، هر سه سرِ رسید مرد",
+    "nextAction": "نگه‌داشتن بدونِ سرمایه‌گذاری؛ مسیرِ تخفیفِ جدید ساخته نشود"
+   },
+   {
+    "feature": "صفحه‌ی «موجودی کافیه»",
+    "version": "2.5.0",
+    "verdict": "neutral",
+    "evidence": "can_afford: ۸ از ۸ عبور در هر دو نسخه (قبل و بعد)",
+    "nextAction": "نگه‌داشتن (متن شفاف‌تر است) ولی وقتِ بیشتری روی کپیِ این صفحه صرف نشود"
+   },
+   {
+    "feature": "پیشنهاددهنده‌ی امتیازی",
+    "version": "2.1.0",
+    "verdict": "unmeasurable",
+    "evidence": "رویدادی که منبعِ انتخابِ فال را تفکیک کند وجود ندارد",
+    "nextAction": "اول ابزار: پراپِ منبعِ انتخابِ فال (پیشنهاد در برابر کاتالوگ) اضافه شود"
+   },
+   {
+    "feature": "جوابِ قاطع + نشونه",
+    "version": "2.4.0",
+    "verdict": "insufficient-sample",
+    "evidence": "فقط ۲ فالِ تصمیم‌محور در پنجره",
+    "nextAction": "دورِ بعد دوباره سنجیده شود؛ حدنصاب: ۱۰ فالِ تصمیم‌محور"
+   },
+   {
+    "feature": "فال عشق سه‌کارتی ۳۰k (هم‌اندازه‌ی هدیه)",
+    "version": "2.7.0",
+    "verdict": "useful",
+    "evidence": "۳۱ انتخاب و ۲۵ تحویل — همچنان پرانتخاب‌ترین و پرتحویل‌ترین فال",
+    "nextAction": "تثبیت‌شده؛ الگویش روی کلِ کاتالوگ اجرا شد"
+   },
+   {
+    "feature": "گیتِ عضویت کانال",
+    "version": "2.7.0",
+    "verdict": "useful",
+    "evidence": "۳۵ دیدند، ۳۴ رد شدند (۱ ریزش)",
+    "nextAction": "نگه‌داشتن؛ گیتِ دوم اضافه نشود"
+   },
+   {
+    "feature": "آزمایشِ intro_order",
+    "version": "2.8.0",
+    "verdict": "insufficient-sample",
+    "evidence": "تجمعی CTW ۹۶.۰٪ به نفع control، ولی در برشِ بعد از هم‌ترازیِ کاتالوگ CTW ۸۲.۰٪ یعنی زیرِ آستانه",
+    "nextAction": "ادامه تا ~۲۰ تحویل per شاخه در برشِ پس از هم‌ترازی (الان ۱۸ و ۱۱)"
+   },
+   {
+    "feature": "فکتِ ۸۶٪",
+    "version": "2.7.1",
+    "verdict": "unmeasurable",
+    "evidence": "در هر دو شاخه‌ی آزمایش حاضر بود، پس اثرِ خودش جدا نشد",
+    "nextAction": "آزمایشِ با/بدونِ فکت، نه جابه‌جایی‌اش"
+   },
+   {
+    "feature": "موضعِ هوش مصنوعی در فلو",
+    "version": "2.7.3",
+    "verdict": "unmeasurable",
+    "evidence": "آزمایش پیش از نمونه‌ی معنادار با تصمیمِ مالک متوقف شد",
+    "nextAction": "بیرون از فلو، روی بنر تبلیغاتی"
+   },
+   {
+    "feature": "هم‌ترازیِ کاتالوگ با هدیه (v2.9.0)",
+    "version": "2.9.0",
+    "verdict": "useful",
+    "evidence": "عبور از پی‌وال ۵۱٪ ← ۸۷٪؛ تجربه‌کننده‌ی کامل ۴۰ ← ۷۱",
+    "nextAction": "همان جهت، ولی دیگر بالادست نه: مانعِ بعدی رسید است"
+   },
+   {
+    "feature": "لنگرِ پریمیوم (صلیب سلتی ۱۰۰k + open5 ۵۰k)",
+    "version": "2.9.0",
+    "verdict": "harmful",
+    "evidence": "صلیب سلتی ۸ انتخاب / ۰ تحویل؛ open5 ۶ انتخاب / ۰ تحویل. ۱۴ کاربر به بن‌بست رفتند.",
+    "nextAction": "P1: کوچک‌سازی طبق قانونِ ۱۰k per کارت یا بیرون بردن از کاتالوگِ پیش‌فرض",
+    "selfCorrection": "دورِ قبل خودم استدلال کرده بودم که لنگر بماند چون پرسونای پرداخت‌کننده می‌خرد. دیتا این را رد کرد."
+   },
+   {
+    "feature": "UX v2 برای همه (v3.25.0)",
+    "version": "3.25.0",
+    "verdict": "useful",
+    "evidence": "قیفِ استارت تا تحویل ۸۰٪ در حجمِ ۵ برابر (دورِ ۶: ۸۲٪ روی ۳۳ استارت). ۱۳۵ نفر از ۱۷۵ کاربرِ جدید (۷۷٪) فالِ تحویل‌شده گرفتند.",
+    "nextAction": "همان جهت، ولی گلوگاه دیگر جلسه‌ی اول نیست؛ سراغِ فالِ دوم برو."
+   },
+   {
+    "feature": "کسرِ اعتبار در لحظه‌ی انتخابِ اندازه (PAY_AT_SIZE)",
+    "version": "3.13.0",
+    "verdict": "useful",
+    "evidence": "فالِ سرگردانِ pending_payment: ۶۳ تا قبل از لانچ، فقط ۳ تا بعدش. مسیرِ «کارت‌ها را بچین بعد پول بده» عملاً حذف شد.",
+    "nextAction": "همان جهت: حذفِ باقیِ نقاطِ تصمیمِ دیرهنگام."
+   },
+   {
+    "feature": "کارتِ شانس + کفِ دو الماسِ دستِ اول",
+    "version": "3.9.0 / 3.21.0",
+    "verdict": "useful",
+    "evidence": "۱۱۸ از ۱۷۵ کاربرِ جدید (۶۵٪) بازی کردند. کف دقیقاً طبقِ طراحی کار کرد (میانگینِ دستِ اول ۲.۰۲ در برابرِ طراحیِ ۲.۰۳) و دست‌های غیرِ اول از هایپرژئومتریک قابلِ تفکیک نیستند (χ²=۲.۶۱، df=۳، p≈۰.۴۶، n=۳۶ کم‌توان).",
+    "caveat": "فقط ۱۸٪ بیش از یک دست بازی کردند. یعنی جذبِ اول عالی است، تکرار نه.",
+    "nextAction": "همان خانواده: برداشتنِ «صفر» از دستِ دوم به بعد (هزینه‌ی این پنجره ۱۳ الماس بود) و بردنِ نردبانِ استریک داخلِ همان مکانیک."
+   },
+   {
+    "feature": "رفرالِ ۱۰ الماس فقط به دعوت‌کننده",
+    "version": "3.8.0 / 3.23.0",
+    "verdict": "useful",
+    "evidence": "سهمِ رفرال از کاربرانِ جدید ۸.۶٪ ← ۲۹٪ (۵۱ از ۱۷۵). ۶۱ دعوت از ۳۶ دعوت‌کننده، ۸۰٪ پاداش‌گرفته. ضریبِ دعوت ۰.۱۸.",
+    "caveat": "۱۲ دعوت (۲۰٪) پاداش نگرفته‌اند؛ دلیلش (دعوت‌شده هنوز فال نگرفته، یا ردِ بی‌صدای isNew) در دیتا تفکیک نشده.",
+    "nextAction": "همان جهت: برچسبِ دکمه شرط را بگوید، و ردِ بی‌صدا دیده شود."
+   },
+   {
+    "feature": "حذفِ یادآوریِ شبانه‌ی کارتِ روز",
+    "version": "3.23.0",
+    "verdict": "harmful",
+    "evidence": "تنها استدلالِ زمانیِ تمیزِ دیتاست: کاربرِ بازگشتیِ روزانه دقیقاً از روزِ حذف افت کرد. جانشینش (یادآورِ opt-inِ کارتِ شانس) فقط به ۱۳ نفر از ۳۴ نفرِ آپت-این رسیده.",
+    "nextAction": "متوقفش کن یعنی برگردان: اول باگِ ارسالِ یادآورِ کارتِ شانس را پیدا کن (۶۲٪ آپت-این‌ها هیچ‌وقت پیام نگرفته‌اند)، بعد opt-in را به بعد از اولین دستِ برنده منتقل کن."
+   },
+   {
+    "feature": "یادآورِ opt-inِ کارتِ شانس",
+    "version": "3.9.0",
+    "verdict": "unmeasurable",
+    "evidence": "فقط ۱۳ کاربر پیام گرفته‌اند (۲۵ ارسال). از همان ۱۳ نفر، ۹ نفر (۶۹٪) ظرفِ ۱۸ ساعت بازی کردند — امیدوارکننده ولی زیرِ آستانه.",
+    "needed": "n≥۳۰ کاربرِ پیام‌گرفته تا حکم بگیرد. تا آن موقع عددِ ۶۹٪ نقل نشود."
+   },
+   {
+    "feature": "فالِ ۱۰ کارتی در کاتالوگِ اندازه‌محور",
+    "version": "3.9.0",
+    "verdict": "harmful",
+    "evidence": "۵۰ انتخاب، ۱۰ تحویل (۲۰٪) — بدترین نرخِ محصول. حداکثر ۸.۹٪ کاربران اصلاً ۱۰ الماس دارند، پس ۲۸ نفر بزرگ‌ترین گزینه را زدند و دست‌خالی برگشتند.",
+    "nextAction": "با variant(): یا قیمت به ۷، یا خاکستری‌کردن تا موجودی کافی نشود، یا حذف از کاتالوگِ کاربرِ کم‌موجودی."
+   },
+   {
+    "feature": "گیتِ عضویتِ کانال",
+    "version": "2.7.0",
+    "verdict": "costly-but-not-decided",
+    "evidence": "۱۹ نفر (۱۱٪ استارت‌ها) در گیت ماندند و ۱۶ نفرشان (۸۴٪) اصلاً دکمه‌ی بررسی را نزدند — یعنی مسئله CTA است نه مقاومت در برابرِ عضویت.",
+    "caveat": "ارزشِ عضوِ کانال (دلیلِ وجودِ گیت) در این حساب لحاظ نشده، پس «حذفش کن» توصیه‌ی یک‌طرفه است.",
+    "nextAction": "اول کپیِ صفحه را عوض کن؛ اگر ریزش ماند، آن‌وقت حذف با variant()."
+   },
+   {
+    "feature": "گنجینه‌ی ۹۳۶ متنِ کارتِ روز",
+    "version": "3.24.0",
+    "verdict": "unmeasurable",
+    "evidence": "فقط ۶۸ کاربر کارتِ روز گرفتند (۸۴ رویداد) در حالی که کارتِ شانس ۱۱۸ کاربر گرفت. بن‌بستِ «گنجینه آماده نیست» حذف شد ولی خودِ فیچر ترافیکِ کمی دارد.",
+    "needed": "تفکیکِ «چند نفر دکمه را دیدند» از «چند نفر زدند»؛ امروز اولی ثبت نمی‌شود."
+   },
+   {
+    "feature": "خوانشِ v4 + لحنِ v2",
+    "version": "3.7.0 / 3.3.0",
+    "verdict": "useful",
+    "evidence": "میانگینِ نمره ۳.۹۸ از ۱۸۸ رأی با نرخِ پاسخِ ۸۲٪ — نرخِ پاسخ خودش نشانه‌ی درگیری است. ۶۷.۶٪ نمره‌ی ۴ یا ۵.",
+    "caveat": "پایه‌ی مقایسه‌ی قبل از لانچ فقط ۱۱ رأی دارد، پس «بهتر شد» اثبات‌پذیر نیست؛ فقط «خوب است» اثبات‌پذیر است.",
+    "nextAction": "نمره را per شماره‌ی فال بشکن (اول در برابرِ دوم و سوم) تا معلوم شود اثرِ تازگی است یا کیفیتِ پایدار."
+   }
   ]
+ },
+ "personas": {
+  "status": "hypothesis-low-sample-two-payer-types",
+  "payer": {
+   "name": "تصمیم‌گیرِ فوری",
+   "definingTrait": "با یک سؤالِ واقعی و فوری وارد می‌شود و در همان نشست تمامش می‌کند",
+   "evidence": "۷ از ۹ پرداخت‌کننده زیر ۱۲ دقیقه — دیگر «صفر استثنا» نیست",
+   "notPredictiveBy": [
+    "حوزه‌ی تمرکز",
+    "نوع فال",
+    "زمانِ ورود"
+   ]
+  },
+  "nonPayer": {
+   "name": "رایگان‌گیرِ یک‌باره",
+   "definingTrait": "دقیقاً یک فال (اندازه‌ی هدیه) مصرف می‌کند و برنمی‌گردد",
+   "evidence": "۶۰ از ۶۲ رایگان‌گیر دقیقاً یک فال"
+  },
+  "caveat": "با ۵ پرداخت‌کننده این پرسونا فرضیه است نه یافته؛ رفتاری است نه جمعیت‌شناختی، پس مستقیم قابلِ هدف‌گیری در تبلیغات نیست.",
+  "payerReturning": {
+   "name": "بازگشتیِ چندروزه",
+   "definingTrait": "چند روز بعد از ثبت‌نام برمی‌گردد و همان‌موقع می‌خرد",
+   "evidence": "۲ از ۹ پرداخت‌کننده (۱۴۰.۳ و ۱۹۲.۱ ساعت)؛ هیچ‌کدام یوزرنیمِ عمومی ندارند",
+   "note": "وجودِ این دسته H12 را باطل کرد"
+  },
+  "round7": {
+   "note": "با ۱۳ پرداخت‌کننده در کلِ عمرِ محصول، پرسونای پولی همچنان **فرضیه** است. ولی این دور برای اولین بار یک پرسونای غیرِپولیِ قابلِ اندازه‌گیری داریم که هدفِ فعلیِ مالک (درگیری، نه پول) دقیقاً روی آن می‌نشیند.",
+   "lover": {
+    "size": 38,
+    "definition": "هم نمره‌ی ۵ داده و هم ≥۲ فالِ تحویل‌شده دارد",
+    "why": "قوی‌ترین سیگنالِ «دوستش دارد» در کلِ دیتاست. مستقل از پرداخت.",
+    "action": "همین گروه باید منبعِ مصاحبه و منبعِ رفرال باشد."
+   },
+   "oneAndDone": {
+    "size": 155,
+    "definition": "دقیقاً یک فالِ تحویل‌شده دارد",
+    "why": "۶۹٪ همه‌ی تجربه‌کننده‌ها. بزرگ‌ترین گلوگاهِ محصول.",
+    "action": "دلیلِ برگشتن بساز، نه ارزشِ بیشتر در جلسه‌ی اول."
+   },
+   "giftRider": {
+    "size": 199,
+    "definition": "موجودیِ ۱ تا ۵ الماس",
+    "why": "۵۱٪ کاربران روی مبلغی نشسته‌اند که ممکن است هیچ فالی نخرد (کفِ قیمت ۳ الماس است).",
+    "action": "هیستوگرامِ داخلِ سطلِ ۱ تا ۵؛ اگر توده روی ۲ باشد، هدیه یا کفِ قیمت باید جابه‌جا شود."
+   },
+   "payer": {
+    "size": 13,
+    "definition": "حداقل یک پرداختِ approved",
+    "why": "۳ پرداختِ بسته‌ای در کلِ پنجره. هر نسبتی با مخرجِ پرداخت بی‌معناست.",
+    "action": "این دور عمداً هدف نیست (تصمیمِ صریحِ مالک: هدف درگیری است نه درآمد)."
+   }
+  }
+ },
+ "hypotheses": [
+  {
+   "id": "H1",
+   "text": "مشکل قیمت نیست، مکانیک پرداخت است (کارت‌به‌کارت)",
+   "from": "report1",
+   "status": "very-strongly-supported",
+   "note": "پنجمین دور. این هفته ۳۵ فاکتور ساخته شد و ۳ تأیید (۸.۶٪)، ۱٬۱۶۴٬۰۰۰ تومان روی زمین. تنها دیوارِ باقی‌مانده."
+  },
+  {
+   "id": "H2",
+   "text": "مدل کیف‌پول یک تصمیم ناخواسته اضافه می‌کند",
+   "from": "report1",
+   "status": "confirmed-and-fixed",
+   "note": "مرحله‌ی amount عملاً حذف شد؛ در پنجره هیچ ریزشِ واقعی در amount نبود"
+  },
+  {
+   "id": "H3",
+   "text": "بازطراحی تخفیف v1.6.0 کانورژن را پایین آورد",
+   "from": "report1",
+   "status": "improved-not-solved",
+   "note": "۱۴ درخواست/۰ پرداخت ← ۳ درخواست/۱ پرداخت. مسیر کوتاه شد ولی به دیوارِ رسید می‌خورد"
+  },
+  {
+   "id": "H4",
+   "text": "لیدهای داغ یخ‌زده و کسی سراغشان نمی‌رود",
+   "from": "report1",
+   "status": "open"
+  },
+  {
+   "id": "H5",
+   "text": "کارت روز نمونه است نه عادت",
+   "from": "report1",
+   "status": "improved",
+   "note": "یادآوری شبانه ۳۰٪ نرخ باز شدن در اولین اجرا"
+  },
+  {
+   "id": "H6",
+   "text": "پرسیدن نام قبل از ارزش، اصطکاک بی‌دلیل است",
+   "from": "report1",
+   "status": "partially-addressed",
+   "note": "v2.0.0 آنبوردینگ را دو پیامی کرد (اول ارزش، بعد نام) ولی نام هنوز قبل از اولین فال پرسیده می‌شود"
+  },
+  {
+   "id": "H7",
+   "text": "کسی که پول می‌دهد برمی‌گردد",
+   "from": "report1",
+   "status": "confirmed"
+  },
+  {
+   "id": "H8",
+   "text": "هدیه mis-size شده: ۳۰k اندازه‌ی سه‌کارتی است ولی تقاضا سمت پنج‌کارتیِ ۵۰k می‌رود",
+   "from": "report2",
+   "status": "superseded-by-H11",
+   "evidence": "۴ کاربر دقیقاً ۲۰٬۰۰۰ کسری دارند"
+  },
+  {
+   "id": "H9",
+   "text": "صفحه‌ی باز کردن کارت‌ها حتی با موجودیِ کافی هم می‌ریزد (مسئله‌ی UI نه پول)",
+   "from": "report2",
+   "status": "REJECTED",
+   "evidence": "۴ کاربر با موجودی دقیقاً کافی در confirm_pay مانده‌اند",
+   "note": "با can_afford سنجیده شد: هر دو نسخه ۱۰۰٪ عبور (۸ از ۸). صفحه هیچ‌وقت برای کاربرِ دارای اعتبار مشکل نداشت؛ کاربرانِ گیرکرده صرفاً بعد از رسیدنِ هدیه برنگشته بودند. v2.5.0 مشکلِ ناموجود را حل کرد."
+  },
+  {
+   "id": "H10",
+   "text": "۱٬۱۱۰٬۰۰۰ تومان اعتبارِ خوابیده بزرگ‌ترین فرصت فوری است",
+   "from": "report2",
+   "status": "reinterpreted-priority-lowered",
+   "evidence": "۶۸ کاربر / ۲٬۰۵۰٬۰۰۰ تومان",
+   "note": "رشدِ ساختاری ادامه دارد. بخشی از آن حالا با H14 توضیح دارد (هدیه دارند ولی فالِ گران انتخاب کرده‌اند) و همان بخش قابلِ نجات است."
+  },
+  {
+   "id": "H11",
+   "text": "هدیه‌ی ۳۰k با تقاضای واقعی هم‌تراز نیست (تقاضا سمت فال ۵۰k)",
+   "from": "report3",
+   "status": "open",
+   "evidence": "۸ از ۱۶ کاربر گیرکرده دقیقاً ۲۰٬۰۰۰ کسری دارند"
+  },
+  {
+   "id": "H12",
+   "text": "خرید فقط در جلسه‌ی اول اتفاق می‌افتد؛ کسی که در شصت دقیقه‌ی اول نخرید، هرگز نمی‌خرد",
+   "from": "report4",
+   "status": "REJECTED",
+   "evidence": "فاصله تا اولین پرداخت (ساعت): ۰.۰ ۰.۱ ۰.۱ ۰.۲ ۰.۰ ۱۴۰.۳ ۱۹۲.۱ ۰.۱ ۰.۱ — دو نفر بعد از شش و هشت روز خریدند.",
+   "ifTrue": "تمامِ بودجه‌ی مهندسی به شصت دقیقه‌ی اول برود؛ کمپینِ بازگشتی فقط برای عادت است نه درآمد",
+   "howItBreaks": "اولین پرداختی که فاصله‌اش از ثبت‌نام بیش از یک روز باشد",
+   "caveat": "قدیمی‌ترین کاربر ۹ روزه است، پس ممکن است اثرِ نوپاییِ محصول باشد نه قانونِ رفتاری",
+   "note": "شرطِ شکستِ ثبت‌شده‌ی خودم («اولین پرداختی با فاصله‌ی بیش از یک روز») دقیقاً محقق شد. نتیجه‌ی عملیِ قبلی («کلِ بودجه به شصت دقیقه‌ی اول») باطل است؛ مسیرِ بازگشت ارزشِ درآمدی دارد."
+  },
+  {
+   "id": "H13",
+   "text": "هدیه سقفِ رفتار را تعیین می‌کند: هدیه اندازه‌ی یک فال است، پس دقیقاً یک فال مصرف می‌شود",
+   "from": "report4",
+   "status": "weakened-still-mostly-true",
+   "evidence": "۶۰ رایگان‌گیر با دقیقاً یک فال، ۲ نفر با دو فال (قبلاً ۳۴ از ۳۴ مطلق بود)",
+   "ifTrue": "اگر هدف چشاندنِ عادت است، هدیه باید دو تجربه بدهد؛ با A/B قابلِ آزمایش است"
+  },
+  {
+   "id": "H14",
+   "text": "فالِ گران‌تر از هدیه عملاً تحویل نمی‌شود؛ نصفِ تقاضا روی فال‌هایی است که کاربرِ تازه نمی‌تواند بازشان کند",
+   "from": "report5",
+   "status": "CONFIRMED",
+   "evidence": "عبور از پی‌وال ۵۱٪ ← ۸۷٪ بعد از هم‌ترازی. و برعکسش هم صادق: فال‌های بالای هدیه (celtic، open5) ۱۴ انتخاب و ۰ تحویل.",
+   "ifTrue": "کاتالوگ با هدیه هم‌تراز شود (فال‌های موضوعیِ ۵۰k به سه‌کارتیِ ۳۰k)",
+   "howItBreaks": "اگر بعد از هم‌قیمت‌کردن نرخِ تحویلشان بالا نرود، مشکل قیمت نبوده",
+   "note": "استثنایی که خودم برای لنگرِ پریمیوم قائل شده بودم هم رد شد."
+  },
+  {
+   "id": "H15",
+   "text": "آخرین جمله‌ی قبل از ورود به فلو، قابِ ذهنیِ پرداخت را می‌سازد",
+   "from": "report5",
+   "status": "open-medium",
+   "evidence": "در A/B هر دو گروه پی‌وال دیدند؛ آن‌که آخرین جمله‌اش «کارت رایگان» بود ۴۰٪ عبور کرد و آن‌که «حالا نوبتِ توئه» بود ۸۵٪",
+   "ifTrue": "جمله‌ی کارت رایگان از انتهای پیامِ اول برداشته/جابه‌جا شود (آزمایشِ تک‌متغیرِ بعدی)"
+  },
+  {
+   "id": "H16",
+   "text": "دو پرسونای پرداخت‌کننده داریم، نه یکی: «تصمیم‌گیرِ فوری» و «بازگشتیِ چندروزه»",
+   "from": "report6",
+   "status": "open-low-sample",
+   "evidence": "۷ از ۹ پرداخت زیر ۱۲ دقیقه، ۲ نفر بعد از ۱۴۰ و ۱۹۲ ساعت",
+   "ifTrue": "مسیرِ بازگشت (یادآوری، فاکتورِ باز) بودجه‌ی مهندسی می‌گیرد، نه فقط بودجه‌ی عادت‌سازی",
+   "howItBreaks": "اگر تا دو دورِ بعد هیچ پرداختِ دیرهنگامِ دیگری نیاید، این دو استثنا بوده‌اند نه پرسونا"
+  },
+  {
+   "id": "H17",
+   "text": "ریتنشنِ پایین از **کیفیتِ جوابِ فال** می‌آید، نه از قیمت یا فلو؛ خوانشِ صریح و جواب‌دار کاربر را برمی‌گرداند",
+   "from": "owner-decision + v3.3.0",
+   "status": "open",
+   "evidence": "هنوز صفر. تا ۲۵ مرداد فقط ادمین لحن را دیده بود، پس هیچ دیتای کاربرِ واقعی وجود ندارد.",
+   "ifTrue": "سرمایه‌گذاریِ بعدی روی عمقِ خوانش می‌رود (حافظه، پیگیریِ فالِ قبلی، شخصی‌سازی)، نه روی قیف و قیمت",
+   "howItBreaks": "اگر کوهورتِ 3.3.0 در نرخِ فالِ دوم با کوهورتِ 2.9.x تفاوتِ معنادار نداشته باشد، مشکلِ ریتنشن جای دیگری است"
+  }
+ ],
+ "gotchas": [
+  "git log بدونِ TZ=UTC تاریخِ محلی می‌دهد — مرزِ نسخه را با `TZ=UTC git log --date=format-local` بگیر، وگرنه چند ساعت از پنجره در سطلِ اشتباه می‌افتد (یک‌بار همین اتفاق افتاد و کل قیف را جابه‌جا کرد).",
+  "«کاربر فعال» را با رویدادِ act بشمار، نه با هر رویدادی — daily_reminder_sent و credit_granted ربات‌فرست‌اند و کاربرِ منفعل را فعال نشان می‌دهند.",
+  "از «موجودیِ لحظه‌ای» (users.state) نتیجه‌ی «جریانی» نگیر. H9 دقیقاً از همین اشتباه آمد: کاربرانی که در confirm_pay با موجودی کافی مانده بودند، اصلاً صفحه را با آن موجودی ندیده بودند. برای سنجش عبور از یک صفحه، همیشه رویدادِ همان صفحه را با propهایش بخوان (اینجا paywall_shown.can_afford).",
+  "`GROUP BY 1` وقتی ستونِ ۱ شاملِ aggregate است خطا می‌دهد — دو بار در این پروژه توش افتادم. همیشه با زیرکوئریِ تودرتو بنویس (اول GROUP BY، بعد رشته‌سازی).",
+  "متنِ صفحه‌ها در تایم‌لاینِ داشبورد **نمونه‌ی اولین کاربر** است نه پیامِ همین کاربر (screens.sample با INSERT OR IGNORE). از ۱۴۰۵/۰۵/۱۳ اعدادش ماسک می‌شود؛ برای عددِ واقعی همیشه به ردیفِ payments نگاه کن.",
+  "در Ops db-query، ORDER BY قبل از UNION ALL خطا می‌دهد. هر شاخه را داخل `SELECT * FROM (…)` بپیچ تا ORDER BY/LIMIT محلی بماند.",
+  "قضاوتِ کیفیِ خودم («لنگرِ پریمیوم لازم است») دو دور بدونِ عدد زنده ماند و بعد رد شد. هر استثنایی که به یک قانونِ دیتامحور می‌زنم باید همان دور یک متریکِ سنجش داشته باشد.",
+  "منوی فال از v3.9.0 «موضوع» و «اندازه» را جدا می‌پرسد. پس `spread_selected.spread` حالا `<topic><size>` است (مثل `love5`) نه یک نامِ ثابت. برای مقایسه با دورهای قبل از propهای **افزایشیِ** `topic` و `size` استفاده کن، نه از پارس‌کردنِ رشته‌ی `spread`.",
+  "⛔ هر کوئریِ Ops که به جدولِ `events` **جوین** بزند عملاً اجراناپذیر است: روی `bot-fa.db` بیش از ۹ دقیقه دوید و لغو شد (چند میلیون ردیف، بدونِ ایندکس روی `event`/`user_id`). قیفِ per کانال با همین مرد. یا ایندکس اضافه کن، یا از `users`/`readings`/`payments` بپرس، یا کوئری را به چند دیسپچِ کوچک بشکن.",
+  "`campaign_costs.usd` **نرخ per کاربرِ همان روز** است، نه خرجِ کلِ آن روز. `campaignCostModel` آن را در تعدادِ کاربرِ روز ضرب می‌کند. خواندنش به‌عنوان «جمعِ خرج» عددِ تبلیغ را چند ده برابر کوچک می‌کند.",
+  "اتریبیوشنِ نسلی: پاداشِ دعوت الماسی است که **خودِ دعوت‌کننده** خرج می‌کند، پس هزینه‌اش در llm_usageِ همان گره است و از قبل داخلِ درخت. اضافه‌کردنِ جداگانه‌اش دوباره‌شماری است (همان قاعده‌ی lib/cpa.js).",
+  "مقایسه‌ی درآمد و هزینه‌ی مدل همیشه بی‌قرینه است: درآمد کلِ عمر (~۶۵ روز) ولی llm_usage فقط از ۳۰ اوت. رتبه‌بندیِ کانال‌ها معتبر است (همه یک بی‌قرینگی دارند)، سطحِ مطلقِ «خالص» خوش‌بینانه است.",
+  "ستونِ cached_tokens صفر دو معنیِ کاملاً متفاوت دارد: «کشِ پرامپت خاموش است» یا «نامِ فیلد را اشتباه گرفته‌ایم» (مستنداتِ OpenRouter از این محیط باز نمی‌شود، بند ۹/۰الف). قبل از هر تصمیمِ هزینه‌ای، نامِ واقعی را از لاگِ یک‌باره‌ی USAGE_SHAPE تأیید کن.",
+  "هزینه‌ی پاداشِ دعوت از v3.83.0 سه نرخِ هم‌زمان دارد (۱۰/۵/۳ بر اساسِ referrals.created_at). یک نرخِ واحد در هیچ کوئریِ بازه‌ای درست نیست."
+ ],
+ "openQuestionsNextRound": [
+  "💸 [نسلی ۱۴۰۵/۰۶/۲۰] توزیعِ فالِ رایگان per کاربر گرفته نشده — برای تصمیم درباره‌ی «سقفِ روزانه‌ی فالِ رایگان» (گزینه‌ی P3) لازم است. بدونش نمی‌دانیم دمِ پرمصرف چقدر بزرگ است.",
+  "💸 [نسلی ۱۴۰۵/۰۶/۲۰] قبل از هر ادعایی درباره‌ی کشِ پرامپت، `cached_tokens`/`reasoning_tokens` به llm_usage اضافه شود (از خودِ پاسخ، بدنه‌ی ریکوئست دست‌نخورده). ممکن است ۱۰٪ از قبل رایگان باشد یا اصلاً ممکن نباشد.",
+  "💸 [نسلی ۱۴۰۵/۰۶/۲۰] دورِ آزمایشگاه با **بودجه‌ی طولِ صریح در پرامپت** (خروجی ۱٬۱۴۰ ⟵ ~۸۰۰ توکن): اگر بی‌لنگر و rubric و رضایت تکان نخورند، ۲٬۰۵۰٬۰۰۰ تومان در ماه رایگان است. هزینه‌ی خودِ دور ~$۰٫۱.",
+  "💸 [اقتصادِ واحد ۱۴۰۵/۰۶/۲۰] نرخِ تبلیغِ واردشده را مالک تأیید کند: فقط ۷ روز در `campaign_costs` هست ($۰٫۰۰۳۵ تا $۰٫۰۱۶۹ per کاربر) و کلِ حکمِ per کمپین رویش ایستاده.",
+  "💸 [اقتصادِ واحد ۱۴۰۵/۰۶/۲۰] قیفِ per کانال هنوز جواب ندارد: **چرا** کاربرِ رفرالی با نرخِ ۰٫۵۲٪ پرداخت می‌کند و ارگانیک ۲٫۸۲٪؟ کوئریِ جوینِ events بیش از ۹ دقیقه دوید و لغو شد.",
+  "🖼 [مارکرِ اینترو ۱۴۰۵/۰۶/۱۶] بعد از افزودنِ GIF به اینترو (مرز 1788798624)، دو سنجه را بسنج: (الف) `starts/views` per پستِ کانال برای پست‌های ≥۴۸ ساعت، (ب) `onboard_done ÷ start` روزانه. ⚠️ «کاربرِ جدید در روز» را خام مقایسه نکن — ترافیک در همان روزها ۸٫۶ برابر شد. و ⚠️ سمتِ «قبل» متریکِ اول خطِ پایه‌ی ذخیره‌شده ندارد چون ویوها هرگز اسکرپ نشده‌اند. جزئیات: measurementMarkers[intro_gif_2026_09_07].",
+  "🚨 [رصدِ اجباری، خواسته‌ی صریحِ مالک] نرخِ رضایت بعد از v3.43.0 چه شد؟ خطِ پایه ۴٫۰۴ از ۵ (n=۷۵۰). میانگین و سهمِ نمره‌های ۱ و ۲ را با مرزِ 2026-09-01T15:45:00Z مقایسه کن. افتِ محسوس = زنگ خطر و پیشنهادِ رول‌بک. جزئیات در کلیدِ regressionWatch.",
+  "🚨 [رصدِ اجباری، خواسته‌ی صریحِ مالک] هزینه‌ی هر فال بعد از v3.43.0 چه شد؟ خطِ پایه $۰٫۰۰۳۹ (n=۴۱۱ فال). تفکیکِ متنی/صوتی و per kind لازم است چون دو تغییر هم‌زمان رفتند. افزایشِ محسوس = زنگ خطر. جزئیات در کلیدِ regressionWatch.",
+  "۹۸ کاربرِ ۲۵ اوت (۵۶٪ کلِ کوهورت) از کجا آمدند؟ تفکیکِ first_source per روز. تا این جواب نیامده، هیچ ادعایی درباره‌ی «رشد» نکن.",
+  "آزمایشِ A/B زنده چیست و چه می‌گوید؟ ۱۷۵ exposure یعنی ۱۰۰٪ کوهورتِ جدید تخصیص گرفته‌اند و هیچ‌کس نتیجه را نخوانده. تنها منبعِ شواهدِ علّیِ موجود است.",
+  "میدل‌ورِ journey از چه تاریخی روشن شده؟ ۷۷.۶٪ رویدادهای پنجره view/act اند، پس جهشِ حجمِ رویداد شاهدِ درگیری نیست تا وقتی این معلوم نشود.",
+  "ریتنشنِ کوهورتیِ D1/D3/D7 فقط روی کاربرانی که ≥۴۸ ساعت فرصت داشته‌اند (۳ تا ۵ روزِ دیگر قابلِ سنجش است).",
+  "نمره‌ی رضایت per شماره‌ی فال (اول در برابرِ دوم و سوم): ۳.۹۸ اثرِ تازگی است یا کیفیتِ پایدار؟",
+  "پی‌وال روی کدام اندازه شلیک می‌شود؟ اگر size در propهای paywall_shown نیست، همین شکافِ ابزار است و باید افزوده شود.",
+  "آن ۱۲۷ کاربری که آخرین رویدادشان view یا act بود روی کدام صفحه ایستادند؟ باارزش‌ترین کوئریِ تشخیصیِ نزده.",
+  "شکافِ ۲۹۴ الماسیِ دفترِ کل: هر مسیری که مستقیم روی balance می‌نویسد باید رویداد بنویسد. تا بسته نشود، هیچ عددِ اقتصادِ الماس قابلِ استناد نیست.",
+  "چرا ۱۲ دعوت از ۶۱ دعوت پاداش نگرفته‌اند؟ (دعوت‌شده هنوز فال نگرفته، یا ردِ بی‌صدای isNew؟)",
+  "مهرِ زمانیِ دقیقِ برودکستِ v3.26 از announce_log: عددِ ثبت‌شده‌ی ۱۲:۴۴ زودتر از خودِ نسخه است و باید اصلاح شود.",
+  "هزینه‌ی واقعیِ OpenRouter per فال هیچ‌جا ثبت نمی‌شود. بدونِ آن «هزینه‌ی فالِ رایگان» قابلِ محاسبه نیست (سؤالِ صریحِ مالک در بازطراحیِ صفحه‌ی هزینه‌ها).",
+  "اثرِ دو پله‌ی کاهشِ پاداشِ دعوت (۱۰⟵۵ در v3.69.0 و ۵⟵۳ در v3.83.0) روی **حجمِ** دعوت: تعدادِ دعوتِ موفق per کاربرِ جدید، قبل و بعد از هر مرز. اندازه‌ی صرفه‌جویی سنجیده شده، اثرش روی حجم نه.",
+  "نرخِ کشِ پرامپت از llm_usage.cached_tokens (بعد از تأییدِ نامِ فیلد): سهمِ توکنِ کش‌شده از کلِ ورودی، و اینکه آیا ۱۰٪ صرفه‌جوییِ تخمینی روی میز هست یا از قبل گرفته شده."
+ ],
+ "abResults": [
+  {
+   "key": "intro_order",
+   "period": "2026-08-04T19:18:00Z → 2026-08-15T15:35:00Z",
+   "primaryMetric": "product_delivered",
+   "control": {
+    "exposed": 39,
+    "product_delivered": 29,
+    "deliveredRatePct": 74.4,
+    "gate_passed": 36,
+    "gatePassedRatePct": 92.3
+   },
+   "variant": {
+    "key": "stat_first",
+    "exposed": 33,
+    "product_delivered": 18,
+    "deliveredRatePct": 54.5,
+    "gate_passed": 33,
+    "gatePassedRatePct": 100
+   },
+   "ctwControlWinsPct": 96,
+   "srmOk": true,
+   "lowSample": true,
+   "decision": "ادامه دارد. عددِ تجمعی از آستانه رد می‌شود ولی برشِ پس از هم‌ترازی نه؛ تصمیمِ نهایی وقتی گرفته شود که برشِ پس از هم‌ترازی به ~۲۰ تحویل per شاخه برسد.",
+   "insight": "فاصله در دنیای جدید (کاتالوگِ هم‌تراز) از ۲۰ واحد به ۱۲ واحد کم شد. یعنی بخشی از برتریِ control محصولِ دنیایی بود که در آن قیمت مانع بود.",
+   "secondaryObjective": "عضویت کانال — stat_first ۱۰۰٪ (۳۳/۳۳) در برابر ۹۲.۳٪ (۳۶/۳۹)، CTW ۹۲.۱٪",
+   "methodNote": "⚠️ کاتالوگ در v2.9.0 وسطِ آزمایش عوض شد (همه‌ی فال‌ها به ۳۰k). تصادفی‌سازی سالم است پس مقایسه بی‌طرف می‌ماند، ولی نرخِ مطلقِ هر دو شاخه بعد از این تاریخ جابه‌جا می‌شود. دورِ بعد اگر نمونه اجازه داد، exposureهای بعد از ۲۰۲۶-۰۸-۰۸ را جدا هم بخوان و با هم pool نکن.",
+   "postCatalogSlice": {
+    "note": "فقط exposureهای بعد از v2.9.0 — طبق هشدارِ متدولوژیکِ دور قبل جدا خوانده شد",
+    "control": {
+     "delivered": 18,
+     "exposed": 21,
+     "ratePct": 85.7
+    },
+    "variant": {
+     "delivered": 11,
+     "exposed": 15,
+     "ratePct": 73.3
+    },
+    "ctwControlWinsPct": 82,
+    "belowShipThreshold": true
+   }
+  },
+  {
+   "key": "intro_order",
+   "closedAt": "2026-08-26",
+   "verdict": "inconclusive",
+   "decision": "کنترل ماند (تجربه اول، آمار بعد)، ولی متنِ تجربه برای همه به INTRO_EXPERIENCE_V2 رفت (تصمیمِ صریحِ مالک).",
+   "primaryMetric": "product_delivered (حداقل یک فالِ تحویل‌شده)",
+   "pooled": {
+    "control": "104/144 = 72.2%",
+    "stat_first": "109/149 = 73.2%",
+    "deltaPP": 0.9,
+    "z": 0.18,
+    "p": 0.858,
+    "ctwPct": 57
+   },
+   "srm": "سالم (۱۴۴ در برابر ۱۴۹، chi2=0.085)",
+   "contamination": "⚠️ مهم‌ترین یافته: از v3.25.0 که uxV2For برای همه true شد، شاخه‌ی stat_first متنِ INTRO_EXPERIENCE_V2 می‌گرفت و control متنِ v1. یعنی آزمایش دیگر «فقط ترتیب» نبود و نتیجه‌ی تجمیعی تفسیرناپذیر است.",
+   "eraSplit": {
+    "pre_v3.25 (ترتیبِ خالص)": {
+     "control": "36/51 = 70.6%",
+     "stat_first": "28/48 = 58.3%",
+     "deltaPP": -12.3,
+     "p": 0.202
+    },
+    "post_v3.25 (آلوده)": {
+     "control": "68/93 = 73.1%",
+     "stat_first": "81/101 = 80.2%",
+     "deltaPP": 7.1,
+     "p": 0.243
+    },
+    "interaction": {
+     "deltaOfDeltasPP": 19.3,
+     "z": 1.7,
+     "p": 0.089,
+     "note": "علامتِ اثر بین دو دوره برعکس می‌شود؛ عددِ تجمیعی میانگینِ دو اثرِ متضاد است."
+    }
+   },
+   "power": "از اول زیرِ توان بود: برای دیدنِ اثرِ ۵ واحدی ~۱٬۱۸۴ کاربر در هر شاخه لازم بود، ۱۰ واحدی ~۲۷۵، و ما ~۱۴۶ داشتیم.",
+   "lessons": [
+    "متغیرِ دومی که **بعداً** به یک شاخه اضافه شود، آزمایشِ در جریان را بی‌صدا می‌کشد. این‌جا INTRO_EXPERIENCE_V2 در v3.9.3 فقط به شاخه‌ی stat_first سیم شد.",
+    "گارد به‌شکلِ **کامنت** بود نه **ادعا**: کامنتِ بالای همان بلوک دقیقاً همین را ممنوع کرده بود، و خودِ چکِ CI هم آن را rationalize کرد («v2 یک متغیرِ مستقلِ دیگر است») که غلط بود. هر آزمایشِ بعدی باید تقارنِ شاخه‌هایش assert داشته باشد (نمونه: تقارنِ طولِ CTA در check-night-reminder).",
+    "با ترافیکِ فعلی، آزمایشِ کپیِ آنبوردینگ ماه‌ها طول می‌کشد تا جواب بدهد. گلوگاهِ واقعیِ محصول طبقِ گزارشِ دورِ ۷ فالِ **دوم** است، نه آنبوردینگ."
+   ],
+   "nextCandidate": "اگر روزی خواستیم: آزمایشِ تک‌متغیره‌ی متنِ تجربه (v1 در برابر v2) با ترتیبِ ثابت. فعلاً باز نشد چون ترافیک کفاف نمی‌دهد و اولویت جای دیگری است."
+  },
+  {
+   "key": "night_reminder",
+   "period": "پنجره‌ی تمیز: exposureهای بعد از فیکسِ v3.36.0 (1788133500) تا 1789215445",
+   "primaryMetric": "product_delivered در ۶ ساعتِ بعد از پیام (per پیام)",
+   "control": {
+    "arm": "کارت روز",
+    "messages": 2877,
+    "delivered6h": 169,
+    "ratePct": 5.87,
+    "ownCtaPct": 20.79,
+    "optOutPerUserPct": 1.82
+   },
+   "variant": {
+    "key": "lucky",
+    "arm": "کارت شانس",
+    "messages": 3056,
+    "delivered6h": 217,
+    "ratePct": 7.1,
+    "ownCtaPct": 22.22,
+    "optOutPerUserPct": 0.31
+   },
+   "ctwLuckyWinsPct": 97.2,
+   "clusterAdjustedCtw": {
+    "icc0.05": 96.2,
+    "icc0.10": 94.8,
+    "icc0.20": 93.2,
+    "msgsPerUser": 4.8
+   },
+   "guardrail": "انصراف از یادآوری: lucky ۰٫۳۱٪ در برابرِ control ۱٫۸۲٪ — نه‌فقط سالم، بهتر",
+   "srmOk": true,
+   "decision": "ship lucky (v3.82.0). دیفالت: کارتِ شانس روشن، کارتِ روز خاموش. آزمایش بعد از دیپلوی stopped شد.",
+   "methodNote": "⚠️ سنجه‌ی per کاربرِ تجمعی تفاوتی نشان نمی‌دهد (۳۱٫۶٪ در برابرِ ۳۲٫۸٪، CTW ۶۷٪) چون اشباع شده و «تا حالا فال گرفته یا نه» را می‌سنجد. حکم آگاهانه روی سنجه‌ی per پیام نشست. ⚠️ مشاهده‌ها خوشه‌ای‌اند (~۴٫۸ پیام per کاربر) پس CTWِ خام بیش از واقعیت مطمئن است؛ با deff هم بالای آستانه ماند.",
+   "migration": "۲۱ انصراف تفکیک شد از روی شاخه: ۵ نفرِ شاخه‌ی lucky خاموش ماندند، ۱۱ control + ۵ بی‌exposure روشن شدند. از ۴۸۹۳ کاربر فقط ۵ نفر بی‌یادآوری."
+  },
+  {
+   "key": "love_slot",
+   "period": "started_at 1788114349 تا 1789215445",
+   "primaryMetric": "payment_approved (rate)",
+   "control": {
+    "arm": "عشق و رابطه",
+    "exposed": 1515,
+    "paid": 26,
+    "ratePct": 1.72,
+    "slot3ClickPct": 58.9
+   },
+   "variants": [
+    {
+     "key": "feel",
+     "arm": "حس طرف مقابل",
+     "exposed": 1460,
+     "paid": 19,
+     "ratePct": 1.3,
+     "ctwPct": 18.1,
+     "slot3ClickPct": 56.4
+    },
+    {
+     "key": "exback",
+     "arm": "بازگشت اکس",
+     "exposed": 1427,
+     "paid": 19,
+     "ratePct": 1.33,
+     "ctwPct": 20.2,
+     "slot3ClickPct": 32.7
+    }
+   ],
+   "srmOk": true,
+   "srm": "chi2=2.69 p=0.26",
+   "lowSample": false,
+   "decision": "control برنده. «عشق و رابطه» در جایگاه ۳ ماند. stopped شد (بدونِ دیپلوی، چون برنده = رفتارِ فعلی).",
+   "insight": "فرضیه نصفه درست بود: جایگاه ~۲٫۲ برابر می‌کند (پس نگرانیِ گزارشِ ۴ شهریور درست بود) ولی موضوع هم مستقلاً مهم است — «بازگشت اکس» حتی در بهترین جایگاه ۳۲٫۷٪ می‌گیرد در برابرِ ۵۸٫۹٪ عشق. 📌 تقاضای تایپی با جذابیتِ دکمه یکی نیست: ۱۸٫۱٪ سؤال‌های آزاد درباره‌ی بازگشتِ اکس است ولی به‌عنوان دکمه ضعیف است."
+  }
+ ],
+ "experimentQueue": [
+  {
+   "id": "H19",
+   "key": "price_ladder_p1 / price_ladder_p2",
+   "status": "phase1-running",
+   "hypothesis": "کفِ پایین‌ترِ بسته (۱۵k به‌جای ۳۰k، با همان قیمتِ هر الماس) خریدارِ تازه می‌آورد؛ و اگر آورد، سطحِ قیمتِ پایین‌تر (~۳۰٪) بیشتر می‌آورد.",
+   "design": "دو فازِ ۳روزه، هر کدام ۵۰/۵۰، با **کلیدِ جدا** (وزنِ متغیر روی یک کلید = سوگیریِ نامتقارن به‌خاطرِ چسبندگیِ ab_exposures). فاز ۱: control در برابرِ floor. فاز ۲: برنده در برابرِ cheap. exposure سرِ نمایشِ صفحه‌ی پلن‌ها ثبت می‌شود. متریکِ اصلی payment_approved (rate).",
+   "power": "⚠️ ~۲۲۰ کاربر و ~۱۴ پرداخت per بازو در ۳ روز ⇒ MDE حدودِ +۱۰۰٪، در حالی که نقطه‌ی سربه‌سرِ floor فقط +۱۴٫۵٪ و cheap +۶۲٪ است. یعنی ۳ روز یک **غربالِ جهت‌دار** است نه آزمونِ معنادار. قاعده‌ی تصمیم از قبل ثبت شده: زیرِ دو برابر شدن ⟶ پیش‌فرض ماندن روی control.",
+   "note": "فاز ۱ زنده است: price_ladder_p1 روی bot-fa.db، control/floor با وزنِ ۵۰/۵۰. ⚠️ مرزِ تحلیل started_at است نه تاریخِ مرج. ⛔ اگر floor برنده شد، فاز ۲ به یک تغییرِ کوچک در ops-exp.mjs نیاز دارد (وزنِ صفر برای شاخه‌های غیرِ اول) — جزئیات در bots/tarot/CLAUDE.md.",
+   "startedAt": "2026-09-11T07:47:20Z (unix 1789112840) — ۱۱:۱۷ تهران"
+  },
+  {
+   "id": "H15",
+   "key": "intro_free_line",
+   "status": "queued-not-started",
+   "hypothesis": "جمله‌ی «🎴 هر روز هم یه کارت رایگان داری» در انتهای پیامِ اول، قابِ ذهنیِ «رایگان» می‌سازد و نرخِ بازکردنِ فال را پایین می‌آورد.",
+   "evidence": "در آزمایشِ intro_order هر دو گروه پی‌وال دیدند؛ گروهی که آخرین جمله‌اش همین بود ۴۰٪ عبور کرد و گروهی که آخرین جمله‌اش «حالا نوبتِ توئه» بود ۸۵٪.",
+   "design": "تک‌متغیره: همان control، فقط بدونِ آن خط (یا با انتقالش به وسطِ پیام). متریکِ اصلی product_delivered.",
+   "blockedBy": "آزمایشِ intro_order هنوز در حال اجراست؛ دو آزمایشِ هم‌زمان روی همان نقطه‌ی فلو نتیجه را درهم می‌کند.",
+   "note": "تصمیمِ مالک: در صف بماند تا فراموش نشود، ولی فعلاً شروع نشود."
+  },
+  {
+   "id": "H18",
+   "key": "menu_slots",
+   "status": "built-not-running",
+   "hypothesis": "ترتیب و انتخابِ دو موضوعِ جایگاه ۲ و ۳ در منوی فال، نرخِ شروعِ فال را جابه‌جا می‌کند. جایگاه ۱ («سؤال شخصی خودم») و جایگاه ۴ («مشاهده همه فال‌ها») ثابت‌اند و آزمایش نمی‌شوند.",
+   "design": "چهار شاخه در `shared/ab.js`: control=[yesno,love] · love_first=[love,yesno] · crush_money=[crush,money] · feel_career=[feel,career]. متریکِ اصلی `product_delivered`؛ متریکِ کمکی نرخِ کلیک per موضوع از `topic_selected`.",
+   "blockedBy": "حجم. یک تستِ چهارشاخه‌ای با ترافیکِ فعلی ماه‌ها طول می‌کشد تا معنادار شود (آستانه‌ی داشبورد: ۲۰۰ exposure per شاخه).",
+   "decisionRuleUntilThen": "چرخشِ **دستیِ** هفتگی: رتبه‌بندیِ کلیکِ موضوع‌ها را از `topic_selected` بگیر و جفتِ بازنده را با یک کاندیدای تازه عوض کن. آزمایشِ رسمی فقط وقتی running شود که حجم به آستانه برسد.",
+   "gotcha": "⚠️ بایاسِ جایگاه: شمردنِ خامِ کلیک، بیشتر «کدام **جایگاه**» را می‌سنجد تا «کدام **موضوع**» — جایگاه ۲ ذاتاً بیشتر از ۳ کلیک می‌گیرد. برای همین شاخه‌ی `love_first` عمداً همان دو موضوع با ترتیبِ برعکس است: مقایسه‌ی control با love_first اثرِ جایگاه را جدا می‌کند. هر تحلیلی که این را لحاظ نکند روی نویز تصمیم می‌گیرد.",
+   "note": "تا running نشود `variant()` همیشه control می‌دهد، یعنی رفتارِ فعلی = همان جفتِ پیش‌فرض. فعلاً فقط روی اکانتِ ادمین (UX_V2_ADMIN_ONLY=true)، پس دیتای کاربرِ واقعی از لحظه‌ی باز شدن برای همه شروع می‌شود."
+  }
+ ],
+ "supportOutreach": {
+  "round5": {
+   "sent": 7,
+   "variants": 3,
+   "sentAt": "2026-08-08",
+   "users": [
+    "@zwartebadge",
+    "@kianrzj",
+    "@Houstatlantvegas",
+    "@Niian16",
+    "@Moradi_82k",
+    "@ShhalHa",
+    "@upiojoq"
+   ],
+   "result": "نرخِ جواب پایین ماند — طبق تصمیمِ ثبت‌شده متن‌ها برای دور ششم بازنویسی شدند"
+  },
+  "history": {
+   "round4": {
+    "sent": 10,
+    "replied": 1
+   }
+  },
+  "learningForNextRound": "نرخِ جوابِ تاکنون خیلی پایین است (۱ از ۱۰ در دور چهارم). اگر دور پنجم هم پایین بود، **متن باید بازنویسی شود**: تصمیمِ مالک این است که با «ما یه تیمِ کوچیکیم که تازه شروع کردیم» شروع شود — قبلاً همین قالب یک‌بار جواب گرفته بود. یعنی اول «ما کی هستیم و چرا مزاحم شدیم»، بعد سؤال.",
+  "round6": {
+   "plannedAt": "2026-08-15",
+   "variants": 3,
+   "users": 13,
+   "excludedBecauseAlreadyContacted": [
+    "@Moradi_82k",
+    "@upiojoq"
+   ],
+   "unreachableNoUsername": [
+    6609640206,
+    8386009829
+   ],
+   "textChange": "شروع با «ما یه تیمِ کوچیکیم که تازه شروع کردیم» طبق تصمیمِ مالک",
+   "result": "در انتظار"
+  },
+  "round7": {
+   "note": "طبق قاعده‌ی اسکیل، وضعیتِ همین کاربران لحظه‌ی ارسال دوباره کوئری شود. کوئری: queries/round7.json → supportOutreachCandidates.",
+   "segments": {
+    "A_lover": "≥۲ فالِ تحویل‌شده و نمره‌ی ۵ — منبعِ مصاحبه‌ی کیفی و رفرال",
+    "B_happy_once": "دقیقاً یک فال، نمره‌ی ۴ یا ۵، برنگشته — بزرگ‌ترین فرصتِ همین‌امروز",
+    "C_no_delivery": "از لانچ به بعد آمده و هیچ فالی تحویل نگرفته",
+    "D_gate": "در گیتِ عضویت مانده (state=gate_join)"
+   }
+  }
+ },
+ "queriesFile": "analytics/tarot/queries/round7.json",
+ "regressionWatch": {
+  "why": "خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۱) بعد از سوییچِ مدلِ فارسی. این دو سنجه از لحظه‌ی مرزِ زیر باید در **هر** دورِ تحلیل دیده شوند تا وقتی مالک صریحاً ببنددشان. اگر هرکدام از آستانه رد شد، پیشنهادِ رول‌بک بده.",
+  "change": "v3.43.0 — مدلِ خوانشِ فارسی از google/gemini-2.5-flash به openai/gpt-5.6-luna، و مسیرِ ویس از تک‌فراخوانی به «رونویسی، بعد خوانش».",
+  "boundaryUnix": 1788277500,
+  "boundaryUtc": "2026-09-01T15:45:00Z",
+  "rollback": "افزودن/برداشتنِ ردیفِ fa در READING_MODEL_BY_LOCALE در bots/tarot/reading-core.js — یک ردیف، بدونِ مهاجرت.",
+  "metrics": [
+   {
+    "id": "satisfaction",
+    "what": "میانگینِ نمره‌ی رضایت (۱ تا ۵) از readings.feedback با پیشوندِ rate:",
+    "sql": "SELECT COUNT(*) n, AVG(CAST(SUBSTR(feedback,6) AS REAL)) mean, AVG(CASE WHEN CAST(SUBSTR(feedback,6) AS REAL)<=2 THEN 1.0 ELSE 0 END) badShare FROM readings WHERE feedback LIKE 'rate:%' AND created_at >= <window> AND user_id NOT IN (excludeUsers)",
+    "baseline": {
+     "mean": 4.036,
+     "n": 750,
+     "window": "همه‌ی تاریخِ مقیاسِ rate تا مرز"
+    },
+    "baseline14d": {
+     "mean": 4.039,
+     "n": 748
+    },
+    "direction": "بالاتر بهتر. ترجیحِ مالک: میانگین دستِ‌کم ثابت بماند، ایده‌آل رو به افزایش.",
+    "alarmIf": "میانگینِ بعد از مرز ۰٫۲۰ واحد یا بیشتر پایین‌تر از خطِ پایه با n≥۲۰۰، یا ۰٫۳۰ واحد با n≥۱۰۰. یا سهمِ نمره‌های ۱ و ۲ بیش از ۵۰٪ نسبی بالا برود.",
+    "whyBadShare": "میانگین می‌تواند یک جابه‌جاییِ دوقطبی را پنهان کند (چند نمره‌ی ۵ جبرانِ چند نمره‌ی ۱ را می‌کند)، پس سهمِ نمره‌های ۱ و ۲ جدا دیده می‌شود."
+   },
+   {
+    "id": "costPerReading",
+    "what": "هزینه‌ی واقعیِ دلاریِ هر فال از جدولِ llm_usage (cost_usd مستقیماً از OpenRouter)",
+    "sql": "SELECT COUNT(DISTINCT ref_id) readings, SUM(cost_usd)/COUNT(DISTINCT ref_id) perReading FROM llm_usage WHERE ref_id>0 AND created_at >= <window> AND user_id NOT IN (excludeUsers)",
+    "baseline": {
+     "perReadingUsd": 0.0039,
+     "readings": 411
+    },
+    "breakdownBaseline": {
+     "reading_rows": 426,
+     "reading_usd": 1.5976,
+     "repair_rows": 27,
+     "repair_usd": 0.01003
+    },
+    "direction": "پایین‌تر بهتر. ثابت‌ماندن هم قابلِ قبول است.",
+    "alarmIf": "هزینه‌ی هر فال ۲۵٪ یا بیشتر بالا برود (یعنی از ~$۰٫۰۰۴۹ رد شود) و روی دستِ‌کم ۱۰۰ فالِ بعد از مرز پایدار بماند.",
+    "splitBy": "kind (reading/repair/transcribe) و متنی در برابرِ صوتی. مسیرِ ویس عمداً از یک فراخوانی به دو تا رفت، پس اگر کل بالا رفت باید معلوم شود از مدلِ گران‌ترِ خوانش است یا از فراخوانیِ دومِ رونویسی."
+   }
+  ],
+  "honestLimits": [
+   "خطِ پایه‌ی **هزینه** فقط ~۲ روز دیتا دارد: llm_usage از 2026-08-30T11:16:25Z شروع شده و قبلش هیچ‌جا ثبت نمی‌شد. پس نوسانِ روزانه هنوز شناخته نیست و یک جهشِ کوچک ممکن است نویز باشد.",
+   "خطِ پایه‌ی هزینه با مرزِ 2026-09-01T17:00:00Z گرفته شد، نه دقیقاً 15:45. یعنی ~۷۵ دقیقه از دیتای **بعد از** سوییچ داخلِ خطِ پایه است. اثرش کوچک است ولی اگر عددها نزدیک بودند، خطِ پایه را با مرزِ دقیق دوباره حساب کن.",
+   "دو تغییر هم‌زمان رفتند (مدلِ خوانش و شکلِ مسیرِ ویس)، پس اگر هزینه تکان خورد، تفکیکِ متنی/صوتی تنها راهِ نسبت‌دادنِ درست است.",
+   "مقایسه‌ی رضایت باید per کوهورتِ نسخه هم دیده شود (users.first_version)، چون کاربرِ تازه و کاربرِ قدیمی ممکن است متفاوت نمره بدهند."
+  ]
+ },
+ "measurementMarkers": [
+  {
+   "id": "intro_gif_2026_09_07",
+   "kind": "external-botfather",
+   "what": "اینتروی ربات (صفحه‌ای که تلگرام قبل از فشردنِ Start نشان می‌دهد) یک GIF گرفت. متن دست‌نخورده ماند.",
+   "changedBy": "مالک، مستقیم در BotFather — **بیرون از ریپو**",
+   "boundaryUnix": 1788798624,
+   "boundaryUtc": "2026-09-07T16:30:24Z",
+   "boundaryTehran": "2026-09-07 20:00 (۱۴۰۵/۰۶/۱۶ ساعت ۲۰:۰۰)",
+   "boundaryPrecision": "مالک گفت «همین الان»؛ مهرِ دقیق لحظه‌ی ثبت است، پس مرزِ واقعی تا ~۵ دقیقه قبل‌تر است. برای تحلیل از `created_at >= 1788798624` استفاده کن و ساعتِ ۱۹:۳۰–۲۰:۰۰ تهران را بافر بگیر.",
+   "whyNoProductVersion": "این تغییر در کد نیست، پس `PRODUCT_VERSION` بامپ نمی‌شود و `users.first_version` هم آن را نمی‌گیرد. همین فایل تنها ردِ آن است — اگر این ردیف پاک شود، تغییر برای همیشه نامرئی می‌شود.",
+   "⚠️ measurabilityLimit": "«نرخِ کانورژنِ دکمه‌ی Start» به معنیِ «چند نفر ربات را باز کردند و Start نزدند» **قابلِ اندازه‌گیری نیست**. تلگرام تا قبل از اولین /start هیچ آپدیتی به ربات نمی‌دهد؛ نه ویو، نه بازدید، نه هیچ. این محدودیتِ Bot API است نه کمبودِ ابزارِ ما، و با هیچ کدی در ربات حل نمی‌شود.",
+   "measurableProxy": {
+    "primary": "ویوِ پستِ کانال ← استارت. هر پستِ روزانه CTA با `?start=c_<code>_<post>` دارد و `props.post` روی رویدادِ start می‌نشیند؛ `tools/marketing/perf.mjs` از قبل `startRate = starts / views` را per پست حساب می‌کند. این تنها جایی است که **مخرجِ واقعی** داریم، و دقیقاً همان قدمی است که اینترو در آن نشسته.",
+    "blocker": "⚠️ `marketing/tarot/performance.md` هنوز ساخته نشده، یعنی ویوها هرگز اسکرپ و ذخیره نشده‌اند. سمتِ «قبل» این متریک **خطِ پایه‌ی ذخیره‌شده ندارد**. ویو از `t.me/s/taroot_fa` می‌آید که از محیطِ سشن بسته است (http=000) و باید از رانرِ گیت‌هاب (ورک‌فلوی Benchmark) گرفته شود.",
+    "secondary": "نرخِ تکمیلِ آنبوردینگ (`onboard_done ÷ start`) — مخرج‌دار و نسبت‌محور، پس نسبت به حجمِ ترافیک مقاوم‌تر است. اگر GIF انتظار را بهتر بسازد باید بالا برود؛ اگر فقط کنجکاوی جذب کند، پایین می‌آید."
+   },
+   "baselineFrozenAt": "2026-09-07T16:31:56Z",
+   "baseline": {
+    "newUsersPerDay": {
+     "2026-08-25..09-04": 67,
+     "2026-09-05..09-06": 570,
+     "note": "میانگین"
+    },
+    "onboardCompletionPct": {
+     "2026-08-25..09-04": 46.5,
+     "n_starts": 1422,
+     "2026-09-05..09-06": 51.8,
+     "n_starts_spike": 1975
+    },
+    "startsAttributedToChannelPost": {
+     "last21d": 434,
+     "ofTotalStarts": 4619,
+     "sharePct": 9.4,
+     "perDayExample": {
+      "260905": {
+       "posts": 11,
+       "starts": 81,
+       "median": 5,
+       "max": 37
+      },
+      "260906": {
+       "posts": 12,
+       "starts": 129,
+       "median": 7,
+       "max": 58
+      }
+     }
+    },
+    "startsBySource": {
+     "referral": 2102,
+     "campaign": 1428,
+     "organic": 1089,
+     "window": "کلِ عمر"
+    }
+   },
+   "🚨 confound": "**بدترین لحظه‌ی ممکن برای اندازه‌گیریِ قبل/بعد.** کاربرِ جدید در سه روزِ اخیر ۸٫۶ برابر شده (۶۷ ⟵ ۵۷۰ در روز). هر تغییری در نرخِ ورود در روزهای آینده به‌احتمالِ زیاد اثرِ همین موجِ ترافیک است نه اثرِ GIF. ⇒ مقایسه‌ی خامِ «کاربرِ جدید در روز» قبل/بعد **بی‌اعتبار** است. فقط سنجه‌های **نسبتی با مخرجِ هم‌دوره** (startRate per پست، و onboard÷start) قابلِ استنادند.",
+   "howToAnalyze": [
+    "۱) per پست: `starts/views` را برای پست‌های ≥۴۸ ساعت، قبل و بعد از مرز مقایسه کن. هر پست یک نمونه است، پس n = تعدادِ پست نه تعدادِ کاربر.",
+    "۲) `onboard_done ÷ start` روزانه، با مرزِ 1788798624.",
+    "۳) ترکیبِ منبعِ ورود (`kind`) را هم‌زمان گزارش کن — اگر سهمِ رفرال/کمپین عوض شده باشد، هر تفاوتی می‌تواند اثرِ ترکیب باشد نه اثرِ اینترو.",
+    "۴) حداقل ۱۰ تا ۱۴ روزِ بعد از مرز صبر کن، و ترجیحاً تا وقتی موجِ ترافیکِ ۵ تا ۷ سپتامبر فروکش کند."
+   ]
+  }
+ ]
 }
