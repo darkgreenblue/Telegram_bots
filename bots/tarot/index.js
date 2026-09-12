@@ -226,7 +226,7 @@ const TEST_PHASE = false;
 //         ۳۰k/۶۰k/۱۵۰k برگشتند و دو بسته‌ی «افسانه‌ای»/«جاودان» به‌همراهِ آزمایشِ
 //         نمایششان بازنشسته شدند. کلیدهایشان زنده می‌مانند (ردیفِ پرداختِ باز +
 //         دکمه‌ی کهنه، بند ۲ج/۵ و ۶).
-const PRODUCT_VERSION = '3.81.3';
+const PRODUCT_VERSION = '3.82.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1363,8 +1363,14 @@ try {
 } catch (e) { logErr('ab seed:', e.message); } // آزمایش هرگز نباید بوتِ ربات را بشکند
 
 const stmts = {
+  /* 🌙 کاربرِ تازه با دیفالتِ **جدیدِ** یادآوری متولد می‌شود: کارتِ شانس روشن، کارتِ روز
+   * خاموش (برنده‌ی آزمایشِ `night_reminder`، v3.82.0).
+   * ⚠️ این خط لازم است و مهاجرتِ یک‌باره جایش را نمی‌گیرد: آن مهاجرت فقط ردیف‌های
+   * **موجود** را می‌برد و DEFAULTِ خودِ ستون‌ها (`0`/`0`) دست‌نخورده است، پس بدونِ این،
+   * هر کاربرِ جدید دقیقاً برعکسِ تصمیم متولد می‌شد — و چون هیچ خطایی نمی‌داد، فقط وقتی
+   * دیده می‌شد که کسی نرخِ یادآوریِ کوهورتِ تازه را جدا می‌شمرد. */
   upsertUser: db.prepare(`
-    INSERT INTO users (telegram_id, name, username) VALUES (?, ?, ?)
+    INSERT INTO users (telegram_id, name, username, daily_reminder_off, lucky_reminder_on) VALUES (?, ?, ?, 1, 1)
     ON CONFLICT(telegram_id) DO UPDATE SET name=excluded.name, username=excluded.username, last_seen=unixepoch()
   `),
   getUser:    db.prepare('SELECT * FROM users WHERE telegram_id=?'),
@@ -3811,7 +3817,35 @@ bot.action(/^lpick:(\d+)$/, async (ctx) => {
   await sleep(PACE_S);
   // (ensureMenu حالا داخلِ خودِ sendContinuePrompt است — تک‌نقطه، بدونِ تکرار)
   await sendContinuePrompt(ctx, uid);
+  await chainDailyReminder(ctx, uid);
 });
+
+/* 🔗 زنجیره‌ی «کارتِ شانس ⟵ کارتِ روز» (v3.82.0، تصمیمِ صریحِ مالک).
+ *
+ * کاربری که **هر دو** یادآوری را روشن دارد، ساعتِ ۲۲ فقط یادآوریِ کارتِ شانس را می‌گیرد
+ * (اولویت با برنده‌ی آزمایش) و یادآوریِ کارتِ روزش این‌جا می‌آید: بلافاصله بعد از اینکه
+ * فلوی کارتِ شانس تمام شد. این‌طور هیچ‌وقت دو پیام در یک ساعت نمی‌رود ولی هر دو نیتِ
+ * کاربر محترم می‌ماند.
+ *
+ * ⚠️ گاردِ «امشب واقعاً یادآوری گرفته» عمداً هست: بدونش، کاربری که ساعتِ سه بعدازظهر
+ * خودش کارتِ شانس را می‌زند پیامِ «فرصتِ کارتِ امروزت داره تموم می‌شه» می‌گرفت که در آن
+ * ساعت بی‌معنی است. پنجره همان ۶ ساعتی است که نتیجه‌ی آزمایش هم رویش سنجیده شد.
+ * ⚠️ و fail-safe است: هر خطا فقط لاگ می‌شود و فلوی کارتِ شانس را نمی‌شکند. */
+const REMIND_CHAIN_SEC = 6 * 3600;
+async function chainDailyReminder(ctx, uid) {
+  try {
+    const u = getUser(uid);
+    if (!u || u.daily_reminder_off) return;                       // کارتِ روز خاموش است
+    if (!NIGHT_ARMS.control.due(u, botToday())) return;           // امروز کارتش را گرفته
+    const sent = Number(u.last_daily_reminder_at || 0);
+    if (!sent || (Math.floor(Date.now() / 1000) - sent) > REMIND_CHAIN_SEC) return; // امشب یادآوری نگرفته بود
+    await ctx.reply(NIGHT_ARMS.control.text(), Markup.inlineKeyboard([
+      NIGHT_ARMS.control.cta(),
+      [Markup.button.callback(L.buttons.nightRemindOff, 'dailyoff')],
+    ]));
+    track(db, uid, 'night_reminder_sent', { arm: 'control', chained: 1 });
+  } catch (e) { logErr('chain daily reminder:', e.message); }
+}
 
 bot.action(/^lremind:([01])$/, async (ctx) => {
   const uid = ctx.from.id;
@@ -5341,6 +5375,49 @@ const KB_V2_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='ux_v2_
 // دعوتِ قدیمی‌تر از این مهر همان ۱۰ وعده‌داده‌شده را می‌گیرد (`referralPayoutFor`).
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_5', unixepoch())").run();
 REFERRAL_5_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_5'").get()?.done_at || 0;
+
+/* 🌙 مهاجرتِ یک‌باره‌ی دیفالتِ یادآوریِ شبانه — برنده‌ی آزمایشِ `night_reminder` (v3.82.0).
+ *
+ * نتیجه‌ی آزمایش (پنجره‌ی تمیز، ۲٬۸۷۷ در برابر ۳٬۰۵۶ پیام): فالِ تحویل‌شده در ۶ ساعتِ
+ * بعد از پیام ۵٫۸۷٪ برای کارتِ روز در برابرِ ۷٫۱۰٪ برای کارتِ شانس (CTW ۹۷٪ خام، و
+ * ۹۳ تا ۹۶٪ بعد از تصحیحِ خوشه‌بندی)، و گاردریلِ انصراف ۱٫۸۲٪ در برابرِ ۰٫۳۱٪. یعنی
+ * کارتِ شانس هم بیشتر می‌فروشد هم کمتر آزار می‌دهد.
+ *
+ * ⚠️ چرا مهاجرتِ **دیتا** و نه ستونِ تازه یا عوض‌کردنِ معنای ستون: بند ۲ج/۱ تغییرِ معنای
+ * ستونِ موجود را ممنوع می‌کند، و ستونِ تازه هم لازم نیست. معنیِ هر دو ستون دست‌نخورده
+ * می‌ماند (`daily_reminder_off` = کارتِ روز خاموش، `lucky_reminder_on` = کارتِ شانس روشن)
+ * و فقط **مقدارشان** به دیفالتِ تازه می‌رود. پس هیچ کدی که این دو را می‌خواند عوض نشد.
+ *
+ * ⚠️ تفکیکِ «کدام یادآوری را خاموش کرده بود» از خودِ شاخه‌ی آزمایش می‌آید، نه از ستون:
+ * دکمه‌ی «دیگه یادآوری نکن» زیرِ **هر دو** شاخه یک ستون را می‌نوشت، پس ستون به‌تنهایی
+ * نمی‌گوید کاربر کدام پیام را رد کرده. کسی که در شاخه‌ی `lucky` بوده، کارتِ شانس را رد
+ * کرده و باید خاموش بماند (خواسته‌ی صریحِ مالک)؛ کسی که در شاخه‌ی `control` بوده یا
+ * اصلاً exposure ندارد، کارتِ **روز** را رد کرده و کارتِ شانسش روشن می‌شود.
+ * روی دیتای زنده: ۲۱ انصراف = ۵ شاخه‌ی lucky (خاموش می‌مانند) + ۱۱ control + ۵ بی‌exposure. */
+try {
+  const NIGHT_DEFAULT_KEY = 'night_default_lucky';
+  const already = db.prepare('SELECT 1 FROM migrations WHERE key=?').get(NIGHT_DEFAULT_KEY);
+  if (!already) {
+    db.transaction(() => {
+      /* ⚠️ ترتیبِ این دو UPDATE حیاتی است و برعکسش یک باگِ بی‌صداست: شرطِ «کارتِ شانس را
+       * رد کرده بود» روی `daily_reminder_off` می‌نشیند، پس **باید قبل از** خاموش‌کردنِ
+       * سراسریِ کارتِ روز خوانده شود. اگر جا عوض شود، همه‌ی کاربران «انصراف‌داده» به نظر
+       * می‌رسند و به‌جای ۵ نفر، هر ۲۳۶ کاربرِ شاخه‌ی lucky بی‌یادآوری می‌مانند. */
+      db.prepare(`
+        UPDATE users SET lucky_reminder_on=1
+        WHERE telegram_id NOT IN (
+          SELECT x.user_id FROM ab_exposures x
+          JOIN users u2 ON u2.telegram_id = x.user_id
+          WHERE x.experiment_key='night_reminder' AND x.variant='lucky' AND u2.daily_reminder_off=1
+        )
+      `).run();
+      // و حالا کارتِ روز برای همه خاموش می‌شود (از این به بعد opt-in است).
+      db.prepare('UPDATE users SET daily_reminder_off=1').run();
+      db.prepare('INSERT OR IGNORE INTO migrations (key, done_at) VALUES (?, unixepoch())').run(NIGHT_DEFAULT_KEY);
+    })();
+    log('🌙 دیفالتِ یادآوریِ شبانه به کارتِ شانس مهاجرت کرد');
+  }
+} catch (e) { logErr('night default migration:', e.message); }
 /* ⌨️ تازه‌سازیِ بی‌صدای کیبورد وقتی نسخه‌اش عقب است (بند ۹ب-۲ ریشه).
 
    چطور کار می‌کند: یک پیامِ کوتاهِ **بی‌صدا** با کیبوردِ تازه فرستاده و بلافاصله حذف
@@ -7954,10 +8031,20 @@ setInterval(async () => {
       // نمی‌بیند، پس نباید exposure هم بگیرد.
       if (await sendStuckReadingReminder(u)) { await sleep(300); continue; }
       if (!expOn) {
-        // بعد از آزمایش: هر یادآوری فقط اگر خودش روشن باشد و کارِ امروزش نشده باشد.
+        /* بعد از آزمایش: هر یادآوری فقط اگر خودش روشن باشد و کارِ امروزش نشده باشد.
+         *
+         * ⚠️ **حداکثر یک پیام در ساعتِ ۲۲.** نسخه‌ی قبلی هر دو یادآوریِ روشن را پشتِ سرِ هم
+         * می‌فرستاد؛ یعنی کاربری که هر دو کلیدش روشن بود دو پیامِ پیاپی می‌گرفت — دقیقاً
+         * همان چیزی که v3.9.0 دلیلِ بلاک‌شدن ثبتش کرده. چون تا امروز آزمایش running بود
+         * این شاخه هرگز اجرا نشده بود و باگ خفته مانده بود.
+         *
+         * قاعده‌ی تازه (تصمیمِ صریحِ مالک): کارتِ شانس اولویت دارد، و یادآوریِ کارتِ روز
+         * اگر روشن باشد **بعد از تمام‌شدنِ فلوی کارتِ شانس** زنجیر می‌شود (پایینِ `lpick:`)،
+         * نه به‌عنوان پیامِ دومِ همین ساعت. کاربری که فقط یکی را روشن دارد همان یکی را
+         * می‌گیرد، و کسی که هر دو را خاموش کرده هیچ‌چیز. */
         const wanted = [];
-        if (!u.daily_reminder_off && NIGHT_ARMS.control.due(u, today)) wanted.push(['control', NIGHT_ARMS.control]);
         if (u.lucky_reminder_on && NIGHT_ARMS.lucky.due(u, today)) wanted.push(['lucky', NIGHT_ARMS.lucky]);
+        else if (!u.daily_reminder_off && NIGHT_ARMS.control.due(u, today)) wanted.push(['control', NIGHT_ARMS.control]);
         if (!wanted.length) continue;
         // مهر **یک بار** و قبل از اولین ارسال: گاردِ ۱۸ساعته per کاربر است نه per یادآوری،
         // پس اگر بعد از ارسالِ اولی ری‌استارت شود، دومی فردا شب دوباره تلاش نمی‌کند.
