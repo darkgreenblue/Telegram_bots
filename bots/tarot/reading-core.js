@@ -288,7 +288,13 @@ export function orChat(system, user, opts = {}) {
     // تفکر (reasoning) خاموش: وگرنه Gemini بخشی از max_tokens را صرف thinking می‌کند و
     // خروجی JSON وسط رشته بریده می‌شود (Unterminated string) — دیده‌شده در لاگ پروداکشن
     reasoning: { enabled: false },
-    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    /* 🗣 `opts.messages` برای **گفتگوی چندنوبتی** (v3.84.0) است و کاملاً افزایشی:
+     * با `undefined` (یعنی هر فراخوانیِ فال، تعمیر، کارتِ روز و رسید) رشته‌ی نهایی
+     * بایت‌به‌بایت همان قبلی است، چون این شاخه دقیقاً همان دو پیامِ system/user را
+     * می‌سازد. همان استدلالی که `usage:{include:true}` و برچسبِ حسابداری رویش
+     * ساخته شدند: «صفر تغییر روی سیم» برای مسیری که کاربرِ پولی روی آن است.
+     * چکِ CI بدنه‌ی مسیرِ فال را کلید-به-کلید دوباره می‌سنجد. */
+    messages: opts.messages || [{ role: 'system', content: system }, { role: 'user', content: user }],
   // برچسبِ حسابداری (کدام مسیر، کدام رکورد، کدام کاربر). عمداً **بیرونِ** بدنه‌ی ریکوئست
   // است تا هیچ‌وقت به سیم نرود و نتواند رفتارِ مدل را عوض کند.
   }, { kind: opts.kind, refId: opts.refId, userId: opts.userId });
@@ -309,6 +315,19 @@ export function orChat(system, user, opts = {}) {
  * ⚠️ اگر `READING_MODEL` دوباره `FLASH` شود (رول‌بک)، این آرایه به چهار تلاشِ جمنای
  * به‌علاوه‌ی یک دیپ‌سیک تبدیل می‌شود. بی‌ضرر است و عمداً ساده نگه داشته شده. */
 export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH, FALLBACK_MODEL];
+
+/* 🗣 زنجیره‌ی **گفتگوی پس از فال** (v3.84.0).
+ *
+ * چرا همان مدلِ خوانش: اولویتِ صریحِ مالک یکسان بودنِ لحن است، و تمامِ کارِ دو دورِ
+ * ۹۰فالیِ جفت‌شده که `luna` را برای فارسی انتخاب کرد روی همین صدا نشسته. مدلِ دومِ
+ * متفاوت یعنی دو صدا در یک تجربه: کاربر فال را با یک لحن می‌خواند و جوابِ سؤالش را
+ * با لحنِ دیگری می‌گیرد.
+ *
+ * چرا **دو** تلاش روی مدلِ اصلی و نه سه (برخلافِ `READING_PLAN`): خروجی این‌جا کوتاه
+ * است و `validate` فقط شکل را می‌سنجد، پس شکستِ تلاشِ اول تقریباً همیشه خرابیِ شبکه
+ * است نه خرابیِ محتوا؛ تلاشِ سومِ همان مدل چیزی اضافه نمی‌کند و کاربر منتظر می‌ماند. */
+export const CHAT_MODEL = (process.env.CHAT_MODEL || '').trim() || READING_MODEL;
+export const CHAT_PLAN  = [CHAT_MODEL, CHAT_MODEL, FLASH, FALLBACK_MODEL];
 export async function orChatResilient(system, user, opts = {}, plan = READING_PLAN) {
   const usages = [];
   for (let i = 0; i < plan.length; i++) {

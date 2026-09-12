@@ -56,6 +56,15 @@ on:
         description: 'چند پاسِ کامل روی همان سناریوها (برای جدا کردنِ اثر از نویز). در حالتِ probe: تکرارِ هر چیدمان. در حالتِ arena: چند بار هر ورودی به هر بازو داده شود'
         required: false
         default: '1'
+      chat:
+        description: '🗣 حالتِ گفتگوی پس از فال (به‌جای خوانش). فالِ پایه کش می‌شود، پس دورِ دوم به بعد فقط هزینه‌ی نوبت‌های گفتگو را می‌دهد'
+        type: boolean
+        required: false
+        default: false
+      turns:
+        description: 'در حالتِ chat: چند follow-up از هر پرسونا (۰ = همه). برای دورِ ارزانِ اکتشافی ۲ بگذار'
+        required: false
+        default: '0'
       arena_runs:
         description: '🛠 حالتِ آرِنای تعمیر: شناسه‌ی runهای قبلیِ همین ورک‌فلو با کاما. هیچ فالی تولید نمی‌شود؛ فقط مسیرِ تعمیر روی خروجیِ ذخیره‌شده‌ی آن‌ها با هر بازو تکرار می‌شود.'
         required: false
@@ -148,6 +157,17 @@ jobs:
             ${{ inputs.arms && format('--arms {0}', inputs.arms) || '' }} \
             --reps "${{ inputs.reps }}"
 
+      # 💰 کشِ فالِ پایه. مهم‌ترین خاصیتِ اقتصادیِ آزمایشگاهِ گفتگو: فالِ پایه یک بار
+      # ساخته می‌شود و دورهای بعدی فقط نوبت‌های گفتگو را می‌پردازند. کلید per زبان و
+      # per مدلِ پایه است، پس عوض‌شدنِ مدل خودش کش را باطل می‌کند.
+      - name: کشِ فالِ پایه
+        if: inputs.chat
+        uses: actions/cache@v4
+        with:
+          path: tools/reading-lab/.chat-base.json
+          key: chat-base-${{ inputs.locale }}-${{ inputs.model }}-${{ hashFiles('tools/reading-lab/scenarios*.json') }}
+          restore-keys: chat-base-${{ inputs.locale }}-
+
       - name: اجرای آزمایشگاه
         if: '!inputs.list_models && !inputs.arena_runs'
         env:
@@ -168,7 +188,18 @@ jobs:
           # بازوهای چندگانه: یک اجرا، کارت و سؤالِ یکسان، گزارشِ جفت‌شده
           [ -n "${{ inputs.arms }}" ] && ARGS="$ARGS --arms ${{ inputs.arms }}"
           [ -n "${{ inputs.set }}" ] && ARGS="$ARGS --set ${{ inputs.set }}"
-          if [ "${{ inputs.probe }}" = "true" ]; then
+          # 🗣 حالتِ گفتگو: **همان** پرچم‌های مشترک (locale/only/arms/reps/fake) ولی
+          # ابزارِ دیگر. عمداً یک ورک‌فلوی تازه ساخته نشد: `workflow_dispatch` فقط برای
+          # فایلی کار می‌کند که روی برنچِ **پیش‌فرض** هم باشد، پس ورک‌فلوی جدید تا مرج
+          # نشدن اصلاً قابلِ اجرا نیست (همان استدلالِ حالتِ آرِنا، چند خط بالاتر).
+          if [ "${{ inputs.chat }}" = "true" ]; then
+            [ "${{ inputs.turns }}" != "0" ] && ARGS="$ARGS --turns ${{ inputs.turns }}"
+            # ⚠️ `--dry` در این ابزار وجود ندارد و عمداً: درسِ ثبت‌شده‌ی `--dry` این بود
+            # که مسیرِ پذیرش و رندر را لمس نمی‌کند و یک باگ را پنهان کرد. جانشینش
+            # `--fake` است که کلِ خطِ لوله را با استابِ محلی اجرا می‌کند.
+            [ "${{ inputs.dry }}" = "true" ] && ARGS="${ARGS/--dry/--fake}"
+            node tools/chat-lab.mjs $ARGS --out reading-lab-out.json
+          elif [ "${{ inputs.probe }}" = "true" ]; then
             node tools/reading-lab.mjs $ARGS --probe
           else
             node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
@@ -187,8 +218,10 @@ jobs:
       # 📋 خلاصه‌ی فشرده در **انتهای** لاگ. لاگِ کاملِ یک دور ~۱۴۰۰ خط است و خلاصه‌اش
       # وسطش گم می‌شود، پس خواندنش از بیرون گران و خطاپذیر بود. این قدم بعد از آپلود
       # اجرا می‌شود تا همیشه آخرین چیزِ لاگ باشد و با یک tail کوتاه دیده شود.
+      # در حالتِ chat خودِ ابزار گزارشِ کاملش را در انتهای لاگ چاپ می‌کند (شاملِ
+      # رونوشتِ همه‌ی گفتگوها)، پس این خلاصه‌ی خوانش‌محور آن‌جا بی‌معنی است و رد می‌شود.
       - name: خلاصه
-        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs
+        if: always() && inputs.probe != true && inputs.list_models != true && !inputs.arena_runs && inputs.chat != true
         run: |
           node -e '
             const fs = require("fs");

@@ -51,7 +51,15 @@ import {
   seedToInt, mulberry32, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName, cardKeywords,
+  CHAT_PLAN, CHAT_MODEL,
 } from './reading-core.js';
+// 🗣 هسته‌ی خالصِ گفتگو — دوقلوی reading-core برای فیچرِ چت. همان کد را
+// `tools/chat-lab.mjs` صدا می‌زند، پس سنجه‌ی آزمایشگاه دقیقاً همان متنی را می‌بیند
+// که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
+import {
+  buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
+  cleanChatReply, chatShapeOk, questionWordsOf, configureChatLang,
+} from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
 const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
@@ -230,7 +238,10 @@ const TEST_PHASE = false;
 // 3.83.0: پاداشِ دعوت ۵ ⟵ ۳ الماس برای فارسی (پله‌ی سومِ `REFERRAL_3_LOCALES`)، با
 //         حفظِ وعده‌ی هر دو نسلِ قبلی؛ به‌علاوه‌ی دو ستونِ افزایشیِ `llm_usage` برای
 //         سنجشِ کشِ پرامپت. تنها تغییرِ رو-به-کاربر همان عددِ پاداش است.
-const PRODUCT_VERSION = '3.83.0';
+// 3.84.0: 🗣 گفتگوی پس از فال (فعلاً فقط-ادمین و فقط فارسی): بعد از تحویلِ فال کاربر
+//         می‌تواند درباره‌ی همان فال سؤال بپرسد، هر سؤال یک الماس. بامپ حتی با
+//         فقط-ادمین بودن اجباری است (بند ۲ج/۴): رفتار برای بخشی از کاربران عوض شده.
+const PRODUCT_VERSION = '3.84.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -269,6 +280,43 @@ const OPEN_TOPIC_ENABLED = true;
 // به‌جای یتیم‌کردنِ بی‌صدای فاکتور. Rollback فوری: false کن → دکمه‌های nav و گارد محو، رفتار دقیقاً مثل قبل
 // (callbackِ nav:menu ثبت‌شده می‌ماند تا دکمه‌ی کش‌شده هم بی‌خطر باشد).
 const NAV_GUARD_ENABLED = true;
+
+/* ═══════════ 🗣 گفتگوی پس از فال (v3.84.0) ═══════════
+ *
+ * بعد از تحویلِ فال، کاربر می‌تواند درباره‌ی **همان فال** سؤال بپرسد. هر سؤال یک
+ * الماس، با حافظه‌ی کاملِ فال و گفتگو، و لحنِ عیناً همان لحنِ خوانش.
+ *
+ * الگوی دو ثابتِ بند ۲ج-۲ ریشه: `CHAT_AFTER_READING` کلیدِ خاموشیِ کلِ فیچر است و
+ * `_ADMIN_ONLY` فقط دامنه. باز کردن برای همه = یک خط، رول‌بک = یک خط، و این دو مسیر
+ * عمداً از هم جدا هستند. **هیچ‌جا پرچمِ خام صدا زده نمی‌شود، فقط `chatOn`** — چکِ CI
+ * تعدادِ استفاده‌ی خام را روی ۲ قفل کرده (تعریف + helper).
+ *
+ * ⚠️ `CHAT_LOCALES` گیتِ **ساختاری** نسخه‌ی اول است: مالک صریح گفت v1 فقط فارسی، چون
+ * آزمایشگاه و تستِ دستی روی فارسی است. کلیدهای locale در هر چهار زبان هست (الزامِ
+ * `check-locale-shape`) ولی برای ru/pt/es کدِ مرده‌اند تا دورِ آزمایشگاهِ خودشان
+ * بیاید — همان الگوی ثبت‌شده‌ی `invoiceReminder`. ردیفِ جدولِ استثناهای زبانی دارد. */
+const CHAT_AFTER_READING = true;
+const CHAT_AFTER_READING_ADMIN_ONLY = true;
+const CHAT_LOCALES = ['fa'];
+const chatOn = (uid) => CHAT_AFTER_READING
+  && CHAT_LOCALES.includes(LOCALE)
+  && (!CHAT_AFTER_READING_ADMIN_ONLY || isTester(uid));
+
+const CHAT_PRICE       = 1;    // الماس per سؤال (throttleِ اصلی؛ سقفِ نوبت فقط ضدِ حلقه است)
+const CHAT_WINDOW_DAYS = 0;    // ۰ = هر فالِ تحویل‌شده، بدونِ محدودیتِ زمانی (تصمیمِ مالک)
+/* سقفِ **فرار**، نه throttle: ۳۰ سؤال یعنی ~$۰٫۰۲۴ هزینه در برابرِ ۳۰ الماس درآمد، پس
+ * از نظرِ اقتصادی هیچ ریسکی ندارد. این عدد فقط جلوی یک حلقه‌ی باگ‌دار یا اسکریپت را
+ * می‌گیرد. مالک صریح گفت سقفِ سخت نمی‌خواهد و خلاصه‌سازیِ کانتکست کارِ طول را می‌کند. */
+const CHAT_MAX_TURNS   = 30;
+const CHAT_VOICE       = false; // نسخه‌ی اول فقط متن (ویس = یک فراخوانیِ رونویسیِ اضافه per پیام)
+/* گاردِ «ادامه/خروج» عمداً **خاموش** است: خروج از گفتگو غیرمخرب است و ورودِ دوباره یک
+ * تپ روی همان دکمه‌ی زیرِ فال. افزودنِ گاردِ چهارم به ~۱۵ نقطه‌ی ورودِ منو دقیقاً همان
+ * الگویی است که بند ۸ ریشه می‌گوید «دیر یا زود یکی را جا می‌گذارد». اگر دیتا نشان داد
+ * کاربرها سهواً بیرون می‌افتند، `true` کردنش یک خط است. */
+const CHAT_EXIT_GUARD  = false;
+const CHAT_ORPHAN_SEC  = 180;  // سنِ لازم برای ریفاندِ سؤالِ بی‌جواب (کوتاه‌تر = ریفاندِ کاربرِ منتظر)
+const CHAT_NUDGE_TURN  = 12;   // نادجِ «تصمیم مالِ خودته»، یک بار در هر گفتگو
+const CHAT_MAX_TOKENS  = 500;
 
 // 🪙 UX v2.6 — نقطه‌ی کسرِ اعتبار از **پی‌والِ بعد از انتخابِ کارت‌ها** به **لحظه‌ی انتخابِ
 // اندازه** منتقل شد (تصمیمِ صریحِ مالک). یعنی کاربر همان‌جا که «۵ کارتی (➖۵💎)» را می‌زند
@@ -1165,6 +1213,30 @@ db.exec(`
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     PRIMARY KEY (card_key, reversed, focus)
   );
+  -- 🗣 گفتگوی پس از فال (v3.84.0). منبعِ حقیقتِ تاریخچه: نه حافظه، نه سشن. هر دیپلوی
+  -- یعنی ری‌استارت و کاربری که وسطِ گفتگوست نباید نخِ حرفش را از دست بدهد (بند ۹ب/۵).
+  -- سشن فقط یک اشاره‌گر به فالِ جاری نگه می‌دارد.
+  --
+  -- دو ستونِ مالی، هیچ‌کدام تزئینی:
+  --   price    = بند ۹ ریشه: «هر الماس ردپای DB دارد». بدونش، اگر روزی CHAT_PRICE
+  --              عوض شود کلِ تاریخِ قبلی معنایش را از دست می‌دهد (همان درسی که
+  --              payments.original_amount و پله‌های پاداشِ دعوت ساختند).
+  --   refunded = گاردِ اتمیک ضدِ ریفاندِ دوباره. دو مسیر می‌توانند یک پیام را برگردانند
+  --              (شکستِ درون‌پروسه، و جاروی بوت)؛ بدونش یک الماس دو بار برمی‌گشت.
+  --              همان الگوی setReferralRewarded.
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    reading_id INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    role       TEXT    NOT NULL DEFAULT '',
+    text       TEXT    NOT NULL DEFAULT '',
+    price      INTEGER NOT NULL DEFAULT 0,
+    refunded   INTEGER NOT NULL DEFAULT 0,
+    model      TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_reading ON chat_messages(reading_id, id);
+  CREATE INDEX IF NOT EXISTS idx_chat_user    ON chat_messages(user_id, created_at);
 `);
 // migration (v3.4.0): ارجاعِ فایلِ صوتیِ سؤال. **خودِ صدا ذخیره نمی‌شود**، فقط file_id تلگرام
 // (یک اشاره‌گر) تا موقعِ خوانش — یعنی بعد از پرداخت — دانلود و مستقیم به مدل داده شود.
@@ -1180,6 +1252,11 @@ try { db.prepare("ALTER TABLE readings ADD COLUMN question_audio_fmt TEXT NOT NU
 // جاروی یتیم‌ها هم عمداً ردش می‌کند چون فقط `llm_json=''` را نجات می‌دهد.
 // با این ستون، رکوردِ خودِ فال می‌داند کاربر تا کجا دیده و بازیابی از DB ممکن می‌شود.
 try { db.prepare('ALTER TABLE readings ADD COLUMN reveal_idx INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* migration (v3.84.0): شناسه‌ی پیامِ «بدنه‌ی اصلیِ فال» — لنگرِ ریپلایِ گفتگو.
+ * خواسته‌ی صریحِ مالک: پاسخ‌های گفتگو باید به خودِ فال reply بخورند تا کاربر خطِ
+ * گفتگو را در چتِ شلوغ راحت تشخیص بدهد. صفر = فالِ قبل از این نسخه، که کاملاً کار
+ * می‌کند فقط بدونِ ریپلای (بند ۲ج/۱: داده‌ی قدیمی با کدِ جدید معتبر می‌ماند). */
+try { db.prepare('ALTER TABLE readings ADD COLUMN anchor_msg_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
@@ -1552,6 +1629,29 @@ const stmts = {
   // پیشرفتِ افشا روی خودِ رکورد (#215). فقط جلو می‌رود: یک دکمه‌ی کهنه که ایندکسِ
   // کوچک‌تری می‌فرستد نباید پیشرفت را عقب ببرد.
   setRevealIdx: db.prepare('UPDATE readings SET reveal_idx=? WHERE id=? AND reveal_idx<?'),
+  // 🗣 لنگرِ ریپلایِ گفتگو. write-once به معنیِ عملی: هر فال یک بار تحویل می‌شود.
+  setAnchorMsg: db.prepare('UPDATE readings SET anchor_msg_id=? WHERE id=?'),
+  insertChatMsg: db.prepare('INSERT INTO chat_messages (reading_id, user_id, role, text, price, model) VALUES (?,?,?,?,?,?)'),
+  chatHistory:   db.prepare('SELECT role, text FROM chat_messages WHERE reading_id=? ORDER BY id ASC'),
+  chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
+  // ادعای اتمیکِ ریفاند: **قبل از** واریز اجرا می‌شود، پس دو مسیرِ ریفاند (شکستِ
+  // درون‌پروسه و جاروی بوت) نمی‌توانند یک الماس را دو بار برگردانند.
+  markChatRefunded: db.prepare('UPDATE chat_messages SET refunded=1 WHERE id=? AND refunded=0'),
+  setChatModel:  db.prepare('UPDATE chat_messages SET model=? WHERE id=?'),
+  /* 🧹 جاروی یتیم‌های گفتگو: پیامِ کاربری که پولش کم شد و **هیچ جوابی بعدش نیامد**.
+   * شرطِ `NOT EXISTS` تنها چیزی است که «بی‌جواب» را از «جواب گرفت» جدا می‌کند؛
+   * بدونش هر سؤالِ سالمی هم ریفاند می‌شد. شرطِ سنی جلوی ریفاندِ کاربری را می‌گیرد
+   * که همین الان منتظرِ یک فراخوانیِ کُند است. */
+  orphanChatMsgs: db.prepare(`
+    SELECT m.id, m.user_id, m.price FROM chat_messages m
+    WHERE m.role='user' AND m.refunded=0 AND m.price > 0
+      AND m.created_at < unixepoch() - ?
+      AND NOT EXISTS (
+        SELECT 1 FROM chat_messages a
+        WHERE a.reading_id = m.reading_id AND a.role='assistant' AND a.id > m.id
+      )
+    LIMIT 200
+  `),
   // 🔮 ادعای فالِ نیمه‌تمام برای نمایشِ دوباره (v3.67.0). عمداً هر دو حالت را می‌گیرد:
   // `paid` (نمایش هرگز شروع نشد) و `started` (وسطش قطع شد). ولی `delivered` و `refunded`
   // بیرون‌اند، پس دکمه‌ی کهنه هرگز فالِ تحویل‌شده را دوباره نمی‌فروشد یا تکرار نمی‌کند.
@@ -1996,7 +2096,9 @@ function wipeUser(uid) {
   try { db.prepare('DELETE FROM referrals WHERE referee_id=? OR referrer_id=?').run(uid, uid); } catch (e) { logErr('wipe referrals', e.message); }
   // `daily_log` هم باید پاک شود، وگرنه ادمینی که ریست کرده هفت روز نمی‌تواند
   // کارت‌هایی را که قبلاً دیده دوباره بگیرد و تستِ کارتِ روز عملاً قفل می‌شود.
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id']]) {
+  // `chat_messages` هم پاک می‌شود (دیتای کاربرمحور). ⚠️ `llm_usage` عمداً نه: دفترِ
+  // هزینه است نه دیتای کاربر، و ریستِ تستیِ ادمین نباید تاریخچه‌ی هزینه را قیچی کند.
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id'],['chat_messages','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -2159,6 +2261,13 @@ const OPEN_FLOW_STATES = new Set([
 const KB_QUIET_STATES = new Set([
   ...ONBOARDING_STATES,
   'await_question', 'pay_amount', 'pay_receipt', 'pay_discount', 'settings_name',
+  // 🗣 گفتگو هم استیتِ ورودی است: کاربر باید سؤالش را **بنویسد**.
+  // ⚠️ ولی عمداً در `OPEN_FLOW_STATES` **نیست**: آن مجموعه یعنی «فلوی نیمه‌تمام» و
+  // تنها مصرفش گاردِ یادآوریِ شبانه است. گفتگو چیزی رزرو نکرده، پولِ معلقی ندارد و
+  // خروجش رایگان است — دقیقاً همان استدلالی که `choose_spread` را بیرون گذاشت. اگر
+  // داخلش بود، کاربری که گفتگو را باز کرده و رفته ۲۴ ساعت یادآوری نمی‌گرفت و ما یک
+  // قلابِ بازگشت را بی‌دلیل خاموش می‌کردیم.
+  'chatting',
 ]);
 // اگر کاربر وسط آنبوردینگ روی یک دکمه‌ی اصلی زد (کیبوردِ کش‌شده یا تایپِ دستی)، به‌جای اجرا،
 // همان قدمِ فعلیِ آنبوردینگ دوباره یادآوری می‌شود. خروجی true = بلاک شد.
@@ -2221,18 +2330,22 @@ const INTENT = {
   LUCKY:   'lucky',
   READING: 'reading',
   SETTINGS: 'settings',
+  CHAT:    'chat',
 };
-function setIntent(uid, key) {
-  try { patchSession(uid, { intent: key, intentAt: Math.floor(Date.now() / 1000) }); } catch {}
+/* ⚠️ `arg` (v3.84.0) برای نیت‌هایی است که بدونِ شناسه بی‌معنی‌اند — گفتگو باید بداند
+ * **کدام فال**. صفر برای همه‌ی نیت‌های قبلی، پس رفتارشان بیت‌به‌بیت دست‌نخورده است. */
+function setIntent(uid, key, arg = 0) {
+  try { patchSession(uid, { intent: key, intentAt: Math.floor(Date.now() / 1000), intentArg: Number(arg) || 0 }); } catch {}
 }
 function takeIntent(uid) {
   try {
     const s = getSession(uid) || {};
     const k = s.intent;
     if (!k) return null;
-    patchSession(uid, { intent: '', intentAt: 0 });
+    const arg = Number(s.intentArg) || 0;
+    patchSession(uid, { intent: '', intentAt: 0, intentArg: 0 });
     if (!s.intentAt || Math.floor(Date.now() / 1000) - s.intentAt > INTENT_TTL_S) return null;
-    return k;
+    return { key: k, arg };
   } catch { return null; }
 }
 /* 🧹 پاک‌کردنِ سشن **بدونِ بردنِ نیت** — دوقلوی جراحیِ `setSession(uid, null)`.
@@ -2253,7 +2366,9 @@ function takeIntent(uid) {
 function clearSessionKeepIntent(uid) {
   const s = getSession(uid) || {};
   const keep = {};
-  if (s.intent) { keep.intent = s.intent; keep.intentAt = s.intentAt || 0; }
+  // ⚠️ `intentArg` باید با `intent` بیاید، وگرنه همان باگِ v3.78.0 از درِ دیگر
+  // برمی‌گردد: نیت زنده می‌ماند ولی شناسه‌اش می‌رود و بازپخش روی فالِ صفر می‌افتد.
+  if (s.intent) { keep.intent = s.intent; keep.intentAt = s.intentAt || 0; keep.intentArg = Number(s.intentArg) || 0; }
   setSession(uid, Object.keys(keep).length ? keep : null);
 }
 
@@ -2267,6 +2382,7 @@ const INTENT_REPLAY = {
   [INTENT.LUCKY]:   (ctx) => luckyCard(ctx),
   [INTENT.READING]: (ctx) => showCatalog(ctx),
   [INTENT.SETTINGS]: (ctx) => showSettings(ctx),
+  [INTENT.CHAT]:    (ctx, arg) => openChat(ctx, arg),
 };
 // صفحه‌ی پشتیبانی از **همان** سازنده‌ی shared می‌آید که خودِ دکمه استفاده می‌کند، تا
 // بازپخشِ نیت هیچ‌وقت با تپِ واقعیِ دکمه واگرا نشود (بند ۶ج: تک‌منبع).
@@ -2277,10 +2393,10 @@ async function replySupport(ctx) {
 
 // خروجی true = نیت بازپخش شد، پس صدازننده نباید پیامِ عمومیِ خودش را هم بفرستد.
 async function replayIntent(ctx, uid) {
-  const k = takeIntent(uid);
-  const fn = k && INTENT_REPLAY[k];
+  const it = takeIntent(uid);
+  const fn = it && INTENT_REPLAY[it.key];
   if (!fn) return false;
-  try { await fn(ctx); return true; } catch (e) { logErr('replayIntent:', e.message); return false; }
+  try { await fn(ctx, it.arg); return true; } catch (e) { logErr('replayIntent:', e.message); return false; }
 }
 
 // گاردِ «پرداختِ باز» — دوقلوی blockDuringOnboarding برای ریلِ پرداخت (الگوی voice2text):
@@ -2330,7 +2446,7 @@ function dropUnissuedPay(uid) {
   if (PAY_STATES.includes(getState(uid))) setState(uid, s.readingId ? 'confirm_pay' : 'idle');
 }
 
-async function blockDuringOpenPay(ctx, intent) {
+async function blockDuringOpenPay(ctx, intent, intentArg = 0) {
   if (!NAV_GUARD_ENABLED) return false;
   const uid = ctx.from.id;
   if (!PAY_STATES.includes(getState(uid))) return false;
@@ -2339,7 +2455,7 @@ async function blockDuringOpenPay(ctx, intent) {
   // کهنه پاک می‌شود و اکشنِ کاربر عادی ادامه پیدا می‌کند.
   if (!p) { dropUnissuedPay(uid); return false; }
   const pid = p.id;
-  if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
+  if (intent) setIntent(uid, intent, intentArg);   // بعد از انصراف، همین برمی‌گردد
   // ⚠️ عمداً `pay_exit` است نه `pay_cancel`. آن یکی از ۱۴۰۵/۰۶/۱۱ معنیِ دیگری گرفت:
   // «یک قدم عقب به صفحه‌ی بسته‌ها»، که برای کاربرِ الماسی یک ردیفِ پرداختِ **تازه** باز
   // می‌کند و دوباره به `pay_amount` برمی‌گردد. یعنی همان چیزی که این گارد رویش حساس است.
@@ -2413,7 +2529,7 @@ async function blockDuringDelivering(ctx) {
   return true;
 }
 
-async function blockDuringOpenReading(ctx, intent) {
+async function blockDuringOpenReading(ctx, intent, intentArg = 0) {
   if (!NAV_GUARD_ENABLED) return false;
   const uid = ctx.from.id;
   const state = getState(uid);
@@ -2428,7 +2544,7 @@ async function blockDuringOpenReading(ctx, intent) {
     return true;
   }
   if (!READING_INPROGRESS.includes(state)) return false;
-  if (intent) setIntent(uid, intent);   // بعد از انصراف، همین برمی‌گردد
+  if (intent) setIntent(uid, intent, intentArg);   // بعد از انصراف، همین برمی‌گردد
   await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
@@ -2533,6 +2649,29 @@ const payForSpread = db.transaction((uid, spread, focusKey) => {
   ).lastInsertRowid);
   stmts.setReadingStatus.run('paid', id);
   return id;
+});
+
+/* ═══ 🗣 پولِ گفتگو (v3.84.0) ═══
+ *
+ * دقیقاً همان دو قاعده‌ی مقدسِ مسیرِ فال، بدونِ هیچ اختراعِ تازه‌ای:
+ *   ۱) **کسر و ردپا در یک تراکنش** — یا هر دو یا هیچ‌کدام. اگر کسر انجام می‌شد و
+ *      ردیف نمی‌نشست، پولِ کاربر بی‌ردپا می‌رفت (بند ۹ ریشه).
+ *   ۲) **کسر قبل از هر فراخوانیِ پولی** — صداکننده موظف است خروجیِ صفر را به‌عنوان
+ *      «کم‌موجودی» بخواند و همان‌جا برگردد، نه اینکه مدل را صدا بزند.
+ * خروجی: شناسه‌ی ردیفِ سؤال (برای ریفاندِ احتمالی)، یا ۰ اگر موجودی کافی نبود. */
+const payForChat = db.transaction((uid, readingId, text) => {
+  if (CHAT_PRICE > 0 && stmts.deduct.run(CHAT_PRICE, uid, CHAT_PRICE).changes === 0) return 0;
+  return Number(stmts.insertChatMsg
+    .run(readingId, uid, 'user', String(text || '').slice(0, 2000), CHAT_PRICE, '').lastInsertRowid);
+});
+
+/* ریفاندِ یک سؤالِ بی‌جواب. **ادعا قبل از واریز** — همان ترتیبِ پاداشِ دعوت: اگر
+ * `markChatRefunded` صفر تغییر بدهد یعنی یک مسیرِ دیگر (جارو یا خودِ هندلر) زودتر
+ * برگردانده و اینجا نباید دوباره واریز شود. خروجی: واقعاً برگشت یا نه. */
+const refundChat = db.transaction((msgId, uid, price) => {
+  if (stmts.markChatRefunded.run(msgId).changes === 0) return false;
+  if (price > 0) stmts.credit.run(price, uid);
+  return true;
 });
 
 /** لغوِ یک فالِ نیمه‌کاره. فالِ هنوز-پرداخت‌نشده فقط canceled می‌شود؛ فالِ **پرداخت‌شده**
@@ -2906,6 +3045,40 @@ registerJourney(bot, {
   isAdmin: isTester,
   isButtonLabel: (t) => KB_LABELS.has(t),
   redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
+});
+
+/* 🚪 تک‌نقطه‌ی خروج از گفتگو (v3.84.0).
+ *
+ * خروج از گفتگو عمداً **گارد ندارد** (`CHAT_EXIT_GUARD=false`): غیرمخرب است و ورودِ
+ * دوباره یک تپ. ولی استیتِ `chatting` باید همان‌جا رها شود، وگرنه کاربری که دکمه‌ی منو
+ * را زد در استیتِ ورودی می‌ماند و **پیامِ بعدی‌اش یک الماس خرج می‌کند** بدونِ اینکه
+ * بخواهد سؤال بپرسد.
+ *
+ * ⚠️ چرا میدل‌ور و نه یک `leaveChat` در هر نقطه‌ی ورودِ منو: بند ۸ ریشه — گاردی که باید
+ * دستی به ده‌ها هندلر اضافه شود دیر یا زود یکی را جا می‌گذارد، و هندلرهای **آینده**
+ * هیچ پوششی ندارند. این‌طوری هر مسیرِ تازه هم خودکار درست است.
+ *
+ * چیزی که استیت را نگه می‌دارد فقط دو تاست: متنِ آزاد (که خودش سؤالِ گفتگوست) و
+ * اکشن‌های خودِ گفتگو. هر برچسبِ کیبورد و هر اکشنِ دیگری یعنی کاربر رفته. */
+/* ⚠️ فقط `chat:<id>` استیت را نگه می‌دارد. `chat_skip` عمداً **بیرون** است: معنی‌اش
+ * «گفتگو نمی‌خواهم، پیشنهادهایت را بده» است، پس اگر کاربرِ وسطِ گفتگو یک دکمه‌ی کهنه‌ی
+ * `chat_skip` را بزند باید واقعاً از گفتگو بیرون بیاید، وگرنه پیامِ بعدی‌اش یک الماس
+ * خرج می‌کند در حالی که فکر می‌کند از گفتگو خارج شده. */
+const CHAT_KEEP_CB = /^chat:\d+$/;
+bot.use(async (ctx, next) => {
+  try {
+    const uid = ctx.from?.id;
+    if (!uid || !CHAT_AFTER_READING || getState(uid) !== 'chatting') return next();
+    const txt = ctx.message?.text;
+    const cb = ctx.callbackQuery?.data;
+    // دستور (`/start`, `/support`, …) هم خروج است، وگرنه استیت می‌ماند و پیامِ بعدیِ
+    // کاربر که فکر می‌کند از گفتگو بیرون آمده یک الماس خرج می‌کند.
+    if (txt && !KB_LABELS.has(txt) && !txt.startsWith('/')) return next();   // سؤالِ گفتگو
+    if (cb && CHAT_KEEP_CB.test(cb)) return next();         // اکشنِ خودِ گفتگو
+    if (!txt && !cb) return next();                         // آپدیتِ سرویسی/ویس: دست نزن
+    leaveChat(uid, txt ? 'menu' : 'action');
+  } catch (e) { logErr('chat exit:', e.message); }
+  return next();
 });
 
 /* ---------- آنبوردینگ و /start ---------- */
@@ -5411,6 +5584,258 @@ async function replyCanceled(ctx, uid) {
   return ctx.reply(L.reading.canceled, mainKeyboard(uid));
 }
 
+/* ═══════════════ 🗣 گفتگوی پس از فال (v3.84.0) ═══════════════
+ *
+ * مدلِ ذهنی: استیتِ `chatting` + یک اشاره‌گر در سشن (`chatReadingId`). منبعِ حقیقتِ
+ * تاریخچه جدولِ `chat_messages` است، پس ری‌استارت هیچ حرفی را گم نمی‌کند.
+ *
+ * ترتیبِ آهنینِ هر نوبت (هر قدم یک ادعای CI دارد):
+ *   ۱ حضور و مالکیت → ۲ بحران → ۳ تعارف → ۴ سقف → ۵ هم‌زمانی → ۶ **کسر** →
+ *   ۷ کم‌موجودی؟ → ۸ LLM → ۹ شکست؟ **ریفاند** → ۱۰ ثبتِ جواب → ۱۱ ارسال.
+ * قدمِ ۶ **قبل از** قدمِ ۸ حیاتی‌ترین ادعای این فیچر است (بند ۹ ریشه: هیچ فراخوانیِ
+ * پولی قبل از کسرِ اعتبار). */
+
+// فالی که می‌شود درباره‌اش گفتگو کرد. هر شرط یک شاخه‌ی صریحِ پیام دارد (بند ۹ب/۱:
+// هیچ‌کدام از این حالت‌ها بن‌بست نیست) و **هیچ‌کدام کسر نمی‌کند**.
+function chatEligible(uid, readingId) {
+  const r = readingId && stmts.getReading.get(readingId);
+  if (!r || r.user_id !== uid) return { ok: false, why: 'missing' };
+  if (r.status !== 'delivered' || !r.llm_json) return { ok: false, why: 'notdelivered' };
+  if (CHAT_WINDOW_DAYS > 0) {
+    const age = Math.floor(Date.now() / 1000) - (r.created_at || 0);
+    if (age > CHAT_WINDOW_DAYS * 86400) return { ok: false, why: 'old', r };
+  }
+  if (CHAT_MAX_TURNS > 0 && (stmts.chatTurns.get(readingId)?.c || 0) >= CHAT_MAX_TURNS) {
+    return { ok: false, why: 'capped', r };
+  }
+  return { ok: true, r };
+}
+
+/* 📎 لنگرِ ریپلای (خواسته‌ی صریحِ مالک): پاسخ‌های گفتگو به **بدنه‌ی خودِ فال** ریپلای
+ * می‌خورند تا کاربر خطِ گفتگو را در چتِ شلوغ تشخیص بدهد.
+ * `allow_sending_without_reply` اجباری است: اگر کاربر پیامِ فال را پاک کرده باشد،
+ * تلگرام بدونِ آن کلِ ارسال را رد می‌کند و جوابی که پولش داده شده گم می‌شود. */
+function chatReplyExtra(reading) {
+  const mid = Number(reading?.anchor_msg_id) || 0;
+  return mid ? { reply_parameters: { message_id: mid, allow_sending_without_reply: true } } : {};
+}
+
+// نشانگرِ تایپ تا رسیدنِ جواب. ۴ ثانیه عمدی است: نشانگرِ تلگرام ~۵ ثانیه زنده می‌ماند
+// (سقفِ ثبت‌شده‌ی v3.73.0) و `sendChatAction` هر بار فقط یک بار شلیک می‌کند.
+// ⚠️ عمداً `loading.js` نیست: آن انیمیشن برای انتظارِ آیینیِ ۱۰ تا ۶۰ ثانیه‌ایِ فال
+// ساخته شده و برای یک انتظارِ ~۷ ثانیه‌ای هم گران است هم حسِ «مراسم» می‌دهد.
+async function typingUntil(ctx, p) {
+  let done = false;
+  const stop = () => { done = true; };
+  p.then(stop, stop);
+  (async () => {
+    while (!done) {
+      await ctx.telegram.sendChatAction(ctx.chat.id, 'typing').catch(() => {});
+      await sleep(4000);
+    }
+  })();
+  return p;
+}
+
+// گاردِ هم‌زمانی. لایه‌ی دومِ صفِ per کاربرِ `dispatch.js` است، نه جایگزینش: آن پشتِ
+// پرچمِ `SERIAL_DISPATCH` است و درستیِ کدِ پول نباید به زمان‌بندیِ تحویل وابسته بماند
+// (درسِ صریحِ همان بند). فقط پیامِ **هم‌زمان** را رد می‌کند، نه سؤالِ دومِ بعد از جواب.
+const chatInflight = new Set();
+
+async function openChat(ctx, readingId, { resumed = false } = {}) {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  if (!chatOn(uid)) { await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid); }
+  // گاردهای فلوی باز، با نیت: بعد از انصراف، کاربر به **همین** گفتگو برمی‌گردد.
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.CHAT, readingId)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.CHAT, readingId)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+
+  const el = chatEligible(uid, readingId);
+  if (!el.ok) {
+    if (el.why === 'capped') {
+      await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
+      return;
+    }
+    await ctx.reply(L.chat.unavailable);
+    return sendContinuePrompt(ctx, uid);
+  }
+  setState(uid, 'chatting');
+  patchSession(uid, { chatReadingId: readingId });
+  track(db, uid, 'chat_opened', { reading_id: readingId, resumed: resumed ? 1 : 0 });
+  ctx.step?.('chat_ask');
+  // استیتِ ورودی: **هیچ دکمه‌ی inline** و **بدونِ نمایشِ موجودی** (بند ۹ب + خواسته‌ی
+  // صریحِ مالک: دیدنِ موجودی کاربر را تشویق می‌کند چند سؤال را در یک پیام جمع کند).
+  const txt = resumed ? L.chat.resumed : L.chat.intro(CHAT_PRICE, curOf(uid));
+  await ctx.reply(txt, { parse_mode: 'Markdown', ...chatReplyExtra(el.r) });
+}
+
+/* 🎬 پیامِ پیشنهادِ پس از فال — جانشینِ `sendContinuePrompt` فقط وقتی گفتگو برای این
+ * کاربر و این فال واقعاً باز است. سه دکمه، و **ترتیبشان قرارداد است** (بند ۱۰، «ترتیب
+ * در خدمتِ حس»): اوجِ لحظه اول، فالِ تازه دوم، و درِ خروج آخر.
+ * ⚠️ اگر گفتگو ممکن نباشد (فلگ، زبان، فالِ ناواجد) **بیت‌به‌بیت** رفتارِ قبلی برمی‌گردد. */
+async function postReadingOffer(ctx, uid, readingId) {
+  if (!chatOn(uid) || !chatEligible(uid, readingId).ok) return sendContinuePrompt(ctx, uid);
+  track(db, uid, 'chat_offer_shown', { reading_id: readingId });
+  ctx.step?.('chat_offer');
+  await ctx.reply(L.chat.offer, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.chatStart, `chat:${readingId}`)],
+    [Markup.button.callback(L.buttons.chatAnotherReading, 'reading_go')],
+    [Markup.button.callback(L.buttons.chatSkip, 'chat_skip')],
+  ]));
+}
+
+/** خروجِ بی‌سروصدا از گفتگو. غیرمخرب است: تاریخچه می‌ماند و ورودِ دوباره یک تپ است. */
+function leaveChat(uid, via = 'menu') {
+  if (getState(uid) !== 'chatting') return;
+  const rid = getSession(uid)?.chatReadingId || 0;
+  const turns = rid ? (stmts.chatTurns.get(rid)?.c || 0) : 0;
+  const s = getSession(uid) || {};
+  delete s.chatReadingId; delete s.chatNudged;
+  setSession(uid, Object.keys(s).length ? s : null);
+  setState(uid, 'idle');
+  track(db, uid, 'chat_exited', { reading_id: rid, turns, via });
+}
+
+/** یک نوبتِ گفتگو. ترتیبِ قدم‌ها قرارداد است، نه سلیقه (بالای این بلوک). */
+async function handleChatMessage(ctx, uid, text) {
+  const rid = getSession(uid)?.chatReadingId || 0;
+  const el = chatEligible(uid, rid);
+  if (!el.ok) {
+    leaveChat(uid, 'ineligible');
+    if (el.why === 'capped') {
+      await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
+      return;
+    }
+    await ctx.reply(L.chat.unavailable);
+    return sendContinuePrompt(ctx, uid);
+  }
+  const r = el.r;
+  const extra = chatReplyExtra(r);
+
+  // ۲) 🤍 بحران — **قبل از** کسر و بدونِ هیچ فراخوانیِ مدلی. متنِ کاربر هرگز در
+  // رویداد ثبت نمی‌شود (فقط پرچم)، چون حساس‌ترین چیزی است که ممکن است بنویسد.
+  if (crisisIn(text)) {
+    track(db, uid, 'chat_crisis', { reading_id: rid });
+    await ctx.reply(L.chat.crisis, extra);
+    return;
+  }
+  // ۳) تعارف/سلام: رایگان. فیلتر عمداً **تنگ** است (کلِ پیام باید خودش تعارف باشد)،
+  // چون فیلترِ گشاد یعنی سؤالِ واقعیِ کاربر بی‌جواب بماند — خیلی بدتر از یک الماس.
+  if (smallTalkIn(text)) { await ctx.reply(L.chat.smallTalk, extra); return; }
+  // ۵) هم‌زمانی
+  if (chatInflight.has(uid)) { await ctx.reply(L.chat.busy, extra); return; }
+
+  // ۶) 💸 کسرِ اتمیک — قبل از هر فراخوانیِ پولی (بند ۹ ریشه).
+  const msgId = payForChat(uid, rid, text);
+  if (!msgId) {
+    // ۷) کم‌موجودی: استیت **می‌ماند**، پس شارژ از مسیرِ دیگر و برگشت، کار می‌کند.
+    track(db, uid, 'chat_paywall', { reading_id: rid, can_afford: 0 });
+    await ctx.reply(L.chat.needBalance(CHAT_PRICE, curOf(uid)), Markup.inlineKeyboard([
+      ...walletRows(uid),
+      [Markup.button.callback(L.buttons.chatBack, `chat:${rid}`)],
+    ]));
+    return;
+  }
+
+  chatInflight.add(uid);
+  try {
+    const llm = JSON.parse(r.llm_json);
+    const cards = JSON.parse(r.cards_json || '[]');
+    const spread = SPREAD_BY_ID[r.type] || null;
+    const labels = L.prompts.cardLabels(cards.length);
+    const user = getUser(uid) || {};
+    const prev = stmts.lastDeliveredSince.all(uid, Number(user.memory_reset_at) || 0, 3)
+      .filter((x) => x.id !== rid).slice(0, 2);
+    // پیشوندِ ثابت: در طولِ یک گفتگو بیت‌به‌بیت یکسان می‌ماند تا کشِ پرامپت بخورد.
+    const system = `${L.prompts.chatSystem}\n\n${buildChatCtx({
+      reading: r, llm, cards, spread, labels, memory: user.memory_json || '', prev, L,
+    })}`;
+    const packed = packHistory(stmts.chatHistory.all(rid).slice(0, -1)); // سؤالِ فعلی جدا می‌رود
+    const messages = toMessages(system, packed, text, L);
+
+    const res = await typingUntil(ctx, orChatResilient('', '', {
+      messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
+      validate: chatShapeOk, kind: 'chat', refId: rid, userId: uid,
+    }, CHAT_PLAN));
+
+    // ۹) شکستِ کامل → ریفاندِ فوری. پولِ کاربر هرگز در حالتِ نامعلوم نمی‌ماند (بند ۹).
+    if (!res?.out) {
+      const back = refundChat(msgId, uid, CHAT_PRICE);
+      track(db, uid, 'chat_llm_failed', { reading_id: rid });
+      if (back) track(db, uid, 'chat_refund', { reading_id: rid, amount: CHAT_PRICE, via: 'fail' });
+      await ctx.reply(L.chat.failed(CHAT_PRICE, curOf(uid)), extra);
+      return;
+    }
+
+    const reply = cleanChatReply(res.out, { name: dispName(user) });
+    // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
+    // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
+    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '').lastInsertRowid);
+    const turn = stmts.chatTurns.get(rid)?.c || 0;
+    track(db, uid, 'chat_message', { reading_id: rid, turn, chars: reply.length });
+    // سنجه‌ی قلاب فقط **لاگ** می‌شود، نه retry: خروجی کوتاه است و بازتولیدش برای یک
+    // جمله‌ی پایانی، تجربه را کند می‌کند. در آزمایشگاه همین تابع سنجه‌ی تصمیم است.
+    try {
+      const h = hookOk(reply, {
+        cardNames: cards.map((c) => cardName(c.key)),
+        questionWords: questionWordsOf(text, r.question),
+      });
+      if (!h.ok) log(`🪝 CHAT_HOOK weak (${h.why}) reading#${rid} msg#${aId}`);
+      if (evasionIn(reply)) log(`🌀 CHAT_EVASION reading#${rid} msg#${aId}`);
+    } catch { /* سنجه هرگز نباید جوابِ پول‌داده را بشکند */ }
+
+    ctx.step?.('chat_reply');
+    await ctx.reply(reply, extra);
+    // نادجِ وابستگی: یک بار در هر گفتگو، **بعد** از جوابِ عادی و نه به‌جایش.
+    if (turn >= CHAT_NUDGE_TURN && !getSession(uid)?.chatNudged) {
+      patchSession(uid, { chatNudged: 1 });
+      await ctx.reply(L.chat.nudge, extra).catch(() => {});
+    }
+  } catch (e) {
+    logErr('chat turn:', e.message);
+    const back = refundChat(msgId, uid, CHAT_PRICE);
+    if (back) track(db, uid, 'chat_refund', { reading_id: rid, amount: CHAT_PRICE, via: 'error' });
+    await ctx.reply(L.chat.failed(CHAT_PRICE, curOf(uid)), extra).catch(() => {});
+  } finally {
+    chatInflight.delete(uid);
+  }
+}
+
+/* 🧹 جاروی یتیم‌های گفتگو: سؤالی که پولش کم شد و وسطِ فراخوانی ری‌استارت خورد.
+ * دوقلوی `recoverOrphanReadings` و با همان قاعده‌ی ترتیب: **اول ریفاند در دفتر، بعد
+ * ارسال** — پیامِ نرسیده نباید پولِ برگشته را بسوزاند. */
+async function recoverOrphanChats() {
+  let rows = [];
+  try { rows = stmts.orphanChatMsgs.all(CHAT_ORPHAN_SEC); } catch (e) { logErr('orphan chats:', e.message); return; }
+  for (const m of rows) {
+    try {
+      if (!refundChat(m.id, m.user_id, m.price)) continue;
+      track(db, m.user_id, 'chat_refund', { msg_id: m.id, amount: m.price, via: 'sweep' });
+      const txt = L.chat.refunded(m.price, curOf(m.user_id));
+      await bot.telegram.sendMessage(m.user_id, txt).catch(() => {});
+      logPush(db, m.user_id, txt, { isAdmin: isAdmin(m.user_id), label: 'chat_refund' });
+      await sleep(60);
+    } catch (e) { logErr('orphan chat refund:', e.message); }
+  }
+  if (rows.length) log(`🗣 ${rows.length} سؤالِ بی‌جوابِ گفتگو ریفاند شد`);
+}
+
+// دکمه‌ی گفتگو. الگو هرگز حذف نمی‌شود (بند ۲ج/۶: دکمه‌ی inline در چتِ کاربران می‌ماند) و
+// همه‌ی هشت حالتِ ناواجد داخلِ `openChat` پیامِ صریحِ خودش را دارد، نه سکوت.
+bot.action(/^chat:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const rid = parseInt(ctx.match[1], 10);
+  const resumed = (stmts.chatTurns.get(rid)?.c || 0) > 0;
+  return openChat(ctx, rid, { resumed });
+});
+// عمداً **همان** تابعِ تک‌منبع، نه یک کپیِ دوم از پیامِ «ادامه».
+bot.action('chat_skip', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return sendContinuePrompt(ctx, ctx.from.id);
+});
+
 // کیبوردِ منو نباید هیچ‌وقت گم شود: تلگرام کیبوردِ reply را تا جایگزینی نگه می‌دارد، ولی اگر
 // کاربر آن را جمع کند و بعد فقط دکمه‌های inline ببیند، عملاً راهی برای تعامل ندارد. این تابع
 // حداکثر هر KB_REFRESH_DAYS یک پیامِ کوتاه با کیبوردِ منو می‌فرستد (نه در آنبوردینگ).
@@ -5645,9 +6070,16 @@ async function finishReading(ctx, uid, readingId) {
     const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length),
     { name: uxV2For(r.user_id) ? dispName(getUser(r.user_id)) : '' });
     await typing(ctx, PACE_M);
-    if (headline) await ctx.reply(headline);
+    // 📎 لنگرِ گفتگو (v3.84.0، خواسته‌ی صریحِ مالک): شناسه‌ی **سرخط** ثبت می‌شود چون
+    // اولین و شناخته‌ترین پیامِ فال است، همیشه یک تکه‌ی واحد است (برخلافِ بدنه که
+    // `replyLong` ممکن است بشکندش)، و خودِ جوابِ فال داخلش است. ثبت در try/catch:
+    // شکستِ یک UPDATE نباید فالی که پولش داده شده را بشکند؛ نبودِ لنگر فقط یعنی
+    // پاسخ‌های گفتگو ریپلای نمی‌خورند، و آن‌ها هم `allow_sending_without_reply` دارند.
+    let anchor = 0;
+    if (headline) { const m = await ctx.reply(headline); anchor = m?.message_id || 0; }
     if (body) { await sleep(PACE_M); await replyLong(ctx, body); }
     if (closing) { await sleep(PACE_M); await replyLong(ctx, closing); }
+    if (anchor) { try { stmts.setAnchorMsg.run(anchor, readingId); } catch (e) { logErr('anchor:', e.message); } }
   } else {
     // روایت پیوندی
     await typing(ctx, PACE_M);
@@ -5801,6 +6233,12 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // کاربری که کارتِ شانسش را قبلاً کشیده بود (یا فالِ اولش در آنبوردینگ نبود) بعد از
   // تشکر به بن‌بست می‌خورد. حالا آن شرط فقط تعیین می‌کند **کدام** قدمِ بعدی بیاید، نه اینکه
   // قدمِ بعدی بیاید یا نه.
+  // 🗣 گفتگوی پس از فال (v3.84.0): جانشینِ پیامِ «ادامه» در اوجِ لحظه — کاربر همین حالا
+  // جوابش را گرفته و اگر جای سؤالی مانده، این نزدیک‌ترین قدمِ ممکن است. شاخه‌ی کارتِ
+  // شانسِ **اولین فال** عمداً دست‌نخورده و مقدم است: آن آخرین قدمِ آنبوردینگ است.
+  if (uxV2For(uid) && chatOn(uid) && !(isFirstReading && luckyAvailable)) {
+    return postReadingOffer(ctx, uid, readingId);
+  }
   if (uxV2For(uid) && isFirstReading && luckyAvailable) {
     // آشناسازی با کارتِ شانس = آخرین قدمِ آنبوردینگ. دعوت به فالِ بعدی بعد از کشیدنِ آن
     // می‌آید (پایانِ `lpick:`)، وگرنه کاربر هم‌زمان دو دعوتِ رقیب می‌گیرد.
@@ -7772,6 +8210,13 @@ bot.on('text', async (ctx) => {
       ));
     }
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
+    // 🗣 گفتگوی پس از فال. ⚠️ شاخه‌ی **رول‌بک** اول می‌آید: اگر پرچم خاموش شود (یا این
+    // زبان از `CHAT_LOCALES` بیرون بیاید) کاربرِ وسطِ گفتگو نباید در استیتی گیر بماند که
+    // هیچ هندلری ندارد — آزادش می‌کنیم و مسیرِ عادی ادامه پیدا می‌کند (بند ۹ب/۱).
+    if (state === 'chatting') {
+      if (!chatOn(uid)) { leaveChat(uid, 'flag_off'); return sendContinuePrompt(ctx, uid); }
+      return await handleChatMessage(ctx, uid, text.trim());
+    }
     if (state === 'pay_amount') {
       const amount = parseInt(normalizeDigits(text).replace(/[^\d]/g, ''), 10);
       if (!amount || amount <= 0) return ctx.reply(L.wallet.invalidAmount());
@@ -7837,6 +8282,11 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(ctx);
   // در مرحله‌ی نام، ویس نمی‌گیریم (نام را تایپی می‌خواهیم) — راهنمای نرم به‌جای سکوت
   if (getState(uid) === 'onboard_name') return ctx.reply(L.onboarding.askNameRetry);
+  // 🗣 ویس در گفتگو (نسخه‌ی اول فقط متن). بدونِ این شاخه، ویس **بی‌صدا** می‌مرد: کاربری
+  // که وسطِ گفتگو ویس بفرستد هیچ جوابی نمی‌گرفت و فکر می‌کرد ربات خراب است. رایگان.
+  if (getState(uid) === 'chatting' && !CHAT_VOICE) {
+    return ctx.reply(L.chat.voiceOnly, { parse_mode: 'Markdown' });
+  }
   if (getState(uid) !== 'await_question') return;
   try {
     const media = ctx.message.voice || ctx.message.audio;
@@ -8206,6 +8656,12 @@ function onLaunched() {
   // و هر شش ساعت یک بار، تا کاربری که همان روز رها کرد تا بوتِ بعدی منتظر نماند.
   setInterval(sweepAbandonedPaidReadings, 6 * 3600 * 1000);
   setInterval(sweepStuckPayFlows, 3600 * 1000);
+  // 🗣 یتیم‌های گفتگو: سؤالی که پولش کم شد و وسطِ فراخوانی ری‌استارت خورد. مثل بالا، هم
+  // در بوت و هم دوره‌ای — کاربری که ظهر گیر کرد نباید تا ری‌استارتِ بعدی منتظر بماند.
+  if (CHAT_AFTER_READING) {
+    recoverOrphanChats();
+    setInterval(recoverOrphanChats, 6 * 3600 * 1000);
+  }
   // 💓 ضربانِ زنده بودن. عمداً همین‌جاست: `onLaunch` بعد از getMe و قبل از شروعِ polling
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.

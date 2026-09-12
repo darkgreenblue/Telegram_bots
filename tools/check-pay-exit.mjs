@@ -40,7 +40,7 @@ console.log('\n🚪 راهِ خروج از فلوی پرداخت\n');
 // نتواند بی‌صدا از کدِ واقعی واگرا شود.
 const PAY_STATES = JSON.parse(
   (SRC.match(/const PAY_STATES = (\[[^\]]+\])/)?.[1] || '[]').replace(/'/g, '"'));
-const guard = bodyOf('async function blockDuringOpenPay(ctx, intent) {', '\n}');
+const guard = bodyOf('async function blockDuringOpenPay(ctx, intent, intentArg = 0) {', '\n}');
 ok(PAY_STATES.length > 0, `PAY_STATES از سورس خوانده شد (${PAY_STATES.join(', ')})`);
 ok(guard ? /PAY_STATES\.includes\(getState\(uid\)\)/.test(guard) : false,
   'گارد روی PAY_STATES تصمیم می‌گیرد');
@@ -386,7 +386,7 @@ console.log('\n  — 🎯 نیتِ معلق بعد از انصراف:');
 
   // ۲) رفتاری: خودِ توابع از سورس بریده و روی یک سشنِ ساختگی **اجرا** می‌شوند.
   const src = [
-    bodyOf('function setIntent(uid, key) {', '\n}'),
+    bodyOf('function setIntent(uid, key, arg = 0) {', '\n}'),
     bodyOf('function takeIntent(uid) {', '\n}'),
     bodyOf('function clearSessionKeepIntent(uid) {', '\n}'),
   ];
@@ -415,8 +415,24 @@ console.log('\n  — 🎯 نیتِ معلق بعد از انصراف:');
   good.clearSessionKeepIntent(1);
   ok(good.store.s.readingId === undefined && good.store.s.picks === undefined,
     'فلوی فال واقعاً پاک می‌شود (کارِ اصلیِ انصراف انجام شده)');
-  ok(good.takeIntent(1) === 'wallet', '🎯 ولی نیت زنده می‌ماند، پس کیفِ الماس بعد از انصراف می‌آید');
+  ok(good.takeIntent(1)?.key === 'wallet', '🎯 ولی نیت زنده می‌ماند، پس کیفِ الماس بعد از انصراف می‌آید');
   ok(good.takeIntent(1) === null, 'و یک‌بارمصرف است (بازپخشِ دوباره نمی‌شود)');
+
+  /* 🗣 v3.84.0 — **شناسه‌ی** نیت هم باید از انصراف جان سالم به در ببرد.
+   * بدونِ این، گفتگو بعد از انصراف روی «فالِ صفر» بازپخش می‌شد: نیت زنده، مقصد غلط —
+   * دقیقاً همان کلاسِ باگی که این بلوک برای بستنش نوشته شد، یک لایه پایین‌تر. */
+  good.store.s = { readingId: 42 };
+  good.setIntent(1, 'chat', 777);
+  good.clearSessionKeepIntent(1);
+  const carried = good.takeIntent(1);
+  ok(carried?.key === 'chat' && carried?.arg === 777,
+    '🎯 شناسه‌ی نیت (کدام فال) هم حمل می‌شود، نه فقط خودِ نیت');
+  // کنترلِ معکوس: حاملی که فقط `intent` را نگه دارد باید این ادعا را قرمز کند.
+  const noArg = make('function clearSessionKeepIntent(uid) { const s = getSession(uid) || {}; setSession(uid, s.intent ? { intent: s.intent, intentAt: s.intentAt || 0 } : null);');
+  noArg.setIntent(1, 'chat', 777);
+  noArg.clearSessionKeepIntent(1);
+  ok((noArg.takeIntent(1)?.arg || 0) === 0,
+    'کنترلِ معکوس: حاملِ بدونِ شناسه واقعاً شناسه را گم می‌کند (پس ادعای بالا آینه‌ی خودش نیست)');
 
   // بدونِ نیت، سشن کاملاً خالی می‌شود (هیچ آشغالی جا نمی‌ماند).
   good.store.s = { readingId: 7 };
@@ -437,7 +453,7 @@ console.log('\n  — 🎯 نیتِ معلق بعد از انصراف:');
     'کنترلِ معکوس: با setSession(uid, null)ِ قدیمی نیت گم می‌شد (همان باگِ گزارش‌شده)');
 
   // ۴) و مقصدِ همان نیت واقعاً در جدولِ بازپخش هست، وگرنه حمل‌کردنش بی‌فایده است.
-  for (const k of ['WALLET', 'SUPPORT', 'DAILY', 'INVITE', 'LUCKY', 'READING', 'SETTINGS']) {
+  for (const k of ['WALLET', 'SUPPORT', 'DAILY', 'INVITE', 'LUCKY', 'READING', 'SETTINGS', 'CHAT']) {
     ok(new RegExp(`\\[INTENT\\.${k}\\]:`).test(SRC), `INTENT.${k} در جدولِ بازپخش ردیف دارد`);
   }
 }

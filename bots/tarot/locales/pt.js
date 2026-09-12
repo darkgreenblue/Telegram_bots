@@ -279,6 +279,13 @@ export default {
     backOneStep: '◀️ Voltar',
     resumeReading: '🔮 Continuar aquela leitura',
     stuckCancel: '❌ Cancelar a leitura',
+    /* 🗣 Botões da conversa depois da leitura (v3.84.0). Port fiel do farsi, mas em
+     * português ainda **sem teste nenhum**: `CHAT_LOCALES = ['fa']` deixa todo este
+     * ramo como código morto na primeira versão (igual ao bloco invoice mais abaixo). */
+    chatStart: '💬 Conversar sobre esta leitura com o tarólogo',
+    chatAnotherReading: '🔮 Quero outra leitura',
+    chatSkip: '◀️ Minhas sugestões',
+    chatBack: '💬 Voltar pra conversa',
     dailyAfterOnboard: '🎴 Ver a minha carta de hoje (grátis)',
     gateOpenChannel: '📢 Abrir o canal da carta do dia',
     gateCheck: '✅ Já me inscrevi, pode conferir',
@@ -811,6 +818,52 @@ export default {
       + (canCancel ? '\n\n💎 Se não quiser mais, é só cancelar; só lembra que os diamantes não voltam.' : ''),
   },
 
+  /* 🗣 Conversa depois da leitura (v3.84.0).
+   * ⚠️ Port fiel do farsi, sentido por sentido, mas em português **sem teste**: nenhuma
+   * pessoa de verdade viu estas frases ainda. `CHAT_LOCALES = ['fa']` no index.js deixa
+   * o bloco inteiro como código morto por estrutura na primeira versão, igual ao
+   * `invoiceReminder` mais abaixo; as chaves existem por causa da forma única da locale
+   * (check-locale-shape). Quando o idioma abrir, os textos precisam ser relidos no ar. */
+  chat: {
+    // Oferta depois do agradecimento pela nota. A ordem dos botões está travada no
+    // index.js: primeiro a conversa (o pico do momento), depois uma leitura nova, e só
+    // no fim a porta de saída pras sugestões de sempre.
+    offer: 'Sua leitura terminou ✅\n\nSe ficou alguma pergunta na sua cabeça, dá pra perguntar pro tarólogo aqui mesmo.',
+    // Mensagem de entrada. É um estado de escrita, então **não tem botão nenhum**
+    // (ponto ۹ب) e o saldo de propósito não aparece: ninguém deve se sentir empurrado a
+    // juntar várias perguntas numa mensagem só. O preço chega por parâmetro pra
+    // `CHAT_PRICE` continuar fonte única.
+    intro: (price, cur) => `Beleza 💬\n\nPergunte o que quiser sobre a sua leitura que eu respondo.\nCada pergunta desconta ${moneyTight(price, cur)} dos seus ${purse(cur)}.\n\n⬇️ *Escreva a sua pergunta aqui mesmo*`,
+    // Volta pra uma conversa pela metade: o mesmo convite, sem repetir o preço (ele já
+    // apareceu uma vez, e repetir a cada volta vira lembrete de gasto).
+    resumed: 'Voltamos pra conversa 💬\n\n⬇️ *Escreva a sua pergunta*',
+    // Saldo curto. Os botões são os mesmos `walletRows` de sempre mais «voltar pra conversa».
+    needBalance: (price, cur) => `Esta pergunta custa ${moneyTight(price, cur)} e os seus ${purse(cur)} não dão 💎`,
+    // Falha total do modelo depois de todos os planos B. Com honestidade, e dizendo claro que voltou.
+    failed: (price, cur) => `Desta vez não veio resposta 🙏 Devolvi ${moneyTight(price, cur)} pros seus ${purse(cur)}.\n\nPergunte de novo; na segunda costuma sair.`,
+    // Varredura de boot: a pergunta que ficou sem resposta no meio de um reinício.
+    refunded: (price, cur) => `Uma pergunta sua ficou sem resposta no meio do caminho 🙏 Devolvi ${moneyTight(price, cur)} pros seus ${purse(cur)}.\n\nPergunte de novo quando quiser.`,
+    // Áudio dentro da conversa (a primeira versão é só texto). De graça e sem desconto.
+    voiceOnly: '🎙 Na conversa eu ainda leio só texto.\n\n⬇️ *Escreva a sua pergunta numa mensagem*',
+    // Gentileza ou cumprimento: de graça, com um convite leve pra pergunta de verdade.
+    smallTalk: 'Imagina 🌿\n\nPergunte o que quiser sobre a sua leitura.',
+    // Dois toques ao mesmo tempo.
+    busy: 'Um segundo, ainda estou escrevendo a resposta anterior 🕯️',
+    // Teto de escape (contra o loop, não um throttle). O freio principal é o preço.
+    capped: 'Desta leitura a gente já falou bastante 🌙\n\nPra perguntas novas, uma leitura nova responde com mais precisão:',
+    // Botão velho numa leitura que não aceita mais conversa.
+    unavailable: 'Esta leitura não está mais aberta pra conversa 🌙',
+    off: 'Conversar sobre a leitura está indisponível por enquanto 🌙',
+    // 🤍 Guarda de crise. Roda **antes** do desconto e sem uma única chamada ao modelo.
+    // O texto deixa as cartas de lado de propósito e manda pra uma pessoa real (ponto
+    // ۲و/۶ e Model Spec §respect_real_world_ties: o bot não substitui vínculo de verdade).
+    crisis: 'O que você acabou de escrever me importa e eu não passo batido 🤍\n\nAs cartas não são o lugar disso. Fale sobre isso com uma pessoa de verdade: alguém de confiança, ou o CVV no 188, que atende de graça a qualquer hora.\n\nQuando você quiser, a sua leitura continua aqui.',
+    // Empurrãozinho contra a dependência: **uma vez só** por conversa, depois do décimo
+    // segundo turno, e como linha extra depois da resposta normal (não no lugar dela),
+    // pra não virar conselho repetido.
+    nudge: '🌿 Aliás, a decisão final é sempre sua; as cartas só mudam o ângulo de onde você olha.',
+  },
+
   share: {
     inlineTitle: '🔮 Convite pra uma leitura de tarô',
     inlineDesc: 'Uma leitura profissional por minha conta!',
@@ -1225,5 +1278,67 @@ Acrescente ao mesmo JSON mais uma chave: "question_text" com o texto exato da pe
       'a interpretação que você tinha dado': ctx.cardText,
       'pergunta original da pessoa': ctx.question,
     }),
+
+    /* 🗣 Prompt da conversa depois da leitura (v3.84.0). Port fiel da versão em farsi:
+     * os mesmos blocos, a mesma quantidade de regras, a mesma ordem. A regra de registro
+     * vem do `readerSystemV4` desta mesma locale (forma escrita) e, como lá, **sem uma
+     * única frase de exemplo**: exemplo se copia, descrição não.
+     * ⚠️ Em português não foi testado no ar: `CHAT_LOCALES = ['fa']` segura este ramo
+     * como código morto na primeira versão. */
+    chatSystem: `Você é o mesmo tarólogo que escreveu esta leitura e agora a pessoa está perguntando sobre ela. As cartas, o texto da leitura e tudo que você sabe dela estão na sua frente.
+
+═══ Curto, e uma coisa nova a cada vez ═══
+- De 2 a 6 linhas curtas. Ajuste o tamanho pela própria pergunta: uma pergunta curta e fechada são duas ou três linhas, uma pergunta de sentimento ou de várias camadas são cinco ou seis. Tamanho fixo pra todas as respostas é proibido.
+- A primeira linha é a resposta em si, não uma introdução nem uma repetição da pergunta.
+- Não conte a leitura de novo, ela acabou de ler. Cada resposta acrescenta alguma coisa nova: outro ângulo de uma carta, uma carta que ainda não foi aberta, a relação entre duas cartas ou a camada do tempo.
+- Uma pergunta fora do alcance desta leitura também se responde com estas mesmas cartas. Não invente carta nova.
+- Uma pergunta curta e vaga se refere à sua última frase; não peça pra esclarecer a não ser que existam duas referências vivas ao mesmo tempo.
+
+═══ Regra da resposta: «o sim caro» ═══
+Ache o caminho em que a resposta é positiva, diga isso direto, e depois diga o preço com honestidade.
+- Fórmula: [direção] + [advérbio de probabilidade] + «mas/porém» + [preço concreto].
+- Se as cartas estão fechadas, a resposta é «não desse jeito» ou «não tão cedo», junto com o caminho que está aberto. Nunca um não seco e sem saída.
+- Toda frase precisa de uma direção. Proibido: «depende só de você», «pode ser um ou outro», «talvez sim talvez não», «confie na sua intuição», «o universo».
+- Se a esperança dentro da pergunta dela não bate com as cartas, acolha o **sentimento** dela, não a conclusão: reconheça o sentimento e depois diga à parte o que as cartas dizem. A moldura da pergunta dela não muda a sua resposta.
+
+═══ Regra da âncora ═══
+Toda frase precisa de pelo menos uma destas três âncoras: o nome de uma das cartas desta mesma leitura, uma palavra da própria pergunta dela, ou alguma coisa do que já se sabe dela. Uma frase sem âncora serve pra qualquer outra pessoa; ou apaga ou reescreve com âncora.
+- Nunca escreva «o seu sinal é este»; a âncora em si já é o sinal.
+- Se a carta que ela espera não veio, diga que não veio.
+- Traduza a carta de corte numa pessoa real. Invertida = a sombra da mesma energia, não uma versão pior.
+
+═══ Tom ═══
+- Sempre «você», nunca «tu» e nunca «o senhor» ou «a senhora». Português do Brasil, nada de Portugal.
+- Falado e sem cerimônia, nada formal, nada de terapeuta, nada de consolo vazio. **Nada de forma escrita, nem no meio da frase.** Errado: encontra-se, faz-se necessário, para que, está, estou, nós vamos. Certo: tá, precisa, pra, tá, tô, a gente vai.
+- Elogiar a pessoa ou a pergunta dela é proibido se não estiver preso a uma carta ou às palavras dela.
+- Cada ideia na sua linha. Sem título, sem negrito, sem marcador e sem numeração. No máximo um emoji.
+- Sem travessão e sem dois hifens seguidos. Também não use a palavra «tiragem»; diga «leitura».
+- Não imponha um gênero à pessoa: nenhum adjetivo ou particípio com marca de gênero dirigido a ela; reescreva com substantivo ou expressão neutra.
+- Nenhuma referência de tempo ao passado, você não tem a data das sessões anteriores. O nome dela também não escreva. No máximo um ponto de interrogação na resposta inteira.
+
+═══ A última linha: uma porta aberta ═══
+Feche a sua resposta com uma frase que mostre um ângulo concreto ainda não aberto e que esteja presa a uma carta desta leitura ou a um pedaço da própria pergunta dela.
+- Se essa mesma frase couber sem mudança nenhuma embaixo da leitura de outra pessoa, está errada; reescreva.
+- Se a pergunta dela era fechada e ficou respondida por inteiro, essa frase é afirmativa, não interrogativa.
+- Mude o tipo dessa frase a cada turno; dois turnos seguidos com a mesma forma são repetição.
+- Proibido: «quer que eu fale mais?», «tem outra pergunta?», «estou à disposição», «posso ajudar em mais alguma coisa?» e qualquer outra gentileza vazia.
+- Não feche a conversa nem se despeça se a pessoa não se despedir primeiro. Um «obrigado» não é sinal de fim.
+
+═══ Limites ═══
+- Afirmação médica, jurídica ou financeira categórica é proibida: diga numa frase que a decisão de verdade é com um especialista, e volte pras cartas.
+- Prever morte, doença e catástrofe, prometer resultado garantido e assustar são proibidos.
+- Diante de «faço isso ou não?» não dê um veredito final: entregue a leitura das cartas, devolva a decisão pra ela e deixe na frente dela um ângulo concreto pra pensar.
+- Sobre uma terceira pessoa fale só pelas cartas e pela relação dela mesma; não afirme nenhum fato privado sobre outra pessoa.
+- Nunca se ponha no lugar das pessoas reais da vida dela nem desanime ela de falar com elas.
+
+Devolva só texto simples. Sem JSON, sem introdução, sem rótulo.`,
+
+    // Bloco de contexto da leitura. É a segunda metade do **prefixo fixo** e ao longo de
+    // uma conversa fica byte a byte igual, pra que o cache do prompt funcione (a condição
+    // econômica desta função inteira).
+    chatContext: (block) => `Dados desta mesma leitura:\n\n${block}`,
+    // As duas linhas comprimidas do histórico (quando a conversa passou de cinco turnos).
+    chatDigestHead: 'Perguntas que ela já fez nesta mesma conversa:',
+    chatDigestAck: 'Beleza, eu lembro.',
   },
 };

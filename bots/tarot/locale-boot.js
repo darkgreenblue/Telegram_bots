@@ -20,7 +20,8 @@
 // برای `fa` هیچ‌کدام از این جدول‌ها در locale نیستند (به‌جز `verdict`)، پس هر ماژول به
 // پیش‌فرضِ فارسیِ هاردکدِ خودش fallback می‌کند و رفتارِ فارسی بیت‌به‌بیت دست‌نخورده است.
 import { configureVerdict } from './verdict.js';
-import { configureSeparator } from './reading-core.js';
+import { configureSeparator, LANG_DATA } from './reading-core.js';
+import { configureChatLang } from './chat-core.js';
 // ⚠️ صرفاً برای اثرِ جانبیِ بارگذاری: `repair.js` لغتنامه‌اش را خودش از `LANG_DATA`
 // برمی‌دارد. import اش این‌جاست تا این فایل واقعاً «همه‌ی پیکربندیِ زبان» باشد و کسی
 // دنبالِ یک نقطه‌ی پیکربندیِ دوم نگردد.
@@ -31,4 +32,9 @@ export function configureLocale(L) {
   // آرگومانِ دوم جداکننده‌ی نام از سرخط است؛ نبودنش یعنی «همان ویرگولِ همین زبان»،
   // پس یک زبان نمی‌تواند نصفه پیکربندی شود و «Аня، …» دوباره برگردد.
   configureSeparator(L?.verdict?.dashReplacement, L?.verdict?.nameSeparator);
+  // 🗣 الگوهای گفتگو (v3.84.0) از `langdata.<locale>.json` می‌آیند. `fa` این فایل را
+  // ندارد، پس فارسی روی پیش‌فرضِ هاردکدِ خودش می‌ماند — همان الگوی `defects[]`.
+  // ⚠️ این‌جاست نه در `index.js`، چون آزمایشگاهِ گفتگو باید **دقیقاً همان** گاردها را
+  // ببیند؛ وگرنه سنجه چیزی را می‌سنجد که محصول اجرا نمی‌کند (درسِ همین فایل).
+  configureChatLang(LANG_DATA?.chat);
 }
