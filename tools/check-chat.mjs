@@ -610,6 +610,30 @@ console.log('\n▶ ۱۶) سنجه‌های لحن و اکوی برچسب');
     'بازوی `model@variant` هم پرامپت و هم مدل را جدا resolve می‌کند');
   ok(/out === base[\s\S]{0,200}process\.exit\(1\)/.test(LAB),
     'واریانتی که هیچ‌چیز را وصله نکند، دورِ پولی را شروع نمی‌کند');
+
+  /* و گاردِ دوم، چون اولی برای واریانتِ **مرکب** کور است: `v3`/`v4` اول `v2` را صدا
+   * می‌زنند، پس «در مجموع چیزی عوض شد» همیشه درست است و یک لنگرِ خطاخورده وسطِ
+   * زنجیره بازو را بی‌صدا به `v2` تبدیل می‌کند. رفتاری سنجیده می‌شود: خودِ `rep` از
+   * سورس بیرون کشیده و با یک لنگرِ ناموجود اجرا می‌شود. */
+  const repSrc = (LAB.match(/const rep = \([\s\S]*?\n\};/) || [])[0] || '';
+  ok(!!repSrc, 'helperِ اجباری‌کردنِ لنگر (`rep`) در آزمایشگاه هست');
+  {
+    let died = false;
+    const realExit = process.exit;
+    process.exit = () => { died = true; throw new Error('exit'); };
+    const realErr = console.error;
+    console.error = () => {};
+    try { new Function(`${repSrc}; return rep;`)()('سلام', 'لنگرِ ناموجود', 'x'); } catch { /* از exit */ }
+    process.exit = realExit; console.error = realErr;
+    ok(died, 'کنترلِ مثبت: لنگرِ ناموجود دورِ پولی را می‌کُشد، نه اینکه بی‌صدا رد شود');
+  }
+  {
+    const realExit = process.exit; let died = false;
+    process.exit = () => { died = true; };
+    const out = new Function(`${repSrc}; return rep;`)()('سلام دنیا', 'دنیا', 'رفیق');
+    process.exit = realExit;
+    ok(!died && out === 'سلام رفیق', 'کنترلِ منفی: لنگرِ موجود عادی جایگزین می‌شود');
+  }
 }
 
 const total = pass + errs.length;
