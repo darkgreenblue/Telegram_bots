@@ -299,5 +299,46 @@ console.log('\n▶ ۹) «اکشنِ مفید» فیچرِ خاموش و دُمِ
     `هر رویدادِ USEFUL_EVENTS واقعاً در ربات ثبت می‌شود${ghosts.length ? ` — بی‌ریشه: ${ghosts.join(', ')}` : ''}`);
 }
 
+console.log('\n▶ ۱۰) 💎 ردیفِ تومانیِ دوره‌ی قدیم واردِ دفترِ FIFO نمی‌شود');
+{
+  /* 🐛 باگِ واقعی (تا ۱۴۰۵/۰۶/۲۱): `COALESCE(original_amount, amount)` روی ردیفی که
+     `original_amount` ندارد به **تومان** می‌افتد و آن را الماس می‌خواند. روی دیتای زنده
+     ۱۳ ردیف = ۶۳۵٬۰۰۰ الماسِ خیالی. فیکسچر همان شکل را بازمی‌سازد. */
+  const { purchaseAmt } = await import(`file://${base}/lib/cpa.js`);
+  const tmp = path.join(root, 'legacy.db');
+  const d2 = new Database(tmp);
+  d2.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+    amount INTEGER DEFAULT 0, original_amount INTEGER, status TEXT, created_at INTEGER)`);
+  const ins = d2.prepare('INSERT INTO payments (user_id,amount,original_amount,status,created_at) VALUES (?,?,?,?,0)');
+  for (let i = 0; i < 13; i++) ins.run(500 + i, 50_000, null, 'approved');   // دوره‌ی تومانی
+  ins.run(600, 60_000, 30, 'approved');                                      // دوره‌ی الماس
+  ins.run(601, 30_000, 10, 'approved');                                      // دوره‌ی الماس
+  const sumWith = (where) => d2.prepare(
+    `SELECT COALESCE(SUM(COALESCE(original_amount, amount)),0) s FROM payments WHERE status='approved'${where}`).get().s;
+
+  const buy = purchaseAmt('tarot');
+  ok(buy.where !== '', 'برای tarot گاردِ واحد فعال است (coinLegacyFloor دارد)');
+  ok(sumWith(buy.where) === 40,
+    `دفتر فقط ۴۰ الماسِ واقعی می‌بیند (شد ${sumWith(buy.where)})`);
+
+  /* 🔬 کنترلِ مثبت (بند ۶ب-۲ ریشه): بدونِ گارد **باید** عددِ نجومی برگردد. بدونِ این،
+     یک فیکسچرِ همیشه‌خالی هم ادعای بالا را سبز رد می‌کرد. */
+  ok(sumWith('') === 650_040,
+    `و بدونِ گارد همان عددِ خیالی برمی‌گردد (${sumWith('')}) — پس ادعا پوچ نیست`);
+
+  // رباتی که دوره‌ی تومانی نداشته باید بیت‌به‌بیت مثل قبل رفتار کند
+  ok(purchaseAmt('tarot-intl').where === '' && purchaseAmt('voice2text').where === '',
+    'رباتِ بدونِ دوره‌ی تومانی هیچ فیلتری نمی‌گیرد (رفتار دست‌نخورده)');
+  d2.close();
+
+  /* ساختاری: هیچ‌کدام از دو نقطه‌ی خواندنِ خرید نباید دوباره به شکلِ خام برگردد. */
+  const cpaSrc = readFileSync(path.resolve(import.meta.dirname, '../bots/dashboard/lib/cpa.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // کامنت‌ها اول حذف
+  const bare = (cpaSrc.match(/COALESCE\(original_amount,\s*amount\)/g) || []).length;
+  ok(bare === 1, `عبارتِ خام فقط یک بار و داخلِ خودِ helper است (شد ${bare})`);
+  ok((cpaSrc.match(/purchaseAmt\(inst\.bot\)/g) || []).length === 2,
+    'هر دو نقطه‌ی خواندنِ خرید (دفترِ اصلی و سهمِ دعوت) از helper رد می‌شوند');
+}
+
 console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
 if (errs.length) { for (const e of errs) console.log(`   - ${e}`); process.exit(1); }
