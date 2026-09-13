@@ -92,6 +92,78 @@ const STEPS = (val('steps', 'last') || 'last').trim();
 const ARMS = (val('arms', '') || '').split(',').map((x) => x.trim()).filter(Boolean);
 const ARM_LIST = ARMS.length ? ARMS : [val('model', CHAT_MODEL)];
 const planFor = (m) => [m, m, FLASH, FALLBACK_MODEL];
+
+/* 🧪 واریانتِ **پرامپت** به‌عنوان بُعدِ دومِ بازو — عیناً همان الگوی `reading-lab.mjs`
+ * و به همان دلیل: فرضیه‌ی پرامپت باید **جفت‌شده** سنجیده شود (همان فالِ پایه، همان
+ * سؤال‌های پیگیری، همان مدل)، وگرنه با نویزِ نمونه‌برداری قاطی می‌شود. و چون واریانت
+ * این‌جا زندگی می‌کند نه در `locales/fa.js`، یک فرضیه‌ی ردشده هیچ ردی در کدِ محصول
+ * نمی‌گذارد. برنده که معلوم شد، در یک PR جدا به locale می‌رود.
+ *
+ * شکلِ بازو: `model` یا `model@variant`.
+ *
+ * ⚠️ هر واریانت با `assertPatched` روی رشته‌ی واقعی سنجیده می‌شود: یک `replace` که
+ * هیچ‌چیز را پیدا نکند بی‌صدا پرامپتِ **دست‌نخورده** برمی‌گرداند، یعنی دو بازو یکی
+ * می‌شوند و ما یک دورِ پولی را خرج می‌کنیم تا «تفاوتِ معنادار نیست» گزارش کنیم. */
+const PROMPT_VARIANTS = {
+  /* 🗣 فرضیه‌ی دورِ ۲ — «حذف به‌جای آموزش» برای دو نقصِ دورِ ۱.
+   *
+   * (الف) **لحنِ کتابی، ۷ از ۱۵.** قاعده‌ی فعلی فقط *مثال* گفتاری می‌دهد
+   * («فعل‌ها گفتاری: می‌ده، می‌شه») و هیچ‌جا شکلِ کتابی را ممنوع نمی‌کند، پس مدل
+   * وسطِ جواب می‌لغزد («شاه سکه آینده را باز می‌گذارد»). قاعده‌ی جایگزین **ساختاری**
+   * است نه فهرستِ کلمه: در فارسی فعلِ نوشتاریِ سومشخص به «ـد» ختم می‌شود و گفتاری به
+   * «ـه». یک ممنوعیتِ ساده بهتر از یک مهارتِ ظریف رعایت می‌شود (همان چیزی که واریانتِ
+   * `nopast` روسی ثابت کرد).
+   *
+   * (ب) **اکوی برچسبِ قلاب، ۱۱ از ۱۵.** تیترِ بلوک «یک درِ باز» است و مدل عیناً
+   * «زاویه‌ی بازِ فال اینه که…» می‌نویسد. پرامپت همین کلاسِ خطا را برای «نشونه» بسته
+   * («خودِ لنگرزدن نشونه است») و برای قلاب نبسته؛ این واریانت همان جمله را قرینه‌سازی
+   * می‌کند.
+   *
+   * ⚠️ **بدهیِ ثبت‌شده:** این واریانت پرامپت را ۳۴۹۵ ⟵ ۳۸۳۵ می‌کند، یعنی ۳۳۵ نویسه
+   * بالاتر از `CHAT_BUDGET.sys` (۳۵۰۰). عمداً همین‌جا رها شده و در لَب بی‌ضرر است
+   * (ورودیِ واقعی ~۵٬۳۰۰ نویسه بود، یک‌سومِ سقفِ ۱۵٬۰۰۰). ولی **اگر v2 برنده شد**،
+   * PRِ انتقال به locale باید یکی از این دو را انجام بدهد و در همان PR ثابتش کند:
+   * یا متن را به ≤۳۵۰۰ برساند، یا `sys` را بالا ببرد و معادلش را از `hist` کم کند تا
+   * جمعِ اجزا دقیقاً ۱۵٬۰۰۰ بماند (همان چیزی که یک بار تصحیح شد؛ سقفی که با اجزا جمع
+   * نخورد یک ادعای دروغ است). دست‌کاریِ ثابتِ محصول برای فرضیه‌ی **اثبات‌نشده** زودرس
+   * است (بند ۹/۰). */
+  v2: (sys) => sys
+    .replace(
+      '- همیشه «تو»، هرگز «شما». فعل‌ها گفتاری: می‌ده، می‌شه، می‌گه، ینی، انگار.',
+      '- همیشه «تو»، هرگز «شما». و **هیچ فعلی را با «ـد» تمام نکن**، تا آخرِ جواب: '
+      + 'می‌ده نه می‌دهد، می‌شه نه می‌شود، می‌کنه نه می‌کند، بشه نه باشد، بگیره نه بگیرد. '
+      + '«است» هم ننویس؛ «ـه» یا «هست» بنویس. یک جمله‌ی کتابی وسطِ جوابِ گفتاری، '
+      + 'متن را مثل نوشته‌ی دو نفر می‌کند.',
+    )
+    .replace(
+      '- نوعِ این جمله را هر نوبت عوض کن؛ دو نوبتِ پشتِ سرِ هم با یک شکل، تکرار است.',
+      '- نوعِ این جمله را هر نوبت عوض کن؛ دو نوبتِ پشتِ سرِ هم با یک شکل، تکرار است.\n'
+      + '- **اسمِ این کار را نبر**: ننویس «زاویه‌ی باز»، «درِ باز»، «بخشِ بازنشده». '
+      + 'جمله باید همان زاویه **باشد**، نه اعلامش؛ مثل «نشونه‌ات اینه» که ممنوع است.',
+    ),
+};
+const armModel = (a) => String(a).split('@')[0];
+const armVariant = (a) => String(a).split('@')[1] || '';
+{
+  const bad = ARM_LIST.map(armVariant).filter((v) => v && !PROMPT_VARIANTS[v]);
+  if (bad.length) {
+    console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join('، ')}`);
+    console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join('، ') || '(هیچ)'}`);
+    process.exit(1);
+  }
+}
+/* گاردِ «وصله واقعاً خورد». بدونِ این، یک ویرایشِ بی‌ربط در `locales/fa.js` که لنگرِ
+ * `replace` را جابه‌جا کند، بازوی آزمایشی را بی‌صدا به بازوی پایه تبدیل می‌کند. */
+function systemFor(variant) {
+  const base = L.prompts.chatSystem;
+  if (!variant) return base;
+  const out = PROMPT_VARIANTS[variant](base);
+  if (out === base) {
+    console.error(`❌ واریانتِ «${variant}» هیچ تغییری در پرامپت نداد (لنگرِ replace عوض شده؟)`);
+    process.exit(1);
+  }
+  return out;
+}
 /* فالِ پایه با **یک** مدل ساخته می‌شود و همه‌ی بازوها همان را می‌گیرند؛ وگرنه تفاوتِ
  * خروجیِ گفتگو می‌تواند از متنِ فالِ متفاوت بیاید نه از مدلِ گفتگو. */
 const BASE_MODEL = val('base-model', READING_MODEL);
@@ -138,6 +210,13 @@ const personas = SCEN.personas.filter((p) => !ONLY.length || ONLY.includes(p.id)
   const lang = chatLang();
   if (!lang.chatbait?.length || !lang.crisis?.length) {
     errs.push(`گاردهای گفتگو برای «${LOCALE}» پیکربندی نشده‌اند (configureChatLang خالی ماند)`);
+  }
+  /* همین قاعده برای دادهٔ **سنجه‌ها** هم برقرار است و به همان دلیل: `chatMetrics` اگر
+   * `bookish`/`hookLabel` را در `lang/<locale>.mjs` پیدا نکند بی‌صدا از رویشان رد
+   * می‌شود و گزارش سبز می‌آید. دقیقاً همین اتفاق در دورِ ۱ افتاد (`bookish` وجود داشت
+   * و صدا زده نمی‌شد) و ۷ جوابِ کتابی را بی‌صدا سبز کرد. نبودن باید بلند شکست بخورد. */
+  for (const k of ['bookish', 'hookLabel']) {
+    if (!LANG[k]) errs.push(`سنجه‌ی «${k}» در tools/reading-lab/lang/${LOCALE}.mjs نیست`);
   }
   if (errs.length) { for (const e of errs) console.error(`❌ ${e}`); process.exit(1); }
 }
@@ -245,6 +324,12 @@ async function buildBase(persona, step, i) {
   if (!parsed && fallback) parsed = fallback;
   if (!parsed) throw new Error(`ساختِ فالِ پایه شکست خورد (${persona.id}.${i + 1})`);
 
+  /* ⚠️ عمداً `repairDefects` اجرا **نمی‌شود** (برخلافِ آزمایشگاهِ خوانش). سه دلیل:
+   * تعمیر روی ~۴٪ فال‌ها شلیک می‌کند، فقط همان فیلدِ معیوب را عوض می‌کند، و این‌جا
+   * فالِ پایه صرفاً **کانتکست** است نه چیزی که سنجیده شود. اجرایش یک فراخوانیِ
+   * اضافه به کشِ پایه می‌چسباند و یک متغیرِ دوم واردِ چیزی می‌کند که باید در همه‌ی
+   * دورها بیت‌به‌بیت ثابت بماند. کیفیتِ خودِ فال کارِ `reading-lab.mjs` است. */
+
   const rendered = renderV4(parsed, cards, labels, { name: persona.name });
   const base = {
     persona: persona.id, step: i, spread: spread.id, question: step.question,
@@ -266,7 +351,7 @@ async function runConversation(persona, base, arm, rep) {
   /* پیشوندِ ثابت: **یک بار** ساخته می‌شود و در طولِ کلِ گفتگو بیت‌به‌بیت یکسان می‌ماند.
    * این شرطِ اقتصادیِ فیچر است نه یک بهینه‌سازی (کشِ پرامپت)، پس آزمایشگاه هم باید
    * دقیقاً همان‌طور بسازدش که ربات می‌سازد و هم باید ثابت ماندنش را **بسنجد**. */
-  const system = `${L.prompts.chatSystem}\n\n${buildChatCtx({
+  const system = `${systemFor(armVariant(arm))}\n\n${buildChatCtx({
     reading: { question: base.question }, llm: base.llm, cards, spread, labels,
     memory: '', prev: [], L,
   })}`;
@@ -308,7 +393,7 @@ async function runConversation(persona, base, arm, rep) {
         usage.usd += Number(u?.cost) || 0;
         usage.cached += Number(u?.prompt_tokens_details?.cached_tokens) || 0;
       },
-    }, planFor(arm));
+    }, planFor(armModel(arm)));
     const ms = Date.now() - t0;
 
     if (!res?.out) { turns.push({ q, failed: true, ms, usage }); continue; }
@@ -399,10 +484,10 @@ console.log('═'.repeat(72));
 /* ⚠️ گروه‌بندی باید **بازو و پاس** را با هم ببیند: با دو بازو، جوابِ بازوی A و بازوی B
  * در یک سطل می‌افتادند و یک ۶کلمه‌ای مشترک «تکرار» شمرده می‌شد، در حالی که این عدد
  * قرار است بگوید **یک** مدل خودش را تکرار می‌کند یا نه. */
-const groups = [...new Set(all.map((c) => `${c.arm} ${c.rep}`))].sort();
+const groups = [...new Set(all.map((c) => `${c.arm}::${c.rep}`))].sort();
 const repeatCounts = [];
 for (const gk of groups) {
-  const [gArm, gRep] = gk.split(' ');
+  const [gArm, gRep] = gk.split('::');
   const convs = all.filter((c) => c.arm === gArm && String(c.rep) === gRep);
   const items = [];
   for (const c of convs) {
