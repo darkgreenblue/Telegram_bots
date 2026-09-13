@@ -204,7 +204,10 @@ export function configureChatLang(d) {
 }
 export const chatLang = () => ({ ...LANG });
 
-const norm = (s) => String(s || '').toLowerCase()
+/* ⚠️ export شده چون `tools/reading-lab/chat-checks.mjs` هم باید **همین** نرمال‌سازی را
+ * ببیند. قاعده‌ی صفرِ آن فایل: هیچ منطقی از این‌جا بازنویسی نمی‌شود؛ دو نسخه‌ی
+ * نیم‌فاصله‌زدایی دیر یا زود واگرا می‌شوند و سنجه چیزی را سبز می‌دهد که ربات رد می‌کند. */
+export const norm = (s) => String(s || '').toLowerCase()
   .replace(/[‌‏‎]/g, '')          // نیم‌فاصله و نشانه‌های جهت
   .replace(/[!؟?.,،؛:*_"'`()\[\]{}…]/g, ' ')
   .replace(/\s+/g, ' ')

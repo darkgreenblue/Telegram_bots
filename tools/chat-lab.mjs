@@ -173,8 +173,15 @@ const CHAT_PRICE = constOf('CHAT_PRICE', 1);
 /* 🌍 سناریوها per زبان، عیناً همان فایلِ آزمایشگاهِ خوانش (پرسوناها و فال‌هایشان یکی
  * است؛ فقط `follow_ups` اضافه شده). عمداً به فارسی fallback نمی‌کند: یک دورِ روسی با
  * سؤال‌های فارسی سبز تمام می‌شد و ما فکر می‌کردیم روسی را سنجیده‌ایم. */
-const SCEN_FILE = path.join(HERE, 'reading-lab',
-  LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`);
+/* `--scenarios <name>` مجموعه‌ی دیگری را بار می‌کند (بدونِ پسوند). تنها مصرفش امروز
+ * `--scenarios adv` است: پرسونای بلندِ خصمانه عمداً **بیرونِ** مجموعه‌ی پیش‌فرض است تا
+ * دورِ نرمال هزینه‌ی ۲۶ نوبتش را ندهد، و مهم‌تر، تا مقایسه‌ی عدم‌رگرسیون همیشه روی
+ * همان پرسوناهای نرمال بنشیند (خواسته‌ی صریحِ مالک: تنظیم روی موردِ خصمانه، مسیرِ
+ * ۹۹۹تای دیگر را خراب می‌کند). */
+const SCEN_NAME = val('scenarios', '');
+const SCEN_FILE = path.join(HERE, 'reading-lab', SCEN_NAME
+  ? `scenarios.${SCEN_NAME}.json`
+  : (LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`));
 if (!fs.existsSync(SCEN_FILE)) {
   console.error(`❌ سناریویی برای زبانِ «${LOCALE}» نیست: ${SCEN_FILE}`);
   process.exit(1);
@@ -353,8 +360,14 @@ async function runConversation(persona, base, arm, rep) {
   let prefixStable = true;
   const ups = MAX_TURNS ? persona.follow_ups.slice(0, MAX_TURNS) : persona.follow_ups;
 
+  /* یک follow-up یا رشته است یا `{ q, off: true }`. شکلِ دوم فقط می‌گوید این سؤال
+   * **بیرونِ دامنه‌ی فال** است، و دو سنجه را برعکس می‌کند: قاعده‌ی قلاب معاف می‌شود
+   * (جوابِ درستِ «پایتخت انگلیس» کوتاه و بی‌لنگر است) و در عوض نام‌بردنِ کارت ایراد
+   * می‌شود. هر ۱۵ فایلِ سناریوی موجود رشته‌اند و دست‌نخورده کار می‌کنند. */
   for (let t = 0; t < ups.length; t++) {
-    const q = String(ups[t]);
+    const up = ups[t];
+    const q = String(typeof up === 'string' ? up : up?.q ?? '');
+    const offDomain = typeof up === 'object' && !!up?.off;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
     if (crisisIn(q)) { turns.push({ q, skipped: 'crisis' }); continue; }
@@ -395,7 +408,7 @@ async function runConversation(persona, base, arm, rep) {
     try {
       check = chatMetrics({
         reply, raw: res.out, cardNames,
-        questionWords: questionWordsOf(q, base.question), question: q,
+        questionWords: questionWordsOf(q, base.question), question: q, offDomain,
       });
     } catch (e) {
       // اگر خودِ سنجه بترکد، نوبت‌های قبلی که پولشان داده شده نباید از بین بروند.
