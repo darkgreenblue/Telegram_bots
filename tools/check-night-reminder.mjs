@@ -191,7 +191,11 @@ ok('کوئریِ مخاطب فقط کاربرانِ خاموش‌نکرده را
 ok('کوئریِ مخاطب گاردِ ۱۸ساعته دارد', /last_daily_reminder_at < unixepoch\(\)-64800/.test(SRC));
 ok('کوئری فقط کاربرِ آنبوردشده را می‌گیرد', /dueNightReminder[\s\S]{0,200}welcomed=1/.test(SRC));
 ok('انصرافِ کاربر همان ستونِ جارو را می‌نویسد', /setDailyReminderOff: db\.prepare\('UPDATE users SET daily_reminder_off=1/.test(SRC));
-ok('دکمه‌ی lremind:0 هم opt-outِ شبانه را ست می‌کند', /if \(on\) stmts\.setDailyReminderOn\.run\(uid\); else stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC));
+/* ⚠️ این ادعا در v3.85.0 **تیزتر شد، نه خفه**: تا آن روز خطِ **متقارنِ**
+   `if (on) …On else …Off` را پین می‌کرد، یعنی دقیقاً همان باگی را محافظت می‌کرد که
+   v3.82.0 ساخته بود (هم‌خانواده‌ی «تست داشت رفتارِ غلط را نگه می‌داشت» در v3.67.0).
+   حالا فقط نیمه‌ی درستش پین است و سنجشِ رفتاریِ هر دو جهت در بلوکِ ۱۲ است. */
+ok('دکمه‌ی lremind:0 هم opt-outِ شبانه را ست می‌کند', /if \(!on\) stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC));
 // جاروی opt-inِ قدیمی نباید بماند، وگرنه کاربرِ شاخه‌ی lucky دو پیام می‌گیرد
 // نامش در یک کامنتِ توضیحی مانده؛ چیزی که نباید بماند **مصرفش** است.
 ok('جاروی opt-inِ قدیمیِ کارتِ شانس حذف شده', !/stmts\.dueLuckyReminder/.test(SRC));
@@ -695,6 +699,98 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
   // زنجیره فقط وقتی شلیک می‌کند که کاربر واقعاً امشب یادآوری گرفته باشد.
   ok('زنجیره پنجره‌ی زمانی دارد (وگرنه پیامِ بی‌موقعِ بعدازظهر)', /REMIND_CHAIN_SEC/.test(chainBody || ''));
   ok('زنجیره fail-safe است و فلوی کارتِ شانس را نمی‌شکند', /catch \(e\)/.test(chainBody || ''));
+}
+
+/* ═══════ ۱۲) دکمه‌ی «🔔 فردا یادآوری کن» فقط **کارتِ شانس** را روشن می‌کند (v3.85.0) ═══════
+   🐛 باگِ زنده‌ای که این بلوک برایش نوشته شد: خطِ نوشتن **متقارن** بود
+   (`if (on) setDailyReminderOn else setDailyReminderOff`). آن خط از v3.28.0 درست بود،
+   چون آن‌وقت `daily_reminder_off` تنها ستونِ یادآوریِ شبانه بود. ولی v3.82.0 معنیِ جفت
+   را عوض کرد و از آن لحظه، تپ روی این دکمه بی‌صدا **هر دو** یادآوری را روشن می‌کرد:
+   ساعتِ ۲۲ کارتِ شانس و بلافاصله زنجیره‌ی کارتِ روز. روی دیتای زنده ۱۸۲ کاربر این‌طور
+   شده بودند، در برابرِ **یک** نفر که واقعاً از صفحه‌ی تنظیمات هر دو را خواسته بود.
+
+   ادعا **رفتاری** است: خودِ بدنه‌ی هندلر از سورس بریده و روی SQLite واقعی با SQLِ
+   استخراج‌شده از همان سورس اجرا می‌شود. و طبقِ بند ۶ب-۲ ریشه هر دو جهت سنجیده می‌شود
+   (`on` نباید کارتِ روز را روشن کند، `off` باید خاموشش کند) به‌علاوه‌ی یک **کنترلِ
+   مثبت** که ثابت می‌کند همین هارنس رفتارِ قدیم را قرمز می‌دهد — وگرنه یک هندلرِ
+   همیشه-بی‌اثر هم هر دو ادعای منفی را پاس می‌کرد. */
+{
+  const iH = SRC.indexOf('bot.action(/^lremind:([01])$/');
+  ok('هندلرِ lremind در سورس پیدا شد', iH > -1);
+  const body = block(SRC, 'bot.action(/^lremind:([01])$/') || '';
+  ok('بدنه‌ی هندلرِ lremind استخراج شد', body.includes('setLuckyReminder'));
+
+  const sqlOf = (name) => {
+    const m = SRC.match(new RegExp(`${name}:\\s*db\\.prepare\\('([^']+)'\\)`));
+    return m ? m[1] : '';
+  };
+  const sqlLucky = sqlOf('setLuckyReminder');
+  const sqlOff   = sqlOf('setDailyReminderOff');
+  const sqlOn    = sqlOf('setDailyReminderOn');
+  ok('هر سه SQL از سورس استخراج شدند (نه کپیِ دستی)', !!sqlLucky && !!sqlOff && !!sqlOn);
+
+  const mkUser = (off, lucky) => {
+    const d = new DB(':memory:');
+    d.exec('CREATE TABLE users(telegram_id INTEGER PRIMARY KEY, daily_reminder_off INT, lucky_reminder_on INT)');
+    d.prepare('INSERT INTO users VALUES(7,?,?)').run(off, lucky);
+    return d;
+  };
+  const row = (d) => d.prepare('SELECT daily_reminder_off o, lucky_reminder_on l FROM users WHERE telegram_id=7').get();
+
+  /** بدنه‌ی هندلر را با stubها اجرا می‌کند. `src` اجازه می‌دهد جهشِ کنترلِ مثبت هم بدود. */
+  const run = async (d, on, src = body) => {
+    const stmts = {
+      setLuckyReminder:    d.prepare(sqlLucky),
+      setDailyReminderOff: d.prepare(sqlOff),
+      setDailyReminderOn:  d.prepare(sqlOn),
+    };
+    const ctx = {
+      from: { id: 7 }, match: [null, on ? '1' : '0'],
+      answerCbQuery: async () => {}, editMessageReplyMarkup: async () => {},
+    };
+    const fn = new Function('stmts', 'track', 'db', 'assignedNightArm',
+      'luckyReminderRow', 'luckyReminderCovered', 'Markup', 'L',
+      `return async (ctx) => ${src};`)(
+      stmts, () => {}, null, () => 'lucky', () => [], () => true,
+      { inlineKeyboard: () => ({ reply_markup: {} }) },
+      { lucky: { remindOnToast: 'a', remindOffToast: 'b' } });
+    await fn(ctx);
+  };
+
+  // جهتِ ۱ — «یادآوری کن»: فقط کارتِ شانس. کارتِ روز باید **دست‌نخورده** بماند.
+  const dOn = mkUser(1, 0);
+  await run(dOn, true);
+  ok('on: کارتِ شانس روشن می‌شود', row(dOn).l === 1);
+  ok('on: کارتِ روز دست‌نخورده می‌ماند (باگِ ۱۸۲ کاربره)', row(dOn).o === 1);
+
+  // و اگر کاربر از صفحه‌ی تنظیمات واقعاً هر دو را خواسته باشد، این دکمه خاموشش نمی‌کند.
+  const dBoth = mkUser(0, 0);
+  await run(dBoth, true);
+  ok('on: انتخابِ آگاهانه‌ی «هر دو» از تنظیمات لمس نمی‌شود', row(dBoth).o === 0 && row(dBoth).l === 1);
+
+  // جهتِ ۲ — «دیگه یادآوری نکن»: نیتش کلِ یادآوریِ شبانه است، پس هر دو خاموش.
+  const dOff = mkUser(0, 1);
+  await run(dOff, false);
+  ok('off: کارتِ شانس خاموش می‌شود', row(dOff).l === 0);
+  ok('off: کارتِ روز هم خاموش می‌شود (نیت = کلِ یادآوریِ شبانه)', row(dOff).o === 1);
+
+  /* 🔬 کنترلِ مثبت: همین هارنس با خطِ **متقارنِ** قبلی باید قرمز بدهد. بدونِ این،
+     یک هندلرِ بی‌اثر (یا استخراجِ خرابِ بدنه) هر چهار ادعای بالا را سبز رد می‌کرد. */
+  const oldLine = 'if (on) stmts.setDailyReminderOn.run(uid); else stmts.setDailyReminderOff.run(uid);';
+  const mutated = body.replace('if (!on) stmts.setDailyReminderOff.run(uid);', oldLine);
+  ok('کنترلِ مثبت: جهش واقعاً روی بدنه نشست', mutated !== body);
+  const dCtl = mkUser(1, 0);
+  await run(dCtl, true, mutated);
+  ok('کنترلِ مثبت: رفتارِ قدیم واقعاً هر دو کلید را روشن می‌کرد', row(dCtl).o === 0 && row(dCtl).l === 1);
+
+  // ادعای ساختاری کنارِ رفتاری (بند ۲و/۶ب): هندلر نباید اصلاً نویسنده‌ی کارتِ روز را
+  // در جهتِ روشن‌کردن صدا بزند، حتی اگر روزی شکلِ شرط عوض شود.
+  ok('هندلرِ lremind هرگز setDailyReminderOn را صدا نمی‌زند', !body.includes('setDailyReminderOn'));
+
+  // و آن statement کدِ مرده نیست: صفحه‌ی تنظیمات تنها جایی است که «هر دو» را می‌سازد.
+  const settings = block(SRC, "bot.action(/^set:rt:") || '';
+  ok('صفحه‌ی تنظیمات همچنان تنها راهِ روشن‌کردنِ کارتِ روز است',
+     settings.includes('setDailyReminderOn'));
 }
 
 /* ═══════ نتیجه ═══════ */

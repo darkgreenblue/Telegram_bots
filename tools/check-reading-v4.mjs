@@ -189,7 +189,13 @@ console.log('\n▶ شکلِ خروجی');
     'در افشا تیزر نمایش داده می‌شود، نه تحلیلِ کامل');
   ok(/const askFeedback = !v4 &&/.test(SRC), 'هیچ بازخوردی وسطِ خوانش گرفته نمی‌شود');
   ok(!/confirmation_question/.test(V4), 'سؤالِ تأییدیِ وسطِ خوانش از پرامپتِ v4 حذف شده');
-  ok(/if \(headline\) await ctx\.reply\(headline\);/.test(SRC), 'متنِ نهایی با سرخط شروع می‌شود');
+  // ⚠️ از v3.84.0 خروجیِ همین ارسال نگه داشته می‌شود (لنگرِ ریپلای گفتگو). ادعا تیزتر
+  // شد نه خفه: هم ترتیب (سرخط اول)، هم اینکه شناسه‌اش واقعاً روی رکورد می‌نشیند —
+  // وگرنه «کد نوشته شد» با «عدد رسید» یکی گرفته می‌شود (بند ۲و/۶ب ریشه).
+  ok(/if \(headline\) \{ const m = await ctx\.reply\(headline\); anchor = m\?\.message_id \|\| 0; \}/.test(SRC),
+    'متنِ نهایی با سرخط شروع می‌شود');
+  ok(/stmts\.setAnchorMsg\.run\(anchor, readingId\)/.test(SRC),
+    'شناسه‌ی سرخط به‌عنوان لنگرِ گفتگو روی همان رکورد ثبت می‌شود');
   // ترتیبِ **ارسال** در ربات: سرخط، بعد بدنه، بعد جمع‌بندی
   const fin = SRC.slice(SRC.indexOf('async function finishReading('));
   const iH = fin.indexOf('if (headline)'), iB = fin.indexOf('if (body)'), iC = fin.indexOf('if (closing)');

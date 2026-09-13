@@ -35,6 +35,8 @@ const TARGETS = [
   'bots/tarot/loading.js',
   'bots/tarot/ganjineh.js',
   'bots/tarot/env-boot.js',   // ماژولِ نشانگرِ انتظار (بند ۸ ریشه: ماژولِ جدید به TARGETS اضافه شود)
+  'bots/tarot/chat-core.js',
+  'bots/tarot/locale-boot.js',
   'bots/voice2text/index.js',
   'bots/dashboard/index.js',
   'bots/daily-brief/index.js',

@@ -23,3 +23,6 @@ analytics/*/reports/*.pdf
 # فقط ریشه را می‌خواند بداند این دو مسیر عمداً بیرون از گیت‌اند.)
 video/tarot-reel/out/
 video/tarot-reel/public/cards/
+
+# کشِ فالِ پایه‌ی آزمایشگاهِ گفتگو (محلی و بازتولیدشدنی — نباید کامیت شود)
+tools/reading-lab/.chat-base.json

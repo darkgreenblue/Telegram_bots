@@ -222,8 +222,14 @@ console.log('\n▶ 🍀 کارت شانس — گاردهای پول و حالت'
   ok(!/stmts\.dueLuckyReminder/.test(SRC), 'جاروی opt-inِ قدیمی حذف شده (جایش A/B آمد)');
   ok(/dueNightReminder/.test(SRC) && /daily_reminder_off=0/.test(SRC),
     'یادآوریِ شبانه opt-out است و انصرافِ قبلیِ کاربر را محترم می‌شمارد');
-  ok(/if \(on\) stmts\.setDailyReminderOn\.run\(uid\); else stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC),
+  // ⚠️ v3.85.0: این ادعا قبلاً خطِ **متقارن** را پین می‌کرد و دقیقاً همان باگی را
+  // محافظت می‌کرد که v3.82.0 ساخت (تپِ «یادآوری کن» هر دو یادآوری را روشن می‌کرد).
+  // حالا فقط نیمه‌ی خاموشی پین است؛ سنجشِ رفتاریِ هر دو جهت در بلوکِ ۱۲ی
+  // `tools/check-night-reminder.mjs` است.
+  ok(/if \(!on\) stmts\.setDailyReminderOff\.run\(uid\);/.test(SRC),
     'دکمه‌ی یادآوریِ کارت شانس همان ستونِ جارو را می‌نویسد');
+  ok(!/bot\.action\(\/\^lremind[\s\S]{0,1800}?setDailyReminderOn/.test(SRC),
+    'ولی جهتِ «یادآوری کن» کارتِ روز را روشن نمی‌کند (باگِ ۱۸۲ کاربره‌ی v3.82.0)');
   // ⚠️ v3.22.0: یادآوریِ کارتِ روز **کاملاً حذف شد** (تصمیمِ مالک). قبلاً فقط برای دنیای
   // الماس خاموش بود. حالا تنها یادآوریِ شبانه‌ی ربات کارت شانسِ opt-in است، پس کاربر
   // هرگز پیامِ شبانه‌ی نخواسته نمی‌گیرد. سه ادعا، چون «حذف» را باید از سه سمت قفل کرد:
@@ -616,15 +622,19 @@ console.log('\n▶ فلوی «فال تک کارت» — سه باگی که تس
 console.log('\n▶ نیتِ معلق: بعد از انصراف، همان چیزی که می‌خواستیم می‌آید (v3.17.0)');
 {
   const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  ok(/function takeIntent\(uid\)/.test(CODE) && /patchSession\(uid, \{ intent: '', intentAt: 0 \}\)/.test(CODE),
-    'نیت یک‌بارمصرف است (خوانده که شد پاک می‌شود)');
+  ok(/function takeIntent\(uid\)/.test(CODE) && /patchSession\(uid, \{ intent: '', intentAt: 0, intentArg: 0 \}\)/.test(CODE),
+    'نیت یک‌بارمصرف است (خوانده که شد پاک می‌شود، با شناسه‌اش)');
   ok(/INTENT_TTL_S/.test(CODE), 'نیتِ کهنه منقضی می‌شود (انصرافِ ساعت‌ها بعد صفحه‌ی بی‌ربط نمی‌آورد)');
   ok(/patchSession\(uid, \{ intent: key/.test(CODE), 'در سشن (یعنی DB) ذخیره می‌شود، نه حافظه (بند ۹ب/۵)');
 
   // فقط هنگامِ بلاکِ واقعی ثبت می‌شود — مسیرِ عادی هیچ نیتی جا نمی‌گذارد
   for (const g of ['blockDuringOpenPay', 'blockDuringOpenReading']) {
-    const b = CODE.slice(CODE.indexOf(`async function ${g}(ctx, intent)`), CODE.indexOf('\n}', CODE.indexOf(`async function ${g}(ctx, intent)`)));
-    ok(/if \(intent\) setIntent\(uid, intent\);/.test(b), `${g} فقط وقتی بلاک می‌کند نیت را ثبت می‌کند`);
+    // ⚠️ امضا از v3.84.0 آرگومانِ سومِ `intentArg` گرفت (گفتگو باید بداند کدام فال).
+    // ادعا **تیزتر** شد نه خفه: حالا عبورِ همان آرگومان را هم می‌سنجد، چون نیتِ بدونِ
+    // شناسه یعنی بازپخش روی فالِ صفر می‌افتد (همان کلاسِ باگِ v3.78.0).
+    const sig = `async function ${g}(ctx, intent, intentArg = 0)`;
+    const b = CODE.slice(CODE.indexOf(sig), CODE.indexOf('\n}', CODE.indexOf(sig)));
+    ok(/if \(intent\) setIntent\(uid, intent, intentArg\);/.test(b), `${g} فقط وقتی بلاک می‌کند نیت را ثبت می‌کند (با شناسه)`);
     const iSet = b.indexOf('setIntent'); const iRet = b.indexOf('return false');
     ok(iSet > iRet, `${g}: ثبتِ نیت **بعد از** همه‌ی returnهای زودهنگام است`);
   }

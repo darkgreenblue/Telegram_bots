@@ -290,6 +290,14 @@ export default {
     backOneStep: '◀️ Volver',
     resumeReading: '🔮 Seguir con esa lectura',
     stuckCancel: '❌ Cancelar la lectura',
+    /* 🗣 Botones de la conversación después de la lectura (v3.84.0). Port fiel del
+     * farsi, pero en español **todavía sin probar**: `CHAT_LOCALES = ['fa']` deja toda
+     * esta rama como código muerto en la primera versión (igual que el bloque invoice
+     * de más abajo). */
+    chatStart: '💬 Hablar de esta lectura con el tarotista',
+    chatAnotherReading: '🔮 Quiero otra lectura',
+    chatSkip: '◀️ Mis sugerencias',
+    chatBack: '💬 Volver a la conversación',
     dailyAfterOnboard: '🎴 Ver mi carta de hoy (gratis)',
     gateOpenChannel: '📢 Abrir el canal de la carta del día',
     gateCheck: '✅ Ya me uní, revisa',
@@ -823,6 +831,52 @@ export default {
       + (canCancel ? '\n\n💎 Si ya no la quieres, cancélala; eso sí, los diamantes no vuelven.' : ''),
   },
 
+  /* 🗣 Conversación después de la lectura (v3.84.0).
+   * ⚠️ Port fiel del farsi, sentido por sentido, pero en español **sin probar**: nadie
+   * de carne y hueso ha visto todavía estas frases. `CHAT_LOCALES = ['fa']` en index.js
+   * deja el bloque entero como código muerto por estructura en la primera versión,
+   * igual que `invoiceReminder` más abajo; las claves existen por la forma única de la
+   * locale (check-locale-shape). Cuando se abra el idioma, hay que releer los textos en vivo. */
+  chat: {
+    // Oferta después del agradecimiento por la calificación. El orden de los botones
+    // está fijo en index.js: primero la conversación (el pico del momento), después una
+    // lectura nueva, y solo al final la puerta de salida a las sugerencias de siempre.
+    offer: 'Tu lectura terminó ✅\n\nSi te quedó alguna pregunta dando vueltas, aquí mismo se la puedes hacer al tarotista.',
+    // Mensaje de entrada. Es un estado de escritura, así que **no lleva ningún botón**
+    // (punto ۹ب) y el saldo a propósito no se muestra: nadie debería sentirse empujado a
+    // juntar varias preguntas en un solo mensaje. El precio llega por parámetro para que
+    // `CHAT_PRICE` siga siendo fuente única.
+    intro: (price, cur) => `Va 💬\n\nPregúntame lo que quieras sobre tu lectura y te respondo.\nCada pregunta descuenta ${moneyTight(price, cur)} de tus ${purse(cur)}.\n\n⬇️ *Escribe tu pregunta aquí mismo*`,
+    // Vuelta a una conversación a medias: la misma invitación, sin repetir el precio
+    // (ya se vio una vez, y repetirlo en cada vuelta se convierte en recordatorio de gasto).
+    resumed: 'Volvimos a la conversación 💬\n\n⬇️ *Escribe tu pregunta*',
+    // Saldo corto. Sus botones son los mismos `walletRows` de siempre más «volver a la conversación».
+    needBalance: (price, cur) => `Esta pregunta cuesta ${moneyTight(price, cur)} y tus ${purse(cur)} no alcanzan 💎`,
+    // Falla total del modelo después de todos los respaldos. Con honestidad, y diciendo claro que se devolvió.
+    failed: (price, cur) => `Esta vez no me llegó respuesta 🙏 Te devolví ${moneyTight(price, cur)} a tus ${purse(cur)}.\n\nPregunta de nuevo; casi siempre sale a la segunda.`,
+    // Barrido de arranque: la pregunta que se quedó sin respuesta en medio de un reinicio.
+    refunded: (price, cur) => `Una pregunta tuya se quedó sin respuesta a medio camino 🙏 Te devolví ${moneyTight(price, cur)} a tus ${purse(cur)}.\n\nPregunta otra vez cuando quieras.`,
+    // Audio dentro de la conversación (la primera versión es solo texto). Gratis y sin descuento.
+    voiceOnly: '🎙 En la conversación por ahora solo leo texto.\n\n⬇️ *Escribe tu pregunta en un mensaje*',
+    // Cortesía o saludo: gratis, con una invitación suave a la pregunta de verdad.
+    smallTalk: 'Con gusto 🌿\n\nPregúntame lo que quieras de tu lectura.',
+    // Dos toques al mismo tiempo.
+    busy: 'Un segundo, todavía estoy escribiendo la respuesta anterior 🕯️',
+    // Tope de escape (contra el bucle, no un throttle). El freno principal es el precio.
+    capped: 'De esta lectura ya hablamos bastante 🌙\n\nPara preguntas nuevas, una lectura nueva responde con más precisión:',
+    // Botón viejo sobre una lectura que ya no admite conversación.
+    unavailable: 'Esta lectura ya no está abierta para conversar 🌙',
+    off: 'Conversar sobre la lectura no está disponible por ahora 🌙',
+    // 🤍 Guarda de crisis. Corre **antes** del descuento y sin una sola llamada al modelo.
+    // El texto deja las cartas de lado a propósito y manda a una persona real (punto ۲و/۶
+    // y Model Spec §respect_real_world_ties: el bot no reemplaza los vínculos de verdad).
+    crisis: 'Lo que acabas de escribir me importa y no lo paso por alto 🤍\n\nLas cartas no son el lugar para esto. Cuéntaselo a una persona de verdad: alguien en quien confíes, o una línea de crisis; en México es la Línea de la Vida, 800 911 2000, que atiende las 24 horas.\n\nCuando quieras, tu lectura sigue aquí.',
+    // Empujón contra la dependencia: **una sola vez** por conversación, después del turno
+    // doce, y como línea extra después de la respuesta normal (no en su lugar), para que
+    // no se vuelva un consejo repetido.
+    nudge: '🌿 Por cierto, la decisión final siempre es tuya; las cartas solo cambian el ángulo desde el que miras.',
+  },
+
   share: {
     inlineTitle: '🔮 Invitación a una lectura de tarot',
     inlineDesc: '¡Una lectura profesional por mi cuenta!',
@@ -1239,5 +1293,68 @@ Agrega al mismo JSON una clave más: "question_text" con el texto exacto de la p
       'la interpretación que habías dado': ctx.cardText,
       'pregunta original de la persona': ctx.question,
     }),
+
+    /* 🗣 Prompt de la conversación después de la lectura (v3.84.0). Port fiel de la
+     * versión en farsi: los mismos bloques, la misma cantidad de reglas, el mismo orden.
+     * La regla de registro sale de `readerSystemV4` de esta misma locale (forma escrita)
+     * y, como allí, **sin una sola frase de ejemplo**: un ejemplo se copia, una
+     * descripción no.
+     * ⚠️ En español no se probó en vivo: `CHAT_LOCALES = ['fa']` mantiene esta rama
+     * como código muerto en la primera versión. */
+    chatSystem: `Eres el mismo tarotista que escribió esta lectura y ahora la persona te pregunta sobre ella. Las cartas, el texto de la lectura y todo lo que sabes de ella están delante de ti.
+
+═══ Corto, y algo nuevo cada vez ═══
+- De 2 a 6 líneas cortas. Ajusta el largo a la pregunta misma: una pregunta corta y cerrada son dos o tres líneas, una pregunta de sentimientos o de varias capas son cinco o seis. Un largo fijo para todas las respuestas está prohibido.
+- La primera línea es la respuesta en sí, no una introducción ni un repaso de la pregunta.
+- No cuentes la lectura otra vez, la acaba de leer. Cada respuesta suma algo nuevo: otro ángulo de una carta, una carta que todavía no se abrió, la relación entre dos cartas o la capa del tiempo.
+- Una pregunta fuera del alcance de esta lectura también se responde con estas mismas cartas. No inventes cartas nuevas.
+- Una pregunta corta y difusa se refiere a tu última frase; no pidas que aclare salvo que haya dos referencias vivas al mismo tiempo.
+
+═══ Regla de la respuesta: «el sí caro» ═══
+Encuentra el camino donde la respuesta es positiva, dilo directo, y después di el precio con honestidad.
+- Fórmula: [dirección] + [adverbio de probabilidad] + «pero/aunque» + [precio concreto].
+- Si las cartas están cerradas, la respuesta es «no de esta forma» o «no tan pronto», junto con el camino que sí está abierto. Nunca un no seco y sin salida.
+- Cada frase necesita una dirección. Prohibido: «depende de ti», «puede ser una u otra», «tal vez sí tal vez no», «confía en tu intuición», «el universo».
+- Si la esperanza que trae su pregunta no cuadra con las cartas, acompaña su **sentimiento**, no su conclusión: reconoce el sentimiento y después di aparte lo que dicen las cartas. El marco de su pregunta no debe cambiar tu respuesta.
+
+═══ Regla del ancla ═══
+Cada frase necesita al menos una de estas tres anclas: el nombre de una de las cartas de esta misma lectura, una palabra de su propia pregunta, o algo de lo que ya se sabe de ella. Una frase sin ancla le sirve a cualquier otra persona; o la borras o la reescribes con ancla.
+- Nunca escribas «tu señal es esta»; el ancla misma ya es la señal.
+- Si la carta que espera no salió, di que no salió.
+- Traduce la carta de corte en una persona real. Invertida = la sombra de esa misma energía, no una versión peor.
+
+═══ Tono ═══
+- Siempre «tú», nunca «usted» y nunca «vos». Español neutro de América Latina, nada de España, y «coger» está prohibido.
+- Hablado y sin ceremonia, nada formal, nada de terapeuta, nada de consuelo vacío. **Nada de forma escrita, ni a media frase.** Mal: se encuentra, resulta necesario, asimismo, por ende, no obstante, debe considerarse. Bien: está, hace falta, y además, entonces, pero, hay que ver.
+- Halagar a la persona o a su pregunta está prohibido si no va amarrado a una carta o a sus propias palabras.
+- Cada idea en su línea. Sin título, sin negrita, sin viñetas y sin numeración. Máximo un emoji.
+- Sin raya larga y sin dos guiones seguidos. Tampoco uses la palabra «tirada»; di «lectura».
+- No le impongas un género a la persona: ningún adjetivo ni participio con marca de género dirigido a ella; reescribe con sustantivo, infinitivo o forma impersonal.
+- Ninguna referencia de tiempo al pasado, no tienes la fecha de las sesiones anteriores. Su nombre tampoco lo escribas. Máximo un signo de pregunta en toda la respuesta.
+
+═══ La última línea: una puerta abierta ═══
+Cierra tu respuesta con una frase que muestre un ángulo concreto todavía sin abrir y que esté amarrada a una carta de esta lectura o a un pedazo de su propia pregunta.
+- Si esa misma frase se puede poner sin cambios debajo de la lectura de otra persona, está mal; reescríbela.
+- Si su pregunta era cerrada y quedó contestada del todo, esa frase va en afirmativo, no en pregunta.
+- Cambia el tipo de esa frase en cada turno; dos turnos seguidos con la misma forma son repetición.
+- Prohibido: «¿te cuento más?», «¿tienes otra pregunta?», «aquí estoy para lo que sea», «¿en qué más te ayudo?» y cualquier otra cortesía vacía.
+- No cierres la conversación ni te despidas si la persona no se despide primero. Un «gracias» no es señal de final.
+
+═══ Límites ═══
+- Las afirmaciones médicas, legales o financieras categóricas están prohibidas: di en una frase que la decisión de verdad es con un especialista, y vuelve a las cartas.
+- Predecir muerte, enfermedad y catástrofe, prometer resultados garantizados y asustar están prohibidos.
+- Ante «¿lo hago o no?» no dictes un veredicto final: da la lectura de las cartas, devuélvele la decisión y déjale delante un ángulo concreto para pensar.
+- De una tercera persona habla solo desde las cartas y desde su propia relación; no afirmes ningún hecho privado sobre alguien más.
+- Nunca te pongas en el lugar de la gente real de su vida ni la desanimes de hablar con ellos.
+
+Devuelve solo texto simple. Sin JSON, sin introducción, sin etiquetas.`,
+
+    // Bloque de contexto de la lectura. Es la segunda mitad del **prefijo fijo** y a lo
+    // largo de una conversación queda byte por byte igual, para que el caché del prompt
+    // funcione (la condición económica de toda esta función).
+    chatContext: (block) => `Datos de esta misma lectura:\n\n${block}`,
+    // Las dos líneas comprimidas del historial (cuando la conversación pasó los cinco turnos).
+    chatDigestHead: 'Preguntas que ya hizo en esta misma conversación:',
+    chatDigestAck: 'Listo, me acuerdo.',
   },
 };
