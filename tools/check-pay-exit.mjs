@@ -247,6 +247,134 @@ ok(exitFn ? !/openPaymentRow/.test(exitFn) : false,
   'pay_exit هیچ ردیفِ پرداختِ تازه‌ای باز نمی‌کند (وگرنه دوباره همان حلقه)');
 ok(exitFn ? !/'pay_amount'/.test(exitFn) : false, 'و کاربر را به pay_amount برنمی‌گرداند');
 
+/* ══ ۳ب) پیامِ فاکتور با **هر** دکمه‌ی انصرافی پاک می‌شود ═══════════════════
+ *
+ * 🐛 گزارشِ مالک (۱۴۰۵/۰۶/۲۲): انصراف از زیرِ پیامِ گارد، فقط پیامِ گارد را می‌بست و
+ * فاکتور با شماره‌کارت و دکمه‌های زنده‌اش در چت می‌ماند، در حالی که ردیفش `canceled`
+ * شده بود.
+ *
+ * ⚠️ و ریشه‌اش از خودِ باگ مهم‌تر است: در مسیرِ `pay_cancel` این پیام پاک **می‌شد**، ولی
+ * نه با یک قاعده — دکمه‌ی آن مسیر زیرِ خودِ فاکتور است و `ctx.deleteMessage()` اتفاقاً
+ * همان را می‌بست. یعنی درستی به «کدام پیام تپ شد» وابسته بود، و اولین دکمه‌ی انصرافی که
+ * جای دیگری نشست از کنارش رد شد. پس این بخش **تک‌نقطه بودن** را می‌سنجد، نه رفتارِ یک
+ * دکمه‌ی خاص: هر مسیرِ انصراف باید از `dropInvoiceArtifacts` رد شود و خودِ آن تابع
+ * تصمیم بگیرد. */
+console.log('\n  — 🧾 پاک‌سازیِ پیامِ فاکتور:');
+ok(exitFn ? /dropInvoiceArtifacts\(ctx, uid, p\)/.test(exitFn) : false,
+  'pay_exit از تک‌نقطه‌ی پاک‌سازی رد می‌شود');
+const cancelFn = bodyOf('bot.action(/^pay_cancel:(\\d+)$/, async (ctx) => {');
+ok(cancelFn ? /dropInvoiceArtifacts\(ctx, uid, p\)/.test(cancelFn) : false,
+  'pay_cancel هم از همان تک‌نقطه رد می‌شود (قاعده، نه تصادفِ «کدام پیام تپ شد»)');
+
+/* ⚠️ درسِ جهشِ M2 (زنده ماند و ادعای اولِ من را پوچ نشان داد): یک ادعای **ترتیبی**
+ * («پاک‌سازی قبل از cancel») این‌جا بی‌معناست، چون `p` یک **اسنپ‌شات** است و
+ * `setPaymentStatus` مقدارِ داخلِ آبجکت را عوض نمی‌کند. یعنی جابه‌جاییِ دو خط هیچ
+ * رفتاری را نمی‌شکند و آن ادعا هیچ‌وقت قرمز نمی‌شد.
+ * چیزی که **واقعاً** بار دارد این است: هر دو مصرف‌کننده باید همان **یک** خوانش را
+ * ببینند. اگر روزی کسی بعد از cancel ردیف را دوباره بخواند و آن را پاس بدهد، شرطِ
+ * `pending` بی‌صدا false می‌شود و فاکتور دوباره در چت می‌ماند — بدونِ هیچ خطایی. */
+const reads = (s) => (s ? (s.match(/stmts\.getPayment\.get\(/g) || []).length : -1);
+ok(reads(exitFn) === 1,
+  'pay_exit ردیف را دقیقاً یک بار می‌خواند (همان اسنپ‌شات به پاک‌سازی و به cancel می‌رسد)',
+  `شمارش: ${reads(exitFn)}`);
+ok(reads(cancelFn) === 1,
+  'pay_cancel هم همان یک اسنپ‌شات را به هر دو می‌دهد',
+  `شمارش: ${reads(cancelFn)}`);
+
+const DROP_MARK = 'async function dropInvoiceArtifacts(ctx, uid, p) {';
+const dropBody = (() => {
+  const i = SRC.indexOf(DROP_MARK);
+  if (i < 0) return null;
+  const s0 = i + DROP_MARK.length - 1;
+  let d = 0;
+  for (let j = s0; j < SRC.length; j++) {
+    if (SRC[j] === '{') d++;
+    else if (SRC[j] === '}') { d--; if (!d) return SRC.slice(s0 + 1, j); }
+  }
+  return null;
+})();
+ok(!!dropBody, 'بدنه‌ی dropInvoiceArtifacts از سورس استخراج شد (بدونِ کپیِ محلی)');
+
+const setInvSql = sqlOf('setInvoiceMsgId');
+if (dropBody && setInvSql) {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending', invoice_msg_id INTEGER, stars_invoice_msg_id INTEGER);`);
+  const U = 4242;
+  const rowOf = (status, invMsg, uid = U, starsMsg = null) => {
+    const id = Number(db.prepare(
+      'INSERT INTO payments (user_id, status, invoice_msg_id, stars_invoice_msg_id) VALUES (?,?,?,?)')
+      .run(uid, status, invMsg, starsMsg).lastInsertRowid);
+    return db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+  };
+  const msgIdOf = (id) => db.prepare('SELECT invoice_msg_id m FROM payments WHERE id=?').get(id).m;
+
+  let delFails = false;   // شبیه‌سازیِ ردِ حذف توسطِ تلگرام (پیامِ قدیمی‌تر از ۴۸ ساعت)
+  const runDrop = async (p, session = {}) => {
+    const log = { deleted: [], kbCleared: [], session: { ...session } };
+    const fn = new Function('ctx', 'uid', 'p', 'deps', `
+      const { getSession, patchSession, stmts } = deps;
+      return (async () => {${dropBody}})();`);
+    await fn(
+      { chat: { id: U },
+        telegram: {
+          deleteMessage: (_c, m) => {
+            log.deleted.push(m);
+            return delFails ? Promise.reject(new Error('too old')) : Promise.resolve();
+          },
+          editMessageReplyMarkup: (_c, m) => { log.kbCleared.push(m); return Promise.resolve(); },
+        } },
+      U, p,
+      { getSession: () => log.session,
+        patchSession: (_u, v) => Object.assign(log.session, v),
+        stmts: { setInvoiceMsgId: { run: (v, id) => db.prepare(setInvSql).run(v, id) } } });
+    return log;
+  };
+
+  // ۱) فاکتورِ زنده: همان چیزی که مالک دید
+  const live = rowOf('pending', 555);
+  const r1 = await runDrop(live);
+  ok(r1.deleted.includes(555), '🧾 پیامِ فاکتورِ زنده واقعاً پاک می‌شود');
+  ok(msgIdOf(live.id) === null,
+    'و مهرِ ستون صفر می‌شود، پس invoice_msg_id دقیقاً یعنی «پیامِ زنده‌ای در چت هست»');
+  ok(r1.kbCleared.length === 0, 'حذفِ موفق دیگر فالبکِ برداشتنِ دکمه را اجرا نمی‌کند');
+
+  // ۲) فالبکِ پیامِ کهنه (همان الگوی پیامِ گارد)
+  {
+    delFails = true;
+    const old = rowOf('pending', 777);
+    const r2 = await runDrop(old);
+    ok(r2.kbCleared.includes(777),
+      'پیامِ قدیمی‌تر از ۴۸ ساعت: دستِ‌کم دکمه‌هایش برداشته می‌شود (تپِ بی‌اثر روی مسیرِ پول نماند)');
+    ok(msgIdOf(old.id) === 777,
+      'و چون پیام هنوز در چت است، مهرِ ستون عمداً صفر **نمی‌شود**');
+    delFails = false;
+  }
+
+  // ۳) چیزی که نباید لمس شود — با کنترلِ مثبت (بند ۶ب-۲ ریشه)
+  for (const st of ['waiting_review', 'approved', 'canceled']) {
+    const p = rowOf(st, 888);
+    ok(!(await runDrop(p)).deleted.includes(888),
+      `💰 فاکتورِ ${st} لمس نمی‌شود (بخشی از رکوردِ همان پرداخت است)`);
+  }
+  const ctrl = rowOf('pending', 888);
+  ok((await runDrop(ctrl)).deleted.includes(888),
+    '🎯 کنترلِ مثبت: همین هارنس روی ردیفِ pending واقعاً پاک می‌کند (پس ادعاهای بالا پوچ نیستند)');
+
+  // ۴) مالکیت: شناسه‌ی پیام per چت است، پس ردیفِ کاربرِ دیگر می‌توانست پیامِ بی‌ربط ببرد
+  const foreign = rowOf('pending', 999, 9999);
+  ok(!(await runDrop(foreign)).deleted.includes(999),
+    'فاکتورِ کاربرِ دیگر پاک نمی‌شود (چکِ مالکیت)');
+
+  // ۵) دو پاک‌سازیِ قبلی نشکسته باشند
+  const both = rowOf('pending', 111, U, 222);
+  const r5 = await runDrop(both, { pickedMsgId: 333 });
+  ok(r5.deleted.includes(222), 'فاکتورِ نیتیوِ استارز مثل قبل پاک می‌شود');
+  ok(r5.deleted.includes(333), 'پیامِ بسته‌ی انتخاب‌شده مثل قبل پاک می‌شود');
+  ok(r5.session.pickedMsgId === null, 'و نشانه‌اش از سشن برداشته می‌شود');
+  db.close();
+}
+
 /* ══ ۴) جاروی خودکار: کسی که از قبل گیر افتاده نباید کاری بکند ══════════ */
 // فیکسِ دکمه یک تپ می‌خواهد؛ کسی که هفته‌ی پیش گیر افتاده و رفته، هرگز آن تپ را نمی‌زند.
 // این بخش ثابت می‌کند جارو دقیقاً همان‌ها را آزاد می‌کند و به پول دست نمی‌زند.
