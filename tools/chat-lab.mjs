@@ -178,7 +178,12 @@ const CHAT_PRICE = constOf('CHAT_PRICE', 1);
  * دورِ نرمال هزینه‌ی ۲۶ نوبتش را ندهد، و مهم‌تر، تا مقایسه‌ی عدم‌رگرسیون همیشه روی
  * همان پرسوناهای نرمال بنشیند (خواسته‌ی صریحِ مالک: تنظیم روی موردِ خصمانه، مسیرِ
  * ۹۹۹تای دیگر را خراب می‌کند). */
-const SCEN_NAME = val('scenarios', '');
+/* ⚠️ `--set` مترادفِ پذیرفته‌شده است، نه یک پرچمِ دوم: ورک‌فلوی `Reading lab` ورودیِ
+ * `set` را برای **هر دو** ابزار به همان شکل پاس می‌دهد، و بدونِ این مترادف یک دورِ
+ * `set: meta` بی‌صدا روی سناریوی **پیش‌فرض** اجرا می‌شد — یعنی گزارشِ سبز از چیزی که
+ * اصلاً سنجیده نشده (همان کلاسِ `--dry`). نام‌گذاری هم عیناً همان قراردادِ
+ * `reading-lab.mjs` است: `--set meta` ⟵ `scenarios.meta.json`. */
+const SCEN_NAME = (val('scenarios', '') || val('set', '') || '').trim().toLowerCase();
 const SCEN_FILE = path.join(HERE, 'reading-lab', SCEN_NAME
   ? `scenarios.${SCEN_NAME}.json`
   : (LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`));
