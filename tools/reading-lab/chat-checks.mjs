@@ -101,6 +101,51 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
   }
   if (formal.length) issues.push(`لحنِ رسمی: «${formal[0]}»`);
 
+  /* ۳ب) لحنِ **کتابی** (گفتاری در برابر نوشتاری). این با بندِ ۳ یکی نیست و آن را
+   * پوشش نمی‌دهد: «شما» خطابِ رسمی است، ولی «می‌کند» خطاب نیست، صرفِ نوشتاری است و
+   * با «تو» هم می‌آید («تو باید تصمیم بگیری که او مسئولیت را نشان می‌دهد»).
+   *
+   * 🐛 چرا اضافه شد: دورِ ۱ (۱۴۰۵/۰۶/۲۲) با **همه‌ی** آستانه‌های فاز ۱ سبز تمام شد،
+   * ولی خواندنِ چشمیِ همان ۱۵ نوبت نشان داد **۷ تا** وسطِ جواب به فارسیِ کتابی
+   * می‌لغزند («شاه سکه آینده را باز می‌گذارد»، «کارت‌ها وقوعِ خبر بد را تأیید
+   * نمی‌کنند»)، و بدتر اینکه لغزش **داخلِ یک جواب** است، پس متن مثل نوشته‌ی دو نفر
+   * خوانده می‌شود. این مستقیماً خواسته‌ی مرکزیِ مالک را نقض می‌کند («لحن عیناً لحنِ
+   * بهینه‌شده‌ی فال»).
+   *
+   * ⚠️ و ریشه‌اش ابزار بود نه مدل (بند ۹/۰ب): سنجه‌ی `bookish` از ۱۶ دورِ آزمایشگاهِ
+   * خوانش در `lang/fa.mjs` **وجود داشت** و هرگز این‌جا صدا زده نمی‌شد. پس سبزیِ دور ۱
+   * از «نبودِ قرمز» آمده بود نه از سلامت (بند ۶ب-۲ ریشه). آستانه و الگو عمداً همان
+   * `lang/<locale>.mjs` است تا دو آزمایشگاه یک تعریف داشته باشند. */
+  const bookish = [];
+  if (LANG.bookish?.re) {
+    const re = new RegExp(LANG.bookish.re.source, LANG.bookish.re.flags.includes('g')
+      ? LANG.bookish.re.flags : `${LANG.bookish.re.flags}g`);
+    let m;
+    while ((m = re.exec(reply))) {
+      bookish.push(m[0].trim());
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+  }
+  const bookishMin = LANG.bookish?.min ?? 3;
+  if (bookish.length >= bookishMin) {
+    issues.push(`لحنِ کتابی (${bookish.length}×): «${bookish.slice(0, 3).join('»، «')}»`);
+  }
+
+  /* ۳ج) اکوی **برچسبِ خودِ پرامپت** در خطِ آخر.
+   *
+   * 🐛 دورِ ۱: ۱۱ تا از ۱۵ خطِ آخر با همان کلمه‌ای ساخته شده بودند که تیترِ بلوکِ
+   * پرامپت است («خطِ آخر: یک درِ باز») — «زاویه‌ی بازِ فال اینه که…»، «درِ بازِ این
+   * فال…»، «بخشِ هنوزبازِ ماجرا…». هیچ‌کدام chatbait نبودند و `hookOk` همه را سبز
+   * داد، چون واقعاً لنگر داشتند؛ ولی قلاب به یک **قالب** تبدیل شده بود و پرامپت
+   * صریح می‌گوید «نوعِ این جمله را هر نوبت عوض کن».
+   *
+   * این دقیقاً همان کلاسِ خطای ثبت‌شده‌ی `labelLeak` است (مدل به‌جای **انجامِ** کار،
+   * خودِ برچسب را چاپ می‌کند) که پرامپت برای «نشونه‌ات اینه» بسته بود و برای قلاب
+   * نبسته بود. سنجه روی خطِ آخر است، نه کلِ جواب: «در باز» وسطِ متن معنیِ عادی دارد. */
+  const last = lines[lines.length - 1] || '';
+  const labelEcho = LANG.hookLabel ? (last.match(LANG.hookLabel)?.[0] || '').trim() : '';
+  if (labelEcho) issues.push(`اکوی برچسبِ قلاب: «${labelEcho}»`);
+
   // ۴) خط تیره‌ی بلند (بند ۱۰ ریشه). روی متنِ نهایی **ایراد** است، روی متنِ خام فقط
   //    یک نکته — چون `cleanChatReply` پاکش می‌کند ولی تولیدش یعنی پرامپت دارد می‌لغزد.
   const dashes = (String(reply).match(/—|--/g) || []).length;
@@ -123,8 +168,8 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     notes.push(`${lines.length} خط (هدف ${LINE_MIN} تا ${LINE_MAX})`);
   }
 
-  return { lines: lines.length, chars, hook, chatbait: bait.length, formal, dashes, dashesRaw,
-    qmarks, firstLine, issues, notes };
+  return { lines: lines.length, chars, hook, chatbait: bait.length, formal, bookish, labelEcho,
+    dashes, dashesRaw, qmarks, firstLine, issues, notes };
 }
 
 /**

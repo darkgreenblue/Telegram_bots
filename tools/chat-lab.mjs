@@ -92,6 +92,70 @@ const STEPS = (val('steps', 'last') || 'last').trim();
 const ARMS = (val('arms', '') || '').split(',').map((x) => x.trim()).filter(Boolean);
 const ARM_LIST = ARMS.length ? ARMS : [val('model', CHAT_MODEL)];
 const planFor = (m) => [m, m, FLASH, FALLBACK_MODEL];
+
+/* 🧪 واریانتِ **پرامپت** به‌عنوان بُعدِ دومِ بازو — عیناً همان الگوی `reading-lab.mjs`
+ * و به همان دلیل: فرضیه‌ی پرامپت باید **جفت‌شده** سنجیده شود (همان فالِ پایه، همان
+ * سؤال‌های پیگیری، همان مدل)، وگرنه با نویزِ نمونه‌برداری قاطی می‌شود. و چون واریانت
+ * این‌جا زندگی می‌کند نه در `locales/fa.js`، یک فرضیه‌ی ردشده هیچ ردی در کدِ محصول
+ * نمی‌گذارد. برنده که معلوم شد، در یک PR جدا به locale می‌رود.
+ *
+ * شکلِ بازو: `model` یا `model@variant`.
+ *
+ * ⚠️ دو گاردِ مکمل، چون هیچ‌کدام به‌تنهایی کافی نیست: `rep` (پایین) هر **لنگر** را
+ * اجباری می‌کند، و `systemFor` بررسی می‌کند واریانت **در مجموع** چیزی عوض کرده. */
+/* ⚠️ هر جایگزینی **باید** لنگرش را پیدا کند. `String.replace` وقتی چیزی پیدا نکند
+ * بی‌صدا رشته‌ی دست‌نخورده را برمی‌گرداند، و گاردِ «واریانت چیزی را عوض نکرد» این را
+ * برای واریانت‌های مرکب (`v3`/`v4` که اول `v2` را صدا می‌زنند) **نمی‌گیرد**: یک
+ * جایگزینیِ خطاخورده وسطِ زنجیره، بازو را بی‌صدا به `v2` تبدیل می‌کند و ما یک دورِ
+ * پولی خرج می‌کنیم تا «تفاوتی نبود» گزارش کنیم. پس هر لنگر همین‌جا اجباری است. */
+const rep = (s, from, to) => {
+  if (!s.includes(from)) {
+    console.error(`❌ لنگرِ جایگزینیِ واریانت در پرامپت نیست: «${from.slice(0, 60)}…»`);
+    console.error('   احتمالاً locale ویرایش شده. واریانت را با متنِ تازه هم‌تراز کن.');
+    process.exit(1);
+  }
+  return s.split(from).join(to);
+};
+
+const PROMPT_VARIANTS = {
+  /* 📭 عمداً خالی. سه واریانتِ دورهای ۲ تا ۴ (`v2`, `v3`, `v4`) این‌جا بودند و هر سه
+   * تکلیفشان روشن شد، پس طبقِ بند ۹/۰ ریشه پاک شدند نه خاموش:
+   *
+   * - **`v2` برنده شد و از v3.85.0 خودش پرامپتِ محصول است** (قفلِ لحنِ گفتاری +
+   *   «اسمِ قلاب را نبر»؛ ۱۱/۱۵ ⟵ ۰/۱۵ و ۷/۱۵ ⟵ ۰/۱۵). نگه‌داشتنش این‌جا یعنی
+   *   وصله‌ای که لنگرش دیگر در locale وجود ندارد، پس `rep` هر دورِ آینده را با خطا
+   *   می‌کُشت — کدِ مرده‌ای که فقط بلد است خراب شود.
+   * - **`v3` و `v4` رد شدند** و دلیلشان باید بماند چون یک **خانواده‌ی مداخله** را
+   *   می‌بندد: هر دو صریح به مدل می‌گفتند «خط جدا کن»، و هر دو ۰/۳ گفتگو داخلِ هدف
+   *   دادند در برابرِ ۱۱/۱۸ برای بازوهای بدونِ آن دستور. یعنی خواستنِ صریحِ
+   *   خط‌بندی طولِ جواب را باد می‌کند. **دوباره امتحان نمی‌شود**؛ همان نیاز در
+   *   `splitChatLines` به‌شکلِ قطعی و رایگان حل شد.
+   *
+   * خودِ مکانیزم (`rep`، `systemFor`، نحوِ `model@variant`) سرِ جایش است و واریانتِ
+   * بعدی فقط یک ردیف این‌جاست. */
+};
+const armModel = (a) => String(a).split('@')[0];
+const armVariant = (a) => String(a).split('@')[1] || '';
+{
+  const bad = ARM_LIST.map(armVariant).filter((v) => v && !PROMPT_VARIANTS[v]);
+  if (bad.length) {
+    console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join('، ')}`);
+    console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join('، ') || '(هیچ)'}`);
+    process.exit(1);
+  }
+}
+/* گاردِ «وصله واقعاً خورد». بدونِ این، یک ویرایشِ بی‌ربط در `locales/fa.js` که لنگرِ
+ * `replace` را جابه‌جا کند، بازوی آزمایشی را بی‌صدا به بازوی پایه تبدیل می‌کند. */
+function systemFor(variant) {
+  const base = L.prompts.chatSystem;
+  if (!variant) return base;
+  const out = PROMPT_VARIANTS[variant](base);
+  if (out === base) {
+    console.error(`❌ واریانتِ «${variant}» هیچ تغییری در پرامپت نداد (لنگرِ replace عوض شده؟)`);
+    process.exit(1);
+  }
+  return out;
+}
 /* فالِ پایه با **یک** مدل ساخته می‌شود و همه‌ی بازوها همان را می‌گیرند؛ وگرنه تفاوتِ
  * خروجیِ گفتگو می‌تواند از متنِ فالِ متفاوت بیاید نه از مدلِ گفتگو. */
 const BASE_MODEL = val('base-model', READING_MODEL);
@@ -138,6 +202,13 @@ const personas = SCEN.personas.filter((p) => !ONLY.length || ONLY.includes(p.id)
   const lang = chatLang();
   if (!lang.chatbait?.length || !lang.crisis?.length) {
     errs.push(`گاردهای گفتگو برای «${LOCALE}» پیکربندی نشده‌اند (configureChatLang خالی ماند)`);
+  }
+  /* همین قاعده برای دادهٔ **سنجه‌ها** هم برقرار است و به همان دلیل: `chatMetrics` اگر
+   * `bookish`/`hookLabel` را در `lang/<locale>.mjs` پیدا نکند بی‌صدا از رویشان رد
+   * می‌شود و گزارش سبز می‌آید. دقیقاً همین اتفاق در دورِ ۱ افتاد (`bookish` وجود داشت
+   * و صدا زده نمی‌شد) و ۷ جوابِ کتابی را بی‌صدا سبز کرد. نبودن باید بلند شکست بخورد. */
+  for (const k of ['bookish', 'hookLabel']) {
+    if (!LANG[k]) errs.push(`سنجه‌ی «${k}» در tools/reading-lab/lang/${LOCALE}.mjs نیست`);
   }
   if (errs.length) { for (const e of errs) console.error(`❌ ${e}`); process.exit(1); }
 }
@@ -245,6 +316,12 @@ async function buildBase(persona, step, i) {
   if (!parsed && fallback) parsed = fallback;
   if (!parsed) throw new Error(`ساختِ فالِ پایه شکست خورد (${persona.id}.${i + 1})`);
 
+  /* ⚠️ عمداً `repairDefects` اجرا **نمی‌شود** (برخلافِ آزمایشگاهِ خوانش). سه دلیل:
+   * تعمیر روی ~۴٪ فال‌ها شلیک می‌کند، فقط همان فیلدِ معیوب را عوض می‌کند، و این‌جا
+   * فالِ پایه صرفاً **کانتکست** است نه چیزی که سنجیده شود. اجرایش یک فراخوانیِ
+   * اضافه به کشِ پایه می‌چسباند و یک متغیرِ دوم واردِ چیزی می‌کند که باید در همه‌ی
+   * دورها بیت‌به‌بیت ثابت بماند. کیفیتِ خودِ فال کارِ `reading-lab.mjs` است. */
+
   const rendered = renderV4(parsed, cards, labels, { name: persona.name });
   const base = {
     persona: persona.id, step: i, spread: spread.id, question: step.question,
@@ -266,7 +343,7 @@ async function runConversation(persona, base, arm, rep) {
   /* پیشوندِ ثابت: **یک بار** ساخته می‌شود و در طولِ کلِ گفتگو بیت‌به‌بیت یکسان می‌ماند.
    * این شرطِ اقتصادیِ فیچر است نه یک بهینه‌سازی (کشِ پرامپت)، پس آزمایشگاه هم باید
    * دقیقاً همان‌طور بسازدش که ربات می‌سازد و هم باید ثابت ماندنش را **بسنجد**. */
-  const system = `${L.prompts.chatSystem}\n\n${buildChatCtx({
+  const system = `${systemFor(armVariant(arm))}\n\n${buildChatCtx({
     reading: { question: base.question }, llm: base.llm, cards, spread, labels,
     memory: '', prev: [], L,
   })}`;
@@ -308,7 +385,7 @@ async function runConversation(persona, base, arm, rep) {
         usage.usd += Number(u?.cost) || 0;
         usage.cached += Number(u?.prompt_tokens_details?.cached_tokens) || 0;
       },
-    }, planFor(arm));
+    }, planFor(armModel(arm)));
     const ms = Date.now() - t0;
 
     if (!res?.out) { turns.push({ q, failed: true, ms, usage }); continue; }
@@ -399,10 +476,10 @@ console.log('═'.repeat(72));
 /* ⚠️ گروه‌بندی باید **بازو و پاس** را با هم ببیند: با دو بازو، جوابِ بازوی A و بازوی B
  * در یک سطل می‌افتادند و یک ۶کلمه‌ای مشترک «تکرار» شمرده می‌شد، در حالی که این عدد
  * قرار است بگوید **یک** مدل خودش را تکرار می‌کند یا نه. */
-const groups = [...new Set(all.map((c) => `${c.arm} ${c.rep}`))].sort();
+const groups = [...new Set(all.map((c) => `${c.arm}::${c.rep}`))].sort();
 const repeatCounts = [];
 for (const gk of groups) {
-  const [gArm, gRep] = gk.split(' ');
+  const [gArm, gRep] = gk.split('::');
   const convs = all.filter((c) => c.arm === gArm && String(c.rep) === gRep);
   const items = [];
   for (const c of convs) {
@@ -450,7 +527,38 @@ function summarize(rows) {
 }
 
 const pct = (a, b) => (b ? Math.round(a * 100 / b) : 0);
-function printSummary(label, rows) {
+
+/* 🔗 **شمارشِ per گفتگو، نه per نوبت — برای سنجه‌های چسبنده.**
+ *
+ * 🐛 درسِ دورِ ۴ (۱۴۰۵/۰۶/۲۳) و یک تصحیحِ جدی روی سه دورِ قبلی: نوبت‌های یک گفتگو
+ * **مستقل نیستند**. تاریخچه‌ای که به مدل داده می‌شود شاملِ جواب‌های قبلیِ خودش است،
+ * پس مدل قالبِ نوبتِ اول را تا آخر تقلید می‌کند. دیتای دورِ ۴ این را بی‌ابهام نشان
+ * داد: در بازوی خط پایه پرسونای P2 هر پنج نوبت چندخطی بود و P3 هر پنج نوبت تک‌خطی؛
+ * در بازوی v2 دقیقاً برعکس. یعنی «۱۵ نمونه» در واقع **۳ نمونه** بود.
+ *
+ * پیامدش این است که «۱۵/۱۵ در برابرِ ۱۰/۱۵» را باید «۳/۳ در برابرِ ۲/۳» خواند، و
+ * نوسانِ خط پایه بین دورها (۱۵ ⟵ ۱۰ ⟵ ۸) اصلاً دریفت نبود، سه شیر-یا-خط بود. یک
+ * عددِ per نوبت این‌جا **دقتِ کاذب** می‌سازد، و عددی که واحدش را اشتباه بگیری از
+ * نبودش بدتر است.
+ *
+ * ⚠️ این برای همه‌ی سنجه‌ها یکسان نیست: «لحنِ کتابی» و «اکوی برچسب» **داخلِ** یک
+ * گفتگو هم بالا و پایین می‌شوند (دورِ ۱: نوبت‌های ۲،۵،۶،۷،۸،۱۳،۱۵ از سه پرسونای
+ * مختلف)، پس عددِ per نوبتشان معنا دارد. «طول» چسبنده است. برای همین هر دو چاپ
+ * می‌شوند و این خط صریحاً `n` را می‌گوید. */
+function convLineStats(convs) {
+  const rows = convs.map((c) => {
+    const done = c.turns.filter((t) => t.reply);
+    const ok = done.filter((t) => t.check.lines >= LINE_MIN && t.check.lines <= LINE_MAX).length;
+    return { n: done.length, ok };
+  }).filter((r) => r.n);
+  return {
+    convs: rows.length,
+    allOk: rows.filter((r) => r.ok === r.n).length,
+    noneOk: rows.filter((r) => r.ok === 0).length,
+  };
+}
+
+function printSummary(label, rows, convs = null) {
   const s = summarize(rows);
   if (!s.n) { console.log(`\n   ${label}: هیچ نوبتی جواب نگرفت`); return s; }
   console.log(`\n   ── ${label}`);
@@ -460,6 +568,14 @@ function printSummary(label, rows) {
   console.log(`   🎯 خطِ اول خودِ جواب: ${s.firstOk}/${s.n} (${pct(s.firstOk, s.n)}٪)`);
   console.log(`   📏 طول: ${s.inTarget}/${s.n} داخلِ هدفِ ${LINE_MIN} تا ${LINE_MAX} خط`
     + ` | توزیع: ${s.lines.join(', ')} خط`);
+  /* و همان عدد در واحدِ درستش. عددِ per نوبتِ بالا برای دیدنِ توزیع می‌ماند، ولی
+   * **مقایسه‌ی بازوها باید روی این خط بنشیند**، نه روی آن. */
+  if (convs) {
+    const cs = convLineStats(convs);
+    console.log(`   🔗 طول per گفتگو (واحدِ درستِ مقایسه، چون نوبت‌ها مستقل نیستند):`
+      + ` ${cs.allOk}/${cs.convs} گفتگو کاملاً داخلِ هدف، ${cs.noneOk}/${cs.convs} کاملاً بیرون`
+      + (cs.convs < 8 ? `  ⚠️ n=${cs.convs} — برای نتیجه‌گیری کم است، --reps را بالا ببر` : ''));
+  }
   if (s.ms.length) console.log(`   ⏱ تأخیر: ${s.ms[0]} تا ${s.ms[s.ms.length - 1]}ms (میانه ${s.ms[Math.floor(s.ms.length / 2)]}ms)`);
   // عددِ دلاری فقط وقتی چاپ می‌شود که **واقعی** باشد؛ نبودنش یعنی سکوت، نه یک تخمینِ
   // ساختگی که بعداً به‌عنوان «هزینه» نقل شود.
@@ -470,7 +586,7 @@ function printSummary(label, rows) {
 }
 
 const allTurns = (rows) => rows.flatMap((c) => c.turns);
-for (const arm of ARM_LIST) printSummary(ARM_LIST.length > 1 ? `بازو ${arm}` : 'کلِ دور', allTurns(all.filter((c) => c.arm === arm)));
+for (const arm of ARM_LIST) printSummary(ARM_LIST.length > 1 ? `بازو ${arm}` : 'کلِ دور', allTurns(all.filter((c) => c.arm === arm)), all.filter((c) => c.arm === arm));
 
 /* دامنه‌ی بین پاس‌ها = واحدِ سنجشِ نویز. بدونِ این عدد نمی‌شود فهمید یک تفاوتِ
  * چندواحدی «بهبود» است یا فقط شانسِ نمونه‌برداریِ مدل (یافته‌ی ثبت‌شده‌ی دورِ هفتمِ
