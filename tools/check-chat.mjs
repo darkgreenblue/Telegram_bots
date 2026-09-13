@@ -277,7 +277,7 @@ console.log('\n▶ ۳) مسیرِ پول');
   ok(before(turn, 'if (!res?.out)', 'refundChat(msgId') && /if \(!res\?\.out\)/.test(turn),
     'شکستِ کاملِ مدل بلافاصله ریفاند می‌شود (پول در حالتِ نامعلوم نمی‌ماند)');
   ok(/catch \(e\) \{[\s\S]*?refundChat\(msgId/.test(turn), 'و هر استثنای دیگری هم ریفاند می‌گیرد، نه فقط شکستِ مدل');
-  ok(before(turn, "insertChatMsg.run(rid, uid, 'assistant'", 'await send(reply)'),
+  ok(before(turn, "insertChatMsg.run(rid, uid, 'assistant'", 'await send(reply, kb)'),
     'ثبتِ جواب **قبل از** ارسال است (وگرنه هر خطای گذرای شبکه یک ریفاندِ کاذب می‌سازد)');
 }
 
@@ -726,7 +726,16 @@ console.log('\n▶ ۱۳) پرامپتِ گفتگو');
   ok(/همیشه «تو»، هرگز «شما»/.test(p), 'خطاب همیشه «تو» است، نه «شما»');
   ok(/متخصص|پزشک|وکیل|مالی/.test(p), 'مرزهای پزشکی/حقوقی/مالی در پرامپت هست');
   ok(/حداکثر یک علامتِ سؤال/.test(p), 'قاعده‌ی حداکثر یک سؤال در هر پاسخ هست');
-  ok(/خروجی فقط متنِ ساده\. بدونِ JSON/.test(p), 'خروجی متنِ ساده است، نه JSON (سرعت)');
+  /* ⚠️ این ادعا در ۱۴۰۵/۰۶/۲۲ **معکوس** شد، نه حذف: تا آن روز خروجی متنِ خام بود و
+   * همین‌جا پین شده بود. حالا پاکتِ JSON است تا مدل بتواند نیت را هم اعلام کند، پس
+   * ادعا باید همان قرارداد را از سمتِ تازه‌اش قفل کند وگرنه برگشتِ سهویِ پرامپت به
+   * متنِ خام، `parseChatOut` را در هر نوبت رد می‌کرد و **هر گفتگو ریفاند می‌خورد**. */
+  ok(/فقط یک JSON/.test(p), 'خروجی پاکتِ JSON است (نسلِ پرچمِ نیت)');
+  ok(!/خروجی فقط متنِ ساده/.test(p), 'و قراردادِ کهنه‌ی «متنِ ساده» در پرامپت نمانده');
+  for (const k of ['answer', 'wants_new_reading', 'needs_support'])
+    ok(new RegExp(k).test(p), `کلیدِ «${k}» در اسکیمای پرامپت اعلام شده`);
+  ok(/هرگز نگو «هوش مصنوعی»/.test(p), 'ادعای «هوش مصنوعی» در پرامپت صریح ممنوع شده (تصمیمِ v2.8.0)');
+  ok(/فکتِ محصولی را از خودت نساز/.test(p), 'و فکتِ محصولی از خودِ مدل ممنوع است');
   ok(/جمع نکن و خداحافظی نکن/.test(p), 'و هرگز جمع‌بندی/خداحافظی نمی‌کند (Model Spec: never wrap up)');
 }
 
@@ -751,9 +760,16 @@ console.log('\n▶ ۱۴) قلاب و پاکسازی');
   ok(chat.cleanChatReply('ساراب یه شهره', { name: 'سارا' }).includes('ساراب'),
     '⚠️ ولی فقط با مرزِ واژه (یک کلمه‌ی مشابه قربانی نمی‌شود)');
   ok(chat.cleanChatReply('ن'.repeat(2000)).length <= chat.CHAT_HARD_CHARS, 'و خروجی سقفِ سخت دارد');
-  ok(chat.chatShapeOk('ن'.repeat(100)) === true, 'validate خروجیِ عادی را می‌پذیرد');
-  ok(chat.chatShapeOk('باشه') === false, 'جوابِ تک‌کلمه‌ای رد می‌شود (خرابیِ مدل)');
-  ok(chat.chatShapeOk('ن'.repeat(2000)) === false, 'و خروجیِ بیش از حد بلند هم');
+  /* همان سه ادعای کفِ/سقفِ طول، حالا از راهِ پاکت. `chatShapeOk` پاک شد چون بعد از
+   * سوییچِ پرامپت هیچ مصرف‌کننده‌ای نداشت و فقط تست‌های خودش صدایش می‌زدند — یعنی
+   * دقیقاً کدِ مرده‌ای که بند ۹/۰ می‌گوید همان لحظه برداشته شود. */
+  const env = (t) => JSON.stringify({ answer: t, wants_new_reading: false, needs_support: false });
+  ok(chat.chatOutOk(env('ن'.repeat(100))) === true, 'validate خروجیِ عادی را می‌پذیرد');
+  ok(chat.chatOutOk(env('باشه')) === false, 'جوابِ تک‌کلمه‌ای رد می‌شود (خرابیِ مدل)');
+  ok(chat.chatOutOk(env('ن'.repeat(2000))) === false, 'و خروجیِ بیش از حد بلند هم');
+  ok(chat.chatOutOk('متنِ خامِ بدونِ پاکت ولی کاملاً به‌اندازه و سالم.') === false,
+    'و متنِ خامِ بدونِ پاکت هم رد می‌شود (وگرنه برگشتِ سهویِ پرامپت بی‌صدا می‌ماند)');
+  ok(chat.chatShapeOk === undefined, 'validateِ نسلِ متنِ خام پاک شد، نه خاموش (بند ۹/۰)');
 }
 
 /* ═══ ۱۵) حسابداری، رویدادها و نسخه ══════════════════════════════════ */
@@ -762,7 +778,7 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
   const hc = bodyOf(CODE, 'async function runChatTurn(');
   ok(/kind: 'chat', refId: rid, userId: uid/.test(hc),
     "هزینه با kind='chat' و شناسه‌ی فال در llm_usage ثبت می‌شود");
-  ok(/validate: chatShapeOk/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
+  ok(/validate: chatOutOk/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
   ok(/maxTokens: CHAT_MAX_TOKENS/.test(hc), 'سقفِ توکنِ خروجی صریح است');
   for (const ev of ['chat_offer_shown', 'chat_opened', 'chat_message', 'chat_paywall',
     'chat_llm_failed', 'chat_refund', 'chat_crisis', 'chat_exited']) {

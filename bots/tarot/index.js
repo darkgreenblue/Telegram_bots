@@ -30,7 +30,12 @@ import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
 import { ensureAb, variant, peekVariant, expose } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
-import { registerSupport, supportRow, supportReply } from '../../shared/support.js';
+import { registerSupport, supportRow, supportReply, supportLink } from '../../shared/support.js';
+
+/* کدِ پیگیریِ پشتیبانیِ این ربات (بند ۶ج ریشه). تک‌منبع شد چون از ۱۴۰۵/۰۶/۲۲ دو
+ * مصرف‌کننده دارد: `registerSupport` و دکمه‌ی CTAی پرچمِ `needs_support`. دو رشته‌ی
+ * `'TRT'` در دو جا یعنی دیر یا زود یکی عوض می‌شود و کدِ تیکت‌ها بی‌صدا دو تکه می‌شود. */
+const SUPPORT_BOT_CODE = 'TRT';
 import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney, logPush } from '../../shared/journey.js';
@@ -58,7 +63,7 @@ import {
 // که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
-  cleanChatReply, chatShapeOk, questionWordsOf, configureChatLang,
+  cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
 } from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -6026,7 +6031,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatShapeOk, kind: 'chat', refId: rid, userId: uid,
+      validate: chatOutOk, kind: 'chat', refId: rid, userId: uid,
     }, CHAT_PLAN));
 
     // ۹) شکستِ کامل → ریفاندِ فوری. پولِ کاربر هرگز در حالتِ نامعلوم نمی‌ماند (بند ۹).
@@ -6040,7 +6045,10 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       return false;
     }
 
-    const reply = cleanChatReply(res.out, { name: dispName(user) });
+    /* پاکت را باز می‌کنیم. `validate` از قبل تضمین کرده پارس می‌شود، ولی گاردِ دوم
+     * می‌ماند: اگر روزی `validate` عوض شود، جوابِ پول‌داده نباید روی `null` بترکد. */
+    const out = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    const reply = cleanChatReply(out.text, { name: dispName(user) });
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
     const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0).lastInsertRowid);
@@ -6057,8 +6065,28 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       if (evasionIn(reply)) log(`🌀 CHAT_EVASION reading#${rid} msg#${aId}`);
     } catch { /* سنجه هرگز نباید جوابِ پول‌داده را بشکند */ }
 
+    /* 🎯 دکمه‌ی CTA از روی پرچمِ نیتِ خودِ مدل (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۲).
+     *
+     * چرا پرچم و نه تشخیصِ کلیدواژه‌ای در کد: نسخه‌ی اولِ پیشنهادِ من یک matcher بود که
+     * منبعِ حقیقتِ **دوم** می‌شد و روی سؤالِ فالِ حاویِ «الماس» مثبتِ کاذب می‌داد. مدل
+     * کلِ کانتکست را دارد و خودش تفکیک می‌کند؛ کد فقط دکمه‌ی درست را می‌سازد.
+     *
+     * ⚠️ هیچ اکشنِ تازه‌ای ساخته نشد: `chat_new` از قبل هست و پشتیبانی از تک‌منبعِ
+     * `shared/support.js` می‌آید با همان کدِ پیگیریِ `#TRT-<uid>` (بند ۶ج ریشه).
+     * دو مسیرِ موازی برای یک کار، همان چیزی است که این ریپو بارها هزینه‌اش را داده.
+     *
+     * ⚠️ و اگر هر دو پرچم روشن باشد، **هر دو** دکمه می‌آیند: نیتِ کاربر مالِ خودش است
+     * و انتخاب بینشان کارِ ما نیست. */
+    let kb = null;
+    try {
+      const rows = [];
+      if (out.newReading) rows.push([Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]);
+      if (out.support) rows.push([Markup.button.url(L.support.openBtn, supportLink(SUPPORT_BOT_CODE, uid, L.support))]);
+      if (rows.length) kb = Markup.inlineKeyboard(rows);
+    } catch (e) { logErr('chat cta:', e.message); } // دکمه هرگز نباید جوابِ پول‌داده را بشکند
+
     step?.('chat_reply');
-    await send(reply);
+    await send(reply, kb);
     // نادجِ وابستگی: یک بار در هر گفتگو، **بعد** از جوابِ عادی و نه به‌جایش.
     if (turn >= CHAT_NUDGE_TURN && !getSession(uid)?.chatNudged) {
       patchSession(uid, { chatNudged: 1 });
@@ -6102,8 +6130,11 @@ async function resumePendingChat(uid, via = 'purchase') {
   const extra = replyToExtra(p.tg_msg_id);
   return runChatTurn({
     uid, r: el.r, text: p.text, msgId: p.id, price,
-    send: async (t) => {
-      await bot.telegram.sendMessage(uid, t, extra);
+    /* ⚠️ `kb` اینجا هم پاس داده می‌شود. نسخه‌ی اول آرگومانِ دوم را نادیده می‌گرفت، یعنی
+     * دکمه‌ی CTA در مسیرِ بازگشتِ بعد از شارژ **بی‌صدا** غایب می‌شد — همان کلاسِ
+     * «مقدار وجود دارد ≠ مقدار می‌رسد» (بند ۲و/۶ب ریشه) که این ریپو بارها خورده. */
+    send: async (t, kb) => {
+      await bot.telegram.sendMessage(uid, t, kb ? { ...extra, reply_markup: kb.reply_markup } : extra);
       // بدونِ ctx، میدل‌ورِ جرنی این پیام را نمی‌بیند و در بازپخشِ مسیر نامرئی می‌ماند
       // (بند ۲الف ریشه). این پیام محصولِ پول‌داده است، پس باید در تایم‌لاین باشد.
       logPush(db, uid, t, { isAdmin: isAdmin(uid), label: 'chat_resume' });
@@ -8525,7 +8556,7 @@ bot.command('reset', doReset);
 // ثبت می‌شود، متنِ دکمه دیگر به‌عنوان «نام» یا «مبلغ» بلعیده نمی‌شود؛ بعدش هم قدمِ فعلیِ کاربر
 // دوباره یادآوری می‌شود تا سرگردان نماند (قرارداد ۹ب).
 registerSupport(bot, {
-  botCode: 'TRT',
+  botCode: SUPPORT_BOT_CODE,
   texts: L.support,
   // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف
   // بده، انصراف داد و پیامِ عمومیِ «همیشه اینجام» گرفت به‌جای پشتیبانی. حالا هر دو گارد

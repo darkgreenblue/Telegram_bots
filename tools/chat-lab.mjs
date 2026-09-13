@@ -45,7 +45,7 @@ const {
 } = await import('../bots/tarot/reading-core.js');
 const {
   buildChatCtx, packHistory, toMessages, messagesChars,
-  cleanChatReply, chatShapeOk, hookOk, questionWordsOf,
+  cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
   crisisIn, smallTalkIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
 } = await import('../bots/tarot/chat-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند (درسِ checks.mjs).
@@ -272,21 +272,27 @@ function fakeReading(cards, ctx) {
  *   • نوبتِ ۱ در هر ۳: خطِ آخرِ **chatbait** (باید `hookOk` را قرمز کند)
  *   • نوبتِ ۲ در هر ۳: خطِ آخرِ **بی‌لنگر** (جمله‌ای که زیرِ فالِ هر کسِ دیگری هم می‌نشیند)
  *   • بقیه: خطِ آخرِ سالم و لنگرخورده به نامِ کارت
- * هر سه باید از `chatShapeOk` رد شوند (بینِ ۲۰ و ۹۰۰ نویسه)، وگرنه استاب به‌جای
- * سنجیدنِ سنجه‌ها، مسیرِ شکستِ مدل را می‌سنجد. */
+ * هر سه باید از `chatOutOk` رد شوند، وگرنه استاب به‌جای سنجیدنِ سنجه‌ها، مسیرِ شکستِ
+ * مدل را می‌سنجد.
+ * ⚠️ از ۱۴۰۵/۰۶/۲۲ استاب هم **پاکتِ JSON** می‌دهد، دقیقاً مثل مدلِ واقعی. اگر متنِ خام
+ * می‌داد، `--fake` یک قراردادِ دیگر را تست می‌کرد و دورِ سبزش هیچ چیزی دربارهٔ
+ * پروداکشن ثابت نمی‌کرد (همان درسِ `--dry`). */
 function fakeChatReply(turnIdx, cardNames, question) {
   const card = cardNames[turnIdx % cardNames.length] || 'کارت';
   const q = String(question || '').split(/\s+/).filter(Boolean).slice(0, 3).join(' ');
   const head = `جوابت این سمته، ولی به بهای صبر: ${card} همین را می‌گه.`;
   const mid = `حرفِ اصلی درباره‌ی «${q}» همینه و توی همین دست دیده می‌شه.`;
   const mode = turnIdx % 3;
-  if (mode === 1) return `${head}\n${mid}\nسؤال دیگه‌ای داری؟`;
+  // پاکت، با همان کلیدهای پروداکشن. پرچم‌ها در استاب همیشه false اند: این‌جا نیتِ
+  // مدل سنجیده نمی‌شود، فقط مسیرِ سنجه‌ها.
+  const env = (t) => JSON.stringify({ answer: t, wants_new_reading: false, needs_support: false });
+  if (mode === 1) return env(`${head}\n${mid}\nسؤال دیگه‌ای داری؟`);
   /* ⚠️ این جمله عمداً با **هیچ‌کدام** از سؤال‌های سناریو و هیچ نامِ کارتی کلمه‌ی مشترک
    * ندارد، وگرنه `hookOk` لنگرش را پیدا می‌کند و نقصِ تزریقی بی‌صدا خنثی می‌شود —
    * یعنی `--fake` سبز رد می‌شود در حالی که مسیرِ `noanchor` هرگز لمس نشده. اگر
    * `follow_ups` عوض شد، کنترلِ مثبتِ پایینِ همین فایل قرمز می‌دهد. */
-  if (mode === 2) return `${head}\n${mid}\nهمه چیز به مرور سرِ جای خودش می‌نشیند و آرامش برمی‌گردد.`;
-  return `${head}\n${mid}\nیه زاویه‌ی دیگه از ${card} هست که هنوز بازش نکردیم.`;
+  if (mode === 2) return env(`${head}\n${mid}\nهمه چیز به مرور سرِ جای خودش می‌نشیند و آرامش برمی‌گردد.`);
+  return env(`${head}\n${mid}\nیه زاویه‌ی دیگه از ${card} هست که هنوز بازش نکردیم.`);
 }
 
 /* ═══════════════ ساختِ فالِ پایه ═══════════════ */
@@ -393,7 +399,7 @@ async function runConversation(persona, base, arm, rep) {
       : orChatResilient;
     const res = await call('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatShapeOk,
+      validate: chatOutOk,
       /* 💵 هزینه‌ی **واقعی** از خودِ پاسخِ OpenRouter. هرگز از روی توکن با یک جدولِ
        * قیمتِ هاردکد حساب نمی‌شود: همان اشتباه یک بار DeepSeek را «گران‌ترین» گزارش
        * کرد در حالی که ارزان‌ترین بود (بند ثبت‌شده‌ی دورِ ۹). */
@@ -408,7 +414,9 @@ async function runConversation(persona, base, arm, rep) {
 
     if (!res?.out) { turns.push({ q, failed: true, ms, usage }); continue; }
 
-    const reply = cleanChatReply(res.out, { name: persona.name });
+    // پاکت را باز می‌کنیم، عیناً مثل `runChatTurn`ِ پروداکشن.
+    const outObj = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    const reply = cleanChatReply(outObj.text, { name: persona.name });
     let check;
     try {
       check = chatMetrics({
