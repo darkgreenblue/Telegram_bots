@@ -20,7 +20,7 @@
 //      همان کانال = CPA.
 //
 // امنیت: هیچ رشته‌ای از URL وارد SQL نمی‌شود؛ همه‌ی ورودی‌ها عددِ بازه‌اند و bound.
-import { withDb, hasTable, rows, scalar, instancesOf, testUserClause } from './bots.js';
+import { withDb, hasTable, rows, scalar, instancesOf, testUserClause, coinLegacyFloorOf } from './bots.js';
 /* ⚠️ نرخِ تبلیغ **per روز** از همان تک‌منبعی می‌آید که صفحه‌ی اقتصاد استفاده می‌کند.
    خواندنِ مستقلِ `cpa_campaign_usd` این‌جا یعنی صفحه‌ی «جذب» و صفحه‌ی «اقتصاد» دو
    هزینه‌ی تبلیغِ متفاوت بسازند — دقیقاً همان کلاسِ باگی که PR قبلی رفعش کرد. */
@@ -35,6 +35,28 @@ import { tehranDayStr } from './util.js';
 export const SELF_ACQ_KINDS = new Set(['welcome']);
 /** همه‌ی سطل‌های جذب (برای مستندسازی و چکِ CI). */
 export const ACQ_KINDS = new Set(['welcome', 'referral']);
+
+/* 💎 ستونِ `original_amount` **دو واحد** دارد (بندِ اختصاصی‌اش در CLAUDE.md همین پوشه):
+ * در دوره‌ی الماس تعدادِ الماس، و در ردیف‌های دوره‌ی تومانی که اصلاً `original_amount`
+ * نگرفتند، `COALESCE` به `amount` می‌افتد که **تومان** است.
+ *
+ * 🐛 باگی که تا ۱۴۰۵/۰۶/۲۱ این‌جا زنده بود: دفترِ FIFO آن تومان‌ها را الماس می‌خواند. روی
+ * دیتای زنده ۱۳ ردیف جمعاً **۶۳۵٬۰۰۰ الماسِ خیالی** وارد دفتر می‌کردند — همان عددی که
+ * `/finance` قبلاً به‌شکلِ «۶۳۵٬۹۵۹💎 خریداری‌شده» نشان می‌داد و مالک گرفتش. اثرش این‌جا
+ * وارونه است: با یک اعتبارِ نجومی، FIFO خرجِ آن کاربران را به `purchase` نسبت می‌دهد و
+ * سهمِ `referral`شان (خطِ ۱۸۵) کم‌برآورد می‌شود.
+ *
+ * ⚠️ چرا **کنار گذاشتن** و نه تبدیل: همان کاری که `/finance` می‌کند، پس دو صفحه یک
+ * تعریف از «خرید» دارند. خطای باقی‌مانده‌اش کراندار و ناچیز است — آن ۱۳ ردیف روی هم
+ * ~۶۳ الماس معادل بودند، یعنی حداکثر همان‌قدر از خرجشان به‌جای خرید به هدیه نسبت
+ * داده می‌شود (بیش‌برآوردِ ≤$۰٫۰۴ در کلِ هزینه‌ی جذب). تبدیلِ دقیق یک «نرخِ دوره‌ی
+ * قدیم» به رجیستری اضافه می‌کرد که برای این اندازه توجیه ندارد (بند ۹/۰ ریشه).
+ * رباتی که `coinLegacyFloor` ندارد صفر می‌گیرد و رفتارش بیت‌به‌بیت مثل قبل است. */
+export const purchaseAmt = (bot) => {
+  const floor = coinLegacyFloorOf(bot);
+  const expr = 'COALESCE(original_amount, amount)';
+  return { expr, where: floor ? ` AND ${expr} < ${floor}` : '' };
+};
 
 /** برچسبِ کانالِ ورودی از `users.first_source` (همان قراردادِ اتریبیوشن). */
 export const CHANNELS = [
@@ -136,8 +158,9 @@ export function channelCosts(botKey, { sinceSec = 0, campaign = null } = {}) {
         }
       }
       if (hasTable(db, 'payments')) {
+        const buy = purchaseAmt(inst.bot);
         for (const p of rows(db, `SELECT user_id AS uid, created_at AS t,
-              COALESCE(original_amount, amount) AS amt FROM payments WHERE status='approved'${testUserClause(inst.bot)}`)) {
+              ${buy.expr} AS amt FROM payments WHERE status='approved'${testUserClause(inst.bot)}${buy.where}`)) {
           users.get(p.uid)?.credits.push({ t: p.t, kind: 'purchase', amt: Math.max(0, p.amt) });
         }
       }
@@ -176,8 +199,9 @@ export function channelCosts(botKey, { sinceSec = 0, campaign = null } = {}) {
             }
           }
           if (hasTable(db, 'payments')) {
-            for (const p of rows(db, `SELECT created_at AS t, COALESCE(original_amount, amount) AS amt
-                FROM payments WHERE status='approved'${testUserClause(inst.bot)} AND user_id=?`, [ref])) {
+            const buy = purchaseAmt(inst.bot);
+            for (const p of rows(db, `SELECT created_at AS t, ${buy.expr} AS amt
+                FROM payments WHERE status='approved'${testUserClause(inst.bot)}${buy.where} AND user_id=?`, [ref])) {
               credits.push({ t: p.t, kind: 'purchase', amt: Math.max(0, p.amt) });
             }
           }
