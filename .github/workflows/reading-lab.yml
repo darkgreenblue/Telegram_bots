@@ -65,6 +65,10 @@ on:
         description: 'در حالتِ chat: چند follow-up از هر پرسونا (۰ = همه). برای دورِ ارزانِ اکتشافی ۲ بگذار'
         required: false
         default: '0'
+      regress_from:
+        description: '🛡 اثباتِ عدم‌رگرسیون: شناسه‌ی یک runِ قبلیِ همین ورک‌فلو به‌عنوان «قبل». بعد از دور، مقایسه‌ی **جفت‌شده** (chat-regress) در همین لاگ چاپ می‌شود.'
+        required: false
+        default: ''
       arena_runs:
         description: '🛠 حالتِ آرِنای تعمیر: شناسه‌ی runهای قبلیِ همین ورک‌فلو با کاما. هیچ فالی تولید نمی‌شود؛ فقط مسیرِ تعمیر روی خروجیِ ذخیره‌شده‌ی آن‌ها با هر بازو تکرار می‌شود.'
         required: false
@@ -204,6 +208,31 @@ jobs:
           else
             node tools/reading-lab.mjs $ARGS --out reading-lab-out.json
           fi
+
+      # 🛡 اثباتِ عدم‌رگرسیونِ مسیرِ نرمال (خواسته‌ی ایستای مالک، ۱۴۰۵/۰۶/۲۲):
+      # «هر تغییری می‌دی برای اینکه سیستم در استفاده‌های خصمانه هم دچار مشکل نشه، باید
+      #  چک کنی که اون تغییر کیفیت خروجی‌ها در استفاده‌های معمولی رو به هیچ وجه کم
+      #  نکرده باشه.»
+      #
+      # ⚠️ چرا این‌جا و نه در سشنِ توسعه: artifactها از محیطِ توسعه **قابلِ دانلود
+      # نیستند** (پراکسی هاستِ بلابِ Actions را می‌بندد)، پس مقایسه‌ی جفت‌شده تنها جایی
+      # ممکن است که هر دو فایل در دسترس‌اند — یعنی همین رانر. بدونِ این قدم، تنها
+      # چیزی که می‌ماند مقایسه‌ی دو **میانگین** است، و درسِ ثبت‌شده‌ی همین ریپو می‌گوید
+      # نویزِ یک دورِ کوچک ±۶ واحد است و دو اجرای مستقل قابلِ مقایسه نیستند.
+      - name: اثباتِ عدم‌رگرسیون (جفت‌شده)
+        if: inputs.regress_from && inputs.probe != true && !inputs.arena_runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ inputs.regress_from }}
+          LOC: ${{ inputs.locale }}
+        run: |
+          set -euo pipefail
+          case "$BEFORE" in ''|*[!0-9]*) echo "::error::شناسه‌ی نامعتبر: $BEFORE"; exit 1;; esac
+          tmp="$(mktemp -d)"
+          if ! gh run download "$BEFORE" -n "reading-lab-$LOC" -D "$tmp" -R "$GITHUB_REPOSITORY"; then
+            echo "::error::artifact دورِ $BEFORE برداشته نشد (منقضی یا نامِ متفاوت)"; exit 1
+          fi
+          node tools/chat-regress.mjs "$tmp/reading-lab-out.json" reading-lab-out.json
 
       # در حالتِ probe فایلی ساخته نمی‌شود (گزارشش فقط در لاگ است)، پس این قدم رد می‌شود
       - name: خروجیِ خام
