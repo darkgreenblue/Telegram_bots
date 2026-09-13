@@ -592,7 +592,38 @@ function summarize(rows) {
 }
 
 const pct = (a, b) => (b ? Math.round(a * 100 / b) : 0);
-function printSummary(label, rows) {
+
+/* 🔗 **شمارشِ per گفتگو، نه per نوبت — برای سنجه‌های چسبنده.**
+ *
+ * 🐛 درسِ دورِ ۴ (۱۴۰۵/۰۶/۲۳) و یک تصحیحِ جدی روی سه دورِ قبلی: نوبت‌های یک گفتگو
+ * **مستقل نیستند**. تاریخچه‌ای که به مدل داده می‌شود شاملِ جواب‌های قبلیِ خودش است،
+ * پس مدل قالبِ نوبتِ اول را تا آخر تقلید می‌کند. دیتای دورِ ۴ این را بی‌ابهام نشان
+ * داد: در بازوی خط پایه پرسونای P2 هر پنج نوبت چندخطی بود و P3 هر پنج نوبت تک‌خطی؛
+ * در بازوی v2 دقیقاً برعکس. یعنی «۱۵ نمونه» در واقع **۳ نمونه** بود.
+ *
+ * پیامدش این است که «۱۵/۱۵ در برابرِ ۱۰/۱۵» را باید «۳/۳ در برابرِ ۲/۳» خواند، و
+ * نوسانِ خط پایه بین دورها (۱۵ ⟵ ۱۰ ⟵ ۸) اصلاً دریفت نبود، سه شیر-یا-خط بود. یک
+ * عددِ per نوبت این‌جا **دقتِ کاذب** می‌سازد، و عددی که واحدش را اشتباه بگیری از
+ * نبودش بدتر است.
+ *
+ * ⚠️ این برای همه‌ی سنجه‌ها یکسان نیست: «لحنِ کتابی» و «اکوی برچسب» **داخلِ** یک
+ * گفتگو هم بالا و پایین می‌شوند (دورِ ۱: نوبت‌های ۲،۵،۶،۷،۸،۱۳،۱۵ از سه پرسونای
+ * مختلف)، پس عددِ per نوبتشان معنا دارد. «طول» چسبنده است. برای همین هر دو چاپ
+ * می‌شوند و این خط صریحاً `n` را می‌گوید. */
+function convLineStats(convs) {
+  const rows = convs.map((c) => {
+    const done = c.turns.filter((t) => t.reply);
+    const ok = done.filter((t) => t.check.lines >= LINE_MIN && t.check.lines <= LINE_MAX).length;
+    return { n: done.length, ok };
+  }).filter((r) => r.n);
+  return {
+    convs: rows.length,
+    allOk: rows.filter((r) => r.ok === r.n).length,
+    noneOk: rows.filter((r) => r.ok === 0).length,
+  };
+}
+
+function printSummary(label, rows, convs = null) {
   const s = summarize(rows);
   if (!s.n) { console.log(`\n   ${label}: هیچ نوبتی جواب نگرفت`); return s; }
   console.log(`\n   ── ${label}`);
@@ -602,6 +633,14 @@ function printSummary(label, rows) {
   console.log(`   🎯 خطِ اول خودِ جواب: ${s.firstOk}/${s.n} (${pct(s.firstOk, s.n)}٪)`);
   console.log(`   📏 طول: ${s.inTarget}/${s.n} داخلِ هدفِ ${LINE_MIN} تا ${LINE_MAX} خط`
     + ` | توزیع: ${s.lines.join(', ')} خط`);
+  /* و همان عدد در واحدِ درستش. عددِ per نوبتِ بالا برای دیدنِ توزیع می‌ماند، ولی
+   * **مقایسه‌ی بازوها باید روی این خط بنشیند**، نه روی آن. */
+  if (convs) {
+    const cs = convLineStats(convs);
+    console.log(`   🔗 طول per گفتگو (واحدِ درستِ مقایسه، چون نوبت‌ها مستقل نیستند):`
+      + ` ${cs.allOk}/${cs.convs} گفتگو کاملاً داخلِ هدف، ${cs.noneOk}/${cs.convs} کاملاً بیرون`
+      + (cs.convs < 8 ? `  ⚠️ n=${cs.convs} — برای نتیجه‌گیری کم است، --reps را بالا ببر` : ''));
+  }
   if (s.ms.length) console.log(`   ⏱ تأخیر: ${s.ms[0]} تا ${s.ms[s.ms.length - 1]}ms (میانه ${s.ms[Math.floor(s.ms.length / 2)]}ms)`);
   // عددِ دلاری فقط وقتی چاپ می‌شود که **واقعی** باشد؛ نبودنش یعنی سکوت، نه یک تخمینِ
   // ساختگی که بعداً به‌عنوان «هزینه» نقل شود.
@@ -612,7 +651,7 @@ function printSummary(label, rows) {
 }
 
 const allTurns = (rows) => rows.flatMap((c) => c.turns);
-for (const arm of ARM_LIST) printSummary(ARM_LIST.length > 1 ? `بازو ${arm}` : 'کلِ دور', allTurns(all.filter((c) => c.arm === arm)));
+for (const arm of ARM_LIST) printSummary(ARM_LIST.length > 1 ? `بازو ${arm}` : 'کلِ دور', allTurns(all.filter((c) => c.arm === arm)), all.filter((c) => c.arm === arm));
 
 /* دامنه‌ی بین پاس‌ها = واحدِ سنجشِ نویز. بدونِ این عدد نمی‌شود فهمید یک تفاوتِ
  * چندواحدی «بهبود» است یا فقط شانسِ نمونه‌برداریِ مدل (یافته‌ی ثبت‌شده‌ی دورِ هفتمِ
