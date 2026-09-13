@@ -431,10 +431,16 @@ async function runConversation(persona, base, arm, rep) {
     }
 
     turns.push({ q, reply, raw: res.out, model: res.model, attempts: res.attempts,
+      flags: { newReading: outObj.newReading, support: outObj.support },
       ms, usage, check, inputChars: messagesChars(messages) });
 
-    // تاریخچه دقیقاً مثل ربات به نوبتِ بعد منتقل می‌شود.
-    history.push({ role: 'user', text: q }, { role: 'assistant', text: reply });
+    // تاریخچه دقیقاً مثل ربات به نوبتِ بعد منتقل می‌شود — **با پرچم‌ها**، وگرنه
+    // `packHistory` پاکتِ بازپخش را همیشه خاموش می‌ساخت و آزمایشگاه چیزی را می‌سنجید
+    // که پروداکشن اجرا نمی‌کند (همان تله‌ی «گاردِ آینه‌ای»، بند ۶ب ریشه).
+    history.push({ role: 'user', text: q }, {
+      role: 'assistant', text: reply,
+      want_reading: outObj.newReading ? 1 : 0, want_support: outObj.support ? 1 : 0,
+    });
   }
 
   return { persona: persona.id, name: persona.name, base, arm, rep, turns, prefixStable };
@@ -481,7 +487,15 @@ for (const arm of ARM_LIST) {
           if (t.failed) { console.log('      ❌ همه‌ی تلاش‌ها شکست خورد (مسیرِ ریفاند)'); continue; }
           console.log(`      ${t.reply.split('\n').join('\n      ')}`);
           const c = t.check;
+          /* ⚠️ مدل و تعدادِ تلاش عمداً چاپ می‌شوند: در دورِ ۱۴۰۵/۰۶/۲۲ جوابِ بیشترِ
+           * نوبت‌ها از **پله‌ی فالبک** می‌آمد (چون مدلِ اصلی پاکت را رعایت نمی‌کرد) و
+           * چون گزارش فقط متن را نشان می‌داد، افتِ طول و لحن به‌جای «مدلِ اشتباه»
+           * به «پرامپت» نسبت داده می‌شد. پرچم‌ها هم چاپ می‌شوند چون تنها مصرفشان
+           * (دکمه‌ی CTA) بیرونِ آزمایشگاه است و بدونِ چاپ، خاموش‌ماندنشان نامرئی بود. */
+          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '']
+            .filter(Boolean).join(' + ') || 'ــ';
           console.log(`      📏 ${c.lines} خط / ${c.chars} نویسه | قلاب: ${c.hook.ok ? '✅' : `❌ ${c.hook.why}`}`
+            + ` | 🚩 ${fl} | 🤖 ${t.model || '?'}${t.attempts > 1 ? ` (تلاشِ ${t.attempts})` : ''}`
             + ` | ورودی ${t.inputChars} نویسه | ${t.ms}ms`);
           if (c.issues.length) c.issues.forEach((x) => console.log(`      ❌ ${x}`));
           if (c.notes.length) c.notes.forEach((x) => console.log(`      ⚠️ ${x}`));

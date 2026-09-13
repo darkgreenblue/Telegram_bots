@@ -144,7 +144,15 @@ export function packHistory(rows = [], { recent = CHAT_RECENT_TURNS, digestChars
     used += t.length + 2;
   }
   const digest = asked.length ? asked.map(t => `- ${t}`).join('\n') : '';
-  let turns = tail.map(r => ({ role: r.role === 'assistant' ? 'assistant' : 'user', content: cut(r.text, CHAT_BUDGET.ask) }));
+  // جوابِ نوبت‌های قبلی در **همان پاکتی** برمی‌گردد که از مدل خواسته‌ایم (`chatEnvelope`،
+  // توضیحِ کامل کنارِ خودِ تابع). بسته‌بندی همین‌جا انجام می‌شود نه در `toMessages`، تا
+  // حسابِ بودجه‌ی `hist` سرباری پاکت را هم ببیند؛ وگرنه سقف یک عددِ روی کاغذ می‌شد.
+  let turns = tail.map(r => ({
+    role: r.role === 'assistant' ? 'assistant' : 'user',
+    content: r.role === 'assistant'
+      ? chatEnvelope(cut(r.text, CHAT_BUDGET.ask), { newReading: !!r.want_reading, support: !!r.want_support })
+      : cut(r.text, CHAT_BUDGET.ask),
+  }));
   // سقفِ کلِ تاریخچه: قدیمی‌ترین نوبت‌ها اول می‌افتند تا تازه‌ترین‌ها (که مدل واقعاً
   // به آن‌ها نیاز دارد) کامل بمانند. بدونِ این، `hist` فقط یک عددِ روی کاغذ بود.
   const room = Math.max(0, CHAT_BUDGET.hist - digest.length);
@@ -161,7 +169,9 @@ export function toMessages(system, packed, question, L = null) {
   if (packed?.digest) {
     const head = L?.prompts?.chatDigestHead || 'سؤال‌هایی که تا حالا در همین گفتگو پرسیده:';
     msgs.push({ role: 'user', content: `${head}\n${packed.digest}` });
-    msgs.push({ role: 'assistant', content: L?.prompts?.chatDigestAck || 'باشه، یادم هست.' });
+    // این هم یک پیامِ assistant است، پس اگر خام بماند همان تقلیدِ فرمتِ غلط را می‌سازد
+    // که `chatEnvelope` برای بستنش هست. یک استثنای جاافتاده کافی است تا الگو بشکند.
+    msgs.push({ role: 'assistant', content: chatEnvelope(L?.prompts?.chatDigestAck || 'باشه، یادم هست.') });
   }
   for (const t of (packed?.turns || [])) msgs.push({ role: t.role, content: t.content });
   msgs.push({ role: 'user', content: cut(question, CHAT_BUDGET.ask) });
@@ -341,6 +351,28 @@ export function cleanChatReply(text, { name = '' } = {}) {
  * ولی دکمه‌ی اشتباه کاربر را به مسیری می‌برد که نمی‌خواست. */
 export const CHAT_OUT_KEYS = Object.freeze({
   text: 'answer', reading: 'wants_new_reading', support: 'needs_support',
+});
+
+/* 🔁 **بازپخشِ تاریخچه باید هم‌شکلِ خروجیِ خواسته‌شده باشد** (باگِ واقعیِ ۱۴۰۵/۰۶/۲۲).
+ *
+ * نسخه‌ی اول جوابِ نوبت‌های قبلی را **متنِ خام** به مدل برمی‌گرداند، در حالی که پرامپت
+ * می‌گفت «فقط JSON بنویس». نتیجه روی دیتای واقعی: از نوبتِ ۲ به بعد مدل شکلِ چیزی را
+ * تقلید می‌کرد که در تاریخچه می‌دید، نه چیزی که در system از او خواسته شده بود؛ یعنی
+ * تقلیدِ فرمت بر دستور غالب شد. لاگ صریح بود: `JSON parse failed: Unexpected token 'م',
+ * "من فال‌گیر"...` — یعنی جوابِ سالم، با پاکتِ غایب.
+ *
+ * ⚠️ و چرا retry نجاتش نمی‌داد: هر چهار پله‌ی `CHAT_PLAN` **همان تاریخچه** را می‌بینند،
+ * پس شکست **هم‌بسته** است نه مستقل. در دورِ آزمایشگاه ۲ نوبت از ۹ هر چهار تلاش را
+ * سوزاندند و به ریفاند رسیدند، و نوبت‌های «موفق» هم عمدتاً از پله‌ی فالبک آمدند (نه
+ * مدلِ اصلی)، پس طول و لحنشان هم افت کرد. همان کلاسی که بند ۹/۰ب ریشه می‌گوید: اول
+ * ابزارِ خودمان مقصر است، نه مدل.
+ *
+ * پرچم‌ها **واقعی** بازپخش می‌شوند (از ستون‌های `chat_messages`)، نه همیشه `false`:
+ * تاریخچه‌ای که همه‌ی پرچم‌هایش خاموش باشد خودش به مدل یاد می‌دهد پرچم نزند. */
+export const chatEnvelope = (text, { newReading = false, support = false } = {}) => JSON.stringify({
+  [CHAT_OUT_KEYS.text]: String(text ?? ''),
+  [CHAT_OUT_KEYS.reading]: !!newReading,
+  [CHAT_OUT_KEYS.support]: !!support,
 });
 
 const truthy = (v) => v === true || v === 1

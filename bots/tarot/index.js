@@ -259,7 +259,7 @@ const TEST_PHASE = false;
 //         پاراگراف‌بندیِ **قطعی** در کد نه در پرامپت (۵۳٪ ⟵ ۱۰۰٪ داخلِ هدفِ ۲ تا ۶
 //         خط). هر سه واریانتی که صریح «خط جدا کن» می‌گفتند بدتر شدند، پس آن مداخله
 //         کنار گذاشته شد. + فیکسِ باگِ خفته‌ی چسبیدنِ خطوط در حذفِ نامِ نشتی.
-const PRODUCT_VERSION = '3.89.0';
+const PRODUCT_VERSION = '3.90.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1321,6 +1321,15 @@ try { db.prepare('ALTER TABLE readings ADD COLUMN tail_msg_id INTEGER NOT NULL D
  * ریپلای به **همان** پیام برگردد — آن لحظه `ctx` دیگر آن پیام را ندارد، پس شناسه باید
  * روی خودِ ردیف بنشیند نه در حافظه (بند ۹ب/۵). */
 try { db.prepare('ALTER TABLE chat_messages ADD COLUMN tg_msg_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* migration (v3.90.0): پرچم‌های نیتی که مدل در پاکتِ JSON برگردانده.
+ *
+ * ⚠️ این‌ها **برای بازپخشِ تاریخچه** لازم‌اند، نه برای گزارش: `packHistory` جوابِ
+ * نوبت‌های قبلی را در همان پاکت به مدل برمی‌گرداند و اگر پرچم‌ها ذخیره نشوند، ناچار
+ * همیشه `false` بازپخش می‌شوند — یعنی تاریخچه خودش به مدل یاد می‌دهد پرچم نزند
+ * (توضیحِ کامل کنارِ `chatEnvelope` در chat-core.js).
+ * افزایشی با DEFAULT 0، پس ردیف‌های قبل از این نسخه معتبر می‌مانند (بند ۲ج/۱). */
+try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_reading INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_support INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
@@ -1697,8 +1706,10 @@ const stmts = {
   setAnchorMsg: db.prepare('UPDATE readings SET anchor_msg_id=? WHERE id=?'),
   // 📎 لنگرِ تازه: آخرین پیامِ فال. همان قاعده‌ی write-once عملیِ بالا.
   setTailMsg: db.prepare('UPDATE readings SET tail_msg_id=? WHERE id=?'),
-  insertChatMsg: db.prepare('INSERT INTO chat_messages (reading_id, user_id, role, text, price, model, tg_msg_id) VALUES (?,?,?,?,?,?,?)'),
-  chatHistory:   db.prepare('SELECT role, text FROM chat_messages WHERE reading_id=? ORDER BY id ASC'),
+  insertChatMsg: db.prepare('INSERT INTO chat_messages (reading_id, user_id, role, text, price, model, tg_msg_id, want_reading, want_support) VALUES (?,?,?,?,?,?,?,?,?)'),
+  // ⚠️ دو ستونِ پرچم **باید** این‌جا خوانده شوند: `packHistory` از رویشان تصمیم می‌گیرد
+  // پاکتِ بازپخش را چطور بسازد. نخواندنشان یعنی همیشه `false` (بند `chatEnvelope`).
+  chatHistory:   db.prepare('SELECT role, text, want_reading, want_support FROM chat_messages WHERE reading_id=? ORDER BY id ASC'),
   chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
   /* شمارشِ سؤال‌های **ریفاندنشده‌ی** همین فال — تنها مبنای «سؤالِ اول رایگان است».
    * شرطِ `refunded=0` عمدی است: سؤالی که جوابی نگرفت و پولش برگشت، انگار پرسیده نشده. */
@@ -2757,7 +2768,7 @@ const payForChat = db.transaction((uid, readingId, text, tgMsgId = 0) => {
   const price = chatPriceFor(readingId);
   if (price > 0 && stmts.deduct.run(price, uid, price).changes === 0) return null;
   const id = Number(stmts.insertChatMsg
-    .run(readingId, uid, 'user', String(text || '').slice(0, 2000), price, '', tgMsgId).lastInsertRowid);
+    .run(readingId, uid, 'user', String(text || '').slice(0, 2000), price, '', tgMsgId, 0, 0).lastInsertRowid);
   return { id, price };
 });
 
@@ -6051,7 +6062,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const reply = cleanChatReply(out.text, { name: dispName(user) });
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
-    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0).lastInsertRowid);
+    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0, out.newReading ? 1 : 0, out.support ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
     track(db, uid, 'chat_message', { reading_id: rid, turn, chars: reply.length });
     // سنجه‌ی قلاب فقط **لاگ** می‌شود، نه retry: خروجی کوتاه است و بازتولیدش برای یک

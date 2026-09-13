@@ -24,6 +24,15 @@ const CODE = strip(SRC);
 const CORE_CODE = strip(CORE);
 
 let pass = 0; const errs = [];
+/* ⚠️ ستون‌های افزایشیِ `chat_messages` از **خودِ سورس** اعمال می‌شوند، نه با تایپِ
+ * دوباره‌ی DDL در این فایل. نسخه‌ی قبلی `tg_msg_id` را دستی نوشته بود و اولین
+ * مهاجرتِ بعدی (`want_reading` در v3.90.0) چک را با یک خطای مبهمِ SQLite ترکاند نه
+ * با یک ادعای خوانا — و بدتر از آن، هر ستونی که این‌جا جا بیفتد یعنی statementهای
+ * پروداکشن روی اسکیمایی سنجیده می‌شوند که با اسکیمای واقعی فرق دارد (همان «گاردِ
+ * آینه‌ای» بند ۶ب ریشه، از سمتِ اسکیما). */
+const CHAT_ALTERS = [...SRC.matchAll(/ALTER TABLE chat_messages ADD COLUMN [^'"`]+/g)].map((m) => m[0]);
+const applyChatAlters = (d) => { for (const a of CHAT_ALTERS) { try { d.exec(a); } catch {} } };
+
 const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } else { errs.push(msg); console.log(`  ❌ ${msg}`); } };
 
 /* بدنه‌ی یک تابع/بلوک از سورس، با شمارشِ آکولاد (نه رجکسِ شکننده).
@@ -201,6 +210,10 @@ console.log('\n▶ ۳) مسیرِ پول');
       price INTEGER NOT NULL DEFAULT 0, refunded INTEGER NOT NULL DEFAULT 0,
       model TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       tg_msg_id INTEGER NOT NULL DEFAULT 0);`);
+  applyChatAlters(d);
+  const cols = new Set(d.prepare('PRAGMA table_info(chat_messages)').all().map((c) => c.name));
+  ok(cols.has('want_reading') && cols.has('want_support'),
+    'ستون‌های پرچمِ نیت از مهاجرتِ سورس روی جدول نشستند (بازپخشِ تاریخچه به آن‌ها وابسته است)');
   /* ⚠️ SQL از **خودِ سورس** خوانده می‌شود، نه اینکه این‌جا دوباره تایپ شود.
    * نسخه‌ی اولِ همین بلوک SQL را کپی کرده بود و در تستِ جهش **زنده ماند**: برداشتنِ
    * `AND refunded=0` از `index.js` هیچ چیزی را قرمز نکرد، چون چک آینه‌ی خودش را
@@ -464,6 +477,69 @@ console.log('\n▶ ۸) بودجه و کشِ پرامپت');
   const p1 = chat.packHistory(rows.slice(0, 20));
   const p2 = chat.packHistory(rows.slice(0, 20));
   ok(JSON.stringify(p1) === JSON.stringify(p2), 'و خروجی‌اش قطعی است (مقایسه‌ی جفت‌شده‌ی آزمایشگاه سالم می‌ماند)');
+}
+
+/* ═══ ۸ب) بازپخشِ تاریخچه هم‌شکلِ خروجیِ خواسته‌شده است ═══════════════════
+ *
+ * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۲۲: جوابِ نوبت‌های قبلی **متنِ خام** بازپخش می‌شد در حالی که
+ * پرامپت JSON می‌خواست. از نوبتِ ۲ به بعد مدل شکلِ تاریخچه را تقلید می‌کرد نه دستورِ
+ * system را، و چون هر چهار پله‌ی `CHAT_PLAN` همان تاریخچه را می‌بینند شکست **هم‌بسته**
+ * بود: ۲ نوبت از ۹ به ریفاند رسید و بقیه از پله‌ی فالبک جواب گرفتند.
+ *
+ * ⚠️ ادعا عمداً **رفتاری** است نه رجکسی: چیزی که بار دارد این است که پیامِ assistant
+ * در آرایه‌ی نهایی پارس شود، نه اینکه نامِ `chatEnvelope` جایی در سورس بیاید. */
+console.log('\n▶ ۸ب) بازپخشِ تاریخچه در همان پاکت');
+{
+  const rows = [
+    { role: 'user', text: 'سؤالِ یک' },
+    { role: 'assistant', text: 'جوابِ یک که به اندازه‌ی کافی بلند است تا از کفِ پاکت رد شود.', want_reading: 0, want_support: 0 },
+    { role: 'user', text: 'سؤالِ دو' },
+    { role: 'assistant', text: 'جوابِ دو که آن هم به اندازه‌ی کافی بلند نوشته شده است.', want_reading: 0, want_support: 1 },
+  ];
+  const packed = chat.packHistory(rows);
+  const msgs = chat.toMessages('پیشوند', packed, 'سؤالِ سه');
+  const asst = msgs.filter(m => m.role === 'assistant');
+  /* ⚠️ سنجشِ **شکل** است نه `parseChatOut`: آن تابع اعتبارسنجِ خروجیِ مدل است و کفِ
+   * طول دارد، پس تأییدِ کوتاهِ فشرده («باشه، یادم هست.») را به‌غلط رد می‌کرد. چیزی که
+   * این‌جا بار دارد این است که مدل **شکلِ پاکت** را در تاریخچه ببیند. */
+  const isEnvelope = (s2) => {
+    try { const o = JSON.parse(s2); return !!o && typeof o === 'object' && typeof o[chat.CHAT_OUT_KEYS.text] === 'string'; }
+    catch { return false; }
+  };
+  ok(asst.length >= 2, 'هر دو جوابِ قبلی در آرایه‌ی نقش‌ها هستند (پیش‌شرطِ ادعاهای بعدی)');
+  ok(!isEnvelope('جوابِ متنیِ خام که پاکت ندارد'), 'کنترلِ مثبت: متنِ خام واقعاً پاکت حساب نمی‌شود');
+  ok(asst.every(m => isEnvelope(m.content)),
+    '🔑 هیچ پیامِ assistantِ متنِ خامی در تاریخچه نمی‌ماند (همان پاکتی که از مدل می‌خواهیم)');
+  // ⚠️ null-safe: با جهشِ «تاریخچه دوباره خام شود» این ادعا باید **قرمز** بدهد، نه
+  // اینکه هارنس را بترکاند (جهشی که خروجیِ خوانا ندهد، چیزی را تأیید نمی‌کند).
+  ok(asst.every(m => (chat.parseChatOut(m.content)?.text || '').length > 0),
+    'و متنِ اصلیِ جواب داخلِ پاکت دست‌نخورده می‌ماند');
+
+  /* 🔑 پرچم‌ها **واقعی** بازپخش می‌شوند، نه همیشه `false`. اگر همیشه خاموش بازپخش
+   * شوند، تاریخچه خودش به مدل یاد می‌دهد پرچم نزند — یعنی دقیقاً همان فیچری که این
+   * پاکت برایش ساخته شد (دکمه‌ی CTA) بی‌صدا می‌میرد. */
+  const flags = asst.map(m => chat.parseChatOut(m.content)).filter(o => o && o.support);
+  ok(flags.length === 1, '🔑 پرچمِ پشتیبانیِ نوبتِ قبلی واقعاً بازپخش می‌شود (نه همیشه false)');
+  const offRows = rows.map(r => ({ ...r, want_support: 0 }));
+  const offAsst = chat.toMessages('پیشوند', chat.packHistory(offRows), 'س')
+    .filter(m => m.role === 'assistant').map(m => chat.parseChatOut(m.content));
+  ok(offAsst.every(o => !o?.support),
+    'کنترلِ مثبت: با ستونِ خاموش، همان کد پرچمِ خاموش می‌دهد (ادعای بالا پوچ نیست)');
+
+  // فشرده هم یک جوابِ assistant دارد؛ یک استثنای جاافتاده کافی است تا الگو بشکند.
+  const many = Array.from({ length: 24 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: `پیامِ شماره‌ی ${i} با طولِ کافی برای پاکت` }));
+  const dm = chat.toMessages('پیشوند', chat.packHistory(many), 'سؤال');
+  ok(dm.filter(m => m.role === 'assistant').every(m => isEnvelope(m.content)),
+    'و تأییدِ فشرده‌ی تاریخچه هم پاکت دارد، نه متنِ خام');
+
+  /* ساختاری: «مقدار وجود دارد ≠ مقدار می‌رسد» (بند ۲و/۶ب ریشه). پاکتِ درست بی‌فایده
+   * است اگر ستون‌ها از دیتابیس خوانده یا نوشته نشوند. */
+  ok(/SELECT[^']*want_reading[^']*want_support[^']*FROM chat_messages/.test(SRC),
+    'کوئریِ تاریخچه هر دو ستونِ پرچم را می‌خواند');
+  ok(/INSERT INTO chat_messages \([^)]*want_reading, want_support\)/.test(SRC),
+    'و insertChatMsg هر دو را می‌نویسد');
+  ok(/'assistant', reply,[\s\S]{0,120}out\.newReading \? 1 : 0, out\.support \? 1 : 0/.test(SRC),
+    '🔑 و ردیفِ جواب پرچم‌های **پارس‌شده‌ی همان نوبت** را می‌گیرد، نه صفرِ هاردکد');
 }
 
 /* ═══ ۹) بدنه‌ی مسیرِ فال دست‌نخورده ═══════════════════════════════════ */
@@ -997,6 +1073,7 @@ console.log('\n▶ ۱۸) پی‌وال و سؤالِ معلق');
       price INTEGER NOT NULL DEFAULT 0, refunded INTEGER NOT NULL DEFAULT 0,
       model TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       tg_msg_id INTEGER NOT NULL DEFAULT 0);`);
+  applyChatAlters(d);
   const BT2 = String.fromCharCode(96);
   const sqlOf2 = (name) => {
     const m = SRC.match(new RegExp(name + ":\\s*db\\.prepare\\((?:'([^']+)'|\"([^\"]+)\"|" + BT2 + '([\\s\\S]*?)' + BT2 + ')\\)'));
