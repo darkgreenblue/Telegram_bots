@@ -108,11 +108,18 @@ const { control, floor, cheap } = M.PRICE_LADDERS;
 const unitOf = (l) => l.map(p => p.toman / p.coins);
 ok(JSON.stringify(unitOf(floor)) === JSON.stringify(unitOf(control)),
   'control ⟶ floor: قیمتِ هر الماس در هر سه بسته **دست‌نخورده** است (فقط کفِ بلیت عوض می‌شود)');
-const changed = control.filter((p, i) => p.coins !== floor[i].coins || p.toman !== floor[i].toman);
-ok(changed.length === 1 && changed[0].key === 'basic',
-  `control ⟶ floor فقط یک بسته را لمس می‌کند (${changed.map(p => p.key).join(', ') || 'هیچ'})`);
-ok(floor[0].toman < control[0].toman,
-  `و کفِ بلیت واقعاً پایین‌تر می‌رود (${control[0].toman.toLocaleString('en-US')} ⟵ ${floor[0].toman.toLocaleString('en-US')})`);
+/* ⚠️ از v3.91.0 این بخش معنایش عوض شد — عمداً، نه رگرسیون. فازِ ۱ (`price_ladder_p1`)
+ * با پیروزیِ قاطعِ `floor` بسته شد و نتیجه‌اش مستقیم در `COIN_PACKAGES` نشست (بخشِ
+ * توضیح بالای `PRICE_LADDERS` در index.js)، پس control و floor از این نسخه **بیت‌به‌بیت
+ * یکی‌اند**. ادعای «فقط یک بسته عوض شد و ارزان‌تر شد» دیگر معنی ندارد؛ اگر دوباره
+ * برقرار شود یعنی کسی به‌اشتباه control را از نتیجه‌ی اثبات‌شده جدا کرده — یعنی
+ * برگرداندنِ بازنده‌ی آزمایش. `floor` عمداً کدش می‌ماند (مادّه‌ی آماده‌ی فازِ ۲). */
+// ⚠️ مقایسه روی {key,coins,toman} است نه کلِ آبجکت: `parsePacks` (بالای همین فایل)
+// همیشه `emoji: '🥉'` می‌گذارد (محدودیتِ خودِ regex)، پس مقایسه‌ی خام حتی با تساویِ
+// واقعیِ منبع هم قرمز می‌داد — قرمزِ کاذبِ ابزار، نه اختلافِ قیمت.
+const bare = (l) => l.map(({ key, coins, toman }) => ({ key, coins, toman }));
+ok(JSON.stringify(bare(floor)) === JSON.stringify(bare(control)),
+  'control ⟶ floor از v3.91.0 بیت‌به‌بیت یکی‌اند (نتیجه‌ی فاز ۱ در COIN_PACKAGES نشسته، نه یک تفاوتِ زنده)');
 
 ok(JSON.stringify(cheap.map(p => p.coins)) === JSON.stringify(floor.map(p => p.coins)),
   'floor ⟶ cheap: تعدادِ الماسِ هر سه بسته **یکی** است (فقط سطحِ قیمت عوض می‌شود)');
