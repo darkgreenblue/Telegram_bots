@@ -266,7 +266,13 @@ const TEST_PHASE = false;
 //         همین فایل: اول کد، بعد بستنِ آزمایش). فاز ۲ (بازوی `cheap`) عمداً شروع
 //         **نشد** — خواسته‌ی صریحِ مالک: فعلاً تستِ تازه‌ای روی قیمت نمی‌خواهد.
 //         جزئیات: بخشِ «آزمایشِ نردبانِ قیمت» پایینِ همین فایل.
-const PRODUCT_VERSION = '3.91.0';
+// 3.92.0: 🗣💎 باگِ گزارشِ زنده‌ی مالک: اولویتِ قدیمیِ «اولین فال + کارتِ شانسِ باز»
+//         روی دکمه‌ی گفتگو هنوز سوار بود، پس ریستِ ادمین (که کلِ ردیفش را پاک
+//         می‌کند) همیشه تبلیغِ کارتِ شانس را به‌جای گفتگو نشان می‌داد. گزینه‌ی ب
+//         (تصمیمِ صریحِ مالک): گفتگو همیشه مقدم است؛ معرفیِ کارتِ شانس به یادآوریِ
+//         ساعتِ ۲۲ شبِ اولِ کاربر منتقل شد (`dueFirstNightLucky`، مستقل از
+//         daily_reminder_off/lucky_reminder_on و از آزمایشِ night_reminder).
+const PRODUCT_VERSION = '3.92.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1670,6 +1676,16 @@ const stmts = {
     SELECT telegram_id, last_daily_date, lucky_date, daily_reminder_off, lucky_reminder_on,
            state, last_seen_at, created_at FROM users
      WHERE welcomed=1 AND (daily_reminder_off=0 OR lucky_reminder_on=1)
+       AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
+     LIMIT 400`),
+  // 🎲 شبِ اولِ کارتِ شانس (بند ۲ج/۴: گفتگو همیشه مقدم است، v3.91.0). با حذفِ تبلیغِ
+  // روزانه‌ی کارتِ شانس بعد از اولین فال (بالا)، تنها لحظه‌ای که کاربرِ تازه با آن آشنا
+  // می‌شود همین یادآوریِ شبِ اول است. عمداً از `dueNightReminder`/`dueNightReminderFree`
+  // جدا است: آن دو `daily_reminder_off=0` می‌خواهند و کاربرِ تازه با دیفالتِ
+  // `daily_reminder_off=1, lucky_reminder_on=1` وارد آن مجموعه نمی‌شود.
+  dueFirstNightLucky: db.prepare(`
+    SELECT telegram_id, display_name, lucky_date, created_at, state, last_seen_at FROM users
+     WHERE welcomed=1 AND created_at > unixepoch()-172800
        AND (last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch()-64800)
      LIMIT 400`),
   // 🍀 کارت شانس. `claimLucky` گاردِ اتمیکِ «روزی یک بار» است: شرطِ روز داخلِ خودِ UPDATE
@@ -6572,13 +6588,6 @@ async function finishReading(ctx, uid, readingId) {
   const days = Math.min(Math.max(parseInt(llm.next_milestone?.days, 10) || MILESTONE_DAYS, 7), 90);
   stmts.setMilestone.run(Math.floor(Date.now() / 1000) + days * 86400, uid);
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
-  // اولین فالِ کاملِ این کاربر (شمارش بعد از setReadingStatus بالا، پس همین فال را هم
-  // می‌شمارد — همان قراردادی که پاداشِ رفرال بالاتر استفاده کرد).
-  const isFirstReading = stmts.countDelivered.get(uid).c === 1;
-  // UX v2.1 (تصمیمِ صریحِ مالک): برای **اولین** فالِ کاربر، پیشنهادِ فالِ جدید این‌جا
-  // نمی‌آید؛ به‌جایش بعد از نمره‌دادن به همین فال، تبلیغِ کارتِ شانس می‌آید (پایین‌تر در
-  // `fbr:`) و دعوت به فالِ بعدی به بعد از کشیدنِ آن کارت موکول می‌شود. برای فال‌های
-  // بعدی و برای دنیای قدیم، رفتار دقیقاً همان قبلی است.
   // 🐛 باگِ ترتیب (گزارشِ مالک): تا امروز پیامِ «ادامه» **قبل از** نظرسنجی می‌آمد و گاهی
   // کاربر CTA را زودتر از سؤالِ نمره می‌دید. قرارداد این است: اول نمره، بعد تشکر، بعد
   // قدمِ بعدی. پس وقتی نظرسنجی پرسیده می‌شود (v4)، پیامِ «ادامه» به `fbr:` موکول می‌شود.
@@ -6616,15 +6625,11 @@ async function finishReading(ctx, uid, readingId) {
      * این کوهورت هرگز اجرا نمی‌شود، پس حاملِ بی‌صدای `ensureKeyboard` جایش را می‌گیرد
      * (همان مکانیزمِ اثبات‌شده: ارسال + حذفِ فوری، صفر رویدادِ جرنی). */
     if (chatOn(uid) && chatEligible(uid, readingId).ok) {
-      // اولویتِ موجود عمداً دست‌نخورده: اولین فال + کارتِ شانسِ باز = آخرین قدمِ
-      // آنبوردینگ، و مقدم بر پیشنهادِ گفتگو (همان تصمیمی که در `fbr:` گرفته شده بود).
-      if (uxV2For(uid) && isFirstReading && getUser(uid)?.lucky_date !== botToday()) {
-        await ctx.reply(L.lucky.promo(dispName(getUser(uid))), Markup.inlineKeyboard([
-          [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
-        ])).catch(() => {});
-      } else {
-        await postReadingOffer(ctx, uid, readingId);
-      }
+      // 🗣 گفتگو همیشه مقدم است (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۳): اولویتِ قدیمیِ
+      // «اولین فال + کارتِ شانسِ باز» حذف شد — دکمه‌ی گفتگو دیگر هرگز جایش را به
+      // تبلیغِ کارتِ شانس نمی‌دهد. همان معرفی حالا به یادآوریِ ساعتِ ۲۲ همان شب منتقل
+      // شده (بخشِ «شبِ اولِ کارتِ شانس» پایین‌تر، `dueFirstNightLucky`).
+      await postReadingOffer(ctx, uid, readingId);
       await ensureKeyboard(ctx.telegram, uid);
       return;
     }
@@ -6663,10 +6668,12 @@ bot.action(/^fbr:([1-5]):(\d+)$/, async (ctx) => {
   // کاربری که کارتِ شانسش را قبلاً کشیده بود (یا فالِ اولش در آنبوردینگ نبود) بعد از
   // تشکر به بن‌بست می‌خورد. حالا آن شرط فقط تعیین می‌کند **کدام** قدمِ بعدی بیاید، نه اینکه
   // قدمِ بعدی بیاید یا نه.
-  // 🗣 گفتگوی پس از فال (v3.84.0): جانشینِ پیامِ «ادامه» در اوجِ لحظه — کاربر همین حالا
-  // جوابش را گرفته و اگر جای سؤالی مانده، این نزدیک‌ترین قدمِ ممکن است. شاخه‌ی کارتِ
-  // شانسِ **اولین فال** عمداً دست‌نخورده و مقدم است: آن آخرین قدمِ آنبوردینگ است.
-  if (uxV2For(uid) && chatOn(uid) && !(isFirstReading && luckyAvailable)) {
+  // 🗣 گفتگو همیشه مقدم است (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۳): اولویتِ قدیمیِ «اولین فال +
+  // کارتِ شانسِ باز» حذف شد — دکمه‌ی گفتگو دیگر هرگز جایش را به تبلیغِ کارتِ شانس
+  // نمی‌دهد. همان معرفی حالا به یادآوریِ ساعتِ ۲۲ همان شب منتقل شده («شبِ اولِ کارتِ
+  // شانس» پایین‌تر، `dueFirstNightLucky`)، پس این شاخه از این به بعد فقط وقتی می‌رسد
+  // که کاربر هنوز تستر/ادمین نیست (`chatOn(uid) === false`، یعنی کاربرِ واقعیِ امروز).
+  if (uxV2For(uid) && chatOn(uid)) {
     return postReadingOffer(ctx, uid, readingId);
   }
   if (uxV2For(uid) && isFirstReading && luckyAvailable) {
@@ -9080,6 +9087,30 @@ setInterval(async () => {
         // ⌨️ ترمیمِ منوی گم‌شده در همان لحظه‌ای که به این کاربرِ خوابیده پیام می‌دهیم
         // (توضیحِ کامل در شاخه‌ی بالا). فقط بعد از ارسالِ موفق، چون شکستِ ارسال یعنی
         // کاربر ربات را بلاک کرده و تلاشِ دوم بی‌فایده است.
+        await ensureKeyboard(bot.telegram, uid);
+      }
+      await sleep(300);
+    }
+    // 🎲 شبِ اولِ کارتِ شانس (v3.91.0): معرفیِ کارتِ شانس دیگر بعد از اولین فال نمی‌آید
+    // (بند ۲ج/۴ بالا، «گفتگو همیشه مقدم است»)، پس تنها لحظه‌ای که کاربرِ تازه با آن آشنا
+    // می‌شود همین یادآوریِ ساعتِ ۲۲ همان شب است. مستقل از هر دو رژیمِ بالا و مستقل از
+    // `daily_reminder_off`/`lucky_reminder_on` و از آزمایشِ `night_reminder`: این پیام
+    // یک **معرفی** است نه یک یادآوری، و `reminderBlocked`ِ 'day1' دقیقاً همان کاربری را
+    // نشانه می‌گیرد که این حلقه باید پیدا کند.
+    for (const u of stmts.dueFirstNightLucky.all()) {
+      const uid = u.telegram_id;
+      if (!uxV2For(uid)) continue;
+      if (!u.created_at || botToday(new Date(u.created_at * 1000)) !== today) continue; // فقط روزِ اول
+      if (reminderBlocked(u, today) === 'flow') continue; // فلوی زنده‌ی باز مانع می‌ماند
+      if ((u.lucky_date || '') === today) continue; // امروز را قبلاً بازی کرده
+      stmts.setNightReminded.run(uid);
+      const ok = await bot.telegram.sendMessage(uid, L.lucky.promo(dispName(u)), {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, curOf(uid)), 'lucky_go')],
+        ]).reply_markup,
+      }).then(() => true).catch(() => false);
+      if (ok) {
+        track(db, uid, 'night_reminder_sent', { arm: 'lucky_intro' });
         await ensureKeyboard(bot.telegram, uid);
       }
       await sleep(300);
