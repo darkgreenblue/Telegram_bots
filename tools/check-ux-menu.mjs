@@ -321,10 +321,16 @@ console.log('\n▶ اولین فالِ کاربر: پیشنهادِ فالِ ج�
   ok(deliverTail.indexOf('L.reading.rateAsk') > 0, 'سؤالِ نمره در خودِ تحویل می‌ماند');
   ok(!/nextOffersV3[\s\S]{0,400}rateAsk/.test(deliverTail),
     'هیچ مسیری پیامِ «ادامه» را قبل از سؤالِ نمره نمی‌فرستد');
-  // بندِ دوم: در fbr: (بعد از نمره‌دادن) باید یک isFirstReading دیگر (تازه، مستقل) محاسبه شود
-  const iIsFirst2 = SRC.indexOf('const isFirstReading = stmts.countDelivered.get(uid).c === 1;', iIsFirst1 + 1);
-  ok(iIsFirst2 > iIsFirst1, 'fbr: هم isFirstReading را دوباره (مستقل) محاسبه می‌کند');
+  // ⚠️ v3.91.0: نسخه‌ی finishReading حذف شد (بندِ «گفتگو همیشه مقدم است» در CLAUDE.md؛
+  // آن شاخه دیگر شرطِ isFirstReading/luckyAvailable ندارد و بی‌قید postReadingOffer را
+  // صدا می‌زند). تنها محاسبه‌ی باقی‌مانده همان‌جا در fbr: است، برای شاخه‌ی تبلیغِ کارتِ
+  // شانس که حالا فقط برای chatOn=false می‌رسد. پس دیگر «دوباره» نیست؛ ادعا حالا این است
+  // که در کلِ فایل دقیقاً یک بار محاسبه می‌شود و همان یکی داخلِ fbr: است.
+  const isFirstCount = [...SRC.matchAll(/const isFirstReading = stmts\.countDelivered\.get\(uid\)\.c === 1;/g)].length;
+  ok(isFirstCount === 1,
+    `در کلِ فایل دقیقاً یک بار isFirstReading محاسبه می‌شود (یافت شد: ${isFirstCount})`);
   const iFbr = SRC.indexOf('bot.action(/^fbr:');
+  ok(iIsFirst1 > iFbr, 'و همان یکی داخلِ fbr: است (نه در finishReading)');
   const fbrBlock = SRC.slice(iFbr, SRC.indexOf('bot.action(', iFbr + 20));
   ok(/luckyAvailable = getUser\(uid\)\?\.lucky_date !== botToday\(\)/.test(fbrBlock),
     'تبلیغِ کارت شانس فقط اگر سهمیه‌ی امروز هنوز مصرف نشده نشان داده می‌شود');

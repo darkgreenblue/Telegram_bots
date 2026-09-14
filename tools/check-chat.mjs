@@ -772,14 +772,27 @@ console.log('\n▶ ۱۲) پیشنهادِ پس از فال');
   const iChat = fin.indexOf('if (chatOn(uid) && chatEligible(uid, readingId).ok)');
   const iRate = fin.indexOf('L.reading.rateAsk');
   ok(iChat > 0 && iRate > iChat, '🔑 پیشنهادِ گفتگو **جای** نظرسنجی می‌نشیند، نه بعدش');
-  ok(/postReadingOffer\(ctx, uid, readingId\);\s*\n\s*}\s*\n\s*await ensureKeyboard\(ctx\.telegram, uid\);/.test(fin),
+  ok(/postReadingOffer\(ctx, uid, readingId\);\s*\n\s*await ensureKeyboard\(ctx\.telegram, uid\);/.test(fin),
     '⌨️ و چون نقطه‌ی صدورِ کیبوردِ `fbr:` از دست می‌رود، حاملِ بی‌صدا جایش را می‌گیرد (بند ۹ب-۳)');
   ok(/L\.reading\.rateAsk/.test(fin), '⚠️ و کدِ نظرسنجی پاک نشده (کوهورتِ بدونِ گفتگو همان را می‌بیند)');
   const fbr = bodyOf(CODE, "bot.action(/^fbr:([1-5]):(\\d+)$/, async (ctx) => {");
   ok(before(fbr, 'L.reading.rateThanks', 'postReadingOffer'),
     'تشکر همیشه اول می‌آید، بعد قدمِ بعدی (قراردادِ v3.14.0 نشکسته)');
-  ok(/!\(isFirstReading && luckyAvailable\)/.test(fbr),
-    '⚠️ و شاخه‌ی کارتِ شانسِ **اولین فال** مقدم می‌ماند (آخرین قدمِ آنبوردینگ)');
+  /* 🐛 باگِ گزارشِ مالک (۱۴۰۵/۰۶/۲۳): اولویتِ قدیمیِ «اولین فال + کارتِ شانسِ باز» روی
+   * دکمه‌ی گفتگو، دقیقاً همان اکانتِ ادمین را به تبلیغِ کارتِ شانس می‌فرستاد به‌جای
+   * گفتگو — چون ریست‌کردنِ ردیفِ ادمین همیشه او را «اولین فال»ِ ساختگی می‌کند. تصمیمِ
+   * صریحِ مالک (گزینه‌ی ب): گفتگو همیشه مقدم است؛ آن اولویت حذف شد. ادعای منفی: هیچ
+   * گاردِ `isFirstReading`/`luckyAvailable`ای دیگر روی شاخه‌ی chatOn نمی‌نشیند. */
+  const iChatBranch = fbr.indexOf('if (uxV2For(uid) && chatOn(uid)) {');
+  ok(iChatBranch >= 0, '🔑 شاخه‌ی گفتگو در `fbr:` بدونِ هیچ گاردِ کارتِ شانس است');
+  const chatBranchEnd = fbr.indexOf('\n  }', iChatBranch);
+  const chatBranchBody = fbr.slice(iChatBranch, chatBranchEnd > 0 ? chatBranchEnd : iChatBranch + 100);
+  ok(!/isFirstReading|luckyAvailable/.test(chatBranchBody),
+    '⚠️ و شاخه‌ی گفتگو دیگر منتظرِ «اولین فال + کارتِ شانسِ باز» نمی‌ماند (گزینه‌ی ب)');
+  // کنترلِ مثبت: خودِ الگوی قدیمی اگر برگردد باید گرفته شود، وگرنه ادعای بالا آینه‌ی
+  // خودش است (بند ۶ب-۲ ریشه).
+  ok(/isFirstReading|luckyAvailable/.test(fbr),
+    '🔎 کنترلِ مثبت: این دو متغیر هنوز در فایل هستند (شاخه‌ی کارتِ شانسِ زیرش)');
 }
 
 /* ═══ ۱۳) پرامپت ════════════════════════════════════════════════════ */

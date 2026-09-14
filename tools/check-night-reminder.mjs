@@ -793,6 +793,83 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
      settings.includes('setDailyReminderOn'));
 }
 
+/* ═══════ ۱۳) شبِ اولِ کارتِ شانس (v3.91.0) ═══════
+   با حذفِ تبلیغِ روزانه‌ی کارتِ شانس بعد از اولین فال (بند ۲ج/۴ بالا، «گفتگو همیشه
+   مقدم است»)، تنها لحظه‌ای که کاربرِ تازه با کارتِ شانس آشنا می‌شود همین یادآوریِ
+   ساعتِ ۲۲ شبِ اولش است. بلوک **رفتاری** است: بدنه‌ی حلقه از خودِ `sweep` بریده و
+   با SQLِ استخراج‌شده از سورس روی SQLite واقعی اجرا می‌شود. */
+{
+  const mFirstLucky = SRC.match(/dueFirstNightLucky: db\.prepare\(`([^`]+)`\)/);
+  ok('دستورِ SQLِ `dueFirstNightLucky` در سورس هست', !!mFirstLucky);
+  const sqlFirstLucky = mFirstLucky ? mFirstLucky[1] : '';
+  ok('کوئری فقط کاربرِ آنبوردشده را می‌گیرد', /welcomed=1/.test(sqlFirstLucky));
+  ok('کوئری به روزِ اول محدود است (۴۸ ساعتِ اخیر، فیلترِ دقیق در JS)',
+    /created_at > unixepoch\(\)-172800/.test(sqlFirstLucky));
+  ok('کوئری گاردِ ۱۸ساعته دارد (همان ستونِ جاروهای دیگر)',
+    /last_daily_reminder_at IS NULL OR last_daily_reminder_at < unixepoch\(\)-64800/.test(sqlFirstLucky));
+  // ⚠️ استقلالِ ساختاری از دیفالتِ کاربرِ تازه: `dueNightReminder`/`dueNightReminderFree`
+  // هر دو `daily_reminder_off=0` می‌خواهند، ولی کاربرِ تازه با
+  // `daily_reminder_off=1, lucky_reminder_on=1` متولد می‌شود (v3.82.0)، پس اگر این
+  // کوئری هم به همان ستون‌ها وابسته بود کاربرِ تازه هرگز در نتیجه‌اش نمی‌افتاد.
+  ok('کوئری به daily_reminder_off/lucky_reminder_on وابسته نیست (کاربرِ تازه‌ی دیفالتی هم شامل می‌شود)',
+    !/daily_reminder_off|lucky_reminder_on/.test(sqlFirstLucky));
+
+  const firstLuckyBody = block(sweep, 'for (const u of stmts.dueFirstNightLucky.all())') || '';
+  ok('بدنه‌ی حلقه‌ی «شبِ اولِ کارتِ شانس» استخراج شد', !!firstLuckyBody);
+
+  ok('فقط روزِ اولِ واقعی (بدونِ ابهامِ ۴۸ساعته‌ی SQL) با botToday سنجیده می‌شود',
+    /botToday\(new Date\(u\.created_at \* 1000\)\) !== today/.test(firstLuckyBody));
+  ok('لوکیِ امروزبازی‌شده رد می‌شود', /u\.lucky_date \|\| ''\) === today/.test(firstLuckyBody));
+  // فلوی زنده‌ی باز مانع می‌ماند، ولی **همان تابعِ `reminderBlocked`ِ روزِ اول** این‌جا
+  // نباید مانع شود — این حلقه دقیقاً همان 'day1' را هدف می‌گیرد، پس فقط شاخه‌ی 'flow'
+  // پذیرفته می‌شود.
+  ok("فلوی زنده‌ی باز مانع می‌ماند (فقط شاخه‌ی 'flow')",
+    /reminderBlocked\(u, today\) === 'flow'/.test(firstLuckyBody));
+  ok("ولی 'day1' را رد نمی‌کند (این حلقه خودش هدفِ روزِ اول است)",
+    !/reminderBlocked\(u, today\)\)\s*continue/.test(firstLuckyBody));
+
+  // exposure/A-B: این پیام یک معرفی است، نه یک شاخه‌ی آزمایش
+  ok('هیچ ارتباطی با آزمایشِ NIGHT_EXP ندارد (نه peekVariant، نه expose، نه variant)',
+    !/peekVariant|expose\(|NIGHT_EXP|variant\(/.test(firstLuckyBody));
+
+  // پیام = همان معرفیِ کارتِ شانس که قبلاً بعد از اولین فال می‌آمد
+  ok('پیام از L.lucky.promo می‌آید (همان متنِ آشنای معرفیِ کارتِ شانس)',
+    /L\.lucky\.promo\(dispName\(u\)\)/.test(firstLuckyBody));
+  ok('دکمه به lucky_go وصل است', /'lucky_go'/.test(firstLuckyBody));
+
+  // دِدوپ و ترتیب: مهرِ زمان قبل از ارسال، دقیقاً یک بار
+  const iFStamp = firstLuckyBody.indexOf('setNightReminded');
+  const iFSend = firstLuckyBody.indexOf('sendMessage');
+  ok('مهرِ زمان قبل از ارسال زده می‌شود (ضدِ پیامِ تکراری)',
+    iFStamp !== -1 && iFSend !== -1 && iFStamp < iFSend);
+  ok('مهرِ زمان دقیقاً یک بار زده می‌شود',
+    (firstLuckyBody.match(/setNightReminded/g) || []).length === 1);
+  ok('رویداد فقط بعد از ارسالِ موفق ثبت می‌شود',
+    /if \(ok\) \{[\s\S]{0,300}track\(db, uid, 'night_reminder_sent', \{ arm: 'lucky_intro' \}\)/.test(firstLuckyBody));
+
+  // ⚠️ رفتاری روی SQLite واقعی: کاربرِ تازه‌ی دیفالتی (daily_reminder_off=1,
+  // lucky_reminder_on=1) واقعاً در کوئری می‌افتد، و کاربرِ لوکیِ امروزبازی‌شده نمی‌افتد.
+  {
+    const d = new DB(':memory:');
+    d.exec(`CREATE TABLE users(
+      telegram_id INTEGER PRIMARY KEY, display_name TEXT, lucky_date TEXT,
+      created_at INTEGER, state TEXT, last_seen_at INTEGER, welcomed INTEGER,
+      daily_reminder_off INTEGER, lucky_reminder_on INTEGER, last_daily_reminder_at INTEGER)`);
+    const NOW = Math.floor(Date.now() / 1000);
+    const ins = d.prepare(`INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?,?)`);
+    // کاربرِ تازه‌ی امروز، هنوز کارتِ شانس نزده، دیفالتِ v3.82.0
+    ins.run(1, 'الف', '', NOW - 3600, 'idle', NOW, 1, 1, 1, null);
+    // کاربرِ قدیمی (بیرونِ ۴۸ ساعت) — نباید بیفتد
+    ins.run(2, 'ب', '', NOW - 10 * 86400, 'idle', NOW, 1, 1, 1, null);
+    const stmt = d.prepare(sqlFirstLucky);
+    const rows = stmt.all();
+    ok('کوئریِ واقعی کاربرِ تازه‌ی دیفالتی را برمی‌گرداند',
+      rows.some((r) => r.telegram_id === 1));
+    ok('و کاربرِ ۱۰روزه را برنمی‌گرداند', !rows.some((r) => r.telegram_id === 2));
+    d.close();
+  }
+}
+
 /* ═══════ نتیجه ═══════ */
 if (fails.length) {
   console.error(`❌ چکِ یادآوریِ شبانه: ${fails.length} ادعا شکست خورد`);
