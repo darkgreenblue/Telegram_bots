@@ -45,7 +45,7 @@ const {
 } = await import('../bots/tarot/reading-core.js');
 const {
   buildChatCtx, packHistory, toMessages, messagesChars,
-  cleanChatReply, chatShapeOk, hookOk, questionWordsOf,
+  cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
   crisisIn, smallTalkIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
 } = await import('../bots/tarot/chat-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند (درسِ checks.mjs).
@@ -173,8 +173,20 @@ const CHAT_PRICE = constOf('CHAT_PRICE', 1);
 /* 🌍 سناریوها per زبان، عیناً همان فایلِ آزمایشگاهِ خوانش (پرسوناها و فال‌هایشان یکی
  * است؛ فقط `follow_ups` اضافه شده). عمداً به فارسی fallback نمی‌کند: یک دورِ روسی با
  * سؤال‌های فارسی سبز تمام می‌شد و ما فکر می‌کردیم روسی را سنجیده‌ایم. */
-const SCEN_FILE = path.join(HERE, 'reading-lab',
-  LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`);
+/* `--scenarios <name>` مجموعه‌ی دیگری را بار می‌کند (بدونِ پسوند). تنها مصرفش امروز
+ * `--scenarios adv` است: پرسونای بلندِ خصمانه عمداً **بیرونِ** مجموعه‌ی پیش‌فرض است تا
+ * دورِ نرمال هزینه‌ی ۲۶ نوبتش را ندهد، و مهم‌تر، تا مقایسه‌ی عدم‌رگرسیون همیشه روی
+ * همان پرسوناهای نرمال بنشیند (خواسته‌ی صریحِ مالک: تنظیم روی موردِ خصمانه، مسیرِ
+ * ۹۹۹تای دیگر را خراب می‌کند). */
+/* ⚠️ `--set` مترادفِ پذیرفته‌شده است، نه یک پرچمِ دوم: ورک‌فلوی `Reading lab` ورودیِ
+ * `set` را برای **هر دو** ابزار به همان شکل پاس می‌دهد، و بدونِ این مترادف یک دورِ
+ * `set: meta` بی‌صدا روی سناریوی **پیش‌فرض** اجرا می‌شد — یعنی گزارشِ سبز از چیزی که
+ * اصلاً سنجیده نشده (همان کلاسِ `--dry`). نام‌گذاری هم عیناً همان قراردادِ
+ * `reading-lab.mjs` است: `--set meta` ⟵ `scenarios.meta.json`. */
+const SCEN_NAME = (val('scenarios', '') || val('set', '') || '').trim().toLowerCase();
+const SCEN_FILE = path.join(HERE, 'reading-lab', SCEN_NAME
+  ? `scenarios.${SCEN_NAME}.json`
+  : (LOCALE === 'fa' ? 'scenarios.json' : `scenarios.${LOCALE}.json`));
 if (!fs.existsSync(SCEN_FILE)) {
   console.error(`❌ سناریویی برای زبانِ «${LOCALE}» نیست: ${SCEN_FILE}`);
   process.exit(1);
@@ -260,21 +272,27 @@ function fakeReading(cards, ctx) {
  *   • نوبتِ ۱ در هر ۳: خطِ آخرِ **chatbait** (باید `hookOk` را قرمز کند)
  *   • نوبتِ ۲ در هر ۳: خطِ آخرِ **بی‌لنگر** (جمله‌ای که زیرِ فالِ هر کسِ دیگری هم می‌نشیند)
  *   • بقیه: خطِ آخرِ سالم و لنگرخورده به نامِ کارت
- * هر سه باید از `chatShapeOk` رد شوند (بینِ ۲۰ و ۹۰۰ نویسه)، وگرنه استاب به‌جای
- * سنجیدنِ سنجه‌ها، مسیرِ شکستِ مدل را می‌سنجد. */
+ * هر سه باید از `chatOutOk` رد شوند، وگرنه استاب به‌جای سنجیدنِ سنجه‌ها، مسیرِ شکستِ
+ * مدل را می‌سنجد.
+ * ⚠️ از ۱۴۰۵/۰۶/۲۲ استاب هم **پاکتِ JSON** می‌دهد، دقیقاً مثل مدلِ واقعی. اگر متنِ خام
+ * می‌داد، `--fake` یک قراردادِ دیگر را تست می‌کرد و دورِ سبزش هیچ چیزی دربارهٔ
+ * پروداکشن ثابت نمی‌کرد (همان درسِ `--dry`). */
 function fakeChatReply(turnIdx, cardNames, question) {
   const card = cardNames[turnIdx % cardNames.length] || 'کارت';
   const q = String(question || '').split(/\s+/).filter(Boolean).slice(0, 3).join(' ');
   const head = `جوابت این سمته، ولی به بهای صبر: ${card} همین را می‌گه.`;
   const mid = `حرفِ اصلی درباره‌ی «${q}» همینه و توی همین دست دیده می‌شه.`;
   const mode = turnIdx % 3;
-  if (mode === 1) return `${head}\n${mid}\nسؤال دیگه‌ای داری؟`;
+  // پاکت، با همان کلیدهای پروداکشن. پرچم‌ها در استاب همیشه false اند: این‌جا نیتِ
+  // مدل سنجیده نمی‌شود، فقط مسیرِ سنجه‌ها.
+  const env = (t) => JSON.stringify({ answer: t, wants_new_reading: false, needs_support: false });
+  if (mode === 1) return env(`${head}\n${mid}\nسؤال دیگه‌ای داری؟`);
   /* ⚠️ این جمله عمداً با **هیچ‌کدام** از سؤال‌های سناریو و هیچ نامِ کارتی کلمه‌ی مشترک
    * ندارد، وگرنه `hookOk` لنگرش را پیدا می‌کند و نقصِ تزریقی بی‌صدا خنثی می‌شود —
    * یعنی `--fake` سبز رد می‌شود در حالی که مسیرِ `noanchor` هرگز لمس نشده. اگر
    * `follow_ups` عوض شد، کنترلِ مثبتِ پایینِ همین فایل قرمز می‌دهد. */
-  if (mode === 2) return `${head}\n${mid}\nهمه چیز به مرور سرِ جای خودش می‌نشیند و آرامش برمی‌گردد.`;
-  return `${head}\n${mid}\nیه زاویه‌ی دیگه از ${card} هست که هنوز بازش نکردیم.`;
+  if (mode === 2) return env(`${head}\n${mid}\nهمه چیز به مرور سرِ جای خودش می‌نشیند و آرامش برمی‌گردد.`);
+  return env(`${head}\n${mid}\nیه زاویه‌ی دیگه از ${card} هست که هنوز بازش نکردیم.`);
 }
 
 /* ═══════════════ ساختِ فالِ پایه ═══════════════ */
@@ -353,8 +371,14 @@ async function runConversation(persona, base, arm, rep) {
   let prefixStable = true;
   const ups = MAX_TURNS ? persona.follow_ups.slice(0, MAX_TURNS) : persona.follow_ups;
 
+  /* یک follow-up یا رشته است یا `{ q, off: true }`. شکلِ دوم فقط می‌گوید این سؤال
+   * **بیرونِ دامنه‌ی فال** است، و دو سنجه را برعکس می‌کند: قاعده‌ی قلاب معاف می‌شود
+   * (جوابِ درستِ «پایتخت انگلیس» کوتاه و بی‌لنگر است) و در عوض نام‌بردنِ کارت ایراد
+   * می‌شود. هر ۱۵ فایلِ سناریوی موجود رشته‌اند و دست‌نخورده کار می‌کنند. */
   for (let t = 0; t < ups.length; t++) {
-    const q = String(ups[t]);
+    const up = ups[t];
+    const q = String(typeof up === 'string' ? up : up?.q ?? '');
+    const offDomain = typeof up === 'object' && !!up?.off;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
     if (crisisIn(q)) { turns.push({ q, skipped: 'crisis' }); continue; }
@@ -375,7 +399,7 @@ async function runConversation(persona, base, arm, rep) {
       : orChatResilient;
     const res = await call('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatShapeOk,
+      validate: chatOutOk,
       /* 💵 هزینه‌ی **واقعی** از خودِ پاسخِ OpenRouter. هرگز از روی توکن با یک جدولِ
        * قیمتِ هاردکد حساب نمی‌شود: همان اشتباه یک بار DeepSeek را «گران‌ترین» گزارش
        * کرد در حالی که ارزان‌ترین بود (بند ثبت‌شده‌ی دورِ ۹). */
@@ -390,12 +414,14 @@ async function runConversation(persona, base, arm, rep) {
 
     if (!res?.out) { turns.push({ q, failed: true, ms, usage }); continue; }
 
-    const reply = cleanChatReply(res.out, { name: persona.name });
+    // پاکت را باز می‌کنیم، عیناً مثل `runChatTurn`ِ پروداکشن.
+    const outObj = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    const reply = cleanChatReply(outObj.text, { name: persona.name });
     let check;
     try {
       check = chatMetrics({
         reply, raw: res.out, cardNames,
-        questionWords: questionWordsOf(q, base.question), question: q,
+        questionWords: questionWordsOf(q, base.question), question: q, offDomain,
       });
     } catch (e) {
       // اگر خودِ سنجه بترکد، نوبت‌های قبلی که پولشان داده شده نباید از بین بروند.
@@ -405,10 +431,16 @@ async function runConversation(persona, base, arm, rep) {
     }
 
     turns.push({ q, reply, raw: res.out, model: res.model, attempts: res.attempts,
+      flags: { newReading: outObj.newReading, support: outObj.support },
       ms, usage, check, inputChars: messagesChars(messages) });
 
-    // تاریخچه دقیقاً مثل ربات به نوبتِ بعد منتقل می‌شود.
-    history.push({ role: 'user', text: q }, { role: 'assistant', text: reply });
+    // تاریخچه دقیقاً مثل ربات به نوبتِ بعد منتقل می‌شود — **با پرچم‌ها**، وگرنه
+    // `packHistory` پاکتِ بازپخش را همیشه خاموش می‌ساخت و آزمایشگاه چیزی را می‌سنجید
+    // که پروداکشن اجرا نمی‌کند (همان تله‌ی «گاردِ آینه‌ای»، بند ۶ب ریشه).
+    history.push({ role: 'user', text: q }, {
+      role: 'assistant', text: reply,
+      want_reading: outObj.newReading ? 1 : 0, want_support: outObj.support ? 1 : 0,
+    });
   }
 
   return { persona: persona.id, name: persona.name, base, arm, rep, turns, prefixStable };
@@ -455,7 +487,15 @@ for (const arm of ARM_LIST) {
           if (t.failed) { console.log('      ❌ همه‌ی تلاش‌ها شکست خورد (مسیرِ ریفاند)'); continue; }
           console.log(`      ${t.reply.split('\n').join('\n      ')}`);
           const c = t.check;
+          /* ⚠️ مدل و تعدادِ تلاش عمداً چاپ می‌شوند: در دورِ ۱۴۰۵/۰۶/۲۲ جوابِ بیشترِ
+           * نوبت‌ها از **پله‌ی فالبک** می‌آمد (چون مدلِ اصلی پاکت را رعایت نمی‌کرد) و
+           * چون گزارش فقط متن را نشان می‌داد، افتِ طول و لحن به‌جای «مدلِ اشتباه»
+           * به «پرامپت» نسبت داده می‌شد. پرچم‌ها هم چاپ می‌شوند چون تنها مصرفشان
+           * (دکمه‌ی CTA) بیرونِ آزمایشگاه است و بدونِ چاپ، خاموش‌ماندنشان نامرئی بود. */
+          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '']
+            .filter(Boolean).join(' + ') || 'ــ';
           console.log(`      📏 ${c.lines} خط / ${c.chars} نویسه | قلاب: ${c.hook.ok ? '✅' : `❌ ${c.hook.why}`}`
+            + ` | 🚩 ${fl} | 🤖 ${t.model || '?'}${t.attempts > 1 ? ` (تلاشِ ${t.attempts})` : ''}`
             + ` | ورودی ${t.inputChars} نویسه | ${t.ms}ms`);
           if (c.issues.length) c.issues.forEach((x) => console.log(`      ❌ ${x}`));
           if (c.notes.length) c.notes.forEach((x) => console.log(`      ⚠️ ${x}`));

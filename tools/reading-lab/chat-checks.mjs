@@ -13,7 +13,7 @@
 // قاعده‌ی دوم: همه‌ی این‌ها **قطعی** اند. قضاوتِ سلیقه‌ای کارِ `chat-rubric.mjs` و
 // خودِ سشن است، نه این فایل.
 import { ngrams } from './checks.mjs';
-import { hookOk } from '../../bots/tarot/chat-core.js';
+import { hookOk, norm } from '../../bots/tarot/chat-core.js';
 
 /* 🌍 دادهٔ زبانیِ سنجه‌ها از همان `lang/<locale>.mjs`ِ آزمایشگاهِ خوانش می‌آید، نه یک
  * کپیِ تازه: الگوی «لحنِ رسمی» و استثنای «جمعِ واقعی» یک بار در همان‌جا تصحیح شده‌اند
@@ -54,6 +54,39 @@ const FORMAL_G = LANG.formal
  * می‌گوید گاردِ پرسروصدا همان‌قدر بی‌فایده است که گاردِ ساکت. */
 const PREAMBLE = /^(خب|خُب|ببین|راستش|بذار|بگذار|اجازه بده|قبل از|اول از همه|در مورد|درباره‌ی|درباره ی|در پاسخ|در جواب|سؤالت|سوالت|این سؤال|این سوال|بریم سراغ)/;
 
+/* ═══ الگوهای ترنسکریپتِ ۱۴۰۵/۰۶/۲۲ ═══
+ * هر چهار الگوی پایین از یک مکالمه‌ی ۲۵نوبتیِ **واقعیِ** مالک آمدند، نه از شهود. و
+ * هر چهار عمداً روی **نقضِ یک قاعده‌ی موجودِ پرامپت** می‌نشینند نه روی معنا، چون
+ * الگوی معنایی روی خروجیِ سالم قرمزِ کاذب می‌دهد (بند ۲و/۶ب-۲ ریشه).
+ *
+ * ⚠️ درسِ روشی که این‌جا رعایت شده: گاردِ نامِ کارت («هر نامی که در این فال نیست»)
+ * عمداً **ساخته نشد**. دو مثبتِ کاذبِ مستقل داشت — نامِ مترادف (اگر کاتالوگ «راهب»
+ * داشته باشد و مدل «خردمند» بنویسد دربارهٔ همان کارتِ داخلِ فال)، و اینکه خودِ
+ * پرامپت نام‌بردنِ کارتِ **غایب** را صریحاً مجاز کرده («اگر کارتی که انتظارش را
+ * دارد در دست نیست، بگو که نیامده»). پس فابریکیشن فقط از راهِ **شکلِ فهرست** گرفته
+ * می‌شود، و فالِ جعلیِ کاماجدا (بدونِ شماره) صادقانه **بیرونِ دامنه‌ی سنجه** است. */
+
+// فهرستِ شماره‌دار یا بولت — پرامپت: «بدونِ تیتر، بولد، بولت و شماره».
+// عددِ دنبالِ نقطه عمداً با `(?=\s)` بسته شده تا «۰.۵» و «۱۲۳» (شماره‌ی خطِ حمایت)
+// و «۳۰٬۰۰۰» هیچ‌کدام شمرده نشوند.
+const LIST_MARK = /(?:^|[\s،,؛])([۰-۹0-9]{1,2})[.)](?=\s)/gu;
+const BULLET_LINE = /^\s*[-•*▪]\s+\S/u;
+
+/* شماره‌ی اورژانس — امضای «مدل نقشِ دیسپچر گرفت».
+ * ⚠️ عمداً عدد به‌تنهایی کافی نیست: با ویژنِ کمکِ عمومی، «۱۲۳ هزار تومان» جوابِ
+ * سالمِ یک سؤالِ حساب است. پس عدد باید در **همان جمله** با یک واژه‌ی اورژانسی بیاید. */
+const EMERG_NUM = /(?:^|[^۰-۹0-9])(۱۱۰|۱۱۵|۱۲۳|۱۲۵|110|115|123|125)(?:[^۰-۹0-9]|$)/u;
+const EMERG_WORD = /(اورژانس|آمبولانس|پلیس|تماس بگیر|زنگ بزن|فوری|امداد)/u;
+
+/* نشتِ دستورهای داخلی. در ترنسکریپت مدل متنِ پرامپت را **نداد** ولی خلاصه‌اش را داد
+ * («پاسخ‌ها باید کوتاه، گفتاری و متکی به کارت‌های همین فال باشند…») که همان
+ * مهندسیِ معکوس است. جوابِ سالمِ گفتگو عملاً هیچ‌وقت درباره‌ی دستورهای خودش حرف نمی‌زند. */
+const PROMPT_LEAK = /(سیستم[‌ ]?پرامپت|پرامپت(م|ت|ش)?\b|دستور(های|ات|های‌)? داخلی|دستورالعمل(م|ی)?\b|قواعد(م|ی)? (که|را)|instruction|system prompt)/iu;
+
+// حرفِ لاتین. **نکته** است نه ایراد: با کمکِ عمومی، لاتینِ مشروع ممکن است بیاید
+// (نامِ محصول، اصطلاح). در ترنسکریپت «خردمند (The Hermit)» بود، که فابریکیشن بود.
+const LATIN_RUN = /[A-Za-z]{3,}/g;
+
 function firstLineAnswers(reply, question) {
   const lines = linesOf(reply);
   const first = lines[0] || '';
@@ -70,15 +103,36 @@ function firstLineAnswers(reply, question) {
  * @param reply متنِ **پاک‌شده** (همان چیزی که کاربر می‌بیند؛ خروجیِ `cleanChatReply`)
  * @param raw   متنِ خامِ مدل، فقط برای شمردنِ چیزی که کد پاکش کرده (خط تیره)
  */
-export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [], question = '' }) {
+export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [], question = '',
+  offDomain = false, canned = false }) {
   const issues = [], notes = [];
   const anchors = { cardNames, questionWords };
   const lines = linesOf(reply);
   const chars = String(reply || '').length;
 
-  // ۱) قلابِ خطِ آخر — **همان تابعی** که ربات هم لاگش می‌کند.
+  /* ⚠️ نوبتِ `canned` = پیامِ ثابتِ خودمان (گاردِ بحران، تعارف، پی‌وال)، نه خروجیِ مدل.
+   * سنجیدنش با قواعدِ نثرِ مدل یعنی سنجیدنِ متنِ خودمان با معیارِ اشتباه: پیامِ بحران
+   * عمداً لنگر ندارد (کارت‌ها جای آن حرف نیستند) و عمداً ۱۲۳ دارد. نسخه‌ی اولِ همین
+   * سنجه هر دو را «ایراد» گزارش کرد. فقط شمرده می‌شود، قضاوت نمی‌شود. */
+  if (canned) {
+    return { lines: lines.length, chars, canned: true, hook: { ok: true, why: '' }, hookExempt: false,
+      chatbait: 0, formal: [], bookish: [], labelEcho: '', dashes: 0, dashesRaw: 0, qmarks: 0,
+      firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', promptLeak: '', cardForce: '',
+      latin: 0, offDomain, issues, notes };
+  }
+
+  /* ۱) قلابِ خطِ آخر — **همان تابعی** که ربات هم لاگش می‌کند.
+   *
+   * ⚠️ معافیتِ `offDomain`: سؤالِ بیرونِ دامنه («پایتخت انگلیس رو بگو») جوابِ درستش
+   * **کوتاه و بی‌لنگر** است، و قاعده‌ی قلاب آن را `short`/`noanchor` می‌خواند. این
+   * دقیقاً همان اجباری است که در ترنسکریپتِ ۱۴۰۵/۰۶/۲۲ مدل را وادار کرد به «پایتخت
+   * انگلستان لندن است» یک جمله‌ی کارتی بچسباند — یعنی سنجه داشت همان رفتارِ بدی را
+   * تشویق می‌کرد که مالک از آن شکایت کرد. `chatbait` معاف **نمی‌شود**: تعارفِ توخالی
+   * در هیچ دامنه‌ای مجاز نیست. */
   const hook = hookOk(reply, anchors);
-  if (!hook.ok) issues.push(`قلابِ خطِ آخر: ${hook.why}${hook.hit ? ` («${hook.hit}»)` : ''}`);
+  const hookExempt = offDomain && (hook.why === 'short' || hook.why === 'noanchor');
+  if (!hook.ok && !hookExempt) issues.push(`قلابِ خطِ آخر: ${hook.why}${hook.hit ? ` («${hook.hit}»)` : ''}`);
+  else if (hookExempt) notes.push(`قلابِ خطِ آخر معاف شد (بیرونِ دامنه: ${hook.why})`);
 
   /* ۲) chatbait در **هر** خط، نه فقط خطِ آخر. `hookOk` روی یک خطِ تنها همان لیست و
    * همان نرمال‌سازیِ chat-core را اجرا می‌کند و chatbait را قبل از هر شرطِ دیگری
@@ -168,8 +222,54 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     notes.push(`${lines.length} خط (هدف ${LINE_MIN} تا ${LINE_MAX})`);
   }
 
-  return { lines: lines.length, chars, hook, chatbait: bait.length, formal, bookish, labelEcho,
-    dashes, dashesRaw, qmarks, firstLine, issues, notes };
+  /* ۸) فالِ جعلی — شکلِ **فهرست**.
+   * امضای دقیقِ فابریکیشنِ ترنسکریپت: «۱. امپراتور، ۲. هشت سکه، ۳. چرخ بخت …» (ده
+   * کارتِ ساخته‌شده، یعنی محصولِ ۱۰ الماسی به بهای ۱ الماس). هر دو شکل سنجیده می‌شود
+   * چون `splitChatLines` ممکن است فهرست را بشکند یا یک‌تکه بگذارد. */
+  LIST_MARK.lastIndex = 0;
+  const numMarks = (String(reply).match(LIST_MARK) || []).length;
+  const bulletLines = lines.filter((ln) => BULLET_LINE.test(ln)).length;
+  const listMarks = numMarks + bulletLines;
+  if (listMarks >= 3) {
+    issues.push(`شکلِ فهرست (${listMarks} نشانگر) — پرامپت بولت و شماره را ممنوع کرده؛ امضای فالِ جعلی`);
+  }
+
+  /* ۹) نقشِ اورژانس. این‌جا فقط جوابِ **تولیدشده‌ی مدل** می‌رسد (نوبتِ `canned` بالاتر
+   * برگشته)، پس شماره‌ی اورژانس یعنی مدل خودش دیسپچر شده. */
+  let emergency = '';
+  for (const ln of lines) {
+    const m = ln.match(EMERG_NUM);
+    if (m && EMERG_WORD.test(ln)) { emergency = m[1]; break; }
+  }
+  if (emergency) {
+    issues.push(`نقشِ اورژانس: شماره‌ی «${emergency}» در جوابِ مدل — این کارِ تاروت‌خوان نیست`);
+  }
+
+  // ۱۰) نشتِ دستورهای داخلی (بازگویی یا خلاصه‌کردنِ قواعدِ خودش).
+  const promptLeak = (String(reply).match(PROMPT_LEAK)?.[0] || '').trim();
+  if (promptLeak) issues.push(`نشتِ دستورها: «${promptLeak}»`);
+
+  /* ۱۱) چپاندنِ کارت در جوابِ بیرونِ دامنه.
+   * نقطه‌مقابلِ معافیتِ بندِ ۱: آن‌جا **نبودِ** لنگر را بخشیدیم، این‌جا **بودنش** ایراد
+   * است. «پایتخت انگلستان لندن است. کارت‌های این فال درباره‌ی مسیر بیزینست بودند» —
+   * جمله‌ی دوم همان چیزی است که مالک «واقعی نبود» خواند. */
+  let cardForce = '';
+  if (offDomain) {
+    const nr = norm(reply);
+    for (const c of cardNames) {
+      const n = norm(c);
+      if (n.length >= 3 && nr.includes(n)) { cardForce = c; break; }
+    }
+    if (cardForce) issues.push(`چپاندنِ کارت در جوابِ بیرونِ دامنه: «${cardForce}»`);
+  }
+
+  // ۱۲) حرفِ لاتین — نکته، نه ایراد (بالا توضیح داده شده).
+  const latin = (String(reply).match(LATIN_RUN) || []);
+  if (latin.length) notes.push(`حرفِ لاتین (${latin.length}×): «${latin.slice(0, 3).join('»، «')}»`);
+
+  return { lines: lines.length, chars, canned: false, hook, hookExempt, chatbait: bait.length,
+    formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency,
+    promptLeak, cardForce, latin: latin.length, offDomain, issues, notes };
 }
 
 /**

@@ -294,10 +294,12 @@ export default {
      * farsi, pero en español **todavía sin probar**: `CHAT_LOCALES = ['fa']` deja toda
      * esta rama como código muerto en la primera versión (igual que el bloque invoice
      * de más abajo). */
-    chatStart: '💬 Hablar de esta lectura con el tarotista',
+    chatStart: '💬 Hablar de esta misma lectura con el tarotista',
     chatAnotherReading: '🔮 Quiero otra lectura',
     chatSkip: '◀️ Mis sugerencias',
     chatBack: '💬 Volver a la conversación',
+    chatKeep: '💬 Sigo acá',
+    chatClose: '✖️ Cerrar la conversación',
     dailyAfterOnboard: '🎴 Ver mi carta de hoy (gratis)',
     gateOpenChannel: '📢 Abrir el canal de la carta del día',
     gateCheck: '✅ Ya me uní, revisa',
@@ -842,20 +844,31 @@ export default {
     // está fijo en index.js: primero la conversación (el pico del momento), después una
     // lectura nueva, y solo al final la puerta de salida a las sugerencias de siempre.
     offer: 'Tu lectura terminó ✅\n\nSi te quedó alguna pregunta dando vueltas, aquí mismo se la puedes hacer al tarotista.',
+    offerDone: 'Cuando quieras, puedes hablar de esta misma lectura con el tarotista 💬',
     // Mensaje de entrada. Es un estado de escritura, así que **no lleva ningún botón**
     // (punto ۹ب) y el saldo a propósito no se muestra: nadie debería sentirse empujado a
     // juntar varias preguntas en un solo mensaje. El precio llega por parámetro para que
     // `CHAT_PRICE` siga siendo fuente única.
-    intro: (price, cur) => `Va 💬\n\nPregúntame lo que quieras sobre tu lectura y te respondo.\nCada pregunta descuenta ${moneyTight(price, cur)} de tus ${purse(cur)}.\n\n⬇️ *Escribe tu pregunta aquí mismo*`,
+    intro: (price, cur, balance, free) => {
+      const cost = free
+        ? `La primera pregunta va por mi cuenta 🎁\nDe la segunda en adelante, cada pregunta descuenta ${moneyTight(price, cur)} de tus ${purse(cur)}.`
+        : `Cada pregunta descuenta ${moneyTight(price, cur)} de tus ${purse(cur)}.`;
+      return `Pregúntame lo que quieras sobre tu lectura y te respondo 💬\n\n${cur?.on ? quote(cost) : cost}\n💠 ${purseLine(balance, cur)}\n\n⬇️ <b>Escribe tu pregunta aquí mismo</b>`;
+    },
     // Vuelta a una conversación a medias: la misma invitación, sin repetir el precio
     // (ya se vio una vez, y repetirlo en cada vuelta se convierte en recordatorio de gasto).
-    resumed: 'Volvimos a la conversación 💬\n\n⬇️ *Escribe tu pregunta*',
+    resumed: 'Volvimos a la conversación 💬\n\n⬇️ <b>Escribe tu pregunta</b>',
     // Saldo corto. Sus botones son los mismos `walletRows` de siempre más «volver a la conversación».
-    needBalance: (price, cur) => `Esta pregunta cuesta ${moneyTight(price, cur)} y tus ${purse(cur)} no alcanzan 💎`,
+    needBalance: (price, cur, balance, parked) =>
+      `Esta pregunta cuesta ${moneyTight(price, cur)} y tus ${purse(cur)} no alcanzan 💎`
+      + (parked ? '\n\nGuardé tu pregunta: apenas se recargue el saldo, la respuesta llega acá mismo 🤝' : '')
+      + `\n\n💠 ${purseLine(balance, cur)}`,
     // Falla total del modelo después de todos los respaldos. Con honestidad, y diciendo claro que se devolvió.
     failed: (price, cur) => `Esta vez no me llegó respuesta 🙏 Te devolví ${moneyTight(price, cur)} a tus ${purse(cur)}.\n\nPregunta de nuevo; casi siempre sale a la segunda.`,
+    failedFree: 'Esta vez no me llegó respuesta 🙏 Y no se te descontó nada.\n\nPregunta de nuevo; casi siempre sale a la segunda.',
     // Barrido de arranque: la pregunta que se quedó sin respuesta en medio de un reinicio.
     refunded: (price, cur) => `Una pregunta tuya se quedó sin respuesta a medio camino 🙏 Te devolví ${moneyTight(price, cur)} a tus ${purse(cur)}.\n\nPregunta otra vez cuando quieras.`,
+    refundedFree: 'Una pregunta tuya se quedó sin respuesta a medio camino 🙏 Y no se te descontó nada.\n\nPregunta otra vez cuando quieras.',
     // Audio dentro de la conversación (la primera versión es solo texto). Gratis y sin descuento.
     voiceOnly: '🎙 En la conversación por ahora solo leo texto.\n\n⬇️ *Escribe tu pregunta en un mensaje*',
     // Cortesía o saludo: gratis, con una invitación suave a la pregunta de verdad.
@@ -867,6 +880,8 @@ export default {
     // Botón viejo sobre una lectura que ya no admite conversación.
     unavailable: 'Esta lectura ya no está abierta para conversar 🌙',
     off: 'Conversar sobre la lectura no está disponible por ahora 🌙',
+    openGuard: 'Tienes una conversación abierta 💬\n\n¿La seguimos o la cerramos?',
+    closed: 'Conversación cerrada ✅\n\nCuando quieras puedes seguir desde aquí 💬',
     // 🤍 Guarda de crisis. Corre **antes** del descuento y sin una sola llamada al modelo.
     // El texto deja las cartas de lado a propósito y manda a una persona real (punto ۲و/۶
     // y Model Spec §respect_real_world_ties: el bot no reemplaza los vínculos de verdad).
