@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` / `price_ladder_p2`، v3.80.0).
+// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` / `price_ladder_p2` / `price_ladder_p3`،
+// v3.80.0 + v3.94.0).
 //
 // چرا این فایل هست: تا امروز قیمت یک **ثابت** بود و `COIN_PACKAGES` تنها منبعش. از این
 // نسخه قیمت per کاربر است، و آن لحظه سه چیز می‌توانند بی‌صدا خراب شوند — هر سه روی
@@ -56,7 +57,7 @@ const parsePacks = (block) => [...(block || '').matchAll(
     toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4],
   }));
 
-console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 / price_ladder_p2)\n');
+console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 / price_ladder_p2 / price_ladder_p3)\n');
 
 /* ══ ۰) بریدنِ بلوکِ منطق از سورس ═══════════════════════════════════════════
  * یک ناحیه‌ی پیوسته: از تعریفِ نردبان‌ها تا آخرین helper. هرچه این ناحیه کوچک‌تر
@@ -84,9 +85,9 @@ function build({ src = REGION, starsRail = false, db = null, extraOn = false } =
 const M = build();
 
 /* ══ ۱) سه نردبان، و control یک **ارجاع** است نه یک کپی ═══════════════════ */
-console.log('\n۱) سه نردبان');
+console.log('\n۱) چهار نردبان');
 const arms = Object.keys(M.PRICE_LADDERS);
-ok(arms.join(',') === 'control,floor,cheap', `سه بازو تعریف شده: ${arms.join(', ')}`);
+ok(arms.join(',') === 'control,floor,cheap,bulk', `چهار بازو تعریف شده: ${arms.join(', ')}`);
 // ⚠️ اگر control یک **کپیِ دستی** از قیمت‌ها باشد، اولین تغییرِ قیمتِ آینده فقط یکی از
 // آن دو را عوض می‌کند و بازوی کنترل بی‌صدا از محصول جدا می‌شود (بند ۲ج/۴: کنترل =
 // رفتارِ قبلی، نه «چیزی که روزی رفتارِ قبلی بود»).
@@ -126,6 +127,15 @@ ok(JSON.stringify(cheap.map(p => p.coins)) === JSON.stringify(floor.map(p => p.c
 ok(cheap.every((p, i) => p.toman < floor[i].toman),
   'و قیمتِ هر سه بسته اکیداً پایین‌تر است');
 
+/* 🆕 `bulk` (price_ladder_p3): فرضیه‌اش «حجمِ الماسِ بیشتر در بسته‌های میانی/بالا»
+ * است، نه تومانِ کمتر. تنها متغیرِ کنترل‌شده‌اش این است که بسته‌ی اول (basic) عمداً
+ * دست‌نخورده بماند؛ گارد را همین‌جا بگیر، نه با فرضِ تک‌متغیره بودنِ کلِ نردبان. */
+const { bulk } = M.PRICE_LADDERS;
+ok(JSON.stringify(bare([bulk[0]])) === JSON.stringify(bare([control[0]])),
+  'bulk ⟶ basic دست‌نخورده است (تنها متغیرِ این فرضیه دو بسته‌ی بالاتر است)');
+ok(bulk[1].coins > control[1].coins && bulk[2].coins > control[2].coins,
+  'و بسته‌ی ویژه/جادوییِ bulk حجمِ الماسِ بیشتری از control دارند (خودِ فرضیه)');
+
 /* ⚠️ کفِ قیمت نباید زیرِ گاردِ اشتباهِ تایپیِ مسیرِ تومانیِ کهنه برود. امروز پرداختِ
  * بسته‌ای اصلاً از آن مسیر رد نمی‌شود، ولی گاردی که به بسته‌بودنِ یک مسیرِ دیگر تکیه
  * کند یک تله‌ی خفته است (درسِ ثبت‌شده‌ی v3.70.0). */
@@ -136,9 +146,9 @@ ok(Number.isFinite(MIN_RECHARGE) && lowest >= MIN_RECHARGE,
 
 /* ══ ۳) رفتار: بازو روی SQLite واقعی ═════════════════════════════════════ */
 console.log('\n۳) رفتارِ priceArm (روی shared/ab.js واقعی)');
-const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2';
-ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P2, P1]),
-  'فازِ جدیدتر اولِ فهرست است (اولویت با p2)');
+const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3';
+ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P3, P2, P1]),
+  'فازِ جدیدتر اولِ فهرست است (اولویت با p3)');
 
 function freshDb() {
   const db = new Database(':memory:');
@@ -210,6 +220,17 @@ let splitP1 = null;
   const m = build({ db });
   const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
   ok(uniq.join(',') === 'cheap,floor', `فازِ دوم بر فازِ اول مقدم است (${uniq.join(', ')})`);
+  db.close();
+}
+
+{ // p3 بر هر دوی p1 و p2 مقدم است (تازه‌ترین آزمایش همیشه اولویتِ اول است)
+  const db = freshDb();
+  startExp(db, P1, 'running', W5050);
+  startExp(db, P2, 'running', [{ key: 'floor', weight: 50 }, { key: 'cheap', weight: 50 }]);
+  startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
+  const m = build({ db });
+  const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
+  ok(uniq.join(',') === 'bulk,control', `فازِ سوم بر هر دوی فازِ اول و دوم مقدم است (${uniq.join(', ')})`);
   db.close();
 }
 
@@ -356,6 +377,29 @@ const mutate = (from, to) => {
   const src = SRC.replace('const pack = packForUser(uid, ctx.match[1]);', 'const pack = PACKAGE_BY_KEY[ctx.match[1]];');
   ok(src !== SRC && /const pack = PACKAGE_BY_KEY\[ctx\.match\[1\]\];/.test(src),
     'جهشِ «برگشتِ pkg: به کاتالوگِ سراسری» قابلِ ساخت است و ادعای بند ۵ آن را می‌گیرد');
+}
+{
+  const m = mutate('coins: 5,    toman: 15_000 },    // ۳۰۰۰ — همان control',
+    'coins: 5,    toman: 12_000 },    // جهش');
+  const same = m && JSON.stringify(bare([m.PRICE_LADDERS.bulk[0]])) === JSON.stringify(bare([control[0]]));
+  ok(m && !same, 'جهشِ «دستکاریِ basicِ bulk» تنها-متغیربودنِ فرضیه‌ی bulk را می‌شکند (ادعای بند ۲)');
+}
+{
+  const m = mutate('coins: 2000, toman: 1_500_000 }, // ۷۵۰', 'coins: 2000, toman: 4_000_000 }, // جهش');
+  ok(m && !ladderMono(m), 'جهشِ «گران‌کردنِ magicِ bulk» نردبان را می‌شکند و ادعای بند ۱ قرمز می‌دهد');
+}
+{
+  const db = freshDb();
+  startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
+  startExp(db, P1, 'running', W5050);
+  const src = REGION.replace(
+    "const PRICE_EXPERIMENTS = ['price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p2', 'price_ladder_p1', 'price_ladder_p3'];",
+  );
+  const m = src === REGION ? null : build({ src, db });
+  ok(m && [...new Set(UIDS.map(u => m.priceArm(u)))].sort().join(',') === 'control,floor',
+    'جهشِ «بردنِ p3 به آخرِ فهرست» اولویتش را می‌شکند و ادعای بند ۳ آن را می‌گیرد');
+  db.close();
 }
 
 console.log(fail ? `\n❌ نتیجه: ${pass} پاس، ${fail} خطا\n` : `\n✅ نتیجه: ${pass} پاس، ۰ خطا\n`);
