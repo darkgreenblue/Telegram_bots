@@ -131,8 +131,11 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
     ${src}}
     return ensureKeyboard;`) : null;
   const NOW = Math.floor(Date.now() / 1000);
-  const scenario = async (u, state) => {
-    const log = { sent: 0, deleted: 0, silent: null, revClaims: 0, shownClaims: 0 };
+  const scenario = async (u, state, sendFails = false) => {
+    const log = {
+      sent: 0, deleted: 0, silent: null, revClaims: 0, shownClaims: 0,
+      restoredShown: null, restoredRev: null,
+    };
     const fnR = run({
       getUser: () => u, getState: () => state, mainKeyboard: () => ({ reply_markup: 'KB' }),
       L: { onboarding: { kbRefresh: 'x' } }, KB_REV: 1,
@@ -140,12 +143,18 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
       stmts: {
         claimKbRev: { run: () => { log.revClaims++; return { changes: (u.kb_rev || 0) < 1 ? 1 : 0 }; } },
         claimKbShown: { run: (_uid, cut) => { log.shownClaims++; return { changes: (u.kb_shown_at || 0) < cut ? 1 : 0 }; } },
+        // ⏪ همان stubهایی که رول‌بکِ v3.93.0 صدا می‌زند؛ فقط آرگومان‌هایشان را ضبط می‌کنند.
+        restoreKbShown: { run: (val, _uid) => { log.restoredShown = val; } },
+        restoreKbRev: { run: (val, _uid) => { log.restoredRev = val; } },
       },
     });
     await fnR({
-      sendMessage: (_id, _t, o) => { log.sent++; log.silent = o.disable_notification; return Promise.resolve({ message_id: 5 }); },
+      sendMessage: (_id, _t, o) => {
+        log.sent++; log.silent = o.disable_notification;
+        return sendFails ? Promise.reject(new Error('blocked')) : Promise.resolve({ message_id: 5 });
+      },
       deleteMessage: () => { log.deleted++; return Promise.resolve(); },
-    }, 7);
+    }, 7).catch(() => {});
     return log;
   };
   const base = { welcomed: 1, kb_rev: 1 };
@@ -214,11 +223,46 @@ console.log('\n  — 🧪 رفتارِ واقعیِ تابع:');
       getUser: () => ({ welcomed: 1, kb_rev: 1, kb_shown_at: 0 }), getState: () => 'idle',
       mainKeyboard: () => ({}), L: { onboarding: { kbRefresh: 'x' } }, KB_REV: 1,
       KB_QUIET_STATES: new Set(), logErr: () => {},
-      stmts: { claimKbRev: { run: () => ({ changes: 0 }) }, claimKbShown: { run: () => ({ changes: 1 }) } },
+      stmts: {
+        claimKbRev: { run: () => ({ changes: 0 }) }, claimKbShown: { run: () => ({ changes: 1 }) },
+        restoreKbShown: { run: () => {} }, restoreKbRev: { run: () => {} },
+      },
     });
     let threw = false;
     await fnR({ sendMessage: () => Promise.reject(new Error('blocked')) }, 7).catch(() => { threw = true; });
     ok(!threw, 'شکستِ ارسال (کاربرِ بلاک‌کرده) استثنا بیرون نمی‌دهد');
+  }
+
+  /* ══ ۳ه) باگِ زنده‌ی v3.93.0: مهر فقط بعد از ارسالِ **تأییدشده** واقعی می‌ماند ══
+     🐛 مالک با اسکرین‌شاتِ زنده گرفتش: به‌عنوانِ ادمین نه در آنبوردینگ بود نه هیچ منویی
+     می‌دید. لاگِ سرور همان روز پر بود از `403 Forbidden: bot was blocked` و
+     `ECONNRESET` دقیقاً روی همین `sendMessage`. تا این نسخه، مهرِ `kb_shown_at`/`kb_rev`
+     **قبل از تأییدِ ارسال** می‌خورد؛ اگر ارسال شکست می‌خورد، ادعای «کیبورد رفت» دروغ
+     می‌ماند و کاربر تا ۲۴ ساعتِ بعد (یا تا وقتی خودش `/start` بزند) هیچ راهِ ترمیمی
+     نداشت. حالا شکستِ ارسال هر دو مهر را به مقدارِ **دقیقاً قبلی** برمی‌گرداند. */
+  console.log('\n  — 🩹 رول‌بکِ مهر روی شکستِ ارسال (v3.93.0):');
+  {
+    const prevShown = NOW - 40 * 86400;   // مقدارِ واقعیِ قبل از claim، نه صفر
+    const okUser = { welcomed: 1, kb_rev: 0, kb_shown_at: prevShown };
+    const failLog = await scenario(okUser, 'idle', /* sendFails */ true);
+    ok(failLog.sent === 1, 'با شکستِ ارسال هم تلاشِ واقعی برای فرستادن انجام می‌شود');
+    ok(failLog.restoredShown === prevShown,
+      `مهرِ kb_shown_at به مقدارِ دقیقِ قبلی برمی‌گردد (بود: ${failLog.restoredShown}, انتظار: ${prevShown})`);
+    ok(failLog.restoredRev === 0,
+      `مهرِ kb_rev هم به مقدارِ دقیقِ قبلی (۰) برمی‌گردد، چون این کاربر بمپِ رول‌بکِ نسخه هم داشت (بود: ${failLog.restoredRev})`);
+
+    // 🔎 کنترلِ مثبت (بند ۶ب-۲ ریشه): وقتی ارسال **موفق** است، رول‌بک اصلاً صدا زده
+    // نمی‌شود — وگرنه یک هارنسی که همیشه رول‌بک می‌کند هم همان ادعاهای بالا را پاس می‌داد.
+    const okLog = await scenario({ ...okUser }, 'idle', /* sendFails */ false);
+    ok(okLog.restoredShown === null && okLog.restoredRev === null,
+      'با ارسالِ موفق، هیچ رول‌بکی صدا زده نمی‌شود');
+
+    // و ترتیب: رول‌بک باید **بعد از** تلاشِ ارسال باشد (وگرنه یعنی همیشه رول‌بک می‌کند)
+    const iTry = fn ? fn.indexOf('await tg.sendMessage(') : -1;
+    const iCatch = fn ? fn.indexOf('catch (sendErr)') : -1;
+    const iRestore = fn ? fn.indexOf('restoreKbShown') : -1;
+    ok(iTry > -1 && iCatch > iTry && iRestore > iCatch,
+      'رول‌بک فقط داخلِ catchِ خودِ ارسال است، نه قبل یا مستقل از آن');
   }
 }
 

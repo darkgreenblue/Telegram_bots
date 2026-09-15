@@ -272,72 +272,38 @@ ok('و دکمه‌ی دعوت هم دارد', /inviteRow\(ref\.referrer_id\)/.te
 // متنِ locale واقعاً موجودی را چاپ می‌کند
 ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referralReward:\s*\(name, bonus, cur, balance/.test(LOC));
 
-const USERS = {
-  1: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // پیش‌فرض، بدونِ exposure
-  2: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // شاخه‌ی lucky
-  3: { daily_reminder_off: 0, lucky_reminder_on: 0 }, // شاخه‌ی control
-  4: { daily_reminder_off: 1, lucky_reminder_on: 0 }, // خودش خاموش کرده
-  5: { daily_reminder_off: 0, lucky_reminder_on: 1 }, // قبلاً opt-in کرده (شاخه‌ی control)
-  6: { daily_reminder_off: 1, lucky_reminder_on: 1 }, // حالتِ متناقضِ قدیمی
-};
-const ARM_BY_UID = { 2: 'lucky', 3: 'control', 5: 'control', 6: 'control' };
-
-/* ═══════ ۷.۵) «🔕 دیگه یادآوری نکن» فقط زیرِ یادآوریِ شبانه ═══════
-   قاعده‌ی صریحِ مالک (۱۴۰۵/۰۶/۰۵). پیشنهادِ خاموشی زیرِ پیامی که خودِ کاربر بازش کرده،
-   دعوت به انصراف است؛ فقط جایی مجاز است که کاربر یک پیامِ **ناخواسته** گرفته باشد. */
+/* ═══════ ۷.۵) دکمه‌ی «فردا یادآوری کن» کاملاً حذف شد (v3.93.0) ═══════
+   قاعده‌ی صریحِ مالک: یادآوریِ شبانه از v3.82.0 بای‌دیفالت برای همه روشن است، پس
+   پیشنهادِ «فردا یادآوری کن» ته دستِ کارتِ شانس دیگر معنایی ندارد — همیشه پیشنهادِ
+   روشن‌کردنِ چیزی بود که از قبل روشن است (باگِ ثبت‌شده‌ی v3.85.0، این‌بار به‌جای
+   فیکسِ چهارم، خودِ دکمه و منطقِ «پوشیده بودن»اش حذف شدند). تنها دو راهِ خاموش‌کردن
+   می‌ماند: دکمه‌ی «دیگه یادآوری نکن» زیرِ خودِ یادآوریِ شبانه، یا صفحه‌ی تنظیمات. */
 {
-  // ردیفِ کارت شانس از سورس بریده و **اجرا** می‌شود، نه رجکس روی نامش.
-  // ⚠️ تا انتهای **همان دستور** بریده می‌شود (اولین `;` در پایانِ خط)، نه تا یک الگوی
-  // نقطه‌ایِ `]]);`: نسخه‌ی اول به علامت‌گذاریِ دقیق گره خورده بود و یک تغییرِ بی‌ضررِ
-  // شکلِ کد به‌جای شکستِ تمیزِ ادعا، کلِ چک را با خطای سینتکس می‌ترکاند.
-  const rowSrc = (SRC.match(/const luckyReminderRow = [\s\S]*?;\n/) || [])[0] || '';
-  ok('ردیفِ یادآوریِ کارت شانس از سورس استخراج شد', !!rowSrc);
-  let row = null;
-  try {
-    row = new Function('L', 'Markup', `${rowSrc} return luckyReminderRow;`)(
-      REAL, { button: { callback: (t, d) => ({ t, d }) } });
-  } catch { /* پایین به‌صورتِ ادعای شکست‌خورده گزارش می‌شود، نه کرش */ }
-  ok('ردیفِ استخراج‌شده اجرا شد', typeof row === 'function');
-  const off = row ? row(false) : null, on = row ? row(true) : null;
-
-  /* «پوشیده بودن» خودش هم از سورس بریده و روی هر پنج حالت اجرا می‌شود. این منطق تعیین
-     می‌کند دکمه به چه کسی نشان داده شود، و باگی که مالک دید دقیقاً همین‌جا بود. */
-  const covSrc = (SRC.match(/const stAssignedArm = [\s\S]*?\n\}\n/) || [])[0] || '';
-  ok('منطقِ «پوشیده بودن» از سورس استخراج شد', /function luckyReminderCovered/.test(covSrc));
-  let covered = null;
-  try {
-    covered = new Function('db', 'NIGHT_EXP', 'getUser', `${covSrc} return luckyReminderCovered;`)(
-      { prepare: () => ({ get: (_k, uid) => (ARM_BY_UID[uid] ? { variant: ARM_BY_UID[uid] } : undefined) }) },
-      'night_reminder', (uid) => USERS[uid]);
-  } catch { /* پایین ادعای شکست‌خورده می‌شود */ }
-  ok('منطقِ «پوشیده بودن» اجرا شد', typeof covered === 'function');
-  if (covered) {
-    // ۱) پیش‌فرض: یادآوری روشن، هنوز هیچ پیامی نگرفته → دکمه **نباید** دیده شود (خودِ باگ)
-    ok('کاربرِ پیش‌فرضِ بدونِ exposure دکمه نمی‌بیند', covered(1) === true);
-    // ۲) شاخه‌ی lucky: همان یادآوری را می‌گیرد → دکمه لازم نیست
-    ok('کاربرِ شاخه‌ی lucky دکمه نمی‌بیند', covered(2) === true);
-    // ۳) شاخه‌ی control: یادآوریِ کارتِ روز می‌گیرد نه کارتِ شانس → دکمه می‌بیند (دیتای تحلیل)
-    ok('کاربرِ شاخه‌ی control دکمه می‌بیند', covered(3) === false);
-    // ۴) خودش خاموش کرده → دکمه می‌بیند (راهِ برگشت)
-    ok('کاربرِ خاموش‌کرده دکمه می‌بیند', covered(4) === false);
-    // ۵) قبلاً opt-in کرده → دیگر پرسیده نمی‌شود، حتی در شاخه‌ی control
-    ok('کاربرِ opt-in‌کرده دیگر دکمه نمی‌بیند', covered(5) === true);
-    // ۶) خاموش‌بودنِ کلی بر opt-inِ قدیمی مقدم است
-    ok('خاموشیِ کلی بر opt-inِ قدیمی مقدم است', covered(6) === false);
+  // منطقِ حذف‌شده دیگر نباید در سورس باشد؛ وگرنه یعنی کدِ مرده برگشته یا کسی دوباره
+  // ساخته بدونِ به‌روزرسانیِ این چک.
+  for (const gone of ['luckyReminderRow', 'luckyReminderCovered', 'stAssignedArm', 'assignedNightArm']) {
+    ok(`${gone} دیگر در سورس نیست (حذفِ v3.93.0)`, !SRC.includes(gone));
   }
-  // ⚠️ مهم‌ترین ادعا: این مسیر نباید کسی را وارد آزمایش کند
-  ok('مسیرِ کارت شانس هیچ exposure تازه‌ای نمی‌سازد (variant صدا زده نمی‌شود)',
-     !/variant\(db, uid, NIGHT_EXP\)/.test(covSrc));
-  ok('فقط انتسابِ ثبت‌شده خوانده می‌شود', /SELECT variant FROM ab_exposures/.test(covSrc));
-  // دیتای تحلیل: مخرج (چند نفر دکمه را دیدند) و صورت (چه کسی زد، در کدام شاخه)
-  ok('رویدادِ lucky_card مخرجِ دکمه را ثبت می‌کند', /remind_btn: luckyReminderCovered\(uid\) \? 0 : 1/.test(SRC));
-  ok('رویدادِ lucky_reminder شاخه را ثبت می‌کند', /'lucky_reminder', \{ on: on \? 1 : 0, arm:/.test(SRC));
-  ok('کاربرِ opt-in‌نکرده دکمه‌ی «فردا یادآوری کن» می‌بیند',
-     !!off && off.length === 1 && off[0][0].d === 'lremind:1'
-     && off[0][0].t === REAL.buttons.luckyRemindOn);
-  ok('بعد از opt-in هیچ دکمه‌ای نمی‌ماند (حذف، نه تبدیل)', Array.isArray(on) && on.length === 0);
-  ok('این ردیف هرگز دکمه‌ی خاموشی نمی‌سازد',
-     !JSON.stringify([off, on]).includes('lremind:0'));
+
+  // پایانِ دستِ کارتِ شانس (بلوکِ ثبتِ رویداد + پیامِ نتیجه) هیچ کیبوردی نمی‌سازد.
+  const handEnd = (() => {
+    const i = SRC.indexOf("track(db, uid, 'lucky_card',");
+    if (i < 0) return '';
+    const j = SRC.indexOf('\n});', i);
+    return j > -1 ? SRC.slice(i, j) : '';
+  })();
+  ok('پایانِ دستِ کارتِ شانس پیدا شد', !!handEnd);
+  ok('پیامِ نتیجه هیچ کیبوردی ندارد (بدونِ آرگومانِ سوم/extra)',
+     !!handEnd && !/Markup\.inlineKeyboard/.test(handEnd) && !/lremind:/.test(handEnd));
+  ok('showLuckyStatusِ نهایی فقط دو آرگومان می‌گیرد (متن، بدونِ extra)',
+     !!handEnd && /showLuckyStatus\(ctx, uid, `\$\{counter\}[\s\S]*?`\);/.test(handEnd));
+
+  // دیتای تحلیل: propِ حذف‌شده‌ی مخرجِ دکمه دیگر ثبت نمی‌شود؛ propِ تازه‌ی legacy جایش را
+  // در رویدادِ خودِ هندلرِ کهنه گرفته (نه چیزی که مسیرِ عادی می‌سازد).
+  ok('رویدادِ lucky_card دیگر propِ remind_btn ندارد (مخرجِ دکمه‌ی حذف‌شده)',
+     !/remind_btn/.test(SRC));
+  ok('رویدادِ lucky_reminder حالا legacy را علامت می‌زند نه arm',
+     /'lucky_reminder', \{ on: on \? 1 : 0, legacy: 1 \}/.test(SRC));
 
   // تنها مصرف‌کننده‌ی مجازِ nightRemindOff همان جاروی شبانه است.
   // نیتِ این ادعا «یک بار» نبود، «فقط زیرِ پیامِ ناخواسته‌ی شبانه» بود. از v3.38.0 جارو دو
@@ -373,13 +339,17 @@ const ARM_BY_UID = { 2: 'lucky', 3: 'control', 5: 'control', 6: 'control' };
   ok('پیامِ «امروز استفاده کردی» هیچ دکمه‌ای ندارد',
      /ctx\.reply\(L\.lucky\.already\);/.test(already) && !/Markup/.test(already));
 
-  // تپِ «فردا یادآوری کن» هیچ پیامی نمی‌فرستد.
+  // تپِ «فردا یادآوری کن» هیچ پیامی نمی‌فرستد. از v3.93.0 هندلر فقط برای دکمه‌های
+  // **کهنه‌ای** زنده است که در چتِ کاربرانِ قدیمی مانده‌اند (بند ۲ج/۶)، پس دیگر کیبورد
+  // را بازرندر نمی‌کند؛ فقط دکمه را از پیامِ کهنه برمی‌دارد.
   const lrem = (SRC.match(/bot\.action\(\/\^lremind:[\s\S]*?\n\}\);/) || [])[0] || '';
   ok('هندلرِ lremind پیدا شد', !!lrem);
   ok('تپِ یادآوری هیچ پیامی نمی‌فرستد', !/ctx\.reply\(/.test(lrem));
   ok('به‌جایش روی خودِ دکمه toast می‌دهد', /answerCbQuery\(on \? L\.lucky\.remindOnToast/.test(lrem));
-  ok('و کیبورد را با همان تک‌منبعِ «پوشیده بودن» بازرندر می‌کند',
-     /editMessageReplyMarkup\(\s*Markup\.inlineKeyboard\(luckyReminderRow\(luckyReminderCovered\(uid\)\)\)/.test(lrem));
+  ok('دیگر منطقِ «پوشیده بودن» را صدا نمی‌زند (آن تابع حذف شده)',
+     !/luckyReminderRow|luckyReminderCovered/.test(lrem));
+  ok('دکمه را از پیامِ کهنه برمی‌دارد (بدونِ بازسازیِ کیبورد)',
+     /editMessageReplyMarkup\(undefined\)/.test(lrem));
 }
 
 /* ═══════ ۷.۶) CTAی شبانه = همان برچسبِ کیبورد ═══════
