@@ -74,7 +74,7 @@ printf 'ENV_CHANGED=[%s]\\n' "\${ENV_CHANGED# }"
 
 const SECRETS = {
   OWNER_TELEGRAM_ID: '111,222',
-  VOICE2TEXT_BOT_TOKEN: 'vtok', VOICE2TEXT_OPENROUTER_KEY: 'vkey', VOICE2TEXT_NOTION_TOKEN: '',
+  VOICE2TEXT_BOT_TOKEN: 'vtok', VOICE2TEXT_OPENROUTER_KEY: 'vkey', VOICE2TEXT_METIS_API_KEY: 'mkey', VOICE2TEXT_NOTION_TOKEN: '',
   TAROT_BOT_TOKEN: 'tok', TAROT_OPENROUTER_KEY: 'key',
   // کلیدِ اختیاریِ ویدیو عمداً **ست‌شده** تست می‌شود: خطِ شرطی‌اش دقیقاً همان شکلی است
   // که اگر بیرونِ write_env بنشیند هر دیپلوی را به پینگ‌پنگِ ری‌استارت تبدیل می‌کند.
@@ -106,12 +106,26 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
   const tarotEnv = readFileSync(join(d, 'bots/tarot/.env'), 'utf8');
   chk('ADMIN_IDS در .envِ tarot نوشته شده', /^ADMIN_IDS=111,222$/m.test(tarotEnv), true);
   chk('tarot توکنِ dispatchِ ویدیو را می‌گیرد', /^VIDEO_DISPATCH_TOKEN=vidtok$/m.test(tarotEnv), true);
+  const v2tEnv = readFileSync(join(d, 'bots/voice2text/.env'), 'utf8');
+  chk('voice2text کلیدِ اختیاریِ Metis را می‌گیرد', /^METIS_API_KEY=mkey$/m.test(v2tEnv), true);
   const dashEnv = readFileSync(join(d, 'bots/dashboard/.env'), 'utf8');
   chk('dashboard ADMIN_IDS نمی‌گیرد', /ADMIN_IDS/.test(dashEnv), false);
   const dlbEnv = readFileSync(join(d, 'bots/daily-brief/.env'), 'utf8');
   chk('daily-brief کلیدِ اختیاریِ Notion را می‌گیرد', /^NOTION_TOKEN=ntok$/m.test(dlbEnv), true);
   chk('daily-brief ADMIN_IDS می‌گیرد (وگرنه مالک پشتِ گیتِ خودش می‌ماند)',
     /^ADMIN_IDS=111,222$/m.test(dlbEnv), true);
+}
+
+// ۱د) کلیدِ Metis هم اختیاری است: نبودش ساکت و افزودنش باعث reload همان بات می‌شود.
+{
+  const d = fresh('metiskey');
+  const noMetis = { ...SECRETS, VOICE2TEXT_METIS_API_KEY: '' };
+  round(d, noMetis);
+  chk('voice2text بدونِ کلید Metis در دورِ دوم ساکت است', round(d, noMetis), '');
+  const env = readFileSync(join(d, 'bots/voice2text/.env'), 'utf8');
+  chk('کلید Metis ست‌نشده اصلاً در .env نمی‌آید', /METIS_API_KEY/.test(env), false);
+  chk('افزودنِ کلید Metis فقط voice2text را reload می‌کند',
+    round(d, { ...noMetis, VOICE2TEXT_METIS_API_KEY: 'mkey' }).includes('voice2text'), true);
 }
 
 // ۱ب) کلیدِ اختیاریِ ست‌نشده هم نباید پینگ‌پنگ بسازد (بلوکِ شرطی درست جای خودش است)
