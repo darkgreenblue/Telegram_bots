@@ -935,7 +935,10 @@ console.log('\n▶ 🍀 کارت شانس — چیدمان per دست است، �
     'شمارنده **قبل از** خروجِ زودهنگام می‌آید، پس «۳ از ۳» هم نشان داده می‌شود');
   ok(/showLuckyStatus\(ctx, uid, `\$\{counter\}\\n\\n\$\{found \? L\.lucky\.won\(found\) : L\.lucky\.lost\}`/.test(lp),
     'نتیجه روی همان پیام می‌نشیند و خطِ شمارنده بالایش می‌ماند');
-  const sls = SRC.slice(SRC.indexOf('async function showLuckyStatus'), SRC.indexOf('const luckyReminderRow'));
+  // ⚠️ از v3.93.0 مرزِ پایانی دیگر `luckyReminderRow` نیست (آن تابع با حذفِ دکمه‌ی
+  // «فردا یادآوری کن» از سورس پاک شد)؛ به‌جایش خودِ تابع تا اولین `readLuckyHand` بریده
+  // می‌شود که بلافاصله بعدش می‌آید.
+  const sls = SRC.slice(SRC.indexOf('async function showLuckyStatus'), SRC.indexOf('function readLuckyHand'));
   ok(/getSession\(uid\)\?\.luckyStatusMsgId/.test(sls) && /editMessageText/.test(sls),
     'پیامِ وضعیت از شناسه‌ی ذخیره‌شده در session ادیت می‌شود (ری‌استارت‌پذیر)');
   ok(/patchSession\(uid, \{ luckyStatusMsgId: m\.message_id \}\)/.test(sls),
