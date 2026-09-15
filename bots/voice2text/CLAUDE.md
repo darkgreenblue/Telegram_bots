@@ -6,6 +6,8 @@
 ## چیستی
 ویس/فایل صوتی → متن با ۵ حالت پردازش (📝 کامل، ✂️ مفید، 📌 خلاصه، 📋 صورت‌جلسه، 🤖 پرامپت هوش مصنوعی) روی مدل‌های Gemini از OpenRouter. «پرامپت هوش مصنوعی» = ویس را که یک درخواست خطاب به AI است، با پرامپت‌اینجینیرینگ ملایم و **حفظ کامل زبان/هدف/جزئیات** به یک پرامپت استاندارد و آماده‌ی کپی‌پیست تبدیل می‌کند (فقط ساختار عوض می‌شود، نه محتوا). کیف‌پول تومانی، شارژ کارت‌به‌کارت با تأیید ادمین، کد تخفیف سگمنت‌محور، whitelist مدل Pro، ارسال به Notion (فقط مالک). Long-polling، تک‌فایل `index.js` (~۲۷۰۰ خط).
 
+**مسیر کافه‌بازار (v1.5.0):** فقط `OWNER_ID` در صفحهٔ انتخاب نوع پردازش، دکمهٔ تمام‌عرض `❌/✅ برای کافه‌بازار` را بین ردیف راهنما/تعویض پردازنده و انصراف می‌بیند. حالت پیش‌فرض `❌` قرمز = OpenRouter؛ لمس آن همان منو را با `✅` سبز بازسازی می‌کند = فقط همان فایل صوتی با `METIS_API_KEY` و Gemini REST wrapper متیس (`https://api.metisai.ir/v1beta/models/<model>:generateContent`) اجرا می‌شود. این سوییچ دائمی نیست و روی فلوهای دیگر اثر ندارد. Metis فقط مدل‌های Gemini همین ربات را می‌پذیرد؛ retry روی همان Metis است و عمداً fallbackِ GPT/OpenRouter ندارد تا هزینه هرگز به حساب نادرست نرود. نبود کلید، سوییچ را فعال نمی‌کند و مسیر عادی سالم می‌ماند.
+
 ## ثابت‌های کلیدی (ابتدای index.js)
 - `ADMIN_IDS` از env (`process.env.ADMIN_IDS`، کامای چند آی‌دی که deploy از `OWNER_TELEGRAM_ID` upsert می‌کند؛ پیش‌فرض `100257975`)؛ `OWNER_ID = ADMIN_IDS[0]` (کارهای مخرب مثل ریست فقط مالک). قرارداد یکپارچه‌ی همه‌ی ربات‌ها. پشتیبانی `@alireza_oliya`
 - کارت: `6219861904145405` (بلوبانک) — `MIN_RECHARGE=50٬000`، `WELCOME_GIFT=10٬000` تومان
@@ -79,7 +81,7 @@
 چون voice2text از `shared/` ایمپورت نمی‌کند، بلوکِ `SUPPORT_*` بالای `index.js` **کپیِ خودکفا**ی `shared/support.js` است و CI با `tools/check-support-sync.mjs` سینکشان را قفل کرده (عوض کردنِ حساب = هر دو جا). هندلر قبل از `bot.on('text')` ثبت شده، پس متنِ دکمه هیچ‌وقت به‌عنوان «مبلغ شارژ» بلعیده نمی‌شود؛ و چون فقط یک پیامِ اطلاعاتی است، `userStates` و فاکتورِ باز دست‌نخورده می‌ماند و کاربر از همان‌جا ادامه می‌دهد. رول‌بک: `SUPPORT_ENABLED = false`.
 
 ## env
-`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور)، `RECEIPT_AI_AUTO_APPROVE` (اختیاری، پیش‌فرض روشن؛ `false` = خاموش‌کردنِ auto-approveِ ایجنتِ رسید بدونِ دیپلوی)، `OPENROUTER_API_KEY_PERSONAL` (اختیاری؛ از Secret `VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED`؛ `apiKeyFor(uid)` فقط برای `OWNER_ID` — اولین `ADMIN_IDS`، پیش‌فرض `100257975` — به‌جای `OPENROUTER_API_KEY` این کلید را در فراخوانی اصلیِ رونویسی/`callAI` استفاده می‌کند؛ ست‌نشده = مثل قبل، همه از کلید مشترک). نیازمند ffmpeg/ffprobe روی سرور.
+`BOT_TOKEN`*, `OPENROUTER_API_KEY`*, `METIS_API_KEY` (اختیاری؛ از Secret `VOICE2TEXT_METIS_API_KEY` و فقط برای سوییچ «برای کافه‌بازار» مالک)، `NOTION_TOKEN` (اختیاری)، `ADMIN_IDS` (کامای آی‌دی‌ها؛ deploy از `OWNER_TELEGRAM_ID` upsert می‌کند — حتی روی .env دستیِ سرور)، `RECEIPT_AI_AUTO_APPROVE` (اختیاری، پیش‌فرض روشن؛ `false` = خاموش‌کردنِ auto-approveِ ایجنتِ رسید بدونِ دیپلوی)، `OPENROUTER_API_KEY_PERSONAL` (اختیاری؛ از Secret `VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED`؛ `apiKeyFor(uid)` فقط برای `OWNER_ID` — اولین `ADMIN_IDS`، پیش‌فرض `100257975` — به‌جای `OPENROUTER_API_KEY` این کلید را در فراخوانی اصلیِ رونویسی/`callAI` استفاده می‌کند؛ ست‌نشده = مثل قبل، همه از کلید مشترک). نیازمند ffmpeg/ffprobe روی سرور.
 
 ## 🔇 اکشنِ ناشناخته‌ی صفِ ادمین دیگر بی‌صدا نیست (۱۴۰۵/۰۶/۱۵)
 

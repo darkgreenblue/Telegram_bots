@@ -83,6 +83,10 @@ jobs:
       - name: Syntax check
         run: node --check bots/${{ matrix.bot }}/index.js
 
+      - name: Metis Gemini routing check
+        if: matrix.bot == 'voice2text'
+        run: node bots/voice2text/metis.test.mjs
+
       # قرارداد آنالیتیکس: کپی محلی voice2text باید با shared/analytics.js سینک بماند
       - name: Analytics contract check
         if: matrix.bot == 'voice2text'

@@ -8,6 +8,7 @@
 
 | تاریخ | وضعیت | عامل | branch / commit | محدوده | تغییر و دلیل | تست/اعتبارسنجی | ریسک و rollback | اقدام بعدی |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-15 | Done | Codex | `feat/voice2text-metis-routing` | `voice2text`، deploy و CI | سوییچ فقط-مالکِ `❌/✅ برای کافه‌بازار` افزوده شد: قرمز/سبز و تمام‌عرض؛ فقط همان فلو را بین OpenRouter و wrapper Gemini متیس جابه‌جا می‌کند. Secret جدید فقط به env همین بات می‌رود. | `node --check`، تست قرارداد Metis، تست نگه‌داشتن style سبز در Telegraf، `check-deploy-env`، `check-undefined`، analytics و support سبز. نصب کامل محلی با Node 26 به‌دلیل native build قدیمی `better-sqlite3` ممکن نیست؛ CI از Node 20 استفاده می‌کند. | بات زنده: مسیر پیش‌فرض بدون تغییر است؛ Metis fallback به OpenRouter ندارد تا هزینه جابه‌جا نشود. rollback = revert PR؛ خاموش‌کردن سوییچ = حذف Secret + deploy. | push، CI، merge در پنجره امن deploy؛ سپس یک تست دستی مالک با ویس کوتاه |
 | 2026-09-15 | Done | Codex | `docs/ai-collaboration-protocol` | مستندات ریشه | افزوده‌شدن قرارداد مشترک Claude Code و Codex؛ هیچ کد محصول، schema، secret یا تنظیم deploy تغییر نکرده است. | بازبینی لینک‌های داخلی و وضعیت گیت | ریسک عملیاتی ندارد؛ rollback = revert این commit | push branch، بازکردن PR، و merge پس از review |
 
 ## قالب برای ردیف‌های بعدی

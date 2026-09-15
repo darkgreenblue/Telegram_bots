@@ -6,6 +6,7 @@ import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import { analyzeReceipt, decideReceipt } from './cardpay.js';
+import { buildMetisRequest, metisModelId, readMetisText } from './metis.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +24,9 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN?.trim() || '';
 // کلید OpenRouter شخصیِ مالک (اختیاری): فقط برای پردازش‌های خودِ OWNER_ID، مصرفش را از کلید
 // اصلیِ سرویس جدا نگه می‌دارد. ست‌نشده → مثل قبل، همه از OPENROUTER_API_KEY استفاده می‌کنند.
 const OPENROUTER_API_KEY_PERSONAL = process.env.OPENROUTER_API_KEY_PERSONAL?.trim() || '';
+// کلیدِ مستقلِ متیس فقط با انتخابِ صریحِ «برای کافه‌بازار» روی همان فلو مصرف می‌شود.
+// نبودنش نباید مسیر عادی OpenRouter یا بوتِ ربات را مختل کند.
+const METIS_API_KEY = process.env.METIS_API_KEY?.trim() || '';
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — همه‌ی ربات‌ها
 // همین لیست را دارند. اگر ست نشده باشد، به مالک تاریخی برمی‌گردد (بدون شکستن).
@@ -80,7 +84,8 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
 // 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
-const PRODUCT_VERSION = '1.4.0';
+// 1.5.0: سوییچ فقط-مالکِ «برای کافه‌بازار»؛ هر فلو می‌تواند جداگانه از متیس (Gemini) برود.
+const PRODUCT_VERSION = '1.5.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -817,12 +822,50 @@ async function transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, primar
   throw new Error(`ALL_FAILED:${lastErr?.message || 'unknown'}`);
 }
 
+// API متیس، wrapper رسمی Gemini است (generateContent)، نه OpenAI-compatible. این مسیر عمداً
+// جداست تا روشن‌بودن سوییچ هرگز با fallback هزینه را از OpenRouter کم نکند.
+async function transcribeWithMetis(audioBuffer, mimeType, prompt, model) {
+  if (!METIS_API_KEY) throw new Error('METIS_NOT_CONFIGURED');
+  const metisModel = metisModelId(model);
+  let lastErr = null;
+  for (let i = 0; i < RETRIES; i++) {
+    if (i > 0) await sleep(RETRY_DELAY);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+    const t0 = Date.now();
+    try {
+      log(`📡 Metis API call → ${metisModel} (${(audioBuffer.length/1024).toFixed(0)}KB audio)`);
+      const res = await fetch(`https://api.metisai.ir/v1beta/models/${encodeURIComponent(metisModel)}:generateContent`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': METIS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(buildMetisRequest(audioBuffer, mimeType, prompt)),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        const errBody = await res.text();
+        const code = res.status === 429 || /rate.?limit|too many requests|temporarily/i.test(errBody) ? 'RATE_LIMIT' : `METIS_HTTP_${res.status}`;
+        throw new Error(`${code}: ${errBody.slice(0, 200)}`);
+      }
+      const text = readMetisText(await res.json());
+      log(`✅ Metis API resp ← ${metisModel} in ${Date.now()-t0}ms | ${text.length} chars`);
+      return text;
+    } catch (err) {
+      lastErr = err.name === 'AbortError' ? new Error('TIMEOUT: متیس در ۱۰ دقیقه پاسخ نداد') : err;
+      logErr(`❌ Metis ${metisModel} attempt ${i+1}/${RETRIES}:`, (lastErr.message || '').slice(0, 200));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(`ALL_FAILED:${lastErr?.message || 'Metis returned no text'}`);
+}
+
 // کل فایل یک‌جا به مدل فرستاده می‌شود (بدون تقسیم). تبدیل فرمت فقط در مسیر fallback لازم است.
 async function callAI(session, type) {
   const { audioBuffer, mimeType, userModel, userId } = session;
   const modelCfg  = MODEL_CONFIG[userModel] || MODEL_CONFIG[DEFAULT_MODEL];
   const prompt    = PROMPT_MAP[type]     || PROMPT_MAP.full;
   const promptGpt = PROMPT_MAP_GPT[type] || PROMPT_MAP_GPT.full;
+  if (session.provider === 'metis') return await transcribeWithMetis(audioBuffer, mimeType, prompt, userModel);
   return await transcribeSingle(audioBuffer, mimeType, prompt, promptGpt, userModel, modelCfg.fallback, apiKeyFor(userId));
 }
 
@@ -974,16 +1017,21 @@ function mainKeyboard(userId) {
   return Markup.keyboard([['🔄 تعویض پردازنده', '👛 کیف پول'], ...supportRow]).resize();
 }
 
-function createProcessTypeKeyboard(token) {
-  return Markup.inlineKeyboard([
+function createProcessTypeKeyboard(token, userId, provider = 'openrouter') {
+  const rows = [
     [Markup.button.callback('📝 متن کامل',      `ptype:full:${token}`)],
     [Markup.button.callback('✂️ متن مفید',       `ptype:clean:${token}`)],
     [Markup.button.callback('📌 خلاصه تیتروار', `ptype:summary:${token}`)],
     [Markup.button.callback('📋 صورت جلسه',      `ptype:meeting:${token}`)],
     [Markup.button.callback('🤖 پرامپت هوش مصنوعی', `ptype:aiprompt:${token}`)],
     [Markup.button.callback('💡 راهنما', `help:${token}`), Markup.button.callback('🔄 تعویض پردازنده', `switchflow:${token}`)],
-    [Markup.button.callback('🚫 انصراف', `cancel:${token}`)],
-  ]);
+  ];
+  if (userId === OWNER_ID) {
+    const metisOn = provider === 'metis';
+    rows.push([{ text: `${metisOn ? '✅' : '❌'} برای کافه‌بازار`, callback_data: `metis:${token}`, style: metisOn ? 'success' : 'danger' }]);
+  }
+  rows.push([Markup.button.callback('🚫 انصراف', `cancel:${token}`)]);
+  return Markup.inlineKeyboard(rows);
 }
 
 // کیبورد راهنما: فقط دکمه بازگشت به مرحله انتخاب حالت
@@ -1517,7 +1565,7 @@ bot.on(['voice', 'audio', 'document'], async (ctx) => {
       { parse_mode: 'HTML' }
     );
     // پیام دوم به پیام اولش («چطور میخوای…») ریپلای می‌شود
-    const modeMsg = await ctx.reply(MODE_SELECT_TEXT, { ...replyTo(thinking.message_id), ...createProcessTypeKeyboard(token) });
+    const modeMsg = await ctx.reply(MODE_SELECT_TEXT, { ...replyTo(thinking.message_id), ...createProcessTypeKeyboard(token, userId) });
     const sess = sessions.get(token);
     if (sess) sess.modeMsgId = modeMsg.message_id;
   } catch (err) {
@@ -2389,7 +2437,22 @@ bot.on('callback_query', async (ctx) => {
       const session = sessions.get(token);
       if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
       await ctx.answerCbQuery();
-      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token)); } catch {}
+      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token, session.userId, session.provider)); } catch {}
+      return;
+    }
+
+    // ── Metis toggle: فقط مالک، فقط برای همین فایل صوتی ──
+    const mt = data.match(/^metis:([a-z0-9]+)$/i);
+    if (mt) {
+      const token = mt[1];
+      const session = sessions.get(token);
+      if (!session || session.step !== 'await_process_type') return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
+      if (userId !== OWNER_ID || session.userId !== OWNER_ID) return ctx.answerCbQuery('این گزینه فقط برای مالک است.', { show_alert: true });
+      if (!METIS_API_KEY) return ctx.answerCbQuery('کلید Metis هنوز در تنظیمات سرور ثبت نشده است.', { show_alert: true });
+      session.provider = session.provider === 'metis' ? 'openrouter' : 'metis';
+      const viaMetis = session.provider === 'metis';
+      await ctx.answerCbQuery(viaMetis ? 'این وُیس با Metis پردازش می‌شود.' : 'این وُیس با OpenRouter پردازش می‌شود.');
+      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token, session.userId, session.provider)); } catch {}
       return;
     }
 
@@ -2421,7 +2484,7 @@ bot.on('callback_query', async (ctx) => {
       } catch {}
 
       // Return the second message back to mode-select
-      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token)); } catch {}
+      try { await ctx.editMessageText(MODE_SELECT_TEXT, createProcessTypeKeyboard(token, session.userId, session.provider)); } catch {}
 
       const lbl = getModelLabel(modelId, uType);
       const prc = getModelPrice(modelId, uType);
