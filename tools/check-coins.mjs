@@ -354,7 +354,9 @@ console.log('\n▶ متن‌ها: هیچ عددِ پولی دو جا نوشته 
    * ادعا هم یک تابع بالاتر می‌رود، نه اینکه برداشته شود. */
   ok(/\$\{invoiceAmount\(amount\)\}/.test(inv), 'مبلغِ فاکتور از تک‌منبعِ `invoiceAmount` می‌آید');
   const amtFn = LOC.slice(LOC.indexOf('const invoiceAmount = '), LOC.indexOf('const invoiceAmount = ') + 400);
-  ok(/tomanShort\(n\)/.test(amtFn) && /تومان/.test(amtFn), 'و همان تابع واحدِ «تومان» را چاپ می‌کند');
+  // v3.96.0: `tomanShort` ⟵ `tomanWords` (پرانتز کاملاً حروفی شد). نام عوض شد چون
+  // خروجی‌اش دیگر «کوتاه‌شده» نیست، حروفیِ کامل است — نامِ دروغ روی مسیرِ پول نمی‌ماند.
+  ok(/tomanWords\(n\)/.test(amtFn) && /تومان/.test(amtFn), 'و همان تابع واحدِ «تومان» را چاپ می‌کند');
   ok(!/money(Long|Tight)?\(\s*(amount|n)\b/.test(inv + amtFn),
     'و مبلغ از هیچ تابعِ تبدیلِ واحد رد نمی‌شود (پولِ واقعی هرگز به الماس تبدیل نمی‌شود)');
   // و ادعای رفتاری: عوض‌شدنِ نرخِ واحدِ نمایش نباید مبلغِ فاکتور را تکان بدهد.
