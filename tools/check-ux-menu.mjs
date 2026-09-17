@@ -1049,9 +1049,10 @@ console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style
   ok(/const styled = \(btn, style\) => \(style \? \{ \.\.\.btn, style \} : btn\);/.test(SRC),
     'helper وقتی رنگ ندارد دکمه را **دست‌نخورده** برمی‌گرداند (نه style: undefined)');
 
-  // ۱) خریدِ الماس سبز، و فقط در دنیای الماس (دکمه‌ی تومانیِ کاربرِ واقعی دست‌نخورده)
-  ok(/const rechargeBtn = \(uid\) => styled\(\s*\n?\s*Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\), coinsOn\(uid\) \? 'success' : undefined\);/.test(SRC),
-    'دکمه‌ی «خرید الماس» سبز است و فقط در دنیای الماس رنگ می‌گیرد');
+  // ۱) خریدِ الماس فقط در treatment رنگی است؛ control بی‌رنگ می‌ماند تا آزمایشِ
+  // سازگاری کلاینت با آزمایشِ قیمت قاطی نشود.
+  ok(/const rechargeBtn = \(uid\) => styled\(\s*\n?\s*Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\),\s*\n?\s*coinsOn\(uid\) && moneyCtaIsColored\(uid\) \? 'success' : undefined,?\s*\n?\);/.test(SRC),
+    'دکمه‌ی «خرید الماس» فقط در treatment رنگی است؛ control استاندارد می‌ماند');
   ok(!/Markup\.button\.callback\(rechargeLabel\(uid\), 'recharge'\)\]/.test(SRC),
     'هیچ نقطه‌ای دکمه‌ی شارژ را بدونِ helper نمی‌سازد (وگرنه یک‌جا بی‌رنگ می‌ماند)');
 
@@ -1094,9 +1095,9 @@ console.log('\n▶ 🎨 رنگِ دکمه‌ها (Bot API 9.4، فیلدِ style
     ok(style.legend === style.eternal, '«افسانه‌ای» و «جاودان» عمداً هم‌رنگ‌اند (تصمیمِ صریحِ مالک، v3.77.0)');
     ok(style.magic && style.magic !== style.gold, 'بسته‌ی جادویی رنگِ خودش را دارد، متمایز از بسته ویژه');
   }
-  // چندخطی شد وقتی قیمتِ واقعیِ استارز به دکمه اضافه شد، پس فاصله‌ها آزاد است.
-  ok(/styled\(Markup\.button\.callback\([\s\S]{0,120}?L\.buttons\.coinPack\(.*?\), `pkg:\$\{p\.key\}`\), PACK_STYLE\[p\.key\]\)/.test(SRC),
-    'رنگِ بسته از جدولِ PACK_STYLE می‌آید، نه شرطِ درجا');
+  // چندخطی شد وقتی قیمتِ واقعیِ استارز و A/B ظاهر به دکمه اضافه شد، پس فاصله‌ها آزاد است.
+  ok(/const colored = moneyCtaIsColored\(uid\);[\s\S]{0,300}?colored \? PACK_STYLE\[p\.key\] : undefined/.test(SRC),
+    'رنگِ بسته از جدول PACK_STYLE و فقط treatment همان کاربر می‌آید');
 }
 
 console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3)');
