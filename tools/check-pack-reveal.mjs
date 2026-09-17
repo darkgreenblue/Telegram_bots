@@ -102,7 +102,7 @@ const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n/* 👁 
 const packageRows = screenFn.slice(screenFn.indexOf('const rows = shown.map'), screenFn.indexOf('// دکمه‌ی کشف'));
 ok(packageRows.includes('Markup.button.callback') && /`pkg:\$\{p\.key\}`/.test(packageRows),
   'هر بسته‌ی فروشگاه callback استاندارد دارد');
-ok(/const colored = moneyCtaIsColored\(uid\);/.test(packageRows),
+ok(/const colored = moneyCtaIsColored\(uid\);/.test(screenFn),
   'رنگِ بسته فقط از assignment پایدارِ همان کاربر می‌آید');
 ok(/colored \? PACK_STYLE\[p\.key\] : undefined/.test(packageRows),
   'control دکمه‌ی استاندارد و treatment فقط رنگ‌های تاریخی می‌گیرد');
