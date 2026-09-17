@@ -95,6 +95,15 @@ ok(/if \(pack\.farsiOnly && starsRail\)/.test(pkgHandler),
 ok(/return ctx\.reply\(L\.errors\.generic\)/.test(pkgHandler.slice(pkgHandler.indexOf('farsiOnly && starsRail'))),
   'و اگر رخ داد، کاربر پیامِ صریح می‌گیرد نه سکوتِ محض (مسیرِ پول)');
 
+/* مسیرِ پول نباید به رنگِ اختیاریِ کلاینت وابسته باشد. یک کلاینتِ واقعی دکمه‌های
+ * رنگی را نمایش داد ولی callback نفرستاد؛ فروشگاه باید فقط callback استاندارد بسازد. */
+const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n}') || '';
+const packageRows = screenFn.slice(screenFn.indexOf('const rows = shown.map'), screenFn.indexOf('// دکمه‌ی کشف'));
+ok(packageRows.includes('Markup.button.callback') && /`pkg:\$\{p\.key\}`/.test(packageRows),
+  'هر بسته‌ی فروشگاه callback استاندارد دارد');
+ok(!/styled\(/.test(packageRows) && !/PACK_STYLE/.test(packageRows),
+  'دکمه‌های مالی به style اختیاریِ کلاینت وابسته نیستند');
+
 /* ══ ۵) دکمه‌ی کهنه‌ی یک بسته‌ی خاموش، بی‌صدا نمی‌میرد ═══════════════════ */
 console.log('\n۵) تپ روی بسته‌ی خاموش (بند ۲ج/۶ + ۹ب/۱)');
 ok(/const isRetiredPack = \(key\) => !EXTRA_PACKS_ENABLED && EXTRA_PACK_KEYS\.has\(key\);/.test(SRC),
@@ -119,7 +128,6 @@ for (const loc of ['fa', 'ru', 'es', 'pt']) {
 
 /* ══ ۶) قراردادِ control و گاردِ خاموشی در همان شرط ═════════════════════ */
 console.log('\n۶) شرطِ staged');
-const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n}') || '';
 ok(/staged = EXTRA_PACKS_ENABLED && !starsRail/.test(screenFn),
   'وقتی دو بسته خاموش‌اند اصلاً staged نمی‌شود (دکمه‌ی کشفی که چیزی برای کشف ندارد ساخته نمی‌شود)');
 ok(/peekVariant\(db, uid, PACK_REVEAL_EXPERIMENT\) !== 'full'/.test(screenFn),

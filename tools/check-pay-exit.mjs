@@ -804,6 +804,10 @@ console.log('\n  — ♻️ سه رگرسیونی که خودِ همین PR نز
     'تپ روی بسته دیگر به‌خاطرِ استیتِ پاک‌شده بی‌صدا نمی‌میرد');
   ok(!/if \(!s\.paymentId\) return ctx\.reply\(L\.errors\.stateLost/.test(pkg),
     'و پیامِ بی‌ربطِ «حالتت گم شد» هم نمی‌دهد');
+  const guardAt = pkg.indexOf('blockDuringOpenReading(ctx, INTENT.WALLET)');
+  const repairAt = pkg.indexOf('openPaymentRow(uid)');
+  ok(guardAt >= 0 && repairAt > guardAt,
+    '⭐ فالِ پرداخت‌شده پیش از ترمیمِ دکمه‌ی کهنه گارد می‌شود؛ سؤال هرگز رسید نمی‌شود');
   ok(/openPaymentRow\(uid\)/.test(pkg) && /setState\(uid, 'pay_amount'\)/.test(pkg),
     'به‌جایش ردیفِ تازه باز می‌کند و تپِ کاربر کامل می‌شود (نیت روشن است)');
 
