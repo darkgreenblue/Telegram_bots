@@ -98,7 +98,7 @@ ok(/return ctx\.reply\(L\.errors\.generic\)/.test(pkgHandler.slice(pkgHandler.in
 /* رنگِ مسیرِ پول حالا یک A/B لایه‌بندی‌شده است، نه نتیجه‌گیری از یک گزارش پشتیبانی.
  * control باید استاندارد بماند و treatment فقط ظاهرِ رنگیِ تاریخی را برگرداند. */
 // بدنه nested block دارد؛ مرزِ پایدارش helper بعدی است، نه اولین `}`.
-const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\nconst exposePackScreen') || '';
+const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n/* 👁 تک‌نقطه‌ی') || '';
 const packageRows = screenFn.slice(screenFn.indexOf('const rows = shown.map'), screenFn.indexOf('// دکمه‌ی کشف'));
 ok(packageRows.includes('Markup.button.callback') && /`pkg:\$\{p\.key\}`/.test(packageRows),
   'هر بسته‌ی فروشگاه callback استاندارد دارد');
@@ -207,8 +207,8 @@ const exposeScreenFn = bodyOf('const exposePackScreen = (uid) => {', '\n};') || 
 ok(/if \(EXTRA_PACKS_ENABLED\) \{ try \{ expose\(db, uid, PACK_REVEAL_EXPERIMENT\); \} catch \{\} \}/.test(exposeScreenFn),
   'فقط وقتی پرچم روشن است exposureِ pack_reveal ثبت می‌شود (وگرنه آزمایشِ آینده با کاربرانی که هیچ‌وقت چیزی ندیدند رقیق می‌شود)');
 ok(/expose\(db, uid, STARS_EXPERIMENT\)/.test(exposeScreenFn), 'و آزمایشِ استارز دست‌نخورده ماند');
-ok(/if \(starsRail\)[\s\S]{0,90}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,40}return;/.test(exposeScreenFn),
-  'دو آزمایش دوقلوی هم‌ساختارند: استارز فقط رویِ starsRail (و همان‌جا return می‌کند)، pack_reveal فقط رویِ !starsRail');
+ok(/if \(starsRail\)[\s\S]{0,90}expose\(db, uid, STARS_EXPERIMENT[\s\S]{0,180}return;/.test(exposeScreenFn),
+  'آزمایش استارز فقط روی starsRail تمام می‌شود و آزمایش‌های تومانی به آن نشت نمی‌کنند');
 
 /* ══ ۱۰) جهش‌ها ══════════════════════════════════════════════════════════ */
 console.log('\n۱۰) جهش‌های تأییدکننده');
