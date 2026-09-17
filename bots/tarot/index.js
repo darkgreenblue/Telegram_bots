@@ -28,7 +28,10 @@ import SPREADS, {
 import { log, logErr } from '../../shared/logger.js';
 import { registerGlobalErrorHandlers } from '../../shared/errors.js';
 import { EVENTS, ensureAnalytics, track, trackOnce, captureStart } from '../../shared/analytics.js';
-import { ensureAb, variant, peekVariant, expose } from '../../shared/ab.js';
+import {
+  ensureAb, variant, peekVariant, expose,
+  reserveStratifiedVariant, exposeStratifiedVariant, releaseStratifiedReservation,
+} from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
 import { registerSupport, supportRow, supportReply, supportLink } from '../../shared/support.js';
 
@@ -288,7 +291,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.94.1';
+const PRODUCT_VERSION = '3.94.2';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -679,9 +682,13 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند و `coins` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
-// دکمه‌های بسته عمداً از کنترلِ استاندارد تلگرام استفاده می‌کنند. در مسیر مالی، سازگاریِ
-// لمس و callback از برجسته‌سازی رنگی مهم‌تر است؛ نام، ایموجی و تعداد الماس تمایز بسته‌ها را
-// روشن نگه می‌دارند.
+/* 🧪 آزمایشِ رنگِ CTAهای مالی. کنترل عمداً «بی‌رنگ» است، یعنی رفتارِ امنِ فعلی؛
+ * treatment با نام `colored` همان رنگ‌بندیِ پیشین را برمی‌گرداند. تخصیص به بازوی
+ * قیمت لایه‌بندی می‌شود تا قیمت و رنگ در تحلیل با هم قاطی نشوند. تا وقتی آزمایش از
+ * داشبورد running نشود، همه control/بی‌رنگ می‌مانند. */
+const MONEY_CTA_STYLE_EXPERIMENT = 'money_cta_style_v1';
+const MONEY_CTA_COLORED_VARIANT = 'colored';
+const PACK_STYLE = { gold: 'success', magic: 'primary', legend: 'danger', eternal: 'danger' };
 /* 📦 بسته‌ها فقط **داده** هستند: کلیدِ پایدار، ایموجی، تعدادِ الماس و قیمت.
  * نامِ نمایشی عمداً این‌جا نیست و در `locales/<lang>.js` نشسته، چون یک متنِ
  * رو-به-کاربر است و هر زبان باید مالِ خودش را داشته باشد (بند ۲و). */
@@ -887,6 +894,38 @@ const exposePrice = (uid) => {
   if (starsRail) return;
   try { const key = activePriceExperiment(); if (key) expose(db, uid, key); }
   catch (e) { logErr('price expose:', e.message); }
+};
+
+/* رنگِ CTA یک آزمایشِ مستقل است، اما «مستقل» به معنیِ رهاکردنِ توازنِ قیمت نیست.
+ * stratum از همان بازویی ساخته می‌شود که کاربر در فروشگاه می‌بیند؛ بنابراین در هر
+ * بازوی قیمت (فعلاً control/bulk) نیمی از کاربران plain و نیمی colored می‌مانند.
+ * روی ریل Stars اصلاً آزمایشِ قیمتِ تومانی نداریم و یک لایه‌ی جدا می‌گیرند. */
+const moneyCtaStratum = (uid) => {
+  if (starsRail) return 'price:outside';
+  const priceExperiment = activePriceExperiment();
+  return priceExperiment ? `price:${priceExperiment}:${priceArm(uid)}` : 'price:none';
+};
+const moneyCtaVariant = (uid) => {
+  if (!coinsOn(uid)) return 'control';
+  return reserveStratifiedVariant(db, uid, MONEY_CTA_STYLE_EXPERIMENT, moneyCtaStratum(uid));
+};
+const moneyCtaIsColored = (uid) => moneyCtaVariant(uid) === MONEY_CTA_COLORED_VARIANT;
+const exposeMoneyCtaStyle = (uid) => {
+  if (!coinsOn(uid)) return 'control';
+  return exposeStratifiedVariant(db, uid, MONEY_CTA_STYLE_EXPERIMENT, moneyCtaStratum(uid));
+};
+const releaseMoneyCtaStyle = (uid) => {
+  if (coinsOn(uid)) releaseStratifiedReservation(db, uid, MONEY_CTA_STYLE_EXPERIMENT);
+};
+/* event جدا برای هر CTA: داشبورد می‌تواند بسته را متریک اصلی و خرید الماس را
+ * گاردریل بگیرد، بدون اینکه کلیکِ یکی داخلِ دیگری حل شود. */
+const trackMoneyCtaCallback = (uid, cta, packageKey = '') => {
+  if (!coinsOn(uid)) return;
+  const visual = moneyCtaVariant(uid);
+  exposeMoneyCtaStyle(uid); // خودِ callback شاهدِ قویِ دیده‌شدنِ CTA است.
+  track(db, uid, cta === 'package' ? 'money_package_callback' : 'money_recharge_callback', {
+    variant: visual, package_key: packageKey,
+  });
 };
 
 /* تنها منبعِ «چه بسته‌هایی در فروشگاه دیده می‌شوند» — حالا per کاربر، چون قیمت per بازو
@@ -2174,10 +2213,12 @@ const coveredRow = (readingId, price, uid) => [Markup.button.callback(
 // برچسبِ دکمه‌ی شارژ به زبانِ اقتصادِ همان کاربر: در دنیای الماس «خرید الماس»،
 // در دنیای تومانی همان «افزایش موجودی کیف پول». هر نقطه‌ی جدید باید از همین بخواند.
 const rechargeLabel = (uid) => (coinsOn(uid) ? L.buttons.buyCoins(curOf(uid)) : L.buttons.recharge);
-// دکمه‌ی «خرید الماس» همیشه **سبز** است (تصمیمِ صریحِ مالک). فقط در دنیای الماس رنگ
-// می‌گیرد؛ دکمه‌ی تومانیِ کاربرِ واقعی بیت‌به‌بیت دست‌نخورده می‌ماند.
+// دکمه‌ی «خرید الماس» در آزمایشِ رنگ با همان بازوی کاربر رندر می‌شود؛ خارج از
+// آزمایش/control بی‌رنگ است. دکمه‌ی تومانیِ کاربرِ واقعی بیت‌به‌بیت دست‌نخورده می‌ماند.
 const rechargeBtn = (uid) => styled(
-  Markup.button.callback(rechargeLabel(uid), 'recharge'), coinsOn(uid) ? 'success' : undefined);
+  Markup.button.callback(rechargeLabel(uid), 'recharge'),
+  coinsOn(uid) && moneyCtaIsColored(uid) ? 'success' : undefined,
+);
 
 const needBalanceRows = (uid, reading) => {
   // اقتصادِ سکه: «پرداختِ هزینه‌ی همین فال» و «تخفیف می‌خوام» هر دو مفهومِ دنیای تومانی‌اند
@@ -4788,8 +4829,11 @@ async function chargeForSpread(ctx, uid, spread, focusKey) {
     track(db, uid, EVENTS.PAYWALL_SHOWN, { spread: spread.id, price: spread.price, can_afford: false });
     const text = needBalanceText(uid, { type: spread.id, price: spread.price });
     const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceRows(uid, null)) };
-    try { await ctx.editMessageText(text, extra); }
-    catch { await ctx.reply(text, extra).catch(() => {}); }
+    let shown = false;
+    try { await ctx.editMessageText(text, extra); shown = true; }
+    catch { shown = !!(await ctx.reply(text, extra).catch(() => null)); }
+    if (shown) exposeMoneyCtaStyle(uid);
+    else releaseMoneyCtaStyle(uid);
     return false;
   }
   patchSession(uid, { readingId });
@@ -5261,14 +5305,20 @@ async function finishPicking(ctx, uid, s) {
     ]));
   } else {
     // یک پیامِ کوتاه و مستقیم (پیامِ اتمسفریکِ paywall این‌جا حذف شد تا کاربر دو پیام پشت‌سرهم نگیرد)
-    await ctx.reply(needBalanceText(uid, { type: spread.id, price: spread.price }), {
-      ...needBalanceExtra,
-      ...Markup.inlineKeyboard([
-        ...needBalanceRows(uid, { id: readingId, price: spread.price }),
-        ...freeMenuRow(),
-        [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
-      ]),
-    });
+    try {
+      await ctx.reply(needBalanceText(uid, { type: spread.id, price: spread.price }), {
+        ...needBalanceExtra,
+        ...Markup.inlineKeyboard([
+          ...needBalanceRows(uid, { id: readingId, price: spread.price }),
+          ...freeMenuRow(),
+          [Markup.button.callback(L.buttons.cancel, `rcancel:${readingId}`)],
+        ]),
+      });
+      exposeMoneyCtaStyle(uid);
+    } catch (e) {
+      releaseMoneyCtaStyle(uid);
+      throw e;
+    }
   }
 }
 
@@ -5346,13 +5396,20 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r), {
-        ...needBalanceExtra,
-        ...Markup.inlineKeyboard([
-          ...needBalanceRows(uid, r),
-          [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-        ]),
-      });
+      try {
+        const sent = await ctx.reply(needBalanceText(uid, r), {
+          ...needBalanceExtra,
+          ...Markup.inlineKeyboard([
+            ...needBalanceRows(uid, r),
+            [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+          ]),
+        });
+        exposeMoneyCtaStyle(uid);
+        return sent;
+      } catch (e) {
+        releaseMoneyCtaStyle(uid);
+        throw e;
+      }
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -5475,13 +5532,20 @@ bot.action(/^retryr:(\d+)$/, async (ctx) => {
     const res = stmts.deduct.run(r.price, uid, r.price);
     if (res.changes === 0) {
       await ctx.answerCbQuery().catch(() => {});
-      return ctx.reply(needBalanceText(uid, r), {
-        ...needBalanceExtra,
-        ...Markup.inlineKeyboard([
-          ...needBalanceRows(uid, r),
-          [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-        ]),
-      });
+      try {
+        const sent = await ctx.reply(needBalanceText(uid, r), {
+          ...needBalanceExtra,
+          ...Markup.inlineKeyboard([
+            ...needBalanceRows(uid, r),
+            [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+          ]),
+        });
+        exposeMoneyCtaStyle(uid);
+        return sent;
+      } catch (e) {
+        releaseMoneyCtaStyle(uid);
+        throw e;
+      }
     }
   }
   stmts.setReadingStatus.run('started', readingId);
@@ -6030,10 +6094,16 @@ async function handleChatMessage(ctx, uid, text) {
      * جلویش است. هندلرش زنده می‌ماند (بند ۲ج/۶: دکمه‌ی کهنه نمی‌میرد). */
     const parked = parkChatQuestion(uid, rid, text, askedId);
     track(db, uid, 'chat_paywall', { reading_id: rid, can_afford: 0, parked: parked ? 1 : 0 });
-    await ctx.reply(L.chat.needBalance(CHAT_PRICE, curOf(uid), getBalance(uid), !!parked), {
-      ...extra,
-      reply_markup: Markup.inlineKeyboard(walletRows(uid)).reply_markup,
-    });
+    try {
+      await ctx.reply(L.chat.needBalance(CHAT_PRICE, curOf(uid), getBalance(uid), !!parked), {
+        ...extra,
+        reply_markup: Markup.inlineKeyboard(walletRows(uid)).reply_markup,
+      });
+      exposeMoneyCtaStyle(uid);
+    } catch (e) {
+      releaseMoneyCtaStyle(uid);
+      throw e;
+    }
     return;
   }
   const { id: msgId, price } = paid;
@@ -6710,7 +6780,14 @@ async function showWallet(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.WALLET)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.WALLET)) return;
   const [text, extra] = walletScreen(ctx.from.id);
-  await ctx.reply(text, extra);
+  try {
+    const sent = await ctx.reply(text, extra);
+    exposeMoneyCtaStyle(ctx.from.id);
+    return sent;
+  } catch (e) {
+    releaseMoneyCtaStyle(ctx.from.id);
+    throw e;
+  }
 }
 bot.hears(L.buttons.wallet, showWallet);
 // همان قاعده: «💎 کیف الماس» (و «💎 الماس فروشی»ِ نسلِ قبل) هنوز match می‌شوند.
@@ -6888,13 +6965,12 @@ function packMenuScreen(uid, paymentId) {
   const staged = EXTRA_PACKS_ENABLED && !starsRail
     && peekVariant(db, uid, PACK_REVEAL_EXPERIMENT) !== 'full' && !packsRevealed(uid);
   const shown = staged ? railPacks.filter(p => !p.farsiOnly) : railPacks;
-  /* ⚠️ دکمه‌ی پرداخت نباید به قابلیتِ نمایشیِ تازه‌ی کلاینت وابسته باشد. در یک مورد
-   * واقعی، دکمه‌های رنگیِ بسته‌های بزرگ روی گوشی کاربر callback نفرستادند، در حالی که
-   * همان callback بدونِ style برای بسته‌ی معمولی کار می‌کرد. چون مسیر پول است، قابلیت
-   * کلیک‌کردن بر رنگ اولویت دارد؛ تا وقتی سازگاری کلاینت‌ها اثبات نشده، همه‌ی بسته‌ها
-   * دکمه‌ی استاندارد تلگرام‌اند. */
-  const rows = shown.map(p => [Markup.button.callback(
-    L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`)]);
+  /* 🧪 plain در control و رنگ‌های تاریخی در treatment. این‌جا فقط ظاهر عوض می‌شود؛
+   * callback_data، قیمت، مسیر پرداخت و ترتیبِ بسته‌ها در هر دو بازو یکی‌اند. */
+  const colored = moneyCtaIsColored(uid);
+  const rows = shown.map(p => [styled(Markup.button.callback(
+    L.buttons.coinPack(p, cur, ladder ? starsFor(p.key, ladder) : null), `pkg:${p.key}`),
+  colored ? PACK_STYLE[p.key] : undefined)]);
   // دکمه‌ی کشفِ دو بسته‌ی گران‌تر — عمداً بدونِ ایموجی (خواسته‌ی مالک: جلبِ توجه فقط
   // رویِ سه بستهٔ اول بماند).
   if (staged) rows.push([Markup.button.callback(L.buttons.revealMorePacks, `pack_reveal:${paymentId}`)]);
@@ -6914,15 +6990,21 @@ function packMenuScreen(uid, paymentId) {
  * همان تله‌ی «گاردِ کپی‌شده» که v3.66.0 روی `nav:menu` گرفت. */
 const exposePackScreen = (uid) => {
   // ریلِ استارز نردبانِ خودش را دارد و آزمایشِ قیمتِ تومانی اصلاً به آن نمی‌رسد.
-  if (starsRail) { try { expose(db, uid, STARS_EXPERIMENT); } catch {} return; }
+  if (starsRail) {
+    try { expose(db, uid, STARS_EXPERIMENT); } catch {}
+    exposeMoneyCtaStyle(uid);
+    return;
+  }
   exposePrice(uid);
   if (EXTRA_PACKS_ENABLED) { try { expose(db, uid, PACK_REVEAL_EXPERIMENT); } catch {} }
+  exposeMoneyCtaStyle(uid);
 };
 
 bot.action('recharge', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
+  trackMoneyCtaCallback(uid, 'recharge');
   const { id: paymentId, fresh } = openPaymentRow(uid);
   if (fresh) track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
   setState(uid, 'pay_amount');
@@ -6944,10 +7026,15 @@ bot.action('recharge', async (ctx) => {
       patchSession(uid, { packMsgId: r?.message_id || ctx.callbackQuery?.message?.message_id });
       return r;
     } catch {}
-    const r = await ctx.reply(text, extra);
-    seen();
-    patchSession(uid, { packMsgId: r?.message_id });
-    return r;
+    try {
+      const r = await ctx.reply(text, extra);
+      seen();
+      patchSession(uid, { packMsgId: r?.message_id });
+      return r;
+    } catch (e) {
+      releaseMoneyCtaStyle(uid);
+      throw e;
+    }
   }
   // مبلغِ پیشنهادیِ «دقیقاً کسریِ فال» حذف شد (v2.0.0): آن کار را حالا دکمه‌ی «پرداختِ هزینه‌ی
   // همین فال» بهتر انجام می‌دهد. این‌جا فقط نردبانِ قیمتِ کیف‌پول است.
@@ -6973,8 +7060,13 @@ bot.action(/^pack_reveal:(\d+)$/, async (ctx) => {
   if (s.paymentId !== pid) return;   // دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر — بی‌صدا رد شود
   patchSession(uid, { packsRevealed: 1 });
   const [text, extra] = packMenuScreen(uid, pid);
-  try { await ctx.editMessageText(text, extra); }
-  catch (e) { logErr('pack_reveal edit:', e.message); }
+  try {
+    await ctx.editMessageText(text, extra);
+    exposePackScreen(uid);
+  } catch (e) {
+    releaseMoneyCtaStyle(uid);
+    logErr('pack_reveal edit:', e.message);
+  }
 });
 
 async function setRechargeAmount(ctx, uid, amount) {
@@ -7021,6 +7113,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * است، رندر و این تپ همیشه یک بازو می‌دهند. */
   const pack = packForUser(uid, ctx.match[1]);
   if (!pack) return;
+  trackMoneyCtaCallback(uid, 'package', pack.key);
   // ⚠️ دفاعِ لایه‌ی دوم: packMenuScreen این بسته را برای ریلِ استارز اصلاً رندر نمی‌کند
   // (STAR_LADDERS این دو کلید را نمی‌شناسد)، ولی دکمه‌ی inline نمی‌میرد (بند ۲ج/۶) —
   // اگر روزی اقتصادِ سکه رویِ استارز هم باز شد، یک دکمه‌ی کهنه نباید کاربر را با خطای
@@ -7066,7 +7159,14 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * «بازگشت»ِ همین کیبورد به یک شناسه‌ی مرده اشاره می‌کرد. */
   if (isRetiredPack(pack.key)) {
     const [, extra] = packMenuScreen(uid, s.paymentId);
-    return ctx.reply(L.errors.packRetired, extra).catch(() => {});
+    try {
+      const sent = await ctx.reply(L.errors.packRetired, extra);
+      exposePackScreen(uid);
+      return sent;
+    } catch (e) {
+      releaseMoneyCtaStyle(uid);
+      return;
+    }
   }
   /* ⭐ قیمتِ **واقعیِ پرداختی** قبل از هر نوشتنی حساب می‌شود.
    *
@@ -7396,9 +7496,13 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
     if (!restored) {
       // پیامِ قدیمی قابلِ ادیت نبود (خیلی کهنه، پاک‌شده، یا ورودِ غیرِ دکمه‌ای)
       const m = await ctx.reply(text, extra).catch(() => null);
-      if (m?.message_id) patchSession(uid, { packMsgId: m.message_id });
+      if (m?.message_id) {
+        patchSession(uid, { packMsgId: m.message_id });
+        restored = true;
+      }
     }
-    exposePackScreen(uid);
+    if (restored) exposePackScreen(uid);
+    else releaseMoneyCtaStyle(uid);
     return;
   }
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
@@ -7518,8 +7622,14 @@ bot.action(/^pay_back:(\d+)$/, async (ctx) => {
     setState(uid, s.readingId ? 'confirm_pay' : 'idle');
   }
   const [text, extra] = walletScreen(uid);
-  try { await ctx.editMessageText(text, extra); }
-  catch { await ctx.reply(text, extra).catch(() => {}); }
+  let walletShown = false;
+  try { await ctx.editMessageText(text, extra); walletShown = true; }
+  catch {
+    const sent = await ctx.reply(text, extra).catch(() => null);
+    walletShown = !!sent;
+  }
+  if (walletShown) exposeMoneyCtaStyle(uid);
+  else releaseMoneyCtaStyle(uid);
   // فالِ رزروشده نباید سرگردان بماند (همان کاری که pay_cancel می‌کند).
   await offerPendingReading(ctx, uid);
 });
@@ -7867,13 +7977,19 @@ async function offerPendingReading(ctx, uid) {
       [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
     ]));
   } else {
-    await ctx.reply(needBalanceText(uid, r), {
-      ...needBalanceExtra,
-      ...Markup.inlineKeyboard([
-        ...needBalanceRows(uid, r),
-        [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
-      ]),
-    });
+    try {
+      await ctx.reply(needBalanceText(uid, r), {
+        ...needBalanceExtra,
+        ...Markup.inlineKeyboard([
+          ...needBalanceRows(uid, r),
+          [Markup.button.callback(L.buttons.cancel, `rcancel:${r.id}`)],
+        ]),
+      });
+      exposeMoneyCtaStyle(uid);
+    } catch (e) {
+      releaseMoneyCtaStyle(uid);
+      throw e;
+    }
   }
   return true;
 }

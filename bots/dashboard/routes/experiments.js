@@ -101,7 +101,22 @@ function expResults(inst, e) {
         valueByV.get(r.variant).push(r.n);
       }
     }
-    return { variants, expByV, convByV, guardrails, valueByV };
+    /* اگر آزمایش با تخصیصِ لایه‌بندی‌شده اجرا شده باشد، نتیجه‌ی هر لایه جدا می‌آید.
+     * این برای آزمایش‌های هم‌زمان (مثلاً ظاهرِ CTA کنارِ قیمت) حیاتی است: جمع‌زدنِ
+     * کورکورانه‌ی لایه‌ها می‌تواند اثرِ یک آزمایش را به دیگری نسبت بدهد. try/catch
+     * سازگاری داشبورد با DBهای قدیمیِ قبل از ستون stratum را حفظ می‌کند. */
+    let strata = [];
+    try {
+      strata = rows(db, `
+        SELECT x.stratum, x.variant, COUNT(*) exposure,
+          COUNT(DISTINCT ev.user_id) conversion
+        FROM ab_exposures x
+        LEFT JOIN events ev ON ev.user_id=x.user_id AND ev.event=? AND ev.created_at >= x.created_at
+        WHERE x.experiment_key=? AND COALESCE(x.stratum,'')<>''
+        GROUP BY x.stratum, x.variant
+        ORDER BY x.stratum, x.variant`, [e.primary_metric, e.key]);
+    } catch {}
+    return { variants, expByV, convByV, guardrails, valueByV, strata };
   }, null);
 }
 
@@ -190,6 +205,24 @@ export function experimentViewBody(url) {
     }),
   ]))}</div>` : '';
 
+  /* جدولِ مستقل برای اثرِ مشترکِ آزمایش‌ها: «exposure / تبدیل / نرخ» هر variant در
+   * هر لایه. با این جدول، توازن 50/50 و نرخِ رنگ در control/bulk قیمت جدا دیده می‌شود. */
+  const strataMap = new Map();
+  for (const row of r.strata || []) {
+    if (!strataMap.has(row.stratum)) strataMap.set(row.stratum, new Map());
+    strataMap.get(row.stratum).set(row.variant, row);
+  }
+  const strataCard = strataMap.size ? `<div class="card"><h2>🧩 نتایج لایه‌بندی‌شده</h2>
+    <p class="muted">هر لایه باید جدا خوانده شود؛ نرخِ جمع‌شده فقط نمای کلی است و جای تحلیلِ اثرِ متقابل را نمی‌گیرد.</p>
+    ${table(['لایه', ...variants.map(esc)], [...strataMap.entries()].map(([stratum, byVariant]) => [
+      `<span class="mono">${esc(stratum)}</span>`,
+      ...variants.map(vk => {
+        const row = byVariant.get(vk); const n = Number(row?.exposure) || 0; const c = Number(row?.conversion) || 0;
+        return `${fmt(n)} / ${fmt(c)} / ${n ? (c / n * 100).toFixed(1) : '0.0'}٪`;
+      }),
+    ]), 'هنوز exposure لایه‌بندی‌شده‌ای نیست.')}
+    <p class="muted">هر خانه: exposure / تبدیلِ متریک اصلی / نرخ تبدیل</p></div>` : '';
+
   /* --- فانل per variant --- */
   const funnelDef = FUNNELS[familyOf(inst.bot)];
   const funnelCard = funnelDef ? `<div class="card"><h2>🔻 فانل به تفکیک variant</h2>${variantFunnel(inst, e, funnelDef.steps)}</div>` : '';
@@ -226,7 +259,7 @@ export function experimentViewBody(url) {
   </div>
   <div style="margin-top:12px">${controls}</div>${decisionForm}</div>`;
 
-  return header + warnings + resultsCard + guardCard + funnelCard;
+  return header + warnings + resultsCard + guardCard + strataCard + funnelCard;
 }
 
 /* ---------- اکشن‌ها ---------- */

@@ -95,14 +95,17 @@ ok(/if \(pack\.farsiOnly && starsRail\)/.test(pkgHandler),
 ok(/return ctx\.reply\(L\.errors\.generic\)/.test(pkgHandler.slice(pkgHandler.indexOf('farsiOnly && starsRail'))),
   'و اگر رخ داد، کاربر پیامِ صریح می‌گیرد نه سکوتِ محض (مسیرِ پول)');
 
-/* مسیرِ پول نباید به رنگِ اختیاریِ کلاینت وابسته باشد. یک کلاینتِ واقعی دکمه‌های
- * رنگی را نمایش داد ولی callback نفرستاد؛ فروشگاه باید فقط callback استاندارد بسازد. */
-const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\n}') || '';
+/* رنگِ مسیرِ پول حالا یک A/B لایه‌بندی‌شده است، نه نتیجه‌گیری از یک گزارش پشتیبانی.
+ * control باید استاندارد بماند و treatment فقط ظاهرِ رنگیِ تاریخی را برگرداند. */
+// بدنه nested block دارد؛ مرزِ پایدارش helper بعدی است، نه اولین `}`.
+const screenFn = bodyOf('function packMenuScreen(uid, paymentId) {', '\nconst exposePackScreen') || '';
 const packageRows = screenFn.slice(screenFn.indexOf('const rows = shown.map'), screenFn.indexOf('// دکمه‌ی کشف'));
 ok(packageRows.includes('Markup.button.callback') && /`pkg:\$\{p\.key\}`/.test(packageRows),
   'هر بسته‌ی فروشگاه callback استاندارد دارد');
-ok(!/styled\(/.test(packageRows) && !/PACK_STYLE/.test(packageRows),
-  'دکمه‌های مالی به style اختیاریِ کلاینت وابسته نیستند');
+ok(/const colored = moneyCtaIsColored\(uid\);/.test(packageRows),
+  'رنگِ بسته فقط از assignment پایدارِ همان کاربر می‌آید');
+ok(/colored \? PACK_STYLE\[p\.key\] : undefined/.test(packageRows),
+  'control دکمه‌ی استاندارد و treatment فقط رنگ‌های تاریخی می‌گیرد');
 
 /* ══ ۵) دکمه‌ی کهنه‌ی یک بسته‌ی خاموش، بی‌صدا نمی‌میرد ═══════════════════ */
 console.log('\n۵) تپ روی بسته‌ی خاموش (بند ۲ج/۶ + ۹ب/۱)');
