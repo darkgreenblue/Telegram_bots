@@ -20,9 +20,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // 🌍 per زبان (بند ۲و): مسیر قبلاً `card-knowledge.fa.json` هاردکد بود، یعنی رباتِ روسی
 // ۷۸ ردیف **متنِ فارسی** را داخلِ یک پرامپتِ روسی تزریق می‌کرد. همان الگوی `ganjineh.js`:
 // نبودنِ فایلِ یک زبان فقط این لایه را برای همان زبان خاموش می‌کند.
+import { langTable, LANGS, DEFAULT_LANG, currentLang } from './locale-ctx.js';
+
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
-export const CARD_KB = await import(`./card-knowledge.${LOCALE}.json`, { with: { type: 'json' } })
-  .then(m => m.default).catch(() => ({}));
+/* 🌍 **per زبانِ زمینه‌ی جاری**، نه per پروسه. رباتِ چندزبانه یک جدولِ دانش ندارد،
+ * چهار تا دارد، و انتخابشان به آپدیتی بستگی دارد که همین حالا پردازش می‌شود.
+ * شکل عمداً همان آبجکت است (`CARD_KB[c.key]`) تا مصرف‌کننده‌ها دست نخورند. */
+const KB_T = langTable({});
+for (const lang of LANGS) {
+  KB_T.set(lang, await import(`./card-knowledge.${lang}.json`, { with: { type: 'json' } })
+    .then(m => m.default).catch(() => ({})));
+}
+export const CARD_KB = new Proxy({}, {
+  get: (_t, k) => KB_T.get()[k],
+  has: (_t, k) => k in KB_T.get(),
+  ownKeys: () => Reflect.ownKeys(KB_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(KB_T.get(), k),
+});
 
 /* 🌍 دادهٔ زبانیِ ساختاری (نامِ کارت/جایگاه/چیدمان، کلیدواژه‌ها، پرامپتِ تعمیر).
  *
@@ -32,8 +46,19 @@ export const CARD_KB = await import(`./card-knowledge.${LOCALE}.json`, { with: {
  * چک را می‌شکست یا مجبورمان می‌کرد ۷۸ کلیدِ بی‌مصرف به فارسی اضافه کنیم. الگوی مرجع
  * همان دو فایلِ per زبانِ موجود است: `card-knowledge.<locale>.json` و
  * `daily-ganjineh.<locale>.json`. کلیدها رشته‌ی **فارسیِ canonical** اند. */
-export const LANG_DATA = await import(`./langdata.${LOCALE}.json`, { with: { type: 'json' } })
-  .then(m => m.default).catch(() => ({}));
+const LD_T = langTable({});
+for (const lang of LANGS) {
+  LD_T.set(lang, await import(`./langdata.${lang}.json`, { with: { type: 'json' } })
+    .then(m => m.default).catch(() => ({})));
+}
+export const LANG_DATA = new Proxy({}, {
+  get: (_t, k) => LD_T.get()[k],
+  has: (_t, k) => k in LD_T.get(),
+  ownKeys: () => Reflect.ownKeys(LD_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(LD_T.get(), k),
+});
+/** دادهٔ زبانیِ یک زبانِ مشخص — برای `locale-boot.js` که هر زبان را جدا پیکربندی می‌کند. */
+export const langDataFor = (lang) => LD_T.for(lang);
 
 /* 🌍 نامِ کارت، جایگاه و چیدمان — دادهٔ زبانی که تا امروز فارسیِ هاردکد بود.
  *
@@ -47,36 +72,51 @@ export const LANG_DATA = await import(`./langdata.${LOCALE}.json`, { with: { typ
  *
  * fa هیچ‌کدام از این جدول‌ها را ندارد، پس دقیقاً به همان فیلدهای هاردکدِ قبلی fallback
  * می‌کند و رفتارش بیت‌به‌بیت دست‌نخورده است. */
-let NAMES = { cards: {}, positions: {}, spreads: {}, keywords: {} };
+const NAMES_DEFAULT = { cards: {}, positions: {}, spreads: {}, keywords: {} };
+const NAMES_T = langTable(NAMES_DEFAULT);
+const NAMES = new Proxy({}, { get: (_t, k) => NAMES_T.get()[k] });
 // ⚠️ برچسبِ «کارتِ بی‌جایگاه» عمداً پیش‌فرضِ فارسی دارد و از locale override می‌شود.
 // اگر به‌جایش یک رشته‌ی خنثی می‌گذاشتیم، فارسی بی‌صدا عوض می‌شد: این fallback واقعاً
 // شلیک می‌کند، چون فال‌های ۵کارتیِ ثبت‌شده‌ی نسل قبل از تعدادِ جایگاه‌های چیدمانِ
 // امروز بیشترند (همان سازگاریِ با گذشته‌ای که بند ۲ج/۱ واجب می‌داند).
-let POS_FALLBACK = (i) => `کارت ${i + 1}`;
-export function configureCardData(d) {
+const POS_DEFAULT = (i) => `کارت ${i + 1}`;
+const POS_T = langTable(POS_DEFAULT);
+const POS_FALLBACK = (i) => POS_T.get()(i);
+/**
+ * برای **هر** زبانِ این پروسه یک‌بار موقعِ boot صدا زده می‌شود. `lang` نیامده = زبانِ
+ * پیش‌فرض، پس صدازننده‌های قدیمی (چک‌های CI، آزمایشگاه) بدونِ تغییر کار می‌کنند.
+ */
+export function configureCardData(d, lang = DEFAULT_LANG) {
   if (!d || typeof d !== 'object') return;
-  NAMES = {
+  NAMES_T.set(lang, {
     cards: d.cardNames || {},
     positions: d.positionNames || {},
     spreads: d.spreadNames || {},
     keywords: d.cardKeywords || {},
-  };
+  });
   // قالبِ رشته‌ای است نه تابع، چون از JSON می‌آید. `%n` = شماره‌ی کارت (از ۱).
   if (typeof d.positionFallback === 'string' && d.positionFallback.includes('%n')) {
-    POS_FALLBACK = (i) => d.positionFallback.replace('%n', String(i + 1));
+    POS_T.set(lang, (i) => d.positionFallback.replace('%n', String(i + 1)));
   }
 }
 // خودِ ماژول از فایلِ زبان پیکربندی می‌شود، پس هیچ مصرف‌کننده‌ای (ربات یا آزمایشگاه)
 // نمی‌تواند صدا زدنش را جا بیندازد. برای `fa` فایل وجود ندارد و همه‌چیز پیش‌فرض می‌ماند.
-configureCardData(LANG_DATA);
+for (const lang of LANGS) configureCardData(LD_T.for(lang), lang);
 
 /* کلیدهای آبجکتِ «فال‌های قبلی» در کانتکست. پیش‌فرض فارسی است تا `fa` که فایلِ زبانی
  * ندارد دقیقاً مثل قبل بماند. */
-const CTX_KEYS = {
-  type: LANG_DATA?.ctxKeys?.type || 'نوع فال',
-  summary: LANG_DATA?.ctxKeys?.summary || 'خلاصه',
-  feedback: LANG_DATA?.ctxKeys?.feedback || 'بازخورد کاربر',
-};
+const ctxKeysOf = (lang) => ({
+  type: LD_T.for(lang)?.ctxKeys?.type || 'نوع فال',
+  summary: LD_T.for(lang)?.ctxKeys?.summary || 'خلاصه',
+  feedback: LD_T.for(lang)?.ctxKeys?.feedback || 'بازخورد کاربر',
+});
+const CTX_T = langTable(ctxKeysOf(DEFAULT_LANG));
+for (const lang of LANGS) CTX_T.set(lang, ctxKeysOf(lang));
+const CTX_KEYS = new Proxy({}, {
+  get: (_t, k) => CTX_T.get()[k],
+  ownKeys: () => Reflect.ownKeys(CTX_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(CTX_T.get(), k),
+});
 export const CONTEXT_KEYS = CTX_KEYS;
 /** نامِ کارت به زبانِ جاری (fallback: نامِ فارسیِ `cards.js`). */
 export const cardName = (key) => NAMES.cards[key] || CARD_BY_KEY[key]?.fa || '';
@@ -128,6 +168,7 @@ export const FLASH          = 'google/gemini-2.5-flash';
 export const LUNA = 'openai/gpt-5.6-luna';
 const READING_MODEL_BY_LOCALE = {
   fa: LUNA,
+  en: LUNA,
   ru: LUNA,
   pt: LUNA,
   es: LUNA,
@@ -515,16 +556,17 @@ export function stripCardLabel(t) {
 /* جداکننده‌ای که جای خط‌تیره می‌نشیند. per زبان است: فارسی ویرگولِ فارسی («،»)
  * می‌خواهد و روسی ویرگولِ لاتین. تا قبل از این «، » هاردکد بود، یعنی متنِ روسی یک
  * کاراکترِ بیگانه‌ی عربی وسطش می‌گرفت. `configureSeparator` موقعِ boot صدا زده می‌شود. */
-let DASH_TO = '، ';
+const DASH_T = langTable('، ');
 /* جداکننده‌ی نام از سرخط. ⚠️ این هم مثل `DASH_TO` یک ویرگولِ **عربی** بود، پس هر فالِ
  * روسی با «Аня، …» شروع می‌شد: یک نویسه‌ی فارسی در **اولین خطِ** محصولِ پولی، در هر
  * فال. سنجه‌ی تازه‌ی نویسه‌ی بیگانه دقیقاً همین را گرفت. */
-let NAME_SEP = '، ';
-export function configureSeparator(sep, nameSep) {
-  if (typeof sep === 'string' && sep) DASH_TO = sep;
+const NAME_T = langTable('، ');
+export function configureSeparator(sep, nameSep, lang = DEFAULT_LANG) {
+  const dash = (typeof sep === 'string' && sep) ? sep : DASH_T.for(lang);
+  DASH_T.set(lang, dash);
   // پیش‌فرضِ جداکننده‌ی نام همان جداکننده‌ی خط‌تیره است: هر دو «ویرگولِ همان زبان» اند،
   // پس یک زبان با ست‌کردنِ یکی، دومی را هم درست می‌گیرد و نمی‌تواند نصفه بماند.
-  NAME_SEP = (typeof nameSep === 'string' && nameSep) ? nameSep : DASH_TO;
+  NAME_T.set(lang, (typeof nameSep === 'string' && nameSep) ? nameSep : dash);
 }
 /* نشانه‌گذاریِ مارک‌داون که مدل خودسرانه تولید می‌کند.
  *
@@ -544,7 +586,7 @@ const stripMarkup = (t) => String(t)
   .replace(/`+/g, '')                    // بک‌تیک و بلوکِ کد
   .replace(/^\s{0,3}#{1,6}\s+/gm, '');   // تیترِ مارک‌داون
 
-export const noDash = (t) => stripMarkup(String(t).replace(/\s*—\s*/g, DASH_TO).replace(/\s*--\s*/g, DASH_TO));
+export const noDash = (t) => { const d = DASH_T.get(); return stripMarkup(String(t).replace(/\s*—\s*/g, d).replace(/\s*--\s*/g, d)); };
 
 // ⏱ `agoFa` (فاصله‌ی زمانی به فارسیِ گفتاری) حذف شد. تاریخچه‌ی کوتاهش درس دارد:
 // اول مدل زمانِ فال‌های قبلی را از خودش می‌ساخت («پارسال» برای فالی که ۱۰ دقیقه قبل
@@ -568,21 +610,31 @@ export const noDash = (t) => stripMarkup(String(t).replace(/\s*—\s*/g, DASH_TO
  * خلافش را گفت، همین یک ردیف عوض می‌شود. */
 const TZ_BY_LOCALE = {
   fa: 'Asia/Tehran',
+  /* ⚠️ انگلیسی یک کشور نیست، پس «منطقه‌ی زمانیِ درست» برایش وجود ندارد. UTC انتخاب شد
+   * چون تنها گزینه‌ی بی‌طرف است: هر انتخابِ دیگری یک قاره را بی‌دلیل ترجیح می‌دهد.
+   * وقتی دیتای واقعیِ کاربر آمد، همین یک ردیف عوض می‌شود. */
+  en: 'UTC',
   ru: 'Europe/Moscow',
   pt: 'America/Sao_Paulo',
   es: 'America/Mexico_City',
 };
+/* 🌍 per زبانِ زمینه‌ی جاری. مرزِ روز روی مسیرِ **استریک و کارتِ روز** می‌نشیند، پس
+ * یک پروسه‌ی چندزبانه نمی‌تواند یک منطقه‌ی زمانی داشته باشد: کاربرِ روس باید نیمه‌شبِ
+ * مسکو روزِ تازه بگیرد و کاربرِ برزیلی نیمه‌شبِ سائوپائولو.
+ * `BOT_TZ` در env همچنان همه را override می‌کند (تکِ رباتِ تک‌زبانه، و تست‌ها). */
+export const botTz = () => process.env.BOT_TZ?.trim() || TZ_BY_LOCALE[currentLang()] || 'Asia/Tehran';
+/** سازگاریِ با گذشته برای مصرف‌کننده‌های تک‌زبانه (چک‌های CI). زبانِ پیش‌فرضِ پروسه. */
 export const BOT_TZ = process.env.BOT_TZ?.trim() || TZ_BY_LOCALE[LOCALE] || 'Asia/Tehran';
 
 // «امروز» به وقتِ همان ربات. نامش عمداً دیگر «tehran» نیست: یک نامِ دروغ روی مسیرِ
 // پول و استریک، همان چیزی است که شش ماه بعد کسی را گمراه می‌کند.
 export const botToday = (d = new Date()) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: BOT_TZ }).format(d);
+  new Intl.DateTimeFormat('en-CA', { timeZone: botTz() }).format(d);
 // n روز قبل، به وقتِ همان ربات (پنجره‌ی «۷ روزِ اخیر» و محاسبه‌ی استریک).
 export const botDaysAgo = (n) => botToday(new Date(Date.now() - n * 86400_000));
 // ساعتِ فعلیِ همان ربات، برای جاروی یادآوری.
 export const botHour = () => parseInt(new Intl.DateTimeFormat('en-US', {
-  timeZone: BOT_TZ, hour: '2-digit', hour12: false,
+  timeZone: botTz(), hour: '2-digit', hour12: false,
 }).format(new Date()), 10);
 
 /* ═══ «کارتِ سنگینی که نیامده» — حذف شد (۱۴۰۵/۰۵/۲۷) ═══ */
@@ -722,7 +774,7 @@ export function renderV4(llm, cards, labels, { name = '' } = {}) {
   // نامِ مخاطب **دقیقاً یک بار** و از کد، نه از مدل. تضمینِ ساختاری به‌جای دستورِ
   // پرامپتی که سه دور جواب نداد.
   const head = llm.headline
-    ? `${SECT.headline} ${name ? `${name}${NAME_SEP}` : ''}${noDash(llm.headline)}`
+    ? `${SECT.headline} ${name ? `${name}${NAME_T.get()}` : ''}${noDash(llm.headline)}`
     : '';
   return {
     headline: head,

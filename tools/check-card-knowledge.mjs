@@ -115,7 +115,10 @@ console.log('\n▶ سیم‌کشیِ runtime');
   const LOC = readFileSync(new URL('../bots/tarot/locales/fa.js', import.meta.url), 'utf8');
   ok(/CARD_KB\[c\.key\]/.test(SRC), 'فقط ردیفِ کارتِ کشیده‌شده خوانده می‌شود (نه کلِ جدول)');
   // 🌍 مسیر باید پویا باشد، وگرنه رباتِ روسی ۷۸ ردیفِ متنِ فارسی را در پرامپتِ روسی می‌ریزد
-  ok(/card-knowledge\.\$\{LOCALE\}\.json/.test(SRC), 'جدولِ دانش per زبان بار می‌شود، نه فارسیِ هاردکد');
+  ok(/card-knowledge\.\$\{lang\}\.json/.test(SRC), 'جدولِ دانش per زبان بار می‌شود، نه فارسیِ هاردکد');
+  // 🌍 و **همه‌ی** زبان‌های پروسه، نه فقط یکی: رباتِ چندزبانه باید هر چهار جدول را داشته باشد
+  ok(/for \(const lang of LANGS\)[\s\S]{0,120}KB_T\.set/.test(SRC),
+     'جدولِ هر زبانِ پروسه جدا بار می‌شود (نه یک جدولِ مشترک)');
   ok(/kbOn && CARD_KB/.test(SRC), 'دانش فقط در لحنِ جدید تزریق می‌شود');
   const BOT = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
   ok(/kbOn: toneV2For\(user\.telegram_id\)/.test(BOT), 'پرچمِ لحن از خودِ ربات می‌آید، نه از هسته');

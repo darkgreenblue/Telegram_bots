@@ -16,7 +16,8 @@
 //   • شکستِ تعمیر هرگز خوانش را نمی‌شکند: متنِ اصلی برمی‌گردد.
 //   • تعمیر فقط فیلدهای معیوب را عوض می‌کند؛ بقیه‌ی خوانش بیت‌به‌بیت دست‌نخورده می‌ماند.
 import { evasionIn, pastTimeIn } from './verdict.js';
-import { parseJsonLoose, readText, LANG_DATA, FLASH, LUNA } from './reading-core.js';
+import { parseJsonLoose, readText, langDataFor, FLASH, LUNA } from './reading-core.js';
+import { langTable, LANGS, DEFAULT_LANG } from './locale-ctx.js';
 import { log, logErr } from '../../shared/logger.js';
 
 // همه‌ی فیلدهای رو-به-کاربر، **دقیقاً همان‌هایی که `v4Text` می‌بیند**.
@@ -31,7 +32,7 @@ import { log, logErr } from '../../shared/logger.js';
 // دو نوع ضعف تا امروز ارزشِ تعمیر دارند. هر دو **هاردکد** تشخیص داده می‌شوند و هر دو
 // در **یک** فراخوانی با هم تعمیر می‌شوند — نه یکی یکی، وگرنه فالِ بدشانس دو بار
 // معطل می‌شود. افزودنِ نوعِ سوم = یک ردیف در این آرایه، نه یک مسیرِ جدید.
-export const DEFECTS = [
+const CORE_DEFECTS = [
   {
     id: 'evasion',
     find: evasionIn,
@@ -45,6 +46,26 @@ export const DEFECTS = [
     get hint() { return RLEX.hints.pastTime; },
   },
 ];
+
+/* 🌍 فهرستِ ضعف‌ها **per زبان**، نه یک آرایه‌ی مشترک.
+ *
+ * ⚠️ چرا این اجباری است و نه تمیزکاری: دو ضعفِ اولْ زبان‌مستقل‌اند، ولی ردیف‌های
+ * `langdata.<lang>.json` کاملاً زبانی‌اند (نشتِ جنسیت در اسپانیایی، خطابِ رسمیِ روسی،
+ * واژه‌ی اروپایی در پرتغالی). در یک پروسه‌ی چندزبانه یک آرایه‌ی مشترک یعنی الگوهای
+ * زبانِ آخری که بار شده روی متنِ **همه‌ی** زبان‌ها اجرا شود: هم قرمزِ کاذب (تعمیرِ
+ * بی‌دلیلِ متنِ سالم، با هزینه و تأخیر) و هم منفیِ کاذب (گاردِ زبانِ خودش غایب).
+ * هر دو بی‌صدا، چون مسیرِ تعمیر fail-safe است و متنِ اصلی تحویل می‌شود.
+ *
+ * `DEFECTS` عمداً همان نام و همان شکلِ آرایه ماند (Proxy)، چون سه مصرف‌کننده‌ی بیرونی
+ * دارد (`findDefects`، `validate`، و دو چکِ CI) و همه با `.some`/`.filter`/`.find` و
+ * `.length` کار می‌کنند. */
+const DEF_T = langTable(CORE_DEFECTS);
+export const DEFECTS = new Proxy([], {
+  get: (_t, k) => Reflect.get(DEF_T.get(), k),
+  has: (_t, k) => Reflect.has(DEF_T.get(), k),
+  ownKeys: () => Reflect.ownKeys(DEF_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(DEF_T.get(), k),
+});
 
 /* 🌍 ضعف‌های **مخصوصِ یک زبان** از `langdata.<locale>.json` می‌آیند.
  *
@@ -71,7 +92,9 @@ function sentenceAround(text, idx) {
   return text.slice(start, end + 1);
 }
 
-for (const d of (LANG_DATA.defects || [])) {
+for (const lang of LANGS) {
+ const list = [...CORE_DEFECTS];
+ for (const d of (langDataFor(lang)?.defects || [])) {
   let re, exceptRe = null;
   try {
     re = new RegExp(d.pattern, d.flags || '');
@@ -80,7 +103,7 @@ for (const d of (LANG_DATA.defects || [])) {
     // رد می‌شد. اولین تستِ واقعی همین را گرفت.
     if (d.except) exceptRe = new RegExp(d.except, `${(d.flags || '').replace('i', '')}i`);
   } catch { continue; } // الگوی خراب فقط همان ردیف را حذف می‌کند، نه کلِ تعمیر را
-  DEFECTS.push({
+  list.push({
     id: d.id,
     hint: d.hint || '',
     find: (t) => {
@@ -90,6 +113,8 @@ for (const d of (LANG_DATA.defects || [])) {
       return m[0].trim();
     },
   });
+ }
+ DEF_T.set(lang, list);
 }
 
 export function findDefects(llm) {
@@ -180,13 +205,14 @@ const FA_REPAIR = {
   },
   item: (i, hint, phrase, text) => `${i + 1}) [ایراد: ${hint}]\n[عبارتِ «${phrase}» نباید در جوابت باشد]\n${text}`,
 };
-let RLEX = FA_REPAIR;
-/** دادهٔ زبانیِ مسیرِ تعمیر را از فایلِ زبان می‌گیرد؛ خودِ ماژول صدایش می‌زند. */
-export function configureRepair(lex) {
+const RLEX_T = langTable(FA_REPAIR);
+const RLEX = new Proxy({}, { get: (_t, k) => RLEX_T.get()[k] });
+/** دادهٔ زبانیِ مسیرِ تعمیر را از فایلِ زبان می‌گیرد؛ خودِ ماژول برای هر زبان صدایش می‌زند. */
+export function configureRepair(lex, lang = DEFAULT_LANG) {
   if (!lex || typeof lex !== 'object') return;
   // `item` قالبِ رشته‌ای است چون از JSON می‌آید (`%i %hint %phrase %text`).
   const tpl = typeof lex.item === 'string' ? lex.item : null;
-  RLEX = {
+  RLEX_T.set(lang, {
     system: lex.system || FA_REPAIR.system,
     hints: { ...FA_REPAIR.hints, ...(lex.hints || {}) },
     item: tpl
@@ -194,9 +220,9 @@ export function configureRepair(lex) {
           .replace('%i', String(i + 1)).replace('%hint', hint)
           .replace('%phrase', phrase).replace('%text', text)
       : FA_REPAIR.item,
-  };
+  });
 }
-configureRepair(LANG_DATA.repair);
+for (const lang of LANGS) configureRepair(langDataFor(lang)?.repair, lang);
 export const repairSystem = () => RLEX.system;
 
 // هر تکه با **ایرادِ خودش** می‌رود، پس یک فراخوانی می‌تواند چند نوع ضعف را با هم
