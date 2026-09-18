@@ -278,7 +278,7 @@ console.log('\n۴) exposure (بند ۲و/۶د: نمایشِ قیمت یعنی ex
 
 /* ══ ۵) سیم‌کشی: نقطه‌ی نمایش و نقطه‌ی تپ باید یک بازو ببینند ════════════ */
 console.log('\n۵) سیم‌کشی در index.js');
-const packMenu = noComments(bodyOf('function packMenuScreen(uid) {', '\n}'));
+const packMenu = noComments(bodyOf('function packMenuScreen(uid, paymentId = 0) {', '\n}'));
 ok(/shopPackages\(uid\)/.test(packMenu) && !/shopPackages\(\)/.test(packMenu),
   'packMenuScreen از shopPackages(uid) می‌خواند، نه کاتالوگِ سراسری');
 const pkgFn = noComments(bodyOf('bot.action(/^pkg:([a-z]+)$/, async (ctx) => {', '\n});'));

@@ -111,9 +111,10 @@ const runScreen = (first, balance = 3) =>
   new Function('L', 'Markup', 'curOf', 'getBalance', 'onboardFirstSpread',
     'SIZES_V3', 'SPREAD_BY_ID', 'spreadIdOf', 'navBackRow', `${screenSrc} return pickSizeScreen;`)(
     L, Markup, () => cur, () => balance, () => first, SIZES_V3, SPREAD_BY_ID, spreadIdOf,
-    // 🧭 پشته‌ی ناوبری (v3.97.0): این سناریو **لایه‌ی ۱** است (پشته خالی)، پس ردیفِ
-    // بازگشت از فالبکِ `tback:` می‌آید — دقیقاً همان دکمه‌ای که این چک از قبل می‌سنجید.
-    () => [])(
+    // 🧭 پشته‌ی ناوبری (v3.97.0): این سناریو کاربرِ **خارج از دامنه**ی انتشارِ مرحله‌ای
+    // را می‌سازد، پس `navBackRow` همان ردیفِ `legacy` (دکمه‌ی `tback:`ِ v3.96.0) را
+    // برمی‌گرداند — دقیقاً همان دکمه‌ای که این چک از اول می‌سنجید.
+    (_uid, legacy = []) => legacy)(
     1, topic, 'm');
 
 {
@@ -153,10 +154,12 @@ console.log('\n۴ب) بدونِ دکمه‌ی خروج در آنبوردینگ')
   // 🧭 v3.97.0: ردیفِ آخر از `navBackRow` می‌آید. لیستِ کاملِ فال‌ها **ریشه** است
   // (پشته خالی)، پس همان «بازگشت به منوی اصلی» را برمی‌گرداند — عیناً چیزی که این
   // چک از اول می‌سنجید.
+  const menuRow = () => [[btn('◀️ بازگشت به منوی اصلی', 'nav:menu')]];
   const mkKb = (onb) => new Function('inOnboardFlow', 'TOPICS_V3', 'styled', 'Markup',
-    'L', 'spreadName', 'topicStyle', 'navBackRow', `${kbSrc} return allTopicsKb;`)(
+    'L', 'spreadName', 'topicStyle', 'navBackRow', 'navMenuRow', `${kbSrc} return allTopicsKb;`)(
     () => onb, [{ key: 'personal', fa: 'x' }], (b) => b, Markup, L, (x) => x,
-    () => undefined, () => [[btn('◀️ بازگشت به منوی اصلی', 'nav:menu')]])(1);
+    // خارج از دامنه: `navBackRow` همان `legacy` را می‌دهد، که این‌جا `navMenuRow()` است.
+    () => undefined, (_uid, legacy = []) => legacy, menuRow)(1);
   ok(!JSON.stringify(mkKb(true)).includes('nav:menu'),
     'لیستِ کاملِ فال‌ها در آنبوردینگ دکمه‌ی «بازگشت به منوی اصلی» ندارد');
   ok(JSON.stringify(mkKb(false)).includes('nav:menu'),

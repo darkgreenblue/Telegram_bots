@@ -162,15 +162,21 @@ ok(inserts === 2, `insertPayment فقط از دو جا صدا می‌شود: ope
  * می‌شود، یعنی دقیقاً لحظه‌ی صدورِ فاکتور. دو سودِ مستقیم: جدولِ `payments` دیگر ردیفِ
  * شبحِ `amount=0` نمی‌گیرد، و گاردِ مرکزی روی دکمه‌ی «بازگشت» چیزی برای محافظت پیدا
  * نمی‌کند پس پیامِ «یه خرید نیمه‌کاره داری» حذف می‌شود. */
+/* ⚠️ و از ۱۴۰۵/۰۶/۲۷ این قرارداد **فقط برای کاربرِ داخلِ دامنه‌ی انتشارِ مرحله‌ای**
+ * برقرار است (بند ۲ج-۲ ریشه). پس هر ادعا دو نیمه دارد: شاخه‌ی تازه پشتِ `navV2For`
+ * باشد، و شاخه‌ی `else` بیت‌به‌بیت همان v3.96.0 بماند — وگرنه کاربرِ واقعی وسطِ مسیرِ
+ * پول یک نسخه‌ی نیمه‌تمام می‌بیند. */
 const rechargeBody = bodyOf("bot.action('recharge'", '\n});');
-ok(!!rechargeBody && !rechargeBody.includes('openPaymentRow('),
-  'مسیرِ recharge هیچ ردیفِ پرداختی نمی‌سازد (فاکتور فقط لحظه‌ی انتخابِ بسته)');
+ok(!!rechargeBody && /if \(navV2For\(uid\)\) \{\s*\n\s*trackRechargeStarted\(uid\);/.test(rechargeBody),
+  'مسیرِ recharge داخلِ دامنه هیچ ردیفِ پرداختی نمی‌سازد (فاکتور فقط لحظه‌ی انتخابِ بسته)');
 ok(!!rechargeBody && !rechargeBody.includes('insertPayment.run'),
   'مسیرِ recharge مستقیم هم INSERT نمی‌کند');
-ok(!!rechargeBody && !/patchSession\(uid, \{ paymentId/.test(rechargeBody),
-  'و شناسه‌ی پرداختی هم در سشن نمی‌نشیند (وگرنه گاردها فاکتورِ ناموجود می‌بینند)');
+ok(!!rechargeBody && /if \(!navV2For\(uid\)\) patchSession\(uid, \{ paymentId \}\);/.test(rechargeBody),
+  'و شناسه‌ی پرداختی فقط برای کاربرِ خارج از دامنه در سشن می‌نشیند');
+ok(!!rechargeBody && /\} else \{[\s\S]*?openPaymentRow\(uid\)[\s\S]*?EVENTS\.RECHARGE_STARTED/.test(rechargeBody),
+  'و شاخه‌ی خارج از دامنه دقیقاً همان ردیف‌سازی و رویدادِ v3.96.0 را دارد');
 ok(!!rechargeBody && rechargeBody.includes('trackRechargeStarted(uid)'),
-  'recharge_started از تک‌منبعِ دِدوپ‌دار می‌رود، نه یک track خام');
+  'recharge_started (داخلِ دامنه) از تک‌منبعِ دِدوپ‌دار می‌رود، نه یک track خام');
 const trackBody = bodyOf('function trackRechargeStarted(uid) {', '\n}');
 ok(!!trackBody && /PAY_ROW_REUSE_SEC/.test(trackBody) && /rechargeSeenAt/.test(trackBody),
   'و همان تک‌منبع پنجره‌ی دِدوپ دارد (قیف با هر بازگشت باد نمی‌کند)');
@@ -178,8 +184,8 @@ const pkgIssueBody = bodyOf('bot.action(/^pkg:', '\n});');
 ok(!!pkgIssueBody && pkgIssueBody.includes('openPaymentRow(uid)'),
   'ردیف دقیقاً در مسیرِ انتخابِ بسته ساخته می‌شود');
 const cancelBody = bodyOf('bot.action(/^pay_cancel:', '\n});');
-ok(!!cancelBody && !cancelBody.includes('openPaymentRow('),
-  'بازگشتِ انصراف به صفحه‌ی بسته‌ها هم ردیفِ تازه نمی‌سازد');
+ok(!!cancelBody && /if \(!navV2For\(uid\)\) freshId = openPaymentRow\(uid\)\.id;/.test(cancelBody),
+  'بازگشتِ انصراف به صفحه‌ی بسته‌ها داخلِ دامنه ردیفِ تازه نمی‌سازد (و خارج از آن مثل قبل می‌سازد)');
 
 /* ══ ۵) تپِ کاربر روی صفحه‌ی کهنه بی‌صدا نمی‌میرد ══════════════════════════
  * بدونِ این، جارو خودش یک باگ می‌ساخت: کاربر روی بسته می‌زند و هیچ اتفاقی نمی‌افتد. */

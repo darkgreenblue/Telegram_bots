@@ -98,7 +98,7 @@ ok(/return ctx\.reply\(L\.errors\.generic\)/.test(pkgHandler.slice(pkgHandler.in
 /* رنگِ مسیرِ پول حالا یک A/B لایه‌بندی‌شده است، نه نتیجه‌گیری از یک گزارش پشتیبانی.
  * control باید استاندارد بماند و treatment فقط ظاهرِ رنگیِ تاریخی را برگرداند. */
 // بدنه nested block دارد؛ مرزِ پایدارش helper بعدی است، نه اولین `}`.
-const screenFn = bodyOf('function packMenuScreen(uid) {', '\n/* 👁 تک‌نقطه‌ی') || '';
+const screenFn = bodyOf('function packMenuScreen(uid, paymentId = 0) {', '\n/* 👁 تک‌نقطه‌ی') || '';
 const packageRows = screenFn.slice(screenFn.indexOf('const rows = shown.map'), screenFn.indexOf('// دکمه‌ی کشف'));
 ok(packageRows.includes('Markup.button.callback') && /`pkg:\$\{p\.key\}`/.test(packageRows),
   'هر بسته‌ی فروشگاه callback استاندارد دارد');
@@ -121,7 +121,7 @@ ok(/L\.errors\.packRetired/.test(pkgHandler), 'و پیامِ مودبانه‌ی
   const iRepair = pkgHandler.indexOf('patchSession(uid, { paymentId: revived })');
   const iRetired = pkgHandler.indexOf('if (isRetiredPack(pack.key))');
   ok(iRepair > -1 && iRetired > iRepair, 'و بعد از بلوکِ ترمیمِ استیت است (شناسه‌ی فاکتورِ معتبر برای دکمه‌ی بازگشت)');
-  ok(/packMenuScreen\(uid\)/.test(pkgHandler.slice(iRetired)),
+  ok(/packMenuScreen\(uid, s\.paymentId \|\| 0\)/.test(pkgHandler.slice(iRetired)),
     'پیام با خودِ کیبوردِ فروشگاه می‌رود، پس کاربر همان‌جا بسته‌ی زنده انتخاب می‌کند (بن‌بست نیست)');
 }
 for (const loc of ['fa', 'ru', 'es', 'pt']) {
@@ -180,16 +180,18 @@ console.log('\n۷) رفتارِ واقعیِ آزمایش (برای روزی ک�
 
 /* ══ ۸) نشانه‌ی «دیده شد» (packsRevealed) ═════════════════════════════════ */
 console.log('\n۸) دکمه‌ی کشف و نشانه‌ی سشن (کدش عمداً حفظ شده)');
-const revealFn = bodyOf('bot.action(/^pack_reveal:?\\d*$/, async (ctx) => {', '\n});') || '';
+const revealFn = bodyOf('bot.action(/^pack_reveal:?(\\d*)$/, async (ctx) => {', '\n});') || '';
 ok(/if \(starsRail \|\| !coinsOn\(uid\)\) return;/.test(revealFn), 'هندلر برای ریلِ استارز/دنیای تومانی هیچ کاری نمی‌کند');
 /* ⚠️ ادعای «مالکیتِ فاکتور» از ۱۴۰۵/۰۶/۲۷ **موضوعیت ندارد و حذف شد، نه اینکه خفه شود**:
    صفحه‌ی بسته‌ها دیگر هیچ شناسه‌ی پرداختی حمل نمی‌کند، چون در آن لحظه هیچ ردیفی وجود
    ندارد (فاکتور فقط لحظه‌ی انتخابِ بسته صادر می‌شود). جایش یک ادعای **معکوس** نشست:
    هیچ شناسه‌ای از callback خوانده نمی‌شود، وگرنه دوباره همان گره‌ی حذف‌شده برمی‌گردد. */
-ok(!/ctx\.match\[1\]/.test(revealFn) && !/paymentId/.test(revealFn),
-  'دکمه‌ی کشف هیچ شناسه‌ی پرداختی حمل نمی‌کند (در این لحظه فاکتوری وجود ندارد)');
+ok(/navV2For\(uid\)/.test(revealFn) && /const \[text, extra\] = packMenuScreen\(uid, pid\);/.test(revealFn),
+  'دکمه‌ی کشف داخلِ دامنه شناسه‌ای حمل نمی‌کند (pid=0)، و خارج از دامنه همان گاردِ v3.96.0 را دارد');
+ok(/if \(getSession\(uid\)\.paymentId !== pid\) return;/.test(revealFn),
+  'و برای کاربرِ خارج از دامنه، دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر مثل قبل بی‌صدا رد می‌شود');
 ok(/patchSession\(uid, \{ packsRevealed: 1 \}\)/.test(revealFn), 'نشانه در سشن می‌نشیند (نه ستونِ DB — بند ۹/۰: چیزی که لازم نیست ساخته نشود)');
-ok(/packMenuScreen\(uid\)/.test(revealFn),
+ok(/packMenuScreen\(uid, pid\)/.test(revealFn),
   'و صفحه را دوباره می‌سازد — پس دکمه‌ی کهنه‌ی کشف در حالتِ خاموش هم خودترمیم است (منو بدونِ آن دکمه بازرندر می‌شود)');
 const packsRevealedFn = bodyOf('const packsRevealed = (uid) => {', '\n};') || '';
 ok(/getSession\(uid\)\?\.packsRevealed/.test(packsRevealedFn), 'و همان کلید در packsRevealed() خوانده می‌شود');
