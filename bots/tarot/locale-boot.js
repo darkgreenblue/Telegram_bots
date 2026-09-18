@@ -20,21 +20,41 @@
 // برای `fa` هیچ‌کدام از این جدول‌ها در locale نیستند (به‌جز `verdict`)، پس هر ماژول به
 // پیش‌فرضِ فارسیِ هاردکدِ خودش fallback می‌کند و رفتارِ فارسی بیت‌به‌بیت دست‌نخورده است.
 import { configureVerdict } from './verdict.js';
-import { configureSeparator, LANG_DATA } from './reading-core.js';
+import { configureSeparator, langDataFor } from './reading-core.js';
 import { configureChatLang } from './chat-core.js';
+import { Lfor, LANGS, DEFAULT_LANG } from './locale-ctx.js';
 // ⚠️ صرفاً برای اثرِ جانبیِ بارگذاری: `repair.js` لغتنامه‌اش را خودش از `LANG_DATA`
 // برمی‌دارد. import اش این‌جاست تا این فایل واقعاً «همه‌ی پیکربندیِ زبان» باشد و کسی
 // دنبالِ یک نقطه‌ی پیکربندیِ دوم نگردد.
 import './repair.js';
 
-export function configureLocale(L) {
-  configureVerdict(L?.verdict);
+/**
+ * دادهٔ زبانیِ **یک** زبان را در همه‌ی ماژول‌های خالص می‌نشاند.
+ *
+ * 🌍 از رباتِ چندزبانه به بعد هر ماژول یک **جدول per زبان** دارد، نه یک مقدارِ واحد،
+ * پس این تابع برای هر زبانِ پروسه یک‌بار صدا زده می‌شود (`configureAllLocales`) و
+ * انتخابِ ردیف در زمانِ اجرا از روی زمینه‌ی همان آپدیت انجام می‌شود.
+ * `lang` نیامده = زبانِ پیش‌فرض، پس صدازننده‌های تک‌زبانه (آزمایشگاه، چک‌های CI)
+ * بدونِ تغییر کار می‌کنند.
+ */
+export function configureLocale(L, lang = DEFAULT_LANG) {
+  configureVerdict(L?.verdict, lang);
   // آرگومانِ دوم جداکننده‌ی نام از سرخط است؛ نبودنش یعنی «همان ویرگولِ همین زبان»،
   // پس یک زبان نمی‌تواند نصفه پیکربندی شود و «Аня، …» دوباره برگردد.
-  configureSeparator(L?.verdict?.dashReplacement, L?.verdict?.nameSeparator);
+  configureSeparator(L?.verdict?.dashReplacement, L?.verdict?.nameSeparator, lang);
   // 🗣 الگوهای گفتگو (v3.84.0) از `langdata.<locale>.json` می‌آیند. `fa` این فایل را
   // ندارد، پس فارسی روی پیش‌فرضِ هاردکدِ خودش می‌ماند — همان الگوی `defects[]`.
   // ⚠️ این‌جاست نه در `index.js`، چون آزمایشگاهِ گفتگو باید **دقیقاً همان** گاردها را
   // ببیند؛ وگرنه سنجه چیزی را می‌سنجد که محصول اجرا نمی‌کند (درسِ همین فایل).
-  configureChatLang(LANG_DATA?.chat);
+  configureChatLang(langDataFor(lang)?.chat, lang);
+}
+
+/**
+ * همان کار، برای **همه‌ی** زبان‌های این پروسه. تک‌نقطه‌ی boot ربات.
+ * ⚠️ چرا یک تابعِ جدا و نه یک حلقه در `index.js`: اگر صدازننده حلقه را بزند، اولین
+ * زبانی که کسی یادش برود اضافه کند یک خرابیِ بی‌صداست (متنِ زبانِ پیش‌فرض داخلِ فالِ
+ * زبانِ دیگر). یک تابع یعنی «همه‌ی زبان‌ها» یک تصمیم است نه یک عادت.
+ */
+export function configureAllLocales() {
+  for (const lang of LANGS) configureLocale(Lfor(lang), lang);
 }

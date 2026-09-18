@@ -16,12 +16,28 @@
 // `DIRECT` از بازنگریِ لحن آمد (نسخه‌ی دوم خوانش): **هر** فال باید به سؤالِ کاربر جواب
 // بدهد، نه فقط فال‌های تصمیم‌محور. جواب این‌جا متنِ آزاد است (چون سؤال آزاد است) ولی از
 // همان فیلترِ ابهام رد می‌شود: جوابی که «شاید» و «بستگی داره» باشد نمایش داده نمی‌شود.
+import { langTable, LANGS, DEFAULT_LANG } from './locale-ctx.js';
+
 export const VERDICT_MODES = { BINARY: 'binary', CHOICE: 'choice', DIRECT: 'direct' };
 
 export const VERDICT_LIMITS = { sign: 300, because: 300, nuance: 200, answer: 240 };
 
-export const BINARY_ANSWERS = { YES: 'آره', NO: 'نه' };
-export const CHOICE_ANSWERS = { FIRST: 'مسیر اول', SECOND: 'مسیر دوم' };
+/* 🌍 per زبانِ **زمینه‌ی جاری** (بند ۲و). تا دیروز یک آبجکتِ واحد بودند و
+ * `configureVerdict` در جا ویرایششان می‌کرد؛ آن شکل وقتی یک پروسه هم‌زمان به چند زبان
+ * جواب می‌دهد ساختاراً ممکن نیست (یک آبجکت نمی‌تواند هم «آره» باشد هم «Да»).
+ * شکلِ خارجی عمداً همان است تا مصرف‌کننده‌ها (`.YES`, `.find`, spread) دست نخورند. */
+const ANS_T = langTable({ YES: 'آره', NO: 'نه' });
+const CHO_T = langTable({ FIRST: 'مسیر اول', SECOND: 'مسیر دوم' });
+export const BINARY_ANSWERS = new Proxy({}, {
+  get: (_t, k) => ANS_T.get()[k],
+  ownKeys: () => Reflect.ownKeys(ANS_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(ANS_T.get(), k),
+});
+export const CHOICE_ANSWERS = new Proxy({}, {
+  get: (_t, k) => CHO_T.get()[k],
+  ownKeys: () => Reflect.ownKeys(CHO_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(CHO_T.get(), k),
+});
 
 const FA_DIGITS = { '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
 
@@ -52,7 +68,7 @@ const tokens = (s) => norm(s).split(' ').filter(Boolean);
  * پیش‌فرض‌ها فارسی می‌مانند تا اگر کسی `configureVerdict` را صدا نزد رفتار عوض
  * نشود، ولی index.js همیشه از روی locale صدایش می‌زند تا فارسی هم تک‌منبع باشد.
  * الگوی مرجع: `setUsageSink` در همین ربات. */
-let LEX = {
+const LEX_DEFAULT = {
   answers: { YES: 'آره', NO: 'نه', FIRST: 'مسیر اول', SECOND: 'مسیر دوم' },
   yes: ['اره', 'بله', 'اری', 'مثبت', 'یس', 'yes', 'y', 'true'],
   no: ['نه', 'خیر', 'منفی', 'نو', 'no', 'n', 'false'],
@@ -75,10 +91,20 @@ let LEX = {
   pastTime: /(پارسال|سالِ? ?(پیش|گذشته)|سال‌ها پیش|ماهِ? ?(پیش|گذشته)|ماه‌ها پیش|ماه‌های قبل|هفتهٔ? ?(پیش|گذشته)|هفته‌ی (پیش|گذشته)|هفته‌ها پیش|هفته‌های قبل|روزهای قبل|چند وقت پیش|دفعه‌ی قبل که|بارِ? قبل که)/,
 };
 
-/** دادهٔ زبانیِ ماژول را از locale می‌گیرد. یک‌بار موقعِ boot صدا زده می‌شود. */
-export function configureVerdict(lex) {
+/* 🌍 لغتنامه per زبان. `LEX` عمداً همان نامِ قبلی و همان شکلِ خواندنی است، پس هیچ‌کدام
+ * از ده‌ها نقطه‌ی `LEX.yes` / `LEX.register` / `LEX.pastTime` عوض نشدند. تنها تفاوت
+ * این است که جوابش به زبانِ آپدیتی بستگی دارد که همین حالا پردازش می‌شود. */
+const LEX_T = langTable(LEX_DEFAULT);
+const LEX = new Proxy({}, { get: (_t, k) => LEX_T.get()[k] });
+
+/**
+ * دادهٔ زبانیِ ماژول را از locale می‌گیرد. برای **هر** زبانِ این پروسه یک‌بار موقعِ
+ * boot صدا زده می‌شود (`locale-boot.js`). `lang` نیامده = زبانِ پیش‌فرض، پس
+ * صدازننده‌های قدیمی (چک‌های CI و آزمایشگاه) بدونِ تغییر کار می‌کنند.
+ */
+export function configureVerdict(lex, lang = DEFAULT_LANG) {
   if (!lex || typeof lex !== 'object') return;
-  LEX = { ...LEX, ...lex };
+  const LEX = { ...LEX_DEFAULT, ...lex };
   // الگوی زمانی به‌صورت رشته می‌آید (تا شکلِ locale قابلِ مقایسه بماند) و این‌جا کامپایل می‌شود
   // ⚠️ پرچمِ `i` اجباری است: در زبان‌های لاتین و سیریلیک عبارتِ زمانی معمولاً **اولِ**
   // جمله می‌آید و با حرفِ بزرگ شروع می‌شود («В прошлом году…»). بدونِ `i` دقیقاً همان
@@ -87,13 +113,11 @@ export function configureVerdict(lex) {
   // ⚠️ `EVASION`، `BINARY_ANSWERS` و `CHOICE_ANSWERS` از بیرون import می‌شوند (index.js
   // و دو چکِ CI)، پس **در جا** پر می‌شوند نه جایگزین. اگر به‌جایش دوباره تعریفشان
   // می‌کردیم، هر کسی که قبلاً import کرده بود به نسخه‌ی فارسیِ کهنه چسبیده می‌ماند.
-  if (lex.evasion) { EVASION.length = 0; EVASION.push(...lex.evasion); }
-  if (lex.answers) {
-    if (lex.answers.YES) BINARY_ANSWERS.YES = lex.answers.YES;
-    if (lex.answers.NO) BINARY_ANSWERS.NO = lex.answers.NO;
-    if (lex.answers.FIRST) CHOICE_ANSWERS.FIRST = lex.answers.FIRST;
-    if (lex.answers.SECOND) CHOICE_ANSWERS.SECOND = lex.answers.SECOND;
-  }
+  LEX_T.set(lang, LEX);
+  if (lex.evasion) EVA_T.set(lang, [...lex.evasion]);
+  const a = lex.answers || {};
+  ANS_T.set(lang, { YES: a.YES || 'آره', NO: a.NO || 'نه' });
+  CHO_T.set(lang, { FIRST: a.FIRST || 'مسیر اول', SECOND: a.SECOND || 'مسیر دوم' });
 }
 
 const YES = () => new Set(LEX.yes);
@@ -268,10 +292,19 @@ const hasDirection = (t) => {
 // این‌ها **قولِ اصلیِ محصول** را می‌شکنند: کاربر آمده جواب بگیرد و اینها جواب را به
 // خودش پس می‌دهند. بازخوردِ واقعیِ کاربر همین بود: «اون جوابی که می‌خواستم رو آخر
 // نفهمیدم و نگرفتم» (بند ۱۰ ریشه).
-export const EVASION = [
+const EVA_T = langTable([
   'بستگی به خودت', 'بستگی داره', 'شاید اره شاید نه', 'هم این هم اون',
   'فقط خودت می دونی', 'فقط خودت میدونی', 'به شهودت',
-];
+]);
+/* آرایه‌ی طفره‌رفتنِ زبانِ جاری. Proxy است نه آرایه‌ی ثابت، چون `configureVerdict`
+ * قبلاً در جا mutate اش می‌کرد و آن کار در پروسه‌ی چندزبانه یعنی زبانِ آخر برنده
+ * می‌شود. `.find` / `.some` / `[...EVASION]` / `.length` همگی دست‌نخورده کار می‌کنند. */
+export const EVASION = new Proxy([], {
+  get: (_t, k) => Reflect.get(EVA_T.get(), k),
+  has: (_t, k) => Reflect.has(EVA_T.get(), k),
+  ownKeys: () => Reflect.ownKeys(EVA_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(EVA_T.get(), k),
+});
 // «کائنات» از جنسِ دیگری است: طفره‌رفتن نیست، فقط واژگانِ عمومیِ نامطلوب است. در سرخط
 // رد می‌شود (سرخط کوتاه است و یک کلمه‌ی این‌شکلی کلش را خراب می‌کند) ولی در متنِ بلند
 // ارزشِ یک بازتولیدِ کامل را ندارد — تفکیکشان عمدی است، نه سهو.

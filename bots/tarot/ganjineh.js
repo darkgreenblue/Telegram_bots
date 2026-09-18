@@ -24,6 +24,7 @@
 // متنِ خالی نمی‌خورد و گنجینه می‌تواند ماه‌به‌ماه پر شود.
 import { readFileSync } from 'node:fs';
 import { logErr } from '../../shared/logger.js';
+import { langTable, LANGS } from './locale-ctx.js';
 
 /* 🌍 گنجینه per زبان است، نه مشترک (بند ۲و/۶). دیتای فارسی صریحاً به تقویمِ ایرانی
  * و برجِ همان ماه گره خورده («تو فروردینی»، «ترازو نشانِ خودِ ماهته»)، پس **هرگز**
@@ -34,14 +35,26 @@ import { logErr } from '../../shared/logger.js';
  * **فارسی** نشان می‌داد. */
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 
-let DATA = {};
-try {
-  DATA = JSON.parse(readFileSync(new URL(`./daily-ganjineh.${LOCALE}.json`, import.meta.url), 'utf8'));
-} catch (e) {
-  // fail-safe: نبودنِ فایل نباید ربات را بکشد. نتیجه‌اش «هیچ کارتی واجد شرایط نیست» است
-  // که خودِ کارتِ روز با پیامِ مؤدبانه هندلش می‌کند.
-  logErr('گنجینه بارگذاری نشد:', e.message);
+/* 🌍 per زبانِ زمینه‌ی جاری. یک پروسه‌ی چندزبانه چند گنجینه دارد و زبانی که فایلش
+ * نیست (امروز: انگلیسی) آبجکتِ خالی می‌گیرد، یعنی کارتِ روز **فقط برای همان زبان**
+ * خاموش می‌شود و بقیه دست‌نخورده می‌مانند. همان الگوی fail-safe قبلی، per زبان. */
+const DATA_T = langTable({});
+for (const lang of LANGS) {
+  try {
+    DATA_T.set(lang, JSON.parse(readFileSync(new URL(`./daily-ganjineh.${lang}.json`, import.meta.url), 'utf8')));
+  } catch (e) {
+    // fail-safe: نبودنِ فایل نباید ربات را بکشد. نتیجه‌اش «هیچ کارتی واجد شرایط نیست» است
+    // که خودِ کارتِ روز با پیامِ مؤدبانه هندلش می‌کند.
+    DATA_T.set(lang, {});
+    logErr(`گنجینه‌ی «${lang}» بارگذاری نشد:`, e.message);
+  }
 }
+const DATA = new Proxy({}, {
+  get: (_t, k) => DATA_T.get()[k],
+  has: (_t, k) => k in DATA_T.get(),
+  ownKeys: () => Reflect.ownKeys(DATA_T.get()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(DATA_T.get(), k),
+});
 
 // سقفِ نسخه‌ای که سیستم می‌تواند بچرخاند. **تعدادِ واقعیِ هر خانه از خودِ دیتا** خوانده
 // می‌شود (`countOf`)، نه از این عدد؛ این فقط سقف است تا نسخه‌ی چهارمِ سهوی نادیده نماند.

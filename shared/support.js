@@ -95,7 +95,11 @@ export const supportRow = (texts = SUPPORT_TEXTS_FA) => (SUPPORT.enabled ? [[tex
 // ثبتِ دکمه + دستور /support.
 // botCode: کدِ کوتاهِ همین ربات (از BOT_CODES). before(ctx): گاردِ اختیاری (true = بلاک).
 // after(ctx): معمولاً یادآوریِ قدمِ فعلیِ فلو تا کاربر بعد از دیدنِ پشتیبانی سرگردان نشود.
-export function registerSupport(bot, { botCode, texts = SUPPORT_TEXTS_FA, before, after } = {}) {
+// hearsLabels: اختیاری و افزایشی. رباتِ چندزبانه باید **اتحادِ** برچسبِ همه‌ی زبان‌هایش
+// را بدهد، چون `bot.hears` لحظه‌ی ثبت ارزیابی می‌شود و یک برچسبِ تک‌زبانه یعنی تپِ
+// کاربرِ زبانِ دیگر به هندلرِ متنِ آزاد می‌افتد. ندادنش = رفتارِ قبلی، بیت‌به‌بیت.
+export function registerSupport(
+  bot, { botCode, texts = SUPPORT_TEXTS_FA, before, after, hearsLabels } = {}) {
   if (!SUPPORT.enabled) return;
   const handler = async (ctx) => {
     if (before && (await before(ctx))) return;
@@ -103,6 +107,7 @@ export function registerSupport(bot, { botCode, texts = SUPPORT_TEXTS_FA, before
     await ctx.reply(r.text, r.extra);
     if (after) await after(ctx);
   };
-  bot.hears(texts.button, handler);
+  const labels = (Array.isArray(hearsLabels) ? hearsLabels : []).filter(Boolean);
+  bot.hears(labels.length ? labels : texts.button, handler);
   bot.command('support', handler);
 }

@@ -279,15 +279,20 @@ console.log('\n▶ یک فیلد، همه‌ی ضعف‌هایش');
 console.log('\n▶ سیم‌کشیِ runtime');
 {
   const SRC = readFileSync(new URL('reading-core.js', DIR), 'utf8');
-  ok(/langdata\.\$\{LOCALE\}\.json/.test(SRC), 'فایلِ زبان per locale بار می‌شود');
+  ok(/langdata\.\$\{lang\}\.json/.test(SRC), 'فایلِ زبان per locale بار می‌شود');
   ok(/catch\(\(\) => \(\{\}\)\)/.test(SRC), 'نبودنِ فایل چیزی را نمی‌شکند (fail-safe برای فارسی)');
-  ok(/configureCardData\(LANG_DATA\)/.test(SRC), 'خودِ ماژول پیکربندی می‌شود، پس مصرف‌کننده نمی‌تواند جا بیندازد');
+  ok(/for \(const lang of LANGS\) configureCardData\(/.test(SRC),
+     'خودِ ماژول پیکربندی می‌شود (برای هر زبانِ پروسه)، پس مصرف‌کننده نمی‌تواند جا بیندازد');
   const BOT = readFileSync(new URL('index.js', DIR), 'utf8');
   // ⚠️ اگر این دو جا برچسبِ خام را پاس بدهند، جوابِ قاطع به فارسی چاپ می‌شود
   ok(!/choiceLabels: spread\?\.choiceLabels/.test(BOT), 'برچسبِ تقابلی از مسیرِ ترجمه می‌رود، نه خام');
   ok((BOT.match(/choiceLabelsFor\(spread\)/g) || []).length === 2, 'هر دو نقطه‌ی verdict برچسبِ ترجمه‌شده می‌گیرند');
   const REP = readFileSync(new URL('repair.js', DIR), 'utf8');
-  ok(/LANG_DATA\.defects/.test(REP), 'مسیرِ تعمیر ضعف‌های زبانی را از فایلِ زبان می‌خواند');
+  ok(/langDataFor\(lang\)\?\.defects/.test(REP), 'مسیرِ تعمیر ضعف‌های زبانی را از فایلِ زبان می‌خواند');
+  // 🌍 و **per زبان**، نه یک آرایه‌ی مشترک: الگوهای اسپانیایی نباید روی متنِ روسی اجرا شوند
+  ok(/for \(const lang of LANGS\) \{\s*\n\s*const list = \[\.\.\.CORE_DEFECTS\]/.test(REP)
+     && /DEF_T\.set\(lang, list\)/.test(REP),
+     'فهرستِ ضعف‌ها per زبانِ پروسه ساخته می‌شود');
   // استثنا باید بی‌توجه به بزرگیِ حرف کامپایل شود، وگرنه «Вы оба» در ابتدای جمله
   // به‌عنوان خطابِ رسمی تعمیر می‌شود در حالی که جمعِ درستِ دو نفره است.
   ok(/replace\('i', ''\)\}i`/.test(REP), 'استثنای ضعف case-insensitive کامپایل می‌شود');
