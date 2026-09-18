@@ -74,6 +74,25 @@ export const CHAT_DIGEST_ITEM  = 120;  // سقفِ هر سؤالِ قدیمی د
 export const CHAT_HARD_CHARS   = 900;  // سقفِ خروجیِ مدل (validate)
 export const CHAT_MIN_CHARS    = 20;   // کفِ خروجیِ مدل (جوابِ تک‌کلمه‌ای = خرابی)
 
+/* ═══ کفِ محتوا (از ۱۴۰۵/۰۶/۲۵) ═══
+ *
+ * `CHAT_MIN_CHARS` کفِ **خرابی** است («جواب عملاً خالی است»)، نه کفِ **ارزش**. بین این
+ * دو یک شکافِ پولی هست: جوابِ ۴۰ نویسه‌ای از آن گارد رد می‌شود، یک الماس می‌گیرد، و
+ * هیچ چیزی تحویل نمی‌دهد.
+ *
+ * عدد از دیتای واقعی آمد نه از شهود — ترنسکریپتِ تستِ دستیِ مالک (۲۷ نوبت) دو خوشه‌ی
+ * کاملاً جدا داشت: جواب‌های سالم ۳۰۰ تا ۵۷۱ نویسه، و هشت جوابِ پشتِ‌سرهمِ حلقه ۲۴ تا
+ * ۱۰۰ نویسه. هیچ نمونه‌ای بینِ ۱۰۰ و ۳۰۰ نبود، پس ۲۰۰ وسطِ یک درّه می‌نشیند نه وسطِ
+ * یک توزیع.
+ *
+ * ⚠️ جوابِ **پرچم‌دار** معاف است و این استثنا اجباری است، نه ملایمت: «برای گرفتنِ الماس
+ * به پشتیبانی پیام بده» و «برای این باید فالِ تازه بگیری» **ذاتاً** کوتاه‌اند (۸۰ تا
+ * ۱۰۸ نویسه در همان ترنسکریپت) و کاملاً مفیدند. بدونِ این معافیت، گارد دقیقاً جوابِ
+ * درست را به retry می‌فرستاد. */
+export const CHAT_FLOOR_CHARS  = 200;
+/** آیا این جواب مشمولِ کفِ محتواست؟ جوابی که پرچمِ نیت دارد، کارِ خودش را کرده. */
+export const floorApplies = (out) => !!out && !out.newReading && !out.support && !out.end;
+
 const cut = (s, n) => {
   const t = String(s == null ? '' : s).trim();
   return t.length <= n ? t : t.slice(0, n).trim();
@@ -229,7 +248,35 @@ const FA_CHATBAIT = [
   'سؤال خوبیه', 'سوال خوبیه', 'چه سؤال', 'چه سوال', 'آفرین', 'عالی پرسیدی',
 ];
 
-const FA_LANG = { crisis: FA_CRISIS, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT };
+/* ═══ برچسبِ دکمه‌ی سؤالِ پیشنهادی: دو کلاسِ خرابِ بی‌ابهام ═══
+ *
+ * 🐛 از ترنسکریپتِ تستِ دستیِ مالک (۲۷ نوبت). گفتگویی که فقط با دکمه جلو رفت، هشت
+ * نوبتِ پشتِ سرِ هم جوابِ ۲۴ تا ۱۰۰ نویسه‌ای داد و هفت الماس سوزاند. ریشه **یک** چیز
+ * بود، نه کیفیتِ مدل: وقتی برچسبِ دکمه به‌جای **سؤالِ بعدیِ کاربر**، یا قولِ او برای
+ * پرسیدن است («سؤالمو می‌پرسم») یا جوابِ او به سؤالِ پایانیِ ربات («آره، بریم سراغش»)،
+ * تپش پیامی می‌فرستد که **هیچ سؤالی در آن نیست**. مدل چاره‌ای جز «باشه، بپرس» ندارد،
+ * و چون هر جواب باید یک دعوتِ تازه بسازد، همان شکل دوباره تولید می‌شود: حلقه.
+ *
+ * ⚠️ فقط همین دو کلاس گارد می‌شوند، نه «برچسبِ ضعیف». برچسبِ امری («… رو بگو») سبکش
+ * بدتر است ولی محتوا دارد و تپش یک نوبتِ واقعی می‌سازد؛ گاردِ پهن آن‌جا فقط دکمه‌های
+ * سالم را می‌کُشد (بند ۲و/۶ب-۲ ریشه: گاردِ پرسروصدا همان‌قدر بی‌فایده است که گاردِ
+ * ساکت). سبک کارِ پرامپت است، حلقه کارِ کد. */
+const FA_FU_META = [
+  'می‌خوام بپرسم', 'میخوام بپرسم', 'می‌خواستم بپرسم', 'میخواستم بپرسم',
+  'می‌خوام سؤالمو', 'سؤالمو', 'سوالمو', 'سؤالم رو', 'سوالم رو', 'سؤالم را', 'سوالم را',
+  'یه سؤال دارم', 'یه سوال دارم', 'یک سؤال دارم', 'یک سوال دارم',
+  'بذار بپرسم', 'بگذار بپرسم', 'اجازه بده بپرسم', 'می‌تونم بپرسم', 'میتونم بپرسم',
+  'همینو می‌خواستم', 'همینو میخواستم', 'دقیقا همینو', 'دقیقاً همینو',
+];
+const FA_FU_ASSENT = [
+  'آره', 'اره', 'بله', 'نه', 'باشه', 'اوکی', 'اوک', 'حتما', 'حتماً', 'قبوله',
+  'موافقم', 'بریم', 'بریم سراغش', 'ادامه بده', 'ادامه بدیم', 'همینو',
+];
+
+const FA_LANG = {
+  crisis: FA_CRISIS, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
+  followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT,
+};
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
  * چندزبانه اجازه ندارد الگوهای یک زبان را روی پیامِ زبانِ دیگر اجرا کند. */
 const LANG_T = langTable(FA_LANG);
@@ -242,6 +289,8 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
     crisis:    arr(d.crisis, base.crisis),
     smallTalk: arr(d.smallTalk, base.smallTalk),
     chatbait:  arr(d.chatbait, base.chatbait),
+    followUpMeta:   arr(d.followUpMeta, base.followUpMeta),
+    followUpAssent: arr(d.followUpAssent, base.followUpAssent),
   });
 }
 export const chatLang = () => ({ ...LANG_T.get() });
@@ -421,11 +470,36 @@ const truthy = (v) => v === true || v === 1
 
 /* برچسبِ دکمه‌ی سؤالِ پیشنهادی. تک‌خط، بدونِ گیومه‌ی دورگیر، بدونِ خطِ جدید.
  * خالی‌شدن هیچ خطایی نیست: یعنی این نوبت دکمه ندارد. */
-export function cleanFollowUp(raw, { max = CHAT_FOLLOWUP_MAX } = {}) {
+/* ⚠️ `guard: false` **فقط** برای آزمایشگاه است و مصرفش در محصول ممنوع: سنجه باید
+ * برچسبِ خامِ مدل را ببیند تا بشود فهمید قاعده‌ی پرامپت چقدر جواب داده. اگر سنجه هم
+ * نسخه‌ی گاردخورده را می‌دید، همیشه صفر گزارش می‌کرد و ما فکر می‌کردیم مسئله حل شده،
+ * در حالی که فقط **پنهان** شده بود (بند ۶ب-۲ ریشه). */
+export function cleanFollowUp(raw, { max = CHAT_FOLLOWUP_MAX, guard = true } = {}) {
   let s = String(raw ?? '').replace(/\s+/g, ' ').trim();
   s = s.replace(/^["'«»“”]+/, '').replace(/["'«»“”]+$/, '').trim();
   if (!s || s.length > max) return '';
-  return s;
+  return guard && followUpBad(s) ? '' : s;
+}
+
+/* باقی‌مانده‌ی برچسب بعد از برداشتنِ واژه‌های تأیید. زیرِ این مقدار یعنی برچسب هیچ
+ * محتوایی ندارد و تپش یک پیامِ توخالی می‌فرستد. «آره، ولی چرا کارتِ دوم برعکس بود؟»
+ * از این گارد رد می‌شود چون باقی‌مانده‌اش یک سؤالِ کامل است. */
+export const FU_ASSENT_REST = 12;
+/** کلاسِ خرابیِ برچسب (`'meta'` | `'assent'`)، یا `''` اگر سالم باشد. */
+export function followUpBad(label) {
+  const n = norm(label);
+  if (!n) return '';
+  for (const p of LANG.followUpMeta) { const q = norm(p); if (q && n.includes(q)) return 'meta'; }
+  let rest = n, stripped = false;
+  const words = LANG.followUpAssent.map(norm).filter(Boolean).sort((a, b) => b.length - a.length);
+  for (let i = 0; i < 4; i++) {
+    const hit = words.find((w) => rest === w || rest.startsWith(`${w} `));
+    if (!hit) break;
+    rest = rest.slice(hit.length).trim();
+    stripped = true;
+  }
+  if (stripped && rest.length < FU_ASSENT_REST) return 'assent';
+  return '';
 }
 
 /** پاکت را باز می‌کند. `null` یعنی غیرقابلِ استفاده ⟵ `validate` رد می‌کند ⟵ retry. */
@@ -435,11 +509,17 @@ export function parseChatOut(raw) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
   const text = String(o[CHAT_OUT_KEYS.text] ?? '').trim();
   if (text.length < CHAT_MIN_CHARS || text.length > CHAT_HARD_CHARS) return null;
+  // برچسبِ خام (فقط پاکسازیِ شکلی) و برچسبِ گاردخورده کنارِ هم برمی‌گردند: محصول از
+  // `followUp` می‌خواند و آزمایشگاه از `followUpRaw` + `fuBad` (بالا توضیح داده شده).
+  const fuRaw = cleanFollowUp(o[CHAT_OUT_KEYS.followUp], { guard: false });
+  const fuBad = fuRaw ? followUpBad(fuRaw) : '';
   return {
     text,
     newReading: truthy(o[CHAT_OUT_KEYS.reading]),
     support: truthy(o[CHAT_OUT_KEYS.support]),
-    followUp: cleanFollowUp(o[CHAT_OUT_KEYS.followUp]),
+    followUp: fuBad ? '' : fuRaw,
+    followUpRaw: fuRaw,
+    fuBad,
     end: truthy(o[CHAT_OUT_KEYS.end]),
   };
 }
