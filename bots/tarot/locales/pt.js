@@ -827,6 +827,7 @@ export default {
     canceled: 'Beleza, estou aqui quando você quiser 🌙',
     backToMenu: 'Voltamos ao menu principal 🌳',
     openReadingGuard: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela ou deixar pra lá?',
+    openReadingGuardPaid: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela?\n\n⚠️ Se cancelar, os diamantes descontados não voltam.\n\nTem certeza que quer cancelar?',
     stuckReading: (canCancel) => 'Você tem uma leitura que ficou pela metade! 🌙\n\nAs suas cartas continuam te esperando; volta nelas quando quiser.'
       + (canCancel ? '\n\n💎 Se não quiser mais, é só cancelar; só lembra que os diamantes não voltam.' : ''),
   },
@@ -1047,7 +1048,7 @@ export default {
     },
     adminMoney,
     adminAutoApproved: (p, user, reason, pack) =>
-      `✅ Pagamento #${p.id} aprovado pelo agente e creditado.\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+      `✅ Pagamento #${p.invoice_no || p.id} aprovado pelo agente e creditado.\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
     confirmReverse: (pid) =>
       `⚠️ Tem certeza de que não chegou o aviso do pagamento #${pid}?\nConfira o banco primeiro. Confirmando, o crédito sai do saldo da pessoa (não passa de zero), o pagamento volta ao estado anterior, e daqui pra frente os pagamentos dela só serão aprovados na mão.`,
     reversedUser: (cur) => `O seu pagamento anterior foi cancelado e o crédito dele saiu da sua conta. 🌙\nSe você acha que houve engano, fale com o suporte: ${SUPPORT_CONTACT}`,
@@ -1060,7 +1061,7 @@ export default {
     // Mensagem única de recusa: sem motivo, só o caminho do suporte.
     rejected: `❌ O seu pagamento não foi aprovado.\n\nFale com o suporte que a gente resolve: ${SUPPORT_CONTACT}`,
     adminNotify: (p, user, pack) =>
-      `💳 Pagamento novo #${p.id}\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
+      `💳 Pagamento novo #${p.invoice_no || p.id}\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },
 
   // Suporte (contrato comum de todos os bots) — a forma do objeto tem que bater com

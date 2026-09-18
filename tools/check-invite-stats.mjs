@@ -131,8 +131,12 @@ ok(invFn ? /Markup\.button\.callback\(L\.buttons\.inviteStatus, 'invite_stat'\)/
   const i = invFn ? invFn.indexOf('Markup.inlineKeyboard([') : -1;
   const kb = i > -1 ? invFn.slice(i, invFn.indexOf(']),', i)) : '';
   ok(!!kb, 'بلوکِ کیبوردِ صفحه‌ی دعوت پیدا شد');
-  ok(kb && !/[?]|&&|\.\.\./.test(kb),
-    'کیبورد دقیقاً دو ردیفِ ثابت است، بدونِ هیچ شرط (کاربرِ صفر-دعوت هم دکمه را می‌بیند)',
+  /* ⚠️ از ۱۴۰۵/۰۶/۲۷ یک ردیفِ **ناوبری** هم آخرش می‌آید (`navBackRow`) که عمداً
+     شرطی است (لایه‌ی ۱ ⟵ منوی اصلی، لایه‌ی ۲ ⟵ یک قدم عقب). ادعا به همان نیتِ اصلی
+     تنگ شد: **دو ردیفِ محتوایی** هیچ شرطی ندارند، پس کاربرِ صفر-دعوت هم می‌بیندشان. */
+  const kbCore = kb.slice(0, kb.indexOf('navBackRow') > -1 ? kb.indexOf('// لایه‌ی ۱') : kb.length);
+  ok(kbCore && !/[?]|&&/.test(kbCore),
+    'دو ردیفِ محتوایی بدونِ هیچ شرط‌اند (کاربرِ صفر-دعوت هم دکمه را می‌بیند)',
     kb.replace(/\s+/g, ' '));
 }
 

@@ -157,16 +157,29 @@ ok(/function openPaymentRow\(uid\)/.test(SRC), 'openPaymentRow تعریف شده
 const inserts = (SRC.match(/stmts\.insertPayment\.run\(/g) || []).length;
 ok(inserts === 2, `insertPayment فقط از دو جا صدا می‌شود: openPaymentRow و مسیرِ فالِ رزروشده (شد ${inserts})`,
   'هر فراخوانِ سومی یعنی یک مسیرِ تازه که ردیفِ یتیم می‌سازد');
+/* ⚠️ قرارداد از ۱۴۰۵/۰۶/۲۷ **وارونه** شد و این ادعاها با آن به‌روز شدند (نه خفه):
+ * دیدنِ فهرستِ بسته‌ها دیگر هیچ ردیفی نمی‌سازد. ردیف فقط لحظه‌ی **انتخابِ بسته** ساخته
+ * می‌شود، یعنی دقیقاً لحظه‌ی صدورِ فاکتور. دو سودِ مستقیم: جدولِ `payments` دیگر ردیفِ
+ * شبحِ `amount=0` نمی‌گیرد، و گاردِ مرکزی روی دکمه‌ی «بازگشت» چیزی برای محافظت پیدا
+ * نمی‌کند پس پیامِ «یه خرید نیمه‌کاره داری» حذف می‌شود. */
 const rechargeBody = bodyOf("bot.action('recharge'", '\n});');
-ok(!!rechargeBody && rechargeBody.includes('openPaymentRow(uid)'),
-  'مسیرِ recharge از openPaymentRow می‌رود');
+ok(!!rechargeBody && !rechargeBody.includes('openPaymentRow('),
+  'مسیرِ recharge هیچ ردیفِ پرداختی نمی‌سازد (فاکتور فقط لحظه‌ی انتخابِ بسته)');
 ok(!!rechargeBody && !rechargeBody.includes('insertPayment.run'),
-  'مسیرِ recharge دیگر مستقیم INSERT نمی‌کند');
-ok(!!rechargeBody && /if \(fresh\) track\(db, uid, EVENTS\.RECHARGE_STARTED/.test(rechargeBody),
-  'recharge_started فقط برای تلاشِ واقعاً تازه ثبت می‌شود (قیف باد نمی‌کند)');
+  'مسیرِ recharge مستقیم هم INSERT نمی‌کند');
+ok(!!rechargeBody && !/patchSession\(uid, \{ paymentId/.test(rechargeBody),
+  'و شناسه‌ی پرداختی هم در سشن نمی‌نشیند (وگرنه گاردها فاکتورِ ناموجود می‌بینند)');
+ok(!!rechargeBody && rechargeBody.includes('trackRechargeStarted(uid)'),
+  'recharge_started از تک‌منبعِ دِدوپ‌دار می‌رود، نه یک track خام');
+const trackBody = bodyOf('function trackRechargeStarted(uid) {', '\n}');
+ok(!!trackBody && /PAY_ROW_REUSE_SEC/.test(trackBody) && /rechargeSeenAt/.test(trackBody),
+  'و همان تک‌منبع پنجره‌ی دِدوپ دارد (قیف با هر بازگشت باد نمی‌کند)');
+const pkgIssueBody = bodyOf('bot.action(/^pkg:', '\n});');
+ok(!!pkgIssueBody && pkgIssueBody.includes('openPaymentRow(uid)'),
+  'ردیف دقیقاً در مسیرِ انتخابِ بسته ساخته می‌شود');
 const cancelBody = bodyOf('bot.action(/^pay_cancel:', '\n});');
-ok(!!cancelBody && cancelBody.includes('openPaymentRow(uid)'),
-  'بازگشتِ انصراف به صفحه‌ی بسته‌ها هم از openPaymentRow می‌رود');
+ok(!!cancelBody && !cancelBody.includes('openPaymentRow('),
+  'بازگشتِ انصراف به صفحه‌ی بسته‌ها هم ردیفِ تازه نمی‌سازد');
 
 /* ══ ۵) تپِ کاربر روی صفحه‌ی کهنه بی‌صدا نمی‌میرد ══════════════════════════
  * بدونِ این، جارو خودش یک باگ می‌ساخت: کاربر روی بسته می‌زند و هیچ اتفاقی نمی‌افتد. */

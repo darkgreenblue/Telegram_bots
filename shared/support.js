@@ -75,14 +75,18 @@ export function supportLink(botCode, uid, texts = SUPPORT_TEXTS_FA) {
 }
 
 // خروجی آماده‌ی ctx.reply(...) — بدون وابستگی به Telegraf (reply_markup آبجکتِ ساده است).
-export function supportReply(botCode, uid, texts = SUPPORT_TEXTS_FA) {
+// `extraRows`: ردیف‌های اضافه‌ی اختیاری زیرِ دکمه‌ی پشتیبانی (مثلاً «بازگشت به منوی
+// اصلی»). افزایشی است و ندادنش دقیقاً رفتارِ قبلی را می‌دهد، پس voice2text/tabir
+// بیت‌به‌بیت دست‌نخورده‌اند.
+export function supportReply(botCode, uid, texts = SUPPORT_TEXTS_FA, extraRows = []) {
   const code = supportCode(botCode, uid);
   const url = supportLink(botCode, uid, texts);
+  const rows = Array.isArray(extraRows) ? extraRows.filter(r => Array.isArray(r) && r.length) : [];
   return {
     text: texts.body(code),
     extra: {
       parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: texts.openBtn, url }]] },
+      reply_markup: { inline_keyboard: [[{ text: texts.openBtn, url }], ...rows] },
     },
     code,
     url,
@@ -99,11 +103,13 @@ export const supportRow = (texts = SUPPORT_TEXTS_FA) => (SUPPORT.enabled ? [[tex
 // را بدهد، چون `bot.hears` لحظه‌ی ثبت ارزیابی می‌شود و یک برچسبِ تک‌زبانه یعنی تپِ
 // کاربرِ زبانِ دیگر به هندلرِ متنِ آزاد می‌افتد. ندادنش = رفتارِ قبلی، بیت‌به‌بیت.
 export function registerSupport(
-  bot, { botCode, texts = SUPPORT_TEXTS_FA, before, after, hearsLabels } = {}) {
+  bot, { botCode, texts = SUPPORT_TEXTS_FA, before, after, hearsLabels, extraRows } = {}) {
   if (!SUPPORT.enabled) return;
   const handler = async (ctx) => {
     if (before && (await before(ctx))) return;
-    const r = supportReply(botCode, ctx.from.id, texts);
+    // `extraRows` می‌تواند تابع باشد تا ردیف‌ها per کاربر ساخته شوند (ناوبری).
+    const rows = typeof extraRows === 'function' ? (extraRows(ctx) || []) : (extraRows || []);
+    const r = supportReply(botCode, ctx.from.id, texts, rows);
     await ctx.reply(r.text, r.extra);
     if (after) await after(ctx);
   };

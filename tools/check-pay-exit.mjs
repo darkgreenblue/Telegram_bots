@@ -779,10 +779,16 @@ console.log('\n  — 🧭 nav:menu گاردِ کپی‌شده ندارد:');
   /* گاردِ کپی‌شده دیر یا زود از اصل عقب می‌افتد. اثباتِ زنده: وقتی `blockDuringOpenPay`
      از `pay_cancel` به `pay_exit` رفت (فیکسِ حلقه)، کپیِ داخلِ `nav:menu` جا ماند و
      همان حلقه را از مسیرِ «بازگشت به منو» زنده نگه داشت. */
-  const nav = bodyOf("bot.action('nav:menu'", '\n});');
-  ok(!!nav, 'هندلرِ nav:menu پیدا شد');
+  /* ⚠️ بدنه از ۱۴۰۵/۰۶/۲۷ به `navToMenu` منتقل شد (پشته‌ی ناوبری هم از همان‌جا به منوی
+     اصلی می‌رسد، پس دو کپی نمی‌خواهیم). ادعا **تیزتر** شد نه خفه: علاوه بر گارد، حالا
+     می‌سنجد که خودِ `bot.action('nav:menu')` جز delegate هیچ منطقی ندارد. */
+  const nav = bodyOf('async function navToMenu(ctx) {', '\n}\nbot.action');
+  ok(!!nav, 'تک‌منبعِ navToMenu پیدا شد');
   ok(nav ? /blockDuringOpenPay\(ctx\)/.test(nav) : false,
-    'nav:menu همان تک‌منبعِ گارد را صدا می‌زند');
+    'بازگشت به منو همان تک‌منبعِ گارد را صدا می‌زند');
+  const navAct = bodyOf("bot.action('nav:menu'", '\n});');
+  ok(navAct ? /navToMenu\(ctx\)/.test(navAct) && !/setSession|cancelReading/.test(navAct) : false,
+    "bot.action('nav:menu') فقط delegate می‌کند (هیچ کپیِ منطق)");
   ok(nav ? !/L\.errors\.openInvoice/.test(nav) : false,
     'و پیامِ گارد را خودش دوباره نمی‌سازد');
   ok(nav ? !/pay_cancel:/.test(nav) : false,

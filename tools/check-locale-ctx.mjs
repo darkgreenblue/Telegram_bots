@@ -288,7 +288,7 @@ console.log('\n▶ ۸) آبجکتِ متنیِ زنده (`liveL`)');
   ok(j.missing === true, 'زیرشاخه‌ی ناموجود undefined می‌دهد، نه کرشِ سرِ ثبت');
 
   // ── ساختاری: خودِ محصول واقعاً از این مسیر رد می‌شود؟ (تله‌ی گاردِ آینه‌ای)
-  const reg = CODE.match(/registerSupport\(bot,\s*\{[\s\S]{0,400}?\n\}\)/);
+  const reg = CODE.match(/registerSupport\(bot,\s*\{[\s\S]{0,1200}?\n\}\)/);
   ok(!!reg, 'بلوکِ `registerSupport` در سورس پیدا شد');
   ok(!!reg && /texts:\s*liveL\(/.test(reg[0]),
      '`registerSupport` آبجکتِ زنده می‌گیرد، نه `L.support`ِ لحظه‌ی ثبت');
@@ -311,6 +311,11 @@ console.log('\n▶ ۸) آبجکتِ متنیِ زنده (`liveL`)');
   ok(/hearsLabels/.test(sup), '`registerSupport` پارامترِ `hearsLabels` را می‌شناسد');
   ok(/labels\.length \? labels : texts\.button/.test(sup),
      'ندادنِ `hearsLabels` رفتارِ قبلی را بیت‌به‌بیت نگه می‌دارد (رباتِ تک‌زبانه دست‌نخورده)');
+  // 🧭 و پارامترِ تازه‌ی `extraRows` (ردیفِ «بازگشت به منوی اصلی» زیرِ پشتیبانی) هم
+  // افزایشی است: ندادنش دقیقاً کیبوردِ قبلی را می‌دهد، پس voice2text/tabir دست‌نخورده‌اند.
+  ok(/extraRows/.test(sup), '`registerSupport` پارامترِ `extraRows` را می‌شناسد');
+  ok(/inline_keyboard: \[\[\{ text: texts\.openBtn, url \}\], \.\.\.rows\]/.test(sup),
+     'و ردیف‌های اضافه **بعد از** دکمه‌ی پشتیبانی می‌آیند (ردیفِ اول عوض نمی‌شود)');
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);

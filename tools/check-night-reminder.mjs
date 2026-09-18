@@ -255,7 +255,7 @@ ok('و آن یکی داخلِ رندرِ خودِ صفحه‌ی دعوت است 
 // و خودِ showInvite باید از همان تک‌منبع بخواند، نه یک کیبوردِ دستِ دوم بسازد.
 const showInvite = block(SRC, 'async function showInvite');
 ok('showInvite از همان تک‌منبع رندر می‌کند', !!showInvite && /inviteScreen\(uid\)/.test(showInvite));
-ok('ردیفِ دعوت تک‌منبع است', /const inviteRow = \(uid\) => \[Markup\.button\.callback\(/.test(SRC));
+ok('ردیفِ دعوت تک‌منبع است', /const inviteRow = \(uid, action = 'invite_go'\) => \[Markup\.button\.callback\(/.test(SRC));
 ok('ردیفِ دعوت به invite_go می‌رود (پیامِ توضیحی)', /inviteRow[\s\S]{0,160}'invite_go'/.test(SRC));
 const inviteUses = (SRC.match(/inviteRow\(/g) || []).length;
 ok(`هر سه نقطه‌ی دعوت از تک‌منبع می‌خوانند (تعریف + ${inviteUses - 1} مصرف)`, inviteUses >= 4);
@@ -333,11 +333,16 @@ ok('متنِ پاداش پارامترِ موجودی می‌گیرد', /referra
   ok('و دقیقاً یک بار در زنجیره', (chain.match(/nightRemindOff/g) || []).length === 1);
   ok('برچسبِ تکراریِ luckyRemindOff از locale حذف شده', !/luckyRemindOff/.test(LOC));
 
-  // پیامِ «امروز استفاده کردی» هیچ کیبوردی ندارد.
+  /* پیامِ «امروز استفاده کردی» هیچ دکمه‌ی **یادآوری/opt-in** ندارد.
+     ⚠️ از ۱۴۰۵/۰۶/۲۷ یک ردیفِ ناوبری دارد (خواسته‌ی صریحِ مالک: این صفحه از کیبوردِ
+     ماندگار باز می‌شود و نباید بن‌بست باشد). نیتِ اصلیِ ادعا همان می‌ماند و تنگ‌تر شد:
+     هیچ دکمه‌ای که یادآوری را روشن/خاموش کند این‌جا نیست. */
   const already = (SRC.match(/if \(user\.lucky_date === today\) \{[\s\S]*?\n  \}/) || [])[0] || '';
   ok('شاخه‌ی «امروز استفاده کردی» پیدا شد', !!already);
-  ok('پیامِ «امروز استفاده کردی» هیچ دکمه‌ای ندارد',
-     /ctx\.reply\(L\.lucky\.already\);/.test(already) && !/Markup/.test(already));
+  ok('پیامِ «امروز استفاده کردی» هیچ دکمه‌ی یادآوری ندارد',
+     /L\.lucky\.already/.test(already) && !/lremind|RemindOn|RemindOff/.test(already));
+  ok('و تنها دکمه‌اش بازگشت به منوی اصلی است (بن‌بست نیست)',
+     /navMenuRow\(\)/.test(already));
 
   // تپِ «فردا یادآوری کن» هیچ پیامی نمی‌فرستد. از v3.93.0 هندلر فقط برای دکمه‌های
   // **کهنه‌ای** زنده است که در چتِ کاربرانِ قدیمی مانده‌اند (بند ۲ج/۶)، پس دیگر کیبورد
