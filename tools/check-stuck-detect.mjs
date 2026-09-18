@@ -67,6 +67,29 @@ function seed(db, { k, uids, n = 4, spacing = 300, agoS = H, adm = false }) {
   }
 }
 
+// دستورِ /menu عمداً همان صفحه‌ی پیشنهادها را دوباره می‌فرستد. این فیکسچر شکلِ واقعیِ
+// journey را می‌سازد: act پیش از view و ترتیب با id، نه با حدس از timestamp.
+function seedMenuRenders(db, { k, uids, n = 4, spacing = 300, agoS = H }) {
+  for (const uid of uids) {
+    for (let i = 0; i < n; i++) {
+      const ts = BASE - agoS - (n - 1 - i) * spacing;
+      db.ins.run(uid, 'act', JSON.stringify({ a: 'cmd', d: '/menu' }), ts);
+      db.ins.run(uid, 'view', JSON.stringify({ k, t: 'msg' }), ts);
+    }
+  }
+}
+
+// کنترلِ مثبت برای اینکه ناظر به‌اشتباه «هر عملی قبل از همان صفحه» را نادیده نگیرد.
+function seedActionRenders(db, { k, uids, action = 'catalog_go', n = 4, spacing = 300, agoS = H }) {
+  for (const uid of uids) {
+    for (let i = 0; i < n; i++) {
+      const ts = BASE - agoS - (n - 1 - i) * spacing;
+      db.ins.run(uid, 'act', JSON.stringify({ a: action }), ts);
+      db.ins.run(uid, 'view', JSON.stringify({ k, t: 'msg' }), ts);
+    }
+  }
+}
+
 const keysOf = (db, cfg) => findStuckScreens(db, { now: BASE, cfg }).map((f) => f.k);
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -189,6 +212,29 @@ console.log('\n۵ب) صفحه‌ای که کاربرِ سالم به آن برم
     }
   }
   ok(keysOf(whole).includes('x'), '   ↳ کنترلِ مثبت: همان شش بازدید بدونِ وقفه ⟶ قرمز');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ۵ج) `/menu` عمداً همان صفحه‌ی پیشنهادها را بازمی‌کشد
+   ══════════════════════════════════════════════════════════════════════════ */
+console.log('\n۵ج) دستورِ آگاهانه‌ی /menu حلقه نیست، ولی loop واقعی پنهان نمی‌شود');
+{
+  const menu = mkdb();
+  seedMenuRenders(menu, { k: 'continue', uids: [711, 712] });
+  ok(!keysOf(menu).includes('continue'),
+    '🔒 چهار بار /menu و همان صفحه‌ی ادامه ⟶ هشدار نمی‌دهد');
+
+  // تنها تفاوت با نمونه‌ی بالا نوعِ عملِ کاربر است. اگر این قرمز نشود، فیلتر بیش از
+  // حد وسیع شده و loop واقعیِ «تپ ⟶ همان صفحه» را هم پنهان می‌کند.
+  const broken = mkdb();
+  seedActionRenders(broken, { k: 'continue', uids: [711, 712] });
+  ok(keysOf(broken).includes('continue'),
+    '↳ کنترلِ مثبت: callback دیگری که همان صفحه را برگرداند ⟶ هشدار می‌دهد');
+
+  const bare = mkdb();
+  seed(bare, { k: 'continue', uids: [711, 712] });
+  ok(keysOf(bare).includes('continue'),
+    '↳ کنترلِ مثبت: بازنماییِ بدونِ /menu نیز همچنان هشدار می‌دهد');
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
