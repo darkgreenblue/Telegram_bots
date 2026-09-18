@@ -635,7 +635,7 @@ console.log('\n▶ وفاداریِ اسپردِ آزمایشگاه به پرو�
   try { out = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { out = { pass: 0, fails: ['خروجیِ ممیزی خوانده نشد: ' + (r.stderr || '').slice(-300)] }; }
   for (const f of out.fails || []) ok(false, `ممیزیِ en: ${f}`);
   // کنترلِ مثبت: اگر روزی خودِ هارنس بی‌صدا از کار بیفتد، «صفر شکست» نباید سبز بدهد.
-  ok((out.pass || 0) >= 24, `ممیزیِ سنجه‌های en اجرا شد (${out.pass || 0} ادعا)`);
+  ok((out.pass || 0) >= 37, `ممیزیِ سنجه‌های en اجرا شد (${out.pass || 0} ادعا)`);
 }
 
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

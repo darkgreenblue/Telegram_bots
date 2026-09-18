@@ -47,7 +47,7 @@ const {
   locSpread,
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
-const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+const { checkReading, modelText, ngrams, closingAnchor } = await import('./reading-lab/checks.mjs');
 // 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت (از STYLE.md). ارزیابی کارِ همان سشنی است که
 // اسناد را خوانده؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
 const { RUBRIC } = await import('./reading-lab/rubric.mjs');
@@ -708,6 +708,33 @@ if (!DRY) {
   const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
   const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
   console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
+  /* 🕯 شرطِ پایانی، **per بازو**. عمداً per بازو و نه یک عددِ کلِ دور: این سنجه برای
+   * مقایسه‌ی دو بازو ساخته شد و جمعِ چند بازو آن مقایسه را پنهان می‌کند.
+   *
+   * ⚠️ و تعدادِ فالِ هر بازو هم چاپ می‌شود، چون نسخه‌ی اولِ این شمارنده (یک اسکریپتِ
+   * موقت در دورِ ۵) بلوکِ ترنسکریپت را با `startsWith('▓ openai')` تشخیص می‌داد و در
+   * دورِ ۶ دو بازوی غیرِOpenAI را **بی‌صدا** انداخت؛ جدولی با دو ردیف داد که کاملاً
+   * درست به نظر می‌رسید. تنها چیزی که گرفتش شمارشِ بازوها بود. قاعده: هر سنجه‌ی
+   * تجمیعی باید مخرجش را هم بگوید، وگرنه «نبودِ ردیف» با «صفر بودنِ مقدار» یکی
+   * به نظر می‌رسد. */
+  {
+    const byArm = new Map();
+    for (const r of done) {
+      const ca = closingAnchor({ llm: r.llm, cards: r.cards });
+      if (!ca) continue;                       // زبانی که الگوی شرط اعلام نکرده
+      const a = byArm.get(r.arm) || { n: 0, cond: 0, named: 0 };
+      a.n++; if (ca.cond) a.cond++; if (ca.named) a.named++;
+      byArm.set(r.arm, a);
+    }
+    if (byArm.size) {
+      console.log('   🕯 شرطِ پایانی نامِ کارتِ همین فال را می‌برد:');
+      for (const [arm, a] of byArm) {
+        const noCond = a.n - a.cond;
+        console.log(`      ${arm.padEnd(34)} ${a.named}/${a.n}`
+          + (noCond ? `  ⚠️ ${noCond} جمع‌بندی اصلاً شرطِ پایانی ندارد` : ''));
+      }
+    }
+  }
   /* 📏 «خط‌کش چقدر کج بود»: همان متن، با مسیرِ **قدیمیِ** نامِ کارت. تفاوتِ این دو عدد
    * اثرِ فیکسِ ریشه‌یابی را **بدونِ نویزِ اجرا** نشان می‌دهد، چون روی عینِ همان جمله‌ها
    * حساب می‌شود. برای فارسی همیشه صفر است (صرف ندارد) و همین صفر، خودش تأییدِ

@@ -25,7 +25,7 @@ const { configureLocale } = await import('../../bots/tarot/locale-boot.js');
 const L = (await import('../../bots/tarot/locales/en.js')).default;
 configureLocale(L);
 const { renderV4, locSpread, cardName } = await import('../../bots/tarot/reading-core.js');
-const { checkReading } = await import('./checks.mjs');
+const { checkReading, closingAnchor } = await import('./checks.mjs');
 
 const spread = locSpread(SPREAD_BY_ID.personal3);
 const cards = [{ key: 'm00', reversed: false }, { key: 'c03', reversed: true }, { key: 'p09', reversed: false }];
@@ -205,6 +205,43 @@ ok(issue(bad((l) => {
   ok(issue(mk(wall), /هر کارت \d+ کاراکتر/) === 1, 'دیوارِ متنِ چیدمانِ بزرگ گرفته نشد');
   ok(issue(mk(bc.map((c) => `${cardName(c.key)} says Berlin.`)), /هر کارت \d+ کاراکتر/) === 0,
     'کنترلِ معکوس: خوانشِ کوتاهِ چیدمانِ بزرگ قرمزِ کاذب گرفت');
+}
+
+/* ═══ سنجه‌ی «شرطِ پایانی نامِ کارت را می‌برد» ═══
+ * این سنجه دورِ ۵ را تصمیم گرفت (۰/۹ ⟵ ۹/۹) در حالی که سنجه‌ی مرکزیِ بی‌لنگر
+ * «قطعی نیست» می‌گفت، پس درستی‌اش مستقیماً روی یک تصمیمِ پرامپتِ منتشرشده نشسته.
+ * طبقِ بند ۶ب-۲ ریشه هر ادعای منفی این‌جا کنترلِ مثبت دارد: سنجه‌ای که فقط سبز
+ * بدهد، فرقی با یک تابعِ همیشه-false ندارد. */
+{
+  const cards3 = [{ key: 'm00' }, { key: 's13' }, { key: 'w06' }];
+  const ca = (closing) => closingAnchor({ llm: { closing }, cards: cards3 });
+  const names = cards3.map((c) => cardName(c.key));
+
+  ok(names.join('|') === 'The Fool|Queen of Swords|Six of Wands',
+    `نامِ کارت‌های فیکسچر عوض شده (${names.join('|')}) — بقیه‌ی ادعاهای این بلوک پوچ می‌شوند`);
+
+  ok(ca('All in all: yes. If you use the Queen of Swords well, then it moves.')?.named === true,
+    'نامِ کارت داخلِ شرط شمرده نشد');
+  // ⚠️ ادعای مرکزی: کارت در **نتیجه**ی شرط، لنگر نیست. گروهِ کنترلِ دورِ ۵ سه بار
+  // دقیقاً همین را داشت و صفر بار کارت را در شرط آورد؛ سنجه‌ای که این دو را یکی
+  // بگیرد، آن دور را «بدونِ تفاوت» گزارش می‌کرد.
+  ok(ca('All in all: yes. If you speak clearly, then The Fool can lead you.')?.named === false,
+    'کارتِ داخلِ نتیجه‌ی شرط به‌غلط لنگر شمرده شد');
+  ok(ca('All in all: it resolves in a few weeks.')?.cond === false,
+    'جمع‌بندیِ بدونِ شرط، «دارای شرط» شمرده شد');
+  ok(ca('If he calls, fine. If the Six of Wands shows up, then act.')?.named === true,
+    'وقتی چند شرط هست، شرطِ آخر ملاک نیست');
+  /* ⚠️ این ادعا **تفکیک‌کننده** است و ادعای بالا نبود: در آن یکی کارت در هر دو شرط
+   * می‌افتاد، پس جهشِ «اولین شرط را بگیر به‌جای آخرین» از کنارش زنده رد می‌شد.
+   * این‌جا کارت فقط در شرطِ **اول** است، پس اگر سنجه شرطِ آخر را نگیرد قرمز می‌دهد.
+   * (بند ۶ب-۲: ادعایی که نتواند قرمز شود، از نبودش بدتر است.) */
+  ok(ca('If The Fool is right, fine. If you speak clearly, then act.')?.named === false,
+    'شرطِ اول به‌جای شرطِ آخر سنجیده شد');
+  ok(ca('If you use the queen of swords well, then it moves.')?.named === true,
+    'تطبیق به حروفِ بزرگ و کوچک حساس است');
+  ok(ca('If you trust the Ace of Cups, then it moves.')?.named === false,
+    'کارتی که در این فال نیست به‌غلط لنگر شمرده شد');
+  ok(ca('')?.cond === false, 'جمع‌بندیِ خالی نباید بترکد');
 }
 
 console.log(JSON.stringify({ pass, fails }));
