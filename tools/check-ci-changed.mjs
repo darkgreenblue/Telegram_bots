@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decide } from './ci-changed-bots.mjs';
+import { decide, baselineOf } from './ci-changed-bots.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let fail = 0;
@@ -88,6 +88,36 @@ for (const [name, files] of [
   ['فقط دفترِ پشتیبانی', ['support/tickets.jsonl']],
   ['هیچ فایلی', []],
 ]) ok(jobsOf(decide(files)) === 0, `بدونِ جاب: ${name}`, JSON.stringify(decide(files)));
+
+/* 💰 مبنای مقایسه per رویداد — رفتاری، با اجرای خودِ تابعِ محصول.
+ *
+ * چرا ادعا دارد: اجرای دستیِ CI ماهی ~۳۱۰ جاب می‌خورد (۱۰٪ سهمیه) چون روی
+ * `workflow_dispatch` مبنا نداشت و fail-open هر هفت جاب را می‌زد. اگر روزی کسی این
+ * شاخه را بردارد، صرفه‌جویی **بی‌صدا** می‌میرد — دقیقاً همان کلاسِ باگی که کلونِ
+ * shallow یک بار ساخت. */
+console.log('\n▶ مبنای مقایسه per رویداد');
+const B = (env) => baselineOf(env);
+
+ok(B({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_BASE_REF: 'main' })?.kind === 'merge-base',
+  'PR با merge-base سنجیده می‌شود');
+ok(B({ GITHUB_EVENT_NAME: 'push', GITHUB_EVENT_BEFORE: 'abc123' })?.kind === 'range',
+  'push با بازه‌ی before..HEAD سنجیده می‌شود');
+ok(B({ GITHUB_EVENT_NAME: 'push', GITHUB_EVENT_BEFORE: '0000000000000000000000000000000000000000' }) === null,
+  'اولین پوشِ یک برنچ مبنا ندارد ⟵ fail-open');
+
+// شاخه‌ی گران‌قیمت: dispatch روی یک برنچ باید مبنا داشته باشد، نه fail-open.
+ok(B({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'claude/x' })?.kind === 'merge-base',
+  '💰 اجرای دستی روی یک برنچ با merge-base سنجیده می‌شود (نه هر هفت جاب)');
+ok(B({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'claude/x' })?.ref === 'main',
+  'و مبنایش برنچِ پیش‌فرض است');
+ok(B({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'dev', GITHUB_DEFAULT_BRANCH: 'dev' }) === null,
+  'ولی روی خودِ برنچِ پیش‌فرض مبنا ندارد ⟵ fail-open (حدس‌زدن یعنی ردکردنِ چکِ لازم)');
+ok(B({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'main' }) === null,
+  'و نامِ پیش‌فرض وقتی ست نشده «main» است');
+ok(B({ GITHUB_EVENT_NAME: 'workflow_dispatch' }) === null,
+  'برنچِ ناشناخته ⟵ fail-open، نه یک مبنای حدسی');
+ok(B({ GITHUB_EVENT_NAME: 'pull_request' }) === null,
+  'PR بدونِ base ref ⟵ fail-open');
 
 console.log(fail ? `\n❌ ${fail} خطا` : '\n✅ همه‌ی ادعاهای فیلترِ CI پاس شدند');
 process.exit(fail ? 1 : 0);

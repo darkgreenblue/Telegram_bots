@@ -56,6 +56,7 @@ ok(paymentAllows('pay_amount', 'pkg:magic'), 'انتخاب بسته در پرد�
 ok(!paymentAllows('pay_amount', 'pay_back:9'), 'pay_back خروج خاموش از پرداخت نیست');
 ok(!paymentAllows('pay_amount', 'daily_go'), 'وسط انتخاب بسته، فلوی دیگر شروع نمی‌شود');
 ok(paymentAllows('pay_receipt', 'disc:9'), 'ورود به تخفیف در همان پرداخت مجاز است');
+ok(paymentAllows('pay_receipt', 'pay_resume:9'), 'تکمیل پرداختِ یادآوری به فاکتورِ اصلی می‌رسد');
 ok(paymentAllows('pay_receipt', 'pay_exit:9'), 'انصراف صریح از پرداخت مجاز است');
 ok(!paymentAllows('pay_receipt', 'spread:love3'), 'وسط فاکتور، فال جدید شروع نمی‌شود');
 

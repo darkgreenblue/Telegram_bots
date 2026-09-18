@@ -265,6 +265,7 @@ export default {
     chatBack: '💬 Back to the chat',
     chatKeep: '💬 I will keep going',
     chatClose: '✖️ Close the chat',
+    chatEnd: '🙏 End the conversation',
     dailyAfterOnboard: '🎴 Show me today\'s card (free)',
     gateOpenChannel: '📢 Open the daily card channel',
     gateCheck: '✅ Done, check my membership',
@@ -811,6 +812,13 @@ export default {
    * کلِ این بلوک را در نسخه‌ی اول کدِ مرده نگه می‌دارد و کلیدها فقط برای یکی ماندنِ
    * شکلِ locale هستند (check-locale-shape). وقتی این زبان باز شد، متن‌ها باید زنده
    * دوباره خوانده شوند. */
+  // ☰ برچسبِ دستورها در منوی کنارِ کادرِ تایپ (v3.95.0). خیلی کوتاه بمانند.
+  commands: {
+    menu: 'Main menu',
+    fal: 'New reading',
+    support: 'Support',
+  },
+
   chat: {
     // پیشنهادِ بعد از تشکرِ نمره. ترتیبِ دکمه‌ها در `index.js` قفل است: اول گفتگو
     // (اوجِ لحظه)، بعد فالِ تازه، و آخر درِ خروج به پیشنهادهای همیشگی.
@@ -868,6 +876,11 @@ export default {
     // نادجِ وابستگی: **یک بار** در هر گفتگو، بعد از نوبتِ دوازدهم، و به‌عنوان خطِ اضافه
     // بعد از جوابِ عادی (نه به‌جایش) تا به نصیحتِ تکراری تبدیل نشود.
     nudge: '🌿 By the way, the final call is always yours; the cards only change the angle you see from.',
+    // 💬 سؤالِ پیشنهادی، طوری که انگار خودِ کاربر پرسیده (v3.95.0).
+    askQuote: (q) => `<blockquote>${q}</blockquote>`,
+    /* دکمه‌ی سؤالِ پیشنهادی که دوبار زده شود. ⚠️ بدونِ اشاره به جنسیتِ خواننده
+       (بند ۲و/۵): انگلیسی گذشته‌ی جنسیت‌دار ندارد، پس این‌جا ساختاراً امن است. */
+    followUpGone: 'You already asked that one 🌙\n\nAnything new, just write it here.',
   },
 
   share: {

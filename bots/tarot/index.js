@@ -306,7 +306,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.95.1';
+const PRODUCT_VERSION = '3.96.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -402,6 +402,31 @@ const CHAT_CLOSE_FLAG  = true;
 const CHAT_ORPHAN_SEC  = 180;  // سنِ لازم برای ریفاندِ سؤالِ بی‌جواب (کوتاه‌تر = ریفاندِ کاربرِ منتظر)
 const CHAT_NUDGE_TURN  = 12;   // نادجِ «تصمیم مالِ خودته»، یک بار در هر گفتگو
 const CHAT_MAX_TOKENS  = 500;
+/* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
+ *
+ * مدل در پاکتِ خودش یک برچسبِ کوتاه به **زبانِ خودِ کاربر** برمی‌گرداند و کد از رویش یک
+ * دکمه می‌سازد. تپش دقیقاً مثل این است که کاربر همان را پرسیده باشد.
+ * ⚠️ Bot API اجازه نمی‌دهد ربات از طرفِ کاربر پیام بفرستد، پس خودِ ربات سؤال را در یک
+ * باکسِ نقلِ‌قول می‌گذارد و جواب را به **همان** پیام ریپلای می‌کند — یعنی خطِ گفتگو
+ * دقیقاً همان شکلی است که سؤالِ تایپیِ خودِ کاربر می‌سازد.
+ * ⚠️ این دکمه یک **سؤالِ واقعی** است، پس از همان `payForChat` رد می‌شود: کسر، پی‌وال و
+ * ریفاند بیت‌به‌بیت مثل سؤالِ تایپی. رول‌بک: `false` ⟵ دکمه ساخته نمی‌شود. */
+const CHAT_FOLLOWUP = true;
+/* 🙏 دکمه‌ی «پایان مکالمه» زیرِ **هر** جواب (خواسته‌ی صریحِ مالک: «با دکمه‌ای که همیشه
+ * هست، دکمه‌ی پایان مکالمه هم همیشه می‌تواند زیرش بنشیند»). دو کار می‌کند که هیچ مسیرِ
+ * دیگری در استیتِ `chatting` نمی‌کند: گفتگو را با فلگِ بازگشت می‌بندد، و **کیبوردِ
+ * ماندگار را واقعاً تحویل می‌دهد** (چون `chatting` در `KB_QUIET_STATES` است و تورِ
+ * ترمیم آن‌جا عمداً ساکت است). رول‌بک: `false` ⟵ دکمه ساخته نمی‌شود، هندلرش می‌ماند. */
+const CHAT_END_BUTTON = true;
+/* ☰ دکمه‌ی منوی کنارِ کادرِ تایپ (`setMyCommands` + `setChatMenuButton`). تنها راهی است
+ * که می‌شود «دسترسی به منو» را همیشه باز نگه داشت بدونِ فرستادنِ `ReplyKeyboardMarkup`
+ * (که کیبوردِ تایپِ کاربر را وسطِ استیت‌های ورودی از زیرِ دستش می‌کشد).
+ * رول‌بک: `false` ⟵ هیچ‌چیز نصب نمی‌شود؛ دستورها خودشان کار می‌کنند ولی دکمه‌ی ☰
+ * فهرستشان را نشان نمی‌دهد (رفتارِ دیروز). */
+const CHAT_MENU_BUTTON = true;
+/* فهرستِ دستورهای دکمه‌ی ☰. عمداً **کوتاه** است: هر دستورِ اضافه یک راهِ ورودِ تازه به
+ * فلوهاست که باید گارد و تست شود. `start` اجباری است (تلگرام خودش نشانش می‌دهد). */
+const BOT_COMMANDS = [['menu', 'menu'], ['fal', 'fal'], ['support', 'support']];
 
 // 🪙 UX v2.6 — نقطه‌ی کسرِ اعتبار از **پی‌والِ بعد از انتخابِ کارت‌ها** به **لحظه‌ی انتخابِ
 // اندازه** منتقل شد (تصمیمِ صریحِ مالک). یعنی کاربر همان‌جا که «۵ کارتی (➖۵💎)» را می‌زند
@@ -1447,6 +1472,19 @@ try { db.prepare('ALTER TABLE chat_messages ADD COLUMN tg_msg_id INTEGER NOT NUL
  * افزایشی با DEFAULT 0، پس ردیف‌های قبل از این نسخه معتبر می‌مانند (بند ۲ج/۱). */
 try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_reading INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_support INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* migration (v3.96.0): دو فیلدِ تازه‌ی همان پاکت، با همان استدلالِ بالا.
+ *   • `follow_up` = برچسبِ دکمه‌ی سؤالِ پیشنهادی. **متنش لازم است نه فقط پرچمش**،
+ *     چون تپِ دکمه ساعت‌ها بعد هم باید همان سؤال را بپرسد و حافظه ری‌استارت می‌شود.
+ *   • `want_end` = مدل تشخیص داده کاربر می‌خواهد تمام کند.
+ * هر دو افزایشی با DEFAULT، پس ردیف‌های نسخه‌های قبل معتبر می‌مانند (بند ۲ج/۱). */
+try { db.prepare("ALTER TABLE chat_messages ADD COLUMN follow_up TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_end INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* ⚠️ ستونِ **سوم** و عمداً جدا از `follow_up`: مصرف‌شدنِ دکمه باید اتمیک ادعا شود
+ * (دو تپِ پیاپی = دو الماس برای یک سؤال، و این پول است نه ظاهر)، ولی پاک‌کردنِ خودِ
+ * `follow_up` برای ادعا، **بازپخشِ تاریخچه** را خراب می‌کند: مدل می‌بیند نوبتِ قبل
+ * پیشنهادی نداشته و یاد می‌گیرد پیشنهاد ندهد — دقیقاً همان باگی که کنارِ `chatEnvelope`
+ * ثبت است. پس متن می‌ماند و مصرف در یک بیتِ جدا مهر می‌خورد. */
+try { db.prepare('ALTER TABLE chat_messages ADD COLUMN follow_up_used INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // migration (v2.3.0): یادداشتِ اصلاحِ فاکتور (چرا مبلغش عوض شد)
 try { db.prepare("ALTER TABLE payments ADD COLUMN adjust_note TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // اقتصادِ سکه (v3.0.0): کلیدِ بسته‌ای که کاربر خرید. افزایشی و پیش‌فرضِ خالی، پس هر ردیفِ
@@ -1844,10 +1882,17 @@ const stmts = {
   setAnchorMsg: db.prepare('UPDATE readings SET anchor_msg_id=? WHERE id=?'),
   // 📎 لنگرِ تازه: آخرین پیامِ فال. همان قاعده‌ی write-once عملیِ بالا.
   setTailMsg: db.prepare('UPDATE readings SET tail_msg_id=? WHERE id=?'),
-  insertChatMsg: db.prepare('INSERT INTO chat_messages (reading_id, user_id, role, text, price, model, tg_msg_id, want_reading, want_support) VALUES (?,?,?,?,?,?,?,?,?)'),
-  // ⚠️ دو ستونِ پرچم **باید** این‌جا خوانده شوند: `packHistory` از رویشان تصمیم می‌گیرد
-  // پاکتِ بازپخش را چطور بسازد. نخواندنشان یعنی همیشه `false` (بند `chatEnvelope`).
-  chatHistory:   db.prepare('SELECT role, text, want_reading, want_support FROM chat_messages WHERE reading_id=? ORDER BY id ASC'),
+  insertChatMsg: db.prepare('INSERT INTO chat_messages (reading_id, user_id, role, text, price, model, tg_msg_id, want_reading, want_support, follow_up, want_end) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
+  // ⚠️ هر چهار ستونِ پاکت **باید** این‌جا خوانده شوند: `packHistory` از رویشان تصمیم
+  // می‌گیرد پاکتِ بازپخش را چطور بسازد. نخواندنشان یعنی همیشه خالی (بند `chatEnvelope`).
+  chatHistory:   db.prepare('SELECT role, text, want_reading, want_support, follow_up, want_end FROM chat_messages WHERE reading_id=? ORDER BY id ASC'),
+  /* متنِ سؤالِ پیشنهادیِ یک پیامِ assistant، برای وقتی کاربر دکمه‌اش را می‌زند. از
+   * **دیتابیس** خوانده می‌شود نه حافظه: دکمه ماه‌ها در چت زنده می‌ماند (بند ۲ج/۶) و
+   * `reading_id` هم برمی‌گردد تا تپِ دکمه‌ی یک فالِ دیگر به فالِ جاری نشت نکند. */
+  chatFollowUp:  db.prepare("SELECT reading_id, user_id, follow_up FROM chat_messages WHERE id=? AND role='assistant'"),
+  /* ادعای اتمیکِ مصرفِ دکمه. الگوی همیشگیِ این ریپو (`claimAmount`/`claimLucky`):
+   * شرط **داخلِ خودِ UPDATE** است، نه یک `if` در جاوااسکریپت، چون مسئله یک مسابقه است. */
+  claimFollowUp: db.prepare("UPDATE chat_messages SET follow_up_used=1 WHERE id=? AND user_id=? AND role='assistant' AND follow_up<>'' AND follow_up_used=0"),
   chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
   /* شمارشِ سؤال‌های **ریفاندنشده‌ی** همین فال — تنها مبنای «سؤالِ اول رایگان است».
    * شرطِ `refunded=0` عمدی است: سؤالی که جوابی نگرفت و پولش برگشت، انگار پرسیده نشده. */
@@ -2852,7 +2897,9 @@ function paymentFlowAllowsCallback(state, data) {
     return /^(pkg:[a-z]+|pack_reveal:\d+|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
   }
   if (state === 'pay_receipt') {
-    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
+    // `pay_resume` از یادآوریِ فاکتور می‌آید و باید به هندلرِ بازفرستادنِ فاکتور برسد؛
+    // وگرنه گارد پیش از action آن را می‌بلعد و همان متنِ کلیِ «فاکتور باز داری» را می‌فرستد.
+    return /^(pay_resume:\d+|stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
   }
   if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
   return false;
@@ -3017,7 +3064,7 @@ const payForChat = db.transaction((uid, readingId, text, tgMsgId = 0) => {
   const price = chatPriceFor(readingId);
   if (price > 0 && stmts.deduct.run(price, uid, price).changes === 0) return null;
   const id = Number(stmts.insertChatMsg
-    .run(readingId, uid, 'user', String(text || '').slice(0, 2000), price, '', tgMsgId, 0, 0).lastInsertRowid);
+    .run(readingId, uid, 'user', String(text || '').slice(0, 2000), price, '', tgMsgId, 0, 0, '', 0).lastInsertRowid);
   return { id, price };
 });
 
@@ -3443,6 +3490,12 @@ const KB_LABELS = new Set([
   '📤 معرفی دوستان', '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)',
   '💎 کیف الماس', '💎 الماس فروشی',
   ...allLabels(l => l.buttons.dailyOneCard), ...allLabels(l => l.buttons.luckyMain),   // UX v2.1
+  /* 🐛 «تنظیمات» تا v3.95.x این‌جا **جا افتاده بود** و دو چیز را بی‌صدا خراب می‌کرد: در
+   * قیفِ جرنی تپِ آن دکمه «تایپِ آزاد» شمرده می‌شد، و مهم‌تر، میدل‌ورِ گفتگو آن را
+   * **سؤالِ گفتگو** می‌دید و رد می‌کرد — یعنی کاربرِ وسطِ گفتگو به تنظیمات می‌رفت در
+   * حالی که استیتش `chatting` می‌ماند و اولین چیزی که بعدش تایپ می‌کرد یک الماس خرج
+   * می‌کرد. حالا ردیفِ `allLabels(l => l.buttons.settings)` بالا پوششش می‌دهد (و
+   * بهتر از نسخه‌ی من: بی‌قید به `SETTINGS_ENABLED`، پس دکمه‌ی کش‌شده هم شمرده می‌شود). */
 ].filter(Boolean));
 // فقط دکمه‌های واقعیِ ناوبری/ورود. متنِ آزادِ سؤال، رسید و مبلغ هرگز این‌جا نیست؛
 // بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
@@ -3485,7 +3538,42 @@ registerJourney(bot, {
  * فایل): دکمه‌های **کهنه‌ای** که قبل از آن نسخه در چتِ کاربران نشسته‌اند هنوز می‌توانند
  * وسطِ گفتگو زده شوند و آن دکمه هیچ‌جا نمی‌برد (یک تاگل است)، پس گارد گرفتنش فقط
  * گیج‌کننده است. قاعده: اکشنی که کاربر را از گفتگو **بیرون نمی‌برد** گارد نمی‌خورد. */
-const CHAT_KEEP_CB = /^(chat:\d+|chat_keep|chat_close(?::\d+)?|lremind:[01])$/;
+/* ⚠️ `chat_ask` و `chat_end` هم از v3.96.0 این‌جا هستند و این **اجباری** است، نه
+ * تزئینی. هر دو زیرِ خودِ جوابِ گفتگو نشسته‌اند: `chat_ask` کاربر را داخلِ گفتگو نگه
+ * می‌دارد (پس گارد گرفتنش بی‌معناست) و `chat_end` **خودش** درِ خروج است — گارد گرفتنش
+ * یعنی تپِ «پایان مکالمه» دوباره پیامِ «ادامه می‌دم / بستن گفتگو» بیاورد، دقیقاً همان
+ * حلقه‌ی بی‌پایانِ تیکتِ `#TRT-8976388520` (بند ۹ب/۶ ریشه). */
+const CHAT_KEEP_CB = /^(chat:\d+|chat_keep|chat_close(?::\d+)?|chat_ask:\d+|chat_end(?::\d+)?|lremind:[01])$/;
+/* 🎯 نیتِ پشتِ اقدامی که گارد جلویش را گرفت (v3.96.0 — خواسته‌ی صریحِ مالک: «اگر گفتگو
+ * با یک دستورِ منوی اصلی بسته شد، بعد از بستن باید جوابِ **همان دستور** بیاید؛ این
+ * قاعده را همیشه همه‌جای ربات داشته‌ایم»).
+ *
+ * 🐛 و این یک شکافِ واقعی بود: `chatOpenGuard` تنها گاردِ ربات بود که آرگومانِ نیت
+ * نمی‌گرفت، پس بستنِ گفتگو با دکمه‌ی «ذخایر الماس» به‌جای کیف، پیامِ عمومیِ «من همیشه
+ * اینجام» می‌داد — دقیقاً همان باگی که در v3.78.0 برای گاردِ فال بسته شده بود، این‌بار
+ * از درِ گفتگو. جدول عمداً از **همان** ثابت‌های برچسبی می‌خواند که خودِ هندلرها، وگرنه
+ * دو منبعِ حقیقت برای یک دکمه می‌شد. */
+function chatExitIntent(txt, cb) {
+  if (cb) {
+    if (/^(wallet_go|recharge)$/.test(cb)) return INTENT.WALLET;
+    if (cb === 'daily_go') return INTENT.DAILY;
+    if (cb === 'lucky_go') return INTENT.LUCKY;
+    if (cb === 'invite_go') return INTENT.INVITE;
+    if (cb === 'reading_go') return INTENT.READING;
+    if (cb === 'settings') return INTENT.SETTINGS;
+    return '';
+  }
+  if (!txt) return '';
+  if (WALLET_LABELS.includes(txt)) return INTENT.WALLET;
+  if (DAILY_LABELS.includes(txt)) return INTENT.DAILY;
+  if (LUCKY_LABELS.includes(txt)) return INTENT.LUCKY;
+  if (INVITE_LABELS.includes(txt)) return INTENT.INVITE;
+  // ⚠️ `/menu` عمداً نیتی نمی‌گیرد: جوابِ خودش **همان** پیامِ پیش‌فرضِ `replyCanceled`
+  // است (منوی پیشنهادها + کیبورد)، پس ثبتِ نیت فقط یک مسیرِ موازیِ اضافه می‌ساخت.
+  if (txt === L.buttons.reading || txt === '/fal') return INTENT.READING;
+  if (SETTINGS_ENABLED && txt === L.buttons.settings) return INTENT.SETTINGS;
+  return '';
+}
 /* 💎 تنها درِ بازِ دیگر: شروعِ **فلوی کسبِ الماس**. این دقیقاً همان سه ردیفِ
  * `walletRows` است (خرید، دعوت، کارتِ شانس) به‌علاوه‌ی خودِ صفحه‌ی کیف — یعنی همان
  * چیزی که کاربرِ پشتِ پی‌وال روی صفحه می‌بیند. هر کدام که تپ شود، هندلرِ خودش استیت
@@ -3512,7 +3600,7 @@ bot.use(async (ctx, next) => {
     /* 💎 کسبِ الماس **فقط با موجودیِ صفر** (خواسته‌ی صریحِ مالک). با موجودیِ ناصفر
      * دلیلی برای ترکِ گفتگو نیست، پس همان گارد می‌آید. */
     if (chatEarnEntry(txt, cb) && getBalance(uid) <= 0) return next();
-    if (CHAT_STATE_GUARD) { await chatOpenGuard(ctx, uid); return; }
+    if (CHAT_STATE_GUARD) { await chatOpenGuard(ctx, uid, chatExitIntent(txt, cb)); return; }
     // مسیرِ رول‌بک: رفتارِ بی‌صدای v3.87.0. استیت باید همان‌جا رها شود، وگرنه پیامِ
     // بعدیِ کاربر که فکر می‌کند بیرون آمده یک الماس خرج می‌کند.
     leaveChat(uid, txt ? 'menu' : 'action');
@@ -4979,6 +5067,29 @@ async function showCatalog(ctx, full = false, edit = false) {
 }
 bot.hears(allLabels(l => l.buttons.reading), (ctx) => showCatalog(ctx));
 
+/* ☰ دو دستورِ منوی تلگرام (v3.96.0) — جوابِ سؤالِ صریحِ مالک: «آیا راهی هست که بدونِ
+ * حواس‌پرت‌کردنِ کاربر، فقط دکمه‌ی منوی اصلی از همان اول برایش فعال باشد؟»
+ *
+ * **بله، و راهش کیبوردِ reply نیست.** فرستادنِ `ReplyKeyboardMarkup` تنها راهِ برگرداندنِ
+ * منوی پایین است و همان کاری است که وسطِ «سؤالت رو بنویس» کیبوردِ **تایپِ** کاربر را از
+ * زیرِ دستش می‌کشد (استثنای مقدسِ بند ۹ب). ولی Bot API یک درِ دومِ کاملاً جدا دارد:
+ * `setMyCommands` + `setChatMenuButton` دکمه‌ی ☰ را **کنارِ کادرِ تایپ** می‌نشاند، برای
+ * هر کاربر، در هر استیتی، بدونِ هیچ پیامی و بدونِ لمسِ کیبوردِ تایپ. یعنی از این نسخه
+ * کاربرِ وسطِ آنبوردینگ یا وسطِ گفتگو هم همیشه یک راهِ رسیدن به منو دارد.
+ *
+ * ⚠️ دستورها عمداً از **همان** توابعِ تک‌منبع می‌آیند، نه یک کپیِ دوم. و هر دو پشتِ
+ * میدل‌ورِ گفتگو هستند (متنی که با `/` شروع شود سؤالِ گفتگو حساب نمی‌شود)، پس وسطِ
+ * گفتگو گاردِ «ادامه می‌دم / بستن گفتگو» را می‌گیرند، نه یک خروجِ بی‌صدا. */
+bot.command('fal', (ctx) => showCatalog(ctx));
+bot.command('menu', async (ctx) => {
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  // منوی پایین **واقعاً** تحویل داده می‌شود: کاربری که این دستور را می‌زند دقیقاً همین
+  // را می‌خواهد، و ممکن است اصلاً کیبوردی نداشته باشد (آنبوردینگ عمداً برمی‌داردش).
+  await deliverKeyboard(ctx.telegram, uid);
+  return sendContinuePrompt(ctx, uid);
+});
+
 // راهنمای انتخاب: همین پیام ادیت می‌شود به توضیحِ فال‌ها + دکمه‌ی بازگشت (بدون پیام جدید).
 bot.action('cat_guide', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -6261,9 +6372,14 @@ function leaveChat(uid, via = 'menu') {
 /* 🚧 گاردِ «یه گفتگوی باز داری» — همان الگوی هر فلوی نیمه‌کاره‌ی دیگر (بند ۹ب/۲):
  * دو گزینه‌ی صریح، هیچ‌کدام بن‌بست. «ادامه می‌دم» فقط همین پیام را برمی‌دارد و کاربر
  * دقیقاً همان‌جا که بود می‌ماند؛ «بستن گفتگو» تنها راهِ خروجِ عمدی است. */
-async function chatOpenGuard(ctx, uid) {
+async function chatOpenGuard(ctx, uid, intent = '') {
   const rid = getSession(uid)?.chatReadingId || 0;
-  track(db, uid, 'chat_guard', { reading_id: rid });
+  /* 🎯 نیت **قبل از** نمایشِ گارد ثبت می‌شود، دقیقاً مثل بقیه‌ی گاردهای این ربات: اگر
+   * کاربر «بستن گفتگو» را بزند، `replyCanceled` همان مقصدی را می‌دهد که می‌خواست.
+   * ⚠️ فقط وقتی گارد **واقعاً** بلاک می‌کند نوشته می‌شود (بند نیت، قاعده‌ی ۱)، پس هیچ
+   * نیتِ کهنه‌ای در سشن جا نمی‌ماند. */
+  if (intent) setIntent(uid, intent);
+  track(db, uid, 'chat_guard', { reading_id: rid, intent: intent || '' });
   await ctx.reply(L.chat.openGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.chatKeep, 'chat_keep')],
     [Markup.button.callback(L.buttons.chatClose, `chat_close:${rid}`)],
@@ -6305,8 +6421,31 @@ bot.action(/^chat_close(?::(\d+))?$/, async (ctx) => {
   return replyCanceled(ctx, uid);
 });
 
-/** یک نوبتِ گفتگو. ترتیبِ قدم‌ها قرارداد است، نه سلیقه (بالای این بلوک). */
-async function handleChatMessage(ctx, uid, text) {
+/* 🙏 «پایان مکالمه» — دکمه‌ی زیرِ خودِ جواب (v3.96.0، خواسته‌ی صریحِ مالک).
+ *
+ * سه تفاوت با `chat_close` که هر سه عمدی‌اند:
+ *   ۱) پیامِ حامل **پاک نمی‌شود**: آن یکی زیرِ پیامِ گارد است (که کارش تمام شده)، این
+ *      یکی زیرِ جوابِ پول‌داده‌ی کاربر نشسته و پاک‌کردنش یعنی بردنِ محصولش.
+ *   ۲) **کیبوردِ ماندگار واقعاً تحویل می‌شود.** خواسته‌ی صریحِ مالک «منوی اصلی باز شود»
+ *      بود، و `chatting` در `KB_QUIET_STATES` است، پس تا این لحظه هیچ مسیرِ خودکاری
+ *      کیبورد نمی‌فرستاد.
+ *   ۳) شناسه در `callback_data` هست ولی تصمیم از **سشن** می‌آید (مثل `chat_close`): تپِ
+ *      یک دکمه‌ی کهنه نباید گفتگوی **دیگری** را ببندد.
+ * پیامِ «من همیشه اینجام» از تک‌منبعِ `replyCanceled` می‌آید، نه یک کپیِ دوم. */
+bot.action(/^chat_end(?::(\d+))?$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const uid = ctx.from.id;
+  const wasOpen = getState(uid) === 'chatting';
+  await closeChat(ctx, uid, 'end_button');
+  if (wasOpen) await deliverKeyboard(ctx.telegram, uid);
+  return replyCanceled(ctx, uid);
+});
+
+/** یک نوبتِ گفتگو. ترتیبِ قدم‌ها قرارداد است، نه سلیقه (بالای این بلوک).
+ * ⚠️ `askedId` از v3.96.0 اختیاری است: دکمه‌ی سؤالِ پیشنهادی `ctx.message` ندارد، و
+ * لنگرِ ریپلایش پیامِ **نقلِ‌قولی** است که خودِ ربات ساخته. بدونِ این آرگومان، جوابِ آن
+ * مسیر به هیچ‌چیز ریپلای نمی‌خورد و خطِ گفتگو در چت گم می‌شود. */
+async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}) {
   const rid = getSession(uid)?.chatReadingId || 0;
   const el = chatEligible(uid, rid);
   if (!el.ok) {
@@ -6322,7 +6461,7 @@ async function handleChatMessage(ctx, uid, text) {
   /* هر چیزی که این تابع می‌فرستد، **جوابِ همین پیامِ کاربر** است (جواب، بحران، تعارف،
    * شلوغی، شکست)، پس همه به همان ریپلای می‌خورند نه به فال. لنگرِ فال جای دیگری است:
    * پیامِ پیشنهاد، پیامِ ورود، و فلگِ بستنِ گفتگو. */
-  const askedId = ctx.message?.message_id || 0;
+  const askedId = askedIdIn || ctx.message?.message_id || 0;
   const extra = replyToExtra(askedId);
 
   // ۲) 🤍 بحران — **قبل از** کسر و بدونِ هیچ فراخوانیِ مدلی. متنِ کاربر هرگز در
@@ -6411,7 +6550,8 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const reply = cleanChatReply(out.text, { name: dispName(user) });
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
-    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0, out.newReading ? 1 : 0, out.support ? 1 : 0).lastInsertRowid);
+    const followUp = CHAT_FOLLOWUP ? (out.followUp || '') : '';
+    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
     track(db, uid, 'chat_message', { reading_id: rid, turn, chars: reply.length });
     // سنجه‌ی قلاب فقط **لاگ** می‌شود، نه retry: خروجی کوتاه است و بازتولیدش برای یک
@@ -6437,11 +6577,19 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      *
      * ⚠️ و اگر هر دو پرچم روشن باشد، **هر دو** دکمه می‌آیند: نیتِ کاربر مالِ خودش است
      * و انتخاب بینشان کارِ ما نیست. */
+    /* 🎯 و از v3.96.0 دو ردیفِ دیگر، با ترتیبی که قرارداد است (بند ۱۰، «ترتیب در خدمتِ
+     * حس»): اول **ادامه** (سؤالِ پیشنهادی)، بعد نیت‌های تشخیص‌داده‌شده، و **پایانِ
+     * مکالمه همیشه آخر** — درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند.
+     *
+     * ⚠️ برچسبِ سؤال از `aId` می‌آید نه از حافظه: دکمه ماه‌ها در چت زنده می‌ماند و بعد از
+     * ری‌استارت هم باید همان سؤال را بپرسد (بند ۹ب/۵). */
     let kb = null;
     try {
       const rows = [];
+      if (followUp) rows.push([Markup.button.callback(followUp, `chat_ask:${aId}`)]);
       if (out.newReading) rows.push([Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]);
       if (out.support) rows.push([Markup.button.url(L.support.openBtn, supportLink(SUPPORT_BOT_CODE, uid, L.support))]);
+      if (CHAT_END_BUTTON) rows.push([Markup.button.callback(L.buttons.chatEnd, `chat_end:${rid}`)]);
       if (rows.length) kb = Markup.inlineKeyboard(rows);
     } catch (e) { logErr('chat cta:', e.message); } // دکمه هرگز نباید جوابِ پول‌داده را بشکند
 
@@ -6543,6 +6691,64 @@ bot.action(/^chat_new:(\d+)$/, async (ctx) => {
   // وگرنه همان درِ ورودِ همیشگی که تازه ساختیم پاک می‌شود.
   return showCatalog(ctx);
 });
+/* 🎯 تپِ **سؤالِ پیشنهادی** (v3.96.0). دقیقاً مثل این است که کاربر همان جمله را تایپ
+ * کرده باشد، پس عمداً از **همان** `handleChatMessage` رد می‌شود: کسرِ اتمیک، پی‌وال،
+ * پارکِ سؤال، ریفاند و ثبتِ تاریخچه هیچ‌کدام کپیِ دوم ندارند (بند ۹ ریشه: مسیرِ پول
+ * تک‌منبع می‌ماند).
+ *
+ * ترتیبِ قدم‌ها قرارداد است:
+ *   ۱) **ادعای اتمیکِ مصرف** قبل از هر کارِ دیگری. دو تپِ پیاپی دو الماس خرج می‌کردند
+ *      برای یک سؤال، و این پول است نه ظاهر.
+ *   ۲) گاردهای فلوی باز با `INTENT.CHAT`، تا انصراف کاربر را به **همین** گفتگو برگرداند.
+ *   ۳) برداشتنِ دکمه از پیامِ حامل — لایه‌ی دومِ ضدِ دوبار-تپ، و نشانه‌ی دیداریِ «مصرف شد».
+ *   ۴) پیامِ نقلِ‌قولیِ سؤال، بعد جواب با ریپلای به همان پیام. */
+bot.action(/^chat_ask:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!CHAT_FOLLOWUP) return;
+  const uid = ctx.from.id;
+  const aId = parseInt(ctx.match[1], 10);
+  let row = null;
+  try { row = stmts.chatFollowUp.get(aId); } catch { return; }
+  // دکمه‌ی کهنه/غیرمالک/بی‌متن: بی‌صدا رد نمی‌شود، ولی چیزی هم کسر نمی‌کند.
+  if (!row || row.user_id !== uid || !row.follow_up) { await ctx.reply(L.chat.followUpGone).catch(() => {}); return; }
+  let claimed = 0;
+  try { claimed = stmts.claimFollowUp.run(aId, uid).changes; } catch { claimed = 0; }
+  if (!claimed) { await ctx.reply(L.chat.followUpGone).catch(() => {}); return; }
+  const rid = row.reading_id;
+  const q = row.follow_up;
+  upsertUser(ctx);
+  if (!chatOn(uid)) { await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid); }
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.CHAT, rid)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.CHAT, rid)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  const el = chatEligible(uid, rid);
+  if (!el.ok) {
+    if (el.why === 'capped') {
+      await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
+      return;
+    }
+    await ctx.reply(L.chat.unavailable);
+    return sendContinuePrompt(ctx, uid);
+  }
+  // دکمه‌ی مصرف‌شده از پیامِ حامل برداشته می‌شود، ولی **بقیه‌ی ردیف‌ها می‌مانند** (پایانِ
+  // مکالمه، پشتیبانی، فالِ تازه). برداشتنِ کلِ کیبورد یعنی بستنِ درهایی که هنوز بازند.
+  try {
+    const km = ctx.callbackQuery?.message?.reply_markup?.inline_keyboard || [];
+    const kept = km.filter((r) => !r.some((b) => b?.callback_data === `chat_ask:${aId}`));
+    await ctx.editMessageReplyMarkup(kept.length ? { inline_keyboard: kept } : undefined);
+  } catch { /* پیامِ کهنه یا پاک‌شده: بی‌ضرر، ادعای اتمیکِ بالا از قبل گرفته شده */ }
+  setState(uid, 'chatting');
+  patchSession(uid, { chatReadingId: rid });
+  track(db, uid, 'chat_followup', { reading_id: rid, msg_id: aId });
+  /* 💬 تلگرام اجازه نمی‌دهد ربات از طرفِ کاربر پیام بفرستد (هیچ متدی در Bot API چنین
+   * کاری نمی‌کند)، پس سؤال در یک باکسِ نقلِ‌قول از طرفِ خودِ ربات می‌رود و جواب به همان
+   * ریپلای می‌خورد — همان شکلی که سؤالِ تایپیِ کاربر می‌سازد. */
+  let qMsg = null;
+  try { qMsg = await ctx.reply(L.chat.askQuote(esc(q)), { parse_mode: 'HTML' }); } catch (e) { logErr('chat ask quote:', e.message); }
+  return handleChatMessage(ctx, uid, q, { askedId: qMsg?.message_id || 0 });
+});
+
 // عمداً **همان** تابعِ تک‌منبع، نه یک کپیِ دوم از پیامِ «ادامه».
 // ⚠️ دکمه‌اش از v3.88.0 دیگر ساخته نمی‌شود (پیشنهاد دو دکمه‌ای شد)، ولی هندلر می‌ماند:
 // دکمه‌ی «پیشنهادهای من» در چتِ کاربرانِ فعلی زنده است و تپش نباید بی‌جواب بماند.
@@ -6725,6 +6931,29 @@ async function ensureKeyboard(tg, uid) {
     // (همین میدل‌ور، دفعه‌ی بعدِ اقدامِ کاربر) دوباره واقعاً امتحان می‌کند.
     logErr('kb ensure:', e.message);
   }
+}
+
+/* 🎹 تحویلِ **قطعیِ** کیبوردِ ماندگار — بدونِ گیتِ کهنگی و بدونِ گاردِ استیتِ ساکت.
+ *
+ * `ensureKeyboard` یک **تور** است: فقط وقتی شلیک می‌کند که کیبورد کهنه یا اصلاً نبوده
+ * باشد، و در استیت‌های ورودی (از جمله `chatting`) عمداً ساکت است. این تابع برعکس، یک
+ * **اقدامِ صریح** است و تنها صداکننده‌اش دکمه‌ای است که خودِ کاربر زده و خواسته‌اش دقیقاً
+ * «منو رو برگردون» است. پس قراردادِ «کیبورد فقط در دو نقطه» را نمی‌شکند: این هم یک
+ * اقدامِ آگاهانه‌ی کاربر است، نه یک پیامِ ناخواسته.
+ *
+ * ⚠️ مهر **بعد از** ارسالِ تأییدشده می‌خورد (درسِ v3.93.0): مهرِ قبل از ارسال یعنی
+ * `kb_shown_at` دربارهٔ کیبوردی که هرگز نرسیده دروغ بگوید و تورِ ترمیم کور بماند. */
+async function deliverKeyboard(tg, uid) {
+  try {
+    if (!uid || !getUser(uid)?.welcomed) return false;
+    const m = await tg.sendMessage(uid, L.onboarding.kbRefresh, {
+      disable_notification: true, ...mainKeyboard(uid),
+    });
+    await tg.deleteMessage(uid, m.message_id).catch(() => {});
+    stmts.setKbShown.run(uid);
+    if (KB_REV) stmts.claimKbRev.run(KB_REV, uid, KB_REV);
+    return true;
+  } catch (e) { logErr('kb deliver:', e.message); return false; }
 }
 
 async function ensureMenu(ctx, uid) {
@@ -9613,6 +9842,33 @@ function onLaunched() {
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
+  installMenuButton();
+}
+
+/* ☰ نصبِ دکمه‌ی منوی کنارِ کادرِ تایپ (v3.96.0). یک بار در هر بوت، و fail-safe:
+ * شکستش هیچ مسیرِ محصولی را لمس نمی‌کند (بدترین حالت = رفتارِ دیروز).
+ * ⚠️ `setChatMenuButton` بدونِ `chatId` **پیش‌فرضِ سراسریِ ربات** را می‌گذارد، پس
+ * کاربرِ فعلی هم بدونِ هیچ اقدامی آن را می‌گیرد؛ لازم نیست کسی `/start` بزند.
+ * ⚠️ متنِ دستورها از locale می‌آید (هیچ رشته‌ی فارسی در index.js) و `command` باید
+ * lowercase و بدونِ اسلش باشد — قراردادِ خودِ Bot API.
+ * 🌍 و **per زبان** نصب می‌شود، نه یک‌بار با زبانِ پیش‌فرض: این تابع سرِ boot اجرا
+ * می‌شود، یعنی بیرونِ زمینه‌ی زبانِ هر کاربر، پس `L` همیشه پیش‌فرض را می‌دهد. در
+ * پروسه‌ی چندزبانه آن یعنی کاربرِ روس توضیحِ فارسی ببیند — یک خرابیِ کاملاً بی‌صدا.
+ * `setMyCommands` فیلدِ `language_code` دارد و دقیقاً برای همین است؛ مجموعه‌ی
+ * **بی‌زبان** هم می‌ماند تا کاربری با زبانِ کلاینتِ دیگر دست‌خالی نماند. */
+async function installMenuButton() {
+  if (!CHAT_MENU_BUTTON) return;
+  const cmdsFor = (Lx) => BOT_COMMANDS.map(([command, key]) => ({ command, description: Lx.commands[key] }));
+  try {
+    await bot.telegram.setMyCommands(cmdsFor(Lfor(DEFAULT_LANG)));
+    if (MULTI_LANG) {
+      for (const lang of LANGS) {
+        await bot.telegram.setMyCommands(cmdsFor(Lfor(lang)), { language_code: lang });
+      }
+    }
+    await bot.telegram.setChatMenuButton({ menuButton: { type: 'commands' } });
+    log(`☰ menu button installed (${MULTI_LANG ? LANGS.join(',') : DEFAULT_LANG})`);
+  } catch (e) { logErr('menu button:', e.message); }
 }
 function launch() {
   // ⚠️ کارِ بوت در قلابِ **onLaunch** است، نه در `.then()`.

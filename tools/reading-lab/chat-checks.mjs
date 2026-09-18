@@ -260,6 +260,11 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
       const n = norm(c);
       if (n.length >= 3 && nr.includes(n)) { cardForce = c; break; }
     }
+    /* ⚠️ v3.95.0 — دامنه از **نامِ کارت** به کلِ واژگانِ قلمروِ تاروت پهن شد. خواسته‌ی
+     * صریحِ مالک: «وقتی از نقشِ تاروت‌خوان بیرون آمدی، دیگر اسمِ فال و کارت را نبر.»
+     * نامِ کارت به‌تنهایی کافی نبود: «این به کارت‌های فالت ربطی نداره ولی…» هم دقیقاً
+     * همان شکستن‌ِ نقش است و هیچ نامِ کارتی ندارد. */
+    if (!cardForce && LANG.tarotWord) cardForce = (reply.match(LANG.tarotWord)?.[0] || '').trim();
     if (cardForce) issues.push(`چپاندنِ کارت در جوابِ بیرونِ دامنه: «${cardForce}»`);
   }
 
