@@ -130,6 +130,32 @@ const ARM_LIST = ARMS.length ? ARMS : [MODEL];
  *
  * شکلِ بازو: `model` یا `model@variant`. */
 const PROMPT_VARIANTS = {
+  /* 🇬🇧 فرضیه‌ی «دامنه‌ی قاعده، نه خودِ قاعده» برای نشتِ برچسبِ انگلیسی.
+   *
+   * مشاهده‌ی خطِ پایه: سرخط‌ها همیشه تمیزند ولی «Your unspoken feeling is…» در متنِ
+   * **کارت‌به‌کارت** می‌آید. قاعده‌ی منع داخلِ بندِ شماره‌ی ۱ نشسته که موضوعش سرخط
+   * است، پس مدل دامنه‌اش را همان‌جا می‌فهمد. فارسی این را ندارد چون همان قاعده را
+   * به‌عنوان یک بولتِ عمومی دارد، نه زیرِ بندِ سرخط.
+   *
+   * واریانت: همان جمله را از بندِ ۱ برمی‌دارد و در بخشِ سراسریِ `=== Voice ===`
+   * می‌گذارد، با دامنه‌ی صریح. **انتقال است نه افزودن**، پس طولِ پرامپت عوض نمی‌شود.
+   *
+   * ⚠️ چرا واریانت و نه ویرایشِ مستقیمِ locale: یک بار مستقیم عوضش کردم و با دو
+   * dispatchِ جدا مقایسه کردم — دقیقاً همان «راهِ غلط»ی که بند «قاعده‌ی صفر» فازِ ۲
+   * می‌گوید عملاً سکه انداختن است. با `--arms` هر دو شاخه **همان کارت‌ها و همان
+   * سؤال‌ها** را می‌گیرند و گزارش تفاضلِ per سناریو می‌دهد. */
+  labelglobal: (sys) => {
+    const ban = /   Never write the label itself[^\n]*\n/;
+    if (!ban.test(sys)) return sys;                 // قاعده جابه‌جا شده؛ واریانت بی‌اثر
+    const moved = '- Never write the label itself anywhere in the reading, write the feeling. '
+      + '"Your unspoken feeling is...", "the unspoken feeling is..." and "your sign is..." are banned '
+      + 'in the headline, in the pattern, and in every single card line: that is the name of our job, '
+      + 'not text for a person. Go straight to the line: "it sounds like you\'re waiting for someone '
+      + 'else to make the call for you".\n';
+    const voice = '- No fake old English: no thee, thou, thy, hath, doth, behold, whence. The voice is a warm modern person, not a fortune teller from a costume drama.\n';
+    return sys.replace(ban, '').replace(voice, moved + voice);
+  },
+
   /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
    * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
    * که از مدل می‌خواهد یک کارِ ظریفِ صرفی را درست انجام دهد. ولی ما **هیچ داده‌ای**
