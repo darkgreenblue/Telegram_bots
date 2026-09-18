@@ -2901,7 +2901,9 @@ function paymentFlowAllowsCallback(state, data) {
     return /^(pkg:[a-z]+|pack_reveal:\d+|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
   }
   if (state === 'pay_receipt') {
-    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
+    // `pay_resume` از یادآوریِ فاکتور می‌آید و باید به هندلرِ بازفرستادنِ فاکتور برسد؛
+    // وگرنه گارد پیش از action آن را می‌بلعد و همان متنِ کلیِ «فاکتور باز داری» را می‌فرستد.
+    return /^(pay_resume:\d+|stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
   }
   if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
   return false;
