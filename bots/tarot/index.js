@@ -305,7 +305,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.99.0';
+const PRODUCT_VERSION = '3.99.1';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1977,6 +1977,13 @@ const stmts = {
   // کارِ `recoverOrphanReadings` است (ریفاند)، نه ادامه.
   resumableReading: db.prepare(
     "SELECT * FROM readings WHERE user_id=? AND status='started' AND llm_json<>'' AND cards_json<>'' ORDER BY id DESC LIMIT 1"),
+  // 🔁 فالِ پرداخت‌شده‌ای که هنوز سؤال نگرفته است. این حالت با `resumableReading`
+  // فرق دارد: هنوز کارت/خوانش ساخته نشده، پس تنها ادامه‌ی درست بازگرداندنِ کاربر به
+  // مرحله‌ی نوشتنِ سؤال است — نه شروعِ دوباره و نه ریفاند. هر سه ستونِ خالی لازم‌اند:
+  // سؤالِ صوتی عمداً `question=''` دارد، اما `question_audio` پر است و نباید دوباره
+  // «سؤالت را بنویس» ببیند.
+  awaitingQuestionReading: db.prepare(
+    "SELECT * FROM readings WHERE user_id=? AND status='paid' AND COALESCE(question,'')='' AND COALESCE(cards_json,'')='' AND COALESCE(question_audio,'')='' ORDER BY id DESC LIMIT 1"),
   // ادعای اتمیکِ استیت — گاردِ دوبار-تپ روی دکمه‌ی اندازه. `setState` بی‌قید است و
   // دو تپِ سریع هر دو رد می‌شدند؛ این یکی فقط برای **اولین** تپ changes=1 می‌دهد.
   claimState: db.prepare('UPDATE users SET state=? WHERE telegram_id=? AND state<>?'),
@@ -2928,6 +2935,32 @@ function resumeRowFromDb(uid) {
   if (idx < n) return [Markup.button.callback(L.buttons.nextCard, `next:${r.id}:${idx}`)];
   if (v4For(uid)) return [Markup.button.callback(L.buttons.finalAnswer, `final:${r.id}`)];
   return null;
+}
+
+// این predicate علاوه بر WHERE کوئری، مرزِ بازیابی را مستند و قابل‌آزمایش می‌کند: فقط
+// فالی که دقیقاً در نقطه‌ی «پول کم شده، سؤال نگرفته‌ایم» است به `await_question` برمی‌گردد.
+// هیچ فالِ صوتی، در حال ساخت، یا در حال تحویل نباید با این مسیر به عقب برگردد.
+function isAwaitingQuestionReading(r) {
+  return !!r && r.status === 'paid' && !r.question && !r.cards_json && !r.question_audio;
+}
+
+/** بازیابیِ فالی که در لحظه‌ی انتخابِ اندازه پولش کم شده، ولی هنوز سؤال نگرفته است.
+ *
+ * `/start` و دکمه‌ی منوی تلگرام ممکن است سشن را پاک کنند. این‌جا DB منبعِ حقیقت است و
+ * سشن فقط دوباره ساخته می‌شود؛ بنابراین نه کسرِ دوم داریم، نه رکوردِ تازه، نه خوانشِ
+ * بی‌سؤال. خروجی خودِ رکورد است تا caller همان گارد استانداردِ ادامه/انصراف را نشان دهد. */
+function resumeAwaitingQuestionFromDb(uid) {
+  const r = stmts.awaitingQuestionReading.get(uid);
+  if (!isAwaitingQuestionReading(r)) return null;
+  const spread = SPREAD_BY_ID[r.type];
+  setSession(uid, {
+    spreadId: r.type,
+    readingId: r.id,
+    picks: [],
+    focusKey: r.focus_area || spread?.focus || (spread?.open ? 'open' : 'question'),
+  });
+  setState(uid, 'await_question');
+  return r;
 }
 
 // 🔒 فالِ **در حالِ تحویل** (پول داده شده، `status='started'`) هرگز با یک تپ از سشن پاک
@@ -3908,6 +3941,20 @@ async function handleStart(ctx) {
     // درخواست بود، نه یک ارزش.
     return startOnboarding(ctx, uid);
   }
+
+  // `/start` یک دکمه‌ی reply نیست، پس عمداً از middleware گاردِ callback رد نمی‌شود.
+  // با این حال نباید بتواند تنها فالِ پول‌داده‌ی منتظرِ سؤال را رها کند. اول خودِ فال را
+  // از DB بازسازی می‌کنیم و همان انتخابِ آگاهانه‌ی استاندارد را می‌دهیم؛ فقط «انصراف»
+  // صریح می‌تواند کاربر را از آن خارج کند. این باید **قبل از** reset پایین باشد.
+  try {
+    const awaitingQuestion = resumeAwaitingQuestionFromDb(uid);
+    if (awaitingQuestion) {
+      return await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${awaitingQuestion.id}`)],
+      ]));
+    }
+  } catch (e) { logErr('resume awaiting question:', e.message); }
 
   // کاربر برگشتی
   setState(uid, 'idle');
