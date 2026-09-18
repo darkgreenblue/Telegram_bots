@@ -233,8 +233,8 @@ ok(/navBackRow\(uid[,)]/.test(packMenu), 'صفحه‌ی بسته‌ها ردیف
 console.log('\n▶ الگوی دو-ثابتیِ انتشارِ مرحله‌ای');
 
 ok(/^const UX_NAV_V2 = true;$/m.test(SRC), 'کلیدِ خاموشیِ کلِ فیچر یک ثابتِ نام‌دار است (UX_NAV_V2)');
-ok(/^const UX_NAV_V2_ADMIN_ONLY = true;$/m.test(SRC),
-  '⭐ و دامنه هنوز **فقط-ادمین** است (UX_NAV_V2_ADMIN_ONLY = true)');
+ok(/^const UX_NAV_V2_ADMIN_ONLY = false;$/m.test(SRC),
+  '⭐ و دامنه برای **همه‌ی کاربران** باز است (UX_NAV_V2_ADMIN_ONLY = false)');
 ok(/const navV2For = \(uid\) => UX_NAV_V2 && \(!UX_NAV_V2_ADMIN_ONLY \|\| isTester\(uid\)\);/.test(SRC),
   'helper هر دو ثابت را با هم می‌خواند و از isTester (نه isAdmin) می‌پرسد');
 
