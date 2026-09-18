@@ -10,6 +10,7 @@ const exceptOf = (id) => { const d = defectOf(id); return d.except ? new RegExp(
 
 export default {
   // 🏷 همان نشتِ برچسب، به پرتغالی
+  tarotWord: /(cartas?|leitura|tiragem|tar[oô])/i,
   labelLeak: /sentimento n[ãa]o dito|seu sinal [ée]|o que voc[êe] n[ãa]o disse/i,
   /* 🗣 ⚠️ پرتغالی مرزِ گفتاری/کتابیِ تمیز **ندارد** («está» هر دو است)، پس این الگو
    * عمداً فقط اداری‌نویسیِ آشکار را می‌گیرد. آستانه ۲ است چون این فرم‌ها نادرند و

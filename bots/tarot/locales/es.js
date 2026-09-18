@@ -300,6 +300,7 @@ export default {
     chatBack: '💬 Volver a la conversación',
     chatKeep: '💬 Sigo acá',
     chatClose: '✖️ Cerrar la conversación',
+    chatEnd: '🙏 Terminar la conversación',
     dailyAfterOnboard: '🎴 Ver mi carta de hoy (gratis)',
     gateOpenChannel: '📢 Abrir el canal de la carta del día',
     gateCheck: '✅ Ya me uní, revisa',
@@ -839,6 +840,13 @@ export default {
    * deja el bloque entero como código muerto por estructura en la primera versión,
    * igual que `invoiceReminder` más abajo; las claves existen por la forma única de la
    * locale (check-locale-shape). Cuando se abra el idioma, hay que releer los textos en vivo. */
+  // ☰ Etiquetas de los comandos del menú junto al campo de texto (v3.95.0). Muy cortas.
+  commands: {
+    menu: 'Menú principal',
+    fal: 'Lectura nueva',
+    support: 'Soporte',
+  },
+
   chat: {
     // Oferta después del agradecimiento por la calificación. El orden de los botones
     // está fijo en index.js: primero la conversación (el pico del momento), después una
@@ -890,6 +898,9 @@ export default {
     // doce, y como línea extra después de la respuesta normal (no en su lugar), para que
     // no se vuelva un consejo repetido.
     nudge: '🌿 Por cierto, la decisión final siempre es tuya; las cartas solo cambian el ángulo desde el que miras.',
+    // 💬 La pregunta sugerida, hecha como si viniera de la propia persona (v3.95.0).
+    askQuote: (q) => `<blockquote>${q}</blockquote>`,
+    followUpGone: 'Esa pregunta ya la hiciste 🌙\n\nCualquier pregunta nueva escríbela acá.',
   },
 
   share: {

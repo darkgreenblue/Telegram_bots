@@ -9,6 +9,7 @@ const exceptOf = (id) => { const d = defectOf(id); return d.except ? new RegExp(
 
 export default {
   // 🏷 همان نشتِ برچسب، به اسپانیایی
+  tarotWord: /(cartas?|lectura|tirada|tarot)/i,
   labelLeak: /sentimiento no dicho|tu se[ñn]al es|lo que no dijiste/i,
   /* 🗣 ⚠️ همان محدودیتِ پرتغالی: اسپانیایی مرزِ صرفیِ گفتاری/کتابی ندارد، پس فقط
    * اداری‌نویسیِ آشکار گرفته می‌شود. آستانه ۲. */
