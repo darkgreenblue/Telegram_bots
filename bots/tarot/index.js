@@ -305,7 +305,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.98.0';
+const PRODUCT_VERSION = '3.99.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -368,7 +368,7 @@ const NAV_GUARD_ENABLED = true;
  * هیچ‌جا پرچمِ خام صدا زده نمی‌شود، فقط `navV2For(uid)` — و چکِ CI تعدادِ استفاده‌ی خام
  * را می‌شمارد (الگوی `tools/check-coins.mjs`). */
 const UX_NAV_V2 = true;
-const UX_NAV_V2_ADMIN_ONLY = true;
+const UX_NAV_V2_ADMIN_ONLY = false;
 
 /* ═══════════ 🗣 گفتگوی پس از فال (v3.84.0) ═══════════
  *
