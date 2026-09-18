@@ -30,7 +30,13 @@ let pass = 0; const errs = [];
  * با یک ادعای خوانا — و بدتر از آن، هر ستونی که این‌جا جا بیفتد یعنی statementهای
  * پروداکشن روی اسکیمایی سنجیده می‌شوند که با اسکیمای واقعی فرق دارد (همان «گاردِ
  * آینه‌ای» بند ۶ب ریشه، از سمتِ اسکیما). */
-const CHAT_ALTERS = [...SRC.matchAll(/ALTER TABLE chat_messages ADD COLUMN [^'"`]+/g)].map((m) => m[0]);
+/* ⚠️ و بارِ دوم، همان تله از سمتِ **نقلِ‌قول** (v3.96.0): الگوی قبلی
+ * `ADD COLUMN [^'"\`]+` بود، پس اولین ستونِ متنی با `DEFAULT ''` را وسطِ کار می‌بُرید و
+ * SQLite با یک خطای مبهم می‌ترکید. حالا **خودِ رشته‌ی کاملِ `db.prepare`** برداشته
+ * می‌شود و بعد فیلتر می‌شود، پس نقلِ‌قولِ داخلی بی‌ضرر است. */
+const CHAT_ALTERS = [...SRC.matchAll(/db\.prepare\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`)\s*\)/g)]
+  .map((m) => m[1] || m[2] || m[3] || '')
+  .filter((s) => /^ALTER TABLE chat_messages ADD COLUMN /.test(s));
 const applyChatAlters = (d) => { for (const a of CHAT_ALTERS) { try { d.exec(a); } catch {} } };
 
 const ok = (cond, msg) => { if (cond) { pass++; console.log(`  ✅ ${msg}`); } else { errs.push(msg); console.log(`  ❌ ${msg}`); } };
@@ -534,10 +540,10 @@ console.log('\n▶ ۸ب) بازپخشِ تاریخچه در همان پاکت');
 
   /* ساختاری: «مقدار وجود دارد ≠ مقدار می‌رسد» (بند ۲و/۶ب ریشه). پاکتِ درست بی‌فایده
    * است اگر ستون‌ها از دیتابیس خوانده یا نوشته نشوند. */
-  ok(/SELECT[^']*want_reading[^']*want_support[^']*FROM chat_messages/.test(SRC),
-    'کوئریِ تاریخچه هر دو ستونِ پرچم را می‌خواند');
-  ok(/INSERT INTO chat_messages \([^)]*want_reading, want_support\)/.test(SRC),
-    'و insertChatMsg هر دو را می‌نویسد');
+  ok(/SELECT[^']*want_reading, want_support, follow_up, want_end[^']*FROM chat_messages/.test(SRC),
+    'کوئریِ تاریخچه هر چهار فیلدِ پاکت را می‌خواند');
+  ok(/INSERT INTO chat_messages \([^)]*want_reading, want_support, follow_up, want_end\)/.test(SRC),
+    'و insertChatMsg هر چهار فیلدِ پاکت را می‌نویسد');
   ok(/'assistant', reply,[\s\S]{0,120}out\.newReading \? 1 : 0, out\.support \? 1 : 0/.test(SRC),
     '🔑 و ردیفِ جواب پرچم‌های **پارس‌شده‌ی همان نوبت** را می‌گیرد، نه صفرِ هاردکد');
 }
@@ -682,8 +688,8 @@ console.log('\n▶ ۱۱) دو لنگرِ ریپلای: دُمِ فال و سؤا
   ok(/return last;/.test(rl), 'replyLong آخرین پیامِ ارسال‌شده را برمی‌گرداند');
 
   const hc = bodyOf(CODE, 'async function handleChatMessage(');
-  ok(/const askedId = ctx\.message\?\.message_id \|\| 0;/.test(hc),
-    'گفتگو شناسه‌ی پیامِ خودِ کاربر را برمی‌دارد');
+  ok(/const askedId = askedIdIn \|\| ctx\.message\?\.message_id \|\| 0;/.test(hc),
+    'گفتگو شناسه‌ی پیامِ خودِ کاربر را برمی‌دارد (و از v3.96.0 لنگرِ تزریقیِ دکمه‌ی سؤال را هم می‌پذیرد)');
   ok(/const extra = replyToExtra\(askedId\)/.test(hc),
     '🔑 جوابِ هر سؤال به **همان سؤال** ریپلای می‌خورد');
   // ⚠️ ادعای معکوس: بدونِ این، «لنگر هست» سبز می‌ماند در حالی که لنگر غلط است.
@@ -1177,18 +1183,24 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
   ok(bool('CHAT_STATE_GUARD') === true, '🔑 گاردِ استیتِ گفتگو روشن منتشر شده');
   ok(bool('CHAT_CLOSE_FLAG') === true, '🏳️ و فلگِ بازگشت هم');
   const LBL = { wallet: '💎 ذخایر الماس', lucky: '🎲 کارت شانس (استخراج الماس)',
-    invite: '📤 دعوت دوستان', reading: '🔮 فال بگیر', support: '💬 پشتیبانی' };
+    invite: '📤 دعوت دوستان', reading: '🔮 فال بگیر', support: '💬 پشتیبانی',
+    daily: '🎴 فال تک کارت امروز (رایگان)', settings: '⚙️ تنظیمات' };
+  const INTENT_STUB = { DAILY: 'daily', WALLET: 'wallet', INVITE: 'invite',
+    LUCKY: 'lucky', READING: 'reading', SETTINGS: 'settings' };
   const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting' }) => {
-    const seen = { next: 0, guard: 0, left: 0 };
+    const seen = { next: 0, guard: 0, left: 0, intent: null };
     const fn = new Function('bot', 'getState', 'getSession', 'getBalance', 'KB_LABELS',
-      'WALLET_LABELS', 'LUCKY_LABELS', 'INVITE_LABELS', 'CHAT_AFTER_READING',
+      'WALLET_LABELS', 'LUCKY_LABELS', 'INVITE_LABELS', 'DAILY_LABELS', 'INTENT',
+      'SETTINGS_ENABLED', 'CHAT_AFTER_READING',
       'CHAT_STATE_GUARD', 'chatOpenGuard', 'leaveChat', 'logErr', 'L', 'seen',
       `${mwSrc}\nreturn bot.__mw;`);
     const stubBot = { use: (h) => { stubBot.__mw = h; } };
     const mw = fn(stubBot, () => state, () => ({ chatReadingId: 9 }), () => balance,
       new Set([...Object.values(LBL), LBL.support]), [LBL.wallet], [LBL.lucky], [LBL.invite],
-      true, guard, async () => { seen.guard++; }, () => { seen.left++; },
-      () => {}, { support: { button: LBL.support } }, seen);
+      [LBL.daily], INTENT_STUB, true,
+      true, guard, async (_c, _u, it) => { seen.guard++; seen.intent = it ?? null; },
+      () => { seen.left++; },
+      () => {}, { support: { button: LBL.support }, buttons: { reading: LBL.reading, settings: LBL.settings } }, seen);
     return mw({ from: { id: 5 }, message: txt ? { text: txt } : undefined,
       callbackQuery: cb ? { data: cb } : undefined }, async () => { seen.next++; })
       .then(() => seen);
@@ -1258,6 +1270,292 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     '🔑 فلگ **قبل از** پیامِ همیشگی می‌رود (ترتیب، خواسته‌ی صریحِ مالک)');
   ok(/chat_close\(\?:\:\(\\d\+\)\)\?/.test(SRC) || /\^chat_close\(\?::\(\\d\+\)\)\?\$/.test(SRC),
     '⚠️ و شناسه در الگو **اختیاری** است (دکمه‌ی کهنه نمی‌میرد، بند ۲ج/۶)');
+}
+
+/* ═══ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه، نیت و دکمه‌ی منو (v3.96.0) ══════════
+ *
+ * چهار چیزِ تازه، و هر چهار روی مسیرهایی که شکستشان **بی‌صداست**: یک دکمه که اگر
+ * دو بار مصرف شود دو الماس خرج می‌کند، یک درِ خروج که اگر گارد بخورد حلقه می‌سازد،
+ * یک بازپخشِ نیت که اگر جا بیفتد فقط پیامِ عمومی می‌دهد، و یک دکمه‌ی منو که اگر
+ * رشته‌ی locale اش گم شود کلِ نصب با خطای API رد می‌شود. پس ادعاها **رفتاری**‌اند. */
+console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه و دکمه‌ی منو');
+{
+  const FAL = (await import('../bots/tarot/locales/fa.js')).default;
+
+  /* ── ۲۰الف) پاکت: دو فیلدِ تازه، از راهِ خودِ توابعِ هسته ────────────────── */
+  ok(chat.CHAT_OUT_KEYS.followUp === 'follow_up' && chat.CHAT_OUT_KEYS.end === 'wants_end',
+    'پاکت دو کلیدِ تازه دارد و نامشان تک‌منبع است');
+  const envObj = JSON.parse(chat.chatEnvelope('x', { followUp: 'چرا؟', end: true }));
+  ok(envObj.follow_up === 'چرا؟' && envObj.wants_end === true,
+    'و `chatEnvelope` هر دو را می‌سازد (بازپخشِ تاریخچه به همین وابسته است)');
+  const longText = 'ی'.repeat(chat.CHAT_MIN_CHARS + 5);
+  const parsedOut = chat.parseChatOut(chat.chatEnvelope(longText, { followUp: ' «چرا؟» ', end: true }));
+  ok(parsedOut.followUp === 'چرا؟' && parsedOut.end === true, 'و `parseChatOut` هر دو را برمی‌گرداند');
+  const clean = chat.cleanFollowUp;
+  ok(clean('  یک   سؤال  ') === 'یک سؤال', 'برچسبِ سؤال نرمال‌سازیِ فاصله می‌شود');
+  ok(clean('«چرا؟»') === 'چرا؟' && clean('"چرا؟"') === 'چرا؟', 'و نقلِ‌قولِ دورش برداشته می‌شود');
+  /* ⚠️ سقفِ طول یک ادعای **UI** است نه سلیقه: برچسبی که روی دکمه جا نشود، از دکمه‌ی
+   * نبودن بدتر است. جهتِ خطا هم عمدی است — برچسبِ بلند **حذف** می‌شود، نه بریده. */
+  ok(clean('x'.repeat(chat.CHAT_FOLLOWUP_MAX + 1)) === '', 'برچسبِ بلندتر از سقف حذف می‌شود، نه بریده');
+  ok(clean('x'.repeat(chat.CHAT_FOLLOWUP_MAX)).length === chat.CHAT_FOLLOWUP_MAX,
+    '🔁 کنترلِ مثبت: دقیقاً روی سقف هنوز می‌ماند (پس ادعای بالا پوچ نیست)');
+  ok(clean(null) === '' && clean(undefined) === '' && clean(123).length > 0,
+    'و ورودیِ خالی/غیررشته‌ای هرگز نمی‌ترکد');
+
+  /* ── ۲۰ب) دکمه‌ی سؤالِ پیشنهادی: ادعای اتمیک، یک‌بارمصرف، مالکیت ──────────
+   * 🔑 حیاتی‌ترین ادعای این بلوک. دکمه در چت **زنده می‌ماند** (بند ۲ج/۶)، پس دو تپِ
+   * پیاپی بدونِ ادعای اتمیک یعنی دو نوبتِ پولی برای یک سؤال. */
+  const BT = String.fromCharCode(96);
+  const sqlOf = (name) => {
+    const m = SRC.match(new RegExp(name + ":\\s*db\\.prepare\\((?:'([^']+)'|\"([^\"]+)\"|" + BT + '([\\s\\S]*?)' + BT + ')\\)'));
+    return (m && (m[1] || m[2] || m[3])) || null;
+  };
+  const claimSql = sqlOf('claimFollowUp');
+  const selSql = sqlOf('chatFollowUp');
+  ok(!!claimSql && !!selSql, 'هر دو statementِ دکمه از سورس برداشته شدند');
+  ok(/follow_up_used\s*=\s*0/.test(claimSql) && /follow_up\s*<>\s*''/.test(claimSql),
+    '🔑 ادعای مصرف در خودِ SQL اتمیک است (نه یک شرطِ جاوااسکریپتی قبلش)');
+  ok(/user_id\s*=\s*\?/.test(claimSql), 'و مالکیتِ ردیف هم در همان SQL چک می‌شود');
+  ok(/role\s*=\s*'assistant'/.test(claimSql) && /role\s*=\s*'assistant'/.test(selSql),
+    "⚠️ و فقط ردیفِ **جواب** (`assistant`) کاندید است، نه سؤالِ خودِ کاربر");
+
+  const d2 = new Database(':memory:');
+  d2.exec(`CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, reading_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '',
+    price INTEGER NOT NULL DEFAULT 0, refunded INTEGER NOT NULL DEFAULT 0,
+    model TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    tg_msg_id INTEGER NOT NULL DEFAULT 0);`);
+  applyChatAlters(d2);
+  const cols2 = new Set(d2.prepare('PRAGMA table_info(chat_messages)').all().map((c) => c.name));
+  ok(cols2.has('follow_up') && cols2.has('want_end') && cols2.has('follow_up_used'),
+    'هر سه ستونِ افزایشیِ تازه از مهاجرتِ سورس روی جدول نشستند');
+  /* ⚠️ چرا `follow_up_used` یک ستونِ **سوم** است و نه پاک‌کردنِ خودِ `follow_up`:
+   * تاریخچه با **پرچمِ واقعی** بازپخش می‌شود (بخشِ ۸ب). خالی‌کردنِ برچسب برای ادعا،
+   * همان تاریخچه را دروغ می‌کرد و مدل یاد می‌گرفت برچسب نسازد. */
+  ok(!/UPDATE chat_messages SET follow_up\s*=\s*''/.test(SRC),
+    '🔑 و ادعا هرگز خودِ برچسب را پاک نمی‌کند (تاریخچه باید واقعی بماند)');
+  const ins2 = d2.prepare("INSERT INTO chat_messages (reading_id, user_id, role, text, follow_up) VALUES (?,?,?,?,?)");
+  const rowOk = Number(ins2.run(3, 5, 'assistant', 'جواب', 'چرا؟').lastInsertRowid);
+  const rowEmpty = Number(ins2.run(3, 5, 'assistant', 'جواب', '').lastInsertRowid);
+  const rowUser = Number(ins2.run(3, 5, 'user', 'سؤال', 'چرا؟').lastInsertRowid);
+  const claim2 = d2.prepare(claimSql);
+  const sel2 = d2.prepare(selSql);
+  /* ⚠️ خطای SQLite به یک عددِ ناممکن تبدیل می‌شود، نه اینکه چک را بترکاند. جهشی که
+   * `AND user_id=?` را بردارد تعدادِ پارامترها را به هم می‌زند، و بدونِ این wrapper
+   * به‌جای یک ادعای خوانا یک stack trace می‌داد — همان نقصِ هارنس که در
+   * check-night-reminder هم یک بار ثبت شده. */
+  const claimTry = (...a) => { try { return claim2.run(...a).changes; } catch { return -1; } };
+  ok(claimTry(rowOk, 5) === 1, '🔁 کنترلِ مثبت: تپِ اول واقعاً ادعا می‌کند');
+  ok(claimTry(rowOk, 5) === 0, '🔑 و تپِ دومِ همان دکمه صفر (یک‌بارمصرف، ضدِ دو الماس برای یک سؤال)');
+  const rowOk2 = Number(ins2.run(3, 5, 'assistant', 'جواب', 'چرا؟').lastInsertRowid);
+  ok(claimTry(rowOk2, 9) === 0, '🔑 کاربرِ دیگر نمی‌تواند دکمه‌ی این کاربر را مصرف کند');
+  ok(claimTry(rowOk2, 5) === 1, '🔁 و همان ردیف برای مالکش هنوز سالم است');
+  ok(claimTry(rowEmpty, 5) === 0, 'ردیفِ بی‌برچسب اصلاً ادعا نمی‌شود');
+  ok(claimTry(rowUser, 5) === 0, 'و ردیفِ سؤالِ کاربر هم نه');
+  ok(!sel2.get(rowUser) && sel2.get(rowOk)?.follow_up === 'چرا؟', 'خوانشِ برچسب هم همان دامنه را دارد');
+
+  const ask = actBody('bot.action(/^chat_ask:(\\d+)$/, async (ctx) => {');
+  ok(!!ask, 'هندلرِ دکمه از سورس برداشته شد');
+  const askCode = strip(ask);
+  /* 🔑 ترتیب قرارداد است: ادعای مصرف **قبل از** هر گارد و هر awaitِ دیگری. اگر بعد از
+   * گاردها می‌آمد، دو تپِ هم‌زمان هر دو از گاردها رد می‌شدند و بعد هر دو ادعا می‌کردند. */
+  ok(before(askCode, 'claimFollowUp.run(', 'blockDuringOpenPay('),
+    '🔑 ادعای مصرف **قبل از** گاردهای فلوی باز است');
+  ok(before(askCode, 'claimFollowUp.run(', 'handleChatMessage('),
+    '🔑 و قبل از شروعِ خودِ نوبت');
+  ok(!/payForChat\(|stmts\.deduct/.test(askCode),
+    '🔑 و خودِ هندلر **هیچ کسری نمی‌کند** (منطقِ پول تک‌منبع در `handleChatMessage` می‌ماند)');
+  ok(/INTENT\.CHAT/.test(askCode) && /blockDuringOpenReading\(ctx, INTENT\.CHAT/.test(askCode),
+    'گاردهای فلوی باز با نیتِ `CHAT` صدا زده می‌شوند (انصراف به همین گفتگو برمی‌گردد)');
+  ok(/chatEligible\(uid, rid\)/.test(askCode), 'و واجدِ شرایط بودنِ همان فال دوباره سنجیده می‌شود');
+  /* ⚠️ دکمه‌ی کهنه/غیرمالک/مصرف‌شده **بی‌صدا رد نمی‌شود**: بند ۹ب/۱ می‌گوید هیچ تپی
+   * بی‌جواب نمی‌ماند. سه مسیرِ ردِ ادعا هر سه همان پیام را می‌دهند. */
+  ok(countOf(/L\.chat\.followUpGone/g, askCode) === 2,
+    '⚠️ دکمه‌ی کهنه/مصرف‌شده پیامِ صریح می‌گیرد، نه سکوت');
+  ok(/L\.chat\.askQuote\(esc\(q\)\)/.test(askCode) && /parse_mode: 'HTML'/.test(askCode),
+    '💬 سؤال در باکسِ نقلِ‌قول و با escape می‌رود (ورودیِ مدل، پس HTML خام ممنوع)');
+  ok(/handleChatMessage\(ctx, uid, q, \{ askedId: qMsg\?\.message_id \|\| 0 \}\)/.test(askCode),
+    '📎 و جواب به **همان پیامِ نقلِ‌قولی** ریپلای می‌خورد (خطِ گفتگو گم نمی‌شود)');
+  ok(/if \(!CHAT_FOLLOWUP\) return;/.test(askCode), 'و رول‌بکِ یک‌خطی دارد');
+
+  /* رفتاری: فیلترِ کیبورد فقط همان یک ردیف را برمی‌دارد. برداشتنِ کلِ کیبورد یعنی
+   * بستنِ درهایی (پایانِ مکالمه، پشتیبانی، فالِ تازه) که هنوز بازند. */
+  const keptLine = (askCode.match(/const kept = km\.filter\([\s\S]*?\);/) || [])[0];
+  ok(!!keptLine, 'خطِ فیلترِ کیبورد از سورس برداشته شد');
+  // نبودِ خط یک ادعای خوانا می‌دهد، نه ReferenceError وسطِ چک.
+  const runKept = keptLine
+    ? new Function('km', 'aId', `${keptLine}\nreturn kept;`)
+    : () => [];
+  const kmIn = [[{ callback_data: 'chat_ask:7' }], [{ callback_data: 'chat_new:3' }], [{ callback_data: 'chat_end:3' }]];
+  let kmOut = '[]';
+  try { kmOut = JSON.stringify(runKept(kmIn, 7)); } catch { kmOut = '[]'; }
+  ok(!kmOut.includes('chat_ask'), '🔑 دکمه‌ی مصرف‌شده از پیامِ حامل برداشته می‌شود');
+  ok(kmOut.includes('chat_end') && kmOut.includes('chat_new'),
+    '🔁 کنترلِ مثبت: بقیه‌ی ردیف‌ها **می‌مانند** (وگرنه یک فیلترِ همیشه-خالی هم ادعای بالا را پاس می‌کرد)');
+
+  /* ترتیبِ ردیف‌های CTA قرارداد است (بند ۱۰): اول ادامه، آخر خروج. */
+  const turn2 = bodyOf(CODE, 'async function runChatTurn(');
+  ok(before(turn2, 'chat_ask:${aId}', 'chat_end:${rid}'),
+    '🔑 دکمه‌ی ادامه بالای دکمه‌ی خروج است (درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند)');
+  ok(/if \(followUp\) rows\.push/.test(turn2), 'و دکمه‌ی ادامه فقط وقتی مدل برچسب داده ساخته می‌شود');
+  ok(/if \(CHAT_END_BUTTON\) rows\.push/.test(turn2), 'دکمه‌ی خروج پرچمِ رول‌بکِ خودش را دارد');
+  ok(/const followUp = CHAT_FOLLOWUP \? \(out\.followUp \|\| ''\) : '';/.test(turn2),
+    'و خاموشیِ پرچم برچسب را از **ثبت** هم بیرون می‌برد، نه فقط از دکمه');
+
+  /* ── ۲۰ج) پایانِ مکالمه ─────────────────────────────────────────────── */
+  const end = actBody('bot.action(/^chat_end(?::(\\d+))?$/, async (ctx) => {');
+  ok(!!end, 'هندلرِ پایانِ مکالمه از سورس برداشته شد');
+  const endCode = strip(end);
+  ok(before(endCode, 'closeChat(ctx, uid', 'deliverKeyboard(ctx.telegram, uid)')
+    && before(endCode, 'deliverKeyboard(ctx.telegram, uid)', 'replyCanceled(ctx, uid)'),
+    '🔑 ترتیب: بستنِ گفتگو ← تحویلِ کیبوردِ ماندگار ← پیامِ «من همیشه اینجام»');
+  ok(/const wasOpen = getState\(uid\) === 'chatting';/.test(endCode)
+    && /if \(wasOpen\) await deliverKeyboard/.test(endCode),
+    '⚠️ کیبورد فقط وقتی تحویل می‌شود که گفتگو **واقعاً** باز بوده (تپِ دکمه‌ی کهنه پیامِ اضافه نمی‌سازد)');
+  ok(!/ctx\.deleteMessage\(\)/.test(endCode),
+    '🔑 و پیامِ حامل **پاک نمی‌شود** (زیرِ جوابِ پول‌داده نشسته، نه زیرِ پیامِ گارد)');
+  ok(!/L\.chat\.closed|L\.buttons\.chatStart/.test(endCode),
+    'و متنِ بسته‌شدن از تک‌منبعِ `closeChat` می‌آید، نه یک کپیِ دوم');
+  /* 🔑 ضدِ حلقه (کلاسِ تیکتِ `#TRT-8976388520`): هر دو اکشنِ تازه در فهرستِ «گارد نگیر»
+   * هستند. `chat_ask` کاربر را داخلِ گفتگو نگه می‌دارد و `chat_end` خودش درِ خروج است؛
+   * گارد گرفتنِ هر کدام یعنی تپی که هیچ‌جا نمی‌برد. */
+  const keepSrc = (CODE.match(/const CHAT_KEEP_CB = (\/[^\n]+\/);/) || [])[1];
+  const keepRe = new Function(`return ${keepSrc};`)();
+  ok(keepRe.test('chat_ask:12'), '🔑 «chat_ask» گارد نمی‌خورد (ضدِ حلقه)');
+  ok(keepRe.test('chat_end') && keepRe.test('chat_end:9'), '🔑 و «chat_end» هم، با شناسه و بی‌شناسه');
+  ok(!keepRe.test('nav:menu') && !keepRe.test('wallet_go') && !keepRe.test('chat_askx'),
+    '🔁 کنترلِ معکوس: بقیه‌ی اکشن‌ها همچنان گارد می‌خورند (فهرست پهن نشده)');
+
+  /* ── ۲۰د) بازپخشِ نیت روی گاردِ گفتگو (رفتاری) ──────────────────────────
+   * 🐛 شکافی که این را ساخت: `chatOpenGuard` تنها گاردِ ربات بود که نیت نمی‌گرفت، پس
+   * بستنِ گفتگو با دکمه‌ی «ذخایر الماس» پیامِ عمومی می‌داد نه کیف — همان باگی که
+   * v3.78.0 برای گاردِ فال بست، این‌بار از درِ گفتگو. */
+  const ceSrc = bodyOf(CODE, 'function chatExitIntent(');
+  ok(!!ceSrc, 'نگاشتِ نیت از سورس برداشته شد');
+  const IN = { DAILY: 'daily', WALLET: 'wallet', INVITE: 'invite', LUCKY: 'lucky', READING: 'reading', SETTINGS: 'settings', CHAT: 'chat' };
+  const B = { wallet: '💎 ذخایر الماس', lucky: '🎲 کارت شانس (استخراج الماس)',
+    invite: '📤 دعوت دوستان', reading: '🔮 فال بگیر', daily: '🎴 فال تک کارت امروز (رایگان)', settings: '⚙️ تنظیمات' };
+  const mkIntent = (settingsOn = true) => new Function('INTENT', 'WALLET_LABELS', 'DAILY_LABELS',
+    'LUCKY_LABELS', 'INVITE_LABELS', 'SETTINGS_ENABLED', 'L',
+    `${ceSrc}\nreturn chatExitIntent;`)(IN, [B.wallet], [B.daily], [B.lucky], [B.invite], settingsOn,
+    { buttons: { reading: B.reading, settings: B.settings } });
+  const intentOf = mkIntent();
+  for (const [cb, want] of [['wallet_go', IN.WALLET], ['recharge', IN.WALLET], ['daily_go', IN.DAILY],
+    ['lucky_go', IN.LUCKY], ['invite_go', IN.INVITE], ['reading_go', IN.READING], ['settings', IN.SETTINGS]]) {
+    ok(intentOf(null, cb) === want, `اکشنِ «${cb}» نیتِ درست می‌دهد`);
+  }
+  for (const [k, lb] of [['wallet', B.wallet], ['daily', B.daily], ['lucky', B.lucky], ['invite', B.invite]]) {
+    ok(intentOf(lb, null) === IN[k.toUpperCase()], `برچسبِ کیبوردِ «${k}» هم`);
+  }
+  ok(intentOf(B.reading, null) === IN.READING && intentOf('/fal', null) === IN.READING, 'و «فال بگیر» و `/fal`');
+  ok(intentOf(B.settings, null) === IN.SETTINGS && mkIntent(false)(B.settings, null) === '',
+    '⚠️ تنظیمات فقط وقتی پرچمش روشن است (دکمه‌ای که وجود ندارد نیت نمی‌سازد)');
+  /* ⚠️ `/menu` عمداً نیتی نمی‌گیرد: جوابش **همان** پیامِ پیش‌فرضِ `replyCanceled` است،
+   * پس ثبتِ نیت فقط یک مسیرِ موازیِ اضافه می‌ساخت. */
+  ok(intentOf('/menu', null) === '', '⚠️ و `/menu` عمداً نیتی نمی‌گیرد (جوابش خودِ پیامِ پیش‌فرض است)');
+  ok(intentOf('سلام', null) === '' && intentOf(null, 'pkg:gold') === '' && intentOf(null, null) === '',
+    '🔁 کنترلِ معکوس: ورودیِ ناشناخته هیچ نیتی نمی‌سازد (نگاشت پهن نشده)');
+  ok(/chatOpenGuard\(ctx, uid, chatExitIntent\(txt, cb\)\)/.test(CODE),
+    '🔑 و میدل‌ور واقعاً همین نگاشت را به گارد پاس می‌دهد (سیمِ اتصال، نه فقط وجودِ تابع)');
+  const gBody = bodyOf(CODE, 'async function chatOpenGuard(');
+  ok(/async function chatOpenGuard\(ctx, uid, intent = ''\)/.test(CODE), 'امضای گارد آرگومانِ نیت دارد');
+  ok(/if \(intent\) setIntent\(uid, intent\);/.test(gBody),
+    '🔑 و نیت را ثبت می‌کند — ولی **فقط وقتی گارد واقعاً بلاک می‌کند** (هیچ نیتِ کهنه‌ای جا نمی‌ماند)');
+  ok(before(gBody, 'setIntent(uid, intent)', 'ctx.reply('), 'و ثبت قبل از نمایشِ گارد است');
+  ok(/'chat_guard', \{ reading_id: rid, intent: intent \|\| '' \}/.test(gBody),
+    'و نیت در رویداد هم ثبت می‌شود (تا بشود سنجید کاربران از گفتگو کجا می‌روند)');
+
+  /* ── ۲۰ه‍) دکمه‌ی ☰ کنارِ کادرِ تایپ ────────────────────────────────────
+   * جوابِ خواسته‌ی «منو باید همیشه در دسترس باشد» بدونِ لمسِ کیبوردِ تایپ: این دکمه
+   * سطحِ **چت** است، هیچ پیامی نمی‌سازد و در هر استیتی دیده می‌شود. */
+  const imb = bodyOf(CODE, 'async function installMenuButton(');
+  ok(!!imb, 'نصبِ دکمه‌ی منو از سورس برداشته شد');
+  ok(/if \(!CHAT_MENU_BUTTON\) return;/.test(imb), 'رول‌بکِ یک‌خطی دارد');
+  ok(/catch \(e\) \{ logErr\(/.test(imb), 'و fail-safe است (شکستش هیچ مسیرِ محصولی را لمس نمی‌کند)');
+  ok(/installMenuButton\(\);/.test(bodyOf(CODE, 'function onLaunched(') || ''),
+    '🔑 و از قلابِ `onLaunch` صدا زده می‌شود، نه `.then()`ِ launch (بند ۹ب/۷ ریشه)');
+  const cmdsSrc = (CODE.match(/const BOT_COMMANDS = \[[\s\S]*?\];/) || [])[0];
+  ok(!!cmdsSrc, 'فهرستِ دستورها از سورس برداشته شد');
+  /* 🌍 هارنس هر دو دنیا را می‌سازد: پروسه‌ی تک‌زبانه (امروز) و چندزبانه (بعد از
+   * رباتِ واحدِ چندزبانه). این تابع سرِ boot اجرا می‌شود، یعنی **بیرونِ** زمینه‌ی زبانِ
+   * کاربر، پس تکیه به `L` در پروسه‌ی چندزبانه یعنی کاربرِ روس توضیحِ فارسی ببیند. */
+  const RU = (await import('../bots/tarot/locales/ru.js')).default;
+  const LTBL = { fa: FAL, ru: RU };
+  const runInstall = async (flag, langs = ['fa']) => {
+    const calls = [];
+    const fn = new Function('CHAT_MENU_BUTTON', 'bot', 'L', 'Lfor', 'LANGS', 'DEFAULT_LANG',
+      'MULTI_LANG', 'log', 'logErr',
+      `${cmdsSrc}\n${imb}\nreturn installMenuButton;`)(flag, {
+      telegram: {
+        setMyCommands: async (c, extra) => { calls.push(['cmds', c, extra || null]); },
+        setChatMenuButton: async (o) => { calls.push(['btn', o]); },
+      },
+    }, LTBL[langs[0]], (l) => LTBL[l], langs, langs[0], langs.length > 1, () => {}, () => {});
+    await fn();
+    return calls;
+  };
+  const installed = await runInstall(true);
+  ok(installed.length === 2 && installed[0][0] === 'cmds' && installed[1][0] === 'btn',
+    '🔁 کنترلِ مثبت: در پروسه‌ی تک‌زبانه دقیقاً دو فراخوانی می‌رود');
+  // ⚠️ همه‌ی دسترسی‌ها اختیاری‌اند: جهشی که یک فراخوانی را بردارد باید یک ادعای
+  // **خوانا** قرمز کند، نه وسطِ چک با TypeError بترکد (نقصِ ثبت‌شده‌ی هارنس).
+  ok(installed.find((c) => c[0] === 'btn')?.[1]?.menuButton?.type === 'commands',
+    'و دکمه از نوعِ «commands» است');
+  const sentCmds = installed.find((c) => c[0] === 'cmds')?.[1];
+  ok(Array.isArray(sentCmds) && sentCmds.length === 3
+    && sentCmds.every((c) => /^[a-z]+$/.test(c.command) && typeof c.description === 'string' && c.description),
+    'هر سه دستور lowercase و بدونِ اسلش‌اند و توضیحِ ناخالی دارند (قراردادِ Bot API)');
+  ok(sentCmds?.[0]?.description === FAL.commands.menu && sentCmds?.[2]?.description === FAL.commands.support,
+    '🔑 و توضیح‌ها از locale می‌آیند، نه رشته‌ی فارسی در `index.js`');
+  /* 🔑 قلبِ این بلوک: در پروسه‌ی چندزبانه، توضیحِ هر زبان باید با `language_code`
+   * خودش نصب شود. نسخه‌ی تک‌زبانه‌ی این تابع کاربرِ روس را با متنِ فارسی رها می‌کرد —
+   * بی‌صدا، چون تلگرام هیچ خطایی نمی‌دهد. */
+  const multi = await runInstall(true, ['fa', 'ru']);
+  const ruSet = multi.find((c) => c[0] === 'cmds' && c[2]?.language_code === 'ru');
+  ok(!!ruSet, '🌍 در پروسه‌ی چندزبانه مجموعه‌ی دستورها per زبان نصب می‌شود');
+  ok(ruSet?.[1]?.[0]?.description === RU.commands.menu,
+    '🔑 و متنِ هر زبان از locale **همان زبان** می‌آید، نه از پیش‌فرض');
+  ok(multi.some((c) => c[0] === 'cmds' && !c[2]),
+    '⚠️ مجموعه‌ی بی‌زبان هم می‌ماند (کاربری با زبانِ کلاینتِ دیگر دست‌خالی نمی‌ماند)');
+  ok((await runInstall(false)).length === 0, '🔁 و با پرچمِ خاموش **هیچ** فراخوانی‌ای نمی‌رود');
+  ok(/bot\.command\('menu'/.test(CODE) && /bot\.command\('fal'/.test(CODE),
+    'و هر دو دستورِ تازه هندلر دارند (دکمه‌ای که به هیچ‌جا نبرد بدتر از نبودنش است)');
+  ok(/await deliverKeyboard\(ctx\.telegram, uid\);/.test(bodyOf(CODE, "bot.command('menu'") || ''),
+    '🔑 و `/menu` کیبوردِ ماندگار را **واقعاً** تحویل می‌دهد (بند ۹ب-۳ ریشه)');
+
+  /* ── ۲۰و) گاردِ ساختاریِ زبان: هر زبانِ فعال باید پاکت را اعلام کند ────────
+   * 🔑 تله‌ی زنده‌ای که این می‌بندد: `CHAT_LOCALES` امروز فقط `fa` است، ولی پرامپتِ
+   * ru/pt/es هنوز قراردادِ **متنِ خام** دارد (پیش از v3.89.0). روشن‌کردنِ هر کدام
+   * بدونِ به‌روزرسانیِ پرامپت یعنی `parseChatOut` هر نوبت `null` بدهد و **هر نوبت
+   * ریفاند بخورد** — بی‌صدا، چون خطایی نمی‌دهد. */
+  const localesSrc = (CODE.match(/const CHAT_LOCALES = (\[[^\]]*\])/) || [])[1] || '[]';
+  const CHAT_LOCALES = JSON.parse(localesSrc.replace(/'/g, '"'));
+  const envKeys = Object.values(chat.CHAT_OUT_KEYS);
+  const declaresEnvelope = (s) => envKeys.every((k) => String(s).includes(k));
+  ok(CHAT_LOCALES.length > 0, `دامنه‌ی زبانیِ گفتگو خوانده شد (${CHAT_LOCALES.join(', ')})`);
+  for (const loc of CHAT_LOCALES) {
+    const Lx = (await import(`../bots/tarot/locales/${loc}.js`)).default;
+    ok(declaresEnvelope(Lx.prompts.chatSystem),
+      `🔑 پرامپتِ گفتگوی «${loc}» هر چهار کلیدِ پاکت را اعلام می‌کند (وگرنه هر نوبت ریفاند)`);
+  }
+  ok(!declaresEnvelope('یک پرامپتِ بی‌پاکت که فقط متن می‌خواهد'),
+    '🔁 کنترلِ مثبت: همین سنجه روی پرامپتِ بی‌پاکت قرمز می‌دهد');
+  /* شکلِ locale برای **هر چهار** زبان سنجیده می‌شود، نه فقط زبانِ فعال: نصبِ دکمه‌ی
+   * منو در بوتِ هر ربات اجرا می‌شود و یک کلیدِ گمشده یعنی `description: undefined` و
+   * ردِ کلِ فراخوانی توسط تلگرام. */
+  const cmdKeys = [...cmdsSrc.matchAll(/\['([a-z]+)', '([a-z]+)'\]/g)].map((m) => m[2]);
+  ok(cmdKeys.length === 3, 'کلیدهای locale ی دستورها از همان فهرست مشتق شدند');
+  for (const loc of ['fa', 'ru', 'pt', 'es']) {
+    const Lx = (await import(`../bots/tarot/locales/${loc}.js`)).default;
+    ok(cmdKeys.every((k) => typeof Lx.commands?.[k] === 'string' && Lx.commands[k].trim()),
+      `«${loc}» هر سه متنِ دستور را دارد`);
+    ok(typeof Lx.buttons?.chatEnd === 'string' && Lx.buttons.chatEnd.trim(),
+      `«${loc}» برچسبِ پایانِ مکالمه را دارد`);
+    ok(typeof Lx.chat?.askQuote === 'function' && /<blockquote>/.test(Lx.chat.askQuote('x')),
+      `«${loc}» باکسِ نقلِ‌قولِ سؤال را دارد`);
+    ok(typeof Lx.chat?.followUpGone === 'string' && Lx.chat.followUpGone.trim(),
+      `«${loc}» پیامِ دکمه‌ی مصرف‌شده را دارد`);
+  }
 }
 
 const total = pass + errs.length;
