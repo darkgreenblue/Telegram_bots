@@ -1,0 +1,338 @@
+{
+  "c01": {
+    "name": "Ace of Cups",
+    "image": "A hand from a cloud holds an overflowing chalice; a dove lowers a wafer into it and five streams pour out",
+    "up": "A new feeling starting; the heart opens",
+    "down": "A heart kept shut, or emotion swallowed",
+    "love": "New love, an honest confession",
+    "work": "A start that comes from the heart"
+  },
+  "c02": {
+    "name": "Two of Cups",
+    "image": "A man and a woman exchange their cups; above them a staff with two snakes and a winged lion's head",
+    "up": "A two-way bond between equals; two people choosing each other",
+    "down": "A mismatch, or a bond that has gone one-sided",
+    "love": "A mutual relationship, making up",
+    "work": "A partnership of equals"
+  },
+  "c03": {
+    "name": "Three of Cups",
+    "image": "Three women raise their cups and dance together; fruit and flowers scattered at their feet",
+    "up": "Shared joy and support from the people around you; something worth celebrating",
+    "down": "A cold crowd, gossip, a celebration that went too far",
+    "love": "Friends backing the relationship, a celebration",
+    "work": "A win for the team"
+  },
+  "c04": {
+    "name": "Four of Cups",
+    "image": "A youth sits under a tree, arms folded, staring at three cups; a hand from a cloud offers a fourth",
+    "up": "Boredom and flatness; something is being offered and you are not looking at it",
+    "down": "Coming out of the slump, seeing what is actually there",
+    "love": "Indifference toward the relationship you already have",
+    "work": "No drive left for the job"
+  },
+  "c05": {
+    "name": "Five of Cups",
+    "image": "A figure in a black cloak looks down at three spilled cups; two more still stand behind, and a bridge crosses a river far off",
+    "up": "Grief and regret; something is still intact that you have not turned around to see",
+    "down": "Accepting the loss and turning back, or staying in the ache",
+    "love": "The sadness of an ending, regret",
+    "work": "A money loss, disappointment"
+  },
+  "c06": {
+    "name": "Six of Cups",
+    "image": "A child hands a cup of white flowers to a smaller one; old houses around them, a guard walking away",
+    "up": "The past and memory; someone or something from back then comes round again",
+    "down": "Stuck in the past, or finally putting it down",
+    "love": "An old connection coming back",
+    "work": "A return to the earlier path"
+  },
+  "c07": {
+    "name": "Seven of Cups",
+    "image": "A dark figure faces seven cups in the clouds: a head, a veiled shape, a snake, a castle, jewels, a wreath, a dragon",
+    "up": "Too many options and daydreaming; one of them has to be made real",
+    "down": "The choice gets clear, or an illusion breaks",
+    "love": "Several options, or an imagined picture of someone",
+    "work": "Choosing between offers"
+  },
+  "c08": {
+    "name": "Eight of Cups",
+    "image": "A man with a staff turns his back on eight cups and climbs toward the mountains; the moon above him",
+    "up": "Leaving something that is no longer enough and walking on",
+    "down": "Staying out of doubt, or going back to the same thing",
+    "love": "Leaving a relationship that is not working",
+    "work": "Walking away from work with nothing left in it"
+  },
+  "c09": {
+    "name": "Nine of Cups",
+    "image": "A satisfied man sits on a bench, arms folded; nine cups lined up on a curved table behind him",
+    "up": "Contentment and a wish granted; the thing you actually wanted",
+    "down": "Surface satisfaction, or a wish that has not landed yet",
+    "love": "Happiness inside the relationship",
+    "work": "Reaching the money goal"
+  },
+  "c10": {
+    "name": "Ten of Cups",
+    "image": "A couple hold each other, two children dance beside them, ten cups arc across a rainbow overhead",
+    "up": "Family happiness and a calm that holds",
+    "down": "A tense household, or happiness kept up for show",
+    "love": "Family, a long-term commitment",
+    "work": "Balance between work and life"
+  },
+  "c11": {
+    "name": "Page of Cups",
+    "image": "A well-dressed youth holds a cup with a little fish poking its head out; a choppy sea behind",
+    "up": "News or a fresh feeling arriving; a curious heart",
+    "down": "Childish feelings, or news that never came",
+    "love": "A message from someone, a gentle start",
+    "work": "An idea that comes from the heart"
+  },
+  "c12": {
+    "name": "Knight of Cups",
+    "image": "A calm rider in a winged helmet holds a cup out in front; his white horse walks toward a stream",
+    "up": "An offer or a move made on feeling; someone is coming closer",
+    "down": "An empty promise, or feeling put on for show",
+    "love": "A suitor, a romantic invitation",
+    "work": "An offer that looks appealing"
+  },
+  "c13": {
+    "name": "Queen of Cups",
+    "image": "A queen on a throne at the water's edge studies a closed, ornate cup; the throne's foot stands in the water",
+    "up": "Deep empathy and reading people without words",
+    "down": "Drowning in feeling, or going cold",
+    "love": "Someone warm and intuitive in the story",
+    "work": "Care work, reading the room"
+  },
+  "c14": {
+    "name": "King of Cups",
+    "image": "A king on a throne afloat on a rough sea holds a cup and stays calm; a fish leaps, a ship sails by",
+    "up": "Steady in the middle of heavy feeling; someone who holds themselves together",
+    "down": "Feelings pushed down, or emotional manipulation",
+    "love": "Someone mature and steady",
+    "work": "Leading with good judgment"
+  },
+  "s01": {
+    "name": "Ace of Swords",
+    "image": "A hand from a cloud lifts a sword point up; a crown rests on the tip with olive and palm branches",
+    "up": "A truth coming into the open; the clean, decisive call",
+    "down": "Fog, or a truth that was never put to use",
+    "love": "The blunt conversation that clears everything up",
+    "work": "A clear decision, the idea that wins"
+  },
+  "s02": {
+    "name": "Two of Swords",
+    "image": "A blindfolded woman holds two crossed swords at her chest; behind her the sea, rocks and a crescent moon",
+    "up": "A stalemate; you are keeping one side of it out of sight",
+    "down": "The blindfold comes off and the truth shows",
+    "love": "A decision left hanging in the relationship",
+    "work": "Putting the choice off"
+  },
+  "s03": {
+    "name": "Three of Swords",
+    "image": "A red heart pierced by three swords; behind it a dark cloud and falling rain",
+    "up": "Plain heartbreak; a truth that hurts but has been said out loud",
+    "down": "Healing starting, or pain that will not be put down",
+    "love": "Betrayal, separation, a bitter word",
+    "work": "Bad news at work"
+  },
+  "s04": {
+    "name": "Four of Swords",
+    "image": "A stone knight lies on a tomb, hands in prayer; three swords hang above him and one lies beneath",
+    "up": "Enforced rest; you have to stop long enough to get your strength back",
+    "down": "Back into the field, or restlessness during the break",
+    "love": "A short distance taken to cool down",
+    "work": "Leave, a pause that is needed"
+  },
+  "s05": {
+    "name": "Five of Swords",
+    "image": "A smirking man holds three swords and watches two figures walk off; two more swords left on the ground",
+    "up": "A win that cost the relationship; a hollow victory",
+    "down": "Making up, or the grudge that stays",
+    "love": "A fight both sides lost",
+    "work": "Competition that is not worth the price"
+  },
+  "s06": {
+    "name": "Six of Swords",
+    "image": "A ferryman poles a boat carrying a woman and a child; six swords stand in the bow, calmer water ahead",
+    "up": "Crossing out of a hard stretch toward quieter water",
+    "down": "Held back by the past, or a trip that got delayed",
+    "love": "Moving away from a heavy atmosphere",
+    "work": "A move, a change of setting"
+  },
+  "s07": {
+    "name": "Seven of Swords",
+    "image": "A man tiptoes off with five swords and leaves two stuck in the ground; tents and people behind him",
+    "up": "Secrecy or cleverness; someone is not telling the whole story",
+    "down": "The secret comes out, or a confession",
+    "love": "A lie, something kept hidden in the relationship",
+    "work": "Going behind backs, a private plan"
+  },
+  "s08": {
+    "name": "Eight of Swords",
+    "image": "A bound, blindfolded woman stands among eight planted swords; her feet are free, the ground is muddy",
+    "up": "The feeling of being trapped, mostly built by the mind; the way out is open",
+    "down": "Getting free, or settling into the victim role",
+    "love": "Feeling shut in by the relationship",
+    "work": "The sense of a career dead end"
+  },
+  "s09": {
+    "name": "Nine of Swords",
+    "image": "Someone sits up in bed at night, head in hands; nine swords lined up on the wall behind",
+    "up": "Anxiety and sleepless nights; fear of what has not happened yet",
+    "down": "Coming out of the nightmare, or sinking further into it",
+    "love": "Lying awake worrying about someone",
+    "work": "Heavy stress at work"
+  },
+  "s10": {
+    "name": "Ten of Swords",
+    "image": "A man lies face down with ten swords in his back; the sky is black but the horizon is lightening",
+    "up": "Rock bottom; the worst part is over and it does not go lower",
+    "down": "Getting up slowly, or clinging to the victim role",
+    "love": "A bitter ending, but a final one",
+    "work": "One path has failed"
+  },
+  "s11": {
+    "name": "Page of Swords",
+    "image": "A youth on a hill grips a raised sword and glances around; the wind drives the clouds",
+    "up": "Curiosity and carrying news; eyes and ears everywhere",
+    "down": "Rumor, a word said without thinking",
+    "love": "A message that changes everything",
+    "work": "Work news, something new to learn"
+  },
+  "s12": {
+    "name": "Knight of Swords",
+    "image": "A rider charges at full gallop, sword raised; the horse and his cloak stretched out by the wind",
+    "up": "A direct charge with no build-up; speed over everything else",
+    "down": "Haste that wrecks things, or aggression",
+    "love": "Someone who arrives fast and leaves fast",
+    "work": "A quick, risky decision"
+  },
+  "s13": {
+    "name": "Queen of Swords",
+    "image": "A queen on a throne, sword point up in one hand, the other reaching forward; sharp clouds, a bird above",
+    "up": "Bluntness with no padding; someone sharpened by hard experience",
+    "down": "Too cold and bitter, or cutting criticism",
+    "love": "Someone direct and independent in the story",
+    "work": "Precise judgment, no tiptoeing"
+  },
+  "s14": {
+    "name": "King of Swords",
+    "image": "A man on a stone throne holds a slightly tilted sword; his gaze is straight ahead, clouds gathering",
+    "up": "Logic and mental authority; a ruling made with the head",
+    "down": "The power of words misused, or rigidity",
+    "love": "Someone rational and a little cold",
+    "work": "A legal decision, strict management"
+  },
+  "p01": {
+    "name": "Ace of Pentacles",
+    "image": "A hand from a cloud holds a large coin; below it a garden with a flowered arch and a path to the mountains",
+    "up": "A real money or job opening; something solid is starting",
+    "down": "An opening missed, or a start that got pushed back",
+    "love": "A relationship with a solid base",
+    "work": "A job offer, new income"
+  },
+  "p02": {
+    "name": "Two of Pentacles",
+    "image": "A youth dances, spinning two coins in a ribbon shaped like an infinity sign; two ships ride high waves behind",
+    "up": "Juggling two things; for now both can be held",
+    "down": "Losing the balance, too much at once",
+    "love": "Splitting time between the relationship and the rest of life",
+    "work": "Several jobs at once"
+  },
+  "p03": {
+    "name": "Three of Pentacles",
+    "image": "A sculptor stands on a bench at work in an unfinished church; two people beside him hold the plans",
+    "up": "Team work and skill that gets noticed; building something that lasts",
+    "down": "Work out of step, or skill that goes unseen",
+    "love": "Building something together",
+    "work": "Collaboration, a shared project"
+  },
+  "p04": {
+    "name": "Four of Pentacles",
+    "image": "A man clutches a coin to his chest, one balanced on his crown and one under each foot; a town behind",
+    "up": "Gripping what you have; there is safety but no movement",
+    "down": "Opening the fist, or a sudden splurge",
+    "love": "Afraid to open up",
+    "work": "Saving, caution with money"
+  },
+  "p05": {
+    "name": "Five of Pentacles",
+    "image": "Two people in rags, one on crutches, cross the snow past a lit church window without looking in",
+    "up": "Lack and the feeling of being left outside; there is help you have not seen",
+    "down": "Things picking up, or staying in the sense of being deprived",
+    "love": "Feeling shut out",
+    "work": "Money trouble, being out of work"
+  },
+  "p06": {
+    "name": "Six of Pentacles",
+    "image": "A merchant holds scales in one hand and with the other drops coins to two kneeling beggars",
+    "up": "Help or generosity arriving; but the two sides are not equal",
+    "down": "Help with strings on it, or an uneven debt",
+    "love": "One side giving more than the other",
+    "work": "A loan, financial backing"
+  },
+  "p07": {
+    "name": "Seven of Pentacles",
+    "image": "A farmer leans on his hoe and pauses to look at a bush loaded with seven coins",
+    "up": "A pause to take stock; it is planted but not ready to pick",
+    "down": "Impatience, or effort that bore nothing",
+    "love": "Weighing whether this relationship is worth what it costs",
+    "work": "Waiting for an investment to pay off"
+  },
+  "p08": {
+    "name": "Eight of Pentacles",
+    "image": "A craftsman on a bench chisels a coin; six finished ones hang on the post beside him and one lies on the ground",
+    "up": "Practice and repetition; the skill is being built",
+    "down": "Soulless, repetitive work, or a sloppy job",
+    "love": "Steady effort to build the relationship",
+    "work": "Study, specialization, careful work"
+  },
+  "p09": {
+    "name": "Nine of Pentacles",
+    "image": "A woman in a vineyard with a hooded falcon on her hand; nine coins among the vines, a manor house far off",
+    "up": "Independence and the harvest of your own work; standing on your own feet",
+    "down": "Financial dependence, or solitude you did not choose",
+    "love": "Someone who is already complete on their own",
+    "work": "Independent income, the fruit of years of work"
+  },
+  "p10": {
+    "name": "Ten of Pentacles",
+    "image": "An old man with two dogs, a young couple and a child under the arch of an old house; ten coins across the scene",
+    "up": "Wealth and family roots; something that stays",
+    "down": "A fight over inheritance, or roots that have loosened",
+    "love": "Family, a long-term commitment",
+    "work": "Financial stability, a family business"
+  },
+  "p11": {
+    "name": "Page of Pentacles",
+    "image": "A youth holds a coin up in both hands, absorbed in it; a green field and trees behind him",
+    "up": "Learning and a fresh plan; a careful first step",
+    "down": "No drive, or a plan that never got carried out",
+    "love": "A slow, careful start",
+    "work": "Work news, the start of learning"
+  },
+  "p12": {
+    "name": "Knight of Pentacles",
+    "image": "A still rider on a heavy black horse holds up a coin; a ploughed field in front of him",
+    "up": "Slow but sure progress; someone who does what they promised",
+    "down": "Slowness that grates, or a standstill",
+    "love": "Someone loyal but not exciting",
+    "work": "Steady, dependable work"
+  },
+  "p13": {
+    "name": "Queen of Pentacles",
+    "image": "A queen on a throne among flowers holds a coin in her lap; a rabbit jumps in the corner of the card",
+    "up": "Practical care and full hands; someone who provides and builds",
+    "down": "Swallowed by daily chores, or neglecting yourself",
+    "love": "Someone warm and committed",
+    "work": "Practical management, handling the money"
+  },
+  "p14": {
+    "name": "King of Pentacles",
+    "image": "A king on his throne, robe embroidered with grapevines, coin in hand and a castle behind; armor under the robe",
+    "up": "Wealth and security already built; someone who has arrived",
+    "down": "Greed, or clinging to possessions",
+    "love": "Someone well off and dependable",
+    "work": "Financial success, an established business"
+  }
+}
