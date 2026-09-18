@@ -658,7 +658,7 @@ export default {
         { t: 'Dinheiro e uma decisão', s: 'Primeiro aparece uma chave ao lado de vários pontinhos; é o sinal de uma abertura no dinheiro ou de uma decisão cuja chave está na sua mão.' },
         { t: 'Família e casa', s: 'Primeiro aparece o desenho de uma casa com uma árvore do lado; é o sinal das raízes e das pessoas que são casa pra você.' },
       ] },
-      { q: 'E você, como está consigo mesmo?', options: [
+      { q: 'E você, como está consigo?', options: [
         { t: 'Firme e seguro', s: 'Do lado assentou uma montanha alta; quer dizer que a sua base está firme e que, venha o vento que vier, você continua de pé.' },
         { t: 'Cansado e meio triste', s: 'Do lado aparece uma nuvem pequena com algumas gotas; quer dizer que o peito está um pouco apertado, mas essa chuva está preparando terra nova.' },
         { t: 'Com esperança e na espera', s: 'Do lado vejo uma asa aberta; quer dizer que o coração está pronto pra voar e no aguardo de uma boa notícia.' },
@@ -712,7 +712,7 @@ export default {
     // quando o saldo realmente dá; caso contrário vai a tela normal.
     pickSizeOnboarding: (balance, cur, size) =>
       `🔮 Pra começar, quero te mostrar minha força com uma leitura de ${cardsN(size)}!\n\n` +
-      `✅ Fica tranquilo: o seu saldo dá pra uma leitura de ${cardsN(size)}!\n\n` +
+      `✅ Tudo certo: o seu saldo dá pra uma leitura de ${cardsN(size)}!\n\n` +
       purseQuote(balance, cur),
     pickSize: (balance, cur) =>
       '🔮 Leitura de quantas cartas?\n\n' +
