@@ -45,6 +45,10 @@ export default {
      * قطعی است. ریسکش با وجودِ locale پرتغالی در همین ریپو واقعی است. */
     { id: 'pt', re: /[ãõç]/u, label: 'نویسه‌ی پرتغالی در متنِ اسپانیایی' },
   ],
+  /* 🕯 الگوی «شرطِ پایانی»، برای سنجه‌ی `closingAnchor` (دورِ ۵ انگلیسی).
+   * برخلافِ پرتغالی این‌جا ابهامی نیست: در اسپانیایی حرفِ شرط «si» است و ضمیرِ
+   * انعکاسی «se»، یعنی دو کلمه‌ی متفاوت. «sí»ِ تأکیدی هم نویسه‌ی دیگری است. */
+  closingCond: { open: /(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])si(?![A-Za-zÀ-ÖØ-öø-ÿ])/gi, sep: /,?\s*entonces\s/i },
   fake: {
     teaser: (n) => `Carta ${n}, es un ejemplo. En ella aparece una escena cualquiera.`,
     headline: 'Sí, probablemente sale bien, pero va a costar tiempo.',

@@ -134,9 +134,32 @@ export function closingAnchor({ llm, cards }) {
   const rest = s.slice(last);
   const sep = rest.match(M.sep);
   const cond = sep ? rest.slice(0, sep.index) : rest;
-  const lc = cond.toLowerCase();
-  const named = cards.map(c => cardName(c.key)).some(n => n && lc.includes(String(n).toLowerCase()));
-  return { cond: true, named };
+  return { cond: true, named: namesACard(cond, cards) };
+}
+
+/* 🃏 «این تکه‌متن نامِ یکی از این کارت‌ها را می‌برد؟»
+ *
+ * 🐛 چرا لازم شد: `closingAnchor` در دورِ ۵ برای **انگلیسی** نوشته شد و نامِ کارت را
+ * فقط **عیناً** تطبیق می‌داد. روی روسی این ساختاراً کم‌شمار می‌کند، چون روسی نام را
+ * صرف می‌کند: «Тройка Кубков» در متن «Тройку Кубков» می‌شود و تطبیقِ عینی ردش
+ * می‌کند. یعنی همان باگی که یک بار برای `anchorScore` ثبت و رفع شده بود، این‌جا
+ * دستِ‌نخورده مانده بود — و جهتش بد است: قاعده‌ی دورِ ۵ را روی روسی **بی‌اثر** نشان
+ * می‌داد در حالی که شاید کار می‌کرد. قبل از خرجِ یک سنت با نمونه‌ی دستی گرفته شد.
+ *
+ * ⚠️ `anchorScore` عمداً دست نخورد: هر عددِ ثبت‌شده‌ی دفترِ آزمایشگاه (از جمله نسبتِ
+ * ۱۸۶٪ فازِ ۳) روی همان خط‌کش نشسته و عوض‌کردنش یعنی باطل‌کردنِ همه‌شان. */
+function namesACard(text, cards) {
+  const t = String(text || '');
+  const names = cards.map(c => cardName(c.key)).filter(Boolean);
+  const lc = t.toLowerCase();
+  if (names.some(n => lc.includes(String(n).toLowerCase()))) return true;
+  // مسیرِ ریشه: **همه‌ی** کلمه‌های معنادارِ نام باید باشند؛ یک کلمه‌ی مشترک
+  // («Кубков») به‌تنهایی لنگر نیست — همان قاعده‌ی `anchorScore`.
+  const sw = allStemsOf(t);
+  const stems = names
+    .map(n => words(n).map(clean1).filter(w => w && !STOP.has(w.toLowerCase())).map(stem))
+    .filter(a => a.length);
+  return stems.some(parts => parts.every(x => sw.has(x)));
 }
 
 export function anchorScore({ llm, cards, ctx }) {

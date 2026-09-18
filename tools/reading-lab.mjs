@@ -203,11 +203,30 @@ const PROMPT_VARIANTS = {
    * کارت‌های همین فال** را ببرد. تغییر داخلِ اسپکِ JSON است، پس بقیه‌ی پرامپت
    * دست‌نخورده می‌ماند. */
   closinganchor: (sys) => {
-    const old = 'The condition has to fit the cards of this very reading and their own question, not be generic advice.';
-    if (!sys.includes(old)) return sys;
-    return sys.replace(old,
-      'The condition has to name one of the cards of this very reading out loud and hook onto their own question, '
-      + 'not be generic advice. A condition with no card name in it is generic advice.');
+    /* 🌍 per زبان، چون هر locale جمله‌ی خودش را دارد. انگلیسی از v3.9x این قاعده را
+     * **در خودِ پرامپت** دارد (دورِ ۵ بردش)، پس ردیفش این‌جا no-op است و عمداً مانده:
+     * حذفش یعنی دورِ تکرارِ انگلیسی بی‌صدا به control تبدیل شود.
+     * متنِ تازه‌ی هر زبان **آینه‌ی دقیقِ** انگلیسی است (نام را بلند ببر + جمله‌ی
+     * تعریفیِ «شرطِ بی‌نامِ کارت یعنی توصیه‌ی عمومی») تا فرضیه بین زبان‌ها یکی بماند. */
+    const PAIRS = [
+      ['The condition has to fit the cards of this very reading and their own question, not be generic advice.',
+       'The condition has to name one of the cards of this very reading out loud and hook onto their own question, '
+       + 'not be generic advice. A condition with no card name in it is generic advice.'],
+      ['شرط باید به کارت‌های همین فال و سؤالِ خودش بخورد، نه یک توصیه‌ی عمومی.',
+       'شرط باید نامِ یکی از کارت‌های همین فال را صریح ببرد و به سؤالِ خودش چفت شود، نه یک '
+       + 'توصیه‌ی عمومی. شرطی که نامِ کارت در آن نباشد، توصیه‌ی عمومی است.'],
+      ['Условие должно подходить картам именно этого расклада и его собственному вопросу, а не быть общим советом.',
+       'Условие должно вслух назвать одну из карт именно этого расклада и цепляться за его собственный вопрос, '
+       + 'а не быть общим советом. Условие без названия карты это и есть общий совет.'],
+      ['A condição tem que caber nas cartas desta leitura e na pergunta dela, não pode ser um conselho genérico.',
+       'A condição tem que dizer em voz alta o nome de uma das cartas desta leitura e se prender à pergunta dela, '
+       + 'não pode ser um conselho genérico. Uma condição sem o nome de uma carta é conselho genérico.'],
+      ['La condición tiene que caber en las cartas de esta lectura y en su pregunta, no puede ser un consejo genérico.',
+       'La condición tiene que decir en voz alta el nombre de una de las cartas de esta lectura y engancharse a su '
+       + 'pregunta, no puede ser un consejo genérico. Una condición sin el nombre de una carta es consejo genérico.'],
+    ];
+    for (const [o, n] of PAIRS) if (sys.includes(o)) return sys.replace(o, n);
+    return sys;   // هیچ ردیفی نخورد: پرامپت عوض شده، گاردِ بالا می‌گیردش
   },
 
   /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
