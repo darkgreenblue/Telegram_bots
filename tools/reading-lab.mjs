@@ -44,6 +44,7 @@ const { repairDefects } = await import('../bots/tarot/repair.js');
 const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose, READING_MODEL, FALLBACK_MODEL, cardName, spreadName,
+  locSpread,
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
 const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
@@ -284,7 +285,7 @@ async function runStep(persona, step, i, state) {
 
   const labels = L.prompts.cardLabels(cards.length);
   /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
-  let system = L.prompts.readerSystemV4(spread, labels);
+  let system = L.prompts.readerSystemV4(locSpread(spread), labels);
   if (VARIANT) {
     const before = system;
     system = PROMPT_VARIANTS[VARIANT](system);
@@ -428,7 +429,7 @@ async function probe(reps) {
       const labels = L.prompts.cardLabels(cards.length);
       let out = null, usage = {};
       try {
-        const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
+        const r = await orChat(L.prompts.readerSystemV4(locSpread(spread), labels), L.prompts.readingContext(ctx),
           { maxTokens: spread.maxTokens, model: MODEL });
         out = r.text; usage = r.usage || {};
       } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
