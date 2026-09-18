@@ -114,18 +114,48 @@ export function decide(files, toolMap = toolMapFromCi()) {
   return { bots: [...bots].sort(), tabir, reason: 'تغییرِ محدود به همین جاب‌ها' };
 }
 
+/* 🎯 «مبنای مقایسه چیست؟» — تصمیمِ **خالص**، جدا از خودِ گیت.
+ *
+ * جدا شد تا چکِ CI بتواند هر رویداد را واقعاً اجرا کند بدونِ اینکه یک مخزنِ گیتِ
+ * ساختگی بسازد؛ وگرنه تنها راهِ سنجشش یک بازنویسیِ آینه‌ای بود (بند ۶ب ریشه).
+ *
+ * 💰 شاخه‌ی `workflow_dispatch` از ۱۴۰۵/۰۶/۲۶ اضافه شد و گران‌ترین شکافِ باقی‌مانده
+ * را بست: اندازه‌گیریِ ۲۱ روزه نشان داد اجرای دستیِ CI ماهی **۳۱۰ جاب** می‌خورد
+ * (۱۰٪ کلِ سهمیه) و دلیلش این بود که `GITHUB_EVENT_BEFORE` روی dispatch خالی است،
+ * پس مبنا `null` می‌شد و fail-open **هر هفت جاب** را می‌زد — حتی وقتی یک فایلِ
+ * تک‌رباتی عوض شده بود. حالا اگر روی یک برنچ dispatch شود (حالتِ رایج: دوباره‌زدنِ
+ * CIِ یک PR که تریگر نشده)، دقیقاً مثل خودِ PR با merge-base سنجیده می‌شود.
+ *
+ * ⚠️ روی خودِ برنچِ پیش‌فرض همچنان `null` برمی‌گردد و این عمدی است: آن‌جا واقعاً
+ * مبنایی وجود ندارد و حدس‌زدنش یعنی ردکردنِ چکی که شاید لازم بوده. fail-open گران
+ * است ولی امن؛ fail-closed ارزان است ولی بی‌صدا چک را می‌خورد. */
+export function baselineOf(env = process.env) {
+  const ev = env.GITHUB_EVENT_NAME || '';
+  if (ev === 'pull_request') {
+    return env.GITHUB_BASE_REF ? { kind: 'merge-base', ref: env.GITHUB_BASE_REF } : null;
+  }
+  if (ev === 'workflow_dispatch') {
+    const def = env.GITHUB_DEFAULT_BRANCH || 'main';
+    const here = env.GITHUB_REF_NAME || '';
+    if (!here || here === def) return null;   // روی برنچِ پیش‌فرض مبنایی نیست
+    return { kind: 'merge-base', ref: def };
+  }
+  const before = env.GITHUB_EVENT_BEFORE || '';
+  if (!before || /^0+$/.test(before)) return null;          // اولین پوش → مبنایی برای مقایسه نیست
+  return { kind: 'range', ref: before };
+}
+
 function changedFiles() {
   const run = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' });
   try {
-    if ((process.env.GITHUB_EVENT_NAME || '') === 'pull_request') {
-      const base = process.env.GITHUB_BASE_REF;
-      run(['fetch', '--no-tags', '--depth=50', 'origin', base]);
+    const base = baselineOf();
+    if (!base) return null;
+    if (base.kind === 'merge-base') {
+      run(['fetch', '--no-tags', '--depth=50', 'origin', base.ref]);
       const mb = run(['merge-base', 'FETCH_HEAD', 'HEAD']).trim();
       return run(['diff', '--name-only', `${mb}..HEAD`]).split('\n').filter(Boolean);
     }
-    const before = process.env.GITHUB_EVENT_BEFORE || '';
-    if (!before || /^0+$/.test(before)) return null;        // اولین پوش → مبنایی برای مقایسه نیست
-    return run(['diff', '--name-only', `${before}..HEAD`]).split('\n').filter(Boolean);
+    return run(['diff', '--name-only', `${base.ref}..HEAD`]).split('\n').filter(Boolean);
   } catch (e) {
     // ⚠️ این حالت **باید دیده شود**. fail-open امن است (هیچ چکی رد نمی‌شود) ولی اگر
     // همیشه بیفتد یعنی صرفه‌جویی بی‌صدا مرده. دقیقاً همین رخ داد: کلونِ shallowِ
