@@ -286,12 +286,16 @@ const TEST_PHASE = false;
 //         `sendMessage`. حالا شکستِ ارسال هر دو مهر را به مقدارِ دقیقِ قبلی
 //         برمی‌گرداند، پس یک شکستِ گذرا دیگر تورِ ترمیمِ بند ۹ب-۳ را برای ۲۴ ساعت
 //         کور نمی‌کند.
+// 3.94.3: 🔒 گاردِ مرکزیِ callback برای تمام مرحله‌های فال و پرداخت. allowlistِ هر
+//         قدم تنها CTAهای همان قدم را عبور می‌دهد؛ callback کهنه‌ی فروشگاه دیگر نمی‌تواند
+//         `await_question` را به receipt تبدیل کند. `pay_back` در خریدِ نیمه‌کاره هم
+//         خروجِ خاموش نیست و فقط `pay_exit` (انصرافِ صریح) فلو را می‌بندد.
 // 💰 v3.94.0: آزمایشِ نردبانِ قیمتِ تازه‌ی `price_ladder_p3` — بازوی `bulk` کنارِ
 // control/floor/cheap نشست. فرضیه‌ی مالک: کاربر با اعدادِ **بزرگ‌ترِ** الماس در
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.95.0';
+const PRODUCT_VERSION = '3.95.1';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2782,6 +2786,120 @@ async function blockDuringPendingReading(ctx) {
   return await offerPendingReading(ctx, ctx.from.id);
 }
 
+/* ═══════════ 🔒 گاردِ مرکزیِ تغییرِ فلو ═══════════
+ *
+ * تا این نسخه، قراردادِ «فلوی باز را بی‌صدا عوض نکن» در چندین هندلر تکرار شده بود.
+ * بیشترِ ورودی‌های معمول درست بودند، اما یک callback کهنه‌ی `pkg:` از آن فهرست جا ماند:
+ * کاربرِ `await_question` را به `pay_receipt` برد و سؤالش رسید خوانده شد. این دقیقاً
+ * ضعفِ ساختاریِ گاردِ پراکنده است؛ مسیرِ بعدی هم می‌توانست از قلم بیفتد.
+ *
+ * این middleware پیش از **تمام** actionها می‌نشیند. پیش‌فرضش «مسدود» است و فقط دکمه‌های
+ * مرحله‌ی فعلی اجازه دارند از آن رد شوند. بنابراین اضافه‌کردنِ هر دکمه‌ی جدید، تا وقتی
+ * آگاهانه به allowlist همان مرحله نرود، نمی‌تواند استیتِ فال یا پرداخت را جایگزین کند.
+ *
+ * نکته‌ی مهمِ محصول:
+ * - `recharge` از paywall یک مسیرِ فرزندِ مجازِ `confirm_pay` است؛ فال را نگه می‌دارد و
+ *   بعد از تأیید پرداخت همان فال را ادامه می‌دهد.
+ * - `pay_back` عمداً مجاز نیست: از صفحه‌ی بسته‌ها خارج و ردیفِ پرداخت را بی‌صدا می‌بست.
+ *   از این پس فقط `pay_exit` (انصرافِ صریح) حقِ خروجِ کامل از پرداخت را دارد.
+ * - در `revealing` حتی انصراف هم مجاز نیست؛ کالا در حال تحویل است و فقط دکمه‌ی قدمِ بعدی
+ *   باید کار کند.
+ */
+const READING_FLOW_STATES = new Set([...READING_INPROGRESS, 'confirm_pay', 'revealing']);
+
+function activePaymentFlow(uid) {
+  const state = getState(uid);
+  if (!PAY_STATES.includes(state)) return null;
+  const pid = Number(getSession(uid)?.paymentId) || 0;
+  const p = pid && stmts.getPayment.get(pid);
+  return (p && p.user_id === uid && p.status === 'pending') ? p : null;
+}
+
+// تنها callbackهایی که ادامه‌ی همان فال‌اند. هر callback ناشناخته، از جمله دکمه‌های
+// آینده، به‌صورت امن گارد می‌خورد تا فقط بعد از تصمیمِ آگاهانه‌ی توسعه‌دهنده باز شود.
+function readingFlowAllowsCallback(state, data) {
+  if (!data) return false;
+  if (state === 'confirm_focus') return /^(focus:\w+|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'await_question') return /^(reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'breathing') return /^(ready_breath|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'shuffling') return /^(shuffle_stop|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'picking') return /^(pick:\d+|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'confirm_pay') {
+    // پرداختِ همین فال (مستقیم یا شارژ کیف) یک شاخه‌ی فرزند است، نه ترکِ فال.
+    return /^(unlock:\d+|payr:\d+|wdisc:\d+|recharge|want_discount|reading:cancel|rcancel:\d+)$/.test(data);
+  }
+  // در حال تحویل: فقط همان step واقعیِ افشا. `reading:cancel` کهنه هم نباید مسیر را بکشد.
+  if (state === 'revealing') return /^(next:\d+:\d+|final:\d+)$/.test(data);
+  return false;
+}
+
+// تنها callbackهایی که درونِ همان پرداخت حرکت می‌کنند. `pay_exit` تنها خروجِ صریح است.
+function paymentFlowAllowsCallback(state, data) {
+  if (!data) return false;
+  if (/^pay_exit:\d+$/.test(data)) return true;
+  if (state === 'pay_amount') {
+    return /^(pkg:[a-z]+|pack_reveal:\d+|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
+  }
+  if (state === 'pay_receipt') {
+    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
+  }
+  if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
+  return false;
+}
+
+function flowIntentFor(ctx) {
+  const data = ctx.callbackQuery?.data || '';
+  const text = ctx.message?.text || '';
+  const key = data || text;
+  if (/^(daily_go|dpick:\d+)$/.test(key) || text === L.buttons.daily || text === L.buttons.dailyOneCard) return { key: INTENT.DAILY };
+  if (/^(lucky_go|lpick:\d+|lucky_stop)$/.test(key) || LUCKY_LABELS.includes(text)) return { key: INTENT.LUCKY };
+  if (/^(reading_go|catalog_go|cat_|opentopic|odepth:|topic:|spread:)/.test(key) || text === L.buttons.reading) return { key: INTENT.READING };
+  if (/^(recharge|wallet_go|pkg:|pack_reveal:|pay_back:)/.test(key) || WALLET_LABELS.includes(text)) return { key: INTENT.WALLET };
+  if (/^invite_?(go|stat|back)?$/.test(key) || INVITE_LABELS.includes(text)) return { key: INTENT.INVITE };
+  const chat = data.match(/^chat:(\d+)/);
+  if (chat) return { key: INTENT.CHAT, arg: Number(chat[1]) };
+  if (/^set:/.test(key) || text === L.buttons.settings) return { key: INTENT.SETTINGS };
+  if (text === L.support?.button || text.startsWith('/support')) return { key: INTENT.SUPPORT };
+  return null;
+}
+
+async function blockDuringActivePayment(ctx, intent, intentArg = 0) {
+  if (!NAV_GUARD_ENABLED) return false;
+  const uid = ctx.from.id;
+  const p = activePaymentFlow(uid);
+  if (!p) return false;
+  if (intent) setIntent(uid, intent, intentArg);
+  // تا وقتی مبلغ انتخاب نشده، «فاکتور» گفتن نادرست است؛ این متنِ جدا جلوی همان ابهام
+  // قبلی را می‌گیرد، ولی برای فاکتورِ صادرشده راهنمای دقیقِ واریز/رسید حفظ می‌شود.
+  const text = p.step === 'receipt' ? L.errors.openInvoice : L.errors.openPaymentFlow;
+  await ctx.reply(text, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.cancel, `pay_exit:${p.id}`)],
+  ])).catch(() => {});
+  return true;
+}
+
+async function blockCrossFlowCallback(ctx) {
+  const uid = ctx.from?.id;
+  const data = ctx.callbackQuery?.data;
+  if (!uid || !data || !NAV_GUARD_ENABLED) return false;
+  const state = getState(uid);
+  const wanted = flowIntentFor(ctx);
+  if (READING_FLOW_STATES.has(state)) {
+    if (readingFlowAllowsCallback(state, data)) return false;
+    await ctx.answerCbQuery().catch(() => {});
+    if (wanted) setIntent(uid, wanted.key, wanted.arg);
+    if (state === 'revealing') return await blockDuringDelivering(ctx);
+    if (state === 'confirm_pay') return await blockDuringPendingReading(ctx);
+    return await blockDuringOpenReading(ctx, wanted?.key, wanted?.arg);
+  }
+  if (PAY_STATES.includes(state)) {
+    if (paymentFlowAllowsCallback(state, data)) return false;
+    await ctx.answerCbQuery().catch(() => {});
+    return await blockDuringActivePayment(ctx, wanted?.key, wanted?.arg);
+  }
+  return false;
+}
+
 // «اونو ادامه می‌دم» → همان پیامِ آخرِ فلو (مطابقِ استیتِ فعلی) دوباره نشان داده می‌شود.
 async function resendCurrentStep(ctx, uid) {
   const state = getState(uid);
@@ -3285,6 +3403,12 @@ const KB_LABELS = new Set([
   '💎 کیف الماس', '💎 الماس فروشی',
   L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
 ].filter(Boolean));
+// فقط دکمه‌های واقعیِ ناوبری/ورود. متنِ آزادِ سؤال، رسید و مبلغ هرگز این‌جا نیست؛
+// بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
+const FLOW_SWITCH_TEXTS = new Set([
+  ...KB_LABELS,
+  L.buttons.settings,
+].filter(Boolean));
 registerJourney(bot, {
   db,
   enabled: JOURNEY_ENABLED,
@@ -3352,6 +3476,39 @@ bot.use(async (ctx, next) => {
     // بعدیِ کاربر که فکر می‌کند بیرون آمده یک الماس خرج می‌کند.
     leaveChat(uid, txt ? 'menu' : 'action');
   } catch (e) { logErr('chat exit:', e.message); }
+  return next();
+});
+
+/* 🔒 دروازه‌ی واحدِ همه‌ی دکمه‌ها، پیش از همه‌ی `bot.action`ها.
+ *
+ * خودِ middleware فقط وقتی دخالت می‌کند که یک فلوی معتبر باز باشد. در بقیه‌ی حالت‌ها
+ * کاملاً transparent است، پس callbackهای قدیمی همان قراردادِ قبلی‌شان را حفظ می‌کنند.
+ * دکمه‌ی ریستِ ادمین هم یک ابزارِ بازیابی است و عمداً راهِ خروجِ ادمین می‌ماند. */
+bot.use(async (ctx, next) => {
+  try {
+    const uid = ctx.from?.id;
+    const data = ctx.callbackQuery?.data;
+    const text = ctx.message?.text;
+    if (!uid) return next();
+    if (isAdmin(uid) && (text === L.buttons.resetTest || text === '🔄 ریست ربات (تست)')) return next();
+    if (data && await blockCrossFlowCallback(ctx)) return;
+    // reply keyboard هم «دکمه» است، ولی متنِ آزادِ مرحله‌های ورودی نباید گارد بخورد.
+    if (!text || !FLOW_SWITCH_TEXTS.has(text)) return next();
+    const state = getState(uid);
+    const wanted = flowIntentFor(ctx);
+    if (READING_FLOW_STATES.has(state)) {
+      if (wanted) setIntent(uid, wanted.key, wanted.arg);
+      if (state === 'revealing') { if (await blockDuringDelivering(ctx)) return; }
+      else if (state === 'confirm_pay') { if (await blockDuringPendingReading(ctx)) return; }
+      else if (await blockDuringOpenReading(ctx, wanted?.key, wanted?.arg)) return;
+    }
+    if (PAY_STATES.includes(state) && await blockDuringActivePayment(ctx, wanted?.key, wanted?.arg)) return;
+  } catch (e) {
+    // fail-openِ محدود: اگر خودِ گارد خطا کرد، دکمه‌ی کاربر نباید در سکوت بمیرد.
+    // خطا لاگ می‌شود تا همان روز قابل رصد باشد؛ منطقِ مالیِ پایین‌دست همچنان گاردهای
+    // اتمیکِ خودش را دارد.
+    logErr('central flow guard:', e.message);
+  }
   return next();
 });
 

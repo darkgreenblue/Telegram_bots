@@ -535,6 +535,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-pay-exit.mjs
 
+      # 🔒 گارد مرکزی: هر callback بیرون از allowlistِ قدمِ فعلی باید پیش از هندلر
+      # متوقف شود. این همان تکرارِ دقیقِ تیکتِ `pkg:` وسطِ نوشتن سؤال است.
+      - name: Central flow guard check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-central-flow-guard.mjs
+
       # منوی فال + کارت شانس: قرارداد منو (پین اول، «همه فال‌ها» آخر)، ماتریسِ
       # موضوع×اندازه، و مهم‌تر از همه **ریاضیِ جایزه‌ی کارت شانس** که باید امیدِ
       # ریاضیِ دقیقاً ۱ سکه در روز بدهد — تنها چیزی که هزینه‌ی آن فیچر را مهار می‌کند.
