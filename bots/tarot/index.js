@@ -18,6 +18,7 @@
 import './env-boot.js';
 import {
   L, Lfor, withLang, currentLang, hasLangCtx, LANGS, DEFAULT_LANG, MULTI_LANG, isLang, normLang, allLabels,
+  liveL,
 } from './locale-ctx.js';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash, randomInt } from 'crypto';
@@ -300,7 +301,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.94.2';
+const PRODUCT_VERSION = '3.95.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1067,7 +1068,11 @@ const CANCELED_RECOVERY_SEC = 12 * 3600;
  * انقضا وضعیت را به همان `canceled`ِ همیشگی می‌برد، نه یک وضعیتِ تازه: یعنی رسیدی که
  * دیر برسد از همان مسیرِ اثبات‌شده‌ی `CANCELED_RECOVERY_SEC` (بالا) خودکار احیا می‌شود —
  * بدونِ این، رسیدِ دیرِ کاربر بعد از انقضا بی‌صدا دور ریخته می‌شد (بند ۹ب/۹ ریشه). */
-const INVOICE_REMINDER_SEC = 3600;      // ۱ ساعت
+/* ⏱ یادآوری **۱۵ دقیقه** بعد از صدور (v3.95.0، خواسته‌ی صریحِ مالک؛ بود ۱ ساعت).
+ * منطقش با پرسونای پرداختِ ثبت‌شده در CLAUDE.md همین ربات می‌خواند: **۶۲٪**
+ * پرداخت‌کننده‌ها زیرِ یک ساعت از عضویت می‌پردازند، یعنی پنجره‌ی تصمیم ساعت است نه روز؛
+ * یادآوریِ یک‌ساعته اغلب بعد از بسته‌شدنِ همان پنجره می‌رسید. */
+const INVOICE_REMINDER_SEC = 900;       // ۱۵ دقیقه
 const INVOICE_EXPIRE_SEC   = 24 * 3600; // ۲۴ ساعت
 // ⭐ سقفِ فاکتورِ استارزی (v3.76.0، خواسته‌ی صریحِ مالک): «چون نرخِ ارز متغیر است»،
 // ۳۰ دقیقه. مستقل از چرخه‌ی بالا — این‌جا هیچ‌وقت canceled نمی‌شود، فقط شکلِ نمایش عوض می‌شود.
@@ -3609,8 +3614,13 @@ bot.action('gate:check', async (ctx) => {
 if (gateOn()) {
   // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
   const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
+  // ⚠️ اتحادِ همه‌ی زبان‌ها، نه زبانِ پیش‌فرض: این Set لحظه‌ی **ثبت** ساخته می‌شود
+  // (بیرونِ هر زمینه‌ای) ولی لحظه‌ی **درخواست** با متنِ کاربر مقایسه می‌شود. با برچسبِ
+  // تک‌زبانه، کاربرِ زبانِ دیگر که وسطِ گیت دکمه‌ی پشتیبانی/ریستِ خودش را می‌زند بی‌صدا
+  // پشتِ گیت می‌ماند — همان تله‌ی `bot.hears` در locale-ctx.js.
   const GATE_FREE_TEXT = new Set(
-    [L.support?.button, L.buttons.resetTest, '🔄 ریست ربات (تست)'].filter(Boolean));
+    [...allLabels((l) => l.support?.button), ...allLabels((l) => l.buttons.resetTest),
+      '🔄 ریست ربات (تست)'].filter(Boolean));
   // ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
 // می‌شود تا `logAct` اقدامِ کاربر را عادی ثبت کرده باشد، و هرگز چیزی را بلاک نمی‌کند.
 bot.use(async (ctx, next) => {
@@ -3852,7 +3862,7 @@ async function dailyCardV2(ctx, uid, user, today) {
     // نسخه‌ی قبلی این‌جا یک صفحه‌ی بدونِ هیچ قدمِ بعدی می‌ساخت (بند ۹ب/۱). حالا همان
     // پیشنهادهایی می‌آید که شاخه‌ی خواهرش («امروز گرفتی») از قبل داشت.
     track(db, uid, 'daily_ganjineh_empty', { month: user.birth_month });
-    return ctx.reply(L.daily.ganjinehEmpty(monthLabel(user.birth_month)),
+    return ctx.reply(L.daily.ganjinehEmpty(),
       Markup.inlineKeyboard(recoRows(uid, null)));
   }
   // seed قطعی per کاربر per روز: بعد از این لحظه ترتیبِ حوضچه ثابت است، حتی بعد از
@@ -3901,7 +3911,9 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   // اگر ارسال شکست بخورد، استیت به `daily_pick` برمی‌گردد تا کاربر بتواند دوباره بزند.
   await typing(ctx, PACE_M, 'upload_photo');
   try {
-    await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthLabel(month)));
+    // ماهِ تولد عمداً به متن نمی‌رود (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۲۴): همچنان کلیدِ انتخابِ
+    // متنِ گنجینه است (`ganjinehText(month, …)` بالا)، ولی نامش چاپ نمی‌شود.
+    await sendCardPhoto(ctx, key, L.daily.captionV2(info));
   } catch (e) {
     logErr('dailyCardV2 photo:', e.message);
     setState(uid, 'daily_pick');   // روز نسوخت؛ همان گرید هنوز معتبر است
@@ -4244,6 +4256,19 @@ bot.action('lucky_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}
 // معنیِ همین را بدهد (بند ۲ج/۶).
 bot.action('reading_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showCatalog(ctx); });
 bot.action('wallet_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showWallet(ctx); });
+
+// دکمه‌ی «افزایش ذخایر» زیرِ پیامِ کم‌موجودی. همان صفحه‌ی `wallet_go` را می‌آورد، با یک
+// تفاوت: پیامی که دکمه رویش بود **حذف** می‌شود (خواسته‌ی مالک: هیچ پیامِ بی‌مصرفی روی
+// صفحه نماند). `wallet_go` عمداً بازاستفاده نشد، چون آن یکی زیرِ پیامِ اطلاع‌رسانیِ آپدیت
+// هم هست و حذفِ آن پیام غلط بود — بند ۹ب/۶ ریشه: معنیِ دوم یعنی اکشنِ دوم، نه بازاستفاده.
+// فالبک همان الگوی همیشگی است: تلگرام حذفِ پیامِ قدیمی‌تر از ۴۸ ساعت را رد می‌کند، پس
+// دستِ‌کم دکمه‌ها برداشته می‌شوند تا دکمه‌ی مرده روی صفحه نماند.
+bot.action('wallet_fresh', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.deleteMessage(); }
+  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  return showWallet(ctx);
+});
 
 bot.action('lucky_stop', async (ctx) => {
   const uid = ctx.from.id;
@@ -4853,6 +4878,38 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   await ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
 });
 
+/** دکمه‌های صفحه‌ی «ذخایرت کافی نیست» سرِ انتخابِ اندازه (خواسته‌ی مالک ۱۴۰۵/۰۶/۲۴).
+ *
+ *  به‌جای سه دکمه‌ی عمومیِ ذخایر، اول **فال‌های ارزان‌ترِ همین موضوع که واقعاً می‌تواند
+ *  بخرد** (صعودی)، و در آخر همیشه یک راهِ افزایشِ ذخایر. چرا: کاربری که ده‌کارتی زد و
+ *  پولش نرسید، یک تپ تا یک فالِ **کامل و پرداخت‌شدنی** فاصله دارد؛ فرستادنش به فروشگاه
+ *  تنها راهِ ادامه نیست و گران‌ترین راه است.
+ *
+ *  ⚠️ فیلترِ `price <= balance` خودش اندازه‌های گران‌تر را هم بیرون می‌گذارد (اگر این یکی
+ *  را نمی‌تواند بخرد، بزرگ‌ترش را هم نمی‌تواند)، و شرطِ `size !== spread.size` تضمین
+ *  می‌کند همان فالی که تازه زد بینِ گزینه‌ها نباشد.
+ *
+ *  چرا این‌جا و نه داخلِ `needBalanceRows`: آن یکی پنج صداکننده دارد و هیچ‌کدام «اندازه‌ی
+ *  انتخاب‌شده» را نمی‌شناسند؛ عمومی‌کردنش یعنی صفحه‌های دیگر هم دکمه‌ای بگیرند که کاربر
+ *  را به فالِ دیگری می‌برد. */
+const needBalanceAltRows = (uid, spread) => {
+  const cur = curOf(uid);
+  const balance = getBalance(uid);
+  const rows = [];
+  // موضوع فقط برای چیدمان‌های نسل چهارم تعریف است؛ چیدمانِ بازنشسته یا `open` خواهرِ
+  // ارزان‌تر ندارد و مستقیم به دکمه‌ی افزایشِ ذخایر می‌رسد.
+  if (spread?.topic) {
+    for (const size of [...SIZES_V3].sort((a, b) => a - b)) {
+      if (size === spread.size) continue;
+      const sp = SPREAD_BY_ID[spreadIdOf(spread.topic, size)];
+      if (!sp || sp.price > balance) continue;
+      rows.push([Markup.button.callback(L.buttons.pickSmallerSpread(sp.size, sp.price, cur), `spread:${sp.id}`)]);
+    }
+  }
+  rows.push([Markup.button.callback(L.buttons.topUpCoins(cur), 'wallet_fresh')]);
+  return rows;
+};
+
 /** کسرِ هزینه‌ی یک چیدمان در لحظه‌ی انتخابِ اندازه.
  *  خروجی true = پول کم شد و می‌شود ادامه داد؛ false = کم‌موجودی (پیامش همین‌جا رفت).
  *
@@ -4868,16 +4925,17 @@ async function chargeForSpread(ctx, uid, spread, focusKey) {
   const readingId = payForSpread(uid, spread, focusKey);
   if (!readingId) {
     // پول کم بود: استیت را برگردان (وگرنه کاربر در await_question گیر می‌کند) و پیامِ
-    // کم‌موجودی را با همان سه دکمه‌ی ذخایر نشان بده.
+    // کم‌موجودی را با دکمه‌های **همین موضوع** نشان بده (خواسته‌ی مالک ۱۴۰۵/۰۶/۲۴):
+    // فال‌های ارزان‌ترِ قابلِ خرید، و در آخر راهِ افزایشِ ذخایر.
     setState(uid, 'choose_spread');
     track(db, uid, EVENTS.PAYWALL_SHOWN, { spread: spread.id, price: spread.price, can_afford: false });
     const text = needBalanceText(uid, { type: spread.id, price: spread.price });
-    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceRows(uid, null)) };
-    let shown = false;
-    try { await ctx.editMessageText(text, extra); shown = true; }
-    catch { shown = !!(await ctx.reply(text, extra).catch(() => null)); }
-    if (shown) exposeMoneyCtaStyle(uid);
-    else releaseMoneyCtaStyle(uid);
+    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceAltRows(uid, spread)) };
+    try { await ctx.editMessageText(text, extra); }
+    catch { await ctx.reply(text, extra).catch(() => null); }
+    // ⚠️ عمداً نه expose و نه release: این صفحه دیگر `rechargeBtn` را رندر نمی‌کند، پس
+    // نه رزروی گرفته شده که آزاد شود و نه treatmentِ آزمایشِ رنگ دیده شده که exposure
+    // بگیرد (بند ۲الف ریشه: exposure یعنی «کاربر treatment را دید»).
     return false;
   }
   patchSession(uid, { readingId });
@@ -7329,6 +7387,56 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, payId);
 });
 
+/* ✅ «تکمیل پرداخت» زیرِ یادآوریِ فاکتورِ باز (v3.95.0، خواسته‌ی صریحِ مالک).
+ *
+ * **همان فاکتورِ قبلی** دوباره نشان داده می‌شود، نه یک فاکتورِ تازه: هیچ ردیفی ساخته
+ * نمی‌شود، هیچ مبلغی دوباره از کاتالوگ خوانده نمی‌شود، و شماره‌ی پرداخت همان می‌ماند.
+ * پس اگر کاربر قبلاً واریز کرده بود، رسیدش روی همان ردیف می‌نشیند.
+ *
+ * سه کارِ ضروری، به همین ترتیب:
+ *   ۱) پیامِ یادآوری **حذف** می‌شود — کارش تمام شده و ماندنش فقط یک دکمه‌ی کهنه‌ی
+ *      «انصراف» را روی صفحه نگه می‌دارد (خواسته‌ی مالک: پیامِ بی‌مصرف نماند).
+ *   ۲) پیامِ **فاکتورِ قبلی** هم حذف می‌شود، وگرنه دو فاکتورِ زنده در چت می‌ماند و
+ *      `dropInvoiceArtifacts` فقط تازه‌ترین را می‌بندد — یعنی همان سیاه‌چاله‌ی v3.87.0
+ *      از درِ دیگر. مهر بعد از ارسالِ فاکتورِ تازه با شناسه‌ی همان به‌روز می‌شود.
+ *   ۳) استیت و `session.paymentId` برمی‌گردند، تا عکسِ رسیدِ بعدی صاحب داشته باشد.
+ *
+ * ⚠️ فاکتورِ دیگر-باز-نبوده (منقضی، لغوشده، یا رسیدش رسیده) **پیامِ صادقانه** می‌گیرد
+ * نه سکوت (بند ۹ب): دکمه‌ی یادآوری ماه‌ها در چت زنده می‌ماند (بند ۲ج/۶). */
+bot.action(/^pay_resume:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (starsRail) return;   // این ریل رسید ندارد؛ چرخه‌ی یادآوری هم اصلاً به آن نمی‌رسد
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  // پیامِ یادآوری در هر دو مسیر می‌رود: چه فاکتور زنده باشد چه نه، کارش تمام است.
+  try { await ctx.deleteMessage(); }
+  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  if (!p || p.user_id !== uid || p.status !== 'pending' || p.step !== 'receipt') {
+    return ctx.reply(L.wallet.invoiceGone(curOf(uid))).catch(() => {});
+  }
+  // پیامِ فاکتورِ قبلی هم برداشته می‌شود تا دقیقاً **یک** فاکتورِ زنده در چت بماند.
+  if (p.invoice_msg_id) {
+    try { await ctx.telegram.deleteMessage(uid, p.invoice_msg_id); }
+    catch {
+      try { await ctx.telegram.editMessageReplyMarkup(uid, p.invoice_msg_id, undefined, undefined); } catch {}
+    }
+  }
+  patchSession(uid, { paymentId: pid });
+  setState(uid, 'pay_receipt');
+  const invMsg = await ctx.reply(
+    L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, pid), curOf(uid)), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        cardCopyRow(),
+        ...starsToggleRow(uid, pid, !!packOf(p)),
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+      ]).reply_markup,
+    }).catch((e) => { logErr('pay_resume invoice pay#' + pid, e.message); return null; });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, pid);
+  track(db, uid, 'invoice_resumed', { payment_id: pid });
+});
+
 /* ⭐ سوییچ به پرداختِ استارز (v3.76.0، فقط-ادمین). فقط رویِ فاکتورِ **بسته‌ای** کار
  * می‌کند (بند بالای `starsToggleRow`). دو کارِ جدا: (۱) پیامِ فاکتورِ تومانی را ادیت
  * می‌کند به متنِ استارزی + دکمه‌ی «برگشت به کارت»، (۲) یک فاکتورِ **نیتیوِ** تلگرام
@@ -8098,7 +8206,9 @@ if (starsRail || FEATURE_STARS_TOGGLE) {
       await afterApproval(p.user_id);
     },
     log, logErr,
-    texts: { staleInvoice: L.wallet.starsStaleInvoice, tempError: L.wallet.starsTempError },
+    // آبجکتِ زنده، نه مقدار: `starspay` این دو را لحظه‌ی pre-checkout می‌خواند، پس
+    // مقدارِ لحظه‌ی ثبت یعنی زبانِ پیش‌فرض برای همه‌ی کاربران (بند «آبجکتِ زنده»).
+    texts: liveL((l) => ({ staleInvoice: l.wallet.starsStaleInvoice, tempError: l.wallet.starsTempError })),
   });
 }
 
@@ -8166,16 +8276,29 @@ async function resendReceiptToAdmins(p) {
 /* ⏱ چرخه‌ی عمرِ فاکتورِ کارت‌به‌کارت (v3.74.0، خواسته‌ی صریحِ مالک). فقط ریلِ کارت
  * (`!starsRail` — بالای این فایل) دارد؛ توضیحِ کامل کنارِ `INVOICE_REMINDER_SEC`. */
 
-// ۱ ساعت بعد از صدور: یک پیامِ **تازه** با دکمه‌ی همیشگیِ انصراف (بدونِ کالبکِ جدید).
+/* ۱۵ دقیقه بعد از صدور: یک پیامِ **تازه** با دو دکمه — «تکمیل پرداخت» اول، «انصراف» دوم.
+ *
+ * 🎯 هدفِ این پیام درآمد است، نه گرفتنِ تکلیف (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۴). تا
+ * v3.94.x تنها دکمه‌اش «انصراف» بود، یعنی تنها اقدامِ ممکنِ کاربر **ترکِ خرید**؛ و متن
+ * هم نمی‌گفت فاکتور بابتِ چه چیزی و با چه مبلغی بوده. حالا متن همان سه چیزی را می‌گوید
+ * که تصمیم را می‌سازد (چه می‌خری، چقدر، بعدش چه می‌شود) و اقدامِ اصلی اولِ ردیف است.
+ *
+ * ⚠️ مبلغ و بسته از **خودِ ردیف** خوانده می‌شوند نه از کاتالوگ (بند ۲ج/۵ ریشه): فاکتورِ
+ * صادرشده با قیمتِ همان لحظه معتبر می‌ماند، حتی اگر کاتالوگ بعدش عوض شده باشد. */
 async function sendInvoiceReminder(p) {
   try {
     stmts.setInvoiceReminded.run(p.id);   // قبل از ارسال: شکستِ ارسال هرگز نباید دوباره‌کاری بسازد
-    await bot.telegram.sendMessage(p.user_id, L.wallet.invoiceReminder, {
-      reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)]]).reply_markup,
+    const text = L.wallet.invoiceReminder(p.amount, curOf(p.user_id), invoicePurchaseFor(p.user_id, p.id));
+    await bot.telegram.sendMessage(p.user_id, text, {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.completePayment, `pay_resume:${p.id}`)],
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
+      ]).reply_markup,
     });
     // پیامِ مالی هرگز نباید از تایم‌لاین غایب باشد (بند ۲الف ریشه) — این از bot.telegram
     // می‌رود، میدل‌ورِ جرنی رپش نمی‌کند.
-    logPush(db, p.user_id, L.wallet.invoiceReminder, { label: 'یادآوریِ فاکتورِ باز' });
+    logPush(db, p.user_id, text, { label: 'یادآوریِ فاکتورِ باز' });
     track(db, p.user_id, 'invoice_reminded', { payment_id: p.id });
   } catch (e) { logErr('invoice reminder pay#' + p.id, e.message); }
 }
@@ -8769,7 +8892,10 @@ bot.command('reset', doReset);
 // دوباره یادآوری می‌شود تا سرگردان نماند (قرارداد ۹ب).
 registerSupport(bot, {
   botCode: SUPPORT_BOT_CODE,
-  texts: L.support,
+  // آبجکتِ زنده: کلیدهایش (body/draft/openBtn/button) لحظه‌ی درخواست خوانده می‌شوند.
+  texts: liveL((l) => l.support),
+  // و برچسبِ `bot.hears` داخلِ registerSupport لحظه‌ی ثبت لازم است، پس اتحاد.
+  hearsLabels: allLabels((l) => l.support?.button),
   // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف
   // بده، انصراف داد و پیامِ عمومیِ «همیشه اینجام» گرفت به‌جای پشتیبانی. حالا هر دو گارد
   // نیتِ SUPPORT را ثبت می‌کنند و `replyCanceled` بعد از انصراف همین صفحه را برمی‌گرداند.

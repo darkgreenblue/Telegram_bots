@@ -462,10 +462,18 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   // زده شود، shared به متنِ پیش‌فرضِ خودش برمی‌گردد و برچسبِ کیبورد با هندلر واگرا
   // می‌شود، بی‌آنکه چک بفهمد. پس اول خودِ سیم‌کشی ادعا می‌شود.
   const SUP = readFileSync(new URL('../shared/support.js', import.meta.url), 'utf8');
-  ok(/bot\.hears\(texts\.button, handler\)/.test(SUP), 'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند');
-  const wired = /registerSupport\(bot,\s*\{[\s\S]{0,400}?texts:\s*L\.support/.test(CODE0);
-  ok(wired, 'tarot متنِ خودش را به registerSupport می‌دهد (وگرنه برچسبِ کیبورد و هندلر واگرا می‌شوند)');
-  if (wired) handled.add(L.support.button);
+  ok(/bot\.hears\(labels\.length \? labels : texts\.button, handler\)/.test(SUP),
+     'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند (و بدونِ اتحاد، به متنِ خودش برمی‌گردد)');
+  // ⚠️ از رباتِ چندزبانه به بعد **دو** چیز لازم است، نه یکی: متنِ زنده (که لحظه‌ی
+  // درخواست به زبانِ کاربر resolve می‌شود) و اتحادِ برچسب‌ها برای `hears` (که لحظه‌ی
+  // ثبت لازم است). نبودِ دومی یعنی تپِ کاربرِ زبانِ دیگر به هندلرِ متنِ آزاد می‌ریزد —
+  // همان واگراییِ «برچسبِ کیبورد در برابر هندلر» که این بلوک برای آن نوشته شد.
+  const supBlock = CODE0.match(/registerSupport\(bot,\s*\{[\s\S]{0,600}?\n\}\)/)?.[0] || '';
+  const liveTexts = /texts:\s*liveL\(/.test(supBlock);
+  const unionHears = /hearsLabels:\s*allLabels\(/.test(supBlock);
+  ok(liveTexts, 'tarot متنِ زنده‌ی خودش را به registerSupport می‌دهد (وگرنه برچسبِ کیبورد و هندلر واگرا می‌شوند)');
+  ok(unionHears, 'و برچسبِ hears اتحادِ همه‌ی زبان‌هاست (وگرنه کاربرِ زبانِ دیگر دکمه‌ی مرده دارد)');
+  if (liveTexts && unionHears) handled.add(L.support.button);
 
   const dead = [...rendered].filter(l => !handled.has(l));
   ok(dead.length === 0, `هیچ دکمه‌ی مرده‌ای در کیبورد نیست${dead.length ? ' — مرده: ' + dead.join(' | ') : ''}`);
@@ -589,7 +597,7 @@ console.log('\n▶ فلوی «فال تک کارت» — سه باگی که تس
 
   // ۱) گنجینه‌ی خالی دیگر صفحه‌ی بی‌دکمه نیست. امروز فقط ۲ ماه از ۱۲ گنجینه دارند،
   //    پس این پرتکرارترین پایانِ مسیرِ رایگان است.
-  ok(/ganjinehEmpty\(monthLabel\(user\.birth_month\)\),\s*\n?\s*Markup\.inlineKeyboard\(recoRows\(uid, null\)\)\)/.test(v2),
+  ok(/ganjinehEmpty\(\),\s*\n?\s*Markup\.inlineKeyboard\(recoRows\(uid, null\)\)\)/.test(v2),
     'شاخه‌ی «گنجینه خالی» همان پیشنهادهای شاخه‌ی خواهرش را دارد (بن‌بست نیست)');
   ok(!/ganjinehEmpty[\s\S]{0,120}ensureMenu/.test(v2),
     'دیگر به ensureMenu تکیه نمی‌کند (در دنیای الماس no-op است، یعنی هیچ‌چیز نمی‌فرستاد)');
@@ -1353,6 +1361,68 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     'صفحه‌ی اندازه هم HTML می‌رود');
   // نامِ کاربر داخلِ HTML باید esc شود.
   ok(/name: esc\(dispName\(getUser\(uid\)\)\)/.test(SRC), 'نامِ کاربر قبل از رفتن به HTML امن می‌شود');
+
+  /* 💎 صفحه‌ی «ذخایرت کافی نیست» سرِ انتخابِ اندازه (v3.95.0، خواسته‌ی صریحِ مالک).
+     به‌جای سه دکمه‌ی عمومیِ ذخایر، اول فال‌های ارزان‌ترِ **قابلِ خرید** همین موضوع و در
+     آخر همیشه راهِ افزایشِ ذخایر.
+     ⚠️ ادعا **رفتاری** است: خودِ تابع از سورس بریده و اجرا می‌شود، وگرنه یک رجکس فقط
+     شکلِ خط را می‌دید و مثلاً وارونه‌شدنِ ترتیب یا نشتِ فالِ گران را نمی‌گرفت. */
+  {
+    const from = SRC.indexOf('const needBalanceAltRows = (uid, spread) => {');
+    const to = SRC.indexOf('\n};', from);
+    ok(from > 0 && to > from, 'تابعِ `needBalanceAltRows` در سورس پیدا شد');
+    const body = SRC.slice(from, to + 3).replace('const needBalanceAltRows =', 'return');
+    const make = new Function('SIZES_V3', 'SPREAD_BY_ID', 'spreadIdOf', 'L', 'Markup', 'curOf', 'getBalance', body);
+    const CUR = { on: true, name: 'الماس', emoji: '💎' };
+    const Mk = { button: { callback: (text, data) => ({ text, data }) } };
+    const run = (balance, spread) =>
+      make(SIZES_V3, SPREAD_BY_ID, spreadIdOf, L, Mk, () => CUR, () => balance)(1, spread);
+
+    const s10 = SPREAD_BY_ID[spreadIdOf('personal', 10)];
+    const s5 = SPREAD_BY_ID[spreadIdOf('personal', 5)];
+    const s3 = SPREAD_BY_ID[spreadIdOf('personal', 3)];
+
+    // ۴ الماس: ده‌کارتی نشد، فقط سه‌کارتی در توان است.
+    let rows = run(4, s10);
+    ok(rows.length === 2 && rows[0][0].data === `spread:${s3.id}`,
+      'با ۴ الماس فقط سه‌کارتی پیشنهاد می‌شود');
+    ok(rows.at(-1)[0].data === 'wallet_fresh', 'و آخرین دکمه همیشه افزایشِ ذخایر است');
+    ok(rows.at(-1)[0].text.includes('💎'), 'دکمه‌ی افزایشِ ذخایر ایموجیِ الماس دارد');
+
+    // ۷ الماس: هم سه‌کارتی هم پنج‌کارتی، به ترتیبِ **صعودی**.
+    rows = run(7, s10);
+    ok(rows.length === 3 && rows[0][0].data === `spread:${s3.id}` && rows[1][0].data === `spread:${s5.id}`,
+      'با ۷ الماس هر دو فالِ ارزان‌تر می‌آیند، صعودی');
+
+    // ۴ الماس ولی خودِ سه‌کارتی را زده: نباید همان فال دوباره پیشنهاد شود.
+    rows = run(2, s3);
+    ok(rows.length === 1 && rows[0][0].data === 'wallet_fresh',
+      'فالی که کاربر همین حالا زد بینِ گزینه‌ها نیست (و گزینه‌ی گران‌تر هم نشت نمی‌کند)');
+
+    // کنترلِ مثبت: با موجودیِ زیاد، دو خواهرِ ارزان‌تر واقعاً ساخته می‌شوند —
+    // وگرنه یک تابعِ همیشه-تک‌دکمه‌ای همه‌ی ادعاهای بالا را پاس می‌کرد (بند ۶ب-۲ ریشه).
+    ok(run(999, s10).length === 3, 'کنترلِ مثبت: با موجودیِ کافی هر دو خواهرِ ارزان‌تر ساخته می‌شوند');
+
+    // و خودِ مسیرِ کم‌موجودیِ `chargeForSpread` باید از همین تابع بخواند، نه از
+    // `needBalanceRows`ِ عمومی (که اندازه‌ی انتخاب‌شده را نمی‌شناسد).
+    const charge = SRC.slice(SRC.indexOf('async function chargeForSpread'), SRC.indexOf('bot.action(/^spread:'));
+    ok(/needBalanceAltRows\(uid, spread\)/.test(charge), 'مسیرِ کم‌موجودی از همین تابع می‌خواند');
+    ok(!/needBalanceRows\(/.test(charge), 'و دیگر سه دکمه‌ی عمومیِ ذخایر را نشان نمی‌دهد');
+    // دکمه‌ی افزایشِ ذخایر باید هندلرِ خودش را داشته باشد، وگرنه تپِ کاربر بی‌جواب می‌ماند.
+    ok(/bot\.action\('wallet_fresh'/.test(SRC), 'کالبکِ `wallet_fresh` هندلر دارد');
+    const wf = SRC.slice(SRC.indexOf("bot.action('wallet_fresh'"), SRC.indexOf("bot.action('wallet_fresh'") + 700);
+    ok(/ctx\.deleteMessage\(\)/.test(wf) && /showWallet\(ctx\)/.test(wf),
+      'و پیامِ قبلی را پاک می‌کند و بعد **همان** صفحه‌ی ذخایرِ منوی اصلی را می‌آورد');
+  }
+
+  /* 🐛 جمله‌ی «برای اینکه کارت‌ها رو برگردونیم» از دنیای پی‌والِ نسلِ قبل مانده بود؛
+     امروز کسر سرِ انتخابِ اندازه است و هنوز هیچ کارتی کشیده نشده (گزارشِ مالک). */
+  {
+    const t = L.reading.needBalance({ name: '', balance: 2, spreadFa: 'تست', price: 10,
+      cur: { on: true, name: 'الماس', emoji: '💎' } });
+    ok(!/برگردونیم|برگردوندن/.test(t), 'پیامِ کم‌موجودی دیگر ادعای «برگردوندنِ کارت‌ها» ندارد');
+    ok(/کافی نیست/.test(t), 'کنترلِ مثبت: همان پیام هنوز خودِ خبر را می‌دهد');
+  }
 
   // نگارشِ یکسانِ دکمه‌ها (تصمیمِ صریحِ مالک)
   /* دکمه‌ی خرید: «💰 خرید الماس💎 (راحت، ارزان)» (v3.81.3، خواسته‌ی صریحِ مالک).

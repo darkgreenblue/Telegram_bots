@@ -285,6 +285,7 @@ export default {
     dailyReminderOffYes: 'Sí, apágalo',
     copyCode: '📋 Copiar el cupón',
     cancel: '❌ Cancelar',
+    completePayment: '✅ Completar el pago',
     backToMenu: '◀️ Volver al menú',
     backToInvoice: '◀️ Volver al pedido',
     backOneStep: '◀️ Volver',
@@ -357,6 +358,11 @@ export default {
     // botón del tamaño: aquí se define el precio, por eso ➖ y el monto del cobro
     startSize: (size, price, cur) => `Empezar lectura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
     topicSize: (size, price, cur) => `${cardsN(size)} (➖${moneyTight(price, cur)})`,
+    // Los dos botones de la pantalla «no alcanza»: primero la lectura más barata que sí
+    // alcanza (con verbo, para que se lea como un camino y no como la etiqueta del
+    // precio), y al final siempre la recarga.
+    pickSmallerSpread: (size, price, cur) => `Elegir lectura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
+    topUpCoins: (cur) => `💎 Sumar ${purse(cur)}`,
     allSpreadsV2: '🗂 Todas las lecturas',
     /* 🎲 carta de la suerte: diamantes gratis una vez al día.
      * «Carta de la suerte» vive en el mismo campo que «número de la suerte» o «el día de
@@ -470,10 +476,11 @@ export default {
     // Las cartas simplemente están listas, y la acción es de la persona.
     pickPrompt: 'Cierra los ojos un segundo y piensa en el día que tienes por delante 🌬️',
     pickHint: 'Las cartas están listas. Elige la que te llame 👇',
-    captionV2: (card, monthFa) => `🎴 Carta del día de ${monthFa}:\n«${card.fa}»\n\nToca la imagen para destapar la carta ✨`,
+    // El signo no se nombra a propósito (ver comentario en fa.js): es solo la clave de datos.
+    captionV2: (card) => `🎴 Tu carta de hoy:\n«${card.fa}»\n\nToca la imagen para destapar la carta ✨`,
     needBirthMonth: 'Para que la carta del día sea tuya de verdad, necesito tu signo 🌿',
     // Honesto y sin plan B por LLM: la carta del día nunca la genera un modelo.
-    ganjinehEmpty: (monthFa) => `La carta del día de ${monthFa} todavía no está lista 🌙 Llega muy pronto.`,
+    ganjinehEmpty: () => 'Tu carta de hoy todavía no está lista 🌙 Llega muy pronto.',
     caption: (card, reversed) => `🎴 Tu carta de hoy:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToca la imagen para destapar la carta ✨`,
     alreadyUsed: 'Tu carta de hoy ya está abierta 🌙 Es una por día; mañana vuelve otra vez.\n\nPero si la cabeza no para y quieres mirar más hondo, una lectura completa es otra historia:',
     streak: (n) => `🔥 ¡${fmt(n)} ${plural(n, ['día seguido', 'días seguidos'])}! Cada día tu conexión con las cartas se hace más fuerte.`,
@@ -781,7 +788,10 @@ export default {
     refundedOnCancel: (price, cur) => `Los ${moneyTight(price, cur)} de esta lectura ya volvieron a tu cuenta ✅`,
     // ⚠️ va como HTML (caja de cita), así que `name` y `spreadFa` llegan con esc().
     needBalance: ({ name, balance, spreadFa, price, cur }) =>
-      `${name ? `¡Casi, ${name}!` : '¡Casi!'} Para destapar las cartas falta poco.\n\n` +
+      // 🐛 Antes decía «para destapar las cartas»: resto del paywall viejo, cuando las
+      // cartas ya estaban elegidas. Hoy el cobro ocurre al elegir el tamaño, o sea que
+      // todavía no se sacó ninguna carta (reporte del dueño, 1405/06/24).
+      `${name ? `¡Casi, ${name}!` : '¡Casi!'} Para esta lectura todavía falta un poco.\n\n` +
       `${purseQuote(balance, cur)}\n\n` +
       `La lectura «${spreadFa}» cuesta ${moneyTight(price, cur)}`,
     resumeAfterRecharge: 'Saldo listo ✅\n\nTus cartas siguen en el mismo lugar 🔮 ¿Las destapamos?',
@@ -924,7 +934,9 @@ export default {
   },
 
   wallet: {
-    info: (balance, cur) => (cur?.on ? `💠 ${purseLine(balance, cur)}` : `💠 Tu ${purse(cur)}: *${moneyLong(balance, cur)}*`),
+    info: (balance, cur) => (cur?.on
+      ? `💠 ${purseLine(balance, cur)}\n\nPara sumar ${purse(cur)} puedes elegir una de estas opciones:`
+      : `💠 Tu ${purse(cur)}: *${moneyLong(balance, cur)}*`),
     // ---- Economía de diamantes: tres paquetes, sin el paso «¿cuánto quieres cargar?» ----
     // La persona no escribe números ni saca cuentas: un toque y aparece el pago.
     // Mientras más grande el paquete, más barato sale cada diamante (escalera de ARPU).
@@ -977,7 +989,16 @@ export default {
     // ⏱ Ciclo de vida del pedido (v3.74.0) — también inalcanzable aquí (solo riel de
     // transferencia, ver arriba), pero la clave debe existir por la forma única de la
     // locale (check-locale-shape).
-    invoiceReminder: '⏳ ¡Todavía tienes un pedido de pago abierto!\n\nCompleta el pago o cancela con el botón de abajo.',
+    // Recordatorio a los 15 minutos. El objetivo es convertir, así que el texto trae la
+    // compra y el monto, y el primer botón devuelve el mismo pedido (ver nota en fa.js).
+    invoiceReminder: (amount, cur, purchase = null) =>
+      `⏳ Tu pedido sigue abierto, ¡falta un solo paso!\n\n`
+      + (purchase
+        ? `🧾 Compra${packName(purchase.pack) ? ` del paquete *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
+        : '')
+      + `💰 Monto: *${fmt(amount)}*\n\n`
+      + `Completa el pago y, apenas se confirme, el saldo entra al instante ✨`,
     invoiceExpired: (amount, cur, purchase = null) =>
       `⌛️ Este pedido expiró\n\n`
       + (purchase
@@ -986,6 +1007,7 @@ export default {
         : '')
       + `Monto: *${fmt(amount)}*\n\nSi todavía quieres, vuelve a empezar desde el menú de recarga.`,
     // Alternador de Stars (v3.76.0) inalcanzable aquí (este riel ya es solo Stars).
+    invoiceGone: (cur) => `⌛️ Este pedido ya no está abierto.\n\nSi todavía quieres, vuelve a empezar desde el menú de ${purse(cur)}.`,
     invoiceStars: (stars, purchase, cur) =>
       `🧾 Pedido (pago con Stars)\n\n`
       + (purchase ? `Compra del paquete *${packName(purchase.pack)}*: *${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n` : '')

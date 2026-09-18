@@ -162,3 +162,33 @@ export function allLabels(pick) {
   }
   return [...out];
 }
+
+/**
+ * یک آبجکتِ **زنده** از یک زیرشاخه‌ی locale: هر بار که مصرف‌کننده یک کلید می‌خواند،
+ * از زبانِ زمینه‌ی جاری خوانده می‌شود.
+ *
+ * ⚠️ کجا اجباری است: هر جا یک آبجکتِ متن **لحظه‌ی ثبت** به یک ماژول پاس داده می‌شود
+ * ولی کلیدهایش **لحظه‌ی درخواست** خوانده می‌شوند (`registerSupport`, `starspay`). یک
+ * `texts: L.support` خام آن‌جا یعنی همان زیرشاخه‌ی زبانِ پیش‌فرض برای همیشه قفل می‌شود
+ * و کاربرِ روس تا ابد متنِ انگلیسی می‌گیرد — بی‌صدا، چون هیچ کلیدی گم نیست.
+ *
+ * فرقش با `allLabels`: آن برای جایی است که خودِ **مقدار** لحظه‌ی ثبت لازم است
+ * (`bot.hears`)، این برای جایی که فقط **ارجاع** پاس می‌شود و بعداً خوانده می‌شود.
+ *
+ *   texts: liveL(l => l.support)
+ */
+export function liveL(pick) {
+  const cur = () => { try { return pick(BUNDLES[currentLang()]) ?? {}; } catch { return {}; } };
+  return new Proxy(Object.create(null), {
+    get: (_t, k) => cur()[k],
+    has: (_t, k) => k in cur(),
+    ownKeys: () => Reflect.ownKeys(cur()),
+    // configurable اجباری است: ویژگی روی خودِ target وجود ندارد، پس پروکسی حق ندارد
+    // آن را non-configurable گزارش کند (نامتغیرِ زبان).
+    getOwnPropertyDescriptor: (_t, k) => {
+      const d = Reflect.getOwnPropertyDescriptor(cur(), k);
+      return d ? { ...d, configurable: true } : undefined;
+    },
+    set: () => { throw new Error('locale فقط-خواندنی است'); },
+  });
+}

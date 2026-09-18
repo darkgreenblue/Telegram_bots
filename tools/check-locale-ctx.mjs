@@ -262,6 +262,57 @@ console.log('\n▶ ۷) پیکربندیِ همه‌ی زبان‌ها');
      'یک تابعِ واحد همه‌ی زبان‌ها را می‌نشاند (نه یک حلقه در صداکننده)');
 }
 
+/* ▶ ۸) آبجکتِ متنی که لحظه‌ی **ثبت** پاس داده می‌شود ولی لحظه‌ی **درخواست** خوانده
+   می‌شود. این خانواده از `bot.hears` موذی‌تر است: هیچ کلیدی گم نیست و هیچ خطایی
+   نمی‌دهد، فقط زیرشاخه‌ی زبانِ پیش‌فرض برای همیشه قفل می‌شود و کاربرِ زبانِ دیگر
+   بی‌صدا متنِ زبانِ اشتباه می‌گیرد. سه مصرف‌کننده‌ی واقعی: `registerSupport`,
+   `starspay`, و Setِ متن‌های آزادِ گیت. */
+console.log('\n▶ ۸) آبجکتِ متنیِ زنده (`liveL`)');
+{
+  const { out } = run({ LOCALE: 'ru', LANGS: 'ru,pt,es' }, `
+    const { liveL, withLang } = await import('./locale-ctx.js');
+    const t = liveL((l) => l.support);            // ← یک بار، بیرونِ هر زمینه‌ای
+    const seen = ['ru', 'pt', 'es'].map((lg) => withLang(lg, () => t.button));
+    const keys = withLang('pt', () => Object.keys(t).length);
+    let froze = false;
+    try { t.button = 'x'; } catch { froze = true; }
+    const missing = liveL((l) => l.nope__).anything;
+    console.log(JSON.stringify({ seen, keys, froze, missing: missing === undefined }));
+  `);
+  let j = {}; try { j = JSON.parse(out); } catch {}
+  const seen = j.seen || [];
+  ok(seen.length === 3 && seen.every(Boolean) && new Set(seen).size === 3,
+     '`liveL` که یک بار ساخته شد، در هر زمینه متنِ زبانِ خودش را می‌دهد');
+  ok(j.keys > 0, '`Object.keys` روی آبجکتِ زنده کار می‌کند (مصرف‌کننده دست‌نخورده می‌ماند)');
+  ok(j.froze === true, 'آبجکتِ زنده فقط-خواندنی است');
+  ok(j.missing === true, 'زیرشاخه‌ی ناموجود undefined می‌دهد، نه کرشِ سرِ ثبت');
+
+  // ── ساختاری: خودِ محصول واقعاً از این مسیر رد می‌شود؟ (تله‌ی گاردِ آینه‌ای)
+  const reg = CODE.match(/registerSupport\(bot,\s*\{[\s\S]{0,400}?\n\}\)/);
+  ok(!!reg, 'بلوکِ `registerSupport` در سورس پیدا شد');
+  ok(!!reg && /texts:\s*liveL\(/.test(reg[0]),
+     '`registerSupport` آبجکتِ زنده می‌گیرد، نه `L.support`ِ لحظه‌ی ثبت');
+  ok(!!reg && /hearsLabels:\s*allLabels\(/.test(reg[0]),
+     'برچسبِ `hears`ِ پشتیبانی اتحادِ همه‌ی زبان‌هاست');
+  ok(/texts:\s*liveL\(\(l\) => \(\{\s*staleInvoice:/.test(CODE),
+     'متن‌های `starspay` زنده‌اند (لحظه‌ی pre-checkout resolve می‌شوند)');
+  ok(!/texts:\s*\{\s*staleInvoice:\s*L\./.test(CODE),
+     'و شکلِ خامِ نسل قبل (`staleInvoice: L.…`) دیگر در سورس نیست');
+
+  const gate = CODE.match(/GATE_FREE_TEXT = new Set\(([\s\S]{0,300}?)\);/);
+  ok(!!gate, 'بلوکِ `GATE_FREE_TEXT` پیدا شد');
+  ok(!!gate && /allLabels\(/.test(gate[1]),
+     'متن‌های آزادِ گیت اتحادِ همه‌ی زبان‌هاست (وگرنه کاربرِ زبانِ دیگر پشتِ گیت گیر می‌کند)');
+  ok(!!gate && !/\bL\.(support|buttons)\b/.test(gate[1]),
+     'و هیچ برچسبِ خامِ تک‌زبانه‌ای در آن Set نمانده');
+
+  // ── و گاردِ shared: پارامترِ تازه باید افزایشی باشد، وگرنه voice2text/tabir می‌شکنند
+  const sup = readFileSync(new URL('../shared/support.js', import.meta.url), 'utf8');
+  ok(/hearsLabels/.test(sup), '`registerSupport` پارامترِ `hearsLabels` را می‌شناسد');
+  ok(/labels\.length \? labels : texts\.button/.test(sup),
+     'ندادنِ `hearsLabels` رفتارِ قبلی را بیت‌به‌بیت نگه می‌دارد (رباتِ تک‌زبانه دست‌نخورده)');
+}
+
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
 for (const e of errs) console.log(`   - ${e}`);
 if (errs.length) process.exit(1);
