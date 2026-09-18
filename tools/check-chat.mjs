@@ -1297,6 +1297,25 @@ console.log('\n▶ قفلِ CHAT_LOCALES و الگوهای بحرانِ per زب
        `«${lg}» الگوهای بحرانِ خودش را دارد (وگرنه بی‌صدا روی الگوهای فارسی می‌ماند)`);
   }
 
+  /* 💸 و بودجه‌ی پرامپت، در همان قفل. `CHAT_BUDGET.sys` یک بندِ **اعلام‌شده** است ولی
+   * `index.js` پرامپتِ سیستم را بدونِ `cut()` می‌چسباند، پس هیچ‌چیز در زمانِ اجرا کوتاه
+   * نمی‌شود: عبور از بودجه بی‌صدا است و فقط پیشوندِ کشِ‌شده را بزرگ‌تر می‌کند — همان
+   * چیزی که کلِ اقتصادِ گفتگو رویش بنا شده.
+   *
+   * ⚠️ اندازه‌گیریِ ۱۴۰۵/۰۶/۲۷: fa ۴۶۹۳ (داخلِ بودجه)، ru ۴۸۷۳، pt ۴۹۸۴، es ۵۱۰۳، و
+   * **en ۶۰۸۳ یعنی ۲۷٪ بالاتر**. هیچ‌کدام امروز اثری ندارند چون گفتگو فقط برای fa روشن
+   * است. این ادعا همان را **لحظه‌ای که اهمیت پیدا می‌کند** قرمز می‌کند، نه دیرتر. */
+  for (const lg of locales) {
+    const f = new URL(`../bots/tarot/locales/${lg}.js`, import.meta.url);
+    if (!fs.existsSync(f)) continue;
+    const mod = (await import(f)).default;
+    const sys = mod?.prompts?.chatSystem;
+    ok(typeof sys === 'string' && sys.length > 0, `«${lg}»: chatSystem یک رشته‌ی ناخالی است`);
+    if (typeof sys !== 'string') continue;
+    ok(sys.length <= chat.CHAT_BUDGET.sys,
+       `«${lg}»: chatSystem داخلِ بودجه است (${sys.length} از ${chat.CHAT_BUDGET.sys})`);
+  }
+
   /* کنترلِ مثبت: ثابت می‌کند ادعای بالا پوچ نیست. یک زبانِ ساختگی که `chat` ندارد باید
    * واقعاً روی الگوهای فارسی بیفتد؛ اگر روزی fallback عوض شد، این قرمز می‌شود. */
   const { configureChatLang, chatLang } = chat;

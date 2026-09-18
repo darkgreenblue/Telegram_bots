@@ -1,0 +1,105 @@
+// 🇬🇧 دادهٔ زبانیِ سنجه‌های آزمایشگاه — انگلیسی.
+//
+// انگلیسی در این خانواده حالتِ خاص است و `I18N-EN-LANGUAGE-RESEARCH.md` تک‌منبعِ
+// دلیلش است: از نظرِ **صرف** ساده‌ترین زبانِ خانواده و از نظرِ **سبک** پرخطرترین.
+// پس این فایل برعکسِ روسی است: ریشه‌یابی‌اش تقریباً هیچ‌کاره است و وزنش روی رجیستر.
+//
+// سه گاردی که ru/pt/es دارند این‌جا عمداً **نیستند**، چون ساختاراً موضوعیت ندارند:
+// رجیسترِ رسمی (انگلیسی تمایزِ ты/вы ندارد)، و جنسیتِ صفت و اسمِ مفعول (انگلیسی
+// صفت را جنسیت‌دار نمی‌کند). نبودشان فراموشی نیست، تصمیمِ ثبت‌شده است.
+/* ⚠️ الگوهای ضعف از **همان فایلی** خوانده می‌شوند که گاردِ محصول (`repair.js`) از آن
+ * می‌خواند. قاعده‌ی ریپو: گارد و سنجه باید عیناً یک تعریف را ببینند، وگرنه یکی چیزی
+ * را می‌گیرد که آن یکی نمی‌بیند و ما روی عددی تصمیم می‌گیریم که محصول نمی‌سنجد. */
+const LANG_DATA = (await import('../../../bots/tarot/langdata.en.json', { with: { type: 'json' } })).default;
+const defectOf = (id) => (LANG_DATA.defects || []).find((d) => d.id === id) || {};
+const reOf = (id) => { const d = defectOf(id); return d.pattern ? new RegExp(d.pattern, d.flags || '') : null; };
+
+export default {
+  // 🏷 همان نشتِ برچسب، به انگلیسی. پرامپت صریح منعش می‌کند، پس هر ضربه یک شکستِ واقعی است.
+  labelLeak: /your unspoken feeling|the unspoken feeling is|your sign is|what you did ?n[o']?t say/i,
+  /* 🗣 معادلِ انگلیسیِ канцелярит **نیست** اداری‌نویسی، بلکه «LLM-ese» است: رجیستری که
+   * در گفتارِ زنده تقریباً هرگز نمی‌آید و بلافاصله حسِ «این را ربات نوشته» می‌دهد. برای
+   * محصولی که کلِ ارزشش صمیمیتِ خوانش است، این مستقیماً مسیرِ درآمد را می‌زند.
+   *
+   * ⚠️ آستانه‌ی `min` یک **فرضیه** است نه یک عدد: روسی ۳ و اسپانیایی ۲ دارند و هر دو از
+   * دیتای واقعی درآمدند. این‌جا با ۲ شروع می‌شود و دورِ اولِ آزمایشگاه باید تنظیمش کند.
+   * آستانه‌ی تنگ = قرمزِ کاذب روی متنِ سالم، و گاردِ پرسروصدا همان‌قدر بی‌فایده است که
+   * گاردِ کور (بند ۲و/۶ب-۲).
+   *
+   * ⚠️ و عمداً از الگوی `defects.llmese` **جدا** است: آن یکی در پروداکشن روی خروجیِ
+   * زنده می‌دود و باید تنگ و بی‌ابهام باشد (هر ضربه یک فراخوانیِ تعمیرِ پولی است)؛ این
+   * یکی فقط می‌شمارد، پس می‌تواند پهن‌تر باشد و شکل‌های مرزی را هم ببیند. */
+  bookish: {
+    min: 2,
+    re: /\b(?:delve|tapestry|a testament to|it is important to note|it'?s important to note|in the realm of|serves as a reminder|embark on a journey|multifaceted|myriad|plethora|underscore[sd]?|paradigm shift|ever-evolving|in conclusion|navigate the (?:complexities|landscape|waters|nuances|terrain)|profound (?:sense|impact|shift|transformation|realization|insight))\b/gi,
+  },
+  /* 🎭 خطرِ مخصوصِ **این دامنه**: مدل وقتی «تاروت» می‌شنود به انگلیسیِ شبه‌باستانی
+   * می‌افتد. در سه زبانِ قبلی این خطر تقریباً وجود نداشت. دقیقاً خلافِ لحنِ محصول
+   * (صمیمی و امروزی، بند ۱۰ ریشه). جای `formal`ِ آن سه زبان را می‌گیرد. */
+  formal: reOf('archaic'),
+  // انگلیسی «جمعِ زوج» ندارد (آن استثنا مخصوصِ вы روسی بود)، پس استثنایی هم لازم نیست.
+  pluralCouple: null,
+  register: ['the universe', 'universal energy', 'the energy of the universe'],
+  stop: ['the', 'this', 'that', 'these', 'those', 'and', 'but', 'for', 'with', 'without',
+    'you', 'your', 'yours', 'its', 'they', 'them', 'there', 'here', 'just', 'still',
+    'because', 'when', 'where', 'what', 'which', 'who', 'how', 'more', 'less', 'most',
+    'very', 'really', 'now', 'then', 'also', 'even', 'always', 'never', 'all', 'some',
+    'something', 'anything', 'nothing', 'about', 'between', 'into', 'from', 'over',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'does',
+    'did', 'can', 'could', 'will', 'would', 'should', 'might', 'must', 'get', 'got',
+    'make', 'made', 'take', 'like', 'want', 'need', 'feel', 'feels', 'one', 'not'],
+  // انگلیسی کلمه‌های محتواییِ کوتاه‌تری از روسی دارد (`fear`, `door`, `move`)، پس ۴ نه ۵.
+  minWordLen: 4,
+  /* 🔑 ریشه‌یابی، عمداً **سبک**. انگلیسی حالتِ اسمی ندارد، پس فاجعه‌ی روسی (سنجه‌ی لنگر
+   * که ۸۰٪ گزارشِ غلط می‌داد) این‌جا ساختاراً تکرار نمی‌شود. ولی `w => w` هم درست نیست:
+   * سه شکل واقعاً نامِ کارت را عوض می‌کنند ⟵ جمع (`Cups`/`Cup`)، ملکی (`the Fool's`)،
+   * و حرفِ تعریف (که خودش با `stop` حذف می‌شود).
+   *
+   * ⚠️ یک استمرِ کاملِ Porter عمداً استفاده **نمی‌شود**: برای نامِ کارت زیادی است و
+   * ریسکِ تطبیقِ کاذب می‌آورد، که روی سنجه‌ی لنگر یعنی عددِ متورمِ خوش‌بینانه. */
+  stem: (w) => {
+    const x = String(w).toLowerCase().replace(/[’']/g, "'");
+    // ملکی اول: وگرنه «fool's» با بریدنِ `s` می‌شود «fool'» و به «fool» نمی‌رسد.
+    const p = x.replace(/'s$|s'$/, '');
+    /* ⚠️ فقط `s`ِ ساده بریده می‌شود، و این عمدی است. نسخه‌ی اول `['ies','es','s']` داشت
+     * (پورتِ فکرنشده از اسپانیایی) و همان یک قاعده‌ی `es` سنجه را می‌شکست:
+     * «Pentacles» ⟵ `pentacl` ولی «Pentacle» ⟵ `pentacle`، یعنی مفرد و جمعِ **یک کارت**
+     * به هم نمی‌رسیدند و هر جمله‌ای که نامِ کارت را جمع می‌برد «بی‌لنگر» شمرده می‌شد.
+     * دقیقاً همان کلاسِ باگی که در روسی ۸۰٪ گزارشِ غلط ساخت. هر چهار خانواده‌ی کارت
+     * جمعِ ساده دارند (Cups, Wands, Swords, Pentacles)، پس `es` هیچ سودی نداشت. */
+    if (p.length - 1 >= 3 && p.endsWith('s')) return p.slice(0, -1);
+    return p;
+  },
+  // ⚠️ باید با `ctxKeys.summary` در `langdata.en.json` یکی بماند (چکِ CI قفلش کرده).
+  summaryKey: 'summary',
+  // انگلیسی گذشته‌ی جنسیت‌دار ندارد؛ کلید برای حفظِ شکلِ یکسانِ ماژول‌ها null می‌ماند.
+  genderedPast: null,
+  /* 🌏 معکوسِ سه زبانِ قبلی: آن‌جا دنبالِ حروفِ **لاتینِ** سرگردان بودیم، این‌جا دنبالِ
+   * **غیرِلاتین**. و این برای رباتِ واحدِ چندزبانه از همه مهم‌تر است، چون حالا هر چهار
+   * زبان در **یک پروسه** زندگی می‌کنند: ضربه این‌جا ممکن است خطای مدل نباشد، ممکن است
+   * باگِ زمینه‌ی زبان باشد (`❌ LANG_UNSET`). پس اول فرضِ باگِ خودمان (بند ۹/۰ب). */
+  alien: [
+    { id: 'cyr', re: /[Ѐ-ӿ]/u, label: 'نویسه‌ی سیریلیک در متنِ انگلیسی' },
+    { id: 'cjk', re: /[　-鿿＀-￯]/u, label: 'نویسه‌ی CJK در متنِ انگلیسی' },
+    { id: 'fa', re: /[؀-ۿ]/u, label: 'نویسه‌ی فارسی/عربی در متنِ انگلیسی' },
+    /* نشتِ پرتغالی/اسپانیایی. `ã`/`õ`/`ç`/`ñ` در انگلیسی اصلاً وجود ندارند، پس تطبیق
+     * قطعی است و با وجودِ آن دو locale در همین پروسه ریسکش واقعی است.
+     * ⚠️ `é`/`á` عمداً **بیرون‌اند**: «café» و «naive» انگلیسیِ درست‌اند. */
+    { id: 'iberian', re: /[ãõçñ]/u, label: 'نویسه‌ی پرتغالی/اسپانیایی در متنِ انگلیسی' },
+  ],
+  /* استابِ `--fake`. ⚠️ اگر این بلوک نبود و استاب فارسی می‌ماند، هر اجرای خشکِ انگلیسی
+   * روی متنِ فارسی سنجیده می‌شد و همه‌ی سنجه‌ها بی‌معنا می‌شدند (درسِ همین فایل در روسی).
+   * `closingEvasive` عمداً hedging دارد: باید گاردِ طفره را **قرمز** کند، وگرنه گارد کور است. */
+  fake: {
+    teaser: (n) => `Card ${n}, this is a sample. There is some scene on it.`,
+    headline: 'Yes, it probably works out, but it will cost you time.',
+    pattern: (a, b, q) => `${a} together with ${b} on "${q}" points one way only.`,
+    read: (n, q) => `${n} says that part of "${q}" is moving right now.`,
+    callback: 'Last time the subject was more or less this.',
+    closingEvasive: (n, q) => `On the whole "${q}" is up to you, but ${n} says perhaps wait and see.`,
+    closing: (n, q) => `On the whole "${q}" clears up in a few weeks, but only if you take ${n} seriously.`,
+    summary: 'sample summary',
+    memory: 'sample memory',
+    repairFix: 'Everything says it works out, but it asks for patience.',
+  },
+};
