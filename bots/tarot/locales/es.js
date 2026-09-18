@@ -725,7 +725,7 @@ export default {
     // texto cuando el saldo realmente alcanza; si no, va la pantalla normal.
     pickSizeOnboarding: (balance, cur, size) =>
       `🔮 ¡Para empezar, quiero mostrarte mi fuerza con una lectura de ${cardsN(size)}!\n\n` +
-      `✅ ¡Quédate tranquilo, tu saldo alcanza para una lectura de ${cardsN(size)}!\n\n` +
+      `✅ ¡Todo listo, tu saldo alcanza para una lectura de ${cardsN(size)}!\n\n` +
       purseQuote(balance, cur),
     pickSize: (balance, cur) =>
       '🔮 ¿Lectura de cuántas cartas?\n\n' +
