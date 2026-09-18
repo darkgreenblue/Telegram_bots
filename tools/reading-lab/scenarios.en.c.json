@@ -1,0 +1,83 @@
+{
+  "_note": "Set C. A bit-for-bit structural mirror of scenarios.c.json (and of the ru/pt/es set C): same nine spreads in the same order, same `picks`, same question intent, same `afterMinutes`. It exists for one reason only, and it is methodological, not creative. Sets A and B are good English scenarios but they use different spreads from the Persian sets, and the workflow doc puts scenario effect at up to 50 units against a model effect of about 5. So an English number taken on set A is not comparable to a Persian number taken on set C, and the headline 'how close to Persian are we' figure that I18N-LANGUAGE-WORKFLOW.md defines as the phase-3 acceptance gate could not be computed at all until this file existed. Five of the nine spreads are five-card because long text is where the anchor rate degrades hardest. The questions are written natively, not translated: same intent, English phrasing a real user would type. Persona C3 asks very short questions on purpose, which is the worst case for anchoring: there is almost nothing in the question to hold on to, so anything specific the model says has to come from the cards. Honest caveat carried over from the Persian file: the non-Persian versions gave C3 a gender-neutral name to catch the model guessing the reader's gender, but English, like Persian, does not inflect for reader gender (see I18N-EN-LANGUAGE-RESEARCH.md: `genero`/`genderedPast` are structurally moot here), so that half of C3's purpose does not apply and its value is purely the short-question anchor pressure.",
+  "personas": [
+    {
+      "id": "C1",
+      "name": "Marina",
+      "focus": "marriage",
+      "why": "Marriage on a five-card spread. A long answer to a personal question: the place to see whether anchoring to the cards survives as the text gets longer.",
+      "steps": [
+        {
+          "spread": "marriage5",
+          "picks": [2, 7, 13, 19, 22],
+          "afterMinutes": 0,
+          "question": "We're going on four years, we live together, and he has never once brought up marriage. Is this actually going somewhere or am I waiting for something that isn't coming?"
+        },
+        {
+          "spread": "soulmate3",
+          "picks": [1, 9, 16],
+          "afterMinutes": 45,
+          "question": "If it doesn't work out with him, will I find my person, or is that going to take years?"
+        },
+        {
+          "spread": "crush3",
+          "picks": [4, 11, 21],
+          "afterMinutes": 180,
+          "question": "There's someone at work and I keep catching myself thinking about him. What is this on my side?"
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Tim",
+      "focus": "migration",
+      "why": "Migration plus two five-card spreads. The longest text in the whole set, so the hardest possible place to hold the anchor.",
+      "steps": [
+        {
+          "spread": "apply3",
+          "picks": [0, 8, 17],
+          "afterMinutes": 0,
+          "question": "I filed my paperwork to move abroad and I've been waiting on an answer for five months now. I'm worn out. Is it worth holding on to this?"
+        },
+        {
+          "spread": "personal5",
+          "picks": [3, 6, 12, 18, 23],
+          "afterMinutes": 120,
+          "question": "I want to see the whole picture. What's actually going on in my life right now and where is all of it heading?"
+        },
+        {
+          "spread": "exback5",
+          "picks": [5, 10, 14, 20, 2],
+          "afterMinutes": 300,
+          "question": "We broke up right before I filed. I haven't messaged her since. If I just wait it out, does she come back?"
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Alex",
+      "focus": "question",
+      "why": "Very short questions. The worst case for anchoring: there is almost no content word in the question to hold on to, so anything specific has to come from the cards themselves. If unanchored sentences blow up anywhere, it is here.",
+      "steps": [
+        {
+          "spread": "personal5",
+          "picks": [1, 5, 11, 15, 21],
+          "afterMinutes": 0,
+          "question": "So now what?"
+        },
+        {
+          "spread": "feel5",
+          "picks": [0, 7, 13, 18, 22],
+          "afterMinutes": 60,
+          "question": "What does he feel about me?"
+        },
+        {
+          "spread": "marriage3",
+          "picks": [3, 9, 19],
+          "afterMinutes": 240,
+          "question": "Will I get married?"
+        }
+      ]
+    }
+  ]
+}

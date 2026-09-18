@@ -192,6 +192,7 @@ for (const file of files) {
     ru: { label: /Не пиши сам ярлык/, register: /Никакого канцелярита/ },
     pt: { label: /Não escreva o rótulo/, register: /Nada de forma escrita/ },
     es: { label: /No escribas la etiqueta/, register: /Nada de forma escrita/ },
+    en: { label: /Never write the label itself/, register: /No LLM-ese/ },
   };
   const spread = SPREAD_BY_ID.three || Object.values(SPREAD_BY_ID)[0];
   for (const file of files) {

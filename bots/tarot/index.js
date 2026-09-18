@@ -63,6 +63,7 @@ import {
   seedToInt, mulberry32, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
   buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName, cardKeywords,
+  locSpread,
   CHAT_PLAN, CHAT_MODEL,
 } from './reading-core.js';
 // 🗣 هسته‌ی خالصِ گفتگو — دوقلوی reading-core برای فیچرِ چت. همان کد را
@@ -2484,11 +2485,6 @@ async function replyLong(ctx, text, extra) {
  *
  * مثلِ `locCard` عمداً تک‌نقطه است تا هر نسلِ **بعدیِ** پرامپت هم خودبه‌خود درست بماند.
  */
-const locSpread = (sp) => (sp ? {
-  ...sp,
-  fa: spreadName(sp.fa) || sp.fa,
-  positions: (sp.positions || []).map((q, i) => ({ ...q, fa: positionName(q?.fa, i) })),
-} : sp);
 
 /* 🌍 نمای زبانیِ کارت — تنها شکلی که حق دارد به locale برود.
  *

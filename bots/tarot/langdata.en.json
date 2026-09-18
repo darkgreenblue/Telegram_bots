@@ -1,0 +1,1246 @@
+{
+  "_note": "دادهٔ زبانیِ انگلیسی که در locale نمی‌گنجد (چون شکلِ locale با fa مقایسه می‌شود). الگوی مرجع: langdata.ru.json و card-knowledge.<locale>.json. کلیدها رشته‌ی فارسیِ canonical اند. ⚠️ defects عمداً formal/genero/dash ندارد (بند ۱ و ۶ سندِ I18N-EN-LANGUAGE-RESEARCH.md): انگلیسی تمایزِ T-V و صفتِ جنسیت‌دار ندارد، و خطِ تیره را noDash در reading-core.js از قبل ساختاراً برمی‌دارد، پس یک ضعفِ dash فقط یک فراخوانیِ تعمیرِ بی‌فایده است (بند ۹/۰ ریشه). به‌جایشان سه ضعفِ سبکیِ انگلیسی: llmese (معادلِ канцелярит)، archaic (باستان‌گراییِ شبه‌عرفانیِ مخصوصِ دامنه‌ی تاروت)، و nonlatin. ⚠️ بلوکِ chat (که ru/pt/es هنوز ندارند) عمداً اضافه شده: بدونِ آن configureChatLang به الگوهای **فارسیِ** بحران fallback می‌کند، و الگوی فارسی روی متنِ انگلیسی هرگز match نمی‌شود — یعنی گاردِ بحران ساختاراً کور می‌ماند و سبزیِ آن هیچ چیزی ثابت نمی‌کند (بند ۲و/۶ب-۲ ریشه).",
+  "positionFallback": "Card %n",
+  "cardNames": {
+    "m00": "The Fool",
+    "m01": "The Magician",
+    "m02": "The High Priestess",
+    "m03": "The Empress",
+    "m04": "The Emperor",
+    "m05": "The Hierophant",
+    "m06": "The Lovers",
+    "m07": "The Chariot",
+    "m08": "Strength",
+    "m09": "The Hermit",
+    "m10": "Wheel of Fortune",
+    "m11": "Justice",
+    "m12": "The Hanged Man",
+    "m13": "Death",
+    "m14": "Temperance",
+    "m15": "The Devil",
+    "m16": "The Tower",
+    "m17": "The Star",
+    "m18": "The Moon",
+    "m19": "The Sun",
+    "m20": "Judgement",
+    "m21": "The World",
+    "w01": "Ace of Wands",
+    "w02": "Two of Wands",
+    "w03": "Three of Wands",
+    "w04": "Four of Wands",
+    "w05": "Five of Wands",
+    "w06": "Six of Wands",
+    "w07": "Seven of Wands",
+    "w08": "Eight of Wands",
+    "w09": "Nine of Wands",
+    "w10": "Ten of Wands",
+    "w11": "Page of Wands",
+    "w12": "Knight of Wands",
+    "w13": "Queen of Wands",
+    "w14": "King of Wands",
+    "c01": "Ace of Cups",
+    "c02": "Two of Cups",
+    "c03": "Three of Cups",
+    "c04": "Four of Cups",
+    "c05": "Five of Cups",
+    "c06": "Six of Cups",
+    "c07": "Seven of Cups",
+    "c08": "Eight of Cups",
+    "c09": "Nine of Cups",
+    "c10": "Ten of Cups",
+    "c11": "Page of Cups",
+    "c12": "Knight of Cups",
+    "c13": "Queen of Cups",
+    "c14": "King of Cups",
+    "s01": "Ace of Swords",
+    "s02": "Two of Swords",
+    "s03": "Three of Swords",
+    "s04": "Four of Swords",
+    "s05": "Five of Swords",
+    "s06": "Six of Swords",
+    "s07": "Seven of Swords",
+    "s08": "Eight of Swords",
+    "s09": "Nine of Swords",
+    "s10": "Ten of Swords",
+    "s11": "Page of Swords",
+    "s12": "Knight of Swords",
+    "s13": "Queen of Swords",
+    "s14": "King of Swords",
+    "p01": "Ace of Pentacles",
+    "p02": "Two of Pentacles",
+    "p03": "Three of Pentacles",
+    "p04": "Four of Pentacles",
+    "p05": "Five of Pentacles",
+    "p06": "Six of Pentacles",
+    "p07": "Seven of Pentacles",
+    "p08": "Eight of Pentacles",
+    "p09": "Nine of Pentacles",
+    "p10": "Ten of Pentacles",
+    "p11": "Page of Pentacles",
+    "p12": "Knight of Pentacles",
+    "p13": "Queen of Pentacles",
+    "p14": "King of Pentacles"
+  },
+  "cardKeywords": {
+    "m00": {
+      "up": [
+        "A fresh start",
+        "Spontaneity",
+        "Trust in the road ahead",
+        "Freedom"
+      ],
+      "down": [
+        "Recklessness",
+        "Fear of starting",
+        "A rushed decision"
+      ]
+    },
+    "m01": {
+      "up": [
+        "Creative will",
+        "The skill and the tools are there",
+        "Making it real",
+        "Self belief"
+      ],
+      "down": [
+        "Talent left unused",
+        "Deception",
+        "Doubting your own ability"
+      ]
+    },
+    "m02": {
+      "up": [
+        "Intuition",
+        "Inner knowing",
+        "Keeping it private",
+        "Patience and silence"
+      ],
+      "down": [
+        "Ignoring your inner voice",
+        "Hidden secrets",
+        "Staying on the surface"
+      ]
+    },
+    "m03": {
+      "up": [
+        "Abundance",
+        "Nurturing and care",
+        "Fertile creativity",
+        "Enjoying life"
+      ],
+      "down": [
+        "Clinginess",
+        "Smothering love",
+        "Neglecting yourself"
+      ]
+    },
+    "m04": {
+      "up": [
+        "Structure and order",
+        "Authority",
+        "Stability",
+        "Taking responsibility"
+      ],
+      "down": [
+        "Domineering",
+        "Rigidity",
+        "Misuse of power"
+      ]
+    },
+    "m05": {
+      "up": [
+        "Tradition and teaching",
+        "A spiritual guide",
+        "Commitment",
+        "Shared values"
+      ],
+      "down": [
+        "Rules that hold you back",
+        "Rebelling against convention",
+        "Dogmatic thinking"
+      ]
+    },
+    "m06": {
+      "up": [
+        "A deep bond",
+        "A choice of the heart",
+        "Values that match",
+        "Mutual attraction"
+      ],
+      "down": [
+        "Torn between two",
+        "Values that clash",
+        "Choosing out of fear"
+      ]
+    },
+    "m07": {
+      "up": [
+        "Winning through will",
+        "Steering your own course",
+        "Moving forward",
+        "Firm resolve"
+      ],
+      "down": [
+        "Scattered energy",
+        "Losing control",
+        "The movement stalls"
+      ]
+    },
+    "m08": {
+      "up": [
+        "Quiet courage",
+        "Taming instinct gently",
+        "Patience",
+        "Trusting yourself"
+      ],
+      "down": [
+        "Self doubt",
+        "Unchecked anger",
+        "Feeling weak"
+      ]
+    },
+    "m09": {
+      "up": [
+        "Looking inward",
+        "Searching for the truth",
+        "Useful solitude",
+        "Inner wisdom"
+      ],
+      "down": [
+        "Isolating too much",
+        "Running from people",
+        "Losing the way"
+      ]
+    },
+    "m10": {
+      "up": [
+        "Fate turning",
+        "A new opening",
+        "The cycle changes",
+        "Luck on the way"
+      ],
+      "down": [
+        "Resisting change",
+        "The same loop again",
+        "Feeling out of control"
+      ]
+    },
+    "m11": {
+      "up": [
+        "Fairness",
+        "The consequence of what you did",
+        "Clarity",
+        "A balanced decision"
+      ],
+      "down": [
+        "Unfairness",
+        "Dodging accountability",
+        "A one sided verdict"
+      ]
+    },
+    "m12": {
+      "up": [
+        "A change of angle",
+        "Letting go on purpose",
+        "A pause that clears things",
+        "Releasing control"
+      ],
+      "down": [
+        "Stuck in place",
+        "Playing the victim",
+        "Putting it off forever"
+      ]
+    },
+    "m13": {
+      "up": [
+        "The end of a chapter",
+        "Deep change",
+        "Letting the old go",
+        "A second birth"
+      ],
+      "down": [
+        "Clinging to the past",
+        "Fear of change",
+        "An ending you keep delaying"
+      ]
+    },
+    "m14": {
+      "up": [
+        "Balance",
+        "Patience and the right mix",
+        "Moderation",
+        "Healing step by step"
+      ],
+      "down": [
+        "All or nothing",
+        "Impatience",
+        "Out of tune inside"
+      ]
+    },
+    "m15": {
+      "up": [
+        "Dependency",
+        "A pattern that keeps you caged",
+        "Temptation",
+        "Chains you made yourself"
+      ],
+      "down": [
+        "Breaking free",
+        "Seeing the chains",
+        "Taking your power back"
+      ]
+    },
+    "m16": {
+      "up": [
+        "A shaky structure coming down",
+        "A shocking truth",
+        "A sudden release"
+      ],
+      "down": [
+        "Avoiding a collapse that has to happen",
+        "Fear of it falling apart",
+        "Change that is overdue"
+      ]
+    },
+    "m17": {
+      "up": [
+        "Hope",
+        "Healing and calm",
+        "Inspiration",
+        "Faith in what is coming"
+      ],
+      "down": [
+        "Hopelessness",
+        "Cut off from yourself",
+        "Worn out inside"
+      ]
+    },
+    "m18": {
+      "up": [
+        "Uncertainty",
+        "Dreams and the unconscious",
+        "Hidden fears",
+        "A foggy road"
+      ],
+      "down": [
+        "The fog lifting",
+        "Seeing past the illusion",
+        "Pushing the fear aside"
+      ]
+    },
+    "m19": {
+      "up": [
+        "Joy",
+        "Clear success",
+        "Life and energy",
+        "Childlike honesty"
+      ],
+      "down": [
+        "The optimism fading",
+        "Success delayed",
+        "Your inner light dimming"
+      ]
+    },
+    "m20": {
+      "up": [
+        "Waking up",
+        "An inner call",
+        "Forgiving the past",
+        "A decision that changes everything"
+      ],
+      "down": [
+        "Beating yourself up",
+        "Not hearing the inner call",
+        "Hesitating at the big step"
+      ]
+    },
+    "m21": {
+      "up": [
+        "A cycle completed",
+        "Achievement",
+        "Wholeness",
+        "Celebrating an end and a beginning"
+      ],
+      "down": [
+        "Left unfinished",
+        "The last missing piece",
+        "The celebration postponed"
+      ]
+    },
+    "w01": {
+      "up": [
+        "The first spark",
+        "Pure inspiration",
+        "A creative opening"
+      ],
+      "down": [
+        "A delayed start",
+        "The fire gone quiet"
+      ]
+    },
+    "w02": {
+      "up": [
+        "Planning ahead",
+        "Looking at the horizon",
+        "Deciding to expand"
+      ],
+      "down": [
+        "Fear of the unknown",
+        "Staying in the safe zone"
+      ]
+    },
+    "w03": {
+      "up": [
+        "Expansion",
+        "Results on the way",
+        "A partnership that is growing"
+      ],
+      "down": [
+        "Obstacles on the way up",
+        "Waiting with nothing to show"
+      ]
+    },
+    "w04": {
+      "up": [
+        "Celebration and stability",
+        "A safe home",
+        "Shared joy"
+      ],
+      "down": [
+        "A wobble for now",
+        "The celebration put off"
+      ]
+    },
+    "w05": {
+      "up": [
+        "Competition",
+        "Clashing opinions",
+        "A lively challenge"
+      ],
+      "down": [
+        "Avoiding the fight",
+        "A rivalry that wears you down"
+      ]
+    },
+    "w06": {
+      "up": [
+        "Victory and recognition",
+        "Public credit",
+        "Good news"
+      ],
+      "down": [
+        "Fragile pride",
+        "Recognition that comes late"
+      ]
+    },
+    "w07": {
+      "up": [
+        "Defending your ground",
+        "Standing firm",
+        "Coming out ahead through effort"
+      ],
+      "down": [
+        "Tired of defending yourself",
+        "Feeling surrounded"
+      ]
+    },
+    "w08": {
+      "up": [
+        "Fast movement",
+        "News on the way",
+        "Sudden progress"
+      ],
+      "down": [
+        "Rushing it",
+        "Held in limbo"
+      ]
+    },
+    "w09": {
+      "up": [
+        "Holding on for the last step",
+        "Setting a boundary",
+        "Staying alert"
+      ],
+      "down": [
+        "Burnout",
+        "Guarding against nothing"
+      ]
+    },
+    "w10": {
+      "up": [
+        "The weight of responsibility",
+        "Pushing near the finish",
+        "A heavy commitment"
+      ],
+      "down": [
+        "Carrying the load of others",
+        "Time to lighten the load"
+      ]
+    },
+    "w11": {
+      "up": [
+        "A messenger of enthusiasm",
+        "Curiosity",
+        "Inspiring news"
+      ],
+      "down": [
+        "Half the news",
+        "Energy with no direction"
+      ]
+    },
+    "w12": {
+      "up": [
+        "Passionate action",
+        "Adventure",
+        "A bold move"
+      ],
+      "down": [
+        "Restlessness",
+        "Rushing with no plan"
+      ]
+    },
+    "w13": {
+      "up": [
+        "Warm confidence",
+        "Natural magnetism",
+        "Independence"
+      ],
+      "down": [
+        "Jealousy",
+        "Asking for too much"
+      ]
+    },
+    "w14": {
+      "up": [
+        "Inspiring leadership",
+        "A big vision",
+        "Building something of your own"
+      ],
+      "down": [
+        "Not listening to anyone",
+        "A big promise with nothing behind it"
+      ]
+    },
+    "c01": {
+      "up": [
+        "A new feeling overflowing",
+        "An emotional beginning",
+        "The heart opening"
+      ],
+      "down": [
+        "A feeling pushed down",
+        "The cup turned over"
+      ]
+    },
+    "c02": {
+      "up": [
+        "A bond between two",
+        "Mutual attraction",
+        "Making up"
+      ],
+      "down": [
+        "The relationship out of balance",
+        "A misunderstanding"
+      ]
+    },
+    "c03": {
+      "up": [
+        "Celebrating with friends",
+        "Support from your people",
+        "Shared happiness"
+      ],
+      "down": [
+        "On the edge of the group",
+        "Joy that stays shallow"
+      ]
+    },
+    "c04": {
+      "up": [
+        "Boredom and flatness",
+        "Missing the offer in front of you",
+        "Needing a fresh look"
+      ],
+      "down": [
+        "Snapping out of it",
+        "Accepting the offer"
+      ]
+    },
+    "c05": {
+      "up": [
+        "Grief that is not finished",
+        "Focused on what was lost",
+        "Sadness that passes"
+      ],
+      "down": [
+        "Accepting it and turning around",
+        "Seeing the cups still standing"
+      ]
+    },
+    "c06": {
+      "up": [
+        "Sweet memories",
+        "The inner child",
+        "Kindness from the past"
+      ],
+      "down": [
+        "Stuck in the past",
+        "Nostalgia that freezes you"
+      ]
+    },
+    "c07": {
+      "up": [
+        "Too many fantasies",
+        "Tempting options",
+        "Daydreaming"
+      ],
+      "down": [
+        "The choice gets clear",
+        "The illusion ends"
+      ]
+    },
+    "c08": {
+      "up": [
+        "Walking away with open eyes",
+        "Leaving what does not fill you",
+        "Looking for meaning"
+      ],
+      "down": [
+        "Afraid to go",
+        "A return that solves nothing"
+      ]
+    },
+    "c09": {
+      "up": [
+        "Contentment",
+        "A wish granted",
+        "Sweet satisfaction"
+      ],
+      "down": [
+        "Satisfaction only on the surface",
+        "Pleasure that is not enough"
+      ]
+    },
+    "c10": {
+      "up": [
+        "Family happiness",
+        "Full harmony",
+        "Lasting peace"
+      ],
+      "down": [
+        "Friction at home",
+        "An ideal out of reach"
+      ]
+    },
+    "c11": {
+      "up": [
+        "An emotional message",
+        "An invitation to play",
+        "Tender news"
+      ],
+      "down": [
+        "Emotional immaturity",
+        "A mixed signal from the heart"
+      ]
+    },
+    "c12": {
+      "up": [
+        "A romantic offer",
+        "Chasing a dream",
+        "Gentle charm"
+      ],
+      "down": [
+        "An empty promise of love",
+        "A dream with no action"
+      ]
+    },
+    "c13": {
+      "up": [
+        "Deep empathy",
+        "Motherly intuition",
+        "A safe place to feel"
+      ],
+      "down": [
+        "Feeling everything too much",
+        "Forgetting yourself"
+      ]
+    },
+    "c14": {
+      "up": [
+        "Steady with your feelings",
+        "Calm in the storm",
+        "Mature support"
+      ],
+      "down": [
+        "Bottling it up",
+        "A careful coldness"
+      ]
+    },
+    "s01": {
+      "up": [
+        "Mental clarity",
+        "The truth that cuts through",
+        "A firm decision"
+      ],
+      "down": [
+        "A foggy mind",
+        "The truth half told"
+      ]
+    },
+    "s02": {
+      "up": [
+        "A deadlock in choosing",
+        "Eyes closed to what is real",
+        "A truce for now"
+      ],
+      "down": [
+        "The knot of the decision loosens",
+        "Seeing it as it is"
+      ]
+    },
+    "s03": {
+      "up": [
+        "Heartbreak",
+        "A painful truth",
+        "Clean sorrow"
+      ],
+      "down": [
+        "The healing starts",
+        "Forgiving and moving on"
+      ]
+    },
+    "s04": {
+      "up": [
+        "The rest you need",
+        "Getting your head back",
+        "A pause that heals"
+      ],
+      "down": [
+        "Exhaustion you keep denying",
+        "Going back too soon"
+      ]
+    },
+    "s05": {
+      "up": [
+        "Winning at any cost",
+        "A bitter conflict",
+        "An unfair field"
+      ],
+      "down": [
+        "The fight ends",
+        "A lesson from losing"
+      ]
+    },
+    "s06": {
+      "up": [
+        "Crossing rough water",
+        "Moving toward calm",
+        "A journey in your head"
+      ],
+      "down": [
+        "The baggage comes with you",
+        "The crossing delayed"
+      ]
+    },
+    "s07": {
+      "up": [
+        "Cleverness",
+        "A quiet move",
+        "Playing your own strategy"
+      ],
+      "down": [
+        "The secret comes out",
+        "Tired of hiding"
+      ]
+    },
+    "s08": {
+      "up": [
+        "A cage built in your head",
+        "Feeling trapped",
+        "Fear that freezes you"
+      ],
+      "down": [
+        "The blindfold comes off",
+        "Seeing the way out"
+      ]
+    },
+    "s09": {
+      "up": [
+        "Anxiety at night",
+        "A loud mind",
+        "Worry feeding itself"
+      ],
+      "down": [
+        "The nightmare easing",
+        "Morning comes"
+      ]
+    },
+    "s10": {
+      "up": [
+        "A painful but complete ending",
+        "Rock bottom",
+        "A hard cycle finished"
+      ],
+      "down": [
+        "Sunrise after the fall",
+        "Getting up again"
+      ]
+    },
+    "s11": {
+      "up": [
+        "A curious mind",
+        "News that challenges you",
+        "Fresh alertness"
+      ],
+      "down": [
+        "Talk with no action",
+        "Snooping and gossip"
+      ]
+    },
+    "s12": {
+      "up": [
+        "A rush of thought",
+        "Lightning fast action",
+        "Blunt honesty"
+      ],
+      "down": [
+        "Haste that breaks things",
+        "Words that wound"
+      ]
+    },
+    "s13": {
+      "up": [
+        "Clarity that is harsh but fair",
+        "Independent thinking",
+        "A clear boundary"
+      ],
+      "down": [
+        "Bitterness from experience",
+        "A cold judgement"
+      ]
+    },
+    "s14": {
+      "up": [
+        "Mental authority",
+        "A fair judgement",
+        "Words that land"
+      ],
+      "down": [
+        "Using logic as a weapon",
+        "Dry strictness"
+      ]
+    },
+    "p01": {
+      "up": [
+        "The seed of a material chance",
+        "A lucky financial start",
+        "A gift you can hold"
+      ],
+      "down": [
+        "A chance that slipped",
+        "A start that keeps getting pushed back"
+      ]
+    },
+    "p02": {
+      "up": [
+        "Juggling more than one thing",
+        "Managing the flow",
+        "Financial flexibility"
+      ],
+      "down": [
+        "The balance breaks",
+        "The strain of too many tasks"
+      ]
+    },
+    "p03": {
+      "up": [
+        "Building it together",
+        "Skill that gets noticed",
+        "Teamwork"
+      ],
+      "down": [
+        "Sloppy work",
+        "No appreciation"
+      ]
+    },
+    "p04": {
+      "up": [
+        "Holding on to what you have",
+        "Wanting security",
+        "Controlling the resources"
+      ],
+      "down": [
+        "Stinginess",
+        "Gripping out of fear"
+      ]
+    },
+    "p05": {
+      "up": [
+        "Money running short",
+        "Feeling left outside",
+        "A hard cold spell"
+      ],
+      "down": [
+        "A door opening",
+        "Help that is right there"
+      ]
+    },
+    "p06": {
+      "up": [
+        "A fair give and take",
+        "Generosity",
+        "Financial support"
+      ],
+      "down": [
+        "Giving with strings attached",
+        "Power out of balance"
+      ]
+    },
+    "p07": {
+      "up": [
+        "Weighing the harvest",
+        "Patience while it grows",
+        "Reviewing the investment"
+      ],
+      "down": [
+        "Impatient to pick it early",
+        "Effort with little return"
+      ]
+    },
+    "p08": {
+      "up": [
+        "Craftsmanship",
+        "Steady practice",
+        "Focusing on the skill"
+      ],
+      "down": [
+        "Repetitive work with no soul",
+        "Perfectionism that freezes you"
+      ]
+    },
+    "p09": {
+      "up": [
+        "Financial independence",
+        "Enjoying what you earned",
+        "A garden that finally bears fruit"
+      ],
+      "down": [
+        "Depending on someone financially",
+        "Spending with no plan"
+      ]
+    },
+    "p10": {
+      "up": [
+        "Lasting wealth",
+        "Family legacy",
+        "Long term security"
+      ],
+      "down": [
+        "A fight over property",
+        "Stability that is fragile"
+      ]
+    },
+    "p11": {
+      "up": [
+        "Good news about money",
+        "A diligent student",
+        "A chance to learn"
+      ],
+      "down": [
+        "Distracted from the goal",
+        "News that gets postponed"
+      ]
+    },
+    "p12": {
+      "up": [
+        "Steady routine",
+        "Someone people can count on",
+        "Slow and sure progress"
+      ],
+      "down": [
+        "Stuck in place",
+        "Perfectionism that slows everything"
+      ]
+    },
+    "p13": {
+      "up": [
+        "Earthy abundance",
+        "Practical care",
+        "Warmth at home and at work"
+      ],
+      "down": [
+        "Work and home out of balance",
+        "Attached to comfort"
+      ]
+    },
+    "p14": {
+      "up": [
+        "Mature material success",
+        "A golden touch",
+        "A generous backer"
+      ],
+      "down": [
+        "Greed",
+        "Success with no joy"
+      ]
+    }
+  },
+  "spreadNames": {
+    "عشق و رابطه": "Love and relationships",
+    "گذشته، حال، آینده": "Past, present, future",
+    "کار و مسیر": "Work and career",
+    "پول و فراوانی": "Money and abundance",
+    "حال درونی": "How you are inside",
+    "خانواده و نزدیکان": "Family and close ones",
+    "مهاجرت و تغییر بزرگ": "Moving and big changes",
+    "آری یا نه": "Yes or no",
+    "دوراهی": "Between two paths",
+    "صلیب سلتی (کامل)": "Full Celtic Cross",
+    "موندن یا جدایی": "Stay or walk away",
+    "عشق یا نفرت": "Love or hate",
+    "تعهد یا خیانت": "Faithful or cheating",
+    "کراش": "That crush",
+    "قلب شکسته": "Broken heart",
+    "موضوع دلخواه": "Any topic you want",
+    "سؤال سفارشی": "Your own question",
+    "فال سه کارتی": "Three card reading",
+    "موضوع دلخواه (عمیق‌تر)": "Any topic you want, deeper",
+    "سؤال سفارشی (عمیق‌تر)": "Your own question, deeper",
+    "فال پنج کارتی": "Five card reading",
+    "فال کامل ده کارتی": "Full ten card reading",
+    "سؤال شخصی خودم": "My personal question",
+    "بله و خیر قطعی": "A clear yes or no",
+    "حس طرف مقابل": "What they feel about me",
+    "بازگشت اکس": "Is my ex coming back?",
+    "فال کراش": "Crush reading",
+    "بهم خیانت کرده؟": "Did they cheat on me?",
+    "فال ازدواج": "Marriage reading",
+    "کی به آدمم می‌رسم؟": "When do I meet my person?",
+    "کار و پول": "Work and money",
+    "درس و کنکور": "Studies and exams",
+    "اپلای و مهاجرت": "Applying and moving abroad",
+    "پول و درآمد بیشتر": "More money coming in",
+    "کارت روز": "Card of the day"
+  },
+  "positionNames": {
+    "قلب تو": "Your heart",
+    "قلب او": "Their heart",
+    "مسیر رابطه": "Where the relationship is going",
+    "گذشته": "Past",
+    "حال": "Present",
+    "آینده": "Future",
+    "جایگاه فعلی": "Where you are now",
+    "مانع": "The obstacle",
+    "برآیند مسیر": "Where this road leads",
+    "وضعیت مالی الان": "Your money today",
+    "نشتی انرژی و پول": "Where it leaks out",
+    "مسیر فراوانی": "The road to abundance",
+    "حال درونی الان": "How you are inside today",
+    "ریشه‌ی ناآرامی": "The root of the unrest",
+    "مسیر آرامش": "The road to calm",
+    "فضای الان": "The mood right now",
+    "ریشه‌ی تنش": "The root of the tension",
+    "مسیر نزدیک‌تر شدن": "How to get closer",
+    "جایگاه الان": "Your place right now",
+    "مانع یا ریسک": "The obstacle or the risk",
+    "چراغ تصمیم": "The light to decide by",
+    "قلب ماجرا": "The heart of the matter",
+    "جهت انرژی": "Where the energy is going",
+    "مسیر اول": "The first path",
+    "مسیر دوم": "The second path",
+    "چراغ راهنما": "The guiding light",
+    "موقعیت فعلی": "The situation now",
+    "چالش": "The challenge",
+    "ریشه": "The root",
+    "هدف آگاهانه": "What you are consciously after",
+    "آینده‌ی نزدیک": "The near future",
+    "خودت": "You",
+    "محیط و اطرافیان": "Your surroundings",
+    "امیدها و ترس‌ها": "Hopes and fears",
+    "برآیند": "The outcome",
+    "اگه بمونی": "If you stay",
+    "اگه جدا شی": "If you leave",
+    "موندن": "Staying",
+    "جدایی": "Leaving",
+    "چیزی که به تو می‌ده": "What it gives you",
+    "چیزی که ازت می‌گیره": "What it takes from you",
+    "حقیقتِ حسش": "The truth of what they feel",
+    "عشق": "Love",
+    "نفرت": "Hate",
+    "چیزی که نشونت می‌ده": "What they show you",
+    "چیزی که پنهون مونده": "What stayed hidden",
+    "حقیقتِ ماجرا": "How it really is",
+    "تعهد": "Faithful",
+    "خیانت": "Cheating",
+    "تو رو چطور می‌بینه": "How they see you",
+    "شانسِ شروع شدن": "The chances it starts",
+    "قدمی که باید برداری": "The step that is yours to take",
+    "زخمی که مونده": "The wound that is still there",
+    "چیزی که رهات نمی‌کنه": "What will not let you go",
+    "مسیرِ خوب شدن": "The road to healing",
+    "ریشه‌ی ماجرا": "The root of the situation",
+    "وضعیت الان": "What is happening now",
+    "مسیر پیش رو": "The road ahead",
+    "نیروی پنهان": "The hidden force",
+    "مانع پیش رو": "What will get in the way",
+    "آنچه گذشت": "What already happened",
+    "آنچه می‌دانی": "What you already know",
+    "آنچه نزدیک است": "What is close now",
+    "اطرافیان": "The people around you",
+    "امید و ترس": "Hope and fear",
+    "وفادار بوده": "They were faithful",
+    "خیانت کرده": "They cheated",
+    "نیروی پشتِ وفادار بوده": "What holds up the faithful side",
+    "نیروی پشتِ خیانت کرده": "What holds up the cheating side",
+    "نیروی پشتِ مسیر اول": "What holds up the first path",
+    "نیروی پشتِ مسیر دوم": "What holds up the second path"
+  },
+  "repair": {
+    "system": "You are an editor of a tarot reading written in English.\n\nEvery line you get has one specific problem, named right next to it. Fix only that.\n\nRules:\n- Leave the rest of the line alone. Same length, same tone, same meaning.\n- Spoken and warm, the way a person actually talks. Never corporate, never old fashioned.\n- No long dash, no emoji, no new sentences.\n- Never promise anything as certain; \"most likely\" and \"it leans this way\" are fine.\n\nAnswer with valid JSON only, no code fence:\n{\"fixes\": [\"fixed line 1\", \"fixed line 2\"]}\nSame order, same count.",
+    "hints": {
+      "evasion": "The decision was handed back to the person. Give a direction: say which side is heavier.",
+      "pastTime": "There is a reference to a point in the past, but we do not have the dates of earlier sessions. Drop the time reference itself and keep only the subject."
+    },
+    "item": "%i) [problem: %hint]\n[the phrase \"%phrase\" must not appear in your answer]\n%text"
+  },
+  "defects": [
+    {
+      "id": "llmese",
+      "pattern": "\\b(?:delv(?:e|es|ed|ing)\\s+(?:in)?to|tapestry|a\\s+testament\\s+to|it(?:\\s+is|['\\u2019]?s)\\s+(?:important\\s+to\\s+note|worth\\s+noting)|in\\s+the\\s+realm\\s+of|serv(?:e|es)\\s+as\\s+a\\s+(?:reminder|testament)|embark(?:s|ed|ing)?\\s+on\\s+a\\s+journey|navigat(?:e|es|ed|ing)\\s+the\\s+(?:complexities|complexity|landscape|waters|nuances|journey|path|terrain)|multifaceted|myriad\\s+of|plethora\\s+of|underscor(?:e|es|ed|ing)\\s+(?:the|a|an|your|how)|foster(?:s|ed|ing)?\\s+(?:a|an|the|deeper|greater)|unlock(?:s|ed|ing)?\\s+(?:your|the|their)\\s+(?:true\\s+|full\\s+|inner\\s+|hidden\\s+)?potential|profound\\s+(?:sense|impact|shift|transformation|realization|realisation|insight|understanding)|a\\s+journey\\s+of\\s+self[\\s\\-]discovery|intricate\\s+dance|paradigm\\s+shift|ever[\\s\\-]evolving|in\\s+conclusion|i\\s+hope\\s+this\\s+helps)\\b",
+      "flags": "i",
+      "hint": "This is corporate LLM wording, the kind of phrase no one says out loud. It instantly reads as machine written. Say the same thing the way a person would say it in a normal conversation, with the same length and the same meaning."
+    },
+    {
+      "id": "archaic",
+      "pattern": "\\b(?:thee|thou|thy|thine|ye|hath|hast|doth|dost|didst|shalt|mayest|canst|wouldst|shouldst|couldst|verily|forsooth|prithee|methinks|betwixt|thusly|whence|whither|thence|hither|yonder|unto|nay|alas|hark|(?<!lo\\s+and\\s+)behold|o['\\u2019]er|ne['\\u2019]er)\\b|['\\u2019](?:tis|twas|twere|twill)\\b",
+      "flags": "i",
+      "hint": "Fake old fashioned or mock mystical wording (thee, thou, hath, behold). The reader is a modern person and the voice here is warm and present day. Rewrite it in plain spoken English without losing the meaning."
+    },
+    {
+      "id": "nonlatin",
+      "pattern": "[\\u0400-\\u052f\\u0600-\\u06ff\\u0750-\\u077f\\ufb50-\\ufdff\\ufe70-\\ufefc\\u3000-\\u9fff\\uff00-\\uffef]+(?:[ ]+[\\u0400-\\u052f\\u0600-\\u06ff\\u0750-\\u077f\\ufb50-\\ufdff\\ufe70-\\ufefc\\u3000-\\u9fff\\uff00-\\uffef]+)*",
+      "flags": "",
+      "hint": "There are non Latin characters inside an English text, so the reader sees letters from another alphabet in the middle of the reading. Remove them and write the whole line in English only, card names included."
+    },
+    {
+      "id": "labelleak",
+      "pattern": "(?:your|the)\\s+unspoken\\s+feeling",
+      "flags": "i",
+      "hint": "This names the label instead of writing the feeling. \"Your unspoken feeling is...\" is the internal name of our job, never text for a person. Delete the label and go straight to the feeling itself, for example \"it sounds like you are waiting for someone else to make the call for you\"."
+    }
+  ],
+  "ctxKeys": {
+    "type": "spread type",
+    "summary": "summary",
+    "feedback": "user feedback"
+  },
+  "chat": {
+    "crisis": [
+      "kill myself",
+      "killing myself",
+      "kill my self",
+      "suicide",
+      "suicidal",
+      "end my life",
+      "end it all",
+      "take my own life",
+      "take my life",
+      "want to die",
+      "wanna die",
+      "i want to die",
+      "i wanna die",
+      "dont want to live",
+      "don't want to live",
+      "dont wanna live",
+      "don't wanna live",
+      "no reason to live",
+      "nothing to live for",
+      "not worth living",
+      "better off dead",
+      "hurt myself",
+      "harm myself",
+      "cut myself",
+      "cutting myself",
+      "overdose",
+      "kill me",
+      "end myself"
+    ],
+    "smallTalk": [
+      "hi",
+      "hi!",
+      "hii",
+      "hello",
+      "hello!",
+      "hey",
+      "hey!",
+      "heyy",
+      "yo",
+      "thanks",
+      "thanks!",
+      "thank you",
+      "thx",
+      "tnx",
+      "ty",
+      "thankyou",
+      "ok",
+      "okay",
+      "okey",
+      "k",
+      "kk",
+      "cool",
+      "cool!",
+      "nice",
+      "nice!",
+      "great",
+      "great!",
+      "awesome",
+      "perfect",
+      "lovely",
+      "got it",
+      "gotcha",
+      "understood",
+      "bye",
+      "goodbye",
+      "bye!",
+      "see ya",
+      "cya",
+      "good night",
+      "night",
+      "gn",
+      "lol",
+      "haha",
+      "hahaha",
+      "appreciate it",
+      "you rock",
+      "love it"
+    ],
+    "chatbait": [
+      "anything else",
+      "any other question",
+      "any other questions",
+      "is there anything else",
+      "let me know if",
+      "feel free to ask",
+      "feel free to reach",
+      "ask me anything",
+      "i am here to help",
+      "i'm here to help",
+      "im here to help",
+      "here if you need",
+      "happy to help",
+      "glad to help",
+      "hope this helps",
+      "hope that helps",
+      "does that help",
+      "does this help",
+      "let me know how",
+      "great question",
+      "good question",
+      "what a great question",
+      "that is a great question",
+      "that's a great question",
+      "well asked",
+      "nice question",
+      "smart question"
+    ]
+  }
+}

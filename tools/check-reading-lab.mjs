@@ -563,4 +563,79 @@ console.log('\n▶ تعمیرِ نقطه‌ای (به‌جای بازتولید�
   }
 }
 
+
+/* ▶ وفاداریِ آزمایشگاه به پروداکشن: اسپرد باید **ترجمه‌شده** به پرامپت برود.
+ *
+ * 🐛 باگِ واقعیِ ۱۴۰۵/۰۶/۲۷ که دورِ اولِ انگلیسی لو داد: `locSpread` فقط در `index.js`
+ * تعریف شده بود، پس تنها پروداکشن از آن رد می‌شد و آزمایشگاه اسپردِ **خام** می‌داد.
+ * یعنی مدل در هر دورِ غیرفارسی نامِ فارسیِ اسپرد و موقعیت‌ها را می‌دید:
+ *     «Расклад: «گذشته، حال، آینده», 3 карт»
+ * ترجمه گم نشده بود (`positionNames` هر چهار زبان کامل است)؛ **مسیرِ رسیدن** نبود
+ * (بند ۲و/۶ب). و این مستقیماً قراردادِ خودِ آزمایشگاه را نقض می‌کرد: «هرگز چیزی را
+ * تست نمی‌کند که با پروداکشن فرق دارد». همه‌ی دورهای غیرفارسیِ تا آن روز روی پرامپتی
+ * اندازه‌گیری شده بودند که محصول اجرا نمی‌کرد. */
+console.log('\n▶ وفاداریِ اسپردِ آزمایشگاه به پروداکشن');
+{
+  const PROD = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
+  const CORE = readFileSync(new URL('../bots/tarot/reading-core.js', import.meta.url), 'utf8');
+  const LABSRC = readFileSync(new URL('./reading-lab.mjs', import.meta.url), 'utf8');
+  const CHATLAB = readFileSync(new URL('./chat-lab.mjs', import.meta.url), 'utf8');
+
+  // ── ساختاری: یک تعریف، نه دو تا که واگرا شوند
+  ok(/export const locSpread/.test(CORE),
+     '`locSpread` در reading-core تعریف و export شده (تک‌منبع)');
+  ok(!/^const locSpread/m.test(PROD),
+     'index.js نسخه‌ی محلیِ خودش را ندارد (وگرنه دو تعریف واگرا می‌شوند)');
+
+  // ── هیچ صداکننده‌ای اسپردِ خام به پرامپت ندهد
+  for (const [name, src] of [['reading-lab.mjs', LABSRC], ['chat-lab.mjs', CHATLAB], ['index.js', PROD]]) {
+    const raw = [...src.matchAll(/readerSystemV[0-9]?\(\s*spread\s*,/g)].length;
+    ok(raw === 0, `${name}: هیچ فراخوانیِ readerSystem با اسپردِ **خام** ندارد`);
+  }
+  ok([...LABSRC.matchAll(/readerSystemV4\(locSpread\(spread\)/g)].length >= 2,
+     'reading-lab هر دو مسیرش اسپردِ ترجمه‌شده می‌دهد');
+
+  /* ── رفتاری، و این مهم‌ترین ادعاست: ادعای ساختاری بالا فقط می‌گوید «تابع صدا زده شد»،
+   * نه اینکه واقعاً **ترجمه کرد**. پس خودِ locSpread در یک زبانِ غیرفارسی اجرا می‌شود و
+   * نتیجه‌اش شمرده می‌شود (بند ۲و/۶ب: گاردِ آینه‌ای همیشه گاردِ رفتاری هم لازم دارد). */
+  const probe = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const s  = await import('${new URL('../bots/tarot/spreads.js', import.meta.url).pathname}');
+    const rc = await import('${new URL('../bots/tarot/reading-core.js', import.meta.url).pathname}');
+    const lb = await import('${new URL('../bots/tarot/locale-boot.js', import.meta.url).pathname}');
+    lb.configureAllLocales();
+    const m  = (await import('${new URL('../bots/tarot/locales/ru.js', import.meta.url).pathname}')).default;
+    const fa = (x) => (String(x).match(/[\\u0600-\\u06FF]+/g) || []).length;
+    const sp = s.SPREAD_BY_ID.three;
+    console.log(JSON.stringify({
+      raw:   fa(m.prompts.readerSystemV4(sp, {})),
+      fixed: fa(m.prompts.readerSystemV4(rc.locSpread(sp), {})),
+    }));
+  `], { encoding: 'utf8', env: { ...process.env, LOCALE: 'ru' } });
+  let r = {}; try { r = JSON.parse((probe.stdout || '').trim().split('\n').pop()); } catch {}
+  ok(r.fixed === 0,
+     `پرامپتِ روسی با locSpread صفر واژه‌ی فارسی دارد (گرفت: ${r.fixed})`);
+  // کنترلِ مثبت: بدونِ آن واقعاً فارسی نشت می‌کند، وگرنه ادعای بالا پوچ بود
+  ok(r.raw > 0,
+     `کنترلِ مثبت: بدونِ locSpread فارسی واقعاً نشت می‌کند (${r.raw} واژه)`);
+}
+
+/* ═══════════════ ۹) ممیزیِ سنجه‌ها روی **انگلیسی** ═══════════════
+ *
+ * چرا جدا و چرا فقط انگلیسی: `lang/en.mjs` تازه است و برخلافِ چهار زبانِ دیگر هرگز
+ * روی دورهای واقعیِ آزمایشگاه نچرخیده. سنجه‌ی سبزِ نچرخیده دو معنی دارد («چیزی نیست»
+ * یا «چیزی را که هست نمی‌بینم») و تنها راهِ تفکیک، زدنش روی نمونه‌ی شناخته‌شده‌ی نقض
+ * است (بند ۲و/۶ب-۲ ریشه). اجرا در پروسه‌ی جدا اجباری است، چون `checks.mjs` زبان را
+ * **لحظه‌ی بارگذاری** از `LOCALE` می‌خواند و کشِ ESM اجازه‌ی بارگذاریِ دوم را نمی‌دهد.
+ * بدونِ شبکه و بدونِ هیچ فراخوانیِ مدل. */
+{
+  console.log('\n▶ ممیزیِ سنجه‌ها روی انگلیسی');
+  const r = spawnSync(process.execPath, [new URL('./reading-lab/metric-audit.en.mjs', import.meta.url).pathname],
+    { encoding: 'utf8' });
+  let out = {};
+  try { out = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { out = { pass: 0, fails: ['خروجیِ ممیزی خوانده نشد: ' + (r.stderr || '').slice(-300)] }; }
+  for (const f of out.fails || []) ok(false, `ممیزیِ en: ${f}`);
+  // کنترلِ مثبت: اگر روزی خودِ هارنس بی‌صدا از کار بیفتد، «صفر شکست» نباید سبز بدهد.
+  ok((out.pass || 0) >= 37, `ممیزیِ سنجه‌های en اجرا شد (${out.pass || 0} ادعا)`);
+}
+
 if (errs.length) { errs.forEach(e => console.log(`   - ${e}`)); process.exit(1); }

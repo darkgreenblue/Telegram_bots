@@ -1272,6 +1272,72 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     '⚠️ و شناسه در الگو **اختیاری** است (دکمه‌ی کهنه نمی‌میرد، بند ۲ج/۶)');
 }
 
+/* ▶ گاردِ ایمنی: هر زبانی که گفتگو برایش روشن است باید الگوهای بحرانِ **خودش** را داشته باشد.
+ *
+ * ⚠️ چرا این ادعا لازم است و چرا الان: `configureChatLang` وقتی `chat` در langdata نباشد
+ * زودهنگام return می‌کند، و `langTable(FA_LANG)` یعنی آن زبان روی الگوهای **فارسی**
+ * می‌ماند. یک الگوی فارسی هرگز با متنِ انگلیسی یا روسی match نمی‌شود، پس گاردِ بحران
+ * ساختاراً کور می‌شود در حالی که همه‌چیز سبز به نظر می‌رسد — دقیقاً همان زخمِ بند ۲و/۶ب-۲.
+ *
+ * امروز `CHAT_LOCALES = ['fa']` جلویش را می‌گیرد و کامنتِ chat-core.js هم همین را
+ * می‌گوید. ولی هیچ چیزی این دو را به هم **قفل** نکرده: اضافه کردنِ یک زبان به آن آرایه
+ * یک تغییرِ تک‌خطی است و اگر langdata همان زبان `chat` نداشته باشد، حساس‌ترین گاردِ
+ * محصول بی‌صدا از کار می‌افتد. این ادعا همان قفل است.
+ *
+ * (رباتِ واحدِ چندزبانه انگلیسی را زبانِ پیش‌فرض می‌کند، پس این خیلی زود واقعی می‌شود.) */
+console.log('\n▶ قفلِ CHAT_LOCALES و الگوهای بحرانِ per زبان');
+{
+  const listSrc = (CODE.match(/const CHAT_LOCALES\s*=\s*\[([^\]]*)\]/) || [])[1];
+  ok(typeof listSrc === 'string', 'آرایه‌ی CHAT_LOCALES در سورس پیدا شد');
+  const locales = (listSrc || '').split(',')
+    .map((x) => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  ok(locales.length > 0, `CHAT_LOCALES خالی نیست (${locales.join(', ')})`);
+
+  for (const lg of locales) {
+    // fa الگوهای هاردکدِ خودش را دارد و عمداً langdata ندارد.
+    if (lg === 'fa') {
+      ok(!fs.existsSync(new URL(`../bots/tarot/langdata.fa.json`, import.meta.url)),
+         'fa عمداً langdata ندارد و روی الگوهای هاردکدِ خودش می‌ماند');
+      continue;
+    }
+    const f = new URL(`../bots/tarot/langdata.${lg}.json`, import.meta.url);
+    const has = fs.existsSync(f);
+    ok(has, `langdata.${lg}.json وجود دارد (گفتگو برایش روشن است)`);
+    if (!has) continue;
+    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+    ok(Array.isArray(d.chat?.crisis) && d.chat.crisis.length > 0,
+       `«${lg}» الگوهای بحرانِ خودش را دارد (وگرنه بی‌صدا روی الگوهای فارسی می‌ماند)`);
+  }
+
+  /* 💸 و بودجه‌ی پرامپت، در همان قفل. `CHAT_BUDGET.sys` یک بندِ **اعلام‌شده** است ولی
+   * `index.js` پرامپتِ سیستم را بدونِ `cut()` می‌چسباند، پس هیچ‌چیز در زمانِ اجرا کوتاه
+   * نمی‌شود: عبور از بودجه بی‌صدا است و فقط پیشوندِ کشِ‌شده را بزرگ‌تر می‌کند — همان
+   * چیزی که کلِ اقتصادِ گفتگو رویش بنا شده.
+   *
+   * ⚠️ اندازه‌گیریِ ۱۴۰۵/۰۶/۲۷: fa ۴۶۹۳ (داخلِ بودجه)، ru ۴۸۷۳، pt ۴۹۸۴، es ۵۱۰۳، و
+   * **en ۶۰۸۳ یعنی ۲۷٪ بالاتر**. هیچ‌کدام امروز اثری ندارند چون گفتگو فقط برای fa روشن
+   * است. این ادعا همان را **لحظه‌ای که اهمیت پیدا می‌کند** قرمز می‌کند، نه دیرتر. */
+  for (const lg of locales) {
+    const f = new URL(`../bots/tarot/locales/${lg}.js`, import.meta.url);
+    if (!fs.existsSync(f)) continue;
+    const mod = (await import(f)).default;
+    const sys = mod?.prompts?.chatSystem;
+    ok(typeof sys === 'string' && sys.length > 0, `«${lg}»: chatSystem یک رشته‌ی ناخالی است`);
+    if (typeof sys !== 'string') continue;
+    ok(sys.length <= chat.CHAT_BUDGET.sys,
+       `«${lg}»: chatSystem داخلِ بودجه است (${sys.length} از ${chat.CHAT_BUDGET.sys})`);
+  }
+
+  /* کنترلِ مثبت: ثابت می‌کند ادعای بالا پوچ نیست. یک زبانِ ساختگی که `chat` ندارد باید
+   * واقعاً روی الگوهای فارسی بیفتد؛ اگر روزی fallback عوض شد، این قرمز می‌شود. */
+  const { configureChatLang, chatLang } = chat;
+  const { withLang } = await import('../bots/tarot/locale-ctx.js');
+  configureChatLang(undefined, 'fa');
+  const faCrisis = withLang('fa', () => chatLang().crisis);
+  ok(Array.isArray(faCrisis) && faCrisis.some((x) => /خودکشی/.test(x)),
+     'کنترلِ مثبت: زبانِ بدونِ `chat` واقعاً روی الگوهای فارسی می‌افتد (پس ادعای بالا واقعی است)');
+}
+
 /* ═══ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه، نیت و دکمه‌ی منو (v3.96.0) ══════════
  *
  * چهار چیزِ تازه، و هر چهار روی مسیرهایی که شکستشان **بی‌صداست**: یک دکمه که اگر
@@ -1540,12 +1606,21 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
   }
   ok(!declaresEnvelope('یک پرامپتِ بی‌پاکت که فقط متن می‌خواهد'),
     '🔁 کنترلِ مثبت: همین سنجه روی پرامپتِ بی‌پاکت قرمز می‌دهد');
-  /* شکلِ locale برای **هر چهار** زبان سنجیده می‌شود، نه فقط زبانِ فعال: نصبِ دکمه‌ی
+  /* شکلِ locale برای **همه‌ی** زبان‌ها سنجیده می‌شود، نه فقط زبانِ فعال: نصبِ دکمه‌ی
    * منو در بوتِ هر ربات اجرا می‌شود و یک کلیدِ گمشده یعنی `description: undefined` و
-   * ردِ کلِ فراخوانی توسط تلگرام. */
+   * ردِ کلِ فراخوانی توسط تلگرام.
+   *
+   * ⚠️ فهرست از **خودِ پوشه‌ی locales** مشتق می‌شود، نه هاردکد. نسخه‌ی اول
+   * `['fa','ru','pt','es']` بود و کامنتش «هر چهار زبان» می‌گفت؛ وقتی انگلیسی اضافه شد
+   * بی‌صدا از این ادعا بیرون ماند، یعنی یک فیچرِ تازه برای چهار زبان سنجیده می‌شد و
+   * برای پنجمی نه (نقضِ بند ۲و/۱). زبانِ بعدی خودبه‌خود پوشش می‌گیرد. */
   const cmdKeys = [...cmdsSrc.matchAll(/\['([a-z]+)', '([a-z]+)'\]/g)].map((m) => m[2]);
   ok(cmdKeys.length === 3, 'کلیدهای locale ی دستورها از همان فهرست مشتق شدند');
-  for (const loc of ['fa', 'ru', 'pt', 'es']) {
+  const ALL_LOCALES = fs.readdirSync(new URL('../bots/tarot/locales/', import.meta.url))
+    .filter((f) => f.endsWith('.js')).map((f) => f.replace(/\.js$/, '')).sort();
+  ok(ALL_LOCALES.length >= 5,
+     `فهرستِ زبان‌ها از پوشه مشتق شد و همه را دارد (${ALL_LOCALES.join(', ')})`);
+  for (const loc of ALL_LOCALES) {
     const Lx = (await import(`../bots/tarot/locales/${loc}.js`)).default;
     ok(cmdKeys.every((k) => typeof Lx.commands?.[k] === 'string' && Lx.commands[k].trim()),
       `«${loc}» هر سه متنِ دستور را دارد`);

@@ -42,6 +42,7 @@ const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape, parseJsonLoose,
   orChatResilient, cardName, spreadName,
   READING_MODEL, FALLBACK_MODEL, FLASH, CHAT_MODEL, CHAT_PLAN,
+  locSpread,
 } = await import('../bots/tarot/reading-core.js');
 const {
   buildChatCtx, packHistory, toMessages, messagesChars,
@@ -311,7 +312,7 @@ async function buildBase(persona, step, i) {
     name: persona.name, hideName: true, kbOn: true, prev: [],
   });
   const labels = L.prompts.cardLabels(cards.length);
-  const system = L.prompts.readerSystemV4(spread, labels);
+  const system = L.prompts.readerSystemV4(locSpread(spread), labels);
   const userMsg = L.prompts.readingContext(ctx);
 
   let parsed = null, fallback = null;
