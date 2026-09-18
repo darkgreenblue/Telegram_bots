@@ -306,7 +306,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.97.0';
+const PRODUCT_VERSION = '3.99.1';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -345,6 +345,31 @@ const OPEN_TOPIC_ENABLED = true;
 // به‌جای یتیم‌کردنِ بی‌صدای فاکتور. Rollback فوری: false کن → دکمه‌های nav و گارد محو، رفتار دقیقاً مثل قبل
 // (callbackِ nav:menu ثبت‌شده می‌ماند تا دکمه‌ی کش‌شده هم بی‌خطر باشد).
 const NAV_GUARD_ENABLED = true;
+
+/* ═══════════ 🧭 UX v3.97 — انتشارِ مرحله‌ای (بند ۲ج-۲ ریشه) ═══════════
+ *
+ * خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۲۷): «کل این تغییرات رو اول روی کاربر ادمین اعمال کن من
+ * تست کنم، اگه اوکی بود روی همه اعمال کنیم.» پس **هر پنج بخشِ** v3.97.0 پشتِ همین یک
+ * جفت‌پرچم رفت و رفتارِ کاربرِ واقعی بیت‌به‌بیت همان v3.96.0 است:
+ *   ۱) ردیفِ بازگشتِ دولایه (لایه‌ی ۱ «بازگشت به منوی اصلی»، لایه‌ی ۲+ «بازگشت»)
+ *   ۲) زنجیره‌ی ادیت-در-جا: کم‌موجودی ⟵ ذخایر (`wallet_fresh`) ⟵ دعوت (`invite_edit`)
+ *   ۳) متنِ هشدارِ انصرافِ فالِ پول‌داده (`openReadingGuardPaid`)
+ *   ۴) فاکتور فقط لحظه‌ی انتخابِ بسته صادر می‌شود (نه سرِ باز شدنِ صفحه‌ی بسته‌ها)
+ *   ۵) ~~شماره‌ی فاکتور~~ — عمداً **گیت نشد**، پایین توضیح داده شده.
+ *
+ * ⚠️ بخشِ ۵ (ستونِ `invoice_no`، بک‌فیل، شماره‌دهی و نمایشش) بیرونِ این گیت است و این
+ * یک تصمیمِ آگاهانه است نه فراموشی: (الف) شماره یک **شمارنده‌ی سراسری** است و «فقط برای
+ * ادمین شماره بده» یعنی دو دنباله‌ی ناسازگار روی یک جدول؛ (ب) هر سه نقطه‌ی نمایشش
+ * (`adminAutoApproved`، `adminNotify`، پیام‌های برگشتِ رسید) **پیامِ ادمین** اند و هیچ
+ * کاربرِ واقعی‌ای نمی‌بیندشان، پس از نظرِ دامنه از قبل «فقط-ادمین» است؛ (ج) ستون افزایشی
+ * و fail-safe است (`invoice_no=0` ⟵ فالبک به `id`).
+ *
+ * باز کردن برای همه = **یک خط** (`UX_NAV_V2_ADMIN_ONLY = false`) در یک PR جدا، با بامپِ
+ * نسخه و آپدیتِ ردیفِ چکِ CI. رول‌بکِ کامل هم **یک خط** (`UX_NAV_V2 = false`).
+ * هیچ‌جا پرچمِ خام صدا زده نمی‌شود، فقط `navV2For(uid)` — و چکِ CI تعدادِ استفاده‌ی خام
+ * را می‌شمارد (الگوی `tools/check-coins.mjs`). */
+const UX_NAV_V2 = true;
+const UX_NAV_V2_ADMIN_ONLY = false;
 
 /* ═══════════ 🗣 گفتگوی پس از فال (v3.84.0) ═══════════
  *
@@ -530,6 +555,8 @@ const TESTER_IDS = [
 ];
 // فیچرهای در-حالِ-تست از این می‌خوانند، نه از isAdmin — پس ادمین هم خودکار تستر است.
 const isTester = (uid) => isAdmin(uid) || TESTER_IDS.includes(uid);
+// 🧭 تنها دروازه‌ی ورودِ v3.97 (بالا). هیچ مسیری حق ندارد `UX_NAV_V2*` را خام بخواند.
+const navV2For = (uid) => UX_NAV_V2 && (!UX_NAV_V2_ADMIN_ONLY || isTester(uid));
 
 // ───────────────────────────────────────────────────────────────────────────
 // 🎭 نسخه‌ی دومِ لحنِ خوانش (v3.0.0)
@@ -1951,6 +1978,13 @@ const stmts = {
   // کارِ `recoverOrphanReadings` است (ریفاند)، نه ادامه.
   resumableReading: db.prepare(
     "SELECT * FROM readings WHERE user_id=? AND status='started' AND llm_json<>'' AND cards_json<>'' ORDER BY id DESC LIMIT 1"),
+  // 🔁 فالِ پرداخت‌شده‌ای که هنوز سؤال نگرفته است. این حالت با `resumableReading`
+  // فرق دارد: هنوز کارت/خوانش ساخته نشده، پس تنها ادامه‌ی درست بازگرداندنِ کاربر به
+  // مرحله‌ی نوشتنِ سؤال است — نه شروعِ دوباره و نه ریفاند. هر سه ستونِ خالی لازم‌اند:
+  // سؤالِ صوتی عمداً `question=''` دارد، اما `question_audio` پر است و نباید دوباره
+  // «سؤالت را بنویس» ببیند.
+  awaitingQuestionReading: db.prepare(
+    "SELECT * FROM readings WHERE user_id=? AND status='paid' AND COALESCE(question,'')='' AND COALESCE(cards_json,'')='' AND COALESCE(question_audio,'')='' ORDER BY id DESC LIMIT 1"),
   // ادعای اتمیکِ استیت — گاردِ دوبار-تپ روی دکمه‌ی اندازه. `setState` بی‌قید است و
   // دو تپِ سریع هر دو رد می‌شدند؛ این یکی فقط برای **اولین** تپ changes=1 می‌دهد.
   claimState: db.prepare('UPDATE users SET state=? WHERE telegram_id=? AND state<>?'),
@@ -2656,11 +2690,13 @@ function navState(uid) {
 
 /** ورودِ لایه‌ی ۱ (کیبوردِ ماندگار): این صفحه ریشه است، پس پشته ریست می‌شود. */
 function navEnter(uid, s, a = '') {
+  if (!navV2For(uid)) return;   // خارج از دامنه: هیچ چیزی در سشن نوشته نمی‌شود
   try { patchSession(uid, { nav: [], navCur: { s, a } }); } catch (e) { logErr('navEnter:', e.message); }
 }
 
 /** یک قدم جلو: صفحه‌ی فعلی روی پشته می‌رود و صفحه‌ی تازه جایش می‌نشیند. */
 function navGo(uid, s, a = '') {
+  if (!navV2For(uid)) return;
   try {
     const { stack, cur } = navState(uid);
     const next = cur ? [...stack, cur].slice(-NAV_STACK_MAX) : stack;
@@ -2668,9 +2704,14 @@ function navGo(uid, s, a = '') {
   } catch (e) { logErr('navGo:', e.message); }
 }
 
-/** آخرین ردیفِ هر صفحه: «بازگشت»ِ یک‌قدمی، یا در لایه‌ی ۱ «بازگشت به منوی اصلی». */
-function navBackRow(uid) {
-  if (!NAV_GUARD_ENABLED) return [];
+/** آخرین ردیفِ هر صفحه: «بازگشت»ِ یک‌قدمی، یا در لایه‌ی ۱ «بازگشت به منوی اصلی».
+ *
+ * ⚠️ `legacy` دقیقاً همان ردیفی است که v3.96.0 در **همان نقطه** رندر می‌کرد. کاربرِ
+ * خارج از دامنه‌ی `navV2For` همان را می‌گیرد، پس بیت‌به‌بیت رفتارِ قبلی برقرار است و
+ * هیچ صفحه‌ای هم بن‌بست نمی‌شود. پیش‌فرضش `[]` است چون بیشترِ این صفحه‌ها در v3.96.0
+ * اصلاً ردیفِ بازگشت نداشتند (همان بن‌بست‌هایی که مالک به‌نام گفت). */
+function navBackRow(uid, legacy = []) {
+  if (!NAV_GUARD_ENABLED || !navV2For(uid)) return legacy;
   return navState(uid).stack.length
     ? [[Markup.button.callback(L.buttons.backOneStep, 'nav:back')]]
     : navMenuRow();
@@ -2892,6 +2933,32 @@ function resumeRowFromDb(uid) {
   return null;
 }
 
+// این predicate علاوه بر WHERE کوئری، مرزِ بازیابی را مستند و قابل‌آزمایش می‌کند: فقط
+// فالی که دقیقاً در نقطه‌ی «پول کم شده، سؤال نگرفته‌ایم» است به `await_question` برمی‌گردد.
+// هیچ فالِ صوتی، در حال ساخت، یا در حال تحویل نباید با این مسیر به عقب برگردد.
+function isAwaitingQuestionReading(r) {
+  return !!r && r.status === 'paid' && !r.question && !r.cards_json && !r.question_audio;
+}
+
+/** بازیابیِ فالی که در لحظه‌ی انتخابِ اندازه پولش کم شده، ولی هنوز سؤال نگرفته است.
+ *
+ * `/start` و دکمه‌ی منوی تلگرام ممکن است سشن را پاک کنند. این‌جا DB منبعِ حقیقت است و
+ * سشن فقط دوباره ساخته می‌شود؛ بنابراین نه کسرِ دوم داریم، نه رکوردِ تازه، نه خوانشِ
+ * بی‌سؤال. خروجی خودِ رکورد است تا caller همان گارد استانداردِ ادامه/انصراف را نشان دهد. */
+function resumeAwaitingQuestionFromDb(uid) {
+  const r = stmts.awaitingQuestionReading.get(uid);
+  if (!isAwaitingQuestionReading(r)) return null;
+  const spread = SPREAD_BY_ID[r.type];
+  setSession(uid, {
+    spreadId: r.type,
+    readingId: r.id,
+    picks: [],
+    focusKey: r.focus_area || spread?.focus || (spread?.open ? 'open' : 'question'),
+  });
+  setState(uid, 'await_question');
+  return r;
+}
+
 // 🔒 فالِ **در حالِ تحویل** (پول داده شده، `status='started'`) هرگز با یک تپ از سشن پاک
 // نمی‌شود. `cancelReading` خودش درست عمل می‌کند و پولی برنمی‌گرداند (محصول دارد تحویل
 // می‌شود)، ولی `setSession(uid, null)`ِ بعدش `readingId` و `revealIdx` را می‌برد و کاربر
@@ -2930,7 +2997,7 @@ async function blockDuringOpenReading(ctx, intent, intentArg = 0) {
    * است، پس هر فالی که به این استیت‌ها رسیده پرداخت شده) و `REFUND_ON_CANCEL=false` است:
    * انصراف الماس را برنمی‌گرداند. تا امروز دکمه‌ی «انصراف» **مخرب** بود و کاربر خبر
    * نداشت — همان ریسکی که خودِ v3.54.0 ثبتش کرده بود و مالک حالا بستنش را خواست. */
-  const paidFlow = REFUND_ON_CANCEL === false && !!getSession(uid)?.readingId;
+  const paidFlow = navV2For(uid) && REFUND_ON_CANCEL === false && !!getSession(uid)?.readingId;
   await ctx.reply(paidFlow ? L.reading.openReadingGuardPaid : L.reading.openReadingGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
@@ -3871,6 +3938,20 @@ async function handleStart(ctx) {
     return startOnboarding(ctx, uid);
   }
 
+  // `/start` یک دکمه‌ی reply نیست، پس عمداً از middleware گاردِ callback رد نمی‌شود.
+  // با این حال نباید بتواند تنها فالِ پول‌داده‌ی منتظرِ سؤال را رها کند. اول خودِ فال را
+  // از DB بازسازی می‌کنیم و همان انتخابِ آگاهانه‌ی استاندارد را می‌دهیم؛ فقط «انصراف»
+  // صریح می‌تواند کاربر را از آن خارج کند. این باید **قبل از** reset پایین باشد.
+  try {
+    const awaitingQuestion = resumeAwaitingQuestionFromDb(uid);
+    if (awaitingQuestion) {
+      return await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
+        [Markup.button.callback(L.buttons.cancel, `rcancel:${awaitingQuestion.id}`)],
+      ]));
+    }
+  } catch (e) { logErr('resume awaiting question:', e.message); }
+
   // کاربر برگشتی
   setState(uid, 'idle');
   setSession(uid, null);
@@ -4575,7 +4656,7 @@ async function luckyCard(ctx) {
     // نه یک پیامِ ناخواسته، پس نه جای پیشنهادِ خاموشی است و نه جای opt-in.
     // 🧭 بن‌بست نباشد (خواسته‌ی صریحِ مالک): این صفحه از کیبوردِ ماندگار باز می‌شود، پس
     // آخرین دکمه‌اش «بازگشت به منوی اصلی» است و منوی پایین را هم برمی‌گرداند.
-    const row = navMenuRow();
+    const row = navV2For(uid) ? navMenuRow() : [];
     return row.length ? ctx.reply(L.lucky.already, Markup.inlineKeyboard(row)) : ctx.reply(L.lucky.already);
   }
   setState(uid, 'lucky_shuffle');
@@ -4626,6 +4707,13 @@ bot.action('wallet_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {
 bot.action('wallet_fresh', async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
+  /* خارج از دامنه‌ی v3.97: بیت‌به‌بیت همان مسیرِ v3.96.0 — پیام پاک می‌شود و صفحه‌ی
+   * ذخایر به‌عنوان یک پیامِ تازه می‌آید (`showWallet` خودش همه‌ی گاردها را دارد). */
+  if (!navV2For(uid)) {
+    try { await ctx.deleteMessage(); }
+    catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+    return showWallet(ctx);
+  }
   upsertUser(ctx);
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.WALLET)) return;
@@ -5145,7 +5233,8 @@ function falMenuKb(uid) {
  * می‌برد، در همان یک مسیر برداشته می‌شود). بیرون از آنبوردینگ بیت‌به‌بیت مثل قبل. */
 const allTopicsKb = (uid) => [
   ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t, spreadName(t.fa)), `topic:${t.key}:a`), topicStyle(t.key))]),
-  ...(inOnboardFlow(uid) ? [] : navBackRow(uid)),
+  // v3.96.0 این‌جا `navMenuRow()` داشت؛ کاربرِ خارج از دامنه دقیقاً همان را می‌گیرد.
+  ...(inOnboardFlow(uid) ? [] : navBackRow(uid, navMenuRow())),
 ];
 
 // تک‌منبعِ «متن + کیبورد» هر صفحه‌ی ناوبری، تا showCatalog و دکمه‌های بازگشت دقیقاً یک چیز
@@ -5525,10 +5614,9 @@ function pickSizeScreen(uid, t, from) {
        * ⚠️ برچسب از «بازگشت به منوی اصلی» به «بازگشت» رفت (خواسته‌ی صریحِ مالک): این
        * صفحه لایه‌ی ۲ است و دکمه‌اش یک قدم عقب می‌رود، نه تا ریشه. مقصد هم از پشته
        * می‌آید نه از `from`؛ ولی `tback:` برای دکمه‌های کهنه‌ی داخلِ چت زنده می‌ماند
-       * (بند ۲ج/۶) و دقیقاً همان منو را برمی‌گرداند. */
-      ...(navBackRow(uid).length
-        ? navBackRow(uid)
-        : [[Markup.button.callback(L.buttons.backOneStep, `tback:${from}`)]]),
+       * (بند ۲ج/۶) و دقیقاً همان منو را برمی‌گرداند.
+       * خارج از دامنه‌ی v3.97: همان دکمه‌ی v3.96.0 با برچسبِ «بازگشت به منوی اصلی». */
+      ...navBackRow(uid, [[Markup.button.callback(L.buttons.backToMenu, `tback:${from}`)]]),
     ]),
   }];
 }
@@ -7470,7 +7558,8 @@ function walletRows(uid) {
   const rows = [[rechargeBtn(uid)]];
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
-  rows.push(inviteRow(uid, 'invite_edit'));   // یک قدم جلو، روی همین پیام (نه پیامِ تازه)
+  // یک قدم جلو، روی همین پیام (نه پیامِ تازه). خارج از دامنه‌ی v3.97 همان `invite_go`.
+  rows.push(inviteRow(uid, navV2For(uid) ? 'invite_edit' : 'invite_go'));
   if (getUser(uid)?.lucky_date !== botToday()) {
     rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
   }
@@ -7693,11 +7782,14 @@ const packsRevealed = (uid) => {
   catch (e) { logErr('packs revealed:', e.message); return false; }
 };
 
-/* ⚠️ از ۱۴۰۵/۰۶/۲۷ دیگر `paymentId` نمی‌گیرد، و این قلبِ تغییرِ «فاکتور فقط لحظه‌ی
- * انتخابِ بسته صادر می‌شود» است: تا وقتی بسته‌ای انتخاب نشده هیچ ردیفی در `payments`
- * وجود ندارد، پس نه شماره‌ای هست که روی دکمه بنشیند و نه فاکتوری که «نیمه‌کاره» بماند.
- * دکمه‌ی بازگشت هم از پشته‌ی ناوبری می‌آید نه از `pay_back:<id>`. */
-function packMenuScreen(uid) {
+/* ⚠️ از ۱۴۰۵/۰۶/۲۷ برای کاربرِ داخلِ دامنه‌ی v3.97 دیگر `paymentId` لازم ندارد، و این
+ * قلبِ تغییرِ «فاکتور فقط لحظه‌ی انتخابِ بسته صادر می‌شود» است: تا وقتی بسته‌ای انتخاب
+ * نشده هیچ ردیفی در `payments` وجود ندارد، پس نه شماره‌ای هست که روی دکمه بنشیند و نه
+ * فاکتوری که «نیمه‌کاره» بماند. دکمه‌ی بازگشت هم از پشته‌ی ناوبری می‌آید.
+ *
+ * برای کاربرِ **خارج** از دامنه، `paymentId` همان نقشِ v3.96.0 را دارد و هر دو دکمه
+ * (`pack_reveal:<id>` و `pay_back:<id>`) بیت‌به‌بیت مثل قبل ساخته می‌شوند. */
+function packMenuScreen(uid, paymentId = 0) {
   const cur = curOf(uid);
   const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
   // ریلِ استارز اصلاً بسته‌ی farsiOnly را نمی‌شناسد (STAR_LADDERS دو تای تازه را ندارد).
@@ -7726,12 +7818,15 @@ function packMenuScreen(uid) {
   colored ? PACK_STYLE[p.key] : undefined)]);
   // دکمه‌ی کشفِ دو بسته‌ی گران‌تر — عمداً بدونِ ایموجی (خواسته‌ی مالک: جلبِ توجه فقط
   // رویِ سه بستهٔ اول بماند).
-  if (staged) rows.push([Markup.button.callback(L.buttons.revealMorePacks, 'pack_reveal')]);
+  if (staged) {
+    rows.push([Markup.button.callback(L.buttons.revealMorePacks,
+      navV2For(uid) ? 'pack_reveal' : `pack_reveal:${paymentId}`)]);
+  }
   /* دکمه‌ی بازگشت **همیشه** هست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست).
-   * 🐛 و از ۱۴۰۵/۰۶/۲۷ دیگر پیامِ «یه خرید نیمه‌کاره داری» نمی‌دهد: چون در این لحظه
-   * هیچ ردیفِ پرداختی وجود ندارد، گاردِ مرکزی چیزی برای محافظت پیدا نمی‌کند و تپ
-   * بی‌سروصدا یک قدم عقب می‌رود — دقیقاً چیزی که مالک خواست. */
-  const back = navBackRow(uid);
+   * 🐛 و از ۱۴۰۵/۰۶/۲۷ (داخلِ دامنه) دیگر پیامِ «یه خرید نیمه‌کاره داری» نمی‌دهد: چون
+   * در این لحظه هیچ ردیفِ پرداختی وجود ندارد، گاردِ مرکزی چیزی برای محافظت پیدا نمی‌کند
+   * و تپ بی‌سروصدا یک قدم عقب می‌رود — دقیقاً چیزی که مالک خواست. */
+  const back = navBackRow(uid, [[Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)]]);
   return [L.wallet.coinPacks(cur), Markup.inlineKeyboard([
     ...rows,
     ...(back.length ? back : [[Markup.button.callback(L.buttons.backOneStep, 'wallet_go')]]),
@@ -7762,20 +7857,33 @@ bot.action('recharge', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
   trackMoneyCtaCallback(uid, 'recharge');
-  /* 🧾 **هیچ ردیفِ پرداختی این‌جا ساخته نمی‌شود** (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۷).
+  /* 🧾 **داخلِ دامنه‌ی v3.97 هیچ ردیفِ پرداختی این‌جا ساخته نمی‌شود** (خواسته‌ی صریحِ
+   * مالک ۱۴۰۵/۰۶/۲۷).
    *
    * دیدنِ فهرستِ بسته‌ها یک تصمیم نیست، یک نگاه است. ساختنِ ردیف در همین لحظه سه ضرر
    * داشت: (۱) هر تپ یک «خریدِ نیمه‌کاره» می‌ساخت و گاردِ مرکزی روی دکمه‌ی بازگشت پیامِ
    * «یه خرید نیمه‌کاره داری» می‌داد، (۲) جدولِ `payments` پر از ردیفِ `amount=0` می‌شد و
-   * (۳) شماره‌ی فاکتور که کاربر و ادمین می‌بینند از تعدادِ **واقعیِ** فاکتورها جلو می‌زد.
+   * (۳) شماره‌ی فاکتور از تعدادِ **واقعیِ** فاکتورها جلو می‌زد.
    * از این به بعد ردیف دقیقاً در `pkg:` — یعنی لحظه‌ی انتخابِ بسته و صدورِ فاکتور — ساخته
    * می‌شود، و خودِ همان هندلر اگر ردیفی نبود می‌سازدش (مسیرِ خودترمیمِ v3.66.0).
    *
    * استیت همچنان `pay_amount` می‌ماند تا متنِ آزادِ کاربر در این صفحه درست تفسیر شود؛
    * ولی چون `session.paymentId` خالی است، `issuedInvoiceOf`/`activePaymentFlow` هیچ
-   * فاکتوری پیدا نمی‌کنند و هیچ گاردی بی‌دلیل شلیک نمی‌کند. */
-  trackRechargeStarted(uid);
+   * فاکتوری پیدا نمی‌کنند و هیچ گاردی بی‌دلیل شلیک نمی‌کند.
+   *
+   * ⚠️ کاربرِ **خارج** از دامنه دقیقاً مسیرِ v3.96.0 را می‌رود: ردیف همین‌جا باز/بازاستفاده
+   * می‌شود، `recharge_started` فقط برای ردیفِ تازه ثبت می‌شود، و `paymentId` در سشن
+   * می‌نشیند — یعنی گاردها و دکمه‌هایش بیت‌به‌بیت مثل قبل. */
+  let paymentId = 0;
+  if (navV2For(uid)) {
+    trackRechargeStarted(uid);
+  } else {
+    const opened = openPaymentRow(uid);
+    paymentId = opened.id;
+    if (opened.fresh) track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
+  }
   setState(uid, 'pay_amount');
+  if (!navV2For(uid)) patchSession(uid, { paymentId });
   // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
   if (coinsOn(uid)) {
     // 🧭 یک قدم جلو از صفحه‌ی ذخایر ⟵ دکمه‌ی آخر «بازگشت» به همان صفحه.
@@ -7784,7 +7892,7 @@ bot.action('recharge', async (ctx) => {
     // UX v2.3: صفحه‌ی بسته‌ها **روی همان پیامِ کیف** ادیت می‌شود (زیرمنو، نه پیامِ تازه) و
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
-    const [text, extra] = packMenuScreen(uid);
+    const [text, extra] = packMenuScreen(uid, paymentId);
     // ⚠️ exposure یعنی «کاربر treatment را دید» (بند ۲الف ریشه) — تک‌نقطه‌اش
     // `exposePackScreen` است، کنارِ `packMenuScreen`.
     const seen = () => exposePackScreen(uid);
@@ -7824,12 +7932,19 @@ bot.action('recharge', async (ctx) => {
 /* ⚠️ شناسه‌ی پرداخت از `callback_data` برداشته شد (دیگر در این لحظه ردیفی وجود ندارد)،
  * ولی الگوی کهنه‌ی `pack_reveal:<id>` هنوز match می‌شود چون دکمه‌اش در چتِ کاربران زنده
  * است (بند ۲ج/۶) و رفتارش دقیقاً همین است. */
-bot.action(/^pack_reveal:?\d*$/, async (ctx) => {
+bot.action(/^pack_reveal:?(\d*)$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   if (starsRail || !coinsOn(uid)) return;   // این آزمایش اصلاً برای این ریل/دنیا نیست
+  /* خارج از دامنه‌ی v3.97: دقیقاً گاردِ v3.96.0 — دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر
+   * بی‌صدا رد می‌شود و صفحه با همان `paymentId` دوباره ساخته می‌شود. */
+  let pid = 0;
+  if (!navV2For(uid)) {
+    pid = parseInt(ctx.match[1] || '0', 10);
+    if (getSession(uid).paymentId !== pid) return;
+  }
   patchSession(uid, { packsRevealed: 1 });
-  const [text, extra] = packMenuScreen(uid);
+  const [text, extra] = packMenuScreen(uid, pid);
   try {
     await ctx.editMessageText(text, extra);
     exposePackScreen(uid);
@@ -7935,7 +8050,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * ⚠️ عمداً **بعد از** بلوکِ ترمیمِ استیت است: بدونِ `s.paymentId` معتبر، دکمه‌ی
    * «بازگشت»ِ همین کیبورد به یک شناسه‌ی مرده اشاره می‌کرد. */
   if (isRetiredPack(pack.key)) {
-    const [, extra] = packMenuScreen(uid);
+    const [, extra] = packMenuScreen(uid, s.paymentId || 0);
     try {
       const sent = await ctx.reply(L.errors.packRetired, extra);
       exposePackScreen(uid);
@@ -8293,15 +8408,21 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
    * `editMessageText` رویش کار نمی‌کند. اگر پاک نشود، یک فاکتورِ مرده با دکمه‌ی
    * پرداختِ بی‌اثر در چت می‌ماند.
    *
-   * ⚠️ از ۱۴۰۵/۰۶/۲۷ **هیچ ردیفِ تازه‌ای ساخته نمی‌شود**: صفحه‌ی بسته‌ها دیگر شناسه‌ی
-   * پرداخت لازم ندارد و ردیفِ بعدی لحظه‌ی انتخابِ بستهٔ بعدی ساخته می‌شود. این همان
-   * چیزی است که ردیف‌های شبحِ `amount=0` را از ریشه حذف می‌کند. `recharge_started` هم
-   * مثل قبل دوباره ثبت نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه. */
+   * ⚠️ از ۱۴۰۵/۰۶/۲۷ (داخلِ دامنه‌ی v3.97) **هیچ ردیفِ تازه‌ای ساخته نمی‌شود**: صفحه‌ی
+   * بسته‌ها دیگر شناسه‌ی پرداخت لازم ندارد و ردیفِ بعدی لحظه‌ی انتخابِ بستهٔ بعدی ساخته
+   * می‌شود. این همان چیزی است که ردیف‌های شبحِ `amount=0` را از ریشه حذف می‌کند.
+   * خارج از دامنه: دقیقاً مثل v3.96.0 یک ردیفِ تازه باز می‌شود تا دکمه‌ی بازگشتِ صفحه‌ی
+   * بسته‌ها به فاکتورِ زنده اشاره کند. `recharge_started` در هر دو حالت دوباره ثبت
+   * نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه. */
   if (coinsOn(uid)) {
     const s0 = getSession(uid);
+    let freshId = 0;
+    if (!navV2For(uid)) freshId = openPaymentRow(uid).id;
     setState(uid, 'pay_amount');
-    patchSession(uid, { invoiceMsgId: null });
-    const [text, extra] = packMenuScreen(uid);
+    patchSession(uid, navV2For(uid)
+      ? { invoiceMsgId: null }
+      : { paymentId: freshId, invoiceMsgId: null });
+    const [text, extra] = packMenuScreen(uid, freshId);
     const here = ctx.callbackQuery?.message?.message_id;
     const packId = s0.packMsgId;
 
@@ -9576,7 +9697,7 @@ registerSupport(bot, {
   /* 🧭 پشتیبانی هم لایه‌ی ۱ است (از کیبوردِ ماندگار) و نباید بن‌بست باشد (خواسته‌ی صریحِ
    * مالک): آخرین دکمه «بازگشت به منوی اصلی». پارامتر در `shared/` افزایشی است، پس
    * voice2text و tabir بیت‌به‌بیت دست‌نخورده‌اند. */
-  extraRows: () => (NAV_GUARD_ENABLED
+  extraRows: (ctx) => (NAV_GUARD_ENABLED && navV2For(ctx?.from?.id)
     ? [[{ text: L.buttons.backToMenu, callback_data: 'nav:menu' }]]
     : []),
   // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف

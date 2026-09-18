@@ -873,7 +873,8 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
   // توضیحیِ دعوت را نشان بدهند (باگ: یکی‌شان مستقیم مخاطبینِ کاربر را باز می‌کرد).
   // از ۱۴۰۵/۰۶/۲۷ صفحه‌ی ذخایر نسخه‌ی **ادیت‌کنان** را می‌دهد (`invite_edit`) تا دکمه‌ی
   // بازگشتش به خودِ ذخایر برگردد؛ بقیه‌ی نقاط همان `invite_go`ِ پیش‌فرض را می‌گیرند.
-  ok(/rows\.push\(inviteRow\(uid, 'invite_edit'\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
+  ok(/rows\.push\(inviteRow\(uid, navV2For\(uid\) \? 'invite_edit' : 'invite_go'\)\);/.test(SRC),
+    'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید (و `invite_edit` پشتِ گیتِ فقط-ادمین است)');
   ok(/const inviteRow = \(uid, action = 'invite_go'\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), action\)\];/.test(SRC),
     'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار را دارد و مقصدش پیش‌فرضِ invite_go است');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== botToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
@@ -1168,8 +1169,8 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   ok(!/sendContinuePrompt|replyCanceled/.test(tback), 'بازگشتِ یک‌قدمی پیامِ «ادامه» نمی‌آورد (خروج از فلو نیست)');
   /* ⚠️ برچسب از «بازگشت به منوی اصلی» به «بازگشت» رفت (خواسته‌ی صریحِ مالک): این صفحه
      لایه‌ی ۲ است. مقصد از پشته‌ی ناوبری می‌آید، و `tback:` فقط فالبکِ دکمه‌های کهنه است. */
-  ok(/backOneStep, `tback:\$\{from\}`/.test(SRC), 'آخرین گزینه‌ی صفحه‌ی اندازه «بازگشت»ِ یک‌قدمی است');
-  ok(!/backToMenu, `tback:/.test(SRC), 'و دیگر برچسبِ «بازگشت به منوی اصلی» ندارد');
+  ok(/navBackRow\(uid, \[\[Markup\.button\.callback\(L\.buttons\.backToMenu, `tback:\$\{from\}`\)\]\]\)/.test(SRC),
+    'آخرین گزینه‌ی صفحه‌ی اندازه از `navBackRow` می‌آید، با فالبکِ بیت‌به‌بیتِ v3.96.0 برای کاربرِ خارج از دامنه');
 
   // ۴) «مشاهده همه فال‌ها» همان پیام را ادیت می‌کند.
   ok(/showCatalog\(ctx, true, true\)/.test(SRC), 'دکمه‌ی «مشاهده همه فال‌ها» ادیت‌کنان جلو می‌رود');
@@ -1200,9 +1201,11 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   /* ⚠️ از ۱۴۰۵/۰۶/۲۷ دکمه‌ی بازگشتِ صفحه‌ی بسته‌ها از پشته‌ی ناوبری می‌آید، نه
      `pay_back:<id>`: در آن لحظه هیچ ردیفِ پرداختی وجود ندارد (فاکتور فقط لحظه‌ی انتخابِ
      بسته صادر می‌شود). `pay_back` برای دکمه‌های کهنه زنده می‌ماند. */
-  const packScreenBody = SRC.slice(SRC.indexOf('function packMenuScreen(uid) {'), SRC.indexOf("/* 👁 تک‌نقطه‌ی"));
-  ok(/navBackRow\(uid\)/.test(packScreenBody), 'صفحه‌ی بسته‌ها دکمه‌ی بازگشتِ یک‌قدمی دارد نه انصراف');
-  ok(!/paymentId/.test(packScreenBody), 'و هیچ شناسه‌ی پرداختی حمل نمی‌کند');
+  const packScreenBody = SRC.slice(SRC.indexOf('function packMenuScreen(uid, paymentId = 0) {'), SRC.indexOf("/* 👁 تک‌نقطه‌ی"));
+  ok(/navBackRow\(uid, \[\[Markup\.button\.callback\(L\.buttons\.backOneStep, `pay_back:\$\{paymentId\}`\)\]\]\)/.test(packScreenBody),
+    'صفحه‌ی بسته‌ها دکمه‌ی بازگشتِ یک‌قدمی دارد نه انصراف (و فالبکش همان `pay_back:<id>`ِ v3.96.0 است)');
+  ok(/navV2For\(uid\) \? 'pack_reveal' : `pack_reveal:\$\{paymentId\}`/.test(packScreenBody),
+    'و دکمه‌ی کشف هم فقط داخلِ دامنه بی‌شناسه است (خارج از آن، همان `pack_reveal:<id>`ِ v3.96.0)');
   const payBackStart = SRC.indexOf('bot.action(/^pay_back:');
   const payBack = SRC.slice(payBackStart, SRC.indexOf('\n});', payBackStart));
   ok(/setPaymentStatus\.run\('canceled', p\.id\)/.test(payBack), 'بازگشت فاکتورِ خالی را می‌بندد (وگرنه گاردِ پرداخت کاربر را قفل می‌کند)');
@@ -1440,8 +1443,12 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     /* ⚠️ از ۱۴۰۵/۰۶/۲۷ به‌جای «پاک کن و پیامِ تازه بفرست»، **همان پیام ادیت می‌شود**
        (خواسته‌ی صریحِ مالک) و یک قدم روی پشته می‌رود، پس دکمه‌ی آخرِ صفحه‌ی ذخایر
        «بازگشت» به همان صفحه‌ی کم‌موجودی است. مسیرِ پاک‌کردن فقط فالبکِ پیامِ کهنه ماند. */
-    ok(/navGo\(uid, 'w'\)/.test(wf), 'و یک قدم روی پشته می‌رود (پس بازگشتش به همین صفحه است)');
-    ok(/editMessageText\(text, extra\)/.test(wf), 'و **همان پیام** را ادیت می‌کند، نه پیامِ تازه');
+    const wfStart = SRC.indexOf("bot.action('wallet_fresh', async (ctx) => {");
+    const wfFull = wfStart < 0 ? '' : SRC.slice(wfStart, SRC.indexOf('\n});', wfStart));
+    ok(/navGo\(uid, 'w'\)/.test(wfFull), 'و یک قدم روی پشته می‌رود (پس بازگشتش به همین صفحه است)');
+    ok(/editMessageText\(text, extra\)/.test(wfFull), 'و **همان پیام** را ادیت می‌کند، نه پیامِ تازه');
+    ok(/if \(!navV2For\(uid\)\) \{[\s\S]*?return showWallet\(ctx\);/.test(wfFull),
+      'و کاربرِ خارج از دامنه بیت‌به‌بیت همان مسیرِ v3.96.0 را می‌رود (پاک‌کردن + پیامِ تازه)');
     ok(/ctx\.deleteMessage\(\)/.test(wf), 'و برای پیامِ غیرقابلِ ادیت همان فالبکِ قبلی را دارد');
   }
 
