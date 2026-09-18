@@ -109,8 +109,11 @@ const btn = (label, data) => ({ label, data });
 const Markup = { button: { callback: btn }, inlineKeyboard: (rows) => ({ rows }) };
 const runScreen = (first, balance = 3) =>
   new Function('L', 'Markup', 'curOf', 'getBalance', 'onboardFirstSpread',
-    'SIZES_V3', 'SPREAD_BY_ID', 'spreadIdOf', `${screenSrc} return pickSizeScreen;`)(
-    L, Markup, () => cur, () => balance, () => first, SIZES_V3, SPREAD_BY_ID, spreadIdOf)(
+    'SIZES_V3', 'SPREAD_BY_ID', 'spreadIdOf', 'navBackRow', `${screenSrc} return pickSizeScreen;`)(
+    L, Markup, () => cur, () => balance, () => first, SIZES_V3, SPREAD_BY_ID, spreadIdOf,
+    // 🧭 پشته‌ی ناوبری (v3.97.0): این سناریو **لایه‌ی ۱** است (پشته خالی)، پس ردیفِ
+    // بازگشت از فالبکِ `tback:` می‌آید — دقیقاً همان دکمه‌ای که این چک از قبل می‌سنجید.
+    () => [])(
     1, topic, 'm');
 
 {
@@ -147,8 +150,11 @@ console.log('\n۴ب) بدونِ دکمه‌ی خروج در آنبوردینگ')
   // لیستِ کاملِ فال‌ها: همان قاعده. اجرای واقعیِ سازنده از سورس.
   const kbSrc = bodyOf('const allTopicsKb = (uid) => [', '\n];');
   ok(!!kbSrc, '`allTopicsKb` از سورس بریده شد');
+  // 🧭 v3.97.0: ردیفِ آخر از `navBackRow` می‌آید. لیستِ کاملِ فال‌ها **ریشه** است
+  // (پشته خالی)، پس همان «بازگشت به منوی اصلی» را برمی‌گرداند — عیناً چیزی که این
+  // چک از اول می‌سنجید.
   const mkKb = (onb) => new Function('inOnboardFlow', 'TOPICS_V3', 'styled', 'Markup',
-    'L', 'spreadName', 'topicStyle', 'navMenuRow', `${kbSrc} return allTopicsKb;`)(
+    'L', 'spreadName', 'topicStyle', 'navBackRow', `${kbSrc} return allTopicsKb;`)(
     () => onb, [{ key: 'personal', fa: 'x' }], (b) => b, Markup, L, (x) => x,
     () => undefined, () => [[btn('◀️ بازگشت به منوی اصلی', 'nav:menu')]])(1);
   ok(!JSON.stringify(mkKb(true)).includes('nav:menu'),

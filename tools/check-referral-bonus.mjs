@@ -270,7 +270,7 @@ ok(/stmts\.credit\.run\(\s*refAmt\s*,/.test(payCode),
   'همان عددِ محاسبه‌شده واریز می‌شود');
 
 // و جهتِ معکوس: دکمه‌ها باید عددِ **رو-به-جلو** را نشان بدهند، نه payout را.
-const inviteRowSrc = slice('const inviteRow = (uid) =>', ');\n');
+const inviteRowSrc = slice("const inviteRow = (uid, action = 'invite_go') =>", ');\n');
 const inviteScreenSrc = slice('const inviteScreen = (uid) => {', '\n};');
 ok(!!inviteRowSrc && /referralBonusFor\(uid\)/.test(inviteRowSrc),
   'دکمه‌ی دعوت عددِ نمایشیِ رو-به-جلو را نشان می‌دهد');

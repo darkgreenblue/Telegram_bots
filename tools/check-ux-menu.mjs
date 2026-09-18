@@ -119,7 +119,10 @@ console.log('\n▶ قرارداد منوی فال (پین اول، «همه فا
   ok(/\[MENU_PIN, \.\.\.menuSlotsFor\(uid\)/.test(fn), 'پین همیشه اولِ منوست');
   ok(/filter\(k => k !== MENU_PIN\)/.test(fn), 'پین دو بار نمی‌آید (اگر آزمایش هم انتخابش کند)');
   ok(/slice\(0, 3\)/.test(fn), 'منو دقیقاً سه موضوع دارد، بعد دکمه‌ی «همه فال‌ها»');
-  ok(/allSpreadsV2, 'catalog_go'\)\],?\s*\n\s*\];/.test(fn), '«مشاهده همه فال‌ها» آخرین ردیف است');
+  // از ۱۴۰۵/۰۶/۲۷ یک ردیفِ ناوبری هم بعدش می‌آید (لایه‌ی ۱ ⟵ «بازگشت به منوی اصلی»)،
+  // پس ادعا از «آخرین ردیفِ مطلق» به «آخرین ردیفِ **موضوعی**، و بعدش فقط ناوبری» رفت.
+  ok(/allSpreadsV2, 'catalog_go'\)\],\s*\n[\s\S]{0,260}?navBackRow\(uid\)\),\s*\n\s*\];/.test(fn),
+    '«مشاهده همه فال‌ها» آخرین گزینه‌ی موضوعی است و فقط ردیفِ ناوبری بعدش می‌آید');
   // لیستِ کامل باید همه‌ی موضوع‌ها را داشته باشد، نه یک زیرمجموعه
   ok(/allTopicsKb = \(uid\) => \[\s*\n\s*\.\.\.TOPICS_V3\.map/.test(SRC),
     'لیستِ کامل از خودِ TOPICS_V3 ساخته می‌شود (نه لیستِ دستیِ موازی)');
@@ -506,7 +509,8 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
     'و مرز از همان مهر خوانده می‌شود');
   // هر دو نقطه‌ی قراردادِ صدورِ کیبورد باید پنجره را ببندند، وگرنه کاربری که کیبورد را
   // از آن‌جا گرفته باز هم پیامِ اضافه‌ی مهاجرت می‌گیرد.
-  const navm = CODE.slice(CODE.indexOf("bot.action('nav:menu'"), CODE.indexOf("bot.action('reading:resume'"));
+  // بدنه از ۱۴۰۵/۰۶/۲۷ در `navToMenu` است (پشته‌ی ناوبری هم از همان‌جا به منو می‌رسد).
+  const navm = CODE.slice(CODE.indexOf('async function navToMenu(ctx) {'), CODE.indexOf("bot.action('reading:resume'"));
   ok(/setKbShown\.run\(uid\)/.test(navm), 'بازگشت به منو پنجره‌ی مهاجرت را می‌بندد');
   const fbr = CODE.slice(CODE.indexOf('L.reading.rateThanks') - 200, CODE.indexOf('L.reading.rateThanks') + 200);
   ok(/setKbShown\.run\(uid\)/.test(fbr), 'تشکرِ بعد از نمره هم پنجره را می‌بندد');
@@ -571,8 +575,12 @@ console.log('\n▶ یک استانداردِ واحد برای «وسطِ فلو
   ok(!/reading:cancel/.test(revealBlock),
     'شاخه‌ی افشا دکمه‌ی انصراف **ندارد** (پول داده شده و محصول دارد تحویل می‌شود)');
   ok(/L\.reading\.openReadingGuard/.test(revealBlock), 'ولی همان پیامِ استاندارد را می‌دهد (یک استاندارد)');
-  ok(/openReadingGuard/.test(g) && (g.match(/openReadingGuard/g) || []).length === 2,
-    'هر دو شاخه از همان یک متن استفاده می‌کنند');
+  /* ⚠️ از ۱۴۰۵/۰۶/۲۷ شاخه‌ی دارای دکمه‌ی انصراف متنِ **هشداردار** می‌گیرد
+     (`openReadingGuardPaid`: الماس برنمی‌گردد + «مطمئنی؟»)، چون از v3.13.0 کسر سرِ
+     انتخابِ اندازه است و آن دکمه واقعاً مخرب است. شاخه‌ی افشا همان متنِ بی‌هشدار را
+     نگه می‌دارد چون اصلاً دکمه‌ی انصراف ندارد. */
+  ok(/openReadingGuardPaid/.test(g), 'شاخه‌ی دارای انصراف متنِ هشداردارِ «الماس برنمی‌گرده» را می‌دهد');
+  ok(!/openReadingGuardPaid/.test(revealBlock), 'و شاخه‌ی افشا (بدونِ انصراف) همان متنِ ساده را نگه می‌دارد');
 
   // ۴) دکمه‌ی «ادامه»ی افشا همان callbackِ قدمِ فعلی است، پس گاردهای ضدِ دوبار-تپ کار می‌کنند
   const rr = CODE.slice(CODE.indexOf('function revealResumeRow'), CODE.indexOf('async function blockDuringOpenReading'));
@@ -683,8 +691,11 @@ console.log('\n▶ فالِ در حالِ تحویل با یک دکمه‌ی ک�
   ok(/r\.status !== 'started'/.test(bd), 'و فقط فالی که واقعاً پول داده و در حالِ تحویل است');
   ok(/r\.user_id !== uid/.test(bd), 'مالکیتِ رکورد چک می‌شود');
   ok(!/reading:cancel/.test(bd), 'هیچ راهِ لغوی پیشنهاد نمی‌دهد');
-  for (const h of ["bot.action('nav:menu'", "bot.action('reading:cancel'", "bot.action('onboard_allspreads'"]) {
-    const b = CODE.slice(CODE.indexOf(h), CODE.indexOf('\n});', CODE.indexOf(h)));
+  // ⚠️ بدنه‌ی بازگشت به منو از ۱۴۰۵/۰۶/۲۷ در `navToMenu` است (تک‌منبعِ مشترکِ
+  // `nav:menu` و پشته‌ی `nav:back`)، پس ادعا روی همان تابع می‌نشیند.
+  for (const h of ['async function navToMenu(ctx) {', "bot.action('reading:cancel'", "bot.action('onboard_allspreads'"]) {
+    const end = h.startsWith('async function') ? '\n}\nbot.action' : '\n});';
+    const b = CODE.slice(CODE.indexOf(h), CODE.indexOf(end, CODE.indexOf(h)));
     ok(/if \(await blockDuringDelivering\(ctx\)\) return;/.test(b), `${h.slice(12)} قبل از پاک‌کردنِ سشن گارد می‌شود`);
     const iG = b.indexOf('blockDuringDelivering'); const iW = b.indexOf('setSession(uid, null)');
     ok(iG > 0 && (iW < 0 || iG < iW), `${h.slice(12)}: گارد **قبل از** setSession است`);
@@ -860,9 +871,11 @@ console.log('\n▶ صفحه‌ی کیف الماس: سه راهِ پرکردن (
     'دنیای قدیم فقط همان دکمه‌ی شارژِ همیشگی را می‌بیند (رول‌بکِ یک‌خطی)');
   // از v3.28.0 هر سه نقطه‌ی دعوت از تک‌منبعِ `inviteRow` می‌خوانند تا همه‌شان اول پیامِ
   // توضیحیِ دعوت را نشان بدهند (باگ: یکی‌شان مستقیم مخاطبینِ کاربر را باز می‌کرد).
-  ok(/rows\.push\(inviteRow\(uid\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
-  ok(/const inviteRow = \(uid\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), 'invite_go'\)\];/.test(SRC),
-    'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار و همان مقصدِ invite_go را دارد');
+  // از ۱۴۰۵/۰۶/۲۷ صفحه‌ی ذخایر نسخه‌ی **ادیت‌کنان** را می‌دهد (`invite_edit`) تا دکمه‌ی
+  // بازگشتش به خودِ ذخایر برگردد؛ بقیه‌ی نقاط همان `invite_go`ِ پیش‌فرض را می‌گیرند.
+  ok(/rows\.push\(inviteRow\(uid, 'invite_edit'\)\);/.test(SRC), 'دکمه‌ی دعوتِ صفحه‌ی کیف از تک‌منبع می‌آید');
+  ok(/const inviteRow = \(uid, action = 'invite_go'\) => \[Markup\.button\.callback\(\s*\n?\s*L\.buttons\.inviteWithBonus\(referralBonusFor\(uid\), curOf\(uid\)\), action\)\];/.test(SRC),
+    'تک‌منبعِ دعوت همان برچسبِ مبلغ‌دار را دارد و مقصدش پیش‌فرضِ invite_go است');
   ok(/if \(getUser\(uid\)\?\.lucky_date !== botToday\(\)\) \{\s*\n\s*rows\.push\(\[Markup\.button\.callback\(L\.buttons\.luckyDraw/.test(SRC),
     'دکمه‌ی کارت شانس فقط وقتی سهمیه‌ی امروز باز است نشان داده می‌شود (بن‌بست نمی‌سازد)');
   ok(/bot\.action\('invite_go', async \(ctx\) => \{ await ctx\.answerCbQuery\(\)\.catch\(\(\) => \{\}\); return showInvite\(ctx\); \}\);/.test(SRC),
@@ -1153,7 +1166,10 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
     && /blockDuringPendingReading\(ctx\)/.test(tback),
     'دکمه‌ی کهنه‌ی بازگشت وسطِ پرداخت/فالِ باز گارد می‌شود، نه اینکه بی‌صدا ردش کند');
   ok(!/sendContinuePrompt|replyCanceled/.test(tback), 'بازگشتِ یک‌قدمی پیامِ «ادامه» نمی‌آورد (خروج از فلو نیست)');
-  ok(/backToMenu, `tback:\$\{from\}`/.test(SRC), 'آخرین گزینه‌ی صفحه‌ی اندازه همان «بازگشت به منو» است');
+  /* ⚠️ برچسب از «بازگشت به منوی اصلی» به «بازگشت» رفت (خواسته‌ی صریحِ مالک): این صفحه
+     لایه‌ی ۲ است. مقصد از پشته‌ی ناوبری می‌آید، و `tback:` فقط فالبکِ دکمه‌های کهنه است. */
+  ok(/backOneStep, `tback:\$\{from\}`/.test(SRC), 'آخرین گزینه‌ی صفحه‌ی اندازه «بازگشت»ِ یک‌قدمی است');
+  ok(!/backToMenu, `tback:/.test(SRC), 'و دیگر برچسبِ «بازگشت به منوی اصلی» ندارد');
 
   // ۴) «مشاهده همه فال‌ها» همان پیام را ادیت می‌کند.
   ok(/showCatalog\(ctx, true, true\)/.test(SRC), 'دکمه‌ی «مشاهده همه فال‌ها» ادیت‌کنان جلو می‌رود');
@@ -1162,7 +1178,7 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
 
   // ۵) nav:menu هم ادیت می‌کند و متنش عوض شده.
   ok(/backToMenu: 'برگشتیم به منوی اصلی 🌳'/.test(LOC), 'متنِ بازگشت به منو: بدونِ «باشه» و با ایموجیِ 🌳');
-  const navH = SRC.slice(SRC.indexOf("bot.action('nav:menu'"), SRC.indexOf("bot.action('reading:resume'"));
+  const navH = SRC.slice(SRC.indexOf('async function navToMenu(ctx) {'), SRC.indexOf("bot.action('reading:resume'"));
   // 🎹 قراردادِ کیبورد (مالک، بارها تکرار شده): دستورِ باز شدنِ منوی پایین **فقط دو نقطه**
   // دارد — (۱) بازگشت، تا وقتی به منوی اصلی برسیم، (۲) لحظه‌ی قدمِ بعدی بعد از نظرسنجی.
   // پس nav:menu پیامِ **تازه** می‌فرستد نه ادیت. ادیتِ تلگرام فقط `InlineKeyboardMarkup`
@@ -1170,8 +1186,10 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
   // کیبورد نگرفته دقیقاً همین‌جا بن‌بست می‌خورد. این تنها معاوضه‌ی این قرارداد است.
   ok(/return ctx\.reply\(L\.reading\.backToMenu, mainKeyboard\(uid\)\);/.test(navH),
     'nav:menu (نقطه‌ی ۱) پیامِ بازگشت را با کیبوردِ اصلی می‌فرستد');
-  ok(!/editMessageText/.test(navH),
-    'nav:menu متن را ادیت نمی‌کند (ادیت نمی‌تواند کیبوردِ reply را حمل کند)');
+  // ⚠️ محدوده حالا `nav:back` را هم در بر می‌گیرد (که عمداً ادیت می‌کند)، پس ادعا روی
+  // خودِ بدنه‌ی `navToMenu` می‌نشیند نه کلِ ناحیه.
+  ok(!/editMessageText/.test(navH.slice(0, navH.indexOf("bot.action('nav:menu'"))),
+    'مسیرِ بازگشت به منو متن را ادیت نمی‌کند (ادیت نمی‌تواند کیبوردِ reply را حمل کند)');
   ok(/editMessageReplyMarkup\(undefined\)/.test(navH),
     'دکمه‌های پیامِ مبدأ کشته می‌شوند تا دوباره‌زدنی نماند');
   ok(!/uxV2For\(uid\)/.test(navH),
@@ -1179,7 +1197,12 @@ console.log('\n▶ ناوبریِ یک‌قدمی و ادیت-در-جا (UX v2.3
 
   // ۶) صفحه‌ی بسته‌ها زیرمنوی کیف است: ادیت + دکمه‌ی «بازگشت» (نه «انصراف»).
   ok(/backOneStep: '◀️ بازگشت'/.test(LOC), 'برچسبِ بازگشتِ یک‌قدمی جدا از «انصراف» تعریف شده');
-  ok(/L\.buttons\.backOneStep, `pay_back:\$\{paymentId\}`/.test(SRC), 'صفحه‌ی بسته‌ها دکمه‌ی بازگشت دارد نه انصراف');
+  /* ⚠️ از ۱۴۰۵/۰۶/۲۷ دکمه‌ی بازگشتِ صفحه‌ی بسته‌ها از پشته‌ی ناوبری می‌آید، نه
+     `pay_back:<id>`: در آن لحظه هیچ ردیفِ پرداختی وجود ندارد (فاکتور فقط لحظه‌ی انتخابِ
+     بسته صادر می‌شود). `pay_back` برای دکمه‌های کهنه زنده می‌ماند. */
+  const packScreenBody = SRC.slice(SRC.indexOf('function packMenuScreen(uid) {'), SRC.indexOf("/* 👁 تک‌نقطه‌ی"));
+  ok(/navBackRow\(uid\)/.test(packScreenBody), 'صفحه‌ی بسته‌ها دکمه‌ی بازگشتِ یک‌قدمی دارد نه انصراف');
+  ok(!/paymentId/.test(packScreenBody), 'و هیچ شناسه‌ی پرداختی حمل نمی‌کند');
   const payBackStart = SRC.indexOf('bot.action(/^pay_back:');
   const payBack = SRC.slice(payBackStart, SRC.indexOf('\n});', payBackStart));
   ok(/setPaymentStatus\.run\('canceled', p\.id\)/.test(payBack), 'بازگشت فاکتورِ خالی را می‌بندد (وگرنه گاردِ پرداخت کاربر را قفل می‌کند)');
@@ -1406,13 +1429,20 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     // و خودِ مسیرِ کم‌موجودیِ `chargeForSpread` باید از همین تابع بخواند، نه از
     // `needBalanceRows`ِ عمومی (که اندازه‌ی انتخاب‌شده را نمی‌شناسد).
     const charge = SRC.slice(SRC.indexOf('async function chargeForSpread'), SRC.indexOf('bot.action(/^spread:'));
-    ok(/needBalanceAltRows\(uid, spread\)/.test(charge), 'مسیرِ کم‌موجودی از همین تابع می‌خواند');
+    ok(/needBalanceScreen\(uid, spread\)/.test(charge), 'مسیرِ کم‌موجودی از تک‌منبعِ صفحه می‌خواند');
+    const nbScreen = SRC.slice(SRC.indexOf('const needBalanceScreen = (uid, spread) =>'), SRC.indexOf('const needBalanceScreen = (uid, spread) =>') + 600);
+    ok(/needBalanceAltRows\(uid, spread\)/.test(nbScreen), 'و همان صفحه از همین تابع می‌خواند');
+    ok(/navBackRow\(uid\)/.test(nbScreen), 'و ردیفِ بازگشت **بعد از** دکمه‌ی افزایشِ ذخایر می‌آید (قراردادِ AltRows نمی‌شکند)');
     ok(!/needBalanceRows\(/.test(charge), 'و دیگر سه دکمه‌ی عمومیِ ذخایر را نشان نمی‌دهد');
     // دکمه‌ی افزایشِ ذخایر باید هندلرِ خودش را داشته باشد، وگرنه تپِ کاربر بی‌جواب می‌ماند.
     ok(/bot\.action\('wallet_fresh'/.test(SRC), 'کالبکِ `wallet_fresh` هندلر دارد');
     const wf = SRC.slice(SRC.indexOf("bot.action('wallet_fresh'"), SRC.indexOf("bot.action('wallet_fresh'") + 700);
-    ok(/ctx\.deleteMessage\(\)/.test(wf) && /showWallet\(ctx\)/.test(wf),
-      'و پیامِ قبلی را پاک می‌کند و بعد **همان** صفحه‌ی ذخایرِ منوی اصلی را می‌آورد');
+    /* ⚠️ از ۱۴۰۵/۰۶/۲۷ به‌جای «پاک کن و پیامِ تازه بفرست»، **همان پیام ادیت می‌شود**
+       (خواسته‌ی صریحِ مالک) و یک قدم روی پشته می‌رود، پس دکمه‌ی آخرِ صفحه‌ی ذخایر
+       «بازگشت» به همان صفحه‌ی کم‌موجودی است. مسیرِ پاک‌کردن فقط فالبکِ پیامِ کهنه ماند. */
+    ok(/navGo\(uid, 'w'\)/.test(wf), 'و یک قدم روی پشته می‌رود (پس بازگشتش به همین صفحه است)');
+    ok(/editMessageText\(text, extra\)/.test(wf), 'و **همان پیام** را ادیت می‌کند، نه پیامِ تازه');
+    ok(/ctx\.deleteMessage\(\)/.test(wf), 'و برای پیامِ غیرقابلِ ادیت همان فالبکِ قبلی را دارد');
   }
 
   /* 🐛 جمله‌ی «برای اینکه کارت‌ها رو برگردونیم» از دنیای پی‌والِ نسلِ قبل مانده بود؛
