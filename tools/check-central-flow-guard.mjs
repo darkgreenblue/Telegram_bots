@@ -38,6 +38,7 @@ function loadPure(name) {
 
 const readingAllows = loadPure('readingFlowAllowsCallback');
 const paymentAllows = loadPure('paymentFlowAllowsCallback');
+const awaitingQuestion = loadPure('isAwaitingQuestionReading');
 
 // فال: تنها CTA همان قدم می‌گذرد؛ دکمه‌ی فروشگاه کهنه دیگر هرگز سؤال را رسید نمی‌کند.
 ok(!readingAllows('await_question', 'pkg:basic'), 'await_question دکمه‌ی بسته را مسدود می‌کند');
@@ -60,12 +61,29 @@ ok(paymentAllows('pay_receipt', 'pay_resume:9'), 'تکمیل پرداختِ یا
 ok(paymentAllows('pay_receipt', 'pay_exit:9'), 'انصراف صریح از پرداخت مجاز است');
 ok(!paymentAllows('pay_receipt', 'spread:love3'), 'وسط فاکتور، فال جدید شروع نمی‌شود');
 
+// `/start` callback نیست. این همان شکاف واقعیِ تیکت TRT-6934733736 بود: کاربر پس از
+// کسر الماس، پیش از نوشتن سؤال /start زد و بازیابیِ قبلی فقط فالِ «started» را می‌شناخت.
+ok(awaitingQuestion({ status: 'paid', question: '', cards_json: '', question_audio: '' }),
+  'فالِ پرداخت‌شده‌ی دقیقاً منتظر سؤال، قابل بازیابی است');
+ok(!awaitingQuestion({ status: 'paid', question: '', cards_json: '', question_audio: 'voice-id' }),
+  'سؤالِ صوتی به اشتباه به مرحله‌ی نوشتن سؤال برنمی‌گردد');
+ok(!awaitingQuestion({ status: 'paid', question: 'سؤال', cards_json: '', question_audio: '' }),
+  'فالِ بعد از ثبت سؤال به اشتباه به عقب برنمی‌گردد');
+ok(!awaitingQuestion({ status: 'started', question: '', cards_json: '', question_audio: '' }),
+  'فالِ در حال ساخت/تحویل با بازیابیِ سؤال قاطی نمی‌شود');
+
 const centralAt = src.indexOf("/* 🔒 دروازه‌ی واحدِ همه‌ی دکمه‌ها");
 const firstAction = src.indexOf('bot.action(');
 ok(centralAt >= 0 && centralAt < firstAction, 'middleware مرکزی پیش از اولین action ثبت شده');
 ok(src.includes('if (data && await blockCrossFlowCallback(ctx)) return;'), 'هر callback پیش از هندلر از گارد مرکزی عبور می‌کند');
 ok(src.includes('await blockDuringActivePayment(ctx, wanted?.key, wanted?.arg)'), 'پرداختِ بی‌فاکتور هم گارد مرکزی دارد');
 ok(src.includes("const text = p.step === 'receipt' ? L.errors.openInvoice : L.errors.openPaymentFlow;"), 'برای خریدِ نیمه‌کاره پیامِ درست می‌رود، نه پیامِ فاکتور');
+const startBody = sourceFunction('handleStart');
+const resumeQuestionAt = startBody.indexOf('resumeAwaitingQuestionFromDb(uid)');
+const resetAt = startBody.indexOf("setState(uid, 'idle');");
+ok(resumeQuestionAt >= 0 && resetAt >= 0 && resumeQuestionAt < resetAt,
+  '/start پیش از پاک‌کردنِ سشن، فالِ پرداخت‌شده‌ی منتظر سؤال را بازیابی می‌کند');
+ok(src.includes("awaitingQuestionReading: db.prepare("), 'کوئریِ اختصاصیِ فالِ منتظر سؤال وجود دارد');
 
 if (failures) process.exit(1);
 console.log('🎯 گارد مرکزیِ تغییر فلو سالم است.');
