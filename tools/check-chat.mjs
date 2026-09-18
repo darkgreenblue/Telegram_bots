@@ -1260,6 +1260,53 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     '⚠️ و شناسه در الگو **اختیاری** است (دکمه‌ی کهنه نمی‌میرد، بند ۲ج/۶)');
 }
 
+/* ▶ گاردِ ایمنی: هر زبانی که گفتگو برایش روشن است باید الگوهای بحرانِ **خودش** را داشته باشد.
+ *
+ * ⚠️ چرا این ادعا لازم است و چرا الان: `configureChatLang` وقتی `chat` در langdata نباشد
+ * زودهنگام return می‌کند، و `langTable(FA_LANG)` یعنی آن زبان روی الگوهای **فارسی**
+ * می‌ماند. یک الگوی فارسی هرگز با متنِ انگلیسی یا روسی match نمی‌شود، پس گاردِ بحران
+ * ساختاراً کور می‌شود در حالی که همه‌چیز سبز به نظر می‌رسد — دقیقاً همان زخمِ بند ۲و/۶ب-۲.
+ *
+ * امروز `CHAT_LOCALES = ['fa']` جلویش را می‌گیرد و کامنتِ chat-core.js هم همین را
+ * می‌گوید. ولی هیچ چیزی این دو را به هم **قفل** نکرده: اضافه کردنِ یک زبان به آن آرایه
+ * یک تغییرِ تک‌خطی است و اگر langdata همان زبان `chat` نداشته باشد، حساس‌ترین گاردِ
+ * محصول بی‌صدا از کار می‌افتد. این ادعا همان قفل است.
+ *
+ * (رباتِ واحدِ چندزبانه انگلیسی را زبانِ پیش‌فرض می‌کند، پس این خیلی زود واقعی می‌شود.) */
+console.log('\n▶ قفلِ CHAT_LOCALES و الگوهای بحرانِ per زبان');
+{
+  const listSrc = (CODE.match(/const CHAT_LOCALES\s*=\s*\[([^\]]*)\]/) || [])[1];
+  ok(typeof listSrc === 'string', 'آرایه‌ی CHAT_LOCALES در سورس پیدا شد');
+  const locales = (listSrc || '').split(',')
+    .map((x) => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  ok(locales.length > 0, `CHAT_LOCALES خالی نیست (${locales.join(', ')})`);
+
+  for (const lg of locales) {
+    // fa الگوهای هاردکدِ خودش را دارد و عمداً langdata ندارد.
+    if (lg === 'fa') {
+      ok(!fs.existsSync(new URL(`../bots/tarot/langdata.fa.json`, import.meta.url)),
+         'fa عمداً langdata ندارد و روی الگوهای هاردکدِ خودش می‌ماند');
+      continue;
+    }
+    const f = new URL(`../bots/tarot/langdata.${lg}.json`, import.meta.url);
+    const has = fs.existsSync(f);
+    ok(has, `langdata.${lg}.json وجود دارد (گفتگو برایش روشن است)`);
+    if (!has) continue;
+    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+    ok(Array.isArray(d.chat?.crisis) && d.chat.crisis.length > 0,
+       `«${lg}» الگوهای بحرانِ خودش را دارد (وگرنه بی‌صدا روی الگوهای فارسی می‌ماند)`);
+  }
+
+  /* کنترلِ مثبت: ثابت می‌کند ادعای بالا پوچ نیست. یک زبانِ ساختگی که `chat` ندارد باید
+   * واقعاً روی الگوهای فارسی بیفتد؛ اگر روزی fallback عوض شد، این قرمز می‌شود. */
+  const { configureChatLang, chatLang } = chat;
+  const { withLang } = await import('../bots/tarot/locale-ctx.js');
+  configureChatLang(undefined, 'fa');
+  const faCrisis = withLang('fa', () => chatLang().crisis);
+  ok(Array.isArray(faCrisis) && faCrisis.some((x) => /خودکشی/.test(x)),
+     'کنترلِ مثبت: زبانِ بدونِ `chat` واقعاً روی الگوهای فارسی می‌افتد (پس ادعای بالا واقعی است)');
+}
+
 const total = pass + errs.length;
 if (errs.length) {
   console.log(`\n❌ گفتگوی پس از فال: ${pass} پاس، ${errs.length} خطا`);

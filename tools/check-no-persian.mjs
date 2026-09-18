@@ -24,7 +24,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const LOCALES = ['ru', 'pt', 'es'];
+const LOCALES = ['ru', 'pt', 'es', 'en'];
 let pass = 0; const errs = [];
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
 
