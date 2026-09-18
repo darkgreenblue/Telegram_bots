@@ -10,6 +10,8 @@
 import { CARD_BY_KEY } from './cards.js';
 import { cardName, cardKeywords, positionName, spreadName, readText, noDash, parseJsonLoose } from './reading-core.js';
 
+import { langTable, DEFAULT_LANG, currentLang } from './locale-ctx.js';
+
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 
 /* ═══ بودجه‌ی عددیِ کانتکست ═══
@@ -227,17 +229,22 @@ const FA_CHATBAIT = [
   'سؤال خوبیه', 'سوال خوبیه', 'چه سؤال', 'چه سوال', 'آفرین', 'عالی پرسیدی',
 ];
 
-let LANG = { crisis: FA_CRISIS, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT };
-export function configureChatLang(d) {
+const FA_LANG = { crisis: FA_CRISIS, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT };
+/* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
+ * چندزبانه اجازه ندارد الگوهای یک زبان را روی پیامِ زبانِ دیگر اجرا کند. */
+const LANG_T = langTable(FA_LANG);
+const LANG = new Proxy({}, { get: (_t, k) => LANG_T.get()[k] });
+export function configureChatLang(d, lang = DEFAULT_LANG) {
   if (!d || typeof d !== 'object') return;
+  const base = LANG_T.for(lang) || FA_LANG;
   const arr = (x, fb) => (Array.isArray(x) && x.length ? x.map(String) : fb);
-  LANG = {
-    crisis:    arr(d.crisis, LANG.crisis),
-    smallTalk: arr(d.smallTalk, LANG.smallTalk),
-    chatbait:  arr(d.chatbait, LANG.chatbait),
-  };
+  LANG_T.set(lang, {
+    crisis:    arr(d.crisis, base.crisis),
+    smallTalk: arr(d.smallTalk, base.smallTalk),
+    chatbait:  arr(d.chatbait, base.chatbait),
+  });
 }
-export const chatLang = () => ({ ...LANG });
+export const chatLang = () => ({ ...LANG_T.get() });
 
 /* ⚠️ export شده چون `tools/reading-lab/chat-checks.mjs` هم باید **همین** نرمال‌سازی را
  * ببیند. قاعده‌ی صفرِ آن فایل: هیچ منطقی از این‌جا بازنویسی نمی‌شود؛ دو نسخه‌ی
@@ -498,4 +505,6 @@ export const chatEnvelopeOk = (out) => !!parseChatOut(out);
 /** شرطِ پذیرشِ نسلِ پاکت. **تنها** مسیرِ retry همین است: پاکتِ خرابِ JSON. */
 export const chatOutOk = (out) => !!parseChatOut(out);
 
-export const chatLocale = () => LOCALE;
+/* زبانِ **این آپدیت**، نه زبانِ پروسه. `CHAT_LOCALES` روی خروجیِ همین می‌نشیند، پس
+ * فیچرِ گفتگو per زبان روشن/خاموش می‌شود نه per ربات. */
+export const chatLocale = () => currentLang();

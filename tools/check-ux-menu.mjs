@@ -423,23 +423,30 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
 
   // برچسب‌هایی که یک `bot.hears` واقعاً می‌گیرد. سه شکلِ آرگومان پشتیبانی می‌شود:
   //   bot.hears(L.buttons.X, …) · bot.hears(SOME_LABELS, …) · bot.hears([a, b], …)
+  /* 🌍 از رباتِ چندزبانه به بعد، برچسب‌ها با `allLabels(l => l.buttons.X)` ثبت می‌شوند
+   * (اتحادِ همه‌ی زبان‌های پروسه) نه با `L.buttons.X`. این چک در یک پروسه‌ی **تک‌زبانه**
+   * اجرا می‌شود، پس اتحاد دقیقاً همان یک برچسب است و ادعا ذره‌ای ضعیف نمی‌شود؛ ولی اگر
+   * این شکل شناخته نشود، چک هر دکمه‌ی کیبورد را «مرده» گزارش می‌کند. */
+  const one = (part) => {
+    part = part.trim().replace(/^\.\.\./, '').trim();
+    const b = /^L\.buttons\.(\w+)$/.exec(part);
+    if (b) return L.buttons[b[1]];
+    const all = /^allLabels\(\s*\w+\s*=>\s*\w+\.buttons\.(\w+)\s*\)$/.exec(part);
+    if (all) return L.buttons[all[1]];
+    const lit = /^'(.*)'$/.exec(part) || /^"(.*)"$/.exec(part);
+    return lit ? lit[1] : null;
+  };
   const resolve = (expr) => {
     expr = expr.trim();
-    const direct = /^L\.buttons\.(\w+)$/.exec(expr);
-    if (direct) return [L.buttons[direct[1]]];
+    const single = one(expr);
+    if (single) return [single];
     if (expr.startsWith('[')) expr = expr.slice(1, -1);
     else if (/^[A-Z_]+$/.test(expr)) {
       const def = new RegExp(`const ${expr}\\s*=\\s*\\[([^\\]]*)\\]`).exec(SRC);
       if (!def) return [];
       expr = def[1];
     } else return [];
-    return expr.split(',').map(part => {
-      part = part.trim();
-      const b = /^L\.buttons\.(\w+)$/.exec(part);
-      if (b) return L.buttons[b[1]];
-      const lit = /^'(.*)'$/.exec(part) || /^"(.*)"$/.exec(part);
-      return lit ? lit[1] : null;
-    }).filter(Boolean);
+    return expr.split(',').map(one).filter(Boolean);
   };
 
   // ⚠️ روی سورسِ **بدونِ کامنت** کار می‌کنیم. نسخه‌ی اولِ همین چک روی سورسِ خام بود و
@@ -455,10 +462,18 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   // زده شود، shared به متنِ پیش‌فرضِ خودش برمی‌گردد و برچسبِ کیبورد با هندلر واگرا
   // می‌شود، بی‌آنکه چک بفهمد. پس اول خودِ سیم‌کشی ادعا می‌شود.
   const SUP = readFileSync(new URL('../shared/support.js', import.meta.url), 'utf8');
-  ok(/bot\.hears\(texts\.button, handler\)/.test(SUP), 'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند');
-  const wired = /registerSupport\(bot,\s*\{[\s\S]{0,400}?texts:\s*L\.support/.test(CODE0);
-  ok(wired, 'tarot متنِ خودش را به registerSupport می‌دهد (وگرنه برچسبِ کیبورد و هندلر واگرا می‌شوند)');
-  if (wired) handled.add(L.support.button);
+  ok(/bot\.hears\(labels\.length \? labels : texts\.button, handler\)/.test(SUP),
+     'shared/support.js دکمه‌ی پشتیبانی را ثبت می‌کند (و بدونِ اتحاد، به متنِ خودش برمی‌گردد)');
+  // ⚠️ از رباتِ چندزبانه به بعد **دو** چیز لازم است، نه یکی: متنِ زنده (که لحظه‌ی
+  // درخواست به زبانِ کاربر resolve می‌شود) و اتحادِ برچسب‌ها برای `hears` (که لحظه‌ی
+  // ثبت لازم است). نبودِ دومی یعنی تپِ کاربرِ زبانِ دیگر به هندلرِ متنِ آزاد می‌ریزد —
+  // همان واگراییِ «برچسبِ کیبورد در برابر هندلر» که این بلوک برای آن نوشته شد.
+  const supBlock = CODE0.match(/registerSupport\(bot,\s*\{[\s\S]{0,600}?\n\}\)/)?.[0] || '';
+  const liveTexts = /texts:\s*liveL\(/.test(supBlock);
+  const unionHears = /hearsLabels:\s*allLabels\(/.test(supBlock);
+  ok(liveTexts, 'tarot متنِ زنده‌ی خودش را به registerSupport می‌دهد (وگرنه برچسبِ کیبورد و هندلر واگرا می‌شوند)');
+  ok(unionHears, 'و برچسبِ hears اتحادِ همه‌ی زبان‌هاست (وگرنه کاربرِ زبانِ دیگر دکمه‌ی مرده دارد)');
+  if (liveTexts && unionHears) handled.add(L.support.button);
 
   const dead = [...rendered].filter(l => !handled.has(l));
   ok(dead.length === 0, `هیچ دکمه‌ی مرده‌ای در کیبورد نیست${dead.length ? ' — مرده: ' + dead.join(' | ') : ''}`);
@@ -466,7 +481,7 @@ console.log('\n▶ هر برچسبِ کیبوردِ ماندگار هندلرِ 
   // خودِ باگ، صریح و نام‌برده، تا اگر کسی DAILY_LABELS را دستکاری کرد بداند چه شکست
   ok(handled.has(L.buttons.dailyOneCard), 'دکمه‌ی «فال تک کارت امروز» هندلر دارد (باگِ v3.9.0)');
   ok(handled.has(L.buttons.daily), 'برچسبِ کهنه‌ی «کارت روز» هم هنوز کار می‌کند (کیبوردِ کش‌شده)');
-  ok(/const DAILY_LABELS = \[L\.buttons\.dailyOneCard, L\.buttons\.daily\]/.test(SRC),
+  ok(/const DAILY_LABELS = \[\.\.\.allLabels\(l => l\.buttons\.dailyOneCard\), \.\.\.allLabels\(l => l\.buttons\.daily\)\]/.test(SRC),
     'هر دو برچسب از یک آرایه‌ی تک‌منبع می‌آیند');
 
   // 🚚 پنجره‌ی یک‌باره‌ی مهاجرتِ کیبورد (v3.25.0). خطرِ واقعیِ لحظه‌ی لانچ: کاربرِ فعلی
@@ -1428,7 +1443,7 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
     'دکمه‌ی کارت شانس: «🎲 کارت شانس (➕صفر تا ۳💎)»');
   // v2.4: ایموجیِ کارت شانس از برگ به تاس رفت — هیچ 🍀ای در متن‌های رو-به-کاربر نماند.
   ok(!/🍀/.test(LOC), 'هیچ 🍀ای در متن‌های رو-به-کاربر نمانده (همه 🎲 شدند)');
-  ok(/LUCKY_LABELS = \[L\.buttons\.luckyMain, '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),
+  ok(/LUCKY_LABELS = \[\.\.\.allLabels\(l => l\.buttons\.luckyMain\), '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),
     'برچسبِ کهنه‌ی 🍀 هنوز match می‌شود (کیبوردِ کش‌شده)');
   ok(/topicSize: \(size, price, cur\) => `\$\{fmt\(size\)\} کارتی \(➖\$\{moneyTight\(price, cur\)\}\)`/.test(LOC),
     'دکمه‌ی اندازه: «۳ کارتی (➖۳💎)»');
@@ -1438,7 +1453,7 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
   ok(/if \(coinsOn\(uid\)\) return walletRows\(uid\);/.test(SRC), 'دکمه‌های زیرِ پیامِ کم‌موجودی = همان دکمه‌های کیف');
 
   // برچسبِ کیبوردِ ماندگار عوض شد → دکمه‌ی کش‌شده روی گوشیِ کاربر نباید بمیرد (بند ۲ج/۶).
-  ok(/const INVITE_LABELS = \[L\.buttons\.inviteMain, '📤 معرفی دوستان'\]/.test(SRC),
+  ok(/const INVITE_LABELS = \[\.\.\.allLabels\(l => l\.buttons\.inviteMain\), '📤 معرفی دوستان'\]/.test(SRC),
     'برچسبِ میانیِ «معرفی دوستان» هنوز match می‌شود (کیبوردِ کش‌شده)');
   ok(/bot\.hears\(INVITE_LABELS, showInvite\)/.test(SRC), 'هندلرِ دعوت هر دو برچسب را می‌گیرد');
   ok(/'📤 معرفی دوستان', '🍀 کارت شانس \(استخراج الماس\)'/.test(SRC),

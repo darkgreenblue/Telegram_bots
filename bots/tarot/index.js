@@ -16,6 +16,10 @@
 // مقدارِ درست را ببینند. در ESM importهای ایستا قبل از بدنه اجرا می‌شوند، پس
 // صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
 import './env-boot.js';
+import {
+  L, Lfor, withLang, currentLang, hasLangCtx, LANGS, DEFAULT_LANG, MULTI_LANG, isLang, normLang, allLabels,
+  liveL,
+} from './locale-ctx.js';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash, randomInt } from 'crypto';
 import { Telegraf, Markup } from 'telegraf';
@@ -47,7 +51,7 @@ import { analyzeReceipt, decideReceipt } from './cardpay.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
-import { configureLocale } from './locale-boot.js';
+import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
@@ -78,7 +82,10 @@ if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); pro
 import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay, refundStars } from './starspay.js';
 
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
-const L = (await import(`./locales/${LOCALE}.js`)).default;
+/* 🌍 `L` دیگر یک آبجکتِ ثابتِ سرِ boot نیست: به زبانِ **همان آپدیتی** وصل است که در
+ * حالِ پردازش است (`locale-ctx.js`). برای رباتِ تک‌زبانه (فارسی، پرتغالی) دقیقاً همان
+ * یک بسته است و هیچ رفتاری عوض نمی‌شود؛ برای رباتِ چندزبانه هر کاربر زبانِ خودش را
+ * می‌بیند، بدونِ اینکه ۵۵۷ نقطه‌ی `L.` در این فایل دست بخورند. */
 /* 💳 ریلِ پرداخت per زبان (بند ۲و ریشه). فارسی کارت‌به‌کارت می‌ماند و بقیه استارز،
  * چون تلگرام فروشِ کالای دیجیتال در بات را روی موبایل اجباراً به استارز محدود کرده.
  * این تنها واگراییِ ساختاریِ مجاز بینِ زبان‌هاست؛ بقیه‌ی UI و UX یکی می‌ماند.
@@ -99,8 +106,11 @@ const monthLabel = (m) => L.buttons.birthMonths[Number(m) - 1] || '';
  * آزمایشگاه هم **همین** تابع را صدا می‌زند تا آن‌چه سنجیده می‌شود با آن‌چه کاربر
  * می‌بیند یکی بماند. برای `fa` هیچ‌کدام از این جدول‌ها در locale نیستند، پس هسته به
  * همان فیلدهای هاردکدِ `cards.js`/`spreads.js` fallback می‌کند و فارسی دست‌نخورده است. */
-configureLocale(L);
-const fmt = L.fmt;
+configureAllLocales();
+/* ⚠️ `L.fmt` نمی‌تواند سرِ boot گرفته شود: در رباتِ چندزبانه هر زبان قالبِ عددیِ
+ * خودش را دارد (`fa-IR` در برابرِ `ru-RU`) و یک ارجاعِ ثابت، قالبِ زبانِ پیش‌فرض را
+ * روی همه‌ی زبان‌ها قفل می‌کرد. */
+const fmt = (n) => L.fmt(n);
 // فال حافظ: دیتای استاتیکِ **per زبان** (امروز فقط `hafez.fa.js`). زبانی که فایلِ خودش را
 // ندارد آرایه‌ی خالی می‌گیرد و فیچر خودکار خاموش می‌شود (`if (HAFEZ.length)` سرِ هر مسیر).
 // ⚠️ نامِ فایل حتماً `${LOCALE}` داشته باشد: قبلاً `./hafez.js` بی‌قید import می‌شد و
@@ -1496,6 +1506,9 @@ try { db.prepare("ALTER TABLE admin_actions ADD COLUMN note TEXT NOT NULL DEFAUL
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_shown_at INTEGER').run(); } catch {}
 // ⌨️ آخرین نسخه‌ی کیبوردی که این کاربر گرفته (بند ۹ب-۲ ریشه). صفر = هنوز هیچ نسخه‌ای.
 try { db.prepare('ALTER TABLE users ADD COLUMN kb_rev INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* 🌍 زبانِ انتخابیِ کاربر (بند ۲و ریشه). خالی = هنوز انتخاب نکرده ⟶ زبانِ پیش‌فرضِ پروسه.
+ * افزایشی با DEFAULT، پس ردیف‌های موجود معتبر می‌مانند و رباتِ تک‌زبانه اصلاً نمی‌خواندش. */
+try { db.prepare("ALTER TABLE users ADD COLUMN lang TEXT NOT NULL DEFAULT ''").run(); } catch {}
 // مهرِ «جارو آزادش کرد». هم رکوردِ عملیاتی است و هم مارکرِ یک‌بارِ پیامِ اطلاع‌رسانی:
 // شرطِ ارسال «اولین باری که آزاد می‌شود» است، پس هیچ‌کس دو بار پیام نمی‌گیرد.
 try { db.prepare('ALTER TABLE users ADD COLUMN pay_unstuck_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
@@ -1819,6 +1832,8 @@ const stmts = {
   setPaymentPackage: db.prepare(
     "UPDATE payments SET pkg=?, original_amount=COALESCE(original_amount, amount), amount=?, updated_at=unixepoch() WHERE id=? AND step='receipt' AND status='pending'"),
   setKbShown: db.prepare('UPDATE users SET kb_shown_at=unixepoch() WHERE telegram_id=?'),
+  getLang:    db.prepare('SELECT lang FROM users WHERE telegram_id=?'),
+  setLang:    db.prepare('UPDATE users SET lang=? WHERE telegram_id=?'),
   // گاردِ `kb_rev<?` داخلِ خودِ UPDATE است: دو آپدیتِ هم‌زمانِ کاربر فقط یک بار changes=1
   // می‌دهند، پس کیبورد دو بار فرستاده نمی‌شود (همان الگوی claimWelcomeBonus).
   claimKbRev: db.prepare('UPDATE users SET kb_rev=? WHERE telegram_id=? AND kb_rev<?'),
@@ -3437,22 +3452,52 @@ bot.catch(async (err, ctx) => {
   try { await ctx.reply(L.errors.generic); } catch {}
 });
 
+/* ══════════════════════════════════════════════════════════════════════════════
+ * 🌍 زمینه‌ی زبانِ هر آپدیت — **باید اولین میدل‌ورِ ربات باشد**
+ * ══════════════════════════════════════════════════════════════════════════════
+ * از این خط به بعد، هر `L.` در این فایل به زبانِ **همان کاربری** وصل است که آپدیتش
+ * در حالِ پردازش است. میدل‌ورِ تلگراف ترتیبی است، پس ثبتِ این یکی قبل از جرنی و قبل
+ * از همه‌ی هندلرها یک الزام است نه سلیقه: هر میدل‌وری که بالاتر بنشیند زبانِ پیش‌فرض
+ * را می‌بیند و متنِ زبانِ اشتباه می‌سازد.
+ *
+ * ⚠️ و باید **بعد از** `installSerialDispatch` اثر کند، نه قبلش. صفِ per کاربر
+ * `bot.handleUpdate` را می‌پیچد و هندلرِ واقعی را از دلِ صف صدا می‌زند؛ چون این یک
+ * میدل‌ورِ داخلیِ تلگراف است، همان‌جا داخلِ صف اجرا می‌شود و زمینه دقیقاً دورِ خودِ
+ * هندلر بسته می‌شود. (اگر روزی کسی خواست زمینه را در `dispatch.js` بگذارد: نگذارد —
+ * آن‌جا هنوز `db` در دسترس نیست و زبانِ کاربر خوانده نمی‌شود.)
+ */
+const langOf = (uid) => {
+  if (!MULTI_LANG || !uid) return DEFAULT_LANG;
+  try { return normLang(stmts.getLang.get(uid)?.lang); } catch { return DEFAULT_LANG; }
+};
+/** زبانِ کاربر را ثبت می‌کند. ورودیِ ناشناخته بی‌صدا رد می‌شود (از تپِ کاربر می‌آید). */
+const setUserLang = (uid, lang) => {
+  if (!isLang(lang)) return false;
+  try { stmts.setLang.run(normLang(lang), uid); return true; } catch { return false; }
+};
+bot.use((ctx, next) => withLang(langOf(ctx.from?.id), next));
+
 // ثبتِ مسیرِ ریز — **باید قبل از همه‌ی هندلرها** ثبت شود (میدل‌ورِ تلگراف ترتیبی اجرا می‌شود).
 // برچسبِ دکمه‌های کیبوردِ ماندگار را می‌دهیم تا «زدنِ دکمه» از «تایپِ آزاد» تفکیک شود، و
 // نامِ نمایشیِ کاربر را می‌دهیم تا از متنِ پیام حذف شود و کلیدِ صفحه برای همه یکی بماند.
 const KB_LABELS = new Set([
-  L.buttons.daily, L.buttons.reading, L.buttons.wallet, L.buttons.coinShop, L.buttons.inviteMain,
-  L.buttons.freeMenu, L.buttons.resetTest, L.support?.button, '🔄 ریست ربات (تست)',
+  /* 🌍 اتحادِ **همه‌ی** زبان‌های این پروسه. برچسبِ تک‌زبانه این‌جا یعنی تپِ کاربرِ زبانِ
+   * دیگر «تایپِ آزاد» شمرده شود و قیفِ جرنی و گاردِ استیتِ گفتگو هر دو دروغ بگویند. */
+  ...allLabels(l => l.buttons.daily), ...allLabels(l => l.buttons.reading),
+  ...allLabels(l => l.buttons.wallet), ...allLabels(l => l.buttons.coinShop),
+  ...allLabels(l => l.buttons.inviteMain), ...allLabels(l => l.buttons.freeMenu),
+  ...allLabels(l => l.buttons.resetTest), ...allLabels(l => l.buttons.settings),
+  ...allLabels(l => l.support?.button), '🔄 ریست ربات (تست)',
   // برچسب‌های کهنه‌ی کیبورد — تا تپِ کیبوردهای کش‌شده هم «دکمه» شمرده شود، نه «تایپِ آزاد»
   '📤 معرفی دوستان', '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)',
   '💎 کیف الماس', '💎 الماس فروشی',
-  L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
-  /* 🐛 v3.96.0 — «تنظیمات» از v3.38.0 در کیبوردِ اصلی هست ولی این‌جا جا افتاده بود، و
-   * دو چیز را بی‌صدا خراب می‌کرد: در قیفِ جرنی تپِ آن دکمه «تایپِ آزاد» شمرده می‌شد، و
-   * مهم‌تر، میدل‌ورِ گفتگو آن را **سؤالِ گفتگو** می‌دید و رد می‌کرد — یعنی کاربرِ وسطِ
-   * گفتگو به تنظیمات می‌رفت در حالی که استیتش `chatting` می‌ماند، و اولین چیزی که
-   * بعدش تایپ می‌کرد یک الماس خرج می‌کرد. */
-  ...(SETTINGS_ENABLED ? [L.buttons.settings] : []),
+  ...allLabels(l => l.buttons.dailyOneCard), ...allLabels(l => l.buttons.luckyMain),   // UX v2.1
+  /* 🐛 «تنظیمات» تا v3.95.x این‌جا **جا افتاده بود** و دو چیز را بی‌صدا خراب می‌کرد: در
+   * قیفِ جرنی تپِ آن دکمه «تایپِ آزاد» شمرده می‌شد، و مهم‌تر، میدل‌ورِ گفتگو آن را
+   * **سؤالِ گفتگو** می‌دید و رد می‌کرد — یعنی کاربرِ وسطِ گفتگو به تنظیمات می‌رفت در
+   * حالی که استیتش `chatting` می‌ماند و اولین چیزی که بعدش تایپ می‌کرد یک الماس خرج
+   * می‌کرد. حالا ردیفِ `allLabels(l => l.buttons.settings)` بالا پوششش می‌دهد (و
+   * بهتر از نسخه‌ی من: بی‌قید به `SETTINGS_ENABLED`، پس دکمه‌ی کش‌شده هم شمرده می‌شود). */
 ].filter(Boolean));
 // فقط دکمه‌های واقعیِ ناوبری/ورود. متنِ آزادِ سؤال، رسید و مبلغ هرگز این‌جا نیست؛
 // بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
@@ -3812,8 +3857,13 @@ bot.action('gate:check', async (ctx) => {
 if (gateOn()) {
   // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
   const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
+  // ⚠️ اتحادِ همه‌ی زبان‌ها، نه زبانِ پیش‌فرض: این Set لحظه‌ی **ثبت** ساخته می‌شود
+  // (بیرونِ هر زمینه‌ای) ولی لحظه‌ی **درخواست** با متنِ کاربر مقایسه می‌شود. با برچسبِ
+  // تک‌زبانه، کاربرِ زبانِ دیگر که وسطِ گیت دکمه‌ی پشتیبانی/ریستِ خودش را می‌زند بی‌صدا
+  // پشتِ گیت می‌ماند — همان تله‌ی `bot.hears` در locale-ctx.js.
   const GATE_FREE_TEXT = new Set(
-    [L.support?.button, L.buttons.resetTest, '🔄 ریست ربات (تست)'].filter(Boolean));
+    [...allLabels((l) => l.support?.button), ...allLabels((l) => l.buttons.resetTest),
+      '🔄 ریست ربات (تست)'].filter(Boolean));
   // ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
 // می‌شود تا `logAct` اقدامِ کاربر را عادی ثبت کرده باشد، و هرگز چیزی را بلاک نمی‌کند.
 bot.use(async (ctx, next) => {
@@ -4227,7 +4277,7 @@ async function dailyCard(ctx) {
 // بازه». برچسب در `KB_LABELS` بود (پس در قیف ثبت می‌شد) ولی هیچ‌جا اجرا نمی‌شد، و
 // همین شکافِ بینِ «ثبت می‌شود» و «اجرا می‌شود» بود که باگ را ماه‌ها پنهان نگه داشت.
 // حالا یک چکِ CI هر برچسبِ کیبورد را با هندلرش تطبیق می‌دهد.
-const DAILY_LABELS = [L.buttons.dailyOneCard, L.buttons.daily];
+const DAILY_LABELS = [...allLabels(l => l.buttons.dailyOneCard), ...allLabels(l => l.buttons.daily)];
 bot.hears(DAILY_LABELS, dailyCard);
 bot.action('daily_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return dailyCard(ctx); });
 
@@ -4438,7 +4488,7 @@ async function luckyCard(ctx) {
 }
 // برچسبِ این دکمه در v3.10.2 از 🍀 به 🎲 رفت. کیبوردِ reply روی گوشیِ کاربر تا اولین
 // جایگزینی می‌ماند، پس برچسبِ قبلی هم باید match شود وگرنه دکمه‌ی کش‌شده می‌میرد (بند ۲ج/۶).
-const LUCKY_LABELS = [L.buttons.luckyMain, '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)'];
+const LUCKY_LABELS = [...allLabels(l => l.buttons.luckyMain), '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)'];
 bot.hears(LUCKY_LABELS, luckyCard);
 bot.action('lucky_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return luckyCard(ctx); });
 // دو نقطه‌ی ورودِ اینلاین که خواهرِ `lucky_go` اند. لازم شدند چون پیامِ اطلاع‌رسانیِ آپدیت
@@ -4620,7 +4670,7 @@ async function showFreeMenu(ctx) {
   await ctx.reply(L.freeMenu.title, Markup.inlineKeyboard(rows));
   track(db, uid, 'free_menu_opened', {});
 }
-bot.hears(L.buttons.freeMenu, showFreeMenu);
+bot.hears(allLabels(l => l.buttons.freeMenu), showFreeMenu);
 bot.action('freemenu', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showFreeMenu(ctx); });
 // ردیفِ «به‌جای ترک، رایگان بازی کن» برای پی‌وال (خالی وقتی فیچر خاموش است)
 const freeMenuRow = () => (FREE_MENU_ENABLED && HAFEZ.length)
@@ -5017,7 +5067,7 @@ async function showCatalog(ctx, full = false, edit = false) {
   // پیام کوتاه: فقط دعوت به انتخاب؛ توضیح تک‌تک فال‌ها به «راهنمای انتخاب» منتقل شد.
   await ctx.reply(L.reading.catalog, Markup.inlineKeyboard(catalogKb(uid)));
 }
-bot.hears(L.buttons.reading, (ctx) => showCatalog(ctx));
+bot.hears(allLabels(l => l.buttons.reading), (ctx) => showCatalog(ctx));
 
 /* ☰ دو دستورِ منوی تلگرام (v3.96.0) — جوابِ سؤالِ صریحِ مالک: «آیا راهی هست که بدونِ
  * حواس‌پرت‌کردنِ کاربر، فقط دکمه‌ی منوی اصلی از همان اول برایش فعال باشد؟»
@@ -7225,9 +7275,9 @@ async function showWallet(ctx) {
     throw e;
   }
 }
-bot.hears(L.buttons.wallet, showWallet);
+bot.hears(allLabels(l => l.buttons.wallet), showWallet);
 // همان قاعده: «💎 کیف الماس» (و «💎 الماس فروشی»ِ نسلِ قبل) هنوز match می‌شوند.
-const WALLET_LABELS = [L.buttons.coinShop, '💎 کیف الماس', '💎 الماس فروشی'];
+const WALLET_LABELS = [...allLabels(l => l.buttons.coinShop), '💎 کیف الماس', '💎 الماس فروشی'];
 bot.hears(WALLET_LABELS, showWallet);   // UX v2: همان صفحه، نامِ تازه
 
 // لینک اشتراک‌گذاری استاندارد تلگرام: با یک تاچ، پیام آماده + لینک دعوت در چت انتخابی گذاشته می‌شود.
@@ -7282,7 +7332,7 @@ async function showInvite(ctx) {
 // reply روی گوشیِ کاربر تا اولین جایگزینی می‌ماند، پس کاربری که کیبوردش هنوز برچسبِ میانی را
 // دارد با یک تپ متنی می‌فرستد که دیگر هیچ hears ای نمی‌گیردش (بند ۲ج/۶: دکمه‌ی کهنه نباید
 // بمیرد). همان الگوی دکمه‌ی ریست: هر دو برچسب match می‌شوند.
-const INVITE_LABELS = [L.buttons.inviteMain, '📤 معرفی دوستان'];
+const INVITE_LABELS = [...allLabels(l => l.buttons.inviteMain), '📤 معرفی دوستان'];
 bot.hears(INVITE_LABELS, showInvite);
 bot.action('invite_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showInvite(ctx); });
 
@@ -8540,7 +8590,9 @@ if (starsRail || FEATURE_STARS_TOGGLE) {
       await afterApproval(p.user_id);
     },
     log, logErr,
-    texts: { staleInvoice: L.wallet.starsStaleInvoice, tempError: L.wallet.starsTempError },
+    // آبجکتِ زنده، نه مقدار: `starspay` این دو را لحظه‌ی pre-checkout می‌خواند، پس
+    // مقدارِ لحظه‌ی ثبت یعنی زبانِ پیش‌فرض برای همه‌ی کاربران (بند «آبجکتِ زنده»).
+    texts: liveL((l) => ({ staleInvoice: l.wallet.starsStaleInvoice, tempError: l.wallet.starsTempError })),
   });
 }
 
@@ -8944,7 +8996,7 @@ async function doReset(ctx) {
   return handleStart(ctx); // مثل کاربر تازه: آنبوردینگ از نو (upsertUser → isNew=true)
 }
 // هم برچسبِ جدید، هم برچسبِ قدیمیِ فاز تست (برای دکمه‌ی کش‌شده‌ی احتمالی) — doReset خودش isAdmin را چک می‌کند
-bot.hears([L.buttons.resetTest, '🔄 ریست ربات (تست)'], doReset);
+bot.hears([...allLabels(l => l.buttons.resetTest), '🔄 ریست ربات (تست)'], doReset);
 /* 🧪 `/loading` — نمایشِ زنده‌ی پنج طرحِ نشانگرِ انتظار، داخلِ خودِ تلگرام.
    خواسته‌ی صریحِ مالک: «یه دستور موقت باشه که بزنم و ببینمشون». عرضِ اموجی، رندرِ RTL و
    «حسِ» سرعت را نمی‌شود از روی کد قضاوت کرد؛ باید روی کلاینتِ واقعی دید.
@@ -9106,7 +9158,7 @@ async function showSettings(ctx) {
   setState(ctx.from.id, 'idle');
   await ctx.reply(L.settings.home, Markup.inlineKeyboard(settingsRows(ctx.from.id)));
 }
-if (SETTINGS_ENABLED) bot.hears(L.buttons.settings, showSettings);
+if (SETTINGS_ENABLED) bot.hears(allLabels(l => l.buttons.settings), showSettings);
 
 // بازگشت به ریشه‌ی تنظیمات (از هر زیرشاخه‌ای) — همیشه ادیت، هرگز پیامِ تازه
 bot.action('set:home', async (ctx) => {
@@ -9224,7 +9276,10 @@ bot.command('reset', doReset);
 // دوباره یادآوری می‌شود تا سرگردان نماند (قرارداد ۹ب).
 registerSupport(bot, {
   botCode: SUPPORT_BOT_CODE,
-  texts: L.support,
+  // آبجکتِ زنده: کلیدهایش (body/draft/openBtn/button) لحظه‌ی درخواست خوانده می‌شوند.
+  texts: liveL((l) => l.support),
+  // و برچسبِ `bot.hears` داخلِ registerSupport لحظه‌ی ثبت لازم است، پس اتحاد.
+  hearsLabels: allLabels((l) => l.support?.button),
   // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف
   // بده، انصراف داد و پیامِ عمومیِ «همیشه اینجام» گرفت به‌جای پشتیبانی. حالا هر دو گارد
   // نیتِ SUPPORT را ثبت می‌کنند و `replyCanceled` بعد از انصراف همین صفحه را برمی‌گرداند.
@@ -9797,15 +9852,24 @@ function onLaunched() {
  * ⚠️ `setChatMenuButton` بدونِ `chatId` **پیش‌فرضِ سراسریِ ربات** را می‌گذارد، پس
  * کاربرِ فعلی هم بدونِ هیچ اقدامی آن را می‌گیرد؛ لازم نیست کسی `/start` بزند.
  * ⚠️ متنِ دستورها از locale می‌آید (هیچ رشته‌ی فارسی در index.js) و `command` باید
- * lowercase و بدونِ اسلش باشد — قراردادِ خودِ Bot API. */
+ * lowercase و بدونِ اسلش باشد — قراردادِ خودِ Bot API.
+ * 🌍 و **per زبان** نصب می‌شود، نه یک‌بار با زبانِ پیش‌فرض: این تابع سرِ boot اجرا
+ * می‌شود، یعنی بیرونِ زمینه‌ی زبانِ هر کاربر، پس `L` همیشه پیش‌فرض را می‌دهد. در
+ * پروسه‌ی چندزبانه آن یعنی کاربرِ روس توضیحِ فارسی ببیند — یک خرابیِ کاملاً بی‌صدا.
+ * `setMyCommands` فیلدِ `language_code` دارد و دقیقاً برای همین است؛ مجموعه‌ی
+ * **بی‌زبان** هم می‌ماند تا کاربری با زبانِ کلاینتِ دیگر دست‌خالی نماند. */
 async function installMenuButton() {
   if (!CHAT_MENU_BUTTON) return;
+  const cmdsFor = (Lx) => BOT_COMMANDS.map(([command, key]) => ({ command, description: Lx.commands[key] }));
   try {
-    await bot.telegram.setMyCommands(BOT_COMMANDS.map(([command, key]) => ({
-      command, description: L.commands[key],
-    })));
+    await bot.telegram.setMyCommands(cmdsFor(Lfor(DEFAULT_LANG)));
+    if (MULTI_LANG) {
+      for (const lang of LANGS) {
+        await bot.telegram.setMyCommands(cmdsFor(Lfor(lang)), { language_code: lang });
+      }
+    }
     await bot.telegram.setChatMenuButton({ menuButton: { type: 'commands' } });
-    log('☰ menu button installed');
+    log(`☰ menu button installed (${MULTI_LANG ? LANGS.join(',') : DEFAULT_LANG})`);
   } catch (e) { logErr('menu button:', e.message); }
 }
 function launch() {

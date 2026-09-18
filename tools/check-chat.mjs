@@ -1476,28 +1476,47 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
     '🔑 و از قلابِ `onLaunch` صدا زده می‌شود، نه `.then()`ِ launch (بند ۹ب/۷ ریشه)');
   const cmdsSrc = (CODE.match(/const BOT_COMMANDS = \[[\s\S]*?\];/) || [])[0];
   ok(!!cmdsSrc, 'فهرستِ دستورها از سورس برداشته شد');
-  const runInstall = async (flag) => {
+  /* 🌍 هارنس هر دو دنیا را می‌سازد: پروسه‌ی تک‌زبانه (امروز) و چندزبانه (بعد از
+   * رباتِ واحدِ چندزبانه). این تابع سرِ boot اجرا می‌شود، یعنی **بیرونِ** زمینه‌ی زبانِ
+   * کاربر، پس تکیه به `L` در پروسه‌ی چندزبانه یعنی کاربرِ روس توضیحِ فارسی ببیند. */
+  const RU = (await import('../bots/tarot/locales/ru.js')).default;
+  const LTBL = { fa: FAL, ru: RU };
+  const runInstall = async (flag, langs = ['fa']) => {
     const calls = [];
-    const fn = new Function('CHAT_MENU_BUTTON', 'bot', 'L', 'log', 'logErr',
+    const fn = new Function('CHAT_MENU_BUTTON', 'bot', 'L', 'Lfor', 'LANGS', 'DEFAULT_LANG',
+      'MULTI_LANG', 'log', 'logErr',
       `${cmdsSrc}\n${imb}\nreturn installMenuButton;`)(flag, {
       telegram: {
-        setMyCommands: async (c) => { calls.push(['cmds', c]); },
+        setMyCommands: async (c, extra) => { calls.push(['cmds', c, extra || null]); },
         setChatMenuButton: async (o) => { calls.push(['btn', o]); },
       },
-    }, FAL, () => {}, () => {});
+    }, LTBL[langs[0]], (l) => LTBL[l], langs, langs[0], langs.length > 1, () => {}, () => {});
     await fn();
     return calls;
   };
   const installed = await runInstall(true);
   ok(installed.length === 2 && installed[0][0] === 'cmds' && installed[1][0] === 'btn',
-    '🔁 کنترلِ مثبت: با پرچمِ روشن هر دو فراخوانی واقعاً انجام می‌شوند');
-  ok(installed[1][1]?.menuButton?.type === 'commands', 'و دکمه از نوعِ «commands» است');
-  const sentCmds = installed[0][1];
+    '🔁 کنترلِ مثبت: در پروسه‌ی تک‌زبانه دقیقاً دو فراخوانی می‌رود');
+  // ⚠️ همه‌ی دسترسی‌ها اختیاری‌اند: جهشی که یک فراخوانی را بردارد باید یک ادعای
+  // **خوانا** قرمز کند، نه وسطِ چک با TypeError بترکد (نقصِ ثبت‌شده‌ی هارنس).
+  ok(installed.find((c) => c[0] === 'btn')?.[1]?.menuButton?.type === 'commands',
+    'و دکمه از نوعِ «commands» است');
+  const sentCmds = installed.find((c) => c[0] === 'cmds')?.[1];
   ok(Array.isArray(sentCmds) && sentCmds.length === 3
     && sentCmds.every((c) => /^[a-z]+$/.test(c.command) && typeof c.description === 'string' && c.description),
     'هر سه دستور lowercase و بدونِ اسلش‌اند و توضیحِ ناخالی دارند (قراردادِ Bot API)');
-  ok(sentCmds[0].description === FAL.commands.menu && sentCmds[2].description === FAL.commands.support,
+  ok(sentCmds?.[0]?.description === FAL.commands.menu && sentCmds?.[2]?.description === FAL.commands.support,
     '🔑 و توضیح‌ها از locale می‌آیند، نه رشته‌ی فارسی در `index.js`');
+  /* 🔑 قلبِ این بلوک: در پروسه‌ی چندزبانه، توضیحِ هر زبان باید با `language_code`
+   * خودش نصب شود. نسخه‌ی تک‌زبانه‌ی این تابع کاربرِ روس را با متنِ فارسی رها می‌کرد —
+   * بی‌صدا، چون تلگرام هیچ خطایی نمی‌دهد. */
+  const multi = await runInstall(true, ['fa', 'ru']);
+  const ruSet = multi.find((c) => c[0] === 'cmds' && c[2]?.language_code === 'ru');
+  ok(!!ruSet, '🌍 در پروسه‌ی چندزبانه مجموعه‌ی دستورها per زبان نصب می‌شود');
+  ok(ruSet?.[1]?.[0]?.description === RU.commands.menu,
+    '🔑 و متنِ هر زبان از locale **همان زبان** می‌آید، نه از پیش‌فرض');
+  ok(multi.some((c) => c[0] === 'cmds' && !c[2]),
+    '⚠️ مجموعه‌ی بی‌زبان هم می‌ماند (کاربری با زبانِ کلاینتِ دیگر دست‌خالی نمی‌ماند)');
   ok((await runInstall(false)).length === 0, '🔁 و با پرچمِ خاموش **هیچ** فراخوانی‌ای نمی‌رود');
   ok(/bot\.command\('menu'/.test(CODE) && /bot\.command\('fal'/.test(CODE),
     'و هر دو دستورِ تازه هندلر دارند (دکمه‌ای که به هیچ‌جا نبرد بدتر از نبودنش است)');
