@@ -1120,6 +1120,12 @@
       "pattern": "[\\u0400-\\u052f\\u0600-\\u06ff\\u0750-\\u077f\\ufb50-\\ufdff\\ufe70-\\ufefc\\u3000-\\u9fff\\uff00-\\uffef]+(?:[ ]+[\\u0400-\\u052f\\u0600-\\u06ff\\u0750-\\u077f\\ufb50-\\ufdff\\ufe70-\\ufefc\\u3000-\\u9fff\\uff00-\\uffef]+)*",
       "flags": "",
       "hint": "There are non Latin characters inside an English text, so the reader sees letters from another alphabet in the middle of the reading. Remove them and write the whole line in English only, card names included."
+    },
+    {
+      "id": "labelleak",
+      "pattern": "(?:your|the)\\s+unspoken\\s+feeling",
+      "flags": "i",
+      "hint": "This names the label instead of writing the feeling. \"Your unspoken feeling is...\" is the internal name of our job, never text for a person. Delete the label and go straight to the feeling itself, for example \"it sounds like you are waiting for someone else to make the call for you\"."
     }
   ],
   "ctxKeys": {
