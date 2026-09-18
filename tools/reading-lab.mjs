@@ -167,6 +167,49 @@ const PROMPT_VARIANTS = {
     return sys.replace(ban, '').replace(voice, moved + voice);
   },
 
+  /* 🇬🇧 دورِ ۵، فرضیه‌ی ۱: **جای قاعده‌ی لنگر**.
+   *
+   * دورِ ۳ یک چیزِ قابلِ تعمیم ثابت کرد: جای یک قاعده در پرامپت بخشی از قوتِ آن است.
+   * آن‌جا قاعده‌ای که از یک بخشِ کوتاهِ سه‌خطی به وسطِ فهرستِ ~۱۵بولتیِ `=== Voice ===`
+   * رفت **بدتر** شد (نشتِ برچسب ۰/۹ ⟵ ۳/۹). این واریانت همان مشاهده را در جهتِ
+   * **معکوس** می‌آزماید: قاعده‌ی لنگر — که خودِ پرامپت «سخت‌ترین قاعده‌ی این متن»
+   * می‌نامدش و تنها سنجه‌ای است که هنوز جا برای بهبود دارد — امروز بولتِ دهم از همان
+   * فهرستِ بلند است. این‌جا به بخشِ کوتاه و نام‌دارِ خودش منتقل می‌شود، بلافاصله بعد از
+   * «قاعده‌ی جواب».
+   *
+   * ⚠️ **انتقال است نه افزودن**: متنِ قاعده بیت‌به‌بیت همان است و فقط دو خطِ عنوان
+   * اضافه می‌شود، پس طولِ پرامپت عملاً ثابت می‌ماند و فرضیه تک‌متغیره است. اگر متن هم
+   * عوض می‌شد، نمی‌شد فهمید برد از **جا** آمده یا از **جمله‌بندی**. */
+  anchorsection: (sys) => {
+    const line = sys.split('\n').find((l) => l.startsWith('- The anchor rule,'));
+    if (!line) return sys;                       // قاعده جابه‌جا شده؛ گاردِ بالا می‌گیردش
+    const body = line.replace(/^- /, '');
+    const head = '\n=== The anchor rule, the hardest rule in this text ===\n'
+      + body.replace(/^The anchor rule, the hardest rule in this text\. /, '') + '\n';
+    return sys.replace(`${line}\n`, '')
+      .replace('\n=== The moves that make a reading personal ===',
+        `${head}\n=== The moves that make a reading personal ===`);
+  },
+
+  /* 🇬🇧 دورِ ۵، فرضیه‌ی ۲: **جمع‌بندی باید کارت را نام ببرد**.
+   *
+   * جمع‌بندی طولانی‌ترین فیلدِ خروجی است (۴ تا ۷ جمله) و اسپکش سه کارِ عمومی از مدل
+   * می‌خواهد (تکرارِ جواب، بازه‌ی زمانی، شرط). هر سه ذاتاً وسوسه‌ی جمله‌ی بی‌لنگر
+   * دارند: «over these next few weeks» و «if you stay patient» را می‌شود عیناً زیرِ
+   * هر فالِ دیگری گذاشت. اسپکِ فعلی می‌گوید شرط باید «به کارت‌های همین فال بخورد»
+   * ولی این یک **توصیف** است، نه یک چیزِ قابلِ سنجش برای خودِ مدل.
+   *
+   * واریانت همان جمله را به یک الزامِ عینی تبدیل می‌کند: شرط باید **نامِ یکی از
+   * کارت‌های همین فال** را ببرد. تغییر داخلِ اسپکِ JSON است، پس بقیه‌ی پرامپت
+   * دست‌نخورده می‌ماند. */
+  closinganchor: (sys) => {
+    const old = 'The condition has to fit the cards of this very reading and their own question, not be generic advice.';
+    if (!sys.includes(old)) return sys;
+    return sys.replace(old,
+      'The condition has to name one of the cards of this very reading out loud and hook onto their own question, '
+      + 'not be generic advice. A condition with no card name in it is generic advice.');
+  },
+
   /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
    * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
    * که از مدل می‌خواهد یک کارِ ظریفِ صرفی را درست انجام دهد. ولی ما **هیچ داده‌ای**
