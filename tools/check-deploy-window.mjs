@@ -13,6 +13,7 @@
  * چکِ CI **همان تابعی** را صدا می‌زند که ورک‌فلو صدا می‌زند، نه بازنویسیِ منطق (بند ۶ب).
  */
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { decide, tehranHour, SAFE_HOURS, PREFERRED_HOURS, BYPASS_MARKER } from './deploy-window.mjs';
 
 let pass = 0; const errs = [];
@@ -141,6 +142,43 @@ ok(/if: steps\.gate\.outputs\.go != 'true' && github\.event_name == 'push'/.test
   'و فقط روی تعویقِ یک **مرج** شلیک می‌کند، نه تعویقِ کرون/اجرای دستی (ضدِ هشدارِ بی‌معنا)');
 ok(/api\.telegram\.org/.test(deferStep) && /OWNER_TELEGRAM_ID/.test(deferStep),
   'و واقعاً به تلگرامِ مالک می‌رود، نه فقط لاگِ جاب (که همان سکوتِ قبلی است)');
+
+/* 🔇 و برای پوشی که هیچ چیزی برای دیپلوی ندارد **شلیک نمی‌کند**.
+ * باگِ واقعیِ ۱۴۰۵/۰۶/۲۷: مرجِ یک فایلِ `tools/` پیامِ تعویق فرستاد، چون گیتِ ساعت
+ * قبل از تصمیمِ انتخابیِ دیپلوی اجرا می‌شود. هشداری که برای مرجِ مستنداتی هم بیاید،
+ * مرجِ واقعاً معطل را لای نویز گم می‌کند (بند ۳ ریشه). */
+ok(/steps\.relevant\.outputs\.rel == '1'/.test(deferStep),
+  'و برای پوشی که فایلِ دیپلوی‌پذیر ندارد شلیک نمی‌کند');
+const relStep = WF.slice(WF.indexOf('- name: Does this push deploy anything?'),
+  WF.indexOf('- name: Telegram notice on deferred deploy'));
+ok(/git diff --name-only/.test(relStep), 'تشخیصِ «چیزی برای دیپلوی هست؟» از دیفِ واقعیِ پوش می‌آید');
+ok(/REL=1/.test(relStep.split('if [ -n "$BEFORE" ]')[0]),
+  '⚠️ fail-open: مبنای نامعلوم ⟵ پیام می‌رود (رفتارِ قبلی)');
+
+/* ادعای **رفتاری** روی خودِ فیلتر: الگو از سورس بریده و با `grep` واقعی روی دو
+ * فهرستِ فایلِ ساختگی اجرا می‌شود. ادعای متنی این‌جا کافی نیست، چون یک الگوی
+ * بیش‌ازحد پهن (مثلاً افتادنِ `^`) سبز رد می‌شود و بی‌صدا به رفتارِ قبلی برمی‌گردد. */
+const pat = /grep -E '(\^\([^']+)'/.exec(relStep);
+ok(!!pat, 'الگوی مسیرهای دیپلوی‌پذیر در سورس پیدا شد');
+if (pat) {
+  const re = pat[1];
+  const run = (files) => {
+    try {
+      return execFileSync('bash', ['-c',
+        `printf '%s\\n' ${files.map((f) => `'${f}'`).join(' ')} | grep -E '${re}' | grep -vE '\\.md$' | grep -q . && echo 1 || echo 0`,
+      ], { encoding: 'utf8' }).trim();
+    } catch { return 'ERR'; }
+  };
+  ok(run(['tools/ci-local.mjs', 'CLAUDE.md', '.github/workflows/ci.yml']) === '0',
+    'پوشِ ابزاری/مستنداتی: دیپلوی‌پذیر نیست ⟵ پیام نمی‌رود');
+  ok(run(['bots/tarot/CLAUDE.md', 'README.md']) === '0',
+    'فقط `.md` داخلِ پوشه‌ی ربات هم دیپلوی‌پذیر نیست');
+  // کنترلِ مثبت — بدونِ این، یک الگوی همیشه-خالی همه‌ی ادعاهای بالا را پاس می‌کرد.
+  ok(run(['bots/tarot/index.js']) === '1', 'کنترلِ مثبت: کدِ ربات دیپلوی‌پذیر است');
+  ok(run(['shared/llm.js']) === '1', 'کنترلِ مثبت: زیرساختِ مشترک دیپلوی‌پذیر است');
+  ok(run(['ecosystem.config.cjs']) === '1', 'کنترلِ مثبت: ecosystem دیپلوی‌پذیر است');
+  ok(run(['.github/workflows/deploy.yml']) === '1', 'کنترلِ مثبت: خودِ deploy.yml دیپلوی‌پذیر است');
+}
 ok(/steps\.gate\.outputs\.bypass != ''/.test(WF), 'عبور از پنجره به تلگرامِ مالک اطلاع داده می‌شود');
 ok(/uses: actions\/checkout@v4/.test(WF.slice(0, WF.indexOf('- name: Deploy to VPS'))),
   'جابِ دیپلوی قبل از گیت چک‌اوت می‌کند (وگرنه اسکریپت روی رانر نیست)');
