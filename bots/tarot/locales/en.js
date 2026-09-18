@@ -800,6 +800,9 @@ export default {
     canceled: 'Alright, I am here whenever you are ready 🌙',
     backToMenu: 'Back to the main menu 🌳',
     openReadingGuard: 'You have a reading open that you never finished 🌙\n\nWant to keep going with it, or drop it?',
+    /* همان پیام، ولی برای فالی که **پولش داده شده**: انصراف الماس را برنمی‌گرداند و
+       کاربر باید قبل از تپ بداند (بند ۱۰ ریشه: ادعا هرگز از دیتا جلو نزند). */
+    openReadingGuardPaid: 'You have a reading open that you never finished 🌙\n\nWant to pick it up where you left off?\n\n⚠️ If you drop it, the diamonds it cost you do not come back.\n\nSure you want to drop it?',
     /* 🌙 یادآوریِ شبانه‌ی فالِ نیمه‌کاره (v3.57.0). جمله‌ی دومِ شرطی عمداً هست: با
        `REFUND_ON_CANCEL = false` انصراف الماس را برنمی‌گرداند، و کاربر باید **قبل** از
        تپ بداند، نه از راهِ تیکتِ پشتیبانی. */
@@ -1041,7 +1044,7 @@ export default {
     adminMoney,
     // اطلاع به ادمین بعد از تأییدِ خودکارِ ایجنت (با دکمه‌ی «پیامکش نیومده» برای برگشت)
     adminAutoApproved: (p, user, reason, pack) =>
-      `✅ Payment #${p.id} approved by the agent and credited.\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+      `✅ Payment #${p.invoice_no || p.id} approved by the agent and credited.\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
     // شبکه‌ی ایمنیِ برگشت (رسیدِ فیک)
     confirmReverse: (pid) =>
       `⚠️ Are you sure no transfer notification arrived for payment #${pid}?\nCheck the banking app first. Once you confirm, the credit from this payment is taken off the user balance (down to zero), the payment goes back to its earlier state, and from now on their payments are only approved by hand.`,
@@ -1056,7 +1059,7 @@ export default {
     // پیامِ ردِ یکپارچه (همه‌ی مسیرها): بدونِ دلیل، فقط راهِ پیگیری
     rejected: `❌ Your payment was not confirmed.\n\nGet in touch with support and we will sort it out: ${SUPPORT_CONTACT}`,
     adminNotify: (p, user, pack) =>
-      `💳 New payment #${p.id}\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
+      `💳 New payment #${p.invoice_no || p.id}\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },
 
   // پشتیبانی (قرارداد مشترکِ همه‌ی ربات‌ها) — شکلِ این آبجکت باید با SUPPORT_TEXTS_FA در
