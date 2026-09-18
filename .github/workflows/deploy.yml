@@ -21,13 +21,23 @@ on:
 
   # ⏰ گرفتنِ دیپلویِ به‌تعویق‌افتاده در پنجره‌ی امن. کرونِ گیت‌هاب UTC است و تهران
   # UTC+3:30 (ایران از ۲۰۲۲ ساعتِ تابستانی ندارد، پس این افست ثابت است).
-  #   04:35 UTC = 08:05 تهران   ·   05:35 UTC = 09:05 تهران
-  # دو پنجره چون زمان‌بندیِ Actions تضمینی نیست و روی همین ریپو ۱ تا ۴ ساعت تأخیر
-  # دیده شده (بند ۳ج). دیپلوی ذاتاً idempotent است: اگر چیزی عوض نشده باشد هیچ
-  # رباتی reload نمی‌شود، پس اجرای دوم بی‌ضرر است.
+  #   04:35 UTC = 08:05 تهران  ⟵ پنجره‌ی هدف، ساعتی که مالک بیدار است
+  #
+  # ⚠️ **یک کرون، نه دو تا (۱۴۰۵/۰۶/۲۶).** تا امروز دو کرون بود با این استدلال که
+  # «تأخیرِ گیت‌هاب ۱ تا ۴ ساعت دیده شده، پس دو فرود شانس را بالا می‌برد». دو بارِ
+  # ثبت‌شده ثابت کرد این استدلال کار نمی‌کند:
+  #   ۱۴۰۵/۰۶/۲۲ ⟵ تأخیرِ ~۵ ساعت، هر دو کرون به ۱۳:۱۰ و ۱۴:۰۱ تهران پرت شدند (ممنوع)
+  #   ۱۴۰۵/۰۶/۲۶ ⟵ هیچ‌کدام اصلاً اجرا نشدند؛ کد ۱۲ ساعت روی سرور ننشست
+  # یعنی کرونِ دوم در هر دو خرابی **صفر** کمک کرد، ولی هزینه‌اش قطعی است: ۳۰ جاب در
+  # ماه. تأخیرِ گیت‌هاب کران‌دار نیست، پس هیچ تعدادِ ثابتی از کرون تضمین نمی‌دهد و
+  # اضافه‌کردنشان فقط شانس را می‌خرد (بند ۳ج: هر چیزی که دقیقه می‌خورد و به هدف
+  # نزدیک نمی‌کند حذف می‌شود، نه بهینه).
+  #
+  # جایش را چیزی گرفت که **قطعی** است و صفر دقیقه خرج دارد: استپِ «Telegram notice on
+  # deferred deploy» پایین. هر مرجی که به تعویق بیفتد همان لحظه به تلگرامِ مالک خبر
+  # می‌دهد، پس سکوت — که علتِ واقعیِ هر دو خرابی بود — ساختاراً ممکن نیست.
   schedule:
     - cron: '35 4 * * *'
-    - cron: '35 5 * * *'
 
 # 🔒 **دو دیپلوی هرگز هم‌زمان روی سرور نمی‌دوند.**
 #
@@ -72,7 +82,13 @@ jobs:
       contents: read
     steps:
       # چک‌اوت لازم است چون گیتِ پنجره یک اسکریپتِ داخلِ ریپوست (تک‌منبعِ منطق).
+      # ⚠️ `fetch-depth: 0` اجباری است و از جابِ ادغام‌شده‌ی tabir آمده: تشخیصِ
+      # «bots/tabir-khab عوض شده؟» یک `git diff BEFORE..sha` است و با کلونِ
+      # shallow (پیش‌فرضِ checkout) کامیتِ BEFORE روی رانر وجود ندارد، پس شرط
+      # **بی‌صدا** به fail-open می‌افتد و tabir در هر دیپلوی بی‌دلیل ری‌استارت
+      # می‌شود. همان تله‌ای که یک بار در جابِ `changes`ِ CI رخ داد.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
       # ⏰ ---------- پنجره‌ی امنِ دیپلوی ----------
       # هر دیپلوی یعنی ری‌استارتِ رباتِ زنده، و ری‌استارت وسطِ اوج یعنی فلوی نیمه‌کاره‌ی
@@ -92,6 +108,33 @@ jobs:
           URGENT:     ${{ inputs.urgent }}
           REASON:     ${{ inputs.reason }}
         run: node tools/deploy-window.mjs
+
+      # ⏸ سکوت همان چیزی بود که دو بار کد را روی سرور ننشاند (بالا، کنارِ کرون).
+      # جابِ skip‌شده `success` گزارش می‌شود، پس «آیا دیپلوی شد؟» از نتیجه‌ی جاب
+      # جواب نمی‌گیرد و کسی خبردار نمی‌شود. حالا خودِ تعویق صدا دارد.
+      #
+      # فقط روی `push`: تعویقِ یک کرون یا اجرای دستی خبر نمی‌خواهد (چیزی تازه مرج
+      # نشده که منتظر بماند)، و هشداری که مدام بی‌دلیل شلیک کند خیلی زود بی‌معنا
+      # می‌شود — همان پینگ‌پنگِ `chmod` و `ADMIN_IDS` در بند ۳ ریشه.
+      - name: Telegram notice on deferred deploy
+        if: steps.gate.outputs.go != 'true' && github.event_name == 'push'
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          WHY:     ${{ steps.gate.outputs.why }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then exit 0; fi
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="⏸ دیپلوی به تعویق افتاد — $WHY
+          کرونِ ۰۸:۰۵ تهران خودش می‌بردش. اگر تا ظهرِ فردا ندیدی که نشسته، Deploy را دستی بزن." || true
+          done
 
       - name: Deploy to VPS
         if: steps.gate.outputs.go == 'true'
@@ -651,73 +694,27 @@ jobs:
             echo "---- وضعیت نهایی ----"
             pm2 ls
 
-      # استثنا باید دیده شود، وگرنه قاعده می‌شود. هر بار که ساعتِ امن دور زده شد،
-      # مالک همان لحظه می‌داند — چه خودش زده باشد چه یک سشن.
-      - name: Telegram notice on urgent bypass
-        if: steps.gate.outputs.bypass != '' && steps.gate.outputs.go == 'true'
-        env:
-          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
-          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
-          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
-          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
-          WHY:     ${{ steps.gate.outputs.why }}
-        run: |
-          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
-          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then exit 0; fi
-          IFS=',' read -ra OWNERS <<< "$OWNER"
-          for id in "${OWNERS[@]}"; do
-            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
-            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-              -d chat_id="$id" \
-              --data-urlencode text="🚨 دیپلوی خارج از ساعتِ امن اجرا شد — $WHY" || true
-          done
-
-      # اگر دیپلوی شکست بخورد، به تلگرام مالک پیام می‌رود (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
-      - name: Telegram alert on failure
-        if: failure()
-        env:
-          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
-          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
-          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
-          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
-        run: |
-          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
-          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
-          # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
-          IFS=',' read -ra OWNERS <<< "$OWNER"
-          for id in "${OWNERS[@]}"; do
-            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
-            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-              -d chat_id="$id" \
-              --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
-          done
-
-  # ---------- tabir-khab (استثنای مونوریپو: پایتون + systemd، نه pm2) ----------
-  # سرویس روی سرور همان‌جاست که همیشه بود: /home/ubuntu/tabir_khab با سرویسِ
-  # systemd به نام tabir-khab. این جاب فقط «محتوای» bots/tabir-khab را با
-  # git archive روی همان مسیر overlay می‌کند — .env و دیتابیس‌های SQLite و
-  # logs/ و .venv/ روی سرور دست‌نخورده می‌مانند — و بعد همان ری‌استارتِ
-  # همیشگی را می‌زند. جدا از جاب pm2 است تا خطای هرکدام به دیگری سرایت نکند.
-  # دیپلوی انتخابی: فقط وقتی bots/tabir-khab تغییر کرده باشد (یا force_all) ری‌استارت می‌شود.
-  deploy-tabir-khab:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # همان گیتِ پنجره‌ی امن، از همان تک‌منبع. دو کپیِ bash دیر یا زود واگرا می‌شوند
-      # و آن‌وقت نیمی از دیپلوی در ساعتِ امن می‌رود و نیمی نه — بی‌صدا.
-      - name: پنجره‌ی امنِ دیپلوی
-        id: gate
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          URGENT:     ${{ inputs.urgent }}
-          REASON:     ${{ inputs.reason }}
-        run: node tools/deploy-window.mjs
-
+      # ---------- tabir-khab (استثنای مونوریپو: پایتون + systemd، نه pm2) ----------
+      # سرویس روی سرور همان‌جاست که همیشه بود: /home/ubuntu/tabir_khab با سرویسِ
+      # systemd به نام tabir-khab. این دو استپ فقط «محتوای» bots/tabir-khab را با
+      # git archive روی همان مسیر overlay می‌کنند — .env و دیتابیس‌های SQLite و
+      # logs/ و .venv/ روی سرور دست‌نخورده می‌مانند — و بعد همان ری‌استارتِ همیشگی.
+      #
+      # 📉 **چرا از جابِ جدا به استپ تبدیل شد (۱۴۰۵/۰۶/۲۶، فشارِ سهمیه):** جابِ
+      # `deploy-tabir-khab` در **هر** دیپلوی یک رانرِ کامل می‌گرفت (یعنی یک دقیقه‌ی
+      # کاملِ بیلینگ‌شده) و در بیشترِ مواقع تنها کارش این بود که بگوید «tabir عوض
+      # نشده». با ~۱۹۵ اجرای Deploy در ماه یعنی ~۱۹۵ جابِ تقریباً بی‌کار، ~۷٪ کلِ
+      # سهمیه. این همان کاری است که بند ۳ج ریشه از قبل به‌عنوان «پیشنهادِ سنجیده‌ی
+      # بعدی» ثبت کرده بود و عمداً عقب افتاده بود؛ حالا که سهمیه به ۹۰٪ رسید، رفت.
+      #
+      # ⚠️ چیزی که با ادغام از دست رفت و آگاهانه پذیرفته شد: جدا بودنِ جاب یعنی
+      # «خطای هرکدام به دیگری سرایت نکند». برای حفظش استپِ tabir شرطِ `!cancelled()`
+      # دارد نه `success()`ِ پیش‌فرض — پس شکستِ دیپلویِ pm2 جلوی رسیدنِ فیکسِ tabir
+      # را نمی‌گیرد، دقیقاً مثل وقتی که دو جابِ مستقل بودند. تنها تفاوتِ باقی‌مانده
+      # این است که حالا یک جابِ قرمز به‌جای دو تا می‌بینی، که خودش خواناتر است.
       - name: Check if tabir-khab changed
         id: changed
+        if: ${{ !cancelled() }}
         env:
           FORCE_ALL: ${{ github.event.inputs.force_all || 'false' }}
           BEFORE:    ${{ github.event.before }}
@@ -736,7 +733,8 @@ jobs:
 
       - name: Deploy tabir-khab (overlay + restart)
         # گیتِ پنجره در کنارِ شرطِ «تغییر کرده؟» — هر دو باید سبز باشند.
-        if: steps.changed.outputs.deploy == '1' && steps.gate.outputs.go == 'true'
+        # `!cancelled()` استقلالِ دو دیپلوی را حفظ می‌کند (بالا).
+        if: ${{ !cancelled() && steps.changed.outputs.deploy == '1' && steps.gate.outputs.go == 'true' }}
         env:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           # توکن‌های تلگرامِ per-language — هر کدام ست باشد در .env سرور upsert می‌شود؛
@@ -797,3 +795,45 @@ jobs:
             sleep 2
             sudo systemctl is-active tabir-khab
             echo "✅ tabir-khab دیپلوی شد"'
+
+      # استثنا باید دیده شود، وگرنه قاعده می‌شود. هر بار که ساعتِ امن دور زده شد،
+      # مالک همان لحظه می‌داند — چه خودش زده باشد چه یک سشن.
+      - name: Telegram notice on urgent bypass
+        if: steps.gate.outputs.bypass != '' && steps.gate.outputs.go == 'true'
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+          WHY:     ${{ steps.gate.outputs.why }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then exit 0; fi
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="🚨 دیپلوی خارج از ساعتِ امن اجرا شد — $WHY" || true
+          done
+
+      # اگر دیپلوی شکست بخورد، به تلگرام مالک پیام می‌رود (نیازمند secret اختیاری OWNER_TELEGRAM_ID)
+      - name: Telegram alert on failure
+        if: failure()
+        env:
+          T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
+          T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}
+          T_RT:    ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
+          OWNER:   ${{ secrets.OWNER_TELEGRAM_ID }}
+        run: |
+          TOKEN="${T_V2T:-${T_TAROT:-$T_RT}}"
+          if [ -z "$TOKEN" ] || [ -z "$OWNER" ]; then echo "ℹ️ OWNER_TELEGRAM_ID یا توکن ربات ست نشده — هشدار تلگرام رد شد"; exit 0; fi
+          # OWNER_TELEGRAM_ID می‌تواند لیستِ چند آیدیِ عددی با کاما باشد (بدون نیاز به کد جدید)
+          IFS=',' read -ra OWNERS <<< "$OWNER"
+          for id in "${OWNERS[@]}"; do
+            id="$(echo "$id" | tr -d '[:space:]')"; [ -n "$id" ] || continue
+            curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              -d chat_id="$id" \
+              --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          done
+
