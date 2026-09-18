@@ -123,6 +123,14 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-ci-changed.mjs
 
+      # اجراکننده‌ی محلیِ همین چک‌ها (tools/ci-local.mjs). خطرش «قرمزِ کاذب» نیست،
+      # «سبزِ کاذب» است: سشنی که محلی سبز می‌گیرد و پوش می‌کند، اگر نگاشتش از ci.yml
+      # جدا شده باشد یک لایه اطمینانِ دروغ هم روی حلقه‌ی گران گذاشته. ادعاها رفتاری‌اند
+      # (`--list` واقعاً اجرا می‌شود)، چون نسخه‌ی متنی‌شان در تستِ جهش زنده ماند.
+      - name: Local CI runner check
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-ci-local.mjs
+
       # دو صرفه‌جوییِ سهمیه که بی‌صدا می‌میرند: ردکردنِ ماتریس روی مرجِ PR، و لغوِ
       # اجرای منسوخِ PR. هر دو رفتاری سنجیده می‌شوند (بند ۳ج ریشه).
       - name: Actions budget guard
