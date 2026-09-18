@@ -60,11 +60,13 @@ ok(missing.length === 0, 'هر صفحه‌ای که navGo/navEnter صدا می�
 ok(orphan.length === 0, 'هیچ ردیفِ رجیستریِ بی‌صداکننده‌ای نمانده (کدِ مرده)',
   orphan.length ? `بی‌مصرف: ${orphan.join('، ')}` : '');
 
-const backRowSrc = bodyOf('function navBackRow(uid) {');
+const backRowSrc = bodyOf('function navBackRow(uid, legacy = []) {');
 ok(backRowSrc ? /NAV_GUARD_ENABLED/.test(backRowSrc) : false,
   'ردیفِ بازگشت پشتِ همان پرچمِ رول‌بکِ ناوبری است (NAV_GUARD_ENABLED)');
 ok(backRowSrc ? /navMenuRow\(\)/.test(backRowSrc) : false,
   'و در لایه‌ی ۱ به همان `navMenuRow()`ِ همیشگی برمی‌گردد، نه یک دکمه‌ی دومِ موازی');
+ok(backRowSrc ? /navV2For\(uid\)/.test(backRowSrc) : false,
+  'و پشتِ گیتِ انتشارِ مرحله‌ای است (navV2For) — کاربرِ خارج از دامنه `legacy` را می‌گیرد');
 
 /* ══ ۲) رفتار: همان توابع، روی یک سشنِ واقعی ════════════════════════════════ */
 console.log('\n▶ رفتار (توابعِ بریده‌شده از سورس، اجرا روی سشنِ واقعی)');
@@ -74,11 +76,13 @@ const enterSrc = bodyOf('function navEnter(uid, s, a = \'\') {');
 const goSrc = bodyOf('function navGo(uid, s, a = \'\') {');
 ok(!!(stateSrc && enterSrc && goSrc && backRowSrc), 'هر چهار تابعِ پشته از سورس بریده شدند');
 
-function harness(guardOn) {
+/** `inScope` = کاربر داخلِ دامنه‌ی انتشارِ مرحله‌ای است یا نه (بند ۲ج-۲ ریشه). */
+function harness(guardOn, inScope = true) {
   const store = new Map();
   const env = {
     NAV_GUARD_ENABLED: guardOn,
     NAV_STACK_MAX: MAXV,
+    navV2For: () => inScope,
     L: { buttons: { backOneStep: '◀️ بازگشت' } },
     Markup: { button: { callback: (t, d) => ({ text: t, callback_data: d }) } },
     navMenuRow: () => [[{ text: '◀️ بازگشت به منوی اصلی', callback_data: 'nav:menu' }]],
@@ -143,6 +147,26 @@ const H3 = harness(false);
 H3.navEnter(UID, 'fm'); H3.navGo(UID, 'ps', 'love:m');
 ok(H3.navBackRow(UID).length === 0,
   'با NAV_GUARD_ENABLED=false هیچ ردیفِ بازگشتی ساخته نمی‌شود (رول‌بکِ یک‌خطی)');
+const LEGACY = [[{ text: 'قدیمی', callback_data: 'legacy' }]];
+ok(dataOf(H3.navBackRow(UID, LEGACY)) === 'legacy',
+  'و همان ردیفِ v3.96.0 (`legacy`) جایش می‌نشیند، نه هیچ‌چیز');
+
+/* ══ ۲ب) گیتِ انتشارِ مرحله‌ای: کاربرِ خارج از دامنه = بیت‌به‌بیت v3.96.0 ════════ */
+console.log('\n▶ گیتِ فقط-ادمین (بند ۲ج-۲ ریشه)');
+
+const HOUT = harness(true, false);   // پرچمِ ناوبری روشن، ولی کاربر خارج از دامنه
+HOUT.navEnter(UID, 'fm'); HOUT.navGo(UID, 'ps', 'love:m');
+ok(HOUT.navBackRow(UID).length === 0,
+  '⭐ کاربرِ خارج از دامنه هیچ ردیفِ بازگشتِ تازه‌ای نمی‌گیرد (پیش‌فرضِ legacy خالی است)');
+ok(dataOf(HOUT.navBackRow(UID, LEGACY)) === 'legacy',
+  '⭐ و هرجا v3.96.0 دکمه‌ای داشت، دقیقاً همان دکمه می‌آید (هیچ صفحه‌ای بن‌بست نمی‌شود)');
+ok(HOUT.store.size === 0,
+  'و هیچ چیزی در سشنش نوشته نمی‌شود (navEnter/navGo برایش no-op اند)');
+// کنترلِ مثبت: همان هارنس با دامنه‌ی باز واقعاً می‌نویسد و دکمه‌ی تازه می‌دهد.
+const HIN = harness(true, true);
+HIN.navEnter(UID, 'fm'); HIN.navGo(UID, 'ps', 'love:m');
+ok(HIN.store.size === 1 && dataOf(HIN.navBackRow(UID, LEGACY)) === 'nav:back',
+  'کنترلِ مثبت: کاربرِ داخلِ دامنه پشته می‌سازد و «بازگشت»ِ یک‌قدمی می‌گیرد');
 
 /* ══ ۳) هندلرِ nav:back — ترتیبِ پاپ و رندر، و بی‌ضرر بودنش ══════════════════ */
 console.log('\n▶ هندلرِ nav:back');
@@ -193,7 +217,7 @@ ok(/registerSupport\([\s\S]{0,400}?extraRows/.test(SRC_NC),
 
 // لایه‌ی ۲ — صفحه‌هایی که از دلِ صفحه‌ی دیگر باز می‌شوند.
 const pickSize = noComments(bodyOf('function pickSizeScreen(uid, t, from) {', '\n}') || '');
-ok(/navBackRow\(uid\)/.test(pickSize), '«تاروت چند کارتی؟» ردیفِ بازگشت دارد');
+ok(/navBackRow\(uid[,)]/.test(pickSize), '«تاروت چند کارتی؟» ردیفِ بازگشت دارد');
 ok(/tback:/.test(pickSize),
   'و فالبکِ `tback:`ِ نسلِ قبل سرِ جایش است (دکمه‌ی کهنه نمی‌میرد، بند ۲ج/۶)');
 const needBal = noComments(bodyOf('const needBalanceScreen = (uid, spread) => [', '\n];') || '');
@@ -202,8 +226,31 @@ ok(/navBackRow\(uid\)/.test(needBal), 'صفحه‌ی کم‌موجودی ردی�
  * («افزایشِ ذخایر همیشه آخرین دکمه») و ریختنِ nav داخلش آن قرارداد را می‌شکست. */
 ok(/needBalanceAltRows\(uid, spread\), \.\.\.navBackRow\(uid\)/.test(needBal),
   'و بعد از needBalanceAltRows می‌آید، نه داخلش (قراردادِ «افزایشِ ذخایر آخر» نمی‌شکند)');
-const packMenu = noComments(bodyOf('function packMenuScreen(uid) {', '\n}') || '');
-ok(/navBackRow\(uid\)/.test(packMenu), 'صفحه‌ی بسته‌ها ردیفِ بازگشت دارد');
+const packMenu = noComments(bodyOf('function packMenuScreen(uid, paymentId = 0) {', '\n}') || '');
+ok(/navBackRow\(uid[,)]/.test(packMenu), 'صفحه‌ی بسته‌ها ردیفِ بازگشت دارد');
+
+/* ══ ۵) الگوی دو-ثابتیِ بند ۲ج-۲: فقط-ادمین، و هیچ پرچمِ خامی ══════════════════ */
+console.log('\n▶ الگوی دو-ثابتیِ انتشارِ مرحله‌ای');
+
+ok(/^const UX_NAV_V2 = true;$/m.test(SRC), 'کلیدِ خاموشیِ کلِ فیچر یک ثابتِ نام‌دار است (UX_NAV_V2)');
+ok(/^const UX_NAV_V2_ADMIN_ONLY = true;$/m.test(SRC),
+  '⭐ و دامنه هنوز **فقط-ادمین** است (UX_NAV_V2_ADMIN_ONLY = true)');
+ok(/const navV2For = \(uid\) => UX_NAV_V2 && \(!UX_NAV_V2_ADMIN_ONLY \|\| isTester\(uid\)\);/.test(SRC),
+  'helper هر دو ثابت را با هم می‌خواند و از isTester (نه isAdmin) می‌پرسد');
+
+/* ⚠️ هیچ‌جا پرچمِ خام صدا زده نشود — مسیری که گیت را جا بیندازد یعنی کاربرِ واقعیِ
+ * رباتِ زنده وسطِ فلو نسخه‌ی نیمه‌تمام می‌بیند (بند ۲ج-۲ ریشه). کامنت‌ها کنار می‌روند
+ * تا خودِ سندنویسی قرمزِ کاذب نسازد (تله‌ی ثبت‌شده‌ی v3.56.0). */
+const rawFlag = (SRC_NC.match(/\bUX_NAV_V2(?:_ADMIN_ONLY)?\b/g) || []).length;
+ok(rawFlag === 4, `پرچمِ خام دقیقاً ۴ بار می‌آید (دو تعریف + دو بار داخلِ helper) — دیدم: ${rawFlag}`);
+
+// و خودِ گیت واقعاً به مسیرهای رو-به-کاربر وصل است (نه فقط تعریف‌شده).
+for (const [needle, msg] of [
+  ['navV2For(uid) ? \'invite_edit\' : \'invite_go\'', 'دکمه‌ی دعوتِ صفحه‌ی ذخایر گیت دارد'],
+  ['if (!navV2For(uid)) {', 'مسیرِ wallet_fresh برای کاربرِ خارج از دامنه همان v3.96.0 است'],
+  ['navV2For(uid) && REFUND_ON_CANCEL === false', 'متنِ هشدارِ انصرافِ فالِ پول‌داده گیت دارد'],
+  ['if (navV2For(uid)) {\n    trackRechargeStarted(uid);', 'ساخته‌نشدنِ ردیفِ پرداخت در recharge گیت دارد'],
+]) ok(SRC.includes(needle), msg);
 
 console.log(fail ? `\n❌ نتیجه: ${pass} پاس، ${fail} خطا` : `\n✅ نتیجه: ${pass} پاس، ۰ خطا`);
 process.exit(fail ? 1 : 0);
