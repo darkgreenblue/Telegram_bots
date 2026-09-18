@@ -1115,6 +1115,7 @@ export default {
     generic: 'Deu um probleminha técnico 🙏 Tente de novo.',
     stateLost: 'A sua sessão venceu; comece de novo pelo menu principal 🌙',
     openInvoice: 'Você tem um pedido de pagamento em aberto 🧾 Termine ou cancele ele primeiro, e aí a gente segue.',
+    openPaymentFlow: 'Você tem uma compra pela metade 🧾 Primeiro escolha seu pacote ou cancele pelo botão abaixo.',
     voiceTooLong: (sec) => `Não consigo receber um áudio com mais de ${fmt(sec)} segundos 🙏 Mande mais curto ou escreva a sua pergunta.`,
     packRetired: 'Esse pacote não está mais disponível 🙏 Escolha um dos de baixo 👇',
   },
