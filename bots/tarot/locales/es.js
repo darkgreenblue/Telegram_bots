@@ -840,6 +840,7 @@ export default {
     canceled: 'Listo, aquí estoy cuando quieras 🌙',
     backToMenu: 'Volvimos al menú principal 🌳',
     openReadingGuard: 'Tienes una lectura abierta que no terminó 🌙\n\n¿Quieres seguir con esa o dejarla?',
+    openReadingGuardPaid: 'Tienes una lectura abierta que no terminó 🌙\n\n¿Quieres seguir con esa?\n\n⚠️ Si cancelas, los diamantes descontados no vuelven.\n\n¿Seguro que quieres cancelar?',
     stuckReading: (canCancel) => '¡Tienes una lectura que quedó a medias! 🌙\n\nTus cartas te siguen esperando; vuelve a ellas cuando quieras.'
       + (canCancel ? '\n\n💎 Si ya no la quieres, cancélala; eso sí, los diamantes no vuelven.' : ''),
   },
@@ -1060,7 +1061,7 @@ export default {
     },
     adminMoney,
     adminAutoApproved: (p, user, reason, pack) =>
-      `✅ Pago #${p.id} aprobado por el agente y acreditado.\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+      `✅ Pago #${p.invoice_no || p.id} aprobado por el agente y acreditado.\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
     confirmReverse: (pid) =>
       `⚠️ ¿Seguro que no llegó el aviso del pago #${pid}?\nRevisa el banco primero. Si confirmas, el crédito sale del saldo de la persona (no baja de cero), el pago vuelve al estado anterior, y de aquí en adelante sus pagos solo se aprueban a mano.`,
     reversedUser: (cur) => `Tu pago anterior quedó cancelado y su crédito salió de tu cuenta. 🌙\nSi crees que hubo un error, escríbele al soporte: ${SUPPORT_CONTACT}`,
@@ -1073,7 +1074,7 @@ export default {
     // Mensaje único de rechazo: sin motivo, solo el camino del soporte.
     rejected: `❌ Tu pago no quedó aprobado.\n\nEscríbele al soporte y lo resolvemos: ${SUPPORT_CONTACT}`,
     adminNotify: (p, user, pack) =>
-      `💳 Pago nuevo #${p.id}\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
+      `💳 Pago nuevo #${p.invoice_no || p.id}\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },
 
   // Soporte (contrato común de todos los bots) — la forma del objeto tiene que coincidir

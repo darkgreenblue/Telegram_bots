@@ -306,7 +306,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.96.0';
+const PRODUCT_VERSION = '3.97.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1598,6 +1598,19 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_issued_at INTEGER').ru
 // پاک شده باشد، ردیف نه (همان قاعده‌ای که `charge_id` را هم روی ردیف نشاند، نه سشن).
 try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_msg_id INTEGER').run(); } catch {}
 try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_reminded_at INTEGER').run(); } catch {}
+/* 🔢 **شماره‌ی فاکتور** — مستقل از `payments.id` (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۷:
+ * «تعداد فاکتور واقعی رو بتونیم هر سری توی عدد فاکتور ببینیم»).
+ *
+ * چرا ستونِ تازه و نه استفاده از `id`: تا امروز هر تپ روی «خرید الماس» یک ردیف می‌ساخت،
+ * پس `id` تعدادِ **تپ** را می‌شمرد نه تعدادِ فاکتور. از این نسخه ردیف فقط لحظه‌ی صدور
+ * ساخته می‌شود، ولی ردیف‌های شبحِ گذشته در `id` باقی‌اند و پاک هم نمی‌شوند —
+ * `admin_actions.payment_id` و `discount_uses` به همین idها اشاره می‌کنند و حذفشان
+ * ریسکِ بازاستفاده‌ی id دارد (بند ۲ج/۱: هرگز DROP/حذفِ معناداری روی دیتای زنده).
+ *
+ * پس شماره‌ی **نمایشی** جدا شد: `invoice_no` فقط وقتی مقدار می‌گیرد که فاکتور واقعاً
+ * صادر شود. `0` یعنی «هنوز فاکتوری نیست» و همه‌جا به `id` فالبک می‌کند تا ردیف‌های
+ * قدیمی بی‌شماره نمانند. کالبک‌ها همچنان `id` را حمل می‌کنند (شناسه‌ی رکورد عوض نشد). */
+try { db.prepare('ALTER TABLE payments ADD COLUMN invoice_no INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 /* ⭐ سوییچِ استارز per-فاکتور برای فارسی (v3.76.0، خواسته‌ی صریحِ مالک، فعلاً فقط-ادمین).
  * چهار ستونِ افزایشی، هیچ‌کدام روی `amount`/`original_amount` اثر نمی‌گذارند — آن دو
  * همیشه **تومان** می‌مانند (منبعِ حقیقتِ درآمدِ داشبورد برای instance فارسی، که با
@@ -1964,6 +1977,16 @@ const stmts = {
   // است (چه مسیرِ تومانیِ آزاد، چه مسیرِ بسته)، پس هیچ فراخوانِ دومی لازم نیست و هیچ مسیری
   // نمی‌تواند این را جا بیندازد.
   claimAmount: db.prepare("UPDATE payments SET amount=?, step='receipt', updated_at=unixepoch(), invoice_issued_at=unixepoch() WHERE id=? AND step='amount' AND status='pending'"),
+  /* 🔢 شماره‌ی فاکتور، بلافاصله بعد از ادعای موفقِ بالا.
+   *
+   * ⚠️ چرا دستورِ **جدا** و نه همان UPDATE: `claimAmount` قرارداد است و شش چکِ CI متنش
+   * را از سورس می‌بُرند و روی SQLite واقعی اجرا می‌کنند. قاطی‌کردنِ یک نگرانیِ دوم با
+   * تنها گاردِ اتمیکِ مسیرِ پول، هم آن ادعاها را می‌شکند و هم خودِ گارد را سخت‌خوان
+   * می‌کند. جدا بودنشان بی‌خطر است: better-sqlite3 سینکرون است و بینِ این دو خط هیچ
+   * کدِ دیگری اجرا نمی‌شود؛ و اگر پروسه دقیقاً همان‌جا بمیرد، ردیف `invoice_no=0` می‌ماند
+   * و نمایش به `id` فالبک می‌کند (هیچ‌جا بی‌شماره نمی‌ماند).
+   * شرطِ `invoice_no=0` یعنی هیچ ردیفی دو بار شماره نمی‌گیرد. */
+  assignInvoiceNo: db.prepare('UPDATE payments SET invoice_no=(SELECT IFNULL(MAX(invoice_no),0)+1 FROM payments) WHERE id=? AND invoice_no=0'),
   setPaymentStatus:  db.prepare('UPDATE payments SET status=?, updated_at=unixepoch() WHERE id=?'),
   setInvoiceMsgId: db.prepare('UPDATE payments SET invoice_msg_id=? WHERE id=?'),
   // سوییچِ استارز: مهرِ زمان + شناسه‌ی فاکتورِ نیتیو + عددِ محاسبه‌شده، هر سه با هم
@@ -2336,6 +2359,7 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   const paymentId = Number(stmts.insertPayment.run(uid).lastInsertRowid);
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
   stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
+  issueInvoiceNo(paymentId);
   if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
   patchSession(uid, { paymentId, readingId });
   setState(uid, 'pay_receipt');
@@ -2584,6 +2608,74 @@ const navMenuRow = () => (NAV_GUARD_ENABLED ? [[Markup.button.callback(L.buttons
 // دکمه‌ای نمی‌گذاریم تا حواسش پرت نشود؛ راهِ خروجِ آن‌جا گاردِ «فالِ باز» است، نه دکمه‌ی درون-پیام.
 // (`navMenuKb` با حذفِ پیامِ `useButtons` در v3.17.0 بی‌مصرف شد و طبق بند ۹/۰ ریشه پاک شد.)
 
+/* ═══════════ 🧭 پشته‌ی ناوبری — «بازگشت» یعنی دقیقاً یک قدم عقب ═══════════
+ *
+ * خواسته‌ی صریحِ مالک: صفحه‌ای که مستقیم از کیبوردِ ماندگار باز می‌شود (لایه‌ی ۱) آخرین
+ * دکمه‌اش «بازگشت به منوی اصلی» است و منوی پایین را هم برمی‌گرداند؛ هر صفحه‌ی عمیق‌تر
+ * (لایه‌ی ۲ به بعد) یک «بازگشت»ِ ساده دارد که به **همان شاخه‌ای** برمی‌گردد که از آن آمده.
+ *
+ * ⚠️ چرا پشته و نه یک مقصدِ ثابت per صفحه: مقصدِ بازگشتِ «ذخایر الماس» به این بستگی دارد
+ * که کاربر از کیبورد آمده (⟵ منوی اصلی) یا از صفحه‌ی کم‌موجودی (⟵ همان صفحه). یک مقصدِ
+ * هاردکد دیر یا زود یکی از این دو را غلط می‌کند.
+ *
+ * ⚠️ چرا در **سشن** (یعنی DB) و نه در `callback_data`: زنجیره‌ی سه‌چهار مرحله‌ای در ۶۴
+ * بایت جا نمی‌شود، و سشن ری‌استارت‌پذیر است (بند ۹ب/۵). هزینه‌اش این است که هر
+ * `setSession(uid, null)` پشته را خالی می‌کند — که **بی‌خطر** است، چون پشته‌ی خالی دقیقاً
+ * یعنی «لایه‌ی ۱»، و دکمه به «بازگشت به منوی اصلی» برمی‌گردد. هیچ حالتی بن‌بست نیست.
+ *
+ * ⚠️ و دکمه‌ی **کهنه**ی چند ماه پیش هم همین‌طور: پشته‌اش دیگر نیست، پس به منوی اصلی
+ * می‌رسد نه به جای اشتباه (بند ۲ج/۶). */
+const NAV_STACK_MAX = 6;
+
+/* رجیستریِ صفحه‌های قابلِ بازگشت: شناسه ⟵ سازنده‌ی «متن + extra».
+ * بدنه‌ها لحظه‌ی **تپ** اجرا می‌شوند، پس ارجاع به سازنده‌هایی که پایین‌تر تعریف شده‌اند
+ * مشکلی ندارد. هر صفحه‌ی تازه فقط یک ردیف این‌جا می‌خواهد. */
+const NAV_SCREENS = {
+  fm: (uid) => falMenuScreen(uid),                     // منوی کوتاهِ فال
+  at: (uid) => allTopicsScreen(uid),                   // لیستِ کاملِ فال‌ها
+  ps: (uid, a) => {                                    // «تاروت چند کارتی؟» — a = `<topic>:<from>`
+    const [key, from] = String(a || '').split(':');
+    const t = TOPIC_BY_KEY[key];
+    return t ? pickSizeScreen(uid, t, from === 'a' ? 'a' : 'm') : null;
+  },
+  nb: (uid, a) => {                                    // «ذخایرت کافی نیست» — a = spreadId
+    const sp = SPREAD_BY_ID[a];
+    return sp ? needBalanceScreen(uid, sp) : null;
+  },
+  w: (uid) => walletScreen(uid),                       // ذخایر الماس
+  i: (uid) => inviteScreen(uid),                       // دعوت دوستان
+  pk: (uid) => packMenuScreen(uid),                    // صفحه‌ی بسته‌ها
+};
+
+function navState(uid) {
+  try {
+    const s = getSession(uid) || {};
+    return { stack: Array.isArray(s.nav) ? s.nav : [], cur: s.navCur || null };
+  } catch (e) { logErr('navState:', e.message); return { stack: [], cur: null }; }
+}
+
+/** ورودِ لایه‌ی ۱ (کیبوردِ ماندگار): این صفحه ریشه است، پس پشته ریست می‌شود. */
+function navEnter(uid, s, a = '') {
+  try { patchSession(uid, { nav: [], navCur: { s, a } }); } catch (e) { logErr('navEnter:', e.message); }
+}
+
+/** یک قدم جلو: صفحه‌ی فعلی روی پشته می‌رود و صفحه‌ی تازه جایش می‌نشیند. */
+function navGo(uid, s, a = '') {
+  try {
+    const { stack, cur } = navState(uid);
+    const next = cur ? [...stack, cur].slice(-NAV_STACK_MAX) : stack;
+    patchSession(uid, { nav: next, navCur: { s, a } });
+  } catch (e) { logErr('navGo:', e.message); }
+}
+
+/** آخرین ردیفِ هر صفحه: «بازگشت»ِ یک‌قدمی، یا در لایه‌ی ۱ «بازگشت به منوی اصلی». */
+function navBackRow(uid) {
+  if (!NAV_GUARD_ENABLED) return [];
+  return navState(uid).stack.length
+    ? [[Markup.button.callback(L.buttons.backOneStep, 'nav:back')]]
+    : navMenuRow();
+}
+
 /* ═══════════ 🎯 نیتِ معلق (pending intent) ═══════════
    قاعده‌ی صریحِ مالک: «وقتی بابتِ رسیدن به چیزی، فلوی موجود رو انصراف می‌زنیم، بعد از
    انصراف همون چیزی باید بیاد که می‌خواستیم بهش برسیم.»
@@ -2697,6 +2789,16 @@ const PAY_STATES = ['pay_amount', 'pay_receipt', 'pay_discount'];
  * می‌کند و از تعریفِ استیتی بهتر است: آن‌جا استیت عمداً روی `pay_amount` می‌ماند، ولی
  * رکورد `step='receipt'` می‌شود، پس فاکتورِ استارز هم حالا محافظت می‌شود (قبلاً
  * تعریفِ استیتی هم آن را می‌گرفت، ولی به دلیلِ اشتباه). */
+/* 🔢 شماره‌ای که ادمین و گزارش‌ها می‌بینند: **شماره‌ی فاکتور**، نه شناسه‌ی ردیف.
+ * ردیف‌های قدیمی که بک‌فیل نشده‌اند (ردیفِ شبحِ بدونِ فاکتور) صفر دارند و به `id`
+ * فالبک می‌کنند تا هیچ پیامی بی‌شماره نماند. کالبک‌ها همچنان `id` را حمل می‌کنند. */
+const invoiceNoOf = (p) => Number(p?.invoice_no) || Number(p?.id) || 0;
+/** شماره‌دهی به فاکتورِ تازه‌صادرشده. fail-safe: خطا هرگز مسیرِ پول را نمی‌شکند. */
+function issueInvoiceNo(paymentId) {
+  try { stmts.assignInvoiceNo.run(paymentId); }
+  catch (e) { logErr('issueInvoiceNo:', e.message); }
+}
+
 function issuedInvoiceOf(uid) {
   const pid = getSession(uid)?.paymentId;
   if (!pid) return null;
@@ -2824,7 +2926,12 @@ async function blockDuringOpenReading(ctx, intent, intentArg = 0) {
   }
   if (!READING_INPROGRESS.includes(state)) return false;
   if (intent) setIntent(uid, intent, intentArg);   // بعد از انصراف، همین برمی‌گردد
-  await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+  /* ⚠️ متنِ هشدار وقتی می‌آید که فال **پولش داده شده** (از v3.13.0 کسر سرِ انتخابِ اندازه
+   * است، پس هر فالی که به این استیت‌ها رسیده پرداخت شده) و `REFUND_ON_CANCEL=false` است:
+   * انصراف الماس را برنمی‌گرداند. تا امروز دکمه‌ی «انصراف» **مخرب** بود و کاربر خبر
+   * نداشت — همان ریسکی که خودِ v3.54.0 ثبتش کرده بود و مالک حالا بستنش را خواست. */
+  const paidFlow = REFUND_ON_CANCEL === false && !!getSession(uid)?.readingId;
+  await ctx.reply(paidFlow ? L.reading.openReadingGuardPaid : L.reading.openReadingGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
   ]));
@@ -2894,7 +3001,12 @@ function paymentFlowAllowsCallback(state, data) {
   if (!data) return false;
   if (/^pay_exit:\d+$/.test(data)) return true;
   if (state === 'pay_amount') {
-    return /^(pkg:[a-z]+|pack_reveal:\d+|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
+    /* ⚠️ `nav:back`/`nav:menu` عمداً این‌جا **نیستند**: لازم هم نیستند. وقتی هنوز بسته‌ای
+     * انتخاب نشده هیچ ردیفِ پرداختی وجود ندارد، پس `blockDuringActivePayment` چیزی برای
+     * محافظت پیدا نمی‌کند و خودش اجازه‌ی عبور می‌دهد. ولی روی ریلِ استارز استیت روی
+     * `pay_amount` می‌ماند در حالی که فاکتور **صادر شده**؛ آن‌جا همان گارد باید تصمیم
+     * بگیرد، نه یک allowlistِ بی‌قید. */
+    return /^(pkg:[a-z]+|pack_reveal:?\d*|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
   }
   if (state === 'pay_receipt') {
     // `pay_resume` از یادآوریِ فاکتور می‌آید و باید به هندلرِ بازفرستادنِ فاکتور برسد؛
@@ -2912,8 +3024,8 @@ function flowIntentFor(ctx) {
   if (/^(daily_go|dpick:\d+)$/.test(key) || text === L.buttons.daily || text === L.buttons.dailyOneCard) return { key: INTENT.DAILY };
   if (/^(lucky_go|lpick:\d+|lucky_stop)$/.test(key) || LUCKY_LABELS.includes(text)) return { key: INTENT.LUCKY };
   if (/^(reading_go|catalog_go|cat_|opentopic|odepth:|topic:|spread:)/.test(key) || text === L.buttons.reading) return { key: INTENT.READING };
-  if (/^(recharge|wallet_go|pkg:|pack_reveal:|pay_back:)/.test(key) || WALLET_LABELS.includes(text)) return { key: INTENT.WALLET };
-  if (/^invite_?(go|stat|back)?$/.test(key) || INVITE_LABELS.includes(text)) return { key: INTENT.INVITE };
+  if (/^(recharge|wallet_go|wallet_fresh|pkg:|pack_reveal|pay_back:)/.test(key) || WALLET_LABELS.includes(text)) return { key: INTENT.WALLET };
+  if (/^invite_?(go|stat|back|edit)?$/.test(key) || INVITE_LABELS.includes(text)) return { key: INTENT.INVITE };
   const chat = data.match(/^chat:(\d+)/);
   if (chat) return { key: INTENT.CHAT, arg: Number(chat[1]) };
   if (/^set:/.test(key) || text === L.buttons.settings) return { key: INTENT.SETTINGS };
@@ -4461,7 +4573,10 @@ async function luckyCard(ctx) {
   if (user.lucky_date === today) {
     // بدونِ هیچ دکمه‌ی یادآوری (تصمیمِ صریحِ مالک): این پیام جوابِ یک تپِ خودِ کاربر است،
     // نه یک پیامِ ناخواسته، پس نه جای پیشنهادِ خاموشی است و نه جای opt-in.
-    return ctx.reply(L.lucky.already);
+    // 🧭 بن‌بست نباشد (خواسته‌ی صریحِ مالک): این صفحه از کیبوردِ ماندگار باز می‌شود، پس
+    // آخرین دکمه‌اش «بازگشت به منوی اصلی» است و منوی پایین را هم برمی‌گرداند.
+    const row = navMenuRow();
+    return row.length ? ctx.reply(L.lucky.already, Markup.inlineKeyboard(row)) : ctx.reply(L.lucky.already);
   }
   setState(uid, 'lucky_shuffle');
   await ctx.reply(L.lucky.intro(LUCKY_PICKS, LUCKY_COINS, GRID_SIZE));
@@ -4504,11 +4619,29 @@ bot.action('wallet_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {
 // هم هست و حذفِ آن پیام غلط بود — بند ۹ب/۶ ریشه: معنیِ دوم یعنی اکشنِ دوم، نه بازاستفاده.
 // فالبک همان الگوی همیشگی است: تلگرام حذفِ پیامِ قدیمی‌تر از ۴۸ ساعت را رد می‌کند، پس
 // دستِ‌کم دکمه‌ها برداشته می‌شوند تا دکمه‌ی مرده روی صفحه نماند.
+/* ⚠️ از ۱۴۰۵/۰۶/۲۷ به‌جای «پیام را پاک کن و یک صفحه‌ی تازه بفرست»، **همان پیام ادیت
+ * می‌شود** (خواسته‌ی صریحِ مالک): این یک قدم جلو در همان شاخه است، نه شروعِ یک صفحه‌ی
+ * مستقل. و چون یک قدم جلوست، دکمه‌ی آخرِ صفحه‌ی ذخایر این‌جا «بازگشت» می‌شود و به همان
+ * صفحه‌ی کم‌موجودی برمی‌گردد، نه به منوی اصلی. */
 bot.action('wallet_fresh', async (ctx) => {
+  const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
-  try { await ctx.deleteMessage(); }
-  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
-  return showWallet(ctx);
+  upsertUser(ctx);
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.WALLET)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.WALLET)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.WALLET)) return;
+  navGo(uid, 'w');
+  const [text, extra] = walletScreen(uid);
+  let shown = false;
+  try { await ctx.editMessageText(text, extra); shown = true; }
+  catch {
+    // پیامِ کهنه/غیرقابلِ ادیت: همان مسیرِ قبلی (پاک‌کردن + پیامِ تازه) تا بن‌بست نشود.
+    try { await ctx.deleteMessage(); }
+    catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+    shown = !!(await ctx.reply(text, extra).catch(() => null));
+  }
+  if (shown) exposeMoneyCtaStyle(uid); else releaseMoneyCtaStyle(uid);
 });
 
 bot.action('lucky_stop', async (ctx) => {
@@ -4996,6 +5129,9 @@ function falMenuKb(uid) {
   return [
     ...keys.map(topicRow).filter(Boolean),
     [Markup.button.callback(L.buttons.allSpreadsV2, 'catalog_go')],
+    // لایه‌ی ۱ (از کیبوردِ ماندگار آمده) ⟵ «بازگشت به منوی اصلی». در آنبوردینگ هیچ
+    // دکمه‌ای که کاربر را از مسیر بیرون ببرد نمی‌آید (همان قاعده‌ی allTopicsKb).
+    ...(inOnboardFlow(uid) ? [] : navBackRow(uid)),
   ];
 }
 
@@ -5009,7 +5145,7 @@ function falMenuKb(uid) {
  * می‌برد، در همان یک مسیر برداشته می‌شود). بیرون از آنبوردینگ بیت‌به‌بیت مثل قبل. */
 const allTopicsKb = (uid) => [
   ...TOPICS_V3.map(t => [styled(Markup.button.callback(L.buttons.topic(t, spreadName(t.fa)), `topic:${t.key}:a`), topicStyle(t.key))]),
-  ...(inOnboardFlow(uid) ? [] : navMenuRow()),
+  ...(inOnboardFlow(uid) ? [] : navBackRow(uid)),
 ];
 
 // تک‌منبعِ «متن + کیبورد» هر صفحه‌ی ناوبری، تا showCatalog و دکمه‌های بازگشت دقیقاً یک چیز
@@ -5057,6 +5193,9 @@ async function showCatalog(ctx, full = false, edit = false) {
      فقط همان یک نشانه عبور داده می‌شود. */
   const keepOnb = inOnboardFlow(uid);
   setSession(uid, keepOnb ? { onbFirst: 1 } : null);
+  // 🧭 هر دو صفحه لایه‌ی ۱ اند (از کیبوردِ ماندگار یا از «مشاهده همه فال‌ها» که خودش
+  // ریشه است)، پس پشته ریست می‌شود و دکمه‌ی آخرشان «بازگشت به منوی اصلی» می‌ماند.
+  navEnter(uid, full ? 'at' : 'fm');
   if (uxV2For(uid)) {
     const [text, kb] = full ? allTopicsScreen(uid) : falMenuScreen(uid);
     if (edit) { try { return await ctx.editMessageText(text, kb); } catch {} }
@@ -5174,6 +5313,20 @@ const needBalanceAltRows = (uid, spread) => {
   return rows;
 };
 
+/* تک‌منبعِ «متن + کیبورد»ی صفحه‌ی کم‌موجودیِ سرِ انتخابِ اندازه، تا هم `chargeForSpread` و
+ * هم دکمه‌ی بازگشتِ صفحه‌ی ذخایر دقیقاً یک چیز را رندر کنند.
+ *
+ * ⚠️ ردیفِ بازگشت **بیرونِ** `needBalanceAltRows` می‌نشیند و این عمدی است: آن تابع
+ * قراردادِ خودش را دارد («آخرین دکمه همیشه افزایشِ ذخایر است») و افزودنِ ناوبری داخلش
+ * همان قرارداد را می‌شکست. */
+const needBalanceScreen = (uid, spread) => [
+  needBalanceText(uid, { type: spread.id, price: spread.price }),
+  {
+    ...needBalanceExtra,
+    ...Markup.inlineKeyboard([...needBalanceAltRows(uid, spread), ...navBackRow(uid)]),
+  },
+];
+
 /** کسرِ هزینه‌ی یک چیدمان در لحظه‌ی انتخابِ اندازه.
  *  خروجی true = پول کم شد و می‌شود ادامه داد؛ false = کم‌موجودی (پیامش همین‌جا رفت).
  *
@@ -5193,8 +5346,9 @@ async function chargeForSpread(ctx, uid, spread, focusKey) {
     // فال‌های ارزان‌ترِ قابلِ خرید، و در آخر راهِ افزایشِ ذخایر.
     setState(uid, 'choose_spread');
     track(db, uid, EVENTS.PAYWALL_SHOWN, { spread: spread.id, price: spread.price, can_afford: false });
-    const text = needBalanceText(uid, { type: spread.id, price: spread.price });
-    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceAltRows(uid, spread)) };
+    // 🧭 یک قدم جلو از «تاروت چند کارتی؟»، پس دکمه‌ی آخرش «بازگشت» به همان صفحه است.
+    navGo(uid, 'nb', spread.id);
+    const [text, extra] = needBalanceScreen(uid, spread);
     try { await ctx.editMessageText(text, extra); }
     catch { await ctx.reply(text, extra).catch(() => null); }
     // ⚠️ عمداً نه expose و نه release: این صفحه دیگر `rechargeBtn` را رندر نمی‌کند، پس
@@ -5367,8 +5521,14 @@ function pickSizeScreen(uid, t, from) {
         // قیمت از خودِ رکوردِ چیدمان می‌آید (تک‌منبعِ قیمت)، نه از ضربِ دوباره‌ی اندازه.
         return [Markup.button.callback(L.buttons.topicSize(size, sp.price, cur), `spread:${sp.id}`)];
       }),
-      // آخرین گزینه: بازگشتِ **یک قدمی** به همان منویی که کاربر از آن آمده.
-      [Markup.button.callback(L.buttons.backToMenu, `tback:${from}`)],
+      /* آخرین گزینه: بازگشتِ **یک قدمی** به همان منویی که کاربر از آن آمده.
+       * ⚠️ برچسب از «بازگشت به منوی اصلی» به «بازگشت» رفت (خواسته‌ی صریحِ مالک): این
+       * صفحه لایه‌ی ۲ است و دکمه‌اش یک قدم عقب می‌رود، نه تا ریشه. مقصد هم از پشته
+       * می‌آید نه از `from`؛ ولی `tback:` برای دکمه‌های کهنه‌ی داخلِ چت زنده می‌ماند
+       * (بند ۲ج/۶) و دقیقاً همان منو را برمی‌گرداند. */
+      ...(navBackRow(uid).length
+        ? navBackRow(uid)
+        : [[Markup.button.callback(L.buttons.backOneStep, `tback:${from}`)]]),
     ]),
   }];
 }
@@ -5390,7 +5550,12 @@ bot.action(/^topic:(\w+)(?::(a))?$/, async (ctx) => {
   // UX v2.3: به‌جای «کشتنِ کیبوردِ پیامِ قبلی + یک پیامِ جدید»، همین پیام به صفحه‌ی اندازه
   // ادیت می‌شود (الگوی cat_guide/cat_back). این تنها راهی است که دکمه‌ی بازگشت واقعاً
   // «یک قدم» باشد: همان پیام دوباره به منوی قبلی برمی‌گردد و چت شلوغ نمی‌شود.
-  const [text, extra] = pickSizeScreen(uid, t, ctx.match[2] === 'a' ? 'a' : 'm');
+  const from = ctx.match[2] === 'a' ? 'a' : 'm';
+  // 🧭 یک قدم جلو. اگر پشته خالی است (دکمه‌ی کهنه، یا سشنی که وسطِ راه پاک شده) همان
+  // منویی که `from` می‌گوید به‌عنوان ریشه گذاشته می‌شود تا «بازگشت» بی‌مقصد نماند.
+  if (!navState(uid).cur) navEnter(uid, from === 'a' ? 'at' : 'fm');
+  navGo(uid, 'ps', `${t.key}:${from}`);
+  const [text, extra] = pickSizeScreen(uid, t, from);
   try { await ctx.editMessageText(text, extra); }
   catch {
     // مسیرِ کهنه: پیام قابلِ ادیت نبود (عکس، پیامِ خیلی قدیمی، پاک‌شده). دقیقاً مثل قبل
@@ -5412,6 +5577,8 @@ bot.action(/^tback:([ma])$/, async (ctx) => {
   if (await blockDuringOpenPay(ctx)) return;
   if (await blockDuringOpenReading(ctx)) return;
   if (await blockDuringPendingReading(ctx)) return;
+  // دکمه‌ی کهنه: پشته را هم به همان منو برگردان تا صفحه‌ی بعدی مقصدِ درست داشته باشد.
+  navEnter(uid, ctx.match[1] === 'a' ? 'at' : 'fm');
   const [text, kb] = topicMenuScreen(uid, ctx.match[1]);
   try { await ctx.editMessageText(text, kb); }
   catch { await ctx.reply(text, kb).catch(() => {}); }
@@ -5705,9 +5872,8 @@ bot.action(/^rcancel:(\d+)$/, async (ctx) => {
 // 🧭 بازگشت به منوی اصلی از هر استیتِ میانی (قرارداد State Management). فالِ هنوز-پرداخت‌نشده لغو می‌شود؛
 // فالِ started/delivered (پول‌داده) هرگز دست نمی‌خورد. همیشه ثبت می‌شود (حتی با گاردِ خاموش) تا دکمه‌ی
 // کش‌شده خطا ندهد. اگر کاربر وسط پرداخت است، فاکتور را یتیم نمی‌کند؛ به‌جایش انصراف را پیشنهاد می‌دهد.
-bot.action('nav:menu', async (ctx) => {
+async function navToMenu(ctx) {
   const uid = ctx.from.id;
-  await ctx.answerCbQuery().catch(() => {});
   /* ⚠️ این‌جا قبلاً یک **کپیِ دستیِ** گارد بود، و هر دو ایرادِ نسخه‌ی اصلی را داشت:
      روی *استیت* می‌نشست (پس در صفحه‌ی انتخابِ بسته هم دروغ می‌گفت) و دکمه‌ی انصرافش به
      `pay_cancel` وصل بود — همان چیزی که در `blockDuringOpenPay` باگِ حلقه‌ی بی‌پایانِ
@@ -5728,6 +5894,37 @@ bot.action('nav:menu', async (ctx) => {
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   stmts.setKbShown.run(uid);   // پنجره‌ی مهاجرتِ کیبورد را می‌بندد (KB_V2_EPOCH پایین)
   return ctx.reply(L.reading.backToMenu, mainKeyboard(uid));
+}
+bot.action('nav:menu', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return navToMenu(ctx);
+});
+
+/* ◀️ بازگشتِ یک‌قدمی (پشته‌ی بالا). عمداً **هیچ استیتی نمی‌نویسد و هیچ فلویی را نمی‌کشد**:
+ * این فقط یک رندرِ دوباره‌ی صفحه‌ی قبلی است. گاردهای مرکزی (`blockCrossFlowCallback`) از
+ * قبل جلوی زدنش وسطِ فال یا فاکتورِ صادرشده را می‌گیرند.
+ *
+ * پشته‌ی خالی یا صفحه‌ی ناشناخته ⟵ منوی اصلی. هرگز سکوت، هرگز بن‌بست (بند ۹ب/۱). */
+bot.action('nav:back', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  const { stack, cur } = navState(uid);
+  const prev = stack[stack.length - 1];
+  /* ⚠️ پاپ **قبل از** رندر است، نه بعدش: خودِ صفحه‌ی مقصد ردیفِ بازگشتش را از همین پشته
+   * می‌سازد، پس اگر اول رندر کنیم، صفحه‌ای که در واقع ریشه است هنوز «بازگشت» نشان می‌دهد
+   * به‌جای «بازگشت به منوی اصلی». شکستِ رندر پشته را برمی‌گرداند. */
+  let page = null;
+  if (prev && NAV_SCREENS[prev.s]) {
+    try { patchSession(uid, { nav: stack.slice(0, -1), navCur: prev }); } catch {}
+    try { page = NAV_SCREENS[prev.s](uid, prev.a || ''); }
+    catch (e) { logErr('nav:back render:', e.message); }
+    if (!page) { try { patchSession(uid, { nav: stack, navCur: cur }); } catch {} }
+  }
+  if (!page) return navToMenu(ctx);
+  const [text, extra] = page;
+  try { await ctx.editMessageText(text, extra); }
+  catch { await ctx.reply(text, extra).catch(() => {}); }
 });
 
 // گاردِ «فالِ باز» — «اونو ادامه می‌دم»: همان پیامِ آخرِ فلو دوباره نشان داده می‌شود (کاربر سرِ کارش برمی‌گردد).
@@ -6182,8 +6379,11 @@ function recoRows(uid, currentType) {
 //
 // یعنی `button.url(shareUrlFor(...))` از این به بعد **فقط** داخلِ خودِ `showInvite` مجاز
 // است، که همان پیامِ توضیحی است. چکِ CI همین را قفل کرده.
-const inviteRow = (uid) => [Markup.button.callback(
-  L.buttons.inviteWithBonus(referralBonusFor(uid), curOf(uid)), 'invite_go')];
+// ⚠️ `action` افزایشی است و پیش‌فرضش بیت‌به‌بیت رفتارِ قبلی: فقط صفحه‌ی **ذخایر** نسخه‌ی
+// `invite_edit` را می‌دهد که به‌جای پیامِ تازه همان پیام را ادیت می‌کند و «بازگشت» به
+// ذخایر دارد. معنیِ دوم یعنی اکشنِ دوم، نه بازاستفاده از `invite_go` (بند ۹ب/۶ ریشه).
+const inviteRow = (uid, action = 'invite_go') => [Markup.button.callback(
+  L.buttons.inviteWithBonus(referralBonusFor(uid), curOf(uid)), action)];
 
 // پیامِ عمومیِ «ادامه‌ی کار با ربات» (UX v2.1، تصمیمِ صریحِ مالک): همان متن و دکمه‌هایی که
 // بعد از تحویلِ فال نشان می‌دهیم («هر سؤال دیگه‌ای داری…» + recoRows + دعوت)، حالا هر
@@ -6786,6 +6986,33 @@ REFERRAL_5_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referra
 db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('referral_3', unixepoch())").run();
 REFERRAL_3_EPOCH = db.prepare("SELECT done_at FROM migrations WHERE key='referral_3'").get()?.done_at || 0;
 
+/* 🔢 بک‌فیلِ یک‌باره‌ی «شماره‌ی فاکتور» برای ردیف‌های تاریخی.
+ *
+ * ملاک: ردیفی که واقعاً فاکتور گرفته. سه نشانه‌اش (هر کدام کافی است): به `step='receipt'`
+ * رسیده، `invoice_issued_at` دارد، یا وضعیتش از `pending` رد شده. ردیف‌های شبحِ
+ * `amount=0, step='amount'` — همان‌هایی که مالک در پنل می‌دید — عمداً بیرون می‌مانند و
+ * `invoice_no` شان صفر است؛ پاک هم نمی‌شوند (بند ۲ج/۹: هیچ حذفِ دسته‌جمعی روی دیتای زنده).
+ *
+ * ترتیب `ORDER BY id` است، یعنی قطعی و بازتولیدپذیر: اجرای دوباره روی همان دیتا همان
+ * شماره‌ها را می‌دهد. مارکر **داخلِ همان تراکنش** نوشته می‌شود (درسِ v3.25.1: مارکرِ
+ * بیرونِ تراکنش یعنی یک قطعِ ساده می‌تواند مهاجرت را دو بار اجرا کند). */
+const INVOICE_NO_KEY = 'invoice_no_1';
+if (!db.prepare('SELECT 1 FROM migrations WHERE key=?').get(INVOICE_NO_KEY)) {
+  try {
+    db.transaction(() => {
+      const rows = db.prepare(
+        'SELECT id FROM payments WHERE invoice_no=0 AND ('
+        + "step='receipt' OR (invoice_issued_at IS NOT NULL AND invoice_issued_at>0)"
+        + " OR status IN ('waiting_review','approved','rejected','reversed')) ORDER BY id").all();
+      const set = db.prepare('UPDATE payments SET invoice_no=? WHERE id=?');
+      let n = Number(db.prepare('SELECT IFNULL(MAX(invoice_no),0) AS m FROM payments').get()?.m) || 0;
+      for (const r of rows) set.run(++n, r.id);
+      db.prepare('INSERT OR IGNORE INTO migrations (key, done_at) VALUES (?, unixepoch())').run(INVOICE_NO_KEY);
+      log(`🔢 شماره‌ی فاکتور بک‌فیل شد: ${rows.length} ردیف (آخرین شماره: ${n})`);
+    })();
+  } catch (e) { logErr('invoice_no backfill:', e.message); }
+}
+
 /* 🌙 مهاجرتِ یک‌باره‌ی دیفالتِ یادآوریِ شبانه — برنده‌ی آزمایشِ `night_reminder` (v3.82.0).
  *
  * نتیجه‌ی آزمایش (پنجره‌ی تمیز، ۲٬۸۷۷ در برابر ۳٬۰۵۶ پیام): فالِ تحویل‌شده در ۶ ساعتِ
@@ -7243,7 +7470,7 @@ function walletRows(uid) {
   const rows = [[rechargeBtn(uid)]];
   if (!uxV2For(uid)) return rows;
   const cur = curOf(uid);
-  rows.push(inviteRow(uid));   // همان تک‌منبعِ دعوت که پیامِ ادامه هم از آن می‌خواند
+  rows.push(inviteRow(uid, 'invite_edit'));   // یک قدم جلو، روی همین پیام (نه پیامِ تازه)
   if (getUser(uid)?.lucky_date !== botToday()) {
     rows.push([Markup.button.callback(L.buttons.luckyDraw(LUCKY_PICKS, cur), 'lucky_go')]);
   }
@@ -7254,7 +7481,7 @@ function walletRows(uid) {
 // دقیقاً یک چیز را رندر کنند (همان الگوی falMenuScreen/allTopicsScreen).
 const walletScreen = (uid) => [L.wallet.info(getBalance(uid), curOf(uid)), {
   parse_mode: 'Markdown',
-  ...Markup.inlineKeyboard(walletRows(uid)),
+  ...Markup.inlineKeyboard([...walletRows(uid), ...navBackRow(uid)]),
 }];
 
 async function showWallet(ctx) {
@@ -7263,6 +7490,8 @@ async function showWallet(ctx) {
   if (await blockDuringOpenPay(ctx, INTENT.WALLET)) return;
   if (await blockDuringOpenReading(ctx, INTENT.WALLET)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.WALLET)) return;
+  // 🧭 لایه‌ی ۱ (کیبوردِ ماندگار یا دکمه‌ی اینلاینِ معادلش) ⟵ «بازگشت به منوی اصلی».
+  navEnter(ctx.from.id, 'w');
   const [text, extra] = walletScreen(ctx.from.id);
   try {
     const sent = await ctx.reply(text, extra);
@@ -7300,6 +7529,8 @@ const inviteScreen = (uid) => {
     ...Markup.inlineKeyboard([
       [styled(Markup.button.url(L.buttons.share(bonus, cur), shareUrlFor(uid)), 'success')],
       [Markup.button.callback(L.buttons.inviteStatus, 'invite_stat')],
+      // لایه‌ی ۱ (از کیبورد) ⟵ منوی اصلی؛ لایه‌ی ۲ (از ذخایر) ⟵ «بازگشت» به ذخایر.
+      ...navBackRow(uid),
     ]),
   }];
 };
@@ -7323,6 +7554,7 @@ async function showInvite(ctx) {
   if (await blockDuringOpenReading(ctx, INTENT.INVITE)) return;
   if (await blockDuringOpenLucky(ctx, INTENT.INVITE)) return;
   if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  navEnter(uid, 'i');   // 🧭 لایه‌ی ۱ ⟵ «بازگشت به منوی اصلی»
   const [text, extra] = inviteScreen(uid);
   await ctx.reply(text, extra);
 }
@@ -7333,6 +7565,23 @@ async function showInvite(ctx) {
 const INVITE_LABELS = [...allLabels(l => l.buttons.inviteMain), '📤 معرفی دوستان'];
 bot.hears(INVITE_LABELS, showInvite);
 bot.action('invite_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showInvite(ctx); });
+/* 📤 دعوت **از داخلِ صفحه‌ی ذخایر** — همان پیام ادیت می‌شود و دکمه‌ی آخرش «بازگشت» به
+ * ذخایر است (خواسته‌ی صریحِ مالک). اکشنِ جدا، نه بازاستفاده از `invite_go`: آن یکی از
+ * چند پیامِ دیگر هم صدا زده می‌شود و ادیتِ آن‌ها غلط بود (بند ۹ب/۶ ریشه). */
+bot.action('invite_edit', async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  if (await blockDuringOnboarding(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.INVITE)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.INVITE)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.INVITE)) return;
+  if (!BOT_USERNAME) { try { BOT_USERNAME = (await bot.telegram.getMe()).username; } catch {} }
+  navGo(uid, 'i');
+  const [text, extra] = inviteScreen(uid);
+  try { await ctx.editMessageText(text, extra); }
+  catch { await ctx.reply(text, extra).catch(() => {}); }
+});
 
 // وضعیتِ دعوت‌ها ⇄ خودِ صفحه‌ی دعوت: هر دو **همان پیام** را ادیت می‌کنند، پس چتِ کاربر
 // شلوغ نمی‌شود. هیچ‌کدام state را دست نمی‌زنند و هیچ چیزی نمی‌نویسند (فقط خواندن)، پس
@@ -7411,6 +7660,22 @@ function openPaymentRow(uid) {
   return { id: Number(stmts.insertPayment.run(uid).lastInsertRowid), fresh: true };
 }
 
+/* 📊 `recharge_started` دیگر به **ساختِ ردیف** گره نخورده (ردیف فقط لحظه‌ی انتخابِ بسته
+ * ساخته می‌شود)، پس دِدوپِ خودش را لازم دارد: بدونش هر بازگشت/ادیتِ صفحه‌ی بسته‌ها یک
+ * بار دیگر شمرده می‌شد و قیف باد می‌کرد. پنجره همان `PAY_ROW_REUSE_SEC`ِ ردیف است تا
+ * «یک تلاش» در هر دو شمارنده یک معنی بدهد.
+ * ⚠️ نامِ رویداد و propهایش دست‌نخورده‌اند (بند ۲ج/۳)؛ `payment_id` حالا صفر است چون در
+ * این لحظه واقعاً فاکتوری وجود ندارد. */
+function trackRechargeStarted(uid) {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const at = Number(getSession(uid)?.rechargeSeenAt) || 0;
+    if (at && now - at < PAY_ROW_REUSE_SEC) return;
+    patchSession(uid, { rechargeSeenAt: now });
+    track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: 0 });
+  } catch (e) { logErr('recharge_started:', e.message); }
+}
+
 /* 🧪 آزمایشِ نمایشِ بسته‌ها (v3.75.0، خواسته‌ی صریحِ مالک): با اضافه‌شدنِ «افسانه‌ای» و
  * «جاودان» می‌شود پرسید همه‌ی پنج بسته را یک‌جا نشان بدهیم یا سه‌تای اول را با یک
  * دکمه‌ی کشف. معیارِ موفقیت **درآمدِ مجموع** است، نه نرخ — پس ادعای CTWِ بیزیِ داشبورد
@@ -7428,7 +7693,11 @@ const packsRevealed = (uid) => {
   catch (e) { logErr('packs revealed:', e.message); return false; }
 };
 
-function packMenuScreen(uid, paymentId) {
+/* ⚠️ از ۱۴۰۵/۰۶/۲۷ دیگر `paymentId` نمی‌گیرد، و این قلبِ تغییرِ «فاکتور فقط لحظه‌ی
+ * انتخابِ بسته صادر می‌شود» است: تا وقتی بسته‌ای انتخاب نشده هیچ ردیفی در `payments`
+ * وجود ندارد، پس نه شماره‌ای هست که روی دکمه بنشیند و نه فاکتوری که «نیمه‌کاره» بماند.
+ * دکمه‌ی بازگشت هم از پشته‌ی ناوبری می‌آید نه از `pay_back:<id>`. */
+function packMenuScreen(uid) {
   const cur = curOf(uid);
   const ladder = starsRail ? ladderFor(peekVariant(db, uid, STARS_EXPERIMENT)) : null;
   // ریلِ استارز اصلاً بسته‌ی farsiOnly را نمی‌شناسد (STAR_LADDERS دو تای تازه را ندارد).
@@ -7457,11 +7726,15 @@ function packMenuScreen(uid, paymentId) {
   colored ? PACK_STYLE[p.key] : undefined)]);
   // دکمه‌ی کشفِ دو بسته‌ی گران‌تر — عمداً بدونِ ایموجی (خواسته‌ی مالک: جلبِ توجه فقط
   // رویِ سه بستهٔ اول بماند).
-  if (staged) rows.push([Markup.button.callback(L.buttons.revealMorePacks, `pack_reveal:${paymentId}`)]);
+  if (staged) rows.push([Markup.button.callback(L.buttons.revealMorePacks, 'pack_reveal')]);
+  /* دکمه‌ی بازگشت **همیشه** هست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست).
+   * 🐛 و از ۱۴۰۵/۰۶/۲۷ دیگر پیامِ «یه خرید نیمه‌کاره داری» نمی‌دهد: چون در این لحظه
+   * هیچ ردیفِ پرداختی وجود ندارد، گاردِ مرکزی چیزی برای محافظت پیدا نمی‌کند و تپ
+   * بی‌سروصدا یک قدم عقب می‌رود — دقیقاً چیزی که مالک خواست. */
+  const back = navBackRow(uid);
   return [L.wallet.coinPacks(cur), Markup.inlineKeyboard([
     ...rows,
-    // دکمه‌ی بازگشت **همیشه** هست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست) و به کیف برمی‌گردد.
-    [Markup.button.callback(L.buttons.backOneStep, `pay_back:${paymentId}`)],
+    ...(back.length ? back : [[Markup.button.callback(L.buttons.backOneStep, 'wallet_go')]]),
   ])];
 }
 
@@ -7489,16 +7762,29 @@ bot.action('recharge', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   upsertUser(ctx);
   trackMoneyCtaCallback(uid, 'recharge');
-  const { id: paymentId, fresh } = openPaymentRow(uid);
-  if (fresh) track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId });
+  /* 🧾 **هیچ ردیفِ پرداختی این‌جا ساخته نمی‌شود** (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۷).
+   *
+   * دیدنِ فهرستِ بسته‌ها یک تصمیم نیست، یک نگاه است. ساختنِ ردیف در همین لحظه سه ضرر
+   * داشت: (۱) هر تپ یک «خریدِ نیمه‌کاره» می‌ساخت و گاردِ مرکزی روی دکمه‌ی بازگشت پیامِ
+   * «یه خرید نیمه‌کاره داری» می‌داد، (۲) جدولِ `payments` پر از ردیفِ `amount=0` می‌شد و
+   * (۳) شماره‌ی فاکتور که کاربر و ادمین می‌بینند از تعدادِ **واقعیِ** فاکتورها جلو می‌زد.
+   * از این به بعد ردیف دقیقاً در `pkg:` — یعنی لحظه‌ی انتخابِ بسته و صدورِ فاکتور — ساخته
+   * می‌شود، و خودِ همان هندلر اگر ردیفی نبود می‌سازدش (مسیرِ خودترمیمِ v3.66.0).
+   *
+   * استیت همچنان `pay_amount` می‌ماند تا متنِ آزادِ کاربر در این صفحه درست تفسیر شود؛
+   * ولی چون `session.paymentId` خالی است، `issuedInvoiceOf`/`activePaymentFlow` هیچ
+   * فاکتوری پیدا نمی‌کنند و هیچ گاردی بی‌دلیل شلیک نمی‌کند. */
+  trackRechargeStarted(uid);
   setState(uid, 'pay_amount');
-  patchSession(uid, { paymentId });
   // اقتصادِ سکه: هیچ عددی وارد نمی‌شود و هیچ مرحله‌ی میانی نیست — سه بسته، و تپِ بعدی فاکتور است.
   if (coinsOn(uid)) {
+    // 🧭 یک قدم جلو از صفحه‌ی ذخایر ⟵ دکمه‌ی آخر «بازگشت» به همان صفحه.
+    if (!navState(uid).cur) navEnter(uid, 'w');
+    navGo(uid, 'pk');
     // UX v2.3: صفحه‌ی بسته‌ها **روی همان پیامِ کیف** ادیت می‌شود (زیرمنو، نه پیامِ تازه) و
     // دکمه‌ی پایینش «بازگشت» است نه «انصراف» — چون این خروج از یک فلوی اصلی نیست و نباید
     // پیامِ «ادامه» بیاورد. اگر ادیت نشد (ورودِ غیرِ دکمه‌ای یا پیامِ کهنه) پیامِ جدید می‌رود.
-    const [text, extra] = packMenuScreen(uid, paymentId);
+    const [text, extra] = packMenuScreen(uid);
     // ⚠️ exposure یعنی «کاربر treatment را دید» (بند ۲الف ریشه) — تک‌نقطه‌اش
     // `exposePackScreen` است، کنارِ `packMenuScreen`.
     const seen = () => exposePackScreen(uid);
@@ -7535,15 +7821,15 @@ bot.action('recharge', async (ctx) => {
  * برای همین کاربر می‌نشیند و همان صفحه را با ۵ بسته دوباره می‌سازد (ادیت، نه پیامِ تازه).
  * نشانه در سشن است نه ستونِ DB (بند ۹/۰: چیزی که به هدف نزدیک نمی‌کند ساخته نشود) —
  * دقیقاً هم‌الگوی `onbFirst` در v3.72.0. */
-bot.action(/^pack_reveal:(\d+)$/, async (ctx) => {
+/* ⚠️ شناسه‌ی پرداخت از `callback_data` برداشته شد (دیگر در این لحظه ردیفی وجود ندارد)،
+ * ولی الگوی کهنه‌ی `pack_reveal:<id>` هنوز match می‌شود چون دکمه‌اش در چتِ کاربران زنده
+ * است (بند ۲ج/۶) و رفتارش دقیقاً همین است. */
+bot.action(/^pack_reveal:?\d*$/, async (ctx) => {
   const uid = ctx.from.id;
   await ctx.answerCbQuery().catch(() => {});
   if (starsRail || !coinsOn(uid)) return;   // این آزمایش اصلاً برای این ریل/دنیا نیست
-  const pid = parseInt(ctx.match[1], 10);
-  const s = getSession(uid);
-  if (s.paymentId !== pid) return;   // دکمه‌ی کهنه‌ی زیرِ فاکتورِ دیگر — بی‌صدا رد شود
   patchSession(uid, { packsRevealed: 1 });
-  const [text, extra] = packMenuScreen(uid, pid);
+  const [text, extra] = packMenuScreen(uid);
   try {
     await ctx.editMessageText(text, extra);
     exposePackScreen(uid);
@@ -7563,6 +7849,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   if (amount < MIN_RECHARGE) return ctx.reply(L.wallet.amountTooLow(MIN_RECHARGE));
   // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
   if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
+  issueInvoiceNo(s.paymentId);
 
   // هیچ تخفیفی خودکار اعمال نمی‌شود: کاربر یا کدش را از دکمه‌ی «تخفیف می‌خوام» گرفته و
   // این‌جا با «🎟️ کد تخفیف دارم» واردش می‌کند، یا مبلغ کامل را می‌پردازد.
@@ -7606,7 +7893,13 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     logErr('pkg: farsiOnly pack tapped on stars rail', pack.key);
     return ctx.reply(L.errors.generic).catch(() => {});
   }
-  /* ♻️ **این تپ خودش را ترمیم می‌کند، نه اینکه بمیرد.**
+  /* 🧾 **این‌جا — و فقط این‌جا — ردیفِ پرداخت ساخته می‌شود.**
+   *
+   * از ۱۴۰۵/۰۶/۲۷ صفحه‌ی بسته‌ها هیچ ردیفی نمی‌سازد (خواسته‌ی صریحِ مالک)، پس مسیرِ
+   * عادی هم از همین شاخه رد می‌شود: تپ روی یک بسته یک نیتِ کاملاً روشن است و دقیقاً
+   * همان لحظه‌ای است که فاکتور صادر می‌شود.
+   *
+   * ♻️ و همین شاخه از قبل **خودترمیم** بود:
    *
    * 🐛 رگرسیونی که همین PR نزدیک بود بسازد: `dropUnissuedPay` (گاردِ تازه) وقتی کاربر
    * صفحه‌ی بسته‌ها را رها می‌کند استیت و `paymentId` را پاک می‌کند — درست است، چون
@@ -7642,7 +7935,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * ⚠️ عمداً **بعد از** بلوکِ ترمیمِ استیت است: بدونِ `s.paymentId` معتبر، دکمه‌ی
    * «بازگشت»ِ همین کیبورد به یک شناسه‌ی مرده اشاره می‌کرد. */
   if (isRetiredPack(pack.key)) {
-    const [, extra] = packMenuScreen(uid, s.paymentId);
+    const [, extra] = packMenuScreen(uid);
     try {
       const sent = await ctx.reply(L.errors.packRetired, extra);
       exposePackScreen(uid);
@@ -7688,6 +7981,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
       return ctx.reply(L.errors.generic).catch(() => {});
     }
   }
+  issueInvoiceNo(payId);   // 🔢 شماره‌ی فاکتور، فقط برای فاکتوری که واقعاً صادر شد
   stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, payId);
   /* کیبوردِ صفحه‌ی بسته‌ها **حذف** نمی‌شود، به یک دکمه‌ی «انصراف» تبدیل می‌شود.
    *
@@ -7999,15 +8293,15 @@ bot.action(/^pay_cancel:(\d+)$/, async (ctx) => {
    * `editMessageText` رویش کار نمی‌کند. اگر پاک نشود، یک فاکتورِ مرده با دکمه‌ی
    * پرداختِ بی‌اثر در چت می‌ماند.
    *
-   * فاکتورِ قبلی همین بالا `canceled` شد، پس یک ردیفِ تازه لازم است تا دکمه‌ی بازگشتِ
-   * صفحه‌ی بسته‌ها به فاکتورِ زنده اشاره کند. عمداً `recharge_started` دوباره ثبت
-   * نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه، و شمردنش قیف را باد می‌کند. */
+   * ⚠️ از ۱۴۰۵/۰۶/۲۷ **هیچ ردیفِ تازه‌ای ساخته نمی‌شود**: صفحه‌ی بسته‌ها دیگر شناسه‌ی
+   * پرداخت لازم ندارد و ردیفِ بعدی لحظه‌ی انتخابِ بستهٔ بعدی ساخته می‌شود. این همان
+   * چیزی است که ردیف‌های شبحِ `amount=0` را از ریشه حذف می‌کند. `recharge_started` هم
+   * مثل قبل دوباره ثبت نمی‌شود: این ادامه‌ی همان تلاش است، نه یک شروعِ تازه. */
   if (coinsOn(uid)) {
     const s0 = getSession(uid);
-    const { id: fresh } = openPaymentRow(uid);
     setState(uid, 'pay_amount');
-    patchSession(uid, { paymentId: fresh, invoiceMsgId: null });
-    const [text, extra] = packMenuScreen(uid, fresh);
+    patchSession(uid, { invoiceMsgId: null });
+    const [text, extra] = packMenuScreen(uid);
     const here = ctx.callbackQuery?.message?.message_id;
     const packId = s0.packMsgId;
 
@@ -8281,8 +8575,9 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   const caption = (note ? `${note}\n\n` : '')
     + L.wallet.adminNotify(p, user, packSoldIn(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
   const kb = Markup.inlineKeyboard([[
-    Markup.button.callback(L.buttons.approve(paymentId), `approve:${paymentId}`),
-    Markup.button.callback(L.buttons.reject(paymentId), `reject:${paymentId}`),
+    // برچسب شماره‌ی **فاکتور** را نشان می‌دهد، ولی کالبک شناسه‌ی ردیف را حمل می‌کند.
+    Markup.button.callback(L.buttons.approve(invoiceNoOf(p)), `approve:${paymentId}`),
+    Markup.button.callback(L.buttons.reject(invoiceNoOf(p)), `reject:${paymentId}`),
   ]]).reply_markup;
   let adminMsg;
   for (const adminId of ADMIN_IDS) {
@@ -8608,7 +8903,7 @@ bot.action(/^cardsms:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery().catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
-  await ctx.reply(L.wallet.confirmReverse(pid), Markup.inlineKeyboard([[
+  await ctx.reply(L.wallet.confirmReverse(invoiceNoOf(stmts.getPayment.get(pid))), Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.reverseYes, `cardrev:${pid}`),
     Markup.button.callback(L.buttons.reverseNo, `cardrevno:${pid}`),
   ]])).catch(() => {});
@@ -8620,14 +8915,14 @@ bot.action(/^cardrev:(\d+)$/, async (ctx) => {
   const done = await reversePayment(parseInt(ctx.match[1], 10));
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
   await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser(curOf(done.p.user_id))).catch(() => {});
-  await ctx.reply(L.wallet.adminReversed(done.p.id, done.p.user_id, done.back,
+  await ctx.reply(L.wallet.adminReversed(invoiceNoOf(done.p), done.p.user_id, done.back,
     packOf(done.p) ? done.back : null)).catch(() => {});
 });
 bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await ctx.reply(L.wallet.reverseCancelled(parseInt(ctx.match[1], 10))).catch(() => {});
+  await ctx.reply(L.wallet.reverseCancelled(invoiceNoOf(stmts.getPayment.get(parseInt(ctx.match[1], 10))))).catch(() => {});
 });
 
 /* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
@@ -9278,6 +9573,12 @@ registerSupport(bot, {
   texts: liveL((l) => l.support),
   // و برچسبِ `bot.hears` داخلِ registerSupport لحظه‌ی ثبت لازم است، پس اتحاد.
   hearsLabels: allLabels((l) => l.support?.button),
+  /* 🧭 پشتیبانی هم لایه‌ی ۱ است (از کیبوردِ ماندگار) و نباید بن‌بست باشد (خواسته‌ی صریحِ
+   * مالک): آخرین دکمه «بازگشت به منوی اصلی». پارامتر در `shared/` افزایشی است، پس
+   * voice2text و tabir بیت‌به‌بیت دست‌نخورده‌اند. */
+  extraRows: () => (NAV_GUARD_ENABLED
+    ? [[{ text: L.buttons.backToMenu, callback_data: 'nav:menu' }]]
+    : []),
   // 🎯 دقیقاً باگی که مالک گزارش کرد: کاربر وسطِ فاکتور پشتیبانی را زد، گارد گفت انصراف
   // بده، انصراف داد و پیامِ عمومیِ «همیشه اینجام» گرفت به‌جای پشتیبانی. حالا هر دو گارد
   // نیتِ SUPPORT را ثبت می‌کنند و `replyCanceled` بعد از انصراف همین صفحه را برمی‌گرداند.
