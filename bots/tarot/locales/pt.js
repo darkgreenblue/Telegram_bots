@@ -775,13 +775,16 @@ export default {
     // sabendo na hora (bloco ۹: o dinheiro de quem paga nunca fica num limbo).
     refundedOnCancel: (price, cur) => `Os ${moneyTight(price, cur)} desta leitura voltaram pra você ✅`,
     // ⚠️ vai como HTML (caixa de citação), então `name` e `spreadFa` chegam com esc().
-    needBalance: ({ name, balance, spreadFa, price, cur }) =>
+    needBalance: ({ name, balance, spreadFa, price, cur, size }) =>
       // 🐛 Antes dizia «pra virar as cartas»: sobra do paywall antigo, quando as cartas já
       // estavam escolhidas. Hoje o débito acontece na escolha do tamanho, ou seja, nenhuma
       // carta foi puxada ainda (relato do dono, 1405/06/24).
       `Quase lá${name ? `, ${name}` : ''}! Pra esta leitura ainda falta um pouco.\n\n` +
       `${purseQuote(balance, cur)}\n\n` +
-      `A leitura «${spreadFa}» custa ${moneyTight(price, cur)}`,
+      // 📐 O tamanho entra na linha do preço (dono, 1405/06/27): o saldo não bastou
+      // justamente por causa do tamanho escolhido, então o número precisa dizer por
+      // quantas cartas se paga. Sem tamanho conhecido, não imprime nada (nunca «0 cartas»).
+      `A leitura ${size ? `de ${fmt(size)} cartas ` : ''}«${spreadFa}» custa ${moneyTight(price, cur)}`,
     resumeAfterRecharge: 'Saldo garantido ✅\n\nAs suas cartas continuam no mesmo lugar 🔮 Bora virar?',
     loadingTitle: 'Lendo as suas cartas',
     loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
