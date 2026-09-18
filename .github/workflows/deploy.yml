@@ -116,8 +116,40 @@ jobs:
       # فقط روی `push`: تعویقِ یک کرون یا اجرای دستی خبر نمی‌خواهد (چیزی تازه مرج
       # نشده که منتظر بماند)، و هشداری که مدام بی‌دلیل شلیک کند خیلی زود بی‌معنا
       # می‌شود — همان پینگ‌پنگِ `chmod` و `ADMIN_IDS` در بند ۳ ریشه.
-      - name: Telegram notice on deferred deploy
+      # 🔇 آیا این پوش اصلاً چیزی برای دیپلوی دارد؟
+      #
+      # گیتِ ساعت **قبل از** تصمیمِ انتخابیِ دیپلوی اجرا می‌شود (آن تصمیم روی خودِ سرور
+      # گرفته می‌شود و رانر نمی‌بیندش)، پس یک مرجِ صرفاً مستنداتی یا ابزاری هم پیامِ
+      # «دیپلوی به تعویق افتاد» می‌گرفت — برای چیزی که حتی با پنجره‌ی باز هم هیچ رباتی
+      # را ری‌استارت نمی‌کرد.
+      #
+      # 🐛 مشاهده‌ی واقعیِ ۱۴۰۵/۰۶/۲۷: مرجِ `tools/ci-local.mjs` (صفر فایلِ رباتی) پیام
+      # فرستاد و مالک همان روز پرسید «این چه پیامیه هی میاد؟». ضررش خودِ پیام نیست،
+      # **بی‌معنا شدنِ هشدار** است: سیگنالی که قرار است بگوید «کدِ تازه‌ات هنوز روی سرور
+      # ننشسته» وقتی برای هر مرجِ مستنداتی هم شلیک کند، مرجِ واقعاً معطل لای نویزش گم
+      # می‌شود — هم‌خانواده‌ی پینگ‌پنگِ `chmod` و `ADMIN_IDS` در بند ۳ ریشه.
+      #
+      # ⚠️ فقط **پیام** گیت می‌شود، نه خودِ دیپلوی: «ربات در pm2 نیست» هم دلیلِ مشروعِ
+      # دیپلوی است و فقط سرور می‌داند، پس کرونِ صبح دست‌نخورده کارش را می‌کند.
+      # ⚠️ و fail-open است: مبنای نامعلوم ⟵ پیام می‌رود (رفتارِ قبلی).
+      - name: Does this push deploy anything?
+        id: relevant
         if: steps.gate.outputs.go != 'true' && github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          REL=1
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            if git diff --name-only "$BEFORE" "${{ github.sha }}" \
+               | grep -E '^(bots/|shared/|ecosystem\.config\.cjs|\.github/workflows/deploy\.yml)' \
+               | grep -vE '\.md$' | grep -q .; then REL=1; else REL=0; fi
+          fi
+          echo "rel=$REL" >> "$GITHUB_OUTPUT"
+          [ "$REL" = 1 ] && echo "این پوش فایلِ دیپلوی‌پذیر دارد ⟵ هشدارِ تعویق می‌رود" \
+                         || echo "پوشِ مستنداتی/ابزاری ⟵ هشدارِ تعویق لازم نیست"
+
+      - name: Telegram notice on deferred deploy
+        if: steps.gate.outputs.go != 'true' && github.event_name == 'push' && steps.relevant.outputs.rel == '1'
         env:
           T_V2T:   ${{ secrets.VOICE2TEXT_BOT_TOKEN }}
           T_TAROT: ${{ secrets.TAROT_BOT_TOKEN }}

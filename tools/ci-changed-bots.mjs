@@ -43,7 +43,7 @@ const IGNORED = [
  *  هر استپِ جابِ `check` یا `if: matrix.bot == 'X'` دارد (یعنی فقط همان ربات) یا ندارد
  *  (یعنی همه‌ی ربات‌های ماتریس). هر `tools/…` که در `run:` همان استپ بیاید همان دامنه را
  *  به ارث می‌برد. */
-function toolMapFromCi() {
+export function toolMapFromCi() {
   const yml = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8');
   const start = yml.indexOf('\n  check:');
   const end = yml.indexOf('\n  check-tabir-khab:');
