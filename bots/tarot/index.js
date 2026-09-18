@@ -286,12 +286,16 @@ const TEST_PHASE = false;
 //         `sendMessage`. حالا شکستِ ارسال هر دو مهر را به مقدارِ دقیقِ قبلی
 //         برمی‌گرداند، پس یک شکستِ گذرا دیگر تورِ ترمیمِ بند ۹ب-۳ را برای ۲۴ ساعت
 //         کور نمی‌کند.
+// 3.94.3: 🔒 گاردِ مرکزیِ callback برای تمام مرحله‌های فال و پرداخت. allowlistِ هر
+//         قدم تنها CTAهای همان قدم را عبور می‌دهد؛ callback کهنه‌ی فروشگاه دیگر نمی‌تواند
+//         `await_question` را به receipt تبدیل کند. `pay_back` در خریدِ نیمه‌کاره هم
+//         خروجِ خاموش نیست و فقط `pay_exit` (انصرافِ صریح) فلو را می‌بندد.
 // 💰 v3.94.0: آزمایشِ نردبانِ قیمتِ تازه‌ی `price_ladder_p3` — بازوی `bulk` کنارِ
 // control/floor/cheap نشست. فرضیه‌ی مالک: کاربر با اعدادِ **بزرگ‌ترِ** الماس در
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.95.0';
+const PRODUCT_VERSION = '3.96.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -387,7 +391,7 @@ const CHAT_CLOSE_FLAG  = true;
 const CHAT_ORPHAN_SEC  = 180;  // سنِ لازم برای ریفاندِ سؤالِ بی‌جواب (کوتاه‌تر = ریفاندِ کاربرِ منتظر)
 const CHAT_NUDGE_TURN  = 12;   // نادجِ «تصمیم مالِ خودته»، یک بار در هر گفتگو
 const CHAT_MAX_TOKENS  = 500;
-/* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.95.0، خواسته‌ی صریحِ مالک).
+/* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
  *
  * مدل در پاکتِ خودش یک برچسبِ کوتاه به **زبانِ خودِ کاربر** برمی‌گرداند و کد از رویش یک
  * دکمه می‌سازد. تپش دقیقاً مثل این است که کاربر همان را پرسیده باشد.
@@ -1083,7 +1087,11 @@ const CANCELED_RECOVERY_SEC = 12 * 3600;
  * انقضا وضعیت را به همان `canceled`ِ همیشگی می‌برد، نه یک وضعیتِ تازه: یعنی رسیدی که
  * دیر برسد از همان مسیرِ اثبات‌شده‌ی `CANCELED_RECOVERY_SEC` (بالا) خودکار احیا می‌شود —
  * بدونِ این، رسیدِ دیرِ کاربر بعد از انقضا بی‌صدا دور ریخته می‌شد (بند ۹ب/۹ ریشه). */
-const INVOICE_REMINDER_SEC = 3600;      // ۱ ساعت
+/* ⏱ یادآوری **۱۵ دقیقه** بعد از صدور (v3.95.0، خواسته‌ی صریحِ مالک؛ بود ۱ ساعت).
+ * منطقش با پرسونای پرداختِ ثبت‌شده در CLAUDE.md همین ربات می‌خواند: **۶۲٪**
+ * پرداخت‌کننده‌ها زیرِ یک ساعت از عضویت می‌پردازند، یعنی پنجره‌ی تصمیم ساعت است نه روز؛
+ * یادآوریِ یک‌ساعته اغلب بعد از بسته‌شدنِ همان پنجره می‌رسید. */
+const INVOICE_REMINDER_SEC = 900;       // ۱۵ دقیقه
 const INVOICE_EXPIRE_SEC   = 24 * 3600; // ۲۴ ساعت
 // ⭐ سقفِ فاکتورِ استارزی (v3.76.0، خواسته‌ی صریحِ مالک): «چون نرخِ ارز متغیر است»،
 // ۳۰ دقیقه. مستقل از چرخه‌ی بالا — این‌جا هیچ‌وقت canceled نمی‌شود، فقط شکلِ نمایش عوض می‌شود.
@@ -1453,7 +1461,7 @@ try { db.prepare('ALTER TABLE chat_messages ADD COLUMN tg_msg_id INTEGER NOT NUL
  * افزایشی با DEFAULT 0، پس ردیف‌های قبل از این نسخه معتبر می‌مانند (بند ۲ج/۱). */
 try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_reading INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 try { db.prepare('ALTER TABLE chat_messages ADD COLUMN want_support INTEGER NOT NULL DEFAULT 0').run(); } catch {}
-/* migration (v3.95.0): دو فیلدِ تازه‌ی همان پاکت، با همان استدلالِ بالا.
+/* migration (v3.96.0): دو فیلدِ تازه‌ی همان پاکت، با همان استدلالِ بالا.
  *   • `follow_up` = برچسبِ دکمه‌ی سؤالِ پیشنهادی. **متنش لازم است نه فقط پرچمش**،
  *     چون تپِ دکمه ساعت‌ها بعد هم باید همان سؤال را بپرسد و حافظه ری‌استارت می‌شود.
  *   • `want_end` = مدل تشخیص داده کاربر می‌خواهد تمام کند.
@@ -2823,6 +2831,120 @@ async function blockDuringPendingReading(ctx) {
   return await offerPendingReading(ctx, ctx.from.id);
 }
 
+/* ═══════════ 🔒 گاردِ مرکزیِ تغییرِ فلو ═══════════
+ *
+ * تا این نسخه، قراردادِ «فلوی باز را بی‌صدا عوض نکن» در چندین هندلر تکرار شده بود.
+ * بیشترِ ورودی‌های معمول درست بودند، اما یک callback کهنه‌ی `pkg:` از آن فهرست جا ماند:
+ * کاربرِ `await_question` را به `pay_receipt` برد و سؤالش رسید خوانده شد. این دقیقاً
+ * ضعفِ ساختاریِ گاردِ پراکنده است؛ مسیرِ بعدی هم می‌توانست از قلم بیفتد.
+ *
+ * این middleware پیش از **تمام** actionها می‌نشیند. پیش‌فرضش «مسدود» است و فقط دکمه‌های
+ * مرحله‌ی فعلی اجازه دارند از آن رد شوند. بنابراین اضافه‌کردنِ هر دکمه‌ی جدید، تا وقتی
+ * آگاهانه به allowlist همان مرحله نرود، نمی‌تواند استیتِ فال یا پرداخت را جایگزین کند.
+ *
+ * نکته‌ی مهمِ محصول:
+ * - `recharge` از paywall یک مسیرِ فرزندِ مجازِ `confirm_pay` است؛ فال را نگه می‌دارد و
+ *   بعد از تأیید پرداخت همان فال را ادامه می‌دهد.
+ * - `pay_back` عمداً مجاز نیست: از صفحه‌ی بسته‌ها خارج و ردیفِ پرداخت را بی‌صدا می‌بست.
+ *   از این پس فقط `pay_exit` (انصرافِ صریح) حقِ خروجِ کامل از پرداخت را دارد.
+ * - در `revealing` حتی انصراف هم مجاز نیست؛ کالا در حال تحویل است و فقط دکمه‌ی قدمِ بعدی
+ *   باید کار کند.
+ */
+const READING_FLOW_STATES = new Set([...READING_INPROGRESS, 'confirm_pay', 'revealing']);
+
+function activePaymentFlow(uid) {
+  const state = getState(uid);
+  if (!PAY_STATES.includes(state)) return null;
+  const pid = Number(getSession(uid)?.paymentId) || 0;
+  const p = pid && stmts.getPayment.get(pid);
+  return (p && p.user_id === uid && p.status === 'pending') ? p : null;
+}
+
+// تنها callbackهایی که ادامه‌ی همان فال‌اند. هر callback ناشناخته، از جمله دکمه‌های
+// آینده، به‌صورت امن گارد می‌خورد تا فقط بعد از تصمیمِ آگاهانه‌ی توسعه‌دهنده باز شود.
+function readingFlowAllowsCallback(state, data) {
+  if (!data) return false;
+  if (state === 'confirm_focus') return /^(focus:\w+|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'await_question') return /^(reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'breathing') return /^(ready_breath|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'shuffling') return /^(shuffle_stop|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'picking') return /^(pick:\d+|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
+  if (state === 'confirm_pay') {
+    // پرداختِ همین فال (مستقیم یا شارژ کیف) یک شاخه‌ی فرزند است، نه ترکِ فال.
+    return /^(unlock:\d+|payr:\d+|wdisc:\d+|recharge|want_discount|reading:cancel|rcancel:\d+)$/.test(data);
+  }
+  // در حال تحویل: فقط همان step واقعیِ افشا. `reading:cancel` کهنه هم نباید مسیر را بکشد.
+  if (state === 'revealing') return /^(next:\d+:\d+|final:\d+)$/.test(data);
+  return false;
+}
+
+// تنها callbackهایی که درونِ همان پرداخت حرکت می‌کنند. `pay_exit` تنها خروجِ صریح است.
+function paymentFlowAllowsCallback(state, data) {
+  if (!data) return false;
+  if (/^pay_exit:\d+$/.test(data)) return true;
+  if (state === 'pay_amount') {
+    return /^(pkg:[a-z]+|pack_reveal:\d+|ramt:\d+|rcustom|pay_cancel:\d+)$/.test(data);
+  }
+  if (state === 'pay_receipt') {
+    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
+  }
+  if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
+  return false;
+}
+
+function flowIntentFor(ctx) {
+  const data = ctx.callbackQuery?.data || '';
+  const text = ctx.message?.text || '';
+  const key = data || text;
+  if (/^(daily_go|dpick:\d+)$/.test(key) || text === L.buttons.daily || text === L.buttons.dailyOneCard) return { key: INTENT.DAILY };
+  if (/^(lucky_go|lpick:\d+|lucky_stop)$/.test(key) || LUCKY_LABELS.includes(text)) return { key: INTENT.LUCKY };
+  if (/^(reading_go|catalog_go|cat_|opentopic|odepth:|topic:|spread:)/.test(key) || text === L.buttons.reading) return { key: INTENT.READING };
+  if (/^(recharge|wallet_go|pkg:|pack_reveal:|pay_back:)/.test(key) || WALLET_LABELS.includes(text)) return { key: INTENT.WALLET };
+  if (/^invite_?(go|stat|back)?$/.test(key) || INVITE_LABELS.includes(text)) return { key: INTENT.INVITE };
+  const chat = data.match(/^chat:(\d+)/);
+  if (chat) return { key: INTENT.CHAT, arg: Number(chat[1]) };
+  if (/^set:/.test(key) || text === L.buttons.settings) return { key: INTENT.SETTINGS };
+  if (text === L.support?.button || text.startsWith('/support')) return { key: INTENT.SUPPORT };
+  return null;
+}
+
+async function blockDuringActivePayment(ctx, intent, intentArg = 0) {
+  if (!NAV_GUARD_ENABLED) return false;
+  const uid = ctx.from.id;
+  const p = activePaymentFlow(uid);
+  if (!p) return false;
+  if (intent) setIntent(uid, intent, intentArg);
+  // تا وقتی مبلغ انتخاب نشده، «فاکتور» گفتن نادرست است؛ این متنِ جدا جلوی همان ابهام
+  // قبلی را می‌گیرد، ولی برای فاکتورِ صادرشده راهنمای دقیقِ واریز/رسید حفظ می‌شود.
+  const text = p.step === 'receipt' ? L.errors.openInvoice : L.errors.openPaymentFlow;
+  await ctx.reply(text, Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.cancel, `pay_exit:${p.id}`)],
+  ])).catch(() => {});
+  return true;
+}
+
+async function blockCrossFlowCallback(ctx) {
+  const uid = ctx.from?.id;
+  const data = ctx.callbackQuery?.data;
+  if (!uid || !data || !NAV_GUARD_ENABLED) return false;
+  const state = getState(uid);
+  const wanted = flowIntentFor(ctx);
+  if (READING_FLOW_STATES.has(state)) {
+    if (readingFlowAllowsCallback(state, data)) return false;
+    await ctx.answerCbQuery().catch(() => {});
+    if (wanted) setIntent(uid, wanted.key, wanted.arg);
+    if (state === 'revealing') return await blockDuringDelivering(ctx);
+    if (state === 'confirm_pay') return await blockDuringPendingReading(ctx);
+    return await blockDuringOpenReading(ctx, wanted?.key, wanted?.arg);
+  }
+  if (PAY_STATES.includes(state)) {
+    if (paymentFlowAllowsCallback(state, data)) return false;
+    await ctx.answerCbQuery().catch(() => {});
+    return await blockDuringActivePayment(ctx, wanted?.key, wanted?.arg);
+  }
+  return false;
+}
+
 // «اونو ادامه می‌دم» → همان پیامِ آخرِ فلو (مطابقِ استیتِ فعلی) دوباره نشان داده می‌شود.
 async function resendCurrentStep(ctx, uid) {
   const state = getState(uid);
@@ -3325,12 +3447,18 @@ const KB_LABELS = new Set([
   '📤 معرفی دوستان', '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)',
   '💎 کیف الماس', '💎 الماس فروشی',
   L.buttons.dailyOneCard, L.buttons.luckyMain,   // UX v2.1
-  /* 🐛 v3.95.0 — «تنظیمات» از v3.38.0 در کیبوردِ اصلی هست ولی این‌جا جا افتاده بود، و
+  /* 🐛 v3.96.0 — «تنظیمات» از v3.38.0 در کیبوردِ اصلی هست ولی این‌جا جا افتاده بود، و
    * دو چیز را بی‌صدا خراب می‌کرد: در قیفِ جرنی تپِ آن دکمه «تایپِ آزاد» شمرده می‌شد، و
    * مهم‌تر، میدل‌ورِ گفتگو آن را **سؤالِ گفتگو** می‌دید و رد می‌کرد — یعنی کاربرِ وسطِ
    * گفتگو به تنظیمات می‌رفت در حالی که استیتش `chatting` می‌ماند، و اولین چیزی که
    * بعدش تایپ می‌کرد یک الماس خرج می‌کرد. */
   ...(SETTINGS_ENABLED ? [L.buttons.settings] : []),
+].filter(Boolean));
+// فقط دکمه‌های واقعیِ ناوبری/ورود. متنِ آزادِ سؤال، رسید و مبلغ هرگز این‌جا نیست؛
+// بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
+const FLOW_SWITCH_TEXTS = new Set([
+  ...KB_LABELS,
+  L.buttons.settings,
 ].filter(Boolean));
 registerJourney(bot, {
   db,
@@ -3367,13 +3495,13 @@ registerJourney(bot, {
  * فایل): دکمه‌های **کهنه‌ای** که قبل از آن نسخه در چتِ کاربران نشسته‌اند هنوز می‌توانند
  * وسطِ گفتگو زده شوند و آن دکمه هیچ‌جا نمی‌برد (یک تاگل است)، پس گارد گرفتنش فقط
  * گیج‌کننده است. قاعده: اکشنی که کاربر را از گفتگو **بیرون نمی‌برد** گارد نمی‌خورد. */
-/* ⚠️ `chat_ask` و `chat_end` هم از v3.95.0 این‌جا هستند و این **اجباری** است، نه
+/* ⚠️ `chat_ask` و `chat_end` هم از v3.96.0 این‌جا هستند و این **اجباری** است، نه
  * تزئینی. هر دو زیرِ خودِ جوابِ گفتگو نشسته‌اند: `chat_ask` کاربر را داخلِ گفتگو نگه
  * می‌دارد (پس گارد گرفتنش بی‌معناست) و `chat_end` **خودش** درِ خروج است — گارد گرفتنش
  * یعنی تپِ «پایان مکالمه» دوباره پیامِ «ادامه می‌دم / بستن گفتگو» بیاورد، دقیقاً همان
  * حلقه‌ی بی‌پایانِ تیکتِ `#TRT-8976388520` (بند ۹ب/۶ ریشه). */
 const CHAT_KEEP_CB = /^(chat:\d+|chat_keep|chat_close(?::\d+)?|chat_ask:\d+|chat_end(?::\d+)?|lremind:[01])$/;
-/* 🎯 نیتِ پشتِ اقدامی که گارد جلویش را گرفت (v3.95.0 — خواسته‌ی صریحِ مالک: «اگر گفتگو
+/* 🎯 نیتِ پشتِ اقدامی که گارد جلویش را گرفت (v3.96.0 — خواسته‌ی صریحِ مالک: «اگر گفتگو
  * با یک دستورِ منوی اصلی بسته شد، بعد از بستن باید جوابِ **همان دستور** بیاید؛ این
  * قاعده را همیشه همه‌جای ربات داشته‌ایم»).
  *
@@ -3434,6 +3562,39 @@ bot.use(async (ctx, next) => {
     // بعدیِ کاربر که فکر می‌کند بیرون آمده یک الماس خرج می‌کند.
     leaveChat(uid, txt ? 'menu' : 'action');
   } catch (e) { logErr('chat exit:', e.message); }
+  return next();
+});
+
+/* 🔒 دروازه‌ی واحدِ همه‌ی دکمه‌ها، پیش از همه‌ی `bot.action`ها.
+ *
+ * خودِ middleware فقط وقتی دخالت می‌کند که یک فلوی معتبر باز باشد. در بقیه‌ی حالت‌ها
+ * کاملاً transparent است، پس callbackهای قدیمی همان قراردادِ قبلی‌شان را حفظ می‌کنند.
+ * دکمه‌ی ریستِ ادمین هم یک ابزارِ بازیابی است و عمداً راهِ خروجِ ادمین می‌ماند. */
+bot.use(async (ctx, next) => {
+  try {
+    const uid = ctx.from?.id;
+    const data = ctx.callbackQuery?.data;
+    const text = ctx.message?.text;
+    if (!uid) return next();
+    if (isAdmin(uid) && (text === L.buttons.resetTest || text === '🔄 ریست ربات (تست)')) return next();
+    if (data && await blockCrossFlowCallback(ctx)) return;
+    // reply keyboard هم «دکمه» است، ولی متنِ آزادِ مرحله‌های ورودی نباید گارد بخورد.
+    if (!text || !FLOW_SWITCH_TEXTS.has(text)) return next();
+    const state = getState(uid);
+    const wanted = flowIntentFor(ctx);
+    if (READING_FLOW_STATES.has(state)) {
+      if (wanted) setIntent(uid, wanted.key, wanted.arg);
+      if (state === 'revealing') { if (await blockDuringDelivering(ctx)) return; }
+      else if (state === 'confirm_pay') { if (await blockDuringPendingReading(ctx)) return; }
+      else if (await blockDuringOpenReading(ctx, wanted?.key, wanted?.arg)) return;
+    }
+    if (PAY_STATES.includes(state) && await blockDuringActivePayment(ctx, wanted?.key, wanted?.arg)) return;
+  } catch (e) {
+    // fail-openِ محدود: اگر خودِ گارد خطا کرد، دکمه‌ی کاربر نباید در سکوت بمیرد.
+    // خطا لاگ می‌شود تا همان روز قابل رصد باشد؛ منطقِ مالیِ پایین‌دست همچنان گاردهای
+    // اتمیکِ خودش را دارد.
+    logErr('central flow guard:', e.message);
+  }
   return next();
 });
 
@@ -3894,7 +4055,7 @@ async function dailyCardV2(ctx, uid, user, today) {
     // نسخه‌ی قبلی این‌جا یک صفحه‌ی بدونِ هیچ قدمِ بعدی می‌ساخت (بند ۹ب/۱). حالا همان
     // پیشنهادهایی می‌آید که شاخه‌ی خواهرش («امروز گرفتی») از قبل داشت.
     track(db, uid, 'daily_ganjineh_empty', { month: user.birth_month });
-    return ctx.reply(L.daily.ganjinehEmpty(monthLabel(user.birth_month)),
+    return ctx.reply(L.daily.ganjinehEmpty(),
       Markup.inlineKeyboard(recoRows(uid, null)));
   }
   // seed قطعی per کاربر per روز: بعد از این لحظه ترتیبِ حوضچه ثابت است، حتی بعد از
@@ -3943,7 +4104,9 @@ bot.action(/^dpick:(\d+)$/, async (ctx) => {
   // اگر ارسال شکست بخورد، استیت به `daily_pick` برمی‌گردد تا کاربر بتواند دوباره بزند.
   await typing(ctx, PACE_M, 'upload_photo');
   try {
-    await sendCardPhoto(ctx, key, L.daily.captionV2(info, monthLabel(month)));
+    // ماهِ تولد عمداً به متن نمی‌رود (تصمیمِ صریحِ مالک ۱۴۰۵/۰۶/۲۴): همچنان کلیدِ انتخابِ
+    // متنِ گنجینه است (`ganjinehText(month, …)` بالا)، ولی نامش چاپ نمی‌شود.
+    await sendCardPhoto(ctx, key, L.daily.captionV2(info));
   } catch (e) {
     logErr('dailyCardV2 photo:', e.message);
     setState(uid, 'daily_pick');   // روز نسوخت؛ همان گرید هنوز معتبر است
@@ -4286,6 +4449,19 @@ bot.action('lucky_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}
 // معنیِ همین را بدهد (بند ۲ج/۶).
 bot.action('reading_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showCatalog(ctx); });
 bot.action('wallet_go', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showWallet(ctx); });
+
+// دکمه‌ی «افزایش ذخایر» زیرِ پیامِ کم‌موجودی. همان صفحه‌ی `wallet_go` را می‌آورد، با یک
+// تفاوت: پیامی که دکمه رویش بود **حذف** می‌شود (خواسته‌ی مالک: هیچ پیامِ بی‌مصرفی روی
+// صفحه نماند). `wallet_go` عمداً بازاستفاده نشد، چون آن یکی زیرِ پیامِ اطلاع‌رسانیِ آپدیت
+// هم هست و حذفِ آن پیام غلط بود — بند ۹ب/۶ ریشه: معنیِ دوم یعنی اکشنِ دوم، نه بازاستفاده.
+// فالبک همان الگوی همیشگی است: تلگرام حذفِ پیامِ قدیمی‌تر از ۴۸ ساعت را رد می‌کند، پس
+// دستِ‌کم دکمه‌ها برداشته می‌شوند تا دکمه‌ی مرده روی صفحه نماند.
+bot.action('wallet_fresh', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.deleteMessage(); }
+  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  return showWallet(ctx);
+});
 
 bot.action('lucky_stop', async (ctx) => {
   const uid = ctx.from.id;
@@ -4843,7 +5019,7 @@ async function showCatalog(ctx, full = false, edit = false) {
 }
 bot.hears(L.buttons.reading, (ctx) => showCatalog(ctx));
 
-/* ☰ دو دستورِ منوی تلگرام (v3.95.0) — جوابِ سؤالِ صریحِ مالک: «آیا راهی هست که بدونِ
+/* ☰ دو دستورِ منوی تلگرام (v3.96.0) — جوابِ سؤالِ صریحِ مالک: «آیا راهی هست که بدونِ
  * حواس‌پرت‌کردنِ کاربر، فقط دکمه‌ی منوی اصلی از همان اول برایش فعال باشد؟»
  *
  * **بله، و راهش کیبوردِ reply نیست.** فرستادنِ `ReplyKeyboardMarkup` تنها راهِ برگرداندنِ
@@ -4918,6 +5094,38 @@ bot.action(/^odepth:(open3|open5)$/, async (ctx) => {
   await ctx.reply(L.reading.askTopic(toneV2For(uid)), { parse_mode: 'Markdown' });
 });
 
+/** دکمه‌های صفحه‌ی «ذخایرت کافی نیست» سرِ انتخابِ اندازه (خواسته‌ی مالک ۱۴۰۵/۰۶/۲۴).
+ *
+ *  به‌جای سه دکمه‌ی عمومیِ ذخایر، اول **فال‌های ارزان‌ترِ همین موضوع که واقعاً می‌تواند
+ *  بخرد** (صعودی)، و در آخر همیشه یک راهِ افزایشِ ذخایر. چرا: کاربری که ده‌کارتی زد و
+ *  پولش نرسید، یک تپ تا یک فالِ **کامل و پرداخت‌شدنی** فاصله دارد؛ فرستادنش به فروشگاه
+ *  تنها راهِ ادامه نیست و گران‌ترین راه است.
+ *
+ *  ⚠️ فیلترِ `price <= balance` خودش اندازه‌های گران‌تر را هم بیرون می‌گذارد (اگر این یکی
+ *  را نمی‌تواند بخرد، بزرگ‌ترش را هم نمی‌تواند)، و شرطِ `size !== spread.size` تضمین
+ *  می‌کند همان فالی که تازه زد بینِ گزینه‌ها نباشد.
+ *
+ *  چرا این‌جا و نه داخلِ `needBalanceRows`: آن یکی پنج صداکننده دارد و هیچ‌کدام «اندازه‌ی
+ *  انتخاب‌شده» را نمی‌شناسند؛ عمومی‌کردنش یعنی صفحه‌های دیگر هم دکمه‌ای بگیرند که کاربر
+ *  را به فالِ دیگری می‌برد. */
+const needBalanceAltRows = (uid, spread) => {
+  const cur = curOf(uid);
+  const balance = getBalance(uid);
+  const rows = [];
+  // موضوع فقط برای چیدمان‌های نسل چهارم تعریف است؛ چیدمانِ بازنشسته یا `open` خواهرِ
+  // ارزان‌تر ندارد و مستقیم به دکمه‌ی افزایشِ ذخایر می‌رسد.
+  if (spread?.topic) {
+    for (const size of [...SIZES_V3].sort((a, b) => a - b)) {
+      if (size === spread.size) continue;
+      const sp = SPREAD_BY_ID[spreadIdOf(spread.topic, size)];
+      if (!sp || sp.price > balance) continue;
+      rows.push([Markup.button.callback(L.buttons.pickSmallerSpread(sp.size, sp.price, cur), `spread:${sp.id}`)]);
+    }
+  }
+  rows.push([Markup.button.callback(L.buttons.topUpCoins(cur), 'wallet_fresh')]);
+  return rows;
+};
+
 /** کسرِ هزینه‌ی یک چیدمان در لحظه‌ی انتخابِ اندازه.
  *  خروجی true = پول کم شد و می‌شود ادامه داد؛ false = کم‌موجودی (پیامش همین‌جا رفت).
  *
@@ -4933,16 +5141,17 @@ async function chargeForSpread(ctx, uid, spread, focusKey) {
   const readingId = payForSpread(uid, spread, focusKey);
   if (!readingId) {
     // پول کم بود: استیت را برگردان (وگرنه کاربر در await_question گیر می‌کند) و پیامِ
-    // کم‌موجودی را با همان سه دکمه‌ی ذخایر نشان بده.
+    // کم‌موجودی را با دکمه‌های **همین موضوع** نشان بده (خواسته‌ی مالک ۱۴۰۵/۰۶/۲۴):
+    // فال‌های ارزان‌ترِ قابلِ خرید، و در آخر راهِ افزایشِ ذخایر.
     setState(uid, 'choose_spread');
     track(db, uid, EVENTS.PAYWALL_SHOWN, { spread: spread.id, price: spread.price, can_afford: false });
     const text = needBalanceText(uid, { type: spread.id, price: spread.price });
-    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceRows(uid, null)) };
-    let shown = false;
-    try { await ctx.editMessageText(text, extra); shown = true; }
-    catch { shown = !!(await ctx.reply(text, extra).catch(() => null)); }
-    if (shown) exposeMoneyCtaStyle(uid);
-    else releaseMoneyCtaStyle(uid);
+    const extra = { ...needBalanceExtra, ...Markup.inlineKeyboard(needBalanceAltRows(uid, spread)) };
+    try { await ctx.editMessageText(text, extra); }
+    catch { await ctx.reply(text, extra).catch(() => null); }
+    // ⚠️ عمداً نه expose و نه release: این صفحه دیگر `rechargeBtn` را رندر نمی‌کند، پس
+    // نه رزروی گرفته شده که آزاد شود و نه treatmentِ آزمایشِ رنگ دیده شده که exposure
+    // بگیرد (بند ۲الف ریشه: exposure یعنی «کاربر treatment را دید»).
     return false;
   }
   patchSession(uid, { readingId });
@@ -6164,7 +6373,7 @@ bot.action(/^chat_close(?::(\d+))?$/, async (ctx) => {
   return replyCanceled(ctx, uid);
 });
 
-/* 🙏 «پایان مکالمه» — دکمه‌ی زیرِ خودِ جواب (v3.95.0، خواسته‌ی صریحِ مالک).
+/* 🙏 «پایان مکالمه» — دکمه‌ی زیرِ خودِ جواب (v3.96.0، خواسته‌ی صریحِ مالک).
  *
  * سه تفاوت با `chat_close` که هر سه عمدی‌اند:
  *   ۱) پیامِ حامل **پاک نمی‌شود**: آن یکی زیرِ پیامِ گارد است (که کارش تمام شده)، این
@@ -6185,7 +6394,7 @@ bot.action(/^chat_end(?::(\d+))?$/, async (ctx) => {
 });
 
 /** یک نوبتِ گفتگو. ترتیبِ قدم‌ها قرارداد است، نه سلیقه (بالای این بلوک).
- * ⚠️ `askedId` از v3.95.0 اختیاری است: دکمه‌ی سؤالِ پیشنهادی `ctx.message` ندارد، و
+ * ⚠️ `askedId` از v3.96.0 اختیاری است: دکمه‌ی سؤالِ پیشنهادی `ctx.message` ندارد، و
  * لنگرِ ریپلایش پیامِ **نقلِ‌قولی** است که خودِ ربات ساخته. بدونِ این آرگومان، جوابِ آن
  * مسیر به هیچ‌چیز ریپلای نمی‌خورد و خطِ گفتگو در چت گم می‌شود. */
 async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}) {
@@ -6320,7 +6529,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      *
      * ⚠️ و اگر هر دو پرچم روشن باشد، **هر دو** دکمه می‌آیند: نیتِ کاربر مالِ خودش است
      * و انتخاب بینشان کارِ ما نیست. */
-    /* 🎯 و از v3.95.0 دو ردیفِ دیگر، با ترتیبی که قرارداد است (بند ۱۰، «ترتیب در خدمتِ
+    /* 🎯 و از v3.96.0 دو ردیفِ دیگر، با ترتیبی که قرارداد است (بند ۱۰، «ترتیب در خدمتِ
      * حس»): اول **ادامه** (سؤالِ پیشنهادی)، بعد نیت‌های تشخیص‌داده‌شده، و **پایانِ
      * مکالمه همیشه آخر** — درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند.
      *
@@ -6434,7 +6643,7 @@ bot.action(/^chat_new:(\d+)$/, async (ctx) => {
   // وگرنه همان درِ ورودِ همیشگی که تازه ساختیم پاک می‌شود.
   return showCatalog(ctx);
 });
-/* 🎯 تپِ **سؤالِ پیشنهادی** (v3.95.0). دقیقاً مثل این است که کاربر همان جمله را تایپ
+/* 🎯 تپِ **سؤالِ پیشنهادی** (v3.96.0). دقیقاً مثل این است که کاربر همان جمله را تایپ
  * کرده باشد، پس عمداً از **همان** `handleChatMessage` رد می‌شود: کسرِ اتمیک، پی‌وال،
  * پارکِ سؤال، ریفاند و ثبتِ تاریخچه هیچ‌کدام کپیِ دوم ندارند (بند ۹ ریشه: مسیرِ پول
  * تک‌منبع می‌ماند).
@@ -7512,6 +7721,56 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
   if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, payId);
 });
 
+/* ✅ «تکمیل پرداخت» زیرِ یادآوریِ فاکتورِ باز (v3.95.0، خواسته‌ی صریحِ مالک).
+ *
+ * **همان فاکتورِ قبلی** دوباره نشان داده می‌شود، نه یک فاکتورِ تازه: هیچ ردیفی ساخته
+ * نمی‌شود، هیچ مبلغی دوباره از کاتالوگ خوانده نمی‌شود، و شماره‌ی پرداخت همان می‌ماند.
+ * پس اگر کاربر قبلاً واریز کرده بود، رسیدش روی همان ردیف می‌نشیند.
+ *
+ * سه کارِ ضروری، به همین ترتیب:
+ *   ۱) پیامِ یادآوری **حذف** می‌شود — کارش تمام شده و ماندنش فقط یک دکمه‌ی کهنه‌ی
+ *      «انصراف» را روی صفحه نگه می‌دارد (خواسته‌ی مالک: پیامِ بی‌مصرف نماند).
+ *   ۲) پیامِ **فاکتورِ قبلی** هم حذف می‌شود، وگرنه دو فاکتورِ زنده در چت می‌ماند و
+ *      `dropInvoiceArtifacts` فقط تازه‌ترین را می‌بندد — یعنی همان سیاه‌چاله‌ی v3.87.0
+ *      از درِ دیگر. مهر بعد از ارسالِ فاکتورِ تازه با شناسه‌ی همان به‌روز می‌شود.
+ *   ۳) استیت و `session.paymentId` برمی‌گردند، تا عکسِ رسیدِ بعدی صاحب داشته باشد.
+ *
+ * ⚠️ فاکتورِ دیگر-باز-نبوده (منقضی، لغوشده، یا رسیدش رسیده) **پیامِ صادقانه** می‌گیرد
+ * نه سکوت (بند ۹ب): دکمه‌ی یادآوری ماه‌ها در چت زنده می‌ماند (بند ۲ج/۶). */
+bot.action(/^pay_resume:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  await ctx.answerCbQuery().catch(() => {});
+  if (starsRail) return;   // این ریل رسید ندارد؛ چرخه‌ی یادآوری هم اصلاً به آن نمی‌رسد
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  // پیامِ یادآوری در هر دو مسیر می‌رود: چه فاکتور زنده باشد چه نه، کارش تمام است.
+  try { await ctx.deleteMessage(); }
+  catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  if (!p || p.user_id !== uid || p.status !== 'pending' || p.step !== 'receipt') {
+    return ctx.reply(L.wallet.invoiceGone(curOf(uid))).catch(() => {});
+  }
+  // پیامِ فاکتورِ قبلی هم برداشته می‌شود تا دقیقاً **یک** فاکتورِ زنده در چت بماند.
+  if (p.invoice_msg_id) {
+    try { await ctx.telegram.deleteMessage(uid, p.invoice_msg_id); }
+    catch {
+      try { await ctx.telegram.editMessageReplyMarkup(uid, p.invoice_msg_id, undefined, undefined); } catch {}
+    }
+  }
+  patchSession(uid, { paymentId: pid });
+  setState(uid, 'pay_receipt');
+  const invMsg = await ctx.reply(
+    L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, pid), curOf(uid)), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        cardCopyRow(),
+        ...starsToggleRow(uid, pid, !!packOf(p)),
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+      ]).reply_markup,
+    }).catch((e) => { logErr('pay_resume invoice pay#' + pid, e.message); return null; });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, pid);
+  track(db, uid, 'invoice_resumed', { payment_id: pid });
+});
+
 /* ⭐ سوییچ به پرداختِ استارز (v3.76.0، فقط-ادمین). فقط رویِ فاکتورِ **بسته‌ای** کار
  * می‌کند (بند بالای `starsToggleRow`). دو کارِ جدا: (۱) پیامِ فاکتورِ تومانی را ادیت
  * می‌کند به متنِ استارزی + دکمه‌ی «برگشت به کارت»، (۲) یک فاکتورِ **نیتیوِ** تلگرام
@@ -8349,16 +8608,29 @@ async function resendReceiptToAdmins(p) {
 /* ⏱ چرخه‌ی عمرِ فاکتورِ کارت‌به‌کارت (v3.74.0، خواسته‌ی صریحِ مالک). فقط ریلِ کارت
  * (`!starsRail` — بالای این فایل) دارد؛ توضیحِ کامل کنارِ `INVOICE_REMINDER_SEC`. */
 
-// ۱ ساعت بعد از صدور: یک پیامِ **تازه** با دکمه‌ی همیشگیِ انصراف (بدونِ کالبکِ جدید).
+/* ۱۵ دقیقه بعد از صدور: یک پیامِ **تازه** با دو دکمه — «تکمیل پرداخت» اول، «انصراف» دوم.
+ *
+ * 🎯 هدفِ این پیام درآمد است، نه گرفتنِ تکلیف (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۶/۲۴). تا
+ * v3.94.x تنها دکمه‌اش «انصراف» بود، یعنی تنها اقدامِ ممکنِ کاربر **ترکِ خرید**؛ و متن
+ * هم نمی‌گفت فاکتور بابتِ چه چیزی و با چه مبلغی بوده. حالا متن همان سه چیزی را می‌گوید
+ * که تصمیم را می‌سازد (چه می‌خری، چقدر، بعدش چه می‌شود) و اقدامِ اصلی اولِ ردیف است.
+ *
+ * ⚠️ مبلغ و بسته از **خودِ ردیف** خوانده می‌شوند نه از کاتالوگ (بند ۲ج/۵ ریشه): فاکتورِ
+ * صادرشده با قیمتِ همان لحظه معتبر می‌ماند، حتی اگر کاتالوگ بعدش عوض شده باشد. */
 async function sendInvoiceReminder(p) {
   try {
     stmts.setInvoiceReminded.run(p.id);   // قبل از ارسال: شکستِ ارسال هرگز نباید دوباره‌کاری بسازد
-    await bot.telegram.sendMessage(p.user_id, L.wallet.invoiceReminder, {
-      reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)]]).reply_markup,
+    const text = L.wallet.invoiceReminder(p.amount, curOf(p.user_id), invoicePurchaseFor(p.user_id, p.id));
+    await bot.telegram.sendMessage(p.user_id, text, {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.completePayment, `pay_resume:${p.id}`)],
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
+      ]).reply_markup,
     });
     // پیامِ مالی هرگز نباید از تایم‌لاین غایب باشد (بند ۲الف ریشه) — این از bot.telegram
     // می‌رود، میدل‌ورِ جرنی رپش نمی‌کند.
-    logPush(db, p.user_id, L.wallet.invoiceReminder, { label: 'یادآوریِ فاکتورِ باز' });
+    logPush(db, p.user_id, text, { label: 'یادآوریِ فاکتورِ باز' });
     track(db, p.user_id, 'invoice_reminded', { payment_id: p.id });
   } catch (e) { logErr('invoice reminder pay#' + p.id, e.message); }
 }
@@ -9520,7 +9792,7 @@ function onLaunched() {
   installMenuButton();
 }
 
-/* ☰ نصبِ دکمه‌ی منوی کنارِ کادرِ تایپ (v3.95.0). یک بار در هر بوت، و fail-safe:
+/* ☰ نصبِ دکمه‌ی منوی کنارِ کادرِ تایپ (v3.96.0). یک بار در هر بوت، و fail-safe:
  * شکستش هیچ مسیرِ محصولی را لمس نمی‌کند (بدترین حالت = رفتارِ دیروز).
  * ⚠️ `setChatMenuButton` بدونِ `chatId` **پیش‌فرضِ سراسریِ ربات** را می‌گذارد، پس
  * کاربرِ فعلی هم بدونِ هیچ اقدامی آن را می‌گیرد؛ لازم نیست کسی `/start` بزند.

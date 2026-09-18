@@ -44,7 +44,12 @@ console.log('۱) مهاجرت‌ها و ثابت‌ها');
 for (const col of ['invoice_issued_at', 'invoice_msg_id', 'invoice_reminded_at']) {
   ok(new RegExp(`ALTER TABLE payments ADD COLUMN ${col}`).test(SRC), `ستونِ \`${col}\` افزایشی اضافه شد`);
 }
-ok(/const INVOICE_REMINDER_SEC = 3600;/.test(SRC), 'یادآوری دقیقاً ۱ ساعت است');
+// ⚠️ پنجره‌ی یادآوری از **خودِ سورس** خوانده می‌شود و فیکسچرها با همان اجرا می‌شوند،
+// نه با یک عددِ کپی‌شده: وگرنه تغییرِ این ثابت یک ادعا را قرمز می‌کرد و بقیه‌ی بلوکِ
+// رفتاری بی‌صدا روی پنجره‌ی قدیمی تست می‌ماند (گاردِ آینه‌ای، بند ۶ب ریشه).
+const REM_SEC = Number((SRC.match(/const INVOICE_REMINDER_SEC = (\d+);/) || [])[1]);
+// ۱۵ دقیقه (v3.95.0، خواسته‌ی صریحِ مالک؛ بود ۱ ساعت). پین شده تا جابه‌جاییِ سهوی دیده شود.
+ok(REM_SEC === 900, `یادآوری دقیقاً ۱۵ دقیقه است (${REM_SEC})`);
 ok(/const INVOICE_EXPIRE_SEC\s*=\s*24 \* 3600;/.test(SRC), 'انقضا دقیقاً ۲۴ ساعت است');
 ok(SRC.indexOf('const INVOICE_REMINDER_SEC') < SRC.indexOf('const INVOICE_EXPIRE_SEC'),
   'و یادآوری همیشه زودتر از انقضا تعریف/اجرا می‌شود (۱ ساعت < ۲۴ ساعت)');
@@ -122,16 +127,16 @@ if (claimSql && remSql && expSql) {
   const fresh = Number(insertAmount.run(1).lastInsertRowid);
   claim.run(1000, fresh);
   issueAt(fresh, 300);
-  ok(remCand.all(3600).every(r => r.id !== fresh), 'فاکتورِ ۵دقیقه‌ای هنوز کاندیدِ یادآوری نیست');
+  ok(remCand.all(REM_SEC).every(r => r.id !== fresh), 'فاکتورِ ۵دقیقه‌ای هنوز کاندیدِ یادآوری نیست');
   ok(expCand.all(86400).every(r => r.id !== fresh), 'و کاندیدِ انقضا هم نیست');
 
   // ۲) فاکتورِ ۲ساعته: کاندیدِ یادآوری هست، بعد از یادآوری دیگر نیست؛ کاندیدِ انقضا نیست
   const twoHr = Number(insertAmount.run(2).lastInsertRowid);
   claim.run(2000, twoHr);
   issueAt(twoHr, 2 * 3600);
-  ok(remCand.all(3600).some(r => r.id === twoHr), 'فاکتورِ ۲ساعته کاندیدِ یادآوری است');
+  ok(remCand.all(REM_SEC).some(r => r.id === twoHr), 'فاکتورِ ۲ساعته کاندیدِ یادآوری است');
   setReminded.run(twoHr);
-  ok(remCand.all(3600).every(r => r.id !== twoHr), 'و بعد از یادآوری دیگر کاندیدا نیست (write-once)');
+  ok(remCand.all(REM_SEC).every(r => r.id !== twoHr), 'و بعد از یادآوری دیگر کاندیدا نیست (write-once)');
   ok(expCand.all(86400).every(r => r.id !== twoHr), 'و هنوز کاندیدِ انقضا نیست (فقط ۲ ساعت گذشته)');
 
   // ۳) فاکتورِ ۲۵ساعته: کاندیدِ انقضا؛ حتی بدونِ یادآوریِ موفق (شکستِ ارسال) هم منقضی می‌شود
@@ -139,7 +144,7 @@ if (claimSql && remSql && expSql) {
   claim.run(3000, old);
   issueAt(old, 25 * 3600);
   ok(expCand.all(86400).some(r => r.id === old), 'فاکتورِ ۲۵ساعته کاندیدِ انقضاست');
-  ok(remCand.all(3600).some(r => r.id === old), 'و چون یادآوری هم نگرفته، همچنان کاندیدِ یادآوری هم هست (استقلالِ دو کوئری)');
+  ok(remCand.all(REM_SEC).some(r => r.id === old), 'و چون یادآوری هم نگرفته، همچنان کاندیدِ یادآوری هم هست (استقلالِ دو کوئری)');
   setStatus.run('canceled', old);
   ok(expCand.all(86400).every(r => r.id !== old), 'بعد از انقضا دیگر کاندیدِ خودِ همین کوئری نیست (status از pending خارج شد)');
 
@@ -148,14 +153,14 @@ if (claimSql && remSql && expSql) {
   claim.run(4000, waiting);
   issueAt(waiting, 48 * 3600);
   setStatus.run('waiting_review', waiting);
-  ok(remCand.all(3600).every(r => r.id !== waiting) && expCand.all(86400).every(r => r.id !== waiting),
+  ok(remCand.all(REM_SEC).every(r => r.id !== waiting) && expCand.all(86400).every(r => r.id !== waiting),
     'رسیدِ ثبت‌شده (waiting_review) با ۴۸ ساعت سن هم لمس نمی‌شود');
 
   const approved = Number(insertAmount.run(5).lastInsertRowid);
   claim.run(5000, approved);
   issueAt(approved, 48 * 3600);
   setStatus.run('approved', approved);
-  ok(remCand.all(3600).every(r => r.id !== approved) && expCand.all(86400).every(r => r.id !== approved),
+  ok(remCand.all(REM_SEC).every(r => r.id !== approved) && expCand.all(86400).every(r => r.id !== approved),
     'پرداختِ تأییدشده (approved) هم لمس نمی‌شود');
 
   // ۵) رسیدِ دیررسیده روی ردیفِ منقضی‌شده: مسیرِ همیشگیِ احیا (CANCELED_RECOVERY_SEC،
@@ -203,7 +208,7 @@ if (claimSql && remSql && expSql) {
   const twoHr = mkOld(102, 2 * 3600);
   dbm.prepare('UPDATE payments SET invoice_reminded_at=unixepoch() WHERE id=?').run(twoHr);
   const mutRem1 = remSql.replace(/ AND invoice_reminded_at IS NULL/, '');
-  ok(dbm.prepare(mutRem1).all(3600).some(r => r.id === twoHr),
+  ok(dbm.prepare(mutRem1).all(REM_SEC).some(r => r.id === twoHr),
     'جهش «reminded_at IS NULL حذف شود» ردیفِ از قبل یادآوری‌شده را دوباره کاندیدا می‌کند');
 
   // جهش ۳: مقایسه‌ی برعکس (> به‌جای <) → فاکتورِ **تازه** هم فوراً «منقضی» به‌حساب می‌آید
@@ -211,6 +216,60 @@ if (claimSql && remSql && expSql) {
   const mutExp2 = expSql.replace('invoice_issued_at < unixepoch()', 'invoice_issued_at > unixepoch()');
   ok(dbm.prepare(mutExp2).all(86400).some(r => r.id === fresh),
     'جهشِ برعکس‌کردنِ علامتِ مقایسه یک فاکتورِ ۱دقیقه‌ای را هم کاندیدِ انقضا می‌کند (ادعای درست این را رد می‌کرد)');
+}
+
+/* ══ ۷) یادآوری: دو دکمه و کپیِ کانورژن‌محور (v3.95.0) ══════════════════════
+
+   خواسته‌ی صریحِ مالک: «هدفِ این پیام باید تبدیلِ کاربرِ پرداخت‌نکرده به مشتری باشد،
+   نه سوق دادنش به انصراف.» تا v3.94.x تنها دکمه‌ی زیرِ یادآوری «انصراف» بود.
+
+   ⚠️ ادعاها عمداً **رفتاری**‌اند نه رجکسیِ صرف: خودِ متنِ locale رندر می‌شود و با
+   مبلغِ واقعی مقایسه می‌شود، وگرنه یک `invoiceReminder`ِ همیشه-خالی همه را پاس می‌کرد
+   (بند ۶ب-۲ ریشه: هر ادعای منفی یک کنترلِ مثبت لازم دارد). */
+console.log('\n۷) یادآوری: دو دکمه و کپیِ کانورژن‌محور');
+{
+  const rem = bodyOf('async function sendInvoiceReminder(p) {');
+  const iDone = rem ? rem.indexOf('pay_resume:${p.id}') : -1;
+  const iCancel = rem ? rem.indexOf('pay_cancel:${p.id}') : -1;
+  ok(iDone > 0, 'یادآوری دکمه‌ی «تکمیل پرداخت» دارد (`pay_resume`)');
+  ok(iCancel > 0, 'و دکمه‌ی «انصراف» هم سرِ جایش ماند');
+  ok(iDone > 0 && iCancel > 0 && iDone < iCancel,
+    'و اقدامِ اصلی **اولِ** ردیف است، نه انصراف (ترتیب در خدمتِ حس — بند ۱۰ ریشه)');
+  // مبلغ و بسته از خودِ ردیف، نه از کاتالوگ (بند ۲ج/۵: فاکتورِ صادرشده قیمتش را نگه می‌دارد).
+  ok(rem ? /L\.wallet\.invoiceReminder\(p\.amount, curOf\(p\.user_id\), invoicePurchaseFor\(p\.user_id, p\.id\)\)/.test(rem) : false,
+    'متنِ یادآوری مبلغ و بسته را از **خودِ ردیف** می‌گیرد، نه از کاتالوگ');
+  ok(rem ? !/COIN_PACKAGES|PACKAGE_BY_KEY/.test(rem) : false,
+    'کنترلِ معکوس: هیچ‌جای این تابع سراغِ کاتالوگ نمی‌رود');
+
+  // هندلرِ «تکمیل پرداخت»: همان فاکتور، نه یک فاکتورِ تازه.
+  const resume = bodyOf('bot.action(/^pay_resume:(\\d+)$/', '\n});');
+  ok(!!resume, 'هندلرِ `pay_resume` وجود دارد');
+  ok(resume ? !/claimAmount|INSERT INTO payments|openPaymentRow/.test(resume) : false,
+    '**هیچ فاکتورِ تازه‌ای ساخته نمی‌شود** — همان ردیفِ قبلی دوباره نشان داده می‌شود');
+  ok(resume ? /p\.status !== 'pending' \|\| p\.step !== 'receipt'/.test(resume) : false,
+    'فقط فاکتورِ زنده احیا می‌شود (رسیدِ ثبت‌شده و پرداختِ تأییدشده لمس نمی‌شوند)');
+  ok(resume ? /p\.user_id !== uid/.test(resume) : false, 'مالکیتِ رکورد چک می‌شود');
+  ok(resume ? /L\.wallet\.invoiceGone\(/.test(resume) : false,
+    'فاکتورِ دیگر-باز-نبوده پیامِ صادقانه می‌گیرد، نه سکوت (بند ۹ب ریشه)');
+  ok(resume ? /setState\(uid, 'pay_receipt'\)/.test(resume) && /patchSession\(uid, \{ paymentId: pid \}\)/.test(resume) : false,
+    'کاربر دوباره در حالتی می‌نشیند که رسیدش صاحب دارد');
+  ok(resume ? /ctx\.deleteMessage\(\)/.test(resume) : false, 'پیامِ یادآوری پاک می‌شود (پیامِ بی‌مصرف نمی‌ماند)');
+  // ⚠️ شرطِ گارد هم پین می‌شود، نه فقط وجودِ خطِ حذف: جهشِ `if (false)` خطِ حذف را
+  // سرِ جایش نگه می‌داشت و از یک ادعای صرفاً وجودی سبز رد می‌شد («کد هست» ≠ «کد اجرا
+  // می‌شود» — همان تله‌ی ثبت‌شده‌ی بند ۲و/۶ب ریشه).
+  ok(resume ? /if \(p\.invoice_msg_id\) \{/.test(resume) && /deleteMessage\(uid, p\.invoice_msg_id\)/.test(resume) : false,
+    'و پیامِ فاکتورِ **قبلی** هم پاک می‌شود، وگرنه دو فاکتورِ زنده در چت می‌ماند');
+  ok(resume ? /stmts\.setInvoiceMsgId\.run\(invMsg\.message_id, pid\)/.test(resume) : false,
+    'شناسه‌ی فاکتورِ تازه ثبت می‌شود تا انصراف/انقضا هنوز چیزی برای بستن داشته باشد');
+  ok(resume ? /if \(starsRail\) return;/.test(resume) : false, 'ریلِ استارز اصلاً واردِ این مسیر نمی‌شود');
+
+  // رندرِ واقعیِ متن در هر چهار زبان: باید تابع باشد و مبلغ را واقعاً چاپ کند.
+  for (const loc of ['fa', 'ru', 'pt', 'es']) {
+    const src = readFileSync(`bots/tarot/locales/${loc}.js`, 'utf8');
+    ok(/invoiceReminder: \(amount, cur, purchase = null\) =>/.test(src),
+      `locale «${loc}»: یادآوری یک **تابع** است (مبلغ و بسته را می‌گیرد)`);
+    ok(/completePayment:/.test(src), `locale «${loc}»: دکمه‌ی «تکمیل پرداخت» تعریف شده`);
+  }
 }
 
 /* ══ نتیجه ═══════════════════════════════════════════════════════════════ */

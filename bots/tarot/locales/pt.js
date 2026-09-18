@@ -274,6 +274,7 @@ export default {
     dailyReminderOffYes: 'Sim, pode desligar',
     copyCode: '📋 Copiar o cupom',
     cancel: '❌ Cancelar',
+    completePayment: '✅ Concluir pagamento',
     backToMenu: '◀️ Voltar ao menu',
     backToInvoice: '◀️ Voltar ao pedido',
     backOneStep: '◀️ Voltar',
@@ -346,6 +347,11 @@ export default {
     // botão do tamanho: é aqui que o preço é definido, por isso ➖ e o valor do débito
     startSize: (size, price, cur) => `Começar leitura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
     topicSize: (size, price, cur) => `${cardsN(size)} (➖${moneyTight(price, cur)})`,
+    // Os dois botões da tela «não dá»: primeiro a leitura mais barata que cabe no saldo
+    // (com verbo, pra ficar claro que é um caminho e não a etiqueta do preço), e por
+    // último sempre o reforço de diamantes.
+    pickSmallerSpread: (size, price, cur) => `Escolher leitura de ${cardsN(size)} (➖${moneyTight(price, cur)})`,
+    topUpCoins: (cur) => `💎 Aumentar ${purse(cur)}`,
     allSpreadsV2: '🗂 Todas as leituras',
     /* 🎲 carta da sorte: diamantes grátis uma vez por dia.
      * «Carta da sorte» é uma coleção viva em português («biscoito da sorte», «número da
@@ -460,10 +466,11 @@ export default {
     // As cartas simplesmente estão prontas, e a ação é da pessoa.
     pickPrompt: 'Fecha os olhos um segundo e pensa no dia que está pela frente 🌬️',
     pickHint: 'As cartas estão prontas. Escolha aquela que te chamar 👇',
-    captionV2: (card, monthFa) => `🎴 Carta do dia de ${monthFa}:\n«${card.fa}»\n\nToque na imagem pra virar a carta ✨`,
+    // O signo não é citado de propósito (ver comentário no fa.js): é só a chave dos dados.
+    captionV2: (card) => `🎴 A sua carta de hoje:\n«${card.fa}»\n\nToque na imagem pra virar a carta ✨`,
     needBirthMonth: 'Pra carta do dia ser sua mesmo, preciso do seu signo 🌿',
     // Honesto e sem plano B via LLM: a carta do dia nunca é gerada por modelo.
-    ganjinehEmpty: (monthFa) => `A carta do dia de ${monthFa} ainda não está pronta 🌙 Chega muito em breve.`,
+    ganjinehEmpty: () => 'A sua carta de hoje ainda não está pronta 🌙 Chega muito em breve.',
     caption: (card, reversed) => `🎴 A sua carta de hoje:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToque na imagem pra virar a carta ✨`,
     alreadyUsed: 'A sua carta de hoje já está aberta 🌙 É uma por dia; amanhã volte de novo.\n\nMas se a cabeça não desliga e você quer olhar mais fundo, uma leitura completa é outra história:',
     streak: (n) => `🔥 ${fmt(n)} ${plural(n, ['dia seguido', 'dias seguidos'])}! A cada dia a sua ligação com as cartas fica mais forte.`,
@@ -769,7 +776,10 @@ export default {
     refundedOnCancel: (price, cur) => `Os ${moneyTight(price, cur)} desta leitura voltaram pra você ✅`,
     // ⚠️ vai como HTML (caixa de citação), então `name` e `spreadFa` chegam com esc().
     needBalance: ({ name, balance, spreadFa, price, cur }) =>
-      `Quase lá${name ? `, ${name}` : ''}! Pra virar as cartas, falta pouco.\n\n` +
+      // 🐛 Antes dizia «pra virar as cartas»: sobra do paywall antigo, quando as cartas já
+      // estavam escolhidas. Hoje o débito acontece na escolha do tamanho, ou seja, nenhuma
+      // carta foi puxada ainda (relato do dono, 1405/06/24).
+      `Quase lá${name ? `, ${name}` : ''}! Pra esta leitura ainda falta um pouco.\n\n` +
       `${purseQuote(balance, cur)}\n\n` +
       `A leitura «${spreadFa}» custa ${moneyTight(price, cur)}`,
     resumeAfterRecharge: 'Saldo garantido ✅\n\nAs suas cartas continuam no mesmo lugar 🔮 Bora virar?',
@@ -922,7 +932,9 @@ export default {
   },
 
   wallet: {
-    info: (balance, cur) => (cur?.on ? `💠 ${purseLine(balance, cur)}` : `💠 Sua ${purse(cur)}: *${moneyLong(balance, cur)}*`),
+    info: (balance, cur) => (cur?.on
+      ? `💠 ${purseLine(balance, cur)}\n\nPra aumentar seus ${purse(cur)}, é só escolher uma das opções abaixo:`
+      : `💠 Sua ${purse(cur)}: *${moneyLong(balance, cur)}*`),
     // ---- Economia de diamantes: três pacotes, sem o passo «quanto quer colocar?» ----
     // A pessoa não digita número nem faz conta: um toque e o pagamento aparece.
     // Quanto maior o pacote, mais barato sai cada diamante (escada de ARPU).
@@ -975,7 +987,16 @@ export default {
     // ⏱ Ciclo de vida do pedido (v3.74.0) — também inalcançável aqui (só trilho de
     // transferência, ver acima), mas a chave precisa existir por causa da forma única
     // da locale (check-locale-shape).
-    invoiceReminder: '⏳ Você ainda tem um pedido de pagamento aberto!\n\nConclua o pagamento ou cancele com o botão abaixo.',
+    // Lembrete 15 minutos depois. O objetivo é converter, então o texto traz a compra e
+    // o valor, e o primeiro botão devolve o mesmo pedido (ver comentário no fa.js).
+    invoiceReminder: (amount, cur, purchase = null) =>
+      `⏳ Seu pedido ainda está aberto, falta só um passo!\n\n`
+      + (purchase
+        ? `🧾 Compra${packName(purchase.pack) ? ` do pacote *${packName(purchase.pack)}*` : ''}: `
+          + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n`
+        : '')
+      + `💰 Valor: *${fmt(amount)}*\n\n`
+      + `Conclua o pagamento e, assim que for confirmado, o saldo entra na hora ✨`,
     invoiceExpired: (amount, cur, purchase = null) =>
       `⌛️ Este pedido expirou\n\n`
       + (purchase
@@ -984,6 +1005,7 @@ export default {
         : '')
       + `Valor: *${fmt(amount)}*\n\nSe ainda quiser, comece de novo pelo menu de recarga.`,
     // Alternador de Stars (v3.76.0) inalcançável aqui (este trilho já é só Stars).
+    invoiceGone: (cur) => `⌛️ Este pedido não está mais aberto.\n\nSe ainda quiser, comece de novo pelo menu de ${purse(cur)}.`,
     invoiceStars: (stars, purchase, cur) =>
       `🧾 Pedido (pagamento com Stars)\n\n`
       + (purchase ? `Compra do pacote *${packName(purchase.pack)}*: *${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n` : '')
@@ -1104,6 +1126,7 @@ export default {
     generic: 'Deu um probleminha técnico 🙏 Tente de novo.',
     stateLost: 'A sua sessão venceu; comece de novo pelo menu principal 🌙',
     openInvoice: 'Você tem um pedido de pagamento em aberto 🧾 Termine ou cancele ele primeiro, e aí a gente segue.',
+    openPaymentFlow: 'Você tem uma compra pela metade 🧾 Primeiro escolha seu pacote ou cancele pelo botão abaixo.',
     voiceTooLong: (sec) => `Não consigo receber um áudio com mais de ${fmt(sec)} segundos 🙏 Mande mais curto ou escreva a sua pergunta.`,
     packRetired: 'Esse pacote não está mais disponível 🙏 Escolha um dos de baixo 👇',
   },
