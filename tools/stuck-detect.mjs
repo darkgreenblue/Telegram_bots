@@ -11,8 +11,8 @@
 //
 // **قاعده‌ای که از آن‌جا آمد:** «کاربر در استیتِ X پارک است» یک عکسِ لحظه‌ای است و
 // معنیِ محصولی ندارد؛ «کاربر یک صفحه را چهار بار در دو ساعت دید» یک **الگوی رفتاری**
-// است. تنها منبعی که الگوی رفتاری دارد جدولِ journey است (رویدادِ `view` با کلیدِ
-// صفحه). پس این تشخیص از همان می‌خواند، نه از `users.state`.
+// است. تنها منبعی که الگوی رفتاری دارد جدولِ journey است (رویدادهای `view` و `act`،
+// یعنی هم صفحه و هم اقدامِ قبلش). پس این تشخیص از همان می‌خواند، نه از `users.state`.
 //
 // ═══ و چرا فقط به مالک خبر می‌دهد ═══
 //
@@ -74,16 +74,28 @@ export const IGNORED_SCREENS = new Set(['content']);
  * shared/analytics.js. `adm` وقتی ۱ است که کاربر ادمین/تستر باشد.
  * ترتیب با `id` است نه `created_at`: ثانیه‌ی یکسان در یک ثانیه چند رویداد دارد و
  * «قدمِ قبلی» بدونِ ترتیبِ قطعی بی‌معنی می‌شود. */
-const SQL_VIEWS = `
-  SELECT id, user_id AS uid, json_extract(props, '$.k') AS k, created_at AS ts
+const SQL_JOURNEY = `
+  SELECT id, user_id AS uid, event,
+    json_extract(props, '$.k') AS k,
+    json_extract(props, '$.a') AS a,
+    json_extract(props, '$.d') AS d,
+    created_at AS ts
   FROM events
-  WHERE event = 'view'
+  WHERE event IN ('view', 'act')
     AND created_at >= ?
     AND COALESCE(json_extract(props, '$.adm'), 0) = 0
     AND user_id IS NOT NULL
-    AND json_extract(props, '$.k') IS NOT NULL
+    AND (event <> 'view' OR json_extract(props, '$.k') IS NOT NULL)
+    AND (event <> 'act' OR json_extract(props, '$.a') IS NOT NULL)
   ORDER BY id
 `;
+
+// `/menu` یک دستورِ صریح برای نمایش دوباره‌ی همین صفحه‌ی ادامه است؛ تکرارِ آن توسطِ
+// کاربر «خروجیِ گیرکرده» نیست. این استثنا عمداً بسیار باریک است: هیچ callback یا
+// دستورِ دیگری را نادیده نمی‌گیریم، پس دکمه‌ای که به‌اشتباه همان صفحه را برمی‌گرداند
+// همچنان با همین ناظر دیده می‌شود.
+const isExplicitMenuCommand = (r) => r?.event === 'act' && r.a === 'cmd'
+  && /^\/menu(?:@[A-Za-z0-9_]+)?$/i.test(String(r.d || ''));
 
 /** بیشترین تعدادِ بازدید در یک پنجره‌ی `windowS` ثانیه‌ای (پنجره‌ی لغزان روی زمان‌های
  *  مرتب). خروجی = «فشرده‌ترین خوشه»، که همان چیزی است که «حلقه» را می‌سازد؛ مجموعِ
@@ -103,10 +115,11 @@ export function maxBurst(tsList, windowS) {
  *  بتواند دیتابیسِ در-حافظه بدهد و این فایل هیچ وابستگیِ npm نگیرد. */
 export function findStuckScreens(db, { now = Math.floor(Date.now() / 1000), cfg = STUCK } = {}) {
   const since = now - cfg.LOOKBACK_H * 3600;
-  const rows = db.prepare(SQL_VIEWS).all(since);
+  const rows = db.prepare(SQL_JOURNEY).all(since);
 
-  // (۱) ردیف‌ها را per کاربر جمع کن. چون به ترتیبِ id آمده‌اند، «قدمِ قبلی» همان
-  //     عنصرِ قبلی در همین آرایه است و هیچ join دومی لازم نیست.
+  // (۱) همه‌ی رویدادهای لازم را per کاربر جمع کن. «act» هم لازم است: وگرنه یک
+  //     دستورِ آگاهانه‌ی /menu که همان صفحه را بازمی‌کشد، از چهار view پیاپی قابلِ
+  //     تشخیص نیست. ترتیب با id قطعی است و هیچ join دومی لازم نیست.
   const byUser = new Map();
   for (const r of rows) {
     let a = byUser.get(r.uid);
@@ -114,16 +127,20 @@ export function findStuckScreens(db, { now = Math.floor(Date.now() / 1000), cfg 
     a.push(r);
   }
 
-  // (۲) per کاربر، دنباله را به **رشته‌های پیاپیِ** یک صفحه بشکن. هر رشته یک نامزدِ
+  // (۲) per کاربر، فقط viewها را به **رشته‌های پیاپیِ** یک صفحه بشکن. نمایش‌هایی که
+  //     بلافاصله پاسخِ /menu هستند از نامزدها کنار می‌روند؛ بقیه‌ی actionها عمداً
+  //     رشته را نمی‌شکنند تا loop واقعیِ «تپ ⟶ همان صفحه» پنهان نشود.
+  //     هر رشته یک نامزدِ
   //     حلقه است؛ صفحه‌ای که وسطش بیاید رشته را می‌بندد، چون یعنی کاربر پیشرفت کرد.
   const perScreen = new Map(); // k → { users:Set, views, lastTs, prev:Map }
   for (const [uid, list] of byUser) {
-    for (let i = 0; i < list.length;) {
-      const k = list[i].k;
+    const views = list.filter((r, i) => r.event === 'view' && !isExplicitMenuCommand(list[i - 1]));
+    for (let i = 0; i < views.length;) {
+      const k = views[i].k;
       let j = i;
-      while (j < list.length && list[j].k === k) j++;
-      const run = list.slice(i, j);
-      const prev = i > 0 ? list[i - 1].k : '';
+      while (j < views.length && views[j].k === k) j++;
+      const run = views.slice(i, j);
+      const prev = i > 0 ? views[i - 1].k : '';
       i = j;
       if (IGNORED_SCREENS.has(k)) continue;
       // رشته‌ی پیاپی لازم است ولی کافی نیست: چهار تکرار در سه روز حلقه نیست.
