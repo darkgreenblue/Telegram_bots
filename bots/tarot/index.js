@@ -72,6 +72,7 @@ import {
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
   cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
+  CHAT_FLOOR_CHARS, floorApplies,
 } from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -425,7 +426,39 @@ const CHAT_STATE_GUARD = true;
 // گفتگو، ریپلای‌خورده به پایانِ فال. رول‌بک: `false` ⟵ فقط پیامِ همیشگی.
 const CHAT_CLOSE_FLAG  = true;
 const CHAT_ORPHAN_SEC  = 180;  // سنِ لازم برای ریفاندِ سؤالِ بی‌جواب (کوتاه‌تر = ریفاندِ کاربرِ منتظر)
-const CHAT_NUDGE_TURN  = 12;   // نادجِ «تصمیم مالِ خودته»، یک بار در هر گفتگو
+/* 🧼 فقط **آخرین** پیامِ گفتگو دکمه دارد (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۶/۲۷).
+ *
+ * چرا: تا امروز هر جوابِ گفتگو ردیفِ کاملِ دکمه‌هایش را برای همیشه نگه می‌داشت، پس بعد
+ * از ده نوبت ده پیام بالای چت هرکدام یک «سؤالِ پیشنهادی» و یک «پایان مکالمه» داشتند.
+ * تپ روی برچسبِ نوبتِ سوم یعنی پرسیدنِ سؤالی که جوابش هفت نوبت قبل داده شده — و یک
+ * الماس بابتش.
+ *
+ * ⚠️ پیامِ **پیشنهادِ گفتگو** (`chat:<rid>:o` تهِ فال) عمداً دست‌نخورده می‌ماند: آن یک
+ * درِ ورود است نه یک دکمه‌ی وسطِ گفتگو، و v3.88.0 صریحاً جمعش کرد به یک دکمه تا ماه‌ها
+ * بعد هم باز بماند. تپش وسطِ گفتگو هیچ هزینه‌ای ندارد (همان گفتگو را باز می‌کند). */
+const CHAT_LAST_ONLY   = true;
+/* 🪫 کفِ محتوا (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۶/۲۷): «جوابِ توخالی نباید یک الماس بگیرد».
+ *
+ * سه چیز با هم، و ترتیبشان قرارداد است:
+ *   ۱) **یک** تلاشِ تعمیرِ **آگاه** — همان مدل، همان کانتکست، به‌علاوه‌ی یک تذکرِ صریح
+ *      که جوابِ قبلی توخالی بود. یک تلاش، نه چهار.
+ *   ۲) اگر باز هم زیرِ کف بود، جواب **تحویل می‌شود** ولی **الماس برمی‌گردد**.
+ *   ۳) رویدادِ افزایشیِ `chat_thin` تا داشبورد بتواند بگوید این عدد بالا می‌رود یا نه.
+ *
+ * ⚠️ چرا کف در `validate` **نرفت** (مسیرِ ساده‌تر و وسوسه‌انگیزتر): آن‌وقت هر جوابِ لاغر
+ * کلِ `CHAT_PLAN` را می‌سوزاند (چهار فراخوانی، تا ~۸ ثانیه تأخیرِ اضافه) و — بدتر —
+ * **کور** re-roll می‌کرد: مدل هیچ‌وقت نمی‌فهمید چرا جوابش رد شد. این همان الگوی
+ * ثبت‌شده‌ی `repair.js` است: تعمیرِ نقطه‌ایِ آگاه، دقیقاً یک فراخوانی، به‌جای بازتولیدِ
+ * کور (v3.6.4: «۸ برابر ارزان‌تر و ۹ برابر سریع‌تر»).
+ *
+ * ⚠️ و ریفاند **بی‌صدا** است: هیچ پیامی به کاربر نمی‌رود. بند ۹ب-۴ ریشه صریح است —
+ * «تشخیص و ترمیم می‌توانند خودکار باشند؛ ارتباط با کاربر هرگز». پیامِ «جوابم ضعیف بود،
+ * پولت برگشت» هم نقصِ خودمان را تبلیغ می‌کند و هم درِ بازی‌کردن با سیستم را باز.
+ *
+ * 📌 خاصیتِ جانبیِ آگاهانه: `refunded=1` روی ردیفِ سؤال یعنی سهمیه‌ی «سؤالِ اول رایگان»
+ * هم برمی‌گردد (`chatAsked` فقط `refunded=0` را می‌شمارد). سخاوتِ اضافه است، در جهتِ
+ * درست، و از یک معنیِ دومِ ستون بهتر است. */
+const CHAT_FLOOR       = true;
 const CHAT_MAX_TOKENS  = 500;
 /* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
  *
@@ -1934,6 +1967,18 @@ const stmts = {
    * شرط **داخلِ خودِ UPDATE** است، نه یک `if` در جاوااسکریپت، چون مسئله یک مسابقه است. */
   claimFollowUp: db.prepare("UPDATE chat_messages SET follow_up_used=1 WHERE id=? AND user_id=? AND role='assistant' AND follow_up<>'' AND follow_up_used=0"),
   chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
+  /* 🧼 «فقط آخرین پیام دکمه دارد» (v3.100.0، خواسته‌ی صریحِ مالک).
+   *
+   * ستونِ `tg_msg_id` روی ردیفِ `assistant` تا امروز **همیشه صفر** نوشته می‌شد و هیچ
+   * خواننده‌ای نداشت (فقط نقشِ `pending` از آن استفاده می‌کرد)، پس این قابلیت بدونِ هیچ
+   * مهاجرتی سوار شد — شناسه‌ی پیامِ خودِ جواب همان‌جا می‌نشیند.
+   *
+   * ⚠️ دامنه per **فال** است نه per کاربر، و این یک تصمیم است: اگر کاربر روی فالِ A
+   * گفتگو کرده و بعد روی فالِ B، دکمه‌ی آخرِ فالِ A هنوز مشروع است (سؤالِ پیشنهادیِ
+   * همان فال). per-کاربر کردنش درِ یک گفتگوی دیگر را می‌بست. */
+  chatBtnMsgs:   db.prepare("SELECT id, user_id, tg_msg_id FROM chat_messages WHERE reading_id=? AND role='assistant' AND tg_msg_id>0 AND id<? ORDER BY id DESC LIMIT 4"),
+  setChatMsgTg:  db.prepare("UPDATE chat_messages SET tg_msg_id=? WHERE id=?"),
+  clearChatMsgTg: db.prepare('UPDATE chat_messages SET tg_msg_id=0 WHERE id=? AND tg_msg_id>0'),
   /* شمارشِ سؤال‌های **ریفاندنشده‌ی** همین فال — تنها مبنای «سؤالِ اول رایگان است».
    * شرطِ `refunded=0` عمدی است: سؤالی که جوابی نگرفت و پولش برگشت، انگار پرسیده نشده. */
   chatAsked:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='user' AND refunded=0"),
@@ -6651,7 +6696,7 @@ function leaveChat(uid, via = 'menu') {
   const rid = getSession(uid)?.chatReadingId || 0;
   const turns = rid ? (stmts.chatTurns.get(rid)?.c || 0) : 0;
   const s = getSession(uid) || {};
-  delete s.chatReadingId; delete s.chatNudged;
+  delete s.chatReadingId;
   setSession(uid, Object.keys(s).length ? s : null);
   setState(uid, 'idle');
   track(db, uid, 'chat_exited', { reading_id: rid, turns, via });
@@ -6793,6 +6838,32 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}
     send: (t, kb) => ctx.reply(t, kb ? { ...extra, reply_markup: kb.reply_markup } : extra) });
 }
 
+/* 🧼 دکمه‌های جواب‌های **قبلیِ** همین گفتگو را برمی‌دارد، تا هر لحظه فقط تازه‌ترین پیام
+ * دکمه داشته باشد (ثابتِ `CHAT_LAST_ONLY` بالا).
+ *
+ * ⚠️ **ادعا قبل از اقدام**، مثل هر مسیرِ یک‌بارمصرفِ دیگرِ این ریپو: ستون **اول** صفر
+ * می‌شود و بعد ادیت می‌رود. دلیلش بی‌کران نشدنِ کار است — تلگرام ادیتِ پیامِ خیلی قدیمی
+ * را رد می‌کند و بدونِ این ترتیب همان چند ردیف در **هر نوبت** دوباره تلاش می‌شدند و هر
+ * نوبت چند فراخوانیِ بی‌فایده می‌داد. هزینه‌ی این انتخاب حداکثر یک ردیفِ دکمه‌ی جامانده
+ * روی یک خرابیِ گذراست، که دقیقاً رفتارِ **امروز** است؛ پس هیچ رگرسیونی ممکن نیست.
+ *
+ * ⚠️ کلِ کیبورد برداشته می‌شود، نه فقط دکمه‌ی سؤالِ پیشنهادی. v3.96.0 برای مسیرِ
+ * **مصرفِ** دکمه عکسِ این را تصمیم گرفته بود («درهای باز را نبند») و آن‌جا درست است:
+ * آن پیام همان لحظه تازه‌ترین است. این‌جا پیام **کهنه** است و همان درها روی پیامِ تازه
+ * باز هستند، پس نگه‌داشتنشان فقط تکرار است.
+ *
+ * `LIMIT 4` در خودِ کوئری است: بیشتر از یکی فقط بازمانده‌ی خرابی‌های قبلی است و
+ * نامحدود کردنش یعنی یک گفتگوی سی‌نوبتی می‌تواند سی ادیت در یک نوبت بزند. */
+async function stripOldChatButtons(rid, beforeId) {
+  let rows = [];
+  try { rows = stmts.chatBtnMsgs.all(rid, beforeId); } catch (e) { logErr('chat strip q:', e.message); return; }
+  for (const m of rows) {
+    try { if (stmts.clearChatMsgTg.run(m.id).changes !== 1) continue; } catch { continue; }
+    try { await bot.telegram.editMessageReplyMarkup(m.user_id, m.tg_msg_id, undefined, undefined); }
+    catch { /* پیامِ پاک‌شده‌ی کاربر یا کهنه‌تر از سقفِ ادیتِ تلگرام — بی‌ضرر */ }
+  }
+}
+
 /* 🧠 یک نوبتِ گفتگو: از ردیفِ **پرداخت‌شده‌ی** سؤال تا ارسالِ جواب.
  * عمداً از `ctx` جدا شده، چون دو صداکننده دارد: پیامِ خودِ کاربر، و بازگشتِ خودکارِ
  * بعد از شارژ که **هیچ ctx ای ندارد**. `send` تنها راهِ خروج به کاربر است، پس هر دو
@@ -6834,14 +6905,48 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
 
     /* پاکت را باز می‌کنیم. `validate` از قبل تضمین کرده پارس می‌شود، ولی گاردِ دوم
      * می‌ماند: اگر روزی `validate` عوض شود، جوابِ پول‌داده نباید روی `null` بترکد. */
-    const out = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    let out = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    let model = res.model || '';
+
+    /* 🪫 کفِ محتوا، قدمِ ۱: **یک** تلاشِ تعمیرِ آگاه (ثابتِ `CHAT_FLOOR` بالا).
+     * تذکر به **آخرین پیامِ user** چسبانده می‌شود نه به `system`، و این اجباری است:
+     * پیشوندِ `system` در طولِ گفتگو بیت‌به‌بیت ثابت می‌ماند تا کشِ پرامپت بخورد (~۷۶٪
+     * ورودیِ سنجیده‌شده). دست‌زدن به آن یعنی کشِ همان نوبت بپرد و هزینه سه برابر شود. */
+    let thin = CHAT_FLOOR && floorApplies(out) && String(out.text || '').trim().length < CHAT_FLOOR_CHARS;
+    if (thin) {
+      try {
+        const hint = L.prompts.chatThinRetry(CHAT_FLOOR_CHARS);
+        const retryMsgs = messages.map((m, i) => (
+          i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
+        // `kind` جدا تا هزینه‌ی خودِ این مکانیزم در `llm_usage` قابلِ تفکیک باشد؛ فقط یک
+        // مقدارِ تازه در ستونِ موجود، بدونِ هیچ ستونی (همان قاعده‌ی `kind='chat'`).
+        const res2 = await typingUntil(typingCtx, orChatResilient('', '', {
+          messages: retryMsgs, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
+          validate: chatOutOk, kind: 'chat_thin', refId: rid, userId: uid,
+        }, [CHAT_MODEL]));
+        const o2 = res2?.out ? parseChatOut(res2.out) : null;
+        const ok2 = o2 && !(floorApplies(o2) && String(o2.text || '').trim().length < CHAT_FLOOR_CHARS);
+        if (ok2) { out = o2; model = res2.model || model; thin = false; }
+      } catch (e) { logErr('chat thin retry:', e.message); } // تعمیر هرگز جواب را نمی‌شکند
+    }
     const reply = cleanChatReply(out.text, { name: dispName(user) });
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
     const followUp = CHAT_FOLLOWUP ? (out.followUp || '') : '';
-    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, res.model || '', 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
+    const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, model, 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
     track(db, uid, 'chat_message', { reading_id: rid, turn, chars: reply.length });
+    /* 🪫 کفِ محتوا، قدمِ ۲: تعمیر هم نگرفت ⟵ جواب می‌رود، **الماس برمی‌گردد**، بی‌صدا.
+     * ترتیب عمدی است: ردیفِ `assistant` از قبل ثبت شده، پس جاروی یتیم‌ها این سؤال را
+     * «بی‌جواب» نمی‌بیند و ریفاندِ دومی روی همان ردیف ممکن نیست (`AND refunded=0`). */
+    if (thin) {
+      const back = refundChat(msgId, uid, price);
+      track(db, uid, 'chat_thin', {
+        reading_id: rid, turn, chars: reply.length, floor: CHAT_FLOOR_CHARS,
+        refunded: back ? 1 : 0, free: price > 0 ? 0 : 1,
+      });
+      log(`🪫 CHAT_THIN reading#${rid} msg#${aId} ${reply.length}<${CHAT_FLOOR_CHARS} refunded=${back ? 1 : 0}`);
+    }
     // سنجه‌ی قلاب فقط **لاگ** می‌شود، نه retry: خروجی کوتاه است و بازتولیدش برای یک
     // جمله‌ی پایانی، تجربه را کند می‌کند. در آزمایشگاه همین تابع سنجه‌ی تصمیم است.
     try {
@@ -6882,11 +6987,14 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     } catch (e) { logErr('chat cta:', e.message); } // دکمه هرگز نباید جوابِ پول‌داده را بشکند
 
     step?.('chat_reply');
-    await send(reply, kb);
-    // نادجِ وابستگی: یک بار در هر گفتگو، **بعد** از جوابِ عادی و نه به‌جایش.
-    if (turn >= CHAT_NUDGE_TURN && !getSession(uid)?.chatNudged) {
-      patchSession(uid, { chatNudged: 1 });
-      await send(L.chat.nudge).catch(() => {});
+    const sent = await send(reply, kb);
+    /* 🧼 ترتیب قرارداد است: **اول ارسال، بعد پاک‌کردنِ دکمه‌های قبلی.** برعکسش یعنی اگر
+     * ارسال شکست بخورد کاربر با **صفر** دکمه می‌ماند، یعنی بن‌بست (بند ۹ب/۱). و چون
+     * پاک‌کردن بعد از ارسال است، در هر لحظه‌ی زمانی دستِ‌کم یک پیامِ دکمه‌دار وجود دارد. */
+    if (CHAT_LAST_ONLY) {
+      const mid = Number(sent?.message_id || 0);
+      if (mid && kb) { try { stmts.setChatMsgTg.run(mid, aId); } catch (e) { logErr('chat tg id:', e.message); } }
+      await stripOldChatButtons(rid, aId);
     }
     return true;
   } catch (e) {
@@ -6929,11 +7037,16 @@ async function resumePendingChat(uid, via = 'purchase') {
     /* ⚠️ `kb` اینجا هم پاس داده می‌شود. نسخه‌ی اول آرگومانِ دوم را نادیده می‌گرفت، یعنی
      * دکمه‌ی CTA در مسیرِ بازگشتِ بعد از شارژ **بی‌صدا** غایب می‌شد — همان کلاسِ
      * «مقدار وجود دارد ≠ مقدار می‌رسد» (بند ۲و/۶ب ریشه) که این ریپو بارها خورده. */
+    /* ⚠️ خروجیِ `sendMessage` **برگردانده می‌شود**، نه دور ریخته: `CHAT_LAST_ONLY` از
+     * `message_id` همین پیام می‌فهمد کدام پیام دکمه دارد. بدونِ این return، جوابِ
+     * مسیرِ بازگشتِ بعد از شارژ ثبت نمی‌شد و دکمه‌هایش برای همیشه روی چت می‌ماندند —
+     * همان کلاسِ باگی که نسخه‌ی اولِ همین مسیر با نادیده‌گرفتنِ `kb` داشت. */
     send: async (t, kb) => {
-      await bot.telegram.sendMessage(uid, t, kb ? { ...extra, reply_markup: kb.reply_markup } : extra);
+      const sent = await bot.telegram.sendMessage(uid, t, kb ? { ...extra, reply_markup: kb.reply_markup } : extra);
       // بدونِ ctx، میدل‌ورِ جرنی این پیام را نمی‌بیند و در بازپخشِ مسیر نامرئی می‌ماند
       // (بند ۲الف ریشه). این پیام محصولِ پول‌داده است، پس باید در تایم‌لاین باشد.
       logPush(db, uid, t, { isAdmin: isAdmin(uid), label: 'chat_resume' });
+      return sent;
     },
   });
 }

@@ -878,7 +878,6 @@ export default {
     crisis: 'What you just wrote matters to me, and I am not going to brush past it 🤍\n\nThe cards are not the right place for this. Say it to a real person: someone you trust, or a crisis line, 988 in the US and 116 123 across the UK and much of Europe, both open around the clock.\n\nYour reading stays right here, come back to it whenever you want.',
     // نادجِ وابستگی: **یک بار** در هر گفتگو، بعد از نوبتِ دوازدهم، و به‌عنوان خطِ اضافه
     // بعد از جوابِ عادی (نه به‌جایش) تا به نصیحتِ تکراری تبدیل نشود.
-    nudge: '🌿 By the way, the final call is always yours; the cards only change the angle you see from.',
     // 💬 سؤالِ پیشنهادی، طوری که انگار خودِ کاربر پرسیده (v3.95.0).
     askQuote: (q) => `<blockquote>${q}</blockquote>`,
     /* دکمه‌ی سؤالِ پیشنهادی که دوبار زده شود. ⚠️ بدونِ اشاره به جنسیتِ خواننده
@@ -1320,6 +1319,7 @@ Add one more key to the same JSON: "question_text" with the exact text of the qu
     // جوابِ پیش‌فرض وقتی کاربر «نه دقیقاً» را زد و چیزی ننوشت. مستقیم به پرامپت می‌رود،
     // پس باید به زبانِ خودِ فال باشد.
     feedbackNoAnswer: 'not really',
+    chatThinRetry: (min) => `⚠️ Your previous answer was far too short and hollow. Answer the same question again, but with something concrete and new: open one card from this reading by name, or anchor to something they said themselves. At least ${min} characters, with no pleasantries and no restating the question.`,
     feedbackContext: (ctx) => JSON.stringify({
       'the check-in question you asked': ctx.confirmationQuestion,
       'the person answer': ctx.userAnswer,

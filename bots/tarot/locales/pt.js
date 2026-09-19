@@ -895,7 +895,6 @@ export default {
     // Empurrãozinho contra a dependência: **uma vez só** por conversa, depois do décimo
     // segundo turno, e como linha extra depois da resposta normal (não no lugar dela),
     // pra não virar conselho repetido.
-    nudge: '🌿 Aliás, a decisão final é sempre sua; as cartas só mudam o ângulo de onde você olha.',
     // 💬 A pergunta sugerida, feita como se viesse da própria pessoa (v3.95.0).
     askQuote: (q) => `<blockquote>${q}</blockquote>`,
     followUpGone: 'Essa pergunta você já fez 🌙\n\nQualquer pergunta nova é só escrever aqui.',
@@ -1321,6 +1320,7 @@ Acrescente ao mesmo JSON mais uma chave: "question_text" com o texto exato da pe
     // Resposta padrão de quem tocou em «não foi bem isso» sem escrever nada.
     // Vai direto pro prompt, então precisa estar na língua da leitura.
     feedbackNoAnswer: 'não foi bem isso',
+    chatThinRetry: (min) => `⚠️ Sua resposta anterior foi curta e vazia demais. Responda à mesma pergunta de novo, mas com algo concreto e novo: abra uma carta desta leitura pelo nome ou ancore no que ele mesmo disse. No mínimo ${min} caracteres, sem gentilezas e sem repetir a pergunta.`,
     feedbackContext: (ctx) => JSON.stringify({
       'a pergunta de confirmação que você fez': ctx.confirmationQuestion,
       'resposta da pessoa': ctx.userAnswer,
