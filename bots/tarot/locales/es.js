@@ -868,6 +868,10 @@ export default {
     // (punto ۹ب) y el saldo a propósito no se muestra: nadie debería sentirse empujado a
     // juntar varias preguntas en un solo mensaje. El precio llega por parámetro para que
     // `CHAT_PRICE` siga siendo fuente única.
+    /* 💎 Última línea de cada respuesta del chat: solo número y emoji, dentro de la caja
+     * de cita (pedido explícito del dueño). Sin palabras, así que es idéntico en los cinco
+     * idiomas y no hay nada que traducir. Cadena vacía en el mundo del tomán. */
+    balanceBox: (balance, cur) => (cur?.on ? quote(moneyTight(balance, cur)) : ''),
     intro: (price, cur, balance, free) => {
       const cost = free
         ? `La primera pregunta va por mi cuenta 🎁\nDe la segunda en adelante, cada pregunta descuenta ${moneyTight(price, cur)} de tus ${purse(cur)}.`

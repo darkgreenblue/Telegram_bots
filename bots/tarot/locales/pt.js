@@ -855,6 +855,10 @@ export default {
     // (ponto ۹ب) e o saldo de propósito não aparece: ninguém deve se sentir empurrado a
     // juntar várias perguntas numa mensagem só. O preço chega por parâmetro pra
     // `CHAT_PRICE` continuar fonte única.
+    /* 💎 Última linha de cada resposta da conversa: só número e emoji, dentro da caixa
+     * de citação (pedido explícito do dono). Sem palavras, então é idêntico nos cinco
+     * idiomas e não há nada para traduzir. String vazia no mundo do toman. */
+    balanceBox: (balance, cur) => (cur?.on ? quote(moneyTight(balance, cur)) : ''),
     intro: (price, cur, balance, free) => {
       const cost = free
         ? `A primeira pergunta é por minha conta 🎁\nDa segunda em diante, cada pergunta desconta ${moneyTight(price, cur)} dos seus ${purse(cur)}.`
