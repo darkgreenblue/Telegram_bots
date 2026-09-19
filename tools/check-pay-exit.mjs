@@ -221,6 +221,47 @@ ok(guard ? /pay_exit:\$\{pid\}/.test(guard) : false, 'دکمه‌ی گارد ب�
 ok(guard ? !/pay_cancel:/.test(guard) : false,
   'گارد دیگر از pay_cancel استفاده نمی‌کند (همان باگی که حلقه را می‌ساخت)');
 
+/* ══ ۳الف) «تکمیل پرداخت» بالای «انصراف» (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۶/۲۷) ══
+ *
+ * تا امروز تنها دکمه‌ی زیرِ این پیام **انصراف** بود، یعنی تنها اقدامِ ممکنِ کاربرِ
+ * گیرکرده ترکِ خرید. همان ایرادی که v3.95.0 روی یادآوریِ فاکتور گرفت و این‌جا جا
+ * مانده بود: متن می‌گوید «تکمیلش کن» و هیچ دکمه‌ای برای تکمیل نیست. */
+{
+  const rows = guard ? guard.slice(guard.indexOf('Markup.inlineKeyboard([')) : '';
+  const iDone = rows.indexOf('completePayment');
+  const iCancel = rows.indexOf('buttons.cancel');
+  ok(iDone > -1 && iCancel > -1 && iDone < iCancel,
+    '✅ «تکمیل پرداخت» **بالای** «انصراف» است (درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند، بند ۱۰)');
+  /* 🔑 همان `pay_resume:` و همان `pid`، نه یک مسیرِ تازه. آن هندلر از قبل فاکتورِ
+   * **همان ردیف** را برمی‌گرداند (بدونِ `claimAmount` و بدونِ INSERT)، پس شماره‌ی
+   * پرداخت عوض نمی‌شود و رسیدِ کاربری که قبلاً واریز کرده روی همان ردیف می‌نشیند.
+   * مسیرِ دومِ موازی روی ریلِ پول دقیقاً همان چیزی است که بند ۹ب/۶ منع می‌کند. */
+  ok(/pay_resume:\$\{pid\}/.test(rows),
+    '🔑 و به همان `pay_resume:<pid>` وصل است (فاکتورِ تازه ساخته نمی‌شود)');
+  const resumeFn = bodyOf("bot.action(/^pay_resume:(\\d+)$/, async (ctx) => {", '\n});') || '';
+  ok(!!resumeFn, 'هندلرِ pay_resume از سورس استخراج شد');
+  ok(!/claimAmount|INSERT INTO payments/i.test(resumeFn),
+    'و همان هندلر هیچ ردیف یا شماره‌ی تازه‌ای نمی‌سازد (رسیدِ واریزشده بی‌صاحب نمی‌شود)');
+  ok(/setState\(uid, 'pay_receipt'\)/.test(resumeFn) && /paymentId/.test(resumeFn),
+    '🧾 و استیت و `session.paymentId` را برمی‌گرداند، پس رسید بعد از تپ هم پذیرفته می‌شود');
+  /* ⚠️ حلقه‌ی بی‌پایانی که همین‌جا نزدیک بود ساخته شود: گارد در **هر سه** استیتِ پرداخت
+   * شلیک می‌کند (`pay_amount`/`pay_receipt`/`pay_discount`)، ولی `pay_resume` فقط در
+   * `pay_receipt` مجاز بود. یعنی کاربرِ وسطِ کدِ تخفیف دکمه را می‌زد، میدل‌ورِ مرکزی
+   * می‌بلعیدش و **همان پیامِ گارد دوباره** می‌آمد — عیناً کلاسِ تیکتِ #TRT-8976388520،
+   * و بی‌صدا چون هیچ خطایی نمی‌دهد. پس هر دو دکمه باید بی‌قیدِ استیت عبور کنند. */
+  // ⚠️ `bodyOf` جداکننده را **شامل نمی‌کند**، پس آکولادِ بسته دستی برمی‌گردد.
+  const allow = bodyOf('function paymentFlowAllowsCallback(state, data) {', '\n}') || '';
+  const allows = new Function('state', 'data',
+    `${allow}\n}\nreturn paymentFlowAllowsCallback(state, data);`);
+  for (const st of ['pay_amount', 'pay_receipt', 'pay_discount']) {
+    ok(allows(st, 'pay_resume:7') === true, `🚪 «تکمیل پرداخت» در استیتِ ${st} عبور می‌کند`);
+    ok(allows(st, 'pay_exit:7') === true, `🚪 و «انصراف» هم در ${st}`);
+  }
+  // 🔁 کنترلِ معکوس: allowlist پهن نشده — یک اکشنِ بی‌ربط هنوز گارد می‌خورد.
+  ok(allows('pay_discount', 'wallet_go') === false,
+    '🔁 کنترلِ معکوس: اکشنِ بی‌ربط هنوز عبور نمی‌کند (allowlist پهن نشد)');
+}
+
 const exitFn = bodyOf("bot.action(/^pay_exit:");
 ok(!!exitFn, 'هندلرِ pay_exit ثبت شده');
 ok(exitFn ? /replyCanceled\(ctx, uid\)/.test(exitFn) : false,
