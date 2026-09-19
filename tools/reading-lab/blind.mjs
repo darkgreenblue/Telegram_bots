@@ -67,6 +67,22 @@ function shuffle(arr, seedStr) {
 
 const pad = (n, w) => String(n).padStart(w, '0');
 
+/**
+ * متنی که نقلِ قولِ داور رویش راستی‌آزمایی می‌شود: **فقط خودِ فال**، بدونِ سرِ بلوک.
+ *
+ * ⚠️ چرا صادر می‌شود و چرا گارد باید همین را صدا بزند: سرِ بلوک سؤالِ کاربر را دارد، و
+ * اگر داخلِ متنِ مرجع بماند نقلِ قولی از **سؤال** هم «اثبات‌شده» می‌شود، در حالی که
+ * معیارها دربارهٔ چیزی‌اند که مدل نوشته. گاردی که خودش برش را دوباره پیاده کند فقط
+ * آینه‌ی خودش را می‌سنجد و اگر فردا این تابع عوض شود سبز می‌ماند (تلهی گاردِ آینه‌ای).
+ * تکه‌ی سر همیشه با خطِ `- کارت‌ها:` تمام می‌شود؛ نبودش = محافظه‌کارانه کلِ بلوک.
+ */
+export function refTextOf(chunk) {
+  const at = String(chunk).indexOf('- کارت‌ها:');
+  if (at < 0) return String(chunk);
+  const nl = String(chunk).indexOf('\n', at);
+  return nl > 0 ? String(chunk).slice(nl) : String(chunk);
+}
+
 /* ⚠️ `tag` (نامِ مجموعه‌ی سناریو) **اجباریِ درستی** است، نه تزئین.
  *
  * 🐛 باگی که قبل از اولین استفاده گرفته شد: شناسه‌ی سناریو per مجموعه یکتا **نیست**.
@@ -149,7 +165,7 @@ if (argv[0] === 'score') {
   const textOf = {};
   for (const chunk of blind.split(/^## /m).slice(1)) {
     const id = chunk.split('\n', 1)[0].trim();
-    textOf[id] = chunk;
+    textOf[id] = refTextOf(chunk);
   }
   const byArm = new Map(), perId = [];
   let faked = 0, missing = 0;
