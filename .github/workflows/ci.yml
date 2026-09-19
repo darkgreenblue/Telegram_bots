@@ -457,6 +457,19 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-reading-v4.mjs
 
+      # ⏭ برشِ ریترای وقتی پیامِ «در حال تفسیر» هنوز نرسیده: مکانیزمِ عمومیِ عبور از
+      # مدل‌های هم‌نام در برنامه‌ی retry، مستقل از هر آزمایشی که آن را صدا بزند.
+      - name: Retry-cut deadline check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-retry-cut.mjs
+
+      # 🧪 آزمایشِ ۵۰/۵۰ مدلِ خوانش (دیپ‌سیکِ برش‌خورده در برابرِ luna): سیدِ آزمایش،
+      # وضعیتِ درست، فیلترِ متقارنِ فالِ صوتی، و چرخه‌ی عمرِ readingArm/loadingShown
+      # (پاک‌سازیِ تک‌مصرف، ms هرگز منفی نمی‌شود) روی SQLite واقعی اجرا می‌شوند.
+      - name: Reading model A/B check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-reading-model-ab.mjs
+
       # بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل (#215): سشن در سیزده نقطه پاک می‌شود و
       # `/start` گارد ندارد، پس تنها اشاره‌گر به یک فالِ پول‌داده می‌توانست دور ریخته شود.
       # ادعای مرکزی: پاک‌شدنِ سشن هرگز دسترسی به آن فال را از بین نبرد.

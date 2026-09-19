@@ -183,8 +183,11 @@ console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو
    * از اول بود: در ورودیِ صوتی هیچ مدلِ ناشنوایی وارد برنامه‌ی retry نشود. حالا دو
    * لایه این را تضمین می‌کنند: برنامه فقط از `READING_MODEL` ساخته می‌شود (نه
    * `FALLBACK_MODEL` که DeepSeek است)، و `audio` اصلاً غیرِ null نمی‌شود مگر
-   * `READING_MODEL` صداشنو باشد (گاردِ `audioDirectOn`). */
-  ok(/const plan = audio \? \[READING_MODEL, READING_MODEL, READING_MODEL\] : undefined;/.test(SRC),
+   * `READING_MODEL` صداشنو باشد (گاردِ `audioDirectOn`).
+   * ⚠️ از v3.105.0 فقط **شاخه‌ی audio‌بودن** پین شده، نه کلِ خط: شاخه‌ی غیرِصوتی حالا
+   * `armOpts?.plan`ِ آزمایشِ مدلِ خوانش را هم می‌گیرد (`check-reading-model-ab.mjs`
+   * جدا همان را می‌سنجد)، و شاخه‌ی صوتی همچنان بیت‌به‌بیت ثابت است. */
+  ok(/const plan = audio \? \[READING_MODEL, READING_MODEL, READING_MODEL\] : /.test(SRC),
     'برنامه‌ی retryِ صوتی فقط از READING_MODEL ساخته می‌شود و فالبکِ ناشنوا داخلش نیست');
 
   // نشتِ ویسِ فالِ قبلی به فالِ بعدی — باگی که موقعِ همین تغییر پیدا و بسته شد

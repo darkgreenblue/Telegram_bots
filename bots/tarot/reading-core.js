@@ -291,7 +291,19 @@ function logUsageShape(u) {
 
 export async function orRequest(body, meta = null) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
+  /* ⏱ سقفِ زمانِ **این** فراخوانی. پیش‌فرض همان `OR_TIMEOUT_MS` سراسری است، پس هر
+   * صداکننده‌ای که `timeoutMs` نمی‌دهد بیت‌به‌بیت رفتارِ قبلی را دارد.
+   *
+   * چرا لازم شد (v3.105.0): سقفِ سراسری **ده دقیقه** است. برای مدلی که میانه‌ی تأخیرش
+   * ~۱۰ ثانیه است این عملاً بی‌اثر است، ولی لحظه‌ای که مدلِ کندتری در برنامه بیاید همان
+   * ده دقیقه تبدیل می‌شود به «کاربر ده دقیقه پشتِ یک فال گیر می‌کند». بستنِ این سقف از
+   * بیرون، تنها چیزی است که دُم را واقعاً کران‌دار می‌کند؛ ردکردنِ تلاشِ دوم (پایین)
+   * فقط تلاشِ **بعدی** را می‌بُرد، نه تلاشی که همین حالا آویزان است.
+   *
+   * ⚠️ از `meta` می‌آید نه از بدنه: `meta` همان کانالی است که خودِ فایل «بیرونِ بدنه‌ی
+   * ریکوئست، هرگز به سیم نمی‌رود» می‌نامدش. `orRequest` اصلاً `opts` ندارد و نوشتنِ
+   * `opts.timeoutMs` این‌جا یک ReferenceError روی **هر فال** می‌شد. */
+  const timer = setTimeout(() => ctrl.abort(), Math.max(1000, Number(meta?.timeoutMs) || OR_TIMEOUT_MS));
   const t0 = Date.now();
   try {
     // با پرچمِ خاموش (پیش‌فرض) این دقیقاً همان `body` است: `JSON.stringify` کلیدی را
@@ -359,7 +371,8 @@ export function orChat(system, user, opts = {}) {
     messages: opts.messages || [{ role: 'system', content: system }, { role: 'user', content: user }],
   // برچسبِ حسابداری (کدام مسیر، کدام رکورد، کدام کاربر). عمداً **بیرونِ** بدنه‌ی ریکوئست
   // است تا هیچ‌وقت به سیم نرود و نتواند رفتارِ مدل را عوض کند.
-  }, { kind: opts.kind, refId: opts.refId, userId: opts.userId });
+  // `timeoutMs` هم مثل بقیه‌ی این آبجکت بیرونِ بدنه می‌ماند و به سیم نمی‌رود.
+  }, { kind: opts.kind, refId: opts.refId, userId: opts.userId, timeoutMs: opts.timeoutMs });
 }
 
 // فراخوانی مقاوم: چند تلاش با مدل اصلی، بعد مدل فالبک؛ validate اختیاری برای ردکردن خروجی خراب.
@@ -410,6 +423,25 @@ export async function orChatResilient(system, user, opts = {}, plan = READING_PL
       logErr(`LLM error (attempt ${i + 1}, ${plan[i]}):`, e.message);
     }
     if (i < plan.length - 1) await sleep(1500);
+    /* ⏱ **برشِ تلاشِ دوباره** (v3.105.0، خواسته‌ی صریحِ مالک): اگر صداکننده بگوید مهلت
+     * تمام شده، تلاشِ دوباره روی **همان مدل** رد می‌شود و مستقیم به مدلِ بعدیِ برنامه
+     * می‌رویم. معنایش دقیقاً همان جمله‌ی مالک است: «اگه تا قبل از پیامِ در حال تفسیر
+     * نرسیده بود، دیگه سراغِ ریترای دوم نریم و یکراست فالبک فعال بشه.»
+     *
+     * چرا شکلش «مدلِ تکراری را رد کن» است و نه «به ایندکسِ N برو»: برنامه یک آرایه‌ی
+     * ساده است و هر شکلِ ایندکس‌محور با اولین تغییرِ ترتیبِ برنامه بی‌صدا غلط می‌شود.
+     * این شکل فقط به **هم‌مدل بودنِ** دو خانه‌ی پیاپی نگاه می‌کند، پس با هر برنامه‌ای
+     * درست می‌ماند و برای برنامه‌ی بی‌تکرار خودبه‌خود no-op است.
+     *
+     * ⚠️ predicate صداکننده هرگز نباید فال را بشکند، پس داخلِ try/catch است و هر خطا
+     * یعنی «نبُر» (رفتارِ قبلی). */
+    let cut = false;
+    try { cut = !!opts.cutRetry?.(); } catch { cut = false; }
+    if (cut) {
+      const from = i;
+      while (i + 1 < plan.length && plan[i + 1] === plan[i]) i++;
+      if (i > from) logErr(`⏭ RETRY_CUT: ${plan[from]} ×${i - from} رد شد ⟵ ${plan[i + 1] || '(پایان)'}`);
+    }
   }
   return null;
 }
