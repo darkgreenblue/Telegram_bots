@@ -38,6 +38,9 @@ const D = 86400;
     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER DEFAULT 0,
       status TEXT DEFAULT 'pending', step TEXT, original_amount INTEGER, created_at INTEGER, updated_at INTEGER);
     CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, event TEXT, props TEXT DEFAULT '{}', created_at INTEGER);
+    CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, reading_id INTEGER, user_id INTEGER,
+      role TEXT DEFAULT '', text TEXT DEFAULT '', price INTEGER DEFAULT 0, refunded INTEGER DEFAULT 0,
+      model TEXT DEFAULT '', created_at INTEGER);
     CREATE TABLE referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referee_id INTEGER UNIQUE, rewarded INTEGER DEFAULT 0, created_at INTEGER);
     CREATE TABLE llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER DEFAULT 0, kind TEXT DEFAULT '',
       ref_id INTEGER DEFAULT 0, model TEXT DEFAULT '', prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0,
@@ -87,6 +90,33 @@ const D = 86400;
      در `dash.js` قبل از افزودنِ این ردیف قرمز نمی‌داد.) */
   db.prepare("INSERT INTO payments (user_id,amount,status,step,created_at) VALUES (?,?,'approved','receipt',?)")
     .run(1, 300_000, now - 60 * D);
+
+  /* 🗣 فیکسچرِ گفتگوی پس از فال. عمداً **نامتقارن** است تا هیچ ادعایی تصادفی سبز نشود:
+     کاربر ۱ پیشنهاد را دید و باز کرد و سه سؤال پرسید (یکی‌شان زیرِ کف و ریفاندشده)،
+     کاربر ۴ فقط پیشنهاد را دید و باز نکرد، و **ادمین** هم یک گفتگوی کامل دارد.
+     ادمین این‌جا لازم است نه مزاحم: فیچر فقط-ادمین است و اگر کارت فیلترِ ادمین بگذارد
+     باید همین ردیف‌ها را از دست بدهد و ادعای «ادمین شمرده می‌شود» قرمز شود. */
+  const cm = db.prepare("INSERT INTO chat_messages (reading_id,user_id,role,text,price,refunded,created_at) VALUES (?,?,?,'x',?,?,?)");
+  e.run(1, 'chat_offer_shown', '{"reading_id":11}', now - 2 * D);
+  e.run(4, 'chat_offer_shown', '{"reading_id":12}', now - 2 * D);
+  e.run(1, 'chat_opened', '{"reading_id":11}', now - 2 * D);
+  for (let i = 0; i < 3; i++) {
+    e.run(1, 'chat_message', `{"reading_id":11,"turn":${i + 1}}`, now - 2 * D + i * 60);
+    cm.run(11, 1, 'user', 1, 0, now - 2 * D + i * 60);
+    cm.run(11, 1, 'assistant', 0, 0, now - 2 * D + i * 60 + 5);
+  }
+  // سؤالِ سومِ کاربر ۱ زیرِ کف افتاد و الماسش برگشت
+  e.run(1, 'chat_thin', '{"reading_id":11,"turn":3,"chars":90,"floor":140,"refunded":1,"free":0}', now - 2 * D + 200);
+  e.run(1, 'chat_refund', '{"reading_id":11,"amount":1,"via":"thin"}', now - 2 * D + 200);
+  // ادمین: گفتگوی کامل با دو سؤال، و یک جوابِ لاغرِ **رایگان** (چیزی برای برگشتن نداشت)
+  e.run(6, 'chat_offer_shown', '{"reading_id":21}', now - D);
+  e.run(6, 'chat_opened', '{"reading_id":21}', now - D);
+  for (let i = 0; i < 2; i++) {
+    e.run(6, 'chat_message', `{"reading_id":21,"turn":${i + 1}}`, now - D + i * 60);
+    cm.run(21, 6, 'user', i === 0 ? 0 : 1, 0, now - D + i * 60);
+  }
+  e.run(6, 'chat_thin', '{"reading_id":21,"turn":1,"chars":70,"floor":140,"refunded":0,"free":1}', now - D + 10);
+  e.run(1, 'chat_paywall', '{"reading_id":11,"can_afford":0}', now - 2 * D + 300);
   db.close();
 }
 
@@ -263,6 +293,78 @@ console.log('\n▶ ۸ب) نمای کلی و صفحه‌ی اقتصاد **یک** 
   ok(!/شروعِ ثبتِ هزینه/.test(html),
     'نمای کلی دیگر «از شروعِ ثبتِ هزینه» را زیرِ عدد نمی‌نویسد');
   ok(/کلِ عمر/.test(html), 'و به‌جایش می‌گوید این عدد کلِ عمر است');
+}
+
+/* ══ 🗣 کارتِ آمارِ گفتگو — و مهم‌ترین عددش «جوابِ زیرِ کفِ محتوا» ══════════════
+ *
+ * خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۹): «آن را به بخشِ آمارِ چتِ داشبورد اضافه کن و زیر نظر
+ * بگیر که آیا بالا می‌رود.» سه چیز این‌جا می‌تواند بی‌صدا خراب شود و هر سه ادعا دارند:
+ *   ۱) **فیلترِ ادمین**. فیچر فقط-ادمین است، پس فیلترِ ادمین (که در بقیه‌ی کارت‌های همین
+ *      صفحه واجب است) این‌جا هر شش عدد را صفر می‌کند — یعنی کارت رندر می‌شود، خطا
+ *      نمی‌دهد، و به مالک می‌گوید «کسی از گفتگو استفاده نمی‌کند».
+ *   ۲) **واگراییِ عدد و لیست**. قراردادِ آهنینِ داشبورد؛ همان ادعای بخشِ ۳، این‌بار روی
+ *      کوهورتِ تازه‌ی `t=chat`.
+ *   ۳) **کاربرِ یکتا در برابر شمارشِ رخداد**. جوابِ لاغر ذاتاً چند بار برای یک کاربر رخ
+ *      می‌دهد؛ اگر این دو قاطی شوند، «نرخِ جوابِ لاغر» بی‌معنا می‌شود. */
+console.log('\n▶ ۸ج) کارتِ گفتگو: شمارش، نرخ، و لیستِ کاربرانِ پشتِ هر عدد');
+{
+  const { engagementBody } = await import(`file://${base}/routes/engagement.js`);
+  const { CHAT_EVENTS } = await import(`file://${base}/lib/engage.js`);
+  const eng = engagementBody(new URL('http://x/engagement?bot=tarot&rChat=all'));
+
+  ok(/گفتگوی پس از فال/.test(eng), 'کارتِ گفتگو در صفحه‌ی درگیری رندر شد');
+  ok(/جوابِ زیرِ کفِ محتوا/.test(eng), 'و عددِ «جوابِ زیرِ کفِ محتوا» رویش هست');
+  ok(/نرخِ جوابِ زیرِ کف/.test(eng), 'و نرخش هم (نه فقط شمارشِ خام)');
+
+  /* عدد ↔ لیست، برای **هر شش** قدم. `since=0` چون بازه‌ی all است. */
+  const idxOf = (evName) => CHAT_EVENTS.findIndex((c) => c.event === evName);
+  const EXPECT = {
+    chat_offer_shown: [1, 4, 6],   // کاربر ۱ و ۴ و ادمین
+    chat_opened: [1, 6],
+    chat_message: [1, 6],
+    chat_thin: [1, 6],
+    chat_refund: [1],
+    chat_paywall: [1],
+  };
+  for (const [evName, want] of Object.entries(EXPECT)) {
+    const i = idxOf(evName);
+    ok(i >= 0, `رویدادِ ${evName} در فهرستِ CHAT_EVENTS اعلام شده`);
+    const got = resolveCohort(U(`k=tarot&bot=tarot&t=chat&i=${i}&since=0`)).users.map((x) => Number(x.uid)).sort();
+    ok(JSON.stringify(got) === JSON.stringify(want),
+      `${evName}: کاربرانِ لیست = ${want.join(',')} (دیده شد: ${got.join(',') || 'هیچ'})`);
+  }
+
+  /* ✅ کنترلِ مثبتِ «ادمین حذف نشده» — بدونِ این، افزودنِ سهویِ فیلترِ ادمین کارت را
+     بی‌صدا به صفر می‌برد و هیچ ادعای دیگری قرمز نمی‌شد. */
+  const opened = resolveCohort(U(`k=tarot&bot=tarot&t=chat&i=${idxOf('chat_opened')}&since=0`)).users.map((x) => Number(x.uid));
+  ok(opened.includes(6), 'کاربرِ ادمین در کوهورتِ گفتگو **هست** (فیچر فقط-ادمین است)');
+  ok(/ادمین در این کارت حذف نشده/.test(eng), 'و خودِ کارت صریح می‌گوید ادمین حذف نشده');
+
+  /* شمارشِ رخداد ≠ کاربرِ یکتا: کاربر ۱ سه سؤال پرسیده و ادمین دو تا ⟵ ۵ رخداد، ۲ کاربر. */
+  ok(/۵ بار/.test(eng), 'شمارشِ رخدادِ سؤال‌ها (۵ بار) کنارِ کاربرِ یکتا چاپ می‌شود');
+  /* نرخِ جوابِ لاغر = ۲ از ۵ = ۴۰٪ — با دست حساب‌شده، نه از خودِ کد. */
+  ok(/۴۰٪/.test(eng), 'نرخِ جوابِ زیرِ کف = ۴۰٪ (۲ جوابِ لاغر از ۵ جواب)');
+  /* از دو جوابِ لاغر فقط یکی ریفاند شده (آن یکی سؤالِ رایگانِ اول بود). */
+  ok(/۱ از ۲/.test(eng), 'از دو جوابِ لاغر، یکی الماسش برگشت (دیگری سؤالِ رایگان بود)');
+  ok(/سؤالِ <b>رایگانِ<\/b> اول/.test(eng), 'و صریح می‌گوید بقیه سؤالِ رایگان بودند، نه پولِ سوخته');
+  /* میانه‌ی عمق: گفتگوی کاربر ۱ سه سؤال و ادمین دو سؤال ⟵ میانه ۲.۵ */
+  ok(/۲٫۵/.test(eng), 'میانه‌ی عمقِ گفتگو = ۲٫۵ سؤال per گفتگو');
+
+  /* 🚫 ادعای معکوس: کارت نباید وقتی هیچ رویدادِ گفتگویی در بازه نیست رندر شود (وگرنه به
+     یک کارتِ همیشه-صفر تبدیل می‌شود که فقط صفحه را شلوغ می‌کند).
+     ⚠️ بازه‌ی «امروز» انتخاب شده نه یک رباتِ دیگر: رباتِ بی‌دیتابیس **قبل از** رسیدن به
+     این کارت زودهنگام return می‌کند، پس آن ادعا سبزِ پوچ بود — جهشِ «بی‌قید رندر کن»
+     از آن زنده رد شد و همین نسخه گرفتش. رویدادهای فیکسچر دیروز و پریروزند. */
+  const today = engagementBody(new URL('http://x/engagement?bot=tarot&rChat=day'));
+  ok(!/گفتگوی پس از فال/.test(today), 'در بازه‌ای که هیچ رویدادِ گفتگویی نیست، کارت اصلاً رندر نمی‌شود');
+  ok(/چسبندگی/.test(today), '(کنترلِ مثبت: خودِ صفحه در همان بازه رندر شده)');
+
+  /* و ورودیِ مخربِ کوهورتِ تازه هم مثل بقیه بی‌خطر است. */
+  for (const q of ["k=tarot&bot=tarot&t=chat&i=' OR 1=1--", 'k=tarot&bot=tarot&t=chat&i=99',
+    'k=tarot&bot=tarot&t=chat&i=0&since=-1);DROP TABLE users;--']) {
+    let r; try { r = resolveCohort(U(q)); } catch (err) { r = { threw: err.message }; }
+    ok(!r.threw, `«${q.slice(0, 40)}…» بدونِ کرش هندل شد`);
+  }
 }
 
 console.log('\n▶ ۹) رباتِ بدونِ داشبوردِ اصلی، پیامِ صادقانه می‌دهد (نه عددِ ساختگی)');
