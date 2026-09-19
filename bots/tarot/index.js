@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.105.0';
+const PRODUCT_VERSION = '3.106.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1701,6 +1701,19 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN reminded_at INTEGER').run(); }
 // کاربرِ «بی‌اعتماد»: بعد از یک برگشتِ پرداخت (رسیدِ فیک)، ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 // و همه‌ی پرداخت‌هایش دستی به ادمین می‌رود. (status پرداخت می‌تواند 'reversed' هم بشود — بدونِ تغییرِ schema.)
 try { db.prepare('ALTER TABLE users ADD COLUMN pay_distrust INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* 🟡 کاربرِ «مشکوک» (لایه‌ی دومِ دفاع، از دیتای شبِ ۹ شهریور ۱۴۰۵ — چند نفر با سوءاستفاده
+ * از یک باگ رسیدِ فیک/تکراری فرستادند و شب که ادمین بیدار نبود چند بار الماس گرفتند).
+ * برخلافِ «بی‌اعتماد» که بعد از **یک** رسیدِ ثابت‌شده‌ی فیک همیشه دستی می‌ماند، «مشکوک»
+ * از **الگوی سرعتِ ارسال** ساخته می‌شود (`suspectTrigger`، پایین)، نه از محتوا.
+ * از لحظه‌ی مشکوک‌شدن هر رسید — حتی آن‌که ایجنت خودش approve می‌کرد — دستیِ ادمین می‌شود؛
+ * تأییدِ صریحِ ادمین («پیامکش آمده») روی **همه‌ی** رسیدهای معلق، برچسب را برمی‌دارد؛
+ * یک «پیامکش نیومده» یعنی برچسب به «بی‌اعتماد»ِ دائمی ارتقا می‌یابد. جزئیات و دو قاعده‌ی
+ * تشخیص (فاصله‌ی زیرِ ۱ دقیقه، یا رسیدِ سوم ظرفِ ۲ ساعتِ رسیدِ دوتا قبل) در CLAUDE.md ربات. */
+try { db.prepare('ALTER TABLE users ADD COLUMN pay_suspect INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// رسیدی که «مشکوک»ِ تعلیق‌شده است: ایجنت approve می‌کرد ولی کریدیت داده نشد و منتظرِ
+// تأییدِ صریحِ ادمین است. جدا از waiting_review عادی، تا auto-clearِ suspect بداند کدام
+// ردیف‌ها واقعاً «معلقِ همین گارد»اند نه یک بازبینیِ دستیِ معمولی.
+try { db.prepare('ALTER TABLE payments ADD COLUMN suspect_hold INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // آخرین باری که حوزه‌ی تمرکز پرسیده شد (برای بازپرسیِ حداکثر هفته‌ای‌یک‌بار؛ نه هر فال)
 try { db.prepare('ALTER TABLE users ADD COLUMN focus_asked_at INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 /* ⏱ چرخه‌ی عمرِ فاکتور (v3.74.0، خواسته‌ی صریحِ مالک): سه ستونِ افزایشی برای یادآوری+
@@ -2211,6 +2224,19 @@ const stmts = {
   // برگشتِ پرداخت — فقط از approved (idempotent، ضدِ دوبار). changes==1 یعنی همین حالا برگشت خورد.
   markPaymentReversed: db.prepare("UPDATE payments SET status='reversed', updated_at=unixepoch() WHERE id=? AND status='approved'"),
   setDistrust: db.prepare('UPDATE users SET pay_distrust=1 WHERE telegram_id=?'),
+  // 🟡 کاربرِ مشکوک — همان الگوی setDistrust، فقط ستونِ دیگر.
+  setSuspect: db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=?'),
+  clearSuspect: db.prepare('UPDATE users SET pay_suspect=0 WHERE telegram_id=?'),
+  // نگه‌داشتنِ رسیدِ «مشکوکِ تعلیق‌شده» در waiting_review، با suspect_hold=1 تا از یک
+  // بازبینیِ دستیِ معمولی تفکیک شود (همان گاردِ اتمیکِ setPaymentReceipt، فقط ستونِ اضافه).
+  setSuspectHold: db.prepare("UPDATE payments SET receipt_file_id=?, admin_message_id=?, status='waiting_review', suspect_hold=1, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
+  // آیا این کاربر هنوز رسیدِ «مشکوکِ معلق»ِ دیگری دارد؟ اگر نه، بعد از یک «پیامکش آمده»
+  // برچسبِ مشکوک برداشته می‌شود.
+  hasSuspectPending: db.prepare("SELECT 1 FROM payments WHERE user_id=? AND suspect_hold=1 AND status='waiting_review' LIMIT 1"),
+  // زمانِ آخرین ۲ رسیدِ **قبلیِ** همین کاربر (برای suspectTrigger، پیش از ثبتِ رویدادِ رسیدِ تازه)
+  recentReceiptTimes: db.prepare(
+    "SELECT created_at FROM events WHERE user_id=? AND event='receipt_submitted' ORDER BY created_at DESC, id DESC LIMIT 2"
+  ),
   // کسرِ اعتبارِ برگشتی، اما هرگز زیرِ صفر (مصرف‌شده تا آن لحظه اشکالی ندارد)
   clawback: db.prepare('UPDATE users SET balance = MAX(0, balance - ?) WHERE telegram_id=?'),
   // پرداختِ منتظرِ رسیدِ همین کاربر (برای بازیابیِ رسید وقتی state گم شده — کاربر بعد از فاکتور /start زده)
@@ -2543,6 +2569,31 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
 }
 // کاربرِ بی‌اعتماد (بعد از برگشتِ رسیدِ فیک): ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد
 const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
+// کاربرِ مشکوک (لایه‌ی دومِ دفاع، بالا): تا وقتی ادمین همه‌ی رسیدهای معلقش را «آمده» نکرده
+// یا یکی را «نیومده» نزده، هر رسیدِ تازه‌اش هم دستی می‌ماند.
+const isSuspect = (uid) => !!getUser(uid)?.pay_suspect;
+// آستانه‌های تشخیصِ الگوی مشکوک — از دیتای واقعیِ شبِ ۹ شهریور ۱۴۰۵ (CLAUDE.md ربات،
+// بخشِ «کاربرِ مشکوک»): هر ۶ کاربرِ بی‌اعتمادِ چندرسیدی زیرِ این دو آستانه‌اند و صفرشان
+// فقط با یکی از این دو گرفته نشدند.
+const SUSPECT_GAP_SEC = 60;          // قاعده‌ی الف: فاصله تا رسیدِ قبلی < ۱ دقیقه → از رسیدِ دوم به بعد
+const SUSPECT_WINDOW_SEC = 2 * 3600; // قاعده‌ی ب: رسیدِ سوم ظرفِ ۲ ساعتِ رسیدِ دوتا قبل → از رسیدِ سوم به بعد
+// آیا رسیدی که همین الان می‌رسد باید کاربر را «مشکوک» کند؟ روی رسیدهای **قبلی** سنجیده
+// می‌شود (صداکننده باید این را قبل از ثبتِ رویدادِ رسیدِ تازه صدا بزند). دو قاعده OR:
+// قاعده‌ی الف (فاصله‌ی رسیدِ بلافاصله‌قبل) یا قاعده‌ی ب (بازه‌ی رسیدِ دوتا‌قبل). یک‌بار که
+// مشکوک شد، همان پرچم (نه این تابع) تعیین می‌کند رسیدهای بعدی هم دستی بمانند.
+function suspectTrigger(uid, nowSec) {
+  const rows = stmts.recentReceiptTimes.all(uid);
+  if (rows.length >= 1 && (nowSec - rows[0].created_at) < SUSPECT_GAP_SEC) return true;
+  if (rows.length >= 2 && (nowSec - rows[1].created_at) < SUSPECT_WINDOW_SEC) return true;
+  return false;
+}
+// تگِ صریحِ روی پیامِ ادمین که می‌گوید این رسید چرا دستی است (بند «هر پیامِ ادمین باید
+// بگوید چرا»). بی‌اعتماد بر مشکوک اولویت دارد چون قطعی‌تر و دائمی‌تر است.
+function trustTagFor(uid) {
+  if (isDistrusted(uid)) return '🔴 کاربر بی‌اعتماد\n\n';
+  if (isSuspect(uid)) return '🟡 کاربر مشکوک\n\n';
+  return '';
+}
 // نامِ نمایشیِ کاربر: نام فارسیِ خودش (اگر در آنبوردینگ داده) — نه first_name تلگرام که ممکن است انگلیسی/نامفهوم باشد.
 // در متن‌های رو-به-کاربر با fallback خالی؛ به LLM هرگز نام تلگرام نمی‌رود (تا مدل نام نامفهوم را تکرار نکند).
 const dispName = (u) => (u?.display_name || '').trim();
@@ -3236,7 +3287,10 @@ function paymentFlowAllowsCallback(state, data) {
   }
   if (state === 'pay_receipt') {
     // `pay_resume` این‌جا لازم نیست: بالا بی‌قیدِ استیت مجاز شده (هر دو دکمه‌ی گارد).
-    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+)$/.test(data);
+    // `susyes`/`susno` عمداً کنارِ `cardsms`/`cardrev`/`cardrevno` نشسته‌اند: هر دو دکمه‌ی
+    // ادمین روی یک پیامِ ادمین‌اند و اگر خودِ ادمین هم‌زمان در `pay_receipt`ِ خودش باشد
+    // (تستر/کاربرِ عادی) باید بدونِ گارد کار کنند.
+    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+|susyes:\d+|susno:\d+)$/.test(data);
   }
   if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
   return false;
@@ -9042,7 +9096,8 @@ async function applyDiscount(ctx, uid, codeText) {
 async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, note = '') {
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
-  const caption = (note ? `${note}\n\n` : '')
+  // 🔴/🟡 تگِ اعتماد اولِ پیام: ادمین همان لحظه می‌فهمد چرا این رسید دستی است.
+  const caption = trustTagFor(uid) + (note ? `${note}\n\n` : '')
     + L.wallet.adminNotify(p, user, packSoldIn(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
   const kb = Markup.inlineKeyboard([[
     // برچسب شماره‌ی **فاکتور** را نشان می‌دهد، ولی کالبک شناسه‌ی ردیف را حمل می‌کند.
@@ -9059,6 +9114,30 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
     } catch {}
   }
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
+}
+
+// 🟡 مسیرِ «مشکوک»: ایجنت این رسید را approve می‌کرد، ولی چون کاربر مشکوک است کریدیت
+// داده نمی‌شود. ادمین با دو دکمه تصمیم می‌گیرد: «آمده» (تأییدِ عادی) یا «نیومده»
+// (رد + ارتقا به بی‌اعتمادِ دائمی). الگوی مرجع: sendReceiptToAdmin/notifyAdminAutoApproved.
+async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
+  const user = getUser(uid);
+  const p = stmts.getPayment.get(paymentId);
+  const caption = trustTagFor(uid) + L.wallet.adminSuspectApprove(p, user, packSoldIn(p))
+    + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+  const kb = Markup.inlineKeyboard([[
+    Markup.button.callback(L.buttons.suspectYes, `susyes:${paymentId}`),
+    Markup.button.callback(L.buttons.suspectNo, `susno:${paymentId}`),
+  ]]).reply_markup;
+  let adminMsg;
+  for (const adminId of ADMIN_IDS) {
+    try {
+      const sent = photoFileId
+        ? await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb })
+        : await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
+      if (!adminMsg) adminMsg = sent;
+    } catch {}
+  }
+  stmts.setSuspectHold.run(photoFileId || null, adminMsg?.message_id || null, paymentId);
 }
 
 // ورودیِ همه‌ی رسیدها (عکس/متن): داوریِ ایجنتِ کارت‌به‌کارت، سپس مسیر:
@@ -9084,6 +9163,11 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   }
   const s = getSession(uid);
   const nextState = s?.readingId ? 'confirm_pay' : 'idle';
+  // 🟡 تشخیصِ الگوی مشکوک — روی رسیدهای **قبلی** (قبل از ثبتِ رویدادِ همین رسید).
+  // بی‌اعتماد از قبل بدترین حالت است و چیزی رویش اضافه نمی‌شود.
+  if (!isDistrusted(uid) && !isSuspect(uid) && suspectTrigger(uid, Math.floor(Date.now() / 1000))) {
+    stmts.setSuspect.run(uid);
+  }
   track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });
   // رسیدِ خام را همان اول ذخیره کن (برای بازبینی/برگشت) بدونِ تغییرِ وضعیت
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
@@ -9140,6 +9224,19 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 
   const reasonFa = decision.reason_fa || 'نامشخص';
   try {
+    // 🟡 کاربرِ مشکوک: هیچ تصمیمِ خودکاری اجرا نمی‌شود — نه approve، نه underpaid، نه
+    // reject. «هر رسیدی که می‌فرسته باید دستیِ ادمین تصمیم بگیره». approve → پیامِ
+    // دوگزینه‌ای «آمده/نیومده» (کریدیت هنوز داده نشده)؛ بقیه → مسیرِ عادیِ تأیید/ردِ
+    // دستی (که تگ را خودش از trustTagFor می‌گیرد). بی‌اعتماد از قبل از AI هم رد شده
+    // (بالا)، پس این‌جا هرگز با هم برخورد نمی‌کنند.
+    if (isSuspect(uid) && !isDistrusted(uid)) {
+      if (decision.action === 'approve') {
+        await sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+      } else {
+        await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+      }
+      return setState(uid, nextState);
+    }
     // سیاست: فقط دو نتیجه‌ی خودکار — approve (پرداختِ کافی و واقعی) و reject (فقط مبلغِ اکیداً کمتر).
     // بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
     // پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (هیچ «این رسید نیست» یا دلیلی).
@@ -9393,6 +9490,39 @@ bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.wallet.reverseCancelled(invoiceNoOf(stmts.getPayment.get(parseInt(ctx.match[1], 10))))).catch(() => {});
+});
+
+/* ── مسیرِ «مشکوک»: تأیید/ردِ رسیدی که ایجنت approve می‌کرد ولی کاربر مشکوک بود ── */
+bot.action(/^susyes:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  const pid = parseInt(ctx.match[1], 10);
+  const done = approvePayment(pid);
+  if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
+  await ctx.answerCbQuery('✅').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  const { p, creditAmount, bonus } = done;
+  await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
+  await afterApproval(p.user_id);
+  // اگر دیگر هیچ رسیدِ «مشکوکِ معلق»ی از همین کاربر نمانده، برچسب برداشته می‌شود —
+  // مگر اینکه در همین حین بی‌اعتماد هم شده باشد (susno روی رسیدِ دیگرش).
+  if (!stmts.hasSuspectPending.get(p.user_id) && !isDistrusted(p.user_id)) {
+    stmts.clearSuspect.run(p.user_id);
+  }
+});
+bot.action(/^susno:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  // چون کریدیت هرگز داده نشده، «نیومده» فقط ردّش می‌کند — هیچ برگشتِ اعتباری لازم نیست.
+  if (!p || p.status !== 'waiting_review') return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
+  stmts.setPaymentStatus.run('rejected', pid);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: pid, amount: p.amount, via: 'suspect_no_sms' });
+  // «مشکوک» دیگر معنا ندارد؛ از این پس دائماً «بی‌اعتماد» است.
+  stmts.setDistrust.run(p.user_id);
+  stmts.clearSuspect.run(p.user_id);
+  await ctx.answerCbQuery('❌').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
 });
 
 /* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
