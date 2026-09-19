@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.104.0';
+const PRODUCT_VERSION = '3.105.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1340,6 +1340,41 @@ const PACE_TEASER = 2000;
 // باشد (پیش‌فراخوانیِ بعد از سؤال)، نشانگر کمتر از این نمی‌ماند. انتظارِ طراحی‌شده بخشی از
 // آیین است؛ جوابی که «آنی» برسد حسِ تفسیر نمی‌دهد.
 const LOADING_MIN_MS = 10_000;
+/* 🧪 آزمایشِ مدلِ خوانش (v3.105.0) — «دیپ‌سیکِ پولی با یک ریترای و فالبکِ مدلِ فعلی».
+ *
+ * چرا A/B و نه سوییچِ سخت: اندازه‌گیریِ آزمایشگاهی افتِ ۴٫۵٪ رابریک و +۲۲ واحد لنگر داد،
+ * پس این یک **فرضیه** است نه فیکسِ باگ (بند ۲ج/۴). و چون رول‌بکش باید بدونِ دیپلوی
+ * باشد، از داشبورد `stopped` می‌شود و ظرفِ ≤۶۰ ثانیه همه به control برمی‌گردند.
+ *
+ * ⚠️ بازوی control بیت‌به‌بیت دست‌نخورده است: نه `plan` عوض می‌شود، نه `timeoutMs` پاس
+ * می‌شود، نه `cutRetry`. تا آزمایش از داشبورد running نشود، `peekVariant` همیشه
+ * `'control'` می‌دهد و این بلوک عملاً وجود ندارد. */
+const READING_MODEL_EXP = 'reading_model_ds';
+const DS_MODEL = 'deepseek/deepseek-v4-flash-0731';
+/* ⏱ سقفِ **هر فراخوانیِ** بازوی آزمایش. سقفِ سراسری ده دقیقه است که برای مدلی با
+ * میانه‌ی ~۳۰ ثانیه یعنی «کاربر می‌تواند ده دقیقه پشتِ یک فال بماند». ۶۰ ثانیه و نه
+ * ۴۵: دُمِ خودِ مدلِ فعلی روی ترافیکِ واقعی تا ۲۵۳ ثانیه دیده شده، و این سقف روی
+ * تلاش‌های فالبکِ همین بازو هم می‌نشیند؛ ۴۵ ثانیه فالبکِ سالم را هم می‌بُرید. */
+const DS_ARM_TIMEOUT_MS = 60_000;
+/* ⏱ بعد از این مدت از شروعِ فراخوانی، تلاشِ دوباره روی **همان مدل** رد می‌شود.
+ * خواسته‌ی مالک با جمله‌ی خودش: «اگه تا قبل از پیامِ در حال تفسیر نرسیده بود، دیگه
+ * سراغِ ریترای دوم نریم و یکراست فالبک فعال بشه.»
+ *
+ * ⚠️ خودِ «پیامِ در حال تفسیر آمد یا نه» هم شرطِ اول است (`loadingShown`)، ولی تنها
+ * شرط نیست و نباید باشد: اندازه‌گیریِ ترافیکِ واقعی می‌گوید میانه‌ی هد-استارت ~۳۵
+ * ثانیه است، یعنی برای کاربرِ متوسط تلاشِ اول **قبل از** آن پیام تمام می‌شود و شرطِ
+ * مالک آن‌جا هیچ‌وقت شلیک نمی‌کند. بدونِ این بودجه، همان کاربر می‌توانست دو تلاشِ
+ * کاملِ کند را پشتِ سرِ هم بگیرد. */
+const DS_CUT_AFTER_MS = 30_000;
+/* readingId هایی که پیامِ «در حال تفسیر» برایشان روی صفحه است. حافظه‌ای و بدونِ DB
+ * عمدی است: این فقط یک سیگنالِ **بهینه‌سازی** است و گم‌شدنش با ری‌استارت بی‌ضرر است
+ * (فراخوانیِ در جریان هم با همان ری‌استارت می‌میرد). */
+const loadingShown = new Set();
+/* readingId → بازوی آزمایش، فقط برای فال‌هایی که واقعاً می‌توانستند درمان را بگیرند.
+ * ⚠️ فالِ **صوتی** بیرون است چون دیپ‌سیک صدا نمی‌فهمد و برنامه‌اش اجباراً مدلِ فعلی
+ * می‌ماند. exposure برای هر دو بازو زیرِ **همین یک شرط** ثبت می‌شود تا فیلتر متقارن
+ * بماند؛ فیلترِ نامتقارن دقیقاً همان رقیق‌شدگیِ سوگیرداری است که بند ۲الف ثبتش کرده. */
+const readingArm = new Map();
 // 🚀 پیش‌فراخوانیِ خوانش بلافاصله بعد از سؤال (v3.53.0). فقط برای فالی که پولش **همان
 // لحظه‌ی انتخابِ اندازه** کسر شده (`paid`)، پس قاعده‌ی آهنینِ هزینه (بند ۹ ریشه) سرِ جایش
 // است: هیچ فراخوانی قبل از کسر نیست. کارت‌ها همان‌جا از بک‌اند کشیده می‌شوند و بُر و
@@ -1803,6 +1838,28 @@ try {
     JSON.stringify([{ key: 'control', weight: 50 }, { key: 'lucky', weight: 50 }]),
     EVENTS.PRODUCT_DELIVERED,
     JSON.stringify(['daily_reminder_off']),
+  );
+  // 🧪 آزمایشِ مدلِ خوانش (v3.105.0) — «دیپ‌سیکِ پولی با یک ریترای و فالبکِ مدلِ فعلی».
+  // بدونِ این ردیف `peekVariant` همیشه literalِ `'control'` می‌دهد و بازوی `ds` به هیچ
+  // کاربری نمی‌رسد (همان الگوی هر آزمایشِ seedشده‌ی دیگر در این فایل). ۵۰/۵۰، چون خواسته‌ی
+  // مالک «نیمی از کاربرها به‌صورت کاملاً رندم» بود.
+  // `primary_metric` روی `payment_approved` نشست چون تنها متریکِ نرخیِ این پنج‌تاست که
+  // امروز داشبورد می‌فهمد؛ رضایت (`feedback`, پراپِ `score`)، تأخیر (`reading_wait`,
+  // پراپِ `ms`) و برگشت‌به‌فالِ‌دوم از همینجا رکورد می‌شوند ولی نمایششان کارِ توسعه‌ی
+  // بعدیِ داشبورد است (event:prop + P90). گاردریل‌ها همان دو چیزی‌اند که مالک گفت
+  // «اگه بد شد سریع بفهمیم»: ریفاند و ردِ پرداخت.
+  db.prepare(`
+    INSERT OR IGNORE INTO experiments
+      (key, name, hypothesis, mode, metric_kind, variants_json, status,
+       primary_metric, guardrails_json, started_at)
+    VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
+  `).run(
+    READING_MODEL_EXP,
+    'مدلِ خوانش: دیپ‌سیکِ پولی+برشِ ریترای در برابرِ luna',
+    'دیپ‌سیکِ پولی با یک ریترای و برشِ مهلت (بدونِ اینکه کاربر بیش از حد پشتِ یک فال بماند) هزینه را کم می‌کند بدونِ افتِ محسوس در پرداخت/رضایت/برگشت.',
+    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'ds', weight: 50 }]),
+    EVENTS.PAYMENT_APPROVED,
+    JSON.stringify([EVENTS.REFUND, EVENTS.PAYMENT_REJECTED]),
   );
   // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
   // می‌شود تا در داشبورد «در حال اجرا»ی دروغین نماند. idempotent است.
@@ -3410,7 +3467,10 @@ function paidForReading(r) {
   return r.price === 0 || r.status === 'started' || r.status === 'paid';
 }
 
-async function callReadingLLM(readingId) {
+/* `armOpts` (v3.105.0) فقط از `awaitReadingLLM` می‌آید و فقط برای بازوی `ds`ِ آزمایشِ
+ * مدلِ خوانش پر می‌شود؛ بازوی `control` و مسیرِ صوتی همیشه `null` می‌گیرند، پس آن‌ها
+ * بیت‌به‌بیت رفتارِ قبل از این آزمایش را دارند. */
+async function callReadingLLM(readingId, armOpts = null) {
   const r = stmts.getReading.get(readingId);
   if (!r) return null;
   if (!paidForReading(r)) {
@@ -3475,8 +3535,9 @@ async function callReadingLLM(readingId) {
   const userMsg = audio
     ? [{ type: 'text', text: textPart }, { type: 'input_audio', input_audio: { data: audio.data, format: audio.format } }]
     : textPart;
-  // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند.
-  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL] : undefined;
+  // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند —
+  // `armOpts` این‌جا عمداً نادیده گرفته می‌شود، حتی اگر بازوی کاربر `ds` باشد.
+  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL] : (armOpts?.plan || undefined);
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
@@ -3495,6 +3556,10 @@ async function callReadingLLM(readingId) {
     // برچسبِ حسابداری (بیرونِ بدنه‌ی ریکوئست؛ به سیم نمی‌رود)
     kind: 'reading', refId: readingId, userId: r.user_id,
     maxTokens: spread.maxTokens,
+    // ⏱ فقط بازوی `ds`ِ غیرصوتی این دو را می‌گیرد؛ بازوی control بیت‌به‌بیت دست‌نخورده
+    // می‌ماند چون `timeoutMs`/`cutRetry` هر دو `undefined` می‌مانند (پیش‌فرضِ
+    // `orChatResilient`/`orChat` سرِ جایش است).
+    ...(!audio && armOpts ? { timeoutMs: armOpts.timeoutMs, cutRetry: armOpts.cutRetry } : {}),
     validate: (out) => {
       const obj = parseJsonLoose(out);
       if (v4) {
@@ -3560,7 +3625,31 @@ async function awaitReadingLLM(uid, readingId) {
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
   let p = llmInflight.get(readingId);
   if (!p) {
-    p = callReadingLLM(readingId).finally(() => llmInflight.delete(readingId));
+    /* 🧪 بازوی آزمایشِ مدلِ خوانش (v3.105.0) دقیقاً همین‌جا تعیین می‌شود: اولین باری که
+     * این فال واقعاً وارد `llmInflight` می‌شود، نه هر بار که کسی `awaitReadingLLM` صدا
+     * می‌زند (افشا هم می‌تواند به همان promiseِ پیش‌فراخوانی برسد، پس این شرط دقیقاً
+     * یک بار اجرا می‌شود). فالِ صوتی همیشه `control` است و اصلاً وارد `readingArm`
+     * نمی‌شود — فیلترِ متقارن، وگرنه رقیقشدنِ نامتقارنی که بند ۲الف ریشه هشدارش را داده
+     * تکرار می‌شود. */
+    const audio = !!(r?.question_audio && !r?.question);
+    const arm = audio ? 'control' : peekVariant(db, r?.user_id ?? uid, READING_MODEL_EXP);
+    let armOpts = null;
+    if (!audio) {
+      readingArm.set(readingId, arm);
+      if (arm === 'ds') {
+        const callStartedAt = Date.now();
+        armOpts = {
+          plan: [DS_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],
+          timeoutMs: DS_ARM_TIMEOUT_MS,
+          // خواسته‌ی مالک: «اگه تا قبل از پیامِ در حال تفسیر نرسیده بود، دیگه سراغِ
+          // ریترای دوم نریم». `loadingShown` شرطِ اول است؛ بودجه‌ی زمانی هم لازم است
+          // چون میانه‌ی هد-استارت ~۳۵ ثانیه است و برای کاربرِ متوسط آن پیام هنوز
+          // نیامده — بدونِ بودجه، همان کاربر می‌توانست دو تلاشِ کاملِ کند بگیرد.
+          cutRetry: () => loadingShown.has(readingId) || (Date.now() - callStartedAt) > DS_CUT_AFTER_MS,
+        };
+      }
+    }
+    p = callReadingLLM(readingId, armOpts).finally(() => llmInflight.delete(readingId));
     llmInflight.set(readingId, p);
   }
   const result = await p;
@@ -6198,6 +6287,10 @@ async function waitLLMWithLoading(ctx, uid, readingId) {
   // حسِ «تفسیر» از بین می‌رفت.
   const frame = loadingFrame(L.reading.loadingLabel);
   const msg = await ctx.reply(frame(0));
+  // 🧪 v3.105.0: این فال از این لحظه «پیامِ در حال تفسیر روی صفحه است». تنها مصرفِ این
+  // Set خودِ `cutRetry`ِ بازوی ds است (بند بالای `awaitReadingLLM`)؛ حافظه‌ای و بدونِ DB
+  // عمدی است چون فقط سیگنالِ **بهینه‌سازی**‌ست و گم‌شدنش با ری‌استارت بی‌ضرر است.
+  loadingShown.add(readingId);
   let i = 1, done = false;
   const startedAt = Date.now();
   (async () => { // پیام لودینگ پویا؛ بدون await تا افشا معطل نماند
@@ -6214,9 +6307,40 @@ async function waitLLMWithLoading(ctx, uid, readingId) {
       i++;
     }
   })().catch(() => {});
-  const result = await awaitReadingLLM(uid, readingId);
+  let result;
+  try {
+    result = await awaitReadingLLM(uid, readingId);
+  } finally {
+    loadingShown.delete(readingId);
+  }
+  // ⏱ لحظه‌ی واقعیِ رسیدنِ جواب، **قبل از** کفِ نمایش — همان چیزی که کاربر واقعاً پشتش
+  // معطل مانده. اگر جواب زودتر از کف رسیده باشد این عدد صفر/منفی است و با max(0,…) پاک می‌شود.
+  const resolvedAt = Date.now();
+  // 🧪 exposureِ متقارنِ آزمایشِ مدلِ خوانش: فقط برای فالِ غیرصوتی (`readingArm` را فقط
+  // `awaitReadingLLM` برای آن‌ها پر می‌کند)، و **بعد از** برگشتنِ فراخوانی — نه لحظه‌ی
+  // تعیینِ بازو — چون این‌جا رفتارِ بازو (مدل/برشِ ریترای) واقعاً روی این فال اجرا شده،
+  // چه موفق چه ناموفق (بند ۲الف ریشه: exposure یعنی کاربر treatment را «دید»/گرفت، نه
+  // اینکه کد شاخه‌اش را حساب کرد).
+  if (readingArm.has(readingId)) {
+    const arm = readingArm.get(readingId);
+    // پاک‌کردن **بلافاصله**، نه فقط بعدِ استفاده‌ی معمولی: `readingArm` صرفاً پُلِ بینِ
+    // لحظه‌ی تعیینِ بازو (در `awaitReadingLLM`) و همین ثبت است. نگه‌داشتنش برای همیشه هم
+    // نشتِ حافظه می‌ساخت (یک ردیف per فال، بدونِ پاک‌سازی) و هم دوباره‌شماری: بازیابیِ
+    // یک فالِ قدیمی از راهِ `rview:` دوباره به `waitLLMWithLoading` می‌رسد و چون
+    // `llm_json` از قبل پر است، `awaitReadingLLM` بدونِ لمسِ `readingArm` فوراً برمی‌گردد —
+    // پس اگر پاک نمی‌شد، همان یک فال بارِ دوم هم exposure/`reading_wait` می‌گرفت.
+    readingArm.delete(readingId);
+    try { expose(db, uid, READING_MODEL_EXP); } catch {}
+    // متریکِ چهارم (تأخیرِ بعدِ کفِ ۱۰ثانیه‌ای) و پنجم (P90ِ همان تأخیر، محاسبه‌اش کارِ
+    // داشبورد است) — این‌جا فقط عددِ خامِ per فال ثبت می‌شود.
+    track(db, uid, 'reading_wait', {
+      reading_id: readingId,
+      arm,
+      ms: Math.max(0, resolvedAt - startedAt - LOADING_MIN_MS),
+    });
+  }
   // کفِ نمایش: اگر جواب زودتر از کف رسید، انیمیشن تا رسیدن به کف ادامه می‌دهد.
-  const remain = LOADING_MIN_MS - (Date.now() - startedAt);
+  const remain = LOADING_MIN_MS - (resolvedAt - startedAt);
   if (remain > 0) await sleep(remain);
   done = true;
   try { await ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id); } catch {}
