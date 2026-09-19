@@ -357,6 +357,10 @@ export default {
     smsNotArrived: '🚫 No transfer notification',
     reverseYes: '✅ Yes, reverse it',
     reverseNo: '↩️ No, never mind',
+    // کدِ مرده برای این زبان (بند ۲و/۴ ریشه: ریلِ پرداخت تنها واگراییِ ساختاری است؛
+    // این دکمه‌ها فقط روی ریلِ کارت‌به‌کارتِ فارسی اجرا می‌شوند).
+    suspectYes: '✅ Transfer notification arrived',
+    suspectNo: '❌ Transfer notification did not arrive',
   },
 
   // «حوزه‌ی تمرکز» که به پرامپت می‌رود (`readingContext`). حوزه‌های بازنشسته
@@ -1053,6 +1057,9 @@ export default {
     // اطلاع به ادمین بعد از تأییدِ خودکارِ ایجنت (با دکمه‌ی «پیامکش نیومده» برای برگشت)
     adminAutoApproved: (p, user, reason, pack) =>
       `✅ Payment #${p.invoice_no || p.id} approved by the agent and credited.\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+    // کدِ مرده برای این زبان (بند ۲و/۴ ریشه) — بخشِ «کاربرِ مشکوک»ِ CLAUDE.md ربات
+    adminSuspectApprove: (p, user, pack) =>
+      `🤖 I would've approved this automatically, but this user is flagged as suspicious: check yourself whether the transfer notification really arrived.\n\nPayment #${p.invoice_no || p.id}\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
     // شبکه‌ی ایمنیِ برگشت (رسیدِ فیک)
     confirmReverse: (pid) =>
       `⚠️ Are you sure no transfer notification arrived for payment #${pid}?\nCheck the banking app first. Once you confirm, the credit from this payment is taken off the user balance (down to zero), the payment goes back to its earlier state, and from now on their payments are only approved by hand.`,
