@@ -394,6 +394,9 @@ export default {
     smsNotArrived: '🚫 No llegó el aviso',
     reverseYes: '✅ Sí, revertir',
     reverseNo: '↩️ No, déjalo así',
+    // کدِ مرده برای این زبان (بند ۲و/۴ ریشه: فقط روی ریلِ کارت‌به‌کارتِ فارسی اجرا می‌شود)
+    suspectYes: '✅ Sí llegó el aviso',
+    suspectNo: '❌ No llegó el aviso',
   },
 
   // «Área de enfoque» que va al prompt (`readingContext`). Las áreas jubiladas
@@ -1068,6 +1071,9 @@ export default {
     adminMoney,
     adminAutoApproved: (p, user, reason, pack) =>
       `✅ Pago #${p.invoice_no || p.id} aprobado por el agente y acreditado.\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+    // کدِ مرده برای این زبان (بند ۲و/۴ ریشه) — بخشِ «کاربرِ مشکوک»ِ CLAUDE.md ربات
+    adminSuspectApprove: (p, user, pack) =>
+      `🤖 Yo hubiera aprobado esto automáticamente, pero esta persona está marcada como sospechosa: revisa personalmente si el aviso realmente llegó.\n\nPago #${p.invoice_no || p.id}\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
     confirmReverse: (pid) =>
       `⚠️ ¿Seguro que no llegó el aviso del pago #${pid}?\nRevisa el banco primero. Si confirmas, el crédito sale del saldo de la persona (no baja de cero), el pago vuelve al estado anterior, y de aquí en adelante sus pagos solo se aprueban a mano.`,
     reversedUser: (cur) => `Tu pago anterior quedó cancelado y su crédito salió de tu cuenta. 🌙\nSi crees que hubo un error, escríbele al soporte: ${SUPPORT_CONTACT}`,
