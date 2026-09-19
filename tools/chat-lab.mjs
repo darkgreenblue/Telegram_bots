@@ -54,7 +54,8 @@ const { chatMetrics, repeatedNgrams, LINE_MIN, LINE_MAX } = await import('./read
 // 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت. **داور خودِ سشن است، نه یک مدلِ سوم** (تصمیمِ
 // صریحِ مالک)؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
 const { CHAT_RUBRIC, MAX: RUBRIC_MAX } = await import('./reading-lab/chat-rubric.mjs');
-const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
+const LANG_MOD = await import(`./reading-lab/lang/${LOCALE}.mjs`);
+const LANG = LANG_MOD.default;
 const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
 const L = (await import(`../bots/tarot/locales/${LOCALE}.js`)).default;
@@ -80,6 +81,15 @@ const OUT = val('out', '');
 const REPS = Math.max(1, parseInt(val('reps', '1'), 10));
 const MAX_TURNS = parseInt(val('turns', '0'), 10) || 0;      // ۰ = همه‌ی follow_upها
 const REFRESH_BASE = flag('refresh-base');
+/* 👆 **حالتِ تپ** — بازتولیدِ قطعیِ همان کاری که مالک کرد: «یه بارم مکالمه رو همین‌جوری
+ * تند تند فقط با دکمه‌ها بردم جلو… افتاد تو یه لوپ با جواب‌های به‌دردنخور و خیلی کوتاه».
+ *
+ * در این حالت، پیامِ نوبتِ بعد **خودِ برچسبی است که مدل در نوبتِ قبل ساخت**، دقیقاً مثل
+ * تپ روی دکمه. سؤال‌های اسکریپت‌شده فقط وقتی استفاده می‌شوند که مدل برچسبی نداده باشد.
+ * چرا این لازم بود: با سؤال‌های اسکریپت‌شده هر نوبت یک سؤالِ **تازه و پرمحتوا** به مدل
+ * می‌رسد، پس حلقه ساختاراً ناممکن است و آزمایشگاه هرگز باگی را که مالک دید نمی‌بیند —
+ * یعنی داشتیم مسیری را می‌سنجیدیم که خرابی در آن رخ نمی‌دهد. */
+const TAP = flag('tap');
 const BASE_FILE = path.resolve(HERE, val('base', 'reading-lab/.chat-base.json'));
 /* کدام قدمِ هر پرسونا فالِ پایه شود. پیش‌فرض **آخرین** قدم: غنی‌ترین کانتکست (حافظه‌ی
  * انباشته و فال‌های قبلی) و ارزان‌ترین دور. `--steps all` هر سه را می‌گیرد. */
@@ -119,7 +129,29 @@ const rep = (s, from, to) => {
 };
 
 const PROMPT_VARIANTS = {
-  /* 📭 عمداً خالی. سه واریانتِ دورهای ۲ تا ۴ (`v2`, `v3`, `v4`) این‌جا بودند و هر سه
+  /* 📭 `v5` هم برد و از v3.100.0 خودش پرامپتِ محصول است، پس طبقِ بند ۹/۰ ریشه **پاک شد
+   * نه خاموش**: واریانتی که لنگرهایش دیگر در locale وجود ندارد، فقط بلد است دورِ بعد را
+   * با خطای «لنگر پیدا نشد» بکُشد (همان سرنوشتِ `v2`).
+   *
+   * فرضیه‌اش یک ریشه‌ی مشترک برای چهار یافته بود: **خطِ آخر یک درخواستِ اجازه بود**
+   * («می‌خوای … کنیم؟»). و چون `follow_up` «همان دعوتِ خطِ آخر از زبانِ کاربر» تعریف شده
+   * بود، تنها چیزی که می‌شد ساخت جوابِ کاربر به آن درخواست بود: یا تأیید یا یک تودوی
+   * اول‌شخص («معیارها رو مشخص کنم») — هیچ‌کدام سؤال نبودند، و همین بود که مالک گرفت.
+   *
+   * نتیجه‌ی دورِ جفت‌شده‌ی ۱۴۰۵/۰۶/۲۷ (۵۶ نوبت، `--set chat`):
+   *   • C1 با `--tap`: قلابِ سالم **۲۵٪ ⟵ ۱۰۰٪**، برچسبِ سؤالِ واقعی **۲/۸ ⟵ ۸/۸**،
+   *     تفاضلِ per سناریو −۷۵ واحد و یک‌دست.
+   *   • C3 (فکتِ محصولی): دو جوابِ **غلطِ** خطِ پایه درست شدند.
+   *   • C2 (اعتماد/قطعیت): هر دو بازو خوب، ولی v5 در نوبتِ **اول** هم صریح می‌گوید
+   *     «هیچ‌چیز صددرصد قطعی نیست» — همان چیزی که جانشینِ پیامِ نادج شد.
+   *
+   * ⚠️ و یک رگرسیونِ ثبت‌شده که پنهان نمی‌شود: زیرِ کفِ محتوا **۲/۲۰ ⟵ ۴/۲۰** و طولِ
+   * داخلِ هدف ۱۷/۲۰ ⟵ ۱۴/۲۰. دو قاعده‌ی «خبری بنویس» و «زاویه را نام ببر» جواب‌ها را
+   * کمی کوتاه‌تر می‌کنند. آگاهانه پذیرفته شد چون مکانیزمِ `CHAT_FLOOR` (تعمیرِ آگاه +
+   * ریفاندِ بی‌صدا) دقیقاً همین را می‌گیرد و رویدادِ `chat_thin` اندازه‌اش را در
+   * پروداکشن گزارش می‌کند. اگر آن عدد بالا رفت، فرضیه‌ی دورِ بعد همین دو قاعده‌اند. */
+
+  /* 📭 سه واریانتِ دورهای ۲ تا ۴ (`v2`, `v3`, `v4`) این‌جا بودند و هر سه
    * تکلیفشان روشن شد، پس طبقِ بند ۹/۰ ریشه پاک شدند نه خاموش:
    *
    * - **`v2` برنده شد و از v3.85.0 خودش پرامپتِ محصول است** (قفلِ لحنِ گفتاری +
@@ -286,7 +318,14 @@ function fakeChatReply(turnIdx, cardNames, question) {
   const mode = turnIdx % 3;
   // پاکت، با همان کلیدهای پروداکشن. پرچم‌ها در استاب همیشه false اند: این‌جا نیتِ
   // مدل سنجیده نمی‌شود، فقط مسیرِ سنجه‌ها.
-  const env = (t) => JSON.stringify({ answer: t, wants_new_reading: false, needs_support: false });
+  /* ⚠️ برچسبِ دکمه هم عمداً **نقصِ شناخته‌شده** تزریق می‌کند (یکی meta، یکی assent، یکی
+   * سالم)، وگرنه `--fake` سبز رد می‌شد در حالی که سنجه‌ی تازه‌ی برچسب هرگز لمس نشده —
+   * دقیقاً همان کلاسی که این فایل برای `hookOk` بسته بود (بند ۶ب-۲ ریشه). */
+  const FU = ['چرا این کارت این‌جا افتاد؟', 'سؤالمو می‌پرسم', 'آره بریم سراغش'];
+  const env = (t) => JSON.stringify({
+    answer: t, wants_new_reading: false, needs_support: false,
+    follow_up: FU[turnIdx % FU.length], wants_end: false,
+  });
   if (mode === 1) return env(`${head}\n${mid}\nسؤال دیگه‌ای داری؟`);
   /* ⚠️ این جمله عمداً با **هیچ‌کدام** از سؤال‌های سناریو و هیچ نامِ کارتی کلمه‌ی مشترک
    * ندارد، وگرنه `hookOk` لنگرش را پیدا می‌کند و نقصِ تزریقی بی‌صدا خنثی می‌شود —
@@ -376,10 +415,18 @@ async function runConversation(persona, base, arm, rep) {
    * **بیرونِ دامنه‌ی فال** است، و دو سنجه را برعکس می‌کند: قاعده‌ی قلاب معاف می‌شود
    * (جوابِ درستِ «پایتخت انگلیس» کوتاه و بی‌لنگر است) و در عوض نام‌بردنِ کارت ایراد
    * می‌شود. هر ۱۵ فایلِ سناریوی موجود رشته‌اند و دست‌نخورده کار می‌کنند. */
+  let lastFollowUp = '';   // برچسبِ دکمه‌ی نوبتِ قبل (فقط در حالتِ --tap مصرف می‌شود)
+  let tapped = 0;
+
   for (let t = 0; t < ups.length; t++) {
     const up = ups[t];
-    const q = String(typeof up === 'string' ? up : up?.q ?? '');
-    const offDomain = typeof up === 'object' && !!up?.off;
+    const scripted = String(typeof up === 'string' ? up : up?.q ?? '');
+    const viaTap = TAP && !!lastFollowUp;
+    const q = viaTap ? lastFollowUp : scripted;
+    if (viaTap) tapped++;
+    // سؤالِ بیرونِ دامنه فقط وقتی معنی دارد که واقعاً همان سؤالِ اسکریپت‌شده رفته باشد؛
+    // برچسبِ خودِ مدل هرگز بیرونِ دامنه نیست.
+    const offDomain = !viaTap && typeof up === 'object' && !!up?.off;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
     if (crisisIn(q)) { turns.push({ q, skipped: 'crisis' }); continue; }
@@ -423,6 +470,8 @@ async function runConversation(persona, base, arm, rep) {
       check = chatMetrics({
         reply, raw: res.out, cardNames,
         questionWords: questionWordsOf(q, base.question), question: q, offDomain,
+        // سنجه برچسبِ **خام** را می‌بیند (قبل از گاردِ کد)، وگرنه همیشه صفر می‌گفت.
+        flags: outObj, followUp: outObj.followUpRaw || '',
       });
     } catch (e) {
       // اگر خودِ سنجه بترکد، نوبت‌های قبلی که پولشان داده شده نباید از بین بروند.
@@ -431,9 +480,13 @@ async function runConversation(persona, base, arm, rep) {
         issues: [`خطای خودِ سنجه: ${e.message}`], notes: [] };
     }
 
-    turns.push({ q, reply, raw: res.out, model: res.model, attempts: res.attempts,
-      flags: { newReading: outObj.newReading, support: outObj.support },
+    turns.push({ q, viaTap, reply, raw: res.out, model: res.model, attempts: res.attempts,
+      flags: { newReading: outObj.newReading, support: outObj.support, end: outObj.end },
+      followUp: outObj.followUpRaw || '', fuKept: outObj.followUp || '',
       ms, usage, check, inputChars: messagesChars(messages) });
+    // تپ روی چیزی انجام می‌شود که **واقعاً دکمه شده**؛ برچسبی که گارد حذفش کرده هیچ
+    // دکمه‌ای در چت ندارد، پس نوبتِ بعد به سؤالِ اسکریپت‌شده برمی‌گردد.
+    lastFollowUp = outObj.followUp || '';
 
     // تاریخچه دقیقاً مثل ربات به نوبتِ بعد منتقل می‌شود — **با پرچم‌ها**، وگرنه
     // `packHistory` پاکتِ بازپخش را همیشه خاموش می‌ساخت و آزمایشگاه چیزی را می‌سنجید
@@ -441,10 +494,21 @@ async function runConversation(persona, base, arm, rep) {
     history.push({ role: 'user', text: q }, {
       role: 'assistant', text: reply,
       want_reading: outObj.newReading ? 1 : 0, want_support: outObj.support ? 1 : 0,
+      follow_up: outObj.followUp || '', want_end: outObj.end ? 1 : 0,
     });
   }
 
-  return { persona: persona.id, name: persona.name, base, arm, rep, turns, prefixStable };
+  /* 🔁 **حلقه = جوابِ زیرِ کف، پشتِ سرِ هم.** عمداً «پیاپی» است نه «تعداد در کلِ گفتگو»
+   * — همان درسِ ثبت‌شده‌ی `stuck-detect` (بند ۹ب-۴ ریشه): یک جوابِ کوتاهِ تکی توضیحِ
+   * محتمل دارد (سؤالِ پرچم‌دار، سؤالِ واقعاً ساده)، ولی سه‌تای پشتِ سرِ هم یعنی گفتگو
+   * دیگر جایی نمی‌رود. بیشینه‌ی طولِ زنجیره چاپ می‌شود، نه جمع. */
+  let thinRun = 0, thinMax = 0;
+  for (const t of turns) {
+    if (!t.reply) continue;
+    if (t.check?.thin) { thinRun++; thinMax = Math.max(thinMax, thinRun); } else thinRun = 0;
+  }
+
+  return { persona: persona.id, name: persona.name, base, arm, rep, turns, prefixStable, tapped, thinMax };
 }
 
 /* ═══════════════ اجرا ═══════════════ */
@@ -482,8 +546,9 @@ for (const arm of ARM_LIST) {
         console.log(`   🃏 ${base.cards.map((c) => cardName(c.key) + (c.reversed ? '↕' : '')).join('، ')}`);
         console.log(`   سرخطِ فال: ${String(base.llm.headline || '').slice(0, 100)}`);
         if (!conv.prefixStable) console.log('   ❌ پیشوندِ ثابت بینِ نوبت‌ها عوض شد (کشِ پرامپت از بین می‌رود)');
+        if (TAP) console.log(`   👆 حالتِ تپ: ${conv.tapped} از ${conv.turns.length} نوبت از روی برچسبِ خودِ مدل آمد`);
         for (const [k, t] of conv.turns.entries()) {
-          console.log(`\n   ── نوبتِ ${k + 1}: «${t.q}»`);
+          console.log(`\n   ── نوبتِ ${k + 1}${t.viaTap ? ' 👆' : ''}: «${t.q}»`);
           if (t.skipped) { console.log(`      ⏭ رایگان، بدونِ فراخوانیِ مدل (${t.skipped})`); continue; }
           if (t.failed) { console.log('      ❌ همه‌ی تلاش‌ها شکست خورد (مسیرِ ریفاند)'); continue; }
           console.log(`      ${t.reply.split('\n').join('\n      ')}`);
@@ -493,11 +558,18 @@ for (const arm of ARM_LIST) {
            * چون گزارش فقط متن را نشان می‌داد، افتِ طول و لحن به‌جای «مدلِ اشتباه»
            * به «پرامپت» نسبت داده می‌شد. پرچم‌ها هم چاپ می‌شوند چون تنها مصرفشان
            * (دکمه‌ی CTA) بیرونِ آزمایشگاه است و بدونِ چاپ، خاموش‌ماندنشان نامرئی بود. */
-          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '']
-            .filter(Boolean).join(' + ') || 'ــ';
-          console.log(`      📏 ${c.lines} خط / ${c.chars} نویسه | قلاب: ${c.hook.ok ? '✅' : `❌ ${c.hook.why}`}`
+          /* ⚠️ پرچمِ `end` هم چاپ می‌شود، و این یک جزئیاتِ تزئینی نیست: نبودش یک بار
+           * باعث شد یک نوبتِ **معافِ درست** (جوابِ «پایانِ مکالمه»، که ذاتاً کوتاه است)
+           * به‌عنوان قرمزِ کاذبِ کفِ محتوا خوانده شود، چون معافیت در دیتا بود و در
+           * گزارش نبود. هر پرچمی که رفتارِ سنجه را عوض می‌کند باید دیده شود. */
+          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '',
+            t.flags?.end ? 'پایانِ مکالمه' : ''].filter(Boolean).join(' + ') || 'ــ';
+          console.log(`      📏 ${c.lines} خط / ${c.chars} نویسه${c.thin ? ' 🪫' : ''} | قلاب: ${c.hook.ok ? '✅' : `❌ ${c.hook.why}`}`
             + ` | 🚩 ${fl} | 🤖 ${t.model || '?'}${t.attempts > 1 ? ` (تلاشِ ${t.attempts})` : ''}`
             + ` | ورودی ${t.inputChars} نویسه | ${t.ms}ms`);
+          // برچسبِ دکمه همیشه چاپ می‌شود، چون در حالتِ تپ **ورودیِ نوبتِ بعد** است و
+          // بدونِ دیدنش نمی‌شود فهمید حلقه از کجا شروع شد.
+          console.log(`      🏷 دکمه: ${t.followUp ? `«${t.followUp}»${c.fuBad ? ` ❌ ${c.fuBad} (گارد حذفش کرد)` : ''}` : '(ندارد)'}`);
           if (c.issues.length) c.issues.forEach((x) => console.log(`      ❌ ${x}`));
           if (c.notes.length) c.notes.forEach((x) => console.log(`      ⚠️ ${x}`));
         }
@@ -555,6 +627,11 @@ function summarize(rows) {
   const qbad = done.filter((t) => t.check.qmarks > 1).length;
   const firstOk = done.filter((t) => t.check.firstLine.ok).length;
   const bad = done.filter((t) => t.check.issues.length).length;
+  const thin = done.filter((t) => t.check.thin).length;
+  const fuHas = done.filter((t) => t.followUp).length;
+  const fuBad = done.filter((t) => t.check.fuBad).length;
+  const fuStyle = done.filter((t) => t.check.fuStyle).length;
+  const fuNoAsk = done.filter((t) => t.check.fuNoAsk).length;
   const lines = done.map((t) => t.check.lines).sort((a, b) => a - b);
   const inTarget = lines.filter((n) => n >= LINE_MIN && n <= LINE_MAX).length;
   const ms = done.map((t) => t.ms).sort((a, b) => a - b);
@@ -563,7 +640,7 @@ function summarize(rows) {
   const tout = done.reduce((s, t) => s + (t.usage?.out || 0), 0);
   const cached = done.reduce((s, t) => s + (t.usage?.cached || 0), 0);
   return { n: done.length, skipped, failed, hookOkN, bait, formal, dash, dashRaw, qbad,
-    firstOk, bad, lines, inTarget, ms, usd, tin, tout, cached,
+    firstOk, bad, thin, fuHas, fuBad, fuStyle, fuNoAsk, lines, inTarget, ms, usd, tin, tout, cached,
     hookFail: done.length ? (done.length - hookOkN) * 100 / done.length : null };
 }
 
@@ -607,6 +684,14 @@ function printSummary(label, rows, convs = null) {
   console.log(`   🪝 خطِ آخرِ سالم: ${s.hookOkN}/${s.n} (${pct(s.hookOkN, s.n)}٪) | chatbait: ${s.bait}`
     + ` | «شما»: ${s.formal} | خط تیره: ${s.dash} (خام: ${s.dashRaw}) | بیش از یک «؟»: ${s.qbad}`);
   console.log(`   🎯 خطِ اول خودِ جواب: ${s.firstOk}/${s.n} (${pct(s.firstOk, s.n)}٪)`);
+  /* دو خطِ تازه‌ی ۱۴۰۵/۰۶/۲۵ — هر دو مستقیماً به بازخوردِ مالک وصل‌اند و هر دو پولی‌اند:
+   * جوابِ زیرِ کف یعنی یک الماسِ سوخته، و برچسبِ خرابِ دکمه یعنی نوبتِ بعدی هم می‌سوزد. */
+  console.log(`   🪫 زیرِ کفِ محتوا: ${s.thin}/${s.n} (${pct(s.thin, s.n)}٪)`
+    + (convs ? ` | بلندترین زنجیره‌ی پیاپی: ${Math.max(0, ...convs.map((c) => c.thinMax || 0))}` : ''));
+  /* ⚠️ «سؤال نیست» **جدا** از «امری» چاپ می‌شود، نه جمع‌شده: کلاسِ غالبِ نقضِ خطِ
+   * پایه امری نبود و اگر یکی می‌شدند همان تفکیکی گم می‌شد که تصمیمِ v5 روی آن نشست. */
+  console.log(`   🏷 دکمه: ${s.fuHas}/${s.n} ساخته شد | ❌ خراب: ${s.fuBad}`
+    + ` | ⚠️ امری: ${s.fuStyle} | ❓ سؤال نیست: ${s.fuNoAsk}`);
   console.log(`   📏 طول: ${s.inTarget}/${s.n} داخلِ هدفِ ${LINE_MIN} تا ${LINE_MAX} خط`
     + ` | توزیع: ${s.lines.join(', ')} خط`);
   /* و همان عدد در واحدِ درستش. عددِ per نوبتِ بالا برای دیدنِ توزیع می‌ماند، ولی
@@ -707,10 +792,11 @@ function dumpTranscripts(rows) {
     console.log(`🃏 ${c.base.cards.map((x) => cardName(x.key) + (x.reversed ? '↕' : '')).join('، ')}`);
     console.log(`📩 ${[c.base.rendered.headline, c.base.rendered.body, c.base.rendered.closing].filter(Boolean).join('\n')}`);
     for (const [k, t] of c.turns.entries()) {
-      console.log(`\n🙋 ${k + 1}) ${t.q}`);
+      console.log(`\n🙋 ${k + 1}) ${t.viaTap ? '👆 ' : ''}${t.q}`);
       if (t.skipped) { console.log(`🤖 (رایگان، بدونِ مدل: ${t.skipped})`); continue; }
       if (t.failed) { console.log('🤖 (شکست خورد)'); continue; }
       console.log(`🤖 ${t.reply}`);
+      if (t.followUp) console.log(`🏷 [${t.followUp}]`);
     }
   }
 }
@@ -744,6 +830,67 @@ if (FAKE) {
     process.exit(1);
   }
   if (enough) console.log('\n✅ کنترلِ مثبت: هر دو نقصِ تزریق‌شده‌ی استاب (chatbait و بی‌لنگر) گرفته شدند.');
+
+  // کنترلِ مثبتِ دومِ همان قاعده، برای سنجه‌ی تازه‌ی برچسبِ دکمه.
+  const fuWhys = new Set(allTurns(all).filter((t) => t.check).map((t) => t.check.fuBad).filter(Boolean));
+  const fuMissed = enough ? ['meta', 'assent'].filter((w) => !fuWhys.has(w)) : [];
+  if (fuMissed.length) {
+    console.log(`\n❌ کنترلِ مثبت: برچسبِ خرابِ تزریق‌شده گرفته نشد (${fuMissed.join('، ')}).`);
+    console.log('   یعنی `followUpBad` دیگر کار نمی‌کند، یا سنجه برچسبِ گاردخورده را می‌بیند');
+    console.log('   به‌جای برچسبِ خام — که همیشه صفر گزارش می‌دهد.');
+    process.exit(1);
+  }
+  if (enough) console.log('✅ کنترلِ مثبت: هر دو برچسبِ خرابِ استاب (meta و assent) گرفته شدند.');
+
+  /* کنترلِ سومِ همان قاعده، برای سنجه‌ی **نکته**ی «برچسبِ امری».
+   *
+   * ⚠️ این یکی را استاب نمی‌تواند تزریق کند، چون `fuStyle` فقط روی برچسبی می‌نشیند که
+   * `followUpBad` **نگرفته** باشد و استاب هر دو برچسبِ بدش را گارد می‌گیرد. پس الگو
+   * مستقیم روی پیکره‌ی پین‌شده‌ی `lang/<locale>.mjs` اجرا می‌شود — هر دو جهت، چون
+   * پهن‌کردنِ این الگو رایگان نیست و یک نسخه‌ی گشاد، سؤالِ سالمِ کاربر را نکته می‌کند. */
+  const re = LANG.followUpImperative;
+  const pos = LANG_MOD.FU_STYLE_POSITIVE || [];
+  const neg = LANG_MOD.FU_STYLE_NEGATIVE || [];
+  if (!re || !pos.length || !neg.length) {
+    console.log('\n❌ کنترلِ مثبت: پیکره‌ی سنجه‌ی برچسبِ امری در lang/' + LOCALE + '.mjs نیست.');
+    console.log('   یک پیکره‌ی خالی همه‌ی ادعاهای زیر را بی‌صدا پاس می‌کند.');
+    process.exit(1);
+  }
+  const posMiss = pos.filter((s) => !re.test(s));
+  const negHit = neg.filter((s) => re.test(s));
+  if (posMiss.length || negHit.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «برچسبِ امری» با پیکره‌ی خودش نمی‌خواند.');
+    if (posMiss.length) console.log(`   نگرفت (باید بگیرد): ${posMiss.map((s) => `«${s}»`).join('، ')}`);
+    if (negHit.length) console.log(`   قرمزِ کاذب: ${negHit.map((s) => `«${s}»`).join('، ')}`);
+    process.exit(1);
+  }
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی برچسبِ امری روی ${pos.length} نقضِ واقعی قرمز و روی ${neg.length} برچسبِ سالم ساکت است.`);
+
+  /* کنترلِ چهارم، برای سنجه‌ی «برچسب سؤال است یا نه» (`followUpAsk`).
+   *
+   * ⚠️ جهتِ این الگو **برعکسِ** سه‌تای بالاست: گرفتن یعنی **سالم** (برچسب سؤالِ خودِ
+   * کاربر است) و نگرفتن یعنی نکته. پس `FU_ASK_POSITIVE` باید بگیرد و
+   * `FU_ASK_NEGATIVE` نباید — دقیقاً برچسب‌های واقعیِ خطِ پایه که تصمیمِ پرامپتِ v5
+   * روی آن‌ها نشست. مثل بالا استاب نمی‌تواند تزریقش کند، چون برچسبِ استاب گارد
+   * می‌خورد و این سنجه فقط روی برچسبِ گاردنخورده اجرا می‌شود. */
+  const reAsk = LANG.followUpAsk;
+  const aPos = LANG_MOD.FU_ASK_POSITIVE || [];
+  const aNeg = LANG_MOD.FU_ASK_NEGATIVE || [];
+  if (!reAsk || !aPos.length || !aNeg.length) {
+    console.log('\n❌ کنترلِ مثبت: پیکره‌ی سنجه‌ی «برچسب سؤال نیست» در lang/' + LOCALE + '.mjs نیست.');
+    console.log('   یک پیکره‌ی خالی یا الگوی غایب، این سنجه را بی‌صدا به صفرِ همیشگی تبدیل می‌کند');
+    console.log('   — همان چیزی که یک بار برای `fuStyle` رخ داد و شکافِ ۲/۸ را نامرئی کرد.');
+    process.exit(1);
+  }
+  const askMiss = aPos.filter((s) => !reAsk.test(s));
+  const askHit = aNeg.filter((s) => reAsk.test(s));
+  if (askMiss.length || askHit.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» با پیکره‌ی خودش نمی‌خواند.');
+    if (askMiss.length) console.log(`   سؤالِ سالم را سؤال ندید: ${askMiss.map((s) => `«${s}»`).join('، ')}`);
+    if (askHit.length) console.log(`   برچسبِ غیرسؤالی را سؤال دید: ${askHit.map((s) => `«${s}»`).join('، ')}`);
+    process.exit(1);
+  }
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» روی ${aPos.length} سؤالِ سالم ساکت و روی ${aNeg.length} برچسبِ واقعیِ خطِ پایه قرمز است.`);
 }
 
 if (OUT) {
@@ -756,7 +903,8 @@ if (OUT) {
     baseModel: c.base.model, baseHeadline: c.base.llm?.headline || '',
     prefixStable: c.prefixStable,
     turns: c.turns.map((t) => ({
-      q: t.q, reply: t.reply || '', raw: t.raw || '', skipped: t.skipped || '',
+      q: t.q, viaTap: !!t.viaTap, reply: t.reply || '', raw: t.raw || '', skipped: t.skipped || '',
+      followUp: t.followUp || '', flags: t.flags || null,
       failed: !!t.failed, model: t.model || '', attempts: t.attempts || 0,
       ms: t.ms || 0, usage: t.usage || null, check: t.check || null,
     })),

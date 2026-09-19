@@ -13,7 +13,7 @@
 // قاعده‌ی دوم: همه‌ی این‌ها **قطعی** اند. قضاوتِ سلیقه‌ای کارِ `chat-rubric.mjs` و
 // خودِ سشن است، نه این فایل.
 import { ngrams } from './checks.mjs';
-import { hookOk, norm } from '../../bots/tarot/chat-core.js';
+import { hookOk, norm, followUpBad, floorApplies, CHAT_FLOOR_CHARS } from '../../bots/tarot/chat-core.js';
 
 /* 🌍 دادهٔ زبانیِ سنجه‌ها از همان `lang/<locale>.mjs`ِ آزمایشگاهِ خوانش می‌آید، نه یک
  * کپیِ تازه: الگوی «لحنِ رسمی» و استثنای «جمعِ واقعی» یک بار در همان‌جا تصحیح شده‌اند
@@ -104,7 +104,7 @@ function firstLineAnswers(reply, question) {
  * @param raw   متنِ خامِ مدل، فقط برای شمردنِ چیزی که کد پاکش کرده (خط تیره)
  */
 export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [], question = '',
-  offDomain = false, canned = false }) {
+  offDomain = false, canned = false, flags = null, followUp = '' }) {
   const issues = [], notes = [];
   const anchors = { cardNames, questionWords };
   const lines = linesOf(reply);
@@ -118,7 +118,40 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     return { lines: lines.length, chars, canned: true, hook: { ok: true, why: '' }, hookExempt: false,
       chatbait: 0, formal: [], bookish: [], labelEcho: '', dashes: 0, dashesRaw: 0, qmarks: 0,
       firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', promptLeak: '', cardForce: '',
-      latin: 0, offDomain, issues, notes };
+      latin: 0, offDomain, thin: false, fuBad: '', fuStyle: '', fuNoAsk: false, issues, notes };
+  }
+
+  /* ۰) 🪫 **کفِ محتوا** — تازه‌ترین سنجه و تنها سنجه‌ای که مستقیم به پول وصل است.
+   * هر جواب یک الماس می‌گیرد، پس جوابی که زیرِ `CHAT_FLOOR_CHARS` بماند محصولی
+   * تحویل نداده. جوابِ **پرچم‌دار** معاف است (`floorApplies`): «به پشتیبانی پیام بده»
+   * و «برای این باید فالِ تازه بگیری» ذاتاً کوتاه‌اند و کارِ خودشان را کرده‌اند.
+   * تعریفِ معافیت از `chat-core` می‌آید تا سنجه و گارد یک قاعده را ببینند. */
+  const thin = chars < CHAT_FLOOR_CHARS && floorApplies(flags || { });
+  if (thin) issues.push(`زیرِ کفِ محتوا: ${chars} نویسه (کف ${CHAT_FLOOR_CHARS}) — یک الماس بابتِ جوابِ توخالی`);
+
+  /* ۰ب) 🏷 برچسبِ دکمه‌ی سؤالِ پیشنهادی.
+   *   • `fuBad` (ایراد) = همان دو کلاسِ بی‌ابهامِ `followUpBad` در chat-core که حلقه
+   *     می‌سازند؛ عیناً همان تابعی که کد هم با آن دکمه را حذف می‌کند.
+   *   • `fuStyle` (نکته) = برچسبِ **امری** («… رو بگو»). محتوا دارد پس حلقه نمی‌سازد و
+   *     گارد نمی‌خورد، ولی شکایتِ صریحِ مالک همین بود: «انگار جمله‌ای نیست که کاربر
+   *     خودش می‌نوشت». این عدد فقط می‌گوید پرامپت چقدر جواب داده. */
+  const fuBad = followUp ? followUpBad(followUp) : '';
+  if (fuBad) issues.push(`برچسبِ دکمه (${fuBad}): «${followUp}»`);
+  let fuStyle = '';
+  if (followUp && !fuBad && LANG.followUpImperative) {
+    fuStyle = (followUp.match(LANG.followUpImperative)?.[0] || '').trim();
+    if (fuStyle) notes.push(`برچسبِ امری (نه سؤالِ خودِ کاربر): «${followUp}»`);
+  }
+  /* ❓ `fuNoAsk` (نکته) = برچسب **سؤال نیست**.
+   * ⚠️ این سنجه جدا از `fuStyle` لازم شد چون آن یکی **کلاسِ غالبِ نقض را نمی‌دید**:
+   * برچسب‌های بدِ خطِ پایه امری نبودند، التزامیِ اول‌شخص بودند («معیارها رو مشخص کنم»)،
+   * پس `fuStyle` در هر دو بازو صفر می‌داد و «نمی‌بینم» شبیهِ «چیزی نیست» بود
+   * (بند ۲و/۶ب-۲ ریشه). این یکی هر دو کلاس را با هم می‌گیرد و همان چیزی است که
+   * تفاوتِ ۲/۸ در برابرِ ۸/۸ را نشان داد. */
+  let fuNoAsk = false;
+  if (followUp && !fuBad && LANG.followUpAsk) {
+    fuNoAsk = !LANG.followUpAsk.test(followUp);
+    if (fuNoAsk) notes.push(`برچسب سؤال نیست (کاربر این را نمی‌نوشت): «${followUp}»`);
   }
 
   /* ۱) قلابِ خطِ آخر — **همان تابعی** که ربات هم لاگش می‌کند.
@@ -274,7 +307,7 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
 
   return { lines: lines.length, chars, canned: false, hook, hookExempt, chatbait: bait.length,
     formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency,
-    promptLeak, cardForce, latin: latin.length, offDomain, issues, notes };
+    promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuStyle, fuNoAsk, issues, notes };
 }
 
 /**
