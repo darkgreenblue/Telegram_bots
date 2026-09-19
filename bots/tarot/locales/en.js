@@ -832,6 +832,10 @@ export default {
      * ⚠️ استیتِ ورودی است، پس **هیچ دکمه‌ای ندارد** (بند ۹ب، استثنای مقدس).
      * ⚠️ `free` از **دیتا** می‌آید نه از ثابت: اگر سؤالِ رایگان خرج شده باشد، متن نباید
      * وعده‌ی رایگان بدهد (بند ۲و/۶ج: ادعا هرگز از دیتا جلو نمی‌زند). */
+    /* 💎 Last line of every chat answer: number + emoji only, inside a quote box
+     * (owner's explicit ask). Wordless on purpose, so it is bit-for-bit identical in all
+     * five locales and has nothing to translate. Empty string in the toman world. */
+    balanceBox: (balance, cur) => (cur?.on ? quote(moneyTight(balance, cur)) : ''),
     intro: (price, cur, balance, free) => {
       const cost = free
         ? `Your first question is on me 🎁\nFrom the second one, each question takes ${moneyTight(price, cur)} from your ${purse(cur)}.`
