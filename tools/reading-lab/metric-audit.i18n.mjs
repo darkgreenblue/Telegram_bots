@@ -26,6 +26,13 @@ const CASES = {
     ['بدونِ شرط', 'در کل: آره. همین مسیر را ادامه بده.', { cond: false, named: false }],
     ['دو شرط، آخری ملاک', 'اگر دیوانه بیاید خوب است. اگر صبر کنی، آن‌وقت جواب می‌گیری.', { cond: true, named: false }],
     ['شکلِ محاوره‌ای «اگه/اونوقت»', 'در کل: آره. اگه سه جام رو ببینی، اونوقت جواب می‌گیری.', { cond: true, named: true }],
+    /* کنترلِ قیدِ «فقط نامِ چندواژه‌ای»، و **تنها جایی که آن قید بار دارد**: فارسی حرفِ
+     * بزرگ ندارد، پس تفکیکِ حساس-به-حرف این‌جا بی‌اثر است و فقط همین قید می‌ماند.
+     * «قدرت» هم نامِ m08 است هم اسمِ عامِ پرتکرار. برداشتنِ قید این ردیف را قرمز می‌کند
+     * (تستِ جهش قبلاً همین شکاف را لو داد: با کنترلِ اسپانیایی تنها، جهش زنده می‌ماند). */
+    ['اسمِ عامِ تک‌واژه‌ای نامِ کارت شمرده نمی‌شود',
+      'در کل: آره. اگر سه جام را با قدرت نگه داری، آن‌وقت راه باز می‌شود.',
+      { cond: true, named: true, alien: '' }],
   ],
   ru: [
     ['نامِ کارت در شرط', 'В целом: да. Если ты доверишься Шуту, тогда путь откроется.', { cond: true, named: true }],
@@ -47,6 +54,28 @@ const CASES = {
     ['بدونِ شرط', 'En general: sí. Todo se resuelve solo.', { cond: false, named: false }],
     // «sí»ِ تأکیدی نویسه‌ی دیگری است و نباید شرط حساب شود.
     ['«sí» تأکیدی شرط نیست', 'En general: sí. Nada se mueve por ahora.', { cond: false, named: false }],
+    /* ⚠️ حیاتی‌ترین موردِ اسپانیایی، و شکلِ **واقعیِ** خروجیِ دورِ ۱۴۰۵/۰۶/۲۸: «si» در
+     * این زبان «آیا» هم معنی می‌دهد و نتیجه‌ی شرط تقریباً همیشه «entonces sabrás
+     * si …» می‌شود. سنجه که آخرین «si» را می‌گیرد، بدونِ قیدِ ابتدای بند بندِ
+     * اشتباه را نمره می‌داد و دو فال از نُه را ❌ می‌کرد. برداشتنِ آن قید این ردیف
+     * را قرمز می‌کند. */
+    ['«si»ِ «آیا» در نتیجه شرط را نمی‌دزدد',
+      'En general: sí. Si usas El Loco para decir lo que necesitas, entonces sabrás si ambos pueden construir eso.',
+      { cond: true, named: true }],
+    /* 🚨 شکلِ **واقعیِ** دو فال از نُهِ همان دور: الزامِ «نامِ کارت را ببر» با کارتی
+     * برآورده شد که در این فال کشیده نشده بود. `named` صفر می‌شود ولی علتش را
+     * نمی‌گوید؛ `alien` می‌گوید. برداشتنِ سنجه این ردیف را قرمز می‌کند. */
+    ['کارتِ بیگانه در شرط', 'En general: sí. Si el Ocho de Oros deja claro el pago, entonces avanzas.',
+      { cond: true, named: false, alien: 'Ocho de Oros' }],
+    ['کارتِ خودِ فال بیگانه شمرده نمی‌شود',
+      'En general: sí. Si aceptas Tres de Copas, entonces avanzas.', { cond: true, named: true, alien: '' }],
+    /* کنترلِ قیدِ «فقط نامِ چندواژه‌ای» (بند ۶ب-۲): «la fuerza» اسمِ عامِ اسپانیایی است و
+     * اتفاقاً نامِ کارتِ m08 هم هست. بدونِ آن قید، همین جمله‌ی سالم «کارتِ بیگانه» اعلام
+     * می‌شد — و اسکنِ اولیه‌ی دورِ ۱۴۰۵/۰۶/۲۸ دقیقاً پنج هشدارِ کاذب از هشت ضربه از
+     * همین کلاس داشت. برداشتنِ قید این ردیف را قرمز می‌کند. */
+    ['اسمِ عام نامِ کارت شمرده نمی‌شود',
+      'En general: sí. Si usas la fuerza de Tres de Copas sin pelear, entonces avanzas.',
+      { cond: true, named: true, alien: '' }],
   ],
 };
 
@@ -63,9 +92,16 @@ for (const [lang, cases] of Object.entries(CASES)) {
   if (!got) { fails.push(`«${lang}»: اجرا نشد — ${(r.stderr || '').slice(0, 160)}`); continue; }
   cases.forEach(([label, , want], i) => {
     const g = got[i];
-    const good = g && g.cond === want.cond && g.named === want.named;
+    /* `alien` فقط وقتی سنجیده می‌شود که ردیف اعلامش کرده باشد، تا ۱۶ ردیفِ قبلی
+     * دست‌نخورده بمانند. ⚠️ ولی `undefined === undefined` یعنی سنجه‌ی حذف‌شده هم سبز
+     * رد می‌شود، پس ردیفی که `alien` دارد صریح می‌خواهد که **رشته** برگردد. */
+    const wantsAlien = Object.hasOwn(want, 'alien');
+    const good = g && g.cond === want.cond && g.named === want.named
+      && (!wantsAlien || (typeof g.alien === 'string' && g.alien === want.alien));
     if (good) pass++;
-    else fails.push(`«${lang}» ${label}: انتظار cond=${want.cond}/named=${want.named}، گرفت ${g ? `cond=${g.cond}/named=${g.named}` : 'null'}`);
+    else fails.push(`«${lang}» ${label}: انتظار cond=${want.cond}/named=${want.named}`
+      + (wantsAlien ? `/alien=«${want.alien}»` : '')
+      + `، گرفت ${g ? `cond=${g.cond}/named=${g.named}${wantsAlien ? `/alien=${JSON.stringify(g.alien)}` : ''}` : 'null'}`);
   });
 }
 

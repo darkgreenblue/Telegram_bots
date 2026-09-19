@@ -191,43 +191,15 @@ const PROMPT_VARIANTS = {
         `${head}\n=== The moves that make a reading personal ===`);
   },
 
-  /* 🇬🇧 دورِ ۵، فرضیه‌ی ۲: **جمع‌بندی باید کارت را نام ببرد**.
-   *
-   * جمع‌بندی طولانی‌ترین فیلدِ خروجی است (۴ تا ۷ جمله) و اسپکش سه کارِ عمومی از مدل
-   * می‌خواهد (تکرارِ جواب، بازه‌ی زمانی، شرط). هر سه ذاتاً وسوسه‌ی جمله‌ی بی‌لنگر
-   * دارند: «over these next few weeks» و «if you stay patient» را می‌شود عیناً زیرِ
-   * هر فالِ دیگری گذاشت. اسپکِ فعلی می‌گوید شرط باید «به کارت‌های همین فال بخورد»
-   * ولی این یک **توصیف** است، نه یک چیزِ قابلِ سنجش برای خودِ مدل.
-   *
-   * واریانت همان جمله را به یک الزامِ عینی تبدیل می‌کند: شرط باید **نامِ یکی از
-   * کارت‌های همین فال** را ببرد. تغییر داخلِ اسپکِ JSON است، پس بقیه‌ی پرامپت
-   * دست‌نخورده می‌ماند. */
-  closinganchor: (sys) => {
-    /* 🌍 per زبان، چون هر locale جمله‌ی خودش را دارد. انگلیسی از v3.9x این قاعده را
-     * **در خودِ پرامپت** دارد (دورِ ۵ بردش)، پس ردیفش این‌جا no-op است و عمداً مانده:
-     * حذفش یعنی دورِ تکرارِ انگلیسی بی‌صدا به control تبدیل شود.
-     * متنِ تازه‌ی هر زبان **آینه‌ی دقیقِ** انگلیسی است (نام را بلند ببر + جمله‌ی
-     * تعریفیِ «شرطِ بی‌نامِ کارت یعنی توصیه‌ی عمومی») تا فرضیه بین زبان‌ها یکی بماند. */
-    const PAIRS = [
-      ['The condition has to fit the cards of this very reading and their own question, not be generic advice.',
-       'The condition has to name one of the cards of this very reading out loud and hook onto their own question, '
-       + 'not be generic advice. A condition with no card name in it is generic advice.'],
-      ['شرط باید به کارت‌های همین فال و سؤالِ خودش بخورد، نه یک توصیه‌ی عمومی.',
-       'شرط باید نامِ یکی از کارت‌های همین فال را صریح ببرد و به سؤالِ خودش چفت شود، نه یک '
-       + 'توصیه‌ی عمومی. شرطی که نامِ کارت در آن نباشد، توصیه‌ی عمومی است.'],
-      ['Условие должно подходить картам именно этого расклада и его собственному вопросу, а не быть общим советом.',
-       'Условие должно вслух назвать одну из карт именно этого расклада и цепляться за его собственный вопрос, '
-       + 'а не быть общим советом. Условие без названия карты это и есть общий совет.'],
-      ['A condição tem que caber nas cartas desta leitura e na pergunta dela, não pode ser um conselho genérico.',
-       'A condição tem que dizer em voz alta o nome de uma das cartas desta leitura e se prender à pergunta dela, '
-       + 'não pode ser um conselho genérico. Uma condição sem o nome de uma carta é conselho genérico.'],
-      ['La condición tiene que caber en las cartas de esta lectura y en su pregunta, no puede ser un consejo genérico.',
-       'La condición tiene que decir en voz alta el nombre de una de las cartas de esta lectura y engancharse a su '
-       + 'pregunta, no puede ser un consejo genérico. Una condición sin el nombre de una carta es consejo genérico.'],
-    ];
-    for (const [o, n] of PAIRS) if (sys.includes(o)) return sys.replace(o, n);
-    return sys;   // هیچ ردیفی نخورد: پرامپت عوض شده، گاردِ بالا می‌گیردش
-  },
+  /* 🕯 بازوی `closinganchor` در ۱۴۰۵/۰۶/۲۸ **حذف شد، نه خاموش** (بند ۹/۰ ریشه).
+   * دورِ چهارزبانه‌ی همان روز قاعده را برد (fa ۵/۹⟵۹/۹ · ru ۰/۹⟵۶/۹ · pt ۰/۹⟵۹/۹ ·
+   * es ۰/۹⟵۷/۹) و متنِ برنده به **خودِ پرامپتِ** هر چهار زبان رفت، دقیقاً همان‌جا که
+   * انگلیسی از دورِ ۵ داشتش. پس هیچ زبانی نمانده که این بازو چیزی در آن عوض کند و
+   * تنها کارِ ممکنش `exit(1)` بود: یک تله‌ی خفته، نه مسیرِ رول‌بک.
+   * ⚠️ استدلالِ قبلیِ «ردیف را نگه دار تا دورِ تکرار بی‌صدا به control تبدیل نشود» هم
+   * دیگر برقرار نیست، چون گاردِ «واریانت هیچ تغییری نداد» بلند شکست می‌خورد نه بی‌صدا.
+   * اگر روزی خواستیم قاعده را دوباره بسنجیم، بازوی درست آن است که قاعده را
+   * **برمی‌دارد** (کنترلِ امروز)، نه آن که اضافه‌اش می‌کند. */
 
   /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
    * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
@@ -741,8 +713,9 @@ if (!DRY) {
     for (const r of done) {
       const ca = closingAnchor({ llm: r.llm, cards: r.cards });
       if (!ca) continue;                       // زبانی که الگوی شرط اعلام نکرده
-      const a = byArm.get(r.arm) || { n: 0, cond: 0, named: 0 };
+      const a = byArm.get(r.arm) || { n: 0, cond: 0, named: 0, alien: [] };
       a.n++; if (ca.cond) a.cond++; if (ca.named) a.named++;
+      if (ca.alien) a.alien.push(`${r.persona}.${(r.step | 0) + 1}:${ca.alien}`);
       byArm.set(r.arm, a);
     }
     if (byArm.size) {
@@ -751,6 +724,9 @@ if (!DRY) {
         const noCond = a.n - a.cond;
         console.log(`      ${arm.padEnd(34)} ${a.named}/${a.n}`
           + (noCond ? `  ⚠️ ${noCond} جمع‌بندی اصلاً شرطِ پایانی ندارد` : ''));
+        /* 🚨 و اگر قاعده با **جعلِ کارت** برآورده شده باشد، این خط تنها جایی است که
+         * می‌گویدش: `named` صفر می‌شود ولی نمی‌گوید چرا، و از یک شرطِ عمومی بدتر است. */
+        if (a.alien.length) console.log(`      ${' '.repeat(34)} 🚨 کارتِ بیگانه در شرط: ${a.alien.join(', ')}`);
       }
     }
   }
