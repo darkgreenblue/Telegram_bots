@@ -1633,6 +1633,167 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
   }
 }
 
+/* ═══ ۲۱) فقط آخرین پیام دکمه دارد + کفِ محتوا (v3.100.0) ══════════════════
+ *
+ * دو خواسته‌ی مالک از بازخوردِ ترنسکریپتِ تستِ دستیِ خودش، و هر دو **بی‌صدا** خراب
+ * می‌شوند اگر بشکنند: دکمه‌های کهنه در چت می‌مانند (کاربر سؤالی می‌پرسد که ده نوبت
+ * پیش پیشنهاد شده بود)، یا جوابِ توخالی الماس می‌گیرد بدونِ اینکه کسی بفهمد. */
+console.log('\n▶ ۲۱) فقط آخرین پیام دکمه دارد + کفِ محتوا');
+{
+  const turn = bodyOf(CODE, 'async function runChatTurn(');
+  ok(!!turn, 'بدنه‌ی runChatTurn از سورس برداشته شد');
+
+  /* ── ۲۱الف) فقط تازه‌ترین پیام دکمه دارد ───────────────────────────── */
+  ok(bool('CHAT_LAST_ONLY'), 'پرچمِ CHAT_LAST_ONLY منتشرشده روشن است (رول‌بک یک خط)');
+  ok(countOf(/CHAT_LAST_ONLY/g) === 2,
+    `و دقیقاً ۲ بار استفاده شده (تعریف + یک نقطه‌ی مصرف) (${countOf(/CHAT_LAST_ONLY/g)})`);
+
+  /* ⚠️ ترتیب قرارداد است و **تنها چیزی است که بن‌بست را ممکن می‌کند**: اگر پاک‌کردن
+   * قبل از ارسال بیاید و ارسال شکست بخورد، کاربر با صفر دکمه می‌ماند (بند ۹ب/۱). */
+  ok(before(turn, 'const sent = await send(', 'stripOldChatButtons('),
+    '⚠️ اول ارسال، بعد پاک‌کردنِ دکمه‌های قبلی (وگرنه شکستِ ارسال = بن‌بستِ بی‌دکمه)');
+  ok(/if \(mid && kb\)/.test(turn),
+    'شناسه‌ی پیام فقط وقتی ثبت می‌شود که واقعاً کیبورد داشته باشد (پیامِ بی‌دکمه چیزی برای پاک‌کردن ندارد)');
+
+  const stripSql = (name) => {
+    const m = SRC.match(new RegExp(`${name}:\\s*db\\.prepare\\(\\s*(?:'([^']+)'|"([^"]+)")\\s*\\)`));
+    return (m && (m[1] || m[2])) || null;
+  };
+  const SQ = { q: stripSql('chatBtnMsgs'), set: stripSql('setChatMsgTg'), clr: stripSql('clearChatMsgTg') };
+  ok(!!SQ.q && !!SQ.set && !!SQ.clr, 'هر سه statementِ این مکانیزم از سورس برداشته شدند');
+  ok(/AND tg_msg_id\s*>\s*0/.test(SQ.clr),
+    '⚠️ ادعای پاک‌کردن در خودِ SQL اتمیک است (`AND tg_msg_id>0`) — دو نوبتِ هم‌زمان یک پیام را دو بار ادیت نمی‌کنند');
+  ok(/LIMIT 4/.test(SQ.q), 'کوئری سقفِ ۴ ردیف دارد (گفتگوی سی‌نوبتی سی ادیت در یک نوبت نمی‌زند)');
+
+  /* رفتاری: خودِ تابع از سورس بریده و روی SQLite واقعی با تلگرامِ قلابی **اجرا** می‌شود.
+   * بدونِ این، همه‌ی ادعاهای بالا فقط می‌گفتند «کد نوشته شد». */
+  const d = new Database(':memory:');
+  d.exec(`CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, reading_id INTEGER,
+    user_id INTEGER, role TEXT DEFAULT '', text TEXT DEFAULT '', price INTEGER DEFAULT 0,
+    refunded INTEGER DEFAULT 0, model TEXT DEFAULT '', tg_msg_id INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch()))`);
+  const ins = d.prepare('INSERT INTO chat_messages (reading_id,user_id,role,tg_msg_id) VALUES (?,?,?,?)');
+  //  گفتگوی ۱: سه جوابِ دکمه‌دار + یک سؤالِ کاربر (که نباید لمس شود)
+  const a1 = Number(ins.run(1, 77, 'assistant', 101).lastInsertRowid);
+  const q1 = Number(ins.run(1, 77, 'user', 102).lastInsertRowid);
+  const a2 = Number(ins.run(1, 77, 'assistant', 103).lastInsertRowid);
+  const a3 = Number(ins.run(1, 77, 'assistant', 104).lastInsertRowid);   // تازه‌ترین: باید بماند
+  //  گفتگوی ۲ (فالِ دیگر، همان کاربر): نباید لمس شود
+  const b1 = Number(ins.run(2, 77, 'assistant', 201).lastInsertRowid);
+
+  const edits = [];
+  const stmts = {
+    chatBtnMsgs: d.prepare(SQ.q),
+    clearChatMsgTg: d.prepare(SQ.clr),
+  };
+  const fakeBot = { telegram: { editMessageReplyMarkup: async (chat, mid) => { edits.push([chat, mid]); } } };
+  const strip = new Function('stmts', 'bot', 'logErr',
+    `${bodyOf(CODE, 'async function stripOldChatButtons(')}; return stripOldChatButtons;`)(stmts, fakeBot, () => {});
+
+  await strip(1, a3);
+  const tg = (id) => d.prepare('SELECT tg_msg_id t FROM chat_messages WHERE id=?').get(id).t;
+  ok(edits.length === 2 && edits.every(([c]) => c === 77),
+    `دو جوابِ قبلیِ همین گفتگو ادیت شدند و هر دو به چتِ خودِ کاربر رفتند (${edits.length} ادیت)`);
+  ok(tg(a1) === 0 && tg(a2) === 0, 'و شناسه‌شان در دیتابیس صفر شد (دیگر کاندید نیستند)');
+  ok(tg(a3) === 104, '⚠️ تازه‌ترین جواب دست‌نخورده ماند (شرطِ `id<?`)');
+  ok(tg(q1) === 102, '⚠️ پیامِ خودِ کاربر لمس نشد (شرطِ `role=assistant`)');
+  ok(tg(b1) === 201, '⚠️ گفتگوی فالِ دیگر لمس نشد (دامنه per فال است)');
+  edits.length = 0;
+  await strip(1, a3);
+  ok(edits.length === 0, 'اجرای دوباره هیچ ادیتی نمی‌زند (ادعا قبل از اقدام، پس کار بی‌کران نمی‌شود)');
+
+  /* ✅ کنترلِ مثبت: همان هارنس با یک ردیفِ **تازه‌ی** دکمه‌دار واقعاً ادیت می‌زند —
+   * وگرنه یک کوئریِ همیشه‌خالی همه‌ی ادعاهای منفیِ بالا را بی‌صدا پاس می‌کرد. */
+  const a4 = Number(ins.run(1, 77, 'assistant', 105).lastInsertRowid);
+  await strip(1, a4 + 1);
+  ok(edits.length === 2 && edits.some(([, m]) => m === 104) && edits.some(([, m]) => m === 105),
+    '🔁 کنترلِ مثبت: با ردیفِ تازه، همان هارنس دوباره ادیت می‌زند (ادعاها پوچ نیستند)');
+
+  /* مسیرِ بازگشتِ بعد از شارژ هم باید پیامِ ارسالی را **برگرداند**، وگرنه شناسه‌اش ثبت
+   * نمی‌شود و دکمه‌هایش برای همیشه در چت می‌مانند. */
+  const resume = bodyOf(CODE, 'async function resumePendingChat(');
+  ok(!!resume, 'بدنه‌ی مسیرِ بازگشتِ بعد از شارژ از سورس برداشته شد');
+  const resSend = (resume || '').match(/send: async \(t, kb\) => \{[\s\S]*?\n {4}\},/);
+  ok(!!resSend && /const sent = await bot\.telegram\.sendMessage\(/.test(resSend[0]) && /\breturn sent;/.test(resSend[0]),
+    'مسیرِ بازگشتِ بعد از شارژ هم پیامِ ارسالی را **برمی‌گرداند**، نه دور می‌ریزد (وگرنه دکمه‌هایش برای همیشه می‌مانند)');
+
+  /* ── ۲۱ب) کفِ محتوا ─────────────────────────────────────────────────── */
+  ok(bool('CHAT_FLOOR'), 'پرچمِ CHAT_FLOOR منتشرشده روشن است');
+  const FLOOR = num('CHAT_FLOOR_CHARS', CORE_CODE);
+  ok(FLOOR === 140, `کفِ محتوا ${FLOOR} نویسه است`);
+
+  /* رفتاری: خودِ `floorApplies` اجرا می‌شود. سه معافیت عمدی‌اند — جوابی که فقط کاربر را
+   * به فالِ تازه/پشتیبانی/پایانِ مکالمه می‌برد ذاتاً کوتاه است و ریفاندش غلط بود. */
+  ok(chat.floorApplies({ text: 'x' }) === true, 'جوابِ عادی مشمولِ کف است');
+  ok(chat.floorApplies({ text: 'x', newReading: true }) === false, '⚠️ جوابِ «فالِ تازه» معاف است');
+  ok(chat.floorApplies({ text: 'x', support: true }) === false, '⚠️ جوابِ «پشتیبانی» معاف است');
+  ok(chat.floorApplies({ text: 'x', end: true }) === false, '⚠️ جوابِ «پایانِ مکالمه» معاف است');
+  ok(chat.floorApplies(null) === false, 'و پاکتِ پارس‌نشده هرگز مشمول نمی‌شود (fail-safe)');
+
+  const thinBlock = (turn.match(/let thin = CHAT_FLOOR[\s\S]*?\n {4}const reply = /) || [''])[0];
+  ok(/floorApplies\(out\)/.test(thinBlock) && new RegExp(`< CHAT_FLOOR_CHARS`).test(thinBlock),
+    'تشخیصِ لاغری هم معافیت‌ها را می‌خواند هم خودِ طول');
+  ok(/\[CHAT_MODEL\]/.test(thinBlock) && !/(for|while)\s*\(/.test(thinBlock),
+    '⚠️ دقیقاً **یک** تلاشِ دوباره، بدونِ حلقه (وگرنه جوابِ پول‌داده ده ثانیه دیرتر می‌رسد)');
+  ok(/kind: 'chat_thin'/.test(thinBlock),
+    'و هزینه‌ی خودِ این مکانیزم در llm_usage جدا برچسب می‌خورد');
+
+  /* ⚠️ حیاتی‌ترین ادعای این نیمه: تذکر به **آخرین پیامِ user** می‌چسبد، نه به `system`.
+   * پیشوندِ system باید در طولِ گفتگو بیت‌به‌بیت ثابت بماند تا کشِ پرامپت بخورد؛
+   * دست‌زدن به آن یعنی کشِ همان نوبت بپرد و هزینه سه برابر شود (بخشِ v3.84.0).
+   * رفتاری سنجیده می‌شود، نه با رجکس: خودِ نگاشت از سورس بریده و اجرا می‌شود. */
+  const mapLine = (thinBlock.match(/const retryMsgs = messages\.map\([\s\S]*?\)\);/) || [''])[0];
+  ok(!!mapLine, 'خطِ ساختِ پیام‌های تلاشِ دوباره از سورس برداشته شد');
+  const msgs = [
+    { role: 'system', content: 'PREFIX' },
+    { role: 'assistant', content: 'A1' },
+    { role: 'user', content: 'Q2' },
+  ];
+  const retry = new Function('messages', 'hint', `${mapLine} return retryMsgs;`)(msgs, 'HINT');
+  ok(retry[0].content === 'PREFIX', '⚠️ پیامِ system بیت‌به‌بیت دست‌نخورده ماند (کشِ پرامپت نمی‌پرد)');
+  ok(retry[1].content === 'A1', 'و نوبت‌های میانیِ تاریخچه هم دست‌نخورده‌اند');
+  ok(retry[2].content.startsWith('Q2') && retry[2].content.includes('HINT'),
+    'تذکر فقط به **آخرین** پیامِ کاربر چسبید');
+  ok(msgs[2].content === 'Q2', 'و آرایه‌ی اصلی mutate نشد (نوبتِ بعدی تذکر را به ارث نمی‌برد)');
+
+  /* ── ۲۱ج) اگر باز هم لاغر بود: الماس برمی‌گردد، **بی‌صدا** ──────────── */
+  /* ⚠️ `if (thin) {` **دو بار** در این تابع هست (یکی تلاشِ دوباره، یکی ریفاند) و یک
+   * رجکسِ تنبل اولی را می‌گیرد — یعنی چهار ادعای زیر روی بلوکِ اشتباه می‌نشستند و
+   * قرمزِ کاذب می‌دادند (نقصِ خودِ هارنس، همان تله‌ی دامنه‌ی check-night-reminder).
+   * پس از **آخرین** وقوع بریده می‌شود. */
+  const thinAt = turn.lastIndexOf('if (thin) {');
+  const thinAfter = thinAt < 0 ? '' : (turn.slice(thinAt).match(/^if \(thin\) \{[\s\S]*?\n {4}\}/) || [''])[0];
+  ok(!!thinAfter && /refundChat/.test(thinAfter), 'بلوکِ ریفاندِ جوابِ لاغر از سورس برداشته شد');
+  ok(/refundChat\(/.test(thinAfter), 'جوابِ لاغرِ باقی‌مانده الماس را برمی‌گرداند');
+  ok(/track\(db, uid, 'chat_thin'/.test(thinAfter), 'و رویدادِ chat_thin ثبت می‌شود (تا داشبورد بتواند بپایدش)');
+  ok(/refunded: back \? 1 : 0/.test(thinAfter), 'و خودِ رویداد می‌گوید ریفاند واقعاً انجام شد یا نه');
+  ok(/CHAT_THIN/.test(thinAfter), 'و یک مارکرِ greppable در لاگ می‌گذارد');
+  /* ⚠️ بند ۹ب-۴ ریشه: تشخیص و ترمیم خودکارند، **ارتباط با کاربر هرگز**. پس این شاخه
+   * حق ندارد پیامی بفرستد؛ کاربر جوابش را می‌گیرد و الماسش هم برمی‌گردد، بی‌صدا. */
+  ok(!/\bsend\(|sendMessage\(|ctx\.reply\(/.test(thinAfter),
+    '⚠️ و هیچ پیامی به کاربر نمی‌فرستد (بند ۹ب-۴: ارتباطِ خودکار ممنوع)');
+  ok(turn.indexOf('insertChatMsg.run') >= 0 && turn.indexOf('insertChatMsg.run') < thinAt,
+    '⚠️ ریفاند **بعد از** ثبتِ ردیفِ جواب است، وگرنه جاروی یتیم‌ها همان سؤال را دوباره ریفاند می‌کند');
+
+  /* ── ۲۱د) شکافی که تستِ جهشِ همین کار لو داد ─────────────────────────
+   * یک جهشِ **بدهدف** (حذفِ `refundChat` از شاخه‌ی شکستِ کاملِ مدل، به‌جای شاخه‌ی
+   * جوابِ لاغر) از هر ۵۱۵ ادعا **زنده رد شد**. یعنی مهم‌ترین تضمینِ پولیِ این فیچر
+   * (بند ۹ ریشه: «پولِ کاربر هرگز در حالتِ نامعلوم نمی‌ماند») تا امروز هیچ گاردی
+   * نداشت — شاخه‌ای که در آن مدل بعد از همه‌ی فالبک‌ها هیچ جوابی نمی‌دهد.
+   * جهشِ بدهدف اثباتِ چیزی نیست، ولی شکافی که لو می‌دهد واقعی است. */
+  const failAt = turn.indexOf('if (!res?.out) {');
+  const failBlock = failAt < 0 ? '' : (turn.slice(failAt).match(/^if \(!res\?\.out\) \{[\s\S]*?\n {4}\}/) || [''])[0];
+  ok(!!failBlock, 'شاخه‌ی شکستِ کاملِ مدل از سورس برداشته شد');
+  ok(/refundChat\(/.test(failBlock), '⚠️ شکستِ کاملِ مدل الماس را برمی‌گرداند (بند ۹ ریشه)');
+  ok(/track\(db, uid, 'chat_llm_failed'/.test(failBlock), 'و رویدادِ شکست ثبت می‌شود');
+  ok(/if \(back\) track\(db, uid, 'chat_refund'/.test(failBlock),
+    'و رویدادِ ریفاند فقط وقتی ثبت می‌شود که واقعاً پولی برگشته باشد');
+  ok(/price > 0 \?/.test(failBlock),
+    '⚠️ و متنِ کاربر بینِ سؤالِ پولی و رایگان تفکیک می‌کند (به کسی که پولی نداده «برگشت به ذخایرت» نمی‌گوید)');
+  ok(before(failBlock, 'refundChat(', 'await send('),
+    '⚠️ اول ریفاند در دفتر، بعد پیام — پیامِ نرسیده نباید پولِ برگشته را بسوزاند');
+}
+
 const total = pass + errs.length;
 if (errs.length) {
   console.log(`\n❌ گفتگوی پس از فال: ${pass} پاس، ${errs.length} خطا`);
