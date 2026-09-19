@@ -15,7 +15,7 @@ import { hbars, ordinalBars, CAT } from '../lib/charts.js';
 import {
   CADENCE_DAYS, CADENCE_MIN_AGE_DAYS, CADENCE_MIN_ACTIVE_DAYS, USEFUL_EVENTS, NEGATIVE_EVENTS,
   READ_BUCKETS, spendCadenceSql, usefulCadenceSql, eligibleUsersSql, negativeUsersSql,
-  bucketUsersSql, readerUsersSql,
+  bucketUsersSql, readerUsersSql, CHAT_EVENTS, chatUsersSql,
 } from '../lib/engage.js';
 
 const countOf = (db, q) => (q ? scalar(db, `SELECT COUNT(*) c FROM (${q.sql})`, q.params) : 0);
@@ -66,6 +66,46 @@ function gather(botKey, { winDays }) {
 
 const EVENT_FA = {
   daily_card: '🎴 کارت روز', lucky_card: '🎲 کارت شانس', product_delivered: '🔮 فال کامل (پولی)',
+};
+
+/* ═══ 🗣 آمارِ گفتگوی پس از فال ═══
+   شرطِ کاربرمحور از `lib/engage.js` می‌آید (تک‌منبع، تا عدد و لیست واگرا نشوند)؛ این‌جا
+   فقط شمارشِ **رخداد** و عمقِ گفتگو اضافه می‌شود که کاربرمحور نیستند.
+
+   ⚠️ عمقِ گفتگو از جدولِ `chat_messages` می‌آید نه از رویدادها: آن جدول رکوردِ قطعیِ
+   فیچر است و اگر روزی رویدادی جا بیفتد، عمق همچنان درست می‌ماند. */
+function chatStats(botKey, since) {
+  const a = {
+    users: CHAT_EVENTS.map(() => 0), hits: CHAT_EVENTS.map(() => 0),
+    thinRefunded: 0, thinFree: 0, turns: [], any: false,
+  };
+  for (const inst of instancesOf(botKey)) {
+    withDb(inst.file, (db) => {
+      if (!hasTable(db, 'events')) return;
+      CHAT_EVENTS.forEach((c, i) => {
+        a.users[i] += countOf(db, chatUsersSql(i, since));
+        a.hits[i] += scalar(db, 'SELECT COUNT(*) c FROM events WHERE event=? AND created_at >= ?', [c.event, since]);
+      });
+      a.thinRefunded += scalar(db,
+        "SELECT COUNT(*) c FROM events WHERE event='chat_thin' AND created_at >= ? AND json_extract(props,'$.refunded') = 1", [since]);
+      a.thinFree += scalar(db,
+        "SELECT COUNT(*) c FROM events WHERE event='chat_thin' AND created_at >= ? AND json_extract(props,'$.free') = 1", [since]);
+      if (hasTable(db, 'chat_messages')) {
+        for (const r of db.prepare(
+          `SELECT COUNT(*) n FROM chat_messages WHERE role='user' AND created_at >= ?
+           GROUP BY reading_id`).all(since)) a.turns.push(r.n);
+      }
+    });
+  }
+  a.any = a.hits.some((n) => n > 0) || a.turns.length > 0;
+  return a;
+}
+
+const median = (xs) => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((x, y) => x - y);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : Math.round(((s[m - 1] + s[m]) / 2) * 10) / 10;
 };
 
 export function engagementBody(url) {
@@ -129,6 +169,40 @@ export function engagementBody(url) {
     </div>
     <p class="muted">از ${fmt(a.readers)} کاربری که حداقل یک فالِ کامل گرفته‌اند.</p></div>`;
 
+  /* 🗣 گفتگوی پس از فال — و مهم‌ترین عددش «جوابِ زیرِ کفِ محتوا» است.
+     خواسته‌ی صریحِ مالک (۱۴۰۵/۰۶/۱۹): «آن را به بخشِ آمارِ چتِ داشبورد اضافه کن و زیر
+     نظر بگیر که آیا بالا می‌رود.» کارت فقط وقتی رندر می‌شود که واقعاً رویدادی هست، پس
+     برای رباتی که گفتگو ندارد صفحه بیت‌به‌بیت مثلِ قبل است. */
+  const rChatK = rangeOf(url, 'rChat', 'month');
+  const chatSince = rangeSince(rChatK);
+  const c = chatStats(bot, chatSince);
+  const accept = pctOf(c.users[1], c.users[0]);          // باز کردن ÷ دیدنِ پیشنهاد
+  const thinRate = pctOf(c.hits[3], c.hits[2]);          // جوابِ لاغر ÷ کلِ جواب‌ها
+  const chat = c.any ? `<div class="card">
+    ${cardHead('🗣 گفتگوی پس از فال', rangePicker(url, 'rChat', rChatK))}
+    <div class="grid">
+      ${CHAT_EVENTS.map((e, i) => stat(e.label,
+        cohortCount(c.users[i], { k: 'tarot', bot, t: 'chat', i: String(i), since: String(chatSince) })
+        + ` <span class="muted">${fmt(c.hits[i])} بار</span>`)).join('')}
+    </div>
+    <div class="grid" style="margin-top:12px">
+      ${stat('نرخِ پذیرشِ گفتگو', `${fmt(accept)}٪`)}
+      ${stat('میانه‌ی عمق (سؤال per گفتگو)', fmt(median(c.turns)))}
+      ${stat('🪫 نرخِ جوابِ زیرِ کف', `${fmt(thinRate)}٪`)}
+      ${stat('🪫 از آن‌ها الماس برگشت', `${fmt(c.thinRefunded)} از ${fmt(c.hits[3])}`)}
+    </div>
+    <p class="muted" style="margin-top:10px">
+      <b>«جوابِ زیرِ کفِ محتوا»</b> یعنی جوابِ مدل حتی بعد از یک تلاشِ دوباره هم کوتاه‌تر از
+      کفِ اعلام‌شده بود؛ در آن حالت الماسِ آن سؤال <b>برمی‌گردد</b> و کاربر هیچ پیامِ اضافه‌ای
+      نمی‌بیند. این عدد سنجه‌ی اصلیِ کیفیتِ گفتگوست: <b>اگر بالا برود یعنی مکانیزمِ تلاشِ
+      دوباره دارد شکست می‌خورد</b>، نه اینکه کاربر بد سؤال می‌پرسد.
+      ${c.thinFree ? `از این‌ها ${fmt(c.thinFree)} مورد سؤالِ <b>رایگانِ</b> اول بود (چیزی برای برگشتن نداشت).` : ''}
+      «${fmt(c.hits[3])} بار» شمارشِ رخداد است و عددِ کنارش کاربرِ یکتا.</p>
+    <p class="muted" style="margin-top:6px">⚠️ <b>ادمین در این کارت حذف نشده، عمداً.</b>
+      گفتگو هنوز فقط-ادمین است، پس تنها کسانی که این رویدادها را می‌سازند خودِ ادمین و
+      تسترند و با فیلترِ ادمین هر شش عدد صفر می‌شد. لحظه‌ی باز شدن برای همه‌ی کاربران،
+      فیلتر در یک PR جدا اضافه می‌شود.</p></div>` : '';
+
   const streak = a.streaks.size ? `<div class="card">
     ${cardHead('🎴 عادتِ روزانه (استریکِ کارت روز)')}
     ${hbars([...a.streaks.entries()].map(([label, value]) => ({ label, value })))}
@@ -137,5 +211,5 @@ export function engagementBody(url) {
   return `<div class="card"><h2 style="margin:0">🔥 درگیری و چسبندگی — ${esc(title)}</h2>
       <p class="muted" style="margin:6px 0 0">دو لایه‌ی مجزا: چسبندگیِ <b>پولی</b> (الماس) و چسبندگیِ
         <b>رایگان</b> (اکشن‌های مفید). هر عدد با یک کلیک لیستِ همان کاربران را باز می‌کند.</p></div>
-    ${layer1}${layer2}${hooks}${negative}${depth}${streak}`;
+    ${layer1}${layer2}${hooks}${chat}${negative}${depth}${streak}`;
 }

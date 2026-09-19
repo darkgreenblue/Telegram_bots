@@ -153,7 +153,7 @@
   },
   "m19": {
     "name": "O Sol",
-    "image": "Criança num cavalo branco com bandeira vermelha, atrás um muro de girassóis e um sol enorme no céu.",
+    "image": "Criança num cavalo branco com bandeira vermelha, atrás um muro de tijolos com quatro girassóis despontando e um sol enorme no céu.",
     "up": "Clareza e sucesso à vista; a melhor carta do baralho.",
     "down": "Alegria adiada, otimismo sem apoio.",
     "love": "Relação leve e feliz.",
@@ -313,7 +313,7 @@
   },
   "c04": {
     "name": "Quatro de Copas",
-    "image": "Jovem sentado sob a árvore, braços cruzados, ignora três taças; uma mão na nuvem oferece a quarta.",
+    "image": "Jovem sentado sob a árvore, braços cruzados, encara as três taças no chão; uma mão na nuvem oferece a quarta e ele não repara.",
     "up": "Desânimo e tédio; tem uma chance na sua frente e você não vê.",
     "down": "Saindo da moleza, enxergando o que já existe.",
     "love": "Indiferença com a relação que você já tem.",
@@ -537,7 +537,7 @@
   },
   "p04": {
     "name": "Quatro de Ouros",
-    "image": "Homem aperta uma moeda no peito, outra sob a coroa e duas sob os pés; a cidade atrás.",
+    "image": "Homem aperta uma moeda no peito, outra equilibrada sobre a coroa e uma sob cada pé; a cidade atrás.",
     "up": "Mão fechada no que já tem; existe segurança, mas nada se move.",
     "down": "Abrir a mão, ou gastar tudo de uma vez.",
     "love": "Medo de abrir o coração.",

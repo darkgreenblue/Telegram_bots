@@ -20,6 +20,7 @@ import {
   activeUsersSql, readerUsersSql, repeatUsersSql, satisfiedUsersSql, ratersUsersSql,
   successfulReferrersSql, bucketUsersSql, retainedUsersSql,
   CADENCE_DAYS, spendCadenceSql, usefulCadenceSql, negativeUsersSql, NEGATIVE_EVENTS,
+  CHAT_EVENTS, chatUsersSql,
 } from './engage.js';
 import { weekIdx, weekExpr, weekLabel, nowSec, postRefLabel } from './util.js';
 
@@ -361,11 +362,12 @@ export function resolveCohort(url) {
         ret: 'کاربرانی که بعد از این تعداد روز دوباره فال گرفتند',
         cadence: 'کاربرانِ این کدنسِ چسبندگی',
         negative: 'کاربرانی که این سیگنالِ منفی را داده‌اند',
+        chat: 'کاربرانِ این قدمِ گفتگو',
       };
       if (!LABEL[t]) return { error: 'نوع سنجه نامعتبر است.' };
 
       const users = collect(targets, botKey, (db, { pk, nameCol }) => {
-        if (!hasTable(db, 'readings') && !['referrer', 'negative', 'cadence'].includes(t)) return null;
+        if (!hasTable(db, 'readings') && !['referrer', 'negative', 'cadence', 'chat'].includes(t)) return null;
         const ev = hasTable(db, 'events');
         let inner = null;
         if (t === 'active') inner = activeUsersSql(now, aw, ev);
@@ -390,6 +392,11 @@ export function resolveCohort(url) {
         } else if (t === 'negative') {
           if (!ev) return null;
           inner = negativeUsersSql(Math.max(0, intParam(url, 'i', -1)), ev);
+        } else if (t === 'chat') {
+          /* گفتگو: عددِ کارت و این لیست از **همان** تابعِ lib/engage.js می‌آیند.
+             `since` هم از URL می‌آید ولی به‌صورت عدد و bound parameter. */
+          if (!ev) return null;
+          inner = chatUsersSql(Math.max(0, intParam(url, 'i', -1)), Math.max(0, intParam(url, 'since', 0)));
         } else if (t === 'churn') {
           inner = {
             sql: `SELECT r.user_id AS uid FROM readings r
@@ -408,7 +415,8 @@ export function resolveCohort(url) {
       const extra = t === 'bucket' ? ` · ${READ_BUCKETS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}`
         : t === 'ret' ? ` · D+${intParam(url, 'd', 0)}`
         : t === 'cadence' ? ` · حداقل هر ${intParam(url, 'n', 0)} روز · ${url.searchParams.get('layer') === 'useful' ? 'اکشنِ مفید' : 'خرجِ الماس'}`
-        : t === 'negative' ? ` · ${NEGATIVE_EVENTS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}` : '';
+        : t === 'negative' ? ` · ${NEGATIVE_EVENTS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}`
+        : t === 'chat' ? ` · ${CHAT_EVENTS[Math.max(0, intParam(url, 'i', -1))]?.label || ''}` : '';
       return done(LABEL[t] + extra, users);
     }
 

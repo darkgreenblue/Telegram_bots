@@ -12,7 +12,7 @@
 //      `size × PER_CARD` بماند (قانونِ قیمتِ ریپو، بدونِ استثنا).
 //
 // اجرا: node tools/check-ux-menu.mjs
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { seedToInt, mulberry32 } from '../bots/tarot/reading-core.js';
 import {
   TOPICS_V3, RETIRED_TOPICS, TOPIC_BY_KEY, TOPIC_SPREADS, SIZES_V3, SPREAD_BY_ID, spreadIdOf, topicOf,
@@ -25,6 +25,7 @@ import L from '../bots/tarot/locales/fa.js';
 import RU_L from '../bots/tarot/locales/ru.js';
 import PT_L from '../bots/tarot/locales/pt.js';
 import ES_L from '../bots/tarot/locales/es.js';
+import EN_L from '../bots/tarot/locales/en.js';
 import { LOADERS, pace, ACTIVE, FAST_MS, SLOW_MS, FAST_FOR_MS, loadingFrame } from '../bots/tarot/loading.js';
 
 const SRC = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8');
@@ -1451,8 +1452,17 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
      * «هزینه‌ی فال فلان» با «هزینه‌ی فالِ ده کارتیِ فلان» یکی دیده می‌شود و کاربر
      * نمی‌فهمد چرا این عدد از دفعه‌ی قبل بیشتر است.
      *
-     * ادعا **رفتاری و چهارزبانه** است (بند ۲و/۱: تغییر by default روی همه‌ی زبان‌ها). */
-    const LOCS = { fa: L, ru: RU_L, pt: PT_L, es: ES_L };
+     * ادعا **رفتاری و همه‌زبانه** است (بند ۲و/۱: تغییر by default روی همه‌ی زبان‌ها). */
+    const LOCS = { fa: L, ru: RU_L, pt: PT_L, es: ES_L, en: EN_L };
+    /* ⚠️ و اول از همه: خودِ این فهرست باید ثابت کند **کور نشده**. نسخه‌ی اولِ همین بلوک
+     * چهار زبان را می‌شناخت و وقتی `en` به ریپو اضافه شد، انگلیسی بی‌صدا از دامنه‌ی
+     * گارد بیرون ماند — دقیقاً همان تله‌ی بند ۶ب-۲ ریشه: چکی که «پیدا نکردم» را مثل
+     * «سالم است» گزارش کند، بخشی از سیستم را نامرئی می‌کند. پس فهرست از **دیسک**
+     * راستی‌آزمایی می‌شود، نه از حافظه‌ی نویسنده. */
+    const onDisk = readdirSync(new URL('../bots/tarot/locales/', import.meta.url))
+      .filter((f) => f.endsWith('.js')).map((f) => f.replace(/\.js$/, '')).sort();
+    ok(onDisk.join(',') === Object.keys(LOCS).sort().join(','),
+      `🌍 گاردِ اندازه همه‌ی locale های روی دیسک را می‌بیند (دیسک: ${onDisk.join('،')})`);
     const base = { name: 'x', balance: 2, spreadFa: 'X', price: 10, cur: CUR };
     for (const [code, LL] of Object.entries(LOCS)) {
       const with10 = LL.reading.needBalance({ ...base, size: 10 });
@@ -1462,7 +1472,7 @@ console.log('\n▶ باکسِ نقل‌قولِ موجودی و نگارشِ چ�
         `🔢 «${code}»: اندازه‌ی فال واقعاً در متن می‌نشیند (۱۰ با ۳ و با «نامعلوم» فرق دارد)`);
       /* ⚠️ و چیدمانِ ناشناخته **هیچ عددی** چاپ نمی‌کند، نه «۰ کارتی». هم‌خانواده‌ی
        * قاعده‌ی بند ۲و/۶ج: عددِ دروغ از نبودِ عدد بدتر است. */
-      ok(!/[۰0]\s*(کارت|карт|cartas)/.test(none),
+      ok(!/[۰0]\s*-?\s*(کارت|карт|cartas|cards?)/.test(none),
         `⚠️ «${code}»: با اندازه‌ی نامعلوم عددِ ساختگی چاپ نمی‌شود`);
     }
     ok(L.reading.needBalance({ ...base, size: 10 }).includes('۱۰ کارتی'),

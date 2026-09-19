@@ -153,7 +153,7 @@
   },
   "m19": {
     "name": "El Sol",
-    "image": "Niño en un caballo blanco con bandera roja, detrás un muro de girasoles y un sol enorme en el cielo.",
+    "image": "Niño en un caballo blanco con bandera roja, detrás un muro de ladrillo con cuatro girasoles asomando y un sol enorme en el cielo.",
     "up": "Claridad y éxito a la vista; la mejor carta del mazo.",
     "down": "Alegría postergada, optimismo sin base.",
     "love": "Relación liviana y feliz.",
@@ -313,7 +313,7 @@
   },
   "c04": {
     "name": "Cuatro de Copas",
-    "image": "Un joven sentado bajo el árbol, brazos cruzados, ignora tres copas; una mano en la nube le ofrece la cuarta.",
+    "image": "Un joven sentado bajo el árbol, brazos cruzados, mira fijo las tres copas del suelo; una mano en la nube le ofrece la cuarta y no la ve.",
     "up": "Desgano y aburrimiento; tienes una oportunidad enfrente y no la ves.",
     "down": "Salir de la apatía, ver lo que ya está ahí.",
     "love": "Indiferencia con la relación que ya tienes.",
@@ -537,7 +537,7 @@
   },
   "p04": {
     "name": "Cuatro de Oros",
-    "image": "Un hombre aprieta una moneda contra el pecho, otra bajo la corona y dos bajo los pies; la ciudad detrás.",
+    "image": "Un hombre aprieta una moneda contra el pecho, otra en equilibrio sobre la corona y una bajo cada pie; la ciudad detrás.",
     "up": "Mano cerrada sobre lo que ya tienes; hay seguridad, pero nada se mueve.",
     "down": "Abrir la mano, o gastar todo de golpe.",
     "love": "Miedo a abrir el corazón.",

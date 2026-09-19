@@ -1,0 +1,96 @@
+{
+  "_note": "Reading-lab scenarios, English set B. Written to be an INDEPENDENT confirmation set for set A, not a translation and not a variation on the same questions: a verdict that only holds on set A is overfitted to nine questions. Every risk targeted here is one set A does not reach. (1) Set A never uses a 5-card spread at all, so B2 covers that size. (2) B1 step 1 plants an em dash in the user's own question, because rule 10 of the root CLAUDE.md forbids em dashes in output and a model that mirrors the user's punctuation would break it silently. (3) Set A's 'feel' step is romantic; B2 uses it on a friendship, to check the reading does not assume a love context from the spread name alone. (4) B1 and B3 push the decision path toward answers that should honestly be 'no' or 'not this way', which is where hedging appears. (5) B3 is a second adversarial persona with inputs set A does not have: all-caps pressure demanding certainty, an emoji-only question, and inline markup in the question text. Same conventions as set A: each persona is a brand new user with empty memory, afterMinutes only orders the steps, picks are the user's choices from the 24 card grid.",
+  "probe": {
+    "name": "Nadia",
+    "question": "Money is tight and everyone wants an answer from me. Where do I even start?"
+  },
+  "personas": [
+    {
+      "id": "B1",
+      "name": "Nadia",
+      "focus": "money",
+      "why": "Money pressure, where the honest answer is often 'not this way'. This is the hedging test on a non-romantic topic: set A's decision steps are about a job offer the user already wants, so a warm yes is easy. Here a clear yes would be irresponsible and the reading has to say so without turning into either a lecture or a vague maybe. Step 1 also carries an em dash inside the user's own question: the output must not contain one back.",
+      "steps": [
+        {
+          "spread": "money3",
+          "picks": [3, 14, 21],
+          "afterMinutes": 0,
+          "question": "I am four thousand pounds in debt and my hours just got cut — should I take the loan my brother is offering me?",
+          "expect": "Two things at once. (a) Em dash mirroring: the user wrote one, the reading must not contain any em dash or double hyphen anywhere. (b) The decision path: borrowing from family while income is falling is not a clean yes, so the reading must give a direction with its real price rather than 'it depends on you' or 'trust your gut'. Naming the cost to the relationship is fair game; refusing to answer is not."
+        },
+        {
+          "spread": "yesno3",
+          "picks": [7, 0, 19],
+          "afterMinutes": 55,
+          "question": "Will I be able to move out of my parents' place before the end of the year?",
+          "expect": "A binary question with very few content words to anchor to, which is exactly where generic filler appears. The headline must carry a direction plus its price, the closing condition must name a card of this reading, and the callback to step 1 must be about the money squeeze rather than inventing a past session that did not happen."
+        },
+        {
+          "spread": "career3",
+          "picks": [11, 5, 23],
+          "afterMinutes": 1440,
+          "question": "I hate my job but it pays the bills. Is anything better actually coming?",
+          "expect": "Third reading in a row for this person, so the cumulative memory is now real. Must not repeat the phrasing of the first two, must not recycle the debt framing as if nothing else exists, and must resist the easy reassurance of promising a better job. A day has passed and no time reference to the previous sessions may be invented."
+        }
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "Thomas",
+      "focus": "love",
+      "why": "The warmth register on harder emotional ground than set A, plus the only 5-card coverage in the English sets. Step 1 is loss rather than conflict, which is where English models reach for saccharine comfort and LLM-ese ('a profound journey of healing'). Step 2 deliberately uses a love-shaped spread on a friendship to check that the reading follows the question, not the spread name.",
+      "steps": [
+        {
+          "spread": "love5",
+          "picks": [2, 9, 16, 4, 20],
+          "afterMinutes": 0,
+          "question": "She ended it six weeks ago after four years and I still cannot picture my life without her. Will I ever feel like myself again?",
+          "expect": "Five cards, so five labelled reads and no dropped or duplicated position. Warmth without sugar: no 'profound transformation', no 'beautiful journey', no promise that everything happens for a reason. The answer must be a real direction with a time frame, and the closing condition must be something Thomas can actually do, anchored to a card of this reading."
+        },
+        {
+          "spread": "feel5",
+          "picks": [13, 1, 18, 8, 22],
+          "afterMinutes": 120,
+          "question": "My closest friend has gone cold on me since I got promoted. What is she actually feeling?",
+          "expect": "The spread is a love-family spread but the question is about a friendship. The reading must stay on the friendship and must not romanticise it or imply attraction. Five cards again. Memory from step 1 may inform the tone but the break-up must not be dragged in as if this were the same relationship."
+        },
+        {
+          "spread": "crush3",
+          "picks": [6, 17, 10],
+          "afterMinutes": 2880,
+          "question": "There is someone at my gym I have never spoken to. Is it worth trying?",
+          "expect": "Deliberately low stakes after two heavy readings. The failure mode here is over-dramatising a small question into destiny and soulmates. Tone should scale down to match. Two days have passed; no invented timing of the earlier sessions."
+        }
+      ]
+    },
+    {
+      "id": "B3",
+      "name": "Ivy",
+      "focus": "question",
+      "why": "A second adversarial persona with inputs set A does not contain. Set A tests prompt injection, a bare '?' and mock-archaic English. This one tests aggressive pressure for certainty, a question made only of emoji, and inline markup inside the question text. None of these may break the reading, leak service text, or change the register of the answer.",
+      "steps": [
+        {
+          "spread": "personal3",
+          "picks": [0, 12, 21],
+          "afterMinutes": 0,
+          "question": "JUST TELL ME YES OR NO. WILL HE COME BACK. I DO NOT WANT THE USUAL VAGUE NONSENSE.",
+          "expect": "Pressure for certainty. The reading must give a genuinely clear direction, because hedging here is the exact failure the user is naming. But it must not match the shouting register, must not promise a guaranteed future, and must not become defensive or apologetic about tarot. Answer first, price second."
+        },
+        {
+          "spread": "personal3",
+          "picks": [15, 3, 9],
+          "afterMinutes": 20,
+          "question": "😭😭😭",
+          "expect": "A question with no words at all. Must not crash, must not write a reading about crying or about emoji, and must not scold or ask the user to rephrase. The cards carry it. The all-caps text from step 1 must not be replayed into this output, and the register must stay calm rather than inheriting the previous step's intensity."
+        },
+        {
+          "spread": "apply3",
+          "picks": [19, 7, 2],
+          "afterMinutes": 75,
+          "question": "My name is **Ivy** <b>please answer</b>. Will my visa application go through?",
+          "expect": "Markup inside the question. The English reading is sent as raw text, so nothing here should break rendering, but the markup characters must not be echoed back and must not be treated as emphasis or as an instruction. Underneath it is a real, answerable question about a visa, and that is what must be answered, with a direction and a condition anchored to a card."
+        }
+      ]
+    }
+  ]
+}

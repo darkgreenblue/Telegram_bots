@@ -44,9 +44,10 @@ const { repairDefects } = await import('../bots/tarot/repair.js');
 const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape,
   orChat, orChatResilient, parseJsonLoose, READING_MODEL, FALLBACK_MODEL, cardName, spreadName,
+  locSpread,
 } = await import('../bots/tarot/reading-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند
-const { checkReading, modelText, ngrams } = await import('./reading-lab/checks.mjs');
+const { checkReading, modelText, ngrams, closingAnchor } = await import('./reading-lab/checks.mjs');
 // 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت (از STYLE.md). ارزیابی کارِ همان سشنی است که
 // اسناد را خوانده؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
 const { RUBRIC } = await import('./reading-lab/rubric.mjs');
@@ -129,6 +130,86 @@ const ARM_LIST = ARMS.length ? ARMS : [MODEL];
  *
  * شکلِ بازو: `model` یا `model@variant`. */
 const PROMPT_VARIANTS = {
+  /* 🇬🇧 فرضیه‌ی «دامنه‌ی قاعده، نه خودِ قاعده» برای نشتِ برچسبِ انگلیسی.
+   *
+   * مشاهده‌ی خطِ پایه: سرخط‌ها همیشه تمیزند ولی «Your unspoken feeling is…» در متنِ
+   * **کارت‌به‌کارت** می‌آید. قاعده‌ی منع داخلِ بندِ شماره‌ی ۱ نشسته که موضوعش سرخط
+   * است، پس مدل دامنه‌اش را همان‌جا می‌فهمد. فارسی این را ندارد چون همان قاعده را
+   * به‌عنوان یک بولتِ عمومی دارد، نه زیرِ بندِ سرخط.
+   *
+   * واریانت: همان جمله را از بندِ ۱ برمی‌دارد و در بخشِ سراسریِ `=== Voice ===`
+   * می‌گذارد، با دامنه‌ی صریح. **انتقال است نه افزودن**، پس طولِ پرامپت عوض نمی‌شود.
+   *
+   * ⚠️ چرا واریانت و نه ویرایشِ مستقیمِ locale: یک بار مستقیم عوضش کردم و با دو
+   * dispatchِ جدا مقایسه کردم — دقیقاً همان «راهِ غلط»ی که بند «قاعده‌ی صفر» فازِ ۲
+   * می‌گوید عملاً سکه انداختن است. با `--arms` هر دو شاخه **همان کارت‌ها و همان
+   * سؤال‌ها** را می‌گیرند و گزارش تفاضلِ per سناریو می‌دهد. */
+  /* 🔴 حکم: **رد شد** (دورِ جفت‌شده، ۱۸ فال، ۱۴۰۵/۰۶/۲۷). نگه داشته می‌شود تا کسی
+   * دوباره کورکورانه امتحانش نکند.
+   *     🅰️ control (قاعده زیرِ بندِ ۱) ⟵ نشتِ برچسب **۰/۹**
+   *     🅱️ variant (قاعده در بخشِ Voice) ⟵ نشتِ برچسب **۳/۹**
+   * بی‌لنگر هیچ سیگنالی نداد (۳ بهتر/۳ بدتر/۳ مساوی؛ خودِ گزارش «قطعی نیست» گفت).
+   * یعنی دقیقاً همان سنجه‌ای که هدف گرفته بودم بدتر شد، نه بهتر.
+   *
+   * توضیحِ محتمل: زیرِ بندِ ۱ این قاعده در بخشی است که خودِ پرامپت «مهم‌ترین خطِ کلِ
+   * فال» می‌نامدش و فقط سه خط دارد؛ در `=== Voice ===` یکی از ~۱۵ بولت می‌شود و
+   * رقیق می‌شود. درسِ عمومی: **جای یک قاعده در پرامپت خودش بخشی از قوتِ آن است**،
+   * نه فقط متنش. */
+  labelglobal: (sys) => {
+    const ban = /   Never write the label itself[^\n]*\n/;
+    if (!ban.test(sys)) return sys;                 // قاعده جابه‌جا شده؛ واریانت بی‌اثر
+    const moved = '- Never write the label itself anywhere in the reading, write the feeling. '
+      + '"Your unspoken feeling is...", "the unspoken feeling is..." and "your sign is..." are banned '
+      + 'in the headline, in the pattern, and in every single card line: that is the name of our job, '
+      + 'not text for a person. Go straight to the line: "it sounds like you\'re waiting for someone '
+      + 'else to make the call for you".\n';
+    const voice = '- No fake old English: no thee, thou, thy, hath, doth, behold, whence. The voice is a warm modern person, not a fortune teller from a costume drama.\n';
+    return sys.replace(ban, '').replace(voice, moved + voice);
+  },
+
+  /* 🇬🇧 دورِ ۵، فرضیه‌ی ۱: **جای قاعده‌ی لنگر**.
+   *
+   * دورِ ۳ یک چیزِ قابلِ تعمیم ثابت کرد: جای یک قاعده در پرامپت بخشی از قوتِ آن است.
+   * آن‌جا قاعده‌ای که از یک بخشِ کوتاهِ سه‌خطی به وسطِ فهرستِ ~۱۵بولتیِ `=== Voice ===`
+   * رفت **بدتر** شد (نشتِ برچسب ۰/۹ ⟵ ۳/۹). این واریانت همان مشاهده را در جهتِ
+   * **معکوس** می‌آزماید: قاعده‌ی لنگر — که خودِ پرامپت «سخت‌ترین قاعده‌ی این متن»
+   * می‌نامدش و تنها سنجه‌ای است که هنوز جا برای بهبود دارد — امروز بولتِ دهم از همان
+   * فهرستِ بلند است. این‌جا به بخشِ کوتاه و نام‌دارِ خودش منتقل می‌شود، بلافاصله بعد از
+   * «قاعده‌ی جواب».
+   *
+   * ⚠️ **انتقال است نه افزودن**: متنِ قاعده بیت‌به‌بیت همان است و فقط دو خطِ عنوان
+   * اضافه می‌شود، پس طولِ پرامپت عملاً ثابت می‌ماند و فرضیه تک‌متغیره است. اگر متن هم
+   * عوض می‌شد، نمی‌شد فهمید برد از **جا** آمده یا از **جمله‌بندی**. */
+  anchorsection: (sys) => {
+    const line = sys.split('\n').find((l) => l.startsWith('- The anchor rule,'));
+    if (!line) return sys;                       // قاعده جابه‌جا شده؛ گاردِ بالا می‌گیردش
+    const body = line.replace(/^- /, '');
+    const head = '\n=== The anchor rule, the hardest rule in this text ===\n'
+      + body.replace(/^The anchor rule, the hardest rule in this text\. /, '') + '\n';
+    return sys.replace(`${line}\n`, '')
+      .replace('\n=== The moves that make a reading personal ===',
+        `${head}\n=== The moves that make a reading personal ===`);
+  },
+
+  /* 🇬🇧 دورِ ۵، فرضیه‌ی ۲: **جمع‌بندی باید کارت را نام ببرد**.
+   *
+   * جمع‌بندی طولانی‌ترین فیلدِ خروجی است (۴ تا ۷ جمله) و اسپکش سه کارِ عمومی از مدل
+   * می‌خواهد (تکرارِ جواب، بازه‌ی زمانی، شرط). هر سه ذاتاً وسوسه‌ی جمله‌ی بی‌لنگر
+   * دارند: «over these next few weeks» و «if you stay patient» را می‌شود عیناً زیرِ
+   * هر فالِ دیگری گذاشت. اسپکِ فعلی می‌گوید شرط باید «به کارت‌های همین فال بخورد»
+   * ولی این یک **توصیف** است، نه یک چیزِ قابلِ سنجش برای خودِ مدل.
+   *
+   * واریانت همان جمله را به یک الزامِ عینی تبدیل می‌کند: شرط باید **نامِ یکی از
+   * کارت‌های همین فال** را ببرد. تغییر داخلِ اسپکِ JSON است، پس بقیه‌ی پرامپت
+   * دست‌نخورده می‌ماند. */
+  closinganchor: (sys) => {
+    const old = 'The condition has to fit the cards of this very reading and their own question, not be generic advice.';
+    if (!sys.includes(old)) return sys;
+    return sys.replace(old,
+      'The condition has to name one of the cards of this very reading out loud and hook onto their own question, '
+      + 'not be generic advice. A condition with no card name in it is generic advice.');
+  },
+
   /* 🇷🇺 فرضیه‌ی «حذف به‌جای آموزش» برای مشکلِ شماره‌یکِ روسی.
    * قاعده‌ی فعلی می‌گوید «فعلِ گذشته‌ی جنسیت‌دار خطاب به کاربر را جنسیت‌زدایی کن»،
    * که از مدل می‌خواهد یک کارِ ظریفِ صرفی را درست انجام دهد. ولی ما **هیچ داده‌ای**
@@ -284,7 +365,7 @@ async function runStep(persona, step, i, state) {
 
   const labels = L.prompts.cardLabels(cards.length);
   /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
-  let system = L.prompts.readerSystemV4(spread, labels);
+  let system = L.prompts.readerSystemV4(locSpread(spread), labels);
   if (VARIANT) {
     const before = system;
     system = PROMPT_VARIANTS[VARIANT](system);
@@ -428,7 +509,7 @@ async function probe(reps) {
       const labels = L.prompts.cardLabels(cards.length);
       let out = null, usage = {};
       try {
-        const r = await orChat(L.prompts.readerSystemV4(spread, labels), L.prompts.readingContext(ctx),
+        const r = await orChat(L.prompts.readerSystemV4(locSpread(spread), labels), L.prompts.readingContext(ctx),
           { maxTokens: spread.maxTokens, model: MODEL });
         out = r.text; usage = r.usage || {};
       } catch (e) { tally['خطای شبکه'] = (tally['خطای شبکه'] || 0) + 1; continue; }
@@ -627,6 +708,33 @@ if (!DRY) {
   const lo = done.reduce((s, r) => s + (r.check.anchor?.loose || 0), 0);
   const to = done.reduce((s, r) => s + (r.check.anchor?.total || 0), 0);
   console.log(`   🎯 جمله‌ی بی‌لنگر در کلِ دور: ${lo}/${to} (${to ? Math.round(lo * 100 / to) : 0}٪)`);
+  /* 🕯 شرطِ پایانی، **per بازو**. عمداً per بازو و نه یک عددِ کلِ دور: این سنجه برای
+   * مقایسه‌ی دو بازو ساخته شد و جمعِ چند بازو آن مقایسه را پنهان می‌کند.
+   *
+   * ⚠️ و تعدادِ فالِ هر بازو هم چاپ می‌شود، چون نسخه‌ی اولِ این شمارنده (یک اسکریپتِ
+   * موقت در دورِ ۵) بلوکِ ترنسکریپت را با پیشوندِ «▓ openai» تشخیص می‌داد و در
+   * دورِ ۶ دو بازوی غیرِOpenAI را **بی‌صدا** انداخت؛ جدولی با دو ردیف داد که کاملاً
+   * درست به نظر می‌رسید. تنها چیزی که گرفتش شمارشِ بازوها بود. قاعده: هر سنجه‌ی
+   * تجمیعی باید مخرجش را هم بگوید، وگرنه «نبودِ ردیف» با «صفر بودنِ مقدار» یکی
+   * به نظر می‌رسد. */
+  {
+    const byArm = new Map();
+    for (const r of done) {
+      const ca = closingAnchor({ llm: r.llm, cards: r.cards });
+      if (!ca) continue;                       // زبانی که الگوی شرط اعلام نکرده
+      const a = byArm.get(r.arm) || { n: 0, cond: 0, named: 0 };
+      a.n++; if (ca.cond) a.cond++; if (ca.named) a.named++;
+      byArm.set(r.arm, a);
+    }
+    if (byArm.size) {
+      console.log('   🕯 شرطِ پایانی نامِ کارتِ همین فال را می‌برد:');
+      for (const [arm, a] of byArm) {
+        const noCond = a.n - a.cond;
+        console.log(`      ${arm.padEnd(34)} ${a.named}/${a.n}`
+          + (noCond ? `  ⚠️ ${noCond} جمع‌بندی اصلاً شرطِ پایانی ندارد` : ''));
+      }
+    }
+  }
   /* 📏 «خط‌کش چقدر کج بود»: همان متن، با مسیرِ **قدیمیِ** نامِ کارت. تفاوتِ این دو عدد
    * اثرِ فیکسِ ریشه‌یابی را **بدونِ نویزِ اجرا** نشان می‌دهد، چون روی عینِ همان جمله‌ها
    * حساب می‌شود. برای فارسی همیشه صفر است (صرف ندارد) و همین صفر، خودش تأییدِ

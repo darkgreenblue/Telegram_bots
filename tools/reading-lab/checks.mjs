@@ -105,13 +105,58 @@ const allStemsOf = (s) => new Set(words(s).map(clean1)
 // جمله‌های فارسی: نقطه، علامت سؤال، و خطِ جدید. «؛» و «،» جمله را نمی‌شکنند.
 const sentences = (t) => String(t || '').split(/[.!؟?\n]+/).map(x => x.trim()).filter(x => words(x).length >= 4);
 
+/* 🕯 «شرطِ پایانیِ جمع‌بندی نامِ کارتِ همین فال را می‌برد؟»
+ *
+ * چرا این سنجه‌ی جدا لازم شد: دورِ ۵ انگلیسی دو واریانتِ پرامپت را سنجید و سنجه‌ی
+ * مرکزیِ **بی‌لنگر** هیچ‌کدام را برنده نکرد (−۰٫۱ واحد، «قطعی نیست»). ولی آن سنجه کلِ
+ * متن را می‌بیند و آن فرضیه فقط دربارهٔ **یک جمله** بود: یک جمله از ~۱۵ جمله یعنی ~۷
+ * واحد جابه‌جایی، دقیقاً هم‌اندازه‌ی نویزِ ثبت‌شده. یعنی بی‌لنگر ساختاراً نمی‌توانست آن
+ * فرضیه را رد یا تأیید کند. با سنجشِ **همان چیزی که فرضیه ادعا می‌کرد**، نتیجه قاطع
+ * شد: ۰/۹ ⟵ ۹/۹، در هر نُه سناریو بدونِ استثنا.
+ *
+ * ⚠️ و تفکیکِ اصلیِ این سنجه همین است: نامِ کارت باید در **شرط** باشد، نه در نتیجه‌ی
+ * شرط. گروهِ کنترلِ دورِ ۵ سه بار نامِ کارت را در نتیجه آورد («then the Ace of
+ * Pentacles can grow…») و **صفر بار** در شرط. سنجه‌ای که این دو را یکی بگیرد،
+ * تفاوتِ واقعی را نمی‌بیند.
+ *
+ * برمی‌گرداند `null` برای زبانی که `closingCond` اعلام نکرده (بالا، در `lang/<loc>.mjs`).
+ */
+export function closingAnchor({ llm, cards }) {
+  const M = LANG.closingCond;
+  if (!M) return null;
+  const s = String(llm?.closing || '');
+  if (!s) return { cond: false, named: false };
+  // آخرین «اگر»، چون جمع‌بندی می‌تواند چند شرط داشته باشد و شرطِ پایانی ملاک است.
+  let last = -1, mm;
+  const re = new RegExp(M.open.source, M.open.flags.includes('g') ? M.open.flags : `${M.open.flags}g`);
+  while ((mm = re.exec(s)) !== null) last = mm.index + mm[0].length;
+  if (last < 0) return { cond: false, named: false };
+  const rest = s.slice(last);
+  const sep = rest.match(M.sep);
+  const cond = sep ? rest.slice(0, sep.index) : rest;
+  const lc = cond.toLowerCase();
+  const named = cards.map(c => cardName(c.key)).some(n => n && lc.includes(String(n).toLowerCase()));
+  return { cond: true, named };
+}
+
 export function anchorScore({ llm, cards, ctx }) {
   // 🌍 نامِ کارت از هسته می‌آید نه از `CARD_BY_KEY[..].fa`، وگرنه روی هر زبانِ
   // غیرفارسی این سنجه همیشه صفر می‌داد (مدلِ روسی «Шут» می‌نویسد نه «دیوانه»).
   const cardNames = cards.map(c => cardName(c.key));
-  // نامِ کارت چندکلمه‌ای است («Тройка Кубков»)، پس ریشه‌ی **همه‌ی** کلمه‌های معنادارش
-  // باید در جمله باشد؛ یک کلمه‌ی مشترک («Кубков») به‌تنهایی لنگر نیست.
-  const cardStems = cardNames.map(n => words(n).map(clean1).filter(Boolean).map(stem)).filter(a => a.length);
+  /* نامِ کارت چندکلمه‌ای است («Тройка Кубков»)، پس ریشه‌ی **همه‌ی** کلمه‌های معنادارش
+   * باید در جمله باشد؛ یک کلمه‌ی مشترک («Кубков») به‌تنهایی لنگر نیست.
+   *
+   * 🐛 و «معنادار» تا ۱۴۰۵/۰۶/۲۷ فقط در همین کامنت بود، نه در کد: این سمت فهرستِ ایست
+   * را اعمال نمی‌کرد و سمتِ جمله (`allStemsOf`) می‌کرد. برای فارسی و روسی بی‌اثر بود
+   * (نامِ کارت حرفِ تعریف ندارد: «دیوانه»، «Шут») ولی انگلیسی را می‌کُشت: «The Fool»
+   * ریشه‌های `[the, fool]` می‌داد و `the` از سمتِ جمله حذف شده بود، پس شرطِ `every`
+   * **هرگز** درست نمی‌شد. یعنی مسیرِ ریشه برای بیشترِ آرکانای بزرگِ انگلیسی مرده بود و
+   * جمله‌ای که «the Fool» را با حرفِ کوچک می‌نوشت (پس از مسیرِ تطبیقِ عینیِ
+   * حساس‌به‌حروف هم رد می‌شد) **بی‌لنگر** شمرده می‌شد.
+   * جهتِ خطا هم بد بود: عددِ بی‌لنگرِ انگلیسی را بی‌دلیل بالا نشان می‌داد. */
+  const cardStems = cardNames
+    .map(n => words(n).map(clean1).filter(w => w && !STOP.has(w.toLowerCase())).map(stem))
+    .filter(a => a.length);
   const qWords = new Set(contentWords(ctx.question).map(stem));
   const memWords = new Set([...contentWords(ctx.memory).map(stem),
     ...(ctx.previous || []).flatMap(p => contentWords(p[LANG.summaryKey]).map(stem))]);
@@ -260,7 +305,18 @@ export function checkReading({ llm, rendered, spread, cards, ctx, L }) {
   // ۶) عبارت‌های ممنوع و ایموجیِ مدل
   const ev = evasionIn(raw);
   if (ev) issues.push(`طفره‌رفتن: «${ev}»`);
-  for (const r of REGISTER) if (raw.includes(r)) notes.push(`واژه‌ی لحنیِ نامطلوب: «${r}»`);
+  /* ⚠️ تطبیق **بی‌توجه به حروفِ بزرگ و کوچک**. تا ۱۴۰۵/۰۶/۲۷ خامِ `includes` بود و
+   * «The universe» را نمی‌دید چون فهرست حروفِ کوچک دارد. برای فارسی بی‌اثر بود (فارسی
+   * حرفِ بزرگ ندارد) ولی برای سه زبانِ لاتین و روسی دقیقاً پرتکرارترین شکل را از دست
+   * می‌داد: این عبارت با حرفِ تعریف شروع می‌شود، پس معمولاً **اولِ جمله** می‌آید.
+   * ⚠️ اثباتِ اینکه تله واقعی بود: `lang/ru.mjs` هر دو شکلِ «вселенная» و «Вселенная»
+   * را دستی نوشته — یعنی یک بار کسی به همین برخورده و به‌جای رفعِ ریشه، یک ردیف اضافه
+   * کرده. سه زبانِ دیگر آن وصله را نگرفتند و کور ماندند (بند ۲و/۶ب-۲ ریشه: سبزیِ
+   * حاصل از نبودِ قرمز هیچ چیز ثابت نمی‌کند).
+   * گاردِ **محصول** این باگ را نداشت (`verdict.js` از `norm()` رد می‌شود که lowercase
+   * می‌کند)، پس این فقط سنجه‌ی آزمایشگاه را کور کرده بود، نه خروجیِ کاربر. */
+  const rawLc = raw.toLowerCase();
+  for (const r of REGISTER) if (rawLc.includes(r.toLowerCase())) notes.push(`واژه‌ی لحنیِ نامطلوب: «${r}»`);
   const em = raw.match(EMOJI);
   if (em) notes.push(`مدل ایموجی گذاشت: ${em[0]}`);
 

@@ -296,3 +296,34 @@ export function negativeUsersSql(idx, hasEvents) {
     params: [n.event],
   };
 }
+
+/* ═══ 🗣 گفتگوی پس از فال ═══
+   قیفِ فیچرِ گفتگو، از رویدادهای افزایشیِ خودش (`bots/tarot/CLAUDE.md` بخشِ v3.84.0).
+   ترتیب عمدی است: از مخرج (پیشنهاد دیده شد) به سمتِ عمق و بعد سیگنال‌های خرابی.
+
+   ⚠️ **ادمین این‌جا حذف نمی‌شود، و این عمدی است.** گفتگو هنوز پشتِ
+   `CHAT_AFTER_READING_ADMIN_ONLY = true` است، یعنی **تنها** کسانی که این رویدادها را
+   می‌سازند ادمین و تسترند. اگر `notAdminEvents` این‌جا می‌آمد، هر شش عدد **صفر** بود و
+   کارت به یک وعده‌ی توخالی تبدیل می‌شد — بدترین حالت، چون مالک فکر می‌کرد فیچر استفاده
+   نمی‌شود. لحظه‌ی باز شدن برای همه، این یک خط اضافه می‌شود (و کارت هم همین را می‌گوید).
+   قاعده‌ی عمومی‌اش: فیلترِ ادمین برای سنجه‌ی **محصولی** واجب است، برای سنجه‌ی فیچرِ
+   فقط-ادمین غلط. */
+export const CHAT_EVENTS = [
+  { event: 'chat_offer_shown', label: '📣 پیشنهادِ گفتگو را دید', cond: '' },
+  { event: 'chat_opened', label: '🗣 گفتگو را باز کرد', cond: '' },
+  { event: 'chat_message', label: '💬 سؤال پرسید', cond: '' },
+  { event: 'chat_thin', label: '🪫 جوابِ زیرِ کفِ محتوا گرفت', cond: '' },
+  { event: 'chat_refund', label: '↩️ الماسش برگشت', cond: '' },
+  { event: 'chat_paywall', label: '💎 به دیوارِ موجودی خورد', cond: '' },
+];
+
+/** کاربرانِ یکتای یک رویدادِ گفتگو در بازه (همان SQL ای که عددش را می‌سازد). */
+export function chatUsersSql(idx, since = 0) {
+  const c = CHAT_EVENTS[idx];
+  if (!c) return null;
+  return {
+    sql: `SELECT DISTINCT e.user_id AS uid FROM events e
+          WHERE e.event = ?${c.cond} AND e.created_at >= ?`,
+    params: [c.event, since],
+  };
+}
