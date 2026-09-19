@@ -113,5 +113,31 @@ ok(ids.every(id => new RegExp(`^## ${id}$`, 'm').test(blind)),
   ok(!/^(AB)+$|^(BA)+$/.test(armSeq), `الگوی متناوبِ بازوها شکسته شد (${armSeq})`);
 }
 
+/* ═══ ۶) برچسبِ مجموعه: شناسه‌ی سناریو بینِ مجموعه‌ها یکتا **نیست** ═══
+ *
+ * 🐛 باگی که قبل از اولین استفاده گرفته شد: `P1.1` در هر سه مجموعه‌ی فارسی هست، با
+ * کارت و سؤالِ کاملاً متفاوت. اگر کلید فقط `persona.step` نگه دارد، تفاضلِ جفت‌شده سه
+ * سناریوی بی‌ربط را یکی می‌شمارد و دو سومِ دیتا **بی‌صدا** دور می‌ریزد. */
+{
+  const mk = (tag, persona, step, body) =>
+    ({ arm: ARM_A, persona, step, rep: 1, spread: 'س', set: tag,
+       question: `سؤالِ ${tag}`, cards: 'کارت', body: [body] });
+  const mixed = [
+    mk('alef', 'P1', 1, 'متنِ الف'), { ...mk('alef', 'P1', 1, 'متنِ الف۲'), arm: ARM_B },
+    mk('b', 'P1', 1, 'متنِ ب'),      { ...mk('b', 'P1', 1, 'متنِ ب۲'), arm: ARM_B },
+    mk('c', 'P1', 1, 'متنِ ج'),      { ...mk('c', 'P1', 1, 'متنِ ج۲'), arm: ARM_B },
+  ];
+  const { key } = splitBlind(mixed, 'mix');
+  const scens = new Set(Object.values(key).map(k => k.scen));
+  ok(scens.size === 3, `سه مجموعه سه سناریوی متمایز دادند، نه یکی (${scens.size})`);
+  ok([...scens].every(x => /^(alef|b|c)\/P1\.1$/.test(x)),
+    `شناسه‌ی سناریو برچسبِ مجموعه را حمل می‌کند (${[...scens].sort().join(' , ')})`);
+  ok(Object.values(key).every(k => k.set), 'برچسبِ مجموعه در هر ردیفِ کلید هست');
+  // کنترلِ مثبت: بازسازیِ بدونِ برچسب همان سه تا را به **یک** سناریو می‌چسباند
+  const naive = new Set(Object.values(key).map(k => `${k.persona}.${k.step}`));
+  ok(naive.size === 1,
+    'کنترلِ مثبت: بازسازیِ بی‌برچسب هر سه مجموعه را یک سناریو می‌بیند (باگی که رفع شد)');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} ${pass} ادعا سبز، ${fail} قرمز`);
 process.exit(fail ? 1 : 0);

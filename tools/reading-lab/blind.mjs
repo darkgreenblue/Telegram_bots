@@ -67,12 +67,20 @@ function shuffle(arr, seedStr) {
 
 const pad = (n, w) => String(n).padStart(w, '0');
 
+/* ⚠️ `tag` (نامِ مجموعه‌ی سناریو) **اجباریِ درستی** است، نه تزئین.
+ *
+ * 🐛 باگی که قبل از اولین استفاده گرفته شد: شناسه‌ی سناریو per مجموعه یکتا **نیست**.
+ * `P1.1` در هر سه مجموعه‌ی فارسی وجود دارد، با کارت و سؤالِ کاملاً متفاوت. اگر سه لاگ
+ * با هم کور شوند و کلید فقط `persona.step` نگه دارد، تفاضلِ جفت‌شده سه سناریوی بی‌ربط
+ * را یک سناریو می‌شمارد و `find` فقط اولی را برمی‌دارد: دو سومِ دیتا **بی‌صدا** دور
+ * می‌ریزد و عددِ باقی‌مانده هم جفتِ اشتباه است. هیچ خطایی هم نمی‌داد. */
 export function splitBlind(rows, seed) {
   const shuffled = shuffle(rows, seed);
   const key = {};
   const blocks = shuffled.map((r, i) => {
     const id = `R${pad(i + 1, 2)}`;
-    key[id] = { arm: r.arm, persona: r.persona, step: r.step, rep: r.rep, spread: r.spread };
+    key[id] = { arm: r.arm, persona: r.persona, step: r.step, rep: r.rep, spread: r.spread,
+                set: r.set || '', scen: `${r.set ? `${r.set}/` : ''}${r.persona}.${r.step}` };
     /* ⚠️ چیدمان و سؤال و کارت‌ها **می‌مانند**: بدونشان معیارهای لنگرِ کارت و جوابِ
      * صریح قابلِ داوری نیستند. هیچ‌کدام بازو را لو نمی‌دهند. شناسه‌ی سناریو عمداً
      * حذف می‌شود، چون با ترتیبِ تصادفی هم دیدنِ «سه بارِ P1.1» می‌تواند به حدسِ
@@ -93,11 +101,30 @@ const argv = RUN_CLI ? process.argv.slice(2) : [];
 const val = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 
 if (argv[0] === 'split') {
-  const src = val('log', '');
-  if (!src || !fs.existsSync(src)) { console.error('❌ --log <فایلِ لاگ> لازم است'); process.exit(1); }
-  const rows = parseTranscripts(fs.readFileSync(src, 'utf8'));
-  if (!rows.length) { console.error('❌ هیچ رونوشتی در لاگ پیدا نشد (هدرِ ▓ عوض شده؟)'); process.exit(1); }
-  const out = val('out', src.replace(/\.[^.]+$/, ''));
+  /* `--logs a.txt:alef,b.txt:b` — چند لاگ در **یک** فایلِ کور، چون شافلِ بینِ
+   * مجموعه‌ها کوری را قوی‌تر می‌کند (ترتیبِ مجموعه هم سرنخ نمی‌دهد). برچسب اجباری است
+   * وگرنه شناسه‌ی سناریوها بینِ مجموعه‌ها قاطی می‌شود (کامنتِ `splitBlind`). */
+  const many = (val('logs', '') || '').split(',').map(x => x.trim()).filter(Boolean);
+  const single = val('log', '');
+  const specs = many.length ? many : (single ? [single] : []);
+  if (!specs.length) { console.error('❌ --log <فایل> یا --logs <فایل:برچسب,…> لازم است'); process.exit(1); }
+  const rows = [];
+  for (const spec of specs) {
+    const i = spec.lastIndexOf(':');
+    const file = i > 1 ? spec.slice(0, i) : spec;
+    const tag = i > 1 ? spec.slice(i + 1) : '';
+    if (!fs.existsSync(file)) { console.error(`❌ فایل نیست: ${file}`); process.exit(1); }
+    if (specs.length > 1 && !tag) {
+      console.error(`❌ با چند لاگ، برچسبِ مجموعه اجباری است: «${spec}» باید «فایل:برچسب» باشد.`);
+      process.exit(1);
+    }
+    const part = parseTranscripts(fs.readFileSync(file, 'utf8'));
+    if (!part.length) { console.error(`❌ هیچ رونوشتی در ${file} نبود (هدرِ ▓ عوض شده؟)`); process.exit(1); }
+    for (const r of part) r.set = tag;
+    console.log(`   ${file}${tag ? ` (${tag})` : ''}: ${part.length} فال`);
+    rows.push(...part);
+  }
+  const out = val('out', (specs[0].split(':')[0]).replace(/\.[^.]+$/, ''));
   const { blind, key } = splitBlind(rows, val('seed', 'blind'));
   fs.writeFileSync(`${out}.blind.md`, blind);
   fs.writeFileSync(`${out}.key.json`, JSON.stringify(key, null, 1));
@@ -131,7 +158,9 @@ if (argv[0] === 'score') {
     if (!s) { missing++; continue; }
     const r = scoreOf(s, textOf[id] || '');
     faked += r.faked.length;
-    perId.push({ id, arm: meta.arm, scen: `${meta.persona}.${meta.step}`, got: r.got, pct: r.pct, faked: r.faked });
+    /* ⚠️ سناریو از **خودِ کلید** خوانده می‌شود نه از `persona.step`: با چند مجموعه
+     * آن بازسازی سناریوهای بی‌ربط را یکی می‌کند (کامنتِ `splitBlind`). */
+    perId.push({ id, arm: meta.arm, scen: meta.scen || `${meta.persona}.${meta.step}`, got: r.got, pct: r.pct, faked: r.faked });
     const a = byArm.get(meta.arm) || { n: 0, got: 0, faked: 0 };
     a.n++; a.got += r.got; a.faked += r.faked.length; byArm.set(meta.arm, a);
   }
@@ -169,6 +198,6 @@ if (argv[0] === 'score') {
 }
 
 if (RUN_CLI && !['split', 'score'].includes(argv[0])) {
-  console.log('حالت‌ها:\n  split --log <لاگ> [--out <پیشوند>] [--seed <رشته>]\n'
+  console.log('حالت‌ها:\n  split --logs <فایل:برچسب,…> | --log <لاگ>  [--out <پیشوند>] [--seed <رشته>]\n'
     + '  score --blind <x.blind.md> --key <x.key.json> --scores <نمره‌ها.json>');
 }
