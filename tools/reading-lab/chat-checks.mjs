@@ -13,7 +13,8 @@
 // قاعده‌ی دوم: همه‌ی این‌ها **قطعی** اند. قضاوتِ سلیقه‌ای کارِ `chat-rubric.mjs` و
 // خودِ سشن است، نه این فایل.
 import { ngrams } from './checks.mjs';
-import { hookOk, norm, followUpBad, floorApplies, CHAT_FLOOR_CHARS } from '../../bots/tarot/chat-core.js';
+import { hookOk, norm, followUpBad, floorApplies, CHAT_FLOOR_CHARS,
+         CHAT_FU_PROMPT_MAX } from '../../bots/tarot/chat-core.js';
 
 /* 🌍 دادهٔ زبانیِ سنجه‌ها از همان `lang/<locale>.mjs`ِ آزمایشگاهِ خوانش می‌آید، نه یک
  * کپیِ تازه: الگوی «لحنِ رسمی» و استثنای «جمعِ واقعی» یک بار در همان‌جا تصحیح شده‌اند
@@ -118,7 +119,8 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     return { lines: lines.length, chars, canned: true, hook: { ok: true, why: '' }, hookExempt: false,
       chatbait: 0, formal: [], bookish: [], labelEcho: '', dashes: 0, dashesRaw: 0, qmarks: 0,
       firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', promptLeak: '', cardForce: '',
-      latin: 0, offDomain, thin: false, fuBad: '', fuStyle: '', fuNoAsk: false, issues, notes };
+      latin: 0, offDomain, thin: false, fuBad: '', fuStyle: '', fuNoAsk: false, fuLen: 0,
+      fuLong: false, noOffer: false, issues, notes };
   }
 
   /* ۰) 🪫 **کفِ محتوا** — تازه‌ترین سنجه و تنها سنجه‌ای که مستقیم به پول وصل است.
@@ -153,6 +155,12 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     fuNoAsk = !LANG.followUpAsk.test(followUp);
     if (fuNoAsk) notes.push(`برچسب سؤال نیست (کاربر این را نمی‌نوشت): «${followUp}»`);
   }
+  /* ✂️ طولِ برچسب. **نکته** است نه ایراد، چون کد تضمین می‌کند بریده‌شده‌اش هرگز از دکمه
+   * بیرون نمی‌زند (`chatBtnLabel`)؛ این عدد فقط می‌گوید پرامپت چقدر جواب داده. سقف از
+   * `chat-core` می‌آید تا پرامپت و سنجه و کد سه عددِ واگرا نشوند. */
+  const fuLen = String(followUp || '').trim().length;
+  const fuLong = !!followUp && fuLen > CHAT_FU_PROMPT_MAX;
+  if (fuLong) notes.push(`برچسبِ بلند (${fuLen} > ${CHAT_FU_PROMPT_MAX} نویسه، روی دکمه بریده می‌شود): «${followUp}»`);
 
   /* ۱) قلابِ خطِ آخر — **همان تابعی** که ربات هم لاگش می‌کند.
    *
@@ -166,6 +174,34 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
   const hookExempt = offDomain && (hook.why === 'short' || hook.why === 'noanchor');
   if (!hook.ok && !hookExempt) issues.push(`قلابِ خطِ آخر: ${hook.why}${hook.hit ? ` («${hook.hit}»)` : ''}`);
   else if (hookExempt) notes.push(`قلابِ خطِ آخر معاف شد (بیرونِ دامنه: ${hook.why})`);
+
+  /* ۱ب) 🎁 **خطِ آخر پیشنهاد است؟** — سنجه‌ی مرکزیِ پرامپتِ v6.
+   *
+   * ⚠️ برخلافِ `hook`، این یکی **بیرونِ دامنه هم معاف نمی‌شود**. تصمیمِ صریحِ مالک:
+   * «تو همه پیام‌ها هم می‌خوام باشه.» و این با معافیتِ بالا تناقض ندارد: آن معافیت
+   * برای **لنگر** است (اجبارِ چسباندنِ نامِ کارت به جوابِ بی‌ربط)، ولی پیشنهاد
+   * محتوای تاروتی لازم ندارد و بیرونِ دامنه هم معنی می‌دهد. تنها معافیتش پایین است.
+   *
+   * ⚠️ و با لیستِ chatbait هم تصادم ندارد: آن لیست پیشنهادِ **بی‌محتوا** را می‌گیرد
+   * («بیشتر بگم؟»)، و خودِ پرامپت پیشنهاد را به «دقیق باشد نه تعارف» مقید کرده. پس
+   * جوابی که هر دو را رعایت کند وجود دارد، و اگر روزی این دو واقعاً به هم خوردند،
+   * همین دو عدد کنارِ هم نشانش می‌دهند. */
+  let noOffer = false;
+  if (LANG.closingOffer) {
+    const o = LANG.closingOffer;
+    const tail = lines[lines.length - 1] || '';
+    const isOffer = (o.ask.test(tail) && o.mine.test(tail)) || o.can.test(tail);
+    /* ⚠️ تنها معافیت، و عیناً همان استثنایی که در پرامپت نوشته شده: نوبتی که خودِ کاربر
+     * دارد گفتگو را تمام می‌کند (`wants_end`). پیشنهادِ تازه آن‌جا دقیقاً همان
+     * «جمع نکن و خداحافظی نکن» را از جهتِ مخالف نقض می‌کند: کاربر خداحافظی کرده و ما
+     * داریم نگهش می‌داریم. بقیه‌ی پرچم‌ها (پشتیبانی، فالِ تازه) معاف **نیستند** —
+     * برخلافِ `floorApplies` که آن‌ها را از کفِ محتوا معاف می‌کند، چون کوتاه بودنِ
+     * مشروعِ آن جواب‌ها دلیلِ نداشتنِ پیشنهاد نیست (بند ۹ب/۱: هیچ صفحه‌ای بن‌بست نیست). */
+    const endTurn = !!(flags && flags.end);
+    noOffer = !isOffer && !endTurn;
+    if (noOffer) issues.push(`خطِ آخر پیشنهاد نیست: «${tail.slice(0, 80)}»`);
+    else if (!isOffer) notes.push('خطِ آخر پیشنهاد نیست، ولی معاف شد (کاربر دارد گفتگو را تمام می‌کند)');
+  }
 
   /* ۲) chatbait در **هر** خط، نه فقط خطِ آخر. `hookOk` روی یک خطِ تنها همان لیست و
    * همان نرمال‌سازیِ chat-core را اجرا می‌کند و chatbait را قبل از هر شرطِ دیگری
@@ -307,7 +343,8 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
 
   return { lines: lines.length, chars, canned: false, hook, hookExempt, chatbait: bait.length,
     formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency,
-    promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuStyle, fuNoAsk, issues, notes };
+    promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuStyle, fuNoAsk,
+    fuLen, fuLong, noOffer, issues, notes };
 }
 
 /**

@@ -72,7 +72,7 @@ import {
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
   cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
-  CHAT_FLOOR_CHARS, floorApplies,
+  CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
 } from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.103.0';
+const PRODUCT_VERSION = '3.104.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -486,6 +486,13 @@ const CHAT_MAX_TOKENS  = 500;
  * ⚠️ این دکمه یک **سؤالِ واقعی** است، پس از همان `payForChat` رد می‌شود: کسر، پی‌وال و
  * ریفاند بیت‌به‌بیت مثل سؤالِ تایپی. رول‌بک: `false` ⟵ دکمه ساخته نمی‌شود. */
 const CHAT_FOLLOWUP = true;
+/* ✂️ سقفِ **نمایشیِ** برچسبِ همان دکمه (v3.104.0، خواسته‌ی صریحِ مالک: «حتماً محدودیت
+ * کاراکتر داشته باشه، یه بخشیش از دکمه می‌زنه بیرون و قابلِ خوندن نیست»).
+ *
+ * ثابت و تابعش در `chat-core.js` اند (تک‌منبع با پرامپت و آزمایشگاه) و این‌جا فقط
+ * مصرف می‌شوند. 🔑 و **فقط برچسب** را کوتاه می‌کند، نه سؤال را: `follow_up` کامل در
+ * دیتابیس می‌ماند و تپِ دکمه همان سؤالِ کاملِ ردیف را می‌پرسد (و v3.96.0 آن را در یک
+ * `blockquote` بازگو می‌کند)، پس بریدنِ نمایشی هیچ اطلاعاتی را از فلو نمی‌برد. */
 /* 🙏 دکمه‌ی «پایان مکالمه» زیرِ **هر** جواب (خواسته‌ی صریحِ مالک: «با دکمه‌ای که همیشه
  * هست، دکمه‌ی پایان مکالمه هم همیشه می‌تواند زیرش بنشیند»). دو کار می‌کند که هیچ مسیرِ
  * دیگری در استیتِ `chatting` نمی‌کند: گفتگو را با فلگِ بازگشت می‌بندد، و **کیبوردِ
@@ -7052,7 +7059,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     let kb = null;
     try {
       const rows = [];
-      if (followUp) rows.push([Markup.button.callback(followUp, `chat_ask:${aId}`)]);
+      if (followUp) rows.push([Markup.button.callback(chatBtnLabel(followUp), `chat_ask:${aId}`)]);
       if (out.newReading) rows.push([Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]);
       if (out.support) rows.push([Markup.button.url(L.support.openBtn, supportLink(SUPPORT_BOT_CODE, uid, L.support))]);
       if (CHAT_END_BUTTON) rows.push([Markup.button.callback(L.buttons.chatEnd, `chat_end:${rid}`)]);
