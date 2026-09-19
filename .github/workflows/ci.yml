@@ -335,6 +335,14 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-payments.mjs
 
+      # لایه‌ی دومِ دفاعِ پرداخت: کاربرِ «مشکوک» (بندِ CLAUDE.md ربات). suspectTrigger
+      # را از سورس می‌بُرد و اجرا می‌کند، SQLِ نگه‌داری/آزادسازیِ برچسب را روی SQLite
+      # واقعی می‌سنجد، و ساختاراً مطمئن می‌شود گیتِ processReceipt هر سه تصمیمِ خودکار
+      # (approve/underpaid/reject) را برای کاربرِ مشکوک می‌بندد نه فقط approve.
+      - name: Suspicious-user payment gate check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-suspect.mjs
+
       # اقتصادِ سکه + نسخه‌ی دومِ لحن (tarot): هر دو فعلاً فقط روی اکانتِ ادمین‌اند، پس این
       # چک قبل از هر چیز «نشتی به کاربرِ واقعی» را می‌گیرد؛ بعد ریاضیِ سکه (هر کارت = ۱ سکه)،
       # نردبانِ بسته‌ها، سالم‌ماندنِ چیدمان‌های قدیمی، و قانونِ «جوابِ مبهم نمایش داده نمی‌شود».

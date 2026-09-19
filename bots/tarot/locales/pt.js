@@ -382,6 +382,8 @@ export default {
     smsNotArrived: '🚫 O aviso não chegou',
     reverseYes: '✅ Sim, pode estornar',
     reverseNo: '↩️ Não, deixa pra lá',
+    suspectYes: '✅ Chegou o aviso',
+    suspectNo: '❌ Não chegou o aviso',
   },
 
   // «Área de foco» que vai para o prompt (`readingContext`). As áreas aposentadas
@@ -1055,6 +1057,8 @@ export default {
     adminMoney,
     adminAutoApproved: (p, user, reason, pack) =>
       `✅ Pagamento #${p.invoice_no || p.id} aprovado pelo agente e creditado.\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}\n🤖 ${reason}`,
+    adminSuspectApprove: (p, user, pack) =>
+      `🤖 Eu teria aprovado isso automaticamente, mas essa pessoa está marcada como suspeita: confira pessoalmente se o aviso realmente chegou.\n\nPagamento #${p.invoice_no || p.id}\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
     confirmReverse: (pid) =>
       `⚠️ Tem certeza de que não chegou o aviso do pagamento #${pid}?\nConfira o banco primeiro. Confirmando, o crédito sai do saldo da pessoa (não passa de zero), o pagamento volta ao estado anterior, e daqui pra frente os pagamentos dela só serão aprovados na mão.`,
     reversedUser: (cur) => `O seu pagamento anterior foi cancelado e o crédito dele saiu da sua conta. 🌙\nSe você acha que houve engano, fale com o suporte: ${SUPPORT_CONTACT}`,
