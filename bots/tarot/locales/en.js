@@ -744,10 +744,15 @@ export default {
        🐛 جمله‌ی قبلی «برای برگردوندنِ کارت‌ها» بود و از دنیای پی‌والِ نسلِ قبل مانده بود:
        از v3.13.0 کسر سرِ **انتخابِ اندازه** انجام می‌شود، یعنی در لحظه‌ی دیدنِ این پیام
        هنوز هیچ کارتی کشیده نشده (گزارشِ مالک، ۱۴۰۵/۰۶/۲۴). */
-    needBalance: ({ name, balance, spreadFa, price, cur }) =>
+    /* ⚠️ `size` (تعدادِ کارتِ چیدمان) اختیاری است و **عمداً** اختیاری می‌ماند: ردیفِ
+       `pending_payment` ستونِ اندازه ندارد و چیدمانِ ناشناخته `undefined` می‌دهد. در آن
+       حالت هیچ عددی چاپ نمی‌شود، نه «0-card» (بند ۲و/۶ج ریشه: عددِ دروغ از نبودِ عدد
+       بدتر است). در انگلیسی صفتِ مرکبِ پیش‌از‌اسم همیشه مفرد است («a 10-card reading»),
+       پس برخلافِ روسی هیچ صرفِ جمعی لازم نیست. */
+    needBalance: ({ name, balance, spreadFa, price, cur, size }) =>
       `Almost there${name ? `, ${name}` : ''}: you need a few more ${purse(cur)} for this reading.\n\n` +
       `${purseQuote(balance, cur)}\n\n` +
-      `The "${spreadFa}" reading costs ${moneyTight(price, cur)}`,
+      `The ${size ? `${fmt(size)}-card ` : ''}"${spreadFa}" reading costs ${moneyTight(price, cur)}`,
     resumeAfterRecharge: 'Topped up ✅\n\nYour cards are waiting right where you left them 🔮 Ready to turn them over?',
     // یک پیامِ واحد با افکتِ لودینگ (تصمیمِ صریحِ مالک): چهار متنِ روایی قبلی حذف شدند.
     // فریم‌ها سریع عوض می‌شوند تا کاربر ببیند اتفاقی دارد می‌افتد و فکر نکند گیر کرده.

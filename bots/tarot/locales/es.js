@@ -788,13 +788,16 @@ export default {
     // entera al instante (bloque ۹: el dinero de quien paga nunca queda en el limbo).
     refundedOnCancel: (price, cur) => `Los ${moneyTight(price, cur)} de esta lectura ya volvieron a tu cuenta ✅`,
     // ⚠️ va como HTML (caja de cita), así que `name` y `spreadFa` llegan con esc().
-    needBalance: ({ name, balance, spreadFa, price, cur }) =>
+    needBalance: ({ name, balance, spreadFa, price, cur, size }) =>
       // 🐛 Antes decía «para destapar las cartas»: resto del paywall viejo, cuando las
       // cartas ya estaban elegidas. Hoy el cobro ocurre al elegir el tamaño, o sea que
       // todavía no se sacó ninguna carta (reporte del dueño, 1405/06/24).
       `${name ? `¡Casi, ${name}!` : '¡Casi!'} Para esta lectura todavía falta un poco.\n\n` +
       `${purseQuote(balance, cur)}\n\n` +
-      `La lectura «${spreadFa}» cuesta ${moneyTight(price, cur)}`,
+      // 📐 El tamaño va en la línea del precio (dueño, 1405/06/27): el saldo no alcanzó
+      // justamente por el tamaño elegido, así que el número debe decir por cuántas cartas
+      // se paga. Si no se conoce el tamaño, no se imprime nada (nunca «0 cartas»).
+      `La lectura ${size ? `de ${fmt(size)} cartas ` : ''}«${spreadFa}» cuesta ${moneyTight(price, cur)}`,
     resumeAfterRecharge: 'Saldo listo ✅\n\nTus cartas siguen en el mismo lugar 🔮 ¿Las destapamos?',
     loadingTitle: 'Leyendo tus cartas',
     loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
