@@ -558,8 +558,12 @@ for (const arm of ARM_LIST) {
            * چون گزارش فقط متن را نشان می‌داد، افتِ طول و لحن به‌جای «مدلِ اشتباه»
            * به «پرامپت» نسبت داده می‌شد. پرچم‌ها هم چاپ می‌شوند چون تنها مصرفشان
            * (دکمه‌ی CTA) بیرونِ آزمایشگاه است و بدونِ چاپ، خاموش‌ماندنشان نامرئی بود. */
-          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '']
-            .filter(Boolean).join(' + ') || 'ــ';
+          /* ⚠️ پرچمِ `end` هم چاپ می‌شود، و این یک جزئیاتِ تزئینی نیست: نبودش یک بار
+           * باعث شد یک نوبتِ **معافِ درست** (جوابِ «پایانِ مکالمه»، که ذاتاً کوتاه است)
+           * به‌عنوان قرمزِ کاذبِ کفِ محتوا خوانده شود، چون معافیت در دیتا بود و در
+           * گزارش نبود. هر پرچمی که رفتارِ سنجه را عوض می‌کند باید دیده شود. */
+          const fl = [t.flags?.newReading ? 'فالِ تازه' : '', t.flags?.support ? 'پشتیبانی' : '',
+            t.flags?.end ? 'پایانِ مکالمه' : ''].filter(Boolean).join(' + ') || 'ــ';
           console.log(`      📏 ${c.lines} خط / ${c.chars} نویسه${c.thin ? ' 🪫' : ''} | قلاب: ${c.hook.ok ? '✅' : `❌ ${c.hook.why}`}`
             + ` | 🚩 ${fl} | 🤖 ${t.model || '?'}${t.attempts > 1 ? ` (تلاشِ ${t.attempts})` : ''}`
             + ` | ورودی ${t.inputChars} نویسه | ${t.ms}ms`);
@@ -627,6 +631,7 @@ function summarize(rows) {
   const fuHas = done.filter((t) => t.followUp).length;
   const fuBad = done.filter((t) => t.check.fuBad).length;
   const fuStyle = done.filter((t) => t.check.fuStyle).length;
+  const fuNoAsk = done.filter((t) => t.check.fuNoAsk).length;
   const lines = done.map((t) => t.check.lines).sort((a, b) => a - b);
   const inTarget = lines.filter((n) => n >= LINE_MIN && n <= LINE_MAX).length;
   const ms = done.map((t) => t.ms).sort((a, b) => a - b);
@@ -635,7 +640,7 @@ function summarize(rows) {
   const tout = done.reduce((s, t) => s + (t.usage?.out || 0), 0);
   const cached = done.reduce((s, t) => s + (t.usage?.cached || 0), 0);
   return { n: done.length, skipped, failed, hookOkN, bait, formal, dash, dashRaw, qbad,
-    firstOk, bad, thin, fuHas, fuBad, fuStyle, lines, inTarget, ms, usd, tin, tout, cached,
+    firstOk, bad, thin, fuHas, fuBad, fuStyle, fuNoAsk, lines, inTarget, ms, usd, tin, tout, cached,
     hookFail: done.length ? (done.length - hookOkN) * 100 / done.length : null };
 }
 
@@ -683,7 +688,10 @@ function printSummary(label, rows, convs = null) {
    * جوابِ زیرِ کف یعنی یک الماسِ سوخته، و برچسبِ خرابِ دکمه یعنی نوبتِ بعدی هم می‌سوزد. */
   console.log(`   🪫 زیرِ کفِ محتوا: ${s.thin}/${s.n} (${pct(s.thin, s.n)}٪)`
     + (convs ? ` | بلندترین زنجیره‌ی پیاپی: ${Math.max(0, ...convs.map((c) => c.thinMax || 0))}` : ''));
-  console.log(`   🏷 دکمه: ${s.fuHas}/${s.n} ساخته شد | ❌ خراب: ${s.fuBad} | ⚠️ امری: ${s.fuStyle}`);
+  /* ⚠️ «سؤال نیست» **جدا** از «امری» چاپ می‌شود، نه جمع‌شده: کلاسِ غالبِ نقضِ خطِ
+   * پایه امری نبود و اگر یکی می‌شدند همان تفکیکی گم می‌شد که تصمیمِ v5 روی آن نشست. */
+  console.log(`   🏷 دکمه: ${s.fuHas}/${s.n} ساخته شد | ❌ خراب: ${s.fuBad}`
+    + ` | ⚠️ امری: ${s.fuStyle} | ❓ سؤال نیست: ${s.fuNoAsk}`);
   console.log(`   📏 طول: ${s.inTarget}/${s.n} داخلِ هدفِ ${LINE_MIN} تا ${LINE_MAX} خط`
     + ` | توزیع: ${s.lines.join(', ')} خط`);
   /* و همان عدد در واحدِ درستش. عددِ per نوبتِ بالا برای دیدنِ توزیع می‌ماند، ولی
@@ -857,6 +865,32 @@ if (FAKE) {
     process.exit(1);
   }
   console.log(`✅ کنترلِ مثبت: سنجه‌ی برچسبِ امری روی ${pos.length} نقضِ واقعی قرمز و روی ${neg.length} برچسبِ سالم ساکت است.`);
+
+  /* کنترلِ چهارم، برای سنجه‌ی «برچسب سؤال است یا نه» (`followUpAsk`).
+   *
+   * ⚠️ جهتِ این الگو **برعکسِ** سه‌تای بالاست: گرفتن یعنی **سالم** (برچسب سؤالِ خودِ
+   * کاربر است) و نگرفتن یعنی نکته. پس `FU_ASK_POSITIVE` باید بگیرد و
+   * `FU_ASK_NEGATIVE` نباید — دقیقاً برچسب‌های واقعیِ خطِ پایه که تصمیمِ پرامپتِ v5
+   * روی آن‌ها نشست. مثل بالا استاب نمی‌تواند تزریقش کند، چون برچسبِ استاب گارد
+   * می‌خورد و این سنجه فقط روی برچسبِ گاردنخورده اجرا می‌شود. */
+  const reAsk = LANG.followUpAsk;
+  const aPos = LANG_MOD.FU_ASK_POSITIVE || [];
+  const aNeg = LANG_MOD.FU_ASK_NEGATIVE || [];
+  if (!reAsk || !aPos.length || !aNeg.length) {
+    console.log('\n❌ کنترلِ مثبت: پیکره‌ی سنجه‌ی «برچسب سؤال نیست» در lang/' + LOCALE + '.mjs نیست.');
+    console.log('   یک پیکره‌ی خالی یا الگوی غایب، این سنجه را بی‌صدا به صفرِ همیشگی تبدیل می‌کند');
+    console.log('   — همان چیزی که یک بار برای `fuStyle` رخ داد و شکافِ ۲/۸ را نامرئی کرد.');
+    process.exit(1);
+  }
+  const askMiss = aPos.filter((s) => !reAsk.test(s));
+  const askHit = aNeg.filter((s) => reAsk.test(s));
+  if (askMiss.length || askHit.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» با پیکره‌ی خودش نمی‌خواند.');
+    if (askMiss.length) console.log(`   سؤالِ سالم را سؤال ندید: ${askMiss.map((s) => `«${s}»`).join('، ')}`);
+    if (askHit.length) console.log(`   برچسبِ غیرسؤالی را سؤال دید: ${askHit.map((s) => `«${s}»`).join('، ')}`);
+    process.exit(1);
+  }
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» روی ${aPos.length} سؤالِ سالم ساکت و روی ${aNeg.length} برچسبِ واقعیِ خطِ پایه قرمز است.`);
 }
 
 if (OUT) {
