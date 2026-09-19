@@ -979,10 +979,10 @@ if (FAKE) {
   if (offMiss.length || offHit.length) {
     console.log('\n❌ کنترلِ مثبت: سنجه‌ی «خطِ آخر پیشنهاد است» با پیکره‌ی خودش نمی‌خواند.');
     if (offMiss.length) console.log(`   پیشنهادِ تأییدشده‌ی مالک را پیشنهاد ندید: ${offMiss.map((x) => `«${x}»`).join('، ')}`);
-    if (offHit.length) console.log(`   شکلِ ردشده‌ی مالک را پیشنهاد دید: ${offHit.map((x) => `«${x}»`).join('، ')}`);
+    if (offHit.length) console.log(`   شکلِ ردشده را پیشنهاد دید: ${offHit.map((x) => `«${x}»`).join('، ')}`);
     process.exit(1);
   }
-  console.log(`✅ کنترلِ مثبت: سنجه‌ی «خطِ آخر پیشنهاد است» روی ${oPos.length} پیشنهادِ تأییدشده ساکت و روی ${oNeg.length} شکلِ ردشده‌ی مالک قرمز است.`);
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی «خطِ آخر پیشنهاد است» روی ${oPos.length} پیشنهادِ تأییدشده ساکت و روی ${oNeg.length} شکلِ ردشده قرمز است.`);
 
   /* کنترلِ ششم: **تنها معافیتِ** سنجه‌ی پیشنهاد، و هر چهار ترکیبِ پرچم.
    *
