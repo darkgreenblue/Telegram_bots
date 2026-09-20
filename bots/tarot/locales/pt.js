@@ -791,6 +791,7 @@ export default {
     loadingTitle: 'Lendo as suas cartas',
     loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
     loadingLabel: 'Lendo as suas cartas',
+    loadingLongWait: 'Uma interpretação cuidadosa pode levar alguns minutos. Por favor, aguarde.',
     revealCaption: (posFa, card, reversed) =>
       `🃏 Carta «${posFa}»:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToque na imagem pra virar ✨`,
     revealCaptionV4: (label, card, reversed) =>

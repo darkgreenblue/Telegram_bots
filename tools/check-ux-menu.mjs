@@ -1023,7 +1023,17 @@ console.log('\n▶ کپیِ دور v2.7 (تصمیم‌های صریحِ مالک
   ok(/loadingLabel: 'در حال تفسیر کارت‌ها'/.test(LOC), 'locale فقط **برچسب** را نگه می‌دارد');
   ok(!/loading: \(i\) =>/.test(LOC), 'خودِ انیمیشن دیگر در locale نیست');
   const wait = SRC.slice(SRC.indexOf('async function waitLLMWithLoading'), SRC.indexOf('async function startReveal'));
-  ok(/const frame = loadingFrame\(L\.reading\.loadingLabel\);/.test(wait), 'فریم از ماژولِ مشترک می‌آید');
+  ok(/const LOADING_LONG_WAIT_MS = 20_000;/.test(SRC), 'پس از ۲۰ ثانیه، اطلاع‌رسانیِ انتظارِ طولانی فعال می‌شود');
+  ok(/loadingLongWait: 'تفسیر دقیق ممکن است چند دقیقه طول بکشد، لطفاً منتظر بمانید'/.test(LOC),
+    'متنِ صادقانه‌ی انتظارِ طولانی در locale است');
+  ok(/async function waitLLMWithLoading\(ctx, uid, readingId, onFinalFailure = null\)/.test(wait),
+    'لودینگ مسیرِ communicationِ شکست نهایی را می‌شناسد');
+  ok(/Date\.now\(\) - startedAt >= LOADING_LONG_WAIT_MS/.test(wait) && /L\.reading\.loadingLongWait/.test(wait),
+    'بعد از ۲۰ ثانیه، زیرِ برچسبِ اصلی توضیحِ انتظارِ طولانی می‌آید');
+  ok(/return loadingFrame\(label\)\(frameIndex\);/.test(wait),
+    'انیمیشنِ مشترک با متنِ تازه ادامه دارد، نه یک پیامِ ثابت یا پیامِ جدا');
+  ok(/if \(!result && onFinalFailure\) await onFinalFailure\(\);/.test(wait)
+    && /deleteMessage/.test(wait), 'در شکست نهایی، communication پیش از حذفِ لودینگ اجرا می‌شود');
   ok(/await sleep\(pace\(Date\.now\(\) - startedAt\)\);/.test(wait),
     'ضرب‌آهنگ **متغیر** است (ثابتِ ۳ ثانیه‌ای رفت): ایرادِ صریحِ مالک «خیلی سریع‌تر»');
   ok(!/await sleep\(3000\)/.test(wait), 'هیچ فاصله‌ی ثابتِ کندی نمانده');

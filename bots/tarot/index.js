@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.107.0';
+const PRODUCT_VERSION = '3.108.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1340,6 +1340,10 @@ const PACE_TEASER = 2000;
 // باشد (پیش‌فراخوانیِ بعد از سؤال)، نشانگر کمتر از این نمی‌ماند. انتظارِ طراحی‌شده بخشی از
 // آیین است؛ جوابی که «آنی» برسد حسِ تفسیر نمی‌دهد.
 const LOADING_MIN_MS = 10_000;
+// ⏳ بعد از این نقطه کاربر دیگر فقط «یک انیمیشن» نمی‌بیند: همان پیام، بدون ساختن
+// پیامِ دوم، صادقانه می‌گوید چرا انتظار ادامه دارد. تا زمانِ تحویل یا اعلامِ refund
+// روی صفحه می‌ماند؛ پس پایانِ انیمیشن هرگز پیش از communicationِ شکست نیست.
+const LOADING_LONG_WAIT_MS = 20_000;
 /* ⏱️ یک سقف برای هر مدل و یک بودجه برای کل زنجیره‌ی فالبک. پیش از این فقط بازوی
  * آزمایشی سقف ۶۰ثانیه‌ای داشت و control می‌توانست ده دقیقه را با مدل اول مصرف کند؛
  * در نتیجه handlerTimeout پیش از رسیدن به فالبک، فلو را می‌کشت. این قواعد برای همه
@@ -6359,19 +6363,27 @@ bot.action(/^unlock:(\d+)$/, async (ctx) => {
 });
 
 // پیام لودینگ پویا تا آماده‌شدن LLM (اگر پیش‌فراخوانی هنوز نرسیده باشد)
-async function waitLLMWithLoading(ctx, uid, readingId) {
+async function waitLLMWithLoading(ctx, uid, readingId, onFinalFailure = null) {
   // ⏳ حتی اگر جواب از قبل آماده باشد (پیش‌فراخوانیِ بعد از سؤال) نشانگر می‌آید و دستِ‌کم
   // `LOADING_MIN_MS` می‌ماند (خواسته‌ی صریحِ مالک). تا v3.52.0 جوابِ آماده یعنی «بدونِ
   // هیچ نشانگری» و افشا آنی شروع می‌شد؛ با پیش‌فراخوانی این حالت **حالتِ عادی** می‌شد و
   // حسِ «تفسیر» از بین می‌رفت.
-  const frame = loadingFrame(L.reading.loadingLabel);
-  const msg = await ctx.reply(frame(0));
+  const initialFrame = loadingFrame(L.reading.loadingLabel);
+  const msg = await ctx.reply(initialFrame(0));
   // 🧪 v3.105.0: این فال از این لحظه «پیامِ در حال تفسیر روی صفحه است». تنها مصرفِ این
   // Set خودِ `cutRetry`ِ بازوی ds است (بند بالای `awaitReadingLLM`)؛ حافظه‌ای و بدونِ DB
   // عمدی است چون فقط سیگنالِ **بهینه‌سازی**‌ست و گم‌شدنش با ری‌استارت بی‌ضرر است.
   loadingShown.add(readingId);
   let i = 1, done = false;
   const startedAt = Date.now();
+  // `loadingFrame` همان سازنده‌ی مشترک است؛ فقط label بعد از ۲۰ ثانیه یک خطِ صادقانه
+  // می‌گیرد. بنابراین ماه/نوار زیرِ همان جمله‌ی دوم هم بی‌وقفه به حرکت ادامه می‌دهند.
+  const frame = (frameIndex) => {
+    const label = Date.now() - startedAt >= LOADING_LONG_WAIT_MS
+      ? `${L.reading.loadingLabel}\n\n${L.reading.loadingLongWait}`
+      : L.reading.loadingLabel;
+    return loadingFrame(label)(frameIndex);
+  };
   (async () => { // پیام لودینگ پویا؛ بدون await تا افشا معطل نماند
     // ⏱ ضرب‌آهنگ **متغیر** است، نه یک عددِ ثابت (جزئیاتِ کامل در `loading.js`):
     // ده ثانیه‌ی اول تند (کاربر همان‌جا تصمیم می‌گیرد «کار می‌کند یا خراب است»)، بعد
@@ -6421,7 +6433,11 @@ async function waitLLMWithLoading(ctx, uid, readingId) {
   // کفِ نمایش: اگر جواب زودتر از کف رسید، انیمیشن تا رسیدن به کف ادامه می‌دهد.
   const remain = LOADING_MIN_MS - (resolvedAt - startedAt);
   if (remain > 0) await sleep(remain);
+  // در شکستِ نهایی، پیامِ لودینگ باید تا **بعد از** برگشت الماس و ارسالِ پیامِ قابل‌دیدن
+  // بماند. حذف‌کردنِ آن پیش از ctx.reply یک فاصله‌ی مبهم می‌ساخت؛ callback فقط همان
+  // مسیرِ فعالِ کاربر را می‌بندد و هیچ پیامِ خودکارِ پس‌زمینه‌ای نیست.
   done = true;
+  if (!result && onFinalFailure) await onFinalFailure();
   try { await ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id); } catch {}
   return result;
 }
@@ -6434,20 +6450,21 @@ async function startReveal(ctx, uid, readingId) {
     const n = rr ? JSON.parse(rr.cards_json).length : 0;
     if (n) await ctx.reply(L.reading.flowIntro());
   }
-  const llm = await waitLLMWithLoading(ctx, uid, readingId);
-  const r = stmts.getReading.get(readingId);
-  if (!llm) {
-    // شکست نهایی (بعد از ۳×Flash + ۲×فالبک) → برگشت کامل مبلغ + دکمه‌ی تلاش مجدد از همان نقطه
+  const llm = await waitLLMWithLoading(ctx, uid, readingId, async () => {
+    const r = stmts.getReading.get(readingId);
+    // شکست نهایی (بعد از همه‌ی فالبک‌ها) → نخست برگشتِ اتمیک، سپس پیامِ قابل‌مشاهده و
+    // دکمه‌ی retry؛ callback داخلِ wait است تا لودینگ تا پایانِ communication بماند.
     if (r && stmts.claimInterruptedReading.run(readingId, uid).changes === 1) {
       if (r.price > 0) stmts.credit.run(r.price, uid);
       track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'llm_failed' });
     }
     setState(uid, 'idle');
     setSession(uid, null);
-    return ctx.reply(L.reading.refunded(curOf(uid)), Markup.inlineKeyboard([
+    await ctx.reply(L.reading.refunded(curOf(uid)), Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.retry, `retryr:${readingId}`)],
-    ]));
-  }
+    ])).catch((e) => logErr(`reading refund notice uid=${uid}:`, e.message));
+  });
+  if (!llm) return;
   await revealNext(ctx, uid, readingId);
 }
 
