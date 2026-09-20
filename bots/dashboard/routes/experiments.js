@@ -120,6 +120,84 @@ function expResults(inst, e) {
   }, null);
 }
 
+/* --------- متریک‌های تکمیلیِ آزمایشِ مدلِ خوانش (رضایت/تأخیر/برگشت به فالِ دوم) ---------
+ * بندِ «⏳ چیزی که عمداً هنوز انجام نشد» در bots/tarot/CLAUDE.md (v3.105.0): سه متریکِ
+ * باقی‌مانده از پنج‌تای خواسته‌شده‌ی مالک را نه `rate` می‌فهمد نه `value` (که فقط تعدادِ
+ * رخداد را می‌شمارد): رضایت میانگینِ یک prop است، تأخیر هم میانگین هم صدکِ ۹۰ می‌خواهد،
+ * و برگشت به فالِ دوم شرطِ «حداقل ۲ رویداد» است نه شمارشِ ساده. عمداً فقط برای همین
+ * آزمایش رندر می‌شود، نه یک مکانیزمِ سراسری — این سه شکل (میانگینِ prop، صدک،
+ * شمارشِ آستانه‌دار) آن‌قدر نیاز به هم ندارند که تعمیمشان قبل از دومین مصرف‌کننده
+ * توجیه داشته باشد (بند ۹/۰ ریشه). نیمه‌ی «خاموشیِ سریع» از قبل با دکمه‌ی استانداردِ
+ * stopped/kill پایین همین صفحه حل است و کدِ تازه نمی‌خواهد. */
+const READING_METRIC_EXPERIMENTS = new Set(['reading_model_ds']);
+
+function readingModelExtras(inst, e) {
+  return withDb(inst.file, (db) => {
+    const satisfaction = new Map(rows(db, `
+      SELECT x.variant, COUNT(*) n, AVG(CAST(json_extract(ev.props,'$.score') AS REAL)) avg_score
+      FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
+      WHERE x.experiment_key=? AND ev.event='feedback' AND ev.created_at >= x.created_at
+        AND json_extract(ev.props,'$.score') IS NOT NULL
+      GROUP BY x.variant`, [e.key]).map(r => [r.variant, r]));
+
+    const waitByV = new Map();
+    for (const r of rows(db, `
+      SELECT x.variant, CAST(json_extract(ev.props,'$.ms') AS REAL) ms
+      FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
+      WHERE x.experiment_key=? AND ev.event='reading_wait' AND ev.created_at >= x.created_at
+        AND json_extract(ev.props,'$.ms') IS NOT NULL`, [e.key])) {
+      if (!waitByV.has(r.variant)) waitByV.set(r.variant, []);
+      waitByV.get(r.variant).push(Number(r.ms) || 0);
+    }
+
+    // برگشت به فالِ دوم: کاربرِ exposeشده که بعدش ≥۲ فالِ تحویل‌شده گرفته (خودِ فالِ
+    // همین آزمایش هم یکی از آن دوتاست — این یعنی «دوباره برگشت»، نه «فقط همین یکی».
+    const secondByV = new Map();
+    for (const r of rows(db, `
+      SELECT x.variant, x.user_id, COUNT(*) n
+      FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
+      WHERE x.experiment_key=? AND ev.event='product_delivered' AND ev.created_at >= x.created_at
+      GROUP BY x.variant, x.user_id`, [e.key])) {
+      if (!secondByV.has(r.variant)) secondByV.set(r.variant, { total: 0, second: 0 });
+      const s = secondByV.get(r.variant);
+      s.total++;
+      if (r.n >= 2) s.second++;
+    }
+
+    return { satisfaction, waitByV, secondByV };
+  }, null);
+}
+
+function pctl(arr, p) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)];
+}
+
+function readingModelExtrasCard(inst, e, variants) {
+  if (!READING_METRIC_EXPERIMENTS.has(e.key)) return '';
+  const x = readingModelExtras(inst, e);
+  if (!x) return '';
+  const sec = (n, digits = 1) => n == null ? '—' : `${(n / 1000).toFixed(digits)} ثانیه`;
+  const body = variants.map((vk) => {
+    const sat = x.satisfaction.get(vk);
+    const waits = x.waitByV.get(vk) || [];
+    const avgMs = waits.length ? waits.reduce((a, b) => a + b, 0) / waits.length : null;
+    const p90 = pctl(waits, 0.9);
+    const ret = x.secondByV.get(vk);
+    return [
+      `<b>${esc(vk)}</b>`,
+      sat ? `${sat.avg_score.toFixed(2)}/۵ <span class="muted">(n=${fmt(sat.n)})</span>` : '<span class="muted">—</span>',
+      avgMs != null ? `${sec(avgMs)} <span class="muted">(n=${fmt(waits.length)})</span>` : '<span class="muted">—</span>',
+      p90 != null ? sec(p90) : '<span class="muted">—</span>',
+      ret?.total ? `${(ret.second / ret.total * 100).toFixed(1)}٪ <span class="muted">(${fmt(ret.second)}/${fmt(ret.total)})</span>` : '<span class="muted">—</span>',
+    ];
+  });
+  return `<div class="card"><h2>📐 متریک‌های تکمیلی (رضایت، تأخیر، برگشت به فالِ دوم)</h2>
+  ${table(['variant', 'رضایت (۱ تا ۵)', 'تأخیرِ میانگین', 'P90 تأخیر', 'برگشت به فالِ دوم'], body)}
+  <p class="muted">رضایت: میانگینِ بازخوردِ ۱ تا ۵ (فقط نسلِ v4؛ yes/some/no قدیمی داخلِ میانگین نمی‌آید). تأخیر: <span class="mono">reading_wait.ms</span>، بعد از کفِ ۱۰ ثانیه‌ایِ لودینگ. برگشت به فالِ دوم: سهمِ کاربرانِ expose‌شده که بعدش ≥۲ فالِ تحویل‌شده گرفته‌اند.</p></div>`;
+}
+
 function variantFunnel(inst, e, funnelSteps) {
   return withDb(inst.file, (db) => {
     const variants = parseJsonSafe(e.variants_json, []).map(v => v.key);
@@ -227,6 +305,9 @@ export function experimentViewBody(url) {
   const funnelDef = FUNNELS[familyOf(inst.bot)];
   const funnelCard = funnelDef ? `<div class="card"><h2>🔻 فانل به تفکیک variant</h2>${variantFunnel(inst, e, funnelDef.steps)}</div>` : '';
 
+  /* --- متریک‌های تکمیلیِ خاصِ آزمایشِ مدلِ خوانش (رضایت/تأخیر/برگشت) --- */
+  const readingExtrasCard = readingModelExtrasCard(inst, e, variants);
+
   /* --- کنترل چرخه --- */
   const btn = (to, label, ghost = false) => `<form method="post" action="/experiments/status" style="display:inline">
     <input type="hidden" name="inst" value="${esc(inst.id)}"><input type="hidden" name="key" value="${esc(e.key)}">
@@ -259,7 +340,7 @@ export function experimentViewBody(url) {
   </div>
   <div style="margin-top:12px">${controls}</div>${decisionForm}</div>`;
 
-  return header + warnings + resultsCard + guardCard + strataCard + funnelCard;
+  return header + warnings + resultsCard + guardCard + strataCard + readingExtrasCard + funnelCard;
 }
 
 /* ---------- اکشن‌ها ---------- */
