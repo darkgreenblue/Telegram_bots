@@ -261,7 +261,7 @@ console.log('\n▶ ب) awaitReadingLLM — تعیینِ بازو');
 function buildWaitLLMWithLoading(src, {
   awaitReadingLLMImpl, readingArm = new Map(), loadingShown = new Set(), loadingMinMs = 0,
 } = {}) {
-  const body = bodyOf(src, 'async function waitLLMWithLoading(ctx, uid, readingId) {');
+  const body = bodyOf(src, 'async function waitLLMWithLoading(ctx, uid, readingId, onFinalFailure = null) {');
   if (!body) return null;
   const exposeCalls = [];
   const trackCalls = [];
@@ -272,7 +272,7 @@ function buildWaitLLMWithLoading(src, {
   };
   const fn = new Function(
     'loadingFrame', 'L', 'loadingShown', 'sleep', 'pace', 'awaitReadingLLM',
-    'readingArm', 'expose', 'db', 'READING_MODEL_EXP', 'track', 'LOADING_MIN_MS',
+    'readingArm', 'expose', 'db', 'READING_MODEL_EXP', 'track', 'LOADING_MIN_MS', 'LOADING_LONG_WAIT_MS',
     `return (${body});`,
   );
   const waitLLMWithLoading = fn(
@@ -288,6 +288,7 @@ function buildWaitLLMWithLoading(src, {
     'reading_model_ds',
     (db, uid, event, props) => { trackCalls.push({ uid, event, props }); },
     loadingMinMs,
+    20_000,
   );
   return { waitLLMWithLoading, ctx, exposeCalls, trackCalls, readingArm, loadingShown };
 }
@@ -365,6 +366,23 @@ console.log('\n▶ ج) waitLLMWithLoading — loadingShown و exposureِ متق�
       await h.waitLLMWithLoading(h.ctx, 99, 604);
       const props = h.trackCalls[0]?.props;
       ok(props?.ms === 0, 'وقتی فاصله‌ی واقعی خیلی کمتر از کف است، ms دقیقاً صفر می‌شود (نه منفی)');
+    }
+  }
+
+  // ۵) شکستِ نهایی: communication باید پیش از پاک‌شدنِ پیام لودینگ تمام شود. این
+  // ترتیب برای کاربر مهم است: بینِ «در حال تفسیر» و خبرِ بازگشت، صفحه‌ی خالی نمی‌بیند.
+  {
+    const order = [];
+    const h = buildWaitLLMWithLoading(SRC0, {
+      awaitReadingLLMImpl: async () => null,
+    });
+    if (h) {
+      h.ctx.telegram.deleteMessage = async () => { order.push('delete-loading'); };
+      const result = await h.waitLLMWithLoading(h.ctx, 99, 605, async () => {
+        order.push('refund-notified');
+      });
+      ok(result === null && order.join('>') === 'refund-notified>delete-loading',
+        'شکستِ نهایی: پیامِ refund/retry پیش از حذفِ لودینگ communicate می‌شود');
     }
   }
 }

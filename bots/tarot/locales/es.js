@@ -805,6 +805,7 @@ export default {
     loadingTitle: 'Leyendo tus cartas',
     loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
     loadingLabel: 'Leyendo tus cartas',
+    loadingLongWait: 'Una interpretación cuidadosa puede tardar unos minutos. Por favor, espera.',
     revealCaption: (posFa, card, reversed) =>
       `🃏 Carta «${posFa}»:\n«${card.fa}»${reversed ? ' 🔃 (invertida)' : ''}\n\nToca la imagen para destaparla ✨`,
     revealCaptionV4: (label, card, reversed) =>

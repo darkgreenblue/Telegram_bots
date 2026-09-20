@@ -827,6 +827,7 @@ export default {
   loadingTitle: 'Читаю расклад',
   loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
   loadingLabel: 'Читаю расклад',
+  loadingLongWait: 'Точное толкование может занять несколько минут. Пожалуйста, подождите.',
   revealCaption: (posFa, card, reversed) =>
     `🃏 Карта «${posFa}»:\n«${card.fa}»${reversed ? ' 🔃 (перевёрнутая)' : ''}\n\nНажми на картинку, чтобы перевернуть ✨`,
   revealCaptionV4: (label, card, reversed) =>

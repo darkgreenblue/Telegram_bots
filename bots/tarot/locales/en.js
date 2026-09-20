@@ -764,6 +764,7 @@ export default {
     loadingFrames: ['▪️▪️▪️▪️', '▫️▪️▪️▪️', '▪️▫️▪️▪️', '▪️▪️▫️▪️', '▪️▪️▪️▫️'],
     // فقط **برچسب**؛ خودِ انیمیشن در `bots/tarot/loading.js` است.
     loadingLabel: 'Reading the cards',
+    loadingLongWait: 'A careful reading can take a few minutes. Please wait.',
     revealCaption: (posFa, card, reversed) =>
       `🃏 The "${posFa}" card:\n"${card.fa}"${reversed ? ' 🔃 (reversed)' : ''}\n\nTap the image to turn it over ✨`,
     // کپشنِ v4: نامِ جایگاه حذف شده و جایش برچسبِ ترتیبی نشسته.
