@@ -405,9 +405,21 @@ export const CHAT_MODEL = (process.env.CHAT_MODEL || '').trim() || READING_MODEL
 export const CHAT_PLAN  = [CHAT_MODEL, CHAT_MODEL, FLASH, FALLBACK_MODEL];
 export async function orChatResilient(system, user, opts = {}, plan = READING_PLAN) {
   const usages = [];
+  /* `deadlineAt` سقفِ **کلِ زنجیره** است، نه سقفِ یک درخواست. بدونِ آن، هر صداکننده
+   * دقیقاً رفتارِ قبلی را دارد. وقتی داده شده، باقی‌مانده‌ی بودجه به هر درخواست داده
+   * می‌شود تا یک مدلِ آویزان نتواند هم فرصت فالبک را بخورد و هم handler بیرونی را
+   * زودتر از مسیرِ عادیِ ریفاند قطع کند. این فقط متادیتاست و هرگز به سیم نمی‌رود. */
+  const deadlineAt = Number(opts.deadlineAt) || 0;
   for (let i = 0; i < plan.length; i++) {
+    const remaining = deadlineAt ? deadlineAt - Date.now() : Infinity;
+    if (remaining <= 0) {
+      logErr(`LLM deadline before attempt ${i + 1}/${plan.length}`);
+      break;
+    }
+    const requested = Math.max(1000, Number(opts.timeoutMs) || OR_TIMEOUT_MS);
+    const timeoutMs = deadlineAt ? Math.max(1000, Math.min(requested, remaining)) : requested;
     try {
-      const { text: out, usage } = await orChat(system, user, { ...opts, model: plan[i] });
+      const { text: out, usage } = await orChat(system, user, { ...opts, timeoutMs, model: plan[i] });
       usages.push(usage);
       /* ⚠️ گزارشِ «یک فراخوانی واقعاً به مدل رسید»، مستقل از اینکه validate قبولش کند
        * یا نه. بدونِ این، مسیرِ شکست (`return null` پایین) کلِ `usages` را دور می‌ریزد و
@@ -422,7 +434,12 @@ export async function orChatResilient(system, user, opts = {}, plan = READING_PL
     } catch (e) {
       logErr(`LLM error (attempt ${i + 1}, ${plan[i]}):`, e.message);
     }
-    if (i < plan.length - 1) await sleep(1500);
+    if (i < plan.length - 1) {
+      // مکث هم جزو بودجه است؛ وگرنه زنجیره پس از deadline فقط با sleep از سقف عبور می‌کرد.
+      const pause = deadlineAt ? Math.min(1500, Math.max(0, deadlineAt - Date.now())) : 1500;
+      if (pause <= 0) break;
+      await sleep(pause);
+    }
     /* ⏱ **برشِ تلاشِ دوباره** (v3.105.0، خواسته‌ی صریحِ مالک): اگر صداکننده بگوید مهلت
      * تمام شده، تلاشِ دوباره روی **همان مدل** رد می‌شود و مستقیم به مدلِ بعدیِ برنامه
      * می‌رویم. معنایش دقیقاً همان جمله‌ی مالک است: «اگه تا قبل از پیامِ در حال تفسیر
