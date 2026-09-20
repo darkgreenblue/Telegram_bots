@@ -121,6 +121,41 @@ ok(OR_TIMEOUT_MS === 10 * 60 * 1000,
     `نه timeoutMs و نه cutRetry در بدنه‌ی ریکوئست نیستند (کلیدها: ${Object.keys(body || {}).join(',')})`);
 }
 
+/* ═══ ۳) سقفِ کلِ زنجیره ═══
+ * یک timeout برای هر درخواست کافی نیست: اگر مدلِ اول کلِ زمانِ هندلر را بخورد، فالبک
+ * هرگز شلیک نمی‌کند. deadlineAt باید درخواستِ در حال اجرا را با زمانِ باقی‌مانده ببندد
+ * و پیش از تلاشِ بعدی هم زنجیره را متوقف کند. */
+{
+  const seen = stub({ hang: true });
+  const t0 = Date.now();
+  const r = await Promise.race([
+    orChatResilient('s', 'u', { validate: () => true, deadlineAt: Date.now() + 1_200 }, ['slow', 'fallback']),
+    new Promise((res) => setTimeout(() => res('DEADLINE'), 8_000)),
+  ]);
+  const dt = Date.now() - t0;
+  ok(r !== 'DEADLINE' && r === null, `بودجه‌ی کل زنجیره، مدل آویزان را پیش از مهلت بیرونی می‌بندد (${dt}ms)`);
+  ok(seen.join(',') === 'slow', 'بعد از اتمام بودجه، فالبکِ دیرهنگام اجرا نمی‌شود');
+}
+{
+  // کنترلِ مثبت: اگر هنوز بودجه مانده باشد، timeout مدل اول باید **واقعاً** به فالبک برسد.
+  const seen = [];
+  global.fetch = async (url, init) => {
+    const model = JSON.parse(init.body).model;
+    seen.push(model);
+    if (model === 'primary') {
+      await new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(
+        Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    }
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'GOOD' } }], usage: {} }) };
+  };
+  const r = await orChatResilient('s', 'u', {
+    validate: (out) => out === 'GOOD', timeoutMs: 1_200,
+    deadlineAt: Date.now() + 5_000, cutRetry: () => true,
+  }, ['primary', 'primary', 'fallback']);
+  ok(r?.model === 'fallback' && seen.join(',') === 'primary,fallback',
+    'timeout مدل اول با بودجه‌ی باقی‌مانده به فالبکِ مستقل می‌رسد (نه refund زودرس)');
+}
+
 global.fetch = realFetch;
 console.log(`\n${fail ? '❌' : '✅'} ${pass} ادعا سبز، ${fail} قرمز`);
 process.exit(fail ? 1 : 0);

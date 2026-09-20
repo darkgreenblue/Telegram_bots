@@ -585,22 +585,28 @@ console.log('\n▶ یک استانداردِ واحد برای «وسطِ فلو
   // **نگرفت** — یعنی خاموش‌کردنِ گارد از چشمش در می‌رفت.
   ok(/\n  if \(state === 'revealing'\) \{\n/.test(g), 'شاخه‌ی افشا زنده است (شرطِ خام، بدونِ && یا پرچمِ خاموش)');
   ok(/const state = getState\(uid\);/.test(g), 'استیت یک بار خوانده و در همین تابع استفاده می‌شود');
-  ok(/revealResumeRow\(uid\)/.test(g), 'دکمه‌ی ادامه‌ی افشا از تک‌منبعِ خودش می‌آید');
-  ok(/if \(!row\) return false;/.test(g), 'اگر چیزی برای ادامه نباشد گارد فعال نمی‌شود (بن‌بست نمی‌سازد)');
-  const revealBlock = g.slice(g.indexOf("state === 'revealing'"), g.indexOf('return true;', g.indexOf("state === 'revealing'")));
-  ok(!/reading:cancel/.test(revealBlock),
-    'شاخه‌ی افشا دکمه‌ی انصراف **ندارد** (پول داده شده و محصول دارد تحویل می‌شود)');
-  ok(/L\.reading\.openReadingGuard/.test(revealBlock), 'ولی همان پیامِ استاندارد را می‌دهد (یک استاندارد)');
+  ok(/return await blockDuringDelivering\(ctx\);/.test(g),
+    'شاخه‌ی افشا به تک‌منبعِ blockDuringDelivering واگذار می‌شود (همه‌ی ورودی‌ها یک رفتار دارند)');
+  const dStart = CODE.indexOf('async function blockDuringDelivering');
+  const d = CODE.slice(dStart, CODE.indexOf('\n}', dStart));
+  ok(/resolveUnreadyReveal\(ctx\)/.test(d),
+    'گاردِ افشا پیش از ساختِ CTA، فالِ بدون خروجیِ مدل را تشخیص می‌دهد');
+  ok(/revealResumeRow\(uid\)/.test(d), 'دکمه‌ی ادامه‌ی افشا از تک‌منبعِ خودش می‌آید');
+  ok(/if \(!row\) return false;/.test(d), 'اگر چیزی برای ادامه نباشد گارد فعال نمی‌شود (بن‌بست نمی‌سازد)');
+  ok(!/reading:cancel/.test(d),
+    'گاردِ افشا دکمه‌ی انصراف **ندارد** (پول داده شده و محصول دارد تحویل می‌شود)');
+  ok(/L\.reading\.openReadingGuard/.test(d), 'ولی همان پیامِ استاندارد را می‌دهد (یک استاندارد)');
   /* ⚠️ از ۱۴۰۵/۰۶/۲۷ شاخه‌ی دارای دکمه‌ی انصراف متنِ **هشداردار** می‌گیرد
      (`openReadingGuardPaid`: الماس برنمی‌گردد + «مطمئنی؟»)، چون از v3.13.0 کسر سرِ
      انتخابِ اندازه است و آن دکمه واقعاً مخرب است. شاخه‌ی افشا همان متنِ بی‌هشدار را
      نگه می‌دارد چون اصلاً دکمه‌ی انصراف ندارد. */
   ok(/openReadingGuardPaid/.test(g), 'شاخه‌ی دارای انصراف متنِ هشداردارِ «الماس برنمی‌گرده» را می‌دهد');
-  ok(!/openReadingGuardPaid/.test(revealBlock), 'و شاخه‌ی افشا (بدونِ انصراف) همان متنِ ساده را نگه می‌دارد');
+  ok(!/openReadingGuardPaid/.test(d), 'و گاردِ افشا (بدونِ انصراف) همان متنِ ساده را نگه می‌دارد');
 
   // ۴) دکمه‌ی «ادامه»ی افشا همان callbackِ قدمِ فعلی است، پس گاردهای ضدِ دوبار-تپ کار می‌کنند
   const rr = CODE.slice(CODE.indexOf('function revealResumeRow'), CODE.indexOf('async function blockDuringOpenReading'));
   ok(/r\.user_id !== uid/.test(rr), 'مالکیتِ رکورد چک می‌شود (بند ۹)');
+  ok(/!r\.llm_json/.test(rr), 'CTAی «کارت بعدی» بدونِ خروجیِ مدل هرگز ساخته نمی‌شود');
   ok(/`next:\$\{rid\}:\$\{idx\}`/.test(rr), 'شماره‌ی کارتِ منتظر عیناً همان سشن است (نه idx+1)');
   // اثباتِ سازگاری با گاردِ خودِ هندلر: `next:` وقتی اجرا می‌شود که expectIdx === revealIdx
   const nx = CODE.slice(CODE.indexOf("bot.action(/^next:"), CODE.indexOf("bot.action(/^final:"));

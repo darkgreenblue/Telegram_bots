@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.106.0';
+const PRODUCT_VERSION = '3.107.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1340,32 +1340,23 @@ const PACE_TEASER = 2000;
 // باشد (پیش‌فراخوانیِ بعد از سؤال)، نشانگر کمتر از این نمی‌ماند. انتظارِ طراحی‌شده بخشی از
 // آیین است؛ جوابی که «آنی» برسد حسِ تفسیر نمی‌دهد.
 const LOADING_MIN_MS = 10_000;
+/* ⏱️ یک سقف برای هر مدل و یک بودجه برای کل زنجیره‌ی فالبک. پیش از این فقط بازوی
+ * آزمایشی سقف ۶۰ثانیه‌ای داشت و control می‌توانست ده دقیقه را با مدل اول مصرف کند؛
+ * در نتیجه handlerTimeout پیش از رسیدن به فالبک، فلو را می‌کشت. این قواعد برای همه
+ * یکسان‌اند، پس A/B فقط مدل/ترتیب مدل را می‌سنجد، نه قابلیت بازیابی را. */
+const READING_ATTEMPT_TIMEOUT_MS = 60_000;
+const READING_LLM_BUDGET_MS      = 4 * 60 * 1000;
+const READING_RETRY_CUT_AFTER_MS = 30_000;
 /* 🧪 آزمایشِ مدلِ خوانش (v3.105.0) — «دیپ‌سیکِ پولی با یک ریترای و فالبکِ مدلِ فعلی».
  *
  * چرا A/B و نه سوییچِ سخت: اندازه‌گیریِ آزمایشگاهی افتِ ۴٫۵٪ رابریک و +۲۲ واحد لنگر داد،
  * پس این یک **فرضیه** است نه فیکسِ باگ (بند ۲ج/۴). و چون رول‌بکش باید بدونِ دیپلوی
  * باشد، از داشبورد `stopped` می‌شود و ظرفِ ≤۶۰ ثانیه همه به control برمی‌گردند.
  *
- * ⚠️ بازوی control بیت‌به‌بیت دست‌نخورده است: نه `plan` عوض می‌شود، نه `timeoutMs` پاس
- * می‌شود، نه `cutRetry`. تا آزمایش از داشبورد running نشود، `peekVariant` همیشه
- * `'control'` می‌دهد و این بلوک عملاً وجود ندارد. */
+ * قواعدِ زمان/فالبک بالای این بلوک برای هر دو بازو مشترک‌اند؛ تنها `plan` بازوی ds
+ * متفاوت است. تا آزمایش از داشبورد running نشود، `peekVariant` همیشه `'control'` می‌دهد. */
 const READING_MODEL_EXP = 'reading_model_ds';
 const DS_MODEL = 'deepseek/deepseek-v4-flash-0731';
-/* ⏱ سقفِ **هر فراخوانیِ** بازوی آزمایش. سقفِ سراسری ده دقیقه است که برای مدلی با
- * میانه‌ی ~۳۰ ثانیه یعنی «کاربر می‌تواند ده دقیقه پشتِ یک فال بماند». ۶۰ ثانیه و نه
- * ۴۵: دُمِ خودِ مدلِ فعلی روی ترافیکِ واقعی تا ۲۵۳ ثانیه دیده شده، و این سقف روی
- * تلاش‌های فالبکِ همین بازو هم می‌نشیند؛ ۴۵ ثانیه فالبکِ سالم را هم می‌بُرید. */
-const DS_ARM_TIMEOUT_MS = 60_000;
-/* ⏱ بعد از این مدت از شروعِ فراخوانی، تلاشِ دوباره روی **همان مدل** رد می‌شود.
- * خواسته‌ی مالک با جمله‌ی خودش: «اگه تا قبل از پیامِ در حال تفسیر نرسیده بود، دیگه
- * سراغِ ریترای دوم نریم و یکراست فالبک فعال بشه.»
- *
- * ⚠️ خودِ «پیامِ در حال تفسیر آمد یا نه» هم شرطِ اول است (`loadingShown`)، ولی تنها
- * شرط نیست و نباید باشد: اندازه‌گیریِ ترافیکِ واقعی می‌گوید میانه‌ی هد-استارت ~۳۵
- * ثانیه است، یعنی برای کاربرِ متوسط تلاشِ اول **قبل از** آن پیام تمام می‌شود و شرطِ
- * مالک آن‌جا هیچ‌وقت شلیک نمی‌کند. بدونِ این بودجه، همان کاربر می‌توانست دو تلاشِ
- * کاملِ کند را پشتِ سرِ هم بگیرد. */
-const DS_CUT_AFTER_MS = 30_000;
 /* readingId هایی که پیامِ «در حال تفسیر» برایشان روی صفحه است. حافظه‌ای و بدونِ DB
  * عمدی است: این فقط یک سیگنالِ **بهینه‌سازی** است و گم‌شدنش با ری‌استارت بی‌ضرر است
  * (فراخوانیِ در جریان هم با همان ری‌استارت می‌میرد). */
@@ -2041,6 +2032,9 @@ const stmts = {
   getReading:    db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingLlm: db.prepare('UPDATE readings SET llm_json=?, summary=? WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
+  // ادعای اتمیکِ ریفاندِ فالِ شروع‌شده‌ای که خروجیِ مدل هرگز ننشست. هم مسیرِ timeout
+  // و هم تپِ کاربر ممکن است برسند؛ شرط‌ها داخل UPDATE اند تا موجودی دوبار برنگردد.
+  claimInterruptedReading: db.prepare("UPDATE readings SET status='refunded' WHERE id=? AND user_id=? AND status='started' AND llm_json=''"),
   // پیشرفتِ افشا روی خودِ رکورد (#215). فقط جلو می‌رود: یک دکمه‌ی کهنه که ایندکسِ
   // کوچک‌تری می‌فرستد نباید پیشرفت را عقب ببرد.
   setRevealIdx: db.prepare('UPDATE readings SET reveal_idx=? WHERE id=? AND reveal_idx<?'),
@@ -3107,13 +3101,39 @@ function revealResumeRow(uid) {
   // پس سشن **منبعِ حقیقت نیست**، فقط کشِ قدمِ فعلی است (بند ۹ب/۵).
   if (!rid) return resumeRowFromDb(uid);
   const r = stmts.getReading.get(rid);
-  if (!r || r.user_id !== uid || !r.cards_json) return null;   // مالکیتِ رکورد (بند ۹)
+  // «کارت بعدی» فقط وقتی معنا دارد که متن تفسیر هم واقعاً آماده باشد. cards_json به
+  // تنهایی کافی نیست: در timeout قدیمی همان دکمه ساخته می‌شد و revealNext بی‌صدا ردش می‌کرد.
+  if (!r || r.user_id !== uid || !r.cards_json || !r.llm_json) return null;   // مالکیتِ رکورد (بند ۹)
   let n;
   try { n = JSON.parse(r.cards_json).length; } catch { return null; }
   const idx = s.revealIdx || 0;
   if (idx < n) return [Markup.button.callback(L.buttons.nextCard, `next:${rid}:${idx}`)];
   if (v4For(uid)) return [Markup.button.callback(L.buttons.finalAnswer, `final:${rid}`)];
   return null;   // نسل قدیم بعد از کارتِ آخر خودکار جمع‌بندی می‌کند؛ چیزی برای ادامه نمانده
+}
+
+/** مدلِ در حال اجرا «کارت بعدی» ندارد؛ و مدلِ تمام‌شده‌ای که خروجی ننوشته خرابیِ ماست.
+ * در حالت دوم، مبلغ با claim اتمیک برمی‌گردد و retry فقط در پاسخ به اقدام خود کاربر
+ * نشان داده می‌شود — نه پیام خودکار و نه push. */
+async function resolveUnreadyReveal(ctx) {
+  const uid = ctx.from.id;
+  if (getState(uid) !== 'revealing') return false;
+  const rid = getSession(uid)?.readingId;
+  const r = rid && stmts.getReading.get(rid);
+  if (!r || r.user_id !== uid || r.status !== 'started' || r.llm_json) return false;
+  if (llmInflight.has(rid)) {
+    await ctx.reply(`⌛️ ${L.reading.loadingLabel}…`).catch(() => {});
+    return true;
+  }
+  if (stmts.claimInterruptedReading.run(rid, uid).changes === 0) return false;
+  if (r.price > 0) stmts.credit.run(r.price, uid);
+  track(db, uid, EVENTS.REFUND, { reading_id: rid, amount: r.price, reason: 'interrupted_reveal' });
+  setState(uid, 'idle');
+  setSession(uid, null);
+  await ctx.reply(L.reading.refunded(curOf(uid)), Markup.inlineKeyboard([
+    [Markup.button.callback(L.buttons.retry, `retryr:${rid}`)],
+  ])).catch(() => {});
+  return true;
 }
 
 /** بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل از **دیتابیس** وقتی سشن دیگر به آن اشاره نمی‌کند (#215).
@@ -3169,6 +3189,7 @@ function resumeAwaitingQuestionFromDb(uid) {
 async function blockDuringDelivering(ctx) {
   const uid = ctx.from.id;
   if (getState(uid) !== 'revealing') return false;
+  if (await resolveUnreadyReveal(ctx)) return true;
   const rid = getSession(uid)?.readingId;
   const r = rid && stmts.getReading.get(rid);
   if (!r || r.user_id !== uid || r.status !== 'started') return false;
@@ -3187,10 +3208,7 @@ async function blockDuringOpenReading(ctx, intent, intentArg = 0) {
   // همین حالا دارد می‌گیرد. تا قبل از v3.17.0 این استیت اصلاً گارد نداشت، یعنی تپِ
   // «فال بگیر» وسطِ افشا یک فالِ **پول‌داده‌شده** را بی‌صدا یتیم می‌کرد.
   if (state === 'revealing') {
-    const row = revealResumeRow(uid);
-    if (!row) return false;
-    await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
-    return true;
+    return await blockDuringDelivering(ctx);
   }
   if (!READING_INPROGRESS.includes(state)) return false;
   if (intent) setIntent(uid, intent, intentArg);   // بعد از انصراف، همین برمی‌گردد
@@ -3334,6 +3352,9 @@ async function blockCrossFlowCallback(ctx) {
   const state = getState(uid);
   const wanted = flowIntentFor(ctx);
   if (READING_FLOW_STATES.has(state)) {
+    // `next:` در حالت عادی مجاز است، اما برای فالِ بدون llm_json همان دکمه‌ی مرده‌ای
+    // بود که تیکت را به حلقه تبدیل کرد. این بررسی باید پیش از allowlist باشد.
+    if (state === 'revealing' && await resolveUnreadyReveal(ctx)) return true;
     if (readingFlowAllowsCallback(state, data)) return false;
     await ctx.answerCbQuery().catch(() => {});
     if (wanted) setIntent(uid, wanted.key, wanted.arg);
@@ -3603,6 +3624,17 @@ async function callReadingLLM(readingId, armOpts = null) {
   // در آخر همان سرخط را نشان می‌داد؛ یعنی تا ۴ ریکوئستِ کامل برای صفر تغییر در چیزی
   // که کاربر می‌بیند. حالا سرخط یک تلاشِ اضافه می‌گیرد، بعد پذیرفته می‌شود.
   const HEADLINE_EXTRA_TRIES = 1;
+  // مالکیت deadline این‌جاست، نه در Telegraf: مدل اول نمی‌تواند فرصت فالبک و ریفاند را
+  // ببلعد. هر دو بازوی A/B همین قاعده را دارند؛ تفاوتشان فقط برنامه‌ی مدل‌هاست.
+  const llmStartedAt = Date.now();
+  const commonRetryOpts = {
+    timeoutMs: READING_ATTEMPT_TIMEOUT_MS,
+    deadlineAt: llmStartedAt + READING_LLM_BUDGET_MS,
+    // پس از رسیدنِ نشانگر یا ۳۰ ثانیه، تکرار همان مدل ارزشِ انتظار ندارد؛ مستقیم سراغ
+    // مدل مستقل بعدی می‌رویم تا فالبک واقعاً فرصت اجرا داشته باشد.
+    cutRetry: () => loadingShown.has(readingId)
+      || (Date.now() - llmStartedAt) > READING_RETRY_CUT_AFTER_MS,
+  };
   let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
   let headlineTries = 0;
@@ -3610,10 +3642,9 @@ async function callReadingLLM(readingId, armOpts = null) {
     // برچسبِ حسابداری (بیرونِ بدنه‌ی ریکوئست؛ به سیم نمی‌رود)
     kind: 'reading', refId: readingId, userId: r.user_id,
     maxTokens: spread.maxTokens,
-    // ⏱ فقط بازوی `ds`ِ غیرصوتی این دو را می‌گیرد؛ بازوی control بیت‌به‌بیت دست‌نخورده
-    // می‌ماند چون `timeoutMs`/`cutRetry` هر دو `undefined` می‌مانند (پیش‌فرضِ
-    // `orChatResilient`/`orChat` سرِ جایش است).
-    ...(!audio && armOpts ? { timeoutMs: armOpts.timeoutMs, cutRetry: armOpts.cutRetry } : {}),
+    ...commonRetryOpts,
+    // A/B فقط برنامه‌ی مدل‌ها را عوض می‌کند؛ قواعد زمان و رسیدن به فالبک مشترک‌اند.
+    ...(!audio && armOpts ? { plan: armOpts.plan } : {}),
     validate: (out) => {
       const obj = parseJsonLoose(out);
       if (v4) {
@@ -3649,7 +3680,8 @@ async function callReadingLLM(readingId, armOpts = null) {
     if (!headlineOk(parsed.headline)) log(`reading#${readingId} سرخط فرمول را ندارد (پذیرفته شد)`);
     // تعمیرِ نقطه‌ای: فقط اگر تشخیصِ هاردکد چیزی پیدا کند، و فقط یک فراخوانیِ کوچک.
     const rep = await repairDefects(parsed, orChatResilient, {
-      tag: `reading#${readingId}`, meta: { kind: 'repair', refId: readingId, userId: r.user_id } });
+      tag: `reading#${readingId}`,
+      meta: { kind: 'repair', refId: readingId, userId: r.user_id, ...commonRetryOpts } });
     parsed = rep.llm;
     const evLeft = evasionIn(v4Text(parsed));
     if (evLeft) logErr(`reading#${readingId} طفره‌رفتن «${evLeft}» بعد از تعمیر هم ماند (پذیرفته شد)`);
@@ -3691,15 +3723,8 @@ async function awaitReadingLLM(uid, readingId) {
     if (!audio) {
       readingArm.set(readingId, arm);
       if (arm === 'ds') {
-        const callStartedAt = Date.now();
         armOpts = {
           plan: [DS_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],
-          timeoutMs: DS_ARM_TIMEOUT_MS,
-          // خواسته‌ی مالک: «اگه تا قبل از پیامِ در حال تفسیر نرسیده بود، دیگه سراغِ
-          // ریترای دوم نریم». `loadingShown` شرطِ اول است؛ بودجه‌ی زمانی هم لازم است
-          // چون میانه‌ی هد-استارت ~۳۵ ثانیه است و برای کاربرِ متوسط آن پیام هنوز
-          // نیامده — بدونِ بودجه، همان کاربر می‌توانست دو تلاشِ کاملِ کند بگیرد.
-          cutRetry: () => loadingShown.has(readingId) || (Date.now() - callStartedAt) > DS_CUT_AFTER_MS,
         };
       }
     }
@@ -6413,10 +6438,9 @@ async function startReveal(ctx, uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (!llm) {
     // شکست نهایی (بعد از ۳×Flash + ۲×فالبک) → برگشت کامل مبلغ + دکمه‌ی تلاش مجدد از همان نقطه
-    if (r && r.status === 'started') {
+    if (r && stmts.claimInterruptedReading.run(readingId, uid).changes === 1) {
       if (r.price > 0) stmts.credit.run(r.price, uid);
-      stmts.setReadingStatus.run('refunded', readingId);
-      track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price });
+      track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'llm_failed' });
     }
     setState(uid, 'idle');
     setSession(uid, null);

@@ -39,6 +39,7 @@ db.exec(`
 `);
 const resumable = db.prepare(sqlOf('resumableReading'));
 const setIdx = db.prepare(sqlOf('setRevealIdx'));
+const claimInterrupted = db.prepare(sqlOf('claimInterruptedReading'));
 
 const CARDS = JSON.stringify([{ key: 'a' }, { key: 'b' }, { key: 'c' }]);
 const LLM = JSON.stringify({ headline: 'x', reads: ['a', 'b', 'c'] });
@@ -73,6 +74,16 @@ for (const st of ['delivered', 'refunded', 'canceled', 'pending_payment', 'paid'
   ok(!resumable.get(U), `وضعیتِ «${st}» بازیابی نمی‌شود`);
 }
 
+console.log('\n── ۴.۵) فالِ بدون خروجی هرگز دکمه‌ی مرده یا ریفاندِ دوباره نمی‌گیرد ──');
+db.prepare('DELETE FROM readings').run();
+const stale = mk(U, 'started', '', CARDS, 0);
+ok(claimInterrupted.run(stale, U).changes === 1,
+  'اولین بازیابیِ فالِ بدون خروجی، اتمیک آن را refunded می‌کند');
+ok(claimInterrupted.run(stale, U).changes === 0,
+  'تپ/مسیرِ دوم نمی‌تواند همان فال را دوباره claim یا دوباره refund کند');
+ok(db.prepare('SELECT status FROM readings WHERE id=?').get(stale).status === 'refunded',
+  'بعد از claim، فال از حالت started خارج شده است');
+
 console.log('\n── ۵) تازه‌ترین فال انتخاب می‌شود ──');
 db.prepare('DELETE FROM readings').run();
 mk(U, 'started', LLM);
@@ -95,8 +106,15 @@ ok(/function resumeRowFromDb\s*\(/.test(SRC), 'تابعِ resumeRowFromDb وجو
 const body = SRC.slice(SRC.indexOf('function revealResumeRow'), SRC.indexOf('function resumeRowFromDb'));
 ok(/if\s*\(!rid\)\s*return resumeRowFromDb\(uid\)/.test(body),
   'revealResumeRow با سشنِ خالی به بازیابیِ DB می‌رود (نه return null)');
+ok(/!r\.llm_json/.test(body),
+  'revealResumeRow بدون خروجیِ مدل، دکمه‌ی «کارت بعدی» نمی‌سازد');
 // پیشرفت باید هم در سشن و هم روی رکورد مهر بخورد
 ok(/stmts\.setRevealIdx\.run\(/.test(SRC), 'پیشرفتِ افشا روی رکورد هم ذخیره می‌شود');
+const stalled = SRC.slice(SRC.indexOf('async function resolveUnreadyReveal'), SRC.indexOf('function resumeRowFromDb'));
+ok(/llmInflight\.has\(rid\)/.test(stalled),
+  'تا وقتی مدل واقعاً در حال اجراست، گارد پول را پس نمی‌دهد');
+ok(/claimInterruptedReading\.run\(rid, uid\)/.test(stalled) && /retryr:\$\{rid\}/.test(stalled),
+  'پس از شکستِ واقعی، گارد فقط همان فال را refund و retry می‌کند');
 // /start نباید بلاک شود؛ فقط پیشنهادِ ادامه بدهد
 const startBlock = SRC.slice(SRC.indexOf('async function handleStart'), SRC.indexOf('bot.start(handleStart)'));
 ok(/resumeRowFromDb\(uid\)/.test(startBlock), 'handleStart بعد از پاک‌کردنِ سشن ادامه را پیشنهاد می‌دهد');

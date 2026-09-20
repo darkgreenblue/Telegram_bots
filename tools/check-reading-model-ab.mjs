@@ -14,7 +14,9 @@
 //        در این فایل).
 //   ب) `awaitReadingLLM` از سورس بریده و با استاب اجرا می‌شود: بازو فقط یک‌بار (لحظه‌ی
 //      ورود به `llmInflight`) تعیین می‌شود، فالِ صوتی هرگز وارد `readingArm` نمی‌شود،
-//      و بازوی `ds` دقیقاً برنامه/مهلت/برشِ درست را می‌سازد.
+//      و بازوی `ds` دقیقاً برنامه‌ی مدلِ درست را می‌سازد. قواعدِ مهلت/برش عمداً
+//      مشترک‌اند و در check-retry-cut.mjs پوشش رفتاری دارند؛ وگرنه A/B با تفاوتِ
+//      قابلیت اطمینان آلوده می‌شد.
 //   ج) `waitLLMWithLoading` از سورس بریده و اجرا می‌شود: `loadingShown` قبل از فراخوانی
 //      پر و در هر حالت (حتی خطا) خالی می‌شود، exposure/`reading_wait` فقط برای فالِ
 //      وارد `readingArm`شده و **بعد از** برگشتنِ فراخوانی ثبت می‌شود، و `readingArm`
@@ -145,13 +147,13 @@ function buildAwaitReadingLLM(src, {
   const peekVariantStub = (db, uid, key) => { peekVariantCalls.push({ uid, key }); return armFor(); };
   const fn = new Function(
     'stmts', 'llmInflight', 'peekVariant', 'db', 'READING_MODEL_EXP', 'readingArm',
-    'DS_MODEL', 'READING_MODEL', 'DS_ARM_TIMEOUT_MS', 'loadingShown', 'DS_CUT_AFTER_MS',
+    'DS_MODEL', 'READING_MODEL',
     'callReadingLLM',
     `return (${body});`,
   );
   const awaitReadingLLM = fn(
     stmts, llmInflight, peekVariantStub, {}, 'reading_model_ds', readingArm,
-    'DS_MODEL_X', 'READING_MODEL_Y', 60_000, loadingShown, 30_000,
+    'DS_MODEL_X', 'READING_MODEL_Y',
     callReadingLLM,
   );
   return { awaitReadingLLM, peekVariantCalls, readingArm, llmInflight, loadingShown };
@@ -190,7 +192,7 @@ console.log('\n▶ ب) awaitReadingLLM — تعیینِ بازو');
     }
   }
 
-  // ۳) بازوی ds: plan/timeoutMs/cutRetry ساخته می‌شود
+  // ۳) بازوی ds: فقط برنامه‌ی مدل را عوض می‌کند؛ سیاست زمان/فالبک برای هر دو بازو مشترک است
   {
     const calls = [];
     const h = buildAwaitReadingLLM(SRC0, {
@@ -206,48 +208,13 @@ console.log('\n▶ ب) awaitReadingLLM — تعیینِ بازو');
       if (opts) {
         ok(JSON.stringify(opts.plan) === JSON.stringify(['DS_MODEL_X', 'DS_MODEL_X', 'READING_MODEL_Y', 'READING_MODEL_Y']),
           'برنامه: دو تلاشِ DS_MODEL بعد دو تلاشِ READING_MODEL', `دیده شد: ${JSON.stringify(opts.plan)}`);
-        ok(opts.timeoutMs === 60_000, 'timeoutMs همان DS_ARM_TIMEOUT_MS است');
-        ok(typeof opts.cutRetry === 'function', 'cutRetry یک تابع است');
-        // cutRetry: شرطِ اول — پیامِ لودینگ روی صفحه است
-        h.loadingShown.add(503);
-        ok(opts.cutRetry() === true, 'cutRetry: با loadingShown.has(id)=true بلافاصله true می‌دهد');
-        h.loadingShown.delete(503);
-        ok(opts.cutRetry() === false, 'cutRetry: بدونِ loadingShown و زیرِ بودجه‌ی زمانی false است');
+        ok(Object.keys(opts).length === 1 && Array.isArray(opts.plan),
+          'armOpts فقط برنامه را حمل می‌کند؛ تفاوت زمانی بین بازوها وارد A/B نمی‌شود');
       }
     }
   }
 
-  // ۴) cutRetry شرطِ دوم: گذشتنِ بودجه‌ی زمانی، مستقل از loadingShown
-  {
-    const h = buildAwaitReadingLLM(SRC0, {
-      readingRow: { llm_json: '', question_audio: '', question: 'سؤالِ متنی', user_id: 10 },
-      armFor: () => 'ds',
-      callReadingLLM: () => Promise.resolve({ ok: true }),
-    });
-    // با تزریقِ مستقیمِ DS_CUT_AFTER_MS=-1 از طریقِ یک نمونه‌ی جداگانه‌ی هارنس ممکن نیست
-    // چون آرگومان‌های fn هاردکد شده‌اند بالا؛ این‌جا با صبرِ واقعی (کوتاه) و
-    // DS_ARM_TIMEOUT_MS/DS_CUT_AFTER_MS دستی جایگزین می‌کنیم.
-    const body = bodyOf(SRC0, 'async function awaitReadingLLM(uid, readingId) {');
-    let capturedCutRetry = null;
-    const fn = new Function(
-      'stmts', 'llmInflight', 'peekVariant', 'db', 'READING_MODEL_EXP', 'readingArm',
-      'DS_MODEL', 'READING_MODEL', 'DS_ARM_TIMEOUT_MS', 'loadingShown', 'DS_CUT_AFTER_MS',
-      'callReadingLLM',
-      `return (${body});`,
-    );
-    const readingArm = new Map();
-    const awaitReadingLLM = fn(
-      { getReading: { get: () => ({ llm_json: '', question_audio: '', question: 'q', user_id: 11 }) } },
-      new Map(), () => 'ds', {}, 'reading_model_ds', readingArm,
-      'DS_MODEL_X', 'READING_MODEL_Y', 60_000, new Set(), -1, // ← بودجه‌ی منفی: هر فاصله‌ای رد می‌شود
-      (id, opts) => { capturedCutRetry = opts?.cutRetry; return Promise.resolve({ ok: true }); },
-    );
-    await awaitReadingLLM(11, 504);
-    ok(typeof capturedCutRetry === 'function', 'cutRetry با بودجه‌ی منفی هم ساخته می‌شود');
-    if (capturedCutRetry) ok(capturedCutRetry() === true, 'cutRetry: با بودجه‌ی گذشته (منفی) و بدونِ loadingShown هم true می‌دهد');
-  }
-
-  // ۵) llmInflight از قبل پر است: peekVariant دوباره صدا زده نمی‌شود، callReadingLLM هم نه
+  // ۴) llmInflight از قبل پر است: peekVariant دوباره صدا زده نمی‌شود، callReadingLLM هم نه
   {
     const calls = [];
     const pending = Promise.resolve({ already: true });
@@ -437,23 +404,20 @@ const mutations = [
     section: 'seed',
   },
   {
-    name: 'برشِ ریترای (cutRetry) از armOpts حذف شود',
+    name: 'برنامه‌ی بازوی ds به‌جای DS با luna شروع شود',
     apply: (s) => s.replace(
-      /cutRetry: \(\) => loadingShown\.has\(readingId\) \|\| \(Date\.now\(\) - callStartedAt\) > DS_CUT_AFTER_MS,/,
-      '',
+      'plan: [DS_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],',
+      'plan: [READING_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],',
     ),
-    check: async () => {
-      const h = buildAwaitReadingLLM(SRC0.replace(
-        /cutRetry: \(\) => loadingShown\.has\(readingId\) \|\| \(Date\.now\(\) - callStartedAt\) > DS_CUT_AFTER_MS,/,
-        '',
-      ), {
+    check: async (mutSrc) => {
+      const h = buildAwaitReadingLLM(mutSrc, {
         readingRow: { llm_json: '', question_audio: '', question: 'q', user_id: 1 },
         armFor: () => 'ds',
-        callReadingLLM: (id, opts) => { global.__cut = opts; return Promise.resolve({}); },
+        callReadingLLM: (id, opts) => { global.__plan = opts?.plan; return Promise.resolve({}); },
       });
       if (!h) return 1;
       await h.awaitReadingLLM(1, 700);
-      return global.__cut?.cutRetry ? 0 : 1;
+      return JSON.stringify(global.__plan) === JSON.stringify(['DS_MODEL_X', 'DS_MODEL_X', 'READING_MODEL_Y', 'READING_MODEL_Y']) ? 0 : 1;
     },
   },
   {
