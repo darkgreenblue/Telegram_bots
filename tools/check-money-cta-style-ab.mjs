@@ -50,7 +50,9 @@ for (const layer of ['price:price_ladder_p3:control', 'price:price_ladder_p3:bul
 
 must(tarot, "const MONEY_CTA_STYLE_EXPERIMENT = 'money_cta_style_v1';", 'کلید آزمایشِ ثابت تعریف شده است');
 must(tarot, "const MONEY_CTA_COLORED_VARIANT = 'colored';", 'treatment دقیقاً colored نام دارد');
+must(tarot, 'const MONEY_CTA_STYLE_SHIPPED = true;', 'رنگی به‌عنوان رفتارِ برنده برای همه فعال است');
 must(tarot, 'return priceExperiment ? `price:${priceExperiment}:${priceArm(uid)}`', 'لایه از بازوی قیمتِ همان کاربر ساخته می‌شود');
+must(tarot, 'if (MONEY_CTA_STYLE_SHIPPED) return MONEY_CTA_COLORED_VARIANT;', 'بعد از بستنِ آزمایش، CTA همچنان رنگی می‌ماند');
 must(tarot, 'reserveStratifiedVariant(db, uid, MONEY_CTA_STYLE_EXPERIMENT, moneyCtaStratum(uid))', 'رنگ با تخصیص لایه‌بندی‌شده خوانده می‌شود');
 must(tarot, "coinsOn(uid) && moneyCtaIsColored(uid) ? 'success' : undefined", 'خرید الماس فقط در treatment رنگی است');
 must(tarot, 'colored ? PACK_STYLE[p.key] : undefined', 'بسته‌ها فقط در treatment رنگ تاریخی می‌گیرند');

@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.111.0';
+const PRODUCT_VERSION = '3.112.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -805,12 +805,13 @@ function curOf(uid) {
 // سه بسته‌ی خریدِ الماس (تصمیمِ مالک). قیمت‌ها **تومانِ واقعی**اند و `coins` همان
 // اعتباری است که به موجودیِ کاربر اضافه می‌شود، یعنی هر بسته ذاتاً تخفیف‌دار است و بسته‌ی بزرگ‌تر
 // هر الماس را ارزان‌تر می‌کند (نردبانِ ARPU). هیچ مرحله‌ی «چقدر شارژ کنم؟» در کار نیست.
-/* 🧪 آزمایشِ رنگِ CTAهای مالی. کنترل عمداً «بی‌رنگ» است، یعنی رفتارِ امنِ فعلی؛
- * treatment با نام `colored` همان رنگ‌بندیِ پیشین را برمی‌گرداند. تخصیص به بازوی
- * قیمت لایه‌بندی می‌شود تا قیمت و رنگ در تحلیل با هم قاطی نشوند. تا وقتی آزمایش از
- * داشبورد running نشود، همه control/بی‌رنگ می‌مانند. */
+/* 🧪 آزمایشِ رنگِ CTAهای مالی. کنترل عمداً «بی‌رنگ» بود و treatment با نام `colored`
+ * رنگ‌بندیِ تاریخی را برمی‌گرداند. رنگی برنده شد و از v3.112.0 رفتارِ سراسری است؛
+ * کلید/سیمِ آزمایش می‌ماند تا تاریخچه و مسیرِ یک آزمونِ مستقلِ آینده روشن باشد.
+ * تخصیص به بازوی قیمت لایه‌بندی می‌شود تا قیمت و رنگ در تحلیل با هم قاطی نشوند. */
 const MONEY_CTA_STYLE_EXPERIMENT = 'money_cta_style_v1';
 const MONEY_CTA_COLORED_VARIANT = 'colored';
+const MONEY_CTA_STYLE_SHIPPED = true;
 const PACK_STYLE = { gold: 'success', magic: 'primary', legend: 'danger', eternal: 'danger' };
 /* 📦 بسته‌ها فقط **داده** هستند: کلیدِ پایدار، ایموجی، تعدادِ الماس و قیمت.
  * نامِ نمایشی عمداً این‌جا نیست و در `locales/<lang>.js` نشسته، چون یک متنِ
@@ -937,6 +938,15 @@ const PRICE_LADDERS = {
     { key: 'gold',  emoji: '💠', coins: 100,  toman: 150_000 },   // ۱۵۰۰
     { key: 'magic', emoji: '🪄', coins: 2000, toman: 1_500_000 }, // ۷۵۰
   ],
+  /* 🆕 `basic_25` (`price_ladder_p4_basic_25`) — تنها سؤالِ این آزمایش: آیا
+   * گران‌ترشدنِ بلیتِ ورودی، بدونِ تغییرِ مقدارِ هیچ بسته‌ای، اقتصاد را بهتر می‌کند؟
+   * کنترل دقیقاً کاتالوگِ زنده است (۵/۳۰/۱۰۰ الماس، ۱۵/۶۰/۱۵۰ هزار تومان) و treatment
+   * فقط basic را ۲۵ هزار تومان می‌کند. */
+  basic_25: [
+    { key: 'basic', emoji: '🥉', coins: 5,   toman: 25_000 },
+    { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },
+    { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 },
+  ],
 };
 
 /* 🔑 **دو کلید، نه یک کلید با وزنِ متغیر** — و این تصمیمِ روشیِ اصلیِ این PR است.
@@ -971,7 +981,7 @@ const PRICE_LADDERS = {
  * `bulk` (بالا) را در برابرِ `control` می‌سنجد: به‌جای ارزان‌ترکردنِ تومان، حجمِ
  * الماسِ بسته‌های میانی/بالا چند برابر شد. چون کلیدش جداست، شروعش هیچ اثری روی
  * تصمیمِ ثبت‌شده‌ی فازِ ۲ (که هنوز `not started` است) ندارد. */
-const PRICE_EXPERIMENTS = ['price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
+const PRICE_EXPERIMENTS = ['price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
 let _priceExpStmt = null;
 let _priceExpCache = { at: 0, key: null };
 /* کلیدِ آزمایشِ قیمتی که همین حالا زنده است (یا null). کشِ ۶۰ثانیه‌ای عمداً هم‌اندازه‌ی
@@ -1030,15 +1040,19 @@ const moneyCtaStratum = (uid) => {
 };
 const moneyCtaVariant = (uid) => {
   if (!coinsOn(uid)) return 'control';
+  if (MONEY_CTA_STYLE_SHIPPED) return MONEY_CTA_COLORED_VARIANT;
   return reserveStratifiedVariant(db, uid, MONEY_CTA_STYLE_EXPERIMENT, moneyCtaStratum(uid));
 };
 const moneyCtaIsColored = (uid) => moneyCtaVariant(uid) === MONEY_CTA_COLORED_VARIANT;
 const exposeMoneyCtaStyle = (uid) => {
   if (!coinsOn(uid)) return 'control';
+  if (MONEY_CTA_STYLE_SHIPPED) return MONEY_CTA_COLORED_VARIANT;
   return exposeStratifiedVariant(db, uid, MONEY_CTA_STYLE_EXPERIMENT, moneyCtaStratum(uid));
 };
 const releaseMoneyCtaStyle = (uid) => {
-  if (coinsOn(uid)) releaseStratifiedReservation(db, uid, MONEY_CTA_STYLE_EXPERIMENT);
+  if (coinsOn(uid) && !MONEY_CTA_STYLE_SHIPPED) {
+    releaseStratifiedReservation(db, uid, MONEY_CTA_STYLE_EXPERIMENT);
+  }
 };
 /* event جدا برای هر CTA: داشبورد می‌تواند بسته را متریک اصلی و خرید الماس را
  * گاردریل بگیرد، بدون اینکه کلیکِ یکی داخلِ دیگری حل شود. */
