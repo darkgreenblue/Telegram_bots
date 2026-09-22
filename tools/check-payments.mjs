@@ -500,6 +500,36 @@ console.log('\n💎 خطِ «بابت خرید» روی فاکتور');
   d2.close();
 }
 
+/* ══ ⏱️ پیام و مکثِ انسانیِ رسید ════════════════════════════════════════════ */
+console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
+{
+  const src = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const start = src.indexOf('const receiptDecisionDelayMs =');
+  const end = start < 0 ? -1 : src.indexOf('\n\n/*', start);
+  const helperSrc = start < 0 || end < 0 ? '' : src.slice(start, end);
+  ok(!!helperSrc, 'helper زمان‌بندیِ رسید از سورس پیدا شد');
+
+  const sampled = [];
+  const delayFor = helperSrc
+    ? new Function('randomInt', `${helperSrc}\nreturn receiptDecisionDelayMs;`)((min, max) => {
+      sampled.push([min, max]);
+      return min;
+    })
+    : () => 0;
+  ok(delayFor({ pkg: 'basic' }) === 40_000 && sampled.at(-1)?.join(',') === '40,61',
+    'بسته‌ی معمولی از بازه‌ی تصادفیِ ۴۰ تا ۶۰ ثانیه می‌آید');
+  ok(delayFor({ pkg: 'gold' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
+    'بسته‌ی ویژه از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
+  ok(delayFor({ pkg: 'magic' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
+    'بسته‌ی جادویی از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
+
+  const fa = (await import('../bots/tarot/locales/fa.js')).default.wallet.receiptSent;
+  ok(fa.includes('حداکثر تا ۱۲ ساعت') && fa.includes('ارسال رسید تکراری خودداری کن'),
+    'پیامِ رسید، سقفِ بررسی و پرهیز از رسیدِ تکراری را روشن می‌گوید');
+  ok(fa.includes('بسته‌های ویژه💠 و جادویی🪄 معمولاً زودتر تایید می‌شن'),
+    'پیامِ رسید، اولویتِ بسته‌های ویژه و جادویی را روشن می‌گوید');
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);

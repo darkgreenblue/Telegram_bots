@@ -46,7 +46,7 @@ console.log('\n▶ suspectTrigger — دو قاعده‌ی OR روی رسیده�
 
   const gapConst = SRC.match(/const SUSPECT_GAP_SEC = (\d+);/)?.[1];
   const winMatch = SRC.match(/const SUSPECT_WINDOW_SEC = (\d+) \* (\d+);/);
-  ok(gapConst === '60', 'قاعده‌ی الف: آستانه دقیقاً ۶۰ ثانیه (تصمیمِ صریحِ مالک: زیرِ ۱ دقیقه)');
+  ok(gapConst === '120', 'قاعده‌ی الف: آستانه دقیقاً ۱۲۰ ثانیه (تصمیمِ صریحِ مالک: زیرِ ۲ دقیقه)');
   ok(!!winMatch && Number(winMatch[1]) * Number(winMatch[2]) === 7200, 'قاعده‌ی ب: آستانه دقیقاً ۲ ساعت');
 
   const build = (rows) => {
@@ -54,15 +54,15 @@ console.log('\n▶ suspectTrigger — دو قاعده‌ی OR روی رسیده�
     return new Function('stmts', 'SUSPECT_GAP_SEC', 'SUSPECT_WINDOW_SEC', `
       ${fnSrc}
       return suspectTrigger;
-    `)(stmtsStub, 60, 7200);
+    `)(stmtsStub, 120, 7200);
   };
 
   const NOW = 1_000_000;
   ok(build([])(1, NOW) === false, 'رسیدِ اول (بدونِ سابقه) هرگز مشکوک نیست');
   ok(build([{ created_at: NOW - 30 }])(1, NOW) === true,
     'قاعده‌ی الف: فاصله‌ی ۳۰ ثانیه‌ای با رسیدِ قبلی → مشکوک (از رسیدِ دوم)');
-  ok(build([{ created_at: NOW - 59 }])(1, NOW) === true, 'مرزِ زیرِ ۶۰ ثانیه هم گرفته می‌شود');
-  ok(build([{ created_at: NOW - 60 }])(1, NOW) === false, 'دقیقاً ۶۰ ثانیه دیگر مشکوک نیست');
+  ok(build([{ created_at: NOW - 119 }])(1, NOW) === true, 'مرزِ زیرِ ۱۲۰ ثانیه هم گرفته می‌شود');
+  ok(build([{ created_at: NOW - 120 }])(1, NOW) === false, 'دقیقاً ۱۲۰ ثانیه دیگر مشکوک نیست');
   ok(build([{ created_at: NOW - 600 }])(1, NOW) === false,
     'یک رسیدِ ۱۰دقیقه‌ای به‌تنهایی (بدونِ رسیدِ سومی برای قاعده‌ی ب) مشکوک نیست');
   ok(build([{ created_at: NOW - 200 }, { created_at: NOW - 3000 }])(1, NOW) === true,
