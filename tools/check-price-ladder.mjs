@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` / `price_ladder_p2` / `price_ladder_p3`،
-// v3.80.0 + v3.94.0).
+// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` تا `price_ladder_p4_basic_25`،
+// v3.80.0 + v3.94.0 + v3.112.0).
 //
 // چرا این فایل هست: تا امروز قیمت یک **ثابت** بود و `COIN_PACKAGES` تنها منبعش. از این
 // نسخه قیمت per کاربر است، و آن لحظه سه چیز می‌توانند بی‌صدا خراب شوند — هر سه روی
@@ -57,7 +57,7 @@ const parsePacks = (block) => [...(block || '').matchAll(
     toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4],
   }));
 
-console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 / price_ladder_p2 / price_ladder_p3)\n');
+console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 تا price_ladder_p4_basic_25)\n');
 
 /* ══ ۰) بریدنِ بلوکِ منطق از سورس ═══════════════════════════════════════════
  * یک ناحیه‌ی پیوسته: از تعریفِ نردبان‌ها تا آخرین helper. هرچه این ناحیه کوچک‌تر
@@ -84,10 +84,10 @@ function build({ src = REGION, starsRail = false, db = null, extraOn = false } =
 }
 const M = build();
 
-/* ══ ۱) سه نردبان، و control یک **ارجاع** است نه یک کپی ═══════════════════ */
-console.log('\n۱) چهار نردبان');
+/* ══ ۱) نردبان‌ها، و control یک **ارجاع** است نه یک کپی ═══════════════════ */
+console.log('\n۱) پنج نردبان');
 const arms = Object.keys(M.PRICE_LADDERS);
-ok(arms.join(',') === 'control,floor,cheap,bulk', `چهار بازو تعریف شده: ${arms.join(', ')}`);
+ok(arms.join(',') === 'control,floor,cheap,bulk,basic_25', `پنج بازو تعریف شده: ${arms.join(', ')}`);
 // ⚠️ اگر control یک **کپیِ دستی** از قیمت‌ها باشد، اولین تغییرِ قیمتِ آینده فقط یکی از
 // آن دو را عوض می‌کند و بازوی کنترل بی‌صدا از محصول جدا می‌شود (بند ۲ج/۴: کنترل =
 // رفتارِ قبلی، نه «چیزی که روزی رفتارِ قبلی بود»).
@@ -127,6 +127,17 @@ ok(JSON.stringify(cheap.map(p => p.coins)) === JSON.stringify(floor.map(p => p.c
 ok(cheap.every((p, i) => p.toman < floor[i].toman),
   'و قیمتِ هر سه بسته اکیداً پایین‌تر است');
 
+/* `basic_25` دقیقاً سؤالِ مالک را ایزوله می‌کند: همان سه بسته و همان تعداد الماس،
+ * فقط بلیت ورودی ۱۵k ⟶ ۲۵k. اگر یکی از دو بسته‌ی دیگر هم عوض شود، نتیجه دیگر به
+ * قیمتِ basic قابل نسبت‌دادن نیست. */
+const { basic_25 } = M.PRICE_LADDERS;
+ok(JSON.stringify(basic_25.map(p => p.coins)) === JSON.stringify(control.map(p => p.coins)),
+  'control ⟶ basic_25: تعدادِ الماسِ هر سه بسته دست‌نخورده است');
+ok(basic_25[0].toman === 25_000 && control[0].toman === 15_000,
+  'control ⟶ basic_25: فقط basic از ۱۵k به ۲۵k می‌رود');
+ok(JSON.stringify(bare(basic_25.slice(1))) === JSON.stringify(bare(control.slice(1))),
+  'control ⟶ basic_25: ویژه و جادویی بیت‌به‌بیت همان کنترل‌اند');
+
 /* 🆕 `bulk` (price_ladder_p3): فرضیه‌اش «حجمِ الماسِ بیشتر در بسته‌های میانی/بالا»
  * است، نه تومانِ کمتر. تنها متغیرِ کنترل‌شده‌اش این است که بسته‌ی اول (basic) عمداً
  * دست‌نخورده بماند؛ گارد را همین‌جا بگیر، نه با فرضِ تک‌متغیره بودنِ کلِ نردبان. */
@@ -146,9 +157,9 @@ ok(Number.isFinite(MIN_RECHARGE) && lowest >= MIN_RECHARGE,
 
 /* ══ ۳) رفتار: بازو روی SQLite واقعی ═════════════════════════════════════ */
 console.log('\n۳) رفتارِ priceArm (روی shared/ab.js واقعی)');
-const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3';
-ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P3, P2, P1]),
-  'فازِ جدیدتر اولِ فهرست است (اولویت با p3)');
+const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3', P4 = 'price_ladder_p4_basic_25';
+ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P4, P3, P2, P1]),
+  'فازِ جدیدتر اولِ فهرست است (اولویت با p4)');
 
 function freshDb() {
   const db = new Database(':memory:');
@@ -223,7 +234,7 @@ let splitP1 = null;
   db.close();
 }
 
-{ // p3 بر هر دوی p1 و p2 مقدم است (تازه‌ترین آزمایش همیشه اولویتِ اول است)
+{ // p3 بر هر دوی p1 و p2 مقدم است (تا قبل از شروع p4)
   const db = freshDb();
   startExp(db, P1, 'running', W5050);
   startExp(db, P2, 'running', [{ key: 'floor', weight: 50 }, { key: 'cheap', weight: 50 }]);
@@ -231,6 +242,22 @@ let splitP1 = null;
   const m = build({ db });
   const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
   ok(uniq.join(',') === 'bulk,control', `فازِ سوم بر هر دوی فازِ اول و دوم مقدم است (${uniq.join(', ')})`);
+  db.close();
+}
+
+{ // p4 بر هر آزمایش قیمتِ قدیمی مقدم است و فقط control/basic_25 می‌دهد
+  const db = freshDb();
+  startExp(db, P1, 'running', W5050);
+  startExp(db, P2, 'running', [{ key: 'floor', weight: 50 }, { key: 'cheap', weight: 50 }]);
+  startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
+  startExp(db, P4, 'running', [{ key: 'control', weight: 50 }, { key: 'basic_25', weight: 50 }]);
+  const m = build({ db });
+  const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
+  ok(uniq.join(',') === 'basic_25,control', `p4 running → فقط control/basic_25 دیده می‌شود (${uniq.join(', ')})`);
+  ok(UIDS.every(u => (m.priceArm(u) === 'basic_25'
+    ? m.shopPackages(u)[0].toman === 25_000
+    : m.shopPackages(u)[0].toman === 15_000)),
+  'و فقط قیمتِ basic بین دو بازوی p4 فرق دارد');
   db.close();
 }
 
@@ -390,15 +417,16 @@ const mutate = (from, to) => {
 }
 {
   const db = freshDb();
+  startExp(db, P4, 'running', [{ key: 'control', weight: 50 }, { key: 'basic_25', weight: 50 }]);
   startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
   startExp(db, P1, 'running', W5050);
   const src = REGION.replace(
-    "const PRICE_EXPERIMENTS = ['price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
-    "const PRICE_EXPERIMENTS = ['price_ladder_p2', 'price_ladder_p1', 'price_ladder_p3'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1', 'price_ladder_p4_basic_25'];",
   );
   const m = src === REGION ? null : build({ src, db });
-  ok(m && [...new Set(UIDS.map(u => m.priceArm(u)))].sort().join(',') === 'control,floor',
-    'جهشِ «بردنِ p3 به آخرِ فهرست» اولویتش را می‌شکند و ادعای بند ۳ آن را می‌گیرد');
+  ok(m && !new Set(UIDS.map(u => m.priceArm(u))).has('basic_25'),
+    'جهشِ «بردنِ p4 به آخرِ فهرست» اولویتش را می‌شکند و ادعای بند ۳ آن را می‌گیرد');
   db.close();
 }
 
