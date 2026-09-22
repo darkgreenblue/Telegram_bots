@@ -102,7 +102,8 @@ export function financeBody(url) {
       ? `<form method="post" action="/finance/action" style="display:inline">
           <input type="hidden" name="inst" value="${esc(p.inst.id)}"><input type="hidden" name="pid" value="${p.id}">
           <button name="act" value="approve" type="submit">✅ تأیید</button>
-          <button name="act" value="reject" type="submit" class="ghost">❌ رد</button></form>`
+          <button name="act" value="reject" type="submit" class="ghost">❌ رد</button>
+          <button name="act" value="duplicate_receipt" type="submit" class="ghost">↩️ رسید تکراری</button></form>`
       : (p.pendingAction ? `<span class="badge warn">در صف ${esc(p.pendingAction)} (تا ۱ دقیقه)</span>` : '');
     return [
       esc(p.inst.title),
@@ -128,12 +129,12 @@ export function financeBody(url) {
   return `<div class="card"><h2>💰 مالی</h2>${filterForm}<div class="grid" style="margin-top:12px">${totalsHtml}</div></div>
   <div class="card"><h2>پرداخت‌ها (${fmt(all.length)}${all.length > 150 ? ' — نمایش ۱۵۰ ردیف اول' : ''})</h2>
   ${table(['ربات', 'شماره', 'کاربر', 'مبلغ', 'وضعیت', 'مرحله/اشتراک', 'ساخت', 'اقدام'], rowsHtml)}
-  <p class="muted">دکمه‌ی تأیید/رد فقط روی رسیدهای «منتظر تأیید» ربات‌های کیف‌پولی است؛ اقدام در صف ربات قرار می‌گیرد و تا ۱ دقیقه با منطق واقعی ربات (اعتبار + پیام به کاربر) اجرا می‌شود. مبلغ همه‌جا به تومان (اشتراک ریالی تعبیر خواب ÷۱۰).</p></div>
+  <p class="muted">دکمه‌های تأیید، رد و رسید تکراری فقط روی رسیدهای «منتظر تأیید» ربات‌های کیف‌پولی است. «رسید تکراری» پرداخت را رد می‌کند، اما برای کاربر پیامی نمی‌فرستد و وضعیت اعتمادش را عوض نمی‌کند. اقدام تا ۱ دقیقه در صف ربات اجرا می‌شود. مبلغ همه‌جا به تومان (اشتراک ریالی تعبیر خواب ÷۱۰).</p></div>
   ${legend}
   <div class="card"><h2>🧾 دفتر ممیزی داشبورد (writeها و exportها)</h2>${auditHtml}</div>`;
 }
 
-// تأیید/رد رسید از داشبورد: مستقیم پول را دست نمی‌زنیم (منطق اعتبار + پیام به کاربر فقط سمت ربات است)؛
+// تأیید/رد/رسید تکراری از داشبورد: مستقیم پول را دست نمی‌زنیم (منطق اعتبار + پیام به کاربر فقط سمت ربات است)؛
 // اقدام را در جدول admin_actions همان ربات enqueue می‌کنیم و sweepِ ۶۰ثانیه‌ایِ ربات با منطق واقعی اجرا می‌کند.
 export function financeAction(body) {
   const inst = getInstance(body.get('inst') || '');
@@ -141,7 +142,8 @@ export function financeAction(body) {
   if (!receiptQueueSupported(inst.bot)) throw new Error('این ربات صف تأیید داشبوردی ندارد');
   const pid = parseInt(body.get('pid'), 10);
   if (!pid) throw new Error('شماره‌ی پرداخت نامعتبر');
-  const act = body.get('act') === 'reject' ? 'reject' : 'approve';
+  const act = ['approve', 'reject', 'duplicate_receipt'].includes(body.get('act'))
+    ? body.get('act') : 'approve';
 
   withWritableDb(inst.file, (db) => {
     assertColumns(db, 'admin_actions', ['payment_id', 'action']);
@@ -154,7 +156,8 @@ export function financeAction(body) {
     db.prepare('INSERT INTO admin_actions (payment_id, action) VALUES (?,?)').run(pid, act);
   });
   audit('finance.action', `${inst.id}/#${pid}`, act);
-  return `اقدام «${act === 'approve' ? 'تأیید' : 'رد'}» برای پرداخت #${pid} در صف ربات قرار گرفت (تا ۱ دقیقه اجرا می‌شود)`;
+  const label = { approve: 'تأیید', reject: 'رد', duplicate_receipt: 'رسید تکراری' }[act];
+  return `اقدام «${label}» برای پرداخت #${pid} در صف ربات قرار گرفت (تا ۱ دقیقه اجرا می‌شود)`;
 }
 
 export function financeCsv(url) {

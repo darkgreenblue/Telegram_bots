@@ -53,7 +53,7 @@ export const BOTS = [
        اکشن از هشت‌تا را می‌پوشاند، پس صفحه‌ی پشتیبانی که شش اکشن صف می‌کند از کنارش
        رد می‌شد. هر شاخه‌ی تازه در sweep باید همین‌جا هم اضافه شود (چکِ CI هر دو جهت
        را می‌سنجد: نامِ بی‌شاخه و شاخه‌ی بی‌نام هر دو قرمزند). */
-    adminActions: ['approve', 'force_approve', 'reject', 'approve_accounting',
+    adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
       'debit', 'credit', 'credit_paid', 'unlock_reading'],
     /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
      *
@@ -130,7 +130,7 @@ export const BOTS = [
        بی‌صدا می‌بست: هیچ اقدامِ پشتیبانی (شارژِ دستی، بازکردنِ فال، تأییدِ دستی) روی
        کاربرانِ روسی/اسپانیایی/پرتغالی ممکن نبود. پرچمِ بی‌دلیل خاموش هم باگ است، فقط
        جهتش برعکس (بند ۲الف ریشه) — و چکِ CI همین را گرفت. */
-    adminActions: ['approve', 'force_approve', 'reject', 'approve_accounting',
+    adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
       'debit', 'credit', 'credit_paid', 'unlock_reading'],
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
