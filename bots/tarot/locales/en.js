@@ -1073,8 +1073,8 @@ export default {
     reverseCancelled: (pid) => `Alright, no reversal. Payment #${pid} stays as it was.`,
     approved: (amount, balance, bonus) =>
       `✅ Your top up of ${fmt(amount)} is confirmed!${bonus ? `\n🎁 + ${fmt(bonus)} bonus` : ''}\nNew balance: ${fmt(balance)}`,
-    // پیامِ ردِ یکپارچه (همه‌ی مسیرها): بدونِ دلیل، فقط راهِ پیگیری
-    rejected: `❌ Your payment was not confirmed.\n\nGet in touch with support and we will sort it out: ${SUPPORT_CONTACT}`,
+    // پیامِ ردِ یکپارچه (همه‌ی مسیرها): بدونِ دلیل، دکمه‌ی پیگیری پایین پیام است.
+    rejected: '❌ Your payment was not confirmed.\n\nYou can contact the bot support using the button below 👇',
     adminNotify: (p, user, pack) =>
       `💳 New payment #${p.invoice_no || p.id}\nUser: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },

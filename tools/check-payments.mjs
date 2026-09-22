@@ -500,6 +500,64 @@ console.log('\n💎 خطِ «بابت خرید» روی فاکتور');
   d2.close();
 }
 
+/* ══ ⏱️ پیام و مکثِ انسانیِ رسید ════════════════════════════════════════════ */
+console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
+{
+  const src = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+  const start = src.indexOf('const receiptDecisionDelayMs =');
+  const end = start < 0 ? -1 : src.indexOf('\n\n/*', start);
+  const helperSrc = start < 0 || end < 0 ? '' : src.slice(start, end);
+  ok(!!helperSrc, 'helper زمان‌بندیِ رسید از سورس پیدا شد');
+
+  const sampled = [];
+  const delayFor = helperSrc
+    ? new Function('randomInt', `${helperSrc}\nreturn receiptDecisionDelayMs;`)((min, max) => {
+      sampled.push([min, max]);
+      return min;
+    })
+    : () => 0;
+  ok(delayFor({ pkg: 'basic' }) === 40_000 && sampled.at(-1)?.join(',') === '40,61',
+    'بسته‌ی معمولی از بازه‌ی تصادفیِ ۴۰ تا ۶۰ ثانیه می‌آید');
+  ok(delayFor({ pkg: 'gold' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
+    'بسته‌ی ویژه از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
+  ok(delayFor({ pkg: 'magic' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
+    'بسته‌ی جادویی از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
+
+  const faLocale = (await import('../bots/tarot/locales/fa.js')).default;
+  const fa = faLocale.wallet.receiptSent;
+  ok(fa.includes('حداکثر تا ۱۲ ساعت') && fa.includes('ارسال رسید تکراری خودداری کن'),
+    'پیامِ رسید، سقفِ بررسی و پرهیز از رسیدِ تکراری را روشن می‌گوید');
+  ok(fa.includes('بسته‌های ویژه💠 و جادویی🪄 معمولاً زودتر تایید می‌شن'),
+    'پیامِ رسید، اولویتِ بسته‌های ویژه و جادویی را روشن می‌گوید');
+
+  const rejectStart = src.indexOf('const rejectedPaymentReply =');
+  const rejectEnd = rejectStart < 0 ? -1 : src.indexOf('\nasync function sendRejectedPayment', rejectStart);
+  const rejectHelper = rejectStart < 0 || rejectEnd < 0 ? '' : src.slice(rejectStart, rejectEnd);
+  ok(!!rejectHelper && /supportLink\(SUPPORT_BOT_CODE, uid, L\.support\)/.test(rejectHelper),
+    'دکمه‌ی رد پرداخت از همان لینکِ پشتیبانیِ منوی اصلی ساخته می‌شود');
+  const markup = {
+    button: { url: (text, url) => ({ text, url }) },
+    inlineKeyboard: (rows) => ({ reply_markup: { inline_keyboard: rows } }),
+  };
+  const { supportLink } = await import('../shared/support.js');
+  const rejectedFor = rejectHelper
+    ? new Function('Markup', 'supportLink', 'SUPPORT_BOT_CODE', 'L', `${rejectHelper}\nreturn rejectedPaymentReply;`)(
+      markup, supportLink, 'TRT', { wallet: { rejected: faLocale.wallet.rejected }, support: faLocale.support })
+    : () => ({ text: '', extra: {} });
+  const rejected = rejectedFor(1050056040);
+  const supportButton = rejected.extra?.reply_markup?.inline_keyboard?.[0]?.[0];
+  ok(rejected.text === '❌ پرداخت شما تأیید نشد.\n\nبرای پیگیری با پشتیبانی ربات از طریق دکمه‌ی زیر می‌تونی ارتباط بگیری👇',
+    'متنِ ردِ فارسی دقیقاً همان نسخه‌ی مصوب است و آی‌دیِ پشتیبانی ندارد');
+  ok(supportButton?.text === faLocale.support.openBtn
+    && new URL(supportButton?.url).searchParams.get('text') === faLocale.support.draft('#TRT-1050056040'),
+  'دکمه‌ی رد، کد #TRT و متنِ آماده‌ی همان مسیرِ پشتیبانی را در چت باز می‌کند');
+  ok(!/ctx\.reply\(L\.wallet\.rejected\)/.test(src)
+    && !/sendMessage\(p\.user_id, L\.wallet\.rejected\)/.test(src)
+    && (src.match(/rejectedPaymentReply\(/g) || []).length === 3
+    && (src.match(/sendRejectedPayment\(/g) || []).length === 3,
+  'هر چهار مسیرِ ارسالِ رد از پیامِ دکمه‌دارِ مشترک استفاده می‌کنند');
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);
