@@ -553,7 +553,8 @@ console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
   'دکمه‌ی رد، کد #TRT و متنِ آماده‌ی همان مسیرِ پشتیبانی را در چت باز می‌کند');
   ok(!/ctx\.reply\(L\.wallet\.rejected\)/.test(src)
     && !/sendMessage\(p\.user_id, L\.wallet\.rejected\)/.test(src)
-    && (src.match(/sendRejectedPayment\(/g) || []).length === 4,
+    && (src.match(/rejectedPaymentReply\(/g) || []).length === 3
+    && (src.match(/sendRejectedPayment\(/g) || []).length === 3,
   'هر چهار مسیرِ ارسالِ رد از پیامِ دکمه‌دارِ مشترک استفاده می‌کنند');
 }
 

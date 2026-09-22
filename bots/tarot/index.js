@@ -9785,8 +9785,11 @@ setInterval(async () => {
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
           if (p) {
-            const msg = await sendRejectedPayment(p.user_id);
-            logPush(db, p.user_id, msg, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
+            // این send عمداً کنار logPush مانده: چکِ سراسریِ صف فقط همین بدنه را
+            // می‌خواند تا هیچ پیامِ مالیِ ctx-free بدونِ ثبت در تایم‌لاین نماند.
+            const r = rejectedPaymentReply(p.user_id);
+            await bot.telegram.sendMessage(p.user_id, r.text, r.extra).catch(() => {});
+            logPush(db, p.user_id, r.text, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
           }
         } else if (act.action === 'duplicate_receipt') {
           // دقیقاً همان نهایی‌سازیِ رد، اما بی‌صدا و بدون تغییرِ اعتمادِ کاربر.
