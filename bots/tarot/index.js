@@ -9644,7 +9644,8 @@ function rejectDuplicateReceiptDb(paymentId) {
 // ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد/تکراری
 async function resendReceiptToAdmins(p) {
   const u = getUser(p.user_id);
-  const caption = `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n👤 ${dispName(u) || u?.name || '-'}\n🆔 ${p.user_id}\n💰 ${(p.original_amount || p.amount).toLocaleString('fa-IR')} تومان\n🔢 پرداخت #${p.id}\n\nهمین‌جا تأیید/رد کن (یا از داشبورد):`;
+  // `original_amount` برای بسته‌ها تعداد الماس است؛ مبلغِ واریزی همیشه `amount` است.
+  const caption = `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n👤 ${dispName(u) || u?.name || '-'}\n🆔 ${p.user_id}\n💰 ${Number(p.amount || 0).toLocaleString('fa-IR')} تومان\n🔢 پرداخت #${invoiceNoOf(p)}\n\nهمین‌جا تأیید/رد کن (یا از داشبورد):`;
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback('✅ تایید', `approve:${p.id}`),
     Markup.button.callback('❌ رد', `reject:${p.id}`),
