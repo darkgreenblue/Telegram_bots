@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.108.0';
+const PRODUCT_VERSION = '3.109.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -9144,6 +9144,8 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
     // برچسب شماره‌ی **فاکتور** را نشان می‌دهد، ولی کالبک شناسه‌ی ردیف را حمل می‌کند.
     Markup.button.callback(L.buttons.approve(invoiceNoOf(p)), `approve:${paymentId}`),
     Markup.button.callback(L.buttons.reject(invoiceNoOf(p)), `reject:${paymentId}`),
+  ], [
+    Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${paymentId}`),
   ]]).reply_markup;
   let adminMsg;
   for (const adminId of ADMIN_IDS) {
@@ -9168,6 +9170,8 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.suspectYes, `susyes:${paymentId}`),
     Markup.button.callback(L.buttons.suspectNo, `susno:${paymentId}`),
+  ], [
+    Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${paymentId}`),
   ]]).reply_markup;
   let adminMsg;
   for (const adminId of ADMIN_IDS) {
@@ -9506,6 +9510,16 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
   await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
 });
 
+// «رسید تکراری» پرداخت را می‌بندد، اما عمداً نه پیامِ رد می‌فرستد و نه اعتمادِ کاربر را
+// تغییر می‌دهد. برای کاربری که رسیدِ درست را چندبار فرستاده، این با «پیامکش نیومده» فرق دارد.
+bot.action(/^duplicate:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  const p = rejectDuplicateReceiptDb(parseInt(ctx.match[1], 10));
+  if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
+  await ctx.answerCbQuery('رسید تکراری ثبت شد').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+});
+
 /* ── شبکه‌ی ایمنیِ auto-approve: «پیامکش نیومده» → تأیید دوم → برگشت + بی‌اعتمادی ── */
 bot.action(/^cardsms:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
@@ -9574,13 +9588,28 @@ function rejectPaymentDb(paymentId) {
   track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
   return p;
 }
-// ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد
+// رسیدِ تکراری: مانند رد، ولی هیچ پیامِ کاربری ندارد و کاربر را بی‌اعتماد نمی‌کند.
+// اگر این آخرین رسیدِ مشکوکِ معلق باشد، برچسبِ «مشکوک» هم پاک می‌شود تا کاربر سفید بماند.
+function rejectDuplicateReceiptDb(paymentId) {
+  const p = stmts.getPayment.get(paymentId);
+  if (!p || p.status !== 'waiting_review') return null;
+  stmts.setPaymentStatus.run('rejected', p.id);
+  track(db, p.user_id, EVENTS.PAYMENT_REJECTED,
+    { payment_id: p.id, amount: p.amount, via: 'duplicate_receipt', silent: true });
+  if (!stmts.hasSuspectPending.get(p.user_id) && !isDistrusted(p.user_id)) {
+    stmts.clearSuspect.run(p.user_id);
+  }
+  return p;
+}
+// ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد/تکراری
 async function resendReceiptToAdmins(p) {
   const u = getUser(p.user_id);
   const caption = `⏳ یادآوری: رسید منتظر تأیید (بیش از ۲ ساعت)\n\n👤 ${dispName(u) || u?.name || '-'}\n🆔 ${p.user_id}\n💰 ${(p.original_amount || p.amount).toLocaleString('fa-IR')} تومان\n🔢 پرداخت #${p.id}\n\nهمین‌جا تأیید/رد کن (یا از داشبورد):`;
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback('✅ تایید', `approve:${p.id}`),
     Markup.button.callback('❌ رد', `reject:${p.id}`),
+  ], [
+    Markup.button.callback('↩️ رسید تکراری', `duplicate:${p.id}`),
   ]]).reply_markup;
   for (const adminId of ADMIN_IDS) {
     try {
@@ -9733,6 +9762,9 @@ setInterval(async () => {
             await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
             logPush(db, p.user_id, L.wallet.rejected, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
           }
+        } else if (act.action === 'duplicate_receipt') {
+          // دقیقاً همان نهایی‌سازیِ رد، اما بی‌صدا و بدون تغییرِ اعتمادِ کاربر.
+          rejectDuplicateReceiptDb(act.payment_id);
         } else if (act.action === 'approve_accounting') {
           // «فقط حسابداری»: پولی که واقعاً رسیده ولی کاربر ارزشش را از راهِ دیگری گرفته
           // (جبرانِ دستی، کدِ هدیه). وضعیت به approved می‌رود تا SUM(amount) درآمدِ واقعی را

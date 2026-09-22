@@ -354,6 +354,7 @@ export default {
     ],
     approve: (id) => `✅ Approve #${id}`,
     reject: (id) => `❌ Reject #${id}`,
+    duplicateReceipt: '↩️ Duplicate receipt',
     smsNotArrived: '🚫 No transfer notification',
     reverseYes: '✅ Yes, reverse it',
     reverseNo: '↩️ No, never mind',

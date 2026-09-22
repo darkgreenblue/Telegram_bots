@@ -486,6 +486,7 @@ export default {
     ],
     approve: (id) => `✅ تأیید #${id}`,
     reject: (id) => `❌ رد #${id}`,
+    duplicateReceipt: '↩️ رسید تکراری',
     smsNotArrived: '🚫 پیامکش نیومده',
     reverseYes: '✅ بله مطمئنم، لغو کن',
     reverseNo: '↩️ نه، بی‌خیال',

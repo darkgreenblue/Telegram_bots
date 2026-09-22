@@ -746,6 +746,7 @@ export default {
   ],
   approve: (id) => `✅ Подтвердить #${id}`,
   reject: (id) => `❌ Отклонить #${id}`,
+  duplicateReceipt: '↩️ Повторный чек',
   smsNotArrived: '🚫 СМС не пришла',
   reverseYes: '✅ Да, точно отменить',
   reverseNo: '↩️ Нет, забудь',
