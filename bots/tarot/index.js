@@ -137,9 +137,9 @@ const TEST_PHASE = false;
 
 // نسخه‌ی محصول (کوهورت users.first_version): با هر تغییر «رفتاری» رو-به-کاربر bump کن — بند «قوانین ربات زنده» CLAUDE.md ریشه
 // 1.1.0: رسیدِ پرداخت از ایجنتِ کارت‌به‌کارت (auto-approve + برگشت/بی‌اعتمادی) رد می‌شود.
-// 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ ۳ تا ۱۰ ثانیه، بدونِ لوکنندنِ ایجنت)
+// 1.1.1: فلوی رسید انسانی‌تر شد (پیامِ «فرستاده شد» + تأخیرِ تصادفی بر اساس بسته، بدونِ لوکنندنِ ایجنت)
 //        + گاردِ قطعیِ مبلغِ بیشتر (پرداختِ اضافه → تأیید، نه رد) + تضمینِ اطلاع‌رسانیِ رد به کاربر.
-// 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با پشتیبانی @Efficient_Support، بدونِ «رسید نیست»/دلیل)
+// 1.1.2: فقط دو پیامِ نهاییِ رسید (تأیید/رد یکپارچه با دکمه‌ی پشتیبانی، بدونِ «رسید نیست»/دلیل)
 //        + دکمه‌ی «کپی شماره کارت» (copy_text) زیرِ فاکتورهای کارت‌به‌کارت.
 // 1.3.0: ناوبری درختی + گاردِ فلوی بازِ پرداخت (قرارداد State Management یکپارچه) — پشتِ NAV_GUARD_ENABLED.
 // 1.3.1: پالایشِ کپیِ آنبوردینگ/خوانش — دکمه‌ی سوم «همه فال‌ها»، کارت روز در کاتالوگ،
@@ -307,7 +307,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.110.0';
+const PRODUCT_VERSION = '3.111.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2531,6 +2531,23 @@ const approvedMsg = (uid, creditAmount, bonus) => {
     cur,
   );
 };
+
+// پیامِ ردِ واحد برای همه‌ی مسیرها (AI، ادمین و صفِ داشبورد). دکمه مستقیماً از همان
+// `supportLink` منوی اصلی می‌آید، پس کادرِ چتِ پشتیبانی با #TRT-<uid> و متنِ آماده
+// پر می‌شود؛ آی‌دیِ متنیِ پشتیبانی کنار پیامِ رد چاپ نمی‌شود.
+const rejectedPaymentReply = (uid) => ({
+  text: L.wallet.rejected,
+  extra: {
+    reply_markup: Markup.inlineKeyboard([[
+      Markup.button.url(L.support.openBtn, supportLink(SUPPORT_BOT_CODE, uid, L.support)),
+    ]]).reply_markup,
+  },
+});
+async function sendRejectedPayment(uid) {
+  const r = rejectedPaymentReply(uid);
+  await bot.telegram.sendMessage(uid, r.text, r.extra).catch(() => {});
+  return r.text;
+}
 
 // فاکتورِ مستقیمِ یک فالِ رزروشده: بدونِ مرحله‌ی «چقدر شارژ کنم؟». مبلغِ پرداخت = قیمتِ فال
 // (یا ۲۰٪ کمتر با تخفیفِ اولین پرداخت)، ولی اعتبارِ داده‌شده هنگام تأیید همان قیمتِ کاملِ فال
@@ -9326,7 +9343,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       rejectPaymentAI(paymentId);
       setState(uid, nextState);
       await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
-      return ctx.reply(L.wallet.rejected).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
+      const r = rejectedPaymentReply(uid);
+      return ctx.reply(r.text, r.extra).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
     }
     // not_a_receipt یا review → تصمیمِ انسانیِ ادمین (پیامِ receiptSent قبلاً رفته)
     await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody,
@@ -9515,7 +9533,7 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
   if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+  await sendRejectedPayment(p.user_id);
 });
 
 // «رسید تکراری» پرداخت را می‌بندد، اما عمداً نه پیامِ رد می‌فرستد و نه اعتمادِ کاربر را
@@ -9585,7 +9603,7 @@ bot.action(/^susno:(\d+)$/, async (ctx) => {
   stmts.clearSuspect.run(p.user_id);
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
+  await sendRejectedPayment(p.user_id);
 });
 
 /* ── رد پرداخت (DB جدا از ctx) + یادآوری/صف داشبورد (مثل voice2text) ── */
@@ -9767,8 +9785,8 @@ setInterval(async () => {
         } else if (act.action === 'reject') {
           const p = rejectPaymentDb(act.payment_id);
           if (p) {
-            await bot.telegram.sendMessage(p.user_id, L.wallet.rejected).catch(() => {});
-            logPush(db, p.user_id, L.wallet.rejected, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
+            const msg = await sendRejectedPayment(p.user_id);
+            logPush(db, p.user_id, msg, { isAdmin: isAdmin(p.user_id), label: 'رد پرداخت' });
           }
         } else if (act.action === 'duplicate_receipt') {
           // دقیقاً همان نهایی‌سازیِ رد، اما بی‌صدا و بدون تغییرِ اعتمادِ کاربر.
