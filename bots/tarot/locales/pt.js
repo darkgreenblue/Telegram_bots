@@ -1070,8 +1070,8 @@ export default {
     reverseCancelled: (pid) => `Beleza, o estorno não foi feito. O pagamento #${pid} ficou como estava.`,
     approved: (amount, balance, bonus) =>
       `✅ Compra de ${fmt(amount)} aprovada!${bonus ? `\n🎁 + ${fmt(bonus)} de bônus` : ''}\nSaldo novo: ${fmt(balance)}`,
-    // Mensagem única de recusa: sem motivo, só o caminho do suporte.
-    rejected: `❌ O seu pagamento não foi aprovado.\n\nFale com o suporte que a gente resolve: ${SUPPORT_CONTACT}`,
+    // Mensagem única de recusa: sem motivo, o botão de suporte fica abaixo.
+    rejected: '❌ O seu pagamento não foi aprovado.\n\nVocê pode falar com o suporte do bot pelo botão abaixo 👇',
     adminNotify: (p, user, pack) =>
       `💳 Pagamento novo #${p.invoice_no || p.id}\nPessoa: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },

@@ -523,11 +523,39 @@ console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
   ok(delayFor({ pkg: 'magic' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
     'بسته‌ی جادویی از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
 
-  const fa = (await import('../bots/tarot/locales/fa.js')).default.wallet.receiptSent;
+  const faLocale = (await import('../bots/tarot/locales/fa.js')).default;
+  const fa = faLocale.wallet.receiptSent;
   ok(fa.includes('حداکثر تا ۱۲ ساعت') && fa.includes('ارسال رسید تکراری خودداری کن'),
     'پیامِ رسید، سقفِ بررسی و پرهیز از رسیدِ تکراری را روشن می‌گوید');
   ok(fa.includes('بسته‌های ویژه💠 و جادویی🪄 معمولاً زودتر تایید می‌شن'),
     'پیامِ رسید، اولویتِ بسته‌های ویژه و جادویی را روشن می‌گوید');
+
+  const rejectStart = src.indexOf('const rejectedPaymentReply =');
+  const rejectEnd = rejectStart < 0 ? -1 : src.indexOf('\nasync function sendRejectedPayment', rejectStart);
+  const rejectHelper = rejectStart < 0 || rejectEnd < 0 ? '' : src.slice(rejectStart, rejectEnd);
+  ok(!!rejectHelper && /supportLink\(SUPPORT_BOT_CODE, uid, L\.support\)/.test(rejectHelper),
+    'دکمه‌ی رد پرداخت از همان لینکِ پشتیبانیِ منوی اصلی ساخته می‌شود');
+  const markup = {
+    button: { url: (text, url) => ({ text, url }) },
+    inlineKeyboard: (rows) => ({ reply_markup: { inline_keyboard: rows } }),
+  };
+  const { supportLink } = await import('../shared/support.js');
+  const rejectedFor = rejectHelper
+    ? new Function('Markup', 'supportLink', 'SUPPORT_BOT_CODE', 'L', `${rejectHelper}\nreturn rejectedPaymentReply;`)(
+      markup, supportLink, 'TRT', { wallet: { rejected: faLocale.wallet.rejected }, support: faLocale.support })
+    : () => ({ text: '', extra: {} });
+  const rejected = rejectedFor(1050056040);
+  const supportButton = rejected.extra?.reply_markup?.inline_keyboard?.[0]?.[0];
+  ok(rejected.text === '❌ پرداخت شما تأیید نشد.\n\nبرای پیگیری با پشتیبانی ربات از طریق دکمه‌ی زیر می‌تونی ارتباط بگیری👇',
+    'متنِ ردِ فارسی دقیقاً همان نسخه‌ی مصوب است و آی‌دیِ پشتیبانی ندارد');
+  ok(supportButton?.text === faLocale.support.openBtn
+    && new URL(supportButton?.url).searchParams.get('text') === faLocale.support.draft('#TRT-1050056040'),
+  'دکمه‌ی رد، کد #TRT و متنِ آماده‌ی همان مسیرِ پشتیبانی را در چت باز می‌کند');
+  ok(!/ctx\.reply\(L\.wallet\.rejected\)/.test(src)
+    && !/sendMessage\(p\.user_id, L\.wallet\.rejected\)/.test(src)
+    && (src.match(/rejectedPaymentReply\(/g) || []).length === 3
+    && (src.match(/sendRejectedPayment\(/g) || []).length === 3,
+  'هر چهار مسیرِ ارسالِ رد از پیامِ دکمه‌دارِ مشترک استفاده می‌کنند');
 }
 
 db.close();

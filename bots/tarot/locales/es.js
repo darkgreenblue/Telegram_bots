@@ -1085,8 +1085,8 @@ export default {
     reverseCancelled: (pid) => `Listo, no se hizo el reverso. El pago #${pid} quedó como estaba.`,
     approved: (amount, balance, bonus) =>
       `✅ ¡Compra de ${fmt(amount)} aprobada!${bonus ? `\n🎁 + ${fmt(bonus)} de regalo` : ''}\nSaldo nuevo: ${fmt(balance)}`,
-    // Mensaje único de rechazo: sin motivo, solo el camino del soporte.
-    rejected: `❌ Tu pago no quedó aprobado.\n\nEscríbele al soporte y lo resolvemos: ${SUPPORT_CONTACT}`,
+    // Mensaje único de rechazo: sin motivo, el botón de soporte queda debajo.
+    rejected: '❌ Tu pago no quedó aprobado.\n\nPuedes contactar con el soporte del bot usando el botón de abajo 👇',
     adminNotify: (p, user, pack) =>
       `💳 Pago nuevo #${p.invoice_no || p.id}\nPersona: ${user.name} (@${user.username || '-'}) [${p.user_id}]\n${adminMoney(p, pack)}`,
   },
