@@ -379,6 +379,7 @@ export default {
     ],
     approve: (id) => `✅ Aprovar #${id}`,
     reject: (id) => `❌ Recusar #${id}`,
+    duplicateReceipt: '↩️ Recibo duplicado',
     smsNotArrived: '🚫 O aviso não chegou',
     reverseYes: '✅ Sim, pode estornar',
     reverseNo: '↩️ Não, deixa pra lá',
