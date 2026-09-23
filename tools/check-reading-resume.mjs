@@ -2,8 +2,7 @@
 // 🔁 چکِ بازیابیِ فالِ پرداخت‌شده‌ی نیمه‌تحویل (#215) — **رفتاری**، روی SQLite واقعیِ در-حافظه.
 //
 // باگی که این فایل نگهبانش است: `readingId` و `revealIdx` فقط داخلِ `users.session_json`
-// زندگی می‌کردند و `setSession(uid, null)` در سیزده نقطه آن ردیف را خالی می‌کند — از جمله
-// `handleStart` که هیچ گاردی ندارد. نتیجه: فالی که کاربر **پولش را داده** و متنش کامل
+// زندگی می‌کردند و `setSession(uid, null)` در چند نقطه آن ردیف را خالی می‌کند. نتیجه: فالی که کاربر **پولش را داده** و متنش کامل
 // تولید شده، بی‌صدا غیرقابل‌دسترس می‌شد؛ نه ریفاند، نه پیام، نه دکمه. جاروی یتیم‌ها هم
 // عمداً ردش می‌کند چون فقط `llm_json=''` را نجات می‌دهد.
 //
@@ -115,11 +114,20 @@ ok(/llmInflight\.has\(rid\)/.test(stalled),
   'تا وقتی مدل واقعاً در حال اجراست، گارد پول را پس نمی‌دهد');
 ok(/claimInterruptedReading\.run\(rid, uid\)/.test(stalled) && /retryr:\$\{rid\}/.test(stalled),
   'پس از شکستِ واقعی، گارد فقط همان فال را refund و retry می‌کند');
-// /start نباید بلاک شود؛ فقط پیشنهادِ ادامه بدهد
+// دستورهای Command Menu هم باید همان قراردادِ گارد مرکزی را داشته باشند: کاربرِ وسطِ
+// فال/پرداخت نمی‌تواند با /start یا /menu بی‌صدا خارج شود. اگر سشن قبلاً گم شده باشد،
+// بازیابیِ DB همچنان پیشنهادِ ادامه را می‌دهد.
 const startBlock = SRC.slice(SRC.indexOf('async function handleStart'), SRC.indexOf('bot.start(handleStart)'));
 ok(/resumeRowFromDb\(uid\)/.test(startBlock), 'handleStart بعد از پاک‌کردنِ سشن ادامه را پیشنهاد می‌دهد');
-ok(!/blockDuringOpenReading\(ctx/.test(startBlock),
-  '/start همچنان بلاک نمی‌شود (راهِ فرارِ کاربر باز می‌ماند، بند ۹ب)');
+ok(/blockDuringOpenReading\(ctx, INTENT\.MENU\)/.test(startBlock),
+  '/start وسطِ فالِ باز، گاردِ ادامه/انصراف می‌دهد');
+const menuBlock = SRC.slice(SRC.indexOf('async function navToMenu'), SRC.indexOf("bot.action('nav:menu'"));
+ok(/blockDuringOpenReading\(ctx, INTENT\.MENU\)/.test(menuBlock)
+  && /blockDuringPendingReading\(ctx\)/.test(menuBlock)
+  && /blockDuringOpenPay\(ctx, INTENT\.MENU\)/.test(menuBlock),
+  '/menu هیچ مرحله‌ی فال یا پرداخت را بی‌صدا ترک نمی‌کند');
+ok(/'\/menu'/.test(SRC) && /data === 'nav:menu'/.test(SRC),
+  'گارد مرکزی هم دستور و هم دکمه‌ی کهنه‌ی منو را به مقصد درست بازپخش می‌کند');
 
 console.log(errs.length
   ? `\n❌ ${errs.length} خطا از ${pass + errs.length} ادعا`
