@@ -6678,17 +6678,42 @@ bot.action(/^next:(\d+):(\d+)$/, async (ctx) => {
 // دکمه‌ی «حالا جوابم رو بگو» زیرِ کارتِ آخر (v4). گاردِ دوبار-تپ **سینکرون و قبل از اولین
 // await** است (الگوی `pick:`): بینِ شروعِ finishReading و لحظه‌ی delivered شدنِ رکورد چند
 // ثانیه await هست و بدونِ این قفل، دو تپِ پشت‌سرهم کلِ جمع‌بندی را دو بار می‌فرستاد.
+//
+// ⚠️ قفل، حکمِ «تحویل شد» ندارد. اگر ارتباط با تلگرام وسطِ ارسال قطع شود، `finalDone`
+// در سشن می‌ماند اما reading هنوز `started` است. در آن حالت دکمه‌ی بازیابی زیرِ گارد
+// قبلاً بی‌صدا return می‌کرد و کاربر برای همیشه در همان پیام می‌ماند. مهر زمان، دو
+// حالت را از هم جدا می‌کند: تپِ هم‌زمان هنوز قفل است؛ قفلِ شکست‌خورده/نسخه‌ی قدیمی با
+// اقدامِ بعدی کاربر دوباره تلاش می‌کند. ۴۵ ثانیه از کلِ ریتمِ ارسال نهایی بلندتر است.
+const FINAL_DELIVERY_LOCK_S = 45;
 bot.action(/^final:(\d+)$/, async (ctx) => {
   const uid = ctx.from.id;
-  await ctx.answerCbQuery('🔮').catch(() => {});
   const readingId = parseInt(ctx.match[1], 10);
   const s = getSession(uid);
-  if (s.readingId !== readingId || s.finalDone) return;
+  if (s.readingId !== readingId) return ctx.answerCbQuery().catch(() => {});
   const r = stmts.getReading.get(readingId);
-  if (!r || r.user_id !== uid || r.status !== 'started') return;
-  patchSession(uid, { finalDone: true }); // قفل قبل از هر await
+  if (!r || r.user_id !== uid || r.status !== 'started') return ctx.answerCbQuery().catch(() => {});
+  const now = Math.floor(Date.now() / 1000);
+  const lockedAt = Number(s.finalAttemptAt) || 0;
+  if (s.finalDone && lockedAt && now - lockedAt < FINAL_DELIVERY_LOCK_S) {
+    return ctx.answerCbQuery('⌛️').catch(() => {});
+  }
+  // `finalDone` بدونِ زمان متعلق به نسخه‌ی قبل از این فیکس است؛ آن هم یک قفلِ یتیم
+  // محسوب می‌شود و باید با اقدامِ آگاهانه‌ی کاربر باز شود.
+  patchSession(uid, { finalDone: true, finalAttemptAt: now }); // قفل قبل از هر await
+  await ctx.answerCbQuery('🔮').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
-  await finishReading(ctx, uid, readingId);
+  try {
+    await finishReading(ctx, uid, readingId);
+  } catch (e) {
+    // پیامِ نهایی ممکن است به‌دلیل قطعِ موقتِ تلگرام نرسد. وضعیت را فقط به‌خاطر
+    // شکستِ **ارسال** terminal نمی‌کنیم و قفل را باز می‌گذاریم تا کاربر با همان دکمه
+    // یا منو/استارت بتواند دوباره ادامه دهد؛ هیچ الماسی هم دوباره کم نمی‌شود.
+    patchSession(uid, { finalDone: false, finalAttemptAt: 0 });
+    logErr(`reading#${readingId} final delivery:`, e.message);
+    await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+      [Markup.button.callback(L.buttons.finalAnswer, `final:${readingId}`)],
+    ])).catch(() => {});
+  }
 });
 
 /* ---------- حلقه‌ی بازخورد وسط خوانش ---------- */

@@ -369,12 +369,17 @@ console.log('\n▶ دکمه‌ی کارتِ آخر (v3.5.2)');
   ok(/`final:\$\{readingId\}`/.test(SRC), 'دکمه readingId را حمل می‌کند');
   ok(/bot\.action\(\/\^final:\(\\d\+\)\$\//.test(SRC), 'هندلرِ دکمه ثبت شده');
   const h = SRC.slice(SRC.indexOf("bot.action(/^final:"));
-  ok(/r\.user_id !== uid \|\| r\.status !== 'started'\) return;/.test(h),
+  ok(/r\.user_id !== uid \|\| r\.status !== 'started'\) return ctx\.answerCbQuery/.test(h),
     'مالکیتِ رکورد و وضعیت چک می‌شود');
   // قفل باید **قبل از** اولین await باشد وگرنه دوبار-تپ جمع‌بندی را دو بار می‌فرستد
   const iLock = h.indexOf('finalDone: true'), iAwait = h.indexOf('await finishReading');
   ok(iLock > 0 && iLock < iAwait, 'قفلِ دوبار-تپ سینکرون و قبل از await است');
-  ok(/s\.finalDone\) return;/.test(h), 'تپِ دوم بی‌اثر است');
+  ok(/FINAL_DELIVERY_LOCK_S/.test(SRC) && /s\.finalDone && lockedAt && now - lockedAt < FINAL_DELIVERY_LOCK_S/.test(h),
+    'تپِ دوم تا وقتی تحویل واقعاً در جریان است بی‌اثر می‌ماند');
+  ok(/patchSession\(uid, \{ finalDone: false, finalAttemptAt: 0 \}\)/.test(h),
+    'شکستِ ارسال، قفل را باز می‌کند تا فال با اقدامِ بعدی کاربر ادامه یابد');
+  ok(/L\.reading\.openReadingGuard/.test(h) && /final:\$\{readingId\}/.test(h),
+    'پس از خطای ارسال، دکمه‌ی ادامه‌ی همان پاسخ نهایی دوباره نمایش داده می‌شود');
 }
 
 console.log('\n▶ فشرده‌سازیِ چیدمانِ بزرگ');
