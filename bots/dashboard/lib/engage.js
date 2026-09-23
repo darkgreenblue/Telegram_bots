@@ -22,9 +22,20 @@ export const RDAY = tehranDayExpr('r.created_at');
 /* حذفِ ادمین از سنجه‌های محصولی: تستِ خودِ مالک نباید ماندگاری را باد کند.
    همان قراردادِ `lib/journey.js` (تگِ `adm:1`)، ولی این‌جا روی جدولِ خوانش‌ها.
    اگر جدولِ events نبود، رشته‌ی خالی برمی‌گردد و رفتار دقیقاً مثل قبل است. */
-export const notAdminReadings = (hasEvents) => (hasEvents
-  ? " AND r.user_id NOT IN (SELECT user_id FROM events WHERE json_extract(props,'$.adm') = 1)"
-  : '');
+export const notAdminReadings = (hasEvents, knownAdminIds = null) => {
+  /* صفحه‌ی اصلی در یک درخواست چندین سنجه از readings می‌سازد. اگر هر سنجه دوباره
+     زیرپرس‌وجوی json_extract روی کل events را اجرا کند، یک گزارش ساده می‌تواند دقیقه‌ها
+     حلقه‌ی HTTP را نگه دارد. callerِ گزارشِ اصلی شناسه‌های ادمین را یک‌بار می‌خواند و
+     این‌جا فقط یک لیست عددیِ امن می‌نشیند. دیگر مصرف‌کننده‌ها بدون آرگومان، دقیقاً همان
+     قراردادِ قبلی را دارند. */
+  if (Array.isArray(knownAdminIds)) {
+    const ids = [...new Set(knownAdminIds.map(Number).filter(Number.isSafeInteger))];
+    return ids.length ? ` AND r.user_id NOT IN (${ids.join(',')})` : '';
+  }
+  return hasEvents
+    ? " AND r.user_id NOT IN (SELECT user_id FROM events WHERE json_extract(props,'$.adm') = 1)"
+    : '';
+};
 
 /* ═══ کاربر فعال (مهم‌ترین سنجه‌ی این داشبورد) ═══
    تعریفِ صریحِ مالک، سه شرط با هم:
@@ -38,10 +49,10 @@ export const notAdminReadings = (hasEvents) => (hasEvents
 export const ACTIVE_MIN_AGE_DAYS = 3;
 export const ACTIVE_MIN_DAYS = 2;
 
-export function activeUsersSql(nowSec, windowDays, hasEvents) {
+export function activeUsersSql(nowSec, windowDays, hasEvents, knownAdminIds = null) {
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${DONE}${notAdminReadings(hasEvents)}
+          WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)}
           GROUP BY r.user_id
           HAVING MIN(r.created_at) <= ?
              AND COUNT(DISTINCT ${RDAY}) >= ${ACTIVE_MIN_DAYS}
@@ -51,20 +62,20 @@ export function activeUsersSql(nowSec, windowDays, hasEvents) {
 }
 
 /** کاربرانی که حداقل یک فالِ کامل گرفته‌اند (مخرجِ اغلب نسبت‌ها). */
-export function readerUsersSql(hasEvents, since = 0) {
+export function readerUsersSql(hasEvents, since = 0, knownAdminIds = null) {
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${DONE}${notAdminReadings(hasEvents)} AND r.created_at >= ?
+          WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)} AND r.created_at >= ?
           GROUP BY r.user_id`,
     params: [since],
   };
 }
 
 /** کاربرانی که در ≥۲ روزِ متفاوت فالِ کامل گرفته‌اند (نرخِ بازگشت). */
-export function repeatUsersSql(hasEvents) {
+export function repeatUsersSql(hasEvents, knownAdminIds = null) {
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${DONE}${notAdminReadings(hasEvents)}
+          WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)}
           GROUP BY r.user_id HAVING COUNT(DISTINCT ${RDAY}) >= ${ACTIVE_MIN_DAYS}`,
     params: [],
   };
@@ -79,18 +90,18 @@ export const RATED = "r.feedback LIKE 'rate:%'";
 /** «کاربر راضی» = میانگینِ نمره‌هایی که به فال‌هایش داده بالای ۴ باشد. */
 export const SATISFIED_MIN_AVG = 4;
 
-export function satisfiedUsersSql(hasEvents) {
+export function satisfiedUsersSql(hasEvents, knownAdminIds = null) {
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${RATED}${notAdminReadings(hasEvents)}
+          WHERE ${RATED}${notAdminReadings(hasEvents, knownAdminIds)}
           GROUP BY r.user_id HAVING AVG(${RATE_EXPR}) > ${SATISFIED_MIN_AVG}`,
     params: [],
   };
 }
-export function ratersUsersSql(hasEvents) {
+export function ratersUsersSql(hasEvents, knownAdminIds = null) {
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${RATED}${notAdminReadings(hasEvents)} GROUP BY r.user_id`,
+          WHERE ${RATED}${notAdminReadings(hasEvents, knownAdminIds)} GROUP BY r.user_id`,
     params: [],
   };
 }
@@ -115,12 +126,12 @@ export const READ_BUCKETS = [
   { label: '۱۱ و بیشتر', min: 11, max: 1e9 },
 ];
 
-export function bucketUsersSql(idx, hasEvents) {
+export function bucketUsersSql(idx, hasEvents, knownAdminIds = null) {
   const b = READ_BUCKETS[idx];
   if (!b) return null;
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${DONE}${notAdminReadings(hasEvents)}
+          WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)}
           GROUP BY r.user_id HAVING COUNT(*) >= ? AND COUNT(*) <= ?`,
     params: [b.min, b.max],
   };
@@ -132,19 +143,19 @@ export function bucketUsersSql(idx, hasEvents) {
    برگشتن نداشته و شمردنش عددِ ماندگاری را مصنوعاً پایین می‌آورد). */
 export const RET_DAYS = [1, 3, 7, 14, 30];
 
-export function retainedUsersSql(dayN, nowSec, hasEvents, { denominator = false } = {}) {
+export function retainedUsersSql(dayN, nowSec, hasEvents, { denominator = false, knownAdminIds = null } = {}) {
   const cutoff = nowSec - dayN * 86400;
   if (denominator) {
     return {
       sql: `SELECT r.user_id AS uid FROM readings r
-            WHERE ${DONE}${notAdminReadings(hasEvents)}
+            WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)}
             GROUP BY r.user_id HAVING MIN(r.created_at) <= ?`,
       params: [cutoff],
     };
   }
   return {
     sql: `SELECT r.user_id AS uid FROM readings r
-          WHERE ${DONE}${notAdminReadings(hasEvents)}
+          WHERE ${DONE}${notAdminReadings(hasEvents, knownAdminIds)}
           GROUP BY r.user_id
           HAVING MIN(r.created_at) <= ? AND MAX(r.created_at) >= MIN(r.created_at) + ?`,
     params: [cutoff, dayN * 86400],
