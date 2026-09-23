@@ -31,6 +31,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { heartbeatAgeSec } from '../shared/heartbeat.js';
 import { stuckCycle } from './stuck-detect.mjs';
+import { checkDashboard } from './dashboard-health.mjs';
 
 const run = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -280,6 +281,7 @@ async function cycle(state) {
     ...(await checkPm2()),
     ...(await checkUnits()),
     ...(await checkDisk()),
+    ...(await checkDashboard(run)),
   ];
   if (now - (state.creditsAt || 0) >= CREDITS_EVERY_MS) {
     problems.push(...(await checkCredits()));
