@@ -160,6 +160,10 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-health-watch.mjs
 
+      - name: Dashboard HTTP health guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-dashboard-health.mjs
+
       # 🔁 تشخیصِ «چند کاربر در یک صفحه حلقه می‌زنند» (بند ۹ب-۴ ریشه). جانشینِ مکانیزمی
       # که در v3.78.0 حذف شد چون هدف‌گیری‌اش غلط بود و **هیچ خطایی نمی‌داد**: تنها
       # کاشفش یک انسان بود که اتفاقاً گیرنده‌ی پیامش شد. هر دو جهتِ خطای جانشین هم

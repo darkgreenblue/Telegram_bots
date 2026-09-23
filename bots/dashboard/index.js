@@ -111,7 +111,17 @@ const ACTIONS = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
   const path = url.pathname;
+  const startedAt = Date.now();
+  // URL کامل (که ممکن است query مدیریتی داشته باشد) لاگ نمی‌شود؛ فقط مسیرِ بی‌خطر.
+  res.once('finish', () => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > 1_000) log(`⚠️ dashboard slow request: ${req.method} ${path} ${elapsed}ms status=${res.statusCode}`);
+  });
   try {
+    // فقط برای ناظرِ محلی: هیچ داده یا وضعیتِ سشن فاش نمی‌کند. اگر event loop گیر کند
+    // همین مسیر هم timeout می‌شود و health-watch به‌جای «pm2 online» هشدار می‌دهد.
+    if (path === '/healthz') return send(res, 200, 'ok', { 'Cache-Control': 'no-store' });
+
     /* ---- ورود/خروج ---- */
     if (path === '/login') {
       if (req.method === 'POST') {

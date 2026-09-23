@@ -617,7 +617,7 @@ jobs:
             # نمی‌رسد: دیپلوی سبز، هیچ خطایی، و ناظر ماه‌ها نسخه‌ی قدیمی را اجرا می‌کند.
             # هر importِ محلیِ تازه باید این‌جا هم اضافه شود؛ گاردِ دوطرفه‌اش در
             # tools/check-health-watch.mjs است (هم جاافتادن، هم ردیفِ بی‌مصرف).
-            if [ -z "$HW_REASON" ] && echo "$CHANGED_FILES" | grep -qE '^tools/(health-watch|stuck-detect)\.mjs$'; then HW_REASON="code"; fi
+            if [ -z "$HW_REASON" ] && echo "$CHANGED_FILES" | grep -qE '^tools/(health-watch|stuck-detect|dashboard-health)\.mjs$'; then HW_REASON="code"; fi
             if [ -z "$HW_REASON" ] && ! pm2 jlist | grep -q '"name":"health-watch"'; then HW_REASON="new-app"; fi
             if [ -n "$HW_REASON" ]; then
               pm2 startOrReload ecosystem.config.cjs --update-env --only health-watch
@@ -868,4 +868,3 @@ jobs:
               -d chat_id="$id" \
               --data-urlencode text="🚨 Deploy شکست خورد — لاگ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
           done
-
