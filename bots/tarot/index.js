@@ -3360,6 +3360,9 @@ function flowIntentFor(ctx) {
   const data = ctx.callbackQuery?.data || '';
   const text = ctx.message?.text || '';
   const key = data || text;
+  // دستورِ منوی تلگرام هم یک تغییرِ فلو است، نه متنِ آزاد. بدونِ این ردیف `/menu`
+  // نیتِ مقصد را گم می‌کرد و پس از انصراف کاربر به منوی اصلی برنمی‌گشت.
+  if (/^\/menu(?:@\w+)?$/i.test(text) || data === 'nav:menu') return { key: INTENT.MENU };
   if (/^(daily_go|dpick:\d+)$/.test(key) || text === L.buttons.daily || text === L.buttons.dailyOneCard) return { key: INTENT.DAILY };
   if (/^(lucky_go|lpick:\d+|lucky_stop)$/.test(key) || LUCKY_LABELS.includes(text)) return { key: INTENT.LUCKY };
   if (/^(reading_go|catalog_go|cat_|opentopic|odepth:|topic:|spread:)/.test(key) || text === L.buttons.reading) return { key: INTENT.READING };
@@ -3991,6 +3994,9 @@ const KB_LABELS = new Set([
 // بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
 const FLOW_SWITCH_TEXTS = new Set([
   ...KB_LABELS,
+  // `/menu` از کیبوردِ command تلگرام می‌آید، نه ReplyKeyboard؛ پس باید صریحاً
+  // در گارد مرکزی باشد. خودِ navToMenu هم پایین‌تر دفاع دوم را دارد.
+  '/menu',
   L.buttons.settings,
 ].filter(Boolean));
 registerJourney(bot, {
@@ -4254,10 +4260,16 @@ async function handleStart(ctx) {
     return startOnboarding(ctx, uid);
   }
 
-  // `/start` یک دکمه‌ی reply نیست، پس عمداً از middleware گاردِ callback رد نمی‌شود.
-  // با این حال نباید بتواند تنها فالِ پول‌داده‌ی منتظرِ سؤال را رها کند. اول خودِ فال را
-  // از DB بازسازی می‌کنیم و همان انتخابِ آگاهانه‌ی استاندارد را می‌دهیم؛ فقط «انصراف»
-  // صریح می‌تواند کاربر را از آن خارج کند. این باید **قبل از** reset پایین باشد.
+  // `/start` و `/menu` از Command Menu تلگرام می‌آیند، نه callback. اگر این‌جا گارد
+  // نگذاریم، کاربر می‌تواند وسطِ هر مرحله‌ی فال یا پرداخت، فلو را بی‌صدا عوض کند.
+  // فقط راه‌های صریحِ خروجِ خودِ گارد حقِ ترک‌کردن دارند؛ این باید پیش از هر reset باشد.
+  if (await blockDuringOpenPay(ctx, INTENT.MENU)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.MENU)) return;
+  if (await blockDuringPendingReading(ctx)) return;
+  if (await blockDuringDelivering(ctx)) return;
+
+  // اگر state/session پیش‌تر از دست رفته باشد، فالِ پول‌داده‌ی منتظرِ سؤال را از DB
+  // بازسازی می‌کنیم و همان انتخابِ آگاهانه‌ی استاندارد را می‌دهیم.
   try {
     const awaitingQuestion = resumeAwaitingQuestionFromDb(uid);
     if (awaitingQuestion) {
@@ -6295,7 +6307,12 @@ async function navToMenu(ctx) {
      `pay_cancel` وصل بود — همان چیزی که در `blockDuringOpenPay` باگِ حلقه‌ی بی‌پایانِ
      تیکتِ #TRT-8976388520 را ساخت و از آن‌جا حذف شد ولی این کپی جا ماند. گاردِ کپی‌شده
      دیر یا زود از اصل عقب می‌افتد؛ پس حالا **همان** تابع صدا زده می‌شود. */
-  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenPay(ctx, INTENT.MENU)) return;
+  // ⚠️ `/menu` از callbackهای دکمه‌ای عبور نمی‌کند. بدون این گاردِ مستقیم، همین
+  // مسیر فالِ «سؤال/تنفس/انتخاب کارت» را با cancelReading بی‌صدا لغو می‌کرد.
+  // middleware مرکزی بالاتر دفاع اول است؛ این دفاع دوم برای command و fail-open است.
+  if (await blockDuringOpenReading(ctx, INTENT.MENU)) return;
+  if (await blockDuringPendingReading(ctx)) return;
   if (await blockDuringDelivering(ctx)) return;
   if (await blockDuringOpenLucky(ctx)) return;   // فالِ پول‌داده‌ی وسطِ افشا پاک نمی‌شود
   const s = getSession(uid);

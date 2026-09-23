@@ -825,8 +825,10 @@ console.log('\n  — 🧭 nav:menu گاردِ کپی‌شده ندارد:');
      می‌سنجد که خودِ `bot.action('nav:menu')` جز delegate هیچ منطقی ندارد. */
   const nav = bodyOf('async function navToMenu(ctx) {', '\n}\nbot.action');
   ok(!!nav, 'تک‌منبعِ navToMenu پیدا شد');
-  ok(nav ? /blockDuringOpenPay\(ctx\)/.test(nav) : false,
-    'بازگشت به منو همان تک‌منبعِ گارد را صدا می‌زند');
+  ok(nav ? /blockDuringOpenPay\(ctx, INTENT\.MENU\)/.test(nav)
+    && /blockDuringOpenReading\(ctx, INTENT\.MENU\)/.test(nav)
+    && /blockDuringPendingReading\(ctx\)/.test(nav) : false,
+    'بازگشت به منو گاردهای تک‌منبعِ پرداخت و هر مرحله‌ی فال را صدا می‌زند');
   const navAct = bodyOf("bot.action('nav:menu'", '\n});');
   ok(navAct ? /navToMenu\(ctx\)/.test(navAct) && !/setSession|cancelReading/.test(navAct) : false,
     "bot.action('nav:menu') فقط delegate می‌کند (هیچ کپیِ منطق)");
