@@ -91,7 +91,14 @@ function gather(botKey, { since, activeWindow }) {
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       const ev = hasTable(db, 'events');
-      const na = notAdminReadings(ev);
+      // در گذشته هر یک از کارت‌های این صفحه خودش کل events را برای یافتن ادمین‌ها
+      // می‌خواند. همان scan تکراری روی دیتابیسِ زنده عامل قفل‌شدن route /dash بود.
+      // این لیست یک‌بار ساخته می‌شود و تمام سنجه‌ها از آن استفاده می‌کنند.
+      const adminIds = ev
+        ? rows(db, "SELECT DISTINCT user_id FROM events WHERE json_extract(props,'$.adm') = 1")
+          .map((r) => Number(r.user_id)).filter(Number.isSafeInteger)
+        : null;
+      const na = notAdminReadings(ev, adminIds);
       const hasReadings = hasTable(db, 'readings');
       const m = moneyOf(botKey);
 
@@ -123,15 +130,15 @@ function gather(botKey, { since, activeWindow }) {
         const f = scalar(db, `SELECT MIN(r.created_at) t FROM readings r WHERE ${DONE}${na}`, [], 0);
         if (f && (!agg.firstReadingAt || f < agg.firstReadingAt)) agg.firstReadingAt = f;
 
-        agg.readers += countOf(db, readerUsersSql(ev));
-        agg.active += countOf(db, activeUsersSql(now, activeWindow, ev));
-        agg.repeat += countOf(db, repeatUsersSql(ev));
-        agg.satisfied += countOf(db, satisfiedUsersSql(ev));
-        agg.raters += countOf(db, ratersUsersSql(ev));
-        READ_BUCKETS.forEach((_, i) => { agg.buckets[i] += countOf(db, bucketUsersSql(i, ev)); });
+        agg.readers += countOf(db, readerUsersSql(ev, 0, adminIds));
+        agg.active += countOf(db, activeUsersSql(now, activeWindow, ev, adminIds));
+        agg.repeat += countOf(db, repeatUsersSql(ev, adminIds));
+        agg.satisfied += countOf(db, satisfiedUsersSql(ev, adminIds));
+        agg.raters += countOf(db, ratersUsersSql(ev, adminIds));
+        READ_BUCKETS.forEach((_, i) => { agg.buckets[i] += countOf(db, bucketUsersSql(i, ev, adminIds)); });
         RET_DAYS.forEach((d, i) => {
-          agg.retention[i].num += countOf(db, retainedUsersSql(d, now, ev));
-          agg.retention[i].den += countOf(db, retainedUsersSql(d, now, ev, { denominator: true }));
+          agg.retention[i].num += countOf(db, retainedUsersSql(d, now, ev, { knownAdminIds: adminIds }));
+          agg.retention[i].den += countOf(db, retainedUsersSql(d, now, ev, { denominator: true, knownAdminIds: adminIds }));
         });
 
         // رضایت: هیستوگرامِ ۱ تا ۵ (میانگین و میانه هر دو از همین ساخته می‌شوند)

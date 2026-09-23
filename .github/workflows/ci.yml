@@ -280,6 +280,12 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-dash.mjs
 
+      # کشِ گزارش نباید داده‌ی فیلترهای متفاوت را قاطی کند یا مسیر پشتیبانی را پشتِ
+      # محاسبه‌ی تحلیلی نگه دارد؛ این‌ها خطاهای UX هستند و در تستِ عددهای BI دیده نمی‌شوند.
+      - name: Dashboard cache and fast-path check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-dashboard-cache.mjs
+
       # کارتِ متریک‌های تکمیلیِ آزمایشِ مدلِ خوانش (رضایت/تأخیر/P90/برگشتِ فالِ دوم) در
       # صفحه‌ی «تست‌ها»: صفحه با یک دیتابیسِ واقعی رندر می‌شود و عددها با محاسبه‌ی
       # مستقل مقایسه می‌شوند، به‌علاوه‌ی کنترلِ مثبتِ allowlist (فقط reading_model_ds).

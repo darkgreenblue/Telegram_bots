@@ -21,19 +21,16 @@ import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } f
 import { supportBody, supportUserBody, supportAction } from './routes/support.js';
 import { financeBody, financeCsv, financeAction } from './routes/finance.js';
 import { orphansBody, orphanAdd, orphanResolve, orphanDelete } from './routes/orphans.js';
-import { funnelsBody } from './routes/funnels.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
-import { retentionBody } from './routes/retention.js';
 import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
 import { cohortBody, cohortFragment } from './routes/cohort.js';
-import { funnelStepsFragment, screensBody } from './routes/journey.js';
+import { funnelStepsFragment } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
-import { dashBody } from './routes/dash.js';
-import { engagementBody } from './routes/engagement.js';
-import { acquisitionBody, acquisitionSettings } from './routes/acquisition.js';
-import { economicsBody, cpaDaySet } from './routes/economics.js';
+import { acquisitionSettings } from './routes/acquisition.js';
+import { cpaDaySet } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
+import { cachedAnalyticsBody, prewarmDashCache, refreshAnalyticsSection } from './lib/dash-cache.js';
 
 /* ===== ENV ===== */
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN?.trim();
@@ -60,21 +57,24 @@ const redirect = (res, to, extraHeaders = {}) => { res.writeHead(303, { Location
 
 /* ===== صفحات GET (بعد از احراز هویت) ===== */
 const PAGES = {
-  '/dash': (url) => ['آمار تحلیلی', dashBody(url)],
-  '/engagement': (url) => ['درگیری و چسبندگی', engagementBody(url)],
-  '/acquisition': (url) => ['جذب و کانال‌ها', acquisitionBody(url)],
-  '/economics': (url) => ['اقتصاد و هزینه', economicsBody(url)],
+  // این‌ها گزارش‌های تحلیلیِ پرهزینه‌اند؛ بدنه از worker/cache می‌آید تا هیچ‌وقت
+  // حلقه‌ی HTTP را نگه ندارد. مسیرهای پشتیبانی، کاربران و عملیات عمداً پایین‌تر
+  // مستقیم باقی مانده‌اند.
+  '/dash': (url) => ['آمار تحلیلی', cachedAnalyticsBody(url)],
+  '/engagement': (url) => ['درگیری و چسبندگی', cachedAnalyticsBody(url)],
+  '/acquisition': (url) => ['جذب و کانال‌ها', cachedAnalyticsBody(url)],
+  '/economics': (url) => ['اقتصاد و هزینه', cachedAnalyticsBody(url)],
   '/marketing': (url) => ['مارکتینگ', marketingBody(url)],
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
   '/orphans': (url) => ['پرداخت‌های سرگردان', orphansBody(url)],
-  '/funnels': (url) => ['فانل‌ها', funnelsBody(url)],
-  '/screens': (url) => ['صفحه‌ها', screensBody(url)],
+  '/funnels': (url) => ['فانل‌ها', cachedAnalyticsBody(url)],
+  '/screens': (url) => ['صفحه‌ها', cachedAnalyticsBody(url)],
   '/discounts': (url) => ['کد تخفیف', discountsBody(url)],
   '/experiments': (url) => ['تست‌ها', experimentsBody(url)],
   '/experiments/view': (url) => ['تست‌ها', experimentViewBody(url), '/experiments'],
-  '/retention': (url) => ['ریتنشن', retentionBody(url)],
+  '/retention': (url) => ['ریتنشن', cachedAnalyticsBody(url)],
   '/journal': (url) => ['ژورنال', journalBody(url)],
   '/users': (url) => ['کاربران', usersBody(url)],
   // «کاربرانِ پشتِ یک عدد» — نسخه‌ی صفحه‌ی کامل (قطعه‌ی کشویی پایین‌تر، خارج از PAGES)
@@ -173,6 +173,12 @@ const server = http.createServer(async (req, res) => {
     /* ---- POST اکشن‌ها (همه با چک Origin — ضد CSRF) ---- */
     if (req.method === 'POST') {
       if (!sameOrigin(req)) return send(res, 403, 'Origin نامعتبر');
+      if (path === '/analytics/refresh') {
+        const body = await readBody(req);
+        const target = refreshAnalyticsSection(body.get('target') || '/dash');
+        const sep = target.includes('?') ? '&' : '?';
+        return redirect(res, `${target}${sep}msg=${encodeURIComponent('به‌روزرسانی همین بخش در پس‌زمینه شروع شد؛ نسخهٔ قبلی تا آماده‌شدن نتیجه نمایش داده می‌شود.')}`);
+      }
       const action = ACTIONS[path];
       if (!action) return send(res, 404, 'یافت نشد');
       const body = await readBody(req);
@@ -234,5 +240,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => log(`✅ dashboard listening on http://127.0.0.1:${PORT} (فقط لوکال — دسترسی از تونل)`));
 registerGlobalErrorHandlers('dashboard');
 scheduleMaintenance(); // rollup روزانه‌ی رویدادها (+ حذف خام فقط اگر events_retention_days ست شده باشد)
+prewarmDashCache(); // نمای معمول بدون معطل‌کردنِ نخستین بازدیدکننده ساخته می‌شود
 process.once('SIGINT', () => server.close());
 process.once('SIGTERM', () => server.close());
