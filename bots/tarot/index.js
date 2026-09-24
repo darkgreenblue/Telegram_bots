@@ -53,6 +53,9 @@ import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict
 import { repairDefects } from './repair.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
+import {
+  PICKER_TEXT, PICKER_BY_CODE, LANG_CB, pickerRows, fullCodes, supportedCodes, langUi, UNIFIED_PROFILE,
+} from './lang-picker.js';
 import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjinehCount, NO_REPEAT_DRAWS } from './ganjineh.js';
 // هسته‌ی خالصِ خوانش: کلاینتِ OpenRouter، موتورِ دک، کانتکست و رندرِ متنِ نهایی.
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
@@ -307,7 +310,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.112.0';
+const PRODUCT_VERSION = '3.113.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -561,10 +564,23 @@ const GATE_BY_LOCALE = {
   pt: { ch: '@TAROT_PT',  url: 'https://t.me/TAROT_PT'  },
   es: { ch: '@TAROOT_ES', url: 'https://t.me/TAROOT_ES' },
 };
-const GATE_CHANNEL     = process.env.GATE_CHANNEL?.trim()     || GATE_BY_LOCALE[LOCALE]?.ch  || '';
-const GATE_CHANNEL_URL = process.env.GATE_CHANNEL_URL?.trim() || GATE_BY_LOCALE[LOCALE]?.url || '';
+/* 🌍 کانالِ گیت **per زبانِ کاربر**، نه per پروسه (رباتِ واحدِ چندزبانه). کاربرِ اسپانیاییِ
+ * رباتِ واحد به `@TAROOT_ES` می‌رود، کاربرِ انگلیسی (بدونِ کانال) اصلاً گیت نمی‌شود. `env`
+ * فقط برای زبانِ پیش‌فرضِ پروسه override می‌کند، پس رباتِ تک‌زبانه بیت‌به‌بیت مثل قبل است. */
+const gateCfgFor = (lang) => {
+  const base = GATE_BY_LOCALE[lang] || {};
+  const ch  = (lang === LOCALE && process.env.GATE_CHANNEL?.trim())     || base.ch  || '';
+  const url = (lang === LOCALE && process.env.GATE_CHANNEL_URL?.trim()) || base.url || '';
+  return { ch, url };
+};
 // هر دو لازم‌اند: کانالِ بدونِ لینک یعنی دکمه‌ی خرابِ «عضو شو» وسطِ اجباری‌ترین مسیرِ ربات.
-const gateOn = () => JOIN_GATE_ENABLED && !!GATE_CHANNEL && !!GATE_CHANNEL_URL;
+const gateOnFor = (lang) => { const g = gateCfgFor(lang); return JOIN_GATE_ENABLED && !!g.ch && !!g.url; };
+// داخلِ زمینه‌ی کاربر (همه‌ی هندلرها) زبانِ همان کاربر را می‌بیند.
+const GATE_CHANNEL_NOW = () => gateCfgFor(currentLang()).ch;
+const GATE_URL_NOW     = () => gateCfgFor(currentLang()).url;
+const gateOn = () => gateOnFor(currentLang());
+// لحظه‌ی **ثبتِ** میدل‌ور (بیرونِ هر زمینه): آیا هیچ زبانی از این پروسه گیت دارد؟
+const GATE_ANY = LANGS.some(gateOnFor);
 // وضعیت‌هایی که یعنی «عضو است». `restricted` فقط وقتی عضو است که is_member هم true باشد.
 const GATE_OK_STATUS = new Set(['member', 'administrator', 'creator']);
 
@@ -1877,7 +1893,10 @@ try {
   // پراپِ `ms`) و برگشت‌به‌فالِ‌دوم از همینجا رکورد می‌شوند ولی نمایششان کارِ توسعه‌ی
   // بعدیِ داشبورد است (event:prop + P90). گاردریل‌ها همان دو چیزی‌اند که مالک گفت
   // «اگه بد شد سریع بفهمیم»: ریفاند و ردِ پرداخت.
-  db.prepare(`
+  // ⚠️ فقط فارسی (تصمیمِ مالک: آزمایشِ دیپ‌سیک فقط درباره‌ی فارسی بود). بقیه‌ی زبان‌ها هرگز
+  // seed نمی‌شوند، و ردیفی که نسخه‌های قبلی در دیتابیسِ غیرفارسی کاشته‌اند همین پایین
+  // stop می‌شود، وگرنه نیمی از کاربرانِ آن زبان روی مدلی می‌رفتند که برایشان سنجیده نشده.
+  if (LOCALE === 'fa') db.prepare(`
     INSERT OR IGNORE INTO experiments
       (key, name, hypothesis, mode, metric_kind, variants_json, status,
        primary_metric, guardrails_json, started_at)
@@ -1890,6 +1909,11 @@ try {
     EVENTS.PAYMENT_APPROVED,
     JSON.stringify([EVENTS.REFUND, EVENTS.PAYMENT_REJECTED]),
   );
+  if (LOCALE !== 'fa') db.prepare(`
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='خارج از دامنه — آزمایشِ مدلِ خوانش فقط برای فارسی است؛ همه به control (luna)'
+    WHERE key=? AND status<>'stopped'
+  `).run(READING_MODEL_EXP);
   // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
   // می‌شود تا در داشبورد «در حال اجرا»ی دروغین نماند. idempotent است.
   db.prepare(`
@@ -4167,7 +4191,7 @@ function needsGate(user) {
 }
 
 const gateKeyboard = () => Markup.inlineKeyboard([
-  [Markup.button.url(L.buttons.gateOpenChannel, GATE_CHANNEL_URL)],
+  [Markup.button.url(L.buttons.gateOpenChannel, GATE_URL_NOW())],
   [Markup.button.callback(L.buttons.gateCheck, 'gate:check')],
 ]);
 
@@ -4177,12 +4201,12 @@ const gateKeyboard = () => Markup.inlineKeyboard([
 // وقتی کسی شکایت نکند نمی‌فهمیدیم. خطا با پیشوندِ قابلِ grep لاگ می‌شود.
 async function isChannelMember(ctx, uid) {
   try {
-    const m = await ctx.telegram.getChatMember(GATE_CHANNEL, uid);
+    const m = await ctx.telegram.getChatMember(GATE_CHANNEL_NOW(), uid);
     if (GATE_OK_STATUS.has(m?.status)) return true;
     if (m?.status === 'restricted') return m.is_member === true;
     return false; // left / kicked
   } catch (e) {
-    logErr(`❌ GATE_CHECK ${GATE_CHANNEL}:`, e.message);
+    logErr(`❌ GATE_CHECK ${GATE_CHANNEL_NOW()}:`, e.message);
     return true; // fail-open: خطای ما نباید راهِ کاربر را ببندد
   }
 }
@@ -4247,11 +4271,14 @@ async function handleStart(ctx) {
   }
 
   if (!user.welcomed) {
+    // 🌍 رباتِ واحدِ چندزبانه: قدمِ اول انتخابِ زبان است (پیامِ انگلیسی). کاربری که زبانش را
+    // انتخاب کرده ولی هنوز آنبورد نشده، مستقیم در زبانِ خودش ادامه می‌دهد.
+    if (MULTI_LANG && !user.lang) return showLangPicker(ctx, uid);
     // 🔑 گیتِ عضویت مقدم بر هدیه است: هدیه لحظه‌ی تأییدِ عضویت واریز می‌شود، پس عضویت
     // «شرطِ گرفتنِ هدیه» است نه هزینه‌ای اضافه. کاربرِ فعلی هرگز این شاخه را نمی‌بیند
     // (needsGate روی هدیه‌ی گرفته‌نشده شرط دارد).
     if (needsGate(user)) {
-      track(db, uid, 'gate_shown', { ch: GATE_CHANNEL });
+      track(db, uid, 'gate_shown', { ch: GATE_CHANNEL_NOW() });
       return showGate(ctx, uid);
     }
     // v2.0.0 — اول ارزش، بعد اسم: پیامِ اول خوش‌آمد + هدیه‌ی اعتبار (دقیقاً بهای یک فالِ
@@ -4343,6 +4370,74 @@ async function sendStartMenu(ctx, uid) {
 }
 bot.start(handleStart);
 
+/* 🌍 انتخابگرِ زبان (فقط پروسه‌ی چندزبانه). جزئیات و دلیلِ انگلیسی‌بودنِ متن: `lang-picker.js`. */
+async function showLangPicker(ctx, uid) {
+  track(db, uid, 'lang_picker_shown', {});
+  await ctx.reply(PICKER_TEXT.ask, { reply_markup: { inline_keyboard: pickerRows(fullCodes(), DEFAULT_LANG) } });
+}
+const settingsLangRows = (checked) => [
+  ...pickerRows(supportedCodes(LANGS), checked, 't'),
+  [Markup.button.callback(L.buttons.setBack, 'set:home')],
+];
+
+// بعد از انتخابِ یک زبانِ ساخته‌شده، داخلِ زمینه‌ی **همان زبان** اجرا می‌شود.
+async function afterLangPicked(ctx, uid, changed) {
+  const user = getUser(uid);
+  if (!user.welcomed) {
+    // دوبار-تپ روی همان زبان وسطِ ورود نباید پیام‌ها را تکرار کند.
+    if (!changed && user.state !== 'new') return;
+    // سفرِ استانداردِ همان زبان: گیتِ کانالِ همان زبان (اگر دارد) و بعد آنبوردینگ. هدیه
+    // write-once است، پس عوض‌کردنِ زبان وسطِ ورود هدیه‌ی دوم نمی‌دهد.
+    if (needsGate(user)) {
+      track(db, uid, 'gate_shown', { ch: GATE_CHANNEL_NOW() });
+      return showGate(ctx, uid);
+    }
+    return startOnboarding(ctx, uid);
+  }
+  if (!changed) return;
+  // برچسب‌های کیبوردِ ماندگار روی گوشیِ کاربر کش می‌شوند، پس کیبوردِ زبانِ تازه همین‌جا می‌رود.
+  stmts.setKbShown.run(uid);
+  await ctx.reply(langUi(currentLang()).saved, mainKeyboard(uid));
+}
+
+bot.action(LANG_CB, async (ctx) => {
+  const uid = ctx.from.id;
+  if (!MULTI_LANG) return ctx.answerCbQuery().catch(() => {});
+  const code = ctx.match[1];
+  const suffix = ctx.match[2] || '';
+  if (!PICKER_BY_CODE[code]) return ctx.answerCbQuery().catch(() => {});
+  upsertUser(ctx);
+  const user = getUser(uid);
+  const supported = isLang(code);
+  // 📊 تحقیقِ بازار: هر کلیک ثبت می‌شود، مخصوصاً زبان‌هایی که هنوز نداریم.
+  track(db, uid, 'lang_picked', { lang: code, supported: supported ? 1 : 0, first: user?.lang ? 0 : 1, from: suffix || 'full' });
+  await ctx.answerCbQuery().catch(() => {});
+  // ✅ روی همان لیستی جابه‌جا می‌شود که کاربر رویش زد.
+  const rows = suffix === 't' ? settingsLangRows(code)
+    : pickerRows(suffix === 's' ? supportedCodes(LANGS) : fullCodes(), code, suffix);
+  try { await ctx.editMessageReplyMarkup({ inline_keyboard: rows }); } catch {}
+  if (!supported) {
+    return ctx.reply(PICKER_TEXT.unsupported,
+      { reply_markup: { inline_keyboard: pickerRows(supportedCodes(LANGS), DEFAULT_LANG, 's') } });
+  }
+  const changed = user?.lang !== code;
+  stmts.setLang.run(code, uid);
+  return withLang(code, () => afterLangPicked(ctx, uid, changed));
+});
+
+// `/language`: آنبوردنشده → همان انتخابگرِ اول؛ آنبوردشده → انتخابگرِ تنظیمات.
+bot.command('language', async (ctx) => {
+  if (!MULTI_LANG) return;
+  const uid = ctx.from.id;
+  upsertUser(ctx);
+  const user = getUser(uid);
+  if (!user.welcomed) return showLangPicker(ctx, uid);
+  if (await blockDuringOpenPay(ctx, INTENT.SETTINGS)) return;
+  if (await blockDuringOpenReading(ctx, INTENT.SETTINGS)) return;
+  if (await blockDuringOpenLucky(ctx, INTENT.SETTINGS)) return;
+  await ctx.reply(langUi(currentLang()).ask, Markup.inlineKeyboard(settingsLangRows(currentLang())));
+});
+
 // دکمه‌ی «عضو شدم، بررسی کن». دو نتیجه بیشتر ندارد: یا عضو است و بلافاصله هدیه و ادامه‌ی
 // فلو را می‌گیرد، یا پاپ‌آپِ «تایید نشده» می‌بیند و روی همان صفحه می‌ماند (بدونِ پیامِ جدید،
 // تا چت شلوغ نشود). دوبار-تپ بی‌خطر است چون claimGate اتمیک است و grantWelcomeBonus write-once.
@@ -4358,7 +4453,7 @@ bot.action('gate:check', async (ctx) => {
   }
   await ctx.answerCbQuery().catch(() => {});
   if (!stmts.claimGate.run(uid).changes) return; // ضدِ دوبار-تپ (یکی از دو تپ برنده است)
-  track(db, uid, 'gate_passed', { ch: GATE_CHANNEL });
+  track(db, uid, 'gate_passed', { ch: GATE_CHANNEL_NOW() });
   try { await ctx.editMessageReplyMarkup(undefined); } catch {} // دکمه‌ها بعد از عبور می‌روند
   return startOnboarding(ctx, uid);
 });
@@ -4373,17 +4468,9 @@ bot.action('gate:check', async (ctx) => {
    این استثنا ادمینی که وسطِ گیت است نمی‌تواند ریست کند و گیت را دوباره تست کند — دقیقاً
    همان چیزی که مالک دید (به‌جای ریست، پیامِ یادآوریِ گیت گرفت). بند ۶ب می‌گوید این دکمه
    «همیشه» در دسترسِ ادمین است. برای کاربرِ عادی بی‌خطر است چون `doReset` خودش `isAdmin` را چک می‌کند. */
-if (gateOn()) {
-  // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
-  const GATE_FREE_CMD = new Set(['/start', '/support', '/reset']);
-  // ⚠️ اتحادِ همه‌ی زبان‌ها، نه زبانِ پیش‌فرض: این Set لحظه‌ی **ثبت** ساخته می‌شود
-  // (بیرونِ هر زمینه‌ای) ولی لحظه‌ی **درخواست** با متنِ کاربر مقایسه می‌شود. با برچسبِ
-  // تک‌زبانه، کاربرِ زبانِ دیگر که وسطِ گیت دکمه‌ی پشتیبانی/ریستِ خودش را می‌زند بی‌صدا
-  // پشتِ گیت می‌ماند — همان تله‌ی `bot.hears` در locale-ctx.js.
-  const GATE_FREE_TEXT = new Set(
-    [...allLabels((l) => l.support?.button), ...allLabels((l) => l.buttons.resetTest),
-      '🔄 ریست ربات (تست)'].filter(Boolean));
-  // ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
+// ⚠️ این میدل‌ور عمداً **بیرونِ** بلوکِ گیت است. تا v3.112.0 داخلِ `if (gateOn())` افتاده
+// بود، پس رباتی که گیت نداشت (انگلیسی) نه مهرِ `last_seen_at` می‌گرفت نه تورِ ترمیمِ کیبورد را.
+// ⌨️ تازه‌سازیِ کیبورد قبل از هر اقدامِ واقعیِ کاربر. عمداً بعد از میدل‌ورِ جرنی ثبت
 // می‌شود تا `logAct` اقدامِ کاربر را عادی ثبت کرده باشد، و هرگز چیزی را بلاک نمی‌کند.
 bot.use(async (ctx, next) => {
   if (ctx.message || ctx.callbackQuery) {
@@ -4396,6 +4483,16 @@ bot.use(async (ctx, next) => {
   return next();
 });
 
+if (GATE_ANY) {
+  // دستورهای همیشه-آزاد. تلگرام `/cmd@botname` هم می‌فرستد، پس با فرمانِ خالص مقایسه می‌کنیم.
+  const GATE_FREE_CMD = new Set(['/start', '/support', '/reset', '/language']);
+  // ⚠️ اتحادِ همه‌ی زبان‌ها، نه زبانِ پیش‌فرض: این Set لحظه‌ی **ثبت** ساخته می‌شود
+  // (بیرونِ هر زمینه‌ای) ولی لحظه‌ی **درخواست** با متنِ کاربر مقایسه می‌شود. با برچسبِ
+  // تک‌زبانه، کاربرِ زبانِ دیگر که وسطِ گیت دکمه‌ی پشتیبانی/ریستِ خودش را می‌زند بی‌صدا
+  // پشتِ گیت می‌ماند — همان تله‌ی `bot.hears` در locale-ctx.js.
+  const GATE_FREE_TEXT = new Set(
+    [...allLabels((l) => l.support?.button), ...allLabels((l) => l.buttons.resetTest),
+      '🔄 ریست ربات (تست)'].filter(Boolean));
 bot.use(async (ctx, next) => {
     try {
       const uid = ctx.from?.id;
@@ -4406,7 +4503,8 @@ bot.use(async (ctx, next) => {
       // گیت می‌گرفت. باگِ واقعی و دیده‌شده — در لاگ سه بار پشت‌سرهم روی my_chat_member تکرار شد.
       if (!ctx.message && !ctx.callbackQuery) return next();
       const data = ctx.callbackQuery?.data || '';
-      if (data.startsWith('gate:')) return next();
+      // انتخابِ زبان قبل از گیت می‌آید (کانالِ گیت به زبان بستگی دارد)، پس هرگز گیت نمی‌شود.
+      if (data.startsWith('gate:') || data.startsWith('lang:')) return next();
       const text = ctx.message?.text?.trim() || '';
       const cmd = text.split(/[\s@]/)[0];
       if (GATE_FREE_CMD.has(cmd) || GATE_FREE_TEXT.has(text)) return next();
@@ -10184,6 +10282,7 @@ const remindersUnlocked = () => SETTINGS_ENABLED && !nightExpActive();
 
 function settingsRows(uid) {
   const rows = [];
+  if (MULTI_LANG) rows.push([Markup.button.callback(langUi(currentLang()).button, 'set:lang')]);
   if (remindersUnlocked()) rows.push([Markup.button.callback(L.buttons.setReminders, 'set:rem')]);
   rows.push([Markup.button.callback(L.buttons.setName, 'set:name')]);
   rows.push([Markup.button.callback(L.buttons.setMonth, 'set:month')]);
@@ -10211,6 +10310,13 @@ async function showSettings(ctx) {
   await ctx.reply(L.settings.home, Markup.inlineKeyboard(settingsRows(ctx.from.id)));
 }
 if (SETTINGS_ENABLED) bot.hears(allLabels(l => l.buttons.settings), showSettings);
+
+// 🌍 تغییرِ زبان از تنظیمات (فقط پروسه‌ی چندزبانه). فقط زبان‌های ساخته‌شده؛ روی همان پیام.
+bot.action('set:lang', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!MULTI_LANG) return;
+  await editOrSend(ctx, langUi(currentLang()).ask, settingsLangRows(currentLang()));
+});
 
 // بازگشت به ریشه‌ی تنظیمات (از هر زیرشاخه‌ای) — همیشه ادیت، هرگز پیامِ تازه
 bot.action('set:home', async (ctx) => {
@@ -10903,6 +11009,7 @@ function onLaunched() {
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
   installMenuButton();
+  installUnifiedProfile();
 }
 
 /* ☰ نصبِ دکمه‌ی منوی کنارِ کادرِ تایپ (v3.96.0). یک بار در هر بوت، و fail-safe:
@@ -10916,6 +11023,27 @@ function onLaunched() {
  * پروسه‌ی چندزبانه آن یعنی کاربرِ روس توضیحِ فارسی ببیند — یک خرابیِ کاملاً بی‌صدا.
  * `setMyCommands` فیلدِ `language_code` دارد و دقیقاً برای همین است؛ مجموعه‌ی
  * **بی‌زبان** هم می‌ماند تا کاربری با زبانِ کلاینتِ دیگر دست‌خالی نماند. */
+/* 🪪 نام و بیوی انگلیسیِ رباتِ واحد (خواسته‌ی مالک). فقط پروسه‌ی چندزبانه؛ فارسی و
+ * پرتغالی هرگز لمس نمی‌شوند. فقط وقتی مقدار واقعاً فرق دارد نوشته می‌شود، چون این متدها
+ * سقفِ نرخ دارند و هر بوت یک بار صدایشان می‌زند. fail-safe: شکست هیچ مسیری را نمی‌شکند. */
+async function installUnifiedProfile() {
+  if (!MULTI_LANG) return;
+  const tg = bot.telegram;
+  const steps = [
+    ['getMyName', 'setMyName', 'name', 'name'],
+    ['getMyShortDescription', 'setMyShortDescription', 'short_description', 'short'],
+    ['getMyDescription', 'setMyDescription', 'description', 'description'],
+  ];
+  for (const [getM, setM, field, key] of steps) {
+    try {
+      const cur = await tg.callApi(getM, {});
+      if (cur?.[field] === UNIFIED_PROFILE[key]) continue;
+      await tg.callApi(setM, { [field]: UNIFIED_PROFILE[key] });
+      log(`🪪 ${field} set`);
+    } catch (e) { logErr(`profile ${field}:`, e.message); }
+  }
+}
+
 async function installMenuButton() {
   if (!CHAT_MENU_BUTTON) return;
   const cmdsFor = (Lx) => BOT_COMMANDS.map(([command, key]) => ({ command, description: Lx.commands[key] }));

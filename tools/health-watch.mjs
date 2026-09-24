@@ -57,7 +57,9 @@ const HEARTBEAT_STALE_SEC = 5 * 60;
 /* نگاشتِ نامِ اپِ pm2 ⟵ locale. چهار اپِ تاروت `cwd` مشترک دارند و فقط LOCALE فرقشان
  * است، پس هرکدام فایلِ ضربانِ خودش را دارد؛ یک فایلِ مشترک باعث می‌شد یک اپِ سالم مرگِ
  * سه‌تای دیگر را بپوشاند. */
-const HEARTBEAT_APPS = [['tarot', 'fa'], ['tarot-ru', 'ru'], ['tarot-pt', 'pt'], ['tarot-es', 'es']];
+/* ⚠️ `tarot-ru` از ۱۴۰۵/۰۶/۲۶ رباتِ واحدِ چندزبانه با `LOCALE=en` است (همان رباتِ تلگرامی،
+ * همان نامِ اپ)، پس ضربان و دیتابیسش `-en` است نه `-ru`. همان تصمیم در `deploy.yml`. */
+const HEARTBEAT_APPS = [['tarot', 'fa'], ['tarot-ru', 'en'], ['tarot-pt', 'pt'], ['tarot-es', 'es']];
 // ربات‌هایی که کلیدِ OpenRouterشان تمام‌شدنش یعنی قطعیِ کاملِ محصول.
 const CREDIT_BOTS = ['voice2text', 'tarot'];
 // سرویس‌های systemd که خارج از pm2 اند (استثناهای مستندِ مونوریپو).

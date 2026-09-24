@@ -370,9 +370,14 @@ jobs:
               upper="$(echo "$lang" | tr '[:lower:]' '[:upper:]')"
               eval "tok=\${TAROT_${upper}_BOT_TOKEN:-}"
               eval "key=\${TAROT_${upper}_OPENROUTER_KEY:-}"
+              # 🌍 اپِ `tarot-ru` (همان رباتِ تلگرامیِ روسی، همان سکرت‌ها) از ۱۴۰۵/۰۶/۲۶
+              # **رباتِ واحدِ چندزبانه** است: انگلیسیِ پیش‌فرض + انتخابگرِ زبان. نامِ اپ و
+              # سکرت‌ها عمداً عوض نشدند (بی‌دلیل ری‌استارت و ساختِ سکرتِ تازه)، فقط محتوای env.
+              loc="$lang"; extra=""
+              if [ "$lang" = ru ]; then loc=en; extra="$(printf '\nLANGS=en,es,ru,pt')"; fi
               if [ -n "$tok" ] && [ -n "$key" ]; then
                 write_env "tarot-$lang" \
-                  "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s' "$tok" "$key" "$lang")" \
+                  "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s%s' "$tok" "$key" "$loc" "$extra")" \
                   "bots/tarot/.env.$lang"
               else
                 # ⚠️ نامِ سکرتِ خالی صریح چاپ می‌شود، وگرنه تنها نشانه یک «ℹ️ .env نبود»
@@ -583,7 +588,10 @@ jobs:
               # اپی که سکرتش ست نشده عمداً دیپلوی نمی‌شود، پس ضربان هم ندارد و
               # نبودنش خرابی نیست (درسِ ۱۱ شهریور: نامِ فایلِ env، نه `.env` ثابت).
               [ -f "bots/tarot/$envf" ] || { echo "⏭ tarot-$loc سکرت ندارد — از گارد معاف"; continue; }
-              hb="bots/tarot/data/heartbeat-$loc.txt"
+              # ضربان با `LOCALE`ِ **داخلِ خودِ فایلِ env** نام می‌گیرد، نه با نامِ اپ: اپِ
+              # `tarot-ru` رباتِ واحدِ انگلیسی است و `heartbeat-en.txt` می‌نویسد.
+              hbloc=$(sed -n 's/^LOCALE=//p' "bots/tarot/$envf" | head -n 1); [ -n "$hbloc" ] || hbloc="$loc"
+              hb="bots/tarot/data/heartbeat-$hbloc.txt"
               while :; do
                 beat=$(cat "$hb" 2>/dev/null || echo 0)
                 if [ "$beat" -ge "$DEPLOY_STARTED_AT" ] 2>/dev/null; then

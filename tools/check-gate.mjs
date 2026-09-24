@@ -82,7 +82,8 @@ ok(/\/\^\\\/start/.test(payloadSrc),
 ok(/isStartCmd \?/.test(payloadSrc), 'فالبکِ متن باید پشتِ شرطِ isStartCmd باشد');
 
 // ── ۴) گیت یک نقطه است، نه ده‌ها گارد پراکنده ────────────────────────────────
-ok((idx.match(/needsGate\(/g) || []).length <= 4,
+// ۵ = تعریف + handleStart + gate:check + میدل‌ور + ادامه‌ی بعد از انتخابِ زبان (رباتِ واحد).
+ok((idx.match(/needsGate\(/g) || []).length <= 5,
    'needsGate باید فقط در چند نقطه‌ی مشخص صدا زده شود (گیت میدل‌ورِ واحد است، نه گاردِ پراکنده)');
 
 // ── ۵) هدیه دقیقاً لحظه‌ی عبور از گیت داده می‌شود، نه قبلش ───────────────────
@@ -200,15 +201,17 @@ for (const s of SPREADS) {
 {
   const src = [
     idx.match(/const GATE_BY_LOCALE = \{[\s\S]*?\n\};/)?.[0],
-    idx.match(/^const GATE_CHANNEL {5}=.*$/m)?.[0],
-    idx.match(/^const GATE_CHANNEL_URL =.*$/m)?.[0],
-    idx.match(/^const gateOn = .*$/m)?.[0],
+    idx.match(/^const gateCfgFor = [\s\S]*?\n\};/m)?.[0],
+    idx.match(/^const gateOnFor = .*$/m)?.[0],
   ];
-  ok(src.every(Boolean), 'هر چهار قطعه‌ی گیتِ per زبان پیدا شدند');
-  const run = (locale, env = {}) => {
+  ok(src.every(Boolean), 'هر سه قطعه‌ی گیتِ per زبان پیدا شدند');
+  /* ⚠️ از رباتِ واحدِ چندزبانه به بعد، گیت per **زبانِ کاربر** است نه per پروسه. `run` زبانِ
+   * پروسه (`LOCALE`) و زبانِ کاربر را جدا می‌گیرد: env فقط زبانِ پیش‌فرضِ پروسه را override
+   * می‌کند، پس کاربرِ اسپانیاییِ رباتِ انگلیسی هرگز کانالِ env را به ارث نمی‌برد. */
+  const run = (locale, env = {}, userLang = locale) => {
     try {
-      return new Function('LOCALE', 'process', 'JOIN_GATE_ENABLED',
-        `${src.join('\n')}; return { on: gateOn(), ch: GATE_CHANNEL };`)(locale, { env }, true);
+      return new Function('LOCALE', 'process', 'JOIN_GATE_ENABLED', 'L0',
+        `${src.join('\n')}; return { on: gateOnFor(L0), ch: gateCfgFor(L0).ch };`)(locale, { env }, true, userLang);
     } catch { return null; }
   };
   /* ⚠️ هر زبانی که کانال دارد باید به کانالِ **خودش** وصل باشد.
@@ -245,6 +248,17 @@ for (const s of SPREADS) {
   ok(deEnv?.on === true && deEnv?.ch === '@taroot_de', 'ست‌کردنِ کانال از env گیت را روشن می‌کند');
   // کانال بدونِ لینک = دکمه‌ی خراب وسطِ اجباری‌ترین مسیرِ ربات
   ok(run('de', { GATE_CHANNEL: '@taroot_de' })?.on === false, 'کانال بدونِ لینک گیت را روشن نمی‌کند');
+  // 🌍 رباتِ واحد (پروسه‌ی انگلیسی): هر کاربر کانالِ زبانِ **خودش** را می‌گیرد.
+  ok(run('en', {}, 'en')?.on === false, 'رباتِ واحد: کاربرِ انگلیسی (بی‌کانال) گیت نمی‌شود');
+  ok(run('en', {}, 'es')?.ch === '@TAROOT_ES', 'رباتِ واحد: کاربرِ اسپانیایی به کانالِ اسپانیایی می‌رود');
+  ok(run('en', {}, 'ru')?.ch === '@TAROOT_RU', 'رباتِ واحد: کاربرِ روس به کانالِ روسی می‌رود');
+  ok(run('en', { GATE_CHANNEL: '@x', GATE_CHANNEL_URL: 'https://t.me/x' }, 'pt')?.ch === '@TAROT_PT',
+    'env فقط زبانِ پیش‌فرضِ پروسه را override می‌کند، نه زبانِ کاربرِ دیگر');
+  ok(/^const GATE_ANY = LANGS\.some\(gateOnFor\);/m.test(idx),
+    'ثبتِ میدل‌ورِ گیت روی «هر زبانی گیت دارد» است، نه زبانِ پیش‌فرض (وگرنه رباتِ انگلیسی هیچ گیتی نداشت)');
+  ok(/^if \(GATE_ANY\) \{/m.test(idx), 'بلوکِ میدل‌ورِ گیت با GATE_ANY باز می‌شود');
+  ok(idx.indexOf('stmts.touchSeen.run(ctx.from.id)') < idx.indexOf('if (GATE_ANY) {'),
+    'میدل‌ورِ کیبورد/last_seen بیرون و قبل از بلوکِ گیت است (رباتِ بی‌گیت هم تورِ ترمیم دارد)');
 }
 
 if (fails) {
