@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, sys, logs, errors, restart, env-check, db-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, recover-dry, recover-send, announce-dry, announce-send]
+        options: [status, sys, logs, errors, restart, env-check, db-query, db-query-sealed, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, recover-dry, recover-send, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -29,6 +29,10 @@ on:
         description: 'فقط این آی‌دی‌ها (announce-*) — کاماجدا. خالی = همه‌ی کاربران'
         required: false
         default: ''
+      pubkey:
+        description: 'db-query-sealed: کلیدِ عمومیِ RSA (base64ِ DERِ SPKI، از tools/ops-unseal.mjs keygen). خروجی فقط با کلیدِ خصوصی خواناست'
+        required: false
+        default: ''
 
 jobs:
   ops:
@@ -42,11 +46,12 @@ jobs:
           OPS_LINES:  ${{ inputs.lines }}
           OPS_QUERY:  ${{ inputs.query }}
           OPS_ONLY:   ${{ inputs.only }}
+          OPS_PUBKEY: ${{ inputs.pubkey }}
         with:
           host: 185.204.171.170
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY,OPS_ONLY
+          envs: OPS_ACTION,OPS_APP,OPS_LINES,OPS_QUERY,OPS_ONLY,OPS_PUBKEY
           script: |
             set -e
             cd ~/voice2text
@@ -150,6 +155,47 @@ jobs:
                   } else {
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
+                "
+                ;;
+              db-query-sealed)
+                # 🔐 همان db-query، ولی خروجی قبل از چاپ رمز می‌شود. لاگِ این جاب وقتی
+                # ریپو موقتاً public است (بند ۳ج ریشه) برای همه خواناست؛ عددِ تجمیعی آن‌جا
+                # بی‌خطر است، متنِ خامِ کاربر (سؤالِ فال، خودِ فال) نه. پس هر کوئری‌ای که
+                # متنِ کاربر برمی‌گرداند باید از این مسیر برود، نه از db-query.
+                # AES-256-GCM با کلیدِ تصادفیِ per اجرا + RSA-OAEP-SHA256 برای همان کلید؛
+                # کلیدِ خصوصی هرگز به این ورک‌فلو نمی‌رسد. بازکردن: tools/ops-unseal.mjs.
+                # ⚠️ کدِ node عمداً بدونِ دابل‌کوت/دلار/بک‌تیک/بک‌اسلش است (داخلِ رشته‌ی
+                # دابل‌کوتِ شل می‌نشیند). tools/check-ops-sealed.mjs همین بلوک را از فایل
+                # می‌بُرد و با bash واقعی اجرا می‌کند؛ هیچ ردیفی نباید خام در خروجی بیاید.
+                [ -n "$OPS_APP" ]   || { echo "❌ app لازم است"; exit 1; }
+                [ -n "$OPS_QUERY" ] || { echo "❌ query لازم است"; exit 1; }
+                case "$OPS_PUBKEY" in (*[!A-Za-z0-9+/=]*|'') echo "❌ pubkey لازم است (base64ِ DERِ SPKI، از tools/ops-unseal.mjs keygen)"; exit 1;; esac
+                cd "bots/$OPS_APP"
+                DBFILE=$(pick_db)
+                [ -n "$DBFILE" ] || { echo "❌ هیچ فایل .db در bots/$OPS_APP/data نیست"; exit 1; }
+                echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
+                ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
+                echo "===== db-query-sealed روی $OPS_APP/$DBFILE ====="
+                DBFILE="$DBFILE" node -e "
+                  const path = require('path'), crypto = require('crypto'), zlib = require('zlib');
+                  const pub = crypto.createPublicKey({ key: Buffer.from(process.env.OPS_PUBKEY, 'base64'), format: 'der', type: 'spki' });
+                  if (pub.asymmetricKeyType === 'rsa' && pub.asymmetricKeyDetails.modulusLength >= 3072) {} else { console.log('❌ کلیدِ عمومی باید RSA با دست‌کم ۳۰۷۲ بیت باشد'); process.exit(1); }
+                  const D = require(path.join(process.cwd(), 'node_modules', 'better-sqlite3'));
+                  const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
+                  const stmt = db.prepare(process.env.OPS_QUERY);
+                  if (stmt.reader === false) { console.log('❌ فقط کوئریِ خواندنی (اتصال readonly است — هیچ تغییری اعمال نشد)'); process.exit(1); }
+                  const rows = stmt.all();
+                  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(rows), 'utf8'), { level: 9 });
+                  const key = crypto.randomBytes(32), iv = crypto.randomBytes(12);
+                  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+                  const ct = Buffer.concat([c.update(gz), c.final()]);
+                  const ek = crypto.publicEncrypt({ key: pub, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, key);
+                  const n = Buffer.alloc(2); n.writeUInt16BE(ek.length);
+                  const blob = Buffer.concat([Buffer.from('SQ1'), n, ek, iv, c.getAuthTag(), ct]).toString('base64');
+                  console.log('--- rows: ' + rows.length + ' | gzip: ' + gz.length + ' bytes | sealed: ' + blob.length + ' chars');
+                  console.log('-----BEGIN OPS SEALED-----');
+                  for (let i = 0; i < blob.length; i += 3000) console.log(blob.slice(i, i + 3000));
+                  console.log('-----END OPS SEALED-----');
                 "
                 ;;
               exp)
