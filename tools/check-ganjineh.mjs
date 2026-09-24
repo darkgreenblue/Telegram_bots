@@ -213,6 +213,13 @@ const RULES = {
     badPhrases: null, pastTime: null,
     alien: [ALIEN_SCRIPTS.fa, ALIEN_SCRIPTS.cjk, ALIEN_SCRIPTS.cyr, ALIEN_SCRIPTS.ptChars],
   },
+  // انگلیسی (رباتِ واحد، v3.113.0): گاردهای زبانی از `langdata.en.json → defects` و
+  // عبارت‌های طفره/زمانِ گذشته از `locales/en.js` می‌آیند، مثلِ سه زبانِ بالا.
+  en: {
+    min: 230, max: 760,
+    badPhrases: null, pastTime: null,
+    alien: [ALIEN_SCRIPTS.fa, ALIEN_SCRIPTS.cjk, ALIEN_SCRIPTS.cyr, ALIEN_SCRIPTS.ptChars, ALIEN_SCRIPTS.esChars],
+  },
 };
 
 // فایل‌های محتوای واقعی روی دیسک — نه لیستِ دستی، وگرنه زبانِ تازه بی‌صدا از قلم می‌افتد.

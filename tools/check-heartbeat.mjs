@@ -126,7 +126,10 @@ ok(/DEPLOY_STARTED_AT=\$\(date \+%s\)/.test(DEPLOY), 'دیپلوی لحظه‌ی
  * فراخوانی می‌آید، پس «قبل از تعریف» شرطِ اکیداً قوی‌تر و پایدارتری است. */
 ok(DEPLOY.indexOf('DEPLOY_STARTED_AT=$(date +%s)') < DEPLOY.indexOf('deploy_bot() {'),
   'و این مهر **قبل از تعریفِ deploy_bot** گرفته می‌شود (یعنی قبل از هر reload)');
-ok(/heartbeat-\$loc\.txt/.test(DEPLOY), 'گاردِ دیپلوی فایلِ ضربانِ هر زبان را می‌خواند');
+ok(/heartbeat-\$hbloc\.txt/.test(DEPLOY), 'گاردِ دیپلوی فایلِ ضربانِ هر زبان را می‌خواند');
+// اپِ `tarot-ru` رباتِ واحدِ انگلیسی است؛ نامِ ضربان باید از LOCALE داخلِ فایلِ env بیاید.
+ok(/hbloc=\$\(sed -n 's\/\^LOCALE=\/\/p' "bots\/tarot\/\$envf"/.test(DEPLOY),
+  'نامِ ضربان از LOCALEِ خودِ فایلِ env می‌آید، نه از نامِ اپ (tarot-ru = LOCALE=en)');
 ok(/\$beat" -ge "\$DEPLOY_STARTED_AT/.test(DEPLOY), 'و ضربان را با لحظه‌ی شروعِ دیپلوی می‌سنجد، نه صرفاً با وجودِ فایل');
 ok(/HB_BAD/.test(DEPLOY) && /exit 1/.test(DEPLOY), 'نبودِ ضربان جابِ دیپلوی را قرمز می‌کند');
 // اپی که سکرت ندارد عمداً دیپلوی نمی‌شود؛ گارد باید معافش کند وگرنه هر دیپلوی قرمز است.
