@@ -4021,7 +4021,9 @@ const FLOW_SWITCH_TEXTS = new Set([
   // `/menu` از کیبوردِ command تلگرام می‌آید، نه ReplyKeyboard؛ پس باید صریحاً
   // در گارد مرکزی باشد. خودِ navToMenu هم پایین‌تر دفاع دوم را دارد.
   '/menu',
-  L.buttons.settings,
+  /* «تنظیمات» جدا این‌جا نمی‌آید: `KB_LABELS` آن را با `allLabels` برای **همه‌ی** زبان‌ها
+   * دارد. `L.buttons.settings`ِ خام لحظه‌ی ثبت (بیرونِ زمینه‌ی کاربر) خوانده می‌شد و در
+   * پروسه‌ی چندزبانه یک `❌ LANG_UNSET`ِ بوت می‌ساخت. */
 ].filter(Boolean));
 registerJourney(bot, {
   db,
