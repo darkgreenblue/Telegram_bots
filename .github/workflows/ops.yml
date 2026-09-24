@@ -12,7 +12,7 @@ on:
         description: 'چه کاری؟'
         required: true
         type: choice
-        options: [status, sys, logs, errors, restart, env-check, db-query, db-query-sealed, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, recover-dry, recover-send, announce-dry, announce-send]
+        options: [status, sys, logs, errors, restart, env-check, db-query, db-query-sealed, kill-query, exp, daypost, channel-overlap, channel-overlap-read, tunnel-url, recover-dry, recover-send, announce-dry, announce-send]
       app:
         description: 'نام اپ pm2 (برای logs/errors/restart/db-query) مثل tarot'
         required: false
@@ -72,6 +72,22 @@ jobs:
               else
                 ls -S data/*.db 2>/dev/null | head -1
               fi
+            }
+
+            # ⏱ سقفِ سختِ هر کوئری: db-query و db-query-sealed هر دو زیرِ `timeout -k 10 300`
+            # اجرا می‌شوند و این تابع خروجِ ناموفقشان را گزارش می‌کند.
+            # 🐛 باگِ واقعیِ ۳ مهر ۱۴۰۵: یک کوئریِ تحلیلیِ سنگین (CTEهایی که SQLite درون‌خطی
+            # کرد و برای هر ردیف یک اسکنِ کاملِ readings ساخت) به سقفِ ۱۰ دقیقه‌ی ssh-action
+            # خورد. جاب قرمز شد ولی **پروسه‌ی node روی سرور زنده ماند**: ssh-action فقط اتصال
+            # را می‌بندد، و پروسه‌ی بدونِ PTY با بسته‌شدنِ اتصال هیچ سیگنالی نمی‌گیرد. یعنی یک
+            # هسته‌ی CPU و یک snapshotِ خواندنی (که checkpointِ WAL را عقب نگه می‌دارد) روی
+            # دیتابیسِ رباتِ زنده، آن هم در ساعتِ اوج، برای مدتی نامعلوم. حالا خودِ پروسه
+            # زودتر از اتصال می‌میرد؛ جامانده‌های قبلی را اکشنِ kill-query برمی‌دارد.
+            query_failed() {
+              if [ "$1" = 124 ] || [ "$1" = 137 ]; then
+                echo "⏱ کوئری به سقفِ ۳۰۰ ثانیه خورد و متوقف شد. سقف را بالا نبر: EXPLAIN QUERY PLAN را روی یک دیتابیسِ هم‌شکل ببین؛ SCANِ یک جدولِ بزرگ داخلِ حلقه‌ی دیگر یعنی کوئری باید بازنویسی شود (مثلاً CTE با AS MATERIALIZED)."
+              fi
+              exit "$1"
             }
 
             case "$OPS_ACTION" in
@@ -143,7 +159,7 @@ jobs:
                 echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
                 ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
                 echo "===== db-query روی $OPS_APP/$DBFILE ====="
-                DBFILE="$DBFILE" node -e "
+                DBFILE="$DBFILE" timeout -k 10 300 node -e "
                   const path = require('path');
                   const D = require(path.join(process.cwd(), 'node_modules', 'better-sqlite3'));
                   const db = new D(process.env.DBFILE, { readonly: true, fileMustExist: true });
@@ -155,7 +171,7 @@ jobs:
                   } else {
                     console.log('کوئری خروجی‌ای برنمی‌گرداند (اتصال readonly است — هیچ تغییری اعمال نشد)');
                   }
-                "
+                " || query_failed $?
                 ;;
               db-query-sealed)
                 # 🔐 همان db-query، ولی خروجی قبل از چاپ رمز می‌شود. لاگِ این جاب وقتی
@@ -176,7 +192,7 @@ jobs:
                 echo "--- دیتابیس‌های موجود (بزرگ‌ترین اول) ---"
                 ls -Sla data/*.db 2>/dev/null | awk '{print "    " $NF "  " $5 " بایت"}'
                 echo "===== db-query-sealed روی $OPS_APP/$DBFILE ====="
-                DBFILE="$DBFILE" node -e "
+                DBFILE="$DBFILE" timeout -k 10 300 node -e "
                   const path = require('path'), crypto = require('crypto'), zlib = require('zlib');
                   const pub = crypto.createPublicKey({ key: Buffer.from(process.env.OPS_PUBKEY, 'base64'), format: 'der', type: 'spki' });
                   if (pub.asymmetricKeyType === 'rsa' && pub.asymmetricKeyDetails.modulusLength >= 3072) {} else { console.log('❌ کلیدِ عمومی باید RSA با دست‌کم ۳۰۷۲ بیت باشد'); process.exit(1); }
@@ -196,7 +212,43 @@ jobs:
                   console.log('-----BEGIN OPS SEALED-----');
                   for (let i = 0; i < blob.length; i += 3000) console.log(blob.slice(i, i + 3000));
                   console.log('-----END OPS SEALED-----');
-                "
+                " || query_failed $?
+                ;;
+              kill-query)
+                # 🧹 پروسه‌های جامانده‌ی db-query/db-query-sealed را پیدا می‌کند و فقط همان‌ها
+                # را می‌کشد (همان جامانده‌ای که باگِ query_failed در بالا توضیح می‌دهد).
+                # انتخاب عمداً با **محیطِ** پروسه است نه cmdline: cmdlineِ خودِ همین شلِ Ops
+                # کلِ اسکریپت را دارد (هر pkill -f روی آن خودش را هم می‌زند)، و رباتِ زنده
+                # هرگز OPS_ACTION=db-query در محیطش ندارد، چون این دو شاخه هیچ‌وقت pm2 را
+                # صدا نمی‌زنند. لایه‌ی دوم: پروسه‌ای که pm_id دارد (یعنی زیرِ pm2 است) در هیچ
+                # حالتی لمس نمی‌شود. هیچ ورودی‌ای نمی‌گیرد، پس سطحِ تزریق ندارد.
+                # ⚠️ همه‌جا `if` صریح، نه `… && …`: زیرِ set -e یک AND-listِ ناموفق در
+                # آخرِ حلقه کلِ اسکریپت را وسطِ کار می‌بندد.
+                PIDS=""
+                for pid in $(pgrep -x node 2>/dev/null || true); do
+                  if [ ! -r "/proc/$pid/environ" ]; then continue; fi
+                  ENVS=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null || true)
+                  if printf '%s\n' "$ENVS" | grep -q '^pm_id='; then continue; fi
+                  if printf '%s\n' "$ENVS" | grep -qxE 'OPS_ACTION=db-query(-sealed)?'; then PIDS="$PIDS $pid"; fi
+                done
+                if [ -z "$PIDS" ]; then
+                  echo "✅ هیچ کوئریِ جامانده‌ای روی سرور نیست"
+                else
+                  echo "🧹 کوئری‌های جامانده (ELAPSED = چقدر است که می‌دوند):"
+                  ps -o pid,etime,pcpu,rss,comm -p "$(echo $PIDS | tr ' ' ',')" || true
+                  echo "loadavg قبل: $(cat /proc/loadavg)"
+                  kill $PIDS 2>/dev/null || true
+                  sleep 3
+                  LEFT=""
+                  for pid in $PIDS; do
+                    if kill -0 "$pid" 2>/dev/null; then LEFT="$LEFT $pid"; fi
+                  done
+                  if [ -n "$LEFT" ]; then
+                    echo "⚠️ با SIGTERM نمرد، SIGKILL:$LEFT"
+                    kill -9 $LEFT 2>/dev/null || true
+                  fi
+                  echo "✅ متوقف شد:$PIDS"
+                fi
                 ;;
               exp)
                 # 🧪 کنترلِ آزمایشِ A/B بدونِ داشبورد (تنها نقطه‌ی **نوشتنِ** Ops).
