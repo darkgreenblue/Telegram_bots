@@ -1412,6 +1412,88 @@
    "lowSample": false,
    "decision": "control برنده. «عشق و رابطه» در جایگاه ۳ ماند. stopped شد (بدونِ دیپلوی، چون برنده = رفتارِ فعلی).",
    "insight": "فرضیه نصفه درست بود: جایگاه ~۲٫۲ برابر می‌کند (پس نگرانیِ گزارشِ ۴ شهریور درست بود) ولی موضوع هم مستقلاً مهم است — «بازگشت اکس» حتی در بهترین جایگاه ۳۲٫۷٪ می‌گیرد در برابرِ ۵۸٫۹٪ عشق. 📌 تقاضای تایپی با جذابیتِ دکمه یکی نیست: ۱۸٫۱٪ سؤال‌های آزاد درباره‌ی بازگشتِ اکس است ولی به‌عنوان دکمه ضعیف است."
+  },
+  {
+   "key": "reading_model_ds",
+   "status": "running (خوانشِ میانی، روزِ ۵؛ عمداً ادامه دارد به خواسته‌ی مالک)",
+   "period": "started_at 1789845024 (۱۴۰۵/۰۶/۲۸ ۲۲:۴۰ تهران) تا ۱۴۰۵/۰۷/۰۳ ۰۱:۴۳ تهران (~۵٫۱ روز)",
+   "primaryMetric": "payment_approved (rate)",
+   "control": {
+    "arm": "luna",
+    "exposed": 1704,
+    "payersPct": 2.17,
+    "firstTimePayersPct": 1.51,
+    "repeatPurchasePct": 25,
+    "revenuePerUserToman": 1297,
+    "satServed": 4.091,
+    "satAfterPayment": 4.251,
+    "ratedAfterPaymentPct": 71.6,
+    "waitBeyondFloorPct": 0.7,
+    "fallbackPct": 0,
+    "repairPct": 2.4,
+    "usdPerReading": 0.001882,
+    "usdPerUser": 0.002746,
+    "blindQuality34": 31.2
+   },
+   "variant": {
+    "key": "ds",
+    "arm": "deepseek-v4-flash + برشِ ریترای",
+    "exposed": 1726,
+    "payersPct": 3.19,
+    "firstTimePayersPct": 2.69,
+    "repeatPurchasePct": 19.2,
+    "revenuePerUserToman": 1689,
+    "satServed": 3.939,
+    "satAfterPayment": 3.9,
+    "ratedAfterPaymentPct": 60.7,
+    "waitBeyondFloorPct": 28.9,
+    "waitP90s": 20.1,
+    "fallbackPct": 15.2,
+    "repairPct": 8.1,
+    "usdPerReading": 0.000992,
+    "usdPerUser": 0.001588,
+    "blindQuality34": 20.3
+   },
+   "ctw": {
+    "payers": 96.7,
+    "firstTimePayers": 99.1,
+    "revenuePerUserPDsBetter": 83.5
+   },
+   "pValues": {
+    "firstTimePayers": 0.018,
+    "satServed": 0.0004,
+    "satAfterPayment": 0.0025,
+    "threePlusReadings": 0.012,
+    "stillActive": 0.005
+   },
+   "srmOk": true,
+   "srm": "chi2=0.141",
+   "guardrail": "❌ رضایت: −۰٫۱۵ ستاره per مدلِ سرو‌شده و −۰٫۳۵ بعد از پرداخت (معنادار)؛ refund ۵ رویداد/۴ کاربر در برابرِ ۰",
+   "decision": "ship نشد: متریکِ اصلی قبول ولی گاردریلِ رضایت رد. running ماند. تاریخِ تصمیم ~۱۵ روزِ کل (~۱۲ مهر). پیشنهادِ بعدی: کلیدِ جدا برای بازوی «دیپ‌سیک فقط فالِ رایگانِ اول».",
+   "savingsPer30d": {
+    "scenarioA_firstFreeOnly": {
+     "usd": 6.06,
+     "pctLLM": 15.8,
+     "pctLLMplusAds": 10.5,
+     "tomanPerMonth": 1400000
+    },
+    "scenarioB_allPrePayment": {
+     "usd": 16.54,
+     "pctLLM": 43.1,
+     "pctLLMplusAds": 28.7,
+     "tomanPerMonth": 3820000
+    },
+    "scenarioC_allText": {
+     "usd": 18.44,
+     "pctLLM": 48.1,
+     "pctLLMplusAds": 32,
+     "tomanPerMonth": 4260000
+    },
+    "base": "مدل $38.34، تبلیغ $19.29، سود ~۳٫۲ میلیون تومان در ماه"
+   },
+   "insight": "دیپ‌سیک ارزان‌تر و در این پنجره پرفروش‌تر است ولی فالِ بدتری می‌دهد؛ رضایتِ فالِ اول برابر و افت با تکرار و در کاربرِ پولی بزرگ می‌شود. در بازبینیِ کور نیمی از فال‌هایش ≤۲۰/۳۴ و بینِ وعده‌ی بی‌پشتوانه (۳۷٪) و قضاوتِ تحقیرآمیز (۶۰٪ کم‌نمره‌ها) نوسان دارد.",
+   "methodNote": "⚠️ نمره‌ی ستاره‌ای در سطحِ یک فال با کیفیتِ کور همبستگی ندارد (Spearman −۰٫۱۲، n=۶۳) و وعده را پاداش می‌دهد؛ آزمایشِ مدلِ بعدی بازبینیِ کورِ نمونه‌ی واقعی را کنارِ ستاره لازم دارد. متنِ نمونه فقط از db-query-sealed آمد.",
+   "report": "analytics/tarot/reports/2026-09-25-reading-model-ds.md"
   }
  ],
  "experimentQueue": [

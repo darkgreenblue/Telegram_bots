@@ -47,13 +47,21 @@ export function keygen(bits = 4096) {
  * لاگِ گیت‌هاب اولِ هر خط یک مهرِ زمان می‌گذارد و ssh-action ممکن است پیشوندِ خودش
  * را هم اضافه کند، پس از هر خطِ بینِ دو نشانگر فقط آخرین توکن برداشته می‌شود و از
  * آن هم فقط نویسه‌های base64. اگر نشانگرها نبودند یا بیش از یک بلوک بود، خطا می‌دهد:
- * حدس‌زدنِ بلوکِ درست روی دیتای کاربر جای حدس نیست. */
+ * حدس‌زدنِ بلوکِ درست روی دیتای کاربر جای حدس نیست.
+ *
+ * نشانگر فقط وقتی نشانگر است که **آخرِ خط** بنشیند و قبلش فقط مهرِ زمان یا فاصله باشد.
+ * 🐛 باگِ اولین اجرای واقعی (۳ مهر ۱۴۰۵): لاگِ گیت‌هاب خودِ اسکریپتِ مرحله را هم (دو بار)
+ * در سرِ مرحله چاپ می‌کند، و همان اسکریپت خطِ console.log با هر دو نشانگر را دارد. جستجوی
+ * «شامل بودن» آن خطِ کد را بلوک گرفت و بازکردن با «بیش از یک بلوک» شکست. لاگِ ساختگیِ
+ * چک فقط خروجی را داشت نه سرِ مرحله را، پس سبز بود. */
+const markerRe = (m) => new RegExp(`(^|\\s)${m}\\s*$`);
+const IS_BEGIN = markerRe(BEGIN), IS_END = markerRe(END);
 export function extract(text) {
   const lines = String(text).split(/\r?\n/);
-  const b = lines.findIndex((l) => l.includes(BEGIN));
-  const e = lines.findIndex((l, i) => i > b && l.includes(END));
+  const b = lines.findIndex((l) => IS_BEGIN.test(l));
+  const e = lines.findIndex((l, i) => i > b && IS_END.test(l));
   if (b < 0 || e < 0) throw new Error('نشانگرهای بلوکِ مهروموم‌شده پیدا نشد');
-  if (lines.slice(e + 1).some((l) => l.includes(BEGIN))) throw new Error('بیش از یک بلوک در لاگ هست');
+  if (lines.slice(e + 1).some((l) => IS_BEGIN.test(l))) throw new Error('بیش از یک بلوک در لاگ هست');
   return lines.slice(b + 1, e)
     .map((l) => (l.trim().split(/\s+/).pop() || '').replace(/[^A-Za-z0-9+/=]/g, ''))
     .join('');
