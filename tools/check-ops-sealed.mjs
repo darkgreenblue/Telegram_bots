@@ -123,15 +123,25 @@ ok(!gunzipOk, 'بلوب بدونِ کلید قابلِ gunzip نیست');
 let rt = null; try { rt = unseal(blob, priv); } catch (e) { console.log('    ' + e.message); }
 ok(Array.isArray(rt) && rt.length === direct.length && JSON.stringify(rt) === JSON.stringify(direct),
   '⭐ بازکردن با کلیدِ درست دقیقاً همان ردیف‌ها را پس می‌دهد (۱۵۰۱ ردیف، چندخطیِ ۳۰۰۰ نویسه‌ای)');
-/* لاگِ واقعیِ گیت‌هاب اولِ هر خط مهرِ زمان دارد. */
-const ghLog = h.out.split('\n').map((l, i) => `2026-09-24T21:30:${String(i % 60).padStart(2, '0')}.1234567Z ${l}`).join('\n');
-let rt2 = null; try { rt2 = unseal(extract(ghLog), priv); } catch { /* ادعای بعدی */ }
-ok(JSON.stringify(rt2) === JSON.stringify(direct), 'از لاگِ خامِ گیت‌هاب (با مهرِ زمان اولِ هر خط) هم باز می‌شود');
+/* لاگِ واقعیِ گیت‌هاب: اولِ هر خط مهرِ زمان، و قبل از خروجی **خودِ اسکریپتِ مرحله، دو
+ * بار** (سرِ مرحله). آن اسکریپت خطِ console.log با هر دو نشانگر را دارد.
+ * 🐛 اولین اجرای واقعی دقیقاً همین‌جا شکست («بیش از یک بلوک»)، چون نسخه‌ی قبلیِ این
+ * لاگِ ساختگی فقط خروجی را داشت: فیکسچر همان چیزی را می‌سنجید که نویسنده فکر می‌کرد
+ * اتفاق می‌افتد، نه چیزی که گیت‌هاب واقعاً چاپ می‌کند. */
+const stamp = (s) => s.split('\n').map((l, i) => `2026-09-24T21:30:${String(i % 60).padStart(2, '0')}.1234567Z ${l}`).join('\n');
+const echo = WF.split('\n').map((l) => `  ${l}`).join('\n');
+const ghLog = stamp(`${echo}\n${echo}\n${h.out}`);
+ok((ghLog.match(/console\.log\('-----BEGIN OPS SEALED-----'\)/g) || []).length === 2,
+  'لاگِ ساختگی مثلِ لاگِ واقعی خطِ کدِ نشانگر را (دو بار، در اسکریپتِ سرِ مرحله) دارد');
+let rt2 = null; try { rt2 = unseal(extract(ghLog), priv); } catch (e) { console.log('    ' + e.message); }
+ok(JSON.stringify(rt2) === JSON.stringify(direct), '⭐ از لاگِ خامِ گیت‌هاب (مهرِ زمان + اسکریپتِ مرحله دو بار) هم باز می‌شود');
 
 /* رمز باید واقعاً تصادفی باشد: کلید یا ivِ ثابت یعنی «رمز» فقط اسمش رمز است. */
 const h2 = run({ query: 'SELECT id, q, j FROM r ORDER BY id', pubkey: pub });
 let blob2 = ''; try { blob2 = extract(h2.out); } catch { /* ادعای بعدی */ }
 ok(blob2 && blob2 !== blob && blob2.slice(-200) !== blob.slice(-200), 'دو اجرای یک کوئری دو بلوبِ متفاوت می‌دهند (کلید و ivِ تصادفی)');
+let two = false; try { extract(stamp(`${echo}\n${h.out}\n${h2.out}`)); two = true; } catch { /* درست */ }
+ok(!two, 'دو بلوکِ واقعی در یک لاگ رد می‌شود (بلوکِ درست جای حدس نیست)');
 {
   const b = Buffer.from(blob, 'base64'); const n = b.readUInt16BE(3);
   const iv = b.subarray(5 + n, 17 + n), tag = b.subarray(17 + n, 33 + n), ct = b.subarray(33 + n);
