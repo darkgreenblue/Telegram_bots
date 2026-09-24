@@ -357,7 +357,10 @@ console.log('\n▶ نقشه‌ی راه و کپشنِ ترتیبی');
   ok(sr.indexOf('flowIntro') > 0 && sr.indexOf('flowIntro') < sr.indexOf('waitLLMWithLoading'),
     'نقشه‌ی راه قبل از پیام‌های انتظار می‌آید');
   ok(/revealCaptionV4:/.test(LOC), 'کپشنِ ترتیبیِ v4 وجود دارد');
-  ok(/v4For\(uid\)\s*\?\s*L\.reading\.revealCaptionV4/.test(SRC),
+  // از v3.114.0 شاخه‌ی v4 یک بار **قبل از** ارسال‌ها حساب می‌شود (`const v4 = v4For(uid)`)
+  // تا بلوکِ try/catchِ رول‌بک یک شرطِ واحد را ببیند؛ کپشن از همان ثابت شاخه می‌گیرد.
+  const rnx = SRC.slice(SRC.indexOf('async function revealNext'), SRC.indexOf("bot.action(/^next:"));
+  ok(/const v4 = v4For\(uid\);/.test(rnx) && /\bv4\s*\?\s*L\.reading\.revealCaptionV4/.test(rnx),
     'کپشنِ عکس در v4 برچسبِ ترتیبی می‌گیرد، نه نامِ جایگاه');
 }
 
@@ -378,8 +381,14 @@ console.log('\n▶ دکمه‌ی کارتِ آخر (v3.5.2)');
     'تپِ دوم تا وقتی تحویل واقعاً در جریان است بی‌اثر می‌ماند');
   ok(/patchSession\(uid, \{ finalDone: false, finalAttemptAt: 0 \}\)/.test(h),
     'شکستِ ارسال، قفل را باز می‌کند تا فال با اقدامِ بعدی کاربر ادامه یابد');
-  ok(/L\.reading\.openReadingGuard/.test(h) && /final:\$\{readingId\}/.test(h),
+  ok(/L\.reading\.deliverGuard/.test(h) && /final:\$\{readingId\}/.test(h),
     'پس از خطای ارسال، دکمه‌ی ادامه‌ی همان پاسخ نهایی دوباره نمایش داده می‌شود');
+  // v3.114.0: اگر خطا از **دُمِ** finishReading آمده (بعد از delivered)، کاربر جوابش را
+  // گرفته و گارد + دکمه‌ای که دیگر هیچ کاری نمی‌کند خودش بن‌بست می‌ساخت.
+  const hc = h.slice(h.indexOf('} catch (e) {'), h.indexOf('\n});'));
+  const iSt = hc.indexOf("?.status !== 'started') return;"), iUn = hc.indexOf('finalDone: false');
+  ok(iSt > 0 && iUn > 0 && iSt < iUn,
+    'catchِ final: اول وضعیتِ رکورد را می‌خواند؛ فالِ تحویل‌شده گارد و دکمه‌ی مرده نمی‌گیرد');
 }
 
 console.log('\n▶ فشرده‌سازیِ چیدمانِ بزرگ');
