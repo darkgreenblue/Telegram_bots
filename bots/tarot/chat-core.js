@@ -219,7 +219,7 @@ export function packHistory(rows = [], { recent = CHAT_RECENT_TURNS, digestChars
   let turns = tail.map(r => ({
     role: r.role === 'assistant' ? 'assistant' : 'user',
     content: r.role === 'assistant'
-      ? chatEnvelope(cut(r.text, CHAT_BUDGET.ask), {
+      ? replayEnvelope(cut(r.text, CHAT_BUDGET.ask), {
         newReading: !!r.want_reading, support: !!r.want_support,
         // ⚠️ برچسبِ سؤالِ پیشنهادیِ نوبت‌های قبل هم **واقعی** بازپخش می‌شود، به همان
         // دلیلِ پرچم‌ها: تاریخچه‌ای که همیشه خالی باشد به مدل یاد می‌دهد دکمه نسازد،
@@ -234,6 +234,21 @@ export function packHistory(rows = [], { recent = CHAT_RECENT_TURNS, digestChars
   let spent = turns.reduce((s, t) => s + t.content.length, 0);
   while (turns.length && spent > room) { spent -= turns[0].content.length; turns = turns.slice(1); }
   return { digest, turns };
+}
+
+/* 🔁 بازپخشِ یک جوابِ ذخیره‌شده **در همان شکلی که از مدل خواسته شده**: متنِ ذخیره‌شده
+ * حاصلِ `finalizeChatOut` است (پیشنهاد خطِ آخرش)، پس خطِ آخر اگر پیشنهاد باشد به فیلدِ
+ * `offer` برمی‌گردد. بدونِ این، تاریخچه نشان می‌داد پیشنهاد داخلِ `answer` است و `offer`
+ * خالی — یعنی همان تقلیدِ فرمتِ غلطی که v3.90.0 یک بار ریفاندِ ۲ نوبت از ۹ را ساخت. */
+function replayEnvelope(text, flags = {}) {
+  const t = String(text || '');
+  const ls = t.split('\n');
+  let k = ls.length - 1;
+  while (k >= 0 && !ls[k].trim()) k--;
+  if (k >= 1 && offerLineOk(ls[k])) {
+    return chatEnvelope(ls.slice(0, k).join('\n').trim(), { ...flags, offer: ls[k].trim() });
+  }
+  return chatEnvelope(t, flags);
 }
 
 /* ═══ ساختِ آرایه‌ی نقش‌ها ═══
@@ -261,10 +276,19 @@ export const messagesChars = (msgs = []) => msgs.reduce((s, m) => s + String(m?.
  * بقیه‌ی زبان‌ها از `configureChatLang` پر می‌شوند — همان الگوی `defects[]` در repair.js.
  * ⚠️ زبانِ بی‌الگو **رفتارِ محافظه‌کارانه** می‌گیرد: گاردِ بحران خالی نمی‌ماند، چون
  * `CHAT_LOCALES` اجازه‌ی فعال شدنِ آن زبان را از اول نمی‌دهد. */
+/* 🛟 فهرستِ بحران = فقط حرفِ **صریحِ** خودکشی و آسیب به خود (تصمیمِ صریحِ مالک،
+ * ۱۴۰۵/۰۷/۰۲). عبارت‌های دوپهلو مثلِ «دیگه نمی‌کشم» یا «می‌خوام همه‌چی تموم شه» عمداً
+ * **نیستند**: مالک خواست این‌ها مثلِ ناراحتیِ معمولی جواب بگیرند، بدونِ هیچ حرفی از
+ * آسیب و اورژانس.
+ * 🐛 تا این نسخه `'بکشم'` هم این‌جا بود و روی **هر** «…بکشم» شلیک می‌کرد: «چطور نفس
+ * بکشم که آروم بشم؟» (برچسبِ دکمه‌ای که خودِ مدل در دورِ آزمایشگاه ساخت) پیامِ ثابتِ
+ * بحران با شماره‌ی ۱۲۳ را می‌گرفت. جایش شکل‌های صریحِ «خودم را بکشم» نشست. */
 const FA_CRISIS = [
-  'خودکشی', 'خودکُشی', 'خود کشی', 'بکشم', 'می‌کشم خودم', 'میکشم خودم',
+  'خودکشی', 'خودکُشی', 'خود کشی', 'خودمو بکشم', 'خودم رو بکشم', 'خودم را بکشم',
+  'بکشم خودمو', 'بکشم خودم', 'می‌کشم خودم', 'میکشم خودم', 'خودمو می‌کشم', 'خودمو میکشم',
   'به زندگیم پایان', 'تموم کنم زندگی', 'تمومش کنم زندگی', 'نمی‌خوام زنده',
   'نمیخوام زنده', 'دیگه نمی‌خوام باشم', 'رگم را', 'رگمو', 'قرص بخورم و بمیرم',
+  'می‌خوام بمیرم', 'میخوام بمیرم', 'به خودم آسیب', 'به خودم صدمه', 'خودزنی',
 ];
 /* 🛟 «حرفِ خطر» در **جوابِ مدل** (نه در پیامِ کاربر). تصمیمِ صریحِ مالک (۱۴۰۵/۰۷/۰۲):
  * به کسی که فقط کمی حالش بد است نباید جمله‌ی «اگه فکرِ آسیب‌زدن به خودت داری…» یا
@@ -273,11 +297,34 @@ const FA_CRISIS = [
  * داشت، بی‌آنکه کاربر هیچ نشانه‌ی خطری داده باشد.
  * این فهرست عمداً فقط **زبانِ خطر** را می‌گیرد (آسیب به خود، خودکشی، اورژانس)، نه
  * واژه‌های معمولیِ دلداری («آدمِ امن»، «نفس بکش»)، که برای حالِ بد مشروع‌اند. */
+/* ⚠️ این فهرست **در پروداکشن هم** اجرا می‌شود (`stripSafetyTalk` جمله‌اش را حذف
+ * می‌کند)، پس فقط واژه‌هایی می‌آیند که در جوابِ یک فالگیر هیچ معنیِ دیگری ندارند.
+ * «فوریت» عمداً بیرون ماند: «این تصمیم فوریت داره» یک جمله‌ی سالم است. */
 const FA_SAFETY_TALK = [
   'آسیب به خود', 'آسیب زدن به خود', 'آسیبزدن به خود', 'به خودت آسیب', 'به خودت صدمه',
-  'صدمه زدن به خود', 'خودکشی', 'خودکُشی', 'اورژانس', 'فوریت', 'خط بحران',
-  'به خودت اسیب', 'نمی‌تونی امن', 'نمیتونی امن',
+  'صدمه زدن به خود', 'خودکشی', 'خودکُشی', 'اورژانس', 'خط بحران',
+  'به خودت اسیب', 'نمی‌تونی امن', 'نمیتونی امن', 'وسایل خطرناک', 'قصد آسیب',
+  'در امان هستی', 'در امانی',
 ];
+/* 🎁 شکلِ «پیشنهاد» در خطِ آخر. **تک‌منبع** برای گاردِ ربات و سنجه‌ی آزمایشگاه
+ * (`tools/reading-lab/lang/fa.mjs` همین را صادر می‌کند). تاریخچه، پیکره‌ی دوجهته و دلیلِ
+ * تک‌تکِ قیدها کنارِ پیکره در همان فایل ثبت است؛ این‌جا فقط خودِ الگوست.
+ * ⚠️ `\b` در JS روی حروفِ فارسی کار نمی‌کند، پس مرزِ کلمه دستی ساخته شده. */
+const FA_L = 'آ-یٔ\\u200c';
+const FA_W0 = `(?<![${FA_L}])`;
+const FA_W1 = `(?![${FA_L}])`;
+export const FA_OFFER = Object.freeze({
+  ask: /می[‌\s]?خوای(?![آ-یٔ])/,
+  mine: new RegExp(
+    `${FA_W0}(?:` +
+      `ب(?!هم${FA_W1})\\S*?(?:یم|م)${FA_W1}` +
+      `|ن?می[\\u200c\\s]?\\S*?(?:یم|م)${FA_W1}` +
+      `|کنی?م${FA_W1}` +
+      `|(?:بدونی|بدانی|ببینی|بشنوی)${FA_W1}` +
+    `)`,
+  ),
+  can: /(?:بخوای|بخواهی)[،,]?\s+می[‌\s]?ت(?:و|وا)نم/,
+});
 const FA_SMALLTALK = [
   'سلام', 'سلام!', 'درود', 'مرسی', 'ممنون', 'ممنونم', 'مرسی!', 'ممنون!',
   'دمت گرم', 'خداحافظ', 'بای', 'فعلا', 'فعلاً', 'باشه', 'اوکی', 'ok', 'اوک',
@@ -321,7 +368,7 @@ const FA_FU_ASSENT = [
 
 const FA_LANG = {
   crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
-  followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT,
+  followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, offer: FA_OFFER,
 };
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
  * چندزبانه اجازه ندارد الگوهای یک زبان را روی پیامِ زبانِ دیگر اجرا کند. */
@@ -338,6 +385,9 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
     chatbait:  arr(d.chatbait, base.chatbait),
     followUpMeta:   arr(d.followUpMeta, base.followUpMeta),
     followUpAssent: arr(d.followUpAssent, base.followUpAssent),
+    // الگوی پیشنهاد per زبان. زبانِ بی‌الگو `null` می‌گیرد، نه الگوی فارسی: الگوی فارسی
+    // روی متنِ زبانِ دیگر همیشه «پیشنهاد نیست» می‌گوید و هر نوبت یک retryِ بی‌دلیل می‌ساخت.
+    offer: (d.offer && d.offer.ask && d.offer.mine && d.offer.can) ? d.offer : (lang === 'fa' ? base.offer : null),
   });
 }
 export const chatLang = () => ({ ...LANG_T.get() });
@@ -369,6 +419,47 @@ export function safetyTalkIn(text) {
   for (const p of (LANG.safetyTalk || [])) { const n = norm(p); if (n && t.includes(n)) return p; }
   return '';
 }
+
+/* ✂️ حذفِ «حرفِ خطر» از جوابِ مدل، **جمله‌به‌جمله** (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۷/۰۲).
+ *
+ * چرا کد و نه فقط پرامپت: دورِ خطِ پایه‌ی آزمایشگاه روی پرسونای «کمی حالم بده»
+ * (C6، سه پاس) در **۲۲ از ۵۷** جواب حرفِ آسیب/اورژانس زد، با اینکه هیچ نشانه‌ی خطری در
+ * پیامِ کاربر نبود. قاعده‌ی پرامپت شانس را کم می‌کند، ولی تضمین فقط از کد می‌آید.
+ *
+ * ⚠️ واحدِ حذف **جمله/بند** است نه کلِ جواب: بقیه‌ی جواب (دلداری، قدمِ عملی) درست و
+ * پول‌داده است. جداکننده‌ها `.!؟?؛` و خطِ جدید؛ «؛» عمداً جداکننده است چون مدل حرفِ خطر
+ * را معمولاً بعد از «؛» به یک بندِ سالم می‌چسباند. بندی که با «؛» یا «،» تمام شده بود و
+ * بعدش حذف شد، با نقطه بسته می‌شود تا جمله نیمه‌کاره نماند.
+ * صداکننده تصمیم می‌گیرد کِی اجرا شود: فقط وقتی کاربر خودش هیچ نشانه‌ی **صریحِ** خطری
+ * نداده (`crisisIn` روی پیام‌هایش خالی است). */
+export function stripSafetyTalk(text) {
+  const src = String(text || '');
+  let removed = 0;
+  const out = [];
+  for (const line of src.split('\n')) {
+    const segs = line.match(/[^.!؟?؛]+[.!؟?؛]*\s*/g) || [];
+    const kept = segs.filter((s) => { if (safetyTalkIn(s)) { removed++; return false; } return true; });
+    const l = kept.join('').trim().replace(/[؛،,]\s*$/, '.');
+    if (l) out.push(l);
+  }
+  return { text: removed ? out.join('\n') : src, removed };
+}
+
+/** آیا این یک خط **پیشنهاد** است («می‌خوای … کنم؟» / «اگه بخوای می‌تونم …»)؟ */
+export function offerLineOk(line) {
+  const o = LANG.offer;
+  const t = String(line || '').trim();
+  if (!t) return false;
+  /* زبانِ بدونِ الگو قضاوت نمی‌شود: هر خطِ ناخالی پذیرفته است. وگرنه `chatFixNeeds`
+   * برای آن زبان **همیشه** تعمیر می‌خواست (یک فراخوانیِ اضافه در هر نوبت) و پیشنهادِ
+   * درستِ مدل هرگز خطِ آخر نمی‌شد. امروز بی‌اثر است چون `CHAT_LOCALES = ['fa']`. */
+  if (!o) return true;
+  return (o.ask.test(t) && o.mine.test(t)) || o.can.test(t);
+}
+const lastLineOf = (text) => {
+  const ls = String(text || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  return ls.length ? ls[ls.length - 1] : '';
+};
 
 /* ⚠️ `smallTalkIn` عمداً **تنگ** است: کلِ پیام (بعد از نرمال‌سازی) باید خودش یکی از
  * الگوها باشد، نه اینکه شاملش باشد. یعنی «مرسی» رایگان است ولی «مرسی، ولی کارتِ دوم
@@ -491,10 +582,25 @@ export function cleanChatReply(text, { name = '' } = {}) {
  *   • `wants_end`: مدل تشخیص می‌دهد کاربر می‌خواهد گفتگو را تمام کند.
  * برچسبِ خرابِ دکمه ⟵ رشته‌ی خالی ⟵ دکمه ساخته نمی‌شود. هیچ‌کدام `null` برنمی‌گردانند،
  * وگرنه یک برچسبِ بلند کلِ جوابِ پول‌داده را به retry می‌برد. */
+/* v3.114.0 — کلیدِ `offer`: **پیشنهادِ پایانی** در فیلدِ خودش، نه داخلِ `answer`.
+ *
+ * 🐛 چرا (دیتای ترنسکریپتِ واقعیِ مالک + دورِ خطِ پایه‌ی آزمایشگاه): وقتی پیشنهاد فقط
+ * یک «قاعده‌ی متنی» داخلِ `answer` بود، ۶ از ۱۳ جوابِ واقعیِ مالک و ۱۵ از ۵۷ جوابِ
+ * آزمایشگاه بی‌پیشنهاد تمام شدند — و بدترینشان **جوابِ اولِ رایگان**، همان پیامی که
+ * باید کاربر را به سؤالِ دوم (پولی) ببرد. فیلدِ جدا سه چیز می‌دهد که قاعده نمی‌داد:
+ *   ۱) مدل آن را **ساختاری** پر می‌کند (کلیدِ خالی دیده می‌شود، قاعده‌ی فراموش‌شده نه)،
+ *   ۲) کد می‌تواند وجودش را بسنجد و فقط همان را **تعمیر** کند،
+ *   ۳) کنارِ `follow_up` می‌نشیند، پس «پیشنهادِ تو» و «سؤالِ او روی دکمه» دو روی یک
+ *      سکه می‌شوند (خواسته‌ی مالک: ادبیاتِ پیشنهاد همان پیشنهادِ دکمه باشد).
+ * ⚠️ کلیدِ **دوم** است، بلافاصله بعد از `answer`: اگر خروجی بریده شود، پرچم‌ها از دست
+ * می‌روند نه پیشنهاد و جواب. کد خودش آن را خطِ آخرِ متن می‌گذارد (`finalizeChatOut`). */
 export const CHAT_OUT_KEYS = Object.freeze({
-  text: 'answer', reading: 'wants_new_reading', support: 'needs_support',
+  text: 'answer', offer: 'offer', reading: 'wants_new_reading', support: 'needs_support',
   followUp: 'follow_up', end: 'wants_end',
 });
+/* سقفِ خطِ پیشنهاد. بیشتر از آن یعنی مدل یک پاراگراف را در این فیلد ریخته؛ آن‌وقت
+ * پیشنهاد نیست و نادیده گرفته می‌شود (مسیرِ تعمیر می‌گیردش). */
+export const CHAT_OFFER_MAX = 220;
 /* سقفِ برچسبِ دکمه. عمداً **بریده نمی‌شود**: سؤالِ نصفه روی دکمه بی‌معناست و کاربر
  * نمی‌داند با تپش چه می‌پرسد. از سقف ردشد ⟵ دکمه نمی‌آید (رفتارِ دیروز). */
 export const CHAT_FOLLOWUP_MAX = 60;
@@ -515,8 +621,9 @@ export const CHAT_FOLLOWUP_MAX = 60;
  *
  * پرچم‌ها **واقعی** بازپخش می‌شوند (از ستون‌های `chat_messages`)، نه همیشه `false`:
  * تاریخچه‌ای که همه‌ی پرچم‌هایش خاموش باشد خودش به مدل یاد می‌دهد پرچم نزند. */
-export const chatEnvelope = (text, { newReading = false, support = false, followUp = '', end = false } = {}) => JSON.stringify({
+export const chatEnvelope = (text, { newReading = false, support = false, followUp = '', end = false, offer = '' } = {}) => JSON.stringify({
   [CHAT_OUT_KEYS.text]: String(text ?? ''),
+  [CHAT_OUT_KEYS.offer]: String(offer ?? ''),
   [CHAT_OUT_KEYS.reading]: !!newReading,
   [CHAT_OUT_KEYS.support]: !!support,
   [CHAT_OUT_KEYS.followUp]: String(followUp ?? ''),
@@ -596,8 +703,13 @@ export function parseChatOut(raw) {
   // `followUp` می‌خواند و آزمایشگاه از `followUpRaw` + `fuBad` (بالا توضیح داده شده).
   const fuRaw = cleanFollowUp(o[CHAT_OUT_KEYS.followUp], { guard: false });
   const fuBad = fuRaw ? followUpBad(fuRaw) : '';
+  // پیشنهاد: یک خط، بدونِ گیومه‌ی دورگیر. خالی یا بلندتر از سقف ⟵ «پیشنهادی نداد».
+  let offer = noDash(String(o[CHAT_OUT_KEYS.offer] ?? '')).replace(/\s+/g, ' ').trim()
+    .replace(/^["'«“]+/, '').replace(/["'»”]+$/, '').trim();
+  if (offer.length > CHAT_OFFER_MAX) offer = '';
   return {
     text,
+    offer,
     newReading: truthy(o[CHAT_OUT_KEYS.reading]),
     support: truthy(o[CHAT_OUT_KEYS.support]),
     followUp: fuBad ? '' : fuRaw,
@@ -665,8 +777,87 @@ export const chatEnvelopeOk = (out) => !!parseChatOut(out);
  * را ریفاند نمی‌کند و همان اندازه‌گیری‌ای است که برنامه‌ی مالک («یه مدت اجرا می‌کنیم
  * و هی بهبود می‌دهیم») بدونش کور است. */
 
-/** شرطِ پذیرشِ نسلِ پاکت. **تنها** مسیرِ retry همین است: پاکتِ خرابِ JSON. */
+/** شرطِ پذیرشِ نسلِ پاکت. **تنها** مسیرِ retryِ زنجیره همین است: پاکتِ خرابِ JSON.
+ *  کمبودِ پیشنهاد یا حرفِ خطر عمداً این‌جا **نیست**: ردِ آن‌ها در این نقطه یعنی رفتن به
+ *  جمنای/دیپ‌سیک (که پیشنهاد را بدتر رعایت می‌کنند) و در بدترین حالت ریفاند. جایشان
+ *  **یک** تعمیرِ هدف‌دار بعد از پذیرش است (`chatFixNeeds`). */
 export const chatOutOk = (out) => !!parseChatOut(out);
+
+/* ═══ 🧩 سیستم‌پرامپتِ کاملِ گفتگو (تک‌منبعِ ربات و آزمایشگاه) ═══
+ *
+ * [پرامپتِ ثابت] + [کانتکستِ همین فال] + [یادآوریِ فرمت]. هر سه per فال ثابت‌اند، پس کلِ
+ * بلوک همچنان پیشوندِ **کش‌شونده** است و شرطِ اقتصادیِ v3.84.0 نمی‌شکند.
+ *
+ * 🐛 چرا یادآوری **بعد از** کانتکست: در دورِ خطِ پایه `luna` بارها به‌جای JSON متنِ
+ * خام داد («امروز لازم نیست تکلیف رابطه رو روشن کنی…»)، به‌خصوص در **نوبتِ اول** که هیچ
+ * تاریخچه‌ی JSONی برای تقلید ندارد. دستورِ فرمت وسطِ یک پرامپتِ ۶۰۰۰ نویسه‌ای است و بعدش
+ * ۳۰۰۰ نویسه متنِ فارسیِ فال می‌آید؛ آخرین چیزی که مدل می‌بیند نثر است و نثر می‌نویسد.
+ * نتیجه در پروداکشن: جوابِ اولِ رایگانِ مالک از پله‌ی **فالبک** (جمنای) آمد و پیشنهاد نداشت. */
+export function chatSystemPrompt(sysText, ctxBlock, L = null) {
+  const tail = L?.prompts?.chatFormatTail || '';
+  return tail ? `${sysText}\n\n${ctxBlock}\n\n${tail}` : `${sysText}\n\n${ctxBlock}`;
+}
+
+/* ═══ 🎁🛟 تعمیرِ هدف‌دارِ بعد از پذیرش ═══
+ *
+ * سه کمبود، هر سه با **یک** فراخوانیِ دوباره روی مدلِ اصلی (نه زنجیره‌ی فالبک):
+ *   • `thin`   — زیرِ کفِ محتوا (مکانیزمِ v3.100.0، دست‌نخورده)
+ *   • `offer`  — پیشنهادِ پایانی ندارد (نه در فیلدش، نه در خطِ آخرِ متن)
+ *   • `safety` — حرفِ آسیب/اورژانس بدونِ هیچ نشانه‌ی صریحِ خطر از خودِ کاربر
+ * صداکننده `crisisCtx` را از پیام‌های **خودِ کاربر** می‌سازد (`crisisIn`)؛ اگر کاربر
+ * صریحاً از خودکشی یا آسیب گفته، حرفِ ایمنی مجاز است و دست نمی‌خورد. */
+export function chatFixNeeds(out, { crisisCtx = false } = {}) {
+  if (!out) return { offer: false, safety: false };
+  const offer = !out.end && !offerLineOk(out.offer) && !offerLineOk(lastLineOf(out.text));
+  const safety = !crisisCtx && !!safetyTalkIn(`${out.text || ''}\n${out.offer || ''}`);
+  return { offer, safety };
+}
+/** وزنِ کمبودها — تعمیر فقط وقتی پذیرفته می‌شود که **اکیداً** کمتر باشد.
+ * `thin` وزنِ ۲ دارد چون پیامدش پولی است (ریفاندِ الماس)؛ پس جوابِ پُرِ بی‌پیشنهاد از
+ * جوابِ توخالیِ پیشنهاددار بهتر شمرده می‌شود، همان رفتارِ v3.100.0. */
+export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.safety ? 1 : 0) + (thin ? 2 : 0);
+
+/* ═══ 🧾 متنِ نهاییِ جواب (تک‌منبعِ ربات و آزمایشگاه) ═══
+ *
+ * ۱) حرفِ خطر، اگر کاربر نشانه‌ی صریحی نداده، جمله‌به‌جمله حذف می‌شود (هم از متن هم از
+ *    پیشنهاد). این **آخرین** تور است، بعد از قاعده‌ی پرامپت و بعد از تعمیر.
+ * ۲) بدنه از `cleanChatReply` رد می‌شود (پاراگراف‌بندی، خط تیره، نامِ نشتی).
+ * ۳) پیشنهاد خطِ آخر می‌شود. اگر مدل **هم** در متن **هم** در فیلد پیشنهاد گذاشته بود،
+ *    فقط یکی می‌ماند (مالِ فیلد، چون کنارِ `follow_up` ساخته شده). اگر فیلد خالی بود ولی
+ *    خطِ آخرِ متن خودش پیشنهاد بود، همان می‌ماند.
+ * ⚠️ نوبتِ `wants_end` پیشنهاد نمی‌گیرد: کاربر خداحافظی کرده و نگه‌داشتنش همان
+ * «جمع نکن و خداحافظی نکن» را از جهتِ مخالف نقض می‌کند. */
+export function finalizeChatOut(out, { name = '', crisisCtx = false } = {}) {
+  let body = String(out?.text || '');
+  let offer = String(out?.offer || '');
+  let safetyStripped = 0;
+  if (!crisisCtx) {
+    const b = stripSafetyTalk(body);
+    body = b.text; safetyStripped += b.removed;
+    if (safetyTalkIn(offer)) { offer = ''; safetyStripped++; }
+  }
+  const offerOk = !out?.end && offerLineOk(offer);
+  if (offerOk) {
+    // پیشنهادِ تکراری داخلِ متن ⟵ حذف؛ پیشنهاد فقط یک بار، و همیشه خطِ آخر.
+    const ls = body.split('\n');
+    let k = ls.length - 1;
+    while (k >= 0 && !ls[k].trim()) k--;
+    // فقط با الگوی واقعی؛ بدونِ الگو هر خطی «پیشنهاد» حساب می‌شد و خطِ آخرِ جواب می‌پرید.
+    if (LANG.offer && k >= 1 && offerLineOk(ls[k])) body = ls.slice(0, k).join('\n');
+  }
+  let reply = cleanChatReply(body, { name });
+  // ⚠️ بدنه‌ای که کلش حرفِ خطر بود و حذف شد، خالی می‌ماند. پیشنهادِ تنها جواب نیست؛
+  // `reply` خالی برمی‌گردد و صداکننده آن را مثلِ شکستِ مدل (ریفاند) رفتار می‌کند.
+  if (offerOk && reply) {
+    const line = cleanChatReply(offer, { name }).replace(/\n+/g, ' ').trim();
+    if (line) {
+      const room = CHAT_HARD_CHARS - line.length - 1;
+      reply = `${cut(reply, Math.max(CHAT_MIN_CHARS, room))}\n${line}`;
+    }
+  }
+  const offerMissing = !out?.end && !offerLineOk(lastLineOf(reply));
+  return { reply, offerMissing, safetyStripped };
+}
 
 /* زبانِ **این آپدیت**، نه زبانِ پروسه. `CHAT_LOCALES` روی خروجیِ همین می‌نشیند، پس
  * فیچرِ گفتگو per زبان روشن/خاموش می‌شود نه per ربات. */

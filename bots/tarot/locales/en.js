@@ -1338,6 +1338,16 @@ Add one more key to the same JSON: "question_text" with the exact text of the qu
     // پس باید به زبانِ خودِ فال باشد.
     feedbackNoAnswer: 'not really',
     chatThinRetry: (min) => `⚠️ Your previous answer was far too short and hollow. Answer the same question again, but with something concrete and new: open one card from this reading by name, or anchor to something they said themselves. At least ${min} characters, with no pleasantries and no restating the question.`,
+    // 🎁🛟 تذکرِ تعمیرِ هدف‌دار (به آخرین پیامِ user می‌چسبد، نه به system).
+    chatFixHint: ({ thin = false, offer = false, safety = false, min = 0 } = {}) => [
+      `⚠️ Answer the same question again, still only that one JSON.`,
+      thin ? `Your previous answer was far too short and hollow: this time bring something concrete and new (open one card from this reading by name, or anchor to what they said), at least ${min} characters.` : '',
+      offer ? `Your previous answer had no closing offer: fill offer with one precise offer tied to this conversation, only in the form "Do you want me to …?" or "If you like, I can … for you".` : '',
+      safety ? `They only feel low and said nothing about hurting themselves: do not mention self-harm, suicide, emergencies or "are you safe?"; stay warm and simple with them.` : '',
+      `No pleasantries and no restating the question.`,
+    ].filter(Boolean).join('\n'),
+    // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
+    chatFormatTail: `Reminder: from the very first answer, your output is only that one JSON with the keys answer, offer, wants_new_reading, needs_support, follow_up, wants_end; the offer goes in offer, not in answer.`,
     feedbackContext: (ctx) => JSON.stringify({
       'the check-in question you asked': ctx.confirmationQuestion,
       'the person answer': ctx.userAnswer,

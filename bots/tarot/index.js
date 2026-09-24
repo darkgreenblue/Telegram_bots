@@ -74,6 +74,7 @@ import {
 // که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
+  chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
   CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
 } from './chat-core.js';
@@ -310,7 +311,7 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.113.0';
+const PRODUCT_VERSION = '3.114.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -479,6 +480,20 @@ const CHAT_BALANCE_BOX = true;
  * درست، و از یک معنیِ دومِ ستون بهتر است. */
 const CHAT_FLOOR       = true;
 const CHAT_MAX_TOKENS  = 500;
+/* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.114.0، خواسته‌ی
+ * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
+ * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
+ * متنِ آزاد گم می‌شد، و نوبت‌های احساسی پیشنهاد را با سؤالِ ایمنی عوض می‌کردند.
+ * درمان: فیلدِ ساختاریِ `offer` + یادآوریِ قالب بعد از کانتکست + یک تلاشِ هدف‌دار +
+ * چسباندنِ قطعیِ پیشنهاد به‌عنوانِ خطِ آخر (`finalizeChatOut`).
+ * رول‌بک: `false` ⟵ تلاشِ هدف‌دار برای پیشنهاد نمی‌رود (فیلد و چسباندن می‌مانند). */
+const CHAT_OFFER_FIX   = true;
+/* 🛟 حرفِ آسیب/اورژانس **فقط** وقتی کاربر خودش صریحاً از خودکشی یا آسیب به خودش گفته
+ * (v3.114.0، تصمیمِ صریحِ مالک: «به کسی که فقط یکم ناراحته حتماً حسِ بدتری می‌ده»).
+ * «دیگه نمی‌کشم» و «می‌خوام همه‌چی تموم شه» عمداً بحران شمرده **نمی‌شوند**. سه لایه: قاعده‌ی
+ * پرامپت، تذکرِ تعمیر، و حذفِ قطعیِ جمله‌به‌جمله در کد. پیامِ ثابتِ بحران (۱۲۳) برای
+ * نشانه‌ی صریح دست‌نخورده است. رول‌بک: `false` ⟵ هیچ حذف و تعمیری برای این مورد نیست. */
+const CHAT_SAFETY_STRIP = true;
 /* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
  *
  * مدل در پاکتِ خودش یک برچسبِ کوتاه به **زبانِ خودِ کاربر** برمی‌گرداند و کد از رویش یک
@@ -7348,6 +7363,15 @@ async function stripOldChatButtons(rid, beforeId) {
  * بعد از شارژ که **هیچ ctx ای ندارد**. `send` تنها راهِ خروج به کاربر است، پس هر دو
  * مسیر بیت‌به‌بیت همان متن‌ها و همان ترتیب را می‌گیرند و کپیِ دومی از منطق ساخته نشد.
  * ⚠️ ورودی‌اش ردیفِ **از قبل کسرشده** است؛ این تابع هرگز خودش کسر نمی‌کند. */
+/* پیامِ بحران خودش در `chat_messages` ثبت نمی‌شود (قبل از کسر جواب می‌گیرد و متنش عمداً
+ * هیچ‌جا نمی‌ماند)، پس تنها ردِ آن رویدادِ `chat_crisis` همین فال است. بدونِ این، کسی که
+ * یک نوبت پیش صریحاً از آسیب گفته بود، در نوبتِ بعد حرفِ ایمنی‌اش حذف می‌شد. */
+const chatCrisisStmt = db.prepare(
+  "SELECT 1 FROM events WHERE user_id=? AND event='chat_crisis' AND CASE WHEN json_valid(props) THEN json_extract(props,'$.reading_id') END=? LIMIT 1");
+function chatHadCrisis(uid, rid) {
+  try { return !!chatCrisisStmt.get(uid, rid); } catch { return true; } // شک ⟵ حذف نکن
+}
+
 async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx = null }) {
   const rid = r.id;
   chatInflight.add(uid);
@@ -7360,10 +7384,19 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const prev = stmts.lastDeliveredSince.all(uid, Number(user.memory_reset_at) || 0, 3)
       .filter((x) => x.id !== rid).slice(0, 2);
     // پیشوندِ ثابت: در طولِ یک گفتگو بیت‌به‌بیت یکسان می‌ماند تا کشِ پرامپت بخورد.
-    const system = `${L.prompts.chatSystem}\n\n${buildChatCtx({
+    // یادآوریِ قالب **بعد از** کانتکست می‌نشیند (`chatSystemPrompt`)؛ خودش هم per locale
+    // ثابت است، پس پیشوند همچنان در طولِ گفتگو بیت‌به‌بیت یکسان می‌ماند.
+    const system = chatSystemPrompt(L.prompts.chatSystem, buildChatCtx({
       reading: r, llm, cards, spread, labels, memory: user.memory_json || '', prev, L,
-    })}`;
-    const packed = packHistory(stmts.chatHistory.all(rid).slice(0, -1)); // سؤالِ فعلی جدا می‌رود
+    }), L);
+    const hist = stmts.chatHistory.all(rid);
+    const packed = packHistory(hist.slice(0, -1)); // سؤالِ فعلی جدا می‌رود
+    /* 🛟 «نشانه‌ی صریحِ خطر» فقط از حرفِ **خودِ کاربر** ساخته می‌شود (سؤالِ فال + همه‌ی
+     * پیام‌هایش در همین گفتگو). بدونِ آن، حرفِ آسیب/اورژانس از جوابِ مدل حذف می‌شود. */
+    const crisisCtx = !CHAT_SAFETY_STRIP
+      || [r.question, text, ...hist.filter((h) => h.role === 'user').map((h) => h.text)]
+        .some((t) => !!crisisIn(t))
+      || chatHadCrisis(uid, rid);
     const messages = toMessages(system, packed, text, L);
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
@@ -7391,24 +7424,64 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      * تذکر به **آخرین پیامِ user** چسبانده می‌شود نه به `system`، و این اجباری است:
      * پیشوندِ `system` در طولِ گفتگو بیت‌به‌بیت ثابت می‌ماند تا کشِ پرامپت بخورد (~۷۶٪
      * ورودیِ سنجیده‌شده). دست‌زدن به آن یعنی کشِ همان نوبت بپرد و هزینه سه برابر شود. */
+    /* 🎁🛟 و از v3.114.0 همین یک تلاش دو کمبودِ دیگر را هم می‌گیرد: پیشنهادِ پایانیِ
+     * غایب، و حرفِ خطرِ بی‌دلیل. **همچنان دقیقاً یک تلاش** و روی مدلِ اصلی، و خروجیِ
+     * تازه فقط وقتی جایگزین می‌شود که اکیداً کمبودِ کمتری داشته باشد (`chatFixScore`).
+     * `validate` عمداً فقط پارس است: ردِ پیشنهادِ غایب در زنجیره یعنی سقوط به فالبک و
+     * حتی ریفاند، برای چیزی که یک تلاشِ هدف‌دار ارزان‌تر درستش می‌کند. */
+    const thinOf = (o) => !!(CHAT_FLOOR && floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
+    const needsOf = (o) => {
+      const n = chatFixNeeds(o, { crisisCtx });
+      return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety };
+    };
     let thin = CHAT_FLOOR && floorApplies(out) && String(out.text || '').trim().length < CHAT_FLOOR_CHARS;
-    if (thin) {
+    let needs = needsOf(out);
+    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety };
+    let fixed = false;
+    if (thin || needs.offer || needs.safety) {
       try {
-        const hint = L.prompts.chatThinRetry(CHAT_FLOOR_CHARS);
+        const hint = L.prompts.chatFixHint
+          ? L.prompts.chatFixHint({ ...fixWanted, min: CHAT_FLOOR_CHARS })
+          : L.prompts.chatThinRetry(CHAT_FLOOR_CHARS);
         const retryMsgs = messages.map((m, i) => (
           i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
         // `kind` جدا تا هزینه‌ی خودِ این مکانیزم در `llm_usage` قابلِ تفکیک باشد؛ فقط یک
         // مقدارِ تازه در ستونِ موجود، بدونِ هیچ ستونی (همان قاعده‌ی `kind='chat'`).
         const res2 = await typingUntil(typingCtx, orChatResilient('', '', {
           messages: retryMsgs, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-          validate: chatOutOk, kind: 'chat_thin', refId: rid, userId: uid,
+          validate: chatOutOk, kind: thin ? 'chat_thin' : 'chat_fix', refId: rid, userId: uid,
         }, [CHAT_MODEL]));
         const o2 = res2?.out ? parseChatOut(res2.out) : null;
-        const ok2 = o2 && !(floorApplies(o2) && String(o2.text || '').trim().length < CHAT_FLOOR_CHARS);
-        if (ok2) { out = o2; model = res2.model || model; thin = false; }
-      } catch (e) { logErr('chat thin retry:', e.message); } // تعمیر هرگز جواب را نمی‌شکند
+        const thin2 = o2 ? thinOf(o2) : true;
+        const needs2 = o2 ? needsOf(o2) : needs;
+        if (o2 && chatFixScore(needs2, thin2) < chatFixScore(needs, thin)) {
+          out = o2; model = res2.model || model; thin = thin2; needs = needs2; fixed = true;
+        }
+      } catch (e) { logErr('chat fix retry:', e.message); } // تعمیر هرگز جواب را نمی‌شکند
     }
-    const reply = cleanChatReply(out.text, { name: dispName(user) });
+    /* 🧾 متنِ نهایی از تک‌منبعِ `finalizeChatOut` (ربات و آزمایشگاه یکی): حرفِ خطرِ
+     * بی‌دلیل جمله‌به‌جمله حذف می‌شود و پیشنهاد خطِ آخر می‌شود. */
+    const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP });
+    if (fixWanted.offer || fixWanted.safety || fin.safetyStripped || fin.offerMissing) {
+      track(db, uid, 'chat_fix', {
+        reading_id: rid, thin: fixWanted.thin ? 1 : 0, offer: fixWanted.offer ? 1 : 0,
+        safety: fixWanted.safety ? 1 : 0, fixed: fixed ? 1 : 0,
+        stripped: fin.safetyStripped, offer_missing: fin.offerMissing ? 1 : 0,
+      });
+      if (fin.safetyStripped) log(`🛟 CHAT_SAFETY_STRIPPED reading#${rid} n=${fin.safetyStripped} fixed=${fixed ? 1 : 0}`);
+      if (fin.offerMissing) log(`🎁 CHAT_OFFER_MISSING reading#${rid} fixed=${fixed ? 1 : 0}`);
+    }
+    /* ⚠️ بدنه‌ای که **کلش** حرفِ خطر بود و حذف شد، خالی می‌ماند. پیشنهادِ تنها جواب نیست؛
+     * پس دقیقاً مثلِ شکستِ مدل: ریفاندِ فوری و پیامِ صادقانه (بند ۹ ریشه). */
+    if (!fin.reply) {
+      const back = refundChat(msgId, uid, price);
+      track(db, uid, 'chat_llm_failed', { reading_id: rid, reason: 'empty_after_fix' });
+      if (back) track(db, uid, 'chat_refund', { reading_id: rid, amount: price, via: 'empty' });
+      log(`🛟 CHAT_EMPTY_AFTER_STRIP reading#${rid}`);
+      await send(price > 0 ? L.chat.failed(price, curOf(uid)) : L.chat.failedFree);
+      return false;
+    }
+    const reply = fin.reply;
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
     const followUp = CHAT_FOLLOWUP ? (out.followUp || '') : '';

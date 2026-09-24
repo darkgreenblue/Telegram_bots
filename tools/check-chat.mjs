@@ -811,8 +811,12 @@ console.log('\n▶ ۱۲) پیشنهادِ پس از فال');
 console.log('\n▶ ۱۳) پرامپتِ گفتگو');
 {
   const p = (FA.match(/chatSystem: `([\s\S]*?)`,\n/) || [])[1] || '';
+  const tailFa = (FA.match(/chatFormatTail: `([^`]*)`,\n/) || [])[1] || '';
   ok(p.length > 500, 'پرامپتِ گفتگو در locale است، نه در index.js');
-  ok(p.length <= chat.CHAT_BUDGET.sys, `و زیرِ سقفِ ${chat.CHAT_BUDGET.sys} کاراکتر است (${p.length})`);
+  /* ⚠️ از v3.114.0 سقف روی **پرامپت + یادآوریِ قالب** است، چون هر دو در پیشوندِ ثابتِ
+   * کش‌شونده می‌نشینند؛ سنجیدنِ فقط اولی یعنی بودجه بی‌صدا از در پشتی رد شود. */
+  const sysLen = p.length + (tailFa ? tailFa.length + 2 : 0);
+  ok(sysLen <= chat.CHAT_BUDGET.sys, `و زیرِ سقفِ ${chat.CHAT_BUDGET.sys} کاراکتر است (${sysLen} با یادآوریِ قالب)`);
   ok(!/—|--/.test(p), 'بدونِ خط تیره‌ی بلند (مدل از سبکِ پرامپت تقلید می‌کند، بند ۱۰ ریشه)');
   /* ⚠️ هیچ **جمله‌ی نمونه‌ی قابلِ کپی** نباشد: نشتِ few-shot دو بار در همین پروژه
    * خروجی را یکنواخت کرد (تکرارِ بین‌فالی). قاعده‌ها بله، جمله‌ی آماده نه. */
@@ -1330,8 +1334,9 @@ console.log('\n▶ قفلِ CHAT_LOCALES و الگوهای بحرانِ per زب
     const sys = mod?.prompts?.chatSystem;
     ok(typeof sys === 'string' && sys.length > 0, `«${lg}»: chatSystem یک رشته‌ی ناخالی است`);
     if (typeof sys !== 'string') continue;
-    ok(sys.length <= chat.CHAT_BUDGET.sys,
-       `«${lg}»: chatSystem داخلِ بودجه است (${sys.length} از ${chat.CHAT_BUDGET.sys})`);
+    const tl = mod?.prompts?.chatFormatTail ? mod.prompts.chatFormatTail.length + 2 : 0;
+    ok(sys.length + tl <= chat.CHAT_BUDGET.sys,
+       `«${lg}»: chatSystem + یادآوریِ قالب داخلِ بودجه است (${sys.length + tl} از ${chat.CHAT_BUDGET.sys})`);
   }
 
   /* کنترلِ مثبت: ثابت می‌کند ادعای بالا پوچ نیست. یک زبانِ ساختگی که `chat` ندارد باید
@@ -1768,8 +1773,10 @@ console.log('\n▶ ۲۱) فقط آخرین پیام دکمه دارد + کفِ �
     'تشخیصِ لاغری هم معافیت‌ها را می‌خواند هم خودِ طول');
   ok(/\[CHAT_MODEL\]/.test(thinBlock) && !/(for|while)\s*\(/.test(thinBlock),
     '⚠️ دقیقاً **یک** تلاشِ دوباره، بدونِ حلقه (وگرنه جوابِ پول‌داده ده ثانیه دیرتر می‌رسد)');
-  ok(/kind: 'chat_thin'/.test(thinBlock),
-    'و هزینه‌ی خودِ این مکانیزم در llm_usage جدا برچسب می‌خورد');
+  /* از v3.114.0 همان یک تلاش کمبودِ پیشنهاد و حرفِ خطر را هم می‌گیرد؛ برچسبِ هزینه
+   * همچنان `chat_thin` است وقتی علتش لاغری بود، و `chat_fix` برای دو علتِ تازه. */
+  ok(/kind: thin \? 'chat_thin' : 'chat_fix'/.test(thinBlock),
+    'و هزینه‌ی خودِ این مکانیزم در llm_usage جدا برچسب می‌خورد (chat_thin / chat_fix)');
 
   /* ⚠️ حیاتی‌ترین ادعای این نیمه: تذکر به **آخرین پیامِ user** می‌چسبد، نه به `system`.
    * پیشوندِ system باید در طولِ گفتگو بیت‌به‌بیت ثابت بماند تا کشِ پرامپت بخورد؛
@@ -2024,6 +2031,130 @@ console.log('\n▶ ۲۲) پرامپتِ v6: پیشنهادِ خطِ آخر و س
     '🎁 ادعای معکوس: پشتیبانی و فالِ تازه معاف **نمی‌شوند** (برخلافِ کفِ محتوا)');
   ok(/floorApplies = \(out\) => !!out && !out\.newReading && !out\.support && !out\.end/.test(CORE_CODE),
     '🪫 و کفِ محتوا همان دو پرچم را معاف می‌کند، پس دو قاعده عمداً فرق دارند');
+}
+
+/* ═══ ۲۳) v3.114.0: پیشنهاد در همه‌ی جواب‌ها + حرفِ خطر فقط در خطرِ واقعی ═══════
+ * خواسته‌ی صریحِ مالک، از گفتگوی تستیِ خودش: «ته همه‌ی متن‌ها داریم پیشنهاد نمی‌دیم،
+ * فقط دکمه‌ی تنها کافی نیست» و «کاربر یکم بگه حالش بده در جواب حرف از این نباید بیاد
+ * که اگه می‌خوای به خودت آسیب بزنی…». خطِ پایه‌ی آزمایشگاه (C5+C6، سه پاس): پیشنهاد
+ * ۴۲/۵۷ و حرفِ خطر ۲۲/۵۷. همه‌ی ادعاهای رفتاری روی **خودِ توابعِ محصول** اجرا می‌شوند. */
+console.log('\n▶ ۲۳) v3.114.0: پیشنهادِ اجباری و گاردِ بحران');
+{
+  // ── ۱) گاردِ بحران تنگ شد: فقط نشانه‌ی **صریح**.
+  for (const t of ['میخوام خودمو بکشم', 'به خودکشی فکر می‌کنم', 'می‌خوام به خودم آسیب بزنم'])
+    ok(!!chat.crisisIn(t), `🛟 نشانه‌ی صریح هنوز بحران است: «${t}»`);
+  /* ⚠️ «بکشم» تنها در نسخه‌ی قبل بود و «چطور نفس بکشم» را بحران می‌خواند: پیامِ ثابتِ
+   * ۱۲۳ به کسی که پرسیده چطور آروم بشم. و تصمیمِ مالک: جمله‌های مبهمِ ناراحتی بحران نیستند. */
+  for (const t of ['چطور نفس بکشم؟', 'دیگه نمی‌کشم', 'می‌خوام همه‌چی تموم شه', 'حالم خیلی بده', 'دلم می‌خواد گریه کنم'])
+    ok(!chat.crisisIn(t), `🛟 ناراحتیِ معمولی بحران نیست: «${t}»`);
+
+  // ── ۲) حذفِ جمله‌به‌جمله: فقط جمله‌ی خطر می‌رود، بقیه‌ی جوابِ پول‌داده می‌ماند.
+  const st = chat.stripSafetyTalk('حالت رو می‌فهمم؛ اگه قصد آسیب داری با اورژانس تماس بگیر.\nیه نفس عمیق بکش.');
+  ok(st.removed === 1 && !/اورژانس|آسیب/.test(st.text), '🛟 جمله‌ی خطر حذف شد');
+  ok(/حالت رو می‌فهمم/.test(st.text) && /نفس عمیق/.test(st.text), '🛟 و بقیه‌ی جواب (دلداری و قدمِ آرام‌کننده) ماند');
+  ok(!/؛\s*$/m.test(st.text), '🛟 و بندِ نیمه‌کاره‌ی «؛» با نقطه بسته شد');
+  const clean = 'یه نفس عمیق بکش و کمی آب بخور.';
+  ok(chat.stripSafetyTalk(clean).text === clean && chat.stripSafetyTalk(clean).removed === 0,
+    '🔎 کنترلِ مثبت: جوابِ سالم بیت‌به‌بیت دست‌نخورده می‌ماند');
+
+  // ── ۳) `finalizeChatOut` تک‌منبعِ متنِ نهایی.
+  const OFFER = 'می‌خوای با هم یه تمرینِ کوتاهِ آروم‌شدن رو امتحان کنیم؟';
+  const body = 'حالت رو می‌فهمم.\nیه نفس عمیق بکش و آب بخور.';
+  const f1 = chat.finalizeChatOut({ text: body, offer: OFFER }, {});
+  const lines = f1.reply.split('\n');
+  ok(lines[lines.length - 1] === OFFER, '🎁 پیشنهادِ فیلدِ offer خطِ آخرِ جواب شد');
+  ok(!f1.offerMissing, '🎁 و `offerMissing` خاموش است');
+  const f2 = chat.finalizeChatOut({ text: `${body}\nمی‌خوای یه زاویه‌ی دیگه رو برات باز کنم؟`, offer: OFFER }, {});
+  ok(f2.reply.split('\n').filter((l) => chat.offerLineOk(l)).length === 1,
+    '🎁 پیشنهادِ تکراریِ داخلِ متن حذف شد؛ پیشنهاد فقط یک بار می‌آید');
+  const f3 = chat.finalizeChatOut({ text: body, offer: '' }, {});
+  ok(f3.offerMissing, '🔎 کنترلِ مثبت: بدونِ پیشنهاد، `offerMissing` روشن می‌شود (پس ادعای بالا پوچ نیست)');
+  const f4 = chat.finalizeChatOut({ text: 'باشه، مراقب خودت باش.', offer: OFFER, end: true }, {});
+  ok(!f4.reply.includes(OFFER) && !f4.offerMissing, '🎁 نوبتِ پایانِ مکالمه (wants_end) پیشنهاد نمی‌گیرد و نقض هم نیست');
+  const danger = 'اگه قصد آسیب به خودت داری با اورژانس تماس بگیر.\nیه نفس عمیق بکش.';
+  const f5 = chat.finalizeChatOut({ text: danger, offer: OFFER }, { crisisCtx: true });
+  ok(/اورژانس/.test(f5.reply) && f5.safetyStripped === 0, '🛟 با نشانه‌ی صریحِ خطر از خودِ کاربر، حرفِ ایمنی دست نمی‌خورد');
+  const f6 = chat.finalizeChatOut({ text: danger, offer: OFFER }, { crisisCtx: false });
+  ok(!/اورژانس/.test(f6.reply) && f6.safetyStripped === 1, '🛟 بدونِ نشانه‌ی صریح، همان جمله حذف می‌شود');
+  const f7 = chat.finalizeChatOut({ text: 'با اورژانس تماس بگیر.', offer: OFFER }, {});
+  ok(f7.reply === '', '🛟 جوابی که کلش حرفِ خطر بود خالی برمی‌گردد (صداکننده آن را شکست و ریفاند می‌کند)');
+  const f8 = chat.finalizeChatOut({ text: body, offer: 'اگه قصد آسیب داری با اورژانس تماس بگیر.' }, {});
+  ok(!/اورژانس/.test(f8.reply), '🛟 حرفِ خطر در خودِ فیلدِ offer هم حذف می‌شود');
+
+  // ── ۴) نیاز به تعمیر و وزنش.
+  ok(chat.chatFixNeeds({ text: body, offer: '' }).offer === true, '🎁 جوابِ بی‌پیشنهاد تعمیر می‌خواهد');
+  ok(chat.chatFixNeeds({ text: body, offer: OFFER }).offer === false, '🎁 جوابِ پیشنهاددار نه');
+  ok(chat.chatFixNeeds({ text: body, offer: '', end: true }).offer === false, '🎁 نوبتِ پایان نه');
+  ok(chat.chatFixNeeds({ text: danger, offer: OFFER }, { crisisCtx: false }).safety === true
+     && chat.chatFixNeeds({ text: danger, offer: OFFER }, { crisisCtx: true }).safety === false,
+    '🛟 نیازِ تعمیرِ ایمنی فقط وقتی کاربر نشانه‌ی صریح نداده');
+  ok(chat.chatFixScore({ offer: true }, false) < chat.chatFixScore({}, true),
+    '🪫 لاغری سنگین‌تر از نبودِ پیشنهاد است (پیامدش پولی است؛ جوابِ پُرِ بی‌پیشنهاد بهتر شمرده می‌شود)');
+
+  // ── ۵) پاکت: کلیدِ offer، و بازپخشِ تاریخچه در همان شکل.
+  const po = chat.parseChatOut(JSON.stringify({ answer: body, offer: OFFER, wants_new_reading: false }));
+  ok(po && po.offer === OFFER, '🎁 `parseChatOut` فیلدِ offer را برمی‌گرداند');
+  const packed = chat.packHistory([
+    { role: 'user', text: 'حالم بده' },
+    { role: 'assistant', text: `${body}\n${OFFER}`, want_reading: 0, want_support: 0, follow_up: '', want_end: 0 },
+  ]);
+  const env = JSON.parse(packed.turns.find((x) => x.role === 'assistant').content);
+  ok(env.offer === OFFER && !String(env.answer).includes(OFFER),
+    '🔑 جوابِ ذخیره‌شده در بازپخش به همان دو فیلدِ answer/offer برمی‌گردد (مدل قالب را از تاریخچه تقلید می‌کند)');
+
+  // ── ۶) یادآوریِ قالب بعد از کانتکست، و پیشوندِ ثابت.
+  const Lfa = (await import('../bots/tarot/locales/fa.js')).default;
+  const sp = chat.chatSystemPrompt('SYS', 'CTX', Lfa);
+  ok(sp.startsWith('SYS\n\nCTX\n\n') && sp.endsWith(Lfa.prompts.chatFormatTail),
+    '🎁 یادآوریِ قالب **بعد از** کانتکستِ فال می‌نشیند (نزدیکِ نقطه‌ی تولید)');
+  ok(chat.chatSystemPrompt('SYS', 'CTX', Lfa) === sp, '🔑 و برای یک فال همیشه بیت‌به‌بیت یکسان است (کشِ پرامپت نمی‌پرد)');
+  ok(chat.chatSystemPrompt('SYS', 'CTX', {}) === 'SYS\n\nCTX', 'و بدونِ یادآوری، دقیقاً همان شکلِ قبلی است');
+
+  // ── ۷) هر پنج زبان هر دو کلید را دارند، و تذکر فقط بخش‌های خواسته‌شده را می‌آورد.
+  for (const lg of ['fa', 'en', 'ru', 'es', 'pt']) {
+    const Lx = (await import(`../bots/tarot/locales/${lg}.js`)).default;
+    ok(typeof Lx.prompts.chatFormatTail === 'string' && /offer/.test(Lx.prompts.chatFormatTail),
+      `«${lg}»: chatFormatTail هست و کلیدِ offer را نام می‌برد`);
+    const all = Lx.prompts.chatFixHint({ thin: true, offer: true, safety: true, min: 140 });
+    const none = Lx.prompts.chatFixHint({ min: 140 });
+    ok(all.length > none.length && all.split('\n').length === none.split('\n').length + 3,
+      `«${lg}»: chatFixHint فقط بخش‌های خواسته‌شده را اضافه می‌کند`);
+    ok(/140/.test(all) && !/140/.test(Lx.prompts.chatFixHint({ offer: true, min: 140 })),
+      `«${lg}»: کفِ طول فقط در بخشِ لاغری می‌آید`);
+    ok(!/—|--/.test(all + Lx.prompts.chatFormatTail), `«${lg}»: بدونِ خط تیره‌ی بلند`);
+  }
+
+  // ── ۸) پرامپت: قاعده‌ی «حالِ بد بحران نیست» صریح است.
+  const P = (FA.match(/chatSystem: `([\s\S]*?)`,\n/) || [])[1] || '';
+  ok(/بحران نیست/.test(P) && /مگر خودش صریحاً از آسیب زدن به خودش گفته باشد/.test(P),
+    '🛟 پرامپت صریح می‌گوید حالِ بد بحران نیست و حرفِ آسیب فقط با نشانه‌ی صریح');
+  ok(/"offer":"…"/.test(P) && /از همان جوابِ اول و بدونِ استثنا/.test(P),
+    '🎁 پاکت کلیدِ offer دارد و «از همان جوابِ اول» صریح است (جوابِ اولِ رایگان)');
+
+  // ── ۹) سیم‌کشیِ ربات (ساختاری؛ رفتارِ توابع در بالا اجرا شد).
+  const T = bodyOf(CODE, 'async function runChatTurn(');
+  ok(/chatSystemPrompt\(L\.prompts\.chatSystem,/.test(T), '🎁 ربات پرامپت را از `chatSystemPrompt` می‌سازد');
+  ok(/finalizeChatOut\(out,/.test(T) && /const reply = fin\.reply;/.test(T),
+    '🎁 و متنِ نهایی از `finalizeChatOut` می‌آید (تک‌منبع با آزمایشگاه)');
+  ok(/crisisIn\(t\)/.test(T) && /h\.role === 'user'/.test(T) && /chatHadCrisis\(uid, rid\)/.test(T),
+    '🛟 نشانه‌ی خطر فقط از حرفِ خودِ کاربر (پیام‌ها + رویدادِ chat_crisis همین فال)');
+  ok(/L\.prompts\.chatFixHint/.test(T) && /chatFixScore\(needs2, thin2\) < chatFixScore\(needs, thin\)/.test(T),
+    '🔧 تعمیر هدف‌دار است و فقط وقتی اکیداً بهتر شد جایگزین می‌شود');
+  const iEmpty = T.indexOf('if (!fin.reply) {');
+  const iIns = T.indexOf('insertChatMsg.run');
+  ok(iEmpty > 0 && iEmpty < iIns && /refundChat\(msgId, uid, price\)/.test(T.slice(iEmpty, iIns)),
+    '💸 جوابِ خالی‌شده **قبل از** ثبتِ ردیف ریفاند می‌شود (همان مسیرِ شکستِ مدل)');
+  ok(bool('CHAT_OFFER_FIX') && bool('CHAT_SAFETY_STRIP'), '↩️ هر دو پرچمِ رول‌بک روشن‌اند');
+  ok(/const crisisCtx = !CHAT_SAFETY_STRIP/.test(T), '↩️ و `CHAT_SAFETY_STRIP=false` واقعاً حذف را خاموش می‌کند');
+
+  // ── ۱۰) آزمایشگاه همان توابع را می‌دواند، و الگوی پیشنهادش با محصول یکی است.
+  const LAB = strip(fs.readFileSync(new URL('./chat-lab.mjs', import.meta.url), 'utf8'));
+  ok(/chatSystemPrompt\(systemFor/.test(LAB) && /finalizeChatOut\(outObj/.test(LAB) && /chatFixNeeds\(/.test(LAB),
+    '🧪 آزمایشگاه همان `chatSystemPrompt`/`chatFixNeeds`/`finalizeChatOut` را صدا می‌زند');
+  const labFa = (await import('./reading-lab/lang/fa.mjs')).default;
+  for (const k of ['ask', 'mine', 'can'])
+    ok(labFa.closingOffer[k].source === chat.FA_OFFER[k].source,
+      `🧪 الگوی «${k}» سنجه‌ی آزمایشگاه با الگوی گاردِ محصول یکی است (گارد و سنجه یک تعریف)`);
 }
 
 const total = pass + errs.length;
