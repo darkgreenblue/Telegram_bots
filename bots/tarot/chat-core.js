@@ -266,6 +266,18 @@ const FA_CRISIS = [
   'به زندگیم پایان', 'تموم کنم زندگی', 'تمومش کنم زندگی', 'نمی‌خوام زنده',
   'نمیخوام زنده', 'دیگه نمی‌خوام باشم', 'رگم را', 'رگمو', 'قرص بخورم و بمیرم',
 ];
+/* 🛟 «حرفِ خطر» در **جوابِ مدل** (نه در پیامِ کاربر). تصمیمِ صریحِ مالک (۱۴۰۵/۰۷/۰۲):
+ * به کسی که فقط کمی حالش بد است نباید جمله‌ی «اگه فکرِ آسیب‌زدن به خودت داری…» یا
+ * ارجاع به اورژانس برسد؛ «به کسی که فقط یکم ناراحته حتماً حسِ بدتری می‌ده» و فکرِ آسیب
+ * را خودمان در سرش می‌اندازیم. ترنسکریپتِ واقعی (فالِ ۱۷۳۳۷) سه نوبتِ پشتِ سرِ هم این را
+ * داشت، بی‌آنکه کاربر هیچ نشانه‌ی خطری داده باشد.
+ * این فهرست عمداً فقط **زبانِ خطر** را می‌گیرد (آسیب به خود، خودکشی، اورژانس)، نه
+ * واژه‌های معمولیِ دلداری («آدمِ امن»، «نفس بکش»)، که برای حالِ بد مشروع‌اند. */
+const FA_SAFETY_TALK = [
+  'آسیب به خود', 'آسیب زدن به خود', 'آسیبزدن به خود', 'به خودت آسیب', 'به خودت صدمه',
+  'صدمه زدن به خود', 'خودکشی', 'خودکُشی', 'اورژانس', 'فوریت', 'خط بحران',
+  'به خودت اسیب', 'نمی‌تونی امن', 'نمیتونی امن',
+];
 const FA_SMALLTALK = [
   'سلام', 'سلام!', 'درود', 'مرسی', 'ممنون', 'ممنونم', 'مرسی!', 'ممنون!',
   'دمت گرم', 'خداحافظ', 'بای', 'فعلا', 'فعلاً', 'باشه', 'اوکی', 'ok', 'اوک',
@@ -308,7 +320,7 @@ const FA_FU_ASSENT = [
 ];
 
 const FA_LANG = {
-  crisis: FA_CRISIS, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
+  crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
   followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT,
 };
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
@@ -321,6 +333,7 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
   const arr = (x, fb) => (Array.isArray(x) && x.length ? x.map(String) : fb);
   LANG_T.set(lang, {
     crisis:    arr(d.crisis, base.crisis),
+    safetyTalk: arr(d.safetyTalk, base.safetyTalk),
     smallTalk: arr(d.smallTalk, base.smallTalk),
     chatbait:  arr(d.chatbait, base.chatbait),
     followUpMeta:   arr(d.followUpMeta, base.followUpMeta),
@@ -343,6 +356,17 @@ export function crisisIn(text) {
   const t = norm(text);
   if (!t) return '';
   for (const p of LANG.crisis) { const n = norm(p); if (n && t.includes(n)) return p; }
+  return '';
+}
+
+/** «حرفِ خطر» که در متن آمده، یا `''`. روی **جوابِ مدل** اجرا می‌شود؛ همتای `crisisIn`
+ * که روی **پیامِ کاربر** اجرا می‌شود. یک ماژول برای هر دو، تا گارد و سنجه یک فهرست را
+ * ببینند. نرمال‌سازی همان `norm` است (نیم‌فاصله حذف می‌شود، پس «آسیب‌زدن» و «آسیب زدن»
+ * هر دو گرفته می‌شوند). */
+export function safetyTalkIn(text) {
+  const t = norm(text);
+  if (!t) return '';
+  for (const p of (LANG.safetyTalk || [])) { const n = norm(p); if (n && t.includes(n)) return p; }
   return '';
 }
 

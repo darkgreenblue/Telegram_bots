@@ -13,7 +13,7 @@
 // قاعده‌ی دوم: همه‌ی این‌ها **قطعی** اند. قضاوتِ سلیقه‌ای کارِ `chat-rubric.mjs` و
 // خودِ سشن است، نه این فایل.
 import { ngrams } from './checks.mjs';
-import { hookOk, norm, followUpBad, floorApplies, CHAT_FLOOR_CHARS,
+import { hookOk, norm, followUpBad, floorApplies, CHAT_FLOOR_CHARS, crisisIn, safetyTalkIn,
          CHAT_FU_PROMPT_MAX } from '../../bots/tarot/chat-core.js';
 
 /* 🌍 دادهٔ زبانیِ سنجه‌ها از همان `lang/<locale>.mjs`ِ آزمایشگاهِ خوانش می‌آید، نه یک
@@ -118,7 +118,7 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
   if (canned) {
     return { lines: lines.length, chars, canned: true, hook: { ok: true, why: '' }, hookExempt: false,
       chatbait: 0, formal: [], bookish: [], labelEcho: '', dashes: 0, dashesRaw: 0, qmarks: 0,
-      firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', promptLeak: '', cardForce: '',
+      firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', safetyTalk: '', promptLeak: '', cardForce: '',
       latin: 0, offDomain, thin: false, fuBad: '', fuStyle: '', fuNoAsk: false, fuLen: 0,
       fuLong: false, noOffer: false, issues, notes };
   }
@@ -314,6 +314,15 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     issues.push(`نقشِ اورژانس: شماره‌ی «${emergency}» در جوابِ مدل — این کارِ تاروت‌خوان نیست`);
   }
 
+  /* ۹ب) 🛟 حرفِ خطر بدونِ نشانه‌ی خطر. تصمیمِ صریحِ مالک (۱۴۰۵/۰۷/۰۲): جمله‌ی «اگه فکرِ
+   * آسیب به خودت داری…» یا ارجاع به اورژانس فقط در خطرِ واقعی. این‌جا «خطرِ واقعی» =
+   * همان `crisisIn` روی پیامِ همین نوبت، یعنی همان تعریفی که پروداکشن با آن پیامِ ثابتِ
+   * حمایتی می‌فرستد. نوبتی که `crisisIn` بگیرد اصلاً به مدل نمی‌رسد (بالاتر رد می‌شود)،
+   * پس هر حرفِ خطری که به این‌جا برسد، ناخواسته است. برخلافِ `emergency` بالا، شماره
+   * لازم ندارد: ترنسکریپتِ واقعی هیچ شماره‌ای نداشت («خدماتِ اورژانسیِ محلِ زندگیت»). */
+  const safetyTalk = crisisIn(question) ? '' : safetyTalkIn(reply);
+  if (safetyTalk) issues.push(`حرفِ خطر بدونِ نشانه‌ی خطر: «${safetyTalk}»`);
+
   // ۱۰) نشتِ دستورهای داخلی (بازگویی یا خلاصه‌کردنِ قواعدِ خودش).
   const promptLeak = (String(reply).match(PROMPT_LEAK)?.[0] || '').trim();
   if (promptLeak) issues.push(`نشتِ دستورها: «${promptLeak}»`);
@@ -342,7 +351,7 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
   if (latin.length) notes.push(`حرفِ لاتین (${latin.length}×): «${latin.slice(0, 3).join('»، «')}»`);
 
   return { lines: lines.length, chars, canned: false, hook, hookExempt, chatbait: bait.length,
-    formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency,
+    formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency, safetyTalk,
     promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuStyle, fuNoAsk,
     fuLen, fuLong, noOffer, issues, notes };
 }
