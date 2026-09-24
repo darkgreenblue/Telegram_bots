@@ -315,7 +315,7 @@ const TEST_PHASE = false;
 //         ادامه می‌دهد نه پیامِ عمومی، `/start` سشنِ افشا را از DB بازسازی می‌کند به‌جای
 //         گارد، دکمه‌ی «💬 پشتیبانی» دیگر پشتِ گاردِ مرکزی نمی‌ماند، و متنِ گاردِ افشا
 //         دیگر گزینه‌ی «بی‌خیالش شو» را وعده نمی‌دهد. جزئیات: CLAUDE.md تاروت.
-const PRODUCT_VERSION = '3.114.0';
+const PRODUCT_VERSION = '3.115.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -3431,6 +3431,11 @@ async function blockCrossFlowCallback(ctx) {
     // `next:` در حالت عادی مجاز است، اما برای فالِ بدون llm_json همان دکمه‌ی مرده‌ای
     // بود که تیکت را به حلقه تبدیل کرد. این بررسی باید پیش از allowlist باشد.
     if (state === 'revealing' && await resolveUnreadyReveal(ctx)) return true;
+    // دکمه‌ی «مشاهده فال»ِ پیامِ بازیابی (`rview:`) برای **همین** فال ترکِ فلو نیست، بازپخشِ
+    // کامل از DB است: سشن را از نو می‌سازد و قفلِ یتیمِ `final:` را هم برمی‌دارد. بدونِ این،
+    // همان کاربرانی که پیام برایشان فرستاده شد به‌جای فال گاردِ «هنوز کامل نشده» می‌گرفتند.
+    const rv = state === 'revealing' && /^rview:(\d+)$/.exec(data);
+    if (rv && Number(rv[1]) === getSession(uid)?.readingId) return false;
     if (readingFlowAllowsCallback(state, data)) return false;
     await ctx.answerCbQuery().catch(() => {});
     if (wanted) setIntent(uid, wanted.key, wanted.arg);
