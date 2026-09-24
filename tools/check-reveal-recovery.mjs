@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 🛟 چکِ مقاومتِ افشای فالِ پول‌داده در برابرِ قطعیِ شبکه (v3.114.0) — **رفتاری**.
+// 🛟 چکِ مقاومتِ افشای فالِ پول‌داده در برابرِ قطعیِ شبکه (v3.114.0، بخشِ ۷: v3.115.0) — **رفتاری**.
 //
 // تیکتِ #TRT-1902690343: کاربر وسطِ تحویلِ جوابِ نهایی `read ECONNRESET` خورد، قفلِ
 // `finalDone` یتیم ماند، و از آن لحظه هر ورودی (دکمه‌ی منو، `/start`، `/menu`، حتی دکمه‌ی
@@ -279,6 +279,50 @@ console.log('\n── ۶) متنِ گاردِ افشا ──');
     ok(typeof g === 'string' && g.length > 10 && !/—|--/.test(g), `${f}: deliverGuard هست و خط تیره‌ی بلند ندارد`);
     ok(g !== L.reading?.openReadingGuard, `${f}: متنش با گاردِ «ادامه یا بی‌خیال» یکی نیست`);
   }
+}
+
+/* ═══════════════ ۷) دکمه‌ی بازیابیِ `rview:` از گاردِ مرکزی رد می‌شود ═══════════════ */
+// پیامِ بازیابی دقیقاً برای کاربرانی فرستاده می‌شود که در `revealing` گیر کرده‌اند، و گاردِ
+// مرکزی در همان استیت فقط `next:`/`final:` را رد می‌کرد؛ یعنی دکمه‌ی «مشاهده فال» به‌جای
+// بازپخش، گاردِ «هنوز کامل نشده» می‌داد. خودِ `blockCrossFlowCallback` اجرا می‌شود.
+console.log('\n── ۷) rview: بازپخشِ همین فال از وسطِ افشا گارد نمی‌خورد ──');
+{
+  const fnSrc = block('async function blockCrossFlowCallback(ctx)');
+  const allowSrc = block('function readingFlowAllowsCallback(state, data)');
+  const run = async (data, { state = 'revealing', sessRid = 7 } = {}) => {
+    const S = { calls: [] };
+    const rec = (name, ret) => async () => { S.calls.push(name); return ret; };
+    const readingFlowAllowsCallback = load(allowSrc, {});
+    const fn = load(fnSrc, {
+      NAV_GUARD_ENABLED: true, getState: () => state, flowIntentFor: () => null,
+      READING_FLOW_STATES: new Set(['revealing', 'confirm_pay', 'picking']),
+      PAY_STATES: [], paymentFlowAllowsCallback: () => false,
+      resolveUnreadyReveal: rec('resolveUnreadyReveal', false),
+      getSession: () => (sessRid == null ? null : { readingId: sessRid }),
+      readingFlowAllowsCallback, setIntent: () => {},
+      blockDuringDelivering: rec('blockDuringDelivering', true),
+      blockDuringPendingReading: rec('blockDuringPendingReading', true),
+      blockDuringOpenReading: rec('blockDuringOpenReading', true),
+      blockDuringActivePayment: rec('blockDuringActivePayment', true),
+    });
+    const ctx = { from: { id: 42 }, callbackQuery: { data }, answerCbQuery: async () => { S.calls.push('answerCbQuery'); } };
+    let out;
+    try { out = await fn(ctx); } catch (e) { out = `THROW:${e.message}`; }
+    return { out, S };
+  };
+  { const t = await run('rview:7');
+    ok(t.out === false && !t.S.calls.includes('blockDuringDelivering'), 'افشا + rviewِ همین فال: عبور به هندلرِ بازپخش (نه گارد)');
+    ok(t.S.calls[0] === 'resolveUnreadyReveal', 'فالِ بدونِ خروجیِ مدل همچنان اول به مسیرِ ریفاند/انتظار می‌رود'); }
+  { const t = await run('rview:8');
+    ok(t.out === true && t.S.calls.includes('blockDuringDelivering'), 'کنترلِ مثبت: rviewِ فالِ **دیگر** وسطِ افشا هنوز گارد می‌خورد'); }
+  { const t = await run('rview:7', { sessRid: null });
+    ok(t.out === true && t.S.calls.includes('blockDuringDelivering'), 'سشنِ بی‌readingId: هیچ فالی حدس زده نمی‌شود (گارد)'); }
+  { const t = await run('rview:7', { state: 'picking' });
+    ok(t.out === true && t.S.calls.includes('blockDuringOpenReading'), 'مجوز فقط برای افشاست: وسطِ انتخابِ کارت rview گارد می‌خورد'); }
+  { const t = await run('final:7');
+    ok(t.out === false, 'کنترلِ مثبت: final: وسطِ افشا مثلِ قبل عبور می‌کند'); }
+  { const t = await run('menu:x');
+    ok(t.out === true && t.S.calls.includes('blockDuringDelivering'), 'کنترلِ مثبت: callbackِ ناشناخته وسطِ افشا هنوز گارد می‌خورد'); }
 }
 
 console.log(`\n${errs.length ? '❌' : '✅'} نتیجه: ${pass} پاس، ${errs.length} خطا`);
