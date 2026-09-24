@@ -311,7 +311,14 @@ const TEST_PHASE = false;
 // بسته‌های میانی/بالا بیشتر ترغیب به خرید می‌شود، نه فقط با تومانِ کمتر. کلیدِ تازه
 // چون price_ladder_p2 (control در برابرِ cheap) هنوز شروع‌نشده و تصمیمِ ثبت‌شده‌ی
 // آن جدا می‌ماند؛ این فرضیه‌ی کاملاً متفاوتی است، نه ادامه‌ی همان مسیر.
-const PRODUCT_VERSION = '3.114.0';
+// 3.114.0: 🛟 افشای فالِ پول‌داده در برابرِ قطعیِ شبکه مقاوم شد (تیکتِ #TRT-1902690343):
+//         شکستِ ارسالِ یک کارت دیگر آن کارت را جا نمی‌اندازد، خطای وسطِ افشا دکمه‌ی
+//         ادامه می‌دهد نه پیامِ عمومی، `/start` سشنِ افشا را از DB بازسازی می‌کند به‌جای
+//         گارد، دکمه‌ی «💬 پشتیبانی» دیگر پشتِ گاردِ مرکزی نمی‌ماند، و متنِ گاردِ افشا
+//         دیگر گزینه‌ی «بی‌خیالش شو» را وعده نمی‌دهد. جزئیات: CLAUDE.md تاروت.
+// 3.116.0: 🎁 پیشنهادِ پایانی در همه‌ی جواب‌های گفتگو (از جوابِ اولِ رایگان) + 🛟 حرفِ
+//         آسیب/اورژانس فقط با نشانه‌ی صریحِ خطر از خودِ کاربر. جزئیات: CLAUDE.md تاروت.
+const PRODUCT_VERSION = '3.116.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -480,7 +487,7 @@ const CHAT_BALANCE_BOX = true;
  * درست، و از یک معنیِ دومِ ستون بهتر است. */
 const CHAT_FLOOR       = true;
 const CHAT_MAX_TOKENS  = 500;
-/* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.114.0، خواسته‌ی
+/* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.116.0، خواسته‌ی
  * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
  * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
  * متنِ آزاد گم می‌شد، و نوبت‌های احساسی پیشنهاد را با سؤالِ ایمنی عوض می‌کردند.
@@ -489,7 +496,7 @@ const CHAT_MAX_TOKENS  = 500;
  * رول‌بک: `false` ⟵ تلاشِ هدف‌دار برای پیشنهاد نمی‌رود (فیلد و چسباندن می‌مانند). */
 const CHAT_OFFER_FIX   = true;
 /* 🛟 حرفِ آسیب/اورژانس **فقط** وقتی کاربر خودش صریحاً از خودکشی یا آسیب به خودش گفته
- * (v3.114.0، تصمیمِ صریحِ مالک: «به کسی که فقط یکم ناراحته حتماً حسِ بدتری می‌ده»).
+ * (v3.116.0، تصمیمِ صریحِ مالک: «به کسی که فقط یکم ناراحته حتماً حسِ بدتری می‌ده»).
  * «دیگه نمی‌کشم» و «می‌خوام همه‌چی تموم شه» عمداً بحران شمرده **نمی‌شوند**. سه لایه: قاعده‌ی
  * پرامپت، تذکرِ تعمیر، و حذفِ قطعیِ جمله‌به‌جمله در کد. پیامِ ثابتِ بحران (۱۲۳) برای
  * نشانه‌ی صریح دست‌نخورده است. رول‌بک: `false` ⟵ هیچ حذف و تعمیری برای این مورد نیست. */
@@ -3276,7 +3283,9 @@ async function blockDuringDelivering(ctx) {
   if (!r || r.user_id !== uid || r.status !== 'started') return false;
   const row = revealResumeRow(uid);
   if (!row) return false;   // چیزی برای ادامه نمانده → بگذار مسیرِ عادی برود
-  await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+  // `deliverGuard` نه `openReadingGuard`: این گارد عمداً دکمه‌ی انصراف ندارد، ولی متنِ
+  // قدیمی می‌پرسید «ادامه بدی یا بی‌خیالش بشی؟» — وعده‌ی گزینه‌ای که روی صفحه نبود.
+  await ctx.reply(L.reading.deliverGuard, Markup.inlineKeyboard([row]));
   return true;
 }
 
@@ -3439,6 +3448,11 @@ async function blockCrossFlowCallback(ctx) {
     // `next:` در حالت عادی مجاز است، اما برای فالِ بدون llm_json همان دکمه‌ی مرده‌ای
     // بود که تیکت را به حلقه تبدیل کرد. این بررسی باید پیش از allowlist باشد.
     if (state === 'revealing' && await resolveUnreadyReveal(ctx)) return true;
+    // دکمه‌ی «مشاهده فال»ِ پیامِ بازیابی (`rview:`) برای **همین** فال ترکِ فلو نیست، بازپخشِ
+    // کامل از DB است: سشن را از نو می‌سازد و قفلِ یتیمِ `final:` را هم برمی‌دارد. بدونِ این،
+    // همان کاربرانی که پیام برایشان فرستاده شد به‌جای فال گاردِ «هنوز کامل نشده» می‌گرفتند.
+    const rv = state === 'revealing' && /^rview:(\d+)$/.exec(data);
+    if (rv && Number(rv[1]) === getSession(uid)?.readingId) return false;
     if (readingFlowAllowsCallback(state, data)) return false;
     await ctx.answerCbQuery().catch(() => {});
     if (wanted) setIntent(uid, wanted.key, wanted.arg);
@@ -3979,6 +3993,18 @@ let BOT_USERNAME = '';
 // گارد خطای سراسری: هیچ خطایی نباید بی‌صدا فلو را بکشد — لاگ کامل + پیام عذرخواهی به کاربر
 bot.catch(async (err, ctx) => {
   logErr(`global error [${ctx.updateType}] uid=${ctx.from?.id} state=${ctx.from ? getState(ctx.from.id) : '-'}:`, err.stack || err.message);
+  /* 🛟 v3.114.0: وسطِ **افشای فالِ پول‌داده** خطای عمومی بن‌بست است. تقریباً همه‌ی این
+   * خطاها قطعِ لحظه‌ایِ شبکه با تلگرام‌اند (`read ECONNRESET`)، و هندلرِ `next:` دکمه‌ی
+   * پیامِ قبلی را **قبل از** ارسال برداشته؛ پس بدونِ دکمه‌ی ادامه، کاربر هیچ راهی به
+   * بقیه‌ی فالی که خریده نداشت. `revealNext` در شکست قفلِ `revealIdx` را پس گرفته، پس
+   * همین ردیف دقیقاً همان کارتی را می‌فرستد که نرسید. */
+  try {
+    const uid = ctx.from?.id;
+    if (uid && getState(uid) === 'revealing') {
+      const row = revealResumeRow(uid);
+      if (row) { await ctx.reply(L.reading.deliverGuard, Markup.inlineKeyboard([row])); return; }
+    }
+  } catch (e) { logErr('global error resume:', e.message); }
   try { await ctx.reply(L.errors.generic); } catch {}
 });
 
@@ -4031,8 +4057,15 @@ const KB_LABELS = new Set([
 ].filter(Boolean));
 // فقط دکمه‌های واقعیِ ناوبری/ورود. متنِ آزادِ سؤال، رسید و مبلغ هرگز این‌جا نیست؛
 // بنابراین middleware مرکزی مانعِ مرحله‌ی ورودیِ فال یا پرداخت نمی‌شود.
+/* 💬 برچسبِ پشتیبانی **عمداً بیرون** است (v3.114.0). بند ۶ج ریشه: «پشتیبانی هیچ‌وقت
+ * گارد نمی‌شود، راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد». این گاردِ مرکزی آن را از
+ * `KB_LABELS` به ارث می‌برد و کاربرِ وسطِ فال با زدنِ «💬 پشتیبانی» به‌جای لینکِ پشتیبانی
+ * همان گاردِ ادامه را می‌گرفت، یعنی دقیقاً وقتی گیر کرده بود **هیچ** راهی به ما نداشت.
+ * `registerSupport` خودش بعد از پیامِ پشتیبانی قدمِ فعلی را با قلابِ `after` یادآوری می‌کند.
+ * `KB_LABELS` دست نخورد: جرنی باید تپِ این دکمه را همچنان «دکمه» بشمارد. */
+const SUPPORT_LABELS = new Set(allLabels(l => l.support?.button).filter(Boolean));
 const FLOW_SWITCH_TEXTS = new Set([
-  ...KB_LABELS,
+  ...[...KB_LABELS].filter(t => !SUPPORT_LABELS.has(t)),
   // `/menu` از کیبوردِ command تلگرام می‌آید، نه ReplyKeyboard؛ پس باید صریحاً
   // در گارد مرکزی باشد. خودِ navToMenu هم پایین‌تر دفاع دوم را دارد.
   '/menu',
@@ -4308,9 +4341,19 @@ async function handleStart(ctx) {
   // نگذاریم، کاربر می‌تواند وسطِ هر مرحله‌ی فال یا پرداخت، فلو را بی‌صدا عوض کند.
   // فقط راه‌های صریحِ خروجِ خودِ گارد حقِ ترک‌کردن دارند؛ این باید پیش از هر reset باشد.
   if (await blockDuringOpenPay(ctx, INTENT.MENU)) return;
-  if (await blockDuringOpenReading(ctx, INTENT.MENU)) return;
-  if (await blockDuringPendingReading(ctx)) return;
-  if (await blockDuringDelivering(ctx)) return;
+  /* 🛟 افشای فالِ پول‌داده (v3.114.0) **گارد نمی‌شود، بازسازی می‌شود.** گاردِ افشا
+   * انصراف ندارد، پس تنها خروجش دکمه‌ی ادامه‌ی همان سشن است؛ اگر آن سشن خودش خراب
+   * باشد (قفلِ یتیمِ `finalDone` از نسخه‌ی پیش از v3.113.x، یا `revealIdx`ی که از
+   * DB جلو افتاده) `/start` هم همان دکمه‌ی مرده را پس می‌داد و کاربر هیچ راهِ فراری
+   * نداشت. پایین‌تر سشن از `readings.reveal_idx` (تنها مهرِ «کاربر دیده») از نو ساخته
+   * می‌شود و همان پیشنهادِ ادامه‌ی #215 می‌آید، با کیبوردِ ماندگار. فالِ بی‌خروجی هم
+   * همان مسیرِ ریفاند و retry را می‌رود. */
+  if (getState(uid) === 'revealing') {
+    if (await resolveUnreadyReveal(ctx)) return;
+  } else {
+    if (await blockDuringOpenReading(ctx, INTENT.MENU)) return;
+    if (await blockDuringPendingReading(ctx)) return;
+  }
 
   // اگر state/session پیش‌تر از دست رفته باشد، فالِ پول‌داده‌ی منتظرِ سؤال را از DB
   // بازسازی می‌کنیم و همان انتخابِ آگاهانه‌ی استاندارد را می‌دهیم.
@@ -4348,7 +4391,7 @@ async function handleStart(ctx) {
     const row = resumeRowFromDb(uid);
     // فالِ نیمه‌تحویل بر منو مقدم است: کاربر پولش را داده و ادامه‌اش تنها چیزی است که
     // باید ببیند. منوی فال آن‌جا فقط حواسش را پرت می‌کرد.
-    if (row) return await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([row]));
+    if (row) return await ctx.reply(L.reading.deliverGuard, Markup.inlineKeyboard([row]));
     setState(uid, 'idle'); setSession(uid, null);   // بازیابی نشد → همان حالتِ قبل
   } catch (e) { logErr('resume offer:', e.message); }
 
@@ -6728,18 +6771,6 @@ async function revealNext(ctx, uid, readingId) {
   const card = cards[idx];
   const info = locCard(card.key);
   patchSession(uid, { revealIdx: idx + 1 }); // قبل از await — دکمه‌ی تکراری دوباره همین کارت را نفرستد
-  // همان پیشرفت روی **خودِ فال** هم مهر می‌خورد (#215): سشن را سیزده نقطه پاک می‌کنند،
-  // این ستون را هیچ‌کس. تنها چیزی است که بعد از `/start` می‌گوید کاربر تا کجا دیده.
-  stmts.setRevealIdx.run(idx + 1, readingId, idx + 1);
-
-  await typing(ctx, PACE_S, 'upload_photo');
-  // در v4 کپشن هم مثل متن، برچسبِ **ترتیبی** می‌گیرد نه نامِ جایگاه — وگرنه کاربر هم‌زمان
-  // «کارت قلب تو» و «کارت اولت» را می‌بیند و تناقض حس می‌کند.
-  await sendCardPhoto(ctx, card.key, v4For(uid)
-    ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
-    : L.reading.revealCaption(positionName(spread.positions[idx]?.fa, idx), info, card.reversed));
-  // ⏱ v3.53.0: مکثِ کور (`sleep`) حذف شد؛ کلِ فاصله تا تیزر با نشانگرِ typing می‌گذرد.
-  await typing(ctx, PACE_TEASER);
 
   // v4: در مرحله‌ی افشا فقط یک تیزرِ کوتاه درباره‌ی خودِ کارت می‌آید تا تعلیق حفظ شود و
   // کاربر در ساختنِ روایت همراه شود. تحلیلِ کامل و جواب، در متنِ نهایی می‌آید.
@@ -6751,31 +6782,64 @@ async function revealNext(ctx, uid, readingId) {
   // هنوز تمام نشده بود). بازخورد به آخرِ کار منتقل شده — پایینِ finishReading.
   const askFeedback = !v4 && idx === midIdx && !s.fbDone && llm.confirmation_question;
 
-  if (askFeedback) {
-    await ctx.reply(esc(interp), { parse_mode: 'HTML' });
-    await sleep(PACE_M);
-    setState(uid, 'feedback');
-    await ctx.reply(llm.confirmation_question, Markup.inlineKeyboard([
-      [Markup.button.callback(L.buttons.fbYes, `fb:yes:${readingId}`)],
-      [Markup.button.callback(L.buttons.fbSomewhat, `fb:some:${readingId}`)],
-      [Markup.button.callback(L.buttons.fbNo, `fb:no:${readingId}`)],
-    ]));
-    return;
-  }
+  /* 🛟 شکستِ ارسال (v3.114.0): قفلِ `revealIdx` پس گرفته می‌شود تا همین کارت دوباره بیاید.
+   *
+   * 🐛 تا این نسخه قفل قبل از ارسال جلو می‌رفت و هرگز برنمی‌گشت. قطعیِ لحظه‌ایِ شبکه با
+   * تلگرام (`read ECONNRESET`، هفته‌ای ده‌ها بار روی همین سرور، و بیشترشان دقیقاً در همین
+   * استیت) یعنی کاربر آن کارت را **هرگز** نمی‌دید: دکمه‌ی بعدی به کارتِ بعد اشاره می‌کرد،
+   * و فالی که پولش داده شده بی‌صدا یک کارت کم تحویل می‌شد.
+   * پس‌گرفتن فقط وقتی است که هنوز خودمان جلو برده‌ایم (صفِ per کاربر هم‌زمانی را حذف کرده،
+   * ولی این شرط نمی‌گذارد یک خطای دیرهنگام پیشرفتِ واقعیِ بعدی را عقب ببرد). خطا دوباره
+   * پرتاب می‌شود تا صداکننده (هندلرِ `next:` یا `bot.catch`) دکمه‌ی ادامه را نشان بدهد. */
+  try {
+    await typing(ctx, PACE_S, 'upload_photo');
+    // در v4 کپشن هم مثل متن، برچسبِ **ترتیبی** می‌گیرد نه نامِ جایگاه — وگرنه کاربر هم‌زمان
+    // «کارت قلب تو» و «کارت اولت» را می‌بیند و تناقض حس می‌کند.
+    await sendCardPhoto(ctx, card.key, v4
+      ? L.reading.revealCaptionV4(L.prompts.cardLabels(cards.length)[idx], info, card.reversed)
+      : L.reading.revealCaption(positionName(spread.positions[idx]?.fa, idx), info, card.reversed));
+    // ⏱ v3.53.0: مکثِ کور (`sleep`) حذف شد؛ کلِ فاصله تا تیزر با نشانگرِ typing می‌گذرد.
+    await typing(ctx, PACE_TEASER);
 
-  // v4: کارتِ آخر هم دکمه دارد. قبلاً بعد از آخرین تیزر، جمع‌بندی خودکار می‌آمد و کاربر
-  // ناگهان با دیوارِ متن روبه‌رو می‌شد؛ حالا خودش لحظه‌ی جواب را انتخاب می‌کند و همان
-  // انتخاب، اوجِ انتظار را می‌سازد.
-  const lastRow = v4
-    ? [[Markup.button.callback(L.buttons.finalAnswer, `final:${readingId}`)]]
-    : null;
-  await ctx.reply(esc(interp), {
-    parse_mode: 'HTML',
-    // دکمه شماره‌ی کارتِ بعدی را حمل می‌کند تا دابل‌تاچ/دکمه‌ی کهنه هرگز کارت تکراری یا پرشی نفرستد
-    ...(isLast
-      ? (lastRow ? Markup.inlineKeyboard(lastRow) : {})
-      : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}:${idx + 1}`)]])),
-  });
+    if (askFeedback) {
+      await ctx.reply(esc(interp), { parse_mode: 'HTML' });
+      await sleep(PACE_M);
+      setState(uid, 'feedback');
+      await ctx.reply(llm.confirmation_question, Markup.inlineKeyboard([
+        [Markup.button.callback(L.buttons.fbYes, `fb:yes:${readingId}`)],
+        [Markup.button.callback(L.buttons.fbSomewhat, `fb:some:${readingId}`)],
+        [Markup.button.callback(L.buttons.fbNo, `fb:no:${readingId}`)],
+      ]));
+    } else {
+      // v4: کارتِ آخر هم دکمه دارد. قبلاً بعد از آخرین تیزر، جمع‌بندی خودکار می‌آمد و کاربر
+      // ناگهان با دیوارِ متن روبه‌رو می‌شد؛ حالا خودش لحظه‌ی جواب را انتخاب می‌کند و همان
+      // انتخاب، اوجِ انتظار را می‌سازد.
+      const lastRow = v4
+        ? [[Markup.button.callback(L.buttons.finalAnswer, `final:${readingId}`)]]
+        : null;
+      await ctx.reply(esc(interp), {
+        parse_mode: 'HTML',
+        // دکمه شماره‌ی کارتِ بعدی را حمل می‌کند تا دابل‌تاچ/دکمه‌ی کهنه هرگز کارت تکراری یا پرشی نفرستد
+        ...(isLast
+          ? (lastRow ? Markup.inlineKeyboard(lastRow) : {})
+          : Markup.inlineKeyboard([[Markup.button.callback(L.buttons.nextCard, `next:${readingId}:${idx + 1}`)]])),
+      });
+    }
+  } catch (e) {
+    const cur = getSession(uid);
+    if (cur.readingId === readingId && (cur.revealIdx || 0) === idx + 1) {
+      patchSession(uid, { revealIdx: idx });
+      if (getState(uid) === 'feedback') setState(uid, 'revealing');
+    }
+    throw e;
+  }
+  // همان پیشرفت روی **خودِ فال** هم مهر می‌خورد (#215): سشن را سیزده نقطه پاک می‌کنند،
+  // این ستون را هیچ‌کس. تنها چیزی است که بعد از `/start` می‌گوید کاربر تا کجا دیده.
+  // ⚠️ از v3.114.0 **بعد از** ارسالِ موفق: این ستون یعنی «کاربر دیده»، نه «قصد داشتیم
+  // بفرستیم». ری‌استارتِ وسطِ ارسال حالا همان کارت را دوباره می‌دهد (تکرارِ یک عکس، نه
+  // کارتِ جاافتاده). مهر یکنواخت است (`WHERE reveal_idx<?`)، پس هرگز عقب نمی‌رود.
+  stmts.setRevealIdx.run(idx + 1, readingId, idx + 1);
+  if (askFeedback) return;
   if (isLast && !v4) await finishReading(ctx, uid, readingId);
 }
 
@@ -6820,12 +6884,17 @@ bot.action(/^final:(\d+)$/, async (ctx) => {
   try {
     await finishReading(ctx, uid, readingId);
   } catch (e) {
+    logErr(`reading#${readingId} final delivery:`, e.message);
+    // 🛟 v3.114.0: اول ببین جواب رسیده یا نه. `finishReading` بعد از سه پیامِ جواب رکورد را
+    // `delivered` می‌کند و **بعدش** هنوز چند ارسال دارد (مدیاگروپ، نظرسنجی، پیشنهاد). اگر
+    // خطا از آن دُم آمده باشد، کاربر جوابش را گرفته و گاردِ «فالت نیمه‌تمومه» + دکمه‌ای که
+    // دیگر هیچ کاری نمی‌کند (رکورد `started` نیست) خودش یک بن‌بستِ تازه می‌ساخت.
+    if (stmts.getReading.get(readingId)?.status !== 'started') return;
     // پیامِ نهایی ممکن است به‌دلیل قطعِ موقتِ تلگرام نرسد. وضعیت را فقط به‌خاطر
     // شکستِ **ارسال** terminal نمی‌کنیم و قفل را باز می‌گذاریم تا کاربر با همان دکمه
     // یا منو/استارت بتواند دوباره ادامه دهد؛ هیچ الماسی هم دوباره کم نمی‌شود.
     patchSession(uid, { finalDone: false, finalAttemptAt: 0 });
-    logErr(`reading#${readingId} final delivery:`, e.message);
-    await ctx.reply(L.reading.openReadingGuard, Markup.inlineKeyboard([
+    await ctx.reply(L.reading.deliverGuard, Markup.inlineKeyboard([
       [Markup.button.callback(L.buttons.finalAnswer, `final:${readingId}`)],
     ])).catch(() => {});
   }

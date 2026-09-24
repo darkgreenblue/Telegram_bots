@@ -811,6 +811,7 @@ export default {
     canceled: 'Alright, I am here whenever you are ready 🌙',
     backToMenu: 'Back to the main menu 🌳',
     openReadingGuard: 'You have a reading open that you never finished 🌙\n\nWant to keep going with it, or drop it?',
+    deliverGuard: 'Your reading isn\'t finished yet 🌙\n\nTap the button below to pick up right where you left off:',
     /* همان پیام، ولی برای فالی که **پولش داده شده**: انصراف الماس را برنمی‌گرداند و
        کاربر باید قبل از تپ بداند (بند ۱۰ ریشه: ادعا هرگز از دیتا جلو نزند). */
     openReadingGuardPaid: 'You have a reading open that you never finished 🌙\n\nWant to pick it up where you left off?\n\n⚠️ If you drop it, the diamonds it cost you do not come back.\n\nSure you want to drop it?',

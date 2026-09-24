@@ -834,6 +834,7 @@ export default {
     canceled: 'Beleza, estou aqui quando você quiser 🌙',
     backToMenu: 'Voltamos ao menu principal 🌳',
     openReadingGuard: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela ou deixar pra lá?',
+    deliverGuard: 'Sua leitura ainda não terminou 🌙\n\nToque no botão abaixo pra continuar de onde ela parou:',
     openReadingGuardPaid: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela?\n\n⚠️ Se cancelar, os diamantes descontados não voltam.\n\nTem certeza que quer cancelar?',
     stuckReading: (canCancel) => 'Você tem uma leitura que ficou pela metade! 🌙\n\nAs suas cartas continuam te esperando; volta nelas quando quiser.'
       + (canCancel ? '\n\n💎 Se não quiser mais, é só cancelar; só lembra que os diamantes não voltam.' : ''),
