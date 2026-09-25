@@ -1469,7 +1469,10 @@
    "srmOk": true,
    "srm": "chi2=0.141",
    "guardrail": "❌ رضایت: −۰٫۱۵ ستاره per مدلِ سرو‌شده و −۰٫۳۵ بعد از پرداخت (معنادار)؛ refund ۵ رویداد/۴ کاربر در برابرِ ۰",
-   "decision": "ship نشد: متریکِ اصلی قبول ولی گاردریلِ رضایت رد. running ماند. تاریخِ تصمیم ~۱۵ روزِ کل (~۱۲ مهر). پیشنهادِ بعدی: کلیدِ جدا برای بازوی «دیپ‌سیک فقط فالِ رایگانِ اول».",
+   "decision": "ship نشد: متریکِ اصلی قبول ولی گاردریلِ رضایت رد. running ماند. تصمیمِ مالک (۳ مهر ۱۴۰۵): حداقل ۱۰ روزِ دیگر با همین ۵۰/۵۰، زودترین ارزیابی ۱۳ مهر. پیشنهادِ بعدی: کلیدِ جدا برای بازوی «دیپ‌سیک فقط فالِ رایگانِ اول».",
+   "reevaluateNotBefore": "2026-10-05",
+   "reevaluationBrief": "analytics/tarot/briefs/reading-model-ds-reevaluation.md",
+   "reevaluationQueries": "analytics/tarot/queries/reading-model-ds.json (eval، cost_scenarios؛ هر دو db-queryِ ساده)",
    "savingsPer30d": {
     "scenarioA_firstFreeOnly": {
      "usd": 6.06,
