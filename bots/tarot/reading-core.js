@@ -199,6 +199,33 @@ export const READING_MODEL  = (process.env.READING_MODEL || '').trim()
 export const FALLBACK_MODEL = 'deepseek/deepseek-v3.2'; // آخرین پله‌ی زنجیره (پایین‌تر، `READING_PLAN`)
 export const OR_TIMEOUT_MS  = 10 * 60 * 1000;
 
+/* ⛓️ **سقفِ سخت** هر درخواستِ OpenRouter (v3.118.0 — تیکتِ `#TRT-1686489477`).
+ *
+ * سقفِ زمانی تا امروز فقط یک `AbortController` بود: تایمر `abort()` می‌زد و انتظار
+ * داشتیم `fetch` (یا خواندنِ بدنه) با `AbortError` رد شود. روی رباتِ زنده این انتظار
+ * یک بار برآورده **نشد**: فالِ #23153 (بازوی ds، سقفِ هر تلاش ۶۰ ثانیه، بودجه‌ی کل ۴
+ * دقیقه) بیش از یک ساعت نه موفق شد، نه خطا داد، نه TIMEOUT؛ هیچ خطی از هیچ تلاشی در لاگ
+ * نیست. پس درخواست جایی گیر کرد که abort به آن نمی‌رسید. علتِ دقیقش داخلِ `fetch`ِ
+ * نود **تأییدنشده** است و فیکس عمداً به آن وابسته نیست.
+ *
+ * درمان: کنارِ abort یک تایمرِ دوم که promiseِ خودِ ما را **مستقل از `fetch`** رد
+ * می‌کند (`Promise.race`). بدترین حالت حالا «یک سوکتِ آویزان در پس‌زمینه» است، نه
+ * «کاربری که پولش را داده و ساعت‌ها پشتِ یک لودینگ می‌ماند». مهلتِ اضافه کوتاه است تا
+ * در حالتِ عادی همان abort زودتر کار کند و رفتارِ امروز (پیامِ TIMEOUT) عوض نشود. */
+export const OR_HARD_GRACE_MS = 5_000;
+/** promise را حداکثر `ms` صبر می‌کند و بعد با `TIMEOUT` ردش می‌کند، حتی اگر خودِ
+ *  promise هرگز settle نشود. `onExpire` (مثلاً abort) قبل از رد اجرا می‌شود. */
+export function hardTimeout(promise, ms, onExpire = null) {
+  let timer = null;
+  const stop = new Promise((_, rej) => {
+    timer = setTimeout(() => {
+      try { onExpire?.(); } catch { /* پاک‌سازی هرگز نباید ردِ اصلی را بخورد */ }
+      rej(new Error('TIMEOUT'));
+    }, Math.max(1, ms));
+  });
+  return Promise.race([promise, stop]).finally(() => clearTimeout(timer));
+}
+
 // کلید از env خوانده می‌شود، نه از پارامتر: هم ربات و هم آزمایشگاه همان `OPENROUTER_API_KEY`
 // را می‌بینند، پس هزینه‌ی تست دقیقاً روی همان کلیدِ تاروت می‌نشیند که خودِ محصول از آن
 // استفاده می‌کند و در گزارشِ OpenRouter از هم جدا نمی‌شوند.
@@ -303,9 +330,13 @@ export async function orRequest(body, meta = null) {
    * ⚠️ از `meta` می‌آید نه از بدنه: `meta` همان کانالی است که خودِ فایل «بیرونِ بدنه‌ی
    * ریکوئست، هرگز به سیم نمی‌رود» می‌نامدش. `orRequest` اصلاً `opts` ندارد و نوشتنِ
    * `opts.timeoutMs` این‌جا یک ReferenceError روی **هر فال** می‌شد. */
-  const timer = setTimeout(() => ctrl.abort(), Math.max(1000, Number(meta?.timeoutMs) || OR_TIMEOUT_MS));
+  const limitMs = Math.max(1000, Number(meta?.timeoutMs) || OR_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), limitMs);
   const t0 = Date.now();
-  try {
+  /* کلِ کار (fetch + خواندنِ بدنه + حسابداری) یک promise است و پشتِ سقفِ سخت می‌نشیند.
+   * اگر abort کارش را کرد، همین promise زودتر با AbortError رد می‌شود و همان مسیرِ
+   * همیشگیِ TIMEOUT اجرا می‌شود؛ سقفِ سخت فقط وقتی شلیک می‌کند که abort بی‌اثر مانده. */
+  const work = (async () => {
     // با پرچمِ خاموش (پیش‌فرض) این دقیقاً همان `body` است: `JSON.stringify` کلیدی را
     // که مقدارش undefined باشد اصلاً نمی‌نویسد، پس رشته‌ی نهایی بایت‌به‌بایت همان قبلی است.
     const wire = { ...body, usage: USAGE_INCLUDE_FLAG ? { include: true } : undefined };
@@ -346,6 +377,12 @@ export async function orRequest(body, meta = null) {
       } catch (e) { logErr('usage sink:', e.message); }
     }
     return { text, usage: u };
+  })();
+  try {
+    return await hardTimeout(work, limitMs + OR_HARD_GRACE_MS, () => {
+      ctrl.abort();
+      logErr(`⛓️ OR_HARD_TIMEOUT ${body.model} after ${Date.now() - t0}ms (abort بی‌اثر ماند)`);
+    });
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('TIMEOUT');
     throw err;
@@ -498,7 +535,8 @@ async function sttRequest(model, dataB64, format, meta) {
   const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), OR_TIMEOUT_MS);
-  try {
+  // همان سقفِ سختِ `orRequest`: abortِ بی‌اثر نباید مسیرِ ویس را بی‌پایان نگه دارد.
+  const work = (async () => {
     const res = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${keyOf()}`, 'Content-Type': 'application/json' },
@@ -522,6 +560,9 @@ async function sttRequest(model, dataB64, format, meta) {
       } catch (e) { logErr('usage sink:', e.message); }
     }
     return String(data.text || '').trim();
+  })();
+  try {
+    return await hardTimeout(work, OR_TIMEOUT_MS + OR_HARD_GRACE_MS, () => ctrl.abort());
   } finally { clearTimeout(timer); }
 }
 

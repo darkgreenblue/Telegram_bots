@@ -352,7 +352,7 @@ console.log('\n۱۰) بند ۹ب-۴: تشخیص خودکار، ارتباط با
 console.log('\n۱۱) سیم‌کشی در ناظرِ سلامت (رفتاری: حلقه از سورس بریده و اجرا می‌شود)');
 {
   const HW = readFileSync(new URL('./health-watch.mjs', import.meta.url), 'utf8');
-  ok(/import \{ stuckCycle \} from '\.\/stuck-detect\.mjs'/.test(HW), 'ناظر ماژول را import می‌کند');
+  ok(/import \{ stuckCycle(, hungCycle)? \} from '\.\/stuck-detect\.mjs'/.test(HW), 'ناظر ماژول را import می‌کند');
   ok(/await checkStuck\(state, now\)/.test(HW), 'و در هر دور صدایش می‌زند');
   // ⚠️ عمداً بیرونِ آرایه‌ی `problems`: وگرنه پایانِ یک حلقه‌ی کاربران یک «✅ رفع شد»
   // می‌ساخت که هیچ‌کس رفعش نکرده بود.

@@ -509,6 +509,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-retry-cut.mjs
 
+      # ⛓️ فالِ پول‌داده هرگز پشتِ یک فراخوانیِ آویزان گیر نمی‌کند (تیکتِ #TRT-1686489477):
+      # fetchی که abort را نادیده می‌گیرد، سقفِ llmInflight، و ناظرِ بیرونیِ health-watch.
+      - name: LLM hang guard check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-llm-hang.mjs
+
       # 🧪 آزمایشِ ۵۰/۵۰ مدلِ خوانش (دیپ‌سیکِ برش‌خورده در برابرِ luna): سیدِ آزمایش،
       # وضعیتِ درست، فیلترِ متقارنِ فالِ صوتی، و چرخه‌ی عمرِ readingArm/loadingShown
       # (پاک‌سازیِ تک‌مصرف، ms هرگز منفی نمی‌شود) روی SQLite واقعی اجرا می‌شوند.

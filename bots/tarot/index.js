@@ -68,6 +68,7 @@ import {
   buildReadingCtx, renderV4, cardName, positionName, choiceLabelsFor, spreadName, cardKeywords,
   locSpread,
   CHAT_PLAN, CHAT_MODEL,
+  hardTimeout,
 } from './reading-core.js';
 // 🗣 هسته‌ی خالصِ گفتگو — دوقلوی reading-core برای فیچرِ چت. همان کد را
 // `tools/chat-lab.mjs` صدا می‌زند، پس سنجه‌ی آزمایشگاه دقیقاً همان متنی را می‌بیند
@@ -318,7 +319,7 @@ const TEST_PHASE = false;
 //         دیگر گزینه‌ی «بی‌خیالش شو» را وعده نمی‌دهد. جزئیات: CLAUDE.md تاروت.
 // 3.116.0: 🎁 پیشنهادِ پایانی در همه‌ی جواب‌های گفتگو (از جوابِ اولِ رایگان) + 🛟 حرفِ
 //         آسیب/اورژانس فقط با نشانه‌ی صریحِ خطر از خودِ کاربر. جزئیات: CLAUDE.md تاروت.
-const PRODUCT_VERSION = '3.117.0';
+const PRODUCT_VERSION = '3.118.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1410,6 +1411,25 @@ const LOADING_LONG_WAIT_MS = 20_000;
 const READING_ATTEMPT_TIMEOUT_MS = 60_000;
 const READING_LLM_BUDGET_MS      = 4 * 60 * 1000;
 const READING_RETRY_CUT_AFTER_MS = 30_000;
+/* ⛓️ سقفِ **کلِ** فراخوانیِ خوانش، از بیرون (v3.118.0 — تیکتِ `#TRT-1686489477`).
+ *
+ * بودجه‌ی بالا فقط **بینِ تلاش‌ها** و **داخلِ هر درخواست** چک می‌شود؛ هر awaitی که
+ * بیرونِ آن‌ها گیر کند (دانلودِ ویس، خواندنِ بدنه با abortِ بی‌اثر، یا هر کدِ آینده)
+ * هیچ سقفی نداشت. نتیجه‌اش روی رباتِ زنده: promiseِ فالِ #23153 هرگز settle نشد، ورودیِ
+ * `llmInflight` برای همیشه ماند، و **هر** اقدامِ کاربر (حتی `/start`) جوابِ «⌛️ در حال
+ * تفسیر کارت‌ها» گرفت، چون `resolveUnreadyReveal` فالِ در جریان را هرگز ریفاند نمی‌کند.
+ * یعنی یک فالِ پول‌داده به بن‌بستِ کاملِ ربات تبدیل شد تا ری‌استارتِ بعدی.
+ *
+ * حالا خودِ promiseِ ذخیره‌شده در `llmInflight` حداکثر این‌قدر زنده است و بعدش `null`
+ * می‌دهد، یعنی همان مسیرِ همیشگیِ شکست: ریفاندِ اتمیک + دکمه‌ی تلاشِ دوباره. عدد عمداً
+ * بزرگ‌تر از بودجه (+دانلودِ ویس +حاشیه) و کوچک‌تر از `handlerTimeout` (۱۰ دقیقه) است:
+ * در حالتِ عادی هرگز شلیک نمی‌کند، و وقتی می‌کند، کاربر پیامِ ریفاند را **داخلِ همان
+ * هندلر** می‌گیرد نه یک خطای سراسری. */
+const QUESTION_AUDIO_TIMEOUT_MS  = 30_000;
+const READING_INFLIGHT_MAX_MS    = READING_LLM_BUDGET_MS + QUESTION_AUDIO_TIMEOUT_MS + 60_000;
+// انیمیشنِ لودینگ هم سقف دارد: بدونِ آن، promiseِ آویزان یعنی هر ۲ ثانیه یک ادیت تا
+// ابد (روی #23153 بیش از یک ساعت). با سقفِ بالا عملاً هرگز به این نمی‌رسد؛ تورِ دوم است.
+const LOADING_MAX_MS             = READING_INFLIGHT_MAX_MS + 30_000;
 /* 🧪 آزمایشِ مدلِ خوانش (v3.105.0) — «دیپ‌سیکِ پولی با یک ریترای و فالبکِ مدلِ فعلی».
  *
  * چرا A/B و نه سوییچِ سخت: اندازه‌گیریِ آزمایشگاهی افتِ ۴٫۵٪ رابریک و +۲۲ واحد لنگر داد،
@@ -3519,13 +3539,19 @@ function readingCtxFor(user, spread, question, cards, focusKey) {
 // هزینه را نمی‌شکند؛ ولی چون بعد از کسرِ اعتبار اجرا می‌شود، شکستش باید به مسیرِ ریفاند
 // برود نه به خوانشِ بی‌سؤال. برای همین در شکست null می‌دهد و صداکننده تصمیم می‌گیرد.
 async function fetchQuestionAudio(r) {
+  // ⛓️ تا v3.117.0 این دانلود هیچ سقفی نداشت و **قبل از** شروعِ بودجه‌ی خوانش است، پس
+  // یک سرورِ کُند می‌توانست فالِ پول‌داده را بی‌پایان نگه دارد. شکستش همان مسیرِ قبلی
+  // است: خوانش بدونِ صدا روی حوزه‌ی تمرکز بنا می‌شود (پایین)، نه ریفاند.
+  const ctrl = new AbortController();
   try {
-    const link = await bot.telegram.getFileLink(r.question_audio);
-    const res = await fetch(link.href);
-    if (!res.ok) throw new Error(`telegram file ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (!buf.length || buf.length > MAX_VOICE_BYTES) throw new Error(`bad size ${buf.length}`);
-    return { data: buf.toString('base64'), format: r.question_audio_fmt || 'mp3' };
+    return await hardTimeout((async () => {
+      const link = await bot.telegram.getFileLink(r.question_audio);
+      const res = await fetch(link.href, { signal: ctrl.signal });
+      if (!res.ok) throw new Error(`telegram file ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length || buf.length > MAX_VOICE_BYTES) throw new Error(`bad size ${buf.length}`);
+      return { data: buf.toString('base64'), format: r.question_audio_fmt || 'mp3' };
+    })(), QUESTION_AUDIO_TIMEOUT_MS, () => ctrl.abort());
   } catch (e) {
     logErr(`reading#${r.id} دانلودِ ویسِ سؤال شکست خورد:`, e.message);
     return null;
@@ -3804,6 +3830,20 @@ async function callReadingLLM(readingId, armOpts = null) {
 // رسیدنِ جواب به افشا می‌رسد، همین Map جلوی **فراخوانیِ دوم** را می‌گیرد: افشا به همان
 // promise می‌چسبد. فقط کش است؛ حقیقت `readings.llm_json` است (ری‌استارت = فراخوانیِ دوباره).
 const llmInflight = new Map();
+/* 🔔 خبرِ فوریِ LLM_HANG فقط به ادمین‌ها (بند ۹ب-۴ ریشه: به کاربر پیامِ خودکار نمی‌رود؛
+ * خودِ کاربر همان مسیرِ ریفاند/تلاشِ دوباره‌ی همیشگی را می‌گیرد). بدونِ این، سقفِ بالا
+ * مشکل را بی‌صدا حل می‌کرد و مالک هرگز نمی‌فهمید مدل آویزان شده بود (تیکتِ
+ * `#TRT-1686489477`: پنج مورد در ۳۰ روز، هیچ‌کدام هشدار نداشت). fire-and-forget. */
+function alertHang(readingId) {
+  try {
+    const r = stmts.getReading.get(readingId);
+    const text = `⛓️ LLM_HANG: فالِ #${readingId} (کاربر ${r?.user_id ?? "?"}، ${r?.type ?? "?"}) بعد از `
+      + `${Math.round(READING_INFLIGHT_MAX_MS / 1000)} ثانیه از مدل جوابی نگرفت و به مسیرِ ریفاند رفت.\n`
+      + 'اگر تکرار شد به Claude Code بگو: «فال گیر کرده، LLM_HANG».';
+    for (const a of ADMIN_IDS) bot.telegram.sendMessage(a, text).catch(() => {});
+  } catch (e) { logErr('alertHang:', e.message); }
+}
+
 async function awaitReadingLLM(uid, readingId) {
   const r = stmts.getReading.get(readingId);
   if (r?.llm_json) { try { return JSON.parse(r.llm_json); } catch {} }
@@ -3826,7 +3866,16 @@ async function awaitReadingLLM(uid, readingId) {
         };
       }
     }
-    p = callReadingLLM(readingId, armOpts).finally(() => llmInflight.delete(readingId));
+    /* ⛓️ سقفِ بیرونی (`READING_INFLIGHT_MAX_MS`): فقط TIMEOUTِ همین سقف به `null`
+     * تبدیل می‌شود (= مسیرِ شکستِ همیشگی)؛ هر خطای دیگری مثل قبل پرتاب می‌شود. */
+    p = hardTimeout(callReadingLLM(readingId, armOpts), READING_INFLIGHT_MAX_MS)
+      .catch((e) => {
+        if (e?.message !== 'TIMEOUT') throw e;
+        logErr(`⛓️ LLM_HANG reading#${readingId}: فراخوانی بعد از ${READING_INFLIGHT_MAX_MS}ms settle نشد؛ مسیرِ شکست (ریفاند) اجرا می‌شود`);
+        alertHang(readingId);
+        return null;
+      })
+      .finally(() => llmInflight.delete(readingId));
     llmInflight.set(readingId, p);
   }
   const result = await p;
@@ -6602,7 +6651,7 @@ async function waitLLMWithLoading(ctx, uid, readingId, onFinalFailure = null) {
     // ده ثانیه‌ی اول تند (کاربر همان‌جا تصمیم می‌گیرد «کار می‌کند یا خراب است»)، بعد
     // آرام. این تنها راهی بود که هم ایرادِ مالک («خیلی سریع‌تر، الان معلوم نیست ویتینگه»)
     // را جواب بدهد و هم برای انتظارِ ۶۰ ثانیه‌ای زیرِ سقفِ ~۱ ادیت-در-ثانیه‌ی تلگرام بماند.
-    while (!done) {
+    while (!done && Date.now() - startedAt < LOADING_MAX_MS) {
       await sleep(pace(Date.now() - startedAt));
       if (done) break;
       try {

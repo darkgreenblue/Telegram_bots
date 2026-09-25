@@ -30,7 +30,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { heartbeatAgeSec } from '../shared/heartbeat.js';
-import { stuckCycle } from './stuck-detect.mjs';
+import { stuckCycle, hungCycle } from './stuck-detect.mjs';
 import { checkDashboard } from './dashboard-health.mjs';
 
 const run = promisify(execFile);
@@ -264,6 +264,32 @@ async function checkStuck(state, now = Date.now()) {
   }
 }
 
+/* 🔮 فالِ پول‌داده‌ای که در «در حال تفسیر» گیر کرده (v3.118.0، `stuck-detect.mjs` → hungCycle).
+ *
+ * برخلافِ `checkStuck` این یک **خرابی** است، پس جزوِ `problems` است: تا وقتی فال گیر
+ * است یادآوری می‌شود و وقتی ریفاند/تحویل شد «✅ رفع شد» می‌گیرد (که این‌جا واقعاً یعنی
+ * رفع شد). هر دور (۵ دقیقه) اجرا می‌شود چون تأییدش دو دورِ پیاپی می‌خواهد. */
+async function checkHungReadings(state, now = Date.now()) {
+  const out = [];
+  let Database;
+  try {
+    Database = (await import(pathToFileURL(
+      join(ROOT, 'bots/tarot/node_modules/better-sqlite3/lib/index.js')).href)).default;
+  } catch (e) { logErr('❌ HEALTH_WATCH better-sqlite3 در دسترس نیست:', e.message); return out; }
+  for (const [name, loc] of HEARTBEAT_APPS) {
+    const file = join(ROOT, 'bots/tarot/data', `bot-${loc}.db`);
+    if (!existsSync(file)) continue;
+    let db;
+    try {
+      db = new Database(file, { readonly: true, fileMustExist: true });
+      const found = hungCycle(db, name, state, Math.floor(now / 1000));
+      if (found) out.push(found);
+    } catch (e) { logErr('❌ HEALTH_WATCH فالِ گیرکرده:', name, e.message); }
+    finally { try { db?.close(); } catch { /* بی‌اهمیت */ } }
+  }
+  return out;
+}
+
 /* ═══════════════ حالت و هشدار ═══════════════ */
 // حالت روی دیسک می‌ماند نه در حافظه: هر دیپلوی این پروسه را ری‌استارت می‌کند و بدونِ آن،
 // هر دیپلوی یک موجِ هشدارِ تکراری برای مشکلی می‌فرستاد که مالک از قبل خبر داشت.
@@ -284,6 +310,7 @@ async function cycle(state) {
     ...(await checkUnits()),
     ...(await checkDisk()),
     ...(await checkDashboard(run)),
+    ...(await checkHungReadings(state, now)),
   ];
   if (now - (state.creditsAt || 0) >= CREDITS_EVERY_MS) {
     problems.push(...(await checkCredits()));
