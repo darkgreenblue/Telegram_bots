@@ -558,6 +558,57 @@ console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
   'هر چهار مسیرِ ارسالِ رد از پیامِ دکمه‌دارِ مشترک استفاده می‌کنند');
 }
 
+/* ══ 🛟 رسیدِ **دستی**-تأییدشده هم شبکه‌ی ایمنیِ برگشت می‌گیرد ══════════════════════ */
+// از تیکتِ واقعیِ پرداختِ #۱۳۰۲: مالک یک رسید را دستی approve کرد و بعد فهمید اشتباه
+// بوده. رسیدِ auto-approve شده از قبل دکمه‌ی «🚫 پیامکش نیومده» را داشت (notifyAdminAutoApproved)؛
+// approve/susyes دستی هیچ‌کدام نداشتند و کیبورد را کاملاً حذف می‌کردند
+// (`editMessageReplyMarkup(undefined)`), یعنی تصمیمِ اشتباهِ ادمین راهِ برگشتی جز
+// جست‌وجوی دستیِ ردیف در DB نداشت. حالا هر دو همان یک‌دکمه‌ایِ `cardsms:${pid}` را
+// می‌گذارند که به همان `confirmReverse → cardrev → reversePayment` وصل است.
+console.log('\n▶ 🛟 approve/susyes همان دکمه‌ی «پیامکش نیومده» را می‌گذارند');
+{
+  function bodyOf(marker, end = '\n});') {
+    const from = SRC.indexOf(marker);
+    if (from < 0) return null;
+    const to = SRC.indexOf(end, from);
+    return to < 0 ? null : SRC.slice(from, to);
+  }
+  const approveBody = bodyOf("bot.action(/^approve:(\\d+)$/, async (ctx) => {");
+  const susyesBody = bodyOf("bot.action(/^susyes:(\\d+)$/, async (ctx) => {");
+  const rejectBody = bodyOf("bot.action(/^reject:(\\d+)$/, async (ctx) => {");
+  const susnoBody = bodyOf("bot.action(/^susno:(\\d+)$/, async (ctx) => {");
+  ok(!!approveBody, 'بدنه‌ی approve: از سورس پیدا شد');
+  ok(!!susyesBody, 'بدنه‌ی susyes: از سورس پیدا شد');
+  ok(!!rejectBody, 'بدنه‌ی reject: از سورس پیدا شد');
+  ok(!!susnoBody, 'بدنه‌ی susno: از سورس پیدا شد');
+
+  const CARDSMS_KEYBOARD =
+    /Markup\.inlineKeyboard\(\[\[\s*Markup\.button\.callback\(L\.buttons\.smsNotArrived,\s*`cardsms:\$\{pid\}`\),?\s*\]\]\)\.reply_markup/;
+
+  ok(approveBody ? CARDSMS_KEYBOARD.test(approveBody) : false,
+    'approve: بعد از تأیید، کیبورد را با تک‌دکمه‌ی cardsms جایگزین می‌کند');
+  ok(approveBody ? !/editMessageReplyMarkup\(undefined\)/.test(approveBody) : false,
+    'و دیگر کلِ کیبورد را (undefined) حذف نمی‌کند');
+
+  ok(susyesBody ? CARDSMS_KEYBOARD.test(susyesBody) : false,
+    'susyes: هم بعد از تأیید همان تک‌دکمه‌ی cardsms را می‌گذارد');
+  ok(susyesBody ? !/editMessageReplyMarkup\(undefined\)/.test(susyesBody) : false,
+    'و دیگر کلِ کیبورد را (undefined) حذف نمی‌کند');
+
+  // کنترلِ معکوس: reject/susno چیزی برای برگشت ندارند (کریدیت داده نشده)، پس باید
+  // بیت‌به‌بیت رفتارِ قدیمی را حفظ کرده باشند — وگرنه یعنی این فیکس بیش از دامنه‌اش رفته.
+  ok(rejectBody ? /editMessageReplyMarkup\(undefined\)/.test(rejectBody) : false,
+    'کنترلِ معکوس: reject: هنوز کلِ کیبورد را حذف می‌کند (چیزی برای برگشت نیست)');
+  ok(susnoBody ? /editMessageReplyMarkup\(undefined\)/.test(susnoBody) : false,
+    'کنترلِ معکوس: susno: هم همین‌طور');
+
+  // دکمه از همان تابعی ساخته می‌شود که رسیدهای auto-approve از v3.61.0 دارند
+  // (notifyAdminAutoApproved) — یعنی منطقِ تازه‌ای موازی ساخته نشده.
+  const autoBody = bodyOf('function notifyAdminAutoApproved(');
+  ok(autoBody ? /Markup\.button\.callback\(L\.buttons\.smsNotArrived,\s*`cardsms:\$\{p\.id\}`\)/.test(autoBody) : false,
+    'همان الگوی دکمه‌ای که رسیدِ auto-approve از قبل داشت، اینجا هم تکرار شده');
+}
+
 db.close();
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا\n`);
 process.exit(fail ? 1 : 0);
