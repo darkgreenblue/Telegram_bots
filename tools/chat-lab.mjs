@@ -48,6 +48,8 @@ const {
   buildChatCtx, packHistory, toMessages, messagesChars,
   cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
   crisisIn, smallTalkIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
+  chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
+  floorApplies, CHAT_FLOOR_CHARS,
 } = await import('../bots/tarot/chat-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند (درسِ checks.mjs).
 const { chatMetrics, repeatedNgrams, LINE_MIN, LINE_MAX } = await import('./reading-lab/chat-checks.mjs');
@@ -152,51 +154,12 @@ const PROMPT_VARIANTS = {
    * ریفاندِ بی‌صدا) دقیقاً همین را می‌گیرد و رویدادِ `chat_thin` اندازه‌اش را در
    * پروداکشن گزارش می‌کند. اگر آن عدد بالا رفت، فرضیه‌ی دورِ بعد همین دو قاعده‌اند. */
 
-  /* 🎁 `v5` — **بازوی مقایسه‌ی v3.104.0**، و عمداً برعکسِ همه‌ی واریانت‌های قبلی:
-   * این‌بار پرامپتِ **محصول** v6 است و بازو همان v5ِ قبلی را برمی‌گرداند. پس `control`
-   * (بدونِ واریانت) چیزی است که قرار است منتشر شود و `v5` وضعِ موجود است.
-   *
-   * چرا این شکل: تصمیمِ مالک روی خطِ آخر گرفته شده و کدِ محصول باید همان را حمل کند؛
-   * بازو فقط برای **اندازه‌گیریِ اثر** لازم است، نه برای تصمیم. اگر برعکس بود، یک دورِ
-   * نگرفته می‌توانست پرامپتِ ردشده را زنده نگه دارد.
-   *
-   * ⚠️ این بازو **دو چیز** را با هم برمی‌گرداند (خطِ آخر و مشخصاتِ `follow_up`)، پس
-   * تک‌متغیره نیست. عمدی است: در v6 این دو یک تغییرِ به‌هم‌گره‌خورده‌اند (شکلِ برچسب
-   * فقط در نسبت با شکلِ خطِ آخر معنی دارد) و تصمیمِ واقعی هم «v6 در برابرِ v5» است نه
-   * «کدام نیمه». تفکیکِ اثر از خودِ سنجه‌ها می‌آید نه از بازو: `noOffer` فقط خطِ آخر را
-   * می‌سنجد و `fuNoAsk`/`fuLong` فقط برچسب را. */
-  v5: (p) => p
-    .replace(
-      `═══ خطِ آخر: پیشنهاد ═══
-هر جواب، بدونِ استثنا، با یک **پیشنهاد** تمام می‌شود: کاری که **تو** برایش می‌کنی و اجازه‌اش را می‌گیری.
-- فقط دو شکل: «می‌خوای …؟» یا «اگه بخوای می‌تونم … برات …». همیشه از زبانِ **تو**.
-- ممنوع چون پیشنهاد نیست: خبرِ کارِ خودت («می‌نویسم»، «آماده می‌کنم»، «می‌تونیم … کنیم»، «می‌رسیم به…»)، سؤالِ خالیِ بی‌پیشنهاد، و زبانِ او («می‌خوام بدونم…»).`,
-      `═══ خطِ آخر: دعوتِ ادامه ═══
-هر جواب، بدونِ استثنا، با یک **دعوتِ مشخص برای ادامه** تمام می‌شود. مهم‌ترین خطِ جواب همین است.
-- یک زاویه‌ی تازه‌ی مشخص را **نام ببر**، یا چیزی را که خودش نیم‌بند گفت بردار و بگو همان‌جا چه چیزی هنوز باز مانده. **خبری بنویس، نه درخواستِ اجازه**: «می‌خوای…؟»، «بریم سراغش؟» و «بررسی کنیم؟» ننویس.`)
-    .replace('پیشنهادی که زیرِ جوابِ هر کسِ دیگری', 'جمله‌ای که زیرِ جوابِ هر کسِ دیگری')
-    .replace('جمله باید همان پیشنهاد **باشد**', 'جمله باید همان دعوت **باشد**')
-    .replace(
-      'دربارهٔ همان چیزی که پیشنهاد دادی، همان‌طور که خودش تایپش می‌کرد: اول‌شخص، سؤالِ کامل که به «؟» تمام شود. **جوابِ پیشنهادِ تو نیست، سؤالِ خودش است.**',
-      'دربارهٔ همان زاویه‌ی خطِ آخر، دقیقاً همان‌طور که خودش تایپش می‌کرد: اول‌شخص، و حتماً یک سؤالِ کامل که به «؟» تمام شود.')
-    .replace('**حداکثر ۳۶ نویسه**، کوتاه‌تر بهتر، یک خط', 'حداکثر ۶۰ نویسه، یک خط'),
-
-  /* 🎁 `v6` — بازوی **دورِ دومِ** همین PR، و برخلافِ `v5` این یکی واقعاً تک‌متغیره است:
-   * فقط همان یک خطِ تازه را برمی‌دارد و باقیِ پرامپت بیت‌به‌بیت همان چیزی می‌ماند که
-   * دورِ ۱۴۰۵/۰۶/۲۸ سنجید. پس تفاضلِ دو بازو دقیقاً اثرِ همان خط است.
-   *
-   * فرضیه از دیتا آمد نه از شهود: در آن دور ۶ نقض از ۱۹ ماند و **۵تایشان یک کلاس
-   * بودند** — جوابِ فکتِ محصولی، ارجاع به پشتیبانی، و اشاره به یک دکمه. مدل آن‌جا را
-   * استثنا می‌فهمید، چون «مرزها» و «فالِ تازه» می‌گویند «همین را بگو و تمام». نقضِ
-   * ششم یک جوابِ زیرِ کفِ محتوا بود که مکانیزمِ `CHAT_FLOOR` خودش می‌گیردش.
-   *
-   * ⚠️ استثنای `wants_end` هم با همین بازو برداشته می‌شود، چون آن دو یک جمله‌اند. اثرش
-   * روی عدد یک نوبت از ۱۹ است و جهتش معلوم: بازوی v6 آن‌جا هم «پیشنهاد نداد» می‌گیرد،
-   * ولی سنجه از این نسخه معافش می‌کند، پس مقایسه به نفعِ هیچ بازویی کج نمی‌شود. */
-  v6: (p) => p
-    .replace(
-      '\n- جوابِ فکتِ محصولی، ارجاع به پشتیبانی و اشاره به یک دکمه هم استثنا نیست؛ پیشنهادت آن‌جا به همین فال یا گفتگو برمی‌گردد. تنها استثنا: خودش دارد تمام می‌کند (wants_end).',
-      ''),
+  /* 📭 `v5` و `v6` (بازوهای دورِ v3.104.0) هم پاک شدند: لنگرِ `replace`ِ هر دو متنِ
+   * بلوکِ قدیمیِ «خطِ آخر» بود که v3.116.0 بازنویسی‌اش کرد، پس هر دو دیگر فقط بلد
+   * بودند با «هیچ تغییری نداد» اجرا را بکُشند. مقایسه‌ی v3.116.0 با خطِ پایه‌ی **ثبت‌شده**
+   * است (همان سناریوها و seedها، قبل از تغییرِ کد)، نه با یک بازوی پرامپتی: چیزی که
+   * عوض شد بیشترش **کد** است (فیلدِ offer، تعمیرِ هدف‌دار، حذفِ جمله)، و کد را با
+   * وصله‌ی پرامپت نمی‌شود برگرداند. */
 
   /* 📭 سه واریانتِ دورهای ۲ تا ۴ (`v2`, `v3`, `v4`) این‌جا بودند و هر سه
    * تکلیفشان روشن شد، پس طبقِ بند ۹/۰ ریشه پاک شدند نه خاموش:
@@ -397,7 +360,11 @@ async function buildBase(persona, step, i) {
   const spread = SPREAD_BY_ID[step.spread];
   // seed ثابت per قدم، عیناً مثل آزمایشگاهِ خوانش: کشِ پایه و ساختِ تازه **همان
   // کارت‌ها** را می‌دهند، پس مقایسه‌ی بین دورها سالم می‌ماند.
-  const cards = drawCards(`lab:${persona.id}:${i}`, step.picks || [0, 1, 2], spread.size);
+  /* `cards` اختیاری است: بازتولیدِ **عینِ** دستِ یک گفتگوی واقعی (پرسونای C5 از
+   * ترنسکریپتِ تستِ دستیِ مالک). بدونش همان کشیدنِ seedدار و قطعیِ همیشگی. */
+  const cards = Array.isArray(step.cards) && step.cards.length
+    ? step.cards.map((c) => ({ key: String(c.key), reversed: !!c.reversed }))
+    : drawCards(`lab:${persona.id}:${i}`, step.picks || [0, 1, 2], spread.size);
   const ctx = buildReadingCtx({
     user: { telegram_id: 900000 + i, memory_json: '', focus_area: persona.focus },
     spread, question: step.question, cards, focusKey: persona.focus, L,
@@ -454,10 +421,12 @@ async function runConversation(persona, base, arm, rep) {
   /* پیشوندِ ثابت: **یک بار** ساخته می‌شود و در طولِ کلِ گفتگو بیت‌به‌بیت یکسان می‌ماند.
    * این شرطِ اقتصادیِ فیچر است نه یک بهینه‌سازی (کشِ پرامپت)، پس آزمایشگاه هم باید
    * دقیقاً همان‌طور بسازدش که ربات می‌سازد و هم باید ثابت ماندنش را **بسنجد**. */
-  const system = `${systemFor(armVariant(arm))}\n\n${buildChatCtx({
+  const system = chatSystemPrompt(systemFor(armVariant(arm)), buildChatCtx({
     reading: { question: base.question }, llm: base.llm, cards, spread, labels,
     memory: '', prev: [], L,
-  })}`;
+  }), L);
+  // 🛟 همان تعریفِ ربات: نشانه‌ی صریحِ خطر فقط از حرفِ خودِ کاربر (سؤالِ فال + نوبت‌ها).
+  let crisisSeen = !!crisisIn(base.question);
 
   const history = [];
   const turns = [];
@@ -482,7 +451,7 @@ async function runConversation(persona, base, arm, rep) {
     const offDomain = !viaTap && typeof up === 'object' && !!up?.off;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
-    if (crisisIn(q)) { turns.push({ q, skipped: 'crisis' }); continue; }
+    if (crisisIn(q)) { crisisSeen = true; turns.push({ q, skipped: 'crisis' }); continue; }
     if (smallTalkIn(q)) { turns.push({ q, skipped: 'smalltalk' }); continue; }
 
     const packed = packHistory(history);
@@ -498,30 +467,66 @@ async function runConversation(persona, base, arm, rep) {
           return opts.validate(out) ? { out, model: 'fake', attempts: 1 } : null;
         }
       : orChatResilient;
+    const onUsage = (u) => {
+      usage.in += Number(u?.prompt_tokens) || 0;
+      usage.out += Number(u?.completion_tokens) || 0;
+      usage.usd += Number(u?.cost) || 0;
+      usage.cached += Number(u?.prompt_tokens_details?.cached_tokens) || 0;
+    };
     const res = await call('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
       validate: chatOutOk,
       /* 💵 هزینه‌ی **واقعی** از خودِ پاسخِ OpenRouter. هرگز از روی توکن با یک جدولِ
        * قیمتِ هاردکد حساب نمی‌شود: همان اشتباه یک بار DeepSeek را «گران‌ترین» گزارش
        * کرد در حالی که ارزان‌ترین بود (بند ثبت‌شده‌ی دورِ ۹). */
-      onUsage: (u) => {
-        usage.in += Number(u?.prompt_tokens) || 0;
-        usage.out += Number(u?.completion_tokens) || 0;
-        usage.usd += Number(u?.cost) || 0;
-        usage.cached += Number(u?.prompt_tokens_details?.cached_tokens) || 0;
-      },
+      onUsage,
     }, planFor(armModel(arm)));
     const ms = Date.now() - t0;
 
     if (!res?.out) { turns.push({ q, failed: true, ms, usage }); continue; }
 
     // پاکت را باز می‌کنیم، عیناً مثل `runChatTurn`ِ پروداکشن.
-    const outObj = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
-    const reply = cleanChatReply(outObj.text, { name: persona.name });
+    let outObj = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
+    let raw = res.out;
+    let model = res.model;
+
+    /* 🎁🛟 همان تعمیرِ هدف‌دارِ ربات: یک تلاش، روی مدلِ بازو، فقط وقتی اکیداً بهتر شد.
+     * «اولِ کار» (`pre`) جدا از «نتیجه» ثبت می‌شود تا معلوم باشد چقدر از بهبود کارِ
+     * پرامپت است و چقدر کارِ تعمیر؛ بدونِ این تفکیک، عددِ نهایی هر دو را قاطی می‌کرد. */
+    const crisisCtx = crisisSeen || !!crisisIn(q);
+    const thinOf = (o) => !!(floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
+    let thin = thinOf(outObj);
+    let needs = chatFixNeeds(outObj, { crisisCtx });
+    const pre = { thin, offer: needs.offer, safety: needs.safety, json: !!parseChatOut(res.out) };
+    const fix = { fired: false, fixed: false, ms: 0 };
+    if (thin || needs.offer || needs.safety) {
+      fix.fired = true;
+      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, min: CHAT_FLOOR_CHARS });
+      const retryMsgs = messages.map((m, i) => (
+        i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
+      const f0 = Date.now();
+      // `Promise.resolve().then` چون استابِ `--fake` همگام برمی‌گرداند، نه promise.
+      const res2 = await Promise.resolve().then(() => call('', '', {
+        messages: retryMsgs, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
+        validate: chatOutOk, onUsage,
+      }, [planFor(armModel(arm))[0]])).catch(() => null);
+      fix.ms = Date.now() - f0;
+      const o2 = res2?.out ? parseChatOut(res2.out) : null;
+      if (o2) {
+        const thin2 = thinOf(o2);
+        const needs2 = chatFixNeeds(o2, { crisisCtx });
+        if (chatFixScore(needs2, thin2) < chatFixScore(needs, thin)) {
+          outObj = o2; raw = res2.out; model = res2.model || model;
+          thin = thin2; needs = needs2; fix.fixed = true;
+        }
+      }
+    }
+    const fin = finalizeChatOut(outObj, { name: persona.name, crisisCtx });
+    const reply = fin.reply;
     let check;
     try {
       check = chatMetrics({
-        reply, raw: res.out, cardNames,
+        reply, raw, cardNames,
         questionWords: questionWordsOf(q, base.question), question: q, offDomain,
         // سنجه برچسبِ **خام** را می‌بیند (قبل از گاردِ کد)، وگرنه همیشه صفر می‌گفت.
         flags: outObj, followUp: outObj.followUpRaw || '',
@@ -533,7 +538,8 @@ async function runConversation(persona, base, arm, rep) {
         issues: [`خطای خودِ سنجه: ${e.message}`], notes: [] };
     }
 
-    turns.push({ q, viaTap, reply, raw: res.out, model: res.model, attempts: res.attempts,
+    turns.push({ q, viaTap, reply, raw, model, attempts: res.attempts, pre, fix,
+      stripped: fin.safetyStripped, offerMissing: fin.offerMissing, crisisCtx,
       flags: { newReading: outObj.newReading, support: outObj.support, end: outObj.end },
       followUp: outObj.followUpRaw || '', fuKept: outObj.followUp || '',
       ms, usage, check, inputChars: messagesChars(messages) });
@@ -687,6 +693,14 @@ function summarize(rows) {
   const fuNoAsk = done.filter((t) => t.check.fuNoAsk).length;
   const fuLong = done.filter((t) => t.check.fuLong).length;
   const noOffer = done.filter((t) => t.check.noOffer).length;
+  const safety = done.filter((t) => t.check.safetyTalk).length;
+  // 🎁🛟 «اولِ کار» در برابرِ «نتیجه»: سهمِ پرامپت جدا از سهمِ تعمیر و حذفِ قطعی.
+  const preOffer = done.filter((t) => t.pre?.offer).length;
+  const preSafety = done.filter((t) => t.pre?.safety).length;
+  const preNoJson = done.filter((t) => t.pre && !t.pre.json).length;
+  const fixFired = done.filter((t) => t.fix?.fired).length;
+  const fixFixed = done.filter((t) => t.fix?.fixed).length;
+  const stripped = done.filter((t) => t.stripped).length;
   const fuLens = done.filter((t) => t.followUp).map((t) => t.check.fuLen).sort((a, b) => a - b);
   const lines = done.map((t) => t.check.lines).sort((a, b) => a - b);
   const inTarget = lines.filter((n) => n >= LINE_MIN && n <= LINE_MAX).length;
@@ -696,7 +710,8 @@ function summarize(rows) {
   const tout = done.reduce((s, t) => s + (t.usage?.out || 0), 0);
   const cached = done.reduce((s, t) => s + (t.usage?.cached || 0), 0);
   return { n: done.length, skipped, failed, hookOkN, bait, formal, dash, dashRaw, qbad,
-    firstOk, bad, thin, fuHas, fuBad, fuStyle, fuNoAsk, fuLong, noOffer, fuLens, lines, inTarget,
+    firstOk, bad, thin, fuHas, fuBad, fuStyle, fuNoAsk, fuLong, noOffer, safety, fuLens, lines, inTarget,
+    preOffer, preSafety, preNoJson, fixFired, fixFixed, stripped,
     ms, usd, tin, tout, cached,
     hookFail: done.length ? (done.length - hookOkN) * 100 / done.length : null };
 }
@@ -756,6 +771,11 @@ function printSummary(label, rows, convs = null) {
    * لنگر دارد، این یکی می‌گوید **شکلش** پیشنهاد است؛ یک جمله می‌تواند اولی را پاس کند
    * و دومی را نه (همان چیزی که کلِ ترنسکریپتِ مالک بود). */
   console.log(`   🎁 خطِ آخر پیشنهاد است: ${s.n - s.noOffer}/${s.n} (${pct(s.n - s.noOffer, s.n)}٪)`);
+  // 🛟 تصمیمِ مالک: حرفِ آسیب به خود/اورژانس فقط در خطرِ واقعی. هدف: صفر.
+  console.log(`   🛟 حرفِ خطر بدونِ نشانه‌ی خطر: ${s.safety}/${s.n}`);
+  console.log(`   🔧 اولِ کار (قبل از تعمیر): بی‌پیشنهاد ${s.preOffer}/${s.n} | حرفِ خطر ${s.preSafety}/${s.n}`
+    + ` | غیرِ JSON ${s.preNoJson}/${s.n} ⟵ تعمیر شلیک کرد ${s.fixFired} بار، ${s.fixFixed} بار پذیرفته شد`
+    + ` | حذفِ قطعیِ جمله‌ی خطر: ${s.stripped} نوبت`);
   console.log(`   📏 طول: ${s.inTarget}/${s.n} داخلِ هدفِ ${LINE_MIN} تا ${LINE_MAX} خط`
     + ` | توزیع: ${s.lines.join(', ')} خط`);
   /* و همان عدد در واحدِ درستش. عددِ per نوبتِ بالا برای دیدنِ توزیع می‌ماند، ولی
@@ -1005,6 +1025,28 @@ if (FAKE) {
     process.exit(1);
   }
   console.log('✅ کنترلِ مثبت: سنجه‌ی پیشنهاد فقط نوبتِ پایانِ مکالمه را معاف می‌کند، نه پشتیبانی و فالِ تازه را.');
+
+  /* کنترلِ هفتم: 🛟 «حرفِ خطر بدونِ نشانه‌ی خطر». دو جمله عیناً از ترنسکریپتِ واقعیِ مالک
+   * (فالِ ۱۷۳۳۷) باید قرمز شوند، دلداریِ معمولی نباید، و همان جمله‌ی خطر وقتی خودِ
+   * کاربر نشانه‌ی خطر داده معاف است. بدونِ این، یک فهرستِ خالی یا یک `norm` که نیم‌فاصله
+   * را درست حذف نکند این سنجه را بی‌صدا به صفرِ همیشگی تبدیل می‌کرد (بند ۶ب-۲ ریشه). */
+  const safeOf = (reply, question = 'حالم بده') => chatMetrics({ reply, question }).safetyTalk;
+  const realHarm = [
+    'اگر این حال شدید یا ماندگار شد، یا فکر آسیب‌زدن به خودت داری، همین الان با یک فرد قابل‌اعتماد و خدمات اورژانسی محل زندگی‌ات تماس بگیر.',
+    'هر چیزی را که ممکنه باهاش به خودت آسیب بزنی از دسترست دور کن.',
+  ];
+  const calm = 'یک لیوان آب بخور، چند نفس آهسته بکش و با یک آدمِ امن حرف بزن.\nمی‌خوای یه برنامه‌ی ساده برای امشب برات بچینم؟';
+  const safeBad = [
+    ...realHarm.filter((x) => !safeOf(`${x}\nمی‌خوای کمکت کنم؟`)).map((x) => `ترنسکریپتِ واقعی گرفته نشد: «${x.slice(0, 40)}…»`),
+    ...(safeOf(calm) ? ['دلداریِ معمولی به‌اشتباه قرمز شد'] : []),
+    ...(safeOf(realHarm[0], 'دیگه نمی‌خوام زنده باشم') ? ['نوبتِ خطرِ واقعی به‌اشتباه قرمز شد'] : []),
+  ];
+  if (safeBad.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «حرفِ خطر بدونِ نشانه‌ی خطر» درست نیست.');
+    console.log(`   ${safeBad.join('؛ ')}`);
+    process.exit(1);
+  }
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی حرفِ خطر روی ${realHarm.length} جمله‌ی واقعی قرمز، روی دلداریِ معمولی ساکت، و در خطرِ واقعی معاف است.`);
 }
 
 if (OUT) {

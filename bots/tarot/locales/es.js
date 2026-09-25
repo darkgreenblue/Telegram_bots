@@ -1352,6 +1352,16 @@ Agrega al mismo JSON una clave más: "question_text" con el texto exacto de la p
     // Va directo al prompt, así que debe ir en el idioma de la lectura.
     feedbackNoAnswer: 'no fue así',
     chatThinRetry: (min) => `⚠️ Tu respuesta anterior fue demasiado corta y vacía. Responde la misma pregunta otra vez, pero con algo concreto y nuevo: abre una carta de esta lectura por su nombre o ánclate en lo que él mismo dijo. Mínimo ${min} caracteres, sin cortesías y sin repetir la pregunta.`,
+    // 🎁🛟 تذکرِ تعمیرِ هدف‌دار (به آخرین پیامِ user می‌چسبد، نه به system).
+    chatFixHint: ({ thin = false, offer = false, safety = false, min = 0 } = {}) => [
+      `⚠️ Responde la misma pregunta otra vez, de nuevo solo ese único JSON.`,
+      thin ? `Tu respuesta anterior fue demasiado corta y vacía: esta vez aporta algo concreto y nuevo (abre una carta de esta lectura por su nombre o ánclate en lo que dijo), mínimo ${min} caracteres.` : '',
+      offer ? `Tu respuesta anterior no tenía propuesta final: llena offer con una propuesta precisa y ligada a esta conversación, solo con la forma «¿Quieres que …?» o «Si quieres, puedo … por ti».` : '',
+      safety ? `Solo se siente mal y no habló de hacerse daño: no menciones autolesión, suicidio, emergencias ni «¿estás a salvo?»; acompáñalo con calidez y sencillez.` : '',
+      `Sin cortesías y sin repetir la pregunta.`,
+    ].filter(Boolean).join('\n'),
+    // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
+    chatFormatTail: `Recordatorio: desde la primera respuesta, tu salida es solo ese único JSON con las claves answer, offer, wants_new_reading, needs_support, follow_up, wants_end; la propuesta va en offer, no en answer.`,
     feedbackContext: (ctx) => JSON.stringify({
       'la pregunta de confirmación que hiciste': ctx.confirmationQuestion,
       'respuesta de la persona': ctx.userAnswer,
