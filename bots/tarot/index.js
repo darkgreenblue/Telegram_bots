@@ -318,7 +318,7 @@ const TEST_PHASE = false;
 //         دیگر گزینه‌ی «بی‌خیالش شو» را وعده نمی‌دهد. جزئیات: CLAUDE.md تاروت.
 // 3.116.0: 🎁 پیشنهادِ پایانی در همه‌ی جواب‌های گفتگو (از جوابِ اولِ رایگان) + 🛟 حرفِ
 //         آسیب/اورژانس فقط با نشانه‌ی صریحِ خطر از خودِ کاربر. جزئیات: CLAUDE.md تاروت.
-const PRODUCT_VERSION = '3.116.0';
+const PRODUCT_VERSION = '3.117.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -9782,12 +9782,23 @@ async function afterApproval(uid) {
   setState(uid, 'idle');
 }
 
+// دکمه‌ی زیرِ رسیدِ **دستی**-تأییدشده بعد از approve دقیقاً همان چیزی می‌شود که
+// auto-approve از اول داشت: تنها «🚫 پیامکش نیومده» (نه حذفِ کاملِ کیبورد). قبلاً این
+// تأییدِ دستی هیچ شبکه‌ی ایمنی نداشت — تأییدِ اشتباهِ ادمین راهِ برگشتی جز جستجوی
+// دستیِ ردیف در DB نداشت. حالا `cardsms:${pid}` → `confirmReverse` → `cardrev` →
+// `reversePayment` عیناً همان فرآیندِ رسیدهای auto-approve را اجرا می‌کند؛ هیچ منطقِ
+// موازیِ تازه‌ای ساخته نشد.
 bot.action(/^approve:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
-  const done = approvePayment(parseInt(ctx.match[1], 10));
+  const pid = parseInt(ctx.match[1], 10);
+  const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  try {
+    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([[
+      Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`),
+    ]]).reply_markup);
+  } catch {}
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
@@ -9872,13 +9883,19 @@ bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
 });
 
 /* ── مسیرِ «مشکوک»: تأیید/ردِ رسیدی که ایجنت approve می‌کرد ولی کاربر مشکوک بود ── */
+// «آمده» هم یک تصمیمِ دستیِ ادمین است (دقیقاً هم‌کلاسِ approve:)، پس همان شبکه‌ی
+// ایمنی را می‌گیرد: کیبورد کاملاً حذف نمی‌شود، فقط «🚫 پیامکش نیومده» می‌ماند.
 bot.action(/^susyes:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
-  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  try {
+    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([[
+      Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`),
+    ]]).reply_markup);
+  } catch {}
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
