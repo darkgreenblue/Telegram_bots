@@ -336,6 +336,14 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-coin-units.mjs
 
+      # صفحه‌ی «کاربران»: باگِ واقعی‌اش یک throw داخلِ withDb بود که بی‌صدا قورت می‌شد
+      # و صفحه را برای هر رباتی که جدولِ payments دارد کاملاً خالی می‌کرد — بدونِ هیچ
+      # خطای دیده‌شده. node --check و check-undefined هیچ‌کدام شناسه‌ی برهنه‌ی تعریف‌نشده
+      # را نمی‌بینند، پس این چک صفحه را واقعاً رندر می‌کند و کاربرانِ واقعی را می‌جوید.
+      - name: Users page check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-users-page.mjs
+
       # اکشنِ اعتباریِ صف: داشبورد فقط برای رباتی enqueue کند که واقعاً اجرایش می‌کند.
       # sweepِ ربات‌ها بعد از if/else بی‌قید `markActionDone` می‌زند، پس اکشنی که هندلر
       # ندارد **بی‌صدا** done می‌شود: ردیفِ سرگردان «حل‌شده» می‌شود، در درآمد می‌ماند، و
