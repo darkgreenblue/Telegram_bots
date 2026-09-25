@@ -55,6 +55,64 @@
 import { pathToFileURL } from 'node:url';
 
 /* ── پارامترها. عمداً export شده‌اند تا چکِ CI بتواند با مقادیرِ دیگر هم اجرا کند. ── */
+/* ═══════════════ فالِ پول‌داده‌ی گیرکرده در «در حال تفسیر» ═══════════════
+ * عمداً در همین فایل و نه ماژولِ جدا: گرپِ دیپلوی تغییرِ این فایل را می‌شناسد و
+ * health-watch را ری‌استارت می‌کند، بدونِ اینکه `deploy.yml` (زیرساختِ مشترک، یعنی
+ * ری‌استارتِ همه‌ی ربات‌ها) عوض شود. */
+/* 🔎 ناظرِ «فالِ پول‌داده‌ای که در حالِ تفسیر گیر کرده» (v3.118.0 — تیکتِ `#TRT-1686489477`).
+ *
+ * چرا: ۳۰ روزِ منتهی به ۴ مهر ۱۴۰۵ پنج فال (پنج کاربر) بینِ ۷۳ دقیقه تا ۱۶٫۵ ساعت در
+ * وضعیتِ «در حال تفسیر» گیر کردند و **هیچ‌کدام** هیچ هشداری نساختند؛ تنها راهِ کشفشان
+ * پیامِ خودِ کاربر به پشتیبانی بود. سقفِ درون‌رباتیِ v3.118.0 باید این را غیرممکن کند،
+ * ولی این ناظر عمداً **بیرونِ پروسه‌ی ربات** است: اگر روزی خودِ آن سقف به هر دلیلی کار
+ * نکرد (همان‌طور که abort کار نکرد)، کسی که خبردار می‌شود مالک است، نه کاربر.
+ *
+ * معیار عمداً دو دوره‌ای است (نه یک عکسِ لحظه‌ای): فالی گیر است که `started` است، خروجیِ
+ * مدل ندارد، دستِ‌کم `HANG_MIN_AGE_SEC` از پرداختش گذشته، **و** در دورِ قبلیِ ناظر (۵ دقیقه
+ * پیش) هم همین وضع را داشته. یعنی دستِ‌کم ~۱۰ دقیقه بی‌خروجی بعد از شروعِ افشا، در حالی
+ * که سقفِ کلِ فراخوانی ۵٫۵ دقیقه است. فالِ سالمی که همین حالا تفسیر می‌شود هرگز دو دوره
+ * پشتِ هم این‌جا نمی‌ماند.
+ *
+ * هزینه: فقط دو هزار ردیفِ آخرِ `readings` با بازه‌ی rowid خوانده می‌شود (نه اسکنِ کلِ
+ * جدول با `llm_json`ِ حجیم)، و اتصال readonly است.
+ * طبقِ بند ۹ب-۴ ریشه این مسیر **هیچ پیامی به کاربر نمی‌فرستد** — فقط به مالک. */
+export const HANG_MIN_AGE_SEC = 15 * 60;
+export const HANG_SCAN_ROWS = 2000;
+
+export const HUNG_SQL = `
+  SELECT id, user_id, created_at FROM readings
+  WHERE id > (SELECT COALESCE(MAX(id), 0) FROM readings) - ?
+    AND status = 'started' AND llm_json = '' AND created_at < ?
+  ORDER BY id`;
+
+/** فال‌های «مشکوک» همین دور (هنوز تأییدنشده). */
+export function hungCandidates(db, nowSec) {
+  return db.prepare(HUNG_SQL).all(HANG_SCAN_ROWS, nowSec - HANG_MIN_AGE_SEC);
+}
+
+/** فقط آن‌هایی که در دورِ قبلی هم مشکوک بوده‌اند گیرِ واقعی حساب می‌شوند. */
+export function confirmHung(prevIds, rows) {
+  const prev = new Set((prevIds || []).map(Number));
+  return rows.filter((r) => prev.has(Number(r.id)));
+}
+
+/** یک دورِ کامل برای یک ربات: `state.hung[name]` شناسه‌های دورِ قبل را نگه می‌دارد.
+ *  خروجی یک «مشکل» برای ماشینِ باز/رفع‌شده‌ی ناظر است، یا null. */
+export function hungCycle(db, name, state, nowSec) {
+  state.hung ||= {};
+  const rows = hungCandidates(db, nowSec);
+  const confirmed = confirmHung(state.hung[name], rows);
+  state.hung[name] = rows.map((r) => r.id);
+  if (!confirmed.length) return null;
+  const ids = confirmed.map((r) => `#${r.id}`).join('، ');
+  return {
+    key: `reading_hang:${name}`,
+    text: [`🔮 «${name}»: ${confirmed.length} فالِ پول‌داده بیش از ۱۰ دقیقه در «در حال تفسیر» مانده (${ids}).`,
+      'کاربر هر دکمه‌ای بزند همان «⌛️» را می‌گیرد. به Claude Code بگو: «فال گیر کرده، LLM_HANG».'].join(' '),
+  };
+}
+
+
 export const STUCK = {
   WINDOW_H: 2,        // پنجره‌ی رفتاری: چهار بار دیدنِ یک صفحه در «دو ساعت» یعنی حلقه
   MIN_VIEWS: 4,       // زیرِ چهار بار، تکرارِ طبیعیِ ناوبری است نه گیر افتادن

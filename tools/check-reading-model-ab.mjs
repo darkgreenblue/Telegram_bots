@@ -28,6 +28,7 @@ import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 import { ensureAnalytics, EVENTS } from '../shared/analytics.js';
 import { ensureAb, peekVariant } from '../shared/ab.js';
+import { hardTimeout } from '../bots/tarot/reading-core.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg, extra = '') => {
@@ -139,6 +140,7 @@ console.log('▶ الف) seedِ آزمایشِ مدلِ خوانش روی SQLite
 function buildAwaitReadingLLM(src, {
   readingRow, armFor = () => 'control', callReadingLLM,
   readingArm = new Map(), llmInflight = new Map(), loadingShown = new Set(),
+  inflightMaxMs = 60_000,
 } = {}) {
   const body = bodyOf(src, 'async function awaitReadingLLM(uid, readingId) {');
   if (!body) return null;
@@ -148,13 +150,13 @@ function buildAwaitReadingLLM(src, {
   const fn = new Function(
     'stmts', 'llmInflight', 'peekVariant', 'db', 'READING_MODEL_EXP', 'readingArm',
     'DS_MODEL', 'READING_MODEL',
-    'callReadingLLM',
+    'callReadingLLM', 'hardTimeout', 'READING_INFLIGHT_MAX_MS', 'logErr', 'alertHang',
     `return (${body});`,
   );
   const awaitReadingLLM = fn(
     stmts, llmInflight, peekVariantStub, {}, 'reading_model_ds', readingArm,
     'DS_MODEL_X', 'READING_MODEL_Y',
-    callReadingLLM,
+    callReadingLLM, hardTimeout, inflightMaxMs, () => {}, () => {},
   );
   return { awaitReadingLLM, peekVariantCalls, readingArm, llmInflight, loadingShown };
 }
@@ -273,6 +275,7 @@ function buildWaitLLMWithLoading(src, {
   const fn = new Function(
     'loadingFrame', 'L', 'loadingShown', 'sleep', 'pace', 'awaitReadingLLM',
     'readingArm', 'expose', 'db', 'READING_MODEL_EXP', 'track', 'LOADING_MIN_MS', 'LOADING_LONG_WAIT_MS',
+    'LOADING_MAX_MS',
     `return (${body});`,
   );
   const waitLLMWithLoading = fn(
@@ -289,6 +292,7 @@ function buildWaitLLMWithLoading(src, {
     (db, uid, event, props) => { trackCalls.push({ uid, event, props }); },
     loadingMinMs,
     20_000,
+    10 * 60_000,
   );
   return { waitLLMWithLoading, ctx, exposeCalls, trackCalls, readingArm, loadingShown };
 }
