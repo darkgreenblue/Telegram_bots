@@ -187,8 +187,10 @@ console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو
    * ⚠️ از v3.105.0 فقط **شاخه‌ی audio‌بودن** پین شده، نه کلِ خط: شاخه‌ی غیرِصوتی حالا
    * `armOpts?.plan`ِ آزمایشِ مدلِ خوانش را هم می‌گیرد (`check-reading-model-ab.mjs`
    * جدا همان را می‌سنجد)، و شاخه‌ی صوتی همچنان بیت‌به‌بیت ثابت است. */
-  ok(/const plan = audio \? \[READING_MODEL, READING_MODEL, READING_MODEL\] : /.test(SRC),
-    'برنامه‌ی retryِ صوتی فقط از READING_MODEL ساخته می‌شود و فالبکِ ناشنوا داخلش نیست');
+  /* v3.121.0: پله‌ی `GEMINI3_FLASH` (صداشنو، /api/v1/models) به برنامه‌ی صوتی اضافه شد؛
+   * قاعده همان است: هیچ مدلِ ناشنوایی (دیپ‌سیک/luna) داخلش نیست. */
+  ok(/const plan = audio \? \[READING_MODEL, READING_MODEL, READING_MODEL, GEMINI3_FLASH\] : /.test(SRC),
+    'برنامه‌ی retryِ صوتی فقط از READING_MODEL و جمنای ۳ ساخته می‌شود و فالبکِ ناشنوا داخلش نیست');
 
   // نشتِ ویسِ فالِ قبلی به فالِ بعدی — باگی که موقعِ همین تغییر پیدا و بسته شد
   const hq = bodyOf(SRC, 'async function handleQuestion(');

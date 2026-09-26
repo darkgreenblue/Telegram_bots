@@ -324,7 +324,9 @@ const TEST_PHASE = false;
 // 3.120.0: 🧾 ایجنتِ رسید: زنجیره‌ی فالبکِ مدل (جمنای ۲.۵ ⟵ جمنای ۳ فلش ⟵ luna)، اعتبارسنجیِ
 //         خروجی با کد و پرسیدنِ دوباره، ددلاینِ ۶۰ث ⟵ «ربات تأییدکننده ایراد دارد». و «رسید
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
-const PRODUCT_VERSION = '3.120.0';
+// 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
+//         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
+const PRODUCT_VERSION = '3.121.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -3756,7 +3758,7 @@ async function callReadingLLM(readingId, armOpts = null) {
     : textPart;
   // DeepSeek صدا نمی‌فهمد، پس وقتی ورودی صوتی است فقط مدل‌های شنوا در برنامه می‌مانند —
   // `armOpts` این‌جا عمداً نادیده گرفته می‌شود، حتی اگر بازوی کاربر `ds` باشد.
-  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL] : (armOpts?.plan || undefined);
+  const plan = audio ? [READING_MODEL, READING_MODEL, READING_MODEL, GEMINI3_FLASH] : (armOpts?.plan || undefined);
   // ۳ تلاش Flash → ۲ تلاش DeepSeek؛ خروجی فقط با JSON معتبر و کامل پذیرفته می‌شود.
   // برای فال‌های تصمیم‌محور یک شرطِ اضافه هم هست: جوابِ قاطعِ قابلِ اتکا (verdict).
   // ولی این شرط عمداً **کیفیِ** است نه حیاتی: اگر همه‌ی تلاش‌ها جوابِ مبهم دادند،
@@ -4984,7 +4986,7 @@ async function dailyCard(ctx) {
     ? Promise.resolve(cached)
     : orChatResilient(L.prompts.dailySystem, L.prompts.dailyContext({
         focusFa: L.focusFa[user.focus_area] || '-', card: info, reversed: card.reversed,
-      }), { maxTokens: DAILY.maxTokens, kind: 'daily_card', userId: user.telegram_id }, [FLASH, FLASH, FALLBACK_MODEL])
+      }), { maxTokens: DAILY.maxTokens, kind: 'daily_card', userId: user.telegram_id }, [FLASH, FLASH, GEMINI3_FLASH, FALLBACK_MODEL])
         .then(r => {
           if (r?.out) stmts.setDailyText.run(card.key, card.reversed ? 1 : 0, focusKey, r.out);
           return r?.out || null;
@@ -6991,7 +6993,7 @@ async function handleFeedback(ctx, uid, readingId, kind, freeText) {
       card: cardName(cards[midIdx]?.key),
       cardText: llm?.cards?.[midIdx]?.text || '',
       question: r.question,
-    }), { maxTokens: 300, kind: 'feedback', refId: readingId, userId: uid }, [FLASH, FALLBACK_MODEL])
+    }), { maxTokens: 300, kind: 'feedback', refId: readingId, userId: uid }, [FLASH, GEMINI3_FLASH, FALLBACK_MODEL])
       .then(res => res?.out || null).catch(e => { logErr('feedback LLM:', e.message); return null; });
     await ctx.reply(recal || L.reading.recalFallback);
   } else {
