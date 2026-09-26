@@ -66,8 +66,8 @@ for (const n of ['approve', 'reject', 'duplicate', 'dupyes', 'dupno', 'cardsms',
   const head = `bot.action(/^${n}:(\\d+)$/, async (ctx) => {\n  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10)))`;
   ok(CODE.includes(head), `«${n}:» اجازه را per پرداخت می‌سنجد (canActOnPayment)`);
 }
-ok((CODE.match(/notifyOwnerAction\(ctx\.from\.id/g) || []).length === 7,
-  'هر هفت اکشنِ تغییردهنده به مالک خبر می‌دهد');
+ok((CODE.match(/notifyOwnerAction\(ctx\.from\.id/g) || []).length === 8,
+  'هر هشت اکشنِ تغییردهنده به مالک خبر می‌دهد (هفت اکشنِ رسید + terryesِ فازِ ۵)');
 
 /* ── ۲) رفتاری: همان کدِ index.js روی SQLite ────────────────────────────────── */
 console.log('\nرفتاری:');

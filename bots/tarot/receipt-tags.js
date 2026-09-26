@@ -41,3 +41,22 @@ export function withShadowLine(caption, line, limit) {
   const tail = `\n\n${line}`;
   return String(caption).slice(0, Math.max(0, limit - tail.length)) + tail;
 }
+
+/* ⛔️ پیامِ اطلاعاتیِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵) — فقط ادمینِ کارتِ ناموفق و مالک. */
+export const TERR_BTN = {
+  sms: '📩 پیامکش اومده',
+  yes: '✅ بله، پیامکش اومده (تأیید و شارژ)',
+  no: '↩️ انصراف',
+};
+const last4 = (c) => String(c?.number ?? '').slice(-4);
+/** متنِ پیامِ ادمین. `from` = کارتی که انتقال به آن ناموفق بود، `to` = کارتِ سفیدِ جدید. */
+export function terrAdminText({ invoiceNo, userId, userName, amount, from, to, errText }) {
+  return [
+    `⛔️ کاربر نتوانست به کارتِ …${last4(from)} (${from?.bank || from?.holder || '-'}) واریز کند.`,
+    `فاکتورِ #${invoiceNo} · ${Number(amount || 0).toLocaleString('fa-IR')} تومان · کاربر ${userId}${userName ? ` (${userName})` : ''}`,
+    errText ? `پیامِ خطا: «${String(errText).slice(0, 160)}»` : '',
+    `🔄 همان فاکتور خودکار به کارتِ سفیدِ …${last4(to)} منتقل شد.`,
+    '',
+    'اگر با وجودِ این خطا پیامکِ واریز به کارتِ بالا آمده، «پیامکش اومده» را بزن تا الماسِ کاملِ فاکتور داده شود.',
+  ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+}

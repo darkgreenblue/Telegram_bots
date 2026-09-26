@@ -178,7 +178,7 @@ if (sender) {
 /* ── ۷) ساختاری ───────────────────────────────────────────────────────────── */
 console.log('\nساختاری:');
 ok(/const RECEIPT_SHADOW_ENABLED = true;/.test(CODE), 'پرچمِ رول‌بک تعریف شده و روشن است');
-ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 3, 'پرچم دقیقاً سه جا: تعریف، پرامپت، خطِ مالک');
+ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 4, 'پرچم دقیقاً چهار جا: تعریف، پرامپت، خطِ مالک، و گیتِ فازِ ۵ (terrOn)');
 ok(/text: textBody, shadow: RECEIPT_SHADOW_ENABLED/.test(CODE), 'analyzeReceipt پرچم را می‌گیرد');
 {
   const body = region('async function processReceipt', '\nasync function notifyAdminAutoApproved');

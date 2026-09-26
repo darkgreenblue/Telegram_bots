@@ -991,6 +991,9 @@ export default {
       + `Amount: *${fmt(amount)}*\n\nTransfer to:\n\`${card}\`\n${owner}\n\nAfter paying, send the receipt photo here 📸`,
     // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
     cardSwitchHeader: '👇👇🔄 New invoice with a new card number 💳👇👇',
+    // ⛔️ فازِ ۵ (v3.127.0): انتقال به کارتِ فاکتور ناموفق بود ⟵ همان فاکتور با کارتِ سفید.
+    transferErrorHeader: '⛔️ It looks like the transfer to that card did not go through. Please pay to the new card below and send the receipt.\n\n👇👇🔄 New invoice with a new card number 💳👇👇',
+    transferErrorApproved: '✅ Your payment is confirmed, no need to pay again.',
     cardSwitchNone: 'No other card is available right now. If the transfer fails, tap 💬 Support.',
     cardSwitchUsed: 'The card for this invoice was already switched once.',
     invoiceDiscounted: (orig, amount, code) =>

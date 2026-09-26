@@ -285,6 +285,17 @@ export function pickSwitchCard({ cards, used = new Map(), currentId = 0 } = {}) 
   return white ? { card: white, via: 'white' } : null;
 }
 
+/** ⛔️ مقصدِ اقدامِ خودکارِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵). **فقط کارتِ سفید** (تصمیمِ
+ *  مالک، پاسخِ ۱۲ و ۱۶): اولویت با سفیدِ **همان ادمینِ** کارتِ ناموفق، بعد اولین سفیدِ دیگر به
+ *  ترتیبِ `sort`. کارتِ فعلی هرگز مقصد نیست و کارتِ غیرفعال یا پرشده هم نه. `null` یعنی هیچ
+ *  سفیدِ قابلِ‌استفاده‌ای نیست ⟵ اقدامِ خودکار نه، مستقیم به ادمین. */
+export function pickWhiteCard({ cards, used = new Map(), currentId = 0 } = {}) {
+  const list = byOrder(cards);
+  const cur = list.find((c) => c.id === Number(currentId)) || null;
+  const whites = list.filter((c) => c.id !== Number(currentId) && c.kind === 'white' && usable(c, used));
+  return (cur && whites.find((c) => Number(c.admin_id) === Number(cur.admin_id))) || whites[0] || null;
+}
+
 /** مراحلِ افزودن، به ترتیب. نوع با دکمه انتخاب می‌شود نه متن. */
 export const ADD_STEPS = Object.freeze(['number', 'holder', 'bank', 'admin']);
 export const ADD_PROMPT = Object.freeze({

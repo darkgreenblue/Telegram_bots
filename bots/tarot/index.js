@@ -48,7 +48,7 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
 import { analyzeReceipt, decideReceipt, shadowFields } from './cardpay.js';
-import { shadowLine, withShadowLine } from './receipt-tags.js';
+import { shadowLine, withShadowLine, TERR_BTN, terrAdminText } from './receipt-tags.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
@@ -328,7 +328,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.126.0';
+const PRODUCT_VERSION = '3.127.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -355,6 +355,13 @@ const CARD_SWITCH_ENABLED = true;
 // `false` ⟵ پرامپتِ ایجنت بیت‌به‌بیت v3.125.0 و هیچ خطی اضافه نمی‌شود؛ ثبتِ ردیف می‌ماند
 // (بی‌خطر و لازمِ حسابرسی). مصرف‌کننده‌ها: فازِ ۵ (خطای انتقال) و فازِ ۷ (تگِ خودکار).
 const RECEIPT_SHADOW_ENABLED = true;
+// ⛔️ اقدامِ خودکارِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵). وقتی ایجنت در رسیدِ فرستاده‌شده
+// (عکسِ خطا یا متنِ «نمی‌تونم انتقال بدم») `transfer_error` می‌خواند، **همان فاکتور** به کارتِ
+// سفید (اولویت: سفیدِ همان ادمین) منتقل می‌شود و ادمینِ کارتِ ناموفق (+ کپیِ مالک) پیامِ
+// اطلاعاتی با «پیامکش اومده» می‌گیرد. هر فاکتور فقط یک بار؛ روی کارتِ سفید هرگز (مستقیم به
+// ادمین). به فیلدِ فازِ ۴ وابسته است، پس بدونِ `RECEIPT_SHADOW_ENABLED` هم خاموش است. `false` ⟵
+// رسیدِ خطا مثلِ v3.126.0 به بازبینیِ دستی می‌رود؛ کالبک‌های `terr*` ثبت می‌مانند.
+const TRANSFER_ERROR_ACTION_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -1254,6 +1261,9 @@ const cardSt = () => _cardSt || (_cardSt = {
   // رسیدِ فاکتورِ تعویض‌شده به کارتِ **قبلی** واریز شده ⟵ کارتِ پرداخت همان کارتی می‌شود که پول
   // در آن نشسته (جابه‌جاییِ اتمیکِ دو ستون؛ SQL سمتِ راست را از ردیفِ قدیم می‌خواند).
   swapToPrev: db.prepare("UPDATE payments SET card_id=prev_card_id, prev_card_id=card_id WHERE id=? AND prev_card_id>0 AND status IN ('pending','waiting_review')"),
+  // ⛔️ فازِ ۵: انتقالِ اتمیک به کارتِ سفید — یک بار per فاکتور، فقط `pending`، فقط از همان کارتی که
+  // رسیدِ خطا رویش آمد. عکسِ خطا رسید نیست، پس `receipt_file_id` پاک می‌شود (جاروی ردیفِ مرده
+  // و بازیابیِ رسید آن را فاکتورِ بی‌رسید ببینند، همان‌طور که واقعاً هست).
   // 💳 مدیریت (v3.123.0). ستونِ هر ویرایش از جدولِ ثابتِ `CA.EDITABLE` می‌آید، نه از ورودی.
   all:      db.prepare('SELECT * FROM cards ORDER BY sort, id'),
   insert:   db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)'),
@@ -2074,6 +2084,8 @@ try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEF
 try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run(); } catch {}
 // کارتی که فاکتور **قبل از** تعویض داشت (۰ = تعویض نشده). رسیدِ واریز به آن کارت هم معتبر است.
 try { db.prepare('ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// ⛔️ فازِ ۵ (v3.127.0): لحظه‌ی اقدامِ خودکارِ «نتوانستم واریز کنم»؛ NULL = هنوز نه (هر فاکتور یک بار).
+try { db.prepare('ALTER TABLE payments ADD COLUMN transfer_error_at INTEGER').run(); } catch {}
 /* 🔎 فازِ ۴ (v3.126.0): یک ردیف per **هر** اجرای ایجنتِ رسید (موفق یا شکست‌خورده). تا امروز
  * خروجیِ ایجنت فقط یک خطِ لاگ بود و بعد از چرخشِ لاگ‌های pm2 از بین می‌رفت؛ پس نه می‌شد
  * دقتش را سنجید، نه فیلدهای تازه را قبل از اعتماد رصد کرد. `raw_json` کلِ verdictِ نرمال
@@ -3718,7 +3730,7 @@ function paymentFlowAllowsCallback(state, data) {
     // `susyes`/`susno` عمداً کنارِ `cardsms`/`cardrev`/`cardrevno` نشسته‌اند: هر دو دکمه‌ی
     // ادمین روی یک پیامِ ادمین‌اند و اگر خودِ ادمین هم‌زمان در `pay_receipt`ِ خودش باشد
     // (تستر/کاربرِ عادی) باید بدونِ گارد کار کنند.
-    return /^(card_switch:\d+|stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+|susyes:\d+|susno:\d+)$/.test(data);
+    return /^(card_switch:\d+|stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+|susyes:\d+|susno:\d+|terrsms:\d+|terryes:\d+|terrno:\d+)$/.test(data);
   }
   if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
   return false;
@@ -9892,8 +9904,8 @@ function activeCardAdminIds() {
   catch (e) { logErr('activeCardAdminIds:', e.message); return new Set(); }
 }
 /** گیرنده‌های پیامِ رسیدِ یک پرداخت: `[{ id, full }]` — `full=false` یعنی کپیِ اطلاعاتیِ بی‌دکمه. */
-function receiptRecipients(p) {
-  const c = cardOfPayment(p);
+function receiptRecipients(p, card = null) {
+  const c = card || cardOfPayment(p);
   const cardAdmin = Number(c.admin_id) || OWNER_ID;
   const out = [{ id: cardAdmin, full: true }];
   if (OWNER_ID !== cardAdmin) out.push({ id: OWNER_ID, full: false });
@@ -9907,19 +9919,19 @@ function receiptRecipients(p) {
   return out;
 }
 // سرتیترِ کپیِ اطلاعاتیِ مالک: کدام کارت و کدام ادمین تصمیم‌گیرنده است.
-const ownerCopyHeader = (p) => {
-  const c = cardOfPayment(p);
+const ownerCopyHeader = (p, card = null) => {
+  const c = card || cardOfPayment(p);
   return `ℹ️ کپیِ اطلاعاتی · کارتِ ${c.bank || c.holder} (…${String(c.number).slice(-4)}) · ادمین ${c.admin_id}\n\n`;
 };
 /** ارسالِ یک پیامِ رسید به گیرنده‌هایش. پیامِ اولین گیرنده‌ی **کامل** برگردانده می‌شود
  *  (همان که قبلاً `adminMsg` بود و در `admin_message_id` می‌نشیند). کپشنِ عکس سقفِ ۱۰۲۴
  *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
-async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
+async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = null) {
   let first;
   const limit = photoFileId ? 1024 : 4096;
   const sline = ownerShadowLine(p);
-  for (const r of receiptRecipients(p)) {
-    const base = r.full ? caption : (ownerCopyHeader(p) + caption);
+  for (const r of receiptRecipients(p, card)) {
+    const base = r.full ? caption : (ownerCopyHeader(p, card) + caption);
     // 🔎 خطِ ایجنت فقط روی پیامِ مالک (فازِ ۴)؛ برای بقیه کپشن بیت‌به‌بیت همان قبلی است.
     const cap = r.id === OWNER_ID ? withShadowLine(base, sline, limit) : (r.full ? caption : base.slice(0, limit));
     const extra = r.full && kb ? { reply_markup: kb } : {};
@@ -9931,7 +9943,7 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
     } catch (e) { logErr(`receipt → ${r.id}:`, e.message); }
   }
   // تورِ ایمنی: هیچ پیامِ کاملی نرسید ⟵ نسخه‌ی کامل با دکمه‌ها به مالک (یک بار).
-  if (!first && receiptRecipients(p).some((r) => r.full && r.id !== OWNER_ID)) {
+  if (!first && receiptRecipients(p, card).some((r) => r.full && r.id !== OWNER_ID)) {
     const cap = withShadowLine(`⚠️ ادمینِ این کارت پیام را دریافت نکرد؛ تصمیم با شماست.\n\n${caption}`, sline, limit);
     const extra = kb ? { reply_markup: kb } : {};
     try {
@@ -10006,6 +10018,81 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
 /** وضعیت‌هایی که هنوز «در جریان» اند و رسیدِ تازه رویشان معنی دارد. */
 const RECEIPT_LIVE_STATES = ['pending', 'waiting_review'];
 
+/* ⛔️ فازِ ۵: «نتوانستم واریز کنم». */
+const terrOn = () => TRANSFER_ERROR_ACTION_ENABLED && RECEIPT_SHADOW_ENABLED && !starsRail;
+const TERR_ADMIN_NOTE = '⛔️ کاربر می‌گوید/نشان می‌دهد انتقال انجام نشد (اقدامِ خودکار ممکن نبود: کارت از قبل سفید است یا یک بار انجام شده). تصمیم با شماست.';
+/** کارتِ سفیدِ مقصد برای پرداختِ `p`، یا null. */
+function whiteTargetFor(p) {
+  try {
+    const cur = cardOfPayment(p);
+    if (!p || p.transfer_error_at || cur.kind === 'white') return null;
+    const st = cardSt();
+    const used = new Map(st.usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c]));
+    return CA.pickWhiteCard({ cards: st.all.all(), used, currentId: cur.id });
+  } catch (e) { logErr('whiteTargetFor:', e.message); return null; }
+}
+/* ادعای اتمیک: یک بار per فاکتور، فقط `pending`، فقط از همان کارتی که کاربر دید. عمداً بیرونِ
+ * `cardSt()` و lazy است: ستون‌های payments که این‌جا لمس می‌شوند ربطی به انتخابِ کارت ندارند و
+ * شکستِ prepareِ آن‌ها نباید کلِ مجموعه‌ی دستوراتِ کارت (و صدورِ فاکتور) را از کار بیندازد. */
+let _terrClaim;
+const terrClaim = () => (_terrClaim ||= db.prepare("UPDATE payments SET card_id=?, prev_card_id=?, card_switched_at=COALESCE(card_switched_at, unixepoch()), transfer_error_at=unixepoch(), receipt_file_id=NULL, updated_at=unixepoch() WHERE id=? AND card_id=? AND transfer_error_at IS NULL AND status='pending'"));
+/** اقدامِ خودکار. `true` = انجام شد (فاکتورِ سفید رفت و ادمین خبر شد)؛ `false` = ممکن نبود. */
+async function handleTransferError(ctx, uid, p, photoFileId, textBody, sh) {
+  if (p.status !== 'pending') return false;
+  const from = cardOfPayment(p);
+  const to = whiteTargetFor(p);
+  if (!to) return false;
+  let claimed = false;
+  try {
+    claimed = db.transaction(() => {
+      if (terrClaim().run(to.id, from.id, p.id, p.card_id).changes !== 1) return false;
+      // کارتِ سفید تا آخرِ روز کارتِ کاربر می‌ماند (تصمیمِ مالک، پاسخِ ۱۵).
+      cardSt().assignSet.run(uid, CA.cardDay(), to.id, 'transfer_error');
+      return true;
+    })();
+  } catch (e) { logErr('transfer_error claim pay#' + p.id, e.message); }
+  if (!claimed) return false;
+  log(`⛔️ TRANSFER_ERROR #${p.id} ${from.id}→${to.id} src=${photoFileId ? 'photo' : 'text'}`);
+  track(db, uid, 'transfer_error_switch', { payment_id: p.id, from: from.id, to: to.id, src: photoFileId ? 'photo' : 'text' });
+  // فقط یک فاکتورِ زنده در چت: پیامِ فاکتورِ کارتِ ناموفق برداشته می‌شود.
+  if (p.invoice_msg_id) {
+    try { await ctx.telegram.deleteMessage(uid, p.invoice_msg_id); }
+    catch { try { await ctx.telegram.editMessageReplyMarkup(uid, p.invoice_msg_id, undefined, undefined); } catch {} }
+  }
+  patchSession(uid, { paymentId: p.id });
+  setState(uid, 'pay_receipt');
+  await ctx.reply(L.wallet.transferErrorHeader).catch(() => {});
+  const invMsg = await ctx.reply(
+    L.wallet.invoice(p.amount, ...invoiceCardArgs(p.id), invoicePurchaseFor(uid, p.id), curOf(uid), invoiceExtra(p.id)), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        cardCopyRow(p.id),
+        ...cardSwitchRow(p.id),
+        ...starsToggleRow(uid, p.id, !!packOf(p)),
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
+      ]).reply_markup,
+    }).catch((e) => { logErr('transfer_error invoice pay#' + p.id, e.message); return null; });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, p.id);
+  // پیامِ اطلاعاتی به ادمینِ کارتِ **ناموفق** (+ کپیِ مالک)، با عکسِ خطا یا متنِ کاربر.
+  try {
+    const u = getUser(uid);
+    const caption = terrAdminText({ invoiceNo: invoiceNoOf(p), userId: uid, userName: dispName(u), amount: p.amount,
+      from, to, errText: sh?.transfer_error_text || (photoFileId ? '' : String(textBody || '').slice(0, 160)) });
+    const kb = Markup.inlineKeyboard([[Markup.button.callback(TERR_BTN.sms, `terrsms:${p.id}`)]]).reply_markup;
+    await sendToReceiptRecipients(stmts.getPayment.get(p.id), { caption, photoFileId, kb }, from);
+  } catch (e) { logErr('transfer_error notify pay#' + p.id, e.message); }
+  return true;
+}
+/** اجازه‌ی اکشن روی پیامِ «نتوانستم واریز کنم»: ادمینِ ربات، یا ادمینِ کارتِ فعلی **یا قبلی**. */
+function canActOnTerr(uid, pid) {
+  if (canActOnPayment(uid, pid)) return true;
+  try {
+    const p = stmts.getPayment.get(pid);
+    const prev = p?.prev_card_id ? cardSt().byId.get(p.prev_card_id) : null;
+    return !!prev && Number(prev.admin_id) === uid;
+  } catch { return false; }
+}
+
 /* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴). fail-safe: هیچ خطایی از این‌جا مسیرِ پول را نمی‌شکند.
  * `verdict=null` یعنی خودِ فراخوانی پرتاب کرد؛ ردیف با `ok=0` ثبت می‌شود تا نرخِ شکست هم دیده شود. */
 let _raIns;
@@ -10069,7 +10156,10 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   await ctx.reply(L.wallet.receiptSent).catch(() => {});
 
   // کلیدِ خاموشی یا کاربرِ بی‌اعتماد → مستقیم به ادمینِ واقعی (بدونِ تصمیمِ خودکار و بدونِ تأخیرِ ساختگی)
-  if (!RECEIPT_AI_AUTO_APPROVE || isDistrusted(uid)) {
+  // ⛔️ استثنای فازِ ۵ (تصمیمِ مالک، پاسخِ ۲۰): بی‌اعتماد هم ایجنت را می‌بیند، **فقط** برای تشخیصِ
+  // «نتوانستم واریز کنم» (بی‌ضرر است: هیچ پولی جابه‌جا نمی‌شود). هر نتیجه‌ی دیگر ⟵ همان ادمین.
+  const distrusted = isDistrusted(uid);
+  if (!RECEIPT_AI_AUTO_APPROVE || (distrusted && !terrOn())) {
     await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
     return setState(uid, nextState);
   }
@@ -10127,6 +10217,22 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   }
   // 🔎 ثبتِ کاملِ خروجی **قبل از** هر ارسالی به ادمین، تا خطِ ایجنتِ پیامِ مالک از همین ردیف بیاید.
   recordReceiptAnalysis(p, uid, verdict, decision, photoFileId ? 'photo' : 'text', Date.now() - agentT0);
+
+  /* ⛔️ «نتوانستم واریز کنم» (فازِ ۵). فقط وقتی ایجنت سالم جواب داده، صراحتاً خطای انتقال خوانده،
+   * و خودِ رسید **موفق نیست** (تأیید/کم‌پرداخت یعنی پول رسیده؛ تناقض ⟵ حرفِ مبلغ را باور کن).
+   * بدونِ تأخیرِ ساختگی: کاربر همین حالا یک شماره‌ی کارتِ تازه لازم دارد. اگر اقدامِ خودکار ممکن
+   * نبود (کارت از قبل سفید است، یک بار انجام شده، یا سفیدی نیست) ⟵ مستقیم به ادمین (پاسخِ ۱۹). */
+  if (!decision.agentFailed && terrOn() && shadowFields(verdict?.extracted).transfer_error
+      && decision.action !== 'approve' && decision.action !== 'underpaid') {
+    if (await handleTransferError(ctx, uid, p, photoFileId, textBody, shadowFields(verdict?.extracted))) return;
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, TERR_ADMIN_NOTE);
+    return setState(uid, nextState);
+  }
+  // بی‌اعتماد فقط برای همان تشخیص تا این‌جا آمد؛ بقیه‌ی تصمیم‌ها مثلِ همیشه دستی‌اند.
+  if (distrusted) {
+    await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
+    return setState(uid, nextState);
+  }
 
   /* 🛟 فالبکِ نهاییِ کلِ سیستم تأییدِ دستی است (قاعده‌ی مالک). ایجنت در ددلاینش پاسخِ
    * سالمی نداد ⟵ همین حالا، بدونِ تأخیرِ ساختگی، با برچسبِ صریح به ادمین. برچسب مهم است:
@@ -10354,6 +10460,61 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
   notifyOwnerAction(ctx.from.id, pid, '✅ تأیید');
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
+  await afterApproval(p.user_id);
+});
+
+/* ⛔️ فازِ ۵: «📩 پیامکش اومده» روی پیامِ «نتوانستم واریز کنم». دو مرحله‌ای (الگوی `cardsms`):
+ * `terrsms` فقط تأیید می‌خواهد، `terryes` پرداخت را تأیید می‌کند، `terrno` برمی‌گرداند.
+ * تأیید = همان `approvePayment` همیشگی (الماسِ کاملِ فاکتور، درآمد، سقفِ روزانه)؛ هیچ منطقِ
+ * پولیِ موازی ساخته نشد. قبلش کارت به کارتِ ناموفق برمی‌گردد چون پول آن‌جا نشسته (سقف هم
+ * همان‌جا شمرده می‌شود)، و فاکتورِ سفید از چت برداشته می‌شود (تصمیمِ مالک، پاسخِ ۱۸). */
+const terrSmsKb = (pid) => Markup.inlineKeyboard([[Markup.button.callback(TERR_BTN.sms, `terrsms:${pid}`)]]).reply_markup;
+bot.action(/^terrsms:(\d+)$/, async (ctx) => {
+  const pid = parseInt(ctx.match[1], 10);
+  if (!canActOnTerr(ctx.from.id, pid)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  try {
+    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+      [Markup.button.callback(TERR_BTN.yes, `terryes:${pid}`)],
+      [Markup.button.callback(TERR_BTN.no, `terrno:${pid}`)],
+    ]).reply_markup);
+  } catch {}
+});
+bot.action(/^terrno:(\d+)$/, async (ctx) => {
+  const pid = parseInt(ctx.match[1], 10);
+  if (!canActOnTerr(ctx.from.id, pid)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  try { await ctx.editMessageReplyMarkup(terrSmsKb(pid)); } catch {}
+});
+bot.action(/^terryes:(\d+)$/, async (ctx) => {
+  const pid = parseInt(ctx.match[1], 10);
+  if (!canActOnTerr(ctx.from.id, pid)) return ctx.answerCbQuery('🔒').catch(() => {});
+  const p0 = stmts.getPayment.get(pid);
+  if (!p0 || !RECEIPT_LIVE_STATES.includes(p0.status)) {
+    await ctx.answerCbQuery('قبلاً پردازش شده؛ اگر کاربر دوباره واریز کرده، دستی بررسی کن.', { show_alert: true }).catch(() => {});
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    return;
+  }
+  // کارت فقط وقتی به کارتِ ناموفق برمی‌گردد که هنوز روی سفید است (رسیدِ کارتِ قبلی ممکن است
+  // از قبل برش گردانده باشد؛ جابه‌جاییِ دوباره آن را اشتباهاً به سفید می‌برد).
+  try {
+    if (p0.prev_card_id && cardOfPayment(p0).kind === 'white') cardSt().swapToPrev.run(pid);
+  } catch (e) { logErr('terryes swap pay#' + pid, e.message); }
+  const done = approvePayment(pid);
+  if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
+  await ctx.answerCbQuery('✅').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(creditedReceiptKb(pid)); } catch {}
+  notifyOwnerAction(ctx.from.id, pid, '📩 پیامکش اومده (تأیید بعد از خطای انتقال)');
+  const { p, creditAmount, bonus } = done;
+  log(`⛔️ TRANSFER_ERROR_CONFIRMED #${pid} by ${ctx.from.id}`);
+  track(db, p.user_id, 'transfer_error_confirmed', { payment_id: pid, by: ctx.from.id });
+  // فاکتورِ سفید دیگر معنی ندارد: برداشته می‌شود تا کاربر دوباره واریز نکند.
+  if (p0.invoice_msg_id) {
+    try { await bot.telegram.deleteMessage(p.user_id, p0.invoice_msg_id); }
+    catch { try { await bot.telegram.editMessageReplyMarkup(p.user_id, p0.invoice_msg_id, undefined, undefined); } catch {} }
+  }
+  await bot.telegram.sendMessage(p.user_id,
+    `${L.wallet.transferErrorApproved}\n\n${approvedMsg(p.user_id, creditAmount, bonus)}`).catch(() => {});
   await afterApproval(p.user_id);
 });
 /* ⭐ سیم‌کشیِ ریلِ استارز. عمداً **بعد از** `approvePayment` و `afterApproval` می‌نشیند
