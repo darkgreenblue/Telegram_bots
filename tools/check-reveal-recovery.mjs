@@ -289,11 +289,14 @@ console.log('\n── ۷) rview: بازپخشِ همین فال از وسطِ ا
 {
   const fnSrc = block('async function blockCrossFlowCallback(ctx)');
   const allowSrc = block('function readingFlowAllowsCallback(state, data)');
+  const retapSrc = block('function sameSpreadRetap(state, data, sessionSpreadId)');
   const run = async (data, { state = 'revealing', sessRid = 7 } = {}) => {
     const S = { calls: [] };
     const rec = (name, ret) => async () => { S.calls.push(name); return ret; };
     const readingFlowAllowsCallback = load(allowSrc, {});
+    const sameSpreadRetap = load(retapSrc, {});
     const fn = load(fnSrc, {
+      sameSpreadRetap, L: { reading: { sameSpreadRetap: 'TOAST' } },
       NAV_GUARD_ENABLED: true, getState: () => state, flowIntentFor: () => null,
       READING_FLOW_STATES: new Set(['revealing', 'confirm_pay', 'picking']),
       PAY_STATES: [], paymentFlowAllowsCallback: () => false,
