@@ -329,7 +329,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.128.0';
+const PRODUCT_VERSION = '3.129.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -369,6 +369,16 @@ const TRANSFER_ERROR_ACTION_ENABLED = true;
 // پیامِ کاربر ندارد. `false` ⟵ نه ردیف، نه خط (کپشن و کیبوردِ مالک بیت‌به‌بیت v3.127.0)؛ کالبک‌های
 // کهنه‌ی `tg:` فقط پاپ‌آپِ 🔒 می‌گیرند. جدول‌ها طبقِ بند ۲ج/۱ می‌مانند.
 const RECEIPT_TAGS_ENABLED = true;
+// 🤖 تگِ خودکار از خروجیِ ایجنت (v3.129.0، فازِ ۷): اپ از `bank_app` و بانکِ مبدأ از پیش‌شماره‌ی
+// کارت (`RT.bankFromPrefix`، نگاشت در کد نه در مدل) با `source='auto'`؛ تگِ دستیِ مالک همیشه
+// مقدم است. هیچ اثری روی پول، تصمیمِ رسید یا پیامِ کاربر. `false` ⟵ دیگر تگِ خودکاری نوشته
+// نمی‌شود (تگ‌های خودکارِ قبلی می‌مانند و با 🤖 دیده می‌شوند).
+const RECEIPT_AUTOTAG_ENABLED = true;
+// 🔁 تحلیلِ دوباره‌ی **یک‌باره‌ی** عکس‌های رسیدِ گذشته (فازِ ۷، پاسخِ مالک): آهسته در پس‌زمینه،
+// هر ۲۰ ثانیه یک رسید، فقط ثبت (`receipt_analyses.source='reanalysis'`) + تگِ خودکار؛ هرگز
+// وضعیتِ پرداخت، کارت یا پیامِ کاربر را لمس نمی‌کند. پایان ⟵ مارکرِ `receipt_reanalysis_1` و یک
+// پیامِ خلاصه به مالک. `false` ⟵ توقفِ فوری (از همان‌جا که مانده، بعداً ادامه می‌دهد).
+const RECEIPT_REANALYSIS_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -10010,6 +10020,10 @@ const tagSt = () => _tagSt || (_tagSt = {
     (SELECT COALESCE(MAX(sort),0)+1 FROM tag_values WHERE dim=?))
     ON CONFLICT(dim, key) DO UPDATE SET label=excluded.label, active=1`),
   valueActive: db.prepare('UPDATE tag_values SET active=? WHERE dim=? AND key=?'),
+  // 🤖 فازِ ۷: ردیفِ خودکار جدا از دستی (کلیدِ اصلی `source` را دارد)، پس هرگز رویش نمی‌نویسد.
+  autoSet: db.prepare(`INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source, by_id)
+    VALUES (?,?,?,?,'auto',0) ON CONFLICT(payment_id, dim, source)
+    DO UPDATE SET value_key=excluded.value_key, updated_at=unixepoch()`),
 });
 const tagValues = () => { try { return tagSt().values.all(); } catch (e) { logErr('tag values:', e.message); return []; } };
 /** برچسبِ خوانای یک مقدار؛ مقدارِ ناشناخته (مثلاً کلیدِ تگِ خودکارِ آینده) خودِ کلید را نشان می‌دهد. */
@@ -10268,7 +10282,7 @@ function canActOnTerr(uid, pid) {
 /* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴). fail-safe: هیچ خطایی از این‌جا مسیرِ پول را نمی‌شکند.
  * `verdict=null` یعنی خودِ فراخوانی پرتاب کرد؛ ردیف با `ok=0` ثبت می‌شود تا نرخِ شکست هم دیده شود. */
 let _raIns;
-function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
+function recordReceiptAnalysis(p, uid, verdict, decision, source, ms, { trackEvent = true } = {}) {
   try {
     const ok = verdict?.agent?.ok ? 1 : 0;
     const sh = shadowFields(verdict?.extracted);
@@ -10286,8 +10300,13 @@ function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
         ok ? (sh.src_prefix || '') : '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw);
     log(`🔎 RECEIPT_SHADOW #${p.id} ok=${ok} app=${sh.app || '-'} src=${sh.src_prefix || '-'} terr=${sh.transfer_error ? 1 : 0}`
       + ` action=${decision?.action || '-'}`);
-    track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
-      action: decision?.action || null, app: sh.app, terr: sh.transfer_error ? 1 : 0 });
+    // 🔁 تحلیلِ دوباره‌ی رسیدِ گذشته رویداد نمی‌سازد: رویدادِ «امروز» زیرِ کاربری که ماه‌ها پیش
+    // پرداخت کرده، فعالیتِ جعلی در قیف و تایم‌لاینش می‌ساخت.
+    if (trackEvent) {
+      track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
+        action: decision?.action || null, app: sh.app, terr: sh.transfer_error ? 1 : 0 });
+    }
+    if (ok) applyAutoTags(p.id, uid, sh);
   } catch (e) { logErr('recordReceiptAnalysis:', e.message); }
 }
 /** تازه‌ترین تحلیلِ ایجنت برای یک پرداخت (یا undefined). */
@@ -10299,6 +10318,110 @@ function lastReceiptAnalysis(pid) {
 }
 /** خطِ ایجنت فقط برای پیامِ **مالک** (تصمیمِ مالک: ادمین‌های دیگر شلوغ نشوند). */
 const ownerShadowLine = (p) => (RECEIPT_SHADOW_ENABLED && p ? shadowLine(lastReceiptAnalysis(p.id)) : '');
+
+/* 🤖 فازِ ۷: تگِ خودکار از یک تحلیلِ سالم. فقط مقدارِ **فعال** (مقداری که مالک خاموش کرده خودکار
+ * هم زده نمی‌شود). fail-safe و بی‌پیام؛ خروجی = تگ‌های نوشته‌شده (برای شمارش). */
+function applyAutoTags(pid, uid, sh) {
+  if (!tagsOn() || !RECEIPT_AUTOTAG_ENABLED || !pid) return [];
+  try {
+    const values = tagValues();
+    const put = RT.autoTagsFrom(sh).filter((t) => values.some((v) => v.dim === t.dim && v.key === t.key && Number(v.active) === 1));
+    for (const t of put) tagSt().autoSet.run(pid, uid, t.dim, t.key);
+    if (put.length) log(`🤖 RECEIPT_AUTOTAG pay#${pid} ${put.map((t) => `${t.dim}=${t.key}`).join(' ')}`);
+    return put;
+  } catch (e) { logErr('autotag:', e.message); return []; }
+}
+/** یک‌باره در بوت: تحلیل‌های سالمی که **قبل از** فازِ ۷ ثبت شده‌اند (v3.126.0 به بعد) تگِ خودکار
+ *  می‌گیرند، از همان `raw_json` و **بدونِ هیچ فراخوانیِ مدل**. مارکرِ `receipt_autotag_backfill_1`. */
+function backfillAutoTags() {
+  if (!tagsOn() || !RECEIPT_AUTOTAG_ENABLED) return;
+  try {
+    if (db.prepare("SELECT 1 FROM migrations WHERE key='receipt_autotag_backfill_1'").get()) return;
+    const rows = db.prepare(`SELECT a.payment_id, a.user_id, a.raw_json FROM receipt_analyses a
+      WHERE a.ok=1 AND a.id=(SELECT MAX(b.id) FROM receipt_analyses b WHERE b.payment_id=a.payment_id AND b.ok=1)`).all();
+    let n = 0;
+    db.transaction(() => {
+      for (const r of rows) {
+        let ext = null;
+        try { ext = JSON.parse(r.raw_json)?.extracted; } catch { ext = null; }   // raw بریده‌شده ⟵ رد
+        n += applyAutoTags(r.payment_id, r.user_id, shadowFields(ext)).length;
+      }
+      db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('receipt_autotag_backfill_1', unixepoch())").run();
+    })();
+    log(`🤖 AUTOTAG_BACKFILL analyses=${rows.length} tags=${n}`);
+  } catch (e) { logErr('autotag backfill:', e.message); }
+}
+
+/* 🔁 فازِ ۷: تحلیلِ دوباره‌ی عکس‌های رسیدِ گذشته، یک‌باره و آهسته. هر پرداختی که عکسِ رسید دارد
+ * ولی هیچ تحلیلِ سالمی ندارد (یعنی قبل از v3.126.0 آمده)، یک بار به همان ایجنتِ زنده با فیلدهای
+ * فازِ ۴ داده می‌شود و **فقط** ثبت می‌شود: نه `decideReceipt`، نه `attributeReceiptCard`، نه تغییرِ
+ * وضعیت، نه پیام به کاربر. هزینه‌ی مدل دارد، پس: یکی در هر ۲۰ ثانیه، سقفِ کلِ تلاش‌ها، حداکثر دو
+ * تلاش per پرداخت، و قطع‌کنِ ۱ساعته بعد از ۵ شکستِ پیاپیِ ایجنت (قطعیِ OpenRouter نباید رسیدها را
+ * بسوزاند). دانلودِ ناموفق (فایلِ منقضی) دائمی است و همان بار ثبت می‌شود. */
+const REANALYSIS_PACE_MS = 20_000;
+const REANALYSIS_MAX = 3000;
+const REANALYSIS_TRIES = 2;
+let _reSt = null;
+const reSt = () => _reSt || (_reSt = {
+  next: db.prepare(`SELECT * FROM payments p WHERE COALESCE(p.receipt_file_id, '') != ''
+    AND NOT EXISTS (SELECT 1 FROM receipt_analyses a WHERE a.payment_id=p.id AND a.ok=1)
+    AND (SELECT COUNT(*) FROM receipt_analyses a WHERE a.payment_id=p.id AND a.source='reanalysis') < ${REANALYSIS_TRIES}
+    ORDER BY p.id DESC LIMIT 1`),
+  stats: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(ok), 0) ok, COUNT(DISTINCT payment_id) pays FROM receipt_analyses WHERE source='reanalysis'"),
+  autoN: db.prepare("SELECT COUNT(*) n FROM receipt_tags WHERE source='auto'"),
+  marker: db.prepare("SELECT 1 FROM migrations WHERE key='receipt_reanalysis_1'"),
+  mark: db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('receipt_reanalysis_1', unixepoch())"),
+});
+const rean = { busy: false, off: false, fails: 0, pauseUntil: 0 };
+const faNum = (n) => Number(n || 0).toLocaleString('fa-IR');
+async function reanalyzeNextPastReceipt() {
+  if (rean.off || rean.busy || !RECEIPT_REANALYSIS_ENABLED || !tagsOn() || !RECEIPT_SHADOW_ENABLED) return;
+  if (Date.now() < rean.pauseUntil) return;
+  rean.busy = true;
+  try {
+    if (reSt().marker.get()) { rean.off = true; return; }
+    const st = reSt().stats.get();
+    const p = Number(st.n) < REANALYSIS_MAX ? reSt().next.get() : null;
+    if (!p) {
+      reSt().mark.run();
+      rean.off = true;
+      const auto = reSt().autoN.get().n;
+      log(`🔁 REANALYSIS_DONE tries=${st.n} ok=${st.ok} payments=${st.pays} auto_tags=${auto}`);
+      await bot.telegram.sendMessage(OWNER_ID, `🔁 تحلیلِ دوباره‌ی رسیدهای گذشته تمام شد: ${faNum(st.pays)} رسید، `
+        + `${faNum(st.ok)} تحلیلِ موفق؛ کلِ تگ‌های خودکار: ${faNum(auto)}.`).catch(() => {});
+      return;
+    }
+    const t0 = Date.now();
+    let imageBuffer = null;
+    try {
+      if (!(p.amount > 0)) throw new Error('مبلغِ نامعتبر');
+      const link = await bot.telegram.getFileLink(p.receipt_file_id);
+      const res = await fetch(link.href);
+      if (!res.ok) throw new Error(`http_${res.status}`);
+      imageBuffer = Buffer.from(await res.arrayBuffer());
+    } catch (e) {
+      logErr(`🔁 REANALYSIS_SKIP pay#${p.id} (دانلود):`, e.message);
+      recordReceiptAnalysis(p, p.user_id, null, null, 'reanalysis', Date.now() - t0, { trackEvent: false });
+      return;
+    }
+    let verdict = null;
+    try {
+      verdict = await analyzeReceipt({
+        apiKey: OPENROUTER_API_KEY, models: RECEIPT_MODELS,
+        expected: { amount_toman: p.amount, amount_rial: p.amount * 10, ...receiptExpectedCards(p) },
+        imageBuffer, imageMime: 'image/jpeg', shadow: true,
+      });
+    } catch (e) { logErr(`🔁 REANALYSIS_FAIL pay#${p.id}:`, e.message); }
+    recordReceiptAnalysis(p, p.user_id, verdict, null, 'reanalysis', Date.now() - t0, { trackEvent: false });
+    if (verdict?.agent?.ok) rean.fails = 0;
+    else if (++rean.fails >= 5) {
+      rean.fails = 0;
+      rean.pauseUntil = Date.now() + 3600 * 1000;
+      logErr('🔁 REANALYSIS_PAUSE ۵ شکستِ پیاپیِ ایجنت ⟵ یک ساعت مکث');
+    }
+  } catch (e) { logErr('reanalysis:', e.message); }
+  finally { rean.busy = false; }
+}
 
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
   let p = stmts.getPayment.get(paymentId);
@@ -12307,6 +12430,9 @@ function onLaunched() {
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
+  // 🤖 فازِ ۷: پرکردنِ یک‌باره‌ی تگ از تحلیل‌های موجود (بی‌هزینه)، بعد صفِ آهسته‌ی تحلیلِ دوباره.
+  backfillAutoTags();
+  if (RECEIPT_REANALYSIS_ENABLED && tagsOn()) setInterval(reanalyzeNextPastReceipt, REANALYSIS_PACE_MS);
   installMenuButton();
   installUnifiedProfile();
 }

@@ -337,7 +337,10 @@ const shortStr = (x, n) => (x == null || typeof x === 'object') ? null : (String
  *  فهرستِ بسته، و خطای انتقال فقط با `true`ِ صریح (رشته‌ی "true" هم نه). */
 function shadowFields(ext) {
   const e = (ext && typeof ext === 'object' && !Array.isArray(ext)) ? ext : {};
-  const digits = toLatin(e.source_card_prefix).replace(/\D/g, '');
+  /* فقط رقم‌های **ابتداییِ پیوسته** (فاصله/خط‌تیره/نقطه‌ی بینِ گروه‌ها نادیده). حذفِ همه‌ی غیرِرقم‌ها
+     «6219 86** **** 1234» را «62198612…» می‌کرد: چهار رقمِ **آخر** به پیش‌شماره می‌چسبید و رقم‌های
+     ۷ و ۸ِ ساختگی بلو را سامان نشان می‌داد (v3.129.0). فیلد فقط-ثبت است؛ روی تصمیمِ رسید اثری ندارد. */
+  const digits = (toLatin(e.source_card_prefix).replace(/[\s\-.\u200c]/g, '').match(/^\d+/) || [''])[0];
   const app = String(e.bank_app ?? '').trim().toLowerCase();
   return {
     src_prefix: digits.length >= 6 ? digits.slice(0, 8) : null,

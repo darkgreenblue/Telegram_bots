@@ -166,7 +166,8 @@ export const stripTagRows = (kb) => rowsOf(kb).filter((r) => !isTagRow(r));
 /** ردیفِ جمع‌شده: «📱 اپ: بلو» و «🏦 بانک: —». `cur` = خروجیِ `effectiveTags` برای همین رسید. */
 export function tagCollapsedRows(pid, cur, labelOf) {
   const lab = typeof labelOf === 'function' ? labelOf : (_d, k) => k;
-  return [TAG_DIMS.map((d) => btn(`${TAG_DIM_ICON[d]} ${TAG_DIM_LABEL[d]}: ${cur?.[d] ? lab(d, cur[d].key) : '—'}`, `tg:o:${pid}:${d}`))];
+  // 🤖 = تگِ خودکارِ فازِ ۷ (هنوز دستی تأیید/اصلاح نشده).
+  return [TAG_DIMS.map((d) => btn(`${TAG_DIM_ICON[d]} ${TAG_DIM_LABEL[d]}: ${cur?.[d] ? lab(d, cur[d].key) + (cur[d].source === 'auto' ? ' 🤖' : '') : '—'}`, `tg:o:${pid}:${d}`))];
 }
 /** ردیف‌های انتخابِ یک بُعد: سه‌تایی، مقدارِ فعلی با ✅، و ردیفِ «پاک کردن / بستن». */
 export function tagPickerRows(pid, dim, values, curKey) {
@@ -234,4 +235,52 @@ export function planTagOp(op, { values = [], payment = null } = {}) {
       what: `${v.label} ⟵ ${active ? 'فعال' : 'غیرفعال'}` };
   }
   return { ok: false, err: 'دستورِ ناشناخته' };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * 🤖 فازِ ۷ (v3.129.0): تگِ خودکار از خروجیِ ایجنت. «مدل می‌خواند، کد حساب می‌کند»: مدل فقط
+ * رقم‌های اولِ کارتِ مبدأ و نامِ اپ را می‌خواند؛ نگاشتِ پیش‌شماره ⟵ بانک این‌جا در کد است.
+ *
+ * منبعِ نگاشت (بند ۹/۰الف ریشه — فقط چیزی که باز شد): دو فهرستِ عمومیِ گیت‌هاب که ۱۴۰۵/۰۷/۰۴ باز و
+ * خوانده شدند (gist.github.com/ahbanavi/7bc6dff01b13d7c718209a5785e6c495 و
+ * gist.github.com/hasanparasteh/4744845b41a260a0128f275058b9c3b3). **منبعِ رسمیِ شاپرک نیست**؛
+ * برای همین فقط پیش‌شماره‌هایی آمده‌اند که **هر دو** فهرست یکسان می‌گویند و در فهرستِ ۳۰ بانکِ
+ * سید هستند. هرچه فقط در یکی بود (مثلاً 502806، 604932، 639217) عمداً کنار ماند: بی‌تگ‌ماندن از
+ * تگِ غلط بهتر است، و تگِ دستیِ مالک همیشه مقدم است.
+ * بلو (۸ رقمیِ 62198618/19) را خودِ مالک داده (بخشِ «تگ‌ها»ی plan). */
+export const BIN_BANK = Object.freeze({
+  603799: 'melli', 610433: 'mellat', 603769: 'saderat', 627353: 'tejarat', 585983: 'tejarat',
+  589210: 'sepah', 603770: 'keshavarzi', 628023: 'maskan', 589463: 'refah', 502229: 'pasargad',
+  621986: 'saman', 622106: 'parsian', 627412: 'eghtesad', 627488: 'karafarin', 639346: 'sina',
+  639607: 'sarmayeh', 504706: 'shahr', 502938: 'day', 636214: 'ayandeh', 505416: 'gardeshgari',
+  505809: 'khavarmianeh', 585947: 'khavarmianeh', 505785: 'iranzamin', 606373: 'mehr', 504172: 'resalat',
+  606256: 'melal', 627760: 'postbank', 627648: 'tosee_saderat', 627961: 'sanat', 502908: 'tosee_taavon',
+  507677: 'noor',
+});
+export const BIN8_BANK = Object.freeze({ 62198618: 'blu', 62198619: 'blu' });
+/** پیش‌شماره‌ی ۶رقمی‌ای که بدونِ رقمِ ۷ و ۸ مبهم است (سامان یا بلو). رسیدها معمولاً وسطِ
+ *  شماره را می‌پوشانند («6219 86** …»)، پس این حالت رایج است و **حدس زده نمی‌شود**. */
+export const AMBIGUOUS_BIN6 = Object.freeze(['621986']);
+
+/** بانکِ مبدأ از رقم‌های اولِ کارت، یا `null` (ناشناخته/مبهم/کوتاه). */
+export function bankFromPrefix(prefix) {
+  // همان قاعده‌ی `shadowFields`: فقط رقم‌های ابتداییِ پیوسته، وگرنه رقم‌های بعد از `**` می‌چسبیدند.
+  const d = (String(prefix ?? '').replace(/[۰-۹]/g, (x) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(x))
+    .replace(/[\s\-.\u200c]/g, '').match(/^\d+/) || [''])[0];
+  if (d.length < 6) return null;
+  if (d.length >= 8 && BIN8_BANK[d.slice(0, 8)]) return BIN8_BANK[d.slice(0, 8)];
+  const six = d.slice(0, 6);
+  if (d.length < 8 && AMBIGUOUS_BIN6.includes(six)) return null;
+  return BIN_BANK[six] || null;
+}
+
+/** تگ‌های خودکارِ یک تحلیل: `[{dim, key}]`. ورودی = خروجیِ `shadowFields` (`app`, `src_prefix`).
+ *  `other` هرگز تگ نیست («سایر» مقدار ندارد). مقدارِ غیرفعال/ناموجود را صداکننده کنار می‌گذارد. */
+export function autoTagsFrom(sh) {
+  const out = [];
+  const app = String(sh?.app || '');
+  if (app && app !== 'other' && TAG_KEY_RE.test(app)) out.push({ dim: 'app', key: app });
+  const bank = bankFromPrefix(sh?.src_prefix);
+  if (bank) out.push({ dim: 'bank', key: bank });
+  return out;
 }

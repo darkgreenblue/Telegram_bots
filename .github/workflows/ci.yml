@@ -604,6 +604,11 @@ jobs:
       - name: Receipt tags check (bot)
         if: matrix.bot == 'tarot'
         run: node tools/check-receipt-tags.mjs --part=bot
+      # 🤖 فازِ ۷: تگِ خودکار (پیش‌شماره ⟵ بانک در کد، مبهم ⟵ بی‌تگ، دستی مقدم) + تحلیلِ دوباره‌ی
+      # یک‌باره‌ی رسیدهای گذشته که هرگز به پول/کاربر دست نمی‌زند و قطع‌کن دارد.
+      - name: Receipt auto-tag check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-autotag.mjs
 
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/

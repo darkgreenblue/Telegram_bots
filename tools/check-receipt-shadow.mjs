@@ -32,7 +32,11 @@ console.log('\n🔎 خروجیِ کاملِ ایجنتِ رسید\n');
 /* ── ۱) نرمال‌سازیِ خالص ───────────────────────────────────────────────────── */
 console.log('shadowFields:');
 const SF = CP.shadowFields;
-ok(SF({ source_card_prefix: '۶۰۳۷ ۹۹** **** ۱۲۳۴' }).src_prefix === '60379912', 'ارقامِ فارسی + فاصله ⟵ لاتین، حداکثر ۸ رقم');
+/* 🐛 v3.129.0: این ادعا قبلاً «60379912» را درست می‌دانست، یعنی خودِ باگ را قفل کرده بود: دو رقمِ آخرِ
+   «1234» بعد از `**` به پیش‌شماره می‌چسبید و برای فازِ ۷ یعنی رقم‌های ۷ و ۸ِ ساختگی (بلو ⟵ سامان). */
+ok(SF({ source_card_prefix: '۶۰۳۷ ۹۹** **** ۱۲۳۴' }).src_prefix === '603799', 'ارقامِ فارسی + فاصله ⟵ لاتین، فقط رقم‌های ابتداییِ پیوسته');
+ok(SF({ source_card_prefix: '6219 86** **** 1234' }).src_prefix === '621986', 'رقم‌های بعد از ماسک هرگز به پیش‌شماره نمی‌چسبند');
+ok(SF({ source_card_prefix: '6219-8619-1234-5678' }).src_prefix === '62198619', 'بدونِ ماسک ⟵ حداکثر ۸ رقم');
 ok(SF({ source_card_prefix: '6037' }).src_prefix === null, 'کمتر از ۶ رقم بانک را مشخص نمی‌کند ⟵ null');
 ok(SF({ source_card_prefix: { a: 1 } }).src_prefix === null, 'نوعِ غلط ⟵ null (کرش نه)');
 ok(SF({ bank_app: 'BLU' }).app === 'blu' && SF({ bank_app: '780' }).app === '780', 'اپ: حساس به حروفِ بزرگ نیست');
@@ -181,7 +185,7 @@ if (sender) {
 /* ── ۷) ساختاری ───────────────────────────────────────────────────────────── */
 console.log('\nساختاری:');
 ok(/const RECEIPT_SHADOW_ENABLED = true;/.test(CODE), 'پرچمِ رول‌بک تعریف شده و روشن است');
-ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 4, 'پرچم دقیقاً چهار جا: تعریف، پرامپت، خطِ مالک، و گیتِ فازِ ۵ (terrOn)');
+ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 5, 'پرچم دقیقاً پنج جا: تعریف، پرامپت، خطِ مالک، گیتِ فازِ ۵ (terrOn) و گیتِ تحلیلِ دوباره‌ی فازِ ۷');
 ok(/text: textBody, shadow: RECEIPT_SHADOW_ENABLED/.test(CODE), 'analyzeReceipt پرچم را می‌گیرد');
 {
   const body = region('async function processReceipt', '\nasync function notifyAdminAutoApproved');
