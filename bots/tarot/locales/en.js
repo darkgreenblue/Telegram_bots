@@ -358,6 +358,7 @@ export default {
     smsNotArrived: '🚫 No transfer notification',
     reverseYes: '✅ Yes, reverse it',
     reverseNo: '↩️ No, never mind',
+    duplicateYes: '✅ Yes, duplicate',
     // کدِ مرده برای این زبان (بند ۲و/۴ ریشه: ریلِ پرداخت تنها واگراییِ ساختاری است؛
     // این دکمه‌ها فقط روی ریلِ کارت‌به‌کارتِ فارسی اجرا می‌شوند).
     suspectYes: '✅ Transfer notification arrived',
@@ -1071,6 +1072,11 @@ export default {
     adminReversed: (pid, uid, back, coins) =>
       `↩️ Payment #${pid} reversed; ${coins != null ? `${fmt(coins)} ${plural(coins, ['diamond', 'diamonds'])}` : fmt(back)} taken back, and user ${uid} is flagged as untrusted (manual only from now on).`,
     reverseAlready: 'This payment has already been reversed, or it is not approved yet.',
+    confirmDuplicate: (pid) =>
+      `⚠️ Mark payment #${pid} as a duplicate receipt?\nThe diamonds from this payment will be taken back from the user's balance (down to zero). The user gets no message and is not marked untrusted.`,
+    adminDuplicateClawed: (pid, uid, back, coins) =>
+      `↩️ Payment #${pid} marked as a duplicate receipt; ${coins != null ? `${fmt(coins)} diamonds` : `${fmt(back)}`} taken back from user ${uid} (no message to the user, not marked untrusted).`,
+    agentBroken: '⚠️ The receipt checker bot has a problem; review this receipt manually.',
     reverseCancelled: (pid) => `Alright, no reversal. Payment #${pid} stays as it was.`,
     approved: (amount, balance, bonus) =>
       `✅ Your top up of ${fmt(amount)} is confirmed!${bonus ? `\n🎁 + ${fmt(bonus)} bonus` : ''}\nNew balance: ${fmt(balance)}`,

@@ -383,6 +383,7 @@ export default {
     smsNotArrived: '🚫 O aviso não chegou',
     reverseYes: '✅ Sim, pode estornar',
     reverseNo: '↩️ Não, deixa pra lá',
+    duplicateYes: '✅ Sim, é duplicado',
     suspectYes: '✅ Chegou o aviso',
     suspectNo: '❌ Não chegou o aviso',
   },
@@ -1068,6 +1069,11 @@ export default {
     adminReversed: (pid, uid, back, n) =>
       `↩️ Pagamento #${pid} estornado; ${n != null ? coins(n) : fmt(back)} debitado, e a pessoa ${uid} ficou marcada como não confiável (daqui pra frente só na mão).`,
     reverseAlready: 'Esse pagamento já foi estornado ou ainda não foi aprovado.',
+    confirmDuplicate: (pid) =>
+      `⚠️ Marcar o pagamento #${pid} como recibo duplicado?\nOs diamantes deste pagamento serão retirados do saldo do usuário (até zero). O usuário não recebe mensagem e não é marcado como não confiável.`,
+    adminDuplicateClawed: (pid, uid, back, coins) =>
+      `↩️ Pagamento #${pid} marcado como recibo duplicado; ${coins != null ? `${fmt(coins)} diamantes` : `${fmt(back)}`} retirados do usuário ${uid} (sem mensagem ao usuário e sem marca de não confiável).`,
+    agentBroken: '⚠️ O bot verificador de recibos está com problema; revise este recibo manualmente.',
     reverseCancelled: (pid) => `Beleza, o estorno não foi feito. O pagamento #${pid} ficou como estava.`,
     approved: (amount, balance, bonus) =>
       `✅ Compra de ${fmt(amount)} aprovada!${bonus ? `\n🎁 + ${fmt(bonus)} de bônus` : ''}\nSaldo novo: ${fmt(balance)}`,
