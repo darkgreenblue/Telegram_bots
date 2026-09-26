@@ -10455,6 +10455,10 @@ setInterval(async () => {
             logPush(db, uid2, msg, { isAdmin: isAdmin(uid2), label: paid ? 'تأیید پرداخت' : 'شارژ پشتیبانی' });
             await afterApproval(uid2); // اگر فالِ رزروشده دارد، خودکار ادامه پیدا کند
           }
+        } else if (act.action === 'card_update') {
+          // 💳 تغییرِ کارت از داشبورد (فازِ ۱c). پولی جابه‌جا نمی‌شود و پیامی به کاربر
+          // نمی‌رود؛ فقط مالک خبر می‌گیرد (موفق یا ناموفق).
+          await applyQueuedCardOp(act);
         } else if (act.action === 'unlock_reading') {
           // بازکردنِ دستیِ یک فالِ رزروشده: قیمتش اعتبار داده می‌شود و خودِ کاربر با دکمه‌ی
           // همیشگی بازش می‌کند — یعنی هیچ مسیرِ کسرِ جدیدی ساخته نمی‌شود (ریلِ پول تک‌منبع).
@@ -11008,9 +11012,12 @@ async function showCardView(ctx, id, edit = true, prefix = '') {
   if (edit) return editOrSend(ctx, text, cardViewRows(c));
   return ctx.reply(text, Markup.inlineKeyboard(cardViewRows(c))).catch(() => {});
 }
-/** هر تغییرِ کارت: رویداد + لاگ، و اگر تغییردهنده خودِ مالک نیست پیام به مالک (مسیرِ داشبورد در فاز ۱c). */
+/** هر تغییرِ کارت: رویداد + لاگ، و اگر تغییردهنده خودِ مالک نیست پیام به مالک.
+ *  `actorId` صفر = داشبورد (صفِ `admin_actions`)، پس همیشه خبر می‌گیرد. */
 function notifyCardChange(actorId, cardId, what) {
-  track(db, actorId, 'card_changed', { card_id: cardId, what });
+  // داشبورد (صفر) به نامِ مالک ثبت می‌شود تا یک کاربرِ شبحِ `0` در قیف‌ها نسازد (ادمین از
+  // قیف‌ها حذف است)؛ منبع در prop افزایشیِ `via` می‌ماند.
+  track(db, Number(actorId) || OWNER_ID, 'card_changed', { card_id: cardId, what, via: Number(actorId) ? 'bot' : 'dashboard' });
   log(`💳 CARD_CHANGED #${cardId} by ${actorId}: ${what}`);
   if (Number(actorId) !== OWNER_ID) bot.telegram.sendMessage(OWNER_ID, CA.changeNotice(actorId, what)).catch(() => {});
 }
@@ -11105,6 +11112,38 @@ bot.action('ca:x', caOnly(async (ctx) => {
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   return showCardsList(ctx);
 }));
+
+/** 🗂 اجرای یک تغییرِ کارت از صفِ `admin_actions` (داشبورد، فازِ ۱c).
+ *  اعتبارسنجی **دوباره و روی فهرستِ همین لحظه** انجام می‌شود (`CA.planCardOp`، همان
+ *  تک‌منبعی که داشبورد قبل از صف‌کردن صدا زد)، چون بینِ صف و اجرا کارت‌ها ممکن است از
+ *  داخلِ ربات عوض شده باشند. نتیجه، **چه موفق چه ناموفق**، به مالک گفته می‌شود: داشبورد
+ *  توکنِ ربات را ندارد، پس تنها جایی که مالک می‌فهمد تغییرش واقعاً نشست همین پیام است. */
+async function applyQueuedCardOp(act) {
+  const tell = (m) => bot.telegram.sendMessage(OWNER_ID, m).catch(() => {});
+  if (starsRail) {
+    logErr(`💳 CARD_OP_REFUSED id=${act.id}: ریلِ استارز کارت ندارد`);
+    return tell('❌ تغییرِ کارت از داشبورد اجرا نشد: این ربات کارت‌به‌کارت ندارد.');
+  }
+  let op = null;
+  try { op = JSON.parse(act.note || ''); } catch { op = null; }
+  const plan = CA.planCardOp(op, cardsAll());
+  if (!plan.ok) {
+    logErr(`💳 CARD_OP_REJECTED id=${act.id}: ${plan.err}`);
+    return tell(`❌ تغییرِ کارت از داشبورد اجرا نشد: ${plan.err}`);
+  }
+  if (plan.noop) return;
+  const a = plan.apply;
+  let id = a.id;
+  if (a.t === 'add') {
+    const sort = Number(cardSt().maxSort.get().m) + 1;
+    id = Number(cardSt().insert.run(a.number, a.holder, a.bank, a.admin, a.kind, sort).lastInsertRowid);
+  } else if (a.t === 'active') cardSt().setActive.run(a.value, id);
+  else if (a.t === 'kind') cardSt().setKind.run(a.value, id);
+  else if (a.t === 'field') cardSt().upd[a.field].run(a.value, id);
+  notifyCardChange(0, id, plan.what);
+  const who = a.t === 'add' ? a.admin : a.t === 'field' && a.field === 'admin' ? a.value : null;
+  if (who) { const note = await adminReachNote(who); if (note) tell(note.trim()); }
+}
 
 /** ورودیِ متنیِ مالک در دو استیتِ `card_add`/`card_edit`. ورودیِ نامعتبر استیت را نمی‌شکند:
  *  همان مرحله با پیامِ خطای مشخص می‌ماند و هیچ چیزی در DB نوشته نشده است. */

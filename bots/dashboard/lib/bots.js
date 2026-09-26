@@ -54,7 +54,11 @@ export const BOTS = [
        رد می‌شد. هر شاخه‌ی تازه در sweep باید همین‌جا هم اضافه شود (چکِ CI هر دو جهت
        را می‌سنجد: نامِ بی‌شاخه و شاخه‌ی بی‌نام هر دو قرمزند). */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update'],
+    /* 💳 صفحه‌ی کارت‌های پرداخت (v3.123.0، فازِ ۱c). فقط ریلِ کارت‌به‌کارت کارت دارد؛
+       `card_update` در tarot-intl هم اعلام شده چون sweep همان کد است، ولی آن‌جا sweep
+       صریح امتناع می‌کند و صفحه هم رندر نمی‌شود (این پرچم را ندارد). */
+    cardsAdmin: true,
     /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
      *
      * ⚠️ عددی که در `users.balance` و `payments.original_amount` نشسته یک **فرمتِ
@@ -131,7 +135,7 @@ export const BOTS = [
        کاربرانِ روسی/اسپانیایی/پرتغالی ممکن نبود. پرچمِ بی‌دلیل خاموش هم باگ است، فقط
        جهتش برعکس (بند ۲الف ریشه) — و چکِ CI همین را گرفت. */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update'],
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
@@ -209,6 +213,10 @@ export const adminActionsOf = (bot) => botByKey(bot)?.adminActions || [];
 export const adminActionSupported = (bot, act) => adminActionsOf(bot).includes(act);
 /* هر دو اکشنِ اعتباری لازم است: صفحه‌ی پرداختِ سرگردان `credit_paid` می‌فرستد و
    شارژِ دستیِ پشتیبانی `credit` — رباتی که فقط یکی را بفهمد نصفِ مسیر را می‌بلعد. */
+/** صفحه‌ی «💳 کارت‌های پرداخت»: ربات باید هم کارت داشته باشد (`cardsAdmin`) و هم sweepش
+ *  `card_update` را اجرا کند. هر دو شرط لازم‌اند: اولی بدونِ دومی یعنی تغییر در صف بمیرد. */
+export const cardsPageSupported = (bot) =>
+  !!botByKey(bot)?.cardsAdmin && adminActionSupported(bot, 'card_update');
 export const creditQueueSupported = (bot) =>
   adminActionSupported(bot, 'credit') && adminActionSupported(bot, 'credit_paid');
 /* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی/ریالی است و همه‌چیز دقیقاً مثل قبل

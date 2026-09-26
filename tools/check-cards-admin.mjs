@@ -65,6 +65,34 @@ ok(!CA.canMakeWhite([R(1), R(2, 1, 'white')], 1) && CA.canMakeWhite([R(1), R(2)]
 }
 
 /* ── ۲) ساختاری در index.js ───────────────────────────────────────────────────── */
+console.log('\nصفِ داشبورد (planCardOp — تک‌منبعِ داشبورد و sweep):');
+{
+  const C = [
+    { id: 1, number: '6219861904145405', holder: 'علی', bank: 'بلوبانک', admin_id: 1, kind: 'regular', active: 1, sort: 1, daily_cap: 0 },
+    { id: 2, number: '5022291612282234', holder: 'علی', bank: 'پاسارگاد', admin_id: 1, kind: 'white', active: 1, sort: 2, daily_cap: 0 },
+  ];
+  const P = (op) => CA.planCardOp(op, C);
+  ok(!P({ op: 'active', id: 1, value: 0 }).ok, 'صف هم آخرین کارتِ عادیِ فعال را خاموش نمی‌کند');
+  ok(!P({ op: 'kind', id: 1, value: 'white' }).ok, 'صف هم آخرین کارتِ عادیِ فعال را سفید نمی‌کند');
+  ok(P({ op: 'active', id: 1, value: 1 }).noop && P({ op: 'kind', id: 2, value: 'white' }).noop,
+    'مقدارِ هدف (نه «برعکس کن»): تکرارِ همان دستور no-op است، پس دوبار-ارسال خنثی نمی‌شود');
+  ok(P({ op: 'active', id: 2, value: 0 }).apply?.value === 0, 'کارتِ سفید غیرفعال می‌شود');
+  ok(!P({ op: 'edit', id: 1, field: 'number', value: '5022291612282234' }).ok, 'صف هم شماره را ویرایش نمی‌کند');
+  ok(!P({ op: 'edit', id: 1, field: '__proto__', value: 'x' }).ok, 'فیلدِ ناشناخته/خصمانه رد می‌شود');
+  ok(P({ op: 'edit', id: 1, field: 'cap', value: '۵' }).apply?.value === 5, 'ویرایشِ سقف با ارقامِ فارسی');
+  ok(P({ op: 'edit', id: 1, field: 'bank', value: 'بلوبانک' }).noop, 'مقدارِ برابر ⟵ no-op');
+  ok(!P({ op: 'edit', id: 9, field: 'bank', value: 'x y' }).ok, 'کارتِ ناموجود رد می‌شود');
+  ok(!P({ op: 'add', number: '6219 8619 0414 5405', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }).ok, 'صف هم شماره‌ی تکراری را رد می‌کند');
+  ok(!P({ op: 'add', number: '6219861904145406', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }).ok, 'صف هم Luhn را می‌سنجد');
+  let good = '603799759919901';
+  for (let d = 0; d < 10; d++) if (CA.luhnOk(good + d)) { good += d; break; }
+  const addOk = P({ op: 'add', number: good, holder: 'x y', bank: '-', admin: '12345', kind: 'regular' });
+  ok(addOk.ok && addOk.apply.bank === '' && addOk.apply.admin === 12345, 'افزودنِ معتبر (کنترلِ مثبت)');
+  ok(!P({ op: 'add', number: good, holder: 'x y', bank: '-', admin: '12345', kind: 'gold' }).ok, 'نوعِ ناشناخته رد می‌شود');
+  ok(!CA.planCardOp(null, C).ok && !CA.planCardOp({ op: 'drop', id: 1 }, C).ok, 'دستورِ خراب/ناشناخته (مثلاً حذف) رد می‌شود');
+  ok(/از داشبورد/.test(CA.changeNotice(0, 'x')) && /توسط 5/.test(CA.changeNotice(5, 'x')), 'خبرِ تغییر منبع را می‌گوید');
+}
+
 console.log('\nساختاری:');
 ok((CODE.match(/\bCARDS_ADMIN_ENABLED\b/g) || []).length === 2, 'پرچمِ خام دقیقاً دو بار است (تعریف + helper)');
 ok(/const cardsAdminOn = \(uid\) => CARDS_ADMIN_ENABLED && !starsRail && Number\(uid\) === OWNER_ID;/.test(CODE),
@@ -86,6 +114,14 @@ ok(!/DELETE FROM cards/i.test(CODE), 'هیچ مسیری کارت حذف نمی�
 ok(/const LEGACY_ADMINS_FULL = false;/.test(CODE), 'ادمین‌های بی‌کارت دیگر پیامِ رسید نمی‌گیرند (تصمیمِ مالک)');
 
 /* ── ۳) رفتاری: خودِ هندلرها روی SQLite ─────────────────────────────────────── */
+ok(/act\.action === 'card_update'\) \{[\s\S]{0,300}await applyQueuedCardOp\(act\)/.test(CODE),
+  'sweepِ ۶۰ثانیه‌ای شاخه‌ی card_update دارد و منتظرِ اجرایش می‌ماند');
+ok(/async function applyQueuedCardOp\(act\) \{[\s\S]{0,300}if \(starsRail\)/.test(CODE),
+  'ریلِ استارز (زبان‌های دیگر) تغییرِ کارت را صریح رد می‌کند');
+ok(/const plan = CA\.planCardOp\(op, cardsAll\(\)\)/.test(CODE),
+  'sweep روی فهرستِ **همان لحظه** دوباره اعتبارسنجی می‌کند');
+ok(!/DELETE FROM cards/.test(CODE), 'هیچ مسیری (نه ربات نه صف) کارت حذف نمی‌کند');
+
 console.log('\nرفتاری:');
 const OWNER = 1000001, OTHER = 2000002, NEWADMIN = 3000003;
 const readers = region('let _cardSt = null;', '\nfunction defaultInvoiceCard()', { includeTo: false });
@@ -93,7 +129,7 @@ const schema = region('db.exec(`\n  CREATE TABLE IF NOT EXISTS cards', "VALUES (
   .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '6219861904145405';");
 const handlers = region('const caOnly = (fn) =>', '/* ---------- هندلر متن', { includeTo: false });
 
-function boot() {
+function boot({ stars = false } = {}) {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE payments (id INTEGER PRIMARY KEY, card_id INTEGER NOT NULL DEFAULT 0)');
   const actions = [], hears = [], sent = [], events = [];
@@ -111,7 +147,7 @@ function boot() {
     button: { callback: (text, data) => ({ text, callback_data: data }) },
   };
   const env = {
-    db, bot, Markup, CA, OWNER_ID: OWNER, L: { buttons: { cardsAdmin: '💳 کارت‌ها' } },
+    db, bot, Markup, CA, OWNER_ID: OWNER, starsRail: stars, L: { buttons: { cardsAdmin: '💳 کارت‌ها' } },
     allLabels: (f) => [f({ buttons: { cardsAdmin: '💳 کارت‌ها' } })],
     cardsAdminOn: (u) => Number(u) === OWNER,
     upsertUser: () => {}, blockDuringOpenPay: async () => false, blockDuringOpenReading: async () => false,
@@ -122,7 +158,7 @@ function boot() {
     track: (_d, u, e, pr) => events.push({ u, e, pr }), log: () => {}, logErr: () => {},
     editOrSend: async (ctx, text, rows) => ctx.reply(text, Markup.inlineKeyboard(rows)),
   };
-  const body = `${readers}\n${schema}\n${handlers}\nreturn { cardSt, handleCardInput };`;
+  const body = `${readers}\n${schema}\n${handlers}\nreturn { cardSt, handleCardInput, applyQueuedCardOp };`;
   const out = new Function(...Object.keys(env), body)(...Object.values(env));
   return { ...out, db, actions, hears, sent, events, state, sess };
 }
@@ -224,6 +260,51 @@ if (h) {
   ok(/تمام شده/.test(mid.cbs[0]?.t || '') && count() === before + 1 && h.sess.get(OWNER).cardAdd?.step === 'number',
     'دکمه‌ی کهنه‌ی نوع وسطِ افزودنِ تازه کارتِ نیمه‌کاره نمی‌سازد و پیش‌نویس را نمی‌کشد');
   await tap(h, OWNER, 'ca:x');
+}
+
+
+console.log('\nصفِ داشبورد (اجرای واقعیِ applyQueuedCardOp):');
+{
+  let q;
+  try { q = boot(); } catch (e) { fail++; console.error('  ❌ boot:', e.message); }
+  if (q) {
+    const run = (op, id = 1) => q.applyQueuedCardOp({ id, note: typeof op === 'string' ? op : JSON.stringify(op) });
+    const n = () => q.db.prepare('SELECT COUNT(*) n FROM cards').get().n;
+    let valid = '603799759919901';
+    for (let d = 0; d < 10; d++) if (CA.luhnOk(valid + d)) { valid += d; break; }
+    await run({ op: 'add', number: valid, holder: 'زهرا احمدی', bank: '-', admin: String(NEWADMIN), kind: 'regular' });
+    const nc = q.db.prepare('SELECT * FROM cards ORDER BY id DESC LIMIT 1').get();
+    ok(n() === 3 && nc.number === valid && nc.bank === '' && nc.admin_id === NEWADMIN && nc.sort === 3, 'افزودن از صف با همه‌ی فیلدها');
+    ok(q.sent.some((m) => m.to === OWNER && /از داشبورد/.test(m.text) && /کارتِ تازه/.test(m.text)), 'مالک خبرِ تغییرِ داشبورد را می‌گیرد');
+    ok(q.sent.some((m) => m.to === OWNER && /استارت نکرده/.test(m.text)), 'و هشدارِ ادمینِ استارت‌نکرده را هم');
+    ok(q.events.some((e) => e.e === 'card_changed' && e.u === OWNER && e.pr.via === 'dashboard'),
+      'رویداد به نامِ مالک با via=dashboard (کاربرِ شبحِ ۰ ساخته نمی‌شود)');
+    const sentBefore = q.sent.length;
+    await run({ op: 'add', number: valid, holder: 'زهرا احمدی', bank: '-', admin: String(NEWADMIN), kind: 'regular' });
+    ok(n() === 3 && q.sent.slice(sentBefore).some((m) => /❌/.test(m.text) && /قبلاً ثبت شده/.test(m.text)),
+      'ردیفِ تکراری در صف کارتِ دوم نمی‌سازد و شکست به مالک گفته می‌شود');
+    await run('{not json');
+    ok(q.sent.at(-1)?.to === OWNER && /❌/.test(q.sent.at(-1).text), 'دستورِ خراب بی‌صدا دور ریخته نمی‌شود');
+    await run({ op: 'active', id: 1, value: 0 });
+    ok(q.db.prepare('SELECT active FROM cards WHERE id=1').get().active === 0, 'غیرفعال‌کردن از صف (کارتِ عادیِ دیگری هست)');
+    await run({ op: 'active', id: nc.id, value: 0 });
+    ok(q.db.prepare('SELECT active FROM cards WHERE id=?').get(nc.id).active === 1 && /آخرین کارتِ عادیِ فعال/.test(q.sent.at(-1).text),
+      'تبِ کهنه‌ی داشبورد آخرین کارتِ عادیِ فعال را خاموش نمی‌کند (اعتبارسنجیِ لحظه‌ی اجرا)');
+    const s2 = q.sent.length;
+    await run({ op: 'active', id: 1, value: 0 });
+    ok(q.sent.length === s2, 'no-op هیچ پیامی نمی‌فرستد');
+    await run({ op: 'edit', id: 2, field: 'admin', value: String(OTHER) });
+    ok(q.db.prepare('SELECT admin_id FROM cards WHERE id=2').get().admin_id === OTHER, 'ویرایشِ ادمین از صف');
+    await run({ op: 'edit', id: 2, field: 'bank', value: '-' });
+    ok(q.db.prepare('SELECT bank FROM cards WHERE id=2').get().bank === '', 'بانک «-» ⟵ خالی');
+  }
+  let st;
+  try { st = boot({ stars: true }); } catch (e) { fail++; console.error('  ❌ boot stars:', e.message); }
+  if (st) {
+    await st.applyQueuedCardOp({ id: 1, note: JSON.stringify({ op: 'active', id: 2, value: 0 }) });
+    ok(st.db.prepare('SELECT active FROM cards WHERE id=2').get().active === 1 && /کارت‌به‌کارت ندارد/.test(st.sent.at(-1)?.text || ''),
+      'ریلِ استارز هیچ تغییری نمی‌دهد و صریح می‌گوید چرا');
+  }
 }
 
 console.log(`\n${pass} پاس، ${fail} خطا`);

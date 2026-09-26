@@ -141,8 +141,69 @@ export function viewText(c, ownerId) {
     + 'شماره‌ی کارت ویرایش نمی‌شود؛ برای شماره‌ی تازه، کارتِ جدید بساز و این یکی را غیرفعال کن.';
 }
 
-/** متنِ خبرِ تغییر برای مالک (وقتی تغییردهنده خودِ مالک نیست — مثلاً از داشبورد). */
-export const changeNotice = (actorId, what) => `🔔 تغییرِ کارت‌ها (توسط ${actorId}): ${what}`;
+/** متنِ خبرِ تغییر برای مالک (وقتی تغییردهنده خودِ مالک نیست — مثلاً از داشبورد).
+ *  `actorId` صفر یعنی داشبورد (صفِ `admin_actions` تغییردهنده‌ی انسانیِ مشخصی ندارد). */
+export const changeNotice = (actorId, what) =>
+  `🔔 تغییرِ کارت‌ها (${Number(actorId) ? `توسط ${actorId}` : 'از داشبورد'}): ${what}`;
+
+const last4 = (n) => `…${String(n).slice(-4)}`;
+
+/**
+ * 🗂 تک‌منبعِ اعتبارسنجیِ یک تغییرِ کارت که از **صف** می‌آید (داشبورد، فازِ ۱c).
+ * هم داشبورد قبل از صف‌کردن صدایش می‌زند (خطای فوری به مالک) و هم sweepِ ربات لحظه‌ی
+ * اجرا (روی فهرستِ **همان لحظه**، چون بینِ صف و اجرا ممکن است کارت‌ها عوض شده باشند).
+ *
+ * ⚠️ اکشن‌ها **مقدارِ هدف** می‌گیرند نه «برعکس کن»: ردیفِ صف ممکن است دو بار ثبت شود
+ * (دو تبِ باز، دوبار-کلیک) و «برعکس کن»ِ دوم کارِ اولی را خنثی می‌کرد. با مقدارِ هدف،
+ * دومی یک no-op است.
+ *
+ * خروجی: `{ ok:false, err }` یا `{ ok:true, noop, apply, what }` که `apply` یکی از:
+ *   `{ t:'add', number, holder, bank, admin, kind }` · `{ t:'active', id, value }` ·
+ *   `{ t:'kind', id, value }` · `{ t:'field', id, field, value }`.
+ */
+export function planCardOp(op, cards) {
+  if (!op || typeof op !== 'object') return { ok: false, err: 'دستورِ نامعتبر' };
+  const list = Array.isArray(cards) ? cards : [];
+  if (op.op === 'add') {
+    const out = {};
+    for (const f of ['number', 'holder', 'bank', 'admin']) {
+      const r = parseCardField(f, op[f]);
+      if (!r.ok) return { ok: false, err: `${FIELD_LABEL[f]}: ${r.err}` };
+      out[f] = r.value;
+    }
+    const kind = op.kind === 'white' ? 'white' : op.kind === 'regular' ? 'regular' : null;
+    if (!kind) return { ok: false, err: 'نوعِ کارت باید عادی یا سفید باشد.' };
+    const dup = list.find((c) => String(c.number) === out.number);
+    if (dup) return { ok: false, err: `این شماره قبلاً ثبت شده (کارتِ #${dup.id}).` };
+    return { ok: true, noop: false, apply: { t: 'add', ...out, kind },
+      what: `کارتِ تازه ${last4(out.number)} (${kind === 'white' ? 'سفید' : 'عادی'}، ادمین ${out.admin})` };
+  }
+  const id = Number(op.id);
+  const c = list.find((x) => x.id === id);
+  if (!c) return { ok: false, err: `کارتِ #${op.id} پیدا نشد.` };
+  if (op.op === 'active') {
+    const value = op.value ? 1 : 0;
+    if (Number(c.active) === value) return { ok: true, noop: true, apply: null, what: '' };
+    if (!value && !canDeactivate(list, id)) return { ok: false, err: 'این آخرین کارتِ عادیِ فعال است؛ اول یک کارتِ عادیِ دیگر فعال کن.' };
+    return { ok: true, noop: false, apply: { t: 'active', id, value }, what: `${value ? 'فعال' : 'غیرفعال'} شد (${last4(c.number)})` };
+  }
+  if (op.op === 'kind') {
+    const value = op.value === 'white' ? 'white' : op.value === 'regular' ? 'regular' : null;
+    if (!value) return { ok: false, err: 'نوعِ کارت باید عادی یا سفید باشد.' };
+    if (c.kind === value) return { ok: true, noop: true, apply: null, what: '' };
+    if (value === 'white' && !canMakeWhite(list, id)) return { ok: false, err: 'این آخرین کارتِ عادیِ فعال است؛ اول یک کارتِ عادیِ دیگر اضافه یا فعال کن.' };
+    return { ok: true, noop: false, apply: { t: 'kind', id, value }, what: `نوع ⟵ ${value === 'white' ? 'سفید' : 'عادی'} (${last4(c.number)})` };
+  }
+  if (op.op === 'edit') {
+    if (!Object.prototype.hasOwnProperty.call(EDITABLE, op.field)) return { ok: false, err: 'این فیلد ویرایش‌پذیر نیست.' };
+    const r = parseCardField(op.field, op.value);
+    if (!r.ok) return { ok: false, err: `${FIELD_LABEL[op.field]}: ${r.err}` };
+    if (String(c[EDITABLE[op.field]] ?? '') === String(r.value)) return { ok: true, noop: true, apply: null, what: '' };
+    return { ok: true, noop: false, apply: { t: 'field', id, field: op.field, value: r.value },
+      what: `${FIELD_LABEL[op.field]} ⟵ ${r.value === '' ? '(خالی)' : r.value} (${last4(c.number)})` };
+  }
+  return { ok: false, err: 'دستورِ ناشناخته' };
+}
 
 /** مراحلِ افزودن، به ترتیب. نوع با دکمه انتخاب می‌شود نه متن. */
 export const ADD_STEPS = Object.freeze(['number', 'holder', 'bank', 'admin']);
