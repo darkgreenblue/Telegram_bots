@@ -1,9 +1,9 @@
 // تست‌ها (A/B): ساخت/اجرا/توقف نرم/kill/تصمیم + نتایج آماری صادقانه برای نمونه‌ی کم.
 // config آزمایش در DB خود ربات نوشته می‌شود (ربات با کش ۶۰ثانیه‌ای می‌خواند — توقف بدون deploy).
-import { instancesOf, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported, familyOf } from '../lib/bots.js';
+import { instancesOf, getInstance, withDb, withWritableDb, hasTable, scalar, rows, abSupported, familyOf, moneyOf, moneyText, unixOf, testUserClause } from '../lib/bots.js';
 import { scopeBot } from '../lib/nav.js';
 import { ensureAb } from '../../../shared/ab.js';
-import { chanceToWin, rateCI, srmCheck, meanSE, MIN_SAMPLE, SHIP_CTW } from '../lib/stats.js';
+import { chanceToWin, chanceToWinMean, rateCI, srmCheck, meanSE, MIN_SAMPLE, SHIP_CTW } from '../lib/stats.js';
 import { audit, listCampaigns } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, nowSec, parseJsonSafe } from '../lib/util.js';
 import { table, stat } from '../lib/html.js';
@@ -116,8 +116,48 @@ function expResults(inst, e) {
         GROUP BY x.stratum, x.variant
         ORDER BY x.stratum, x.variant`, [e.primary_metric, e.key]);
     } catch {}
-    return { variants, expByV, convByV, guardrails, valueByV, strata };
+    const revenueByV = expRevenue(db, inst.bot, e.key);
+    return { variants, expByV, convByV, guardrails, valueByV, strata, revenueByV };
   }, null);
+}
+
+/* 💰 درآمدِ per variant (خواسته‌ی مالک، ۱۴۰۵/۰۷/۰۴): نرخِ تبدیل به‌تنهایی نمی‌گوید کدام
+ * شاخه پولِ بیشتری آورد. آزمایشِ قیمت می‌تواند نرخ را پایین بیاورد و درآمد را بالا ببرد
+ * (یا برعکس)، پس کنارِ نرخ «مجموعِ پرداخت» و «درآمد per exposure» هم لازم است.
+ *
+ * تعریف‌ها عمداً همان تعریفِ درآمدِ بقیه‌ی داشبورد است، نه یک تعریفِ تازه:
+ *   - پرداختِ موفقِ پروفایلِ پولِ ربات (`moneyOf`: جدول/ستون/وضعیت/واحد)، یعنی مبلغِ
+ *     **بعد از تخفیف**؛ اعتبارِ هدیه پول نیست و نمی‌آید.
+ *   - حساب‌های تستی از هر دو طرف حذف‌اند (`testUserClause`)، هم از پرداخت‌ها هم از
+ *     مخرجِ exposure، تا ARPU با کاربرِ ادمین رقیق نشود.
+ *   - فقط پرداختِ **بعد از** exposure، همان پنجره‌ی ستونِ تبدیل (بعد از stopped_at هم
+ *     بسته نمی‌شود، تا دو ستونِ کنارِ هم یک جمعیت و یک پنجره داشته باشند).
+ * همه‌ی مقادیرِ SQL از رجیستری می‌آیند (نه از ورودی کاربر) و کلید با پارامتر می‌رود. */
+function expRevenue(db, bot, key) {
+  const m = moneyOf(bot);
+  if (!hasTable(db, m.table)) return null;
+  const test = m.testFilter ? ` AND ${m.testFilter}` : '';
+  try {
+    const out = new Map();
+    for (const r of rows(db, `
+      SELECT u.variant, COUNT(*) n, SUM(u.k > 0) payers, SUM(u.k) cnt, SUM(u.s) rev, SUM(u.s * u.s) rev2
+      FROM (
+        SELECT x.variant, x.user_id, COALESCE(SUM(p.amt), 0) s, COUNT(p.t) k
+        FROM ab_exposures x
+        LEFT JOIN (
+          SELECT user_id uid, ${m.amountCol} amt, ${unixOf(m.createdKind, 'created_at')} t
+          FROM ${m.table} WHERE status=?${test}${testUserClause(bot)}
+        ) p ON p.uid = x.user_id AND p.t >= x.created_at
+        WHERE x.experiment_key=?${testUserClause(bot, 'x.user_id')}
+        GROUP BY x.variant, x.user_id
+      ) u GROUP BY u.variant`, [m.successStatus, key])) {
+      const n = Number(r.n) || 0, rev = Number(r.rev) || 0, rev2 = Number(r.rev2) || 0;
+      const mean = n ? rev / n : 0;
+      const varr = n > 1 ? Math.max(0, (rev2 - n * mean * mean) / (n - 1)) : 0;
+      out.set(r.variant, { n, payers: Number(r.payers) || 0, cnt: Number(r.cnt) || 0, rev, mean, se: n ? Math.sqrt(varr / n) : 0 });
+    }
+    return out;
+  } catch { return null; }
 }
 
 /* --------- متریک‌های تکمیلیِ آزمایشِ مدلِ خوانش (رضایت/تأخیر/برگشت به فالِ دوم) ---------
@@ -237,6 +277,32 @@ export function experimentViewBody(url) {
     if (overlapping.length) warnings += `<div class="note">🚨 هم‌زمان با این آزمایش کمپین ساخته‌ای (${overlapping.map(c => esc(c.name || c.code)).join('، ')}) — مقایسه‌ی قبل/بعد بی‌اعتبار می‌شود.</div>`;
   }
 
+  /* --- 💰 ستون‌های درآمد (کنارِ نرخ تبدیل، برای هر آزمایش) — تعریف: expRevenue --- */
+  const rv = r.revenueByV, cRev = rv?.get(control);
+  const starUnit = moneyOf(inst.bot).unit === 'star';
+  const REV_HEAD = ['مجموع پرداخت', 'درآمد per exposure', 'lift درآمد', 'شانس برد درآمد (تقریبی)'];
+  const revCells = (vk) => {
+    if (!rv) return ['—', '—', '—', '—'];
+    const x = rv.get(vk) || { n: 0, payers: 0, cnt: 0, rev: 0, mean: 0, se: 0 };
+    const total = `<b>${moneyText(inst.bot, x.rev)}</b> <span class="muted">(${fmt(x.payers)} نفر، ${fmt(x.cnt)} پرداخت)</span>`;
+    const arpu = moneyText(inst.bot, starUnit ? Math.round(x.mean * 10) / 10 : Math.round(x.mean));
+    let lift = '—', ctw = '—';
+    if (vk !== control && cRev?.n && x.n) {
+      if (cRev.mean > 0) {
+        const pct = ((x.mean - cRev.mean) / cRev.mean) * 100;
+        lift = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}٪`;
+      }
+      // با صفر پرداخت در یک طرف، SE صفر است و تقریبِ نرمال قطعیتِ کاذب می‌سازد.
+      if (x.payers && cRev.payers) {
+        const p = chanceToWinMean(x, cRev);
+        const cls = p >= SHIP_CTW ? 'ok' : p <= 1 - SHIP_CTW ? 'bad' : 'warn';
+        ctw = `<span class="badge ${cls}">${(p * 100).toFixed(1)}٪</span>`;
+      }
+    }
+    return [total, arpu, lift, ctw];
+  };
+  const revNote = rv ? `<p class="muted">💰 درآمد = مجموعِ پرداخت‌های تأییدشده‌ی (بعد از تخفیف) کاربرانِ expose‌شده از لحظه‌ی exposure به بعد، بدونِ حساب‌های تستی؛ «per exposure» یعنی تقسیم بر همه‌ی expose‌شده‌ها، نه فقط پرداخت‌کننده‌ها. در آزمایشِ قیمت این ستون از نرخ تبدیل مهم‌تر است: نرخِ کمتر با مبلغِ بیشتر می‌تواند درآمدِ بیشتری بسازد. «شانس برد درآمد» تقریبِ نرمال است و با پرداخت‌کننده‌ی کم (درآمد دُمِ سنگین دارد) فقط جهت‌نماست.${e.stopped_at ? ' ⚠️ این آزمایش متوقف شده و پرداخت‌های بعد از توقف هم شمرده می‌شوند (همان پنجره‌ی ستونِ تبدیل)؛ بعد از توقف همه control را می‌بینند، پس هرچه از توقف بگذرد تفاوتِ دو گروه رقیق‌تر می‌شود.' : ''}</p>` : '';
+
   /* --- جدول نتایج متریک اصلی --- */
   let resultsCard;
   if (e.metric_kind === 'rate') {
@@ -257,19 +323,21 @@ export function experimentViewBody(url) {
         `<b>${esc(vk)}</b>${vk === control ? ' <span class="muted">(مبنا)</span>' : ''}`,
         fmt(n), fmt(conv),
         `${(rate * 100).toFixed(1)}٪ <span class="muted">[${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)}]</span>`,
-        liftCell, ctwCell,
+        liftCell, ctwCell, ...revCells(vk),
       ];
     });
     resultsCard = `<div class="card"><h2>📊 متریک اصلی: <span class="mono">${esc(e.primary_metric)}</span> (نرخ تبدیل بعد از exposure)</h2>
-    ${table(['variant', 'exposure', 'تبدیل', 'نرخ [بازه ۹۵٪]', 'lift نسبی', 'شانس برد'], body)}
+    ${table(['variant', 'exposure', 'تبدیل', 'نرخ [بازه ۹۵٪]', 'lift نسبی', 'شانس برد', ...REV_HEAD], body)}
+    ${revNote}
     <p class="muted">قانون پیش‌فرض تصمیم: ship اگر شانس برد > ${SHIP_CTW * 100}٪ و هیچ گاردریلی بدتر نشده باشد.</p></div>`;
   } else {
     const body = variants.map(vk => {
       const { n, mean, se } = meanSE(r.valueByV?.get(vk) || []);
-      return [`<b>${esc(vk)}</b>`, fmt(n), `${mean.toFixed(2)} ± ${se.toFixed(2)}`];
+      return [`<b>${esc(vk)}</b>`, fmt(n), `${mean.toFixed(2)} ± ${se.toFixed(2)}`, ...revCells(vk)];
     });
     resultsCard = `<div class="card"><h2>📊 متریک مقداری: <span class="mono">${esc(e.primary_metric)}</span> (میانگین رخداد per کاربر)</h2>
-    ${table(['variant', 'کاربر', 'میانگین ± SE'], body)}
+    ${table(['variant', 'کاربر', 'میانگین ± SE', ...REV_HEAD], body)}
+    ${revNote}
     <p class="muted">برای متریک مقداری «شانس برد» گزارش نمی‌شود (صداقت آماری) — همپوشانی بازه‌ها یعنی هنوز نتیجه‌ای نیست.</p></div>`;
   }
 
