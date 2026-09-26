@@ -54,7 +54,7 @@ const tagHelpers = region('/* 🏷 فازِ ۶ (v3.128.0): تگِ دستیِ ا�
 const phase7 = region('/* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴)', '\nasync function processReceipt', { includeTo: false });
 
 const EXT = (o) => ({ amount_raw: 600000, ...o });
-function boot({ autotag = true, rean = true, stars = false, shadow = true, agent = null } = {}) {
+function boot({ autotag = true, rean = true, stars = false, shadow = true, agent = null, max = null } = {}) {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, status TEXT NOT NULL DEFAULT 'approved',
       receipt_file_id TEXT, card_id INTEGER);
@@ -75,10 +75,11 @@ function boot({ autotag = true, rean = true, stars = false, shadow = true, agent
     } },
   };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
-  const body = `db.exec(\`${raSchema}\`);\n${tagSchema}\n${tagHelpers}\n${phase7}
+  const p7 = max ? phase7.replace('const REANALYSIS_MAX = 500;', `const REANALYSIS_MAX = ${max};`) : phase7;
+  const body = `db.exec(\`${raSchema}\`);\n${tagSchema}\n${tagHelpers}\n${p7}
     return { recordReceiptAnalysis, applyAutoTags, backfillAutoTags, reanalyzeNextPastReceipt, curTagsOf, tagSt, rean };`;
   const h = { ...new Function(...Object.keys(env), body)(...Object.values(env)), db, errs, logs, events, sent, calls, dl };
-  h.pay = (fid = 'F', amount = 60000) => Number(db.prepare('INSERT INTO payments (user_id, amount, receipt_file_id, card_id) VALUES (?,?,?,1)').run(USER, amount, fid).lastInsertRowid);
+  h.pay = (fid = 'F', amount = 60000, uid = USER, status = 'approved') => Number(db.prepare('INSERT INTO payments (user_id, amount, receipt_file_id, card_id, status) VALUES (?,?,?,1,?)').run(uid, amount, fid, status).lastInsertRowid);
   h.tags = (pid) => db.prepare('SELECT dim, value_key, source FROM receipt_tags WHERE payment_id=? ORDER BY dim, source').all(pid).map((t) => `${t.dim}=${t.value_key}/${t.source}`).join(' ');
   h.drain = async (n = 20) => { for (let i = 0; i < n; i++) await h.reanalyzeNextPastReceipt(); };
   return h;
@@ -127,32 +128,52 @@ if (h) {
   hb.backfillAutoTags();
   ok(hb.tags(b1) === '' && hb.db.prepare("SELECT 1 FROM migrations WHERE key='receipt_autotag_backfill_1'").get(), 'مارکر ⟵ اجرای دوم هیچ کاری نمی‌کند');
 
-  // تحلیلِ دوباره.
+  // تحلیلِ دوباره: فقط آخرین پرداختِ تأییدشده‌ی عکس‌دارِ هر کاربر، پرتراکنش‌ترین اول، یک تلاش (تصمیمِ مالک).
   const hr = boot();
-  const done = hr.pay('D');
-  hr.db.prepare("INSERT INTO receipt_analyses (payment_id, user_id, source, ok) VALUES (?,?,'photo',1)").run(done, USER);
-  const noPhoto = hr.pay(null), gone = hr.pay('GONE'), badAmt = hr.pay('Z', 0), old = hr.pay('OLD');
+  const rA1 = hr.pay('A1', 60000, 101), rA2 = hr.pay(null, 60000, 101), rA3 = hr.pay('A3', 60000, 101);   // ۳ تراکنش
+  const rC1 = hr.pay('C1', 60000, 103), rC2 = hr.pay('C2', 60000, 103);                                   // ۲ تراکنش
+  hr.db.prepare("INSERT INTO receipt_analyses (payment_id, user_id, source, ok) VALUES (?,103,'photo',1)").run(rC2);
+  const rB1 = hr.pay('B1', 60000, 102);
+  const rD1 = hr.pay('D1', 60000, 104), rD2 = hr.pay('D2', 60000, 104, 'rejected');
+  const rE1 = hr.pay('GONE', 60000, 105), rF1 = hr.pay('Z', 0, 106);
+  const rG1 = hr.pay('G1', 60000, 107, 'pending');
   hr.dl.fail.add('https://f/GONE');
   const before = JSON.stringify(hr.db.prepare('SELECT * FROM payments ORDER BY id').all());
   await hr.drain();
-  const analyzed = hr.calls.map((c) => c.imageBuffer && c.shadow === true && c.expected.amount_toman);
-  ok(hr.calls.length === 1 && analyzed[0] === 60000 && hr.calls[0].expected.amount_rial === 600000,
-    'فقط رسیدِ عکس‌دارِ بی‌تحلیل به ایجنت رفت (با فیلدهای فازِ ۴ و مبلغِ فاکتور)');
-  ok(hr.tags(old) === 'app=ap/auto bank=mellat/auto', 'تحلیلِ موفق ⟵ تگِ خودکار');
+  const order = hr.db.prepare("SELECT payment_id FROM receipt_analyses WHERE source='reanalysis' ORDER BY id").all().map((r) => r.payment_id);
+  ok(order[0] === rA3, 'پرتراکنش‌ترین کاربر اول (۳ تراکنش)، و از او فقط آخرین رسیدِ عکس‌دار');
+  ok(!order.includes(rA1) && !order.includes(rA2) && !order.includes(rC1) && !order.includes(rC2),
+    'رسیدهای قدیمی‌ترِ همان کاربر نه؛ کاربری که آخرین رسیدش از قبل تحلیل شده، اصلاً نه');
+  ok(order.includes(rD1) && !order.includes(rD2) && !order.includes(rG1), 'فقط پرداختِ تأییدشده (ردشده و در انتظار نه)');
+  ok(JSON.stringify([...order].sort((x, y) => x - y)) === JSON.stringify([rA3, rB1, rD1, rE1, rF1].sort((x, y) => x - y)),
+    `دقیقاً یک رسید per کاربرِ واجد (${order.join(',')})`);
+  ok(hr.calls.length === 3 && hr.calls.every((c) => c.imageBuffer && c.shadow === true && c.expected.amount_toman === 60000 && c.expected.amount_rial === 600000),
+    'به ایجنت فقط رسیدهای قابلِ‌دانلود با مبلغِ معتبر رفتند (با فیلدهای فازِ ۴ و مبلغِ فاکتور)');
+  ok(hr.tags(rA3) === 'app=ap/auto bank=mellat/auto', 'تحلیلِ موفق ⟵ تگِ خودکار');
   ok(JSON.stringify(hr.db.prepare('SELECT * FROM payments ORDER BY id').all()) === before, 'هیچ ستونی از هیچ پرداختی (وضعیت، کارت، …) عوض نشد');
   ok(!hr.events.length, 'هیچ رویدادِ analytics (نه «امروز» زیرِ کاربرِ قدیمی)');
   const rows = (pid) => hr.db.prepare("SELECT COUNT(*) n FROM receipt_analyses WHERE payment_id=? AND source='reanalysis'").get(pid).n;
-  ok(rows(done) === 0 && rows(noPhoto) === 0, 'رسیدِ از قبل تحلیل‌شده و پرداختِ بی‌عکس لمس نشدند');
-  ok(rows(gone) === 2 && rows(badAmt) === 2, 'دانلودِ ناموفق/مبلغِ نامعتبر ⟵ حداکثر دو تلاش، بعد رها');
+  ok(rows(rE1) === 1 && rows(rF1) === 1, 'دانلودِ ناموفق/مبلغِ نامعتبر ⟵ فقط یک تلاش (هزینه‌ی الکی نه)');
   ok(hr.sent.length === 1 && hr.sent[0].to === OWNER && /تمام شد/.test(hr.sent[0].text)
     && hr.db.prepare("SELECT 1 FROM migrations WHERE key='receipt_reanalysis_1'").get(), 'پایان ⟵ مارکر + یک پیامِ خلاصه فقط به مالک');
-  hr.db.prepare("INSERT INTO payments (user_id, amount, receipt_file_id) VALUES (?, 60000, 'NEW')").run(USER);
+  hr.pay('NEW', 60000, 108);
   await hr.drain(3);
-  ok(hr.calls.length === 1 && hr.sent.length === 1, 'بعد از پایان هرگز دوباره نمی‌چرخد (پرداختِ تازه مالِ مسیرِ زنده است)');
+  ok(hr.calls.length === 3 && hr.sent.length === 1, 'بعد از پایان هرگز دوباره نمی‌چرخد (پرداختِ تازه مالِ مسیرِ زنده است)');
+
+  // سقف: وقتی پر شد، پرتراکنش‌ترین‌ها تگ گرفته‌اند.
+  const hm = boot({ max: 2 });
+  hm.pay('X', 60000, 201);
+  for (let i = 0; i < 4; i++) hm.pay(`Y${i}`, 60000, 202);
+  for (let i = 0; i < 2; i++) hm.pay(`Z${i}`, 60000, 203);
+  const w3 = hm.pay('W', 60000, 204);
+  await hm.drain();
+  const got = hm.db.prepare("SELECT user_id FROM receipt_analyses WHERE source='reanalysis' ORDER BY id").all().map((r) => r.user_id);
+  ok(JSON.stringify(got) === '[202,203]' && hm.sent.length === 1 && !hm.db.prepare("SELECT 1 FROM receipt_analyses WHERE payment_id=?").get(w3),
+    `سقفِ پر ⟵ همان دو کاربرِ پرتراکنش (${got.join(',')})، بقیه نه، و پایان اعلام شد`);
 
   // قطع‌کن.
   const hc = boot({ agent: () => ({ verdict: 'review', extracted: {}, agent: { ok: false, attempts: [] } }) });
-  for (let i = 0; i < 8; i++) hc.pay(`C${i}`);
+  for (let i = 0; i < 8; i++) hc.pay(`C${i}`, 60000, 300 + i);
   await hc.drain(10);
   ok(hc.calls.length === 5 && hc.rean.pauseUntil > Date.now() && hc.errs.some((e) => /REANALYSIS_PAUSE/.test(e)),
     'پنج شکستِ پیاپیِ ایجنت ⟵ یک ساعت مکث (قطعیِ OpenRouter صف را نمی‌سوزاند)');
@@ -179,7 +200,7 @@ console.log('\nساختاری:');
   ok(/backfillAutoTags\(\);/.test(boot2) && /setInterval\(reanalyzeNextPastReceipt, REANALYSIS_PACE_MS\)/.test(boot2),
     'از قلابِ onLaunch شروع می‌شود (نه `.then()`ِ launch، بند ۹ب/۷)');
   ok(/if \(ok\) applyAutoTags\(p\.id, uid, sh\);/.test(SRC), 'تگِ خودکار فقط روی تحلیلِ سالم');
-  ok(/REANALYSIS_PACE_MS = 20_000/.test(SRC) && /REANALYSIS_TRIES = 2/.test(SRC), 'آهنگ و سقفِ تلاش پین شده‌اند (هزینه‌ی مدل)');
+  ok(/REANALYSIS_PACE_MS = 20_000/.test(SRC) && /const REANALYSIS_MAX = 500;/.test(SRC), 'آهنگ و سقفِ ۵۰۰ رسید پین شده‌اند (هزینه‌ی مدل، تصمیمِ مالک)');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا`);

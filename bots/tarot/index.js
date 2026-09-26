@@ -2676,9 +2676,14 @@ const stmts = {
     "SELECT * FROM payments WHERE status='pending' AND step='receipt' AND invoice_issued_at IS NOT NULL " +
     "AND invoice_issued_at < unixepoch()-? AND invoice_reminded_at IS NULL ORDER BY id"),
   setInvoiceReminded: db.prepare('UPDATE payments SET invoice_reminded_at=unixepoch() WHERE id=?'),
+  /* `receipt_file_id IS NULL` (v3.131.0): فاکتوری که عکسِ رسیدش همین حالا در حالِ بررسی است منقضی نمی‌شود.
+     `processReceipt` عکس را اولِ کار ذخیره می‌کند و تا تصمیم (خواندنِ رسید + مکث) وضعیت `pending` می‌ماند؛ بدونِ
+     این شرط، رسیدی که در دقیقه‌ی آخرِ ۲۴ ساعت برسد وسطِ بررسی لغو می‌شد و `approvePayment` بی‌صدا شکست می‌خورد
+     (پول رسیده، الماس نه). مسیرِ «نتوانستم واریز کنم» ستون را عمداً خالی می‌کند، پس فاکتورِ سفیدِ منتظرِ رسید
+     همچنان عادی منقضی می‌شود. */
   invoiceExpiryCandidates: db.prepare(
     "SELECT * FROM payments WHERE status='pending' AND step='receipt' AND invoice_issued_at IS NOT NULL " +
-    "AND invoice_issued_at < unixepoch()-? ORDER BY id"),
+    "AND receipt_file_id IS NULL AND invoice_issued_at < unixepoch()-? ORDER BY id"),
 
   /* 🚪 کاربرانی که در فلوی پرداخت پارک شده‌اند و فاکتورشان دیگر معنایی ندارد.
    * فیلترِ استیت عمداً این‌جا نیست و در جاوااسکریپت با خودِ PAY_STATES انجام می‌شود،
@@ -10439,21 +10444,23 @@ function backfillAutoTags() {
   } catch (e) { logErr('autotag backfill:', e.message); }
 }
 
-/* 🔁 فازِ ۷: تحلیلِ دوباره‌ی عکس‌های رسیدِ گذشته، یک‌باره و آهسته. هر پرداختی که عکسِ رسید دارد
- * ولی هیچ تحلیلِ سالمی ندارد (یعنی قبل از v3.126.0 آمده)، یک بار به همان ایجنتِ زنده با فیلدهای
- * فازِ ۴ داده می‌شود و **فقط** ثبت می‌شود: نه `decideReceipt`، نه `attributeReceiptCard`، نه تغییرِ
- * وضعیت، نه پیام به کاربر. هزینه‌ی مدل دارد، پس: یکی در هر ۲۰ ثانیه، سقفِ کلِ تلاش‌ها، حداکثر دو
- * تلاش per پرداخت، و قطع‌کنِ ۱ساعته بعد از ۵ شکستِ پیاپیِ ایجنت (قطعیِ OpenRouter نباید رسیدها را
- * بسوزاند). دانلودِ ناموفق (فایلِ منقضی) دائمی است و همان بار ثبت می‌شود. */
+/* 🔁 فازِ ۷: تحلیلِ دوباره‌ی عکس‌های رسیدِ گذشته، یک‌باره و آهسته. **فقط آخرین پرداختِ تأییدشده‌ی
+ * عکس‌دارِ هر کاربر** (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵: «کاربرِ بلو» هم از آخرین رسید تعریف می‌شود)، به ترتیبِ
+ * **پرتراکنش‌ترین کاربر اول** (تعدادِ پرداختِ تأییدشده)، تا اگر سقف پر شد، کسانی تگ خورده باشند که
+ * احتمالِ برگشتنشان بیشتر است. کاربری که آخرین رسیدش از قبل تحلیلِ سالم دارد (v3.126.0 به بعد) رد
+ * می‌شود. سقفِ کل **۵۰۰ رسید** و هر رسید **یک** تلاش (هزینه‌ی مدل، خواسته‌ی مالک). فقط ثبت: نه
+ * `decideReceipt`، نه `attributeReceiptCard`، نه تغییرِ وضعیت، نه پیام به کاربر. یکی در هر ۲۰ ثانیه،
+ * و قطع‌کنِ ۱ساعته بعد از ۵ شکستِ پیاپیِ ایجنت (قطعیِ OpenRouter نباید رسیدها را بسوزاند). */
 const REANALYSIS_PACE_MS = 20_000;
-const REANALYSIS_MAX = 3000;
-const REANALYSIS_TRIES = 2;
+const REANALYSIS_MAX = 500;
 let _reSt = null;
 const reSt = () => _reSt || (_reSt = {
-  next: db.prepare(`SELECT * FROM payments p WHERE COALESCE(p.receipt_file_id, '') != ''
-    AND NOT EXISTS (SELECT 1 FROM receipt_analyses a WHERE a.payment_id=p.id AND a.ok=1)
-    AND (SELECT COUNT(*) FROM receipt_analyses a WHERE a.payment_id=p.id AND a.source='reanalysis') < ${REANALYSIS_TRIES}
-    ORDER BY p.id DESC LIMIT 1`),
+  next: db.prepare(`WITH tx AS (SELECT user_id, COUNT(*) AS n FROM payments WHERE status='approved' GROUP BY user_id),
+    latest AS (SELECT user_id, MAX(id) AS pid FROM payments
+      WHERE status='approved' AND COALESCE(receipt_file_id, '') != '' GROUP BY user_id)
+    SELECT p.* FROM latest l JOIN payments p ON p.id = l.pid JOIN tx ON tx.user_id = l.user_id
+    WHERE NOT EXISTS (SELECT 1 FROM receipt_analyses a WHERE a.payment_id = p.id AND (a.ok = 1 OR a.source = 'reanalysis'))
+    ORDER BY tx.n DESC, p.id DESC LIMIT 1`),
   stats: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(ok), 0) ok, COUNT(DISTINCT payment_id) pays FROM receipt_analyses WHERE source='reanalysis'"),
   autoN: db.prepare("SELECT COUNT(*) n FROM receipt_tags WHERE source='auto'"),
   marker: db.prepare("SELECT 1 FROM migrations WHERE key='receipt_reanalysis_1'"),
@@ -10468,7 +10475,7 @@ async function reanalyzeNextPastReceipt() {
   try {
     if (reSt().marker.get()) { rean.off = true; return; }
     const st = reSt().stats.get();
-    const p = Number(st.n) < REANALYSIS_MAX ? reSt().next.get() : null;
+    const p = Number(st.pays) < REANALYSIS_MAX ? reSt().next.get() : null;
     if (!p) {
       reSt().mark.run();
       rean.off = true;
