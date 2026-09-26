@@ -584,6 +584,9 @@ jobs:
       - name: Card rotation check
         if: matrix.bot == 'tarot'
         run: node tools/check-card-rotation.mjs
+      - name: Card switch check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-switch.mjs
 
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/

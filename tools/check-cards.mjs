@@ -58,7 +58,8 @@ ok(!/cardCopyRow\(\s*\)/.test(CODE), 'دکمه‌ی کپی هیچ‌جا بدو�
     `هر صدورِ فاکتور همان لحظه کارت می‌گیرد (${issues.length}/${allNo})`);
 }
 ok(!/for \(const adminId of ADMIN_IDS\)/.test(CODE), 'هیچ پیامِ رسیدی دیگر کورکورانه به همه‌ی ADMIN_IDS نمی‌رود');
-ok(/recipient: cardOfPayment\(p\)\.holder, dest_last4: cardOfPayment\(p\)\.number\.slice\(-4\)/.test(CODE),
+ok(/const cur = cardOfPayment\(p\);/.test(CODE) && /return \{ recipient: cur\.holder, dest_last4: cur\.number\.slice\(-4\) \};/.test(CODE)
+  && /\.\.\.receiptExpectedCards\(p\)/.test(CODE),
   'ایجنتِ رسید گیرنده و چهار رقمِ آخر را از کارتِ همین فاکتور می‌گیرد');
 for (const n of ['approve', 'reject', 'duplicate', 'dupyes', 'dupno', 'cardsms', 'cardrev', 'cardrevno', 'susyes', 'susno']) {
   const head = `bot.action(/^${n}:(\\d+)$/, async (ctx) => {\n  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10)))`;

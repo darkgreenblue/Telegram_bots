@@ -177,7 +177,8 @@ console.log('\n💳 شماره کارت: دش‌دار و قابلِ تپ');
 
   /* و تطبیقِ ایجنتِ رسید از همان ارقامِ خام می‌آید، نه از رشته‌ی نمایشی — وگرنه
    * فرمتِ نمایشی می‌توانست بی‌صدا تأییدِ خودکارِ رسید را بشکند. */
-  ok(/dest_last4: cardOfPayment\(p\)\.number\.slice\(-4\)/.test(SRC),
+  ok(/const cur = cardOfPayment\(p\);/.test(SRC) && /dest_last4: cur\.number\.slice\(-4\)/.test(SRC)
+    && /\.\.\.receiptExpectedCards\(p\)/.test(SRC),
     'چهار رقمِ آخرِ ایجنتِ رسید از ارقامِ خامِ کارتِ همین فاکتور می‌آید');
 }
 

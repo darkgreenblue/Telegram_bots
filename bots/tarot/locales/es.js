@@ -394,6 +394,7 @@ export default {
     reject: (id) => `❌ Rechazar #${id}`,
     duplicateReceipt: '↩️ Recibo duplicado',
     smsNotArrived: '🚫 No llegó el aviso',
+    cardSwitch: '🔄 Cambiar número de tarjeta',
     reverseYes: '✅ Sí, revertir',
     reverseNo: '↩️ No, déjalo así',
     duplicateYes: '✅ Sí, está duplicado',
@@ -1010,6 +1011,10 @@ export default {
           + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `Monto: *${fmt(amount)}*\n\nTransfiere a:\n\`${card}\`\n${owner}\n\nDespués de pagar, manda aquí la foto del comprobante 📸`,
+    // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
+    cardSwitchHeader: '👇👇🔄 Nueva factura con un nuevo número de tarjeta 💳👇👇',
+    cardSwitchNone: 'No hay otra tarjeta disponible ahora. Si la transferencia falla, usa 💬 Soporte.',
+    cardSwitchUsed: 'La tarjeta de esta factura ya se cambió una vez.',
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupón «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
     // ⏱ Ciclo de vida del pedido (v3.74.0) — también inalcanzable aquí (solo riel de

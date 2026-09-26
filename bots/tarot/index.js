@@ -327,7 +327,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.124.0';
+const PRODUCT_VERSION = '3.125.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -344,6 +344,10 @@ const cardsAdminOn = (uid) => CARDS_ADMIN_ENABLED && !starsRail && Number(uid) =
 // به `daily_cap` رسیده) از چرخش بیرون می‌رود؛ همه‌ی عادی‌ها پر ⟵ کارتِ سفید. `false` ⟵ دقیقاً
 // رفتارِ v3.123.0 (اولین کارتِ عادیِ فعال، بدونِ سقف). ربات‌های استارز هرگز وارد نمی‌شوند.
 const CARD_ROTATION_ENABLED = true;
+// 🔄 دکمه‌ی «تعویض شماره کارت» زیرِ فاکتور (v3.125.0، فازِ ۳). هر فاکتور یک بار؛ ترتیب: کارتِ
+// بعدیِ همان ادمین ⟵ ادمینِ بعدی ⟵ سفید (`CA.pickSwitchCard`). `false` ⟵ دکمه و تذکرش محو،
+// فاکتور بیت‌به‌بیت v3.124.0؛ اکشنِ `card_switch:` ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد.
+const CARD_SWITCH_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -1238,6 +1242,11 @@ const cardSt = () => _cardSt || (_cardSt = {
   rotInc:   db.prepare('INSERT INTO card_rotation (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n=n+1'),
   usedOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_day=? AND card_id>0 GROUP BY card_id"),
   markDay:  db.prepare("UPDATE payments SET approved_day=? WHERE id=? AND approved_day=''"),
+  // 🔄 فازِ ۳: ادعای اتمیکِ تعویض — یک بار، فقط روی فاکتورِ باز و فقط از همان کارتی که دیده شد.
+  switchClaim: db.prepare("UPDATE payments SET card_id=?, prev_card_id=?, card_switched_at=unixepoch() WHERE id=? AND card_id=? AND card_switched_at IS NULL AND status='pending'"),
+  // رسیدِ فاکتورِ تعویض‌شده به کارتِ **قبلی** واریز شده ⟵ کارتِ پرداخت همان کارتی می‌شود که پول
+  // در آن نشسته (جابه‌جاییِ اتمیکِ دو ستون؛ SQL سمتِ راست را از ردیفِ قدیم می‌خواند).
+  swapToPrev: db.prepare("UPDATE payments SET card_id=prev_card_id, prev_card_id=card_id WHERE id=? AND prev_card_id>0 AND status IN ('pending','waiting_review')"),
   // 💳 مدیریت (v3.123.0). ستونِ هر ویرایش از جدولِ ثابتِ `CA.EDITABLE` می‌آید، نه از ورودی.
   all:      db.prepare('SELECT * FROM cards ORDER BY sort, id'),
   insert:   db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)'),
@@ -1329,6 +1338,51 @@ const RECEIPT_MODELS = [FLASH, FLASH, GEMINI3_FLASH, LUNA];
 // هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
 // ⚠️ `pid` اجباری است: دکمه همیشه دقیقاً شماره‌ی **همان فاکتور** را کپی می‌کند.
 const cardCopyRow = (pid) => [{ text: '📋 کپی شماره کارت', copy_text: { text: cardOfPid(pid).number } }];
+/* 🔄 تعویضِ کارت (فازِ ۳). مقصدِ تعویضِ یک فاکتور، یا null وقتی تعویض ممکن/مجاز نیست:
+ * پرچم خاموش، ریلِ استارز، فاکتورِ غیرِباز، قبلاً تعویض‌شده، سوییچ‌شده به استارز، یا هیچ کارتِ
+ * دیگری در دسترس نیست. دکمه و تذکرِ متنِ فاکتور هر دو از **همین** تصمیم می‌آیند تا هرگز یکی
+ * بدونِ دیگری دیده نشود. */
+function switchTargetFor(p) {
+  if (!CARD_SWITCH_ENABLED || starsRail || !p || p.status !== 'pending' || p.card_switched_at || p.stars_toggle_at) return null;
+  try {
+    const st = cardSt();
+    const used = new Map(st.usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c]));
+    return CA.pickSwitchCard({ cards: st.all.all(), used, currentId: cardOfPayment(p).id });
+  } catch (e) { logErr('switchTargetFor:', e.message); return null; }
+}
+const cardSwitchRow = (pid) => (switchTargetFor(stmts.getPayment.get(pid))
+  ? [[Markup.button.callback(L.buttons.cardSwitch, `card_switch:${pid}`)]] : []);
+/** کارت‌های قابلِ‌قبولِ رسیدِ یک پرداخت برای ایجنت: کارتِ فعلی، و اگر تعویض شده کارتِ قبلی هم.
+ *  فاکتورِ تعویض‌نشده بیت‌به‌بیت همان ورودیِ قبلی را می‌دهد. */
+function receiptExpectedCards(p) {
+  const cur = cardOfPayment(p);
+  let prev = null;
+  try { if (p?.prev_card_id) prev = cardSt().byId.get(p.prev_card_id) || null; } catch (e) { logErr('receiptExpectedCards:', e.message); }
+  if (!prev || prev.id === cur.id) return { recipient: cur.holder, dest_last4: cur.number.slice(-4) };
+  const names = [...new Set([cur.holder, prev.holder])];
+  return { recipient: names.join(' or '), dest_last4: `${cur.number.slice(-4)} or ${prev.number.slice(-4)}` };
+}
+/** اگر رسیدِ فاکتورِ تعویض‌شده صراحتاً به کارتِ **قبلی** رفته (چهار رقمِ آخرِ خوانده‌شده = قبلی و
+ *  ≠ فعلی)، کارتِ پرداخت به قبلی برمی‌گردد. هر ابهامی ⟵ دست نمی‌زنیم (کارتِ فعلی). */
+function attributeReceiptCard(p, extracted) {
+  try {
+    if (!p?.prev_card_id) return false;
+    const seen = String(extracted?.dest_card_last4 ?? '').replace(/[^0-9۰-۹]/g, '')
+      .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).slice(-4);
+    if (seen.length !== 4) return false;
+    const cur = cardOfPayment(p), prev = cardSt().byId.get(p.prev_card_id);
+    if (!prev || seen !== String(prev.number).slice(-4) || seen === String(cur.number).slice(-4)) return false;
+    if (cardSt().swapToPrev.run(p.id).changes !== 1) return false;
+    log(`💳 CARD_RECEIPT_PREV #${p.id} ${cur.id}→${prev.id}`);
+    track(db, p.user_id, 'card_receipt_prev', { payment_id: p.id, from: cur.id, to: prev.id });
+    return true;
+  } catch (e) { logErr('attributeReceiptCard:', e.message); return false; }
+}
+/** آرگومانِ ششمِ `L.wallet.invoice`: تذکرِ دکمه‌ی تعویض، و خطِ هشدارِ فاکتورِ تعویض‌شده. */
+const invoiceExtra = (pid) => {
+  const p = stmts.getPayment.get(pid);
+  return { note: !!switchTargetFor(p), switched: !!p?.card_switched_at };
+};
 // دکمه‌ی سوییچ به استارز، درست زیرِ دکمه‌ی کپیِ کارت (خواسته‌ی صریحِ مالک). آرایه‌ی
 // **ردیف‌ها** برمی‌گرداند (مثلِ الگوی `navMenuRow`) تا هر محلِ صدور با
 // `...starsToggleRow(uid, paymentId, hasPkg)` بی‌قید و شرط اسپرد کند.
@@ -2003,6 +2057,10 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN card_id INTEGER NOT NULL DEFAU
  * هر کاربر در هر روز (چسبندگی). `card_rotation` = نوبتِ چرخشِ هر روز؛ روزِ تازه ردیف ندارد، پس
  * خودبه‌خود از کارتِ اول شروع می‌شود و هیچ ریستِ زمان‌بندی‌شده‌ای لازم نیست. */
 try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEFAULT ''").run(); } catch {}
+// 🔄 فازِ ۳ (v3.125.0): لحظه‌ی تعویضِ کارتِ فاکتور؛ NULL = هنوز تعویض نشده (هر فاکتور یک بار).
+try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run(); } catch {}
+// کارتی که فاکتور **قبل از** تعویض داشت (۰ = تعویض نشده). رسیدِ واریز به آن کارت هم معتبر است.
+try { db.prepare('ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_assign (
     user_id    INTEGER NOT NULL,
@@ -2858,10 +2916,11 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   // ⭐ سوییچِ استارز عمداً این‌جا نیست: این تابع فقط در دنیای تومانیِ میراثی اجرا می‌شود
   // (بالا: `if (legacyTomanPay(uid))` یعنی `coinsOn(uid)` که این‌جا **رد** شده)، پس هیچ
   // بسته‌ای پشتِ این فاکتور نیست و buildInvoice بدونِ pack.key خطا می‌دهد.
-  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(paymentId), invoicePurchaseFor(uid, paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(paymentId), invoicePurchaseFor(uid, paymentId), curOf(uid), invoiceExtra(paymentId)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(paymentId),
+      ...cardSwitchRow(paymentId),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
     ]).reply_markup,
   });
@@ -3622,7 +3681,7 @@ function paymentFlowAllowsCallback(state, data) {
     // `susyes`/`susno` عمداً کنارِ `cardsms`/`cardrev`/`cardrevno` نشسته‌اند: هر دو دکمه‌ی
     // ادمین روی یک پیامِ ادمین‌اند و اگر خودِ ادمین هم‌زمان در `pay_receipt`ِ خودش باشد
     // (تستر/کاربرِ عادی) باید بدونِ گارد کار کنند.
-    return /^(stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+|susyes:\d+|susno:\d+)$/.test(data);
+    return /^(card_switch:\d+|stars_toggle:\d+|card_toggle:\d+|disc:\d+|disc_back:\d+|pay_cancel:\d+|cardsms:\d+|cardrev:\d+|cardrevno:\d+|susyes:\d+|susno:\d+)$/.test(data);
   }
   if (state === 'pay_discount') return /^(disc_back:\d+|pay_cancel:\d+)$/.test(data);
   return false;
@@ -8994,10 +9053,11 @@ async function setRechargeAmount(ctx, uid, amount) {
   setState(uid, 'pay_receipt');
   // ⭐ سوییچِ استارز عمداً این‌جا نیست — همان دلیلِ invoiceForReading (دنیای تومانیِ
   // میراثی، بدونِ بسته‌ی کاتالوگ).
-  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(s.paymentId), invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(s.paymentId), invoicePurchaseFor(uid, s.paymentId), curOf(uid), invoiceExtra(s.paymentId)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(s.paymentId),
+      ...cardSwitchRow(s.paymentId),
       [Markup.button.callback(L.buttons.discountHave, `disc:${s.paymentId}`)],
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
     ]).reply_markup,
@@ -9189,10 +9249,11 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * ⚠️ `pickedMsgId` و پاک‌سازی‌اش در `dropInvoiceArtifacts` عمداً **می‌مانند**: کاربرانی
    * که همین حالا وسطِ فلواند یک `pickedMsgId` زنده در سشن دارند و بعد از دیپلوی باید
    * پیامشان درست پاک شود (بند ۲ج/۲: کدِ جدید روی حالتِ قدیمی اجرا می‌شود). */
-  const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, ...invoiceCardArgs(payId), invoicePurchaseFor(uid, payId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, ...invoiceCardArgs(payId), invoicePurchaseFor(uid, payId), curOf(uid), invoiceExtra(payId)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
       cardCopyRow(payId),
+      ...cardSwitchRow(payId),
       ...starsToggleRow(uid, payId, true),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)],
     ]).reply_markup,
@@ -9238,16 +9299,71 @@ bot.action(/^pay_resume:(\d+)$/, async (ctx) => {
   patchSession(uid, { paymentId: pid });
   setState(uid, 'pay_receipt');
   const invMsg = await ctx.reply(
-    L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid)), {
+    L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid), invoiceExtra(pid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
         cardCopyRow(pid),
+        ...cardSwitchRow(pid),
         ...starsToggleRow(uid, pid, !!packOf(p)),
         [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
       ]).reply_markup,
     }).catch((e) => { logErr('pay_resume invoice pay#' + pid, e.message); return null; });
   if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, pid);
   track(db, uid, 'invoice_resumed', { payment_id: pid });
+});
+
+/* 🔄 «تعویض شماره کارت» (v3.125.0، فازِ ۳ی PAYMENT-V2-PLAN، متن‌ها عینِ خواسته‌ی مالک).
+ * همان ردیفِ پرداخت می‌ماند (شماره‌ی فاکتور، مبلغ، بسته)؛ فقط `card_id` عوض می‌شود. ترتیب:
+ *   ۱) ادعای اتمیک (یک بار، فقط فاکتورِ باز، فقط از همان کارتی که کاربر دید) + کارتِ امروزِ
+ *      کاربر همان کارتِ تازه می‌شود (`card_assign`، via=switch) تا فاکتورهای بعدیِ امروزش هم
+ *      روی کارتی بنشینند که کار می‌کند.
+ *   ۲) پیامِ فاکتورِ قبلی **حذف** می‌شود (دو فاکتورِ هم‌زمان نه)؛ حذف‌نشدنی ⟵ دکمه‌هایش برداشته.
+ *   ۳) سرتیترِ «فاکتور جدید با شماره کارت جدید» و بعد همان فاکتور با کارتِ تازه + خطِ هشدار.
+ * رسیدِ این فاکتور از این لحظه به ادمینِ کارتِ تازه می‌رود (مسیریابی از `card_id` است). */
+bot.action(/^card_switch:(\d+)$/, async (ctx) => {
+  const uid = ctx.from.id;
+  const pid = parseInt(ctx.match[1], 10);
+  const p = stmts.getPayment.get(pid);
+  if (!p || p.user_id !== uid) return ctx.answerCbQuery().catch(() => {});
+  if (p.status !== 'pending' || p.step !== 'receipt') {
+    await ctx.answerCbQuery().catch(() => {});
+    try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+    return ctx.reply(L.wallet.invoiceGone(curOf(uid))).catch(() => {});
+  }
+  if (p.card_switched_at) return ctx.answerCbQuery(L.wallet.cardSwitchUsed, { show_alert: true }).catch(() => {});
+  const target = switchTargetFor(p);
+  if (!target) return ctx.answerCbQuery(L.wallet.cardSwitchNone, { show_alert: true }).catch(() => {});
+  const fromId = cardOfPayment(p).id;
+  let claimed = false;
+  try {
+    claimed = db.transaction(() => {
+      if (cardSt().switchClaim.run(target.card.id, fromId, pid, p.card_id).changes !== 1) return false;
+      cardSt().assignSet.run(uid, CA.cardDay(), target.card.id, 'switch');
+      return true;
+    })();
+  } catch (e) { logErr('card_switch claim pay#' + pid, e.message); }
+  if (!claimed) return ctx.answerCbQuery(L.wallet.cardSwitchUsed, { show_alert: true }).catch(() => {});
+  await ctx.answerCbQuery().catch(() => {});
+  log(`💳 CARD_SWITCH #${pid} ${fromId}→${target.card.id} via=${target.via}`);
+  track(db, uid, 'card_switched', { payment_id: pid, from: fromId, to: target.card.id, via: target.via });
+  const oldMsg = p.invoice_msg_id || ctx.callbackQuery?.message?.message_id;
+  let gone = false;
+  if (oldMsg) { try { await ctx.telegram.deleteMessage(uid, oldMsg); gone = true; } catch {} }
+  if (!gone) { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  patchSession(uid, { paymentId: pid });
+  setState(uid, 'pay_receipt');
+  await ctx.reply(L.wallet.cardSwitchHeader).catch(() => {});
+  const invMsg = await ctx.reply(
+    L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid), invoiceExtra(pid)), {
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        cardCopyRow(pid),
+        ...cardSwitchRow(pid),
+        ...starsToggleRow(uid, pid, !!packOf(p)),
+        [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
+      ]).reply_markup,
+    }).catch((e) => { logErr('card_switch invoice pay#' + pid, e.message); return null; });
+  if (invMsg?.message_id) stmts.setInvoiceMsgId.run(invMsg.message_id, pid);
 });
 
 /* ⭐ سوییچ به پرداختِ استارز (v3.76.0، فقط-ادمین). فقط رویِ فاکتورِ **بسته‌ای** کار
@@ -9310,10 +9426,11 @@ bot.action(/^card_toggle:(\d+)$/, async (ctx) => {
   stmts.clearStarsToggle.run(pid);
   const pack = packOf(p);
   try {
-    await ctx.editMessageText(L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid)), {
+    await ctx.editMessageText(L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid), invoiceExtra(pid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
         cardCopyRow(pid),
+        ...cardSwitchRow(pid),
         ...starsToggleRow(uid, pid, !!pack),
         [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
       ]).reply_markup,
@@ -9700,9 +9817,9 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, ...invoiceCardArgs(p.id), invoicePurchaseFor(uid, p.id), curOf(uid)), {
+    const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, ...invoiceCardArgs(p.id), invoicePurchaseFor(uid, p.id), curOf(uid), invoiceExtra(p.id)), {
       parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([cardCopyRow(p.id), ...starsToggleRow(uid, p.id, !!p.pkg)]).reply_markup,
+      reply_markup: Markup.inlineKeyboard([cardCopyRow(p.id), ...cardSwitchRow(p.id), ...starsToggleRow(uid, p.id, !!p.pkg)]).reply_markup,
     });
     // فاکتورِ تخفیف‌خورده جایگزینِ فاکتورِ قبلیِ همان ردیف است، پس شناسه‌ی «فاکتورِ فعلی»
     // هم باید همین پیام باشد وگرنه انقضا پیامِ کهنه‌ای را ادیت می‌کند که مبلغش دیگر درست نیست.
@@ -9849,7 +9966,7 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
 const RECEIPT_LIVE_STATES = ['pending', 'waiting_review'];
 
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
-  const p = stmts.getPayment.get(paymentId);
+  let p = stmts.getPayment.get(paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
   /* پرداختی که از قبل تعیین‌تکلیف شده، رسیدِ دوم نمی‌گیرد. گاردِ اتمیکِ
      `setPaymentReceipt` جلوی خرابیِ **پول** را می‌گیرد؛ این‌یکی جلوی سه چیزِ دیگر:
@@ -9909,8 +10026,9 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       // که مدل باید روی رسید دنبالش بگردد، و شمردنِ صفرهایش کلِ کارِ اوست.
       expected: {
         amount_toman: amountToman, amount_rial: amountToman * 10,
-        // 💳 گیرنده و چهار رقمِ آخر از کارتِ **همین فاکتور**، نه یک ثابتِ سراسری.
-        recipient: cardOfPayment(p).holder, dest_last4: cardOfPayment(p).number.slice(-4),
+        // 💳 گیرنده و چهار رقمِ آخر از کارتِ **همین فاکتور**، نه یک ثابتِ سراسری. فاکتورِ
+        // تعویض‌شده هر دو کارت را می‌پذیرد (تصمیمِ مالک: رسیدِ کارتِ قبلی معتبر است).
+        ...receiptExpectedCards(p),
       },
       imageBuffer, imageMime: 'image/jpeg', text: textBody,
     });
@@ -9918,6 +10036,9 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     if (verdict.agent?.ok) {
       log(`🧾 RECEIPT_AGENT #${paymentId} model=${verdict.agent.model} verdict=${verdict.verdict}/${verdict.reason_code} tries=[${tries}]`);
       decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
+      // 🔄 رسیدِ فاکتورِ تعویض‌شده به کارتِ قبلی ⟵ پرداخت به همان کارت برمی‌گردد (سقف، ادمین،
+      // مسیریابیِ رسید همه از `card_id` می‌آیند). مدل فقط چهار رقم را می‌خواند؛ تصمیم با کد.
+      if (attributeReceiptCard(p, verdict.extracted)) p = stmts.getPayment.get(paymentId);
     } else {
       logErr(`❌ RECEIPT_AGENT_FAIL #${paymentId} tries=[${tries}]`);
       decision = { action: 'review', reason_fa: '', overpaid: 0, agentFailed: true };
@@ -10435,9 +10556,10 @@ async function expireStarsInvoice(p) {
     // ⚠️ عمداً L.wallet.invoice() همیشگی صدا زده می‌شود، نه یک رندرِ موازی — بند ۶ج
     // ریشه: مبلغ و بسته باید از همان یک منبع چاپ شوند که فاکتورِ اصلی هم ازش می‌آید.
     const text = L.wallet.starsInvoiceExpiredNotice + '\n\n'
-      + L.wallet.invoice(p.amount, ...invoiceCardArgs(p.id), invoicePurchaseFor(p.user_id, p.id), cur);
+      + L.wallet.invoice(p.amount, ...invoiceCardArgs(p.id), invoicePurchaseFor(p.user_id, p.id), cur, invoiceExtra(p.id));
     const kb = Markup.inlineKeyboard([
       cardCopyRow(p.id),
+      ...cardSwitchRow(p.id),
       ...starsToggleRow(p.user_id, p.id, !!pack),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
     ]).reply_markup;

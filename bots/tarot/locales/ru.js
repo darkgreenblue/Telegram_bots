@@ -749,6 +749,7 @@ export default {
   reject: (id) => `❌ Отклонить #${id}`,
   duplicateReceipt: '↩️ Повторный чек',
   smsNotArrived: '🚫 СМС не пришла',
+  cardSwitch: '🔄 Сменить номер карты',
   reverseYes: '✅ Да, точно отменить',
   reverseNo: '↩️ Нет, забудь',
   duplicateYes: '✅ Да, это дубликат',
@@ -997,6 +998,10 @@ export default {
         + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
       : '')
     + `Сумма: *${fmt(amount)}*\n\nПеревод на:\n\`${card}\`\n${owner}\n\nПосле оплаты пришли сюда фото чека 📸`,
+  // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
+  cardSwitchHeader: '👇👇🔄 Новый счёт с новым номером карты 💳👇👇',
+  cardSwitchNone: 'Другой карты сейчас нет. Если перевод не проходит, нажми 💬 Поддержка.',
+  cardSwitchUsed: 'Карту для этого счёта уже меняли один раз.',
   invoiceDiscounted: (orig, amount, code) =>
     `🎟️ Код «${code}» применён: ${fmt(orig)} ← *${fmt(amount)}*`,
   // ⏱ Жизненный цикл счёта (v3.74.0) — тоже недостижим здесь (только рельс карт, см.

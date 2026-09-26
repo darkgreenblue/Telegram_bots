@@ -357,6 +357,7 @@ export default {
     reject: (id) => `❌ Reject #${id}`,
     duplicateReceipt: '↩️ Duplicate receipt',
     smsNotArrived: '🚫 No transfer notification',
+    cardSwitch: '🔄 Switch card number',
     reverseYes: '✅ Yes, reverse it',
     reverseNo: '↩️ No, never mind',
     duplicateYes: '✅ Yes, duplicate',
@@ -988,6 +989,10 @@ export default {
           + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `Amount: *${fmt(amount)}*\n\nTransfer to:\n\`${card}\`\n${owner}\n\nAfter paying, send the receipt photo here 📸`,
+    // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
+    cardSwitchHeader: '👇👇🔄 New invoice with a new card number 💳👇👇',
+    cardSwitchNone: 'No other card is available right now. If the transfer fails, tap 💬 Support.',
+    cardSwitchUsed: 'The card for this invoice was already switched once.',
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Code "${code}" applied: ${fmt(orig)} ← *${fmt(amount)}*`,
     // ⏱ چرخه‌ی عمرِ فاکتور (v3.74.0): این‌جا هم دست‌نیافتنی است (فقط ریلِ کارت)، ولی کلید

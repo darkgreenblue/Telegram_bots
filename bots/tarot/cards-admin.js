@@ -258,6 +258,31 @@ export function pickDailyCard({ cards, used = new Map(), stickyId = 0, n = 0 } =
   return any ? { card: any, via: 'overflow' } : { card: null, via: 'none' };
 }
 
+/* ═══ 🔄 تعویضِ کارتِ فاکتور (فازِ ۳ی PAYMENT-V2-PLAN) ═══
+ * تصمیمِ مالک: وقتی انتقالِ کاربر به کارتِ فاکتور خطا می‌دهد، یک بار در هر فاکتور کارتِ دیگری
+ * بگیرد: «کارتِ بعدیِ همان ادمین ⟵ (نبود یا سقفش پر) کارتِ ادمینِ بعدی ⟵ (نبود) کارتِ سفید».
+ * «بعدی» یعنی بعد از کارتِ فعلی به ترتیبِ `sort`، حلقه‌ای. فقط کارتِ فعالِ زیرِ سقف، و هرگز
+ * خودِ کارتِ فعلی. `null` یعنی تعویض ممکن نیست ⟵ دکمه اصلاً ساخته نمی‌شود. */
+export function pickSwitchCard({ cards, used = new Map(), currentId = 0 } = {}) {
+  const list = byOrder(cards);
+  const cur = list.find((c) => c.id === Number(currentId)) || null;
+  const pool = list.filter((c) => c.id !== Number(currentId) && usable(c, used));
+  // حلقه‌ای «بعد از کارتِ فعلی»: اول آن‌هایی که بعدش می‌آیند، بعد از اولِ فهرست.
+  const after = (arr) => {
+    if (!cur) return arr;
+    const pos = (c) => byOrder([...arr, cur]).indexOf(c);
+    const me = pos(cur);
+    return [...arr.filter((c) => pos(c) > me), ...arr.filter((c) => pos(c) < me)];
+  };
+  const regular = pool.filter((c) => c.kind === 'regular');
+  const sameAdmin = cur ? after(regular.filter((c) => Number(c.admin_id) === Number(cur.admin_id))) : [];
+  if (sameAdmin.length) return { card: sameAdmin[0], via: 'same_admin' };
+  const other = after(regular.filter((c) => !cur || Number(c.admin_id) !== Number(cur.admin_id)));
+  if (other.length) return { card: other[0], via: 'next_admin' };
+  const white = pool.find((c) => c.kind === 'white');
+  return white ? { card: white, via: 'white' } : null;
+}
+
 /** مراحلِ افزودن، به ترتیب. نوع با دکمه انتخاب می‌شود نه متن. */
 export const ADD_STEPS = Object.freeze(['number', 'holder', 'bank', 'admin']);
 export const ADD_PROMPT = Object.freeze({
