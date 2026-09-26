@@ -306,6 +306,13 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-reading-model-metrics.mjs
 
+      # ستون‌های درآمدِ per variant (مجموع پرداخت، per exposure، lift، شانس برد) کنارِ
+      # نرخ تبدیلِ **همه‌ی** آزمایش‌ها: رندرِ واقعی روی SQLiteِ موقت، با کنترلِ منفی برای
+      # پرداختِ قبل از exposure، پرداختِ تأییدنشده و حسابِ تستی.
+      - name: A/B revenue columns check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-exp-revenue.mjs
+
       # کدنسِ چسبندگی (دو لایه) و CPA per کانال: هر دو روی یک دیتابیسِ واقعیِ موقت با
       # الگوهای دست‌ساز و جوابِ از پیش حساب‌شده اجرا می‌شوند. این‌ها سنجه‌هایی‌اند که اگر
       # غلط باشند صفحه هنوز رندر می‌شود و فقط **تصمیم** غلط گرفته می‌شود — پس ادعاها

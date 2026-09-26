@@ -108,3 +108,15 @@ export function meanSE(values) {
   const varr = n > 1 ? values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1) : 0;
   return { n, mean, se: Math.sqrt(varr / n) };
 }
+
+/* P(میانگینِ variant > میانگینِ control) با تقریبِ نرمال روی دو {mean, se} از `meanSE`.
+ * برای درآمدِ per کاربر استفاده می‌شود (صفرِ نپرداخته‌ها هم در میانگین هست). ⚠️ درآمد
+ * دُمِ سنگین دارد و با پرداخت‌کننده‌ی کم این تقریب **شکننده** است؛ برای همین صفحه آن را
+ * «تقریبی» برچسب می‌زند و تا هر دو طرف حداقل یک پرداخت نداشته باشند null برمی‌گرداند. */
+export function chanceToWinMean(v, c) {
+  if (!v?.n || !c?.n) return null;
+  const sd = Math.sqrt(v.se ** 2 + c.se ** 2);
+  if (!(sd > 0)) return v.mean === c.mean ? 0.5 : (v.mean > c.mean ? 1 : 0);
+  const z = (v.mean - c.mean) / sd;
+  return 1 - erfc(z / Math.SQRT2) / 2;
+}
