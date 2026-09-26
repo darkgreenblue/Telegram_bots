@@ -76,7 +76,7 @@ function boot({ rotation = true, stars = false } = {}) {
   const clock = { day: '2026-09-26' };
   const CAx = { ...CA, cardDay: () => clock.day };
   const errs = [], events = [];
-  const env = { CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars,
+  const env = { CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars, BLU_USER_CARD_ENABLED: false,
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }) };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };

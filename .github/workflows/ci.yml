@@ -614,6 +614,10 @@ jobs:
       - name: Receipt auto-tag check
         if: matrix.bot == 'tarot'
         run: node tools/check-receipt-autotag.mjs
+      # 💙 کاربرِ بلو ⟵ کارتِ بلو بیرون از نوبت (آخرین رسید، دستی مقدم، سقف/غیرفعال ⟵ چرخش) + سیدِ دومِ کارت‌ها.
+      - name: Blu user card check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-blu-user.mjs
 
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/

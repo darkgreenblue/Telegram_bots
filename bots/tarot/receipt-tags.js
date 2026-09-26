@@ -125,6 +125,15 @@ export function effectiveTags(rows) {
   return out;
 }
 
+/** بانکِ مؤثرِ **آخرین** رسیدِ تگ‌دارِ کاربر (بزرگ‌ترین `payment_id` که تگِ بانک دارد)، یا `null`.
+ *  تعریفِ «کاربرِ بلو» (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴: بر اساسِ آخرین رسید). ردنشده‌بودن را SQL فیلتر می‌کند. */
+export function lastBank(rows) {
+  const eff = effectiveTags(rows);
+  let best = null;
+  for (const [pid, slot] of Object.entries(eff)) if (slot.bank && (!best || Number(pid) > best.pid)) best = { pid: Number(pid), key: slot.bank.key };
+  return best ? best.key : null;
+}
+
 /** شمارشِ سابقه‌ی یک کاربر از تگ‌های مؤثر: `{ app: [[key, n], …], bank: […] }` نزولی. */
 export function tagHistory(rows) {
   const eff = effectiveTags(rows);
@@ -280,7 +289,14 @@ export function autoTagsFrom(sh) {
   const out = [];
   const app = String(sh?.app || '');
   if (app && app !== 'other' && TAG_KEY_RE.test(app)) out.push({ dim: 'app', key: app });
-  const bank = bankFromPrefix(sh?.src_prefix);
+  let bank = bankFromPrefix(sh?.src_prefix);
+  /* اپِ بلو ⟵ بانکِ بلو (تأییدِ مالک ۱۴۰۵/۰۷/۰۴)، **فقط** وقتی پیش‌شماره خودش چیزی نمی‌گوید: خوانده نشد،
+     کوتاه بود، یا همان ۶ رقمِ مبهمِ سامان/بلو است. پیش‌شماره‌ای که صریحاً بانکِ دیگری را می‌گوید بر اپ
+     مقدم است (رقم را کد می‌خواند، نامِ اپ را مدل حدس می‌زند). */
+  if (!bank && app === 'blu') {
+    const d = (String(sh?.src_prefix ?? '').match(/^\d+/) || [''])[0];
+    if (d.length < 6 || AMBIGUOUS_BIN6.includes(d.slice(0, 6))) bank = 'blu';
+  }
   if (bank) out.push({ dim: 'bank', key: bank });
   return out;
 }

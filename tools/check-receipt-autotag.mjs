@@ -96,8 +96,8 @@ if (h) {
   const p2 = h.pay();
   h.tagSt().set.run(p2, USER, 'bank', 'saman', OWNER);
   h.recordReceiptAnalysis({ id: p2 }, USER, good({ bank_app: 'blu', source_card_prefix: '6219 86** **** 1234' }), null, 'photo', 1);
-  ok(h.tags(p2) === 'app=blu/auto bank=saman/admin' && h.curTagsOf(p2).bank.source === 'admin',
-    'پیش‌شماره‌ی مبهم ⟵ بدونِ تگِ بانک؛ تگِ دستیِ مالک دست‌نخورده و مؤثر');
+  ok(h.tags(p2) === 'app=blu/auto bank=saman/admin bank=blu/auto' && h.curTagsOf(p2).bank.source === 'admin',
+    'اپِ بلو + پیش‌شماره‌ی مبهم ⟵ بانکِ بلو (خودکار)؛ تگِ دستیِ مالک دست‌نخورده و مؤثر');
   const p3 = h.pay();
   h.recordReceiptAnalysis({ id: p3 }, USER, good({ bank_app: 'other', source_card_prefix: '603799' }), null, 'photo', 1);
   h.db.prepare("UPDATE tag_values SET active=0 WHERE dim='bank' AND key='mellat'").run();

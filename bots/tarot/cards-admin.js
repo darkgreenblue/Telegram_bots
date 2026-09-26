@@ -243,10 +243,16 @@ const byOrder = (cards) => [...(Array.isArray(cards) ? cards : [])]
  *    سقف یک ترجیح است، نه دیوار).
  *  - `none`: هیچ کارتِ فعالی نیست ⟵ `card=null` (صداکننده به فالبکِ قدیمی می‌رود).
  */
-export function pickDailyCard({ cards, used = new Map(), stickyId = 0, n = 0 } = {}) {
+export function pickDailyCard({ cards, used = new Map(), stickyId = 0, n = 0, preferIds = [], preferVia = 'preferred' } = {}) {
   const list = byOrder(cards);
   const sticky = stickyId ? list.find((c) => c.id === Number(stickyId)) : null;
   if (usable(sticky, used)) return { card: sticky, via: 'sticky' };
+  /* 💙 کارتِ ترجیحیِ کاربر (کاربرِ بلو ⟵ کارتِ بلو، تصمیمِ مالک ۱۴۰۵/۰۷/۰۴): **بیرون از نوبت**، پس
+     شمارنده‌ی چرخش جلو نمی‌رود و کارت‌های دیگر شلوغ نمی‌شوند. فقط اگر فعال و زیرِ سقف باشد؛ وگرنه
+     همان چرخشِ معمول. چسبندگیِ امروز (مثلاً بعد از تعویض) بر آن مقدم است. */
+  const want = new Set((Array.isArray(preferIds) ? preferIds : []).map(Number));
+  const preferred = want.size ? list.find((c) => want.has(Number(c.id)) && usable(c, used)) : null;
+  if (preferred) return { card: preferred, via: preferVia };
   const regular = list.filter((c) => c.kind === 'regular' && usable(c, used));
   if (regular.length) {
     const i = ((Math.floor(Number(n) || 0) % regular.length) + regular.length) % regular.length;

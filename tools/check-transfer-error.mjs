@@ -84,7 +84,7 @@ function boot({ flag = true, shadow = true, stars = false } = {}) {
   const handlers = [];
   const tg = { log: [] };
   const env = {
-    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
+    CA: CAx, db, OWNER_ID: OWNER, BLU_USER_CARD_ENABLED: false, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
     TRANSFER_ERROR_ACTION_ENABLED: flag, RECEIPT_SHADOW_ENABLED: shadow,
     Markup, L: fa, TERR_BTN: RT.TERR_BTN, terrAdminText: RT.terrAdminText, RECEIPT_LIVE_STATES: ['pending', 'waiting_review'],
     bot: {

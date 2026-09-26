@@ -329,7 +329,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.129.0';
+const PRODUCT_VERSION = '3.130.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -379,6 +379,11 @@ const RECEIPT_AUTOTAG_ENABLED = true;
 // وضعیتِ پرداخت، کارت یا پیامِ کاربر را لمس نمی‌کند. پایان ⟵ مارکرِ `receipt_reanalysis_1` و یک
 // پیامِ خلاصه به مالک. `false` ⟵ توقفِ فوری (از همان‌جا که مانده، بعداً ادامه می‌دهد).
 const RECEIPT_REANALYSIS_ENABLED = true;
+// 💙 کاربرِ بلوبانک ⟵ کارتِ بلو به‌طورِ ثابت (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴). «کاربرِ بلو» = بانکِ مؤثرِ **آخرین**
+// رسیدِ تگ‌دار و ردنشده‌اش بلو باشد (تگِ دستی یا خودکار). فاکتورش بیرون از نوبت روی کارتِ عادیِ بلو
+// صادر می‌شود (فعال و زیرِ سقف؛ وگرنه چرخشِ معمول) و دکمه‌ی تعویض مثلِ همه فعال است. کارتِ بلو برای
+// بقیه در چرخش می‌ماند. `false` ⟵ همه مثلِ v3.128.0 به نوبت.
+const BLU_USER_CARD_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -1335,7 +1340,12 @@ const pickInvoiceCardTx = () => _pickTx || (_pickTx = db.transaction((pid) => {
   const sticky = st.assignGet.get(p.user_id, day);
   const used = new Map(st.usedOn.all(day).map((r) => [r.card_id, r.c]));
   const n = st.rotGet.get(day)?.n || 0;
-  const { card, via } = CA.pickDailyCard({ cards: st.all.all(), used, stickyId: sticky?.card_id || 0, n });
+  const cards = st.all.all();
+  // 💙 کاربرِ بلو ⟵ کارتِ عادیِ بلو، بیرون از نوبت (کارمزدِ صفر، و کارت‌های دیگر شلوغ نمی‌شوند).
+  // کارتِ بلو از پیش‌شماره‌ی خودِ شماره شناخته می‌شود (همان نگاشتِ تگ‌ها)، نه از برچسبِ متنیِ بانک.
+  const preferIds = BLU_USER_CARD_ENABLED && isBluUser(p.user_id)
+    ? cards.filter((c) => c.kind === 'regular' && RT.bankFromPrefix(c.number) === 'blu').map((c) => c.id) : [];
+  const { card, via } = CA.pickDailyCard({ cards, used, stickyId: sticky?.card_id || 0, n, preferIds, preferVia: 'blu_user' });
   if (!card) return null;
   if (via === 'rotation') st.rotInc.run(day);
   if (!sticky || sticky.card_id !== card.id) st.assignSet.run(p.user_id, day, card.id, via);
@@ -2154,6 +2164,23 @@ db.transaction(() => {
     for (const c of SEED_CARDS) ins.run(c.number, c.holder, c.bank, OWNER_ID, c.kind, c.sort);
   }
   db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('cards_seed_1', unixepoch())").run();
+})();
+/* 💳 سیدِ دوم (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴، بعد از سیدِ اول): کارتِ عادیِ خاورمیانه و کارتِ سفیدِ بانک شهر
+ * اضافه می‌شوند و پاسارگاد از سفید به **عادی** می‌رود ⟵ سه عادی (بلو، پاسارگاد، خاورمیانه) + یک سفید
+ * (شهر). همه با ادمینِ مالک. ترتیب عمدی است: اول سفیدِ تازه، بعد پاسارگاد عادی، تا هیچ لحظه‌ای بی‌سفید
+ * نماند. کارتی که شماره‌اش از قبل هست (مالک دستی اضافه کرده) دوباره ساخته نمی‌شود؛ پاسارگاد فقط اگر
+ * هنوز سفید است عوض می‌شود. یک‌باره با مهرِ داخلِ همان تراکنش (همان الگوی سیدِ اول). */
+const SEED_CARDS_2 = [
+  { number: '5859471120915172', holder: 'علیرضا اولیاء', bank: 'بانک خاورمیانه', kind: 'regular', sort: 3 },
+  { number: '5047061675180547', holder: 'علیرضا اولیاء', bank: 'بانک شهر',       kind: 'white',   sort: 4 },
+];
+db.transaction(() => {
+  if (db.prepare("SELECT 1 FROM migrations WHERE key='cards_seed_2'").get()) return;
+  const has = db.prepare('SELECT 1 FROM cards WHERE number=?');
+  const ins = db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)');
+  for (const c of SEED_CARDS_2) if (!has.get(c.number)) ins.run(c.number, c.holder, c.bank, OWNER_ID, c.kind, c.sort);
+  db.prepare("UPDATE cards SET kind='regular', updated_at=unixepoch() WHERE number='5022291612282234' AND kind='white'").run();
+  db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('cards_seed_2', unixepoch())").run();
 })();
 /* 🏷 فازِ ۶ (v3.128.0): تگِ اپ/بانکِ مبدأ per رسید. `tag_values` فهرستِ مقدارهای مجاز است
  * (از داشبورد افزودنی/غیرفعال‌شدنی، هرگز حذف‌شدنی) و `receipt_tags` تگِ هر پرداخت در هر بُعد
@@ -10039,6 +10066,12 @@ function tagHistoryLineFor(uid, values = tagValues()) {
   if (!tagsOn()) return '';
   try { return RT.historyLine(RT.tagHistory(tagSt().ofUser.all(uid)), tagLabelFn(values)); }
   catch (e) { logErr('tag history:', e.message); return ''; }
+}
+/** 💙 کاربرِ بلو؟ بانکِ مؤثرِ آخرین رسیدِ تگ‌دارِ ردنشده. fail-safe: هر خطا ⟵ false (چرخشِ معمول). */
+function isBluUser(uid) {
+  if (!tagsOn() || !uid) return false;
+  try { return RT.lastBank(tagSt().ofUser.all(uid)) === 'blu'; }
+  catch (e) { logErr('isBluUser:', e.message); return false; }
 }
 /** کیبوردِ پیامِ رسیدِ مالک = دکمه‌های اکشنِ خودش (اگر پیامِ کامل است) + ردیفِ جمع‌شده‌ی تگ. */
 function ownerReceiptMarkup(p, kb) {

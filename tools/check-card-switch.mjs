@@ -90,7 +90,7 @@ function boot({ flag = true, stars = false } = {}) {
   const errs = [], events = [], sessions = {}, states = {};
   const handlers = [];
   const env = {
-    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars,
+    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars, BLU_USER_CARD_ENABLED: false,
     Markup, L: fa, bot: { action: (re, fn) => handlers.push({ re, fn }) },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }),
     curOf: () => ({ on: true, name: 'الماس', emoji: '💎' }), invoicePurchaseFor: () => null,
