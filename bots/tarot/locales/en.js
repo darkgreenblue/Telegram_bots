@@ -216,6 +216,7 @@ export default {
     coinShop: '💎 My diamonds',
     support: '💬 Support',
     resetTest: '🔄 Reset account (admin)',
+    cardsAdmin: '💳 Cards', // owner-only; card-to-card rail only (never shown on Stars bots)
     ready: 'My intention is set 🔮',
     stopShuffle: '⏹️ Stop it right here',
     nextCard: 'Next card 🎴',
@@ -356,6 +357,7 @@ export default {
     reject: (id) => `❌ Reject #${id}`,
     duplicateReceipt: '↩️ Duplicate receipt',
     smsNotArrived: '🚫 No transfer notification',
+    cardSwitch: '🔄 Switch card number',
     reverseYes: '✅ Yes, reverse it',
     reverseNo: '↩️ No, never mind',
     duplicateYes: '✅ Yes, duplicate',
@@ -987,6 +989,13 @@ export default {
           + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `Amount: *${fmt(amount)}*\n\nTransfer to:\n\`${card}\`\n${owner}\n\nAfter paying, send the receipt photo here 📸`,
+    // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
+    cardSwitchHeader: '👇👇🔄 New invoice with a new card number 💳👇👇',
+    // ⛔️ فازِ ۵ (v3.127.0): انتقال به کارتِ فاکتور ناموفق بود ⟵ همان فاکتور با کارتِ سفید.
+    transferErrorHeader: '⛔️ It looks like the transfer to that card did not go through. Please pay to the new card below and send the receipt.\n\n👇👇🔄 New invoice with a new card number 💳👇👇',
+    transferErrorApproved: '✅ Your payment is confirmed, no need to pay again.',
+    cardSwitchNone: 'No other card is available right now. If the transfer fails, tap 💬 Support.',
+    cardSwitchUsed: 'The card for this invoice was already switched once.',
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Code "${code}" applied: ${fmt(orig)} ← *${fmt(amount)}*`,
     // ⏱ چرخه‌ی عمرِ فاکتور (v3.74.0): این‌جا هم دست‌نیافتنی است (فقط ریلِ کارت)، ولی کلید

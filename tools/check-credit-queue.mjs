@@ -127,6 +127,7 @@ console.log('\n▶ ۳) هر مسیرِ enqueue قبل از INSERT گارد دا�
     ['bots/dashboard/routes/orphans.js', 'creditQueueSupported(r.bot)'],
     ['bots/dashboard/routes/support.js', 'adminActionSupported(inst.bot, act)'],
     ['bots/dashboard/routes/finance.js', 'receiptQueueSupported(inst.bot)'],
+    ['bots/dashboard/routes/cards.js', 'cardsPageSupported(bot)'],
   ]) {
     const code = strip(read(file));
     const g = code.indexOf(guard);

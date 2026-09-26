@@ -246,6 +246,7 @@ export default {
     coinShop: '💎 Meus diamantes',
     support: '💬 Suporte',
     resetTest: '🔄 Zerar conta (admin)',
+    cardsAdmin: '💳 Cartões', // owner-only; card-to-card rail only (never shown on Stars bots)
     ready: 'Fiz o meu pedido 🔮',
     stopShuffle: '⏹️ Para aqui',
     nextCard: 'Próxima carta 🎴',
@@ -381,6 +382,7 @@ export default {
     reject: (id) => `❌ Recusar #${id}`,
     duplicateReceipt: '↩️ Recibo duplicado',
     smsNotArrived: '🚫 O aviso não chegou',
+    cardSwitch: '🔄 Trocar número do cartão',
     reverseYes: '✅ Sim, pode estornar',
     reverseNo: '↩️ Não, deixa pra lá',
     duplicateYes: '✅ Sim, é duplicado',
@@ -995,6 +997,13 @@ export default {
           + `*${coins(purchase.coins)}* ${cur?.emoji || '💎'}\n\n`
         : '')
       + `Valor: *${fmt(amount)}*\n\nTransfira para:\n\`${card}\`\n${owner}\n\nDepois de pagar, mande a foto do comprovante aqui 📸`,
+    // 🔄 تعویضِ کارتِ فاکتور (v3.125.0، فازِ ۳). روی ریلِ کارت‌به‌کارت (فقط fa) دیده می‌شود.
+    cardSwitchHeader: '👇👇🔄 Nova fatura com um novo número de cartão 💳👇👇',
+    // ⛔️ فازِ ۵ (v3.127.0): انتقال به کارتِ فاکتور ناموفق بود ⟵ همان فاکتور با کارتِ سفید.
+    transferErrorHeader: '⛔️ Parece que a transferência para esse cartão não foi concluída. Pague para o novo cartão abaixo e envie o comprovante.\n\n👇👇🔄 Nova fatura com um novo número de cartão 💳👇👇',
+    transferErrorApproved: '✅ Seu pagamento foi confirmado, não precisa pagar de novo.',
+    cardSwitchNone: 'Não há outro cartão disponível agora. Se a transferência falhar, use 💬 Suporte.',
+    cardSwitchUsed: 'O cartão desta fatura já foi trocado uma vez.',
     invoiceDiscounted: (orig, amount, code) =>
       `🎟️ Cupom «${code}» aplicado: ${fmt(orig)} ← *${fmt(amount)}*`,
     // ⏱ Ciclo de vida do pedido (v3.74.0) — também inalcançável aqui (só trilho de

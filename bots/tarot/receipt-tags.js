@@ -1,0 +1,62 @@
+/* 🔎 خوانشِ «فقط ثبتِ» ایجنتِ رسید و (از فازِ ۶) تگ‌های اپ و بانکِ مبدأ.
+ *
+ * ماژولِ **خالص**: هیچ import از npm، هیچ دیتابیس، هیچ تلگرام. `index.js` ردیفِ
+ * `receipt_analyses` را می‌خواند و از همین‌جا متن می‌سازد، پس
+ * `tools/check-receipt-shadow.mjs` همین توابع را مستقیم اجرا می‌کند (نه کپیِ منطق).
+ *
+ * متن‌ها عمداً فارسیِ ثابت‌اند و در locale نیستند (همان استدلالِ `cards-admin.js`): این خط
+ * فقط روی پیامِ رسیدِ **مالک** و فقط روی رباتِ فارسی (ریلِ کارت‌به‌کارت) دیده می‌شود. */
+
+/** برچسبِ نمایشیِ اپ‌ها. کلیدها همان enumِ `BANK_APPS` در `cardpay.js` اند. */
+export const APP_LABELS = {
+  blu: 'بلو',
+  ap: 'آپ',
+  780: '۷۸۰',
+  top: 'تاپ',
+  hamrahcard: 'همراه‌کارت',
+  mobilebank: 'موبایل‌بانک',
+  other: 'سایر',
+};
+
+/** ارقامِ لاتین ⟵ فارسی (فقط برای نمایش). */
+const faDigits = (s) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
+
+/** یک خطِ کوتاه برای پیامِ رسیدِ مالک از ردیفِ `receipt_analyses`. `''` یعنی چیزی برای
+ *  گفتن نیست (ایجنت اجرا نشد، شکست خورد، یا هیچ فیلدی خوانده نشد): آن‌وقت خطی اضافه
+ *  نمی‌شود تا پیامِ مالک با «نامشخص · نامشخص · نامشخص» شلوغ نشود. */
+export function shadowLine(row) {
+  if (!row || !row.ok) return '';
+  const parts = [];
+  if (row.app) parts.push(`اپ: ${APP_LABELS[row.app] || row.app}`);
+  if (row.src_prefix) parts.push(`کارتِ مبدأ: ${faDigits(row.src_prefix)}…`);
+  if (row.transfer_error) parts.push('⛔️ خطای انتقال');
+  if (!parts.length) return '';
+  return `🔎 ایجنت: ${parts.join(' · ')}`;
+}
+
+/** کپشن + خطِ ایجنت، بدونِ اینکه خطِ ایجنت با سقفِ کپشن بریده شود: اگر جا نبود، از خودِ
+ *  کپشن کم می‌شود نه از خط. */
+export function withShadowLine(caption, line, limit) {
+  if (!line) return String(caption).slice(0, limit);
+  const tail = `\n\n${line}`;
+  return String(caption).slice(0, Math.max(0, limit - tail.length)) + tail;
+}
+
+/* ⛔️ پیامِ اطلاعاتیِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵) — فقط ادمینِ کارتِ ناموفق و مالک. */
+export const TERR_BTN = {
+  sms: '📩 پیامکش اومده',
+  yes: '✅ بله، پیامکش اومده (تأیید و شارژ)',
+  no: '↩️ انصراف',
+};
+const last4 = (c) => String(c?.number ?? '').slice(-4);
+/** متنِ پیامِ ادمین. `from` = کارتی که انتقال به آن ناموفق بود، `to` = کارتِ سفیدِ جدید. */
+export function terrAdminText({ invoiceNo, userId, userName, amount, from, to, errText }) {
+  return [
+    `⛔️ کاربر نتوانست به کارتِ …${last4(from)} (${from?.bank || from?.holder || '-'}) واریز کند.`,
+    `فاکتورِ #${invoiceNo} · ${Number(amount || 0).toLocaleString('fa-IR')} تومان · کاربر ${userId}${userName ? ` (${userName})` : ''}`,
+    errText ? `پیامِ خطا: «${String(errText).slice(0, 160)}»` : '',
+    `🔄 همان فاکتور خودکار به کارتِ سفیدِ …${last4(to)} منتقل شد.`,
+    '',
+    'اگر با وجودِ این خطا پیامکِ واریز به کارتِ بالا آمده، «پیامکش اومده» را بزن تا الماسِ کاملِ فاکتور داده شود.',
+  ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+}
