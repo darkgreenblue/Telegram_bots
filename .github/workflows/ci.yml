@@ -619,7 +619,7 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-blu-user.mjs
       # ⏳ تأییدِ کُندِ بسته‌ی معمولی (۵ تا ۱۰ دقیقه، زمان‌بندی در DB نه sleep) + رسیدِ دوباره وسطِ صبر ⟵
-      # مشکوکِ ماندگار. زمان‌بند و اجراکننده‌ی واقعی روی SQLite، ری‌استارت و دو پروسه‌ی هم‌زمان.
+      # تگِ مشکوکِ همیشگی. زمان‌بند و اجراکننده‌ی واقعی روی SQLite، ری‌استارت و دو پروسه‌ی هم‌زمان.
       - name: Slow approve check
         if: matrix.bot == 'tarot'
         run: node tools/check-slow-approve.mjs

@@ -90,7 +90,7 @@ console.log('\n▶ SQLِ برچسبِ «مشکوک» روی SQLite واقعی');
 
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, pay_suspect INTEGER NOT NULL DEFAULT 0, pay_distrust INTEGER NOT NULL DEFAULT 0, suspect_sticky INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, pay_suspect INTEGER NOT NULL DEFAULT 0, pay_distrust INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending', suspect_hold INTEGER NOT NULL DEFAULT 0,
       receipt_file_id TEXT, admin_message_id INTEGER, updated_at INTEGER NOT NULL DEFAULT 0);
@@ -106,12 +106,6 @@ console.log('\n▶ SQLِ برچسبِ «مشکوک» روی SQLite واقعی');
   db.prepare(S.clearSuspect).run(UID);
   ok(db.prepare('SELECT pay_suspect FROM users WHERE telegram_id=?').get(UID).pay_suspect === 0,
     'clearSuspect برچسب را خاموش می‌کند');
-  // ⏳ v3.131.0: مشکوکِ ماندگار (رسیدِ دوباره وسطِ صبرِ تأیید) با هیچ تأییدِ بعدی خاموش نمی‌شود.
-  db.prepare(sqlOf('setSuspectSticky')).run(UID);
-  db.prepare(S.clearSuspect).run(UID);
-  ok(db.prepare('SELECT pay_suspect FROM users WHERE telegram_id=?').get(UID).pay_suspect === 1,
-    'مشکوکِ ماندگار با clearSuspect خاموش نمی‌شود («تمام رسیدهای بعدیش» دستی)');
-  db.prepare('UPDATE users SET pay_suspect=0, suspect_sticky=0 WHERE telegram_id=?').run(UID);
 
   // setSuspectHold: همان گاردِ setPaymentReceipt، فقط با suspect_hold=1 هم‌زمان
   const mk = (st) => Number(db.prepare('INSERT INTO payments (user_id, status) VALUES (?, ?)').run(UID, st).lastInsertRowid);

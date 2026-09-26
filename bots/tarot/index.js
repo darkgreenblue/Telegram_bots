@@ -1203,7 +1203,7 @@ const receiptDecisionDelayMs = (p) =>
  * ویژه/جادویی (یعنی شارژهای کوچکِ ۱۵ و ۲۰ هزاری و مبلغِ دلخواه) بعد از **۵ تا ۱۰ دقیقه‌ی تصادفی**، نه
  * ۴۰ تا ۶۰ ثانیه. فقط مسیرِ «تأیید/کم‌پرداخت»؛ ارجاع به ادمین و ردِ خودکار همان تأخیرِ کوتاهِ قبلی را
  * دارند. زمان‌بندی در DB است (`auto_decide_at`) و کاربر در این فاصله آزاد است؛ رسیدِ دوباره در همین
- * فاصله ⟵ مشکوکِ ماندگار (`flagResendDuringWait`). `false` ⟵ رفتارِ v3.130.0 بیت‌به‌بیت. */
+ * فاصله ⟵ همان تگِ «مشکوکِ» همیشگی (`flagResendDuringWait`). `false` ⟵ رفتارِ v3.130.0 بیت‌به‌بیت. */
 const SLOW_APPROVE_ENABLED = true;
 const slowApproveDelaySec = () => randomInt(300, 601);
 
@@ -2127,9 +2127,6 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN transfer_error_at INTEGER').ru
 try { db.prepare('ALTER TABLE payments ADD COLUMN auto_decide_at INTEGER').run(); } catch {}
 try { db.prepare("ALTER TABLE payments ADD COLUMN auto_decision TEXT NOT NULL DEFAULT ''").run(); } catch {}
 try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_auto_decide ON payments(auto_decide_at)').run(); } catch {}
-/* 🟡 مشکوکِ **ماندگار** (v3.131.0): کاربری که وسطِ صبرِ تأیید دوباره رسید فرستاد، برای همیشه دستی
- * بررسی می‌شود (خواسته‌ی مالک: «تمام رسیدهای بعدیش»). `clearSuspect` این ردیف‌ها را پاک نمی‌کند. */
-try { db.prepare('ALTER TABLE users ADD COLUMN suspect_sticky INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 /* 🔎 فازِ ۴ (v3.126.0): یک ردیف per **هر** اجرای ایجنتِ رسید (موفق یا شکست‌خورده). تا امروز
  * خروجیِ ایجنت فقط یک خطِ لاگ بود و بعد از چرخشِ لاگ‌های pm2 از بین می‌رفت؛ پس نه می‌شد
  * دقتش را سنجید، نه فیلدهای تازه را قبل از اعتماد رصد کرد. `raw_json` کلِ verdictِ نرمال
@@ -2713,9 +2710,7 @@ const stmts = {
   setDistrust: db.prepare('UPDATE users SET pay_distrust=1 WHERE telegram_id=?'),
   // 🟡 کاربرِ مشکوک — همان الگوی setDistrust، فقط ستونِ دیگر.
   setSuspect: db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=?'),
-  // ⚠️ مشکوکِ ماندگار (`suspect_sticky`) هرگز خودکار پاک نمی‌شود؛ فقط ریستِ کاملِ حساب.
-  clearSuspect: db.prepare('UPDATE users SET pay_suspect=0 WHERE telegram_id=? AND COALESCE(suspect_sticky, 0)=0'),
-  setSuspectSticky: db.prepare('UPDATE users SET pay_suspect=1, suspect_sticky=1 WHERE telegram_id=?'),
+  clearSuspect: db.prepare('UPDATE users SET pay_suspect=0 WHERE telegram_id=?'),
   // نگه‌داشتنِ رسیدِ «مشکوکِ تعلیق‌شده» در waiting_review، با suspect_hold=1 تا از یک
   // بازبینیِ دستیِ معمولی تفکیک شود (همان گاردِ اتمیکِ setPaymentReceipt، فقط ستونِ اضافه).
   setSuspectHold: db.prepare("UPDATE payments SET receipt_file_id=?, admin_message_id=?, status='waiting_review', suspect_hold=1, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
@@ -10587,16 +10582,17 @@ async function afterDelayedApproval(uid, paidPid) {
   if (s?.paymentId && Number(s.paymentId) !== Number(paidPid)) return;
   if (!st || st === 'idle' || st === 'confirm_pay' || st === 'chatting') await afterApproval(uid);
 }
-/** 🟡 رسیدِ تازه وقتی همین کاربر یک تأییدِ زمان‌بندی‌شده‌ی اجرانشده دارد ⟵ **مشکوکِ ماندگار** (خواسته‌ی
- *  مالک: صبر نکرد، پس از این به بعد همه‌ی رسیدهایش دستی؛ و رسیدِ تکراریِ بی‌صبری الماسِ الکی نمی‌گیرد، چون
- *  هم زمان‌بندیِ قبلی و هم این رسید هر دو به ادمین می‌روند). خروجی: آیا پرچم خورد. */
+/** 🟡 رسیدِ تازه وقتی همین کاربر یک تأییدِ زمان‌بندی‌شده‌ی اجرانشده دارد ⟵ همان تگِ **مشکوکِ** همیشگی
+ *  (`setSuspect`؛ خواسته‌ی مالک). یعنی رسیدهایش تا وقتی ادمین مشکوک را با «آمده» تأیید کند دستی‌اند، و رسیدِ
+ *  تکراریِ بی‌صبری الماسِ الکی نمی‌گیرد (زمان‌بندیِ قبلی و این رسید هر دو به ادمین می‌روند). عمداً هیچ
+ *  برچسبِ تازه‌ای ساخته نشده: چرخه‌ی مشکوک ⟵ بی‌اعتماد از قبل هست. خروجی: آیا پرچم خورد. */
 function flagResendDuringWait(uid) {
   try {
     if (!SLOW_APPROVE_ENABLED || starsRail) return false;
     const waiting = autoSt().waitingOf.all(uid).map((r) => r.id);
     if (!waiting.length) return false;
-    if (!isDistrusted(uid)) stmts.setSuspectSticky.run(uid);
-    log(`🟡 RESEND_DURING_WAIT uid=${uid} waiting=${waiting.join(',')} ⟵ مشکوکِ ماندگار`);
+    if (!isDistrusted(uid) && !isSuspect(uid)) stmts.setSuspect.run(uid);
+    log(`🟡 RESEND_DURING_WAIT uid=${uid} waiting=${waiting.join(',')} ⟵ مشکوک`);
     track(db, uid, 'receipt_resent_during_wait', { waiting });
     return true;
   } catch (e) { logErr('flagResendDuringWait:', e.message); return false; }
@@ -10617,7 +10613,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   }
   const s = getSession(uid);
   const nextState = s?.readingId ? 'confirm_pay' : 'idle';
-  // ⏳🟡 رسیدِ تازه وسطِ صبرِ تأییدِ کُند ⟵ مشکوکِ ماندگار؛ پس همین رسید هم پایین‌تر دستی می‌شود.
+  // ⏳🟡 رسیدِ تازه وسطِ صبرِ تأییدِ کُند ⟵ مشکوک؛ پس همین رسید هم پایین‌تر دستی می‌شود.
   flagResendDuringWait(uid);
   // 🟡 تشخیصِ الگوی مشکوک — روی رسیدهای **قبلی** (قبل از ثبتِ رویدادِ همین رسید).
   // بی‌اعتماد از قبل بدترین حالت است و چیزی رویش اضافه نمی‌شود.
@@ -12289,7 +12285,7 @@ bot.on('photo', async (ctx) => {
      می‌شد. یک جمله‌ی صادقانه به‌مراتب بهتر از هیچ است. */
   if (!paymentId) {
     /* ⏳ رسیدِ دوباره برای پرداختی که تأییدِ کُندش در راه است (دیگر `pending` نیست، پس بالا پیدا نشد):
-       «فاکتوری نداری» دروغ بود. مشکوکِ ماندگار ⟵ همان پرداخت سرِ وقت به ادمین می‌رود، و کاربر همان
+       «فاکتوری نداری» دروغ بود. مشکوک ⟵ همان پرداخت سرِ وقت به ادمین می‌رود، و کاربر همان
        پیامِ همیشگیِ «رسیدت رسید» را می‌گیرد (نه چیزی که بی‌صبری را پاداش یا لو بدهد). */
     if (flagResendDuringWait(uid)) return ctx.reply(L.wallet.receiptSent).catch(() => {});
     return ctx.reply(L.wallet.receiptNoInvoice, mainKeyboard(uid)).catch(() => {});

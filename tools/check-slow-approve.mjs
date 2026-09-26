@@ -1,12 +1,12 @@
-// چکِ CI برای «⏳ تأییدِ کُندِ بسته‌های معمولی + 🟡 رسیدِ دوباره وسطِ صبر ⟵ مشکوکِ ماندگار» (tarot، v3.131.0).
+// چکِ CI برای «⏳ تأییدِ کُندِ بسته‌های معمولی + 🟡 رسیدِ دوباره وسطِ صبر ⟵ تگِ مشکوک» (tarot، v3.131.0).
 //
 // خواسته‌ی مالک (۱۴۰۵/۰۷/۰۴): تأییدِ خودکارِ بسته‌ی معمولی بعد از ۵ تا ۱۰ دقیقه‌ی تصادفی؛ هر رسیدِ دوباره در این
-// فاصله ⟵ کاربر مشکوک و همه‌ی رسیدهای بعدی‌اش دستی؛ و رسیدِ تکراریِ بی‌صبری الماسِ الکی نگیرد.
+// فاصله ⟵ تگِ مشکوکِ همیشگی (رسیدها دستی تا ادمین «آمده» بزند)؛ و رسیدِ تکراریِ بی‌صبری الماسِ الکی نگیرد.
 // خرابی‌های بی‌صدا که این‌جا گرفته می‌شوند:
 //   • تصمیم با ری‌استارت گم شود (زمان‌بندی باید در DB باشد، نه `sleep`).
 //   • در فاصله‌ی صبر کاربر فاکتور را لغو کند و پولِ رسیده بی‌اعتبار بماند (باید `waiting_review` شود).
 //   • یک تصمیم دو بار اجرا شود (دو اعتبار)، یا بعد از تصمیمِ ادمین هم اجرا شود.
-//   • رسیدِ دوباره مشکوک نکند، یا مشکوکی که خورد با اولین تأییدِ ادمین پاک شود.
+//   • رسیدِ دوباره مشکوک نکند (همان تگِ مشکوکِ همیشگی؛ هیچ برچسبِ ماندگارِ تازه‌ای نیست).
 //   • تأییدِ دیرهنگام فلوی تازه‌ی کاربر (فاکتورِ دیگر، نوشتنِ سؤال) را یتیم کند.
 // کدِ واقعیِ index.js بریده و روی SQLite اجرا می‌شود.
 import { readFileSync, mkdtempSync, rmSync } from 'fs';
@@ -33,8 +33,8 @@ const OWNER = 111, U = 9;
 console.log('\n⏳ تأییدِ کُند و رسیدِ دوباره\n');
 const body = region('/* 💰 تأیید یا اصلاحِ کم‌پرداختِ خودکار', '\nasync function processReceipt', { includeTo: false });
 const helper = region('const isPriorityPack =', 'const slowApproveDelaySec = () => randomInt(300, 601);');
-const SQL = { adjust: sqlOf('adjustPaymentAmount'), sticky: sqlOf('setSuspectSticky'), clear: sqlOf('clearSuspect') };
-ok(SQL.adjust && SQL.sticky && SQL.clear, 'SQLهای واقعی از سورس خوانده شدند');
+const SQL = { adjust: sqlOf('adjustPaymentAmount'), suspect: sqlOf('setSuspect'), clear: sqlOf('clearSuspect') };
+ok(SQL.adjust && SQL.suspect && SQL.clear, 'SQLهای واقعی از سورس خوانده شدند');
 
 function boot({ file = ':memory:', flag = true, stars = false, delay = 420, state = 'idle', session = {} } = {}) {
   const db = new Database(file);
@@ -42,7 +42,7 @@ function boot({ file = ':memory:', flag = true, stars = false, delay = 420, stat
       status TEXT NOT NULL DEFAULT 'pending', pkg TEXT, discount_code_id INTEGER, receipt_file_id TEXT, adjust_note TEXT,
       auto_decide_at INTEGER, auto_decision TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS users (telegram_id INTEGER PRIMARY KEY, pay_suspect INTEGER NOT NULL DEFAULT 0,
-      pay_distrust INTEGER NOT NULL DEFAULT 0, suspect_sticky INTEGER NOT NULL DEFAULT 0);
+      pay_distrust INTEGER NOT NULL DEFAULT 0);
     INSERT OR IGNORE INTO users (telegram_id) VALUES (${U});`);
   const log = { approve: 0, sent: [], pushed: [], toAdmin: 0, suspectAdmin: 0, notify: 0, after: 0, timers: [], errs: [], events: [] };
   const user = (u) => db.prepare('SELECT * FROM users WHERE telegram_id=?').get(u) || {};
@@ -51,7 +51,7 @@ function boot({ file = ':memory:', flag = true, stars = false, delay = 420, stat
     randomInt: () => delay, isDistrusted: (u) => !!user(u).pay_distrust, isSuspect: (u) => !!user(u).pay_suspect,
     stmts: {
       getPayment: db.prepare('SELECT * FROM payments WHERE id=?'),
-      adjustPaymentAmount: db.prepare(SQL.adjust), setSuspectSticky: db.prepare(SQL.sticky),
+      adjustPaymentAmount: db.prepare(SQL.adjust), setSuspect: db.prepare(SQL.suspect),
     },
     approvePayment: (pid) => {
       const r = db.prepare("UPDATE payments SET status='approved' WHERE id=? AND status IN ('pending','waiting_review')").run(pid);
@@ -125,10 +125,8 @@ if (h) {
   const c = hs.pay();
   hs.scheduleAutoDecision(hs.row(c), A, 20000, null);
   ok(hs.flagResendDuringWait(U) === true, 'رسیدِ دوباره شناخته شد');
-  const u1 = hs.db.prepare('SELECT * FROM users WHERE telegram_id=?').get(U);
-  ok(u1.pay_suspect === 1 && u1.suspect_sticky === 1, 'کاربر مشکوکِ ماندگار شد');
-  hs.db.prepare(SQL.clear).run(U);
-  ok(hs.db.prepare('SELECT pay_suspect FROM users WHERE telegram_id=?').get(U).pay_suspect === 1, 'و با تأییدِ بعدیِ ادمین (clearSuspect) پاک نمی‌شود');
+  ok(hs.db.prepare('SELECT pay_suspect FROM users WHERE telegram_id=?').get(U).pay_suspect === 1, 'کاربر همان تگِ مشکوکِ همیشگی را گرفت');
+  ok(!/suspect_sticky|setSuspectSticky/.test(SRC), 'هیچ برچسبِ «مشکوکِ ماندگارِ» تازه‌ای نیست (چرخه‌ی مشکوک ⟵ بی‌اعتماد همان قبلی)');
   hs.due(c);
   await hs.runDueAutoDecisions();
   ok(hs.log.approve === 0 && hs.log.suspectAdmin === 1 && hs.log.sent.length === 0, 'زمان‌بندیِ قبلی هم دیگر خودکار تأیید نمی‌شود ⟵ ادمین («آمده/نیومده»)، بدونِ الماس');
@@ -214,7 +212,7 @@ console.log('\nساختاری:');
   ok(/setInterval\(\(\) => \{ runDueAutoDecisions\(\)/.test(SRC) && /runDueAutoDecisions\(\)\.catch\(\(e\) => logErr\('slow approve boot:'/.test(SRC), 'اجرای بوت + جاروی ۳۰ثانیه‌ای از onLaunch');
   ok(/\['pending'\]\.includes\(p\.status\)\) stmts\.setPaymentStatus\.run\('canceled'/.test(SRC), 'انصرافِ کاربر فقط روی pending (پرداختِ در صف لغوشدنی نیست)');
   ok(/const SLOW_APPROVE_ENABLED = true;/.test(SRC), 'پرچمِ رول‌بک روشن منتشر شده');
-  ok(/ALTER TABLE payments ADD COLUMN auto_decide_at INTEGER/.test(SRC) && /ALTER TABLE users ADD COLUMN suspect_sticky INTEGER NOT NULL DEFAULT 0/.test(SRC), 'ستون‌ها افزایشی‌اند');
+  ok(/ALTER TABLE payments ADD COLUMN auto_decide_at INTEGER/.test(SRC), 'ستون‌ها افزایشی‌اند');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} نتیجه: ${pass} پاس، ${fail} خطا`);
