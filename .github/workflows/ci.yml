@@ -366,6 +366,11 @@ jobs:
       - name: Payment cards dashboard page check
         if: matrix.bot == 'dashboard'
         run: node tools/check-cards-page.mjs
+      # 🏷 فازِ ۶: کارتِ تگ‌ها در پروفایلِ کاربر؛ صف (نه نوشتنِ مستقیم) و همان شکلی که sweepِ
+      # ربات می‌پذیرد — سرتاسری روی یک فایلِ دیتابیس (داشبورد صف می‌کند، sweepِ واقعی اجرا).
+      - name: Receipt tags check (dashboard)
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-receipt-tags.mjs --part=dash
 
       # مسیرِ پولِ voice2text (رباتِ زنده‌ی درآمدزا). ادعاها منطق را **اجرا** می‌کنند نه
       # اینکه شکلِ `if` را ببینند: شاخه‌ای که اعتبارِ رایگان می‌دهد، «شرط عوض شد» کافی
@@ -594,6 +599,11 @@ jobs:
       - name: Transfer error check
         if: matrix.bot == 'tarot'
         run: node tools/check-transfer-error.mjs
+      # 🏷 فازِ ۶: تگِ اپ/بانک فقط روی پیامِ رسیدِ مالک؛ ردیفِ تگ بعد از هر اکشن می‌ماند؛ سابقه
+      # فقط از رسیدهای ردنشده. کدِ واقعیِ index.js روی SQLite با middlewareِ واقعی اجرا می‌شود.
+      - name: Receipt tags check (bot)
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-tags.mjs --part=bot
 
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/

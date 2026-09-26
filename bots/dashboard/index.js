@@ -22,6 +22,7 @@ import { supportBody, supportUserBody, supportAction } from './routes/support.js
 import { financeBody, financeCsv, financeAction } from './routes/finance.js';
 import { orphansBody, orphanAdd, orphanResolve, orphanDelete } from './routes/orphans.js';
 import { cardsBody, cardsAction } from './routes/cards.js';
+import { tagAction } from './routes/tags.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
 import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
@@ -91,6 +92,13 @@ const ACTIONS = {
   '/finance/action': { fn: financeAction, backTo: '/finance' },
   '/support/action': {
     fn: supportAction,
+    backTo: (b) => {
+      const inst = String(b.get('inst') || ''), uid = parseInt(b.get('uid'), 10);
+      return (inst && uid) ? `/support/user?inst=${encodeURIComponent(inst)}&id=${uid}` : '/support';
+    },
+  },
+  '/support/tag': {
+    fn: tagAction,
     backTo: (b) => {
       const inst = String(b.get('inst') || ''), uid = parseInt(b.get('uid'), 10);
       return (inst && uid) ? `/support/user?inst=${encodeURIComponent(inst)}&id=${uid}` : '/support';

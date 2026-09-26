@@ -54,11 +54,15 @@ export const BOTS = [
        رد می‌شد. هر شاخه‌ی تازه در sweep باید همین‌جا هم اضافه شود (چکِ CI هر دو جهت
        را می‌سنجد: نامِ بی‌شاخه و شاخه‌ی بی‌نام هر دو قرمزند). */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag'],
     /* 💳 صفحه‌ی کارت‌های پرداخت (v3.123.0، فازِ ۱c). فقط ریلِ کارت‌به‌کارت کارت دارد؛
        `card_update` در tarot-intl هم اعلام شده چون sweep همان کد است، ولی آن‌جا sweep
        صریح امتناع می‌کند و صفحه هم رندر نمی‌شود (این پرچم را ندارد). */
     cardsAdmin: true,
+    /* 🏷 تگِ اپ/بانکِ رسیدها (v3.128.0، فازِ ۶): کارتِ «تگ‌ها» در پروفایلِ کاربر. مثلِ
+       `cardsAdmin` فقط ریلِ کارت‌به‌کارت رسید دارد؛ `receipt_tag` در tarot-intl هم اعلام شده
+       چون sweep همان کد است، ولی آن‌جا sweep صریح امتناع می‌کند و کارت هم رندر نمی‌شود. */
+    receiptTags: true,
     /* 💎 واحدِ اعتبارِ این ربات **الماس** است، نقطه.
      *
      * ⚠️ عددی که در `users.balance` و `payments.original_amount` نشسته یک **فرمتِ
@@ -135,7 +139,7 @@ export const BOTS = [
        کاربرانِ روسی/اسپانیایی/پرتغالی ممکن نبود. پرچمِ بی‌دلیل خاموش هم باگ است، فقط
        جهتش برعکس (بند ۲الف ریشه) — و چکِ CI همین را گرفت. */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag'],
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
@@ -217,6 +221,9 @@ export const adminActionSupported = (bot, act) => adminActionsOf(bot).includes(a
  *  `card_update` را اجرا کند. هر دو شرط لازم‌اند: اولی بدونِ دومی یعنی تغییر در صف بمیرد. */
 export const cardsPageSupported = (bot) =>
   !!botByKey(bot)?.cardsAdmin && adminActionSupported(bot, 'card_update');
+/** کارتِ «🏷 تگ‌های رسید» در پروفایلِ کاربر: هم پرچمِ ربات، هم اکشنِ صفِ `receipt_tag`. */
+export const receiptTagsSupported = (bot) =>
+  !!botByKey(bot)?.receiptTags && adminActionSupported(bot, 'receipt_tag');
 export const creditQueueSupported = (bot) =>
   adminActionSupported(bot, 'credit') && adminActionSupported(bot, 'credit_paid');
 /* 💎 واحدِ کیفِ یک ربات. `null` یعنی ربات تومانی/ریالی است و همه‌چیز دقیقاً مثل قبل

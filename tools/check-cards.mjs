@@ -93,7 +93,9 @@ function boot({ legacy = false, failTo = null } = {}) {
     // 🔄 فازِ ۲: چرخش واقعاً اجرا می‌شود (نه اینکه با ReferenceError بی‌صدا به فالبک بیفتد).
     CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {},
     // 🔎 فازِ ۴: خطِ ایجنتِ مالک. این‌جا تحلیلی نیست ⟵ '' ⟵ کپشن‌ها بیت‌به‌بیت قبلی (خودِ خط در check-receipt-shadow).
-    ownerShadowLine: () => '', withShadowLine: RT.withShadowLine };
+    ownerShadowLine: () => '', withShadowLine: RT.withShadowLine,
+    // 🏷 فازِ ۶: تگ‌ها این‌جا خاموش ⟵ کیبورد و کپشن بیت‌به‌بیت قبلی (خودِ تگ‌ها در check-receipt-tags).
+    RECEIPT_TAGS_ENABLED: false };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing.replace('const LEGACY_ADMINS_FULL = false', 'const LEGACY_ADMINS_FULL = true') : routing)}
     const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };

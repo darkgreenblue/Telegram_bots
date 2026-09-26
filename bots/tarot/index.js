@@ -49,6 +49,7 @@ import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
 import { analyzeReceipt, decideReceipt, shadowFields } from './cardpay.js';
 import { shadowLine, withShadowLine, TERR_BTN, terrAdminText } from './receipt-tags.js';
+import * as RT from './receipt-tags.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
@@ -328,7 +329,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.127.0';
+const PRODUCT_VERSION = '3.128.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -362,6 +363,12 @@ const RECEIPT_SHADOW_ENABLED = true;
 // ادمین). به فیلدِ فازِ ۴ وابسته است، پس بدونِ `RECEIPT_SHADOW_ENABLED` هم خاموش است. `false` ⟵
 // رسیدِ خطا مثلِ v3.126.0 به بازبینیِ دستی می‌رود؛ کالبک‌های `terr*` ثبت می‌مانند.
 const TRANSFER_ERROR_ACTION_ENABLED = true;
+// 🏷 تگِ دستیِ «اپ» و «بانکِ مبدأ» روی رسیدها (v3.128.0، فازِ ۶). **فقط روی پیام‌های رسیدِ
+// مالک** (تصمیمِ مالک: «تگ زدن فقط کار خودمه، باقی ادمین‌ها رو نمی‌خوام گیج کنم») یک ردیفِ
+// «📱 اپ / 🏦 بانک» و یک خطِ «🏷 سابقه‌ی کاربر» اضافه می‌شود. هیچ اثری روی پول، تصمیمِ رسید یا
+// پیامِ کاربر ندارد. `false` ⟵ نه ردیف، نه خط (کپشن و کیبوردِ مالک بیت‌به‌بیت v3.127.0)؛ کالبک‌های
+// کهنه‌ی `tg:` فقط پاپ‌آپِ 🔒 می‌گیرند. جدول‌ها طبقِ بند ۲ج/۱ می‌مانند.
+const RECEIPT_TAGS_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -2138,6 +2145,42 @@ db.transaction(() => {
   }
   db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('cards_seed_1', unixepoch())").run();
 })();
+/* 🏷 فازِ ۶ (v3.128.0): تگِ اپ/بانکِ مبدأ per رسید. `tag_values` فهرستِ مقدارهای مجاز است
+ * (از داشبورد افزودنی/غیرفعال‌شدنی، هرگز حذف‌شدنی) و `receipt_tags` تگِ هر پرداخت در هر بُعد
+ * per منبع (`admin` دستی، `auto` فازِ ۷). کلیدِ اصلیِ `(payment_id, dim, source)` یعنی هر منبع
+ * روی هر رسید در هر بُعد **یک** مقدار دارد؛ ادمین بر auto مقدم است (`RT.effectiveTags`). */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tag_values (
+    dim        TEXT    NOT NULL,
+    key        TEXT    NOT NULL,
+    label      TEXT    NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (dim, key)
+  );
+  CREATE TABLE IF NOT EXISTS receipt_tags (
+    payment_id INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    dim        TEXT    NOT NULL,
+    value_key  TEXT    NOT NULL,
+    source     TEXT    NOT NULL DEFAULT 'admin',
+    by_id      INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (payment_id, dim, source)
+  );
+  CREATE INDEX IF NOT EXISTS idx_receipt_tags_user ON receipt_tags(user_id);
+`);
+/* سیدِ مقدارهای اولیه با `INSERT OR IGNORE` در **هر** بوت: ردیفِ موجود هرگز لمس نمی‌شود، پس
+ * برچسبی که مالک از داشبورد عوض کرده یا مقداری که غیرفعال کرده دوباره زنده نمی‌شود؛ و مقدارِ
+ * تازه‌ای که روزی به `SEED_TAG_VALUES` اضافه شود خودکار می‌نشیند. */
+try {
+  const ins = db.prepare('INSERT OR IGNORE INTO tag_values (dim, key, label, sort) VALUES (?,?,?,?)');
+  db.transaction(() => {
+    for (const d of RT.TAG_DIMS) RT.SEED_TAG_VALUES[d].forEach(([k, l], i) => ins.run(d, k, l, i + 1));
+  })();
+} catch (e) { logErr('tag_values seed:', e.message); }
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -3024,7 +3067,7 @@ function wipeUser(uid) {
   // کارت‌هایی را که قبلاً دیده دوباره بگیرد و تستِ کارتِ روز عملاً قفل می‌شود.
   // `chat_messages` هم پاک می‌شود (دیتای کاربرمحور). ⚠️ `llm_usage` عمداً نه: دفترِ
   // هزینه است نه دیتای کاربر، و ریستِ تستیِ ادمین نباید تاریخچه‌ی هزینه را قیچی کند.
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id'],['chat_messages','user_id'],['receipt_analyses','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id'],['chat_messages','user_id'],['receipt_analyses','user_id'],['receipt_tags','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -4443,6 +4486,30 @@ registerJourney(bot, {
   isAdmin: isTester,
   isButtonLabel: (t) => KB_LABELS.has(t),
   redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
+});
+
+/* 🏷 فازِ ۶: دکمه‌های تگِ رسید (`tg:`) **قبل از همه‌ی گاردهای فلو** رسیدگی می‌شوند. تگ‌زدن
+ * کارِ مدیریتیِ مالک روی پیامِ رسیدِ یک کاربرِ دیگر است و هیچ ربطی به فلوی شخصیِ خودِ مالک
+ * (گفتگوی باز، فاکتورِ باز) ندارد؛ بدونِ این، گاردِ «فلوی باز» تپِ تگ را می‌گرفت.
+ * برای بقیه‌ی دکمه‌های همان پیام (تأیید/رد/…)، `editMessageReplyMarkup` طوری پیچیده می‌شود
+ * که ردیف‌های تگ حفظ شوند: هر هندلرِ اکشن کیبورد را عوض یا کامل پاک می‌کند، و بدونِ این
+ * لایه تگ‌زدن بعد از اولین تصمیم از روی پیام محو می‌شد. فقط برای مالک و فقط وقتی پیام واقعاً
+ * ردیفِ تگ دارد؛ برای هر کسِ دیگری این middleware کاملاً شفاف است. */
+bot.use(async function receiptTagGate(ctx, next) {
+  const data = ctx.callbackQuery?.data;
+  if (typeof data === 'string' && data.startsWith('tg:')) {
+    try { await handleTagCallback(ctx, data); }
+    catch (e) { logErr('tag cb:', e.message); await ctx.answerCbQuery('❌').catch(() => {}); }
+    return;
+  }
+  try {
+    const mk = ctx.callbackQuery?.message?.reply_markup;
+    if (mk && ctx.from?.id === OWNER_ID && RT.hasTagRows(mk)) {
+      const orig = ctx.editMessageReplyMarkup.bind(ctx);
+      ctx.editMessageReplyMarkup = (m) => orig(RT.preserveTagRows(mk, m));
+    }
+  } catch (e) { logErr('tag preserve:', e.message); }
+  return next();
 });
 
 /* 🚪 تک‌نقطه‌ی خروج از گفتگو (v3.84.0).
@@ -9923,18 +9990,122 @@ const ownerCopyHeader = (p, card = null) => {
   const c = card || cardOfPayment(p);
   return `ℹ️ کپیِ اطلاعاتی · کارتِ ${c.bank || c.holder} (…${String(c.number).slice(-4)}) · ادمین ${c.admin_id}\n\n`;
 };
+/* 🏷 فازِ ۶ (v3.128.0): تگِ دستیِ اپ/بانک، فقط روی پیام‌های رسیدِ **مالک**.
+ * متن‌ها و کیبورد از ماژولِ خالصِ `receipt-tags.js` (`RT`) می‌آیند؛ این‌جا فقط سیم‌کشی به DB است.
+ * statementها lazy و **جدا** از `cardSt()` اند (درسِ فازِ ۵): یک prepareِ شکست‌خورده این‌جا
+ * نباید کلِ دسته‌ی کارت‌ها را بشکند، و برعکس. */
+const tagsOn = () => RECEIPT_TAGS_ENABLED && !starsRail;
+let _tagSt = null;
+const tagSt = () => _tagSt || (_tagSt = {
+  values: db.prepare('SELECT dim, key, label, active, sort FROM tag_values ORDER BY dim, sort, rowid'),
+  ofPayment: db.prepare('SELECT payment_id, dim, value_key, source FROM receipt_tags WHERE payment_id=?'),
+  // سابقه فقط از رسیدهای **ردنشده** (پاسخِ مالک): ردشده و برگشت‌خورده (رسیدِ فیک) شمرده نمی‌شوند.
+  ofUser: db.prepare(`SELECT t.payment_id, t.dim, t.value_key, t.source FROM receipt_tags t
+    JOIN payments p ON p.id = t.payment_id WHERE t.user_id=? AND p.status NOT IN ('rejected','reversed')`),
+  set: db.prepare(`INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source, by_id)
+    VALUES (?,?,?,?,'admin',?) ON CONFLICT(payment_id, dim, source)
+    DO UPDATE SET value_key=excluded.value_key, by_id=excluded.by_id, updated_at=unixepoch()`),
+  clear: db.prepare("DELETE FROM receipt_tags WHERE payment_id=? AND dim=? AND source='admin'"),
+  valueUpsert: db.prepare(`INSERT INTO tag_values (dim, key, label, active, sort) VALUES (?,?,?,1,
+    (SELECT COALESCE(MAX(sort),0)+1 FROM tag_values WHERE dim=?))
+    ON CONFLICT(dim, key) DO UPDATE SET label=excluded.label, active=1`),
+  valueActive: db.prepare('UPDATE tag_values SET active=? WHERE dim=? AND key=?'),
+});
+const tagValues = () => { try { return tagSt().values.all(); } catch (e) { logErr('tag values:', e.message); return []; } };
+/** برچسبِ خوانای یک مقدار؛ مقدارِ ناشناخته (مثلاً کلیدِ تگِ خودکارِ آینده) خودِ کلید را نشان می‌دهد. */
+function tagLabelFn(values = tagValues()) {
+  return (dim, key) => values.find((v) => v.dim === dim && v.key === key)?.label || key;
+}
+const curTagsOf = (pid) => {
+  try { return RT.effectiveTags(tagSt().ofPayment.all(pid))[pid] || {}; }
+  catch (e) { logErr('tags of payment:', e.message); return {}; }
+};
+/** خطِ «🏷 سابقه‌ی کاربر» (یا `''`). fail-safe: هیچ خطایی پیامِ رسید را نمی‌شکند. */
+function tagHistoryLineFor(uid, values = tagValues()) {
+  if (!tagsOn()) return '';
+  try { return RT.historyLine(RT.tagHistory(tagSt().ofUser.all(uid)), tagLabelFn(values)); }
+  catch (e) { logErr('tag history:', e.message); return ''; }
+}
+/** کیبوردِ پیامِ رسیدِ مالک = دکمه‌های اکشنِ خودش (اگر پیامِ کامل است) + ردیفِ جمع‌شده‌ی تگ. */
+function ownerReceiptMarkup(p, kb) {
+  if (!tagsOn() || !p?.id) return kb || null;
+  try { return RT.withTagRows(kb, RT.tagCollapsedRows(p.id, curTagsOf(p.id), tagLabelFn())); }
+  catch (e) { logErr('owner tag kb:', e.message); return kb || null; }
+}
+
+/** اجرای یک پلنِ تمیزشده‌ی `RT.planTagOp` روی DB — تک‌نقطه برای دکمه‌ی تلگرام و صفِ داشبورد.
+ *  `byId=0` یعنی داشبورد. عمداً **رویدادِ analytics نمی‌سازد**: این کارِ مالک است نه کاربر، و
+ *  رویدادی زیرِ `user_id`ِ کاربر فعالیتِ جعلی در قیف/تایم‌لاینش می‌ساخت؛ ردِ حسابرسی خودِ
+ *  ستون‌های `by_id`/`updated_at` و خطِ لاگِ `🏷 RECEIPT_TAG` است. */
+function applyTagPlan(a, byId, via) {
+  const s = tagSt();
+  if (a.t === 'set') s.set.run(a.pid, a.uid, a.dim, a.key, byId);
+  else if (a.t === 'clear') s.clear.run(a.pid, a.dim);
+  else if (a.t === 'value_add') s.valueUpsert.run(a.dim, a.key, a.label, a.dim);
+  else if (a.t === 'value_active') s.valueActive.run(a.active, a.dim, a.key);
+  else throw new Error(`tag plan ناشناخته: ${a.t}`);
+  log(`🏷 RECEIPT_TAG ${a.t} ${a.dim}${a.key ? '=' + a.key : ''}${a.pid ? ' pay#' + a.pid : ''} by=${byId} via=${via}`);
+}
+/** دکمه‌های `tg:` روی پیامِ رسیدِ مالک. `o` بازکردنِ فهرستِ یک بُعد، `s` انتخاب، `c` پاک‌کردن،
+ *  `x` بستن. هر تپ فقط **ردیف‌های تگ** را بازسازی می‌کند؛ دکمه‌های اکشنِ پرداخت دست نمی‌خورند. */
+async function handleTagCallback(ctx, data) {
+  const m = RT.TAG_CB.exec(data);
+  const answer = (t, alert = false) => ctx.answerCbQuery(t, alert ? { show_alert: true } : undefined).catch(() => {});
+  if (ctx.from?.id !== OWNER_ID || !m) return answer('🔒');
+  if (!tagsOn()) return answer('تگ‌زدن فعلاً خاموش است.');
+  const [, verb, pidS, dim, key] = m;
+  const pid = Number(pidS);
+  const p = stmts.getPayment.get(pid);
+  if (!p) return answer('پرداخت پیدا نشد.', true);
+  const values = tagValues();
+  const kb = ctx.callbackQuery?.message?.reply_markup;
+  const render = (rows) => ctx.editMessageReplyMarkup(RT.withTagRows(kb, rows)).catch(() => {});
+  const collapsed = () => RT.tagCollapsedRows(pid, curTagsOf(pid), tagLabelFn(values));
+  if (verb === 'x') { await answer(); return render(collapsed()); }
+  if (!dim) return answer('🔒');
+  if (verb === 'o') { await answer(); return render(RT.tagPickerRows(pid, dim, values, curTagsOf(pid)[dim]?.key)); }
+  const plan = RT.planTagOp(verb === 's' ? { op: 'set', dim, key } : { op: 'clear', dim }, { values, payment: p });
+  if (!plan.ok) return answer(plan.err, true);
+  applyTagPlan(plan.apply, OWNER_ID, 'bot');
+  await answer(`✅ ${plan.what}`);
+  return render(collapsed());
+}
+/** 🏷 اکشنِ صفِ داشبورد `receipt_tag`. پیامِ موفقیت نمی‌رود (مالک همین حالا خودش در داشبورد
+ *  زده)؛ فقط شکست به تلگرامِ مالک خبر داده می‌شود تا تغییرِ نانشسته بی‌صدا نماند. */
+async function applyQueuedTagOp(act) {
+  const tell = (msg) => bot.telegram.sendMessage(OWNER_ID, msg).catch(() => {});
+  if (!tagsOn()) {
+    logErr(`🏷 TAG_OP_REFUSED id=${act.id}: تگ‌زدن روی این ربات خاموش است`);
+    return tell('❌ تغییرِ تگ از داشبورد اجرا نشد: تگ‌زدن روی این ربات خاموش است.');
+  }
+  let op = null;
+  try { op = JSON.parse(act.note || ''); } catch { op = null; }
+  const payment = act.ref_id ? stmts.getPayment.get(act.ref_id) : null;
+  const plan = RT.planTagOp(op, { values: tagValues(), payment });
+  if (!plan.ok) {
+    logErr(`🏷 TAG_OP_REJECTED id=${act.id}: ${plan.err}`);
+    return tell(`❌ تغییرِ تگ از داشبورد اجرا نشد: ${plan.err}`);
+  }
+  if (plan.noop) return;
+  applyTagPlan(plan.apply, 0, 'dashboard');
+}
+
 /** ارسالِ یک پیامِ رسید به گیرنده‌هایش. پیامِ اولین گیرنده‌ی **کامل** برگردانده می‌شود
  *  (همان که قبلاً `adminMsg` بود و در `admin_message_id` می‌نشیند). کپشنِ عکس سقفِ ۱۰۲۴
  *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
 async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = null) {
   let first;
   const limit = photoFileId ? 1024 : 4096;
-  const sline = ownerShadowLine(p);
+  // 🔎 خطِ ایجنت (فازِ ۴) و 🏷 خطِ سابقه‌ی تگ (فازِ ۶) فقط روی پیامِ مالک، در یک دُمِ واحد
+  // که سقفِ کپشن هرگز نمی‌بُرد (`withShadowLine` از خودِ کپشن کم می‌کند نه از دُم).
+  const sline = [ownerShadowLine(p), tagHistoryLineFor(p?.user_id)].filter(Boolean).join('\n');
   for (const r of receiptRecipients(p, card)) {
     const base = r.full ? caption : (ownerCopyHeader(p, card) + caption);
-    // 🔎 خطِ ایجنت فقط روی پیامِ مالک (فازِ ۴)؛ برای بقیه کپشن بیت‌به‌بیت همان قبلی است.
+    // برای بقیه‌ی گیرنده‌ها کپشن بیت‌به‌بیت همان قبلی است.
     const cap = r.id === OWNER_ID ? withShadowLine(base, sline, limit) : (r.full ? caption : base.slice(0, limit));
-    const extra = r.full && kb ? { reply_markup: kb } : {};
+    // 🏷 ردیفِ تگ فقط روی پیامِ مالک (کامل یا کپی)؛ کپیِ اطلاعاتی بقیه‌ی دکمه‌ها را نمی‌گیرد.
+    const mk = r.id === OWNER_ID ? ownerReceiptMarkup(p, r.full ? kb : null) : (r.full ? kb : null);
+    const extra = mk ? { reply_markup: mk } : {};
     try {
       const sent = photoFileId
         ? await bot.telegram.sendPhoto(r.id, photoFileId, { caption: cap, ...extra })
@@ -9945,7 +10116,8 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = n
   // تورِ ایمنی: هیچ پیامِ کاملی نرسید ⟵ نسخه‌ی کامل با دکمه‌ها به مالک (یک بار).
   if (!first && receiptRecipients(p, card).some((r) => r.full && r.id !== OWNER_ID)) {
     const cap = withShadowLine(`⚠️ ادمینِ این کارت پیام را دریافت نکرد؛ تصمیم با شماست.\n\n${caption}`, sline, limit);
-    const extra = kb ? { reply_markup: kb } : {};
+    const mk = ownerReceiptMarkup(p, kb);
+    const extra = mk ? { reply_markup: mk } : {};
     try {
       first = photoFileId
         ? await bot.telegram.sendPhoto(OWNER_ID, photoFileId, { caption: cap, ...extra })
@@ -10896,6 +11068,9 @@ setInterval(async () => {
           // 💳 تغییرِ کارت از داشبورد (فازِ ۱c). پولی جابه‌جا نمی‌شود و پیامی به کاربر
           // نمی‌رود؛ فقط مالک خبر می‌گیرد (موفق یا ناموفق).
           await applyQueuedCardOp(act);
+        } else if (act.action === 'receipt_tag') {
+          // 🏷 تگِ رسید از داشبورد (فازِ ۶). پولی جابه‌جا نمی‌شود و پیامی به کاربر نمی‌رود.
+          await applyQueuedTagOp(act);
         } else if (act.action === 'unlock_reading') {
           // بازکردنِ دستیِ یک فالِ رزروشده: قیمتش اعتبار داده می‌شود و خودِ کاربر با دکمه‌ی
           // همیشگی بازش می‌کند — یعنی هیچ مسیرِ کسرِ جدیدی ساخته نمی‌شود (ریلِ پول تک‌منبع).

@@ -351,7 +351,7 @@ per زبان برای چندزبانه‌ها. ردیفِ تجمیعی می‌م
 | `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
 | `family` | «کدِ محصولش همان کدامست» — قیف و تایم‌لاین از این خوانده می‌شوند نه از کلید | خودِ کلید (tarot-intl: `tarot`) |
 | `receiptQueue` | ربات جدول `admin_actions` + sweep دارد؟ (دکمه‌ی تأیید/رد رسید از داشبورد فعال) | false (voice2text/tarot: true) |
-| `adminActions` | **فهرستِ کاملِ** اکشن‌هایی که sweepِ ربات واقعاً اجرا می‌کند — تک‌منبعِ مجوزِ صف‌کردن. هیچ صفحه‌ای حق ندارد نامی بیرون از این فهرست را enqueue کند | `[]` (voice2text: `approve,reject` · tarot و tarot-intl: هر هشت‌تا) |
+| `adminActions` | **فهرستِ کاملِ** اکشن‌هایی که sweepِ ربات واقعاً اجرا می‌کند — تک‌منبعِ مجوزِ صف‌کردن. هیچ صفحه‌ای حق ندارد نامی بیرون از این فهرست را enqueue کند | `[]` (voice2text: `approve,reject` · tarot و tarot-intl: فهرستِ کاملِ `lib/bots.js`، از جمله `card_update` و `receipt_tag`) |
 | `coinLegacyFloor` | مرزِ واحد در `payments.original_amount`: مقدارِ ≥ این عدد **تومانِ** دوره‌ی قبل است، کمتر **الماس**. `0`/نبود = این ربات هرگز دوره‌ی تومانی نداشته | 0 (tarot: ۱۰٬۰۰۰) |
 | `coinValue` | دیکودِ فرمتِ ذخیره‌سازیِ اعتبار (۱ الماس = چند واحدِ داخلی). **نرخِ تبدیل نیست** — قیمتِ هر الماس به بسته بستگی دارد | null (tarot: **۱** — بعد از مهاجرتِ الماس، `users.balance` خودِ تعدادِ الماس است) |
 
@@ -603,6 +603,19 @@ helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `to
   داده می‌شوند تا مالک بداند چیزی هنوز اجرا نشده.
 - **چکِ CI:** `tools/check-cards-page.mjs` (۲۵ ادعا، اجرای واقعی روی فیکسچرِ SQLite) +
   ردیفِ `routes/cards.js` در بخشِ ۳ی `check-credit-queue`.
+
+## 🏷 تگ‌های رسید (کارت در `/support/user` + اکشنِ صفِ `receipt_tag`، فازِ ۶ِ `bots/tarot/PAYMENT-V2-PLAN.md`)
+- کارتِ «🏷 تگ‌های رسید» زیرِ اقدام‌های پشتیبانیِ پروفایل (`routes/tags.js`): خطِ سابقه‌ی کاربر (همان
+  تعریفِ ربات: فقط رسیدهای غیرِ `rejected`/`reversed`)، ۱۵ رسیدِ آخر با انتخابِ اپ/بانک (🤖 = تگِ
+  خودکارِ فازِ ۷)، و افزودن/فعال‌وغیرفعالِ مقدارها. هیچ مقداری حذف نمی‌شود.
+- **صف، نه نوشتنِ مستقیم** (همان قراردادِ کارت‌ها): `POST /support/tag` ⟵ `RT.planTagOp` روی وضعیتِ
+  همین لحظه ⟵ ردیفِ `admin_actions` با `action='receipt_tag'`، `payment_id=0` (عمداً، تا قفلِ «یک
+  اقدام در صف»ِ اقدام‌های **پولیِ** همان پرداخت را نگیرد)، `ref_id`=پرداخت، `note`=شکلِ تمیز.
+  گاردها: `receiptTagsSupported(inst.bot)` قبل از INSERT (= پرچمِ `receiptTags` + اکشن در
+  `adminActions`)، مالکیتِ رسید، ضدِ دوبار enqueue per رسید، و `audit('support.tag')`.
+- `tarot-intl` اکشن را اعلام کرده (sweep همان کد است و صریح رد می‌کند) ولی پرچمِ کارت را ندارد.
+- **چکِ CI:** `tools/check-receipt-tags.mjs --part=dash` (سرتاسری روی یک فایل: داشبورد صف می‌کند،
+  sweepِ واقعیِ ربات اجرا) + ردیفِ `routes/tags.js` در بخشِ ۳ی `check-credit-queue`.
 
 ## 🧮 فلسفه‌ی هزینه (میراثِ صفحه‌ی حذف‌شده‌ی `/costs`، حالا در `/economics`)
 > سؤالِ صریحِ مالک: «این مقایسه چه لزومی داره؟ فلسفه‌ش چیه؟»
