@@ -319,7 +319,9 @@ const TEST_PHASE = false;
 //         دیگر گزینه‌ی «بی‌خیالش شو» را وعده نمی‌دهد. جزئیات: CLAUDE.md تاروت.
 // 3.116.0: 🎁 پیشنهادِ پایانی در همه‌ی جواب‌های گفتگو (از جوابِ اولِ رایگان) + 🛟 حرفِ
 //         آسیب/اورژانس فقط با نشانه‌ی صریحِ خطر از خودِ کاربر. جزئیات: CLAUDE.md تاروت.
-const PRODUCT_VERSION = '3.118.0';
+// 3.119.0: 💰 بازوی `basic_20` برای آزمایشِ تازه‌ی `price_ladder_p5_basic_20` (۱۵k در برابرِ
+//         ۲۰k)؛ تا از داشبورد/Ops running نشود رفتار دقیقاً همان کنترل است.
+const PRODUCT_VERSION = '3.119.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -986,6 +988,16 @@ const PRICE_LADDERS = {
     { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },
     { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 },
   ],
+  /* 🆕 `basic_20` (`price_ladder_p5_basic_20`، v3.119.0) — دنباله‌ی p4: ۲۵k هم در نرخ
+   * و هم در درآمد به ۱۵k باخت (۱۴۰۵/۰۷/۰۴)، پس مالک نقطه‌ی میانی را می‌سنجد. باز هم
+   * فقط basic عوض می‌شود؛ کنترل همان کاتالوگِ زنده (۱۵k). کلیدِ **تازه** عمدی است:
+   * انتسابِ p5 با هشِ `uid:price_ladder_p5_basic_20` از p4 کاملاً مستقل است، پس
+   * کسانی که ۲۵k را دیدند به‌طورِ مساوی بینِ دو بازوی تازه پخش می‌شوند. */
+  basic_20: [
+    { key: 'basic', emoji: '🥉', coins: 5,   toman: 20_000 },
+    { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },
+    { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 },
+  ],
 };
 
 /* 🔑 **دو کلید، نه یک کلید با وزنِ متغیر** — و این تصمیمِ روشیِ اصلیِ این PR است.
@@ -1020,7 +1032,7 @@ const PRICE_LADDERS = {
  * `bulk` (بالا) را در برابرِ `control` می‌سنجد: به‌جای ارزان‌ترکردنِ تومان، حجمِ
  * الماسِ بسته‌های میانی/بالا چند برابر شد. چون کلیدش جداست، شروعش هیچ اثری روی
  * تصمیمِ ثبت‌شده‌ی فازِ ۲ (که هنوز `not started` است) ندارد. */
-const PRICE_EXPERIMENTS = ['price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
+const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
 let _priceExpStmt = null;
 let _priceExpCache = { at: 0, key: null };
 /* کلیدِ آزمایشِ قیمتی که همین حالا زنده است (یا null). کشِ ۶۰ثانیه‌ای عمداً هم‌اندازه‌ی

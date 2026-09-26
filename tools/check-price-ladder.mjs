@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` تا `price_ladder_p4_basic_25`،
+// 💰 چکِ آزمایشِ نردبانِ قیمت (`price_ladder_p1` تا `price_ladder_p5_basic_20`،
 // v3.80.0 + v3.94.0 + v3.112.0).
 //
 // چرا این فایل هست: تا امروز قیمت یک **ثابت** بود و `COIN_PACKAGES` تنها منبعش. از این
@@ -57,7 +57,7 @@ const parsePacks = (block) => [...(block || '').matchAll(
     toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4],
   }));
 
-console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 تا price_ladder_p4_basic_25)\n');
+console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 تا price_ladder_p5_basic_20)\n');
 
 /* ══ ۰) بریدنِ بلوکِ منطق از سورس ═══════════════════════════════════════════
  * یک ناحیه‌ی پیوسته: از تعریفِ نردبان‌ها تا آخرین helper. هرچه این ناحیه کوچک‌تر
@@ -87,7 +87,7 @@ const M = build();
 /* ══ ۱) نردبان‌ها، و control یک **ارجاع** است نه یک کپی ═══════════════════ */
 console.log('\n۱) پنج نردبان');
 const arms = Object.keys(M.PRICE_LADDERS);
-ok(arms.join(',') === 'control,floor,cheap,bulk,basic_25', `پنج بازو تعریف شده: ${arms.join(', ')}`);
+ok(arms.join(',') === 'control,floor,cheap,bulk,basic_25,basic_20', `شش بازو تعریف شده: ${arms.join(', ')}`);
 // ⚠️ اگر control یک **کپیِ دستی** از قیمت‌ها باشد، اولین تغییرِ قیمتِ آینده فقط یکی از
 // آن دو را عوض می‌کند و بازوی کنترل بی‌صدا از محصول جدا می‌شود (بند ۲ج/۴: کنترل =
 // رفتارِ قبلی، نه «چیزی که روزی رفتارِ قبلی بود»).
@@ -137,6 +137,13 @@ ok(basic_25[0].toman === 25_000 && control[0].toman === 15_000,
   'control ⟶ basic_25: فقط basic از ۱۵k به ۲۵k می‌رود');
 ok(JSON.stringify(bare(basic_25.slice(1))) === JSON.stringify(bare(control.slice(1))),
   'control ⟶ basic_25: ویژه و جادویی بیت‌به‌بیت همان کنترل‌اند');
+const { basic_20 } = M.PRICE_LADDERS;
+ok(JSON.stringify(basic_20.map(p => p.coins)) === JSON.stringify(control.map(p => p.coins)),
+  'control ⟶ basic_20: تعدادِ الماسِ هر سه بسته دست‌نخورده است');
+ok(basic_20[0].toman === 20_000 && control[0].toman === 15_000,
+  'control ⟶ basic_20: فقط basic از ۱۵k به ۲۰k می‌رود');
+ok(JSON.stringify(bare(basic_20.slice(1))) === JSON.stringify(bare(control.slice(1))),
+  'control ⟶ basic_20: ویژه و جادویی بیت‌به‌بیت همان کنترل‌اند');
 
 /* 🆕 `bulk` (price_ladder_p3): فرضیه‌اش «حجمِ الماسِ بیشتر در بسته‌های میانی/بالا»
  * است، نه تومانِ کمتر. تنها متغیرِ کنترل‌شده‌اش این است که بسته‌ی اول (basic) عمداً
@@ -157,9 +164,9 @@ ok(Number.isFinite(MIN_RECHARGE) && lowest >= MIN_RECHARGE,
 
 /* ══ ۳) رفتار: بازو روی SQLite واقعی ═════════════════════════════════════ */
 console.log('\n۳) رفتارِ priceArm (روی shared/ab.js واقعی)');
-const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3', P4 = 'price_ladder_p4_basic_25';
-ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P4, P3, P2, P1]),
-  'فازِ جدیدتر اولِ فهرست است (اولویت با p4)');
+const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3', P4 = 'price_ladder_p4_basic_25', P5 = 'price_ladder_p5_basic_20';
+ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P5, P4, P3, P2, P1]),
+  'فازِ جدیدتر اولِ فهرست است (اولویت با p5)');
 
 function freshDb() {
   const db = new Database(':memory:');
@@ -258,6 +265,20 @@ let splitP1 = null;
     ? m.shopPackages(u)[0].toman === 25_000
     : m.shopPackages(u)[0].toman === 15_000)),
   'و فقط قیمتِ basic بین دو بازوی p4 فرق دارد');
+  db.close();
+}
+
+{ // p5 بر همه‌ی آزمایش‌های قیمتِ قبلی (از جمله p4ِ هنوز running) مقدم است
+  const db = freshDb();
+  startExp(db, P4, 'running', [{ key: 'control', weight: 50 }, { key: 'basic_25', weight: 50 }]);
+  startExp(db, P5, 'running', [{ key: 'control', weight: 50 }, { key: 'basic_20', weight: 50 }]);
+  const m = build({ db });
+  const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
+  ok(uniq.join(',') === 'basic_20,control', `p5 running → فقط control/basic_20 دیده می‌شود (${uniq.join(', ')})`);
+  ok(UIDS.every(u => (m.priceArm(u) === 'basic_20'
+    ? m.shopPackages(u)[0].toman === 20_000
+    : m.shopPackages(u)[0].toman === 15_000)),
+  'و فقط قیمتِ basic بین دو بازوی p5 فرق دارد (۲۰k در برابرِ ۱۵k)');
   db.close();
 }
 
@@ -421,8 +442,8 @@ const mutate = (from, to) => {
   startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
   startExp(db, P1, 'running', W5050);
   const src = REGION.replace(
-    "const PRICE_EXPERIMENTS = ['price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
-    "const PRICE_EXPERIMENTS = ['price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1', 'price_ladder_p4_basic_25'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1', 'price_ladder_p4_basic_25'];",
   );
   const m = src === REGION ? null : build({ src, db });
   ok(m && !new Set(UIDS.map(u => m.priceArm(u))).has('basic_25'),
