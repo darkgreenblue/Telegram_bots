@@ -326,7 +326,10 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.121.0';
+// 3.122.0: 🔁 هیچ تپِ غیرناوبری دیگر انصرافِ الماس‌سوز نمی‌سازد: تپِ تکراریِ قدمِ قبلی
+//         (#411)، تپِ دوباره روی اندازه‌ی همین فال (فقط toast)، و متن/ویسِ بعد از ثبتِ
+//         سؤال (یک خطِ صادقانه + همان قدم). تیکتِ #TRT-1957801074. جزئیات: CLAUDE.md تاروت.
+const PRODUCT_VERSION = '3.122.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -3423,6 +3426,26 @@ function readingFlowAllowsCallback(state, data) {
   return false;
 }
 
+/* 🔁 تپِ دوباره روی دکمه‌ی اندازه‌ی **همین** فال، وقتی الماسش کم شده و منتظرِ سؤالیم.
+ *
+ * 🐛 باگِ واقعی (هم‌خانواده‌ی تیکتِ #TRT-1957801074): تپِ اولِ `spread:<id>` الماس را کم
+ * می‌کند و استیت را `await_question` می‌کند؛ نسخه‌ی تکراریِ همان تپ (دوبار-تپ یا تحویلِ
+ * دوباره‌ی تلگرام) پشتِ صفِ per کاربر بعد از آن می‌رسد و گاردِ «ادامه یا انصراف» می‌گرفت.
+ * کاربری که فقط یک بار «می‌خواهم» گفته بود، یک دکمه‌ی انصرافِ **الماس‌سوز** جلویش می‌دید.
+ * این ترکِ فلو نیست، همان تصمیم است؛ پس فقط یک toast می‌گیرد و هیچ چیزی عوض نمی‌شود.
+ * اندازه‌ی **دیگر** عمداً بیرون است: آن تغییرِ نظر است و همان گارد درست است. */
+function sameSpreadRetap(state, data, sessionSpreadId) {
+  if (state !== 'await_question' || !sessionSpreadId) return false;
+  const m = /^spread:(\w+)$/.exec(data || '');
+  return !!m && m[1] === sessionSpreadId;
+}
+
+/* ✍️ متن یا ویسِ آزاد **بعد از** ثبتِ سؤال (نفس، بُر، انتخابِ کارت). کاربر معمولاً دارد
+ * سؤالش را در چند پیام کامل می‌کند، نه اینکه فلو را ترک کند؛ ولی تا v3.122.0 همین متن
+ * گاردِ «ادامه یا انصراف» می‌گرفت و انصراف الماسِ کم‌شده را می‌سوزاند. حالا همان قدمِ
+ * جاری دوباره جلویش می‌آید، با یک خطِ صادقانه که سؤالش ثبت شده است. */
+const POST_QUESTION_STATES = new Set(['breathing', 'shuffling', 'picking']);
+
 // تنها callbackهایی که درونِ همان پرداخت حرکت می‌کنند. `pay_exit` تنها خروجِ صریح است.
 function paymentFlowAllowsCallback(state, data) {
   if (!data) return false;
@@ -3504,6 +3527,10 @@ async function blockCrossFlowCallback(ctx) {
     // همان کاربرانی که پیام برایشان فرستاده شد به‌جای فال گاردِ «هنوز کامل نشده» می‌گرفتند.
     const rv = state === 'revealing' && /^rview:(\d+)$/.exec(data);
     if (rv && Number(rv[1]) === getSession(uid)?.readingId) return false;
+    if (sameSpreadRetap(state, data, getSession(uid)?.spreadId)) {
+      await ctx.answerCbQuery(L.reading.sameSpreadRetap).catch(() => {});
+      return true;
+    }
     if (readingFlowAllowsCallback(state, data)) return false;
     await ctx.answerCbQuery().catch(() => {});
     if (wanted) setIntent(uid, wanted.key, wanted.arg);
@@ -10868,6 +10895,12 @@ bot.on('text', async (ctx) => {
     // کن») که فقط دکمه‌ی بازگشت داشت، در حالی که هر جای دیگرِ ربات برای همین موقعیت
     // پیامِ «یه فالِ باز داری» با دو دکمه‌ی ادامه/انصراف را می‌داد. حالا هر دو مسیر از
     // همان یک گارد رد می‌شوند.
+    // ✍️ به‌جز متنِ بعد از ثبتِ سؤال: آن ادامه‌ی همان سؤال است نه ترکِ فلو (بالای
+    // `POST_QUESTION_STATES`)، پس دکمه‌ی انصرافِ الماس‌سوز نمی‌گیرد.
+    if (POST_QUESTION_STATES.has(state)) {
+      await ctx.reply(L.reading.questionAlreadyTaken);
+      return resendCurrentStep(ctx, uid);
+    }
     if (await blockDuringOpenReading(ctx)) return;
     // `choose_spread` فلوی باز **نیست**: فقط کاتالوگ روی صفحه است و هیچ فالی رزرو نشده،
     // پس نه گارد لازم دارد نه پیامِ خطا. کاتالوگ دوباره نشان داده می‌شود تا کاربر به‌جای
@@ -10905,6 +10938,17 @@ bot.on(['voice', 'audio'], async (ctx) => {
   // که وسطِ گفتگو ویس بفرستد هیچ جوابی نمی‌گرفت و فکر می‌کرد ربات خراب است. رایگان.
   if (getState(uid) === 'chatting' && !CHAT_VOICE) {
     return ctx.reply(L.chat.voiceOnly, { parse_mode: 'Markdown' });
+  }
+  // ✍️ ویسِ دوم بعد از ثبتِ سؤال تا امروز **بی‌صدا** دور ریخته می‌شد؛ کاربر فکر می‌کرد
+  // ربات گیر کرده. همان رفتارِ متن را می‌گیرد: سؤالت ثبت شده، از همین قدم ادامه بده.
+  if (POST_QUESTION_STATES.has(getState(uid))) {
+    try {
+      await ctx.reply(L.reading.questionAlreadyTaken);
+      return await resendCurrentStep(ctx, uid);
+    } catch (e) {
+      logErr('voice post-question:', e.message);
+      return;
+    }
   }
   if (getState(uid) !== 'await_question') return;
   try {

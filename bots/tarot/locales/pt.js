@@ -837,6 +837,10 @@ export default {
     openReadingGuard: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela ou deixar pra lá?',
     deliverGuard: 'Sua leitura ainda não terminou 🌙\n\nToque no botão abaixo pra continuar de onde ela parou:',
     openReadingGuardPaid: 'Você tem uma leitura aberta que não terminou 🌙\n\nQuer continuar aquela?\n\n⚠️ Se cancelar, os diamantes descontados não voltam.\n\nTem certeza que quer cancelar?',
+    // 🔁 تپِ دوباره روی دکمه‌ی اندازه‌ی همین فال (toast، سقفِ ۲۰۰ کاراکتر).
+    sameSpreadRetap: 'A sua leitura já começou ✨ Agora escreva a sua pergunta ou mande um áudio.',
+    // ✍️ متن/ویسِ بعد از ثبتِ سؤال؛ بعدش همان قدمِ جاری دوباره می‌آید.
+    questionAlreadyTaken: 'A sua pergunta já ficou guardada e a sua leitura parte dela 🌙\n\nVamos seguir daqui 👇',
     stuckReading: (canCancel) => 'Você tem uma leitura que ficou pela metade! 🌙\n\nAs suas cartas continuam te esperando; volta nelas quando quiser.'
       + (canCancel ? '\n\n💎 Se não quiser mais, é só cancelar; só lembra que os diamantes não voltam.' : ''),
   },
