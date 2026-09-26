@@ -351,6 +351,9 @@ console.log('\n▶ ۱۰) پرداختِ حساب‌های تستی از درآم
         if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue;
         if (!/successStatus\}'|status='approved'/.test(line)) continue;
         if (/testUserClause|revenueWhere|rw\.where/.test(line)) continue;
+        // معافیتِ صریح و نام‌دار: شمارشی که درآمد نیست و **باید** با ربات یکی بماند (سقفِ روزانه‌ی
+        // کارت: پولِ حسابِ تستی هم روی همان کارت نشسته، پس حذفش سقف را دروغ می‌کرد).
+        if (/\/\/ not-revenue: /.test(line)) continue;
         miss.push(`${f}: ${line.trim().slice(0, 70)}`);
       }
     }

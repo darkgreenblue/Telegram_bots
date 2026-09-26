@@ -579,6 +579,12 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-cards-admin.mjs
 
+      # 🔄 چرخشِ روزانه‌ی کارت + سقفِ روزانه (v3.124.0): مرزِ روز ۰۶:۰۰ تهران، نوبتِ کاربرِ تازه
+      # بینِ کارت‌های عادی، چسبندگیِ روزانه، سقف = پرداختِ تأییدشده‌ی امروز، همه پر ⟵ سفید.
+      - name: Card rotation check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-rotation.mjs
+
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/
       # یک آیتم بودنِ prices و اینکه amount خودِ تعدادِ استارز است نه سِنت)، شکستنِ نسبتِ

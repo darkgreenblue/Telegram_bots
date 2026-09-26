@@ -112,22 +112,30 @@ export function canMakeWhite(cards, id) {
 
 const kindFa = (k) => (k === 'white' ? 'سفید' : 'عادی');
 const adminFa = (id, ownerId) => `${id}${Number(id) === Number(ownerId) ? ' (شما)' : ''}`;
-const capFa = (n) => (Number(n) > 0 ? `${n} پرداختِ تأییدشده (هنوز اعمال نمی‌شود)` : 'ندارد');
+const capFa = (n) => (Number(n) > 0 ? `${n} پرداختِ تأییدشده در روز` : 'ندارد');
+
+/** مصرفِ امروز (فازِ ۲). `used` اختیاری است: بدونش خط ساخته نمی‌شود و متن بیت‌به‌بیت قبلی است. */
+const usedLine = (c, used) => {
+  if (!used) return null;
+  const u = Number(used.get?.(c.id)) || 0;
+  return `امروز: ${u} پرداختِ تأییدشده${capFull(c, u) ? ' · 🔴 سقف پر شد' : ''}`;
+};
 
 /** یک کارت، چندخطی. */
-export function cardBlock(c, ownerId) {
+export function cardBlock(c, ownerId, used) {
   return [
     `${c.active ? '✅' : '⏸'} ${kindFa(c.kind)} · ${c.bank || 'بدونِ نامِ بانک'}`,
     fmtCardNo(c.number),
     `${c.holder}`,
     `ادمین: ${adminFa(c.admin_id, ownerId)} · ترتیب: ${c.sort} · سقفِ روزانه: ${capFa(c.daily_cap)}`,
-  ].join('\n');
+    usedLine(c, used),
+  ].filter((x) => x !== null).join('\n');
 }
 
 /** صفحه‌ی فهرست. */
-export function listText(cards, ownerId) {
+export function listText(cards, ownerId, used) {
   if (!cards.length) return '💳 کارت‌های پرداخت\n\nهنوز هیچ کارتی نیست.';
-  const body = cards.map((c, i) => `${i + 1}) ${cardBlock(c, ownerId)}`).join('\n\n');
+  const body = cards.map((c, i) => `${i + 1}) ${cardBlock(c, ownerId, used)}`).join('\n\n');
   return `💳 کارت‌های پرداخت\n\n${body}\n\n✅ فعال · ⏸ غیرفعال. برای ویرایش روی کارت بزن.`;
 }
 
@@ -136,8 +144,8 @@ export const cardButtonLabel = (c, i) =>
   `${c.active ? '✅' : '⏸'} ${i + 1}) ${c.bank || c.holder} …${String(c.number).slice(-4)}`;
 
 /** صفحه‌ی یک کارت. */
-export function viewText(c, ownerId) {
-  return `💳 کارتِ #${c.id}\n\n${cardBlock(c, ownerId)}\n\n`
+export function viewText(c, ownerId, used) {
+  return `💳 کارتِ #${c.id}\n\n${cardBlock(c, ownerId, used)}\n\n`
     + 'شماره‌ی کارت ویرایش نمی‌شود؛ برای شماره‌ی تازه، کارتِ جدید بساز و این یکی را غیرفعال کن.';
 }
 
@@ -203,6 +211,51 @@ export function planCardOp(op, cards) {
       what: `${FIELD_LABEL[op.field]} ⟵ ${r.value === '' ? '(خالی)' : r.value} (${last4(c.number)})` };
   }
   return { ok: false, err: 'دستورِ ناشناخته' };
+}
+
+/* ═══ 🔁 چرخشِ روزانه و سقفِ روزانه (فازِ ۲ی PAYMENT-V2-PLAN) ═══
+ * تصمیمِ مالک: اولین کاربرِ هر روز (لحظه‌ی **صدورِ فاکتور**) کارتِ ۱ را می‌گیرد، دومی کارتِ
+ * ۲ و حلقه‌ای جلو؛ هر کاربر تا آخرِ همان روز روی کارتش می‌ماند؛ فردا دوباره از کارتِ ۱.
+ * مرزِ «روز» نیمه‌شب نیست، ۰۶:۰۰ تهران است (کم‌کارترین ساعت). سقفِ روزانه = تعدادِ
+ * پرداخت‌های **تأییدشده** روی آن کارت در همان «روز»؛ کارتِ پر از چرخه بیرون می‌رود.
+ * همه‌چیز این‌جا خالص است تا چکِ CI بدونِ DB و بدونِ تلگرام اجرایش کند. */
+export const CARD_DAY_BOUNDARY_H = 6;
+export const CARD_TZ = 'Asia/Tehran';
+/** کلیدِ «روزِ کارت» برای یک لحظه (میلی‌ثانیه): تاریخِ تهرانِ `ms − ۶ساعت`، یعنی ۰۵:۵۹ هنوز دیروز است. */
+export function cardDay(ms = Date.now(), tz = CARD_TZ, boundaryH = CARD_DAY_BOUNDARY_H) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(Number(ms) - boundaryH * 3600_000));
+}
+/** سقفِ امروزِ کارت پر شده؟ سقفِ ۰ = بی‌سقف. */
+export const capFull = (c, approvedToday) =>
+  Number(c?.daily_cap) > 0 && Number(approvedToday || 0) >= Number(c.daily_cap);
+const usable = (c, used) => !!c && Number(c.active) === 1 && !capFull(c, used?.get?.(c.id));
+const byOrder = (cards) => [...(Array.isArray(cards) ? cards : [])]
+  .sort((a, b) => (Number(a.sort) - Number(b.sort)) || (Number(a.id) - Number(b.id)));
+
+/**
+ * کارتِ فاکتورِ تازه. ورودی: فهرستِ کارت‌ها، `used` = Map از id به تعدادِ تأییدشده‌ی امروز،
+ * `stickyId` = کارتی که این کاربر امروز گرفته (یا 0)، و `n` = چندمین کاربرِ چرخه‌ی امروز.
+ * خروجی `{ card, via }`:
+ *  - `sticky`: کاربر امروز کارت دارد و آن کارت هنوز فعال و زیرِ سقف است ⟵ همان.
+ *  - `rotation`: کارتِ عادیِ فعالِ زیرِ سقف، به نوبت (`n % تعداد`).
+ *  - `white`: همه‌ی عادی‌ها پر یا خاموش‌اند ⟵ اولین کارتِ سفیدِ فعالِ زیرِ سقف.
+ *  - `overflow`: همه پرند ⟵ اولین کارتِ عادیِ فعال (فاکتور هرگز بی‌کارت نمی‌ماند؛
+ *    سقف یک ترجیح است، نه دیوار).
+ *  - `none`: هیچ کارتِ فعالی نیست ⟵ `card=null` (صداکننده به فالبکِ قدیمی می‌رود).
+ */
+export function pickDailyCard({ cards, used = new Map(), stickyId = 0, n = 0 } = {}) {
+  const list = byOrder(cards);
+  const sticky = stickyId ? list.find((c) => c.id === Number(stickyId)) : null;
+  if (usable(sticky, used)) return { card: sticky, via: 'sticky' };
+  const regular = list.filter((c) => c.kind === 'regular' && usable(c, used));
+  if (regular.length) {
+    const i = ((Math.floor(Number(n) || 0) % regular.length) + regular.length) % regular.length;
+    return { card: regular[i], via: 'rotation' };
+  }
+  const white = list.find((c) => c.kind === 'white' && usable(c, used));
+  if (white) return { card: white, via: 'white' };
+  const any = list.find((c) => Number(c.active) === 1 && c.kind === 'regular') || list.find((c) => Number(c.active) === 1);
+  return any ? { card: any, via: 'overflow' } : { card: null, via: 'none' };
 }
 
 /** مراحلِ افزودن، به ترتیب. نوع با دکمه انتخاب می‌شود نه متن. */

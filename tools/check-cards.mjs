@@ -75,6 +75,7 @@ const routing = region('const LEGACY_ADMINS_FULL', '\n// note: هشدارِ اخ
 const copyRow = /const cardCopyRow = [^\n]+/.exec(SRC)?.[0] || '';
 
 const OWNER = 111, SECOND = 222, OTHER = 333;
+const errs = [];
 function boot({ legacy = false, failTo = null } = {}) {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
@@ -86,7 +87,9 @@ function boot({ legacy = false, failTo = null } = {}) {
   } };
   const ADMIN_IDS = [OWNER, SECOND];
   const env = { CA, db, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
-    logErr: () => {}, invoiceNoOf: (p) => p.invoice_no || p.id };
+    logErr: (...a) => errs.push(a.join(' ')), invoiceNoOf: (p) => p.invoice_no || p.id,
+    // 🔄 فازِ ۲: چرخش واقعاً اجرا می‌شود (نه اینکه با ReferenceError بی‌صدا به فالبک بیفتد).
+    CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {} };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing.replace('const LEGACY_ADMINS_FULL = false', 'const LEGACY_ADMINS_FULL = true') : routing)}
     const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };
@@ -125,6 +128,8 @@ if (h) {
   const pid = Number(db.prepare('INSERT INTO payments (user_id, amount) VALUES (8, 60000)').run().lastInsertRowid);
   h.issueInvoiceCard(pid);
   ok(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 1, 'فاکتورِ تازه کارتِ عادیِ پیش‌فرض را می‌گیرد (نه سفید)');
+  ok(!errs.some((e) => /issueInvoiceCard/.test(e)) && db.prepare('SELECT via FROM card_assign WHERE user_id=8').get()?.via === 'rotation',
+    'کارت از مسیرِ چرخشِ فازِ ۲ آمد، نه از فالبکِ خطا');
   db.prepare("UPDATE cards SET sort=0 WHERE id=2").run();
   db.prepare("UPDATE cards SET kind='regular' WHERE id=2").run();
   h.issueInvoiceCard(pid);

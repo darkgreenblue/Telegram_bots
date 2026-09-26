@@ -125,13 +125,14 @@ ok(!/DELETE FROM cards/.test(CODE), 'هیچ مسیری (نه ربات نه صف)
 console.log('\nرفتاری:');
 const OWNER = 1000001, OTHER = 2000002, NEWADMIN = 3000003;
 const readers = region('let _cardSt = null;', '\nfunction defaultInvoiceCard()', { includeTo: false });
+const usedFn = region('function cardsUsedToday()', '\n/** روزِ کارتِ لحظه‌ی', { includeTo: false });
 const schema = region('db.exec(`\n  CREATE TABLE IF NOT EXISTS cards', "VALUES ('cards_seed_1', unixepoch())\").run();\n})();")
   .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '6219861904145405';");
 const handlers = region('const caOnly = (fn) =>', '/* ---------- هندلر متن', { includeTo: false });
 
 function boot({ stars = false } = {}) {
   const db = new Database(':memory:');
-  db.exec('CREATE TABLE payments (id INTEGER PRIMARY KEY, card_id INTEGER NOT NULL DEFAULT 0)');
+  db.exec("CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT NOT NULL DEFAULT 'pending', card_id INTEGER NOT NULL DEFAULT 0)");
   const actions = [], hears = [], sent = [], events = [];
   const state = new Map(), sess = new Map();
   const bot = {
@@ -158,7 +159,7 @@ function boot({ stars = false } = {}) {
     track: (_d, u, e, pr) => events.push({ u, e, pr }), log: () => {}, logErr: () => {},
     editOrSend: async (ctx, text, rows) => ctx.reply(text, Markup.inlineKeyboard(rows)),
   };
-  const body = `${readers}\n${schema}\n${handlers}\nreturn { cardSt, handleCardInput, applyQueuedCardOp };`;
+  const body = `${readers}\n${usedFn}\n${schema}\n${handlers}\nreturn { cardSt, handleCardInput, applyQueuedCardOp };`;
   const out = new Function(...Object.keys(env), body)(...Object.values(env));
   return { ...out, db, actions, hears, sent, events, state, sess };
 }

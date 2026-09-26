@@ -55,6 +55,19 @@ export function cardsBody(url) {
       ? rows(db, "SELECT props, created_at FROM events WHERE event='card_changed' ORDER BY id DESC LIMIT 20")
       : [];
 
+    // 🔄 مصرفِ امروزِ هر کارت (v3.124.0): همان شمارشی که ربات برای سقف و چرخش می‌خواند —
+    // پرداخت‌های **تأییدشده** با `approved_day` = روزِ کارتِ امروز (مرزِ ۰۶:۰۰ تهران).
+    const today = CA.cardDay();
+    const hasDay = rows(db, "SELECT 1 FROM pragma_table_info('payments') WHERE name='approved_day'").length > 0;
+    const usedToday = new Map(hasDay ? rows(db,
+      "SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_day=? AND card_id>0 GROUP BY card_id", // not-revenue: همان شمارشِ سقفِ ربات
+      [today]).map((r) => [r.card_id, r.c]) : []);
+    const capCell = (c) => {
+      const u = usedToday.get(c.id) || 0;
+      if (!(Number(c.daily_cap) > 0)) return `${fmt(u)} <span class="muted">امروز · بی‌سقف</span>`;
+      return `${fmt(u)} از ${fmt(c.daily_cap)}${CA.capFull(c, u) ? ' <b>(پر شد)</b>' : ''}`;
+    };
+
     const bodyRows = cards.map((c) => [
       `#${c.id}`,
       c.active ? '✅ فعال' : '⏸ غیرفعال',
@@ -64,7 +77,7 @@ export function cardsBody(url) {
       esc(c.holder),
       `<span class="mono">${esc(c.admin_id)}</span>`,
       fmt(c.sort),
-      Number(c.daily_cap) > 0 ? `${fmt(c.daily_cap)} <span class="muted">(هنوز اعمال نمی‌شود)</span>` : '<span class="muted">ندارد</span>',
+      capCell(c),
       cardActions(bot, c),
     ]);
 
@@ -79,10 +92,13 @@ export function cardsBody(url) {
       }), 'هنوز تغییری ثبت نشده')}</div>`;
 
     return head + `<div class="card">${cardHead('📋 کارت‌ها')}
-        ${table(['#', 'وضعیت', 'نوع', 'بانک', 'شماره', 'صاحب کارت', 'ادمین', 'ترتیب', 'سقفِ روزانه', 'اقدام'],
+        ${table(['#', 'وضعیت', 'نوع', 'بانک', 'شماره', 'صاحب کارت', 'ادمین', 'ترتیب', `مصرفِ امروز / سقف (${esc(today)})`, 'اقدام'],
           bodyRows, 'هیچ کارتی نیست')}
         <p class="muted">همیشه دستِ‌کم یک کارتِ <b>عادیِ فعال</b> لازم است؛ فاکتورِ تازه با آن صادر می‌شود.
-          رسیدِ هر فاکتور با دکمه‌ها فقط برای ادمینِ همان کارت می‌رود.</p></div>`
+          رسیدِ هر فاکتور با دکمه‌ها فقط برای ادمینِ همان کارت می‌رود.
+          <br>🔄 روزِ کارت از ساعتِ ۰۶:۰۰ تهران شروع می‌شود: اولین کاربرِ هر روز کارتِ عادیِ اول (به ترتیب)،
+          دومی کارتِ بعدی، و هر کاربر تا آخرِ همان روز روی کارتِ خودش می‌ماند. کارتی که به سقفِ
+          پرداخت‌های تأییدشده‌ی امروزش برسد از چرخش بیرون می‌رود؛ اگر همه‌ی عادی‌ها پر شوند، کارتِ سفید.</p></div>`
       + queuedHtml + addForm(bot) + historyHtml;
   }, head + `<div class="card"><p class="muted">دیتابیس در دسترس نیست.</p></div>`);
 }

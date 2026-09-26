@@ -327,7 +327,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.123.0';
+const PRODUCT_VERSION = '3.124.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -338,6 +338,12 @@ const SETTINGS_ENABLED = true;
 // صدا زده نمی‌شود، فقط `cardsAdminOn` (چکِ CI شمارشش را قفل کرده).
 const CARDS_ADMIN_ENABLED = true;
 const cardsAdminOn = (uid) => CARDS_ADMIN_ENABLED && !starsRail && Number(uid) === OWNER_ID;
+// 🔄 چرخشِ روزانه‌ی کارت + سقفِ روزانه (v3.124.0، فازِ ۲ِ `PAYMENT-V2-PLAN.md`). روزِ کارت از
+// ۰۶:۰۰ تهران شروع می‌شود (`CA.cardDay`). هر روز اولین کاربر کارتِ عادیِ اول، دومی کارتِ بعدی،
+// و هر کاربر تا آخرِ همان روز روی کارتِ خودش می‌ماند. کارتِ پرشده (تعدادِ پرداختِ **تأییدشده**
+// به `daily_cap` رسیده) از چرخش بیرون می‌رود؛ همه‌ی عادی‌ها پر ⟵ کارتِ سفید. `false` ⟵ دقیقاً
+// رفتارِ v3.123.0 (اولین کارتِ عادیِ فعال، بدونِ سقف). ربات‌های استارز هرگز وارد نمی‌شوند.
+const CARD_ROTATION_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -1224,6 +1230,14 @@ const cardSt = () => _cardSt || (_cardSt = {
   anyActive: db.prepare('SELECT * FROM cards WHERE active=1 ORDER BY sort, id LIMIT 1'),
   admins:   db.prepare('SELECT DISTINCT admin_id FROM cards WHERE active=1'),
   assign:   db.prepare('UPDATE payments SET card_id=? WHERE id=? AND card_id=0'),
+  // 🔄 فازِ ۲: چرخش، چسبندگیِ روزانه‌ی هر کاربر، و شمارشِ سقف.
+  assignGet: db.prepare('SELECT card_id FROM card_assign WHERE user_id=? AND day=?'),
+  assignSet: db.prepare('INSERT INTO card_assign (user_id, day, card_id, via) VALUES (?,?,?,?) '
+    + 'ON CONFLICT(user_id, day) DO UPDATE SET card_id=excluded.card_id, via=excluded.via'),
+  rotGet:   db.prepare('SELECT n FROM card_rotation WHERE day=?'),
+  rotInc:   db.prepare('INSERT INTO card_rotation (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n=n+1'),
+  usedOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_day=? AND card_id>0 GROUP BY card_id"),
+  markDay:  db.prepare("UPDATE payments SET approved_day=? WHERE id=? AND approved_day=''"),
   // 💳 مدیریت (v3.123.0). ستونِ هر ویرایش از جدولِ ثابتِ `CA.EDITABLE` می‌آید، نه از ورودی.
   all:      db.prepare('SELECT * FROM cards ORDER BY sort, id'),
   insert:   db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)'),
@@ -1233,7 +1247,8 @@ const cardSt = () => _cardSt || (_cardSt = {
   upd: Object.fromEntries(Object.entries(CA.EDITABLE).map(([f, col]) =>
     [f, db.prepare(`UPDATE cards SET ${col}=?, updated_at=unixepoch() WHERE id=?`)])),
 });
-/** کارتی که فاکتورِ تازه با آن صادر می‌شود. فاز ۱: اولین کارتِ عادیِ فعال (چرخشِ روزانه فاز ۲). */
+/** کارتی که فاکتورِ تازه با آن صادر می‌شود **وقتی چرخش خاموش است** (رفتارِ v3.123.0) و فالبکِ
+ *  هر خطای مسیرِ چرخش: اولین کارتِ عادیِ فعال. */
 function defaultInvoiceCard() {
   try { return cardSt().default.get() || cardSt().anyActive.get() || LEGACY_CARD; }
   catch (e) { logErr('defaultInvoiceCard:', e.message); return LEGACY_CARD; }
@@ -1251,8 +1266,49 @@ const cardOfPid = (pid) => cardOfPayment(stmts.getPayment.get(pid));
  *  دوباره یا دوبار-تپ کارتِ فاکتور را عوض نمی‌کند. شکستش فاکتور را نمی‌شکند: `card_id`
  *  صفر می‌ماند و `cardOfPayment` همان کارتِ قدیمی را می‌دهد. */
 function issueInvoiceCard(paymentId) {
+  try {
+    if (CARD_ROTATION_ENABLED && !starsRail) {
+      const r = pickInvoiceCardTx()(paymentId);
+      if (r) {
+        log(`💳 CARD_PICK #${paymentId} card=${r.card.id} via=${r.via} day=${r.day}`);
+        track(db, r.uid, 'card_assigned', { payment_id: paymentId, card_id: r.card.id, via: r.via, day: r.day });
+        return;
+      }
+    }
+  } catch (e) { logErr('issueInvoiceCard rotation:', e.message); }
+  // چرخش خاموش، ربات استارز، یا خطا ⟵ همان رفتارِ v3.123.0. فاکتور هرگز بی‌کارت نمی‌ماند.
   try { const c = defaultInvoiceCard(); if (c.id) cardSt().assign.run(c.id, paymentId); }
   catch (e) { logErr('issueInvoiceCard:', e.message); }
+}
+/* 🔄 انتخابِ کارتِ روز در **یک تراکنش**: خواندنِ شمارنده، انتخاب، افزایشِ شمارنده و نشاندنِ
+ * کارت روی فاکتور یا همه با هم می‌نشینند یا هیچ‌کدام، پس دو فاکتورِ هم‌زمان یک نوبت را
+ * نمی‌گیرند. تصمیم کاملاً در `CA.pickDailyCard` (خالص، همان تابعی که چکِ CI اجرا می‌کند). */
+let _pickTx = null;
+const pickInvoiceCardTx = () => _pickTx || (_pickTx = db.transaction((pid) => {
+  const st = cardSt();
+  const p = stmts.getPayment.get(pid);
+  if (!p || p.card_id) return null;              // فاکتورِ ناموجود یا از قبل کارت‌دار: دست نمی‌زنیم
+  const day = CA.cardDay();
+  const sticky = st.assignGet.get(p.user_id, day);
+  const used = new Map(st.usedOn.all(day).map((r) => [r.card_id, r.c]));
+  const n = st.rotGet.get(day)?.n || 0;
+  const { card, via } = CA.pickDailyCard({ cards: st.all.all(), used, stickyId: sticky?.card_id || 0, n });
+  if (!card) return null;
+  if (via === 'rotation') st.rotInc.run(day);
+  if (!sticky || sticky.card_id !== card.id) st.assignSet.run(p.user_id, day, card.id, via);
+  if (st.assign.run(card.id, pid).changes !== 1) throw new Error('card_id already set');
+  return { card, via, day, uid: p.user_id };
+}));
+/** مصرفِ امروزِ هر کارت (برای نمایش در «💳 کارت‌ها»). خطا ⟵ `undefined` = بدونِ خطِ مصرف. */
+function cardsUsedToday() {
+  try { return new Map(cardSt().usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c])); }
+  catch (e) { logErr('cardsUsedToday:', e.message); return undefined; }
+}
+/** روزِ کارتِ لحظه‌ی **تأیید** روی پرداخت می‌نشیند (یک‌بار). سقفِ روزانه دقیقاً همین را می‌شمارد:
+ *  «پرداخت‌های تأییدشده‌ی امروزِ این کارت». شکستش هیچ تأییدی را نمی‌شکند. */
+function markApprovedDay(paymentId) {
+  try { cardSt().markDay.run(CA.cardDay(), paymentId); }
+  catch (e) { logErr('markApprovedDay:', e.message); }
 }
 // خطِ زیرِ شماره روی فاکتور. شکلِ کارتِ ۱ بیت‌به‌بیت همان `CARD_OWNER`ِ قبلی است.
 const cardOwnerLine = (c) => (c.bank ? `${c.holder} — ${c.bank}` : c.holder);
@@ -1925,7 +1981,7 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN stars_paid_amount INTEGER').ru
  *
  * `admin_id` ادمینِ کارت است: فقط او روی رسیدهای این کارت دکمه‌ی اکشن می‌گیرد. `kind`:
  * `regular` (عادی) یا `white` (سفید، مقصدِ تعویض/«نتوانستم واریز کنم» در فازهای ۳ و ۵).
- * `daily_cap` صفر یعنی بی‌سقف (سقف در فاز ۲ خوانده می‌شود). حذف نداریم، فقط `active=0`. */
+ * `daily_cap` صفر یعنی بی‌سقف؛ از v3.124.0 سقفِ پرداخت‌های تأییدشده‌ی هر روزِ کارت است. حذف نداریم، فقط `active=0`. */
 db.exec(`
   CREATE TABLE IF NOT EXISTS cards (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1942,6 +1998,22 @@ db.exec(`
   );
 `);
 try { db.prepare('ALTER TABLE payments ADD COLUMN card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* 🔄 فازِ ۲ (v3.124.0): سه چیزِ افزایشی. `approved_day` = روزِ کارتِ لحظه‌ی تأیید (پایه‌ی سقف؛
+ * '' = قبل از این نسخه، پس هیچ پرداختِ قدیمی در سقفِ امروز شمرده نمی‌شود). `card_assign` = کارتِ
+ * هر کاربر در هر روز (چسبندگی). `card_rotation` = نوبتِ چرخشِ هر روز؛ روزِ تازه ردیف ندارد، پس
+ * خودبه‌خود از کارتِ اول شروع می‌شود و هیچ ریستِ زمان‌بندی‌شده‌ای لازم نیست. */
+try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEFAULT ''").run(); } catch {}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS card_assign (
+    user_id    INTEGER NOT NULL,
+    day        TEXT    NOT NULL,
+    card_id    INTEGER NOT NULL,
+    via        TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_id, day)
+  );
+  CREATE TABLE IF NOT EXISTS card_rotation (day TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0);
+`);
 /* دو کارتِ اولیه (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴): عادیِ فعلی و تنها کارتِ سفید، هر دو با ادمینِ
  * **مالک**. سید یک‌باره است و مهرش **داخلِ همان تراکنش** می‌خورد (درسِ v3.25.1)، پس
  * ری‌استارت هرگز کارتِ تکراری نمی‌سازد و کارتی که مالک بعداً غیرفعال کند برنمی‌گردد. */
@@ -9997,6 +10069,7 @@ function approvePayment(paymentId, allowRejected = false) {
   // می‌خواند. دو کپی از این حساب یعنی وعده‌ی فاکتور و واریزِ واقعی روزی واگرا می‌شوند.
   const bonus = creditForPayment(p) - creditAmount;
   stmts.setPaymentStatus.run('approved', paymentId);
+  markApprovedDay(paymentId);
   stmts.credit.run(creditAmount + bonus, p.user_id);
   track(db, p.user_id, EVENTS.PAYMENT_APPROVED, { payment_id: paymentId, amount: p.amount, credited: creditAmount + bonus });
   if (p.discount_code_id) {
@@ -10421,6 +10494,7 @@ setInterval(async () => {
           const p2 = stmts.getPayment.get(act.payment_id);
           if (p2 && ['pending', 'waiting_review', 'rejected', 'canceled'].includes(p2.status)) {
             stmts.setPaymentStatus.run('approved', p2.id);
+            markApprovedDay(p2.id);
             track(db, p2.user_id, EVENTS.PAYMENT_APPROVED,
               { payment_id: p2.id, amount: p2.amount, credited: 0, accounting: 1 });
           }
@@ -11001,14 +11075,14 @@ function clearCardInput(uid) {
 }
 async function showCardsList(ctx, edit = false) {
   const cards = cardsAll();
-  const text = CA.listText(cards, OWNER_ID);
+  const text = CA.listText(cards, OWNER_ID, cardsUsedToday());
   if (edit) return editOrSend(ctx, text, cardsListRows(cards));
   return ctx.reply(text, Markup.inlineKeyboard(cardsListRows(cards))).catch(() => {});
 }
 async function showCardView(ctx, id, edit = true, prefix = '') {
   const c = cardSt().byId.get(id);
   if (!c) return showCardsList(ctx, edit);
-  const text = prefix + CA.viewText(c, OWNER_ID);
+  const text = prefix + CA.viewText(c, OWNER_ID, cardsUsedToday());
   if (edit) return editOrSend(ctx, text, cardViewRows(c));
   return ctx.reply(text, Markup.inlineKeyboard(cardViewRows(c))).catch(() => {});
 }
