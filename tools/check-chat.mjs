@@ -562,7 +562,7 @@ console.log('\n▶ ۹) مسیرِ فال لمس نشده');
   ok(/export const CHAT_MODEL = \(process\.env\.CHAT_MODEL/.test(RC), 'مدلِ گفتگو قابلِ override است');
   ok(/CHAT_MODEL \|\| ''\)\.trim\(\) \|\| READING_MODEL/.test(RC),
     'و پیش‌فرضش **همان مدلِ خوانش** است (لحن یکسان، خواسته‌ی صریحِ مالک)');
-  ok(/const CHAT_PLAN\s+= \[CHAT_MODEL, CHAT_MODEL, FLASH, FALLBACK_MODEL\]/.test(RC),
+  ok(/const CHAT_PLAN\s+= \[CHAT_MODEL, CHAT_MODEL, FLASH, GEMINI3_FLASH, FALLBACK_MODEL\]/.test(RC),
     'زنجیره‌ی فالبک دارد (هیچ مسیرِ پولی بدونِ فالبک، بند ۹)');
 }
 

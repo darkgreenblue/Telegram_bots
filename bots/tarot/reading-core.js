@@ -430,7 +430,11 @@ export function orChat(system, user, opts = {}) {
  *
  * ⚠️ اگر `READING_MODEL` دوباره `FLASH` شود (رول‌بک)، این آرایه به چهار تلاشِ جمنای
  * به‌علاوه‌ی یک دیپ‌سیک تبدیل می‌شود. بی‌ضرر است و عمداً ساده نگه داشته شده. */
-export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH, FALLBACK_MODEL];
+/* 🔗 v3.121.0 (PAYMENT-V2-PLAN فازِ 0c): اوپن‌روتر برای `gemini-2.5-flash` تاریخِ حذفِ
+ * 2026-10-20 گذاشته، پس هر جا FLASH پله است، `GEMINI3_FLASH` بلافاصله بعدش می‌نشیند
+ * (تصمیمِ مالک: «فقط یک مدل بالاتر از خودش»). بعد از حذفِ FLASH، این پله خودکار جایش را
+ * می‌گیرد بدونِ اینکه زنجیره کوتاه شود. */
+export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH, GEMINI3_FLASH, FALLBACK_MODEL];
 
 /* 🗣 زنجیره‌ی **گفتگوی پس از فال** (v3.84.0).
  *
@@ -443,7 +447,7 @@ export const READING_PLAN = [READING_MODEL, READING_MODEL, READING_MODEL, FLASH,
  * است و `validate` فقط شکل را می‌سنجد، پس شکستِ تلاشِ اول تقریباً همیشه خرابیِ شبکه
  * است نه خرابیِ محتوا؛ تلاشِ سومِ همان مدل چیزی اضافه نمی‌کند و کاربر منتظر می‌ماند. */
 export const CHAT_MODEL = (process.env.CHAT_MODEL || '').trim() || READING_MODEL;
-export const CHAT_PLAN  = [CHAT_MODEL, CHAT_MODEL, FLASH, FALLBACK_MODEL];
+export const CHAT_PLAN  = [CHAT_MODEL, CHAT_MODEL, FLASH, GEMINI3_FLASH, FALLBACK_MODEL];
 export async function orChatResilient(system, user, opts = {}, plan = READING_PLAN) {
   const usages = [];
   /* `deadlineAt` سقفِ **کلِ زنجیره** است، نه سقفِ یک درخواست. بدونِ آن، هر صداکننده
@@ -528,7 +532,9 @@ export async function orChatResilient(system, user, opts = {}, plan = READING_PL
  * می‌شد، و شد. */
 export const TRANSCRIBE_MODEL    = FLASH;
 export const TRANSCRIBE_FALLBACK = 'openai/whisper-1:stt';
-export const TRANSCRIBE_PLAN     = [TRANSCRIBE_MODEL, TRANSCRIBE_MODEL, TRANSCRIBE_FALLBACK];
+// v3.121.0: جمنای ۳ هم صدا می‌فهمد (input_modalities شاملِ audio در /api/v1/models)،
+// پس قبل از ویسپرِ گران‌تر می‌نشیند.
+export const TRANSCRIBE_PLAN     = [TRANSCRIBE_MODEL, TRANSCRIBE_MODEL, GEMINI3_FLASH, TRANSCRIBE_FALLBACK];
 export const TRANSCRIBE_PROMPT   =
   'Transcribe this audio verbatim in the same language spoken. Output only the transcript, no commentary.';
 

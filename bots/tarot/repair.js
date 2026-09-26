@@ -16,7 +16,7 @@
 //   • شکستِ تعمیر هرگز خوانش را نمی‌شکند: متنِ اصلی برمی‌گردد.
 //   • تعمیر فقط فیلدهای معیوب را عوض می‌کند؛ بقیه‌ی خوانش بیت‌به‌بیت دست‌نخورده می‌ماند.
 import { evasionIn, pastTimeIn } from './verdict.js';
-import { parseJsonLoose, readText, langDataFor, FLASH, LUNA } from './reading-core.js';
+import { parseJsonLoose, readText, langDataFor, FLASH, GEMINI3_FLASH, LUNA } from './reading-core.js';
 import { langTable, LANGS, DEFAULT_LANG } from './locale-ctx.js';
 import { log, logErr } from '../../shared/logger.js';
 
@@ -263,7 +263,7 @@ const isCleanFix = (f) => {
 };
 
 export const REPAIR_FALLBACK = LUNA;
-export const REPAIR_PLAN = [FLASH, REPAIR_FALLBACK];
+export const REPAIR_PLAN = [FLASH, GEMINI3_FLASH, REPAIR_FALLBACK]; // v3.121.0: جمنای ۳ بینِ دو پله
 
 export async function repairDefects(llm, call, { tag = '', meta = null, plan = null } = {}) {
   const hits = findDefects(llm);

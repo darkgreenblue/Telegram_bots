@@ -41,7 +41,7 @@ const { headlineOk } = await import('../bots/tarot/verdict.js');
 const {
   drawCards, buildReadingCtx, renderV4, checkV4Shape, parseJsonLoose,
   orChatResilient, cardName, spreadName,
-  READING_MODEL, FALLBACK_MODEL, FLASH, CHAT_MODEL, CHAT_PLAN,
+  READING_MODEL, FALLBACK_MODEL, FLASH, GEMINI3_FLASH, CHAT_MODEL, CHAT_PLAN,
   locSpread,
 } = await import('../bots/tarot/reading-core.js');
 const {
@@ -105,7 +105,7 @@ const STEPS = (val('steps', 'last') || 'last').trim();
  * برنامه‌ی retry را می‌سنجیم نه مدل را. */
 const ARMS = (val('arms', '') || '').split(',').map((x) => x.trim()).filter(Boolean);
 const ARM_LIST = ARMS.length ? ARMS : [val('model', CHAT_MODEL)];
-const planFor = (m) => [m, m, FLASH, FALLBACK_MODEL];
+const planFor = (m) => [m, m, FLASH, GEMINI3_FLASH, FALLBACK_MODEL];
 
 /* 🧪 واریانتِ **پرامپت** به‌عنوان بُعدِ دومِ بازو — عیناً همان الگوی `reading-lab.mjs`
  * و به همان دلیل: فرضیه‌ی پرامپت باید **جفت‌شده** سنجیده شود (همان فالِ پایه، همان
@@ -390,7 +390,7 @@ async function buildBase(persona, step, i) {
       parsed = obj;
       return true;
     },
-  }, [BASE_MODEL, BASE_MODEL, BASE_MODEL, FLASH, FALLBACK_MODEL]);
+  }, [BASE_MODEL, BASE_MODEL, BASE_MODEL, FLASH, GEMINI3_FLASH, FALLBACK_MODEL]);
   if (!parsed && fallback) parsed = fallback;
   if (!parsed) throw new Error(`ساختِ فالِ پایه شکست خورد (${persona.id}.${i + 1})`);
 
