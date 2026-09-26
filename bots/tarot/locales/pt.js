@@ -246,6 +246,7 @@ export default {
     coinShop: '💎 Meus diamantes',
     support: '💬 Suporte',
     resetTest: '🔄 Zerar conta (admin)',
+    cardsAdmin: '💳 Cartões', // owner-only; card-to-card rail only (never shown on Stars bots)
     ready: 'Fiz o meu pedido 🔮',
     stopShuffle: '⏹️ Para aqui',
     nextCard: 'Próxima carta 🎴',

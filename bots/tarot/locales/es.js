@@ -257,6 +257,7 @@ export default {
     coinShop: '💎 Mis diamantes',
     support: '💬 Soporte',
     resetTest: '🔄 Reiniciar mi cuenta (admin)',
+    cardsAdmin: '💳 Tarjetas', // owner-only; card-to-card rail only (never shown on Stars bots)
     ready: 'Ya pedí mi deseo 🔮',
     stopShuffle: '⏹️ Detén el mazo',
     nextCard: 'Siguiente carta 🎴',

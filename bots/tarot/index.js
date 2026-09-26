@@ -53,6 +53,7 @@ import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict
 import { repairDefects } from './repair.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
+import * as CA from './cards-admin.js';
 import {
   PICKER_TEXT, PICKER_BY_CODE, LANG_CB, pickerRows, fullCodes, supportedCodes, langUi, UNIFIED_PROFILE,
 } from './lang-picker.js';
@@ -326,10 +327,17 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.122.0';
+const PRODUCT_VERSION = '3.123.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
+
+// 💳 مدیریتِ کارت‌های پرداخت داخلِ ربات (v3.123.0، فازِ ۱bِ `PAYMENT-V2-PLAN.md`). فقط **مالک**
+// (`OWNER_ID`) و فقط روی ریلِ کارت‌به‌کارت؛ ربات‌های استارز کارت ندارند. `false` ⟵ دکمه از
+// کیبوردِ مالک محو و همه‌ی اکشن‌های `ca:` بی‌اثر (رول‌بکِ یک‌خطی، بند ۲ج/۸). ⚠️ هیچ‌جا پرچمِ خام
+// صدا زده نمی‌شود، فقط `cardsAdminOn` (چکِ CI شمارشش را قفل کرده).
+const CARDS_ADMIN_ENABLED = true;
+const cardsAdminOn = (uid) => CARDS_ADMIN_ENABLED && !starsRail && Number(uid) === OWNER_ID;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -342,11 +350,11 @@ const SETTINGS_ENABLED = true;
    یک واحد بالا ببرد. فراموش‌کردنش یعنی آپدیت به کاربرِ فعلی نمی‌رسد — و چون هیچ خطایی
    نمی‌دهد، بی‌صدا. برای همین اثرانگشتِ شکلِ کیبورد در چکِ CI کنارِ همین عدد پین شده
    (`tools/check-kb-rev.mjs`): ویرایشِ کیبورد بدونِ بامپ، CI را قرمز می‌کند. */
-const KB_REV = 1;
+const KB_REV = 2;
 // اثرانگشتِ شکلِ فعلیِ کیبورد. `tools/check-kb-rev.mjs` دوباره حسابش می‌کند و با این
 // مقایسه می‌کند؛ ناهم‌خوانی یعنی کیبورد عوض شده و KB_REV بامپ نشده. عددِ تازه را خودِ
 // همان چک در پیامِ خطا چاپ می‌کند.
-const KB_SHAPE_FINGERPRINT = '2f4e434197b4';
+const KB_SHAPE_FINGERPRINT = 'f70f1fafaae8';
 const FOCUS_REASK_DAYS = 7; // حوزه‌ی تمرکز حداکثر هفته‌ای یک‌بار دوباره پرسیده می‌شود (نه هر فال)
 
 // 🎁 منوی سرگرمی‌های رایگان (کارت روز + فال حافظ؛ قلاب بازگشت روزانه بدون LLM).
@@ -1216,6 +1224,14 @@ const cardSt = () => _cardSt || (_cardSt = {
   anyActive: db.prepare('SELECT * FROM cards WHERE active=1 ORDER BY sort, id LIMIT 1'),
   admins:   db.prepare('SELECT DISTINCT admin_id FROM cards WHERE active=1'),
   assign:   db.prepare('UPDATE payments SET card_id=? WHERE id=? AND card_id=0'),
+  // 💳 مدیریت (v3.123.0). ستونِ هر ویرایش از جدولِ ثابتِ `CA.EDITABLE` می‌آید، نه از ورودی.
+  all:      db.prepare('SELECT * FROM cards ORDER BY sort, id'),
+  insert:   db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)'),
+  maxSort:  db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM cards'),
+  setActive: db.prepare('UPDATE cards SET active=?, updated_at=unixepoch() WHERE id=?'),
+  setKind:  db.prepare('UPDATE cards SET kind=?, updated_at=unixepoch() WHERE id=?'),
+  upd: Object.fromEntries(Object.entries(CA.EDITABLE).map(([f, col]) =>
+    [f, db.prepare(`UPDATE cards SET ${col}=?, updated_at=unixepoch() WHERE id=?`)])),
 });
 /** کارتی که فاکتورِ تازه با آن صادر می‌شود. فاز ۱: اولین کارتِ عادیِ فعال (چرخشِ روزانه فاز ۲). */
 function defaultInvoiceCard() {
@@ -2948,7 +2964,10 @@ function mainKeyboard(uid) {
   const sup = supportRow(L.support)[0] || [];
   const tail = [...sup, ...(SETTINGS_ENABLED ? [L.buttons.settings] : [])];
   if (tail.length) rows.push(tail);
-  if (isTester(uid)) rows.push([L.buttons.resetTest]); // دکمه‌ی ریست: ادمین‌ها و تسترها، همیشه
+  // ردیفِ ابزارهای مدیریتی: «ریست» برای ادمین‌ها و تسترها، و «💳 کارت‌ها» فقط برای مالک و فقط
+  // روی ریلِ کارت‌به‌کارت (v3.123.0، تصمیمِ مالک: کنارِ دکمه‌ی ریست). کاربرِ عادی هیچ‌کدام را نمی‌بیند.
+  const adminRow = [...(isTester(uid) ? [L.buttons.resetTest] : []), ...(cardsAdminOn(uid) ? [L.buttons.cardsAdmin] : [])];
+  if (adminRow.length) rows.push(adminRow);
   return Markup.keyboard(rows).resize();
 }
 
@@ -2991,6 +3010,8 @@ const OPEN_FLOW_STATES = new Set([
 const KB_QUIET_STATES = new Set([
   ...ONBOARDING_STATES,
   'await_question', 'pay_amount', 'pay_receipt', 'pay_discount', 'settings_name',
+  // 💳 ورودیِ مدیریتِ کارت (فقط مالک): او هم دارد چیزی **تایپ** می‌کند.
+  'card_add', 'card_edit',
   // 🗣 گفتگو هم استیتِ ورودی است: کاربر باید سؤالش را **بنویسد**.
   // ⚠️ ولی عمداً در `OPEN_FLOW_STATES` **نیست**: آن مجموعه یعنی «فلوی نیمه‌تمام» و
   // تنها مصرفش گاردِ یادآوریِ شبانه است. گفتگو چیزی رزرو نکرده، پولِ معلقی ندارد و
@@ -4203,6 +4224,7 @@ const KB_LABELS = new Set([
   ...allLabels(l => l.buttons.wallet), ...allLabels(l => l.buttons.coinShop),
   ...allLabels(l => l.buttons.inviteMain), ...allLabels(l => l.buttons.freeMenu),
   ...allLabels(l => l.buttons.resetTest), ...allLabels(l => l.buttons.settings),
+  ...allLabels(l => l.buttons.cardsAdmin),
   ...allLabels(l => l.support?.button), '🔄 ریست ربات (تست)',
   // برچسب‌های کهنه‌ی کیبورد — تا تپِ کیبوردهای کش‌شده هم «دکمه» شمرده شود، نه «تایپِ آزاد»
   '📤 معرفی دوستان', '🍀 کارت شانس (استخراج الماس)', '🍀 کارت شانس (الماس رایگان)',
@@ -9631,11 +9653,14 @@ const creditedReceiptKb = (pid) => Markup.inlineKeyboard([
  *   • مالک (`OWNER_ID`) اگر ادمینِ این کارت نیست ⟵ **کپیِ اطلاعاتی**: همان متن و عکس،
  *     با یک خطِ سرتیتر و **بدونِ هیچ دکمه‌ی اکشن** (دکمه‌های تگ در فاز ۶، فقط برای مالک).
  *   • مالک اگر خودش ادمینِ کارت است ⟵ فقط **یک** پیام (کامل)، نه دو پیام.
- *   • بقیه‌ی ADMIN_IDS که ادمینِ هیچ کارتِ فعالی نیستند ⟵ `LEGACY_ADMINS_FULL`: تا تصمیمِ
- *     صریحِ مالک، دقیقاً همان پیامِ کاملِ امروز (هیچ‌کس بی‌خبر از جریانِ رسید حذف نمی‌شود).
- *     کسی که ادمینِ یک کارت شد، از آن لحظه فقط رسیدهای کارتِ خودش را می‌گیرد.
+ *   • بقیه‌ی ADMIN_IDS که ادمینِ کارتِ این فاکتور نیستند ⟵ **هیچ پیامی** (تصمیمِ مالک
+ *     ۱۴۰۵/۰۷/۰۴، v3.123.0: «باقی ادمین‌ها را نمی‌خوام شلوغ‌پلوغ و گیج کنم»). رول‌بک:
+ *     `LEGACY_ADMINS_FULL = true` ⟵ دوباره همان پیامِ کاملِ v3.121.0 را می‌گیرند.
+ *   • تورِ ایمنی: اگر پیامِ کامل به ادمینِ کارت **نرسید** (هنوز ربات را استارت نکرده، بلاک
+ *     کرده، آیدیِ اشتباه)، همان پیامِ کامل با دکمه‌ها به مالک می‌رود؛ رسیدی که هیچ‌کس
+ *     نتواند تأییدش کند یعنی پولِ کاربر در هوا (بند ۹ ریشه).
  * با دو کارتِ اولیه (ادمینِ هر دو = مالک) رفتارِ رو-به-ادمین بیت‌به‌بیت همان قبلی است. */
-const LEGACY_ADMINS_FULL = true;
+const LEGACY_ADMINS_FULL = false;
 function activeCardAdminIds() {
   try { return new Set(cardSt().admins.all().map((r) => Number(r.admin_id))); }
   catch (e) { logErr('activeCardAdminIds:', e.message); return new Set(); }
@@ -9673,7 +9698,17 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
         ? await bot.telegram.sendPhoto(r.id, photoFileId, { caption: cap, ...extra })
         : await bot.telegram.sendMessage(r.id, cap, extra);
       if (r.full && !first) first = sent;
-    } catch {}
+    } catch (e) { logErr(`receipt → ${r.id}:`, e.message); }
+  }
+  // تورِ ایمنی: هیچ پیامِ کاملی نرسید ⟵ نسخه‌ی کامل با دکمه‌ها به مالک (یک بار).
+  if (!first && receiptRecipients(p).some((r) => r.full && r.id !== OWNER_ID)) {
+    const cap = (`⚠️ ادمینِ این کارت پیام را دریافت نکرد؛ تصمیم با شماست.\n\n${caption}`).slice(0, photoFileId ? 1024 : 4096);
+    const extra = kb ? { reply_markup: kb } : {};
+    try {
+      first = photoFileId
+        ? await bot.telegram.sendPhoto(OWNER_ID, photoFileId, { caption: cap, ...extra })
+        : await bot.telegram.sendMessage(OWNER_ID, cap, extra);
+    } catch (e) { logErr('receipt → owner fallback:', e.message); }
   }
   return first;
 }
@@ -10929,6 +10964,187 @@ bot.command('refund', async (ctx) => {
     (res.ledger ? ` و ${fmt(res.clawed)} از اعتبارش کسر شد.` : ' ولی ⚠️ دفترِ اعتبار عوض نشد (قبلاً برگشته بود).')).catch(() => {});
 });
 
+/* ---------- 💳 مدیریتِ کارت‌ها (v3.123.0، فازِ ۱b) ----------
+ * فقط مالک (`cardsAdminOn`). فهرست ⟵ کارت ⟵ فعال/غیرفعال، نوع، ویرایشِ فیلدها؛ و افزودنِ
+ * چهارمرحله‌ای + انتخابِ نوع. **حذف وجود ندارد** (تصمیمِ مالک): فاکتورها و رسیدهای قدیمی با
+ * `card_id` به همین ردیف‌ها اشاره می‌کنند. هر صفحه روی همان پیام ادیت می‌شود.
+ * گاردها: همیشه دستِ‌کم یک کارتِ **عادیِ فعال** می‌ماند (وگرنه فاکتورِ تازه بی‌کارت می‌ماند)،
+ * شماره‌ی تکراری پذیرفته نمی‌شود، و شماره‌ی کارت ویرایش نمی‌شود (توضیح در `cards-admin.js`). */
+const caOnly = (fn) => async (ctx) => {
+  if (!cardsAdminOn(ctx.from?.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  return fn(ctx);
+};
+const cardsAll = () => cardSt().all.all();
+const CA_CANCEL_ROW = [Markup.button.callback('❌ انصراف', 'ca:x')];
+function cardsListRows(cards) {
+  const rows = cards.map((c, i) => [Markup.button.callback(CA.cardButtonLabel(c, i), `ca:v:${c.id}`)]);
+  rows.push([Markup.button.callback('➕ افزودنِ کارت', 'ca:add')]);
+  return rows;
+}
+function cardViewRows(c) {
+  return [
+    [Markup.button.callback(c.active ? '⏸ غیرفعال کن' : '▶️ فعال کن', `ca:t:${c.id}`),
+      Markup.button.callback(c.kind === 'white' ? '🔁 تبدیل به عادی' : '🔁 تبدیل به سفید', `ca:k:${c.id}`)],
+    [Markup.button.callback('✏️ نامِ صاحب کارت', `ca:e:${c.id}:holder`), Markup.button.callback('✏️ بانک', `ca:e:${c.id}:bank`)],
+    [Markup.button.callback('✏️ ادمین', `ca:e:${c.id}:admin`), Markup.button.callback('✏️ ترتیب', `ca:e:${c.id}:sort`),
+      Markup.button.callback('✏️ سقفِ روزانه', `ca:e:${c.id}:cap`)],
+    [Markup.button.callback('◀️ بازگشت به فهرست', 'ca:l')],
+  ];
+}
+function clearCardInput(uid) {
+  if (['card_add', 'card_edit'].includes(getState(uid))) setState(uid, 'idle');
+  patchSession(uid, { cardAdd: null, cardEdit: null });
+}
+async function showCardsList(ctx, edit = false) {
+  const cards = cardsAll();
+  const text = CA.listText(cards, OWNER_ID);
+  if (edit) return editOrSend(ctx, text, cardsListRows(cards));
+  return ctx.reply(text, Markup.inlineKeyboard(cardsListRows(cards))).catch(() => {});
+}
+async function showCardView(ctx, id, edit = true, prefix = '') {
+  const c = cardSt().byId.get(id);
+  if (!c) return showCardsList(ctx, edit);
+  const text = prefix + CA.viewText(c, OWNER_ID);
+  if (edit) return editOrSend(ctx, text, cardViewRows(c));
+  return ctx.reply(text, Markup.inlineKeyboard(cardViewRows(c))).catch(() => {});
+}
+/** هر تغییرِ کارت: رویداد + لاگ، و اگر تغییردهنده خودِ مالک نیست پیام به مالک (مسیرِ داشبورد در فاز ۱c). */
+function notifyCardChange(actorId, cardId, what) {
+  track(db, actorId, 'card_changed', { card_id: cardId, what });
+  log(`💳 CARD_CHANGED #${cardId} by ${actorId}: ${what}`);
+  if (Number(actorId) !== OWNER_ID) bot.telegram.sendMessage(OWNER_ID, CA.changeNotice(actorId, what)).catch(() => {});
+}
+// آیدیِ ادمینی که هنوز ربات را استارت نکرده پیامِ رسید را نمی‌گیرد (تورِ ایمنیِ مالک پوشش
+// می‌دهد، ولی مالک باید همین حالا بداند). `getChat` فقط برای کسی که با ربات چت کرده جواب می‌دهد.
+async function adminReachNote(id) {
+  if (Number(id) === OWNER_ID) return '';
+  try { await bot.telegram.getChat(id); return ''; }
+  catch { return '\n\n⚠️ این آیدی هنوز ربات را استارت نکرده (یا اشتباه است). تا استارت نکند رسیدهای این کارت با دکمه به شما می‌رسد، نه به او.'; }
+}
+
+bot.hears(allLabels(l => l.buttons.cardsAdmin), async (ctx) => {
+  const uid = ctx.from.id;
+  if (!cardsAdminOn(uid)) return;
+  upsertUser(ctx);
+  if (await blockDuringOpenPay(ctx)) return;
+  if (await blockDuringOpenReading(ctx)) return;
+  if (await blockDuringOpenLucky(ctx)) return;
+  clearCardInput(uid);
+  return showCardsList(ctx);
+});
+bot.action('ca:l', caOnly(async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  clearCardInput(ctx.from.id);
+  return showCardsList(ctx, true);
+}));
+bot.action(/^ca:v:(\d+)$/, caOnly(async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showCardView(ctx, Number(ctx.match[1]));
+}));
+bot.action(/^ca:t:(\d+)$/, caOnly(async (ctx) => {
+  const id = Number(ctx.match[1]);
+  const c = cardSt().byId.get(id);
+  if (!c) return ctx.answerCbQuery('کارت پیدا نشد').catch(() => {});
+  if (c.active && !CA.canDeactivate(cardsAll(), id)) {
+    return ctx.answerCbQuery('این آخرین کارتِ عادیِ فعال است؛ اول یک کارتِ عادیِ دیگر فعال کن.', { show_alert: true }).catch(() => {});
+  }
+  cardSt().setActive.run(c.active ? 0 : 1, id);
+  notifyCardChange(ctx.from.id, id, `${c.active ? 'غیرفعال' : 'فعال'} شد (…${String(c.number).slice(-4)})`);
+  await ctx.answerCbQuery(c.active ? '⏸ غیرفعال شد' : '▶️ فعال شد').catch(() => {});
+  return showCardView(ctx, id);
+}));
+bot.action(/^ca:k:(\d+)$/, caOnly(async (ctx) => {
+  const id = Number(ctx.match[1]);
+  const c = cardSt().byId.get(id);
+  if (!c) return ctx.answerCbQuery('کارت پیدا نشد').catch(() => {});
+  if (c.kind === 'regular' && !CA.canMakeWhite(cardsAll(), id)) {
+    return ctx.answerCbQuery('این آخرین کارتِ عادیِ فعال است؛ اول یک کارتِ عادیِ دیگر اضافه یا فعال کن.', { show_alert: true }).catch(() => {});
+  }
+  const kind = c.kind === 'white' ? 'regular' : 'white';
+  cardSt().setKind.run(kind, id);
+  notifyCardChange(ctx.from.id, id, `نوع ⟵ ${kind === 'white' ? 'سفید' : 'عادی'} (…${String(c.number).slice(-4)})`);
+  await ctx.answerCbQuery('✅').catch(() => {});
+  return showCardView(ctx, id);
+}));
+bot.action(/^ca:e:(\d+):(holder|bank|admin|sort|cap)$/, caOnly(async (ctx) => {
+  const id = Number(ctx.match[1]), f = ctx.match[2];
+  const c = cardSt().byId.get(id);
+  await ctx.answerCbQuery().catch(() => {});
+  if (!c) return showCardsList(ctx, true);
+  setState(ctx.from.id, 'card_edit');
+  patchSession(ctx.from.id, { cardEdit: { id, f }, cardAdd: null });
+  const hint = f === 'bank' ? '\n(برای خالی: -)' : f === 'cap' ? '\n(۰ یعنی بی‌سقف)' : '';
+  return ctx.reply(`✏️ ${CA.FIELD_LABEL[f]} برای کارتِ …${String(c.number).slice(-4)}\nمقدارِ فعلی: ${
+    f === 'admin' ? c.admin_id : f === 'cap' ? c.daily_cap : c[CA.EDITABLE[f]] || '-'}\n\nمقدارِ تازه را بفرست:${hint}`,
+  Markup.inlineKeyboard([CA_CANCEL_ROW])).catch(() => {});
+}));
+bot.action('ca:add', caOnly(async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  setState(ctx.from.id, 'card_add');
+  patchSession(ctx.from.id, { cardAdd: { step: 'number' }, cardEdit: null });
+  return ctx.reply(CA.ADD_PROMPT.number, Markup.inlineKeyboard([CA_CANCEL_ROW])).catch(() => {});
+}));
+bot.action(/^ca:ak:(regular|white)$/, caOnly(async (ctx) => {
+  const uid = ctx.from.id;
+  const d = getSession(uid)?.cardAdd;
+  // گاردِ دوبار-تپ و دکمه‌ی کهنه: پیش‌نویس باید همین حالا در مرحله‌ی نوع باشد.
+  if (!d || d.step !== 'kind' || getState(uid) !== 'card_add') return ctx.answerCbQuery('این مرحله تمام شده').catch(() => {});
+  patchSession(uid, { cardAdd: null });
+  setState(uid, 'idle');
+  await ctx.answerCbQuery().catch(() => {});
+  if (cardSt().byNumber.get(d.number)) return ctx.reply('❌ این شماره همین حالا ثبت شده است.').catch(() => {});
+  const sort = Number(cardSt().maxSort.get().m) + 1;
+  const id = Number(cardSt().insert.run(d.number, d.holder, d.bank, d.admin, ctx.match[1], sort).lastInsertRowid);
+  notifyCardChange(uid, id, `کارتِ تازه …${d.number.slice(-4)} (${ctx.match[1] === 'white' ? 'سفید' : 'عادی'}، ادمین ${d.admin})`);
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  return showCardView(ctx, id, false, `✅ کارت اضافه شد.${await adminReachNote(d.admin)}\n\n`);
+}));
+bot.action('ca:x', caOnly(async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  clearCardInput(ctx.from.id);
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  return showCardsList(ctx);
+}));
+
+/** ورودیِ متنیِ مالک در دو استیتِ `card_add`/`card_edit`. ورودیِ نامعتبر استیت را نمی‌شکند:
+ *  همان مرحله با پیامِ خطای مشخص می‌ماند و هیچ چیزی در DB نوشته نشده است. */
+async function handleCardInput(ctx, state, text) {
+  const uid = ctx.from.id;
+  if (!cardsAdminOn(uid)) { setState(uid, 'idle'); return; }
+  const s = getSession(uid);
+  const cancel = Markup.inlineKeyboard([CA_CANCEL_ROW]);
+  if (state === 'card_edit') {
+    const e = s?.cardEdit;
+    const c = e && cardSt().byId.get(e.id);
+    if (!c || !CA.EDITABLE[e.f]) { clearCardInput(uid); return showCardsList(ctx); }
+    const r = CA.parseCardField(e.f, text);
+    if (!r.ok) return ctx.reply(`❌ ${r.err}`, cancel);
+    cardSt().upd[e.f].run(r.value, c.id);
+    clearCardInput(uid);
+    notifyCardChange(uid, c.id, `${CA.FIELD_LABEL[e.f]} ⟵ ${r.value === '' ? '(خالی)' : r.value} (…${String(c.number).slice(-4)})`);
+    const note = e.f === 'admin' ? await adminReachNote(r.value) : '';
+    return showCardView(ctx, c.id, false, `✅ ذخیره شد.${note}\n\n`);
+  }
+  // card_add
+  const d = s?.cardAdd;
+  if (!d || !CA.ADD_STEPS.includes(d.step)) { clearCardInput(uid); return showCardsList(ctx); }
+  const r = CA.parseCardField(d.step, text);
+  if (!r.ok) return ctx.reply(`❌ ${r.err}`, cancel);
+  if (d.step === 'number') {
+    const dup = cardSt().byNumber.get(r.value);
+    if (dup) return ctx.reply(`❌ این شماره قبلاً ثبت شده (کارتِ #${dup.id}). از فهرست همان را ${dup.active ? 'ویرایش' : 'فعال'} کن، یا شماره‌ی دیگری بفرست.`, cancel);
+  }
+  const next = CA.ADD_STEPS[CA.ADD_STEPS.indexOf(d.step) + 1] || 'kind';
+  patchSession(uid, { cardAdd: { ...d, [d.step]: r.value, step: next } });
+  if (next === 'kind') {
+    return ctx.reply(CA.ADD_PROMPT.kind, Markup.inlineKeyboard([
+      [Markup.button.callback('💳 عادی', 'ca:ak:regular'), Markup.button.callback('🤍 سفید', 'ca:ak:white')],
+      CA_CANCEL_ROW,
+    ]));
+  }
+  return ctx.reply(CA.ADD_PROMPT[next], cancel);
+}
+
 /* ---------- هندلر متن (state machine) ---------- */
 bot.on('text', async (ctx) => {
   const uid = ctx.from.id;
@@ -10938,6 +11154,8 @@ bot.on('text', async (ctx) => {
   const state = getState(uid);
   try {
     if (state === 'onboard_name') return await finishNameOnboarding(ctx, text);
+    // 💳 ورودیِ مدیریتِ کارت (فقط مالک؛ خودِ تابع دوباره گارد دارد).
+    if (state === 'card_add' || state === 'card_edit') return await handleCardInput(ctx, state, text);
     // ⚙️ تغییرِ اسم از منوی تنظیمات. عمداً استیتِ جدا از `onboard_name` است: آن یکی بعد از
     // خودش کلِ آنبوردینگ (ماهِ تولد، منوی فال) را ادامه می‌دهد، و کاربری که فقط اسمش را
     // عوض می‌کند نباید دوباره آنبورد شود. نامِ نامعتبر استیت را نمی‌شکند: کاربر در همان

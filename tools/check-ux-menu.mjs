@@ -1075,7 +1075,10 @@ console.log('\n▶ 🧪 تستر: فیچرها بله، اختیارِ ادمی�
       `«${fn}» از isTester می‌خواند، نه isAdmin`);
   }
   // دکمه‌ی ریست: تستر می‌بیند، و گاردِ دومِ خودِ هندلر هم تستر را می‌پذیرد
-  ok(/if \(isTester\(uid\)\) rows\.push\(\[L\.buttons\.resetTest\]\)/.test(SRC), 'دکمه‌ی ریست به تستر هم نشان داده می‌شود');
+  // از v3.123.0 ریست و «💳 کارت‌ها» (فقط مالک) در یک ردیفِ ادمین‌اند؛ ردیف فقط وقتی push
+  // می‌شود که خالی نباشد، پس هم نمایشِ ریست به تستر و هم push شدنِ ردیف سنجیده می‌شود.
+  ok(/isTester\(uid\) \? \[L\.buttons\.resetTest\] : \[\]/.test(SRC)
+    && /if \(adminRow\.length\) rows\.push\(adminRow\)/.test(SRC), 'دکمه‌ی ریست به تستر هم نشان داده می‌شود');
   const dr = SRC.slice(SRC.indexOf('async function doReset('), SRC.indexOf('bot.command(\'reset\''));
   ok(/if \(!isTester\(ctx\.from\.id\)\) return;/.test(dr), 'گاردِ دومِ ریست هم تستر را می‌پذیرد');
   ok(/wipeUser\(ctx\.from\.id\)/.test(dr), 'ریست فقط دیتای **خودِ** صداکننده را پاک می‌کند');

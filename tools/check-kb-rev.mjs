@@ -36,7 +36,7 @@ const kbFn = bodyOf('function mainKeyboard(uid) {');
 ok(!!kbFn, 'تابع mainKeyboard پیدا شد');
 const shape = (kbFn || '')
   .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')   // کامنت‌ها حساب نمی‌شوند
-  .match(/L\.buttons\.\w+|supportRow|SETTINGS_ENABLED|isTester|FREE_MENU_ENABLED|rows\.push|rows\.splice|uxV2For/g) || [];
+  .match(/L\.buttons\.\w+|supportRow|SETTINGS_ENABLED|isTester|cardsAdminOn|FREE_MENU_ENABLED|rows\.push|rows\.splice|uxV2For/g) || [];
 const fp = createHash('sha256').update(shape.join('|')).digest('hex').slice(0, 12);
 
 const pinned = SRC.match(/KB_SHAPE_FINGERPRINT\s*=\s*'([0-9a-f]{12})'/)?.[1];

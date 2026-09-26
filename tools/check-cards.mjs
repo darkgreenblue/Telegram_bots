@@ -10,6 +10,7 @@
 //   ۳) سید دوباره اجرا شود و کارتی که مالک غیرفعال کرده برگردد.
 //
 // کدِ واقعی از خودِ index.js بریده و روی SQLite در-حافظه **اجرا** می‌شود، نه کپی.
+import * as CA from '../bots/tarot/cards-admin.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 
@@ -74,20 +75,20 @@ const routing = region('const LEGACY_ADMINS_FULL', '\n// note: هشدارِ اخ
 const copyRow = /const cardCopyRow = [^\n]+/.exec(SRC)?.[0] || '';
 
 const OWNER = 111, SECOND = 222, OTHER = 333;
-function boot({ legacy = true } = {}) {
+function boot({ legacy = false, failTo = null } = {}) {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
     status TEXT DEFAULT 'pending', receipt_file_id TEXT, invoice_no INTEGER DEFAULT 0)`);
   const sent = [];
   const bot = { telegram: {
-    sendMessage: async (to, text, extra = {}) => { sent.push({ to, text, extra }); return { message_id: sent.length }; },
-    sendPhoto: async (to, file, extra = {}) => { sent.push({ to, file, text: extra.caption, extra }); return { message_id: sent.length }; },
+    sendMessage: async (to, text, extra = {}) => { if (to === failTo) throw new Error('403'); sent.push({ to, text, extra }); return { message_id: sent.length }; },
+    sendPhoto: async (to, file, extra = {}) => { if (to === failTo) throw new Error('403'); sent.push({ to, file, text: extra.caption, extra }); return { message_id: sent.length }; },
   } };
   const ADMIN_IDS = [OWNER, SECOND];
-  const env = { db, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
+  const env = { CA, db, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
     logErr: () => {}, invoiceNoOf: (p) => p.invoice_no || p.id };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
-  const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing : routing.replace('const LEGACY_ADMINS_FULL = true', 'const LEGACY_ADMINS_FULL = false'))}
+  const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing.replace('const LEGACY_ADMINS_FULL = false', 'const LEGACY_ADMINS_FULL = true') : routing)}
     const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };
     return { LEGACY_CARD, defaultInvoiceCard, cardOfPayment, cardOfPid, issueInvoiceCard, cardOwnerLine,
       invoiceCardArgs, cardCopyRow, receiptRecipients, sendToReceiptRecipients, canActOnPayment, notifyOwnerAction };`;
@@ -138,10 +139,11 @@ if (h) {
   ok(h.cardCopyRow(pidW)[0].copy_text.text === num, 'دکمه‌ی کپی دقیقاً شماره‌ی روی همان فاکتور را کپی می‌کند');
   db.prepare("UPDATE cards SET active=1 WHERE id=2").run();
 
-  // مسیریابی: هر دو کارت با ادمینِ مالک ⟵ مالک یک پیامِ کامل + ادمینِ قدیمی همان پیامِ امروز.
+  // مسیریابی (v3.123.0، تصمیمِ مالک): کارتِ مالک ⟵ فقط مالک یک پیامِ کامل؛ ادمینِ بی‌کارت هیچ.
+  ok(/const LEGACY_ADMINS_FULL = false;/.test(CODE), 'پرچمِ ادمین‌های بی‌کارت خاموش است (تصمیمِ مالک)');
   const r1 = h.receiptRecipients(db.prepare('SELECT * FROM payments WHERE id=?').get(pid));
-  ok(JSON.stringify(r1) === JSON.stringify([{ id: OWNER, full: true }, { id: SECOND, full: true }]),
-    'کارتِ مالک: مالک یک پیامِ کامل (نه دو پیام)، ادمینِ دوم مثلِ امروز پیامِ کامل');
+  ok(JSON.stringify(r1) === JSON.stringify([{ id: OWNER, full: true }]),
+    'کارتِ مالک: مالک یک پیامِ کامل (نه دو پیام) و ادمینِ بی‌کارت هیچ پیامی نمی‌گیرد');
 
   // کارتی با ادمینِ دیگر.
   db.prepare("UPDATE cards SET admin_id=? WHERE id=2").run(SECOND);
@@ -179,12 +181,30 @@ if (h) {
   await new Promise((r) => setImmediate(r));
   ok(h.sent.length === 1 && h.sent[0].to === OWNER && h.sent[0].text.includes('✅ تأیید'), 'اکشنِ غیرِمالک به مالک خبر داده می‌شود، اکشنِ خودِ مالک نه');
 
-  // پرچمِ ادمین‌های قدیمی (تصمیمِ مالک): خاموش ⟵ ادمینی که کارت ندارد چیزی نمی‌گیرد.
-  const h2 = boot({ legacy: false });
+  // رول‌بکِ پرچم: روشن ⟵ ادمینِ بی‌کارت دوباره همان پیامِ کاملِ v3.121.0 را می‌گیرد.
+  const h2 = boot({ legacy: true });
   const p2 = Number(h2.db.prepare('INSERT INTO payments (user_id, amount) VALUES (1, 1)').run().lastInsertRowid);
   h2.issueInvoiceCard(p2);
-  ok(JSON.stringify(h2.receiptRecipients(h2.db.prepare('SELECT * FROM payments WHERE id=?').get(p2))) === JSON.stringify([{ id: OWNER, full: true }]),
-    'LEGACY_ADMINS_FULL=false ⟵ فقط ادمینِ کارت');
+  ok(JSON.stringify(h2.receiptRecipients(h2.db.prepare('SELECT * FROM payments WHERE id=?').get(p2))) === JSON.stringify([{ id: OWNER, full: true }, { id: SECOND, full: true }]),
+    'رول‌بک: LEGACY_ADMINS_FULL=true ⟵ ادمینِ بی‌کارت دوباره پیامِ کامل می‌گیرد');
+
+  // تورِ ایمنی: پیامِ کامل به ادمینِ کارت نرسید ⟵ نسخه‌ی کامل با دکمه‌ها به مالک.
+  const h3 = boot({ failTo: SECOND });
+  const p3 = Number(h3.db.prepare('INSERT INTO payments (user_id, amount, card_id) VALUES (1, 1, 2)').run().lastInsertRowid);
+  h3.db.prepare('UPDATE cards SET admin_id=? WHERE id=2').run(SECOND);
+  const kb3 = { inline_keyboard: [[{ text: 'ok', callback_data: `approve:${p3}` }]] };
+  const f3 = await h3.sendToReceiptRecipients(h3.db.prepare('SELECT * FROM payments WHERE id=?').get(p3), { caption: 'CAP', photoFileId: 'F', kb: kb3 });
+  const ownerFull = h3.sent.filter((m) => m.to === OWNER && m.extra.reply_markup === kb3);
+  ok(ownerFull.length === 1 && ownerFull[0].text.includes('⚠️') && ownerFull[0].text.endsWith('CAP'),
+    'ادمینِ کارت پیام را نگرفت ⟵ مالک نسخه‌ی **کامل با دکمه‌ها** گرفت (رسید هرگز بی‌تصمیم‌گیرنده نمی‌ماند)');
+  ok(!!f3 && f3.message_id === h3.sent.indexOf(ownerFull[0]) + 1, 'شناسه‌ی همان پیامِ کاملِ مالک برگردانده می‌شود');
+  // کنترلِ مثبت: وقتی ادمینِ کارت پیام را گرفت، مالک نسخه‌ی دکمه‌دار نمی‌گیرد.
+  h3.sent.length = 0;
+  const h4 = boot();
+  const p4 = Number(h4.db.prepare('INSERT INTO payments (user_id, amount, card_id) VALUES (1, 1, 2)').run().lastInsertRowid);
+  h4.db.prepare('UPDATE cards SET admin_id=? WHERE id=2').run(SECOND);
+  await h4.sendToReceiptRecipients(h4.db.prepare('SELECT * FROM payments WHERE id=?').get(p4), { caption: 'CAP', photoFileId: 'F', kb: kb3 });
+  ok(!h4.sent.some((m) => m.to === OWNER && m.extra.reply_markup), 'ادمینِ کارت پیام را گرفت ⟵ مالک فقط کپیِ بی‌دکمه (نه نسخه‌ی دوم)');
 }
 
 console.log(`\n${pass} پاس، ${fail} خطا`);

@@ -620,6 +620,7 @@ export default {
   coinShop: '💎 Мои алмазы',
   support: '💬 Поддержка',
   resetTest: '🔄 Сброс аккаунта (админ)',
+  cardsAdmin: '💳 Карты', // owner-only; card-to-card rail only (never shown on Stars bots)
   ready: 'Вопрос загадан 🔮',
   stopShuffle: '⏹️ Останови здесь',
   nextCard: 'Следующая карта 🎴',

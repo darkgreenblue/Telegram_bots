@@ -216,6 +216,7 @@ export default {
     coinShop: '💎 My diamonds',
     support: '💬 Support',
     resetTest: '🔄 Reset account (admin)',
+    cardsAdmin: '💳 Cards', // owner-only; card-to-card rail only (never shown on Stars bots)
     ready: 'My intention is set 🔮',
     stopShuffle: '⏹️ Stop it right here',
     nextCard: 'Next card 🎴',
