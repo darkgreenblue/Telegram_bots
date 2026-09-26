@@ -371,6 +371,11 @@ jobs:
       - name: Receipt tags check (dashboard)
         if: matrix.bot == 'dashboard'
         run: node tools/check-receipt-tags.mjs --part=dash
+      # 📊 فازِ ۸: آمارِ روزانه‌ی کارت‌ها از رویدادها (نه از card_idِ جابه‌جاشونده)، روزِ کارتِ ۰۶:۰۰،
+      # «تأییدشده» = شمارشِ سقفِ ربات، «مبلغ» بدونِ حسابِ تستی. صفحه روی فیکسچرِ واقعی رندر می‌شود.
+      - name: Card daily stats check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-card-stats.mjs
 
       # مسیرِ پولِ voice2text (رباتِ زنده‌ی درآمدزا). ادعاها منطق را **اجرا** می‌کنند نه
       # اینکه شکلِ `if` را ببینند: شاخه‌ای که اعتبارِ رایگان می‌دهد، «شرط عوض شد» کافی
