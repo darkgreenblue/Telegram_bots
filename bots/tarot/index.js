@@ -326,7 +326,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.121.0';
+const PRODUCT_VERSION = '3.122.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1198,10 +1198,50 @@ function starsForToman(amountToman, usdtToman) {
   return Math.max(1, Math.ceil(amountToman / tomanPerStar));
 }
 
-const CARD_NUMBER = '6219861904145405';
-const CARD_OWNER  = 'علیرضا اولیا — بلوبانک';
-const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
-const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
+/* 💳 کارتِ هر فاکتور (v3.122.0). جدولِ `cards` و سیدش پایین‌تر کنارِ مهاجرت‌های
+ * `payments` است؛ این‌جا فقط خواندن. ثابت‌های قدیمیِ `CARD_NUMBER`/`CARD_OWNER` حذف شدند
+ * تا هیچ مسیری شماره‌ای جدا از کارتِ خودِ فاکتور نشان ندهد (چکِ CI همین را قفل کرده). */
+// فالبکِ نهایی اگر جدولِ کارت‌ها به هر دلیلی خالی باشد: همان کارتی که تا v3.121.0 روی
+// **همه‌ی** فاکتورها بود. ادمینش مالک است، پس رسید هرگز بی‌گیرنده نمی‌ماند.
+const LEGACY_CARD = Object.freeze({
+  id: 0, number: '6219861904145405', holder: 'علیرضا اولیا', bank: 'بلوبانک', kind: 'regular', active: 1,
+  admin_id: OWNER_ID,
+});
+// statementها تنبل ساخته می‌شوند چون جدولِ `cards` چند صد خط پایین‌تر ساخته می‌شود.
+let _cardSt = null;
+const cardSt = () => _cardSt || (_cardSt = {
+  byId:     db.prepare('SELECT * FROM cards WHERE id=?'),
+  byNumber: db.prepare('SELECT * FROM cards WHERE number=? ORDER BY id LIMIT 1'),
+  default:  db.prepare("SELECT * FROM cards WHERE active=1 AND kind='regular' ORDER BY sort, id LIMIT 1"),
+  anyActive: db.prepare('SELECT * FROM cards WHERE active=1 ORDER BY sort, id LIMIT 1'),
+  admins:   db.prepare('SELECT DISTINCT admin_id FROM cards WHERE active=1'),
+  assign:   db.prepare('UPDATE payments SET card_id=? WHERE id=? AND card_id=0'),
+});
+/** کارتی که فاکتورِ تازه با آن صادر می‌شود. فاز ۱: اولین کارتِ عادیِ فعال (چرخشِ روزانه فاز ۲). */
+function defaultInvoiceCard() {
+  try { return cardSt().default.get() || cardSt().anyActive.get() || LEGACY_CARD; }
+  catch (e) { logErr('defaultInvoiceCard:', e.message); return LEGACY_CARD; }
+}
+/** کارتِ یک پرداخت. کارتِ غیرفعال‌شده هم برگردانده می‌شود: فاکتوری که با آن صادر شده باید
+ *  همان شماره را نشان بدهد و رسیدش به همان ادمین برود. `card_id=0` = فاکتورِ قبل از v3.122.0. */
+function cardOfPayment(p) {
+  try {
+    if (p?.card_id) { const c = cardSt().byId.get(p.card_id); if (c) return c; }
+    return cardSt().byNumber.get(LEGACY_CARD.number) || LEGACY_CARD;
+  } catch (e) { logErr('cardOfPayment:', e.message); return LEGACY_CARD; }
+}
+const cardOfPid = (pid) => cardOfPayment(stmts.getPayment.get(pid));
+/** لحظه‌ی صدورِ فاکتور (کنارِ `issueInvoiceNo`). یک‌بار و اتمیک (`card_id=0`)، پس صدورِ
+ *  دوباره یا دوبار-تپ کارتِ فاکتور را عوض نمی‌کند. شکستش فاکتور را نمی‌شکند: `card_id`
+ *  صفر می‌ماند و `cardOfPayment` همان کارتِ قدیمی را می‌دهد. */
+function issueInvoiceCard(paymentId) {
+  try { const c = defaultInvoiceCard(); if (c.id) cardSt().assign.run(c.id, paymentId); }
+  catch (e) { logErr('issueInvoiceCard:', e.message); }
+}
+// خطِ زیرِ شماره روی فاکتور. شکلِ کارتِ ۱ بیت‌به‌بیت همان `CARD_OWNER`ِ قبلی است.
+const cardOwnerLine = (c) => (c.bank ? `${c.holder} — ${c.bank}` : c.holder);
+/** دو آرگومانِ کارتِ `L.wallet.invoice` از کارتِ **همان فاکتور**. */
+const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };
 
 // ایجنتِ رسیدِ کارت‌به‌کارت (Gemini Flash از طریق OpenRouter): auto-approve با شبکه‌ی ایمنیِ
 // برگشت + بی‌اعتمادی. کلیدِ خاموشیِ سراسری (env RECEIPT_AI_AUTO_APPROVE=false → همه‌ی رسیدها
@@ -1215,7 +1255,8 @@ const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').
 const RECEIPT_MODELS = [FLASH, FLASH, GEMINI3_FLASH, LUNA];
 // دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
 // هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
-const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
+// ⚠️ `pid` اجباری است: دکمه همیشه دقیقاً شماره‌ی **همان فاکتور** را کپی می‌کند.
+const cardCopyRow = (pid) => [{ text: '📋 کپی شماره کارت', copy_text: { text: cardOfPid(pid).number } }];
 // دکمه‌ی سوییچ به استارز، درست زیرِ دکمه‌ی کپیِ کارت (خواسته‌ی صریحِ مالک). آرایه‌ی
 // **ردیف‌ها** برمی‌گرداند (مثلِ الگوی `navMenuRow`) تا هر محلِ صدور با
 // `...starsToggleRow(uid, paymentId, hasPkg)` بی‌قید و شرط اسپرد کند.
@@ -1855,6 +1896,53 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN stars_amount INTEGER').run(); 
 // فقط برای آمارِ استقبال (بند ۹ درخواستِ مالک: «میزان استقبال سنجیده شود») — در هیچ
 // SUM(amount) ای شرکت نمی‌کند.
 try { db.prepare('ALTER TABLE payments ADD COLUMN stars_paid_amount INTEGER').run(); } catch {}
+
+/* 💳 کارت‌ها (v3.122.0 — فازِ ۱ی `PAYMENT-V2-PLAN.md`). تا امروز شماره‌کارت یک ثابتِ
+ * هاردکد بود و هر رسیدی به همه‌ی ADMIN_IDS می‌رفت. حالا هر فاکتور لحظه‌ی **صدور** یک کارت
+ * می‌گیرد (`payments.card_id`) و از آن به بعد همه‌چیزِ آن فاکتور از همان کارت می‌آید:
+ * شماره و نامِ روی فاکتور، دکمه‌ی کپی، گیرنده‌ای که ایجنتِ رسید تطبیق می‌دهد، و ادمینی که
+ * رسید را با دکمه‌های اکشن می‌گیرد.
+ *
+ * هر دو ستون افزایشی‌اند (بند ۲ج/۱). `card_id=0` یعنی فاکتورِ قبل از این نسخه، که شماره‌ی
+ * `LEGACY_CARD_NUMBER` را دیده بود، پس `cardOfPayment` برایش همان کارت را برمی‌گرداند و
+ * هیچ فاکتورِ بازی بعد از دیپلوی شماره‌ی دیگری نشان نمی‌دهد.
+ *
+ * `admin_id` ادمینِ کارت است: فقط او روی رسیدهای این کارت دکمه‌ی اکشن می‌گیرد. `kind`:
+ * `regular` (عادی) یا `white` (سفید، مقصدِ تعویض/«نتوانستم واریز کنم» در فازهای ۳ و ۵).
+ * `daily_cap` صفر یعنی بی‌سقف (سقف در فاز ۲ خوانده می‌شود). حذف نداریم، فقط `active=0`. */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cards (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    number     TEXT    NOT NULL,
+    holder     TEXT    NOT NULL,
+    bank       TEXT    NOT NULL DEFAULT '',
+    admin_id   INTEGER NOT NULL,
+    kind       TEXT    NOT NULL DEFAULT 'regular',
+    active     INTEGER NOT NULL DEFAULT 1,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    daily_cap  INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+`);
+try { db.prepare('ALTER TABLE payments ADD COLUMN card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* دو کارتِ اولیه (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴): عادیِ فعلی و تنها کارتِ سفید، هر دو با ادمینِ
+ * **مالک**. سید یک‌باره است و مهرش **داخلِ همان تراکنش** می‌خورد (درسِ v3.25.1)، پس
+ * ری‌استارت هرگز کارتِ تکراری نمی‌سازد و کارتی که مالک بعداً غیرفعال کند برنمی‌گردد. */
+const LEGACY_CARD_NUMBER = LEGACY_CARD.number;
+const SEED_CARDS = [
+  { number: LEGACY_CARD_NUMBER, holder: 'علیرضا اولیا',  bank: 'بلوبانک',      kind: 'regular', sort: 1 },
+  { number: '5022291612282234', holder: 'علیرضا اولیاء', bank: 'بانک پاسارگاد', kind: 'white',   sort: 2 },
+];
+db.exec('CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)');
+db.transaction(() => {
+  if (db.prepare("SELECT 1 FROM migrations WHERE key='cards_seed_1'").get()) return;
+  if (!db.prepare('SELECT 1 FROM cards LIMIT 1').get()) {
+    const ins = db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)');
+    for (const c of SEED_CARDS) ins.run(c.number, c.holder, c.bank, OWNER_ID, c.kind, c.sort);
+  }
+  db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('cards_seed_1', unixepoch())").run();
+})();
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -2673,6 +2761,7 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
   stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
   issueInvoiceNo(paymentId);
+  issueInvoiceCard(paymentId);         // 💳 کارتِ این فاکتور، همین لحظه و یک‌بار
   if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
   patchSession(uid, { paymentId, readingId });
   setState(uid, 'pay_receipt');
@@ -2681,10 +2770,10 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   // ⭐ سوییچِ استارز عمداً این‌جا نیست: این تابع فقط در دنیای تومانیِ میراثی اجرا می‌شود
   // (بالا: `if (legacyTomanPay(uid))` یعنی `coinsOn(uid)` که این‌جا **رد** شده)، پس هیچ
   // بسته‌ای پشتِ این فاکتور نیست و buildInvoice بدونِ pack.key خطا می‌دهد.
-  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(paymentId), invoicePurchaseFor(uid, paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
-      cardCopyRow(),
+      cardCopyRow(paymentId),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${paymentId}`)],
     ]).reply_markup,
   });
@@ -8802,6 +8891,7 @@ async function setRechargeAmount(ctx, uid, amount) {
   // ادعای اتمیک قبل از هر await؛ اگر تپِ دیگری قبلاً مبلغ را ست کرده (changes=0) بی‌صدا برگرد
   if (stmts.claimAmount.run(amount, s.paymentId).changes === 0) return;
   issueInvoiceNo(s.paymentId);
+  issueInvoiceCard(s.paymentId);
 
   // هیچ تخفیفی خودکار اعمال نمی‌شود: کاربر یا کدش را از دکمه‌ی «تخفیف می‌خوام» گرفته و
   // این‌جا با «🎟️ کد تخفیف دارم» واردش می‌کند، یا مبلغ کامل را می‌پردازد.
@@ -8810,10 +8900,10 @@ async function setRechargeAmount(ctx, uid, amount) {
   setState(uid, 'pay_receipt');
   // ⭐ سوییچِ استارز عمداً این‌جا نیست — همان دلیلِ invoiceForReading (دنیای تومانیِ
   // میراثی، بدونِ بسته‌ی کاتالوگ).
-  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(payAmount, ...invoiceCardArgs(s.paymentId), invoicePurchaseFor(uid, s.paymentId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
-      cardCopyRow(),
+      cardCopyRow(s.paymentId),
       [Markup.button.callback(L.buttons.discountHave, `disc:${s.paymentId}`)],
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${s.paymentId}`)],
     ]).reply_markup,
@@ -8934,6 +9024,7 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     }
   }
   issueInvoiceNo(payId);   // 🔢 شماره‌ی فاکتور، فقط برای فاکتوری که واقعاً صادر شد
+  issueInvoiceCard(payId); // 💳 کارتِ فاکتور، همان لحظه‌ی صدور
   stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, payId);
   /* کیبوردِ صفحه‌ی بسته‌ها **حذف** نمی‌شود، به یک دکمه‌ی «انصراف» تبدیل می‌شود.
    *
@@ -9004,10 +9095,10 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
    * ⚠️ `pickedMsgId` و پاک‌سازی‌اش در `dropInvoiceArtifacts` عمداً **می‌مانند**: کاربرانی
    * که همین حالا وسطِ فلواند یک `pickedMsgId` زنده در سشن دارند و بعد از دیپلوی باید
    * پیامشان درست پاک شود (بند ۲ج/۲: کدِ جدید روی حالتِ قدیمی اجرا می‌شود). */
-  const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, payId), curOf(uid)), {
+  const invMsg = await ctx.reply(L.wallet.invoice(pack.toman, ...invoiceCardArgs(payId), invoicePurchaseFor(uid, payId), curOf(uid)), {
     parse_mode: 'Markdown',
     reply_markup: Markup.inlineKeyboard([
-      cardCopyRow(),
+      cardCopyRow(payId),
       ...starsToggleRow(uid, payId, true),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${payId}`)],
     ]).reply_markup,
@@ -9053,10 +9144,10 @@ bot.action(/^pay_resume:(\d+)$/, async (ctx) => {
   patchSession(uid, { paymentId: pid });
   setState(uid, 'pay_receipt');
   const invMsg = await ctx.reply(
-    L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, pid), curOf(uid)), {
+    L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
-        cardCopyRow(),
+        cardCopyRow(pid),
         ...starsToggleRow(uid, pid, !!packOf(p)),
         [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
       ]).reply_markup,
@@ -9125,10 +9216,10 @@ bot.action(/^card_toggle:(\d+)$/, async (ctx) => {
   stmts.clearStarsToggle.run(pid);
   const pack = packOf(p);
   try {
-    await ctx.editMessageText(L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, pid), curOf(uid)), {
+    await ctx.editMessageText(L.wallet.invoice(p.amount, ...invoiceCardArgs(pid), invoicePurchaseFor(uid, pid), curOf(uid)), {
       parse_mode: 'Markdown',
       reply_markup: Markup.inlineKeyboard([
-        cardCopyRow(),
+        cardCopyRow(pid),
         ...starsToggleRow(uid, pid, !!pack),
         [Markup.button.callback(L.buttons.cancel, `pay_cancel:${pid}`)],
       ]).reply_markup,
@@ -9515,9 +9606,9 @@ async function applyDiscount(ctx, uid, codeText) {
     await ctx.reply(L.wallet.freeApproved);
     await afterApproval(uid);
   } else {
-    const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(uid, p.id), curOf(uid)), {
+    const invMsg = await ctx.reply(L.wallet.invoice(v.finalAmount, ...invoiceCardArgs(p.id), invoicePurchaseFor(uid, p.id), curOf(uid)), {
       parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([cardCopyRow(), ...starsToggleRow(uid, p.id, !!p.pkg)]).reply_markup,
+      reply_markup: Markup.inlineKeyboard([cardCopyRow(p.id), ...starsToggleRow(uid, p.id, !!p.pkg)]).reply_markup,
     });
     // فاکتورِ تخفیف‌خورده جایگزینِ فاکتورِ قبلیِ همان ردیف است، پس شناسه‌ی «فاکتورِ فعلی»
     // هم باید همین پیام باشد وگرنه انقضا پیامِ کهنه‌ای را ادیت می‌کند که مبلغش دیگر درست نیست.
@@ -9532,6 +9623,78 @@ const creditedReceiptKb = (pid) => Markup.inlineKeyboard([
   [Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`)],
   [Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${pid}`)],
 ]).reply_markup;
+
+/* 💳 مسیریابیِ رسید per کارت (v3.122.0، فازِ ۱ی `PAYMENT-V2-PLAN.md`).
+ *
+ * تا v3.121.0 هر پیامِ رسید با همه‌ی دکمه‌ها به **همه‌ی** ADMIN_IDS می‌رفت. حالا:
+ *   • ادمینِ کارتِ همین فاکتور ⟵ پیامِ کامل با همه‌ی دکمه‌ها (همان اختیاراتِ قبلی).
+ *   • مالک (`OWNER_ID`) اگر ادمینِ این کارت نیست ⟵ **کپیِ اطلاعاتی**: همان متن و عکس،
+ *     با یک خطِ سرتیتر و **بدونِ هیچ دکمه‌ی اکشن** (دکمه‌های تگ در فاز ۶، فقط برای مالک).
+ *   • مالک اگر خودش ادمینِ کارت است ⟵ فقط **یک** پیام (کامل)، نه دو پیام.
+ *   • بقیه‌ی ADMIN_IDS که ادمینِ هیچ کارتِ فعالی نیستند ⟵ `LEGACY_ADMINS_FULL`: تا تصمیمِ
+ *     صریحِ مالک، دقیقاً همان پیامِ کاملِ امروز (هیچ‌کس بی‌خبر از جریانِ رسید حذف نمی‌شود).
+ *     کسی که ادمینِ یک کارت شد، از آن لحظه فقط رسیدهای کارتِ خودش را می‌گیرد.
+ * با دو کارتِ اولیه (ادمینِ هر دو = مالک) رفتارِ رو-به-ادمین بیت‌به‌بیت همان قبلی است. */
+const LEGACY_ADMINS_FULL = true;
+function activeCardAdminIds() {
+  try { return new Set(cardSt().admins.all().map((r) => Number(r.admin_id))); }
+  catch (e) { logErr('activeCardAdminIds:', e.message); return new Set(); }
+}
+/** گیرنده‌های پیامِ رسیدِ یک پرداخت: `[{ id, full }]` — `full=false` یعنی کپیِ اطلاعاتیِ بی‌دکمه. */
+function receiptRecipients(p) {
+  const c = cardOfPayment(p);
+  const cardAdmin = Number(c.admin_id) || OWNER_ID;
+  const out = [{ id: cardAdmin, full: true }];
+  if (OWNER_ID !== cardAdmin) out.push({ id: OWNER_ID, full: false });
+  if (LEGACY_ADMINS_FULL) {
+    const cardAdmins = activeCardAdminIds();
+    for (const a of ADMIN_IDS) {
+      if (a === cardAdmin || a === OWNER_ID || cardAdmins.has(a)) continue;
+      out.push({ id: a, full: true });
+    }
+  }
+  return out;
+}
+// سرتیترِ کپیِ اطلاعاتیِ مالک: کدام کارت و کدام ادمین تصمیم‌گیرنده است.
+const ownerCopyHeader = (p) => {
+  const c = cardOfPayment(p);
+  return `ℹ️ کپیِ اطلاعاتی · کارتِ ${c.bank || c.holder} (…${String(c.number).slice(-4)}) · ادمین ${c.admin_id}\n\n`;
+};
+/** ارسالِ یک پیامِ رسید به گیرنده‌هایش. پیامِ اولین گیرنده‌ی **کامل** برگردانده می‌شود
+ *  (همان که قبلاً `adminMsg` بود و در `admin_message_id` می‌نشیند). کپشنِ عکس سقفِ ۱۰۲۴
+ *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
+async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
+  let first;
+  for (const r of receiptRecipients(p)) {
+    const cap = r.full ? caption : (ownerCopyHeader(p) + caption).slice(0, photoFileId ? 1024 : 4096);
+    const extra = r.full && kb ? { reply_markup: kb } : {};
+    try {
+      const sent = photoFileId
+        ? await bot.telegram.sendPhoto(r.id, photoFileId, { caption: cap, ...extra })
+        : await bot.telegram.sendMessage(r.id, cap, extra);
+      if (r.full && !first) first = sent;
+    } catch {}
+  }
+  return first;
+}
+/** اجازه‌ی اکشن روی رسیدِ یک پرداخت: ادمینِ ربات (ADMIN_IDS، مثلِ قبل) یا ادمینِ کارتِ
+ *  **همین** پرداخت. ادمینِ کارتِ دیگر روی این رسید هیچ اختیاری ندارد. */
+function canActOnPayment(uid, pid) {
+  if (isAdmin(uid)) return true;
+  const p = stmts.getPayment.get(pid);
+  return !!p && Number(cardOfPayment(p).admin_id) === uid;
+}
+/** هر اکشنی که کسی غیر از مالک روی یک رسید بزند، به مالک خبر داده می‌شود (fire-and-forget). */
+function notifyOwnerAction(actorId, pid, label) {
+  if (actorId === OWNER_ID) return;
+  try {
+    const p = stmts.getPayment.get(pid);
+    const c = cardOfPayment(p);
+    bot.telegram.sendMessage(OWNER_ID,
+      `🔔 ادمین ${actorId} روی پرداختِ #${p ? invoiceNoOf(p) : pid} (کاربر ${p?.user_id ?? '?'}، `
+      + `کارتِ …${String(c.number).slice(-4)}) زد: ${label}`).catch(() => {});
+  } catch (e) { logErr('notifyOwnerAction:', e.message); }
+}
 
 // note: هشدارِ اختیاری بالای رسید (مثلاً «مبلغ ممکن است ریال باشد») تا ادمین کورکورانه
 // تأیید نکند. بدونِ آن، بازبینیِ انسانی همان خطای مدل را تکرار می‌کند.
@@ -9548,15 +9711,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   ], [
     Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${paymentId}`),
   ]]).reply_markup;
-  let adminMsg;
-  for (const adminId of ADMIN_IDS) {
-    try {
-      const sent = photoFileId
-        ? await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb })
-        : await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
-      if (!adminMsg) adminMsg = sent;
-    } catch {}
-  }
+  const adminMsg = await sendToReceiptRecipients(p, { caption, photoFileId, kb });
   stmts.setPaymentReceipt.run(photoFileId || null, adminMsg?.message_id || null, 'waiting_review', paymentId);
 }
 
@@ -9574,15 +9729,7 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
   ], [
     Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${paymentId}`),
   ]]).reply_markup;
-  let adminMsg;
-  for (const adminId of ADMIN_IDS) {
-    try {
-      const sent = photoFileId
-        ? await ctx.telegram.sendPhoto(adminId, photoFileId, { caption, reply_markup: kb })
-        : await ctx.telegram.sendMessage(adminId, caption, { reply_markup: kb });
-      if (!adminMsg) adminMsg = sent;
-    } catch {}
-  }
+  const adminMsg = await sendToReceiptRecipients(p, { caption, photoFileId, kb });
   stmts.setSuspectHold.run(photoFileId || null, adminMsg?.message_id || null, paymentId);
 }
 
@@ -9655,7 +9802,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       // که مدل باید روی رسید دنبالش بگردد، و شمردنِ صفرهایش کلِ کارِ اوست.
       expected: {
         amount_toman: amountToman, amount_rial: amountToman * 10,
-        recipient: CARD_RECIPIENT_NAME, dest_last4: CARD_DEST_LAST4,
+        // 💳 گیرنده و چهار رقمِ آخر از کارتِ **همین فاکتور**، نه یک ثابتِ سراسری.
+        recipient: cardOfPayment(p).holder, dest_last4: cardOfPayment(p).number.slice(-4),
       },
       imageBuffer, imageMime: 'image/jpeg', text: textBody,
     });
@@ -9758,25 +9906,13 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
   let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packSoldIn(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
-  const kb = creditedReceiptKb(p.id);
-  for (const adminId of ADMIN_IDS) {
-    try {
-      if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
-      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
-    } catch {}
-  }
+  await sendToReceiptRecipients(p, { caption, photoFileId: p.receipt_file_id, kb: creditedReceiptKb(p.id) });
 }
 // یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
 // `kb` اختیاری است: فقط برای یادداشتی که پشتش اعتبار داده شده (کم‌پرداختِ اصلاح‌شده).
 async function notifyAdminAuto(p, user, note, photoFileId, kb = undefined) {
   const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packSoldIn(p))}`;
-  const extra = kb ? { reply_markup: kb } : {};
-  for (const adminId of ADMIN_IDS) {
-    try {
-      if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption, ...extra });
-      else await bot.telegram.sendMessage(adminId, caption, extra);
-    } catch {}
-  }
+  await sendToReceiptRecipients(p, { caption, photoFileId, kb });
 }
 // ردِ خودکارِ ایجنت — از pending هم مجاز (قبل از waiting_review)؛ ضدِ دوبار با گاردِ status
 function rejectPaymentAI(paymentId) {
@@ -9900,12 +10036,13 @@ async function afterApproval(uid) {
 // `reversePayment` عیناً همان فرآیندِ رسیدهای auto-approve را اجرا می‌کند؛ هیچ منطقِ
 // موازیِ تازه‌ای ساخته نشد.
 bot.action(/^approve:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
   try { await ctx.editMessageReplyMarkup(creditedReceiptKb(pid)); } catch {}
+  notifyOwnerAction(ctx.from.id, pid, '✅ تأیید');
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
@@ -9944,11 +10081,12 @@ if (starsRail || FEATURE_STARS_TOGGLE) {
 }
 
 bot.action(/^reject:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   const p = rejectPaymentDb(parseInt(ctx.match[1], 10));
   if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  notifyOwnerAction(ctx.from.id, p.id, '❌ رد');
   await sendRejectedPayment(p.user_id);
 });
 
@@ -9958,7 +10096,7 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
 // بی‌صدا پس می‌گیرد (`clawbackDuplicate`) — کارِ مالی است و یک تپِ اشتباه روی گوشی نباید
 // پولِ کاربرِ واقعی را بگیرد. روی رسیدِ هنوز تأییدنشده، رفتار همان یک‌تپیِ قبلی است.
 bot.action(/^duplicate:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const cur = stmts.getPayment.get(pid);
   if (cur?.status === 'approved') {
@@ -9972,19 +10110,21 @@ bot.action(/^duplicate:(\d+)$/, async (ctx) => {
   if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('رسید تکراری ثبت شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  notifyOwnerAction(ctx.from.id, pid, '↩️ رسید تکراری');
 });
 bot.action(/^dupyes:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery('در حال برگشت…').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const done = clawbackDuplicate(parseInt(ctx.match[1], 10));
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
+  notifyOwnerAction(ctx.from.id, done.p.id, '↩️ رسید تکراری (پس‌گرفتنِ الماس)');
   // عمداً هیچ پیامی به کاربر نمی‌رود (خواسته‌ی صریحِ مالک).
   await ctx.reply(L.wallet.adminDuplicateClawed(invoiceNoOf(done.p), done.p.user_id, done.back,
     packOf(done.p) ? done.back : null)).catch(() => {});
 });
 bot.action(/^dupno:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.wallet.reverseCancelled(invoiceNoOf(stmts.getPayment.get(parseInt(ctx.match[1], 10))))).catch(() => {});
@@ -9992,7 +10132,7 @@ bot.action(/^dupno:(\d+)$/, async (ctx) => {
 
 /* ── شبکه‌ی ایمنیِ auto-approve: «پیامکش نیومده» → تأیید دوم → برگشت + بی‌اعتمادی ── */
 bot.action(/^cardsms:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery().catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   await ctx.reply(L.wallet.confirmReverse(invoiceNoOf(stmts.getPayment.get(pid))), Markup.inlineKeyboard([[
@@ -10001,17 +10141,18 @@ bot.action(/^cardsms:(\d+)$/, async (ctx) => {
   ]])).catch(() => {});
 });
 bot.action(/^cardrev:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery('در حال برگشت…').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   const done = await reversePayment(parseInt(ctx.match[1], 10));
   if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
+  notifyOwnerAction(ctx.from.id, done.p.id, '🚫 پیامکش نیومده (برگشت)');
   await bot.telegram.sendMessage(done.p.user_id, L.wallet.reversedUser(curOf(done.p.user_id))).catch(() => {});
   await ctx.reply(L.wallet.adminReversed(invoiceNoOf(done.p), done.p.user_id, done.back,
     packOf(done.p) ? done.back : null)).catch(() => {});
 });
 bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
   await ctx.reply(L.wallet.reverseCancelled(invoiceNoOf(stmts.getPayment.get(parseInt(ctx.match[1], 10))))).catch(() => {});
@@ -10021,12 +10162,13 @@ bot.action(/^cardrevno:(\d+)$/, async (ctx) => {
 // «آمده» هم یک تصمیمِ دستیِ ادمین است (دقیقاً هم‌کلاسِ approve:)، پس همان شبکه‌ی
 // ایمنی را می‌گیرد: کیبورد کاملاً حذف نمی‌شود، فقط «🚫 پیامکش نیومده» می‌ماند.
 bot.action(/^susyes:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
   try { await ctx.editMessageReplyMarkup(creditedReceiptKb(pid)); } catch {}
+  notifyOwnerAction(ctx.from.id, pid, '✅ پیامکش اومده (مشکوک)');
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
@@ -10037,7 +10179,7 @@ bot.action(/^susyes:(\d+)$/, async (ctx) => {
   }
 });
 bot.action(/^susno:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
   const pid = parseInt(ctx.match[1], 10);
   const p = stmts.getPayment.get(pid);
   // چون کریدیت هرگز داده نشده، «نیومده» فقط ردّش می‌کند — هیچ برگشتِ اعتباری لازم نیست.
@@ -10049,6 +10191,7 @@ bot.action(/^susno:(\d+)$/, async (ctx) => {
   stmts.clearSuspect.run(p.user_id);
   await ctx.answerCbQuery('❌').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  notifyOwnerAction(ctx.from.id, pid, '❌ پیامکش نیومده (مشکوک ⟵ بی‌اعتماد)');
   await sendRejectedPayment(p.user_id);
 });
 
@@ -10084,12 +10227,7 @@ async function resendReceiptToAdmins(p) {
   ], [
     Markup.button.callback('↩️ رسید تکراری', `duplicate:${p.id}`),
   ]]).reply_markup;
-  for (const adminId of ADMIN_IDS) {
-    try {
-      if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
-      else await bot.telegram.sendMessage(adminId, caption, { reply_markup: kb });
-    } catch {}
-  }
+  await sendToReceiptRecipients(p, { caption, photoFileId: p.receipt_file_id, kb });
   stmts.setReminded.run(p.id);
 }
 
@@ -10189,9 +10327,9 @@ async function expireStarsInvoice(p) {
     // ⚠️ عمداً L.wallet.invoice() همیشگی صدا زده می‌شود، نه یک رندرِ موازی — بند ۶ج
     // ریشه: مبلغ و بسته باید از همان یک منبع چاپ شوند که فاکتورِ اصلی هم ازش می‌آید.
     const text = L.wallet.starsInvoiceExpiredNotice + '\n\n'
-      + L.wallet.invoice(p.amount, CARD_NUMBER, CARD_OWNER, invoicePurchaseFor(p.user_id, p.id), cur);
+      + L.wallet.invoice(p.amount, ...invoiceCardArgs(p.id), invoicePurchaseFor(p.user_id, p.id), cur);
     const kb = Markup.inlineKeyboard([
-      cardCopyRow(),
+      cardCopyRow(p.id),
       ...starsToggleRow(p.user_id, p.id, !!pack),
       [Markup.button.callback(L.buttons.cancel, `pay_cancel:${p.id}`)],
     ]).reply_markup;

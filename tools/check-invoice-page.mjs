@@ -141,9 +141,14 @@ console.log('\n💰 خطِ مبلغ: عددِ کامل اول، شکلِ کوت�
  * یعنی پولِ کاربر به کارتِ دیگری می‌رود، بی‌صدا. */
 console.log('\n💳 شماره کارت: دش‌دار و قابلِ تپ');
 {
-  const CARD = SRC.match(/const CARD_NUMBER = '([^']+)'/)?.[1] || '';
-  const OWNER = SRC.match(/const CARD_OWNER {2}= '([^']+)'/)?.[1] || '';
-  ok(/^\d{16}$/.test(CARD), `CARD_NUMBER در سورس ۱۶ رقمِ خام است (بدونِ دش): ${CARD}`);
+  /* از v3.122.0 شماره‌ی هر فاکتور از جدولِ `cards` می‌آید (چکِ کاملش: check-cards.mjs).
+   * این‌جا همان کارتِ ۱ (`LEGACY_CARD`، که سیدِ کارتِ ۱ هم از آن می‌خواند) سنجیده می‌شود و
+   * خطِ صاحب کارت با خودِ `cardOwnerLine` ساخته می‌شود، نه یک رشته‌ی دستی. */
+  const lc = SRC.match(/const LEGACY_CARD = Object\.freeze\(\{\s*id: 0, number: '(\d+)', holder: '([^']+)', bank: '([^']+)'/);
+  const CARD = lc?.[1] || '';
+  const ownerLine = new Function('return ' + (SRC.match(/const cardOwnerLine = ([^\n]+);/)?.[1] || '() => ""'))();
+  const OWNER = lc ? ownerLine({ holder: lc[2], bank: lc[3] }) : '';
+  ok(/^\d{16}$/.test(CARD), `شماره‌ی کارتِ ۱ در سورس ۱۶ رقمِ خام است (بدونِ دش): ${CARD}`);
 
   const body = L.wallet.invoice(60_000, CARD, OWNER, { pack: { key: 'gold' }, coins: 30 }, CUR);
   const shown = body.split('\n').find((l) => /\d{4}-\d{4}/.test(l)) || '';
@@ -161,8 +166,8 @@ console.log('\n💳 شماره کارت: دش‌دار و قابلِ تپ');
 
   /* 🔒 ولی دکمه عمداً ارقامِ **خام** را نگه می‌دارد: مسیرِ کپیِ تضمینی برای اپی که
    * روزی دش را نفهمد. یعنی دو مسیرِ کپی داریم و هر دو معتبرند. */
-  const copyRow = SRC.match(/const cardCopyRow = \(\) => (.+);/)?.[1] || '';
-  ok(/copy_text: \{ text: CARD_NUMBER \}/.test(copyRow),
+  const copyRow = SRC.match(/const cardCopyRow = \(pid\) => (.+);/)?.[1] || '';
+  ok(/copy_text: \{ text: cardOfPid\(pid\)\.number \}/.test(copyRow),
     'دکمه‌ی کپی همچنان ارقامِ خام را می‌دهد (مسیرِ کپیِ تضمینی)');
   ok(!/cardFmt|-/.test(copyRow.replace('=>', '')), 'و هیچ دشی واردِ فیلدِ دکمه نمی‌شود');
 
@@ -172,8 +177,8 @@ console.log('\n💳 شماره کارت: دش‌دار و قابلِ تپ');
 
   /* و تطبیقِ ایجنتِ رسید از همان ارقامِ خام می‌آید، نه از رشته‌ی نمایشی — وگرنه
    * فرمتِ نمایشی می‌توانست بی‌صدا تأییدِ خودکارِ رسید را بشکند. */
-  const last4 = SRC.match(/const CARD_DEST_LAST4 {5}= '(\d+)'/)?.[1] || '';
-  ok(last4 && CARD.endsWith(last4), `چهار رقمِ آخرِ ایجنتِ رسید با CARD_NUMBER می‌خواند (${last4})`);
+  ok(/dest_last4: cardOfPayment\(p\)\.number\.slice\(-4\)/.test(SRC),
+    'چهار رقمِ آخرِ ایجنتِ رسید از ارقامِ خامِ کارتِ همین فاکتور می‌آید');
 }
 
 console.log('\n🧾 عنوانِ داینامیک');
@@ -214,7 +219,7 @@ console.log('\n📌 آن‌چه مالک گفت دست نخورد');
   const invStart = SRC.indexOf('L.wallet.invoice(pack.toman');
   const invBlock = invStart > 0 ? SRC.slice(invStart, SRC.indexOf('});', invStart)) : '';
   ok(!!invBlock, 'بلوکِ ارسالِ فاکتور در سورس پیدا شد');
-  ok(/cardCopyRow\(\)/.test(invBlock), 'دکمه‌ی «کپی شماره کارت» زیرِ فاکتور هست');
+  ok(/cardCopyRow\(payId\)/.test(invBlock), 'دکمه‌ی «کپی شماره کارت» زیرِ فاکتور هست (با شماره‌ی همان پرداخت)');
   ok(/pay_cancel:\$\{payId\}/.test(invBlock), 'و دکمه‌ی انصراف هم');
 }
 

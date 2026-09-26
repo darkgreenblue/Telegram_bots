@@ -1082,8 +1082,14 @@ console.log('\n▶ 🧪 تستر: فیچرها بله، اختیارِ ادمی�
 
   // ⚠️ مهم‌ترین ادعا: هیچ اختیارِ ادمینی به تستر نشت نکرده باشد.
   // هر گاردِ ادمینِ واقعی (رسید، /stats، /newcode، اکشن‌های ادمین) باید isAdmin بماند.
-  const adminGuards = (SRC.match(/if \(!isAdmin\(ctx\.from\.id\)\)/g) || []).length;
+  // از v3.122.0 اکشن‌های رسید پشتِ `canActOnPayment` اند (ادمینِ ربات یا ادمینِ **همان**
+  // کارت؛ check-cards.mjs). آن هم نباید تستر را بپذیرد.
+  const adminGuards = (SRC.match(/if \(!isAdmin\(ctx\.from\.id\)\)/g) || []).length
+    + (SRC.match(/if \(!canActOnPayment\(ctx\.from\.id,/g) || []).length;
   ok(adminGuards >= 7, `اختیارهای ادمین هنوز پشتِ isAdmin اند (${adminGuards} گارد)`);
+  const cap = SRC.slice(SRC.indexOf('function canActOnPayment('), SRC.indexOf('function notifyOwnerAction('));
+  ok(/if \(isAdmin\(uid\)\) return true;/.test(cap) && !/isTester/.test(cap),
+    'اجازه‌ی اکشنِ رسید از isAdmin و ادمینِ کارت می‌آید، نه isTester');
   ok(!/if \(!isTester\(ctx\.from\.id\)\) return ctx\.answerCbQuery\('🔒'\)/.test(SRC),
     'هیچ دکمه‌ی قفل‌دارِ ادمینی به تستر باز نشده');
   for (const cmd of ['stats', 'newcode']) {
