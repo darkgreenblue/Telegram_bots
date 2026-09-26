@@ -61,14 +61,6 @@ function normalize(data) {
   };
 }
 
-function parse(raw) {
-  let s = (raw || '').trim();
-  if (s.startsWith('```')) { s = s.replace(/^```(json)?/i, '').replace(/```$/,'').trim(); }
-  const a = s.indexOf('{'), b = s.lastIndexOf('}');
-  if (a !== -1 && b !== -1 && b > a) s = s.slice(a, b + 1);
-  return normalize(JSON.parse(s));
-}
-
 // ── واحدِ پول: چرا حساب‌وکتابش این‌جاست و نه در مدل ───────────────────────────
 // رسیدِ بانکیِ ایرانی تقریباً همیشه **ریال** چاپ می‌کند، ولی فاکتوری که ما به کاربر نشان
 // می‌دهیم **تومان** است (چون همه به تومان می‌نویسند). یعنی رسیدِ درست همیشه یک صفر
@@ -198,12 +190,70 @@ function decideReceipt(verdict, expectedToman) {
   return out(underpaid ? 'underpaid' : v, { paid: hasPaid ? paid : null, overpaid, basis });
 }
 
+// ── اعتبارسنجیِ سختِ خروجیِ مدل (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۷/۰۴) ─────────────────
+// `normalize` بالا هر چیزی را «قابلِ استفاده» می‌کند: verdictِ ناشناخته را بی‌صدا review
+// می‌کند و extractedِ غایب را `{}`. این برای **بعد از** پذیرشِ یک پاسخ درست است، ولی
+// پاسخی که شکلش غلط است نباید اصلاً پذیرفته شود: مدل را **دوباره** صدا می‌زنیم (یا مدلِ
+// بعدیِ زنجیره را)، و فقط اگر هیچ‌کدام پاسخِ سالم ندادند به تأییدِ دستی می‌رویم.
+// خروجی: رشته‌ی خطا (برای لاگ) یا null یعنی سالم.
+function validateVerdict(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'not_object';
+  const v = String(data.verdict ?? '').trim().toLowerCase();
+  if (!VERDICTS.includes(v)) return `bad_verdict:${String(data.verdict).slice(0, 20)}`;
+  if (data.extracted != null && (typeof data.extracted !== 'object' || Array.isArray(data.extracted))) return 'bad_extracted';
+  // تأیید بدونِ «آن‌چه خوانده شد» معنی ندارد: decideReceipt بدونِ مبلغ تأیید نمی‌کند، پس
+  // این پاسخ در بهترین حالت یک review ساختگی است و بهتر است دوباره پرسیده شود.
+  if (v === 'approve' && (data.extracted == null)) return 'approve_without_extracted';
+  const amt = data.extracted?.amount_raw;
+  if (amt != null && !(Number.isFinite(Number(amt)) && Number(amt) >= 0)) return 'bad_amount_raw';
+  if (data.risk_flags != null && !Array.isArray(data.risk_flags)) return 'bad_risk_flags';
+  return null;
+}
+
+function parseStrict(raw) {
+  let s = (raw || '').trim();
+  if (s.startsWith('```')) { s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim(); }
+  const a = s.indexOf('{'), b = s.lastIndexOf('}');
+  if (a === -1 || b <= a) throw new Error('no_json');
+  let data;
+  try { data = JSON.parse(s.slice(a, b + 1)); } catch { throw new Error('bad_json'); }
+  const err = validateVerdict(data);
+  if (err) throw new Error(err);
+  return normalize(data);
+}
+
+// promise را حداکثر `ms` صبر می‌کند، **مستقل از abort**. درسِ v3.118.0 (فالِ آویزان):
+// روی سرور یک fetch دیده شد که abort رویش اثر نکرد و هرگز settle نشد؛ پس هیچ سقفی نباید
+// فقط به AbortController تکیه کند. کپیِ محلی است چون این ماژول عمداً هیچ importی ندارد.
+function raceTimeout(promise, ms, onExpire) {
+  let timer = null;
+  const stop = new Promise((_, rej) => {
+    timer = setTimeout(() => { try { onExpire?.(); } catch {} rej(new Error('TIMEOUT')); }, Math.max(1, ms));
+  });
+  return Promise.race([promise, stop]).finally(() => clearTimeout(timer));
+}
+
+// ددلاینِ کلِ ایجنت (خواسته‌ی مالک: «مثلاً ۱ دقیقه»). عبور از آن = تأییدِ دستی با برچسبِ
+// «ربات تأییدکننده ایراد دارد». تلاشی که کمتر از MIN_ATTEMPT_MS فرصت داشته باشد شروع
+// نمی‌شود (یک فراخوانیِ تصویری در کمتر از چند ثانیه عملاً کامل نمی‌شود و فقط هزینه است).
+const RECEIPT_DEADLINE_MS = 60_000;
+const RECEIPT_ATTEMPT_MS = 30_000;
+const MIN_ATTEMPT_MS = 4_000;
+
 // analyzeReceipt: یکی از imageBuffer یا text را بده.
-// deps: fetchImpl (پیش‌فرض global fetch) تا قابلِ‌تست باشد.
-async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', model,
+// `models` زنجیره‌ی تلاش است (اولی اصلی؛ تکرارِ یک مدل یعنی «دوباره بپرس»). `model`ِ تکی
+// برای سازگاری با فراخواننده‌های قدیمی مانده.
+// خروجی همیشه یک verdictِ نرمال است به‌علاوه‌ی `agent`:
+//   { ok: true,  model, attempts: [...] }  ⟵ پاسخِ سالم از یکی از مدل‌ها
+//   { ok: false, attempts: [...] }         ⟵ هیچ پاسخِ سالمی در ددلاین نیامد ⟵ review
+// deps: fetchImpl و now تا قابلِ‌تست باشد.
+async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', model, models = null,
                                expected = {}, imageBuffer = null, imageMime = 'image/jpeg',
-                               text = null, timeoutMs = 60000, fetchImpl = null }) {
+                               text = null, timeoutMs = RECEIPT_ATTEMPT_MS,
+                               deadlineMs = RECEIPT_DEADLINE_MS, minAttemptMs = MIN_ATTEMPT_MS,
+                               fetchImpl = null, now = Date.now }) {
   const doFetch = fetchImpl || fetch;
+  const chain = (Array.isArray(models) && models.length ? models : [model]).filter(Boolean);
   let userContent;
   if (imageBuffer) {
     const b64 = Buffer.from(imageBuffer).toString('base64');
@@ -215,33 +265,53 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
     userContent = 'کاربر این متن را به‌عنوانِ رسیدِ پرداخت فرستاده. طبق قرارداد داوری کن و فقط JSON بده.\n\nمتنِ کاربر:\n'
       + String(text || '').slice(0, 4000);
   }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await doFetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: systemPrompt(expected) },
-          { role: 'user', content: userContent },
-        ],
-      }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
-    const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content || '';
-    return parse(raw);
-  } catch (e) {
-    // هرگز در خطا auto approve/reject نکن — به انسان بسپار.
-    return normalize({ verdict: 'review', reason_code: 'uncertain',
-      reason_fa: 'بررسیِ خودکارِ رسید ممکن نشد؛ به ادمین ارجاع شد.', risk_flags: ['agent_error'] });
-  } finally {
-    clearTimeout(timer);
+  const system = systemPrompt(expected);
+  const started = now();
+  const attempts = [];
+
+  const callOnce = async (m, ms) => {
+    const ctrl = new AbortController();
+    const work = (async () => {
+      const res = await doFetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: m,
+          temperature: 0,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: userContent },
+          ],
+        }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`http_${res.status}`);
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || '';
+    })();
+    return raceTimeout(work, ms, () => ctrl.abort());
+  };
+
+  for (const m of chain) {
+    const remaining = deadlineMs - (now() - started);
+    if (remaining < minAttemptMs) { attempts.push({ model: m, error: 'deadline' }); break; }
+    const t0 = now();
+    try {
+      const raw = await callOnce(m, Math.min(timeoutMs, remaining));
+      const verdict = parseStrict(raw);
+      attempts.push({ model: m, ms: now() - t0, ok: true });
+      return { ...verdict, agent: { ok: true, model: m, attempts } };
+    } catch (e) {
+      attempts.push({ model: m, ms: now() - t0, error: String(e?.message || e).slice(0, 60) });
+    }
   }
+  // هرگز در خطا auto approve/reject نکن — به انسان بسپار.
+  return {
+    ...normalize({ verdict: 'review', reason_code: 'uncertain',
+      reason_fa: 'بررسیِ خودکارِ رسید ممکن نشد؛ به ادمین ارجاع شد.', risk_flags: ['agent_error'] }),
+    agent: { ok: false, attempts },
+  };
 }
 
-export { analyzeReceipt, decideReceipt, resolvePaidToman, VERDICTS };
+export { analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
+  VERDICTS, RECEIPT_DEADLINE_MS };

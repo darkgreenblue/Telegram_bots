@@ -395,6 +395,7 @@ export default {
     smsNotArrived: '🚫 No llegó el aviso',
     reverseYes: '✅ Sí, revertir',
     reverseNo: '↩️ No, déjalo así',
+    duplicateYes: '✅ Sí, está duplicado',
     // کدِ مرده برای این زبان (بند ۲و/۴ ریشه: فقط روی ریلِ کارت‌به‌کارتِ فارسی اجرا می‌شود)
     suspectYes: '✅ Sí llegó el aviso',
     suspectNo: '❌ No llegó el aviso',
@@ -1083,6 +1084,11 @@ export default {
     adminReversed: (pid, uid, back, n) =>
       `↩️ Pago #${pid} revertido; ${n != null ? coins(n) : fmt(back)} debitado, y la persona ${uid} quedó marcada como no confiable (de aquí en adelante solo a mano).`,
     reverseAlready: 'Ese pago ya fue revertido o todavía no está aprobado.',
+    confirmDuplicate: (pid) =>
+      `⚠️ ¿Marcar el pago #${pid} como recibo duplicado?\nLos diamantes de este pago se descontarán del saldo del usuario (hasta cero). El usuario no recibe ningún mensaje ni queda marcado como no confiable.`,
+    adminDuplicateClawed: (pid, uid, back, coins) =>
+      `↩️ Pago #${pid} marcado como recibo duplicado; se descontaron ${coins != null ? `${fmt(coins)} diamantes` : `${fmt(back)}`} al usuario ${uid} (sin mensaje al usuario y sin marca de no confiable).`,
+    agentBroken: '⚠️ El bot verificador de recibos tiene un problema; revisa este recibo manualmente.',
     reverseCancelled: (pid) => `Listo, no se hizo el reverso. El pago #${pid} quedó como estaba.`,
     approved: (amount, balance, bonus) =>
       `✅ ¡Compra de ${fmt(amount)} aprobada!${bonus ? `\n🎁 + ${fmt(bonus)} de regalo` : ''}\nSaldo nuevo: ${fmt(balance)}`,

@@ -582,8 +582,9 @@ console.log('\n▶ 🛟 approve/susyes همان دکمه‌ی «پیامکش ن�
   ok(!!rejectBody, 'بدنه‌ی reject: از سورس پیدا شد');
   ok(!!susnoBody, 'بدنه‌ی susno: از سورس پیدا شد');
 
-  const CARDSMS_KEYBOARD =
-    /Markup\.inlineKeyboard\(\[\[\s*Markup\.button\.callback\(L\.buttons\.smsNotArrived,\s*`cardsms:\$\{pid\}`\),?\s*\]\]\)\.reply_markup/;
+  // از v3.120.0 کیبوردِ بعد از تأیید از تک‌منبعِ `creditedReceiptKb` ساخته می‌شود («پیامکش
+  // نیومده» + زیرش «رسید تکراری»). محتوای خودِ آن کیبورد را check-receipt-agent می‌سنجد.
+  const CARDSMS_KEYBOARD = /editMessageReplyMarkup\(creditedReceiptKb\(pid\)\)/;
 
   ok(approveBody ? CARDSMS_KEYBOARD.test(approveBody) : false,
     'approve: بعد از تأیید، کیبورد را با تک‌دکمه‌ی cardsms جایگزین می‌کند');
@@ -605,7 +606,9 @@ console.log('\n▶ 🛟 approve/susyes همان دکمه‌ی «پیامکش ن�
   // دکمه از همان تابعی ساخته می‌شود که رسیدهای auto-approve از v3.61.0 دارند
   // (notifyAdminAutoApproved) — یعنی منطقِ تازه‌ای موازی ساخته نشده.
   const autoBody = bodyOf('function notifyAdminAutoApproved(');
-  ok(autoBody ? /Markup\.button\.callback\(L\.buttons\.smsNotArrived,\s*`cardsms:\$\{p\.id\}`\)/.test(autoBody) : false,
+  const kbDef = bodyOf('const creditedReceiptKb', ']).reply_markup;');
+  ok(autoBody && kbDef ? /creditedReceiptKb\(p\.id\)/.test(autoBody)
+      && /Markup\.button\.callback\(L\.buttons\.smsNotArrived,\s*`cardsms:\$\{pid\}`\)/.test(kbDef) : false,
     'همان الگوی دکمه‌ای که رسیدِ auto-approve از قبل داشت، اینجا هم تکرار شده');
 }
 

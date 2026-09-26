@@ -61,7 +61,7 @@ import { eligibleCards, pickVariant, textOf as ganjinehText, countOf as ganjineh
 // همان کد را `tools/reading-lab.mjs` هم صدا می‌زند تا تستِ آفلاین دقیقاً همان چیزی را
 // اجرا کند که کاربر می‌بیند (کپی نداریم، پس drift ممکن نیست).
 import {
-  FLASH, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
+  FLASH, GEMINI3_FLASH, LUNA, READING_MODEL, FALLBACK_MODEL, OR_TIMEOUT_MS,
   orChatResilient, orTranscribe, parseJsonLoose, setUsageSink,
   seedToInt, mulberry32, shuffledDeck, drawCards, botToday, botDaysAgo, botHour, GRID_SIZE,
   checkV4Shape, softMissesV4, v4Text,
@@ -321,7 +321,10 @@ const TEST_PHASE = false;
 //         آسیب/اورژانس فقط با نشانه‌ی صریحِ خطر از خودِ کاربر. جزئیات: CLAUDE.md تاروت.
 // 3.119.0: 💰 بازوی `basic_20` برای آزمایشِ تازه‌ی `price_ladder_p5_basic_20` (۱۵k در برابرِ
 //         ۲۰k)؛ تا از داشبورد/Ops running نشود رفتار دقیقاً همان کنترل است.
-const PRODUCT_VERSION = '3.119.0';
+// 3.120.0: 🧾 ایجنتِ رسید: زنجیره‌ی فالبکِ مدل (جمنای ۲.۵ ⟵ جمنای ۳ فلش ⟵ luna)، اعتبارسنجیِ
+//         خروجی با کد و پرسیدنِ دوباره، ددلاینِ ۶۰ث ⟵ «ربات تأییدکننده ایراد دارد». و «رسید
+//         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
+const PRODUCT_VERSION = '3.120.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1202,7 +1205,12 @@ const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ ک�
 // برگشت + بی‌اعتمادی. کلیدِ خاموشیِ سراسری (env RECEIPT_AI_AUTO_APPROVE=false → همه‌ی رسیدها
 // دستی به ادمین می‌روند، بدون تصمیمِ خودکار). پیش‌فرض: روشن.
 const RECEIPT_AI_AUTO_APPROVE = (process.env.RECEIPT_AI_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
-const RECEIPT_MODEL = FLASH;
+/* 🧾 زنجیره‌ی مدلِ ایجنتِ رسید (v3.120.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۴). تکرارِ FLASH یعنی
+ * «خروجیِ نامعتبر ⟵ دوباره بپرس»؛ بعد جانشینِ هم‌خانواده و بعد luna. اوپن‌روتر برای
+ * gemini-2.5-flash تاریخِ حذف ۲۰۲۶-۱۰-۲۰ گذاشته، پس روزی که حذف شود تلاش‌های اول سریع
+ * خطا می‌دهند و زنجیره خودش جلو می‌رود. کلِ زنجیره زیرِ ددلاینِ ۶۰ثانیه‌ای است
+ * (`RECEIPT_DEADLINE_MS` در cardpay.js) و شکستِ همه = تأییدِ دستی با برچسبِ صریح. */
+const RECEIPT_MODELS = [FLASH, FLASH, GEMINI3_FLASH, LUNA];
 // دکمه‌ی کپیِ شماره کارت (Telegram copy_text — کلیک = کپی به کلیپ‌بورد). قاعده‌ی سراسری:
 // هر پیامِ پرداختِ کارت‌به‌کارت که شماره کارت را نشان می‌دهد باید این دکمه را زیرش داشته باشد.
 const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text: { text: CARD_NUMBER } }];
@@ -9515,6 +9523,14 @@ async function applyDiscount(ctx, uid, codeText) {
   }
 }
 
+/* ↩️ کیبوردِ هر رسیدِ **اعتباردیده** (v3.120.0، خواسته‌ی مالک): «پیامکش نیومده» برای رسیدِ
+ * فیک و، زیرش، «رسید تکراری» برای کاربری که تقصیری نداشته و فقط رسیدِ تکراری فرستاده.
+ * تک‌منبع است تا هیچ مسیرِ تأییدی (دستی، خودکار، مشکوک، کم‌پرداخت) یکی را جا نیندازد. */
+const creditedReceiptKb = (pid) => Markup.inlineKeyboard([
+  [Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`)],
+  [Markup.button.callback(L.buttons.duplicateReceipt, `duplicate:${pid}`)],
+]).reply_markup;
+
 // note: هشدارِ اختیاری بالای رسید (مثلاً «مبلغ ممکن است ریال باشد») تا ادمین کورکورانه
 // تأیید نکند. بدونِ آن، بازبینیِ انسانی همان خطای مدل را تکرار می‌کند.
 async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, note = '') {
@@ -9632,7 +9648,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   let decision;
   try {
     const verdict = await analyzeReceipt({
-      apiKey: OPENROUTER_API_KEY, model: RECEIPT_MODEL,
+      apiKey: OPENROUTER_API_KEY, models: RECEIPT_MODELS,
       // `amount_rial` صریح داده می‌شود (نه استنتاجی در خودِ پرامپت): این تنها عددی است
       // که مدل باید روی رسید دنبالش بگردد، و شمردنِ صفرهایش کلِ کارِ اوست.
       expected: {
@@ -9641,10 +9657,27 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
       },
       imageBuffer, imageMime: 'image/jpeg', text: textBody,
     });
-    decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
+    const tries = (verdict.agent?.attempts || []).map((a) => `${a.model}:${a.ok ? 'ok' : a.error}`).join(' ');
+    if (verdict.agent?.ok) {
+      log(`🧾 RECEIPT_AGENT #${paymentId} model=${verdict.agent.model} verdict=${verdict.verdict}/${verdict.reason_code} tries=[${tries}]`);
+      decision = decideReceipt(verdict, amountToman); // گاردِ قطعیِ مبلغ (پرداختِ بیشتر → تأیید)
+    } else {
+      logErr(`❌ RECEIPT_AGENT_FAIL #${paymentId} tries=[${tries}]`);
+      decision = { action: 'review', reason_fa: '', overpaid: 0, agentFailed: true };
+    }
   } catch (e) {
-    logErr('receipt agent:', e.message);
-    decision = { action: 'review', reason_fa: '', overpaid: 0 };
+    logErr(`❌ RECEIPT_AGENT_FAIL #${paymentId}:`, e.message);
+    decision = { action: 'review', reason_fa: '', overpaid: 0, agentFailed: true };
+  }
+
+  /* 🛟 فالبکِ نهاییِ کلِ سیستم تأییدِ دستی است (قاعده‌ی مالک). ایجنت در ددلاینش پاسخِ
+   * سالمی نداد ⟵ همین حالا، بدونِ تأخیرِ ساختگی، با برچسبِ صریح به ادمین. برچسب مهم است:
+   * ادمین باید بداند این رسید «مشکوک» نیست، بلکه خودِ ربات خراب است. */
+  if (decision.agentFailed) {
+    try {
+      await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, L.wallet.agentBroken);
+    } catch (e) { logErr('receipt agentFailed → admin:', e.message); }
+    return setState(uid, nextState);
   }
 
   // تأخیرِ انسانی پیش از پاسخِ خودکار: معمولی ۴۰–۶۰ث، ویژه/جادویی ۱۵–۳۰ث.
@@ -9691,7 +9724,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
         if (!done) return setState(uid, nextState);
         await ctx.reply(L.wallet.underpaidApproved(paid, getBalance(uid))).catch(() => {});
         await notifyAdminAuto(stmts.getPayment.get(paymentId), getUser(uid),
-          `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId);
+          `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId,
+          creditedReceiptKb(paymentId));
         return await afterApproval(uid);
       }
       // ناامن (تخفیف داشت، یا مبلغ خیلی کم بود) → تصمیمِ انسانی
@@ -9722,9 +9756,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
   let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packSoldIn(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
-  const kb = Markup.inlineKeyboard([[
-    Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${p.id}`),
-  ]]).reply_markup;
+  const kb = creditedReceiptKb(p.id);
   for (const adminId of ADMIN_IDS) {
     try {
       if (p.receipt_file_id) await bot.telegram.sendPhoto(adminId, p.receipt_file_id, { caption, reply_markup: kb });
@@ -9733,12 +9765,14 @@ async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expected
   }
 }
 // یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
-async function notifyAdminAuto(p, user, note, photoFileId) {
+// `kb` اختیاری است: فقط برای یادداشتی که پشتش اعتبار داده شده (کم‌پرداختِ اصلاح‌شده).
+async function notifyAdminAuto(p, user, note, photoFileId, kb = undefined) {
   const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packSoldIn(p))}`;
+  const extra = kb ? { reply_markup: kb } : {};
   for (const adminId of ADMIN_IDS) {
     try {
-      if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption });
-      else await bot.telegram.sendMessage(adminId, caption);
+      if (photoFileId) await bot.telegram.sendPhoto(adminId, photoFileId, { caption, ...extra });
+      else await bot.telegram.sendMessage(adminId, caption, extra);
     } catch {}
   }
 }
@@ -9752,15 +9786,29 @@ function rejectPaymentAI(paymentId) {
 }
 // برگشتِ پرداختِ فیک: کسرِ اعتبارِ ناشی از این پرداخت (کفِ صفر) + بی‌اعتمادکردنِ کاربر.
 // ضدِ دوبار با گذارِ اتمیکِ approved→reversed. null یعنی قبلاً برگشت خورده/approved نبوده.
-async function reversePayment(paymentId) {
+// هسته‌ی مشترکِ «پس‌گرفتنِ اعتبارِ یک پرداختِ تأییدشده»: گذارِ اتمیکِ approved→reversed
+// (ضدِ دوبار‌تپ) + کسرِ دقیقاً همان مبلغی که approve داد (کفِ صفر). **هیچ تصمیمی درباره‌ی
+// اعتمادِ کاربر نمی‌گیرد**؛ آن را صدازننده می‌گیرد.
+function clawbackApproved(paymentId, extraProps = {}) {
   if (stmts.markPaymentReversed.run(paymentId).changes === 0) return null;
   const p = stmts.getPayment.get(paymentId);
   const creditAmount = p.original_amount || p.amount;
   const back = creditAmount + (p.pkg ? 0 : bonusFor(creditAmount)); // دقیقاً همان که approve اعتبار داد
   stmts.clawback.run(back, p.user_id);
-  stmts.setDistrust.run(p.user_id);
-  track(db, p.user_id, 'payment_reversed', { payment_id: paymentId, amount: p.amount, clawed: back });
+  track(db, p.user_id, 'payment_reversed', { payment_id: paymentId, amount: p.amount, clawed: back, ...extraProps });
   return { p, back };
+}
+async function reversePayment(paymentId) {
+  const done = clawbackApproved(paymentId);
+  if (!done) return null;
+  stmts.setDistrust.run(done.p.user_id);
+  return done;
+}
+/* ↩️ «رسید تکراری» روی پرداختی که **اعتبارش داده شده** (v3.120.0، خواسته‌ی مالک): همان
+ * پس‌گرفتن، ولی **بدونِ** تگِ بی‌اعتماد و **بدونِ** هیچ پیامی به کاربر. تفاوت با «پیامکش
+ * نیومده» عمدی است: کاربری که یک رسیدِ درست را دو بار فرستاده تقصیری ندارد. */
+function clawbackDuplicate(paymentId) {
+  return clawbackApproved(paymentId, { via: 'duplicate_receipt', silent: true });
 }
 
 // allowRejected فقط از مسیرِ پشتیبانی می‌آید: پرداختی که ایجنت اشتباهاً رد کرده بود باید
@@ -9855,11 +9903,7 @@ bot.action(/^approve:(\d+)$/, async (ctx) => {
   const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
-  try {
-    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([[
-      Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`),
-    ]]).reply_markup);
-  } catch {}
+  try { await ctx.editMessageReplyMarkup(creditedReceiptKb(pid)); } catch {}
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
@@ -9908,12 +9952,40 @@ bot.action(/^reject:(\d+)$/, async (ctx) => {
 
 // «رسید تکراری» پرداخت را می‌بندد، اما عمداً نه پیامِ رد می‌فرستد و نه اعتمادِ کاربر را
 // تغییر می‌دهد. برای کاربری که رسیدِ درست را چندبار فرستاده، این با «پیامکش نیومده» فرق دارد.
+// روی رسیدِ **اعتباردیده** (v3.120.0) همان دکمه اول یک تأییدِ دوم می‌خواهد و بعد الماس را
+// بی‌صدا پس می‌گیرد (`clawbackDuplicate`) — کارِ مالی است و یک تپِ اشتباه روی گوشی نباید
+// پولِ کاربرِ واقعی را بگیرد. روی رسیدِ هنوز تأییدنشده، رفتار همان یک‌تپیِ قبلی است.
 bot.action(/^duplicate:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
-  const p = rejectDuplicateReceiptDb(parseInt(ctx.match[1], 10));
+  const pid = parseInt(ctx.match[1], 10);
+  const cur = stmts.getPayment.get(pid);
+  if (cur?.status === 'approved') {
+    await ctx.answerCbQuery().catch(() => {});
+    return ctx.reply(L.wallet.confirmDuplicate(invoiceNoOf(cur)), Markup.inlineKeyboard([[
+      Markup.button.callback(L.buttons.duplicateYes, `dupyes:${pid}`),
+      Markup.button.callback(L.buttons.reverseNo, `dupno:${pid}`),
+    ]])).catch(() => {});
+  }
+  const p = rejectDuplicateReceiptDb(pid);
   if (!p) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('رسید تکراری ثبت شد').catch(() => {});
   try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+});
+bot.action(/^dupyes:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery('در حال برگشت…').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  const done = clawbackDuplicate(parseInt(ctx.match[1], 10));
+  if (!done) return ctx.reply(L.wallet.reverseAlready).catch(() => {});
+  // عمداً هیچ پیامی به کاربر نمی‌رود (خواسته‌ی صریحِ مالک).
+  await ctx.reply(L.wallet.adminDuplicateClawed(invoiceNoOf(done.p), done.p.user_id, done.back,
+    packOf(done.p) ? done.back : null)).catch(() => {});
+});
+bot.action(/^dupno:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('🔒').catch(() => {});
+  await ctx.answerCbQuery('بی‌خیال شد').catch(() => {});
+  try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+  await ctx.reply(L.wallet.reverseCancelled(invoiceNoOf(stmts.getPayment.get(parseInt(ctx.match[1], 10))))).catch(() => {});
 });
 
 /* ── شبکه‌ی ایمنیِ auto-approve: «پیامکش نیومده» → تأیید دوم → برگشت + بی‌اعتمادی ── */
@@ -9952,11 +10024,7 @@ bot.action(/^susyes:(\d+)$/, async (ctx) => {
   const done = approvePayment(pid);
   if (!done) return ctx.answerCbQuery('قبلاً پردازش شده').catch(() => {});
   await ctx.answerCbQuery('✅').catch(() => {});
-  try {
-    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([[
-      Markup.button.callback(L.buttons.smsNotArrived, `cardsms:${pid}`),
-    ]]).reply_markup);
-  } catch {}
+  try { await ctx.editMessageReplyMarkup(creditedReceiptKb(pid)); } catch {}
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
