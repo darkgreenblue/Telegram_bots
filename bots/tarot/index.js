@@ -47,7 +47,8 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
-import { analyzeReceipt, decideReceipt } from './cardpay.js';
+import { analyzeReceipt, decideReceipt, shadowFields } from './cardpay.js';
+import { shadowLine, withShadowLine } from './receipt-tags.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
@@ -327,7 +328,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.125.0';
+const PRODUCT_VERSION = '3.126.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -348,6 +349,12 @@ const CARD_ROTATION_ENABLED = true;
 // بعدیِ همان ادمین ⟵ ادمینِ بعدی ⟵ سفید (`CA.pickSwitchCard`). `false` ⟵ دکمه و تذکرش محو،
 // فاکتور بیت‌به‌بیت v3.124.0؛ اکشنِ `card_switch:` ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد.
 const CARD_SWITCH_ENABLED = true;
+// 🔎 ثبتِ کاملِ خروجیِ ایجنتِ رسید + فیلدهای «فقط ثبت» (v3.126.0، فازِ ۴). ایجنت علاوه بر
+// verdict، پیشوندِ کارتِ مبدأ، اپِ بانکی و «خطای انتقال» را می‌خواند؛ **هیچ‌کدام روی تصمیم اثر
+// ندارند** و فقط در `receipt_analyses` و یک خطِ کوتاه روی پیامِ رسیدِ **مالک** دیده می‌شوند.
+// `false` ⟵ پرامپتِ ایجنت بیت‌به‌بیت v3.125.0 و هیچ خطی اضافه نمی‌شود؛ ثبتِ ردیف می‌ماند
+// (بی‌خطر و لازمِ حسابرسی). مصرف‌کننده‌ها: فازِ ۵ (خطای انتقال) و فازِ ۷ (تگِ خودکار).
+const RECEIPT_SHADOW_ENABLED = true;
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -2067,6 +2074,30 @@ try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEF
 try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run(); } catch {}
 // کارتی که فاکتور **قبل از** تعویض داشت (۰ = تعویض نشده). رسیدِ واریز به آن کارت هم معتبر است.
 try { db.prepare('ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+/* 🔎 فازِ ۴ (v3.126.0): یک ردیف per **هر** اجرای ایجنتِ رسید (موفق یا شکست‌خورده). تا امروز
+ * خروجیِ ایجنت فقط یک خطِ لاگ بود و بعد از چرخشِ لاگ‌های pm2 از بین می‌رفت؛ پس نه می‌شد
+ * دقتش را سنجید، نه فیلدهای تازه را قبل از اعتماد رصد کرد. `raw_json` کلِ verdictِ نرمال
+ * (extracted، risk_flags، تلاش‌ها) است؛ سه ستونِ جدا فقط برای کوئریِ سریعِ فازهای ۵ و ۷اند. */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS receipt_analyses (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    payment_id     INTEGER NOT NULL,
+    user_id        INTEGER NOT NULL,
+    source         TEXT    NOT NULL DEFAULT '',
+    ok             INTEGER NOT NULL DEFAULT 0,
+    model          TEXT    NOT NULL DEFAULT '',
+    verdict        TEXT    NOT NULL DEFAULT '',
+    reason_code    TEXT    NOT NULL DEFAULT '',
+    action         TEXT    NOT NULL DEFAULT '',
+    app            TEXT    NOT NULL DEFAULT '',
+    src_prefix     TEXT    NOT NULL DEFAULT '',
+    transfer_error INTEGER NOT NULL DEFAULT 0,
+    ms             INTEGER NOT NULL DEFAULT 0,
+    raw_json       TEXT    NOT NULL DEFAULT '',
+    created_at     INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_receipt_analyses_payment ON receipt_analyses(payment_id);
+`);
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_assign (
     user_id    INTEGER NOT NULL,
@@ -2981,7 +3012,7 @@ function wipeUser(uid) {
   // کارت‌هایی را که قبلاً دیده دوباره بگیرد و تستِ کارتِ روز عملاً قفل می‌شود.
   // `chat_messages` هم پاک می‌شود (دیتای کاربرمحور). ⚠️ `llm_usage` عمداً نه: دفترِ
   // هزینه است نه دیتای کاربر، و ریستِ تستیِ ادمین نباید تاریخچه‌ی هزینه را قیچی کند.
-  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id'],['chat_messages','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['readings','user_id'],['payments','user_id'],['discount_uses','user_id'],['events','user_id'],['ab_exposures','user_id'],['daily_log','user_id'],['chat_messages','user_id'],['receipt_analyses','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('wipe', t, e.message); }
   }
   try { db.prepare('DELETE FROM discount_codes WHERE only_user_id=?').run(uid); } catch (e) { logErr('wipe personal code', e.message); }
@@ -9885,8 +9916,12 @@ const ownerCopyHeader = (p) => {
  *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
 async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
   let first;
+  const limit = photoFileId ? 1024 : 4096;
+  const sline = ownerShadowLine(p);
   for (const r of receiptRecipients(p)) {
-    const cap = r.full ? caption : (ownerCopyHeader(p) + caption).slice(0, photoFileId ? 1024 : 4096);
+    const base = r.full ? caption : (ownerCopyHeader(p) + caption);
+    // 🔎 خطِ ایجنت فقط روی پیامِ مالک (فازِ ۴)؛ برای بقیه کپشن بیت‌به‌بیت همان قبلی است.
+    const cap = r.id === OWNER_ID ? withShadowLine(base, sline, limit) : (r.full ? caption : base.slice(0, limit));
     const extra = r.full && kb ? { reply_markup: kb } : {};
     try {
       const sent = photoFileId
@@ -9897,7 +9932,7 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }) {
   }
   // تورِ ایمنی: هیچ پیامِ کاملی نرسید ⟵ نسخه‌ی کامل با دکمه‌ها به مالک (یک بار).
   if (!first && receiptRecipients(p).some((r) => r.full && r.id !== OWNER_ID)) {
-    const cap = (`⚠️ ادمینِ این کارت پیام را دریافت نکرد؛ تصمیم با شماست.\n\n${caption}`).slice(0, photoFileId ? 1024 : 4096);
+    const cap = withShadowLine(`⚠️ ادمینِ این کارت پیام را دریافت نکرد؛ تصمیم با شماست.\n\n${caption}`, sline, limit);
     const extra = kb ? { reply_markup: kb } : {};
     try {
       first = photoFileId
@@ -9971,6 +10006,41 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
 /** وضعیت‌هایی که هنوز «در جریان» اند و رسیدِ تازه رویشان معنی دارد. */
 const RECEIPT_LIVE_STATES = ['pending', 'waiting_review'];
 
+/* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴). fail-safe: هیچ خطایی از این‌جا مسیرِ پول را نمی‌شکند.
+ * `verdict=null` یعنی خودِ فراخوانی پرتاب کرد؛ ردیف با `ok=0` ثبت می‌شود تا نرخِ شکست هم دیده شود. */
+let _raIns;
+function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
+  try {
+    const ok = verdict?.agent?.ok ? 1 : 0;
+    const sh = shadowFields(verdict?.extracted);
+    const raw = JSON.stringify({
+      verdict: verdict?.verdict ?? null, reason_code: verdict?.reason_code ?? null,
+      reason_fa: verdict?.reason_fa ?? null, extracted: verdict?.extracted ?? null,
+      risk_flags: verdict?.risk_flags ?? [], agent: verdict?.agent ?? null,
+      decision: decision ? { action: decision.action, reason_code: decision.reason_code ?? null,
+        paid: decision.paid ?? null, overpaid: decision.overpaid ?? 0, basis: decision.basis ?? null } : null,
+    }).slice(0, 8000);
+    (_raIns ||= db.prepare(`INSERT INTO receipt_analyses (payment_id, user_id, source, ok, model, verdict,
+      reason_code, action, app, src_prefix, transfer_error, ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`))
+      .run(p.id, uid, source, ok, String(verdict?.agent?.model || ''), String(verdict?.verdict || ''),
+        String(verdict?.reason_code || ''), String(decision?.action || ''), ok ? (sh.app || '') : '',
+        ok ? (sh.src_prefix || '') : '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw);
+    log(`🔎 RECEIPT_SHADOW #${p.id} ok=${ok} app=${sh.app || '-'} src=${sh.src_prefix || '-'} terr=${sh.transfer_error ? 1 : 0}`
+      + ` action=${decision?.action || '-'}`);
+    track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
+      action: decision?.action || null, app: sh.app, terr: sh.transfer_error ? 1 : 0 });
+  } catch (e) { logErr('recordReceiptAnalysis:', e.message); }
+}
+/** تازه‌ترین تحلیلِ ایجنت برای یک پرداخت (یا undefined). */
+let _raLast;
+function lastReceiptAnalysis(pid) {
+  try {
+    return (_raLast ||= db.prepare('SELECT * FROM receipt_analyses WHERE payment_id=? ORDER BY id DESC LIMIT 1')).get(pid);
+  } catch (e) { logErr('lastReceiptAnalysis:', e.message); return undefined; }
+}
+/** خطِ ایجنت فقط برای پیامِ **مالک** (تصمیمِ مالک: ادمین‌های دیگر شلوغ نشوند). */
+const ownerShadowLine = (p) => (RECEIPT_SHADOW_ENABLED && p ? shadowLine(lastReceiptAnalysis(p.id)) : '');
+
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
   let p = stmts.getPayment.get(paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
@@ -10025,8 +10095,10 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     return setState(uid, nextState);
   }
   let decision;
+  let verdict = null;
+  const agentT0 = Date.now();
   try {
-    const verdict = await analyzeReceipt({
+    verdict = await analyzeReceipt({
       apiKey: OPENROUTER_API_KEY, models: RECEIPT_MODELS,
       // `amount_rial` صریح داده می‌شود (نه استنتاجی در خودِ پرامپت): این تنها عددی است
       // که مدل باید روی رسید دنبالش بگردد، و شمردنِ صفرهایش کلِ کارِ اوست.
@@ -10036,7 +10108,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
         // تعویض‌شده هر دو کارت را می‌پذیرد (تصمیمِ مالک: رسیدِ کارتِ قبلی معتبر است).
         ...receiptExpectedCards(p),
       },
-      imageBuffer, imageMime: 'image/jpeg', text: textBody,
+      imageBuffer, imageMime: 'image/jpeg', text: textBody, shadow: RECEIPT_SHADOW_ENABLED,
     });
     const tries = (verdict.agent?.attempts || []).map((a) => `${a.model}:${a.ok ? 'ok' : a.error}`).join(' ');
     if (verdict.agent?.ok) {
@@ -10053,6 +10125,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     logErr(`❌ RECEIPT_AGENT_FAIL #${paymentId}:`, e.message);
     decision = { action: 'review', reason_fa: '', overpaid: 0, agentFailed: true };
   }
+  // 🔎 ثبتِ کاملِ خروجی **قبل از** هر ارسالی به ادمین، تا خطِ ایجنتِ پیامِ مالک از همین ردیف بیاید.
+  recordReceiptAnalysis(p, uid, verdict, decision, photoFileId ? 'photo' : 'text', Date.now() - agentT0);
 
   /* 🛟 فالبکِ نهاییِ کلِ سیستم تأییدِ دستی است (قاعده‌ی مالک). ایجنت در ددلاینش پاسخِ
    * سالمی نداد ⟵ همین حالا، بدونِ تأخیرِ ساختگی، با برچسبِ صریح به ادمین. برچسب مهم است:

@@ -11,6 +11,7 @@
 //
 // کدِ واقعی از خودِ index.js بریده و روی SQLite در-حافظه **اجرا** می‌شود، نه کپی.
 import * as CA from '../bots/tarot/cards-admin.js';
+import * as RT from '../bots/tarot/receipt-tags.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 
@@ -90,7 +91,9 @@ function boot({ legacy = false, failTo = null } = {}) {
   const env = { CA, db, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
     logErr: (...a) => errs.push(a.join(' ')), invoiceNoOf: (p) => p.invoice_no || p.id,
     // 🔄 فازِ ۲: چرخش واقعاً اجرا می‌شود (نه اینکه با ReferenceError بی‌صدا به فالبک بیفتد).
-    CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {} };
+    CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {},
+    // 🔎 فازِ ۴: خطِ ایجنتِ مالک. این‌جا تحلیلی نیست ⟵ '' ⟵ کپشن‌ها بیت‌به‌بیت قبلی (خودِ خط در check-receipt-shadow).
+    ownerShadowLine: () => '', withShadowLine: RT.withShadowLine };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing.replace('const LEGACY_ADMINS_FULL = false', 'const LEGACY_ADMINS_FULL = true') : routing)}
     const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };

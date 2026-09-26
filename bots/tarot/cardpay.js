@@ -10,7 +10,21 @@
 
 const VERDICTS = ['approve', 'reject', 'review'];
 
-function systemPrompt(expected) {
+/* 🔎 فیلدهای «فقط ثبت» (فازِ ۴ِ `PAYMENT-V2-PLAN.md`، v3.126.0). مدل فقط **می‌خواند**؛ هیچ‌کدام
+ * روی verdict اثر ندارند و کد هم تصمیمی رویشان نمی‌گیرد. مصرف‌کننده‌هایشان فازهای بعدی‌اند
+ * (۵: خطای انتقال ⟵ کارتِ سفید؛ ۷: تگِ خودکارِ اپ و بانکِ مبدأ). `shadow=false` ⟵ پرامپت
+ * بیت‌به‌بیت همان v3.125.0 است (رول‌بک). */
+const SHADOW_RULES = `
+RECORD-ONLY FIELDS (read and report them; they must NEVER change your verdict or reason_code):
+- extracted.source_card_prefix = the leading digits of the SOURCE (payer) card exactly as printed, digits only (e.g. "6037 99** **** 1234" → "603799"); null if the source card is not shown.
+- extracted.bank_app = which app produced this receipt: "blu" (Blu Bank app), "ap" (Asan Pardakht «آپ»), "780" (USSD *780#), "top" (Top «تاپ»), "hamrahcard" (Hamrah Card «همراه کارت»), "mobilebank" (a bank's own mobile or internet banking app), "other" (recognizable but none of these); null if you cannot tell or the input is plain text.
+- extracted.bank_app_name = the app or bank name as it appears, or null.
+- extracted.transfer_error = true ONLY if the input shows or says that a transfer to the destination card FAILED or is NOT POSSIBLE (an error screen or a user message such as «امکان انتقال وجه به این کارت مقصد وجود ندارد», «محدودیت روزانه», «نمیتونم به این کارت انتقال بدم»); otherwise false.
+- extracted.transfer_error_text = that error message, short, as shown; otherwise null.
+`;
+const SHADOW_KEYS = ',"source_card_prefix":"<string|null>","bank_app":"blu|ap|780|top|hamrahcard|mobilebank|other|null","bank_app_name":"<string|null>","transfer_error":<true|false>,"transfer_error_text":"<string|null>"';
+
+function systemPrompt(expected, shadow = false) {
   const toman = Number(expected.amount_toman || 0).toLocaleString('en-US');
   const rial = Number(expected.amount_rial || (expected.amount_toman || 0) * 10).toLocaleString('en-US');
   return `You are a strict Iranian bank card-to-card (کارت به کارت) receipt verifier for a paid bot.
@@ -42,9 +56,9 @@ DECISION RULES (in order). Compare the printed amount against amount_rial (${ria
 CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When paid >= expected you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3).
 
 Notes: a round amount (exact multiple of 100,000) is a mild fraud signal, note in risk_flags, not a reason alone to reject. When in doubt choose "review", never "approve".
-
+${shadow ? SHADOW_RULES : ''}
 Return ONLY a JSON object, no markdown, EXACTLY these keys:
-{"verdict":"approve|reject|review","reason_code":"ok|not_a_receipt|amount_too_low|low_quality|missing_fields|mismatch|uncertain","reason_fa":"<one short Persian sentence, no em dash>","extracted":{"amount_raw":<number|null>,"amount_currency":"rial|toman|null","recipient_name":"<string|null>","dest_card_last4":"<string|null>","tracking_code":"<string|null>","status_successful":<true|false|null>},"risk_flags":["<tags: round_amount, name_mismatch, last4_mismatch, no_recipient, edited_look>"]}`;
+{"verdict":"approve|reject|review","reason_code":"ok|not_a_receipt|amount_too_low|low_quality|missing_fields|mismatch|uncertain","reason_fa":"<one short Persian sentence, no em dash>","extracted":{"amount_raw":<number|null>,"amount_currency":"rial|toman|null","recipient_name":"<string|null>","dest_card_last4":"<string|null>","tracking_code":"<string|null>","status_successful":<true|false|null>${shadow ? SHADOW_KEYS : ''}},"risk_flags":["<tags: round_amount, name_mismatch, last4_mismatch, no_recipient, edited_look>"]}`;
 }
 
 function normalize(data) {
@@ -251,7 +265,7 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
                                expected = {}, imageBuffer = null, imageMime = 'image/jpeg',
                                text = null, timeoutMs = RECEIPT_ATTEMPT_MS,
                                deadlineMs = RECEIPT_DEADLINE_MS, minAttemptMs = MIN_ATTEMPT_MS,
-                               fetchImpl = null, now = Date.now }) {
+                               fetchImpl = null, now = Date.now, shadow = false }) {
   const doFetch = fetchImpl || fetch;
   const chain = (Array.isArray(models) && models.length ? models : [model]).filter(Boolean);
   let userContent;
@@ -265,7 +279,7 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
     userContent = 'کاربر این متن را به‌عنوانِ رسیدِ پرداخت فرستاده. طبق قرارداد داوری کن و فقط JSON بده.\n\nمتنِ کاربر:\n'
       + String(text || '').slice(0, 4000);
   }
-  const system = systemPrompt(expected);
+  const system = systemPrompt(expected, shadow);
   const started = now();
   const attempts = [];
 
@@ -313,5 +327,26 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
   };
 }
 
-export { analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
+// ── نرمال‌سازیِ فیلدهای «فقط ثبت» (مدل می‌خواند، کد اعتبارسنجی می‌کند) ─────────────────
+const BANK_APPS = ['blu', 'ap', '780', 'top', 'hamrahcard', 'mobilebank', 'other'];
+const toLatin = (x) => String(x ?? '').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+  .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+const shortStr = (x, n) => (x == null || typeof x === 'object') ? null : (String(x).trim().slice(0, n) || null);
+/** خروجی همیشه همین پنج کلید را دارد و هر مقدارِ نامعتبر `null`/`false` می‌شود:
+ *  پیشوندِ کارت فقط اگر ≥۶ رقم خوانا باشد (کمتر از آن بانک را مشخص نمی‌کند)، اپ فقط از
+ *  فهرستِ بسته، و خطای انتقال فقط با `true`ِ صریح (رشته‌ی "true" هم نه). */
+function shadowFields(ext) {
+  const e = (ext && typeof ext === 'object' && !Array.isArray(ext)) ? ext : {};
+  const digits = toLatin(e.source_card_prefix).replace(/\D/g, '');
+  const app = String(e.bank_app ?? '').trim().toLowerCase();
+  return {
+    src_prefix: digits.length >= 6 ? digits.slice(0, 8) : null,
+    app: BANK_APPS.includes(app) ? app : null,
+    app_name: shortStr(e.bank_app_name, 40),
+    transfer_error: e.transfer_error === true,
+    transfer_error_text: shortStr(e.transfer_error_text, 200),
+  };
+}
+
+export { shadowFields, BANK_APPS, systemPrompt, analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
   VERDICTS, RECEIPT_DEADLINE_MS };
