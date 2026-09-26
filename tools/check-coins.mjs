@@ -176,7 +176,7 @@ console.log('\n▶ بسته‌های خریدِ سکه');
   ok(/const back = creditAmount \+ \(p\.pkg \? 0 : bonusFor\(creditAmount\)\)/.test(SRC),
     'برگشتِ پرداخت هم دقیقاً همان مقدارِ داده‌شده را پس می‌گیرد (بدونِ هدیه‌ی نداده)');
   // اصلاحِ خودکارِ «پرداختِ کمتر» وعده‌ی بسته را می‌شکند → باید به تصمیمِ انسانی برود
-  ok(/const safe = !p\.discount_code_id && !p\.pkg &&/.test(SRC),
+  ok(/const safe = (?:!!p && )?!p\.discount_code_id && !p\.pkg &&/.test(SRC),
     'پرداختِ کمترِ یک بسته خودکار اصلاح نمی‌شود (تصمیمِ انسانی)');
   // ستون افزایشی است و پیش‌فرضِ خالی دارد (بند ۲ج/۱)
   ok(/ALTER TABLE payments ADD COLUMN pkg TEXT NOT NULL DEFAULT ''/.test(SRC), 'ستونِ pkg افزایشی با پیش‌فرضِ خالی');

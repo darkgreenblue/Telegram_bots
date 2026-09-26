@@ -329,7 +329,7 @@ const TEST_PHASE = false;
 //         تکراری» روی همه‌ی پیام‌های رسیدِ اعتباردیده (پس‌گرفتنِ بی‌صدا، بدونِ بی‌اعتمادی).
 // 3.121.0: 🔗 جمنای ۳ فلش بعد از جمنای ۲٫۵ در همه‌ی زنجیره‌های فالبکِ تاروت (فال، صوت، رونویسی،
 //         تعمیر، گفتگو، کارتِ روز، بازخورد)؛ فقط وقتی مدل‌های قبلی شکست بخورند دیده می‌شود.
-const PRODUCT_VERSION = '3.130.0';
+const PRODUCT_VERSION = '3.131.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1194,10 +1194,18 @@ const packOf = (p) => (p && p.pkg ? PACKAGE_BY_KEY[p.pkg] || null : null);
 // مکثِ کوتاهِ انسانی پیش از پاسخِ خودکار به رسید: بسته‌های گران‌تر اولویتِ بیشتری
 // دارند، اما بازه‌ها تصادفی‌اند تا پاسخ مکانیکی به نظر نرسد. `randomInt` سقف را
 // شامل نمی‌شود، پس 31 و 61 مرزِ بالای 30 و 60 ثانیه را هم وارد نمونه می‌کند.
+const isPriorityPack = (p) => p?.pkg === 'gold' || p?.pkg === 'magic';
 const receiptDecisionDelayMs = (p) =>
-  (p?.pkg === 'gold' || p?.pkg === 'magic'
+  (isPriorityPack(p)
     ? randomInt(15, 31)
     : randomInt(40, 61)) * 1000;
+/* ⏳ تأییدِ کُندِ بسته‌های معمولی (v3.131.0، خواسته‌ی مالک ۱۴۰۵/۰۷/۰۴): تأییدِ خودکارِ هر بسته‌ای جز
+ * ویژه/جادویی (یعنی شارژهای کوچکِ ۱۵ و ۲۰ هزاری و مبلغِ دلخواه) بعد از **۵ تا ۱۰ دقیقه‌ی تصادفی**، نه
+ * ۴۰ تا ۶۰ ثانیه. فقط مسیرِ «تأیید/کم‌پرداخت»؛ ارجاع به ادمین و ردِ خودکار همان تأخیرِ کوتاهِ قبلی را
+ * دارند. زمان‌بندی در DB است (`auto_decide_at`) و کاربر در این فاصله آزاد است؛ رسیدِ دوباره در همین
+ * فاصله ⟵ مشکوکِ ماندگار (`flagResendDuringWait`). `false` ⟵ رفتارِ v3.130.0 بیت‌به‌بیت. */
+const SLOW_APPROVE_ENABLED = true;
+const slowApproveDelaySec = () => randomInt(300, 601);
 
 /* ⭐ تبدیلِ تومان به استارز — فقط برای سوییچِ فارسی (بالا).
  *
@@ -2113,6 +2121,15 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run
 try { db.prepare('ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // ⛔️ فازِ ۵ (v3.127.0): لحظه‌ی اقدامِ خودکارِ «نتوانستم واریز کنم»؛ NULL = هنوز نه (هر فاکتور یک بار).
 try { db.prepare('ALTER TABLE payments ADD COLUMN transfer_error_at INTEGER').run(); } catch {}
+/* ⏳ v3.131.0: تصمیمِ خودکارِ **زمان‌بندی‌شده**‌ی رسید (تأییدِ کُندِ بسته‌های معمولی). در DB است نه در
+ * حافظه، چون صبرِ ۵ تا ۱۰ دقیقه‌ای یعنی هر دیپلوی احتمالاً وسطش می‌افتد. `auto_decide_at` = لحظه‌ی اجرا
+ * (NULL یعنی چیزی زمان‌بندی نشده)، `auto_decision` = JSONِ تصمیمِ ایجنت. */
+try { db.prepare('ALTER TABLE payments ADD COLUMN auto_decide_at INTEGER').run(); } catch {}
+try { db.prepare("ALTER TABLE payments ADD COLUMN auto_decision TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_auto_decide ON payments(auto_decide_at)').run(); } catch {}
+/* 🟡 مشکوکِ **ماندگار** (v3.131.0): کاربری که وسطِ صبرِ تأیید دوباره رسید فرستاد، برای همیشه دستی
+ * بررسی می‌شود (خواسته‌ی مالک: «تمام رسیدهای بعدیش»). `clearSuspect` این ردیف‌ها را پاک نمی‌کند. */
+try { db.prepare('ALTER TABLE users ADD COLUMN suspect_sticky INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 /* 🔎 فازِ ۴ (v3.126.0): یک ردیف per **هر** اجرای ایجنتِ رسید (موفق یا شکست‌خورده). تا امروز
  * خروجیِ ایجنت فقط یک خطِ لاگ بود و بعد از چرخشِ لاگ‌های pm2 از بین می‌رفت؛ پس نه می‌شد
  * دقتش را سنجید، نه فیلدهای تازه را قبل از اعتماد رصد کرد. `raw_json` کلِ verdictِ نرمال
@@ -2696,7 +2713,9 @@ const stmts = {
   setDistrust: db.prepare('UPDATE users SET pay_distrust=1 WHERE telegram_id=?'),
   // 🟡 کاربرِ مشکوک — همان الگوی setDistrust، فقط ستونِ دیگر.
   setSuspect: db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=?'),
-  clearSuspect: db.prepare('UPDATE users SET pay_suspect=0 WHERE telegram_id=?'),
+  // ⚠️ مشکوکِ ماندگار (`suspect_sticky`) هرگز خودکار پاک نمی‌شود؛ فقط ریستِ کاملِ حساب.
+  clearSuspect: db.prepare('UPDATE users SET pay_suspect=0 WHERE telegram_id=? AND COALESCE(suspect_sticky, 0)=0'),
+  setSuspectSticky: db.prepare('UPDATE users SET pay_suspect=1, suspect_sticky=1 WHERE telegram_id=?'),
   // نگه‌داشتنِ رسیدِ «مشکوکِ تعلیق‌شده» در waiting_review، با suspect_hold=1 تا از یک
   // بازبینیِ دستیِ معمولی تفکیک شود (همان گاردِ اتمیکِ setPaymentReceipt، فقط ستونِ اضافه).
   setSuspectHold: db.prepare("UPDATE payments SET receipt_file_id=?, admin_message_id=?, status='waiting_review', suspect_hold=1, updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')"),
@@ -10456,6 +10475,133 @@ async function reanalyzeNextPastReceipt() {
   finally { rean.busy = false; }
 }
 
+/* 💰 تأیید یا اصلاحِ کم‌پرداختِ خودکار — **تک‌منبع** برای مسیرِ فوری (داخلِ `processReceipt`) و مسیرِ
+ * زمان‌بندی‌شده (`executeScheduledDecision`)، تا منطقِ پول دو کپی نشود. `say(text, extra)` = پیام به کاربر،
+ * `toAdmin()` = ارجاعِ دستی. خروجی: `'approved'` | `'admin'` | `'noop'` (از قبل نهایی شده، ضدِ دوبار).
+ * پرداختِ کمتر از فاکتور: رسید واقعی است و پول رسیده، فقط کمتر؛ پس فاکتور به همان مبلغِ واقعی **اصلاح**
+ * می‌شود. گاردِ صریح: تخفیف یا بسته یا مبلغِ خیلی کم ⟵ تصمیمِ انسانی (فاجعه‌ی ۱۴۰۵/۰۵/۰۹). */
+async function applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, reasonFa, say, toAdmin }) {
+  if (decision.action === 'approve') {
+    const done = approvePayment(paymentId);
+    if (!done) return 'noop';
+    await say(approvedMsg(uid, done.creditAmount, done.bonus));
+    await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
+    return 'approved';
+  }
+  const p = stmts.getPayment.get(paymentId);
+  const paid = Number(decision.paid) || 0;
+  const safe = !!p && !p.discount_code_id && !p.pkg && paid >= MIN_RECHARGE && paid < amountToman;
+  if (safe && stmts.adjustPaymentAmount.run(paid, paid, 'اصلاح به دلیل پرداخت کمتر', paymentId).changes) {
+    track(db, uid, 'payment_adjusted',
+      { payment_id: paymentId, from: amountToman, to: paid, reason: 'underpaid' });
+    const done = approvePayment(paymentId);
+    if (!done) return 'noop';
+    await say(L.wallet.underpaidApproved(paid, getBalance(uid)));
+    await notifyAdminAuto(stmts.getPayment.get(paymentId), getUser(uid),
+      `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId,
+      creditedReceiptKb(paymentId));
+    return 'approved';
+  }
+  await toAdmin();   // ناامن (تخفیف داشت، یا مبلغ خیلی کم بود) → تصمیمِ انسانی
+  return 'admin';
+}
+
+/* ⏳ تأییدِ کُندِ بسته‌های معمولی (v3.131.0). چرخه: `processReceipt` تصمیمِ ایجنت را با
+ * `scheduleAutoDecision` در DB می‌نشاند و پرداخت را `waiting_review` می‌کند (کاربر دیگر نمی‌تواند لغوش
+ * کند، بند ۹ب/۳ ریشه) ⟵ سرِ وقت، `runDueAutoDecisions` (یک setTimeoutِ دقیق + جاروی ۳۰ثانیه‌ای برای بعد
+ * از ری‌استارت) ادعای اتمیک می‌زند و `executeScheduledDecision` همان منطقِ `applyAutoCredit` را اجرا
+ * می‌کند. اگر در این فاصله کاربر مشکوک/بی‌اعتماد شد ⟵ دستی. اگر ادمین زودتر تصمیم گرفت ⟵ هیچ. */
+const slowApproveOn = (p, uid, decision) => SLOW_APPROVE_ENABLED && !starsRail && !isPriorityPack(p)
+  && (decision.action === 'approve' || decision.action === 'underpaid')
+  && !isDistrusted(uid) && !isSuspect(uid);
+let _autoSt = null;
+const autoSt = () => _autoSt || (_autoSt = {
+  schedule: db.prepare(`UPDATE payments SET status='waiting_review', auto_decide_at=unixepoch()+?, auto_decision=?,
+    updated_at=unixepoch() WHERE id=? AND status IN ('pending','waiting_review')`),
+  due: db.prepare('SELECT * FROM payments WHERE auto_decide_at IS NOT NULL AND auto_decide_at <= unixepoch() ORDER BY auto_decide_at LIMIT 20'),
+  claim: db.prepare('UPDATE payments SET auto_decide_at=NULL WHERE id=? AND auto_decide_at IS NOT NULL'),
+  waitingOf: db.prepare('SELECT id FROM payments WHERE user_id=? AND auto_decide_at IS NOT NULL'),
+});
+function scheduleAutoDecision(p, decision, amountToman, textBody) {
+  try {
+    const sec = slowApproveDelaySec();
+    const d = JSON.stringify({ action: decision.action, paid: decision.paid ?? null, overpaid: decision.overpaid || 0,
+      reason_fa: decision.reason_fa || '', amount: amountToman, text: textBody ? String(textBody).slice(0, 1000) : null });
+    if (autoSt().schedule.run(sec, d, p.id).changes !== 1) return false;   // وضعیت عوض شده ⟵ مسیرِ فوری
+    log(`⏳ SLOW_APPROVE_SCHEDULED #${p.id} in=${sec}s action=${decision.action}`);
+    track(db, p.user_id, 'receipt_decision_scheduled', { payment_id: p.id, delay_s: sec, action: decision.action });
+    setTimeout(() => { runDueAutoDecisions().catch((e) => logErr('slow approve timer:', e.message)); }, sec * 1000 + 1500);
+    return true;
+  } catch (e) { logErr('scheduleAutoDecision:', e.message); return false; }
+}
+let autoBusy = false;
+async function runDueAutoDecisions() {
+  if (autoBusy) return;
+  autoBusy = true;
+  try {
+    for (const row of autoSt().due.all()) {
+      if (autoSt().claim.run(row.id).changes !== 1) continue;             // ادعای اتمیک: فقط یک بار
+      try { await withLang(langOf(row.user_id), () => executeScheduledDecision(row)); }
+      catch (e) { logErr(`❌ SLOW_APPROVE_FAIL #${row.id}:`, e.message); }
+    }
+  } catch (e) { logErr('runDueAutoDecisions:', e.message); }
+  finally { autoBusy = false; }
+}
+async function executeScheduledDecision(row) {
+  const uid = row.user_id, paymentId = row.id;
+  const p = stmts.getPayment.get(paymentId);
+  let d = null;
+  try { d = JSON.parse(row.auto_decision || ''); } catch { d = null; }
+  const photoFileId = p?.receipt_file_id || null;
+  const textBody = d?.text || null;
+  const toAdmin = () => sendReceiptToAdmin(null, uid, paymentId, photoFileId, textBody);
+  if (!p || p.status !== 'waiting_review') {       // ادمین زودتر تصمیم گرفت (داشبورد/تکرار) ⟵ هیچ
+    log(`⏳ SLOW_APPROVE_SKIP #${paymentId} status=${p?.status || '-'}`);
+    return;
+  }
+  // تصمیمِ ناخوانا هرگز حدس زده نمی‌شود: پول رسیده، پس تصمیمِ انسانی (بند ۹ ریشه).
+  if (!d || (d.action !== 'approve' && d.action !== 'underpaid') || !(Number(d.amount) > 0)) {
+    logErr(`⏳ SLOW_APPROVE_BAD_DECISION #${paymentId} ⟵ ادمین`);
+    return toAdmin();
+  }
+  if (isDistrusted(uid)) return toAdmin();
+  if (isSuspect(uid)) {
+    log(`⏳ SLOW_APPROVE_SUSPECT #${paymentId} ⟵ ادمین`);
+    return d.action === 'approve' ? sendSuspectApprovalToAdmin(null, uid, paymentId, photoFileId, textBody) : toAdmin();
+  }
+  // پیامِ مالی بدونِ ctx از میدل‌ورِ جرنی رد می‌شود؛ `logPush` تا هرگز از تایم‌لاین غایب نباشد (بند ۲الف ریشه).
+  const say = async (t, x) => {
+    await bot.telegram.sendMessage(uid, t, x).catch(() => {});
+    logPush(db, uid, t, { isAdmin: isAdmin(uid), label: 'تأیید پرداخت' });
+  };
+  const r = await applyAutoCredit({ uid, paymentId, decision: d, amountToman: Number(d.amount), photoFileId,
+    reasonFa: d.reason_fa || 'نامشخص', say, toAdmin });
+  log(`⏳ SLOW_APPROVE_DONE #${paymentId} result=${r}`);
+  if (r === 'approved') await afterDelayedApproval(uid, paymentId);
+}
+/** `afterApproval` بعد از تأییدِ دیرهنگام، **فقط** اگر کاربر وسطِ کارِ دیگری نیست. ۱۰ دقیقه بعد ممکن است
+ *  فاکتورِ تازه‌ای باز کرده یا دارد سؤالِ فال می‌نویسد؛ `afterApproval` استیت/سشن را عوض می‌کند و آن فلو را
+ *  یتیم می‌کرد. پیامِ تأیید در هر حال رفته است. */
+async function afterDelayedApproval(uid, paidPid) {
+  const st = getState(uid), s = getSession(uid);
+  if (s?.paymentId && Number(s.paymentId) !== Number(paidPid)) return;
+  if (!st || st === 'idle' || st === 'confirm_pay' || st === 'chatting') await afterApproval(uid);
+}
+/** 🟡 رسیدِ تازه وقتی همین کاربر یک تأییدِ زمان‌بندی‌شده‌ی اجرانشده دارد ⟵ **مشکوکِ ماندگار** (خواسته‌ی
+ *  مالک: صبر نکرد، پس از این به بعد همه‌ی رسیدهایش دستی؛ و رسیدِ تکراریِ بی‌صبری الماسِ الکی نمی‌گیرد، چون
+ *  هم زمان‌بندیِ قبلی و هم این رسید هر دو به ادمین می‌روند). خروجی: آیا پرچم خورد. */
+function flagResendDuringWait(uid) {
+  try {
+    if (!SLOW_APPROVE_ENABLED || starsRail) return false;
+    const waiting = autoSt().waitingOf.all(uid).map((r) => r.id);
+    if (!waiting.length) return false;
+    if (!isDistrusted(uid)) stmts.setSuspectSticky.run(uid);
+    log(`🟡 RESEND_DURING_WAIT uid=${uid} waiting=${waiting.join(',')} ⟵ مشکوکِ ماندگار`);
+    track(db, uid, 'receipt_resent_during_wait', { waiting });
+    return true;
+  } catch (e) { logErr('flagResendDuringWait:', e.message); return false; }
+}
+
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
   let p = stmts.getPayment.get(paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
@@ -10471,6 +10617,8 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   }
   const s = getSession(uid);
   const nextState = s?.readingId ? 'confirm_pay' : 'idle';
+  // ⏳🟡 رسیدِ تازه وسطِ صبرِ تأییدِ کُند ⟵ مشکوکِ ماندگار؛ پس همین رسید هم پایین‌تر دستی می‌شود.
+  flagResendDuringWait(uid);
   // 🟡 تشخیصِ الگوی مشکوک — روی رسیدهای **قبلی** (قبل از ثبتِ رویدادِ همین رسید).
   // بی‌اعتماد از قبل بدترین حالت است و چیزی رویش اضافه نمی‌شود.
   if (!isDistrusted(uid) && !isSuspect(uid) && suspectTrigger(uid, Math.floor(Date.now() / 1000))) {
@@ -10572,6 +10720,14 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     return setState(uid, nextState);
   }
 
+  /* ⏳ تأییدِ کُندِ بسته‌ی معمولی (v3.131.0): به‌جای `sleep` داخلِ همین هندلر، تصمیم در DB زمان‌بندی
+   * می‌شود و هندلر همین حالا تمام می‌شود. `sleep`ِ ۵ تا ۱۰ دقیقه‌ای سه خرابی داشت: (۱) صفِ per کاربر
+   * (`dispatch.js`) تمامِ آن مدت قفل می‌ماند، پس ربات برای کاربر یخ می‌زد و رسیدِ دومش هرگز دیده نمی‌شد؛
+   * (۲) پرداخت `pending` می‌ماند و «انصراف» پولِ رسیده را بی‌اعتبار می‌کرد؛ (۳) هر ری‌استارت تصمیم را
+   * از حافظه پاک می‌کرد. کاربرِ مشکوک این‌جا نمی‌رسد (پایین‌تر مستقیم به ادمین می‌رود). */
+  if (slowApproveOn(p, uid, decision) && scheduleAutoDecision(p, decision, amountToman, textBody)) {
+    return setState(uid, nextState);
+  }
   // تأخیرِ انسانی پیش از پاسخِ خودکار: معمولی ۴۰–۶۰ث، ویژه/جادویی ۱۵–۳۰ث.
   // رسیدهایی که دستی‌اند بالاتر از این نقطه مستقیم به ادمین می‌روند و معطل نمی‌شوند.
   await sleep(receiptDecisionDelayMs(p));
@@ -10594,35 +10750,12 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     // سیاست: فقط دو نتیجه‌ی خودکار — approve (پرداختِ کافی و واقعی) و reject (فقط مبلغِ اکیداً کمتر).
     // بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
     // پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (هیچ «این رسید نیست» یا دلیلی).
-    if (decision.action === 'approve') {
-      const done = approvePayment(paymentId);
-      if (!done) return setState(uid, nextState); // ضدِ دوبار (قبلاً نهایی شده)
-      await ctx.reply(approvedMsg(uid, done.creditAmount, done.bonus)).catch(() => {});
-      await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
-      return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
-    }
-    // پرداختِ کمتر از فاکتور: رسید واقعی است و پول رسیده، فقط کمتر. لغوِ کاملش هم به کاربر
-    // ظلم است هم پولِ رسیده را از درآمد حذف می‌کند. پس فاکتور به همان مبلغِ واقعی **اصلاح**
-    // می‌شود و کاربر دقیقاً همان‌قدر اعتبار می‌گیرد.
-    // گاردِ صریح: اگر پای تخفیف وسط باشد، خودکار تصمیم نمی‌گیریم — چون اختلافِ مبلغ در آن
-    // حالت می‌تواند باگِ تطبیق باشد نه اشتباهِ کاربر (همان فاجعه‌ی ۱۴۰۵/۰۵/۰۹). → ادمین.
-    if (decision.action === 'underpaid') {
-      const paid = Number(decision.paid) || 0;
-      const safe = !p.discount_code_id && !p.pkg && paid >= MIN_RECHARGE && paid < amountToman;
-      if (safe && stmts.adjustPaymentAmount.run(paid, paid, 'اصلاح به دلیل پرداخت کمتر', paymentId).changes) {
-        track(db, uid, 'payment_adjusted',
-          { payment_id: paymentId, from: amountToman, to: paid, reason: 'underpaid' });
-        const done = approvePayment(paymentId);
-        if (!done) return setState(uid, nextState);
-        await ctx.reply(L.wallet.underpaidApproved(paid, getBalance(uid))).catch(() => {});
-        await notifyAdminAuto(stmts.getPayment.get(paymentId), getUser(uid),
-          `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId,
-          creditedReceiptKb(paymentId));
-        return await afterApproval(uid);
-      }
-      // ناامن (تخفیف داشت، یا مبلغ خیلی کم بود) → تصمیمِ انسانی
-      await sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody);
-      return setState(uid, nextState);
+    if (decision.action === 'approve' || decision.action === 'underpaid') {
+      const r = await applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, reasonFa,
+        say: (t, x) => ctx.reply(t, x).catch(() => {}),
+        toAdmin: () => sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) });
+      if (r === 'approved') return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
+      return setState(uid, nextState);                       // ضدِ دوبار (قبلاً نهایی شده) یا ارجاعِ دستی
     }
     if (decision.action === 'reject') {
       rejectPaymentAI(paymentId);
@@ -12155,6 +12288,10 @@ bot.on('photo', async (ctx) => {
      داشت: کاربری که واریز کرده و رسید فرستاده هیچ جوابی نمی‌گرفت و پولش در سکوت گم
      می‌شد. یک جمله‌ی صادقانه به‌مراتب بهتر از هیچ است. */
   if (!paymentId) {
+    /* ⏳ رسیدِ دوباره برای پرداختی که تأییدِ کُندش در راه است (دیگر `pending` نیست، پس بالا پیدا نشد):
+       «فاکتوری نداری» دروغ بود. مشکوکِ ماندگار ⟵ همان پرداخت سرِ وقت به ادمین می‌رود، و کاربر همان
+       پیامِ همیشگیِ «رسیدت رسید» را می‌گیرد (نه چیزی که بی‌صبری را پاداش یا لو بدهد). */
+    if (flagResendDuringWait(uid)) return ctx.reply(L.wallet.receiptSent).catch(() => {});
     return ctx.reply(L.wallet.receiptNoInvoice, mainKeyboard(uid)).catch(() => {});
   }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
@@ -12464,6 +12601,9 @@ function onLaunched() {
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
   // 🤖 فازِ ۷: پرکردنِ یک‌باره‌ی تگ از تحلیل‌های موجود (بی‌هزینه)، بعد صفِ آهسته‌ی تحلیلِ دوباره.
+  // ⏳ تأییدهای زمان‌بندی‌شده‌ای که ری‌استارت از حافظه برده: همین حالا + هر ۳۰ ثانیه (پشتیبانِ setTimeout).
+  runDueAutoDecisions().catch((e) => logErr('slow approve boot:', e.message));
+  setInterval(() => { runDueAutoDecisions().catch((e) => logErr('slow approve sweep:', e.message)); }, 30_000);
   backfillAutoTags();
   if (RECEIPT_REANALYSIS_ENABLED && tagsOn()) setInterval(reanalyzeNextPastReceipt, REANALYSIS_PACE_MS);
   installMenuButton();
