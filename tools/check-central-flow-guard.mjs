@@ -46,6 +46,12 @@ ok(!readingAllows('await_question', 'wallet_go'), 'await_question دکمه‌ی 
 ok(readingAllows('await_question', 'reading:cancel'), 'انصراف صریح از فال باز می‌ماند');
 ok(readingAllows('picking', 'pick:12'), 'انتخاب کارت در همان فال مجاز می‌ماند');
 ok(!readingAllows('picking', 'daily_go'), 'وسط انتخاب کارت، فال دیگر شروع نمی‌شود');
+// تپِ تکراریِ قدمِ قبلی نباید گاردِ «ادامه یا انصراف» بسازد. خودِ هندلرها state-check
+// دارند، پس فقط no-op/toast می‌شوند و هیچ فالِ پول‌داده‌ای را در معرض انصرافِ ناخواسته
+// نمی‌گذارند (رگرسیون TRT-1957801074).
+ok(readingAllows('picking', 'shuffle_stop'), 'تپِ تکراریِ توقف بُرزدن در انتخاب کارت بی‌خطر است');
+ok(readingAllows('confirm_pay', 'pick:12'), 'تپِ دیررسِ کارت بعد از پایان انتخاب، گاردِ انصراف نمی‌سازد');
+ok(readingAllows('revealing', 'shuffle_stop'), 'تپِ کهنه‌ی بُرزدن وسط تحویل، فقط بی‌اثر می‌شود');
 ok(readingAllows('confirm_pay', 'recharge'), 'شارژ از paywall شاخه‌ی فرزندِ همان فال است');
 ok(!readingAllows('confirm_pay', 'pkg:gold'), 'confirm_pay بسته‌ی کهنه را مستقیم اجرا نمی‌کند');
 ok(!readingAllows('confirm_pay', 'reading:resume'), 'reading:resume کهنه، paywall را با کاتالوگ جایگزین نمی‌کند');

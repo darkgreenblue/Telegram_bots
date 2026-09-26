@@ -3398,8 +3398,17 @@ function activePaymentFlow(uid) {
 
 // تنها callbackهایی که ادامه‌ی همان فال‌اند. هر callback ناشناخته، از جمله دکمه‌های
 // آینده، به‌صورت امن گارد می‌خورد تا فقط بعد از تصمیمِ آگاهانه‌ی توسعه‌دهنده باز شود.
+// تپِ دوباره روی دکمه‌ی قدمِ **قبلی** مسیر تازه‌ای نیست. تلگرام می‌تواند چند callback
+// یکسان را هم‌زمان تحویل دهد: مثلاً اولین `shuffle_stop` استیت را فوراً به `picking`
+// می‌برد، اما نسخه‌های تکراریِ همان تپ بعد از آن می‌رسند. اگر آن‌ها گاردِ «ادامه یا
+// انصراف» بگیرند، یک تپ بی‌خطر به‌اشتباه گزینه‌ی مخربِ انصراف می‌سازد. خودِ هندلرهای
+// این سه قدم state-check دارند و در استیتِ تازه فقط toast/no-op می‌شوند؛ پس عبورشان
+// امن است و مهم‌تر از آن هیچ‌وقت فلوی کاربر را عوض نمی‌کند.
 function readingFlowAllowsCallback(state, data) {
   if (!data) return false;
+  const staleStep = ['shuffling', 'picking', 'confirm_pay', 'revealing'].includes(state)
+    && /^(ready_breath|shuffle_stop|pick:\d+)$/.test(data);
+  if (staleStep) return true;
   if (state === 'confirm_focus') return /^(focus:\w+|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
   if (state === 'await_question') return /^(reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
   if (state === 'breathing') return /^(ready_breath|reading:resume|reading:cancel|rcancel:\d+)$/.test(data);
