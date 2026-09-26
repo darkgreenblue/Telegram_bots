@@ -1342,9 +1342,12 @@ const cardCopyRow = (pid) => [{ text: '📋 کپی شماره کارت', copy_te
  * پرچم خاموش، ریلِ استارز، فاکتورِ غیرِباز، قبلاً تعویض‌شده، سوییچ‌شده به استارز، یا هیچ کارتِ
  * دیگری در دسترس نیست. دکمه و تذکرِ متنِ فاکتور هر دو از **همین** تصمیم می‌آیند تا هرگز یکی
  * بدونِ دیگری دیده نشود. */
+const cardSwitchOn = () => CARD_SWITCH_ENABLED && !starsRail;
 function switchTargetFor(p) {
-  if (!CARD_SWITCH_ENABLED || starsRail || !p || p.status !== 'pending' || p.card_switched_at || p.stars_toggle_at) return null;
+  if (!cardSwitchOn() || !p || p.status !== 'pending' || p.card_switched_at || p.stars_toggle_at) return null;
   try {
+    // فاکتورِ کارتِ سفید دکمه‌ی تعویض ندارد (تصمیمِ مالک، پاسخِ ۱۵): سفید آخرین مقصد است.
+    if (cardOfPayment(p).kind === 'white') return null;
     const st = cardSt();
     const used = new Map(st.usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c]));
     return CA.pickSwitchCard({ cards: st.all.all(), used, currentId: cardOfPayment(p).id });
@@ -1381,7 +1384,10 @@ function attributeReceiptCard(p, extracted) {
 /** آرگومانِ ششمِ `L.wallet.invoice`: تذکرِ دکمه‌ی تعویض، و خطِ هشدارِ فاکتورِ تعویض‌شده. */
 const invoiceExtra = (pid) => {
   const p = stmts.getPayment.get(pid);
-  return { note: !!switchTargetFor(p), switched: !!p?.card_switched_at };
+  // خطِ هشدارِ اپ‌ها: فاکتورِ تعویض‌شده، و هر فاکتوری که روی کارتِ سفید است (پاسخِ ۱۵).
+  let white = false;
+  try { white = !!p && cardSwitchOn() && cardOfPayment(p).kind === 'white'; } catch {}
+  return { note: !!switchTargetFor(p), switched: !!p?.card_switched_at || white };
 };
 // دکمه‌ی سوییچ به استارز، درست زیرِ دکمه‌ی کپیِ کارت (خواسته‌ی صریحِ مالک). آرایه‌ی
 // **ردیف‌ها** برمی‌گرداند (مثلِ الگوی `navMenuRow`) تا هر محلِ صدور با

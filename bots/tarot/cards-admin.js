@@ -279,7 +279,9 @@ export function pickSwitchCard({ cards, used = new Map(), currentId = 0 } = {}) 
   if (sameAdmin.length) return { card: sameAdmin[0], via: 'same_admin' };
   const other = after(regular.filter((c) => !cur || Number(c.admin_id) !== Number(cur.admin_id)));
   if (other.length) return { card: other[0], via: 'next_admin' };
-  const white = pool.find((c) => c.kind === 'white');
+  // سفید: اولویت با کارتِ سفیدِ **همان ادمین** (تصمیمِ مالک، پاسخِ ۱۶)، بعد هر سفیدِ دیگر.
+  const whites = pool.filter((c) => c.kind === 'white');
+  const white = (cur && whites.find((c) => Number(c.admin_id) === Number(cur.admin_id))) || whites[0];
   return white ? { card: white, via: 'white' } : null;
 }
 

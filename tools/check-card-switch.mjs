@@ -46,7 +46,10 @@ ok(sw(1, { cards: cards.map((c) => (c.id === 4 ? { ...c, active: 0 } : c)) })?.c
   const two = [C(1, 7, 'regular', 1), C(2, 7, 'white', 2)];
   const r = CA.pickSwitchCard({ cards: two, currentId: 1 });
   ok(r?.card.id === 2 && r.via === 'white', 'هیچ کارتِ عادیِ دیگری نیست ⟵ کارتِ سفید');
-  ok(CA.pickSwitchCard({ cards: two, currentId: 2 })?.card.id === 1, 'از سفید هم می‌شود به عادی رفت');
+  ok(CA.pickSwitchCard({ cards: two, currentId: 2 })?.card.id === 1, 'تابعِ خالص از سفید هم مقصد می‌دهد (ربات خودش روی سفید دکمه نمی‌گذارد، پایین)');
+  const w2 = [C(1, 7, 'regular', 1), C(5, 8, 'white', 2), C(6, 7, 'white', 3)];
+  ok(CA.pickSwitchCard({ cards: w2, currentId: 1 })?.card.id === 6, 'سفید: اولویت با سفیدِ همان ادمین (پاسخِ ۱۶)، حتی اگر در ترتیب عقب‌تر باشد');
+  ok(CA.pickSwitchCard({ cards: [C(1, 7, 'regular', 1), C(5, 8, 'white', 2)], currentId: 1 })?.card.id === 5, 'سفیدِ همان ادمین نبود ⟵ هر سفیدِ دیگر');
   ok(CA.pickSwitchCard({ cards: [C(1, 7, 'regular', 1)], currentId: 1 }) === null, 'تنها کارت ⟵ null (دکمه ساخته نمی‌شود)');
   ok(CA.pickSwitchCard({ cards: two, currentId: 1, used: new Map([[2, 3]]) })?.card.id === 2, 'کارتِ سفیدِ بی‌سقف همیشه در دسترس است');
 }
@@ -209,6 +212,20 @@ if (h) {
     const p = r.invoice(9);
     await r.tap(9, p);
     ok(r.pay(p).card_id === 2, 'فقط یک کارتِ عادی ⟵ تعویض به کارتِ سفید');
+    // فاکتوری که مستقیم روی کارتِ سفید صادر شده (همه‌ی عادی‌ها پر): بدونِ دکمه، با هشدار (پاسخِ ۱۵).
+    r.db.prepare('UPDATE cards SET daily_cap=1 WHERE id=1').run();
+    r.db.prepare("INSERT INTO payments (user_id, amount, status, card_id, approved_day) VALUES (77, 1, 'approved', 1, '2026-09-26')").run();
+    const wv = r.invoice(11);
+    ok(r.pay(wv).card_id === 2, 'همه‌ی عادی‌ها پر ⟵ فاکتور روی کارتِ سفید صادر شد');
+    ok(r.cardSwitchRow(wv).length === 0 && r.invoiceExtra(wv).note === false && r.invoiceExtra(wv).switched === true,
+      'فاکتورِ کارتِ سفید: بدونِ دکمه‌ی تعویض و بدونِ تذکرش، ولی با خطِ هشدارِ اپ‌ها');
+    const wt = await r.tap(11, wv);
+    ok(wt.length === 1 && wt[0][1] === fa.wallet.cardSwitchNone && r.pay(wv).card_id === 2, 'دکمه‌ی کهنه روی فاکتورِ سفید ⟵ هیچ تعویضی');
+    r.db.prepare('UPDATE cards SET daily_cap=0 WHERE id=1').run();
+    // حتی وقتی کارتِ عادیِ آزاد هست، فاکتورِ روی سفید دکمه نمی‌گیرد (سفید آخرین مقصد است).
+    const wy = r.invoice(12);
+    r.db.prepare('UPDATE payments SET card_id=2 WHERE id=?').run(wy);
+    ok(r.switchTargetFor(r.pay(wy)) === null && r.cardSwitchRow(wy).length === 0, 'فاکتورِ سفید با کارتِ عادیِ آزاد هم دکمه ندارد');
     r.db.prepare('UPDATE cards SET active=0 WHERE id=2').run();
     const q = r.invoice(10);
     ok(r.cardSwitchRow(q).length === 0 && r.invoiceExtra(q).note === false, 'هیچ کارتِ دیگری نیست ⟵ نه دکمه، نه تذکر');
@@ -241,7 +258,8 @@ console.log('\nساختاری:');
 ok(/switchClaim:\s*db\.prepare\("UPDATE payments SET card_id=\?, prev_card_id=\?, card_switched_at=unixepoch\(\) WHERE id=\? AND card_id=\? AND card_switched_at IS NULL AND status='pending'"\)/.test(SRC),
   'ادعای تعویض اتمیک است: یک بار، فقط فاکتورِ باز، فقط از همان کارتی که کاربر دید');
 ok(/\^\(card_switch:\\d\+\|/.test(SRC), 'گاردِ مرکزیِ کالبک card_switch را در pay_receipt عبور می‌دهد');
-ok((CODE.match(/\bCARD_SWITCH_ENABLED\b/g) || []).length === 2, 'پرچمِ تعویض فقط تعریف + یک گارد (رول‌بکِ یک‌خطی)');
+ok((CODE.match(/\bCARD_SWITCH_ENABLED\b/g) || []).length === 2 && /const cardSwitchOn = \(\) => CARD_SWITCH_ENABLED && !starsRail;/.test(CODE),
+  'پرچمِ تعویض فقط تعریف + یک helper (رول‌بکِ یک‌خطی)');
 ok(/ALTER TABLE payments ADD COLUMN card_switched_at INTEGER/.test(CODE)
   && /ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0/.test(CODE), 'مهاجرت‌ها افزایشی‌اند (بند ۲ج/۱)');
 ok(/\.\.\.receiptExpectedCards\(p\)/.test(CODE) && /if \(attributeReceiptCard\(p, verdict\.extracted\)\) p = stmts\.getPayment\.get\(paymentId\);/.test(CODE),
