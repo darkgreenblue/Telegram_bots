@@ -816,6 +816,10 @@ export default {
     /* همان پیام، ولی برای فالی که **پولش داده شده**: انصراف الماس را برنمی‌گرداند و
        کاربر باید قبل از تپ بداند (بند ۱۰ ریشه: ادعا هرگز از دیتا جلو نزند). */
     openReadingGuardPaid: 'You have a reading open that you never finished 🌙\n\nWant to pick it up where you left off?\n\n⚠️ If you drop it, the diamonds it cost you do not come back.\n\nSure you want to drop it?',
+    // 🔁 تپِ دوباره روی دکمه‌ی اندازه‌ی همین فال (toast، سقفِ ۲۰۰ کاراکتر).
+    sameSpreadRetap: 'Your reading has started ✨ Now write your question or send a voice note.',
+    // ✍️ متن/ویسِ بعد از ثبتِ سؤال؛ بعدش همان قدمِ جاری دوباره می‌آید.
+    questionAlreadyTaken: 'Your question is saved and your reading is built on it 🌙\n\nLet\'s carry on from right here 👇',
     /* 🌙 یادآوریِ شبانه‌ی فالِ نیمه‌کاره (v3.57.0). جمله‌ی دومِ شرطی عمداً هست: با
        `REFUND_ON_CANCEL = false` انصراف الماس را برنمی‌گرداند، و کاربر باید **قبل** از
        تپ بداند، نه از راهِ تیکتِ پشتیبانی. */
