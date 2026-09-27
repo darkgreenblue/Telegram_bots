@@ -47,6 +47,14 @@ export function ensureJourney(db) {
       first_seen INTEGER NOT NULL DEFAULT (unixepoch())
     );
   `);
+  /* ایندکسِ جزئیِ ردیف‌های ادمین. داشبورد در هر کوئریِ تحلیلی کاربرانِ ادمین را با همین شرط
+     کنار می‌گذارد و بدونِ این ایندکس هر بار JSONِ همه‌ی رویدادها (میلیون‌ها ردیف) را پارس
+     می‌کرد؛ ساختِ کشِ یک صفحه روی سرور به سقفِ ۳ دقیقه می‌خورد و «به‌روزرسانی» هیچ‌وقت
+     نمی‌نشست. شرط باید **عیناً** همان متنِ کوئری‌های داشبورد بماند (tools/check-dash-speed.mjs).
+     جدا از بالا در try است: شکستش فقط کندی است و نباید journey را خاموش کند. */
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_events_adm ON events(user_id) WHERE json_extract(props,'$.adm') = 1");
+  } catch (e) { logErr('❌ JOURNEY_ADM_INDEX:', e.message); }
 }
 
 const hash8 = (s) => createHash('sha1').update(s).digest('hex').slice(0, 8);
