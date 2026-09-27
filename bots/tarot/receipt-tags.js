@@ -148,11 +148,12 @@ export const hasTagRows = (kb) => rowsOf(kb).some(isTagRow);
 export const stripTagRows = (kb) => rowsOf(kb).filter((r) => !isTagRow(r));
 
 /** ردیفِ جمع‌شده: «📱 اپ: آپ» و «🏦 بانک: —». `cur` = خروجیِ `effectiveTags` برای همین رسید.
- *  `cardLabel` (فقط پیامِ مالک، v3.132.0) ⟵ یک ردیفِ دیگر: «💳 کارت: … · تغییر». */
+ *  `cardLabel` (فقط پیامِ مالک، v3.132.0) ⟵ یک ردیفِ دیگر با برچسبِ کوتاهِ ثابتِ «💳 تغییر کارت تخصیص»؛ شماره و
+ *  بانکِ کارت عمداً روی دکمه نیست (خواسته‌ی مالک): در متنِ پیام (`receiptInfoLines`) آمده. */
 export function tagCollapsedRows(pid, cur, labelOf, { cardLabel = '' } = {}) {
   const lab = typeof labelOf === 'function' ? labelOf : (_d, k) => k;
   const rows = [TAG_DIMS.map((d) => btn(`${TAG_DIM_ICON[d]} ${TAG_DIM_LABEL[d]}: ${cur?.[d] ? lab(d, cur[d].key) : '—'}`, `tg:o:${pid}:${d}`))];
-  if (cardLabel) rows.push([btn(`💳 کارتِ تخصیص: ${cardLabel} · تغییر`, `tg:o:${pid}:card`)]);
+  if (cardLabel) rows.push([btn(CARD_CHANGE_BTN, `tg:o:${pid}:card`)]);
   return rows;
 }
 
@@ -161,6 +162,7 @@ export function tagCollapsedRows(pid, cur, labelOf, { cardLabel = '' } = {}) {
  * آمارِ «تأییدشده‌ی امروزِ هر کارت با هر مبلغ» را کج می‌کند و انتخابِ کارتِ فاکتورهای بعدی روی
  * همان عدد می‌نشیند. مالک از روی رسید کارتِ واقعی را انتخاب می‌کند و `card_id` همان می‌شود.
  * فقط مالک، فقط دستی (نه ایجنت، نه پشتیبانی). فهرست = **همه‌ی کارت‌های فعال** (عادی و سفید). */
+export const CARD_CHANGE_BTN = '💳 تغییر کارت تخصیص';
 export const cardShortLabel = (c) => `${c?.bank || c?.holder || '-'} …${String(c?.number ?? '').slice(-4)}`;
 export function cardPickerRows(pid, cards, curId) {
   const list = (Array.isArray(cards) ? cards : []).filter((c) => Number(c.active) === 1)
