@@ -275,6 +275,9 @@ ok(!/await|fetch\(|telegram\./.test(region('const pickInvoiceCardTx', '}));')), 
     const later = [...body.matchAll(AMOUNT_WRITES)].filter((w) => w.index > at);
     if (later.length) bad.push(`${m[0]} ⟵ بعدش ${later.map((w) => w[1]).join('، ')}`);
   }
+  const topArgs = (a) => { let d = 0, n = 1; for (const ch of a) { if (ch === '(') d++; else if (ch === ')') d--; else if (ch === ',' && d === 0) n++; } return n; };
+  const disc = [...CODE.matchAll(/setPaymentDiscount\.run\(([^;]*)\);/g)].map((m) => topArgs(m[1]));
+  ok(disc.length >= 2 && disc.every((n) => n === 4), `هر setPaymentDiscount دقیقاً چهار مقدار می‌دهد (${disc.join('،')}); کمتر ⟵ پرتاب و جاافتادنِ صدورِ کارت`);
   ok(calls.length >= 3 && !bad.length, `کارتِ فاکتور همیشه بعد از نشستنِ مبلغِ نهایی انتخاب می‌شود (${calls.length} صدا${bad.length ? '؛ ' + bad.join(' | ') : ''})`);
 }
 {

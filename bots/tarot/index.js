@@ -3122,7 +3122,9 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
   stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
   issueInvoiceNo(paymentId);
-  if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
+  // ⚠️ چهار مقدار (همان شکلِ مسیرِ `disc:`): نسخه‌ی قبل سه مقدار می‌داد و better-sqlite3 پرتاب می‌کرد. مسیر امروز مرده است
+  // (`legacyTomanPay`)، ولی از #416 پرتابش صدورِ کارت را هم جا می‌انداخت؛ پس درست می‌شود نه اینکه منتظرِ احیا بماند.
+  if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, Math.max(0, price - payAmount), paymentId); // original_amount=price، amount=تخفیف‌خورده
   issueInvoiceCard(paymentId);         // 💳 کارتِ این فاکتور، بعد از نشستنِ مبلغِ نهایی (انتخاب بر اساسِ مبلغ است)
   patchSession(uid, { paymentId, readingId });
   setState(uid, 'pay_receipt');
@@ -4639,7 +4641,8 @@ registerJourney(bot, {
   enabled: JOURNEY_ENABLED,
   // تپ‌های **تستر** هم مثل ادمین از قیف‌های محصولی بیرون می‌مانند: او دارد فیچر را
   // می‌آزماید، نه رفتارِ واقعیِ کاربر را نشان می‌دهد. (این «اختیار» نیست، بهداشتِ دیتاست.)
-  isAdmin: isTester,
+  // 🧾 اکانتِ پشتیبانی (v3.132.0) کاربرِ واقعی نیست: صدها تپِ تگِ بازبینی قیف و «کجا گیر کردند» را آلوده می‌کرد.
+  isAdmin: (uid) => isTester(uid) || (SUPPORT?.id && Number(uid) === Number(SUPPORT.id)),
   isButtonLabel: (t) => KB_LABELS.has(t),
   redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
 });
@@ -10546,7 +10549,10 @@ async function runTagReview() {
       trSt().mark.run(p.id, ok);
       await sleep(1100);
     }
-    if (TAG_REVIEW_ENABLED && !trSt().queue.all().length) {
+    /* یک‌باره یعنی دامنه همان فهرستِ **اولِ** اجراست: رسیدی که وسطِ کار تأیید شد عمداً بیرون است (برای آن رسیدِ خودش با
+       دکمه‌های تگ به مالک رفته). نسخه‌ی قبل مهر را فقط با صفِ خالی می‌زد و هر تأییدِ تازه وسطِ ارسال یعنی مهر هرگز
+       نمی‌خورد و بوتِ بعدی دوباره می‌فرستاد (بازبینیِ خصمانه‌ی ۱۴۰۵/۰۷/۰۵؛ روی سرور بی‌اثر بود چون مهر خورده بود). */
+    if (TAG_REVIEW_ENABLED) {
       trSt().setDone.run();
       const st = trSt().sentN.get();
       log(`🧾 TAG_REVIEW_DONE sent=${st.ok} failed=${st.n - st.ok}`);

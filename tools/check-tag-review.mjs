@@ -159,6 +159,22 @@ function boot(db, { flag = true, tagsOn = true, fail429Once = false, failFor = n
   ok(h.sent.find((s) => s.file === 'F2').text.startsWith('🧾 رسیدِ ۳ از ۴'), 'شماره‌ی ردیف از همان‌جا ادامه می‌دهد');
 }
 {
+  // 🐛 بازبینیِ خصمانه: تأییدِ تازه وسطِ ارسال مهرِ پایان را قفل می‌کرد و بوتِ بعدی دوباره می‌فرستاد.
+  const db = freshDb();
+  new Function('db', 'RT', 'logErr', tagSchema)(db, RT, () => {});
+  const P = db.prepare("INSERT INTO payments (user_id, amount, status, receipt_file_id) VALUES (?, 15000, 'approved', ?)");
+  P.run(1, 'F1'); P.run(2, 'F2');
+  const h = boot(db);
+  const orig = h.sent.push.bind(h.sent);
+  let once = false;
+  h.sent.push = (x) => { if (!once && x.file) { once = true; P.run(3, 'F3new'); } return orig(x); };
+  await h.runTagReview();
+  ok(db.prepare("SELECT 1 FROM migrations WHERE key='tag_review_1'").get(), 'تأییدِ تازه وسطِ ارسال ⟵ مهرِ پایان باز هم می‌خورد (دامنه = فهرستِ اول)');
+  const again = boot(db);
+  await again.runTagReview();
+  ok(!again.sent.length, 'و بوتِ بعدی رسیدِ تازه را نمی‌فرستد (یک‌باره واقعاً یک‌باره است)');
+}
+{
   // فایلِ خراب ⟵ رد می‌شود و ثبت می‌شود (ok=0)؛ کار ادامه دارد.
   const db = freshDb();
   new Function('db', 'RT', 'logErr', tagSchema)(db, RT, () => {});
