@@ -2299,6 +2299,16 @@ try {
     db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tags_v2_manual_only', unixepoch())").run();
   })();
 } catch (e) { logErr('tags_v2 migration:', e.message); }
+/* 📱 v3.132.0، یک‌باره (خواسته‌ی مالک): «بله»، «۷۲۴» و «سایر» به اپ‌ها اضافه شدند. سید فقط ردیفِ **تازه** را با
+ * جایگاهِ خودش در `SEED_TAG_VALUES` می‌نشاند و ردیف‌های موجود را جابه‌جا نمی‌کند، پس ترتیب یک بار از نو ست می‌شود. */
+try {
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM migrations WHERE key='tags_v3_app_order'").get()) return;
+    const sortSet = db.prepare('UPDATE tag_values SET sort=? WHERE dim=? AND key=?');
+    RT.SEED_TAG_VALUES.app.forEach(([k], i) => sortSet.run(i + 1, 'app', k));
+    db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tags_v3_app_order', unixepoch())").run();
+  })();
+} catch (e) { logErr('tags_v3 migration:', e.message); }
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,

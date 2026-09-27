@@ -22,7 +22,7 @@ function region(from, to, { includeTo = true } = {}) {
   return SRC.slice(a, includeTo ? b + to.length : b);
 }
 const tagSchema = region('/* 🏷 فازِ ۶ (v3.128.0): تگِ اپ/بانکِ مبدأ per رسید.', "} catch (e) { logErr('tag_values seed:', e.message); }");
-const migration = region('/* 🧹 v3.132.0، یک‌باره', "} catch (e) { logErr('tags_v2 migration:', e.message); }");
+const migration = region('/* 🧹 v3.132.0، یک‌باره', "} catch (e) { logErr('tags_v3 migration:', e.message); }");
 const review = region('/* 🧾 بازبینیِ رسیدهای گذشته برای اکانتِ پشتیبانی', '/* 💰 تأیید یا اصلاحِ', { includeTo: false });
 const OWNER = 111, SUPPORT_ID = 555;
 
@@ -73,8 +73,20 @@ console.log('\n🧹 مهاجرتِ تگ‌ها (یک‌باره)\n');
     { p: 1, dim: 'app', k: 'mobilebank', s: 'admin' }, { p: 1, dim: 'bank', k: 'blu', s: 'admin' }, { p: 4, dim: 'bank', k: 'saman', s: 'admin' }]),
   'تگِ دستیِ اپِ «بلو» ⟵ «موبایل‌بانک» (بانکش بلو ماند)؛ بقیه‌ی تگ‌های دستی دست‌نخورده');
   const app = db2.prepare("SELECT key, active, sort FROM tag_values WHERE dim='app' ORDER BY active DESC, sort").all();
-  ok(JSON.stringify(app.filter((v) => v.active).map((v) => v.key)) === JSON.stringify(['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'atm', 'unknown']),
-    'اپ‌های فعال به ترتیبِ مالک، با «خودپرداز» و «نمی‌تونم تشخیص بدم»');
+  const APP_ORDER = JSON.stringify(['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'bale', '724', 'atm', 'other', 'unknown']);
+  ok(JSON.stringify(app.filter((v) => v.active).map((v) => v.key)) === APP_ORDER,
+    'اپ‌های فعال به ترتیبِ مالک، با «بله»، «۷۲۴»، «خودپرداز»، «سایر» و «نمی‌تونم تشخیص بدم»');
+  {
+    // وضعیتِ واقعیِ سرور: v2 با فهرستِ قبلی از قبل اجرا شده (مهر دارد) و حالا سیدِ تازه + v3 می‌رسد.
+    const db3 = freshDb();
+    new Function('db', 'RT', 'logErr', tagSchema)(db3, RT, () => {});
+    ['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'atm', 'unknown'].forEach((k, i) => db3.prepare("UPDATE tag_values SET sort=? WHERE dim='app' AND key=?").run(i + 1, k));
+    db3.prepare("INSERT INTO migrations (key, done_at) VALUES ('tags_v2_manual_only', 1)").run();
+    ['bale', '724', 'other'].forEach((k) => db3.prepare("UPDATE tag_values SET sort=6 WHERE dim='app' AND key=?").run(k));   // جایگاهِ برخوردیِ سیدِ تازه
+    new Function('db', 'RT', 'logErr', `${tagSchema}\n${migration}`)(db3, RT, (...a) => errs.push(a.join(' ')));
+    const order = db3.prepare("SELECT key FROM tag_values WHERE dim='app' AND active=1 ORDER BY sort, rowid").all().map((r) => r.key);
+    ok(JSON.stringify(order) === APP_ORDER, `سرورِ واقعی (v2 از قبل اجرا شده): ترتیبِ تازه یک‌باره درست می‌شود (${order.join('،')})`);
+  }
   ok(app.find((v) => v.key === 'blu')?.active === 0, 'اپِ «بلو» غیرفعال شد (هرگز حذف نمی‌شود؛ برچسبِ تگِ قدیمی خوانا می‌ماند)');
   ok(db2.prepare("SELECT sort FROM tag_values WHERE dim='bank' AND key='unknown'").get()?.sort === 0, '«نمی‌تونم تشخیص بدم» اولِ فهرستِ بانک');
   const pays = db2.prepare('SELECT status, approved_at FROM payments ORDER BY id').all();
