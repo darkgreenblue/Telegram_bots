@@ -13,6 +13,7 @@
 //
 // کدِ واقعی از index.js بریده و روی SQLite با تلگرامِ قلابی اجرا می‌شود.
 import * as CA from '../bots/tarot/cards-admin.js';
+import * as CR from '../bots/tarot/card-rules.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 import { Markup } from '../bots/tarot/node_modules/telegraf/lib/index.js';
@@ -72,8 +73,11 @@ function boot({ flag = true, stars = false } = {}) {
   const clock = {};
   const errs = [], events = [], sessions = {}, states = {};
   const handlers = [];
+  // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
+  // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
+  db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
   const env = {
-    CA, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars,
+    CA, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars,
     Markup, L: fa, bot: { action: (re, fn) => handlers.push({ re, fn }), telegram: { sendMessage: async () => {} } },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }),
     curOf: () => ({ on: true, name: 'الماس', emoji: '💎' }), invoicePurchaseFor: () => null,
@@ -245,8 +249,8 @@ ok(/ALTER TABLE payments ADD COLUMN card_switched_at INTEGER/.test(CODE)
   && /ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0/.test(CODE), 'مهاجرت‌ها افزایشی‌اند (بند ۲ج/۱)');
 ok(/\.\.\.receiptExpectedCards\(p\)/.test(CODE) && /if \(attributeReceiptCard\(p, verdict\.extracted\)\) p = stmts\.getPayment\.get\(paymentId\);/.test(CODE),
   'ایجنتِ رسید هر دو کارت را می‌بیند و بعد از خواندن، پرداخت به کارتِ واقعیِ رسید نسبت داده می‌شود');
-ok(/CA\.pickAmountCard\(\{ cards: cardSt\(\)\.all\.all\(\), \.\.\.cardCounts\(p\.amount\), excludeId: cardOfPayment\(p\)\.id \}\)/.test(CODE),
-  'مقصدِ تعویض از همان تک‌منبعِ خالص و همان شمارش‌های مبلغ، به‌جز کارتِ فعلی');
+ok(/const cur = cardOfPayment\(p\);\s*const r = CA\.pickAmountCard\(\{ cards: cardsForSwitch\(p, cur\), \.\.\.cardCounts\(p\.amount\), excludeId: cur\.id \}\)/.test(CODE),
+  'مقصدِ تعویض از همان تک‌منبعِ خالص و همان شمارش‌های مبلغ، به‌جز کارتِ فعلی (فهرست از قواعدِ کارتِ کاربر، v3.133.0)');
 
 console.log(`\n${pass} پاس، ${fail} خطا`);
 if (fail) process.exit(1);

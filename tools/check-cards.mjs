@@ -11,6 +11,7 @@
 //
 // کدِ واقعی از خودِ index.js بریده و روی SQLite در-حافظه **اجرا** می‌شود، نه کپی.
 import * as CA from '../bots/tarot/cards-admin.js';
+import * as CR from '../bots/tarot/card-rules.js';
 import * as RT from '../bots/tarot/receipt-tags.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
@@ -96,7 +97,10 @@ function boot({ legacy = false, failTo = null } = {}) {
     sendPhoto: async (to, file, extra = {}) => { if (to === failTo) throw new Error('403'); sent.push({ to, file, text: extra.caption, extra }); return { message_id: sent.length }; },
   } };
   const ADMIN_IDS = [OWNER, SECOND];
-  const env = { CA, db, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
+  // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
+  // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
+  db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
+  const env = { CA, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
     logErr: (...a) => errs.push(a.join(' ')), invoiceNoOf: (p) => p.invoice_no || p.id,
     // 🔄 فازِ ۲: چرخش واقعاً اجرا می‌شود (نه اینکه با ReferenceError بی‌صدا به فالبک بیفتد).
     CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {},

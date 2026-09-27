@@ -12,6 +12,7 @@
 //
 // کدِ واقعی از index.js بریده و روی SQLite با تلگرامِ قلابی اجرا می‌شود.
 import * as CA from '../bots/tarot/cards-admin.js';
+import * as CR from '../bots/tarot/card-rules.js';
 import * as RT from '../bots/tarot/receipt-tags.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
@@ -83,8 +84,11 @@ function boot({ flag = true, shadow = true, stars = false } = {}) {
   const errs = [], events = [], sessions = {}, states = {}, notified = [], sentTo = [], approved = [], after = [], ownerNotes = [];
   const handlers = [];
   const tg = { log: [] };
+  // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
+  // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
+  db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
   const env = {
-    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
+    CA: CAx, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
     TRANSFER_ERROR_ACTION_ENABLED: flag, RECEIPT_SHADOW_ENABLED: shadow,
     Markup, L: fa, TERR_BTN: RT.TERR_BTN, terrAdminText: RT.terrAdminText, RECEIPT_LIVE_STATES: ['pending', 'waiting_review'],
     bot: {
