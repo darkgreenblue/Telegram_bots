@@ -92,7 +92,7 @@ console.log('ماژولِ خالص:');
   const col = RT.tagCollapsedRows(7, { bank: { key: 'saman', source: 'admin' } }, (d, k) => (k === 'saman' ? 'سامان' : k));
   ok(col.length === 1 && col[0][0].text === '📱 اپ: —' && col[0][1].text === '🏦 بانک: سامان', 'ردیفِ جمع‌شده: «📱 اپ: —» و «🏦 بانک: سامان»');
   const colC = RT.tagCollapsedRows(7, {}, null, { cardLabel: 'بلوبانک …5405' });
-  ok(colC.length === 2 && colC[1][0].callback_data === 'tg:o:7:card' && colC[1][0].text === '💳 کارتِ تخصیص: بلوبانک …5405 · تغییر',
+  ok(colC.length === 2 && colC[1][0].callback_data === 'tg:o:7:card' && colC[1][0].text === '💳 تغییر کارت تخصیص',
     'ردیفِ «💳 کارتِ تخصیص» فقط وقتی cardLabel داده شود (پیامِ مالک)');
   const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', number: '6219861904145405' },
     { id: 2, kind: 'white', active: 1, sort: 5, bank: 'ملت', number: '6104330000005224' },
@@ -262,7 +262,7 @@ if (h) {
   rc = await h.tap(`tg:s:${pid}:card:2`, OWNER, cardPick);
   ok(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 2 && h.logs.some((l) => /CARD_CORRECT pay#\d+ 1→2/.test(l)),
     'انتخابِ کارتِ سفید ⟵ card_idِ همین پرداخت عوض شد + لاگِ CARD_CORRECT');
-  ok(rc.log.find((x) => x[0] === 'editkb')?.[1]?.inline_keyboard?.[1]?.[0]?.text === '💳 کارتِ تخصیص: ملت …5224 · تغییر', 'ردیفِ جمع‌شده کارتِ تازه را نشان می‌دهد');
+  ok(rc.log.find((x) => x[0] === 'editkb')?.[1]?.inline_keyboard?.[1]?.[0]?.text === '💳 تغییر کارت تخصیص', 'بعد از تغییر، ردیف جمع می‌شود و دکمه همان برچسبِ کوتاه را دارد (بی شماره و بانک)');
   rc = await h.tap(`tg:s:${pid}:card:3`, OWNER, cardPick);
   ok(rc.log.some((x) => x[0] === 'cb' && x[2]) && db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 2, 'کارتِ غیرفعال (دکمه‌ی دست‌ساز) ⟵ هشدار، بدونِ تغییر');
   for (const who of [ADMIN2, SUPPORT_ID]) {
