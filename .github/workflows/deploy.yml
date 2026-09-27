@@ -291,7 +291,27 @@ jobs:
             git reset --hard --quiet origin/main
 
             NEW_HEAD=$(git rev-parse HEAD)
-            CHANGED_FILES=$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD" || echo "")
+            # ---------- مبنای «چه عوض شد؟» = آخرین دیپلویِ موفق، نه HEADِ سرور (باگِ واقعیِ ۱۴۰۵/۰۷/۰۵) ----------
+            # کرونِ ساعتیِ vps-daily-post.sh سرِ دقیقه‌ی ۳۰ `git pull` می‌زند و HEADِ سرور را
+            # **بدونِ ری‌استارت** جلو می‌برد. مرجِ #415 ساعتِ 12:30:01 UTC خورد، کرون همان
+            # دقیقه pull کرد، و دیپلوی ۳۰ ثانیه بعد HEAD را «از قبل به‌روز» دید: دیفِ خالی ⟵
+            # «⏭ tarot بدون تغییر» ⟵ ربات کدِ قدیمی را اجرا می‌کرد و همه‌جا سبز بود. همین
+            # برای هر مرجِ **به‌تعویق‌افتاده** هم برقرار است (کرون تا صبح حتماً pull می‌کند).
+            # درمان: مبنا مهرِ آخرین دیپلویِ موفق است که فقط **آخرِ همین اسکریپت** نوشته
+            # می‌شود؛ هر نویسنده‌ی دیگری روی درختِ سرور دیگر نمی‌تواند یک تغییر را پنهان کند.
+            # دیپلویِ شکست‌خورده مهر را جلو نمی‌برد، پس دفعه‌ی بعد همان تغییرها دوباره سنجیده
+            # می‌شوند. نبودِ مهر (اولین اجرا) ⟵ رفتارِ قبلی. گارد: tools/check-deploy-baseline.mjs
+            # >>> deploy-baseline
+            DEPLOYED_FILE="$HOME/.deploy-last-sha"
+            BASE=$(cat "$DEPLOYED_FILE" 2>/dev/null | tr -d '[:space:]')
+            if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              BASE="$OLD_HEAD"
+              echo "ℹ️ مهرِ آخرین دیپلو نیست — مبنا HEADِ سرور"
+            elif [ "$BASE" != "$OLD_HEAD" ]; then
+              echo "ℹ️ HEADِ سرور ($OLD_HEAD) جلوتر از آخرین دیپلو ($BASE) بود — تغییرات از آخرین دیپلو سنجیده می‌شوند"
+            fi
+            CHANGED_FILES=$(git diff --name-only "$BASE" "$NEW_HEAD" || echo "")
+            # <<< deploy-baseline
             # تغییر زیرساخت مشترک → همه‌ی ربات‌ها ری‌دیپلوی می‌شوند
             INFRA_CHANGED=0
             if echo "$CHANGED_FILES" | grep -qE '^(ecosystem\.config\.cjs|shared/|\.github/workflows/deploy\.yml)'; then INFRA_CHANGED=1; fi
@@ -745,6 +765,10 @@ jobs:
             fi
 
             pm2 save
+            # مهرِ دیپلویِ موفق: فقط این‌جا، بعد از همه‌ی گاردها (هر `exit 1` بالاتر این خط را رد می‌کند).
+            # >>> deploy-mark
+            printf '%s\n' "$NEW_HEAD" > "$DEPLOYED_FILE"
+            # <<< deploy-mark
             echo "---- وضعیت نهایی ----"
             pm2 ls
 

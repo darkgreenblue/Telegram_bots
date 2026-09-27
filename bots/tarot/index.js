@@ -56,6 +56,7 @@ import { repairDefects } from './repair.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
 import * as CA from './cards-admin.js';
+import * as CR from './card-rules.js';
 import {
   PICKER_TEXT, PICKER_BY_CODE, LANG_CB, pickerRows, fullCodes, supportedCodes, langUi, UNIFIED_PROFILE,
 } from './lang-picker.js';
@@ -340,7 +341,9 @@ const TEST_PHASE = false;
 //         ترتیب؛ روز از ۰۰:۰۰؛ کاربر هیچ نقشی ندارد؛ کاربرِ بلو حذف)، تشخیصِ اپ/بانک کاملاً از هوش مصنوعی
 //         بیرون (فقط دکمه‌ی ادمین)، پیامِ رسید «کارتِ تخصیص‌داده» + «سوابق کاربر: N پرداخت»، دکمه‌ی «تغییر
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
-const PRODUCT_VERSION = '3.132.0';
+// 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
+//         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
+const PRODUCT_VERSION = '3.133.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -357,6 +360,11 @@ const cardsAdminOn = (uid) => CARDS_ADMIN_ENABLED && !starsRail && Number(uid) =
 // کاربر هیچ نقشی ندارد (نه کارتِ ثابتِ روزانه، نه کارتِ ترجیحی). همه‌ی عادی‌ها پر ⟵ کارتِ سفید.
 // `false` ⟵ اولین کارتِ عادیِ فعال (رفتارِ v3.123.0). ربات‌های استارز هرگز وارد نمی‌شوند.
 const CARD_ROTATION_ENABLED = true;
+// 🚫 قواعدِ صلاحیتِ کارت per کاربر (v3.133.0، `card-rules.js`). فعلاً یک قاعده: کاربری که رسیدش تگِ
+// دستیِ اپِ «آپ» خورده، کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
+// افزودن/حذفِ قاعده = یک ردیف در `CR.CARD_RULES`. `false` ⟵ همه‌ی کاربران همه‌ی کارت‌ها (v3.132.0).
+// ⚠️ هیچ‌جا پرچمِ خام صدا زده نمی‌شود، فقط `cardsForUser` (چکِ CI).
+const CARD_RULES_ENABLED = true;
 // 🔄 دکمه‌ی «تعویض شماره کارت» زیرِ فاکتور (v3.125.0، فازِ ۳). هر فاکتور یک بار؛ مقصد با **همان**
 // قانونِ صدورِ فاکتور انتخاب می‌شود، به‌جز کارتِ فعلی (v3.132.0). `false` ⟵ دکمه و تذکرش محو،
 // فاکتور بیت‌به‌بیت v3.124.0؛ اکشنِ `card_switch:` ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد.
@@ -1323,6 +1331,27 @@ function cardOfPayment(p) {
   } catch (e) { logErr('cardOfPayment:', e.message); return LEGACY_CARD; }
 }
 const cardOfPid = (pid) => cardOfPayment(stmts.getPayment.get(pid));
+/* 🚫 کارت‌های مجازِ یک کاربر (`CR.eligibleCards`). تنها درِ ورودِ قواعد به انتخابِ کارت: هر مسیری
+ * که برای کاربر کارت انتخاب می‌کند فهرستش را از این‌جا می‌گیرد. statement جدا و lazy است (درسِ
+ * فازِ ۵: prepareِ شکست‌خورده این‌جا نباید `cardSt()` را بشکند). خواندنِ ناموفق ⟵ `facts=null` ⟵
+ * سخت‌ترین حالت (همه‌ی قاعده‌ها)، نه بی‌قاعده. */
+let _ruleFactsSt;
+function cardsForUser(uid, cards) {
+  if (!CARD_RULES_ENABLED) return { cards, blocked: [], rules: [] };
+  let facts = null;
+  try {
+    _ruleFactsSt ||= db.prepare("SELECT DISTINCT dim, value_key FROM receipt_tags WHERE user_id=? AND source='admin'");
+    facts = CR.userCardFacts(_ruleFactsSt.all(uid));
+  } catch (e) { logErr('cardsForUser:', e.message); }
+  return CR.eligibleCards(cards, facts);
+}
+/** کارت‌های مجاز + کارتِ فعلیِ پرداخت (حتی اگر قاعده برش داشته). کارتِ فعلی را خودِ انتخاب‌گر با
+ *  `excludeId`/`currentId` کنار می‌گذارد؛ بودنش فقط ترجیحِ «سفیدِ همان ادمین» را زنده نگه می‌دارد. */
+function cardsForSwitch(p, cur) {
+  const all = cardSt().all.all();
+  const { cards } = cardsForUser(p.user_id, all);
+  return cards.some((c) => c.id === cur.id) ? cards : [...cards, cur];
+}
 /* ⏱ انتخابِ کارت روی مسیرِ صدورِ فاکتور است و کاربر منتظرش می‌ماند. همه‌ی دیتایش در SQLiteِ
  * **داخلِ همین پروسه** است (هیچ فراخوانیِ شبکه‌ای نیست) و روی ایندکس، پس در عمل زیرِ یک
  * میلی‌ثانیه تمام می‌شود (چکِ CI بدترین حالت را روی جدولِ بزرگ می‌سنجد). دو تورِ احتیاط:
@@ -1353,8 +1382,10 @@ function issueInvoiceCard(paymentId) {
       if (ms > CARD_PICK_BUDGET_MS) cardPickAlert(`محاسبه ${ms} میلی‌ثانیه طول کشید (فاکتورِ ردیفِ ${paymentId})؛ کارت درست انتخاب شد ولی باید بررسی شود.`);
       if (r) {
         lastPickedCardId = r.card.id;
-        log(`💳 CARD_PICK #${paymentId} card=${r.card.id} via=${r.via} amount=${r.amount} ms=${ms}`);
-        track(db, r.uid, 'card_assigned', { payment_id: paymentId, card_id: r.card.id, via: r.via, day: r.day, amount: r.amount });
+        const ruleNote = r.rules.length ? ` rules=${r.rules.join(',')} blocked=${r.blocked.map((b) => b.id).join(',') || '-'}` : '';
+        log(`💳 CARD_PICK #${paymentId} card=${r.card.id} via=${r.via} amount=${r.amount} ms=${ms}${ruleNote}`);
+        track(db, r.uid, 'card_assigned', { payment_id: paymentId, card_id: r.card.id, via: r.via, day: r.day, amount: r.amount,
+          ...(r.rules.length ? { rules: r.rules.join(',') } : {}) });
         return;
       }
     }
@@ -1364,13 +1395,27 @@ function issueInvoiceCard(paymentId) {
   }
   // چرخش خاموش، ربات استارز، یا خطا ⟵ فالبک. فاکتور هرگز بی‌کارت نمی‌ماند.
   try {
+    const p = stmts.getPayment.get(paymentId);
     const last = failed && lastPickedCardId ? cardSt().byId.get(lastPickedCardId) : null;
-    const c = last && Number(last.active) === 1 ? last : defaultInvoiceCard();
+    const c = allowedFallback(p?.user_id, last && Number(last.active) === 1 ? last : defaultInvoiceCard(), paymentId);
     if (c.id && cardSt().assign.run(c.id, paymentId).changes === 1 && failed) {
-      const p = stmts.getPayment.get(paymentId);
       track(db, p?.user_id, 'card_assigned', { payment_id: paymentId, card_id: c.id, via: 'fallback', day: CA.cardDay(), amount: p?.amount });
     }
   } catch (e) { logErr('issueInvoiceCard:', e.message); }
+}
+/** کارتِ فالبک اگر برای کاربر مجاز است؛ وگرنه اولین کارتِ فعالِ مجاز (عادی، بعد هر نوع). اگر هیچ
+ *  کارتِ فعالِ مجازی نمانده (همه‌ی کارت‌های دیگر خاموش‌اند)، فاکتور بی‌کارت نمی‌ماند: همان کارت
+ *  می‌رود و مالک هشدار می‌گیرد، چون این یعنی فهرستِ کارت‌ها باید دست بخورد. */
+function allowedFallback(uid, c, paymentId) {
+  // عمداً مستقل از پرچمِ چرخش: رول‌بکِ چرخش قاعده را خاموش نمی‌کند (فقط `CARD_RULES_ENABLED`).
+  if (starsRail || !c?.id) return c;
+  const { cards, rules } = cardsForUser(uid, cardSt().all.all());
+  if (!rules.length || cards.some((x) => x.id === c.id)) return c;
+  const act = cards.filter((x) => Number(x.active) === 1);
+  const alt = act.find((x) => x.kind === 'regular') || act[0];
+  if (alt) return alt;
+  cardPickAlert(`قاعده‌ی کارت (${rules.join(',')}) برای فاکتورِ ردیفِ ${paymentId} اعمال نشد: هیچ کارتِ فعالِ مجازِ دیگری نیست.`);
+  return c;
 }
 const countMap = (rows) => new Map(rows.map((r) => [r.card_id, r.c]));
 /** سه شمارشِ امروز برای یک مبلغ: `used` (سقف)، `wins` (تأییدشده با همین مبلغ)، `open` (باز با همین مبلغ). */
@@ -1386,10 +1431,11 @@ const pickInvoiceCardTx = () => _pickTx || (_pickTx = db.transaction((pid) => {
   const st = cardSt();
   const p = stmts.getPayment.get(pid);
   if (!p || p.card_id) return null;              // فاکتورِ ناموجود یا از قبل کارت‌دار: دست نمی‌زنیم
-  const { card, via } = CA.pickAmountCard({ cards: st.all.all(), ...cardCounts(p.amount) });
-  if (!card) return null;
+  const { cards, blocked, rules } = cardsForUser(p.user_id, st.all.all());
+  const { card, via } = CA.pickAmountCard({ cards, ...cardCounts(p.amount) });
+  if (!card) return null;                       // هیچ کارتِ مجازی ⟵ فالبکِ `allowedFallback`
   if (st.assign.run(card.id, pid).changes !== 1) throw new Error('card_id already set');
-  return { card, via, day: CA.cardDay(), uid: p.user_id, amount: p.amount };
+  return { card, via, day: CA.cardDay(), uid: p.user_id, amount: p.amount, blocked, rules };
 }));
 /** مصرفِ امروزِ هر کارت (برای نمایش در «💳 کارت‌ها»). خطا ⟵ `undefined` = بدونِ خطِ مصرف. */
 function cardsUsedToday() {
@@ -1431,7 +1477,8 @@ function switchTargetFor(p) {
   try {
     // فاکتورِ کارتِ سفید دکمه‌ی تعویض ندارد (تصمیمِ مالک، پاسخِ ۱۵): سفید آخرین مقصد است.
     if (cardOfPayment(p).kind === 'white') return null;
-    const r = CA.pickAmountCard({ cards: cardSt().all.all(), ...cardCounts(p.amount), excludeId: cardOfPayment(p).id });
+    const cur = cardOfPayment(p);
+    const r = CA.pickAmountCard({ cards: cardsForSwitch(p, cur), ...cardCounts(p.amount), excludeId: cur.id });
     return r.card ? r : null;
   } catch (e) { logErr('switchTargetFor:', e.message); return null; }
 }
@@ -10408,7 +10455,7 @@ function whiteTargetFor(p) {
     const cur = cardOfPayment(p);
     if (!p || p.transfer_error_at || cur.kind === 'white') return null;
     const st = cardSt();
-    return CA.pickWhiteCard({ cards: st.all.all(), used: countMap(st.usedOn.all(CA.cardDayStartSec())), currentId: cur.id });
+    return CA.pickWhiteCard({ cards: cardsForSwitch(p, cur), used: countMap(st.usedOn.all(CA.cardDayStartSec())), currentId: cur.id });
   } catch (e) { logErr('whiteTargetFor:', e.message); return null; }
 }
 /* ادعای اتمیک: یک بار per فاکتور، فقط `pending`، فقط از همان کارتی که کاربر دید. عمداً بیرونِ

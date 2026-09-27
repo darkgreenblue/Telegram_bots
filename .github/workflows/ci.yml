@@ -188,6 +188,13 @@ jobs:
         if: matrix.bot == 'voice2text'
         run: node tools/check-deploy-concurrency.mjs
 
+      # 🧭 مبنای «چه عوض شد؟» در دیپلوی = مهرِ آخرین دیپلویِ موفق، نه HEADِ سرور. کرونِ ساعتیِ
+      # vps-daily-post.sh با `git pull` HEAD را جلو می‌برد و دیپلویِ بعدی ربات را «بدون تغییر»
+      # می‌دید (باگِ واقعیِ ۱۴۰۵/۰۷/۰۵، #415). رفتاری: روی یک مخزنِ گیتِ واقعی اجرا می‌شود.
+      - name: Deploy baseline guard
+        if: matrix.bot == 'voice2text'
+        run: node tools/check-deploy-baseline.mjs
+
       # ⏰ پنجره‌ی امنِ دیپلوی: هر دو جهتِ خطا گران است — گاردِ شل یعنی ری‌استارت وسطِ
       # اوج، گاردِ سفت یعنی رباتِ خوابیده که تا فردا فیکسش نمی‌رسد. هر ۲۴ ساعت و
       # پروتکلِ فوری با همان تابعی سنجیده می‌شوند که خودِ ورک‌فلو صدا می‌زند.
@@ -600,6 +607,11 @@ jobs:
       - name: Card amount pick check
         if: matrix.bot == 'tarot'
         run: node tools/check-card-amount.mjs
+      # 🚫 قواعدِ صلاحیتِ کارت per کاربر (v3.133.0): کاربرِ تگِ «آپ» هرگز کارتِ بلوبانک نمی‌گیرد، در
+      # هیچ مسیری (صدور، تعویض، خطای انتقال، فالبک). قاعده‌ها در `card-rules.js`، هر کدام یک ردیف.
+      - name: Card rules check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-rules.mjs
       - name: Card switch check
         if: matrix.bot == 'tarot'
         run: node tools/check-card-switch.mjs

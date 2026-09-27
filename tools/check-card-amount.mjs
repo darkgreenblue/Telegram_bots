@@ -12,6 +12,7 @@
 //
 // کدِ واقعی از index.js بریده و روی SQLite اجرا می‌شود؛ منطقِ انتخاب همان `CA.pickAmountCard`.
 import * as CA from '../bots/tarot/cards-admin.js';
+import * as CR from '../bots/tarot/card-rules.js';
 import { readFileSync } from 'fs';
 import Database from '../bots/tarot/node_modules/better-sqlite3/lib/index.js';
 
@@ -90,6 +91,7 @@ ok(P({ excludeId: 2, wins: M({ 1: 3, 3: 1 }) }).card.id === 3, 'تعویض: کم
 /* ── ۳) رفتاری: همان کدِ index.js روی SQLite ──────────────────────────────── */
 console.log('\nرفتاری:');
 const readers = region('let _cardSt = null;', '\nfunction cardOfPayment', { includeTo: false });
+const rulesRg = region('/* 🚫 کارت‌های مجازِ یک کاربر', '\n/* ⏱ انتخابِ کارت', { includeTo: false });
 const issue = region('/* ⏱ انتخابِ کارت روی مسیرِ صدورِ فاکتور', '\n// خطِ زیرِ شماره روی فاکتور', { includeTo: false });
 const schema = region('db.exec(`\n  CREATE TABLE IF NOT EXISTS cards', "VALUES ('cards_seed_1', unixepoch())\").run();\n})();");
 const OWNER = 111;
@@ -103,12 +105,15 @@ function boot({ rotation = true, stars = false, CAo = {}, DateO = Date } = {}) {
   const clock = { now: DAY0 };
   const CAx = { ...CA, cardDay: () => CA.cardDay(clock.now * 1000), cardDayStartSec: () => CA.cardDayStartSec(clock.now * 1000), ...CAo };
   const errs = [], events = [], sent = [];
-  const env = { CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars, Date: DateO,
+  // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
+  // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
+  db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
+  const env = { CA: CAx, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars, Date: DateO,
     bot: { telegram: { sendMessage: async (to, t) => { sent.push({ to, t }); } } },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }) };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
-    ${readers}\n${schema}\n${issue}
+    ${readers}\n${schema}\n${rulesRg}\n${issue}
     return { issueInvoiceCard, markApprovedDay, cardsUsedToday, cardSt, cardCounts };`;
   const f = new Function(...Object.keys(env), body);
   const h = { ...f(...Object.values(env)), db, clock, errs, events, sent };
