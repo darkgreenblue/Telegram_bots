@@ -269,7 +269,7 @@ console.log('\n▶ تگِ اعتماد (🔴/🟡) روی پیام‌های اد
   ok(!!susSend && /trustTagFor\(uid\)/.test(susSend), 'sendSuspectApprovalToAdmin هم همان تگ را می‌گذارد');
   // کنترلِ معکوس: مسیری که فقط برای کاربرِ سالم اجرا می‌شود نباید این تگ را داشته باشد،
   // وگرنه ادعای بالا آینه‌ی خودش بود نه سنجه‌ی واقعی (بند ۶ب ریشه).
-  const autoApproved = bodyOf('async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {', '\n}');
+  const autoApproved = bodyOf('async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0, textBody = null) {', '\n}');
   ok(!!autoApproved && !/trustTagFor/.test(autoApproved),
     'notifyAdminAutoApproved تگ ندارد (کنترلِ معکوس: این مسیر فقط برای کاربرِ سالم اجرا می‌شود)');
 

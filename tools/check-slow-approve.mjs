@@ -60,13 +60,13 @@ function boot({ file = ':memory:', flag = true, stars = false, delay = 420, stat
       return { creditAmount: 10, bonus: 0 };
     },
     approvedMsg: () => 'APPROVED', getUser: () => ({}), getBalance: () => 5, isAdmin: () => false,
-    notifyAdminAutoApproved: async () => { log.notify++; }, notifyAdminAuto: async () => { log.notify++; },
+    notifyAdminAutoApproved: async (...a) => { log.notify++; log.notifyArgs = a; }, notifyAdminAuto: async () => { log.notify++; },
     creditedReceiptKb: () => ({}), L: { wallet: { underpaidApproved: () => 'UNDERPAID_OK' } },
     sendReceiptToAdmin: async () => { log.toAdmin++; }, sendSuspectApprovalToAdmin: async () => { log.suspectAdmin++; },
     track: (_d, u, e, p) => log.events.push({ e, p }), log: () => {}, logErr: (...a) => log.errs.push(a.join(' ')),
     logPush: (_d, u, t) => log.pushed.push(t),
     bot: { telegram: { sendMessage: async (u, t) => { log.sent.push({ u, t }); } } },
-    withLang: (_l, fn) => fn(), langOf: () => 'fa',
+    withLang: (_l, fn) => fn(), langOf: () => 'fa', RECEIPT_TEXT_MAX: 3500,
     getState: () => state, getSession: () => session, afterApproval: async () => { log.after++; },
     setTimeout: (fn, ms) => { log.timers.push(ms); },
   };
@@ -112,13 +112,31 @@ if (h) {
     'پیامِ تأیید به کاربر + logPush (تایم‌لاین) + خبرِ ادمین + ادامه‌ی فال');
   ok(h.scheduleAutoDecision(h.row(a), A, 20000, null) === false, 'پرداختِ نهایی‌شده دوباره زمان‌بندی نمی‌شود');
 
+  // 📋 رسیدِ متنی (فاکتور #۱۴۲۹): متنی که ایجنت خوانده باید به پیامِ ادمین برسد، وگرنه ادمین پیامی بی‌رسید می‌بیند.
+  const t = h.pay();
+  h.db.prepare('UPDATE payments SET receipt_file_id=NULL WHERE id=?').run(t);
+  h.scheduleAutoDecision(h.row(t), A, 20000, 'متنِ رسیدِ کپی‌شده');
+  h.due(t);
+  await h.runDueAutoDecisions();
+  ok(h.log.notifyArgs?.[5] === 'متنِ رسیدِ کپی‌شده', 'تأییدِ زمان‌بندی‌شده‌ی رسیدِ متنی ⟵ متنِ رسید به پیامِ ادمین می‌رسد');
+  const tailSrc = /const RECEIPT_TEXT_MAX = [\s\S]*?: ''\);/.exec(SRC)?.[0] || '';
+  const tail = new Function(`${tailSrc}\nreturn receiptTextTail;`)();
+  const long = 'x'.repeat(2000);
+  ok(/📋 متنِ رسیدِ کاربر/.test(tail('abc', null)) && tail('abc', 'F') === '' && tail(null, null) === '', 'دُمِ متن فقط برای رسیدِ بی‌عکس');
+  ok(tail(long, null).endsWith(long), 'کلِ متنِ کاربر می‌آید (۲۰۰۰ نویسه بدونِ بریدن؛ نسخه‌ی قبل ۵۰۰ را می‌برید)');
+  ok(!/textBody\.slice\(0, 500\)/.test(SRC) && (SRC.match(/receiptTextTail\(textBody/g) || []).length === 4,
+    'هر چهار سازنده‌ی پیامِ رسید (دستی، مشکوک، تأیید، و notifyAdminAuto برای اصلاح/رد) از همان helper، بدونِ برشِ ۵۰۰تایی');
+  ok(/caption \+= receiptTextTail\(textBody, p\.receipt_file_id\)/.test(SRC) && /\+ receiptTextTail\(textBody, photoFileId\)/.test(SRC)
+    && /applyAutoCredit\(\{ uid, paymentId, decision, amountToman, photoFileId, textBody,/.test(SRC),
+    'هر سه پیامِ خودکار (تأیید، اصلاحِ کم‌پرداخت، رد) و مسیرِ فوری متن را می‌گیرند');
+
   const b = h.pay();
   h.scheduleAutoDecision(h.row(b), A, 20000, null);
   h.db.prepare("UPDATE payments SET status='rejected' WHERE id=?").run(b);   // ادمین زودتر رد کرد
   h.due(b);
   const before = h.log.sent.length;
   await h.runDueAutoDecisions();
-  ok(h.log.sent.length === before && h.log.approve === 1, 'ادمین زودتر تصمیم گرفت ⟵ هیچ پیام و هیچ اعتباری');
+  ok(h.log.sent.length === before && h.log.approve === 2, 'ادمین زودتر تصمیم گرفت ⟵ هیچ پیام و هیچ اعتباری');
 
   console.log('\nرسیدِ دوباره وسطِ صبر:');
   const hs = boot();

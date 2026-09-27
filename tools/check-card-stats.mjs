@@ -4,7 +4,7 @@
 //   • صدور/تعویض/خطا از `payments.card_id` شمرده شود: آن ستون بعد از تعویض و «پیامکش اومده» جابه‌جا
 //     می‌شود، پس فاکتورِ کارتِ الف به کارتِ ب نسبت داده می‌شد. منبعِ درست رویدادهای ربات است.
 //   • «تأییدشده» با شمارشِ سقفِ ربات فرق کند (مالک دو عدد برای یک چیز ببیند).
-//   • «مبلغ» حسابِ تستی را درآمد بشمارد، یا روز با مرزِ نیمه‌شب (به‌جای ۰۶:۰۰) بریده شود.
+//   • «مبلغ» حسابِ تستی را درآمد بشمارد، یا روز با مرزِ غلط بریده شود (از v3.132.0 نیمه‌شبِ تهران، از `approved_at`).
 // صفحه روی یک دیتابیسِ فیکسچرِ واقعی **رندر** و اعداد از HTML خوانده می‌شوند.
 import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import os from 'os';
@@ -37,7 +37,7 @@ const tY = now - 86400;
     CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, event TEXT NOT NULL,
       props TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()));
     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, status TEXT,
-      card_id INTEGER, approved_day TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+      card_id INTEGER, approved_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
   `);
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6219861904145405','ع','بلوبانک',1,'regular',1)").run();
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5022291612282234','ع','پاسارگاد',1,'white',2)").run();
@@ -51,13 +51,13 @@ const tY = now - 86400;
   ev.run(7, 'card_assigned', JSON.stringify({ payment_id: 30, card_id: 3 }), tY);
   ev.run(7, 'card_assigned', JSON.stringify({ payment_id: 31, card_id: 3 }), tY);
   ev.run(7, 'card_assigned', JSON.stringify({ payment_id: 99, card_id: 1 }), now - 40 * 86400);   // بیرون از ماه
-  // ۰۵:۰۰ تهرانِ همین تاریخ ⟵ هنوز روزِ کارتِ **دیروز** است. بدونِ این ردیف، بریدنِ روز با نیمه‌شب هیچ ادعایی را قرمز نمی‌کرد.
-  ev.run(7, 'card_assigned', JSON.stringify({ payment_id: 32, card_id: 3 }), Math.floor(Date.parse(`${TODAY}T06:00:00+03:30`) / 1000) - 3600);
-  const pay = db.prepare('INSERT INTO payments (user_id, amount, status, card_id, approved_day) VALUES (?,?,?,?,?)');
+  // ۲۳:۰۰ تهرانِ دیروز ⟵ روزِ کارتِ **دیروز**. بدونِ این ردیف، بریدنِ روز با مرزِ غلط هیچ ادعایی را قرمز نمی‌کرد.
+  ev.run(7, 'card_assigned', JSON.stringify({ payment_id: 32, card_id: 3 }), Math.floor(Date.parse(`${TODAY}T00:00:00+03:30`) / 1000) - 3600);
+  const pay = db.prepare('INSERT INTO payments (user_id, amount, status, card_id, approved_at) VALUES (?,?,?,?,?)');
   // پرداختِ ۱۱ حالا card_id=2 دارد (خطای انتقال جابه‌جایش کرد) ولی صدورش مالِ کارتِ ۱ است.
-  pay.run(5, 60000, 'approved', 1, TODAY);
-  pay.run(TESTER, 30000, 'approved', 1, TODAY);      // حسابِ تستی: در شمارشِ سقف هست، در مبلغ نه
-  pay.run(6, 150000, 'approved', 3, YDAY);
+  pay.run(5, 60000, 'approved', 1, tNow);
+  pay.run(TESTER, 30000, 'approved', 1, tNow);      // حسابِ تستی: در شمارشِ سقف هست، در مبلغ نه
+  pay.run(6, 150000, 'approved', 3, tY);
   pay.run(8, 90000, 'rejected', 1, null);
   pay.run(5, 60000, 'pending', 2, null);            // همان پرداختِ ۱۱ِ جابه‌جاشده (card_id حالا سفید)
   db.close();
@@ -73,9 +73,9 @@ try {
   const d7 = cardDays(7);
   ok(d7.length === 7 && d7[0] === TODAY && d7[1] === YDAY && new Set(d7).size === 7, 'cardDays: هفت روزِ کارتِ یکتا، امروز اول');
   ok(cardDays(1).length === 1 && cardDays(1)[0] === TODAY, 'بازه‌ی روزانه = فقط روزِ کارتِ امروز');
-  // مرزِ ۰۶:۰۰: ۰۵:۵۹ تهران مالِ روزِ قبل است.
-  const at0559 = Date.parse('2026-09-26T05:59:00+03:30'), at0601 = Date.parse('2026-09-26T06:01:00+03:30');
-  ok(cardDays(1, at0559)[0] === '2026-09-25' && cardDays(1, at0601)[0] === '2026-09-26', 'مرزِ روز ۰۶:۰۰ تهران است نه نیمه‌شب');
+  // مرزِ نیمه‌شب (v3.132.0): ۲۳:۵۹ تهران مالِ همان روز است و ۰۰:۰۱ روزِ تازه.
+  const at2359 = Date.parse('2026-09-25T23:59:00+03:30'), at0001 = Date.parse('2026-09-26T00:01:00+03:30');
+  ok(cardDays(1, at2359)[0] === '2026-09-25' && cardDays(1, at0001)[0] === '2026-09-26', 'مرزِ روز ۰۰:۰۰ تهران است');
 
   const cell = (html, cardLabel) => {
     const tb = html.slice(html.indexOf('📊 آمارِ روزانه‌ی کارت‌ها'));
@@ -96,7 +96,7 @@ try {
 
   const day = cardsBody(new URL('http://x/cards?bot=tarot&rCard=day'));
   const d3 = cell(day, '#3 💳');
-  ok(d3[1] === '۱' && d3[4] === '۰', `بازه‌ی روزانه: فقط امروز (رویدادِ ۰۵:۰۰ مالِ دیروز است) — ${JSON.stringify(d3)}`);
+  ok(d3[1] === '۱' && d3[4] === '۰', `بازه‌ی روزانه: فقط امروز (رویدادِ ۲۳:۰۰ِ دیشب مالِ دیروز است) — ${JSON.stringify(d3)}`);
   const month = cardsBody(new URL('http://x/cards?bot=tarot&rCard=month'));
   ok(cell(month, '#1 💳')[1] === '۳', 'رویدادِ ۴۰ روز پیش بیرون از بازه‌ی ماهانه');
   const bad = cardsBody(new URL('http://x/cards?bot=tarot&rCard=all%27--'));

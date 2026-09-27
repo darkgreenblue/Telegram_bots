@@ -5,6 +5,9 @@
 //     (حتی با callbackِ دست‌ساز) هیچ چیزی نمی‌نویسد («تگ زدن فقط کار خودمه»).
 //   • مالکی که ادمینِ کارت هم هست **یک** پیام می‌گیرد: دکمه‌های اکشن + ردیفِ تگ.
 //   • تگ یک‌به‌چند per کاربر؛ سابقه فقط از رسیدهای **ردنشده**؛ تگِ دستی همیشه بر خودکار مقدم.
+//   • v3.132.0: تنها منبعِ تگ ادمین است (تشخیصِ خودکار حذف شد)؛ پیامِ رسید دیگر از اپ و بانک حرف
+//     نمی‌زند (فقط «کارتِ تخصیص‌داده» و «سوابق کاربر: N پرداخت»)؛ اکانتِ پشتیبانی فقط تگِ اپ و بانک
+//     را می‌زند؛ «💳 تغییر کارتِ تخصیص» فقط مالک، فقط کارت‌های فعال.
 //   • «سایر» مقدار نیست؛ مقدارها از داشبورد اضافه/فعال/غیرفعال می‌شوند و هرگز حذف نمی‌شوند.
 //   • بلو (بانک) جدا از سامان.
 // خرابی‌های بی‌صدا که این‌جا گرفته می‌شوند: ردیفِ تگ بعد از «تأیید» از پیامِ مالک محو شود؛ گاردِ
@@ -14,7 +17,6 @@
 // کدِ واقعیِ index.js بریده و روی SQLite اجرا می‌شود؛ داشبورد روی **همان** فایلِ دیتابیس رندر و
 // صف می‌کند و بعد sweepِ واقعیِ ربات همان ردیفِ صف را اجرا می‌کند (سرتاسری).
 import * as RT from '../bots/tarot/receipt-tags.js';
-import { BANK_APPS } from '../bots/tarot/cardpay.js';
 import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -37,7 +39,7 @@ function region(from, to, { includeTo = true } = {}) {
   if (a < 0 || b < 0) { fail++; console.error(`  ❌ بخشِ «${from.slice(0, 40)}» در index.js پیدا نشد`); return ''; }
   return SRC.slice(a, includeTo ? b + to.length : b);
 }
-const OWNER = 111, ADMIN2 = 222, USER = 9;
+const OWNER = 111, ADMIN2 = 222, USER = 9, SUPPORT_ID = 555;
 
 console.log('\n🏷 تگِ رسید (فازِ ۶)\n');
 
@@ -45,10 +47,13 @@ console.log('\n🏷 تگِ رسید (فازِ ۶)\n');
 console.log('ماژولِ خالص:');
 {
   const appKeys = RT.SEED_TAG_VALUES.app.map(([k]) => k);
-  ok(JSON.stringify(appKeys) === JSON.stringify(BANK_APPS.filter((k) => k !== 'other')),
-    'کلیدهای اپ = enumِ ایجنت منهای other (تگِ خودکارِ فازِ ۷ بی‌نگاشت می‌نشیند؛ «سایر» مقدار نیست)');
+  ok(JSON.stringify(appKeys) === JSON.stringify(['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'atm', 'unknown']),
+    'اپ‌ها عینِ فهرستِ مالک (v3.132.0): موبایل‌بانک، آپ، ۷۸۰، همراه‌کارت، تاپ، خودپرداز، نمی‌تونم تشخیص بدم');
+  ok(!appKeys.includes('blu'), '«بلو» اپ نیست (کاربرِ بلو = بانکِ بلو + موبایل‌بانک)');
   const bankKeys = RT.SEED_TAG_VALUES.bank.map(([k]) => k);
   ok(bankKeys.includes('blu') && bankKeys.includes('saman'), 'بلو و سامان دو بانکِ جدا');
+  ok(bankKeys[0] === 'unknown' && RT.SEED_TAG_VALUES.bank[0][1] === 'نمی‌تونم تشخیص بدم'
+    && RT.SEED_TAG_VALUES.app.find(([k]) => k === 'unknown')[1] === 'نمی‌تونم تشخیص بدم', '«نمی‌تونم تشخیص بدم» در هر دو بُعد (بانک: اولِ فهرست)');
   ok(!appKeys.includes('other') && !bankKeys.includes('other'), 'هیچ مقدارِ «سایر»ی نیست');
   const all = [...appKeys, ...bankKeys];
   ok(all.every((k) => RT.TAG_KEY_RE.test(k)) && new Set(bankKeys).size === bankKeys.length, 'همه‌ی کلیدهای سید معتبر و یکتا');
@@ -86,6 +91,22 @@ console.log('ماژولِ خالص:');
   ok(picker.slice(0, -1).every((r) => r.length <= 3), 'حداکثر سه دکمه در هر ردیف (روی موبایل جا می‌شود)');
   const col = RT.tagCollapsedRows(7, { bank: { key: 'saman', source: 'admin' } }, (d, k) => (k === 'saman' ? 'سامان' : k));
   ok(col.length === 1 && col[0][0].text === '📱 اپ: —' && col[0][1].text === '🏦 بانک: سامان', 'ردیفِ جمع‌شده: «📱 اپ: —» و «🏦 بانک: سامان»');
+  const colC = RT.tagCollapsedRows(7, {}, null, { cardLabel: 'بلوبانک …5405' });
+  ok(colC.length === 2 && colC[1][0].callback_data === 'tg:o:7:card' && colC[1][0].text === '💳 کارتِ تخصیص: بلوبانک …5405 · تغییر',
+    'ردیفِ «💳 کارتِ تخصیص» فقط وقتی cardLabel داده شود (پیامِ مالک)');
+  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', number: '6219861904145405' },
+    { id: 2, kind: 'white', active: 1, sort: 5, bank: 'ملت', number: '6104330000005224' },
+    { id: 3, kind: 'regular', active: 0, sort: 2, bank: 'شهر', number: '5047061675180547' },
+    { id: 4, kind: 'regular', active: 1, sort: 3, bank: 'خاورمیانه', number: '5859471120915172' }];
+  const cp = RT.cardPickerRows(4242424242, CARDS, 4);
+  const cpcb = cp.flat().map((b) => b.callback_data);
+  ok(JSON.stringify(cpcb) === JSON.stringify(['tg:s:4242424242:card:1', 'tg:s:4242424242:card:4', 'tg:s:4242424242:card:2', 'tg:x:4242424242']),
+    'فهرستِ کارت: همه‌ی کارت‌های **فعال** (عادی و سفید) به ترتیب، غیرفعال نه، و «بستن»');
+  ok(cpcb.every((c) => Buffer.byteLength(c) <= 64 && RT.TAG_CB.test(c)) && cp[1][0].text === '✅ 💳 خاورمیانه …5172' && cp[2][0].text.startsWith('🤍'),
+    'callbackها ≤۶۴ بایت و با TAG_CB جور؛ کارتِ فعلی ✅؛ سفید با 🤍');
+  const pc = (to, pay = { id: 5, card_id: 1 }) => RT.planCardCorrection(pay, CARDS, to);
+  ok(pc(4).ok && !pc(4).noop && pc(4).from === 1 && pc(4).to === 4 && pc(2).ok, 'تغییر به کارتِ فعال (عادی یا سفید) ⟵ مجاز');
+  ok(!pc(3).ok && !pc(99).ok && !pc(4, null).ok && pc(1).noop === true, 'کارتِ غیرفعال/ناموجود/پرداختِ ناموجود ⟵ رد؛ همان کارت ⟵ noop');
 
   const actionRows = [[{ text: 'تأیید', callback_data: 'approve:7' }]];
   const withTags = RT.withTagRows({ inline_keyboard: actionRows }, col);
@@ -123,7 +144,8 @@ const mw = region('/* 🏷 فازِ ۶: دکمه‌های تگِ رسید (`tg:`
 
 const BASE_SQL = `
   CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
-    status TEXT NOT NULL DEFAULT 'waiting_review', receipt_file_id TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+    status TEXT NOT NULL DEFAULT 'waiting_review', receipt_file_id TEXT, card_id INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()));
   CREATE TABLE IF NOT EXISTS admin_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL DEFAULT (unixepoch()), done_at INTEGER,
     user_id INTEGER, amount INTEGER, ref_id INTEGER, note TEXT NOT NULL DEFAULT '');
@@ -133,8 +155,14 @@ function boot({ file = ':memory:', flag = true, stars = false, recipients = null
   const db = new Database(file);
   db.exec(BASE_SQL);
   const errs = [], logs = [], sent = [], uses = [];
+  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', holder: 'ع', number: '6219861904145405' },
+    { id: 2, kind: 'white', active: 1, sort: 2, bank: 'ملت', holder: 'ع', number: '6104330000005224' },
+    { id: 3, kind: 'regular', active: 0, sort: 3, bank: 'شهر', holder: 'ع', number: '5047061675180547' }];
   const env = {
-    db, RT, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, starsRail: stars,
+    db, RT, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
+    cardSt: () => ({ all: { all: () => CARDS } }),
+    cardOfPayment: (p) => CARDS.find((c) => c.id === Number(p?.card_id)) || CARDS[0],
+    cardOfPid: (pid) => env.cardOfPayment(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid)),
     log: (...a) => logs.push(a.join(' ')), logErr: (...a) => errs.push(a.join(' ')),
     receiptRecipients: () => recipients || [{ id: OWNER, full: false }, { id: ADMIN2, full: true }],
     ownerCopyHeader: () => 'COPY\n', ownerShadowLine: () => '',
@@ -149,7 +177,7 @@ function boot({ file = ':memory:', flag = true, stars = false, recipients = null
   };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `${schema}\n${helpers}\n${mw}
-    return { tagSt, tagValues, curTagsOf, tagHistoryLineFor, ownerReceiptMarkup, applyTagPlan, handleTagCallback, applyQueuedTagOp, sendToReceiptRecipients };`;
+    return { tagSt, tagValues, curTagsOf, receiptInfoLines, ownerReceiptMarkup, applyTagPlan, handleTagCallback, applyQueuedTagOp, sendToReceiptRecipients };`;
   const f = new Function(...Object.keys(env), body);
   const h = { ...f(...Object.values(env)), db, errs, logs, sent, mw: uses[0] };
   h.reboot = () => new Function(...Object.keys(env), `${schema}`)(...Object.values(env));
@@ -193,16 +221,18 @@ if (h) {
   const first = await h.sendToReceiptRecipients(p, { caption: 'CAP', photoFileId: 'F', kb });
   const toOwner = h.sent.find((s) => s.to === OWNER), toAdmin = h.sent.find((s) => s.to === ADMIN2);
   ok(first && toOwner && toAdmin, 'هر دو گیرنده پیام گرفتند و پیامِ کامل برگشت');
-  ok(JSON.stringify(cbOf(toOwner.extra.reply_markup)) === JSON.stringify([`tg:o:${pid}:app`, `tg:o:${pid}:bank`]),
-    'کپیِ اطلاعاتیِ مالک: فقط ردیفِ تگ (بدونِ دکمه‌های اکشنِ ادمینِ کارت)');
-  ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === 'CAP',
-    'ادمینِ دیگر: کیبورد و کپشن بیت‌به‌بیت همان قبلی، هیچ دکمه‌ی تگی');
+  ok(JSON.stringify(cbOf(toOwner.extra.reply_markup)) === JSON.stringify([`tg:o:${pid}:app`, `tg:o:${pid}:bank`, `tg:o:${pid}:card`]),
+    'کپیِ اطلاعاتیِ مالک: فقط ردیفِ تگ + «💳 کارتِ تخصیص» (بدونِ دکمه‌های اکشنِ ادمینِ کارت)');
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: 6219 8619 0414 5405 (بلوبانک)\n📊 سوابق کاربر: ۱ پرداخت';
+  ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === `CAP${INFO}`,
+    'ادمینِ دیگر: کیبوردِ قبلی بدونِ هیچ دکمه‌ی تگ/کارت؛ کپشن + کارتِ تخصیص و سوابق');
+  ok(toOwner.text === `COPY\nCAP${INFO}` && !/اپ|بانک:/.test(toOwner.text), 'پیامِ مالک: هیچ حرفی از اپ و بانک، فقط کارت و سوابق');
 
   // مالک = ادمینِ کارت ⟵ یک پیام با هر دو.
   const h2 = boot({ recipients: [{ id: OWNER, full: true }] });
   const pid2 = h2.payment();
   await h2.sendToReceiptRecipients(h2.db.prepare('SELECT * FROM payments WHERE id=?').get(pid2), { caption: 'CAP', photoFileId: 'F', kb: { inline_keyboard: [[{ text: 'تأیید', callback_data: `approve:${pid2}` }]] } });
-  ok(h2.sent.length === 1 && JSON.stringify(cbOf(h2.sent[0].extra.reply_markup)) === JSON.stringify([`approve:${pid2}`, `tg:o:${pid2}:app`, `tg:o:${pid2}:bank`]),
+  ok(h2.sent.length === 1 && JSON.stringify(cbOf(h2.sent[0].extra.reply_markup)) === JSON.stringify([`approve:${pid2}`, `tg:o:${pid2}:app`, `tg:o:${pid2}:bank`, `tg:o:${pid2}:card`]),
     'مالکی که ادمینِ کارت است: یک پیام، دکمه‌های اکشن + ردیفِ تگ');
 
   // تپ‌ها از میانِ middlewareِ واقعی.
@@ -215,14 +245,40 @@ if (h) {
   ok(JSON.stringify(tagsOfPay(h, pid)) === JSON.stringify([{ dim: 'bank', value_key: 'saman', source: 'admin', by_id: OWNER }]),
     'انتخابِ «سامان» ⟵ ردیفِ تگِ دستی با by_idِ مالک');
   const collapsed = r.log.find((x) => x[0] === 'editkb')?.[1];
-  ok(collapsed?.inline_keyboard?.length === 1 && collapsed.inline_keyboard[0][1].text === '🏦 بانک: سامان' && r.log.some((x) => x[0] === 'cb' && /سامان/.test(x[1])),
+  ok(collapsed?.inline_keyboard?.length === 2 && collapsed.inline_keyboard[0][1].text === '🏦 بانک: سامان' && r.log.some((x) => x[0] === 'cb' && /سامان/.test(x[1])),
     'بعد از انتخاب: ردیف جمع می‌شود، «🏦 بانک: سامان» و پیامِ کوتاهِ تأیید');
 
   // مالک = ادمینِ کارت: تپِ تگ دکمه‌های اکشن را دست نمی‌زند.
   const fullKb = h2.sent[0].extra.reply_markup;
   const r2 = await h2.tap(`tg:o:${pid2}:app`, OWNER, fullKb);
   const opened2 = r2.log.find((x) => x[0] === 'editkb')?.[1];
-  ok(cbOf(opened2)[0] === `approve:${pid2}` && cbOf(opened2).includes(`tg:s:${pid2}:app:blu`), 'بازکردنِ فهرست روی پیامِ کامل: دکمه‌ی تأیید سرِ جایش می‌ماند');
+  ok(cbOf(opened2)[0] === `approve:${pid2}` && cbOf(opened2).includes(`tg:s:${pid2}:app:atm`) && !cbOf(opened2).includes(`tg:s:${pid2}:app:blu`),
+    'بازکردنِ فهرست روی پیامِ کامل: دکمه‌ی تأیید سرِ جایش می‌ماند؛ «خودپرداز» هست و «بلو» نه');
+
+  // 💳 تغییرِ کارتِ تخصیص (فقط مالک).
+  let rc = await h.tap(`tg:o:${pid}:card`, OWNER, ownerKb);
+  const cardPick = rc.log.find((x) => x[0] === 'editkb')?.[1];
+  ok(JSON.stringify(cbOf(cardPick)) === JSON.stringify([`tg:s:${pid}:card:1`, `tg:s:${pid}:card:2`, `tg:x:${pid}`]), 'مالک «💳 کارتِ تخصیص» ⟵ فهرستِ کارت‌های فعال (عادی و سفید)');
+  rc = await h.tap(`tg:s:${pid}:card:2`, OWNER, cardPick);
+  ok(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 2 && h.logs.some((l) => /CARD_CORRECT pay#\d+ 1→2/.test(l)),
+    'انتخابِ کارتِ سفید ⟵ card_idِ همین پرداخت عوض شد + لاگِ CARD_CORRECT');
+  ok(rc.log.find((x) => x[0] === 'editkb')?.[1]?.inline_keyboard?.[1]?.[0]?.text === '💳 کارتِ تخصیص: ملت …5224 · تغییر', 'ردیفِ جمع‌شده کارتِ تازه را نشان می‌دهد');
+  rc = await h.tap(`tg:s:${pid}:card:3`, OWNER, cardPick);
+  ok(rc.log.some((x) => x[0] === 'cb' && x[2]) && db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 2, 'کارتِ غیرفعال (دکمه‌ی دست‌ساز) ⟵ هشدار، بدونِ تغییر');
+  for (const who of [ADMIN2, SUPPORT_ID]) {
+    rc = await h.tap(`tg:s:${pid}:card:1`, who, cardPick);
+    ok(rc.log.some((x) => x[1] === '🔒') && db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 2, `${who === ADMIN2 ? 'ادمینِ دیگر' : 'اکانتِ پشتیبانی'} ⟵ 🔒 روی تغییرِ کارت`);
+  }
+  db.prepare('UPDATE payments SET card_id=1 WHERE id=?').run(pid);
+
+  // 🧾 اکانتِ پشتیبانی فقط تگِ اپ و بانک.
+  const pSup = h.payment();
+  rc = await h.tap(`tg:o:${pSup}:app`, SUPPORT_ID, null);
+  const supPick = rc.log.find((x) => x[0] === 'editkb')?.[1];
+  rc = await h.tap(`tg:s:${pSup}:app:mobilebank`, SUPPORT_ID, supPick);
+  ok(JSON.stringify(tagsOfPay(h, pSup)) === JSON.stringify([{ dim: 'app', value_key: 'mobilebank', source: 'admin', by_id: SUPPORT_ID }]),
+    'اکانتِ پشتیبانی تگِ اپ می‌زند (با by_idِ خودش، تگِ دستی)');
+  ok(!cbOf(rc.log.find((x) => x[0] === 'editkb')?.[1]).some((c) => /:card$/.test(c)), 'ردیفِ جمع‌شده‌ی پشتیبانی دکمه‌ی کارت ندارد');
 
   // غیرمالک و ورودیِ خصمانه.
   r = await h.tap(`tg:s:${pid}:bank:melli`, ADMIN2, ownerKb);
@@ -239,7 +295,7 @@ if (h) {
   r = await h2.tap(`approve:${pid2}`, OWNER, fullKb);
   ok(r.nextCalled, 'دکمه‌ی غیرتگ ⟵ به زنجیره‌ی عادی می‌رود');
   await r.ctx.editMessageReplyMarkup(undefined);
-  ok(JSON.stringify(cbOf(r.log.at(-1)[1])) === JSON.stringify([`tg:o:${pid2}:app`, `tg:o:${pid2}:bank`]),
+  ok(JSON.stringify(cbOf(r.log.at(-1)[1])) === JSON.stringify([`tg:o:${pid2}:app`, `tg:o:${pid2}:bank`, `tg:o:${pid2}:card`]),
     'هندلرِ اکشن کیبورد را کامل پاک می‌کند ⟵ ردیفِ تگ روی پیامِ مالک می‌ماند');
   r = await h2.tap(`approve:${pid2}`, ADMIN2, { inline_keyboard: [[{ text: 'تأیید', callback_data: `approve:${pid2}` }]] });
   await r.ctx.editMessageReplyMarkup(undefined);
@@ -253,20 +309,20 @@ if (h) {
   ok(!hOff.sent.find((s) => s.to === OWNER).extra.reply_markup && !tagsOfPay(hOff, pOff).length,
     'رول‌بک (RECEIPT_TAGS_ENABLED=false): نه دکمه‌ی تگ، نه نوشتن (دکمه‌ی کهنه هم)');
 
-  // سابقه: فقط ردنشده‌ها، و خطِ سابقه فقط روی پیامِ مالک.
-  const pRej = h.payment(USER, 'rejected'), pCan = h.payment(USER, 'canceled'), pOther = h.payment(77);
-  for (const [x, k] of [[pRej, 'melli'], [pCan, 'saman'], [pOther, 'melli']]) await h.tap(`tg:s:${x}:bank:${k}`, OWNER, ownerKb);
-  db.prepare("INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source) VALUES (?, ?, 'bank', 'melli', 'auto')").run(pid, USER);
-  ok(h.tagHistoryLineFor(USER) === '🏷 سابقه‌ی کاربر: بانک: سامان ×۲',
-    `سابقه: ردشده بیرون، کاربرِ دیگر بیرون، خودکارِ مغلوب بیرون («${h.tagHistoryLineFor(USER)}»)`);
+  // 📊 «سوابق کاربر: N پرداخت» = پرداخت‌های تأییدشده‌ی **دیگرِ** کاربر + همین یکی (ردشده/لغوشده/کاربرِ دیگر نه).
+  const pRej = h.payment(USER, 'rejected'), pCan = h.payment(USER, 'canceled'), pOther = h.payment(77, 'approved');
+  const pOk1 = h.payment(USER, 'approved'), pOk2 = h.payment(USER, 'approved');
+  void pRej; void pCan; void pOther;
   h.sent.length = 0;
   const pNew = h.payment();
   await h.sendToReceiptRecipients(db.prepare('SELECT * FROM payments WHERE id=?').get(pNew), { caption: 'CAP', photoFileId: 'F', kb });
-  ok(/سابقه‌ی کاربر: بانک: سامان ×۲/.test(h.sent.find((s) => s.to === OWNER).text) && h.sent.find((s) => s.to === ADMIN2).text === 'CAP',
-    'رسیدِ بعدیِ همان کاربر: خطِ سابقه فقط در کپشنِ مالک');
+  ok(h.sent.every((s) => s.text.endsWith('📊 سوابق کاربر: ۳ پرداخت')), 'دو تأییدشده‌ی قبلی + همین ⟵ «۳ پرداخت»، برای همه‌ی گیرنده‌ها');
+  ok(h.receiptInfoLines(db.prepare('SELECT * FROM payments WHERE id=?').get(pOk2)).endsWith('۲ پرداخت')
+    && h.receiptInfoLines(db.prepare('SELECT * FROM payments WHERE id=?').get(pOk1)).endsWith('۲ پرداخت'),
+    'پیامِ «تأیید شد» (پرداختِ از قبل تأییدشده) خودش را دو بار نمی‌شمارد: دو تأییدشده ⟵ «۲ پرداخت»');
+  ok(h.receiptInfoLines(db.prepare('SELECT * FROM payments WHERE id=?').get(pOther)).endsWith('۱ پرداخت'), 'اولین پرداختِ یک کاربر ⟵ «۱ پرداخت»');
   r = await h.tap(`tg:c:${pid}:bank`, OWNER, ownerKb);
-  ok(JSON.stringify(tagsOfPay(h, pid).map((t) => t.source)) === '["auto"]' && h.curTagsOf(pid).bank.key === 'melli',
-    'پاک‌کردن فقط تگِ دستی را برمی‌دارد؛ تگِ خودکار دوباره مؤثر می‌شود');
+  ok(!tagsOfPay(h, pid).length && !h.curTagsOf(pid).bank, 'پاک‌کردن تگِ دستی را برمی‌دارد');
   ok(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events'").get() && !h.errs.length, 'هیچ رویدادِ analytics زیرِ کاربر ساخته نشد، هیچ خطایی');
 
   // صفِ داشبورد (شکل‌های دست‌ساز).
@@ -307,6 +363,8 @@ if (PART !== 'dash') {
   const apply = region('function applyTagPlan', '\n}');
   ok(apply && !/track\(/.test(apply), 'applyTagPlan رویدادِ analytics نمی‌سازد (فعالیتِ جعلی زیرِ کاربر)');
   ok(/const mk = r\.id === OWNER_ID \? ownerReceiptMarkup\(/.test(SRC), 'ردیفِ تگ فقط برای گیرنده‌ی OWNER_ID');
+  ok(!/tagHistoryLineFor|historyLine\(/.test(code), 'رباتِ هیچ خطِ «سابقه‌ی اپ/بانک» روی پیامِ رسید نمی‌سازد');
+  ok(/if \(!m \|\| !\(owner \|\| \(support && m\[3\] !== 'card'\)\)\) return answer\('🔒'\);/.test(code), 'گارد: مالک همه، پشتیبانی فقط اپ/بانک');
 }
 
 /* ── ۴) داشبورد روی همان فایل، سرتاسری ─────────────────────────────────────── */
@@ -349,7 +407,7 @@ if (PART !== 'bot') {
       && JSON.stringify(JSON.parse(q1.note)) === JSON.stringify({ op: 'set', dim: 'bank', key: 'saman' }),
     'set از داشبورد ⟵ ردیفِ صف با payment_id=0 (قفلِ اقدام‌های پولی را نمی‌گیرد) و شکلِ تمیز');
     let threw = '';
-    try { tagAction(form({ pid: String(p2), dim: 'app', key: 'blu' })); } catch (e) { threw = e.message; }
+    try { tagAction(form({ pid: String(p2), dim: 'app', key: 'ap' })); } catch (e) { threw = e.message; }
     ok(/در صف است/.test(threw), 'ضدِ دوبار: رسیدِ دارای تغییرِ در صف ⟵ خطا');
     for (const [o, re, why] of [
       [{ pid: String(pForeign), dim: 'bank', key: 'saman' }, /مالِ این کاربر نیست/, 'رسیدِ کاربرِ دیگر'],
