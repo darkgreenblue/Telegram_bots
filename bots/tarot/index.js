@@ -10270,6 +10270,13 @@ function receiptInfoLines(p) {
     return `💳 کارتِ تخصیص‌داده: ${num} (${c.bank || c.holder})\n📊 سوابق کاربر: ${(prior + 1).toLocaleString('fa-IR')} پرداخت`;
   } catch (e) { logErr('receiptInfoLines:', e.message); return ''; }
 }
+/* 📋 رسیدِ **متنی** (کاربر متنِ رسید را از اپِ بانک کپی کرده، نه عکس): **کلِ** پیامِ کاربر باید در پیامِ ادمین
+ * بیاید، همان‌طور که عکس می‌آید (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵، فاکتور #۱۴۲۹: پیامِ «تأیید شد» نه عکس داشت نه متن).
+ * تک‌منبع برای هر پنج پیام (بازبینیِ دستی، مشکوک، تأیید، اصلاحِ کم‌پرداخت، ردِ خودکار). سقفِ ۳۵۰۰ نویسه فقط
+ * برای اینکه با سرتیتر زیرِ سقفِ ۴۰۹۶ِ پیامِ تلگرام بماند (رسیدِ واقعی چند صد نویسه است). */
+const RECEIPT_TEXT_MAX = 3500;
+const receiptTextTail = (textBody, photoFileId = null) => (textBody && !photoFileId
+  ? `\n\n📋 متنِ رسیدِ کاربر (عکس نفرستاده):\n${String(textBody).slice(0, RECEIPT_TEXT_MAX)}` : '');
 /** ارسالِ یک پیامِ رسید به گیرنده‌هایش. پیامِ اولین گیرنده‌ی **کامل** برگردانده می‌شود
  *  (همان که قبلاً `adminMsg` بود و در `admin_message_id` می‌نشیند). کپشنِ عکس سقفِ ۱۰۲۴
  *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
@@ -10333,7 +10340,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   const p = stmts.getPayment.get(paymentId);
   // 🔴/🟡 تگِ اعتماد اولِ پیام: ادمین همان لحظه می‌فهمد چرا این رسید دستی است.
   const caption = trustTagFor(uid) + (note ? `${note}\n\n` : '')
-    + L.wallet.adminNotify(p, user, packSoldIn(p)) + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+    + L.wallet.adminNotify(p, user, packSoldIn(p)) + receiptTextTail(textBody, photoFileId);
   const kb = Markup.inlineKeyboard([[
     // برچسب شماره‌ی **فاکتور** را نشان می‌دهد، ولی کالبک شناسه‌ی ردیف را حمل می‌کند.
     Markup.button.callback(L.buttons.approve(invoiceNoOf(p)), `approve:${paymentId}`),
@@ -10352,7 +10359,7 @@ async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, text
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
   const caption = trustTagFor(uid) + L.wallet.adminSuspectApprove(p, user, packSoldIn(p))
-    + (textBody ? `\n\n📋 ${textBody.slice(0, 500)}` : '');
+    + receiptTextTail(textBody, photoFileId);
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.suspectYes, `susyes:${paymentId}`),
     Markup.button.callback(L.buttons.suspectNo, `susno:${paymentId}`),
@@ -10594,7 +10601,7 @@ function scheduleAutoDecision(p, decision, amountToman, textBody) {
   try {
     const sec = slowApproveDelaySec();
     const d = JSON.stringify({ action: decision.action, paid: decision.paid ?? null, overpaid: decision.overpaid || 0,
-      reason_fa: decision.reason_fa || '', amount: amountToman, text: textBody ? String(textBody).slice(0, 1000) : null });
+      reason_fa: decision.reason_fa || '', amount: amountToman, text: textBody ? String(textBody).slice(0, RECEIPT_TEXT_MAX) : null });
     if (autoSt().schedule.run(sec, d, p.id).changes !== 1) return false;   // وضعیت عوض شده ⟵ مسیرِ فوری
     log(`⏳ SLOW_APPROVE_SCHEDULED #${p.id} in=${sec}s action=${decision.action}`);
     track(db, p.user_id, 'receipt_decision_scheduled', { payment_id: p.id, delay_s: sec, action: decision.action });
@@ -10847,10 +10854,6 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
 // overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
-/* 📋 رسیدِ **متنی** (کاربر متنِ رسید را از اپِ بانک کپی کرده، نه عکس): متن باید در پیامِ ادمین بیاید، وگرنه
- * ادمین پیامی بی‌عکس و بی‌رسید می‌بیند و فکر می‌کند عکس گم شده (گزارشِ مالک ۱۴۰۵/۰۷/۰۵، فاکتور #۱۴۲۹). مسیرِ
- * بازبینیِ دستی از قبل همین خط را داشت؛ تأییدِ خودکار و ردِ خودکار نداشتند. */
-const receiptTextTail = (textBody, photoFileId) => (textBody && !photoFileId ? `\n\n📋 رسیدِ متنی (عکس نفرستاده):\n${String(textBody).slice(0, 500)}` : '');
 async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0, textBody = null) {
   let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packSoldIn(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;

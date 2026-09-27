@@ -66,7 +66,7 @@ function boot({ file = ':memory:', flag = true, stars = false, delay = 420, stat
     track: (_d, u, e, p) => log.events.push({ e, p }), log: () => {}, logErr: (...a) => log.errs.push(a.join(' ')),
     logPush: (_d, u, t) => log.pushed.push(t),
     bot: { telegram: { sendMessage: async (u, t) => { log.sent.push({ u, t }); } } },
-    withLang: (_l, fn) => fn(), langOf: () => 'fa',
+    withLang: (_l, fn) => fn(), langOf: () => 'fa', RECEIPT_TEXT_MAX: 3500,
     getState: () => state, getSession: () => session, afterApproval: async () => { log.after++; },
     setTimeout: (fn, ms) => { log.timers.push(ms); },
   };
@@ -119,9 +119,13 @@ if (h) {
   h.due(t);
   await h.runDueAutoDecisions();
   ok(h.log.notifyArgs?.[5] === 'متنِ رسیدِ کپی‌شده', 'تأییدِ زمان‌بندی‌شده‌ی رسیدِ متنی ⟵ متنِ رسید به پیامِ ادمین می‌رسد');
-  const tailSrc = /const receiptTextTail = [^\n]+/.exec(SRC)?.[0] || '';
+  const tailSrc = /const RECEIPT_TEXT_MAX = [\s\S]*?: ''\);/.exec(SRC)?.[0] || '';
   const tail = new Function(`${tailSrc}\nreturn receiptTextTail;`)();
-  ok(/📋 رسیدِ متنی/.test(tail('abc', null)) && tail('abc', 'F') === '' && tail(null, null) === '', 'دُمِ متن فقط برای رسیدِ بی‌عکس');
+  const long = 'x'.repeat(2000);
+  ok(/📋 متنِ رسیدِ کاربر/.test(tail('abc', null)) && tail('abc', 'F') === '' && tail(null, null) === '', 'دُمِ متن فقط برای رسیدِ بی‌عکس');
+  ok(tail(long, null).endsWith(long), 'کلِ متنِ کاربر می‌آید (۲۰۰۰ نویسه بدونِ بریدن؛ نسخه‌ی قبل ۵۰۰ را می‌برید)');
+  ok(!/textBody\.slice\(0, 500\)/.test(SRC) && (SRC.match(/receiptTextTail\(textBody/g) || []).length === 4,
+    'هر چهار سازنده‌ی پیامِ رسید (دستی، مشکوک، تأیید، و notifyAdminAuto برای اصلاح/رد) از همان helper، بدونِ برشِ ۵۰۰تایی');
   ok(/caption \+= receiptTextTail\(textBody, p\.receipt_file_id\)/.test(SRC) && /\+ receiptTextTail\(textBody, photoFileId\)/.test(SRC)
     && /applyAutoCredit\(\{ uid, paymentId, decision, amountToman, photoFileId, textBody,/.test(SRC),
     'هر سه پیامِ خودکار (تأیید، اصلاحِ کم‌پرداخت، رد) و مسیرِ فوری متن را می‌گیرند');
