@@ -59,6 +59,10 @@ const ago = (d) => dayTs(todayNo - d);
   r.run(5, 'love3', 3, ago(0));                                       // یک روز → حذف
   u.run(6, 'فقط رایگان', 'campaign:cad', ago(30), ago(0));
   for (let d = 9; d >= 0; d--) e.run(6, 'daily_card', '{}', ago(d));   // فقط لایه‌ی ۲
+  // مرزِ حداقلِ عمر (۷ روز، از ۱۴۰۵/۰۷/۰۵؛ قبلاً ۳): عادتِ کامل ولی فقط ۵ روزه. با گاردِ ۳
+  // روزه در همه‌ی سطل‌ها و در «کاربرِ فعال» می‌نشست؛ با گاردِ ۷ روزه نباید هیچ‌جا بیاید.
+  u.run(7, 'پنج‌روزه', 'campaign:cad', ago(5), ago(0));
+  for (let d = 5; d >= 0; d--) r.run(7, 'love3', 3, ago(d));
   u.run(99, 'ادمین', 'campaign:cad', ago(40), ago(0));
   e.run(99, 'view', JSON.stringify({ k: 'menu', adm: 1 }), ago(1));
   for (let d = 9; d >= 0; d--) r.run(99, 'love3', 3, ago(d));          // باید همه‌جا حذف شود
@@ -109,13 +113,29 @@ console.log('▶ ۱) کدنسِ لایه‌ی ۱ (خرجِ الماس) — ال�
   ok(JSON.stringify(spend(2)) === '[1]', `«هر ۲ روز» هنوز فقط کاربرِ ۱ (دیده شد: ${spend(2)})`);
   ok(JSON.stringify(spend(3)) === '[1,2]', `«هر ۳ روز» کاربرِ ۱ و ۲ (دیده شد: ${spend(3)})`);
   ok(JSON.stringify(spend(7)) === '[1,2]', `«هفته‌ای یک‌بار» باز هم ۱ و ۲ (وقفه‌ی ۱۰ بیرون است؛ دیده شد: ${spend(7)})`);
-  ok(!spend(7).includes(4), 'کاربرِ تازه‌وارد (عضویت < ۳ روز) شمرده نمی‌شود');
+  ok(!spend(7).includes(4), 'کاربرِ تازه‌وارد (عضویت ۱ روز) شمرده نمی‌شود');
   ok(!spend(7).includes(5), 'کاربرِ تک‌اکشن شمرده نمی‌شود (یک اکشن عادت نیست)');
   ok(!spend(7).includes(99), 'ادمین از کدنس حذف است');
   // تجمعی بودن: هر سطل باید زیرمجموعه‌ی سطلِ بزرگ‌تر باشد
   let mono = true;
   for (let n = 1; n < 7; n++) if (!spend(n).every(x => spend(n + 1).includes(x))) mono = false;
   ok(mono, 'سطل‌ها تجمعی‌اند: هر کدنس زیرمجموعه‌ی کدنسِ بزرگ‌تر است');
+}
+
+console.log('\n▶ ۱ب) مرزِ حداقلِ عمر ۷ روز است، نه ۳');
+{
+  ok(eng.CADENCE_MIN_AGE_DAYS === 7 && eng.ACTIVE_MIN_AGE_DAYS === 7, 'هر دو گاردِ عمر ۷ روزند');
+  const spend = ids(eng.spendCadenceSql(1, now, true, {}));
+  const useful = ids(eng.usefulCadenceSql(1, now, true, {}));
+  ok(!spend.includes(7) && !useful.includes(7), 'کاربرِ ۵روزه با عادتِ روزانه در هیچ لایه‌ی کدنس نیست');
+  ok(!ids(eng.eligibleUsersSql(now)).includes(7), 'کاربرِ ۵روزه در مخرجِ کدنس (واجدِ شرایط) هم نیست');
+  ok(!ids(eng.activeUsersSql(now, 7, true)).includes(7), 'کاربرِ ۵روزه «کاربرِ فعال» نیست');
+  // کنترلِ مثبت: همان کاربر با گاردِ قبلیِ ۳ روزه واقعاً شمرده می‌شد، پس ادعاهای بالا پوچ نیستند
+  const q = eng.spendCadenceSql(1, now, true, {});
+  const oldQ = { sql: q.sql, params: [...q.params.slice(0, -1), now - 3 * D] };
+  ok(ids(oldQ).includes(7), 'کنترلِ مثبت: با گاردِ ۳ روزه همان کاربر در سطلِ «هر روز» می‌آمد');
+  const a = eng.activeUsersSql(now, 7, true);
+  ok(ids({ sql: a.sql, params: [now - 3 * D, a.params[1]] }).includes(7), 'کنترلِ مثبت: با گاردِ ۳ روزه «فعال» حساب می‌شد');
 }
 
 console.log('\n▶ ۲) وقفه‌ی دنباله شمرده می‌شود (کاربرِ رفته «فعال» نمی‌ماند)');
