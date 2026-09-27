@@ -357,6 +357,12 @@ jobs:
       - name: Users page check
         if: matrix.bot == 'dashboard'
         run: node tools/check-users-page.mjs
+      # ساختِ کشِ تحلیلی روی دیتای واقعی به سقفِ ۳ دقیقه می‌خورد و «به‌روزرسانی همین بخش»
+      # هیچ‌وقت نمی‌نشست: هم‌ارزیِ کوئری‌های تازه با قبلی، استفاده‌ی واقعیِ planner از
+      # ایندکسِ ادمین، و ترتیبِ صف (کلیکِ دستی جلو) را می‌سنجد.
+      - name: Dashboard build speed check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-dash-speed.mjs
 
       # اکشنِ اعتباریِ صف: داشبورد فقط برای رباتی enqueue کند که واقعاً اجرایش می‌کند.
       # sweepِ ربات‌ها بعد از if/else بی‌قید `markActionDone` می‌زند، پس اکشنی که هندلر

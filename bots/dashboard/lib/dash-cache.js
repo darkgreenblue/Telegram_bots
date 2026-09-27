@@ -13,13 +13,15 @@ import { log, logErr } from '../../../shared/logger.js';
 
 const CACHE_DIR = process.env.DASH_CACHE_DIR
   || fileURLToPath(new URL('../data/dash-cache/', import.meta.url));
-const WORKER = fileURLToPath(new URL('./dash-cache-worker.js', import.meta.url));
+const WORKER = process.env.DASH_CACHE_WORKER
+  || fileURLToPath(new URL('./dash-cache-worker.js', import.meta.url));
 const FRESH_FOR_MS = 5 * 60 * 1000;
 const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
 const BUILD_BUDGET_MS = 3 * 60 * 1000;
 const ANALYTICS_PATHS = new Set(['/dash', '/engagement', '/acquisition', '/economics', '/funnels', '/screens', '/retention']);
 
 let running = false;
+let runningKey = '';
 const queued = new Map();
 const retryAfter = new Map();
 
@@ -97,25 +99,37 @@ const freshnessNote = (url, createdAt, refreshing) => `<div class="card muted" r
 function queueBuild(rawUrl, { force = false } = {}) {
   const canonical = canonicalAnalyticsUrl(rawUrl);
   const key = dashCacheKey(canonical);
-  if (queued.has(key)) return;
-  // فقط یک worker هم‌زمان داریم، ولی درخواستِ بخش بعدی باید پشتِ آن واقعاً صف شود.
-  if (running) { queued.set(key, canonical); return; }
-  if (!force && Date.now() < (retryAfter.get(key) || 0)) return;
-  queued.set(key, canonical);
-  runNext();
+  if (key === runningKey) return; // همین الان در حالِ ساخت است
+  if (force) {
+    // کلیکِ دستی جلوی صف می‌نشیند: وگرنه پشتِ ساختِ خودکارِ بخش‌هایی که فقط باز شده بودند
+    // منتظر می‌ماند و ساعتِ به‌روزرسانی تا چند دقیقه عوض نمی‌شد.
+    const rest = [...queued].filter(([k]) => k !== key);
+    queued.clear();
+    queued.set(key, canonical);
+    for (const [k, v] of rest) queued.set(k, v);
+  } else {
+    if (queued.has(key) || Date.now() < (retryAfter.get(key) || 0)) return;
+    queued.set(key, canonical);
+  }
+  runNext(); // فقط یک worker هم‌زمان؛ اگر مشغول است، بعدی از جلوی صف برداشته می‌شود
 }
 
 function spawnWorker(url, done) {
-  const child = spawn(process.execPath, [WORKER, url], { stdio: 'ignore' });
+  // stderr عمداً به لاگِ داشبورد وصل است: با `ignore` هر خطای worker بی‌صدا دور ریخته
+  // می‌شد و تنها نشانه‌اش ساعتی بود که عوض نمی‌شد.
+  const child = spawn(process.execPath, [WORKER, url], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let errText = '';
+  child.stderr.on('data', (d) => { if (errText.length < 4000) errText += d; });
   let finished = false;
   const finish = (ok) => {
     if (finished) return;
     finished = true;
     clearTimeout(killTimer);
+    if (errText.trim()) logErr(`dashboard cache worker (${url}): ${errText.trim()}`);
     done(ok);
   };
   const killTimer = setTimeout(() => {
-    logErr('dashboard cache: build exceeded 3 minutes; keeping the last good view');
+    logErr(`dashboard cache: build exceeded 3 minutes; keeping the last good view: ${url}`);
     child.kill('SIGTERM');
   }, BUILD_BUDGET_MS);
   child.once('error', () => finish(false));
@@ -130,10 +144,13 @@ function runNext() {
   const [key, url] = next;
   queued.delete(key);
   running = true;
+  runningKey = key;
+  const started = Date.now();
   spawnWorker(url, (ok) => {
     running = false;
+    runningKey = '';
     if (!ok) retryAfter.set(key, Date.now() + RETRY_AFTER_FAILURE_MS);
-    else log(`dashboard cache refreshed: ${url}`);
+    else log(`dashboard cache refreshed in ${Math.round((Date.now() - started) / 1000)}s: ${url}`);
     runNext();
   });
 }
@@ -143,7 +160,8 @@ export function cachedAnalyticsBody(url) {
   const item = readDashCache(url);
   const ageMs = item ? Date.now() - item.createdAt : Infinity;
   if (!item || ageMs >= FRESH_FOR_MS) queueBuild(url);
-  const refreshing = !item || ageMs >= FRESH_FOR_MS || queued.has(dashCacheKey(url));
+  const key = dashCacheKey(url);
+  const refreshing = !item || ageMs >= FRESH_FOR_MS || queued.has(key) || runningKey === key;
   return item ? `${freshnessNote(url, item.createdAt, refreshing)}${item.body}` : waitingBody(url);
 }
 

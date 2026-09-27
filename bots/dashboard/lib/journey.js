@@ -203,22 +203,28 @@ export function exitPoints(botKey, { since = 0, ch = 0, ver = '', includeAdmin =
       /* یک کوئری هم شمارشِ ردیف را می‌دهد هم قدمِ قبلی را. `LEFT JOIN` عمدی است: کاربری که
          هیچ رویدادِ قبلی ندارد (اولین و آخرین ردپایش یکی است) نباید از شمارش بیفتد، وگرنه
          عددِ این جدول با لیستِ کوهورتِ پشتش یکی نمی‌ماند (قراردادِ «هیچ عددی بن‌بست نیست»). */
+      /* «قدمِ قبلی» با یک جستجوی معکوس روی `idx_events_user` پیدا می‌شود که روی اولین ردیف
+         می‌ایستد. نسخه‌ی قبل کلِ تاریخچه‌ی هر کاربرِ خارج‌شده را join و با ROW_NUMBER رتبه‌بندی
+         می‌کرد؛ نتیجه یکی است (شناسه‌ها با زمان بالا می‌روند) ولی هزینه به طولِ تاریخچه وابسته بود. */
       const sql = `
         WITH last AS (SELECT user_id, MAX(id) mid FROM events WHERE created_at>=? GROUP BY user_id),
              ex AS (
-               SELECT e.user_id uid, e.id eid, e.event ev, ${KEY_EXPR('e')} kk
+               SELECT e.user_id uid, e.id eid, e.created_at ets, e.event ev, ${KEY_EXPR('e')} kk
                FROM events e
                JOIN last ON last.mid = e.id
                JOIN users u ON u.${pk} = e.user_id
                WHERE e.created_at < ? AND ${s.cond}
              ),
              pv AS (
-               SELECT ex.ev ev, ex.kk kk, p.event pev, ${KEY_EXPR('p')} pkk,
-                      ROW_NUMBER() OVER (PARTITION BY ex.uid ORDER BY p.id DESC) rn
-               FROM ex LEFT JOIN events p ON p.user_id = ex.uid AND p.id < ex.eid
+               SELECT ex.ev ev, ex.kk kk,
+                      (SELECT p.id FROM events p
+                        WHERE p.user_id = ex.uid AND p.created_at <= ex.ets AND p.id < ex.eid
+                        ORDER BY p.created_at DESC, p.id DESC LIMIT 1) pid
+               FROM ex
              )
-        SELECT ev, kk, COALESCE(pev,'') pev, COALESCE(pkk,'') pkk, COUNT(*) n
-        FROM pv WHERE rn = 1 GROUP BY ev, kk, pev, pkk`;
+        SELECT pv.ev ev, pv.kk kk, COALESCE(p.event,'') pev, COALESCE(${KEY_EXPR('p')},'') pkk, COUNT(*) n
+        FROM pv LEFT JOIN events p ON p.id = pv.pid
+        GROUP BY pv.ev, pv.kk, pev, pkk`;
       for (const r of rows(db, sql, [since, idleBefore, ...s.params])) {
         const id = `${r.ev}|${r.kk}`;
         const cur = agg.get(id) || { ev: r.ev, k: r.kk, n: 0, prevs: new Map() };
@@ -262,18 +268,23 @@ export function screensReport(botKey, { since = 0, includeAdmin = false } = {}) 
   for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (!hasTable(db, 'events')) return;
+      /* «اقدامِ بعدی» با یک پنجره‌ی رو به عقب در یک گذرِ مرتب پیدا می‌شود: کمینه‌ی زمانِ
+         اکشن‌هایی که بعد از این ردیف آمده‌اند (ORDER BY id DESC، قابِ «همه‌ی قبلی‌ها»). چون
+         قابش از UNBOUNDED شروع می‌شود، MIN فقط جمع می‌شود و کلِ کار خطی است. نسخه‌ی قبل per
+         هر نمایش یک زیرکوئری می‌زد و روی دیتای واقعی از سقفِ ۳ دقیقه‌ی ساختِ کش رد می‌شد.
+         نتیجه یکی است چون شناسه‌ها با زمان بالا می‌روند (tools/check-dash-speed.mjs). */
       const sql = `
-        SELECT k, COUNT(*) imps, COUNT(DISTINCT uid) users,
-               SUM(CASE WHEN na IS NOT NULL THEN 1 ELSE 0 END) acted,
-               SUM(CASE WHEN na IS NOT NULL THEN na - ts ELSE 0 END) secSum
+        SELECT json_extract(pr,'$.k') k, COUNT(*) imps, COUNT(DISTINCT uid) users,
+               SUM(CASE WHEN na <= ts + ${ACT_WINDOW_S} THEN 1 ELSE 0 END) acted,
+               SUM(CASE WHEN na <= ts + ${ACT_WINDOW_S} THEN na - ts ELSE 0 END) secSum
         FROM (
-          SELECT json_extract(e.props,'$.k') k, e.user_id uid, e.created_at ts,
-                 (SELECT MIN(a.created_at) FROM events a
-                   WHERE a.user_id = e.user_id AND a.event='act'
-                     AND a.id > e.id AND a.created_at <= e.created_at + ${ACT_WINDOW_S}) na
+          SELECT e.event ev, e.props pr, e.user_id uid, e.created_at ts,
+                 MIN(CASE WHEN e.event='act' THEN e.created_at END) OVER (
+                   PARTITION BY e.user_id ORDER BY e.id DESC
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) na
           FROM events e
-          WHERE e.event='view' AND e.created_at >= ?${includeAdmin ? '' : ` AND ${notAdmin('e')}`}
-        ) GROUP BY k`;
+          WHERE e.event IN ('view','act') AND e.created_at >= ?${includeAdmin ? '' : ` AND ${notAdmin('e')}`}
+        ) WHERE ev='view' GROUP BY 1`;
       for (const r of rows(db, sql, [since])) {
         if (!r.k) continue;
         const cur = agg.get(r.k) || { k: r.k, imps: 0, users: 0, acted: 0, secSum: 0 };
