@@ -2,8 +2,9 @@
 //
 // تصمیم‌های مالک که این فایل قفل می‌کند:
 //   • دکمه زیرِ دکمه‌ی کپی و بالای انصراف، **یک بار برای هر فاکتور**.
-//   • انتخاب: کارتِ بعدیِ همان ادمین ⟵ (نبود یا پر بود) کارتِ ادمینِ بعدی ⟵ (نبود) کارتِ سفید.
-//   • کارتِ تازه کارتِ امروزِ کاربر می‌شود؛ فاکتورهای بعدیِ امروزش هم روی همان می‌نشینند.
+//   • انتخاب (v3.132.0): **همان** قانونِ صدورِ فاکتور (`CA.pickAmountCard`، کمترین تأییدشده‌ی امروز با
+//     همین مبلغ ⟵ کمترین فاکتورِ باز ⟵ ترتیب) به‌جز کارتِ فعلی؛ عادی نبود ⟵ سفید (همان ادمین اول).
+//   • فاکتورهای بعدیِ کاربر هر کدام از نو انتخاب می‌شوند (کاربر در انتخاب نقشی ندارد).
 //   • پیامِ فاکتورِ قبلی **حذف** می‌شود (دو فاکتورِ هم‌زمان نه)، اول سرتیترِ «فاکتور جدید»،
 //     بعد همان فاکتور با کارتِ تازه و یک خطِ هشدارِ اضافه در پایین.
 //   • هر فاکتوری که دکمه دارد تذکرِ «در صورت خطا از دکمه‌ی تعویض استفاده کنید» را هم دارد.
@@ -31,30 +32,12 @@ function region(from, to, { includeTo = true } = {}) {
 
 console.log('\n🔄 تعویضِ شماره کارت\n');
 
-/* ── ۱) تابعِ خالصِ انتخاب ─────────────────────────────────────────────────── */
-console.log('انتخاب (CA.pickSwitchCard):');
+/* ── ۱) تابعِ خالصِ انتخاب: همان `CA.pickAmountCard` با `excludeId` (جزئیاتش در check-card-amount.mjs) ── */
+console.log('انتخاب (CA.pickAmountCard + excludeId):');
 const C = (id, admin, kind, sort, extra = {}) => ({ id, admin_id: admin, kind, sort, active: 1, daily_cap: 0, ...extra });
 const cards = [C(1, 7, 'regular', 1), C(2, 7, 'white', 2), C(3, 8, 'regular', 3), C(4, 7, 'regular', 4)];
-const sw = (currentId, o = {}) => CA.pickSwitchCard({ cards, currentId, ...o });
-ok(sw(1)?.card.id === 4 && sw(1).via === 'same_admin', 'کارتِ بعدیِ همان ادمین اول است (۱ ⟵ ۴، از روی کارتِ ادمینِ دیگر رد می‌شود)');
-ok(sw(4)?.card.id === 1 && sw(4).via === 'same_admin', 'ترتیب دوره‌ای است (۴ ⟵ ۱)');
-ok(sw(3)?.card.id === 4 && sw(3).via === 'next_admin', 'ادمین کارتِ دیگری ندارد ⟵ کارتِ ادمینِ بعدی (بعد از جایگاهِ فعلی)');
-ok(sw(1, { used: new Map([[4, 5]]), cards: cards.map((c) => (c.id === 4 ? { ...c, daily_cap: 5 } : c)) })?.card.id === 3,
-  'کارتِ همان ادمین پر است ⟵ ادمینِ بعدی');
-ok(sw(1, { cards: cards.map((c) => (c.id === 4 ? { ...c, active: 0 } : c)) })?.card.id === 3, 'کارتِ غیرفعال هرگز مقصد نیست');
-{
-  const two = [C(1, 7, 'regular', 1), C(2, 7, 'white', 2)];
-  const r = CA.pickSwitchCard({ cards: two, currentId: 1 });
-  ok(r?.card.id === 2 && r.via === 'white', 'هیچ کارتِ عادیِ دیگری نیست ⟵ کارتِ سفید');
-  ok(CA.pickSwitchCard({ cards: two, currentId: 2 })?.card.id === 1, 'تابعِ خالص از سفید هم مقصد می‌دهد (ربات خودش روی سفید دکمه نمی‌گذارد، پایین)');
-  const w2 = [C(1, 7, 'regular', 1), C(5, 8, 'white', 2), C(6, 7, 'white', 3)];
-  ok(CA.pickSwitchCard({ cards: w2, currentId: 1 })?.card.id === 6, 'سفید: اولویت با سفیدِ همان ادمین (پاسخِ ۱۶)، حتی اگر در ترتیب عقب‌تر باشد');
-  ok(CA.pickSwitchCard({ cards: [C(1, 7, 'regular', 1), C(5, 8, 'white', 2)], currentId: 1 })?.card.id === 5, 'سفیدِ همان ادمین نبود ⟵ هر سفیدِ دیگر');
-  ok(CA.pickSwitchCard({ cards: [C(1, 7, 'regular', 1)], currentId: 1 }) === null, 'تنها کارت ⟵ null (دکمه ساخته نمی‌شود)');
-  ok(CA.pickSwitchCard({ cards: two, currentId: 1, used: new Map([[2, 3]]) })?.card.id === 2, 'کارتِ سفیدِ بی‌سقف همیشه در دسترس است');
-}
-ok(sw(0)?.card.id === 1, 'کارتِ فعلیِ ناشناخته ⟵ اولین کارتِ عادی (کرش نه)');
-ok([1, 2, 3, 4].every((id) => sw(id)?.card.id !== id), 'مقصد هرگز همان کارتِ فعلی نیست');
+ok([1, 2, 3, 4].every((id) => CA.pickAmountCard({ cards, excludeId: id }).card?.id !== id), 'مقصد هرگز همان کارتِ فعلی نیست');
+ok(CA.pickAmountCard({ cards, excludeId: 1, wins: new Map([[3, 2], [4, 0]]) }).card.id === 4, 'مقصد با همان قانونِ مبلغ (کمترین تأییدشده) انتخاب می‌شود');
 
 /* ── ۲) متنِ فاکتور ────────────────────────────────────────────────────────── */
 console.log('\nمتنِ فاکتور:');
@@ -84,14 +67,14 @@ function boot({ flag = true, stars = false } = {}) {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'receipt', pkg TEXT,
-    invoice_msg_id INTEGER, stars_toggle_at INTEGER)`);
-  const clock = { day: '2026-09-26' };
-  const CAx = { ...CA, cardDay: () => clock.day };
+    invoice_msg_id INTEGER, stars_toggle_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
+  const clock = {};
   const errs = [], events = [], sessions = {}, states = {};
   const handlers = [];
   const env = {
-    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars, BLU_USER_CARD_ENABLED: false,
-    Markup, L: fa, bot: { action: (re, fn) => handlers.push({ re, fn }) },
+    CA, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars,
+    Markup, L: fa, bot: { action: (re, fn) => handlers.push({ re, fn }), telegram: { sendMessage: async () => {} } },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }),
     curOf: () => ({ on: true, name: 'الماس', emoji: '💎' }), invoicePurchaseFor: () => null,
     starsToggleRow: () => [], packOf: () => null,
@@ -144,11 +127,9 @@ if (h) {
 
   const log = await h.tap(1, a);
   const p = h.pay(a);
-  ok(p.card_id === 3 && p.card_switched_at > 0, 'تپ ⟵ فاکتور روی کارتِ ادمینِ بعدی (۳) و مهرِ تعویض خورد');
+  ok(p.card_id === 3 && p.card_switched_at > 0, 'تپ ⟵ فاکتور روی تنها کارتِ عادیِ دیگر (۳) و مهرِ تعویض خورد');
   ok(p.prev_card_id === 1, 'کارتِ قبلی روی پرداخت ثبت شد (رسیدِ واریز به آن هم معتبر است)');
-  ok(db.prepare("SELECT card_id, via FROM card_assign WHERE user_id=1 AND day='2026-09-26'").get()?.card_id === 3,
-    'کارتِ امروزِ کاربر هم کارتِ تازه شد');
-  ok(db.prepare("SELECT via FROM card_assign WHERE user_id=1").get().via === 'switch', 'با via=switch (قابلِ تفکیک در آمار)');
+  ok(!db.prepare('SELECT COUNT(*) n FROM card_assign').get().n, 'هیچ «کارتِ روزانه‌ی کاربر»ی ثبت نمی‌شود (v3.132.0)');
   const kinds = log.map((x) => x[0]);
   ok(kinds.indexOf('delete') >= 0 && kinds.indexOf('delete') < kinds.indexOf('reply'), 'پیامِ فاکتورِ قبلی **قبل از** فاکتورِ تازه حذف شد');
   ok(log.find((x) => x[0] === 'delete')?.[1] === 500, 'همان پیامِ ثبت‌شده‌ی فاکتور حذف شد');
@@ -161,7 +142,7 @@ if (h) {
     'کیبوردِ فاکتورِ تازه: کپی … انصراف، و **بدونِ** دکمه‌ی تعویضِ دوم');
   ok(h.pay(a).invoice_msg_id > 600, 'شناسه‌ی پیامِ فاکتورِ تازه ثبت شد (انصرافِ بعدی همان را پاک می‌کند)');
   ok(h.sessions[1]?.paymentId === a && h.states[1] === 'pay_receipt', 'سشن و استیت روی همان فاکتور (رسید همان‌جا می‌نشیند)');
-  ok(h.events.some((e) => e.e === 'card_switched' && e.p.from === 1 && e.p.to === 3 && e.p.via === 'next_admin'),
+  ok(h.events.some((e) => e.e === 'card_switched' && e.p.from === 1 && e.p.to === 3 && e.p.via === 'amount'),
     'رویدادِ افزایشیِ card_switched با from/to/via');
 
   const again = await h.tap(1, a);
@@ -170,20 +151,20 @@ if (h) {
   ok(h.pay(a).card_id === 3, 'و کارت دوباره عوض نشد');
 
   const b = h.invoice(1);
-  ok(h.pay(b).card_id === 3, 'فاکتورِ بعدیِ همان کاربر همان روز روی کارتِ تازه می‌نشیند');
+  ok(h.pay(b).card_id === 1, 'فاکتورِ بعدیِ همان کاربر از نو انتخاب می‌شود (کارتِ ۳ فاکتورِ باز دارد ⟵ کارتِ ۱)');
   ok(h.cardSwitchRow(b).length === 1, 'و خودش دوباره دکمه‌ی تعویض دارد (هر فاکتور یک بار)');
 
   // رسیدِ کارتِ قبلی (تصمیمِ مالک: معتبر است و به ادمینِ کارتی می‌رود که در رسید دیده می‌شود).
   const exp = h.receiptExpectedCards(h.pay(a));
   ok(exp.dest_last4 === '9013 or 5405' && exp.recipient.includes(' or '), 'ایجنت برای فاکتورِ تعویض‌شده هر دو کارت را می‌پذیرد');
   const plain = h.receiptExpectedCards(h.pay(b));
-  ok(plain.dest_last4 === '9013' && !plain.recipient.includes(' or '), 'فاکتورِ تعویض‌نشده: ورودیِ ایجنت بیت‌به‌بیت همان قبلی');
+  ok(plain.dest_last4 === '5405' && !plain.recipient.includes(' or '), 'فاکتورِ تعویض‌نشده: ورودیِ ایجنت بیت‌به‌بیت همان قبلی');
   ok(h.attributeReceiptCard(h.pay(a), { dest_card_last4: '9013' }) === false && h.pay(a).card_id === 3, 'رسید به کارتِ تازه ⟵ دست نمی‌خورد');
   ok(h.attributeReceiptCard(h.pay(a), { dest_card_last4: null }) === false && h.pay(a).card_id === 3, 'چهار رقم خوانده نشد ⟵ دست نمی‌خورد (کارتِ فعلی)');
   ok(h.attributeReceiptCard(h.pay(a), { dest_card_last4: '****۵۴۰۵' }) === true
     && h.pay(a).card_id === 1 && h.pay(a).prev_card_id === 3, 'رسید به کارتِ قبلی (حتی با رقمِ فارسی) ⟵ پرداخت به همان کارت برگشت');
   ok(h.events.some((e) => e.e === 'card_receipt_prev' && e.p.to === 1), 'رویدادِ افزایشیِ card_receipt_prev');
-  ok(h.attributeReceiptCard(h.pay(b), { dest_card_last4: '5405' }) === false && h.pay(b).card_id === 3, 'پرداختِ تعویض‌نشده هرگز جابه‌جا نمی‌شود');
+  ok(h.attributeReceiptCard(h.pay(b), { dest_card_last4: '9013' }) === false && h.pay(b).card_id === 1, 'پرداختِ تعویض‌نشده هرگز جابه‌جا نمی‌شود');
   db.prepare('UPDATE payments SET card_id=3, prev_card_id=1 WHERE id=?').run(a);
 
   // مالکیت و فاکتورِ بسته.
@@ -193,7 +174,7 @@ if (h) {
   const closed = await h.tap(1, b);
   ok(closed.some((x) => x[0] === 'reply' && x[1] === fa.wallet.invoiceGone({ on: true, name: 'الماس', emoji: '💎' })),
     'فاکتورِ در انتظارِ بررسی ⟵ پیامِ «فاکتور بسته شده»');
-  ok(h.pay(b).card_switched_at == null && h.pay(b).card_id === 3, 'و رسیدِ ثبت‌شده هرگز کارتش عوض نمی‌شود');
+  ok(h.pay(b).card_switched_at == null && h.pay(b).card_id === 1, 'و رسیدِ ثبت‌شده هرگز کارتش عوض نمی‌شود');
   ok(h.cardSwitchRow(b).length === 0 && h.invoiceExtra(b).note === false, 'فاکتورِ غیرِباز نه دکمه دارد نه تذکر');
 
   // حذفِ ناموفق (پیامِ قدیمی) ⟵ دست‌کم دکمه‌ها برداشته می‌شوند.
@@ -214,7 +195,7 @@ if (h) {
     ok(r.pay(p).card_id === 2, 'فقط یک کارتِ عادی ⟵ تعویض به کارتِ سفید');
     // فاکتوری که مستقیم روی کارتِ سفید صادر شده (همه‌ی عادی‌ها پر): بدونِ دکمه، با هشدار (پاسخِ ۱۵).
     r.db.prepare('UPDATE cards SET daily_cap=1 WHERE id=1').run();
-    r.db.prepare("INSERT INTO payments (user_id, amount, status, card_id, approved_day) VALUES (77, 1, 'approved', 1, '2026-09-26')").run();
+    r.db.prepare("INSERT INTO payments (user_id, amount, status, card_id, approved_at) VALUES (77, 1, 'approved', 1, unixepoch())").run();
     const wv = r.invoice(11);
     ok(r.pay(wv).card_id === 2, 'همه‌ی عادی‌ها پر ⟵ فاکتور روی کارتِ سفید صادر شد');
     ok(r.cardSwitchRow(wv).length === 0 && r.invoiceExtra(wv).note === false && r.invoiceExtra(wv).switched === true,
@@ -264,7 +245,8 @@ ok(/ALTER TABLE payments ADD COLUMN card_switched_at INTEGER/.test(CODE)
   && /ALTER TABLE payments ADD COLUMN prev_card_id INTEGER NOT NULL DEFAULT 0/.test(CODE), 'مهاجرت‌ها افزایشی‌اند (بند ۲ج/۱)');
 ok(/\.\.\.receiptExpectedCards\(p\)/.test(CODE) && /if \(attributeReceiptCard\(p, verdict\.extracted\)\) p = stmts\.getPayment\.get\(paymentId\);/.test(CODE),
   'ایجنتِ رسید هر دو کارت را می‌بیند و بعد از خواندن، پرداخت به کارتِ واقعیِ رسید نسبت داده می‌شود');
-ok(/CA\.pickSwitchCard\(/.test(CODE) && !/function pickSwitchCard/.test(CODE), 'انتخاب فقط از تک‌منبعِ خالص (cards-admin.js)');
+ok(/CA\.pickAmountCard\(\{ cards: cardSt\(\)\.all\.all\(\), \.\.\.cardCounts\(p\.amount\), excludeId: cardOfPayment\(p\)\.id \}\)/.test(CODE),
+  'مقصدِ تعویض از همان تک‌منبعِ خالص و همان شمارش‌های مبلغ، به‌جز کارتِ فعلی');
 
 console.log(`\n${pass} پاس، ${fail} خطا`);
 if (fail) process.exit(1);

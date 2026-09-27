@@ -10,19 +10,16 @@
 
 const VERDICTS = ['approve', 'reject', 'review'];
 
-/* 🔎 فیلدهای «فقط ثبت» (فازِ ۴ِ `PAYMENT-V2-PLAN.md`، v3.126.0). مدل فقط **می‌خواند**؛ هیچ‌کدام
- * روی verdict اثر ندارند و کد هم تصمیمی رویشان نمی‌گیرد. مصرف‌کننده‌هایشان فازهای بعدی‌اند
- * (۵: خطای انتقال ⟵ کارتِ سفید؛ ۷: تگِ خودکارِ اپ و بانکِ مبدأ). `shadow=false` ⟵ پرامپت
- * بیت‌به‌بیت همان v3.125.0 است (رول‌بک). */
+/* 🔎 فیلدهای «فقط ثبت» (فازِ ۴ِ `PAYMENT-V2-PLAN.md`، v3.126.0). مدل فقط **می‌خواند**؛ روی verdict
+ * اثر ندارند. تنها مصرف‌کننده فازِ ۵ است (خطای انتقال ⟵ کارتِ سفید). اپ و پیش‌شماره‌ی کارتِ مبدأ از
+ * v3.132.0 **حذف** شدند (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵: خطای زیادی داشتند؛ اپ و بانک فقط دستِ ادمین است).
+ * `shadow=false` ⟵ پرامپت بیت‌به‌بیت همان v3.125.0 است (رول‌بک). */
 const SHADOW_RULES = `
 RECORD-ONLY FIELDS (read and report them; they must NEVER change your verdict or reason_code):
-- extracted.source_card_prefix = the leading digits of the SOURCE (payer) card exactly as printed, digits only (e.g. "6037 99** **** 1234" → "603799"); null if the source card is not shown.
-- extracted.bank_app = which app produced this receipt: "blu" (Blu Bank app), "ap" (Asan Pardakht «آپ»), "780" (USSD *780#), "top" (Top «تاپ»), "hamrahcard" (Hamrah Card «همراه کارت»), "mobilebank" (a bank's own mobile or internet banking app), "other" (recognizable but none of these); null if you cannot tell or the input is plain text.
-- extracted.bank_app_name = the app or bank name as it appears, or null.
 - extracted.transfer_error = true ONLY if the input shows or says that a transfer to the destination card FAILED or is NOT POSSIBLE (an error screen or a user message such as «امکان انتقال وجه به این کارت مقصد وجود ندارد», «محدودیت روزانه», «نمیتونم به این کارت انتقال بدم»); otherwise false.
 - extracted.transfer_error_text = that error message, short, as shown; otherwise null.
 `;
-const SHADOW_KEYS = ',"source_card_prefix":"<string|null>","bank_app":"blu|ap|780|top|hamrahcard|mobilebank|other|null","bank_app_name":"<string|null>","transfer_error":<true|false>,"transfer_error_text":"<string|null>"';
+const SHADOW_KEYS = ',"transfer_error":<true|false>,"transfer_error_text":"<string|null>"';
 
 function systemPrompt(expected, shadow = false) {
   const toman = Number(expected.amount_toman || 0).toLocaleString('en-US');
@@ -328,28 +325,15 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
 }
 
 // ── نرمال‌سازیِ فیلدهای «فقط ثبت» (مدل می‌خواند، کد اعتبارسنجی می‌کند) ─────────────────
-const BANK_APPS = ['blu', 'ap', '780', 'top', 'hamrahcard', 'mobilebank', 'other'];
-const toLatin = (x) => String(x ?? '').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
-  .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 const shortStr = (x, n) => (x == null || typeof x === 'object') ? null : (String(x).trim().slice(0, n) || null);
-/** خروجی همیشه همین پنج کلید را دارد و هر مقدارِ نامعتبر `null`/`false` می‌شود:
- *  پیشوندِ کارت فقط اگر ≥۶ رقم خوانا باشد (کمتر از آن بانک را مشخص نمی‌کند)، اپ فقط از
- *  فهرستِ بسته، و خطای انتقال فقط با `true`ِ صریح (رشته‌ی "true" هم نه). */
+/** خروجی همیشه همین دو کلید را دارد: خطای انتقال فقط با `true`ِ صریح (رشته‌ی "true" هم نه). */
 function shadowFields(ext) {
   const e = (ext && typeof ext === 'object' && !Array.isArray(ext)) ? ext : {};
-  /* فقط رقم‌های **ابتداییِ پیوسته** (فاصله/خط‌تیره/نقطه‌ی بینِ گروه‌ها نادیده). حذفِ همه‌ی غیرِرقم‌ها
-     «6219 86** **** 1234» را «62198612…» می‌کرد: چهار رقمِ **آخر** به پیش‌شماره می‌چسبید و رقم‌های
-     ۷ و ۸ِ ساختگی بلو را سامان نشان می‌داد (v3.129.0). فیلد فقط-ثبت است؛ روی تصمیمِ رسید اثری ندارد. */
-  const digits = (toLatin(e.source_card_prefix).replace(/[\s\-.\u200c]/g, '').match(/^\d+/) || [''])[0];
-  const app = String(e.bank_app ?? '').trim().toLowerCase();
   return {
-    src_prefix: digits.length >= 6 ? digits.slice(0, 8) : null,
-    app: BANK_APPS.includes(app) ? app : null,
-    app_name: shortStr(e.bank_app_name, 40),
     transfer_error: e.transfer_error === true,
     transfer_error_text: shortStr(e.transfer_error_text, 200),
   };
 }
 
-export { shadowFields, BANK_APPS, systemPrompt, analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
+export { shadowFields, systemPrompt, analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
   VERDICTS, RECEIPT_DEADLINE_MS };

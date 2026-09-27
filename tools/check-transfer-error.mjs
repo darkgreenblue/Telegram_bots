@@ -77,14 +77,14 @@ function boot({ flag = true, shadow = true, stars = false } = {}) {
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
     original_amount INTEGER, status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'receipt', pkg TEXT,
     invoice_msg_id INTEGER, stars_toggle_at INTEGER, receipt_file_id TEXT, invoice_no INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
-  const clock = { day: '2026-09-26' };
-  const CAx = { ...CA, cardDay: () => clock.day };
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()), created_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
+  const clock = {};
+  const CAx = CA;
   const errs = [], events = [], sessions = {}, states = {}, notified = [], sentTo = [], approved = [], after = [], ownerNotes = [];
   const handlers = [];
   const tg = { log: [] };
   const env = {
-    CA: CAx, db, OWNER_ID: OWNER, BLU_USER_CARD_ENABLED: false, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
+    CA: CAx, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
     TRANSFER_ERROR_ACTION_ENABLED: flag, RECEIPT_SHADOW_ENABLED: shadow,
     Markup, L: fa, TERR_BTN: RT.TERR_BTN, terrAdminText: RT.terrAdminText, RECEIPT_LIVE_STATES: ['pending', 'waiting_review'],
     bot: {
@@ -186,8 +186,7 @@ if (h) {
   ok(p.card_id === 2 && p.prev_card_id === 3 && p.transfer_error_at > 0, 'فاکتور روی کارتِ سفید (۲)، کارتِ ناموفق در prev_card_id، مهرِ یک‌باره خورد');
   ok(p.receipt_file_id == null && p.status === 'pending', 'عکسِ خطا رسید حساب نمی‌شود و فاکتور همچنان باز است');
   ok(p.card_switched_at > 0, 'مهرِ تعویض هم خورد (دکمه‌ی تعویضِ دوم ساخته نمی‌شود)');
-  ok(db.prepare("SELECT card_id, via FROM card_assign WHERE user_id=1").get()?.via === 'transfer_error'
-    && db.prepare("SELECT card_id FROM card_assign WHERE user_id=1").get().card_id === 2, 'سفید تا آخرِ روز کارتِ کاربر شد (پاسخِ ۱۵)');
+  ok(!db.prepare('SELECT COUNT(*) n FROM card_assign').get().n, 'هیچ «کارتِ روزانه‌ی کاربر»ی ثبت نمی‌شود (v3.132.0: فاکتورهای بعدی از نو انتخاب می‌شوند)');
   const kinds = log.map((x) => x[0]);
   ok(kinds[0] === 'delete' && log[0][1] === 500, 'اول پیامِ فاکتورِ کارتِ ناموفق حذف شد (یک فاکتورِ زنده در چت)');
   const replies = log.filter((x) => x[0] === 'reply');

@@ -2,8 +2,9 @@
 // bots/tarot/PAYMENT-V2-PLAN.md).
 //
 // قراردادی که این فایل قفل می‌کند:
-//   • فیلدهای تازه (پیشوندِ کارتِ مبدأ، اپِ بانکی، خطای انتقال) **هرگز** روی تصمیمِ پول اثر
-//     ندارند: `decideReceipt` با و بدونِ آن‌ها دقیقاً یک خروجی می‌دهد.
+//   • فیلدِ فقط-ثبت (خطای انتقال) **هرگز** روی تصمیمِ پول اثر ندارد: `decideReceipt` با و بدونِ آن
+//     دقیقاً یک خروجی می‌دهد. اپ و پیش‌شماره‌ی کارتِ مبدأ از v3.132.0 **از پرامپت حذف شدند** (تصمیمِ
+//     مالک: تشخیصِ اپ و بانک فقط دستِ ادمین) و این فایل برنگشتنشان را هم قفل می‌کند.
 //   • پرچمِ خاموش ⟵ پرامپتِ ایجنت بیت‌به‌بیت همان قبلی (رول‌بک).
 //   • هر اجرای ایجنت (موفق یا شکست‌خورده) یک ردیفِ `receipt_analyses` می‌سازد، **قبل از** هر
 //     ارسال به ادمین، و خطای دیتابیس هرگز مسیرِ پول را نمی‌شکند.
@@ -32,24 +33,16 @@ console.log('\n🔎 خروجیِ کاملِ ایجنتِ رسید\n');
 /* ── ۱) نرمال‌سازیِ خالص ───────────────────────────────────────────────────── */
 console.log('shadowFields:');
 const SF = CP.shadowFields;
-/* 🐛 v3.129.0: این ادعا قبلاً «60379912» را درست می‌دانست، یعنی خودِ باگ را قفل کرده بود: دو رقمِ آخرِ
-   «1234» بعد از `**` به پیش‌شماره می‌چسبید و برای فازِ ۷ یعنی رقم‌های ۷ و ۸ِ ساختگی (بلو ⟵ سامان). */
-ok(SF({ source_card_prefix: '۶۰۳۷ ۹۹** **** ۱۲۳۴' }).src_prefix === '603799', 'ارقامِ فارسی + فاصله ⟵ لاتین، فقط رقم‌های ابتداییِ پیوسته');
-ok(SF({ source_card_prefix: '6219 86** **** 1234' }).src_prefix === '621986', 'رقم‌های بعد از ماسک هرگز به پیش‌شماره نمی‌چسبند');
-ok(SF({ source_card_prefix: '6219-8619-1234-5678' }).src_prefix === '62198619', 'بدونِ ماسک ⟵ حداکثر ۸ رقم');
-ok(SF({ source_card_prefix: '6037' }).src_prefix === null, 'کمتر از ۶ رقم بانک را مشخص نمی‌کند ⟵ null');
-ok(SF({ source_card_prefix: { a: 1 } }).src_prefix === null, 'نوعِ غلط ⟵ null (کرش نه)');
-ok(SF({ bank_app: 'BLU' }).app === 'blu' && SF({ bank_app: '780' }).app === '780', 'اپ: حساس به حروفِ بزرگ نیست');
-ok(SF({ bank_app: 'melli-app' }).app === null, 'اپِ بیرون از فهرستِ بسته ⟵ null');
 ok(SF({ transfer_error: true }).transfer_error === true, 'خطای انتقال با true');
 ok(SF({ transfer_error: 'true' }).transfer_error === false && SF({ transfer_error: 1 }).transfer_error === false,
   'خطای انتقال فقط با true ِ صریح (رشته/عدد نه) — فازِ ۵ رویش اقدامِ خودکار می‌زند');
 for (const bad of [null, undefined, 'x', [], 5]) {
   const r = SF(bad);
-  ok(r && r.src_prefix === null && r.app === null && r.transfer_error === false, `ورودیِ ${JSON.stringify(bad)} ⟵ همه null/false`);
+  ok(r && r.transfer_error === false && r.transfer_error_text === null, `ورودیِ ${JSON.stringify(bad)} ⟵ false/null`);
 }
-ok(Object.keys(SF({})).sort().join(',') === 'app,app_name,src_prefix,transfer_error,transfer_error_text', 'خروجی همیشه همان پنج کلید');
-ok(SF({ bank_app_name: 'x'.repeat(100) }).app_name.length === 40, 'نامِ اپ به ۴۰ نویسه بریده می‌شود');
+ok(Object.keys(SF({ source_card_prefix: '603799', bank_app: 'blu' })).sort().join(',') === 'transfer_error,transfer_error_text',
+  'خروجی فقط همان دو کلید؛ اپ و کارتِ مبدأ حتی اگر مدل بدهد خوانده نمی‌شوند');
+ok(SF({ transfer_error_text: 'x'.repeat(300) }).transfer_error_text.length === 200, 'متنِ خطا به ۲۰۰ نویسه بریده می‌شود');
 
 /* ── ۲) پرامپت: خاموش = بیت‌به‌بیت قبلی؛ روشن = فیلدها + «هرگز verdict را عوض نکن» ─── */
 console.log('\nپرامپت:');
@@ -57,9 +50,10 @@ const exp = { amount_toman: 60000, recipient: 'علیرضا اولیا', dest_la
 const off = CP.systemPrompt(exp), offF = CP.systemPrompt(exp, false), on = CP.systemPrompt(exp, true);
 ok(off === offF, 'پیش‌فرضِ systemPrompt خاموش است');
 ok(!/source_card_prefix|bank_app|transfer_error/.test(off), 'خاموش: هیچ اثری از فیلدهای تازه');
-for (const k of ['source_card_prefix', 'bank_app', 'bank_app_name', 'transfer_error', 'transfer_error_text']) {
+for (const k of ['transfer_error', 'transfer_error_text']) {
   ok(on.includes(`"${k}"`) && on.includes(`extracted.${k}`), `روشن: «${k}» هم در قاعده، هم در اسکیمای JSON`);
 }
+ok(!/source_card_prefix|bank_app/.test(on), 'روشن: از اپ و کارتِ مبدأ هیچ اثری نیست (v3.132.0)');
 ok(/NEVER change your verdict/.test(on), 'روشن: صریح می‌گوید فیلدها verdict را عوض نمی‌کنند');
 ok(on.startsWith(off.slice(0, off.indexOf('Notes:'))), 'روشن: همه‌ی قواعدِ تصمیم قبل از بخشِ تازه دست‌نخورده‌اند');
 {
@@ -93,15 +87,14 @@ ok(CP.validateVerdict({ verdict: 'approve', extracted: { amount_raw: 600000, ban
 
 /* ── ۴) خطِ نمایشی ────────────────────────────────────────────────────────── */
 console.log('\nخطِ ایجنت:');
-ok(RT.shadowLine(undefined) === '' && RT.shadowLine({ ok: 0, app: 'blu' }) === '', 'بدونِ ردیف یا ایجنتِ شکست‌خورده ⟵ هیچ خطی');
-ok(RT.shadowLine({ ok: 1, app: '', src_prefix: '', transfer_error: 0 }) === '', 'هیچ فیلدی خوانده نشد ⟵ هیچ خطی (نه «نامشخص»)');
+ok(RT.shadowLine(undefined) === '' && RT.shadowLine({ ok: 0, transfer_error: 1 }) === '', 'بدونِ ردیف یا ایجنتِ شکست‌خورده ⟵ هیچ خطی');
+ok(RT.shadowLine({ ok: 1, app: 'blu', src_prefix: '603799', transfer_error: 0 }) === '', 'ردیفِ کهنه با اپ/کارتِ مبدأ ⟵ هیچ خطی (اپ و بانک دیگر روی پیام نمی‌آیند)');
 {
   const l = RT.shadowLine({ ok: 1, app: 'blu', src_prefix: '603799', transfer_error: 1 });
-  ok(l.includes('بلو') && l.includes('۶۰۳۷۹۹') && l.includes('خطای انتقال'), `خطِ کامل: «${l}»`);
+  ok(l === '🔎 ایجنت: ⛔️ خطای انتقال', `فقط خطای انتقال: «${l}»`);
 }
-ok(Object.keys(RT.APP_LABELS).sort().join() === CP.BANK_APPS.slice().sort().join(), 'هر اپِ enum برچسبِ نمایشی دارد (و برعکس)');
 {
-  const line = RT.shadowLine({ ok: 1, app: 'ap' });
+  const line = RT.shadowLine({ ok: 1, transfer_error: 1 });
   const cap = RT.withShadowLine('x'.repeat(2000), line, 1024);
   ok(cap.length <= 1024 && cap.endsWith(line), 'کپشنِ بلند: خط سالم می‌ماند و سقفِ ۱۰۲۴ رعایت می‌شود');
   ok(RT.withShadowLine('abc', '', 1024) === 'abc', 'بدونِ خط ⟵ کپشن بیت‌به‌بیت');
@@ -126,21 +119,21 @@ if (R) {
   R.recordReceiptAnalysis({ id: 7 }, 42, v, { action: 'approve', paid: 60000 }, 'photo', 1234);
   const row = R.lastReceiptAnalysis(7);
   ok(row && row.ok === 1 && row.user_id === 42 && row.source === 'photo' && row.ms === 1234, 'ردیفِ موفق با کاربر، منبع و زمان');
-  ok(row?.app === 'blu' && row.src_prefix === '603799' && row.transfer_error === 1, 'سه ستونِ سریع از shadowFields');
+  ok(row?.app === '' && row.src_prefix === '' && row.transfer_error === 1, 'خطای انتقال ثبت شد؛ ستون‌های اپ و کارتِ مبدأ خالی می‌مانند');
   ok(row?.verdict === 'approve' && row.action === 'approve' && row.model === 'google/gemini-2.5-flash', 'verdict، action و مدل');
   const raw = JSON.parse(row?.raw_json || '{}');
   ok(raw.extracted?.transfer_error_text === EXTRA.transfer_error_text && raw.decision?.paid === 60000, 'raw_json کلِ خروجی + تصمیم را دارد');
   ok(tracked.some((t) => t.ev === 'receipt_analyzed' && t.props.payment_id === 7 && t.props.terr === 1), 'رویدادِ افزایشیِ receipt_analyzed');
-  ok(logs.some((l) => l.startsWith('🔎 RECEIPT_SHADOW #7 ok=1 app=blu')), 'لاگِ greppable');
+  ok(logs.some((l) => l.startsWith('🔎 RECEIPT_SHADOW #7 ok=1 terr=1')), 'لاگِ greppable');
   R.recordReceiptAnalysis({ id: 8 }, 42, { verdict: 'review', extracted: EXTRA, agent: { ok: false, attempts: [] } },
     { action: 'review', agentFailed: true }, 'text', 60000);
   const f = R.lastReceiptAnalysis(8);
   ok(f?.ok === 0 && f.app === '' && f.transfer_error === 0, 'ایجنتِ شکست‌خورده ⟵ ردیف با ok=0 و بدونِ فیلدِ نمایشی (فالبکِ ساختگی اعتبار ندارد)');
   R.recordReceiptAnalysis({ id: 9 }, 42, null, { action: 'review', agentFailed: true }, 'text', 5);
   ok(R.lastReceiptAnalysis(9)?.ok === 0, 'verdict=null (پرتاب شد) ⟵ باز هم یک ردیف');
-  ok(R.ownerShadowLine({ id: 7 }).includes('بلو') && R.ownerShadowLine({ id: 8 }) === '' && R.ownerShadowLine(null) === '', 'ownerShadowLine از تازه‌ترین ردیف');
+  ok(R.ownerShadowLine({ id: 7 }).includes('خطای انتقال') && R.ownerShadowLine({ id: 8 }) === '' && R.ownerShadowLine(null) === '', 'ownerShadowLine از تازه‌ترین ردیف');
   R.recordReceiptAnalysis({ id: 7 }, 42, { ...v, extracted: { amount_raw: 1 }, agent: { ok: true } }, { action: 'review' }, 'photo', 1);
-  ok(R.lastReceiptAnalysis(7)?.app === '', 'رسیدِ دوم ⟵ تازه‌ترین ردیف ملاک است');
+  ok(R.lastReceiptAnalysis(7)?.transfer_error === 0 && R.ownerShadowLine({ id: 7 }) === '', 'رسیدِ دوم ⟵ تازه‌ترین ردیف ملاک است');
   const broken = new Database(':memory:');
   const RB = mk(broken);
   let threw = false;
@@ -164,13 +157,13 @@ if (sender) {
     } };
     // 🏷 تگ‌های فازِ ۶ این‌جا خاموش‌اند (بی‌خط، کیبوردِ دست‌نخورده)؛ `check-receipt-tags` خودشان را می‌سنجد.
     const fn = new Function('receiptRecipients', 'ownerCopyHeader', 'ownerShadowLine', 'withShadowLine', 'OWNER_ID', 'bot', 'logErr',
-      'tagHistoryLineFor', 'ownerReceiptMarkup',
+      'receiptInfoLines', 'ownerReceiptMarkup',
       `${sender}\nreturn sendToReceiptRecipients;`)(() => recips, () => 'HDR\n', () => line, RT.withShadowLine, 1, bot, () => {},
       () => '', (_p, kb) => kb || null);
     await fn({ id: 5 }, { caption: 'CAP', photoFileId: 'f', kb: null });
     return sent;
   };
-  const L = '🔎 ایجنت: اپ: بلو';
+  const L = '🔎 ایجنت: ⛔️ خطای انتقال';
   let s = await run([{ id: 1, full: true }], L);
   ok(s.length === 1 && s[0].cap === `CAP\n\n${L}`, 'مالکِ ادمینِ کارت ⟵ یک پیام، با خط');
   s = await run([{ id: 9, full: true }, { id: 1, full: false }], L);
@@ -185,7 +178,7 @@ if (sender) {
 /* ── ۷) ساختاری ───────────────────────────────────────────────────────────── */
 console.log('\nساختاری:');
 ok(/const RECEIPT_SHADOW_ENABLED = true;/.test(CODE), 'پرچمِ رول‌بک تعریف شده و روشن است');
-ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 5, 'پرچم دقیقاً پنج جا: تعریف، پرامپت، خطِ مالک، گیتِ فازِ ۵ (terrOn) و گیتِ تحلیلِ دوباره‌ی فازِ ۷');
+ok((CODE.match(/RECEIPT_SHADOW_ENABLED/g) || []).length === 4, 'پرچم دقیقاً چهار جا: تعریف، پرامپت، خطِ مالک و گیتِ فازِ ۵ (terrOn)');
 ok(/text: textBody, shadow: RECEIPT_SHADOW_ENABLED/.test(CODE), 'analyzeReceipt پرچم را می‌گیرد');
 {
   const body = region('async function processReceipt', '\nasync function notifyAdminAutoApproved');

@@ -13,8 +13,6 @@ import { table, statusBadge } from '../lib/html.js';
 import { audit } from '../lib/platform.js';
 import * as RT from '../../tarot/receipt-tags.js';
 
-const SOURCE_MARK = { admin: '', auto: ' 🤖' };
-
 /** کارتِ «🏷 تگ‌های رسید» برای پروفایلِ یک کاربر. رباتِ بدونِ قابلیت ⟵ `''` (کارت نیست). */
 export function tagsCard(inst, uid) {
   if (!inst || !receiptTagsSupported(inst.bot)) return '';
@@ -29,6 +27,12 @@ export function tagsCard(inst, uid) {
     const histRows = rows(db, `SELECT t.payment_id, t.dim, t.value_key, t.source FROM receipt_tags t
       JOIN payments p ON p.id = t.payment_id WHERE t.user_id=? AND p.status NOT IN ('rejected','reversed')`, [uid]);
     const hist = RT.historyLine(RT.tagHistory(histRows), labelOf);
+    // 🆕 «آخرین» هر بُعد = تگِ رسیدی با بزرگ‌ترین شناسه (تصمیمِ مالک: همیشه آخری مهم است).
+    const effH = RT.effectiveTags(histRows);
+    const latest = RT.TAG_DIMS.map((d) => {
+      const pid = Math.max(0, ...Object.keys(effH).filter((k) => effH[k][d]).map(Number));
+      return pid ? `${RT.TAG_DIM_ICON[d]} ${labelOf(d, effH[pid][d].key)}` : '';
+    }).filter(Boolean).join(' · ');
     const pays = rows(db, `SELECT id, amount, status, created_at AS t FROM payments
       WHERE user_id=? AND receipt_file_id IS NOT NULL ORDER BY id DESC LIMIT 15`, [uid]);
     const eff = RT.effectiveTags(pays.length
@@ -48,7 +52,7 @@ export function tagsCard(inst, uid) {
         <select name="key"><option value="">— بدونِ تگ —</option>${opts.map((v) =>
           `<option value="${esc(v.key)}"${cur?.key === v.key ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
         <button type="submit" class="ghost">ثبت</button></form>`
-        + (cur ? ` <span class="muted">${esc(labelOf(dim, cur.key))}${SOURCE_MARK[cur.source] || ''}</span>` : '');
+        + (cur ? ` <span class="muted">${esc(labelOf(dim, cur.key))}</span>` : '');
     };
     const payRows = pays.map((p) => [
       `#${p.id}`, `${fmt(p.amount)} ت`, statusBadge(p.status), tehranDateTime(p.t),
@@ -68,9 +72,10 @@ export function tagsCard(inst, uid) {
 
     return `<div class="card"><h2>🏷 تگ‌های رسید</h2>
       <p>${hist ? esc(hist) : '<span class="muted">هنوز هیچ رسیدِ ردنشده‌ای از این کاربر تگ نخورده.</span>'}</p>
+      ${latest ? `<p>🆕 آخرین رسیدِ تگ‌دار: ${esc(latest)}</p>` : ''}
       <p class="muted">تگ فقط برای شماست (روی پیامِ رسید در تلگرام هم فقط برای مالک دیده می‌شود).
-        سابقه از رسیدهای ردنشده شمرده می‌شود. 🤖 = تگِ خودکار؛ تگِ دستیِ شما همیشه بر آن مقدم است.
-        «بدونِ تگ» فقط تگِ دستی را پاک می‌کند.</p>
+        سابقه از رسیدهای ردنشده شمرده می‌شود. تنها منبعِ تگ خودِ شمایید (تشخیصِ خودکار از v3.132.0 حذف شد).
+        «نمی‌تونم تشخیص بدم» یعنی نگاه شد و معلوم نبود؛ «بدونِ تگ» یعنی هنوز کسی نگاه نکرده.</p>
       ${table(['رسید', 'مبلغ', 'وضعیت', 'زمان', '📱 اپ', '🏦 بانک'], payRows, 'این کاربر هنوز رسیدی نفرستاده')}
       <details style="margin-top:12px"><summary>مقدارهای تگ (افزودن / فعال‌وغیرفعال)</summary>
         <form method="post" action="/support/tag" class="inline" style="margin:10px 0">${hidden}

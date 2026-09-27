@@ -81,7 +81,8 @@ const errs = [];
 function boot({ legacy = false, failTo = null } = {}) {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
-    status TEXT DEFAULT 'pending', receipt_file_id TEXT, invoice_no INTEGER DEFAULT 0)`);
+    status TEXT DEFAULT 'pending', receipt_file_id TEXT, invoice_no INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
   const sent = [];
   const bot = { telegram: {
     sendMessage: async (to, text, extra = {}) => { if (to === failTo) throw new Error('403'); sent.push({ to, text, extra }); return { message_id: sent.length }; },
@@ -95,7 +96,7 @@ function boot({ legacy = false, failTo = null } = {}) {
     // 🔎 فازِ ۴: خطِ ایجنتِ مالک. این‌جا تحلیلی نیست ⟵ '' ⟵ کپشن‌ها بیت‌به‌بیت قبلی (خودِ خط در check-receipt-shadow).
     ownerShadowLine: () => '', withShadowLine: RT.withShadowLine,
     // 🏷 فازِ ۶: تگ‌ها این‌جا خاموش ⟵ کیبورد و کپشن بیت‌به‌بیت قبلی (خودِ تگ‌ها در check-receipt-tags).
-    RECEIPT_TAGS_ENABLED: false, BLU_USER_CARD_ENABLED: false };
+    RECEIPT_TAGS_ENABLED: false };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
   const body = `${readers}\n${copyRow}\n${schema}\n${(legacy ? routing.replace('const LEGACY_ADMINS_FULL = false', 'const LEGACY_ADMINS_FULL = true') : routing)}
     const invoiceCardArgs = (pid) => { const c = cardOfPid(pid); return [c.number, cardOwnerLine(c)]; };
@@ -134,8 +135,8 @@ if (h) {
   const pid = Number(db.prepare('INSERT INTO payments (user_id, amount) VALUES (8, 60000)').run().lastInsertRowid);
   h.issueInvoiceCard(pid);
   ok(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id === 1, 'فاکتورِ تازه کارتِ عادیِ پیش‌فرض را می‌گیرد (نه سفید)');
-  ok(!errs.some((e) => /issueInvoiceCard/.test(e)) && db.prepare('SELECT via FROM card_assign WHERE user_id=8').get()?.via === 'rotation',
-    'کارت از مسیرِ چرخشِ فازِ ۲ آمد، نه از فالبکِ خطا');
+  ok(!errs.some((e) => /issueInvoiceCard|CARD_PICK_ALERT/.test(e)) && !h.sent.length,
+    'کارت از مسیرِ انتخابِ مبلغ (v3.132.0) آمد، نه از فالبکِ خطا (هیچ هشداری نرفت)');
   db.prepare("UPDATE cards SET sort=0 WHERE id=2").run();
   db.prepare("UPDATE cards SET kind='regular' WHERE id=2").run();
   h.issueInvoiceCard(pid);
@@ -172,8 +173,9 @@ if (h) {
   const first = await h.sendToReceiptRecipients(pSecond, { caption: 'CAP', photoFileId: 'F', kb });
   const toSecond = h.sent.find((m) => m.to === SECOND), toOwner = h.sent.find((m) => m.to === OWNER);
   ok(h.sent.length === 2, 'دقیقاً دو پیام رفت');
-  ok(toSecond?.extra?.reply_markup === kb && toSecond.text === 'CAP', 'ادمینِ کارت پیامِ کامل با دکمه‌ها گرفت');
-  ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی') && toOwner.text.endsWith('CAP'),
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: 5022 2916 1228 2234 (بانک پاسارگاد)\n📊 سوابق کاربر: ۱ پرداخت';
+  ok(toSecond?.extra?.reply_markup === kb && toSecond.text === `CAP${INFO}`, 'ادمینِ کارت پیامِ کامل با دکمه‌ها + کارتِ تخصیص و سوابق گرفت');
+  ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی') && toOwner.text.endsWith(`CAP${INFO}`),
     'مالک کپیِ اطلاعاتیِ **بی‌دکمه** با سرتیتر گرفت');
   ok(first?.message_id === 1, 'شناسه‌ی پیامِ ادمینِ کارت (نه کپی) برگردانده می‌شود');
   h.sent.length = 0;
@@ -206,7 +208,7 @@ if (h) {
   const kb3 = { inline_keyboard: [[{ text: 'ok', callback_data: `approve:${p3}` }]] };
   const f3 = await h3.sendToReceiptRecipients(h3.db.prepare('SELECT * FROM payments WHERE id=?').get(p3), { caption: 'CAP', photoFileId: 'F', kb: kb3 });
   const ownerFull = h3.sent.filter((m) => m.to === OWNER && m.extra.reply_markup === kb3);
-  ok(ownerFull.length === 1 && ownerFull[0].text.includes('⚠️') && ownerFull[0].text.endsWith('CAP'),
+  ok(ownerFull.length === 1 && ownerFull[0].text.includes('⚠️') && ownerFull[0].text.includes('CAP\n\n💳 کارتِ تخصیص‌داده'),
     'ادمینِ کارت پیام را نگرفت ⟵ مالک نسخه‌ی **کامل با دکمه‌ها** گرفت (رسید هرگز بی‌تصمیم‌گیرنده نمی‌ماند)');
   ok(!!f3 && f3.message_id === h3.sent.indexOf(ownerFull[0]) + 1, 'شناسه‌ی همان پیامِ کاملِ مالک برگردانده می‌شود');
   // کنترلِ مثبت: وقتی ادمینِ کارت پیام را گرفت، مالک نسخه‌ی دکمه‌دار نمی‌گیرد.

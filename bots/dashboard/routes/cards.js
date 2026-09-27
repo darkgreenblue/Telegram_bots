@@ -55,13 +55,13 @@ export function cardsBody(url) {
       ? rows(db, "SELECT props, created_at FROM events WHERE event='card_changed' ORDER BY id DESC LIMIT 20")
       : [];
 
-    // 🔄 مصرفِ امروزِ هر کارت (v3.124.0): همان شمارشی که ربات برای سقف و چرخش می‌خواند —
-    // پرداخت‌های **تأییدشده** با `approved_day` = روزِ کارتِ امروز (مرزِ ۰۶:۰۰ تهران).
+    // 🔄 مصرفِ امروزِ هر کارت: همان شمارشی که ربات برای سقف می‌خواند (v3.132.0) — پرداخت‌های
+    // **تأییدشده** با `approved_at` از نیمه‌شبِ تهرانِ امروز (`CA.cardDayStartSec`).
     const today = CA.cardDay();
-    const hasDay = rows(db, "SELECT 1 FROM pragma_table_info('payments') WHERE name='approved_day'").length > 0;
-    const usedToday = new Map(hasDay ? rows(db,
-      "SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_day=? AND card_id>0 GROUP BY card_id", // not-revenue: همان شمارشِ سقفِ ربات
-      [today]).map((r) => [r.card_id, r.c]) : []);
+    const hasAt = hasApprovedAt(db);
+    const usedToday = new Map(hasAt ? rows(db,
+      "SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND card_id>0 GROUP BY card_id", // not-revenue: همان شمارشِ سقفِ ربات
+      [CA.cardDayStartSec()]).map((r) => [r.card_id, r.c]) : []);
     const capCell = (c) => {
       const u = usedToday.get(c.id) || 0;
       if (!(Number(c.daily_cap) > 0)) return `${fmt(u)} <span class="muted">امروز · بی‌سقف</span>`;
@@ -96,21 +96,25 @@ export function cardsBody(url) {
           bodyRows, 'هیچ کارتی نیست')}
         <p class="muted">همیشه دستِ‌کم یک کارتِ <b>عادیِ فعال</b> لازم است؛ فاکتورِ تازه با آن صادر می‌شود.
           رسیدِ هر فاکتور با دکمه‌ها فقط برای ادمینِ همان کارت می‌رود.
-          <br>🔄 روزِ کارت از ساعتِ ۰۶:۰۰ تهران شروع می‌شود: اولین کاربرِ هر روز کارتِ عادیِ اول (به ترتیب)،
-          دومی کارتِ بعدی، و هر کاربر تا آخرِ همان روز روی کارتِ خودش می‌ماند. کارتی که به سقفِ
-          پرداخت‌های تأییدشده‌ی امروزش برسد از چرخش بیرون می‌رود؛ اگر همه‌ی عادی‌ها پر شوند، کارتِ سفید.</p></div>`
+          <br>🔁 کارتِ هر فاکتور بر اساسِ <b>مبلغِ همان فاکتور</b> انتخاب می‌شود و کاربر هیچ نقشی ندارد: بینِ
+          کارت‌های عادیِ فعال، کارتی که امروز کمترین پرداختِ تأییدشده با همین مبلغ را داشته؛ اگر مساوی
+          بودند، کارتی که فاکتورِ بازِ کمتری با همین مبلغ دارد؛ باز مساوی ⟵ به ترتیبِ «ترتیب». روز از
+          ساعتِ ۰۰:۰۰ تهران شروع می‌شود. سقفِ روزانه اختیاری است (۰ = بی‌سقف)؛ کارتی که به سقفش برسد
+          کنار می‌رود و اگر همه‌ی عادی‌ها پر شوند، کارتِ سفید.</p></div>`
       + queuedHtml + addForm(bot) + historyHtml;
   }, head + `<div class="card"><p class="muted">دیتابیس در دسترس نیست.</p></div>`);
 }
 
-/* 📊 فازِ ۸ (v3.129.0): آمارِ روزانه‌ی هر کارت. «روز» همان روزِ کارت است (مرزِ ۰۶:۰۰ تهران،
+/* 📊 فازِ ۸ (v3.129.0): آمارِ روزانه‌ی هر کارت. «روز» همان روزِ کارت است (از v3.132.0 مرزِ ۰۰:۰۰ تهران،
  * `CA.cardDay`)، همان روزی که سقف و چرخش با آن کار می‌کنند.
  *
  * ⚠️ صدور، تعویض و خطای انتقال از **رویدادهای** ربات شمرده می‌شوند، نه از ستونِ `payments.card_id`:
  * آن ستون بعد از تعویض/خطا/«پیامکش اومده» جابه‌جا می‌شود (`swapToPrev`)، پس شمارش از روی آن
  * فاکتورِ دیروزِ کارتِ الف را امروز به کارتِ ب نسبت می‌داد. رویداد لحظه‌ی رخداد ثبت شده و عوض نمی‌شود.
- * «تأییدشده» عیناً شمارشِ سقفِ ربات است (`approved_day`، حسابِ تستی هم، چون پولش روی همان کارت
- * نشسته)؛ «مبلغ» درآمد است و حسابِ تستی از آن بیرون است. */
+ * «تأییدشده» عیناً شمارشِ سقفِ ربات است (`approved_at`، حسابِ تستی هم، چون پولش روی همان کارت
+ * نشسته)؛ «مبلغ» درآمد است و حسابِ تستی از آن بیرون است. روزِ هر تأیید از لحظه‌ی `approved_at`
+ * ساخته می‌شود (نه ستونِ کهنه‌ی `approved_day` که مرزِ ۰۶:۰۰ را در خودش قفل کرده بود). */
+const hasApprovedAt = (db) => rows(db, "SELECT 1 FROM pragma_table_info('payments') WHERE name='approved_at'").length > 0;
 const CARD_STAT_RANGES = ['day', 'week', 'month'];
 export function cardDays(n, nowMs = Date.now()) {
   const out = [];
@@ -143,11 +147,15 @@ function cardStatsCard(db, bot, url, cards) {
       else if (e.event === 'transfer_error_switch' && Number(p.from) > 0) at(day, p.from).terr++;
     }
   }
-  const hasDay = rows(db, "SELECT 1 FROM pragma_table_info('payments') WHERE name='approved_day'").length > 0;
-  if (hasDay) {
-    const ph = days.map(() => '?').join(',');
-    for (const r of rows(db, `SELECT card_id, approved_day AS d, COUNT(*) AS c FROM payments WHERE status='approved' AND card_id>0 AND approved_day IN (${ph}) GROUP BY card_id, approved_day`, days)) at(r.d, r.card_id).approved = r.c; // not-revenue: همان شمارشِ سقفِ ربات
-    for (const r of rows(db, `SELECT card_id, approved_day AS d, SUM(amount) AS s FROM payments WHERE status='approved' AND card_id>0 AND approved_day IN (${ph})${testUserClause(bot)} GROUP BY card_id, approved_day`, days)) at(r.d, r.card_id).sum = Number(r.s) || 0;
+  if (hasApprovedAt(db)) {
+    const real = new Set(rows(db, `SELECT id FROM payments WHERE status='approved' AND card_id>0 AND approved_at >= ?${testUserClause(bot)}`, [since]).map((r) => r.id)); // بدونِ حسابِ تستی (فقط برای مبلغ)
+    for (const r of rows(db, "SELECT id, card_id, amount, approved_at FROM payments WHERE status='approved' AND card_id>0 AND approved_at >= ?", [since])) { // not-revenue: همان شمارشِ سقفِ ربات؛ مبلغ پایین‌تر بدونِ حسابِ تستی
+      const day = CA.cardDay(Number(r.approved_at) * 1000);
+      if (!inDays.has(day)) continue;
+      const cell = at(day, r.card_id);
+      cell.approved++;
+      if (real.has(r.id)) cell.sum += Number(r.amount) || 0;
+    }
   }
   const byId = new Map(cards.map((c) => [c.id, c]));
   const label = (id) => {
@@ -170,7 +178,7 @@ function cardStatsCard(db, bot, url, cards) {
   return `<div class="card">${cardHead('📊 آمارِ روزانه‌ی کارت‌ها', rangePicker(url, 'rCard', key, { keys: CARD_STAT_RANGES }))}
     ${table(['کارت', ...H], sumRows, 'در این بازه فعالیتی روی کارت‌ها ثبت نشده')}
     ${dayRows.length > 1 ? `<details style="margin-top:10px"><summary>تفکیکِ روزبه‌روز</summary>${table(['روزِ کارت', 'کارت', ...H], dayRows)}</details>` : ''}
-    <p class="muted">روزِ کارت از ۰۶:۰۰ تهران شروع می‌شود. «تعویض» و «خطای انتقال» روی کارتی شمرده می‌شوند که
+    <p class="muted">روزِ کارت از ۰۰:۰۰ تهران شروع می‌شود (تا v3.131.0 از ۰۶:۰۰ بود). «تعویض» و «خطای انتقال» روی کارتی شمرده می‌شوند که
       کاربر <b>از آن</b> رفت. «تأییدشده» همان عددِ سقفِ روزانه است (با حسابِ تستی)؛ «مبلغ» بدونِ حسابِ تستی.
       صدور از v3.124.0 و خطای انتقال از v3.127.0 ثبت می‌شوند؛ روزهای قبل‌تر در این ستون‌ها صفرند.</p></div>`;
 }

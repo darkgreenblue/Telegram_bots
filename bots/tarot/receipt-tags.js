@@ -7,31 +7,15 @@
  * متن‌ها عمداً فارسیِ ثابت‌اند و در locale نیستند (همان استدلالِ `cards-admin.js`): این خط
  * فقط روی پیامِ رسیدِ **مالک** و فقط روی رباتِ فارسی (ریلِ کارت‌به‌کارت) دیده می‌شود. */
 
-/** برچسبِ نمایشیِ اپ‌ها. کلیدها همان enumِ `BANK_APPS` در `cardpay.js` اند. */
-export const APP_LABELS = {
-  blu: 'بلو',
-  ap: 'آپ',
-  780: '۷۸۰',
-  top: 'تاپ',
-  hamrahcard: 'همراه‌کارت',
-  mobilebank: 'موبایل‌بانک',
-  other: 'سایر',
-};
-
 /** ارقامِ لاتین ⟵ فارسی (فقط برای نمایش). */
 const faDigits = (s) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
 
-/** یک خطِ کوتاه برای پیامِ رسیدِ مالک از ردیفِ `receipt_analyses`. `''` یعنی چیزی برای
- *  گفتن نیست (ایجنت اجرا نشد، شکست خورد، یا هیچ فیلدی خوانده نشد): آن‌وقت خطی اضافه
- *  نمی‌شود تا پیامِ مالک با «نامشخص · نامشخص · نامشخص» شلوغ نشود. */
+/** یک خطِ کوتاه برای پیامِ رسیدِ مالک از ردیفِ `receipt_analyses`: فقط «خطای انتقال» (فازِ ۵).
+ *  اپ و کارتِ مبدأ از v3.132.0 خوانده نمی‌شوند (تصمیمِ مالک: تشخیصِ اپ و بانک فقط دستِ ادمین).
+ *  `''` یعنی چیزی برای گفتن نیست و خطی اضافه نمی‌شود. */
 export function shadowLine(row) {
-  if (!row || !row.ok) return '';
-  const parts = [];
-  if (row.app) parts.push(`اپ: ${APP_LABELS[row.app] || row.app}`);
-  if (row.src_prefix) parts.push(`کارتِ مبدأ: ${faDigits(row.src_prefix)}…`);
-  if (row.transfer_error) parts.push('⛔️ خطای انتقال');
-  if (!parts.length) return '';
-  return `🔎 ایجنت: ${parts.join(' · ')}`;
+  if (!row || !row.ok || !row.transfer_error) return '';
+  return '🔎 ایجنت: ⛔️ خطای انتقال';
 }
 
 /** کپشن + خطِ ایجنت، بدونِ اینکه خطِ ایجنت با سقفِ کپشن بریده شود: اگر جا نبود، از خودِ
@@ -67,8 +51,8 @@ export function terrAdminText({ invoiceNo, userId, userName, amount, from, to, e
  * قرارداد (پاسخ‌های مالک در `PAYMENT-V2-PLAN.md`):
  *   • دو بُعد: `app` و `bank`. هر رسید در هر بُعد حداکثر **یک** مقدار دارد، ولی هر کاربر
  *     در طولِ زمان چند مقدار می‌گیرد (یک‌به‌چند per کاربر).
- *   • دو منبع: `admin` (دستیِ مالک) و `auto` (فازِ ۷). روی یک رسید و یک بُعد، **ادمین همیشه
- *     مقدم** است (`effectiveTags`).
+ *   • تنها منبع `admin` است (دستیِ مالک). تگِ خودکارِ فازِ ۷ (`auto`) در v3.132.0 حذف و پاک شد؛
+ *     `effectiveTags` هنوز ادمین را مقدم می‌گیرد تا ردیفِ کهنه‌ی احتمالی هرگز بر دستی غلبه نکند.
  *   • سابقه‌ی کاربر فقط از رسیدهای **ردنشده** شمرده می‌شود (SQL در `index.js` این را فیلتر
  *     می‌کند، این‌جا فقط شمارش است).
  *   • «سایر» عمداً مقدار نیست: رسیدی که با هیچ مقداری جور نیست بی‌تگ می‌ماند.
@@ -83,17 +67,17 @@ export const TAG_DIMS = ['app', 'bank'];
 export const TAG_DIM_LABEL = { app: 'اپ', bank: 'بانک' };
 export const TAG_DIM_ICON = { app: '📱', bank: '🏦' };
 
-/** مقدارهای اولیه. کلیدهای اپ **عمداً** همان enumِ `BANK_APPS` در `cardpay.js` اند (منهای
- *  `other`) تا تگِ خودکارِ فازِ ۷ بدونِ جدولِ نگاشت روی همین کلیدها بنشیند. فهرستِ بانک فقط
- *  **نام** است، نه پیش‌شماره (BIN): نگاشتِ پیش‌شماره به بانک کارِ فازِ ۷ است و منبعِ خوانده‌شده
- *  می‌خواهد (بند ۹/۰الف ریشه). بلو جدا از سامان است (تصمیمِ مالک، پاسخِ ۲۴). */
+/** مقدارهای اولیه (فقط نام، نه پیش‌شماره). بلو جدا از سامان است (تصمیمِ مالک، پاسخِ ۲۴). */
 export const SEED_TAG_VALUES = {
+  // v3.132.0 (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵): «بلو» اپ نیست، یک موبایل‌بانک است ⟵ از فهرست بیرون (کاربرِ
+  // بلو = بانکِ بلو + اپِ موبایل‌بانک). «خودپرداز» و «نمی‌تونم تشخیص بدم» اضافه شدند. «نمی‌تونم
+  // تشخیص بدم» یعنی ادمین نگاه کرد و نفهمید؛ بی‌تگ یعنی هنوز کسی نگاه نکرده.
   app: [
-    ['blu', 'بلو'], ['ap', 'آپ'], ['780', '۷۸۰'], ['top', 'تاپ'],
-    ['hamrahcard', 'همراه‌کارت'], ['mobilebank', 'موبایل‌بانک'],
+    ['mobilebank', 'موبایل‌بانک'], ['ap', 'آپ'], ['780', '۷۸۰'], ['hamrahcard', 'همراه‌کارت'],
+    ['top', 'تاپ'], ['atm', 'خودپرداز'], ['unknown', 'نمی‌تونم تشخیص بدم'],
   ],
   bank: [
-    ['blu', 'بلو'], ['melli', 'ملی'], ['mellat', 'ملت'], ['saderat', 'صادرات'], ['tejarat', 'تجارت'],
+    ['unknown', 'نمی‌تونم تشخیص بدم'], ['blu', 'بلو'], ['melli', 'ملی'], ['mellat', 'ملت'], ['saderat', 'صادرات'], ['tejarat', 'تجارت'],
     ['sepah', 'سپه'], ['keshavarzi', 'کشاورزی'], ['maskan', 'مسکن'], ['refah', 'رفاه'],
     ['pasargad', 'پاسارگاد'], ['saman', 'سامان'], ['parsian', 'پارسیان'], ['eghtesad', 'اقتصاد نوین'],
     ['karafarin', 'کارآفرین'], ['sina', 'سینا'], ['sarmayeh', 'سرمایه'], ['shahr', 'شهر'], ['day', 'دی'],
@@ -125,15 +109,6 @@ export function effectiveTags(rows) {
   return out;
 }
 
-/** بانکِ مؤثرِ **آخرین** رسیدِ تگ‌دارِ کاربر (بزرگ‌ترین `payment_id` که تگِ بانک دارد)، یا `null`.
- *  تعریفِ «کاربرِ بلو» (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴: بر اساسِ آخرین رسید). ردنشده‌بودن را SQL فیلتر می‌کند. */
-export function lastBank(rows) {
-  const eff = effectiveTags(rows);
-  let best = null;
-  for (const [pid, slot] of Object.entries(eff)) if (slot.bank && (!best || Number(pid) > best.pid)) best = { pid: Number(pid), key: slot.bank.key };
-  return best ? best.key : null;
-}
-
 /** شمارشِ سابقه‌ی یک کاربر از تگ‌های مؤثر: `{ app: [[key, n], …], bank: […] }` نزولی. */
 export function tagHistory(rows) {
   const eff = effectiveTags(rows);
@@ -161,7 +136,7 @@ export function historyLine(hist, labelOf) {
  * همه‌ی دکمه‌های تگ `callback_data`ی با پیشوندِ `tg:` دارند و **ردیفِ خودشان** را می‌گیرند
  * (هیچ ردیفی قاطیِ دکمه‌های اکشن نیست). پس `stripTagRows` بی‌ابهام همان‌ها را برمی‌دارد و
  * هر ادیتِ کیبوردِ یک هندلرِ اکشن می‌تواند ردیف‌های تگ را سالم نگه دارد (`preserveTagRows`). */
-export const TAG_CB = /^tg:(o|s|c|x):(\d+)(?::(app|bank))?(?::([a-z0-9_]{1,24}))?$/;
+export const TAG_CB = /^tg:(o|s|c|x):(\d+)(?::(app|bank|card))?(?::([a-z0-9_]{1,24}))?$/;
 const btn = (text, data) => ({ text, callback_data: data });
 export const isTagRow = (row) => Array.isArray(row) && row.length > 0
   && row.every((b) => typeof b?.callback_data === 'string' && b.callback_data.startsWith('tg:'));
@@ -172,11 +147,36 @@ const rowsOf = (kb) => {
 export const hasTagRows = (kb) => rowsOf(kb).some(isTagRow);
 export const stripTagRows = (kb) => rowsOf(kb).filter((r) => !isTagRow(r));
 
-/** ردیفِ جمع‌شده: «📱 اپ: بلو» و «🏦 بانک: —». `cur` = خروجیِ `effectiveTags` برای همین رسید. */
-export function tagCollapsedRows(pid, cur, labelOf) {
+/** ردیفِ جمع‌شده: «📱 اپ: آپ» و «🏦 بانک: —». `cur` = خروجیِ `effectiveTags` برای همین رسید.
+ *  `cardLabel` (فقط پیامِ مالک، v3.132.0) ⟵ یک ردیفِ دیگر: «💳 کارت: … · تغییر». */
+export function tagCollapsedRows(pid, cur, labelOf, { cardLabel = '' } = {}) {
   const lab = typeof labelOf === 'function' ? labelOf : (_d, k) => k;
-  // 🤖 = تگِ خودکارِ فازِ ۷ (هنوز دستی تأیید/اصلاح نشده).
-  return [TAG_DIMS.map((d) => btn(`${TAG_DIM_ICON[d]} ${TAG_DIM_LABEL[d]}: ${cur?.[d] ? lab(d, cur[d].key) + (cur[d].source === 'auto' ? ' 🤖' : '') : '—'}`, `tg:o:${pid}:${d}`))];
+  const rows = [TAG_DIMS.map((d) => btn(`${TAG_DIM_ICON[d]} ${TAG_DIM_LABEL[d]}: ${cur?.[d] ? lab(d, cur[d].key) : '—'}`, `tg:o:${pid}:${d}`))];
+  if (cardLabel) rows.push([btn(`💳 کارتِ تخصیص: ${cardLabel} · تغییر`, `tg:o:${pid}:card`)]);
+  return rows;
+}
+
+/* ── 💳 «تغییر شماره کارت تخصیص» (v3.132.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۵) ─────────────────────────
+ * کاربری که کارتِ دیگری گرفته ولی به کارتِ قبلی (یا کارتی که در گوشی ذخیره داشته) واریز کرده،
+ * آمارِ «تأییدشده‌ی امروزِ هر کارت با هر مبلغ» را کج می‌کند و انتخابِ کارتِ فاکتورهای بعدی روی
+ * همان عدد می‌نشیند. مالک از روی رسید کارتِ واقعی را انتخاب می‌کند و `card_id` همان می‌شود.
+ * فقط مالک، فقط دستی (نه ایجنت، نه پشتیبانی). فهرست = **همه‌ی کارت‌های فعال** (عادی و سفید). */
+export const cardShortLabel = (c) => `${c?.bank || c?.holder || '-'} …${String(c?.number ?? '').slice(-4)}`;
+export function cardPickerRows(pid, cards, curId) {
+  const list = (Array.isArray(cards) ? cards : []).filter((c) => Number(c.active) === 1)
+    .sort((a, b) => (Number(a.sort) - Number(b.sort)) || (Number(a.id) - Number(b.id)));
+  const rows = list.map((c) => [btn(`${Number(c.id) === Number(curId) ? '✅ ' : ''}${c.kind === 'white' ? '🤍' : '💳'} ${cardShortLabel(c)}`, `tg:s:${pid}:card:${c.id}`)]);
+  rows.push([btn('↩️ بستن', `tg:x:${pid}`)]);
+  return rows;
+}
+/** اعتبارسنجیِ تغییرِ کارتِ یک پرداخت: کارتِ مقصد باید وجود داشته باشد و **فعال** باشد. */
+export function planCardCorrection(payment, cards, toId) {
+  if (!payment) return { ok: false, err: 'پرداخت پیدا نشد.' };
+  const to = (Array.isArray(cards) ? cards : []).find((c) => Number(c.id) === Number(toId));
+  if (!to) return { ok: false, err: 'این کارت پیدا نشد.' };
+  if (Number(to.active) !== 1) return { ok: false, err: 'این کارت غیرفعال است.' };
+  if (Number(payment.card_id) === Number(to.id)) return { ok: true, noop: true, to: to.id };
+  return { ok: true, noop: false, from: Number(payment.card_id) || 0, to: Number(to.id), label: cardShortLabel(to) };
 }
 /** ردیف‌های انتخابِ یک بُعد: سه‌تایی، مقدارِ فعلی با ✅، و ردیفِ «پاک کردن / بستن». */
 export function tagPickerRows(pid, dim, values, curKey) {
@@ -244,59 +244,4 @@ export function planTagOp(op, { values = [], payment = null } = {}) {
       what: `${v.label} ⟵ ${active ? 'فعال' : 'غیرفعال'}` };
   }
   return { ok: false, err: 'دستورِ ناشناخته' };
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════════════════
- * 🤖 فازِ ۷ (v3.129.0): تگِ خودکار از خروجیِ ایجنت. «مدل می‌خواند، کد حساب می‌کند»: مدل فقط
- * رقم‌های اولِ کارتِ مبدأ و نامِ اپ را می‌خواند؛ نگاشتِ پیش‌شماره ⟵ بانک این‌جا در کد است.
- *
- * منبعِ نگاشت (بند ۹/۰الف ریشه — فقط چیزی که باز شد): دو فهرستِ عمومیِ گیت‌هاب که ۱۴۰۵/۰۷/۰۴ باز و
- * خوانده شدند (gist.github.com/ahbanavi/7bc6dff01b13d7c718209a5785e6c495 و
- * gist.github.com/hasanparasteh/4744845b41a260a0128f275058b9c3b3). **منبعِ رسمیِ شاپرک نیست**؛
- * برای همین فقط پیش‌شماره‌هایی آمده‌اند که **هر دو** فهرست یکسان می‌گویند و در فهرستِ ۳۰ بانکِ
- * سید هستند. هرچه فقط در یکی بود (مثلاً 502806، 604932، 639217) عمداً کنار ماند: بی‌تگ‌ماندن از
- * تگِ غلط بهتر است، و تگِ دستیِ مالک همیشه مقدم است.
- * بلو (۸ رقمیِ 62198618/19) را خودِ مالک داده (بخشِ «تگ‌ها»ی plan). */
-export const BIN_BANK = Object.freeze({
-  603799: 'melli', 610433: 'mellat', 603769: 'saderat', 627353: 'tejarat', 585983: 'tejarat',
-  589210: 'sepah', 603770: 'keshavarzi', 628023: 'maskan', 589463: 'refah', 502229: 'pasargad',
-  621986: 'saman', 622106: 'parsian', 627412: 'eghtesad', 627488: 'karafarin', 639346: 'sina',
-  639607: 'sarmayeh', 504706: 'shahr', 502938: 'day', 636214: 'ayandeh', 505416: 'gardeshgari',
-  505809: 'khavarmianeh', 585947: 'khavarmianeh', 505785: 'iranzamin', 606373: 'mehr', 504172: 'resalat',
-  606256: 'melal', 627760: 'postbank', 627648: 'tosee_saderat', 627961: 'sanat', 502908: 'tosee_taavon',
-  507677: 'noor',
-});
-export const BIN8_BANK = Object.freeze({ 62198618: 'blu', 62198619: 'blu' });
-/** پیش‌شماره‌ی ۶رقمی‌ای که بدونِ رقمِ ۷ و ۸ مبهم است (سامان یا بلو). رسیدها معمولاً وسطِ
- *  شماره را می‌پوشانند («6219 86** …»)، پس این حالت رایج است و **حدس زده نمی‌شود**. */
-export const AMBIGUOUS_BIN6 = Object.freeze(['621986']);
-
-/** بانکِ مبدأ از رقم‌های اولِ کارت، یا `null` (ناشناخته/مبهم/کوتاه). */
-export function bankFromPrefix(prefix) {
-  // همان قاعده‌ی `shadowFields`: فقط رقم‌های ابتداییِ پیوسته، وگرنه رقم‌های بعد از `**` می‌چسبیدند.
-  const d = (String(prefix ?? '').replace(/[۰-۹]/g, (x) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(x))
-    .replace(/[\s\-.\u200c]/g, '').match(/^\d+/) || [''])[0];
-  if (d.length < 6) return null;
-  if (d.length >= 8 && BIN8_BANK[d.slice(0, 8)]) return BIN8_BANK[d.slice(0, 8)];
-  const six = d.slice(0, 6);
-  if (d.length < 8 && AMBIGUOUS_BIN6.includes(six)) return null;
-  return BIN_BANK[six] || null;
-}
-
-/** تگ‌های خودکارِ یک تحلیل: `[{dim, key}]`. ورودی = خروجیِ `shadowFields` (`app`, `src_prefix`).
- *  `other` هرگز تگ نیست («سایر» مقدار ندارد). مقدارِ غیرفعال/ناموجود را صداکننده کنار می‌گذارد. */
-export function autoTagsFrom(sh) {
-  const out = [];
-  const app = String(sh?.app || '');
-  if (app && app !== 'other' && TAG_KEY_RE.test(app)) out.push({ dim: 'app', key: app });
-  let bank = bankFromPrefix(sh?.src_prefix);
-  /* اپِ بلو ⟵ بانکِ بلو (تأییدِ مالک ۱۴۰۵/۰۷/۰۴)، **فقط** وقتی پیش‌شماره خودش چیزی نمی‌گوید: خوانده نشد،
-     کوتاه بود، یا همان ۶ رقمِ مبهمِ سامان/بلو است. پیش‌شماره‌ای که صریحاً بانکِ دیگری را می‌گوید بر اپ
-     مقدم است (رقم را کد می‌خواند، نامِ اپ را مدل حدس می‌زند). */
-  if (!bank && app === 'blu') {
-    const d = (String(sh?.src_prefix ?? '').match(/^\d+/) || [''])[0];
-    if (d.length < 6 || AMBIGUOUS_BIN6.includes(d.slice(0, 6))) bank = 'blu';
-  }
-  if (bank) out.push({ dim: 'bank', key: bank });
-  return out;
 }

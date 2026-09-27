@@ -37,7 +37,7 @@ import {
   reserveStratifiedVariant, exposeStratifiedVariant, releaseStratifiedReservation,
 } from '../../shared/ab.js';
 // پشتیبانی مشترکِ همه‌ی ربات‌ها (حساب + کدِ پیگیری + لینکِ پیامِ آماده) — متن‌ها از locale می‌آیند
-import { registerSupport, supportRow, supportReply, supportLink } from '../../shared/support.js';
+import { registerSupport, supportRow, supportReply, supportLink, SUPPORT } from '../../shared/support.js';
 
 /* کدِ پیگیریِ پشتیبانیِ این ربات (بند ۶ج ریشه). تک‌منبع شد چون از ۱۴۰۵/۰۶/۲۲ دو
  * مصرف‌کننده دارد: `registerSupport` و دکمه‌ی CTAی پرچمِ `needs_support`. دو رشته‌ی
@@ -336,7 +336,11 @@ const TEST_PHASE = false;
 //         کاربرِ بلو، تأییدِ کُندِ بسته‌ی معمولی). ⚠️ نسخه‌های میانیِ ۳.۱۲۲ تا ۳.۱۳۰ که در CLAUDE.md تاروت
 //         آمده‌اند فقط مراحلِ داخلیِ همین برنچ‌اند و هرگز جدا دیپلوی نشدند؛ ۳.۱۲۲.۰ِ **منتشرشده** همان
 //         خطِ بالاست (#412). اولین نسخه‌ای که از این پروژه روی `first_version` کاربران می‌نشیند ۳.۱۳۱.۰ است.
-const PRODUCT_VERSION = '3.131.0';
+// 3.132.0: 🔁 کارتِ هر فاکتور بر اساسِ **مبلغ** (کمترین تأییدشده‌ی امروز با همین مبلغ ⟵ کمترین فاکتورِ باز ⟵
+//         ترتیب؛ روز از ۰۰:۰۰؛ کاربر هیچ نقشی ندارد؛ کاربرِ بلو حذف)، تشخیصِ اپ/بانک کاملاً از هوش مصنوعی
+//         بیرون (فقط دکمه‌ی ادمین)، پیامِ رسید «کارتِ تخصیص‌داده» + «سوابق کاربر: N پرداخت»، دکمه‌ی «تغییر
+//         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
+const PRODUCT_VERSION = '3.132.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -347,14 +351,14 @@ const SETTINGS_ENABLED = true;
 // صدا زده نمی‌شود، فقط `cardsAdminOn` (چکِ CI شمارشش را قفل کرده).
 const CARDS_ADMIN_ENABLED = true;
 const cardsAdminOn = (uid) => CARDS_ADMIN_ENABLED && !starsRail && Number(uid) === OWNER_ID;
-// 🔄 چرخشِ روزانه‌ی کارت + سقفِ روزانه (v3.124.0، فازِ ۲ِ `PAYMENT-V2-PLAN.md`). روزِ کارت از
-// ۰۶:۰۰ تهران شروع می‌شود (`CA.cardDay`). هر روز اولین کاربر کارتِ عادیِ اول، دومی کارتِ بعدی،
-// و هر کاربر تا آخرِ همان روز روی کارتِ خودش می‌ماند. کارتِ پرشده (تعدادِ پرداختِ **تأییدشده**
-// به `daily_cap` رسیده) از چرخش بیرون می‌رود؛ همه‌ی عادی‌ها پر ⟵ کارتِ سفید. `false` ⟵ دقیقاً
-// رفتارِ v3.123.0 (اولین کارتِ عادیِ فعال، بدونِ سقف). ربات‌های استارز هرگز وارد نمی‌شوند.
+// 🔁 انتخابِ کارتِ هر فاکتور بر اساسِ **مبلغ** (v3.132.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۵؛ جایگزینِ چرخشِ
+// per کاربرِ v3.124.0). بینِ کارت‌های عادیِ فعالِ زیرِ سقف: کمترین تأییدشده‌ی امروز با همین مبلغ ⟵
+// کمترین فاکتورِ بازِ امروز با همین مبلغ ⟵ ترتیبِ فهرست (`CA.pickAmountCard`). روز از ۰۰:۰۰ تهران.
+// کاربر هیچ نقشی ندارد (نه کارتِ ثابتِ روزانه، نه کارتِ ترجیحی). همه‌ی عادی‌ها پر ⟵ کارتِ سفید.
+// `false` ⟵ اولین کارتِ عادیِ فعال (رفتارِ v3.123.0). ربات‌های استارز هرگز وارد نمی‌شوند.
 const CARD_ROTATION_ENABLED = true;
-// 🔄 دکمه‌ی «تعویض شماره کارت» زیرِ فاکتور (v3.125.0، فازِ ۳). هر فاکتور یک بار؛ ترتیب: کارتِ
-// بعدیِ همان ادمین ⟵ ادمینِ بعدی ⟵ سفید (`CA.pickSwitchCard`). `false` ⟵ دکمه و تذکرش محو،
+// 🔄 دکمه‌ی «تعویض شماره کارت» زیرِ فاکتور (v3.125.0، فازِ ۳). هر فاکتور یک بار؛ مقصد با **همان**
+// قانونِ صدورِ فاکتور انتخاب می‌شود، به‌جز کارتِ فعلی (v3.132.0). `false` ⟵ دکمه و تذکرش محو،
 // فاکتور بیت‌به‌بیت v3.124.0؛ اکشنِ `card_switch:` ثبت می‌ماند تا دکمه‌ی کش‌شده خطا ندهد.
 const CARD_SWITCH_ENABLED = true;
 // 🔎 ثبتِ کاملِ خروجیِ ایجنتِ رسید + فیلدهای «فقط ثبت» (v3.126.0، فازِ ۴). ایجنت علاوه بر
@@ -376,21 +380,14 @@ const TRANSFER_ERROR_ACTION_ENABLED = true;
 // پیامِ کاربر ندارد. `false` ⟵ نه ردیف، نه خط (کپشن و کیبوردِ مالک بیت‌به‌بیت v3.127.0)؛ کالبک‌های
 // کهنه‌ی `tg:` فقط پاپ‌آپِ 🔒 می‌گیرند. جدول‌ها طبقِ بند ۲ج/۱ می‌مانند.
 const RECEIPT_TAGS_ENABLED = true;
-// 🤖 تگِ خودکار از خروجیِ ایجنت (v3.129.0، فازِ ۷): اپ از `bank_app` و بانکِ مبدأ از پیش‌شماره‌ی
-// کارت (`RT.bankFromPrefix`، نگاشت در کد نه در مدل) با `source='auto'`؛ تگِ دستیِ مالک همیشه
-// مقدم است. هیچ اثری روی پول، تصمیمِ رسید یا پیامِ کاربر. `false` ⟵ دیگر تگِ خودکاری نوشته
-// نمی‌شود (تگ‌های خودکارِ قبلی می‌مانند و با 🤖 دیده می‌شوند).
-const RECEIPT_AUTOTAG_ENABLED = true;
-// 🔁 تحلیلِ دوباره‌ی **یک‌باره‌ی** عکس‌های رسیدِ گذشته (فازِ ۷، پاسخِ مالک): آهسته در پس‌زمینه،
-// هر ۲۰ ثانیه یک رسید، فقط ثبت (`receipt_analyses.source='reanalysis'`) + تگِ خودکار؛ هرگز
-// وضعیتِ پرداخت، کارت یا پیامِ کاربر را لمس نمی‌کند. پایان ⟵ مارکرِ `receipt_reanalysis_1` و یک
-// پیامِ خلاصه به مالک. `false` ⟵ توقفِ فوری (از همان‌جا که مانده، بعداً ادامه می‌دهد).
-const RECEIPT_REANALYSIS_ENABLED = true;
-// 💙 کاربرِ بلوبانک ⟵ کارتِ بلو به‌طورِ ثابت (تصمیمِ مالک ۱۴۰۵/۰۷/۰۴). «کاربرِ بلو» = بانکِ مؤثرِ **آخرین**
-// رسیدِ تگ‌دار و ردنشده‌اش بلو باشد (تگِ دستی یا خودکار). فاکتورش بیرون از نوبت روی کارتِ عادیِ بلو
-// صادر می‌شود (فعال و زیرِ سقف؛ وگرنه چرخشِ معمول) و دکمه‌ی تعویض مثلِ همه فعال است. کارتِ بلو برای
-// بقیه در چرخش می‌ماند. `false` ⟵ همه مثلِ v3.128.0 به نوبت.
-const BLU_USER_CARD_ENABLED = true;
+// 🧾 بازبینیِ یک‌باره‌ی رسیدهای گذشته (v3.132.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۵): آخرین رسیدِ تأییدشده‌ی هر
+// کاربر که مالک هنوز دستی تگش نزده، یکی‌یکی با دکمه‌های اپ/بانک برای **اکانتِ پشتیبانی** (`SUPPORT.id`)
+// در همین ربات فرستاده می‌شود؛ پرتراکنش‌ترین کاربر اول. اکانتِ پشتیبانی فقط تگ می‌زند (نه کارت، نه
+// پول). پیشرفت در `tag_review_sent` است، پس ری‌استارت از همان‌جا ادامه می‌دهد؛ پایان ⟵ مارکرِ
+// `tag_review_1`. `false` ⟵ توقف (بعداً از همان‌جا ادامه می‌دهد).
+const TAG_REVIEW_ENABLED = true;
+// 🤖 تگِ خودکار (v3.129.0) و تحلیلِ دوباره‌ی رسیدهای گذشته (فازِ ۷) در v3.132.0 **حذف** شدند (تصمیمِ
+// مالک ۱۴۰۵/۰۷/۰۵: تشخیصِ اپ و بانک خطای زیادی داشت). تنها منبعِ تگ دکمه‌های ادمین است.
 
 /* ⌨️ نسخه‌ی کیبوردِ ماندگار (v3.39.0) — بند ۹ب-۲ ریشه.
    مسئله: کیبوردِ reply روی **گوشیِ کاربر** ذخیره است و هیچ متدی در Bot API نمی‌تواند از
@@ -1285,14 +1282,13 @@ const cardSt = () => _cardSt || (_cardSt = {
   anyActive: db.prepare('SELECT * FROM cards WHERE active=1 ORDER BY sort, id LIMIT 1'),
   admins:   db.prepare('SELECT DISTINCT admin_id FROM cards WHERE active=1'),
   assign:   db.prepare('UPDATE payments SET card_id=? WHERE id=? AND card_id=0'),
-  // 🔄 فازِ ۲: چرخش، چسبندگیِ روزانه‌ی هر کاربر، و شمارشِ سقف.
-  assignGet: db.prepare('SELECT card_id FROM card_assign WHERE user_id=? AND day=?'),
-  assignSet: db.prepare('INSERT INTO card_assign (user_id, day, card_id, via) VALUES (?,?,?,?) '
-    + 'ON CONFLICT(user_id, day) DO UPDATE SET card_id=excluded.card_id, via=excluded.via'),
-  rotGet:   db.prepare('SELECT n FROM card_rotation WHERE day=?'),
-  rotInc:   db.prepare('INSERT INTO card_rotation (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n=n+1'),
-  usedOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_day=? AND card_id>0 GROUP BY card_id"),
-  markDay:  db.prepare("UPDATE payments SET approved_day=? WHERE id=? AND approved_day=''"),
+  // 🔁 v3.132.0: سه شمارشِ «امروز» (از ۰۰:۰۰ تهران = `since`). هر سه روی ایندکس می‌نشینند
+  // (`idx_payments_status_approved`، `idx_payments_status_created`)، پس هزینه‌شان با تعدادِ ردیف‌های
+  // **امروز** بالا می‌رود نه با کلِ جدول (چکِ CI روی جدولِ بزرگ اندازه‌اش را می‌گیرد).
+  usedOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND card_id>0 GROUP BY card_id"),
+  winsOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
+  openOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status IN ('pending','waiting_review') AND created_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
+  markDay:  db.prepare('UPDATE payments SET approved_at=unixepoch() WHERE id=? AND approved_at IS NULL'),
   // 🔄 فازِ ۳: ادعای اتمیکِ تعویض — یک بار، فقط روی فاکتورِ باز و فقط از همان کارتی که دیده شد.
   switchClaim: db.prepare("UPDATE payments SET card_id=?, prev_card_id=?, card_switched_at=unixepoch() WHERE id=? AND card_id=? AND card_switched_at IS NULL AND status='pending'"),
   // رسیدِ فاکتورِ تعویض‌شده به کارتِ **قبلی** واریز شده ⟵ کارتِ پرداخت همان کارتی می‌شود که پول
@@ -1325,57 +1321,83 @@ function cardOfPayment(p) {
   } catch (e) { logErr('cardOfPayment:', e.message); return LEGACY_CARD; }
 }
 const cardOfPid = (pid) => cardOfPayment(stmts.getPayment.get(pid));
+/* ⏱ انتخابِ کارت روی مسیرِ صدورِ فاکتور است و کاربر منتظرش می‌ماند. همه‌ی دیتایش در SQLiteِ
+ * **داخلِ همین پروسه** است (هیچ فراخوانیِ شبکه‌ای نیست) و روی ایندکس، پس در عمل زیرِ یک
+ * میلی‌ثانیه تمام می‌شود (چکِ CI بدترین حالت را روی جدولِ بزرگ می‌سنجد). دو تورِ احتیاط:
+ *   • خطا ⟵ فالبک: آخرین کارتی که در محاسبه برنده شده (اگر هنوز فعال است)، وگرنه اولین عادیِ
+ *     فعال. فاکتور هرگز بی‌کارت نمی‌ماند.
+ *   • بیش از ۳ ثانیه ⟵ هشدار به مالک. خواندنِ SQLite همگام است و وسطش قطع‌شدنی نیست، پس وقتی
+ *     زمان معلوم می‌شود جوابِ درست از قبل آماده است و همان استفاده می‌شود؛ هشدار یعنی «معماری
+ *     باید بازبینی شود»، نه «کاربر کارتِ اشتباه گرفت».
+ * هر دو هشدار مارکرِ `CARD_PICK_ALERT` دارند و حداکثر هر ۱۰ دقیقه یک پیام به تلگرام می‌روند. */
+const CARD_PICK_BUDGET_MS = 3000;
+let lastPickedCardId = 0;
+let lastPickAlertAt = 0;
+function cardPickAlert(msg) {
+  logErr(`💳 CARD_PICK_ALERT ${msg}`);
+  if (Date.now() - lastPickAlertAt < 10 * 60_000) return;
+  lastPickAlertAt = Date.now();
+  bot.telegram.sendMessage(OWNER_ID, `⚠️ انتخابِ کارتِ فاکتور: ${msg}`).catch(() => {});
+}
 /** لحظه‌ی صدورِ فاکتور (کنارِ `issueInvoiceNo`). یک‌بار و اتمیک (`card_id=0`)، پس صدورِ
- *  دوباره یا دوبار-تپ کارتِ فاکتور را عوض نمی‌کند. شکستش فاکتور را نمی‌شکند: `card_id`
- *  صفر می‌ماند و `cardOfPayment` همان کارتِ قدیمی را می‌دهد. */
+ *  دوباره یا دوبار-تپ کارتِ فاکتور را عوض نمی‌کند. شکستش فاکتور را نمی‌شکند. */
 function issueInvoiceCard(paymentId) {
+  const t0 = Date.now();
+  let failed = false;
   try {
     if (CARD_ROTATION_ENABLED && !starsRail) {
       const r = pickInvoiceCardTx()(paymentId);
+      const ms = Date.now() - t0;
+      if (ms > CARD_PICK_BUDGET_MS) cardPickAlert(`محاسبه ${ms} میلی‌ثانیه طول کشید (فاکتورِ ردیفِ ${paymentId})؛ کارت درست انتخاب شد ولی باید بررسی شود.`);
       if (r) {
-        log(`💳 CARD_PICK #${paymentId} card=${r.card.id} via=${r.via} day=${r.day}`);
-        track(db, r.uid, 'card_assigned', { payment_id: paymentId, card_id: r.card.id, via: r.via, day: r.day });
+        lastPickedCardId = r.card.id;
+        log(`💳 CARD_PICK #${paymentId} card=${r.card.id} via=${r.via} amount=${r.amount} ms=${ms}`);
+        track(db, r.uid, 'card_assigned', { payment_id: paymentId, card_id: r.card.id, via: r.via, day: r.day, amount: r.amount });
         return;
       }
     }
-  } catch (e) { logErr('issueInvoiceCard rotation:', e.message); }
-  // چرخش خاموش، ربات استارز، یا خطا ⟵ همان رفتارِ v3.123.0. فاکتور هرگز بی‌کارت نمی‌ماند.
-  try { const c = defaultInvoiceCard(); if (c.id) cardSt().assign.run(c.id, paymentId); }
-  catch (e) { logErr('issueInvoiceCard:', e.message); }
+  } catch (e) {
+    failed = true;
+    cardPickAlert(`خطا در محاسبه (${e.message}) ⟵ فالبک به آخرین کارتِ برنده.`);
+  }
+  // چرخش خاموش، ربات استارز، یا خطا ⟵ فالبک. فاکتور هرگز بی‌کارت نمی‌ماند.
+  try {
+    const last = failed && lastPickedCardId ? cardSt().byId.get(lastPickedCardId) : null;
+    const c = last && Number(last.active) === 1 ? last : defaultInvoiceCard();
+    if (c.id && cardSt().assign.run(c.id, paymentId).changes === 1 && failed) {
+      const p = stmts.getPayment.get(paymentId);
+      track(db, p?.user_id, 'card_assigned', { payment_id: paymentId, card_id: c.id, via: 'fallback', day: CA.cardDay(), amount: p?.amount });
+    }
+  } catch (e) { logErr('issueInvoiceCard:', e.message); }
 }
-/* 🔄 انتخابِ کارتِ روز در **یک تراکنش**: خواندنِ شمارنده، انتخاب، افزایشِ شمارنده و نشاندنِ
- * کارت روی فاکتور یا همه با هم می‌نشینند یا هیچ‌کدام، پس دو فاکتورِ هم‌زمان یک نوبت را
- * نمی‌گیرند. تصمیم کاملاً در `CA.pickDailyCard` (خالص، همان تابعی که چکِ CI اجرا می‌کند). */
+const countMap = (rows) => new Map(rows.map((r) => [r.card_id, r.c]));
+/** سه شمارشِ امروز برای یک مبلغ: `used` (سقف)، `wins` (تأییدشده با همین مبلغ)، `open` (باز با همین مبلغ). */
+function cardCounts(amount, since = CA.cardDayStartSec()) {
+  const st = cardSt();
+  return { used: countMap(st.usedOn.all(since)), wins: countMap(st.winsOn.all(since, amount)), open: countMap(st.openOn.all(since, amount)) };
+}
+/* 🔁 انتخاب و نشاندنِ کارت در **یک تراکنش**، پس دو فاکتورِ هم‌زمان شمارش‌های یکسان نمی‌بینند:
+ * فاکتورِ دوم فاکتورِ بازِ اولی را می‌شمارد و به کارتِ بعدی می‌رود. تصمیم کاملاً در
+ * `CA.pickAmountCard` (خالص، همان تابعی که چکِ CI اجرا می‌کند). */
 let _pickTx = null;
 const pickInvoiceCardTx = () => _pickTx || (_pickTx = db.transaction((pid) => {
   const st = cardSt();
   const p = stmts.getPayment.get(pid);
   if (!p || p.card_id) return null;              // فاکتورِ ناموجود یا از قبل کارت‌دار: دست نمی‌زنیم
-  const day = CA.cardDay();
-  const sticky = st.assignGet.get(p.user_id, day);
-  const used = new Map(st.usedOn.all(day).map((r) => [r.card_id, r.c]));
-  const n = st.rotGet.get(day)?.n || 0;
-  const cards = st.all.all();
-  // 💙 کاربرِ بلو ⟵ کارتِ عادیِ بلو، بیرون از نوبت (کارمزدِ صفر، و کارت‌های دیگر شلوغ نمی‌شوند).
-  // کارتِ بلو از پیش‌شماره‌ی خودِ شماره شناخته می‌شود (همان نگاشتِ تگ‌ها)، نه از برچسبِ متنیِ بانک.
-  const preferIds = BLU_USER_CARD_ENABLED && isBluUser(p.user_id)
-    ? cards.filter((c) => c.kind === 'regular' && RT.bankFromPrefix(c.number) === 'blu').map((c) => c.id) : [];
-  const { card, via } = CA.pickDailyCard({ cards, used, stickyId: sticky?.card_id || 0, n, preferIds, preferVia: 'blu_user' });
+  const { card, via } = CA.pickAmountCard({ cards: st.all.all(), ...cardCounts(p.amount) });
   if (!card) return null;
-  if (via === 'rotation') st.rotInc.run(day);
-  if (!sticky || sticky.card_id !== card.id) st.assignSet.run(p.user_id, day, card.id, via);
   if (st.assign.run(card.id, pid).changes !== 1) throw new Error('card_id already set');
-  return { card, via, day, uid: p.user_id };
+  return { card, via, day: CA.cardDay(), uid: p.user_id, amount: p.amount };
 }));
 /** مصرفِ امروزِ هر کارت (برای نمایش در «💳 کارت‌ها»). خطا ⟵ `undefined` = بدونِ خطِ مصرف. */
 function cardsUsedToday() {
-  try { return new Map(cardSt().usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c])); }
+  try { return countMap(cardSt().usedOn.all(CA.cardDayStartSec())); }
   catch (e) { logErr('cardsUsedToday:', e.message); return undefined; }
 }
-/** روزِ کارتِ لحظه‌ی **تأیید** روی پرداخت می‌نشیند (یک‌بار). سقفِ روزانه دقیقاً همین را می‌شمارد:
- *  «پرداخت‌های تأییدشده‌ی امروزِ این کارت». شکستش هیچ تأییدی را نمی‌شکند. */
+/** لحظه‌ی **تأیید** روی پرداخت می‌نشیند (`approved_at`، یک‌بار). سقف و رقابتِ مبلغ دقیقاً همین را
+ *  می‌شمارند: «تأییدشده‌های امروزِ این کارت». شکستش هیچ تأییدی را نمی‌شکند. */
 function markApprovedDay(paymentId) {
-  try { cardSt().markDay.run(CA.cardDay(), paymentId); }
+  try { cardSt().markDay.run(paymentId); }
   catch (e) { logErr('markApprovedDay:', e.message); }
 }
 // خطِ زیرِ شماره روی فاکتور. شکلِ کارتِ ۱ بیت‌به‌بیت همان `CARD_OWNER`ِ قبلی است.
@@ -1407,9 +1429,8 @@ function switchTargetFor(p) {
   try {
     // فاکتورِ کارتِ سفید دکمه‌ی تعویض ندارد (تصمیمِ مالک، پاسخِ ۱۵): سفید آخرین مقصد است.
     if (cardOfPayment(p).kind === 'white') return null;
-    const st = cardSt();
-    const used = new Map(st.usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c]));
-    return CA.pickSwitchCard({ cards: st.all.all(), used, currentId: cardOfPayment(p).id });
+    const r = CA.pickAmountCard({ cards: cardSt().all.all(), ...cardCounts(p.amount), excludeId: cardOfPayment(p).id });
+    return r.card ? r : null;
   } catch (e) { logErr('switchTargetFor:', e.message); return null; }
 }
 const cardSwitchRow = (pid) => (switchTargetFor(stmts.getPayment.get(pid))
@@ -2122,6 +2143,13 @@ try { db.prepare('ALTER TABLE payments ADD COLUMN card_id INTEGER NOT NULL DEFAU
  * هر کاربر در هر روز (چسبندگی). `card_rotation` = نوبتِ چرخشِ هر روز؛ روزِ تازه ردیف ندارد، پس
  * خودبه‌خود از کارتِ اول شروع می‌شود و هیچ ریستِ زمان‌بندی‌شده‌ای لازم نیست. */
 try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEFAULT ''").run(); } catch {}
+/* 🔁 v3.132.0: لحظه‌ی **تأیید** (ثانیه‌ی یونیکس). `approved_day` (روزِ کارتِ ۰۶:۰۰) معنایش دست
+ * نمی‌خورد و دیگر نوشته نمی‌شود (بند ۲ج/۱)؛ روزِ تازه (۰۰:۰۰ تهران) از همین لحظه ساخته می‌شود تا
+ * مرزِ روز دیگر در ستون قفل نباشد. پرداخت‌های تأییدشده‌ی قبلی یک‌بار از `updated_at` پر می‌شوند
+ * (تقریب، فقط برای آمارِ روزهای گذشته). دو ایندکس تا سه شمارشِ «امروز» هرگز کلِ جدول را نخوانند. */
+try { db.prepare('ALTER TABLE payments ADD COLUMN approved_at INTEGER').run(); } catch {}
+try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_status_approved ON payments(status, approved_at)').run(); } catch {}
+try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_status_created ON payments(status, created_at)').run(); } catch {}
 // 🔄 فازِ ۳ (v3.125.0): لحظه‌ی تعویضِ کارتِ فاکتور؛ NULL = هنوز تعویض نشده (هر فاکتور یک بار).
 try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run(); } catch {}
 // کارتی که فاکتور **قبل از** تعویض داشت (۰ = تعویض نشده). رسیدِ واریز به آن کارت هم معتبر است.
@@ -2229,6 +2257,11 @@ db.exec(`
     PRIMARY KEY (payment_id, dim, source)
   );
   CREATE INDEX IF NOT EXISTS idx_receipt_tags_user ON receipt_tags(user_id);
+  CREATE TABLE IF NOT EXISTS tag_review_sent (
+    payment_id INTEGER PRIMARY KEY,
+    sent_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    ok         INTEGER NOT NULL DEFAULT 1
+  );
 `);
 /* سیدِ مقدارهای اولیه با `INSERT OR IGNORE` در **هر** بوت: ردیفِ موجود هرگز لمس نمی‌شود، پس
  * برچسبی که مالک از داشبورد عوض کرده یا مقداری که غیرفعال کرده دوباره زنده نمی‌شود؛ و مقدارِ
@@ -2239,6 +2272,29 @@ try {
     for (const d of RT.TAG_DIMS) RT.SEED_TAG_VALUES[d].forEach(([k, l], i) => ins.run(d, k, l, i + 1));
   })();
 } catch (e) { logErr('tag_values seed:', e.message); }
+/* 🧹 v3.132.0، یک‌باره (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵): تشخیصِ اپ و بانک کاملاً از دستِ هوش مصنوعی بیرون
+ * آمد؛ تنها منبعِ تگ دکمه‌های ادمین است. پس:
+ *   ۱) همه‌ی تگ‌های `source='auto'` پاک می‌شوند. بکاپِ جدا لازم ندارند: مکانیکی از خروجیِ ثبت‌شده‌ی
+ *      ایجنت در `receipt_analyses` ساخته شده بودند و آن ردیف‌ها دست نمی‌خورند.
+ *   ۲) اپِ «بلو» غیرفعال می‌شود (مقدار هرگز حذف نمی‌شود) و تگ‌های دستیِ «بلو» ⟵ «موبایل‌بانک»
+ *      (بانکشان بلو می‌ماند؛ کاربرِ بلو = بانکِ بلو + موبایل‌بانک).
+ *   ۳) ترتیبِ اپ‌ها همان ترتیبِ `SEED_TAG_VALUES` می‌شود (ردیف‌های موجود با `INSERT OR IGNORE` جابه‌جا
+ *      نمی‌شدند) و «نمی‌تونم تشخیص بدم» اولِ فهرستِ بانک می‌نشیند.
+ *   ۴) `approved_at`ِ پرداخت‌های تأییدشده‌ی قبلی از `updated_at` پر می‌شود.
+ * همه در یک تراکنش با مهرِ داخلِ همان تراکنش (الگوی سیدِ کارت‌ها). */
+try {
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM migrations WHERE key='tags_v2_manual_only'").get()) return;
+    db.prepare("DELETE FROM receipt_tags WHERE source='auto'").run();
+    db.prepare("UPDATE tag_values SET active=0 WHERE dim='app' AND key='blu'").run();
+    db.prepare("UPDATE receipt_tags SET value_key='mobilebank' WHERE dim='app' AND value_key='blu'").run();
+    const sortSet = db.prepare('UPDATE tag_values SET sort=? WHERE dim=? AND key=?');
+    RT.SEED_TAG_VALUES.app.forEach(([k], i) => sortSet.run(i + 1, 'app', k));
+    sortSet.run(0, 'bank', 'unknown');
+    db.prepare("UPDATE payments SET approved_at=updated_at WHERE status='approved' AND approved_at IS NULL").run();
+    db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tags_v2_manual_only', unixepoch())").run();
+  })();
+} catch (e) { logErr('tags_v2 migration:', e.message); }
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -9526,9 +9582,8 @@ bot.action(/^pay_resume:(\d+)$/, async (ctx) => {
 
 /* 🔄 «تعویض شماره کارت» (v3.125.0، فازِ ۳ی PAYMENT-V2-PLAN، متن‌ها عینِ خواسته‌ی مالک).
  * همان ردیفِ پرداخت می‌ماند (شماره‌ی فاکتور، مبلغ، بسته)؛ فقط `card_id` عوض می‌شود. ترتیب:
- *   ۱) ادعای اتمیک (یک بار، فقط فاکتورِ باز، فقط از همان کارتی که کاربر دید) + کارتِ امروزِ
- *      کاربر همان کارتِ تازه می‌شود (`card_assign`، via=switch) تا فاکتورهای بعدیِ امروزش هم
- *      روی کارتی بنشینند که کار می‌کند.
+ *   ۱) ادعای اتمیک (یک بار، فقط فاکتورِ باز، فقط از همان کارتی که کاربر دید). مقصد با همان
+ *      قانونِ مبلغ انتخاب می‌شود (v3.132.0)؛ فاکتورهای بعدیِ کاربر هر کدام از نو انتخاب می‌شوند.
  *   ۲) پیامِ فاکتورِ قبلی **حذف** می‌شود (دو فاکتورِ هم‌زمان نه)؛ حذف‌نشدنی ⟵ دکمه‌هایش برداشته.
  *   ۳) سرتیترِ «فاکتور جدید با شماره کارت جدید» و بعد همان فاکتور با کارتِ تازه + خطِ هشدار.
  * رسیدِ این فاکتور از این لحظه به ادمینِ کارتِ تازه می‌رود (مسیریابی از `card_id` است). */
@@ -9548,11 +9603,7 @@ bot.action(/^card_switch:(\d+)$/, async (ctx) => {
   const fromId = cardOfPayment(p).id;
   let claimed = false;
   try {
-    claimed = db.transaction(() => {
-      if (cardSt().switchClaim.run(target.card.id, fromId, pid, p.card_id).changes !== 1) return false;
-      cardSt().assignSet.run(uid, CA.cardDay(), target.card.id, 'switch');
-      return true;
-    })();
+    claimed = cardSt().switchClaim.run(target.card.id, fromId, pid, p.card_id).changes === 1;
   } catch (e) { logErr('card_switch claim pay#' + pid, e.message); }
   if (!claimed) return ctx.answerCbQuery(L.wallet.cardSwitchUsed, { show_alert: true }).catch(() => {});
   await ctx.answerCbQuery().catch(() => {});
@@ -10106,10 +10157,6 @@ const tagSt = () => _tagSt || (_tagSt = {
     (SELECT COALESCE(MAX(sort),0)+1 FROM tag_values WHERE dim=?))
     ON CONFLICT(dim, key) DO UPDATE SET label=excluded.label, active=1`),
   valueActive: db.prepare('UPDATE tag_values SET active=? WHERE dim=? AND key=?'),
-  // 🤖 فازِ ۷: ردیفِ خودکار جدا از دستی (کلیدِ اصلی `source` را دارد)، پس هرگز رویش نمی‌نویسد.
-  autoSet: db.prepare(`INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source, by_id)
-    VALUES (?,?,?,?,'auto',0) ON CONFLICT(payment_id, dim, source)
-    DO UPDATE SET value_key=excluded.value_key, updated_at=unixepoch()`),
 });
 const tagValues = () => { try { return tagSt().values.all(); } catch (e) { logErr('tag values:', e.message); return []; } };
 /** برچسبِ خوانای یک مقدار؛ مقدارِ ناشناخته (مثلاً کلیدِ تگِ خودکارِ آینده) خودِ کلید را نشان می‌دهد. */
@@ -10120,22 +10167,10 @@ const curTagsOf = (pid) => {
   try { return RT.effectiveTags(tagSt().ofPayment.all(pid))[pid] || {}; }
   catch (e) { logErr('tags of payment:', e.message); return {}; }
 };
-/** خطِ «🏷 سابقه‌ی کاربر» (یا `''`). fail-safe: هیچ خطایی پیامِ رسید را نمی‌شکند. */
-function tagHistoryLineFor(uid, values = tagValues()) {
-  if (!tagsOn()) return '';
-  try { return RT.historyLine(RT.tagHistory(tagSt().ofUser.all(uid)), tagLabelFn(values)); }
-  catch (e) { logErr('tag history:', e.message); return ''; }
-}
-/** 💙 کاربرِ بلو؟ بانکِ مؤثرِ آخرین رسیدِ تگ‌دارِ ردنشده. fail-safe: هر خطا ⟵ false (چرخشِ معمول). */
-function isBluUser(uid) {
-  if (!tagsOn() || !uid) return false;
-  try { return RT.lastBank(tagSt().ofUser.all(uid)) === 'blu'; }
-  catch (e) { logErr('isBluUser:', e.message); return false; }
-}
 /** کیبوردِ پیامِ رسیدِ مالک = دکمه‌های اکشنِ خودش (اگر پیامِ کامل است) + ردیفِ جمع‌شده‌ی تگ. */
 function ownerReceiptMarkup(p, kb) {
   if (!tagsOn() || !p?.id) return kb || null;
-  try { return RT.withTagRows(kb, RT.tagCollapsedRows(p.id, curTagsOf(p.id), tagLabelFn())); }
+  try { return RT.withTagRows(kb, RT.tagCollapsedRows(p.id, curTagsOf(p.id), tagLabelFn(), { cardLabel: RT.cardShortLabel(cardOfPayment(p)) })); }
   catch (e) { logErr('owner tag kb:', e.message); return kb || null; }
 }
 
@@ -10157,7 +10192,11 @@ function applyTagPlan(a, byId, via) {
 async function handleTagCallback(ctx, data) {
   const m = RT.TAG_CB.exec(data);
   const answer = (t, alert = false) => ctx.answerCbQuery(t, alert ? { show_alert: true } : undefined).catch(() => {});
-  if (ctx.from?.id !== OWNER_ID || !m) return answer('🔒');
+  // 🧾 اکانتِ پشتیبانی (v3.132.0) فقط تگِ اپ و بانک را می‌زند (بازبینیِ رسیدهای گذشته)؛ نه کارت،
+  // نه هیچ اکشنِ پولی. کارتِ تخصیص فقط دستِ مالک است.
+  const owner = ctx.from?.id === OWNER_ID;
+  const support = !owner && SUPPORT?.id && ctx.from?.id === Number(SUPPORT.id);
+  if (!m || !(owner || (support && m[3] !== 'card'))) return answer('🔒');
   if (!tagsOn()) return answer('تگ‌زدن فعلاً خاموش است.');
   const [, verb, pidS, dim, key] = m;
   const pid = Number(pidS);
@@ -10166,14 +10205,33 @@ async function handleTagCallback(ctx, data) {
   const values = tagValues();
   const kb = ctx.callbackQuery?.message?.reply_markup;
   const render = (rows) => ctx.editMessageReplyMarkup(RT.withTagRows(kb, rows)).catch(() => {});
-  const collapsed = () => RT.tagCollapsedRows(pid, curTagsOf(pid), tagLabelFn(values));
+  const collapsed = () => RT.tagCollapsedRows(pid, curTagsOf(pid), tagLabelFn(values),
+    owner ? { cardLabel: RT.cardShortLabel(cardOfPid(pid)) } : {});
   if (verb === 'x') { await answer(); return render(collapsed()); }
   if (!dim) return answer('🔒');
+  if (dim === 'card') return handleCardCorrection(verb, p, key, { answer, render, collapsed });
   if (verb === 'o') { await answer(); return render(RT.tagPickerRows(pid, dim, values, curTagsOf(pid)[dim]?.key)); }
   const plan = RT.planTagOp(verb === 's' ? { op: 'set', dim, key } : { op: 'clear', dim }, { values, payment: p });
   if (!plan.ok) return answer(plan.err, true);
-  applyTagPlan(plan.apply, OWNER_ID, 'bot');
+  applyTagPlan(plan.apply, ctx.from.id, support ? 'support' : 'bot');
   await answer(`✅ ${plan.what}`);
+  return render(collapsed());
+}
+/** 💳 «تغییر شماره کارت تخصیص» (v3.132.0): فقط `card_id`ِ همین پرداخت عوض می‌شود، در هر وضعیتی.
+ *  اثرش فقط روی آمار است (تأییدشده‌ی امروزِ هر کارت با هر مبلغ ⟵ انتخابِ کارتِ فاکتورهای بعدی)؛
+ *  نه پول، نه پیامِ کاربر. ردِ حسابرسی: خطِ لاگِ `💳 CARD_CORRECT`. */
+let _cardCorrect;
+async function handleCardCorrection(verb, p, key, { answer, render, collapsed }) {
+  const cards = cardSt().all.all();
+  if (verb === 'o') { await answer(); return render(RT.cardPickerRows(p.id, cards, cardOfPayment(p).id)); }
+  if (verb !== 's') return answer('🔒');
+  const plan = RT.planCardCorrection(p, cards, Number(key));
+  if (!plan.ok) return answer(plan.err, true);
+  if (!plan.noop) {
+    (_cardCorrect ||= db.prepare('UPDATE payments SET card_id=? WHERE id=?')).run(plan.to, p.id);
+    log(`💳 CARD_CORRECT pay#${p.id} ${plan.from}→${plan.to} status=${p.status} amount=${p.amount} by=${OWNER_ID}`);
+  }
+  await answer(plan.noop ? 'همین کارت ثبت است.' : `✅ کارتِ این پرداخت ⟵ ${plan.label}`);
   return render(collapsed());
 }
 /** 🏷 اکشنِ صفِ داشبورد `receipt_tag`. پیامِ موفقیت نمی‌رود (مالک همین حالا خودش در داشبورد
@@ -10196,19 +10254,36 @@ async function applyQueuedTagOp(act) {
   applyTagPlan(plan.apply, 0, 'dashboard');
 }
 
+/** دو خطِ ثابتِ زیرِ هر پیامِ رسید: شماره‌ی کاملِ کارتی که سیستم به این فاکتور داده (تا ادمین ببیند
+ *  کاربر به همان زده یا نه) و «سوابق کاربر: N پرداخت» = پرداخت‌های تأییدشده‌ی **دیگرِ** کاربر + همین
+ *  یکی (۱ یعنی اولین بار). از v3.132.0 هیچ حرفی از اپ و بانک این‌جا نیست. fail-safe: خطا ⟵ ''. */
+let _priorApproved;
+function receiptInfoLines(p) {
+  if (!p?.id) return '';
+  try {
+    // همیشه کارتِ **فعلیِ** همین پرداخت (نه کارتِ مسیریابی): پیامِ «نتوانستم واریز کنم» به ادمینِ کارتِ
+    // ناموفق می‌رود ولی فاکتور حالا روی کارتِ سفید است، و همین عدد است که ادمین باید با رسید مقایسه کند.
+    const c = cardOfPayment(p);
+    const num = String(c.number || '').replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ');
+    const prior = (_priorApproved ||= db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved' AND id<>?"))
+      .get(p.user_id, p.id).c;
+    return `💳 کارتِ تخصیص‌داده: ${num} (${c.bank || c.holder})\n📊 سوابق کاربر: ${(prior + 1).toLocaleString('fa-IR')} پرداخت`;
+  } catch (e) { logErr('receiptInfoLines:', e.message); return ''; }
+}
 /** ارسالِ یک پیامِ رسید به گیرنده‌هایش. پیامِ اولین گیرنده‌ی **کامل** برگردانده می‌شود
  *  (همان که قبلاً `adminMsg` بود و در `admin_message_id` می‌نشیند). کپشنِ عکس سقفِ ۱۰۲۴
  *  نویسه دارد؛ سرتیترِ کپی نباید باعث شود پیامِ مالک به‌کل نرسد. */
 async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = null) {
   let first;
   const limit = photoFileId ? 1024 : 4096;
-  // 🔎 خطِ ایجنت (فازِ ۴) و 🏷 خطِ سابقه‌ی تگ (فازِ ۶) فقط روی پیامِ مالک، در یک دُمِ واحد
-  // که سقفِ کپشن هرگز نمی‌بُرد (`withShadowLine` از خودِ کپشن کم می‌کند نه از دُم).
-  const sline = [ownerShadowLine(p), tagHistoryLineFor(p?.user_id)].filter(Boolean).join('\n');
+  // 📊 دُمِ هر پیامِ رسید (v3.132.0، همه‌ی گیرنده‌ها): کارتِ تخصیص‌داده و تعدادِ پرداخت‌های کاربر.
+  // 🔎 خطِ ایجنت (فقط «خطای انتقال») فقط روی پیامِ مالک. دُم را سقفِ کپشن هرگز نمی‌بُرد
+  // (`withShadowLine` از خودِ کپشن کم می‌کند نه از دُم).
+  const info = receiptInfoLines(p);
+  const sline = [info, ownerShadowLine(p)].filter(Boolean).join('\n');
   for (const r of receiptRecipients(p, card)) {
     const base = r.full ? caption : (ownerCopyHeader(p, card) + caption);
-    // برای بقیه‌ی گیرنده‌ها کپشن بیت‌به‌بیت همان قبلی است.
-    const cap = r.id === OWNER_ID ? withShadowLine(base, sline, limit) : (r.full ? caption : base.slice(0, limit));
+    const cap = withShadowLine(base, r.id === OWNER_ID ? sline : info, limit);
     // 🏷 ردیفِ تگ فقط روی پیامِ مالک (کامل یا کپی)؛ کپیِ اطلاعاتی بقیه‌ی دکمه‌ها را نمی‌گیرد.
     const mk = r.id === OWNER_ID ? ownerReceiptMarkup(p, r.full ? kb : null) : (r.full ? kb : null);
     const extra = mk ? { reply_markup: mk } : {};
@@ -10305,8 +10380,7 @@ function whiteTargetFor(p) {
     const cur = cardOfPayment(p);
     if (!p || p.transfer_error_at || cur.kind === 'white') return null;
     const st = cardSt();
-    const used = new Map(st.usedOn.all(CA.cardDay()).map((r) => [r.card_id, r.c]));
-    return CA.pickWhiteCard({ cards: st.all.all(), used, currentId: cur.id });
+    return CA.pickWhiteCard({ cards: st.all.all(), used: countMap(st.usedOn.all(CA.cardDayStartSec())), currentId: cur.id });
   } catch (e) { logErr('whiteTargetFor:', e.message); return null; }
 }
 /* ادعای اتمیک: یک بار per فاکتور، فقط `pending`، فقط از همان کارتی که کاربر دید. عمداً بیرونِ
@@ -10322,12 +10396,7 @@ async function handleTransferError(ctx, uid, p, photoFileId, textBody, sh) {
   if (!to) return false;
   let claimed = false;
   try {
-    claimed = db.transaction(() => {
-      if (terrClaim().run(to.id, from.id, p.id, p.card_id).changes !== 1) return false;
-      // کارتِ سفید تا آخرِ روز کارتِ کاربر می‌ماند (تصمیمِ مالک، پاسخِ ۱۵).
-      cardSt().assignSet.run(uid, CA.cardDay(), to.id, 'transfer_error');
-      return true;
-    })();
+    claimed = terrClaim().run(to.id, from.id, p.id, p.card_id).changes === 1;
   } catch (e) { logErr('transfer_error claim pay#' + p.id, e.message); }
   if (!claimed) return false;
   log(`⛔️ TRANSFER_ERROR #${p.id} ${from.id}→${to.id} src=${photoFileId ? 'photo' : 'text'}`);
@@ -10374,7 +10443,7 @@ function canActOnTerr(uid, pid) {
 /* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴). fail-safe: هیچ خطایی از این‌جا مسیرِ پول را نمی‌شکند.
  * `verdict=null` یعنی خودِ فراخوانی پرتاب کرد؛ ردیف با `ok=0` ثبت می‌شود تا نرخِ شکست هم دیده شود. */
 let _raIns;
-function recordReceiptAnalysis(p, uid, verdict, decision, source, ms, { trackEvent = true } = {}) {
+function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
   try {
     const ok = verdict?.agent?.ok ? 1 : 0;
     const sh = shadowFields(verdict?.extracted);
@@ -10388,17 +10457,11 @@ function recordReceiptAnalysis(p, uid, verdict, decision, source, ms, { trackEve
     (_raIns ||= db.prepare(`INSERT INTO receipt_analyses (payment_id, user_id, source, ok, model, verdict,
       reason_code, action, app, src_prefix, transfer_error, ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`))
       .run(p.id, uid, source, ok, String(verdict?.agent?.model || ''), String(verdict?.verdict || ''),
-        String(verdict?.reason_code || ''), String(decision?.action || ''), ok ? (sh.app || '') : '',
-        ok ? (sh.src_prefix || '') : '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw);
-    log(`🔎 RECEIPT_SHADOW #${p.id} ok=${ok} app=${sh.app || '-'} src=${sh.src_prefix || '-'} terr=${sh.transfer_error ? 1 : 0}`
-      + ` action=${decision?.action || '-'}`);
-    // 🔁 تحلیلِ دوباره‌ی رسیدِ گذشته رویداد نمی‌سازد: رویدادِ «امروز» زیرِ کاربری که ماه‌ها پیش
-    // پرداخت کرده، فعالیتِ جعلی در قیف و تایم‌لاینش می‌ساخت.
-    if (trackEvent) {
-      track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
-        action: decision?.action || null, app: sh.app, terr: sh.transfer_error ? 1 : 0 });
-    }
-    if (ok) applyAutoTags(p.id, uid, sh);
+        String(verdict?.reason_code || ''), String(decision?.action || ''), '',
+        '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw);
+    log(`🔎 RECEIPT_SHADOW #${p.id} ok=${ok} terr=${sh.transfer_error ? 1 : 0} action=${decision?.action || '-'}`);
+    track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
+      action: decision?.action || null, terr: sh.transfer_error ? 1 : 0 });
   } catch (e) { logErr('recordReceiptAnalysis:', e.message); }
 }
 /** تازه‌ترین تحلیلِ ایجنت برای یک پرداخت (یا undefined). */
@@ -10411,110 +10474,73 @@ function lastReceiptAnalysis(pid) {
 /** خطِ ایجنت فقط برای پیامِ **مالک** (تصمیمِ مالک: ادمین‌های دیگر شلوغ نشوند). */
 const ownerShadowLine = (p) => (RECEIPT_SHADOW_ENABLED && p ? shadowLine(lastReceiptAnalysis(p.id)) : '');
 
-/* 🤖 فازِ ۷: تگِ خودکار از یک تحلیلِ سالم. فقط مقدارِ **فعال** (مقداری که مالک خاموش کرده خودکار
- * هم زده نمی‌شود). fail-safe و بی‌پیام؛ خروجی = تگ‌های نوشته‌شده (برای شمارش). */
-function applyAutoTags(pid, uid, sh) {
-  if (!tagsOn() || !RECEIPT_AUTOTAG_ENABLED || !pid) return [];
-  try {
-    const values = tagValues();
-    const put = RT.autoTagsFrom(sh).filter((t) => values.some((v) => v.dim === t.dim && v.key === t.key && Number(v.active) === 1));
-    for (const t of put) tagSt().autoSet.run(pid, uid, t.dim, t.key);
-    if (put.length) log(`🤖 RECEIPT_AUTOTAG pay#${pid} ${put.map((t) => `${t.dim}=${t.key}`).join(' ')}`);
-    return put;
-  } catch (e) { logErr('autotag:', e.message); return []; }
-}
-/** یک‌باره در بوت: تحلیل‌های سالمی که **قبل از** فازِ ۷ ثبت شده‌اند (v3.126.0 به بعد) تگِ خودکار
- *  می‌گیرند، از همان `raw_json` و **بدونِ هیچ فراخوانیِ مدل**. مارکرِ `receipt_autotag_backfill_1`. */
-function backfillAutoTags() {
-  if (!tagsOn() || !RECEIPT_AUTOTAG_ENABLED) return;
-  try {
-    if (db.prepare("SELECT 1 FROM migrations WHERE key='receipt_autotag_backfill_1'").get()) return;
-    const rows = db.prepare(`SELECT a.payment_id, a.user_id, a.raw_json FROM receipt_analyses a
-      WHERE a.ok=1 AND a.id=(SELECT MAX(b.id) FROM receipt_analyses b WHERE b.payment_id=a.payment_id AND b.ok=1)`).all();
-    let n = 0;
-    db.transaction(() => {
-      for (const r of rows) {
-        let ext = null;
-        try { ext = JSON.parse(r.raw_json)?.extracted; } catch { ext = null; }   // raw بریده‌شده ⟵ رد
-        n += applyAutoTags(r.payment_id, r.user_id, shadowFields(ext)).length;
-      }
-      db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('receipt_autotag_backfill_1', unixepoch())").run();
-    })();
-    log(`🤖 AUTOTAG_BACKFILL analyses=${rows.length} tags=${n}`);
-  } catch (e) { logErr('autotag backfill:', e.message); }
-}
-
-/* 🔁 فازِ ۷: تحلیلِ دوباره‌ی عکس‌های رسیدِ گذشته، یک‌باره و آهسته. **فقط آخرین پرداختِ تأییدشده‌ی
- * عکس‌دارِ هر کاربر** (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵: «کاربرِ بلو» هم از آخرین رسید تعریف می‌شود)، به ترتیبِ
- * **پرتراکنش‌ترین کاربر اول** (تعدادِ پرداختِ تأییدشده)، تا اگر سقف پر شد، کسانی تگ خورده باشند که
- * احتمالِ برگشتنشان بیشتر است. کاربری که آخرین رسیدش از قبل تحلیلِ سالم دارد (v3.126.0 به بعد) رد
- * می‌شود. سقفِ کل **۵۰۰ رسید** و هر رسید **یک** تلاش (هزینه‌ی مدل، خواسته‌ی مالک). فقط ثبت: نه
- * `decideReceipt`، نه `attributeReceiptCard`، نه تغییرِ وضعیت، نه پیام به کاربر. یکی در هر ۲۰ ثانیه،
- * و قطع‌کنِ ۱ساعته بعد از ۵ شکستِ پیاپیِ ایجنت (قطعیِ OpenRouter نباید رسیدها را بسوزاند). */
-const REANALYSIS_PACE_MS = 20_000;
-const REANALYSIS_MAX = 500;
-let _reSt = null;
-const reSt = () => _reSt || (_reSt = {
-  next: db.prepare(`WITH tx AS (SELECT user_id, COUNT(*) AS n FROM payments WHERE status='approved' GROUP BY user_id),
+/* 🧾 بازبینیِ رسیدهای گذشته برای اکانتِ پشتیبانی (v3.132.0). صف همان تعریفِ «آخرین رسید» است:
+ * آخرین پرداختِ **تأییدشده‌ی عکس‌دارِ** هر کاربر، بدونِ هیچ تگِ دستی (رسیدهایی که مالک خودش تگ زده
+ * بیرون‌اند)، به ترتیبِ تعدادِ پرداختِ تأییدشده‌ی کاربر (بیشترین اول). هر پیام ۱٫۱ ثانیه فاصله دارد
+ * (سقفِ تلگرام برای یک چت ~۱ پیام در ثانیه) و `429` با همان `retry_after` صبر می‌کند. هیچ اثری روی
+ * پرداخت، کارت یا کاربر ندارد؛ فقط پیام به اکانتِ پشتیبانی. */
+let _trSt = null;
+const trSt = () => _trSt || (_trSt = {
+  queue: db.prepare(`WITH tx AS (SELECT user_id, COUNT(*) AS n FROM payments WHERE status='approved' GROUP BY user_id),
     latest AS (SELECT user_id, MAX(id) AS pid FROM payments
       WHERE status='approved' AND COALESCE(receipt_file_id, '') != '' GROUP BY user_id)
     SELECT p.* FROM latest l JOIN payments p ON p.id = l.pid JOIN tx ON tx.user_id = l.user_id
-    WHERE NOT EXISTS (SELECT 1 FROM receipt_analyses a WHERE a.payment_id = p.id AND (a.ok = 1 OR a.source = 'reanalysis'))
-    ORDER BY tx.n DESC, p.id DESC LIMIT 1`),
-  stats: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(ok), 0) ok, COUNT(DISTINCT payment_id) pays FROM receipt_analyses WHERE source='reanalysis'"),
-  autoN: db.prepare("SELECT COUNT(*) n FROM receipt_tags WHERE source='auto'"),
-  marker: db.prepare("SELECT 1 FROM migrations WHERE key='receipt_reanalysis_1'"),
-  mark: db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('receipt_reanalysis_1', unixepoch())"),
+    WHERE NOT EXISTS (SELECT 1 FROM receipt_tags t WHERE t.payment_id = p.id AND t.source = 'admin')
+      AND NOT EXISTS (SELECT 1 FROM tag_review_sent r WHERE r.payment_id = p.id)
+    ORDER BY tx.n DESC, p.id DESC`),
+  sentN: db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(ok), 0) AS ok FROM tag_review_sent'),
+  mark: db.prepare('INSERT OR IGNORE INTO tag_review_sent (payment_id, ok) VALUES (?, ?)'),
+  done: db.prepare("SELECT 1 FROM migrations WHERE key='tag_review_1'"),
+  setDone: db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tag_review_1', unixepoch())"),
 });
-const rean = { busy: false, off: false, fails: 0, pauseUntil: 0 };
-const faNum = (n) => Number(n || 0).toLocaleString('fa-IR');
-async function reanalyzeNextPastReceipt() {
-  if (rean.off || rean.busy || !RECEIPT_REANALYSIS_ENABLED || !tagsOn() || !RECEIPT_SHADOW_ENABLED) return;
-  if (Date.now() < rean.pauseUntil) return;
-  rean.busy = true;
+let tagReviewBusy = false;
+const faN = (n) => Number(n || 0).toLocaleString('fa-IR');
+async function runTagReview() {
+  if (!TAG_REVIEW_ENABLED || !tagsOn() || !SUPPORT?.id || tagReviewBusy) return;
+  tagReviewBusy = true;
+  const to = Number(SUPPORT.id);
   try {
-    if (reSt().marker.get()) { rean.off = true; return; }
-    const st = reSt().stats.get();
-    const p = Number(st.pays) < REANALYSIS_MAX ? reSt().next.get() : null;
-    if (!p) {
-      reSt().mark.run();
-      rean.off = true;
-      const auto = reSt().autoN.get().n;
-      log(`🔁 REANALYSIS_DONE tries=${st.n} ok=${st.ok} payments=${st.pays} auto_tags=${auto}`);
-      await bot.telegram.sendMessage(OWNER_ID, `🔁 تحلیلِ دوباره‌ی رسیدهای گذشته تمام شد: ${faNum(st.pays)} رسید، `
-        + `${faNum(st.ok)} تحلیلِ موفق؛ کلِ تگ‌های خودکار: ${faNum(auto)}.`).catch(() => {});
-      return;
+    if (trSt().done.get()) return;
+    const list = trSt().queue.all();
+    const before = trSt().sentN.get().n;
+    const total = before + list.length;
+    log(`🧾 TAG_REVIEW start sent=${before} left=${list.length}`);
+    if (!before && list.length) {
+      await bot.telegram.sendMessage(to, `🧾 بازبینیِ رسیدهای گذشته: ${faN(list.length)} رسید، از پرتراکنش‌ترین کاربر.
+`
+        + 'زیرِ هر رسید با «📱 اپ» و «🏦 بانک» تگ بزن؛ همان لحظه روی کاربر ثبت می‌شود.').catch(() => {});
     }
-    const t0 = Date.now();
-    let imageBuffer = null;
-    try {
-      if (!(p.amount > 0)) throw new Error('مبلغِ نامعتبر');
-      const link = await bot.telegram.getFileLink(p.receipt_file_id);
-      const res = await fetch(link.href);
-      if (!res.ok) throw new Error(`http_${res.status}`);
-      imageBuffer = Buffer.from(await res.arrayBuffer());
-    } catch (e) {
-      logErr(`🔁 REANALYSIS_SKIP pay#${p.id} (دانلود):`, e.message);
-      recordReceiptAnalysis(p, p.user_id, null, null, 'reanalysis', Date.now() - t0, { trackEvent: false });
-      return;
+    let i = before;
+    for (const p of list) {
+      if (!TAG_REVIEW_ENABLED) break;
+      i++;
+      const u = getUser(p.user_id);
+      const when = new Date(Number(p.created_at) * 1000).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' });
+      const caption = `🧾 رسیدِ ${faN(i)} از ${faN(total)}\nکاربر: ${dispName(u) || u?.name || '-'} [${p.user_id}]\n`
+        + `پرداخت #${invoiceNoOf(p)} · ${faN(p.amount)} تومان · ${when}\n${receiptInfoLines(p)}`;
+      const reply_markup = RT.withTagRows(null, RT.tagCollapsedRows(p.id, curTagsOf(p.id), tagLabelFn()));
+      let ok = 0;
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try { await bot.telegram.sendPhoto(to, p.receipt_file_id, { caption: caption.slice(0, 1024), reply_markup }); ok = 1; }
+        catch (e) {
+          const wait = Number(e?.response?.parameters?.retry_after) || 0;
+          if (!wait) { logErr(`🧾 TAG_REVIEW_SKIP pay#${p.id}:`, e.message); break; }
+          await sleep((wait + 1) * 1000);
+        }
+      }
+      trSt().mark.run(p.id, ok);
+      await sleep(1100);
     }
-    let verdict = null;
-    try {
-      verdict = await analyzeReceipt({
-        apiKey: OPENROUTER_API_KEY, models: RECEIPT_MODELS,
-        expected: { amount_toman: p.amount, amount_rial: p.amount * 10, ...receiptExpectedCards(p) },
-        imageBuffer, imageMime: 'image/jpeg', shadow: true,
-      });
-    } catch (e) { logErr(`🔁 REANALYSIS_FAIL pay#${p.id}:`, e.message); }
-    recordReceiptAnalysis(p, p.user_id, verdict, null, 'reanalysis', Date.now() - t0, { trackEvent: false });
-    if (verdict?.agent?.ok) rean.fails = 0;
-    else if (++rean.fails >= 5) {
-      rean.fails = 0;
-      rean.pauseUntil = Date.now() + 3600 * 1000;
-      logErr('🔁 REANALYSIS_PAUSE ۵ شکستِ پیاپیِ ایجنت ⟵ یک ساعت مکث');
+    if (TAG_REVIEW_ENABLED && !trSt().queue.all().length) {
+      trSt().setDone.run();
+      const st = trSt().sentN.get();
+      log(`🧾 TAG_REVIEW_DONE sent=${st.ok} failed=${st.n - st.ok}`);
+      await bot.telegram.sendMessage(to, `✅ همه‌ی رسیدها فرستاده شد (${faN(st.ok)} رسید).`).catch(() => {});
+      await bot.telegram.sendMessage(OWNER_ID, `🧾 ${faN(st.ok)} رسیدِ گذشته برای تگ‌زدن به اکانتِ پشتیبانی رفت`
+        + `${st.n - st.ok ? ` (${faN(st.n - st.ok)} ارسال نشد)` : ''}.`).catch(() => {});
     }
-  } catch (e) { logErr('reanalysis:', e.message); }
-  finally { rean.busy = false; }
+  } catch (e) { logErr('🧾 TAG_REVIEW:', e.message); }
+  finally { tagReviewBusy = false; }
 }
 
 /* 💰 تأیید یا اصلاحِ کم‌پرداختِ خودکار — **تک‌منبع** برای مسیرِ فوری (داخلِ `processReceipt`) و مسیرِ
@@ -10522,12 +10548,12 @@ async function reanalyzeNextPastReceipt() {
  * `toAdmin()` = ارجاعِ دستی. خروجی: `'approved'` | `'admin'` | `'noop'` (از قبل نهایی شده، ضدِ دوبار).
  * پرداختِ کمتر از فاکتور: رسید واقعی است و پول رسیده، فقط کمتر؛ پس فاکتور به همان مبلغِ واقعی **اصلاح**
  * می‌شود. گاردِ صریح: تخفیف یا بسته یا مبلغِ خیلی کم ⟵ تصمیمِ انسانی (فاجعه‌ی ۱۴۰۵/۰۵/۰۹). */
-async function applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, reasonFa, say, toAdmin }) {
+async function applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, textBody = null, reasonFa, say, toAdmin }) {
   if (decision.action === 'approve') {
     const done = approvePayment(paymentId);
     if (!done) return 'noop';
     await say(approvedMsg(uid, done.creditAmount, done.bonus));
-    await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman);
+    await notifyAdminAutoApproved(stmts.getPayment.get(paymentId), getUser(uid), reasonFa, decision.overpaid, amountToman, textBody);
     return 'approved';
   }
   const p = stmts.getPayment.get(paymentId);
@@ -10541,7 +10567,7 @@ async function applyAutoCredit({ uid, paymentId, decision, amountToman, photoFil
     await say(L.wallet.underpaidApproved(paid, getBalance(uid)));
     await notifyAdminAuto(stmts.getPayment.get(paymentId), getUser(uid),
       `✏️ فاکتور اصلاح شد: ${amountToman} ← ${paid} (پرداختِ کمتر) و تأیید شد`, photoFileId,
-      creditedReceiptKb(paymentId));
+      creditedReceiptKb(paymentId), textBody);
     return 'approved';
   }
   await toAdmin();   // ناامن (تخفیف داشت، یا مبلغ خیلی کم بود) → تصمیمِ انسانی
@@ -10616,7 +10642,7 @@ async function executeScheduledDecision(row) {
     await bot.telegram.sendMessage(uid, t, x).catch(() => {});
     logPush(db, uid, t, { isAdmin: isAdmin(uid), label: 'تأیید پرداخت' });
   };
-  const r = await applyAutoCredit({ uid, paymentId, decision: d, amountToman: Number(d.amount), photoFileId,
+  const r = await applyAutoCredit({ uid, paymentId, decision: d, amountToman: Number(d.amount), photoFileId, textBody,
     reasonFa: d.reason_fa || 'نامشخص', say, toAdmin });
   log(`⏳ SLOW_APPROVE_DONE #${paymentId} result=${r}`);
   if (r === 'approved') await afterDelayedApproval(uid, paymentId);
@@ -10794,7 +10820,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     // بقیه (not_a_receipt/بی‌کیفیت/مشکوک) → تصمیمِ انسانیِ ادمین. کاربر همیشه فقط یکی از دو
     // پیامِ نهایی را می‌گیرد: «تأیید شد» یا «تأیید نشد + پشتیبانی» (هیچ «این رسید نیست» یا دلیلی).
     if (decision.action === 'approve' || decision.action === 'underpaid') {
-      const r = await applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, reasonFa,
+      const r = await applyAutoCredit({ uid, paymentId, decision, amountToman, photoFileId, textBody, reasonFa,
         say: (t, x) => ctx.reply(t, x).catch(() => {}),
         toAdmin: () => sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody) });
       if (r === 'approved') return await afterApproval(uid); // فالِ رزروشده خودکار ادامه پیدا می‌کند (state را خودش می‌زند)
@@ -10803,7 +10829,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     if (decision.action === 'reject') {
       rejectPaymentAI(paymentId);
       setState(uid, nextState);
-      await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId);
+      await notifyAdminAuto(p, getUser(uid), `❌ auto-reject: ${reasonFa}`, photoFileId, undefined, textBody);
       const r = rejectedPaymentReply(uid);
       return ctx.reply(r.text, r.extra).catch(() => {}); // پیامِ یکپارچه، بدونِ دلیل
     }
@@ -10821,15 +10847,21 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
 
 // اطلاع به ادمین‌ها بعد از تأییدِ خودکار + دکمه‌ی «پیامکش نیومده» (تنها راهِ برگشتِ رسیدِ فیک)
 // overpaid>0 یعنی کاربر بیشتر واریز کرده → یادداشتِ اضافه برای اعتبارِ دستیِ اختلاف.
-async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0) {
+/* 📋 رسیدِ **متنی** (کاربر متنِ رسید را از اپِ بانک کپی کرده، نه عکس): متن باید در پیامِ ادمین بیاید، وگرنه
+ * ادمین پیامی بی‌عکس و بی‌رسید می‌بیند و فکر می‌کند عکس گم شده (گزارشِ مالک ۱۴۰۵/۰۷/۰۵، فاکتور #۱۴۲۹). مسیرِ
+ * بازبینیِ دستی از قبل همین خط را داشت؛ تأییدِ خودکار و ردِ خودکار نداشتند. */
+const receiptTextTail = (textBody, photoFileId) => (textBody && !photoFileId ? `\n\n📋 رسیدِ متنی (عکس نفرستاده):\n${String(textBody).slice(0, 500)}` : '');
+async function notifyAdminAutoApproved(p, user, reasonFa, overpaid = 0, expectedToman = 0, textBody = null) {
   let caption = L.wallet.adminAutoApproved(p, user, reasonFa, packSoldIn(p));
   if (overpaid > 0) caption += `\n\n⚠️ ${L.wallet.overpaidNote(expectedToman || (p.original_amount || p.amount), overpaid)}`;
+  caption += receiptTextTail(textBody, p.receipt_file_id);
   await sendToReceiptRecipients(p, { caption, photoFileId: p.receipt_file_id, kb: creditedReceiptKb(p.id) });
 }
 // یادداشتِ ساده به ادمین‌ها (بدونِ دکمه) — مثلِ اطلاعِ auto-reject. user ممکن است null باشد (گاردِ ??).
 // `kb` اختیاری است: فقط برای یادداشتی که پشتش اعتبار داده شده (کم‌پرداختِ اصلاح‌شده).
-async function notifyAdminAuto(p, user, note, photoFileId, kb = undefined) {
-  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packSoldIn(p))}`;
+async function notifyAdminAuto(p, user, note, photoFileId, kb = undefined, textBody = null) {
+  const caption = `${note}\n\n${L.wallet.adminNotify(p, user || { name: '-', username: '' }, packSoldIn(p))}`
+    + receiptTextTail(textBody, photoFileId);
   await sendToReceiptRecipients(p, { caption, photoFileId, kb });
 }
 // ردِ خودکارِ ایجنت — از pending هم مجاز (قبل از waiting_review)؛ ضدِ دوبار با گاردِ status
@@ -12660,12 +12692,11 @@ function onLaunched() {
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
-  // 🤖 فازِ ۷: پرکردنِ یک‌باره‌ی تگ از تحلیل‌های موجود (بی‌هزینه)، بعد صفِ آهسته‌ی تحلیلِ دوباره.
   // ⏳ تأییدهای زمان‌بندی‌شده‌ای که ری‌استارت از حافظه برده: همین حالا + هر ۳۰ ثانیه (پشتیبانِ setTimeout).
   runDueAutoDecisions().catch((e) => logErr('slow approve boot:', e.message));
   setInterval(() => { runDueAutoDecisions().catch((e) => logErr('slow approve sweep:', e.message)); }, 30_000);
-  backfillAutoTags();
-  if (RECEIPT_REANALYSIS_ENABLED && tagsOn()) setInterval(reanalyzeNextPastReceipt, REANALYSIS_PACE_MS);
+  // 🧾 یک دقیقه بعد از بوت (بوت آرام بنشیند)، یک‌باره؛ ری‌استارتِ وسطِ کار از همان‌جا ادامه می‌دهد.
+  setTimeout(() => { runTagReview().catch((e) => logErr('tag review boot:', e.message)); }, 60_000);
   installMenuButton();
   installUnifiedProfile();
 }

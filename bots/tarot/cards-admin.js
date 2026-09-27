@@ -213,82 +213,78 @@ export function planCardOp(op, cards) {
   return { ok: false, err: 'دستورِ ناشناخته' };
 }
 
-/* ═══ 🔁 چرخشِ روزانه و سقفِ روزانه (فازِ ۲ی PAYMENT-V2-PLAN) ═══
- * تصمیمِ مالک: اولین کاربرِ هر روز (لحظه‌ی **صدورِ فاکتور**) کارتِ ۱ را می‌گیرد، دومی کارتِ
- * ۲ و حلقه‌ای جلو؛ هر کاربر تا آخرِ همان روز روی کارتش می‌ماند؛ فردا دوباره از کارتِ ۱.
- * مرزِ «روز» نیمه‌شب نیست، ۰۶:۰۰ تهران است (کم‌کارترین ساعت). سقفِ روزانه = تعدادِ
- * پرداخت‌های **تأییدشده** روی آن کارت در همان «روز»؛ کارتِ پر از چرخه بیرون می‌رود.
- * همه‌چیز این‌جا خالص است تا چکِ CI بدونِ DB و بدونِ تلگرام اجرایش کند. */
-export const CARD_DAY_BOUNDARY_H = 6;
+/* ═══ 🔁 انتخابِ کارت بر اساسِ مبلغِ فاکتور (v3.132.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۵) ═══
+ * چرا: بانک‌ها روی «یک مبلغِ ثابت، تعدادِ زیاد، یک کارت» حساس‌اند و کارت را می‌بندند. پس
+ * کارت per **فاکتور** انتخاب می‌شود، نه per کاربر، و هر مبلغ فقط با خودش رقابت می‌کند
+ * (۱۵ هزاری‌ها با هم، ۶۰ هزاری‌ها با هم). «مبلغ» همان عددی است که از کاربر خواسته‌ایم
+ * (`payments.amount`)، نه نامِ بسته، چون بسته‌ها و قیمت‌ها عوض می‌شوند.
+ *
+ * بینِ کارت‌های **عادیِ فعالِ زیرِ سقف**، به ترتیب:
+ *   ۱) کمترین پرداختِ **تأییدشده** با همین مبلغ در امروز،
+ *   ۲) مساوی ⟵ کمترین فاکتورِ **باز** با همین مبلغ در امروز (صادرشده و بی‌رسید، یا رسیدِ
+ *      منتظرِ تصمیم)،
+ *   ۳) باز مساوی ⟵ ترتیبِ فهرستِ کارت‌ها (`sort`, `id`).
+ * «امروز» از ۰۰:۰۰ تهران شروع می‌شود (مرزِ روزِ بانکی). سقفِ روزانه (پیش‌فرض ۰ = بی‌سقف) هنوز
+ * کارتِ پر را از رقابت بیرون می‌برد. همه‌ی عادی‌ها پر یا خاموش ⟵ کارتِ سفید. همه‌چیز این‌جا خالص
+ * است تا چکِ CI بدونِ DB و تلگرام اجرایش کند؛ شمارش‌ها را ربات از SQLiteِ محلی می‌دهد. */
+export const CARD_DAY_BOUNDARY_H = 0;
 export const CARD_TZ = 'Asia/Tehran';
-/** کلیدِ «روزِ کارت» برای یک لحظه (میلی‌ثانیه): تاریخِ تهرانِ `ms − ۶ساعت`، یعنی ۰۵:۵۹ هنوز دیروز است. */
+/** کلیدِ «روزِ کارت» برای یک لحظه (میلی‌ثانیه): تاریخِ تهران، مرزِ نیمه‌شب. */
 export function cardDay(ms = Date.now(), tz = CARD_TZ, boundaryH = CARD_DAY_BOUNDARY_H) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(Number(ms) - boundaryH * 3600_000));
 }
-/** سقفِ امروزِ کارت پر شده؟ سقفِ ۰ = بی‌سقف. */
+/** اختلافِ ساعتِ منطقه با UTC در یک لحظه (میلی‌ثانیه). بدونِ فرضِ ثابت‌بودن (اگر روزی ساعتِ
+ *  تابستانی برگردد، همین تابع درست می‌ماند). */
+function tzOffsetMs(ms, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
+}
+/** لحظه‌ی شروعِ روزِ کارتِ `ms` (ثانیه‌ی یونیکس): نیمه‌شبِ تهرانِ همان روز. */
+export function cardDayStartSec(ms = Date.now(), tz = CARD_TZ) {
+  const guess = Date.parse(`${cardDay(ms, tz)}T00:00:00Z`);
+  return Math.floor((guess - tzOffsetMs(guess, tz)) / 1000);
+}
+/** سقفِ امروزِ کارت پر شده؟ سقفِ ۰ = بی‌سقف (پیش‌فرض). */
 export const capFull = (c, approvedToday) =>
   Number(c?.daily_cap) > 0 && Number(approvedToday || 0) >= Number(c.daily_cap);
 const usable = (c, used) => !!c && Number(c.active) === 1 && !capFull(c, used?.get?.(c.id));
 const byOrder = (cards) => [...(Array.isArray(cards) ? cards : [])]
   .sort((a, b) => (Number(a.sort) - Number(b.sort)) || (Number(a.id) - Number(b.id)));
+const cnt = (m, id) => Number(m?.get?.(id)) || 0;
 
 /**
- * کارتِ فاکتورِ تازه. ورودی: فهرستِ کارت‌ها، `used` = Map از id به تعدادِ تأییدشده‌ی امروز،
- * `stickyId` = کارتی که این کاربر امروز گرفته (یا 0)، و `n` = چندمین کاربرِ چرخه‌ی امروز.
- * خروجی `{ card, via }`:
- *  - `sticky`: کاربر امروز کارت دارد و آن کارت هنوز فعال و زیرِ سقف است ⟵ همان.
- *  - `rotation`: کارتِ عادیِ فعالِ زیرِ سقف، به نوبت (`n % تعداد`).
- *  - `white`: همه‌ی عادی‌ها پر یا خاموش‌اند ⟵ اولین کارتِ سفیدِ فعالِ زیرِ سقف.
- *  - `overflow`: همه پرند ⟵ اولین کارتِ عادیِ فعال (فاکتور هرگز بی‌کارت نمی‌ماند؛
- *    سقف یک ترجیح است، نه دیوار).
- *  - `none`: هیچ کارتِ فعالی نیست ⟵ `card=null` (صداکننده به فالبکِ قدیمی می‌رود).
+ * کارتِ یک فاکتور. ورودی: فهرستِ کارت‌ها؛ `used` = Map از id به کلِ تأییدشده‌های امروز (سقف)؛
+ * `wins` و `open` = Map از id به تأییدشده/بازِ امروز **با همین مبلغ**؛ `excludeId` = کارتی که
+ * نباید انتخاب شود (دکمه‌ی تعویض: کارتِ فعلی). خروجی `{ card, via }`:
+ *  - `amount`: برنده‌ی رقابتِ کارت‌های عادی.
+ *  - `white`: هیچ عادیِ قابلِ‌استفاده‌ای نیست ⟵ کارتِ سفید (اولویت با سفیدِ همان ادمینِ کارتِ
+ *    کنارگذاشته، بعد اولین سفید به ترتیب).
+ *  - `overflow`: فقط برای فاکتورِ تازه، وقتی همه پرند ⟵ اولین کارتِ عادیِ فعال (فاکتور هرگز
+ *    بی‌کارت نمی‌ماند؛ سقف یک ترجیح است، نه دیوار).
+ *  - `none`: `card=null`. برای تعویض یعنی «کارتِ دیگری نیست» ⟵ دکمه ساخته نمی‌شود.
  */
-export function pickDailyCard({ cards, used = new Map(), stickyId = 0, n = 0, preferIds = [], preferVia = 'preferred' } = {}) {
-  const list = byOrder(cards);
-  const sticky = stickyId ? list.find((c) => c.id === Number(stickyId)) : null;
-  if (usable(sticky, used)) return { card: sticky, via: 'sticky' };
-  /* 💙 کارتِ ترجیحیِ کاربر (کاربرِ بلو ⟵ کارتِ بلو، تصمیمِ مالک ۱۴۰۵/۰۷/۰۴): **بیرون از نوبت**، پس
-     شمارنده‌ی چرخش جلو نمی‌رود و کارت‌های دیگر شلوغ نمی‌شوند. فقط اگر فعال و زیرِ سقف باشد؛ وگرنه
-     همان چرخشِ معمول. چسبندگیِ امروز (مثلاً بعد از تعویض) بر آن مقدم است. */
-  const want = new Set((Array.isArray(preferIds) ? preferIds : []).map(Number));
-  const preferred = want.size ? list.find((c) => want.has(Number(c.id)) && usable(c, used)) : null;
-  if (preferred) return { card: preferred, via: preferVia };
+export function pickAmountCard({ cards, used = new Map(), wins = new Map(), open = new Map(), excludeId = 0 } = {}) {
+  const all = byOrder(cards);
+  const ex = Number(excludeId) || 0;
+  const cur = ex ? all.find((c) => c.id === ex) || null : null;
+  const list = all.filter((c) => c.id !== ex);
   const regular = list.filter((c) => c.kind === 'regular' && usable(c, used));
   if (regular.length) {
-    const i = ((Math.floor(Number(n) || 0) % regular.length) + regular.length) % regular.length;
-    return { card: regular[i], via: 'rotation' };
+    // `reduce` با مقایسه‌ی اکید ⟵ در تساوی، اولیِ فهرست (ترتیبِ `sort`) می‌ماند.
+    const best = regular.reduce((b, c) => {
+      const dw = cnt(wins, c.id) - cnt(wins, b.id);
+      return dw < 0 || (dw === 0 && cnt(open, c.id) < cnt(open, b.id)) ? c : b;
+    });
+    return { card: best, via: 'amount' };
   }
-  const white = list.find((c) => c.kind === 'white' && usable(c, used));
+  const whites = list.filter((c) => c.kind === 'white' && usable(c, used));
+  const white = (cur && whites.find((c) => Number(c.admin_id) === Number(cur.admin_id))) || whites[0];
   if (white) return { card: white, via: 'white' };
+  if (ex) return { card: null, via: 'none' };
   const any = list.find((c) => Number(c.active) === 1 && c.kind === 'regular') || list.find((c) => Number(c.active) === 1);
   return any ? { card: any, via: 'overflow' } : { card: null, via: 'none' };
-}
-
-/* ═══ 🔄 تعویضِ کارتِ فاکتور (فازِ ۳ی PAYMENT-V2-PLAN) ═══
- * تصمیمِ مالک: وقتی انتقالِ کاربر به کارتِ فاکتور خطا می‌دهد، یک بار در هر فاکتور کارتِ دیگری
- * بگیرد: «کارتِ بعدیِ همان ادمین ⟵ (نبود یا سقفش پر) کارتِ ادمینِ بعدی ⟵ (نبود) کارتِ سفید».
- * «بعدی» یعنی بعد از کارتِ فعلی به ترتیبِ `sort`، حلقه‌ای. فقط کارتِ فعالِ زیرِ سقف، و هرگز
- * خودِ کارتِ فعلی. `null` یعنی تعویض ممکن نیست ⟵ دکمه اصلاً ساخته نمی‌شود. */
-export function pickSwitchCard({ cards, used = new Map(), currentId = 0 } = {}) {
-  const list = byOrder(cards);
-  const cur = list.find((c) => c.id === Number(currentId)) || null;
-  const pool = list.filter((c) => c.id !== Number(currentId) && usable(c, used));
-  // حلقه‌ای «بعد از کارتِ فعلی»: اول آن‌هایی که بعدش می‌آیند، بعد از اولِ فهرست.
-  const after = (arr) => {
-    if (!cur) return arr;
-    const pos = (c) => byOrder([...arr, cur]).indexOf(c);
-    const me = pos(cur);
-    return [...arr.filter((c) => pos(c) > me), ...arr.filter((c) => pos(c) < me)];
-  };
-  const regular = pool.filter((c) => c.kind === 'regular');
-  const sameAdmin = cur ? after(regular.filter((c) => Number(c.admin_id) === Number(cur.admin_id))) : [];
-  if (sameAdmin.length) return { card: sameAdmin[0], via: 'same_admin' };
-  const other = after(regular.filter((c) => !cur || Number(c.admin_id) !== Number(cur.admin_id)));
-  if (other.length) return { card: other[0], via: 'next_admin' };
-  // سفید: اولویت با کارتِ سفیدِ **همان ادمین** (تصمیمِ مالک، پاسخِ ۱۶)، بعد هر سفیدِ دیگر.
-  const whites = pool.filter((c) => c.kind === 'white');
-  const white = (cur && whites.find((c) => Number(c.admin_id) === Number(cur.admin_id))) || whites[0];
-  return white ? { card: white, via: 'white' } : null;
 }
 
 /** ⛔️ مقصدِ اقدامِ خودکارِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵). **فقط کارتِ سفید** (تصمیمِ

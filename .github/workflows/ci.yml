@@ -595,11 +595,11 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node tools/check-cards-admin.mjs
 
-      # 🔄 چرخشِ روزانه‌ی کارت + سقفِ روزانه (v3.124.0): مرزِ روز ۰۶:۰۰ تهران، نوبتِ کاربرِ تازه
-      # بینِ کارت‌های عادی، چسبندگیِ روزانه، سقف = پرداختِ تأییدشده‌ی امروز، همه پر ⟵ سفید.
-      - name: Card rotation check
+      # 🔁 انتخابِ کارت بر اساسِ مبلغِ فاکتور (v3.132.0): روز از ۰۰:۰۰ تهران، کمترین تأییدشده‌ی امروز با
+      # همین مبلغ ⟵ کمترین فاکتورِ باز ⟵ ترتیب؛ فالبک + هشدارِ خطا/کندی؛ سرعت روی ۴۲۰ هزار ردیف.
+      - name: Card amount pick check
         if: matrix.bot == 'tarot'
-        run: node tools/check-card-rotation.mjs
+        run: node tools/check-card-amount.mjs
       - name: Card switch check
         if: matrix.bot == 'tarot'
         run: node tools/check-card-switch.mjs
@@ -615,17 +615,13 @@ jobs:
       - name: Receipt tags check (bot)
         if: matrix.bot == 'tarot'
         run: node tools/check-receipt-tags.mjs --part=bot
-      # 🤖 فازِ ۷: تگِ خودکار (پیش‌شماره ⟵ بانک در کد، مبهم ⟵ بی‌تگ، دستی مقدم) + تحلیلِ دوباره‌ی
-      # یک‌باره‌ی رسیدهای گذشته که هرگز به پول/کاربر دست نمی‌زند و قطع‌کن دارد.
-      - name: Receipt auto-tag check
+      # 🧾 v3.132.0: مهاجرتِ یک‌باره‌ی تگ‌ها (پاک‌کردنِ تگِ هوش مصنوعی، اپِ بلو ⟵ موبایل‌بانک) + ارسالِ
+      # آخرین رسیدِ هر کاربر به اکانتِ پشتیبانی برای تگِ دستی (ترتیب، ادامه بعد از ری‌استارت، ۴۲۹).
+      - name: Tag review check
         if: matrix.bot == 'tarot'
-        run: node tools/check-receipt-autotag.mjs
-      # 💙 کاربرِ بلو ⟵ کارتِ بلو بیرون از نوبت (آخرین رسید، دستی مقدم، سقف/غیرفعال ⟵ چرخش) + سیدِ دومِ کارت‌ها.
-      - name: Blu user card check
-        if: matrix.bot == 'tarot'
-        run: node tools/check-blu-user.mjs
+        run: node tools/check-tag-review.mjs
       # ⏳ تأییدِ کُندِ بسته‌ی معمولی (۵ تا ۱۰ دقیقه، زمان‌بندی در DB نه sleep) + رسیدِ دوباره وسطِ صبر ⟵
-      # تگِ مشکوکِ همیشگی. زمان‌بند و اجراکننده‌ی واقعی روی SQLite، ری‌استارت و دو پروسه‌ی هم‌زمان.
+      # تگِ مشکوک (تا تصمیمِ ادمین). زمان‌بند و اجراکننده‌ی واقعی روی SQLite، ری‌استارت و دو پروسه‌ی هم‌زمان.
       - name: Slow approve check
         if: matrix.bot == 'tarot'
         run: node tools/check-slow-approve.mjs
