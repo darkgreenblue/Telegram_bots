@@ -53,10 +53,17 @@ ok(!/cardCopyRow\(\s*\)/.test(CODE), 'دکمه‌ی کپی هیچ‌جا بدو�
   ok(pairs >= 7 && bad === 0, `دکمه‌ی کپی و متنِ فاکتور از یک پرداخت‌اند (${pairs} جفت، ${bad} ناجور)`);
 }
 {
-  const issues = [...CODE.matchAll(/issueInvoiceNo\(([^)]+)\);[^\n]*\n\s*issueInvoiceCard\(([^)]+)\);/g)];
-  const allNo = [...CODE.matchAll(/^\s*issueInvoiceNo\(/gm)].length;
-  ok(allNo >= 3 && issues.length === allNo && issues.every((m) => m[1] === m[2]),
-    `هر صدورِ فاکتور همان لحظه کارت می‌گیرد (${issues.length}/${allNo})`);
+  // v3.132.0: کارت بعد از نشستنِ مبلغِ نهایی (بسته/تخفیف) انتخاب می‌شود، پس «بلافاصله بعد» شد «قبل از اولین
+  // await ِ همان تابع و با همان شناسه» (ترتیب نسبت به نوشتنِ مبلغ را check-card-amount می‌سنجد).
+  const nos = [...CODE.matchAll(/^\s*issueInvoiceNo\(([^)]+)\);/gm)];
+  const issues = nos.filter((m) => {
+    const rest = CODE.slice(m.index + m[0].length, CODE.indexOf('\n}', m.index));
+    const aw = rest.search(/\bawait\b/);
+    const card = rest.indexOf(`issueInvoiceCard(${m[1]});`);
+    return card >= 0 && (aw < 0 || card < aw);
+  });
+  ok(nos.length >= 3 && issues.length === nos.length,
+    `هر صدورِ فاکتور قبل از اولین انتظار کارت می‌گیرد (${issues.length}/${nos.length})`);
 }
 ok(!/for \(const adminId of ADMIN_IDS\)/.test(CODE), 'هیچ پیامِ رسیدی دیگر کورکورانه به همه‌ی ADMIN_IDS نمی‌رود');
 ok(/const cur = cardOfPayment\(p\);/.test(CODE) && /return \{ recipient: cur\.holder, dest_last4: cur\.number\.slice\(-4\) \};/.test(CODE)
