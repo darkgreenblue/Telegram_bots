@@ -250,6 +250,26 @@ ok(!/pickDailyCard|pickSwitchCard|assignSet|assignGet|rotInc|isBluUser|BLU_USER_
   'هیچ اثری از کارتِ per کاربر، نوبتِ روزانه یا کاربرِ بلو نمانده');
 ok(!/await|fetch\(|telegram\./.test(region('const pickInvoiceCardTx', '}));')), 'انتخاب هیچ انتظار یا فراخوانیِ بیرونی ندارد (فقط SQLiteِ محلی)');
 {
+  /* 🐛 v3.132.0 (روی دیتای زنده دیده شد): در مسیرِ بسته `issueInvoiceCard` قبل از `setPaymentPackage` بود، پس
+     `amount` هنوز تعدادِ الماس بود و همه‌ی فاکتورها روی کارتِ اول می‌نشستند. هر صدا باید **بعد از** آخرین
+     نوشتنِ مبلغِ همان تابع باشد. */
+  const AMOUNT_WRITES = /stmts\.(claimAmount|setPaymentPackage|setPaymentDiscount|adjustPaymentAmount)\.run\(/g;
+  const calls = [...CODE.matchAll(/issueInvoiceCard\((\w+(?:\.\w+)?)\);/g)].filter((m) => !/function issueInvoiceCard/.test(CODE.slice(m.index - 9, m.index)));
+  const bad = [];
+  for (const m of calls) {
+    const fnStart = CODE.lastIndexOf('\nasync function ', m.index) > CODE.lastIndexOf('\nfunction ', m.index)
+      ? CODE.lastIndexOf('\nasync function ', m.index) : CODE.lastIndexOf('\nfunction ', m.index);
+    const actStart = CODE.lastIndexOf('\nbot.action(', m.index);
+    const start = Math.max(fnStart, actStart);
+    const end = CODE.indexOf('\n}', m.index);
+    const body = CODE.slice(start, end);
+    const at = m.index - start;
+    const later = [...body.matchAll(AMOUNT_WRITES)].filter((w) => w.index > at);
+    if (later.length) bad.push(`${m[0]} ⟵ بعدش ${later.map((w) => w[1]).join('، ')}`);
+  }
+  ok(calls.length >= 3 && !bad.length, `کارتِ فاکتور همیشه بعد از نشستنِ مبلغِ نهایی انتخاب می‌شود (${calls.length} صدا${bad.length ? '؛ ' + bad.join(' | ') : ''})`);
+}
+{
   const botSql = /usedOn:\s*db\.prepare\("([^"]+)"\)/.exec(SRC)?.[1];
   const dash = readFileSync('bots/dashboard/routes/cards.js', 'utf8');
   ok(botSql && dash.includes(`"${botSql}"`), 'داشبورد مصرفِ امروز را با **همان** SQLِ سقفِ ربات می‌شمارد');

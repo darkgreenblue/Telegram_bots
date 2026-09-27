@@ -3118,8 +3118,8 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
   stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
   issueInvoiceNo(paymentId);
-  issueInvoiceCard(paymentId);         // 💳 کارتِ این فاکتور، همین لحظه و یک‌بار
   if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
+  issueInvoiceCard(paymentId);         // 💳 کارتِ این فاکتور، بعد از نشستنِ مبلغِ نهایی (انتخاب بر اساسِ مبلغ است)
   patchSession(uid, { paymentId, readingId });
   setState(uid, 'pay_receipt');
   // پیامِ اطلاع‌رسانیِ تخفیف، بلافاصله قبل از فاکتور (بدونِ هیچ دکمه‌ای وسطِ راه)
@@ -9446,8 +9446,11 @@ bot.action(/^pkg:([a-z]+)$/, async (ctx) => {
     }
   }
   issueInvoiceNo(payId);   // 🔢 شماره‌ی فاکتور، فقط برای فاکتوری که واقعاً صادر شد
-  issueInvoiceCard(payId); // 💳 کارتِ فاکتور، همان لحظه‌ی صدور
   stmts.setPaymentPackage.run(pack.key, starsRail ? stars : pack.toman, payId);
+  /* 💳 کارتِ فاکتور **بعد از** نشستنِ مبلغِ نهایی. 🐛 v3.132.0 اول این را قبل از `setPaymentPackage` صدا می‌زد،
+     وقتی `amount` هنوز تعدادِ الماس (۵، ۱۰۰) بود؛ انتخابِ بر اساسِ مبلغ هیچ تأییدشده/بازی با آن عدد پیدا
+     نمی‌کرد و همه‌ی فاکتورها روی کارتِ اول می‌نشستند (دیده‌شده روی دیتای زنده، همان روزِ دیپلوی). */
+  issueInvoiceCard(payId);
   /* کیبوردِ صفحه‌ی بسته‌ها **حذف** نمی‌شود، به یک دکمه‌ی «انصراف» تبدیل می‌شود.
    *
    * چرا: فاکتورِ استارز باید دکمه‌ی **بومیِ** تلگرام را داشته باشد تا لوگوی واقعیِ
