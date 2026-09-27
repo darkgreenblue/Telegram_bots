@@ -194,18 +194,25 @@ console.log('\n▶ گیتِ processReceipt — رفتاری: با isSuspect=true
   const endAt = SRC.indexOf(endMarker, startAt);
   ok(startAt >= 0 && endAt > startAt, 'بدنه‌ی مسیرِ تصمیم‌گیری از سورس بریده شد');
   const routingBody = startAt >= 0 && endAt > startAt ? SRC.slice(startAt, endAt) : '';
+  // v3.131.0: تأیید/کم‌پرداخت در `applyAutoCredit` (تک‌منبعِ مسیرِ فوری و زمان‌بندی‌شده) است؛ همان تابعِ
+  // واقعی از سورس کنارِ بدنه می‌نشیند، نه یک stub، تا کنترلِ مثبت واقعاً approvePayment را برسد.
+  const acStart = SRC.indexOf('async function applyAutoCredit(');
+  const acSrc = acStart < 0 ? '' : SRC.slice(acStart, SRC.indexOf('\n}\n', acStart) + 3);
+  ok(!!acSrc, 'applyAutoCredit از سورس بریده شد');
 
   const DEP_NAMES = [
     'isSuspect', 'isDistrusted', 'decision', 'ctx', 'uid', 'paymentId', 'photoFileId', 'textBody',
     'sendSuspectApprovalToAdmin', 'sendReceiptToAdmin', 'setState', 'nextState', 'approvePayment',
     'approvedMsg', 'notifyAdminAutoApproved', 'stmts', 'getUser', 'afterApproval', 'p', 'MIN_RECHARGE',
     'amountToman', 'track', 'db', 'rejectPaymentAI', 'notifyAdminAuto', 'L', 'logErr', 'getBalance',
+    'creditedReceiptKb', 'slowApproveOn', 'scheduleAutoDecision', 'sleep', 'receiptDecisionDelayMs',
   ];
 
   const run = async (suspect) => {
     const log = { approveCalls: 0, suspectAdminCalls: 0, normalAdminCalls: 0, finalState: null };
     const fn = new Function('deps', `
       const { ${DEP_NAMES.join(', ')} } = deps;
+      ${acSrc}
       return (async () => {${routingBody}})();
     `);
     await fn({
@@ -228,6 +235,8 @@ console.log('\n▶ گیتِ processReceipt — رفتاری: با isSuspect=true
       track: () => {}, db: {}, rejectPaymentAI: () => {}, notifyAdminAuto: () => Promise.resolve(),
       L: { wallet: { underpaidApproved: () => '', rejected: '', adminAmountNote: () => '' } },
       logErr: () => {}, getBalance: () => 0,
+      creditedReceiptKb: () => ({}), slowApproveOn: () => false, scheduleAutoDecision: () => false,
+      sleep: () => Promise.resolve(), receiptDecisionDelayMs: () => 0,
     });
     return log;
   };

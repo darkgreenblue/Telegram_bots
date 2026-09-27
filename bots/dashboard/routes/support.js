@@ -7,6 +7,7 @@ import { fmt, esc, tehranDateTime, parseJsonSafe } from '../lib/util.js';
 import { parseSupportCode } from '../../../shared/support.js';
 import { table, statusBadge, stat } from '../lib/html.js';
 import { groupSessions, screenText } from '../lib/journey.js';
+import { tagsCard } from './tags.js';
 
 // created_at ممکن است unix یا ISO باشد → همیشه به رشته‌ی قابل‌نمایش تبدیل شود
 const showTime = (v) => (typeof v === 'string' ? v : tehranDateTime(v));
@@ -177,6 +178,7 @@ export function supportUserBody(url) {
       .map(x => `<a href="/support/user?inst=${encodeURIComponent(x.id)}&id=${uid}">${esc(x.title)}</a>`).join(' · ');
     return profileCard(inst, u)
       + openStateCard(inst, uid)
+      + tagsCard(inst, uid)
       + `<div class="card"><h2>🕓 سشن‌ها و بازپخشِ مسیر</h2>
          <p class="muted">هر سشن = فعالیتِ پیوسته با فاصله‌ی کمتر از ۳۰ دقیقه. ردیف‌های کم‌رنگ، قدم‌های ریز
            (پیامی که ربات نشان داد یا دکمه‌ای که کاربر زد) هستند.</p>${tlHtml}</div>`

@@ -21,6 +21,8 @@ import { marketingBody, marketingCreate, marketingToggle, marketingUsernames } f
 import { supportBody, supportUserBody, supportAction } from './routes/support.js';
 import { financeBody, financeCsv, financeAction } from './routes/finance.js';
 import { orphansBody, orphanAdd, orphanResolve, orphanDelete } from './routes/orphans.js';
+import { cardsBody, cardsAction } from './routes/cards.js';
+import { tagAction } from './routes/tags.js';
 import { discountsBody, discountCreate, discountToggle } from './routes/discounts.js';
 import { experimentsBody, experimentViewBody, experimentCreate, experimentStatus, experimentDecide } from './routes/experiments.js';
 import { journalBody, journalVersion, journalInsight } from './routes/journal.js';
@@ -69,6 +71,7 @@ const PAGES = {
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
   '/finance': (url) => ['مالی', financeBody(url)],
   '/orphans': (url) => ['پرداخت‌های سرگردان', orphansBody(url)],
+  '/cards': (url) => ['کارت‌های پرداخت', cardsBody(url)],
   '/funnels': (url) => ['فانل‌ها', cachedAnalyticsBody(url)],
   '/screens': (url) => ['صفحه‌ها', cachedAnalyticsBody(url)],
   '/discounts': (url) => ['کد تخفیف', discountsBody(url)],
@@ -94,6 +97,13 @@ const ACTIONS = {
       return (inst && uid) ? `/support/user?inst=${encodeURIComponent(inst)}&id=${uid}` : '/support';
     },
   },
+  '/support/tag': {
+    fn: tagAction,
+    backTo: (b) => {
+      const inst = String(b.get('inst') || ''), uid = parseInt(b.get('uid'), 10);
+      return (inst && uid) ? `/support/user?inst=${encodeURIComponent(inst)}&id=${uid}` : '/support';
+    },
+  },
   '/discounts/create': { fn: discountCreate, backTo: '/discounts' },
   '/discounts/toggle': { fn: discountToggle, backTo: '/discounts' },
   '/experiments/create': { fn: experimentCreate, backTo: '/experiments' },
@@ -106,6 +116,7 @@ const ACTIONS = {
   '/orphans/add':     { fn: orphanAdd,     backTo: '/orphans' },
   '/orphans/resolve': { fn: orphanResolve, backTo: '/orphans' },
   '/orphans/delete':  { fn: orphanDelete,  backTo: '/orphans' },
+  '/cards/action':    { fn: cardsAction,   backTo: '/cards' },
 };
 
 const server = http.createServer(async (req, res) => {

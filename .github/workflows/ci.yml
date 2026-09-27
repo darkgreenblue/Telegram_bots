@@ -359,6 +359,24 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-credit-queue.mjs
 
+      # 🏦 صفحه‌ی کارت‌های پرداختِ داشبورد (v3.123.0): هر تغییر فقط از صفِ admin_actions
+      # می‌رود (هیچ SQLِ نوشتنی روی cards)، ورودیِ نامعتبر همان‌جا رد می‌شود، و هر ردیفِ صف
+      # از اعتبارسنجیِ **خودِ ربات** (planCardOp) هم رد می‌شود؛ وگرنه داشبورد «در صف» می‌گفت
+      # و sweep بی‌صدا ردش می‌کرد. صفحه و اکشن روی دیتابیسِ فیکسچرِ واقعی اجرا می‌شوند.
+      - name: Payment cards dashboard page check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-cards-page.mjs
+      # 🏷 فازِ ۶: کارتِ تگ‌ها در پروفایلِ کاربر؛ صف (نه نوشتنِ مستقیم) و همان شکلی که sweepِ
+      # ربات می‌پذیرد — سرتاسری روی یک فایلِ دیتابیس (داشبورد صف می‌کند، sweepِ واقعی اجرا).
+      - name: Receipt tags check (dashboard)
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-receipt-tags.mjs --part=dash
+      # 📊 فازِ ۸: آمارِ روزانه‌ی کارت‌ها از رویدادها (نه از card_idِ جابه‌جاشونده)، روزِ کارتِ ۰۶:۰۰،
+      # «تأییدشده» = شمارشِ سقفِ ربات، «مبلغ» بدونِ حسابِ تستی. صفحه روی فیکسچرِ واقعی رندر می‌شود.
+      - name: Card daily stats check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-card-stats.mjs
+
       # مسیرِ پولِ voice2text (رباتِ زنده‌ی درآمدزا). ادعاها منطق را **اجرا** می‌کنند نه
       # اینکه شکلِ `if` را ببینند: شاخه‌ای که اعتبارِ رایگان می‌دهد، «شرط عوض شد» کافی
       # نیست، «شرطِ تازه درست است» لازم است.
@@ -562,6 +580,55 @@ jobs:
       - name: Admin profile reset check
         if: matrix.bot == 'tarot'
         run: node tools/check-reset-profile.mjs
+
+      # 💳 کارت‌های پرداخت (v3.122.0): شماره‌ی هر فاکتور از کارتِ خودش، دکمه‌ی کپی از همان
+      # پرداخت، رسید فقط به ادمینِ همان کارت با دکمه و کپیِ بی‌دکمه به مالک، و سیدِ یک‌باره.
+      # هر سه خرابی بی‌صدا و روی مسیرِ پول‌اند؛ کدِ واقعی روی SQLite اجرا می‌شود.
+      - name: Payment cards check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-cards.mjs
+
+      # 💳 مدیریتِ کارت‌ها داخلِ ربات (v3.123.0، فقط مالک): اعتبارسنجیِ Luhn، گاردِ «آخرین کارتِ
+      # عادیِ فعال»، نبودِ حذف و ویرایشِ شماره، گاردِ مالک روی هر اکشنِ ca:، و فلوی افزودن/ویرایش
+      # که روی SQLite با تلگرامِ قلابی اجرا می‌شود.
+      - name: Cards admin check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-cards-admin.mjs
+
+      # 🔄 چرخشِ روزانه‌ی کارت + سقفِ روزانه (v3.124.0): مرزِ روز ۰۶:۰۰ تهران، نوبتِ کاربرِ تازه
+      # بینِ کارت‌های عادی، چسبندگیِ روزانه، سقف = پرداختِ تأییدشده‌ی امروز، همه پر ⟵ سفید.
+      - name: Card rotation check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-rotation.mjs
+      - name: Card switch check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-card-switch.mjs
+      - name: Receipt shadow check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-shadow.mjs
+
+      - name: Transfer error check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-transfer-error.mjs
+      # 🏷 فازِ ۶: تگِ اپ/بانک فقط روی پیامِ رسیدِ مالک؛ ردیفِ تگ بعد از هر اکشن می‌ماند؛ سابقه
+      # فقط از رسیدهای ردنشده. کدِ واقعیِ index.js روی SQLite با middlewareِ واقعی اجرا می‌شود.
+      - name: Receipt tags check (bot)
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-tags.mjs --part=bot
+      # 🤖 فازِ ۷: تگِ خودکار (پیش‌شماره ⟵ بانک در کد، مبهم ⟵ بی‌تگ، دستی مقدم) + تحلیلِ دوباره‌ی
+      # یک‌باره‌ی رسیدهای گذشته که هرگز به پول/کاربر دست نمی‌زند و قطع‌کن دارد.
+      - name: Receipt auto-tag check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-autotag.mjs
+      # 💙 کاربرِ بلو ⟵ کارتِ بلو بیرون از نوبت (آخرین رسید، دستی مقدم، سقف/غیرفعال ⟵ چرخش) + سیدِ دومِ کارت‌ها.
+      - name: Blu user card check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-blu-user.mjs
+      # ⏳ تأییدِ کُندِ بسته‌ی معمولی (۵ تا ۱۰ دقیقه، زمان‌بندی در DB نه sleep) + رسیدِ دوباره وسطِ صبر ⟵
+      # تگِ مشکوکِ همیشگی. زمان‌بند و اجراکننده‌ی واقعی روی SQLite، ری‌استارت و دو پروسه‌ی هم‌زمان.
+      - name: Slow approve check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-slow-approve.mjs
 
       # ⭐ ریلِ پرداختِ استارز (زبان‌های غیرفارسی). سه خرابیِ بی‌صدا که تستِ دودِ boot به
       # آن‌ها نمی‌رسد چون مسیرِ سردند: قراردادِ فاکتورِ Bot API (currency/provider_token/

@@ -196,7 +196,7 @@ console.log('\n▶ پرداختِ کمتر از فاکتور: تشخیصِ decid
   // ⚠️ اصلاحِ خودکارِ فاکتور این‌جا **رخ نمی‌دهد**، ولی گاردش بالادست است نه در این تابع:
   // `processReceipt` فقط وقتی فاکتور را اصلاح می‌کند که `paid >= MIN_RECHARGE` باشد، و
   // ۴٬۰۰۰ < ۱۰٬۰۰۰. همان قاعده‌ای که پرداختِ بسته‌ای (`p.pkg`) را هم کنار می‌گذارد.
-  ok(/const safe = !p\.discount_code_id && !p\.pkg && paid >= MIN_RECHARGE && paid < amountToman;/.test(SRC),
+  ok(/const safe = (?:!!p && )?!p\.discount_code_id && !p\.pkg && paid >= MIN_RECHARGE && paid < amountToman;/.test(SRC),
     'گاردِ اصلاحِ فاکتور هنوز MIN_RECHARGE و بسته‌ای‌نبودن را می‌خواهد');
 }
 
@@ -217,7 +217,8 @@ console.log('\n▶ اصلاحِ فاکتور: اعتبار = دقیقاً هما
 
 console.log('\n▶ گاردِ صریح: با تخفیف، پرداختِ کمتر خودکار تصمیم گرفته نمی‌شود');
 {
-  const src = SRC.slice(SRC.indexOf("decision.action === 'underpaid'"), SRC.indexOf("decision.action === 'underpaid'") + 400);
+  // v3.131.0: منطقِ تأیید/کم‌پرداخت به `applyAutoCredit` (تک‌منبعِ مسیرِ فوری و زمان‌بندی‌شده) رفت.
+  const src = SRC.slice(SRC.indexOf('async function applyAutoCredit'), SRC.indexOf('async function applyAutoCredit') + 1400);
   ok(/!p\.discount_code_id/.test(src), 'شرطِ safe شاملِ «تخفیف نداشته باشد» است');
   ok(/paid >= MIN_RECHARGE/.test(src), 'مبلغِ خیلی کم هم خودکار تصمیم گرفته نمی‌شود');
   ok(/paid < amountToman/.test(src), 'و فقط وقتی واقعاً کمتر از فاکتور باشد');
@@ -504,14 +505,14 @@ console.log('\n💎 خطِ «بابت خرید» روی فاکتور');
 console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
 {
   const src = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
-  const start = src.indexOf('const receiptDecisionDelayMs =');
+  const start = src.indexOf('const isPriorityPack =');
   const end = start < 0 ? -1 : src.indexOf('\n\n/*', start);
   const helperSrc = start < 0 || end < 0 ? '' : src.slice(start, end);
   ok(!!helperSrc, 'helper زمان‌بندیِ رسید از سورس پیدا شد');
 
   const sampled = [];
   const delayFor = helperSrc
-    ? new Function('randomInt', `${helperSrc}\nreturn receiptDecisionDelayMs;`)((min, max) => {
+    ? new Function('randomInt', `${helperSrc}\nreturn (p) => (p === 'slow' ? slowApproveDelaySec() * 1000 : receiptDecisionDelayMs(p));`)((min, max) => {
       sampled.push([min, max]);
       return min;
     })
@@ -522,6 +523,8 @@ console.log('\n▶ پیام و زمان‌بندیِ بررسیِ رسید');
     'بسته‌ی ویژه از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
   ok(delayFor({ pkg: 'magic' }) === 15_000 && sampled.at(-1)?.join(',') === '15,31',
     'بسته‌ی جادویی از بازه‌ی تصادفیِ ۱۵ تا ۳۰ ثانیه می‌آید');
+  ok(delayFor('slow') === 300_000 && sampled.at(-1)?.join(',') === '300,601',
+    '⏳ تأییدِ کُندِ بسته‌ی معمولی: ۵ تا ۱۰ دقیقه‌ی تصادفی (v3.131.0)');
 
   const faLocale = (await import('../bots/tarot/locales/fa.js')).default;
   const fa = faLocale.wallet.receiptSent;

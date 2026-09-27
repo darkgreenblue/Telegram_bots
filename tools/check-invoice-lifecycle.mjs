@@ -109,7 +109,7 @@ if (claimSql && remSql && expSql) {
   db.exec(`CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT, pkg TEXT NOT NULL DEFAULT '',
-    invoice_issued_at INTEGER, invoice_msg_id INTEGER, invoice_reminded_at INTEGER,
+    invoice_issued_at INTEGER, invoice_msg_id INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT,
     created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
   );`);
   const insertAmount = db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')");
@@ -148,6 +148,17 @@ if (claimSql && remSql && expSql) {
   setStatus.run('canceled', old);
   ok(expCand.all(86400).every(r => r.id !== old), 'بعد از انقضا دیگر کاندیدِ خودِ همین کوئری نیست (status از pending خارج شد)');
 
+  // ۳ب) رسیدِ در حالِ بررسی (عکس ذخیره شده، هنوز pending): حتی ۲۵ساعته منقضی نمی‌شود (v3.131.0).
+  // کنترلِ مثبت: همان ردیف بدونِ عکس (مثلاً بعد از «نتوانستم واریز کنم» که ستون را خالی می‌کند) منقضی می‌شود.
+  const inReview = Number(insertAmount.run(6).lastInsertRowid);
+  claim.run(6000, inReview);
+  issueAt(inReview, 25 * 3600);
+  db.prepare("UPDATE payments SET receipt_file_id='PHOTO' WHERE id=?").run(inReview);
+  ok(expCand.all(86400).every(r => r.id !== inReview), 'فاکتوری که رسیدش در حالِ بررسی است، وسطِ بررسی منقضی نمی‌شود');
+  db.prepare('UPDATE payments SET receipt_file_id=NULL WHERE id=?').run(inReview);
+  ok(expCand.all(86400).some(r => r.id === inReview), 'کنترلِ مثبت: بدونِ رسید (مثلاً فاکتورِ سفید) همان ردیف عادی منقضی می‌شود');
+  setStatus.run('canceled', inReview);
+
   // ۴) مقدسات: رسیدِ ثبت‌شده و پرداختِ تأییدشده — حتی اگر خیلی قدیمی باشند، هرگز کاندیدا نیستند
   const waiting = Number(insertAmount.run(4).lastInsertRowid);
   claim.run(4000, waiting);
@@ -185,7 +196,7 @@ if (claimSql && remSql && expSql) {
   dbm.exec(`CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT,
-    invoice_issued_at INTEGER, invoice_reminded_at INTEGER,
+    invoice_issued_at INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT,
     created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
   );`);
   const ins = dbm.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')");
