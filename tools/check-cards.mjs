@@ -87,7 +87,7 @@ const OWNER = 111, SECOND = 222, OTHER = 333;
 const errs = [];
 function boot({ legacy = false, failTo = null } = {}) {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
+  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, invoice_issued_at INTEGER DEFAULT (unixepoch()),
     status TEXT DEFAULT 'pending', receipt_file_id TEXT, invoice_no INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
   const sent = [];
@@ -180,7 +180,7 @@ if (h) {
   const first = await h.sendToReceiptRecipients(pSecond, { caption: 'CAP', photoFileId: 'F', kb });
   const toSecond = h.sent.find((m) => m.to === SECOND), toOwner = h.sent.find((m) => m.to === OWNER);
   ok(h.sent.length === 2, 'دقیقاً دو پیام رفت');
-  const INFO = '\n\n💳 کارتِ تخصیص‌داده: 5022 2916 1228 2234 (بانک پاسارگاد)\n📊 سوابق کاربر: ۱ پرداخت';
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بانک پاسارگاد🔰\n5022291612282234\n📊 سوابق کاربر: ۱ پرداخت';
   ok(toSecond?.extra?.reply_markup === kb && toSecond.text === `CAP${INFO}`, 'ادمینِ کارت پیامِ کامل با دکمه‌ها + کارتِ تخصیص و سوابق گرفت');
   ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی') && toOwner.text.endsWith(`CAP${INFO}`),
     'مالک کپیِ اطلاعاتیِ **بی‌دکمه** با سرتیتر گرفت');

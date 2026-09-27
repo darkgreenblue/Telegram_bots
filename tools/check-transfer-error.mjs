@@ -74,7 +74,7 @@ const OWNER = 111;
 
 function boot({ flag = true, shadow = true, stars = false } = {}) {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
+  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, invoice_issued_at INTEGER DEFAULT (unixepoch()),
     original_amount INTEGER, status TEXT NOT NULL DEFAULT 'pending', step TEXT NOT NULL DEFAULT 'receipt', pkg TEXT,
     invoice_msg_id INTEGER, stars_toggle_at INTEGER, receipt_file_id TEXT, invoice_no INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()), created_at INTEGER NOT NULL DEFAULT (unixepoch()))`);

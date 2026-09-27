@@ -97,7 +97,7 @@ const DAY0 = T('2026-09-27T08:00:00Z') / 1000;       // ۱۱:۳۰ تهران
 
 function boot({ rotation = true, stars = false, CAo = {}, DateO = Date } = {}) {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
+  db.exec(`CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, invoice_issued_at INTEGER,
     status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
   const clock = { now: DAY0 };
@@ -116,7 +116,7 @@ function boot({ rotation = true, stars = false, CAo = {}, DateO = Date } = {}) {
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6037997599199013','ب','-',111,'regular',3)").run();
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5859471120915172','ج','-',111,'regular',4)").run();
   h.invoice = (uid, amount = 15000) => {
-    const id = Number(db.prepare('INSERT INTO payments (user_id, amount, created_at) VALUES (?, ?, ?)').run(uid, amount, h.clock.now).lastInsertRowid);
+    const id = Number(db.prepare('INSERT INTO payments (user_id, amount, created_at, invoice_issued_at) VALUES (?, ?, ?, ?)').run(uid, amount, h.clock.now, h.clock.now).lastInsertRowid);
     h.issueInvoiceCard(id); return id;
   };
   h.cardOf = (pid) => db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid).card_id;
@@ -131,7 +131,8 @@ if (h) {
   const { db } = h;
   ok(db.prepare("SELECT 1 FROM pragma_table_info('payments') WHERE name='approved_at'").get(), 'ستونِ افزایشیِ approved_at ساخته شد');
   const idx = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='payments'").all().map((r) => r.name);
-  ok(idx.includes('idx_payments_status_approved') && idx.includes('idx_payments_status_created'), 'هر دو ایندکسِ شمارشِ امروز ساخته شدند');
+  ok(idx.includes('idx_payments_status_approved') && idx.includes('idx_payments_status_issued') && !idx.includes('idx_payments_status_created'),
+    'هر دو ایندکسِ شمارشِ امروز ساخته شدند (و ایندکسِ بی‌مصرفِ نسخه‌ی اول برداشته شد)');
   // کارت‌های عادی به ترتیب: ۱، ۳، ۴ (کارتِ ۲ سفید است).
   const a = [h.invoice(1), h.invoice(1), h.invoice(2), h.invoice(3)];
   ok(a.map(h.cardOf).join() === '1,3,4,1', `یک کاربر هم کارت‌های مختلف می‌گیرد؛ فاکتورِ باز کارتِ بعدی را جلو می‌اندازد (${a.map(h.cardOf).join()})`);
@@ -145,6 +146,13 @@ if (h) {
   db.prepare("UPDATE payments SET status='waiting_review' WHERE id=?").run(a[3]);
   const openNow = h.cardCounts(15000).open;
   ok(openNow.get(1) === 1, 'رسیدِ منتظرِ تصمیم (waiting_review) هنوز فاکتورِ باز است');
+  {
+    // ردیفِ بسته‌ها که دیروز (۲۳:۵۸) ساخته شد و امروز فاکتور شد ⟵ امروز «باز» است (ملاک صدور است نه ساختِ ردیف).
+    const rid = Number(db.prepare("INSERT INTO payments (user_id, amount, status, card_id, created_at, invoice_issued_at) VALUES (77, 45000, 'pending', 4, ?, ?)")
+      .run(h.clock.now - 86400, h.clock.now).lastInsertRowid);
+    ok(h.cardCounts(45000).open.get(4) === 1, 'ردیفِ دیروز که امروز فاکتور شد در «فاکتورِ بازِ امروز» شمرده می‌شود');
+    db.prepare("UPDATE payments SET status='canceled' WHERE id=?").run(rid);
+  }
   ok(!h.errs.length && !h.sent.length, 'هیچ خطا و هیچ هشداری در مسیرِ عادی');
   ok(h.events.filter((e) => e.e === 'card_assigned').every((e) => e.p.via === 'amount' && e.p.amount > 0),
     'رویدادِ card_assigned با via=amount و مبلغ ثبت می‌شود');
@@ -203,23 +211,23 @@ console.log('\nسرعت (بدترین حالت):');
   const cardIds = db.prepare('SELECT id FROM cards').all().map((c) => c.id);
   const AMTS = [15000, 20000, 25000, 30000, 50000, 60000, 90000, 150000];
   const ST = ['approved', 'approved', 'pending', 'waiting_review', 'rejected', 'canceled'];
-  const ins = db.prepare('INSERT INTO payments (user_id, amount, status, created_at, card_id, approved_at) VALUES (?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO payments (user_id, amount, status, created_at, invoice_issued_at, card_id, approved_at) VALUES (?,?,?,?,?,?,?)');
   const start = r.clock.now - 3600;
   db.transaction(() => {
     for (let i = 0; i < 400_000; i++) {
       const at = start - 86400 - (i % (730 * 86400));
       const st = ST[i % ST.length];
-      ins.run(i % 9000, AMTS[i % 8], st, at, cardIds[i % cardIds.length], st === 'approved' ? at : null);
+      ins.run(i % 9000, AMTS[i % 8], st, at, at, cardIds[i % cardIds.length], st === 'approved' ? at : null);
     }
     for (let i = 0; i < 20_000; i++) {
       const at = start + (i % 3600);
       const st = ST[i % ST.length];
-      ins.run(i % 5000, AMTS[i % 8], st, at, cardIds[i % cardIds.length], st === 'approved' ? at : null);
+      ins.run(i % 5000, AMTS[i % 8], st, at, at, cardIds[i % cardIds.length], st === 'approved' ? at : null);
     }
   })();
   const st = r.cardSt();
   const plans = ['usedOn', 'winsOn', 'openOn'].map((k) => [k, db.prepare(`EXPLAIN QUERY PLAN ${st[k].source}`).all(...(k === 'usedOn' ? [1] : [1, 15000])).map((x) => x.detail).join(' | ')]);
-  for (const [k, plan] of plans) ok(/USING (COVERING )?INDEX idx_payments_(status_approved \(status=\? AND approved_at>\?\)|status_created \(status=\? AND created_at>\?\))/.test(plan) && !/SCAN payments(?! USING)/.test(plan), `${k} روی ایندکس می‌نشیند، نه اسکنِ کلِ جدول (${plan})`);
+  for (const [k, plan] of plans) ok(/USING (COVERING )?INDEX idx_payments_(status_approved \(status=\? AND approved_at>\?\)|status_issued \(status=\? AND invoice_issued_at>\?\))/.test(plan) && !/SCAN payments(?! USING)/.test(plan), `${k} روی ایندکس می‌نشیند، نه اسکنِ کلِ جدول (${plan})`);
   const times = [];
   for (let i = 0; i < 300; i++) {
     const t0 = process.hrtime.bigint();

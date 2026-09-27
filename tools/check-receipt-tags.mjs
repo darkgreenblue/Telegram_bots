@@ -223,7 +223,7 @@ if (h) {
   ok(first && toOwner && toAdmin, 'هر دو گیرنده پیام گرفتند و پیامِ کامل برگشت');
   ok(JSON.stringify(cbOf(toOwner.extra.reply_markup)) === JSON.stringify([`tg:o:${pid}:app`, `tg:o:${pid}:bank`, `tg:o:${pid}:card`]),
     'کپیِ اطلاعاتیِ مالک: فقط ردیفِ تگ + «💳 کارتِ تخصیص» (بدونِ دکمه‌های اکشنِ ادمینِ کارت)');
-  const INFO = '\n\n💳 کارتِ تخصیص‌داده: 6219 8619 0414 5405 (بلوبانک)\n📊 سوابق کاربر: ۱ پرداخت';
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بلوبانک🔰\n6219861904145405\n📊 سوابق کاربر: ۱ پرداخت';
   ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === `CAP${INFO}`,
     'ادمینِ دیگر: کیبوردِ قبلی بدونِ هیچ دکمه‌ی تگ/کارت؛ کپشن + کارتِ تخصیص و سوابق');
   ok(toOwner.text === `COPY\nCAP${INFO}` && !/اپ|بانک:/.test(toOwner.text), 'پیامِ مالک: هیچ حرفی از اپ و بانک، فقط کارت و سوابق');
