@@ -133,7 +133,7 @@ const handlers = region('const caOnly = (fn) =>', '/* ---------- هندلر مت
 
 function boot({ stars = false } = {}) {
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', card_id INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()))");
+  db.exec("CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', card_id INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), invoice_issued_at INTEGER DEFAULT (unixepoch()))");
   const actions = [], hears = [], sent = [], events = [];
   const state = new Map(), sess = new Map();
   const bot = {

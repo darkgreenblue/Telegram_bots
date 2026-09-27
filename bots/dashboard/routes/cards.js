@@ -133,7 +133,7 @@ function cardStatsCard(db, bot, url, cards) {
   const stat = new Map();   // `${day}|${card}` ⟵ {issued, switched, terr, approved, sum}
   const at = (day, card) => {
     const k = `${day}|${card}`;
-    if (!stat.has(k)) stat.set(k, { day, card: Number(card), issued: 0, switched: 0, terr: 0, approved: 0, sum: 0 });
+    if (!stat.has(k)) stat.set(k, { day, card: Number(card), issued: 0, incoming: 0, switched: 0, terr: 0, approved: 0, sum: 0 });
     return stat.get(k);
   };
   if (hasTable(db, 'events')) {
@@ -145,6 +145,10 @@ function cardStatsCard(db, bot, url, cards) {
       if (e.event === 'card_assigned' && Number(p.card_id) > 0) at(day, p.card_id).issued++;
       else if (e.event === 'card_switched' && Number(p.from) > 0) at(day, p.from).switched++;
       else if (e.event === 'transfer_error_switch' && Number(p.from) > 0) at(day, p.from).terr++;
+      /* 🔁 v3.132.0 (تصمیمِ مالک): فاکتوری که بعد از «تعویض شماره کارت» یا «نتوانستم واریز کنم» برای کارتِ **مقصد**
+         دوباره فرستاده شد، ستونِ جدا دارد، نه جزوِ «صادرشده». «صادرشده» تعدادِ فاکتورهای یکتا می‌ماند تا جمع‌ها
+         دو بار شمرده نشوند (یک فاکتور، دو پیام). */
+      if ((e.event === 'card_switched' || e.event === 'transfer_error_switch') && Number(p.to) > 0) at(day, p.to).incoming++;
     }
   }
   if (hasApprovedAt(db)) {
@@ -165,21 +169,22 @@ function cardStatsCard(db, bot, url, cards) {
   const all = [...stat.values()];
   const tot = new Map();
   for (const r of all) {
-    const t = tot.get(r.card) || { card: r.card, issued: 0, switched: 0, terr: 0, approved: 0, sum: 0 };
-    for (const f of ['issued', 'switched', 'terr', 'approved', 'sum']) t[f] += r[f];
+    const t = tot.get(r.card) || { card: r.card, issued: 0, incoming: 0, switched: 0, terr: 0, approved: 0, sum: 0 };
+    for (const f of ['issued', 'incoming', 'switched', 'terr', 'approved', 'sum']) t[f] += r[f];
     tot.set(r.card, t);
   }
-  const line = (r) => [fmt(r.issued), fmt(r.switched), fmt(r.terr), fmt(r.approved), moneyText(bot, r.sum)];
+  const line = (r) => [fmt(r.issued), fmt(r.incoming), fmt(r.switched), fmt(r.terr), fmt(r.approved), moneyText(bot, r.sum)];
   const order = (a, b) => ((byId.get(a.card)?.sort ?? 1e9) - (byId.get(b.card)?.sort ?? 1e9)) || (a.card - b.card);
   const sumRows = [...tot.values()].sort(order).map((t) => [label(t.card), ...line(t)]);
   const dayRows = all.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : order(a, b)))
     .slice(0, 200).map((r) => [esc(r.day), label(r.card), ...line(r)]);
-  const H = ['فاکتورِ صادرشده', 'تعویض به کارتِ دیگر', 'خطای انتقال', 'تأییدشده', 'مبلغِ تأییدشده'];
+  const H = ['فاکتورِ صادرشده', 'فاکتور از تعویض', 'تعویض به کارتِ دیگر', 'خطای انتقال', 'تأییدشده', 'مبلغِ تأییدشده'];
   return `<div class="card">${cardHead('📊 آمارِ روزانه‌ی کارت‌ها', rangePicker(url, 'rCard', key, { keys: CARD_STAT_RANGES }))}
     ${table(['کارت', ...H], sumRows, 'در این بازه فعالیتی روی کارت‌ها ثبت نشده')}
     ${dayRows.length > 1 ? `<details style="margin-top:10px"><summary>تفکیکِ روزبه‌روز</summary>${table(['روزِ کارت', 'کارت', ...H], dayRows)}</details>` : ''}
-    <p class="muted">روزِ کارت از ۰۰:۰۰ تهران شروع می‌شود (تا v3.131.0 از ۰۶:۰۰ بود). «تعویض» و «خطای انتقال» روی کارتی شمرده می‌شوند که
-      کاربر <b>از آن</b> رفت. «تأییدشده» همان عددِ سقفِ روزانه است (با حسابِ تستی)؛ «مبلغ» بدونِ حسابِ تستی.
+    <p class="muted">روزِ کارت از ۰۰:۰۰ تهران شروع می‌شود (تا v3.131.0 از ۰۶:۰۰ بود). «فاکتورِ صادرشده» = هر بار که کاربر روی یک بسته زد
+      و فاکتور گرفت (فاکتورِ یکتا). «فاکتور از تعویض» = فاکتوری که بعد از تعویض/خطای انتقال برای <b>این</b> کارت دوباره فرستاده
+      شد. «تعویض» و «خطای انتقال» روی کارتی شمرده می‌شوند که کاربر <b>از آن</b> رفت. «تأییدشده» همان عددِ سقفِ روزانه است (با حسابِ تستی)؛ «مبلغ» بدونِ حسابِ تستی.
       صدور از v3.124.0 و خطای انتقال از v3.127.0 ثبت می‌شوند؛ روزهای قبل‌تر در این ستون‌ها صفرند.</p></div>`;
 }
 

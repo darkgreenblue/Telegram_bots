@@ -1283,11 +1283,13 @@ const cardSt = () => _cardSt || (_cardSt = {
   admins:   db.prepare('SELECT DISTINCT admin_id FROM cards WHERE active=1'),
   assign:   db.prepare('UPDATE payments SET card_id=? WHERE id=? AND card_id=0'),
   // 🔁 v3.132.0: سه شمارشِ «امروز» (از ۰۰:۰۰ تهران = `since`). هر سه روی ایندکس می‌نشینند
-  // (`idx_payments_status_approved`، `idx_payments_status_created`)، پس هزینه‌شان با تعدادِ ردیف‌های
+  // (`idx_payments_status_approved`، `idx_payments_status_issued`)، پس هزینه‌شان با تعدادِ ردیف‌های
   // **امروز** بالا می‌رود نه با کلِ جدول (چکِ CI روی جدولِ بزرگ اندازه‌اش را می‌گیرد).
   usedOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND card_id>0 GROUP BY card_id"),
   winsOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
-  openOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status IN ('pending','waiting_review') AND created_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
+  // «باز» از لحظه‌ی **صدورِ فاکتور** (`invoice_issued_at`)، نه ساختِ ردیف: ردیفِ بسته‌ها تا چند دقیقه دوباره
+  // استفاده می‌شود (`reusablePending`)، پس ردیفِ ساخته‌شده در ۲۳:۵۸ که ۰۰:۰۳ فاکتور شد با `created_at` از قلم می‌افتاد.
+  openOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status IN ('pending','waiting_review') AND invoice_issued_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
   markDay:  db.prepare('UPDATE payments SET approved_at=unixepoch() WHERE id=? AND approved_at IS NULL'),
   // 🔄 فازِ ۳: ادعای اتمیکِ تعویض — یک بار، فقط روی فاکتورِ باز و فقط از همان کارتی که دیده شد.
   switchClaim: db.prepare("UPDATE payments SET card_id=?, prev_card_id=?, card_switched_at=unixepoch() WHERE id=? AND card_id=? AND card_switched_at IS NULL AND status='pending'"),
@@ -2149,7 +2151,9 @@ try { db.prepare("ALTER TABLE payments ADD COLUMN approved_day TEXT NOT NULL DEF
  * (تقریب، فقط برای آمارِ روزهای گذشته). دو ایندکس تا سه شمارشِ «امروز» هرگز کلِ جدول را نخوانند. */
 try { db.prepare('ALTER TABLE payments ADD COLUMN approved_at INTEGER').run(); } catch {}
 try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_status_approved ON payments(status, approved_at)').run(); } catch {}
-try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_status_created ON payments(status, created_at)').run(); } catch {}
+try { db.prepare('CREATE INDEX IF NOT EXISTS idx_payments_status_issued ON payments(status, invoice_issued_at)').run(); } catch {}
+// ایندکسِ نسخه‌ی اولِ همین روز که دیگر هیچ کوئری‌ای رویش نمی‌نشیند (فقط هزینه‌ی نوشتن داشت). ایندکس داده نیست.
+try { db.prepare('DROP INDEX IF EXISTS idx_payments_status_created').run(); } catch {}
 // 🔄 فازِ ۳ (v3.125.0): لحظه‌ی تعویضِ کارتِ فاکتور؛ NULL = هنوز تعویض نشده (هر فاکتور یک بار).
 try { db.prepare('ALTER TABLE payments ADD COLUMN card_switched_at INTEGER').run(); } catch {}
 // کارتی که فاکتور **قبل از** تعویض داشت (۰ = تعویض نشده). رسیدِ واریز به آن کارت هم معتبر است.
@@ -2295,6 +2299,16 @@ try {
     db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tags_v2_manual_only', unixepoch())").run();
   })();
 } catch (e) { logErr('tags_v2 migration:', e.message); }
+/* 📱 v3.132.0، یک‌باره (خواسته‌ی مالک): «بله»، «۷۲۴» و «سایر» به اپ‌ها اضافه شدند. سید فقط ردیفِ **تازه** را با
+ * جایگاهِ خودش در `SEED_TAG_VALUES` می‌نشاند و ردیف‌های موجود را جابه‌جا نمی‌کند، پس ترتیب یک بار از نو ست می‌شود. */
+try {
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM migrations WHERE key='tags_v3_app_order'").get()) return;
+    const sortSet = db.prepare('UPDATE tag_values SET sort=? WHERE dim=? AND key=?');
+    RT.SEED_TAG_VALUES.app.forEach(([k], i) => sortSet.run(i + 1, 'app', k));
+    db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('tags_v3_app_order', unixepoch())").run();
+  })();
+} catch (e) { logErr('tags_v3 migration:', e.message); }
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
@@ -3118,7 +3132,9 @@ async function invoiceForReading(ctx, uid, readingId, withDiscount) {
   track(db, uid, EVENTS.RECHARGE_STARTED, { payment_id: paymentId, kind: 'reading', reading_id: readingId });
   stmts.claimAmount.run(price, paymentId);            // اصل = قیمتِ فال، step → receipt
   issueInvoiceNo(paymentId);
-  if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, paymentId); // original_amount=price، amount=تخفیف‌خورده
+  // ⚠️ چهار مقدار (همان شکلِ مسیرِ `disc:`): نسخه‌ی قبل سه مقدار می‌داد و better-sqlite3 پرتاب می‌کرد. مسیر امروز مرده است
+  // (`legacyTomanPay`)، ولی از #416 پرتابش صدورِ کارت را هم جا می‌انداخت؛ پس درست می‌شود نه اینکه منتظرِ احیا بماند.
+  if (dc) stmts.setPaymentDiscount.run(dc.id, payAmount, Math.max(0, price - payAmount), paymentId); // original_amount=price، amount=تخفیف‌خورده
   issueInvoiceCard(paymentId);         // 💳 کارتِ این فاکتور، بعد از نشستنِ مبلغِ نهایی (انتخاب بر اساسِ مبلغ است)
   patchSession(uid, { paymentId, readingId });
   setState(uid, 'pay_receipt');
@@ -4635,7 +4651,8 @@ registerJourney(bot, {
   enabled: JOURNEY_ENABLED,
   // تپ‌های **تستر** هم مثل ادمین از قیف‌های محصولی بیرون می‌مانند: او دارد فیچر را
   // می‌آزماید، نه رفتارِ واقعیِ کاربر را نشان می‌دهد. (این «اختیار» نیست، بهداشتِ دیتاست.)
-  isAdmin: isTester,
+  // 🧾 اکانتِ پشتیبانی (v3.132.0) کاربرِ واقعی نیست: صدها تپِ تگِ بازبینی قیف و «کجا گیر کردند» را آلوده می‌کرد.
+  isAdmin: (uid) => isTester(uid) || (SUPPORT?.id && Number(uid) === Number(SUPPORT.id)),
   isButtonLabel: (t) => KB_LABELS.has(t),
   redact: (ctx) => { try { return [dispName(getUser(ctx.from?.id))]; } catch { return []; } },
 });
@@ -10267,10 +10284,11 @@ function receiptInfoLines(p) {
     // همیشه کارتِ **فعلیِ** همین پرداخت (نه کارتِ مسیریابی): پیامِ «نتوانستم واریز کنم» به ادمینِ کارتِ
     // ناموفق می‌رود ولی فاکتور حالا روی کارتِ سفید است، و همین عدد است که ادمین باید با رسید مقایسه کند.
     const c = cardOfPayment(p);
-    const num = String(c.number || '').replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ');
+    // فرمتِ خواسته‌ی مالک (۱۴۰۵/۰۷/۰۵): نامِ بانک + 🔰، و شماره‌ی کاملِ **بی‌فاصله** در خطِ بعد (کپی‌پذیر).
+    const num = String(c.number || '').replace(/\D/g, '');
     const prior = (_priorApproved ||= db.prepare("SELECT COUNT(*) AS c FROM payments WHERE user_id=? AND status='approved' AND id<>?"))
       .get(p.user_id, p.id).c;
-    return `💳 کارتِ تخصیص‌داده: ${num} (${c.bank || c.holder})\n📊 سوابق کاربر: ${(prior + 1).toLocaleString('fa-IR')} پرداخت`;
+    return `💳 کارتِ تخصیص‌داده: ${c.bank || c.holder}🔰\n${num}\n📊 سوابق کاربر: ${(prior + 1).toLocaleString('fa-IR')} پرداخت`;
   } catch (e) { logErr('receiptInfoLines:', e.message); return ''; }
 }
 /* 📋 رسیدِ **متنی** (کاربر متنِ رسید را از اپِ بانک کپی کرده، نه عکس): **کلِ** پیامِ کاربر باید در پیامِ ادمین
@@ -10541,7 +10559,10 @@ async function runTagReview() {
       trSt().mark.run(p.id, ok);
       await sleep(1100);
     }
-    if (TAG_REVIEW_ENABLED && !trSt().queue.all().length) {
+    /* یک‌باره یعنی دامنه همان فهرستِ **اولِ** اجراست: رسیدی که وسطِ کار تأیید شد عمداً بیرون است (برای آن رسیدِ خودش با
+       دکمه‌های تگ به مالک رفته). نسخه‌ی قبل مهر را فقط با صفِ خالی می‌زد و هر تأییدِ تازه وسطِ ارسال یعنی مهر هرگز
+       نمی‌خورد و بوتِ بعدی دوباره می‌فرستاد (بازبینیِ خصمانه‌ی ۱۴۰۵/۰۷/۰۵؛ روی سرور بی‌اثر بود چون مهر خورده بود). */
+    if (TAG_REVIEW_ENABLED) {
       trSt().setDone.run();
       const st = trSt().sentN.get();
       log(`🧾 TAG_REVIEW_DONE sent=${st.ok} failed=${st.n - st.ok}`);

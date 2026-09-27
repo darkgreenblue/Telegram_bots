@@ -47,14 +47,14 @@ console.log('\n🏷 تگِ رسید (فازِ ۶)\n');
 console.log('ماژولِ خالص:');
 {
   const appKeys = RT.SEED_TAG_VALUES.app.map(([k]) => k);
-  ok(JSON.stringify(appKeys) === JSON.stringify(['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'atm', 'unknown']),
+  ok(JSON.stringify(appKeys) === JSON.stringify(['mobilebank', 'ap', '780', 'hamrahcard', 'top', 'bale', '724', 'atm', 'other', 'unknown']),
     'اپ‌ها عینِ فهرستِ مالک (v3.132.0): موبایل‌بانک، آپ، ۷۸۰، همراه‌کارت، تاپ، خودپرداز، نمی‌تونم تشخیص بدم');
   ok(!appKeys.includes('blu'), '«بلو» اپ نیست (کاربرِ بلو = بانکِ بلو + موبایل‌بانک)');
   const bankKeys = RT.SEED_TAG_VALUES.bank.map(([k]) => k);
   ok(bankKeys.includes('blu') && bankKeys.includes('saman'), 'بلو و سامان دو بانکِ جدا');
   ok(bankKeys[0] === 'unknown' && RT.SEED_TAG_VALUES.bank[0][1] === 'نمی‌تونم تشخیص بدم'
     && RT.SEED_TAG_VALUES.app.find(([k]) => k === 'unknown')[1] === 'نمی‌تونم تشخیص بدم', '«نمی‌تونم تشخیص بدم» در هر دو بُعد (بانک: اولِ فهرست)');
-  ok(!appKeys.includes('other') && !bankKeys.includes('other'), 'هیچ مقدارِ «سایر»ی نیست');
+  ok(appKeys.includes('other') && !bankKeys.includes('other'), '«سایر» فقط برای اپ (خواسته‌ی مالک)، نه بانک');
   const all = [...appKeys, ...bankKeys];
   ok(all.every((k) => RT.TAG_KEY_RE.test(k)) && new Set(bankKeys).size === bankKeys.length, 'همه‌ی کلیدهای سید معتبر و یکتا');
   ok([...RT.SEED_TAG_VALUES.app, ...RT.SEED_TAG_VALUES.bank].every(([, l]) => RT.cleanTagLabel(l) === l), 'همه‌ی برچسب‌های سید تمیز');
@@ -223,7 +223,7 @@ if (h) {
   ok(first && toOwner && toAdmin, 'هر دو گیرنده پیام گرفتند و پیامِ کامل برگشت');
   ok(JSON.stringify(cbOf(toOwner.extra.reply_markup)) === JSON.stringify([`tg:o:${pid}:app`, `tg:o:${pid}:bank`, `tg:o:${pid}:card`]),
     'کپیِ اطلاعاتیِ مالک: فقط ردیفِ تگ + «💳 کارتِ تخصیص» (بدونِ دکمه‌های اکشنِ ادمینِ کارت)');
-  const INFO = '\n\n💳 کارتِ تخصیص‌داده: 6219 8619 0414 5405 (بلوبانک)\n📊 سوابق کاربر: ۱ پرداخت';
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بلوبانک🔰\n6219861904145405\n📊 سوابق کاربر: ۱ پرداخت';
   ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === `CAP${INFO}`,
     'ادمینِ دیگر: کیبوردِ قبلی بدونِ هیچ دکمه‌ی تگ/کارت؛ کپشن + کارتِ تخصیص و سوابق');
   ok(toOwner.text === `COPY\nCAP${INFO}` && !/اپ|بانک:/.test(toOwner.text), 'پیامِ مالک: هیچ حرفی از اپ و بانک، فقط کارت و سوابق');
