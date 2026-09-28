@@ -58,9 +58,7 @@ export function orphansBody(url) {
     esc(r.ref || '') || '<span class="muted">-</span>',
     `${esc(STATUS_FA[r.status] || r.status)}${r.owner_id ? ` <span class="mono">${r.owner_id}</span>` : ''}`,
     `${r.note ? `<div class="muted">${esc(r.note)}</div>` : ''}${r.shot ? `<div class="muted mono">${esc(r.shot)}</div>` : ''}`,
-    r.status === 'orphan' ? ownerForm(bot, r, coin) : `<form method="post" action="/orphans/delete" class="inline">
-        <input type="hidden" name="bot" value="${esc(bot)}"><input type="hidden" name="id" value="${r.id}">
-        <button type="submit" class="ghost">حذف ردیف</button></form>`,
+    (r.status === 'orphan' ? ownerForm(bot, r, coin) : '') + deleteForm(bot, r),
   ]);
 
   return `<div class="card"><h2 style="margin:0">🧾 پرداخت‌های سرگردان — ${esc(title)}</h2>
@@ -97,6 +95,24 @@ export function orphansBody(url) {
         حالا از مسیرِ خودِ ربات ثبت شده و ماندنش یعنی یک پول دو بار شمرده شود. ردیفِ
         «از راه پشتیبانی» در درآمد <b>می‌ماند</b>، چون هیچ‌وقت در ربات ثبت نشد.</p>
     </div>`;
+}
+
+/* 🗑 حذفِ کاملِ ردیف (خواسته‌ی مالک، ۱۴۰۵/۰۷/۰۶): حالتِ رایجِ «رسید را دیر فرستاد» این
+   است که ربات خودش رسید را تأیید کرده و الماس داده، پس این ردیف اصلاً پرداختِ سرگردان
+   نبوده و باید کامل از بین برود، نه فقط از درآمد خارج شود. حذف از درآمد هم کمش می‌کند،
+   که دقیقاً درست است چون پرداختِ واقعی حالا در `payments` ربات شمرده می‌شود.
+   ⚠️ ردیفِ «از راه پشتیبانی» استثناست: پولش هیچ‌جای دیگری ثبت نیست، پس حذفش درآمد را
+   کم‌برآورد می‌کند؛ برای همین هشدارِ تأییدش جداست. */
+function deleteForm(bot, r) {
+  const warn = r.status === 'resolved_support'
+    ? 'این پرداخت فقط همین‌جا ثبت است؛ با حذفش از درآمد کم می‌شود. مطمئنی؟'
+    : `ردیف #${r.id} (${fmt(r.amount)} تومان) کامل حذف شود؟ فقط وقتی که رسیدش در خودِ ربات ثبت و تأیید شده.`;
+  return `<form method="post" action="/orphans/delete" class="inline" style="margin-top:6px"
+      onsubmit="return confirm(${esc(JSON.stringify(warn))})">
+    <input type="hidden" name="bot" value="${esc(bot)}"><input type="hidden" name="id" value="${r.id}">
+    <button type="submit" class="ghost">🗑 حذف ردیف</button>
+    ${r.status === 'orphan' ? '<span class="muted">(رسید را بعداً در ربات فرستاد و تأیید شد)</span>' : ''}
+  </form>`;
 }
 
 /** دو مسیرِ «صاحبش پیدا شد»، هر کدام یک فرمِ جدا تا تپِ اشتباه ممکن نباشد. */
@@ -207,8 +223,8 @@ export function orphanDelete(body) {
   const id = parseInt(body.get('id'), 10);
   const r = getOrphan(id);
   if (!r) throw new Error('ردیف پیدا نشد');
-  if (r.status === 'orphan') throw new Error('ردیفِ باز حذف نمی‌شود؛ اول وضعیتش را مشخص کن');
-  deleteOrphan(id);
+  /* ردیفِ باز هم حذف‌شدنی است: یعنی «اصلاً سرگردان نبود» (رسیدش در ربات ثبت شد). */
+  if (!deleteOrphan(id)) throw new Error('حذف انجام نشد');
   audit('orphan.delete', `${r.bot}/${id}`, r.status);
-  return `ردیف #${id} حذف شد`;
+  return `ردیف #${id} (${fmt(r.amount)} ت) کامل حذف شد و از درآمد هم خارج شد`;
 }
