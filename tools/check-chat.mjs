@@ -102,22 +102,120 @@ console.log('▶ ۱) پرچم و دامنه');
    * تعریف، helper، میدل‌ورِ خروج، و جاروی بوت. آن دو تای آخر نمی‌توانند از `chatOn`
    * بروند (یکی ctx ندارد و دیگری باید برای همه‌ی کاربران اجرا شود، نه فقط تسترها). */
   const rawKill = countOf(/CHAT_AFTER_READING(?!_)/g);
-  ok(rawKill === 4, `کلیدِ خاموشی دقیقاً ۴ بار (تعریف، helper، میدل‌ورِ خروج، جاروی بوت) (${rawKill})`);
+  ok(rawKill === 5, `کلیدِ خاموشی دقیقاً ۵ بار (تعریف، helper، میدل‌ورِ خروج، جاروی بوت، گاردِ exposure) (${rawKill})`);
   ok(/getState\(uid\) !== 'chatting'\) return next\(\)/.test(CODE) && /if \(CHAT_AFTER_READING\) \{/.test(CODE),
     'و هر دو مصرفِ اضافه در مسیرِ **غیرِ رو-به-کاربر** اند (خروجِ استیت و ریفاندِ یتیم)');
 
   // رفتاری: خودِ helper با locale و تسترِ تزریقی اجرا می‌شود.
   const helper = (SRC.match(/const chatOn = \(uid\) =>[\s\S]*?;\n/) || [])[0] || '';
   ok(/CHAT_LOCALES\.includes\(LOCALE\)/.test(helper), 'helper هر سه شرط را با هم می‌خواند (فلگ، زبان، دامنه)');
-  const mkChatOn = (kill, adminOnly, locale, testers) => new Function(
-    'CHAT_AFTER_READING', 'CHAT_AFTER_READING_ADMIN_ONLY', 'CHAT_LOCALES', 'LOCALE', 'isTester',
-    `${helper} return chatOn;`)(kill, adminOnly, ['fa'], locale, (u) => testers.includes(u));
+  const mkChatOn = (kill, adminOnly, locale, testers, rollout = []) => new Function(
+    'CHAT_AFTER_READING', 'CHAT_AFTER_READING_ADMIN_ONLY', 'CHAT_LOCALES', 'LOCALE', 'isTester', 'chatRolloutPeek',
+    `${helper} return chatOn;`)(kill, adminOnly, ['fa'], locale, (u) => testers.includes(u), (u) => rollout.includes(u));
   ok(mkChatOn(true, true, 'fa', [7])(7) === true, 'تستر/ادمینِ فارسی گفتگو را می‌بیند');
   ok(mkChatOn(true, true, 'fa', [7])(9) === false, '⚠️ کاربرِ عادی **نمی‌بیند** (انتشارِ مرحله‌ای)');
   ok(mkChatOn(true, false, 'fa', [7])(9) === true, 'و باز کردن برای همه دقیقاً یک خط است');
   ok(mkChatOn(true, true, 'ru', [7])(7) === false, '⚠️ زبانِ دیگر حتی برای ادمین هم خاموش است (گیتِ ساختاریِ v1)');
   ok(mkChatOn(false, false, 'fa', [7])(7) === false, 'و رول‌بکِ یک‌خطی همه را خاموش می‌کند');
+  ok(mkChatOn(true, true, 'fa', [7], [9])(9) === true, '🎲 کاربرِ عادی در شاخه‌ی chat ِ انتشارِ تدریجی گفتگو را می‌بیند');
+  ok(mkChatOn(false, true, 'fa', [7], [9])(9) === false, 'و کلیدِ خاموشی شاخه‌ی chat را هم خاموش می‌کند');
+  ok(mkChatOn(true, true, 'ru', [7], [9])(9) === false, 'و گیتِ زبانی شاخه‌ی chat را هم می‌بندد');
   ok(/const CHAT_LOCALES = \['fa'\]/.test(CODE), 'دامنه‌ی زبانیِ v1 فقط فارسی است');
+}
+
+/* ═══ ۱ب) انتشارِ تدریجیِ تصادفی (۱۴۰۵/۰۷/۰۶) — روی SQLite واقعی و خودِ shared/ab.js ═══
+ * ⚠️ رفتاری است نه رجکسی: helperها از سورس بریده و با `peekVariant`/`expose` واقعی اجرا
+ * می‌شوند. سه ادعای مرکزی: (۱) سهمِ chat به وزنِ آزمایش نزدیک است، (۲) کلیدِ بعدی فقط
+ * control های قبلی را جابه‌جا می‌کند و هیچ کاربرِ گفتگوداری گفتگویش را از دست نمی‌دهد،
+ * (۳) exposure برای هر دو شاخه در **همان** شرط ثبت می‌شود (رقیق‌شدنِ متقارن، بند ۲الف). */
+console.log('\n▶ ۱ب) انتشارِ تدریجیِ تصادفی');
+{
+  const ab = await import('../shared/ab.js');
+  const an = await import('../shared/analytics.js');
+  const decl = (SRC.match(/const CHAT_ROLLOUT_EXPS = [^\n]+\n/) || [])[0] || '';
+  const peekSrc = (SRC.match(/const chatRolloutPeek = [^\n]+\n/) || [])[0] || '';
+  const exposeSrc = bodyOf(SRC, 'function exposeChatRollout(uid)') || '';
+  ok(decl && peekSrc && exposeSrc, 'سه تکه‌ی انتشار از سورس پیدا شدند');
+  ok(/'chat_rollout_a', 'chat_rollout_b', 'chat_rollout_c'/.test(decl), 'سه کلیدِ پیاپی (وزنِ آزمایش بعد از start فریز است)');
+  const mk = (kill, testers, locale, db) => new Function(
+    'CHAT_AFTER_READING', 'isTester', 'CHAT_LOCALES', 'LOCALE', 'peekVariant', 'expose', 'db',
+    `${decl}${peekSrc}${exposeSrc}\nreturn { chatRolloutPeek, exposeChatRollout };`,
+  )(kill, (u) => testers.includes(u), ['fa'], locale, ab.peekVariant, ab.expose, db);
+
+  const fresh = () => {
+    const d = new Database(':memory:');
+    d.exec('CREATE TABLE users (telegram_id INTEGER PRIMARY KEY)');  // ensureAnalytics ستونِ اتریبیوشن رویش می‌گذارد
+    an.ensureAnalytics(d); ab.ensureAb(d); return d;
+  };
+  const addExp = (d, key, chatW) => d.prepare(
+    "INSERT INTO experiments (key, variants_json, status, started_at) VALUES (?, ?, 'running', unixepoch())",
+  ).run(key, JSON.stringify([{ key: 'control', weight: 100 - chatW }, { key: 'chat', weight: chatW }]));
+  const N = 4000, users = Array.from({ length: N }, (_, i) => 1_000_000 + i * 7);
+
+  // بدونِ هیچ آزمایشی: همه control و هیچ exposure ای (کد تا start شدن ساکت و بی‌اثر است).
+  const d0 = fresh(); const r0 = mk(true, [], 'fa', d0);
+  ok(users.every((u) => !r0.chatRolloutPeek(u)), 'تا آزمایشی running نشود هیچ کاربری شاخه‌ی chat نمی‌گیرد');
+  users.slice(0, 50).forEach((u) => r0.exposeChatRollout(u));
+  ok(d0.prepare('SELECT COUNT(*) c FROM ab_exposures').get().c === 0, 'و آزمایشِ ساخته‌نشده هیچ exposure ای نمی‌نویسد');
+
+  // فازِ ۱: a = ۸۰/۲۰
+  const d = fresh(); addExp(d, 'chat_rollout_a', 20); const r = mk(true, [], 'fa', d);
+  users.forEach((u) => r.exposeChatRollout(u));
+  const shareA = users.filter((u) => r.chatRolloutPeek(u)).length / N;
+  ok(shareA > 0.17 && shareA < 0.23, `فازِ ۱: سهمِ chat نزدیکِ ۲۰٪ (${(shareA * 100).toFixed(1)}٪)`);
+  const expA = d.prepare("SELECT variant, COUNT(*) c FROM ab_exposures WHERE experiment_key='chat_rollout_a' GROUP BY variant").all();
+  const cntA = Object.fromEntries(expA.map((x) => [x.variant, x.c]));
+  ok((cntA.chat || 0) + (cntA.control || 0) === N, 'هر کاربرِ واجد شرایط دقیقاً یک exposure در کلیدِ a دارد (هر دو شاخه)');
+  const chatA = new Set(users.filter((u) => r.chatRolloutPeek(u)));
+
+  // فازِ ۲: b = ۶۲.۵/۳۷.۵ روی control های a ⟵ کل ≈ ۵۰٪
+  addExp(d, 'chat_rollout_b', 37.5);
+  /* ⚠️ `shared/ab.js` config را ۶۰ ثانیه per db کش می‌کند (همان تأخیرِ پروداکشن بعد از
+   * start کردنِ کلیدِ تازه). کپیِ کلِ وضعیت در یک db تازه همان «بعد از انقضای کش» است. */
+  const dd = fresh();
+  for (const row of d.prepare('SELECT * FROM experiments').all()) {
+    dd.prepare('INSERT INTO experiments (key, variants_json, status, started_at) VALUES (?,?,?,?)').run(row.key, row.variants_json, row.status, row.started_at);
+  }
+  for (const row of d.prepare('SELECT experiment_key, user_id, variant FROM ab_exposures').all()) {
+    dd.prepare('INSERT INTO ab_exposures (experiment_key, user_id, variant) VALUES (?,?,?)').run(row.experiment_key, row.user_id, row.variant);
+  }
+  const rb =mk(true, [], 'fa', dd);
+  users.forEach((u) => rb.exposeChatRollout(u));
+  const chatB = new Set(users.filter((u) => rb.chatRolloutPeek(u)));
+  const shareB = chatB.size / N;
+  ok(shareB > 0.46 && shareB < 0.54, `فازِ ۲: سهمِ کلِ chat نزدیکِ ۵۰٪ (${(shareB * 100).toFixed(1)}٪)`);
+  ok([...chatA].every((u) => chatB.has(u)), '⚠️ هیچ کاربرِ گفتگوداری با بزرگ‌شدنِ دامنه گفتگویش را از دست نمی‌دهد');
+  const bRows = dd.prepare("SELECT user_id FROM ab_exposures WHERE experiment_key='chat_rollout_b'").all().map((x) => x.user_id);
+  ok(bRows.every((u) => !chatA.has(u)), 'کلیدِ b فقط روی کسانی expose می‌شود که a آن‌ها را control کرده بود');
+  ok(bRows.length === N - chatA.size, `و روی **همه‌ی** آن‌ها (${bRows.length} از ${N - chatA.size})`);
+
+  // stopped ⟵ همه control، بدونِ دیپلوی (kill switchِ A/B)
+  const ds = fresh();
+  ds.prepare("INSERT INTO experiments (key, variants_json, status) VALUES ('chat_rollout_a', ?, 'stopped')")
+    .run(JSON.stringify([{ key: 'control', weight: 0.0001 }, { key: 'chat', weight: 100 }]));
+  ds.prepare("INSERT INTO ab_exposures (experiment_key, user_id, variant) VALUES ('chat_rollout_a', 5, 'chat')").run();
+  ok(mk(true, [], 'fa', ds).chatRolloutPeek(5) === false, 'آزمایشِ stopped حتی کاربرِ chatِ قبلی را هم به control برمی‌گرداند');
+
+  // گاردهای exposure
+  const dg = fresh(); addExp(dg, 'chat_rollout_a', 50);
+  mk(true, [11], 'fa', dg).exposeChatRollout(11);
+  mk(true, [], 'ru', dg).exposeChatRollout(12);
+  mk(false, [], 'fa', dg).exposeChatRollout(13);
+  ok(dg.prepare('SELECT COUNT(*) c FROM ab_exposures').get().c === 0,
+    'تستر، زبانِ دیگر، و کلیدِ خاموشی هیچ exposure ای نمی‌سازند');
+  mk(true, [], 'fa', dg).exposeChatRollout(14);
+  ok(dg.prepare('SELECT COUNT(*) c FROM ab_exposures').get().c === 1, 'و کنترلِ مثبت: کاربرِ عادی واقعاً ثبت می‌شود');
+
+  // ساختاری: نقطه‌ی تحویل هر دو شاخه را بعد از ارسالِ واقعی و زیرِ **یک** شرط ثبت می‌کند.
+  const deliver = (CODE.match(/const eligible = chatEligible\(uid, readingId\)\.ok;[\s\S]*?\n  \}\n\}/) || [])[0] || '';
+  ok(deliver.length > 0, 'بلوکِ تصمیمِ پس از فال پیدا شد');
+  ok(before(deliver, 'await postReadingOffer(ctx, uid, readingId);', 'exposeChatRollout(uid);'),
+    'شاخه‌ی chat: exposure **بعد از** ارسالِ پیشنهاد');
+  ok(before(deliver, 'await ctx.reply(L.reading.rateAsk', 'if (eligible && !chatRolloutPeek(uid)) exposeChatRollout(uid);'),
+    'شاخه‌ی control: exposure **بعد از** ارسالِ نظرسنجی، با همان شرطِ `eligible`');
+  ok(/if \(chatOn\(uid\) && eligible\)/.test(deliver), 'و شرطِ `eligible` مستقل از شاخه است');
+  ok(!/chatOn\(uid\)/.test(bodyOf(SRC, 'function chatEligible(uid, readingId)') || 'chatOn(uid)'),
+    '⚠️ `chatEligible` خودش به `chatOn` وابسته نیست، وگرنه control ها هرگز ثبت نمی‌شدند');
 }
 
 /* ═══ ۲) مهاجرتِ افزایشی (بند ۲ج/۱) ═══════════════════════════════════ */
@@ -781,10 +879,11 @@ console.log('\n▶ ۱۲) پیشنهادِ پس از فال');
    * **در همان جایگاه** می‌آید. ادعای معکوس هم لازم است، وگرنه «پیشنهاد می‌آید» سبز
    * می‌ماند در حالی که نظرسنجی هم کنارش مانده و کاربر دو دعوتِ رقیب می‌گیرد. */
   const fin = bodyOf(CODE, 'async function finishReading(');
-  const iChat = fin.indexOf('if (chatOn(uid) && chatEligible(uid, readingId).ok)');
+  const iChat = fin.indexOf('if (chatOn(uid) && eligible)');
   const iRate = fin.indexOf('L.reading.rateAsk');
-  ok(iChat > 0 && iRate > iChat, '🔑 پیشنهادِ گفتگو **جای** نظرسنجی می‌نشیند، نه بعدش');
-  ok(/postReadingOffer\(ctx, uid, readingId\);\s*\n\s*await ensureKeyboard\(ctx\.telegram, uid\);/.test(fin),
+  ok(/const eligible = chatEligible\(uid, readingId\)\.ok;/.test(fin) && iChat > 0 && iRate > iChat,
+    '🔑 پیشنهادِ گفتگو **جای** نظرسنجی می‌نشیند، نه بعدش');
+  ok(/postReadingOffer\(ctx, uid, readingId\);\s*\n\s*exposeChatRollout\(uid\);\s*\n\s*await ensureKeyboard\(ctx\.telegram, uid\);/.test(fin),
     '⌨️ و چون نقطه‌ی صدورِ کیبوردِ `fbr:` از دست می‌رود، حاملِ بی‌صدا جایش را می‌گیرد (بند ۹ب-۳)');
   ok(/L\.reading\.rateAsk/.test(fin), '⚠️ و کدِ نظرسنجی پاک نشده (کوهورتِ بدونِ گفتگو همان را می‌بیند)');
   const fbr = bodyOf(CODE, "bot.action(/^fbr:([1-5]):(\\d+)$/, async (ctx) => {");
@@ -900,6 +999,33 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
   ok(/chat_messages/.test(wipe), 'wipeUser جدولِ گفتگو را پاک می‌کند (ریستِ ادمین کامل است)');
   ok(/INTENT\.CHAT\]:\s*\(ctx, arg\) => openChat\(ctx, arg\)/.test(CODE),
     'نیتِ گفتگو با **شناسه‌ی فال** بازپخش می‌شود، نه روی فالِ صفر');
+
+  /* 🔭 پوششِ کاملِ رویدادها (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۷/۰۶: «تمام کلیک‌ها و اکشن‌های
+   * کاربر در این فیچر ثبت شود تا بعداً سفرِ هر کاربر و هر گفتگو را کامل تحلیل کنیم»).
+   * journey هر تپ و هر پیام را از قبل خودکار ثبت می‌کند؛ این‌ها رویدادهای **معنایی**اند
+   * که می‌گویند آن تپ به چه نتیجه‌ای رسید — مخصوصاً مسیرهای ردشده که قبلاً بی‌رد بودند. */
+  const REQUIRED = ['chat_offer_shown', 'chat_opened', 'chat_unavailable', 'chat_message', 'chat_paywall',
+    'chat_llm_failed', 'chat_refund', 'chat_crisis', 'chat_smalltalk', 'chat_busy', 'chat_exited', 'chat_guard',
+    'chat_keep', 'chat_resumed', 'chat_new_tap', 'chat_followup', 'chat_followup_gone', 'chat_skip', 'chat_voice',
+    'chat_fix', 'chat_thin'];
+  const missing = REQUIRED.filter((e) => !new RegExp(`track\\(db, [\\w.()]+, '${e}'`).test(CODE));
+  ok(missing.length === 0, `هر ${REQUIRED.length} رویدادِ معنایی گفتگو ثبت می‌شوند${missing.length ? ` (غایب: ${missing.join(', ')})` : ''}`);
+  // هر هندلرِ دکمه‌ی گفتگو یا خودش ثبت می‌کند یا به تابعی می‌رسد که ثبت می‌کند.
+  const actions = [...CODE.matchAll(/bot\.action\((\/\^chat[^,]*|'chat_[a-z_]+'),/g)].map((m) => m[1]);
+  ok(actions.length >= 7, `هندلرهای گفتگو پیدا شدند (${actions.length})`);
+  const tracksVia = /track\(db,|closeChat\(|openChat\(|handleChatMessage\(|collapseChatOffer\(/;
+  const silent = actions.filter((h) => !tracksVia.test(actBody(`bot.action(${h},`) || ''));
+  ok(silent.length === 0, `هیچ هندلرِ گفتگویی بی‌رد نیست${silent.length ? ` (بی‌رد: ${silent.join(' ')})` : ''}`);
+  const cmBody = (CODE.match(/track\(db, uid, 'chat_message', \{[\s\S]*?\}\);/) || [])[0] || '';
+  for (const p of ['via', 'price', 'free', 'q_chars', 'has_fu', 'has_offer', 'new_reading', 'support', 'end', 'model', 'fixed']) {
+    ok(new RegExp(`\\b${p}\\b`).test(cmBody), `\`chat_message\` propِ \`${p}\` را دارد`);
+  }
+  // مسیرهای ردِ ورود: هیچ `return` ی بدونِ رد نیست (قبلاً بی‌صدا بودند).
+  const hcm = bodyOf(CODE, 'async function handleChatMessage(') || '';
+  ok(/'chat_unavailable'/.test(hcm) && /'chat_smalltalk'/.test(hcm) && /'chat_busy'/.test(hcm),
+    'handleChatMessage: فالِ ناموجود، تعارف و هم‌زمانی هر سه ثبت می‌شوند');
+  ok(/via = 'typed'/.test(hcm) && /runChatTurn\(\{[^}]*\bvia\b/.test(hcm),
+    'و منبعِ پیام (تایپ یا دکمه) تا خودِ نوبت می‌رسد');
 }
 
 /* ═══ ۱۶) سنجه‌های لحن و اکوی برچسب (درسِ دورِ ۱ آزمایشگاه) ══════════
@@ -1451,8 +1577,8 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
     '⚠️ دکمه‌ی کهنه/مصرف‌شده پیامِ صریح می‌گیرد، نه سکوت');
   ok(/L\.chat\.askQuote\(esc\(q\)\)/.test(askCode) && /parse_mode: 'HTML'/.test(askCode),
     '💬 سؤال در باکسِ نقلِ‌قول و با escape می‌رود (ورودیِ مدل، پس HTML خام ممنوع)');
-  ok(/handleChatMessage\(ctx, uid, q, \{ askedId: qMsg\?\.message_id \|\| 0 \}\)/.test(askCode),
-    '📎 و جواب به **همان پیامِ نقلِ‌قولی** ریپلای می‌خورد (خطِ گفتگو گم نمی‌شود)');
+  ok(/handleChatMessage\(ctx, uid, q, \{ askedId: qMsg\?\.message_id \|\| 0, via: 'button' \}\)/.test(askCode),
+    '📎 و جواب به **همان پیامِ نقلِ‌قولی** ریپلای می‌خورد، با برچسبِ `via` تا تپِ دکمه از تایپ جدا شمرده شود');
   ok(/if \(!CHAT_FOLLOWUP\) return;/.test(askCode), 'و رول‌بکِ یک‌خطی دارد');
 
   /* رفتاری: فیلترِ کیبورد فقط همان یک ردیف را برمی‌دارد. برداشتنِ کلِ کیبورد یعنی
