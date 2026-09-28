@@ -151,7 +151,7 @@ const BASE_SQL = `
     user_id INTEGER, amount INTEGER, ref_id INTEGER, note TEXT NOT NULL DEFAULT '');
   CREATE TABLE IF NOT EXISTS users (telegram_id INTEGER PRIMARY KEY, name TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));`;
 
-function boot({ file = ':memory:', flag = true, stars = false, recipients = null } = {}) {
+function boot({ file = ':memory:', flag = true, defaults = true, stars = false, recipients = null } = {}) {
   const db = new Database(file);
   db.exec(BASE_SQL);
   const errs = [], logs = [], sent = [], uses = [];
@@ -159,7 +159,7 @@ function boot({ file = ':memory:', flag = true, stars = false, recipients = null
     { id: 2, kind: 'white', active: 1, sort: 2, bank: 'ملت', holder: 'ع', number: '6104330000005224' },
     { id: 3, kind: 'regular', active: 0, sort: 3, bank: 'شهر', holder: 'ع', number: '5047061675180547' }];
   const env = {
-    db, RT, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
+    db, RT, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, TAG_DEFAULTS_ENABLED: defaults, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
     cardSt: () => ({ all: { all: () => CARDS } }),
     cardOfPayment: (p) => CARDS.find((c) => c.id === Number(p?.card_id)) || CARDS[0],
     cardOfPid: (pid) => env.cardOfPayment(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid)),
@@ -325,7 +325,9 @@ if (h) {
   ok(!tagsOfPay(h, pid).length && !h.curTagsOf(pid).bank, 'پاک‌کردن تگِ دستی را برمی‌دارد');
   ok(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events'").get() && !h.errs.length, 'هیچ رویدادِ analytics زیرِ کاربر ساخته نشد، هیچ خطایی');
 
-  // صفِ داشبورد (شکل‌های دست‌ساز).
+  // صفِ داشبورد (شکل‌های دست‌ساز). `pNew` تگِ پیش‌فرضِ کاربر را گرفته (v3.134.0، بخشِ بعدی می‌سنجد)؛
+  // این‌جا روی رسیدِ بی‌تگ سنجیده می‌شود.
+  db.prepare('DELETE FROM receipt_tags WHERE payment_id=?').run(pNew);
   const q = (note, ref = null) => ({ id: 1, ref_id: ref, note: JSON.stringify(note) });
   h.sent.length = 0;
   await h.applyQueuedTagOp(q({ op: 'value_add', dim: 'bank', key: 'resalat2', label: 'رسالت ۲' }));
@@ -347,6 +349,93 @@ if (h) {
   await hs.applyQueuedTagOp(q({ op: 'value_add', dim: 'bank', key: 'x', label: 'x' }));
   ok(hs.errs.some((e) => /TAG_OP_REFUSED/.test(e)) && !hs.db.prepare("SELECT 1 FROM tag_values WHERE key='x'").get(),
     'ریلِ استارز: sweep صریح امتناع می‌کند');
+}
+
+/* ── ۲ب) پیش‌فرضِ تگ (v3.134.0) ─────────────────────────────────────────────────
+ * خواسته‌ی مالک (۱۴۰۵/۰۷/۰۶): هر رسیدِ تازه اپ و بانک را، هر بُعد جدا، از **آخرین** تگی که همین کاربر
+ * گرفته پیش‌پر بیاورد؛ مالک فقط وقتی چیزِ متفاوتی دید عوض می‌کند و از آن به بعد همان پیش‌فرض است. */
+console.log('\nپیش‌فرضِ تگ (v3.134.0):');
+if (PART !== 'dash') {
+  const d = boot();
+  const U = 31, row = (pid) => d.db.prepare('SELECT * FROM payments WHERE id=?').get(pid);
+  const send = async (pid) => { d.sent.length = 0; await d.sendToReceiptRecipients(row(pid), { caption: 'CAP', photoFileId: 'F', kb: null }); };
+  const ownerBtns = () => (d.sent.find((x) => x.to === OWNER)?.extra?.reply_markup?.inline_keyboard?.[0] || []).map((b) => b.text);
+  const tags = (pid) => Object.fromEntries(d.db.prepare("SELECT dim, value_key FROM receipt_tags WHERE payment_id=? AND source='admin'").all(pid).map((r) => [r.dim, r.value_key]));
+  const bump = (pid, dim, dt) => d.db.prepare('UPDATE receipt_tags SET updated_at=updated_at+? WHERE payment_id=? AND dim=?').run(dt, pid, dim);
+
+  const p1 = d.payment(U);
+  await send(p1);
+  ok(JSON.stringify(ownerBtns()) === JSON.stringify(['📱 اپ: —', '🏦 بانک: —']) && !Object.keys(tags(p1)).length,
+    'اولین رسیدِ کاربر (بی‌سابقه): هر دو فیلد خالی، چیزی ثبت نمی‌شود');
+  await d.tap(`tg:s:${p1}:app:ap`, OWNER, null);
+  await d.tap(`tg:s:${p1}:bank:saman`, OWNER, null);
+  bump(p1, 'app', 1); bump(p1, 'bank', 1);
+
+  const p2 = d.payment(U);
+  await send(p2);
+  ok(JSON.stringify(ownerBtns()) === JSON.stringify(['📱 اپ: آپ', '🏦 بانک: سامان']),
+    'رسیدِ بعدی: هر دو فیلد با آخرین تگِ کاربر پیش‌پر روی پیامِ مالک');
+  ok(JSON.stringify(d.db.prepare('SELECT dim, value_key, source, by_id FROM receipt_tags WHERE payment_id=? ORDER BY dim').all(p2))
+    === JSON.stringify([{ dim: 'app', value_key: 'ap', source: 'admin', by_id: -1 }, { dim: 'bank', value_key: 'saman', source: 'admin', by_id: -1 }]),
+    'پیش‌فرض واقعاً روی خودِ رسید ثبت می‌شود (تگِ دستی، `by_id=-1` = پیش‌فرضِ خودکار)');
+  ok(d.logs.some((l) => /🏷 RECEIPT_TAG default app=ap bank=saman pay#/.test(l)), 'مارکرِ لاگِ `RECEIPT_TAG default`');
+  ok(!(d.sent.find((x) => x.to === ADMIN2)?.extra?.reply_markup?.inline_keyboard || []).flat().some((b) => /^tg:/.test(b.callback_data)),
+    'ادمینِ دیگر همچنان هیچ دکمه‌ی تگی نمی‌بیند');
+
+  // مالک بانک را روی همین رسید عوض می‌کند ⟵ از این به بعد پیش‌فرض همان است؛ اپ دست‌نخورده می‌ماند.
+  await d.tap(`tg:s:${p2}:bank:melli`, OWNER, null);
+  bump(p2, 'bank', 2);
+  const p3 = d.payment(U);
+  await send(p3);
+  ok(JSON.stringify(tags(p3)) === JSON.stringify({ app: 'ap', bank: 'melli' }), 'تغییرِ مالک پیش‌فرضِ بعدی می‌شود، هر بُعد جدا');
+
+  // «آخرین» = آخرین تگی که خورده، نه تگِ جدیدترین رسید: مالک اپِ رسیدِ قدیمی را عوض کرد.
+  await d.tap(`tg:s:${p1}:app:top`, OWNER, null);
+  bump(p1, 'app', 10);
+  const p4 = d.payment(U);
+  await send(p4);
+  ok(tags(p4).app === 'top' && tags(p4).bank === 'melli', 'ویرایشِ تگِ یک رسیدِ قدیمی هم پیش‌فرضِ بعدی می‌شود');
+
+  // «پاک کردن» ماندگار است: یادآوری/ارسالِ دوباره‌ی همان رسید دوباره پرش نمی‌کند.
+  await d.tap(`tg:c:${p4}:bank`, OWNER, null);
+  await send(p4);
+  ok(!tags(p4).bank && ownerBtns()[1] === '🏦 بانک: —', 'پاک‌کردنِ پیش‌فرض ماندگار است (ارسالِ دوباره‌ی رسید پرش نمی‌کند)');
+  const p4b = d.payment(U);
+  await d.tap(`tg:s:${p4b}:bank:mellat`, OWNER, null);
+  bump(p4b, 'bank', 20);
+  await send(p4b);
+  ok(tags(p4b).bank === 'mellat' && tags(p4b).app === 'top', 'تگِ دستیِ موجود روی رسید هرگز با پیش‌فرض بازنویسی نمی‌شود');
+
+  // رسیدِ ردشده/برگشتی منبعِ پیش‌فرض نیست؛ مقدارِ غیرفعال هم پیش‌فرض نمی‌شود.
+  const pRej = d.payment(U, 'rejected');
+  d.db.prepare("INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, by_id, updated_at) VALUES (?,?, 'bank', 'blu', ?, unixepoch()+100)").run(pRej, U, OWNER);
+  const p5 = d.payment(U);
+  await send(p5);
+  ok(tags(p5).bank === 'mellat', 'تگِ رسیدِ ردشده (مثلاً رسیدِ فیک) پیش‌فرض نمی‌شود');
+  d.db.prepare("UPDATE tag_values SET active=0 WHERE dim='bank' AND key='mellat'").run();
+  const p6 = d.payment(U);
+  await send(p6);
+  ok(tags(p6).bank === 'melli', 'مقدارِ غیرفعال‌شده پیش‌فرض نمی‌شود (آخرین مقدارِ فعال می‌آید)');
+  d.db.prepare("UPDATE tag_values SET active=1 WHERE dim='bank' AND key='mellat'").run();
+
+  // کاربرِ دیگر هیچ چیز از این کاربر به ارث نمی‌برد.
+  const pO = d.payment(U + 1);
+  await send(pO);
+  ok(!Object.keys(tags(pO)).length, 'تگِ یک کاربر به رسیدِ کاربرِ دیگر نمی‌رسد');
+  ok(!d.errs.length, 'بدونِ هیچ خطا');
+
+  // رول‌بک: TAG_DEFAULTS_ENABLED=false ⟵ رفتارِ v3.133.0.
+  const off = boot({ defaults: false });
+  const q1 = off.payment(U);
+  await off.tap(`tg:s:${q1}:app:ap`, OWNER, null);
+  const q2 = off.payment(U);
+  await off.sendToReceiptRecipients(off.db.prepare('SELECT * FROM payments WHERE id=?').get(q2), { caption: 'CAP', photoFileId: 'F', kb: null });
+  ok(!off.db.prepare('SELECT 1 FROM receipt_tags WHERE payment_id=?').get(q2)
+    && (off.sent.find((x) => x.to === OWNER)?.extra?.reply_markup?.inline_keyboard?.[0] || [])[0]?.text === '📱 اپ: —',
+    'رول‌بک (TAG_DEFAULTS_ENABLED=false): فیلدها خالی، چیزی ثبت نمی‌شود');
+  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/applyDefaultTags\(p\);[^\n]*\n\s*const info = receiptInfoLines\(p\);/.test(code),
+    'پیش‌فرض داخلِ تک‌نقطه‌ی ارسالِ رسید و **قبل از** ساختِ کیبورد (همه‌ی مسیرهای رسید را می‌پوشاند)');
 }
 
 /* ── ۳) ساختاری ────────────────────────────────────────────────────────────── */
