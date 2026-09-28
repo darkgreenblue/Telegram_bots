@@ -21,19 +21,76 @@
 //   ▶ ۳ طرحِ کوئری: `/screens` هیچ زیرکوئریِ همبسته‌ای ندارد.
 //   ▶ ۴ صف: کلیکِ دستی جلوی صف می‌رود، ساختِ در جریان تکراری نمی‌شود، وضعیتِ «در حال
 //     آماده‌سازی» برای ساختِ در جریان هم نشان داده می‌شود، و stderrِ worker به لاگ می‌رسد.
+//   ▶ ۵ دیسک (دورِ دوم، بعد از دیپلوی): ایندکسِ ادمین کافی نبود و `/dash` روی سرور هنوز به
+//     سقف می‌خورد، چون سرور **دیسک‌محدود** است (~۱۵MB/s) و `status`/`created_at` در
+//     `readings` بعد از `llm_json`ِ حجیم‌اند؛ هر خواندنشان یعنی خواندنِ صفحه‌های overflowِ
+//     همان فال. درمان دو ایندکسِ پوششی در بوتِ تاروت است به‌علاوه‌ی بازنویسیِ
+//     `costPerDiamond`. این بخش **تعریفِ ایندکس‌ها و DDLِ جدول‌ها را از خودِ
+//     `bots/tarot/index.js` می‌خواند** (ترتیبِ ستون همان چیزی است که باگ را ساخت، پس کپیِ
+//     دستی‌اش خودِ باگ را پنهان می‌کرد)، هم‌ارزیِ خروجی را می‌سنجد، و برای هر ادعای طرحِ
+//     کوئری یک کنترلِ مثبت دارد: همان SQL بدونِ ایندکس، و SQLِ قبلی با ایندکس، هر دو هنوز
+//     ردیفِ کامل را می‌خوانند.
 //
 // اجرا: node tools/check-dash-speed.mjs   (بدون شبکه؛ فیکسچر در پوشه‌ی موقت)
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
+
+/* --part=bot فقط ادعاهای ساختاریِ بخشِ ۵ را روی سورسِ ربات می‌سنجد، بدونِ better-sqlite3ِ
+ * داشبورد. لازم است چون ci-changed-bots یک تغییرِ صرفاً `bots/tarot/` را فقط به جابِ tarot
+ * می‌برد؛ بدونِ این، جابه‌جا شدنِ ایندکس‌ها به بعد از launch (یا حذفشان) از CI سبز رد می‌شد. */
+const PART = (process.argv.find((a) => a.startsWith('--part=')) || '--part=all').slice(7);
+if (!['all', 'bot'].includes(PART)) { console.error(`❌ --part نامعتبر: ${PART}`); process.exit(1); }
+
+/* از خودِ سورسِ ربات: DDLِ دو جدول (با ترتیبِ واقعیِ ستون‌ها) و تعریفِ ایندکس‌های داشبورد */
+const tarotSrc = readFileSync(path.resolve('bots/tarot/index.js'), 'utf8');
+const ddlOf = (t) => (tarotSrc.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${t} \\([\\s\\S]*?\\n  \\);`)) || [])[0];
+const READINGS_DDL = ddlOf('readings');
+const LLM_USAGE_DDL = ddlOf('llm_usage');
+const DASH_IDX = new Map([...tarotSrc.matchAll(/'(CREATE INDEX IF NOT EXISTS (idx_readings_stats|idx_events_ev_user) ON [^']+)'/g)]
+  .map(m => [m[2], m[1]]));
+
+let pass = 0; const errs = [];
+const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
+const done = () => {
+  console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
+  process.exit(errs.length ? 1 : 0);
+};
+
+/* ─ بخشِ ۵ الف) ساختاری: هر دو ایندکس در بوتِ ربات، بعد از جدول‌ها و قبل از launch، هر کدام در try ─ */
+function structural() {
+  ok(!!READINGS_DDL && !!LLM_USAGE_DDL, 'DDLِ readings و llm_usage از خودِ bots/tarot/index.js خوانده شد');
+  ok(READINGS_DDL && READINGS_DDL.indexOf('llm_json') < READINGS_DDL.indexOf('status'),
+    'فیکسچر همان ترتیبِ واقعی را دارد: status بعد از llm_json (همان چیزی که overflow را می‌سازد)');
+
+  ok(DASH_IDX.size === 2, `هر دو ایندکس در سورسِ ربات تعریف شده‌اند (${[...DASH_IDX.keys()].join('، ')})`);
+  ok(/ON readings\(status, user_id, created_at, price, type, feedback\)/.test(DASH_IDX.get('idx_readings_stats') || '')
+    && /ON events\(event, created_at, user_id\)/.test(DASH_IDX.get('idx_events_ev_user') || ''),
+    'ستون‌های ایندکس‌ها همان‌اند که کوئری‌های داشبورد و ربات را پوشش می‌دهند');
+  const at = (s) => tarotSrc.indexOf(s);
+  const idxAt = at('CREATE INDEX IF NOT EXISTS idx_readings_stats');
+  // «قبل از launch» یعنی کدِ سطحِ ماژول، نه داخلِ یک تابع: گذاشتنش در onLaunched (که متنش
+  // هم بالای bot.launch است) یعنی ساخت بعد از شروعِ polling و قفل‌شدنِ حلقه‌ی رویداد.
+  const loopAt = tarotSrc.search(/\nfor \(const \[name, sql\] of \[\n  \['idx_readings_stats'/);
+  ok(loopAt > 0 && loopAt < idxAt && at('CREATE TABLE IF NOT EXISTS readings') < loopAt
+    && at('\nensureAnalytics(db);') < loopAt && loopAt < at('new Telegraf('),
+    'ساخت در سطحِ ماژول، بعد از جدولِ readings و ensureAnalytics(events) و قبل از ساختِ ربات است (هرگز بعد از launch)');
+  const loop = tarotSrc.slice(idxAt, tarotSrc.indexOf('\n}\n', idxAt));
+  ok(/try \{[\s\S]*db\.exec\(sql\)[\s\S]*catch \(e\) \{ logErr\(`❌ DASH_INDEX/.test(loop),
+    'هر ایندکس جدا داخلِ try است و شکستش فقط مارکرِ «❌ DASH_INDEX» می‌گذارد (بوتِ ربات نمی‌شکند)');
+}
+
+if (PART === 'bot') {
+  console.log('▶ ۵ الف) ایندکس‌های پوششیِ داشبورد در بوتِ ربات (فقط ساختاری)');
+  structural();
+  done();
+}
 
 const require = createRequire(path.resolve('bots/dashboard/package.json'));
 const Database = require('better-sqlite3');
 const base = path.resolve('bots/dashboard');
 
-let pass = 0; const errs = [];
-const ok = (c, m) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { errs.push(m); console.log(`  ❌ ${m}`); } };
 
 const root = mkdtempSync(path.join(tmpdir(), 'dashspeed-'));
 const dataDir = path.join(root, 'tarotdata');
@@ -71,7 +128,35 @@ const { ensureJourney } = await import(`file://${path.resolve('shared/journey.js
       else if (k < 0.85) ie.run(u, 'act', JSON.stringify({ a: 'cb' + Math.floor(rnd() * 6), ...adm }), t);
       else ie.run(u, ['start', 'paywall_shown', 'product_delivered'][Math.floor(rnd() * 3)], '{}', t);
     }
+    // فال‌ها و هزینه‌ها (بخشِ ۵): llm_jsonِ حجیم تا ستون‌های بعدش واقعاً در overflow بیفتند،
+    // هر وضعیت و هر اندازه، چند ردیفِ هزینه per فال، و هزینه‌هایی که به فالِ رایگان/ناتمام/
+    // ناموجود یا هیچ فالی (ref_id=0) اشاره می‌کنند.
+    if (READINGS_DDL && LLM_USAGE_DDL) {
+      db.exec(READINGS_DDL); db.exec(LLM_USAGE_DDL);
+      const ir = db.prepare('INSERT INTO readings (user_id, type, price, llm_json, feedback, status, created_at) VALUES (?,?,?,?,?,?,?)');
+      const il = db.prepare('INSERT INTO llm_usage (user_id, kind, ref_id, cost_usd, created_at) VALUES (?,?,?,?,?)');
+      for (let i = 0; i < 400; i++) {
+        const u = rnd() < 0.03 ? ADMIN : uids[Math.floor(rnd() * uids.length)];
+        const price = [0, 3, 5, 10][Math.floor(rnd() * 4)];
+        const st = ['delivered', 'delivered', 'delivered', 'started', 'paid', 'canceled', 'refunded'][Math.floor(rnd() * 7)];
+        const ts = now - Math.floor(rnd() * 60 * 86400);
+        const rid = ir.run(u, 'open' + (price || 3), price, 'x'.repeat(3000 + Math.floor(rnd() * 3000)),
+          ['', 'rate:' + (1 + Math.floor(rnd() * 5)), 'yes'][Math.floor(rnd() * 3)], st, ts).lastInsertRowid;
+        const n = Math.floor(rnd() * 4); // ۰ تا ۳ ردیفِ هزینه (خوانش + تعمیر + رونویسی)
+        for (let j = 0; j < n; j++) il.run(u, ['reading', 'repair', 'transcribe'][j], rid, Math.round(rnd() * 1e6) / 1e8, ts + j);
+      }
+      for (let i = 0; i < 60; i++) il.run(uids[i % uids.length], 'daily_card', 0, 0.0001 * (i + 1), now - i * 3600);
+      il.run(uids[0], 'reading', 999999, 0.5, now); // فالی که وجود ندارد
+    }
   })();
+  db.close();
+}
+// نسخه‌ی بدونِ دو ایندکسِ تازه (برای کنترل‌های مثبت) و بعد ساختِ ایندکس‌ها با همان SQLِ ربات
+const noIdxFile = path.join(root, 'noidx.db');
+copyFileSync(file, noIdxFile);
+{
+  const db = new Database(file);
+  for (const sql of DASH_IDX.values()) db.exec(sql);
   db.close();
 }
 
@@ -194,6 +279,75 @@ console.log('\n▶ ۳) «صفحه‌ها» هیچ زیرکوئریِ همبست�
   const plan = main ? ref.prepare('EXPLAIN QUERY PLAN ' + main.sql).all(...main.params).map(r => r.detail).join(' | ') : '';
   ok(main && !/CORRELATED/.test(plan), 'طرحِ کوئری بدونِ CORRELATED SCALAR SUBQUERY است (per نمایش یک جستجو نمی‌زند)');
 }
+
+console.log('\n▶ ۵) دیسک: ایندکس‌های پوششیِ ربات و بازنویسیِ costPerDiamond');
+{
+  structural();   // ─ الف) ساختاری، مشترک با --part=bot (بالا) ─
+
+  const idx = new Database(file, { readonly: true });
+  const raw = new Database(noIdxFile, { readonly: true });
+  const planOf = (db, sql, params = []) => db.prepare('EXPLAIN QUERY PLAN ' + sql).all(...params).map(r => r.detail);
+
+  // ─ ب) هم‌ارزیِ costPerDiamond: تابعِ واقعیِ داشبورد در برابرِ SQLِ قبلی، روی همان فیکسچر ─
+  const OLD_CPD = `SELECT size, SUM(usd) AS usd, COUNT(*) AS readings, SUM(size) AS diamonds FROM (
+      SELECT r.price AS size, r.id AS rid, SUM(l.cost_usd) AS usd
+        FROM readings r JOIN llm_usage l ON l.ref_id = r.id
+       WHERE r.status='delivered' AND r.price > 0 AND l.ref_id > 0
+       GROUP BY r.id
+    ) GROUP BY size ORDER BY size`;
+  const C = await import(`file://${base}/lib/cpa.js`);
+  captured.length = 0;
+  const cpd = C.costPerDiamond('tarot');
+  const newSql = captured.find(c => /FROM readings r JOIN u/.test(c.sql))?.sql;
+  const fmt = (s) => `${s.size}|${s.readings}|${s.diamonds}|${Number(s.usd).toFixed(9)}`;
+  const oldRows = idx.prepare(OLD_CPD).all().map(fmt);
+  const newRows = cpd.sizes.map(fmt);
+  ok(oldRows.length >= 3 && JSON.stringify(oldRows) === JSON.stringify(newRows),
+    `costPerDiamond: ${newRows.length} اندازه، per اندازه تعدادِ فال و الماس و دلار عیناً برابرِ SQLِ قبلی`);
+  // کنترلِ مثبت: فیکسچر واقعاً فالِ چندردیفه دارد، وگرنه «اول per فال جمع کن» سنجیده نمی‌شد
+  const flat = idx.prepare(`SELECT COUNT(*) c FROM readings r JOIN llm_usage l ON l.ref_id = r.id
+    WHERE r.status='delivered' AND r.price > 0`).get().c;
+  ok(flat > cpd.readings, `کنترلِ مثبت: شمارشِ تخت (${flat}) از شمارشِ per فال (${cpd.readings}) بزرگ‌تر است`);
+
+  // ─ ج) طرحِ کوئری: هر دو تغییر لازم‌اند، هیچ‌کدام به‌تنهایی کافی نیست ─
+  const ROW = /SEARCH r USING INTEGER PRIMARY KEY/;
+  const pNew = newSql ? planOf(idx, newSql).join(' | ') : '';
+  ok(!!newSql && pNew.includes('COVERING INDEX idx_readings_stats') && !ROW.test(pNew),
+    'SQLِ تازه با ایندکس: readings فقط از ایندکسِ پوششی خوانده می‌شود، نه ردیفِ کامل');
+  ok(ROW.test(planOf(idx, OLD_CPD).join(' | ')),
+    'کنترلِ مثبت: SQLِ قبلی **با همان ایندکس** هنوز per فال ردیفِ کامل را می‌خواند (بازنویسی لازم بود)');
+  ok(!!newSql && ROW.test(planOf(raw, newSql).join(' | ')),
+    'کنترلِ مثبت: SQLِ تازه **بدونِ ایندکس** هنوز ردیفِ کامل را می‌خواند (ایندکس لازم بود)');
+
+  // ─ د) SQLهای واقعیِ سنجه‌های اصلی (lib/engage.js) هرگز ردیفِ کاملِ فال را نمی‌خوانند ─
+  const E = await import(`file://${base}/lib/engage.js`);
+  const qs = [
+    ['کاربرِ فعال', E.activeUsersSql(now, 7, true)],
+    ['خواننده', E.readerUsersSql(true, 0)],
+    ['بازگشت', E.repeatUsersSql(true)],
+    ['راضی', E.satisfiedUsersSql(true)],
+    ['نمره‌دهنده', E.ratersUsersSql(true)],
+    ['سطلِ عمق', E.bucketUsersSql(0, true)],
+    ['ماندگاری D+7', E.retainedUsersSql(7, now, true)],
+    ['کدنسِ خرج', E.spendCadenceSql(3, now, true)],
+    ['کدنسِ مفید', E.usefulCadenceSql(3, now, true)],
+  ];
+  const rLines = (plan) => plan.filter(l => /^(SCAN|SEARCH) r\b/.test(l));
+  const bad = qs.filter(([, q]) => {
+    const lines = rLines(planOf(idx, q.sql, q.params));
+    return !lines.length || lines.some(l => !l.includes('COVERING INDEX idx_readings_stats'));
+  }).map(([n]) => n);
+  ok(!bad.length, `هر ${qs.length} سنجه‌ی engage فقط از ایندکسِ پوششی می‌خوانند${bad.length ? ` (ناقص: ${bad.join('، ')})` : ''}`);
+  const rawScans = qs.filter(([, q]) => rLines(planOf(raw, q.sql, q.params)).some(l => l === 'SCAN r')).length;
+  ok(rawScans >= qs.length - 1, `کنترلِ مثبت: بدونِ ایندکس ${rawScans} از ${qs.length} سنجه کلِ جدولِ فال را اسکن می‌کردند`);
+
+  // ─ ه) رویدادها: بخشِ events ِ کدنسِ مفید از ایندکسِ پوششیِ تازه، بدونِ خواندنِ ردیف ─
+  const U = E.usefulCadenceSql(3, now, true);
+  const eLine = (db) => planOf(db, U.sql, U.params).find(l => /^(SCAN|SEARCH) e\b/.test(l)) || '';
+  ok(eLine(idx).includes('COVERING INDEX idx_events_ev_user'), `رویدادهای «اکشنِ مفید» فقط از ایندکسِ پوششی: ${eLine(idx)}`);
+  ok(!eLine(raw).includes('COVERING'), `کنترلِ مثبت: بدونِ ایندکسِ تازه ردیفِ رویداد خوانده می‌شد: ${eLine(raw)}`);
+  idx.close(); raw.close();
+}
 ref.close();
 
 console.log('\n▶ ۴) صفِ «به‌روزرسانی همین بخش»');
@@ -241,5 +395,4 @@ if (url.includes('bot=fail')) { console.error('boom ' + url); process.exit(1); }
   ok(/build exceeded 3 minutes[^`]*\$\{url\}/.test(cacheSrc), 'پیامِ کشته‌شدن در سقفِ زمان نامِ صفحه را دارد');
 }
 
-console.log(errs.length ? `\n❌ نتیجه: ${pass} پاس، ${errs.length} خطا` : `\n✅ نتیجه: ${pass} پاس، 0 خطا`);
-process.exit(errs.length ? 1 : 0);
+done();

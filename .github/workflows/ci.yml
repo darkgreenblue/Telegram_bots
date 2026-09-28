@@ -633,6 +633,11 @@ jobs:
       - name: Receipt tags check (bot)
         if: matrix.bot == 'tarot'
         run: node tools/check-receipt-tags.mjs --part=bot
+      # 📇 ایندکس‌های پوششیِ داشبورد در بوتِ ربات: تغییرِ صرفاً bots/tarot/ فقط این جاب را
+      # می‌زند، پس بخشِ ساختاری (تعریف، ستون‌ها، ساخت قبل از launch، try) این‌جا هم سنجیده می‌شود.
+      - name: Dashboard indexes check (bot)
+        if: matrix.bot == 'tarot'
+        run: node tools/check-dash-speed.mjs --part=bot
       # 🧾 v3.132.0: مهاجرتِ یک‌باره‌ی تگ‌ها (پاک‌کردنِ تگِ هوش مصنوعی، اپِ بلو ⟵ موبایل‌بانک) + ارسالِ
       # آخرین رسیدِ هر کاربر به اکانتِ پشتیبانی برای تگِ دستی (ترتیب، ادامه بعد از ری‌استارت، ۴۲۹).
       - name: Tag review check

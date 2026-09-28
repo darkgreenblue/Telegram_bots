@@ -79,13 +79,18 @@ export function costPerDiamond(botKey) {
       // گروه‌بندیِ دومرحله‌ای لازم است: هر فال چند ردیفِ هزینه دارد (خوانش + تعمیر +
       // رونویسی)، پس اول per فال جمع می‌شود بعد per اندازه — وگرنه تعدادِ الماس در
       // تعدادِ فراخوانی‌ها ضرب می‌شد.
+      // ⏱ جمعِ per فال **اول** روی خودِ `llm_usage` ساخته می‌شود (MATERIALIZED، یک ردیف per
+      // فال) و `readings` از ایندکسِ پوششیِ `idx_readings_stats` خوانده می‌شود. شکلِ قبلی از
+      // هر ردیفِ هزینه به ردیفِ کاملِ فال می‌پرید و چون `status` بعد از `llm_json`ِ حجیم است،
+      // برای هر فال صفحه‌های overflow را هم می‌خواند: ~۲۲۰MB روی دیتای هم‌اندازه‌ی سرور، در
+      // برابرِ ~۲MB حالا. خروجی عیناً همان است (`tools/check-dash-speed.mjs`).
       for (const r of rows(db, `
-        SELECT size, SUM(usd) AS usd, COUNT(*) AS readings, SUM(size) AS diamonds FROM (
-          SELECT r.price AS size, r.id AS rid, SUM(l.cost_usd) AS usd
-            FROM readings r JOIN llm_usage l ON l.ref_id = r.id
-           WHERE r.status='delivered' AND r.price > 0 AND l.ref_id > 0
-           GROUP BY r.id
-        ) GROUP BY size ORDER BY size`)) {
+        WITH u AS MATERIALIZED (
+          SELECT ref_id, SUM(cost_usd) AS usd FROM llm_usage WHERE ref_id > 0 GROUP BY ref_id)
+        SELECT r.price AS size, SUM(u.usd) AS usd, COUNT(*) AS readings, SUM(r.price) AS diamonds
+          FROM readings r JOIN u ON u.ref_id = r.id
+         WHERE r.status='delivered' AND r.price > 0
+         GROUP BY r.price ORDER BY r.price`)) {
         const cur = bySize.get(r.size) || { usd: 0, diamonds: 0, readings: 0 };
         cur.usd += r.usd || 0; cur.diamonds += r.diamonds || 0; cur.readings += r.readings || 0;
         bySize.set(r.size, cur);

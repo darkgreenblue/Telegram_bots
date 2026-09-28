@@ -2399,6 +2399,28 @@ try { db.prepare('ALTER TABLE llm_usage ADD COLUMN cached_tokens INTEGER NOT NUL
 try { db.prepare('ALTER TABLE llm_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0').run(); } catch {}
 // آنالیتیکس مشترک: جدول events + ستون‌های اتریبیوشن first_source/first_payload روی users
 ensureAnalytics(db);
+
+/* 📇 دو ایندکسِ پوششی برای کوئری‌های فقط‌خواندنیِ داشبورد (بدونِ بامپِ نسخه: هیچ رفتارِ
+ * رو-به-کاربری عوض نمی‌شود). سرورِ ما دیسک‌محدود است (~۱۵MB/s) و ساختِ کشِ `/dash` به
+ * سقفِ ۳ دقیقه می‌خورد، چون `status`/`created_at`/`price` در `readings` **بعد از**
+ * `llm_json`ِ حجیم‌اند و خواندنِ هر کدام یعنی خواندنِ صفحه‌های overflowِ همان فال. روی
+ * دیتای هم‌اندازه‌ی سرور جمعِ خواندنِ هفت صفحه‌ی تحلیلی ~۱۰٬۲۰۰MB ⟵ ~۶۶۰MB شد.
+ * همین ایندکس کوئری‌های per کاربرِ خودِ ربات را هم از ~۵۰MB به ~صفر می‌برد (هیچ پلنی بدتر
+ * نشد؛ `tools/check-dash-speed.mjs`). ساخت یک‌باره و **قبل از launch** است، چون
+ * better-sqlite3 همگام است و ساختنش بعد از launch یعنی چند ده ثانیه حلقه‌ی رویدادِ قفل.
+ * افزایشی (بند ۲ج/۱ ریشه) و هر کدام جدا در try: شکست فقط مارکرِ `❌ DASH_INDEX` می‌گذارد.
+ * رول‌بک: `git revert` (ایندکسِ ساخته‌شده بی‌ضرر روی دیتابیس می‌ماند). */
+for (const [name, sql] of [
+  ['idx_readings_stats', 'CREATE INDEX IF NOT EXISTS idx_readings_stats ON readings(status, user_id, created_at, price, type, feedback)'],
+  ['idx_events_ev_user', 'CREATE INDEX IF NOT EXISTS idx_events_ev_user ON events(event, created_at, user_id)'],
+]) {
+  try {
+    const had = db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?").get(name);
+    const t0 = Date.now();
+    db.exec(sql);
+    if (!had) log(`📇 DASH_INDEX ${name} ساخته شد در ${Date.now() - t0}ms`);
+  } catch (e) { logErr(`❌ DASH_INDEX ${name}:`, e.message); }
+}
 // A/B تست: جدول‌های experiments/ab_exposures (چرخه‌ی عمر را داشبورد کنترل می‌کند)
 ensureAb(db);
 
