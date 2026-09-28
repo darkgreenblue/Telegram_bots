@@ -157,9 +157,9 @@ if (sender) {
     } };
     // 🏷 تگ‌های فازِ ۶ این‌جا خاموش‌اند (بی‌خط، کیبوردِ دست‌نخورده)؛ `check-receipt-tags` خودشان را می‌سنجد.
     const fn = new Function('receiptRecipients', 'ownerCopyHeader', 'ownerShadowLine', 'withShadowLine', 'OWNER_ID', 'bot', 'logErr',
-      'receiptInfoLines', 'ownerReceiptMarkup',
+      'receiptInfoLines', 'ownerReceiptMarkup', 'applyDefaultTags',
       `${sender}\nreturn sendToReceiptRecipients;`)(() => recips, () => 'HDR\n', () => line, RT.withShadowLine, 1, bot, () => {},
-      () => '', (_p, kb) => kb || null);
+      () => '', (_p, kb) => kb || null, () => {});
     await fn({ id: 5 }, { caption: 'CAP', photoFileId: 'f', kb: null });
     return sent;
   };

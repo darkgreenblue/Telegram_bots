@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.133.0';
+const PRODUCT_VERSION = '3.134.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -388,6 +388,11 @@ const TRANSFER_ERROR_ACTION_ENABLED = true;
 // پیامِ کاربر ندارد. `false` ⟵ نه ردیف، نه خط (کپشن و کیبوردِ مالک بیت‌به‌بیت v3.127.0)؛ کالبک‌های
 // کهنه‌ی `tg:` فقط پاپ‌آپِ 🔒 می‌گیرند. جدول‌ها طبقِ بند ۲ج/۱ می‌مانند.
 const RECEIPT_TAGS_ENABLED = true;
+// 🏷 پیش‌فرضِ تگ (v3.134.0، خواسته‌ی مالک ۱۴۰۵/۰۷/۰۶): هر رسیدِ تازه اپ و بانک را، هر بُعد **جدا**، از
+// آخرین تگی که همین کاربر گرفته پیش‌پر می‌گیرد و واقعاً روی همان رسید ثبت می‌شود (`by_id=-1`). مالک فقط
+// وقتی چیزِ متفاوتی دید عوضش می‌کند و از آن به بعد همان مقدارِ تازه پیش‌فرض است. `false` ⟵ رسیدِ تازه
+// مثلِ v3.133.0 با فیلدهای خالی می‌آید (تگ‌های قبلاً ثبت‌شده دست نمی‌خورند).
+const TAG_DEFAULTS_ENABLED = true;
 // 🧾 بازبینیِ یک‌باره‌ی رسیدهای گذشته (v3.132.0، تصمیمِ مالک ۱۴۰۵/۰۷/۰۵): آخرین رسیدِ تأییدشده‌ی هر
 // کاربر که مالک هنوز دستی تگش نزده، یکی‌یکی با دکمه‌های اپ/بانک برای **اکانتِ پشتیبانی** (`SUPPORT.id`)
 // در همین ربات فرستاده می‌شود؛ پرتراکنش‌ترین کاربر اول. اکانتِ پشتیبانی فقط تگ می‌زند (نه کارت، نه
@@ -2314,6 +2319,9 @@ db.exec(`
     ok         INTEGER NOT NULL DEFAULT 1
   );
 `);
+// 🏷 v3.134.0: لحظه‌ی پیش‌پرکردنِ تگِ این رسید (NULL = هنوز نه). مهرِ یک‌باره است تا اگر مالک تگِ پیش‌فرض را
+// «پاک» کرد، یادآوریِ بعدیِ همان رسید دوباره پرش نکند.
+try { db.prepare('ALTER TABLE payments ADD COLUMN tag_default_at INTEGER').run(); } catch {}
 /* سیدِ مقدارهای اولیه با `INSERT OR IGNORE` در **هر** بوت: ردیفِ موجود هرگز لمس نمی‌شود، پس
  * برچسبی که مالک از داشبورد عوض کرده یا مقداری که غیرفعال کرده دوباره زنده نمی‌شود؛ و مقدارِ
  * تازه‌ای که روزی به `SEED_TAG_VALUES` اضافه شود خودکار می‌نشیند. */
@@ -10256,6 +10264,38 @@ const curTagsOf = (pid) => {
   try { return RT.effectiveTags(tagSt().ofPayment.all(pid))[pid] || {}; }
   catch (e) { logErr('tags of payment:', e.message); return {}; }
 };
+/** 🏷 پیش‌فرضِ تگِ رسیدِ تازه (v3.134.0). برای هر بُعدی که این رسید هنوز تگِ دستی ندارد، **آخرین** تگی
+ *  که همین کاربر گرفته (به ترتیبِ لحظه‌ی ثبت یا ویرایشِ تگ، نه شماره‌ی رسید؛ پس «مالک رسیدِ قدیمی را
+ *  عوض کرد» هم پیش‌فرضِ بعدی می‌شود) روی همین رسید ثبت می‌شود. منبع فقط رسیدهای ردنشده و مقدارهای
+ *  **فعال**. هر رسید فقط یک بار (مهرِ اتمیکِ `tag_default_at`)، پس «پاک کردن» ماندگار است. `by_id=-1`
+ *  یعنی «پیش‌فرضِ خودکار» (ردِ حسابرسی)؛ هیچ اثری روی پول یا پیامِ کاربر ندارد. شکست هرگز ارسالِ رسید را
+ *  نمی‌شکند. */
+const tagDefSt = () => (_tagDefSt ||= {
+  claim: db.prepare('UPDATE payments SET tag_default_at=unixepoch() WHERE id=? AND tag_default_at IS NULL'),
+  last: db.prepare(`SELECT t.value_key FROM receipt_tags t JOIN payments q ON q.id = t.payment_id
+    JOIN tag_values v ON v.dim = t.dim AND v.key = t.value_key AND v.active = 1
+    WHERE t.user_id=? AND t.dim=? AND t.source='admin' AND t.payment_id<>?
+      AND q.status NOT IN ('rejected','reversed')
+    ORDER BY t.updated_at DESC, t.payment_id DESC LIMIT 1`),
+  put: db.prepare(`INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source, by_id)
+    VALUES (?,?,?,?,'admin',-1) ON CONFLICT(payment_id, dim, source) DO NOTHING`),
+});
+let _tagDefSt = null;
+function applyDefaultTags(p) {
+  if (!TAG_DEFAULTS_ENABLED || !tagsOn() || !p?.id || !p.user_id) return;
+  try {
+    const s = tagDefSt();
+    db.transaction(() => {
+      if (!s.claim.run(p.id).changes) return;
+      const got = [];
+      for (const d of RT.TAG_DIMS) {
+        const k = s.last.get(p.user_id, d, p.id)?.value_key;
+        if (k && s.put.run(p.id, p.user_id, d, k).changes) got.push(`${d}=${k}`);
+      }
+      if (got.length) log(`🏷 RECEIPT_TAG default ${got.join(' ')} pay#${p.id} user=${p.user_id}`);
+    })();
+  } catch (e) { logErr('tag defaults:', e.message); }
+}
 /** کیبوردِ پیامِ رسیدِ مالک = دکمه‌های اکشنِ خودش (اگر پیامِ کامل است) + ردیفِ جمع‌شده‌ی تگ. */
 function ownerReceiptMarkup(p, kb) {
   if (!tagsOn() || !p?.id) return kb || null;
@@ -10376,6 +10416,7 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = n
   // 📊 دُمِ هر پیامِ رسید (v3.132.0، همه‌ی گیرنده‌ها): کارتِ تخصیص‌داده و تعدادِ پرداخت‌های کاربر.
   // 🔎 خطِ ایجنت (فقط «خطای انتقال») فقط روی پیامِ مالک. دُم را سقفِ کپشن هرگز نمی‌بُرد
   // (`withShadowLine` از خودِ کپشن کم می‌کند نه از دُم).
+  applyDefaultTags(p); // 🏷 قبل از ساختِ کیبورد: فیلدهای تگِ مالک پیش‌پر برسند
   const info = receiptInfoLines(p);
   const sline = [info, ownerShadowLine(p)].filter(Boolean).join('\n');
   for (const r of receiptRecipients(p, card)) {
