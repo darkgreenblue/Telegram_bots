@@ -18,7 +18,9 @@ const WORKER = process.env.DASH_CACHE_WORKER
 const FRESH_FOR_MS = 5 * 60 * 1000;
 const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
 const BUILD_BUDGET_MS = 3 * 60 * 1000;
-const ANALYTICS_PATHS = new Set(['/dash', '/engagement', '/acquisition', '/economics', '/funnels', '/screens', '/retention']);
+// `/marketing` این‌جا فقط **آمارِ** صفحه است (JSON)؛ فرم‌ها و فهرستِ کمپین‌ها زنده رندر می‌شوند
+// (`marketingBody`)، پس لینکِ کمپینِ تازه بی‌درنگ دیده می‌شود.
+const ANALYTICS_PATHS = new Set(['/dash', '/engagement', '/acquisition', '/economics', '/funnels', '/screens', '/retention', '/marketing']);
 
 let running = false;
 let runningKey = '';
@@ -157,13 +159,25 @@ function runNext() {
 
 /** مسیر HTTP: فقط خواندنِ کوتاه از فایل + صف‌کردن worker؛ هیچ SQLite ای این‌جا نیست. */
 export function cachedAnalyticsBody(url) {
+  const { item, note } = cachedAnalyticsItem(url);
+  return item ? `${note}${item.body}` : waitingBody(url);
+}
+
+/** همان مسیر، ولی خودِ آیتم را برمی‌گرداند تا صفحه‌ای که بخشی از آن زنده است (مارکتینگ)
+ *  فقط دیتای سنگینش را از کش بخواند. `note` = نوارِ «آخرین به‌روزرسانی» یا «در حال آماده‌سازی». */
+export function cachedAnalyticsItem(url) {
   const item = readDashCache(url);
   const ageMs = item ? Date.now() - item.createdAt : Infinity;
   if (!item || ageMs >= FRESH_FOR_MS) queueBuild(url);
   const key = dashCacheKey(url);
   const refreshing = !item || ageMs >= FRESH_FOR_MS || queued.has(key) || runningKey === key;
-  return item ? `${freshnessNote(url, item.createdAt, refreshing)}${item.body}` : waitingBody(url);
+  return { item, note: item ? freshnessNote(url, item.createdAt, refreshing) : waitingNote(url) };
 }
+
+const waitingNote = (url) => `<div class="card muted" role="status" style="display:flex;align-items:center;gap:.75rem">
+  <span>📊 آمارِ این بخش در پس‌زمینه در حال آماده‌سازی است؛ چند لحظه‌ی دیگر صفحه را تازه کن.</span>
+  ${refreshForm(url)}
+</div>`;
 
 export const cachedDashBody = cachedAnalyticsBody;
 
