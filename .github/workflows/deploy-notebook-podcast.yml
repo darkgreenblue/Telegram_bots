@@ -41,13 +41,14 @@ jobs:
           BOT_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_BOT_TOKEN }}
           OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
           MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
+          PROXY_CONFIG: ${{ secrets.NOTEBOOK_PODCAST_PROXY_CONFIG_JSON }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_IDS" ] && [ -n "$MASTER_TOKEN" ] && [ -n "$SSH_KEY" ]; then
+          if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_IDS" ] && [ -n "$MASTER_TOKEN" ] && [ -n "$PROXY_CONFIG" ] && [ -n "$SSH_KEY" ]; then
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo '⚠️ Required secrets: NOTEBOOK_PODCAST_BOT_TOKEN, OWNER_TELEGRAM_ID, NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON, VPS_SSH_KEY'
+            echo '⚠️ Required secrets: NOTEBOOK_PODCAST_BOT_TOKEN, OWNER_TELEGRAM_ID, NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON, NOTEBOOK_PODCAST_PROXY_CONFIG_JSON, VPS_SSH_KEY'
           fi
       - name: Deploy only notebook-podcast
         if: steps.ready.outputs.ready == 'true'
@@ -55,12 +56,18 @@ jobs:
           BOT_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_BOT_TOKEN }}
           OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
           MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
+          PROXY_CONFIG: ${{ secrets.NOTEBOOK_PODCAST_PROXY_CONFIG_JSON }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
           [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]
           [[ "$OWNER_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]
           python -c 'import json,os; v=json.loads(os.environ["MASTER_TOKEN"]); assert isinstance(v,dict)'
+          python -c 'import json,os; v=json.loads(os.environ["PROXY_CONFIG"]); assert v["inbounds"][0]["listen"]=="127.0.0.1" and v["inbounds"][0]["port"]==18759 and v["inbounds"][0]["protocol"]=="http"'
+          curl -fsSL -o /tmp/notebook-podcast-xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip
+          echo '23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae  /tmp/notebook-podcast-xray.zip' | sha256sum -c -
+          unzip -p /tmp/notebook-podcast-xray.zip xray > /tmp/notebook-podcast-xray
+          chmod 700 /tmp/notebook-podcast-xray
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/notebook_podcast_key"
           chmod 600 "$HOME/.ssh/notebook_podcast_key"
@@ -69,6 +76,9 @@ jobs:
           TARGET=/home/ubuntu/voice2text/bots/notebook-podcast
           # Archive tracked source only; never copy the runner's SQLite test data.
           git archive HEAD:bots/notebook-podcast | "${SSH[@]}" "mkdir -p '$TARGET' && tar -xf - -C '$TARGET'"
+          "${SSH[@]}" "mkdir -p '$TARGET/.proxy' && chmod 700 '$TARGET/.proxy'"
+          cat /tmp/notebook-podcast-xray | "${SSH[@]}" "umask 077; cat > '$TARGET/.proxy/xray.new' && chmod 700 '$TARGET/.proxy/xray.new' && mv '$TARGET/.proxy/xray.new' '$TARGET/.proxy/xray'"
+          printf '%s' "$PROXY_CONFIG" | "${SSH[@]}" "umask 077; cat > '$TARGET/.proxy/config.json.new' && mv '$TARGET/.proxy/config.json.new' '$TARGET/.proxy/config.json'"
           printf 'BOT_TOKEN=%s\nADMIN_IDS=%s\nNOTEBOOKLM_PROFILE=notebook-podcast\n' "$BOT_TOKEN" "$OWNER_IDS" \
             | "${SSH[@]}" "umask 077; cat > '$TARGET/.env.new' && mv '$TARGET/.env.new' '$TARGET/.env'"
           printf '%s' "$MASTER_TOKEN" \
@@ -77,8 +87,14 @@ jobs:
             cd '$TARGET';
             python3 -m venv .venv;
             .venv/bin/pip install -q -r requirements.txt;
+            .proxy/xray run -test -config .proxy/config.json;
+            pm2 startOrReload ecosystem.config.cjs --only notebook-podcast-proxy --update-env;
+            sleep 3;
+            curl --proxy http://127.0.0.1:18759 -fsS -o /dev/null --max-time 20 https://notebooklm.google.com/;
+            export HTTP_PROXY=http://127.0.0.1:18759 HTTPS_PROXY=http://127.0.0.1:18759;
             .venv/bin/notebooklm -p notebook-podcast auth refresh --verify >/dev/null;
             .venv/bin/notebooklm -p notebook-podcast auth check --test --json | .venv/bin/python -c 'import json,sys; x=json.load(sys.stdin); assert x.get(\"status\")==\"ok\" and x.get(\"checks\",{}).get(\"token_fetch\") is True';
+            .venv/bin/python -c 'import httpx; from pathlib import Path; token=next(x.split(\"=\",1)[1] for x in Path(\".env\").read_text().splitlines() if x.startswith(\"BOT_TOKEN=\")); r=httpx.get(\"https://api.telegram.org/bot\"+token+\"/getMe\",timeout=20); assert r.status_code==200 and r.json().get(\"ok\") is True';
             pm2 startOrReload ecosystem.config.cjs --only notebook-podcast --update-env;
             sleep 3;
             pm2 jlist | node -e 'const a=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));const p=a.find(x=>x.name===\"notebook-podcast\");process.exit(p?.pm2_env?.status===\"online\"?0:1)';
