@@ -357,6 +357,11 @@ jobs:
       - name: Users page check
         if: matrix.bot == 'dashboard'
         run: node tools/check-users-page.mjs
+
+      - name: Dashboard disk-read check (profile + experiment pages)
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-dash-io.mjs
+
       # ساختِ کشِ تحلیلی روی دیتای واقعی به سقفِ ۳ دقیقه می‌خورد و «به‌روزرسانی همین بخش»
       # هیچ‌وقت نمی‌نشست: هم‌ارزیِ کوئری‌های تازه با قبلی، استفاده‌ی واقعیِ planner از
       # ایندکسِ ادمین، و ترتیبِ صف (کلیکِ دستی جلو) را می‌سنجد.

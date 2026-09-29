@@ -89,7 +89,7 @@ function buildTimeline(db, botKey, uid) {
     for (const s of rows(db, 'SELECT k, label, sample FROM screens')) screens.set(s.k, s);
   }
   if (hasTable(db, 'events')) {
-    for (const e of rows(db, 'SELECT created_at ts, event, props FROM events WHERE user_id=? ORDER BY id DESC LIMIT 400', [uid])) {
+    for (const e of rows(db, 'SELECT created_at ts, event, props FROM events WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT 400', [uid])) {
       const p = parseJsonSafe(e.props);
       // رویدادهای ریزِ مسیر (shared/journey.js) خواناتر نمایش داده می‌شوند: خودِ پیام / خودِ دکمه
       if (e.event === 'view') {
@@ -126,7 +126,14 @@ function buildTimeline(db, botKey, uid) {
     }
   }
   if (familyOf(botKey) === 'tarot' && hasTable(db, 'readings')) {
-    for (const r of rows(db, 'SELECT * FROM readings WHERE user_id=? ORDER BY id DESC LIMIT 100', [uid])) {
+    /* ⏱ `readings` ایندکسی با `user_id` در ابتدا ندارد و `SELECT *` کلِ جدول را همراهِ
+       `llm_json`ِ حجیم اسکن می‌کرد (~۸۰MB per پروفایل؛ روی سرور ۲۰ تا ۳۰ ثانیه قفلِ کلِ
+       داشبورد). فقط ستون‌های لازم خوانده می‌شوند و همه در ایندکسِ پوششیِ `idx_readings_stats`
+       (status, user_id, …) هستند؛ `status IN (DISTINCT status)` یک skip-scanِ دستی روی همان
+       ایندکس است. status ستونِ NOT NULL است، پس هیچ ردیفی جا نمی‌ماند. اگر ایندکس نباشد
+       همان اسکنِ قبلی انجام می‌شود، کُند ولی درست. */
+    for (const r of rows(db, `SELECT id, type, price, status, feedback, created_at FROM readings
+        WHERE status IN (SELECT DISTINCT status FROM readings) AND user_id=? ORDER BY id DESC LIMIT 100`, [uid])) {
       items.push({ ts: r.created_at, icon: '🔮', label: `فال ${r.type} — ${creditText(botKey, r.price)}`, detail: `${r.status}${r.feedback ? ` · بازخورد: ${r.feedback.slice(0, 60)}` : ''}`, status: r.status });
     }
   }
