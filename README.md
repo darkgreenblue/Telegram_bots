@@ -16,6 +16,7 @@
 | [`bots/resume-tailor`](bots/resume-tailor) | `resume-tailor` | ساخت رزومه‌ی استاندارد انگلیسیِ کاستومایز برای هر آگهی شغلی |
 | [`bots/tarot`](bots/tarot) | `tarot` | فال تاروت فارسی — سفر مشتری تاروت‌خوان حرفه‌ای، کیف‌پول + کارت‌به‌کارت |
 | [`bots/tabir-khab`](bots/tabir-khab) | — (systemd) | تعبیر خواب (بله + تلگرام) — پایتون؛ استثنای مونوریپو: venv + systemd به‌جای pm2 |
+| [`bots/notebook-podcast`](bots/notebook-podcast) | `notebook-podcast` | ربات شخصی ساخت پادکست از منابع تلگرام با NotebookLM؛ Python/venv و دیپلوی مستقل |
 
 ## ساختار
 ```

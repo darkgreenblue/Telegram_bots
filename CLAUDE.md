@@ -22,6 +22,7 @@
 | `bots/tarot` | pm2: `tarot` (+ `tarot-ru` = **رباتِ واحدِ چندزبانه** en/es/ru/pt از v3.113.0، `tarot-pt`، `tarot-es`) | فال تاروت فارسی، کیف‌پول + کارت‌به‌کارت (از v3.7.0 ساختارِ خوانشِ v4 **برای همه‌ی کاربران** باز شد، بعد از ۱۶ دورِ آزمایشگاه و تستِ دستیِ مالک؛ اقتصادِ سکه ساخته و موقتاً پارک شد) | **🟢 زنده از ۱۴۰۵/۰۴/۲۰** (شروع تبلیغات؛ TEST_PHASE=false، دیتای تست پاک شد) | `bots/tarot/CLAUDE.md` |
 | `bots/tabir-khab` | systemd: `tabir-khab` | تعبیر خواب (بله + تلگرام، پایتون) — **استثنای مونوریپو**: Python/venv/systemd، نه Node/pm2 | 🧪 تست شخصی — روی سرور اجراست؛ پرداختش هنوز شبیه‌سازی است | `bots/tabir-khab/CLAUDE.md` |
 | `bots/daily-brief` | pm2: `daily-brief` | پادکستِ آموزشیِ روزانه‌ی شخصی: رودمپِ Notion → متن با LLM → صدا با TTS → ارسالِ صبحگاهی | 🧪 تست شخصی — **فقط ادمین** (کاربر دیگری نمی‌تواند استفاده کند)؛ بدون پرداخت | `bots/daily-brief/CLAUDE.md` |
+| `bots/notebook-podcast` | pm2: `notebook-podcast` | منابع تلگرام → نوت‌بوک تازهٔ NotebookLM → Audio Overview در همان چت | 🧪 تست شخصی و فقط-مالک؛ Python/venv و workflow مستقل برای جلوگیری از ری‌استارتِ ربات‌های زنده | `bots/notebook-podcast/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
 
 مدل‌ها (همه از **OpenRouter**): فالبکِ ارزانِ آخرِ زنجیره `deepseek/deepseek-v3.2`.
