@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.136.0';
+const PRODUCT_VERSION = '3.137.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -670,6 +670,17 @@ const payAtSizeFor = (uid) => PAY_AT_SIZE && uxV2For(uid);
    (`recoverOrphanReadings`). آن دو مسیر عمداً به این پرچم وصل **نیستند**.
    رول‌بکِ یک‌خطی: `true` → دقیقاً رفتارِ v3.53.0 (ریفاندِ لغو + جاروی ۲۴ساعته‌ی رهاشده). */
 const REFUND_ON_CANCEL = false;
+/* 💎 استثنای «هنوز چیزی مصرف نشده» (تصمیمِ مالک، ۱۴۰۵/۰۷/۰۷، تیکتِ #TRT-661811364).
+   دلیلِ `REFUND_ON_CANCEL=false` این بود که «کارت‌ها کشیده شده و مدل هزینه‌اش را گرفته».
+   ولی انصرافی که **قبل از نوشتنِ سؤال** بیاید هیچ‌کدام را ندارد: کارتی کشیده نشده، هیچ
+   فراخوانیِ مدلی نرفته، و هزینه‌ی ما صفر است. دیتای ۲۴ روز: ۱۸۱ انصراف از ۲۹۵ دقیقاً همین
+   بودند (۶۲۸💎، میانه‌ی ۳۲ ثانیه بعد از پرداخت)، و یک‌سومشان ظرفِ ۱۵ دقیقه دوباره خریدند؛
+   یعنی نمی‌خواستند فال را دور بیندازند. تیکت: کاربر ۶💎 داد برای **یک** فالِ ۳ کارته.
+   شرط روی **دیتای خودِ رکورد** هم هست نه فقط استیت (`refundableOnCancel`)، پس اگر روزی
+   ترتیبِ فلو عوض شود و سؤال یا کارت زودتر بنشیند، این استثنا خودبه‌خود بسته می‌شود.
+   رول‌بکِ یک‌خطی: `false` ⟵ دقیقاً رفتارِ v3.136.0 (هر انصرافِ پول‌داده می‌سوزد). */
+const REFUND_BEFORE_QUESTION = true;
+const PRE_QUESTION_STATES = new Set(['confirm_focus', 'await_question']);
 
 // 🧭 ثبتِ خودکارِ مسیرِ ریزِ کاربر (shared/journey.js): هر پیامِ خروجی (`view`) و هر اکشنِ ورودی
 // (`act`) ثبت می‌شود تا در داشبورد بشود دید کاربر دقیقاً پشتِ کدام پیام/دکمه ریخته است.
@@ -2716,6 +2727,7 @@ const stmts = {
   getReading:    db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingLlm: db.prepare('UPDATE readings SET llm_json=?, summary=? WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
+  claimPaidRefund:  db.prepare("UPDATE readings SET status='refunded' WHERE id=? AND status='paid'"),
   // ادعای اتمیکِ ریفاندِ فالِ شروع‌شده‌ای که خروجیِ مدل هرگز ننشست. هم مسیرِ timeout
   // و هم تپِ کاربر ممکن است برسند؛ شرط‌ها داخل UPDATE اند تا موجودی دوبار برنگردد.
   claimInterruptedReading: db.prepare("UPDATE readings SET status='refunded' WHERE id=? AND user_id=? AND status='started' AND llm_json=''"),
@@ -3933,7 +3945,12 @@ async function blockDuringOpenReading(ctx, intent, intentArg = 0) {
    * است، پس هر فالی که به این استیت‌ها رسیده پرداخت شده) و `REFUND_ON_CANCEL=false` است:
    * انصراف الماس را برنمی‌گرداند. تا امروز دکمه‌ی «انصراف» **مخرب** بود و کاربر خبر
    * نداشت — همان ریسکی که خودِ v3.54.0 ثبتش کرده بود و مالک حالا بستنش را خواست. */
-  const paidFlow = navV2For(uid) && REFUND_ON_CANCEL === false && !!getSession(uid)?.readingId;
+  // 💎 و فالی که انصرافش پول را **برمی‌گرداند** (هنوز سؤالی نوشته نشده) متنِ «الماس
+  // برنمی‌گرده» را نمی‌گیرد، وگرنه متن دروغ می‌گفت؛ متنِ ساده‌ی بی‌وعده را می‌گیرد و
+  // بعد از انصراف پیامِ «هزینه‌ی این فال کامل برگشت» خودش می‌آید.
+  const openRid = getSession(uid)?.readingId;
+  const paidFlow = navV2For(uid) && REFUND_ON_CANCEL === false && !!openRid
+    && !refundableOnCancel(uid, stmts.getReading.get(openRid));
   await ctx.reply(paidFlow ? L.reading.openReadingGuardPaid : L.reading.openReadingGuard, Markup.inlineKeyboard([
     [Markup.button.callback(L.buttons.resumeReading, 'reading:resume')],
     [Markup.button.callback(L.buttons.cancel, 'reading:cancel')],
@@ -4275,9 +4292,10 @@ const refundChat = db.transaction((msgId, uid, price) => {
 });
 
 /** لغوِ یک فالِ نیمه‌کاره. فالِ هنوز-پرداخت‌نشده فقط canceled می‌شود؛ فالِ **پرداخت‌شده**
- *  terminal می‌شود ولی پولش برنمی‌گردد (`REFUND_ON_CANCEL`). فالِ started/delivered هرگز
- *  دست نمی‌خورد. خروجی: مبلغی که برگشت — با پرچمِ فعلی همیشه ۰، پس هر سه نقطه‌ی لغو که
- *  شرطِ `if (back)` دارند خودبه‌خود دیگر پیامِ «پولت برگشت» نمی‌فرستند (هیچ متنی عوض نشد). */
+ *  terminal می‌شود ولی پولش برنمی‌گردد (`REFUND_ON_CANCEL`)، **مگر** هنوز هیچ چیزی مصرف
+ *  نشده باشد (`refundableOnCancel`، v3.137.0). فالِ started/delivered هرگز دست نمی‌خورد.
+ *  خروجی: مبلغی که برگشت؛ هر سه نقطه‌ی لغو با شرطِ `if (back)` پیامِ «پولت برگشت» را فقط
+ *  وقتی می‌فرستند که واقعاً برگشته باشد. */
 function cancelReading(uid, readingId) {
   const r = readingId && stmts.getReading.get(readingId);
   if (!r || r.user_id !== uid) return 0;
@@ -4287,15 +4305,32 @@ function cancelReading(uid, readingId) {
   // «انصراف» نباید پشتِ گاردِ «یه فالِ باز داری» گیر کند (بند ۹ب: هیچ صفحه‌ای بن‌بست نیست).
   // رویدادِ **افزایشیِ** `reading_forfeited` جای `refund` را می‌گیرد، وگرنه شمارنده‌ی ریفاندِ
   // داشبورد پولی را گزارش می‌کرد که هرگز برنگشته (بند ۲ج/۳: فقط اضافه کن).
-  if (!REFUND_ON_CANCEL) {
+  const early = refundableOnCancel(uid, r);
+  if (!REFUND_ON_CANCEL && !early) {
     stmts.setReadingStatus.run('canceled', readingId);
     track(db, uid, 'reading_forfeited', { reading_id: readingId, amount: r.price, reason: 'cancel' });
     return 0;
   }
-  if (r.price > 0) stmts.credit.run(r.price, uid);
-  stmts.setReadingStatus.run('refunded', readingId);
-  track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: 'cancel' });
-  return r.price;
+  // ادعا و واریز در **یک تراکنش**، و ادعا مشروط به `status='paid'`: دوبار-تپِ انصراف
+  // یا دو مسیرِ هم‌زمان فقط یک بار پول برمی‌گردانند (بند ۹ب/۵)، و ری‌استارتِ بینِ دو
+  // دستور نمی‌تواند فال را refunded و پول را برنگشته جا بگذارد.
+  return db.transaction(() => {
+    if (stmts.claimPaidRefund.run(readingId).changes === 0) return 0;
+    if (r.price > 0) stmts.credit.run(r.price, uid);
+    track(db, uid, EVENTS.REFUND, { reading_id: readingId, amount: r.price, reason: early ? 'cancel_before_question' : 'cancel' });
+    return r.price;
+  })();
+}
+
+/** آیا انصرافِ این فال پول را برمی‌گرداند؟ فقط وقتی **هیچ** چیزی مصرف نشده: فال پرداخت
+ *  شده ولی کاربر هنوز در قدمِ نوشتنِ سؤال است، و رکورد نه کارت دارد، نه سؤال، نه صدا،
+ *  نه خروجیِ مدل. هر کدام از این‌ها پر باشد، قاعده‌ی `REFUND_ON_CANCEL` حاکم است.
+ *  تک‌منبع برای **دو** مصرف‌کننده: خودِ `cancelReading` و متنِ گاردِ انصراف، تا متن
+ *  هرگز چیزی بگوید که پول خلافش رفتار کند (بند ۹ب/۱۰-ه). */
+function refundableOnCancel(uid, r) {
+  return !!(REFUND_BEFORE_QUESTION && r && r.user_id === uid && r.status === 'paid'
+    && PRE_QUESTION_STATES.has(getState(uid))
+    && !r.cards_json && !r.llm_json && !r.question && !r.question_audio);
 }
 
 // `paid` هم مجاز است (v3.53.0): در آن وضعیت پول **همین حالا** از موجودی کم شده
@@ -12753,7 +12788,11 @@ async function sendStuckReadingReminder(u) {
   // مهر **قبل** از ارسال و رویداد **بعد** از موفقیت: همان الگویی که «مهرخورده بدونِ
   // رویداد» را به معنیِ بلاک‌شدنِ کاربر قابلِ شمارش می‌کند (بند ۲.۵ اسکیلِ جرنی).
   stmts.setNightReminded.run(uid);
-  const ok = await bot.telegram.sendMessage(uid, L.reading.stuckReading(hit.canCancel), {
+  // 💎 v3.137.0: فالی که انصرافش پول را **برمی‌گرداند** (هنوز سؤالی ننوشته) جمله‌ی «الماسش
+  // برنمی‌گرده» را نمی‌گیرد، وگرنه متن دروغ می‌گفت. دکمه‌ی انصراف سرِ جایش است و بعد از
+  // تپش پیامِ «هزینه‌ی این فال کامل برگشت» خودش می‌آید (همان تک‌منبعِ `cancelReading`).
+  const warnNoRefund = hit.canCancel && !refundableOnCancel(uid, stmts.getReading.get(hit.r.id));
+  const ok = await bot.telegram.sendMessage(uid, L.reading.stuckReading(warnNoRefund), {
     reply_markup: Markup.inlineKeyboard(rows).reply_markup,
   }).then(() => true).catch(() => false);
   if (ok) {

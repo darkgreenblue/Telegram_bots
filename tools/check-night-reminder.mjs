@@ -516,16 +516,18 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
   // ── رفتارِ ارسال ─────────────────────────────────────────────────────────
   const sendSrc = bodyOfFn('async function sendStuckReadingReminder(u)');
   ok('sendStuckReadingReminder از سورس استخراج شد', !!sendSrc);
-  const runSend = (row, state, revealRow = ['REVEAL']) => {
+  const runSend = (row, state, revealRow = ['REVEAL'], refundable = false) => {
     const log = { text: null, kb: null, stamped: 0, tracked: null, kbEnsured: 0, sent: 0 };
     const fn = new Function('deps', `
-      const { stuckReadingFor, revealResumeRow, Markup, L, stmts, bot, track, db, ensureKeyboard } = deps;
+      const { stuckReadingFor, revealResumeRow, Markup, L, stmts, bot, track, db, ensureKeyboard, refundableOnCancel } = deps;
       return async function sendStuckReadingReminder(u)${sendSrc};`)({
       stuckReadingFor: mkFor(row), revealResumeRow: () => revealRow,
       Markup: { button: { callback: (t, d) => ({ t, d }) }, inlineKeyboard: (r) => ({ reply_markup: r }) },
       L: { buttons: { resumeReading: 'RESUME', stuckCancel: 'CANCEL' },
            reading: { stuckReading: (c) => `MSG:${c}` } },
-      stmts: { setNightReminded: { run: () => { log.stamped++; } } },
+      stmts: { setNightReminded: { run: () => { log.stamped++; } }, getReading: { get: (id) => ({ id }) } },
+      // v3.137.0: فالی که انصرافش پول را برمی‌گرداند جمله‌ی «الماسش برنمی‌گرده» را نمی‌گیرد
+      refundableOnCancel: (_uid, r) => refundable && r?.id === row?.id,
       bot: { telegram: { sendMessage: (_i, t, o) => { log.sent++; log.text = t; log.kb = o.reply_markup; return Promise.resolve({}); } } },
       track: (_d, _u, name, props) => { log.tracked = { name, props }; }, db: {},
       ensureKeyboard: () => { log.kbEnsured++; return Promise.resolve(); },
@@ -546,6 +548,13 @@ for (const t of newTexts) ok('متنِ تازه خط تیره‌ی بلند ند
     ok('رویدادِ افزایشیِ stuck_reading_reminder ثبت می‌شود', r.tracked?.name === 'stuck_reading_reminder');
     ok('رویداد فال و استیت را ثبت می‌کند', r.tracked?.props?.reading_id === 9 && r.tracked?.props?.state === 'await_question');
     ok('منوی گم‌شده‌ی همین کاربر هم ترمیم می‌شود', r.kbEnsured === 1);
+  }
+  {
+    // v3.137.0: فالِ قبل از سؤال (انصرافش پول را برمی‌گرداند): دکمه‌ی انصراف می‌ماند ولی
+    // جمله‌ی «فقط بدون الماسش برنمی‌گرده» نمی‌آید، وگرنه متن دروغ می‌گفت.
+    const r = await runSend({ id: 9, status: 'paid' }, 'await_question', ['REVEAL'], true);
+    ok('فالِ قابلِ ریفاند: متن بدونِ جمله‌ی «الماسش برنمی‌گرده»', r.text === 'MSG:false');
+    ok('و دکمه‌ی انصراف همچنان هست (فقط متن عوض شد)', r.kb.length === 2 && r.kb[1][0].d === 'rcancel:9');
   }
   {
     const r = await runSend({ id: 5, status: 'started' }, 'revealing');

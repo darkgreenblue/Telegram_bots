@@ -37,6 +37,7 @@ const stmts = {
   setReadingCards: db.prepare(`UPDATE readings SET seed=?, cards_json=?, focus_area=?, question=?, question_audio=?, question_audio_fmt=? WHERE id=? AND cards_json=''`),
   getReading: db.prepare('SELECT * FROM readings WHERE id=?'),
   setReadingStatus: db.prepare('UPDATE readings SET status=? WHERE id=?'),
+  claimPaidRefund: db.prepare("UPDATE readings SET status='refunded' WHERE id=? AND status='paid'"),
 };
 const bal = (uid) => db.prepare('SELECT balance FROM users WHERE telegram_id=?').get(uid).balance;
 const mkUser = (uid, balance) => db.prepare('INSERT INTO users (telegram_id, balance) VALUES (?,?)').run(uid, balance);
@@ -63,13 +64,20 @@ function bodyOf(src, header) {
   return null;
 }
 const CANCEL_SRC = bodyOf(SRC, 'function cancelReading(');
+// v3.137.0: شرطِ «هنوز چیزی مصرف نشده» هم از خودِ ربات بریده می‌شود، و مجموعه‌ی استیت‌ها
+// هم از خودِ سورس خوانده می‌شود نه کپی، تا گسترشِ بی‌صدای آن در ربات این‌جا هم دیده شود.
+const REFUNDABLE_SRC = bodyOf(SRC, 'function refundableOnCancel(');
+const PRE_Q_SRC = (SRC.match(/const PRE_QUESTION_STATES = (new Set\(\[[^\]]*\]\));/) || [])[1];
+const PRE_QUESTION_STATES = PRE_Q_SRC ? new Function(`return ${PRE_Q_SRC};`)() : new Set();
+const getState = (uid) => db.prepare('SELECT state FROM users WHERE telegram_id=?').get(uid)?.state || 'new';
+const setState = (uid, st) => db.prepare('UPDATE users SET state=? WHERE telegram_id=?').run(st, uid);
 const events = [];   // هر track که کدِ محصول می‌زند این‌جا ثبت می‌شود
 const trackSpy = (_db, uid, name, props) => events.push({ uid, name, props });
 /** همان تابعِ واقعیِ ربات، با پرچمِ دلخواه. */
-const makeCancel = (refundOnCancel) => new Function(
-  'stmts', 'track', 'db', 'EVENTS', 'REFUND_ON_CANCEL',
-  `${CANCEL_SRC}; return cancelReading;`,
-)(stmts, trackSpy, db, { REFUND: 'refund' }, refundOnCancel);
+const makeCancel = (refundOnCancel, refundBeforeQuestion = true, st = stmts) => new Function(
+  'stmts', 'track', 'db', 'EVENTS', 'REFUND_ON_CANCEL', 'REFUND_BEFORE_QUESTION', 'PRE_QUESTION_STATES', 'getState',
+  `${REFUNDABLE_SRC}; ${CANCEL_SRC}; return cancelReading;`,
+)(st, trackSpy, db, { REFUND: 'refund' }, refundOnCancel, refundBeforeQuestion, PRE_QUESTION_STATES, getState);
 const cancelReading = makeCancel(false);          // رفتارِ زنده‌ی امروز
 const SP3 = { id: 'love3', price: 30_000, size: 3 };
 const SP10 = { id: 'love10', price: 100_000, size: 10 };
@@ -156,6 +164,88 @@ console.log('\n▶ رول‌بکِ یک‌خطی: REFUND_ON_CANCEL = true دقی
   ok(back === SP3.price && bal(41) === 50_000, 'با پرچمِ روشن، پولِ کامل برمی‌گردد');
   ok(stmts.getReading.get(id).status === 'refunded', 'و وضعیت refunded می‌شود');
   ok(events.length === 1 && events[0].name === 'refund', 'و رویدادِ refund دوباره ثبت می‌شود');
+}
+
+/* 💎 v3.137.0 — استثنای «هنوز چیزی مصرف نشده» (تیکتِ #TRT-661811364): انصرافِ قبل از
+   نوشتنِ سؤال پول را برمی‌گرداند، چون نه کارتی کشیده شده نه مدلی صدا زده شده. هر دو جهت
+   سنجیده می‌شود: کجا **باید** برگردد و کجا **نباید** (هر فیلدِ مصرف جدا). */
+console.log('\n▶ v3.137.0: انصرافِ قبل از نوشتنِ سؤال، پول را کامل برمی‌گرداند');
+{
+  ok(!!REFUNDABLE_SRC, 'تابعِ refundableOnCancel از خودِ ربات بریده شد');
+  ok(PRE_QUESTION_STATES.has('await_question') && PRE_QUESTION_STATES.size <= 2
+    && !['breathing', 'shuffling', 'picking', 'revealing'].some((x) => PRE_QUESTION_STATES.has(x)),
+    `مجموعه‌ی استیت‌ها فقط «قبل از سؤال» است (${[...PRE_QUESTION_STATES].join(',')})`);
+  ok(/const REFUND_BEFORE_QUESTION = true;/.test(SRC), 'پرچم در ربات هست و روشن است');
+
+  // ۱) مسیرِ اصلی: پرداخت ⟵ صفحه‌ی نوشتنِ سؤال ⟵ انصراف
+  mkUser(50, 50_000); setState(50, 'await_question');
+  const id = payForSpread(50, SP3, 'love');
+  events.length = 0;
+  const back = cancelReading(50, id);
+  ok(back === SP3.price && bal(50) === 50_000, `پولِ کامل برگشت (${back}، موجودی ${bal(50)})`);
+  ok(stmts.getReading.get(id).status === 'refunded', 'فال refunded شد (terminal، پس گارد گیر نمی‌دهد)');
+  ok(events.length === 1 && events[0].name === 'refund' && events[0].props?.reason === 'cancel_before_question',
+    `دقیقاً یک رویدادِ refund با دلیلِ جدا (${events.map((e) => e.name + ':' + e.props?.reason).join(',')})`);
+  ok(!events.some((e) => e.name === 'reading_forfeited'), 'و هیچ reading_forfeited ی ثبت نشد');
+
+  // ۲) دوبار-تپِ انصراف: فقط یک بار پول
+  events.length = 0;
+  ok(cancelReading(50, id) === 0 && bal(50) === 50_000 && events.length === 0,
+    'انصرافِ دوباره نه پول می‌دهد نه رویداد');
+
+  // ۳) بعد از نوشتنِ سؤال (استیتِ بعدی): قاعده‌ی REFUND_ON_CANCEL حاکم است
+  mkUser(51, 50_000); setState(51, 'breathing');
+  const id2 = payForSpread(51, SP3, 'love');
+  events.length = 0;
+  ok(cancelReading(51, id2) === 0 && bal(51) === 20_000, 'بعد از نوشتنِ سؤال پول برنمی‌گردد');
+  ok(events.length === 1 && events[0].name === 'reading_forfeited', 'و همان reading_forfeitedِ قبلی ثبت می‌شود');
+
+  // ۴) گاردِ **دیتای رکورد**: حتی در استیتِ «قبل از سؤال»، هر فیلدِ مصرف‌شده استثنا را می‌بندد
+  let uidN = 52;
+  for (const [col, val] of [['cards_json', '[{"k":1}]'], ['llm_json', '{"x":1}'], ['question', 'q'], ['question_audio', 'fid']]) {
+    const u = uidN++;
+    mkUser(u, 50_000); setState(u, 'await_question');
+    const rid = payForSpread(u, SP3, 'love');
+    db.prepare(`UPDATE readings SET ${col}=? WHERE id=?`).run(val, rid);
+    ok(cancelReading(u, rid) === 0 && bal(u) === 20_000, `با ${col} پر، پول برنمی‌گردد (استیت کافی نیست)`);
+  }
+  // کنترلِ مثبتِ همان حلقه: بدونِ پر کردنِ فیلد، همان مسیر پول می‌داد (وگرنه چهار ادعای بالا توخالی‌اند)
+  { const u = uidN++; mkUser(u, 50_000); setState(u, 'await_question');
+    const rid = payForSpread(u, SP3, 'love');
+    ok(cancelReading(u, rid) === SP3.price, 'کنترلِ مثبت: همان رکورد با فیلدهای خالی پول می‌گیرد'); }
+
+  // ۵) مالکیت: کاربرِ دیگری که خودش در استیتِ «قبل از سؤال» است نمی‌تواند فالِ من را ریفاند کند
+  { const a = uidN++, b = uidN++; mkUser(a, 50_000); mkUser(b, 0); setState(a, 'await_question'); setState(b, 'await_question');
+    const rid = payForSpread(a, SP3, 'love');
+    ok(cancelReading(b, rid) === 0 && bal(b) === 0 && bal(a) === 20_000, 'فالِ دیگری ریفاند نمی‌شود'); }
+
+  // ۶) رول‌بکِ یک‌خطی: پرچمِ خاموش ⟵ دقیقاً رفتارِ v3.136.0
+  { const u = uidN++; mkUser(u, 50_000); setState(u, 'await_question');
+    const rid = payForSpread(u, SP3, 'love');
+    events.length = 0;
+    ok(makeCancel(false, false)(u, rid) === 0 && bal(u) === 20_000 && events[0]?.name === 'reading_forfeited',
+      'REFUND_BEFORE_QUESTION=false ⟵ انصرافِ قبل از سؤال هم می‌سوزد (رفتارِ قبلی)'); }
+
+  // ۷) اتمیک بودن: اگر واریز وسطِ کار بشکند، ادعا هم برمی‌گردد (فال refunded و پول برنگشته نمی‌ماند)
+  { const u = uidN++; mkUser(u, 50_000); setState(u, 'await_question');
+    const rid = payForSpread(u, SP3, 'love');
+    const broken = { ...stmts, credit: { run: () => { throw new Error('disk'); } } };
+    let threw = false;
+    try { makeCancel(false, true, broken)(u, rid); } catch { threw = true; }
+    ok(threw && stmts.getReading.get(rid).status === 'paid' && bal(u) === 20_000,
+      'شکستِ واریز ⟵ ادعا rollback شد (فال هنوز paid است و قابلِ انصرافِ دوباره)'); }
+
+  // ۸) متنِ گارد با همان تک‌منبع تصمیم می‌گیرد، وگرنه «الماس برنمی‌گرده» دروغ می‌گفت
+  const guard = SRC.slice(SRC.indexOf('const paidFlow = navV2For(uid)'), SRC.indexOf('const paidFlow = navV2For(uid)') + 220);
+  ok(/!refundableOnCancel\(uid, stmts\.getReading\.get\(openRid\)\)/.test(guard),
+    'متنِ «الماس برنمی‌گرده» برای فالِ قابلِ ریفاند نشان داده نمی‌شود (همان تابع، نه کپیِ شرط)');
+  // و یادآوریِ شبانه‌ی فالِ نیمه‌کاره هم همان جمله را دارد («فقط بدون الماسش برنمی‌گرده»)
+  const stuck = bodyOf(SRC, 'async function sendStuckReadingReminder(') || '';
+  ok(/const warnNoRefund = hit\.canCancel && !refundableOnCancel\(uid, stmts\.getReading\.get\(hit\.r\.id\)\);/.test(stuck)
+    && /L\.reading\.stuckReading\(warnNoRefund\)/.test(stuck) && !/stuckReading\(hit\.canCancel\)/.test(stuck),
+    'یادآوریِ شبانه هم برای فالِ قابلِ ریفاند «الماسش برنمی‌گرده» نمی‌گوید (رکوردِ کامل، نه ستون‌های ناقصِ latestOpenReading)');
+  ok(/claimPaidRefund: *db\.prepare\("UPDATE readings SET status='refunded' WHERE id=\? AND status='paid'"\)/.test(SRC),
+    'ادعای مشروطِ ریفاند در ربات همانی است که این‌جا تست شد');
 }
 
 console.log('\n▶ فالِ پول‌داده‌ی در جریان هرگز با لغو دست نمی‌خورد');

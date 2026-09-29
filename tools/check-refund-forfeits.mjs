@@ -5,7 +5,7 @@
  * با `fetch` استابی می‌دواند. مهم‌ترین ادعا این است که فقط انصرافی جبران شود که **خودِ
  * پیامِ گارد** را یک تپِ غیرناوبری ساخته بود، نه هر انصرافی که آخرین تپش آن شکل را داشت.
  */
-import { readFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -130,7 +130,8 @@ console.log('\n▶ ۵) اجرا: پول قبل از پیام، یک‌بار، �
   try {
     await T.run(file, { token: 'x', sendReal: false });
     console.log = quiet;
-    ok(bal(101) === 0 && sent.length === 0 && !existsSync(file + '.pre-forfeit-refund.bak'), 'آزمایشی: هیچ الماس، هیچ پیام، هیچ بکاپ');
+    const baks = () => readdirSync(dir).filter((f) => /^bot-fa\.db\.pre-forfeit-refund-\d{12}\.bak$/.test(f));
+    ok(bal(101) === 0 && sent.length === 0 && baks().length === 0, 'آزمایشی: هیچ الماس، هیچ پیام، هیچ بکاپ');
 
     console.log = () => {};
     mode = 'fail';
@@ -138,7 +139,7 @@ console.log('\n▶ ۵) اجرا: پول قبل از پیام، یک‌بار، �
     console.log = quiet;
     ok(bal(101) === 3 && bal(202) === 3, '⭐ پیامِ نرسیده پول را نمی‌سوزاند: الماس قبل از ارسال برگشته');
     ok(bal(303) === 0 && bal(404) === 0, '⭐ ناوبری و اندازه‌ی دیگر هیچ الماسی نمی‌گیرند');
-    ok(existsSync(file + '.pre-forfeit-refund.bak'), 'بکاپِ همان لحظه قبل از هر نوشتن (بند ۲ج/۹)');
+    ok(baks().length === 1, 'بکاپِ همان لحظه قبل از هر نوشتن (بند ۲ج/۹)');
 
     console.log = () => {};
     mode = 'ok';
@@ -153,6 +154,84 @@ console.log('\n▶ ۵) اجرا: پول قبل از پیام، یک‌بار، �
     ok(d.prepare("SELECT COUNT(*) n FROM events WHERE event='view' AND json_extract(props,'$.k')='forfeit_refund'").get().n === 2,
       'پیامِ مالی در تایم‌لاین ثبت می‌شود (logPush)');
     d.close();
+  } finally { console.log = quiet; rmSync(dir, { recursive: true, force: true }); }
+}
+
+/* ═══════ ۵ب) دورِ دوم (v3.137.0): منوی بی‌گارد + تیکت ═══════ */
+console.log('\n▶ ۵ب) دورِ دوم: منوی بی‌گارد، تیکتِ بی‌پیام، و اعلامِ per فال');
+{
+  const m = (d) => ({ event: 'act', a: 'cmd', d });
+  ok(T.silentMenuOf([m('/menu'), view('x')]) === 'silent_menu', '/menu درست قبل از انصراف ⟵ silent_menu');
+  ok(T.silentMenuOf([m('/menu@taroot_fa_bot')]) === 'silent_menu', 'شکلِ گروهیِ دستور هم');
+  ok(T.silentMenuOf([act('nav', 'nav:menu')]) === 'silent_menu', 'دکمه‌ی nav:menu هم');
+  ok(T.silentMenuOf([view(GUARD), m('/menu')]) === null, '⭐ اگر هر پیامی در میانه آمده (مثلاً گارد)، بی‌گارد نیست');
+  ok(T.silentMenuOf([act('reading', 'reading:cancel'), view(GUARD), m('/menu')]) === null,
+    '⭐ منو ⟵ گارد ⟵ انصراف: هشدار را دیده، جبران ندارد');
+  ok(T.silentMenuOf([m('/start')]) === null && T.silentMenuOf([]) === null, 'دستورِ دیگر یا مسیرِ خالی ⟵ نه');
+  ok(T.TICKET_READINGS.get(26471) === '#TRT-661811364', 'فالِ تیکت با شماره‌ی تیکت ثبت است (ردپای تصمیمِ مالک)');
+  const tm = T.messageFor(3, ['silent_menu']);
+  ok(/منو/.test(tm) && !/پیامِ «انصراف»/.test(tm) && /تقصیرِ ربات بود/.test(tm) && !/—|--/.test(tm),
+    'کاربرِ منو متنِ ماجرای خودش را می‌گیرد، نه «پیامِ انصراف جلوت آمد»');
+  ok(T.messageFor(3) === T.messageFor(3, ['stale_step']) && /پیامِ «انصراف»/.test(T.messageFor(3)),
+    'متنِ دورِ اول بیت‌به‌بیت همان ماند');
+
+  const dir = mkdtempSync(join(tmpdir(), 'forfeit2-'));
+  const file = join(dir, 'bot-fa.db');
+  const db = new Database(file);
+  db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0);
+           CREATE TABLE readings (id INTEGER PRIMARY KEY, user_id INTEGER, type TEXT, price INTEGER,
+             status TEXT, question TEXT NOT NULL DEFAULT '', question_audio TEXT NOT NULL DEFAULT '');
+           CREATE TABLE forfeit_refund_log (reading_id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+             amount INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT '', refunded_at INTEGER NOT NULL DEFAULT 0,
+             sent_at INTEGER NOT NULL DEFAULT 0);`);
+  ensureAnalytics(db); ensureJourney(db);
+  db.prepare("INSERT INTO screens (k, sample, buttons) VALUES (?, 'یه فالِ باز داری که تمومش نکردی 🌙', 'reading:resume|reading:cancel')").run(GUARD);
+  for (const u of [101, 505, 606, 707]) db.prepare('INSERT INTO users (telegram_id, balance) VALUES (?, 0)').run(u);
+  const ev = db.prepare('INSERT INTO events (user_id, event, props, created_at) VALUES (?,?,?,?)');
+  const T0 = 1_790_000_000;
+  const forfeit = (uid, rid, t) => {
+    db.prepare("INSERT INTO readings (id, user_id, type, price, status) VALUES (?,?,'love3',3,'canceled')").run(rid, uid);
+    ev.run(uid, 'reading_forfeited', JSON.stringify({ reading_id: rid, amount: 3, reason: 'cancel' }), t);
+  };
+  // 101: دورِ اول جبران و پیام گرفته (فالِ ۱)؛ حالا یک فالِ دیگر با /menu سوخته
+  db.prepare("INSERT INTO readings (id, user_id, type, price, status) VALUES (1, 101, 'love3', 3, 'canceled')").run();
+  db.prepare("INSERT INTO forfeit_refund_log VALUES (1, 101, 3, 'stale_step', 1, 1)").run();
+  ev.run(101, 'act', JSON.stringify({ a: 'cmd', d: '/menu' }), T0 + 1); forfeit(101, 7, T0 + 1);
+  // 505: فقط منوی بی‌گارد
+  ev.run(505, 'act', JSON.stringify({ a: 'nav', d: 'nav:menu' }), T0 + 1); forfeit(505, 8, T0 + 1);
+  // 606: تیکت (گارد را دیده و از منو زده، پس طبقه‌بندیِ باگ ندارد؛ فقط تصمیمِ مالک)
+  ev.run(606, 'act', JSON.stringify({ a: 'kb', d: '🔮 فال بگیر' }), T0 + 1);
+  ev.run(606, 'view', JSON.stringify({ k: GUARD, t: 'msg' }), T0 + 2);
+  ev.run(606, 'act', JSON.stringify({ a: 'reading', d: 'reading:cancel' }), T0 + 9); forfeit(606, 26471, T0 + 9);
+  // 707: کنترلِ منفی: منو ⟵ گارد ⟵ انصراف
+  ev.run(707, 'act', JSON.stringify({ a: 'cmd', d: '/menu' }), T0 + 1);
+  ev.run(707, 'view', JSON.stringify({ k: GUARD, t: 'msg' }), T0 + 2);
+  ev.run(707, 'act', JSON.stringify({ a: 'reading', d: 'reading:cancel' }), T0 + 5); forfeit(707, 9, T0 + 5);
+  db.close();
+  // بکاپِ دورِ اول روی دیسک هست (همان وضعیتِ واقعیِ سرور)
+  rmSync(file + '.pre-forfeit-refund.bak', { force: true });
+  new Database(file).exec(`VACUUM INTO '${file}.pre-forfeit-refund.bak'`);
+  const baks2 = () => readdirSync(dir).filter((f) => /\.pre-forfeit-refund-\d{12}\.bak$/.test(f)).length;
+
+  const sent = [];
+  globalThis.fetch = async (url, init) => { sent.push(JSON.parse(init.body)); return { json: async () => ({ ok: true }) }; };
+  const quiet = console.log; console.log = () => {};
+  const bal = (u) => { const d = new Database(file); const b = d.prepare('SELECT balance FROM users WHERE telegram_id=?').get(u).balance; d.close(); return b; };
+  try {
+    await T.run(file, { token: 'x', sendReal: true });
+    const afterFirst = baks2();
+    await T.run(file, { token: 'x', sendReal: true });
+    console.log = quiet;
+    ok(afterFirst === 1, '⭐ دورِ دوم بکاپِ خودش را می‌گیرد، با اینکه بکاپِ دورِ اول روی دیسک هست');
+    ok(baks2() === 1, 'اجرای دوباره‌ی بی‌کار بکاپِ تازه نمی‌سازد (دیسکِ سرور)');
+    ok(bal(101) === 3 && bal(505) === 3 && bal(606) === 3, 'هر سه الماسِ همان یک فالِ تازه را گرفتند (نه فالِ دورِ اول دوباره)');
+    ok(bal(707) === 0, '⭐ کنترلِ منفی: کسی که گارد را دیده و انصراف زده چیزی نمی‌گیرد');
+    const to = (u) => sent.filter((x) => x.chat_id === u);
+    ok(to(505).length === 1 && /منو/.test(to(505)[0].text), 'کاربرِ منو یک پیام با متنِ ماجرای خودش');
+    ok(to(101).length === 1 && /۳ الماس/.test(to(101)[0].text) && /منو/.test(to(101)[0].text),
+      '⭐ کاربرِ دورِ اول برای فالِ **تازه** یک پیام می‌گیرد، با مبلغِ همان فال (نه جمعِ کل)');
+    ok(to(606).length === 0, '⭐ تیکت بی‌پیام: پشتیبانی خودش جواب می‌دهد');
+    ok(sent.length === 2, `اجرای دوباره هیچ پیامی تکرار نمی‌کند (${sent.length})`);
   } finally { console.log = quiet; rmSync(dir, { recursive: true, force: true }); }
 }
 
