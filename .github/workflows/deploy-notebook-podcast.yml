@@ -12,9 +12,10 @@ on:
       - '.github/workflows/deploy-notebook-podcast.yml'
   workflow_dispatch:
 
-# Serializes access to the shared VPS with the monorepo's existing deploy job.
+# This bot has its own PM2 app and files. A separate queue prevents GitHub from
+# cancelling its pending run when the monorepo's main deploy queues up.
 concurrency:
-  group: deploy-vps
+  group: deploy-notebook-podcast
   cancel-in-progress: false
 
 jobs:
