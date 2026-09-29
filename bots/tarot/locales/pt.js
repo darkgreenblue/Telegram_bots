@@ -896,6 +896,10 @@ export default {
     refundedFree: 'Uma pergunta sua ficou sem resposta no meio do caminho 🙏 E não descontei nada de você.\n\nPergunte de novo quando quiser.',
     // Áudio dentro da conversa (a primeira versão é só texto). De graça e sem desconto.
     voiceOnly: '🎙 Na conversa eu ainda leio só texto.\n\n⬇️ *Escreva a sua pergunta numa mensagem*',
+    // Foto/arquivo/vídeo/… dentro da conversa (v3.136.0): só texto, sem pular pra outro fluxo.
+    mediaOnly: '📎 Na conversa eu ainda leio só texto.\n\n⬇️ *Escreva a sua pergunta numa mensagem*',
+    // Igual, quando há uma fatura aberta esperando o comprovante.
+    mediaReceipt: '📎 Na conversa eu ainda leio só texto.\n\nSe for um comprovante de pagamento, encerre a conversa primeiro e depois envie de novo.',
     // Gentileza ou cumprimento: de graça, com um convite leve pra pergunta de verdade.
     smallTalk: 'Imagina 🌿\n\nPergunte o que quiser sobre a sua leitura.',
     // Dois toques ao mesmo tempo.

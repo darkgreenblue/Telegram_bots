@@ -880,6 +880,10 @@ export default {
     refundedFree: 'One of your questions was left unanswered 🙏 And nothing was taken from you.\n\nAsk again whenever you want.',
     // ویس در گفتگو (نسخه‌ی اول فقط متن). رایگان و بدونِ کسر.
     voiceOnly: '🎙 In the chat I can only read text for now.\n\n⬇️ *Type your question*',
+    // Photo/file/video/… inside the chat (v3.136.0): the chat takes text only and never jumps to another flow.
+    mediaOnly: '📎 In the chat I can only read text for now.\n\n⬇️ *Type your question*',
+    // Same, when an open invoice is waiting for a receipt: the receipt is not handled inside the chat.
+    mediaReceipt: '📎 In the chat I can only read text for now.\n\nIf this is a payment receipt, end the conversation first and then send it again.',
     // تعارف/سلام: رایگان، با یک دعوتِ نرم به سؤالِ واقعی.
     smallTalk: 'Likewise 🌿\n\nAsk me anything about your reading.',
     // دو تپِ هم‌زمان.
