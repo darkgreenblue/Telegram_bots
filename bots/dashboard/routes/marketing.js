@@ -44,30 +44,70 @@ export const validScope = (raw) => {
 };
 
 // آمار یک کمپین: جمع روی همه‌ی instance های همان ربات (tarot چند locale دارد)
-export function campaignStats(c) {
-  const src = `campaign:${c.code}`;
-  const agg = { starts: 0, returning: 0, newUsers: 0, firstValue: 0, paywall: 0, payers: 0, revenue: 0, hasPayments: false };
-  const pk = userPk(c.bot);
-  const m = moneyOf(c.bot);
+//
+// ⏱ ضدِ N+1 (۱۴۰۵/۰۷/۰۷): نسخه‌ی قبلی per کمپین هفت کوئری می‌زد و دو تایشان کلِ ردیف‌های
+// `start` را با json_extract اسکن می‌کردند. با ده‌ها کمپین روی `bot-fa.db` (دیسکِ کند)
+// صفحه‌ی `/marketing` ۱۰۷ ثانیه طول کشید؛ و چون better-sqlite3 همگام است، در تمامِ آن
+// مدت حلقه‌ی رویدادِ داشبورد قفل بود، `/healthz` جواب نداد و ناظرِ سلامت «HTTP 0» هشدار
+// داد. حالا per (ربات × دیتابیس) فقط پنج کوئریِ گروهی زده می‌شود، مستقل از تعدادِ کمپین‌ها،
+// و نتیجه برای بقیه‌ی کمپین‌های همان صفحه کش می‌شود. شرط‌ها **عیناً** همان شرط‌های قبلی‌اند
+// (هم‌ارزی را `tools/check-campaign-stats.mjs` روی فیکسچر می‌سنجد).
+const EMPTY_AGG = () => ({ starts: 0, returning: 0, newUsers: 0, firstValue: 0, paywall: 0, payers: 0, revenue: 0, hasPayments: false });
+const STATS_TTL_MS = 60_000;
+const statsMemo = new Map(); // botKey -> { at, byCode: Map<code, agg>, hasPayments }
+
+export function campaignStatsAll(botKey) {
+  const hit = statsMemo.get(botKey);
+  if (hit && Date.now() - hit.at < STATS_TTL_MS) return hit;
+  const byCode = new Map();
+  const get = (code) => { let a = byCode.get(code); if (!a) { a = EMPTY_AGG(); byCode.set(code, a); } return a; };
+  const codeOf = (src) => String(src).slice('campaign:'.length);
+  let hasPayments = false;
+  const pk = userPk(botKey);
+  const m = moneyOf(botKey);
   const testClause = m.testFilter ? ` AND p.${m.testFilter}` : '';
-  for (const inst of instancesOf(c.bot)) {
+  for (const inst of instancesOf(botKey)) {
     withDb(inst.file, (db) => {
       if (hasTable(db, 'events')) {
-        agg.starts += scalar(db, "SELECT COUNT(*) c FROM events WHERE event='start' AND json_extract(props,'$.kind')='campaign' AND json_extract(props,'$.code')=?", [c.code]);
-        agg.returning += scalar(db, "SELECT COUNT(*) c FROM events WHERE event='start' AND json_extract(props,'$.code')=? AND json_extract(props,'$.new')=0", [c.code]);
-        agg.firstValue += scalar(db, `SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.${pk}=e.user_id WHERE u.first_source=? AND e.event='first_value'`, [src]);
-        agg.paywall += scalar(db, `SELECT COUNT(DISTINCT e.user_id) c FROM events e JOIN users u ON u.${pk}=e.user_id WHERE u.first_source=? AND e.event='paywall_shown'`, [src]);
+        for (const r of rows(db, `SELECT json_extract(props,'$.code') code,
+              SUM(CASE WHEN json_extract(props,'$.kind')='campaign' THEN 1 ELSE 0 END) starts,
+              SUM(CASE WHEN json_extract(props,'$.new')=0 THEN 1 ELSE 0 END) ret
+            FROM events WHERE event='start' AND json_extract(props,'$.code') IS NOT NULL GROUP BY 1`)) {
+          const a = get(String(r.code)); a.starts += r.starts || 0; a.returning += r.ret || 0;
+        }
+        for (const r of rows(db, `SELECT u.first_source src, e.event ev, COUNT(DISTINCT e.user_id) c
+            FROM events e JOIN users u ON u.${pk}=e.user_id
+            WHERE u.first_source LIKE 'campaign:%' AND e.event IN ('first_value','paywall_shown') GROUP BY 1, 2`)) {
+          const a = get(codeOf(r.src));
+          if (r.ev === 'first_value') a.firstValue += r.c; else a.paywall += r.c;
+        }
       }
-      agg.newUsers += scalar(db, 'SELECT COUNT(*) c FROM users WHERE first_source=?', [src]);
+      for (const r of rows(db, "SELECT first_source src, COUNT(*) c FROM users WHERE first_source LIKE 'campaign:%' GROUP BY 1")) {
+        get(codeOf(r.src)).newUsers += r.c;
+      }
       if (hasTable(db, m.table)) {
-        agg.hasPayments = true;
-        agg.payers += scalar(db, `SELECT COUNT(DISTINCT p.user_id) c FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}${testUserClause(c.bot, 'p.user_id')}`, [src]);
-        agg.revenue += toToman(c.bot, scalar(db, `SELECT COALESCE(SUM(p.${m.amountCol}),0) s FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id WHERE u.first_source=? AND p.status='${m.successStatus}'${testClause}${testUserClause(c.bot, 'p.user_id')}`, [src]));
+        hasPayments = true;
+        for (const r of rows(db, `SELECT u.first_source src, COUNT(DISTINCT p.user_id) payers, COALESCE(SUM(p.${m.amountCol}),0) rev
+            FROM ${m.table} p JOIN users u ON u.${pk}=p.user_id
+            WHERE u.first_source LIKE 'campaign:%' AND p.status='${m.successStatus}'${testClause}${testUserClause(botKey, 'p.user_id')} GROUP BY 1`)) {
+          const a = get(codeOf(r.src)); a.payers += r.payers; a.revenue += toToman(botKey, r.rev);
+        }
       }
     });
   }
-  return agg;
+  for (const a of byCode.values()) a.hasPayments = hasPayments;
+  const out = { at: Date.now(), byCode, hasPayments };
+  statsMemo.set(botKey, out);
+  return out;
 }
+
+export function campaignStats(c) {
+  const all = campaignStatsAll(c.bot);
+  return { ...(all.byCode.get(String(c.code)) || EMPTY_AGG()), hasPayments: all.hasPayments };
+}
+
+/** فقط برای چک: کشِ ۶۰ثانیه‌ای را خالی می‌کند. */
+export const _resetCampaignStatsMemo = () => statsMemo.clear();
 
 // مقایسه‌ی چنل‌ها (کمپین/رفرال/ارگانیک) per ربات از روی first_source کاربران
 const CH_EXPR = `CASE
