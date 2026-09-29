@@ -14,9 +14,10 @@
 
 ## پیاده‌سازی و عملیات
 
-- Python 3.12؛ `python-telegram-bot` و `notebooklm-py[headless]` در venv مستقل؛ PM2 با ecosystem محلی این ربات. استقرار مستقل در `.github/workflows/deploy-notebook-podcast.yml` و همان قفل `deploy-vps`، بدون دستکاری پروسه‌های زندهٔ دیگر.
+- Python 3.12؛ `python-telegram-bot` و `notebooklm-py[headless]` در venv مستقل؛ PM2 با ecosystem محلی این ربات. استقرار مستقل در `.github/workflows/deploy-notebook-podcast.yml` و قفل `deploy-notebook-podcast`، بدون دستکاری پروسه‌های زندهٔ دیگر.
+- فقط فرایند `notebook-podcast` از پروکسی محلی `127.0.0.1:18759` استفاده می‌کند؛ فرایند `notebook-podcast-proxy` با Xray روی loopback اجرا می‌شود. مسیر پیش‌فرض سرور، تنظیمات شبکه و پروکسی سایر ربات‌ها تغییر نمی‌کند. ترافیک تلگرام و NotebookLM این ربات هر دو از همین پروکسی می‌گذرند.
 - SQLite در `data/bot.db` وضعیت فعلی هر مالک، منابع و شناسهٔ نوت‌بوک/تسک را نگه می‌دارد. پس از ری‌استارت، مرحلهٔ آپلود/تولید/ارسال ادامه می‌یابد. عنوان نوت‌بوک و عنوان منبع متنی پایدارند تا تلاش دوباره معمولاً تکرار نسازد. پنجرهٔ کوچک بین ساخت بیرونی و ثبت شناسه می‌تواند مصرف سهمیه را دوباره رقم بزند؛ برای صوتِ در حال تولید، قبل از retry باید آثار موجود بررسی شوند.
-- `NOTEBOOK_PODCAST_BOT_TOKEN` و `NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON` تنها سکرت‌های تازه‌اند. `OWNER_TELEGRAM_ID` و `VPS_SSH_KEY` از زیرساخت موجود خوانده می‌شوند. مستر توکن گوگل در `~/.notebooklm/profiles/notebook-podcast/master_token.json` با مجوز مالک ذخیره می‌شود؛ هرگز در Git، لاگ یا چت قرار نگیرد.
+- `NOTEBOOK_PODCAST_BOT_TOKEN`، `NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON` و `NOTEBOOK_PODCAST_PROXY_CONFIG_JSON` سکرت‌های اختصاصی‌اند. سکرت پروکسی یک پیکربندی Xray با HTTP inbound روی `127.0.0.1:18759` است و از نود انتخاب‌شدهٔ اشتراک Karing مالک گرفته می‌شود. `OWNER_TELEGRAM_ID` و `VPS_SSH_KEY` از زیرساخت موجود خوانده می‌شوند. مستر توکن گوگل و کانفیگ پروکسی با مجوز مالک روی VPS ذخیره می‌شوند؛ هرگز در Git، لاگ یا چت قرار نگیرند. با تعویض نود یا انقضای اشتراک، این Secret باید به‌روز و workflow دوباره اجرا شود.
 - سقف‌های ورودی: ۳۰۰ منبع و ۲۰ MB برای هر فایل طبق محدودیت دریافت Bot API. فایل ورودی موقت پس از آپلود و خروجی پس از ارسال حذف می‌شود. اطلاعات متنی در SQLite تا شروع درخواست جدید باقی می‌ماند تا retry ممکن باشد؛ نوت‌بوک ساخته‌شده خودکار حذف نمی‌شود.
 - وابستگی NotebookLM غیررسمی است و API داخلی گوگل ممکن است تغییر کند. در خطا، مرحله و دادهٔ ذخیره‌شده حفظ می‌شوند و ربات دکمهٔ «تلاش دوباره» می‌دهد. برای rollback، workflow را به کامیت قبلی برگردانید یا فقط اپ `notebook-podcast` را از PM2 متوقف کنید؛ هیچ دادهٔ ربات دیگری لمس نمی‌شود.
 
