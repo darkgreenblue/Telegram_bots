@@ -44,7 +44,7 @@ async def upload(session: dict, save, download_file, profile: str) -> None:
                     (s for s in await client.sources.list(nb_id) if s.title == title), None
                 )
                 source = known or await client.sources.add_text(
-                    nb_id, title, item["value"], wait=True, idempotent=True
+                    nb_id, title, item["value"], wait=True
                 )
             else:
                 filename = f"{session['batch_id'][:8]}-{index + 1}-{item['filename']}"
