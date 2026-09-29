@@ -6,6 +6,7 @@ import { scopeBot } from '../lib/nav.js';
 import { listCampaigns, createCampaign, getCampaign, setCampaignActive, getSetting, setSetting, audit } from '../lib/platform.js';
 import { fmt, esc, tehranDateTime, postRefLabel } from '../lib/util.js';
 import { table, cohortCount } from '../lib/html.js';
+import { cachedAnalyticsItem } from '../lib/dash-cache.js';
 
 const usernameKey = (botKey) => `username:${botKey}`;
 
@@ -302,10 +303,21 @@ export function marketingBody(url) {
     <button type="submit">ذخیره</button>
   </form></div>`;
 
+  /* ⏱ آمارِ کمپین‌ها، پست‌ها و چنل‌ها از کشِ worker می‌آید (۱۴۰۵/۰۷/۰۷). حتی بعد از
+     گروهی‌شدنِ کوئری‌ها، خواندنِ props همه‌ی رویدادهای start روی دیسکِ سرور ده‌ها ثانیه طول
+     می‌کشید و چون better-sqlite3 همگام است، کلِ داشبورد (و `/healthz`) در آن مدت قفل بود.
+     فرم‌ها، لینک‌ها و فهرستِ کمپین‌ها زنده‌اند؛ فقط اعداد از نسخه‌ی آماده خوانده می‌شوند.
+     کمپینی که بعد از آخرین ساخت اضافه شده «…» نشان می‌دهد تا نسخه‌ی تازه برسد. */
+  const cached = cachedAnalyticsItem(new URL(`/marketing?bot=${encodeURIComponent(bot)}`, 'http://127.0.0.1'));
+  let data = null;
+  try { data = cached.item ? JSON.parse(cached.item.body) : null; } catch { data = null; }
+  const statMap = new Map(data?.stats || []);
+  const statOf = (c) => statMap.get(`${c.bot}|${c.code}`) || null;
+
   const rowsHtml = campaigns.map(c => {
     const uname = getSetting(usernameKey(c.bot));
     const link = uname ? `https://t.me/${uname}?start=c_${c.code}` : '';
-    const s = campaignStats(c);
+    const s = statOf(c);
     return [
       `<b>${esc(c.name || c.code)}</b><div class="muted">${esc(c.source)} · ${esc(c.medium)}</div>`,
       `${esc(c.bot)}`,
@@ -314,14 +326,16 @@ export function marketingBody(url) {
         : `<span class="badge warn">یوزرنیم ربات را بالا ست کن</span> <span class="mono">c_${esc(c.code)}</span>`,
       // «استارت کل» و «کلیک برگشتی» شمارشِ رویدادند (نه کاربر یکتا) → عدد ساده می‌مانند؛
       // بقیه کاربرمحورند و با کلیک لیستشان باز می‌شود.
-      fmt(s.starts),
-      cohortCount(s.newUsers, { k: 'camp', bot: c.bot, code: c.code, m: 'new' }),
-      fmt(s.returning),
-      cohortCount(s.firstValue, { k: 'camp', bot: c.bot, code: c.code, m: 'fv' }),
-      cohortCount(s.paywall, { k: 'camp', bot: c.bot, code: c.code, m: 'pw' }),
-      s.hasPayments
-        ? `${cohortCount(s.payers, { k: 'camp', bot: c.bot, code: c.code, m: 'payers' })} / ${fmt(s.revenue)} ت`
-        : '-',
+      ...(s ? [
+        fmt(s.starts),
+        cohortCount(s.newUsers, { k: 'camp', bot: c.bot, code: c.code, m: 'new' }),
+        fmt(s.returning),
+        cohortCount(s.firstValue, { k: 'camp', bot: c.bot, code: c.code, m: 'fv' }),
+        cohortCount(s.paywall, { k: 'camp', bot: c.bot, code: c.code, m: 'pw' }),
+        s.hasPayments
+          ? `${cohortCount(s.payers, { k: 'camp', bot: c.bot, code: c.code, m: 'payers' })} / ${fmt(s.revenue)} ت`
+          : '-',
+      ] : Array(6).fill('<span class="muted">…</span>')),
       tehranDateTime(c.created_at),
       `<form method="post" action="/marketing/toggle" style="display:inline"><input type="hidden" name="id" value="${c.id}">
         <button class="ghost" type="submit">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button></form>${c.is_active ? '' : ' <span class="badge bad">غیرفعال</span>'}`,
@@ -332,6 +346,15 @@ export function marketingBody(url) {
   ${table(['کمپین', 'ربات', 'لینک', 'استارت کل', 'کاربر جدید', 'کلیک برگشتی', 'به اولین ارزش رسید', 'پی‌وال دید', 'خریدار / درآمد', 'ساخت', ''], rowsHtml, 'هنوز کمپینی نساخته‌ای.')}
   <p class="muted">«کاربر جدید» = first-touch با همین کمپین. «کلیک برگشتی» = /start کاربرِ ازقبل‌موجود با این لینک (کمپین‌های re-engagement این‌جا دیده می‌شوند).</p></div>`;
 
+  return createForm + cached.note + campaignsCard + (data?.postsHtml || '') + (data?.channelsHtml || '') + unameForm;
+}
+
+/** سنگینِ صفحه‌ی مارکتینگ، فقط در worker اجرا می‌شود (`lib/analytics-pages.js`). */
+export function marketingStatsData(url) {
+  const bot = scopeBot(url);
+  const inScope = (cb) => (langOfKey(bot) ? cb === bot : baseKey(cb) === bot);
+  const campaigns = listCampaigns().filter(c => inScope(c.bot));
+  const stats = campaigns.map(c => [`${c.bot}|${c.code}`, campaignStats(c)]);
   let channels = '';
   for (const b of BOTS.filter(x => x.key === bot)) {
     const list = channelSummary(b.key);
@@ -355,7 +378,7 @@ export function marketingBody(url) {
     }))}</div>`;
   }
 
-  return createForm + campaignsCard + postsCards(campaigns, bot) + channels + unameForm;
+  return { stats, postsHtml: postsCards(campaigns, bot), channelsHtml: channels };
 }
 
 export function marketingCreate(body) {

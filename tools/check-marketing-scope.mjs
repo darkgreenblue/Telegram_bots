@@ -11,7 +11,7 @@
 //   ۲) یک فیلدِ یوزرنیم برای هر سه زبان بود، پس لینکِ کمپینِ اسپانیایی می‌توانست به
 //      رباتِ روسی برود. اتریبیوشن درست جمع می‌شد ولی کاربر به رباتِ اشتباه می‌رفت؛
 //      همان خانواده‌ی «عددِ درست، واحدِ دروغ» (بند ۶ج ریشه).
-import { mkdtempSync, mkdirSync, readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
@@ -36,6 +36,11 @@ for (const lang of ['fa', 'ru', 'pt', 'es']) {
   db.close();
 }
 process.env.TAROT_DB_DIR = dataDir;
+// صفحه‌ی مارکتینگ آمارش را از کشِ worker می‌خواند؛ کش و worker در ریشه‌ی موقت می‌مانند
+// تا چک هیچ پروسه‌ی واقعی نسازد و در `bots/dashboard/data` چیزی ننویسد.
+process.env.DASH_CACHE_DIR = path.join(root, 'cache');
+process.env.DASH_CACHE_WORKER = path.join(root, 'noop-worker.mjs');
+writeFileSync(process.env.DASH_CACHE_WORKER, 'process.exit(0);\n');
 
 /* ⚠️ `lib/platform.js` هنگامِ import یک `./data/platform.db` **نسبت به cwd** باز می‌کند،
  * پس قبل از import باید داخلِ ریشه‌ی موقت باشیم، وگرنه چک روی دیتای واقعیِ داشبورد

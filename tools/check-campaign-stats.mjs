@@ -11,7 +11,7 @@
 //      با code، new=0، کاربرِ تستی، پرداختِ تأییدنشده، کمپینِ بی‌دیتا، و اسکوپِ زبان‌دار.
 //   ۲) تعدادِ کوئری مستقل از تعدادِ کمپین‌هاست (کنترلِ مثبت: نسخه‌ی قبلی خطی رشد می‌کند).
 //   ۳) ساختاری: `campaignStats` دیگر per کمپین `scalar` صدا نمی‌زند.
-import { mkdtempSync, mkdirSync, readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
@@ -34,7 +34,7 @@ const CODES = ['aaaaa', 'bbbbb', 'ccccc', 'ddddd', 'eeeee', 'fffff'];
 function seed(file, salt) {
   const db = new Database(file);
   db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, name TEXT DEFAULT '',
-      first_source TEXT DEFAULT '', created_at INTEGER DEFAULT 0);
+      first_source TEXT DEFAULT '', first_payload TEXT DEFAULT '', created_at INTEGER DEFAULT 0);
     CREATE TABLE events (id INTEGER PRIMARY KEY, user_id INTEGER, event TEXT, props TEXT, created_at INTEGER);
     CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER, original_amount INTEGER,
       status TEXT, created_at INTEGER);`);
@@ -67,6 +67,9 @@ seed(path.join(dataDir, 'bot-fa.db'), 1);
 seed(path.join(dataDir, 'bot-ru.db'), 2);
 seed(path.join(dataDir, 'bot-es.db'), 3);
 process.env.TAROT_DB_DIR = dataDir;
+process.env.DASH_CACHE_DIR = path.join(root, 'cache');
+process.env.DASH_CACHE_WORKER = path.join(root, 'noop-worker.mjs');
+writeFileSync(process.env.DASH_CACHE_WORKER, 'process.exit(0);\n');
 
 const REPO = path.resolve('.');
 mkdirSync(path.join(root, 'data'), { recursive: true });
@@ -142,6 +145,50 @@ const oldCounter = { n: 0 };
 for (const code of CODES) oldStats({ bot: 'tarot', code }, oldCounter);
 ok(newCount <= 12, `شش کمپین با حداکثر ۱۲ prepare (واقعی: ${newCount})`);
 ok(oldCounter.n >= 6 * 7, `کنترلِ مثبت: نسخه‌ی قبلی per کمپین ۷ کوئری می‌زد (${oldCounter.n})`);
+
+/* ══ ۲ب) صفحه‌ی مارکتینگ هیچ کوئریِ سنگینی روی حلقه‌ی HTTP نمی‌زند ══
+ * حتی نسخه‌ی گروهی روی سرور ده‌ها ثانیه طول می‌کشید (props همه‌ی رویدادهای start)، پس آمار
+ * به worker رفت و `marketingBody` فقط فرم‌ها + فهرست + اعدادِ کش‌شده را رندر می‌کند. */
+const { writeDashCache } = await import(path.join(REPO, 'bots/dashboard/lib/dash-cache.js'));
+const { renderCachedAnalyticsPage } = await import(path.join(REPO, 'bots/dashboard/lib/analytics-pages.js'));
+const { listCampaigns } = await import(path.join(REPO, 'bots/dashboard/lib/platform.js'));
+{
+  const pdb = new Database(path.join(root, 'data', 'platform.db'));
+  const ins = pdb.prepare('INSERT OR IGNORE INTO campaigns (code, bot, source, medium, name) VALUES (?,?,?,?,?)');
+  for (const code of CODES) ins.run(code, 'tarot', 's', 'm', 'n_' + code);
+  pdb.close();
+}
+ok(listCampaigns().length >= CODES.length, 'کمپین‌های فیکسچر در platform.db ثبت شدند');
+const MKURL = new URL('http://x/marketing?bot=tarot');
+const heavyRe = /FROM events|FROM payments|json_extract/;
+let seen = [];
+Database.prototype.prepare = function (sql) { seen.push(sql); return origPrepare.call(this, sql); };
+const cold = M.marketingBody(MKURL);
+Database.prototype.prepare = origPrepare;
+ok(seen.filter(q => heavyRe.test(q)).length === 0, 'بدونِ کش، `marketingBody` هیچ کوئریِ events/payments نمی‌زند',
+  seen.filter(q => heavyRe.test(q)).map(q => q.replace(/\s+/g, ' ').slice(0, 80)).join(' || '));
+ok(/در حال آماده‌سازی/.test(cold) && /…/.test(cold) && /n_aaaaa/.test(cold),
+  'بدونِ کش: فهرستِ کمپین‌ها زنده دیده می‌شود و اعداد «…» با نوارِ «در حال آماده‌سازی»');
+
+// worker همان مسیری را می‌سازد که صفحه می‌خواند
+M._resetCampaignStatsMemo();
+const built = renderCachedAnalyticsPage(new URL('http://127.0.0.1/marketing?bot=tarot'));
+let parsed = null; try { parsed = JSON.parse(built); } catch {}
+ok(parsed && Array.isArray(parsed.stats) && parsed.stats.length >= CODES.length, 'worker برای /marketing دیتای JSON می‌سازد');
+const want = oldStats({ bot: 'tarot', code: 'eeeee' });
+const got = new Map(parsed?.stats || []).get('tarot|eeeee');
+ok(JSON.stringify(got) === JSON.stringify(want), 'آمارِ ساخته‌شده در worker همان آمارِ قبلی است',
+  `got=${JSON.stringify(got)} want=${JSON.stringify(want)}`);
+
+writeDashCache(new URL('http://127.0.0.1/marketing?bot=tarot'), built);
+seen = [];
+Database.prototype.prepare = function (sql) { seen.push(sql); return origPrepare.call(this, sql); };
+const warm = M.marketingBody(MKURL);
+Database.prototype.prepare = origPrepare;
+ok(seen.filter(q => heavyRe.test(q)).length === 0, 'با کش هم `marketingBody` هیچ کوئریِ سنگینی نمی‌زند');
+ok(warm.includes(`>${new Intl.NumberFormat('fa-IR').format(want.starts)}<`) || warm.includes(String(want.starts)),
+  'با کش: اعدادِ کمپین روی صفحه می‌نشینند');
+ok(/آخرین‌بار/.test(warm), 'با کش: زمانِ به‌روزرسانیِ آمار نشان داده می‌شود');
 
 /* ══ ۳) ساختاری ══ */
 const body = SRC.slice(SRC.indexOf('export function campaignStats('), SRC.indexOf('export const _resetCampaignStatsMemo'));
