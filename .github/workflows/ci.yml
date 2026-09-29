@@ -487,6 +487,7 @@ jobs:
           cd bots/dashboard && npm ci --silent && cd ../..
           node tools/check-admin-coins.mjs
           node tools/check-marketing-scope.mjs
+          node tools/check-campaign-stats.mjs
 
       - name: LLM cost rule check
         if: matrix.bot == 'tarot'
