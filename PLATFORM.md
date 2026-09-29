@@ -84,7 +84,7 @@ merge → دیپلوی خودکار. تنها کارِ دستیِ مجاز بر�
 |-----|--------|------|
 | `~/voice2text/` | مونوریپوی ربات‌های تلگرام | نامش تاریخی است؛ **کلِ** مونوریپو آنجاست. دست نزن. |
 | `~/tabir_khab/` | ربات تعبیر خواب (پایتون + systemd) | دست نزن. |
-| اپ‌های pm2: `voice2text`, `tarot`, `tarot-ru`, `tarot-pt`, `tarot-es`, `daily-brief`, `dashboard`, `health-watch` | مونوریپو | **هرگز** stop/restart/delete نکن |
+| اپ‌های pm2: `voice2text`, `tarot`, `tarot-ru`, `tarot-pt`, `tarot-es`, `daily-brief`, `dashboard`, `health-watch`, `notebook-podcast` | مونوریپو | **هرگز** stop/restart/delete نکن، مگر اپ متعلق به همین تسک باشد |
 | سرویس systemd: `tabir-khab`, `dash-tunnel`, `pm2-ubuntu` | مونوریپو | `pm2-ubuntu` یعنی بعد از ری‌بوت pm2 خودکار بالا می‌آید |
 | پورت `8787` روی `127.0.0.1` | داشبورد ادمین | **اشغال است** — پورت دیگری بردار |
 | کرونِ کاربر `ubuntu` سرِ دقیقه‌ی ۳۰ هر ساعت | انتشار روزانه‌ی کانال مارکتینگ | با `crontab -` بازنویسی نکن (بند ۵، قاعده‌ی ۷) |

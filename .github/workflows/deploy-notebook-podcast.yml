@@ -1,0 +1,80 @@
+name: Deploy Notebook Podcast
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bots/notebook-podcast/**'
+      - '.github/workflows/deploy-notebook-podcast.yml'
+  workflow_dispatch:
+
+# Serializes access to the shared VPS with the monorepo's existing deploy job.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r bots/notebook-podcast/requirements.txt
+      - name: Validate code
+        run: |
+          python -m compileall -q bots/notebook-podcast
+          python -m unittest discover -s bots/notebook-podcast -p 'test_*.py'
+      - name: Check required secrets
+        id: ready
+        env:
+          BOT_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_BOT_TOKEN }}
+          OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
+          MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_IDS" ] && [ -n "$MASTER_TOKEN" ] && [ -n "$SSH_KEY" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '⚠️ Required secrets: NOTEBOOK_PODCAST_BOT_TOKEN, OWNER_TELEGRAM_ID, NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON, VPS_SSH_KEY'
+          fi
+      - name: Deploy only notebook-podcast
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          BOT_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_BOT_TOKEN }}
+          OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
+          MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]
+          [[ "$OWNER_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]
+          python -c 'import json,os; v=json.loads(os.environ["MASTER_TOKEN"]); assert isinstance(v,dict)'
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/notebook_podcast_key"
+          chmod 600 "$HOME/.ssh/notebook_podcast_key"
+          ssh-keyscan -H 185.204.171.170 >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          SSH=(ssh -i "$HOME/.ssh/notebook_podcast_key" -o StrictHostKeyChecking=yes ubuntu@185.204.171.170)
+          TARGET=/home/ubuntu/voice2text/bots/notebook-podcast
+          # Archive tracked source only; never copy the runner's SQLite test data.
+          git archive HEAD:bots/notebook-podcast | "${SSH[@]}" "mkdir -p '$TARGET' && tar -xf - -C '$TARGET'"
+          printf 'BOT_TOKEN=%s\nADMIN_IDS=%s\nNOTEBOOKLM_PROFILE=notebook-podcast\n' "$BOT_TOKEN" "$OWNER_IDS" \
+            | "${SSH[@]}" "umask 077; cat > '$TARGET/.env.new' && mv '$TARGET/.env.new' '$TARGET/.env'"
+          printf '%s' "$MASTER_TOKEN" \
+            | "${SSH[@]}" 'umask 077; mkdir -p ~/.notebooklm/profiles/notebook-podcast; cat > ~/.notebooklm/profiles/notebook-podcast/master_token.json.new && mv ~/.notebooklm/profiles/notebook-podcast/master_token.json.new ~/.notebooklm/profiles/notebook-podcast/master_token.json'
+          "${SSH[@]}" "set -e;
+            cd '$TARGET';
+            python3 -m venv .venv;
+            .venv/bin/pip install -q -r requirements.txt;
+            .venv/bin/notebooklm -p notebook-podcast auth refresh --verify >/dev/null;
+            .venv/bin/notebooklm -p notebook-podcast auth check --test --json | .venv/bin/python -c 'import json,sys; x=json.load(sys.stdin); assert x.get(\"status\")==\"ok\" and x.get(\"checks\",{}).get(\"token_fetch\") is True';
+            pm2 startOrReload ecosystem.config.cjs --only notebook-podcast --update-env;
+            sleep 3;
+            pm2 jlist | node -e 'const a=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));const p=a.find(x=>x.name===\"notebook-podcast\");process.exit(p?.pm2_env?.status===\"online\"?0:1)';
+            pm2 jlist | node -e 'const a=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));process.exit(a.every(x=>x.pm2_env.status===\"online\")?0:1)' && pm2 save || echo 'pm2 save skipped: another app is not online';
+            echo 'notebook-podcast deployed and online'"
