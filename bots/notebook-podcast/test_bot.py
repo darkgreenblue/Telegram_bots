@@ -31,6 +31,41 @@ class CollectionTests(unittest.TestCase):
 
 
 class GenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_retries_redirect_and_reuses_url_created_before_failure(self):
+        source = SimpleNamespace(id="source-1", url="https://youtu.be/abc")
+
+        class Sources:
+            def __init__(self):
+                self.items = []
+                self.add_url = AsyncMock(side_effect=self.create)
+
+            async def list(self, notebook_id):
+                return self.items
+
+            async def create(self, notebook_id, url, *, wait):
+                self.items.append(source)
+                raise ValueError("CSRF token not found in HTML. Final URL: https://notebook.google/")
+
+        class Client:
+            sources = Sources()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return None
+
+        client = Client()
+        session = {
+            "batch_id": "batch", "notebook_id": "notebook-1",
+            "inputs": [{"kind": "url", "value": "https://youtu.be/abc"}],
+        }
+        with patch("notebook.NotebookLMClient.from_storage", return_value=client), \
+             patch("notebook.asyncio.sleep", new_callable=AsyncMock):
+            await upload(session, lambda s: None, None, "profile")
+        self.assertEqual(client.sources.add_url.await_count, 1)
+        self.assertEqual(session["inputs"][0]["source_id"], "source-1")
+
     async def test_text_upload_retries_without_unsupported_idempotent_flag(self):
         created = SimpleNamespace(id="source-1", title="Telegram text batch-1")
 
