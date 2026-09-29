@@ -139,15 +139,21 @@ function expRevenue(db, bot, key) {
   const test = m.testFilter ? ` AND ${m.testFilter}` : '';
   try {
     const out = new Map();
+    /* ⏱ `MATERIALIZED` حیاتی است (۱۴۰۵/۰۷/۰۷): بدونِ آن SQLite زیرکوئریِ پرداخت‌ها را
+       inline می‌کرد و per هر exposure همه‌ی ردیف‌های پرداختِ موفق را دوباره از جدول
+       می‌خواند (روی دیتای هم‌اندازه ~۱۵ گیگابایت خواندن؛ روی سرور `/experiments/view` تا
+       ۱۸۷ ثانیه طول کشید و کلِ داشبورد قفل بود). حالا یک بار ساخته می‌شود و join با
+       ایندکسِ خودکار می‌نشیند (~۳ مگابایت). */
     for (const r of rows(db, `
+      WITH p AS MATERIALIZED (
+        SELECT user_id uid, ${m.amountCol} amt, ${unixOf(m.createdKind, 'created_at')} t
+        FROM ${m.table} WHERE status=?${test}${testUserClause(bot)}
+      )
       SELECT u.variant, COUNT(*) n, SUM(u.k > 0) payers, SUM(u.k) cnt, SUM(u.s) rev, SUM(u.s * u.s) rev2
       FROM (
         SELECT x.variant, x.user_id, COALESCE(SUM(p.amt), 0) s, COUNT(p.t) k
         FROM ab_exposures x
-        LEFT JOIN (
-          SELECT user_id uid, ${m.amountCol} amt, ${unixOf(m.createdKind, 'created_at')} t
-          FROM ${m.table} WHERE status=?${test}${testUserClause(bot)}
-        ) p ON p.uid = x.user_id AND p.t >= x.created_at
+        LEFT JOIN p ON p.uid = x.user_id AND p.t >= x.created_at
         WHERE x.experiment_key=?${testUserClause(bot, 'x.user_id')}
         GROUP BY x.variant, x.user_id
       ) u GROUP BY u.variant`, [m.successStatus, key])) {
@@ -173,19 +179,23 @@ const READING_METRIC_EXPERIMENTS = new Set(['reading_model_ds']);
 
 function readingModelExtras(inst, e) {
   return withDb(inst.file, (db) => {
-    const satisfaction = new Map(rows(db, `
-      SELECT x.variant, COUNT(*) n, AVG(CAST(json_extract(ev.props,'$.score') AS REAL)) avg_score
-      FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
-      WHERE x.experiment_key=? AND ev.event='feedback' AND ev.created_at >= x.created_at
-        AND json_extract(ev.props,'$.score') IS NOT NULL
-      GROUP BY x.variant`, [e.key]).map(r => [r.variant, r]));
+    /* ⏱ اول فقط شناسه‌ی رویدادهای کاربرانِ exposeشده از ایندکسِ پوششیِ
+       `(event, created_at, user_id)` ساخته می‌شود و `props` فقط برای همان‌ها خوانده
+       می‌شود؛ شکلِ قبلی props همه‌ی رویدادهای آن نوع را از دیسک می‌کشید (~۵۰MB). */
+    const matched = (ev) => `WITH m AS MATERIALIZED (
+        SELECT x.variant, ev.id FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
+        WHERE x.experiment_key=? AND ev.event='${ev}' AND ev.created_at >= x.created_at)`;
+    const satisfaction = new Map(rows(db, `${matched('feedback')}
+      SELECT m.variant, COUNT(*) n, AVG(CAST(json_extract(ev.props,'$.score') AS REAL)) avg_score
+      FROM m JOIN events ev ON ev.id = m.id
+      WHERE json_extract(ev.props,'$.score') IS NOT NULL
+      GROUP BY m.variant`, [e.key]).map(r => [r.variant, r]));
 
     const waitByV = new Map();
-    for (const r of rows(db, `
-      SELECT x.variant, CAST(json_extract(ev.props,'$.ms') AS REAL) ms
-      FROM ab_exposures x JOIN events ev ON ev.user_id = x.user_id
-      WHERE x.experiment_key=? AND ev.event='reading_wait' AND ev.created_at >= x.created_at
-        AND json_extract(ev.props,'$.ms') IS NOT NULL`, [e.key])) {
+    for (const r of rows(db, `${matched('reading_wait')}
+      SELECT m.variant, CAST(json_extract(ev.props,'$.ms') AS REAL) ms
+      FROM m JOIN events ev ON ev.id = m.id
+      WHERE json_extract(ev.props,'$.ms') IS NOT NULL`, [e.key])) {
       if (!waitByV.has(r.variant)) waitByV.set(r.variant, []);
       waitByV.get(r.variant).push(Number(r.ms) || 0);
     }
