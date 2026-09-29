@@ -1007,7 +1007,7 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
   const REQUIRED = ['chat_offer_shown', 'chat_opened', 'chat_unavailable', 'chat_message', 'chat_paywall',
     'chat_llm_failed', 'chat_refund', 'chat_crisis', 'chat_smalltalk', 'chat_busy', 'chat_exited', 'chat_guard',
     'chat_keep', 'chat_resumed', 'chat_new_tap', 'chat_followup', 'chat_followup_gone', 'chat_skip', 'chat_voice',
-    'chat_fix', 'chat_thin'];
+    'chat_fix', 'chat_thin', 'chat_media'];
   const missing = REQUIRED.filter((e) => !new RegExp(`track\\(db, [\\w.()]+, '${e}'`).test(CODE));
   ok(missing.length === 0, `هر ${REQUIRED.length} رویدادِ معنایی گفتگو ثبت می‌شوند${missing.length ? ` (غایب: ${missing.join(', ')})` : ''}`);
   // هر هندلرِ دکمه‌ی گفتگو یا خودش ثبت می‌کند یا به تابعی می‌رسد که ثبت می‌کند.
@@ -1026,6 +1026,48 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
     'handleChatMessage: فالِ ناموجود، تعارف و هم‌زمانی هر سه ثبت می‌شوند');
   ok(/via = 'typed'/.test(hcm) && /runChatTurn\(\{[^}]*\bvia\b/.test(hcm),
     'و منبعِ پیام (تایپ یا دکمه) تا خودِ نوبت می‌رسد');
+}
+
+/* ═══ ۱۵ب) گفتگو فقط متن می‌گیرد و به فلوی دیگری نمی‌پرد (v3.136.0) ═══════
+ *
+ * 🐛 باگی که مالک گرفت: عکسی که وسطِ گفتگو می‌آمد از میدل‌ورِ گفتگو رد می‌شد
+ * (`!txt && !cb ⟵ next()`) و به هندلرِ **رسید** می‌رسید، پس کاربر به‌جای جوابِ گفتگو
+ * پیامِ «فاکتوری نداری» می‌گرفت. قاعده (بند ۹ب/۲ ریشه): داخلِ یک فلوی باز هیچ اکشنی از
+ * پایپ‌لاینِ دیگر زده نمی‌شود. ادعاها رفتاری‌اند: خودِ `chatMediaKind` از سورس بریده و
+ * روی پیام‌های ساختگی اجرا می‌شود، با کنترلِ معکوس برای پیامِ سرویسی. */
+{
+  console.log('\n📎 ۱۵ب) گفتگو فقط متن');
+  ok(/const CHAT_TEXT_ONLY\s*=\s*true;/.test(CODE), 'پرچمِ `CHAT_TEXT_ONLY` روشن است (رول‌بک = false)');
+  const kindsSrc = (CODE.match(/const CHAT_MEDIA_KINDS = \[[\s\S]*?\];/) || [''])[0];
+  const kindFn = (CODE.match(/const chatMediaKind = [^\n]*;/) || [''])[0];
+  let kind = () => 'BROKEN';
+  try { kind = new Function(`${kindsSrc}\n${kindFn}\nreturn chatMediaKind;`)(); } catch {}
+  const cases = [
+    [{ photo: [{}] }, 'photo'], [{ document: {} }, 'document'], [{ animation: {}, document: {} }, 'animation'],
+    [{ video: {} }, 'video'], [{ video_note: {} }, 'video_note'], [{ sticker: {} }, 'sticker'],
+    [{ location: {} }, 'location'], [{ contact: {} }, 'contact'],
+  ];
+  const bad = cases.filter(([m, k]) => kind(m) !== k).map(([, k]) => k);
+  ok(bad.length === 0, `هر رسانه‌ی غیرمتنی شناخته می‌شود${bad.length ? ` (غایب: ${bad.join(', ')})` : ''}`);
+  // کنترلِ معکوس: پیامِ سرویسی (پولِ استارز)، ویس (هندلرِ خودش) و متن **هرگز** بلعیده نمی‌شوند.
+  ok(kind({ successful_payment: {} }) === '' && kind({ voice: {} }) === '' && kind({ audio: {} }) === ''
+    && kind({ text: 'x' }) === '' && kind(undefined) === '',
+    'پیامِ سرویسی/ویس/متن بلعیده نمی‌شوند (فهرستِ صریح، نه «هر چیزی جز متن»)');
+  // جای شاخه: داخلِ میدل‌ورِ گفتگو و **قبل از** عبورِ بی‌قیدِ `!txt && !cb`.
+  const mw = CODE.slice(CODE.indexOf("getState(uid) !== 'chatting') return next();"));
+  const iMedia = mw.indexOf('chatRejectMedia(ctx, uid, media)');
+  const iPass = mw.indexOf('if (!txt && !cb) return next();');
+  ok(iMedia > 0 && iPass > 0 && iMedia < iPass, 'شاخه‌ی رسانه قبل از عبورِ بی‌قیدِ `!txt && !cb` است');
+  ok(/if \(media\) \{ await chatRejectMedia\(ctx, uid, media\); return; \}/.test(mw),
+    'و بعد از جواب **return** می‌کند (به هندلرِ رسید نمی‌رسد)');
+  const rj = bodyOf(CODE, 'async function chatRejectMedia(') || '';
+  ok(!/processReceipt|claimAmount|revivePayment/.test(rj), 'رسید داخلِ گفتگو پردازش نمی‌شود');
+  const iSticker = rj.indexOf("if (kind === 'sticker') return;");
+  ok(iSticker > 0 && iSticker < rj.indexOf('ctx.reply('), 'استیکر بی‌جواب است (تصمیمِ مالک)');
+  ok(iSticker > rj.indexOf("'chat_media'"), '…ولی ثبت می‌شود');
+  ok(/L\.chat\.mediaReceipt[\s\S]{0,160}chat_end:\$\{rid\}/.test(rj),
+    'فاکتورِ باز ⟵ راهِ خروج با دکمه‌ی «پایان مکالمه» (رسید بی‌راه نمی‌ماند)');
+  ok(/!starsRail/.test(rj), 'روی ریلِ استارز حرفِ رسید زده نمی‌شود');
 }
 
 /* ═══ ۱۶) سنجه‌های لحن و اکوی برچسب (درسِ دورِ ۱ آزمایشگاه) ══════════
@@ -1323,12 +1365,16 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     daily: '🎴 فال تک کارت امروز (رایگان)', settings: '⚙️ تنظیمات' };
   const INTENT_STUB = { DAILY: 'daily', WALLET: 'wallet', INVITE: 'invite',
     LUCKY: 'lucky', READING: 'reading', SETTINGS: 'settings' };
-  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting' }) => {
-    const seen = { next: 0, guard: 0, left: 0, intent: null };
+  const kindsSrc2 = (CODE.match(/const CHAT_MEDIA_KINDS = \[[\s\S]*?\];/) || [''])[0];
+  const kindFn2 = (CODE.match(/const chatMediaKind = [^\n]*;/) || [''])[0];
+  const realKind = new Function(`${kindsSrc2}\n${kindFn2}\nreturn chatMediaKind;`)();
+  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting', msg = null, textOnly = true }) => {
+    const seen = { next: 0, guard: 0, left: 0, intent: null, media: null };
     const fn = new Function('bot', 'getState', 'getSession', 'getBalance', 'KB_LABELS',
       'WALLET_LABELS', 'LUCKY_LABELS', 'INVITE_LABELS', 'DAILY_LABELS', 'INTENT',
       'SETTINGS_ENABLED', 'CHAT_AFTER_READING',
       'CHAT_STATE_GUARD', 'chatOpenGuard', 'leaveChat', 'logErr', 'L', 'seen',
+      'CHAT_TEXT_ONLY', 'chatMediaKind', 'chatRejectMedia',
       `${mwSrc}\nreturn bot.__mw;`);
     const stubBot = { use: (h) => { stubBot.__mw = h; } };
     const mw = fn(stubBot, () => state, () => ({ chatReadingId: 9 }), () => balance,
@@ -1336,8 +1382,9 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
       [LBL.daily], INTENT_STUB, true,
       true, guard, async (_c, _u, it) => { seen.guard++; seen.intent = it ?? null; },
       () => { seen.left++; },
-      () => {}, { support: { button: LBL.support }, buttons: { reading: LBL.reading, settings: LBL.settings } }, seen);
-    return mw({ from: { id: 5 }, message: txt ? { text: txt } : undefined,
+      () => {}, { support: { button: LBL.support }, buttons: { reading: LBL.reading, settings: LBL.settings } }, seen,
+      textOnly, realKind, async (_c, _u, k) => { seen.media = k; });
+    return mw({ from: { id: 5 }, message: msg || (txt ? { text: txt } : undefined),
       callbackQuery: cb ? { data: cb } : undefined }, async () => { seen.next++; })
       .then(() => seen);
   };
@@ -1352,6 +1399,17 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     ok(g.next === 1 && g.guard === 0, `🔑 دکمه‌ی خودِ گارد («${cb}») گارد نمی‌خورد (ضدِ حلقه)`);
   }
   ok((await runMw({})).next === 1, 'آپدیتِ سرویسی/ویس دست نمی‌خورد');
+  /* 📎 v3.136.0: رسانه‌ی غیرمتنی داخلِ گفتگو همین‌جا تمام می‌شود و به هندلرِ رسید نمی‌رسد. */
+  for (const [m, k] of [[{ photo: [{}] }, 'photo'], [{ document: {} }, 'document'], [{ sticker: {} }, 'sticker'], [{ video: {} }, 'video']]) {
+    const g = await runMw({ msg: m });
+    ok(g.next === 0 && g.media === k && g.guard === 0, `📎 «${k}» وسطِ گفتگو به فلوی دیگری نمی‌رسد`);
+  }
+  for (const m of [{ voice: {} }, { successful_payment: {} }]) {
+    const g = await runMw({ msg: m });
+    ok(g.next === 1 && g.media === null, `📎 «${Object.keys(m)[0]}» دست نمی‌خورد (هندلرِ خودش / پیامِ سرویسی)`);
+  }
+  ok((await runMw({ msg: { photo: [{}] }, state: 'idle' })).next === 1, '📎 بیرونِ گفتگو عکس همان مسیرِ رسید را می‌رود');
+  ok((await runMw({ msg: { photo: [{}] }, textOnly: false })).next === 1, '📎 رول‌بک (`CHAT_TEXT_ONLY=false`) = رفتارِ قبلی');
   /* 🔑 قلبِ مورد ۹: تنها درِ باز، کسبِ الماس است و **فقط** با موجودیِ صفر. */
   for (const cb of ['recharge', 'wallet_go', 'lucky_go', 'invite_go']) {
     ok((await runMw({ cb, balance: 0 })).next === 1, `🔑 «${cb}» با موجودیِ صفر باز است`);
