@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from notebook import generate, upload
@@ -350,8 +351,12 @@ async def post_init(app: Application) -> None:
 def main() -> None:
     if not TOKEN or not OWNER_IDS:
         raise SystemExit("BOT_TOKEN یا ADMIN_IDS خالی است")
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
+    # HTTP client INFO logs include the Bot API URL, which contains the bot token.
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    request = HTTPXRequest(connect_timeout=30, read_timeout=30, write_timeout=30)
+    updates_request = HTTPXRequest(connect_timeout=30, read_timeout=35, write_timeout=30)
+    app = (Application.builder().token(TOKEN).request(request)
+           .get_updates_request(updates_request).post_init(post_init).build())
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(on_choice))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, on_message))
