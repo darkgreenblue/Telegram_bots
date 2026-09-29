@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from notebook import generate, upload
+from notebook import InputValidationError, generate, upload
 from store import Store
 
 ROOT = Path(__file__).resolve().parent
@@ -305,7 +305,7 @@ async def run_job(owner: int, app: Application) -> None:
         failed_upload = session["state"] == "uploading"
         session["state"] = "error_upload" if failed_upload else "error_generate"
         save(owner, session)
-        if isinstance(exc, ValueError):
+        if isinstance(exc, InputValidationError):
             detail = str(exc)
         elif failed_upload:
             first = next((i + 1 for i, item in enumerate(session["inputs"]) if not item.get("source_id")), "؟")
