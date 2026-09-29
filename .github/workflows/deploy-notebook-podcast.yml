@@ -1,6 +1,10 @@
 name: Deploy Notebook Podcast
 
 on:
+  pull_request:
+    paths:
+      - 'bots/notebook-podcast/**'
+      - '.github/workflows/deploy-notebook-podcast.yml'
   push:
     branches: [main]
     paths:
@@ -30,6 +34,7 @@ jobs:
           python -m compileall -q bots/notebook-podcast
           python -m unittest discover -s bots/notebook-podcast -p 'test_*.py'
       - name: Check required secrets
+        if: github.event_name != 'pull_request'
         id: ready
         env:
           BOT_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_BOT_TOKEN }}
