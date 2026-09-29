@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot import MAX_FILE, on_message, parse_message
-from notebook import generate
+from notebook import generate, upload
 from store import Store
 
 
@@ -31,6 +31,48 @@ class CollectionTests(unittest.TestCase):
 
 
 class GenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_text_upload_retries_without_unsupported_idempotent_flag(self):
+        created = SimpleNamespace(id="source-1", title="Telegram text batch-1")
+
+        class Sources:
+            def __init__(self):
+                self.items = []
+                self.add_text = AsyncMock(side_effect=self.create)
+
+            async def list(self, notebook_id):
+                return self.items
+
+            async def create(self, notebook_id, title, content, *, wait):
+                self.items.append(created)
+                return created
+
+        class Client:
+            sources = Sources()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return None
+
+        client = Client()
+        session = {
+            "batch_id": "batch", "notebook_id": "notebook-1", "inputs": [
+                {"kind": "text", "value": "متن آزمایشی"}
+            ],
+        }
+        with patch("notebook.NotebookLMClient.from_storage", return_value=client):
+            await upload(session, lambda s: None, None, "profile")
+            self.assertEqual(session["inputs"][0]["source_id"], "source-1")
+            self.assertEqual(client.sources.add_text.await_count, 1)
+            self.assertEqual(client.sources.add_text.await_args.kwargs, {"wait": True})
+
+            # A retry after the remote write should reuse the titled source.
+            session["inputs"][0].pop("source_id")
+            await upload(session, lambda s: None, None, "profile")
+            self.assertEqual(client.sources.add_text.await_count, 1)
+            self.assertEqual(session["inputs"][0]["source_id"], "source-1")
+
     async def test_collecting_input_is_persisted_without_reply(self):
         with tempfile.TemporaryDirectory() as tmp:
             local_store = Store(Path(tmp) / "bot.db")
