@@ -132,6 +132,10 @@ const rep = (s, from, to) => {
 };
 
 const PROMPT_VARIANTS = {
+  /* 🪞 `mirror`/`mirror2` (۱۴۰۵/۰۷/۰۶) برد و `mirror2` از همین نسخه پرامپتِ محصول است،
+   * پس هر دو **پاک شدند نه خاموش** (لنگرشان دیگر در locale نیست). نتیجه‌ی دو دورِ جفت‌شده:
+   * base→mirror ناهم‌خوانیِ دکمه با پیشنهاد ۴۱/۴۶ ⟵ ۳/۴۶ ولی برچسب بلندتر (میانه ۲۶ ⟵ ۲۹)؛
+   * mirror→mirror2 میانه ۲۸ ⟵ ۲۱، بالای ۳۰ نویسه ۱۱ ⟵ ۲، بالای ۳۶ ۱ ⟵ ۰، صفر شکست. */
   /* 📭 `v5` هم برد و از v3.100.0 خودش پرامپتِ محصول است، پس طبقِ بند ۹/۰ ریشه **پاک شد
    * نه خاموش**: واریانتی که لنگرهایش دیگر در locale وجود ندارد، فقط بلد است دورِ بعد را
    * با خطای «لنگر پیدا نشد» بکُشد (همان سرنوشتِ `v2`).
@@ -337,7 +341,12 @@ function fakeChatReply(turnIdx, cardNames, question) {
   /* ⚠️ برچسبِ دکمه هم عمداً **نقصِ شناخته‌شده** تزریق می‌کند (یکی meta، یکی assent، یکی
    * سالم)، وگرنه `--fake` سبز رد می‌شد در حالی که سنجه‌ی تازه‌ی برچسب هرگز لمس نشده —
    * دقیقاً همان کلاسی که این فایل برای `hookOk` بسته بود (بند ۶ب-۲ ریشه). */
-  const FU = ['چرا این کارت این‌جا افتاد؟', 'سؤالمو می‌پرسم', 'آره بریم سراغش'];
+  /* 🪞 در نوبت‌های پیشنهاددار (mode 0) دکمه یک در میان **آینه**ی پیشنهاد است و
+   * **ناآینه** (سؤال درباره‌ی همان پیشنهاد، عیناً شکلِ باگِ مالک)، تا کنترلِ مثبتِ
+   * سنجه‌ی آینه هر دو جهت را روی مسیرِ واقعی ببیند. */
+  const FU = [
+    Math.floor(turnIdx / 3) % 2 ? 'این زاویه‌ی دیگه چطوری کار می‌کنه؟' : 'اون زاویه‌ی دیگه رو برام باز کن',
+    'سؤالمو می‌پرسم', 'آره بریم سراغش'];
   const env = (t) => JSON.stringify({
     answer: t, wants_new_reading: false, needs_support: false,
     follow_up: FU[turnIdx % FU.length], wants_end: false,
@@ -529,7 +538,7 @@ async function runConversation(persona, base, arm, rep) {
         reply, raw, cardNames,
         questionWords: questionWordsOf(q, base.question), question: q, offDomain,
         // سنجه برچسبِ **خام** را می‌بیند (قبل از گاردِ کد)، وگرنه همیشه صفر می‌گفت.
-        flags: outObj, followUp: outObj.followUpRaw || '',
+        flags: outObj, followUp: outObj.followUpRaw || '', offer: outObj.offer || '',
       });
     } catch (e) {
       // اگر خودِ سنجه بترکد، نوبت‌های قبلی که پولشان داده شده نباید از بین بروند.
@@ -689,8 +698,9 @@ function summarize(rows) {
   const thin = done.filter((t) => t.check.thin).length;
   const fuHas = done.filter((t) => t.followUp).length;
   const fuBad = done.filter((t) => t.check.fuBad).length;
-  const fuStyle = done.filter((t) => t.check.fuStyle).length;
-  const fuNoAsk = done.filter((t) => t.check.fuNoAsk).length;
+  // 🪞 دکمه آینه‌ی پیشنهاد نیست (۱۴۰۵/۰۷/۰۶). مخرج: نوبت‌هایی که هم پیشنهاد دارند هم دکمه.
+  const fuMirror = done.filter((t) => t.check.fuMirror).length;
+  const fuMirrorBase = done.filter((t) => t.followUp && !t.check.fuBad && !t.check.noOffer && !t.flags?.end).length;
   const fuLong = done.filter((t) => t.check.fuLong).length;
   const noOffer = done.filter((t) => t.check.noOffer).length;
   const safety = done.filter((t) => t.check.safetyTalk).length;
@@ -710,7 +720,7 @@ function summarize(rows) {
   const tout = done.reduce((s, t) => s + (t.usage?.out || 0), 0);
   const cached = done.reduce((s, t) => s + (t.usage?.cached || 0), 0);
   return { n: done.length, skipped, failed, hookOkN, bait, formal, dash, dashRaw, qbad,
-    firstOk, bad, thin, fuHas, fuBad, fuStyle, fuNoAsk, fuLong, noOffer, safety, fuLens, lines, inTarget,
+    firstOk, bad, thin, fuHas, fuBad, fuMirror, fuMirrorBase, fuLong, noOffer, safety, fuLens, lines, inTarget,
     preOffer, preSafety, preNoJson, fixFired, fixFixed, stripped,
     ms, usd, tin, tout, cached,
     hookFail: done.length ? (done.length - hookOkN) * 100 / done.length : null };
@@ -760,10 +770,11 @@ function printSummary(label, rows, convs = null) {
    * جوابِ زیرِ کف یعنی یک الماسِ سوخته، و برچسبِ خرابِ دکمه یعنی نوبتِ بعدی هم می‌سوزد. */
   console.log(`   🪫 زیرِ کفِ محتوا: ${s.thin}/${s.n} (${pct(s.thin, s.n)}٪)`
     + (convs ? ` | بلندترین زنجیره‌ی پیاپی: ${Math.max(0, ...convs.map((c) => c.thinMax || 0))}` : ''));
-  /* ⚠️ «سؤال نیست» **جدا** از «امری» چاپ می‌شود، نه جمع‌شده: کلاسِ غالبِ نقضِ خطِ
-   * پایه امری نبود و اگر یکی می‌شدند همان تفکیکی گم می‌شد که تصمیمِ v5 روی آن نشست. */
+  /* 🪞 سنجه‌ی مرکزیِ دورِ ۱۴۰۵/۰۷/۰۶: دکمه باید آینه‌ی پیشنهاد باشد. عمداً جدا از
+   * «خراب» چاپ می‌شود: برچسبِ خراب حلقه می‌سازد و کد حذفش می‌کند، ولی برچسبِ ناآینه
+   * سالم به نظر می‌رسد و به کاربر می‌رسد — همان چیزی که مالک در تستِ دستی دید. */
   console.log(`   🏷 دکمه: ${s.fuHas}/${s.n} ساخته شد | ❌ خراب: ${s.fuBad}`
-    + ` | ⚠️ امری: ${s.fuStyle} | ❓ سؤال نیست: ${s.fuNoAsk}`
+    + ` | 🪞 آینه‌ی پیشنهاد نیست: ${s.fuMirror}/${s.fuMirrorBase}`
     + ` | ✂️ بلندتر از ${CHAT_FU_PROMPT_MAX}: ${s.fuLong}`
     + (s.fuLens.length ? ` (طول‌ها: ${s.fuLens.join(', ')})` : ''));
   /* 🎁 سنجه‌ی مرکزیِ v6 و تنها سنجه‌ای که خواسته‌ی «تو همه پیام‌ها» را اندازه می‌گیرد.
@@ -926,55 +937,35 @@ if (FAKE) {
   }
   if (enough) console.log('✅ کنترلِ مثبت: هر دو برچسبِ خرابِ استاب (meta و assent) گرفته شدند.');
 
-  /* کنترلِ سومِ همان قاعده، برای سنجه‌ی **نکته**ی «برچسبِ امری».
-   *
-   * ⚠️ این یکی را استاب نمی‌تواند تزریق کند، چون `fuStyle` فقط روی برچسبی می‌نشیند که
-   * `followUpBad` **نگرفته** باشد و استاب هر دو برچسبِ بدش را گارد می‌گیرد. پس الگو
-   * مستقیم روی پیکره‌ی پین‌شده‌ی `lang/<locale>.mjs` اجرا می‌شود — هر دو جهت، چون
-   * پهن‌کردنِ این الگو رایگان نیست و یک نسخه‌ی گشاد، سؤالِ سالمِ کاربر را نکته می‌کند. */
-  const re = LANG.followUpImperative;
-  const pos = LANG_MOD.FU_STYLE_POSITIVE || [];
-  const neg = LANG_MOD.FU_STYLE_NEGATIVE || [];
-  if (!re || !pos.length || !neg.length) {
-    console.log('\n❌ کنترلِ مثبت: پیکره‌ی سنجه‌ی برچسبِ امری در lang/' + LOCALE + '.mjs نیست.');
-    console.log('   یک پیکره‌ی خالی همه‌ی ادعاهای زیر را بی‌صدا پاس می‌کند.');
+  /* کنترلِ سوم: سنجه‌ی «دکمه آینه‌ی پیشنهاد است» (۱۴۰۵/۰۷/۰۶)، دوجهته.
+   * هم روی پیکره‌ی پین‌شده‌ی `lang/<locale>.mjs` (شش جفتِ **واقعیِ** گفتگوی مالک باید
+   * قرمز شوند و نسخه‌ی درستشان سبز)، و هم روی خودِ اجرا: استاب در نوبت‌های پیشنهاددار
+   * یک در میان دکمه‌ی آینه و دکمه‌ی ناآینه می‌دهد، پس سنجه باید هر دو را ببیند. */
+  const mirror = LANG.followUpMirror;
+  const mPos = LANG_MOD.MIRROR_POSITIVE || [];
+  const mNeg = LANG_MOD.MIRROR_NEGATIVE || [];
+  if (!mirror || !mPos.length || !mNeg.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه یا پیکره‌ی «دکمه آینه‌ی پیشنهاد» در lang/' + LOCALE + '.mjs نیست.');
+    console.log('   یک سنجه‌ی غایب بی‌صدا صفر گزارش می‌کند و همان باگِ مالک دوباره نامرئی می‌شود.');
     process.exit(1);
   }
-  const posMiss = pos.filter((s) => !re.test(s));
-  const negHit = neg.filter((s) => re.test(s));
-  if (posMiss.length || negHit.length) {
-    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «برچسبِ امری» با پیکره‌ی خودش نمی‌خواند.');
-    if (posMiss.length) console.log(`   نگرفت (باید بگیرد): ${posMiss.map((s) => `«${s}»`).join('، ')}`);
-    if (negHit.length) console.log(`   قرمزِ کاذب: ${negHit.map((s) => `«${s}»`).join('، ')}`);
+  const mMiss = mPos.filter(([o, l]) => mirror(o, l) !== '');
+  const mHit = mNeg.filter(([o, l]) => !['meta-q', 'mismatch'].includes(mirror(o, l)));
+  if (mMiss.length || mHit.length) {
+    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «دکمه آینه‌ی پیشنهاد» با پیکره‌ی خودش نمی‌خواند.');
+    if (mMiss.length) console.log(`   آینه‌ی درست را رد کرد: ${mMiss.map(([, l]) => `«${l}»`).join('، ')}`);
+    if (mHit.length) console.log(`   جفتِ واقعیِ خراب را ندید: ${mHit.map(([, l]) => `«${l}»`).join('، ')}`);
     process.exit(1);
   }
-  console.log(`✅ کنترلِ مثبت: سنجه‌ی برچسبِ امری روی ${pos.length} نقضِ واقعی قرمز و روی ${neg.length} برچسبِ سالم ساکت است.`);
-
-  /* کنترلِ چهارم، برای سنجه‌ی «برچسب سؤال است یا نه» (`followUpAsk`).
-   *
-   * ⚠️ جهتِ این الگو **برعکسِ** سه‌تای بالاست: گرفتن یعنی **سالم** (برچسب سؤالِ خودِ
-   * کاربر است) و نگرفتن یعنی نکته. پس `FU_ASK_POSITIVE` باید بگیرد و
-   * `FU_ASK_NEGATIVE` نباید — دقیقاً برچسب‌های واقعیِ خطِ پایه که تصمیمِ پرامپتِ v5
-   * روی آن‌ها نشست. مثل بالا استاب نمی‌تواند تزریقش کند، چون برچسبِ استاب گارد
-   * می‌خورد و این سنجه فقط روی برچسبِ گاردنخورده اجرا می‌شود. */
-  const reAsk = LANG.followUpAsk;
-  const aPos = LANG_MOD.FU_ASK_POSITIVE || [];
-  const aNeg = LANG_MOD.FU_ASK_NEGATIVE || [];
-  if (!reAsk || !aPos.length || !aNeg.length) {
-    console.log('\n❌ کنترلِ مثبت: پیکره‌ی سنجه‌ی «برچسب سؤال نیست» در lang/' + LOCALE + '.mjs نیست.');
-    console.log('   یک پیکره‌ی خالی یا الگوی غایب، این سنجه را بی‌صدا به صفرِ همیشگی تبدیل می‌کند');
-    console.log('   — همان چیزی که یک بار برای `fuStyle` رخ داد و شکافِ ۲/۸ را نامرئی کرد.');
+  const runMirror = new Set(allTurns(all).filter((t) => t.check && t.followUp && !t.check.fuBad && !t.check.noOffer)
+    .map((t) => (t.check.fuMirror ? 'bad' : 'ok')));
+  const mRunMiss = enough ? ['ok', 'bad'].filter((w) => !runMirror.has(w)) : [];
+  if (mRunMiss.length) {
+    console.log(`\n❌ کنترلِ مثبت: در اجرای استاب، دکمه‌ی ${mRunMiss.includes('bad') ? 'ناآینه' : 'آینه'} دیده نشد.`);
+    console.log('   یعنی سنجه در مسیرِ واقعیِ `chatMetrics` صدا زده نمی‌شود، یا پیشنهاد به آن نمی‌رسد.');
     process.exit(1);
   }
-  const askMiss = aPos.filter((s) => !reAsk.test(s));
-  const askHit = aNeg.filter((s) => reAsk.test(s));
-  if (askMiss.length || askHit.length) {
-    console.log('\n❌ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» با پیکره‌ی خودش نمی‌خواند.');
-    if (askMiss.length) console.log(`   سؤالِ سالم را سؤال ندید: ${askMiss.map((s) => `«${s}»`).join('، ')}`);
-    if (askHit.length) console.log(`   برچسبِ غیرسؤالی را سؤال دید: ${askHit.map((s) => `«${s}»`).join('، ')}`);
-    process.exit(1);
-  }
-  console.log(`✅ کنترلِ مثبت: سنجه‌ی «برچسب سؤال نیست» روی ${aPos.length} سؤالِ سالم ساکت و روی ${aNeg.length} برچسبِ واقعیِ خطِ پایه قرمز است.`);
+  console.log(`✅ کنترلِ مثبت: سنجه‌ی آینه روی ${mNeg.length} جفتِ خراب (شش‌تا از گفتگوی مالک) قرمز و روی ${mPos.length} جفتِ درست سبز است، و در اجرا هر دو را دید.`);
 
   /* کنترلِ پنجم، برای سنجه‌ی مرکزیِ پرامپتِ v6: **خطِ آخر پیشنهاد است؟**
    *

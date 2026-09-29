@@ -105,7 +105,7 @@ function firstLineAnswers(reply, question) {
  * @param raw   متنِ خامِ مدل، فقط برای شمردنِ چیزی که کد پاکش کرده (خط تیره)
  */
 export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [], question = '',
-  offDomain = false, canned = false, flags = null, followUp = '' }) {
+  offDomain = false, canned = false, flags = null, followUp = '', offer = '' }) {
   const issues = [], notes = [];
   const anchors = { cardNames, questionWords };
   const lines = linesOf(reply);
@@ -119,7 +119,7 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     return { lines: lines.length, chars, canned: true, hook: { ok: true, why: '' }, hookExempt: false,
       chatbait: 0, formal: [], bookish: [], labelEcho: '', dashes: 0, dashesRaw: 0, qmarks: 0,
       firstLine: { ok: true, why: '' }, listMarks: 0, emergency: '', safetyTalk: '', promptLeak: '', cardForce: '',
-      latin: 0, offDomain, thin: false, fuBad: '', fuStyle: '', fuNoAsk: false, fuLen: 0,
+      latin: 0, offDomain, thin: false, fuBad: '', fuMirror: '', fuLen: 0,
       fuLong: false, noOffer: false, issues, notes };
   }
 
@@ -134,27 +134,14 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
   /* ۰ب) 🏷 برچسبِ دکمه‌ی سؤالِ پیشنهادی.
    *   • `fuBad` (ایراد) = همان دو کلاسِ بی‌ابهامِ `followUpBad` در chat-core که حلقه
    *     می‌سازند؛ عیناً همان تابعی که کد هم با آن دکمه را حذف می‌کند.
-   *   • `fuStyle` (نکته) = برچسبِ **امری** («… رو بگو»). محتوا دارد پس حلقه نمی‌سازد و
-   *     گارد نمی‌خورد، ولی شکایتِ صریحِ مالک همین بود: «انگار جمله‌ای نیست که کاربر
-   *     خودش می‌نوشت». این عدد فقط می‌گوید پرامپت چقدر جواب داده. */
+   *   • `fuMirror` (ایراد) پایین‌تر، کنارِ سنجه‌ی پیشنهاد حساب می‌شود چون به خطِ آخر
+   *     نیاز دارد.
+   * ⚠️ دو سنجه‌ی قبلی (`fuStyle` «برچسبِ امری» و `fuNoAsk` «برچسب سؤال نیست») در
+   * ۱۴۰۵/۰۷/۰۶ **حذف شدند**، چون دومی دقیقاً همان باگی را پاداش می‌داد که مالک گرفت:
+   * دکمه‌ای که درباره‌ی پیشنهاد سؤال می‌کند («بر چه اساسی تنظیم می‌کنی؟») از نظرِ
+   * `fuNoAsk` سالم بود. خط‌کشی که جهتِ خطا را وارونه می‌سنجد، از نبودنش بدتر است. */
   const fuBad = followUp ? followUpBad(followUp) : '';
   if (fuBad) issues.push(`برچسبِ دکمه (${fuBad}): «${followUp}»`);
-  let fuStyle = '';
-  if (followUp && !fuBad && LANG.followUpImperative) {
-    fuStyle = (followUp.match(LANG.followUpImperative)?.[0] || '').trim();
-    if (fuStyle) notes.push(`برچسبِ امری (نه سؤالِ خودِ کاربر): «${followUp}»`);
-  }
-  /* ❓ `fuNoAsk` (نکته) = برچسب **سؤال نیست**.
-   * ⚠️ این سنجه جدا از `fuStyle` لازم شد چون آن یکی **کلاسِ غالبِ نقض را نمی‌دید**:
-   * برچسب‌های بدِ خطِ پایه امری نبودند، التزامیِ اول‌شخص بودند («معیارها رو مشخص کنم»)،
-   * پس `fuStyle` در هر دو بازو صفر می‌داد و «نمی‌بینم» شبیهِ «چیزی نیست» بود
-   * (بند ۲و/۶ب-۲ ریشه). این یکی هر دو کلاس را با هم می‌گیرد و همان چیزی است که
-   * تفاوتِ ۲/۸ در برابرِ ۸/۸ را نشان داد. */
-  let fuNoAsk = false;
-  if (followUp && !fuBad && LANG.followUpAsk) {
-    fuNoAsk = !LANG.followUpAsk.test(followUp);
-    if (fuNoAsk) notes.push(`برچسب سؤال نیست (کاربر این را نمی‌نوشت): «${followUp}»`);
-  }
   /* ✂️ طولِ برچسب. **نکته** است نه ایراد، چون کد تضمین می‌کند بریده‌شده‌اش هرگز از دکمه
    * بیرون نمی‌زند (`chatBtnLabel`)؛ این عدد فقط می‌گوید پرامپت چقدر جواب داده. سقف از
    * `chat-core` می‌آید تا پرامپت و سنجه و کد سه عددِ واگرا نشوند. */
@@ -201,6 +188,26 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
     noOffer = !isOffer && !endTurn;
     if (noOffer) issues.push(`خطِ آخر پیشنهاد نیست: «${tail.slice(0, 80)}»`);
     else if (!isOffer) notes.push('خطِ آخر پیشنهاد نیست، ولی معاف شد (کاربر دارد گفتگو را تمام می‌کند)');
+  }
+
+  /* ۱ب) 🪞 **دکمه آینه‌ی پیشنهاد است؟** (۱۴۰۵/۰۷/۰۶ — خواسته‌ی صریحِ مالک).
+   * پیشنهاد و دکمه باید به **یک** کار اشاره کنند: پیشنهاد «X رو برات بسازم؟» و دکمه
+   * جمله‌ای که کاربر برای قبولش تایپ می‌کرد («X رو برام بساز»). فقط وقتی سنجیده می‌شود
+   * که خطِ آخر واقعاً پیشنهاد باشد و دکمه‌ای وجود داشته باشد؛ پیشنهادی که فعلِ
+   * قابلِ‌تشخیص ندارد نکته است نه ایراد، چون سنجه نمی‌تواند درباره‌اش قضاوت کند.
+   * تعریفِ «آینه» زبان‌محور است و از `lang/<locale>.mjs` می‌آید. */
+  let fuMirror = '';
+  if (LANG.followUpMirror && followUp && !fuBad && LANG.closingOffer && !noOffer) {
+    const offerLine = String(offer || '').trim() || (lines[lines.length - 1] || '');
+    const o = LANG.closingOffer;
+    const isOffer = (o.ask.test(offerLine) && o.mine.test(offerLine)) || o.can.test(offerLine);
+    if (isOffer) {
+      const why = LANG.followUpMirror(offerLine, followUp);
+      if (why === 'meta-q' || why === 'mismatch') {
+        fuMirror = why;
+        issues.push(`دکمه آینه‌ی پیشنهاد نیست (${why === 'meta-q' ? 'به‌جای «انجامش بده» درباره‌اش سؤال کرده' : 'به چیزِ دیگری اشاره می‌کند'}): «${offerLine.slice(0, 70)}» ⟵ «${followUp}»`);
+      } else if (why === 'noverb') notes.push(`آینه‌بودنِ دکمه قضاوت نشد (فعلِ اول‌شخص در پیشنهاد پیدا نشد): «${followUp}»`);
+    }
   }
 
   /* ۲) chatbait در **هر** خط، نه فقط خطِ آخر. `hookOk` روی یک خطِ تنها همان لیست و
@@ -352,7 +359,7 @@ export function chatMetrics({ reply, raw = '', cardNames = [], questionWords = [
 
   return { lines: lines.length, chars, canned: false, hook, hookExempt, chatbait: bait.length,
     formal, bookish, labelEcho, dashes, dashesRaw, qmarks, firstLine, listMarks, emergency, safetyTalk,
-    promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuStyle, fuNoAsk,
+    promptLeak, cardForce, latin: latin.length, offDomain, thin, fuBad, fuMirror,
     fuLen, fuLong, noOffer, issues, notes };
 }
 

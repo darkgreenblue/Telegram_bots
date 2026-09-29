@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.134.0';
+const PRODUCT_VERSION = '3.135.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -479,9 +479,35 @@ const UX_NAV_V2_ADMIN_ONLY = false;
 const CHAT_AFTER_READING = true;
 const CHAT_AFTER_READING_ADMIN_ONLY = true;
 const CHAT_LOCALES = ['fa'];
+/* 🎲 انتشارِ تدریجیِ تصادفی (۱۴۰۵/۰۷/۰۶، تصمیمِ صریحِ مالک: «شروع روی ۲۰٪ کاملاً رندم،
+ * بعد کم‌کم بیشتر»). دامنه‌ی `_ADMIN_ONLY` دست نخورد؛ فقط یک درِ سوم کنارش باز شد:
+ * کاربری که یکی از این آزمایش‌های A/B او را در شاخه‌ی `chat` بگذارد.
+ *
+ * چرا A/B و نه درصدِ خام: (۱) چسبنده است (`ab_exposures`)، پس کاربر یک روز گفتگو دارد و
+ * فردا ندارد، ممکن نیست؛ (۲) kill switch بدونِ دیپلوی است (`stopped` ⟵ همه control، و
+ * کاربرِ وسطِ گفتگو با شاخه‌ی `flag_off` آزاد می‌شود)؛ (۳) گروهِ control خودش خطِ مقایسه
+ * است، پس اثرِ گفتگو روی بازگشت و درآمد اندازه‌گیری می‌شود نه حدس زده.
+ *
+ * ⚠️ **سه کلید، نه یکی**، چون وزن‌های یک آزمایش بعد از start فریزند (`shared/ab.js`).
+ * بزرگ‌کردنِ دامنه = ساختن و start کردنِ کلیدِ **بعدی** از Ops، بدونِ دیپلوی. هر کلید فقط
+ * روی کسانی expose می‌شود که کلیدهای قبلی control شان کرده‌اند (`exposeChatRollout`)، پس
+ * هیچ کاربرِ گفتگوداری گفتگویش را از دست نمی‌دهد و سهمِ کل = ۱ − Π(سهمِ control ها).
+ * نمونه: a = ۸۰/۲۰ ⟵ ۲۰٪؛ b = ۶۲.۵/۳۷.۵ ⟵ ۵۰٪؛ ۱۰۰٪ = PR یک‌خطیِ `_ADMIN_ONLY = false`.
+ * کلیدی که ساخته نشده یا running نیست، `control` برمی‌گرداند؛ یعنی ساکت و بی‌اثر. */
+const CHAT_ROLLOUT_EXPS = ['chat_rollout_a', 'chat_rollout_b', 'chat_rollout_c'];
+const chatRolloutPeek = (uid) => CHAT_ROLLOUT_EXPS.some((k) => peekVariant(db, uid, k) === 'chat');
 const chatOn = (uid) => CHAT_AFTER_READING
   && CHAT_LOCALES.includes(LOCALE)
-  && (!CHAT_AFTER_READING_ADMIN_ONLY || isTester(uid));
+  && (!CHAT_AFTER_READING_ADMIN_ONLY || isTester(uid) || chatRolloutPeek(uid));
+/* ثبتِ exposure، **هم‌زمان برای هر دو شاخه** و در یک نقطه: لحظه‌ای که فال تحویل شد و
+ * کاربر یا پیشنهادِ گفتگو (chat) یا نظرسنجیِ همیشگی (control) را واقعاً دید (بند ۲الف،
+ * قاعده‌ی آهنینِ exposure). تسترها بیرون‌اند چون شاخه‌شان را آزمایش تعیین نمی‌کند.
+ * و با کلیدِ خاموشی هیچ‌کس ثبت نمی‌شود: آن‌وقت هر دو شاخه نظرسنجی می‌بینند و فقط control
+ * ثبت می‌شد، یعنی رقیق‌شدنِ یک‌طرفه. */
+function exposeChatRollout(uid) {
+  if (!CHAT_AFTER_READING || isTester(uid) || !CHAT_LOCALES.includes(LOCALE)) return;
+  for (const k of CHAT_ROLLOUT_EXPS) if (expose(db, uid, k) === 'chat') return;
+}
 
 const CHAT_PRICE       = 1;    // الماس per سؤال (throttleِ اصلی؛ سقفِ نوبت فقط ضدِ حلقه است)
 /* 🎁 سؤالِ **اولِ هر فال** رایگان است (خواسته‌ی صریحِ مالک: «انگار که رو هزینه‌ی فالش
@@ -7850,7 +7876,10 @@ const chatInflight = new Set();
 async function openChat(ctx, readingId, { resumed = false } = {}) {
   const uid = ctx.from.id;
   upsertUser(ctx);
-  if (!chatOn(uid)) { await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid); }
+  if (!chatOn(uid)) {
+    track(db, uid, 'chat_unavailable', { reading_id: readingId, why: 'off', via: 'open' });
+    await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid);
+  }
   // گاردهای فلوی باز، با نیت: بعد از انصراف، کاربر به **همین** گفتگو برمی‌گردد.
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.CHAT, readingId)) return;
@@ -7859,6 +7888,7 @@ async function openChat(ctx, readingId, { resumed = false } = {}) {
 
   const el = chatEligible(uid, readingId);
   if (!el.ok) {
+    track(db, uid, 'chat_unavailable', { reading_id: readingId, why: el.why || '', via: 'open' });
     if (el.why === 'capped') {
       await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
       return;
@@ -7973,6 +8003,7 @@ async function closeChat(ctx, uid, via = 'guard') {
 // «ادامه می‌دم»: پیامِ گارد برداشته می‌شود و هیچ چیزِ دیگری عوض نمی‌شود.
 bot.action('chat_keep', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
+  track(db, ctx.from.id, 'chat_keep', { reading_id: getSession(ctx.from.id)?.chatReadingId || 0 });
   try { await ctx.deleteMessage(); } catch { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
 });
 // «بستن گفتگو». شناسه اختیاری است چون دکمه‌های کهنه نمی‌میرند (بند ۲ج/۶) و خودِ
@@ -8009,10 +8040,11 @@ bot.action(/^chat_end(?::(\d+))?$/, async (ctx) => {
  * ⚠️ `askedId` از v3.96.0 اختیاری است: دکمه‌ی سؤالِ پیشنهادی `ctx.message` ندارد، و
  * لنگرِ ریپلایش پیامِ **نقلِ‌قولی** است که خودِ ربات ساخته. بدونِ این آرگومان، جوابِ آن
  * مسیر به هیچ‌چیز ریپلای نمی‌خورد و خطِ گفتگو در چت گم می‌شود. */
-async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}) {
+async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via = 'typed' } = {}) {
   const rid = getSession(uid)?.chatReadingId || 0;
   const el = chatEligible(uid, rid);
   if (!el.ok) {
+    track(db, uid, 'chat_unavailable', { reading_id: rid, why: el.why || '', via });
     leaveChat(uid, 'ineligible');
     if (el.why === 'capped') {
       await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
@@ -8037,9 +8069,18 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}
   }
   // ۳) تعارف/سلام: رایگان. فیلتر عمداً **تنگ** است (کلِ پیام باید خودش تعارف باشد)،
   // چون فیلترِ گشاد یعنی سؤالِ واقعیِ کاربر بی‌جواب بماند — خیلی بدتر از یک الماس.
-  if (smallTalkIn(text)) { await ctx.reply(L.chat.smallTalk, extra); return; }
+  /* 📊 هر شاخه‌ی بی‌هزینه هم رویدادِ خودش را دارد (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۷/۰۶: «تمامِ
+   * اکشن‌ها ثبت شود، بعداً به فکرش نیفتیم»). بدونِ این‌ها، پیامی که کاربر فرستاد و جوابِ
+   * مدل نگرفت فقط یک `act` بی‌نام در جرنی بود. متن ثبت نمی‌شود، فقط طولش. */
+  if (smallTalkIn(text)) {
+    track(db, uid, 'chat_smalltalk', { reading_id: rid, chars: text.length, via });
+    await ctx.reply(L.chat.smallTalk, extra); return;
+  }
   // ۵) هم‌زمانی
-  if (chatInflight.has(uid)) { await ctx.reply(L.chat.busy, extra); return; }
+  if (chatInflight.has(uid)) {
+    track(db, uid, 'chat_busy', { reading_id: rid, chars: text.length, via });
+    await ctx.reply(L.chat.busy, extra); return;
+  }
 
   // ۶) 💸 کسرِ اتمیک — قبل از هر فراخوانیِ پولی (بند ۹ ریشه). قیمت از خودِ تراکنش
   // برمی‌گردد، پس سؤالِ رایگانِ اول و سؤالِ پولی از یک مسیر رد می‌شوند.
@@ -8068,7 +8109,7 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0 } = {}
   /* ⚠️ آرگومانِ سومِ `opts.html` اجباری است، نه تزئینی: بدونِ آن باکسِ موجودی **بی‌صدا**
    * خام چاپ می‌شد (`<blockquote>۵💎</blockquote>` وسطِ جوابِ کاربر). همان کلاسِ باگی که
    * نسخه‌ی اولِ مسیرِ بازگشتِ بعد از شارژ با نادیده‌گرفتنِ `kb` داشت. */
-  return runChatTurn({ uid, r, text, msgId, price, typingCtx: ctx, step: (n) => ctx.step?.(n),
+  return runChatTurn({ uid, r, text, msgId, price, via, typingCtx: ctx, step: (n) => ctx.step?.(n),
     send: (t, kb, opts = {}) => ctx.reply(t, {
       ...extra,
       ...(opts.html ? { parse_mode: 'HTML' } : {}),
@@ -8116,7 +8157,7 @@ function chatHadCrisis(uid, rid) {
   try { return !!chatCrisisStmt.get(uid, rid); } catch { return true; } // شک ⟵ حذف نکن
 }
 
-async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx = null }) {
+async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx = null, via = 'typed' }) {
   const rid = r.id;
   chatInflight.add(uid);
   try {
@@ -8231,7 +8272,15 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const followUp = CHAT_FOLLOWUP ? (out.followUp || '') : '';
     const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, model, 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
-    track(db, uid, 'chat_message', { reading_id: rid, turn, chars: reply.length });
+    /* 📊 props افزایشی‌اند (بند ۲ج/۳): `turn`/`chars` همان قبلی‌اند. بقیه برای تحلیلِ
+     * جرنی: سؤال از کجا آمد (تایپ، دکمه‌ی پیشنهادی، بازگشتِ بعد از شارژ)، رایگان بود
+     * یا پولی، و جواب چه درهایی باز کرد. متنِ هر دو طرف در `chat_messages` است. */
+    track(db, uid, 'chat_message', {
+      reading_id: rid, turn, chars: reply.length, via, price, free: price > 0 ? 0 : 1,
+      q_chars: text.length, has_fu: followUp ? 1 : 0, has_offer: out.offer ? 1 : 0,
+      new_reading: out.newReading ? 1 : 0, support: out.support ? 1 : 0, end: out.end ? 1 : 0,
+      model, fixed: fixed ? 1 : 0,
+    });
     /* 🪫 کفِ محتوا، قدمِ ۲: تعمیر هم نگرفت ⟵ جواب می‌رود، **الماس برمی‌گردد**، بی‌صدا.
      * ترتیب عمدی است: ردیفِ `assistant` از قبل ثبت شده، پس جاروی یتیم‌ها این سؤال را
      * «بی‌جواب» نمی‌بیند و ریفاندِ دومی روی همان ردیف ممکن نیست (`AND refunded=0`). */
@@ -8351,7 +8400,7 @@ async function resumePendingChat(uid, via = 'purchase') {
   patchSession(uid, { chatReadingId: p.reading_id });
   const extra = replyToExtra(p.tg_msg_id);
   return runChatTurn({
-    uid, r: el.r, text: p.text, msgId: p.id, price,
+    uid, r: el.r, text: p.text, msgId: p.id, price, via: `resume_${via}`,
     /* ⚠️ `kb` اینجا هم پاس داده می‌شود. نسخه‌ی اول آرگومانِ دوم را نادیده می‌گرفت، یعنی
      * دکمه‌ی CTA در مسیرِ بازگشتِ بعد از شارژ **بی‌صدا** غایب می‌شد — همان کلاسِ
      * «مقدار وجود دارد ≠ مقدار می‌رسد» (بند ۲و/۶ب ریشه) که این ریپو بارها خورده. */
@@ -8415,6 +8464,9 @@ bot.action(/^chat:(\d+)(?::(o))?$/, async (ctx) => {
  * عمومی است و ده جای دیگر هم استفاده می‌شود. خودِ `reading_go` دست‌نخورده ثبت می‌ماند. */
 bot.action(/^chat_new:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
+  track(db, ctx.from.id, 'chat_new_tap', {
+    reading_id: parseInt(ctx.match[1], 10), in_chat: getState(ctx.from.id) === 'chatting' ? 1 : 0,
+  });
   await collapseChatOffer(ctx, parseInt(ctx.match[1], 10));
   // ⚠️ بدونِ `edit`: پیام همین حالا به شکلِ جمع‌شده ادیت شد و کاتالوگ نباید رویش بنشیند،
   // وگرنه همان درِ ورودِ همیشگی که تازه ساختیم پاک می‌شود.
@@ -8439,20 +8491,30 @@ bot.action(/^chat_ask:(\d+)$/, async (ctx) => {
   let row = null;
   try { row = stmts.chatFollowUp.get(aId); } catch { return; }
   // دکمه‌ی کهنه/غیرمالک/بی‌متن: بی‌صدا رد نمی‌شود، ولی چیزی هم کسر نمی‌کند.
-  if (!row || row.user_id !== uid || !row.follow_up) { await ctx.reply(L.chat.followUpGone).catch(() => {}); return; }
+  if (!row || row.user_id !== uid || !row.follow_up) {
+    track(db, uid, 'chat_followup_gone', { msg_id: aId, why: !row ? 'missing' : (row.user_id !== uid ? 'owner' : 'empty') });
+    await ctx.reply(L.chat.followUpGone).catch(() => {}); return;
+  }
   let claimed = 0;
   try { claimed = stmts.claimFollowUp.run(aId, uid).changes; } catch { claimed = 0; }
-  if (!claimed) { await ctx.reply(L.chat.followUpGone).catch(() => {}); return; }
+  if (!claimed) {
+    track(db, uid, 'chat_followup_gone', { msg_id: aId, reading_id: row.reading_id, why: 'used' });
+    await ctx.reply(L.chat.followUpGone).catch(() => {}); return;
+  }
   const rid = row.reading_id;
   const q = row.follow_up;
   upsertUser(ctx);
-  if (!chatOn(uid)) { await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid); }
+  if (!chatOn(uid)) {
+    track(db, uid, 'chat_unavailable', { reading_id: rid, why: 'off', via: 'button' });
+    await ctx.reply(L.chat.off); return sendContinuePrompt(ctx, uid);
+  }
   if (await blockDuringOnboarding(ctx)) return;
   if (await blockDuringOpenPay(ctx, INTENT.CHAT, rid)) return;
   if (await blockDuringOpenReading(ctx, INTENT.CHAT, rid)) return;
   if (await blockDuringPendingReading(ctx)) return;
   const el = chatEligible(uid, rid);
   if (!el.ok) {
+    track(db, uid, 'chat_unavailable', { reading_id: rid, why: el.why || '', via: 'button' });
     if (el.why === 'capped') {
       await ctx.reply(L.chat.capped, Markup.inlineKeyboard([...recoRows(uid, el.r?.type), inviteRow(uid)]));
       return;
@@ -8475,7 +8537,7 @@ bot.action(/^chat_ask:(\d+)$/, async (ctx) => {
    * ریپلای می‌خورد — همان شکلی که سؤالِ تایپیِ کاربر می‌سازد. */
   let qMsg = null;
   try { qMsg = await ctx.reply(L.chat.askQuote(esc(q)), { parse_mode: 'HTML' }); } catch (e) { logErr('chat ask quote:', e.message); }
-  return handleChatMessage(ctx, uid, q, { askedId: qMsg?.message_id || 0 });
+  return handleChatMessage(ctx, uid, q, { askedId: qMsg?.message_id || 0, via: 'button' });
 });
 
 // عمداً **همان** تابعِ تک‌منبع، نه یک کپیِ دوم از پیامِ «ادامه».
@@ -8483,6 +8545,7 @@ bot.action(/^chat_ask:(\d+)$/, async (ctx) => {
 // دکمه‌ی «پیشنهادهای من» در چتِ کاربرانِ فعلی زنده است و تپش نباید بی‌جواب بماند.
 bot.action('chat_skip', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
+  track(db, ctx.from.id, 'chat_skip', {});
   return sendContinuePrompt(ctx, ctx.from.id);
 });
 
@@ -8928,18 +8991,26 @@ async function finishReading(ctx, uid, readingId) {
      * نقطه‌ی صدورِ کیبوردِ ماندگار است (بند ۹ب-۳ ریشه). با نیامدنِ نظرسنجی آن نقطه برای
      * این کوهورت هرگز اجرا نمی‌شود، پس حاملِ بی‌صدای `ensureKeyboard` جایش را می‌گیرد
      * (همان مکانیزمِ اثبات‌شده: ارسال + حذفِ فوری، صفر رویدادِ جرنی). */
-    if (chatOn(uid) && chatEligible(uid, readingId).ok) {
+    /* 🎲 شرطِ exposure (`eligible`) عمداً **مستقل از شاخه** است و هر دو شاخه بعد از
+     * ارسالِ واقعیِ پیامشان expose می‌شوند: اگر فقط شاخه‌ی chat ثبت می‌شد، یا شرطِ ثبت
+     * بینِ دو شاخه فرق می‌کرد، رقیق‌شدن نامتقارن و نتیجه سوگیر می‌شد (بند ۲الف ریشه). */
+    const eligible = chatEligible(uid, readingId).ok;
+    if (chatOn(uid) && eligible) {
       // 🗣 گفتگو همیشه مقدم است (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۶/۲۳): اولویتِ قدیمیِ
       // «اولین فال + کارتِ شانسِ باز» حذف شد — دکمه‌ی گفتگو دیگر هرگز جایش را به
       // تبلیغِ کارتِ شانس نمی‌دهد. همان معرفی حالا به یادآوریِ ساعتِ ۲۲ همان شب منتقل
       // شده (بخشِ «شبِ اولِ کارتِ شانس» پایین‌تر، `dueFirstNightLucky`).
       await postReadingOffer(ctx, uid, readingId);
+      exposeChatRollout(uid);
       await ensureKeyboard(ctx.telegram, uid);
       return;
     }
     await ctx.reply(L.reading.rateAsk, Markup.inlineKeyboard([
       [1, 2, 3, 4, 5].map((n) => Markup.button.callback(L.buttons.rate(n), `fbr:${n}:${readingId}`)),
     ]));
+    // فقط کسی که شاخه‌اش control است: کاربرِ شاخه‌ی chat که به هر دلیلی (پرچمِ خاموشی)
+    // نظرسنجی دید، treatment را ندیده و نباید به‌اسمِ chat ثبت شود.
+    if (eligible && !chatRolloutPeek(uid)) exposeChatRollout(uid);
   }
 }
 
@@ -12409,6 +12480,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
   // 🗣 ویس در گفتگو (نسخه‌ی اول فقط متن). بدونِ این شاخه، ویس **بی‌صدا** می‌مرد: کاربری
   // که وسطِ گفتگو ویس بفرستد هیچ جوابی نمی‌گرفت و فکر می‌کرد ربات خراب است. رایگان.
   if (getState(uid) === 'chatting' && !CHAT_VOICE) {
+    track(db, uid, 'chat_voice', { reading_id: getSession(uid)?.chatReadingId || 0, sec: ctx.message?.voice?.duration || ctx.message?.audio?.duration || 0 });
     return ctx.reply(L.chat.voiceOnly, { parse_mode: 'Markdown' });
   }
   // ✍️ ویسِ دوم بعد از ثبتِ سؤال تا امروز **بی‌صدا** دور ریخته می‌شد؛ کاربر فکر می‌کرد
