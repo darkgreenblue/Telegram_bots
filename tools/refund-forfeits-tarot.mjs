@@ -10,6 +10,13 @@
 //                 هنوز سؤالی ننوشته — v3.122.0 بستش.
 // کاربر یک بار «می‌خواهم» گفته بود و ربات جلویش دکمه‌ی انصرافِ الماس‌سوز گذاشت.
 //
+//   · silent_menu (دورِ دوم، v3.137.0) `/menu` یا دکمه‌ی `nav:menu` وسطِ فالِ پول‌داده، که
+//                 تا `da35e99` (۱۴۰۵/۰۷/۰۱) فال را **بدونِ هیچ پیامِ گاردی** می‌سوزاند.
+//                 کاربر نه هشداری دید نه انتخابی کرد. تشخیص: تپِ منو درست قبل از خودِ
+//                 رویدادِ انصراف، بی هیچ پیامی در میانه.
+//   · ticket      یک فالِ مشخص با تصمیمِ صریحِ مالک (#TRT-661811364). فقط الماس، **بدونِ**
+//                 پیامِ خودکار: پشتیبانی خودش جواب می‌دهد و دو پیام برای یک ماجرا گیج می‌کند.
+//
 // ── تصمیمِ مالک (۱۴۰۵/۰۷/۰۵) ───────────────────────────────────────────────────
 // «خود سیستم اگه می‌تونه بهشون پیام بده و جبران کنه، بدون دخالت من اوکی‌ام؛ فقط مراقب
 // باش که هر کاری انجام می‌شه تمیز انجام بشه.» یعنی این **یک تصمیمِ انسانیِ per کوهورت**
@@ -44,6 +51,11 @@ const require = createRequire(import.meta.url);
 export const CTA_LABEL = '🔮 فال بگیر';
 export const CTA_DATA = 'reading_go';
 const STALE_STEP = new Set(['ready_breath', 'shuffle_stop', 'pick']);
+/** فال‌هایی که مالک صریحاً per مورد جبرانشان را خواست (بند ۹ب-۴ ریشه: ارتباط با کاربر
+ *  تصمیمِ انسانی است). reading_id ⟵ تیکت. فقط الماس، بدونِ پیامِ خودکار. */
+export const TICKET_READINGS = new Map([
+  [26471, '#TRT-661811364'],   // ۱۴۰۵/۰۷/۰۷: انصراف ۳۱ ثانیه بعد از پرداخت، قبل از سؤال، و خریدِ دوباره‌ی همان فال
+]);
 /** پنجره‌ی جست‌وجوی مسیرِ قبل از انصراف (ثانیه). پیامِ گارد و تپِ انصراف معمولاً چند ثانیه فاصله دارند. */
 const LOOKBACK_S = 900;
 
@@ -51,14 +63,29 @@ const fa = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
 const mask = (uid) => `…${String(uid).slice(-3)}`;
 
 /* ═══════ متنِ پیام — تک‌منبع، و در چکِ CI ادعا می‌شود ═══════ */
-export function messageFor(total) {
+export function messageFor(total, kinds = []) {
+  // متنِ هر کوهورت ماجرای **خودش** را می‌گوید: کاربرِ `/menu` هیچ پیامِ «انصرافی» ندیده بود،
+  // پس جمله‌ی «پیامِ انصراف جلوت آمد» برایش ناآشنا و دروغ بود.
+  const why = kinds.includes('silent_menu')
+    ? 'وقتی وسطِ فالت منو رو باز کردی، ربات بدونِ اینکه ازت بپرسه فالت رو بست. تقصیرِ ربات بود، نه تو، و حالا برطرف شده.'
+    : 'موقعِ گرفتنِ فالت، یه اختلال توی ربات پیامِ «انصراف» رو بی‌دلیل جلوت آورد و فالت بسته شد. تقصیرِ ربات بود، نه تو، و حالا برطرف شده.';
   return [
     'یه فال از تو نیمه‌کاره موند 🌿',
     '',
-    'موقعِ گرفتنِ فالت، یه اختلال توی ربات پیامِ «انصراف» رو بی‌دلیل جلوت آورد و فالت بسته شد. تقصیرِ ربات بود، نه تو، و حالا برطرف شده.',
+    why,
     '',
     `${fa(total)} الماسی که بابتش کم شده بود به ذخایرت برگشت ✅`,
   ].join('\n');
+}
+
+/** انصرافِ **بی‌گارد** با منو (قبل از `da35e99`). events جدیدترین اول، از قبل از انصراف.
+ *  فقط وقتی که خودِ تپِ منو **بلافاصله** قبل از رویدادِ انصراف باشد: هیچ پیامی (نه گارد، نه
+ *  هیچ صفحه‌ی دیگری) در میانه نیامده، پس کاربر هیچ هشداری ندیده است. خالص. */
+export function silentMenuOf(events) {
+  const e = events[0];
+  if (!e || e.event !== 'act') return null;
+  const menu = (e.a === 'cmd' && /^\/menu(@\w+)?$/.test(e.d || '')) || (e.a === 'nav' && e.d === 'nav:menu');
+  return menu ? 'silent_menu' : null;
 }
 
 /** مسیرِ قبل از انصراف (جدیدترین اول) ⟵ ماشه‌ی گارد. خالص تا چکِ CI مستقیم بسنجدش.
@@ -146,12 +173,14 @@ export function scan(db) {
       AND json_extract(props,'$.kind') IN ('support','support_reading')`);
 
   const items = [];
-  const byKind = { stale_step: 0, same_spread: 0, other: 0 };
+  const byKind = { stale_step: 0, same_spread: 0, silent_menu: 0, ticket: 0, other: 0 };
   for (const f of forfeits) {
-    const trig = triggerOf(pathOf.all(f.user_id, f.id, f.created_at - LOOKBACK_S), isGuardKey);
+    const path_ = pathOf.all(f.user_id, f.id, f.created_at - LOOKBACK_S);
+    const trig = triggerOf(path_, isGuardKey);
     const r = readingOf.get(f.reading_id);
     const ok = r && r.user_id === f.user_id && r.status === 'canceled';
-    const kind = ok ? classify(trig, r) : null;
+    const kind = !ok ? null
+      : (classify(trig, r) || silentMenuOf(path_) || (TICKET_READINGS.has(f.reading_id) ? 'ticket' : null));
     byKind[kind || 'other']++;
     if (!kind) continue;
     items.push({
@@ -180,19 +209,28 @@ export async function run(dbFile, { token, only = [], sendReal = false, admins =
   const skippedComp = items.filter((i) => i.compensated).length;
 
   console.log(`\n📁 ${path.basename(dbFile)} — ${fa(forfeits)} انصرافِ الماس‌سوز، ${fa(guardKeys)} کلیدِ صفحه‌ی گارد`);
-  console.log(`   تپِ تکراریِ قدمِ فال: ${fa(byKind.stale_step)} · اندازه‌ی همین فال: ${fa(byKind.same_spread)} · بقیه (تصمیمِ خودِ کاربر، جبران ندارد): ${fa(byKind.other)}`);
+  console.log(`   تپِ تکراریِ قدمِ فال: ${fa(byKind.stale_step)} · اندازه‌ی همین فال: ${fa(byKind.same_spread)} · منوی بی‌گارد: ${fa(byKind.silent_menu)} · تیکت: ${fa(byKind.ticket)} · بقیه (تصمیمِ خودِ کاربر، جبران ندارد): ${fa(byKind.other)}`);
   if (skippedComp) console.log(`   ⏭ ${fa(skippedComp)} فال رد شد (پشتیبانی از قبل جبران کرده)`);
   console.log(`   👥 ${fa(plan.length)} نفر، ${fa(plan.reduce((s, p) => s + p.total, 0))} الماس`);
 
   const ensureRow = db.prepare('INSERT OR IGNORE INTO forfeit_refund_log (reading_id, user_id, amount, kind) VALUES (?,?,?,?)');
   const claim = db.prepare('UPDATE forfeit_refund_log SET refunded_at=unixepoch() WHERE reading_id=? AND refunded_at=0');
   const credit = db.prepare('UPDATE users SET balance=balance+? WHERE telegram_id=?');
-  const userSent = db.prepare('SELECT MAX(sent_at) AS s, SUM(amount) AS total FROM forfeit_refund_log WHERE user_id=? AND refunded_at>0');
-  const markSent = db.prepare('UPDATE forfeit_refund_log SET sent_at=unixepoch() WHERE user_id=? AND refunded_at>0');
+  // اعلام **per فال** است نه per کاربر: هر فالِ جبران‌شده دقیقاً یک بار اعلام می‌شود. کاربری که
+  // در دورِ اول پیام گرفته و حالا یک فالِ دیگر از کوهورتِ تازه دارد، برای **همان** فال یک
+  // پیام می‌گیرد؛ وگرنه الماس بی‌توضیح می‌نشست.
+  const unsent = db.prepare("SELECT reading_id, amount, kind FROM forfeit_refund_log WHERE user_id=? AND refunded_at>0 AND sent_at=0");
+  const markSent = db.prepare('UPDATE forfeit_refund_log SET sent_at=unixepoch() WHERE user_id=? AND refunded_at>0 AND sent_at=0');
+  const markTicketSent = db.prepare("UPDATE forfeit_refund_log SET sent_at=unixepoch() WHERE user_id=? AND refunded_at>0 AND sent_at=0 AND kind='ticket'");
 
-  if (sendReal && plan.length) {
-    // بکاپِ همان لحظه (بند ۲ج/۹ ریشه) — هرگز بازنویسی نمی‌شود.
-    const bak = `${dbFile}.pre-forfeit-refund.bak`;
+  // بکاپِ همان لحظه (بند ۲ج/۹ ریشه) — هرگز بازنویسی نمی‌شود، و **per دور** است: نامِ ثابت
+  // یعنی دورِ دوم بکاپِ دورِ اول را «موجود» می‌دید و بی‌بکاپ می‌نوشت. فقط وقتی که واقعاً
+  // فالی برای واریز مانده باشد، تا اجرای دوباره‌ی بی‌کار دیسکِ سرور را پر نکند.
+  const doneAt = db.prepare('SELECT refunded_at FROM forfeit_refund_log WHERE reading_id=?');
+  const hasWork = plan.some((p) => p.readings.some((r) => !(doneAt.get(r.readingId)?.refunded_at > 0)));
+  if (sendReal && hasWork) {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    const bak = `${dbFile}.pre-forfeit-refund-${stamp}.bak`;
     if (!existsSync(bak)) { db.exec(`VACUUM INTO '${bak.replace(/'/g, "''")}'`); console.log(`   💾 بکاپ: ${path.basename(bak)}`); }
   }
 
@@ -211,9 +249,11 @@ export async function run(dbFile, { token, only = [], sendReal = false, admins =
         }
       }
     })();
-    const st = userSent.get(p.userId);
-    if (st?.s) { console.log(`   ⏭ ${tag} قبلاً پیام گرفته`); continue; }
-    const text = messageFor(st?.total || p.total);
+    // فالِ تیکت بی‌پیام بسته می‌شود (پشتیبانی جواب می‌دهد)، قبل از شمردنِ بقیه.
+    if (markTicketSent.run(p.userId).changes) console.log(`   🎫 ${tag} الماس برگشت؛ پیام را پشتیبانی می‌دهد`);
+    const todo = unsent.all(p.userId);
+    if (!todo.length) { console.log(`   ⏭ ${tag} قبلاً پیام گرفته`); continue; }
+    const text = messageFor(todo.reduce((n, r) => n + r.amount, 0), todo.map((r) => r.kind));
     let attempt = 0;
     for (;;) {
       const res = await send(token, p.userId, text);
@@ -230,7 +270,11 @@ export async function run(dbFile, { token, only = [], sendReal = false, admins =
     await sleep(120);
   }
   if (!sendReal) console.log('\n   ℹ️ آزمایشی — هیچ الماسی جابه‌جا نشد و هیچ پیامی نرفت (برای اجرای واقعی: --send)');
-  if (!sendReal && plan.length) console.log('\n   متنِ پیام (نمونه):\n' + messageFor(plan[0].total).split('\n').map((l) => '      ' + l).join('\n'));
+  if (!sendReal && plan.length) {
+    for (const k of [...new Set(plan.flatMap((p) => p.readings.map((r) => r.kind)))].filter((k) => k !== 'ticket')) {
+      console.log(`\n   متنِ پیام (${k}):\n` + messageFor(3, [k]).split('\n').map((l) => '      ' + l).join('\n'));
+    }
+  }
   db.close();
   return sent;
 }
