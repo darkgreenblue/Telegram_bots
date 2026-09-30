@@ -1,7 +1,7 @@
 // چکِ CI برای چرخه‌ی عمرِ فاکتورِ کارت‌به‌کارتِ tarot (v3.74.0، خواسته‌ی صریحِ مالک):
-// ۱ ساعت بعد از صدورِ فاکتور یک یادآوری، ۲۴ ساعت بعد انقضای خودکار (ادیتِ همان پیام،
-// بدونِ دکمه) + بازگشتِ ردیف به همان `canceled` همیشگی تا رسیدِ دیررسیده از مسیرِ
-// اثبات‌شده‌ی `CANCELED_RECOVERY_SEC` خودکار احیا شود، نه بی‌صدا دور ریخته شود.
+// ۱۵ دقیقه بعد از صدورِ فاکتور یک یادآوری، **۱ ساعت** بعد از آخرین فعالیت انقضای خودکار (v3.139.0؛
+// بود ۲۴ ساعت) با ادیتِ همان پیام، بدونِ دکمه + بازگشتِ ردیف به همان `canceled` همیشگی تا رسیدِ
+// دیررسیده از مسیرِ اثبات‌شده‌ی `CANCELED_RECOVERY_SEC` خودکار احیا شود، نه بی‌صدا دور ریخته شود.
 //
 // این چک خودِ SQLِ استخراج‌شده از سورس را روی SQLite واقعی اجرا می‌کند — نه یک کپیِ
 // دستی — تا هیچ‌وقت از رفتارِ واقعی واگرا نشود.
@@ -50,9 +50,13 @@ for (const col of ['invoice_issued_at', 'invoice_msg_id', 'invoice_reminded_at']
 const REM_SEC = Number((SRC.match(/const INVOICE_REMINDER_SEC = (\d+);/) || [])[1]);
 // ۱۵ دقیقه (v3.95.0، خواسته‌ی صریحِ مالک؛ بود ۱ ساعت). پین شده تا جابه‌جاییِ سهوی دیده شود.
 ok(REM_SEC === 900, `یادآوری دقیقاً ۱۵ دقیقه است (${REM_SEC})`);
-ok(/const INVOICE_EXPIRE_SEC\s*=\s*24 \* 3600;/.test(SRC), 'انقضا دقیقاً ۲۴ ساعت است');
-ok(SRC.indexOf('const INVOICE_REMINDER_SEC') < SRC.indexOf('const INVOICE_EXPIRE_SEC'),
-  'و یادآوری همیشه زودتر از انقضا تعریف/اجرا می‌شود (۱ ساعت < ۲۴ ساعت)');
+// ۱ ساعت (v3.139.0، خواسته‌ی صریحِ مالک ۱۴۰۵/۰۷/۰۸؛ بود ۲۴ ساعت). مثلِ یادآوری از خودِ سورس خوانده
+// می‌شود و فیکسچرهای پایین با همین عدد اجرا می‌شوند.
+const EXP_SEC = (() => { const m = SRC.match(/const INVOICE_EXPIRE_SEC\s*=\s*(\d+) \* (\d+);/); return m ? Number(m[1]) * Number(m[2]) : NaN; })();
+ok(EXP_SEC === 3600, `انقضا دقیقاً ۱ ساعت است (${EXP_SEC})`);
+const RECOVERY_SEC = (() => { const m = SRC.match(/const CANCELED_RECOVERY_SEC = (\d+) \* 3600;/); return m ? Number(m[1]) * 3600 : NaN; })();
+ok(REM_SEC < EXP_SEC && EXP_SEC < RECOVERY_SEC,
+  `یادآوری (${REM_SEC}s) < انقضا (${EXP_SEC}s) < پنجره‌ی احیای رسیدِ دیررسیده (${RECOVERY_SEC}s): رسیدِ بعد از انقضا خودکار احیا می‌شود`);
 
 /* ══ ۲) خودِ گذار به «فاکتور صادر شد» ═════════════════════════════════════ */
 console.log('\n۲) لحظه‌ی صدورِ فاکتور');
@@ -79,6 +83,12 @@ for (const [label, sql] of [['یادآوری', remSql], ['انقضا', expSql]])
 }
 ok(remSql ? /invoice_reminded_at IS NULL/.test(remSql) : false,
   'کوئریِ یادآوری write-once است (بعد از یک‌بار یادآوری، دیگر کاندیدا نیست)');
+ok(expSql ? /MAX\(invoice_issued_at, COALESCE\(card_switched_at, 0\), COALESCE\(updated_at, 0\)\) < unixepoch\(\)-\?/.test(expSql) : false,
+  'ساعتِ انقضا از آخرین فعالیت می‌خوابد: صدور، تعویضِ کارت، یا هر نوشتنِ updated_at (رسید، کارتِ سفید، احیا)');
+ok(/if \(photoFileId\) stmts\.saveReceiptFile\.run\(photoFileId, paymentId\);\n\s*else stmts\.touchPayment\.run\(paymentId\);/.test(SRC),
+  'رسیدِ **متنی** هم ساعت را از نو شروع می‌کند (وگرنه وسطِ خواندنِ ایجنت منقضی می‌شد)');
+ok(/terrClaim = [^\n]*transfer_error_at=unixepoch\(\)[^\n]*updated_at=unixepoch\(\)/.test(SRC),
+  '«نتوانستم واریز کنم» (کارتِ سفید) updated_at را می‌زند، پس کاربر یک ساعتِ کامل برای کارتِ تازه دارد');
 ok(expSql ? !/invoice_reminded_at/.test(expSql) : false,
   'کوئریِ انقضا به یادآوری وابسته نیست — حتی اگر ارسالِ یادآوری شکست بخورد، انقضا سرِ جایش اجرا می‌شود');
 
@@ -109,7 +119,7 @@ if (claimSql && remSql && expSql) {
   db.exec(`CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT, pkg TEXT NOT NULL DEFAULT '',
-    invoice_issued_at INTEGER, invoice_msg_id INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT,
+    invoice_issued_at INTEGER, invoice_msg_id INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT, card_switched_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
   );`);
   const insertAmount = db.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')");
@@ -121,42 +131,54 @@ if (claimSql && remSql && expSql) {
 
   // شبیه‌سازیِ زمان: به‌جای منتظر ماندن، مهرِ صدور را دستی به عقب می‌بریم (خودِ کوئری
   // همچنان با `unixepoch()` واقعی مقایسه می‌کند، پس این خودِ منطقِ زمان‌بندی را می‌سنجد).
-  const issueAt = (pid, secondsAgo) => db.prepare('UPDATE payments SET invoice_issued_at=unixepoch()-? WHERE id=?').run(secondsAgo, pid);
+  const issueAt = (pid, secondsAgo) => db.prepare('UPDATE payments SET invoice_issued_at=unixepoch()-?, updated_at=unixepoch()-? WHERE id=?').run(secondsAgo, secondsAgo, pid);
 
   // ۱) فاکتورِ تازه (۵ دقیقه پیش): نه کاندیدِ یادآوری، نه انقضا
   const fresh = Number(insertAmount.run(1).lastInsertRowid);
   claim.run(1000, fresh);
   issueAt(fresh, 300);
   ok(remCand.all(REM_SEC).every(r => r.id !== fresh), 'فاکتورِ ۵دقیقه‌ای هنوز کاندیدِ یادآوری نیست');
-  ok(expCand.all(86400).every(r => r.id !== fresh), 'و کاندیدِ انقضا هم نیست');
+  ok(expCand.all(EXP_SEC).every(r => r.id !== fresh), 'و کاندیدِ انقضا هم نیست');
 
-  // ۲) فاکتورِ ۲ساعته: کاندیدِ یادآوری هست، بعد از یادآوری دیگر نیست؛ کاندیدِ انقضا نیست
+  // ۲) فاکتورِ ۳۰دقیقه‌ای: کاندیدِ یادآوری هست، بعد از یادآوری دیگر نیست؛ کاندیدِ انقضا نیست
   const twoHr = Number(insertAmount.run(2).lastInsertRowid);
   claim.run(2000, twoHr);
-  issueAt(twoHr, 2 * 3600);
-  ok(remCand.all(REM_SEC).some(r => r.id === twoHr), 'فاکتورِ ۲ساعته کاندیدِ یادآوری است');
+  issueAt(twoHr, 30 * 60);
+  ok(remCand.all(REM_SEC).some(r => r.id === twoHr), 'فاکتورِ ۳۰دقیقه‌ای کاندیدِ یادآوری است');
   setReminded.run(twoHr);
   ok(remCand.all(REM_SEC).every(r => r.id !== twoHr), 'و بعد از یادآوری دیگر کاندیدا نیست (write-once)');
-  ok(expCand.all(86400).every(r => r.id !== twoHr), 'و هنوز کاندیدِ انقضا نیست (فقط ۲ ساعت گذشته)');
+  ok(expCand.all(EXP_SEC).every(r => r.id !== twoHr), 'و هنوز کاندیدِ انقضا نیست (فقط ۳۰ دقیقه گذشته)');
 
-  // ۳) فاکتورِ ۲۵ساعته: کاندیدِ انقضا؛ حتی بدونِ یادآوریِ موفق (شکستِ ارسال) هم منقضی می‌شود
+  // ۳) فاکتورِ ۶۱دقیقه‌ای: کاندیدِ انقضا؛ حتی بدونِ یادآوریِ موفق (شکستِ ارسال) هم منقضی می‌شود
   const old = Number(insertAmount.run(3).lastInsertRowid);
   claim.run(3000, old);
-  issueAt(old, 25 * 3600);
-  ok(expCand.all(86400).some(r => r.id === old), 'فاکتورِ ۲۵ساعته کاندیدِ انقضاست');
+  issueAt(old, 61 * 60);
+  ok(expCand.all(EXP_SEC).some(r => r.id === old), 'فاکتورِ ۶۱دقیقه‌ای کاندیدِ انقضاست');
+  {
+    // ۳الف) فعالیت ساعت را از نو شروع می‌کند (v3.139.0). هر حالت روی یک ردیفِ ۶۱دقیقه‌ای، با کنترلِ مثبت.
+    const act = (uid, set) => { const id = Number(insertAmount.run(uid).lastInsertRowid); claim.run(1000, id); issueAt(id, 61 * 60);
+      if (set) db.prepare(`UPDATE payments SET ${set} WHERE id=?`).run(id); return id; };
+    const sw = act(31, 'card_switched_at=unixepoch()-300');
+    ok(expCand.all(EXP_SEC).every(r => r.id !== sw), 'کارت ۵ دقیقه پیش عوض شد ⟵ فاکتورِ ۶۱دقیقه‌ای منقضی نمی‌شود');
+    const touched = act(32, 'updated_at=unixepoch()-300');
+    ok(expCand.all(EXP_SEC).every(r => r.id !== touched), 'رسیدِ متنی/کارتِ سفید/احیا ۵ دقیقه پیش ⟵ منقضی نمی‌شود');
+    const swOld = act(33, 'card_switched_at=unixepoch()-3700');
+    ok(expCand.all(EXP_SEC).some(r => r.id === swOld), 'کنترلِ مثبت: تعویضِ کارتِ یک ساعت پیش ساعت را زنده نگه نمی‌دارد');
+    for (const id of [sw, touched, swOld]) setStatus.run('canceled', id);
+  }
   ok(remCand.all(REM_SEC).some(r => r.id === old), 'و چون یادآوری هم نگرفته، همچنان کاندیدِ یادآوری هم هست (استقلالِ دو کوئری)');
   setStatus.run('canceled', old);
-  ok(expCand.all(86400).every(r => r.id !== old), 'بعد از انقضا دیگر کاندیدِ خودِ همین کوئری نیست (status از pending خارج شد)');
+  ok(expCand.all(EXP_SEC).every(r => r.id !== old), 'بعد از انقضا دیگر کاندیدِ خودِ همین کوئری نیست (status از pending خارج شد)');
 
   // ۳ب) رسیدِ در حالِ بررسی (عکس ذخیره شده، هنوز pending): حتی ۲۵ساعته منقضی نمی‌شود (v3.131.0).
   // کنترلِ مثبت: همان ردیف بدونِ عکس (مثلاً بعد از «نتوانستم واریز کنم» که ستون را خالی می‌کند) منقضی می‌شود.
   const inReview = Number(insertAmount.run(6).lastInsertRowid);
   claim.run(6000, inReview);
-  issueAt(inReview, 25 * 3600);
+  issueAt(inReview, 61 * 60);
   db.prepare("UPDATE payments SET receipt_file_id='PHOTO' WHERE id=?").run(inReview);
-  ok(expCand.all(86400).every(r => r.id !== inReview), 'فاکتوری که رسیدش در حالِ بررسی است، وسطِ بررسی منقضی نمی‌شود');
+  ok(expCand.all(EXP_SEC).every(r => r.id !== inReview), 'فاکتوری که عکسِ رسیدش در حالِ بررسی است، وسطِ بررسی منقضی نمی‌شود');
   db.prepare('UPDATE payments SET receipt_file_id=NULL WHERE id=?').run(inReview);
-  ok(expCand.all(86400).some(r => r.id === inReview), 'کنترلِ مثبت: بدونِ رسید (مثلاً فاکتورِ سفید) همان ردیف عادی منقضی می‌شود');
+  ok(expCand.all(EXP_SEC).some(r => r.id === inReview), 'کنترلِ مثبت: بدونِ رسید (مثلاً فاکتورِ سفید) همان ردیف عادی منقضی می‌شود');
   setStatus.run('canceled', inReview);
 
   // ۴) مقدسات: رسیدِ ثبت‌شده و پرداختِ تأییدشده — حتی اگر خیلی قدیمی باشند، هرگز کاندیدا نیستند
@@ -164,29 +186,27 @@ if (claimSql && remSql && expSql) {
   claim.run(4000, waiting);
   issueAt(waiting, 48 * 3600);
   setStatus.run('waiting_review', waiting);
-  ok(remCand.all(REM_SEC).every(r => r.id !== waiting) && expCand.all(86400).every(r => r.id !== waiting),
+  ok(remCand.all(REM_SEC).every(r => r.id !== waiting) && expCand.all(EXP_SEC).every(r => r.id !== waiting),
     'رسیدِ ثبت‌شده (waiting_review) با ۴۸ ساعت سن هم لمس نمی‌شود');
 
   const approved = Number(insertAmount.run(5).lastInsertRowid);
   claim.run(5000, approved);
   issueAt(approved, 48 * 3600);
   setStatus.run('approved', approved);
-  ok(remCand.all(REM_SEC).every(r => r.id !== approved) && expCand.all(86400).every(r => r.id !== approved),
+  ok(remCand.all(REM_SEC).every(r => r.id !== approved) && expCand.all(EXP_SEC).every(r => r.id !== approved),
     'پرداختِ تأییدشده (approved) هم لمس نمی‌شود');
 
-  // ۵) رسیدِ دیررسیده روی ردیفِ منقضی‌شده: مسیرِ همیشگیِ احیا (CANCELED_RECOVERY_SEC،
-  // روی created_at) دیگر او را نمی‌گیرد، چون created_at خودش موقعِ انقضا حدودِ ۲۴ ساعت
-  // سن دارد و پنجره‌ی ۱۲ساعته از قبل رد شده — این **واقعیتِ** رفتار است، نه چیزی که
-  // این چک باید پنهانش کند. ادعای درست این است که آن مسیر می‌داند این حالت را برنمی‌گرداند
-  // (تا کسی فردا فکر نکند احیای خودکار برای این حالت هست) و مسیرِ صادقانه‌ی جایگزین‌اش
-  // (`L.wallet.receiptNoInvoice`) هنوز در سورس وجود دارد — یعنی سکوت نیست، فقط خودکار نیست.
-  db.prepare('UPDATE payments SET created_at=unixepoch()-? WHERE id=?').run(25 * 3600, old);
-  const revivable = db.prepare(
-    "SELECT * FROM payments WHERE user_id=? AND status='canceled' AND step='receipt' AND created_at > unixepoch()-?");
-  ok(revivable.get(3, 12 * 3600) === undefined,
-    'رسیدِ دیررسیده‌ی روی فاکتورِ ۲۵ساعته‌ی منقضی‌شده دیگر با مسیرِ ۱۲ساعته‌ی همیشگی خودکار احیا نمی‌شود (created_at از قبل رد شده)');
+  // ۵) رسیدِ دیررسیده روی ردیفِ منقضی‌شده (v3.139.0). با انقضای ۲۴ساعته این احیا عملاً هرگز اجرا نمی‌شد
+  // (created_at از پنجره‌ی ۱۲ساعته رد شده بود). با انقضای ۱ساعته، رسیدی که مثلاً ۳ ساعت بعد برسد **خودکار**
+  // به همان فاکتور برمی‌گردد. کنترلِ مثبت: رسیدِ ۱۳ ساعت بعد دیگر برنمی‌گردد و مسیرِ صادقانه‌ی «سکوت ممنوع» می‌گیرد.
+  const revivable = db.prepare(sqlOf('canceledReceiptPayment'));
+  db.prepare('UPDATE payments SET created_at=unixepoch()-? WHERE id=?').run(3 * 3600, old);
+  ok(revivable.get(3, RECOVERY_SEC)?.id === old,
+    'رسیدِ ۳ ساعت بعد از صدور، روی فاکتورِ منقضی‌شده، با مسیرِ همیشگی خودکار پیدا و احیا می‌شود');
+  db.prepare('UPDATE payments SET created_at=unixepoch()-? WHERE id=?').run(13 * 3600, old);
+  ok(revivable.get(3, RECOVERY_SEC) === undefined, 'کنترلِ مثبت: رسیدِ ۱۳ ساعت بعد دیگر خودکار احیا نمی‌شود');
   ok(/L\.wallet\.receiptNoInvoice/.test(SRC) && /سکوت ممنوع/.test(SRC),
-    'و به‌جایش مسیرِ صادقانه‌ی «سکوت ممنوع» هنوز سرِ جایش است — پول بی‌صدا گم نمی‌شود، فقط خودکار برنمی‌گردد');
+    'و آن‌جا مسیرِ صادقانه‌ی «سکوت ممنوع» هنوز سرِ جایش است — پول بی‌صدا گم نمی‌شود');
 }
 
 /* ══ ۶) جهش‌ها ═══════════════════════════════════════════════════════════ */
@@ -196,7 +216,7 @@ if (claimSql && remSql && expSql) {
   dbm.exec(`CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending', step TEXT,
-    invoice_issued_at INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT,
+    invoice_issued_at INTEGER, invoice_reminded_at INTEGER, receipt_file_id TEXT, card_switched_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
   );`);
   const ins = dbm.prepare("INSERT INTO payments (user_id, amount, step) VALUES (?, 0, 'amount')");
@@ -204,7 +224,7 @@ if (claimSql && remSql && expSql) {
   const mkOld = (uid, secondsAgo) => {
     const id = Number(ins.run(uid).lastInsertRowid);
     cl.run(1000, id);
-    dbm.prepare('UPDATE payments SET invoice_issued_at=unixepoch()-? WHERE id=?').run(secondsAgo, id);
+    dbm.prepare('UPDATE payments SET invoice_issued_at=unixepoch()-?, updated_at=unixepoch()-? WHERE id=?').run(secondsAgo, secondsAgo, id);
     return id;
   };
   const approvedOld = mkOld(101, 48 * 3600);
@@ -212,7 +232,7 @@ if (claimSql && remSql && expSql) {
 
   // جهش ۱: حذفِ status='pending' از کوئریِ انقضا → پرداختِ approved هم منقضی می‌شود (فاجعه)
   const mutExp1 = expSql.replace(/status='pending' AND /, '');
-  ok(dbm.prepare(mutExp1).all(86400).some(r => r.id === approvedOld),
+  ok(dbm.prepare(mutExp1).all(EXP_SEC).some(r => r.id === approvedOld),
     'جهش «status=pending حذف شود» یک approvedِ ۴۸ساعته را هم می‌گیرد (ادعا این را رد می‌کرد)');
 
   // جهش ۲: حذفِ invoice_reminded_at IS NULL از کوئریِ یادآوری → یادآوری بی‌پایان تکرار می‌شود
@@ -224,8 +244,9 @@ if (claimSql && remSql && expSql) {
 
   // جهش ۳: مقایسه‌ی برعکس (> به‌جای <) → فاکتورِ **تازه** هم فوراً «منقضی» به‌حساب می‌آید
   const fresh = mkOld(103, 60);
-  const mutExp2 = expSql.replace('invoice_issued_at < unixepoch()', 'invoice_issued_at > unixepoch()');
-  ok(dbm.prepare(mutExp2).all(86400).some(r => r.id === fresh),
+  const mutExp2 = expSql.replace(')) < unixepoch()', ')) > unixepoch()');
+  ok(mutExp2 !== expSql, 'جهشِ علامتِ مقایسه واقعاً روی کوئری نشست');
+  ok(dbm.prepare(mutExp2).all(EXP_SEC).some(r => r.id === fresh),
     'جهشِ برعکس‌کردنِ علامتِ مقایسه یک فاکتورِ ۱دقیقه‌ای را هم کاندیدِ انقضا می‌کند (ادعای درست این را رد می‌کرد)');
 }
 

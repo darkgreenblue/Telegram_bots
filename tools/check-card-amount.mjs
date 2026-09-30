@@ -103,7 +103,7 @@ function boot({ rotation = true, stars = false, CAo = {}, DateO = Date } = {}) {
     status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`);
   const clock = { now: DAY0 };
-  const CAx = { ...CA, cardDay: () => CA.cardDay(clock.now * 1000), cardDayStartSec: () => CA.cardDayStartSec(clock.now * 1000), ...CAo };
+  const CAx = { ...CA, cardDay: () => CA.cardDay(clock.now * 1000), cardDayStartSec: () => CA.cardDayStartSec(clock.now * 1000), nowSec: () => clock.now, ...CAo };
   const errs = [], events = [], sent = [];
   // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
   // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
@@ -158,6 +158,22 @@ if (h) {
     ok(h.cardCounts(45000).open.get(4) === 1, 'ردیفِ دیروز که امروز فاکتور شد در «فاکتورِ بازِ امروز» شمرده می‌شود');
     db.prepare("UPDATE payments SET status='canceled' WHERE id=?").run(rid);
   }
+  {
+    /* ⏳ v3.139.0 (بررسیِ فاکتورهای ۱۶۴۲/۱۶۴۴): فاکتورِ `pending`ِ رهاشده بعد از ۳۰ دقیقه دیگر «باز» نیست،
+     * رسیدِ `waiting_review` همیشه باز است، و تعویضِ کارت فاکتور را برای کارتِ تازه «تازه» می‌کند. */
+    const add = (card, status, ago, swAgo = null) => Number(db.prepare(`INSERT INTO payments (user_id, amount, status, card_id, created_at, invoice_issued_at, card_switched_at)
+      VALUES (88, 35000, ?, ?, ?, ?, ?)`).run(status, card, h.clock.now - ago, h.clock.now - ago, swAgo === null ? null : h.clock.now - swAgo).lastInsertRowid);
+    const ids = [add(1, 'pending', 31 * 60), add(3, 'pending', 29 * 60), add(4, 'waiting_review', 2 * 3600), add(1, 'pending', 2 * 3600, 5 * 60)];
+    const o = h.cardCounts(35000).open;
+    ok(!o.has(1) || o.get(1) === 1, `فاکتورِ ۳۱دقیقه‌ایِ رهاشده دیگر کارت را عقب نگه نمی‌دارد (کارتِ ۱: ${o.get(1)})`);
+    ok(o.get(3) === 1, 'کنترلِ مثبت: فاکتورِ ۲۹دقیقه‌ای هنوز باز است');
+    ok(o.get(4) === 1, 'رسیدِ منتظرِ تصمیم (waiting_review) دوساعته هم باز است: پولِ واقعی در راهِ همان کارت است');
+    ok(o.get(1) === 1, 'فاکتوری که ۵ دقیقه پیش به این کارت تعویض شد، تازه حساب می‌شود');
+    h.clock.now += 0;
+    db.prepare("UPDATE payments SET status='canceled' WHERE id IN (" + ids.join(',') + ')').run();
+  }
+  ok(/const CARD_OPEN_FRESH_SEC = 30 \* 60;/.test(SRC) && /const fresh = CARD_OPEN_FRESH_SEC > 0 \? now - CARD_OPEN_FRESH_SEC : 0;/.test(SRC),
+    'پنجره‌ی تازگی ۳۰ دقیقه، و رول‌بکِ یک‌خطی (`0` ⟵ همه‌ی بازهای امروز، رفتارِ قبل از v3.139.0)');
   ok(!h.errs.length && !h.sent.length, 'هیچ خطا و هیچ هشداری در مسیرِ عادی');
   ok(h.events.filter((e) => e.e === 'card_assigned').every((e) => e.p.via === 'amount' && e.p.amount > 0),
     'رویدادِ card_assigned با via=amount و مبلغ ثبت می‌شود');
@@ -231,7 +247,7 @@ console.log('\nسرعت (بدترین حالت):');
     }
   })();
   const st = r.cardSt();
-  const plans = ['usedOn', 'winsOn', 'openOn'].map((k) => [k, db.prepare(`EXPLAIN QUERY PLAN ${st[k].source}`).all(...(k === 'usedOn' ? [1] : [1, 15000])).map((x) => x.detail).join(' | ')]);
+  const plans = ['usedOn', 'winsOn', 'openOn'].map((k) => [k, db.prepare(`EXPLAIN QUERY PLAN ${st[k].source}`).all(...(k === 'usedOn' ? [1] : k === 'openOn' ? [1, 15000, 1] : [1, 15000])).map((x) => x.detail).join(' | ')]);
   for (const [k, plan] of plans) ok(/USING (COVERING )?INDEX idx_payments_(status_approved \(status=\? AND approved_at>\?\)|status_issued \(status=\? AND invoice_issued_at>\?\))/.test(plan) && !/SCAN payments(?! USING)/.test(plan), `${k} روی ایندکس می‌نشیند، نه اسکنِ کلِ جدول (${plan})`);
   const times = [];
   for (let i = 0; i < 300; i++) {

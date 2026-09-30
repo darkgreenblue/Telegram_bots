@@ -246,6 +246,8 @@ export function cardDayStartSec(ms = Date.now(), tz = CARD_TZ) {
   const guess = Date.parse(`${cardDay(ms, tz)}T00:00:00Z`);
   return Math.floor((guess - tzOffsetMs(guess, tz)) / 1000);
 }
+/** «الان» به ثانیه‌ی یونیکس. جدا شده تا چکِ CI همان ساعتِ ساختگیِ `cardDayStartSec` را به پنجره‌ی تازگیِ فاکتورِ باز هم بدهد. */
+export const nowSec = (ms = Date.now()) => Math.floor(ms / 1000);
 /** سقفِ امروزِ کارت پر شده؟ سقفِ ۰ = بی‌سقف (پیش‌فرض). */
 export const capFull = (c, approvedToday) =>
   Number(c?.daily_cap) > 0 && Number(approvedToday || 0) >= Number(c.daily_cap);
