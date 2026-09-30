@@ -336,6 +336,11 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-profit.mjs
 
+      # گزارشِ شبانه‌ی مالک (v3.140.0 تاروت): عددها، سود از profitFor، یک بار per روز، و سرعت.
+      - name: Owner nightly report check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-owner-report.mjs
+
       # هزینه‌ی تبلیغ per **روز** ثبت می‌شود، نه یک عددِ ثابت. سه خرابیِ ممکنش هر سه
       # بی‌صدایند: «خالی» با «صفر» یکی شود (هر روزِ واردنشده صفر حساب شود)، میانگین
       # ساده به‌جای وزنی، یا فیلدِ تاریخ مقدارِ همان روز را برنگرداند.
@@ -644,6 +649,11 @@ jobs:
       - name: Dashboard indexes check (bot)
         if: matrix.bot == 'tarot'
         run: node tools/check-dash-speed.mjs --part=bot
+
+      # سمتِ رباتِ گزارشِ شبانه: ایندکس‌های بوت + شاخه‌ی sweep و ارسال فقط به مالک.
+      - name: Owner nightly report check (bot side)
+        if: matrix.bot == 'tarot'
+        run: node tools/check-owner-report.mjs --part=bot
       # 🧾 v3.132.0: مهاجرتِ یک‌باره‌ی تگ‌ها (پاک‌کردنِ تگِ هوش مصنوعی، اپِ بلو ⟵ موبایل‌بانک) + ارسالِ
       # آخرین رسیدِ هر کاربر به اکانتِ پشتیبانی برای تگِ دستی (ترتیب، ادامه بعد از ری‌استارت، ۴۲۹).
       - name: Tag review check
@@ -798,6 +808,11 @@ jobs:
       - name: Invoice lifecycle check
         if: matrix.bot == 'tarot'
         run: node tools/check-invoice-lifecycle.mjs
+
+      # دو خطِ پولیِ فقط-مالک زیرِ رسید (مجموعِ کاربر + درآمدِ امروز)، هم‌تعریف با داشبورد.
+      - name: Owner money lines check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-owner-money.mjs
 
       # آزمایشِ نمایشِ بسته‌ها (pack_reveal_v1): قراردادِ control، گاردِ ریلِ استارز.
       - name: Pack reveal experiment check

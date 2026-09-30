@@ -371,7 +371,7 @@ per زبان برای چندزبانه‌ها. ردیفِ تجمیعی می‌م
 | `abSupport` | ربات `variant()` را صدا می‌زند؟ (فقط این‌ها در صفحه‌ی تست‌ها) | false (tarot: true) |
 | `family` | «کدِ محصولش همان کدامست» — قیف و تایم‌لاین از این خوانده می‌شوند نه از کلید | خودِ کلید (tarot-intl: `tarot`) |
 | `receiptQueue` | ربات جدول `admin_actions` + sweep دارد؟ (دکمه‌ی تأیید/رد رسید از داشبورد فعال) | false (voice2text/tarot: true) |
-| `adminActions` | **فهرستِ کاملِ** اکشن‌هایی که sweepِ ربات واقعاً اجرا می‌کند — تک‌منبعِ مجوزِ صف‌کردن. هیچ صفحه‌ای حق ندارد نامی بیرون از این فهرست را enqueue کند | `[]` (voice2text: `approve,reject` · tarot و tarot-intl: فهرستِ کاملِ `lib/bots.js`، از جمله `card_update` و `receipt_tag`) |
+| `adminActions` | **فهرستِ کاملِ** اکشن‌هایی که sweepِ ربات واقعاً اجرا می‌کند — تک‌منبعِ مجوزِ صف‌کردن. هیچ صفحه‌ای حق ندارد نامی بیرون از این فهرست را enqueue کند | `[]` (voice2text: `approve,reject` · tarot و tarot-intl: فهرستِ کاملِ `lib/bots.js`، از جمله `card_update`، `receipt_tag` و `owner_report`) |
 | `coinLegacyFloor` | مرزِ واحد در `payments.original_amount`: مقدارِ ≥ این عدد **تومانِ** دوره‌ی قبل است، کمتر **الماس**. `0`/نبود = این ربات هرگز دوره‌ی تومانی نداشته | 0 (tarot: ۱۰٬۰۰۰) |
 | `coinValue` | دیکودِ فرمتِ ذخیره‌سازیِ اعتبار (۱ الماس = چند واحدِ داخلی). **نرخِ تبدیل نیست** — قیمتِ هر الماس به بسته بستگی دارد | null (tarot: **۱** — بعد از مهاجرتِ الماس، `users.balance` خودِ تعدادِ الماس است) |
 
@@ -724,6 +724,27 @@ helperها: `userPk`, `userNameCol`, `userCreatedExpr`, `moneyOf`, `unixOf`, `to
 - `tarot-intl` اکشن را اعلام کرده (sweep همان کد است و صریح رد می‌کند) ولی پرچمِ کارت را ندارد.
 - **چکِ CI:** `tools/check-receipt-tags.mjs --part=dash` (سرتاسری روی یک فایل: داشبورد صف می‌کند،
   sweepِ واقعیِ ربات اجرا) + ردیفِ `routes/tags.js` در بخشِ ۳ی `check-credit-queue`.
+
+## 📊 گزارشِ شبانه‌ی مالک (`lib/owner-report.js` + اکشنِ صفِ `owner_report`، v3.140.0 تاروت)
+- **خواسته‌ی مالک (۱۴۰۵/۰۷/۰۹):** هر شب ساعت ۱۲ فقط برای `100257975` یک پیامِ کوتاه با سود/درآمد/هزینه، کاربرِ
+  فعال/نیو/ریتنشن، فال‌گرفته‌ها (کل/نیو/ریتنشن) و آمارِ گفتگو با تاروت‌خوانِ **همان روز**. فقط تاروت فارسی.
+- **چرا این‌جا ساخته می‌شود و ربات می‌فرستد:** سود تک‌منبع دارد و آن `profitFor` است (هزینه‌ی تبلیغ، نرخِ دلار و
+  پرداختِ سرگردان در `platform.db` همین داشبوردند)، و داشبورد توکنِ ربات ندارد. پس `scheduleOwnerReport()`
+  (هر ۶۰ ثانیه) بعد از ۰۰:۰۰ تهران گزارشِ **دیروز** را می‌سازد و یک ردیفِ `admin_actions` با
+  `action='owner_report'`، `payment_id=0` (قفلِ پولیِ هیچ پرداختی را نمی‌گیرد) و متنِ آماده در `note` صف می‌کند؛
+  sweepِ ربات فقط به `OWNER_ID` می‌فرستد. گاردِ قرارداد: `adminActionSupported(inst.bot, 'owner_report')` قبل از INSERT.
+- **یک بار per روز:** مهرِ `owner_report_last_day` در `settings`، فقط **بعد از** صفِ موفق. اولین بالا آمدن گزارشِ
+  دیروز را یک بار همان لحظه می‌فرستد (catch-up). `audit('owner_report')` + لاگِ `📊 OWNER_REPORT day= ms=`؛
+  خطاها: `❌ OWNER_REPORT_ENQUEUE`، `❌ OWNER_REPORT`.
+- **تعریف‌ها:** ادمین‌ها (`json_extract(props,'$.adm') = 1`، عیناً همین شکل تا روی `idx_events_adm` بنشیند) از همه
+  بیرون؛ فعال = `event='act'` ∪ کاربرِ تازه‌ی روز؛ نیو = `users.created_at` در روز؛ ریتنشن = فعال − نیو؛ فال‌گرفته =
+  `DONE`ِ `engage.js`؛ سؤال = `chat_messages.role='user'`. پول = سطرِ همان روز در `profitFor(bot,'week')`؛ بدونِ
+  `usd_toman` فقط درآمد + یک خطِ صادقانه (سود و هزینه‌ی دروغین نه).
+- **سرعت:** پنج کوئری (`DAY_SQL`)، همه روز-محدود و روی ایندکسِ **پوششی** (`idx_events_ev_user`، `idx_users_created`،
+  `idx_readings_stats`، `idx_chat_role_day`، `idx_events_adm`) که خودِ ربات در بوت می‌سازد. کوئریِ کاربرانِ کمپینِ
+  `profit.js` هم حالا روی `idx_users_created` است.
+- رول‌بک: `OWNER_REPORT_ENABLED = false`. **چکِ CI:** `tools/check-owner-report.mjs` (جابِ dashboard؛ `--part=bot` روی
+  جابِ tarot) + ردیفِ رجیستری در `check-credit-queue`.
 
 ## 🧮 فلسفه‌ی هزینه (میراثِ صفحه‌ی حذف‌شده‌ی `/costs`، حالا در `/economics`)
 > سؤالِ صریحِ مالک: «این مقایسه چه لزومی داره؟ فلسفه‌ش چیه؟»

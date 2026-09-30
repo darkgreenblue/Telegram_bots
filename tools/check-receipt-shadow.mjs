@@ -156,10 +156,11 @@ if (sender) {
       sendMessage: async (id, cap) => { if (failFull && id !== 1) throw new Error('blocked'); sent.push({ id, cap }); return { message_id: 1 }; },
     } };
     // 🏷 تگ‌های فازِ ۶ این‌جا خاموش‌اند (بی‌خط، کیبوردِ دست‌نخورده)؛ `check-receipt-tags` خودشان را می‌سنجد.
+    // 💰 دو خطِ پولیِ مالک (v3.140.0) هم خاموش ⟵ ''؛ خودشان در check-owner-money.
     const fn = new Function('receiptRecipients', 'ownerCopyHeader', 'ownerShadowLine', 'withShadowLine', 'OWNER_ID', 'bot', 'logErr',
-      'receiptInfoLines', 'ownerReceiptMarkup', 'applyDefaultTags',
+      'receiptInfoLines', 'ownerReceiptMarkup', 'applyDefaultTags', 'ownerMoneyLines',
       `${sender}\nreturn sendToReceiptRecipients;`)(() => recips, () => 'HDR\n', () => line, RT.withShadowLine, 1, bot, () => {},
-      () => '', (_p, kb) => kb || null, () => {});
+      () => '', (_p, kb) => kb || null, () => {}, () => '');
     await fn({ id: 5 }, { caption: 'CAP', photoFileId: 'f', kb: null });
     return sent;
   };

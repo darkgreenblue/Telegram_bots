@@ -186,8 +186,10 @@ if (h) {
   ok(h.sent.length === 2, 'دقیقاً دو پیام رفت');
   const INFO = '\n\n💳 کارتِ تخصیص‌داده: بانک پاسارگاد🔰\n5022291612282234\n📊 سوابق کاربر: ۱ پرداخت';
   ok(toSecond?.extra?.reply_markup === kb && toSecond.text === `CAP${INFO}`, 'ادمینِ کارت پیامِ کامل با دکمه‌ها + کارتِ تخصیص و سوابق گرفت');
-  ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی') && toOwner.text.endsWith(`CAP${INFO}`),
-    'مالک کپیِ اطلاعاتیِ **بی‌دکمه** با سرتیتر گرفت');
+  // 💰 v3.140.0: دُمِ پیامِ مالک دو خطِ پولی هم دارد (کدِ واقعی، از همین بخشِ سورس)؛ ادمینِ کارت بالا دقیقاً بدونِ آن‌هاست.
+  ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی')
+    && toOwner.text.includes(`CAP${INFO}\nمجموعاً ۳۰٬۰۰۰ تومان\n💰 درآمد امروز تا این لحظه: `),
+    'مالک کپیِ اطلاعاتیِ **بی‌دکمه** با سرتیتر گرفت (+ دو خطِ پولیِ فقط-مالک)');
   ok(first?.message_id === 1, 'شناسه‌ی پیامِ ادمینِ کارت (نه کپی) برگردانده می‌شود');
   h.sent.length = 0;
   await h.sendToReceiptRecipients(pSecond, { caption: 'X'.repeat(1100), photoFileId: 'F', kb });
