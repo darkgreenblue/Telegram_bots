@@ -27,6 +27,7 @@ import { getSetting, setCampaignCost, clearCampaignCost, audit } from '../lib/pl
 import { costPerDiamond } from '../lib/cpa.js';
 import { coinEconomy, collectDaily, COST_KINDS } from './finance.js';
 import { profitFor, lifetimeDays, campaignCostModel, USD_RATE_KEY, PRE_TRACK_COST_KEY } from '../lib/profit.js';
+import { cachedAnalyticsBody } from '../lib/dash-cache.js';
 
 const usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n)) < 1 ? 4 : 2)}`;
 const t = (n) => `${fmt(Math.round(Number(n) || 0))} ت`;
@@ -74,7 +75,20 @@ function giving(botKey, days) {
   return sum;
 }
 
-export function economicsBody(url) {
+/* `opts.inputsSlot`: worker (`lib/analytics-pages.js`) به‌جای کارتِ ورودی یک نشانگر می‌گذارد
+   و route همان کارت را **زنده** جایش می‌نشاند (`economicsPage`). دلیل: کارتِ ورودی باید
+   مقدارِ همین لحظه را نشان دهد و هیچ تعاملی با آن نباید منتظرِ ساختِ کشِ آمار بماند. */
+export const COST_INPUTS_SLOT = '<!--cost-inputs-->';
+/** مسیرِ HTTPِ `/economics`: آمار از کشِ worker، کارتِ ورودی زنده. اگر هنوز نسخه‌ی آماده‌ای
+ *  نیست (صفحه‌ی «در حال آماده‌سازی»)، کارتِ ورودی بالای آن می‌آید تا ثبتِ عدد هرگز منتظرِ
+ *  ساختِ آمار نماند. */
+export function economicsPage(url) {
+  const bot = scopeBot(url);
+  const body = cachedAnalyticsBody(url);
+  const card = instancesOf(bot).length ? costInputsCard(bot, url) : '';
+  return body.includes(COST_INPUTS_SLOT) ? body.replace(COST_INPUTS_SLOT, () => card) : card + body;
+}
+export function economicsBody(url, opts = {}) {
   const bot = scopeBot(url);
   const title = botByKey(bot)?.title || bot;
   if (!instancesOf(bot).length) {
@@ -99,7 +113,7 @@ export function economicsBody(url) {
       هم نیستند و سود ساخته نمی‌شود. بقیه‌ی اعدادِ این صفحه (که دلاری‌اند) سرِ جایشان‌اند.</p>
     <p class="muted">نرخ را در کارتِ بالا وارد کن تا سود هم زنده شود.</p></div>`;
 
-  return `${head}${costInputsCard(bot, url)}${profit}
+  return `${head}${opts.inputsSlot ? COST_INPUTS_SLOT : costInputsCard(bot, url)}${profit}
     ${costBreakdownCard(bot, p, rk)}${modelCard(bot, p, rk)}${diamondCard(bot, p, rk)}`;
 }
 
@@ -286,6 +300,40 @@ export function diamondCard(bot, p, rk) {
    قبلاً وسطِ صفحه‌ی «جذب» بود، ولی هر سه ورودی‌اش ورودیِ محاسبه‌ی اقتصادند و بدونشان
    هیچ عددِ تومانی‌ای در این صفحه ساخته نمی‌شود. پس اول صفحه، جایی که اگر خالی باشد
    بلافاصله دیده شود. اکشن عمداً همان `/acquisition/settings` ماند تا audit نشکند. */
+const dayNote = (users, usdVal) => (users
+  ? `در این روز <b>${fmt(users)}</b> کاربرِ کمپین وارد شده‌اند${usdVal !== null
+      ? `، پس خرجِ این روز <b>${usd(usdVal * users)}</b> است.` : '.'}`
+  : 'در این روز هیچ کاربرِ کمپینی وارد نشده، پس عددش روی هیچ محاسبه‌ای اثر نمی‌گذارد.');
+
+/* 📅 عوض‌کردنِ تاریخ **هیچ درخواستی به سرور نمی‌زند** (۱۴۰۵/۰۷/۰۸، گزارشِ مالک: «فقط
+   انتخابِ تاریخ صفحه را می‌برد روی در حال آماده‌سازی آمار»). قبلاً انتخابِ تاریخ یک GET با
+   `?cpaDay=` می‌زد، و چون `/economics` از کشِ worker خوانده می‌شود و کلیدِ کش از URL
+   ساخته می‌شد، هر تاریخ یک کلیدِ تازه بود ⟵ کشِ خالی ⟵ ساختِ کاملِ آمار برای یک
+   فیلدِ فرم. حالا نرخ و کاربرِ همه‌ی روزها داخلِ خودِ فرم است (data-*) و این اسکریپت
+   فقط مقدار و متن را عوض می‌کند. بدونِ جاوااسکریپت، لینک‌های جدولِ روزها با
+   `?cpaDay=` همچنان کار می‌کنند (کارت زنده رندر می‌شود و `cpaDay` در کلیدِ کش نیست). */
+const CPA_DAY_SCRIPT = `<script>(() => {
+  const f = document.getElementById('cpa-day-form'); if (!f) return;
+  const rates = JSON.parse(f.dataset.rates || '{}'), users = JSON.parse(f.dataset.users || '{}');
+  const nf = new Intl.NumberFormat('fa-IR');
+  const usd = (v) => '$' + v.toFixed(Math.abs(v) < 1 ? 4 : 2);   // همان قالبِ سرور
+  const show = (d) => {
+    const r = Object.prototype.hasOwnProperty.call(rates, d) ? rates[d] : null, n = users[d] || 0;
+    f.day.value = d;
+    f.usd.value = r === null ? '' : r;
+    f.usd.placeholder = r === null ? 'هنوز وارد نشده' : '';
+    const lab = f.querySelector('[data-cpa="day"]'); if (lab) lab.textContent = d;
+    const note = document.querySelector('[data-cpa="note"]');
+    if (note) note.innerHTML = n
+      ? 'در این روز <b>' + nf.format(n) + '</b> کاربرِ کمپین وارد شده‌اند' + (r === null ? '.' : '، پس خرجِ این روز <b>' + usd(r * n) + '</b> است.')
+      : 'در این روز هیچ کاربرِ کمپینی وارد نشده، پس عددش روی هیچ محاسبه‌ای اثر نمی‌گذارد.';
+  };
+  f.day.addEventListener('change', () => { if (/^\\d{4}-\\d{2}-\\d{2}$/.test(f.day.value)) show(f.day.value); });
+  document.querySelectorAll('[data-cpa-day]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault(); show(a.dataset.cpaDay); f.usd.focus();
+  }));
+})();</script>`;
+
 export function costInputsCard(bot, url = null) {
   const rate = parseInt(getSetting(USD_RATE_KEY, '0'), 10) || 0;
   const pre = Number(getSetting(PRE_TRACK_COST_KEY, '0')) || 0;
@@ -302,16 +350,14 @@ export function costInputsCard(bot, url = null) {
 
   const missing = [!rate && 'نرخ دلار', !cam.avgUsd && 'هزینه‌ی تبلیغ'].filter(Boolean);
   const q = new URLSearchParams(url?.searchParams || '');
-  q.delete('cpaDay');
-  const keep = [...q.entries()].map(([k, v]) =>
-    `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('');
+  q.delete('cpaDay'); q.delete('msg');
 
   /* تاریخچه‌ی روزهای واردشده — جدیدترین بالا، با تعدادِ کاربر و خرجِ همان روز، چون
      «نرخ» بدونِ «چند نفر» هیچ نمی‌گوید. */
   const histRows = [...cam.rates.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([d, u]) => {
     const n = cam.users.get(d) || 0;
     return [
-      `<a href="?${new URLSearchParams({ ...Object.fromEntries(q), cpaDay: d })}#cpa">${esc(d)}</a>`,
+      `<a href="?${new URLSearchParams({ ...Object.fromEntries(q), cpaDay: d })}#cpa" data-cpa-day="${esc(d)}">${esc(d)}</a>`,
       usd(u), fmt(n), usd(u * n),
       d === day ? '<span class="badge">در حالِ ویرایش</span>' : '',
     ];
@@ -336,31 +382,26 @@ export function costInputsCard(bot, url = null) {
       پس هر روز عددِ خودش را می‌گیرد. تاریخ را انتخاب کن، دلارِ همان روز را بنویس و
       <b>ثبت</b> بزن. تا ثبت نزنی چیزی ذخیره نمی‌شود.</p>
 
-    <form method="get" class="inline" style="margin-bottom:6px">${keep}
-      <label>تاریخ
-        <input name="cpaDay" type="date" value="${esc(day)}" max="${esc(today)}"
-          onchange="this.form.submit()"></label>
-      <noscript><button type="submit">نمایش</button></noscript>
-    </form>
-
-    <form method="post" action="/economics/cpa-day" class="inline">
+    <form method="post" action="/economics/cpa-day" class="inline" id="cpa-day-form"
+        data-rates="${esc(JSON.stringify(Object.fromEntries(cam.rates)))}"
+        data-users="${esc(JSON.stringify(Object.fromEntries(cam.users)))}">
       <input type="hidden" name="bot" value="${esc(bot)}">
-      <input type="hidden" name="day" value="${esc(day)}">
-      <label>هزینه per کاربر در <b>${esc(day)}</b> (دلار)
+      <label>تاریخ
+        <input name="day" type="date" value="${esc(day)}" max="${esc(today)}" required></label>
+      <label>هزینه per کاربر در <b data-cpa="day">${esc(day)}</b> (دلار)
         <input name="usd" type="number" step="0.00001" min="0" value="${dayUsd ?? ''}"
           placeholder="${dayUsd === null ? 'هنوز وارد نشده' : ''}"></label>
       <button type="submit">ثبت</button>
     </form>
     <p class="muted" style="margin-top:6px">
-      ${dayUsers
-        ? `در این روز <b>${fmt(dayUsers)}</b> کاربرِ کمپین وارد شده‌اند${dayUsd !== null
-            ? `، پس خرجِ این روز <b>${usd(dayUsd * dayUsers)}</b> است.` : '.'}`
-        : 'در این روز هیچ کاربرِ کمپینی وارد نشده، پس عددش روی هیچ محاسبه‌ای اثر نمی‌گذارد.'}
+      <span data-cpa="note">${dayNote(dayUsers, dayUsd)}</span>
       <br>فیلد را <b>خالی</b> بگذار و ثبت بزن تا ردیفِ آن روز پاک شود و دوباره میانگین
       بگیرد. <b>صفر</b> با خالی فرق دارد: صفر یعنی «آن روز واقعاً تبلیغی نداشتم».</p>
 
     ${histRows.length ? `<h3 class="ch">روزهای ثبت‌شده</h3>
     ${table(['روز', 'نرخ per کاربر', 'کاربرِ کمپین', 'خرجِ آن روز', ''], histRows, '')}` : ''}
+
+    ${CPA_DAY_SCRIPT}
 
     <div class="grid" style="margin-top:10px">
       ${stat('میانگینِ هزینه per کاربرِ کمپین', `<b>${usd(cam.avgUsd)}</b>${rate

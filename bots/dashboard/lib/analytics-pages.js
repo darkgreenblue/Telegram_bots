@@ -13,7 +13,8 @@ const PAGES = new Map([
   ['/dash', dashBody],
   ['/engagement', engagementBody],
   ['/acquisition', acquisitionBody],
-  ['/economics', economicsBody],
+  // کارتِ ورودی‌های دستی زنده است (`economicsPage`)؛ worker فقط جایش نشانگر می‌گذارد
+  ['/economics', (url) => economicsBody(url, { inputsSlot: true })],
   ['/funnels', funnelsBody],
   ['/screens', screensBody],
   ['/retention', retentionBody],

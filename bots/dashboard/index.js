@@ -30,7 +30,7 @@ import { cohortBody, cohortFragment } from './routes/cohort.js';
 import { funnelStepsFragment } from './routes/journey.js';
 import { usersBody, usersCsv } from './routes/users.js';
 import { acquisitionSettings } from './routes/acquisition.js';
-import { cpaDaySet } from './routes/economics.js';
+import { cpaDaySet, economicsPage } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 import { cachedAnalyticsBody, prewarmDashCache, refreshAnalyticsSection } from './lib/dash-cache.js';
 
@@ -65,7 +65,7 @@ const PAGES = {
   '/dash': (url) => ['آمار تحلیلی', cachedAnalyticsBody(url)],
   '/engagement': (url) => ['درگیری و چسبندگی', cachedAnalyticsBody(url)],
   '/acquisition': (url) => ['جذب و کانال‌ها', cachedAnalyticsBody(url)],
-  '/economics': (url) => ['اقتصاد و هزینه', cachedAnalyticsBody(url)],
+  '/economics': (url) => ['اقتصاد و هزینه', economicsPage(url)],
   '/marketing': (url) => ['مارکتینگ', marketingBody(url)],
   '/support': (url) => ['پشتیبانی', supportBody(url)],
   '/support/user': (url) => ['پشتیبانی', supportUserBody(url), '/support'],
@@ -111,8 +111,12 @@ const ACTIONS = {
   '/experiments/decide': { fn: experimentDecide, backTo: '/experiments' },
   '/journal/version': { fn: journalVersion, backTo: '/journal' },
   '/journal/insight': { fn: journalInsight, backTo: '/journal' },
-  '/acquisition/settings': { fn: acquisitionSettings, backTo: '/economics' },
-  '/economics/cpa-day': { fn: cpaDaySet, backTo: '/economics' },
+  '/acquisition/settings': { fn: acquisitionSettings, backTo: '/economics', refreshEconomics: true },
+  // بعد از ثبت، همان روزی که ثبت شد در فرم می‌ماند (نه امروز) تا عددِ تازه دیده شود
+  '/economics/cpa-day': {
+    fn: cpaDaySet, refreshEconomics: true,
+    backTo: (b) => (/^\d{4}-\d{2}-\d{2}$/.test(String(b.get('day') || '')) ? `/economics?cpaDay=${b.get('day')}` : '/economics'),
+  },
   '/orphans/add':     { fn: orphanAdd,     backTo: '/orphans' },
   '/orphans/resolve': { fn: orphanResolve, backTo: '/orphans' },
   '/orphans/delete':  { fn: orphanDelete,  backTo: '/orphans' },
@@ -199,6 +203,11 @@ const server = http.createServer(async (req, res) => {
       // backTo می‌تواند تابع باشد تا اکشن به همان صفحه‌ای که از آن آمده برگردد
       // (مثلاً اقدامِ پشتیبانی → پروفایلِ همان کاربر، نه صفحه‌ی جستجو).
       const back = typeof action.backTo === 'function' ? action.backTo(body) : action.backTo;
+      // ورودیِ هزینه عوض شد ⟵ کارتِ ورودی زنده است، ولی سود/تفکیک از کش می‌آیند؛ نسخه‌ی
+      // تازه‌شان همین حالا جلوی صف ساخته می‌شود تا عددِ کهنه ماندگار نماند.
+      if (action.refreshEconomics && !String(msg || '').startsWith('❌')) {
+        try { refreshAnalyticsSection(`/economics?bot=${encodeURIComponent(bot)}`); } catch { /* صف اختیاری است */ }
+      }
       // اسکوپِ ربات باید از اکشن هم رد شود، وگرنه بعد از هر POST به رباتِ پیش‌فرض برمی‌گشتیم
       const sep = back.includes('?') ? '&' : '?';
       return redirect(res, `${back}${sep}bot=${encodeURIComponent(bot)}&msg=${encodeURIComponent(msg || '')}`);

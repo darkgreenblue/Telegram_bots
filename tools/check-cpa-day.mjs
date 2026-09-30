@@ -15,7 +15,7 @@
 //      وارد کند، یا بدتر، عددِ روزِ دیگری را ببیند و بر اساسش تصمیم بگیرد.
 //
 // اجرا: node tools/check-cpa-day.mjs   (بدون شبکه؛ فیکسچرِ SQLite در پوشه‌ی موقت)
-import { mkdtempSync, mkdirSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { createRequire } from 'module';
@@ -44,6 +44,10 @@ u.run(2,'b','campaign:AB', now-2*D, now);   // دو کاربر در یک روز
 u.run(3,'c','campaign:AB', now-1*D, now);   // یک کاربر روز بعد
 db.close();
 process.env.TAROT_DB_DIR = dataDir;
+// صفحه‌ی اقتصاد از کشِ worker می‌خواند؛ کش و worker داخلِ ریشه‌ی موقت (worker بی‌اثر)
+process.env.DASH_CACHE_DIR = path.join(root, 'cache');
+process.env.DASH_CACHE_WORKER = path.join(root, 'noop-worker.mjs');
+writeFileSync(process.env.DASH_CACHE_WORKER, 'process.exit(0);\n');
 process.chdir(root); mkdirSync(path.join(root,'data'), {recursive:true});
 
 const { setSetting } = await import(`file://${base}/lib/platform.js`);
@@ -127,6 +131,41 @@ ok(/میانگینِ هزینه per کاربرِ کمپین/.test(html), 'باک
 const avgBlock = html.slice(html.indexOf('میانگینِ هزینه per کاربرِ کمپین'), html.indexOf('میانگینِ هزینه per کاربرِ کمپین')+400);
 ok(!/<input/.test(avgBlock), 'و قابلِ ویرایش نیست (هیچ input ای ندارد)');
 ok(/روزهای ثبت‌شده/.test(html), 'جدولِ تاریخچه‌ی روزها رندر می‌شود');
+
+// ۹) انتخابِ تاریخ هیچ درخواستی به سرور نمی‌زند و هرگز صفحه را به «در حال آماده‌سازی» نمی‌برد
+//    (گزارشِ مالک ۱۴۰۵/۰۷/۰۸: هر تاریخ یک کلیدِ کشِ تازه بود ⟵ کشِ خالی ⟵ ساختِ کاملِ آمار)
+{
+  const { economicsPage, COST_INPUTS_SLOT } = await import(`file://${base}/routes/economics.js`);
+  const { canonicalAnalyticsUrl, writeDashCache } = await import(`file://${base}/lib/dash-cache.js`);
+  const { renderCachedAnalyticsPage } = await import(`file://${base}/lib/analytics-pages.js`);
+  html = economicsBody(new URL('http://x/economics?bot=tarot'));
+  ok(!/method="get"[^>]*>[\s\S]{0,400}name="cpaDay"/.test(html) && !/this\.form\.submit\(\)/.test(html),
+    'فیلدِ تاریخ دیگر فرمِ GET نیست و با تغییر، چیزی submit نمی‌کند');
+  const form = html.slice(html.indexOf('id="cpa-day-form"'), html.indexOf('</form>', html.indexOf('id="cpa-day-form"')));
+  ok(/method="post"/.test(html.slice(html.lastIndexOf('<form', html.indexOf('id="cpa-day-form"')), html.indexOf('id="cpa-day-form"')))
+    && /name="day" type="date"/.test(form) && /name="usd"/.test(form),
+    'تاریخ و مبلغ در همان فرمِ POSTِ «ثبت»اند (تاریخ فقط با ثبت فرستاده می‌شود)');
+  const rates = JSON.parse((form.match(/data-rates="([^"]*)"/) || [])[1]?.replace(/&quot;/g, '"') || '{}');
+  ok(rates[day(2)] === 0.8 && rates[day(1)] === 0, 'نرخِ همه‌ی روزهای ثبت‌شده داخلِ فرم است (عوض‌کردنِ تاریخ در مرورگر)');
+  ok(/addEventListener\('change'/.test(html) && /data-cpa-day=/.test(html), 'اسکریپتِ تاریخ و لینک‌های جدولِ روزها بدونِ رفت‌وبرگشت کار می‌کنند');
+
+  ok(canonicalAnalyticsUrl('/economics?bot=tarot&cpaDay=2026-01-01') === canonicalAnalyticsUrl('/economics?bot=tarot'),
+    'cpaDay در کلیدِ کش نیست (لینکِ بدونِ جاوااسکریپت هم کشِ تازه نمی‌سازد)');
+
+  // بدونِ کش: کارتِ ورودی باز هم هست (نه فقط «در حال آماده‌سازی»)
+  let page = economicsPage(new URL(`http://x/economics?bot=tarot&cpaDay=${day(2)}`));
+  ok(/id="cpa-day-form"/.test(page) && /name="usd"[^>]*value="0\.8"/.test(page),
+    'بدونِ کشِ آماده هم کارتِ ورودی زنده با مقدارِ همان روز دیده می‌شود');
+  // با کش: worker نشانگر می‌گذارد و route کارتِ زنده را جایش می‌نشاند
+  const built = renderCachedAnalyticsPage(new URL('http://127.0.0.1/economics?bot=tarot'));
+  ok(built.includes(COST_INPUTS_SLOT) && !/id="cpa-day-form"/.test(built), 'نسخه‌ی کش‌شده کارتِ ورودی ندارد، فقط نشانگرش را');
+  writeDashCache(new URL('http://127.0.0.1/economics?bot=tarot'), built);
+  post({bot:'tarot', day:day(2), usd:'0.9'});       // بعد از ساختِ کش عوض شد
+  page = economicsPage(new URL(`http://x/economics?bot=tarot&cpaDay=${day(2)}`));
+  ok(!page.includes(COST_INPUTS_SLOT) && (page.match(/id="cpa-day-form"/g) || []).length === 1,
+    'با کش، کارت دقیقاً یک بار و جای نشانگر می‌نشیند');
+  ok(/name="usd"[^>]*value="0\.9"/.test(page), 'کارتِ ورودی زنده است: عددِ تازه‌ثبت‌شده بلافاصله دیده می‌شود، نه عددِ کش');
+}
 
 console.log(errs.length?`\n❌ ${pass} پاس، ${errs.length} خطا`:`\n✅ ${pass} پاس، 0 خطا`);
 if (errs.length) process.exit(1);

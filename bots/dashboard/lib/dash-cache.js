@@ -45,7 +45,9 @@ export function canonicalAnalyticsUrl(rawUrl) {
     // پیامِ یک‌بارمصرف و علامتِ refresh نباید cache را تکثیر کنند. بقیه‌ی فیلترها
     // همان‌طور که route اعتبارسنجی می‌کند حفظ می‌شوند تا داده‌ی دو فیلتر قاطی نشود.
     for (const [key, value] of [...q.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      if (!['bot', 'msg', 'refresh'].includes(key)) out.append(key, value);
+      // `cpaDay` فقط روزِ فرمِ ورودیِ زنده‌ی اقتصاد است؛ در کلید بود و هر انتخابِ تاریخ
+      // یک کشِ خالیِ تازه می‌ساخت ⟵ «در حال آماده‌سازی آمار» برای یک فیلدِ فرم.
+      if (!['bot', 'msg', 'refresh', 'cpaDay'].includes(key)) out.append(key, value);
     }
   }
   return `${path}?${out.toString()}`;
