@@ -36,6 +36,8 @@ const ALL = { bots: NODE_BOTS, tabir: true };
 // مسیرهایی که **هیچ** جابی را لازم ندارند: مستندات و دیتای غیر-رباتی.
 const IGNORED = [
   /^marketing\//, /^benchmark\//, /^analytics\//, /^support\//,
+  // سرویسِ مستقلِ دروازه‌ی جمنای؛ هیچ رباتی آن را import نمی‌کند و CIِ خودش را جدا می‌گیرد.
+  /^gemini-gateway\//,
   /^\.github\/ISSUE_TEMPLATE\//, /^\.claude\//, /\.md$/,
 ];
 
