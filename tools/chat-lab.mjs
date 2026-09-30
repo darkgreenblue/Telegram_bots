@@ -47,7 +47,7 @@ const {
 const {
   buildChatCtx, packHistory, toMessages, messagesChars,
   cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
-  crisisIn, smallTalkIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
+  crisisIn, smallTalkIn, newReadingAskIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   floorApplies, CHAT_FLOOR_CHARS,
 } = await import('../bots/tarot/chat-core.js');
@@ -132,6 +132,16 @@ const rep = (s, from, to) => {
 };
 
 const PROMPT_VARIANTS = {
+  /* 🔮 `newread` (v3.139.0، دورِ مختصرِ قبل از انتشار): پیش‌گوییِ موضوعی **بیرونِ این فال**
+   * (ازدواج در فالِ کار) ⟵ پرچمِ فالِ تازه، نه جوابِ «آدمِ باتجربه» و نه جواب از همین
+   * کارت‌ها. باگِ واقعیِ دورِ ۲ کیفیت. برنده که شد به locale می‌رود و این ردیف پاک می‌شود. */
+  newread: (s) => {
+    let t = rep(s, '- **بیرونِ فال، یا مطمئن نیستی** ⟵', '- **بیرونِ فال (نه پیش‌گویی)، یا مطمئن نیستی** ⟵');
+    t = rep(t, '**هیچ اشاره‌ای به فال، کارت یا چیدمان نکن**، حتی یک کلمه.', '**هیچ اشاره‌ای به فال، کارت یا چیدمان نکن**.');
+    return rep(t,
+      'خواست فالِ تازه بگیرد: سؤالش را این‌جا **نخواه** و خودت هم فالی نگیر. فالِ تازه کارتِ تازه می‌خواهد و تنها راهش دکمه‌ای است که زیرِ همین جواب می‌آید. همین را بگو و پرچمِ wants_new_reading را روشن کن.',
+      'فالِ تازه خواست، یا پیش‌گوییِ موضوعی بیرونِ این فال (ازدواج در فالِ کار): سؤالش را **نخواه** و از این کارت‌ها جواب نساز؛ بگو فالِ تازه لازم است و دکمه‌اش زیرِ همین جواب است. wants_new_reading را روشن کن.');
+  },
   /* 🪞 `mirror`/`mirror2` (۱۴۰۵/۰۷/۰۶) برد و `mirror2` از همین نسخه پرامپتِ محصول است،
    * پس هر دو **پاک شدند نه خاموش** (لنگرشان دیگر در locale نیست). نتیجه‌ی دو دورِ جفت‌شده:
    * base→mirror ناهم‌خوانیِ دکمه با پیشنهاد ۴۱/۴۶ ⟵ ۳/۴۶ ولی برچسب بلندتر (میانه ۲۶ ⟵ ۲۹)؛
@@ -458,10 +468,13 @@ async function runConversation(persona, base, arm, rep) {
     // سؤالِ بیرونِ دامنه فقط وقتی معنی دارد که واقعاً همان سؤالِ اسکریپت‌شده رفته باشد؛
     // برچسبِ خودِ مدل هرگز بیرونِ دامنه نیست.
     const offDomain = !viaTap && typeof up === 'object' && !!up?.off;
+    // 🔮 انتظارِ پرچمِ فالِ تازه (`expectNew: true|false`)؛ فقط برای سؤالِ اسکریپت‌شده.
+    const expectNew = !viaTap && typeof up === 'object' && typeof up?.expectNew === 'boolean' ? up.expectNew : null;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
     if (crisisIn(q)) { crisisSeen = true; turns.push({ q, skipped: 'crisis' }); continue; }
     if (smallTalkIn(q)) { turns.push({ q, skipped: 'smalltalk' }); continue; }
+    if (newReadingAskIn(q)) { turns.push({ q, skipped: 'newask' }); continue; }
 
     const packed = packHistory(history);
     const messages = toMessages(system, packed, q, L);
@@ -505,12 +518,14 @@ async function runConversation(persona, base, arm, rep) {
     const crisisCtx = crisisSeen || !!crisisIn(q);
     const thinOf = (o) => !!(floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
     let thin = thinOf(outObj);
-    let needs = chatFixNeeds(outObj, { crisisCtx });
-    const pre = { thin, offer: needs.offer, safety: needs.safety, json: !!parseChatOut(res.out) };
+    // 🔤 همان تعریفِ ربات: واژه‌ی لاتینی که خودِ کاربر نوشته مجاز است.
+    const userText = [base.question, ...history.filter((h) => h.role === 'user').map((h) => h.text), q].join('\n');
+    let needs = chatFixNeeds(outObj, { crisisCtx, userText });
+    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, json: !!parseChatOut(res.out) };
     const fix = { fired: false, fixed: false, ms: 0 };
-    if (thin || needs.offer || needs.safety) {
+    if (thin || needs.offer || needs.safety || needs.latin) {
       fix.fired = true;
-      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, min: CHAT_FLOOR_CHARS });
+      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, min: CHAT_FLOOR_CHARS });
       const retryMsgs = messages.map((m, i) => (
         i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
       const f0 = Date.now();
@@ -523,7 +538,7 @@ async function runConversation(persona, base, arm, rep) {
       const o2 = res2?.out ? parseChatOut(res2.out) : null;
       if (o2) {
         const thin2 = thinOf(o2);
-        const needs2 = chatFixNeeds(o2, { crisisCtx });
+        const needs2 = chatFixNeeds(o2, { crisisCtx, userText });
         if (chatFixScore(needs2, thin2) < chatFixScore(needs, thin)) {
           outObj = o2; raw = res2.out; model = res2.model || model;
           thin = thin2; needs = needs2; fix.fixed = true;
@@ -547,7 +562,7 @@ async function runConversation(persona, base, arm, rep) {
         issues: [`خطای خودِ سنجه: ${e.message}`], notes: [] };
     }
 
-    turns.push({ q, viaTap, reply, raw, model, attempts: res.attempts, pre, fix,
+    turns.push({ q, viaTap, reply, raw, model, attempts: res.attempts, pre, fix, latinLeft: needs.latin || '', expectNew,
       stripped: fin.safetyStripped, offerMissing: fin.offerMissing, crisisCtx,
       flags: { newReading: outObj.newReading, support: outObj.support, end: outObj.end },
       followUp: outObj.followUpRaw || '', fuKept: outObj.followUp || '',
@@ -638,10 +653,31 @@ for (const arm of ARM_LIST) {
           // برچسبِ دکمه همیشه چاپ می‌شود، چون در حالتِ تپ **ورودیِ نوبتِ بعد** است و
           // بدونِ دیدنش نمی‌شود فهمید حلقه از کجا شروع شد.
           console.log(`      🏷 دکمه: ${t.followUp ? `«${t.followUp}»${c.fuBad ? ` ❌ ${c.fuBad} (گارد حذفش کرد)` : ''}` : '(ندارد)'}`);
+          // 🔤 نشتِ لاتین: قبل از تعمیر و بعدش، تا سهمِ خودِ مکانیزمِ تعمیر دیده شود.
+          if (t.pre?.latin || t.latinLeft) console.log(`      🔤 لاتین: «${t.pre?.latin || ''}» ⟵ ${t.latinLeft ? `هنوز «${t.latinLeft}»` : 'تعمیر شد'}`);
           if (c.issues.length) c.issues.forEach((x) => console.log(`      ❌ ${x}`));
           if (c.notes.length) c.notes.forEach((x) => console.log(`      ⚠️ ${x}`));
         }
       }
+    }
+  }
+}
+
+/* ═══════════════ 🔮 پرچمِ فالِ تازه در برابرِ انتظار (v3.139.0) ═══════════════
+ * هر دو جهت شمرده می‌شود: پرچم روی پیش‌گوییِ موضوعِ دیگر باید روشن شود، و روی سؤالِ
+ * همین فال یا سؤالِ عمومی **نباید** (هر پرچم یعنی الماس برمی‌گردد). */
+{
+  const rows = [];
+  for (const conv of all) for (const t of conv.turns) {
+    if (t.expectNew === null || t.expectNew === undefined || !t.reply) continue;
+    rows.push({ arm: conv.arm, want: t.expectNew, got: !!t.flags?.newReading });
+  }
+  if (rows.length) {
+    console.log(`\n${'═'.repeat(72)}\n🔮 پرچمِ فالِ تازه در برابرِ انتظار\n${'═'.repeat(72)}`);
+    for (const arm of [...new Set(rows.map((r) => r.arm))]) {
+      const a = rows.filter((r) => r.arm === arm);
+      const pos = a.filter((r) => r.want), neg = a.filter((r) => !r.want);
+      console.log(`   ${arm}: باید روشن شود ${pos.filter((r) => r.got).length}/${pos.length} | نباید روشن شود ${neg.filter((r) => !r.got).length}/${neg.length} درست`);
     }
   }
 }
