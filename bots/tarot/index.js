@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.137.0';
+const PRODUCT_VERSION = '3.138.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -12477,7 +12477,18 @@ bot.on('text', async (ctx) => {
     // زبان از `CHAT_LOCALES` بیرون بیاید) کاربرِ وسطِ گفتگو نباید در استیتی گیر بماند که
     // هیچ هندلری ندارد — آزادش می‌کنیم و مسیرِ عادی ادامه پیدا می‌کند (بند ۹ب/۱).
     if (state === 'chatting') {
-      if (!chatOn(uid)) { leaveChat(uid, 'flag_off'); return sendContinuePrompt(ctx, uid); }
+      /* 🌙 v3.138.0: قبل از پیشنهادها یک جمله‌ی صادقانه می‌آید. تا امروز سؤالی که کاربر
+       * وسطِ گفتگو تایپ کرده بود (بعد از خاموش شدنِ گفتگو برای او، مثلاً `stopped` شدنِ یک
+       * پله‌ی رولاوت) **بی‌هیچ توضیحی** نادیده می‌ماند و فقط پیشنهادهای بعد از فال می‌آمد.
+       * الماسی کم نمی‌شد (خروج قبل از کسر است)، ولی کاربر نمی‌فهمید چرا جواب نگرفت. همان
+       * متنِ `L.chat.off` که درِ ورود و دکمه‌ی سؤالِ پیشنهادی هم نشان می‌دهند. */
+      if (!chatOn(uid)) {
+        const offRid = getSession(uid)?.chatReadingId || 0; // قبل از leaveChat، که اشاره‌گر را پاک می‌کند
+        leaveChat(uid, 'flag_off');
+        track(db, uid, 'chat_unavailable', { reading_id: offRid, why: 'off', via: 'typed' });
+        await ctx.reply(L.chat.off).catch(() => {});
+        return sendContinuePrompt(ctx, uid);
+      }
       return await handleChatMessage(ctx, uid, text.trim());
     }
     if (state === 'pay_amount') {

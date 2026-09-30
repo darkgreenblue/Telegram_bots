@@ -448,8 +448,13 @@ console.log('\n▶ ۵) استیت');
   // شاخه‌ی رول‌بک: پرچمِ خاموش نباید کاربر را در استیتی بی‌هندلر گیر بیندازد.
   const txt = bodyOf(CODE, "bot.on('text', async (ctx) => {");
   const br = txt.slice(txt.indexOf("if (state === 'chatting')"), txt.indexOf("if (state === 'pay_amount')"));
-  ok(/if \(!chatOn\(uid\)\) \{ leaveChat\(uid, 'flag_off'\); return sendContinuePrompt/.test(br),
+  ok(/if \(!chatOn\(uid\)\) \{[\s\S]{0,200}leaveChat\(uid, 'flag_off'\);[\s\S]{0,300}return sendContinuePrompt/.test(br),
     '🔑 با پرچمِ خاموش، کاربرِ وسطِ گفتگو آزاد می‌شود (رول‌بک کسی را قفل نمی‌کند)');
+  // 🌙 v3.138.0: و سؤالش بی‌توضیح نادیده نمی‌ماند؛ پیامِ `off` **قبل از** پیشنهادها.
+  const offBr = br.slice(br.indexOf('!chatOn(uid)'), br.indexOf('handleChatMessage'));
+  ok(before(offBr, 'L.chat.off', 'sendContinuePrompt') && /'chat_unavailable'/.test(offBr)
+     && before(offBr, 'chatReadingId', "leaveChat(uid, 'flag_off')"),
+    '🌙 گفتگوی خاموش‌شده به کاربرِ وسطِ گفتگو می‌گوید چرا جواب نگرفت (و ثبت می‌شود)');
   ok(before(br, '!chatOn(uid)', 'handleChatMessage'),
     'و آن شاخه **قبل از** هندلر است (وگرنه رول‌بک بی‌اثر می‌ماند)');
 
