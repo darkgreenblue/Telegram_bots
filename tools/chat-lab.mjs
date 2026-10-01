@@ -47,7 +47,7 @@ const {
 const {
   buildChatCtx, packHistory, toMessages, messagesChars,
   cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
-  crisisIn, smallTalkIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
+  crisisIn, smallTalkIn, newReadingAskIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   floorApplies, CHAT_FLOOR_CHARS,
 } = await import('../bots/tarot/chat-core.js');
@@ -132,6 +132,26 @@ const rep = (s, from, to) => {
 };
 
 const PROMPT_VARIANTS = {
+  /* 🧪 دورِ ۱۴۰۵/۰۷/۰۹ (موارد ۱، ۲، ۳ از بازبینیِ ۲۶۴ گفتگوی واقعی، همه هم‌زمان چون هر سه در
+   * همان پرامپت می‌نشینند):
+   *   ۱) پیشنهادِ پایانی «بسته‌بندیِ دوباره» نباشد (نشونه/معیار/فرق/چک‌لیست/صمیمی‌تر)،
+   *   ۲) «کِی؟» یک بازه از خودِ فال بگیرد،
+   *   ۳) جواب کامل داده شود و بخشی‌اش برای پیشنهادِ پولیِ بعدی نگه داشته نشود.
+   * `A` فقط پرامپت است. `AH` همان پرامپت به‌علاوه‌ی یک خطِ **کد** است: برچسبِ دکمه‌های قبلیِ
+   * همین گفتگو به آخرین پیامِ کاربر می‌چسبد تا مدل بداند چه پیشنهادهایی قبلاً داده (پیشوندِ
+   * system دست نمی‌خورد، پس کش می‌ماند). */
+  A: (s) => labArmA(s),
+  AH: (s) => labArmA(s),
+  /* `A2` = نسخه‌ی قابلِ انتشارِ `A` (دورِ ۲): بخشِ پیشنهادِ **محصول** بیت‌به‌بیت می‌ماند (قواعدش
+   * شواهدِ دورهای قبل را دارند، از جمله «فکتِ محصولی استثنا نیست») و فقط دو خطِ تازه به آن
+   * اضافه می‌شود. مثالِ «بعد از پیام، قدمِ بعد: اگه جواب نداد…» عمداً نیامد: در دورِ ۱ همان
+   * یک مثال الگوی تکراریِ «قدمِ بعدی رو برای وقتی که…» را در ۶ از ۴۸ جوابِ یک پاس ساخت. */
+  A2: (s) => labArmA2(s),
+  /* 📭 `newread`/`newread2` (v3.141.0) پاک شدند نه خاموش: `newread2` برد و خودش پرامپتِ محصول
+   * است. دورِ مختصرِ جفت‌شده روی `--set fix` (پرچمِ فالِ تازه، «باید روشن شود | نباید»):
+   * خطِ پایه ۲/۶ | ۸/۸، `newread` (مثالِ «ازدواج در فالِ کار») ۱۳/۱۵ | ۱۸/۲۰، `newread2`
+   * (مثالِ «کار در فالِ عشق») ۷/۹ | ۱۲/۱۲. مثالِ «ازدواج» خودش سوگیری می‌ساخت: «ازدواج
+   * می‌کنیم؟» در فالِ **عشق** (همان موضوع) پرچم گرفت. */
   /* 🪞 `mirror`/`mirror2` (۱۴۰۵/۰۷/۰۶) برد و `mirror2` از همین نسخه پرامپتِ محصول است،
    * پس هر دو **پاک شدند نه خاموش** (لنگرشان دیگر در locale نیست). نتیجه‌ی دو دورِ جفت‌شده:
    * base→mirror ناهم‌خوانیِ دکمه با پیشنهاد ۴۱/۴۶ ⟵ ۳/۴۶ ولی برچسب بلندتر (میانه ۲۶ ⟵ ۲۹)؛
@@ -181,6 +201,44 @@ const PROMPT_VARIANTS = {
    * خودِ مکانیزم (`rep`، `systemFor`، نحوِ `model@variant`) سرِ جایش است و واریانتِ
    * بعدی فقط یک ردیف این‌جاست. */
 };
+function labArmA(s) {
+  const OFFER_OLD = '═══ خطِ آخر: پیشنهاد ═══', NEXT = '═══ فالِ تازه ═══';
+  const BRIEF_OLD = '- خطِ اول باید خودِ جواب باشد، نه مقدمه و نه بازگوییِ سؤال.\n';
+  const DASH_OLD = '- بدونِ خط تیره‌ی بلند. کلمه‌ی «خوانش»';
+  const i = s.indexOf(OFFER_OLD), j = s.indexOf(NEXT);
+  if (i < 0 || j < 0) { console.error('❌ لنگرِ بخشِ پیشنهاد در پرامپت نیست'); process.exit(1); }
+  let t = s.slice(0, i) + `═══ خطِ آخر: پیشنهاد ═══
+هر جواب، از همان جوابِ اول، با یک **پیشنهاد** در offer تمام می‌شود، از زبانِ **تو**: کاری که برایش می‌کنی و اجازه‌اش را می‌گیری.
+- فقط دو شکل، یک جمله: «می‌خوای …؟» یا «اگه بخوای می‌تونم … برات …».
+- ممنوع: خبرِ کارِ خودت، سؤالِ خالی، زبانِ او، «بیشتر بگم؟»، «در خدمتم».
+- پیشنهاد **چیزِ تازه و مخصوصِ همین آدم** بیاورد، نه چیزی که زیرِ جوابِ هر کسی بنشیند: قدمِ عملیِ بعدی، یک پیامِ آماده، آمادگی برای واکنشِ طرف، یا زاویه‌ی بازنشده‌ی کارت‌ها؛ هر نوبت نوعی دیگر.
+- بسته‌بندیِ دوباره‌ی حرفِ گفته‌شده ممنوع: نشونه، معیار، فرق، فهرست، چک‌لیست، «دقیق‌ترش»، یا نسخه‌ی صمیمی‌تر و کوتاه‌ترِ پیامی که نوشتی. بعد از پیام، قدمِ بعد: اگه جواب نداد یا سرد بود.
+- تنها استثنا wants_end است (offer خالی). خودت جمع‌بندی و خداحافظی نکن؛ «ممنون» پایان نیست.
+
+` + s.slice(j);
+  t = rep(t, BRIEF_OLD, `- خطِ اول خودِ جواب است، نه مقدمه یا بازگوییِ سؤال؛ جوابِ همین سؤال را کامل بده و چیزی را برای پیشنهاد نگه ندار.
+- «کِی؟»: بازه‌ای از خودِ فال بده (روز، هفته، ماه)؛ نه تاریخِ دقیق، نه «معلوم نیست».
+`);
+  return rep(t, DASH_OLD, '- کلمه‌ی «خوانش»');
+}
+function labArmA2(s) {
+  const EXACT_OLD = '- **دقیق** و وصل به همین گفتگو یا فال، و هر نوبت از نوعی دیگر؛ پیشنهادی که زیرِ جوابِ هر کسِ دیگری هم بنشیند غلط است. اسمِ این کار را نبر.\n';
+  const BRIEF_OLD = '- خطِ اول باید خودِ جواب باشد، نه مقدمه و نه بازگوییِ سؤال.\n';
+  const DASH_OLD = '- بدونِ خط تیره‌ی بلند. کلمه‌ی «خوانش»';
+  let t = rep(s, EXACT_OLD, `- **چیزِ تازه** بیاورد، وصل به همین گفتگو یا فال: قدمِ عملیِ بعدی، یک پیامِ آماده، آمادگی برای واکنشِ طرف، یا زاویه‌ی بازنشده‌ی کارت‌ها؛ هر نوبت نوعی دیگر. پیشنهادی که زیرِ جوابِ هر کسِ دیگری هم بنشیند غلط است. اسمِ این کار را نبر.
+- بسته‌بندیِ دوباره‌ی حرفِ گفته‌شده ممنوع: نشونه، معیار، فرق، فهرست، چک‌لیست، «دقیق‌ترش»، یا نسخه‌ی صمیمی‌تر و کوتاه‌ترِ پیامی که نوشتی.
+`);
+  t = rep(t, BRIEF_OLD, `- خطِ اول خودِ جواب است، نه مقدمه یا بازگوییِ سؤال؛ جوابِ همین سؤال را کامل بده و چیزی را برای پیشنهاد نگه ندار.
+- «کِی؟»: بازه‌ای از خودِ فال بده (روز، هفته، ماه)؛ نه تاریخِ دقیق، نه «معلوم نیست».
+`);
+  return rep(t, DASH_OLD, '- کلمه‌ی «خوانش»');
+}
+/* خطِ «دکمه‌های قبلی» برای بازوی `…H`. فقط برچسب‌ها، نه متنِ جواب‌ها (آن‌ها در تاریخچه هست). */
+const offerHistoryHint = (history) => {
+  const labs = history.filter((h) => h.role === 'assistant' && h.follow_up).map((h) => `«${h.follow_up}»`).slice(-3);
+  return labs.length ? `\n\n(پیشنهادهای قبلیِ همین گفتگو: ${labs.join('، ')}. پیشنهادِ این نوبت از نوعِ دیگری باشد و حرفِ گفته‌شده را دوباره بسته‌بندی نکند.)` : '';
+};
+const INVALID_RAW = [];
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
 {
@@ -458,13 +516,20 @@ async function runConversation(persona, base, arm, rep) {
     // سؤالِ بیرونِ دامنه فقط وقتی معنی دارد که واقعاً همان سؤالِ اسکریپت‌شده رفته باشد؛
     // برچسبِ خودِ مدل هرگز بیرونِ دامنه نیست.
     const offDomain = !viaTap && typeof up === 'object' && !!up?.off;
+    // 🔮 انتظارِ پرچمِ فالِ تازه (`expectNew: true|false`)؛ فقط برای سؤالِ اسکریپت‌شده.
+    const expectNew = !viaTap && typeof up === 'object' && typeof up?.expectNew === 'boolean' ? up.expectNew : null;
     // گاردهای رایگانِ خودِ ربات، با همان توابع. سؤالی که در محصول به مدل نمی‌رسد،
     // این‌جا هم نباید برسد — وگرنه آزمایشگاه چیزی را می‌سنجد که رخ نمی‌دهد.
     if (crisisIn(q)) { crisisSeen = true; turns.push({ q, skipped: 'crisis' }); continue; }
     if (smallTalkIn(q)) { turns.push({ q, skipped: 'smalltalk' }); continue; }
+    if (newReadingAskIn(q)) { turns.push({ q, skipped: 'newask' }); continue; }
 
     const packed = packHistory(history);
     const messages = toMessages(system, packed, q, L);
+    if (armVariant(arm).endsWith('H')) {
+      const hint = offerHistoryHint(history);
+      if (hint) messages[messages.length - 1] = { ...messages[messages.length - 1], content: messages[messages.length - 1].content + hint };
+    }
     if (messages[0].content !== system) prefixStable = false;
 
     const usage = { in: 0, out: 0, usd: 0, cached: 0 };
@@ -484,7 +549,7 @@ async function runConversation(persona, base, arm, rep) {
     };
     const res = await call('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatOutOk,
+      validate: (out) => { const ok = chatOutOk(out); if (!ok) INVALID_RAW.push({ arm, persona: persona.id, turn: t + 1, raw: String(out || '').slice(0, 500) }); return ok; },
       /* 💵 هزینه‌ی **واقعی** از خودِ پاسخِ OpenRouter. هرگز از روی توکن با یک جدولِ
        * قیمتِ هاردکد حساب نمی‌شود: همان اشتباه یک بار DeepSeek را «گران‌ترین» گزارش
        * کرد در حالی که ارزان‌ترین بود (بند ثبت‌شده‌ی دورِ ۹). */
@@ -505,12 +570,14 @@ async function runConversation(persona, base, arm, rep) {
     const crisisCtx = crisisSeen || !!crisisIn(q);
     const thinOf = (o) => !!(floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
     let thin = thinOf(outObj);
-    let needs = chatFixNeeds(outObj, { crisisCtx });
-    const pre = { thin, offer: needs.offer, safety: needs.safety, json: !!parseChatOut(res.out) };
+    // 🔤 همان تعریفِ ربات: واژه‌ی لاتینی که خودِ کاربر نوشته مجاز است.
+    const userText = [base.question, ...history.filter((h) => h.role === 'user').map((h) => h.text), q].join('\n');
+    let needs = chatFixNeeds(outObj, { crisisCtx, userText });
+    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, json: (() => { const o = parseChatOut(res.out); return !!o && !o.salvaged; })() };
     const fix = { fired: false, fixed: false, ms: 0 };
-    if (thin || needs.offer || needs.safety) {
+    if (thin || needs.offer || needs.safety || needs.latin) {
       fix.fired = true;
-      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, min: CHAT_FLOOR_CHARS });
+      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, min: CHAT_FLOOR_CHARS });
       const retryMsgs = messages.map((m, i) => (
         i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
       const f0 = Date.now();
@@ -523,7 +590,7 @@ async function runConversation(persona, base, arm, rep) {
       const o2 = res2?.out ? parseChatOut(res2.out) : null;
       if (o2) {
         const thin2 = thinOf(o2);
-        const needs2 = chatFixNeeds(o2, { crisisCtx });
+        const needs2 = chatFixNeeds(o2, { crisisCtx, userText });
         if (chatFixScore(needs2, thin2) < chatFixScore(needs, thin)) {
           outObj = o2; raw = res2.out; model = res2.model || model;
           thin = thin2; needs = needs2; fix.fixed = true;
@@ -547,7 +614,7 @@ async function runConversation(persona, base, arm, rep) {
         issues: [`خطای خودِ سنجه: ${e.message}`], notes: [] };
     }
 
-    turns.push({ q, viaTap, reply, raw, model, attempts: res.attempts, pre, fix,
+    turns.push({ q, viaTap, reply, raw, model, attempts: res.attempts, pre, fix, latinLeft: needs.latin || '', expectNew,
       stripped: fin.safetyStripped, offerMissing: fin.offerMissing, crisisCtx,
       flags: { newReading: outObj.newReading, support: outObj.support, end: outObj.end },
       followUp: outObj.followUpRaw || '', fuKept: outObj.followUp || '',
@@ -638,10 +705,66 @@ for (const arm of ARM_LIST) {
           // برچسبِ دکمه همیشه چاپ می‌شود، چون در حالتِ تپ **ورودیِ نوبتِ بعد** است و
           // بدونِ دیدنش نمی‌شود فهمید حلقه از کجا شروع شد.
           console.log(`      🏷 دکمه: ${t.followUp ? `«${t.followUp}»${c.fuBad ? ` ❌ ${c.fuBad} (گارد حذفش کرد)` : ''}` : '(ندارد)'}`);
+          // 🔤 نشتِ لاتین: قبل از تعمیر و بعدش، تا سهمِ خودِ مکانیزمِ تعمیر دیده شود.
+          if (t.pre?.latin || t.latinLeft) console.log(`      🔤 لاتین: «${t.pre?.latin || ''}» ⟵ ${t.latinLeft ? `هنوز «${t.latinLeft}»` : 'تعمیر شد'}`);
           if (c.issues.length) c.issues.forEach((x) => console.log(`      ❌ ${x}`));
           if (c.notes.length) c.notes.forEach((x) => console.log(`      ⚠️ ${x}`));
         }
       }
+    }
+  }
+}
+
+/* ═══════════════ 🧪 دورِ پیشنهاد/زمان/فالبک (۱۴۰۵/۰۷/۰۹) ═══════════════
+ * سنجه‌های **خودکارِ کمکی**؛ داورِ اصلی خودِ سشن است که متن‌ها را می‌خواند. هر سنجه این‌جا
+ * فقط برای این است که داوری روی چیزی شمرده‌شده بنشیند، نه حدس. */
+{
+  const REPACK = /(نشونه|نشانه|معیار|فرق|تفاوت|تفکیک|جدا کن|فهرست|چک‌?لیست|جدول|دقیق‌تر|صمیمی‌تر|کوتاه‌تر|گرم‌تر|خودمونی‌تر|بازنویسی|دو نسخه|دو لحن)/;
+  const WINDOW = /(روز|هفته|ماه|سال|فصل|تا آخر|تا عید|بهار|تابستان|پاییز|زمستان)/;
+  const TIMING_Q = /(کی\b|کی[؟?]|کِی|تا کی|چند وعده|دقیقاً کی|امسال|چه زمانی)/;
+  const arms = [...new Set(all.map((c) => c.arm))];
+  console.log(`\n${'═'.repeat(72)}\n🧪 پیشنهاد/زمان/فالبک per بازو\n${'═'.repeat(72)}`);
+  for (const arm of arms) {
+    const convs = all.filter((c) => c.arm === arm);
+    let ans = 0, rep = 0, chain = 0, tq = 0, tw = 0, fb = 0, retried = 0, fuNone = 0;
+    for (const c of convs) {
+      let prevRep = false;
+      for (const t of c.turns) {
+        if (!t.reply) continue;
+        ans++;
+        const label = `${t.followUp || ''} ${t.offer || ''}`;
+        const isRep = REPACK.test(t.followUp || '') || REPACK.test(String(t.reply).split('\n').pop());
+        if (isRep) rep++;
+        if (isRep && prevRep) chain++;
+        prevRep = isRep;
+        if (!t.followUp) fuNone++;
+        if (!t.viaTap && TIMING_Q.test(t.q)) { tq++; if (WINDOW.test(t.reply)) tw++; }
+        if (t.model && t.model !== armModel(arm)) fb++;
+        if ((t.attempts || 1) > 1) retried++;
+      }
+    }
+    console.log(`   ${arm}: جواب=${ans} | پیشنهادِ بسته‌بندیِ دوباره=${rep} (${(rep / Math.max(1, ans) * 100).toFixed(0)}٪) | زنجیره=${chain} | بی‌دکمه=${fuNone}`
+      + ` | «کِی؟» با بازه=${tw}/${tq} | فالبک=${fb} | تلاشِ دوباره=${retried}`);
+  }
+  console.log(`\n🧾 خروجی‌های ردشده توسطِ validate (مورد ۵، خام، ${INVALID_RAW.length} مورد):`);
+  for (const x of INVALID_RAW.slice(0, 20)) console.log(`   [${x.arm} ${x.persona} نوبتِ ${x.turn}] ${x.raw.replace(/\n/g, ' ⏎ ')}`);
+}
+
+/* ═══════════════ 🔮 پرچمِ فالِ تازه در برابرِ انتظار (v3.141.0) ═══════════════
+ * هر دو جهت شمرده می‌شود: پرچم روی پیش‌گوییِ موضوعِ دیگر باید روشن شود، و روی سؤالِ
+ * همین فال یا سؤالِ عمومی **نباید** (هر پرچم یعنی الماس برمی‌گردد). */
+{
+  const rows = [];
+  for (const conv of all) for (const t of conv.turns) {
+    if (t.expectNew === null || t.expectNew === undefined || !t.reply) continue;
+    rows.push({ arm: conv.arm, want: t.expectNew, got: !!t.flags?.newReading });
+  }
+  if (rows.length) {
+    console.log(`\n${'═'.repeat(72)}\n🔮 پرچمِ فالِ تازه در برابرِ انتظار\n${'═'.repeat(72)}`);
+    for (const arm of [...new Set(rows.map((r) => r.arm))]) {
+      const a = rows.filter((r) => r.arm === arm);
+      const pos = a.filter((r) => r.want), neg = a.filter((r) => !r.want);
+      console.log(`   ${arm}: باید روشن شود ${pos.filter((r) => r.got).length}/${pos.length} | نباید روشن شود ${neg.filter((r) => !r.got).length}/${neg.length} درست`);
     }
   }
 }

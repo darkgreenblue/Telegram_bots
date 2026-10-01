@@ -916,6 +916,7 @@ export default {
     mediaReceipt: '📎 En la conversación por ahora solo leo texto.\n\nSi es un comprobante de pago, primero termina la conversación y luego envíalo otra vez.',
     // Cortesía o saludo: gratis, con una invitación suave a la pregunta de verdad.
     smallTalk: 'Con gusto 🌿\n\nPregúntame lo que quieras de tu lectura.',
+    newReadingAsk: 'Una lectura nueva empieza con cartas nuevas; toca el botón de abajo 👇\n\nSi tu pregunta es sobre esta lectura, escríbela completa.',
     // Dos toques al mismo tiempo.
     busy: 'Un segundo, todavía estoy escribiendo la respuesta anterior 🕯️',
     // Tope de escape (contra el bucle, no un throttle). El freno principal es el precio.

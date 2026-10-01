@@ -366,9 +366,21 @@ const FA_FU_ASSENT = [
   'موافقم', 'بریم', 'بریم سراغش', 'ادامه بده', 'ادامه بدیم', 'همینو',
 ];
 
+/* 🔮 «فالِ تازه» به‌صورتِ **کلِ پیام** (v3.140.0). باگِ واقعیِ دورِ ۲ کیفیت: کاربر وسطِ
+ * گفتگو فقط نوشت «فال»؛ یک الماس کم شد و مدل جوابِ قبلی را تکرار کرد. همان منطقِ تنگِ
+ * `smallTalkIn`: کلِ پیام باید خودش یکی از این‌ها باشد، پس «فال رو دوباره توضیح بده» یک
+ * سؤالِ واقعی است و مثل قبل کسر می‌شود. */
+const FA_NEW_ASK = [
+  'فال', 'فال جدید', 'فال تازه', 'فال دیگه', 'یه فال', 'یه فال دیگه', 'یک فال دیگه',
+  'یه فال جدید', 'یه فال تازه', 'فال بگیر', 'فال بگیرم', 'فال بده', 'فال میخوام',
+  'فال می‌خوام', 'فال جدید میخوام', 'فال جدید می‌خوام', 'میخوام فال بگیرم',
+  'می‌خوام فال بگیرم', 'فال جدید بگیرم', 'یه فال دیگه بگیرم', 'فال دوباره',
+];
+
 const FA_LANG = {
   crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
   followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, offer: FA_OFFER,
+  newReadingAsk: FA_NEW_ASK, latinFix: true,
 };
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
  * چندزبانه اجازه ندارد الگوهای یک زبان را روی پیامِ زبانِ دیگر اجرا کند. */
@@ -388,6 +400,10 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
     // الگوی پیشنهاد per زبان. زبانِ بی‌الگو `null` می‌گیرد، نه الگوی فارسی: الگوی فارسی
     // روی متنِ زبانِ دیگر همیشه «پیشنهاد نیست» می‌گوید و هر نوبت یک retryِ بی‌دلیل می‌ساخت.
     offer: (d.offer && d.offer.ask && d.offer.mine && d.offer.can) ? d.offer : (lang === 'fa' ? base.offer : null),
+    // 🔮 دو کلیدِ v3.140.0، هر دو فقط-فارسی مگر langdata خودش بدهد: فهرستِ فارسی روی پیامِ
+    // زبانِ دیگر هیچ‌وقت تطبیق نمی‌خورد، و «لاتین = نشت» برای زبانِ لاتین‌خط غلط است.
+    newReadingAsk: arr(d.newReadingAsk, lang === 'fa' ? base.newReadingAsk : []),
+    latinFix: typeof d.latinFix === 'boolean' ? d.latinFix : lang === 'fa',
   });
 }
 export const chatLang = () => ({ ...LANG_T.get() });
@@ -471,6 +487,27 @@ export function smallTalkIn(text) {
   const t = norm(text);
   if (!t || t.length > CHAT_SMALLTALK_MAX) return false;
   return LANG.smallTalk.some(p => norm(p) === t);
+}
+
+/** «فالِ تازه می‌خواهم» به‌صورتِ کلِ پیام؟ همان تنگیِ `smallTalkIn`، به همان دلیل. */
+export const CHAT_NEW_ASK_MAX = 25;
+export function newReadingAskIn(text) {
+  const t = norm(text);
+  if (!t || t.length > CHAT_NEW_ASK_MAX) return false;
+  return (LANG.newReadingAsk || []).some((p) => norm(p) === t);
+}
+
+/* 🔤 واژه‌ی لاتینِ نشتی در جوابِ فارسی (v3.140.0). باگِ واقعیِ دورِ ۲: «منو hurt کرد»
+ * وسطِ پیامِ پیش‌نویسی که کاربر قرار بود برای کسی بفرستد (۱ از ۱۹۷ جواب). واژه‌ای که
+ * **خودِ کاربر** نوشته مجاز است (اسمِ اپ، برند، اسمِ لاتینِ آدم‌ها). خروجی: اولین واژه‌ی
+ * غیرمجاز، یا `''`. فقط زبانی که `latinFix` دارد سنجیده می‌شود. */
+export function latinIn(text, allowFrom = '') {
+  if (!LANG.latinFix) return '';
+  const allow = String(allowFrom || '').toLowerCase();
+  for (const m of String(text || '').matchAll(/[A-Za-z]{2,}/g)) {
+    if (!allow.includes(m[0].toLowerCase())) return m[0];
+  }
+  return '';
 }
 
 /* ═══ سنجه‌ی قلاب ═══
@@ -695,10 +732,54 @@ export function chatBtnLabel(s) {
   return `${keep.trimEnd()}…`;
 }
 
+/* 🧾 **جوابِ متنِ خام پذیرفته می‌شود** (v3.141.0، موردِ ۵ِ بازبینیِ مالک).
+ *
+ * ریشه‌یابی روی لاگِ خطای سرور (۶۰۰۰ خط، ۱۴۰۵/۰۷/۰۹): مدلِ اصلی خطا نمی‌دهد (۴ تایم‌اوت در
+ * کلِ بازه) و جوابش هم بریده نمی‌شود (از ۶۸۵ فراخوانیِ گفتگو فقط ۱ به سقفِ توکن رسید).
+ * چیزی که ردش می‌کرد خودِ ما بودیم: مدل گاهی جوابِ **سالم** را بدونِ پاکتِ JSON می‌دهد
+ * («Unexpected token 'ا'…»)، `validate` ردش می‌کرد، تلاشِ دوم می‌رفت و گاهی کار به مدلِ
+ * پشتیبان (لحنِ دیگر) می‌کشید. یعنی یک جوابِ خوب دور ریخته می‌شد تا یک جوابِ دیگر خریده شود.
+ *
+ * حالا متنی که **هیچ آکولادی ندارد** (پس قطعاً تلاشِ ناقص برای JSON نیست) خودِ جواب حساب
+ * می‌شود. پرچم‌ها در این نوبت `false` می‌مانند (دکمه‌ی CTAِ فالِ تازه/پشتیبانی نمی‌آید) و
+ * نبودِ پیشنهاد را همان تعمیرِ هدف‌دارِ موجود روی **همان مدل** می‌گیرد، پس صدا عوض نمی‌شود.
+ * کف و سقفِ طول دقیقاً مثلِ قبل اعمال می‌شود.
+ *
+ * ⚠️ برگشتِ سهویِ پرامپت به «متنِ خام» دیگر از این‌جا قرمز نمی‌شود، ولی ادعای جدای
+ * `check-chat` («فقط یک JSON» در پرامپت) هنوز آن را قفل کرده، و `salvaged` در لاگ
+ * (`🧾 CHAT_PLAIN`) و آزمایشگاه («غیرِ JSON») شمرده می‌شود تا نرخش نامرئی نشود.
+ * رول‌بکِ یک‌خطی: `CHAT_PLAIN_SALVAGE = false`. */
+export const CHAT_PLAIN_SALVAGE = true;
+
+const stripFence = (s) => s.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
+
+/** شکلِ خروجیِ ردشده، برای لاگ؛ **هرگز** محتوا برنمی‌گرداند، فقط یک کد. */
+export function chatRejectReason(raw) {
+  const t = stripFence(String(raw || '').trim());
+  if (!t) return 'empty';
+  if (!/[{}]/.test(t)) return 'plain';
+  const i = t.indexOf('{'), j = t.lastIndexOf('}');
+  let o = null;
+  try { o = JSON.parse(i >= 0 && j > i ? t.slice(i, j + 1) : t); } catch { return 'bad_json'; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'not_object';
+  if (!(CHAT_OUT_KEYS.text in o)) return 'no_answer_key';
+  const n = String(o[CHAT_OUT_KEYS.text] ?? '').trim().length;
+  if (n < CHAT_MIN_CHARS) return 'short';
+  if (n > CHAT_HARD_CHARS) return 'long';
+  return 'ok';
+}
+
 /** پاکت را باز می‌کند. `null` یعنی غیرقابلِ استفاده ⟵ `validate` رد می‌کند ⟵ retry. */
 export function parseChatOut(raw) {
   let o = null;
-  try { o = parseJsonLoose(String(raw || '')); } catch { o = null; }
+  let salvaged = false;
+  const plain = stripFence(String(raw || '').trim());
+  if (CHAT_PLAIN_SALVAGE && plain && !/[{}]/.test(plain)) {
+    o = { [CHAT_OUT_KEYS.text]: plain };
+    salvaged = true;
+  } else {
+    try { o = parseJsonLoose(String(raw || '')); } catch { o = null; }
+  }
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
   const text = String(o[CHAT_OUT_KEYS.text] ?? '').trim();
   if (text.length < CHAT_MIN_CHARS || text.length > CHAT_HARD_CHARS) return null;
@@ -719,6 +800,7 @@ export function parseChatOut(raw) {
     followUpRaw: fuRaw,
     fuBad,
     end: truthy(o[CHAT_OUT_KEYS.end]),
+    salvaged,
   };
 }
 
@@ -809,16 +891,20 @@ export function chatSystemPrompt(sysText, ctxBlock, L = null) {
  *   • `safety` — حرفِ آسیب/اورژانس بدونِ هیچ نشانه‌ی صریحِ خطر از خودِ کاربر
  * صداکننده `crisisCtx` را از پیام‌های **خودِ کاربر** می‌سازد (`crisisIn`)؛ اگر کاربر
  * صریحاً از خودکشی یا آسیب گفته، حرفِ ایمنی مجاز است و دست نمی‌خورد. */
-export function chatFixNeeds(out, { crisisCtx = false } = {}) {
-  if (!out) return { offer: false, safety: false };
+/* 🔤 و از v3.140.0 کمبودِ چهارم: `latin` (واژه‌ی لاتینِ نشتی، `latinIn`). همان یک تلاش،
+ * نه تلاشِ تازه. `userText` = حرف‌های خودِ کاربر، تا واژه‌ی لاتینی که خودش نوشته مجاز بماند. */
+export function chatFixNeeds(out, { crisisCtx = false, userText = '' } = {}) {
+  if (!out) return { offer: false, safety: false, latin: '' };
   const offer = !out.end && !offerLineOk(out.offer) && !offerLineOk(lastLineOf(out.text));
   const safety = !crisisCtx && !!safetyTalkIn(`${out.text || ''}\n${out.offer || ''}`);
-  return { offer, safety };
+  const latin = latinIn(`${out.text || ''}\n${out.offer || ''}`, userText);
+  return { offer, safety, latin };
 }
 /** وزنِ کمبودها — تعمیر فقط وقتی پذیرفته می‌شود که **اکیداً** کمتر باشد.
  * `thin` وزنِ ۲ دارد چون پیامدش پولی است (ریفاندِ الماس)؛ پس جوابِ پُرِ بی‌پیشنهاد از
  * جوابِ توخالیِ پیشنهاددار بهتر شمرده می‌شود، همان رفتارِ v3.100.0. */
-export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.safety ? 1 : 0) + (thin ? 2 : 0);
+export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.safety ? 1 : 0)
+  + (needs?.latin ? 1 : 0) + (thin ? 2 : 0);
 
 /* ═══ 🧾 متنِ نهاییِ جواب (تک‌منبعِ ربات و آزمایشگاه) ═══
  *

@@ -78,9 +78,9 @@ import {
 // `tools/chat-lab.mjs` صدا می‌زند، پس سنجه‌ی آزمایشگاه دقیقاً همان متنی را می‌بیند
 // که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
 import {
-  buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, hookOk,
+  buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, newReadingAskIn, hookOk,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
-  cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
+  cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
   CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
 } from './chat-core.js';
 
@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.140.0';
+const PRODUCT_VERSION = '3.141.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -606,6 +606,18 @@ const CHAT_BALANCE_BOX = true;
  * درست، و از یک معنیِ دومِ ستون بهتر است. */
 const CHAT_FLOOR       = true;
 const CHAT_MAX_TOKENS  = 500;
+/* 🔮🔤 سه فیکسِ دورِ ۲ کیفیتِ گفتگو (v3.140.0، تأییدِ مالک ۱۴۰۵/۰۷/۰۸). هرکدام رول‌بکِ
+ * یک‌خطیِ خودش را دارد:
+ *   • `CHAT_NEW_ASK`: پیامِ تنهای «فال» (کلِ پیام، `newReadingAskIn`) قبل از کسر جواب
+ *     می‌گیرد: دکمه‌ی فالِ تازه، رایگان. قبلاً یک الماس کم می‌شد و جوابِ قبلی تکرار.
+ *   • `CHAT_NEWREAD_REFUND`: جوابی که پرچمِ فالِ تازه دارد فقط راهنماست («برای این فالِ
+ *     تازه لازمه»)، پس الماسش بی‌صدا برمی‌گردد، مثل کفِ محتوا بالا. قبلاً پیش‌گوییِ
+ *     موضوعِ دیگر (ازدواج در فالِ کار) یک الماس می‌گرفت و فقط «از این فال نمی‌شه» می‌داد.
+ *   • `CHAT_LATIN_FIX`: واژه‌ی لاتینِ نشتی (`latinIn`) کمبودِ چهارمِ همان **یک** تلاشِ
+ *     تعمیر است، نه تلاشِ تازه. واژه‌ای که خودِ کاربر نوشته مجاز می‌ماند. */
+const CHAT_NEW_ASK        = true;
+const CHAT_NEWREAD_REFUND = true;
+const CHAT_LATIN_FIX      = true;
 /* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.116.0، خواسته‌ی
  * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
  * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
@@ -8172,6 +8184,16 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
     track(db, uid, 'chat_smalltalk', { reading_id: rid, chars: text.length, via });
     await ctx.reply(L.chat.smallTalk, extra); return;
   }
+  // ۳ب) 🔮 «فال»ِ تنها: رایگان، بدونِ مدل. دکمه همان `chat_new`ِ موجود است (کپیِ دومی نیست)،
+  // و استیت دست نمی‌خورد تا اگر منظورش همین فال بود، سؤالِ کامل‌تر را همین‌جا بنویسد.
+  if (CHAT_NEW_ASK && newReadingAskIn(text)) {
+    track(db, uid, 'chat_new_ask', { reading_id: rid, chars: text.length, via });
+    await ctx.reply(L.chat.newReadingAsk, {
+      ...extra,
+      reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]]).reply_markup,
+    });
+    return;
+  }
   // ۵) هم‌زمانی
   if (chatInflight.has(uid)) {
     track(db, uid, 'chat_busy', { reading_id: rid, chars: text.length, via });
@@ -8253,6 +8275,15 @@ function chatHadCrisis(uid, rid) {
   try { return !!chatCrisisStmt.get(uid, rid); } catch { return true; } // شک ⟵ حذف نکن
 }
 
+/* 🧾 `validate`ِ گفتگو + یک خطِ لاگِ **شکل** برای هر ردِ پاکت (v3.141.0). فقط کدِ دلیل و
+ * طول، هرگز محتوا. بدونِ این، «مدل جواب داد ولی رد شد» و «مدل جوابِ بد داد» در لاگ یکی
+ * بودند و ریشه‌ی افتادن به مدلِ پشتیبان فقط از ردِ یک خطای JSON حدس زده می‌شد. */
+function chatValidateLogged(out) {
+  const ok = chatOutOk(out);
+  if (!ok) logErr(`🧾 CHAT_REJECT reason=${chatRejectReason(out)} len=${String(out || '').length}`);
+  return ok;
+}
+
 async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx = null, via = 'typed' }) {
   const rid = r.id;
   chatInflight.add(uid);
@@ -8274,15 +8305,17 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const packed = packHistory(hist.slice(0, -1)); // سؤالِ فعلی جدا می‌رود
     /* 🛟 «نشانه‌ی صریحِ خطر» فقط از حرفِ **خودِ کاربر** ساخته می‌شود (سؤالِ فال + همه‌ی
      * پیام‌هایش در همین گفتگو). بدونِ آن، حرفِ آسیب/اورژانس از جوابِ مدل حذف می‌شود. */
+    const userTexts = [r.question, text, ...hist.filter((h) => h.role === 'user').map((h) => h.text)];
     const crisisCtx = !CHAT_SAFETY_STRIP
-      || [r.question, text, ...hist.filter((h) => h.role === 'user').map((h) => h.text)]
-        .some((t) => !!crisisIn(t))
+      || userTexts.some((t) => !!crisisIn(t))
       || chatHadCrisis(uid, rid);
+    // 🔤 واژه‌ی لاتینی که خودِ کاربر نوشته (اسمِ اپ، برند، اسمِ آدم) نشت نیست.
+    const userText = userTexts.map((t) => String(t || '')).join('\n');
     const messages = toMessages(system, packed, text, L);
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatOutOk, kind: 'chat', refId: rid, userId: uid,
+      validate: chatValidateLogged, kind: 'chat', refId: rid, userId: uid,
     }, CHAT_PLAN));
 
     // ۹) شکستِ کامل → ریفاندِ فوری. پولِ کاربر هرگز در حالتِ نامعلوم نمی‌ماند (بند ۹).
@@ -8300,6 +8333,8 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      * می‌ماند: اگر روزی `validate` عوض شود، جوابِ پول‌داده نباید روی `null` بترکد. */
     let out = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
     let model = res.model || '';
+    const salvaged = !!out.salvaged;
+    if (salvaged) log(`🧾 CHAT_PLAIN salvaged model=${model} attempts=${res.attempts || 1} rid=${rid}`);
 
     /* 🪫 کفِ محتوا، قدمِ ۱: **یک** تلاشِ تعمیرِ آگاه (ثابتِ `CHAT_FLOOR` بالا).
      * تذکر به **آخرین پیامِ user** چسبانده می‌شود نه به `system`، و این اجباری است:
@@ -8312,14 +8347,14 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      * حتی ریفاند، برای چیزی که یک تلاشِ هدف‌دار ارزان‌تر درستش می‌کند. */
     const thinOf = (o) => !!(CHAT_FLOOR && floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
     const needsOf = (o) => {
-      const n = chatFixNeeds(o, { crisisCtx });
-      return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety };
+      const n = chatFixNeeds(o, { crisisCtx, userText });
+      return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety, latin: CHAT_LATIN_FIX ? n.latin : '' };
     };
     let thin = CHAT_FLOOR && floorApplies(out) && String(out.text || '').trim().length < CHAT_FLOOR_CHARS;
     let needs = needsOf(out);
-    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety };
+    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety, latin: needs.latin };
     let fixed = false;
-    if (thin || needs.offer || needs.safety) {
+    if (thin || needs.offer || needs.safety || needs.latin) {
       try {
         const hint = L.prompts.chatFixHint
           ? L.prompts.chatFixHint({ ...fixWanted, min: CHAT_FLOOR_CHARS })
@@ -8343,12 +8378,14 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     /* 🧾 متنِ نهایی از تک‌منبعِ `finalizeChatOut` (ربات و آزمایشگاه یکی): حرفِ خطرِ
      * بی‌دلیل جمله‌به‌جمله حذف می‌شود و پیشنهاد خطِ آخر می‌شود. */
     const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP });
-    if (fixWanted.offer || fixWanted.safety || fin.safetyStripped || fin.offerMissing) {
+    if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fin.safetyStripped || fin.offerMissing) {
       track(db, uid, 'chat_fix', {
         reading_id: rid, thin: fixWanted.thin ? 1 : 0, offer: fixWanted.offer ? 1 : 0,
         safety: fixWanted.safety ? 1 : 0, fixed: fixed ? 1 : 0,
         stripped: fin.safetyStripped, offer_missing: fin.offerMissing ? 1 : 0,
+        latin: fixWanted.latin ? 1 : 0, latin_left: needs.latin ? 1 : 0,
       });
+      if (fixWanted.latin) log(`🔤 CHAT_LATIN reading#${rid} fixed=${needs.latin ? 0 : 1}`);
       if (fin.safetyStripped) log(`🛟 CHAT_SAFETY_STRIPPED reading#${rid} n=${fin.safetyStripped} fixed=${fixed ? 1 : 0}`);
       if (fin.offerMissing) log(`🎁 CHAT_OFFER_MISSING reading#${rid} fixed=${fixed ? 1 : 0}`);
     }
@@ -8376,6 +8413,8 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       q_chars: text.length, has_fu: followUp ? 1 : 0, has_offer: out.offer ? 1 : 0,
       new_reading: out.newReading ? 1 : 0, support: out.support ? 1 : 0, end: out.end ? 1 : 0,
       model, fixed: fixed ? 1 : 0,
+      // 🧾 افزایشی (v3.141.0): نوبتِ چندمِ برنامه جواب داد، و آیا متنِ خامِ بی‌پاکت بود.
+      attempts: res.attempts || 1, plain: salvaged ? 1 : 0,
     });
     /* 🪫 کفِ محتوا، قدمِ ۲: تعمیر هم نگرفت ⟵ جواب می‌رود، **الماس برمی‌گردد**، بی‌صدا.
      * ترتیب عمدی است: ردیفِ `assistant` از قبل ثبت شده، پس جاروی یتیم‌ها این سؤال را
@@ -8387,6 +8426,15 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
         refunded: back ? 1 : 0, free: price > 0 ? 0 : 1,
       });
       log(`🪫 CHAT_THIN reading#${rid} msg#${aId} ${reply.length}<${CHAT_FLOOR_CHARS} refunded=${back ? 1 : 0}`);
+    }
+    /* 🔮 جوابِ «فالِ تازه لازمه» فقط راهنماست، پس الماس برمی‌گردد (ثابتِ بالا). همان
+     * ترتیبِ کفِ محتوا: ردیفِ assistant از قبل ثبت شده، پس جارو ریفاندِ دوم نمی‌سازد، و
+     * موجودیِ باکسِ پایین بعد از همین خط خوانده می‌شود. `thin` این‌جا ساختاراً false است
+     * (`floorApplies` نوبتِ پرچم‌دار را معاف می‌کند)، پس دو ریفاند روی یک ردیف ممکن نیست. */
+    if (CHAT_NEWREAD_REFUND && out.newReading && !thin) {
+      const back = refundChat(msgId, uid, price);
+      if (back) track(db, uid, 'chat_refund', { reading_id: rid, amount: price, via: 'new_reading' });
+      log(`🔮 CHAT_NEWREAD_REFUND reading#${rid} msg#${aId} refunded=${back ? 1 : 0}`);
     }
     // سنجه‌ی قلاب فقط **لاگ** می‌شود، نه retry: خروجی کوتاه است و بازتولیدش برای یک
     // جمله‌ی پایانی، تجربه را کند می‌کند. در آزمایشگاه همین تابع سنجه‌ی تصمیم است.

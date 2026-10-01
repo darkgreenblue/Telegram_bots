@@ -976,8 +976,28 @@ console.log('\n▶ ۱۴) قلاب و پاکسازی');
   ok(chat.chatOutOk(env('ن'.repeat(100))) === true, 'validate خروجیِ عادی را می‌پذیرد');
   ok(chat.chatOutOk(env('باشه')) === false, 'جوابِ تک‌کلمه‌ای رد می‌شود (خرابیِ مدل)');
   ok(chat.chatOutOk(env('ن'.repeat(2000))) === false, 'و خروجیِ بیش از حد بلند هم');
-  ok(chat.chatOutOk('متنِ خامِ بدونِ پاکت ولی کاملاً به‌اندازه و سالم.') === false,
-    'و متنِ خامِ بدونِ پاکت هم رد می‌شود (وگرنه برگشتِ سهویِ پرامپت بی‌صدا می‌ماند)');
+  /* 🧾 v3.141.0: این ادعا **معکوس** شد، نه حذف. ریشه‌ی افتادن به مدلِ پشتیبان همین ردِ
+   * جوابِ سالمِ بی‌پاکت بود (لاگِ سرور). برگشتِ سهویِ پرامپت به متنِ خام همچنان با ادعای
+   * «فقط یک JSON» در بخشِ ۱۳ قفل است. */
+  const plainTxt = 'متنِ خامِ بدونِ پاکت ولی کاملاً به‌اندازه و سالم.';
+  ok(chat.CHAT_PLAIN_SALVAGE === true, '🧾 پذیرشِ متنِ خام روشن است (رول‌بک: false)');
+  ok(chat.chatOutOk(plainTxt) === true, '🧾 جوابِ سالمِ بی‌پاکت پذیرفته می‌شود (دیگر به retry/مدلِ پشتیبان نمی‌افتد)');
+  const pp = chat.parseChatOut(plainTxt);
+  ok(pp && pp.salvaged === true && pp.text === plainTxt && !pp.newReading && !pp.support,
+    '🧾 و با پرچمِ salvaged برمی‌گردد، بدونِ پرچمِ نیتِ ساختگی');
+  ok(chat.parseChatOut('```\n' + plainTxt + '\n```')?.text === plainTxt, '🧾 حصارِ کد دورِ متنِ خام پاک می‌شود');
+  ok(chat.chatOutOk('باشه') === false, '🧾 ولی متنِ خامِ تک‌کلمه‌ای همچنان رد می‌شود (همان کف)');
+  ok(chat.chatOutOk('ن'.repeat(2000)) === false, '🧾 و متنِ خامِ بیش از حد بلند هم (همان سقف)');
+  ok(chat.chatOutOk('{"answer": "' + 'ن'.repeat(60)) === false,
+    '🧾 کنترلِ معکوس: JSONِ ناقص (آکولاد دارد) خام حساب **نمی‌شود** و رد می‌شود');
+  const env2 = (t) => JSON.stringify({ answer: t });
+  ok(chat.parseChatOut(env2('ن'.repeat(100)))?.salvaged === false, '🧾 پاکتِ سالم salvaged نیست');
+  ok(chat.chatRejectReason('') === 'empty' && chat.chatRejectReason(plainTxt) === 'plain'
+    && chat.chatRejectReason('{"answer": "x') === 'bad_json'    && chat.chatRejectReason('{"text":"' + 'ن'.repeat(50) + '"}') === 'no_answer_key'
+    && chat.chatRejectReason(env2('باشه')) === 'short' && chat.chatRejectReason(env2('ن'.repeat(2000))) === 'long'
+    && chat.chatRejectReason(env2('ن'.repeat(100))) === 'ok', '🧾 کدِ دلیلِ رد برای هر شکل درست است');
+  ok(!chat.chatRejectReason('{"answer":"' + 'رازِ کاربر'.repeat(5) + '"}').includes('راز'),
+    '🧾 کدِ دلیل هرگز محتوا برنمی‌گرداند');
   ok(chat.chatShapeOk === undefined, 'validateِ نسلِ متنِ خام پاک شد، نه خاموش (بند ۹/۰)');
 }
 
@@ -987,7 +1007,16 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
   const hc = bodyOf(CODE, 'async function runChatTurn(');
   ok(/kind: 'chat', refId: rid, userId: uid/.test(hc),
     "هزینه با kind='chat' و شناسه‌ی فال در llm_usage ثبت می‌شود");
-  ok(/validate: chatOutOk/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
+  ok(/validate: chatValidateLogged/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
+  {
+    const vb = bodyOf(CODE, 'function chatValidateLogged(');
+    ok(/const ok = chatOutOk\(out\)/.test(vb) && /return ok;/.test(vb),
+      '🧾 validateِ لاگ‌دار همان chatOutOk را برمی‌گرداند (فقط لاگ اضافه می‌کند)');
+    ok(/CHAT_REJECT reason=\$\{chatRejectReason\(out\)\}/.test(vb) && !/\$\{out\}/.test(vb),
+      '🧾 لاگِ رد فقط کد و طول دارد، نه متنِ خروجی');
+    ok(/plain: salvaged \? 1 : 0/.test(hc) && /attempts: res\.attempts/.test(hc),
+      '🧾 رویدادِ chat_message نرخِ متنِ خام و تعدادِ تلاش را ثبت می‌کند');
+  }
   ok(/maxTokens: CHAT_MAX_TOKENS/.test(hc), 'سقفِ توکنِ خروجی صریح است');
   for (const ev of ['chat_offer_shown', 'chat_opened', 'chat_message', 'chat_paywall',
     'chat_llm_failed', 'chat_refund', 'chat_crisis', 'chat_exited']) {
@@ -2350,6 +2379,74 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   for (const k of ['ask', 'mine', 'can'])
     ok(labFa.closingOffer[k].source === chat.FA_OFFER[k].source,
       `🧪 الگوی «${k}» سنجه‌ی آزمایشگاه با الگوی گاردِ محصول یکی است (گارد و سنجه یک تعریف)`);
+}
+
+/* ── ۲۳) 🔮🔤 سه فیکسِ دورِ ۲ کیفیت (v3.141.0) ──────────────────────────────────────
+ * هر سه از یک ترنسکریپتِ واقعی آمده‌اند: «فال»ِ تنها که یک الماس گرفت و جوابِ قبلی را
+ * تکرار کرد، پیش‌گوییِ ازدواج در فالِ کار که الماس گرفت و فقط «از این فال نمی‌شه» داد،
+ * و «منو hurt کرد» وسطِ پیش‌نویسِ پیام. */
+{
+  console.log('\n── ۲۳) «فال»ِ تنها، ریفاندِ فالِ تازه، نشتِ لاتین');
+  const h = bodyOf(CODE, 'async function handleChatMessage(');
+  const T = bodyOf(CODE, 'async function runChatTurn(');
+
+  // الف) تشخیص: تنگ، مثل smallTalkIn. هر دو جهت، با کنترلِ مثبت.
+  ok(chat.newReadingAskIn('فال') === true, '🔮 «فال»ِ تنها (پیامِ ۵۴۸) فالِ تازه است');
+  ok(chat.newReadingAskIn('یه فال دیگه') === true && chat.newReadingAskIn('فال جدید می‌خوام') === true,
+    '🔮 و شکل‌های «یه فال دیگه» و «فال جدید می‌خوام» هم');
+  ok(chat.newReadingAskIn('فال جدید؟') === true && chat.newReadingAskIn('  فال بگیرم!  ') === true,
+    '🔮 علامت و فاصله‌ی دورِ پیام مهم نیست (همان `norm`)');
+  ok(chat.newReadingAskIn('فال رو دوباره برام توضیح بده') === false,
+    '⚠️ کنترلِ مثبت: سؤالِ واقعی درباره‌ی همین فال رایگان نمی‌شود (کلِ پیام باید خودش درخواستِ فال باشد)');
+  ok(chat.newReadingAskIn('این فال یعنی چی؟') === false && chat.newReadingAskIn('') === false,
+    '⚠️ و «این فال یعنی چی؟» یا پیامِ خالی هم نه');
+
+  // ب) در هندلر: بعد از بحران، قبل از کسر، بدونِ مدل، و با همان دکمه‌ی `chat_new`ِ موجود.
+  ok(before(h, 'crisisIn(', 'newReadingAskIn(') && before(h, 'newReadingAskIn(', 'payForChat('),
+    '🔮 شاخه‌ی «فال» بعد از گاردِ بحران و **قبل از** کسر است');
+  const nb = (h.match(/if \(CHAT_NEW_ASK && newReadingAskIn\(text\)\) \{[\s\S]*?\n {2}\}/) || [''])[0];
+  ok(!!nb && /return;/.test(nb) && !/orChatResilient|payForChat|runChatTurn/.test(nb),
+    '🔮 و بی‌هیچ فراخوانیِ مدل یا کسر برمی‌گردد');
+  ok(/`chat_new:\$\{rid\}`/.test(nb) && /L\.buttons\.chatAnotherReading/.test(nb),
+    '🔮 دکمه همان `chat_new`ِ موجود است، نه اکشنِ تازه');
+  ok(/track\(db, uid, 'chat_new_ask'/.test(nb) && !/text[,}]/.test((nb.match(/track\([^)]*\)/) || [''])[0].replace('text.length', '')),
+    '📊 رویدادِ `chat_new_ask` ثبت می‌شود، فقط طولِ متن نه خودش');
+  ok(!/setState\(|leaveChat\(/.test(nb), '🔮 استیتِ گفتگو دست نمی‌خورد (شاید منظورش همین فال بود)');
+
+  // ج) ریفاندِ نوبتِ «فالِ تازه»: بعد از ثبتِ ردیف، قبل از خواندنِ موجودیِ باکس، بی‌صدا.
+  const iNR = T.indexOf('if (CHAT_NEWREAD_REFUND && out.newReading');
+  const nr = iNR < 0 ? '' : (T.slice(iNR).match(/^if \(CHAT_NEWREAD_REFUND[\s\S]*?\n {4}\}/) || [''])[0];
+  ok(!!nr && /refundChat\(msgId, uid, price\)/.test(nr), '💎 جوابِ پرچم‌دارِ فالِ تازه الماس را برمی‌گرداند');
+  ok(/via: 'new_reading'/.test(nr), '📊 با `chat_refund` و `via: new_reading`');
+  ok(iNR > T.indexOf('insertChatMsg.run') && iNR < T.indexOf('CHAT_BALANCE_BOX ? L.chat.balanceBox'),
+    '💎 بعد از ثبتِ ردیف (ضدِ ریفاندِ دوم از جارو) و **قبل از** خواندنِ موجودیِ باکس');
+  ok(!/\bsend\(|sendMessage\(|ctx\.reply\(/.test(nr), '⚠️ و هیچ پیامی نمی‌فرستد (بند ۹ب-۴ ریشه)');
+  ok(/!thin/.test(nr), '💎 و هرگز روی همان ردیفی که کفِ محتوا ریفاندش کرد دوباره نمی‌نشیند');
+
+  // د) لاتین: واژه‌ی نشتی گرفته می‌شود، واژه‌ی خودِ کاربر نه، و فقط در زبانِ غیرلاتین.
+  const hurt = 'برخورد بد تو هم منو hurt کرد، ولی قصد ندارم دوباره وارد دعوا بشیم.';
+  ok(chat.latinIn(hurt) === 'hurt', '🔤 «منو hurt کرد» (پیامِ ۴۳۳) گرفته می‌شود');
+  ok(chat.latinIn('توی Instagram بهش پیام بدم؟', 'اینو تو instagram بفرستم؟') === '',
+    '🔤 واژه‌ای که خودِ کاربر نوشته مجاز است (بی‌حساسیت به حروفِ بزرگ)');
+  ok(chat.latinIn('ده شمشیر پایانِ انتظار است.') === '', '⚠️ کنترلِ مثبت: جوابِ تمام‌فارسی پاک است');
+  ok(chat.chatFixNeeds({ text: hurt, offer: '' }).latin === 'hurt'
+     && chat.chatFixNeeds({ text: hurt, offer: '' }, { userText: 'hurt' }).latin === '',
+    '🔤 `chatFixNeeds` کمبودِ `latin` را گزارش می‌کند');
+  ok(chat.chatFixScore({ latin: 'x' }, false) > chat.chatFixScore({}, false),
+    '🔤 و تعمیری که لاتین را برداشت «اکیداً بهتر» شمرده می‌شود');
+  ok(/latin: CHAT_LATIN_FIX \? n\.latin : ''/.test(T) && /needs\.safety \|\| needs\.latin\) \{/.test(T),
+    '🔤 ربات لاتین را در همان **یک** تلاشِ تعمیر می‌آورد، پشتِ پرچمِ رول‌بک');
+  ok(/chatFixNeeds\(o, \{ crisisCtx, userText \}\)/.test(T), '🔤 و حرف‌های خودِ کاربر را به‌عنوانِ مجاز پاس می‌دهد');
+  {
+    const L = (await import('../bots/tarot/locales/fa.js')).default;
+    ok(/hurt/.test(L.prompts.chatFixHint({ latin: 'hurt' })) && !/فارسی نیست/.test(L.prompts.chatFixHint({})),
+      '🔤 تذکرِ تعمیر همان واژه را نام می‌برد، و بدونِ لاتین چیزی درباره‌اش نمی‌گوید');
+  }
+  // ه) پرامپت: پیش‌گوییِ موضوعی بیرونِ این فال ⟵ فالِ تازه (برنده‌ی دورِ آزمایشگاه `newread2`).
+  ok(/پیش‌گوییِ موضوعی بیرونِ این فال \(کار در فالِ عشق\)/.test(FA) && /بیرونِ فال \(نه پیش‌گویی\)/.test(FA),
+    '🔮 پرامپت پیش‌گوییِ موضوعِ دیگر را به فالِ تازه می‌فرستد، نه به جوابِ «آدمِ باتجربه»');
+  ok(!/ازدواج در فالِ کار/.test(FA), '⚠️ و مثالش «ازدواج» نیست (دورِ اول نشان داد «ازدواج در فالِ عشق» را هم پرچم می‌زد)');
+  ok(bool('CHAT_NEW_ASK') && bool('CHAT_NEWREAD_REFUND') && bool('CHAT_LATIN_FIX'), '↩️ هر سه پرچمِ رول‌بک روشن‌اند');
 }
 
 const total = pass + errs.length;
