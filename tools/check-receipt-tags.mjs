@@ -145,7 +145,7 @@ const mw = region('/* 🏷 فازِ ۶: دکمه‌های تگِ رسید (`tg:`
 const BASE_SQL = `
   CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
     status TEXT NOT NULL DEFAULT 'waiting_review', receipt_file_id TEXT, card_id INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()), approved_at INTEGER);
   CREATE TABLE IF NOT EXISTS admin_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, action TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL DEFAULT (unixepoch()), done_at INTEGER,
     user_id INTEGER, amount INTEGER, ref_id INTEGER, note TEXT NOT NULL DEFAULT '');
@@ -159,7 +159,7 @@ function boot({ file = ':memory:', flag = true, defaults = true, stars = false, 
     { id: 2, kind: 'white', active: 1, sort: 2, bank: 'ملت', holder: 'ع', number: '6104330000005224' },
     { id: 3, kind: 'regular', active: 0, sort: 3, bank: 'شهر', holder: 'ع', number: '5047061675180547' }];
   const env = {
-    db, RT, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, TAG_DEFAULTS_ENABLED: defaults, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
+    db, RT, CA: { cardDayStartSec: () => 0 }, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, TAG_DEFAULTS_ENABLED: defaults, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
     cardSt: () => ({ all: { all: () => CARDS } }),
     cardOfPayment: (p) => CARDS.find((c) => c.id === Number(p?.card_id)) || CARDS[0],
     cardOfPid: (pid) => env.cardOfPayment(db.prepare('SELECT card_id FROM payments WHERE id=?').get(pid)),
@@ -226,7 +226,9 @@ if (h) {
   const INFO = '\n\n💳 کارتِ تخصیص‌داده: بلوبانک🔰\n6219861904145405\n📊 سوابق کاربر: ۱ پرداخت';
   ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === `CAP${INFO}`,
     'ادمینِ دیگر: کیبوردِ قبلی بدونِ هیچ دکمه‌ی تگ/کارت؛ کپشن + کارتِ تخصیص و سوابق');
-  ok(toOwner.text === `COPY\nCAP${INFO}` && !/اپ|بانک:/.test(toOwner.text), 'پیامِ مالک: هیچ حرفی از اپ و بانک، فقط کارت و سوابق');
+  // 💰 v3.140.0: دو خطِ پولیِ فقط-مالک (بخشِ رفتاری‌شان در check-owner-money.mjs).
+  const MONEY = '\nمجموعاً ۶۰٬۰۰۰ تومان\n💰 درآمد امروز تا این لحظه: ۰ تومان';
+  ok(toOwner.text === `COPY\nCAP${INFO}${MONEY}` && !/اپ|بانک:/.test(toOwner.text), 'پیامِ مالک: هیچ حرفی از اپ و بانک، فقط کارت و سوابق (+ دو خطِ پولیِ فقط-مالک)');
 
   // مالک = ادمینِ کارت ⟵ یک پیام با هر دو.
   const h2 = boot({ recipients: [{ id: OWNER, full: true }] });
@@ -316,7 +318,7 @@ if (h) {
   h.sent.length = 0;
   const pNew = h.payment();
   await h.sendToReceiptRecipients(db.prepare('SELECT * FROM payments WHERE id=?').get(pNew), { caption: 'CAP', photoFileId: 'F', kb });
-  ok(h.sent.every((s) => s.text.endsWith('📊 سوابق کاربر: ۳ پرداخت')), 'دو تأییدشده‌ی قبلی + همین ⟵ «۳ پرداخت»، برای همه‌ی گیرنده‌ها');
+  ok(h.sent.every((s) => s.text.includes('📊 سوابق کاربر: ۳ پرداخت')), 'دو تأییدشده‌ی قبلی + همین ⟵ «۳ پرداخت»، برای همه‌ی گیرنده‌ها');
   ok(h.receiptInfoLines(db.prepare('SELECT * FROM payments WHERE id=?').get(pOk2)).endsWith('۲ پرداخت')
     && h.receiptInfoLines(db.prepare('SELECT * FROM payments WHERE id=?').get(pOk1)).endsWith('۲ پرداخت'),
     'پیامِ «تأیید شد» (پرداختِ از قبل تأییدشده) خودش را دو بار نمی‌شمارد: دو تأییدشده ⟵ «۲ پرداخت»');

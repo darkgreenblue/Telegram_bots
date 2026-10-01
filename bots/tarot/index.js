@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.140.0';
+const PRODUCT_VERSION = '3.141.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2498,6 +2498,11 @@ ensureAnalytics(db);
 for (const [name, sql] of [
   ['idx_readings_stats', 'CREATE INDEX IF NOT EXISTS idx_readings_stats ON readings(status, user_id, created_at, price, type, feedback)'],
   ['idx_events_ev_user', 'CREATE INDEX IF NOT EXISTS idx_events_ev_user ON events(event, created_at, user_id)'],
+  /* 📊 v3.140.0 (گزارشِ شبانه‌ی مالک + سودِ داشبورد): «کاربرِ تازه‌ی یک روز» و «کاربرِ کمپین» بدونِ این دو
+   * اسکنِ کاملِ `users` (با `session_json`) بودند، و «سؤال‌های گفتگوی یک روز» اسکنِ کاملِ `chat_messages`
+   * (با متنِ پیام). حالا هر دو فقط برشِ همان روز از ایندکس را می‌خوانند. */
+  ['idx_users_created', 'CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at, first_source)'],
+  ['idx_chat_role_day', 'CREATE INDEX IF NOT EXISTS idx_chat_role_day ON chat_messages(role, created_at, user_id)'],
 ]) {
   try {
     const had = db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?").get(name);
@@ -10597,6 +10602,34 @@ function receiptInfoLines(p) {
     return `💳 کارتِ تخصیص‌داده: ${c.bank || c.holder}🔰\n${num}\n📊 سوابق کاربر: ${(prior + 1).toLocaleString('fa-IR')} پرداخت`;
   } catch (e) { logErr('receiptInfoLines:', e.message); return ''; }
 }
+/* 💰 دو خطِ **فقط-مالک** زیرِ «سوابق کاربر» (v3.140.0، خواسته‌ی مالک ۱۴۰۵/۰۷/۰۹):
+ *   «مجموعاً n تومان» = جمعِ پرداخت‌های تأییدشده‌ی **دیگرِ** کاربر + همین یکی (همان قراردادِ شمارشِ بالا، پس
+ *     پیامِ «تأیید شد» خودش را دو بار نمی‌شمارد).
+ *   «💰 درآمد امروز تا این لحظه» = همان تعریفِ درآمدِ داشبورد: پرداختِ **تأییدشده** با زمانِ ساختِ ردیف از
+ *     ۰۰:۰۰ تهران، بدونِ حساب‌های تستی (`REVENUE_TEST_USERS`، آینه‌ی `testUsers`ِ رجیستریِ داشبورد با چکِ CI).
+ *     رسیدِ همین پیام تا تأیید نشده جزوِ آن نیست. پرداختِ سرگردانِ ثبت‌شده در داشبورد را نمی‌بیند (تصمیمِ مالک).
+ * ادمین‌های دیگرِ کارت این دو خط را نمی‌بینند. هر دو کوئری روی ایندکس و بازه‌ی امروزند. خطا ⟵ ''.
+ * رول‌بک: `OWNER_MONEY_LINES_ENABLED = false`. */
+const OWNER_MONEY_LINES_ENABLED = true;
+const REVENUE_TEST_USERS = [409581917, 100257975, 5725984933, 429557996];
+let _ownerMoneySt;
+function ownerMoneyLines(p) {
+  if (!OWNER_MONEY_LINES_ENABLED || !p?.id) return '';
+  try {
+    const st = (_ownerMoneySt ||= {
+      user: db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE user_id=? AND status='approved' AND id<>?"),
+      // `approved_at >= ?` فقط برای نشستن روی ایندکسِ (status, approved_at) است: ردیفی که امروز ساخته شده
+      // نمی‌تواند قبل از امروز تأیید شده باشد، پس هیچ ردیفِ درستی حذف نمی‌شود.
+      today: db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status='approved' AND approved_at>=?
+        AND created_at>=? AND user_id NOT IN (${REVENUE_TEST_USERS.join(',')})`),
+    });
+    const fa = (n) => Number(n || 0).toLocaleString('fa-IR');
+    const total = st.user.get(p.user_id, p.id).s + (Number(p.amount) || 0);
+    const since = CA.cardDayStartSec();
+    const today = st.today.get(since, since).s;
+    return `مجموعاً ${fa(total)} تومان\n💰 درآمد امروز تا این لحظه: ${fa(today)} تومان`;
+  } catch (e) { logErr('ownerMoneyLines:', e.message); return ''; }
+}
 /* 📋 رسیدِ **متنی** (کاربر متنِ رسید را از اپِ بانک کپی کرده، نه عکس): **کلِ** پیامِ کاربر باید در پیامِ ادمین
  * بیاید، همان‌طور که عکس می‌آید (تصمیمِ مالک ۱۴۰۵/۰۷/۰۵، فاکتور #۱۴۲۹: پیامِ «تأیید شد» نه عکس داشت نه متن).
  * تک‌منبع برای هر پنج پیام (بازبینیِ دستی، مشکوک، تأیید، اصلاحِ کم‌پرداخت، ردِ خودکار). سقفِ ۳۵۰۰ نویسه فقط
@@ -10615,7 +10648,7 @@ async function sendToReceiptRecipients(p, { caption, photoFileId, kb }, card = n
   // (`withShadowLine` از خودِ کپشن کم می‌کند نه از دُم).
   applyDefaultTags(p); // 🏷 قبل از ساختِ کیبورد: فیلدهای تگِ مالک پیش‌پر برسند
   const info = receiptInfoLines(p);
-  const sline = [info, ownerShadowLine(p)].filter(Boolean).join('\n');
+  const sline = [info, ownerMoneyLines(p), ownerShadowLine(p)].filter(Boolean).join('\n');
   for (const r of receiptRecipients(p, card)) {
     const base = r.full ? caption : (ownerCopyHeader(p, card) + caption);
     const cap = withShadowLine(base, r.id === OWNER_ID ? sline : info, limit);
@@ -11770,6 +11803,9 @@ setInterval(async () => {
         } else if (act.action === 'receipt_tag') {
           // 🏷 تگِ رسید از داشبورد (فازِ ۶). پولی جابه‌جا نمی‌شود و پیامی به کاربر نمی‌رود.
           await applyQueuedTagOp(act);
+        } else if (act.action === 'owner_report') {
+          // 📊 گزارشِ شبانه‌ی مالک (v3.140.0): داشبورد متن را ساخته، ربات فقط به OWNER_ID می‌رساند.
+          await sendOwnerReport(act);
         } else if (act.action === 'unlock_reading') {
           // بازکردنِ دستیِ یک فالِ رزروشده: قیمتش اعتبار داده می‌شود و خودِ کاربر با دکمه‌ی
           // همیشگی بازش می‌کند — یعنی هیچ مسیرِ کسرِ جدیدی ساخته نمی‌شود (ریلِ پول تک‌منبع).
@@ -11803,6 +11839,24 @@ setInterval(async () => {
     sweepInvoiceLifecycle();
   } catch (e) { logErr('payment sweep:', e.message); }
 }, 60_000);
+
+/* 📊 رساندنِ گزارشِ شبانه‌ی مالک (v3.140.0). متن را داشبورد ساخته (سود تک‌منبعش آن‌جاست و داشبورد
+ * توکنِ ربات ندارد، `bots/dashboard/lib/owner-report.js`)؛ این‌جا فقط به **خودِ مالک** فرستاده می‌شود،
+ * نه ادمین‌های دیگر و نه هیچ کاربری. sweep بعد از هر اکشن done می‌زند، پس یک خطای گذرای تلگرام
+ * گزارشِ آن شب را می‌بلعید: سه تلاش با فاصله، و شکستِ نهایی مارکرِ greppable دارد. */
+async function sendOwnerReport(act) {
+  const text = String(act?.note || '').slice(0, 4096);
+  if (!text) return logErr(`❌ OWNER_REPORT_EMPTY id=${act?.id}`);
+  for (let i = 0; i < 3; i++) {
+    try {
+      await bot.telegram.sendMessage(OWNER_ID, text, { disable_web_page_preview: true });
+      return log(`📊 OWNER_REPORT_SENT id=${act.id}`);
+    } catch (e) {
+      if (i === 2) return logErr(`❌ OWNER_REPORT_SEND id=${act.id}:`, e.message);
+      await sleep((Number(e?.response?.parameters?.retry_after) || 2 + i * 3) * 1000);
+    }
+  }
+}
 
 /* 🧹 بستنِ ردیف‌های پرداختی که **هیچ مسیری دیگر به آن‌ها نمی‌رسد**.
  *

@@ -54,7 +54,7 @@ export const BOTS = [
        رد می‌شد. هر شاخه‌ی تازه در sweep باید همین‌جا هم اضافه شود (چکِ CI هر دو جهت
        را می‌سنجد: نامِ بی‌شاخه و شاخه‌ی بی‌نام هر دو قرمزند). */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag', 'owner_report'],
     /* 💳 صفحه‌ی کارت‌های پرداخت (v3.123.0، فازِ ۱c). فقط ریلِ کارت‌به‌کارت کارت دارد؛
        `card_update` در tarot-intl هم اعلام شده چون sweep همان کد است، ولی آن‌جا sweep
        صریح امتناع می‌کند و صفحه هم رندر نمی‌شود (این پرچم را ندارد). */
@@ -139,7 +139,7 @@ export const BOTS = [
        کاربرانِ روسی/اسپانیایی/پرتغالی ممکن نبود. پرچمِ بی‌دلیل خاموش هم باگ است، فقط
        جهتش برعکس (بند ۲الف ریشه) — و چکِ CI همین را گرفت. */
     adminActions: ['approve', 'force_approve', 'reject', 'duplicate_receipt', 'approve_accounting',
-      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag'],
+      'debit', 'credit', 'credit_paid', 'unlock_reading', 'card_update', 'receipt_tag', 'owner_report'],
     coinValue: 1, coinName: 'الماس', coinEmoji: '💎',
     idFromFile: (f) => f.replace(/^bot-|\.db$/g, ''), // locale
   },
