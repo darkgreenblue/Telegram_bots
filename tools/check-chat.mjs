@@ -2449,6 +2449,98 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   ok(bool('CHAT_NEW_ASK') && bool('CHAT_NEWREAD_REFUND') && bool('CHAT_LATIN_FIX'), '↩️ هر سه پرچمِ رول‌بک روشن‌اند');
 }
 
+/* ── ۲۴) ✅🙏 «بله»ی تایپی = دکمه، و پیامِ بی‌سؤال رایگان (موردِ ۴ِ بازبینیِ مالک) ──────
+ * رفتاری: بلوکِ واقعیِ هندلر از سورس بریده و روی SQLite واقعی با statementهای خودِ سورس
+ * اجرا می‌شود. هر ادعای «رایگان» یک کنترلِ مثبت دارد که سؤالِ واقعی هنوز به کسر می‌رسد. */
+{
+  console.log('\n── ۲۴) «بله»ی تایپی و پیام‌های بی‌سؤال');
+  // الف) تشخیص: تنگ، هر دو جهت.
+  ok(chat.assentIn('آره') && chat.assentIn('باشه 🙏') && chat.assentIn('اره لطفا!'), '✅ «آره»، «باشه 🙏»، «اره لطفا!» تأیید شمرده می‌شوند');
+  ok(!chat.assentIn('آره ولی کارت دوم چی؟') && !chat.assentIn('آره میخوام بدونم کی') && !chat.assentIn(''),
+    '⚠️ کنترلِ مثبت: «آره ولی کارت دوم چی؟» سؤالِ واقعی است، تأییدِ خالی نیست');
+  ok(chat.smallTalkIn('نه مرسی') && chat.smallTalkIn('خیلی ممنون 🙏') && chat.smallTalkIn('دستت درد نکنه'),
+    '🙏 «نه مرسی»، «خیلی ممنون 🙏»، «دستت درد نکنه» رایگان‌اند');
+  ok(!chat.smallTalkIn('نه، منظورم کارت آخر بود'), '⚠️ کنترلِ مثبت: «نه، منظورم…» سؤال است');
+  ok(chat.noContentIn('.') && chat.noContentIn('🙏') && chat.noContentIn('؟؟') && !chat.noContentIn('چرا') && !chat.noContentIn(''),
+    '🙏 «.»، «🙏»، «؟؟» بی‌محتوا هستند؛ «چرا» و پیامِ خالی نه');
+
+  // ب) ترتیب: بعد از بحران، قبل از تعارف و کسر.
+  const h = bodyOf(CODE, 'async function handleChatMessage(');
+  ok(before(h, 'crisisIn(', 'assentIn(') && before(h, 'assentIn(', 'smallTalkIn(') && before(h, 'assentIn(', 'payForChat('),
+    '✅ شاخه‌ی «بله» بعد از بحران و **قبل از** تعارف و کسر است (وگرنه «باشه» همیشه تعارف می‌شد)');
+
+  // ج) رفتاری.
+  const blk = (h.match(/let assentFree = false;[\s\S]*?await ctx\.reply\(L\.chat\.smallTalk, extra\); return;\n {2}\}/) || [''])[0];
+  ok(!!blk, 'بلوکِ «بله» و تعارف از سورس بریده شد');
+  const d = new Database(':memory:');
+  d.exec(`CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, reading_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL DEFAULT '',
+    price INTEGER NOT NULL DEFAULT 0, refunded INTEGER NOT NULL DEFAULT 0,
+    model TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    tg_msg_id INTEGER NOT NULL DEFAULT 0);`);
+  applyChatAlters(d);
+  const BT = String.fromCharCode(96);
+  const sq = (name) => {
+    const m = SRC.match(new RegExp(name + ":\\s*db\\.prepare\\((?:'([^']+)'|\"([^\"]+)\"|" + BT + '([\\s\\S]*?)' + BT + ')\\)'));
+    return (m && (m[1] || m[2] || m[3])) || null;
+  };
+  ok(!!sq('chatLastAnswer') && /ORDER BY id DESC LIMIT 1/.test(sq('chatLastAnswer')), '✅ فقط **آخرین** جوابِ همین فال دیده می‌شود');
+  const st = { chatLastAnswer: d.prepare(sq('chatLastAnswer')), claimFollowUp: d.prepare(sq('claimFollowUp')) };
+  const run = async (text, { flag = true, via = 'typed' } = {}) => {
+    const log = { replies: [], events: [] };
+    const fn = new Function('ctx', 'uid', 'rid', 'text', 'via', 'extra', 'stmts', 'track', 'db', 'L', 'CHAT_ASSENT_TAP',
+      'assentIn', 'noContentIn', 'smallTalkIn',
+      `return (async () => { ${blk}\n return { text, via, passed: true }; })();`);
+    const out = await fn({ reply: async (t) => { log.replies.push(t); } }, 7, 20, text, via, {}, st,
+      (_db, _u, ev, p) => log.events.push([ev, p]), d, { chat: { smallTalk: 'ST' } }, flag,
+      chat.assentIn, chat.noContentIn, chat.smallTalkIn);
+    return { ...(out || { passed: false }), ...log };
+  };
+  const addAnswer = (fu, used = 0) => d.prepare(
+    "INSERT INTO chat_messages (reading_id, user_id, role, text, follow_up, follow_up_used) VALUES (20, 7, 'assistant', 'جواب', ?, ?)").run(fu, used).lastInsertRowid;
+
+  // ۱) پیشنهادِ باز ⟵ «آره» همان سؤال می‌شود و به کسر می‌رسد.
+  const a1 = addAnswer('پیام کوتاه رو آماده کن');
+  const r1 = await run('آره');
+  ok(r1.passed && r1.text === 'پیام کوتاه رو آماده کن' && r1.via === 'assent' && !r1.replies.length,
+    '✅ «آره» زیرِ پیشنهادِ باز = همان سؤالِ پیشنهادی، و به کسر می‌رسد (مثلِ دکمه، پولی)');
+  ok(d.prepare('SELECT follow_up_used u FROM chat_messages WHERE id=?').get(a1).u === 1, '✅ پیشنهاد مصرف‌شده علامت می‌خورد');
+  ok(r1.events.some(([e, p]) => e === 'chat_followup' && p.via === 'typed'), '📊 رویدادِ `chat_followup` با `via: typed`');
+  // ۲) همان پیشنهاد دوباره ⟵ رایگان، بدونِ کسر (دکمه و «آره» با هم فقط یک بار).
+  const r2 = await run('باشه');
+  ok(!r2.passed && r2.replies.length === 1 && r2.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'assent_no_offer'),
+    '✅ «باشه»ی دوم روی پیشنهادِ مصرف‌شده رایگان جواب می‌گیرد، دو بار پرسیده نمی‌شود');
+  // ۳) فقط آخرین جواب: پیشنهادِ قدیمی‌ترِ باز نادیده.
+  addAnswer('پیشنهادِ قدیمی');
+  addAnswer('');
+  const r3 = await run('آره');
+  ok(!r3.passed && r3.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'assent_no_offer'),
+    '✅ اگر **آخرین** جواب پیشنهاد ندارد، پیشنهادِ قدیمی‌تر با «آره» زنده نمی‌شود');
+  // ۴) سؤالِ واقعی هنوز به کسر می‌رسد (کنترلِ مثبت).
+  addAnswer('کارت دوم رو باز کن');
+  const r4 = await run('آره ولی کارت دوم چی؟');
+  ok(r4.passed && r4.text === 'آره ولی کارت دوم چی؟' && r4.via === 'typed',
+    '⚠️ کنترلِ مثبت: «آره ولی کارت دوم چی؟» همان‌طور که هست پرسیده و کسر می‌شود، پیشنهاد مصرف نمی‌شود');
+  // ۵) پیامِ بی‌محتوا و «نه مرسی» رایگان.
+  const r5 = await run('🙏');
+  ok(!r5.passed && r5.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'empty'), '🙏 پیامِ بی‌محتوا رایگان است');
+  const r6 = await run('نه مرسی');
+  ok(!r6.passed && r6.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'smalltalk'), '🙏 «نه مرسی» رایگان است');
+  // ۶) تپِ دکمه (`via: button`) هرگز از این مسیر رد نمی‌شود، حتی اگر متنِ پیشنهاد «بریم» باشد.
+  addAnswer('بریم');
+  const r7 = await run('بریم سراغش', { via: 'button' });
+  ok(r7.passed && r7.via === 'button', '✅ فقط پیامِ **تایپی** تأیید شمرده می‌شود، نه متنِ دکمه');
+  // ۷) رول‌بک: پرچمِ خاموش ⟵ «آره» تعارف است (رفتارِ قبلی) و پیشنهاد مصرف نمی‌شود.
+  addAnswer('پیشنهادِ تازه');
+  const r8 = await run('آره', { flag: false });
+  const lastId = d.prepare("SELECT MAX(id) m FROM chat_messages").get().m;
+  ok(r8.passed && r8.text === 'آره' && d.prepare('SELECT follow_up_used u FROM chat_messages WHERE id=?').get(lastId).u === 0,
+    '↩️ با پرچمِ خاموش «آره» مثلِ قبل یک پیامِ عادی است و پیشنهاد دست نمی‌خورد');
+  const r9 = await run('.', { flag: false });
+  ok(r9.passed, '↩️ و پیامِ بی‌محتوا هم مثلِ قبل');
+  ok(bool('CHAT_ASSENT_TAP'), '✅ پرچمِ `CHAT_ASSENT_TAP` روشن است');
+}
+
 const total = pass + errs.length;
 if (errs.length) {
   console.log(`\n❌ گفتگوی پس از فال: ${pass} پاس، ${errs.length} خطا`);

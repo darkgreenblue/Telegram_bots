@@ -80,6 +80,7 @@ import {
 // که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, newReadingAskIn, hookOk,
+  assentIn, noContentIn,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
   CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
@@ -344,7 +345,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.142.0';
+const PRODUCT_VERSION = '3.143.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -619,6 +620,13 @@ const CHAT_MAX_TOKENS  = 500;
 const CHAT_NEW_ASK        = true;
 const CHAT_NEWREAD_REFUND = true;
 const CHAT_LATIN_FIX      = true;
+/* ✅ موردِ ۴ِ بازبینیِ مالک (۱۴۰۵/۰۷/۰۹): «بله»ی تایپی = زدنِ همان دکمه‌ی سؤالِ پیشنهادی.
+ * در دیتای واقعی کاربر به‌جای تپ، «آره» یا «باشه» می‌نوشت؛ یک الماس کم می‌شد و مدل بی‌سؤال
+ * دوباره می‌پرسید. حالا اگر آخرین جوابِ همین فال پیشنهادِ مصرف‌نشده دارد، همان ادعای اتمیکِ
+ * دکمه (`claimFollowUp`) می‌خورد و متنِ پیشنهاد به‌جای «آره» پرسیده می‌شود (مثلِ دکمه، پولی).
+ * اگر پیشنهادی نیست، «آره» سؤالی ندارد و رایگان جواب می‌گیرد؛ پیامِ بی‌محتوا («.»، «🙏») هم.
+ * رول‌بک: `false` ⟵ دقیقاً رفتارِ v3.142.0 (تشکر و «نه مرسی» همچنان رایگان‌اند، فهرستشان در chat-core). */
+const CHAT_ASSENT_TAP     = true;
 /* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.116.0، خواسته‌ی
  * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
  * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
@@ -2788,6 +2796,9 @@ const stmts = {
   /* ادعای اتمیکِ مصرفِ دکمه. الگوی همیشگیِ این ریپو (`claimAmount`/`claimLucky`):
    * شرط **داخلِ خودِ UPDATE** است، نه یک `if` در جاوااسکریپت، چون مسئله یک مسابقه است. */
   claimFollowUp: db.prepare("UPDATE chat_messages SET follow_up_used=1 WHERE id=? AND user_id=? AND role='assistant' AND follow_up<>'' AND follow_up_used=0"),
+  // آخرین جوابِ همین فال، برای «بله»ی تایپی (`CHAT_ASSENT_TAP`). فقط آخرین: پیشنهادِ دو نوبت
+  // پیش به بافتِ فعلی ربطی ندارد، همان دلیلِ `CHAT_LAST_ONLY`.
+  chatLastAnswer: db.prepare("SELECT id, follow_up, follow_up_used FROM chat_messages WHERE reading_id=? AND user_id=? AND role='assistant' ORDER BY id DESC LIMIT 1"),
   chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
   /* 🧼 «فقط آخرین پیام دکمه دارد» (v3.100.0، خواسته‌ی صریحِ مالک).
    *
@@ -8198,8 +8209,29 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
   /* 📊 هر شاخه‌ی بی‌هزینه هم رویدادِ خودش را دارد (خواسته‌ی صریحِ مالک، ۱۴۰۵/۰۷/۰۶: «تمامِ
    * اکشن‌ها ثبت شود، بعداً به فکرش نیفتیم»). بدونِ این‌ها، پیامی که کاربر فرستاد و جوابِ
    * مدل نگرفت فقط یک `act` بی‌نام در جرنی بود. متن ثبت نمی‌شود، فقط طولش. */
-  if (smallTalkIn(text)) {
-    track(db, uid, 'chat_smalltalk', { reading_id: rid, chars: text.length, via });
+  /* ۳الف) ✅ «بله»ی تایپی = تپِ همان دکمه (`CHAT_ASSENT_TAP`). **قبل از** تعارف، چون «باشه» و
+   * «اوکی» هر دو فهرست را دارند و این‌جا پیشنهادِ باز مقدم است. ادعا همان statementِ دکمه
+   * است، پس «آره» و تپِ دکمه روی یک پیشنهاد فقط یک بار پرسیده می‌شوند. */
+  let assentFree = false;
+  if (CHAT_ASSENT_TAP && via === 'typed' && assentIn(text)) {
+    let last = null;
+    try { last = stmts.chatLastAnswer.get(rid, uid); } catch { last = null; }
+    let claimed = 0;
+    if (last?.follow_up && !last.follow_up_used) {
+      try { claimed = stmts.claimFollowUp.run(last.id, uid).changes; } catch { claimed = 0; }
+    }
+    if (claimed) {
+      track(db, uid, 'chat_followup', { reading_id: rid, msg_id: last.id, via: 'typed' });
+      text = last.follow_up;
+      via = 'assent';
+    } else assentFree = true;
+  }
+  const emptyMsg = CHAT_ASSENT_TAP && noContentIn(text);
+  if (assentFree || emptyMsg || smallTalkIn(text)) {
+    track(db, uid, 'chat_smalltalk', {
+      reading_id: rid, chars: text.length, via,
+      kind: assentFree ? 'assent_no_offer' : emptyMsg ? 'empty' : 'smalltalk',
+    });
     await ctx.reply(L.chat.smallTalk, extra); return;
   }
   // ۳ب) 🔮 «فال»ِ تنها: رایگان، بدونِ مدل. دکمه همان `chat_new`ِ موجود است (کپیِ دومی نیست)،
