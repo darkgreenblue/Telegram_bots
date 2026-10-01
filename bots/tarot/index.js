@@ -343,7 +343,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.139.0';
+const PRODUCT_VERSION = '3.140.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -606,7 +606,7 @@ const CHAT_BALANCE_BOX = true;
  * درست، و از یک معنیِ دومِ ستون بهتر است. */
 const CHAT_FLOOR       = true;
 const CHAT_MAX_TOKENS  = 500;
-/* 🔮🔤 سه فیکسِ دورِ ۲ کیفیتِ گفتگو (v3.139.0، تأییدِ مالک ۱۴۰۵/۰۷/۰۸). هرکدام رول‌بکِ
+/* 🔮🔤 سه فیکسِ دورِ ۲ کیفیتِ گفتگو (v3.140.0، تأییدِ مالک ۱۴۰۵/۰۷/۰۸). هرکدام رول‌بکِ
  * یک‌خطیِ خودش را دارد:
  *   • `CHAT_NEW_ASK`: پیامِ تنهای «فال» (کلِ پیام، `newReadingAskIn`) قبل از کسر جواب
  *     می‌گیرد: دکمه‌ی فالِ تازه، رایگان. قبلاً یک الماس کم می‌شد و جوابِ قبلی تکرار.
@@ -1365,7 +1365,9 @@ const cardSt = () => _cardSt || (_cardSt = {
   winsOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status='approved' AND approved_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
   // «باز» از لحظه‌ی **صدورِ فاکتور** (`invoice_issued_at`)، نه ساختِ ردیف: ردیفِ بسته‌ها تا چند دقیقه دوباره
   // استفاده می‌شود (`reusablePending`)، پس ردیفِ ساخته‌شده در ۲۳:۵۸ که ۰۰:۰۳ فاکتور شد با `created_at` از قلم می‌افتاد.
-  openOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status IN ('pending','waiting_review') AND invoice_issued_at>=? AND amount=? AND card_id>0 GROUP BY card_id"),
+  // ⏳ v3.139.0: فاکتورِ `pending` فقط تا `CARD_OPEN_FRESH_SEC` بعد از صدور (یا تعویضِ کارت) «باز» است؛ بعدش عملاً
+  // رهاشده است و نباید کارت را عقب نگه دارد. رسیدِ `waiting_review` همیشه باز است: پولِ واقعی در راهِ همان کارت است.
+  openOn:   db.prepare("SELECT card_id, COUNT(*) AS c FROM payments WHERE status IN ('pending','waiting_review') AND invoice_issued_at>=? AND amount=? AND card_id>0 AND (status='waiting_review' OR MAX(invoice_issued_at, COALESCE(card_switched_at, 0))>=?) GROUP BY card_id"),
   markDay:  db.prepare('UPDATE payments SET approved_at=unixepoch() WHERE id=? AND approved_at IS NULL'),
   // 🔄 فازِ ۳: ادعای اتمیکِ تعویض — یک بار، فقط روی فاکتورِ باز و فقط از همان کارتی که دیده شد.
   switchClaim: db.prepare("UPDATE payments SET card_id=?, prev_card_id=?, card_switched_at=unixepoch() WHERE id=? AND card_id=? AND card_switched_at IS NULL AND status='pending'"),
@@ -1430,6 +1432,10 @@ function cardsForSwitch(p, cur) {
  *     باید بازبینی شود»، نه «کاربر کارتِ اشتباه گرفت».
  * هر دو هشدار مارکرِ `CARD_PICK_ALERT` دارند و حداکثر هر ۱۰ دقیقه یک پیام به تلگرام می‌روند. */
 const CARD_PICK_BUDGET_MS = 3000;
+/* ⏳ لایه‌ی ۲ (کمترین فاکتورِ باز) فقط فاکتورهای `pending`ِ **تازه** را می‌شمارد (v3.139.0، تصمیمِ مالک
+ * ۱۴۰۵/۰۷/۰۸). بررسیِ فاکتورهای ۱۶۴۲/۱۶۴۴: یک فاکتورِ رهاشده‌ی دوساعته کارتِ «خالی» را کلِ روز عقب نگه
+ * می‌داشت. رسید معمولاً چند دقیقه بعد از صدور می‌آید. رول‌بک: `0` (همه‌ی بازهای امروز، رفتارِ قبلی). */
+const CARD_OPEN_FRESH_SEC = 30 * 60;
 let lastPickedCardId = 0;
 let lastPickAlertAt = 0;
 function cardPickAlert(msg) {
@@ -1486,10 +1492,12 @@ function allowedFallback(uid, c, paymentId) {
   return c;
 }
 const countMap = (rows) => new Map(rows.map((r) => [r.card_id, r.c]));
-/** سه شمارشِ امروز برای یک مبلغ: `used` (سقف)، `wins` (تأییدشده با همین مبلغ)، `open` (باز با همین مبلغ). */
-function cardCounts(amount, since = CA.cardDayStartSec()) {
+/** سه شمارشِ امروز برای یک مبلغ: `used` (سقف)، `wins` (تأییدشده با همین مبلغ)، `open` (باز با همین مبلغ؛
+ *  `pending` فقط اگر در `CARD_OPEN_FRESH_SEC` اخیر صادر/تعویض شده، `waiting_review` همیشه). */
+function cardCounts(amount, since = CA.cardDayStartSec(), now = CA.nowSec()) {
   const st = cardSt();
-  return { used: countMap(st.usedOn.all(since)), wins: countMap(st.winsOn.all(since, amount)), open: countMap(st.openOn.all(since, amount)) };
+  const fresh = CARD_OPEN_FRESH_SEC > 0 ? now - CARD_OPEN_FRESH_SEC : 0;
+  return { used: countMap(st.usedOn.all(since)), wins: countMap(st.winsOn.all(since, amount)), open: countMap(st.openOn.all(since, amount, fresh)) };
 }
 /* 🔁 انتخاب و نشاندنِ کارت در **یک تراکنش**، پس دو فاکتورِ هم‌زمان شمارش‌های یکسان نمی‌بینند:
  * فاکتورِ دوم فاکتورِ بازِ اولی را می‌شمارد و به کارتِ بعدی می‌رود. تصمیم کاملاً در
@@ -1638,7 +1646,13 @@ const CANCELED_RECOVERY_SEC = 12 * 3600;
  * پرداخت‌کننده‌ها زیرِ یک ساعت از عضویت می‌پردازند، یعنی پنجره‌ی تصمیم ساعت است نه روز؛
  * یادآوریِ یک‌ساعته اغلب بعد از بسته‌شدنِ همان پنجره می‌رسید. */
 const INVOICE_REMINDER_SEC = 900;       // ۱۵ دقیقه
-const INVOICE_EXPIRE_SEC   = 24 * 3600; // ۲۴ ساعت
+/* ⏱ انقضا **۱ ساعت** (v3.139.0، خواسته‌ی صریحِ مالک ۱۴۰۵/۰۷/۰۸؛ بود ۲۴ ساعت). ساعتِ انقضا از **آخرین
+ * فعالیتِ روی فاکتور** می‌خوابد، نه فقط از صدور (کوئریِ `invoiceExpiryCandidates`): تعویضِ کارت، «نتوانستم
+ * واریز کنم» (کارتِ سفید)، رسیدِ متنی/عکسی و احیا هر کدام ساعت را از نو شروع می‌کنند. بدونِ این، کاربری که
+ * دقیقه‌ی ۵۵ کارتِ سفید گرفت ۵ دقیقه وقت داشت، و رسیدِ متنیِ دقیقه‌ی ۵۹ وسطِ خواندنِ ایجنت لغو می‌شد.
+ * رسیدِ دیرتر از یک ساعت هم گم نمی‌شود: تا ۱۲ ساعت از ساختِ ردیف (`CANCELED_RECOVERY_SEC`) خودکار احیا
+ * می‌شود؛ با ۲۴ ساعت این احیا عملاً هرگز اجرا نمی‌شد. رول‌بک: `24 * 3600`. */
+const INVOICE_EXPIRE_SEC   = 60 * 60;   // ۱ ساعت
 // ⭐ سقفِ فاکتورِ استارزی (v3.76.0، خواسته‌ی صریحِ مالک): «چون نرخِ ارز متغیر است»،
 // ۳۰ دقیقه. مستقل از چرخه‌ی بالا — این‌جا هیچ‌وقت canceled نمی‌شود، فقط شکلِ نمایش عوض می‌شود.
 const STARS_INVOICE_EXPIRE_SEC = 30 * 60;
@@ -2894,7 +2908,10 @@ const stmts = {
      همچنان عادی منقضی می‌شود. */
   invoiceExpiryCandidates: db.prepare(
     "SELECT * FROM payments WHERE status='pending' AND step='receipt' AND invoice_issued_at IS NOT NULL " +
-    "AND receipt_file_id IS NULL AND invoice_issued_at < unixepoch()-? ORDER BY id"),
+    "AND receipt_file_id IS NULL " +
+    "AND MAX(invoice_issued_at, COALESCE(card_switched_at, 0), COALESCE(updated_at, 0)) < unixepoch()-? ORDER BY id"),
+  // رسیدِ **متنی** عکسی ذخیره نمی‌کند؛ این مهر ساعتِ انقضا را از لحظه‌ی رسیدن شروع می‌کند (v3.139.0).
+  touchPayment: db.prepare('UPDATE payments SET updated_at=unixepoch() WHERE id=?'),
 
   /* 🚪 کاربرانی که در فلوی پرداخت پارک شده‌اند و فاکتورشان دیگر معنایی ندارد.
    * فیلترِ استیت عمداً این‌جا نیست و در جاوااسکریپت با خودِ PAY_STATES انجام می‌شود،
@@ -11017,6 +11034,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
   track(db, uid, EVENTS.RECEIPT_SUBMITTED, { payment_id: paymentId, amount: p.amount });
   // رسیدِ خام را همان اول ذخیره کن (برای بازبینی/برگشت) بدونِ تغییرِ وضعیت
   if (photoFileId) stmts.saveReceiptFile.run(photoFileId, paymentId);
+  else stmts.touchPayment.run(paymentId);
 
   // پیامِ انسانی: رسید برای بررسی/تأیید فرستاده شد (هیچ اشاره‌ای به بررسیِ خودکار نیست)
   await ctx.reply(L.wallet.receiptSent).catch(() => {});
@@ -11584,7 +11602,7 @@ async function sendInvoiceReminder(p) {
   } catch (e) { logErr('invoice reminder pay#' + p.id, e.message); }
 }
 
-/* ۲۴ ساعت بعد از صدور: خودِ پیامِ فاکتور ادیت می‌شود (نه پیامِ تازه)، بدونِ هیچ دکمه‌ای،
+/* ۱ ساعت بعد از آخرین فعالیت (v3.139.0؛ بود ۲۴ ساعت از صدور): خودِ پیامِ فاکتور ادیت می‌شود (نه پیامِ تازه)، بدونِ هیچ دکمه‌ای،
  * و ردیف به همان `canceled` همیشگی می‌رود — نه یک وضعیتِ تازه.
  *
  * ⚠️ چرا نه یک وضعیتِ تازه: `canceled` تنها وضعیتی است که مسیرهای پایین‌دستی
