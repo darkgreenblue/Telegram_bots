@@ -8,6 +8,7 @@ import { funnelsBody } from '../routes/funnels.js';
 import { screensBody } from '../routes/journey.js';
 import { retentionBody } from '../routes/retention.js';
 import { marketingStatsData } from '../routes/marketing.js';
+import { trendsBody } from '../routes/trends.js';
 
 const PAGES = new Map([
   ['/dash', dashBody],
@@ -18,6 +19,8 @@ const PAGES = new Map([
   ['/funnels', funnelsBody],
   ['/screens', screensBody],
   ['/retention', retentionBody],
+  // ترندها: سنجه‌ها از platform.db (ثبتِ شبانه)، ولی پول زنده از `profitFor` که DBِ ربات را می‌خواند
+  ['/trends', trendsBody],
   // مارکتینگ: فقط آمار (JSON)، نه کلِ صفحه — `marketingBody` فرم‌ها و فهرست را زنده می‌سازد
   ['/marketing', (url) => JSON.stringify(marketingStatsData(url))],
 ]);

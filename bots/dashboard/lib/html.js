@@ -142,6 +142,23 @@ const CSS = `
   .col-b { display:block; width:100%; max-width:64px; border-radius:4px 4px 0 0; }
   .col-v { font-size:12px; direction:ltr; }
   .col-l { font-size:11px; color:var(--dim); text-align:center; }
+  /* 📈 ترندها: کاشی‌های کوچکِ کنارِ هم (small multiples)، هر سنجه یک کاشی */
+  .tgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(330px,100%),1fr)); gap:14px; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px 12px 8px; min-width:0; }
+  .tile .tl { color:var(--dim); font-size:12px; }
+  .tile .tv { font-size:22px; font-weight:800; margin-top:2px; }
+  .tile .td { font-size:12px; margin-top:2px; color:var(--dim); }
+  .tile .td.good { color:var(--ok); }
+  .tile .td.bad { color:var(--bad); }
+  .tile .th { color:var(--dim); font-size:11px; margin-top:3px; }
+  .tc { position:relative; margin-top:6px; }
+  .tc svg { display:block; height:auto; outline:none; touch-action:pan-y; }
+  .tc svg:focus-visible { box-shadow:0 0 0 2px var(--accent); border-radius:6px; }
+  .tc-tip { position:absolute; top:0; pointer-events:none; background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:5px 9px; font-size:12px; box-shadow:0 2px 10px rgba(29,35,51,.1); white-space:nowrap; direction:rtl; z-index:2; }
+  .tc-tip b { display:block; font-size:14px; }
+  .tc-key { display:flex; gap:14px; justify-content:flex-end; font-size:11px; color:var(--dim); direction:rtl; margin-top:2px; }
+  .tc-key i { display:inline-block; width:16px; height:2px; vertical-align:middle; margin-inline-end:5px; border-radius:2px; }
 `;
 
 /* منوی عمودی + محتوا. `active` مسیرِ صفحه‌ی جاری است و `bot` اسکوپِ رباتِ انتخاب‌شده
@@ -217,6 +234,86 @@ document.addEventListener('click', (e) => {
     setTimeout(() => { el.textContent = t; }, 1200);
   });
 });
+// 📈 نمودارِ ترند (trendChart): خطِ عمودی روی نزدیک‌ترین روز + تولتیپ. داده در data-tc؛
+// متن فقط با textContent (هیچ innerHTML). کیبورد: فوکوس روی نمودار + ← → روز به روز.
+(() => {
+  const dataOf = (svg) => svg._tc || (svg._tc = JSON.parse(svg.dataset.tc || '[]'));
+  const hide = (svg) => {
+    svg.querySelector('.tc-xh')?.setAttribute('opacity', '0');
+    svg.querySelector('.tc-dot')?.setAttribute('opacity', '0');
+    const tip = svg.parentElement.querySelector('.tc-tip');
+    if (tip) tip.hidden = true;
+  };
+  const show = (svg, i) => {
+    const data = dataOf(svg);
+    if (!data.length) return;
+    i = Math.max(0, Math.min(data.length - 1, i));
+    svg._i = i;
+    const [x, y, date, v, a] = data[i];
+    const xh = svg.querySelector('.tc-xh'), dot = svg.querySelector('.tc-dot');
+    xh.setAttribute('x1', x); xh.setAttribute('x2', x); xh.setAttribute('opacity', '0.35');
+    if (y === null) dot.setAttribute('opacity', '0');
+    else { dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('opacity', '1'); }
+    const tip = svg.parentElement.querySelector('.tc-tip');
+    tip.textContent = '';
+    const b = document.createElement('b');
+    b.textContent = v === '' ? 'بدونِ داده' : v;
+    tip.appendChild(b);
+    if (a !== null && a !== undefined) {
+      const s = document.createElement('div');
+      s.textContent = 'میانگینِ ۷ روزه: ' + (a || '-');
+      tip.appendChild(s);
+    }
+    const d = document.createElement('div');
+    d.className = 'muted';
+    d.textContent = date;
+    tip.appendChild(d);
+    tip.hidden = false;
+    const W = Number(svg.dataset.w) || 480;
+    const r = svg.getBoundingClientRect(), pr = svg.parentElement.getBoundingClientRect();
+    const px = (x / W) * r.width + (r.left - pr.left);
+    tip.style.left = Math.max(0, Math.min(px - tip.offsetWidth / 2, pr.width - tip.offsetWidth)) + 'px';
+    const py = y === null ? 0 : (y / W) * r.width;
+    tip.style.top = Math.max(0, py - tip.offsetHeight - 10) + 'px';
+  };
+  const near = (svg, clientX) => {
+    const data = dataOf(svg), r = svg.getBoundingClientRect();
+    const vx = ((clientX - r.left) / r.width) * (Number(svg.dataset.w) || 480);
+    let best = 0;
+    for (let k = 1; k < data.length; k++) if (Math.abs(data[k][0] - vx) < Math.abs(data[best][0] - vx)) best = k;
+    return best;
+  };
+  const onPoint = (e) => {
+    const svg = e.target.closest && e.target.closest('svg[data-tc]');
+    if (svg) show(svg, near(svg, e.clientX));
+  };
+  document.addEventListener('pointermove', onPoint);
+  document.addEventListener('pointerdown', onPoint);
+  document.addEventListener('pointerout', (e) => {
+    // لمس: انگشت بلند شد ولی تولتیپ می‌ماند تا لمسِ بعدی یا رفتنِ فوکوس (focusout)
+    if (e.pointerType === 'touch') return;
+    const svg = e.target.closest && e.target.closest('svg[data-tc]');
+    if (svg && !(e.relatedTarget && svg.contains(e.relatedTarget))) hide(svg);
+  });
+  document.addEventListener('focusin', (e) => {
+    // فوکوسِ کیبورد ⟵ آخرین روز؛ ولی اگر همین الان با لمس/کلیک روزی انتخاب شده، همان بماند
+    const svg = e.target;
+    if (!svg.matches || !svg.matches('svg[data-tc]')) return;
+    const tip = svg.parentElement.querySelector('.tc-tip');
+    if (tip && tip.hidden) show(svg, dataOf(svg).length - 1);
+  });
+  document.addEventListener('focusout', (e) => {
+    if (e.target.matches && e.target.matches('svg[data-tc]')) hide(e.target);
+  });
+  document.addEventListener('keydown', (e) => {
+    const svg = document.activeElement;
+    if (!svg || !svg.matches || !svg.matches('svg[data-tc]')) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      show(svg, (svg._i ?? dataOf(svg).length - 1) + (e.key === 'ArrowRight' ? 1 : -1));
+    }
+  });
+})();
 // منوی کشوییِ ربات (و هر select دیگری با data-autosubmit) بدون دکمه‌ی «برو» کار می‌کند
 document.addEventListener('change', (e) => {
   if (e.target.matches('select[data-autosubmit]')) e.target.form?.submit();
@@ -292,11 +389,13 @@ export function statusBadge(s) {
 /* انتخابگرِ بازه‌ی **یک بخش** — لینک‌هایی که فقط پارامترِ خودشان را عوض می‌کنند و بقیه‌ی
    فیلترهای صفحه را دست‌نخورده نگه می‌دارند. بدونِ جاوااسکریپت، پس با back/forward مرورگر
    و با اشتراک‌گذاریِ لینک هم درست کار می‌کند. */
-export function rangePicker(url, name, cur, { keys = RANGE_KEYS, label = 'بازه' } = {}) {
+/* `ranges` (اختیاری، افزایشی): صفحه‌ای که بازه‌های خودش را دارد (ترندها: ۳۰/۹۰ روز/کل)
+   همین helper را صدا می‌زند و برچسب‌ها را از نقشه‌ی خودش می‌دهد. ندادنش = رفتارِ قبلی. */
+export function rangePicker(url, name, cur, { keys = RANGE_KEYS, label = 'بازه', ranges = RANGES } = {}) {
   const pills = keys.map((k) => {
     const q = new URLSearchParams(url.searchParams);
     q.set(name, k);
-    return `<a href="${esc(url.pathname)}?${esc(q.toString())}" class="pill ${k === cur ? 'on' : ''}">${esc(RANGES[k].label)}</a>`;
+    return `<a href="${esc(url.pathname)}?${esc(q.toString())}" class="pill ${k === cur ? 'on' : ''}">${esc(ranges[k].label)}</a>`;
   }).join('');
   return `<span class="rangepick"><span class="muted">${esc(label)}:</span><span class="pills">${pills}</span></span>`;
 }

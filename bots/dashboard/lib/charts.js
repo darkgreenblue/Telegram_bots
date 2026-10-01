@@ -129,3 +129,87 @@ export function timeChart(points, { height = 190, color = CAT[0], area = true, l
     ${xlabels}${hover}
   </svg></div>`;
 }
+
+/* ── 📈 نمودارِ ترند (صفحه‌ی «ترندها»): یک سنجه در طولِ زمان، تک‌سری ──
+   تفاوت با `timeChart`:
+   • **مقیاسِ یکنواخت** (بدونِ `preserveAspectRatio="none"`)، پس برچسب‌ها کش نمی‌آیند و
+     کاشیِ کوچک کنارِ هم می‌نشیند (small multiples) بدونِ اسکرولِ افقی روی موبایل.
+   • **جای خالی برای روزِ بی‌داده** (`null` ⟵ قطعِ خط، نه صفرِ ساختگی).
+   • محورِ عمودیِ «تمیز» با منفی (سودِ روزانه) و کفِ دلخواه (نمره‌ی ۱ تا ۵).
+   • سنجه‌ی «جریانی» (`avg`) دو لایه دارد: روزانه کم‌رنگ و نازک، میانگینِ ۷ روزه پررنگ؛
+     هر دو یک هویت‌اند (یک رنگ) و لجندِ متنی زیرِ نمودار می‌آید (هرگز فقط رنگ).
+   • **hover با خطِ عمودی که روی روز می‌چسبد** + تولتیپ (اسکریپتِ سراسریِ `html.js`، داده در
+     `data-tc`)؛ بدونِ JS هم چیزی پنهان نمی‌ماند چون عددِ آخر روی کاشی و جدولِ روزانه زیرِ
+     هر بخش هست. */
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const r = raw / p;
+  return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10) * p;
+}
+
+export function trendChart(points, { fmtV = (v) => fmt(v), fmtTick = fmtV, yMin = null, avg = null, height = 170, label = '' } = {}) {
+  const ys = points.map((p) => (Number.isFinite(p.y) ? p.y : null));
+  const as = avg ? avg.map((v) => (Number.isFinite(v) ? v : null)) : null;
+  const vals = [...ys, ...(as || [])].filter((v) => v !== null);
+  if (points.length < 2 || !vals.length) return '<p class="muted">هنوز نقطه‌ی کافی برای نمودار نیست.</p>';
+  const W = 480, H = height, padL = 68, padR = 14, padT = 12, padB = 26;
+  let lo = Math.min(yMin ?? 0, ...vals);
+  let hi = Math.max(...vals);
+  if (hi <= lo) hi = lo + (Math.abs(lo) || 1);
+  const step = niceStep((hi - lo) / 3);
+  if (yMin === null || lo < yMin) lo = Math.floor(lo / step) * step;
+  hi = lo + Math.ceil((hi - lo) / step) * step;
+  const xOf = (i) => padL + (i * (W - padL - padR)) / (points.length - 1);
+  const yOf = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+  const path = (arr) => {
+    let d = '', pen = false;
+    arr.forEach((v, i) => {
+      if (v === null) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)} `;
+      pen = true;
+    });
+    return d.trim();
+  };
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  const grid = ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}"
+      stroke="${v === 0 && lo < 0 ? DIM : GRID}" stroke-width="1"${v === 0 && lo < 0 ? ' opacity="0.55"' : ''}/>`
+    + `<text x="${padL - 7}" y="${(yOf(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${DIM}">${esc(fmtTick(v))}</text>`).join('');
+  const n = points.length;
+  const xIdx = [...new Set([0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1])];
+  const xl = xIdx.map((i) => `<text x="${xOf(i).toFixed(1)}" y="${H - 7}" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}"
+      font-size="11" fill="${DIM}">${esc(points[i].x)}</text>`).join('');
+  const main = as || ys;
+  const color = CAT[0];
+  let lastI = -1;
+  main.forEach((v, i) => { if (v !== null) lastI = i; });
+  const baseY = yOf(Math.max(lo, 0));
+  // سطحِ کم‌رنگ فقط برای سری‌ای که به صفر تکیه دارد و پیوسته است (سطحِ بریده گمراه می‌کند)
+  const area = !as && lo >= 0 && ys.every((v) => v !== null)
+    ? `<path d="${path(ys)} L${xOf(n - 1).toFixed(1)},${baseY.toFixed(1)} L${xOf(0).toFixed(1)},${baseY.toFixed(1)} Z" fill="${color}" opacity="0.1"/>` : '';
+  const lines = as
+    ? `<path d="${path(ys)}" fill="none" stroke="${ORD[0]}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+       <path d="${path(as)}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+    : `<path d="${path(ys)}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const endDot = lastI >= 0
+    ? `<circle cx="${xOf(lastI).toFixed(1)}" cy="${yOf(main[lastI]).toFixed(1)}" r="4" fill="${color}" stroke="#fff" stroke-width="2"/>` : '';
+  // دیتای hover: مختصاتِ x/y در واحدِ viewBox + متنِ آماده (ارقامِ فارسی). اسکریپت فقط textContent می‌گذارد.
+  const data = points.map((p, i) => [
+    Number(xOf(i).toFixed(1)),
+    main[i] === null ? null : Number(yOf(main[i]).toFixed(1)),
+    p.title || p.x,
+    ys[i] === null ? '' : fmtV(ys[i]),
+    as ? (as[i] === null ? '' : fmtV(as[i])) : null,
+  ]);
+  return `<div class="tc" dir="ltr">
+    <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" tabindex="0" aria-label="${esc(label)}"
+      data-tc="${esc(JSON.stringify(data))}" data-w="${W}" data-top="${padT}" data-bot="${H - padB}">
+      ${grid}${area}${lines}${endDot}${xl}
+      <line class="tc-xh" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="${INK}" stroke-width="1" opacity="0"/>
+      <circle class="tc-dot" r="4" fill="${color}" stroke="#fff" stroke-width="2" opacity="0"/>
+    </svg>
+    <div class="tc-tip" hidden></div>
+    ${as ? `<div class="tc-key"><span><i style="background:${ORD[0]}"></i>روزانه</span><span><i style="background:${color};height:3px"></i>میانگینِ ۷ روزه</span></div>` : ''}
+  </div>`;
+}

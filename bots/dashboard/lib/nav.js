@@ -35,6 +35,7 @@ export const NAV = [
     key: 'analytics', href: '/dash', label: 'آمار تحلیلی', icon: '📊',
     children: [
       ['/dash', '🏠 نمای کلی'],
+      ['/trends', '📈 ترندها'],
       ['/acquisition', '📥 جذب و کانال‌ها'],
       ['/engagement', '🔥 درگیری و چسبندگی'],
       ['/retention', '🔁 ماندگاری و کوهورت'],

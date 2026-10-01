@@ -20,7 +20,7 @@ const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
 const BUILD_BUDGET_MS = 3 * 60 * 1000;
 // `/marketing` این‌جا فقط **آمارِ** صفحه است (JSON)؛ فرم‌ها و فهرستِ کمپین‌ها زنده رندر می‌شوند
 // (`marketingBody`)، پس لینکِ کمپینِ تازه بی‌درنگ دیده می‌شود.
-const ANALYTICS_PATHS = new Set(['/dash', '/engagement', '/acquisition', '/economics', '/funnels', '/screens', '/retention', '/marketing']);
+const ANALYTICS_PATHS = new Set(['/dash', '/trends', '/engagement', '/acquisition', '/economics', '/funnels', '/screens', '/retention', '/marketing']);
 
 let running = false;
 let runningKey = '';

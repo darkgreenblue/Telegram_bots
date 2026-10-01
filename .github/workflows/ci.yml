@@ -306,6 +306,12 @@ jobs:
         if: matrix.bot == 'dashboard'
         run: node tools/check-dash.mjs
 
+      # 📈 ترندها: آخرین نقطه‌ی هر نمودار = عددِ نمای کلی (همان gather)، مرزِ روزِ تهران روی
+      # خودِ لبه، یخ‌بودنِ ثبتِ شبانه، و اینکه خطای خواندن هرگز روزِ صفر ثبت نکند.
+      - name: Trends page check
+        if: matrix.bot == 'dashboard'
+        run: node tools/check-trends.mjs
+
       # کشِ گزارش نباید داده‌ی فیلترهای متفاوت را قاطی کند یا مسیر پشتیبانی را پشتِ
       # محاسبه‌ی تحلیلی نگه دارد؛ این‌ها خطاهای UX هستند و در تستِ عددهای BI دیده نمی‌شوند.
       - name: Dashboard cache and fast-path check

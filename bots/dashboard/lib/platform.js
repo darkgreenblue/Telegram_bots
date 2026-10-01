@@ -92,6 +92,22 @@ pdb.exec(`
     PRIMARY KEY (bot, day)
   );
 
+  /* 📈 ترندها: عددِ هر سنجه‌ی سرخطِ نمای کلی در **پایانِ** هر روزِ تهران (lib/trends.js).
+     ردیف یخ است: فقط INSERT OR IGNORE، هرگز بازنویسی — مگر نسخه‌ی تعریفِ سنجه (v)
+     عوض شود که آن‌وقت تاریخچه‌ی همان سنجه از نو ساخته می‌شود. src: night = ثبتِ شبانه،
+     rebuilt = بازسازی‌شده از دیتای خام بعد از گذشتنِ روز (اولین اجرا یا پرکردنِ جاافتاده).
+     پول این‌جا **نیست**: ورودی‌هایش بعداً دستی وارد می‌شوند و همیشه زنده از profitFor می‌آید. */
+  CREATE TABLE IF NOT EXISTS trend_daily (
+    scope      TEXT    NOT NULL,
+    day        TEXT    NOT NULL,
+    metric     TEXT    NOT NULL,
+    value      REAL,
+    v          INTEGER NOT NULL DEFAULT 1,
+    src        TEXT    NOT NULL DEFAULT 'night',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (scope, day, metric)
+  );
+
   CREATE TABLE IF NOT EXISTS events_rollup (
     bot   TEXT    NOT NULL,
     day   TEXT    NOT NULL,

@@ -33,6 +33,7 @@ import { acquisitionSettings } from './routes/acquisition.js';
 import { cpaDaySet, economicsPage } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
 import { scheduleOwnerReport } from './lib/owner-report.js';
+import { scheduleTrends } from './lib/trends.js';
 import { cachedAnalyticsBody, prewarmDashCache, refreshAnalyticsSection } from './lib/dash-cache.js';
 
 /* ===== ENV ===== */
@@ -64,6 +65,7 @@ const PAGES = {
   // حلقه‌ی HTTP را نگه ندارد. مسیرهای پشتیبانی، کاربران و عملیات عمداً پایین‌تر
   // مستقیم باقی مانده‌اند.
   '/dash': (url) => ['آمار تحلیلی', cachedAnalyticsBody(url)],
+  '/trends': (url) => ['ترندها', cachedAnalyticsBody(url)],
   '/engagement': (url) => ['درگیری و چسبندگی', cachedAnalyticsBody(url)],
   '/acquisition': (url) => ['جذب و کانال‌ها', cachedAnalyticsBody(url)],
   '/economics': (url) => ['اقتصاد و هزینه', economicsPage(url)],
@@ -262,6 +264,7 @@ server.listen(PORT, '127.0.0.1', () => log(`✅ dashboard listening on http://12
 registerGlobalErrorHandlers('dashboard');
 scheduleMaintenance(); // rollup روزانه‌ی رویدادها (+ حذف خام فقط اگر events_retention_days ست شده باشد)
 scheduleOwnerReport(); // 📊 گزارشِ شبانه‌ی ۰۰:۰۰ تهران برای مالک (متن این‌جا ساخته، ربات می‌فرستد)
+scheduleTrends(); // 📈 ثبتِ شبانه‌ی سنجه‌های نمای کلی برای صفحه‌ی ترندها (worker کم‌اولویت)
 prewarmDashCache(); // نمای معمول بدون معطل‌کردنِ نخستین بازدیدکننده ساخته می‌شود
 process.once('SIGINT', () => server.close());
 process.once('SIGTERM', () => server.close());
