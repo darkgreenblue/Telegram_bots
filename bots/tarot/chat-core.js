@@ -732,10 +732,54 @@ export function chatBtnLabel(s) {
   return `${keep.trimEnd()}…`;
 }
 
+/* 🧾 **جوابِ متنِ خام پذیرفته می‌شود** (v3.141.0، موردِ ۵ِ بازبینیِ مالک).
+ *
+ * ریشه‌یابی روی لاگِ خطای سرور (۶۰۰۰ خط، ۱۴۰۵/۰۷/۰۹): مدلِ اصلی خطا نمی‌دهد (۴ تایم‌اوت در
+ * کلِ بازه) و جوابش هم بریده نمی‌شود (از ۶۸۵ فراخوانیِ گفتگو فقط ۱ به سقفِ توکن رسید).
+ * چیزی که ردش می‌کرد خودِ ما بودیم: مدل گاهی جوابِ **سالم** را بدونِ پاکتِ JSON می‌دهد
+ * («Unexpected token 'ا'…»)، `validate` ردش می‌کرد، تلاشِ دوم می‌رفت و گاهی کار به مدلِ
+ * پشتیبان (لحنِ دیگر) می‌کشید. یعنی یک جوابِ خوب دور ریخته می‌شد تا یک جوابِ دیگر خریده شود.
+ *
+ * حالا متنی که **هیچ آکولادی ندارد** (پس قطعاً تلاشِ ناقص برای JSON نیست) خودِ جواب حساب
+ * می‌شود. پرچم‌ها در این نوبت `false` می‌مانند (دکمه‌ی CTAِ فالِ تازه/پشتیبانی نمی‌آید) و
+ * نبودِ پیشنهاد را همان تعمیرِ هدف‌دارِ موجود روی **همان مدل** می‌گیرد، پس صدا عوض نمی‌شود.
+ * کف و سقفِ طول دقیقاً مثلِ قبل اعمال می‌شود.
+ *
+ * ⚠️ برگشتِ سهویِ پرامپت به «متنِ خام» دیگر از این‌جا قرمز نمی‌شود، ولی ادعای جدای
+ * `check-chat` («فقط یک JSON» در پرامپت) هنوز آن را قفل کرده، و `salvaged` در لاگ
+ * (`🧾 CHAT_PLAIN`) و آزمایشگاه («غیرِ JSON») شمرده می‌شود تا نرخش نامرئی نشود.
+ * رول‌بکِ یک‌خطی: `CHAT_PLAIN_SALVAGE = false`. */
+export const CHAT_PLAIN_SALVAGE = true;
+
+const stripFence = (s) => s.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
+
+/** شکلِ خروجیِ ردشده، برای لاگ؛ **هرگز** محتوا برنمی‌گرداند، فقط یک کد. */
+export function chatRejectReason(raw) {
+  const t = stripFence(String(raw || '').trim());
+  if (!t) return 'empty';
+  if (!/[{}]/.test(t)) return 'plain';
+  const i = t.indexOf('{'), j = t.lastIndexOf('}');
+  let o = null;
+  try { o = JSON.parse(i >= 0 && j > i ? t.slice(i, j + 1) : t); } catch { return 'bad_json'; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'not_object';
+  if (!(CHAT_OUT_KEYS.text in o)) return 'no_answer_key';
+  const n = String(o[CHAT_OUT_KEYS.text] ?? '').trim().length;
+  if (n < CHAT_MIN_CHARS) return 'short';
+  if (n > CHAT_HARD_CHARS) return 'long';
+  return 'ok';
+}
+
 /** پاکت را باز می‌کند. `null` یعنی غیرقابلِ استفاده ⟵ `validate` رد می‌کند ⟵ retry. */
 export function parseChatOut(raw) {
   let o = null;
-  try { o = parseJsonLoose(String(raw || '')); } catch { o = null; }
+  let salvaged = false;
+  const plain = stripFence(String(raw || '').trim());
+  if (CHAT_PLAIN_SALVAGE && plain && !/[{}]/.test(plain)) {
+    o = { [CHAT_OUT_KEYS.text]: plain };
+    salvaged = true;
+  } else {
+    try { o = parseJsonLoose(String(raw || '')); } catch { o = null; }
+  }
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
   const text = String(o[CHAT_OUT_KEYS.text] ?? '').trim();
   if (text.length < CHAT_MIN_CHARS || text.length > CHAT_HARD_CHARS) return null;
@@ -756,6 +800,7 @@ export function parseChatOut(raw) {
     followUpRaw: fuRaw,
     fuBad,
     end: truthy(o[CHAT_OUT_KEYS.end]),
+    salvaged,
   };
 }
 

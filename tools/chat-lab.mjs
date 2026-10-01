@@ -573,7 +573,7 @@ async function runConversation(persona, base, arm, rep) {
     // 🔤 همان تعریفِ ربات: واژه‌ی لاتینی که خودِ کاربر نوشته مجاز است.
     const userText = [base.question, ...history.filter((h) => h.role === 'user').map((h) => h.text), q].join('\n');
     let needs = chatFixNeeds(outObj, { crisisCtx, userText });
-    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, json: !!parseChatOut(res.out) };
+    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, json: (() => { const o = parseChatOut(res.out); return !!o && !o.salvaged; })() };
     const fix = { fired: false, fixed: false, ms: 0 };
     if (thin || needs.offer || needs.safety || needs.latin) {
       fix.fired = true;

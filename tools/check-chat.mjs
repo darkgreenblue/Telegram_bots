@@ -976,8 +976,28 @@ console.log('\n▶ ۱۴) قلاب و پاکسازی');
   ok(chat.chatOutOk(env('ن'.repeat(100))) === true, 'validate خروجیِ عادی را می‌پذیرد');
   ok(chat.chatOutOk(env('باشه')) === false, 'جوابِ تک‌کلمه‌ای رد می‌شود (خرابیِ مدل)');
   ok(chat.chatOutOk(env('ن'.repeat(2000))) === false, 'و خروجیِ بیش از حد بلند هم');
-  ok(chat.chatOutOk('متنِ خامِ بدونِ پاکت ولی کاملاً به‌اندازه و سالم.') === false,
-    'و متنِ خامِ بدونِ پاکت هم رد می‌شود (وگرنه برگشتِ سهویِ پرامپت بی‌صدا می‌ماند)');
+  /* 🧾 v3.141.0: این ادعا **معکوس** شد، نه حذف. ریشه‌ی افتادن به مدلِ پشتیبان همین ردِ
+   * جوابِ سالمِ بی‌پاکت بود (لاگِ سرور). برگشتِ سهویِ پرامپت به متنِ خام همچنان با ادعای
+   * «فقط یک JSON» در بخشِ ۱۳ قفل است. */
+  const plainTxt = 'متنِ خامِ بدونِ پاکت ولی کاملاً به‌اندازه و سالم.';
+  ok(chat.CHAT_PLAIN_SALVAGE === true, '🧾 پذیرشِ متنِ خام روشن است (رول‌بک: false)');
+  ok(chat.chatOutOk(plainTxt) === true, '🧾 جوابِ سالمِ بی‌پاکت پذیرفته می‌شود (دیگر به retry/مدلِ پشتیبان نمی‌افتد)');
+  const pp = chat.parseChatOut(plainTxt);
+  ok(pp && pp.salvaged === true && pp.text === plainTxt && !pp.newReading && !pp.support,
+    '🧾 و با پرچمِ salvaged برمی‌گردد، بدونِ پرچمِ نیتِ ساختگی');
+  ok(chat.parseChatOut('```\n' + plainTxt + '\n```')?.text === plainTxt, '🧾 حصارِ کد دورِ متنِ خام پاک می‌شود');
+  ok(chat.chatOutOk('باشه') === false, '🧾 ولی متنِ خامِ تک‌کلمه‌ای همچنان رد می‌شود (همان کف)');
+  ok(chat.chatOutOk('ن'.repeat(2000)) === false, '🧾 و متنِ خامِ بیش از حد بلند هم (همان سقف)');
+  ok(chat.chatOutOk('{"answer": "' + 'ن'.repeat(60)) === false,
+    '🧾 کنترلِ معکوس: JSONِ ناقص (آکولاد دارد) خام حساب **نمی‌شود** و رد می‌شود');
+  const env2 = (t) => JSON.stringify({ answer: t });
+  ok(chat.parseChatOut(env2('ن'.repeat(100)))?.salvaged === false, '🧾 پاکتِ سالم salvaged نیست');
+  ok(chat.chatRejectReason('') === 'empty' && chat.chatRejectReason(plainTxt) === 'plain'
+    && chat.chatRejectReason('{"answer": "x') === 'bad_json'    && chat.chatRejectReason('{"text":"' + 'ن'.repeat(50) + '"}') === 'no_answer_key'
+    && chat.chatRejectReason(env2('باشه')) === 'short' && chat.chatRejectReason(env2('ن'.repeat(2000))) === 'long'
+    && chat.chatRejectReason(env2('ن'.repeat(100))) === 'ok', '🧾 کدِ دلیلِ رد برای هر شکل درست است');
+  ok(!chat.chatRejectReason('{"answer":"' + 'رازِ کاربر'.repeat(5) + '"}').includes('راز'),
+    '🧾 کدِ دلیل هرگز محتوا برنمی‌گرداند');
   ok(chat.chatShapeOk === undefined, 'validateِ نسلِ متنِ خام پاک شد، نه خاموش (بند ۹/۰)');
 }
 
@@ -987,7 +1007,16 @@ console.log('\n▶ ۱۵) حسابداری و رویدادها');
   const hc = bodyOf(CODE, 'async function runChatTurn(');
   ok(/kind: 'chat', refId: rid, userId: uid/.test(hc),
     "هزینه با kind='chat' و شناسه‌ی فال در llm_usage ثبت می‌شود");
-  ok(/validate: chatOutOk/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
+  ok(/validate: chatValidateLogged/.test(hc), 'و خروجی validate می‌شود (هیچ فراخوانی بدونِ validate)');
+  {
+    const vb = bodyOf(CODE, 'function chatValidateLogged(');
+    ok(/const ok = chatOutOk\(out\)/.test(vb) && /return ok;/.test(vb),
+      '🧾 validateِ لاگ‌دار همان chatOutOk را برمی‌گرداند (فقط لاگ اضافه می‌کند)');
+    ok(/CHAT_REJECT reason=\$\{chatRejectReason\(out\)\}/.test(vb) && !/\$\{out\}/.test(vb),
+      '🧾 لاگِ رد فقط کد و طول دارد، نه متنِ خروجی');
+    ok(/plain: salvaged \? 1 : 0/.test(hc) && /attempts: res\.attempts/.test(hc),
+      '🧾 رویدادِ chat_message نرخِ متنِ خام و تعدادِ تلاش را ثبت می‌کند');
+  }
   ok(/maxTokens: CHAT_MAX_TOKENS/.test(hc), 'سقفِ توکنِ خروجی صریح است');
   for (const ev of ['chat_offer_shown', 'chat_opened', 'chat_message', 'chat_paywall',
     'chat_llm_failed', 'chat_refund', 'chat_crisis', 'chat_exited']) {

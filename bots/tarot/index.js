@@ -80,7 +80,7 @@ import {
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, newReadingAskIn, hookOk,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
-  cleanChatReply, chatOutOk, parseChatOut, questionWordsOf, configureChatLang,
+  cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
   CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
 } from './chat-core.js';
 
@@ -8275,6 +8275,15 @@ function chatHadCrisis(uid, rid) {
   try { return !!chatCrisisStmt.get(uid, rid); } catch { return true; } // شک ⟵ حذف نکن
 }
 
+/* 🧾 `validate`ِ گفتگو + یک خطِ لاگِ **شکل** برای هر ردِ پاکت (v3.141.0). فقط کدِ دلیل و
+ * طول، هرگز محتوا. بدونِ این، «مدل جواب داد ولی رد شد» و «مدل جوابِ بد داد» در لاگ یکی
+ * بودند و ریشه‌ی افتادن به مدلِ پشتیبان فقط از ردِ یک خطای JSON حدس زده می‌شد. */
+function chatValidateLogged(out) {
+  const ok = chatOutOk(out);
+  if (!ok) logErr(`🧾 CHAT_REJECT reason=${chatRejectReason(out)} len=${String(out || '').length}`);
+  return ok;
+}
+
 async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx = null, via = 'typed' }) {
   const rid = r.id;
   chatInflight.add(uid);
@@ -8306,7 +8315,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatOutOk, kind: 'chat', refId: rid, userId: uid,
+      validate: chatValidateLogged, kind: 'chat', refId: rid, userId: uid,
     }, CHAT_PLAN));
 
     // ۹) شکستِ کامل → ریفاندِ فوری. پولِ کاربر هرگز در حالتِ نامعلوم نمی‌ماند (بند ۹).
@@ -8324,6 +8333,8 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      * می‌ماند: اگر روزی `validate` عوض شود، جوابِ پول‌داده نباید روی `null` بترکد. */
     let out = parseChatOut(res.out) || { text: res.out, newReading: false, support: false };
     let model = res.model || '';
+    const salvaged = !!out.salvaged;
+    if (salvaged) log(`🧾 CHAT_PLAIN salvaged model=${model} attempts=${res.attempts || 1} rid=${rid}`);
 
     /* 🪫 کفِ محتوا، قدمِ ۱: **یک** تلاشِ تعمیرِ آگاه (ثابتِ `CHAT_FLOOR` بالا).
      * تذکر به **آخرین پیامِ user** چسبانده می‌شود نه به `system`، و این اجباری است:
@@ -8402,6 +8413,8 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       q_chars: text.length, has_fu: followUp ? 1 : 0, has_offer: out.offer ? 1 : 0,
       new_reading: out.newReading ? 1 : 0, support: out.support ? 1 : 0, end: out.end ? 1 : 0,
       model, fixed: fixed ? 1 : 0,
+      // 🧾 افزایشی (v3.141.0): نوبتِ چندمِ برنامه جواب داد، و آیا متنِ خامِ بی‌پاکت بود.
+      attempts: res.attempts || 1, plain: salvaged ? 1 : 0,
     });
     /* 🪫 کفِ محتوا، قدمِ ۲: تعمیر هم نگرفت ⟵ جواب می‌رود، **الماس برمی‌گردد**، بی‌صدا.
      * ترتیب عمدی است: ردیفِ `assistant` از قبل ثبت شده، پس جاروی یتیم‌ها این سؤال را
