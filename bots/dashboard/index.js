@@ -32,6 +32,7 @@ import { usersBody, usersCsv } from './routes/users.js';
 import { acquisitionSettings } from './routes/acquisition.js';
 import { cpaDaySet, economicsPage } from './routes/economics.js';
 import { scheduleMaintenance } from './lib/maintenance.js';
+import { scheduleOwnerReport } from './lib/owner-report.js';
 import { cachedAnalyticsBody, prewarmDashCache, refreshAnalyticsSection } from './lib/dash-cache.js';
 
 /* ===== ENV ===== */
@@ -260,6 +261,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => log(`✅ dashboard listening on http://127.0.0.1:${PORT} (فقط لوکال — دسترسی از تونل)`));
 registerGlobalErrorHandlers('dashboard');
 scheduleMaintenance(); // rollup روزانه‌ی رویدادها (+ حذف خام فقط اگر events_retention_days ست شده باشد)
+scheduleOwnerReport(); // 📊 گزارشِ شبانه‌ی ۰۰:۰۰ تهران برای مالک (متن این‌جا ساخته، ربات می‌فرستد)
 prewarmDashCache(); // نمای معمول بدون معطل‌کردنِ نخستین بازدیدکننده ساخته می‌شود
 process.once('SIGINT', () => server.close());
 process.once('SIGTERM', () => server.close());
