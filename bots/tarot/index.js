@@ -53,6 +53,7 @@ import * as RT from './receipt-tags.js';
 import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
+import { cardMismatch } from './card-integrity.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
 import * as CA from './cards-admin.js';
@@ -343,7 +344,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.141.0';
+const PRODUCT_VERSION = '3.142.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -754,6 +755,13 @@ const GATE_OK_STATUS = new Set(['member', 'administrator', 'creator']);
 // Rollback فوری: false کن → پرامپت و پیامِ جواب کاملاً محو، خوانش دقیقاً مثل قبل
 // (فال‌هایی که verdict شان در DB ذخیره شده بی‌ضرر می‌مانند و فقط نمایش داده نمی‌شوند).
 const DECISIVE_VERDICT_ENABLED = true;
+
+// 🃏 متنِ فال باید درباره‌ی همین کارت‌های کشیده‌شده باشد (card-integrity.js). خروجی‌ای که
+// دست‌کم دو کارتِ کشیده‌نشده را نام ببرد و هیچ‌کدام از کارت‌های خودش را نه، دوباره ساخته می‌شود.
+// رول‌بک: false. سقفِ تلاشِ اضافه کوچک است چون نرخِ واقعی ۱ در ۸٬۷۶۱ بود.
+const CARD_INTEGRITY = true;
+const CARD_MISMATCH_EXTRA_TRIES = 2;
+const CARD_KEYS = CARDS.map((c) => c.key);
 
 // 💳 صفحه‌ی «اعتبارت کافیه» به‌جای صفحه‌ی قیمت‌دار، برای کاربری که موجودی‌اش هزینه‌ی فال را
 // پوشش می‌دهد. از تحلیل جرنی: چند کاربر با موجودیِ دقیقاً کافی در confirm_pay مانده بودند،
@@ -4471,6 +4479,7 @@ async function callReadingLLM(readingId, armOpts = null) {
   let parsed = null;      // خروجیِ کاملاً معتبر (شاملِ جوابِ قاطع، اگر لازم باشد)
   let fallback = null;    // آخرین خروجیِ سالم بدونِ جوابِ قاطع — شبکه‌ی ایمنیِ ضدِ ریفاند
   let headlineTries = 0;
+  let cardMismatchTries = 0;
   const res = await orChatResilient(systemFinal, userMsg, {
     // برچسبِ حسابداری (بیرونِ بدنه‌ی ریکوئست؛ به سیم نمی‌رود)
     kind: 'reading', refId: readingId, userId: r.user_id,
@@ -4483,6 +4492,15 @@ async function callReadingLLM(readingId, armOpts = null) {
       if (v4) {
         // ساختارِ v4: تیزرِ هر کارت + سرخط + الگو + خوانشِ هر کارت + جمع‌بندی
         if (!checkV4Shape(obj, cards.length)) return false;
+        // 🃏 متنی که کلاً درباره‌ی کارت‌های دیگری است رد می‌شود (نه fallback: محتوایش غلط است).
+        // سقفِ تلاش دارد تا یک خطای بعید هرگز به ریفاند نرسد؛ بعد از آن پذیرفته و لاگ می‌شود.
+        if (CARD_INTEGRITY) {
+          const cm = cardMismatch(obj, cards.map((c) => c.key), CARD_KEYS, cardName, currentLang());
+          if (cm.bad) {
+            logErr(`🃏 CARD_MISMATCH reading#${readingId} try=${cardMismatchTries + 1} foreign=${cm.foreign.join(',')}`);
+            if (cardMismatchTries++ < CARD_MISMATCH_EXTRA_TRIES) return false;
+          }
+        }
         // سرخطِ بی‌جهت یا بدونِ «ولی» پذیرفته نمی‌شود؛ ولی مثل verdict، شکستِ نهاییِ آن
         // هرگز به ریفاند نمی‌رسد — آخرین خروجیِ سالم بدونِ سرخط تحویل می‌شود.
         // فرمولِ سرخط «نرم» است: یک تلاشِ اضافه می‌دهیم، بعد همان را می‌پذیریم.
