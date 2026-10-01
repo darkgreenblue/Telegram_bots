@@ -132,6 +132,16 @@ const rep = (s, from, to) => {
 };
 
 const PROMPT_VARIANTS = {
+  /* 🧪 دورِ ۱۴۰۵/۰۷/۰۹ (موارد ۱، ۲، ۳ از بازبینیِ ۲۶۴ گفتگوی واقعی، همه هم‌زمان چون هر سه در
+   * همان پرامپت می‌نشینند):
+   *   ۱) پیشنهادِ پایانی «بسته‌بندیِ دوباره» نباشد (نشونه/معیار/فرق/چک‌لیست/صمیمی‌تر)،
+   *   ۲) «کِی؟» یک بازه از خودِ فال بگیرد،
+   *   ۳) جواب کامل داده شود و بخشی‌اش برای پیشنهادِ پولیِ بعدی نگه داشته نشود.
+   * `A` فقط پرامپت است. `AH` همان پرامپت به‌علاوه‌ی یک خطِ **کد** است: برچسبِ دکمه‌های قبلیِ
+   * همین گفتگو به آخرین پیامِ کاربر می‌چسبد تا مدل بداند چه پیشنهادهایی قبلاً داده (پیشوندِ
+   * system دست نمی‌خورد، پس کش می‌ماند). */
+  A: (s) => labArmA(s),
+  AH: (s) => labArmA(s),
   /* 📭 `newread`/`newread2` (v3.139.0) پاک شدند نه خاموش: `newread2` برد و خودش پرامپتِ محصول
    * است. دورِ مختصرِ جفت‌شده روی `--set fix` (پرچمِ فالِ تازه، «باید روشن شود | نباید»):
    * خطِ پایه ۲/۶ | ۸/۸، `newread` (مثالِ «ازدواج در فالِ کار») ۱۳/۱۵ | ۱۸/۲۰، `newread2`
@@ -186,6 +196,32 @@ const PROMPT_VARIANTS = {
    * خودِ مکانیزم (`rep`، `systemFor`، نحوِ `model@variant`) سرِ جایش است و واریانتِ
    * بعدی فقط یک ردیف این‌جاست. */
 };
+function labArmA(s) {
+  const OFFER_OLD = '═══ خطِ آخر: پیشنهاد ═══', NEXT = '═══ فالِ تازه ═══';
+  const BRIEF_OLD = '- خطِ اول باید خودِ جواب باشد، نه مقدمه و نه بازگوییِ سؤال.\n';
+  const DASH_OLD = '- بدونِ خط تیره‌ی بلند. کلمه‌ی «خوانش»';
+  const i = s.indexOf(OFFER_OLD), j = s.indexOf(NEXT);
+  if (i < 0 || j < 0) { console.error('❌ لنگرِ بخشِ پیشنهاد در پرامپت نیست'); process.exit(1); }
+  let t = s.slice(0, i) + `═══ خطِ آخر: پیشنهاد ═══
+هر جواب، از همان جوابِ اول، با یک **پیشنهاد** در offer تمام می‌شود، از زبانِ **تو**: کاری که برایش می‌کنی و اجازه‌اش را می‌گیری.
+- فقط دو شکل، یک جمله: «می‌خوای …؟» یا «اگه بخوای می‌تونم … برات …».
+- ممنوع: خبرِ کارِ خودت، سؤالِ خالی، زبانِ او، «بیشتر بگم؟»، «در خدمتم».
+- پیشنهاد **چیزِ تازه و مخصوصِ همین آدم** بیاورد، نه چیزی که زیرِ جوابِ هر کسی بنشیند: قدمِ عملیِ بعدی، یک پیامِ آماده، آمادگی برای واکنشِ طرف، یا زاویه‌ی بازنشده‌ی کارت‌ها؛ هر نوبت نوعی دیگر.
+- بسته‌بندیِ دوباره‌ی حرفِ گفته‌شده ممنوع: نشونه، معیار، فرق، فهرست، چک‌لیست، «دقیق‌ترش»، یا نسخه‌ی صمیمی‌تر و کوتاه‌ترِ پیامی که نوشتی. بعد از پیام، قدمِ بعد: اگه جواب نداد یا سرد بود.
+- تنها استثنا wants_end است (offer خالی). خودت جمع‌بندی و خداحافظی نکن؛ «ممنون» پایان نیست.
+
+` + s.slice(j);
+  t = rep(t, BRIEF_OLD, `- خطِ اول خودِ جواب است، نه مقدمه یا بازگوییِ سؤال؛ جوابِ همین سؤال را کامل بده و چیزی را برای پیشنهاد نگه ندار.
+- «کِی؟»: بازه‌ای از خودِ فال بده (روز، هفته، ماه)؛ نه تاریخِ دقیق، نه «معلوم نیست».
+`);
+  return rep(t, DASH_OLD, '- کلمه‌ی «خوانش»');
+}
+/* خطِ «دکمه‌های قبلی» برای بازوی `…H`. فقط برچسب‌ها، نه متنِ جواب‌ها (آن‌ها در تاریخچه هست). */
+const offerHistoryHint = (history) => {
+  const labs = history.filter((h) => h.role === 'assistant' && h.follow_up).map((h) => `«${h.follow_up}»`).slice(-3);
+  return labs.length ? `\n\n(پیشنهادهای قبلیِ همین گفتگو: ${labs.join('، ')}. پیشنهادِ این نوبت از نوعِ دیگری باشد و حرفِ گفته‌شده را دوباره بسته‌بندی نکند.)` : '';
+};
+const INVALID_RAW = [];
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
 {
@@ -473,6 +509,10 @@ async function runConversation(persona, base, arm, rep) {
 
     const packed = packHistory(history);
     const messages = toMessages(system, packed, q, L);
+    if (armVariant(arm).endsWith('H')) {
+      const hint = offerHistoryHint(history);
+      if (hint) messages[messages.length - 1] = { ...messages[messages.length - 1], content: messages[messages.length - 1].content + hint };
+    }
     if (messages[0].content !== system) prefixStable = false;
 
     const usage = { in: 0, out: 0, usd: 0, cached: 0 };
@@ -492,7 +532,7 @@ async function runConversation(persona, base, arm, rep) {
     };
     const res = await call('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
-      validate: chatOutOk,
+      validate: (out) => { const ok = chatOutOk(out); if (!ok) INVALID_RAW.push({ arm, persona: persona.id, turn: t + 1, raw: String(out || '').slice(0, 500) }); return ok; },
       /* 💵 هزینه‌ی **واقعی** از خودِ پاسخِ OpenRouter. هرگز از روی توکن با یک جدولِ
        * قیمتِ هاردکد حساب نمی‌شود: همان اشتباه یک بار DeepSeek را «گران‌ترین» گزارش
        * کرد در حالی که ارزان‌ترین بود (بند ثبت‌شده‌ی دورِ ۹). */
@@ -656,6 +696,41 @@ for (const arm of ARM_LIST) {
       }
     }
   }
+}
+
+/* ═══════════════ 🧪 دورِ پیشنهاد/زمان/فالبک (۱۴۰۵/۰۷/۰۹) ═══════════════
+ * سنجه‌های **خودکارِ کمکی**؛ داورِ اصلی خودِ سشن است که متن‌ها را می‌خواند. هر سنجه این‌جا
+ * فقط برای این است که داوری روی چیزی شمرده‌شده بنشیند، نه حدس. */
+{
+  const REPACK = /(نشونه|نشانه|معیار|فرق|تفاوت|تفکیک|جدا کن|فهرست|چک‌?لیست|جدول|دقیق‌تر|صمیمی‌تر|کوتاه‌تر|گرم‌تر|خودمونی‌تر|بازنویسی|دو نسخه|دو لحن)/;
+  const WINDOW = /(روز|هفته|ماه|سال|فصل|تا آخر|تا عید|بهار|تابستان|پاییز|زمستان)/;
+  const TIMING_Q = /(کی\b|کی[؟?]|کِی|تا کی|چند وعده|دقیقاً کی|امسال|چه زمانی)/;
+  const arms = [...new Set(all.map((c) => c.arm))];
+  console.log(`\n${'═'.repeat(72)}\n🧪 پیشنهاد/زمان/فالبک per بازو\n${'═'.repeat(72)}`);
+  for (const arm of arms) {
+    const convs = all.filter((c) => c.arm === arm);
+    let ans = 0, rep = 0, chain = 0, tq = 0, tw = 0, fb = 0, retried = 0, fuNone = 0;
+    for (const c of convs) {
+      let prevRep = false;
+      for (const t of c.turns) {
+        if (!t.reply) continue;
+        ans++;
+        const label = `${t.followUp || ''} ${t.offer || ''}`;
+        const isRep = REPACK.test(t.followUp || '') || REPACK.test(String(t.reply).split('\n').pop());
+        if (isRep) rep++;
+        if (isRep && prevRep) chain++;
+        prevRep = isRep;
+        if (!t.followUp) fuNone++;
+        if (!t.viaTap && TIMING_Q.test(t.q)) { tq++; if (WINDOW.test(t.reply)) tw++; }
+        if (t.model && t.model !== armModel(arm)) fb++;
+        if ((t.attempts || 1) > 1) retried++;
+      }
+    }
+    console.log(`   ${arm}: جواب=${ans} | پیشنهادِ بسته‌بندیِ دوباره=${rep} (${(rep / Math.max(1, ans) * 100).toFixed(0)}٪) | زنجیره=${chain} | بی‌دکمه=${fuNone}`
+      + ` | «کِی؟» با بازه=${tw}/${tq} | فالبک=${fb} | تلاشِ دوباره=${retried}`);
+  }
+  console.log(`\n🧾 خروجی‌های ردشده توسطِ validate (مورد ۵، خام، ${INVALID_RAW.length} مورد):`);
+  for (const x of INVALID_RAW.slice(0, 20)) console.log(`   [${x.arm} ${x.persona} نوبتِ ${x.turn}] ${x.raw.replace(/\n/g, ' ⏎ ')}`);
 }
 
 /* ═══════════════ 🔮 پرچمِ فالِ تازه در برابرِ انتظار (v3.139.0) ═══════════════
