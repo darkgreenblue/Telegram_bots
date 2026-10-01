@@ -40,6 +40,7 @@ const TARGETS = [
   'bots/tarot/cards-admin.js',
   'bots/tarot/receipt-tags.js',
   'bots/tarot/card-rules.js',
+  'bots/tarot/card-integrity.js',
   'bots/voice2text/index.js',
   'bots/dashboard/index.js',
   'bots/daily-brief/index.js',
