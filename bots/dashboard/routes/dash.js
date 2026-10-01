@@ -66,7 +66,10 @@ const countOf = (db, q) => (q ? scalar(db, `SELECT COUNT(*) c FROM (${q.sql})`, 
 /* ═══ جمع‌آوریِ همه‌ی سنجه‌ها ═══
    تاروت ممکن است چند instance (per locale) داشته باشد؛ کاربرانشان مجزا هستند، پس
    شمارش‌ها جمع می‌شوند و بیشینه‌ها max گرفته می‌شوند. اتصال‌ها readonly و کوتاه‌اند. */
-function gather(botKey, { since, activeWindow }) {
+/* ⚠️ صادر می‌شود فقط برای چکِ CIِ ترندها (`tools/check-trends.mjs`): موتورِ ترند باید در
+   «الان» دقیقاً همین عددها را بدهد. اگر تعریفی این‌جا عوض شد، `v`ِ همان سنجه در
+   `lib/trends.js` را هم بالا ببر تا تاریخچه‌اش با تعریفِ تازه از نو ساخته شود. */
+export function gather(botKey, { since, activeWindow }) {
   const now = nowSec();
   const agg = {
     users: 0, newInRange: 0, newToday: 0, newWeek: 0,
@@ -501,6 +504,7 @@ export function dashBody(url) {
        دعوت / کانال‌ها / CPA / کمپین‌ها               → `/acquisition`
      چیزی حذف نشد؛ فقط سرِ جای درستش نشست. */
   const jump = `<div class="card"><div class="pills">
+    <a class="pill" href="/trends?bot=${esc(bot)}">📈 ترندِ همین عددها در طولِ زمان</a>
     <a class="pill" href="/engagement?bot=${esc(bot)}">🔥 درگیری و چسبندگی</a>
     <a class="pill" href="/retention?bot=${esc(bot)}">🔁 ماندگاری و کوهورت</a>
     <a class="pill" href="/acquisition?bot=${esc(bot)}">📥 جذب و کانال‌ها</a>
