@@ -345,7 +345,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.144.0';
+const PRODUCT_VERSION = '3.145.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -8427,7 +8427,7 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     }
     /* 🧾 متنِ نهایی از تک‌منبعِ `finalizeChatOut` (ربات و آزمایشگاه یکی): حرفِ خطرِ
      * بی‌دلیل جمله‌به‌جمله حذف می‌شود و پیشنهاد خطِ آخر می‌شود. */
-    const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP });
+    const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP, userText });
     if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fin.safetyStripped || fin.offerMissing) {
       track(db, uid, 'chat_fix', {
         reading_id: rid, thin: fixWanted.thin ? 1 : 0, offer: fixWanted.offer ? 1 : 0,

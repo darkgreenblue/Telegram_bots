@@ -548,7 +548,7 @@ async function runConversation(persona, base, arm, rep) {
         }
       }
     }
-    const fin = finalizeChatOut(outObj, { name: persona.name, crisisCtx });
+    const fin = finalizeChatOut(outObj, { name: persona.name, crisisCtx, userText });
     const reply = fin.reply;
     let check;
     try {

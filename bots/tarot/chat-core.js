@@ -612,10 +612,23 @@ export function splitChatLines(text, { max = CHAT_SPLIT_MAX_LINES, minChars = CH
   return out.join('\n');
 }
 
-export function cleanChatReply(text, { name = '' } = {}) {
+/* 🪪 v3.145.0: نامی که **خودِ کاربر** در سؤالِ فال یا پیام‌هایش نوشته نشت نیست و حذف نمی‌شود.
+ * 🐛 باگِ دورِ ۳ی کیفیت (۲ جواب): کاربر در سؤالِ «X زاده Y به Z» خودش را به نام صدا می‌زند،
+ * مدل همان نام را برمی‌گرداند، و حذفش جمله را می‌بُرد («احساسِ [نام] به رو»). حذفِ نام برای
+ * جلوگیری از **تکرارِ چاپلوسانه‌ی نامِ پروفایل** است (همان باگی که v4 بست)، نه برای سانسورِ
+ * چیزی که کاربر خودش گفته. تشخیص همان مرزِ واژه‌ی حذف است، پس «علی» در «علیرضا» کافی نیست. */
+const nameWordRe = (name) => {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // بعدِ نام: مرز، یا نیم‌فاصله/اعراب («نعیمِ من»، «نعیم‌ام») که هنوز همان واژه است.
+  return new RegExp(`(^|[\\s،,:!؟?.«»"'()])${esc}([\\s،,:!؟?.«»"'()\\u200c\\u064B-\\u065F]|$)`);
+};
+export function userWroteName(name, userText = '') {
+  return !!(name && name.length >= 2 && userText && nameWordRe(name).test(String(userText)));
+}
+export function cleanChatReply(text, { name = '', userText = '' } = {}) {
   let t = noDash(String(text || '')).trim();
   t = t.replace(LABEL_RE, '').trim();
-  if (name && name.length >= 2) {
+  if (name && name.length >= 2 && !userWroteName(name, userText)) {
     // فقط نامِ نشتی‌شده حذف می‌شود، نه هر کلمه‌ی مشابه: مرزِ واژه لازم است.
     // ⚠️ فشرده‌سازیِ فاصله عمداً `[^\S\n]` است نه `\s`: `\s` خطِ جدید را هم می‌خورد،
     // پس جوابی که مدل خودش چندخطی نوشته بود با نشتِ نام یک‌تکه می‌شد — بی‌صدا، و
@@ -951,7 +964,7 @@ export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.sa
  *    خطِ آخرِ متن خودش پیشنهاد بود، همان می‌ماند.
  * ⚠️ نوبتِ `wants_end` پیشنهاد نمی‌گیرد: کاربر خداحافظی کرده و نگه‌داشتنش همان
  * «جمع نکن و خداحافظی نکن» را از جهتِ مخالف نقض می‌کند. */
-export function finalizeChatOut(out, { name = '', crisisCtx = false } = {}) {
+export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = '' } = {}) {
   let body = String(out?.text || '');
   let offer = String(out?.offer || '');
   let safetyStripped = 0;
@@ -969,11 +982,11 @@ export function finalizeChatOut(out, { name = '', crisisCtx = false } = {}) {
     // فقط با الگوی واقعی؛ بدونِ الگو هر خطی «پیشنهاد» حساب می‌شد و خطِ آخرِ جواب می‌پرید.
     if (LANG.offer && k >= 1 && offerLineOk(ls[k])) body = ls.slice(0, k).join('\n');
   }
-  let reply = cleanChatReply(body, { name });
+  let reply = cleanChatReply(body, { name, userText });
   // ⚠️ بدنه‌ای که کلش حرفِ خطر بود و حذف شد، خالی می‌ماند. پیشنهادِ تنها جواب نیست؛
   // `reply` خالی برمی‌گردد و صداکننده آن را مثلِ شکستِ مدل (ریفاند) رفتار می‌کند.
   if (offerOk && reply) {
-    const line = cleanChatReply(offer, { name }).replace(/\n+/g, ' ').trim();
+    const line = cleanChatReply(offer, { name, userText }).replace(/\n+/g, ' ').trim();
     if (line) {
       const room = CHAT_HARD_CHARS - line.length - 1;
       reply = `${cut(reply, Math.max(CHAT_MIN_CHARS, room))}\n${line}`;
