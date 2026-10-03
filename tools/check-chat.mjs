@@ -549,7 +549,7 @@ console.log('\n▶ ۸) بودجه و کشِ پرامپت');
   const packed = chat.packHistory(rows);
   // 📒 بدترین حالت دفترِ پُر را هم دارد (v3.148.0)، وگرنه کرانِ کل بدونِ آن سنجیده می‌شد.
   const LFA8 = (await import('../bots/tarot/locales/fa.js')).default;
-  const fullLedger = Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: big, taken: false }));
+  const fullLedger = Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: big }));
   const msgs = chat.toMessages(big.slice(0, B.sys + 5400), packed, big, LFA8, { ledger: fullLedger });
   ok(chat.messagesChars(msgs) <= B.total + B.sys,
     `بدترین حالتِ ورودی کران‌دار است (${chat.messagesChars(msgs)} کاراکتر)`);
@@ -2726,13 +2726,13 @@ console.log('\n▶ ۲۴) دفترِ پیشنهادها');
   ];
   const led = chat.offerLedger(rows);
   ok(led.length === 3, `📒 هر جوابِ پیشنهاددار یک ردیف (۳)، جوابِ بی‌پیشنهاد و بی‌دکمه هیچ (${led.length})`);
-  ok(led[0]?.text === OFF1 && led[0]?.taken === true, '📒 تپِ دکمه (متنِ کاربر = follow_up) یعنی «قبول کرد»');
-  ok(led[1]?.text === OFF2 && led[1]?.taken === false, '📒 حرفِ دیگر بعد از پیشنهاد یعنی «جواب نداد»');
-  ok(led[2]?.text === 'حسش رو بگو' && led[2]?.taken === true,
-    '📒 خطِ آخرِ غیرپیشنهادی ⟵ متن از برچسبِ دکمه؛ و «آره»ی تایپی هم «قبول کرد» است');
-  // ⚠️ کنترلِ مثبت: آخرین پیشنهادِ بی‌پاسخ (هنوز پیامِ بعدی نیامده) «جواب نداد» نیست، ولی در دفتر هست.
+  ok(led[0]?.text === OFF1 && led[1]?.text === OFF2, '📒 متنِ پیشنهاد از خطِ آخرِ خودِ جواب (حرفِ تاروت‌خوان)');
+  ok(led[2]?.text === 'حسش رو بگو', '📒 خطِ آخرِ غیرپیشنهادی ⟵ متن از برچسبِ دکمه');
+  ok(led.every((x) => Object.keys(x).join() === 'text'),
+    '📒 ردیف فقط متن دارد (وضعیتِ «قبول/بی‌جواب» با دفترِ فشرده حذف شد؛ برنگشتنش یعنی کدِ مرده برنگشت)');
+  // ⚠️ کنترلِ مثبت: آخرین پیشنهادِ بی‌پاسخ (هنوز پیامِ بعدی نیامده) هم در دفتر هست.
   const tail = chat.offerLedger(rows.slice(0, 2));
-  ok(tail.length === 1 && tail[0].taken === false, '📒 پیشنهادی که هنوز پیامِ بعدی ندارد در دفتر هست و «قبول» حساب نمی‌شود');
+  ok(tail.length === 1 && tail[0].text === OFF1, '📒 پیشنهادی که هنوز پیامِ بعدی ندارد هم در دفتر هست');
   const many = Array.from({ length: 30 }, (_, i) => [
     { role: 'assistant', text: `جواب.\nمی‌خوای نکته‌ی ${i} رو برات باز کنم؟ ${'ی'.repeat(200)}`, follow_up: '' },
     { role: 'user', text: `سؤال ${i}` }]).flat();
@@ -2763,12 +2763,12 @@ console.log('\n▶ ۲۴) دفترِ پیشنهادها');
   ok(!/^\s*-\s/m.test(ledBody), '📏 دفتر هیچ خطِ بولتی ندارد (مدل از شکلِ بولت تقلید می‌کرد)');
   ok(ledBody.split('\n').length === 2, `📏 دفتر دقیقاً دو خط است: فهرست و یک قاعده (${ledBody.split('\n').length})`);
   ok(!/offer|قبول کرد|جواب نداد/.test(ledBody), '📏 نه واژه‌ی انگلیسیِ «offer» و نه برچسبِ قبول/رد در متنِ دفتر');
-  const ledTxt = LF.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'ی'.repeat(chat.CHAT_LEDGER_ITEM), taken: false })));
+  const ledTxt = LF.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'ی'.repeat(chat.CHAT_LEDGER_ITEM) })));
   ok(ledTxt.length <= chat.CHAT_BUDGET.ledger, `📒 دفترِ پُرِ فارسی داخلِ بودجه است (${ledTxt.length} ≤ ${chat.CHAT_BUDGET.ledger})، پس قواعدِ آخرش بریده نمی‌شود`);
   ok(!/[—]|--/.test(ledTxt), '✍️ متنِ دفتر خط تیره‌ی بلند ندارد (بند ۱۰)');
   for (const lg of ['en', 'es', 'pt', 'ru']) {
     const LL = (await import(`../bots/tarot/locales/${lg}.js`)).default;
-    const t = LL.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'x'.repeat(chat.CHAT_LEDGER_ITEM), taken: true })));
+    const t = LL.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'x'.repeat(chat.CHAT_LEDGER_ITEM) })));
     ok(t.length <= chat.CHAT_BUDGET.ledger, `📒 «${lg}»: دفترِ پُر داخلِ بودجه است (${t.length})`);
   }
 
@@ -2778,7 +2778,7 @@ console.log('\n▶ ۲۴) دفترِ پیشنهادها');
     '🔌 دفتر از `hist`ِ کامل ساخته می‌شود (نه `hist.slice(0, -1)`)، تا قبول/ردِ آخرین پیشنهاد معلوم باشد');
   ok(/toMessages\(system, packed, text, L, \{ ledger \}\)/.test(CODE), '🔌 و واقعاً به `toMessages` می‌رسد');
   ok(/chatHistory:\s+db\.prepare\('SELECT role, text,[^']*follow_up[^']*FROM chat_messages/.test(SRC),
-    '🔌 کوئریِ تاریخچه `follow_up` را می‌خواند (منبعِ «قبول کرد»)');
+    '🔌 کوئریِ تاریخچه `follow_up` را می‌خواند (فالبکِ متنِ پیشنهاد از برچسبِ دکمه)');
 }
 
 const total = pass + errs.length;
