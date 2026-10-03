@@ -449,8 +449,5 @@ jobs:
                 STARTED=$(systemctl show -p ActiveEnterTimestamp --value dash-tunnel)
                 URL=$(sudo journalctl -u dash-tunnel --since "$STARTED" --no-pager -o cat 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
                 echo "🌐 ${URL:-آدرس trycloudflare در لاگ نبود؛ لاگ تونل باید بررسی شود}"
-                if [ -n "$URL" ]; then
-                  echo "dashboard external: HTTP $(curl -sS -o /dev/null --max-time 15 -w '%{http_code}' "$URL/login" || echo 000) (انتظار: 200)"
-                fi
                 ;;
             esac
