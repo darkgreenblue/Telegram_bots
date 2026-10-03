@@ -6,7 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-OPEN_STATES = {"collecting", "uploading", "format", "language", "language_custom", "length", "prompt", "generating", "sending"}
+OPEN_STATES = {"title", "collecting", "uploading", "output_type", "studio_language", "studio_language_custom", "studio_setting", "studio_prompt", "format", "language", "language_custom", "length", "prompt", "generating", "sending"}
 RUNNING_STATES = {"uploading", "generating", "sending"}
 
 

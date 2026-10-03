@@ -53,12 +53,16 @@ async def _upload_once(session: dict, save, download_file, profile: str) -> None
     async with NotebookLMClient.from_storage(profile=profile) as client:
         if not session.get("notebook_id"):
             # A stable title lets us recover a create that succeeded just before a crash.
-            title = session["notebook_title"]
+            title = session.get("create_title", session["notebook_title"])
             existing = next((n for n in await client.notebooks.list() if n.title == title), None)
             nb = existing or await client.notebooks.create(title)
             session["notebook_id"] = nb.id
             save(session)
         nb_id = session["notebook_id"]
+        if session.get("create_title") and not session.get("renamed"):
+            await client.notebooks.rename(nb_id, session["notebook_title"])
+            session["renamed"] = True
+            save(session)
 
         for index, item in enumerate(session["inputs"]):
             if item.get("source_id"):

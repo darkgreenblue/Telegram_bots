@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -16,6 +15,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from notebook import InputValidationError
 from store import Store
+from studio import KIND_LABELS, KINDS, STEPS, output_path
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -28,8 +28,9 @@ MAX_AUDIO = 50 * 1024 * 1024
 MAX_SOURCES = 300
 START = "📥 ورود ورودی‌ها"
 DONE = "✅ ورودی‌ها تمام شد"
+NOTEBOOKS = "📚 نوت‌بوک‌های من"
 RETRY = "🔁 تلاش دوباره"
-MENU = ReplyKeyboardMarkup([[START], [DONE]], resize_keyboard=True, is_persistent=True)
+MENU = ReplyKeyboardMarkup([[START], [NOTEBOOKS], [DONE]], resize_keyboard=True, is_persistent=True)
 URL = re.compile(r"^https?://\S+$", re.IGNORECASE)
 LOG = logging.getLogger("notebook-podcast")
 store = Store(DATA / "bot.db")
@@ -59,6 +60,81 @@ def label(session: dict) -> str:
     return f"#{session['batch_id'][:8]}"
 
 
+def notebook_sources(session: dict) -> list[str]:
+    return session.get("source_ids") or [i["source_id"] for i in session.get("inputs", []) if i.get("source_id")]
+
+
+def saved_notebooks(owner: int) -> list[dict]:
+    found = set()
+    result = []
+    for session in store.list(owner):
+        notebook_id = session.get("notebook_id")
+        if notebook_id and notebook_id not in found and notebook_sources(session) and session.get("state") not in {"uploading", "error_upload"}:
+            found.add(notebook_id)
+            result.append(session)
+    return result
+
+
+async def show_notebooks(owner: int, message, page: int = 0) -> None:
+    notebooks = saved_notebooks(owner)
+    if not notebooks:
+        await message.reply_text("هنوز نوت‌بوکی با این ربات نساخته‌ای.")
+        return
+    page = max(0, min(page, (len(notebooks) - 1) // 8))
+    rows = [
+        [InlineKeyboardButton(s.get("notebook_title", "بدون نام")[:40], callback_data=f"pick:{s['batch_id']}")]
+        for s in notebooks[page * 8:(page + 1) * 8]
+    ]
+    navigation = []
+    if page:
+        navigation.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"npage:{page - 1}"))
+    if (page + 1) * 8 < len(notebooks):
+        navigation.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"npage:{page + 1}"))
+    if navigation:
+        rows.append(navigation)
+    await message.reply_text("یک نوت‌بوک را برای ساخت خروجی تازه انتخاب کن:", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def choose_notebook(owner: int, reference: dict, message) -> None:
+    if store.open_count(owner) >= MAX_REQUESTS:
+        await message.reply_text("سه درخواست باز داری. پس از پایان یکی از آن‌ها دوباره تلاش کن.")
+        return
+    batch_id = uuid.uuid4().hex
+    session = {
+        "batch_id": batch_id,
+        "notebook_id": reference["notebook_id"],
+        "notebook_title": reference.get("notebook_title", "بدون نام"),
+        "source_ids": notebook_sources(reference),
+        "state": "output_type",
+        "inputs": [],
+        "work_dir": str(DATA / str(owner) / batch_id),
+    }
+    save(owner, session)
+    await message.reply_text(
+        f"نوت‌بوک «{session['notebook_title']}» انتخاب شد. خروجی تازهٔ {label(session)} را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
+        reply_markup=buttons("output", KINDS, batch_id),
+    )
+
+
+async def ask_studio_next(owner: int, session: dict, send) -> None:
+    steps = STEPS[session["output_type"]]
+    index = session.get("option_index", 0)
+    if index < len(steps):
+        key, question, choices = steps[index]
+        session["state"] = "studio_setting"
+        save(owner, session)
+        await send(f"{question} برای {KIND_LABELS[session['output_type']]} {label(session)}:", reply_markup=buttons("setting", choices, session["batch_id"]))
+    else:
+        session["state"] = "studio_prompt"
+        sent = await send(
+            f"اگر راهنمایی برای {KIND_LABELS[session['output_type']]} {label(session)} داری، در پاسخ به همین پیام بفرست؛ وگرنه «بدون پرامپت» را بزن.",
+            reply_markup=buttons("studio_prompt", [("بدون پرامپت", "skip")], session["batch_id"]),
+        )
+        if getattr(sent, "message_id", None):
+            session["settings_message_id"] = sent.message_id
+        save(owner, session)
+
+
 def save(owner_id: int, session: dict) -> None:
     store.put(owner_id, session)
 
@@ -67,14 +143,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not allowed(update):
         return
     await update.message.reply_text(
-        "برای ساخت پادکست، «ورود ورودی‌ها» را بزن.", reply_markup=MENU
+        "برای ساخت نوت‌بوک تازه «ورود ورودی‌ها» را بزن؛ برای خروجی تازه از منابع قبلی «نوت‌بوک‌های من» را انتخاب کن.", reply_markup=MENU
     )
 
 
 async def begin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     owner = update.effective_user.id
-    if store.latest_in_state(owner, "collecting"):
-        await update.message.reply_text("یک مجموعه در حال دریافت ورودی است؛ اول همان را تمام کن.")
+    if store.latest_in_state(owner, "title", "collecting"):
+        await update.message.reply_text("نام‌گذاری یا دریافت ورودیِ یک مجموعه باز است؛ اول همان را تمام کن.")
         return
     if store.open_count(owner) >= MAX_REQUESTS:
         await update.message.reply_text("سه درخواست باز داری. پس از پایان یکی از آن‌ها، مجموعهٔ بعدی را شروع کن.")
@@ -82,16 +158,16 @@ async def begin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     batch_id = uuid.uuid4().hex
     session = {
         "batch_id": batch_id,
-        "notebook_title": f"Telegram podcast {datetime.now(timezone.utc):%Y-%m-%d} {batch_id[:8]}",
-        "state": "collecting",
+        "notebook_title": "",
+        "state": "title",
         "inputs": [],
         "work_dir": str(DATA / str(owner) / batch_id),
     }
     save(owner, session)
-    await update.message.reply_text(
-        f"مجموعهٔ {label(session)} باز شد. حالا متن، فایل یا لینک‌ها را بفرست. تا «ورودی‌ها تمام شد» را نزنی، پیامی نمی‌فرستم.",
-        reply_markup=MENU,
-    )
+    sent = await update.message.reply_text(f"نام نوت‌بوک تازهٔ {label(session)} را بفرست؛ همان نام در NotebookLM ثبت می‌شود.", reply_markup=MENU)
+    if getattr(sent, "message_id", None):
+        session["settings_message_id"] = sent.message_id
+        save(owner, session)
 
 
 def parse_message(message) -> list[dict]:
@@ -156,12 +232,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if message.text == DONE:
         await finish(update, context)
         return
+    if message.text == NOTEBOOKS:
+        await show_notebooks(update.effective_user.id, message)
+        return
     if message.text == RETRY:
         await retry(update, context)
         return
     owner = update.effective_user.id
     collecting = store.latest_in_state(owner, "collecting")
-    waiting = [s for s in store.list(owner) if s["state"] in {"prompt", "language_custom"}]
+    waiting = [s for s in store.list(owner) if s["state"] in {"title", "prompt", "language_custom", "studio_prompt", "studio_language_custom"}]
     replied_to = getattr(getattr(message, "reply_to_message", None), "message_id", None)
     session = next((s for s in waiting if s.get("settings_message_id") == replied_to), None)
     if session is None and not collecting:
@@ -173,6 +252,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     if session is None:
         await message.reply_text("برای شروع «ورود ورودی‌ها» را بزن.", reply_markup=MENU)
+        return
+    if session["state"] == "title":
+        title = (message.text or "").strip()
+        if not title or len(title) > 100:
+            await message.reply_text("نام نوت‌بوک را به‌صورت متن، بین ۱ تا ۱۰۰ نویسه بفرست.")
+            return
+        session["notebook_title"] = title
+        session["create_title"] = f"Telegram draft {session['batch_id']}"
+        session["state"] = "collecting"
+        save(owner, session)
+        await message.reply_text(f"نوت‌بوک «{title}» ثبت شد. حالا ورودی‌های {label(session)} را بفرست. تا «ورودی‌ها تمام شد» را نزنی، پیامی نمی‌فرستم.", reply_markup=MENU)
         return
     if session["state"] == "collecting":
         incoming = parse_message(message)
@@ -203,6 +293,23 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"طول پادکست {label(session)} را انتخاب کن:",
             reply_markup=buttons("length", [("کوتاه", "short"), ("معمولی", "default"), ("بلند", "long")], session["batch_id"]),
         )
+    elif session["state"] == "studio_language_custom" and message.text:
+        code = message.text.strip().lower()
+        if not re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", code):
+            await message.reply_text("کد زبان را مثل fa، en یا tr بفرست.")
+            return
+        session["language"] = code
+        await ask_studio_next(owner, session, message.reply_text)
+    elif session["state"] == "studio_prompt" and message.text:
+        prompt = message.text.strip()
+        if not prompt:
+            await message.reply_text("پرامپت را بنویس یا «بدون پرامپت» را انتخاب کن.")
+            return
+        session["prompt"] = prompt
+        session["state"] = "generating"
+        save(owner, session)
+        await message.reply_text(f"ساخت {KIND_LABELS[session['output_type']]} {label(session)} شروع شد و ممکن است چند دقیقه طول بکشد.")
+        launch_job(owner, session["batch_id"], context.application)
 
 
 async def on_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -211,6 +318,19 @@ async def on_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     owner = update.effective_user.id
+    if query.data.startswith("npage:"):
+        try:
+            page = int(query.data.split(":", 1)[1])
+        except ValueError:
+            return
+        await show_notebooks(owner, query.message, page)
+        return
+    if query.data.startswith("pick:"):
+        batch_id = query.data.split(":", 1)[1]
+        reference = next((s for s in saved_notebooks(owner) if s["batch_id"] == batch_id), None)
+        if reference:
+            await choose_notebook(owner, reference, query.message)
+        return
     parts = query.data.split(":", 2)
     if len(parts) not in {2, 3}:
         return
@@ -224,6 +344,50 @@ async def on_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if kind == "retry" and value == "go" and session["state"] in {"error_upload", "error_generate"}:
         await retry_session(owner, session, query.message, context.application)
+        return
+    if kind == "output" and session["state"] == "output_type" and value in KIND_LABELS:
+        session["output_type"] = value
+        session["settings"] = {}
+        session["option_index"] = 0
+        session["state"] = "studio_language"
+        save(owner, session)
+        await query.message.reply_text(
+            f"زبان {KIND_LABELS[value]} {label(session)} را انتخاب کن:",
+            reply_markup=buttons("studio_lang", [("فارسی", "fa"), ("انگلیسی", "en"), ("زبان دیگر", "other")], session["batch_id"]),
+        )
+        return
+    if kind == "studio_lang" and session["state"] == "studio_language":
+        if value == "other":
+            session["state"] = "studio_language_custom"
+            sent = await query.message.reply_text(f"کد زبان {label(session)} را در پاسخ به همین پیام بفرست؛ مثلاً tr یا ar.")
+            if getattr(sent, "message_id", None):
+                session["settings_message_id"] = sent.message_id
+            save(owner, session)
+        elif value in {"fa", "en"}:
+            session["language"] = value
+            await ask_studio_next(owner, session, query.message.reply_text)
+        return
+    if kind == "setting" and session["state"] == "studio_setting":
+        steps = STEPS[session["output_type"]]
+        index = session.get("option_index", 0)
+        if index >= len(steps):
+            return
+        key, _, choices = steps[index]
+        if value not in {choice for _, choice in choices}:
+            return
+        session["settings"][key] = value
+        session["option_index"] = index + 1
+        await ask_studio_next(owner, session, query.message.reply_text)
+        return
+    if kind == "studio_prompt" and session["state"] == "studio_prompt" and value == "skip":
+        if session["output_type"] == "report" and session.get("settings", {}).get("report_format") == "custom":
+            await query.message.reply_text("برای گزارش سفارشی باید پرامپت بنویسی و به پیام قبلی Reply بزنی.")
+            return
+        session["prompt"] = ""
+        session["state"] = "generating"
+        save(owner, session)
+        await query.message.reply_text(f"ساخت {KIND_LABELS[session['output_type']]} {label(session)} شروع شد و ممکن است چند دقیقه طول بکشد.")
+        launch_job(owner, session["batch_id"], context.application)
         return
     if kind == "format" and session["state"] == "format" and value in {"deep-dive", "brief", "critique", "debate"}:
         session["format"] = value
@@ -317,19 +481,18 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
         if code != 0:
             raise RuntimeError(f"Worker exited with code {code}")
         if session["state"] == "uploading":
-            session["state"] = "format"
+            session["source_ids"] = notebook_sources(session)
+            session["state"] = "output_type"
             save(owner, session)
             await app.bot.send_message(
                 owner,
-                f"همهٔ ورودی‌های {label(session)} وارد نوت‌بوک شدند. قالب پادکست را انتخاب کن:",
-                reply_markup=buttons("format", [
-                    ("گفت‌وگوی عمیق", "deep-dive"), ("خلاصهٔ کوتاه", "brief"),
-                    ("نقد", "critique"), ("مناظره", "debate"),
-                ], batch_id),
+                f"همهٔ ورودی‌های {label(session)} وارد نوت‌بوک «{session['notebook_title']}» شدند. نوع خروجی را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
+                reply_markup=buttons("output", KINDS, batch_id),
             )
             return
         if session["state"] in {"generating", "sending"}:
-            output = Path(session["work_dir"]) / f"{batch_id}.m4a"
+            kind = session.get("output_type", "audio")
+            output = output_path(session) if session.get("output_type") else Path(session["work_dir"]) / f"{batch_id}.m4a"
             if session["state"] == "generating":
                 session["state"] = "sending"
                 save(owner, session)
@@ -339,12 +502,19 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
                 output.unlink(missing_ok=True)
                 await app.bot.send_message(
                     owner,
-                    f"پادکست {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. "
+                    f"{KIND_LABELS[kind]} {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. "
                     f"می‌توانی آن را در نوت‌بوک خودت ببینی: https://notebooklm.google.com/notebook/{session['notebook_id']}",
                 )
                 return
             with output.open("rb") as stream:
-                await app.bot.send_audio(owner, stream, filename=f"podcast-{batch_id[:8]}.m4a")
+                filename = f"{kind}-{batch_id[:8]}{output.suffix}"
+                caption = f"{KIND_LABELS[kind]} از «{session['notebook_title']}» {label(session)}"
+                if kind == "audio":
+                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
+                elif kind in {"video", "cinematic"}:
+                    await app.bot.send_video(owner, stream, filename=filename, caption=caption)
+                else:
+                    await app.bot.send_document(owner, stream, filename=filename, caption=caption)
             session["state"] = "done"
             save(owner, session)
             output.unlink(missing_ok=True)
@@ -378,7 +548,29 @@ async def post_init(app: Application) -> None:
         for session in store.list(owner):
             state = session["state"]
             batch_id = session["batch_id"]
-            if state == "format":
+            if state == "title":
+                sent = await app.bot.send_message(owner, f"نام نوت‌بوک تازهٔ {label(session)} را بفرست.")
+                session["settings_message_id"] = sent.message_id
+                save(owner, session)
+            elif state == "output_type":
+                await app.bot.send_message(owner, f"نوع خروجی نوت‌بوک «{session['notebook_title']}» {label(session)} را انتخاب کن:", reply_markup=buttons("output", KINDS, batch_id))
+            elif state == "studio_language":
+                await app.bot.send_message(owner, f"زبان {KIND_LABELS[session['output_type']]} {label(session)} را انتخاب کن:", reply_markup=buttons("studio_lang", [
+                    ("فارسی", "fa"), ("انگلیسی", "en"), ("زبان دیگر", "other"),
+                ], batch_id))
+            elif state == "studio_setting":
+                async def send(text, reply_markup):
+                    return await app.bot.send_message(owner, text, reply_markup=reply_markup)
+                await ask_studio_next(owner, session, send)
+            elif state == "studio_prompt":
+                sent = await app.bot.send_message(owner, f"پرامپت {KIND_LABELS[session['output_type']]} {label(session)} را در پاسخ به همین پیام بفرست یا «بدون پرامپت» را بزن.", reply_markup=buttons("studio_prompt", [("بدون پرامپت", "skip")], batch_id))
+                session["settings_message_id"] = sent.message_id
+                save(owner, session)
+            elif state == "studio_language_custom":
+                sent = await app.bot.send_message(owner, f"کد زبان {label(session)} را در پاسخ به همین پیام بفرست؛ مثلاً tr یا ar.")
+                session["settings_message_id"] = sent.message_id
+                save(owner, session)
+            elif state == "format":
                 await app.bot.send_message(owner, f"قالب پادکست {label(session)} را انتخاب کن:", reply_markup=buttons("format", [
                     ("گفت‌وگوی عمیق", "deep-dive"), ("خلاصهٔ کوتاه", "brief"),
                     ("نقد", "critique"), ("مناظره", "debate"),
@@ -408,7 +600,7 @@ def main() -> None:
         raise SystemExit("BOT_TOKEN یا ADMIN_IDS خالی است")
     # HTTP client INFO logs include the Bot API URL, which contains the bot token.
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    request = HTTPXRequest(connect_timeout=30, read_timeout=30, write_timeout=30)
+    request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=300)
     updates_request = HTTPXRequest(connect_timeout=30, read_timeout=35, write_timeout=30)
     app = (Application.builder().token(TOKEN).request(request)
            .get_updates_request(updates_request).post_init(post_init).build())

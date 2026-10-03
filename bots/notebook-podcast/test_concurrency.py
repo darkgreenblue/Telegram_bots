@@ -34,13 +34,13 @@ class MultipleRequestTests(unittest.IsolatedAsyncioTestCase):
             local_store = Store(Path(tmp) / "bot.db")
             first = {"batch_id": "old-1", "state": "uploading", "inputs": [{"kind": "text", "value": "first"}]}
             local_store.put(42, first)
-            message = SimpleNamespace(reply_text=AsyncMock())
+            message = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=123)))
             update = SimpleNamespace(effective_user=SimpleNamespace(id=42), message=message)
             with patch.object(bot, "store", local_store), patch.object(bot, "DATA", Path(tmp)):
                 await bot.begin(update, SimpleNamespace())
                 self.assertEqual(local_store.get(42, "old-1")["state"], "uploading")
                 self.assertEqual(local_store.open_count(42), 2)
-                self.assertEqual(local_store.latest_in_state(42, "collecting")["inputs"], [])
+                self.assertEqual(local_store.latest_in_state(42, "title")["inputs"], [])
                 await bot.begin(update, SimpleNamespace())
                 self.assertEqual(local_store.open_count(42), 2)
 
