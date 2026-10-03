@@ -1386,6 +1386,9 @@ Agrega al mismo JSON una clave más: "question_text" con el texto exacto de la p
     ].filter(Boolean).join('\n'),
     // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
     chatFormatTail: `Recordatorio: desde la primera respuesta, tu salida es solo ese único JSON con las claves answer, offer, wants_new_reading, needs_support, follow_up, wants_end; la propuesta va en offer, no en answer.`,
+    // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو (شکلِ برابر با fa؛ گفتگو فعلاً فقط fa است).
+    chatOfferLedger: (items) =>
+      `(Solo para ti, no lo muestres) Propuestas anteriores de esta conversación: ${items.map((x) => `«${x.text}»`).join(' · ')}\nNo vuelvas a proponer ninguna, ni con otras palabras.`,
     feedbackContext: (ctx) => JSON.stringify({
       'la pregunta de confirmación que hiciste': ctx.confirmationQuestion,
       'respuesta de la persona': ctx.userAnswer,

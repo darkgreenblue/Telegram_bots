@@ -49,10 +49,10 @@ const {
   cleanChatReply, chatOutOk, parseChatOut, hookOk, questionWordsOf,
   crisisIn, smallTalkIn, newReadingAskIn, chatLang, CHAT_BUDGET, CHAT_RECENT_TURNS,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
-  floorApplies, CHAT_FLOOR_CHARS,
+  floorApplies, CHAT_FLOOR_CHARS, offerLedger, offerTailIn,
 } = await import('../bots/tarot/chat-core.js');
 // سنجه‌ها در ماژولِ خالصِ جدا هستند تا بدونِ اجرای پولی تست شوند (درسِ checks.mjs).
-const { chatMetrics, repeatedNgrams, LINE_MIN, LINE_MAX } = await import('./reading-lab/chat-checks.mjs');
+const { chatMetrics, repeatedNgrams, LINE_MIN, LINE_MAX, offerSim, OFFER_DUP } = await import('./reading-lab/chat-checks.mjs');
 const { CHAT_FU_PROMPT_MAX } = await import('../bots/tarot/chat-core.js');
 // 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت. **داور خودِ سشن است، نه یک مدلِ سوم** (تصمیمِ
 // صریحِ مالک)؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
@@ -193,11 +193,17 @@ const PROMPT_VARIANTS = {
    * خودِ مکانیزم (`rep`، `systemFor`، نحوِ `model@variant`) سرِ جایش است و واریانتِ
    * بعدی فقط یک ردیف این‌جاست. */
 };
+/* 📒 واریانتِ **غیرپرامپتی**: پرامپتِ سیستم دست نمی‌خورد (پس `systemFor` همان پایه را
+ * می‌دهد و گاردِ «هیچ تغییری نداد» برایش اجرا نمی‌شود)؛ تنها تفاوتِ بازو دفترِ پیشنهادهاست
+ * که مثلِ ربات به دُمِ آخرین پیامِ کاربر می‌چسبد (#42، v3.148.0). مقایسه‌ی جفت‌شده‌ی
+ * `<مدل>` در برابرِ `<مدل>@ledger` یعنی دقیقاً «دفتر» سنجیده می‌شود، نه چیزِ دیگری. */
+const NON_PROMPT_VARIANTS = new Set(['ledger']);
 const INVALID_RAW = [];
+const LEDGER_SENT = { turns: 0, items: 0 };   // 📒 اثباتِ اینکه دفتر واقعاً به مدل رسید
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
 {
-  const bad = ARM_LIST.map(armVariant).filter((v) => v && !PROMPT_VARIANTS[v]);
+  const bad = ARM_LIST.map(armVariant).filter((v) => v && !PROMPT_VARIANTS[v] && !NON_PROMPT_VARIANTS.has(v));
   if (bad.length) {
     console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join('، ')}`);
     console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join('، ') || '(هیچ)'}`);
@@ -208,7 +214,7 @@ const armVariant = (a) => String(a).split('@')[1] || '';
  * `replace` را جابه‌جا کند، بازوی آزمایشی را بی‌صدا به بازوی پایه تبدیل می‌کند. */
 function systemFor(variant) {
   const base = L.prompts.chatSystem;
-  if (!variant) return base;
+  if (!variant || NON_PROMPT_VARIANTS.has(variant)) return base;
   const out = PROMPT_VARIANTS[variant](base);
   if (out === base) {
     console.error(`❌ واریانتِ «${variant}» هیچ تغییری در پرامپت نداد (لنگرِ replace عوض شده؟)`);
@@ -480,7 +486,12 @@ async function runConversation(persona, base, arm, rep) {
     if (newReadingAskIn(q)) { turns.push({ q, skipped: 'newask' }); continue; }
 
     const packed = packHistory(history);
-    const messages = toMessages(system, packed, q, L);
+    /* 📒 همان ورودیِ ربات: کلِ تاریخچه **به‌علاوه‌ی** سؤالِ فعلی، تا قبول/ردِ آخرین
+     * پیشنهاد معلوم باشد (ربات `offerLedger(hist)` را روی تاریخچه‌ای می‌زند که ردیفِ سؤالِ
+     * فعلی از قبل در آن نشسته). بازوی بی‌دفتر بیت‌به‌بیت همان پیامِ v3.147.0 است. */
+    const ledger = armVariant(arm) === 'ledger' ? offerLedger([...history, { role: 'user', text: q }]) : null;
+    const messages = toMessages(system, packed, q, L, { ledger });
+    if (ledger?.length) { LEDGER_SENT.turns++; LEDGER_SENT.items += ledger.length; }
     if (messages[0].content !== system) prefixStable = false;
 
     const usage = { in: 0, out: 0, usd: 0, cached: 0 };
@@ -701,6 +712,76 @@ for (const arm of ARM_LIST) {
   }
   console.log(`\n🧾 خروجی‌های ردشده توسطِ validate (مورد ۵، خام، ${INVALID_RAW.length} مورد):`);
   for (const x of INVALID_RAW.slice(0, 20)) console.log(`   [${x.arm} ${x.persona} نوبتِ ${x.turn}] ${x.raw.replace(/\n/g, ' ⏎ ')}`);
+}
+
+/* ═══════════════ 📒 تکرارِ پیشنهاد (#42، v3.148.0) ═══════════════
+ * سه سنجه، per بازو، همه از **متنِ تحویلی** (همان چیزی که کاربر می‌بیند):
+ *   • تکرار: پیشنهادی که با یکی از پیشنهادهای قبلیِ **همین گفتگو** هم‌پوشانیِ واژه‌ی
+ *     محتواییِ ≥OFFER_DUP دارد («همان را با کلماتِ دیگر»).
+ *   • پیش‌کشیدنِ ردشده: تکراری که پیشنهادِ قبلی‌اش **جواب نگرفته بود** (کاربر چیزِ دیگری پرسید).
+ *   • هم‌نوعِ پیاپی: نوعِ پیشنهاد (پیامِ آماده / آمادگی برای واکنش / کارت / قدمِ عملی) دو بار پشتِ هم.
+ * «پیشنهاد» دقیقاً همان تعریفِ دفتر است (خطِ آخر اگر پیشنهاد باشد، وگرنه برچسبِ دکمه). */
+{
+  const TYPE = [
+    ['msg', /(پیام|متن|جمله|بنویس|بفرست|کپی)/],
+    ['prep', /(واکنش|اگه گفت|اگر گفت|جواب داد|جواب نداد|چی بگی|آماده‌ت|آماده ات)/],
+    ['step', /(قدم|برنامه|تمرین|امروز|این هفته|کارِ? عملی|لیست)/],
+    ['card', /(کارت|برج|جام|شمشیر|سکه|چوب|ستاره|ماه|خورشید|امپرا|عاشقان|دیوانه|جادوگر|کاهن|ارابه|قدرت|زاهد|چرخ|عدالت|مرگ|اعتدال|شیطان|داوری|جهان)/],
+  ];
+  const typeOf = (x) => (TYPE.find(([, re]) => re.test(x)) || ['other'])[0];
+  const offerOfTurn = (t) => {
+    const ls = String(t.reply || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    return ls.length && offerTailIn(t.reply) ? ls[ls.length - 1] : (t.fuKept || '');
+  };
+  const arms = [...new Set(all.map((c) => c.arm))];
+  console.log(`\n${'═'.repeat(72)}\n📒 تکرارِ پیشنهاد per بازو (آستانه‌ی هم‌پوشانی ${OFFER_DUP})\n${'═'.repeat(72)}`);
+  const perArm = {};
+  for (const arm of arms) {
+    let n = 0, dup = 0, pushIgnored = 0, sameType = 0, deep = 0, deepDup = 0;
+    const examples = [];
+    for (const c of all.filter((x) => x.arm === arm)) {
+      const seen = [];   // { text, taken, type }
+      let prevType = '';
+      const done = c.turns.filter((t) => t.reply);
+      for (let i = 0; i < done.length; i++) {
+        const t = done[i];
+        const off = offerOfTurn(t);
+        if (!off) { prevType = ''; continue; }
+        n++;
+        const depth = i + 1;
+        const hit = seen.find((p) => offerSim(off, p.text) >= OFFER_DUP);
+        if (hit) {
+          dup++;
+          if (!hit.taken) pushIgnored++;
+          if (examples.length < 6) examples.push(`${c.persona} ن${depth}: «${off}» ≈ «${hit.text}»`);
+        }
+        const ty = typeOf(off);
+        if (ty !== 'other' && ty === prevType) sameType++;
+        prevType = ty;
+        if (depth >= 3) { deep++; if (hit) deepDup++; }
+        // «قبول شد» = نوبتِ بعدی همان برچسبِ دکمه بود (تپ) — همان تعریفِ دفتر.
+        const next = done[i + 1];
+        const taken = !!next && !!t.fuKept && next.q === t.fuKept;
+        seen.push({ text: off, taken, type: ty });
+      }
+    }
+    perArm[arm] = { n, dup, pushIgnored, sameType, deep, deepDup };
+    const pct = (a, b) => `${(a / Math.max(1, b) * 100).toFixed(0)}٪`;
+    console.log(`   ${arm}: پیشنهاد=${n} | تکرار=${dup} (${pct(dup, n)}) | پیش‌کشیدنِ ردشده=${pushIgnored}`
+      + ` | هم‌نوعِ پیاپی=${sameType} (${pct(sameType, n)}) | عمق≥۳: ${deepDup}/${deep} (${pct(deepDup, deep)})`);
+    for (const e of examples) console.log(`      ↻ ${e}`);
+  }
+  /* بازوی دفتر بدونِ حتی یک دفترِ ارسال‌شده یعنی سیم‌کشی شکسته و مقایسه بی‌معناست؛
+   * با صدای بلند گفته می‌شود نه با یک ستونِ صفرِ بی‌توضیح. */
+  if (arms.some((x) => armVariant(x) === 'ledger')) {
+    console.log(`   📒 دفترِ ارسال‌شده: ${LEDGER_SENT.turns} نوبت، ${LEDGER_SENT.items} ردیف`);
+    if (!LEDGER_SENT.turns) console.log('   ⚠️ بازوی ledger هیچ دفتری نفرستاد؛ مقایسه‌ی این دور معتبر نیست.');
+  }
+  if (arms.length === 2) {
+    const [a, b] = arms;
+    const A = perArm[a], B = perArm[b];
+    console.log(`   ⇢ ${a} → ${b}: تکرار ${A.dup}→${B.dup} | ردشده ${A.pushIgnored}→${B.pushIgnored} | هم‌نوع ${A.sameType}→${B.sameType} | عمق≥۳ ${A.deepDup}→${B.deepDup}`);
+  }
 }
 
 /* ═══════════════ 🔮 پرچمِ فالِ تازه در برابرِ انتظار (v3.141.0) ═══════════════
