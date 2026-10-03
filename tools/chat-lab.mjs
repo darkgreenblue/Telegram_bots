@@ -524,11 +524,13 @@ async function runConversation(persona, base, arm, rep) {
     // 🔤 همان تعریفِ ربات: واژه‌ی لاتینی که خودِ کاربر نوشته مجاز است.
     const userText = [base.question, ...history.filter((h) => h.role === 'user').map((h) => h.text), q].join('\n');
     let needs = chatFixNeeds(outObj, { crisisCtx, userText });
-    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, json: (() => { const o = parseChatOut(res.out); return !!o && !o.salvaged; })() };
+    const pre = { thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, fu: !!needs.fu, json: (() => { const o = parseChatOut(res.out); return !!o && !o.salvaged; })() };
     const fix = { fired: false, fixed: false, ms: 0 };
-    if (thin || needs.offer || needs.safety || needs.latin) {
+    // 🔘 جوابِ بی‌دکمه (`fu`) همان کمبودِ پنجمِ ربات است (`CHAT_FU_FIX`)؛ hint برایش خطِ جدا
+    // ندارد و به خطِ پایه‌ی «همان یک JSON» تکیه می‌کند، پس پرامپت دست نخورد.
+    if (thin || needs.offer || needs.safety || needs.latin || needs.fu) {
       fix.fired = true;
-      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, min: CHAT_FLOOR_CHARS });
+      const hint = L.prompts.chatFixHint({ thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, fu: !!needs.fu, min: CHAT_FLOOR_CHARS });
       const retryMsgs = messages.map((m, i) => (
         i === messages.length - 1 ? { ...m, content: `${m.content}\n\n${hint}` } : m));
       const f0 = Date.now();
