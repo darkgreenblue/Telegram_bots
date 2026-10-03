@@ -149,6 +149,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def begin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     owner = update.effective_user.id
+    empty = store.latest_in_state(owner, "collecting")
+    if empty and not empty.get("inputs") and not empty.get("notebook_id"):
+        empty["state"] = "title"
+        empty["notebook_title"] = ""
+        save(owner, empty)
+        sent = await update.message.reply_text(f"نام نوت‌بوک تازهٔ {label(empty)} را بفرست؛ همان نام در NotebookLM ثبت می‌شود.", reply_markup=MENU)
+        if getattr(sent, "message_id", None):
+            empty["settings_message_id"] = sent.message_id
+            save(owner, empty)
+        return
     if store.latest_in_state(owner, "title", "collecting"):
         await update.message.reply_text("نام‌گذاری یا دریافت ورودیِ یک مجموعه باز است؛ اول همان را تمام کن.")
         return
