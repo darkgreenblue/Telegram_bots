@@ -83,7 +83,7 @@ import {
   assentIn, noContentIn, offerTailIn, chatLang,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
-  CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
+  CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel, offerLedger,
 } from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -345,7 +345,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.147.0';
+const PRODUCT_VERSION = '3.148.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -652,6 +652,12 @@ const CHAT_OFFER_FIX   = true;
  * پرامپت، تذکرِ تعمیر، و حذفِ قطعیِ جمله‌به‌جمله در کد. پیامِ ثابتِ بحران (۱۲۳) برای
  * نشانه‌ی صریح دست‌نخورده است. رول‌بک: `false` ⟵ هیچ حذف و تعمیری برای این مورد نیست. */
 const CHAT_SAFETY_STRIP = true;
+/* 📒 دفترِ پیشنهادها (v3.148.0، موضوعِ #42: پیشنهادِ تکراری و بسته‌بندیِ دوباره).
+ * فهرستِ پیشنهادهای **همین گفتگو** با وضعیتشان (قبول کرد / جواب نداد) به دُمِ آخرین پیامِ user
+ * می‌چسبد تا مدل پیشنهادِ دیده‌شده یا ردشده را دوباره نیاورد. نه در system (کش می‌پرد) و نه در
+ * تاریخچه (از DB از نو ساخته می‌شود، پس تکرار نمی‌شود). منطق: `offerLedger` در chat-core.
+ * رول‌بک: `false` ⟵ پیامِ آخر بیت‌به‌بیت همان v3.147.0. */
+const CHAT_OFFER_LEDGER = true;
 /* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
  *
  * مدل در پاکتِ خودش یک برچسبِ کوتاه به **زبانِ خودِ کاربر** برمی‌گرداند و کد از رویش یک
@@ -8407,7 +8413,9 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       || chatHadCrisis(uid, rid);
     // 🔤 واژه‌ی لاتینی که خودِ کاربر نوشته (اسمِ اپ، برند، اسمِ آدم) نشت نیست.
     const userText = userTexts.map((t) => String(t || '')).join('\n');
-    const messages = toMessages(system, packed, text, L);
+    // 📒 دفتر از کلِ تاریخچه ساخته می‌شود (شاملِ سؤالِ فعلی، تا قبول/ردِ آخرین پیشنهاد معلوم باشد).
+    const ledger = CHAT_OFFER_LEDGER ? offerLedger(hist) : null;
+    const messages = toMessages(system, packed, text, L, { ledger });
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,

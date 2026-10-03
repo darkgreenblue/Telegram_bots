@@ -83,7 +83,8 @@ export const CHAT_BUDGET = {
   prev: 400,      // دو فالِ قبلی
   hist: 4100,     // تاریخچه‌ی گفتگو (فشرده + نوبت‌های خام)
   ask: 700,       // سؤالِ فعلی
-  total: 16600,   // کرانِ بالای جمعِ همه (بدترین حالت)
+  ledger: 1500,   // 📒 دفترِ پیشنهادهای همین گفتگو (v3.148.0، فقط دُمِ پیامِ آخر؛ بدترین حالتِ ۸ ردیف در هر پنج زبان ≤۱۴۶۰)
+  total: 18100,   // کرانِ بالای جمعِ همه (بدترین حالت)
 };
 /* ⚠️ `hist` یک **سقفِ اجراشونده** است، نه یک عددِ تزئینی در مستندات.
  * نسخه‌ی اول فقط هر نوبت را جدا می‌بُرید (۱۰ نوبت × ۷۰۰ + فشرده = ۸۰۰۰)، پس عددِ
@@ -258,7 +259,7 @@ function replayEnvelope(text, flags = {}) {
 /* ═══ ساختِ آرایه‌ی نقش‌ها ═══
  * پیشوندِ ثابت در **یک** پیامِ system می‌نشیند (نه دو پیام و نه داخلِ اولین پیامِ user)
  * تا یک بلوکِ پیوسته‌ی قابلِ کش بماند و نوبت‌ها append-only به دُمش اضافه شوند. */
-export function toMessages(system, packed, question, L = null) {
+export function toMessages(system, packed, question, L = null, { ledger = null } = {}) {
   const msgs = [{ role: 'system', content: system }];
   if (packed?.digest) {
     const head = L?.prompts?.chatDigestHead || 'سؤال‌هایی که تا حالا در همین گفتگو پرسیده:';
@@ -268,8 +269,52 @@ export function toMessages(system, packed, question, L = null) {
     msgs.push({ role: 'assistant', content: chatEnvelope(L?.prompts?.chatDigestAck || 'باشه، یادم هست.') });
   }
   for (const t of (packed?.turns || [])) msgs.push({ role: t.role, content: t.content });
-  msgs.push({ role: 'user', content: cut(question, CHAT_BUDGET.ask) });
+  const q = cut(question, CHAT_BUDGET.ask);
+  const led = ledgerBlock(ledger, L);
+  msgs.push({ role: 'user', content: led ? `${q}\n\n${led}` : q });
   return msgs;
+}
+
+/* ═══ 📒 دفترِ پیشنهادها (v3.148.0، موضوعِ #42: پیشنهادِ تکراری و بسته‌بندیِ دوباره) ═══
+ *
+ * ریشه (از ۳۴۴۹ پیامِ واقعیِ گفتگو): پیشنهادِ خطِ آخر **اجباری** است و «باید تازه باشد»، ولی مدل
+ * فقط ۵ نوبتِ آخر را خام می‌بیند و از نوبت‌های قدیمی‌تر فقط **سؤال‌های کاربر** می‌ماند؛ یعنی
+ * پیشنهادهای خودش را فراموش می‌کند و همان را با کلماتِ دیگر دوباره می‌دهد. و هیچ‌جا به او گفته
+ * نمی‌شود کدام پیشنهاد را کاربر **بی‌جواب** گذاشت، پس همان را دوباره پیش می‌کشد (۲۸٪ نوبت‌ها).
+ * پیشنهادِ صفرامتیازی با عمق بالا می‌رود: نوبتِ ۱ ۸٪، نوبتِ ۴ به بعد ۴۴٪.
+ *
+ * درمان: فهرستِ پیشنهادهای **همین گفتگو** با وضعیتشان (قبول کرد / جواب نداد)، فقط در **دُمِ
+ * آخرین پیامِ user**. ⚠️ نه در system: پیشوند باید بیت‌به‌بیت ثابت بماند تا کش بخورد. و نه در
+ * تاریخچه: ردیف‌های تاریخچه از DB از نو ساخته می‌شوند، پس دفترِ نوبتِ قبل هرگز تکرار نمی‌شود.
+ *
+ * «قبول کرد» = پیامِ بعدیِ کاربر **عینِ** دکمه‌ی همان پیشنهاد است (تپِ دکمه و «بله»ی تایپی هر دو
+ * متنِ کاربر را با خودِ `follow_up` عوض می‌کنند) یا خودش یک «بله» است. هر چیزِ دیگر = جواب نداد.
+ * متنِ پیشنهاد از **خطِ آخرِ خودِ جواب** می‌آید (حرفِ تاروت‌خوان)، و اگر خطِ آخر پیشنهاد نبود از
+ * برچسبِ دکمه. ندادنِ `ledger` به `toMessages` بیت‌به‌بیت همان پیامِ قبلی است (رول‌بک). */
+export const CHAT_LEDGER_MAX = 8;    // تازه‌ترین پیشنهادها؛ قدیمی‌ترها می‌افتند
+export const CHAT_LEDGER_ITEM = 90;  // سقفِ هر ردیف
+export function offerLedger(rows = [], { max = CHAT_LEDGER_MAX, item = CHAT_LEDGER_ITEM } = {}) {
+  const clean = (rows || []).filter((r) => r && (r.role === 'user' || r.role === 'assistant'));
+  const out = [];
+  for (let i = 0; i < clean.length; i++) {
+    const r = clean[i];
+    if (r.role !== 'assistant') continue;
+    const text = String(r.text || '');
+    const ls = text.split('\n').map((x) => x.trim()).filter(Boolean);
+    const fu = String(r.follow_up || '').trim();
+    const offer = ls.length && offerTailIn(text) ? ls[ls.length - 1] : fu;
+    if (!offer) continue;
+    const next = clean.slice(i + 1).find((x) => x.role === 'user');
+    const nt = next ? String(next.text || '') : '';
+    const taken = !!next && ((!!fu && tight(nt) === tight(fu)) || assentIn(nt));
+    out.push({ text: cut(offer, item), taken });
+  }
+  return max > 0 ? out.slice(-max) : [];
+}
+function ledgerBlock(ledger, L) {
+  if (!Array.isArray(ledger) || !ledger.length) return '';
+  const f = L?.prompts?.chatOfferLedger;
+  return typeof f === 'function' ? cut(f(ledger), CHAT_BUDGET.ledger) : '';
 }
 
 /** جمعِ کاراکترِ همه‌ی پیام‌ها — تنها عددی که چکِ CI کران‌دار بودنش را ادعا می‌کند. */

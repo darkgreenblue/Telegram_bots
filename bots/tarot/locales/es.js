@@ -1386,6 +1386,16 @@ Agrega al mismo JSON una clave más: "question_text" con el texto exacto de la p
     ].filter(Boolean).join('\n'),
     // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
     chatFormatTail: `Recordatorio: desde la primera respuesta, tu salida es solo ese único JSON con las claves answer, offer, wants_new_reading, needs_support, follow_up, wants_end; la propuesta va en offer, no en answer.`,
+    // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو (شکلِ برابر با fa؛ گفتگو فعلاً فقط fa است).
+    chatOfferLedger: (items) => [
+      `📒 Propuestas que ya hiciste en esta conversación (solo para ti; no las muestres ni las menciones):`,
+      ...items.map((x) => `- ${x.taken ? '(aceptó)' : '(sin respuesta)'} ${x.text}`),
+      `Para el offer de esta respuesta:`,
+      `- No vuelvas a proponer ninguna de estas, ni con otras palabras ni con otra forma.`,
+      `- Una propuesta sin respuesta significa que no quiere ese camino; no la vuelvas a empujar.`,
+      `- Su tipo debe ser distinto de la última propuesta (por ejemplo, no un mensaje listo justo después de otro mensaje listo).`,
+      `- Si ya no queda nada nuevo que decir de las cartas de esta tirada, propone una carta de la que aún no hayas hablado, o un paso práctico pequeño y concreto fuera de esta conversación.`,
+    ].join('\n'),
     feedbackContext: (ctx) => JSON.stringify({
       'la pregunta de confirmación que hiciste': ctx.confirmationQuestion,
       'respuesta de la persona': ctx.userAnswer,

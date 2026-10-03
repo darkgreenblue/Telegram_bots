@@ -1373,6 +1373,16 @@ Add one more key to the same JSON: "question_text" with the exact text of the qu
     ].filter(Boolean).join('\n'),
     // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
     chatFormatTail: `Reminder: from the very first answer, your output is only that one JSON with the keys answer, offer, wants_new_reading, needs_support, follow_up, wants_end; the offer goes in offer, not in answer.`,
+    // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو (شکلِ برابر با fa؛ گفتگو فعلاً فقط fa است).
+    chatOfferLedger: (items) => [
+      `📒 Offers you have already made in this conversation (for you only; do not show or mention them):`,
+      ...items.map((x) => `- ${x.taken ? '(accepted)' : '(no answer)'} ${x.text}`),
+      `For the offer in this answer:`,
+      `- Do not offer any of these again, not even in other words or another shape.`,
+      `- An offer they did not answer means they do not want that path; do not push it again.`,
+      `- Its type must differ from the last offer (for example, no ready-made message right after a ready-made message).`,
+      `- If nothing new is left to say about this reading's cards, offer a card you have not talked about yet, or one small, concrete practical step outside this conversation.`,
+    ].join('\n'),
     feedbackContext: (ctx) => JSON.stringify({
       'the check-in question you asked': ctx.confirmationQuestion,
       'the person answer': ctx.userAnswer,

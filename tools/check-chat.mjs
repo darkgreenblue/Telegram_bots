@@ -541,13 +541,16 @@ console.log('\n▶ ۷) بحران و تعارف');
 console.log('\n▶ ۸) بودجه و کشِ پرامپت');
 {
   const B = chat.CHAT_BUDGET;
-  const sum = B.sys + B.question + B.cards + B.reading + B.memory + B.prev + B.hist + B.ask;
+  const sum = B.sys + B.question + B.cards + B.reading + B.memory + B.prev + B.hist + B.ask + B.ledger;
   ok(sum <= B.total, `جمعِ اجزا (${sum}) زیرِ کرانِ اعلام‌شده (${B.total}) است`);
   // بدترین حالتِ واقعی: تاریخچه‌ی پر، کانتکستِ پر.
   const big = 'ن'.repeat(5000);
   const rows = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: big }));
   const packed = chat.packHistory(rows);
-  const msgs = chat.toMessages(big.slice(0, B.sys + 5400), packed, big);
+  // 📒 بدترین حالت دفترِ پُر را هم دارد (v3.148.0)، وگرنه کرانِ کل بدونِ آن سنجیده می‌شد.
+  const LFA8 = (await import('../bots/tarot/locales/fa.js')).default;
+  const fullLedger = Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: big, taken: false }));
+  const msgs = chat.toMessages(big.slice(0, B.sys + 5400), packed, big, LFA8, { ledger: fullLedger });
   ok(chat.messagesChars(msgs) <= B.total + B.sys,
     `بدترین حالتِ ورودی کران‌دار است (${chat.messagesChars(msgs)} کاراکتر)`);
   ok(packed.turns.length <= chat.CHAT_RECENT_TURNS * 2, `فقط ${chat.CHAT_RECENT_TURNS} نوبتِ آخر خام می‌ماند`);
@@ -2699,6 +2702,76 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   ok(chat.assentIn('بله لطفاً') && chat.assentIn('بله لطفا') && chat.smallTalkIn('مرسی') ,
     '🔡 «بله لطفاً» (با تنوین) همان «بله لطفا» است');
   ok(!chat.assentIn('بله لطفاً کارت دوم رو بگو'), '⚠️ کنترلِ مثبت: تأییدِ همراهِ سؤال هنوز پولی است');
+}
+
+/* ═══ ۲۴) 📒 دفترِ پیشنهادها (v3.148.0، #42) ═══════════════════════════════
+ * ریشه از ۳۴۴۹ پیامِ واقعی: پیشنهادِ خطِ آخر اجباری است و «باید تازه باشد»، ولی مدل
+ * پیشنهادهای قدیمیِ خودش را نمی‌بیند (فشرده‌ی تاریخچه فقط سؤال‌های کاربر را نگه می‌دارد) و
+ * نمی‌داند کدام را کاربر بی‌جواب گذاشت. دفتر هر دو را به دُمِ پیامِ آخر می‌دهد. */
+console.log('\n▶ ۲۴) دفترِ پیشنهادها');
+{
+  const LF = (await import('../bots/tarot/locales/fa.js')).default;
+  const OFF1 = 'می‌خوای کارت دوم رو برات باز کنم؟';
+  const OFF2 = 'اگه بخوای می‌تونم یه پیامِ کوتاه برات بنویسم.';
+  const rows = [
+    { role: 'user', text: 'سؤالِ اول' },
+    { role: 'assistant', text: `جوابِ اول.\n${OFF1}`, follow_up: 'کارت دوم رو باز کن' },
+    { role: 'user', text: 'کارت دوم رو باز کن' },            // تپِ دکمه ⟵ قبول
+    { role: 'assistant', text: `جوابِ دوم.\n${OFF2}`, follow_up: 'پیام کوتاه رو بنویس' },
+    { role: 'user', text: 'نه، بگو اون آدم چه حسی داره' },   // حرفِ دیگر ⟵ جواب نداد
+    { role: 'assistant', text: 'جوابِ سوم بدونِ پیشنهاد', follow_up: 'حسش رو بگو' },
+    { role: 'user', text: 'آره' },                           // «بله»ی تایپی ⟵ قبول
+    { role: 'pending', text: 'نادیده' },
+    { role: 'assistant', text: 'جوابِ چهارم', follow_up: '' }, // نه پیشنهاد نه دکمه ⟵ ردیف ندارد
+  ];
+  const led = chat.offerLedger(rows);
+  ok(led.length === 3, `📒 هر جوابِ پیشنهاددار یک ردیف (۳)، جوابِ بی‌پیشنهاد و بی‌دکمه هیچ (${led.length})`);
+  ok(led[0]?.text === OFF1 && led[0]?.taken === true, '📒 تپِ دکمه (متنِ کاربر = follow_up) یعنی «قبول کرد»');
+  ok(led[1]?.text === OFF2 && led[1]?.taken === false, '📒 حرفِ دیگر بعد از پیشنهاد یعنی «جواب نداد»');
+  ok(led[2]?.text === 'حسش رو بگو' && led[2]?.taken === true,
+    '📒 خطِ آخرِ غیرپیشنهادی ⟵ متن از برچسبِ دکمه؛ و «آره»ی تایپی هم «قبول کرد» است');
+  // ⚠️ کنترلِ مثبت: آخرین پیشنهادِ بی‌پاسخ (هنوز پیامِ بعدی نیامده) «جواب نداد» نیست، ولی در دفتر هست.
+  const tail = chat.offerLedger(rows.slice(0, 2));
+  ok(tail.length === 1 && tail[0].taken === false, '📒 پیشنهادی که هنوز پیامِ بعدی ندارد در دفتر هست و «قبول» حساب نمی‌شود');
+  const many = Array.from({ length: 30 }, (_, i) => [
+    { role: 'assistant', text: `جواب.\nمی‌خوای نکته‌ی ${i} رو برات باز کنم؟ ${'ی'.repeat(200)}`, follow_up: '' },
+    { role: 'user', text: `سؤال ${i}` }]).flat();
+  const lm = chat.offerLedger(many);
+  ok(lm.length === chat.CHAT_LEDGER_MAX && lm.every((x) => x.text.length <= chat.CHAT_LEDGER_ITEM),
+    `📒 فقط ${chat.CHAT_LEDGER_MAX} پیشنهادِ آخر و هر ردیف ≤${chat.CHAT_LEDGER_ITEM} نویسه`);
+  ok(lm[lm.length - 1].text.includes('نکته‌ی 29'), '📒 تازه‌ترین‌ها می‌مانند، نه قدیمی‌ترین‌ها');
+  ok(chat.offerLedger([]).length === 0 && chat.offerLedger(null).length === 0, '📒 تاریخچه‌ی خالی ⟵ دفترِ خالی');
+
+  // 🔑 رول‌بک: بدونِ دفتر، پیام‌ها بیت‌به‌بیت همان قبلی‌اند (و دفترِ خالی هم همین‌طور).
+  const packed = chat.packHistory(rows.slice(0, 6));
+  const base = chat.toMessages('SYS', packed, 'سؤالِ تازه', LF);
+  const none = chat.toMessages('SYS', packed, 'سؤالِ تازه', LF, { ledger: null });
+  const empty = chat.toMessages('SYS', packed, 'سؤالِ تازه', LF, { ledger: [] });
+  ok(JSON.stringify(base) === JSON.stringify(none) && JSON.stringify(base) === JSON.stringify(empty),
+    '🔑 بدونِ دفتر (یا دفترِ خالی) آرایه‌ی پیام‌ها بیت‌به‌بیت همان v3.147.0 است');
+  const withL = chat.toMessages('SYS', packed, 'سؤالِ تازه', LF, { ledger: led });
+  ok(withL.length === base.length, '📒 دفتر پیامِ تازه نمی‌سازد، فقط دُمِ پیامِ آخر را بلند می‌کند');
+  ok(withL[0].content === 'SYS', '🔑 پیشوندِ system دست‌نخورده می‌ماند (کشِ پرامپت)');
+  ok(withL.slice(0, -1).every((m, i) => m.content === base[i].content), '🔑 هیچ پیامِ تاریخچه‌ای عوض نمی‌شود');
+  const last = withL[withL.length - 1];
+  ok(last.role === 'user' && last.content.startsWith('سؤالِ تازه') && last.content.includes(OFF1) && last.content.includes('(جواب نداد)'),
+    '📒 دفتر فقط به دُمِ آخرین پیامِ user می‌چسبد، بعد از خودِ سؤال');
+  const ledTxt = LF.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'ی'.repeat(chat.CHAT_LEDGER_ITEM), taken: false })));
+  ok(ledTxt.length <= chat.CHAT_BUDGET.ledger, `📒 دفترِ پُرِ فارسی داخلِ بودجه است (${ledTxt.length} ≤ ${chat.CHAT_BUDGET.ledger})، پس قواعدِ آخرش بریده نمی‌شود`);
+  ok(!/[—]|--/.test(ledTxt), '✍️ متنِ دفتر خط تیره‌ی بلند ندارد (بند ۱۰)');
+  for (const lg of ['en', 'es', 'pt', 'ru']) {
+    const LL = (await import(`../bots/tarot/locales/${lg}.js`)).default;
+    const t = LL.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'x'.repeat(chat.CHAT_LEDGER_ITEM), taken: true })));
+    ok(t.length <= chat.CHAT_BUDGET.ledger, `📒 «${lg}»: دفترِ پُر داخلِ بودجه است (${t.length})`);
+  }
+
+  // 🔌 سیم‌کشیِ ربات: دفتر از **کلِ** تاریخچه (با سؤالِ فعلی) و پشتِ پرچم.
+  ok(/const CHAT_OFFER_LEDGER = true;/.test(CODE), '🎚 پرچمِ `CHAT_OFFER_LEDGER` روشن است (رول‌بکِ یک‌خطی)');
+  ok(/const ledger = CHAT_OFFER_LEDGER \? offerLedger\(hist\) : null;/.test(CODE),
+    '🔌 دفتر از `hist`ِ کامل ساخته می‌شود (نه `hist.slice(0, -1)`)، تا قبول/ردِ آخرین پیشنهاد معلوم باشد');
+  ok(/toMessages\(system, packed, text, L, \{ ledger \}\)/.test(CODE), '🔌 و واقعاً به `toMessages` می‌رسد');
+  ok(/chatHistory:\s+db\.prepare\('SELECT role, text,[^']*follow_up[^']*FROM chat_messages/.test(SRC),
+    '🔌 کوئریِ تاریخچه `follow_up` را می‌خواند (منبعِ «قبول کرد»)');
 }
 
 const total = pass + errs.length;
