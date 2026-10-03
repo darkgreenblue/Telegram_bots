@@ -28,6 +28,18 @@ class _Client:
 
 
 class StudioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_old_collection_can_be_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_store = Store(Path(tmp) / "db.sqlite")
+            local_store.put(42, {"batch_id": "old", "state": "collecting", "inputs": [], "notebook_title": "Old automatic title"})
+            message = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=12)))
+            update = SimpleNamespace(effective_user=SimpleNamespace(id=42), message=message)
+            with patch.object(bot, "store", local_store):
+                await bot.begin(update, SimpleNamespace())
+            self.assertEqual(local_store.get(42, "old")["state"], "title")
+            self.assertEqual(local_store.get(42, "old")["notebook_title"], "")
+            self.assertEqual(local_store.open_count(42), 1)
+
     async def test_slide_generation_saves_task_and_downloads_pptx(self):
         with tempfile.TemporaryDirectory() as tmp:
             session = {"batch_id": "abc", "work_dir": tmp, "notebook_id": "nb", "source_ids": ["src"],

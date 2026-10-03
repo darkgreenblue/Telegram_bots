@@ -90,9 +90,8 @@ jobs:
             .proxy/xray run -test -config .proxy/config.json;
             pm2 startOrReload ecosystem.config.cjs --only notebook-podcast-proxy --update-env;
             sleep 3;
-            for port in 18764 18776 18760 18761 18762 18763 18765 18775 18777 18778 18779; do
-              if HTTP_PROXY=http://127.0.0.1:\$port HTTPS_PROXY=http://127.0.0.1:\$port timeout 30 .venv/bin/notebooklm -p notebook-podcast auth refresh --verify >/dev/null 2>&1; then break; fi;
-            done;
+            # A working browser session is sufficient. The optional master token
+            # may be stale; trying every node can delay deployment for minutes.
             .venv/bin/python proxy_select.py;
             curl --proxy http://127.0.0.1:18759 -fsS -o /dev/null --max-time 20 https://notebooklm.google.com/;
             export HTTP_PROXY=http://127.0.0.1:18759 HTTPS_PROXY=http://127.0.0.1:18759;
