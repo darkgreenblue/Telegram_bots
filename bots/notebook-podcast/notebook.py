@@ -34,7 +34,7 @@ def _retryable_upload_error(exc: Exception, session: dict) -> bool:
     return isinstance(exc, ValueError) and "Final URL: https://notebook.google/" in str(exc)
 
 
-async def upload(session: dict, save, download_file, profile: str) -> None:
+async def upload(session: dict, save, download_file, profile: str, on_retry=None) -> None:
     """Upload every source in order; retain progress for retry after a restart."""
     for attempt in range(5):
         try:
@@ -44,6 +44,8 @@ async def upload(session: dict, save, download_file, profile: str) -> None:
             if attempt == 4 or not _retryable_upload_error(exc, session):
                 raise
             LOG.warning("NotebookLM upload retry %s after %s", attempt + 1, type(exc).__name__)
+            if on_retry is not None:
+                await on_retry()
             await asyncio.sleep(2 ** attempt)
 
 
@@ -110,7 +112,10 @@ async def generate(session: dict, save, profile: str) -> Path:
         output = Path(session["work_dir"]) / f"{session['batch_id']}.m4a"
         output.parent.mkdir(parents=True, exist_ok=True)
         if not output.exists():
+            partial = output.with_suffix(".download")
+            partial.unlink(missing_ok=True)
             await client.artifacts.download_audio(
-                session["notebook_id"], str(output), artifact_id=session["task_id"]
+                session["notebook_id"], str(partial), artifact_id=session["task_id"]
             )
+            partial.replace(output)
         return output
