@@ -1768,7 +1768,7 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
     '🔑 دکمه‌ی ادامه بالای دکمه‌ی خروج است (درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند)');
   ok(/if \(followUp\) rows\.push/.test(turn2), 'و دکمه‌ی ادامه فقط وقتی مدل برچسب داده ساخته می‌شود');
   ok(/if \(CHAT_END_BUTTON\) rows\.push/.test(turn2), 'دکمه‌ی خروج پرچمِ رول‌بکِ خودش را دارد');
-  ok(/const followUp = CHAT_FOLLOWUP \? \(out\.followUp \|\| ''\) : '';/.test(turn2),
+  ok(/const followUp = CHAT_FOLLOWUP && !\(CHAT_NEWREAD_NO_FU && out\.newReading\) \? \(out\.followUp \|\| ''\) : '';/.test(turn2),
     'و خاموشیِ پرچم برچسب را از **ثبت** هم بیرون می‌برد، نه فقط از دکمه');
 
   /* ── ۲۰ج) پایانِ مکالمه ─────────────────────────────────────────────── */
@@ -2508,7 +2508,7 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
     '🔤 `chatFixNeeds` کمبودِ `latin` را گزارش می‌کند');
   ok(chat.chatFixScore({ latin: 'x' }, false) > chat.chatFixScore({}, false),
     '🔤 و تعمیری که لاتین را برداشت «اکیداً بهتر» شمرده می‌شود');
-  ok(/latin: CHAT_LATIN_FIX \? n\.latin : ''/.test(T) && /needs\.safety \|\| needs\.latin\) \{/.test(T),
+  ok(/latin: CHAT_LATIN_FIX \? n\.latin : ''/.test(T) && /needs\.safety \|\| needs\.latin \|\| needs\.fu\) \{/.test(T),
     '🔤 ربات لاتین را در همان **یک** تلاشِ تعمیر می‌آورد، پشتِ پرچمِ رول‌بک');
   ok(/chatFixNeeds\(o, \{ crisisCtx, userText \}\)/.test(T), '🔤 و حرف‌های خودِ کاربر را به‌عنوانِ مجاز پاس می‌دهد');
   {
@@ -2560,18 +2560,21 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   };
   ok(!!sq('chatLastAnswer') && /ORDER BY id DESC LIMIT 1/.test(sq('chatLastAnswer')), '✅ فقط **آخرین** جوابِ همین فال دیده می‌شود');
   const st = { chatLastAnswer: d.prepare(sq('chatLastAnswer')), claimFollowUp: d.prepare(sq('claimFollowUp')) };
-  const run = async (text, { flag = true, via = 'typed' } = {}) => {
-    const log = { replies: [], events: [] };
+  // استابِ `Markup`: فقط شکلِ دکمه را نگه می‌دارد تا `callback_data` سنجیده شود.
+  const MK = { inlineKeyboard: (rows) => ({ reply_markup: rows }), button: { callback: (t, cb) => ({ text: t, cb }) } };
+  const run = async (text, { flag = true, via = 'typed', noFu = true, assentOffer = true } = {}) => {
+    const log = { replies: [], events: [], extras: [] };
     const fn = new Function('ctx', 'uid', 'rid', 'text', 'via', 'extra', 'stmts', 'track', 'db', 'L', 'CHAT_ASSENT_TAP',
-      'assentIn', 'noContentIn', 'smallTalkIn',
+      'assentIn', 'noContentIn', 'smallTalkIn', 'CHAT_NEWREAD_NO_FU', 'CHAT_ASSENT_OFFER', 'offerTailIn', 'chatLang', 'Markup',
       `return (async () => { ${blk}\n return { text, via, passed: true }; })();`);
-    const out = await fn({ reply: async (t) => { log.replies.push(t); } }, 7, 20, text, via, {}, st,
-      (_db, _u, ev, p) => log.events.push([ev, p]), d, { chat: { smallTalk: 'ST' } }, flag,
-      chat.assentIn, chat.noContentIn, chat.smallTalkIn);
+    const out = await fn({ reply: async (t, x) => { log.replies.push(t); log.extras.push(x); } }, 7, 20, text, via, {}, st,
+      (_db, _u, ev, p) => log.events.push([ev, p]), d,
+      { chat: { smallTalk: 'ST', newReadingAsk: 'NEWASK' }, buttons: { chatAnotherReading: 'NEWBTN' } }, flag,
+      chat.assentIn, chat.noContentIn, chat.smallTalkIn, noFu, assentOffer, chat.offerTailIn, chat.chatLang, MK);
     return { ...(out || { passed: false }), ...log };
   };
-  const addAnswer = (fu, used = 0) => d.prepare(
-    "INSERT INTO chat_messages (reading_id, user_id, role, text, follow_up, follow_up_used) VALUES (20, 7, 'assistant', 'جواب', ?, ?)").run(fu, used).lastInsertRowid;
+  const addAnswer = (fu, used = 0, { text = 'جواب', wr = 0 } = {}) => d.prepare(
+    "INSERT INTO chat_messages (reading_id, user_id, role, text, follow_up, follow_up_used, want_reading) VALUES (20, 7, 'assistant', ?, ?, ?, ?)").run(text, fu, used, wr).lastInsertRowid;
 
   // ۱) پیشنهادِ باز ⟵ «آره» همان سؤال می‌شود و به کسر می‌رسد.
   const a1 = addAnswer('پیام کوتاه رو آماده کن');
@@ -2613,6 +2616,89 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   const r9 = await run('.', { flag: false });
   ok(r9.passed, '↩️ و پیامِ بی‌محتوا هم مثلِ قبل');
   ok(bool('CHAT_ASSENT_TAP'), '✅ پرچمِ `CHAT_ASSENT_TAP` روشن است');
+
+  /* ── ۲۴ب) v3.147.0: سه اشکالِ «بله» و دکمه (F1، F3) ───────────────────────────
+   * F1: جوابِ «فالِ تازه لازمه» با دکمه‌ی پیشنهادی، تپ ⟵ همان جواب ⟵ حلقه (۴۱ نوبت، ۱۳ کاربر).
+   * F3: «بله» زیرِ پیشنهادِ خطِ آخرِ بی‌دکمه، رایگان و بی‌جواب می‌ماند (۹ رویدادِ واقعی). */
+  const OFFER_TXT = 'کارت دوم می‌گه هنوز وقتش نرسیده.\nمی‌خوای یه پیامِ کوتاه برای شروعِ دوباره برات بنویسم؟';
+  ok(chat.offerTailIn(OFFER_TXT), 'پیش‌شرط: متنِ آزمون واقعاً خطِ آخرِ پیشنهادی دارد');
+  // F1) «بله» زیرِ جوابِ فالِ تازه ⟵ پیامِ رایگانِ «فال» با دکمه‌ی `chat_new`؛ هیچ ادعایی، هیچ کسری.
+  const w1 = addAnswer('برای کار فال بگیر', 0, { text: 'از این فال نمی‌شه.\nبرای این یه فالِ تازه لازمه.', wr: 1 });
+  const f1 = await run('آره');
+  ok(!f1.passed && f1.replies[0] === 'NEWASK' && f1.events.some(([e, p]) => e === 'chat_new_ask' && p.via === 'assent'),
+    '🔁 «بله» زیرِ جوابِ «فالِ تازه لازمه» ⟵ پیامِ رایگانِ «فال» (`via: assent`)، نه یک نوبتِ پولیِ دیگر');
+  ok(JSON.stringify(f1.extras[0]?.reply_markup || '').includes('chat_new:20'), '🔁 و دکمه‌اش همان `chat_new:<rid>`ِ موجود است');
+  ok(d.prepare('SELECT follow_up_used u FROM chat_messages WHERE id=?').get(w1).u === 0,
+    '🔁 دکمه‌ی پیشنهادیِ کهنه‌ی همان جواب ادعا **نمی‌شود** (وگرنه حلقه از درِ تایپ برمی‌گشت)');
+  const f1off = await run('آره', { noFu: false });
+  ok(f1off.passed && f1off.via === 'assent' && f1off.text === 'برای کار فال بگیر',
+    '↩️ کنترلِ مثبت / رول‌بک: با `CHAT_NEWREAD_NO_FU` خاموش همان رفتارِ قبلی (ادعا و نوبتِ پولی) برمی‌گردد');
+  // F3) «بله» زیرِ پیشنهادِ خطِ آخرِ بی‌دکمه ⟵ نوبتِ پولیِ عادی، متن همان «بله».
+  addAnswer('', 0, { text: OFFER_TXT });
+  const f3 = await run('بله لطفاً');
+  ok(f3.passed && f3.via === 'assent_offer' && f3.text === 'بله لطفاً' && !f3.replies.length,
+    '✅ «بله لطفاً» زیرِ پیشنهادِ بی‌دکمه = جوابِ همان پیشنهاد، به کسر می‌رسد (`via: assent_offer`)');
+  const f3off = await run('آره', { assentOffer: false });
+  ok(!f3off.passed && f3off.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'assent_no_offer'),
+    '↩️ رول‌بک: با `CHAT_ASSENT_OFFER` خاموش همان پیامِ رایگانِ قبلی');
+  // پیشنهادِ مصرف‌شده‌ی دکمه‌دار ولی با خطِ آخرِ پیشنهادی هم همین را می‌گیرد (۲ از ۹ موردِ واقعی).
+  addAnswer('پیام رو بنویس', 1, { text: OFFER_TXT });
+  const f3b = await run('آره');
+  ok(f3b.passed && f3b.via === 'assent_offer', '✅ دکمه‌ی مصرف‌شده + خطِ آخرِ پیشنهادی هم پولی جواب می‌گیرد');
+  // کنترلِ مثبت: خطِ آخرِ نقل‌قولی (پیش‌نویسِ پیامِ کاربر) پیشنهادِ ما نیست.
+  addAnswer('', 0, { text: 'می‌تونی این رو بفرستی:\n«می‌خوای یه روز با هم قهوه بخوریم؟»' });
+  const f3c = await run('آره');
+  ok(!f3c.passed && f3c.events.some(([e, p]) => e === 'chat_smalltalk' && p.kind === 'assent_no_offer'),
+    '⚠️ کنترلِ مثبت: پیش‌نویسِ نقل‌قولی بعد از دونقطه «پیشنهادِ ما» نیست و «آره» زیرش رایگان می‌ماند');
+  ok(bool('CHAT_NEWREAD_NO_FU') && bool('CHAT_ASSENT_OFFER') && bool('CHAT_FU_FIX'),
+    '✅ سه پرچمِ v3.147.0 روشن‌اند (`CHAT_NEWREAD_NO_FU`، `CHAT_ASSENT_OFFER`، `CHAT_FU_FIX`)');
+}
+
+/* ── ۲۵) v3.147.0: دکمه‌ی کهنه، کمبودِ دکمه، دُمِ پیشنهاد، برچسبِ اول‌شخص، نرمال‌سازی ──
+ * هر ادعای «حالا می‌گیرد» یک کنترلِ مثبت دارد که چیزِ سالم را نمی‌گیرد (بند ۶ب-۲ ریشه). */
+{
+  console.log('\n── ۲۵) پنج اشکالِ گفتگو (v3.147.0)');
+  const T = bodyOf(CODE, 'async function runChatTurn(');
+  // F1) دکمه‌ی کهنه‌ی `chat_ask` زیرِ جوابِ «فالِ تازه» ⟵ پیامِ رایگانِ «فال»، قبل از هر کسری.
+  const ask = (CODE.match(/bot\.action\(\/\^chat_ask:[\s\S]*?\n\}\);/) || [''])[0];
+  ok(!!ask, 'هندلرِ `chat_ask` از سورس بریده شد');
+  ok(/if \(CHAT_NEWREAD_NO_FU && row\.want_reading\)/.test(ask)
+     && before(ask, 'CHAT_NEWREAD_NO_FU && row.want_reading', 'handleChatMessage('),
+    '🔁 دکمه‌ی کهنه زیرِ جوابِ «فالِ تازه» **قبل از** نوبتِ پولی به پیامِ رایگانِ «فال» می‌رود');
+  ok(/followup_stale/.test(ask), '📊 و رویدادش `via: followup_stale` دارد');
+  ok(/want_reading FROM chat_messages WHERE id=\? AND role='assistant'/.test(SRC),
+    '🔁 `chatFollowUp` ستونِ `want_reading` را هم می‌خواند (بدونش گاردِ بالا همیشه false بود)');
+  // F2) جوابِ بی‌دکمه کمبودِ پنجمِ همان یک تلاشِ تعمیر است.
+  ok(chat.chatFixNeeds({ text: 'جواب', offer: 'x', followUp: '' }).fu === true,
+    '🔘 جوابِ عادیِ بی‌دکمه کمبودِ `fu` دارد');
+  ok(!chat.chatFixNeeds({ text: 'جواب', offer: 'x', followUp: 'بیشتر بگو' }).fu
+     && !chat.chatFixNeeds({ text: 'جواب', offer: 'x', followUp: '', newReading: true }).fu
+     && !chat.chatFixNeeds({ text: 'جواب', offer: 'x', followUp: '', end: true }).fu,
+    '⚠️ کنترلِ مثبت: دکمه‌دار، «فالِ تازه» و «پایانِ مکالمه» کمبودِ `fu` ندارند (هیچ تعمیرِ بی‌دلیلی)');
+  ok(chat.chatFixScore({ fu: true }, false) > chat.chatFixScore({}, false), '🔘 و تعمیری که دکمه آورد «اکیداً بهتر» است');
+  ok(/fu: CHAT_FU_FIX && CHAT_FOLLOWUP && !!n\.fu/.test(T), '🔘 ربات `fu` را پشتِ پرچمِ رول‌بک به همان تلاش می‌برد');
+  ok(/fu: fixWanted\.fu \? 1 : 0, fu_left: needs\.fu \? 1 : 0/.test(T), '📊 رویدادِ `chat_fix` دو propِ افزایشیِ `fu`/`fu_left` دارد');
+  // F4) دُمِ پیشنهاد: خطِ نقل‌قولی یا بعد از دونقطه «پیشنهادِ ما» نیست، پس بدنه حذف نمی‌شود.
+  const q1 = 'یه پیامِ ساده بفرست:\nمی‌خوای این آخر هفته با هم حرف بزنیم؟';
+  ok(!chat.offerTailIn(q1) && !chat.offerTailIn('بفرست: «می‌خوای با هم حرف بزنیم؟»'),
+    '🧾 پیش‌نویسِ پیامِ کاربر (بعد از دونقطه یا داخلِ «») پیشنهادِ ما نیست');
+  ok(chat.offerTailIn('کارت سوم روشنه.\nمی‌خوای کارت دوم رو هم برات باز کنم؟'),
+    '⚠️ کنترلِ مثبت: پیشنهادِ واقعیِ خطِ آخر هنوز گرفته می‌شود');
+  ok(chat.offerTailIn('کارت سوم روشنه.\nاگه بخوای می‌تونم فرقِ «تنش» و «حمله» رو برات جدا کنم.')
+     && chat.offerTailIn('کارت دوم آرومه.\nمی‌خوای معنیِ «صبر» رو توی این فال برات باز کنم؟'),
+    '🧾 پیشنهادِ واقعی که وسطش یک عبارتِ نقل‌قولی دارد هنوز پیشنهاد است (۱۶/۱۶۰۳ جوابِ واقعی که قاعده‌ی «گیومه دارد» می‌انداخت)');
+  const fin =chat.finalizeChatOut({ text: q1, offer: 'می‌خوای یه نسخه‌ی کوتاه‌ترش رو هم بنویسم؟', followUp: 'x' }, {});
+  ok(fin.reply.includes('می‌خوای این آخر هفته با هم حرف بزنیم؟') && fin.reply.includes('نسخه‌ی کوتاه‌ترش'),
+    '🧾 بدنه‌ی پیش‌نویس سرِ جایش می‌ماند و پیشنهادِ واقعی زیرش می‌آید (۴۴/۴۴ بازسازیِ واقعی، قبلاً ۰/۴۴)');
+  // F5) برچسبِ اول‌شخصِ مدل («برات بنویسم») از زبانِ ربات است، نه کاربر.
+  ok(chat.followUpBad('پیام رو برات می‌نویسم') === 'firstperson' && chat.followUpBad('متن رو می‌فرستم') === 'firstperson',
+    '🔤 برچسبِ اول‌شخصِ ربات («برات می‌نویسم») رد می‌شود (۸ از ۱۵۴۳ برچسبِ واقعی، ۵ تپ)');
+  ok(!chat.followUpBad('پیام کوتاه رو آماده کن') && !chat.followUpBad('کارت دوم رو باز کن') && !chat.followUpBad('بهش چی بنویسم؟'),
+    '⚠️ کنترلِ مثبت: امرِ کاربر («آماده کن») و سؤالِ خودش («چی بنویسم؟») سالم‌اند؛ فقط شکلِ «می‌…م» گرفته می‌شود');
+  // F6) نرمال‌سازی: نیم‌فاصله و اعراب و «ئ/ی» تأیید و تعارف را نمی‌شکنند.
+  ok(chat.assentIn('بله لطفاً') && chat.assentIn('بله لطفا') && chat.smallTalkIn('مرسی') ,
+    '🔡 «بله لطفاً» (با تنوین) همان «بله لطفا» است');
+  ok(!chat.assentIn('بله لطفاً کارت دوم رو بگو'), '⚠️ کنترلِ مثبت: تأییدِ همراهِ سؤال هنوز پولی است');
 }
 
 const total = pass + errs.length;

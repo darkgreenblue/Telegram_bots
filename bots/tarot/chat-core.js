@@ -249,7 +249,7 @@ function replayEnvelope(text, flags = {}) {
   const ls = t.split('\n');
   let k = ls.length - 1;
   while (k >= 0 && !ls[k].trim()) k--;
-  if (k >= 1 && offerLineOk(ls[k])) {
+  if (k >= 1 && offerTailIn(ls.slice(0, k + 1).join('\n'))) {
     return chatEnvelope(ls.slice(0, k).join('\n').trim(), { ...flags, offer: ls[k].trim() });
   }
   return chatEnvelope(t, flags);
@@ -382,6 +382,12 @@ const FA_FU_ASSENT = [
   'آره', 'اره', 'بله', 'نه', 'باشه', 'اوکی', 'اوک', 'حتما', 'حتماً', 'قبوله',
   'موافقم', 'بریم', 'بریم سراغش', 'ادامه بده', 'ادامه بدیم', 'همینو',
 ];
+/* 🙋 کلاسِ سوم (v3.147.0): برچسبی که **قولِ کاری از طرفِ کاربر** است نه سؤالش («پیامش رو
+ * می‌فرستم»، «همین جمله رو کپی می‌کنم»). تپش جمله‌ای می‌فرستد که هیچ سؤالی ندارد؛ مدل فقط
+ * «باشه، موفق باشی» می‌گوید و یک الماس می‌رود (۵ تپِ واقعی از ۳ کاربر، ۲ تا پولی).
+ * ⚠️ فقط فعلِ اخباریِ اول‌شخص **با «می»**: «چی براش بفرستم؟» و «چی کار کنم؟» سؤالِ واقعیِ کاربرند
+ * و نباید بیفتند. روی ۱۵۴۳ برچسبِ واقعی سنجیده شد: هر ۵ برچسبِ «…کنم؟» بی‌«می» سالم ماندند. */
+const FA_FU_FIRSTPERSON = /(?<![؀-ۿ])می[‌ ]?(?:فرستم|نویسم|گم|گویم|دم|ذارم|کنم)(?![؀-ۿ])/;
 
 /* 🔮 «فالِ تازه» به‌صورتِ **کلِ پیام** (v3.140.0). باگِ واقعیِ دورِ ۲ کیفیت: کاربر وسطِ
  * گفتگو فقط نوشت «فال»؛ یک الماس کم شد و مدل جوابِ قبلی را تکرار کرد. همان منطقِ تنگِ
@@ -396,7 +402,7 @@ const FA_NEW_ASK = [
 
 const FA_LANG = {
   crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
-  followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, offer: FA_OFFER,
+  followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, followUpFirstPerson: FA_FU_FIRSTPERSON, offer: FA_OFFER,
   newReadingAsk: FA_NEW_ASK, latinFix: true, assent: FA_ASSENT,
 };
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
@@ -422,6 +428,9 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
     newReadingAsk: arr(d.newReadingAsk, lang === 'fa' ? base.newReadingAsk : []),
     latinFix: typeof d.latinFix === 'boolean' ? d.latinFix : lang === 'fa',
     assent: arr(d.assent, lang === 'fa' ? base.assent : []),
+    // الگوی فعلِ اول‌شخصِ فارسی روی زبانِ دیگر بی‌معناست؛ آن زبان این کلاس را ندارد تا الگوی خودش بیاید.
+    followUpFirstPerson: d.followUpFirstPerson instanceof RegExp ? d.followUpFirstPerson
+      : (lang === 'fa' ? base.followUpFirstPerson : null),
   });
 }
 export const chatLang = () => ({ ...LANG_T.get() });
@@ -490,10 +499,36 @@ export function offerLineOk(line) {
   if (!o) return true;
   return (o.ask.test(t) && o.mine.test(t)) || o.can.test(t);
 }
-const lastLineOf = (text) => {
+/* 📨 «خطِ آخرِ متن **پیشنهادِ تاروت‌خوان** است» (v3.147.0، باگِ «متنِ پیامِ آماده گم شد»).
+ *
+ * `offerLineOk` فقط شکلِ جمله را می‌بیند. پیامِ آماده‌ای که تاروت‌خوان **برای کاربر** می‌نویسد
+ * («این رو بفرست:» و زیرش «می‌خوام بدونم … چی می‌خوای؟») همان شکل را دارد، پس تکرارزدایِ
+ * `finalizeChatOut` آن را «پیشنهادِ تکراری» می‌خواند و **حذفش می‌کرد**. کاربر برای یک پیامِ آماده
+ * الماس می‌داد و فقط «این رو بفرست:» می‌گرفت (۵ جوابِ واقعی، ۱۴۰۵/۰۷/۰۹ تا ۱۱).
+ * دو نشانه‌ی ساختاری که پیامِ آماده را از پیشنهاد جدا می‌کند، هر دو از همان ۴۳ خطِ واقعیِ داخلِ
+ * متن که `offerLineOk` می‌گرفت: خطِ قبلی با «:» تمام شده، یا خودِ خط گیومه دارد.
+ * ⚠️ فقط برای زبانِ دارای الگو؛ زبانِ بی‌الگو همان قضاوت‌نشدنِ `offerLineOk` را می‌گیرد. */
+export const OFFER_TAIL_GUARD = true;
+/* متنِ خط **بیرون از گیومه**. بازه‌ی متوازن حذف می‌شود؛ گیومه‌ی بازِ بی‌جفت تا آخرِ خط و
+ * گیومه‌ی بسته‌ی بی‌جفت از اولِ خط (پیامِ آماده‌ای که چند خط است). */
+function unquoted(s) {
+  let t = String(s || '');
+  for (let i = 0; i < 2; i++) t = t.replace(/«[^«»]*»|“[^“”]*”|"[^"\n]*"/g, ' ');
+  return t.replace(/[«“"][^]*$/, ' ').replace(/^[^]*[»”]/, ' ');
+}
+export function offerTailIn(text) {
   const ls = String(text || '').split('\n').map((s) => s.trim()).filter(Boolean);
-  return ls.length ? ls[ls.length - 1] : '';
-};
+  if (!ls.length) return false;
+  const last = ls[ls.length - 1];
+  if (!offerLineOk(last)) return false;
+  if (!OFFER_TAIL_GUARD || !LANG.offer) return true;
+  /* ⚠️ «گیومه دارد» کافی نیست (ممیزیِ عدم‌رگرسیون روی ۱۶۰۳ جوابِ واقعی، ۱۴۰۵/۰۷/۱۱): پیشنهادِ
+   * واقعی هم عبارت را در گیومه می‌آورد («فرقِ «تنش» و «حمله» رو برات جدا کنم») و نسخه‌ی اولِ همین
+   * گارد ۱۶ پیشنهادِ واقعی را «پیامِ آماده» می‌خواند. ملاک: شکلِ پیشنهاد **بیرونِ** گیومه هم هست؟ */
+  if (/[«»"“”]/.test(last) && !offerLineOk(unquoted(last))) return false;
+  if (ls.length >= 2 && /[:：]$/.test(ls[ls.length - 2])) return false;
+  return true;
+}
 
 /* ⚠️ `smallTalkIn` عمداً **تنگ** است: کلِ پیام (بعد از نرمال‌سازی) باید خودش یکی از
  * الگوها باشد، نه اینکه شاملش باشد. یعنی «مرسی» رایگان است ولی «مرسی، ولی کارتِ دوم
@@ -504,10 +539,15 @@ export const CHAT_SMALLTALK_MAX = 15;
 /* ایموجی هیچ محتوایی به «مرسی» اضافه نمی‌کند («مرسی 🙏» همان «مرسی» است)، پس قبل از تطبیق
  * کنار می‌رود. ⚠️ فقط برای همین تطبیقِ تنگ؛ `norm` عمداً دست نخورد چون سنجه‌ها هم از آن می‌خوانند. */
 const noEmoji = (s) => String(s || '').replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}️‍]/gu, ' ');
+/* 🔤 نرمال‌سازیِ **شُل** فقط برای همین دو تطبیقِ تنگ (v3.147.0): «حتماً» و «حتما»، و «مرسي» با یِ
+ * عربیِ کیبوردِ قدیمی، یک پیام‌اند. اعراب و تنوین کنار می‌رود و ي/ك عربی فارسی می‌شوند، **روی
+ * هر دو طرف**. ⚠️ `norm` عمداً دست نخورد: سنجه‌های آزمایشگاه هم از آن می‌خوانند. */
+const loose = (s) => String(s || '').replace(/[ً-ٰٟ]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+const tight = (s) => norm(loose(noEmoji(s)));
 export function smallTalkIn(text) {
-  const t = norm(noEmoji(text));
+  const t = tight(text);
   if (!t || t.length > CHAT_SMALLTALK_MAX) return false;
-  return LANG.smallTalk.some(p => norm(p) === t);
+  return LANG.smallTalk.some(p => tight(p) === t);
 }
 
 /** پیامی که بعد از کنار رفتنِ ایموجی و علامت‌ها **هیچ** چیزی ندارد («.»، «🙏»، «؟؟»). رایگان؛
@@ -519,9 +559,9 @@ export function noContentIn(text) {
 /** «بله»ی تایپی به‌صورتِ **کلِ پیام**؟ (همان تنگیِ `smallTalkIn`). صداکننده تصمیم می‌گیرد آن را
  * به آخرین پیشنهادِ مصرف‌نشده وصل کند یا، اگر پیشنهادی نیست، رایگان جواب بدهد. */
 export function assentIn(text) {
-  const t = norm(noEmoji(text));
+  const t = tight(text);
   if (!t || t.length > CHAT_SMALLTALK_MAX) return false;
-  return (LANG.assent || []).some((p) => norm(p) === t);
+  return (LANG.assent || []).some((p) => tight(p) === t);
 }
 
 /** «فالِ تازه می‌خواهم» به‌صورتِ کلِ پیام؟ همان تنگیِ `smallTalkIn`، به همان دلیل. */
@@ -735,11 +775,14 @@ export function cleanFollowUp(raw, { max = CHAT_FOLLOWUP_MAX, guard = true } = {
  * محتوایی ندارد و تپش یک پیامِ توخالی می‌فرستد. «آره، ولی چرا کارتِ دوم برعکس بود؟»
  * از این گارد رد می‌شود چون باقی‌مانده‌اش یک سؤالِ کامل است. */
 export const FU_ASSENT_REST = 12;
-/** کلاسِ خرابیِ برچسب (`'meta'` | `'assent'`)، یا `''` اگر سالم باشد. */
+/** کلاسِ خرابیِ برچسب (`'meta'` | `'assent'` | `'firstperson'`)، یا `''` اگر سالم باشد. */
 export function followUpBad(label) {
   const n = norm(label);
   if (!n) return '';
   for (const p of LANG.followUpMeta) { const q = norm(p); if (q && n.includes(q)) return 'meta'; }
+  // روی متنِ خام نه `norm`: `norm` نیم‌فاصله را برمی‌دارد و «می‌فرستم» را به «میفرستم» می‌چسباند؛
+  // الگو هر دو شکل را می‌پذیرد ولی مرزِ واژه‌اش روی متنِ خام دقیق‌تر است.
+  if (LANG.followUpFirstPerson && LANG.followUpFirstPerson.test(String(label))) return 'firstperson';
   let rest = n, stripped = false;
   const words = LANG.followUpAssent.map(norm).filter(Boolean).sort((a, b) => b.length - a.length);
   for (let i = 0; i < 4; i++) {
@@ -941,18 +984,23 @@ export function chatSystemPrompt(sysText, ctxBlock, L = null) {
  * صریحاً از خودکشی یا آسیب گفته، حرفِ ایمنی مجاز است و دست نمی‌خورد. */
 /* 🔤 و از v3.140.0 کمبودِ چهارم: `latin` (واژه‌ی لاتینِ نشتی، `latinIn`). همان یک تلاش،
  * نه تلاشِ تازه. `userText` = حرف‌های خودِ کاربر، تا واژه‌ی لاتینی که خودش نوشته مجاز بماند. */
+/* 🔘 و از v3.147.0 کمبودِ پنجم: `fu` (جوابی که دکمه‌ی سؤالِ بعدی ندارد). ۳۱ جوابِ واقعی بی‌دکمه
+ * ماندند و همه جوابِ **بی‌پاکت** (`salvaged`) بودند، چون آن‌جا هیچ فیلدِ `follow_up`ی وجود ندارد.
+ * برچسبی هم که گارد انداخته (`followUpBad`) همین‌جا خالی دیده می‌شود. پاسخِ فالِ تازه معاف است
+ * چون از v3.147.0 اصلاً دکمه‌ی سؤال نمی‌گیرد. */
 export function chatFixNeeds(out, { crisisCtx = false, userText = '' } = {}) {
-  if (!out) return { offer: false, safety: false, latin: '' };
-  const offer = !out.end && !offerLineOk(out.offer) && !offerLineOk(lastLineOf(out.text));
+  if (!out) return { offer: false, safety: false, latin: '', fu: false };
+  const offer = !out.end && !offerLineOk(out.offer) && !offerTailIn(out.text);
   const safety = !crisisCtx && !!safetyTalkIn(`${out.text || ''}\n${out.offer || ''}`);
   const latin = latinIn(`${out.text || ''}\n${out.offer || ''}`, userText);
-  return { offer, safety, latin };
+  const fu = !out.end && !out.newReading && !out.followUp;
+  return { offer, safety, latin, fu };
 }
 /** وزنِ کمبودها — تعمیر فقط وقتی پذیرفته می‌شود که **اکیداً** کمتر باشد.
  * `thin` وزنِ ۲ دارد چون پیامدش پولی است (ریفاندِ الماس)؛ پس جوابِ پُرِ بی‌پیشنهاد از
  * جوابِ توخالیِ پیشنهاددار بهتر شمرده می‌شود، همان رفتارِ v3.100.0. */
 export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.safety ? 1 : 0)
-  + (needs?.latin ? 1 : 0) + (thin ? 2 : 0);
+  + (needs?.latin ? 1 : 0) + (needs?.fu ? 1 : 0) + (thin ? 2 : 0);
 
 /* ═══ 🧾 متنِ نهاییِ جواب (تک‌منبعِ ربات و آزمایشگاه) ═══
  *
@@ -980,7 +1028,8 @@ export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = 
     let k = ls.length - 1;
     while (k >= 0 && !ls[k].trim()) k--;
     // فقط با الگوی واقعی؛ بدونِ الگو هر خطی «پیشنهاد» حساب می‌شد و خطِ آخرِ جواب می‌پرید.
-    if (LANG.offer && k >= 1 && offerLineOk(ls[k])) body = ls.slice(0, k).join('\n');
+    // ⚠️ `offerTailIn` نه `offerLineOk`: پیامِ آماده‌ی بعد از «این رو بفرست:» پیشنهاد نیست، بدنه است.
+    if (LANG.offer && k >= 1 && offerTailIn(ls.slice(0, k + 1).join('\n'))) body = ls.slice(0, k).join('\n');
   }
   let reply = cleanChatReply(body, { name, userText });
   // ⚠️ بدنه‌ای که کلش حرفِ خطر بود و حذف شد، خالی می‌ماند. پیشنهادِ تنها جواب نیست؛
@@ -992,7 +1041,7 @@ export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = 
       reply = `${cut(reply, Math.max(CHAT_MIN_CHARS, room))}\n${line}`;
     }
   }
-  const offerMissing = !out?.end && !offerLineOk(lastLineOf(reply));
+  const offerMissing = !out?.end && !offerTailIn(reply);
   return { reply, offerMissing, safetyStripped };
 }
 
