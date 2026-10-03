@@ -345,7 +345,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.145.0';
+const PRODUCT_VERSION = '3.146.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -4948,7 +4948,12 @@ async function chatRejectMedia(ctx, uid, kind) {
  * می‌دارد (پس گارد گرفتنش بی‌معناست) و `chat_end` **خودش** درِ خروج است — گارد گرفتنش
  * یعنی تپِ «پایان مکالمه» دوباره پیامِ «ادامه می‌دم / بستن گفتگو» بیاورد، دقیقاً همان
  * حلقه‌ی بی‌پایانِ تیکتِ `#TRT-8976388520` (بند ۹ب/۶ ریشه). */
-const CHAT_KEEP_CB = /^(chat:\d+|chat_keep|chat_close(?::\d+)?|chat_ask:\d+|chat_end(?::\d+)?|lremind:[01])$/;
+/* 🔮 و از v3.146.0 `chat_new` هم این‌جاست، به همان دلیلِ `chat_end`: دکمه‌ای است که **خودِ
+ * گفتگو** زیرِ جوابش گذاشته («🔮 فال تازه»، وقتی مدل می‌گوید سؤال فالِ تازه می‌خواهد).
+ * گارد گرفتنش یعنی ربات پیشنهادی بدهد و بعد بپرسد «مطمئنی می‌خوای بری؟». دیتای ۴ روز:
+ * ۲۷ بار، ۱۵ کاربر، و بعد از «بستن گفتگو» به‌جای کاتالوگ پیامِ عمومی می‌گرفتند. خودِ
+ * هندلر گفتگو را با فلگِ بازگشت می‌بندد، پس استیت هرگز `chatting` نمی‌ماند. */
+const CHAT_KEEP_CB = /^(chat:\d+|chat_keep|chat_close(?::\d+)?|chat_ask:\d+|chat_end(?::\d+)?|chat_new:\d+|lremind:[01])$/;
 /* 🎯 نیتِ پشتِ اقدامی که گارد جلویش را گرفت (v3.96.0 — خواسته‌ی صریحِ مالک: «اگر گفتگو
  * با یک دستورِ منوی اصلی بسته شد، بعد از بستن باید جوابِ **همان دستور** بیاید؛ این
  * قاعده را همیشه همه‌جای ربات داشته‌ایم»).
@@ -4963,7 +4968,7 @@ function chatExitIntent(txt, cb) {
     if (/^(wallet_go|recharge)$/.test(cb)) return INTENT.WALLET;
     if (cb === 'daily_go') return INTENT.DAILY;
     if (cb === 'lucky_go') return INTENT.LUCKY;
-    if (cb === 'invite_go') return INTENT.INVITE;
+    if (cb === 'invite_go' || cb === 'invite_edit') return INTENT.INVITE;
     if (cb === 'reading_go') return INTENT.READING;
     if (cb === 'settings') return INTENT.SETTINGS;
     return '';
@@ -4988,7 +4993,12 @@ function chatExitIntent(txt, cb) {
  * `walletRows` است (خرید، دعوت، کارتِ شانس) به‌علاوه‌ی خودِ صفحه‌ی کیف — یعنی همان
  * چیزی که کاربرِ پشتِ پی‌وال روی صفحه می‌بیند. هر کدام که تپ شود، هندلرِ خودش استیت
  * را عوض می‌کند و گفتگو از راهِ سؤالِ معلق برمی‌گردد (`resumePendingChat`). */
-const CHAT_EARN_CB = /^(recharge|wallet_go|lucky_go|invite_go)$/;
+/* 🐛 v3.146.0: پی‌والِ خودِ گفتگو `walletRows` را رندر می‌کند و آن‌جا دکمه‌ی دعوت از v3.97
+ * `invite_edit` است نه `invite_go`. پس **تنها درِ کسبِ الماسی که خودِ صفحه نشان می‌داد**
+ * گارد می‌خورد: کاربر «دعوت دوستان» را می‌زد، «یه گفتگوی باز داری» می‌گرفت، «ادامه»
+ * می‌زد و دوباره همان. دیتای ۴ روز: ۱۶۷ بار، ۸۸ کاربر. دو زیرصفحه‌ی همان پیام
+ * (`invite_stat`/`invite_back`) هم فقط خواندنی‌اند و استیت را دست نمی‌زنند. */
+const CHAT_EARN_CB = /^(recharge|wallet_go|lucky_go|invite_go|invite_edit|invite_stat|invite_back)$/;
 const chatEarnEntry = (txt, cb) => {
   if (cb) return CHAT_EARN_CB.test(cb);
   if (!txt) return false;
@@ -5013,6 +5023,13 @@ bot.use(async (ctx, next) => {
     /* 💎 کسبِ الماس **فقط با موجودیِ صفر** (خواسته‌ی صریحِ مالک). با موجودیِ ناصفر
      * دلیلی برای ترکِ گفتگو نیست، پس همان گارد می‌آید. */
     if (chatEarnEntry(txt, cb) && getBalance(uid) <= 0) return next();
+    /* 🎲 تپِ یک کارتِ دیگر روی گریدِ **دستِ تمام‌شده** (v3.146.0). الگوی واقعی: دستِ شانس
+     * تمام می‌شود، سؤالِ پارک‌شده‌ی گفتگو جواب می‌گیرد و استیت `chatting` می‌شود، بعد کاربر
+     * کارتِ دیگری از همان گرید را می‌زند. بیرونِ گفتگو همین تپ یک no-opِ بی‌صداست (هندلر
+     * قبل از هر `setState` برمی‌گردد)، ولی این‌جا گاردِ «یه گفتگوی باز داری» می‌داد:
+     * ۵۶ بار، ۴۱ کاربر. فقط وقتی **دستِ بازی نیست** رد می‌شود؛ دستِ باز همچنان گارد
+     * می‌گیرد، چون آن‌جا هندلر استیت را عوض می‌کند و گفتگو بی‌صدا رها می‌شد. */
+    if (cb && /^lpick:\d+$/.test(cb) && !openLuckyHand(uid)) return next();
     if (CHAT_STATE_GUARD) { await chatOpenGuard(ctx, uid, chatExitIntent(txt, cb)); return; }
     // مسیرِ رول‌بک: رفتارِ بی‌صدای v3.87.0. استیت باید همان‌جا رها شود، وگرنه پیامِ
     // بعدیِ کاربر که فکر می‌کند بیرون آمده یک الماس خرج می‌کند.
@@ -8658,10 +8675,21 @@ bot.action(/^chat:(\d+)(?::(o))?$/, async (ctx) => {
  * عمومی است و ده جای دیگر هم استفاده می‌شود. خودِ `reading_go` دست‌نخورده ثبت می‌ماند. */
 bot.action(/^chat_new:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  track(db, ctx.from.id, 'chat_new_tap', {
-    reading_id: parseInt(ctx.match[1], 10), in_chat: getState(ctx.from.id) === 'chatting' ? 1 : 0,
+  const uid = ctx.from.id;
+  const wasOpen = getState(uid) === 'chatting';
+  track(db, uid, 'chat_new_tap', {
+    reading_id: parseInt(ctx.match[1], 10), in_chat: wasOpen ? 1 : 0,
   });
-  await collapseChatOffer(ctx, parseInt(ctx.match[1], 10));
+  /* ⚠️ این دکمه سه جا می‌نشیند: پیامِ پیشنهادِ گفتگو، **زیرِ جوابِ گفتگو**، و پیامِ «فال»ِ
+   * تنها. `collapseChatOffer` **متنِ** پیام را عوض می‌کند، پس فقط روی پیامِ پیشنهاد مجاز
+   * است (تنها پیامی که دکمه‌ی `chat:<id>` دارد). روی جوابِ گفتگو همان جوابِ پول‌داده را
+   * با «هر وقت خواستی…» جایگزین می‌کرد؛ آن‌جا فقط دکمه‌ها برداشته می‌شوند و متن می‌ماند. */
+  const btns = (ctx.callbackQuery?.message?.reply_markup?.inline_keyboard || []).flat();
+  if (btns.some((b) => /^chat:\d+/.test(b?.callback_data || ''))) await collapseChatOffer(ctx, parseInt(ctx.match[1], 10));
+  else { try { await ctx.editMessageReplyMarkup(undefined); } catch {} }
+  // 🔮 تپِ دکمه‌ای که خودِ گفتگو پیشنهاد داده، خروجِ آگاهانه است: گفتگو با همان فلگِ بازگشتِ
+  // `chat_end` بسته می‌شود و کیبوردِ ماندگار تحویل می‌شود (`chatting` استیتِ ساکت است).
+  if (wasOpen) { await closeChat(ctx, uid, 'new_reading'); await deliverKeyboard(ctx.telegram, uid); }
   // ⚠️ بدونِ `edit`: پیام همین حالا به شکلِ جمع‌شده ادیت شد و کاتالوگ نباید رویش بنشیند،
   // وگرنه همان درِ ورودِ همیشگی که تازه ساختیم پاک می‌شود.
   return showCatalog(ctx);
