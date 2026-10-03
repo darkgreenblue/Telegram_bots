@@ -80,10 +80,10 @@ import {
 // که به کاربر می‌رسد (گارد و سنجه یک کد، درسِ ثبت‌شده‌ی گافِ تیزر).
 import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, newReadingAskIn, hookOk,
-  assentIn, noContentIn,
+  assentIn, noContentIn, offerTailIn, chatLang,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
   cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
-  CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel,
+  CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel, offerLedger,
 } from './chat-core.js';
 
 /* ===== 1) ENV و ثابت‌ها ===== */
@@ -345,7 +345,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.146.0';
+const PRODUCT_VERSION = '3.148.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -627,6 +627,17 @@ const CHAT_LATIN_FIX      = true;
  * اگر پیشنهادی نیست، «آره» سؤالی ندارد و رایگان جواب می‌گیرد؛ پیامِ بی‌محتوا («.»، «🙏») هم.
  * رول‌بک: `false` ⟵ دقیقاً رفتارِ v3.142.0 (تشکر و «نه مرسی» همچنان رایگان‌اند، فهرستشان در chat-core). */
 const CHAT_ASSENT_TAP     = true;
+/* 🧩 سه فیکسِ v3.147.0 (پنج اشکالِ گفتگو، سنجیده روی ۱۵۷۸ جوابِ واقعی). هرکدام رول‌بکِ یک‌خطیِ خودش:
+ *   • `CHAT_NEWREAD_NO_FU`: جوابی که می‌گوید «برای این فالِ تازه لازمه» دکمه‌ی سؤالِ پیشنهادی
+ *     **نمی‌گیرد**. آن دکمه یک نوبتِ گفتگوی دیگر می‌ساخت که دوباره همان «فالِ تازه» را می‌گفت:
+ *     ۴۱ حلقه از ۱۳ کاربر. دکمه‌ی کهنه‌ی چنین جوابی و «بله»ی تایپی زیرش هم همان پیامِ رایگانِ
+ *     «فال»ِ تنها (`L.chat.newReadingAsk` + دکمه‌ی `chat_new`) را می‌گیرند، نه نوبتِ پولی.
+ *   • `CHAT_FU_FIX`: جوابِ بی‌دکمه (۳۱ مورد، همه بی‌پاکت) کمبودِ پنجمِ همان **یک** تلاشِ تعمیر است.
+ *   • `CHAT_ASSENT_OFFER`: «بله»ی تایپی وقتی پیشنهادِ خطِ آخر هست ولی دکمه‌ای نیست، همان پیشنهاد
+ *     را قبول می‌کند (پولی، مثلِ تپ) به‌جای جوابِ رایگانِ «خوشحالم». ۷ «بله»ی گم‌شده. */
+const CHAT_NEWREAD_NO_FU  = true;
+const CHAT_FU_FIX         = true;
+const CHAT_ASSENT_OFFER   = true;
 /* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.116.0، خواسته‌ی
  * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
  * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
@@ -641,6 +652,12 @@ const CHAT_OFFER_FIX   = true;
  * پرامپت، تذکرِ تعمیر، و حذفِ قطعیِ جمله‌به‌جمله در کد. پیامِ ثابتِ بحران (۱۲۳) برای
  * نشانه‌ی صریح دست‌نخورده است. رول‌بک: `false` ⟵ هیچ حذف و تعمیری برای این مورد نیست. */
 const CHAT_SAFETY_STRIP = true;
+/* 📒 دفترِ پیشنهادها (v3.148.0، موضوعِ #42: پیشنهادِ تکراری و بسته‌بندیِ دوباره).
+ * فهرستِ پیشنهادهای **همین گفتگو** با یک قاعده («دوباره پیشنهاد نده، حتی با کلماتِ دیگر») به دُمِ
+ * آخرین پیامِ user می‌چسبد تا مدل پیشنهادِ قبلی را دوباره نیاورد. نه در system (کش می‌پرد) و نه در
+ * تاریخچه (از DB از نو ساخته می‌شود، پس تکرار نمی‌شود). منطق: `offerLedger` در chat-core.
+ * رول‌بک: `false` ⟵ پیامِ آخر بیت‌به‌بیت همان v3.147.0. */
+const CHAT_OFFER_LEDGER = true;
 /* 🎯 دکمه‌ی **سؤالِ پیشنهادی** (v3.96.0، خواسته‌ی صریحِ مالک).
  *
  * مدل در پاکتِ خودش یک برچسبِ کوتاه به **زبانِ خودِ کاربر** برمی‌گرداند و کد از رویش یک
@@ -2792,13 +2809,13 @@ const stmts = {
   /* متنِ سؤالِ پیشنهادیِ یک پیامِ assistant، برای وقتی کاربر دکمه‌اش را می‌زند. از
    * **دیتابیس** خوانده می‌شود نه حافظه: دکمه ماه‌ها در چت زنده می‌ماند (بند ۲ج/۶) و
    * `reading_id` هم برمی‌گردد تا تپِ دکمه‌ی یک فالِ دیگر به فالِ جاری نشت نکند. */
-  chatFollowUp:  db.prepare("SELECT reading_id, user_id, follow_up FROM chat_messages WHERE id=? AND role='assistant'"),
+  chatFollowUp:  db.prepare("SELECT reading_id, user_id, follow_up, want_reading FROM chat_messages WHERE id=? AND role='assistant'"),
   /* ادعای اتمیکِ مصرفِ دکمه. الگوی همیشگیِ این ریپو (`claimAmount`/`claimLucky`):
    * شرط **داخلِ خودِ UPDATE** است، نه یک `if` در جاوااسکریپت، چون مسئله یک مسابقه است. */
   claimFollowUp: db.prepare("UPDATE chat_messages SET follow_up_used=1 WHERE id=? AND user_id=? AND role='assistant' AND follow_up<>'' AND follow_up_used=0"),
   // آخرین جوابِ همین فال، برای «بله»ی تایپی (`CHAT_ASSENT_TAP`). فقط آخرین: پیشنهادِ دو نوبت
   // پیش به بافتِ فعلی ربطی ندارد، همان دلیلِ `CHAT_LAST_ONLY`.
-  chatLastAnswer: db.prepare("SELECT id, follow_up, follow_up_used FROM chat_messages WHERE reading_id=? AND user_id=? AND role='assistant' ORDER BY id DESC LIMIT 1"),
+  chatLastAnswer: db.prepare("SELECT id, text, follow_up, follow_up_used, want_reading FROM chat_messages WHERE reading_id=? AND user_id=? AND role='assistant' ORDER BY id DESC LIMIT 1"),
   chatTurns:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='assistant'"),
   /* 🧼 «فقط آخرین پیام دکمه دارد» (v3.100.0، خواسته‌ی صریحِ مالک).
    *
@@ -8230,9 +8247,21 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
    * «اوکی» هر دو فهرست را دارند و این‌جا پیشنهادِ باز مقدم است. ادعا همان statementِ دکمه
    * است، پس «آره» و تپِ دکمه روی یک پیشنهاد فقط یک بار پرسیده می‌شوند. */
   let assentFree = false;
+  let assentOffer = false;
   if (CHAT_ASSENT_TAP && via === 'typed' && assentIn(text)) {
     let last = null;
     try { last = stmts.chatLastAnswer.get(rid, uid); } catch { last = null; }
+    /* 🔁 «بله» زیرِ جوابِ «فالِ تازه لازمه» یعنی «باشه، فال می‌گیرم»، نه یک نوبتِ گفتگوی
+     * دیگر (`CHAT_NEWREAD_NO_FU`). همان پیامِ رایگانِ «فال»ِ تنها با دکمه‌ی `chat_new`؛ بدونِ
+     * این، دکمه‌ی پیشنهادیِ کهنه‌ی همان جواب ادعا می‌شد و حلقه از درِ تایپ برمی‌گشت. */
+    if (CHAT_NEWREAD_NO_FU && last?.want_reading) {
+      track(db, uid, 'chat_new_ask', { reading_id: rid, chars: text.length, via: 'assent' });
+      await ctx.reply(L.chat.newReadingAsk, {
+        ...extra,
+        reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]]).reply_markup,
+      });
+      return;
+    }
     let claimed = 0;
     if (last?.follow_up && !last.follow_up_used) {
       try { claimed = stmts.claimFollowUp.run(last.id, uid).changes; } catch { claimed = 0; }
@@ -8241,10 +8270,16 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
       track(db, uid, 'chat_followup', { reading_id: rid, msg_id: last.id, via: 'typed' });
       text = last.follow_up;
       via = 'assent';
+    } else if (CHAT_ASSENT_OFFER && last && chatLang().offer && offerTailIn(last.text)) {
+      /* ✅ پیشنهاد در خطِ آخرِ جواب هست ولی دکمه‌ای نیست (یا مصرف شده): «بله» جوابِ
+       * همان پیشنهاد است، پس سؤالِ واقعی است و مسیرِ پولیِ عادی را می‌رود. متن همان
+       * «بله»ی کاربر می‌ماند: خطِ آخرِ تاریخچه دقیقاً همان پیشنهاد است و ابهامی نمی‌ماند. */
+      assentOffer = true;
+      via = 'assent_offer';
     } else assentFree = true;
   }
   const emptyMsg = CHAT_ASSENT_TAP && noContentIn(text);
-  if (assentFree || emptyMsg || smallTalkIn(text)) {
+  if (!assentOffer && (assentFree || emptyMsg || smallTalkIn(text))) {
     track(db, uid, 'chat_smalltalk', {
       reading_id: rid, chars: text.length, via,
       kind: assentFree ? 'assent_no_offer' : emptyMsg ? 'empty' : 'smalltalk',
@@ -8378,7 +8413,9 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       || chatHadCrisis(uid, rid);
     // 🔤 واژه‌ی لاتینی که خودِ کاربر نوشته (اسمِ اپ، برند، اسمِ آدم) نشت نیست.
     const userText = userTexts.map((t) => String(t || '')).join('\n');
-    const messages = toMessages(system, packed, text, L);
+    // 📒 دفتر از کلِ تاریخچه ساخته می‌شود (شاملِ سؤالِ فعلی، تا قبول/ردِ آخرین پیشنهاد معلوم باشد).
+    const ledger = CHAT_OFFER_LEDGER ? offerLedger(hist) : null;
+    const messages = toMessages(system, packed, text, L, { ledger });
 
     const res = await typingUntil(typingCtx, orChatResilient('', '', {
       messages, maxTokens: CHAT_MAX_TOKENS, temperature: 0.9,
@@ -8415,13 +8452,14 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const thinOf = (o) => !!(CHAT_FLOOR && floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
     const needsOf = (o) => {
       const n = chatFixNeeds(o, { crisisCtx, userText });
-      return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety, latin: CHAT_LATIN_FIX ? n.latin : '' };
+      return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety, latin: CHAT_LATIN_FIX ? n.latin : '',
+        fu: CHAT_FU_FIX && CHAT_FOLLOWUP && !!n.fu };
     };
     let thin = CHAT_FLOOR && floorApplies(out) && String(out.text || '').trim().length < CHAT_FLOOR_CHARS;
     let needs = needsOf(out);
-    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety, latin: needs.latin };
+    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, fu: needs.fu };
     let fixed = false;
-    if (thin || needs.offer || needs.safety || needs.latin) {
+    if (thin || needs.offer || needs.safety || needs.latin || needs.fu) {
       try {
         const hint = L.prompts.chatFixHint
           ? L.prompts.chatFixHint({ ...fixWanted, min: CHAT_FLOOR_CHARS })
@@ -8445,13 +8483,15 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     /* 🧾 متنِ نهایی از تک‌منبعِ `finalizeChatOut` (ربات و آزمایشگاه یکی): حرفِ خطرِ
      * بی‌دلیل جمله‌به‌جمله حذف می‌شود و پیشنهاد خطِ آخر می‌شود. */
     const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP, userText });
-    if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fin.safetyStripped || fin.offerMissing) {
+    if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fixWanted.fu || fin.safetyStripped || fin.offerMissing) {
       track(db, uid, 'chat_fix', {
         reading_id: rid, thin: fixWanted.thin ? 1 : 0, offer: fixWanted.offer ? 1 : 0,
         safety: fixWanted.safety ? 1 : 0, fixed: fixed ? 1 : 0,
         stripped: fin.safetyStripped, offer_missing: fin.offerMissing ? 1 : 0,
         latin: fixWanted.latin ? 1 : 0, latin_left: needs.latin ? 1 : 0,
+        fu: fixWanted.fu ? 1 : 0, fu_left: needs.fu ? 1 : 0,
       });
+      if (fixWanted.fu) log(`🔘 CHAT_FU_MISSING reading#${rid} fixed=${needs.fu ? 0 : 1}`);
       if (fixWanted.latin) log(`🔤 CHAT_LATIN reading#${rid} fixed=${needs.latin ? 0 : 1}`);
       if (fin.safetyStripped) log(`🛟 CHAT_SAFETY_STRIPPED reading#${rid} n=${fin.safetyStripped} fixed=${fixed ? 1 : 0}`);
       if (fin.offerMissing) log(`🎁 CHAT_OFFER_MISSING reading#${rid} fixed=${fixed ? 1 : 0}`);
@@ -8469,7 +8509,10 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const reply = fin.reply;
     // ۱۰) ثبت **قبل از** ارسال: جاروی بوت «بی‌جواب» را از روی نبودِ همین ردیف تشخیص
     // می‌دهد، پس ثبتِ بعد از ارسال یعنی هر شکستِ گذرای شبکه یک ریفاندِ کاذب بسازد.
-    const followUp = CHAT_FOLLOWUP ? (out.followUp || '') : '';
+    /* 🔁 جوابِ «فالِ تازه لازمه» دکمه‌ی سؤالِ پیشنهادی نمی‌گیرد (`CHAT_NEWREAD_NO_FU`): درِ
+     * درستش همان `chat_new` است، و دکمه‌ی دوم کاربر را به یک نوبتِ گفتگوی دیگر می‌برد که
+     * دوباره «فالِ تازه لازمه» می‌گوید (۴۱ حلقه از ۶۶ جوابِ پرچم‌دار، ۱۳ کاربر). */
+    const followUp = CHAT_FOLLOWUP && !(CHAT_NEWREAD_NO_FU && out.newReading) ? (out.followUp || '') : '';
     const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, model, 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
     /* 📊 props افزایشی‌اند (بند ۲ج/۳): `turn`/`chars` همان قبلی‌اند. بقیه برای تحلیلِ
@@ -8753,6 +8796,14 @@ bot.action(/^chat_ask:(\d+)$/, async (ctx) => {
   } catch { /* پیامِ کهنه یا پاک‌شده: بی‌ضرر، ادعای اتمیکِ بالا از قبل گرفته شده */ }
   setState(uid, 'chatting');
   patchSession(uid, { chatReadingId: rid });
+  /* 🔁 دکمه‌ی کهنه زیرِ جوابِ «فالِ تازه لازمه» (قبل از `CHAT_NEWREAD_NO_FU` ساخته شده و در
+   * چت زنده مانده): به‌جای یک نوبتِ پولیِ دیگر که دوباره همان را می‌گفت، همان پیامِ رایگانِ
+   * «فال»ِ تنها. ادعا از قبل خورده، پس دوبار-تپ پیامِ دوم نمی‌سازد. */
+  if (CHAT_NEWREAD_NO_FU && row.want_reading) {
+    track(db, uid, 'chat_new_ask', { reading_id: rid, chars: q.length, via: 'followup_stale' });
+    await ctx.reply(L.chat.newReadingAsk, Markup.inlineKeyboard([[Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]]));
+    return;
+  }
   track(db, uid, 'chat_followup', { reading_id: rid, msg_id: aId });
   /* 💬 تلگرام اجازه نمی‌دهد ربات از طرفِ کاربر پیام بفرستد (هیچ متدی در Bot API چنین
    * کاری نمی‌کند)، پس سؤال در یک باکسِ نقلِ‌قول از طرفِ خودِ ربات می‌رود و جواب به همان

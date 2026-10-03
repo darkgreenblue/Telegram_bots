@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse, parse_qsl
 
 from notebooklm import (
     AudioFormat, AudioLength, InfographicDetail, InfographicOrientation,
@@ -70,6 +71,28 @@ def output_path(session: dict) -> Path:
     return Path(session["work_dir"]) / f"{session['batch_id']}.{extension}"
 
 
+def bind_asset_download_to_account(client) -> None:
+    """Keep Google file downloads on the account used for NotebookLM RPCs.
+
+    The pinned NotebookLM client omits authuser on Google usercontent URLs.
+    With multiple signed-in Google accounts, that sends a valid artifact to
+    account 0 and Google responds with 403 even though account 3 created it.
+    """
+    authuser = client.get_account_authuser()
+    transfer = client.artifacts._downloads
+    original = transfer._download_to_path
+
+    async def download_for_account(url: str, path: str) -> str:
+        parsed = urlparse(url)
+        if parsed.hostname in {"contribution.usercontent.google.com", "lh3.googleusercontent.com"}:
+            if "authuser" not in {key for key, _ in parse_qsl(parsed.query)}:
+                query = f"{parsed.query}&authuser={authuser}" if parsed.query else f"authuser={authuser}"
+                url = urlunparse(parsed._replace(query=query))
+        return await original(url, path)
+
+    transfer._download_to_path = download_for_account
+
+
 async def generate_artifact(session: dict, save, profile: str) -> Path:
     """Generate once, persist the task ID, and download the exact artifact."""
     kind = session["output_type"]
@@ -85,6 +108,7 @@ async def generate_artifact(session: dict, save, profile: str) -> Path:
     prompt = session.get("prompt") or ""
     output.parent.mkdir(parents=True, exist_ok=True)
     async with NotebookLMClient.from_storage(profile=profile) as client:
+        bind_asset_download_to_account(client)
         if kind == "mindmap":
             if not session.get("note_id"):
                 result = await client.artifacts.generate_mind_map(notebook_id, source_ids=source_ids, language=language, instructions=prompt)
