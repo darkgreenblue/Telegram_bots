@@ -14,6 +14,7 @@ from telegram.request import HTTPXRequest
 from notebook import InputValidationError, generate, upload
 from proxy_select import select_proxy
 from store import Store
+from studio import generate_artifact, output_path
 
 ROOT = Path(__file__).resolve().parent
 
@@ -28,7 +29,7 @@ async def work(owner: int, batch_id: str, phase: str, slot: int) -> int:
     def save(updated: dict) -> None:
         store.put(owner, updated)
 
-    output = Path(session["work_dir"]) / f"{batch_id}.m4a"
+    output = output_path(session) if session.get("output_type") else Path(session["work_dir"]) / f"{batch_id}.m4a"
     if phase in {"generating", "sending"} and output.exists() and output.stat().st_size:
         return 0
 
@@ -53,7 +54,8 @@ async def work(owner: int, batch_id: str, phase: str, slot: int) -> int:
     if phase in {"generating", "sending"}:
         for attempt in range(3):
             try:
-                await generate(session, save, os.getenv("NOTEBOOKLM_PROFILE", "notebook-podcast"))
+                method = generate_artifact if session.get("output_type") else generate
+                await method(session, save, os.getenv("NOTEBOOKLM_PROFILE", "notebook-podcast"))
                 return 0
             except (NetworkError, ServerError):
                 # Reissuing a generation without its saved task ID could spend
