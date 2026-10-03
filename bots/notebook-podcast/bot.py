@@ -56,6 +56,10 @@ def buttons(prefix: str, choices: list[tuple[str, str]], batch_id: str | None = 
     ])
 
 
+def output_buttons(batch_id: str) -> InlineKeyboardMarkup:
+    return buttons("output", [(title, kind) for kind, title in KINDS], batch_id)
+
+
 def label(session: dict) -> str:
     return f"#{session['batch_id'][:8]}"
 
@@ -112,7 +116,7 @@ async def choose_notebook(owner: int, reference: dict, message) -> None:
     save(owner, session)
     await message.reply_text(
         f"نوت‌بوک «{session['notebook_title']}» انتخاب شد. خروجی تازهٔ {label(session)} را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
-        reply_markup=buttons("output", KINDS, batch_id),
+        reply_markup=output_buttons(batch_id),
     )
 
 
@@ -452,7 +456,9 @@ async def retry_session(owner: int, session: dict, message, app: Application) ->
     if any(item.get("error") for item in session["inputs"]):
         await message.reply_text("ورودی نامعتبر باید با یک مجموعهٔ تازه جایگزین شود.")
         return
-    session["state"] = "uploading" if session["state"] == "error_upload" else "generating"
+    session["state"] = "uploading" if session["state"] == "error_upload" or (
+        not session.get("output_type") and notebook_sources(session)
+    ) else "generating"
     save(owner, session)
     await message.reply_text(f"درخواست {label(session)} را دوباره امتحان می‌کنم.")
     launch_job(owner, session["batch_id"], app)
@@ -492,13 +498,13 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
             raise RuntimeError(f"Worker exited with code {code}")
         if session["state"] == "uploading":
             session["source_ids"] = notebook_sources(session)
-            session["state"] = "output_type"
-            save(owner, session)
             await app.bot.send_message(
                 owner,
                 f"همهٔ ورودی‌های {label(session)} وارد نوت‌بوک «{session['notebook_title']}» شدند. نوع خروجی را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
-                reply_markup=buttons("output", KINDS, batch_id),
+                reply_markup=output_buttons(batch_id),
             )
+            session["state"] = "output_type"
+            save(owner, session)
             return
         if session["state"] in {"generating", "sending"}:
             kind = session.get("output_type", "audio")
@@ -563,7 +569,7 @@ async def post_init(app: Application) -> None:
                 session["settings_message_id"] = sent.message_id
                 save(owner, session)
             elif state == "output_type":
-                await app.bot.send_message(owner, f"نوع خروجی نوت‌بوک «{session['notebook_title']}» {label(session)} را انتخاب کن:", reply_markup=buttons("output", KINDS, batch_id))
+                await app.bot.send_message(owner, f"نوع خروجی نوت‌بوک «{session['notebook_title']}» {label(session)} را انتخاب کن:", reply_markup=output_buttons(batch_id))
             elif state == "studio_language":
                 await app.bot.send_message(owner, f"زبان {KIND_LABELS[session['output_type']]} {label(session)} را انتخاب کن:", reply_markup=buttons("studio_lang", [
                     ("فارسی", "fa"), ("انگلیسی", "en"), ("زبان دیگر", "other"),
