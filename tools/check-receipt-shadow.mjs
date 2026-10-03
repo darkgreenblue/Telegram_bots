@@ -106,6 +106,8 @@ const schema = region('db.exec(`\n  CREATE TABLE IF NOT EXISTS receipt_analyses'
 const recorder = region('let _raIns;', '\nasync function processReceipt', { includeTo: false });
 const db = new Database(':memory:');
 if (schema) new Function('db', schema)(db);
+// ستون‌های افزایشیِ بعدی (v3.147.0: paid_time/time_flag) از خودِ سورس، نه کپیِ دستی.
+for (const m of CODE.matchAll(/ALTER TABLE receipt_analyses ADD COLUMN [^"]+/g)) { try { db.exec(m[0]); } catch {} }
 const tracked = [], logs = [], errs = [];
 let FLAG = true;
 const mk = (d) => new Function('db', 'shadowFields', 'shadowLine', 'log', 'logErr', 'track', 'RECEIPT_SHADOW_ENABLED',

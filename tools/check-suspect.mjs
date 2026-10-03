@@ -294,10 +294,11 @@ console.log('\n▶ هندلرهای susyes/susno');
 
   ok(/approvePayment\(pid\)/.test(yes), 'susyes از approvePayment همیشگی می‌خواند (کپیِ منطقِ پول نیست)');
   ok(/afterApproval\(p\.user_id\)/.test(yes), 'و فالِ رزروشده را مثل مسیرِ عادیِ approve ادامه می‌دهد');
-  ok(/hasSuspectPending\.get\(p\.user_id\)/.test(yes) && /clearSuspect\.run\(p\.user_id\)/.test(yes),
-    'susyes فقط وقتی هیچ رسیدِ مشکوکِ معلقِ دیگری نمانده برچسب را برمی‌دارد');
-  ok(/isDistrusted\(p\.user_id\)/.test(yes),
-    'و اگر در همین حین بی‌اعتماد شده (susno روی رسیدِ دیگر)، برچسبِ مشکوک برنمی‌گردد');
+  // v3.147.0: برداشتنِ تگ دیگر کارِ susyes نیست؛ approvePayment خودش settleSuspect را صدا می‌زند
+  // (تک‌نقطه برای همه‌ی مسیرهای تأیید/رد)، پس susyes نباید کپیِ موازیِ آن را داشته باشد.
+  ok(!/clearSuspect\.run/.test(yes), 'susyes کپیِ موازیِ برداشتنِ تگ ندارد (کارِ approvePayment است)');
+  const ap = bodyOf('function approvePayment(', '\n}\n');
+  ok(!!ap && /settleSuspect\(/.test(ap), 'approvePayment تگِ مشکوک را تعیین‌تکلیف می‌کند (settleSuspect)');
 
   ok(/setPaymentStatus\.run\('rejected', pid\)/.test(no), 'susno پرداخت را رد می‌کند');
   ok(!/approvePayment/.test(no) && !/clawback/.test(no),
@@ -305,6 +306,73 @@ console.log('\n▶ هندلرهای susyes/susno');
   ok(/setDistrust\.run\(p\.user_id\)/.test(no), 'susno کاربر را دائماً بی‌اعتماد می‌کند');
   ok(/clearSuspect\.run\(p\.user_id\)/.test(no),
     'و برچسبِ موقتِ مشکوک را برمی‌دارد (جایش را برچسبِ دائمیِ بی‌اعتماد گرفته)');
+}
+
+/* ═══ ۶ب) v3.147.0 — «مشکوک هرگز مشکوک نمی‌ماند»: settleSuspect و runReceipt روی SQLite ═══ */
+console.log('\n▶ settleSuspect: تگ فقط تا وقتی رسیدی روی میز است');
+{
+  const fnSrc = bodyOf('function settleSuspect(uid) {', '\n}');
+  const runSrc = bodyOf('async function runReceipt(', '\n}');
+  ok(!!fnSrc && !!runSrc, 'settleSuspect و runReceipt از سورس بریده شدند');
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, pay_suspect INTEGER NOT NULL DEFAULT 0, pay_distrust INTEGER NOT NULL DEFAULT 0);
+           CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT);`);
+  const stmts = { clearSuspect: db.prepare(sqlOf('clearSuspect')), hasOpenReview: db.prepare(sqlOf('hasOpenReview')) };
+  const getU = (u) => db.prepare('SELECT * FROM users WHERE telegram_id=?').get(u);
+  const tracked = [];
+  const inflight = new Map();
+  let processHook = async () => {};
+  const mk = new Function('stmts', 'isSuspect', 'isDistrusted', 'receiptInFlight', 'log', 'logErr', 'track', 'db', 'processReceipt',
+    `${fnSrc}\n${runSrc}\nreturn { settleSuspect, runReceipt };`);
+  const F = mk(stmts, (u) => !!getU(u)?.pay_suspect, (u) => !!getU(u)?.pay_distrust, inflight,
+    () => {}, () => {}, (_d, u, ev) => tracked.push(ev), db, (...a) => processHook(...a));
+  const sus = (u, distrust = 0) => db.prepare('INSERT OR REPLACE INTO users VALUES (?,1,?)').run(u, distrust);
+  const pay = (id, u, st) => db.prepare('INSERT OR REPLACE INTO payments VALUES (?,?,?)').run(id, u, st);
+  const flag = (u) => getU(u).pay_suspect;
+
+  sus(1); pay(1, 1, 'waiting_review');
+  ok(F.settleSuspect(1) === false && flag(1) === 1, 'رسیدِ waiting_review روی میز ⟵ تگ می‌ماند');
+  pay(1, 1, 'approved');
+  ok(F.settleSuspect(1) === true && flag(1) === 0, 'همه تعیین‌تکلیف شدند (تأیید) ⟵ تگ برداشته می‌شود');
+  ok(tracked.includes('suspect_cleared'), 'رویدادِ افزایشیِ suspect_cleared');
+  sus(2); pay(2, 2, 'rejected');
+  ok(F.settleSuspect(2) === true && flag(2) === 0, 'ردِ عادی ⟵ عادی می‌شود');
+  sus(3, 1); pay(3, 3, 'waiting_review');
+  ok(F.settleSuspect(3) === true && flag(3) === 0, 'بی‌اعتماد ⟵ مشکوک فوراً پاک می‌شود (حتی با رسیدِ باز)');
+  sus(4); pay(4, 4, 'approved'); inflight.set(4, 1);
+  ok(F.settleSuspect(4) === false && flag(4) === 1, 'رسیدی در حالِ پردازش ⟵ تگ نمی‌پرد');
+  inflight.delete(4);
+  db.prepare('INSERT INTO users (telegram_id) VALUES (5)').run();
+  ok(F.settleSuspect(5) === false, 'کاربرِ غیرمشکوک ⟵ هیچ کاری نمی‌شود');
+
+  // runReceipt: شمارنده در هر دو مسیر (موفق و پرتاب) پاک می‌شود و در پایان دوباره settle می‌کند
+  sus(6); pay(6, 6, 'approved');
+  let seenInside = null;
+  processHook = async () => { seenInside = inflight.get(6); pay(6, 6, 'approved'); };
+  await F.runReceipt({}, 6, 6, 'f', null, false);
+  ok(seenInside === 1, 'runReceipt حینِ پردازش شمارنده‌ی in-flight را نگه می‌دارد');
+  ok(!inflight.has(6), 'بعد از پایان، شمارنده پاک می‌شود');
+  sus(7); pay(7, 7, 'approved');
+  processHook = async () => { db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=7').run(); pay(7, 7, 'waiting_review'); };
+  await F.runReceipt({}, 7, 7, 'f', null, false);
+  ok(flag(7) === 1, 'رسیدِ تازه‌ای که مشکوک ماند و به میزِ ادمین رفت ⟵ تگ حفظ می‌شود');
+  processHook = async () => { throw new Error('boom'); };
+  let threw = false;
+  try { await F.runReceipt({}, 7, 7, 'f', null, false); } catch { threw = true; }
+  ok(threw && !inflight.has(7), 'خطای پردازش ⟵ شمارنده باز هم پاک می‌شود (finally)');
+}
+
+console.log('\n▶ سیم‌کشیِ settle در همه‌ی مسیرهای تعیین‌تکلیف');
+{
+  const CODE = stripComments(SRC);
+  for (const fn of ['function approvePayment(', 'function rejectPaymentDb(', 'function rejectDuplicateReceiptDb(', 'function clawbackApproved(', 'function rejectPaymentAI(']) {
+    const b = (() => { const a = CODE.indexOf(fn); if (a < 0) return null; const e = CODE.indexOf('\n}\n', a); return CODE.slice(a, e); })();
+    ok(!!b && /settleSuspect\(/.test(b), `${fn.replace('function ', '').replace('(', '')} ⟵ settleSuspect`);
+  }
+  ok((CODE.match(/await runReceipt\(/g) || []).length >= 2 && (CODE.match(/await processReceipt\(/g) || []).length === 1,
+    'هر دو ورودیِ رسید (عکس و متن) از runReceipt می‌گذرند، نه processReceipt خام');
+  const rev = bodyOf('async function reversePayment(', '\n}');
+  ok(!!rev && /setDistrust\.run[\s\S]*clearSuspect\.run/.test(rev), '«پیامکش نیومده» ⟵ بی‌اعتماد و پاک‌شدنِ مشکوک');
 }
 
 /* ═══ ۷) گاردِ مرکزیِ callback: susyes/susno بی‌قید عبور کنند ═══════════════ */
