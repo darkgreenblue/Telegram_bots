@@ -28,6 +28,12 @@ class _Client:
 
 
 class StudioTests(unittest.IsolatedAsyncioTestCase):
+    def test_output_buttons_use_short_type_ids(self):
+        markup = bot.output_buttons("a" * 32)
+        data = [row[0].callback_data for row in markup.inline_keyboard]
+        self.assertEqual({item.split(":")[-1] for item in data}, set(studio.KIND_LABELS))
+        self.assertTrue(all(len(item.encode()) <= 64 for item in data))
+
     async def test_empty_old_collection_can_be_named(self):
         with tempfile.TemporaryDirectory() as tmp:
             local_store = Store(Path(tmp) / "db.sqlite")
