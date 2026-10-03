@@ -509,13 +509,23 @@ export function offerLineOk(line) {
  * متن که `offerLineOk` می‌گرفت: خطِ قبلی با «:» تمام شده، یا خودِ خط گیومه دارد.
  * ⚠️ فقط برای زبانِ دارای الگو؛ زبانِ بی‌الگو همان قضاوت‌نشدنِ `offerLineOk` را می‌گیرد. */
 export const OFFER_TAIL_GUARD = true;
+/* متنِ خط **بیرون از گیومه**. بازه‌ی متوازن حذف می‌شود؛ گیومه‌ی بازِ بی‌جفت تا آخرِ خط و
+ * گیومه‌ی بسته‌ی بی‌جفت از اولِ خط (پیامِ آماده‌ای که چند خط است). */
+function unquoted(s) {
+  let t = String(s || '');
+  for (let i = 0; i < 2; i++) t = t.replace(/«[^«»]*»|“[^“”]*”|"[^"\n]*"/g, ' ');
+  return t.replace(/[«“"][^]*$/, ' ').replace(/^[^]*[»”]/, ' ');
+}
 export function offerTailIn(text) {
   const ls = String(text || '').split('\n').map((s) => s.trim()).filter(Boolean);
   if (!ls.length) return false;
   const last = ls[ls.length - 1];
   if (!offerLineOk(last)) return false;
   if (!OFFER_TAIL_GUARD || !LANG.offer) return true;
-  if (/[«»"“”]/.test(last)) return false;
+  /* ⚠️ «گیومه دارد» کافی نیست (ممیزیِ عدم‌رگرسیون روی ۱۶۰۳ جوابِ واقعی، ۱۴۰۵/۰۷/۱۱): پیشنهادِ
+   * واقعی هم عبارت را در گیومه می‌آورد («فرقِ «تنش» و «حمله» رو برات جدا کنم») و نسخه‌ی اولِ همین
+   * گارد ۱۶ پیشنهادِ واقعی را «پیامِ آماده» می‌خواند. ملاک: شکلِ پیشنهاد **بیرونِ** گیومه هم هست؟ */
+  if (/[«»"“”]/.test(last) && !offerLineOk(unquoted(last))) return false;
   if (ls.length >= 2 && /[:：]$/.test(ls[ls.length - 2])) return false;
   return true;
 }
