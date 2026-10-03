@@ -1426,13 +1426,13 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
   const kindsSrc2 = (CODE.match(/const CHAT_MEDIA_KINDS = \[[\s\S]*?\];/) || [''])[0];
   const kindFn2 = (CODE.match(/const chatMediaKind = [^\n]*;/) || [''])[0];
   const realKind = new Function(`${kindsSrc2}\n${kindFn2}\nreturn chatMediaKind;`)();
-  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting', msg = null, textOnly = true }) => {
+  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting', msg = null, textOnly = true, luckyOpen = false }) => {
     const seen = { next: 0, guard: 0, left: 0, intent: null, media: null };
     const fn = new Function('bot', 'getState', 'getSession', 'getBalance', 'KB_LABELS',
       'WALLET_LABELS', 'LUCKY_LABELS', 'INVITE_LABELS', 'DAILY_LABELS', 'INTENT',
       'SETTINGS_ENABLED', 'CHAT_AFTER_READING',
       'CHAT_STATE_GUARD', 'chatOpenGuard', 'leaveChat', 'logErr', 'L', 'seen',
-      'CHAT_TEXT_ONLY', 'chatMediaKind', 'chatRejectMedia',
+      'CHAT_TEXT_ONLY', 'chatMediaKind', 'chatRejectMedia', 'openLuckyHand',
       `${mwSrc}\nreturn bot.__mw;`);
     const stubBot = { use: (h) => { stubBot.__mw = h; } };
     const mw = fn(stubBot, () => state, () => ({ chatReadingId: 9 }), () => balance,
@@ -1441,7 +1441,8 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
       true, guard, async (_c, _u, it) => { seen.guard++; seen.intent = it ?? null; },
       () => { seen.left++; },
       () => {}, { support: { button: LBL.support }, buttons: { reading: LBL.reading, settings: LBL.settings } }, seen,
-      textOnly, realKind, async (_c, _u, k) => { seen.media = k; });
+      textOnly, realKind, async (_c, _u, k) => { seen.media = k; },
+      () => (luckyOpen ? { d: 'today', n: 'x', p: [1] } : null));
     return mw({ from: { id: 5 }, message: msg || (txt ? { text: txt } : undefined),
       callbackQuery: cb ? { data: cb } : undefined }, async () => { seen.next++; })
       .then(() => seen);
@@ -1478,6 +1479,26 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     ok((await runMw({ txt: lb, balance: 0 })).next === 1, `🔑 برچسبِ کیبوردِ «${k}» هم با موجودیِ صفر باز است`);
     ok((await runMw({ txt: lb, balance: 3 })).guard === 1, `⚠️ و با موجودیِ ناصفر گارد می‌خورد`);
   }
+  /* 🐛 v3.146.0 — دکمه‌هایی که **خودِ ربات** وسطِ گفتگو نشان می‌دهد نباید گاردِ «یه گفتگوی
+   * باز داری» بگیرند. هر سه از یک هشدارِ ناظرِ گیرافتادن (`chat_reply`) و دیتای زنده آمدند:
+   * `invite_edit` ۸۸ کاربر، `lpick` ۴۱ کاربر، `chat_new` ۱۵ کاربر در ۴ روز. */
+  for (const cb of ['invite_edit', 'invite_stat', 'invite_back']) {
+    const z = await runMw({ cb, balance: 0 });
+    ok(z.next === 1 && z.guard === 0, `🐛 «${cb}» (دکمه‌ی دعوتِ پی‌والِ خودِ گفتگو) با موجودیِ صفر باز است`);
+    ok((await runMw({ cb, balance: 3 })).guard === 1, `   ↳ و با موجودیِ ناصفر همان قاعده‌ی «فقط کسبِ الماس» (گارد)`);
+  }
+  ok((await runMw({ cb: 'invite_edit', balance: 3 })).intent === 'invite',
+    '   ↳ و بستنِ گفتگو بعد از گاردش به صفحه‌ی دعوت می‌رود، نه پیامِ عمومی');
+  for (const balance of [0, 5]) {
+    const g = await runMw({ cb: 'chat_new:9', balance });
+    ok(g.next === 1 && g.guard === 0, `🐛 «🔮 فال تازه» (chat_new) گارد نمی‌خورد (موجودی ${balance})؛ خودِ هندلر گفتگو را می‌بندد`);
+  }
+  const lp = await runMw({ cb: 'lpick:4', balance: 3 });
+  ok(lp.next === 1 && lp.guard === 0, '🐛 تپِ کارتِ دستِ **تمام‌شده** وسطِ گفتگو گارد نمی‌خورد (هندلر بی‌صدا no-op است)');
+  const lpOpen = await runMw({ cb: 'lpick:4', balance: 3, luckyOpen: true });
+  ok(lpOpen.guard === 1 && lpOpen.next === 0,
+    '   ↳ کنترلِ مثبت: دستِ **باز** همچنان گارد می‌خورد (هندلرش استیت را عوض می‌کرد و گفتگو بی‌صدا رها می‌شد)');
+
   /* 🔑 هر چیزِ دیگری گارد می‌خورد — و این نقطه‌ی تفاوت با v3.87.0 است: آن‌جا گفتگو
    * **بی‌صدا** بسته می‌شد. */
   for (const [what, arg] of [['فال بگیر', { txt: LBL.reading }], ['nav:menu', { cb: 'nav:menu' }],
@@ -1510,6 +1531,35 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
   const keepCode = keep.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok(/deleteMessage\(\)/.test(keepCode) && !/setState|leaveChat|closeChat/.test(keepCode),
     '🔑 «ادامه می‌دم» فقط پیامِ گارد را برمی‌دارد و هیچ استیتی را عوض نمی‌کند');
+
+  /* 🔮 v3.146.0 — هندلرِ `chat_new` خودش اجرا می‌شود. ⚠️ مهم‌ترین ادعا: روی **جوابِ
+   * گفتگو** متن دست نمی‌خورد. `collapseChatOffer` متنِ پیام را با «هر وقت خواستی…»
+   * عوض می‌کند و تا امروز فقط گارد جلویش را گرفته بود؛ باز کردنِ گارد بدونِ این شرط
+   * یعنی جوابِ پول‌داده‌ی کاربر پاک شود. */
+  {
+    const hSrc = actBody('bot.action(/^chat_new:(\\d+)$/, async (ctx) => {');
+    ok(!!hSrc, 'هندلرِ chat_new از سورس برداشته شد');
+    const runNew = async ({ state, buttons }) => {
+      const seen = { text: 0, markup: 0, closed: null, kb: 0, catalog: 0, st: state };
+      const fn = new Function('bot', 'track', 'db', 'getState', 'collapseChatOffer', 'closeChat',
+        'deliverKeyboard', 'showCatalog', `${hSrc}\nreturn bot.__h;`);
+      const stubBot = { action: (_re, h) => { stubBot.__h = h; } };
+      const h = fn(stubBot, () => {}, {}, () => seen.st,
+        async () => { seen.text++; }, async (_c, _u, via) => { seen.closed = via; seen.st = 'idle'; },
+        async () => { seen.kb++; }, async () => { seen.catalog++; });
+      await h({ from: { id: 5 }, match: ['chat_new:9', '9'], telegram: {},
+        answerCbQuery: async () => {}, editMessageReplyMarkup: async () => { seen.markup++; },
+        callbackQuery: { message: { reply_markup: { inline_keyboard: buttons } } } });
+      return seen;
+    };
+    const fromReply = await runNew({ state: 'chatting', buttons: [[{ callback_data: 'chat_ask:12' }], [{ callback_data: 'chat_new:9' }], [{ callback_data: 'chat_end:9' }]] });
+    ok(fromReply.text === 0 && fromReply.markup === 1, '🔑 روی جوابِ گفتگو متن دست نمی‌خورد؛ فقط دکمه‌ها برداشته می‌شوند');
+    ok(fromReply.closed === 'new_reading' && fromReply.kb === 1 && fromReply.catalog === 1,
+      '🔑 وسطِ گفتگو: بستن با فلگِ بازگشت ⟵ کیبوردِ ماندگار ⟵ کاتالوگ');
+    const fromOffer = await runNew({ state: 'idle', buttons: [[{ callback_data: 'chat:9:o' }], [{ callback_data: 'chat_new:9' }]] });
+    ok(fromOffer.text === 1 && fromOffer.closed === null && fromOffer.catalog === 1,
+      '   ↳ و روی پیامِ پیشنهاد همان جمع‌شدنِ قبلی، بدونِ بستنِ گفتگویی که باز نیست');
+  }
 
   /* 🏳️ مورد ۱۰: ترتیبِ فلگ و پیامِ همیشگی، و لنگرش. */
   const cl = bodyOf(CODE, 'async function closeChat(');
