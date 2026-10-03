@@ -2754,8 +2754,15 @@ console.log('\n▶ ۲۴) دفترِ پیشنهادها');
   ok(withL[0].content === 'SYS', '🔑 پیشوندِ system دست‌نخورده می‌ماند (کشِ پرامپت)');
   ok(withL.slice(0, -1).every((m, i) => m.content === base[i].content), '🔑 هیچ پیامِ تاریخچه‌ای عوض نمی‌شود');
   const last = withL[withL.length - 1];
-  ok(last.role === 'user' && last.content.startsWith('سؤالِ تازه') && last.content.includes(OFF1) && last.content.includes('(جواب نداد)'),
+  ok(last.role === 'user' && last.content.startsWith('سؤالِ تازه') && last.content.includes(`«${OFF1}»`) && last.content.includes(`«${OFF2}»`),
     '📒 دفتر فقط به دُمِ آخرین پیامِ user می‌چسبد، بعد از خودِ سؤال');
+  /* 📏 فشرده، نه فهرستِ قاعده (دورِ آزمایشگاهِ v3.148.0): نسخه‌ی اول بولت‌دار بود و چهار قاعده
+   * داشت (چرخشِ نوع، «قدمِ عملیِ بیرون از گفتگو»، …)؛ تکرار را صفر کرد ولی در حالتِ تپِ پیاپی
+   * جواب‌ها را بلند و جدول‌دار کرد. حالا یک خطِ فهرست و **یک** قاعده. */
+  const ledBody = LF.prompts.chatOfferLedger(led);
+  ok(!/^\s*-\s/m.test(ledBody), '📏 دفتر هیچ خطِ بولتی ندارد (مدل از شکلِ بولت تقلید می‌کرد)');
+  ok(ledBody.split('\n').length === 2, `📏 دفتر دقیقاً دو خط است: فهرست و یک قاعده (${ledBody.split('\n').length})`);
+  ok(!/offer|قبول کرد|جواب نداد/.test(ledBody), '📏 نه واژه‌ی انگلیسیِ «offer» و نه برچسبِ قبول/رد در متنِ دفتر');
   const ledTxt = LF.prompts.chatOfferLedger(Array.from({ length: chat.CHAT_LEDGER_MAX }, () => ({ text: 'ی'.repeat(chat.CHAT_LEDGER_ITEM), taken: false })));
   ok(ledTxt.length <= chat.CHAT_BUDGET.ledger, `📒 دفترِ پُرِ فارسی داخلِ بودجه است (${ledTxt.length} ≤ ${chat.CHAT_BUDGET.ledger})، پس قواعدِ آخرش بریده نمی‌شود`);
   ok(!/[—]|--/.test(ledTxt), '✍️ متنِ دفتر خط تیره‌ی بلند ندارد (بند ۱۰)');
