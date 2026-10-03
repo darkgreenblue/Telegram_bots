@@ -47,7 +47,8 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
-import { analyzeReceipt, decideReceipt, shadowFields } from './cardpay.js';
+import { analyzeReceipt, decideReceipt, shadowFields, parsePaidTime } from './cardpay.js';
+import { receiptTimeSuspicion, timeFlagLine } from './receipt-time.js';
 import { shadowLine, withShadowLine, TERR_BTN, terrAdminText } from './receipt-tags.js';
 import * as RT from './receipt-tags.js';
 import { scoreSpreads, RECO } from './reco.js';
@@ -345,7 +346,7 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.147.0';
+const PRODUCT_VERSION = '3.148.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -377,6 +378,11 @@ const CARD_SWITCH_ENABLED = true;
 // `false` ⟵ پرامپتِ ایجنت بیت‌به‌بیت v3.125.0 و هیچ خطی اضافه نمی‌شود؛ ثبتِ ردیف می‌ماند
 // (بی‌خطر و لازمِ حسابرسی). مصرف‌کننده‌ها: فازِ ۵ (خطای انتقال) و فازِ ۷ (تگِ خودکار).
 const RECEIPT_SHADOW_ENABLED = true;
+// 🕐 قاعده‌ی سومِ «مشکوک»: ساعتِ پرداختِ چاپ‌شده در رسید (v3.148.0، خواسته‌ی مالک ۱۴۰۵/۰۷/۱۱).
+// ایجنت ساعت را می‌خواند (`extracted.paid_time`) و `receipt-time.js` سه حالت را مشکوک می‌کند: رسیدِ
+// بی‌ساعت، ساعتِ تکراریِ همین کاربر، و ارسالِ بیرون از [ساعتِ رسید، +۳۰ دقیقه]. فقط **تگ** می‌زند
+// (رسید دستی می‌شود)؛ هیچ ردِ خودکاری ندارد. `false` ⟵ پرامپت و رفتار بیت‌به‌بیت v3.146.0.
+const RECEIPT_TIME_CHECK_ENABLED = true;
 // ⛔️ اقدامِ خودکارِ «نتوانستم واریز کنم» (v3.127.0، فازِ ۵). وقتی ایجنت در رسیدِ فرستاده‌شده
 // (عکسِ خطا یا متنِ «نمی‌تونم انتقال بدم») `transfer_error` می‌خواند، **همان فاکتور** به کارتِ
 // سفید (اولویت: سفیدِ همان ادمین) منتقل می‌شود و ادمینِ کارتِ ناموفق (+ کپیِ مالک) پیامِ
@@ -2346,6 +2352,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_receipt_analyses_payment ON receipt_analyses(payment_id);
 `);
+/* 🕐 v3.148.0: ساعتِ خوانده‌شده‌ی رسید ("HH:MM"، خالی یعنی ساعت نداشت/خوانده نشد) و نتیجه‌ی قاعده‌ی
+ * ساعت (`no_time`/`repeat`/`window`/خالی). افزایشی (بند ۲ج/۱). ساعتِ رسیدهای قبلی از همین ستون
+ * برای «ساعتِ تکراری» خوانده می‌شود، پس ردیف‌های قبل از این نسخه خالی‌اند و در مقایسه نمی‌آیند. */
+try { db.prepare("ALTER TABLE receipt_analyses ADD COLUMN paid_time TEXT NOT NULL DEFAULT ''").run(); } catch {}
+try { db.prepare("ALTER TABLE receipt_analyses ADD COLUMN time_flag TEXT NOT NULL DEFAULT ''").run(); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_assign (
     user_id    INTEGER NOT NULL,
@@ -2992,6 +3003,9 @@ const stmts = {
   // آیا این کاربر هنوز رسیدِ «مشکوکِ معلق»ِ دیگری دارد؟ اگر نه، بعد از یک «پیامکش آمده»
   // برچسبِ مشکوک برداشته می‌شود.
   hasSuspectPending: db.prepare("SELECT 1 FROM payments WHERE user_id=? AND suspect_hold=1 AND status='waiting_review' LIMIT 1"),
+  // 🟡 v3.148.0: آیا هنوز رسیدی از این کاربر روی میزِ ادمین است؟ (هر waiting_review، نه فقط suspect_hold).
+  // تا وقتی هست، تگِ مشکوک می‌ماند؛ وقتی همه تعیین‌تکلیف شدند، settleSuspect برش می‌دارد.
+  hasOpenReview: db.prepare("SELECT 1 FROM payments WHERE user_id=? AND status='waiting_review' LIMIT 1"),
   // زمانِ آخرین ۲ رسیدِ **قبلیِ** همین کاربر (برای suspectTrigger، پیش از ثبتِ رویدادِ رسیدِ تازه)
   recentReceiptTimes: db.prepare(
     "SELECT created_at FROM events WHERE user_id=? AND event='receipt_submitted' ORDER BY created_at DESC, id DESC LIMIT 2"
@@ -3352,6 +3366,23 @@ const isDistrusted = (uid) => !!getUser(uid)?.pay_distrust;
 // کاربرِ مشکوک (لایه‌ی دومِ دفاع، بالا): تا وقتی ادمین همه‌ی رسیدهای معلقش را «آمده» نکرده
 // یا یکی را «نیومده» نزده، هر رسیدِ تازه‌اش هم دستی می‌ماند.
 const isSuspect = (uid) => !!getUser(uid)?.pay_suspect;
+// 🟡 v3.148.0 — «مشکوک هرگز مشکوک نمی‌ماند» (خواسته‌ی صریحِ مالک ۱۴۰۵/۰۷/۱۱). مشکوک یک ترمزِ موقت است
+// نه برچسبِ بد: فقط تا وقتی می‌ماند که رسیدی از این کاربر روی میزِ ادمین (waiting_review) یا در حالِ
+// پردازش است. لحظه‌ای که همه تعیین‌تکلیف شدند (تأیید، رد، تکراری، برگشت)، برداشته می‌شود. بی‌اعتماد
+// (دائمی) بر مشکوک مقدم است و مشکوکِ همراهش همان‌جا پاک می‌شود. فقط روی DB، پس fail-safe و بی‌پیام.
+const receiptInFlight = new Map(); // uid → تعدادِ processReceiptِ در جریان (صفِ per کاربر یعنی معمولاً ۰ یا ۱)
+function settleSuspect(uid) {
+  try {
+    if (!uid || !isSuspect(uid)) return false;
+    if (isDistrusted(uid)) { stmts.clearSuspect.run(uid); return true; }
+    if ((receiptInFlight.get(uid) || 0) > 0) return false;
+    if (stmts.hasOpenReview.get(uid)) return false;
+    stmts.clearSuspect.run(uid);
+    log(`🟢 SUSPECT_CLEARED uid=${uid}`);
+    track(db, uid, 'suspect_cleared', {});
+    return true;
+  } catch (e) { logErr('settleSuspect:', e.message); return false; }
+}
 // آستانه‌های تشخیصِ الگوی مشکوک — از دیتای واقعیِ شبِ ۹ شهریور ۱۴۰۵ (CLAUDE.md ربات،
 // بخشِ «کاربرِ مشکوک»): هر ۶ کاربرِ بی‌اعتمادِ چندرسیدی زیرِ این دو آستانه‌اند و صفرشان
 // فقط با یکی از این دو گرفته نشدند.
@@ -10834,7 +10865,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
   // 🔴/🟡 تگِ اعتماد اولِ پیام: ادمین همان لحظه می‌فهمد چرا این رسید دستی است.
-  const caption = trustTagFor(uid) + (note ? `${note}\n\n` : '')
+  const caption = trustTagFor(uid) + receiptTimeLine(paymentId) + (note ? `${note}\n\n` : '')
     + L.wallet.adminNotify(p, user, packSoldIn(p)) + receiptTextTail(textBody, photoFileId);
   const kb = Markup.inlineKeyboard([[
     // برچسب شماره‌ی **فاکتور** را نشان می‌دهد، ولی کالبک شناسه‌ی ردیف را حمل می‌کند.
@@ -10853,7 +10884,7 @@ async function sendReceiptToAdmin(ctx, uid, paymentId, photoFileId, textBody, no
 async function sendSuspectApprovalToAdmin(ctx, uid, paymentId, photoFileId, textBody) {
   const user = getUser(uid);
   const p = stmts.getPayment.get(paymentId);
-  const caption = trustTagFor(uid) + L.wallet.adminSuspectApprove(p, user, packSoldIn(p))
+  const caption = trustTagFor(uid) + receiptTimeLine(paymentId) + L.wallet.adminSuspectApprove(p, user, packSoldIn(p))
     + receiptTextTail(textBody, photoFileId);
   const kb = Markup.inlineKeyboard([[
     Markup.button.callback(L.buttons.suspectYes, `susyes:${paymentId}`),
@@ -10945,7 +10976,7 @@ function canActOnTerr(uid, pid) {
 /* 🔎 ثبتِ یک اجرای ایجنتِ رسید (فازِ ۴). fail-safe: هیچ خطایی از این‌جا مسیرِ پول را نمی‌شکند.
  * `verdict=null` یعنی خودِ فراخوانی پرتاب کرد؛ ردیف با `ok=0` ثبت می‌شود تا نرخِ شکست هم دیده شود. */
 let _raIns;
-function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
+function recordReceiptAnalysis(p, uid, verdict, decision, source, ms, timeInfo = null) {
   try {
     const ok = verdict?.agent?.ok ? 1 : 0;
     const sh = shadowFields(verdict?.extracted);
@@ -10955,12 +10986,15 @@ function recordReceiptAnalysis(p, uid, verdict, decision, source, ms) {
       risk_flags: verdict?.risk_flags ?? [], agent: verdict?.agent ?? null,
       decision: decision ? { action: decision.action, reason_code: decision.reason_code ?? null,
         paid: decision.paid ?? null, overpaid: decision.overpaid ?? 0, basis: decision.basis ?? null } : null,
+      time: timeInfo?.sus ?? null,
     }).slice(0, 8000);
     (_raIns ||= db.prepare(`INSERT INTO receipt_analyses (payment_id, user_id, source, ok, model, verdict,
-      reason_code, action, app, src_prefix, transfer_error, ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`))
+      reason_code, action, app, src_prefix, transfer_error, ms, raw_json, paid_time, time_flag)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`))
       .run(p.id, uid, source, ok, String(verdict?.agent?.model || ''), String(verdict?.verdict || ''),
         String(verdict?.reason_code || ''), String(decision?.action || ''), '',
-        '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw);
+        '', ok && sh.transfer_error ? 1 : 0, Math.max(0, Math.round(ms || 0)), raw,
+        String(timeInfo?.paidTime || ''), String(timeInfo?.timeFlag || ''));
     log(`🔎 RECEIPT_SHADOW #${p.id} ok=${ok} terr=${sh.transfer_error ? 1 : 0} action=${decision?.action || '-'}`);
     track(db, uid, 'receipt_analyzed', { payment_id: p.id, ok, verdict: verdict?.verdict || null,
       action: decision?.action || null, terr: sh.transfer_error ? 1 : 0 });
@@ -10972,6 +11006,26 @@ function lastReceiptAnalysis(pid) {
   try {
     return (_raLast ||= db.prepare('SELECT * FROM receipt_analyses WHERE payment_id=? ORDER BY id DESC LIMIT 1')).get(pid);
   } catch (e) { logErr('lastReceiptAnalysis:', e.message); return undefined; }
+}
+/* 🕐 قاعده‌ی ساعتِ رسید (v3.148.0). `timeCheckOn` فقط ریلِ کارت (استارز رسید ندارد). */
+const timeCheckOn = () => RECEIPT_TIME_CHECK_ENABLED && !starsRail;
+let _raTimes;
+/** ساعت‌های خوانده‌شده‌ی همه‌ی رسیدهای **قبلیِ** این کاربر (برای قاعده‌ی «ساعتِ تکراری»). */
+function receiptTimesOf(uid) {
+  try {
+    return (_raTimes ||= db.prepare("SELECT paid_time FROM receipt_analyses WHERE user_id=? AND paid_time<>''"))
+      .all(uid).map((r) => r.paid_time);
+  } catch (e) { logErr('receiptTimesOf:', e.message); return []; }
+}
+/** خطِ «🕐» روی پیامِ ادمین: از تازه‌ترین تحلیلِ همین پرداخت (خالی اگر قاعده چیزی نگفت). */
+function receiptTimeLine(pid) {
+  try {
+    const ra = lastReceiptAnalysis(pid);
+    if (!ra?.time_flag) return '';
+    let sus = null;
+    try { sus = JSON.parse(ra.raw_json || '{}').time || null; } catch {}
+    return timeFlagLine(sus || { code: ra.time_flag, hhmm: ra.paid_time || null, upload: '' });
+  } catch (e) { logErr('receiptTimeLine:', e.message); return ''; }
 }
 /** خطِ ایجنت فقط برای پیامِ **مالک** (تصمیمِ مالک: ادمین‌های دیگر شلوغ نشوند). */
 const ownerShadowLine = (p) => (RECEIPT_SHADOW_ENABLED && p ? shadowLine(lastReceiptAnalysis(p.id)) : '');
@@ -11176,6 +11230,20 @@ function flagResendDuringWait(uid) {
   } catch (e) { logErr('flagResendDuringWait:', e.message); return false; }
 }
 
+/* 🟡 پوسته‌ی `processReceipt` (v3.148.0): وقتی رسید در حالِ پردازش است، تگِ مشکوک برداشته نمی‌شود (حتی
+ * اگر ادمین همان لحظه رسیدِ دیگری را تعیین‌تکلیف کند)، و بعد از پایانش یک بار تسویه می‌شود. قبلش هم
+ * یک تسویه: تگی که از نسخه‌ی قبل جا مانده (هیچ رسیدِ بازی ندارد) قبل از داوریِ رسیدِ تازه پاک می‌شود. */
+async function runReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
+  settleSuspect(uid);
+  receiptInFlight.set(uid, (receiptInFlight.get(uid) || 0) + 1);
+  try {
+    return await processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered);
+  } finally {
+    const n = (receiptInFlight.get(uid) || 1) - 1;
+    if (n > 0) receiptInFlight.set(uid, n); else receiptInFlight.delete(uid);
+    settleSuspect(uid);
+  }
+}
 async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recovered) {
   let p = stmts.getPayment.get(paymentId);
   if (!p) { setState(uid, 'idle'); return ctx.reply(L.errors.stateLost, mainKeyboard(ctx.from.id)); }
@@ -11250,6 +11318,7 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
         ...receiptExpectedCards(p),
       },
       imageBuffer, imageMime: 'image/jpeg', text: textBody, shadow: RECEIPT_SHADOW_ENABLED,
+      paidTime: timeCheckOn(),
     });
     const tries = (verdict.agent?.attempts || []).map((a) => `${a.model}:${a.ok ? 'ok' : a.error}`).join(' ');
     if (verdict.agent?.ok) {
@@ -11266,8 +11335,27 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
     logErr(`❌ RECEIPT_AGENT_FAIL #${paymentId}:`, e.message);
     decision = { action: 'review', reason_fa: '', overpaid: 0, agentFailed: true };
   }
+  /* 🕐 قاعده‌ی ساعتِ رسید (v3.148.0). فقط وقتی ایجنت سالم جواب داده (شکستِ ایجنت خودش دستی است و
+   * ساعتی برای سنجیدن ندارد) و رسید «نتوانستم واریز کنم» نیست (عکسِ خطا ساعتِ پرداخت ندارد). ساعتِ
+   * رسیدهای قبلی **قبل از** ثبتِ همین ردیف خوانده می‌شود، پس رسید با خودش «تکراری» نمی‌شود. */
+  let timeSus = null, paidTimeHHMM = '';
+  if (timeCheckOn() && !decision.agentFailed && !shadowFields(verdict?.extracted).transfer_error) {
+    try {
+      paidTimeHHMM = parsePaidTime(verdict?.extracted?.paid_time).hhmm || '';
+      timeSus = receiptTimeSuspicion({
+        paidTime: paidTimeHHMM || null,
+        uploadSec: ctx?.message?.date || Math.floor(Date.now() / 1000),
+        prevTimes: receiptTimesOf(uid),
+      });
+    } catch (e) {
+      // fail-closed: هر شکی ⟵ دستی (قاعده‌ی مالک). خطای کدِ خالص هم «ساعتی نداریم» حساب می‌شود.
+      logErr('receipt time check:', e.message);
+      timeSus = { code: 'no_time', hhmm: null, upload: '' };
+    }
+  }
   // 🔎 ثبتِ کاملِ خروجی **قبل از** هر ارسالی به ادمین، تا خطِ ایجنتِ پیامِ مالک از همین ردیف بیاید.
-  recordReceiptAnalysis(p, uid, verdict, decision, photoFileId ? 'photo' : 'text', Date.now() - agentT0);
+  recordReceiptAnalysis(p, uid, verdict, decision, photoFileId ? 'photo' : 'text', Date.now() - agentT0,
+    { paidTime: paidTimeHHMM, timeFlag: timeSus?.code || '', sus: timeSus });
 
   /* ⛔️ «نتوانستم واریز کنم» (فازِ ۵). فقط وقتی ایجنت سالم جواب داده، صراحتاً خطای انتقال خوانده،
    * و خودِ رسید **موفق نیست** (تأیید/کم‌پرداخت یعنی پول رسیده؛ تناقض ⟵ حرفِ مبلغ را باور کن).
@@ -11300,6 +11388,13 @@ async function processReceipt(ctx, uid, paymentId, photoFileId, textBody, recove
    * (`dispatch.js`) تمامِ آن مدت قفل می‌ماند، پس ربات برای کاربر یخ می‌زد و رسیدِ دومش هرگز دیده نمی‌شد؛
    * (۲) پرداخت `pending` می‌ماند و «انصراف» پولِ رسیده را بی‌اعتبار می‌کرد؛ (۳) هر ری‌استارت تصمیم را
    * از حافظه پاک می‌کرد. کاربرِ مشکوک این‌جا نمی‌رسد (پایین‌تر مستقیم به ادمین می‌رود). */
+  // 🕐 قاعده‌ی ساعت ⟵ همان تگِ مشکوکِ همیشگی (موقت). پس همین رسید پایین‌تر به ادمین می‌رود و رسیدهای
+  // بعدی هم تا تعیین‌تکلیف دستی می‌مانند؛ بعد settleSuspect خودش برش می‌دارد. هیچ ردِ خودکاری نیست.
+  if (timeSus) {
+    if (!isDistrusted(uid) && !isSuspect(uid)) stmts.setSuspect.run(uid);
+    log(`🕐 RECEIPT_TIME_SUSPECT #${paymentId} code=${timeSus.code} paid=${timeSus.hhmm || '-'} upload=${timeSus.upload}`);
+    track(db, uid, 'receipt_time_suspect', { payment_id: paymentId, code: timeSus.code });
+  }
   if (slowApproveOn(p, uid, decision) && scheduleAutoDecision(p, decision, amountToman, textBody)) {
     return setState(uid, nextState);
   }
@@ -11372,6 +11467,7 @@ function rejectPaymentAI(paymentId) {
   if (!p || !['pending', 'waiting_review'].includes(p.status)) return null;
   stmts.setPaymentStatus.run('rejected', p.id);
   track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount, via: 'ai' });
+  settleSuspect(p.user_id);
   return p;
 }
 // برگشتِ پرداختِ فیک: کسرِ اعتبارِ ناشی از این پرداخت (کفِ صفر) + بی‌اعتمادکردنِ کاربر.
@@ -11386,12 +11482,15 @@ function clawbackApproved(paymentId, extraProps = {}) {
   const back = creditAmount + (p.pkg ? 0 : bonusFor(creditAmount)); // دقیقاً همان که approve اعتبار داد
   stmts.clawback.run(back, p.user_id);
   track(db, p.user_id, 'payment_reversed', { payment_id: paymentId, amount: p.amount, clawed: back, ...extraProps });
+  settleSuspect(p.user_id);
   return { p, back };
 }
 async function reversePayment(paymentId) {
   const done = clawbackApproved(paymentId);
   if (!done) return null;
   stmts.setDistrust.run(done.p.user_id);
+  // بی‌اعتماد (دائمی) جای مشکوک (موقت) را می‌گیرد؛ دو تگ با هم معنا ندارد.
+  stmts.clearSuspect.run(done.p.user_id);
   return done;
 }
 /* ↩️ «رسید تکراری» روی پرداختی که **اعتبارش داده شده** (v3.120.0، خواسته‌ی مالک): همان
@@ -11426,6 +11525,8 @@ function approvePayment(paymentId, allowRejected = false) {
        این‌جا فقط خوانده. ستون افزایشی است (بند ۲ج/۱) و ردیف‌های قدیمی صفر می‌مانند. */
     stmts.insertDiscountUse.run(p.discount_code_id, p.user_id, paymentId, Math.max(0, p.discount_toman || 0));
   }
+  // 🟡 تعیین‌تکلیفِ این رسید ممکن است آخرین دلیلِ «مشکوک» بودن را برداشته باشد.
+  settleSuspect(p.user_id);
   return { p, creditAmount, bonus };
 }
 
@@ -11680,11 +11781,8 @@ bot.action(/^susyes:(\d+)$/, async (ctx) => {
   const { p, creditAmount, bonus } = done;
   await bot.telegram.sendMessage(p.user_id, approvedMsg(p.user_id, creditAmount, bonus)).catch(() => {});
   await afterApproval(p.user_id);
-  // اگر دیگر هیچ رسیدِ «مشکوکِ معلق»ی از همین کاربر نمانده، برچسب برداشته می‌شود —
-  // مگر اینکه در همین حین بی‌اعتماد هم شده باشد (susno روی رسیدِ دیگرش).
-  if (!stmts.hasSuspectPending.get(p.user_id) && !isDistrusted(p.user_id)) {
-    stmts.clearSuspect.run(p.user_id);
-  }
+  // برداشتنِ برچسبِ مشکوک کارِ خودِ approvePayment است (settleSuspect): فقط وقتی هیچ رسیدِ دیگری
+  // از همین کاربر روی میز نمانده باشد، و نه اگر در این حین بی‌اعتماد شده باشد.
 });
 bot.action(/^susno:(\d+)$/, async (ctx) => {
   if (!canActOnPayment(ctx.from.id, parseInt(ctx.match[1], 10))) return ctx.answerCbQuery('🔒').catch(() => {});
@@ -11709,6 +11807,7 @@ function rejectPaymentDb(paymentId) {
   if (!p || p.status !== 'waiting_review') return null;
   stmts.setPaymentStatus.run('rejected', p.id);
   track(db, p.user_id, EVENTS.PAYMENT_REJECTED, { payment_id: p.id, amount: p.amount });
+  settleSuspect(p.user_id);
   return p;
 }
 // رسیدِ تکراری: مانند رد، ولی هیچ پیامِ کاربری ندارد و کاربر را بی‌اعتماد نمی‌کند.
@@ -11719,9 +11818,7 @@ function rejectDuplicateReceiptDb(paymentId) {
   stmts.setPaymentStatus.run('rejected', p.id);
   track(db, p.user_id, EVENTS.PAYMENT_REJECTED,
     { payment_id: p.id, amount: p.amount, via: 'duplicate_receipt', silent: true });
-  if (!stmts.hasSuspectPending.get(p.user_id) && !isDistrusted(p.user_id)) {
-    stmts.clearSuspect.run(p.user_id);
-  }
+  settleSuspect(p.user_id);
   return p;
 }
 // ارسال دوباره‌ی رسیدِ معطل به ادمین‌ها با همان دکمه‌های تأیید/رد/تکراری
@@ -11898,6 +11995,7 @@ setInterval(async () => {
             markApprovedDay(p2.id);
             track(db, p2.user_id, EVENTS.PAYMENT_APPROVED,
               { payment_id: p2.id, amount: p2.amount, credited: 0, accounting: 1 });
+            settleSuspect(p2.user_id);
           }
         } else if (act.action === 'debit') {
           // کسرِ اعتبار (اصلاحِ حساب توسط پشتیبانی) — کفِ صفر، بی‌صدا برای کاربر
@@ -12749,7 +12847,7 @@ bot.on('text', async (ctx) => {
         setState(uid, 'pay_discount');
         return await applyDiscount(ctx, uid, text);
       }
-      return await processReceipt(ctx, uid, s.paymentId, null, text, false);
+      return await runReceipt(ctx, uid, s.paymentId, null, text, false);
     }
     if (state === 'feedback') {
       const s = getSession(uid);
@@ -12922,7 +13020,7 @@ bot.on('photo', async (ctx) => {
     return ctx.reply(L.wallet.receiptNoInvoice, mainKeyboard(uid)).catch(() => {});
   }
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-  await processReceipt(ctx, uid, paymentId, fileId, null, recovered);
+  await runReceipt(ctx, uid, paymentId, fileId, null, recovered);
 });
 
 /* ---------- یادآوریِ کارت روز: **حذف شد** (تصمیمِ صریحِ مالک ۱۴۰۵/۰۵/۲۹) ----------

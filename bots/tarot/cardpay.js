@@ -21,7 +21,21 @@ RECORD-ONLY FIELDS (read and report them; they must NEVER change your verdict or
 `;
 const SHADOW_KEYS = ',"transfer_error":<true|false>,"transfer_error_text":"<string|null>"';
 
-function systemPrompt(expected, shadow = false) {
+/* 🕐 ساعتِ پرداخت (v3.148.0، خواسته‌ی مالک ۱۴۰۵/۰۷/۱۱). مدل فقط ساعتِ **داخلِ خودِ رسید** را
+ * می‌خواند، همان‌طور که چاپ شده؛ ساعتِ نوارِ وضعیتِ گوشی بالای اسکرین‌شات عمداً کنار گذاشته
+ * می‌شود. تبدیلِ ۱۲/۲۴ ساعته و هر مقایسه‌ای با **کد** است (`receipt-time.js`)، نه با مدل؛
+ * همان قاعده‌ی «مدل فقط می‌خواند، کد حساب می‌کند» (بند ۹ ریشه). روی verdict اثری ندارد.
+ * `paidTime=false` ⟵ پرامپت بیت‌به‌بیت همان قبلی است (رول‌بک). */
+const TIME_RULES = `
+PAYMENT TIME FIELD (read and report it; it must NEVER change your verdict or reason_code):
+- extracted.paid_time = the transaction time printed INSIDE the receipt itself (next to تاریخ و ساعت / زمان / ساعت تراکنش, or stated in the user's text), as "HH:MM" with Latin digits, hour and minute EXACTLY as printed.
+- Do NOT convert between 12-hour and 24-hour formats and do NOT add 12 for PM; just copy the printed hour and minute. Drop seconds.
+- IGNORE the phone's own clock in the status bar at the very top of a screenshot, and any other clock that is not part of the receipt content.
+- If the receipt shows no time at all, paid_time = null. Never guess a time.
+`;
+const TIME_KEY = ',"paid_time":"<HH:MM|null>"';
+
+function systemPrompt(expected, shadow = false, paidTime = false) {
   const toman = Number(expected.amount_toman || 0).toLocaleString('en-US');
   const rial = Number(expected.amount_rial || (expected.amount_toman || 0) * 10).toLocaleString('en-US');
   return `You are a strict Iranian bank card-to-card (کارت به کارت) receipt verifier for a paid bot.
@@ -53,9 +67,9 @@ DECISION RULES (in order). Compare the printed amount against amount_rial (${ria
 CRITICAL AMOUNT RULE: paying MORE than expected is ALWAYS acceptable. When paid >= expected you must NEVER use "amount_too_low" and must NOT reject for the amount, EVER. "amount_too_low" is ONLY for paid < expected. Overpayment → approve (rule 3).
 
 Notes: a round amount (exact multiple of 100,000) is a mild fraud signal, note in risk_flags, not a reason alone to reject. When in doubt choose "review", never "approve".
-${shadow ? SHADOW_RULES : ''}
+${shadow ? SHADOW_RULES : ''}${paidTime ? TIME_RULES : ''}
 Return ONLY a JSON object, no markdown, EXACTLY these keys:
-{"verdict":"approve|reject|review","reason_code":"ok|not_a_receipt|amount_too_low|low_quality|missing_fields|mismatch|uncertain","reason_fa":"<one short Persian sentence, no em dash>","extracted":{"amount_raw":<number|null>,"amount_currency":"rial|toman|null","recipient_name":"<string|null>","dest_card_last4":"<string|null>","tracking_code":"<string|null>","status_successful":<true|false|null>${shadow ? SHADOW_KEYS : ''}},"risk_flags":["<tags: round_amount, name_mismatch, last4_mismatch, no_recipient, edited_look>"]}`;
+{"verdict":"approve|reject|review","reason_code":"ok|not_a_receipt|amount_too_low|low_quality|missing_fields|mismatch|uncertain","reason_fa":"<one short Persian sentence, no em dash>","extracted":{"amount_raw":<number|null>,"amount_currency":"rial|toman|null","recipient_name":"<string|null>","dest_card_last4":"<string|null>","tracking_code":"<string|null>","status_successful":<true|false|null>${shadow ? SHADOW_KEYS : ''}${paidTime ? TIME_KEY : ''}},"risk_flags":["<tags: round_amount, name_mismatch, last4_mismatch, no_recipient, edited_look>"]}`;
 }
 
 function normalize(data) {
@@ -207,7 +221,26 @@ function decideReceipt(verdict, expectedToman) {
 // پاسخی که شکلش غلط است نباید اصلاً پذیرفته شود: مدل را **دوباره** صدا می‌زنیم (یا مدلِ
 // بعدیِ زنجیره را)، و فقط اگر هیچ‌کدام پاسخِ سالم ندادند به تأییدِ دستی می‌رویم.
 // خروجی: رشته‌ی خطا (برای لاگ) یا null یعنی سالم.
-function validateVerdict(data) {
+/* 🕐 ساعتِ چاپ‌شده‌ی رسید ⟵ "HH:MM" (یا null یعنی «رسید ساعت ندارد»). `valid=false` یعنی مدل
+ * چیزی برگرداند که ساعت نیست؛ آن پاسخ پذیرفته نمی‌شود و دوباره پرسیده می‌شود (خواسته‌ی مالک:
+ * «جوابِ قابلِ قبول نداده ⟵ دوباره ریکوئست»). ارقامِ فارسی/عربی پذیرفته می‌شوند. نشانگرِ
+ * صبح/عصر فقط **دور ریخته** می‌شود، تبدیل نمی‌شود: ساعت همان چیزی است که چاپ شده. */
+const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹', AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+function parsePaidTime(x) {
+  if (x === null || x === undefined) return { valid: true, hhmm: null };
+  if (typeof x !== 'string') return { valid: false, hhmm: null };
+  let t = x.trim().replace(/[۰-۹]/g, (d) => String(FA_DIGITS.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String(AR_DIGITS.indexOf(d)));
+  if (!t || /^null$/i.test(t)) return { valid: true, hhmm: null };
+  t = t.replace(/\s*(a\.?m\.?|p\.?m\.?|ق\.?\s?ظ|ب\.?\s?ظ|صبح|ظهر|عصر|شب|بعد\s?از\s?ظهر)\s*$/i, '').trim();
+  const m = t.match(/^(\d{1,2})\s*[:：٫.]\s*(\d{2})(?:\s*[:：٫.]\s*\d{2})?$/);
+  if (!m) return { valid: false, hhmm: null };
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return { valid: false, hhmm: null };
+  return { valid: true, hhmm: `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}` };
+}
+
+function validateVerdict(data, { requireTime = false } = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return 'not_object';
   const v = String(data.verdict ?? '').trim().toLowerCase();
   if (!VERDICTS.includes(v)) return `bad_verdict:${String(data.verdict).slice(0, 20)}`;
@@ -218,17 +251,24 @@ function validateVerdict(data) {
   const amt = data.extracted?.amount_raw;
   if (amt != null && !(Number.isFinite(Number(amt)) && Number(amt) >= 0)) return 'bad_amount_raw';
   if (data.risk_flags != null && !Array.isArray(data.risk_flags)) return 'bad_risk_flags';
+  // 🕐 کلیدِ ساعت باید **باشد** (null مجاز است، غایب‌بودن نه): مدلی که فیلد را جا انداخته
+  // جوابِ ناقص داده و دوباره پرسیده می‌شود. فقط وقتی `extracted` اصلاً هست؛ «اصلاً رسید نیست»
+  // بدونِ extracted همان ساعتِ خالی حساب می‌شود.
+  if (requireTime && data.extracted != null) {
+    if (!Object.prototype.hasOwnProperty.call(data.extracted, 'paid_time')) return 'missing_paid_time';
+    if (!parsePaidTime(data.extracted.paid_time).valid) return 'bad_paid_time';
+  }
   return null;
 }
 
-function parseStrict(raw) {
+function parseStrict(raw, opts = {}) {
   let s = (raw || '').trim();
   if (s.startsWith('```')) { s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim(); }
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
   if (a === -1 || b <= a) throw new Error('no_json');
   let data;
   try { data = JSON.parse(s.slice(a, b + 1)); } catch { throw new Error('bad_json'); }
-  const err = validateVerdict(data);
+  const err = validateVerdict(data, opts);
   if (err) throw new Error(err);
   return normalize(data);
 }
@@ -262,7 +302,7 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
                                expected = {}, imageBuffer = null, imageMime = 'image/jpeg',
                                text = null, timeoutMs = RECEIPT_ATTEMPT_MS,
                                deadlineMs = RECEIPT_DEADLINE_MS, minAttemptMs = MIN_ATTEMPT_MS,
-                               fetchImpl = null, now = Date.now, shadow = false }) {
+                               fetchImpl = null, now = Date.now, shadow = false, paidTime = false }) {
   const doFetch = fetchImpl || fetch;
   const chain = (Array.isArray(models) && models.length ? models : [model]).filter(Boolean);
   let userContent;
@@ -276,7 +316,7 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
     userContent = 'کاربر این متن را به‌عنوانِ رسیدِ پرداخت فرستاده. طبق قرارداد داوری کن و فقط JSON بده.\n\nمتنِ کاربر:\n'
       + String(text || '').slice(0, 4000);
   }
-  const system = systemPrompt(expected, shadow);
+  const system = systemPrompt(expected, shadow, paidTime);
   const started = now();
   const attempts = [];
 
@@ -309,7 +349,7 @@ async function analyzeReceipt({ apiKey, baseUrl = 'https://openrouter.ai/api/v1'
     const t0 = now();
     try {
       const raw = await callOnce(m, Math.min(timeoutMs, remaining));
-      const verdict = parseStrict(raw);
+      const verdict = parseStrict(raw, { requireTime: paidTime });
       attempts.push({ model: m, ms: now() - t0, ok: true });
       return { ...verdict, agent: { ok: true, model: m, attempts } };
     } catch (e) {
@@ -335,5 +375,5 @@ function shadowFields(ext) {
   };
 }
 
-export { shadowFields, systemPrompt, analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
+export { parsePaidTime, shadowFields, systemPrompt, analyzeReceipt, decideReceipt, resolvePaidToman, validateVerdict, parseStrict,
   VERDICTS, RECEIPT_DEADLINE_MS };
