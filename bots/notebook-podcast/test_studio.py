@@ -11,11 +11,16 @@ from store import Store
 
 class _Client:
     def __init__(self):
+        self._download_to_path = AsyncMock()
         self.artifacts = SimpleNamespace(
             generate_slide_deck=AsyncMock(return_value=SimpleNamespace(task_id="task-1")),
             wait_for_completion=AsyncMock(return_value=SimpleNamespace(is_complete=True)),
             download_slide_deck=AsyncMock(side_effect=self._download),
+            _downloads=SimpleNamespace(_download_to_path=self._download_to_path),
         )
+
+    def get_account_authuser(self):
+        return 3
 
     async def _download(self, notebook_id, path, **kwargs):
         Path(path).write_bytes(b"PPTX content")
@@ -28,6 +33,17 @@ class _Client:
 
 
 class StudioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_asset_download_uses_selected_google_account(self):
+        client = _Client()
+        studio.bind_asset_download_to_account(client)
+        await client.artifacts._downloads._download_to_path(
+            "https://contribution.usercontent.google.com/download?c=signed%2Bvalue&opi=1", "/tmp/out.pdf"
+        )
+        self.assertEqual(client._download_to_path.await_args.args[0],
+                         "https://contribution.usercontent.google.com/download?c=signed%2Bvalue&opi=1&authuser=3")
+        await client.artifacts._downloads._download_to_path("https://example.com/file", "/tmp/out.pdf")
+        self.assertEqual(client._download_to_path.await_args.args[0], "https://example.com/file")
+
     def test_output_buttons_use_short_type_ids(self):
         markup = bot.output_buttons("a" * 32)
         data = [row[0].callback_data for row in markup.inline_keyboard]
