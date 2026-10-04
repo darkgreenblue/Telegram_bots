@@ -350,7 +350,7 @@ const TEST_PHASE = false;
 //         (p5: سهمِ بسته‌ی بزرگ از خریدِ اول ۳۱٫۶٪ ⟵ ۵۲٫۴٪ با خریدارِ برابر)، و مدلِ خوانش برای همه
 //         دیپ‌سیک به‌جز «خریدارانِ لونا» (کسانی که اولین پرداختشان با luna بود)، با ۱۰٪ گروهِ
 //         نگه‌داشته‌ی luna (`reading_model_ds2`).
-const PRODUCT_VERSION = '3.150.0';
+const PRODUCT_VERSION = '3.151.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -12863,12 +12863,13 @@ bot.on('text', async (ctx) => {
       return ctx.reply(L.settings.nameSaved(nm), Markup.inlineKeyboard(
         [[Markup.button.callback(L.buttons.setBack, 'set:home')]]));
     }
-    // در مرحله‌ی حوزه‌ی تمرکز، ورودی متنی را نمی‌گیریم؛ کاربر باید از دکمه‌ها انتخاب کند (نه رد کردن مرحله).
-    if (state === 'onboard_focus') {
-      return ctx.reply(L.onboarding.askFocus, Markup.inlineKeyboard(
-        L.buttons.focusOptions.map(([key, label]) => [Markup.button.callback(label, `focus:${key}`)])
-      ));
-    }
+    // در مرحله‌ی حوزه‌ی تمرکز و ماهِ تولد، ورودی متنی را نمی‌گیریم؛ کاربر باید از دکمه‌ها انتخاب
+    // کند (نه رد کردن مرحله). 🐛 v3.151.0: `onboard_month` تا امروز این‌جا شاخه نداشت و به
+    // پیش‌فرضِ تهِ همین هندلر می‌افتاد: پیامِ «کاربرِ برگشتی» + **کیبوردِ ماندگار** وسطِ
+    // آنبوردینگ، و سؤالِ ماهِ تولد هرگز دوباره پرسیده نمی‌شد (هشدارِ ناظرِ گیرافتادن روی
+    // `d815db9d`). حالا همان گاردِ تک‌منبعِ `blockDuringOnboarding` جواب می‌دهد که دکمه‌ها
+    // هم از آن‌جا می‌آیند.
+    if (state === 'onboard_focus' || state === 'onboard_month') return await blockDuringOnboarding(ctx);
     if (state === 'await_question') return await handleQuestion(ctx, text.trim());
     // 🗣 گفتگوی پس از فال. ⚠️ شاخه‌ی **رول‌بک** اول می‌آید: اگر پرچم خاموش شود (یا این
     // زبان از `CHAT_LOCALES` بیرون بیاید) کاربرِ وسطِ گفتگو نباید در استیتی گیر بماند که
@@ -12959,6 +12960,9 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(ctx);
   // در مرحله‌ی نام، ویس نمی‌گیریم (نام را تایپی می‌خواهیم) — راهنمای نرم به‌جای سکوت
   if (getState(uid) === 'onboard_name') return ctx.reply(L.onboarding.askNameRetry);
+  // 🐛 v3.151.0: ویس در مرحله‌ی ماهِ تولد/حوزه‌ی تمرکز تا امروز **بی‌صدا** دور ریخته می‌شد
+  // (پایینِ همین هندلر فقط `await_question` را می‌پذیرد). همان سؤالِ دکمه‌ای را دوباره می‌پرسیم.
+  if (getState(uid) === 'onboard_month' || getState(uid) === 'onboard_focus') return blockDuringOnboarding(ctx);
   // 🗣 ویس در گفتگو (نسخه‌ی اول فقط متن). بدونِ این شاخه، ویس **بی‌صدا** می‌مرد: کاربری
   // که وسطِ گفتگو ویس بفرستد هیچ جوابی نمی‌گرفت و فکر می‌کرد ربات خراب است. رایگان.
   if (getState(uid) === 'chatting' && !CHAT_VOICE) {
