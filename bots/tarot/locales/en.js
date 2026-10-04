@@ -886,6 +886,7 @@ export default {
     mediaReceipt: '📎 In the chat I can only read text for now.\n\nIf this is a payment receipt, end the conversation first and then send it again.',
     // تعارف/سلام: رایگان، با یک دعوتِ نرم به سؤالِ واقعی.
     smallTalk: 'Likewise 🌿\n\nAsk me anything about your reading.',
+    newReadingPointer: (btn) => `👇 For a fresh reading, tap «${btn}».`,
     newReadingAsk: 'A new reading starts with fresh cards; tap the button below 👇\n\nIf your question is about this reading, write it out in full.',
     // دو تپِ هم‌زمان.
     busy: 'One second, I am still writing the last answer 🕯️',

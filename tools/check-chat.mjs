@@ -1771,7 +1771,7 @@ console.log('\n▶ ۲۰) سؤالِ پیشنهادی، پایانِ مکالمه
     '🔑 دکمه‌ی ادامه بالای دکمه‌ی خروج است (درِ خروج هیچ‌وقت بالای درِ ادامه نمی‌نشیند)');
   ok(/if \(followUp\) rows\.push/.test(turn2), 'و دکمه‌ی ادامه فقط وقتی مدل برچسب داده ساخته می‌شود');
   ok(/if \(CHAT_END_BUTTON\) rows\.push/.test(turn2), 'دکمه‌ی خروج پرچمِ رول‌بکِ خودش را دارد');
-  ok(/const followUp = CHAT_FOLLOWUP && !\(CHAT_NEWREAD_NO_FU && out\.newReading\) \? \(out\.followUp \|\| ''\) : '';/.test(turn2),
+  ok(/const followUp = CHAT_FOLLOWUP && !\(CHAT_NEWREAD_NO_FU && out\.newReading\)\s*&& !offerNeedsDataIn\(offerTextOf\(out\)\) \? \(out\.followUp \|\| ''\) : '';/.test(turn2),
     'و خاموشیِ پرچم برچسب را از **ثبت** هم بیرون می‌برد، نه فقط از دکمه');
 
   /* ── ۲۰ج) پایانِ مکالمه ─────────────────────────────────────────────── */
@@ -2481,7 +2481,7 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
   // ب) در هندلر: بعد از بحران، قبل از کسر، بدونِ مدل، و با همان دکمه‌ی `chat_new`ِ موجود.
   ok(before(h, 'crisisIn(', 'newReadingAskIn(') && before(h, 'newReadingAskIn(', 'payForChat('),
     '🔮 شاخه‌ی «فال» بعد از گاردِ بحران و **قبل از** کسر است');
-  const nb = (h.match(/if \(CHAT_NEW_ASK && newReadingAskIn\(text\)\) \{[\s\S]*?\n {2}\}/) || [''])[0];
+  const nb = (h.match(/if \(\(CHAT_NEW_ASK && newReadingAskIn\(text\)\) \|\| takeNew\) \{[\s\S]*?\n {2}\}/) || [''])[0];
   ok(!!nb && /return;/.test(nb) && !/orChatResilient|payForChat|runChatTurn/.test(nb),
     '🔮 و بی‌هیچ فراخوانیِ مدل یا کسر برمی‌گردد');
   ok(/`chat_new:\$\{rid\}`/.test(nb) && /L\.buttons\.chatAnotherReading/.test(nb),
@@ -2511,9 +2511,9 @@ console.log('\n▶ ۲۳) v3.116.0: پیشنهادِ اجباری و گاردِ �
     '🔤 `chatFixNeeds` کمبودِ `latin` را گزارش می‌کند');
   ok(chat.chatFixScore({ latin: 'x' }, false) > chat.chatFixScore({}, false),
     '🔤 و تعمیری که لاتین را برداشت «اکیداً بهتر» شمرده می‌شود');
-  ok(/latin: CHAT_LATIN_FIX \? n\.latin : ''/.test(T) && /needs\.safety \|\| needs\.latin \|\| needs\.fu\) \{/.test(T),
+  ok(/latin: CHAT_LATIN_FIX \? n\.latin : ''/.test(T) && /needs\.safety \|\| needs\.latin \|\| needs\.fu \|\| needs\.alien\) \{/.test(T),
     '🔤 ربات لاتین را در همان **یک** تلاشِ تعمیر می‌آورد، پشتِ پرچمِ رول‌بک');
-  ok(/chatFixNeeds\(o, \{ crisisCtx, userText \}\)/.test(T), '🔤 و حرف‌های خودِ کاربر را به‌عنوانِ مجاز پاس می‌دهد');
+  ok(/chatFixNeeds\(o, \{ crisisCtx, userText, allowedCards \}\)/.test(T), '🔤 و حرف‌های خودِ کاربر را به‌عنوانِ مجاز پاس می‌دهد');
   {
     const L = (await import('../bots/tarot/locales/fa.js')).default;
     ok(/hurt/.test(L.prompts.chatFixHint({ latin: 'hurt' })) && !/فارسی نیست/.test(L.prompts.chatFixHint({})),
@@ -2779,6 +2779,159 @@ console.log('\n▶ ۲۴) دفترِ پیشنهادها');
   ok(/toMessages\(system, packed, text, L, \{ ledger \}\)/.test(CODE), '🔌 و واقعاً به `toMessages` می‌رسد');
   ok(/chatHistory:\s+db\.prepare\('SELECT role, text,[^']*follow_up[^']*FROM chat_messages/.test(SRC),
     '🔌 کوئریِ تاریخچه `follow_up` را می‌خواند (فالبکِ متنِ پیشنهاد از برچسبِ دکمه)');
+}
+
+/* ═══ ۲۶) 🧩 v3.150.0 — بررسیِ روزانه‌ی ۱۴۰۵/۰۷/۱۲، باگ‌های ۲ تا ۷ و ۹ ═════════════════
+ * هر کدام از یک کیسِ واقعی آمده و روی همان کیس‌ها بازپخش شد (بخشِ v3.150.0 در
+ * `bots/tarot/CLAUDE.md`). هر ادعای منفی کنارش یک کنترلِ مثبت دارد (بند ۶ب-۲ ریشه). */
+console.log('\n▶ ۲۶) v3.150.0: حلقه‌ی فالِ تازه، برچسبِ منو، پیشنهادِ داده‌خواه، کارتِ بیگانه، برش، تکرار، تشکر');
+{
+  const LF = (await import('../bots/tarot/locales/fa.js')).default;
+  const rc = await import('../bots/tarot/reading-core.js');
+
+  // ۱) 🔁 «بله بگیر» زیرِ جوابِ فالِ تازه = همان پیامِ رایگانِ فالِ تازه.
+  for (const t of ['بله بگیر', 'باز کن', 'فال تازه رو بگیر', 'بگیییرررر', 'اره فال تازه بگیر',
+    'دکمه فال تازه رو بزن', 'فالِ تازه رو شروع کن', 'فال تازه ماهور', 'گرفتن فال ماهور', 'فال بگیرم', 'بریم فال']) {
+    ok(chat.afterNewReadingIn(t), `🔁 «${t}» دستورِ گرفتنِ فالِ تازه است`);
+  }
+  // ⚠️ کنترلِ مثبت: درخواستِ **متن** و هر سؤالی پولی می‌ماند.
+  // «بگیرم/بریم» بدونِ «فال» جمله‌ی روایی است (هر دو از پیکره‌ی واقعی).
+  for (const t of ['بگیر؟', 'پیامش رو بنویس', 'بگو کارت دوم چیه', 'توضیح بده', 'کارت دوم چی میگه',
+    'میترسم جواب نه بگیرم', 'میخوایم بریم', 'فال تازه بگیرم؟']) {
+    ok(!chat.afterNewReadingIn(t), `⚠️ «${t}» دستورِ فالِ تازه نیست (سؤال یا درخواستِ متن)`);
+  }
+  { const longT = 'فال تازه رو همین الان برام بگیر لطفا خواهش میکنم بگیر';
+    ok(longT.length > chat.CHAT_NEWREAD_TAKE_MAX && !chat.afterNewReadingIn(longT) && chat.afterNewReadingIn('فال تازه رو بگیر'),
+      '📏 پیامِ بلندتر از سقف هرگز دستور حساب نمی‌شود (کنترلِ مثبت: نسخه‌ی کوتاهش هست)'); }
+  ok(chat.CHAT_NEWREAD_TAKE === true && bool('CHAT_NEWREAD_TAKE_ON'), '🎚 هر دو پرچمِ «بگیر» روشن‌اند (رول‌بکِ یک‌خطی)');
+  const nb = (CODE.match(/if \(\(CHAT_NEW_ASK && newReadingAskIn\(text\)\) \|\| takeNew\) \{[\s\S]*?\n {2}\}/) || [''])[0];
+  ok(/via === 'typed' && afterNewReadingIn\(text\)/.test(CODE),
+    '🔌 فقط پیامِ **تایپی**؛ تپِ دکمه از این شاخه رد نمی‌شود');
+  ok(/takeNew = !!stmts\.chatLastAnswer\.get\(rid, uid\)\?\.want_reading/.test(CODE),
+    '🔌 فقط وقتی آخرین جواب **واقعاً** پرچمِ فالِ تازه دارد (وگرنه «بزن» سؤالِ پولیِ عادی است)');
+  ok(/want_reading FROM chat_messages/.test(SRC), '🔌 کوئریِ آخرین جواب ستونِ `want_reading` را می‌خواند');
+  ok(nb && /via: takeNew \? 'take' : via/.test(nb) && /chat_new:\$\{rid\}/.test(nb) && !/payForChat|runChatTurn/.test(nb),
+    '🔁 شاخه‌ی «بگیر» رایگان است (نه کسر، نه مدل)، دکمه‌ی `chat_new` می‌دهد و `via:take` ثبت می‌کند');
+
+  // ۲) 👇 جوابِ پرچم‌دارِ فالِ تازه: پیشنهادِ گفتگو حذف، خطِ ثابتِ دکمه جایش.
+  const PTR = LF.chat.newReadingPointer(LF.buttons.chatAnotherReading);
+  const nr = chat.finalizeChatOut({ text: 'برای این سؤال فالِ تازه لازمه.\nمی‌خوای نشونه‌هاش رو برات روشن کنم؟',
+    offer: 'می‌خوای نشونه‌هاش رو برات روشن کنم؟', newReading: true }, { newReadingPointer: PTR });
+  ok(nr.pointer === true && nr.reply.endsWith(PTR), '👇 جوابِ فالِ تازه با خطِ «دکمه‌ی فالِ تازه رو بزن» تمام می‌شود');
+  ok(!/روشن کنم/.test(nr.reply), '👇 پیشنهادِ گفتگو (که «بله»ی پولیِ بعدی را می‌ساخت) حذف شد، هم از فیلد هم از دُمِ متن');
+  ok(/فال/.test(nr.reply.split('\n')[0]), '👇 خودِ بدنه‌ی جواب سرِ جایش است');
+  const nrOff = chat.finalizeChatOut({ text: 'برای این سؤال فالِ تازه لازمه.', offer: 'می‌خوای نشونه‌هاش رو برات روشن کنم؟', newReading: true });
+  ok(!nrOff.pointer && /روشن کنم/.test(nrOff.reply), '⚠️ کنترلِ رول‌بک: بدونِ `newReadingPointer` رفتارِ قبلی (پیشنهاد می‌ماند)');
+  const nrNo = chat.finalizeChatOut({ text: 'کارت دوم می‌گه صبر کن.', offer: 'می‌خوای نشونه‌هاش رو برات روشن کنم؟' }, { newReadingPointer: PTR });
+  ok(!nrNo.pointer && !nrNo.reply.includes(PTR), '⚠️ کنترلِ مثبت: جوابِ **بی‌پرچم** خطِ فالِ تازه نمی‌گیرد');
+  ok(/newReadingPointer: CHAT_NEWREAD_POINTER \? L\.chat\.newReadingPointer\(L\.buttons\.chatAnotherReading\) : ''/.test(CODE)
+    && bool('CHAT_NEWREAD_POINTER'), '🔌 ربات خطِ دکمه را از locale و پشتِ پرچم پاس می‌دهد');
+  for (const lg of ['fa', 'en', 'es', 'pt', 'ru']) {
+    const LL = (await import(`../bots/tarot/locales/${lg}.js`)).default;
+    const s = typeof LL.chat?.newReadingPointer === 'function' ? LL.chat.newReadingPointer('X') : '';
+    ok(s.includes('X') && !/[—]|--/.test(s), `👇 «${lg}»: \`newReadingPointer\` نامِ دکمه را می‌آورد و خط تیره‌ی بلند ندارد`);
+  }
+
+  // ۳) 🧭 برچسبِ منوی تایپ‌شده جوابِ پولی نمی‌گیرد (فیلترِ سؤالِ پارک‌شده).
+  const B = LF.buttons;
+  const KBL = [B.daily, B.reading, B.wallet, B.coinShop, B.inviteMain, B.freeMenu, B.resetTest, B.settings,
+    B.cardsAdmin, LF.support?.button, B.dailyOneCard, B.luckyMain].filter((x) => typeof x === 'string');
+  for (const t of ['تک کارت رایگان', 'فال تک کارت', 'تنظیمات', 'کارت شانس', 'ذخایر الماس']) {
+    ok(chat.menuLabelLikeIn(t, KBL), `🧭 «${t}» برچسبِ کیبورد است، نه سؤال`);
+  }
+  for (const t of ['کارت دوم چی میگه', 'کارت', 'فال', 'کارت امروزم چی میگه؟', 'رایگان', 'این کارت چی می‌گه']) {
+    ok(!chat.menuLabelLikeIn(t, KBL), `⚠️ «${t}» برچسبِ منو حساب نمی‌شود (سؤال یا تک‌واژه)`);
+  }
+  const rp = bodyOf(CODE, 'async function resumePendingChat(');
+  const rf = (rp || '').match(/if \(CHAT_RESUME_FILTER\) \{[\s\S]*?\n {2}\}/)?.[0] || '';
+  ok(bool('CHAT_RESUME_FILTER') && !!rf, '🎚 فیلترِ سؤالِ پارک‌شده پشتِ `CHAT_RESUME_FILTER` و روشن است');
+  ok(before(rp || '', 'chatEligible(', 'if (CHAT_RESUME_FILTER)') && before(rp || '', 'if (CHAT_RESUME_FILTER)', 'claimPendingChat('),
+    '💸 ترتیب: بعد از گاردِ واجد بودن و **قبل از** ادعا/کسرِ الماس');
+  ok(/menuLabelLikeIn\(p\.text, \[\.\.\.KB_LABELS\]\)/.test(rf), '🔌 برچسب‌ها از `KB_LABELS` (کیبوردِ واقعی) می‌آیند، نه همه‌ی دکمه‌ها');
+  ok(['smallTalkIn(p.text)', 'noContentIn(p.text)', 'newReadingAskIn(p.text)'].every((x) => rf.includes(x)),
+    '🧹 تعارف، پیامِ بی‌محتوا و «فال»ِ تنها هم بعد از شارژ جواب پولی نمی‌گیرند');
+  ok(/dropChatPendings\.run\(uid\)/.test(rf) && /return false;/.test(rf) && !/runChatTurn|payForChat|claimPendingChat|credit/.test(rf),
+    '🧹 شاخه‌ی دور ریختن فقط پارک را پاک می‌کند و برمی‌گردد: نه کسر، نه مدل');
+  ok(/'chat_resume_dropped'/.test(rf) && !/p\.text\s*[,}]/.test(rf.split("'chat_resume_dropped'")[1] || ''),
+    '📊 رویدادِ `chat_resume_dropped` ثبت می‌شود و متنِ کاربر داخلش نیست');
+  ok(!/assentIn/.test(rf), '⚠️ «بله» عمداً دور ریخته نمی‌شود (قبلاً با متنِ پیشنهاد جایگزین شده و سؤالِ واقعی است)');
+
+  // ۴) 📝 پیشنهادی که داده‌ی تازه می‌خواهد دکمه نمی‌گیرد و کمبودِ `fu` هم نیست.
+  for (const t of ['اگه رتبه‌ت رو بفرستی تا دقیق‌تر بگم؟', 'اگه بگی چند سالته بهتر می‌گم']) {
+    ok(chat.offerNeedsDataIn(t), `📝 «${t}» داده‌ی تازه از کاربر می‌خواهد`);
+  }
+  for (const t of ['می‌خوای بعد از گرفتن فال تازه بررسیش کنیم؟', 'می‌خوای یه پیام کوتاه برات بنویسم؟']) {
+    ok(!chat.offerNeedsDataIn(t), `⚠️ «${t}» پیشنهادِ عادی است و دکمه می‌گیرد`);
+  }
+  ok(chat.offerTextOf({ offer: 'می‌خوای کارت دوم رو برات باز کنم؟', text: 'الف\nب' }) === 'می‌خوای کارت دوم رو برات باز کنم؟'
+    && chat.offerTextOf({ offer: '', text: 'الف\n\nخطِ آخر\n' }) === 'خطِ آخر', '📝 متنِ پیشنهاد: فیلدِ سالم، وگرنه آخرین خطِ ناخالی');
+  const nd = chat.chatFixNeeds({ text: 'رتبه خیلی مهمه.\nاگه رتبه‌ت رو بفرستی تا دقیق‌تر بگم؟', offer: '', followUp: '' });
+  const nd2 = chat.chatFixNeeds({ text: 'رتبه خیلی مهمه.', offer: 'می‌خوای کارت دوم رو برات باز کنم؟', followUp: '' });
+  ok(!nd.fu && nd2.fu, '📝 بی‌دکمه بودنِ پیشنهادِ داده‌خواه کمبود نیست؛ کنترلِ مثبت: پیشنهادِ عادیِ بی‌دکمه هنوز کمبود است');
+  ok(/&& !offerNeedsDataIn\(offerTextOf\(out\)\) \? \(out\.followUp \|\| ''\) : ''/.test(CODE),
+    '🔌 ربات دکمه‌ی پیشنهادِ داده‌خواه را ذخیره و نمایش نمی‌دهد');
+
+  // ۵) 🃏 کارتِ بیگانه: کمبودِ ششمِ همان یک تلاشِ تعمیر.
+  const cardsTxt = `${rc.cardName('c03')} و ${rc.cardName('s10')} و ${rc.cardName('m17')}`;
+  const seen = chat.chatCardsIn(cardsTxt);
+  ok(seen.has('c03') && seen.has('s10') && !seen.has('m17'), '🃏 نام‌های چندواژه‌ای شمرده می‌شوند؛ «ستاره»ی تک‌واژه‌ای (واژه‌ی روزمره) نه');
+  ok(chat.alienCardIn(cardsTxt, new Set(['c03'])) === rc.cardName('s10'), '🃏 کارتِ نام‌برده‌ای که مدل ندیده بود پیدا می‌شود (نامش برای hint)');
+  ok(chat.alienCardIn(cardsTxt, new Set(['c03', 's10', 'm17'])) === '', '⚠️ کنترلِ مثبت: کارتِ دیده‌شده بیگانه نیست');
+  ok(chat.alienCardIn(cardsTxt, null) === '', '🎚 بدونِ `allowedCards` کمبود خاموش است (خطای ساختِ مجموعه هرگز جواب را نمی‌شکند)');
+  ok(chat.chatFixNeeds({ text: cardsTxt, offer: 'می‌خوای بیشتر بگم؟', followUp: 'بیشتر بگو' }, { allowedCards: new Set(['c03']) }).alien === rc.cardName('s10'),
+    '🃏 `chatFixNeeds` کمبودِ `alien` را برمی‌گرداند');
+  ok(chat.chatFixScore({ alien: 'x' }, false) === 1 && chat.chatFixScore({}, false) === 0, '⚖️ وزنِ `alien` در امتیازِ تعمیر ۱ است');
+  ok(/allowedCards = chatCardsIn\(`\$\{system\}\\n\$\{userText\}`\)/.test(CODE) && /for \(const c of cards\) if \(c\?\.key\) allowedCards\.add\(c\.key\)/.test(CODE),
+    '🔌 مجاز = هرچه مدل دید (کانتکستِ فال و حرفِ کاربر) + کارت‌های همین فال؛ جوابِ قبلیِ مدل مجوز نمی‌شود');
+  ok(/chatFixNeeds\(o, \{ crisisCtx, userText, allowedCards \}\)/.test(CODE) && /alien: CHAT_ALIEN_CHECK \? \(n\.alien \|\| ''\) : ''/.test(CODE)
+    && bool('CHAT_ALIEN_CHECK'), '🔌 کمبود به تلاشِ تعمیر می‌رسد و پشتِ `CHAT_ALIEN_CHECK` است');
+  ok(/alien: fixWanted\.alien \? 1 : 0, alien_left/.test(CODE) && /🃏 CHAT_ALIEN_CARD/.test(CODE), '📊 propهای `alien`/`alien_left` و مارکرِ لاگ');
+  const hint = LF.prompts.chatFixHint({ alien: 'ده شمشیر' });
+  ok(/ده شمشیر/.test(hint) && /نام نبر/.test(hint) && !/[—]|--/.test(hint), '🃏 hintِ فارسی نامِ کارتِ بیگانه را می‌برد و می‌گوید نامش را نبرد');
+  ok(!/کارت/.test(LF.prompts.chatFixHint({})), '⚠️ کنترلِ مثبت: بدونِ کمبودِ `alien` خطِ کارت در hint نیست');
+
+  // ۶) ✂️ برش در مرزِ جمله، نه وسطِ واژه.
+  const longS = `${'الف '.repeat(30)}پایانِ جمله‌ی اول. ${'ب '.repeat(80)}`;
+  const cs = chat.cutSentence(longS, 120);
+  ok(cs.length <= 120 && cs.endsWith('…') && !/\sب$/.test(cs.slice(0, -1).trim().split(' ').pop() || ''), '✂️ بدونِ پایانِ جمله در نیمه‌ی دوم: آخرین فاصله + «…»');
+  const sent = `${'الف '.repeat(10)}جمله‌ی اول. ${'جیم '.repeat(5)}جمله‌ی دوم. ${'دال '.repeat(40)}`;
+  const cs2 = chat.cutSentence(sent, 120);
+  ok(cs2.endsWith('جمله‌ی دوم.'), `✂️ اگر پایانِ جمله در نیمه‌ی دوم بود، همان‌جا بریده می‌شود («…${cs2.slice(-14)}»)`);
+  ok(chat.cutSentence('کوتاه', 120) === 'کوتاه', '✂️ متنِ زیرِ سقف دست نمی‌خورد');
+  ok(chat.CHAT_CUT_SENTENCE === true && /cutSentence\(reply, Math\.max\(CHAT_MIN_CHARS, room\)\)/.test(CORE_CODE),
+    '🔌 `finalizeChatOut` برای جا دادنِ پیشنهاد از برشِ جمله‌ای استفاده می‌کند');
+
+  // ۷) 🔂 پیشنهادِ تکراری در بدنه‌ی تک‌پاراگرافی.
+  const dd = chat.finalizeChatOut({ text: 'کارت دوم می‌گه صبر کن. می‌خوای نشونه‌هاش رو برات روشن کنم؟', offer: 'می‌خوای نشونه‌هاش رو برات روشن کنم؟' });
+  ok((dd.reply.match(/روشن کنم/g) || []).length === 1 && dd.reply.endsWith('روشن کنم؟'), '🔂 پیشنهاد فقط یک بار، و خطِ آخر');
+  ok(/صبر کن/.test(dd.reply), '🔂 بدنه سرِ جایش است');
+  ok(chat.CHAT_OFFER_DEDUP === true, '🎚 `CHAT_OFFER_DEDUP` روشن است (رول‌بکِ یک‌خطی)');
+  // ⚠️ دو رگرسیونی که بازپخشِ ۱۸۳۹ جوابِ واقعی قبل از مرج گرفت: نسخه‌ی اول کلِ جمله‌ی آخر را
+  // می‌انداخت، پس هر تکه‌ی بی‌نقطه‌ای که قبلِ پیشنهاد نشسته بود (یا کلِ جمله‌ی بی‌پایان) گم می‌شد.
+  const OF = 'می‌خوای نشونه‌هاش رو برات روشن کنم؟';
+  const dos = (b, o = OF) => chat.dedupOfferSentence(b, o);
+  ok(dos(`کارت دوم می‌گه صبر کن. ${OF}`) === 'کارت دوم می‌گه صبر کن.', '🔂 تطبیقِ دقیقِ دُم: فقط خودِ پیشنهاد می‌رود');
+  { const r = dos('کارت دوم می‌گه صبر کن. ولی یه چیز دیگه هم هست اگه بخوای می‌تونم برات بازش کنم');
+    ok(r.includes('یه چیز دیگه هم هست') && !/می‌تونم برات بازش کنم/.test(r),
+      `🔂 تکه‌ی قبل از پیشنهاد (بی‌نقطه) می‌ماند و فقط خودِ پیشنهاد بریده می‌شود («${r.slice(-24)}»)`); }
+  { const r = dos(`کارت دوم می‌گه صبر کن. ✨ ${OF}`);
+    ok(r === 'کارت دوم می‌گه صبر کن.', '🔂 تکه‌ی بی‌حرف (فقط ایموجی) جدا نمی‌ماند (وگرنه خطِ تنهای «✨» ساخته می‌شد)'); }
+  { const r = dos('کارت دوم می‌گه صبر کن. ✨ اگه بخوای می‌تونم برات بازش کنم');
+    ok(r === 'کارت دوم می‌گه صبر کن.', '🔂 همان، وقتی پیشنهادِ متن با فیلد فرق دارد (مسیرِ برش از شروعِ پیشنهاد)'); }
+  ok(dos(OF) === OF, '⚠️ کنترلِ مثبت: بدنه‌ای که **فقط** پیشنهاد است دست نمی‌خورد (هرگز جوابِ خالی نمی‌سازد)');
+  { const q = 'بهش بگو «دلم برات تنگ شده.»';
+    ok(dos(`${q} ${OF}`) === q, '🔂 گیومه‌ی بسته‌ی بعد از نقطه بخشی از جمله‌ی قبل است و حفظ می‌شود'); }
+  { const b = 'کارت دوم می‌گه صبر کن. کارت سوم می‌گه برو جلو.';
+    ok(dos(b) === b, '⚠️ کنترلِ مثبت: جمله‌ی آخرِ غیرپیشنهادی دست نمی‌خورد'); }
+  { const d2 = chat.finalizeChatOut({ text: `صبر کن. ${OF} ${OF}`, offer: OF });
+    ok((d2.reply.match(/روشن کنم/g) || []).length === 1 && /صبر کن/.test(d2.reply), '🔂 پیشنهادِ دوبار تکرارشده در متن به یکی جمع می‌شود'); }
+  ok(chat.LANG?.offer?.open instanceof RegExp || /open: \/\(\?:\(\?:اگه\|اگر\)/.test(CORE_CODE),
+    '🔌 شروعِ پیشنهاد از `FA_OFFER.open` می‌آید (تک‌منبعِ الگوی پیشنهاد)');
+
+  // ۸) 🙏 تشکرِ چندواژه‌ای رایگان است؛ تشکرِ همراهِ سؤال نه.
+  for (const t of ['تمام‌ممنون', 'ممنون خیلی خوب بود', 'مرسی عزیزم']) ok(chat.smallTalkIn(t), `🙏 «${t}» تشکر است (رایگان)`);
+  for (const t of ['ممنون کارت دوم چی میگه', 'خیلی خوب بود', 'تمام‌ممنون؟']) ok(!chat.smallTalkIn(t), `⚠️ «${t}» تشکرِ خالص نیست (پولی می‌ماند)`);
+  ok(chat.CHAT_THANKS_TOKENS === true, '🎚 `CHAT_THANKS_TOKENS` روشن است');
 }
 
 const total = pass + errs.length;
