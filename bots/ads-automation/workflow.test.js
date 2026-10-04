@@ -155,6 +155,30 @@ test('a disabled cost gate blocks both test continuation and winner graduation',
   }
 });
 
+test('pauseall during a delayed recharge check prevents a financial API write',async()=>{
+  const store=openStore(':memory:');seed(store);
+  store.db.prepare(`UPDATE projects SET approved_spend=2 WHERE id=1`).run();
+  store.db.prepare(`UPDATE experiments SET status='paused' WHERE id=1`).run();
+  store.db.prepare(`INSERT INTO decisions(id,project_id,experiment_id,kind,payload_json,status)
+    VALUES (8,1,1,'recharge','{"amount":1}','approved')`).run();
+  const before=process.env.ADS_COST_GATE_VERIFIED;
+  process.env.ADS_COST_GATE_VERIFIED='1';
+  let writes=0;
+  const api={live:true,getAd:async()=>{
+    store.db.prepare("UPDATE projects SET status='paused' WHERE id=1").run();
+    return {ad_id:444,remaining_budget:0,is_paused:true};
+  },getAccount:async()=>({currency:'TON',remaining_budget:10}),call:async()=>{writes++;}};
+  try{
+    await assert.rejects(executeDecision(store,api,8,{resetMinute:safeResetMinute()}),/project not approved/);
+    assert.equal(writes,0);
+    assert.equal(store.db.prepare('SELECT spend_reservation_applied FROM decisions WHERE id=8').get().spend_reservation_applied,0);
+  }finally{
+    if(before===undefined)delete process.env.ADS_COST_GATE_VERIFIED;
+    else process.env.ADS_COST_GATE_VERIFIED=before;
+    store.close();
+  }
+});
+
 test('recharge after an interrupted resume allocates only one extra TON',async()=>{
   const store=openStore(':memory:');seed(store);
   store.db.prepare(`UPDATE projects SET approved_spend=2 WHERE id=1`).run();

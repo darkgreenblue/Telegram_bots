@@ -127,9 +127,20 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
   const params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
     initial_budget:1,daily_budget_limit:TEST_TON,is_paused:false,
     deactivate_date:leaseEnd(now(),resetMinute),...(photoId?{photo_id:photoId}:candidate.surface==='bots'?{show_userpic:true}:{})};
-  db.transaction(()=>reserveProjectSpend(store,project,row(db,'experiments',ex.id),TEST_TON))();
+  db.transaction(()=>{
+    const freshProject=row(db,'projects',project.id);
+    safetyGate(freshProject,api,resetMinute);
+    const freshCap=projectCapacity(db,project.id);
+    const freshEx=row(db,'experiments',ex.id);
+    const alreadyReserved=freshEx.spend_authorized>0;
+    if(freshCap.slots-(alreadyReserved?1:0)>=freshProject.max_campaigns||
+       freshCap.allocated+(alreadyReserved?0:1)>freshProject.max_allocated+1e-6)
+      throw new Error('project allocation capacity exhausted');
+    reserveProjectSpend(store,freshProject,freshEx,TEST_TON);
+  })();
   // A prior uncertain response can be reconciled by unique title before retry.
   const existing=await api.findByTitle(ex.title);
+  if(!existing)safetyGate(row(db,'projects',project.id),api,resetMinute);
   const ad=existing||await api.call('createAd',params,`create-${ex.id}`);
   if(!Number.isInteger(ad.ad_id))throw new Error('Ads API returned no ad_id');
   db.prepare(`UPDATE experiments SET ad_id=?,status='review',review_status=?,activated_at=?,
@@ -157,6 +168,8 @@ async function recordRound(store,ex,ad,reason){
 async function extendLease(store,api,ex,ad,resetMinute){
   const project=row(store.db,'projects',ex.project_id);
   safetyGate(project,api,resetMinute);
+  if(checkMoney(ad.spent_budget,'spent')>ex.spend_authorized+1e-6)
+    throw new Error('provider spend exceeds authorized share');
   if(projectSpendCommitment(store.db,project.id)>project.approved_spend+1e-6)throw new Error('project spend cap exhausted');
   const end=leaseEnd(now(),resetMinute);
   const remaining=remainingTest(ad.spent_budget,ex.start_spent);
@@ -306,6 +319,7 @@ export async function executeDecision(store,api,decisionId,config){
     }
     if(!d.spend_reservation_applied){
       store.db.transaction(()=>{
+        safetyGate(row(store.db,'projects',p.id),api,config.resetMinute);
         const pending=store.db.prepare(`SELECT COUNT(*) n FROM decisions WHERE project_id=? AND kind='recharge'
           AND status='approved' AND allocation_applied=0`).get(p.id).n;
         if(projectCapacity(store.db,p.id).allocated+pending>p.max_allocated+1e-6)throw new Error('allocation cap');
@@ -319,6 +333,7 @@ export async function executeDecision(store,api,decisionId,config){
       const applied=store.db.prepare('UPDATE decisions SET allocation_applied=1 WHERE id=? AND allocation_applied=0').run(d.id);
       if(applied.changes)store.db.prepare(`UPDATE experiments SET allocated_total=allocated_total+1,last_remaining=last_remaining+1 WHERE id=?`).run(ex.id);
     })();
+    safetyGate(row(store.db,'projects',p.id),api,config.resetMinute);
     await api.call('editAd',{ad_id:ex.ad_id,is_paused:false,daily_budget_limit:0},`recharge-resume-${ex.id}-${d.id}`);
     store.db.prepare(`UPDATE experiments SET status='winner',next_check_at=? WHERE id=?`).run(now()+60,ex.id);
   } else if(d.kind==='continue'){
