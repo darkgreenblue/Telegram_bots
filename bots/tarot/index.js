@@ -348,7 +348,8 @@ const TEST_PHASE = false;
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
 // 3.150.0: 🏁 دو آزمایش بسته شد (تصمیمِ مالک، ۱۲ مهر ۱۴۰۵): بسته‌ی معمولی برای همه ۲۰ هزار تومان
 //         (p5: سهمِ بسته‌ی بزرگ از خریدِ اول ۳۱٫۶٪ ⟵ ۵۲٫۴٪ با خریدارِ برابر)، و مدلِ خوانش برای همه
-//         دیپ‌سیک به‌جز فالِ کاربرِ پرداخت‌کرده، با ۱۰٪ گروهِ نگه‌داشته‌ی luna (`reading_model_ds2`).
+//         دیپ‌سیک به‌جز «خریدارانِ لونا» (کسانی که اولین پرداختشان با luna بود)، با ۱۰٪ گروهِ
+//         نگه‌داشته‌ی luna (`reading_model_ds2`).
 const PRODUCT_VERSION = '3.150.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
@@ -1145,7 +1146,7 @@ const isRetiredPack = (key) => !EXTRA_PACKS_ENABLED && EXTRA_PACK_KEYS.has(key);
 // عمداً پاک نشد: مستندِ تاریخیِ «چه چیزی آزمایش و برنده شد» است و ورودیِ آماده‌ی
 // یک مقایسه‌ی احتمالیِ آینده. تنها بازوی زنده‌ی امروز `cheap` است.
 const PRICE_LADDERS = {
-  control: COIN_PACKAGES,                                     // ۳۰۰۰ / ۲۰۰۰ / ۱۵۰۰ تومان per الماس
+  control: COIN_PACKAGES,                                     // ۴۰۰۰ / ۲۰۰۰ / ۱۵۰۰ تومان per الماس (از v3.150.0)
   floor: [
     { key: 'basic', emoji: '🥉', coins: 5,   toman: 15_000 },  // ۳۰۰۰ — دقیقاً نرخِ control
     { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },  // ۲۰۰۰ — دست‌نخورده
@@ -1896,11 +1897,29 @@ const LOADING_MAX_MS             = READING_INFLIGHT_MAX_MS + 30_000;
 /* 🏁 v3.150.0: کلیدِ اول (`reading_model_ds`، ۵۰/۵۰) بسته شد و این کلیدِ **تازه** جایش آمد،
  * چون وزن عوض شد (`shared/ab.js`: تغییرِ وزن = آزمایشِ جدید). تصمیمِ مالک بعد از خوانشِ
  * ماندگاری/LTV (گزارشِ `2026-10-03-ab-decisions.md` بخشِ ۶.۱): بازوی `ds` (۹۰٪) = دیپ‌سیک
- * برای همه‌ی فال‌های متنی **به‌جز فالِ کاربری که قبلاً پرداختِ تأییدشده دارد** (تنها بخشی که
- * با دیپ‌سیک کمتر خرید کرد)؛ `control` (۱۰٪) = گروهِ نگه‌داشته‌ی luna برای سنجشِ LTVِ ۳۰روزه.
- * رول‌بک بدونِ دیپلوی: `stopped` ⟵ همه luna. */
+ * برای همه‌ی فال‌های متنی **به‌جز «خریدارانِ لونا»** (`isLunaBuyer` پایین)؛ `control` (۱۰٪)
+ * = گروهِ نگه‌داشته‌ی luna برای سنجشِ LTVِ ۳۰روزه. رول‌بک بدونِ دیپلوی: `stopped` ⟵ همه luna. */
 const READING_MODEL_EXP = 'reading_model_ds2';
 const READING_MODEL_EXP_V1 = 'reading_model_ds';
+/* 🛡 «خریدارِ لونا» (v3.150.0، گزینه‌ی ۱ِ مالک): کسی که اولین پرداختِ تأییدشده‌اش را **با luna**
+ * انجام داد، یعنی (الف) قبل از بسته‌شدنِ کلیدِ اول (`stopped_at`ش، که بوتِ همین نسخه یک بار
+ * می‌زند) و (ب) نه بعد از اینکه بازوی ds همان آزمایش به او رسیده بود. فقط همین گروه با دیپ‌سیک
+ * کمتر خرید کرد (درآمدِ ۷روزه ۱۶٬۶۶۷ ⟵ ۱۰٬۲۴۲)؛ کسی که با دیپ‌سیک خریدار شد بیشتر دوباره خرید
+ * (۳۷٫۵٪ در برابرِ ۲۸٫۳٪) و دلیلی برای عوض‌کردنِ مدلش نیست. مرزِ زمانی ثابت و در گذشته است،
+ * پس این گروه دیگر بزرگ نمی‌شود: هر خریدارِ تازه از این نسخه به بعد با دیپ‌سیک خریدار شده.
+ * ⚠️ هر خطا ⟵ `false` (یعنی سیاستِ عادیِ بازو)، و لاگ؛ هرگز فال را نمی‌شکند. */
+let _lunaBuyerStmt = null;
+const isLunaBuyer = (uid) => {
+  try {
+    if (!_lunaBuyerStmt) _lunaBuyerStmt = db.prepare(`
+      SELECT 1 AS y FROM experiments e,
+        (SELECT MIN(created_at) AS t FROM payments WHERE user_id=@uid AND status='approved') f
+      WHERE e.key=@v1 AND f.t IS NOT NULL AND f.t < COALESCE(e.stopped_at, 9000000000)
+        AND NOT EXISTS (SELECT 1 FROM ab_exposures x WHERE x.experiment_key=e.key
+          AND x.user_id=@uid AND x.variant='ds' AND x.created_at <= f.t)`);
+    return !!_lunaBuyerStmt.get({ uid, v1: READING_MODEL_EXP_V1 });
+  } catch (e) { logErr('luna buyer:', e.message); return false; }
+};
 const DS_MODEL = 'deepseek/deepseek-v4-flash-0731';
 /* readingId هایی که پیامِ «در حال تفسیر» برایشان روی صفحه است. حافظه‌ای و بدونِ DB
  * عمدی است: این فقط یک سیگنالِ **بهینه‌سازی** است و گم‌شدنش با ری‌استارت بی‌ضرر است
@@ -2641,8 +2660,8 @@ try {
     VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
   `).run(
     READING_MODEL_EXP,
-    'مدلِ خوانش ۲: دیپ‌سیک (به‌جز کاربرِ پرداخت‌کرده) با ۱۰٪ نگه‌داشته‌ی luna',
-    'دیپ‌سیک برای فالِ کاربرِ هنوز‌نخریده هزینه را نصف می‌کند بدونِ افتِ ماندگاری و LTV؛ گروهِ ۱۰٪ luna اثرِ ۳۰روزه را می‌سنجد.',
+    'مدلِ خوانش ۲: دیپ‌سیک (به‌جز خریدارانِ لونا) با ۱۰٪ نگه‌داشته‌ی luna',
+    'دیپ‌سیک برای همه به‌جز کسانی که با luna خریدار شدند، هزینه‌ی مدل را نصف می‌کند بدونِ افتِ ماندگاری و LTV؛ گروهِ ۱۰٪ luna اثرِ ۳۰روزه را می‌سنجد.',
     JSON.stringify([{ key: 'control', weight: 10 }, { key: 'ds', weight: 90 }]),
     EVENTS.PAYMENT_APPROVED,
     JSON.stringify([EVENTS.REFUND, EVENTS.PAYMENT_REJECTED]),
@@ -2661,7 +2680,7 @@ try {
   `).run();
   db.prepare(`
     UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
-      decision='ship ds (به‌جز کاربرِ پرداخت‌کرده) — ماندگاری تا ۱۰ روز بی‌تفاوت، درآمد منهای هزینه +۷۳۸ تومان per کاربر؛ ادامه با reading_model_ds2 (۹۰/۱۰) (v3.150.0)'
+      decision='ship ds (به‌جز خریدارانِ لونا) — ماندگاری تا ۱۰ روز بی‌تفاوت، درآمد منهای هزینه +۷۳۸ تومان per کاربر؛ ادامه با reading_model_ds2 (۹۰/۱۰) (v3.150.0)'
     WHERE key=? AND status<>'stopped'
   `).run(READING_MODEL_EXP_V1);
   // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
@@ -4675,9 +4694,9 @@ async function awaitReadingLLM(uid, readingId) {
     let armOpts = null;
     if (!audio) {
       readingArm.set(readingId, arm);
-      /* کاربرِ پرداخت‌کرده در بازوی ds هم luna می‌گیرد (سیاستِ بازو، نه استثنای exposure):
+      /* «خریدارِ لونا» در بازوی ds هم luna می‌گیرد (سیاستِ بازو، نه استثنای exposure):
        * exposure و `reading_wait` مثلِ قبل با `arm='ds'` ثبت می‌شوند تا مقایسه ITT بماند. */
-      if (arm === 'ds' && !(stmts.countApprovedPayments.get(r?.user_id ?? uid)?.c > 0)) {
+      if (arm === 'ds' && !isLunaBuyer(r?.user_id ?? uid)) {
         armOpts = {
           plan: [DS_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],
         };

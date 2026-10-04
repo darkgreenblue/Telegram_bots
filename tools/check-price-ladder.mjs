@@ -107,8 +107,17 @@ for (const [name, ladder] of Object.entries(M.PRICE_LADDERS)) {
 console.log('\n۲) تک‌متغیره بودنِ هر پله (وگرنه نتیجه تفسیرپذیر نیست)');
 const { control, floor, cheap } = M.PRICE_LADDERS;
 const unitOf = (l) => l.map(p => p.toman / p.coins);
-ok(JSON.stringify(unitOf(floor)) === JSON.stringify(unitOf(control)),
-  'control ⟶ floor: قیمتِ هر الماس در هر سه بسته **دست‌نخورده** است (فقط کفِ بلیت عوض می‌شود)');
+/* 🏁 v3.150.0: نتیجه‌ی p5 (`basic_20`) در `COIN_PACKAGES` نشست، پس control حالا ۲۰k است.
+ * بازوهای تاریخی (floor/cheap/bulk/basic_25/basic_20) هر کدام نسبت به **کاتالوگِ زمانِ خودشان**
+ * تعریف شده بودند: همان ۵/۳۰/۱۰۰ الماس با ۱۵/۶۰/۱۵۰ هزار تومان که از v3.91.0 تا v3.149.0
+ * زنده بود و `floor` بیت‌به‌بیت همان است. پس مبنای تک‌متغیره‌بودنِ آن‌ها `BASE` است، نه
+ * control ِ امروز (وگرنه هر ship کردنِ یک برنده، گاردِ آزمایش‌های قبلی را قرمزِ کاذب می‌کرد). */
+const BASE = [
+  { key: 'basic', coins: 5, toman: 15_000 },
+  { key: 'gold', coins: 30, toman: 60_000 },
+  { key: 'magic', coins: 100, toman: 150_000 },
+];
+const floorIsBase = (m) => JSON.stringify(bare(m.PRICE_LADDERS.floor)) === JSON.stringify(BASE);
 /* ⚠️ از v3.91.0 این بخش معنایش عوض شد — عمداً، نه رگرسیون. فازِ ۱ (`price_ladder_p1`)
  * با پیروزیِ قاطعِ `floor` بسته شد و نتیجه‌اش مستقیم در `COIN_PACKAGES` نشست (بخشِ
  * توضیح بالای `PRICE_LADDERS` در index.js)، پس control و floor از این نسخه **بیت‌به‌بیت
@@ -119,8 +128,13 @@ ok(JSON.stringify(unitOf(floor)) === JSON.stringify(unitOf(control)),
 // همیشه `emoji: '🥉'` می‌گذارد (محدودیتِ خودِ regex)، پس مقایسه‌ی خام حتی با تساویِ
 // واقعیِ منبع هم قرمز می‌داد — قرمزِ کاذبِ ابزار، نه اختلافِ قیمت.
 const bare = (l) => l.map(({ key, coins, toman }) => ({ key, coins, toman }));
-ok(JSON.stringify(bare(floor)) === JSON.stringify(bare(control)),
-  'control ⟶ floor از v3.91.0 بیت‌به‌بیت یکی‌اند (نتیجه‌ی فاز ۱ در COIN_PACKAGES نشسته، نه یک تفاوتِ زنده)');
+ok(floorIsBase(M),
+  'floor همان کاتالوگِ v3.91.0 تا v3.149.0 است (۵/۳۰/۱۰۰ الماس، ۱۵/۶۰/۱۵۰ هزار): مبنای p3 تا p5');
+ok(JSON.stringify(unitOf(floor).slice(1)) === JSON.stringify(unitOf(control).slice(1)),
+  'control ⟶ floor: قیمتِ هر الماسِ ویژه و جادویی دست‌نخورده است (فقط کفِ بلیت فرق دارد)');
+const { basic_20: shipped } = M.PRICE_LADDERS;
+ok(JSON.stringify(bare(shipped)) === JSON.stringify(bare(control)),
+  'از v3.150.0 control بیت‌به‌بیت همان basic_20 است (نتیجه‌ی p5 در COIN_PACKAGES نشسته)');
 
 ok(JSON.stringify(cheap.map(p => p.coins)) === JSON.stringify(floor.map(p => p.coins)),
   'floor ⟶ cheap: تعدادِ الماسِ هر سه بسته **یکی** است (فقط سطحِ قیمت عوض می‌شود)');
@@ -133,24 +147,24 @@ ok(cheap.every((p, i) => p.toman < floor[i].toman),
 const { basic_25 } = M.PRICE_LADDERS;
 ok(JSON.stringify(basic_25.map(p => p.coins)) === JSON.stringify(control.map(p => p.coins)),
   'control ⟶ basic_25: تعدادِ الماسِ هر سه بسته دست‌نخورده است');
-ok(basic_25[0].toman === 25_000 && control[0].toman === 15_000,
-  'control ⟶ basic_25: فقط basic از ۱۵k به ۲۵k می‌رود');
-ok(JSON.stringify(bare(basic_25.slice(1))) === JSON.stringify(bare(control.slice(1))),
-  'control ⟶ basic_25: ویژه و جادویی بیت‌به‌بیت همان کنترل‌اند');
+ok(basic_25[0].toman === 25_000 && floor[0].toman === 15_000,
+  'مبنا ⟶ basic_25: فقط basic از ۱۵k به ۲۵k می‌رود');
+ok(JSON.stringify(bare(basic_25.slice(1))) === JSON.stringify(BASE.slice(1)),
+  'مبنا ⟶ basic_25: ویژه و جادویی بیت‌به‌بیت همان مبنا هستند');
 const { basic_20 } = M.PRICE_LADDERS;
 ok(JSON.stringify(basic_20.map(p => p.coins)) === JSON.stringify(control.map(p => p.coins)),
   'control ⟶ basic_20: تعدادِ الماسِ هر سه بسته دست‌نخورده است');
-ok(basic_20[0].toman === 20_000 && control[0].toman === 15_000,
-  'control ⟶ basic_20: فقط basic از ۱۵k به ۲۰k می‌رود');
-ok(JSON.stringify(bare(basic_20.slice(1))) === JSON.stringify(bare(control.slice(1))),
-  'control ⟶ basic_20: ویژه و جادویی بیت‌به‌بیت همان کنترل‌اند');
+ok(basic_20[0].toman === 20_000 && floor[0].toman === 15_000,
+  'مبنا ⟶ basic_20: فقط basic از ۱۵k به ۲۰k می‌رود');
+ok(JSON.stringify(bare(basic_20.slice(1))) === JSON.stringify(BASE.slice(1)),
+  'مبنا ⟶ basic_20: ویژه و جادویی بیت‌به‌بیت همان مبنا هستند');
 
 /* 🆕 `bulk` (price_ladder_p3): فرضیه‌اش «حجمِ الماسِ بیشتر در بسته‌های میانی/بالا»
  * است، نه تومانِ کمتر. تنها متغیرِ کنترل‌شده‌اش این است که بسته‌ی اول (basic) عمداً
  * دست‌نخورده بماند؛ گارد را همین‌جا بگیر، نه با فرضِ تک‌متغیره بودنِ کلِ نردبان. */
 const { bulk } = M.PRICE_LADDERS;
-ok(JSON.stringify(bare([bulk[0]])) === JSON.stringify(bare([control[0]])),
-  'bulk ⟶ basic دست‌نخورده است (تنها متغیرِ این فرضیه دو بسته‌ی بالاتر است)');
+ok(JSON.stringify(bare([bulk[0]])) === JSON.stringify([BASE[0]]),
+  'bulk ⟶ basic همان مبنا است (تنها متغیرِ این فرضیه دو بسته‌ی بالاتر است)');
 ok(bulk[1].coins > control[1].coins && bulk[2].coins > control[2].coins,
   'و بسته‌ی ویژه/جادوییِ bulk حجمِ الماسِ بیشتری از control دارند (خودِ فرضیه)');
 
@@ -263,7 +277,7 @@ let splitP1 = null;
   ok(uniq.join(',') === 'basic_25,control', `p4 running → فقط control/basic_25 دیده می‌شود (${uniq.join(', ')})`);
   ok(UIDS.every(u => (m.priceArm(u) === 'basic_25'
     ? m.shopPackages(u)[0].toman === 25_000
-    : m.shopPackages(u)[0].toman === 15_000)),
+    : m.shopPackages(u)[0].toman === control[0].toman)),
   'و فقط قیمتِ basic بین دو بازوی p4 فرق دارد');
   db.close();
 }
@@ -275,10 +289,8 @@ let splitP1 = null;
   const m = build({ db });
   const uniq = [...new Set(UIDS.map(u => m.priceArm(u)))].sort();
   ok(uniq.join(',') === 'basic_20,control', `p5 running → فقط control/basic_20 دیده می‌شود (${uniq.join(', ')})`);
-  ok(UIDS.every(u => (m.priceArm(u) === 'basic_20'
-    ? m.shopPackages(u)[0].toman === 20_000
-    : m.shopPackages(u)[0].toman === 15_000)),
-  'و فقط قیمتِ basic بین دو بازوی p5 فرق دارد (۲۰k در برابرِ ۱۵k)');
+  ok(UIDS.every(u => m.shopPackages(u)[0].toman === 20_000),
+  'از v3.150.0 هر دو بازوی p5 همان ۲۰k را می‌دهند (control همان basic_20 است؛ p5 در بوت stop می‌شود)');
   db.close();
 }
 
@@ -395,8 +407,7 @@ const mutate = (from, to) => {
 }
 {
   const m = mutate('coins: 5,   toman: 15_000 }', 'coins: 5,   toman: 20_000 }');
-  const same = m && JSON.stringify(unitOf(m.PRICE_LADDERS.floor)) === JSON.stringify(unitOf(control));
-  ok(m && !same, 'جهشِ «گران‌کردنِ کفِ floor» تک‌متغیره بودنِ پله‌ی اول را می‌شکند (ادعای بند ۲)');
+  ok(m && !floorIsBase(m), 'جهشِ «گران‌کردنِ کفِ floor» مبنای تاریخیِ p3 تا p5 را می‌شکند (ادعای بند ۲)');
 }
 {
   const m = mutate('coins: 5,   toman: 10_000 }', 'coins: 20,  toman: 10_000 }');
@@ -429,7 +440,7 @@ const mutate = (from, to) => {
 {
   const m = mutate('coins: 5,    toman: 15_000 },    // ۳۰۰۰ — همان control',
     'coins: 5,    toman: 12_000 },    // جهش');
-  const same = m && JSON.stringify(bare([m.PRICE_LADDERS.bulk[0]])) === JSON.stringify(bare([control[0]]));
+  const same = m && JSON.stringify(bare([m.PRICE_LADDERS.bulk[0]])) === JSON.stringify([BASE[0]]);
   ok(m && !same, 'جهشِ «دستکاریِ basicِ bulk» تنها-متغیربودنِ فرضیه‌ی bulk را می‌شکند (ادعای بند ۲)');
 }
 {
