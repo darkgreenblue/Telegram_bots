@@ -3,6 +3,7 @@ import { openStore,addCandidate,row } from './db.js';
 import { queueMarketResearch,queueResearch,queueStrategy } from './brain.js';
 import { shortlist,expandPublicChannels } from './discovery.js';
 import { GoogleSheetsMirror } from './sheets.js';
+import { projectCapacity,projectSpendCommitment } from './workflow.js';
 
 const store=openStore(),db=store.db;
 const input=async()=>{let s='';for await(const c of process.stdin){s+=c;if(s.length>100000)throw new Error('input too large');}return JSON.parse(s||'{}');};
@@ -16,7 +17,9 @@ try{
     store.audit('admin-cli','project.init',id,{slug});result={projectId:id,status:'draft'};
   }else if(cmd==='activate'){
     const p=row(db,'projects',Number(arg.projectId));
-    if(!p||!(arg.targetCpa>0)||!(arg.approvedSpend>0)||arg.approvedSpend>20||!arg.market)throw new Error('project, CPA, approved spend and market required');
+    if(!p||typeof arg.targetCpa!=='number'||!Number.isFinite(arg.targetCpa)||arg.targetCpa<=0||
+      typeof arg.approvedSpend!=='number'||!Number.isFinite(arg.approvedSpend)||arg.approvedSpend<=0||
+      arg.approvedSpend>20||!arg.market)throw new Error('project, CPA, approved spend and market required');
     db.prepare(`UPDATE projects SET target_cpa=?,approved_spend=?,market=?,status='ready' WHERE id=?`).run(arg.targetCpa,arg.approvedSpend,arg.market,p.id);
     store.audit('admin-cli','project.activate',p.id,{targetCpa:arg.targetCpa,approvedSpend:arg.approvedSpend,market:arg.market});
     result={projectId:p.id,status:'ready'};
@@ -34,7 +37,8 @@ try{
     const mirror=new GoogleSheetsMirror({spreadsheetId:process.env.ADS_SHEETS_ID,credentialsPath:process.env.ADS_GOOGLE_CREDENTIALS});
     result={synced:await mirror.sync(store,Number(arg.projectId))};
   }else if(cmd==='status'){
-    result={projects:db.prepare('SELECT id,slug,market,language,status,mode,target_cpa,approved_spend FROM projects').all(),
+    result={projects:db.prepare('SELECT id,slug,market,language,status,mode,target_cpa,approved_spend,max_allocated,max_campaigns FROM projects').all()
+      .map(p=>({...p,allocation:projectCapacity(db,p.id),spendCommitted:projectSpendCommitment(db,p.id)})),
       experiments:db.prepare('SELECT id,project_id,status,ad_id,last_spent,last_views,last_actions FROM experiments ORDER BY id DESC LIMIT 30').all(),
       pending:db.prepare(`SELECT id,kind,experiment_id FROM decisions WHERE status='pending'`).all()};
   }else throw new Error('unknown command');
