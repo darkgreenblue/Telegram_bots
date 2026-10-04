@@ -347,7 +347,13 @@ const TEST_PHASE = false;
 //         کارتِ تخصیص»، و ارسالِ یک‌باره‌ی رسیدهای گذشته به اکانتِ پشتیبانی برای تگِ دستی.
 // 3.133.0: 🚫 قواعدِ صلاحیتِ کارت per کاربر (`card-rules.js`): کاربری که رسیدش تگِ دستیِ اپِ «آپ» خورده
 //         کارتِ بلوبانک را در هیچ مسیری نمی‌بیند (صدور، تعویض، خطای انتقال، فالبک).
-const PRODUCT_VERSION = '3.150.0';
+// 3.150.0: 🏁 دو آزمایش بسته شد (تصمیمِ مالک، ۱۲ مهر ۱۴۰۵): بسته‌ی معمولی برای همه ۲۰ هزار تومان
+//         (p5: سهمِ بسته‌ی بزرگ از خریدِ اول ۳۱٫۶٪ ⟵ ۵۲٫۴٪ با خریدارِ برابر)، و مدلِ خوانش برای همه
+//         دیپ‌سیک به‌جز «خریدارانِ لونا» (کسانی که اولین پرداختشان با luna بود)، با ۱۰٪ گروهِ
+//         نگه‌داشته‌ی luna (`reading_model_ds2`).
+// 3.151.0: 🧩 هفت اشکالِ گفتگو (برداشتِ «بله بگیر»، تکرارزدایِ پیشنهاد، فیلترِ بازگشت، کارتِ بیگانه، …) +
+//         ⌨️ برچسبِ منوی تایپ‌شده وسطِ گفتگو همان گاردِ رایگانِ تپِ دکمه را می‌گیرد، نه سؤالِ پولی.
+const PRODUCT_VERSION = '3.151.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -645,7 +651,7 @@ const CHAT_ASSENT_TAP     = true;
 const CHAT_NEWREAD_NO_FU  = true;
 const CHAT_FU_FIX         = true;
 const CHAT_ASSENT_OFFER   = true;
-/* 🧩 v3.150.0 (بررسیِ روزانه‌ی ۱۴۰۵/۰۷/۱۲، بازپخش روی کیس‌های واقعی). هرکدام رول‌بکِ یک‌خطی:
+/* 🧩 v3.151.0 (بررسیِ روزانه‌ی ۱۴۰۵/۰۷/۱۲، بازپخش روی کیس‌های واقعی). هرکدام رول‌بکِ یک‌خطی:
  *   • `CHAT_NEWREAD_POINTER`: جوابِ پرچم‌دارِ فالِ تازه به‌جای پیشنهادِ گفتگو یک خطِ ثابتِ
  *     «دکمه‌ی فالِ تازه رو بزن» می‌گیرد (`finalizeChatOut`). پیشنهادِ گفتگو زیرِ چنین جوابی
  *     «بله»ی پولیِ بعدی را می‌ساخت که دوباره «فالِ تازه لازمه» می‌گفت.
@@ -1075,8 +1081,15 @@ const COIN_PACKAGES = [
    * p=۰٫۰۰۷، CTW ۹۹٫۷٪)، بدونِ افتِ حاشیه و بدونِ هم‌نوع‌خواریِ بسته‌های دیگر. تصمیمِ
    * صریحِ مالک: اعمال روی همه، بدونِ فازِ دوم فعلاً. چون این آرایه همان چیزی است که
    * `PRICE_LADDERS.control` به آن ارجاع می‌دهد (پایین‌تر)، همین یک خط کافی بود —
-   * فاز ۱ همین‌جا مستقیماً «بازوِ برنده در کد نشست» را برآورده کرد. */
-  { key: 'basic',  emoji: '🥉', coins: 5,   toman: 15_000 },
+   * فاز ۱ همین‌جا مستقیماً «بازوِ برنده در کد نشست» را برآورده کرد.
+   *
+   * 💰 **۱۵k ⟵ ۲۰k (v3.150.0)** — نتیجه‌ی `price_ladder_p5_basic_20`: هدفِ آزمایش «طعمه» بود
+   * (بسته‌ی کوچکِ گران‌تر خریدار را به بسته‌ی بزرگ‌تر هل بدهد). سهمِ ویژه/جادویی از خریدِ اول
+   * ۳۱٫۶٪ ⟵ ۵۲٫۴٪ (p=۰٫۰۰۵) با نرخِ خریدارِ تقریباً برابر، درآمد per exposure +۲۱٪
+   * (`analytics/tarot/reports/2026-10-03-ab-decisions.md` بخشِ ۶.۲). تصمیمِ صریحِ مالک.
+   * همان الگوی v3.91.0: `PRICE_LADDERS.control` به همین آرایه ارجاع می‌دهد، پس control
+   * از این نسخه بیت‌به‌بیت همان `basic_20` است و p5 در بوت stop می‌شود. */
+  { key: 'basic',  emoji: '🥉', coins: 5,   toman: 20_000 },
   // ایموجیِ بسته‌ی وسط 💠 است و عمداً **خودِ 💎 نیست**: در همان دکمه ایموجیِ واحد هم
   // می‌آید و دو 💎 پشت‌سرهم بد خوانده می‌شود. نامش از «بسته‌ی الماسی» به «بسته ویژه»
   // رفت (تصمیمِ مالک): «الماسی» با واحدِ الماس اشتباه گرفته می‌شد، انگار فقط این یکی
@@ -1151,7 +1164,7 @@ const isRetiredPack = (key) => !EXTRA_PACKS_ENABLED && EXTRA_PACK_KEYS.has(key);
 // عمداً پاک نشد: مستندِ تاریخیِ «چه چیزی آزمایش و برنده شد» است و ورودیِ آماده‌ی
 // یک مقایسه‌ی احتمالیِ آینده. تنها بازوی زنده‌ی امروز `cheap` است.
 const PRICE_LADDERS = {
-  control: COIN_PACKAGES,                                     // ۳۰۰۰ / ۲۰۰۰ / ۱۵۰۰ تومان per الماس
+  control: COIN_PACKAGES,                                     // ۴۰۰۰ / ۲۰۰۰ / ۱۵۰۰ تومان per الماس (از v3.150.0)
   floor: [
     { key: 'basic', emoji: '🥉', coins: 5,   toman: 15_000 },  // ۳۰۰۰ — دقیقاً نرخِ control
     { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },  // ۲۰۰۰ — دست‌نخورده
@@ -1899,7 +1912,32 @@ const LOADING_MAX_MS             = READING_INFLIGHT_MAX_MS + 30_000;
  *
  * قواعدِ زمان/فالبک بالای این بلوک برای هر دو بازو مشترک‌اند؛ تنها `plan` بازوی ds
  * متفاوت است. تا آزمایش از داشبورد running نشود، `peekVariant` همیشه `'control'` می‌دهد. */
-const READING_MODEL_EXP = 'reading_model_ds';
+/* 🏁 v3.150.0: کلیدِ اول (`reading_model_ds`، ۵۰/۵۰) بسته شد و این کلیدِ **تازه** جایش آمد،
+ * چون وزن عوض شد (`shared/ab.js`: تغییرِ وزن = آزمایشِ جدید). تصمیمِ مالک بعد از خوانشِ
+ * ماندگاری/LTV (گزارشِ `2026-10-03-ab-decisions.md` بخشِ ۶.۱): بازوی `ds` (۹۰٪) = دیپ‌سیک
+ * برای همه‌ی فال‌های متنی **به‌جز «خریدارانِ لونا»** (`isLunaBuyer` پایین)؛ `control` (۱۰٪)
+ * = گروهِ نگه‌داشته‌ی luna برای سنجشِ LTVِ ۳۰روزه. رول‌بک بدونِ دیپلوی: `stopped` ⟵ همه luna. */
+const READING_MODEL_EXP = 'reading_model_ds2';
+const READING_MODEL_EXP_V1 = 'reading_model_ds';
+/* 🛡 «خریدارِ لونا» (v3.150.0، گزینه‌ی ۱ِ مالک): کسی که اولین پرداختِ تأییدشده‌اش را **با luna**
+ * انجام داد، یعنی (الف) قبل از بسته‌شدنِ کلیدِ اول (`stopped_at`ش، که بوتِ همین نسخه یک بار
+ * می‌زند) و (ب) نه بعد از اینکه بازوی ds همان آزمایش به او رسیده بود. فقط همین گروه با دیپ‌سیک
+ * کمتر خرید کرد (درآمدِ ۷روزه ۱۶٬۶۶۷ ⟵ ۱۰٬۲۴۲)؛ کسی که با دیپ‌سیک خریدار شد بیشتر دوباره خرید
+ * (۳۷٫۵٪ در برابرِ ۲۸٫۳٪) و دلیلی برای عوض‌کردنِ مدلش نیست. مرزِ زمانی ثابت و در گذشته است،
+ * پس این گروه دیگر بزرگ نمی‌شود: هر خریدارِ تازه از این نسخه به بعد با دیپ‌سیک خریدار شده.
+ * ⚠️ هر خطا ⟵ `false` (یعنی سیاستِ عادیِ بازو)، و لاگ؛ هرگز فال را نمی‌شکند. */
+let _lunaBuyerStmt = null;
+const isLunaBuyer = (uid) => {
+  try {
+    if (!_lunaBuyerStmt) _lunaBuyerStmt = db.prepare(`
+      SELECT 1 AS y FROM experiments e,
+        (SELECT MIN(created_at) AS t FROM payments WHERE user_id=@uid AND status='approved') f
+      WHERE e.key=@v1 AND f.t IS NOT NULL AND f.t < COALESCE(e.stopped_at, 9000000000)
+        AND NOT EXISTS (SELECT 1 FROM ab_exposures x WHERE x.experiment_key=e.key
+          AND x.user_id=@uid AND x.variant='ds' AND x.created_at <= f.t)`);
+    return !!_lunaBuyerStmt.get({ uid, v1: READING_MODEL_EXP_V1 });
+  } catch (e) { logErr('luna buyer:', e.message); return false; }
+};
 const DS_MODEL = 'deepseek/deepseek-v4-flash-0731';
 /* readingId هایی که پیامِ «در حال تفسیر» برایشان روی صفحه است. حافظه‌ای و بدونِ DB
  * عمدی است: این فقط یک سیگنالِ **بهینه‌سازی** است و گم‌شدنش با ری‌استارت بی‌ضرر است
@@ -2640,9 +2678,9 @@ try {
     VALUES (?,?,?,'split','rate',?,'running',?,?,unixepoch())
   `).run(
     READING_MODEL_EXP,
-    'مدلِ خوانش: دیپ‌سیکِ پولی+برشِ ریترای در برابرِ luna',
-    'دیپ‌سیکِ پولی با یک ریترای و برشِ مهلت (بدونِ اینکه کاربر بیش از حد پشتِ یک فال بماند) هزینه را کم می‌کند بدونِ افتِ محسوس در پرداخت/رضایت/برگشت.',
-    JSON.stringify([{ key: 'control', weight: 50 }, { key: 'ds', weight: 50 }]),
+    'مدلِ خوانش ۲: دیپ‌سیک (به‌جز خریدارانِ لونا) با ۱۰٪ نگه‌داشته‌ی luna',
+    'دیپ‌سیک برای همه به‌جز کسانی که با luna خریدار شدند، هزینه‌ی مدل را نصف می‌کند بدونِ افتِ ماندگاری و LTV؛ گروهِ ۱۰٪ luna اثرِ ۳۰روزه را می‌سنجد.',
+    JSON.stringify([{ key: 'control', weight: 10 }, { key: 'ds', weight: 90 }]),
     EVENTS.PAYMENT_APPROVED,
     JSON.stringify([EVENTS.REFUND, EVENTS.PAYMENT_REJECTED]),
   );
@@ -2651,6 +2689,18 @@ try {
       decision='خارج از دامنه — آزمایشِ مدلِ خوانش فقط برای فارسی است؛ همه به control (luna)'
     WHERE key=? AND status<>'stopped'
   `).run(READING_MODEL_EXP);
+  // 🏁 v3.150.0: دو آزمایشِ تمام‌شده صراحتاً stop می‌شوند (idempotent). p5 بی‌خطر است چون
+  // control از همین نسخه همان ۲۰k است؛ کلیدِ اولِ مدل جایش را به `reading_model_ds2` داد.
+  db.prepare(`
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='ship basic_20 — طعمه کار کرد: سهمِ بسته‌ی بزرگ ۳۱٫۶٪ ⟵ ۵۲٫۴٪ با خریدارِ برابر؛ ۲۰k در COIN_PACKAGES نشست (v3.150.0)'
+    WHERE key='price_ladder_p5_basic_20' AND status<>'stopped'
+  `).run();
+  db.prepare(`
+    UPDATE experiments SET status='stopped', stopped_at=unixepoch(),
+      decision='ship ds (به‌جز خریدارانِ لونا) — ماندگاری تا ۱۰ روز بی‌تفاوت، درآمد منهای هزینه +۷۳۸ تومان per کاربر؛ ادامه با reading_model_ds2 (۹۰/۱۰) (v3.150.0)'
+    WHERE key=? AND status<>'stopped'
+  `).run(READING_MODEL_EXP_V1);
   // آزمایشِ نامِ واحدِ پول منحل شد (تصمیمِ مالک: «فال‌گیر» بد جا می‌افتاد). صراحتاً stop
   // می‌شود تا در داشبورد «در حال اجرا»ی دروغین نماند. idempotent است.
   db.prepare(`
@@ -4662,7 +4712,9 @@ async function awaitReadingLLM(uid, readingId) {
     let armOpts = null;
     if (!audio) {
       readingArm.set(readingId, arm);
-      if (arm === 'ds') {
+      /* «خریدارِ لونا» در بازوی ds هم luna می‌گیرد (سیاستِ بازو، نه استثنای exposure):
+       * exposure و `reading_wait` مثلِ قبل با `arm='ds'` ثبت می‌شوند تا مقایسه ITT بماند. */
+      if (arm === 'ds' && !isLunaBuyer(r?.user_id ?? uid)) {
         armOpts = {
           plan: [DS_MODEL, DS_MODEL, READING_MODEL, READING_MODEL],
         };
@@ -8335,7 +8387,7 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
   }
   // ۳ب) 🔮 «فال»ِ تنها: رایگان، بدونِ مدل. دکمه همان `chat_new`ِ موجود است (کپیِ دومی نیست)،
   // و استیت دست نمی‌خورد تا اگر منظورش همین فال بود، سؤالِ کامل‌تر را همین‌جا بنویسد.
-  /* 🔁 v3.150.0: «بله بگیر»/«باز کن»/«فال تازه رو شروع کن» زیرِ جوابِ «فالِ تازه لازمه» همان
+  /* 🔁 v3.151.0: «بله بگیر»/«باز کن»/«فال تازه رو شروع کن» زیرِ جوابِ «فالِ تازه لازمه» همان
    * پیامِ رایگانِ «فال»ِ تنهاست (`CHAT_NEWREAD_TAKE_ON`). فقط وقتی آخرین جواب **واقعاً** پرچمِ
    * فالِ تازه دارد؛ وگرنه «بزن» یعنی چیزِ دیگری و سؤالِ پولیِ عادی است. */
   let takeNew = false;
