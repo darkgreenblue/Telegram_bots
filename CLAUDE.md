@@ -32,6 +32,7 @@
 | `bots/daily-brief` | pm2: `daily-brief` | پادکستِ آموزشیِ روزانه‌ی شخصی: رودمپِ Notion → متن با LLM → صدا با TTS → ارسالِ صبحگاهی | 🧪 تست شخصی — **فقط ادمین** (کاربر دیگری نمی‌تواند استفاده کند)؛ بدون پرداخت | `bots/daily-brief/CLAUDE.md` |
 | `bots/notebook-podcast` | pm2: `notebook-podcast` | منابع تلگرام → نوت‌بوک تازهٔ NotebookLM → Audio Overview در همان چت | 🧪 تست شخصی و فقط-مالک؛ Python/venv و workflow مستقل برای جلوگیری از ری‌استارتِ ربات‌های زنده | `bots/notebook-podcast/CLAUDE.md` |
 | `bots/dashboard` | pm2: `dashboard` | **داشبورد ادمین وب** (ربات نیست): مارکتینگ/اتریبیوشن، پشتیبانی، مالی — فقط `127.0.0.1:8787` + Cloudflare Tunnel | ابزار داخلی مالک | `bots/dashboard/CLAUDE.md` |
+| `bots/ads-automation` | محلی؛ سرور هنوز مستقر نشده | اتوماسیون آزمایشی تبلیغات تلگرام با تأیید ادمین، رهگیری `c_CODE` و گیت هزینه | 🧪 تست شخصی، بدون خرج زنده | `bots/ads-automation/CLAUDE.md` |
 
 مدل‌ها (همه از **OpenRouter**): فالبکِ ارزانِ آخرِ زنجیره `deepseek/deepseek-v3.2`.
 
