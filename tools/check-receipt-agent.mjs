@@ -148,7 +148,7 @@ ok(!/sendMessage\(done\.p\.user_id/.test(dupYes), 'dupyes هیچ پیامی به
 const require = createRequire(join(tarot, 'package.json'));
 const Database = require('better-sqlite3');
 const db = new Database(':memory:');
-db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0, pay_distrust INTEGER NOT NULL DEFAULT 0);
+db.exec(`CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0, pay_distrust INTEGER NOT NULL DEFAULT 0, pay_suspect INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER, original_amount INTEGER,
            pkg TEXT, status TEXT, updated_at INTEGER);`);
 const sqlOf = (name) => {
@@ -160,6 +160,7 @@ const stmts = {
   markPaymentReversed: sqlOf('markPaymentReversed'),
   clawback: sqlOf('clawback'),
   setDistrust: sqlOf('setDistrust'),
+  clearSuspect: sqlOf('clearSuspect'),
   getPayment: db.prepare('SELECT * FROM payments WHERE id=?'),
 };
 const events = [];
@@ -173,9 +174,10 @@ const cut = (name) => {
   throw new Error(`cut ${name}`);
 };
 const fnSrc = [cut('function clawbackApproved('), cut('async function reversePayment('), cut('function clawbackDuplicate(')].join('\n');
-const mk = new Function('stmts', 'db', 'track', 'bonusFor',
+const settled = [];
+const mk = new Function('stmts', 'db', 'track', 'bonusFor', 'settleSuspect',
   `${fnSrc}\nreturn { clawbackApproved, reversePayment, clawbackDuplicate };`);
-const fns = mk(stmts, db, (_db, uid, ev, props) => events.push({ uid, ev, props }), () => 0);
+const fns = mk(stmts, db, (_db, uid, ev, props) => events.push({ uid, ev, props }), () => 0, (uid) => settled.push(uid));
 
 db.prepare('INSERT INTO users (telegram_id, balance) VALUES (1, 10), (2, 3)').run();
 db.prepare("INSERT INTO payments (id, user_id, amount, original_amount, pkg, status) VALUES (10, 1, 15000, 5, 'basic', 'approved'), (11, 1, 15000, 5, 'basic', 'waiting_review'), (12, 2, 15000, 5, 'basic', 'approved')").run();
@@ -191,6 +193,12 @@ await fns.reversePayment(12);
 const u2 = db.prepare('SELECT * FROM users WHERE telegram_id=2').get();
 ok(u2.balance === 0, 'کسر کفِ صفر دارد');
 ok(u2.pay_distrust === 1, 'کنترلِ مثبت: «پیامکش نیومده» همچنان بی‌اعتماد می‌کند');
+// v3.149.0: هر برگشتِ پرداخت وضعیتِ «مشکوک» را تعیین‌تکلیف می‌کند (مشکوک هرگز مشکوک نمی‌ماند).
+ok(settled.includes(1) && settled.includes(2), 'clawbackApproved بعد از برگشت settleSuspect را صدا می‌زند');
+db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=2').run();
+db.prepare("INSERT INTO payments (id, user_id, amount, original_amount, pkg, status) VALUES (13, 2, 15000, 5, 'basic', 'approved')").run();
+await fns.reversePayment(13);
+ok(db.prepare('SELECT pay_suspect FROM users WHERE telegram_id=2').get().pay_suspect === 0, '«نیومده» ⟵ تگِ مشکوک برداشته می‌شود (بی‌اعتماد جایش را می‌گیرد)');
 
 console.log(fails ? `\n❌ ${fails} ادعا شکست خورد (${passes} سبز)` : `✅ همه سبز (${passes} ادعا)`);
 process.exit(fails ? 1 : 0);
