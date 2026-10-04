@@ -51,6 +51,7 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       allocated_total REAL NOT NULL DEFAULT 1, returned_total REAL NOT NULL DEFAULT 0,
       activated_at INTEGER, serving_at INTEGER, last_checked_at INTEGER, next_check_at INTEGER,
       test_limit REAL NOT NULL DEFAULT 0.05, test_round INTEGER NOT NULL DEFAULT 1,
+      spend_authorized REAL NOT NULL DEFAULT 0,
       test_started_at INTEGER, lease_until INTEGER, stopped_at INTEGER,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
@@ -80,6 +81,7 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       payload_json TEXT NOT NULL, evidence_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'pending', message_id INTEGER,
       decided_at INTEGER, allocation_applied INTEGER NOT NULL DEFAULT 0,
+      spend_reservation_applied INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE IF NOT EXISTS insights (
@@ -121,6 +123,17 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, until_at INTEGER NOT NULL
     );
   `);
+  const experimentColumns=new Set(db.pragma('table_info(experiments)').map(c=>c.name));
+  if(!experimentColumns.has('spend_authorized')){
+    db.exec('ALTER TABLE experiments ADD COLUMN spend_authorized REAL NOT NULL DEFAULT 0');
+    db.exec(`UPDATE experiments SET spend_authorized=CASE
+      WHEN ad_id IS NULL THEN 0
+      WHEN status IN ('winner','limited_winner') THEN allocated_total
+      ELSE MAX(last_spent,MIN(allocated_total,test_round*test_limit)) END`);
+  }
+  const decisionColumns=new Set(db.pragma('table_info(decisions)').map(c=>c.name));
+  if(!decisionColumns.has('spend_reservation_applied'))
+    db.exec('ALTER TABLE decisions ADD COLUMN spend_reservation_applied INTEGER NOT NULL DEFAULT 0');
   const audit = (actor, action, subject, details = {}) => db.prepare(
     'INSERT INTO audit(actor,action,subject,details_json) VALUES (?,?,?,?)'
   ).run(actor, action, String(subject), JSON.stringify(details));

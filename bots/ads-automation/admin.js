@@ -2,7 +2,7 @@ import { Telegraf,Markup } from 'telegraf';
 import { resolve } from 'node:path';
 import { saveTelegramImage } from './images.js';
 import { addJob,row } from './db.js';
-import { decide,requestDecision,pauseManaged } from './workflow.js';
+import { decide,requestDecision,pauseManaged,projectCapacity,projectSpendCommitment } from './workflow.js';
 
 const brief=d=>{
   const p=JSON.parse(d.payload_json),e=JSON.parse(d.evidence_json);
@@ -27,9 +27,14 @@ export function createAdminBot(store,{token,ownerId,api}){
   bot.use(async(ctx,next)=>{if(ctx.from?.id!==ownerId)return;await next();});
   bot.start(ctx=>ctx.reply('ربات مدیریت تبلیغات آماده است. /status وضعیت، /pauseall توقف حفاظتی.'));
   bot.command('status',ctx=>{
-    const projects=store.db.prepare(`SELECT p.slug,p.status,p.mode,COUNT(e.id) experiments,
+    const projects=store.db.prepare(`SELECT p.id,p.slug,p.status,p.mode,p.approved_spend,p.max_allocated,COUNT(e.id) experiments,
       SUM(CASE WHEN e.status='winner' THEN 1 ELSE 0 END) winners FROM projects p LEFT JOIN experiments e ON e.project_id=p.id GROUP BY p.id`).all();
-    ctx.reply(projects.length?projects.map(p=>`${p.slug}: ${p.status}، ${p.mode}، ${p.experiments} تست، ${p.winners||0} برنده`).join('\n'):'پروژه‌ای ثبت نشده است.');
+    ctx.reply(projects.length?projects.map(p=>{
+      const cap=projectCapacity(store.db,p.id),committed=projectSpendCommitment(store.db,p.id);
+      return `${p.slug}: ${p.status}، ${p.mode}، ${p.experiments} تست، ${p.winners||0} برنده\n`+
+        `تخصیص: ${cap.allocated.toFixed(2)} از ${p.max_allocated.toFixed(2)} TON؛ `+
+        `مجوز خرج: ${committed.toFixed(2)} از ${p.approved_spend.toFixed(2)} TON`;
+    }).join('\n\n'):'پروژه‌ای ثبت نشده است.');
   });
   bot.command('pauseall',async ctx=>{
     store.db.prepare(`UPDATE projects SET status='paused' WHERE status IN ('draft','ready')`).run();

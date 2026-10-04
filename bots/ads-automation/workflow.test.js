@@ -1,19 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './db.js';
-import { pollExperiment,executeDecision,projectCapacity } from './workflow.js';
+import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment } from './workflow.js';
 import { AdsApi } from './api.js';
 
 const safeResetMinute=()=>Math.floor(((Date.now()/1000)%86400)/60+180)%1440;
 
 const seed=store=>{
   const db=store.db;
-  db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context,target_cpa,status)
-    VALUES (1,'pilot','Pilot','tarot-intl@pt','https://t.me/examplebot','BR','pt','test',0.02,'ready')`).run();
+  db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context,target_cpa,approved_spend,status)
+    VALUES (1,'pilot','Pilot','tarot-intl@pt','https://t.me/examplebot','BR','pt','test',0.02,3,'ready')`).run();
   db.prepare(`INSERT INTO candidates(id,project_id,surface,value,source,hypothesis) VALUES (1,1,'bots','@examplebot','test','persona')`).run();
   db.prepare(`INSERT INTO creatives(id,project_id,candidate_id,angle,ad_text,status) VALUES (1,1,1,'angle','Ad','approved')`).run();
-  db.prepare(`INSERT INTO experiments(id,project_id,candidate_id,creative_id,title,cpm,placement,ad_id,status,first_view_at)
-    VALUES (1,1,1,1,'unique',0.13,'bot_banner',444,'testing',unixepoch()-1000)`).run();
+  db.prepare(`INSERT INTO experiments(id,project_id,candidate_id,creative_id,title,cpm,placement,ad_id,status,first_view_at,spend_authorized)
+    VALUES (1,1,1,1,'unique',0.13,'bot_banner',444,'testing',unixepoch()-1000,0.05)`).run();
 };
 
 test('full 0.05 test is paused, recorded, and sent for review',async()=>{
@@ -26,6 +26,22 @@ test('full 0.05 test is paused, recorded, and sent for review',async()=>{
   assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'paused');
   assert.equal(store.db.prepare('SELECT spent FROM rounds WHERE experiment_id=1').get().spent,0.05);
   assert.equal(store.db.prepare(`SELECT kind FROM decisions WHERE experiment_id=1`).get().kind,'review');store.close();
+});
+
+test('provider spend beyond a reserved test share locks the whole project',async()=>{
+  const store=openStore(':memory:');seed(store);
+  const ad={ad_id:444,spent_budget:0.06,remaining_budget:0.94,daily_spent_budget:0.06,
+    views:250,actions:2,status:'active',is_paused:false};
+  let pauses=0;
+  const api={getAd:async()=>ad,call:async(method,params)=>{
+    if(method==='editAd'&&params.is_paused)pauses++;
+    return {...ad,is_paused:true};
+  }};
+  await pollExperiment(store,api,1,{resetMinute:0});
+  assert.equal(pauses,1);
+  assert.equal(store.db.prepare('SELECT status FROM projects WHERE id=1').get().status,'paused');
+  assert.equal(store.db.prepare(`SELECT kind FROM decisions WHERE experiment_id=1`).get().kind,'review');
+  store.close();
 });
 
 test('deletion cannot reclaim before ten inactive minutes',async()=>{
@@ -58,6 +74,39 @@ test('project cap counts money already spent even after a campaign was deleted',
   store.db.prepare(`UPDATE experiments SET status='deleted',allocated_total=1,returned_total=0.6,last_remaining=0 WHERE id=1`).run();
   assert.deepEqual(projectCapacity(store.db,1),{slots:0,allocated:0.4});
   store.close();
+});
+
+test('twenty allocated campaigns remain distinct from a three TON spend ceiling',async()=>{
+  const store=openStore(':memory:');seed(store);
+  store.db.prepare(`UPDATE experiments SET status='paused',spend_authorized=0.05 WHERE id=1`).run();
+  for(let id=2;id<=20;id++)store.db.prepare(`INSERT INTO experiments(
+    id,project_id,candidate_id,creative_id,title,cpm,placement,ad_id,status,spend_authorized)
+    VALUES (?,?,?,?,?,0.13,'bot_banner',?,'paused',0.05)`).run(id,1,1,1,`ad-${id}`,1000+id);
+  assert.deepEqual(projectCapacity(store.db,1),{slots:20,allocated:20});
+  assert.equal(projectSpendCommitment(store.db,1),1);
+  store.db.prepare(`UPDATE experiments SET spend_authorized=1 WHERE id IN (2,3)`).run();
+  store.db.prepare(`UPDATE experiments SET spend_authorized=0.15 WHERE id=4`).run();
+  assert.equal(projectSpendCommitment(store.db,1),3);
+  store.db.prepare(`INSERT INTO decisions(id,project_id,experiment_id,kind,payload_json,status)
+    VALUES (30,1,1,'continue','{}','approved'),(31,1,1,'graduate','{}','approved')`).run();
+  store.db.prepare(`INSERT INTO rounds(experiment_id,number,spent,actions,views,reason)
+    VALUES (1,1,0.05,3,300,'test'),(1,2,0.05,3,300,'test')`).run();
+  const before=process.env.ADS_COST_GATE_VERIFIED;
+  process.env.ADS_COST_GATE_VERIFIED='1';
+  let writes=0;
+  const api={live:true,getAd:async()=>({ad_id:444,spent_budget:0.05,remaining_budget:0.95,
+    daily_spent_budget:0.05,views:300,actions:3,is_paused:true}),call:async()=>{writes++;}};
+  try{
+    for(const id of [30,31])await assert.rejects(
+      executeDecision(store,api,id,{resetMinute:safeResetMinute()}),/project spend cap exhausted/);
+    assert.equal(writes,0);
+    assert.equal(store.db.prepare('SELECT test_round FROM experiments WHERE id=1').get().test_round,1);
+    assert.equal(projectSpendCommitment(store.db,1),3);
+  }finally{
+    if(before===undefined)delete process.env.ADS_COST_GATE_VERIFIED;
+    else process.env.ADS_COST_GATE_VERIFIED=before;
+    store.close();
+  }
 });
 
 test('an untouched ad stopped during review receives a fresh bounded lease',async()=>{
@@ -120,12 +169,14 @@ test('recharge after an interrupted resume allocates only one extra TON',async()
     if(method==='increaseAdBudget')increased++;
     if(method==='editAd'&&failResume)throw new Error('resume temporarily unavailable');
     return {ok:true,status:200,json:async()=>({ok:true,result:method==='getCurrentAccount'
-      ?{currency:'TON',remaining_budget:10}:true})};
+      ?{currency:'TON',remaining_budget:10}:method==='getAdsById'
+        ?[{ad_id:444,remaining_budget:increased?1:0}]:true})};
   };
   const api=new AdsApi({token:'test',store,fetcher,live:true});
   try{
     await assert.rejects(executeDecision(store,api,9,{resetMinute:safeResetMinute()}),/temporarily unavailable/);
     assert.equal(store.db.prepare('SELECT allocated_total FROM experiments WHERE id=1').get().allocated_total,2);
+    assert.equal(projectSpendCommitment(store.db,1),2);
     failResume=false;
     await executeDecision(store,api,9,{resetMinute:safeResetMinute()});
     assert.equal(increased,1);

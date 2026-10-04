@@ -57,14 +57,31 @@ export function leaseEnd(nowSec,resetMinute){
 
 function safetyGate(project,api,resetMinute) {
   if(project.status!=='ready'||!(project.target_cpa>0)||!(project.approved_spend>0))throw new Error('project not approved for live spending');
+  if(project.approved_spend>20||project.max_allocated>20||project.max_campaigns>20)throw new Error('project exceeds the 20 TON pilot envelope');
   if(!api.live||process.env.ADS_COST_GATE_VERIFIED!=='1')throw new Error('cost capability gate not verified');
   leaseEnd(now(),resetMinute);
 }
 
 export function projectCapacity(db,projectId){
-  const rows=db.prepare(`SELECT status,allocated_total,returned_total FROM experiments WHERE project_id=? AND ad_id IS NOT NULL`).all(projectId);
+  const rows=db.prepare(`SELECT status,allocated_total,returned_total FROM experiments
+    WHERE project_id=? AND (ad_id IS NOT NULL OR spend_authorized>0)`).all(projectId);
   return {slots:rows.filter(r=>!['deleted','rejected'].includes(r.status)).length,
     allocated:money(rows.reduce((s,r)=>s+Math.max(0,r.allocated_total-r.returned_total),0))};
+}
+
+export function projectSpendCommitment(db,projectId){
+  const ads=db.prepare(`SELECT spend_authorized,last_spent FROM experiments WHERE project_id=?`).all(projectId);
+  return money(ads.reduce((sum,ad)=>sum+Math.max(ad.spend_authorized,ad.last_spent),0));
+}
+
+function reserveProjectSpend(store,project,ex,desired){
+  if(!Number.isFinite(desired)||desired<0||desired>ex.allocated_total+1e-6)throw new Error('invalid spend reservation');
+  const current=Math.max(ex.spend_authorized,ex.last_spent);
+  const additional=Math.max(0,Math.max(desired,ex.last_spent)-current);
+  if(projectSpendCommitment(store.db,project.id)+additional>project.approved_spend+1e-6)
+    throw new Error('project spend cap exhausted');
+  if(desired>ex.spend_authorized)
+    store.db.prepare('UPDATE experiments SET spend_authorized=? WHERE id=?').run(money(desired),ex.id);
 }
 
 export async function createApproved(store,api,experimentId,{resetMinute}) {
@@ -77,7 +94,11 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
   safetyGate(project,api,resetMinute);
   validateCreative(creative,candidate,project);
   const cap=projectCapacity(db,project.id);
-  if(cap.slots>=project.max_campaigns||cap.allocated+1>Math.min(project.max_allocated,project.approved_spend)+1e-6)throw new Error('project allocation capacity exhausted');
+  const reserved=ex.spend_authorized>0;
+  if(cap.slots-(reserved?1:0)>=project.max_campaigns||cap.allocated+(reserved?0:1)>project.max_allocated+1e-6)
+    throw new Error('project allocation capacity exhausted');
+  if(projectSpendCommitment(db,project.id)+(reserved?0:TEST_TON)>project.approved_spend+1e-6)
+    throw new Error('project spend cap exhausted');
   const account=await api.getAccount();
   if(account.currency!=='TON'||checkMoney(account.remaining_budget,'account remaining budget')<1)throw new Error('account is not funded in TON');
   const configured=await dashboardBridge({action:'handle',scope:project.scope});
@@ -106,6 +127,7 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
   const params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
     initial_budget:1,daily_budget_limit:TEST_TON,is_paused:false,
     deactivate_date:leaseEnd(now(),resetMinute),...(photoId?{photo_id:photoId}:candidate.surface==='bots'?{show_userpic:true}:{})};
+  db.transaction(()=>reserveProjectSpend(store,project,row(db,'experiments',ex.id),TEST_TON))();
   // A prior uncertain response can be reconciled by unique title before retry.
   const existing=await api.findByTitle(ex.title);
   const ad=existing||await api.call('createAd',params,`create-${ex.id}`);
@@ -133,7 +155,9 @@ async function recordRound(store,ex,ad,reason){
 }
 
 async function extendLease(store,api,ex,ad,resetMinute){
-  safetyGate(row(store.db,'projects',ex.project_id),api,resetMinute);
+  const project=row(store.db,'projects',ex.project_id);
+  safetyGate(project,api,resetMinute);
+  if(projectSpendCommitment(store.db,project.id)>project.approved_spend+1e-6)throw new Error('project spend cap exhausted');
   const end=leaseEnd(now(),resetMinute);
   const remaining=remainingTest(ad.spent_budget,ex.start_spent);
   if(remaining<=0)throw new Error('no test share remains');
@@ -165,6 +189,19 @@ export async function pollExperiment(store,api,experimentId,{resetMinute}){
     serving_at=CASE WHEN serving_at IS NULL AND ? IN ('active','on_hold') THEN ? ELSE serving_at END,
     last_checked_at=?,review_status=? WHERE id=?`).run(spent,remaining,views,actions,first,ad.status||'',time,time,ad.status||'',ex.id);
   const update=()=>row(db,'experiments',ex.id);
+  if(spent>ex.spend_authorized+1e-6||projectSpendCommitment(db,project.id)>project.approved_spend+1e-6){
+    db.prepare(`UPDATE projects SET status='paused' WHERE id=?`).run(project.id);
+    const active=db.prepare(`SELECT * FROM experiments WHERE project_id=? AND ad_id IS NOT NULL
+      AND status IN ('review','testing','winner','limited_winner')`).all(project.id);
+    for(const managed of active){
+      try{await pauseManaged(store,api,managed,'project-spend-guard');}
+      catch(error){store.audit('system','spend-guard.pause-failed',managed.id,{error:String(error.message).slice(0,200)});}
+    }
+    requestDecision(store,project.id,ex.id,'review',
+      {reason:'تجاوز آمار هزینه از مجوز تست؛ پروژه قفل شد و نیاز به بررسی دارد.'},
+      {spent,authorized:ex.spend_authorized,projectCommitted:projectSpendCommitment(db,project.id),approvedSpend:project.approved_spend});
+    return;
+  }
   if(ad.status==='declined'){
     await pauseManaged(store,api,update(),'declined');
     requestDecision(store,ex.project_id,ex.id,'delete',{reason:'declined by Telegram'},{status:ad.status});
@@ -240,28 +277,42 @@ export async function executeDecision(store,api,decisionId,config){
       if(now()-fresh.stopped_at<600)return; // API requires ten inactive minutes
       const ad=await api.getAd(ex.ad_id);
       if(!ad.is_paused && ad.status!=='stopped')throw new Error('ad not inactive');
+      if(checkMoney(ad.remaining_budget,'remaining budget')>ex.allocated_total+1e-6)
+        throw new Error('provider returned more budget than this campaign received');
       await api.call('deleteAd',{ad_id:ex.ad_id},`delete-${ex.id}`);
-      store.db.prepare(`UPDATE experiments SET status='deleted',returned_total=? WHERE id=?`).run(ad.remaining_budget,ex.id);
+      store.db.prepare(`UPDATE experiments SET status='deleted',returned_total=?,
+        spend_authorized=MAX(last_spent,allocated_total-?) WHERE id=?`).run(ad.remaining_budget,ad.remaining_budget,ex.id);
       store.audit('admin','ad.delete',ex.id,{adId:ex.ad_id,returnedBudget:ad.remaining_budget});
     }
   } else if(d.kind==='graduate'){
     const project=row(store.db,'projects',ex.project_id);
     const rounds=store.db.prepare('SELECT spent,actions,views FROM rounds WHERE experiment_id=? ORDER BY number').all(ex.id);
     if(!canGraduate(rounds,project.target_cpa))throw new Error('winner evidence insufficient');
+    store.db.transaction(()=>reserveProjectSpend(store,project,row(store.db,'experiments',ex.id),ex.allocated_total))();
     await api.call('editAd',{ad_id:ex.ad_id,daily_budget_limit:0,is_paused:false},`graduate-${ex.id}`);
     store.db.prepare(`UPDATE experiments SET status='winner',next_check_at=?,lease_until=NULL WHERE id=?`).run(now()+60,ex.id);
     store.audit('admin','ad.graduate',ex.id,{rounds:rounds.length});
   } else if(d.kind==='recharge'){
     const p=row(store.db,'projects',ex.project_id);
     safetyGate(p,api,config.resetMinute);
-    const account=await api.getAccount();
-    if(account.currency!=='TON'||checkMoney(account.remaining_budget,'balance')<1)throw new Error('insufficient TON balance');
     const opKey=`recharge-${ex.id}-${d.id}`;
-    const op=store.db.prepare('SELECT status FROM operations WHERE op_key=?').get(opKey);
-    if(!op||op.status!=='done'){
-      const pending=store.db.prepare(`SELECT COUNT(*) n FROM decisions WHERE project_id=? AND kind='recharge'
-        AND status='approved' AND allocation_applied=0`).get(p.id).n;
-      if(projectCapacity(store.db,p.id).allocated+pending>Math.min(p.max_allocated,p.approved_spend)+1e-6)throw new Error('allocation cap');
+    const priorOperation=store.db.prepare('SELECT status FROM operations WHERE op_key=?').get(opKey);
+    if(!d.allocation_applied&&priorOperation?.status!=='done'){
+      if(ex.status!=='paused')throw new Error('campaign must be paused before recharge');
+      const ad=await api.getAd(ex.ad_id);
+      if(checkMoney(ad.remaining_budget,'remaining budget')>0.01)throw new Error('campaign budget is not exhausted');
+      const account=await api.getAccount();
+      if(account.currency!=='TON'||checkMoney(account.remaining_budget,'balance')<1)throw new Error('insufficient TON balance');
+    }
+    if(!d.spend_reservation_applied){
+      store.db.transaction(()=>{
+        const pending=store.db.prepare(`SELECT COUNT(*) n FROM decisions WHERE project_id=? AND kind='recharge'
+          AND status='approved' AND allocation_applied=0`).get(p.id).n;
+        if(projectCapacity(store.db,p.id).allocated+pending>p.max_allocated+1e-6)throw new Error('allocation cap');
+        const fresh=row(store.db,'experiments',ex.id);
+        reserveProjectSpend(store,p,{...fresh,allocated_total:fresh.allocated_total+1},fresh.allocated_total+1);
+        store.db.prepare('UPDATE decisions SET spend_reservation_applied=1 WHERE id=?').run(d.id);
+      })();
     }
     await api.call('increaseAdBudget',{ad_id:ex.ad_id,amount:1},opKey);
     store.db.transaction(()=>{
@@ -274,8 +325,12 @@ export async function executeDecision(store,api,decisionId,config){
     if(ex.status!=='paused')throw new Error('experiment not paused');
     const ad=await api.getAd(ex.ad_id);
     if(remainingTest(ad.spent_budget,ex.start_spent)<=0) {
-      store.db.prepare(`UPDATE experiments SET test_round=test_round+1,start_spent=?,start_actions=?,start_views=?,test_started_at=? WHERE id=?`).run(
-        ad.spent_budget,ad.actions,ad.views,now(),ex.id);
+      store.db.transaction(()=>{
+        const fresh=row(store.db,'experiments',ex.id);
+        reserveProjectSpend(store,project,fresh,(fresh.test_round+1)*TEST_TON);
+        store.db.prepare(`UPDATE experiments SET test_round=test_round+1,start_spent=?,start_actions=?,start_views=?,test_started_at=? WHERE id=?`).run(
+          ad.spent_budget,ad.actions,ad.views,now(),ex.id);
+      })();
     }
     await extendLease(store,api,row(store.db,'experiments',ex.id),ad,config.resetMinute);
   } else if(d.kind==='review') {

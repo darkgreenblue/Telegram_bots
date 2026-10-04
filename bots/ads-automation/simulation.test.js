@@ -36,7 +36,7 @@ test('offline four-surface cycle records evidence without touching the Ads accou
   assert.equal(db.prepare('SELECT COUNT(*) n FROM experiments WHERE ad_id IS NOT NULL').get().n,0);
 
   const id=ids[1];
-  db.prepare(`UPDATE experiments SET ad_id=444,status='testing',first_view_at=unixepoch()-1200 WHERE id=?`).run(id);
+  db.prepare(`UPDATE experiments SET ad_id=444,status='testing',first_view_at=unixepoch()-1200,spend_authorized=0.05 WHERE id=?`).run(id);
   let snapshot={ad_id:444,spent_budget:0.05,remaining_budget:0.95,daily_spent_budget:0.05,
     views:300,actions:4,status:'active',is_paused:false};
   const api={getAd:async()=>snapshot,call:async(method,params)=>{
@@ -46,7 +46,7 @@ test('offline four-surface cycle records evidence without touching the Ads accou
   assert.equal(db.prepare('SELECT COUNT(*) n FROM rounds WHERE experiment_id=?').get(id).n,1);
   assert.equal(db.prepare(`SELECT kind FROM decisions WHERE experiment_id=? AND kind='graduate'`).get(id),undefined);
   db.prepare(`UPDATE experiments SET status='testing',test_round=2,start_spent=0.05,start_actions=4,
-    start_views=300,last_spent=0.05,last_views=300,last_actions=4 WHERE id=?`).run(id);
+    start_views=300,last_spent=0.05,last_views=300,last_actions=4,spend_authorized=0.1 WHERE id=?`).run(id);
   snapshot={...snapshot,spent_budget:0.1,remaining_budget:0.9,daily_spent_budget:0.1,views:700,actions:8};
   await pollExperiment(store,api,id,{resetMinute:0});
   assert.equal(db.prepare(`SELECT kind FROM decisions WHERE experiment_id=? AND kind='graduate'`).get(id).kind,'graduate');
