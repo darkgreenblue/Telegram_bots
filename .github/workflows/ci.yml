@@ -647,6 +647,11 @@ jobs:
       - name: Receipt shadow check
         if: matrix.bot == 'tarot'
         run: node tools/check-receipt-shadow.mjs
+      # 🕐 قاعده‌ی ساعتِ پرداختِ رسید (v3.147.0): تکراری بدونِ تبدیل، بازه‌ی ۳۰ دقیقه‌ای بدونِ ارفاق،
+      # ساعتِ غایب ⟵ دوباره پرسیدن، و تگِ مشکوک قبل از هر تصمیمِ خودکار. رفتاری + سیم‌کشی.
+      - name: Receipt time check
+        if: matrix.bot == 'tarot'
+        run: node tools/check-receipt-time.mjs
 
       - name: Transfer error check
         if: matrix.bot == 'tarot'
