@@ -175,7 +175,7 @@ function expRevenue(db, bot, key) {
  * شمارشِ آستانه‌دار) آن‌قدر نیاز به هم ندارند که تعمیمشان قبل از دومین مصرف‌کننده
  * توجیه داشته باشد (بند ۹/۰ ریشه). نیمه‌ی «خاموشیِ سریع» از قبل با دکمه‌ی استانداردِ
  * stopped/kill پایین همین صفحه حل است و کدِ تازه نمی‌خواهد. */
-const READING_METRIC_EXPERIMENTS = new Set(['reading_model_ds']);
+const READING_METRIC_EXPERIMENTS = new Set(['reading_model_ds', 'reading_model_ds2']);
 
 function readingModelExtras(inst, e) {
   return withDb(inst.file, (db) => {
