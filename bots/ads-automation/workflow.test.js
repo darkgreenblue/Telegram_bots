@@ -62,18 +62,48 @@ test('project cap counts money already spent even after a campaign was deleted',
 
 test('an untouched ad stopped during review receives a fresh bounded lease',async()=>{
   const store=openStore(':memory:');seed(store);
+  store.db.prepare(`UPDATE projects SET approved_spend=1 WHERE id=1`).run();
   store.db.prepare(`UPDATE experiments SET status='review',review_status='in_review',first_view_at=NULL,
     lease_until=unixepoch()-60 WHERE id=1`).run();
   const ad={ad_id:444,spent_budget:0,remaining_budget:1,daily_spent_budget:0,
     views:0,actions:0,status:'stopped',is_paused:true};
   let edit;
-  const api={getAd:async()=>ad,call:async(method,params)=>{assert.equal(method,'editAd');edit=params;return ad;}};
-  await pollExperiment(store,api,1,{resetMinute:safeResetMinute()});
-  assert.equal(edit.ad_id,444);
-  assert.equal(edit.daily_budget_limit,0.05);
-  assert.equal(edit.is_paused,false);
-  assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'testing');
-  store.close();
+  const api={live:true,getAd:async()=>ad,call:async(method,params)=>{assert.equal(method,'editAd');edit=params;return ad;}};
+  const before=process.env.ADS_COST_GATE_VERIFIED;
+  process.env.ADS_COST_GATE_VERIFIED='1';
+  try{
+    await pollExperiment(store,api,1,{resetMinute:safeResetMinute()});
+    assert.equal(edit.ad_id,444);
+    assert.equal(edit.daily_budget_limit,0.05);
+    assert.equal(edit.is_paused,false);
+    assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'testing');
+  }finally{
+    if(before===undefined)delete process.env.ADS_COST_GATE_VERIFIED;
+    else process.env.ADS_COST_GATE_VERIFIED=before;
+    store.close();
+  }
+});
+
+test('a disabled cost gate blocks both test continuation and winner graduation',async()=>{
+  const store=openStore(':memory:');seed(store);
+  store.db.prepare(`UPDATE projects SET approved_spend=2 WHERE id=1`).run();
+  store.db.prepare(`UPDATE experiments SET status='paused' WHERE id=1`).run();
+  store.db.prepare(`INSERT INTO decisions(id,project_id,experiment_id,kind,payload_json,status)
+    VALUES (20,1,1,'continue','{}','approved'),(21,1,1,'graduate','{}','approved')`).run();
+  const before=process.env.ADS_COST_GATE_VERIFIED;
+  process.env.ADS_COST_GATE_VERIFIED='0';
+  let calls=0;
+  const api={live:true,call:async()=>{calls++;return true;}};
+  try{
+    for(const id of [20,21])await assert.rejects(
+      executeDecision(store,api,id,{resetMinute:safeResetMinute()}),/cost capability gate/);
+    assert.equal(calls,0);
+    assert.equal(store.db.prepare(`SELECT COUNT(*) n FROM decisions WHERE status='approved'`).get().n,2);
+  }finally{
+    if(before===undefined)delete process.env.ADS_COST_GATE_VERIFIED;
+    else process.env.ADS_COST_GATE_VERIFIED=before;
+    store.close();
+  }
 });
 
 test('recharge after an interrupted resume allocates only one extra TON',async()=>{

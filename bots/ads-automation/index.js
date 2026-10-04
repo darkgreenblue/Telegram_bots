@@ -10,6 +10,9 @@ import { queueResearch } from './brain.js';
 import { shortlist } from './discovery.js';
 import { syncProductStats } from './product.js';
 
+if(!process.env.ADS_ADMIN_BOT_TOKEN)throw new Error('ADS_ADMIN_BOT_TOKEN خالی است');
+if(!Number.isSafeInteger(Number(process.env.ADS_ADMIN_ID)))throw new Error('ADS_ADMIN_ID نامعتبر است');
+
 const store=openStore(),db=store.db,owner=randomUUID();
 const ownerId=Number(process.env.ADS_ADMIN_ID),resetMinute=Number(process.env.ADS_DAILY_RESET_UTC_MINUTE);
 const api=new AdsApi({token:process.env.ADS_API_TOKEN,store,live:process.env.ADS_LIVE_ENABLED==='1'});

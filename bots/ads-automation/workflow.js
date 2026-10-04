@@ -133,6 +133,7 @@ async function recordRound(store,ex,ad,reason){
 }
 
 async function extendLease(store,api,ex,ad,resetMinute){
+  safetyGate(row(store.db,'projects',ex.project_id),api,resetMinute);
   const end=leaseEnd(now(),resetMinute);
   const remaining=remainingTest(ad.spent_budget,ex.start_spent);
   if(remaining<=0)throw new Error('no test share remains');
@@ -230,6 +231,7 @@ export async function executeDecision(store,api,decisionId,config){
   const ex=d.experiment_id?row(store.db,'experiments',d.experiment_id):null;
   const project=row(store.db,'projects',d.project_id);
   if(['create','graduate','recharge','continue'].includes(d.kind)&&project.status!=='ready')throw new Error('project is not ready for spending');
+  if(['graduate','continue'].includes(d.kind))safetyGate(project,api,config.resetMinute);
   if(d.kind==='create')await createApproved(store,api,ex.id,config);
   else if(d.kind==='delete'){
     if(ex.status!=='deleted'){
