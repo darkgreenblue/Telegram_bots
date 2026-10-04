@@ -1429,23 +1429,33 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
   const kindsSrc2 = (CODE.match(/const CHAT_MEDIA_KINDS = \[[\s\S]*?\];/) || [''])[0];
   const kindFn2 = (CODE.match(/const chatMediaKind = [^\n]*;/) || [''])[0];
   const realKind = new Function(`${kindsSrc2}\n${kindFn2}\nreturn chatMediaKind;`)();
-  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting', msg = null, textOnly = true, luckyOpen = false }) => {
-    const seen = { next: 0, guard: 0, left: 0, intent: null, media: null };
+  /* ⌨️ v3.151.0: میدل‌ور حالا `typedMenuLabel` را صدا می‌زند که از `allLabels`، `menuLabelLikeIn`
+   * و `newReadingAskIn`ِ **واقعیِ** chat-core می‌خواند؛ هارنس همان‌ها را تزریق می‌کند تا تطبیقِ
+   * برچسبِ تایپی روی کدِ محصول سنجیده شود، نه روی یک کپی. `typedFlag` پرچمِ رول‌بک را در سورسِ
+   * بریده‌شده عوض می‌کند تا هر دو حالت اجرا شوند. */
+  const ADMIN_ONLY = { resetTest: '🔄 ریست حساب (ادمین)', cardsAdmin: '💳 کارت‌ها' };
+  const runMw = ({ cb = null, txt = null, balance = 0, guard = true, state = 'chatting', msg = null, textOnly = true, luckyOpen = false, typedFlag = true }) => {
+    const seen = { next: 0, guard: 0, left: 0, intent: null, media: null, tracked: [] };
+    const src = typedFlag ? mwSrc : mwSrc.replace('const CHAT_TYPED_LABEL_GUARD = true;', 'const CHAT_TYPED_LABEL_GUARD = false;');
     const fn = new Function('bot', 'getState', 'getSession', 'getBalance', 'KB_LABELS',
       'WALLET_LABELS', 'LUCKY_LABELS', 'INVITE_LABELS', 'DAILY_LABELS', 'INTENT',
       'SETTINGS_ENABLED', 'CHAT_AFTER_READING',
       'CHAT_STATE_GUARD', 'chatOpenGuard', 'leaveChat', 'logErr', 'L', 'seen',
       'CHAT_TEXT_ONLY', 'chatMediaKind', 'chatRejectMedia', 'openLuckyHand',
-      `${mwSrc}\nreturn bot.__mw;`);
+      'allLabels', 'menuLabelLikeIn', 'newReadingAskIn', 'track', 'db',
+      `${src}\nreturn bot.__mw;`);
     const stubBot = { use: (h) => { stubBot.__mw = h; } };
     const mw = fn(stubBot, () => state, () => ({ chatReadingId: 9 }), () => balance,
-      new Set([...Object.values(LBL), LBL.support]), [LBL.wallet], [LBL.lucky], [LBL.invite],
+      new Set([...Object.values(LBL), ...Object.values(ADMIN_ONLY)]), [LBL.wallet], [LBL.lucky], [LBL.invite],
       [LBL.daily], INTENT_STUB, true,
       true, guard, async (_c, _u, it) => { seen.guard++; seen.intent = it ?? null; },
       () => { seen.left++; },
       () => {}, { support: { button: LBL.support }, buttons: { reading: LBL.reading, settings: LBL.settings } }, seen,
       textOnly, realKind, async (_c, _u, k) => { seen.media = k; },
-      () => (luckyOpen ? { d: 'today', n: 'x', p: [1] } : null));
+      () => (luckyOpen ? { d: 'today', n: 'x', p: [1] } : null),
+      (pick) => [pick({ support: { button: LBL.support }, buttons: ADMIN_ONLY })].filter(Boolean),
+      chat.menuLabelLikeIn, chat.newReadingAskIn,
+      (_db, _u, ev, props) => { seen.tracked.push([ev, props]); }, {});
     return mw({ from: { id: 5 }, message: msg || (txt ? { text: txt } : undefined),
       callbackQuery: cb ? { data: cb } : undefined }, async () => { seen.next++; })
       .then(() => seen);
@@ -1515,6 +1525,37 @@ console.log('\n▶ ۱۹) گاردِ استیت و فلگِ بازگشت');
     const g = await runMw({ ...arg, balance: 5 });
     ok(g.next === 1 && g.guard === 0, `🔑 «${arg.txt}» هرگز گارد نمی‌شود (بند ۶ج ریشه)`);
   }
+
+  /* ⌨️ v3.151.0 — برچسبِ منوی **تایپ‌شده** وسطِ گفتگو همان گاردِ رایگانِ تپِ دکمه را می‌گیرد
+   * (تصمیمِ مالک ۱۴۰۵/۰۷/۱۲: «گارد باز بشه و نذاره کاربر از گفتگو خارج بشه مگر خودش»)، با نیتِ
+   * همان دکمه تا بعد از بستن به مقصدِ درست برسد. هر ادعای منفی کنترلِ مثبت دارد (بند ۶ب-۲). */
+  ok(bool('CHAT_TYPED_LABEL_GUARD') === true, '⌨️ `CHAT_TYPED_LABEL_GUARD` روشن منتشر شده');
+  for (const [t, it] of [['کارت شانس', 'lucky'], ['تک کارت رایگان', 'daily'], ['تنظیمات', 'settings'],
+    ['دعوت دوستان', 'invite'], ['ذخایر الماس', 'wallet']]) {
+    const g = await runMw({ txt: t, balance: 5 });
+    ok(g.guard === 1 && g.next === 0 && g.intent === it, `⌨️ «${t}»ِ تایپی گارد می‌گیرد با نیتِ «${it}» (رایگان، نه سؤالِ پولی)`);
+  }
+  { const g = await runMw({ txt: 'کارت شانس', balance: 5 });
+    const ev = g.tracked.find(([e]) => e === 'chat_typed_label');
+    ok(!!ev && Object.keys(ev[1]).sort().join() === 'chars,reading_id' && ev[1].reading_id === 9,
+      '⌨️ رویدادِ `chat_typed_label` فقط شناسه‌ی فال و طولِ متن دارد، هرگز خودِ متن'); }
+  for (const t of ['کارت شانس امروز چی میگه', 'کارت دوم یعنی چی؟', 'الماس']) {
+    const g = await runMw({ txt: t, balance: 5 });
+    ok(g.next === 1 && g.guard === 0, `⚠️ کنترلِ مثبت: «${t}» سؤالِ واقعی است و همان مسیرِ پولیِ گفتگو را می‌رود`);
+  }
+  for (const t of ['پشتیبانی', 'کارت‌ها', 'ریست حساب']) {
+    const g = await runMw({ txt: t, balance: 5 });
+    ok(g.next === 1 && g.guard === 0, `⌨️ «${t}»ِ تایپی گارد نمی‌گیرد (پشتیبانی هرگز؛ برچسبِ فقط-ادمین را کاربر نمی‌بیند)`);
+  }
+  { const g = await runMw({ txt: 'فال بگیر', balance: 5 });
+    ok(g.next === 1 && g.guard === 0, '⌨️ «فال بگیر»ِ تایپی مسیرِ رایگانِ دقیق‌ترِ خودش (`newReadingAskIn`) را می‌رود'); }
+  ok((await runMw({ txt: 'کارت شانس', balance: 5, typedFlag: false })).next === 1,
+    '🔁 رول‌بک: `CHAT_TYPED_LABEL_GUARD=false` ⟵ همان رفتارِ قبلی (متنِ غیرِدقیق = سؤال)');
+  { const g = await runMw({ txt: 'کارت شانس', balance: 5, guard: false });
+    ok(g.next === 1 && g.guard === 0 && g.left === 0, '🔁 و با `CHAT_STATE_GUARD=false` هم (گاردِ تایپی تابعِ همان پرچم است)'); }
+  ok((await runMw({ txt: 'کارت شانس', state: 'idle' })).next === 1, '⚠️ بیرونِ گفتگو برچسبِ تایپی دست نمی‌خورد');
+  { const i = mwSrc.indexOf('typedMenuLabel(txt)'), j = mwSrc.indexOf("return next();   // سؤالِ گفتگو");
+    ok(i > 0 && j > 0 && i < j, '🔌 تطبیقِ برچسبِ تایپی **قبل از** عبورِ متنِ آزاد به مسیرِ پولی است'); }
 
   /* 🔁 کنترلِ مثبتِ رول‌بک (بند ۶ب-۲): با پرچمِ خاموش، **همان کد** دقیقاً رفتارِ
    * v3.87.0 را می‌دهد. بدونِ این، یک میدل‌ورِ همیشه-گارد هم همه‌ی ادعاهای بالا را

@@ -5120,12 +5120,36 @@ const chatEarnEntry = (txt, cb) => {
   if (!txt) return false;
   return WALLET_LABELS.includes(txt) || LUCKY_LABELS.includes(txt) || INVITE_LABELS.includes(txt);
 };
+/* ⌨️ v3.151.0 `CHAT_TYPED_LABEL_GUARD` (تصمیمِ مالک ۱۴۰۵/۰۷/۱۲): برچسبِ منویی که کاربر وسطِ
+ * گفتگو **تایپ** کرده («کارت شانس»، «تک کارت رایگان»، «تنظیمات») همان گاردِ رایگانِ تپِ دکمه را
+ * می‌گیرد («ادامه می‌دم / بستن گفتگو»، با نیتِ همان دکمه)، نه جوابِ پولیِ گفتگو. تطبیق همان
+ * `menuLabelLikeIn`ِ فیلترِ بازگشتِ بعد از شارژ است (تک‌منبع)، با سه استثنا:
+ *   • پشتیبانی هرگز گارد نمی‌شود (بند ۶ج ریشه) و برچسب‌های فقط-ادمین (ریست، کارت‌ها) را کاربرِ
+ *     عادی نمی‌بیند، پس «کارت‌ها»ی تایپیِ او نباید گارد بگیرد؛
+ *   • «فال بگیر» و هم‌خانواده‌اش (`newReadingAskIn`) مسیرِ رایگانِ دقیق‌ترِ خودشان را دارند.
+ * رول‌بک: `false` ⟵ دقیقاً رفتارِ قبلی (متنِ غیرِدقیق، سؤالِ پولی). */
+const CHAT_TYPED_LABEL_GUARD = true;
+const CHAT_TYPED_SKIP = new Set([
+  ...allLabels(l => l.support?.button), ...allLabels(l => l.buttons.resetTest),
+  ...allLabels(l => l.buttons.cardsAdmin), '🔄 ریست ربات (تست)',
+].filter(Boolean));
+const CHAT_TYPED_LABELS = [...KB_LABELS].filter(l => !CHAT_TYPED_SKIP.has(l));
+function typedMenuLabel(txt) {
+  if (!CHAT_TYPED_LABEL_GUARD || !CHAT_STATE_GUARD || !txt || KB_LABELS.has(txt) || txt.startsWith('/')) return '';
+  if (newReadingAskIn(txt)) return '';
+  return CHAT_TYPED_LABELS.find(l => menuLabelLikeIn(txt, [l])) || '';
+}
 bot.use(async (ctx, next) => {
   try {
     const uid = ctx.from?.id;
     if (!uid || !CHAT_AFTER_READING || getState(uid) !== 'chatting') return next();
     const txt = ctx.message?.text;
     const cb = ctx.callbackQuery?.data;
+    const typed = typedMenuLabel(txt);
+    if (typed) {
+      track(db, uid, 'chat_typed_label', { reading_id: getSession(uid)?.chatReadingId || 0, chars: txt.length });
+      await chatOpenGuard(ctx, uid, chatExitIntent(typed, null)); return;
+    }
     if (txt && !KB_LABELS.has(txt) && !txt.startsWith('/')) return next();   // سؤالِ گفتگو
     if (cb && CHAT_KEEP_CB.test(cb)) return next();         // اکشنِ خودِ گفتگو
     // 📎 رسانه‌ی غیرمتنی همین‌جا تمام می‌شود و به هیچ فلوی دیگری (رسید و…) نمی‌رسد.
