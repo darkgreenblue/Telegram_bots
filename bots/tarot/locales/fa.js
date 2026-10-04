@@ -1678,6 +1678,9 @@ ${spread.decisive ? decisiveBlock(spread) : ''}
     ].filter(Boolean).join('\n'),
     // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
     chatFormatTail: `یادآوری: خروجیِ تو، از همان جوابِ اول، فقط همان یک JSON است با کلیدهای answer، offer، wants_new_reading، needs_support، follow_up، wants_end؛ پیشنهاد در offer، نه در answer.`,
+    // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو؛ فقط دُمِ آخرین پیامِ user (نه system، تا کش بماند).
+    chatOfferLedger: (items) =>
+      `(فقط برای خودت، نشانش نده) پیشنهادهای قبلیِ همین گفتگو: ${items.map((x) => `«${x.text}»`).join(' · ')}\nهیچ‌کدام را دوباره پیشنهاد نده، حتی با کلماتِ دیگر.`,
     feedbackContext: (ctx) => JSON.stringify({
       'سؤال تأییدی که پرسیدی': ctx.confirmationQuestion,
       'پاسخ مخاطب': ctx.userAnswer,

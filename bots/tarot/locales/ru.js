@@ -1297,6 +1297,9 @@ ${spread.decisive ? decisiveBlock(spread) : ''}
   ].filter(Boolean).join('\n'),
   // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
   chatFormatTail: `Напоминание: с самого первого ответа твой вывод это только тот один JSON с ключами answer, offer, wants_new_reading, needs_support, follow_up, wants_end; предложение в offer, а не в answer.`,
+  // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو (شکلِ برابر با fa؛ گفتگو فعلاً فقط fa است).
+  chatOfferLedger: (items) =>
+    `(Только для тебя, не показывай) Прежние предложения в этом разговоре: ${items.map((x) => `«${x.text}»`).join(' · ')}\nНе предлагай ничего из этого снова, даже другими словами.`,
   feedbackContext: (ctx) => JSON.stringify({
     'уточняющий вопрос, который ты задал': ctx.confirmationQuestion,
     'ответ человека': ctx.userAnswer,

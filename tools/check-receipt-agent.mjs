@@ -193,7 +193,7 @@ await fns.reversePayment(12);
 const u2 = db.prepare('SELECT * FROM users WHERE telegram_id=2').get();
 ok(u2.balance === 0, 'کسر کفِ صفر دارد');
 ok(u2.pay_distrust === 1, 'کنترلِ مثبت: «پیامکش نیومده» همچنان بی‌اعتماد می‌کند');
-// v3.148.0: هر برگشتِ پرداخت وضعیتِ «مشکوک» را تعیین‌تکلیف می‌کند (مشکوک هرگز مشکوک نمی‌ماند).
+// v3.149.0: هر برگشتِ پرداخت وضعیتِ «مشکوک» را تعیین‌تکلیف می‌کند (مشکوک هرگز مشکوک نمی‌ماند).
 ok(settled.includes(1) && settled.includes(2), 'clawbackApproved بعد از برگشت settleSuspect را صدا می‌زند');
 db.prepare('UPDATE users SET pay_suspect=1 WHERE telegram_id=2').run();
 db.prepare("INSERT INTO payments (id, user_id, amount, original_amount, pkg, status) VALUES (13, 2, 15000, 5, 'basic', 'approved')").run();

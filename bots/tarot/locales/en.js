@@ -1373,6 +1373,9 @@ Add one more key to the same JSON: "question_text" with the exact text of the qu
     ].filter(Boolean).join('\n'),
     // یادآوریِ قالب، **بعد از** بلوکِ کانتکستِ فال تا نزدیکِ نقطه‌ی تولید باشد.
     chatFormatTail: `Reminder: from the very first answer, your output is only that one JSON with the keys answer, offer, wants_new_reading, needs_support, follow_up, wants_end; the offer goes in offer, not in answer.`,
+    // 📒 v3.148.0: دفترِ پیشنهادهای همین گفتگو (شکلِ برابر با fa؛ گفتگو فعلاً فقط fa است).
+    chatOfferLedger: (items) =>
+      `(For you only, do not show it) Earlier offers in this conversation: ${items.map((x) => `"${x.text}"`).join(' · ')}\nDo not offer any of them again, not even in other words.`,
     feedbackContext: (ctx) => JSON.stringify({
       'the check-in question you asked': ctx.confirmationQuestion,
       'the person answer': ctx.userAnswer,

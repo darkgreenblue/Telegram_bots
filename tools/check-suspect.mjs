@@ -294,7 +294,7 @@ console.log('\n▶ هندلرهای susyes/susno');
 
   ok(/approvePayment\(pid\)/.test(yes), 'susyes از approvePayment همیشگی می‌خواند (کپیِ منطقِ پول نیست)');
   ok(/afterApproval\(p\.user_id\)/.test(yes), 'و فالِ رزروشده را مثل مسیرِ عادیِ approve ادامه می‌دهد');
-  // v3.148.0: برداشتنِ تگ دیگر کارِ susyes نیست؛ approvePayment خودش settleSuspect را صدا می‌زند
+  // v3.149.0: برداشتنِ تگ دیگر کارِ susyes نیست؛ approvePayment خودش settleSuspect را صدا می‌زند
   // (تک‌نقطه برای همه‌ی مسیرهای تأیید/رد)، پس susyes نباید کپیِ موازیِ آن را داشته باشد.
   ok(!/clearSuspect\.run/.test(yes), 'susyes کپیِ موازیِ برداشتنِ تگ ندارد (کارِ approvePayment است)');
   const ap = bodyOf('function approvePayment(', '\n}\n');
@@ -308,7 +308,7 @@ console.log('\n▶ هندلرهای susyes/susno');
     'و برچسبِ موقتِ مشکوک را برمی‌دارد (جایش را برچسبِ دائمیِ بی‌اعتماد گرفته)');
 }
 
-/* ═══ ۶ب) v3.148.0 — «مشکوک هرگز مشکوک نمی‌ماند»: settleSuspect و runReceipt روی SQLite ═══ */
+/* ═══ ۶ب) v3.149.0 — «مشکوک هرگز مشکوک نمی‌ماند»: settleSuspect و runReceipt روی SQLite ═══ */
 console.log('\n▶ settleSuspect: تگ فقط تا وقتی رسیدی روی میز است');
 {
   const fnSrc = bodyOf('function settleSuspect(uid) {', '\n}');
