@@ -18,6 +18,8 @@ module.exports = {
     { name: 'tarot-es',      cwd: 'bots/tarot',          script: 'index.js', env: { ENV_FILE: '.env.es' } },
     // پادکستِ آموزشیِ روزانه‌ی شخصیِ مالک (فقط ادمین؛ Notion → LLM → TTS → تلگرام)
     { name: 'daily-brief',   cwd: 'bots/daily-brief',    script: 'index.js' },
+    // آزمایش اتوماسیون Ads: توکن ادمین دارد، اما خرج و API تبلیغات تا گیت حساب غیرفعال‌اند.
+    { name: 'ads-automation', cwd: 'bots/ads-automation', script: 'index.js' },
     // داشبورد ادمین — ربات نیست ولی همین زنجیره‌ی deploy/backup/ops را استفاده می‌کند؛
     // فقط روی 127.0.0.1:8787 گوش می‌دهد و از Cloudflare Tunnel در دسترس است (deploy.yml)
     { name: 'dashboard',     cwd: 'bots/dashboard',      script: 'index.js' },
