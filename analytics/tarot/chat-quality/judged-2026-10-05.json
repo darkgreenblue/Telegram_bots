@@ -1,0 +1,2224 @@
+{
+ "4306": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4398": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4308": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 0
+ },
+ "4310": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4312": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4314": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4316": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4318": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4320": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4324": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4327": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4329": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4333": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4337": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4339": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4341": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4343": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4345": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4352": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4355": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4357": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4364": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4362": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4371": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4373": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4376": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4379": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4381": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4384": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4392": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4387": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4390": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4393": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4396": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4400": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4402": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4404": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4407": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4410": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4415": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4417": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4420": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 0
+ },
+ "4422": {
+  "answer": 1,
+  "new": 1,
+  "safe": 0,
+  "offer": 1,
+  "button": 1
+ },
+ "4425": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4427": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4430": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4432": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4434": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4436": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4439": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4441": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4444": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4446": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4449": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4453": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4451": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4455": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4458": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4462": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4464": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4466": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4470": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4473": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4489": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4491": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4493": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 0
+ },
+ "4495": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4497": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4499": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4501": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4476": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4480": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4483": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4485": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4488": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4503": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4505": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4511": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4513": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4516": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4518": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4520": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4522": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4525": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4528": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4530": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4532": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4534": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4543": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4537": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4540": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4542": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4545": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4551": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4554": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4556": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4558": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 0
+ },
+ "4560": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4562": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4672": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4683": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4564": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4568": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4572": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4574": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4576": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4582": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 0
+ },
+ "4586": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4588": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4578": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4581": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4590": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4595": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4592": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4708": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4598": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4600": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4603": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4605": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4608": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4610": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4612": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4614": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4617": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4619": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4621": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4632": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4635": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4637": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4639": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4623": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4629": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4651": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4653": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4658": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4660": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4655": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4663": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4665": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4668": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4671": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4675": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4677": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4679": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4681": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4685": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4687": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4689": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4693": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4691": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4695": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4697": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4699": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4702": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4704": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4709": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4706": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4711": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4719": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4715": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4717": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4721": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4723": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4725": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4738": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4742": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4728": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4734": {
+  "answer": 1,
+  "new": 1,
+  "safe": 0,
+  "offer": 1,
+  "button": 1
+ },
+ "4736": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4744": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4750": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4753": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4757": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4755": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4942": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4760": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4763": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4766": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4769": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4771": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4774": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4776": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4778": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4781": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4783": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4785": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4787": {
+  "answer": 0,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4789": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4791": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4796": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4793": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4797": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4799": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4801": {
+  "answer": 1,
+  "new": 1,
+  "safe": 0,
+  "offer": 1,
+  "button": 1
+ },
+ "4803": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4807": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4813": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4805": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4809": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4811": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4818": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4820": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4822": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4825": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4827": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4829": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4833": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4837": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4842": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4845": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4847": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4851": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4853": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4855": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4859": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4858": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4861": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4864": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4866": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4868": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4870": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4872": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4874": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4877": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4883": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4885": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4887": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4890": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4892": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4895": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4898": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4900": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4902": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4904": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4907": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4913": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4915": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4919": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4922": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4936": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4939": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4944": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4547": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4526": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4359": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4923": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4925": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4570": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4916": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4346": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4642": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4816": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4506": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4737": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4740": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4746": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4566": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4456": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4548": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4447": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4358": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4583": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4367": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4369": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4764": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4730": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4423": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4405": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4940": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4926": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4928": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4641": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4644": {
+  "answer": 1,
+  "new": 0,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4646": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4650": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4908": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4910": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4606": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4412": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4428": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4718": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4849": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4879": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4930": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4932": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4334": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4836": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4840": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4917": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4673": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4941": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4347": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4349": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4331": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4468": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4830": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4834": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4731": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4630": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4377": {
+  "answer": 0,
+  "new": 0,
+  "safe": 1,
+  "offer": 0,
+  "button": 1
+ },
+ "4937": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4627": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4647": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "4767": {
+  "answer": 1,
+  "new": 1,
+  "safe": 1,
+  "offer": 1,
+  "button": 1
+ },
+ "_pushback": [
+  4315,
+  4323,
+  4370,
+  4375,
+  4406,
+  4448,
+  4463,
+  4492,
+  4555,
+  4620,
+  4670,
+  4674,
+  4754,
+  4759,
+  4773,
+  4788,
+  4828,
+  4831,
+  4850
+ ],
+ "_offer_contradiction_hard": [
+  4586,
+  4760
+ ],
+ "_offer_contradiction_soft": [
+  4673,
+  4717,
+  4919
+ ],
+ "carryover_ids_not_scored": [
+  4331,
+  4334,
+  4346,
+  4347,
+  4349,
+  4358,
+  4359,
+  4367,
+  4369,
+  4377,
+  4405,
+  4412,
+  4423,
+  4428,
+  4447,
+  4456,
+  4468,
+  4506,
+  4526,
+  4547,
+  4548,
+  4566,
+  4570,
+  4583,
+  4606,
+  4627,
+  4630,
+  4641,
+  4642,
+  4644,
+  4646,
+  4647,
+  4650,
+  4673,
+  4718,
+  4730,
+  4731,
+  4737,
+  4740,
+  4746,
+  4764,
+  4767,
+  4816,
+  4830,
+  4834,
+  4836,
+  4840,
+  4849,
+  4879,
+  4908,
+  4910,
+  4916,
+  4917,
+  4923,
+  4925,
+  4926,
+  4928,
+  4930,
+  4932,
+  4937,
+  4940,
+  4941
+ ]
+}
