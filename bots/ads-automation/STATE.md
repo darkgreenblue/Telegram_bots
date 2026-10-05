@@ -19,12 +19,15 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Project 1 (`tarot-en-global-2026`) registered in calibration with 20 research seeds. No live experiments created.
 - Product scope `tarot-intl@en` resolves to the existing destination. Per-version attribution bridge is implemented; real attribution round trip remains to be checked.
 - Admin bot: `@AliAdsOpsControlBot`. Server owns polling; no competing local poller is authorized.
-- Latest local suite before this checkpoint: 24 tests passed. A fresh run is in progress.
+- Latest local suite: 29 tests passed; all 22 selected repository CI checks passed.
+- Research job 1 completed through the actual subscription-backed Codex/SSH round trip. The store now has 39 candidates and 20 strategy jobs.
+- Local worker installed as `org.alireza.telegram-ads-brain` in `~/Library/LaunchAgents/`; observed running and leasing strategy job 2. Logs: `data/brain-logs/`. It processes brain jobs only, never polls the admin bot.
+- PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Merge and server verification are pending.
 
 ## Remaining acceptance work
 
 1. Confirm current server SHA, PM2 stability and bot status after deployment.
-2. Execute queued research through local Codex, then strategy/copy/banner jobs. Install persistent local worker only after that round trip passes.
+2. Verify strategy/copy/banner stages from the installed local worker; the research round trip and persistent worker startup passed.
 3. Verify product link creation and late-conversion reports without Ads spend.
 4. Configure automatic Sheets credentials and preserve existing manual discovery rows before enabling mirror writes.
 5. Exercise admin reply/image QA and correction flow with real image input.
@@ -41,5 +44,5 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 ## Current working copy
 
 - Managed worktree: `/Users/alireza/.codex/worktrees/telegram-ads-automation/Telegram_bots`.
-- Branch: `codex/ads-sqlite-deploy`. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending.
+- Branch: `codex/ads-sqlite-deploy`. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending. Server native probes (SQLite query, sharp encode, mtcute import) passed and the verified installation fingerprint was recorded for reuse.
 - User's original dirty checkout must remain untouched.
