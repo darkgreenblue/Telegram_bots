@@ -6,14 +6,16 @@ import os
 import re
 import sys
 import uuid
+from datetime import datetime, time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from notebook import InputValidationError
+from daily import NotionLessons, TEHRAN, dated_session, make_session, retry_due, retry_later, send_due, start_due, tehran_now
 from store import Store
 from studio import KIND_LABELS, KINDS, STEPS, output_path
 
@@ -22,6 +24,8 @@ load_dotenv(ROOT / ".env")
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
 PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "notebook-podcast")
+DAILY_BRIEF_TOKEN = os.getenv("DAILY_BRIEF_BOT_TOKEN", "")
+DAILY_NOTION_TOKEN = os.getenv("DAILY_BRIEF_NOTION_TOKEN", "")
 DATA = ROOT / "data"
 MAX_FILE = 20 * 1024 * 1024
 MAX_AUDIO = 50 * 1024 * 1024
@@ -443,13 +447,15 @@ async def on_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     owner = update.effective_user.id
-    session = store.latest_in_state(owner, "error_upload", "error_generate")
+    session = next((s for s in store.list(owner) if s["state"] in {"error_upload", "error_generate"} and not s.get("daily_date")), None)
     if not session:
         return
     await retry_session(owner, session, update.message, context.application)
 
 
 async def retry_session(owner: int, session: dict, message, app: Application) -> None:
+    if session.get("daily_date"):
+        return  # Daily requests retry automatically in the scheduler.
     if store.open_count(owner) >= MAX_REQUESTS:
         await message.reply_text("سه درخواست باز داری. پس از پایان یکی از آن‌ها دوباره تلاش کن.")
         return
@@ -472,60 +478,162 @@ def launch_job(owner: int, batch_id: str, app: Application) -> None:
     jobs[batch_id] = task
 
 
+async def daily_send_message(owner: int, message: str) -> None:
+    request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=60)
+    async with Bot(DAILY_BRIEF_TOKEN, request=request) as daily_bot:
+        await daily_bot.send_message(owner, message)
+
+
+async def daily_send_audio(owner: int, stream, filename: str, caption: str) -> None:
+    request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=300)
+    async with Bot(DAILY_BRIEF_TOKEN, request=request) as daily_bot:
+        await daily_bot.send_audio(owner, stream, filename=filename, caption=caption)
+
+
+async def daily_tick(app: Application) -> None:
+    if not DAILY_BRIEF_TOKEN or not DAILY_NOTION_TOKEN:
+        return
+    now = tehran_now()
+    if not start_due(now):
+        return
+    owner = min(OWNER_IDS)
+    date = now.date().isoformat()
+    session = dated_session(store.list(owner), date)
+    if session and session["state"] in {"done", "daily_missing_sent"}:
+        return
+    if not session or session["state"] in {"daily_missing_pending", "daily_lookup_error"}:
+        if session and not retry_due(session, now):
+            return
+        try:
+            lesson = await NotionLessons(DAILY_NOTION_TOKEN).lesson_for_date(date)
+        except Exception as exc:
+            LOG.error("Daily Notion lookup failed: %s", type(exc).__name__)
+            session = session or {"batch_id": uuid.uuid4().hex, "daily_date": date, "inputs": []}
+            session["state"] = "daily_lookup_error"
+            retry_later(session, now)
+            save(owner, session)
+            if send_due(date, now) and not session.get("daily_notified"):
+                await daily_send_message(owner, f"دریافت محتوای آموزشی تاریخ {date} از نوشن ناموفق بود. دوباره تلاش می‌کنم.")
+                session["daily_notified"] = True
+                save(owner, session)
+            return
+        if lesson is None:
+            session = session or {"batch_id": uuid.uuid4().hex, "daily_date": date, "inputs": []}
+            session["state"] = "daily_missing_pending"
+            session["daily_retry_at"] = datetime.combine(now.date(), time(6, 30), TEHRAN).timestamp()
+            save(owner, session)
+            if send_due(date, now):
+                await daily_send_message(owner, "امروز محتوای آموزشی نداریم!")
+                session["state"] = "daily_missing_sent"
+                save(owner, session)
+            return
+        session = make_session(owner, session["batch_id"] if session else uuid.uuid4().hex, date, lesson, DATA)
+        save(owner, session)
+    if session["state"] in {"error_upload", "error_generate"}:
+        if send_due(date, now) and not session.get("daily_notified"):
+            await daily_send_message(owner, f"ساخت محتوای آموزشی تاریخ {date} با خطا روبه‌رو شد. دوباره تلاش می‌کنم.")
+            session["daily_notified"] = True
+            save(owner, session)
+        if not retry_due(session, now):
+            return
+        session["state"] = "uploading" if session["state"] == "error_upload" else "generating"
+        save(owner, session)
+    if session["state"] == "daily_ready" and send_due(date, now):
+        session["state"] = "sending"
+        save(owner, session)
+    if session["state"] == "daily_pending":
+        session["state"] = "uploading"
+        save(owner, session)
+    if session["state"] in {"uploading", "generating", "sending"} and len(busy_slots) < MAX_REQUESTS:
+        launch_job(owner, session["batch_id"], app)
+
+
+async def daily_loop(app: Application) -> None:
+    while True:
+        try:
+            await daily_tick(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            LOG.error("Daily scheduler failed: %s", type(exc).__name__)
+        await asyncio.sleep(15)
+
+
 async def run_job(owner: int, batch_id: str, app: Application) -> None:
     session = store.get(owner, batch_id)
     if not session:
         return
     slot = None
     try:
-        async with slot_lock:
-            slot = next((n for n in range(MAX_REQUESTS) if n not in busy_slots), None)
+        while slot is None:
+            async with slot_lock:
+                slot = next((n for n in range(MAX_REQUESTS) if n not in busy_slots), None)
+                if slot is not None:
+                    busy_slots.add(slot)
             if slot is None:
-                raise RuntimeError("No free proxy slot")
-            busy_slots.add(slot)
+                if not session.get("daily_date"):
+                    raise RuntimeError("No free proxy slot")
+                await asyncio.sleep(2)
         proxy_url = f"http://127.0.0.1:{18770 + slot}"
         env = os.environ.copy()
         env.update({key: proxy_url for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")})
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(ROOT / "job_worker.py"), str(owner), batch_id, session["state"], str(slot),
-            env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        )
-        code = await proc.wait()
+        async def worker(phase: str) -> None:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(ROOT / "job_worker.py"), str(owner), batch_id, phase, str(slot),
+                env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            code = await proc.wait()
+            if code == 2:
+                current = store.get(owner, batch_id) or session
+                raise InputValidationError(current.get("worker_error", "ورودی نامعتبر است"))
+            if code != 0:
+                raise RuntimeError(f"Worker exited with code {code}")
+
+        await worker(session["state"])
         session = store.get(owner, batch_id) or session
-        if code == 2:
-            raise InputValidationError(session.get("worker_error", "ورودی نامعتبر است"))
-        if code != 0:
-            raise RuntimeError(f"Worker exited with code {code}")
         if session["state"] == "uploading":
             session["source_ids"] = notebook_sources(session)
-            await app.bot.send_message(
-                owner,
-                f"همهٔ ورودی‌های {label(session)} وارد نوت‌بوک «{session['notebook_title']}» شدند. نوع خروجی را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
-                reply_markup=output_buttons(batch_id),
-            )
-            session["state"] = "output_type"
-            save(owner, session)
-            return
+            if session.get("daily_date"):
+                session["state"] = "generating"
+                save(owner, session)
+                await worker("generating")
+                session = store.get(owner, batch_id) or session
+            else:
+                await app.bot.send_message(
+                    owner,
+                    f"همهٔ ورودی‌های {label(session)} وارد نوت‌بوک «{session['notebook_title']}» شدند. نوع خروجی را انتخاب کن:\nhttps://notebooklm.google.com/notebook/{session['notebook_id']}",
+                    reply_markup=output_buttons(batch_id),
+                )
+                session["state"] = "output_type"
+                save(owner, session)
+                return
         if session["state"] in {"generating", "sending"}:
             kind = session.get("output_type", "audio")
             output = output_path(session) if session.get("output_type") else Path(session["work_dir"]) / f"{batch_id}.m4a"
+            if session.get("daily_date") and not session.get("daily_send_now") and not send_due(session["daily_date"]):
+                session["state"] = "daily_ready"
+                save(owner, session)
+                return
             if session["state"] == "generating":
                 session["state"] = "sending"
                 save(owner, session)
             if output.stat().st_size > MAX_AUDIO:
+                target_bot = app.bot if not session.get("daily_date") else None
+                if target_bot:
+                    await target_bot.send_message(owner, f"{KIND_LABELS[kind]} {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. می‌توانی آن را در نوت‌بوک خودت ببینی: https://notebooklm.google.com/notebook/{session['notebook_id']}")
+                else:
+                    await daily_send_message(owner, f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}\nفایل از سقف ۵۰ مگابایت تلگرام بزرگ‌تر است: https://notebooklm.google.com/notebook/{session['notebook_id']}")
                 session["state"] = "done"
                 save(owner, session)
                 output.unlink(missing_ok=True)
-                await app.bot.send_message(
-                    owner,
-                    f"{KIND_LABELS[kind]} {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. "
-                    f"می‌توانی آن را در نوت‌بوک خودت ببینی: https://notebooklm.google.com/notebook/{session['notebook_id']}",
-                )
                 return
             with output.open("rb") as stream:
                 filename = f"{kind}-{batch_id[:8]}{output.suffix}"
-                caption = f"{KIND_LABELS[kind]} از «{session['notebook_title']}» {label(session)}"
-                if kind == "audio":
+                caption = (f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}" if session.get("daily_date")
+                           else f"{KIND_LABELS[kind]} از «{session['notebook_title']}» {label(session)}")
+                if session.get("daily_date"):
+                    await daily_send_audio(owner, stream, filename, caption)
+                elif kind == "audio":
                     await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
                 elif kind in {"video", "cinematic"}:
                     await app.bot.send_video(owner, stream, filename=filename, caption=caption)
@@ -539,7 +647,11 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
         session = store.get(owner, batch_id) or session
         failed_upload = session["state"] == "uploading"
         session["state"] = "error_upload" if failed_upload else "error_generate"
+        if session.get("daily_date"):
+            retry_later(session)
         save(owner, session)
+        if session.get("daily_date"):
+            return
         if isinstance(exc, InputValidationError):
             detail = str(exc)
         elif failed_upload:
@@ -609,6 +721,10 @@ async def post_init(app: Application) -> None:
                 sent = await app.bot.send_message(owner, f"کد زبان {label(session)} را در پاسخ به همین پیام بفرست؛ مثلاً tr یا ar.")
                 session["settings_message_id"] = sent.message_id
                 save(owner, session)
+    if DAILY_BRIEF_TOKEN and DAILY_NOTION_TOKEN:
+        app.create_task(daily_loop(app))
+    else:
+        LOG.warning("Daily Brief scheduler disabled: missing bot or Notion token")
 
 
 def main() -> None:

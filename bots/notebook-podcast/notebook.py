@@ -75,7 +75,7 @@ async def _upload_once(session: dict, save, download_file, profile: str) -> None
                 )
                 source = known or await client.sources.add_url(nb_id, item["value"], wait=True)
             elif item["kind"] == "text":
-                title = f"Telegram text {session['batch_id'][:8]}-{index + 1}"
+                title = item.get("title") or f"Telegram text {session['batch_id'][:8]}-{index + 1}"
                 known = next(
                     (s for s in await client.sources.list(nb_id) if s.title == title), None
                 )
