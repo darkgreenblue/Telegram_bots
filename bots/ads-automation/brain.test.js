@@ -41,3 +41,19 @@ test('research output uses a strict schema and preserves validated target eviden
     /target must be an object/);
   store.close();
 });
+
+test('research accepts HTTPS homepages but rejects credentials and unsafe URL schemes',()=>{
+  const store=openStore(':memory:');
+  try{
+    store.db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context)
+      VALUES (1,'pilot','Pilot','tarot-intl@en','https://t.me/examplebot','Global','en','test')`).run();
+    const id=addJob(store.db,1,'research',{}),job=store.db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
+    const candidate={surface:'search',value:'tarot',target_json:'{}',hypothesis:'direct intent',source:'research',
+      evidence_urls:['https://example.com'],score:2};
+    applyBrainResult(store,job,{candidates:[candidate],assumptions:[]});
+    assert.deepEqual(JSON.parse(store.db.prepare('SELECT evidence_json FROM candidates').get().evidence_json),
+      [{type:'research-source',url:'https://example.com'}]);
+    for(const url of ['http://example.com','https://secret@example.com','javascript:alert(1)','not a URL'])
+      assert.throws(()=>applyBrainResult(store,job,{candidates:[{...candidate,evidence_urls:[url]}],assumptions:[]}),/invalid evidence URL/);
+  }finally{store.close();}
+});

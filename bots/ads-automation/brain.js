@@ -87,7 +87,11 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
       if(!target||typeof target!=='object'||Array.isArray(target))throw new Error('candidate target must be an object');
       if(['channels','bots'].includes(c.surface)&&!c.evidence_urls.some(url=>url.startsWith('https://t.me/')))
         throw new Error('public peer needs a direct Telegram evidence URL');
-      if(c.evidence_urls.some(url=>!/^https:\/\/[^\s/]+\/.+/.test(url)))throw new Error('invalid evidence URL');
+      for(const url of c.evidence_urls){
+        let parsed;try{parsed=new URL(url);}catch{throw new Error('invalid evidence URL');}
+        if(parsed.protocol!=='https:'||!parsed.hostname||parsed.username||parsed.password||/\s/.test(url))
+          throw new Error('invalid evidence URL');
+      }
       targetFor({...c,target});
       addCandidate(db,{projectId:p.id,...c,target,
         evidence:c.evidence_urls.map(url=>({type:'research-source',url}))});

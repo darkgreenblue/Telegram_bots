@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp,writeFile,readFile,rm } from 'node:fs/promises';
+import { mkdtemp,writeFile,readFile,rm,mkdir } from 'node:fs/promises';
 import { tmpdir,hostname } from 'node:os';
 import { resolve,join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +23,8 @@ function run(bin,args,stdin,cwd=process.cwd(),timeout=600000){
 }
 const remoteCommand=`cd ${remoteRoot}/bots/ads-automation && node jobs-cli.js`;
 const ssh=async(cmd,body)=>JSON.parse(await run('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=10',remote,`${remoteCommand} ${cmd}`],JSON.stringify(body)));
+const redact=value=>String(value).replace(/\b\d{7,}:[A-Za-z0-9_-]{20,}\b/g,'[redacted]');
+const log=(event,details={})=>process.stdout.write(`${JSON.stringify({at:new Date().toISOString(),event,...details})}\n`);
 
 function promptFor(job){
   const roles={
@@ -49,7 +51,12 @@ async function execute(job){
       const args=['exec','-s','read-only','--ephemeral','--output-schema',schema,'-o',output,'-'];
       if(image)args.splice(args.length-1,0,'-i',image);
       await run('codex',args,promptFor(job),resolve('.'));
-      return JSON.parse(await readFile(output,'utf8'));
+      const result=JSON.parse(await readFile(output,'utf8'));
+      if(job.kind==='research'){
+        for(const candidate of result.candidates||[])
+          candidate.evidence_urls=candidate.evidence_urls.map(url=>new URL(url).href);
+      }
+      return result;
     }
     if(provider==='claude'){
       const args=['-p','--output-format','json','--json-schema',JSON.stringify(job.schema),
@@ -66,11 +73,24 @@ async function execute(job){
 async function once(){
   const job=await ssh('lease',{owner});
   if(!job)return false;
-  try{const result=await execute(job);await ssh('submit',{owner,id:job.id,result});}
-  catch(e){await ssh('fail',{owner,id:job.id,error:e.message}).catch(()=>{});throw e;}
+  log('brain.job.leased',{jobId:job.id,kind:job.kind});
+  let result;
+  try{
+    result=await execute(job);
+    await ssh('submit',{owner,id:job.id,result});
+    log('brain.job.completed',{jobId:job.id,kind:job.kind});
+  }catch(e){
+    // Preserve rejected output for review; do not silently lose research evidence.
+    const folder=resolve('./data/brain-failures');await mkdir(folder,{recursive:true,mode:0o700});
+    const artifact=join(folder,`job-${job.id}-${randomUUID()}.json`);
+    await writeFile(artifact,JSON.stringify({jobId:job.id,kind:job.kind,error:redact(e.message),result},null,2),{mode:0o600});
+    await ssh('fail',{owner,id:job.id,error:redact(e.message)}).catch(()=>{});
+    log('brain.job.failed',{jobId:job.id,kind:job.kind,error:redact(e.message),artifact});
+    throw e;
+  }
   return true;
 }
 
 if(process.argv.includes('--watch')){
-  for(;;){try{await once();}catch(e){process.stderr.write(`${e.message}\n`);}await new Promise(r=>setTimeout(r,30000));}
+  for(;;){try{await once();}catch(e){log('brain.worker.error',{error:redact(e.message)});}await new Promise(r=>setTimeout(r,30000));}
 }else{await once();}
