@@ -3,6 +3,9 @@
 // One explicit placement and one attribution unit per experiment.
 const peer = (s) => /^@[A-Za-z0-9_]{5,32}$/.test(s);
 const nonempty = (s) => typeof s === 'string' && s.trim().length > 0;
+export const USER_FILTER_KEYS=['country_codes','location_ids','language_codes','topic_ids','intersect_topics',
+  'exclude_topic_ids','channel_ids','exclude_channel_ids','device','exclude_political_channels','political_channels_only'];
+export const USER_DEVICES=['ios','android','mobile','desktop'];
 
 export function targetFor(candidate) {
   const {surface,value} = candidate;
@@ -20,14 +23,12 @@ export function targetFor(candidate) {
     return {placement:'search_result',target:{type:'search',search_queries:[value.trim()]}};
   }
   if (surface === 'users') {
-    const allowed = ['country_codes','location_ids','language_codes','topic_ids','intersect_topics',
-      'exclude_topic_ids','channel_ids','exclude_channel_ids','device','exclude_political_channels','political_channels_only'];
-    if (Object.keys(spec).some(k=>!allowed.includes(k))) throw new Error('unsupported users filter');
+    if (Object.keys(spec).some(k=>!USER_FILTER_KEYS.includes(k))) throw new Error('unsupported users filter');
     if (!(spec.country_codes?.length || spec.location_ids?.length || spec.language_codes?.length || spec.topic_ids?.length || spec.channel_ids?.length)) throw new Error('users target needs a filter');
     if (spec.country_codes?.length > 8 || spec.language_codes?.length > 8 || spec.location_ids?.length > 20 || spec.topic_ids?.length > 20 || spec.channel_ids?.length > 100) throw new Error('users target limit');
     if (spec.location_ids?.length && spec.country_codes?.length !== 1) throw new Error('locations require one country');
     if (spec.political_channels_only && spec.exclude_political_channels) throw new Error('contradictory political filters');
-    if (spec.device && !['ios','android','mobile','desktop'].includes(spec.device)) throw new Error('unknown device');
+    if (spec.device && !USER_DEVICES.includes(spec.device)) throw new Error('unknown device');
     return {placement:'channel_post',target:{type:'users',...spec}};
   }
   throw new Error('unknown targeting surface');
