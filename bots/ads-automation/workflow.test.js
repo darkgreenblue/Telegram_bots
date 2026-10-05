@@ -16,6 +16,22 @@ const seed=store=>{
     VALUES (1,1,1,1,'unique',0.13,'bot_banner',444,'testing',unixepoch()-1000,0.05)`).run();
 };
 
+test('a matching account title without local create history cannot claim an old campaign',async()=>{
+  const store=openStore(':memory:');seed(store);
+  const previousGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';
+  try{
+    store.db.prepare("UPDATE experiments SET ad_id=NULL,status='draft',spend_authorized=0,tracking_code='FIXTURE' WHERE id=1").run();
+    store.db.prepare("INSERT INTO decisions(project_id,experiment_id,kind,payload_json,status) VALUES(1,1,'create','{}','approved')").run();
+    const api={live:true,getAccount:async()=>({currency:'TON',remaining_budget:20}),
+      findByTitle:async()=>({ad_id:999,title:'unique'}),call:async()=>assert.fail('cannot mutate existing campaign')};
+    await assert.rejects(createApproved(store,api,1,{resetMinute:safeResetMinute(),bridge:async()=>({username:'examplebot'})}),/unowned title collision/);
+    assert.equal(store.db.prepare('SELECT ad_id FROM experiments WHERE id=1').get().ad_id,null);
+  }finally{
+    if(previousGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=previousGate;
+    store.close();
+  }
+});
+
 test('uncertain create retries preserve the original provider deadline and financial reservation',async()=>{
   const store=openStore(':memory:');seed(store);
   const previousGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';

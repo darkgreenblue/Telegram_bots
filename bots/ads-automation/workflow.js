@@ -142,6 +142,7 @@ export async function createApproved(store,api,experimentId,{resetMinute,bridge=
   // A prior uncertain response can be reconciled by unique title before retry.
   const existing=await api.findByTitle(ex.title);
   const operation=db.prepare('SELECT * FROM operations WHERE op_key=?').get(`create-${ex.id}`);
+  if(existing&&!operation)throw new Error('unowned title collision: refuse to adopt an existing ad');
   if(operation){
     const previous=JSON.parse(operation.request_json);
     const {deactivate_date:previousEnd,...original}=previous;
