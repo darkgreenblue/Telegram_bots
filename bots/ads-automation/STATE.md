@@ -19,21 +19,21 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Project 1 (`tarot-en-global-2026`) registered in calibration with 20 research seeds. No live experiments created.
 - Product scope `tarot-intl@en` resolves to the existing destination. Per-version attribution bridge is implemented; real attribution round trip remains to be checked.
 - Admin bot: `@AliAdsOpsControlBot`. Server owns polling; no competing local poller is authorized.
-- Latest local suite: 29 tests passed; all 22 selected repository CI checks passed.
+- Latest local suite: 36 tests passed; all 22 selected repository CI checks passed.
 - Research job 1 completed through the actual subscription-backed Codex/SSH round trip. The store now has 39 candidates and 20 strategy jobs.
 - Local worker installed as `org.alireza.telegram-ads-brain` in `~/Library/LaunchAgents/`; observed running and leasing strategy job 2. Logs: `data/brain-logs/`. It processes brain jobs only, never polls the admin bot.
 - PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Server deployment passed. The actual `/status` handler delivered to the owner through Telegram without starting another poller.
 - Actual product `stats_all` bridge passed for `tarot-intl@en`: Stars unit, payment events supported, one existing attribution code. Creation/entry attribution still needs verification.
-- User approved creating a dedicated Google service account in `tg-voice2text-bot`, editor of only the Ads sheet, with its key on the VPS. Existing Cloud SDK scope set was verified before renewal. Google requires owner phone confirmation (Gmail on iPhone 13); authentication is pending that confirmation.
+- User approved creating a dedicated Google service account in `tg-voice2text-bot`, editor of only the Ads sheet, with its key on the VPS. Existing Cloud SDK scope set was verified before renewal. Owner phone authentication completed. Dedicated account `telegram-ads-mirror@tg-voice2text-bot.iam.gserviceaccount.com` was created without project IAM roles; only the specified spreadsheet was shared as writer. Ignored key installed with mode 600 locally and on VPS; a real Sheets metadata read with that key passed.
 - Existing manual Sheet rows were preserved as native duplicates: Archive Candidates 2026-10-05 (864660455), Archive Tests 2026-10-05 (491827409), Archive Insights 2026-10-05 (1808106150). Original three tabs remain first; sampled candidate values match their archived copy.
 - Ads account homepage loads, but navigating its visible Ads API menu to `/account/api` returns ERR_CONNECTION_RESET. No API token obtained; browser automation has not replaced the approved API route.
 
 ## Remaining acceptance work
 
-1. Reconfirm PM2 restart stability after the successful deployment. Server SHA and actual status-message delivery passed.
+1. Deploy and verify the startup fix: awaiting Telegraf.launch prevented every server cycle despite PM2 being online. runtime.js now runs polling and processing concurrently and drains them before closing SQLite. Confirm renewed worker lease and cycle.completed audit records on the server.
 2. Verify strategy/copy/banner stages from the installed local worker; the research round trip and persistent worker startup passed.
 3. Verify product link creation and late-conversion reports without Ads spend.
-4. Complete the approved Google service-account setup after owner phone authentication, share only the specified sheet and verify automatic mirroring. Manual discovery rows already have native archive copies.
+4. Verify real automatic mirroring after deploying atomic Sheet replacement and scoped credential configuration. Native archive copies preserve the previous manual rows; service-account authentication already passed.
 5. Exercise admin reply/image QA and correction flow with real image input.
 6. Obtain authorized Ads API access and conduct explicitly approved controlled account validation.
 
@@ -43,7 +43,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Exact provider-side 0.05 TON enforcement, actual daily reset, precision and delayed-statistics behavior are not yet account-verified.
 - Net product revenue cannot be claimed until per-code refunds are available.
 - Public-channel evidence is a hypothesis, not proof of Ads inventory availability or audience country.
-- Google Sheets exists but automatic server mirroring is not configured.
+- Google service account can read the correct sheet; server mirroring still awaits the pending runtime/config deployment and real write verification.
 
 ## Current working copy
 
