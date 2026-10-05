@@ -8,9 +8,11 @@
 // می‌کند (درسِ ثبت‌شده‌ی گافِ تیزر و `v4Text`). سنجه‌ی «قلاب» و سنجه‌ی «لنگر» دقیقاً
 // همان متنی را می‌بینند که به کاربر می‌رسد، چون از همین فایل می‌آیند.
 import { CARD_BY_KEY } from './cards.js';
+import { cardMentions } from './card-integrity.js';
 import { cardName, cardKeywords, positionName, spreadName, readText, noDash, parseJsonLoose } from './reading-core.js';
 
 import { langTable, DEFAULT_LANG, currentLang } from './locale-ctx.js';
+const ALL_CARD_KEYS = Object.keys(CARD_BY_KEY);
 
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
 
@@ -136,6 +138,32 @@ const cut = (s, n) => {
   const t = String(s == null ? '' : s).trim();
   return t.length <= n ? t : t.slice(0, n).trim();
 };
+
+/* ✂️ v3.150.0: برشِ خروجیِ **رو-به-کاربر** در مرزِ جمله، نه وسطِ واژه.
+ * 🐛 باگِ واقعی (بررسیِ روزانه‌ی ۱۴۰۵/۰۷/۱۲): جوابِ بلند با `cut` وسطِ جمله بریده می‌شد و کاربر
+ * «… فقط روی واقعیت‌هایی» را می‌دید و بعد خطِ پیشنهاد (۲ جوابِ واقعی، هر دو پولی).
+ * قاعده: آخرین پایانِ جمله (`.!؟?…` یا خطِ جدید) که دستِ‌کم در نیمه‌ی دومِ سقف باشد؛ اگر
+ * نبود، آخرین فاصله + «…». `cut` خام برای جاهایی می‌ماند که متن به کاربر نشان داده نمی‌شود.
+ * رول‌بک: `CHAT_CUT_SENTENCE = false` ⟵ بیت‌به‌بیت همان `cut`. */
+export const CHAT_CUT_SENTENCE = true;
+/* 🐛 v3.150.0: پیشنهادِ تکراری داخلِ بدنه‌ی **تک‌پاراگرافی** (`finalizeChatOut`). رول‌بک: `false`. */
+export const CHAT_OFFER_DEDUP = true;
+export function cutSentence(s, n) {
+  const t = String(s == null ? '' : s).trim();
+  if (t.length <= n) return t;
+  if (!CHAT_CUT_SENTENCE) return t.slice(0, n).trim();
+  const floor = Math.floor(n * 0.5);
+  let best = -1;
+  for (const m of t.matchAll(/[.!؟?…][»”"]?(?=\s|$)|\n/g)) {
+    const end = m[0] === '\n' ? m.index : m.index + m[0].length;
+    if (end > n) break;
+    if (end >= floor) best = end;
+  }
+  if (best > 0) return t.slice(0, best).trim();
+  const head = t.slice(0, n - 1);
+  const sp = head.lastIndexOf(' ');
+  return `${(sp >= floor ? head.slice(0, sp) : head).trim()}…`;
+}
 
 /* ═══ چکیده‌ی فالِ تحویل‌شده ═══
  *
@@ -372,6 +400,8 @@ export const FA_OFFER = Object.freeze({
     `)`,
   ),
   can: /(?:بخوای|بخواهی)[،,]?\s+می[‌\s]?ت(?:و|وا)نم/,
+  /* شروعِ خودِ پیشنهاد داخلِ یک جمله (v3.150.0، فقط برای تکرارزدایِ `finalizeChatOut`). */
+  open: /(?:(?:اگه|اگر)\s+(?:بخوای|بخواهی)|می[‌\s]?خوای)(?![آ-یٔ])/g,
 });
 const FA_SMALLTALK = [
   'سلام', 'سلام!', 'درود', 'مرسی', 'ممنون', 'ممنونم', 'مرسی!', 'ممنون!',
@@ -444,10 +474,22 @@ const FA_NEW_ASK = [
   'می‌خوام فال بگیرم', 'فال جدید بگیرم', 'یه فال دیگه بگیرم', 'فال دوباره',
 ];
 
+/* 🙏 v3.150.0 (`CHAT_THANKS_TOKENS`): تشکرِ **چسبیده یا ترکیبی** («تمام‌ممنون»، «ممنون خیلی خوب بود»).
+ * فهرستِ بالا جمله‌ی کامل می‌خواهد و `norm` نیم‌فاصله را می‌چسباند، پس «تمام‌ممنون» یک الماس سوزاند.
+ * قاعده‌ی تازه هنوز **تنگ** است: همه‌ی واژه‌ها باید از این دو فهرست باشند (هیچ واژه‌ی محتوایی) و
+ * دستِ‌کم یکی از `core`؛ علامتِ سؤال یعنی سؤال، پس هرگز رایگان نمی‌شود. */
+const FA_THANKS_CORE = ['ممنون', 'ممنونم', 'مرسی', 'سپاس', 'تشکر', 'متشکرم', 'سپاسگزارم', 'قربونت', 'خداحافظ'];
+const FA_THANKS_EXTRA = [
+  'خیلی', 'عزیزم', 'دمت', 'گرم', 'تمام', 'تموم', 'همین', 'بود', 'عالی', 'خوب', 'خوبه', 'باشه',
+  'اوکی', 'فعلا', 'بای', 'ازت', 'دستت', 'درد', 'نکنه', 'نه', 'واقعا', 'بسیار', 'جان', 'جون',
+];
+
 const FA_LANG = {
   crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
   followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, followUpFirstPerson: FA_FU_FIRSTPERSON, offer: FA_OFFER,
   newReadingAsk: FA_NEW_ASK, latinFix: true, assent: FA_ASSENT,
+  takeFix: true, needsDataFix: true, alienFix: true,
+  thanksCore: FA_THANKS_CORE, thanksExtra: FA_THANKS_EXTRA,
 };
 /* 🌍 per زبانِ زمینه‌ی جاری. گاردِ بحران روی حساس‌ترین مسیرِ محصول است، پس یک پروسه‌ی
  * چندزبانه اجازه ندارد الگوهای یک زبان را روی پیامِ زبانِ دیگر اجرا کند. */
@@ -472,6 +514,10 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
     newReadingAsk: arr(d.newReadingAsk, lang === 'fa' ? base.newReadingAsk : []),
     latinFix: typeof d.latinFix === 'boolean' ? d.latinFix : lang === 'fa',
     assent: arr(d.assent, lang === 'fa' ? base.assent : []),
+    thanksCore: arr(d.thanksCore, lang === 'fa' ? base.thanksCore : []),
+    thanksExtra: arr(d.thanksExtra, lang === 'fa' ? base.thanksExtra : []),
+    // 🔁📝🃏 سه کلیدِ v3.150.0؛ الگوهایشان فارسی‌اند، پس فقط فارسی مگر langdata خودش بگوید.
+    takeFix: lang === 'fa', needsDataFix: lang === 'fa', alienFix: lang === 'fa',
     // الگوی فعلِ اول‌شخصِ فارسی روی زبانِ دیگر بی‌معناست؛ آن زبان این کلاس را ندارد تا الگوی خودش بیاید.
     followUpFirstPerson: d.followUpFirstPerson instanceof RegExp ? d.followUpFirstPerson
       : (lang === 'fa' ? base.followUpFirstPerson : null),
@@ -560,6 +606,32 @@ function unquoted(s) {
   for (let i = 0; i < 2; i++) t = t.replace(/«[^«»]*»|“[^“”]*”|"[^"\n]*"/g, ' ');
   return t.replace(/[«“"][^]*$/, ' ').replace(/^[^]*[»”]/, ' ');
 }
+/* تکرارزدایِ پیشنهاد در متنِ **تک‌خطی** (جزئیات کنارِ صداکننده در `finalizeChatOut`). */
+export function dedupOfferSentence(body, offer) {
+  const o = LANG.offer;
+  if (!o) return body;
+  const sp = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const t = sp(body), of = sp(offer);
+  if (of && t.length > of.length && t.endsWith(of)) {
+    // تهِ بی‌حرف (ایموجیِ تنها بعد از نقطه) هم با تکرار می‌رود، به همان دلیلِ پایین.
+    const rest = t.slice(0, t.length - of.length).trimEnd().replace(/\s+[^\p{L}\p{N}]+$/u, '');
+    if (/\p{L}/u.test(rest)) return rest;
+  }
+  const re = /[.!؟?…]+["»”'’)]*\s+/gu;
+  let cut = 0, m;
+  while ((m = re.exec(t))) cut = m.index + m[0].length;
+  const tail = t.slice(cut);
+  let at = -1;
+  if (o.open) {
+    const op = new RegExp(o.open.source, 'g');
+    while ((m = op.exec(tail))) { if (offerTailIn(tail.slice(m.index))) { at = m.index; break; } }
+  } else if (offerTailIn(tail)) at = 0;
+  if (at < 0) return body;
+  // تکه‌ی بی‌حرف (فقط ایموجی/علامت) جدا نمی‌ماند؛ وگرنه تکه‌کننده یک خطِ تنهای «✨» می‌سازد.
+  const keep = /\p{L}/u.test(tail.slice(0, at)) ? tail.slice(0, at) : '';
+  return (t.slice(0, cut) + keep).trimEnd() || body;
+}
+
 export function offerTailIn(text) {
   const ls = String(text || '').split('\n').map((s) => s.trim()).filter(Boolean);
   if (!ls.length) return false;
@@ -588,10 +660,23 @@ const noEmoji = (s) => String(s || '').replace(/[\p{Extended_Pictographic}\u{1F3
  * هر دو طرف**. ⚠️ `norm` عمداً دست نخورد: سنجه‌های آزمایشگاه هم از آن می‌خوانند. */
 const loose = (s) => String(s || '').replace(/[ً-ٰٟ]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک');
 const tight = (s) => norm(loose(noEmoji(s)));
+export const CHAT_THANKS_TOKENS = true;
+export const CHAT_THANKS_MAX = 24;
+function thanksTokensIn(text) {
+  const core = (LANG.thanksCore || []).map(loose);
+  if (!core.length) return false;
+  const raw = loose(noEmoji(text)).toLowerCase();
+  if (/[?؟]/.test(raw)) return false;
+  const t = raw.replace(/[‌‏‎]/g, ' ').replace(/[!.,،؛:*_"'`()\[\]{}…\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > CHAT_THANKS_MAX) return false;
+  const ok = new Set([...core, ...(LANG.thanksExtra || []).map(loose)]);
+  const toks = t.split(' ');
+  return toks.every((w) => ok.has(w)) && toks.some((w) => core.includes(w));
+}
 export function smallTalkIn(text) {
   const t = tight(text);
-  if (!t || t.length > CHAT_SMALLTALK_MAX) return false;
-  return LANG.smallTalk.some(p => tight(p) === t);
+  if (t && t.length <= CHAT_SMALLTALK_MAX && LANG.smallTalk.some(p => tight(p) === t)) return true;
+  return CHAT_THANKS_TOKENS && thanksTokensIn(text);
 }
 
 /** پیامی که بعد از کنار رفتنِ ایموجی و علامت‌ها **هیچ** چیزی ندارد («.»، «🙏»، «؟؟»). رایگان؛
@@ -614,6 +699,69 @@ export function newReadingAskIn(text) {
   const t = norm(text);
   if (!t || t.length > CHAT_NEW_ASK_MAX) return false;
   return (LANG.newReadingAsk || []).some((p) => norm(p) === t);
+}
+
+/* 🔁 v3.150.0 — «فال تازه رو بگیر» بعد از جوابِ فالِ تازه (`CHAT_NEWREAD_TAKE`).
+ * دیتای واقعی: بعد از جوابِ «برای این فالِ تازه لازمه»، کاربر به‌جای دکمه می‌نوشت «بله بگیر»،
+ * «باز کن»، «فال تازه رو شروع کن»، «بگیییرررر» و یک الماس برای همان جوابِ تکراری می‌داد.
+ * فقط پیامِ کوتاهِ **دستوری** (فعلِ «بگیر/بزن/باز کن/…» یا شروع با «فال»)، بدونِ «؟»؛ و فعل‌هایی
+ * که درخواستِ **متن** اند («بنویس»، «بگو»، «توضیح بده») عمداً بیرون‌اند. صداکننده فقط وقتی
+ * صدایش می‌زند که آخرین جواب پرچمِ فالِ تازه داشته باشد. رول‌بک: `false`. */
+export const CHAT_NEWREAD_TAKE = true;
+export const CHAT_NEWREAD_TAKE_MAX = 40;
+const FA_TAKE_VERB = /(^|\s)(بگیر(ید|ش)?|بزن|بنداز|بکش|باز\s?کن|شروع\s?کن|انجام\s?بده)(\s|$)/u;
+/* اول‌شخص («بگیرم»، «بریم») فقط کنارِ واژه‌ی «فال» دستور است؛ تنها، جمله‌ی روایی هم می‌سازد:
+ * «میترسم جواب نه بگیرم»، «میخوایم بریم» (هر دو در پیکره‌ی واقعی). */
+const FA_TAKE_SELF = /(^|\s)(بگیرم|بریم)(\s|$)/u;
+const FA_TAKE_NOT = /(آماده|بنویس|بگو|کپی|فرست|بررسی|توضیح|تحلیل)/u;
+export function afterNewReadingIn(text) {
+  if (!CHAT_NEWREAD_TAKE || !LANG.takeFix) return false;
+  const raw = String(text || '');
+  if (/[?؟]/.test(raw)) return false;
+  const t = norm(noEmoji(raw)).replace(/(\p{L})\1{2,}/gu, '$1').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > CHAT_NEWREAD_TAKE_MAX || FA_TAKE_NOT.test(t)) return false;
+  return FA_TAKE_VERB.test(t) || (/فال/u.test(t) && FA_TAKE_SELF.test(t)) || /^(گرفتن\s)?فال(\s|$)/u.test(t);
+}
+
+/* 🧭 v3.150.0 — متنی که در واقع **برچسبِ دکمه‌ی منو**ست، نه سؤال (`CHAT_RESUME_FILTER`).
+ * کیسِ واقعی: کاربر وسطِ گفتگو بدونِ الماس تایپ کرد «تک کارت رایگان» (یعنی دکمه‌ی «🎴 فال تک کارت
+ * امروز (رایگان)»)؛ متن پارک شد و بعد از شارژ با یک الماس **همان جوابِ قبلی** را گرفت. برچسبِ
+ * دقیق (بی‌ایموجی) یا پیامی که **همه‌ی** واژه‌هایش داخلِ یک برچسب است و دستِ‌کم دو واژه دارد.
+ * عمداً تنگ: «کارت دوم چی میگه» واژه‌ی «میگه» دارد که در هیچ برچسبی نیست، پس سؤال می‌ماند. */
+export const CHAT_MENU_LIKE_MAX = 40;
+const menuToks = (s) => loose(noEmoji(s)).toLowerCase().replace(/[‌‏‎]/g, ' ')
+  .replace(/[!?؟.,،؛:*_"'`()\[\]{}…\-+]/g, ' ').replace(/\s+/g, ' ').trim();
+export function menuLabelLikeIn(text, labels = []) {
+  const t = menuToks(text);
+  if (!t || t.length > CHAT_MENU_LIKE_MAX) return false;
+  const toks = t.split(' ');
+  for (const l of labels) {
+    const lt = menuToks(l);
+    if (!lt) continue;
+    if (lt === t) return true;
+    const set = new Set(lt.split(' '));
+    if (toks.length >= 2 && toks.every((w) => set.has(w))) return true;
+  }
+  return false;
+}
+
+/* 📝 v3.150.0 — پیشنهادی که خودش **داده‌ی تازه** از کاربر لازم دارد (`CHAT_NEEDS_DATA_NO_FU`).
+ * «اگه رتبه‌ت رو بفرستی تا …»: دکمه‌ی «رتبه رو بسنج» بدونِ رتبه یعنی یک الماس برای جوابِ
+ * «اول رتبه‌ت رو بفرست». پس چنین جوابی دکمه نمی‌گیرد و کمبودِ `fu` هم حساب نمی‌شود؛ کاربر
+ * داده را **تایپ** می‌کند. فقط فارسی (`needsDataFix`). رول‌بک: `false`. */
+export const CHAT_NEEDS_DATA_NO_FU = true;
+const FA_NEEDS_DATA = /(بعد از (فرستادن|گرفتن|دونستن|اینکه بفرستی)|اگه (بفرستی|بگی|بنویسی)|بر اساس (حرفهای|متن|رتبه|نمره|درس)|با (رتبه|نمره|حرفهای دقیق)|(رو|را) (بفرستی|بنویسی) تا|بفرستی تا|بنویسی تا)/u;
+/** متنِ پیشنهاد: فیلدِ `offer` اگر سالم است، وگرنه آخرین خطِ ناخالیِ متن. */
+export function offerTextOf(out) {
+  if (offerLineOk(out?.offer)) return String(out.offer);
+  const ls = String(out?.text || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  return ls.length ? ls[ls.length - 1] : '';
+}
+export function offerNeedsDataIn(text) {
+  if (!CHAT_NEEDS_DATA_NO_FU || !LANG.needsDataFix) return false;
+  const t = String(text || '').replace(/\u200c/g, '');
+  if (/بعد از گرفتن فال/u.test(t)) return false;
+  return FA_NEEDS_DATA.test(t);
 }
 
 /* 🔤 واژه‌ی لاتینِ نشتی در جوابِ فارسی (v3.140.0). باگِ واقعیِ دورِ ۲: «منو hurt کرد»
@@ -723,7 +871,7 @@ export function cleanChatReply(text, { name = '', userText = '' } = {}) {
       .replace(/[^\S\n]+\n/g, '\n')
       .trim();
   }
-  return cut(splitChatLines(t), CHAT_HARD_CHARS);
+  return cutSentence(splitChatLines(t), CHAT_HARD_CHARS);
 }
 
 /* ═══ 📦 پاکتِ JSON خروجی (از ۱۴۰۵/۰۶/۲۲) ═══
@@ -1032,19 +1180,34 @@ export function chatSystemPrompt(sysText, ctxBlock, L = null) {
  * ماندند و همه جوابِ **بی‌پاکت** (`salvaged`) بودند، چون آن‌جا هیچ فیلدِ `follow_up`ی وجود ندارد.
  * برچسبی هم که گارد انداخته (`followUpBad`) همین‌جا خالی دیده می‌شود. پاسخِ فالِ تازه معاف است
  * چون از v3.147.0 اصلاً دکمه‌ی سؤال نمی‌گیرد. */
-export function chatFixNeeds(out, { crisisCtx = false, userText = '' } = {}) {
-  if (!out) return { offer: false, safety: false, latin: '', fu: false };
-  const offer = !out.end && !offerLineOk(out.offer) && !offerTailIn(out.text);
+/* 🃏 و از v3.150.0 کمبودِ ششم: `alien` (نامِ کارتی که **هیچ‌جای چیزی که مدل دید** نبود؛
+ * نه در کارت‌های این فال، نه در متنِ فال و فال‌های قبلی، نه در حرفِ کاربر). صداکننده
+ * `allowedCards` را از همان متن‌ها می‌سازد (`chatAllowedCards`). بدونِ آن، کمبود خاموش است. */
+export const CHAT_ALIEN_FIX = true;
+export function chatFixNeeds(out, { crisisCtx = false, userText = '', allowedCards = null } = {}) {
+  if (!out) return { offer: false, safety: false, latin: '', fu: false, alien: '' };
+  const offer = !out.end && !out.newReading && !offerLineOk(out.offer) && !offerTailIn(out.text);
   const safety = !crisisCtx && !!safetyTalkIn(`${out.text || ''}\n${out.offer || ''}`);
   const latin = latinIn(`${out.text || ''}\n${out.offer || ''}`, userText);
-  const fu = !out.end && !out.newReading && !out.followUp;
-  return { offer, safety, latin, fu };
+  const fu = !out.end && !out.newReading && !out.followUp && !offerNeedsDataIn(offerTextOf(out));
+  const alien = allowedCards ? alienCardIn(`${out.text || ''}\n${out.offer || ''}`, allowedCards) : '';
+  return { offer, safety, latin, fu, alien };
+}
+/** همه‌ی کارت‌هایی که نامشان در این متن‌ها آمده (Set کلید). */
+export function chatCardsIn(text) {
+  return cardMentions(String(text || ''), ALL_CARD_KEYS, (k) => cardName(k), currentLang());
+}
+/** اولین کارتِ نام‌برده‌ای که در `allowed` نیست (نامش برای hint)، یا `''`. */
+export function alienCardIn(text, allowed) {
+  if (!CHAT_ALIEN_FIX || !LANG.alienFix || !allowed) return '';
+  for (const k of chatCardsIn(text)) if (!allowed.has(k)) return cardName(k);
+  return '';
 }
 /** وزنِ کمبودها — تعمیر فقط وقتی پذیرفته می‌شود که **اکیداً** کمتر باشد.
  * `thin` وزنِ ۲ دارد چون پیامدش پولی است (ریفاندِ الماس)؛ پس جوابِ پُرِ بی‌پیشنهاد از
  * جوابِ توخالیِ پیشنهاددار بهتر شمرده می‌شود، همان رفتارِ v3.100.0. */
 export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.safety ? 1 : 0)
-  + (needs?.latin ? 1 : 0) + (needs?.fu ? 1 : 0) + (thin ? 2 : 0);
+  + (needs?.latin ? 1 : 0) + (needs?.fu ? 1 : 0) + (needs?.alien ? 1 : 0) + (thin ? 2 : 0);
 
 /* ═══ 🧾 متنِ نهاییِ جواب (تک‌منبعِ ربات و آزمایشگاه) ═══
  *
@@ -1056,7 +1219,26 @@ export const chatFixScore = (needs, thin) => (needs?.offer ? 1 : 0) + (needs?.sa
  *    خطِ آخرِ متن خودش پیشنهاد بود، همان می‌ماند.
  * ⚠️ نوبتِ `wants_end` پیشنهاد نمی‌گیرد: کاربر خداحافظی کرده و نگه‌داشتنش همان
  * «جمع نکن و خداحافظی نکن» را از جهتِ مخالف نقض می‌کند. */
-export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = '' } = {}) {
+/* 🔁 v3.150.0 (`newReadingPointer`): جوابِ پرچم‌دارِ فالِ تازه به‌جای پیشنهادِ گفتگو، یک خطِ
+ * ثابت می‌گیرد که به **دکمه‌ی** فالِ تازه اشاره می‌کند (صداکننده متنش را از locale می‌دهد).
+ * دیتا: کاربر بعد از «برای این فالِ تازه لازمه» خطِ پیشنهاد را می‌خواند، «بله» می‌نوشت و یک
+ * الماس برای همان جوابِ تکراری می‌داد. پیشنهاد و هر خطِ پیشنهادشکلِ تهِ بدنه حذف می‌شوند. */
+export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = '', newReadingPointer = '' } = {}) {
+  if (newReadingPointer && out?.newReading && !out?.end) {
+    let b = String(out?.text || '');
+    if (!crisisCtx) b = stripSafetyTalk(b).text;
+    for (let n = 0; n < 2; n++) {
+      const ls = b.split('\n').map((x) => x.trimEnd());
+      while (ls.length && !ls[ls.length - 1].trim()) ls.pop();
+      if (ls.length >= 2 && offerTailIn(ls.join('\n'))) { ls.pop(); b = ls.join('\n'); } else break;
+    }
+    let reply = cleanChatReply(b, { name, userText });
+    if (reply) {
+      const room = CHAT_HARD_CHARS - newReadingPointer.length - 1;
+      reply = `${cutSentence(reply, Math.max(CHAT_MIN_CHARS, room))}\n${newReadingPointer}`;
+    }
+    return { reply, offerMissing: false, safetyStripped: 0, pointer: true };
+  }
   let body = String(out?.text || '');
   let offer = String(out?.offer || '');
   let safetyStripped = 0;
@@ -1068,12 +1250,31 @@ export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = 
   const offerOk = !out?.end && offerLineOk(offer);
   if (offerOk) {
     // پیشنهادِ تکراری داخلِ متن ⟵ حذف؛ پیشنهاد فقط یک بار، و همیشه خطِ آخر.
-    const ls = body.split('\n');
-    let k = ls.length - 1;
-    while (k >= 0 && !ls[k].trim()) k--;
-    // فقط با الگوی واقعی؛ بدونِ الگو هر خطی «پیشنهاد» حساب می‌شد و خطِ آخرِ جواب می‌پرید.
-    // ⚠️ `offerTailIn` نه `offerLineOk`: پیامِ آماده‌ی بعد از «این رو بفرست:» پیشنهاد نیست، بدنه است.
-    if (LANG.offer && k >= 1 && offerTailIn(ls.slice(0, k + 1).join('\n'))) body = ls.slice(0, k).join('\n');
+    /* 🐛 v3.150.0 (`CHAT_OFFER_DEDUP`): مدل گاهی کلِ جواب را **یک پاراگراف** می‌دهد و جمله‌ی
+     * آخرش همان پیشنهاد است. تکه‌کردن تا `cleanChatReply` صبر می‌کرد، پس این‌جا فقط یک خط بود
+     * (`k = 0`) و تکرار می‌ماند: «… روشن کنی.» و زیرش «… روشن کنم؟». حالا جمله‌ها همین‌جا جدا
+     * دیده می‌شوند؛ اگر متن خودش خط نداشت، دوباره با فاصله چسبانده می‌شود تا پاراگراف‌بندیِ
+     * بعدی دقیقاً همان قاعده‌ی همیشگی را اجرا کند. */
+    /* ⚠️ نسخه‌ی اولِ همین فیکس متن را با `splitChatLines` تکه می‌کرد و **کلِ** تکه‌ی آخر را
+     * برمی‌داشت. بازپخش روی ۱۸۳۹ جوابِ واقعی نشان داد آن تکه گاهی چند جمله است (پایانِ نقل‌قولِ
+     * «…» به جمله‌ی بعد می‌چسبد) و ۱۷۹ جواب بدنه از دست می‌دادند. حالا فقط **جمله‌ی آخر** سنجیده
+     * و برداشته می‌شود؛ مرزِ جمله شاملِ گیومه‌ی بسته‌ی بعد از نقطه هم هست. */
+    /* ⚠️ و دورِ دومِ همان بازپخش: جمله‌ی آخر گاهی «تکه‌ی بدنه‌ی بی‌نقطه + پیشنهاد» است
+     * («… بذاری حرفش رو بزنه اگه بخوای می‌تونم …»). برداشتنِ کلِ جمله یعنی آن تکه هم برود (۲ جوابِ
+     * واقعی). پس اول تکرارِ **عینِ** فیلدِ پیشنهاد از تهِ متن برداشته می‌شود، وگرنه فقط از **شروعِ
+     * خودِ پیشنهاد** (`offer.open`) به بعد، و هرچه قبلش است می‌ماند. */
+    const hadNl = /\n/.test(body);
+    if (CHAT_OFFER_DEDUP && !hadNl) {
+      // دو بار: مدل گاهی پیشنهاد را دو بار پشتِ هم در متن تکرار می‌کند.
+      for (let n = 0; n < 2; n++) body = dedupOfferSentence(body, offer);
+    } else {
+      const ls = body.split('\n');
+      let k = ls.length - 1;
+      while (k >= 0 && !ls[k].trim()) k--;
+      // فقط با الگوی واقعی؛ بدونِ الگو هر خطی «پیشنهاد» حساب می‌شد و خطِ آخرِ جواب می‌پرید.
+      // ⚠️ `offerTailIn` نه `offerLineOk`: پیامِ آماده‌ی بعد از «این رو بفرست:» پیشنهاد نیست، بدنه است.
+      if (LANG.offer && k >= 1 && offerTailIn(ls.slice(0, k + 1).join('\n'))) body = ls.slice(0, k).join('\n');
+    }
   }
   let reply = cleanChatReply(body, { name, userText });
   // ⚠️ بدنه‌ای که کلش حرفِ خطر بود و حذف شد، خالی می‌ماند. پیشنهادِ تنها جواب نیست؛
@@ -1082,7 +1283,7 @@ export function finalizeChatOut(out, { name = '', crisisCtx = false, userText = 
     const line = cleanChatReply(offer, { name, userText }).replace(/\n+/g, ' ').trim();
     if (line) {
       const room = CHAT_HARD_CHARS - line.length - 1;
-      reply = `${cut(reply, Math.max(CHAT_MIN_CHARS, room))}\n${line}`;
+      reply = `${cutSentence(reply, Math.max(CHAT_MIN_CHARS, room))}\n${line}`;
     }
   }
   const offerMissing = !out?.end && !offerTailIn(reply);

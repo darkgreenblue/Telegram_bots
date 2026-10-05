@@ -83,6 +83,7 @@ import {
   buildChatCtx, packHistory, toMessages, crisisIn, smallTalkIn, newReadingAskIn, hookOk,
   assentIn, noContentIn, offerTailIn, chatLang,
   chatSystemPrompt, chatFixNeeds, chatFixScore, finalizeChatOut,
+  afterNewReadingIn, offerNeedsDataIn, offerTextOf, chatCardsIn, menuLabelLikeIn,
   cleanChatReply, chatOutOk, chatRejectReason, parseChatOut, questionWordsOf, configureChatLang,
   CHAT_FLOOR_CHARS, floorApplies, chatBtnLabel, offerLedger,
 } from './chat-core.js';
@@ -350,7 +351,11 @@ const TEST_PHASE = false;
 //         (p5: سهمِ بسته‌ی بزرگ از خریدِ اول ۳۱٫۶٪ ⟵ ۵۲٫۴٪ با خریدارِ برابر)، و مدلِ خوانش برای همه
 //         دیپ‌سیک به‌جز «خریدارانِ لونا» (کسانی که اولین پرداختشان با luna بود)، با ۱۰٪ گروهِ
 //         نگه‌داشته‌ی luna (`reading_model_ds2`).
-const PRODUCT_VERSION = '3.151.0';
+// 3.151.0: 🧩 هفت اشکالِ گفتگو (برداشتِ «بله بگیر»، تکرارزدایِ پیشنهاد، فیلترِ بازگشت، کارتِ بیگانه، …) +
+//         ⌨️ برچسبِ منوی تایپ‌شده وسطِ گفتگو همان گاردِ رایگانِ تپِ دکمه را می‌گیرد، نه سؤالِ پولی.
+// 3.152.0: 🗓 متن و ویس در مرحله‌ی ماهِ تولد (و ویس در حوزه‌ی تمرکز) دیگر از آنبوردینگ بیرون نمی‌زند؛
+//         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
+const PRODUCT_VERSION = '3.152.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -648,6 +653,21 @@ const CHAT_ASSENT_TAP     = true;
 const CHAT_NEWREAD_NO_FU  = true;
 const CHAT_FU_FIX         = true;
 const CHAT_ASSENT_OFFER   = true;
+/* 🧩 v3.151.0 (بررسیِ روزانه‌ی ۱۴۰۵/۰۷/۱۲، بازپخش روی کیس‌های واقعی). هرکدام رول‌بکِ یک‌خطی:
+ *   • `CHAT_NEWREAD_POINTER`: جوابِ پرچم‌دارِ فالِ تازه به‌جای پیشنهادِ گفتگو یک خطِ ثابتِ
+ *     «دکمه‌ی فالِ تازه رو بزن» می‌گیرد (`finalizeChatOut`). پیشنهادِ گفتگو زیرِ چنین جوابی
+ *     «بله»ی پولیِ بعدی را می‌ساخت که دوباره «فالِ تازه لازمه» می‌گفت.
+ *   • `CHAT_NEWREAD_TAKE`: پیامِ دستوریِ کوتاه («بله بگیر»، «باز کن»، «فال تازه رو شروع کن»)
+ *     زیرِ چنین جوابی، رایگان همان پیامِ `newReadingAsk` + دکمه‌ی `chat_new` را می‌گیرد.
+ *   • `CHAT_RESUME_FILTER`: سؤالِ پارک‌شده‌ای که در واقع برچسبِ کیبورد، تعارف، بی‌محتوا یا «فال»ِ
+ *     تنها بود، بعد از شارژ **جواب پولی نمی‌گیرد** و بی‌صدا دور ریخته می‌شود (کیسِ واقعی: متنِ
+ *     «تک کارت رایگان» بعد از خرید با تکرارِ جوابِ قبلی و یک الماس جواب گرفت).
+ *   • `CHAT_ALIEN_CHECK`: نامِ کارتی که در هیچ چیزی که مدل دید نبود، کمبودِ ششمِ همان **یک**
+ *     تلاشِ تعمیر است (دو کیسِ واقعی: کارتِ بیگانه وسطِ جوابِ گفتگو). */
+const CHAT_NEWREAD_POINTER = true;
+const CHAT_NEWREAD_TAKE_ON = true;
+const CHAT_RESUME_FILTER   = true;
+const CHAT_ALIEN_CHECK     = true;
 /* 🎁 پیشنهادِ پایانی در **همه‌ی** جواب‌ها، از همان جوابِ اولِ رایگان (v3.116.0، خواسته‌ی
  * صریحِ مالک: «فقط دکمه‌ی تنها کافی نیست»). ریشه‌ی شکافِ قبلی سه چیز بود: جوابِ اول هیچ
  * تاریخچه‌ای برای تقلیدِ قالب ندارد و گاهی JSON نمی‌شد و به فالبک می‌افتاد، پیشنهاد داخلِ
@@ -5102,12 +5122,36 @@ const chatEarnEntry = (txt, cb) => {
   if (!txt) return false;
   return WALLET_LABELS.includes(txt) || LUCKY_LABELS.includes(txt) || INVITE_LABELS.includes(txt);
 };
+/* ⌨️ v3.151.0 `CHAT_TYPED_LABEL_GUARD` (تصمیمِ مالک ۱۴۰۵/۰۷/۱۲): برچسبِ منویی که کاربر وسطِ
+ * گفتگو **تایپ** کرده («کارت شانس»، «تک کارت رایگان»، «تنظیمات») همان گاردِ رایگانِ تپِ دکمه را
+ * می‌گیرد («ادامه می‌دم / بستن گفتگو»، با نیتِ همان دکمه)، نه جوابِ پولیِ گفتگو. تطبیق همان
+ * `menuLabelLikeIn`ِ فیلترِ بازگشتِ بعد از شارژ است (تک‌منبع)، با سه استثنا:
+ *   • پشتیبانی هرگز گارد نمی‌شود (بند ۶ج ریشه) و برچسب‌های فقط-ادمین (ریست، کارت‌ها) را کاربرِ
+ *     عادی نمی‌بیند، پس «کارت‌ها»ی تایپیِ او نباید گارد بگیرد؛
+ *   • «فال بگیر» و هم‌خانواده‌اش (`newReadingAskIn`) مسیرِ رایگانِ دقیق‌ترِ خودشان را دارند.
+ * رول‌بک: `false` ⟵ دقیقاً رفتارِ قبلی (متنِ غیرِدقیق، سؤالِ پولی). */
+const CHAT_TYPED_LABEL_GUARD = true;
+const CHAT_TYPED_SKIP = new Set([
+  ...allLabels(l => l.support?.button), ...allLabels(l => l.buttons.resetTest),
+  ...allLabels(l => l.buttons.cardsAdmin), '🔄 ریست ربات (تست)',
+].filter(Boolean));
+const CHAT_TYPED_LABELS = [...KB_LABELS].filter(l => !CHAT_TYPED_SKIP.has(l));
+function typedMenuLabel(txt) {
+  if (!CHAT_TYPED_LABEL_GUARD || !CHAT_STATE_GUARD || !txt || KB_LABELS.has(txt) || txt.startsWith('/')) return '';
+  if (newReadingAskIn(txt)) return '';
+  return CHAT_TYPED_LABELS.find(l => menuLabelLikeIn(txt, [l])) || '';
+}
 bot.use(async (ctx, next) => {
   try {
     const uid = ctx.from?.id;
     if (!uid || !CHAT_AFTER_READING || getState(uid) !== 'chatting') return next();
     const txt = ctx.message?.text;
     const cb = ctx.callbackQuery?.data;
+    const typed = typedMenuLabel(txt);
+    if (typed) {
+      track(db, uid, 'chat_typed_label', { reading_id: getSession(uid)?.chatReadingId || 0, chars: txt.length });
+      await chatOpenGuard(ctx, uid, chatExitIntent(typed, null)); return;
+    }
     if (txt && !KB_LABELS.has(txt) && !txt.startsWith('/')) return next();   // سؤالِ گفتگو
     if (cb && CHAT_KEEP_CB.test(cb)) return next();         // اکشنِ خودِ گفتگو
     // 📎 رسانه‌ی غیرمتنی همین‌جا تمام می‌شود و به هیچ فلوی دیگری (رسید و…) نمی‌رسد.
@@ -8369,8 +8413,15 @@ async function handleChatMessage(ctx, uid, text, { askedId: askedIdIn = 0, via =
   }
   // ۳ب) 🔮 «فال»ِ تنها: رایگان، بدونِ مدل. دکمه همان `chat_new`ِ موجود است (کپیِ دومی نیست)،
   // و استیت دست نمی‌خورد تا اگر منظورش همین فال بود، سؤالِ کامل‌تر را همین‌جا بنویسد.
-  if (CHAT_NEW_ASK && newReadingAskIn(text)) {
-    track(db, uid, 'chat_new_ask', { reading_id: rid, chars: text.length, via });
+  /* 🔁 v3.151.0: «بله بگیر»/«باز کن»/«فال تازه رو شروع کن» زیرِ جوابِ «فالِ تازه لازمه» همان
+   * پیامِ رایگانِ «فال»ِ تنهاست (`CHAT_NEWREAD_TAKE_ON`). فقط وقتی آخرین جواب **واقعاً** پرچمِ
+   * فالِ تازه دارد؛ وگرنه «بزن» یعنی چیزِ دیگری و سؤالِ پولیِ عادی است. */
+  let takeNew = false;
+  if (CHAT_NEWREAD_TAKE_ON && via === 'typed' && afterNewReadingIn(text)) {
+    try { takeNew = !!stmts.chatLastAnswer.get(rid, uid)?.want_reading; } catch { takeNew = false; }
+  }
+  if ((CHAT_NEW_ASK && newReadingAskIn(text)) || takeNew) {
+    track(db, uid, 'chat_new_ask', { reading_id: rid, chars: text.length, via: takeNew ? 'take' : via });
     await ctx.reply(L.chat.newReadingAsk, {
       ...extra,
       reply_markup: Markup.inlineKeyboard([[Markup.button.callback(L.buttons.chatAnotherReading, `chat_new:${rid}`)]]).reply_markup,
@@ -8494,6 +8545,15 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
       || chatHadCrisis(uid, rid);
     // 🔤 واژه‌ی لاتینی که خودِ کاربر نوشته (اسمِ اپ، برند، اسمِ آدم) نشت نیست.
     const userText = userTexts.map((t) => String(t || '')).join('\n');
+    /* 🃏 کارت‌های مجاز = هر کارتی که نامش در چیزی آمده که مدل **دید** (کانتکستِ فال و فال‌های
+     * قبلی، و حرف‌های کاربر). جواب‌های قبلیِ مدل عمداً حساب نمی‌شوند تا خطای قبلی مجوز نشود. */
+    let allowedCards = null;
+    if (CHAT_ALIEN_CHECK) {
+      try {
+        allowedCards = chatCardsIn(`${system}\n${userText}`);
+        for (const c of cards) if (c?.key) allowedCards.add(c.key);
+      } catch (e) { allowedCards = null; logErr('chat alien allow:', e.message); }
+    }
     // 📒 دفتر از کلِ تاریخچه ساخته می‌شود (شاملِ سؤالِ فعلی، تا قبول/ردِ آخرین پیشنهاد معلوم باشد).
     const ledger = CHAT_OFFER_LEDGER ? offerLedger(hist) : null;
     const messages = toMessages(system, packed, text, L, { ledger });
@@ -8532,15 +8592,15 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
      * حتی ریفاند، برای چیزی که یک تلاشِ هدف‌دار ارزان‌تر درستش می‌کند. */
     const thinOf = (o) => !!(CHAT_FLOOR && floorApplies(o) && String(o.text || '').trim().length < CHAT_FLOOR_CHARS);
     const needsOf = (o) => {
-      const n = chatFixNeeds(o, { crisisCtx, userText });
+      const n = chatFixNeeds(o, { crisisCtx, userText, allowedCards });
       return { offer: CHAT_OFFER_FIX && n.offer, safety: CHAT_SAFETY_STRIP && n.safety, latin: CHAT_LATIN_FIX ? n.latin : '',
-        fu: CHAT_FU_FIX && CHAT_FOLLOWUP && !!n.fu };
+        fu: CHAT_FU_FIX && CHAT_FOLLOWUP && !!n.fu, alien: CHAT_ALIEN_CHECK ? (n.alien || '') : '' };
     };
     let thin = CHAT_FLOOR && floorApplies(out) && String(out.text || '').trim().length < CHAT_FLOOR_CHARS;
     let needs = needsOf(out);
-    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, fu: needs.fu };
+    const fixWanted = { thin: !!thin, offer: needs.offer, safety: needs.safety, latin: needs.latin, fu: needs.fu, alien: needs.alien };
     let fixed = false;
-    if (thin || needs.offer || needs.safety || needs.latin || needs.fu) {
+    if (thin || needs.offer || needs.safety || needs.latin || needs.fu || needs.alien) {
       try {
         const hint = L.prompts.chatFixHint
           ? L.prompts.chatFixHint({ ...fixWanted, min: CHAT_FLOOR_CHARS })
@@ -8563,15 +8623,20 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     }
     /* 🧾 متنِ نهایی از تک‌منبعِ `finalizeChatOut` (ربات و آزمایشگاه یکی): حرفِ خطرِ
      * بی‌دلیل جمله‌به‌جمله حذف می‌شود و پیشنهاد خطِ آخر می‌شود. */
-    const fin = finalizeChatOut(out, { name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP, userText });
-    if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fixWanted.fu || fin.safetyStripped || fin.offerMissing) {
+    const fin = finalizeChatOut(out, {
+      name: dispName(user), crisisCtx: crisisCtx || !CHAT_SAFETY_STRIP, userText,
+      newReadingPointer: CHAT_NEWREAD_POINTER ? L.chat.newReadingPointer(L.buttons.chatAnotherReading) : '',
+    });
+    if (fixWanted.offer || fixWanted.safety || fixWanted.latin || fixWanted.fu || fixWanted.alien || fin.safetyStripped || fin.offerMissing) {
       track(db, uid, 'chat_fix', {
         reading_id: rid, thin: fixWanted.thin ? 1 : 0, offer: fixWanted.offer ? 1 : 0,
         safety: fixWanted.safety ? 1 : 0, fixed: fixed ? 1 : 0,
         stripped: fin.safetyStripped, offer_missing: fin.offerMissing ? 1 : 0,
         latin: fixWanted.latin ? 1 : 0, latin_left: needs.latin ? 1 : 0,
         fu: fixWanted.fu ? 1 : 0, fu_left: needs.fu ? 1 : 0,
+        alien: fixWanted.alien ? 1 : 0, alien_left: needs.alien ? 1 : 0,
       });
+      if (fixWanted.alien) log(`🃏 CHAT_ALIEN_CARD reading#${rid} fixed=${needs.alien ? 0 : 1}`);
       if (fixWanted.fu) log(`🔘 CHAT_FU_MISSING reading#${rid} fixed=${needs.fu ? 0 : 1}`);
       if (fixWanted.latin) log(`🔤 CHAT_LATIN reading#${rid} fixed=${needs.latin ? 0 : 1}`);
       if (fin.safetyStripped) log(`🛟 CHAT_SAFETY_STRIPPED reading#${rid} n=${fin.safetyStripped} fixed=${fixed ? 1 : 0}`);
@@ -8593,7 +8658,10 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     /* 🔁 جوابِ «فالِ تازه لازمه» دکمه‌ی سؤالِ پیشنهادی نمی‌گیرد (`CHAT_NEWREAD_NO_FU`): درِ
      * درستش همان `chat_new` است، و دکمه‌ی دوم کاربر را به یک نوبتِ گفتگوی دیگر می‌برد که
      * دوباره «فالِ تازه لازمه» می‌گوید (۴۱ حلقه از ۶۶ جوابِ پرچم‌دار، ۱۳ کاربر). */
-    const followUp = CHAT_FOLLOWUP && !(CHAT_NEWREAD_NO_FU && out.newReading) ? (out.followUp || '') : '';
+    /* 📝 و پیشنهادی که خودش داده‌ی تازه از کاربر می‌خواهد («اگه رتبه‌ت رو بفرستی تا …») هم دکمه
+     * نمی‌گیرد: تپِ آن دکمه بدونِ داده فقط «اول رتبه‌ت رو بفرست» را می‌خرید (`offerNeedsDataIn`). */
+    const followUp = CHAT_FOLLOWUP && !(CHAT_NEWREAD_NO_FU && out.newReading)
+      && !offerNeedsDataIn(offerTextOf(out)) ? (out.followUp || '') : '';
     const aId = Number(stmts.insertChatMsg.run(rid, uid, 'assistant', reply, 0, model, 0, out.newReading ? 1 : 0, out.support ? 1 : 0, followUp, out.end ? 1 : 0).lastInsertRowid);
     const turn = stmts.chatTurns.get(rid)?.c || 0;
     /* 📊 props افزایشی‌اند (بند ۲ج/۳): `turn`/`chars` همان قبلی‌اند. بقیه برای تحلیلِ
@@ -8725,6 +8793,20 @@ async function resumePendingChat(uid, via = 'purchase') {
   const el = chatEligible(uid, p.reading_id);
   // فالی که دیگر واجد نیست (سقفِ نوبت، حذف، فلگ) سؤالِ پارک‌شده‌اش هم بی‌معناست.
   if (!el.ok) { try { stmts.dropChatPendings.run(uid); } catch {} return false; }
+  /* 🧹 `CHAT_RESUME_FILTER`: متنی که سؤال نیست (برچسبِ کیبوردِ تایپ‌شده، تعارف، بی‌محتوا، «فال»ِ
+   * تنها) بعد از شارژ جوابِ پولی نمی‌گیرد؛ بی‌صدا دور ریخته می‌شود. «بله» عمداً این‌جا نیست:
+   * «بله»ی پارک‌شده قبلاً با متنِ پیشنهاد جایگزین شده و سؤالِ واقعی است. */
+  if (CHAT_RESUME_FILTER) {
+    const kind = menuLabelLikeIn(p.text, [...KB_LABELS]) ? 'menu'
+      : smallTalkIn(p.text) ? 'smalltalk'
+      : noContentIn(p.text) ? 'empty'
+      : newReadingAskIn(p.text) ? 'new_reading' : '';
+    if (kind) {
+      try { stmts.dropChatPendings.run(uid); } catch {}
+      track(db, uid, 'chat_resume_dropped', { reading_id: p.reading_id, kind, via });
+      return false;
+    }
+  }
   if (chatInflight.has(uid)) return false;
   let price = null;
   try { price = claimPendingChat(uid, p.id, p.reading_id); } catch { return false; }
@@ -12864,7 +12946,7 @@ bot.on('text', async (ctx) => {
         [[Markup.button.callback(L.buttons.setBack, 'set:home')]]));
     }
     // در مرحله‌ی حوزه‌ی تمرکز و ماهِ تولد، ورودی متنی را نمی‌گیریم؛ کاربر باید از دکمه‌ها انتخاب
-    // کند (نه رد کردن مرحله). 🐛 v3.151.0: `onboard_month` تا امروز این‌جا شاخه نداشت و به
+    // کند (نه رد کردن مرحله). 🐛 v3.152.0: `onboard_month` تا امروز این‌جا شاخه نداشت و به
     // پیش‌فرضِ تهِ همین هندلر می‌افتاد: پیامِ «کاربرِ برگشتی» + **کیبوردِ ماندگار** وسطِ
     // آنبوردینگ، و سؤالِ ماهِ تولد هرگز دوباره پرسیده نمی‌شد (هشدارِ ناظرِ گیرافتادن روی
     // `d815db9d`). حالا همان گاردِ تک‌منبعِ `blockDuringOnboarding` جواب می‌دهد که دکمه‌ها
@@ -12960,7 +13042,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
   upsertUser(ctx);
   // در مرحله‌ی نام، ویس نمی‌گیریم (نام را تایپی می‌خواهیم) — راهنمای نرم به‌جای سکوت
   if (getState(uid) === 'onboard_name') return ctx.reply(L.onboarding.askNameRetry);
-  // 🐛 v3.151.0: ویس در مرحله‌ی ماهِ تولد/حوزه‌ی تمرکز تا امروز **بی‌صدا** دور ریخته می‌شد
+  // 🐛 v3.152.0: ویس در مرحله‌ی ماهِ تولد/حوزه‌ی تمرکز تا امروز **بی‌صدا** دور ریخته می‌شد
   // (پایینِ همین هندلر فقط `await_question` را می‌پذیرد). همان سؤالِ دکمه‌ای را دوباره می‌پرسیم.
   if (getState(uid) === 'onboard_month' || getState(uid) === 'onboard_focus') return blockDuringOnboarding(ctx);
   // 🗣 ویس در گفتگو (نسخه‌ی اول فقط متن). بدونِ این شاخه، ویس **بی‌صدا** می‌مرد: کاربری

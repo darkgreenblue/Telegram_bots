@@ -902,6 +902,7 @@ export default {
     mediaReceipt: '📎 Na conversa eu ainda leio só texto.\n\nSe for um comprovante de pagamento, encerre a conversa primeiro e depois envie de novo.',
     // Gentileza ou cumprimento: de graça, com um convite leve pra pergunta de verdade.
     smallTalk: 'Imagina 🌿\n\nPergunte o que quiser sobre a sua leitura.',
+    newReadingPointer: (btn) => `👇 Para uma leitura nova, toque em «${btn}».`,
     newReadingAsk: 'Uma leitura nova começa com cartas novas; toque no botão abaixo 👇\n\nSe a sua pergunta for sobre esta leitura, escreva a pergunta completa.',
     // Dois toques ao mesmo tempo.
     busy: 'Um segundo, ainda estou escrevendo a resposta anterior 🕯️',

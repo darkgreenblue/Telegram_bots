@@ -84,7 +84,7 @@ merge → دیپلوی خودکار. تنها کارِ دستیِ مجاز بر�
 |-----|--------|------|
 | `~/voice2text/` | مونوریپوی ربات‌های تلگرام | نامش تاریخی است؛ **کلِ** مونوریپو آنجاست. دست نزن. |
 | `~/tabir_khab/` | ربات تعبیر خواب (پایتون + systemd) | دست نزن. |
-| اپ‌های pm2: `voice2text`, `tarot`, `tarot-ru`, `tarot-pt`, `tarot-es`, `daily-brief`, `dashboard`, `health-watch`, `notebook-podcast`, `notebook-podcast-proxy` | مونوریپو | **هرگز** stop/restart/delete نکن، مگر اپ متعلق به همین تسک باشد |
+| اپ‌های pm2: `voice2text`, `tarot`, `tarot-ru`, `tarot-pt`, `tarot-es`, `daily-brief`, `ads-automation`, `dashboard`, `health-watch`, `notebook-podcast`, `notebook-podcast-proxy` | مونوریپو | **هرگز** stop/restart/delete نکن، مگر اپ متعلق به همین تسک باشد |
 
 `notebook-podcast-proxy` فقط روی loopback گوش می‌دهد: پورت `18759` برای تلگرام همین ربات، `18760–18765` و `18775–18779` برای سنجش ۱۱ نود، `18769` برای API انتخاب نود و `18770–18772` برای حداکثر سه کار NotebookLM هم‌زمان. فایل کانفیگ از Secret اختصاصی GitHub روی VPS قرار می‌گیرد. مسیر شبکهٔ VPS و سایر اپ‌ها تغییر نمی‌کند.
 | سرویس systemd: `tabir-khab`, `dash-tunnel`, `pm2-ubuntu` | مونوریپو | `pm2-ubuntu` یعنی بعد از ری‌بوت pm2 خودکار بالا می‌آید |
