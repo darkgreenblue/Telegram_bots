@@ -419,7 +419,11 @@ jobs:
               write_env daily-brief "$DLB_ENV"
             fi
             if [ -n "$ADS_ADMIN_BOT_TOKEN" ]; then
-              write_env ads-automation "$(printf 'ADS_ADMIN_BOT_TOKEN=%s\nADS_ADMIN_ID=100257975\nADS_LIVE_ENABLED=0\nADS_COST_GATE_VERIFIED=0\nADS_SHEETS_ID=1d1_2x9cNYB7CsoGVGYuNXRFhctyX0G9boROKbvVLYNs' "$ADS_ADMIN_BOT_TOKEN")"
+              ADS_ENV="$(printf 'ADS_ADMIN_BOT_TOKEN=%s\nADS_ADMIN_ID=100257975\nADS_LIVE_ENABLED=0\nADS_COST_GATE_VERIFIED=0\nADS_SHEETS_ID=1d1_2x9cNYB7CsoGVGYuNXRFhctyX0G9boROKbvVLYNs' "$ADS_ADMIN_BOT_TOKEN")"
+              if [ -f bots/ads-automation/data/google-service-account.json ]; then
+                ADS_ENV="$(printf '%s\nADS_GOOGLE_CREDENTIALS=./data/google-service-account.json' "$ADS_ENV")"
+              fi
+              write_env ads-automation "$ADS_ENV"
             fi
             if [ -n "$DASHBOARD_TOKEN" ]; then
               write_env dashboard "$(printf 'DASHBOARD_TOKEN=%s\nPORT=8787' "$DASHBOARD_TOKEN")"

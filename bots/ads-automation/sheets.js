@@ -5,8 +5,23 @@ const base='https://sheets.googleapis.com/v4/spreadsheets';
 const b64=v=>Buffer.from(JSON.stringify(v)).toString('base64url');
 
 export class GoogleSheetsMirror {
-  constructor({spreadsheetId,credentialsPath,fetcher=fetch}){
+  constructor({spreadsheetId,credentialsPath,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),timeoutMs=15000}){
     this.spreadsheetId=spreadsheetId;this.credentialsPath=credentialsPath;this.fetcher=fetcher;this.cached=null;
+    this.sleep=sleep;this.timeoutMs=timeoutMs;
+  }
+  async request(url,options,{retry=true,label}={}){
+    for(let attempt=0;attempt<3;attempt++){
+      let response;
+      try{response=await this.fetcher(url,{...options,signal:AbortSignal.timeout(this.timeoutMs)});}
+      catch(error){
+        if(!retry||attempt===2)throw new Error(`${label} network request failed`);
+      }
+      if(response?.ok)return response.status===204?{}:response.json();
+      if(response && (!retry||attempt===2||![429,500,502,503,504].includes(response.status)))
+        throw new Error(`${label} HTTP ${response.status}`);
+      const retryAfter=Number(response?.headers?.get('retry-after'));
+      await this.sleep(Math.max(250*2**attempt,Math.min(2000,Number.isFinite(retryAfter)?retryAfter*1000:0)));
+    }
   }
   async token(){
     if(this.cached && this.cached.until>Date.now()+60000)return this.cached.value;
@@ -17,26 +32,33 @@ export class GoogleSheetsMirror {
       aud:'https://oauth2.googleapis.com/token',iat:epoch,exp:epoch+3600});
     const sign=createSign('RSA-SHA256');sign.update(`${head}.${claim}`);sign.end();
     const assertion=`${head}.${claim}.${sign.sign(creds.private_key).toString('base64url')}`;
-    const r=await this.fetcher('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})});
-    if(!r.ok)throw new Error(`Google token HTTP ${r.status}`);
-    const data=await r.json();this.cached={value:data.access_token,until:Date.now()+data.expires_in*1000};return data.access_token;
+    const data=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion})},{label:'Google token'});
+    if(typeof data.access_token!=='string'||!Number.isFinite(Number(data.expires_in)))throw new Error('invalid Google token response');
+    this.cached={value:data.access_token,until:Date.now()+data.expires_in*1000};return data.access_token;
   }
-  async api(path,{method='GET',body}={}){
-    const token=await this.token();const r=await this.fetcher(`${base}/${this.spreadsheetId}${path}`,{method,
-      headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
-    if(!r.ok)throw new Error(`Google Sheets HTTP ${r.status}`);
-    return r.status===204?{}:r.json();
+  async api(path,{method='GET',body,retry=true}={}){
+    const token=await this.token();
+    return this.request(`${base}/${this.spreadsheetId}${path}`,{method,
+      headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})},
+      {retry,label:'Google Sheets'});
   }
   async ensureTabs(){
-    const meta=await this.api('?fields=sheets.properties.title');
+    const path='?fields=sheets.properties(sheetId,title,gridProperties.rowCount)';
+    let meta=await this.api(path);
     const existing=new Set((meta.sheets||[]).map(s=>s.properties.title));
     const missing=['Candidates','Tests','Insights'].filter(t=>!existing.has(t));
-    if(missing.length)await this.api(':batchUpdate',{method:'POST',body:{requests:missing.map(title=>({addSheet:{properties:{title}}}))}});
+    // addSheet is not replayed after an ambiguous response. The next sync reads
+    // the actual tab list again, rather than blindly creating it twice.
+    if(missing.length){
+      await this.api(':batchUpdate',{method:'POST',retry:false,body:{requests:missing.map(title=>({addSheet:{properties:{title}}}))}});
+      meta=await this.api(path);
+    }
+    return meta.sheets.map(s=>s.properties);
   }
   async sync(store,projectId){
     if(!this.spreadsheetId||!this.credentialsPath)return false;
-    await this.ensureTabs();
+    const tabs=await this.ensureTabs();
     const db=store.db;
     const candidates=db.prepare('SELECT * FROM candidates WHERE project_id=? ORDER BY score DESC,id').all(projectId);
     const tests=db.prepare(`SELECT e.*,c.surface,c.value FROM experiments e JOIN candidates c ON c.id=e.candidate_id
@@ -52,8 +74,19 @@ export class GoogleSheetsMirror {
         ...insights.map(i=>[i.id,i.scope,i.claim,i.status,i.hypothesis,i.evidence_json])]
     };
     const names=Object.keys(tables);
-    await this.api('/values:batchClear',{method:'POST',body:{ranges:names.map(n=>`${n}!A:Z`)}});
-    await this.api('/values:batchUpdate',{method:'POST',body:{valueInputOption:'RAW',data:names.map(n=>({range:`${n}!A1`,values:tables[n]}))}});
+    const requests=[];
+    for(const name of names){
+      const tab=tabs.find(t=>t.title===name),values=tables[name];
+      const rowCount=Math.max(tab.gridProperties.rowCount,values.length);
+      if(rowCount>tab.gridProperties.rowCount)requests.push({updateSheetProperties:{
+        properties:{sheetId:tab.sheetId,gridProperties:{rowCount}},fields:'gridProperties.rowCount'}});
+      requests.push({updateCells:{range:{sheetId:tab.sheetId,startRowIndex:0,endRowIndex:rowCount,startColumnIndex:0,endColumnIndex:26},
+        fields:'userEnteredValue',rows:values.map(row=>({values:row.map(value=>({userEnteredValue:
+          typeof value==='number'?{numberValue:value}:{stringValue:String(value??'')}}))}))}});
+    }
+    // A single atomic batch replaces values AND clears obsolete rows. Replaying
+    // this exact payload after a timeout is safe; archives and formatting survive.
+    await this.api(':batchUpdate',{method:'POST',body:{requests}});
     store.audit('system','sheets.sync',projectId,{counts:names.map(n=>tables[n].length-1)});
     return true;
   }

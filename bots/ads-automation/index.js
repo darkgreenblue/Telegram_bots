@@ -9,6 +9,7 @@ import { refreshInsights } from './learning.js';
 import { queueResearch } from './brain.js';
 import { shortlist } from './discovery.js';
 import { syncProductStats } from './product.js';
+import { startRuntime } from './runtime.js';
 
 if(!process.env.ADS_ADMIN_BOT_TOKEN)throw new Error('ADS_ADMIN_BOT_TOKEN خالی است');
 if(!Number.isSafeInteger(Number(process.env.ADS_ADMIN_ID)))throw new Error('ADS_ADMIN_ID نامعتبر است');
@@ -109,12 +110,21 @@ async function cycle(){
       }
     }
     await sendAdminQueue(store,bot,ownerId);
+    store.audit('worker','cycle.completed',owner,{cycleNo});
   }catch(e){store.audit('worker','error','cycle',{message:e.message});}
   finally{busy=false;}
 }
 
-await bot.launch();
-await cycle();
-const timer=setInterval(cycle,30000);
-const stop=async()=>{clearInterval(timer);bot.stop();store.close();};
+const runtime=startRuntime({bot,cycle,close:()=>store.close(),log:(event,detail)=>{
+  store.audit('worker',event,owner,detail);
+  console.log(JSON.stringify({at:new Date().toISOString(),event,...detail}));
+}});
+const stop=()=>runtime.stop().catch(error=>{
+  console.error(JSON.stringify({event:'runtime.shutdown_failed',message:String(error.message).slice(0,200)}));
+  process.exitCode=1;
+});
 process.once('SIGTERM',stop);process.once('SIGINT',stop);
+try{await runtime.done;}catch(error){
+  console.error(JSON.stringify({event:'runtime.exit',message:String(error.message).slice(0,200)}));
+  process.exitCode=1;
+}
