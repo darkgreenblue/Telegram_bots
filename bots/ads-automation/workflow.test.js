@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './db.js';
-import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment,createApproved } from './workflow.js';
+import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment,createApproved,pauseManaged } from './workflow.js';
 import { AdsApi } from './api.js';
 
 const safeResetMinute=()=>Math.floor(((Date.now()/1000)%86400)/60+180)%1440;
@@ -109,6 +109,20 @@ test('deletion cannot reclaim before ten inactive minutes',async()=>{
   store.db.prepare(`UPDATE experiments SET stopped_at=unixepoch()-601 WHERE id=1`).run();
   await executeDecision(store,api,1,{resetMinute:0});assert.equal(deletions,1);
   assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'deleted');store.close();
+});
+
+test('provider status can prove inactivity without an is_paused response field',async()=>{
+  const store=openStore(':memory:');seed(store);let writes=0;
+  try{
+    const api={getAd:async()=>({ad_id:444,status:'on_hold',remaining_budget:0.95}),
+      call:async method=>{assert.equal(method,'deleteAd');writes++;return true;}};
+    const ex=store.db.prepare('SELECT * FROM experiments WHERE id=1').get();
+    await pauseManaged(store,api,ex,'fixture');assert.equal(writes,0);
+    store.db.prepare('UPDATE experiments SET stopped_at=unixepoch()-601 WHERE id=1').run();
+    store.db.prepare("INSERT INTO decisions(id,project_id,experiment_id,kind,payload_json,status) VALUES(1,1,1,'delete','{}','approved')").run();
+    await executeDecision(store,api,1,{resetMinute:0});assert.equal(writes,1);
+    assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'deleted');
+  }finally{store.close();}
 });
 
 test('ready-for-review ads are submitted explicitly after account review state changes',async()=>{

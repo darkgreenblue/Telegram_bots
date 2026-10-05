@@ -19,7 +19,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Project 1 (`tarot-en-global-2026`) registered in calibration with 20 research seeds. No live experiments created.
 - Product scope `tarot-intl@en` resolves to the existing destination. Per-version attribution bridge is implemented; real attribution round trip remains to be checked.
 - Admin bot: `@AliAdsOpsControlBot`. Server owns polling; no competing local poller is authorized.
-- Latest local suite: 46 tests passed; all 22 selected repository CI checks passed.
+- Latest local suite: 47 tests passed; all 22 selected repository CI checks passed.
 - Research job 1 completed through the actual subscription-backed Codex/SSH round trip. The store has 39 candidates; 20 strategy jobs, 20 copy jobs and all 6 channel image-prompt jobs completed. All six banner prompts have Telegram message IDs with status sent; 14 draft experiments await calibration approval, and no Ads exist.
 - Local worker installed as `org.alireza.telegram-ads-brain` in `~/Library/LaunchAgents/`; observed running after a safe idle restart to load the Persian owner-language prompt updates (PID 99199). Logs: `data/brain-logs/`. It processes brain jobs only, never polls the admin bot.
 - PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Server deployment passed. The actual `/status` handler delivered to the owner through Telegram without starting another poller.
@@ -67,3 +67,5 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Further plan gaps to resolve before enabling automatic decisions: stable shared hypothesis grouping and product-version validity on insights; decision feedback that uses comparable-age payment quality rather than only CPA; provider-side winner lease behavior and verified API formats. Current calibration is required, and a no-spend deployment is not full live-pilot acceptance.
 
 - A matching provider title without persisted local create history is rejected; the automation cannot adopt an old campaign merely because its title matches. A consistent live SQLite backup was reopened readonly and passed integrity/foreign-key checks with 39 candidates, 14 drafts, 47 completed jobs and zero Ads/financial operations. Evidence on VPS: `data/backups/acceptance-2026-10-05T15-13-51.785Z.db.json`.
+
+- Read-only getAdsList, getAdsById and getAdStats passed with the existing token. The account has seven older Ads (six active, one stopped); none were adopted or altered. Responses expose status, not is_paused, so inactivity checks support stopped/on_hold without that field. Stats are an array. Financial operations in this service remain zero.

@@ -11,6 +11,7 @@ const now=()=>Math.floor(Date.now()/1000);
 const money=n=>Math.round(n*100000)/100000;
 const checkMoney=(n,name)=>{if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new Error(`${name} missing`);return n;};
 const asDecision=(db,id)=>row(db,'decisions',id);
+const isInactive=ad=>ad.is_paused===true||['on_hold','stopped'].includes(ad.status);
 
 export function requestDecision(store,projectId,experimentId,kind,payload,evidence={}) {
   const d=store.db.prepare(`SELECT * FROM decisions WHERE project_id=? AND experiment_id IS ? AND kind=? AND status='pending' ORDER BY id DESC LIMIT 1`).get(projectId,experimentId,kind);
@@ -167,7 +168,7 @@ export async function pauseManaged(store,api,ex,reason){
   if(!ex.ad_id||ex.status==='deleted')return;
   const ad=await api.getAd(ex.ad_id);
   if(!ad||ad.ad_id!==ex.ad_id)throw new Error('managed ad missing from account');
-  if(!ad.is_paused)await api.call('editAd',{ad_id:ex.ad_id,is_paused:true},`pause-${ex.id}-${ex.test_round}-${reason}`);
+  if(!isInactive(ad))await api.call('editAd',{ad_id:ex.ad_id,is_paused:true},`pause-${ex.id}-${ex.test_round}-${reason}`);
   store.db.prepare(`UPDATE experiments SET status='paused',stopped_at=?,lease_until=NULL WHERE id=?`).run(now(),ex.id);
   store.audit('system','ad.pause',ex.id,{reason,adId:ex.ad_id});
 }
@@ -283,7 +284,7 @@ export async function pollExperiment(store,api,experimentId,{resetMinute}){
     return;
   }
   // Always stop at the provider-side deadline before crossing an unverified day boundary.
-  if(ad.is_paused||!ex.lease_until||ex.lease_until-time<300)await extendLease(store,api,update(),ad,resetMinute);
+  if(isInactive(ad)||!ex.lease_until||ex.lease_until-time<300)await extendLease(store,api,update(),ad,resetMinute);
   const delay=cadence({views,spent,firstViewAt:first,lastCheckedAt:ex.last_checked_at,lastViews:ex.last_views,lastSpent:ex.last_spent},time);
   db.prepare(`UPDATE experiments SET status='testing',next_check_at=? WHERE id=?`).run(time+delay,ex.id);
 }
@@ -302,7 +303,7 @@ export async function executeDecision(store,api,decisionId,config){
       const fresh=row(store.db,'experiments',ex.id);
       if(now()-fresh.stopped_at<600)return; // API requires ten inactive minutes
       const ad=await api.getAd(ex.ad_id);
-      if(!ad.is_paused && ad.status!=='stopped')throw new Error('ad not inactive');
+      if(!isInactive(ad))throw new Error('ad not inactive');
       if(checkMoney(ad.remaining_budget,'remaining budget')>ex.allocated_total+1e-6)
         throw new Error('provider returned more budget than this campaign received');
       await api.call('deleteAd',{ad_id:ex.ad_id},`delete-${ex.id}`);
