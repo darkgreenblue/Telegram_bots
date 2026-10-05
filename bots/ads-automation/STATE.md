@@ -19,7 +19,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Project 1 (`tarot-en-global-2026`) registered in calibration with 20 research seeds. No live experiments created.
 - Product scope `tarot-intl@en` resolves to the existing destination. Per-version attribution bridge is implemented; real attribution round trip remains to be checked.
 - Admin bot: `@AliAdsOpsControlBot`. Server owns polling; no competing local poller is authorized.
-- Latest local suite: 37 tests passed; all 22 selected repository CI checks passed.
+- Latest local suite: 45 tests passed; all 22 selected repository CI checks passed.
 - Research job 1 completed through the actual subscription-backed Codex/SSH round trip. The store has 39 candidates; 20 strategy jobs, 20 copy jobs and all 6 channel image-prompt jobs completed. All six banner prompts have Telegram message IDs with status sent; 14 draft experiments await calibration approval, and no Ads exist.
 - Local worker installed as `org.alireza.telegram-ads-brain` in `~/Library/LaunchAgents/`; observed running after a safe idle restart to load the Persian owner-language prompt updates (PID 99199). Logs: `data/brain-logs/`. It processes brain jobs only, never polls the admin bot.
 - PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Server deployment passed. The actual `/status` handler delivered to the owner through Telegram without starting another poller.
@@ -48,7 +48,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 ## Current working copy
 
 - Managed worktree: `/Users/alireza/.codex/worktrees/telegram-ads-automation/Telegram_bots`.
-- Branch: `codex/ads-acceptance-checkpoint`. PRs #484 and #485 merged and actually deployed. Calibration messages show the target, copy, sources, Persian hypothesis and financial effects with an explicit disabled-gate notice. Preserve a configured server Google credential path across future deployments only when the ignored credential file exists. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending. Server native probes (SQLite query, sharp encode, mtcute import) passed and the verified installation fingerprint was recorded for reuse.
+- Branch: `codex/ads-recovery-validation`. PRs #484 and #485 merged and actually deployed; documentation checkpoint #486 merged. Calibration messages show the target, copy, sources, Persian hypothesis and financial effects with an explicit disabled-gate notice. Preserve a configured server Google credential path across future deployments only when the ignored credential file exists. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending. Server native probes (SQLite query, sharp encode, mtcute import) passed and the verified installation fingerprint was recorded for reuse.
 - User's original dirty checkout must remain untouched.
 
 ## Acceptance remains incomplete
@@ -57,3 +57,11 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Real owner banner reply, real product-user entry and late-payment/refund attribution are not accepted yet.
 - Before enabling live spend, audit API rate-limit cooldowns, uncertainty reconciliation, provider precision/leases and decision/learning behavior against real account responses. Passing the no-spend simulation does not establish those account behaviors.
 - The initial heartbeat `verify-telegram-ads-no-spend-deploy` is already PAUSED; there is no active redundant deploy monitor.
+
+## Recovery validation checkpoint
+
+- Real Codex vision accepted the synthetic image reading `Daily reflection` and rejected `Daily refelction`, identifying the spelling error. The same structured output went through the actual submission path into an isolated database: incorrect image -> qa_failed + correction job; corrected revision -> prepared 1280x720 JPEG + approved. Evidence: ignored `data/verification/vision-1791212784221/evidence.json`. No real campaign creative was replaced and no live Ads calls occurred. Owner/Gemini reply remains the approved manual v1 step.
+- Necessary recovery fixes: persist account-wide API cooldown across restarts; defer long provider limits without sleeping inside the worker; preserve the exact initial create request after an uncertain response; stop replay if that request expired or its other fields changed. Completed brain outputs may be acknowledged again without applying twice. Interrupted image preparation reuses only an identical artifact; stale/expired image jobs cannot prepare output.
+- Actual shared start-attribution and dashboard bridge exercised on temporary product/platform databases: campaign creation is idempotent, new and returning users stay separate, a returning organic payer does not become campaign-acquired, pending payments are excluded, and a late approved Stars payment appears on the next bridge read. Refunded-status exclusion passed; separate refund amounts remain unavailable in the current bridge.
+- These checks do not establish provider account capabilities, real conversion profitability or production refund attribution. Both financial gates remain disabled.
+- Further plan gaps to resolve before enabling automatic decisions: stable shared hypothesis grouping and product-version validity on insights; decision feedback that uses comparable-age payment quality rather than only CPA; provider-side winner lease behavior and verified API formats. Current calibration is required, and a no-spend deployment is not full live-pilot acceptance.

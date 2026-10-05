@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { row } from './db.js';
 import { dashboardBridge } from './bridge.js';
@@ -84,7 +85,7 @@ function reserveProjectSpend(store,project,ex,desired){
     store.db.prepare('UPDATE experiments SET spend_authorized=? WHERE id=?').run(money(desired),ex.id);
 }
 
-export async function createApproved(store,api,experimentId,{resetMinute}) {
+export async function createApproved(store,api,experimentId,{resetMinute,bridge=dashboardBridge}) {
   const db=store.db,ex=row(db,'experiments',experimentId);
   if(!ex)throw new Error('experiment absent');
   if(ex.ad_id)return ex.ad_id;
@@ -101,12 +102,12 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
     throw new Error('project spend cap exhausted');
   const account=await api.getAccount();
   if(account.currency!=='TON'||checkMoney(account.remaining_budget,'account remaining budget')<1)throw new Error('account is not funded in TON');
-  const configured=await dashboardBridge({action:'handle',scope:project.scope});
+  const configured=await bridge({action:'handle',scope:project.scope});
   const destUser=new URL(project.destination).pathname.replace(/^\//,'').replace(/\/$/,'');
   if(destUser.toLowerCase()!==configured.username.toLowerCase())throw new Error('destination differs from dashboard scope');
   let tracking=ex.tracking_code;
   if(!tracking){
-    const c=await dashboardBridge({action:'campaign',scope:project.scope,surface:candidate.surface,title:ex.title,marker:`ads-experiment-${ex.id}`});
+    const c=await bridge({action:'campaign',scope:project.scope,surface:candidate.surface,title:ex.title,marker:`ads-experiment-${ex.id}`});
     tracking=c.code;
     db.prepare('UPDATE experiments SET tracking_code=? WHERE id=?').run(tracking,ex.id);
   }
@@ -124,7 +125,7 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
     }
   }
   const {target,placement}=targetFor(candidate);
-  const params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
+  let params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
     initial_budget:1,daily_budget_limit:TEST_TON,is_paused:false,
     deactivate_date:leaseEnd(now(),resetMinute),...(photoId?{photo_id:photoId}:candidate.surface==='bots'?{show_userpic:true}:{})};
   db.transaction(()=>{
@@ -140,6 +141,17 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
   })();
   // A prior uncertain response can be reconciled by unique title before retry.
   const existing=await api.findByTitle(ex.title);
+  const operation=db.prepare('SELECT * FROM operations WHERE op_key=?').get(`create-${ex.id}`);
+  if(operation){
+    const previous=JSON.parse(operation.request_json);
+    const {deactivate_date:previousEnd,...original}=previous;
+    const {deactivate_date:proposedEnd,...current}=params;
+    if(operation.method!=='createAd'||!isDeepStrictEqual(original,current))
+      throw new Error('uncertain create request changed: reconcile before retry');
+    params=previous;
+    if(!existing&&operation.status!=='done'&&(!Number.isInteger(previousEnd)||previousEnd<=now()))
+      throw new Error('expired uncertain create: reconcile before retry');
+  }
   if(!existing)safetyGate(row(db,'projects',project.id),api,resetMinute);
   const ad=existing||await api.call('createAd',params,`create-${ex.id}`);
   if(!Number.isInteger(ad.ad_id))throw new Error('Ads API returned no ad_id');
