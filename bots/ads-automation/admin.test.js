@@ -7,8 +7,9 @@ test('a financial approval shows its actual target, copy, evidence, cost and dis
   const store=openStore(':memory:');
   store.db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context)
     VALUES (1,'pilot','Pilot','tarot-intl@en','https://t.me/samplebot','global','en','test')`).run();
-  store.db.prepare(`INSERT INTO candidates(id,project_id,surface,value,source,hypothesis,evidence_json)
-    VALUES (1,1,'bots','@samplebot','research','علایق مشترک مخاطبان','[{"url":"https://t.me/samplebot"}]')`).run();
+  store.db.prepare(`INSERT INTO candidates(id,project_id,surface,value,source,hypothesis,evidence_json,features_json)
+    VALUES (1,1,'bots','@samplebot','research','Original research hypothesis','[{"url":"https://t.me/samplebot"}]',
+      '{"ownerHypothesisFa":"علایق مشترک مخاطبان"}')`).run();
   store.db.prepare(`INSERT INTO creatives(id,project_id,candidate_id,angle,ad_text,status)
     VALUES (1,1,1,'Daily reflection','Explore your daily tarot','approved')`).run();
   store.db.prepare(`INSERT INTO experiments(id,project_id,candidate_id,creative_id,title,cpm,placement)
@@ -25,5 +26,6 @@ test('a financial approval shows its actual target, copy, evidence, cost and dis
   assert.ok(message.includes('@samplebot'));
   assert.equal(store.db.prepare('SELECT message_id FROM decisions WHERE id=1').get().message_id,100);
   assert.equal(store.db.prepare('SELECT spend_authorized FROM experiments WHERE id=1').get().spend_authorized,0);
+  assert.equal(store.db.prepare('SELECT hypothesis FROM candidates WHERE id=1').get().hypothesis,'Original research hypothesis');
   store.close();
 });

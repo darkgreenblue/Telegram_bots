@@ -31,9 +31,9 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 ## Remaining acceptance work
 
 1. Startup fix deployed in PR #484 (merge f101a9afcc948da2d788db4b7ee93bce2868e56e). Deploy run 37323911810 actually executed Deploy to VPS successfully at 14:22:48 UTC. Real server lease and cycle.completed records passed; PM2 restart counter 3. Continue checking stability, not just process online status.
-2. Verify strategy/copy/banner stages from the installed local worker; the research round trip and persistent worker startup passed.
+2. Verify strategy/copy/banner stages from the installed local worker; real research, all 20 strategies and all 20 copies passed; channel image prompts are being delivered to the admin bot.
 3. Real product link creation passed for experiment 1: two calls returned the same c_CODE, persisted on the draft experiment, and the real per-code stats bridge returned the Stars unit. No product-user entry or payment was fabricated. Real entry/refund attribution remains pending.
-4. Real VPS Sheet write passed with 39 candidates and 10 draft tests. Independent connector reads confirmed the new values and preserved Brazil archive. Still verify the periodic server sync, not only the manually invoked sync.
+4. Real VPS Sheet write passed with 39 candidates and 10 draft tests. Independent connector reads confirmed the new values and preserved Brazil archive. Periodic sync passed at cycle 20: the server updated the Sheet to 39 candidates and 14 drafts without an operator call. No worker errors were recorded. Original research evidence is unchanged; the selected 20 candidates have Persian owner explanations in features metadata.
 5. Exercise admin reply/image QA and correction flow with real image input.
 6. Obtain authorized Ads API access and conduct explicitly approved controlled account validation.
 
@@ -43,7 +43,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Exact provider-side 0.05 TON enforcement, actual daily reset, precision and delayed-statistics behavior are not yet account-verified.
 - Net product revenue cannot be claimed until per-code refunds are available.
 - Public-channel evidence is a hypothesis, not proof of Ads inventory availability or audience country.
-- Google service account is configured on the server and real writes passed. Account has no project-wide IAM role. Periodic sync acceptance is pending the next server interval.
+- Google service account is configured on the server and real writes passed. Account has no project-wide IAM role. Periodic sync passed at cycle 20 with the current draft count.
 
 ## Current working copy
 

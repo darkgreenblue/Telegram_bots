@@ -12,7 +12,7 @@ export const decisionBrief=(store,d,{live=false,costVerified=false}={})=>{
     graduate:'برداشتن سقف روزانهٔ برنده',continue:'ادامهٔ تست',review:'ارزیابی نوبت تست'};
   let t=`🧭 تصمیم #${d.id}\n${names[d.kind]||d.kind}\nپروژه: ${d.project_id}`;
   if(d.experiment_id)t+=` | تست: ${d.experiment_id}`;
-  const context=d.experiment_id?store.db.prepare(`SELECT c.surface,c.value,c.hypothesis,c.source,c.evidence_json,
+  const context=d.experiment_id?store.db.prepare(`SELECT c.surface,c.value,c.hypothesis,c.source,c.evidence_json,c.features_json,
     cr.angle,cr.ad_text FROM experiments ex JOIN candidates c ON c.id=ex.candidate_id
     JOIN creatives cr ON cr.id=ex.creative_id WHERE ex.id=?`).get(d.experiment_id):null;
   if(context){
@@ -20,7 +20,8 @@ export const decisionBrief=(store,d,{live=false,costVerified=false}={})=>{
     t+=`\nمحل تبلیغ (${surfaces[context.surface]}): ${compact(context.value,180)}`;
     t+=`\nزاویه: ${compact(context.angle,180)}\nمتن تبلیغ: ${compact(context.ad_text,160)}`;
   }
-  const reason=p.reason||context?.hypothesis;
+  const ownerHypothesis=context?JSON.parse(context.features_json).ownerHypothesisFa:null;
+  const reason=p.reason||ownerHypothesis||context?.hypothesis;
   if(reason)t+=`\nدلیل / فرضیه: ${compact(reason,500)}`;
   if(e.cpa!=null)t+=`\nCPA: ${Number(e.cpa).toFixed(5)} TON`;
   if(e.spent!=null)t+=`\nخرج: ${Number(e.spent).toFixed(5)} TON`;
