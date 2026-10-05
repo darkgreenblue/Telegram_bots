@@ -4,9 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import bot
 from bot import MAX_FILE, on_message, parse_message
 from notebook import generate, upload
 from store import Store
+from studio import output_path
 
 
 class CollectionTests(unittest.TestCase):
@@ -31,6 +33,48 @@ class CollectionTests(unittest.TestCase):
 
 
 class GenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_manual_audio_retries_delivery_with_mp3_and_then_cleans_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            local_store = Store(Path(directory) / "bot.db")
+            session = {
+                "batch_id": "c" * 32, "state": "generating", "output_type": "audio",
+                "notebook_title": "درس آزمایشی", "notebook_id": "notebook-1",
+                "work_dir": directory, "inputs": [],
+            }
+            local_store.put(42, session)
+            original = output_path(session)
+            original.write_bytes(b"notebook audio")
+            mp3 = original.with_suffix(".mp3")
+
+            async def convert(source):
+                self.assertEqual(source, original)
+                mp3.write_bytes(b"converted audio")
+                return mp3, 12
+
+            async def worker(*args, **kwargs):
+                return SimpleNamespace(wait=AsyncMock(return_value=0))
+
+            send_audio = AsyncMock(side_effect=[RuntimeError("Telegram unavailable"), None])
+            app = SimpleNamespace(bot=SimpleNamespace(send_audio=send_audio, send_message=AsyncMock()))
+            with patch.object(bot, "store", local_store), patch.object(bot, "busy_slots", set()), \
+                 patch.object(bot.asyncio, "create_subprocess_exec", worker), \
+                 patch.object(bot, "telegram_mp3", convert):
+                await bot.run_job(42, session["batch_id"], app)
+                self.assertEqual(local_store.get(42)["state"], "error_generate")
+                self.assertTrue(original.exists())
+                self.assertTrue(mp3.exists())
+                session = local_store.get(42)
+                session["state"] = "generating"
+                local_store.put(42, session)
+                await bot.run_job(42, session["batch_id"], app)
+
+            self.assertEqual(local_store.get(42)["state"], "done")
+            self.assertEqual(send_audio.await_count, 2)
+            self.assertEqual(send_audio.await_args.kwargs["filename"], "audio-cccccccc.mp3")
+            self.assertEqual(send_audio.await_args.kwargs["duration"], 12)
+            self.assertFalse(original.exists())
+            self.assertFalse(mp3.exists())
+
     async def test_upload_retries_redirect_and_reuses_url_created_before_failure(self):
         source = SimpleNamespace(id="source-1", url="https://youtu.be/abc")
 
