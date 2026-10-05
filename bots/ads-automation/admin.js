@@ -5,20 +5,41 @@ import { row } from './db.js';
 import { currentBannerRequest,submitBannerImage } from './banner-state.js';
 import { decide,requestDecision,pauseManaged,projectCapacity,projectSpendCommitment } from './workflow.js';
 
-const brief=d=>{
+const compact=(value,limit=350)=>Array.from(String(value??'')).slice(0,limit).join('');
+export const decisionBrief=(store,d,{live=false,costVerified=false}={})=>{
   const p=JSON.parse(d.payload_json),e=JSON.parse(d.evidence_json);
   const names={create:'ساخت تبلیغ و تخصیص ۱ TON',delete:'حذف تبلیغ و آزادسازی باقیمانده',recharge:'افزودن ۱ TON',
     graduate:'برداشتن سقف روزانهٔ برنده',continue:'ادامهٔ تست',review:'ارزیابی نوبت تست'};
   let t=`🧭 تصمیم #${d.id}\n${names[d.kind]||d.kind}\nپروژه: ${d.project_id}`;
   if(d.experiment_id)t+=` | تست: ${d.experiment_id}`;
-  if(p.reason)t+=`\nدلیل: ${p.reason}`;
+  const context=d.experiment_id?store.db.prepare(`SELECT c.surface,c.value,c.hypothesis,c.source,c.evidence_json,c.features_json,
+    cr.angle,cr.ad_text FROM experiments ex JOIN candidates c ON c.id=ex.candidate_id
+    JOIN creatives cr ON cr.id=ex.creative_id WHERE ex.id=?`).get(d.experiment_id):null;
+  if(context){
+    const surfaces={channels:'کانال',bots:'ربات',search:'عبارت جست‌وجو',users:'ترکیب مخاطب'};
+    t+=`\nمحل تبلیغ (${surfaces[context.surface]}): ${compact(context.value,180)}`;
+    t+=`\nزاویه: ${compact(context.angle,180)}\nمتن تبلیغ: ${compact(context.ad_text,160)}`;
+  }
+  const ownerHypothesis=context?JSON.parse(context.features_json).ownerHypothesisFa:null;
+  const reason=p.reason||ownerHypothesis||context?.hypothesis;
+  if(reason)t+=`\nدلیل / فرضیه: ${compact(reason,500)}`;
   if(e.cpa!=null)t+=`\nCPA: ${Number(e.cpa).toFixed(5)} TON`;
   if(e.spent!=null)t+=`\nخرج: ${Number(e.spent).toFixed(5)} TON`;
   if(e.views!=null)t+=` | ویو: ${e.views}`;
   if(e.actions!=null)t+=` | اکشن: ${e.actions}`;
   if(e.rounds)t+=`\nتکرارهای ثبت‌شده: ${e.rounds.length}`;
-  if(d.kind==='create')t+='\nسقف تست: مجموعاً ۰٫۰۵ TON؛ بودجهٔ کمپین: ۱ TON.';
-  if(d.kind==='recharge')t+='\nدر صورت رد، کمپین متوقف می‌ماند.';
+  if(context){
+    t+=`\nمنبع: ${compact(context.source,180)}`;
+    const sources=JSON.parse(context.evidence_json).filter(v=>typeof v.url==='string').slice(0,2);
+    for(const source of sources)t+=`\n${compact(source.url,220)}`;
+    t+='\nاین شواهد، فرضیهٔ انتخاب‌اند؛ نتیجهٔ تست تبلیغ نیستند.';
+  }
+  if(d.kind==='create')t+='\nاثر تأیید: ساخت همین تبلیغ با تخصیص ۱ TON و مجوز تست مجموعاً ۰٫۰۵ TON.\nاثر رد: این تبلیغ ساخته نمی‌شود.';
+  if(d.kind==='continue')t+='\nاثر تأیید: مجوز یک نوبت تازهٔ ۰٫۰۵ TON در سقف پروژه.\nاثر رد: تبلیغ متوقف می‌ماند.';
+  if(d.kind==='graduate')t+='\nاثر تأیید: برداشتن سقف روزانه تا سقف تجمعی ۱ TON، در محدودهٔ مجوز پروژه.\nاثر رد: ارتقا اجرا نمی‌شود.';
+  if(d.kind==='delete')t+='\nاثر تأیید: توقف و حذف پس از انتظار API؛ فقط ماندهٔ تأییدشده آزاد می‌شود و شواهد حفظ می‌شوند.\nاثر رد: حذف اجرا نمی‌شود.';
+  if(d.kind==='recharge')t+='\nاثر تأیید: تخصیص ۱ TON بعدی، در سقف مجوز پروژه.\nاثر رد: کمپین متوقف می‌ماند.';
+  if(!live||!costVerified)t+='\n🔒 خرج غیرفعال است؛ تأیید این پیام به‌تنهایی مجوز عبور از گیت مالی نیست.';
   return t.slice(0,3500);
 };
 
@@ -93,7 +114,8 @@ export async function sendAdminQueue(store,bot,ownerId){
       ? [[Markup.button.callback('ادامهٔ تست',`d:C:${d.id}`),Markup.button.callback('حذف کمپین',`d:X:${d.id}`)],
          [Markup.button.callback('فعلاً متوقف بماند',`d:N:${d.id}`)]]
       : [[Markup.button.callback('تأیید',`d:Y:${d.id}`),Markup.button.callback('رد',`d:N:${d.id}`)]];
-    const sent=await bot.telegram.sendMessage(ownerId,brief(d),Markup.inlineKeyboard(buttons));
+    const sent=await bot.telegram.sendMessage(ownerId,decisionBrief(store,d,{live:process.env.ADS_LIVE_ENABLED==='1',
+      costVerified:process.env.ADS_COST_GATE_VERIFIED==='1'}),Markup.inlineKeyboard(buttons));
     store.db.prepare(`UPDATE decisions SET message_id=? WHERE id=? AND message_id IS NULL`).run(sent.message_id,d.id);
   }
   for(const req of store.db.prepare(`SELECT b.* FROM banner_requests b JOIN creatives c ON c.id=b.creative_id
