@@ -10,7 +10,7 @@ from datetime import datetime, time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -24,7 +24,6 @@ load_dotenv(ROOT / ".env")
 TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
 PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "notebook-podcast")
-DAILY_BRIEF_TOKEN = os.getenv("DAILY_BRIEF_BOT_TOKEN", "")
 DAILY_NOTION_TOKEN = os.getenv("DAILY_BRIEF_NOTION_TOKEN", "")
 DATA = ROOT / "data"
 MAX_FILE = 20 * 1024 * 1024
@@ -478,20 +477,8 @@ def launch_job(owner: int, batch_id: str, app: Application) -> None:
     jobs[batch_id] = task
 
 
-async def daily_send_message(owner: int, message: str) -> None:
-    request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=60)
-    async with Bot(DAILY_BRIEF_TOKEN, request=request) as daily_bot:
-        await daily_bot.send_message(owner, message)
-
-
-async def daily_send_audio(owner: int, stream, filename: str, caption: str) -> None:
-    request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=300)
-    async with Bot(DAILY_BRIEF_TOKEN, request=request) as daily_bot:
-        await daily_bot.send_audio(owner, stream, filename=filename, caption=caption)
-
-
 async def daily_tick(app: Application) -> None:
-    if not DAILY_BRIEF_TOKEN or not DAILY_NOTION_TOKEN:
+    if not DAILY_NOTION_TOKEN:
         return
     now = tehran_now()
     if not start_due(now):
@@ -513,7 +500,7 @@ async def daily_tick(app: Application) -> None:
             retry_later(session, now)
             save(owner, session)
             if send_due(date, now) and not session.get("daily_notified"):
-                await daily_send_message(owner, f"دریافت محتوای آموزشی تاریخ {date} از نوشن ناموفق بود. دوباره تلاش می‌کنم.")
+                await app.bot.send_message(owner, f"دریافت محتوای آموزشی تاریخ {date} از نوشن ناموفق بود. دوباره تلاش می‌کنم.")
                 session["daily_notified"] = True
                 save(owner, session)
             return
@@ -523,15 +510,17 @@ async def daily_tick(app: Application) -> None:
             session["daily_retry_at"] = datetime.combine(now.date(), time(6, 30), TEHRAN).timestamp()
             save(owner, session)
             if send_due(date, now):
-                await daily_send_message(owner, "امروز محتوای آموزشی نداریم!")
+                await app.bot.send_message(owner, "امروز محتوای آموزشی نداریم!")
                 session["state"] = "daily_missing_sent"
                 save(owner, session)
             return
         session = make_session(owner, session["batch_id"] if session else uuid.uuid4().hex, date, lesson, DATA)
         save(owner, session)
     if session["state"] in {"error_upload", "error_generate"}:
-        if send_due(date, now) and not session.get("daily_notified"):
-            await daily_send_message(owner, f"ساخت محتوای آموزشی تاریخ {date} با خطا روبه‌رو شد. دوباره تلاش می‌کنم.")
+        output = output_path(session) if session.get("output_type") else None
+        ready_file = output and output.is_file() and output.stat().st_size > 0
+        if send_due(date, now) and not ready_file and not session.get("daily_notified"):
+            await app.bot.send_message(owner, f"ساخت محتوای آموزشی تاریخ {date} با خطا روبه‌رو شد. دوباره تلاش می‌کنم.")
             session["daily_notified"] = True
             save(owner, session)
         if not retry_due(session, now):
@@ -618,11 +607,10 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
                 session["state"] = "sending"
                 save(owner, session)
             if output.stat().st_size > MAX_AUDIO:
-                target_bot = app.bot if not session.get("daily_date") else None
-                if target_bot:
-                    await target_bot.send_message(owner, f"{KIND_LABELS[kind]} {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. می‌توانی آن را در نوت‌بوک خودت ببینی: https://notebooklm.google.com/notebook/{session['notebook_id']}")
+                if session.get("daily_date"):
+                    await app.bot.send_message(owner, f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}\nفایل از سقف ۵۰ مگابایت تلگرام بزرگ‌تر است: https://notebooklm.google.com/notebook/{session['notebook_id']}")
                 else:
-                    await daily_send_message(owner, f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}\nفایل از سقف ۵۰ مگابایت تلگرام بزرگ‌تر است: https://notebooklm.google.com/notebook/{session['notebook_id']}")
+                    await app.bot.send_message(owner, f"{KIND_LABELS[kind]} {label(session)} ساخته شد، اما فایل از سقف ارسال ۵۰ مگابایت تلگرام بزرگ‌تر است. می‌توانی آن را در نوت‌بوک خودت ببینی: https://notebooklm.google.com/notebook/{session['notebook_id']}")
                 session["state"] = "done"
                 save(owner, session)
                 output.unlink(missing_ok=True)
@@ -632,7 +620,7 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
                 caption = (f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}" if session.get("daily_date")
                            else f"{KIND_LABELS[kind]} از «{session['notebook_title']}» {label(session)}")
                 if session.get("daily_date"):
-                    await daily_send_audio(owner, stream, filename, caption)
+                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
                 elif kind == "audio":
                     await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
                 elif kind in {"video", "cinematic"}:
@@ -721,10 +709,10 @@ async def post_init(app: Application) -> None:
                 sent = await app.bot.send_message(owner, f"کد زبان {label(session)} را در پاسخ به همین پیام بفرست؛ مثلاً tr یا ar.")
                 session["settings_message_id"] = sent.message_id
                 save(owner, session)
-    if DAILY_BRIEF_TOKEN and DAILY_NOTION_TOKEN:
+    if DAILY_NOTION_TOKEN:
         app.create_task(daily_loop(app))
     else:
-        LOG.warning("Daily Brief scheduler disabled: missing bot or Notion token")
+        LOG.warning("Daily Brief scheduler disabled: missing Notion token")
 
 
 def main() -> None:

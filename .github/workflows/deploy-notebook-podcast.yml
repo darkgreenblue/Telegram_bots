@@ -42,15 +42,14 @@ jobs:
           OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
           MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
           PROXY_CONFIG: ${{ secrets.NOTEBOOK_PODCAST_PROXY_CONFIG_JSON }}
-          DAILY_BRIEF_TOKEN: ${{ secrets.DAILY_BRIEF_BOT_TOKEN }}
           DAILY_NOTION_TOKEN: ${{ secrets.DAILY_BRIEF_NOTION_TOKEN }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_IDS" ] && [ -n "$MASTER_TOKEN" ] && [ -n "$PROXY_CONFIG" ] && [ -n "$DAILY_BRIEF_TOKEN" ] && [ -n "$DAILY_NOTION_TOKEN" ] && [ -n "$SSH_KEY" ]; then
+          if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_IDS" ] && [ -n "$MASTER_TOKEN" ] && [ -n "$PROXY_CONFIG" ] && [ -n "$DAILY_NOTION_TOKEN" ] && [ -n "$SSH_KEY" ]; then
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo '⚠️ Required secrets: NOTEBOOK_PODCAST_BOT_TOKEN, OWNER_TELEGRAM_ID, NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON, NOTEBOOK_PODCAST_PROXY_CONFIG_JSON, DAILY_BRIEF_BOT_TOKEN, DAILY_BRIEF_NOTION_TOKEN, VPS_SSH_KEY'
+            echo '⚠️ Required secrets: NOTEBOOK_PODCAST_BOT_TOKEN, OWNER_TELEGRAM_ID, NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON, NOTEBOOK_PODCAST_PROXY_CONFIG_JSON, DAILY_BRIEF_NOTION_TOKEN, VPS_SSH_KEY'
           fi
       - name: Deploy only notebook-podcast
         if: steps.ready.outputs.ready == 'true'
@@ -59,13 +58,11 @@ jobs:
           OWNER_IDS: ${{ secrets.OWNER_TELEGRAM_ID }}
           MASTER_TOKEN: ${{ secrets.NOTEBOOK_PODCAST_GOOGLE_MASTER_TOKEN_JSON }}
           PROXY_CONFIG: ${{ secrets.NOTEBOOK_PODCAST_PROXY_CONFIG_JSON }}
-          DAILY_BRIEF_TOKEN: ${{ secrets.DAILY_BRIEF_BOT_TOKEN }}
           DAILY_NOTION_TOKEN: ${{ secrets.DAILY_BRIEF_NOTION_TOKEN }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
           [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]
-          [[ "$DAILY_BRIEF_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]
           [[ "$OWNER_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]
           python -c 'import json,os; v=json.loads(os.environ["MASTER_TOKEN"]); assert isinstance(v,dict)'
           python -c 'import json,os; v=json.loads(os.environ["PROXY_CONFIG"]); i=v["inbounds"]; b={x["tag"] for x in v["routing"]["balancers"]}; assert all(x["listen"]=="127.0.0.1" and x["protocol"]=="http" for x in i); assert {x["port"] for x in i}=={18759,*range(18760,18766),*range(18770,18773),*range(18775,18780)}; assert {"active","job-0","job-1","job-2"}<=b; assert len(v["outbounds"])==11; assert v["api"]["listen"]=="127.0.0.1:18769"'
@@ -84,7 +81,7 @@ jobs:
           "${SSH[@]}" "mkdir -p '$TARGET/.proxy' && chmod 700 '$TARGET/.proxy'"
           cat /tmp/notebook-podcast-xray | "${SSH[@]}" "umask 077; cat > '$TARGET/.proxy/xray.new' && chmod 700 '$TARGET/.proxy/xray.new' && mv '$TARGET/.proxy/xray.new' '$TARGET/.proxy/xray'"
           printf '%s' "$PROXY_CONFIG" | "${SSH[@]}" "umask 077; cat > '$TARGET/.proxy/config.json.new' && mv '$TARGET/.proxy/config.json.new' '$TARGET/.proxy/config.json'"
-          printf 'BOT_TOKEN=%s\nADMIN_IDS=%s\nNOTEBOOKLM_PROFILE=notebook-podcast\nDAILY_BRIEF_BOT_TOKEN=%s\nDAILY_BRIEF_NOTION_TOKEN=%s\n' "$BOT_TOKEN" "$OWNER_IDS" "$DAILY_BRIEF_TOKEN" "$DAILY_NOTION_TOKEN" \
+          printf 'BOT_TOKEN=%s\nADMIN_IDS=%s\nNOTEBOOKLM_PROFILE=notebook-podcast\nDAILY_BRIEF_NOTION_TOKEN=%s\n' "$BOT_TOKEN" "$OWNER_IDS" "$DAILY_NOTION_TOKEN" \
             | "${SSH[@]}" "umask 077; cat > '$TARGET/.env.new' && mv '$TARGET/.env.new' '$TARGET/.env'"
           printf '%s' "$MASTER_TOKEN" \
             | "${SSH[@]}" 'umask 077; mkdir -p ~/.notebooklm/profiles/notebook-podcast; cat > ~/.notebooklm/profiles/notebook-podcast/master_token.json.new && mv ~/.notebooklm/profiles/notebook-podcast/master_token.json.new ~/.notebooklm/profiles/notebook-podcast/master_token.json'
