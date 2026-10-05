@@ -69,17 +69,18 @@ class DailyTests(unittest.IsolatedAsyncioTestCase):
             now = datetime(2026, 10, 5, 6, 0, tzinfo=TEHRAN)
             fake_lesson = AsyncMock(return_value=None)
             send = AsyncMock()
+            app = SimpleNamespace(bot=SimpleNamespace(send_message=send))
             with patch.object(bot, "store", store), patch.object(bot, "OWNER_IDS", {123}), \
-                 patch.object(bot, "DAILY_BRIEF_TOKEN", "token"), patch.object(bot, "DAILY_NOTION_TOKEN", "token"), \
+                 patch.object(bot, "DAILY_NOTION_TOKEN", "token"), \
                  patch.object(bot, "tehran_now", return_value=now) as clock, \
-                 patch.object(bot, "NotionLessons") as reader, patch.object(bot, "daily_send_message", send):
+                 patch.object(bot, "NotionLessons") as reader:
                 reader.return_value.lesson_for_date = fake_lesson
-                await bot.daily_tick(None)
+                await bot.daily_tick(app)
                 self.assertEqual(store.get(123)["state"], "daily_missing_pending")
                 send.assert_not_awaited()
                 clock.return_value = datetime(2026, 10, 5, 6, 30, tzinfo=TEHRAN)
-                await bot.daily_tick(None)
-                await bot.daily_tick(None)
+                await bot.daily_tick(app)
+                await bot.daily_tick(app)
                 send.assert_awaited_once_with(123, "امروز محتوای آموزشی نداریم!")
                 self.assertEqual(store.get(123)["state"], "daily_missing_sent")
                 self.assertEqual(fake_lesson.await_count, 2)
@@ -112,11 +113,12 @@ class DailyTests(unittest.IsolatedAsyncioTestCase):
 
                 return SimpleNamespace(wait=wait)
 
-            app = SimpleNamespace(bot=SimpleNamespace())
+            app = SimpleNamespace(bot=SimpleNamespace(send_audio=AsyncMock()))
             send_audio = AsyncMock()
+            app.bot.send_audio = send_audio
             with patch.object(bot, "store", store), patch.object(bot, "busy_slots", set()), \
                  patch.object(bot.asyncio, "create_subprocess_exec", fake_process), \
-                 patch.object(bot, "send_due", return_value=False), patch.object(bot, "daily_send_audio", send_audio):
+                 patch.object(bot, "send_due", return_value=False):
                 await bot.run_job(123, session["batch_id"], app)
                 self.assertEqual(phases, ["uploading", "generating"])
                 self.assertEqual(store.get(123)["state"], "daily_ready")
@@ -127,7 +129,7 @@ class DailyTests(unittest.IsolatedAsyncioTestCase):
             store.put(123, current)
             with patch.object(bot, "store", store), patch.object(bot, "busy_slots", set()), \
                  patch.object(bot.asyncio, "create_subprocess_exec", fake_process), \
-                 patch.object(bot, "send_due", return_value=True), patch.object(bot, "daily_send_audio", send_audio):
+                 patch.object(bot, "send_due", return_value=True):
                 await bot.run_job(123, session["batch_id"], app)
             send_audio.assert_awaited_once()
             self.assertEqual(store.get(123)["state"], "done")
