@@ -1,6 +1,7 @@
 import { addCandidate,addJob,row } from './db.js';
 import { shortlist } from './discovery.js';
 import { targetFor } from './targets.js';
+import { assertCurrentBannerQa } from './banner-state.js';
 
 export const SCHEMAS={
   market:{type:'object',additionalProperties:false,required:['recommended_market','reasons','alternatives','sources'],properties:{
@@ -126,6 +127,7 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
   } else if(job.kind==='image_qa'){
     const input=JSON.parse(job.input_json),creative=row(db,'creatives',input.creativeId);
     if(!creative)throw new Error('creative absent');
+    assertCurrentBannerQa(db,input);
     if(result.approved&&result.text_matches&&result.language_matches&&Array.isArray(result.issues)&&!result.issues.length){
       if(!preparedBanner?.path||!preparedBanner?.sha256)throw new Error('approved banner was not prepared');
       db.prepare(`UPDATE creatives SET image_path=?,image_sha256=?,qa_json=?,status='approved' WHERE id=?`).run(

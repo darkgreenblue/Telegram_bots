@@ -1,7 +1,8 @@
 import { Telegraf,Markup } from 'telegraf';
 import { resolve } from 'node:path';
 import { saveTelegramImage } from './images.js';
-import { addJob,row } from './db.js';
+import { row } from './db.js';
+import { currentBannerRequest,submitBannerImage } from './banner-state.js';
 import { decide,requestDecision,pauseManaged,projectCapacity,projectSpendCommitment } from './workflow.js';
 
 const brief=d=>{
@@ -70,6 +71,7 @@ export function createAdminBot(store,{token,ownerId,api}){
     const req=replyId?store.db.prepare(`SELECT * FROM banner_requests WHERE message_id=?`).get(replyId):null;
     if(!req)return ctx.reply('تصویر را در پاسخ به پرامپت همان بنر بفرست.');
     if(req.status==='submitted')return ctx.reply('این تصویر قبلاً دریافت شده است.');
+    if(!currentBannerRequest(store.db,req.id))return ctx.reply('این پرامپت قدیمی است؛ تصویر را در پاسخ به آخرین پرامپت همین بنر بفرست.');
     const doc=ctx.message.document;
     if(doc && !['image/png','image/jpeg','image/webp'].includes(doc.mime_type))return ctx.reply('فایل PNG یا JPEG بفرست.');
     const fileId=doc?.file_id||ctx.message.photo?.at(-1)?.file_id;
@@ -77,11 +79,7 @@ export function createAdminBot(store,{token,ownerId,api}){
     const rawPath=resolve('./data/banners',`raw-${req.id}-${ctx.message.message_id}.img`);
     try{
       await saveTelegramImage(bot,fileId,rawPath);
-      const creative=row(store.db,'creatives',req.creative_id);
-      addJob(store.db,creative.project_id,'image_qa',{creativeId:creative.id,rawPath,
-        exactText:creative.banner_text,language:row(store.db,'projects',creative.project_id).language,
-        rules:'Reject missing/incorrect lettering, spelling, poor readability or unsafe misleading visual claims.'});
-      store.db.prepare(`UPDATE banner_requests SET status='submitted' WHERE id=?`).run(req.id);
+      submitBannerImage(store,req.id,rawPath);
       await ctx.reply('تصویر رسید؛ بررسی متن و کیفیت در صف است.');
     }catch(e){await ctx.reply(`تصویر دریافت نشد: ${String(e.message).slice(0,100)}`);}
   });
@@ -100,8 +98,11 @@ export async function sendAdminQueue(store,bot,ownerId){
   }
   for(const req of store.db.prepare(`SELECT b.* FROM banner_requests b JOIN creatives c ON c.id=b.creative_id
     WHERE b.status='pending' AND c.status='needs_image' ORDER BY b.id LIMIT 10`).all()){
-    const text=`🎨 بنر #${req.creative_id} — نسخهٔ ${req.revision}\n\n${req.prompt}\n\nتصویر نهایی را در پاسخ به همین پیام، ترجیحاً به‌صورت فایل، بفرست.`;
-    const sent=await bot.telegram.sendMessage(ownerId,text.slice(0,4000));
+    const text=`🎨 بنر #${req.creative_id}، نسخهٔ ${req.revision}\n\n${req.prompt}\n\nتصویر نهایی را در پاسخ به همین پیام، ترجیحاً به‌صورت فایل، بفرست.`;
+    const sent=Array.from(text).length<=4000
+      ?await bot.telegram.sendMessage(ownerId,text)
+      :await bot.telegram.sendDocument(ownerId,{source:Buffer.from(req.prompt,'utf8'),filename:`banner-${req.creative_id}-v${req.revision}.txt`},
+        {caption:`🎨 بنر #${req.creative_id}، نسخهٔ ${req.revision}\nپرامپت کامل در فایل است. تصویر نهایی را در پاسخ به همین پیام بفرست.`});
     store.db.prepare(`UPDATE banner_requests SET message_id=?,status='sent' WHERE id=? AND status='pending'`).run(sent.message_id,req.id);
   }
   for(const n of store.db.prepare(`SELECT * FROM notifications WHERE message_id IS NULL ORDER BY id LIMIT 20`).all()){
