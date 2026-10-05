@@ -15,6 +15,7 @@ from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from notebook import InputValidationError
+from audio import AudioConversionError, telegram_mp3
 from daily import NotionLessons, TEHRAN, dated_session, make_session, retry_due, retry_later, send_due, start_due, tehran_now
 from store import Store
 from studio import KIND_LABELS, KINDS, STEPS, output_path
@@ -599,6 +600,11 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
         if session["state"] in {"generating", "sending"}:
             kind = session.get("output_type", "audio")
             output = output_path(session) if session.get("output_type") else Path(session["work_dir"]) / f"{batch_id}.m4a"
+            delivery = output
+            duration = None
+            if kind == "audio":
+                delivery, duration = await telegram_mp3(output)
+                LOG.info("audio_delivery_ready request=%s daily=%s bytes=%d duration_seconds=%d", batch_id[:8], bool(session.get("daily_date")), delivery.stat().st_size, duration)
             if session.get("daily_date") and not session.get("daily_send_now") and not send_due(session["daily_date"]):
                 session["state"] = "daily_ready"
                 save(owner, session)
@@ -606,7 +612,7 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
             if session["state"] == "generating":
                 session["state"] = "sending"
                 save(owner, session)
-            if output.stat().st_size > MAX_AUDIO:
+            if delivery.stat().st_size > MAX_AUDIO:
                 if session.get("daily_date"):
                     await app.bot.send_message(owner, f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}\nفایل از سقف ۵۰ مگابایت تلگرام بزرگ‌تر است: https://notebooklm.google.com/notebook/{session['notebook_id']}")
                 else:
@@ -614,22 +620,28 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
                 session["state"] = "done"
                 save(owner, session)
                 output.unlink(missing_ok=True)
+                if delivery != output:
+                    delivery.unlink(missing_ok=True)
                 return
-            with output.open("rb") as stream:
-                filename = f"{kind}-{batch_id[:8]}{output.suffix}"
+            with delivery.open("rb") as stream:
+                filename = f"{kind}-{batch_id[:8]}{delivery.suffix}"
                 caption = (f"محتوای آموزشی امروز صبح! تاریخ: {session['daily_date']}" if session.get("daily_date")
                            else f"{KIND_LABELS[kind]} از «{session['notebook_title']}» {label(session)}")
                 if session.get("daily_date"):
-                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
+                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption, duration=duration)
                 elif kind == "audio":
-                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption)
+                    await app.bot.send_audio(owner, stream, filename=filename, caption=caption, duration=duration)
                 elif kind in {"video", "cinematic"}:
                     await app.bot.send_video(owner, stream, filename=filename, caption=caption)
                 else:
                     await app.bot.send_document(owner, stream, filename=filename, caption=caption)
             session["state"] = "done"
             save(owner, session)
+            if kind == "audio":
+                LOG.info("audio_delivery_completed request=%s daily=%s", batch_id[:8], bool(session.get("daily_date")))
             output.unlink(missing_ok=True)
+            if delivery != output:
+                delivery.unlink(missing_ok=True)
     except Exception as exc:
         LOG.error("Job failed for request %s: %s", batch_id[:8], type(exc).__name__)
         session = store.get(owner, batch_id) or session
@@ -642,6 +654,8 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
             return
         if isinstance(exc, InputValidationError):
             detail = str(exc)
+        elif isinstance(exc, AudioConversionError):
+            detail = "تبدیل فایل پادکست به MP3 ناموفق بود"
         elif failed_upload:
             first = next((i + 1 for i, item in enumerate(session["inputs"]) if not item.get("source_id")), "؟")
             detail = f"ارسال ورودی {first} به NotebookLM ناموفق بود"

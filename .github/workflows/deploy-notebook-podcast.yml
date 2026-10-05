@@ -87,6 +87,8 @@ jobs:
             | "${SSH[@]}" 'umask 077; mkdir -p ~/.notebooklm/profiles/notebook-podcast; cat > ~/.notebooklm/profiles/notebook-podcast/master_token.json.new && mv ~/.notebooklm/profiles/notebook-podcast/master_token.json.new ~/.notebooklm/profiles/notebook-podcast/master_token.json'
           "${SSH[@]}" "set -e;
             cd '$TARGET';
+            command -v ffmpeg >/dev/null;
+            command -v ffprobe >/dev/null;
             python3 -m venv .venv;
             .venv/bin/pip install -q -r requirements.txt;
             .proxy/xray run -test -config .proxy/config.json;

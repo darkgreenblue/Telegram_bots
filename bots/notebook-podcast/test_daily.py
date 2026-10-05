@@ -116,8 +116,13 @@ class DailyTests(unittest.IsolatedAsyncioTestCase):
             app = SimpleNamespace(bot=SimpleNamespace(send_audio=AsyncMock()))
             send_audio = AsyncMock()
             app.bot.send_audio = send_audio
+            async def fake_mp3(source):
+                target = source.with_suffix(".mp3")
+                target.write_bytes(b"mp3 audio data")
+                return target, 42
             with patch.object(bot, "store", store), patch.object(bot, "busy_slots", set()), \
                  patch.object(bot.asyncio, "create_subprocess_exec", fake_process), \
+                 patch.object(bot, "telegram_mp3", fake_mp3), \
                  patch.object(bot, "send_due", return_value=False):
                 await bot.run_job(123, session["batch_id"], app)
                 self.assertEqual(phases, ["uploading", "generating"])
@@ -129,10 +134,15 @@ class DailyTests(unittest.IsolatedAsyncioTestCase):
             store.put(123, current)
             with patch.object(bot, "store", store), patch.object(bot, "busy_slots", set()), \
                  patch.object(bot.asyncio, "create_subprocess_exec", fake_process), \
+                 patch.object(bot, "telegram_mp3", fake_mp3), \
                  patch.object(bot, "send_due", return_value=True):
                 await bot.run_job(123, session["batch_id"], app)
             send_audio.assert_awaited_once()
+            self.assertEqual(send_audio.await_args.kwargs["filename"], "audio-bbbbbbbb.mp3")
+            self.assertEqual(send_audio.await_args.kwargs["duration"], 42)
             self.assertEqual(store.get(123)["state"], "done")
+            self.assertFalse(output_path(current).exists())
+            self.assertFalse(output_path(current).with_suffix(".mp3").exists())
             with patch.object(bot, "store", store):
                 self.assertEqual(bot.saved_notebooks(123)[0]["notebook_id"], "notebook-id")
 
