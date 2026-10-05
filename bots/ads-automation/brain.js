@@ -1,6 +1,7 @@
 import { addCandidate,addJob,row } from './db.js';
 import { shortlist } from './discovery.js';
 import { targetFor } from './targets.js';
+import { assertCurrentBannerQa } from './banner-state.js';
 
 export const SCHEMAS={
   market:{type:'object',additionalProperties:false,required:['recommended_market','reasons','alternatives','sources'],properties:{
@@ -87,7 +88,11 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
       if(!target||typeof target!=='object'||Array.isArray(target))throw new Error('candidate target must be an object');
       if(['channels','bots'].includes(c.surface)&&!c.evidence_urls.some(url=>url.startsWith('https://t.me/')))
         throw new Error('public peer needs a direct Telegram evidence URL');
-      if(c.evidence_urls.some(url=>!/^https:\/\/[^\s/]+\/.+/.test(url)))throw new Error('invalid evidence URL');
+      for(const url of c.evidence_urls){
+        let parsed;try{parsed=new URL(url);}catch{throw new Error('invalid evidence URL');}
+        if(parsed.protocol!=='https:'||!parsed.hostname||parsed.username||parsed.password||/\s/.test(url))
+          throw new Error('invalid evidence URL');
+      }
       targetFor({...c,target});
       addCandidate(db,{projectId:p.id,...c,target,
         evidence:c.evidence_urls.map(url=>({type:'research-source',url}))});
@@ -122,6 +127,7 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
   } else if(job.kind==='image_qa'){
     const input=JSON.parse(job.input_json),creative=row(db,'creatives',input.creativeId);
     if(!creative)throw new Error('creative absent');
+    assertCurrentBannerQa(db,input);
     if(result.approved&&result.text_matches&&result.language_matches&&Array.isArray(result.issues)&&!result.issues.length){
       if(!preparedBanner?.path||!preparedBanner?.sha256)throw new Error('approved banner was not prepared');
       db.prepare(`UPDATE creatives SET image_path=?,image_sha256=?,qa_json=?,status='approved' WHERE id=?`).run(
