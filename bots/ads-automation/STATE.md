@@ -15,21 +15,25 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 
 - PRs #473, #477 and #481 merged: server workflow, separate allocation/spend reservations, strict research output schema.
 - Server uses `/home/ubuntu/voice2text`, SSH alias `vps`, PM2 process `ads-automation`.
-- Native SQLite installation completed after installing build tools; process observed online. Latest restart stability and end-to-end jobs still require verification.
+- Native SQLite installation completed after installing build tools. PR #483 merged as `8d717224d8932b3185f46edd6ce54e06fbc8b96e`; Deploy run 37320588476 executed Deploy to VPS successfully in about two minutes. Server HEAD matched the merge and ads process was online with restart counter 2.
 - Project 1 (`tarot-en-global-2026`) registered in calibration with 20 research seeds. No live experiments created.
 - Product scope `tarot-intl@en` resolves to the existing destination. Per-version attribution bridge is implemented; real attribution round trip remains to be checked.
 - Admin bot: `@AliAdsOpsControlBot`. Server owns polling; no competing local poller is authorized.
 - Latest local suite: 29 tests passed; all 22 selected repository CI checks passed.
 - Research job 1 completed through the actual subscription-backed Codex/SSH round trip. The store now has 39 candidates and 20 strategy jobs.
 - Local worker installed as `org.alireza.telegram-ads-brain` in `~/Library/LaunchAgents/`; observed running and leasing strategy job 2. Logs: `data/brain-logs/`. It processes brain jobs only, never polls the admin bot.
-- PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Merge and server verification are pending.
+- PR #483 fixes deployment timeout/repeated native builds, research URL/target contracts, duplicate/stale banner replies and long-prompt truncation. Server deployment passed. The actual `/status` handler delivered to the owner through Telegram without starting another poller.
+- Actual product `stats_all` bridge passed for `tarot-intl@en`: Stars unit, payment events supported, one existing attribution code. Creation/entry attribution still needs verification.
+- User approved creating a dedicated Google service account in `tg-voice2text-bot`, editor of only the Ads sheet, with its key on the VPS. Existing Cloud SDK scope set was verified before renewal. Google requires owner phone confirmation (Gmail on iPhone 13); authentication is pending that confirmation.
+- Existing manual Sheet rows were preserved as native duplicates: Archive Candidates 2026-10-05 (864660455), Archive Tests 2026-10-05 (491827409), Archive Insights 2026-10-05 (1808106150). Original three tabs remain first; sampled candidate values match their archived copy.
+- Ads account homepage loads, but navigating its visible Ads API menu to `/account/api` returns ERR_CONNECTION_RESET. No API token obtained; browser automation has not replaced the approved API route.
 
 ## Remaining acceptance work
 
-1. Confirm current server SHA, PM2 stability and bot status after deployment.
+1. Reconfirm PM2 restart stability after the successful deployment. Server SHA and actual status-message delivery passed.
 2. Verify strategy/copy/banner stages from the installed local worker; the research round trip and persistent worker startup passed.
 3. Verify product link creation and late-conversion reports without Ads spend.
-4. Configure automatic Sheets credentials and preserve existing manual discovery rows before enabling mirror writes.
+4. Complete the approved Google service-account setup after owner phone authentication, share only the specified sheet and verify automatic mirroring. Manual discovery rows already have native archive copies.
 5. Exercise admin reply/image QA and correction flow with real image input.
 6. Obtain authorized Ads API access and conduct explicitly approved controlled account validation.
 
@@ -44,5 +48,5 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 ## Current working copy
 
 - Managed worktree: `/Users/alireza/.codex/worktrees/telegram-ads-automation/Telegram_bots`.
-- Branch: `codex/ads-sqlite-deploy`. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending. Server native probes (SQLite query, sharp encode, mtcute import) passed and the verified installation fingerprint was recorded for reuse.
+- Branch: `codex/ads-sheets-config`. Preserve a configured server Google credential path across future deployments only when the ignored credential file exists. The speculative SQLite downgrade was reverted because mtcute still requires SQLite 12; no dependency downgrade is pending. Server native probes (SQLite query, sharp encode, mtcute import) passed and the verified installation fingerprint was recorded for reuse.
 - User's original dirty checkout must remain untouched.
