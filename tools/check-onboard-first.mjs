@@ -250,6 +250,80 @@ for (const loc of ['fa', 'ru', 'pt', 'es']) {
   ok(!/—|--/.test(txt) && !/—|--/.test(lbl), `«${loc}»: بدونِ خط تیره‌ی بلند`);
 }
 
+/* ══ ۵ب) ورودیِ متن/ویس در مرحله‌ی ماهِ تولد (v3.152.0، هشدارِ گیرافتادن `d815db9d`) ══
+ * باگ: `onboard_month` در هندلرِ متن شاخه نداشت و به پیش‌فرضِ تهِ هندلر می‌افتاد: پیامِ
+ * «کاربرِ برگشتی» + کیبوردِ ماندگار وسطِ آنبوردینگ، و سؤالِ ماه هرگز دوباره پرسیده نمی‌شد.
+ * ویس هم بی‌صدا دور ریخته می‌شد. این بخش خودِ دو هندلر را از سورس می‌بُرد و **اجرا** می‌کند
+ * (نه رجکس)؛ هر شناسه‌ی استاب‌نشده ReferenceError می‌دهد، پس مسیرِ اشتباه بی‌صدا رد نمی‌شود. */
+console.log('\n۵ب) متن و ویس در مرحله‌ی ماهِ تولد');
+function block(from) {
+  const i = SRC.indexOf(from);
+  if (i < 0) return null;
+  const b = SRC.indexOf('{', i + from.length - 1);
+  let d = 0;
+  for (let j = b; j < SRC.length; j++) {
+    if (SRC[j] === '{') d++;
+    else if (SRC[j] === '}' && --d === 0) return SRC.slice(i, j + 1);
+  }
+  return null;
+}
+function load(src, scope) {
+  const f = new Function('__s', `with (__s) { return (${src}); }`);
+  return f(new Proxy(scope, { has: (t, k) => typeof k === 'string' && k in t }));
+}
+const TEXT_SRC = block("bot.on('text', async (ctx) => {")?.replace("bot.on('text', ", '');
+const VOICE_SRC = block("bot.on(['voice', 'audio'], async (ctx) => {")?.replace("bot.on(['voice', 'audio'], ", '');
+ok(!!TEXT_SRC && !!VOICE_SRC, 'هر دو هندلر (متن و ویس) از سورس بریده شدند');
+
+async function runHandler(src, state, msg) {
+  const S = { blocked: 0, finishName: 0, replies: [], errs: [] };
+  const scope = {
+    upsertUser: () => {},
+    getState: () => state,
+    blockDuringOnboarding: async () => { S.blocked++; return true; },
+    finishNameOnboarding: async () => { S.finishName++; },
+    logErr: (...a) => { S.errs.push(a.join(' ')); },
+    L: { errors: { generic: 'GENERIC' }, onboarding: { askNameRetry: 'NAME_RETRY' } },
+  };
+  const ctx = { from: { id: 9 }, message: msg, reply: async (t, x) => { S.replies.push({ t, x }); return {}; } };
+  try { await load(src, scope)(ctx); } catch (e) { S.errs.push(String(e.message || e)); }
+  return S;
+}
+if (TEXT_SRC && VOICE_SRC) {
+  for (const st of ['onboard_month', 'onboard_focus']) {
+    const t = await runHandler(TEXT_SRC, st, { text: 'سلام' });
+    ok(t.blocked === 1 && t.errs.length === 0 && t.replies.length === 0,
+      `متن در «${st}» به گاردِ آنبوردینگ می‌رسد (نه پیامِ کاربرِ برگشتی/کیبورد)`, JSON.stringify(t));
+    const v = await runHandler(VOICE_SRC, st, { voice: { duration: 3 } });
+    ok(v.blocked === 1 && v.errs.length === 0,
+      `ویس در «${st}» بی‌صدا دور ریخته نمی‌شود و همان سؤال را دوباره می‌گیرد`, JSON.stringify(v));
+  }
+  // کنترلِ مثبت: هارنس واقعاً شاخه‌ها را از هم جدا می‌کند (وگرنه ادعاهای بالا پوچ بودند).
+  const tn = await runHandler(TEXT_SRC, 'onboard_name', { text: 'علی' });
+  ok(tn.finishName === 1 && tn.blocked === 0, 'کنترلِ مثبت: متن در «onboard_name» همان مسیرِ ثبتِ نام را می‌رود');
+  const vn = await runHandler(VOICE_SRC, 'onboard_name', { voice: { duration: 3 } });
+  ok(vn.blocked === 0 && vn.replies[0]?.t === 'NAME_RETRY', 'کنترلِ مثبت: ویس در «onboard_name» همان راهنمای نام را می‌گیرد');
+  const ti = await runHandler(TEXT_SRC, 'idle', { text: 'سلام' });
+  ok(ti.blocked === 0, 'کنترلِ معکوس: متن در «idle» گاردِ آنبوردینگ نمی‌گیرد');
+}
+// خودِ گارد برای `onboard_month` سؤالِ ماه را دوباره می‌پرسد و کیبوردِ ماندگار نمی‌دهد.
+{
+  const G = block('async function blockDuringOnboarding(ctx) {');
+  ok(!!G, 'گاردِ blockDuringOnboarding پیدا شد');
+  if (G) {
+    const S = { asked: 0, replies: [] };
+    const fn = load(G, {
+      getState: () => 'onboard_month',
+      ONBOARDING_STATES: ['onboard_name', 'onboard_focus', 'onboard_month'],
+      askBirthMonth: async () => { S.asked++; },
+      dropKeyboard: () => ({}), Markup: {}, L: { onboarding: {}, buttons: {} },
+    });
+    const r = await fn({ from: { id: 9 }, reply: async (t, x) => { S.replies.push({ t, x }); } });
+    ok(r === true && S.asked === 1 && S.replies.length === 0,
+      'گارد در «onboard_month» دقیقاً سؤالِ ماهِ تولد را دوباره می‌فرستد', JSON.stringify(S));
+  }
+}
+
 /* ══ ۶) نسخه ═════════════════════════════════════════════════════════════ */
 console.log('\n۶) نسخه');
 // ⚠️ کف، نه عددِ دقیق (درسِ ثبت‌شده: پینِ دقیق اولین بامپِ بعدی را قرمز می‌کند).
