@@ -26,7 +26,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 - Actual product `stats_all` bridge passed for `tarot-intl@en`: Stars unit, payment events supported, one existing attribution code. Actual campaign-code creation and retry idempotency passed for experiment 1; user-entry/payment attribution still needs verification.
 - User approved creating a dedicated Google service account in `tg-voice2text-bot`, editor of only the Ads sheet, with its key on the VPS. Existing Cloud SDK scope set was verified before renewal. Owner phone authentication completed. Dedicated account `telegram-ads-mirror@tg-voice2text-bot.iam.gserviceaccount.com` was created without project IAM roles; only the specified spreadsheet was shared as writer. Ignored key installed with mode 600 locally and on VPS; a real Sheets metadata read with that key passed.
 - Existing manual Sheet rows were preserved as native duplicates: Archive Candidates 2026-10-05 (864660455), Archive Tests 2026-10-05 (491827409), Archive Insights 2026-10-05 (1808106150). Original three tabs remain first; sampled candidate values match their archived copy.
-- Ads API page recovered and displays an existing masked token. Copy returned no token and the rendered input contains only the masked value. Owner was asked whether the old token is used elsewhere and may be replaced; no revocation or new token issuance has occurred. Official docs page still resets the browser connection. No financial write was attempted.
+- Ads API page recovered. The first clipboard read returned no complete token, but a later supported clipboard-item read after the copied confirmation recovered the existing token. Stored only in ignored local/VPS `data/ads-api-token.txt` with mode 600. No revocation or new access occurred; the previous replacement question is obsolete. Actual read-only getCurrentAccount succeeded and reported currency TON. Official docs page still resets the browser connection. No financial write was attempted.
 
 ## Remaining acceptance work
 
@@ -35,11 +35,11 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 3. Real product link creation passed for experiment 1: two calls returned the same c_CODE, persisted on the draft experiment, and the real per-code stats bridge returned the Stars unit. No product-user entry or payment was fabricated. Real entry/refund attribution remains pending.
 4. Real VPS Sheet write passed with 39 candidates and 10 draft tests. Independent connector reads confirmed the new values and preserved Brazil archive. Periodic sync passed at cycle 20: the server updated the Sheet to 39 candidates and 14 drafts without an operator call. No worker errors were recorded. Original research evidence is unchanged; the selected 20 candidates have Persian owner explanations in features metadata.
 5. Exercise admin reply/image QA and correction flow with real image input.
-6. Obtain authorized Ads API access and conduct explicitly approved controlled account validation.
+6. Authorized read-only Ads API access passed. Conduct explicitly approved controlled account validation before enabling spend.
 
 ## Gates and limitations
 
-- `ADS_LIVE_ENABLED=0` and `ADS_COST_GATE_VERIFIED=0`. No Ads credentials configured. No advertising has been created, funded or altered by this work.
+- `ADS_LIVE_ENABLED=0` and `ADS_COST_GATE_VERIFIED=0`. Existing Ads token is stored in the ignored protected file; automatic loading is implemented without opening either gate. No advertising has been created, funded or altered by this work.
 - Exact provider-side 0.05 TON enforcement, actual daily reset, precision and delayed-statistics behavior are not yet account-verified.
 - Net product revenue cannot be claimed until per-code refunds are available.
 - Public-channel evidence is a hypothesis, not proof of Ads inventory availability or audience country.
@@ -53,7 +53,7 @@ Updated: 2026-10-05. This file records verified progress and outstanding work; c
 
 ## Acceptance remains incomplete
 
-- No live Ads API read or account capability test has passed because a complete authorized token is still unavailable. The pending token question must be answered before revocation/replacement.
+- Actual getCurrentAccount passed with the existing token; no token replacement or answer to the old question is needed. Spending capability tests remain unapproved and unverified.
 - Real owner banner reply, real product-user entry and late-payment/refund attribution are not accepted yet.
 - Before enabling live spend, audit API rate-limit cooldowns, uncertainty reconciliation, provider precision/leases and decision/learning behavior against real account responses. Passing the no-spend simulation does not establish those account behaviors.
 - The initial heartbeat `verify-telegram-ads-no-spend-deploy` is already PAUSED; there is no active redundant deploy monitor.
