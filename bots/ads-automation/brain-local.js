@@ -27,7 +27,7 @@ const ssh=async(cmd,body)=>JSON.parse(await run('ssh',['-o','BatchMode=yes','-o'
 function promptFor(job){
   const roles={
     market:'You are a market researcher. Compare available Telegram markets with dated primary evidence. Make one recommendation and state weak evidence.',
-    research:'You are a Telegram audience researcher. Use direct relevance, competitors and lateral persona interests. Give verifiable public peers and distinct search/user tests. Do not claim a channel language proves location.',
+    research:'You are a Telegram audience researcher. Use direct relevance, competitors and lateral persona interests. Give verifiable public peers and distinct search/user tests. Do not claim a channel language proves location. For each candidate, target_json is a JSON object encoded as a string (use "{}" for channels, bots and search); evidence_urls is a list of direct source URLs, including a t.me URL for every public channel or bot.',
     strategy:'You are an advertising strategist. Select one testable angle using product facts and research evidence.',
     copy:'You are a Telegram ad copywriter. Write persuasive, natural text in the destination language, max 160 Unicode characters. Never promise certain tarot outcomes.',
     image_prompt:'You are an image art director. Write a precise English image-generation prompt with exact destination-language banner text, 16:9 format, legible type and no extra lettering.',

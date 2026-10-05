@@ -8,9 +8,9 @@ export const SCHEMAS={
     sources:{type:'array',items:{type:'object',additionalProperties:false,required:['url','claim'],properties:{url:{type:'string'},claim:{type:'string'}}}}
   }},
   research:{type:'object',additionalProperties:false,required:['candidates','assumptions'],properties:{
-    candidates:{type:'array',items:{type:'object',additionalProperties:false,required:['surface','value','target','hypothesis','source','evidence','score'],properties:{
-      surface:{type:'string',enum:['channels','bots','search','users']},value:{type:'string'},target:{type:'object'},
-      hypothesis:{type:'string'},source:{type:'string'},evidence:{type:'array',items:{type:'object'}},score:{type:'number'}}}},
+    candidates:{type:'array',items:{type:'object',additionalProperties:false,required:['surface','value','target_json','hypothesis','source','evidence_urls','score'],properties:{
+      surface:{type:'string',enum:['channels','bots','search','users']},value:{type:'string'},target_json:{type:'string'},
+      hypothesis:{type:'string'},source:{type:'string'},evidence_urls:{type:'array',items:{type:'string'}},score:{type:'number'}}}},
     assumptions:{type:'array',items:{type:'string'}}
   }},
   strategy:{type:'object',additionalProperties:false,required:['angle','copy_brief','visual_brief','reason'],properties:{
@@ -80,9 +80,17 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
   } else if(job.kind==='research'){
     if(!Array.isArray(result.candidates)||result.candidates.length>100)throw new Error('invalid candidate list');
     for(const c of result.candidates){
-      if(!Array.isArray(c.evidence)||!c.hypothesis||!c.source)throw new Error('candidate missing evidence');
-      targetFor(c);
-      addCandidate(db,{projectId:p.id,...c});
+      if(!Array.isArray(c.evidence_urls)||!c.hypothesis||!c.source||c.target_json.length>2000)
+        throw new Error('candidate missing evidence or target');
+      let target;
+      try{target=JSON.parse(c.target_json);}catch{throw new Error('candidate target is not JSON');}
+      if(!target||typeof target!=='object'||Array.isArray(target))throw new Error('candidate target must be an object');
+      if(['channels','bots'].includes(c.surface)&&!c.evidence_urls.some(url=>url.startsWith('https://t.me/')))
+        throw new Error('public peer needs a direct Telegram evidence URL');
+      if(c.evidence_urls.some(url=>!/^https:\/\/[^\s/]+\/.+/.test(url)))throw new Error('invalid evidence URL');
+      targetFor({...c,target});
+      addCandidate(db,{projectId:p.id,...c,target,
+        evidence:c.evidence_urls.map(url=>({type:'research-source',url}))});
     }
     const candidates=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=? AND status='found'`).all(p.id),20);
     for(const c of candidates){
