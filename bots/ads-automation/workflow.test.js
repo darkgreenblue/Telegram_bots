@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './db.js';
-import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment } from './workflow.js';
+import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment,createApproved,pauseManaged } from './workflow.js';
 import { AdsApi } from './api.js';
 
 const safeResetMinute=()=>Math.floor(((Date.now()/1000)%86400)/60+180)%1440;
@@ -15,6 +15,61 @@ const seed=store=>{
   db.prepare(`INSERT INTO experiments(id,project_id,candidate_id,creative_id,title,cpm,placement,ad_id,status,first_view_at,spend_authorized)
     VALUES (1,1,1,1,'unique',0.13,'bot_banner',444,'testing',unixepoch()-1000,0.05)`).run();
 };
+
+test('a matching account title without local create history cannot claim an old campaign',async()=>{
+  const store=openStore(':memory:');seed(store);
+  const previousGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';
+  try{
+    store.db.prepare("UPDATE experiments SET ad_id=NULL,status='draft',spend_authorized=0,tracking_code='FIXTURE' WHERE id=1").run();
+    store.db.prepare("INSERT INTO decisions(project_id,experiment_id,kind,payload_json,status) VALUES(1,1,'create','{}','approved')").run();
+    const api={live:true,getAccount:async()=>({currency:'TON',remaining_budget:20}),
+      findByTitle:async()=>({ad_id:999,title:'unique'}),call:async()=>assert.fail('cannot mutate existing campaign')};
+    await assert.rejects(createApproved(store,api,1,{resetMinute:safeResetMinute(),bridge:async()=>({username:'examplebot'})}),/unowned title collision/);
+    assert.equal(store.db.prepare('SELECT ad_id FROM experiments WHERE id=1').get().ad_id,null);
+  }finally{
+    if(previousGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=previousGate;
+    store.close();
+  }
+});
+
+test('uncertain create retries preserve the original provider deadline and financial reservation',async()=>{
+  const store=openStore(':memory:');seed(store);
+  const previousGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';
+  try{
+    store.db.prepare("UPDATE experiments SET ad_id=NULL,status='draft',spend_authorized=0,tracking_code='FIXTURE' WHERE id=1").run();
+    store.db.prepare("INSERT INTO decisions(project_id,experiment_id,kind,payload_json,status) VALUES(1,1,'create','{}','approved')").run();
+    let first=true,writes=0,original;
+    const api=new AdsApi({token:'fixture',store,live:true,wait:async()=>{},fetcher:async(url,request)=>{
+      if(url.endsWith('/getCurrentAccount'))return {ok:true,status:200,json:async()=>({ok:true,result:{currency:'TON',remaining_budget:20}})};
+      if(url.endsWith('/getAdsList'))return {ok:true,status:200,json:async()=>({ok:true,result:{ads:[]}})};
+      writes++;original=JSON.parse(request.body);
+      if(first)throw new Error('unknown response');
+      return {ok:true,status:200,json:async()=>({ok:true,result:{ad_id:555,status:'in_review'}})};
+    }});
+    const options={resetMinute:safeResetMinute(),bridge:async()=>({username:'examplebot'})};
+    await assert.rejects(createApproved(store,api,1,options),/unknown response/);
+    store.db.prepare("UPDATE operations SET request_json=? WHERE op_key='create-1'")
+      .run(JSON.stringify({...original,deactivate_date:1}));
+    await assert.rejects(createApproved(store,api,1,options),/expired uncertain create/);
+    assert.equal(writes,4);
+    store.db.prepare("UPDATE operations SET request_json=? WHERE op_key='create-1'").run(JSON.stringify(original));
+    store.db.prepare("UPDATE creatives SET ad_text='Changed after unknown outcome' WHERE id=1").run();
+    await assert.rejects(createApproved(store,api,1,options),/request changed/);
+    assert.equal(writes,4);
+    store.db.prepare("UPDATE creatives SET ad_text='Ad' WHERE id=1").run();
+    // A later retry calculates a different deadline; persisted request remains authoritative.
+    const persisted={...original,deactivate_date:original.deactivate_date-30};
+    store.db.prepare("UPDATE operations SET request_json=? WHERE op_key='create-1'").run(JSON.stringify(persisted));
+    first=false;
+    assert.equal(await createApproved(store,api,1,options),555);
+    assert.deepEqual(original,persisted);assert.equal(writes,5);
+    assert.equal(projectSpendCommitment(store.db,1),0.05);
+    assert.equal(store.db.prepare('SELECT lease_until FROM experiments WHERE id=1').get().lease_until,persisted.deactivate_date);
+  }finally{
+    if(previousGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=previousGate;
+    store.close();
+  }
+});
 
 test('full 0.05 test is paused, recorded, and sent for review',async()=>{
   const store=openStore(':memory:');seed(store);let paused=0;
@@ -54,6 +109,20 @@ test('deletion cannot reclaim before ten inactive minutes',async()=>{
   store.db.prepare(`UPDATE experiments SET stopped_at=unixepoch()-601 WHERE id=1`).run();
   await executeDecision(store,api,1,{resetMinute:0});assert.equal(deletions,1);
   assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'deleted');store.close();
+});
+
+test('provider status can prove inactivity without an is_paused response field',async()=>{
+  const store=openStore(':memory:');seed(store);let writes=0;
+  try{
+    const api={getAd:async()=>({ad_id:444,status:'on_hold',remaining_budget:0.95}),
+      call:async method=>{assert.equal(method,'deleteAd');writes++;return true;}};
+    const ex=store.db.prepare('SELECT * FROM experiments WHERE id=1').get();
+    await pauseManaged(store,api,ex,'fixture');assert.equal(writes,0);
+    store.db.prepare('UPDATE experiments SET stopped_at=unixepoch()-601 WHERE id=1').run();
+    store.db.prepare("INSERT INTO decisions(id,project_id,experiment_id,kind,payload_json,status) VALUES(1,1,1,'delete','{}','approved')").run();
+    await executeDecision(store,api,1,{resetMinute:0});assert.equal(writes,1);
+    assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'deleted');
+  }finally{store.close();}
 });
 
 test('ready-for-review ads are submitted explicitly after account review state changes',async()=>{

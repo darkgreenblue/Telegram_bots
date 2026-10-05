@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { row } from './db.js';
 import { dashboardBridge } from './bridge.js';
@@ -10,6 +11,7 @@ const now=()=>Math.floor(Date.now()/1000);
 const money=n=>Math.round(n*100000)/100000;
 const checkMoney=(n,name)=>{if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new Error(`${name} missing`);return n;};
 const asDecision=(db,id)=>row(db,'decisions',id);
+const isInactive=ad=>ad.is_paused===true||['on_hold','stopped'].includes(ad.status);
 
 export function requestDecision(store,projectId,experimentId,kind,payload,evidence={}) {
   const d=store.db.prepare(`SELECT * FROM decisions WHERE project_id=? AND experiment_id IS ? AND kind=? AND status='pending' ORDER BY id DESC LIMIT 1`).get(projectId,experimentId,kind);
@@ -84,7 +86,7 @@ function reserveProjectSpend(store,project,ex,desired){
     store.db.prepare('UPDATE experiments SET spend_authorized=? WHERE id=?').run(money(desired),ex.id);
 }
 
-export async function createApproved(store,api,experimentId,{resetMinute}) {
+export async function createApproved(store,api,experimentId,{resetMinute,bridge=dashboardBridge}) {
   const db=store.db,ex=row(db,'experiments',experimentId);
   if(!ex)throw new Error('experiment absent');
   if(ex.ad_id)return ex.ad_id;
@@ -101,12 +103,12 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
     throw new Error('project spend cap exhausted');
   const account=await api.getAccount();
   if(account.currency!=='TON'||checkMoney(account.remaining_budget,'account remaining budget')<1)throw new Error('account is not funded in TON');
-  const configured=await dashboardBridge({action:'handle',scope:project.scope});
+  const configured=await bridge({action:'handle',scope:project.scope});
   const destUser=new URL(project.destination).pathname.replace(/^\//,'').replace(/\/$/,'');
   if(destUser.toLowerCase()!==configured.username.toLowerCase())throw new Error('destination differs from dashboard scope');
   let tracking=ex.tracking_code;
   if(!tracking){
-    const c=await dashboardBridge({action:'campaign',scope:project.scope,surface:candidate.surface,title:ex.title,marker:`ads-experiment-${ex.id}`});
+    const c=await bridge({action:'campaign',scope:project.scope,surface:candidate.surface,title:ex.title,marker:`ads-experiment-${ex.id}`});
     tracking=c.code;
     db.prepare('UPDATE experiments SET tracking_code=? WHERE id=?').run(tracking,ex.id);
   }
@@ -124,7 +126,7 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
     }
   }
   const {target,placement}=targetFor(candidate);
-  const params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
+  let params={title:ex.title,text:creative.ad_text,promote_url:link,cpm:ex.cpm,placement,target,
     initial_budget:1,daily_budget_limit:TEST_TON,is_paused:false,
     deactivate_date:leaseEnd(now(),resetMinute),...(photoId?{photo_id:photoId}:candidate.surface==='bots'?{show_userpic:true}:{})};
   db.transaction(()=>{
@@ -140,6 +142,18 @@ export async function createApproved(store,api,experimentId,{resetMinute}) {
   })();
   // A prior uncertain response can be reconciled by unique title before retry.
   const existing=await api.findByTitle(ex.title);
+  const operation=db.prepare('SELECT * FROM operations WHERE op_key=?').get(`create-${ex.id}`);
+  if(existing&&!operation)throw new Error('unowned title collision: refuse to adopt an existing ad');
+  if(operation){
+    const previous=JSON.parse(operation.request_json);
+    const {deactivate_date:previousEnd,...original}=previous;
+    const {deactivate_date:proposedEnd,...current}=params;
+    if(operation.method!=='createAd'||!isDeepStrictEqual(original,current))
+      throw new Error('uncertain create request changed: reconcile before retry');
+    params=previous;
+    if(!existing&&operation.status!=='done'&&(!Number.isInteger(previousEnd)||previousEnd<=now()))
+      throw new Error('expired uncertain create: reconcile before retry');
+  }
   if(!existing)safetyGate(row(db,'projects',project.id),api,resetMinute);
   const ad=existing||await api.call('createAd',params,`create-${ex.id}`);
   if(!Number.isInteger(ad.ad_id))throw new Error('Ads API returned no ad_id');
@@ -154,7 +168,7 @@ export async function pauseManaged(store,api,ex,reason){
   if(!ex.ad_id||ex.status==='deleted')return;
   const ad=await api.getAd(ex.ad_id);
   if(!ad||ad.ad_id!==ex.ad_id)throw new Error('managed ad missing from account');
-  if(!ad.is_paused)await api.call('editAd',{ad_id:ex.ad_id,is_paused:true},`pause-${ex.id}-${ex.test_round}-${reason}`);
+  if(!isInactive(ad))await api.call('editAd',{ad_id:ex.ad_id,is_paused:true},`pause-${ex.id}-${ex.test_round}-${reason}`);
   store.db.prepare(`UPDATE experiments SET status='paused',stopped_at=?,lease_until=NULL WHERE id=?`).run(now(),ex.id);
   store.audit('system','ad.pause',ex.id,{reason,adId:ex.ad_id});
 }
@@ -270,7 +284,7 @@ export async function pollExperiment(store,api,experimentId,{resetMinute}){
     return;
   }
   // Always stop at the provider-side deadline before crossing an unverified day boundary.
-  if(ad.is_paused||!ex.lease_until||ex.lease_until-time<300)await extendLease(store,api,update(),ad,resetMinute);
+  if(isInactive(ad)||!ex.lease_until||ex.lease_until-time<300)await extendLease(store,api,update(),ad,resetMinute);
   const delay=cadence({views,spent,firstViewAt:first,lastCheckedAt:ex.last_checked_at,lastViews:ex.last_views,lastSpent:ex.last_spent},time);
   db.prepare(`UPDATE experiments SET status='testing',next_check_at=? WHERE id=?`).run(time+delay,ex.id);
 }
@@ -289,7 +303,7 @@ export async function executeDecision(store,api,decisionId,config){
       const fresh=row(store.db,'experiments',ex.id);
       if(now()-fresh.stopped_at<600)return; // API requires ten inactive minutes
       const ad=await api.getAd(ex.ad_id);
-      if(!ad.is_paused && ad.status!=='stopped')throw new Error('ad not inactive');
+      if(!isInactive(ad))throw new Error('ad not inactive');
       if(checkMoney(ad.remaining_budget,'remaining budget')>ex.allocated_total+1e-6)
         throw new Error('provider returned more budget than this campaign received');
       await api.call('deleteAd',{ad_id:ex.ad_id},`delete-${ex.id}`);

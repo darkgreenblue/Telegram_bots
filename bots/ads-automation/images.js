@@ -1,6 +1,6 @@
-import { mkdir,readFile,writeFile } from 'node:fs/promises';
+import { mkdir,readFile,writeFile,link,unlink } from 'node:fs/promises';
 import { resolve,dirname } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash,randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 
 export async function prepareBanner(input,output){
@@ -14,7 +14,17 @@ export async function prepareBanner(input,output){
     .rotate().resize(1280,720,{fit:'contain',background:'#ffffff',withoutEnlargement:false})
     .flatten({background:'#ffffff'}).jpeg({quality:88,mozjpeg:true}).toBuffer();
   if(jpeg.length>5_000_000)throw new Error('prepared banner exceeds Telegram Ads 5 MB');
-  const dest=resolve(output);await mkdir(dirname(dest),{recursive:true});await writeFile(dest,jpeg,{flag:'wx'});
+  const dest=resolve(output);await mkdir(dirname(dest),{recursive:true});
+  const temporary=`${dest}.${randomUUID()}.tmp`;
+  await writeFile(temporary,jpeg,{flag:'wx',mode:0o600});
+  try {await link(temporary,dest);}
+  catch(error){
+    if(error.code!=='EEXIST')throw error;
+    // A submit can fail after preparation but before its database transaction.
+    // Reuse only the exact artifact; never replace another revision's file.
+    if(!jpeg.equals(await readFile(dest)))throw new Error('prepared banner artifact differs');
+  }
+  finally {await unlink(temporary);}
   return {path:dest,sha256:createHash('sha256').update(jpeg).digest('hex'),width:1280,height:720,size:jpeg.length};
 }
 

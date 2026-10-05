@@ -1,9 +1,8 @@
 import 'dotenv/config';
 import { readFile } from 'node:fs/promises';
-import { openStore,leaseJob,row,completeJob } from './db.js';
-import { applyBrainResult,SCHEMAS,validateBrainResult } from './brain.js';
-import { prepareBanner } from './images.js';
-import { resolve } from 'node:path';
+import { openStore,leaseJob,row } from './db.js';
+import { SCHEMAS } from './brain.js';
+import { submitBrainJob } from './brain-submit.js';
 
 const store=openStore();
 const readInput=async()=>{
@@ -25,22 +24,7 @@ try{
       }
     }else out=null;
   }else if(command==='submit'){
-    const job=row(store.db,'jobs',Number(input.id));
-    if(!job||job.lease_owner!==input.owner||job.status!=='leased')throw new Error('invalid job lease');
-    const value=input.result;
-    if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('invalid brain result');
-    validateBrainResult(job.kind,value);
-    let preparedBanner=null;
-    if(job.kind==='image_qa'&&value.approved&&value.text_matches&&value.language_matches&&
-      Array.isArray(value.issues)&&value.issues.length===0){
-      const spec=JSON.parse(job.input_json);
-      preparedBanner=await prepareBanner(spec.rawPath,resolve('./data/banners',`creative-${spec.creativeId}-${job.id}.jpg`));
-    }
-    store.db.transaction(()=>{
-      applyBrainResult(store,job,value,{preparedBanner});
-      completeJob(store.db,job.id,input.owner,value);
-    })();
-    out={done:job.id};
+    out=await submitBrainJob(store,input);
   }else if(command==='fail'){
     const job=row(store.db,'jobs',Number(input.id));
     if(!job||job.lease_owner!==input.owner||job.status!=='leased')throw new Error('invalid job lease');

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { openStore,row } from './db.js';
 import { AdsApi } from './api.js';
 import { createAdminBot,sendAdminQueue,notify } from './admin.js';
@@ -16,7 +17,12 @@ if(!Number.isSafeInteger(Number(process.env.ADS_ADMIN_ID)))throw new Error('ADS_
 
 const store=openStore(),db=store.db,owner=randomUUID();
 const ownerId=Number(process.env.ADS_ADMIN_ID),resetMinute=Number(process.env.ADS_DAILY_RESET_UTC_MINUTE);
-const api=new AdsApi({token:process.env.ADS_API_TOKEN,store,live:process.env.ADS_LIVE_ENABLED==='1'});
+const apiToken=process.env.ADS_API_TOKEN||await readFile(process.env.ADS_API_TOKEN_PATH||'./data/ads-api-token.txt','utf8')
+  .then(value=>value.trim()).catch(error=>{
+    if(error.code==='ENOENT')return undefined;
+    throw new Error('Ads API credential file unreadable');
+  });
+const api=new AdsApi({token:apiToken,store,live:process.env.ADS_LIVE_ENABLED==='1'});
 const bot=createAdminBot(store,{token:process.env.ADS_ADMIN_BOT_TOKEN,ownerId,api});
 const sheets=new GoogleSheetsMirror({spreadsheetId:process.env.ADS_SHEETS_ID,
   credentialsPath:process.env.ADS_GOOGLE_CREDENTIALS});

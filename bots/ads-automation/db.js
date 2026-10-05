@@ -122,6 +122,9 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
     CREATE TABLE IF NOT EXISTS worker_lease (
       id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, until_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS api_cooldowns (
+      account_key TEXT PRIMARY KEY, until_at INTEGER NOT NULL, reason TEXT NOT NULL
+    );
   `);
   const experimentColumns=new Set(db.pragma('table_info(experiments)').map(c=>c.name));
   if(!experimentColumns.has('spend_authorized')){
