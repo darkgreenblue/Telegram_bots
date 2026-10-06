@@ -94,9 +94,12 @@ if (archiveSql && sinceSql && plainSql) {
   // هیچ‌جا نمی‌گفت کانتکستِ خوانش واقعاً از کدامشان می‌خواند. برگرداندنِ call site به
   // `lastDelivered` سبز رد می‌شد، یعنی مدل هنوز فال‌های قبلی را می‌دید و پیامی که به کاربر
   // دادیم («انگار اولین فالته») دروغ می‌شد. حالا خودِ سیمِ اتصال سنجیده می‌شود.
-  const ctxFn = bodyOf('function readingCtxFor(user, spread, question, cards, focusKey) {', '\n}');
+  const ctxFn = bodyOf('function readingCtxFor(user, spread, question, cards, focusKey, realQuestion = question) {', '\n}');
   ok(!!ctxFn, 'سازنده‌ی کانتکستِ خوانش پیدا شد');
-  ok(ctxFn ? /prev:\s*stmts\.lastDeliveredSince\.all\(/.test(ctxFn) : false,
+  // v3.154.0: فال‌های قبلی اول از برنامه‌ی ایمنی رد می‌شوند (`prev: plan.prev`)، ولی منبعشان همان
+  // statementِ خطِ آب‌دار است و برنامه فقط فیلتر/تقلیل می‌دهد، هرگز اضافه نمی‌کند.
+  ok(ctxFn ? (/const prev = stmts\.lastDeliveredSince\.all\(/.test(ctxFn) && /prev: plan\.prev/.test(ctxFn)
+    && /safetyPlanFor\(user, realQuestion, prev\)/.test(ctxFn)) : false,
     'کانتکستِ خوانش از statementِ خطِ آب‌دار می‌خواند');
   ok(ctxFn ? /memory_reset_at/.test(ctxFn) : false, 'خطِ آبِ همان کاربر به کوئری پاس می‌شود');
   ok(ctxFn ? !/stmts\.lastDelivered\.all\(/.test(ctxFn) : false,

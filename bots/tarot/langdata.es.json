@@ -1131,5 +1131,18 @@
     "type": "tipo de lectura",
     "summary": "resumen",
     "feedback": "comentario de la persona"
+  },
+  "chat": {
+    "crisis": [
+      "suicid",
+      "matarme",
+      "quitarme la vida",
+      "no quiero vivir",
+      "quiero morir",
+      "quiero morirme",
+      "hacerme daño",
+      "cortarme",
+      "acabar con mi vida"
+    ]
   }
 }

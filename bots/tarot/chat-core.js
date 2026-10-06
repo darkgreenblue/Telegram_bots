@@ -534,11 +534,29 @@ export const norm = (s) => String(s || '').toLowerCase()
   .replace(/\s+/g, ' ')
   .trim();
 
+/* 🐛 دو قرمزِ کاذبِ واقعی (ممیزیِ ۲۲ فالِ واقعی، ۱۴۰۵/۰۷/۱۴):
+ *   ۱) الگو **وسطِ** یک کلمه می‌نشست: «پدربزرگمو» و «داماد بزرگمو» هر دو «رگمو» دارند.
+ *      حالا الگو فقط از **ابتدای یک کلمه** شروع می‌شود (پسوند آزاد است: «خودکشیه»).
+ *   ۲) «خودمو بکشم عقب/کنار» (فاصله گرفتن) با «خودمو بکشم» یکی گرفته می‌شد. هر الگویی که
+ *      به فعلِ «کشیدن» ختم می‌شود، اگر بلافاصله یک قیدِ جهت بیاید بحران نیست.
+ * هر دو در گفتگو هم پیامِ ثابتِ ۱۲۳ را به‌جای جواب می‌فرستادند. */
+const KESH_DIR = new Set(['عقب', 'کنار', 'بیرون', 'بالا', 'پایین', 'جلو', 'کنارش', 'عقبتر', 'کنارتر']);
+const endsWithKesh = (n) => /(?:بکشم|میکشم|می کشم)$/.test(n);
 /** الگوی بحران که شلیک کرده، یا `''`. روی **هر طولی** از پیام اجرا می‌شود. */
 export function crisisIn(text) {
   const t = norm(text);
   if (!t) return '';
-  for (const p of LANG.crisis) { const n = norm(p); if (n && t.includes(n)) return p; }
+  const padded = ` ${t} `;
+  for (const p of LANG.crisis) {
+    const n = norm(p);
+    if (!n) continue;
+    let i = padded.indexOf(` ${n}`);
+    while (i >= 0) {
+      const next = padded.slice(i + n.length + 2).split(' ')[0];
+      if (!(endsWithKesh(n) && KESH_DIR.has(next))) return p;
+      i = padded.indexOf(` ${n}`, i + 1);
+    }
+  }
   return '';
 }
 

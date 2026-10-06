@@ -1,0 +1,233 @@
+/* 🛟 ایمنیِ فال (v3.153.0): موضوعِ حساس، حافظه‌ی پزشکی، و «فال برای آدمِ دیگر».
+ *
+ * از ممیزیِ کاربرِ واقعیِ ۷۲۵۸۷۴۳۱۰۱ (۱۴۰۵/۰۷/۱۴). سه تصمیمِ صریحِ مالک:
+ *   ۱) فالِ موضوعِ حساس (خودکشی، آسیب به خود، بستری، درمان) **داده می‌شود**، ولی با یک
+ *      بلوکِ ایمنی در پرامپت (بدونِ بله/نه و پیش‌بینیِ زمان، طرفِ پزشک، بدونِ سرزنش) و
+ *      یک خطِ ثابتِ مراقبت که **کد** تهِ فال می‌گذارد.
+ *   ۲) حافظه سابقه‌ی پزشکی و خودکشی را نگه نمی‌دارد؛ حداکثر یک برچسبِ کلی.
+ *   ۳) اسمِ متفاوت یعنی شاید آدمِ متفاوت: اگر کاربر در سؤال خودش را با اسمِ دیگری معرفی
+ *      کرد (یا گفت فال برای کسِ دیگری است)، مدل از الگوهای فال‌های قبلی استفاده نمی‌کند.
+ *
+ * ماژولِ **خالص** است (بدونِ DB و تلگرام) تا هم ربات و هم آزمایشگاه همین را اجرا کنند و
+ * گارد و سنجه یک کد باشند (قاعده‌ی صفرِ `tools/reading-lab/`).
+ * تشخیصِ بحران عمداً از `crisisIn`ِ گفتگو می‌آید، نه یک فهرستِ دوم: دو فهرست دیر یا زود
+ * واگرا می‌شوند و یک کاربر در فال و گفتگو دو رفتارِ متفاوت می‌گیرد.
+ */
+import { crisisIn, norm } from './chat-core.js';
+
+/** برچسبِ کلیِ حافظه. باید با جمله‌ی آخرِ `readerSafety` همان زبان یکی بماند. */
+export const SENSITIVE_LABEL = {
+  fa: 'موضوعِ حساس؛ با احتیاط.',
+  en: 'Sensitive topic; handle with care.',
+  ru: 'Чувствительная тема; осторожно.',
+  es: 'Tema sensible; con cuidado.',
+  pt: 'Tema sensível; com cuidado.',
+};
+const labelOf = (lang) => SENSITIVE_LABEL[lang] || SENSITIVE_LABEL.fa;
+
+/* 🩺 واژه‌هایی که یک جمله‌ی حافظه را «پزشکی/روانیِ حساس» می‌کنند. عمداً تنگ: اضطراب،
+ * استرس، وسواس و تراپی **نیستند** (حالِ روزمره‌اند و حذفشان شناختِ مفید را می‌برد).
+ * تطبیق از **ابتدای کلمه** است (مثلِ `crisisIn`)، پس «بستری» داخلِ «بستریِ» هم می‌گیرد
+ * ولی داخلِ یک کلمه‌ی دیگر نه. */
+const SENSITIVE = {
+  fa: ['بستری', 'اعصاب و روان', 'روانپزشک', 'روان پزشک', 'بیمارستان روانی', 'افسردگی شدید',
+    'افسردگی', 'قرص اعصاب', 'قرص خواب', 'ضد افسردگی', 'ضدافسردگی', 'دوقطبی', 'دو قطبی',
+    'اسکیزوفرنی', 'حمله پنیک', 'حمله‌ی پنیک', 'سرطان', 'شیمی درمانی', 'شیمیدرمانی', 'آسیب به خود',
+    'خودآزاری', 'خودآسیب', 'ترخیص',
+    /* سوم‌شخص: خطرِ آدمِ دیگری حساس است ولی بحرانِ خودِ کاربر نیست (خطِ مراقبت نمی‌گیرد). */
+    'خودشو بکشه', 'خودش رو بکشه', 'خودش را بکشد', 'خودشو میکشه', 'خودشو می کشه', 'به خودش آسیب'],
+  en: ['suicid', 'self-harm', 'self harm', 'hospitaliz', 'psychiatr', 'psych ward', 'depression',
+    'antidepress', 'bipolar', 'schizophren', 'panic attack', 'cancer', 'chemo', 'overdos', 'rehab',
+    'discharg'],
+  ru: ['суицид', 'самоубий', 'самоповрежд', 'госпитализ', 'психиатр', 'психбольниц', 'депресси',
+    'антидепрессант', 'биполяр', 'шизофрен', 'панической атак', 'рак ', 'химиотерап', 'передозир',
+    'выписк'],
+  es: ['suicid', 'autoles', 'hospitaliz', 'internad', 'psiquiatr', 'depresi', 'antidepres',
+    'bipolar', 'esquizofren', 'ataque de pánico', 'cáncer', 'cancer', 'quimio', 'sobredosis'],
+  pt: ['suicíd', 'suicid', 'automutil', 'internad', 'internação', 'psiquiatr', 'depressão',
+    'depressao', 'antidepress', 'bipolar', 'esquizofren', 'ataque de pânico', 'câncer', 'cancer',
+    'quimio', 'overdose'],
+};
+
+/** واژه‌ی حساسِ پیداشده در متن، یا `''`. */
+export function sensitiveTermIn(text, lang = 'fa') {
+  const padded = ` ${norm(text)} `;
+  if (padded.trim() === '') return '';
+  for (const p of (SENSITIVE[lang] || SENSITIVE.fa)) {
+    const n = norm(p);
+    if (n && padded.includes(` ${n}`)) return p;
+  }
+  return '';
+}
+
+/* ✂️ حافظه جمله‌به‌جمله پاک می‌شود، نه کلش: بقیه‌ی شناخت (موضوعِ رابطه، الگوی سؤال‌ها)
+ * درست و مفید است. جمله‌ای که حرفِ بحران یا واژه‌ی حساس دارد حذف و یک برچسبِ کلی
+ * جایش می‌نشیند. idempotent است: برچسبِ موجود دوباره اضافه نمی‌شود. */
+export function sanitizeMemory(text, lang = 'fa') {
+  const src = String(text || '');
+  if (!src.trim()) return { text: src, cut: 0 };
+  const label = labelOf(lang);
+  /* برچسبِ قبلی اول کنار می‌رود و در انتها یک بار برمی‌گردد. باید پیش از تکه‌کردن باشد:
+   * خودِ برچسب «؛» دارد و تکه‌کننده دو نیمش می‌کرد، پس هر اجرا یک برچسبِ تازه می‌افزود. */
+  const hadLabel = src.includes(label);
+  const body0 = hadLabel ? src.split(label).join(' ') : src;
+  const segs = body0.match(/[^.!?؟؛\n]+[.!?؟؛]*\s*/g) || [body0];
+  let cut = 0;
+  const kept = segs.filter((s) => {
+    if (!norm(s)) return false;
+    if (crisisIn(s) || sensitiveTermIn(s, lang)) { cut++; return false; }
+    return true;
+  });
+  if (!cut && !hadLabel) return { text: src, cut: 0 };
+  const body = kept.join('').replace(/\s+/g, ' ').trim();
+  return { text: body ? `${body} ${label}` : label, cut };
+}
+
+/** حافظه‌ای که خودش موضوعِ حساس دارد (یا قبلاً برچسب خورده). */
+export function memorySensitive(text, lang = 'fa') {
+  const src = String(text || '');
+  if (!src.trim()) return false;
+  return src.includes(labelOf(lang)) || sanitizeMemory(src, lang).cut > 0;
+}
+
+/* 🪪 اسمی که کاربر **در خودِ سؤال** به خودش نسبت داده. فقط الگوهای بی‌ابهام: «اسمم X»،
+ * «من X متولد…»، و «خودم X» وقتی بعدش واژه‌ای می‌آید که آن را اسم می‌کند. «من خسته
+ * هستم» عمداً الگو نیست (صفت با اسم قابلِ تفکیک نیست). */
+const FA_LETTERS = 'آ-یءأإؤئةكيۀ';
+const faWord = `[${FA_LETTERS}]{2,}`;
+const FA_STOP = new Set(['و', 'هم', 'رو', 'را', 'که', 'اون', 'او', 'دیگه', 'خیلی', 'فکر', 'دارم',
+  'هستم', 'خودم', 'هنوز', 'نمی', 'میخوام', 'میدونم', 'دوست', 'تنها', 'واقعا', 'الان', 'حالا',
+  'شخصا', 'اصلا', 'همیشه', 'یه', 'یک', 'این', 'اینو', 'چی', 'چه', 'کی', 'کجا', 'چرا', 'باید',
+  'میتونم', 'نمیدونم', 'ازش', 'بهش', 'باهاش', 'براش', 'برای', 'واسه', 'هست', 'است', 'بود',
+  'متولد', 'ماه', 'سال', 'دختر', 'پسر', 'خانم', 'آقا', 'مجرد', 'متاهل', 'اسمش', 'اسم', 'توی', 'تو',
+  'در', 'رشته', 'رشتۀ', 'شناسنامه', 'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر',
+  'آبان', 'آذر', 'دی', 'بهمن', 'اسفند', 'با', 'از', 'به', 'دو', 'سه', 'هر', 'چیه', 'کنه', 'انتخاب']);
+/* فعل اسم نیست («اسمم میاد»، «اسمم میپیچه»): X که با «می/نمی» شروع شود رد می‌شود، **مگر**
+ * اسمِ رایجی که خودش با «می» شروع می‌شود (مینا، میلاد، …) یا بعدش «هست/هستم» آمده باشد؛
+ * نسخه‌ی اول «اسمم مینا هست» را فعل خواند و جداسازی را از دست داد. */
+const MI_NAMES = new Set(['مینا', 'میلاد', 'میترا', 'میثم', 'مینو', 'میعاد', 'میرا', 'میکاییل',
+  'میکائیل', 'میهن', 'میشا', 'میسا', 'میلا', 'میناز', 'میهما', 'میهمان']);
+const NAME_AFTER = new Set(['هست', 'هستم', 'هستش', 'است', 'ام']);
+const notName = (n, next = '') => !n || FA_STOP.has(n)
+  || (/^(?:ن?می)/.test(n) && !MI_NAMES.has(n) && !NAME_AFTER.has(next));
+/* «خودم X» فقط وقتی اسم است که بعدش یکی از این‌ها بیاید («خودم زینب طرف مقابل…»). «و» و پایانِ
+ * جمله عمداً نیستند: «دست خودم نیس و…» و «…از طرف خودم چیه؟» روی دیتای واقعی اسم خوانده می‌شدند. */
+const AFTER_SELF = new Set(['طرف', 'اون', 'او', 'ماه', 'متولد', 'اسم', 'هستم', 'متولدم', 'هستش']);
+const faNorm = (s) => String(s || '').replace(/[‌‏‎]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
+
+function faSelfNames(q) {
+  const t = faNorm(q).replace(/[!؟?.,،؛:()"«»]/g, ' ').replace(/\s+/g, ' ');
+  const out = [];
+  const push = (n, next) => { if (!notName(n, next)) out.push(n); };
+  for (const m of t.matchAll(new RegExp(`(?:^|\\s)(?:اسمم|اسم من|اسم خودم|نام من)\\s+(?:هم\\s+)?(${faWord})(?:\\s+(\\S+))?`, 'g'))) push(m[1], m[2]);
+  for (const m of t.matchAll(new RegExp(`(?:^|\\s)من\\s+(${faWord})\\s+(?:متولد|متولدم|هستم\\s+متولد)`, 'g'))) push(m[1]);
+  for (const m of t.matchAll(new RegExp(`(?:^|\\s)خودم\\s+(${faWord})\\s+(\\S+)`, 'g'))) {
+    if (AFTER_SELF.has(m[2])) push(m[1]);
+  }
+  return out;
+}
+const OTHER_SELF = {
+  /* عبارت با حرفِ بزرگ یا کوچک، ولی خودِ اسم فقط با حرفِ بزرگ (وگرنه «my name is not…»). */
+  en: /(?:^|[^\p{L}])[Mm]y name is\s+(\p{Lu}\p{Ll}+)/gu,
+  ru: /(?:^|[^\p{L}])[Мм]еня зовут\s+(\p{Lu}\p{Ll}+)/gu,
+  es: /(?:^|[^\p{L}])(?:[Mm]e llamo|[Mm]i nombre es)\s+(\p{Lu}\p{Ll}+)/gu,
+  pt: /(?:^|[^\p{L}])(?:[Mm]eu nome é|[Mm]e chamo)\s+(\p{Lu}\p{Ll}+)/gu,
+};
+/** اولین اسمی که کاربر در سؤال به **خودش** نسبت داده، یا `''`. */
+export function declaredSelfName(question, lang = 'fa') {
+  if (lang === 'fa') return faSelfNames(question)[0] || '';
+  const re = OTHER_SELF[lang];
+  if (!re) return '';
+  for (const m of String(question || '').matchAll(new RegExp(re.source, re.flags))) return m[1];
+  return '';
+}
+
+/* 👥 «این فال برای کسِ دیگری است». فقط الگوهای صریح؛ «برای دوستم کادو بخرم؟» نباید
+ * بگیرد (آن سؤالِ خودِ کاربر درباره‌ی دوستش است، نه فالِ دوستش). */
+const FA_FRIEND = '(?:دوستم|دوستام|دوستای|رفیقم|رفیقام|همکارم|دوست صمیمیم|دوستمه|رفیقمه)';
+const FA_FAMILY = '(?:خواهرم|برادرم|داداشم|آبجیم|مامانم|مادرم|بابام|پدرم|دخترم|پسرم|همسرم|شوهرم|خانمم|دختر خالم|دخترخالم|پسرخالم|دختر عموم|پسر عموم|دخترعمم|زن داداشم|خالم|عمم)';
+const FA_REL = `(?:${FA_FRIEND}|${FA_FAMILY})`;
+const FA_OTHER = [
+  new RegExp(`(?:برای|واسه|برا)\\s+${FA_FRIEND}(?:ه|مه)?\\s+(?:میخوام|می خوام|فال|بگیر|باز|میگیرم|می گیرم)`),
+  new RegExp(`(?:برای|واسه|برا)\\s+${FA_FRIEND}(?:ه|مه)?\\s*$`),
+  new RegExp(`فال\\s+(?:برای|واسه|برا|مال)\\s+${FA_REL}`),
+  new RegExp(`(?:برای|واسه|برا)\\s+${FA_REL}\\s+(?:یه\\s+|یک\\s+)?فال`),
+  new RegExp(`${FA_REL}\\s+(?:میخواد|می خواد|میخواست)\\s+(?:فال|بدونه)`),
+  new RegExp(`(?:سوال|سؤال|فال)\\s+${FA_REL}\\s+(?:هست|است|ه\\b)`),
+  /فال من نیست|سوال من نیست|سؤال من نیست|برای خودم نیست|واسه خودم نیست/,
+  new RegExp(`این\\s+(?:فال\\s+)?(?:برای|واسه|برا|مال)\\s+${FA_REL}(?:ه|مه|هست)?(?:\\s|$)`),
+];
+const OTHER_FOR = {
+  en: /\b(?:reading|asking|this is)\s+for\s+(?:my\s+)?(?:friend|sister|brother|mom|mother|dad|father|cousin|colleague)\b|\bmy (?:friend|sister|brother|mom|cousin) wants (?:a|to know)/i,
+  ru: /(?:расклад|гадание|вопрос)\s+для\s+(?:моей\s+|моего\s+)?(?:подруги|друга|сестры|брата|мамы|коллеги)/i,
+  es: /(?:lectura|tirada|pregunta)\s+(?:es\s+)?para\s+(?:mi\s+)?(?:amiga|amigo|hermana|hermano|mamá|madre|prima|primo)/i,
+  pt: /(?:leitura|tiragem|pergunta)\s+(?:é\s+)?(?:para|pra)\s+(?:a\s+|o\s+)?(?:minha\s+|meu\s+)?(?:amiga|amigo|irmã|irmão|mãe|prima|primo)/i,
+};
+export function forOtherPerson(question, lang = 'fa') {
+  const q = String(question || '');
+  if (!q.trim()) return false;
+  if (lang === 'fa') {
+    const t = faNorm(q).replace(/[!؟?.,،؛:()"«»]/g, ' ').replace(/\s+/g, ' ').trim();
+    return FA_OTHER.some((re) => re.test(t));
+  }
+  return !!OTHER_FOR[lang]?.test(q);
+}
+
+/** آیا دو اسم یک نفرند؟ پسوند آزاد است («فرنیاست» = «فرنیا»)؛ اسمِ خالی یعنی «نمی‌دانیم». */
+const sameName = (a, b) => {
+  const x = faNorm(a).toLowerCase(); const y = faNorm(b).toLowerCase();
+  if (!x || !y) return true;
+  return x.startsWith(y) || y.startsWith(x);
+};
+/** دلیلِ جداسازی (`'other'` یا `'name'`) یا `''`. */
+export function identityIsolate(question, displayName, lang = 'fa') {
+  if (forOtherPerson(question, lang)) return 'other';
+  const self = declaredSelfName(question, lang);
+  /* نامِ نمایشی گاهی چندتکه است («اسمم هایا»، «شناسنامه زهرا»): اگر اسمِ اعلام‌شده با **هر** تکه‌اش
+   * بخواند همان آدم است. */
+  const parts = String(displayName || '').trim().split(/\s+/).filter(Boolean);
+  if (self && parts.length && !parts.some((p) => sameName(self, p))) return 'name';
+  return '';
+}
+
+/* 🧭 برنامه‌ی ایمنیِ یک فال، تک‌منبع برای ربات و آزمایشگاه.
+ *   - `crisis`: سؤال حرفِ صریحِ آسیب به خود دارد (⟵ بلوکِ ایمنی + خطِ مراقبت).
+ *   - `sensitive`: سؤال یا حافظه موضوعِ حساس دارد (⟵ بلوکِ ایمنی).
+ *   - `isolate`: فال برای آدمِ دیگری است (⟵ نه حافظه، نه فال‌های قبلی، نه نام).
+ *   - `memory`/`prev`: آن‌چه واقعاً به مدل می‌رود.
+ * `prev` ردیف‌هایی است با `question` و `summary`؛ فالِ قبلی‌ای که خودش «برای دیگری» بوده
+ * از الگوهای خودِ کاربر حذف می‌شود، و خلاصه‌ی فالِ حساس به برچسب تقلیل پیدا می‌کند. */
+/* ⏳ آسیبِ **گذشته** («یه زمانی به خودم آسیب می‌زدم ولی الان بهترم») خطرِ امروز نیست:
+ * حساس می‌ماند (بلوکِ ایمنی) ولی خطِ مراقبت نمی‌گیرد (قاعده‌ی مالک: فقط خطرِ صریحِ فعلی).
+ * عمداً تنگ: فقط واژه‌های آسیب (نه نیتِ مرگ مثلِ «می‌خوام بمیرم») و فقط با نشانه‌ی صریحِ گذشته. */
+const FA_PAST_HARM = /(?:به خودم آسیب|به خودم صدمه|خودزنی)/;
+const FA_PAST_MARK = /(?:یه زمانی|یک زمانی|یه موقعی|قبلا|قبلاً|سالها پیش|سال‌ها پیش|اون موقع|آن موقع|در گذشته|میزدم|می زدم|می‌زدم|کرده بودم|زده بودم)/;
+function pastHarmOnly(question, lang) {
+  if (lang !== 'fa') return false;
+  const hit = crisisIn(question);
+  if (!hit || !FA_PAST_HARM.test(hit)) return false;
+  return FA_PAST_MARK.test(faNorm(question).replace(/\s+/g, ' ')) || FA_PAST_MARK.test(String(question));
+}
+
+export function readingSafetyPlan({ question = '', displayName = '', memory = '', prev = [], lang = 'fa',
+  safety = true, identity = true } = {}) {
+  const pastHarm = safety && pastHarmOnly(question, lang);
+  const crisis = safety ? (!!crisisIn(question) && !pastHarm) : false;
+  const isolate = identity ? identityIsolate(question, displayName, lang) : '';
+  let mem = String(memory || '');
+  let memoryCut = 0;
+  if (safety) { const s = sanitizeMemory(mem, lang); mem = s.text; memoryCut = s.cut; }
+  const memSensitive = safety && memorySensitive(mem, lang);
+  const sensitive = safety && (crisis || pastHarm || !!sensitiveTermIn(question, lang) || memSensitive);
+  let outPrev = Array.isArray(prev) ? prev : [];
+  if (identity) outPrev = outPrev.filter((p) => !identityIsolate(p?.question, displayName, lang));
+  if (safety) {
+    outPrev = outPrev.map((p) => {
+      const risky = crisisIn(p?.question) || crisisIn(p?.summary)
+        || sensitiveTermIn(p?.question, lang) || sensitiveTermIn(p?.summary, lang);
+      return risky ? { ...p, summary: labelOf(lang) } : p;
+    });
+  }
+  if (isolate) { mem = ''; outPrev = []; }
+  return { crisis, sensitive, isolate, memory: mem, prev: outPrev, memoryCut };
+}

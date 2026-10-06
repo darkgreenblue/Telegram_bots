@@ -55,6 +55,7 @@ import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
 import { cardMismatch } from './card-integrity.js';
+import { readingSafetyPlan, sanitizeMemory } from './reading-safety.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
 import * as CA from './cards-admin.js';
@@ -357,7 +358,16 @@ const TEST_PHASE = false;
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
 // 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
 //         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
-const PRODUCT_VERSION = '3.153.0';
+// 3.154.0: 🛟 ایمنیِ فال (تصمیم‌های مالک ۱۴۰۵/۰۷/۱۴): سؤالِ حساس (خودکشی، آسیب به خود، بستری، درمان)
+//         فال می‌گیرد ولی با بلوکِ ایمنی در پرامپت و خطِ ثابتِ مراقبت از کد؛ حافظه سابقه‌ی پزشکی و
+//         خودکشی را نگه نمی‌دارد؛ و فالی که برای آدمِ دیگری است (اسمِ دیگر، «برای دوستم») از حافظه
+//         و الگوی فال‌های قبلی استفاده نمی‌کند.
+const PRODUCT_VERSION = '3.154.0';
+/* 🛟 دو پرچمِ مستقل، هر کدام رول‌بکِ یک‌خطی:
+ *   READING_SAFETY: بلوکِ ایمنیِ پرامپت + خطِ مراقبت + پاک‌سازیِ حافظه. `false` ⟵ دقیقاً v3.153.0.
+ *   READING_IDENTITY_GUARD: جداسازیِ فالِ «آدمِ دیگر» از حافظه و فال‌های قبلی. */
+const READING_SAFETY = true;
+const READING_IDENTITY_GUARD = true;
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -4360,17 +4370,33 @@ async function resendCurrentStep(ctx, uid) {
 // کانتکستِ خوانش در `reading-core.js` ساخته می‌شود (تابعِ خالص). این‌جا فقط چیزهایی که
 // از دیتابیس و استیت می‌آیند جمع و به آن پاس داده می‌شوند — همان الگویی که
 // `tools/reading-lab.mjs` برای شبیه‌سازیِ آفلاینِ همین مسیر استفاده می‌کند.
-function readingCtxFor(user, spread, question, cards, focusKey) {
-  return buildReadingCtx({
+/* 🛟 برنامه‌ی ایمنیِ یک فال (v3.154.0)، تک‌منبع برای کانتکست، پرامپت و پایانِ فال.
+ * `question` فقط متنِ **واقعیِ** کاربر است (نه جای‌خالیِ «سؤال در صوت است»)؛ برای سؤالِ صوتی
+ * بحران بعد از برگشتنِ `question_text` در `finishReading` دوباره سنجیده می‌شود. */
+function safetyPlanFor(user, question, prev = []) {
+  return readingSafetyPlan({
+    question: question || '', displayName: dispName(user), memory: user.memory_json || '', prev,
+    lang: currentLang(), safety: READING_SAFETY, identity: READING_IDENTITY_GUARD,
+  });
+}
+
+function readingCtxFor(user, spread, question, cards, focusKey, realQuestion = question) {
+  // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست.
+  // ⚠️ از خطِ آبِ ریستِ حافظه رد نمی‌شود: کاربری که حافظه‌اش را ریست کرده باید از نظرِ
+  // **خروجیِ فال** انگار اولین فالش است. رکوردها سرِ جایشان‌اند، فقط مدل نمی‌بیندشان.
+  const prev = stmts.lastDeliveredSince.all(user.telegram_id, Number(user.memory_reset_at) || 0, 4);
+  const plan = safetyPlanFor(user, realQuestion, prev);
+  const ctx = buildReadingCtx({
     user, spread, question, cards, focusKey, L,
-    name: dispName(user), // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
+    // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود. فالِ «آدمِ دیگر» نامی نمی‌گیرد.
+    name: plan.isolate ? '' : dispName(user),
     kbOn: toneV2For(user.telegram_id),
     hideName: uxV2For(user.telegram_id),
-    // ریکال کامل ارزان: در مقیاس ما کل تاریخچه‌ی مفید در کانتکست جا می‌شود — RAG لازم نیست.
-    // ⚠️ از خطِ آبِ ریستِ حافظه رد نمی‌شود: کاربری که حافظه‌اش را ریست کرده باید از نظرِ
-    // **خروجیِ فال** انگار اولین فالش است. رکوردها سرِ جایشان‌اند، فقط مدل نمی‌بیندشان.
-    prev: stmts.lastDeliveredSince.all(user.telegram_id, Number(user.memory_reset_at) || 0, 4),
+    memory: plan.memory,
+    prev: plan.prev,
   });
+  ctx.safety = plan; // فقط برای صداکننده؛ `readingContext` کلیدهایش را صریح برمی‌دارد و این به مدل نمی‌رود
+  return ctx;
 }
 
 // 💸 دانلودِ فایلِ صوتیِ سؤال. **رایگان است** (Bot API تلگرام، نه OpenRouter) پس قاعده‌ی
@@ -4565,7 +4591,7 @@ async function callReadingLLM(readingId, armOpts = null) {
   // (فایلی در کار نیست و مدل گیج می‌شود). به‌جایش صریح می‌گوییم سؤالِ مشخصی نداریم و
   // خوانش روی حوزه‌ی تمرکز بنا می‌شود — این خیلی بهتر از ریفاندِ کاربری است که پول داده.
   const questionText = r.question || (audio ? L.prompts.questionInAudio : L.prompts.questionMissing);
-  const ctx = readingCtxFor(user, spread, questionText, cards, r.focus_area);
+  const ctx = readingCtxFor(user, spread, questionText, cards, r.focus_area, r.question || '');
   // پرچمِ خاموش باید پرامپت را هم دقیقاً به حالتِ قبل برگرداند، نه فقط پیام را پنهان کند
   // (وگرنه رول‌بک نصفه است: هزینه‌ی توکنِ اضافه می‌ماند بدونِ هیچ فایده‌ای).
   const toneV2 = toneV2For(r.user_id);
@@ -4585,7 +4611,12 @@ async function callReadingLLM(readingId, armOpts = null) {
   // وقتی صدا همراه است، سؤال از خودِ فایل شنیده می‌شود؛ یک بلوکِ کوتاه به پرامپت اضافه
   // می‌شود که می‌گوید صدا **داده است نه دستور** (گاردِ prompt-injection، بند ۹ ریشه) و
   // متنِ سؤال را در `question_text` برگردان تا رکوردِ فال بدونِ فراخوانیِ دوم کامل شود.
-  const systemFinal = audio ? `${system}\n${L.prompts.audioQuestionNote}` : system;
+  // 🛟 بلوکِ ایمنی **بعد از** پرامپت می‌چسبد، پس پیشوندِ کش‌شونده‌ی فالِ عادی دست نمی‌خورد.
+  const safeSystem = ctx.safety.sensitive ? `${system}\n${L.prompts.readerSafety}` : system;
+  if (ctx.safety.sensitive || ctx.safety.isolate || ctx.safety.memoryCut) {
+    log(`🛟 READING_SAFETY reading#${readingId} crisis=${+ctx.safety.crisis} sensitive=${+ctx.safety.sensitive} isolate=${ctx.safety.isolate || '-'} memory_cut=${ctx.safety.memoryCut}`);
+  }
+  const systemFinal = audio ? `${safeSystem}\n${L.prompts.audioQuestionNote}` : safeSystem;
   const textPart = L.prompts.readingContext(ctx);
   const userMsg = audio
     ? [{ type: 'text', text: textPart }, { type: 'input_audio', input_audio: { data: audio.data, format: audio.format } }]
@@ -8539,13 +8570,16 @@ async function runChatTurn({ uid, r, text, msgId, price, send, step, typingCtx =
     const spread = SPREAD_BY_ID[r.type] || null;
     const labels = L.prompts.cardLabels(cards.length);
     const user = getUser(uid) || {};
-    const prev = stmts.lastDeliveredSince.all(uid, Number(user.memory_reset_at) || 0, 3)
+    const prevRaw = stmts.lastDeliveredSince.all(uid, Number(user.memory_reset_at) || 0, 3)
       .filter((x) => x.id !== rid).slice(0, 2);
+    // 🛟 همان قاعده‌ی فال: گفتگوی فالِ «آدمِ دیگر» نه حافظه دارد نه فال‌های قبلی، و حافظه پاک‌شده است.
+    const chatSafety = safetyPlanFor(user, r.question || '', prevRaw);
+    const prev = chatSafety.prev;
     // پیشوندِ ثابت: در طولِ یک گفتگو بیت‌به‌بیت یکسان می‌ماند تا کشِ پرامپت بخورد.
     // یادآوریِ قالب **بعد از** کانتکست می‌نشیند (`chatSystemPrompt`)؛ خودش هم per locale
     // ثابت است، پس پیشوند همچنان در طولِ گفتگو بیت‌به‌بیت یکسان می‌ماند.
     const system = chatSystemPrompt(L.prompts.chatSystem, buildChatCtx({
-      reading: r, llm, cards, spread, labels, memory: user.memory_json || '', prev, L,
+      reading: r, llm, cards, spread, labels, memory: chatSafety.memory, prev, L,
     }), L);
     const hist = stmts.chatHistory.all(rid);
     const packed = packHistory(hist.slice(0, -1)); // سؤالِ فعلی جدا می‌رود
@@ -9286,6 +9320,9 @@ async function finishReading(ctx, uid, readingId) {
   if (!r || r.status !== 'started') return;
   const llm = JSON.parse(r.llm_json);
   const cards = JSON.parse(r.cards_json);
+  /* 🛟 همان برنامه‌ی ایمنیِ کانتکست، این‌بار با سؤالِ **نهایی** (برای سؤالِ صوتی، `question_text`ِ
+   * همین فراخوانی). خالص و قطعی است، پس با تصمیمِ لحظه‌ی ساختِ پرامپت یکی است. */
+  const safety = safetyPlanFor(getUser(uid) || {}, r.question || '');
 
   if (v4For(uid)) {
     // ── متنِ نهایی v4: جواب اول، بعد دلیل ──────────────────────────────────
@@ -9294,8 +9331,9 @@ async function finishReading(ctx, uid, readingId) {
     // بدونِ parse_mode: خروجیِ v4 عمداً هیچ قالب‌بندی‌ای ندارد (نه بولد، نه تیتر)، و
     // متنِ خام یعنی تلگرام هیچ نشانه‌گذاری‌ای را تفسیر نمی‌کند — پس نه escape لازم است
     // نه ریسکِ خرابیِ قالب. (replyLong هم extra را فقط به تکه‌ی آخر می‌دهد.)
+    // 🛟 فالِ «آدمِ دیگر» نامِ صاحبِ حساب را سرِ جواب نمی‌گیرد (آن جواب مالِ زینب است نه رخساره).
     const { headline, body, closing } = renderV4(llm, cards, L.prompts.cardLabels(cards.length),
-    { name: uxV2For(r.user_id) ? dispName(getUser(r.user_id)) : '' });
+    { name: uxV2For(r.user_id) && !safety.isolate ? dispName(getUser(r.user_id)) : '' });
     await typing(ctx, PACE_M);
     // 📎 لنگرِ گفتگو (v3.84.0، خواسته‌ی صریحِ مالک): شناسه‌ی **سرخط** ثبت می‌شود چون
     // اولین و شناخته‌ترین پیامِ فال است، همیشه یک تکه‌ی واحد است (برخلافِ بدنه که
@@ -9340,12 +9378,30 @@ async function finishReading(ctx, uid, readingId) {
     await ctx.reply(L.reading.empowerClose);
   }
 
+  /* 🛟 خطِ ثابتِ مراقبت، از **کد** نه از مدل، فقط وقتی سؤال حرفِ صریحِ آسیب به خود دارد. آخرِ فال
+   * می‌نشیند تا آخرین چیزی باشد که کاربر می‌خواند. شکستش فالِ پول‌داده را نمی‌شکند. */
+  if (safety.crisis) {
+    try { await sleep(PACE_M); await ctx.reply(L.reading.careLine); }
+    catch (e) { logErr('careLine:', e.message); }
+  }
+
   stmts.setReadingStatus.run('delivered', readingId);
   track(db, uid, EVENTS.PRODUCT_DELIVERED, { type: r.type, price: r.price, reading_id: readingId });
   trackOnce(db, uid, EVENTS.FIRST_VALUE, { via: 'reading' });
   // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
-  if (typeof llm.memory === 'string' && llm.memory.trim()) {
-    stmts.setMemory.run(llm.memory.trim().slice(0, 1200), uid);
+  /* 🛟 فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند (شناختِ زینب جای شناختِ رخساره
+   * نمی‌نشیند)، و حافظه‌ی نوشته‌شده جمله‌های پزشکی/خودکشی را ندارد. */
+  let memCut = 0;
+  if (typeof llm.memory === 'string' && llm.memory.trim() && !safety.isolate) {
+    const mem = READING_SAFETY ? sanitizeMemory(llm.memory.trim(), currentLang()) : { text: llm.memory.trim(), cut: 0 };
+    memCut = mem.cut;
+    stmts.setMemory.run(mem.text.slice(0, 1200), uid);
+  }
+  if (safety.crisis || safety.sensitive || safety.isolate || memCut) {
+    track(db, uid, 'reading_safety', {
+      reading_id: readingId, crisis: +safety.crisis, sensitive: +safety.sensitive,
+      isolate: safety.isolate || '', memory_cut: memCut,
+    });
   }
   setState(uid, 'idle');
   setSession(uid, null);

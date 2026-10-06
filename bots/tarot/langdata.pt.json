@@ -1128,5 +1128,20 @@
     "type": "tipo de leitura",
     "summary": "resumo",
     "feedback": "retorno da pessoa"
+  },
+  "chat": {
+    "crisis": [
+      "suicid",
+      "suicíd",
+      "me matar",
+      "tirar minha vida",
+      "tirar a minha vida",
+      "não quero viver",
+      "nao quero viver",
+      "quero morrer",
+      "me machucar",
+      "me cortar",
+      "acabar com a minha vida"
+    ]
   }
 }
