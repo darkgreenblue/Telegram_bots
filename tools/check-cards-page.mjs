@@ -35,8 +35,8 @@ const Database = require('better-sqlite3');
     CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, event TEXT NOT NULL,
       props TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()));
   `);
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6219861904145405','علیرضا اولیا','بلوبانک',100257975,'regular',1)").run();
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5022291612282234','علیرضا اولیاء','بانک پاسارگاد',100257975,'white',2)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000425405','علیرضا اولیا','بلوبانک',100257975,'regular',1)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000122234','علیرضا اولیاء','بانک پاسارگاد',100257975,'white',2)").run();
   db.prepare("INSERT INTO events (user_id, event, props) VALUES (100257975, 'card_changed', ?)").run(JSON.stringify({ card_id: 2, what: 'نوع ⟵ سفید', via: 'bot' }));
   db.close();
 }
@@ -57,7 +57,7 @@ ok(!cardsPageSupported('voice2text') && !adminActionSupported('voice2text', 'car
 
 console.log('\nرندر:');
 const html = cardsBody(new URL('http://x/cards?bot=tarot'));
-ok(/6219-8619-0414-5405/.test(html) && /5022-2916-1228-2234/.test(html), 'هر دو کارت با شماره‌ی چهارتا-چهارتا');
+ok(/0000-0000-0042-5405/.test(html) && /0000-0000-0012-2234/.test(html), 'هر دو کارت با شماره‌ی چهارتا-چهارتا');
 ok(/⏸ غیرفعال کن/.test(html) && /🔁 عادی کن/.test(html) && /افزودنِ کارت/.test(html), 'دکمه‌های اقدام و فرمِ افزودن');
 ok(!/name="field"[^>]*>[\s\S]{0,400}value="number"/.test(html), 'شماره در گزینه‌های ویرایش نیست');
 ok(!/حذف/.test(html.replace(/حذف و ویرایشِ شماره/g, '')), 'هیچ دکمه‌ی حذفی نیست');
@@ -76,9 +76,9 @@ ok(throws(() => post({ op: 'active', id: '1', value: '0' }), /آخرین کار�
   'خاموش‌کردنِ آخرین کارتِ عادیِ فعال همین‌جا رد می‌شود و به صف نمی‌رسد');
 ok(throws(() => post({ op: 'add', number: '6219861904145406', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }), /اشتباه/),
   'Luhn همین‌جا');
-ok(throws(() => post({ op: 'add', number: '6219 8619 0414 5405', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }), /قبلاً ثبت شده/),
+ok(throws(() => post({ op: 'add', number: '0000 0000 0042 5405', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }), /قبلاً ثبت شده/),
   'شماره‌ی تکراری همین‌جا');
-ok(throws(() => post({ op: 'edit', id: '1', field: 'number', value: '5022291612282234' }), /ویرایش‌پذیر نیست/), 'ویرایشِ شماره رد می‌شود');
+ok(throws(() => post({ op: 'edit', id: '1', field: 'number', value: '0000000000122234' }), /ویرایش‌پذیر نیست/), 'ویرایشِ شماره رد می‌شود');
 ok(throws(() => cardsAction(new URLSearchParams({ bot: 'tarot-intl', op: 'active', id: '2', value: '0' })), /اجرا نمی‌کند/),
   'POST به رباتِ بی‌کارت (تبِ کهنه) رد می‌شود، نه صف');
 const safe = (fn) => { try { return String(fn()); } catch (e) { return `THROW ${e.message}`; } };

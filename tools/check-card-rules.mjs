@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای قواعدِ صلاحیتِ کارت per کاربر (tarot، v3.133.0 — `bots/tarot/card-rules.js`).
 //
 // تصمیمِ مالک (۱۴۰۵/۰۷/۰۵) که این فایل قفل می‌کند:
@@ -91,19 +92,19 @@ function boot({ rules = true, rotation = true, CAo = {}, noTags = false } = {}) 
   if (!noTags) db.exec(`CREATE TABLE receipt_tags (payment_id INTEGER NOT NULL, user_id INTEGER NOT NULL, dim TEXT NOT NULL, value_key TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'admin', by_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (payment_id, dim, source))`);
   const errs = [], events = [], sent = [], logs = [];
-  const env = { CA: { ...CA, ...CAo }, CR, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, CARD_RULES_ENABLED: rules,
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS, CA: { ...CA, ...CAo }, CR, db, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, CARD_RULES_ENABLED: rules,
     CARD_SWITCH_ENABLED: true, starsRail: false,
     bot: { telegram: { sendMessage: async (to, t) => { sent.push({ to, t }); } } },
     log: (...a) => logs.push(a.join(' ')), logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }) };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
-  const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: 'بلوبانک', kind: 'regular', active: 1, admin_id: OWNER_ID };
+  const body = `const LEGACY_CARD = { id: 0, number: '0000000000425405', holder: 'x', bank: 'بلوبانک', kind: 'regular', active: 1, admin_id: OWNER_ID };
     ${readers}\n${schema}\n${switchRg}\n${whiteRg}
     return { issueInvoiceCard, switchTargetFor, whiteTargetFor, cardsForUser, cardSt };`;
   const h = { ...new Function(...Object.keys(env), body)(...Object.values(env)), db, errs, events, sent, logs };
   // کارت‌ها مثلِ پروداکشن: ۱ بلو (عادی)، ۲ پاسارگاد (عادی)، ۳ خاورمیانه (عادی)، ۴ شهر (سفید).
   db.prepare("UPDATE cards SET kind='regular' WHERE id=2").run();
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5859471120915172','x','بانک خاورمیانه',111,'regular',3)").run();
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5047061675180547','x','بانک شهر',111,'white',4)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000355172','x','بانک خاورمیانه',111,'regular',3)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000260547','x','بانک شهر',111,'white',4)").run();
   if (!noTags) {
     // سوابق: کاربرِ آپ یک رسیدِ قدیمیِ تگ‌خورده دارد؛ کاربرِ موبایل‌بانک هم تگ دارد ولی نه آپ.
     const tag = db.prepare('INSERT INTO receipt_tags (payment_id, user_id, dim, value_key, source) VALUES (?,?,?,?,?)');

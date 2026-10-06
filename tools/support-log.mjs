@@ -13,10 +13,9 @@
 //   node tools/support-log.mjs sqlite [out.db]  خروجی SQLite برای کوئریِ دلخواه
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FILE = join(ROOT, 'support', 'tickets.jsonl');
+const FILE = process.env.SUPPORT_LEDGER_PATH || join(homedir(), 'private', 'telegram-bots', 'support', 'tickets.jsonl');
 export const SUPPORT_LOG_SCHEMA_VERSION = 1;
 
 const CATEGORIES = ['payment', 'credit', 'reading', 'bug', 'question', 'feature', 'other'];
@@ -86,8 +85,8 @@ export function addTicket(input) {
   if (!VERDICTS.includes(t.verdict)) throw new Error(`verdict نامعتبر: ${t.verdict} (${VERDICTS.join('|')})`);
   if (!STATUSES.includes(t.status)) throw new Error(`status نامعتبر: ${t.status} (${STATUSES.join('|')})`);
   if (t.verdict === 'confirmed_bug' && !t.bug_ref) throw new Error('باگِ تأییدشده بدونِ bug_ref ثبت نمی‌شود (قاعده‌ی ۳ در support/README.md)');
-  mkdirSync(dirname(FILE), { recursive: true });
-  appendFileSync(FILE, JSON.stringify(t) + '\n', 'utf8');
+  mkdirSync(dirname(FILE), { recursive: true, mode: 0o700 });
+  appendFileSync(FILE, JSON.stringify(t) + '\n', { encoding: 'utf8', mode: 0o600 });
   return t;
 }
 
@@ -149,7 +148,7 @@ function main() {
     return;
   }
   if (cmd === 'sqlite') {
-    const out = args[0] || join(ROOT, 'support', 'tickets.db');
+    const out = args[0] || join(dirname(FILE), 'tickets.db');
     const sql = [
       'CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, ts INTEGER, date TEXT, bot TEXT, support_code TEXT,',
       'user_id INTEGER, user_message TEXT, category TEXT, verdict TEXT, findings TEXT, actions TEXT, reply TEXT,',

@@ -39,8 +39,8 @@ const tY = now - 86400;
     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, status TEXT,
       card_id INTEGER, approved_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
   `);
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6219861904145405','ع','بلوبانک',1,'regular',1)").run();
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5022291612282234','ع','پاسارگاد',1,'white',2)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000425405','ع','بلوبانک',1,'regular',1)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000122234','ع','پاسارگاد',1,'white',2)").run();
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6037997599199013','ب','ملی',2,'regular',3)").run();
   const ev = db.prepare('INSERT INTO events (user_id, event, props, created_at) VALUES (?,?,?,?)');
   // امروز: کارتِ ۱ سه فاکتور، ۳ یک فاکتور؛ یک تعویض ۱⟵۳؛ یک خطای انتقال ۱⟵۲. دیروز: کارتِ ۳ دو فاکتور.

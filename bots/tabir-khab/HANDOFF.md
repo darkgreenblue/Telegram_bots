@@ -1,3 +1,5 @@
+> شماره‌کارت‌های نمونهٔ این سند ساختگی‌اند. مقصد واقعی پرداخت فقط از تنظیمات خصوصی خوانده می‌شود.
+
 # Tabir Khab — Project Handoff / سندِ انتقالِ کانتکست
 
 > این فایل برای انتقالِ کاملِ کانتکستِ پروژه به یک سیشنِ جدیدِ Claude Code است.
@@ -10,7 +12,7 @@
 
 ## ریپو و استقرار
 - **GitHub:** `darkgreenblue/tabir-khab` (خصوصی)
-- **سرور:** ابرِ آروان، Ubuntu 24.04، `ubuntu@185.204.171.170`
+- **سرور:** ابرِ آروان، Ubuntu 24.04، `ubuntu@<VPS_HOST from GitHub Secrets>`
   - مسیر: `/home/ubuntu/tabir_khab` · venv: `.venv` (Python 3.12)
   - سرویسِ systemd: `tabir-khab` (enabled، auto-restart)
   - Deploy key فقط‌خواندنی سرور↔گیت‌هاب وصل می‌کند (SSH alias `github-tabir`)

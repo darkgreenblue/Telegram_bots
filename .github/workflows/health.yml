@@ -53,8 +53,8 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/health_key
           chmod 600 ~/.ssh/health_key
-          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
-          OUT=$(ssh -i ~/.ssh/health_key -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@185.204.171.170 'bash -s' <<'REMOTE'
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          OUT=$(ssh -i ~/.ssh/health_key -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@${{ secrets.VPS_HOST }} 'bash -s' <<'REMOTE'
             cd ~/voice2text
             # تنها چکِ این جاب: خودِ ناظر. بقیه‌ی چک‌ها کارِ اوست و اگر او زنده باشد،
             # هر خرابیِ دیگری حداکثر ۵ دقیقه بعد مستقیم به تلگرامِ مالک می‌رسد.

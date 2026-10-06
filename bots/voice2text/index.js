@@ -1,3 +1,4 @@
+import { loadSinglePaymentCard } from './payment-config.js';
 // index.js — SaaS Telegram voice→text bot (multi-user, wallet, model selection)
 import 'dotenv/config';
 import { execFile } from 'child_process';
@@ -37,10 +38,11 @@ const OWNER_ID = ADMIN_IDS[0] || 100257975; // اولین آی‌دی = مالک
 function apiKeyFor(uid) { return (uid === OWNER_ID && OPENROUTER_API_KEY_PERSONAL) ? OPENROUTER_API_KEY_PERSONAL : OPENROUTER_API_KEY; }
 const RESET_TEST_BTN = '🔄 ریست حساب (ادمین)'; // ابزار مدیریتیِ همیشه‌فعالِ فقط-ادمین (هر دو آی‌دیِ ADMIN_IDS)
 
-const CARD_NUMBER  = '6219861904145405';
-const CARD_OWNER   = 'علیرضا اولیا — بلوبانک';
-const CARD_RECIPIENT_NAME = 'علیرضا اولیا';   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
-const CARD_DEST_LAST4     = '5405';            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
+const PAYMENT_CARD = loadSinglePaymentCard(process.env.PAYMENT_CARD_JSON);
+const CARD_NUMBER = PAYMENT_CARD.number;
+const CARD_OWNER = PAYMENT_CARD.owner;
+const CARD_RECIPIENT_NAME = PAYMENT_CARD.recipient;   // نامِ گیرنده (تطبیق در ایجنتِ رسید)
+const CARD_DEST_LAST4 = PAYMENT_CARD.dest_last4;            // چهار رقمِ آخرِ کارتِ مقصد (تطبیق در ایجنتِ رسید)
 const MIN_RECHARGE = 50_000;  // تومان
 /* سقفِ بالا — عمداً خیلی بالاتر از هر شارژِ واقعی، چون هدفش رد کردنِ کاربرِ عادی نیست.
  * بند ۹ ریشه: «برای هر ورودی کاربر سقف بگذار… بالاتر از الگوی مصرف واقعی». بدونِ سقف،

@@ -193,6 +193,8 @@ jobs:
           RESUME_TAILOR_BOT_TOKEN:      ${{ secrets.RESUME_TAILOR_BOT_TOKEN }}
           RESUME_TAILOR_OPENROUTER_KEY: ${{ secrets.RESUME_TAILOR_OPENROUTER_KEY }}
           # tarot
+          TAROT_PAYMENT_CARDS_JSON: ${{ secrets.TAROT_PAYMENT_CARDS_JSON }}
+          VOICE2TEXT_PAYMENT_CARD_JSON: ${{ secrets.VOICE2TEXT_PAYMENT_CARD_JSON }}
           TAROT_BOT_TOKEN:              ${{ secrets.TAROT_BOT_TOKEN }}
           TAROT_OPENROUTER_KEY:         ${{ secrets.TAROT_OPENROUTER_KEY }}
           # PATِ ریزدانه‌ی گیت‌هاب تا دستورِ /reel بتواند ورک‌فلوی Tarot video را صدا بزند
@@ -222,11 +224,11 @@ jobs:
           # اجرای دستی با force_all=true → همه ری‌دیپلوی می‌شوند
           FORCE_ALL:                    ${{ github.event.inputs.force_all || 'false' }}
         with:
-          host: 185.204.171.170
+          host: ${{ secrets.VPS_HOST }}
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 30m
-          envs: GH_FETCH_TOKEN,VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_METIS_API_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_USDT_TOMAN_RATE,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,ADS_ADMIN_BOT_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
+          envs: TAROT_PAYMENT_CARDS_JSON,VOICE2TEXT_PAYMENT_CARD_JSON,GH_FETCH_TOKEN,VOICE2TEXT_BOT_TOKEN,VOICE2TEXT_OPENROUTER_KEY,VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED,VOICE2TEXT_METIS_API_KEY,VOICE2TEXT_NOTION_TOKEN,RESUME_TAILOR_BOT_TOKEN,RESUME_TAILOR_OPENROUTER_KEY,TAROT_BOT_TOKEN,TAROT_OPENROUTER_KEY,TAROT_VIDEO_DISPATCH_TOKEN,TAROT_USDT_TOMAN_RATE,TAROT_RU_BOT_TOKEN,TAROT_RU_OPENROUTER_KEY,TAROT_PT_BOT_TOKEN,TAROT_PT_OPENROUTER_KEY,TAROT_ES_BOT_TOKEN,TAROT_ES_OPENROUTER_KEY,DAILY_BRIEF_BOT_TOKEN,DAILY_BRIEF_OPENROUTER_KEY,DAILY_BRIEF_NOTION_TOKEN,ADS_ADMIN_BOT_TOKEN,DASHBOARD_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,OWNER_TELEGRAM_ID,FORCE_ALL
           script: |
             set -e
             cd ~/voice2text
@@ -370,6 +372,8 @@ jobs:
               [ -n "$VOICE2TEXT_NOTION_TOKEN" ] && V2T_ENV="$(printf '%s\nNOTION_TOKEN=%s' "$V2T_ENV" "$VOICE2TEXT_NOTION_TOKEN")"
               [ -n "$VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED" ] && V2T_ENV="$(printf '%s\nOPENROUTER_API_KEY_PERSONAL=%s' "$V2T_ENV" "$VOICE2TEXT_OPENROUTER_KEY_PERSONAL_USED")"
               [ -n "$VOICE2TEXT_METIS_API_KEY" ] && V2T_ENV="$(printf '%s\nMETIS_API_KEY=%s' "$V2T_ENV" "$VOICE2TEXT_METIS_API_KEY")"
+              [ -n "$VOICE2TEXT_PAYMENT_CARD_JSON" ] || { echo 'Missing VOICE2TEXT_PAYMENT_CARD_JSON'; exit 1; }
+              V2T_ENV="$(printf '%s\nPAYMENT_CARD_JSON=%s' "$V2T_ENV" "$VOICE2TEXT_PAYMENT_CARD_JSON")"
               write_env voice2text "$V2T_ENV"
             fi
             if [ -n "$RESUME_TAILOR_BOT_TOKEN" ] && [ -n "$RESUME_TAILOR_OPENROUTER_KEY" ]; then
@@ -381,6 +385,8 @@ jobs:
               TRT_ENV="$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=fa' "$TAROT_BOT_TOKEN" "$TAROT_OPENROUTER_KEY")"
               [ -n "$TAROT_VIDEO_DISPATCH_TOKEN" ] && TRT_ENV="$(printf '%s\nVIDEO_DISPATCH_TOKEN=%s' "$TRT_ENV" "$TAROT_VIDEO_DISPATCH_TOKEN")"
               [ -n "$TAROT_USDT_TOMAN_RATE" ] && TRT_ENV="$(printf '%s\nUSDT_TOMAN_RATE=%s' "$TRT_ENV" "$TAROT_USDT_TOMAN_RATE")"
+              [ -n "$TAROT_PAYMENT_CARDS_JSON" ] || { echo 'Missing TAROT_PAYMENT_CARDS_JSON'; exit 1; }
+              TRT_ENV="$(printf '%s\nPAYMENT_CARDS_JSON=%s' "$TRT_ENV" "$TAROT_PAYMENT_CARDS_JSON")"
               write_env tarot "$TRT_ENV"
             fi
             # 🌍 یک بلوک per زبان. هرکدام کاملاً مستقل است: نبودِ سکرتِ یک زبان فقط
@@ -399,7 +405,7 @@ jobs:
               if [ "$lang" = ru ]; then loc=en; extra="$(printf '\nLANGS=en,es,ru,pt')"; fi
               if [ -n "$tok" ] && [ -n "$key" ]; then
                 write_env "tarot-$lang" \
-                  "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s%s' "$tok" "$key" "$loc" "$extra")" \
+                  "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s%s\nPAYMENT_CARDS_JSON=%s' "$tok" "$key" "$loc" "$extra" "$TAROT_PAYMENT_CARDS_JSON")" \
                   "bots/tarot/.env.$lang"
               else
                 # ⚠️ نامِ سکرتِ خالی صریح چاپ می‌شود، وگرنه تنها نشانه یک «ℹ️ .env نبود»
@@ -828,6 +834,7 @@ jobs:
         # `!cancelled()` استقلالِ دو دیپلوی را حفظ می‌کند (بالا).
         if: ${{ !cancelled() && steps.changed.outputs.deploy == '1' && steps.gate.outputs.go == 'true' }}
         env:
+          PAYMENT_CONFIG: ${{ secrets.TABIR_KHAB_PAYMENT_CONFIG_JSON }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           # توکن‌های تلگرامِ per-language — هر کدام ست باشد در .env سرور upsert می‌شود؛
           # خالی = دست‌نخورده. (فارسی از قبل با نامِ قدیمی TELEGRAM_BOT_TOKEN روی سرور است؛
@@ -845,11 +852,14 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
-          SSH="ssh -i $HOME/.ssh/deploy_key ubuntu@185.204.171.170"
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          SSH="ssh -i $HOME/.ssh/deploy_key ubuntu@${{ secrets.VPS_HOST }}"
 
           # ۱) کد جدید را روی مسیر فعلی سرور overlay کن (فایل‌های untracked مثل .env/db دست نمی‌خورند)
           git archive HEAD:bots/tabir-khab | $SSH 'mkdir -p /home/ubuntu/tabir_khab && tar -x -C /home/ubuntu/tabir_khab'
+          [ -n "$PAYMENT_CONFIG" ] || { echo 'Missing TABIR_KHAB_PAYMENT_CONFIG_JSON'; exit 1; }
+          printf '%s' "$PAYMENT_CONFIG" | $SSH 'python3 /home/ubuntu/tabir_khab/configure_payments.py'
+
 
           # ۲) upsertِ توکن‌ها در .env سرور — فقط کلیدهایی که در Secrets ست شده‌اند؛
           #    بقیه‌ی .env (OPENROUTER_API_KEY, GAPGPT_API_KEY, پرداخت و...) دست نمی‌خورد.

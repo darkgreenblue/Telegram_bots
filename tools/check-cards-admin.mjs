@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای مدیریتِ کارت‌ها داخلِ ربات (tarot، v3.123.0 — فازِ ۱bِ bots/tarot/PAYMENT-V2-PLAN.md).
 //
 // چرا: از این نسخه مالک از داخلِ ربات کارت اضافه/ویرایش/فعال‌وغیرفعال می‌کند و **شماره‌ای که
@@ -31,15 +32,15 @@ console.log('\n💳 مدیریتِ کارت‌ها\n');
 
 /* ── ۱) ماژولِ خالص ─────────────────────────────────────────────────────────── */
 console.log('اعتبارسنجی:');
-ok(CA.normCardNumber('۶۲۱۹-۸۶۱۹ ۰۴۱۴-۵۴۰۵') === '6219861904145405', 'ارقامِ فارسی، خط تیره و فاصله نرمال می‌شوند');
-ok(CA.normCardNumber('٥٠٢٢٢٩١٦١٢٢٨٢٢٣٤') === '5022291612282234', 'ارقامِ عربی هم');
-ok(CA.normCardNumber('621986190414540') === null && CA.normCardNumber('62198619041454051') === null, '۱۵ و ۱۷ رقم رد می‌شوند');
-ok(CA.luhnOk('6219861904145405') && CA.luhnOk('5022291612282234'), 'دو کارتِ واقعیِ فعلی از Luhn رد می‌شوند');
+ok(CA.normCardNumber('۰۰۰۰-۰۰۰۰ ۰۰۴۲-۵۴۰۵') === '0000000000425405', 'ارقامِ فارسی، خط تیره و فاصله نرمال می‌شوند');
+ok(CA.normCardNumber('٠٠٠٠٠٠٠٠٠٠١٢٢٢٣٤') === '0000000000122234', 'ارقامِ عربی هم');
+ok(CA.normCardNumber('621986190414540') === null && CA.normCardNumber('00000000000454051') === null, '۱۵ و ۱۷ رقم رد می‌شوند');
+ok(CA.luhnOk('0000000000425405') && CA.luhnOk('0000000000122234'), 'دو کارتِ واقعیِ فعلی از Luhn رد می‌شوند');
 ok(!CA.luhnOk('6219861904145406') && !CA.luhnOk('6219861904145495'), 'یک رقمِ اشتباه ⟵ Luhn رد می‌کند');
 {
   const r = CA.parseCardField('number', '6219 8619 0414 5406');
   ok(!r.ok && /اشتباه/.test(r.err), 'شماره‌ی ۱۶ رقمیِ نامعتبر با خطای «رقمِ اشتباه» رد می‌شود');
-  ok(CA.parseCardField('number', '6219-8619-0414-5405').value === '6219861904145405', 'شماره‌ی معتبر نرمال‌شده ذخیره می‌شود');
+  ok(CA.parseCardField('number', '0000-0000-0042-5405').value === '0000000000425405', 'شماره‌ی معتبر نرمال‌شده ذخیره می‌شود');
 }
 ok(!CA.parseCardField('holder', 'ع').ok && !CA.parseCardField('holder', 'x'.repeat(41)).ok && CA.parseCardField('holder', 'علی رضایی').ok,
   'نامِ صاحب کارت: ۲ تا ۴۰ حرف');
@@ -60,16 +61,16 @@ ok(CA.canDeactivate([R(1), R(2, 1, 'white')], 2), 'کارتِ سفید همیش�
 ok(CA.canDeactivate([R(1), R(2, 0)], 2), 'فعال‌کردن/غیرفعالِ دوباره‌ی کارتِ غیرفعال گارد ندارد');
 ok(!CA.canMakeWhite([R(1), R(2, 1, 'white')], 1) && CA.canMakeWhite([R(1), R(2)], 1), 'تنها کارتِ عادیِ فعال سفید نمی‌شود');
 {
-  const txt = CA.listText([{ id: 1, active: 1, kind: 'regular', bank: 'بلوبانک', number: '6219861904145405', holder: 'علیرضا', admin_id: 7, sort: 1, daily_cap: 0 }], 7);
-  ok(txt.includes('6219-8619-0414-5405') && txt.includes('(شما)') && !/—/.test(txt), 'فهرست شماره را چهارتا-چهارتا و ادمینِ مالک را «(شما)» نشان می‌دهد، بدونِ «—»');
+  const txt = CA.listText([{ id: 1, active: 1, kind: 'regular', bank: 'بلوبانک', number: '0000000000425405', holder: 'علیرضا', admin_id: 7, sort: 1, daily_cap: 0 }], 7);
+  ok(txt.includes('0000-0000-0042-5405') && txt.includes('(شما)') && !/—/.test(txt), 'فهرست شماره را چهارتا-چهارتا و ادمینِ مالک را «(شما)» نشان می‌دهد، بدونِ «—»');
 }
 
 /* ── ۲) ساختاری در index.js ───────────────────────────────────────────────────── */
 console.log('\nصفِ داشبورد (planCardOp — تک‌منبعِ داشبورد و sweep):');
 {
   const C = [
-    { id: 1, number: '6219861904145405', holder: 'علی', bank: 'بلوبانک', admin_id: 1, kind: 'regular', active: 1, sort: 1, daily_cap: 0 },
-    { id: 2, number: '5022291612282234', holder: 'علی', bank: 'پاسارگاد', admin_id: 1, kind: 'white', active: 1, sort: 2, daily_cap: 0 },
+    { id: 1, number: '0000000000425405', holder: 'علی', bank: 'بلوبانک', admin_id: 1, kind: 'regular', active: 1, sort: 1, daily_cap: 0 },
+    { id: 2, number: '0000000000122234', holder: 'علی', bank: 'پاسارگاد', admin_id: 1, kind: 'white', active: 1, sort: 2, daily_cap: 0 },
   ];
   const P = (op) => CA.planCardOp(op, C);
   ok(!P({ op: 'active', id: 1, value: 0 }).ok, 'صف هم آخرین کارتِ عادیِ فعال را خاموش نمی‌کند');
@@ -77,12 +78,12 @@ console.log('\nصفِ داشبورد (planCardOp — تک‌منبعِ داشب�
   ok(P({ op: 'active', id: 1, value: 1 }).noop && P({ op: 'kind', id: 2, value: 'white' }).noop,
     'مقدارِ هدف (نه «برعکس کن»): تکرارِ همان دستور no-op است، پس دوبار-ارسال خنثی نمی‌شود');
   ok(P({ op: 'active', id: 2, value: 0 }).apply?.value === 0, 'کارتِ سفید غیرفعال می‌شود');
-  ok(!P({ op: 'edit', id: 1, field: 'number', value: '5022291612282234' }).ok, 'صف هم شماره را ویرایش نمی‌کند');
+  ok(!P({ op: 'edit', id: 1, field: 'number', value: '0000000000122234' }).ok, 'صف هم شماره را ویرایش نمی‌کند');
   ok(!P({ op: 'edit', id: 1, field: '__proto__', value: 'x' }).ok, 'فیلدِ ناشناخته/خصمانه رد می‌شود');
   ok(P({ op: 'edit', id: 1, field: 'cap', value: '۵' }).apply?.value === 5, 'ویرایشِ سقف با ارقامِ فارسی');
   ok(P({ op: 'edit', id: 1, field: 'bank', value: 'بلوبانک' }).noop, 'مقدارِ برابر ⟵ no-op');
   ok(!P({ op: 'edit', id: 9, field: 'bank', value: 'x y' }).ok, 'کارتِ ناموجود رد می‌شود');
-  ok(!P({ op: 'add', number: '6219 8619 0414 5405', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }).ok, 'صف هم شماره‌ی تکراری را رد می‌کند');
+  ok(!P({ op: 'add', number: '0000 0000 0042 5405', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }).ok, 'صف هم شماره‌ی تکراری را رد می‌کند');
   ok(!P({ op: 'add', number: '6219861904145406', holder: 'x y', bank: '-', admin: '12345', kind: 'regular' }).ok, 'صف هم Luhn را می‌سنجد');
   let good = '603799759919901';
   for (let d = 0; d < 10; d++) if (CA.luhnOk(good + d)) { good += d; break; }
@@ -128,7 +129,7 @@ const readers = region('let _cardSt = null;', '\nfunction defaultInvoiceCard()',
 const usedFn = (/const countMap = [^\n]+/.exec(SRC)?.[0] || '') + '\n'
   + region('function cardsUsedToday()', '\n/** لحظه‌ی **تأیید**', { includeTo: false });
 const schema = region('db.exec(`\n  CREATE TABLE IF NOT EXISTS cards', "VALUES ('cards_seed_1', unixepoch())\").run();\n})();")
-  .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '6219861904145405';");
+  .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '0000000000425405';");
 const handlers = region('const caOnly = (fn) =>', '/* ---------- هندلر متن', { includeTo: false });
 
 function boot({ stars = false } = {}) {
@@ -148,7 +149,7 @@ function boot({ stars = false } = {}) {
     inlineKeyboard: (rows) => ({ reply_markup: { inline_keyboard: rows } }),
     button: { callback: (text, data) => ({ text, callback_data: data }) },
   };
-  const env = {
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS,
     db, bot, Markup, CA, OWNER_ID: OWNER, starsRail: stars, L: { buttons: { cardsAdmin: '💳 کارت‌ها' } },
     allLabels: (f) => [f({ buttons: { cardsAdmin: '💳 کارت‌ها' } })],
     cardsAdminOn: (u) => Number(u) === OWNER,
@@ -213,7 +214,7 @@ if (h) {
   ok(h.state.get(OWNER) === 'card_add', 'افزودن استیتِ ورودی را باز می‌کند');
   const bad = await type(h, OWNER, '6219861904145406');
   ok(/❌/.test(bad.replies[0]?.text) && h.sess.get(OWNER).cardAdd.step === 'number', 'رقمِ اشتباه ⟵ خطا و ماندن در همان مرحله');
-  const dup = await type(h, OWNER, '6219-8619-0414-5405');
+  const dup = await type(h, OWNER, '0000-0000-0042-5405');
   ok(/قبلاً ثبت شده/.test(dup.replies[0]?.text) && h.sess.get(OWNER).cardAdd.step === 'number', 'شماره‌ی تکراری رد می‌شود');
   // یک شماره‌ی معتبرِ Luhn می‌سازیم (رقمِ کنترل حساب می‌شود، نه حدس زده).
   let valid = '603799759919901';

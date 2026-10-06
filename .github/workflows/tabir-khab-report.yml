@@ -15,7 +15,7 @@ jobs:
       - name: Run admin report over SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: 185.204.171.170
+          host: ${{ secrets.VPS_HOST }}
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |

@@ -25,7 +25,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/vps && chmod 600 ~/.ssh/vps
           SSH_OPTS="-i $HOME/.ssh/vps -o StrictHostKeyChecking=accept-new"
-          HOST="ubuntu@185.204.171.170"
+          HOST="ubuntu@${{ secrets.VPS_HOST }}"
 
           cat > /tmp/snapshot.sh <<'SNAP'
           set -e

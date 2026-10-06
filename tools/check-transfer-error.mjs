@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای «⛔️ نتوانستم واریز کنم» (tarot، v3.127.0 — فازِ ۵ِ bots/tarot/PAYMENT-V2-PLAN.md).
 //
 // تصمیم‌های مالک که این فایل قفل می‌کند (شماره‌ها از «سؤال‌های باز»ِ plan):
@@ -50,7 +51,7 @@ const C = (id, admin, kind, sort, extra = {}) => ({ id, admin_id: admin, kind, s
 console.log('\nمتن‌ها:');
 {
   const t = RT.terrAdminText({ invoiceNo: 42, userId: 9, userName: 'سارا', amount: 60000,
-    from: { number: '6219861904145405', bank: 'بلوبانک' }, to: { number: '5022291612282234' }, errText: 'امکان انتقال وجه وجود ندارد' });
+    from: { number: '0000000000425405', bank: 'بلوبانک' }, to: { number: '0000000000122234' }, errText: 'امکان انتقال وجه وجود ندارد' });
   ok(t.includes('…5405') && t.includes('بلوبانک') && t.includes('…2234'), 'پیامِ ادمین: هر دو کارت (ناموفق و سفید)');
   ok(t.includes('#42') && t.includes('۶۰٬۰۰۰') && t.includes('سارا'), 'پیامِ ادمین: شماره‌ی فاکتور، مبلغ و کاربر');
   ok(t.includes('امکان انتقال وجه وجود ندارد') && t.includes('پیامکش اومده'), 'پیامِ ادمین: متنِ خطا و راهنمای دکمه');
@@ -87,7 +88,7 @@ function boot({ flag = true, shadow = true, stars = false } = {}) {
   // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
   // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
   db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
-  const env = {
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS,
     CA: CAx, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: true, starsRail: stars,
     TRANSFER_ERROR_ACTION_ENABLED: flag, RECEIPT_SHADOW_ENABLED: shadow,
     Markup, L: fa, TERR_BTN: RT.TERR_BTN, terrAdminText: RT.terrAdminText, RECEIPT_LIVE_STATES: ['pending', 'waiting_review'],
@@ -123,7 +124,7 @@ function boot({ flag = true, shadow = true, stars = false } = {}) {
     approved.push({ pid, card_id: p.card_id });
     return { p, creditAmount: p.original_amount || p.amount, bonus: 0 };
   };
-  const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
+  const body = `const LEGACY_CARD = { id: 0, number: '0000000000425405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
     ${readers}\n${schema}\n${helpers}
     function canActOnPayment(uid, pid) {
       if (isAdmin(uid)) return true;
@@ -195,7 +196,7 @@ if (h) {
   ok(kinds[0] === 'delete' && log[0][1] === 500, 'اول پیامِ فاکتورِ کارتِ ناموفق حذف شد (یک فاکتورِ زنده در چت)');
   const replies = log.filter((x) => x[0] === 'reply');
   ok(replies.length === 2 && replies[0][1] === fa.wallet.transferErrorHeader, 'سرتیترِ «کارتِ جدید»، بعد فاکتور');
-  ok(replies[1][1].includes('5022-2916-1228-2234'), 'فاکتورِ تازه شماره‌ی کارتِ سفید را دارد');
+  ok(replies[1][1].includes('0000-0000-0012-2234'), 'فاکتورِ تازه شماره‌ی کارتِ سفید را دارد');
   const keys = kbData(replies[1][2]);
   ok(keys[0] === 'copy' && keys.at(-1) === `pay_cancel:${a}` && !keys.some((k) => /^card_switch:/.test(k)),
     'کیبورد: کپی … انصراف، **بدونِ** دکمه‌ی تعویض (فاکتورِ سفید)');

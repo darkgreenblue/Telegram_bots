@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای «🔄 تعویض شماره کارت» (tarot، v3.125.0 — فازِ ۳ِ bots/tarot/PAYMENT-V2-PLAN.md).
 //
 // تصمیم‌های مالک که این فایل قفل می‌کند:
@@ -42,10 +43,10 @@ ok(CA.pickAmountCard({ cards, excludeId: 1, wins: new Map([[3, 2], [4, 0]]) }).c
 
 /* ── ۲) متنِ فاکتور ────────────────────────────────────────────────────────── */
 console.log('\nمتنِ فاکتور:');
-const INV = (extra) => fa.wallet.invoice(60000, '6219861904145405', 'علیرضا اولیا — بلوبانک', null, null, extra);
+const INV = (extra) => fa.wallet.invoice(60000, '0000000000425405', 'علیرضا اولیا — بلوبانک', null, null, extra);
 const WARN = '⚠️🔴 لطفا از اپلیکیشن‌های آپ، ۷۸۰، همراه کارت و تاپ استفاده نکنید!🔴';
 const NOTE = '❗️🔁 در صورت مواجهه با خطا در انتقال وجه، از دکمه‌ی «تعویض شماره کارت» استفاده کنید.';
-ok(INV(null) === fa.wallet.invoice(60000, '6219861904145405', 'علیرضا اولیا — بلوبانک'), 'بدونِ extra متن بیت‌به‌بیت همان قبلی است');
+ok(INV(null) === fa.wallet.invoice(60000, '0000000000425405', 'علیرضا اولیا — بلوبانک'), 'بدونِ extra متن بیت‌به‌بیت همان قبلی است');
 ok(INV({ note: true }).endsWith(`━━━━━━━━━━━━━\n${NOTE}`) && !INV({ note: true }).includes(WARN), 'فاکتورِ دکمه‌دار: فقط تذکر، در خطِ آخر');
 ok(INV({ switched: true }).endsWith(`━━━━━━━━━━━━━\n${WARN}`) && !INV({ switched: true }).includes(NOTE), 'فاکتورِ تعویض‌شده: فقط خطِ هشدار، در پایین');
 ok(fa.wallet.cardSwitchHeader === '👇👇🔄 فاکتور جدید با شماره کارت جدید 💳👇👇', 'سرتیترِ فاکتورِ جدید عینِ متنِ مالک است');
@@ -76,7 +77,7 @@ function boot({ flag = true, stars = false } = {}) {
   // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
   // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
   db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
-  const env = {
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS,
     CA, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: true, CARD_SWITCH_ENABLED: flag, starsRail: stars,
     Markup, L: fa, bot: { action: (re, fn) => handlers.push({ re, fn }), telegram: { sendMessage: async () => {} } },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }),
@@ -88,7 +89,7 @@ function boot({ flag = true, stars = false } = {}) {
     getPayment: db.prepare('SELECT * FROM payments WHERE id=?'),
     setInvoiceMsgId: db.prepare('UPDATE payments SET invoice_msg_id=? WHERE id=?'),
   };
-  const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
+  const body = `const LEGACY_CARD = { id: 0, number: '0000000000425405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
     ${readers}\n${schema}\n${helpers}\n${handler}
     return { issueInvoiceCard, cardSwitchRow, invoiceExtra, switchTargetFor, cardSt, receiptExpectedCards, attributeReceiptCard };`;
   const f = new Function(...Object.keys(env), body);

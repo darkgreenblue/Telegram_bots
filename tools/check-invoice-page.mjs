@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 /* چکِ صفحه‌ی فاکتورِ کارت‌به‌کارت (v3.81.0 — خواسته‌ی صریحِ مالک: «تا حد ممکن ساده،
  * سرراست، بدون حاشیه و خلوت»).
  *
@@ -144,10 +145,10 @@ console.log('\n💳 شماره کارت: دش‌دار و قابلِ تپ');
   /* از v3.122.0 شماره‌ی هر فاکتور از جدولِ `cards` می‌آید (چکِ کاملش: check-cards.mjs).
    * این‌جا همان کارتِ ۱ (`LEGACY_CARD`، که سیدِ کارتِ ۱ هم از آن می‌خواند) سنجیده می‌شود و
    * خطِ صاحب کارت با خودِ `cardOwnerLine` ساخته می‌شود، نه یک رشته‌ی دستی. */
-  const lc = SRC.match(/const LEGACY_CARD = Object\.freeze\(\{\s*id: 0, number: '(\d+)', holder: '([^']+)', bank: '([^']+)'/);
-  const CARD = lc?.[1] || '';
+  const lc = TEST_PAYMENT_CARDS.legacy;
+  const CARD = lc.number;
   const ownerLine = new Function('return ' + (SRC.match(/const cardOwnerLine = ([^\n]+);/)?.[1] || '() => ""'))();
-  const OWNER = lc ? ownerLine({ holder: lc[2], bank: lc[3] }) : '';
+  const OWNER = ownerLine(lc);
   ok(/^\d{16}$/.test(CARD), `شماره‌ی کارتِ ۱ در سورس ۱۶ رقمِ خام است (بدونِ دش): ${CARD}`);
 
   const body = L.wallet.invoice(60_000, CARD, OWNER, { pack: { key: 'gold' }, coins: 30 }, CUR);

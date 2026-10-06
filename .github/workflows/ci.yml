@@ -51,6 +51,9 @@ jobs:
       # چک در جابِ tarot می‌نشست، یک بافرِ تازه که فقط `marketing/` را عوض می‌کند هرگز
       # سنجیده نمی‌شد. جابِ `changes` روی هر push اجرا می‌شود و این چک نه نصبی می‌خواهد
       # نه شبکه‌ای، پس هزینه‌ی اضافه‌اش صفر جاب است (بند ۳ج ریشه).
+      - name: Private payment configuration guard
+        run: node tools/check-private-payment-config.mjs
+
       - name: Channel content diversity guard
         run: node tools/marketing/check-day-diversity.mjs
 

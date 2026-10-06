@@ -34,7 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const WF_DIR = '.github/workflows';
-const VPS_HOST = '185.204.171.170';
+const VPS_HOST = 'secrets.VPS_HOST';
 
 // فایل‌هایی که روی خودِ سرور اجرا می‌شوند (خارج از ورک‌فلوها)
 const SERVER_SCRIPTS = ['tools/marketing/vps-daily-post.sh', 'tools/manual-deploy.sh'];

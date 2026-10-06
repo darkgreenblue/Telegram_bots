@@ -1,3 +1,5 @@
+> شماره‌کارت‌های نمونهٔ این سند ساختگی‌اند. مقصد واقعی پرداخت فقط از تنظیمات خصوصی خوانده می‌شود.
+
 # tabir-khab — راهنمای Claude Code
 
 > این ربات از ریپوی مستقل `darkgreenblue/tabir-khab` به این مونوریپو (زیر `bots/tabir-khab/`) منتقل شده.
@@ -35,7 +37,7 @@
 ---
 
 ## سرور پروداکشن
-- **IP:** `185.204.171.170`
+- **IP:** `<VPS_HOST from GitHub Secrets>`
 - **یوزر:** `ubuntu`
 - **پوشه‌ی ربات:** `/home/ubuntu/tabir_khab`
 - **سرویس:** `tabir-khab` (systemd)

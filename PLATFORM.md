@@ -50,7 +50,7 @@ merge → دیپلوی خودکار. تنها کارِ دستیِ مجاز بر�
 
 | قطعه | جزئیات | مشترک یا جدا؟ |
 |------|---------|----------------|
-| **سرور (VPS)** | `185.204.171.170` · کاربر `ubuntu` · Ubuntu · Node 20 · PM2 · `sudo` بدون رمز | **مشترک** — همه‌ی پروژه‌ها روی همین یک ماشین‌اند |
+| **سرور (VPS)** | `<VPS_HOST from GitHub Secrets>` · کاربر `ubuntu` · Ubuntu · Node 20 · PM2 · `sudo` بدون رمز | **مشترک** — همه‌ی پروژه‌ها روی همین یک ماشین‌اند |
 | **کلید سرور** | GitHub Secret به نام `VPS_SSH_KEY` (کلید خصوصی SSH) | **مشترک** — همان کلید در Secrets هر ریپوی جدید هم گذاشته می‌شود |
 | **OpenRouter** | یک حساب، `https://openrouter.ai/api/v1` | حساب مشترک، ولی **کلید per پروژه جدا** (برای اندازه‌گیری مستقل هزینه) |
 | **تلگرام / بله** | Bot API | **هر ربات توکن جدا** از BotFather |
@@ -281,7 +281,7 @@ on:
 # ⚙️ فقط این سه خط را برای پروژه‌ی خودت عوض کن
 env:
   PROJ: <PROJ>                 # نام پوشه روی سرور و نام اپ pm2
-  VPS_HOST: 185.204.171.170
+  VPS_HOST: <VPS_HOST from GitHub Secrets>
   VPS_USER: ubuntu
 
 jobs:
@@ -491,7 +491,7 @@ jobs:
           OPS_QUERY:  ${{ inputs.query }}
           PROJ: <PROJ>
         with:
-          host: 185.204.171.170
+          host: <VPS_HOST from GitHub Secrets>
           username: ubuntu
           key: ${{ secrets.VPS_SSH_KEY }}
           # ⚠️ قاعده‌ی ۵ بند ۵: هرچه اسکریپت می‌خواند باید اینجا هم باشد
@@ -610,9 +610,9 @@ jobs:
           set +e
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/k && chmod 600 ~/.ssh/k
-          ssh-keyscan -H 185.204.171.170 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H <VPS_HOST from GitHub Secrets> >> ~/.ssh/known_hosts 2>/dev/null
           OUT=$(ssh -i ~/.ssh/k -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
-                ubuntu@185.204.171.170 'bash -s' <<'REMOTE'
+                ubuntu@<VPS_HOST from GitHub Secrets> 'bash -s' <<'REMOTE'
             pm2 jlist 2>/dev/null | node -e "
               let a=[]; try{a=JSON.parse(require('fs').readFileSync(0,'utf8'))}catch(e){}
               const p=a.find(x=>x.name==='<PROJ>');
@@ -687,7 +687,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/k && chmod 600 ~/.ssh/k
           O="-i $HOME/.ssh/k -o StrictHostKeyChecking=accept-new"
-          H="ubuntu@185.204.171.170"
+          H="ubuntu@<VPS_HOST from GitHub Secrets>"
           # ⚠️ پایتون عمداً یک‌خطی است: خطِ دوم در ستون صفر بلوکِ YAML را می‌بندد،
           #    و heredocِ تودرتو هم با تورفتگیِ YAML به IndentationError می‌خورد.
           ssh $O $H 'set -e
