@@ -25,6 +25,10 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 - Preserve candidates, decisions, tests and source evidence, including rejected or deleted campaigns.
 - Separate Telegram CPA, new/returning product users, gross revenue and unknown refunds. Do not invent a currency conversion or net return.
 - Validate research peers and mark unavailable metrics as unknown. Never infer country from language alone.
+- Initial competitor baseline requires independently observed public peer identity/counts: at least 5,000 channel subscribers or 10,000 bot monthly users, fresh evidence within 24 hours, direct relevance and explicit market review. Channels also need recent sampled public content. Unknown-size, inactive, unrelated and lateral peers stay in reserve; a large count never proves profitability or Ads availability. Do not compare MAU with subscriber counts.
+- Treat directory audience/language/eligibility as provider claims, not Telegram facts. Exclude groups and synthetic/demo responses. Retain source URLs, observation times and graph parents; preserve previous evidence on rediscovery. Review responses must match the exact current peer observation.
+- Public source work runs separately from protective Ads polling. Persist provider/domain cooldowns and interrupted-run leases; fence completion by lease token. A provider outage is not a valid empty search result, and recovery must not replay financial actions.
+- The owner selected a separate discovery Telegram user account. Do not authenticate the personal account. Native search/recommendation adapters are not production-verified until the dedicated session is connected. Full-text public-post search must respect Telegram's free-slot and manual-initiation contract; never authorize paid Stars.
 - Image input must match the current request/revision, pass visual QA and preserve essential text during resizing.
 
 ## Recovery and security

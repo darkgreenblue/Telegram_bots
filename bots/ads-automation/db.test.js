@@ -33,3 +33,23 @@ test('existing automation databases gain spend reservations without losing campa
     upgraded.close();
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('rediscovery preserves candidate identity, collected measurements and evidence across routes',async()=>{
+  const {addCandidate}=await import('./db.js');const s=openStore(':memory:');try{
+    s.db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context)
+      VALUES (1,'discovery','Discovery','en','https://t.me/examplebot','Global','en','Tarot')`).run();
+    const proof={audience:{value:24000},checkedAt:'now'};
+    const first=addCandidate(s.db,{projectId:1,surface:'bots',value:'@ExampleBot',source:'web',hypothesis:'Direct',
+      target:{z:1,a:2},features:{publicPeer:proof,initialReview:{status:'pending'}},evidence:[{url:'https://t.me/examplebot'}]});
+    // A subsequent INSERT used to leave a stale lastInsertRowid for an upsert.
+    addCandidate(s.db,{projectId:1,surface:'bots',value:'@AnotherBot',source:'web',hypothesis:'Other'});
+    const again=addCandidate(s.db,{projectId:1,surface:'bots',value:'@examplebot',source:'recommendation',hypothesis:'Similar',
+      target:{a:2,z:1},features:{publicPeer:{audience:{value:999999999}},tag:'tarot'},evidence:[{url:'https://example.com/reference'}]});
+    assert.equal(again,first);
+    const stored=s.db.prepare('SELECT * FROM candidates WHERE id=?').get(first);
+    assert.deepEqual(JSON.parse(stored.features_json).publicPeer,proof);
+    assert.equal(JSON.parse(stored.features_json).tag,'tarot');
+    assert.equal(JSON.parse(stored.evidence_json).length,2);
+    assert.equal(s.db.prepare('SELECT count(*) n FROM candidates').get().n,2);
+  }finally{s.close();}
+});
