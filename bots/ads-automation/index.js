@@ -4,11 +4,11 @@ import { readFile } from 'node:fs/promises';
 import { openStore,row } from './db.js';
 import { AdsApi } from './api.js';
 import { createAdminBot,sendAdminQueue,notify } from './admin.js';
-import { createExperiment,decide,executeDecision,pollExperiment } from './workflow.js';
+import { decide,executeDecision,pollExperiment } from './workflow.js';
 import { GoogleSheetsMirror } from './sheets.js';
 import { refreshInsights } from './learning.js';
 import { queueResearch } from './brain.js';
-import { shortlist } from './discovery.js';
+import { prepareCandidates } from './preparation.js';
 import { syncProductStats } from './product.js';
 import { startRuntime } from './runtime.js';
 
@@ -34,27 +34,6 @@ function claimWorker(){
     db.prepare(`UPDATE worker_lease SET owner=?,until_at=? WHERE id=1 AND (owner=? OR until_at<?)`).run(owner,t+120,owner,t);
     return db.prepare('SELECT owner FROM worker_lease WHERE id=1').get().owner===owner;
   })();
-}
-
-function prepareCandidates(){
-  for(const project of db.prepare(`SELECT * FROM projects WHERE status IN ('draft','ready')`).all()){
-    const occupied=db.prepare(`SELECT COUNT(*) n FROM experiments WHERE project_id=? AND status NOT IN ('deleted','rejected')`).get(project.id).n;
-    const available=Math.max(0,project.max_campaigns-occupied);
-    if(!available)continue;
-    const candidates=shortlist(db.prepare(`SELECT c.* FROM candidates c
-      WHERE c.project_id=? AND c.status='found' AND EXISTS
-      (SELECT 1 FROM creatives cr WHERE cr.candidate_id=c.id AND cr.status='approved') AND NOT EXISTS
-      (SELECT 1 FROM experiments e WHERE e.candidate_id=c.id) ORDER BY c.score DESC,c.id LIMIT 5000`).all(project.id),available);
-    for(const c of candidates){
-      const creative=db.prepare(`SELECT * FROM creatives WHERE candidate_id=? AND status='approved' ORDER BY id DESC LIMIT 1`).get(c.id);
-      const cpm=Number(process.env[`ADS_MIN_CPM_${c.surface.toUpperCase()}`]||
-        ({channels:0.18,bots:0.13,search:0.1,users:0.1})[c.surface]);
-      const placement=({channels:'channel_post',bots:'bot_banner',search:'search_result',users:'channel_post'})[c.surface];
-      try{createExperiment(store,{projectId:project.id,candidateId:c.id,creativeId:creative.id,cpm,placement});
-        db.prepare(`UPDATE candidates SET status='prepared' WHERE id=?`).run(c.id);
-      }catch(e){notify(store,`prepare:${c.id}`,`⚠️ آماده‌سازی کاندید ${c.id}: ${e.message}`);}
-    }
-  }
 }
 
 function autoDecide(){
@@ -84,7 +63,12 @@ async function cycle(){
   if(busy)return;busy=true;
   try{
     if(!claimWorker())throw new Error('another ads worker owns the lease');
-    prepareCandidates();autoDecide();
+    prepareCandidates(store,{
+      minimumCpms:Object.fromEntries(['channels','bots','search','users']
+        .map(surface=>[surface,process.env[`ADS_MIN_CPM_${surface.toUpperCase()}`]])),
+      onError:(candidate,creative,error)=>notify(store,`prepare:${candidate.id}:${creative.id}`,
+        `⚠️ آماده‌سازی کاندید ${candidate.id}، نسخهٔ ${creative.id}: ${error.message}`)
+    });autoDecide();
     for(const d of db.prepare(`SELECT * FROM decisions WHERE status='approved' ORDER BY id LIMIT 30`).all()){
       try{await executeDecision(store,api,d.id,{resetMinute});}
       catch(e){notify(store,`decision-error:${d.id}:${Math.floor(Date.now()/86400000)}`,

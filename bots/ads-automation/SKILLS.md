@@ -34,3 +34,10 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 - Log structured event IDs, outcomes and bounded errors; redact tokens, environment values and deployment command arguments.
 - Secrets belong in ignored local/server configuration or approved secret storage, never Git, Sheets or reports.
 - Preserve the original dirty checkout; use the attached managed worktree and Conventional Commits. PR titles/descriptions are English.
+
+## Authorized Gemini browser production
+
+- The owner authorized browser image generation, download and reply delivery on 2026-10-05. Use only `alirezaoliyaforspotify@gmail.com`; verify the visible active-account identity and Pro before sending prompts. Never use another account or purchase an upgrade.
+- Consume the latest persisted banner request/revision and its exact prompt. Select image mode and 16:9. Download the original, preserve provenance, and reply as a document to that request in `@AliAdsOpsControlBot`.
+- Wait for real server acceptance and subscription-backed vision QA. A sent or downloaded file alone is not completion; rejected images follow the existing correction queue. No paid image API, separate text overlay or Ads funding is authorized by image-generation permission.
+- Browser production requires the desktop/browser session; server polling and cost guards remain independent. Do not claim an unattended server Gemini integration from a successful browser run.
