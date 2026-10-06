@@ -355,7 +355,9 @@ const TEST_PHASE = false;
 //         ⌨️ برچسبِ منوی تایپ‌شده وسطِ گفتگو همان گاردِ رایگانِ تپِ دکمه را می‌گیرد، نه سؤالِ پولی.
 // 3.152.0: 🗓 متن و ویس در مرحله‌ی ماهِ تولد (و ویس در حوزه‌ی تمرکز) دیگر از آنبوردینگ بیرون نمی‌زند؛
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
-const PRODUCT_VERSION = '3.152.0';
+// 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
+//         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
+const PRODUCT_VERSION = '3.153.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -1207,6 +1209,16 @@ const PRICE_LADDERS = {
     { key: 'gold',  emoji: '💠', coins: 30,  toman: 60_000 },
     { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 },
   ],
+  /* 🆕 `gold25` (`price_ladder_p6_gold_25`، v3.153.0) — فرضیه‌ی مالک: اگر بسته ویژه کمی
+   * کم‌صرفه‌تر شود (۳۰ ⟵ ۲۵ الماس با **همان** ۶۰k)، خریدار به بسته جادویی می‌رود بدونِ اینکه
+   * سهمِ بسته معمولی زیاد بالا برود. تنها متغیر تعدادِ الماسِ gold است؛ قیمت‌ها، دو بسته‌ی
+   * دیگر و ترتیب بیت‌به‌بیت همان control (کاتالوگِ v3.150.0). نردبان سالم می‌ماند:
+   * ۴۰۰۰ > ۲۴۰۰ > ۱۵۰۰ تومان per الماس. متریکِ تصمیم: درآمدِ کل per exposure. */
+  gold25: [
+    { key: 'basic', emoji: '🥉', coins: 5,   toman: 20_000 },
+    { key: 'gold',  emoji: '💠', coins: 25,  toman: 60_000 },
+    { key: 'magic', emoji: '🪄', coins: 100, toman: 150_000 },
+  ],
 };
 
 /* 🔑 **دو کلید، نه یک کلید با وزنِ متغیر** — و این تصمیمِ روشیِ اصلیِ این PR است.
@@ -1241,7 +1253,7 @@ const PRICE_LADDERS = {
  * `bulk` (بالا) را در برابرِ `control` می‌سنجد: به‌جای ارزان‌ترکردنِ تومان، حجمِ
  * الماسِ بسته‌های میانی/بالا چند برابر شد. چون کلیدش جداست، شروعش هیچ اثری روی
  * تصمیمِ ثبت‌شده‌ی فازِ ۲ (که هنوز `not started` است) ندارد. */
-const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
+const PRICE_EXPERIMENTS = ['price_ladder_p6_gold_25', 'price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];
 let _priceExpStmt = null;
 let _priceExpCache = { at: 0, key: null };
 /* کلیدِ آزمایشِ قیمتی که همین حالا زنده است (یا null). کشِ ۶۰ثانیه‌ای عمداً هم‌اندازه‌ی

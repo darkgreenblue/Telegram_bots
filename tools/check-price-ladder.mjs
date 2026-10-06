@@ -57,7 +57,7 @@ const parsePacks = (block) => [...(block || '').matchAll(
     toman: Number(m[3].replace(/_/g, '')), farsiOnly: !!m[4],
   }));
 
-console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 تا price_ladder_p5_basic_20)\n');
+console.log('\n💰 آزمایشِ نردبانِ قیمت (price_ladder_p1 تا price_ladder_p6_gold_25)\n');
 
 /* ══ ۰) بریدنِ بلوکِ منطق از سورس ═══════════════════════════════════════════
  * یک ناحیه‌ی پیوسته: از تعریفِ نردبان‌ها تا آخرین helper. هرچه این ناحیه کوچک‌تر
@@ -87,7 +87,7 @@ const M = build();
 /* ══ ۱) نردبان‌ها، و control یک **ارجاع** است نه یک کپی ═══════════════════ */
 console.log('\n۱) پنج نردبان');
 const arms = Object.keys(M.PRICE_LADDERS);
-ok(arms.join(',') === 'control,floor,cheap,bulk,basic_25,basic_20', `شش بازو تعریف شده: ${arms.join(', ')}`);
+ok(arms.join(',') === 'control,floor,cheap,bulk,basic_25,basic_20,gold25', `هفت بازو تعریف شده: ${arms.join(', ')}`);
 // ⚠️ اگر control یک **کپیِ دستی** از قیمت‌ها باشد، اولین تغییرِ قیمتِ آینده فقط یکی از
 // آن دو را عوض می‌کند و بازوی کنترل بی‌صدا از محصول جدا می‌شود (بند ۲ج/۴: کنترل =
 // رفتارِ قبلی، نه «چیزی که روزی رفتارِ قبلی بود»).
@@ -159,6 +159,18 @@ ok(basic_20[0].toman === 20_000 && floor[0].toman === 15_000,
 ok(JSON.stringify(bare(basic_20.slice(1))) === JSON.stringify(BASE.slice(1)),
   'مبنا ⟶ basic_20: ویژه و جادویی بیت‌به‌بیت همان مبنا هستند');
 
+/* 🆕 `gold25` (price_ladder_p6_gold_25): **تنها** متغیر تعدادِ الماسِ بسته ویژه است (۳۰ ⟵ ۲۵).
+ * مبنایش control ِ امروز (v3.150.0) است، نه BASE ِ تاریخی، چون این آزمایش بعد از ship شدنِ ۲۰k
+ * طراحی شد. اگر قیمتی یا بسته‌ی دیگری هم عوض شود، تغییرِ سهمِ بسته جادویی دیگر به این یک عدد
+ * قابلِ نسبت‌دادن نیست. */
+const { gold25 } = M.PRICE_LADDERS;
+ok(JSON.stringify(gold25.map(p => p.toman)) === JSON.stringify(control.map(p => p.toman)),
+  'control ⟶ gold25: قیمتِ تومانیِ هر سه بسته بیت‌به‌بیت همان control است');
+ok(gold25[1].key === 'gold' && gold25[1].coins === 25 && control[1].coins === 30,
+  'control ⟶ gold25: بسته ویژه ۳۰ ⟵ ۲۵ الماس');
+ok(JSON.stringify(bare([gold25[0], gold25[2]])) === JSON.stringify(bare([control[0], control[2]])),
+  'control ⟶ gold25: معمولی و جادویی بیت‌به‌بیت همان control هستند');
+
 /* 🆕 `bulk` (price_ladder_p3): فرضیه‌اش «حجمِ الماسِ بیشتر در بسته‌های میانی/بالا»
  * است، نه تومانِ کمتر. تنها متغیرِ کنترل‌شده‌اش این است که بسته‌ی اول (basic) عمداً
  * دست‌نخورده بماند؛ گارد را همین‌جا بگیر، نه با فرضِ تک‌متغیره بودنِ کلِ نردبان. */
@@ -178,9 +190,9 @@ ok(Number.isFinite(MIN_RECHARGE) && lowest >= MIN_RECHARGE,
 
 /* ══ ۳) رفتار: بازو روی SQLite واقعی ═════════════════════════════════════ */
 console.log('\n۳) رفتارِ priceArm (روی shared/ab.js واقعی)');
-const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3', P4 = 'price_ladder_p4_basic_25', P5 = 'price_ladder_p5_basic_20';
-ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P5, P4, P3, P2, P1]),
-  'فازِ جدیدتر اولِ فهرست است (اولویت با p5)');
+const P1 = 'price_ladder_p1', P2 = 'price_ladder_p2', P3 = 'price_ladder_p3', P4 = 'price_ladder_p4_basic_25', P5 = 'price_ladder_p5_basic_20', P6 = 'price_ladder_p6_gold_25';
+ok(JSON.stringify(M.PRICE_EXPERIMENTS) === JSON.stringify([P6, P5, P4, P3, P2, P1]),
+  'فازِ جدیدتر اولِ فهرست است (اولویت با p6)');
 
 function freshDb() {
   const db = new Database(':memory:');
@@ -291,6 +303,29 @@ let splitP1 = null;
   ok(uniq.join(',') === 'basic_20,control', `p5 running → فقط control/basic_20 دیده می‌شود (${uniq.join(', ')})`);
   ok(UIDS.every(u => m.shopPackages(u)[0].toman === 20_000),
   'از v3.150.0 هر دو بازوی p5 همان ۲۰k را می‌دهند (control همان basic_20 است؛ p5 در بوت stop می‌شود)');
+  db.close();
+}
+
+{ // p6 بر همه‌ی آزمایش‌های قیمتِ قبلی مقدم است و فقط gold فرق دارد
+  const db = freshDb();
+  startExp(db, P5, 'running', [{ key: 'control', weight: 50 }, { key: 'basic_20', weight: 50 }]);
+  startExp(db, P6, 'running', [{ key: 'control', weight: 50 }, { key: 'gold25', weight: 50 }]);
+  const m = build({ db });
+  const arms6 = UIDS.map(u => m.priceArm(u));
+  const uniq = [...new Set(arms6)].sort();
+  ok(uniq.join(',') === 'control,gold25', `p6 running → فقط control/gold25 دیده می‌شود (${uniq.join(', ')})`);
+  const nG = arms6.filter(a => a === 'gold25').length;
+  ok(nG > UIDS.length * 0.4 && nG < UIDS.length * 0.6, `تقسیمِ p6 حدودِ ۵۰/۵۰ است (${nG}/${UIDS.length})`);
+  ok(UIDS.every((u, i) => {
+    const sp = m.shopPackages(u);
+    return sp[0].toman === 20_000 && sp[1].toman === 60_000 && sp[2].toman === 150_000
+      && sp[1].coins === (arms6[i] === 'gold25' ? 25 : 30)
+      && m.packForUser(u, 'gold').coins === sp[1].coins;
+  }), 'در p6 قیمت‌ها برای همه یکی است و فقط الماسِ ویژه (۲۵/۳۰) فرق دارد؛ packForUser همان را می‌دهد');
+  db.prepare("UPDATE experiments SET status='stopped' WHERE key=?").run(P6);
+  const m2 = build({ db });
+  ok(UIDS.every(u => m2.shopPackages(u)[1].coins !== 25),
+    'stop کردنِ p6 هیچ‌کس را روی ۲۵ الماس نگه نمی‌دارد');
   db.close();
 }
 
@@ -453,8 +488,8 @@ const mutate = (from, to) => {
   startExp(db, P3, 'running', [{ key: 'control', weight: 50 }, { key: 'bulk', weight: 50 }]);
   startExp(db, P1, 'running', W5050);
   const src = REGION.replace(
-    "const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
-    "const PRICE_EXPERIMENTS = ['price_ladder_p5_basic_20', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1', 'price_ladder_p4_basic_25'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p6_gold_25', 'price_ladder_p5_basic_20', 'price_ladder_p4_basic_25', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1'];",
+    "const PRICE_EXPERIMENTS = ['price_ladder_p6_gold_25', 'price_ladder_p5_basic_20', 'price_ladder_p3', 'price_ladder_p2', 'price_ladder_p1', 'price_ladder_p4_basic_25'];",
   );
   const m = src === REGION ? null : build({ src, db });
   ok(m && !new Set(UIDS.map(u => m.priceArm(u))).has('basic_25'),
