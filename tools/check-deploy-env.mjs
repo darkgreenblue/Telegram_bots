@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ «دیپلوی نباید ربات را بی‌دلیل ری‌استارت کند».
 //
 // چرا وجود دارد: بندِ ۳ قول می‌دهد merge ای که به یک ربات ربطی ندارد بقیه را
@@ -67,7 +68,7 @@ printf 'ENV_CHANGED=[%s]\\n' "\${ENV_CHANGED# }"
   writeFileSync(f, script);
   const out = execFileSync('bash', [f], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, ...env },
+    env: { PATH: process.env.PATH, TAROT_PAYMENT_CARDS_JSON: JSON.stringify(TEST_PAYMENT_CARDS), VOICE2TEXT_PAYMENT_CARD_JSON: JSON.stringify({ number: '0000000000001234', owner: 'Test', recipient: 'Test', dest_last4: '1234' }), ...env },
   });
   return (out.match(/ENV_CHANGED=\[(.*)\]/) || [, '?'])[1];
 }

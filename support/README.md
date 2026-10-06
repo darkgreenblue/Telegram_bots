@@ -1,19 +1,17 @@
+# Private support ledger
+
+User messages and identifiers must not be committed or printed in public Actions logs. The ledger lives only on the server at `~/private/telegram-bots/support/tickets.jsonl`, outside the deployment checkout. Keep the existing schema and revision rules below, but perform ledger reads and writes through private server access rather than Git or a pull request.
+
 # پشتیبانی — دفترِ تیکت‌ها (منبع حقیقتِ سابقه‌ی پشتیبانی)
 
 سشنِ «پشتیبانیِ ربات‌ها» هر پیامِ کاربر را این‌جا ثبت می‌کند تا سابقه‌ی هر کاربر، تصمیمِ ما و
 پیامی که فرستادیم برای همیشه بماند و در تیکتِ بعدیِ همان کاربر خوانده شود.
 
-## چرا فایل، نه جدول در دیتابیسِ ربات
-- سشنِ کلاد به سرور SSH ندارد؛ تنها راهِ نوشتنِ ماندگار، کامیت روی ریپوست (بند ۳ ریشه).
-- دیتابیسِ ربات مقدس است (بند ۹/۲ج): تیکتِ پشتیبانی داده‌ی عملیاتیِ ماست، نه دیتای محصول،
-  و نباید در مسیرِ نوشتنِ رباتِ زنده بنشیند.
-- JSONL در گیت diff‌پذیر و merge‌پذیر است و با یک کوئری به SQLite بارگذاری می‌شود
-  (`tools/support-log.mjs sqlite`), پس «دیتابیس بودن» را از دست نمی‌دهیم.
-- `support/` زیرِ `bots/` نیست، پس تغییرش **هیچ رباتی را ری‌استارت نمی‌کند** (بند ۳).
+## محل نگهداری
 
-## فایل‌ها
-- `tickets.jsonl` — append-only، هر خط یک **بازنگری** از یک تیکت (schema پایین).
-- `tools/support-log.mjs` — افزودن/بازنگری/جستجو/نمایش + خروجی SQLite.
+دفتر فقط روی سرور در `~/private/telegram-bots/support/tickets.jsonl` نگهداری می‌شود.
+`tools/support-log.mjs` همین مسیر را می‌خواند؛ برای تست از `SUPPORT_LEDGER_PATH` و دادهٔ ساختگی استفاده کنید.
+اطلاعات واقعی کاربران را در کامیت، PR یا لاگ عمومی ثبت نکنید. سشن بدون دسترسی خصوصی به سرور باید برای ثبت تیکت دسترسی بگیرد.
 
 ## تیکت تکامل پیدا می‌کند، ولی هیچ خطی بازنویسی نمی‌شود
 یک تیکت معمولاً چند مرحله دارد: بررسی شد → جواب رفت → کاربر دوباره نوشت → بسته شد.

@@ -227,10 +227,10 @@ SKIP_PAYMENT = True
 SKIP_DAILY_LIMIT = False  # سقفِ «هر شب یک رویا» فعال — ضد مصرفِ LLM بی‌سقفِ غریبه
 
 # --- کارت‌به‌کارت (تلگرامِ فارسی) ---
-CARD_NUMBER          = os.getenv("CARD_NUMBER", "6219861904145405").strip()
-CARD_OWNER           = os.getenv("CARD_OWNER", "علیرضا اولیا — بلوبانک").strip()
-CARD_RECIPIENT_NAME  = os.getenv("CARD_RECIPIENT_NAME", "علیرضا اولیا").strip()  # نامِ تطبیق در رسید
-CARD_DEST_LAST4      = os.getenv("CARD_DEST_LAST4", "5405").strip()             # ۴رقمِ آخرِ کارتِ مقصد
+CARD_NUMBER = os.getenv("CARD_NUMBER", "").strip()
+CARD_OWNER = os.getenv("CARD_OWNER", "").strip()
+CARD_RECIPIENT_NAME = os.getenv("CARD_RECIPIENT_NAME", "").strip()  # نامِ تطبیق در رسید
+CARD_DEST_LAST4 = os.getenv("CARD_DEST_LAST4", "").strip()             # ۴رقمِ آخرِ کارتِ مقصد
 # حسابِ پشتیبانی تک‌منبع است (support.py — پورتِ shared/support.js)؛ env فقط برای override موقت
 SUPPORT_CONTACT      = os.getenv("SUPPORT_CONTACT", _SUPPORT_CONTACT).strip()
 # ایجنتِ رسید: روشن = تأییدِ خودکارِ AI؛ خاموش = همه‌ی رسیدها به ادمین (رول‌بکِ فوری).

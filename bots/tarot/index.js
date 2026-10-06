@@ -16,6 +16,7 @@
 // مقدارِ درست را ببینند. در ESM importهای ایستا قبل از بدنه اجرا می‌شوند، پس
 // صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
 import './env-boot.js';
+import { loadTarotPaymentConfig } from '../../shared/payment-config.js';
 import {
   L, Lfor, withLang, currentLang, hasLangCtx, LANGS, DEFAULT_LANG, MULTI_LANG, isLang, normLang, allLabels,
   liveL,
@@ -93,6 +94,9 @@ const BOT_TOKEN          = process.env.BOT_TOKEN?.trim();
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
 if (!BOT_TOKEN)          { logErr('❌ BOT_TOKEN خالی است');          process.exit(1); }
 if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); process.exit(1); }
+let PAYMENT_CARDS;
+try { PAYMENT_CARDS = loadTarotPaymentConfig(process.env.PAYMENT_CARDS_JSON); }
+catch (err) { logErr('payment configuration:', err.message); process.exit(1); }
 
 import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay, refundStars } from './starspay.js';
 
@@ -1416,8 +1420,7 @@ function starsForToman(amountToman, usdtToman) {
 // فالبکِ نهایی اگر جدولِ کارت‌ها به هر دلیلی خالی باشد: همان کارتی که تا v3.121.0 روی
 // **همه‌ی** فاکتورها بود. ادمینش مالک است، پس رسید هرگز بی‌گیرنده نمی‌ماند.
 const LEGACY_CARD = Object.freeze({
-  id: 0, number: '6219861904145405', holder: 'علیرضا اولیا', bank: 'بلوبانک', kind: 'regular', active: 1,
-  admin_id: OWNER_ID,
+  ...PAYMENT_CARDS.legacy, id: 0, active: 1, admin_id: OWNER_ID,
 });
 // statementها تنبل ساخته می‌شوند چون جدولِ `cards` چند صد خط پایین‌تر ساخته می‌شود.
 let _cardSt = null;
@@ -2434,10 +2437,7 @@ db.exec(`
  * **مالک**. سید یک‌باره است و مهرش **داخلِ همان تراکنش** می‌خورد (درسِ v3.25.1)، پس
  * ری‌استارت هرگز کارتِ تکراری نمی‌سازد و کارتی که مالک بعداً غیرفعال کند برنمی‌گردد. */
 const LEGACY_CARD_NUMBER = LEGACY_CARD.number;
-const SEED_CARDS = [
-  { number: LEGACY_CARD_NUMBER, holder: 'علیرضا اولیا',  bank: 'بلوبانک',      kind: 'regular', sort: 1 },
-  { number: '5022291612282234', holder: 'علیرضا اولیاء', bank: 'بانک پاسارگاد', kind: 'white',   sort: 2 },
-];
+const SEED_CARDS = PAYMENT_CARDS.seed1;
 db.exec('CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL DEFAULT 0)');
 db.transaction(() => {
   if (db.prepare("SELECT 1 FROM migrations WHERE key='cards_seed_1'").get()) return;
@@ -2452,16 +2452,13 @@ db.transaction(() => {
  * (شهر). همه با ادمینِ مالک. ترتیب عمدی است: اول سفیدِ تازه، بعد پاسارگاد عادی، تا هیچ لحظه‌ای بی‌سفید
  * نماند. کارتی که شماره‌اش از قبل هست (مالک دستی اضافه کرده) دوباره ساخته نمی‌شود؛ پاسارگاد فقط اگر
  * هنوز سفید است عوض می‌شود. یک‌باره با مهرِ داخلِ همان تراکنش (همان الگوی سیدِ اول). */
-const SEED_CARDS_2 = [
-  { number: '5859471120915172', holder: 'علیرضا اولیاء', bank: 'بانک خاورمیانه', kind: 'regular', sort: 3 },
-  { number: '5047061675180547', holder: 'علیرضا اولیاء', bank: 'بانک شهر',       kind: 'white',   sort: 4 },
-];
+const SEED_CARDS_2 = PAYMENT_CARDS.seed2;
 db.transaction(() => {
   if (db.prepare("SELECT 1 FROM migrations WHERE key='cards_seed_2'").get()) return;
   const has = db.prepare('SELECT 1 FROM cards WHERE number=?');
   const ins = db.prepare('INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES (?,?,?,?,?,?)');
   for (const c of SEED_CARDS_2) if (!has.get(c.number)) ins.run(c.number, c.holder, c.bank, OWNER_ID, c.kind, c.sort);
-  db.prepare("UPDATE cards SET kind='regular', updated_at=unixepoch() WHERE number='5022291612282234' AND kind='white'").run();
+  db.prepare("UPDATE cards SET kind='regular', updated_at=unixepoch() WHERE number=? AND kind='white'").run(PAYMENT_CARDS.regularized_number);
   db.prepare("INSERT OR IGNORE INTO migrations (key, done_at) VALUES ('cards_seed_2', unixepoch())").run();
 })();
 /* 🏷 فازِ ۶ (v3.128.0): تگِ اپ/بانکِ مبدأ per رسید. `tag_values` فهرستِ مقدارهای مجاز است

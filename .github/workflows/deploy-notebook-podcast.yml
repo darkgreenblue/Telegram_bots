@@ -73,8 +73,8 @@ jobs:
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/notebook_podcast_key"
           chmod 600 "$HOME/.ssh/notebook_podcast_key"
-          ssh-keyscan -H 185.204.171.170 >> "$HOME/.ssh/known_hosts" 2>/dev/null
-          SSH=(ssh -i "$HOME/.ssh/notebook_podcast_key" -o StrictHostKeyChecking=yes ubuntu@185.204.171.170)
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          SSH=(ssh -i "$HOME/.ssh/notebook_podcast_key" -o StrictHostKeyChecking=yes ubuntu@${{ secrets.VPS_HOST }})
           TARGET=/home/ubuntu/voice2text/bots/notebook-podcast
           # Archive tracked source only; never copy the runner's SQLite test data.
           git archive HEAD:bots/notebook-podcast | "${SSH[@]}" "mkdir -p '$TARGET' && tar -xf - -C '$TARGET'"

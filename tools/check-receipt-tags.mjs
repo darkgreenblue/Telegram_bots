@@ -94,10 +94,10 @@ console.log('ماژولِ خالص:');
   const colC = RT.tagCollapsedRows(7, {}, null, { cardLabel: 'بلوبانک …5405' });
   ok(colC.length === 2 && colC[1][0].callback_data === 'tg:o:7:card' && colC[1][0].text === '💳 تغییر کارت تخصیص',
     'ردیفِ «💳 کارتِ تخصیص» فقط وقتی cardLabel داده شود (پیامِ مالک)');
-  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', number: '6219861904145405' },
+  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', number: '0000000000425405' },
     { id: 2, kind: 'white', active: 1, sort: 5, bank: 'ملت', number: '6104330000005224' },
-    { id: 3, kind: 'regular', active: 0, sort: 2, bank: 'شهر', number: '5047061675180547' },
-    { id: 4, kind: 'regular', active: 1, sort: 3, bank: 'خاورمیانه', number: '5859471120915172' }];
+    { id: 3, kind: 'regular', active: 0, sort: 2, bank: 'شهر', number: '0000000000260547' },
+    { id: 4, kind: 'regular', active: 1, sort: 3, bank: 'خاورمیانه', number: '0000000000355172' }];
   const cp = RT.cardPickerRows(4242424242, CARDS, 4);
   const cpcb = cp.flat().map((b) => b.callback_data);
   ok(JSON.stringify(cpcb) === JSON.stringify(['tg:s:4242424242:card:1', 'tg:s:4242424242:card:4', 'tg:s:4242424242:card:2', 'tg:x:4242424242']),
@@ -155,9 +155,9 @@ function boot({ file = ':memory:', flag = true, defaults = true, stars = false, 
   const db = new Database(file);
   db.exec(BASE_SQL);
   const errs = [], logs = [], sent = [], uses = [];
-  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', holder: 'ع', number: '6219861904145405' },
+  const CARDS = [{ id: 1, kind: 'regular', active: 1, sort: 1, bank: 'بلوبانک', holder: 'ع', number: '0000000000425405' },
     { id: 2, kind: 'white', active: 1, sort: 2, bank: 'ملت', holder: 'ع', number: '6104330000005224' },
-    { id: 3, kind: 'regular', active: 0, sort: 3, bank: 'شهر', holder: 'ع', number: '5047061675180547' }];
+    { id: 3, kind: 'regular', active: 0, sort: 3, bank: 'شهر', holder: 'ع', number: '0000000000260547' }];
   const env = {
     db, RT, CA: { cardDayStartSec: () => 0 }, OWNER_ID: OWNER, RECEIPT_TAGS_ENABLED: flag, TAG_DEFAULTS_ENABLED: defaults, starsRail: stars, SUPPORT: { id: SUPPORT_ID },
     cardSt: () => ({ all: { all: () => CARDS } }),
@@ -223,7 +223,7 @@ if (h) {
   ok(first && toOwner && toAdmin, 'هر دو گیرنده پیام گرفتند و پیامِ کامل برگشت');
   ok(JSON.stringify(cbOf(toOwner.extra.reply_markup)) === JSON.stringify([`tg:o:${pid}:app`, `tg:o:${pid}:bank`, `tg:o:${pid}:card`]),
     'کپیِ اطلاعاتیِ مالک: فقط ردیفِ تگ + «💳 کارتِ تخصیص» (بدونِ دکمه‌های اکشنِ ادمینِ کارت)');
-  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بلوبانک🔰\n6219861904145405\n📊 سوابق کاربر: ۱ پرداخت';
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بلوبانک🔰\n0000000000425405\n📊 سوابق کاربر: ۱ پرداخت';
   ok(JSON.stringify(cbOf(toAdmin.extra.reply_markup)) === JSON.stringify([`approve:${pid}`]) && toAdmin.text === `CAP${INFO}`,
     'ادمینِ دیگر: کیبوردِ قبلی بدونِ هیچ دکمه‌ی تگ/کارت؛ کپشن + کارتِ تخصیص و سوابق');
   // 💰 v3.140.0: دو خطِ پولیِ فقط-مالک (بخشِ رفتاری‌شان در check-owner-money.mjs).

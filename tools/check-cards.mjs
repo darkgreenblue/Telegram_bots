@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای کارت‌های پرداخت (tarot، v3.122.0 — فازِ ۱ی bots/tarot/PAYMENT-V2-PLAN.md).
 //
 // چرا این فایل وجود دارد: از این نسخه شماره‌کارتِ هر فاکتور یک ستونِ دیتابیس است نه یک
@@ -100,7 +101,7 @@ function boot({ legacy = false, failTo = null } = {}) {
   // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
   // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
   db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
-  const env = { CA, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS, CA, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, ADMIN_IDS, isAdmin: (u) => ADMIN_IDS.includes(u), bot,
     logErr: (...a) => errs.push(a.join(' ')), invoiceNoOf: (p) => p.invoice_no || p.id,
     // 🔄 فازِ ۲: چرخش واقعاً اجرا می‌شود (نه اینکه با ReferenceError بی‌صدا به فالبک بیفتد).
     CARD_ROTATION_ENABLED: true, starsRail: false, log: () => {}, track: () => {},
@@ -123,24 +124,24 @@ if (h) {
   const { db } = h;
   const cards = db.prepare('SELECT * FROM cards ORDER BY id').all();
   ok(cards.length === 2, 'سید دقیقاً دو کارت می‌سازد');
-  ok(cards[0].number === '6219861904145405' && cards[0].kind === 'regular' && cards[0].admin_id === OWNER,
+  ok(cards[0].number === '0000000000425405' && cards[0].kind === 'regular' && cards[0].admin_id === OWNER,
     'کارتِ ۱ = همان کارتِ عادیِ قبلی، ادمین = مالک');
-  ok(cards[1].number === '5022291612282234' && cards[1].kind === 'white' && cards[1].holder === 'علیرضا اولیاء'
+  ok(cards[1].number === '0000000000122234' && cards[1].kind === 'white' && cards[1].holder === 'علیرضا اولیاء'
     && cards[1].bank === 'بانک پاسارگاد' && cards[1].admin_id === OWNER, 'کارتِ ۲ = کارتِ سفیدِ پاسارگاد، ادمین = مالک');
   ok(h.cardOwnerLine(cards[0]) === 'علیرضا اولیا — بلوبانک', 'خطِ زیرِ شماره‌ی کارتِ ۱ بیت‌به‌بیت همان CARD_OWNERِ قبلی است');
 
   // سید یک‌باره است: کارتِ غیرفعال‌شده برنمی‌گردد و کارت تکرار نمی‌شود (خرابیِ ۳).
   db.prepare("UPDATE cards SET active=0 WHERE id=1").run();
-  new Function('db', 'OWNER_ID', 'SEED_CARDS_UNUSED', schema.replace(/^[\s\S]*?(const LEGACY_CARD_NUMBER)/, '$1')
-    .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '6219861904145405';"))(db, OWNER, 0);
+  new Function('db', 'OWNER_ID', 'PAYMENT_CARDS', schema.replace(/^[\s\S]*?(const LEGACY_CARD_NUMBER)/, '$1')
+    .replace('const LEGACY_CARD_NUMBER = LEGACY_CARD.number;', "const LEGACY_CARD_NUMBER = '0000000000425405';"))(db, OWNER, TEST_PAYMENT_CARDS);
   ok(db.prepare('SELECT COUNT(*) n FROM cards').get().n === 2, 'اجرای دوباره‌ی سید کارتِ تازه نمی‌سازد');
   ok(db.prepare('SELECT active FROM cards WHERE id=1').get().active === 0, 'کارتی که مالک غیرفعال کرده بعد از ری‌استارت غیرفعال می‌ماند');
   db.prepare("UPDATE cards SET active=1 WHERE id=1").run();
 
   // فاکتورِ قبل از این نسخه (card_id=0) همان شماره‌ی قدیمی را نشان می‌دهد.
   const legacyPid = Number(db.prepare('INSERT INTO payments (user_id, amount) VALUES (7, 50000)').run().lastInsertRowid);
-  ok(h.cardOfPid(legacyPid).number === '6219861904145405', 'فاکتورِ قدیمیِ بی‌کارت ⟵ همان کارتِ ۱');
-  ok(h.cardCopyRow(legacyPid)[0].copy_text.text === '6219861904145405', 'دکمه‌ی کپیِ فاکتورِ قدیمی همان شماره را کپی می‌کند');
+  ok(h.cardOfPid(legacyPid).number === '0000000000425405', 'فاکتورِ قدیمیِ بی‌کارت ⟵ همان کارتِ ۱');
+  ok(h.cardCopyRow(legacyPid)[0].copy_text.text === '0000000000425405', 'دکمه‌ی کپیِ فاکتورِ قدیمی همان شماره را کپی می‌کند');
 
   // صدور: کارت یک‌بار و اتمیک.
   const pid = Number(db.prepare('INSERT INTO payments (user_id, amount) VALUES (8, 60000)').run().lastInsertRowid);
@@ -158,7 +159,7 @@ if (h) {
   const pidW = Number(db.prepare('INSERT INTO payments (user_id, amount, card_id) VALUES (9, 30000, 2)').run().lastInsertRowid);
   db.prepare("UPDATE cards SET active=0 WHERE id=2").run();
   const [num, owner] = h.invoiceCardArgs(pidW);
-  ok(num === '5022291612282234' && owner === 'علیرضا اولیاء — بانک پاسارگاد', 'کارتِ غیرفعال‌شده روی فاکتوری که با آن صادر شده می‌ماند');
+  ok(num === '0000000000122234' && owner === 'علیرضا اولیاء — بانک پاسارگاد', 'کارتِ غیرفعال‌شده روی فاکتوری که با آن صادر شده می‌ماند');
   ok(h.cardCopyRow(pidW)[0].copy_text.text === num, 'دکمه‌ی کپی دقیقاً شماره‌ی روی همان فاکتور را کپی می‌کند');
   db.prepare("UPDATE cards SET active=1 WHERE id=2").run();
 
@@ -184,7 +185,7 @@ if (h) {
   const first = await h.sendToReceiptRecipients(pSecond, { caption: 'CAP', photoFileId: 'F', kb });
   const toSecond = h.sent.find((m) => m.to === SECOND), toOwner = h.sent.find((m) => m.to === OWNER);
   ok(h.sent.length === 2, 'دقیقاً دو پیام رفت');
-  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بانک پاسارگاد🔰\n5022291612282234\n📊 سوابق کاربر: ۱ پرداخت';
+  const INFO = '\n\n💳 کارتِ تخصیص‌داده: بانک پاسارگاد🔰\n0000000000122234\n📊 سوابق کاربر: ۱ پرداخت';
   ok(toSecond?.extra?.reply_markup === kb && toSecond.text === `CAP${INFO}`, 'ادمینِ کارت پیامِ کامل با دکمه‌ها + کارتِ تخصیص و سوابق گرفت');
   // 💰 v3.140.0: دُمِ پیامِ مالک دو خطِ پولی هم دارد (کدِ واقعی، از همین بخشِ سورس)؛ ادمینِ کارت بالا دقیقاً بدونِ آن‌هاست.
   ok(toOwner && !toOwner.extra.reply_markup && toOwner.text.startsWith('ℹ️ کپیِ اطلاعاتی')

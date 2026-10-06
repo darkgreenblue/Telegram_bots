@@ -1,3 +1,4 @@
+import { TEST_PAYMENT_CARDS } from './fixtures/payment-config.mjs';
 // چکِ CI برای انتخابِ کارتِ فاکتور بر اساسِ مبلغ (tarot، v3.132.0 — جایگزینِ چرخشِ per کاربرِ v3.124.0).
 //
 // تصمیم‌های مالک (۱۴۰۵/۰۷/۰۵) که این فایل قفل می‌کند:
@@ -108,18 +109,18 @@ function boot({ rotation = true, stars = false, CAo = {}, DateO = Date } = {}) {
   // 🚫 v3.133.0: قواعدِ کارت (`cardsForUser`) واقعاً اجرا می‌شوند؛ کاربرانِ این‌جا تگی ندارند پس هیچ قاعده‌ای
   // فعال نیست و رفتار دقیقاً همان قبلی است. خودِ قاعده‌ها در check-card-rules.mjs.
   db.exec("CREATE TABLE IF NOT EXISTS receipt_tags (payment_id INTEGER, user_id INTEGER, dim TEXT, value_key TEXT, source TEXT NOT NULL DEFAULT 'admin')");
-  const env = { CA: CAx, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars, Date: DateO,
+  const env = { PAYMENT_CARDS: TEST_PAYMENT_CARDS, CA: CAx, db, CR, CARD_RULES_ENABLED: true, OWNER_ID: OWNER, CARD_ROTATION_ENABLED: rotation, starsRail: stars, Date: DateO,
     bot: { telegram: { sendMessage: async (to, t) => { sent.push({ to, t }); } } },
     log: () => {}, logErr: (...a) => errs.push(a.join(' ')), track: (_d, u, e, p) => events.push({ u, e, p }) };
   env.stmts = { getPayment: db.prepare('SELECT * FROM payments WHERE id=?') };
-  const body = `const LEGACY_CARD = { id: 0, number: '6219861904145405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
+  const body = `const LEGACY_CARD = { id: 0, number: '0000000000425405', holder: 'x', bank: '', kind: 'regular', active: 1, admin_id: OWNER_ID };
     ${readers}\n${schema}\n${rulesRg}\n${issue}
     return { issueInvoiceCard, markApprovedDay, cardsUsedToday, cardSt, cardCounts };`;
   const f = new Function(...Object.keys(env), body);
   const h = { ...f(...Object.values(env)), db, clock, errs, events, sent };
   // کارت‌ها: ۱ عادی (سید)، ۲ سفید (سید)، ۳ و ۴ عادیِ تازه.
   db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('6037997599199013','ب','-',111,'regular',3)").run();
-  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('5859471120915172','ج','-',111,'regular',4)").run();
+  db.prepare("INSERT INTO cards (number, holder, bank, admin_id, kind, sort) VALUES ('0000000000355172','ج','-',111,'regular',4)").run();
   h.invoice = (uid, amount = 15000) => {
     const id = Number(db.prepare('INSERT INTO payments (user_id, amount, created_at, invoice_issued_at) VALUES (?, ?, ?, ?)').run(uid, amount, h.clock.now, h.clock.now).lastInsertRowid);
     h.issueInvoiceCard(id); return id;

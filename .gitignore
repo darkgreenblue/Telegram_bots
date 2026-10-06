@@ -26,3 +26,6 @@ video/tarot-reel/public/cards/
 
 # کشِ فالِ پایه‌ی آزمایشگاهِ گفتگو (محلی و بازتولیدشدنی — نباید کامیت شود)
 tools/reading-lab/.chat-base.json
+
+# Support records belong on the server only.
+support/tickets.jsonl
