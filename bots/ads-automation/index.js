@@ -9,7 +9,7 @@ import { GoogleSheetsMirror } from './sheets.js';
 import { refreshInsights } from './learning.js';
 import { queueResearch } from './brain.js';
 import { prepareCandidates } from './preparation.js';
-import { syncProductStats } from './product.js';
+import { syncProductStats,paymentFeedback,paymentFingerprint } from './product.js';
 import { startRuntime } from './runtime.js';
 
 if(!process.env.ADS_ADMIN_BOT_TOKEN)throw new Error('ADS_ADMIN_BOT_TOKEN خالی است');
@@ -87,12 +87,16 @@ async function cycle(){
       for(const p of db.prepare('SELECT id,market FROM projects').all()){
         refreshInsights(store,p.id);
         const latest=db.prepare(`SELECT MAX(r.ended_at) at FROM rounds r JOIN experiments e ON e.id=r.experiment_id WHERE e.project_id=?`).get(p.id).at;
-        const lastResearch=db.prepare(`SELECT MAX(created_at) at FROM jobs WHERE project_id=? AND kind='research'`).get(p.id).at||0;
-        if(p.market && latest && latest>lastResearch){
+        const lastResearch=db.prepare(`SELECT created_at,input_json FROM jobs WHERE project_id=? AND kind='research' ORDER BY id DESC LIMIT 1`).get(p.id);
+        const quality=paymentFeedback(store,p.id);
+        const paymentChanged=quality.experiments.some(ex=>ex.cohorts!==null)&&
+          paymentFingerprint(quality)!==JSON.parse(lastResearch?.input_json||'{}').paymentFingerprint;
+        if(p.market && ((latest && latest>(lastResearch?.created_at||0))||paymentChanged)){
           const evidence=db.prepare(`SELECT e.id,c.surface,c.value,r.spent,r.actions,r.views FROM rounds r
             JOIN experiments e ON e.id=r.experiment_id JOIN candidates c ON c.id=e.candidate_id
             WHERE e.project_id=? ORDER BY r.ended_at DESC LIMIT 20`).all(p.id);
-          queueResearch(store,p.id,{recentTests:evidence,goal:'Find similar peers to winners and alternatives to failed hypotheses.'});
+          queueResearch(store,p.id,{recentTests:evidence,paymentChanged,
+            goal:'Find similar peers to winners and alternatives to failed hypotheses; use comparable-age payment quality without claiming net profitability.'});
         }
         if(sheets.spreadsheetId && sheets.credentialsPath){
           try{await sheets.sync(store,p.id);}catch(e){notify(store,`sheets:${p.id}:${Math.floor(Date.now()/86400000)}`,`⚠️ همگام‌سازی شیت پروژه ${p.id}: ${e.message}`);}

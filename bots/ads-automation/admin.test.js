@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {openStore} from './db.js';
 import {decisionBrief,sendAdminQueue} from './admin.js';
+import {requestDecision} from './workflow.js';
 
 test('a financial approval shows its actual target, copy, evidence, cost and disabled gate',async()=>{
   const store=openStore(':memory:');
@@ -27,5 +28,16 @@ test('a financial approval shows its actual target, copy, evidence, cost and dis
   assert.equal(store.db.prepare('SELECT message_id FROM decisions WHERE id=1').get().message_id,100);
   assert.equal(store.db.prepare('SELECT spend_authorized FROM experiments WHERE id=1').get().spend_authorized,0);
   assert.equal(store.db.prepare('SELECT hypothesis FROM candidates WHERE id=1').get().hypothesis,'Original research hypothesis');
+  const cohorts=[{instance:'tarot-intl-en',7:{eligibleUsers:3,paymentQualityKnown:true,payers:1,revenue:25,revenueUnit:'star'},
+    30:{eligibleUsers:0,paymentQualityKnown:true,payers:0,revenue:0,revenueUnit:'star'}}];
+  store.db.prepare(`INSERT INTO product_observations(experiment_id,at,starts,returning_users,new_users,payers,revenue,revenue_unit,raw_json)
+    VALUES(1,1234,3,0,3,1,25,'star',?)`).run(JSON.stringify({cohorts}));
+  const reviewId=requestDecision(store,1,1,'review',{reason:'test complete'},{cpa:0.02});
+  const review=store.db.prepare('SELECT * FROM decisions WHERE id=?').get(reviewId);
+  const brief=decisionBrief(store,review);
+  assert.match(brief,/3 کاربر هم‌سن/);assert.match(brief,/25 Stars/);assert.match(brief,/هنوز کاربر با سن کافی نداریم/);
+  assert.match(brief,/سود خالص نیستند/);
+  assert.equal(JSON.parse(review.evidence_json).paymentQuality.experiments[0].observedAt,1234);
+  assert.equal(store.db.prepare('SELECT spend_authorized FROM experiments WHERE id=1').get().spend_authorized,0);
   store.close();
 });
