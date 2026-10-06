@@ -587,7 +587,7 @@ console.log('\n▶ سقفِ ورودیِ مدل (Gemini Flash: ورودیِ مت
   // همه‌ی اجزای کانتکست باید سقفِ عددی داشته باشند، وگرنه ورودی با گذشتِ زمان
   // بی‌صدا باد می‌کند: حافظه‌ی یک کاربرِ قدیمی، یا لیستِ فال‌های قبلی‌اش.
   // v3.154.0: حافظه پیش از نوشتن از `sanitizeMemory` رد می‌شود؛ سقف همان ۱۲۰۰ روی خروجیِ آن است.
-  ok(/setMemory\.run\(mem\.text\.slice\(0, 1200\)/.test(SRC) && /const mem = READING_SAFETY \? sanitizeMemory\(llm\.memory\.trim\(\)/.test(SRC), 'حافظه سقفِ ۱۲۰۰ کاراکتری دارد');
+  ok(/setMemory\.run\(mem\.text\.slice\(0, 1200\)/.test(SRC) && /const mem = typeof llm\.memory === .string. \? memoryToStore\(/.test(SRC), 'حافظه سقفِ ۱۲۰۰ کاراکتری دارد');
   ok(/String\(parsed\.summary \|\| ''\)\.slice\(0, 300\)/.test(SRC), 'خلاصه‌ی هر فال سقفِ ۳۰۰ کاراکتری دارد');
   ok(/question: question\.slice\(0, 1500\)/.test(SRC), 'سؤال سقفِ ۱۵۰۰ کاراکتری دارد');
   // از v3.38.0 کانتکست از `lastDeliveredSince` می‌خواند (خطِ آبِ ریستِ حافظه). ادعا همان

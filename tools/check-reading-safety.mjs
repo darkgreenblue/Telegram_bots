@@ -222,7 +222,30 @@ fa(() => {
 {
   const lab = readFileSync(new URL('./reading-lab.mjs', import.meta.url), 'utf8');
   ok('آزمایشگاه: نام در جداسازی روی سرخط نمی‌نشیند', /name: plan\.isolate \? '' : persona\.name/.test(lab));
-  ok('آزمایشگاه: حافظه در جداسازی به‌روز نمی‌شود', /&& !plan\.isolate/.test(lab));
+  ok('آزمایشگاه: حافظه از همان memoryToStore می‌آید (بحران و جداسازی)', /memoryToStore\(\{[\s\S]{0,160}crisis: plan\.crisis, isolate: plan\.isolate/.test(lab));
+}
+
+// ---------- ۹ه) فالِ بحران از متنِ حافظه‌ی خودش هیچ چیز ذخیره نمی‌کند ----------
+{
+  const L = RS.SENSITIVE_LABEL.fa;
+  /* جمله‌ی واقعیِ دورِ دومِ آزمایشگاه (S2.1): بازنویسیِ مدل که از هر فهرستِ واژه فرار کرد. */
+  const leak = 'اولین جلسه در حوزه‌ی عشق و رابطه؛ در فشار عاطفی شدید، ارزشِ زندگی‌اش را به ماندن یا رفتنِ رابطه گره می‌زند و لازم است به حمایتِ فوریِ آدم‌های امن، درمانگر، پزشک یا خدمات بحران ارجاع داده شود.';
+  ok('کنترلِ مثبت: پاک‌سازیِ واژه‌ای همین جمله را نمی‌گیرد (پس گاردِ ساختاری لازم است)', RS.sanitizeMemory(leak, 'fa').text.includes('ارزشِ زندگی'));
+  const c1 = RS.memoryToStore({ newMemory: leak, oldMemory: '', crisis: true });
+  ok('بحران بدونِ حافظه‌ی قبلی ⟵ فقط برچسب', c1 && c1.text === L && c1.crisis === true);
+  const old = 'نگران کار است.';
+  const c2 = RS.memoryToStore({ newMemory: leak, oldMemory: old, crisis: true });
+  ok('بحران ⟵ حافظه‌ی قبلی + برچسب، بدونِ هیچ چیزی از متنِ تازه', c2 && c2.text.startsWith(old) && c2.text.includes(L) && !c2.text.includes('رابطه'));
+  const c3 = RS.memoryToStore({ newMemory: leak, oldMemory: `${old} ${L}`, crisis: true });
+  ok('بحرانِ دوم برچسب را دوبله نمی‌کند', c3 && c3.text.split(L).length === 2);
+  const c4 = RS.memoryToStore({ newMemory: leak, oldMemory: 'سابقه‌ی بستری دارد. نگران کار است.', crisis: true });
+  ok('حافظه‌ی قبلی هم پاک‌سازی می‌شود', c4 && !/بستری/.test(c4.text) && c4.text.includes('نگران کار'));
+  ok('جداسازی ⟵ هیچ نوشتنی', RS.memoryToStore({ newMemory: leak, oldMemory: old, crisis: true, isolate: 'other' }) === null);
+  ok('حافظه‌ی خالیِ مدل ⟵ هیچ نوشتنی', RS.memoryToStore({ newMemory: '  ', oldMemory: old }) === null);
+  const n = RS.memoryToStore({ newMemory: 'به کارِ تازه فکر می‌کند.', oldMemory: old, crisis: false });
+  ok('فالِ عادی ⟵ همان sanitizeMemory (کنترلِ مثبت)', n && n.text === 'به کارِ تازه فکر می‌کند.' && n.crisis === false);
+  const r = RS.memoryToStore({ newMemory: leak, oldMemory: old, crisis: true, safety: false });
+  ok('رول‌بکِ READING_SAFETY=false ⟵ متنِ مدل بیت‌به‌بیت', r && r.text === leak);
 }
 
 // ---------- ۱۰) سیم‌کشی در ربات ----------
@@ -234,8 +257,8 @@ ok('بلوکِ ایمنی فقط وقتی sensitive است به پرامپت م�
 ok('پرامپتِ ایمن واقعاً به مدل می‌رود', /safeSystem/.test(src.slice(src.indexOf('const safeSystem'), src.indexOf('const safeSystem') + 3000).replace('const safeSystem', '')));
 ok('خطِ مراقبت فقط روی بحران', /if \(safety\.crisis\) \{[\s\S]{0,120}L\.reading\.careLine/.test(src));
 ok('خطِ مراقبت قبل از delivered', src.indexOf('L.reading.careLine') < src.indexOf("setReadingStatus.run('delivered'", src.indexOf('L.reading.careLine') - 4000) || src.indexOf('L.reading.careLine') < src.indexOf("'delivered'", src.indexOf('L.reading.careLine')));
-ok('حافظه در جداسازی نوشته نمی‌شود', /llm\.memory\.trim\(\) && !safety\.isolate/.test(src));
-ok('حافظه پیش از نوشتن پاک‌سازی می‌شود', /READING_SAFETY \? sanitizeMemory\(llm\.memory\.trim\(\)/.test(src));
+ok('حافظه فقط از memoryToStore نوشته می‌شود (بحران، جداسازی، پاک‌سازی)', /memoryToStore\(\{[\s\S]{0,200}crisis: safety\.crisis, isolate: safety\.isolate, lang: currentLang\(\), safety: READING_SAFETY/.test(src));
+ok('نوشتنِ حافظه پشتِ نتیجه‌ی memoryToStore است', /if \(mem\) \{\s*memCut = mem\.cut;\s*stmts\.setMemory\.run\(mem\.text/.test(src));
 ok('نام در جداسازی روی سرخط نمی‌نشیند', /uxV2For\(r\.user_id\) && !safety\.isolate \? dispName/.test(src));
 ok('کانتکستِ فال memory و prev را از برنامه می‌گیرد', /memory: plan\.memory/.test(src) && /prev: plan\.prev/.test(src));
 ok('گفتگو هم از همان برنامه می‌خواند', /chatSafety = safetyPlanFor\(/.test(src) && /memory: chatSafety\.memory/.test(src));

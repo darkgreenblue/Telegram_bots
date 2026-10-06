@@ -55,7 +55,7 @@ import { scoreSpreads, RECO } from './reco.js';
 import { normalizeVerdict, decisiveMode, headlineOk, evasionIn } from './verdict.js';
 import { repairDefects } from './repair.js';
 import { cardMismatch } from './card-integrity.js';
-import { readingSafetyPlan, sanitizeMemory } from './reading-safety.js';
+import { readingSafetyPlan, memoryToStore } from './reading-safety.js';
 import { configureLocale, configureAllLocales } from './locale-boot.js';
 import { installSerialDispatch } from './dispatch.js';
 import * as CA from './cards-admin.js';
@@ -9391,9 +9391,13 @@ async function finishReading(ctx, uid, readingId) {
   // حافظه‌ی انباشتی: مدل در همان فراخوانی اصلی نسخه‌ی به‌روز حافظه را برگردانده (هزینه‌ی اضافه: صفر)
   /* 🛟 فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند (شناختِ زینب جای شناختِ رخساره
    * نمی‌نشیند)، و حافظه‌ی نوشته‌شده جمله‌های پزشکی/خودکشی را ندارد. */
+  /* 🚨 فالِ بحران از متنِ حافظه‌ی خودش هیچ چیز ذخیره نمی‌کند (`memoryToStore`). */
   let memCut = 0;
-  if (typeof llm.memory === 'string' && llm.memory.trim() && !safety.isolate) {
-    const mem = READING_SAFETY ? sanitizeMemory(llm.memory.trim(), currentLang()) : { text: llm.memory.trim(), cut: 0 };
+  const mem = typeof llm.memory === 'string' ? memoryToStore({
+    newMemory: llm.memory, oldMemory: (getUser(uid) || {}).memory_json || '',
+    crisis: safety.crisis, isolate: safety.isolate, lang: currentLang(), safety: READING_SAFETY,
+  }) : null;
+  if (mem) {
     memCut = mem.cut;
     stmts.setMemory.run(mem.text.slice(0, 1200), uid);
   }

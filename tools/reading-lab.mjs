@@ -53,7 +53,7 @@ const { checkReading, modelText, ngrams, closingAnchor } = await import('./readi
 const { RUBRIC } = await import('./reading-lab/rubric.mjs');
 /* 🛟 همان طرحِ ایمنیِ ربات (بخشِ v3.154.0 در CLAUDE.mdِ tarot). بازوی `@nosafety` خاموشش
  * می‌کند تا مقایسه‌ی جفت‌شده «با گارد» و «بدونِ گارد» روی عینِ همان کارت و سؤال باشد. */
-const { readingSafetyPlan, sanitizeMemory } = await import('../bots/tarot/reading-safety.js');
+const { readingSafetyPlan, memoryToStore } = await import('../bots/tarot/reading-safety.js');
 const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
 const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
@@ -467,10 +467,11 @@ async function runStep(persona, step, i, state) {
 
   // حافظه و تاریخچه دقیقاً مثل ربات به قدمِ بعد منتقل می‌شوند
   // و مثلِ ربات، فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند.
-  if (typeof parsed.memory === 'string' && parsed.memory.trim() && !plan.isolate) {
-    const m = parsed.memory.trim();
-    state.memory = (safetyOn ? sanitizeMemory(m, LOCALE).text : m).slice(0, 1200);
-  }
+  const memNext = typeof parsed.memory === 'string' ? memoryToStore({
+    newMemory: parsed.memory, oldMemory: state.memory, crisis: plan.crisis, isolate: plan.isolate,
+    lang: LOCALE, safety: safetyOn,
+  }) : null;
+  if (memNext) state.memory = memNext.text.slice(0, 1200);
   state.prev.unshift({
     created_at: state.nowSec, type: spread.id, question: step.question,
     summary: String(parsed.summary || '').slice(0, 300), feedback: '-',

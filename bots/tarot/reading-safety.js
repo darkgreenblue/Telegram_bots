@@ -261,3 +261,25 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
   if (isolate) { mem = ''; outPrev = []; }
   return { crisis, sensitive, isolate, memory: mem, prev: outPrev, memoryCut };
 }
+
+/* 🧠 حافظه‌ای که بعد از یک فال ذخیره می‌شود — تک‌منبعِ ربات و آزمایشگاه.
+ * `null` یعنی «هیچ چیزی ننویس». سه قاعده، به این ترتیب:
+ *  1. فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند.
+ *  2. 🚨 فالِ **بحران**: از متنِ حافظه‌ی همین فال هیچ چیز نمی‌ماند؛ حافظه‌ی قبلی (پاک‌شده)
+ *     به‌علاوه‌ی برچسبِ کلی ذخیره می‌شود. دلیل (دورِ دومِ آزمایشگاه، ۱۴۰۵/۰۷/۱۴): مدل در
+ *     بحران بازنویسی‌هایی می‌سازد که از هر فهرستِ واژه فرار می‌کنند («ارزشِ زندگی‌اش را به
+ *     ماندنِ رابطه گره می‌زند»)، پس گاردِ واژه‌ای آن‌جا ساختاراً کافی نیست.
+ *  3. بقیه: همان `sanitizeMemory`. */
+export function memoryToStore({ newMemory = '', oldMemory = '', crisis = false, isolate = '',
+  lang = 'fa', safety = true } = {}) {
+  const fresh = String(newMemory || '').trim();
+  if (!fresh || isolate) return null;
+  if (!safety) return { text: fresh, cut: 0, crisis: false };
+  if (crisis) {
+    const prior = memoryWithoutLabel(sanitizeMemory(String(oldMemory || ''), lang).text, lang);
+    const label = labelOf(lang);
+    return { text: prior ? `${prior} ${label}` : label, cut: 1, crisis: true };
+  }
+  const s = sanitizeMemory(fresh, lang);
+  return { text: s.text, cut: s.cut, crisis: false };
+}
