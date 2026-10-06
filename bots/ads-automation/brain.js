@@ -2,6 +2,7 @@ import { addCandidate,addJob,row } from './db.js';
 import { shortlist } from './discovery.js';
 import { targetFor } from './targets.js';
 import { assertCurrentBannerQa } from './banner-state.js';
+import { paymentFeedback,paymentFingerprint } from './product.js';
 
 export const SCHEMAS={
   market:{type:'object',additionalProperties:false,required:['recommended_market','reasons','alternatives','sources'],properties:{
@@ -60,15 +61,17 @@ export function queueMarketResearch(store,projectId){
 export function queueResearch(store,projectId,feedback={}){
   const p=row(store.db,'projects',projectId);if(!p)throw new Error('project absent');
   const insights=store.db.prepare(`SELECT scope,claim,evidence_json FROM insights WHERE project_id=? AND status='validated' LIMIT 30`).all(p.id);
+  const quality=paymentFeedback(store,p.id);
   return addJob(store.db,p.id,'research',{name:p.name,context:p.context,market:p.market,language:p.language,
     brief:'Find direct, competitor, persona-adjacent, search and user-filter hypotheses. Cite source URL for each public peer; qualify country. Do not invent Telegram usernames.',
-    feedback,insights});
+    feedback,paymentQuality:quality,paymentFingerprint:paymentFingerprint(quality),insights});
 }
 export function queueStrategy(store,candidateId){
   const c=row(store.db,'candidates',candidateId);if(!c)throw new Error('candidate absent');
   const p=row(store.db,'projects',c.project_id),insights=store.db.prepare(`SELECT scope,claim,evidence_json FROM insights WHERE project_id=? AND status='validated' LIMIT 30`).all(p.id);
   return addJob(store.db,p.id,'strategy',{candidateId,project:{name:p.name,context:p.context,market:p.market,language:p.language},
-    candidate:{surface:c.surface,value:c.value,hypothesis:c.hypothesis,features:JSON.parse(c.features_json)},insights});
+    candidate:{surface:c.surface,value:c.value,hypothesis:c.hypothesis,features:JSON.parse(c.features_json)},
+    paymentQuality:paymentFeedback(store,p.id),insights});
 }
 
 export function applyBrainResult(store,job,result,{preparedBanner=null}={}){

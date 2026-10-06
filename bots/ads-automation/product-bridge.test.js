@@ -29,7 +29,7 @@ test('real dashboard bridge tracks a new and returning start and a delayed payme
   try{
     db=new Database(join(data,'bot-en.db'));
     db.exec(`CREATE TABLE users(telegram_id INTEGER PRIMARY KEY,name TEXT DEFAULT '',created_at INTEGER DEFAULT 0);
-      CREATE TABLE payments(id INTEGER PRIMARY KEY,user_id INTEGER,amount INTEGER,status TEXT,created_at INTEGER DEFAULT 0);`);
+      CREATE TABLE payments(id INTEGER PRIMARY KEY,user_id INTEGER,amount INTEGER,status TEXT,created_at INTEGER DEFAULT 0,approved_at INTEGER);`);
     ensureAnalytics(db);
     const platform=join(directory,'data');mkdirSync(platform);
     const settings=new Database(join(platform,'platform.db'));
@@ -52,5 +52,13 @@ test('real dashboard bridge tracks a new and returning start and a delayed payme
     db.prepare("UPDATE payments SET status='refunded' WHERE user_id=900001 AND status='approved'").run();
     assert.equal(stats().revenue,0);
     // This verifies exclusion by payment status, not per-campaign refund totals.
+    const acquired=db.prepare("SELECT MIN(created_at) at FROM events WHERE user_id=900001 AND event='start'").get().at;
+    db.prepare("UPDATE payments SET status='approved',approved_at=? WHERE user_id=900001 AND status='refunded'").run(acquired+2*86400);
+    db.prepare("INSERT INTO payments(user_id,amount,status,approved_at) VALUES(900001,15,'approved',?)").run(acquired+9*86400);
+    const cohorts=bridge({action:'stats_all',scope:'tarot-intl@en',cohortCodes:[campaign.code],at:acquired+40*86400});
+    const age=cohorts.cohorts.instances[0].byCode[campaign.code];
+    assert.equal(age[7].eligibleUsers,1);assert.equal(age[7].revenue,40);
+    assert.equal(age[30].revenue,55);assert.equal(age[7].refunds,null);
+    assert.equal(age[7].versions[0].productVersion,'fixture-v1');
   }finally{db?.close();rmSync(directory,{recursive:true,force:true});}
 });

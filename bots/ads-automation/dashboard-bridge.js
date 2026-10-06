@@ -1,7 +1,8 @@
 // Run with cwd=bots/dashboard so existing platform and bot paths retain their contracts.
 import { createCampaign, listCampaigns, getSetting, audit } from '../dashboard/lib/platform.js';
 import { campaignStatsAll, validScope } from '../dashboard/routes/marketing.js';
-import { moneyOf } from '../dashboard/lib/bots.js';
+import { moneyOf,botByKey,instancesOf,withDb,userPk } from '../dashboard/lib/bots.js';
+import { readCampaignCohorts } from './cohorts.js';
 
 const request=JSON.parse(await new Promise((resolve,reject)=>{
   let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',x=>{s+=x;if(s.length>10000)reject(new Error('bridge input too large'));});
@@ -31,5 +32,18 @@ else if(request.action==='campaign') {
     ?stats(request.code,all.byCode.get(String(request.code)))
     :{scope,revenueUnit:unit,hasPayments:all.hasPayments,
       byCode:Object.fromEntries([...all.byCode].map(([code,a])=>[code,stats(code,a)]))};
+  if(request.action==='stats_all'&&request.cohortCodes){
+    const money=moneyOf(scope);
+    const snapshots=instancesOf(scope).map(instance=>{
+      const snapshot=withDb(instance.file,db=>readCampaignCohorts(db,{codes:request.cohortCodes,at:request.at,
+        profile:{userPk:userPk(scope),paymentTable:money.table,amountColumn:money.amountCol,
+          successStatus:money.successStatus,paymentFilter:money.testFilter,
+          excludedUsers:botByKey(scope)?.testUsers||[],revenueUnit:unit,amountDivisor:money.unit==='rial'?10:1}}));
+      if(!snapshot)throw new Error('cohort read unavailable; no zero substitute');
+      return {instance:instance.id,...snapshot};
+    });
+    if(!snapshots.length)throw new Error('cohort product instance unavailable');
+    result.cohorts={windows:[7,30],asOf:request.at,instances:snapshots};
+  }
 } else throw new Error('unknown bridge action');
 process.stdout.write(JSON.stringify(result));

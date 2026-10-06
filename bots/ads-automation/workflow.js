@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { row } from './db.js';
 import { dashboardBridge } from './bridge.js';
+import { paymentFeedback } from './product.js';
 import { targetFor,validateCreative } from './targets.js';
 import { assessTest,cadence,canGraduate,cpa,remainingTest,TEST_TON } from './policy.js';
 
@@ -16,7 +17,9 @@ const isInactive=ad=>ad.is_paused===true||['on_hold','stopped'].includes(ad.stat
 export function requestDecision(store,projectId,experimentId,kind,payload,evidence={}) {
   const d=store.db.prepare(`SELECT * FROM decisions WHERE project_id=? AND experiment_id IS ? AND kind=? AND status='pending' ORDER BY id DESC LIMIT 1`).get(projectId,experimentId,kind);
   if(d)return d.id;
-  const id=Number(store.db.prepare(`INSERT INTO decisions(project_id,experiment_id,kind,payload_json,evidence_json) VALUES (?,?,?,?,?)`).run(projectId,experimentId,kind,JSON.stringify(payload),JSON.stringify(evidence)).lastInsertRowid);
+  const quality=paymentFeedback(store,projectId);
+  const id=Number(store.db.prepare(`INSERT INTO decisions(project_id,experiment_id,kind,payload_json,evidence_json) VALUES (?,?,?,?,?)`).run(
+    projectId,experimentId,kind,JSON.stringify(payload),JSON.stringify({...evidence,paymentQuality:quality})).lastInsertRowid);
   store.audit('system','decision.proposed',id,{kind,experimentId});
   return id;
 }

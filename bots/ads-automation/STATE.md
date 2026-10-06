@@ -96,7 +96,7 @@ Updated: 2026-10-06. This file records verified progress and outstanding work; c
 ## Remaining full-plan implementation gaps
 
 - Stable shared hypothesis identities and product-version validity are not yet implemented; grouping exact prose is insufficient for cross-channel learning. Existing selected hypotheses are separate narratives, so product-wide promotion cannot be assumed.
-- Product snapshots retain aggregate payments but do not yet compare users at equal cohort ages or feed payment quality back into decisions, research and strategy. Refund amounts remain unavailable; do not report net profitability. The maturity window is an owner decision.
+- Comparable-age payment snapshots and research/strategy/decision evidence are now implemented locally for the owner-approved 7/30-day windows. They are pending deployment and do not implement automatic financial optimization or insight promotion. Refund amounts remain unavailable; do not report net profitability.
 - The preparation-queue defect for new approved creatives on an already tested candidate is fixed locally: each creative gets its own pending owner decision, identical preparation is idempotent, and drafts still occupy the campaign cap. Automatic choice of repeat-test hypotheses/angles and negative-insight promotion remain incomplete; this fix alone does not implement the entire experimentation planner.
 - Optional MTProto discovery/enrichment is not configured and is not automatically run for every candidate. Public-source research worked; that is not a complete inventory-availability check.
 - Paid search attribution remains unresolved because the real provider rejects bot start parameters. Search must not silently become an untracked paid experiment while the owner decision is pending.
@@ -107,3 +107,28 @@ Updated: 2026-10-06. This file records verified progress and outstanding work; c
 
 - Real periodic Sheet sync now reports 39 candidates, 20 draft tests and zero insights. A separate service-account read confirmed 20 rows, all draft and all provider IDs blank; no operator sync call was used. Primary store has 53 completed jobs. Worker lease was fresh and the latest three cycles completed.
 - Local preparation recovery adds one pending create decision per approved creative, including new variants for prepared candidates. It never calls Ads or grants spending. Replays return the original experiment; changing its bid or using another candidate's creative is rejected. Deleted experiment evidence remains present, and the slot limit includes drafts. Four new behavioral checks passed; the complete local suite now passes 51 tests. Deployment of this new code is pending.
+
+
+## Owner feedback and cohort work in progress
+
+- PR #489 merged as 8f834042f411f198d487fa276591509280502952 after CI run 37449536673 passed. Deploy run 37449862803 deferred outside the safe window; its Deploy to VPS step was skipped. Server remains on verified PR #487 until a later normal deployment. No urgent bypass.
+- Owner explicitly approved 7-day payment comparison with the proposed 30-day review. New branch codex/ads-payment-cohorts adds read-only acquisition/approval-time cohorts, preserving product versions, maturity and missing-data distinctions. Work is not yet merged/deployed.
+- Owner objected to banner 8's advertising quality. Technical text/language/size QA does not establish marketing suitability. Creative 8 is now needs_review in the primary store; experiment 15 still has no provider ID. The protected controlled-cost proposal is held_for_creative_review and must not execute with that image even if its earlier approval question receives an answer. Existing technical QA evidence and original image are preserved.
+- Owner asked to wait for successful Persian banner examples/prompts, noting ex-return/partner-feelings angles worked to some extent and other angles were not tested. Wait for those references before producing replacements. Owner also authorized evaluating the available ChatGPT image tool against Gemini; no model/provider superiority is established yet. The English hypotheses must retain the limited scope of the Persian evidence.
+
+
+## Comparable-age payment acceptance (local and read-only)
+
+- Owner approved 7-day comparison with 30-day review. Read-only cohorts use actual new campaign-acquisition start and approved_at payment time. Organic returning payers, admin/test users, immature users, pending and refunded-status payments are excluded from bounded successful-payment quality. Missing acquisition or payment times remain unknown; product versions stay separate. Gross revenue is not net profit.
+- All 55 local tests pass. Behavioral coverage includes 7/30-day maturity, payment-window boundaries, product versions, late inserted payment records, organic returns, administrator/test exclusion, unavailable schema/timing, and the actual dashboard bridge running against isolated product databases. Admin decision evidence includes the age-window results without increasing spend authority.
+- Actual product database readonly validation passed in 76 ms with approval-time schema present and two tracked codes. Zero mature or newly acquired campaign users exist yet; this is schema/integration acceptance, not live payment acceptance. Protected server evidence: data/verification/cohorts-readonly-acceptance.json.
+- Payment snapshots now enter research and strategy input and fresh admin proposal evidence. Only material changes in cohort metrics trigger payment feedback research; advancing snapshot timestamps alone does not. The existing automatic financial decision rule still needs separate completion/acceptance before leaving calibration.
+- Six original images passed technical QA; creative 8 is now held for marketing review. No replacement image should be generated until the requested Persian references arrive. The old controlled cost-test approval must not override this hold.
+
+## Owner creative references received (2026-10-06)
+
+- Installed the owner-provided `extract-share-link` skill locally after inspecting both Markdown and script; no paid API or new account access.
+- Extracted the full rendered Claude share conversation (49,222 characters). It concerns intro images/translations; hidden attachments are unavailable. The original Persian Ads prompt and Korean-character revision were separately visible in the approved Gemini account and saved locally.
+- Three owner-provided banners and source hashes are preserved in ignored `data/verification/creative-reference-2026-10-06/`. Initial English creatives should follow this reference family: relationship question, photographic adult character/card, large readable headline and CTA; adapt visual style to evidenced peer context.
+- Owner reports some Persian success for ex-return/other-person-feelings angles and anime-channel character adaptation. No controlled numbers were supplied; English demographics, ROI and transfer remain hypotheses.
+- Started a paired ChatGPT built-in image / Gemini Pro comparison with the same English prompt and first reference. Preview only; no creative approval or Ads activation. Creative 8 and its earlier paid-test proposal stay held.

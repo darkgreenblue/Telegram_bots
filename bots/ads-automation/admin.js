@@ -28,6 +28,17 @@ export const decisionBrief=(store,d,{live=false,costVerified=false}={})=>{
   if(e.views!=null)t+=` | ویو: ${e.views}`;
   if(e.actions!=null)t+=` | اکشن: ${e.actions}`;
   if(e.rounds)t+=`\nتکرارهای ثبت‌شده: ${e.rounds.length}`;
+  const quality=e.paymentQuality?.experiments?.find(item=>item.experimentId===d.experiment_id);
+  if(quality?.cohorts){
+    for(const instance of quality.cohorts.slice(0,3))for(const days of [7,30]){
+      const age=instance[days];if(!age)continue;
+      if(!age.eligibleUsers)t+=`\nکیفیت ${days}روزه: هنوز کاربر با سن کافی نداریم.`;
+      else if(!age.paymentQualityKnown)t+=`\nکیفیت ${days}روزه: زمان یا مبلغ پرداخت نامعلوم؛ مقایسهٔ درآمد ممکن نیست.`;
+      else t+=`\nکیفیت ${days}روزه (${compact(instance.instance,50)}): ${age.eligibleUsers} کاربر هم‌سن؛ `+
+        `${age.payers} پرداخت‌کننده؛ درآمد ناخالص ${age.revenue} ${age.revenueUnit==='star'?'Stars':'تومان'}.`;
+    }
+    t+='\nبازپرداخت نامعلوم است؛ این اعداد سود خالص نیستند. نسخه‌های محصول در شواهد جدا نگهداری می‌شوند.';
+  }
   if(context){
     t+=`\nمنبع: ${compact(context.source,180)}`;
     const sources=JSON.parse(context.evidence_json).filter(v=>typeof v.url==='string').slice(0,2);
