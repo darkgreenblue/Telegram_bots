@@ -8,7 +8,8 @@ async function readSource(url,{fetcher=fetch,wait=ms=>new Promise(r=>setTimeout(
     try{
       const response=await fetcher(url,{signal:AbortSignal.timeout(15000),headers:{accept:'application/json,text/html'}});
       if(response.status===429){const e=new Error('discovery source rate limited');
-        e.retryAfter=Math.max(60,Number(response.headers.get('retry-after'))||60);throw e;}
+        const seconds=Number(response.headers.get('retry-after'));
+        e.retryAfter=Math.max(60,Number.isFinite(seconds)?seconds:60);throw e;}
       if(!response.ok){const e=new Error(`discovery source HTTP ${response.status}`);e.permanent=response.status<500;throw e;}
       const body=await response.text();if(body.length>2_000_000){const e=new Error('discovery source response too large');e.permanent=true;throw e;}
       return body;

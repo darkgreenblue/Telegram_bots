@@ -60,6 +60,6 @@ export async function findPublicPosts(client,{query,hashtag,limit=30}){
 
 export async function similarPublicChannels(client,username){
   const result=await client.getSimilarChannels(username);
-  return Array.from(result).filter(c=>c.username).map(c=>({surface:'channels',value:`@${c.username}`,
+  return Array.from(result).filter(c=>c.username&&c.chatType==='channel').map(c=>({surface:'channels',value:`@${c.username}`,
     source:`recommendation:${username}`,totalAvailable:result.total??null}));
 }

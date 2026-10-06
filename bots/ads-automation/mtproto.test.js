@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findPublicPeers,similarPublicBots,findPublicPosts } from './mtproto.js';
+import { findPublicPeers,similarPublicBots,similarPublicChannels,findPublicPosts } from './mtproto.js';
 
 test('native peer and similar-bot discovery excludes groups, private peers and human users',async()=>{
   const result={chats:[{_:'channel',broadcast:true,username:'tarotchannel',title:'Tarot'},{_:'channel',megagroup:true,username:'tarotgroup'}],
@@ -37,4 +37,12 @@ test('native discovery propagates rate limit without rotating accounts or replay
   let attempts=0;const error=Object.assign(new Error('FLOOD_WAIT_600'),{seconds:600});
   await assert.rejects(()=>findPublicPeers({call:async()=>{attempts++;throw error;}},'tarot'),e=>e===error);
   assert.equal(attempts,1);
+});
+
+test('native channel recommendations keep broadcast channels and exclude other public chat types',async()=>{
+  const result=Object.assign([{username:'tarotchannel',chatType:'channel'},
+    {username:'tarotgroup',chatType:'supergroup'},{username:'tarotcommunity',chatType:'community'},
+    {chatType:'channel'}],{total:30});
+  const peers=await similarPublicChannels({getSimilarChannels:async()=>result},'seedchannel');
+  assert.deepEqual(peers,[{surface:'channels',value:'@tarotchannel',source:'recommendation:seedchannel',totalAvailable:30}]);
 });
