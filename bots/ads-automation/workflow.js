@@ -30,12 +30,23 @@ export function decide(store,id,approve,actor='admin') {
 }
 
 export function createExperiment(store,{projectId,candidateId,creativeId,cpm,placement}) {
+  return store.db.transaction(()=>prepareExperiment(store,{projectId,candidateId,creativeId,cpm,placement}))();
+}
+
+function prepareExperiment(store,{projectId,candidateId,creativeId,cpm,placement}) {
   const db=store.db,project=row(db,'projects',projectId),candidate=row(db,'candidates',candidateId),creative=row(db,'creatives',creativeId);
   if(!project||!candidate||!creative)throw new Error('missing project/candidate/creative');
+  if(creative.candidate_id!==candidate.id)throw new Error('creative belongs to another candidate');
   validateCreative(creative,candidate,project);
   const target=targetFor(candidate);
   if(target.placement!==placement)throw new Error('placement does not match surface');
   if(!(Number.isFinite(cpm)&&cpm>0))throw new Error('valid minimum CPM required');
+  const existing=db.prepare(`SELECT * FROM experiments WHERE project_id=? AND candidate_id=? AND creative_id=?
+    ORDER BY id LIMIT 1`).get(projectId,candidateId,creativeId);
+  if(existing){
+    if(existing.cpm!==cpm||existing.placement!==placement)throw new Error('existing experiment parameters differ');
+    return existing.id;
+  }
   const title=`${project.slug}-${candidate.surface}-${candidateId}-${creativeId}-${Date.now().toString(36)}`;
   if(Buffer.byteLength(title,'utf8')>128)throw new Error('title too long');
   const id=Number(db.prepare(`INSERT INTO experiments(project_id,candidate_id,creative_id,title,cpm,placement)
