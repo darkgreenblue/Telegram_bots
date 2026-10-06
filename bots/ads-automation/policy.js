@@ -36,9 +36,14 @@ export function assessTest({spent,actions,views,firstViewAt,now,testStartSpent=0
 }
 
 export function canGraduate(rounds,targetCpa) {
-  if (!(targetCpa>0) || rounds.length<2) return false;
+  if (!Number.isFinite(targetCpa) || !(targetCpa>0) || rounds.length<2) return false;
   const last = rounds.slice(-2);
-  return last.every(r => r.actions>0 && r.spent>0 && r.spent/r.actions<=targetCpa)
+  // Partial, malformed or overspent tests remain observations. They cannot
+  // authorize unrestricted winner spending or validate a learned claim.
+  return last.every(r => Number.isFinite(r.spent) && Math.abs(r.spent-TEST_TON)<=EPS
+    && Number.isSafeInteger(r.actions) && r.actions>0
+    && Number.isSafeInteger(r.views) && r.views>0
+    && r.spent/r.actions<=targetCpa)
     && last.reduce((a,r)=>a+r.actions,0)>=5;
 }
 
