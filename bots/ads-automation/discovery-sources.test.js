@@ -5,6 +5,7 @@ import {expandPublicPeers,publicUsernames} from './discovery-graph.js';
 import {channelFeatures} from './channel-evidence.js';
 import {useCompetitorFirst,prepareCandidates} from './preparation.js';
 import {parsePublicPeer,recordPeerEvidence,peerReadiness} from './peer-evidence.js';
+import {searchAllDiscoverySources} from './native-source.js';
 
 function fixture(){const s=openStore(':memory:');s.db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context,status)
  VALUES(1,'baseline','Baseline','en','https://t.me/examplebot','Global','en','Tarot','ready')`).run();return s;}
@@ -50,6 +51,30 @@ test('multiple discovery routes deduplicate the peer while retaining both source
   assert.equal(out.uniqueSeeds,1);assert.equal(out.verifiedPublicPeers,1);
   const c=s.db.prepare('SELECT * FROM candidates').get();assert.equal(JSON.parse(c.features_json).publicPeer.audience.value,24000);
   assert.equal(JSON.parse(c.evidence_json).filter(e=>e.type==='directory-source').length,2);
+ }finally{s.close();}
+});
+
+test('native and public discovery converge on independently measured peers without granting spending authority',async()=>{
+ const s=fixture();try{
+  useCompetitorFirst(s,1);
+  const publicSearch=async()=>[{provider:'lyzem',status:'ok',seeds:[
+   {value:'@tarot_bot',source:'lyzem',url:'https://lyzem.com/search?q=tarot'}]}];
+  const provider={get:async()=>({userId:123,client:{call:async params=>{
+   assert.equal(params._,'contacts.search');
+   return {users:[{bot:true,username:'Tarot_Bot',firstName:'Tarot',botActiveUsers:99000}],chats:[]};
+  }}})};
+  const out=await discoverFromSources(s,{projectId:1,query:'tarot',
+   search:query=>searchAllDiscoverySources(s,{projectId:1,query,provider,publicSearch}),
+   collect:async name=>proof(name)});
+  assert.equal(out.uniqueSeeds,1);assert.equal(out.verifiedPublicPeers,1);
+  const c=s.db.prepare('SELECT * FROM candidates').get();
+  const evidence=JSON.parse(c.evidence_json),features=JSON.parse(c.features_json);
+  assert.ok(evidence.some(e=>e.type==='directory-source'));
+  assert.equal(evidence.find(e=>e.type==='native-source').nativeEvidence.monthlyActiveUsers,99000);
+  assert.equal(features.publicPeer.audience.value,24000);
+  assert.equal(peerReadiness(c,'competitor-first').ready,false); // Market/relevance still need review.
+  assert.equal(s.db.prepare("SELECT count(*) n FROM jobs WHERE kind='peer_review'").get().n,1);
+  assert.equal(s.db.prepare('SELECT count(*) n FROM operations').get().n,0);
  }finally{s.close();}
 });
 

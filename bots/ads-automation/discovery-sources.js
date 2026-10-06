@@ -117,7 +117,7 @@ export async function discoverFromSources(store,{projectId,query,max=30,search=s
     for(const seed of routes.flatMap(r=>r.seeds).filter(s=>s.value===peer.value)){
       addCandidate(store.db,{projectId,surface:peer.surface,value:peer.value,source:seed.source,
         hypothesis:`${query}: source suggestion requires direct relevance and market review`,
-        evidence:[{type:'directory-source',...seed,query}],score:0});
+        evidence:[{...seed,type:seed.nativeEvidence?'native-source':'directory-source',query}],score:0});
     }
   }
   const summary={query,routes:routes.map(r=>({provider:r.provider,status:r.status,seeds:r.seeds.length})),

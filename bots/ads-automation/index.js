@@ -12,7 +12,8 @@ import { prepareCandidates } from './preparation.js';
 import { syncProductStats,paymentFeedback,paymentFingerprint } from './product.js';
 import { startRuntime } from './runtime.js';
 import { enrichPublicPeers } from './peer-evidence.js';
-import { runSourceDiscovery } from './discovery-sources.js';
+import { runSourceDiscovery,discoverFromSources } from './discovery-sources.js';
+import { nativeAccountProvider,searchAllDiscoverySources } from './native-source.js';
 
 if(!process.env.ADS_ADMIN_BOT_TOKEN)throw new Error('ADS_ADMIN_BOT_TOKEN خالی است');
 if(!Number.isSafeInteger(Number(process.env.ADS_ADMIN_ID)))throw new Error('ADS_ADMIN_ID نامعتبر است');
@@ -60,11 +61,14 @@ function autoDecide(){
   }
 }
 
+const nativeProvider=nativeAccountProvider(store);
 let cycleNo=0,busy=false,discoveryTask=null;
 function startDiscovery(){
   if(discoveryTask)return;
   discoveryTask=(async()=>{
-    if(!await runSourceDiscovery(store))await enrichPublicPeers(store,{limit:1});
+    if(!await runSourceDiscovery(store,{discover:(store,arg)=>discoverFromSources(store,{...arg,
+      search:query=>searchAllDiscoverySources(store,{projectId:arg.projectId,query,provider:nativeProvider})})}))
+      await enrichPublicPeers(store,{limit:1});
   })().catch(error=>{
     store.audit('discovery','cycle.failed','background',{message:String(error.message).slice(0,180)});
   }).finally(()=>{discoveryTask=null;});
@@ -120,7 +124,9 @@ async function cycle(){
   finally{busy=false;}
 }
 
-const runtime=startRuntime({bot,cycle,close:async()=>{await discoveryTask;store.close();},log:(event,detail)=>{
+const runtime=startRuntime({bot,cycle,close:async()=>{
+  try{await discoveryTask;await nativeProvider.close();}finally{store.close();}
+},log:(event,detail)=>{
   store.audit('worker',event,owner,detail);
   console.log(JSON.stringify({at:new Date().toISOString(),event,...detail}));
 }});
