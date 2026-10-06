@@ -452,7 +452,10 @@ async function runStep(persona, step, i, state) {
   parsed = rep.llm;
   const repair = { fired: !!rep.fired, ok: !!rep.repaired, ms: Date.now() - t0, usage: rep.usage || null, calls: rep.calls || 0 };
 
-  const rendered = renderV4(parsed, cards, labels, { name: persona.name });
+  // آینه‌ی ربات (`index.js`، رندرِ v4): فالِ «آدمِ دیگر» نامِ صاحبِ حساب را نمی‌گیرد. تا
+  // ۱۴۰۵/۰۷/۱۴ این‌جا بی‌قید بود و فالِ «اسمم مینا هست» را با «فاطمه» شروع می‌کرد؛ خطای ابزار
+  // بود نه محصول، ولی رونوشت را گمراه‌کننده می‌کرد.
+  const rendered = renderV4(parsed, cards, labels, { name: plan.isolate ? '' : persona.name });
   // اگر خودِ سنجه خطا داد، اجرا نباید بمیرد: فال‌های قبلی پول خرج کرده‌اند و نتیجه‌شان
   // نباید بابتِ یک باگِ ابزار از بین برود (درسِ کرشِ اجرای دوم).
   let check;
@@ -463,7 +466,8 @@ async function runStep(persona, step, i, state) {
   }
 
   // حافظه و تاریخچه دقیقاً مثل ربات به قدمِ بعد منتقل می‌شوند
-  if (typeof parsed.memory === 'string' && parsed.memory.trim()) {
+  // و مثلِ ربات، فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند.
+  if (typeof parsed.memory === 'string' && parsed.memory.trim() && !plan.isolate) {
     const m = parsed.memory.trim();
     state.memory = (safetyOn ? sanitizeMemory(m, LOCALE).text : m).slice(0, 1200);
   }

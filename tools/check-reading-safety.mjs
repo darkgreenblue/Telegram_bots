@@ -122,10 +122,14 @@ fa(() => {
   const mem = 'دنبالِ کار است. سابقه‌ی افسردگی دارد.';
   const p = RS.readingSafetyPlan({ question: 'کار جدید پیدا می‌کنم؟', displayName: 'مریم', memory: mem, prev, lang: 'fa' });
   ok('سؤالِ عادی: بحران نه', !p.crisis);
-  ok('حافظه‌ی حساس ⟵ sensitive روشن', p.sensitive);
-  ok('حافظه پاک‌شده به مدل می‌رود', !/افسردگی/.test(p.memory) && p.memory.includes(RS.SENSITIVE_LABEL.fa));
-  ok('فالِ «برای دیگری» از سابقه حذف شد', p.prev.length === 2 && !p.prev.some((x) => /دوستم/.test(x.question)));
-  ok('خلاصه‌ی فالِ حساس به برچسب تقلیل یافت', p.prev.find((x) => /بستری/.test(x.question))?.summary === RS.SENSITIVE_LABEL.fa);
+  // حساس بودن فقط از سؤالِ همین فال می‌آید؛ حافظه‌ی برچسب‌خورده سؤالِ پولی را «حساس» نمی‌کند.
+  ok('سؤالِ عادی با حافظه‌ی حساس ⟵ sensitive خاموش', !p.sensitive);
+  ok('حافظه پاک‌شده به مدل می‌رود', !/افسردگی/.test(p.memory) && p.memory.includes('دنبالِ کار'));
+  ok('برچسبِ حساس به مدل نمی‌رسد', !p.memory.includes(RS.SENSITIVE_LABEL.fa.replace(/\.$/, '')));
+  ok('فالِ «برای دیگری» و فالِ حساس از سابقه حذف شدند', p.prev.length === 1 && !p.prev.some((x) => /دوستم|بستری/.test(x.question)));
+  ok('سابقه‌ی حساس اصلاً به مدل نمی‌رسد (نه حتی برچسب)', !p.prev.some((x) => x.summary === RS.SENSITIVE_LABEL.fa));
+  // کنترلِ مثبت: سؤالِ خودش حساس است ⟵ sensitive روشن.
+  ok('سؤالِ حساس با همان حافظه ⟵ sensitive روشن', RS.readingSafetyPlan({ question: 'مامانم بستری شده خوب میشه؟', displayName: 'مریم', memory: mem, prev, lang: 'fa' }).sensitive);
   ok('خلاصه‌ی فالِ عادی دست‌نخورده', p.prev.find((x) => x.question === 'کارم درست میشه؟')?.summary === 'کار پیش می‌رود.');
   ok('ورودی دست‌نخورده (کپی، نه mutate)', prev[2].summary === 'نگرانِ بیمارستان.');
 
@@ -139,7 +143,7 @@ fa(() => {
   const off = RS.readingSafetyPlan({ question: 'امشب میخوام خودمو بکشم', displayName: 'مریم', memory: mem, prev, lang: 'fa', safety: false, identity: false });
   ok('رول‌بک safety=false: هیچ‌چیز عوض نمی‌شود', !off.crisis && !off.sensitive && off.memory === mem && off.prev.length === 3);
   const offIso = RS.readingSafetyPlan({ question: 'اسمم سارا', displayName: 'مریم', memory: mem, prev, lang: 'fa', identity: false });
-  ok('رول‌بک identity=false: جداسازی خاموش', offIso.isolate === '' && offIso.prev.length === 3);
+  ok('رول‌بک identity=false: جداسازی خاموش (فالِ «برای دوستم» می‌ماند، فقط حساس می‌رود)', offIso.isolate === '' && offIso.prev.length === 2 && offIso.prev.some((x) => /دوستم/.test(x.question)));
 });
 
 // ---------- ۹) locale: بلوکِ ایمنی و خطِ مراقبت در هر پنج زبان ----------
@@ -176,6 +180,50 @@ fa(() => {
   const ctrl = plan('خودمو از این رابطه بکشم عقب یا نه؟');
   ok('«بکشم عقب» نه بحران نه حساس', !ctrl.crisis && !ctrl.sensitive);
 });
+
+// ---------- ۹ج) جمله‌های واقعیِ آزمایشگاه (۱۴۰۵/۰۷/۱۴) — نقص‌هایی که دورِ اول نشان داد ----------
+fa(() => {
+  const L = RS.SENSITIVE_LABEL.fa;
+  const head = L.split(/[;؛]/)[0].trim();
+  const count = (t) => t.split(head).length - 1;
+  // S2.1 و S3.1: مدل این جمله‌ها را در حافظه نوشت و پاک‌سازی نمی‌گرفتشان.
+  for (const m of [
+    'پایانِ رابطه را به آسیب‌زدن به خود گره زده و نگران است.',
+    'گاهی فکرِ پایان‌دادن به زندگی به سرش می‌زند.',
+    'می‌ترسد خواهرش به زندگی‌اش پایان دهد.',
+    'از افکار خودکشی گفته است.',
+  ]) {
+    const s = RS.sanitizeMemory(`به کارش علاقه دارد. ${m}`, 'fa');
+    ok(`جمله‌ی واقعیِ حساس بریده شد: «${m.slice(0, 30)}…»`, s.cut === 1 && !s.text.includes(m.replace(/\.$/, '')) && s.text.includes('کارش'));
+  }
+  // کنترلِ منفی: «پایانِ رابطه» و «به خودش رسید» حساس نیستند.
+  for (const m of ['پایانِ رابطه را پذیرفته است.', 'این ماه بیشتر به خودش رسید.', 'به زندگی‌اش نظم داده است.']) {
+    const s = RS.sanitizeMemory(m, 'fa');
+    ok(`جمله‌ی عادی دست‌نخورده: «${m}»`, s.cut === 0 && s.text === m);
+  }
+  // برچسبِ تکراری که مدل خودش نوشت ⟵ یکی.
+  const dup = RS.sanitizeMemory(`دنبالِ کار است. ${L} ${L}`, 'fa');
+  ok('برچسبِ دوبله یکی شد', count(dup.text) === 1 && dup.text.includes('دنبالِ کار'));
+  // برچسبِ بازنویسی‌شده (با کسره و جمله‌بندیِ دیگر) هم برچسب شناخته می‌شود.
+  const para = RS.sanitizeMemory('دنبالِ کار است. و موضوعِ حساس دارد؛ با احتیاط.', 'fa');
+  ok('برچسبِ بازنویسی‌شده جایگزینِ برچسبِ اصلی شد', count(para.text) === 1 && !/دارد؛/.test(para.text));
+  ok('memoryWithoutLabel برچسب را برمی‌دارد', RS.memoryWithoutLabel(`دنبالِ کار است. ${L}`, 'fa') === 'دنبالِ کار است.');
+  ok('memoryWithoutLabel حافظه‌ی بی‌برچسب را دست نمی‌زند', RS.memoryWithoutLabel('دنبالِ کار است.', 'fa') === 'دنبالِ کار است.');
+  // برنامه: حافظه‌ی برچسب‌خورده بی‌برچسب به مدل می‌رسد و سؤالِ پولی حساس نمی‌شود.
+  const pm = RS.readingSafetyPlan({ question: 'پولم زیاد میشه؟', displayName: 'مریم', memory: `نگران کار است. ${L}`, prev: [], lang: 'fa' });
+  ok('برنامه: سؤالِ پولی با حافظه‌ی برچسب‌دار حساس نیست', !pm.sensitive && !pm.crisis);
+  ok('برنامه: حافظه بی‌برچسب به مدل می‌رسد', pm.memory === 'نگران کار است.');
+  // کنترلِ مثبت: رول‌بک دست‌نخورده.
+  const off = RS.readingSafetyPlan({ question: 'پولم زیاد میشه؟', displayName: 'مریم', memory: `نگران کار است. ${L}`, prev: [], lang: 'fa', safety: false });
+  ok('رول‌بک: حافظه بیت‌به‌بیت', off.memory === `نگران کار است. ${L}`);
+});
+
+// ---------- ۹د) آزمایشگاه آینه‌ی ربات است: جداسازی نام و حافظه را هم می‌برد ----------
+{
+  const lab = readFileSync(new URL('./reading-lab.mjs', import.meta.url), 'utf8');
+  ok('آزمایشگاه: نام در جداسازی روی سرخط نمی‌نشیند', /name: plan\.isolate \? '' : persona\.name/.test(lab));
+  ok('آزمایشگاه: حافظه در جداسازی به‌روز نمی‌شود', /&& !plan\.isolate/.test(lab));
+}
 
 // ---------- ۱۰) سیم‌کشی در ربات ----------
 const src = readFileSync(new URL('../bots/tarot/index.js', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

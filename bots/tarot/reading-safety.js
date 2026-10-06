@@ -34,6 +34,13 @@ const SENSITIVE = {
     'افسردگی', 'قرص اعصاب', 'قرص خواب', 'ضد افسردگی', 'ضدافسردگی', 'دوقطبی', 'دو قطبی',
     'اسکیزوفرنی', 'حمله پنیک', 'حمله‌ی پنیک', 'سرطان', 'شیمی درمانی', 'شیمیدرمانی', 'آسیب به خود',
     'خودآزاری', 'خودآسیب', 'ترخیص',
+    /* شکل‌هایی که خودِ مدل در **حافظه** می‌نویسد (دورِ آزمایشگاهِ ۱۴۰۵/۰۷/۱۴): «پایانِ رابطه را
+     * به آسیب‌زدن به خود گره زده» و «فکرِ پایان‌دادن به زندگی» از این فهرست و از `crisisIn` رد
+     * شدند و در حافظه ماندند (نقضِ قاعده‌ی ۱ِ مالک). `norm` نیم‌فاصله را حذف می‌کند، پس هر
+     * دو نگارش لازم است. */
+    'آسیب زدن به خود', 'آسیب‌زدن به خود', 'صدمه زدن به خود', 'صدمه‌زدن به خود',
+    'پایان دادن به زندگی', 'پایان‌دادن به زندگی', 'تمام کردن زندگی', 'تمام‌کردن زندگی',
+    'به زندگی‌اش پایان', 'به زندگیش پایان', 'به زندگی خود پایان', 'کشتن خود', 'افکار خودکشی',
     /* سوم‌شخص: خطرِ آدمِ دیگری حساس است ولی بحرانِ خودِ کاربر نیست (خطِ مراقبت نمی‌گیرد). */
     'خودشو بکشه', 'خودش رو بکشه', 'خودش را بکشد', 'خودشو میکشه', 'خودشو می کشه', 'به خودش آسیب'],
   en: ['suicid', 'self-harm', 'self harm', 'hospitaliz', 'psychiatr', 'psych ward', 'depression',
@@ -62,19 +69,39 @@ export function sensitiveTermIn(text, lang = 'fa') {
 
 /* ✂️ حافظه جمله‌به‌جمله پاک می‌شود، نه کلش: بقیه‌ی شناخت (موضوعِ رابطه، الگوی سؤال‌ها)
  * درست و مفید است. جمله‌ای که حرفِ بحران یا واژه‌ی حساس دارد حذف و یک برچسبِ کلی
- * جایش می‌نشیند. idempotent است: برچسبِ موجود دوباره اضافه نمی‌شود. */
+ * جایش می‌نشیند. idempotent است: برچسبِ موجود دوباره اضافه نمی‌شود.
+ * 🐛 برچسب با **تطبیقِ نرمال** شناخته می‌شود، نه رشته‌ی عینی: مدل آن را بدونِ کسره
+ * («موضوع حساس؛ با احتیاط.») یا با یک واژه‌ی اضافه («… موضوعِ حساس دارد؛ با احتیاط.»)
+ * بازنویسی می‌کرد و نسخه‌ی قبلی هر بار یک برچسبِ دوم می‌افزود (دورِ آزمایشگاهِ
+ * ۱۴۰۵/۰۷/۱۴: «موضوع حساس؛ با احتیاط. موضوعِ حساس؛ با احتیاط.»). تکه‌ای که نیمه‌ی اولِ
+ * برچسب را دارد کامل می‌رود، و تکه‌ای که **فقط** نیمه‌ی دوم است هم. */
+const HARAKAT = /[\u064B-\u065F\u0670]/g;
+const nh = (s) => norm(String(s || '').replace(HARAKAT, '')).replace(/\s+/g, ' ').trim();
+const labelParts = (lang) => labelOf(lang).split(/[;؛]/).map(nh).filter(Boolean);
+function isLabelSeg(seg, lang) {
+  const t = nh(seg);
+  if (!t) return false;
+  const [head, tail] = labelParts(lang);
+  return (head && t.includes(head)) || (tail && t === tail);
+}
+
+/** حافظه بدونِ هیچ ردی از برچسبِ کلی: همان چیزی که به **مدل** می‌رسد. */
+export function memoryWithoutLabel(text, lang = 'fa') {
+  const src = String(text || '');
+  const segs = src.match(/[^.!?؟؛\n]+[.!?؟؛]*\s*/g) || [];
+  return segs.filter((s) => norm(s) && !isLabelSeg(s, lang)).join('').replace(/\s+/g, ' ').trim();
+}
+
 export function sanitizeMemory(text, lang = 'fa') {
   const src = String(text || '');
   if (!src.trim()) return { text: src, cut: 0 };
   const label = labelOf(lang);
-  /* برچسبِ قبلی اول کنار می‌رود و در انتها یک بار برمی‌گردد. باید پیش از تکه‌کردن باشد:
-   * خودِ برچسب «؛» دارد و تکه‌کننده دو نیمش می‌کرد، پس هر اجرا یک برچسبِ تازه می‌افزود. */
-  const hadLabel = src.includes(label);
-  const body0 = hadLabel ? src.split(label).join(' ') : src;
-  const segs = body0.match(/[^.!?؟؛\n]+[.!?؟؛]*\s*/g) || [body0];
+  const segs = src.match(/[^.!?؟؛\n]+[.!?؟؛]*\s*/g) || [src];
   let cut = 0;
+  let hadLabel = false;
   const kept = segs.filter((s) => {
     if (!norm(s)) return false;
+    if (isLabelSeg(s, lang)) { hadLabel = true; return false; }
     if (crisisIn(s) || sensitiveTermIn(s, lang)) { cut++; return false; }
     return true;
   });
@@ -87,7 +114,7 @@ export function sanitizeMemory(text, lang = 'fa') {
 export function memorySensitive(text, lang = 'fa') {
   const src = String(text || '');
   if (!src.trim()) return false;
-  return src.includes(labelOf(lang)) || sanitizeMemory(src, lang).cut > 0;
+  return memoryWithoutLabel(src, lang) !== src.replace(/\s+/g, ' ').trim() || sanitizeMemory(src, lang).cut > 0;
 }
 
 /* 🪪 اسمی که کاربر **در خودِ سؤال** به خودش نسبت داده. فقط الگوهای بی‌ابهام: «اسمم X»،
@@ -192,11 +219,11 @@ export function identityIsolate(question, displayName, lang = 'fa') {
 
 /* 🧭 برنامه‌ی ایمنیِ یک فال، تک‌منبع برای ربات و آزمایشگاه.
  *   - `crisis`: سؤال حرفِ صریحِ آسیب به خود دارد (⟵ بلوکِ ایمنی + خطِ مراقبت).
- *   - `sensitive`: سؤال یا حافظه موضوعِ حساس دارد (⟵ بلوکِ ایمنی).
+ *   - `sensitive`: **سؤالِ همین فال** موضوعِ حساس دارد (⟵ بلوکِ ایمنی).
  *   - `isolate`: فال برای آدمِ دیگری است (⟵ نه حافظه، نه فال‌های قبلی، نه نام).
  *   - `memory`/`prev`: آن‌چه واقعاً به مدل می‌رود.
  * `prev` ردیف‌هایی است با `question` و `summary`؛ فالِ قبلی‌ای که خودش «برای دیگری» بوده
- * از الگوهای خودِ کاربر حذف می‌شود، و خلاصه‌ی فالِ حساس به برچسب تقلیل پیدا می‌کند. */
+ * از الگوهای خودِ کاربر حذف می‌شود، و فالِ قبلیِ حساس هم کامل حذف می‌شود. */
 /* ⏳ آسیبِ **گذشته** («یه زمانی به خودم آسیب می‌زدم ولی الان بهترم») خطرِ امروز نیست:
  * حساس می‌ماند (بلوکِ ایمنی) ولی خطِ مراقبت نمی‌گیرد (قاعده‌ی مالک: فقط خطرِ صریحِ فعلی).
  * عمداً تنگ: فقط واژه‌های آسیب (نه نیتِ مرگ مثلِ «می‌خوام بمیرم») و فقط با نشانه‌ی صریحِ گذشته. */
@@ -217,16 +244,19 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
   let mem = String(memory || '');
   let memoryCut = 0;
   if (safety) { const s = sanitizeMemory(mem, lang); mem = s.text; memoryCut = s.cut; }
-  const memSensitive = safety && memorySensitive(mem, lang);
-  const sensitive = safety && (crisis || pastHarm || !!sensitiveTermIn(question, lang) || memSensitive);
+  /* 🧷 برچسبِ کلی فقط در DB می‌ماند و هرگز به مدل نمی‌رسد (دورِ آزمایشگاهِ ۱۴۰۵/۰۷/۱۴):
+   * با دیدنش، فالِ بعدیِ کاملاً بی‌ربط («از جلسه‌ی قبلی فقط می‌دونم موضوعت حساسه…») هم
+   * محتاط و بی‌حکم می‌شد. همین‌طور `sensitive` فقط از **سؤالِ همین فال** می‌آید، نه از
+   * حافظه: سؤالِ پولِ کسی که یک بار از بستری گفته، سؤالِ پول است. */
+  if (safety) mem = memoryWithoutLabel(mem, lang);
+  const sensitive = safety && (crisis || pastHarm || !!sensitiveTermIn(question, lang));
   let outPrev = Array.isArray(prev) ? prev : [];
   if (identity) outPrev = outPrev.filter((p) => !identityIsolate(p?.question, displayName, lang));
   if (safety) {
-    outPrev = outPrev.map((p) => {
-      const risky = crisisIn(p?.question) || crisisIn(p?.summary)
-        || sensitiveTermIn(p?.question, lang) || sensitiveTermIn(p?.summary, lang);
-      return risky ? { ...p, summary: labelOf(lang) } : p;
-    });
+    /* فالِ قبلیِ حساس **کامل** حذف می‌شود، نه با برچسب: نوع و بازخوردش هم به مدل می‌گفت
+     * «این‌جا چیزی بوده»، و همان برچسب را دوباره به فالِ بی‌ربط می‌کشاند. */
+    outPrev = outPrev.filter((p) => !(crisisIn(p?.question) || crisisIn(p?.summary)
+      || sensitiveTermIn(p?.question, lang) || sensitiveTermIn(p?.summary, lang)));
   }
   if (isolate) { mem = ''; outPrev = []; }
   return { crisis, sensitive, isolate, memory: mem, prev: outPrev, memoryCut };
