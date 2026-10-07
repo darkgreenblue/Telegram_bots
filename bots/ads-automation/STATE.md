@@ -1,3 +1,10 @@
+## Roadmap checkpoint — 2026-10-07
+
+- Owner explicitly reaffirmed the original architecture: always-on server, subscription-backed desktop brain/image tools, safe financial boundaries during desktop outage, and admin-authorized new funding. `ROADMAP.md` defines R0–R9 and observable completion criteria; `AUTOMATION-ACCEPTANCE.md` distinguishes software tests from live acceptance. Existing paid/cost calibration gates remain required.
+- Branch `codex/ads-roadmap-learning-scope`: exact shared hypothesis registry and immutable new-test context now prevent mutable project/candidate/creative edits from relabeling old observations. Context includes market, language, CPA, scope, destination, target and creative. Historical experiments are never backfilled from current data. Unknown serving product version remains observational; attestation is R2 and not yet implemented.
+- Create requests reject changed context before reservation and again after asynchronous lookups. Previously held unfunded/unexecuted competitor drafts capture context only at fresh release; managed/historical tests cannot receive invented context. No financial authority is added by these changes.
+- Current deployment remains the verified #497 runtime until a new actual Deploy step and fresh worker cycles are confirmed. Local changes are not presented as server behavior. 110 module tests and three relevant repository checks passed; exact-head CI and deployment remain pending.
+
 ## Latest operational checkpoint — 2026-10-07 04:31 UTC
 
 - PR #497 merged as 0cd26951e6d51acb287ea9af73799a809fb6a062 after exact-head CI 37571298397 passed all jobs, including scoped-admin and Linux sealed-query checks. Deployed Tarot version verified as 3.154.0; no reservation of a future version.

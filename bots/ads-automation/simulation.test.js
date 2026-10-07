@@ -52,8 +52,10 @@ test('offline four-surface cycle records evidence without touching the Ads accou
   assert.equal(db.prepare(`SELECT kind FROM decisions WHERE experiment_id=? AND kind='graduate'`).get(id).kind,'graduate');
   refreshInsights(store,1);
   const evidence=db.prepare(`SELECT scope,status,evidence_json FROM insights WHERE project_id=1 AND status='validated'`).all();
-  assert.equal(evidence.length,1);
-  assert.equal(JSON.parse(evidence[0].evidence_json).rounds.length,2);
+  assert.equal(evidence.length,0); // The simulation has no verified serving product version.
+  const observed=db.prepare("SELECT evidence_json FROM insights WHERE status='observed'").get();
+  assert.equal(JSON.parse(observed.evidence_json).rounds.length,2);
+  assert.equal(JSON.parse(observed.evidence_json).contextStatus,'product_version_unknown');
   assert.equal(db.prepare('SELECT COUNT(*) n FROM operations').get().n,0);
   store.close();
 });

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { row } from './db.js';
 import { dashboardBridge } from './bridge.js';
 import { paymentFeedback } from './product.js';
+import { captureExperimentContext,assertExperimentContextCurrent } from './learning-context.js';
 import { requirePeerReadiness } from './peer-evidence.js';
 import { targetFor,validateCreative } from './targets.js';
 import { assessTest,cadence,canGraduate,cpa,remainingTest,TEST_TON } from './policy.js';
@@ -56,6 +57,7 @@ function prepareExperiment(store,{projectId,candidateId,creativeId,cpm,placement
   if(Buffer.byteLength(title,'utf8')>128)throw new Error('title too long');
   const id=Number(db.prepare(`INSERT INTO experiments(project_id,candidate_id,creative_id,title,cpm,placement)
     VALUES (?,?,?,?,?,?)`).run(projectId,candidateId,creativeId,title,cpm,placement).lastInsertRowid);
+  captureExperimentContext(store,id);
   requestDecision(store,projectId,id,'create',{initialBudget:1,testBudget:TEST_TON},{candidateId,creativeId,cpm,placement});
   store.audit('system','experiment.prepare',id,{candidateId,creativeId});
   return id;
@@ -113,6 +115,7 @@ export async function createApproved(store,api,experimentId,{resetMinute,bridge=
   requirePeerReadiness(candidate,project);
   validateCreative(creative,candidate,project);
   const cap=projectCapacity(db,project.id);
+  assertExperimentContextCurrent(db,ex);
   const reserved=ex.spend_authorized>0;
   if(cap.slots-(reserved?1:0)>=project.max_campaigns||cap.allocated+(reserved?0:1)>project.max_allocated+1e-6)
     throw new Error('project allocation capacity exhausted');
@@ -151,6 +154,7 @@ export async function createApproved(store,api,experimentId,{resetMinute,bridge=
     safetyGate(freshProject,api,resetMinute);
     const freshCap=projectCapacity(db,project.id);
     const freshEx=row(db,'experiments',ex.id);
+    assertExperimentContextCurrent(db,freshEx);
     const alreadyReserved=freshEx.spend_authorized>0;
     if(freshCap.slots-(alreadyReserved?1:0)>=freshProject.max_campaigns||
        freshCap.allocated+(alreadyReserved?0:1)>freshProject.max_allocated+1e-6)
@@ -171,7 +175,10 @@ export async function createApproved(store,api,experimentId,{resetMinute,bridge=
     if(!existing&&operation.status!=='done'&&(!Number.isInteger(previousEnd)||previousEnd<=now()))
       throw new Error('expired uncertain create: reconcile before retry');
   }
-  if(!existing)safetyGate(row(db,'projects',project.id),api,resetMinute);
+  if(!existing){
+    safetyGate(row(db,'projects',project.id),api,resetMinute);
+    assertExperimentContextCurrent(db,row(db,'experiments',ex.id));
+  }
   const ad=existing||await api.call('createAd',params,`create-${ex.id}`);
   if(!Number.isInteger(ad.ad_id))throw new Error('Ads API returned no ad_id');
   db.prepare(`UPDATE experiments SET ad_id=?,status='review',review_status=?,activated_at=?,
