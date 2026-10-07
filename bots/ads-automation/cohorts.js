@@ -1,3 +1,4 @@
+import { refundCohortReader } from './refund-cohorts.js';
 const DAY=86400;
 export const COHORT_WINDOWS=[7,30];
 const identifier=value=>{
@@ -35,6 +36,7 @@ export function readCampaignCohorts(db,{codes,at,profile}){
       AND u.${pk} NOT IN (SELECT user_id FROM events WHERE json_extract(props,'$.adm')=1)
   )`;
   const params=[...codes.map(code=>`campaign:${code}`),...excluded];
+  const refundsFor=refundCohortReader(db,{acquisition,params,profile,columns:payments,at});
   const byCode=Object.fromEntries(codes.map(code=>[code,{}]));
   for(const days of COHORT_WINDOWS){
     // Only approved events with an actual timestamp can be attributed to a
@@ -60,15 +62,21 @@ export function readCampaignCohorts(db,{codes,at,profile}){
       const versions=rows.filter(r=>r.code===code).map(r=>({productVersion:r.product_version,
         eligibleUsers:r.eligible_users,immatureUsers:r.immature_users,unknownAcquisitionUsers:r.unknown_acquisition_users,
         recordedPayers:r.recorded_payers,recordedRevenue:r.recorded_revenue/(profile.amountDivisor||1),
-        unknownPayments:r.unknown_payments}));
+        unknownPayments:r.unknown_payments,...refundsFor(code,r.product_version,days)}));
       const total=key=>versions.reduce((sum,v)=>sum+v[key],0);
       const paymentQualityKnown=timingAvailable&&total('unknownPayments')===0;
+      const refundEvidenceKnown=paymentQualityKnown&&total('unknownAcquisitionUsers')===0&&
+        versions.every(v=>v.refundEvidenceKnown===true)&&!!refundsFor(code,null,days);
+      const refundMetric=key=>refundEvidenceKnown?total(key):null;
       byCode[code][days]={days,asOf:at,eligibleUsers:total('eligibleUsers'),immatureUsers:total('immatureUsers'),
         unknownAcquisitionUsers:total('unknownAcquisitionUsers'),paymentQualityKnown,
         payers:paymentQualityKnown?total('recordedPayers'):null,
         revenue:paymentQualityKnown?total('recordedRevenue'):null,
-        revenueUnit:profile.revenueUnit,refunds:null,versions,
-        caveat:'Gross successful payments only. Per-code refund amounts are unavailable; this is not net revenue.'};
+        revenueUnit:profile.revenueUnit,refunds:refundMetric('refundedRevenue'),versions,refundEvidenceKnown,
+        grossReceivedRevenue:refundMetric('grossReceivedRevenue'),netReceivedRevenue:refundMetric('netReceivedRevenue'),
+        lateRefundRevenue:refundMetric('lateRefundRevenue'),refundedPayments:refundMetric('refundedPayments'),
+        unknownRefundPayments:versions.some(v=>v.unknownRefundPayments===undefined)?null:total('unknownRefundPayments'),
+        caveat:'revenue is currently approved payments only. Received/refunded/net fields use the recorded Tarot Stars refund ledger; late refunds revise the original acquisition window. Internal credit refunds are excluded. Missing or conflicting evidence stays unknown. This is not net profit or proof of a Telegram payout.'};
     }
   }
   return {windows:COHORT_WINDOWS,asOf:at,hasPayments,paymentTimingAvailable:timingAvailable,byCode};

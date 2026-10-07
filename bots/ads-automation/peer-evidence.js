@@ -80,9 +80,13 @@ export function peerReadiness(candidate,policy='standard',at=Date.now()){
   const age=at-Date.parse(proof.checkedAt);
   if(!Number.isFinite(age)||age< -300000||age>86400000)
     return {ready:false,reason:'public peer evidence needs a current refresh'};
+  const interfaceAge=at-Date.parse(features.botInterface?.checkedAt);
+  if(features.botInterface&&(!Number.isFinite(interfaceAge)||interfaceAge< -300000||interfaceAge>86400000))
+    return {ready:false,reason:'bot interface evidence needs a current refresh'};
   if(review?.status!=='eligible'||review.relevance!=='direct'||!review.reason||!review.marketEvidence)
     return {ready:false,reason:review?.reason||'direct competitor and market suitability review required'};
-  if(review.peerCheckedAt!==proof.checkedAt)
+  if(review.peerCheckedAt!==proof.checkedAt||
+      (review.interfaceCheckedAt??null)!==(features.botInterface?.checkedAt??null))
     return {ready:false,reason:'peer evidence changed; suitability review must be refreshed'};
   return {ready:true,audience:proof.audience.value,unit:proof.audience.unit};
 }
@@ -136,10 +140,57 @@ export function recordPeerEvidence(store,candidateId,proof){
     db.prepare('UPDATE candidates SET features_json=? WHERE id=?').run(JSON.stringify(features),candidateId);
     store.audit('discovery','peer.observed',candidateId,proof);
     if(project.initial_peer_policy!=='competitor-first')return null;
-    return addJob(db,project.id,'peer_review',{candidateId,peer:proof,
+    return addJob(db,project.id,'peer_review',{candidateId,peer:proof,botInterface:features.botInterface??null,
       project:{name:project.name,market:project.market,language:project.language,context:project.context},
       hypothesis:candidate.hypothesis,
       rule:'Initial tests prioritize established direct competitors. Minimum 5000 channel subscribers or 10000 bot monthly users. Review actual profile AND sampled posts (not title alone), measured size, freshness and English-market suitability. Defer tiny, unrelated, unknown-size or market-uncertain peers; do not fill a quota. Profile language does not prove audience language share. Do not infer country or invent metrics.'});
+  })();
+}
+
+// Desktop inspection only: no message/RPC capability is exposed to the model.
+// Observation languages are interface evidence, never audience proportions.
+export function recordBotInterfaceEvidence(store,candidateId,evidence,{at=Date.now()}={}){
+  const db=store.db,candidate=db.prepare('SELECT * FROM candidates WHERE id=?').get(candidateId);
+  if(!candidate||candidate.surface!=='bots'||evidence.url!==`https://t.me/${username(candidate.value)}`)
+    throw new Error('bot interface identity mismatch');
+  const age=at-Date.parse(evidence.checkedAt);
+  if(!Number.isFinite(age)||age< -300000||age>86400000||evidence.method!=='support-web-start'||
+    !['observed','no-response','blocked'].includes(evidence.status)||
+    !Array.isArray(evidence.observedLanguages)||evidence.observedLanguages.length>20||
+    evidence.observedLanguages.some(l=>!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(l))||
+    typeof evidence.excerpt!=='string'||!evidence.excerpt.trim()||evidence.excerpt.length>2000||
+    typeof evidence.limitations!=='string'||!evidence.limitations.trim()||evidence.limitations.length>1000||
+    (evidence.status!=='observed'&&evidence.observedLanguages.length))throw new Error('invalid bot interface evidence');
+  const proof={version:1,url:evidence.url,checkedAt:evidence.checkedAt,method:evidence.method,
+    status:evidence.status,observedLanguages:[...new Set(evidence.observedLanguages)],
+    excerpt:evidence.excerpt,limitations:evidence.limitations,audienceLanguageShare:null,defaultLanguage:null};
+  const selection=evidence.languageSelection??{status:'not-checked',offeredLanguages:[],selectedLanguage:null,verified:false};
+  if(!['not-checked','not-observed','available','blocked'].includes(selection.status)||
+    !Array.isArray(selection.offeredLanguages)||selection.offeredLanguages.length>20||
+    selection.offeredLanguages.some(l=>!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(l))||typeof selection.verified!=='boolean'||
+    (selection.selectedLanguage!==null&&!selection.offeredLanguages.includes(selection.selectedLanguage))||
+    (selection.verified&&(!selection.selectedLanguage||!proof.observedLanguages.includes(selection.selectedLanguage)))||
+    (selection.status!=='available'&&(selection.offeredLanguages.length||selection.selectedLanguage!==null||selection.verified)))
+    throw new Error('invalid bot language selection evidence');
+  proof.languageSelection={status:selection.status,offeredLanguages:[...new Set(selection.offeredLanguages)],
+    selectedLanguage:selection.selectedLanguage,verified:selection.verified};
+  return db.transaction(()=>{
+    const features=JSON.parse(db.prepare('SELECT features_json FROM candidates WHERE id=?').get(candidateId).features_json);
+    if(features.botInterface?.checkedAt===proof.checkedAt){
+      if(JSON.stringify(features.botInterface)!==JSON.stringify(proof))throw new Error('conflicting bot interface observation');
+      return null;
+    }
+    if(Date.parse(features.botInterface?.checkedAt)>Date.parse(proof.checkedAt))throw new Error('stale bot interface observation');
+    features.botInterface=proof;
+    features.initialReview={status:'pending',reason:'bot interface evidence changed; review required'};
+    db.prepare('UPDATE candidates SET features_json=? WHERE id=?').run(JSON.stringify(features),candidateId);
+    store.audit('discovery','bot.interface_observed',candidateId,proof);
+    const project=db.prepare('SELECT * FROM projects WHERE id=?').get(candidate.project_id);
+    if(!features.publicPeer||project.initial_peer_policy!=='competitor-first')return null;
+    return addJob(db,project.id,'peer_review',{candidateId,peer:features.publicPeer,botInterface:proof,
+      project:{name:project.name,market:project.market,language:project.language,context:project.context},
+      hypothesis:candidate.hypothesis,
+      rule:'Use supplied public profile/count and actual bot interface observation. Separate observed response language, offered language choices, verified selection and unknown default. A greeting or language menu is not proof of audience proportions or full reading flow. Not-observed is not unsupported. Unknown size stays in reserve; enforce floors and direct relevance. Do not browse or invent missing evidence.'});
   })();
 }
 

@@ -38,7 +38,8 @@ else if(request.action==='campaign') {
       const snapshot=withDb(instance.file,db=>readCampaignCohorts(db,{codes:request.cohortCodes,at:request.at,
         profile:{userPk:userPk(scope),paymentTable:money.table,amountColumn:money.amountCol,
           successStatus:money.successStatus,paymentFilter:money.testFilter,
-          excludedUsers:botByKey(scope)?.testUsers||[],revenueUnit:unit,amountDivisor:money.unit==='rial'?10:1}}));
+          excludedUsers:botByKey(scope)?.testUsers||[],revenueUnit:unit,amountDivisor:money.unit==='rial'?10:1,
+          refundEvidence:botByKey(scope)?.family==='tarot'&&unit==='star'?'tarot-stars-v1':null}}));
       if(!snapshot)throw new Error('cohort read unavailable; no zero substitute');
       return {instance:instance.id,...snapshot};
     });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore,addCandidate,addJob } from './db.js';
-import { parsePublicPeer,collectPublicPeer,peerReadiness,enrichPublicPeers } from './peer-evidence.js';
+import { parsePublicPeer,collectPublicPeer,peerReadiness,enrichPublicPeers,recordBotInterfaceEvidence } from './peer-evidence.js';
 import { shortlist } from './discovery.js';
 import { createExperiment } from './workflow.js';
 import { applyBrainResult } from './brain.js';
@@ -22,6 +22,38 @@ function fixture(){
     VALUES(1,'direct','Direct','tarot-intl@en','https://t.me/examplebot','Global','en','Tarot','ready','competitor-first')`).run();
   return s;
 }
+
+test('actual bot language evidence invalidates old reviews and duplicate or older observations cannot mutate it',()=>{
+  const s=fixture();try{
+    const id=addCandidate(s.db,{projectId:1,surface:'bots',value:'@samplebot',source:'fixture',hypothesis:'direct',features:features()});
+    const jid=addJob(s.db,1,'peer_review',{candidateId:id,peer:features().publicPeer});
+    const old=s.db.prepare('SELECT * FROM jobs WHERE id=?').get(jid);
+    const proof={url:'https://t.me/samplebot',checkedAt:at,method:'support-web-start',status:'observed',
+      observedLanguages:['en'],excerpt:'Greetings! Personal Tarot bot.',limitations:'Greeting only. Audience proportions unknown.'};
+    const newer=recordBotInterfaceEvidence(s,id,proof);
+    assert.equal(recordBotInterfaceEvidence(s,id,proof),null);
+    assert.throws(()=>recordBotInterfaceEvidence(s,id,{...proof,url:'https://t.me/wrongbot'}),/identity/);
+    assert.throws(()=>recordBotInterfaceEvidence(s,id,{...proof,excerpt:'different'}),/conflicting/);
+    assert.throws(()=>recordBotInterfaceEvidence(s,id,{...proof,checkedAt:'2000-01-01'}),/invalid/);
+    const result={status:'eligible',relevance:'direct',reason:'Direct English greeting verified',marketEvidence:'English interface only, audience share unknown'};
+    assert.throws(()=>applyBrainResult(s,old,result),/stale/);
+    const job=s.db.prepare('SELECT * FROM jobs WHERE id=?').get(newer);
+    assert.equal(JSON.parse(job.input_json).botInterface.audienceLanguageShare,null);
+    applyBrainResult(s,job,result);
+    const candidate=s.db.prepare('SELECT * FROM candidates WHERE id=?').get(id);
+    assert.equal(peerReadiness(candidate,'competitor-first').ready,true);
+    assert.equal(JSON.parse(candidate.features_json).initialReview.interfaceCheckedAt,at);
+    const language={status:'available',offeredLanguages:['en','ru'],selectedLanguage:'en',verified:true};
+    const next=new Date(Date.parse(at)+1000).toISOString();
+    recordBotInterfaceEvidence(s,id,{...proof,checkedAt:next,languageSelection:language});
+    const observed=JSON.parse(s.db.prepare('SELECT features_json FROM candidates WHERE id=?').get(id).features_json).botInterface;
+    assert.equal(observed.defaultLanguage,null);assert.equal(observed.languageSelection.verified,true);
+    assert.throws(()=>recordBotInterfaceEvidence(s,id,{...proof,checkedAt:next,
+      languageSelection:{...language,selectedLanguage:'ru'}}),/invalid/);
+    assert.equal(peerReadiness({...candidate,features_json:JSON.stringify({...features(),botInterface:observed})},
+      'competitor-first',Date.parse(at)+2*86400000).ready,false);
+  }finally{s.close();}
+});
 
 test('public MAU is measured, hidden MAU stays null, and groups cannot become channels',()=>{
   assert.equal(parsePublicPeer(html('23 788'),'@samplebot',at).audience.value,23788);

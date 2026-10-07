@@ -30,7 +30,7 @@ export async function syncProductStats(store,{bridge=dashboardBridge,at=now(),mi
           ...s,hasPayments:s.hasPayments??null,refunds:null,
           cohorts:stats.cohorts?.instances?.map(instance=>({instance:instance.instance,
             ...instance.byCode?.[ex.tracking_code]}))??null,
-          caveat:'Refund attribution is unavailable in the existing grouped dashboard API.'}));
+          caveat:'All-time grouped refunds remain unavailable. Comparable-age cohorts separately preserve verified recorded money refunds; internal credit returns are excluded.'}));
       if(inserted.changes){
         store.audit('product','cohort.snapshot',ex.id,{at,windows:[7,30],cohortDataAvailable:!!stats.cohorts});
         count++;
@@ -47,7 +47,7 @@ export function paymentFeedback(store,projectId){
     JOIN candidates c ON c.id=e.candidate_id JOIN product_observations o ON o.experiment_id=e.id
     WHERE e.project_id=? AND o.at=(SELECT MAX(recent.at) FROM product_observations recent WHERE recent.experiment_id=e.id)
     ORDER BY e.id LIMIT 100`).all(projectId);
-  return {windows:[7,30],basis:'First 7/30 days from new campaign acquisition, approved payment timestamp; gross revenue, refunds unknown.',
+  return {windows:[7,30],basis:'First 7/30 days from new campaign acquisition and approved payment time. Late verified money refunds revise the original window. Read separate received/refunded/net ledger metrics where available; unknown is not zero.',
     experiments:snapshots.map(snapshot=>({experimentId:snapshot.id,surface:snapshot.surface,candidate:snapshot.value,
       observedAt:snapshot.at,cohorts:JSON.parse(snapshot.raw_json).cohorts??null})),
     rules:'Do not compare immature users with mature cohorts or merge different product versions. Zero eligibleUsers means no mature evidence. Missing metrics are unknown. Small cohorts remain weak evidence. Do not claim net profit or convert Stars to TON.'};

@@ -6,6 +6,7 @@ import { paymentFeedback,paymentFingerprint } from './product.js';
 import { peerReadiness } from './peer-evidence.js';
 import { queueSourceDiscovery } from './discovery-sources.js';
 import { usableInsights } from './learning-context.js';
+import { competitorInspiration } from './competitor-observations.js';
 
 export const SCHEMAS={
   peer_review:{type:'object',additionalProperties:false,required:['status','relevance','reason','marketEvidence'],properties:{
@@ -72,14 +73,15 @@ export function queueResearch(store,projectId,feedback={}){
     brief:p.initial_peer_policy==='competitor-first'?
       'Initial pilot: prioritize active direct tarot/relationship-reading competitors with real public audience counts and evidence of market language fit. First verify large relevant bots/channels. Do not fill a quota with tiny, unknown-size, movie-title or general app-discovery peers. Keep lateral ideas in reserve. A profile language is not proof of audience language share. Cite dated primary sources; do not invent usernames or counts.':
       'Find direct, competitor, persona-adjacent, search and user-filter hypotheses. Cite source URL for each public peer; qualify country. Do not invent Telegram usernames.',
-    feedback,paymentQuality:quality,paymentFingerprint:paymentFingerprint(quality),insights});
+    feedback,paymentQuality:quality,paymentFingerprint:paymentFingerprint(quality),insights,
+    competitorInspiration:competitorInspiration(store,p.id)});
 }
 export function queueStrategy(store,candidateId){
   const c=row(store.db,'candidates',candidateId);if(!c)throw new Error('candidate absent');
   const p=row(store.db,'projects',c.project_id),insights=usableInsights(store,p);
   return addJob(store.db,p.id,'strategy',{candidateId,project:{name:p.name,context:p.context,market:p.market,language:p.language},
     candidate:{surface:c.surface,value:c.value,hypothesis:c.hypothesis,features:JSON.parse(c.features_json)},
-    paymentQuality:paymentFeedback(store,p.id),insights});
+    paymentQuality:paymentFeedback(store,p.id),insights,competitorInspiration:competitorInspiration(store,p.id)});
 }
 
 export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
@@ -121,8 +123,9 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
     const input=JSON.parse(job.input_json),candidate=row(db,'candidates',input.candidateId);
     if(!candidate||candidate.project_id!==p.id)throw new Error('peer review candidate differs');
     const features=JSON.parse(candidate.features_json);
-    if(features.publicPeer?.checkedAt!==input.peer?.checkedAt)throw new Error('stale peer review');
-    const proposed={...result,peerCheckedAt:input.peer.checkedAt};
+    if(features.publicPeer?.checkedAt!==input.peer?.checkedAt||
+      (features.botInterface?.checkedAt??null)!==(input.botInterface?.checkedAt??null))throw new Error('stale peer review');
+    const proposed={...result,peerCheckedAt:input.peer.checkedAt,interfaceCheckedAt:input.botInterface?.checkedAt??null};
     if(!result.reason.trim()||!result.marketEvidence.trim())throw new Error('peer review evidence required');
     features.initialReview=proposed;
     if(result.status==='eligible'&&!peerReadiness({...candidate,features_json:JSON.stringify(features)},'competitor-first').ready)
@@ -147,6 +150,7 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
       p.id,c.id,input.strategy.angle,result.ad_text,banner,c.surface==='channels'?'awaiting_prompt':'approved').lastInsertRowid);
     if(c.surface==='channels')addJob(db,p.id,'image_prompt',{creativeId:id,language:p.language,market:p.market,
       angle:input.strategy.angle,visualBrief:input.strategy.visual_brief,
+      competitorInspiration:competitorInspiration(store,p.id),
       exactBannerText:banner,rules:'Write prompt in English; exact destination-language banner text in quotes; 16:9; no hardcoded overlay; visually verify spelling.'});
   } else if(job.kind==='image_prompt'||job.kind==='image_revision'){
     const input=JSON.parse(job.input_json),id=input.creativeId;
