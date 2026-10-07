@@ -6,11 +6,27 @@ import logging
 import sys
 from pathlib import Path
 
-from proxy_select import select_proxy
-
 LOG = logging.getLogger("notebook-podcast.auth")
 INTERVAL = 15 * 60
 RETRY_INTERVAL = 60
+
+
+async def select_proxy(root: Path) -> None:
+    # The selector's cross-process file lock must never block Telegram's event loop.
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, str(root / "proxy_select.py"), cwd=root,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        code = await asyncio.wait_for(process.wait(), timeout=240)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
+        raise
+    LOG.info("auth_proxy_selection_completed exit_code=%d", code)
+    if code:
+        raise ConnectionError("No authenticated proxy available")
 
 
 async def refresh_auth(root: Path, profile: str) -> bool:
@@ -44,7 +60,7 @@ async def auth_loop(root: Path, profile: str) -> None:
             if not success:
                 # A reachable proxy can still redirect a signed-in account to a
                 # regional landing page. Re-select using an authenticated RPC.
-                await select_proxy()
+                await select_proxy(root)
                 success = await refresh_auth(root, profile)
         except asyncio.CancelledError:
             raise

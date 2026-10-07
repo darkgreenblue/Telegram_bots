@@ -34,5 +34,5 @@ class AuthKeepaliveTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await auth_keepalive.auth_loop(Path("/tmp"), "profile")
         self.assertEqual(refresh.await_count, 2)
-        select.assert_awaited_once()
+        select.assert_awaited_once_with(Path("/tmp"))
         sleep.assert_awaited_once_with(900)
