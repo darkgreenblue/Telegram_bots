@@ -155,5 +155,45 @@
       "licenseFiles": [],
       "upstreamTestsRun": false
     }
-  ]
+  ],
+  "additionalPublicProbes20261007": {
+    "at": "2026-10-07T10:53:38Z",
+    "semagram": {
+      "primary": "https://semagram.io/",
+      "query": "tarot reading love relationships lang:en min_users:10000",
+      "method": "anonymous public browser UI",
+      "returned": 100,
+      "observedTarotNamedPeers": 4,
+      "newTarotNamedPeers": [
+        "@tarot_gram_bot"
+      ],
+      "directNewPeerAudience": null,
+      "caveats": [
+        "Many unrelated results",
+        "Russian profiles survive lang:en filter; no language-share inference",
+        "Provider indexed 13.2K MAU for new bot, but current t.me profile exposes no MAU; reserve only",
+        "Ordinary public HTML GET returned no result links; no automated provider accepted"
+      ],
+      "agentApi": {
+        "url": "https://semagram.io/agent-api",
+        "payment": "x402 per request; not approved or called"
+      }
+    },
+    "statiko": {
+      "url": "https://statiko.io/catalog/search?q=tarot",
+      "method": "anonymous public browser UI",
+      "returned": 0,
+      "mcp": "Pro/Business paid plans; not connected"
+    },
+    "telgrapp": {
+      "url": "https://www.telgrapp.com/apps/tarot-daily-readings",
+      "status": 402,
+      "bypassed": false
+    },
+    "telegramtop": {
+      "url": "https://www.telegramtop.com/",
+      "status": "fetch failed; unverified"
+    },
+    "financialOperations": 0
+  }
 }

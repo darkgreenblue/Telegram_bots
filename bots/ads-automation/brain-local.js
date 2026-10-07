@@ -4,10 +4,13 @@ import { tmpdir,hostname } from 'node:os';
 import { resolve,join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { USER_FILTER_KEYS,USER_DEVICES } from './targets.js';
+import { isProviderQuotaError } from './brain-errors.js';
 
 const owner=`${hostname()}-${randomUUID().slice(0,12)}`;
 const remote=process.env.ADS_SSH_TARGET;
 const remoteRoot=process.env.ADS_REMOTE_ROOT;
+const provider=process.env.ADS_BRAIN_PROVIDER||'codex';
+if(!['codex','claude'].includes(provider))throw new Error('unknown brain provider');
 if(!remote||!/^[\w.@-]+$/.test(remote)||!remoteRoot||!/^\/[\w./-]+$/.test(remoteRoot))throw new Error('ADS_SSH_TARGET and safe ADS_REMOTE_ROOT required');
 
 function run(bin,args,stdin,cwd=process.cwd(),timeout=600000){
@@ -18,7 +21,13 @@ function run(bin,args,stdin,cwd=process.cwd(),timeout=600000){
     child.stdout.on('data',x=>{stdout+=x;if(stdout.length>12_000_000)child.kill();});
     child.stderr.on('data',x=>{stderr+=x;if(stderr.length>2000)stderr=stderr.slice(-2000);});
     child.on('error',e=>{clearTimeout(timer);reject(e);});
-    child.on('close',code=>{clearTimeout(timer);if(code!==0)reject(new Error(`${bin} exited ${code}: ${stderr.slice(-500)}`));else resolveRun(stdout);});
+    child.on('close',code=>{
+      clearTimeout(timer);
+      if(code===0)return resolveRun(stdout);
+      const quota=['codex','claude'].includes(bin)&&isProviderQuotaError(stderr);
+      const error=new Error(`${quota?'Provider usage limit reached. ':''}${bin} exited ${code}: ${stderr.slice(-500)}`);
+      error.providerQuota=quota;reject(error);
+    });
     child.stdin.end(stdin);
   });
 }
@@ -50,11 +59,12 @@ async function execute(job){
     await writeFile(schema,JSON.stringify(job.schema));
     let image;
     if(job.imageBase64){image=join(folder,'banner.png');await writeFile(image,Buffer.from(job.imageBase64,'base64'));}
-    const provider=process.env.ADS_BRAIN_PROVIDER||'codex';
     if(provider==='codex'){
       const args=['exec','-s','read-only','--ephemeral','--output-schema',schema,'-o',output,'-'];
+      if(job.kind==='peer_review')args.splice(1,0,'--ignore-user-config','--skip-git-repo-check',
+        '-c','web_search="disabled"','-c','features.shell_tool=false','-c','features.apps=false');
       if(image)args.splice(args.length-1,0,'-i',image);
-      await run('codex',args,promptFor(job),resolve('.'));
+      await run('codex',args,promptFor(job),job.kind==='peer_review'?folder:resolve('.'));
       const result=JSON.parse(await readFile(output,'utf8'));
       if(job.kind==='research'){
         for(const candidate of result.candidates||[])
@@ -65,9 +75,10 @@ async function execute(job){
     if(provider==='claude'){
       const args=['-p','--output-format','json','--json-schema',JSON.stringify(job.schema),
         '--allowedTools','WebSearch,WebFetch,Read'];
+      if(job.kind==='peer_review')args.push('--tools','','--strict-mcp-config','--safe-mode');
       // Claude headless accepts stdin; image QA currently uses Codex image input only.
       if(image)throw new Error('image QA needs Codex provider');
-      const response=JSON.parse(await run('claude',args,promptFor(job),resolve('.')));
+      const response=JSON.parse(await run('claude',args,promptFor(job),job.kind==='peer_review'?folder:resolve('.')));
       return response.structured_output||JSON.parse(response.result);
     }
     throw new Error('unknown brain provider');
@@ -75,7 +86,7 @@ async function execute(job){
 }
 
 async function once(){
-  const job=await ssh('lease',{owner});
+  const job=await ssh('lease',{owner,provider});
   if(!job)return false;
   log('brain.job.leased',{jobId:job.id,kind:job.kind});
   let result;
@@ -88,8 +99,8 @@ async function once(){
     const folder=resolve('./data/brain-failures');await mkdir(folder,{recursive:true,mode:0o700});
     const artifact=join(folder,`job-${job.id}-${randomUUID()}.json`);
     await writeFile(artifact,JSON.stringify({jobId:job.id,kind:job.kind,error:redact(e.message),result},null,2),{mode:0o600});
-    await ssh('fail',{owner,id:job.id,error:redact(e.message)}).catch(()=>{});
-    log('brain.job.failed',{jobId:job.id,kind:job.kind,error:redact(e.message),artifact});
+    await ssh('fail',{owner,id:job.id,error:redact(e.message),provider,quota:e.providerQuota===true}).catch(()=>{});
+    log(e.providerQuota?'brain.quota.wait':'brain.job.failed',{jobId:job.id,kind:job.kind,error:redact(e.message),artifact});
     throw e;
   }
   return true;

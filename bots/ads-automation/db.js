@@ -159,6 +159,8 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
   if(!db.pragma('table_info(discovery_runs)').some(c=>c.name==='lease_token'))
     db.exec('ALTER TABLE discovery_runs ADD COLUMN lease_token TEXT');
   const experimentColumns=new Set(db.pragma('table_info(experiments)').map(c=>c.name));
+  if(!db.pragma('table_info(jobs)').some(c=>c.name==='not_before'))
+    db.exec('ALTER TABLE jobs ADD COLUMN not_before INTEGER NOT NULL DEFAULT 0');
   if(!db.pragma('table_info(projects)').some(c=>c.name==='initial_peer_policy'))
     db.exec("ALTER TABLE projects ADD COLUMN initial_peer_policy TEXT NOT NULL DEFAULT 'standard'");
   if(!experimentColumns.has('spend_authorized')){
@@ -217,10 +219,16 @@ export function addJob(db, projectId, kind, input) {
   return Number(db.prepare('INSERT INTO jobs(project_id,kind,input_json) VALUES (?,?,?)').run(projectId,kind,JSON.stringify(input)).lastInsertRowid);
 }
 
-export function leaseJob(db, owner, now = Math.floor(Date.now()/1000)) {
+export function leaseJob(db, owner, now = Math.floor(Date.now()/1000), provider='codex') {
   return db.transaction(() => {
-    const job = db.prepare(`SELECT * FROM jobs WHERE status='queued' OR (status='leased' AND lease_until<?)
-      ORDER BY id LIMIT 1`).get(now);
+    const cooldown=db.prepare('SELECT until_at FROM api_cooldowns WHERE account_key=?').get(`brain:${provider}`);
+    if(cooldown?.until_at>now)return null;
+    const job = db.prepare(`SELECT * FROM jobs WHERE not_before<=?
+      AND (status='queued' OR (status='leased' AND lease_until<?))
+      ORDER BY CASE WHEN kind='peer_review' AND (
+        (json_extract(input_json,'$.peer.kind')='bots' AND json_extract(input_json,'$.peer.audience.value')>=10000) OR
+        (json_extract(input_json,'$.peer.kind')='channels' AND json_extract(input_json,'$.peer.audience.value')>=5000)
+      ) THEN 1 WHEN kind!='peer_review' THEN 1 ELSE 0 END DESC,id LIMIT 1`).get(now,now);
     if (!job) return null;
     db.prepare(`UPDATE jobs SET status='leased',lease_owner=?,lease_until=?,attempts=attempts+1 WHERE id=?`).run(owner,now+900,job.id);
     return {...job, input:JSON.parse(job.input_json)};
