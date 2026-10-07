@@ -14,6 +14,7 @@ Updated: 2026-10-07 (Asia/Tehran). This file records verified progress and outst
 
 ## Support-account connection work (October 7)
 
+- PR #495 is open, stacked on #494, head 05a0675d45a29d99c614d2b16e19e44b52a8f9c1. Exact-head CI run 37537425160 succeeded, including the ads-automation safeguards. Normal merge/deployment remains pending the safe window and parent PRs. The existing 08:20/17:20 heartbeat now includes this follow-up and explicitly keeps API creation, native authentication and bot-admin scope behind the pending owner answers. The local verification checkpoint is in ignored data/verification/support-account-2026-10-07/local-verification.json.
 - Owner identified the existing Support Telegram account and explicitly prohibits sending anyone messages without permission. Chrome account 2 was verified against the supplied phone; its public username is @Efficient_Support. The phone is not stored in Git. The account is not yet a native server session.
 - Logged into the official my.telegram.org/apps panel. No API application exists for this account. Prepared Telegram Ads Discovery / tgadsdiscovery (Desktop) with a public-read-only description. Browser confirmation to create the new persistent API credential and store it privately is pending; the Create application button was not clicked. The ready form is marked as a browser handoff, and an ignored screenshot is saved in data/verification/support-account-2026-10-07/api-request.png.
 - Owner additionally suggested making this account admin of pipeline bots. Exact scope (control bot only or both Tarot bots too) is pending. Readonly server configuration shows it is not currently in the Ads or Tarot administrator list. No administrator configuration, BotFather ownership, existing admin, or notification recipient was changed.
@@ -166,3 +167,16 @@ Updated: 2026-10-07 (Asia/Tehran). This file records verified progress and outst
 - Three owner-provided banners and source hashes are preserved in ignored `data/verification/creative-reference-2026-10-06/`. Initial English creatives should follow this reference family: relationship question, photographic adult character/card, large readable headline and CTA; adapt visual style to evidenced peer context.
 - Owner reports some Persian success for ex-return/other-person-feelings angles and anime-channel character adaptation. No controlled numbers were supplied; English demographics, ROI and transfer remain hypotheses.
 - Started a paired ChatGPT built-in image / Gemini Pro comparison with the same English prompt and first reference. Preview only; no creative approval or Ads activation. Creative 8 and its earlier paid-test proposal stay held.
+
+## 2026-10-07 support handover and product preparation
+
+- PRs #493/#494/#495 merged; Deploy run 37568621610 executed the real Deploy to VPS step successfully (03:50:42–03:52:08 UTC). Fresh lease/cycle and merged ancestry still require final read-only verification.
+- Support identity confirmed by getChat on the owned control bot after its real Start; additional grants and primary recipient explicitly approved. Private config remains outside Git.
+- Owner chose Tarot Reading Bot, kept @TAROOT_RU_BOT, and approved changing only the listed-language line. Russian intro GIF removed through authorized owner BotFather operation; BotFather reports no description picture. Returned to Support afterward. Name/text deploy still pending.
+- Three bounded official API application creation attempts returned only ERROR, including a fresh form and valid non-Telegram application title. No API key/session created; native discovery remains disabled. Public discovery remains usable. No borrowed key/personal session substitution.
+- Intro reminder scheduled for 2026-10-08 12:00 Asia/Tehran; one-time delivery then pause.
+- Both Ads financial gates remain disabled; no funded/active pilot, no old Ads mutations. Product/profile work is a prerequisite to controlled cost validation.
+
+- Deployed stamp a9160d3 is a descendant of all three discovery/learning PRs; fresh lease and cycle 51 verified. Project remains calibration with approved pilot ceiling 3 TON, zero spend authorization and no API operations. Draft allocated_total sums to 20 TON in the planning store; this is not an actual provider-funded allocation.
+- Competitor-first policy applied to project 1; 20 old drafts discovery_held with evidence retained. Bounded tarot source run 1 completed: all five providers responded, 36 unique seeds, 22 verified public peers. Actual subscription-backed peer_review completions observed; relevance/market suitability remains independent of size. Public-peer evidence saved privately on VPS.
+- Current branch tests: 104 Ads, 2 scoped administrator tests and 60 language-picker claims pass; 118 repository checks pass. Unchanged Linux /proc kill-query test cannot pass its process-environment assertions on macOS; require green exact-head Ubuntu CI before merge.

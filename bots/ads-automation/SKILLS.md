@@ -47,3 +47,7 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 - Consume the latest persisted banner request/revision and its exact prompt. Select image mode and 16:9. Download the original, preserve provenance, and reply as a document to that request in `@AliAdsOpsControlBot`.
 - Wait for real server acceptance and subscription-backed vision QA. A sent or downloaded file alone is not completion; rejected images follow the existing correction queue. No paid image API, separate text overlay or Ads funding is authorized by image-generation permission.
 - Browser production requires the desktop/browser session; server polling and cost guards remain independent. Do not claim an unattended server Gemini integration from a successful browser run.
+
+## Scoped administrator handover
+
+Only a positively verified private-chat identity may be added through the private administrator config. Preserve owner access. Decisions record the actual administrator; banner reply lookup must use chat ID plus message ID, with legacy fallback restricted to the owner. Configuration grants do not enable Ads spending or native account authorization.

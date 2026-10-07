@@ -16,6 +16,7 @@
 // مقدارِ درست را ببینند. در ESM importهای ایستا قبل از بدنه اجرا می‌شوند، پس
 // صداکردنِ `dotenv.config()` در همین فایل **دیر** بود. شرح کامل در خودِ آن ماژول.
 import './env-boot.js';
+import {extraAdmins} from './extra-admins.js';
 import {
   L, Lfor, withLang, currentLang, hasLangCtx, LANGS, DEFAULT_LANG, MULTI_LANG, isLang, normLang, allLabels,
   liveL,
@@ -357,7 +358,7 @@ const TEST_PHASE = false;
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
 // 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
 //         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
-const PRODUCT_VERSION = '3.153.0';
+const PRODUCT_VERSION = '3.154.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -839,8 +840,10 @@ const VIDEO_DISPATCH_REPO = 'darkgreenblue/Telegram_bots';
 const VIDEO_BACKGROUNDS = ['mystic', 'nature', 'minimal'];
 
 // ادمین‌ها از env (کامای ADMIN_IDS که deploy از OWNER_TELEGRAM_ID می‌سازد) — مشترک با بقیه‌ی ربات‌ها
-const ADMIN_IDS = (process.env.ADMIN_IDS || '100257975')
-  .split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+const ADMIN_IDS = [...new Set([
+  ...(process.env.ADMIN_IDS || '100257975').split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite),
+  ...extraAdmins(process.env.ENV_FILE||'.env',{log:(event,detail)=>console.error(JSON.stringify({event,...detail}))}),
+])];
 const OWNER_ID  = ADMIN_IDS[0] || 100257975;
 const isAdmin = (uid) => ADMIN_IDS.includes(uid);
 
