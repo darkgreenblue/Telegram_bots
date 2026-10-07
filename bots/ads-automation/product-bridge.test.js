@@ -60,5 +60,15 @@ test('real dashboard bridge tracks a new and returning start and a delayed payme
     assert.equal(age[7].eligibleUsers,1);assert.equal(age[7].revenue,40);
     assert.equal(age[30].revenue,55);assert.equal(age[7].refunds,null);
     assert.equal(age[7].versions[0].productVersion,'fixture-v1');
+    db.exec('ALTER TABLE payments ADD COLUMN charge_id TEXT');
+    const refunded=db.prepare('SELECT id FROM payments WHERE user_id=900001 AND amount=40').get().id;
+    db.prepare("UPDATE payments SET status='reversed',charge_id='fixture-charge' WHERE id=?").run(refunded);
+    db.prepare("INSERT INTO events(user_id,event,props,created_at) VALUES(900001,'payment_refunded',?,?)")
+      .run(JSON.stringify({payment_id:refunded,amount:40,clawed:8000}),acquired+35*86400);
+    const adjusted=bridge({action:'stats_all',scope:'tarot-intl@en',cohortCodes:[campaign.code],at:acquired+40*86400})
+      .cohorts.instances[0].byCode[campaign.code];
+    assert.equal(adjusted[7].grossReceivedRevenue,40);assert.equal(adjusted[7].refunds,40);
+    assert.equal(adjusted[7].netReceivedRevenue,0);assert.equal(adjusted[30].netReceivedRevenue,15);
+    assert.equal(adjusted[30].lateRefundRevenue,40);
   }finally{db?.close();rmSync(directory,{recursive:true,force:true});}
 });

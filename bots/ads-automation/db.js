@@ -37,6 +37,16 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       status TEXT NOT NULL DEFAULT 'draft',
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+    CREATE TABLE IF NOT EXISTS competitor_observations (
+      id INTEGER PRIMARY KEY,candidate_id INTEGER NOT NULL REFERENCES candidates(id),
+      checked_at TEXT NOT NULL,digest TEXT NOT NULL UNIQUE,observation_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS competitor_observations_candidate ON competitor_observations(candidate_id,id);
+    CREATE TRIGGER IF NOT EXISTS competitor_observation_immutable_update
+      BEFORE UPDATE ON competitor_observations BEGIN SELECT RAISE(ABORT,'competitor observation is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS competitor_observation_immutable_delete
+      BEFORE DELETE ON competitor_observations BEGIN SELECT RAISE(ABORT,'competitor observation is immutable'); END;
     CREATE TABLE IF NOT EXISTS experiments (
       id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
       candidate_id INTEGER NOT NULL REFERENCES candidates(id),
@@ -203,7 +213,7 @@ export function addCandidate(db, candidate) {
       .find(c=>JSON.stringify(stable(JSON.parse(c.target_json)))===targetJson);
     if(existing){
       const oldFeatures=JSON.parse(existing.features_json),combined={...oldFeatures,...features};
-      for(const key of ['publicPeer','initialReview','publicPeerRetryAt'])
+      for(const key of ['publicPeer','initialReview','publicPeerRetryAt','botInterface'])
         if(key in oldFeatures)combined[key]=oldFeatures[key];
       const merged=[...new Map([...JSON.parse(existing.evidence_json),...evidence]
         .map(e=>[JSON.stringify(e),e])).values()];

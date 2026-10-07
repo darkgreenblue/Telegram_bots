@@ -7,6 +7,8 @@ import { projectCapacity,projectSpendCommitment } from './workflow.js';
 import { expandPublicPeers } from './discovery-graph.js';
 import { useCompetitorFirst } from './preparation.js';
 import { discoverFromSources,queueSourceDiscovery } from './discovery-sources.js';
+import { recordBotInterfaceEvidence } from './peer-evidence.js';
+import { archiveCompetitorObservation,competitorBenchmark } from './competitor-observations.js';
 
 const store=openStore(),db=store.db;
 const input=async()=>{let s='';for await(const c of process.stdin){s+=c;if(s.length>100000)throw new Error('input too large');}return JSON.parse(s||'{}');};
@@ -37,6 +39,9 @@ try{
     max:Math.min(Number(arg.max)||30,100)});
   else if(cmd==='research')result={jobId:queueResearch(store,Number(arg.projectId),arg.feedback||{})};
   else if(cmd==='candidate')result={candidateId:addCandidate(db,arg)};
+  else if(cmd==='peer-interface')result={jobId:recordBotInterfaceEvidence(store,Number(arg.candidateId),arg.evidence)};
+  else if(cmd==='competitor-observation')result=archiveCompetitorObservation(store,Number(arg.candidateId),arg.observation);
+  else if(cmd==='competitor-benchmark')result=competitorBenchmark(store,Number(arg.candidateId),{limit:arg.limit??10});
   else if(cmd==='strategy')result={jobId:queueStrategy(store,Number(arg.candidateId))};
   else if(cmd==='shortlist')result=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=?`).all(Number(arg.projectId)),Number(arg.limit)||20,
     {policy:row(db,'projects',Number(arg.projectId))?.initial_peer_policy});
