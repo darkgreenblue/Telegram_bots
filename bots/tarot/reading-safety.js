@@ -56,9 +56,24 @@ const SENSITIVE = {
     'quimio', 'overdose'],
 };
 
+/* ♋ «سرطان» هم بیماری است هم نامِ برجِ تیر. سؤالِ عادیِ طالع («برج سرطان»، «متولد سرطانم»،
+ * «ماه تولدم سرطانه»، «سرطانی‌ها») نباید فال را حساس و بی‌حکم کند. فقط همین بافت‌های صریحِ
+ * برج حذف می‌شوند؛ «سرطان داره» و «توده‌ی سرطانی» حساس می‌مانند. `norm` نیم‌فاصله را برداشته،
+ * پس «سرطانی‌ها» این‌جا «سرطانیها» است. */
+const FA_ZODIAC = [
+  /(?<= )(ماه تولدم|ماه تولدش|ماه تولد|متولدین|متولد|برجم|برجش|برج|ماه) سرطان[^ ]*/g,
+  /(?<= )()سرطانی ?ها[^ ]*/g,
+  /(?<= )()سرطانیا[^ ]*/g,
+  /* 🛏 «بستری برای حرکت/ادامه» یعنی «زمینه»، نه بیمارستان (قرمزِ کاذبِ واقعی روی یک حافظه، ۱۴۰۵/۰۷/۱۵). */
+  /(?<= )()بستری(?= (?:برای|مناسب|مساعد|فراهم) )/g,
+];
+const stripZodiac = (padded, lang) => (lang === 'fa'
+  ? FA_ZODIAC.reduce((s, re) => s.replace(re, (m, lead) => `${lead} `), padded)
+  : padded);
+
 /** واژه‌ی حساسِ پیداشده در متن، یا `''`. */
 export function sensitiveTermIn(text, lang = 'fa') {
-  const padded = ` ${norm(text)} `;
+  const padded = stripZodiac(` ${norm(text)} `, lang);
   if (padded.trim() === '') return '';
   for (const p of (SENSITIVE[lang] || SENSITIVE.fa)) {
     const n = norm(p);
@@ -128,7 +143,11 @@ const FA_STOP = new Set(['و', 'هم', 'رو', 'را', 'که', 'اون', 'او',
   'میتونم', 'نمیدونم', 'ازش', 'بهش', 'باهاش', 'براش', 'برای', 'واسه', 'هست', 'است', 'بود',
   'متولد', 'ماه', 'سال', 'دختر', 'پسر', 'خانم', 'آقا', 'مجرد', 'متاهل', 'اسمش', 'اسم', 'توی', 'تو',
   'در', 'رشته', 'رشتۀ', 'شناسنامه', 'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر',
-  'آبان', 'آذر', 'دی', 'بهمن', 'اسفند', 'با', 'از', 'به', 'دو', 'سه', 'هر', 'چیه', 'کنه', 'انتخاب']);
+  'آبان', 'آذر', 'دی', 'بهمن', 'اسفند', 'با', 'از', 'به', 'دو', 'سه', 'هر', 'چیه', 'کنه', 'انتخاب',
+  /* از دیتای واقعی (۱۴۰۵/۰۷/۱۵): «اسمم دروغ گفتم»، «اسمم قرعه‌کشی میافته»، «از من بزرگتره»،
+   * «هم اسم من داشته»، «خودم موفق هستم» اسم خوانده می‌شدند. */
+  'دروغ', 'موفق', 'داشته', 'قرعهکشی', 'قرعه', 'بزرگتره', 'بزرگتر', 'کوچیکتره', 'کوچکتره', 'عوض',
+  'مخاطب', 'مراجع', 'کاربر', 'اولین', 'جلسه', 'همچنان', 'درباره', 'دربارهی']);
 /* فعل اسم نیست («اسمم میاد»، «اسمم میپیچه»): X که با «می/نمی» شروع شود رد می‌شود، **مگر**
  * اسمِ رایجی که خودش با «می» شروع می‌شود (مینا، میلاد، …) یا بعدش «هست/هستم» آمده باشد؛
  * نسخه‌ی اول «اسمم مینا هست» را فعل خواند و جداسازی را از دست داد. */
@@ -138,16 +157,26 @@ const NAME_AFTER = new Set(['هست', 'هستم', 'هستش', 'است', 'ام'])
 const notName = (n, next = '') => !n || FA_STOP.has(n)
   || (/^(?:ن?می)/.test(n) && !MI_NAMES.has(n) && !NAME_AFTER.has(next));
 /* «خودم X» فقط وقتی اسم است که بعدش یکی از این‌ها بیاید («خودم زینب طرف مقابل…»). «و» و پایانِ
- * جمله عمداً نیستند: «دست خودم نیس و…» و «…از طرف خودم چیه؟» روی دیتای واقعی اسم خوانده می‌شدند. */
-const AFTER_SELF = new Set(['طرف', 'اون', 'او', 'ماه', 'متولد', 'اسم', 'هستم', 'متولدم', 'هستش']);
+ * جمله عمداً نیستند: «دست خودم نیس و…» و «…از طرف خودم چیه؟» روی دیتای واقعی اسم خوانده می‌شدند.
+ * «هستم» هم نیست: «خودم موفق هستم» صفت است نه اسم. */
+const AFTER_SELF = new Set(['طرف', 'اون', 'او', 'ماه', 'متولد', 'اسم', 'متولدم']);
+/* «از/به/با/مثلِ من X متولد…» درباره‌ی آدمِ دیگری است («دوسال از من بزرگتره متولد شهریور»). */
+const BEFORE_MAN = /(?:^|\s)(?:از|به|با|مثل|مث|برای|واسه|برا|پیش|کنار)\s+$/;
 const faNorm = (s) => String(s || '').replace(/[‌‏‎]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
 
 function faSelfNames(q) {
   const t = faNorm(q).replace(/[!؟?.,،؛:()"«»]/g, ' ').replace(/\s+/g, ' ');
   const out = [];
   const push = (n, next) => { if (!notName(n, next)) out.push(n); };
-  for (const m of t.matchAll(new RegExp(`(?:^|\\s)(?:اسمم|اسم من|اسم خودم|نام من)\\s+(?:هم\\s+)?(${faWord})(?:\\s+(\\S+))?`, 'g'))) push(m[1], m[2]);
-  for (const m of t.matchAll(new RegExp(`(?:^|\\s)من\\s+(${faWord})\\s+(?:متولد|متولدم|هستم\\s+متولد)`, 'g'))) push(m[1]);
+  for (const m of t.matchAll(new RegExp(`(?:^|\\s)(?:اسمم|اسم من|اسم خودم|نام من)\\s+(?:هم\\s+)?(${faWord})(?:\\s+(\\S+))?`, 'g'))) {
+    /* «هم‌اسمِ من» (یه دختر هم اسم من داشته) یعنی آدمِ دیگری با همان اسم، نه معرفیِ خود. */
+    if (/(?:^|\s)هم\s*$/.test(t.slice(0, m.index + (m[0].startsWith(' ') ? 1 : 0)))) continue;
+    push(m[1], m[2]);
+  }
+  for (const m of t.matchAll(new RegExp(`(?:^|\\s)من\\s+(${faWord})\\s+(?:متولد|متولدم|هستم\\s+متولد)`, 'g'))) {
+    if (BEFORE_MAN.test(t.slice(0, m.index + (m[0].startsWith(' ') ? 1 : 0)))) continue;
+    push(m[1]);
+  }
   for (const m of t.matchAll(new RegExp(`(?:^|\\s)خودم\\s+(${faWord})\\s+(\\S+)`, 'g'))) {
     if (AFTER_SELF.has(m[2])) push(m[1]);
   }
@@ -200,20 +229,83 @@ export function forOtherPerson(question, lang = 'fa') {
   return !!OTHER_FOR[lang]?.test(q);
 }
 
-/** آیا دو اسم یک نفرند؟ پسوند آزاد است («فرنیاست» = «فرنیا»)؛ اسمِ خالی یعنی «نمی‌دانیم». */
+/* 🔤 کلیدِ آوایی: یک اسم با چند نگارش یک نفر است. روی دیتای واقعی (۱۴۰۵/۰۷/۱۵) این‌ها جداسازیِ
+ * کاذب می‌ساختند: آتنا/اتنا، محیا/مهیا، حانیه/هانیه، فائقه/فاعقه، کوثر/کوثره، آیسل/آیزل،
+ * رکسانا/روکسانا، زینب/زیبنه، نرجس/نرگس. پس حروفِ هم‌آوا یکی، اعراب و نیم‌فاصله حذف، و «ه»ِ
+ * پایانی (کوثره = «کوثره»، یعنی «کوثر است») متقارن برداشته می‌شود. */
+const NAME_MAP = [[/[آأإ]/g, 'ا'], [/[ةۀ]/g, 'ه'], [/ح/g, 'ه'], [/[عئء]/g, 'ا'], [/ؤ/g, 'و'],
+  [/[صث]/g, 'س'], [/[ذضظ]/g, 'ز'], [/ط/g, 'ت'], [/غ/g, 'ق']];
+function nameKey(s) {
+  let x = faNorm(s).replace(HARAKAT, '').toLowerCase();
+  for (const [re, to] of NAME_MAP) x = x.replace(re, to);
+  if (x.length > 3 && x.endsWith('ه')) x = x.slice(0, -1);
+  return x;
+}
+/** فاصله‌ی ویرایشی با جابه‌جایی (Damerau، فقط تا ۱ لازم است). */
+function within1(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const m = a.length; const n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[m][n] <= 1;
+}
+/** آیا دو اسم یک نفرند؟ پسوند آزاد است («فرنیاست» = «فرنیا»)؛ اسمِ خالی یعنی «نمی‌دانیم».
+ * پیشوند فقط وقتی که اسمِ کوتاه‌تر دست‌کم ۳ حرف است، و غلطِ تایپیِ یک‌حرفی فقط برای اسمِ ≥۴ حرفی.
+ * جهتِ خطا عمداً این است: دو اسمِ نزدیک (مینا/مینو) یکی حساب می‌شوند، یعنی همان رفتارِ پیش از
+ * این نسخه (بدونِ جداسازی)، نه جداسازیِ کاذبی که حافظه‌ی آدمِ درست را از فالش می‌گیرد. */
 const sameName = (a, b) => {
-  const x = faNorm(a).toLowerCase(); const y = faNorm(b).toLowerCase();
+  const x = nameKey(a); const y = nameKey(b);
   if (!x || !y) return true;
-  return x.startsWith(y) || y.startsWith(x);
+  if (x === y) return true;
+  const [s, l] = x.length <= y.length ? [x, y] : [y, x];
+  if (s.length >= 3 && l.startsWith(s)) return true;
+  return s.length >= 4 && within1(x, y);
 };
-/** دلیلِ جداسازی (`'other'` یا `'name'`) یا `''`. */
-export function identityIsolate(question, displayName, lang = 'fa') {
+
+/* 🧠 اسمی که **حافظه** به صاحبِ حساب نسبت داده («نگین (یلدا) هنوز…»، «مراجع (ساغر) درباره…»،
+ * «مخاطب فاعقه است…»). قاعده‌ی ۲ِ مالک دقیقاً همین را می‌گوید: اسمِ سؤال را با اسمِ **مموری**
+ * بسنج. بدونِ این، کاربری که اسمِ نمایشی‌اش لقب است (زنبور) و همیشه خودش را «شارمین» معرفی
+ * می‌کند، در هر فال حافظه‌اش را از دست می‌داد. */
+const MEM_SUBJECT_LEAD = new Set(['مخاطب', 'مراجع', 'کاربر']);
+export function memorySubjectNames(memory, lang = 'fa') {
+  const src = String(memory || '').trim();
+  if (!src) return [];
+  if (lang !== 'fa') {
+    const m = src.match(/^\s*(\p{Lu}\p{Ll}+)/u);
+    return m ? [m[1]] : [];
+  }
+  const head = faNorm(src).slice(0, 80);
+  const out = [];
+  const add = (n) => { const w = String(n || '').replace(/[^آ-یءأإؤئةكيۀ]/g, ''); if (w.length >= 2 && !notName(w)) out.push(w); };
+  const toks = head.replace(/[!؟?.,،؛:"«»]/g, ' ').split(/\s+/).filter(Boolean);
+  const first = (toks[0] || '').replace(/[()]/g, '');
+  if (MEM_SUBJECT_LEAD.has(first)) {
+    /* «مخاطب فاعقه است» / «مراجع (ساغر)» */
+    const m = head.match(new RegExp(`^(?:مخاطب|مراجع|کاربر)\\s*\\(?\\s*(${faWord})(?:\\s*\\))?(?:\\s+(?:است|هست|ست)(?![${FA_LETTERS}]))?`));
+    if (m && (/\(/.test(m[0]) || /(?:است|هست|ست)$/.test(m[0]))) add(m[1]);
+  } else if (!first.includes('(')) add(first);
+  for (const m of head.slice(0, 40).matchAll(new RegExp(`\\(\\s*(${faWord})\\s*\\)`, 'g'))) add(m[1]);
+  for (const m of head.matchAll(new RegExp(`به نام\\s+(${faWord})`, 'g'))) add(m[1]);
+  return [...new Set(out)];
+}
+
+/** دلیلِ جداسازی (`'other'` یا `'name'`) یا `''`. `memory` همان حافظه‌ی خامِ حساب است. */
+export function identityIsolate(question, displayName, lang = 'fa', memory = '') {
   if (forOtherPerson(question, lang)) return 'other';
   const self = declaredSelfName(question, lang);
+  if (!self) return '';
   /* نامِ نمایشی گاهی چندتکه است («اسمم هایا»، «شناسنامه زهرا»): اگر اسمِ اعلام‌شده با **هر** تکه‌اش
-   * بخواند همان آدم است. */
-  const parts = String(displayName || '').trim().split(/\s+/).filter(Boolean);
-  if (self && parts.length && !parts.some((p) => sameName(self, p))) return 'name';
+   * یا با اسمی که حافظه به این آدم داده بخواند، همان آدم است. */
+  const known = [...String(displayName || '').trim().split(/\s+/).filter(Boolean),
+    ...memorySubjectNames(memory, lang)];
+  if (known.length && !known.some((p) => sameName(self, p))) return 'name';
   return '';
 }
 
@@ -240,7 +332,7 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
   safety = true, identity = true } = {}) {
   const pastHarm = safety && pastHarmOnly(question, lang);
   const crisis = safety ? (!!crisisIn(question) && !pastHarm) : false;
-  const isolate = identity ? identityIsolate(question, displayName, lang) : '';
+  const isolate = identity ? identityIsolate(question, displayName, lang, memory) : '';
   let mem = String(memory || '');
   let memoryCut = 0;
   if (safety) { const s = sanitizeMemory(mem, lang); mem = s.text; memoryCut = s.cut; }
@@ -251,7 +343,7 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
   if (safety) mem = memoryWithoutLabel(mem, lang);
   const sensitive = safety && (crisis || pastHarm || !!sensitiveTermIn(question, lang));
   let outPrev = Array.isArray(prev) ? prev : [];
-  if (identity) outPrev = outPrev.filter((p) => !identityIsolate(p?.question, displayName, lang));
+  if (identity) outPrev = outPrev.filter((p) => !identityIsolate(p?.question, displayName, lang, memory));
   if (safety) {
     /* فالِ قبلیِ حساس **کامل** حذف می‌شود، نه با برچسب: نوع و بازخوردش هم به مدل می‌گفت
      * «این‌جا چیزی بوده»، و همان برچسب را دوباره به فالِ بی‌ربط می‌کشاند. */
@@ -264,7 +356,11 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
 
 /* 🧠 حافظه‌ای که بعد از یک فال ذخیره می‌شود — تک‌منبعِ ربات و آزمایشگاه.
  * `null` یعنی «هیچ چیزی ننویس». سه قاعده، به این ترتیب:
- *  1. فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند.
+ *  1. فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند. **استثنا:** جداسازیِ «اسم»
+ *     (`'name'`) روی حسابی که هنوز هیچ حافظه‌ای ندارد چیزی را بازنویسی نمی‌کند، پس حافظه
+ *     ذخیره می‌شود و اسمِ اعلام‌شده اسمِ مموری می‌شود؛ وگرنه کاربری که اسمِ نمایشی‌اش لقب است
+ *     هرگز حافظه‌ای نمی‌گرفت و همه‌ی فال‌هایش برای همیشه جدا می‌ماندند. «برای دوستم» (`'other'`)
+ *     همیشه `null` است.
  *  2. 🚨 فالِ **بحران**: از متنِ حافظه‌ی همین فال هیچ چیز نمی‌ماند؛ حافظه‌ی قبلی (پاک‌شده)
  *     به‌علاوه‌ی برچسبِ کلی ذخیره می‌شود. دلیل (دورِ دومِ آزمایشگاه، ۱۴۰۵/۰۷/۱۴): مدل در
  *     بحران بازنویسی‌هایی می‌سازد که از هر فهرستِ واژه فرار می‌کنند («ارزشِ زندگی‌اش را به
@@ -273,7 +369,8 @@ export function readingSafetyPlan({ question = '', displayName = '', memory = ''
 export function memoryToStore({ newMemory = '', oldMemory = '', crisis = false, isolate = '',
   lang = 'fa', safety = true } = {}) {
   const fresh = String(newMemory || '').trim();
-  if (!fresh || isolate) return null;
+  if (!fresh) return null;
+  if (isolate && !(isolate === 'name' && !String(oldMemory || '').trim())) return null;
   if (!safety) return { text: fresh, cut: 0, crisis: false };
   if (crisis) {
     const prior = memoryWithoutLabel(sanitizeMemory(String(oldMemory || ''), lang).text, lang);
