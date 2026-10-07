@@ -1,12 +1,6 @@
 // Dedicated user session. No member scraping, private history or paid Stars search.
 // @mtcute/node docs: https://mtcute.dev/guide/ and https://ref.mtcute.dev/modules/_mtcute_node
-export async function openDiscoveryAccount({apiId,apiHash,storage='./data/discovery-account'}){
-  if(!Number.isInteger(apiId)||!apiHash)throw new Error('dedicated account API credentials missing');
-  const {TelegramClient}=await import('@mtcute/node');
-  const client=new TelegramClient({apiId,apiHash,storage});
-  await client.start(); // initial login is performed by the owner on this dedicated account
-  return client;
-}
+export { openReadOnlyDiscoveryAccount as openDiscoveryAccount } from './discovery-account.js';
 
 const boundedLimit=limit=>{
   if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('discovery limit must be 1..100');
