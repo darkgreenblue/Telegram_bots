@@ -48,6 +48,7 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 // ثبتِ خودکارِ مسیرِ ریزِ کاربر (view/act) — قیفِ ریزِ داشبورد از همین تغذیه می‌شود
 import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
+import { startRuntimeProof } from './runtime-proof.js';
 import { analyzeReceipt, decideReceipt, shadowFields, parsePaidTime } from './cardpay.js';
 import { receiptTimeSuspicion, timeFlagLine } from './receipt-time.js';
 import { shadowLine, withShadowLine, TERR_BTN, terrAdminText } from './receipt-tags.js';
@@ -13488,6 +13489,9 @@ function onLaunched() {
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
+  startRuntimeProof(`./data/runtime-${LOCALE}.json`, {
+    version: PRODUCT_VERSION, username: bot.botInfo?.username, languages: LANGS, logErr,
+  });
   // ⏳ تأییدهای زمان‌بندی‌شده‌ای که ری‌استارت از حافظه برده: همین حالا + هر ۳۰ ثانیه (پشتیبانِ setTimeout).
   runDueAutoDecisions().catch((e) => logErr('slow approve boot:', e.message));
   setInterval(() => { runDueAutoDecisions().catch((e) => logErr('slow approve sweep:', e.message)); }, 30_000);

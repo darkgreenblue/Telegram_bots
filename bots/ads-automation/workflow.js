@@ -7,6 +7,7 @@ import { dashboardBridge } from './bridge.js';
 import { paymentFeedback } from './product.js';
 import { captureExperimentContext,assertExperimentContextCurrent } from './learning-context.js';
 import { requirePeerReadiness } from './peer-evidence.js';
+import { readProductRuntime } from './product-runtime.js';
 import { targetFor,validateCreative } from './targets.js';
 import { assessTest,cadence,canGraduate,cpa,remainingTest,TEST_TON } from './policy.js';
 
@@ -199,7 +200,9 @@ export async function pauseManaged(store,api,ex,reason){
 
 async function recordRound(store,ex,ad,reason){
   const spent=money(ad.spent_budget-ex.start_spent),actions=ad.actions-ex.start_actions,views=ad.views-ex.start_views;
-  store.db.prepare(`INSERT OR IGNORE INTO rounds(experiment_id,number,spent,actions,views,reason) VALUES (?,?,?,?,?,?)`).run(ex.id,ex.test_round,spent,actions,views,reason);
+  const proof=readProductRuntime(row(store.db,'projects',ex.project_id));
+  store.db.prepare(`INSERT OR IGNORE INTO rounds(experiment_id,number,spent,actions,views,reason,product_runtime_json)
+    VALUES (?,?,?,?,?,?,?)`).run(ex.id,ex.test_round,spent,actions,views,reason,JSON.stringify(proof));
   return {spent,actions,views};
 }
 

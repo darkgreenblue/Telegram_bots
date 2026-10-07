@@ -1,5 +1,5 @@
 import { canGraduate, TEST_TON } from './policy.js';
-import { readExperimentContext,hasVerifiedContext,learningGroupKey } from './learning-context.js';
+import { readExperimentContext,hasVerifiedContext,verifiedRoundContext,learningGroupKey } from './learning-context.js';
 
 function upsert(store,projectId,scope,claim,status,evidence,hypothesis=''){
   const db=store.db,old=db.prepare('SELECT * FROM insights WHERE project_id=? AND scope=? AND claim=?').get(projectId,scope,claim);
@@ -31,17 +31,18 @@ function refresh(store,projectId){
     WHERE e.project_id=? AND e.ad_id IS NOT NULL`).all(projectId);
   const groups=new Map(),validated=new Set();
   for(const e of experiments){
-    const rounds=db.prepare('SELECT number,spent,actions,views,ended_at FROM rounds WHERE experiment_id=? ORDER BY number').all(e.id);
+    const rounds=db.prepare('SELECT number,spent,actions,views,ended_at,product_runtime_json FROM rounds WHERE experiment_id=? ORDER BY number').all(e.id);
     if(!rounds.length)continue;
     const context=readExperimentContext(db,e.id);
     const value=context?.candidate??e.value,angle=context?.angle??'نامعلوم',hypothesis=context?.hypothesis??'';
-    const evidence={context,contextStatus:hasVerifiedContext(context)?'verified':context?'product_version_unknown':'legacy_unknown',
+    const runtimeVerified=verifiedRoundContext(context,rounds);
+    const evidence={context,contextStatus:runtimeVerified?'verified':hasVerifiedContext(context)?'runtime_changed_or_unknown':context?'product_version_unknown':'legacy_unknown',
       market:context?.market??null,language:context?.language??null,surface:context?.surface??e.surface,candidate:value,
       experimentId:e.id,creativeId:e.creative_id,angle,rounds,
       qualification:{targetCpa:context?.targetCpa??null,testTon:TEST_TON,minimumActions:5}};
     const claim=`${value}: نتیجهٔ مشاهده‌شده برای زاویهٔ ${angle} (تست #${e.id})`;
     upsert(store,projectId,'candidate',claim,'observed',evidence,hypothesis);
-    if(hasVerifiedContext(context)&&canGraduate(rounds,context.targetCpa)){
+    if(runtimeVerified&&canGraduate(rounds,context.targetCpa)){
       validated.add(upsert(store,projectId,'channel',`${value}: دو نوبت تست زاویهٔ ${angle} زیر CPA هدف بود (تست #${e.id})`,
         'validated',evidence,hypothesis));
       const key=learningGroupKey(context),arr=groups.get(key)||[];arr.push(evidence);groups.set(key,arr);
