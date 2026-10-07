@@ -108,6 +108,12 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, text TEXT NOT NULL,
       message_id INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+    CREATE TABLE IF NOT EXISTS admin_deliveries (
+      kind TEXT NOT NULL CHECK(kind='banner'),entity_id INTEGER NOT NULL REFERENCES banner_requests(id),
+      chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY(kind,entity_id,chat_id),UNIQUE(chat_id,message_id)
+    );
     CREATE TABLE IF NOT EXISTS operations (
       id INTEGER PRIMARY KEY, op_key TEXT NOT NULL UNIQUE, method TEXT NOT NULL,
       request_json TEXT NOT NULL, response_json TEXT,
@@ -146,6 +152,7 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       ELSE MAX(last_spent,MIN(allocated_total,test_round*test_limit)) END`);
   }
   const decisionColumns=new Set(db.pragma('table_info(decisions)').map(c=>c.name));
+  if(!decisionColumns.has('chat_id'))db.exec('ALTER TABLE decisions ADD COLUMN chat_id INTEGER');
   if(!decisionColumns.has('spend_reservation_applied'))
     db.exec('ALTER TABLE decisions ADD COLUMN spend_reservation_applied INTEGER NOT NULL DEFAULT 0');
   const audit = (actor, action, subject, details = {}) => db.prepare(

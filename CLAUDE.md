@@ -966,3 +966,7 @@ tarot چنین است. اگر روزی به یکی از سه تای دیگر آ�
 
 ### پیکربندی شیت اتوماسیون تبلیغات (۱۴۰۵/۰۷/۱۳)
 مسیر `ADS_GOOGLE_CREDENTIALS` فقط وقتی فایل نادیده‌گرفته‌شدهٔ `bots/ads-automation/data/google-service-account.json` روی سرور موجود است در env استقرار نوشته می‌شود. کلید از گیت یا شیت خوانده نمی‌شود؛ دسترسی سرویس‌اکانت فقط به شیت تبلیغات است و گیت‌های خرج همچنان صفر می‌مانند.
+
+### Scoped support administrators (2026-10-07)
+
+The Ads controller and only the Persian/unified Tarot profiles may load additional administrators from their respective private `data/admin-access.json` files. Existing owners remain first and retain ownership. The Tarot CI matrix explicitly runs `extra-admins.test.mjs`; no shared env, other bot grants, or financial gates change. Admin replies are scoped by chat and message ID.
