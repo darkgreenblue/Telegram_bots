@@ -1,3 +1,15 @@
+## Latest operational checkpoint — 2026-10-07 04:31 UTC
+
+- PR #497 merged as 0cd26951e6d51acb287ea9af73799a809fb6a062 after exact-head CI 37571298397 passed all jobs, including scoped-admin and Linux sealed-query checks. Deployed Tarot version verified as 3.154.0; no reservation of a future version.
+- Deploy run 37571595010 actually executed Deploy to VPS successfully at 04:28:17–04:29:53 UTC inside the normal safe window. Server HEAD and independent deploy stamp both match the merge, which contains #493/#494/#495.
+- Ads PM2 online PID 3927552/restarts 10, fresh lease, cycle 2 completed, additive admin schema present, zero recent worker failure audits. Tarot profiles online with one expected selective restart each; voice2text/dashboard/daily-brief/health-watch PID/counters unchanged. Notebook processes retain the independently deployed #496 counters.
+- Private Support administrator/primary-recipient configuration installed (mode 600). Real Support /status returned calibration, 20 held/planned tests, 0 winners, actual allocated 0.00/20 TON and spend authorization 0.00/3 TON. No local Ads poller found; one local analysis worker is active. Existing owner retained; Tarot extra grants scoped to Persian/unified only.
+- Bot API confirms display name Tarot Reading Bot, retained TAROOT_RU_BOT username, unchanged biography and intro text except the generic multilingual line. BotFather confirmed no description picture after authorized GIF removal; owner account used only for that operation, then returned to Support. No production start/user/payment was fabricated.
+- Five-route public discovery completed with 36 unique seeds and 22 verified public peers, additional actual peer reviews completing, and real Sheet sync succeeded. Measured size alone never admits uncertain English-market inventory. Twenty previous unfunded drafts remain held with evidence preserved.
+- Both financial gates remain 0, zero managed API operations and zero spending authorization. Native Telegram account connection blocked by the official application form's generic ERROR, no API credentials/session created. Real cost gate and paid-pilot evaluation remain pending.
+- Deployment verification heartbeat paused after these checks. Separate one-time intro reminder stays set for October 8 at 12:00 Tehran.
+- Private verification evidence: data/verification/support-account-2026-10-07 (VPS discovery-live.json/deployed.json; local screenshots). STATE.md records operations; SKILLS.md records role/access boundaries. Neither contains credentials.
+
 # Automation checkpoint
 
 Updated: 2026-10-07 (Asia/Tehran). This file records verified progress and outstanding work; credentials must never appear here.
