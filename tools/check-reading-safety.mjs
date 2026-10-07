@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// چکِ ایمنیِ فال (bots/tarot/reading-safety.js، v3.154.0).
+// چکِ ایمنیِ فال (bots/tarot/reading-safety.js، v3.155.0).
 //
 // چرا: ممیزیِ یک کاربرِ واقعی (۱۴۰۵/۰۷/۱۴) سه شکاف نشان داد: فالِ موضوعِ حساس (خودکشی، بستری)
 // بدونِ هیچ احتیاطی ساخته می‌شد، حافظه سابقه‌ی پزشکی را نگه می‌داشت و به فال‌های بعدی می‌برد، و
@@ -335,7 +335,7 @@ ok('کانتکستِ فال memory و prev را از برنامه می‌گیر�
 ok('گفتگو هم از همان برنامه می‌خواند', /chatSafety = safetyPlanFor\(/.test(src) && /memory: chatSafety\.memory/.test(src));
 ok('buildReadingCtx پارامترِ memory را می‌پذیرد', /memory !== undefined \? String\(memory \|\| ''\) : \(user\.memory_json \|\| ''\)/.test(core));
 ok('رویدادِ افزایشیِ reading_safety بدونِ متن', /track\(db, uid, 'reading_safety', \{[\s\S]{0,200}memory_cut/.test(src) && !/'reading_safety', \{[^}]*question/.test(src));
-ok('PRODUCT_VERSION بامپ شد', /PRODUCT_VERSION = '3\.154\.0'/.test(src));
+ok('PRODUCT_VERSION بامپ شد', /PRODUCT_VERSION = '3\.155\.0'/.test(src));
 
 console.log(`\n${fail ? '❌' : '✅'} reading-safety: ${pass} پاس، ${fail} خطا`);
 if (fail) process.exit(1);

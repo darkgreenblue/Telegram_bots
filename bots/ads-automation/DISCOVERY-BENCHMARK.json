@@ -1,0 +1,159 @@
+{
+  "at": "2026-10-06T16:01:25.586Z",
+  "query": "tarot",
+  "language": "en",
+  "validationBudget": 30,
+  "routes": [
+    {
+      "provider": "lyzem",
+      "url": "https://lyzem.com/search?q=tarot&per-page=20",
+      "status": "ok",
+      "seedCount": 5
+    },
+    {
+      "provider": "telemetr-channels",
+      "url": "https://tgadsspy.com/api/v1/channels?q=tarot&limit=20&lang=en",
+      "status": "ok",
+      "seedCount": 20
+    },
+    {
+      "provider": "telemetr-ads",
+      "url": "https://tgadsspy.com/api/v1/ads?q=tarot&limit=20&lang=en&dest=telegram",
+      "status": "ok",
+      "seedCount": 6
+    },
+    {
+      "provider": "grambots",
+      "url": "https://www.grambots.com/?q=tarot&sort=mau",
+      "status": "ok",
+      "seedCount": 3
+    },
+    {
+      "provider": "telegramic",
+      "url": "https://telegramic.org/bots/?q=tarot",
+      "status": "ok",
+      "seedCount": 2
+    }
+  ],
+  "uniqueSeeds": 36,
+  "verifiedPublicPeers": 22,
+  "unknownAudience": 8,
+  "aboveSizeFloor": 9,
+  "activeChannelsAboveFloor": 4,
+  "financialOperations": 0,
+  "reviewJobs": 22,
+  "marketSuitability": "pending; size alone is not readiness",
+  "openSource": [
+    {
+      "name": "TeleAd",
+      "sha": "a543ef61268338227ab8c33395c7c2df7c760f98",
+      "url": "https://github.com/Elimeshi1/TeleAd.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "Telegram-Search-Engine",
+      "sha": "24c818a3ab71ec2379b5cc0a9a1348428d05e012",
+      "url": "https://github.com/Brooksolomon/Telegram-Search-Engine.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "TelegramBots",
+      "sha": "8d7abc8dd73635ff1ed80f854264151ec9f2950b",
+      "url": "https://github.com/taro-tsuchiya/TelegramBots.git",
+      "licenseFiles": [],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "TelegramScrap",
+      "sha": "47f49977506c98ed798d8c17b67bb39df6efed50",
+      "url": "https://github.com/ergoncugler/web-scraping-telegram.git",
+      "licenseFiles": [],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "Telepathy-Community",
+      "sha": "2919ce83fd5c762481046894385f029b5d2bfc94",
+      "url": "https://github.com/prose-intelligence-ltd/Telepathy-Community.git",
+      "licenseFiles": [
+        "LICENSE.txt"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "awesome-telegram",
+      "sha": "f6f9d47726acce82974d3cab29030a7b4040563a",
+      "url": "https://github.com/TGrpg/awesome-telegram.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "telegram_similar_channels_finder",
+      "sha": "16e9f9f9c6bcf9005023b58bb01a25e87dee061c",
+      "url": "https://github.com/MargotP/telegram_similar_channels_finder.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tg-radar",
+      "sha": "a927dd3c3452e738cb59ff743032ec248a8f7813",
+      "url": "https://github.com/bigidulka/tg-radar.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tgbotmau",
+      "sha": "5f086049115a667f38178655c95ebf859e5498a2",
+      "url": "https://github.com/KivApple/tgbotmau.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tgbox",
+      "sha": "b35d27310d5d077adf009695e422c2f5d64cc83e",
+      "url": "https://github.com/TGrpg/tgbox.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tgden-api",
+      "sha": "23d1e5ac6dd1339d90b0552ec68d084a3ab696f1",
+      "url": "https://github.com/JustJuice55/tgden-api.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tgdr",
+      "sha": "57bb3c0777d815d2c79f10a154479a645ea36eb2",
+      "url": "https://github.com/thedevs-network/tgdr.git",
+      "licenseFiles": [
+        "LICENSE"
+      ],
+      "upstreamTestsRun": false
+    },
+    {
+      "name": "tgindex",
+      "sha": "ded6de562f73d5a509a092cd9f308409713d6808",
+      "url": "https://github.com/usedcplt/tgindex.git",
+      "licenseFiles": [],
+      "upstreamTestsRun": false
+    }
+  ]
+}

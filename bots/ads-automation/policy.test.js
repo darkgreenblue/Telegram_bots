@@ -16,9 +16,23 @@ test('slow campaign rule uses 48 hours from first view and independent 0.03 CPA'
   assert.equal(assessTest({...base,spent:0.02,actions:0}).kind,'reclaim');
 });
 test('winning requires repeated action-bearing tests',()=>{
-  assert.equal(canGraduate([{spent:0.05,actions:5}],0.02),false);
-  assert.equal(canGraduate([{spent:0.05,actions:3},{spent:0.05,actions:2}],0.03),true);
-  assert.equal(canGraduate([{spent:0.05,actions:3},{spent:0.05,actions:0}],0.03),false);
+  const good={spent:0.05,actions:3,views:300};
+  assert.equal(canGraduate([good],0.02),false);
+  assert.equal(canGraduate([good,{...good,actions:2}],0.03),true);
+  assert.equal(canGraduate([good,{...good,actions:0}],0.03),false);
+});
+test('cheap partial tests and overspend do not qualify a winner',()=>{
+  const good={spent:0.05,actions:3,views:300};
+  assert.equal(canGraduate([{...good,spent:0.001},{...good,spent:0.001}],0.03),false);
+  assert.equal(canGraduate([good,{...good,spent:0.049}],0.03),false);
+  assert.equal(canGraduate([good,{...good,spent:0.051}],0.03),false);
+  assert.equal(canGraduate([good,{...good,spent:0.05-0.0000001}],0.03),true);
+});
+test('invalid counts and non-finite CPA cannot validate a winner',()=>{
+  const good={spent:0.05,actions:3,views:300};
+  for(const bad of [{actions:Infinity},{actions:2.5},{views:0},{views:NaN},{spent:NaN}])
+    assert.equal(canGraduate([good,{...good,...bad}],0.03),false);
+  assert.equal(canGraduate([good,good],Infinity),false);
 });
 test('provider-side lease cannot cross verified budget reset',()=>{
   const t=86400+12*3600;

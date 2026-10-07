@@ -51,7 +51,7 @@ const { checkReading, modelText, ngrams, closingAnchor } = await import('./readi
 // 🎯 فهرستِ نوشته‌شده‌ی معیارهای کیفیت (از STYLE.md). ارزیابی کارِ همان سشنی است که
 // اسناد را خوانده؛ این فقط تضمین می‌کند ارزیابی روی یک فهرستِ ثابت بنشیند نه حافظه.
 const { RUBRIC } = await import('./reading-lab/rubric.mjs');
-/* 🛟 همان طرحِ ایمنیِ ربات (بخشِ v3.154.0 در CLAUDE.mdِ tarot). بازوی `@nosafety` خاموشش
+/* 🛟 همان طرحِ ایمنیِ ربات (بخشِ v3.155.0 در CLAUDE.mdِ tarot). بازوی `@nosafety` خاموشش
  * می‌کند تا مقایسه‌ی جفت‌شده «با گارد» و «بدونِ گارد» روی عینِ همان کارت و سؤال باشد. */
 const { readingSafetyPlan, memoryToStore, SENSITIVE_LABEL } = await import('../bots/tarot/reading-safety.js');
 const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;

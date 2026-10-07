@@ -782,7 +782,7 @@ export const botHour = () => parseInt(new Intl.DateTimeFormat('en-US', {
 // تا این تابع خالص بماند و آزمایشگاه بتواند بدونِ دیتابیس همان ورودی را بسازد.
 export function buildReadingCtx({ user, spread, question, cards, focusKey, L, prev = [], kbOn = false, name = '', hideName = false, memory }) {
   return {
-    // 🛟 `memory` (v3.154.0) نسخه‌ی پاک‌شده از `reading-safety.js` است؛ ندادنش یعنی رفتارِ قبلی.
+    // 🛟 `memory` (v3.155.0) نسخه‌ی پاک‌شده از `reading-safety.js` است؛ ندادنش یعنی رفتارِ قبلی.
     memory: memory !== undefined ? String(memory || '') : (user.memory_json || ''),
     name, // فقط نام فارسیِ خودِ کاربر؛ نام تلگرام هرگز به مدل نمی‌رود
     hideName, // UX v2: نام اصلاً به مدل نمی‌رود و کد خودش یک بار می‌چسباند

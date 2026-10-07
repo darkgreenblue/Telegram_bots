@@ -11,6 +11,10 @@ import { queueResearch } from './brain.js';
 import { prepareCandidates } from './preparation.js';
 import { syncProductStats,paymentFeedback,paymentFingerprint } from './product.js';
 import { startRuntime } from './runtime.js';
+import { enrichPublicPeers } from './peer-evidence.js';
+import { runSourceDiscovery,discoverFromSources } from './discovery-sources.js';
+import { nativeAccountProvider,searchAllDiscoverySources } from './native-source.js';
+import { adminAccess } from './admin-access.js';
 
 if(!process.env.ADS_ADMIN_BOT_TOKEN)throw new Error('ADS_ADMIN_BOT_TOKEN خالی است');
 if(!Number.isSafeInteger(Number(process.env.ADS_ADMIN_ID)))throw new Error('ADS_ADMIN_ID نامعتبر است');
@@ -23,7 +27,8 @@ const apiToken=process.env.ADS_API_TOKEN||await readFile(process.env.ADS_API_TOK
     throw new Error('Ads API credential file unreadable');
   });
 const api=new AdsApi({token:apiToken,store,live:process.env.ADS_LIVE_ENABLED==='1'});
-const bot=createAdminBot(store,{token:process.env.ADS_ADMIN_BOT_TOKEN,ownerId,api});
+const access=adminAccess(ownerId,{log:(event,detail)=>store.audit('admin-bot',event,'configuration',detail)});
+const bot=createAdminBot(store,{token:process.env.ADS_ADMIN_BOT_TOKEN,ownerId,adminIds:access.adminIds,api});
 const sheets=new GoogleSheetsMirror({spreadsheetId:process.env.ADS_SHEETS_ID,
   credentialsPath:process.env.ADS_GOOGLE_CREDENTIALS});
 
@@ -58,7 +63,18 @@ function autoDecide(){
   }
 }
 
-let cycleNo=0,busy=false;
+const nativeProvider=nativeAccountProvider(store);
+let cycleNo=0,busy=false,discoveryTask=null;
+function startDiscovery(){
+  if(discoveryTask)return;
+  discoveryTask=(async()=>{
+    if(!await runSourceDiscovery(store,{discover:(store,arg)=>discoverFromSources(store,{...arg,
+      search:query=>searchAllDiscoverySources(store,{projectId:arg.projectId,query,provider:nativeProvider})})}))
+      await enrichPublicPeers(store,{limit:1});
+  })().catch(error=>{
+    store.audit('discovery','cycle.failed','background',{message:String(error.message).slice(0,180)});
+  }).finally(()=>{discoveryTask=null;});
+}
 async function cycle(){
   if(busy)return;busy=true;
   try{
@@ -103,13 +119,16 @@ async function cycle(){
         }
       }
     }
-    await sendAdminQueue(store,bot,ownerId);
+    await sendAdminQueue(store,bot,access.notificationId,{legacyOwnerId:ownerId});
     store.audit('worker','cycle.completed',owner,{cycleNo});
+    startDiscovery(); // Public fetch latency must not block protective Ads polling.
   }catch(e){store.audit('worker','error','cycle',{message:e.message});}
   finally{busy=false;}
 }
 
-const runtime=startRuntime({bot,cycle,close:()=>store.close(),log:(event,detail)=>{
+const runtime=startRuntime({bot,cycle,close:async()=>{
+  try{await discoveryTask;await nativeProvider.close();}finally{store.close();}
+},log:(event,detail)=>{
   store.audit('worker',event,owner,detail);
   console.log(JSON.stringify({at:new Date().toISOString(),event,...detail}));
 }});

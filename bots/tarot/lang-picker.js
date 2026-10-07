@@ -90,7 +90,7 @@ export const langUi = (lang) => LANG_UI[lang] || LANG_UI.en;
  * می‌شود؛ ربات‌های تک‌زبانه (فارسی، پرتغالی) هرگز این را لمس نمی‌کنند. سقف‌های Bot API:
  * نام ≤۶۴، توضیحِ کوتاه (بیو) ≤۱۲۰، توضیح ≤۵۱۲ نویسه. چکِ CI هر سه را می‌سنجد. */
 export const UNIFIED_PROFILE = Object.freeze({
-  name: 'Tarot Reading 🔮 Card of the Day',
+  name: 'Tarot Reading Bot',
   short: 'Ask any question and get a real tarot reading. Free card of the day, every day. 🔮',
   description:
     '🔮 A real tarot reading, right here in Telegram.\n\n'
@@ -98,6 +98,6 @@ export const UNIFIED_PROFILE = Object.freeze({
     + 'and get a clear answer with the signs behind it.\n\n'
     + '🎴 Free card of the day, every day\n'
     + '🎲 A daily lucky card to win diamonds\n'
-    + '🌍 English · Español · Русский · Português\n\n'
+    + '🌍 Multilingual readings. Choose your language.\n\n'
     + 'Tap Start to begin.',
 });

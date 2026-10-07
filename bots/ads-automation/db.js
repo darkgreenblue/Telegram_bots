@@ -108,6 +108,12 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, text TEXT NOT NULL,
       message_id INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+    CREATE TABLE IF NOT EXISTS admin_deliveries (
+      kind TEXT NOT NULL CHECK(kind='banner'),entity_id INTEGER NOT NULL REFERENCES banner_requests(id),
+      chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY(kind,entity_id,chat_id),UNIQUE(chat_id,message_id)
+    );
     CREATE TABLE IF NOT EXISTS operations (
       id INTEGER PRIMARY KEY, op_key TEXT NOT NULL UNIQUE, method TEXT NOT NULL,
       request_json TEXT NOT NULL, response_json TEXT,
@@ -125,8 +131,19 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
     CREATE TABLE IF NOT EXISTS api_cooldowns (
       account_key TEXT PRIMARY KEY, until_at INTEGER NOT NULL, reason TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS discovery_runs (
+      id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id),query TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',attempts INTEGER NOT NULL DEFAULT 0,
+      lease_until INTEGER,lease_token TEXT,next_at INTEGER NOT NULL DEFAULT 0,response_json TEXT,error TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),completed_at INTEGER,
+      UNIQUE(project_id,query)
+    );
   `);
+  if(!db.pragma('table_info(discovery_runs)').some(c=>c.name==='lease_token'))
+    db.exec('ALTER TABLE discovery_runs ADD COLUMN lease_token TEXT');
   const experimentColumns=new Set(db.pragma('table_info(experiments)').map(c=>c.name));
+  if(!db.pragma('table_info(projects)').some(c=>c.name==='initial_peer_policy'))
+    db.exec("ALTER TABLE projects ADD COLUMN initial_peer_policy TEXT NOT NULL DEFAULT 'standard'");
   if(!experimentColumns.has('spend_authorized')){
     db.exec('ALTER TABLE experiments ADD COLUMN spend_authorized REAL NOT NULL DEFAULT 0');
     db.exec(`UPDATE experiments SET spend_authorized=CASE
@@ -135,6 +152,7 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       ELSE MAX(last_spent,MIN(allocated_total,test_round*test_limit)) END`);
   }
   const decisionColumns=new Set(db.pragma('table_info(decisions)').map(c=>c.name));
+  if(!decisionColumns.has('chat_id'))db.exec('ALTER TABLE decisions ADD COLUMN chat_id INTEGER');
   if(!decisionColumns.has('spend_reservation_applied'))
     db.exec('ALTER TABLE decisions ADD COLUMN spend_reservation_applied INTEGER NOT NULL DEFAULT 0');
   const audit = (actor, action, subject, details = {}) => db.prepare(
@@ -151,13 +169,31 @@ export function row(db, table, id) {
 export function addCandidate(db, candidate) {
   const {projectId,surface,value,target={},source,evidence=[],hypothesis,features={},score=0} = candidate;
   if (!['channels','bots','search','users'].includes(surface) || !value || !source || !hypothesis) throw new Error('invalid candidate');
-  const targetJson = JSON.stringify(target);
-  const result = db.prepare(`INSERT INTO candidates(project_id,surface,value,target_json,source,evidence_json,hypothesis,features_json,score)
-    VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,surface,value,target_json) DO UPDATE SET
-    source=excluded.source,evidence_json=excluded.evidence_json,hypothesis=excluded.hypothesis,
-    features_json=excluded.features_json,score=excluded.score`).run(
-      projectId,surface,value,targetJson,source,JSON.stringify(evidence),hypothesis,JSON.stringify(features),score);
-  return result.lastInsertRowid || db.prepare('SELECT id FROM candidates WHERE project_id=? AND surface=? AND value=? AND target_json=?').get(projectId,surface,value,targetJson).id;
+  const peer=['channels','bots'].includes(surface);
+  if(peer&&!/^@[A-Za-z0-9_]{5,32}$/.test(value))throw new Error('public Telegram username required');
+  const stable=x=>Array.isArray(x)?x.map(stable):x&&typeof x==='object'?
+    Object.fromEntries(Object.keys(x).sort().map(k=>[k,stable(x[k])])):x;
+  const targetJson=JSON.stringify(stable(target)),canonical=peer?value.toLowerCase():value;
+  return db.transaction(()=>{
+    // Existing IDs may have creatives/tests attached. Preserve them and their
+    // measurements when another route rediscovers the same public username.
+    const existing=db.prepare(`SELECT * FROM candidates WHERE project_id=? AND surface=?
+      AND value ${peer?'COLLATE NOCASE':''}=? ORDER BY id`).all(projectId,surface,canonical)
+      .find(c=>JSON.stringify(stable(JSON.parse(c.target_json)))===targetJson);
+    if(existing){
+      const oldFeatures=JSON.parse(existing.features_json),combined={...oldFeatures,...features};
+      for(const key of ['publicPeer','initialReview','publicPeerRetryAt'])
+        if(key in oldFeatures)combined[key]=oldFeatures[key];
+      const merged=[...new Map([...JSON.parse(existing.evidence_json),...evidence]
+        .map(e=>[JSON.stringify(e),e])).values()];
+      db.prepare(`UPDATE candidates SET source=?,evidence_json=?,hypothesis=?,features_json=?,score=? WHERE id=?`)
+        .run(source,JSON.stringify(merged),hypothesis,JSON.stringify(combined),score,existing.id);
+      return existing.id;
+    }
+    return Number(db.prepare(`INSERT INTO candidates(project_id,surface,value,target_json,source,evidence_json,hypothesis,features_json,score)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(projectId,surface,canonical,targetJson,source,
+        JSON.stringify(evidence),hypothesis,JSON.stringify(features),score).lastInsertRowid);
+  })();
 }
 
 export function addJob(db, projectId, kind, input) {

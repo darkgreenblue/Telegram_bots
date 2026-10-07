@@ -96,7 +96,7 @@ if (archiveSql && sinceSql && plainSql) {
   // دادیم («انگار اولین فالته») دروغ می‌شد. حالا خودِ سیمِ اتصال سنجیده می‌شود.
   const ctxFn = bodyOf('function readingCtxFor(user, spread, question, cards, focusKey, realQuestion = question) {', '\n}');
   ok(!!ctxFn, 'سازنده‌ی کانتکستِ خوانش پیدا شد');
-  // v3.154.0: فال‌های قبلی اول از برنامه‌ی ایمنی رد می‌شوند (`prev: plan.prev`)، ولی منبعشان همان
+  // v3.155.0: فال‌های قبلی اول از برنامه‌ی ایمنی رد می‌شوند (`prev: plan.prev`)، ولی منبعشان همان
   // statementِ خطِ آب‌دار است و برنامه فقط فیلتر/تقلیل می‌دهد، هرگز اضافه نمی‌کند.
   ok(ctxFn ? (/const prev = stmts\.lastDeliveredSince\.all\(/.test(ctxFn) && /prev: plan\.prev/.test(ctxFn)
     && /safetyPlanFor\(user, realQuestion, prev\)/.test(ctxFn)) : false,
