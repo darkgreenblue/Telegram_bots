@@ -3,8 +3,13 @@ import { shortlist } from './discovery.js';
 import { targetFor } from './targets.js';
 import { assertCurrentBannerQa } from './banner-state.js';
 import { paymentFeedback,paymentFingerprint } from './product.js';
+import { peerReadiness } from './peer-evidence.js';
+import { queueSourceDiscovery } from './discovery-sources.js';
 
 export const SCHEMAS={
+  peer_review:{type:'object',additionalProperties:false,required:['status','relevance','reason','marketEvidence'],properties:{
+    status:{type:'string',enum:['eligible','deferred']},relevance:{type:'string',enum:['direct','adjacent','unrelated','unknown']},
+    reason:{type:'string'},marketEvidence:{type:'string'}}},
   market:{type:'object',additionalProperties:false,required:['recommended_market','reasons','alternatives','sources'],properties:{
     recommended_market:{type:'string'},reasons:{type:'array',items:{type:'string'}},alternatives:{type:'array',items:{type:'string'}},
     sources:{type:'array',items:{type:'object',additionalProperties:false,required:['url','claim'],properties:{url:{type:'string'},claim:{type:'string'}}}}
@@ -63,7 +68,9 @@ export function queueResearch(store,projectId,feedback={}){
   const insights=store.db.prepare(`SELECT scope,claim,evidence_json FROM insights WHERE project_id=? AND status='validated' LIMIT 30`).all(p.id);
   const quality=paymentFeedback(store,p.id);
   return addJob(store.db,p.id,'research',{name:p.name,context:p.context,market:p.market,language:p.language,
-    brief:'Find direct, competitor, persona-adjacent, search and user-filter hypotheses. Cite source URL for each public peer; qualify country. Do not invent Telegram usernames.',
+    brief:p.initial_peer_policy==='competitor-first'?
+      'Initial pilot: prioritize active direct tarot/relationship-reading competitors with real public audience counts and evidence of market language fit. First verify large relevant bots/channels. Do not fill a quota with tiny, unknown-size, movie-title or general app-discovery peers. Keep lateral ideas in reserve. A profile language is not proof of audience language share. Cite dated primary sources; do not invent usernames or counts.':
+      'Find direct, competitor, persona-adjacent, search and user-filter hypotheses. Cite source URL for each public peer; qualify country. Do not invent Telegram usernames.',
     feedback,paymentQuality:quality,paymentFingerprint:paymentFingerprint(quality),insights});
 }
 export function queueStrategy(store,candidateId){
@@ -100,10 +107,29 @@ export function applyBrainResult(store,job,result,{preparedBanner=null}={}){
       addCandidate(db,{projectId:p.id,...c,target,
         evidence:c.evidence_urls.map(url=>({type:'research-source',url}))});
     }
-    const candidates=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=? AND status='found'`).all(p.id),20);
-    for(const c of candidates){
+    if(p.initial_peer_policy==='competitor-first'){
+      for(const c of result.candidates.filter(c=>c.surface==='search'&&c.value.trim().length>=3)
+        .sort((a,b)=>b.score-a.score).slice(0,6))queueSourceDiscovery(store,p.id,c.value);
+    }
+    const candidates=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=? AND status='found'`).all(p.id),20,{policy:p.initial_peer_policy});
+    for(const c of candidates.filter(c=>peerReadiness(c,p.initial_peer_policy).ready)){
       const queued=db.prepare(`SELECT 1 FROM jobs WHERE project_id=? AND kind='strategy' AND json_extract(input_json,'$.candidateId')=?`).get(p.id,c.id);
       if(!queued)queueStrategy(store,c.id);
+    }
+  } else if(job.kind==='peer_review'){
+    const input=JSON.parse(job.input_json),candidate=row(db,'candidates',input.candidateId);
+    if(!candidate||candidate.project_id!==p.id)throw new Error('peer review candidate differs');
+    const features=JSON.parse(candidate.features_json);
+    if(features.publicPeer?.checkedAt!==input.peer?.checkedAt)throw new Error('stale peer review');
+    const proposed={...result,peerCheckedAt:input.peer.checkedAt};
+    if(!result.reason.trim()||!result.marketEvidence.trim())throw new Error('peer review evidence required');
+    features.initialReview=proposed;
+    if(result.status==='eligible'&&!peerReadiness({...candidate,features_json:JSON.stringify(features)},'competitor-first').ready)
+      throw new Error('eligible peer review lacks direct, current measurable evidence');
+    db.prepare('UPDATE candidates SET features_json=? WHERE id=?').run(JSON.stringify(features),candidate.id);
+    if(result.status==='eligible'){
+      const queued=db.prepare(`SELECT 1 FROM jobs WHERE project_id=? AND kind='strategy' AND json_extract(input_json,'$.candidateId')=?`).get(p.id,candidate.id);
+      if(!queued)queueStrategy(store,candidate.id);
     }
   } else if(job.kind==='strategy'){
     const input=JSON.parse(job.input_json);

@@ -2,10 +2,23 @@
 
 Updated: 2026-10-06. This file records verified progress and outstanding work; credentials must never appear here.
 
+## Latest verified checkpoint (takes precedence over historical entries below)
+
+- PRs #489 and #490 are merged and deployed. Normal Deploy run 37472391533 actually executed `Deploy to VPS` successfully at 13:38:34–13:40:48 UTC (17:08–17:10 Tehran) for main `3f51281cb7c6c91b263db58d21bb8a8e5ab16c25`. Fresh readonly VPS evidence at 15:31:11 UTC confirmed that SHA includes `d6a7e186b2140a539522bb690492ee6c8f710259`.
+- PM2 ads-automation online, PID 3826927, restart counter 6; worker 4581927f-9244-4b89-b18f-da48098170e6 has a fresh lease and three recent completed cycles. Both actual financial gates are 0, managed Ads IDs 0, financial operations 0, allocation/commitment 0. Project's approved pilot ceiling is still 3 TON; that ceiling is not a spend reservation. Only the server polls the admin bot. Evidence: ignored `data/verification/discovery-review-2026-10-06/deployment-proof.json`.
+- Previous deployment-verification heartbeat was PAUSED after completion. PR #493 contains the new discovery changes on `codex/ads-discovery-evidence`; they are tested locally and awaiting CI/review and normal safe-window deployment. Do not claim they are already running on the VPS.
+- Owner approved the European adult-character banner direction, including the more visible pink CTA and amber headline. Accepted preview: ignored `data/verification/creative-reference-2026-10-06/chatgpt-european-pink-cta-v3.png`. This is not an Ads upload or a paid experiment. Creative 8 and its old controlled-cost proposal remain held.
+- Initial discovery must start with established direct competitors. Owner explicitly approved minimum 5,000 channel subscribers / 10,000 bot monthly users. Unknown/tiny/adjacent peers remain in the repository; search/user hypotheses remain supported but are held from the initial competitor baseline. No arbitrary count quota justifies a weak peer.
+- Five anonymous provider paths passed a real local no-spend probe: Lyzem, Telemetr.com channels, Telemetr.com ad destinations, GramBots and Telegramic. `tarot`, language hint `en`: 36 unique seeds, 30 validation attempts, 22 actual channels/bots, 8 unknown-size peers, 9 above size floor (not market-eligible), 4 recently active channels above floor. All 22 were queued for relevance/market review; financial operations 0. Actual third-party language errors and demo responses were rejected/qualified. See `DISCOVERY-REVIEW.md` and `DISCOVERY-BENCHMARK.json`.
+- 80 local tests passed; three applicable repository checks and undefined-function check passed. Source acquisition is bounded, durable, deduplicated, rate-limited and independent of protective Ads polling. Interrupted runs use leases and fenced completions; all-provider outage is not valid empty discovery. Upstream test suites were not executed.
+- Native public search / similar bot and channel adapters have behavioral tests only. Owner selected a separate discovery user account; its phone number/setup is pending. No session on the owner's personal account was created. Native full-text public post search is not auto-enabled: respect free-slot and manual-initiation requirements; no Stars payment fallback.
+- First paid target is not chosen yet. The question about @HoroscopesOfLoveBot versus larger multilingual rivals is pending; no answer is inferred. @HoroscopesOfLoveBot had 23,667 directly observed monthly users and English presentation; the larger directly measured rivals have Russian profiles and uncertain English audience share.
+- Next: review/merge the discovery changes, deploy in a permitted normal window, apply `discovery-policy` for project 1 only after that code is deployed, enqueue bounded public queries, restart the idle local brain to load `peer_review`, and verify server review jobs/Sheets. Keep both financial gates disabled and do not mutate Ads. Complete the separate account setup and real market/financial acceptance afterwards.
+
 ## Approved pilot
 
 - English globally, no country restriction; destination `@TAROOT_RU_BOT`.
-- CPA target: 0.05 TON per action. Pilot spend authority: 3 TON.
+- CPA target: 0.05 TON per action. Approved pilot spend ceiling: 3 TON; actual server spend reservations remain zero.
 - Allocation limit: 20 TON, at most 20 independent campaigns, initially 1 TON each.
 - Each test round may consume 0.05 TON in total across calendar days.
 - Calibration remains enabled. Existing campaigns are outside automation authority.

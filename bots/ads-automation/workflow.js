@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { row } from './db.js';
 import { dashboardBridge } from './bridge.js';
 import { paymentFeedback } from './product.js';
+import { requirePeerReadiness } from './peer-evidence.js';
 import { targetFor,validateCreative } from './targets.js';
 import { assessTest,cadence,canGraduate,cpa,remainingTest,TEST_TON } from './policy.js';
 
@@ -40,6 +41,7 @@ function prepareExperiment(store,{projectId,candidateId,creativeId,cpm,placement
   const db=store.db,project=row(db,'projects',projectId),candidate=row(db,'candidates',candidateId),creative=row(db,'creatives',creativeId);
   if(!project||!candidate||!creative)throw new Error('missing project/candidate/creative');
   if(creative.candidate_id!==candidate.id)throw new Error('creative belongs to another candidate');
+  requirePeerReadiness(candidate,project);
   validateCreative(creative,candidate,project);
   const target=targetFor(candidate);
   if(target.placement!==placement)throw new Error('placement does not match surface');
@@ -108,6 +110,7 @@ export async function createApproved(store,api,experimentId,{resetMinute,bridge=
   if(!approved)throw new Error('admin approval missing');
   const project=row(db,'projects',ex.project_id),candidate=row(db,'candidates',ex.candidate_id),creative=row(db,'creatives',ex.creative_id);
   safetyGate(project,api,resetMinute);
+  requirePeerReadiness(candidate,project);
   validateCreative(creative,candidate,project);
   const cap=projectCapacity(db,project.id);
   const reserved=ex.spend_authorized>0;

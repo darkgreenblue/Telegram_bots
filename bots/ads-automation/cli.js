@@ -4,6 +4,9 @@ import { queueMarketResearch,queueResearch,queueStrategy } from './brain.js';
 import { shortlist,expandPublicChannels } from './discovery.js';
 import { GoogleSheetsMirror } from './sheets.js';
 import { projectCapacity,projectSpendCommitment } from './workflow.js';
+import { expandPublicPeers } from './discovery-graph.js';
+import { useCompetitorFirst } from './preparation.js';
+import { discoverFromSources,queueSourceDiscovery } from './discovery-sources.js';
 
 const store=openStore(),db=store.db;
 const input=async()=>{let s='';for await(const c of process.stdin){s+=c;if(s.length>100000)throw new Error('input too large');}return JSON.parse(s||'{}');};
@@ -28,10 +31,17 @@ try{
     db.prepare(`UPDATE projects SET mode='automatic' WHERE id=?`).run(p.id);
     store.audit('admin-cli','project.mode',p.id,{mode:'automatic'});result={projectId:p.id,mode:'automatic'};
   }else if(cmd==='market')result={jobId:queueMarketResearch(store,Number(arg.projectId))};
+  else if(cmd==='discovery-policy')result=useCompetitorFirst(store,Number(arg.projectId));
+  else if(cmd==='discovery-queue')result={runId:queueSourceDiscovery(store,Number(arg.projectId),arg.query)};
+  else if(cmd==='discover')result=await discoverFromSources(store,{projectId:Number(arg.projectId),query:arg.query,
+    max:Math.min(Number(arg.max)||30,100)});
   else if(cmd==='research')result={jobId:queueResearch(store,Number(arg.projectId),arg.feedback||{})};
   else if(cmd==='candidate')result={candidateId:addCandidate(db,arg)};
   else if(cmd==='strategy')result={jobId:queueStrategy(store,Number(arg.candidateId))};
-  else if(cmd==='shortlist')result=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=?`).all(Number(arg.projectId)),Number(arg.limit)||20);
+  else if(cmd==='shortlist')result=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=?`).all(Number(arg.projectId)),Number(arg.limit)||20,
+    {policy:row(db,'projects',Number(arg.projectId))?.initial_peer_policy});
+  else if(cmd==='expand-peers')result=await expandPublicPeers(store,{projectId:Number(arg.projectId),seeds:arg.seeds,
+    max:Math.min(Number(arg.max)||100,500),depth:arg.depth===0?0:Math.min(Number(arg.depth)||2,3)});
   else if(cmd==='expand')result=await expandPublicChannels(store,{projectId:Number(arg.projectId),seeds:arg.seeds,max:Math.min(Number(arg.max)||100,500),depth:Math.min(Number(arg.depth)||2,3)});
   else if(cmd==='sheet'){
     const mirror=new GoogleSheetsMirror({spreadsheetId:process.env.ADS_SHEETS_ID,credentialsPath:process.env.ADS_GOOGLE_CREDENTIALS});
