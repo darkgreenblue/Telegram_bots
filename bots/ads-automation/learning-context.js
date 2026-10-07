@@ -1,9 +1,10 @@
 import { row } from './db.js';
 import { isDeepStrictEqual } from 'node:util';
+import { readProductRuntime,sameProductRuntime,sameProductVersion } from './product-runtime.js';
 
 // A rediscovered candidate is mutable. An experiment's claim and evaluation
 // boundary are not. Do not backfill old experiments from today's candidate.
-export function captureExperimentContext(store, experimentId) {
+export function captureExperimentContext(store, experimentId,{runtime=readProductRuntime}={}) {
   const db=store.db,experiment=row(db,'experiments',experimentId);
   if(!experiment)throw new Error('experiment absent');
   const existing=db.prepare('SELECT * FROM experiment_contexts WHERE experiment_id=?').get(experimentId);
@@ -19,12 +20,13 @@ export function captureExperimentContext(store, experimentId) {
   // Exact claims share an identity; semantic similarity is not equivalence.
   db.prepare('INSERT OR IGNORE INTO hypotheses(project_id,claim) VALUES (?,?)').run(project.id,claim);
   const hypothesis=db.prepare('SELECT id FROM hypotheses WHERE project_id=? AND claim=?').get(project.id,claim);
-  const context={schema:1,hypothesisId:hypothesis.id,hypothesis:claim,market:project.market,
+  const runtimeProof=runtime(project);
+  const context={schema:2,hypothesisId:hypothesis.id,hypothesis:claim,market:project.market,
     productScope:project.scope,destination:project.destination,
     language:project.language,targetCpa:project.target_cpa,surface:candidate.surface,candidate:candidate.value,
     target:JSON.parse(candidate.target_json),angle:creative.angle,
-    creative:{adText:creative.ad_text,bannerText:creative.banner_text,imageSha256:creative.image_sha256},productVersion:null,
-    productVersionEvidence:null};
+    creative:{adText:creative.ad_text,bannerText:creative.banner_text,imageSha256:creative.image_sha256},
+    productVersion:runtimeProof.verified?runtimeProof.version:null,productVersionEvidence:runtimeProof};
   // Source code HEAD and a user cohort's first_version do not attest to the
   // version serving the entire test. Runtime attestation is a separate gate.
   db.prepare('INSERT INTO experiment_contexts(experiment_id,context_json) VALUES (?,?)')
@@ -38,7 +40,7 @@ export function readExperimentContext(db,experimentId){
   return saved?JSON.parse(saved.context_json):null;
 }
 
-export function assertExperimentContextCurrent(db,experiment){
+export function assertExperimentContextCurrent(db,experiment,{runtime=readProductRuntime}={}){
   const context=readExperimentContext(db,experiment.id);
   if(!context)throw new Error('experiment context missing; refresh the unfunded proposal before approval');
   const project=row(db,'projects',experiment.project_id),candidate=row(db,'candidates',experiment.candidate_id),
@@ -49,14 +51,24 @@ export function assertExperimentContextCurrent(db,experiment){
     creative:{adText:creative.ad_text,bannerText:creative.banner_text,imageSha256:creative.image_sha256}};
   if(Object.entries(current).some(([key,value])=>!isDeepStrictEqual(context[key],value)))
     throw new Error('experiment context changed; prepare and approve a new creative');
+  if(context.schema===2&&context.productVersion!==null&&
+    !sameProductRuntime(context.productVersionEvidence,runtime(project)))
+    throw new Error('product runtime changed or unavailable; refresh the unfunded proposal');
 }
 
 export function hasVerifiedContext(context){
-  return context?.schema===1&&Number.isInteger(context.hypothesisId)&&context.hypothesisId>0&&
+  return context?.schema===2&&Number.isInteger(context.hypothesisId)&&context.hypothesisId>0&&
     typeof context.productVersion==='string'&&!!context.productVersion.trim()&&
     typeof context.productVersionEvidence==='object'&&context.productVersionEvidence!==null&&
     context.productVersionEvidence.verified===true&&typeof context.productVersionEvidence.source==='string'&&
-    !!context.productVersionEvidence.source.trim();
+    !!context.productVersionEvidence.source.trim()&&context.productVersionEvidence.version===context.productVersion;
+}
+
+export function verifiedRoundContext(context,rounds){
+  return hasVerifiedContext(context)&&rounds.length>0&&rounds.every(round=>{
+    let proof;try{proof=JSON.parse(round.product_runtime_json);}catch{return false;}
+    return sameProductRuntime(context.productVersionEvidence,proof);
+  });
 }
 
 export function learningGroupKey(context){
@@ -64,12 +76,14 @@ export function learningGroupKey(context){
     context.productVersion,context.targetCpa]);
 }
 
-export function usableInsights(store,project){
+export function usableInsights(store,project,{runtime=readProductRuntime}={}){
+  const currentRuntime=runtime(project);
   return store.db.prepare(`SELECT scope,claim,evidence_json FROM insights
     WHERE project_id=? AND status='validated' ORDER BY id DESC`).all(project.id).filter(insight=>{
     let evidence;try{evidence=JSON.parse(insight.evidence_json);}catch{return false;}
     return hasVerifiedContext(evidence.context)&&evidence.context.market===project.market&&
       evidence.context.language===project.language&&evidence.context.targetCpa===project.target_cpa&&
-      evidence.context.productScope===project.scope&&evidence.context.destination===project.destination;
+      evidence.context.productScope===project.scope&&evidence.context.destination===project.destination&&
+      sameProductVersion(evidence.context.productVersionEvidence,currentRuntime);
   }).slice(0,30);
 }

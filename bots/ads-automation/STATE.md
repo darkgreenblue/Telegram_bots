@@ -1,9 +1,15 @@
+## Runtime and queue implementation checkpoint — 2026-10-07
+
+- PR #500 merged as 5f4deffbf6801123facf045f1b43abfa57c150da after exact-head CI 37610660872 passed. Neither #499 nor #500 is asserted deployed; normal safe-window verification remains required.
+- Branch codex/ads-product-runtime-attestation adds fail-safe private metadata from Tarot's launched process, exact bot/language/process validation, schema=2 immutable test scope, end-of-round evidence and current-version-only insight reuse. Metadata changes do not change customer behavior or product version. Live publication and acquisition/payment acceptance remain unverified until deployment.
+- New public-browser seed imported as candidate 61 from Semagram. Direct t.me MAU unavailable, so it stays pending/reserve. Authority and operations remain zero. Owner permission requested for only Start/English selection on two specific competitor bots; no message to them sent.
+
 ## Roadmap checkpoint — 2026-10-07
 
 - Owner explicitly reaffirmed the original architecture: always-on server, subscription-backed desktop brain/image tools, safe financial boundaries during desktop outage, and admin-authorized new funding. `ROADMAP.md` defines R0–R9 and observable completion criteria; `AUTOMATION-ACCEPTANCE.md` distinguishes software tests from live acceptance. Existing paid/cost calibration gates remain required.
 - Branch `codex/ads-roadmap-learning-scope`: exact shared hypothesis registry and immutable new-test context now prevent mutable project/candidate/creative edits from relabeling old observations. Context includes market, language, CPA, scope, destination, target and creative. Historical experiments are never backfilled from current data. Unknown serving product version remains observational; attestation is R2 and not yet implemented.
 - Create requests reject changed context before reservation and again after asynchronous lookups. Previously held unfunded/unexecuted competitor drafts capture context only at fresh release; managed/historical tests cannot receive invented context. No financial authority is added by these changes.
-- Current deployment remains the verified #497 runtime until a new actual Deploy step and fresh worker cycles are confirmed. Local changes are not presented as server behavior. 110 module tests and three relevant repository checks passed; exact-head CI and deployment remain pending.
+- Current deployment remains the verified #497 runtime until a new actual Deploy step and fresh worker cycles are confirmed. Local changes are not presented as server behavior. 110 module tests and three relevant repository checks passed; exact-head CI passed and PR #499 merged; deployment remains pending.
 
 ## Latest operational checkpoint — 2026-10-07 04:31 UTC
 
@@ -209,3 +215,5 @@ Updated: 2026-10-07 (Asia/Tehran). This file records verified progress and outst
 
 - Recovery verified against a private copy of the actual store: 11 terminal quota jobs restored once, second recovery restored none, spending authority remains zero and operation count remains zero. Original store untouched. Actual isolated Codex peer review emitted structured Persian JSON without any tool calls; it deferred the peer for missing English-market interaction evidence. This is not a completed live-server recovery.
 - Anonymous Semagram query returned 100 bots, four tarot-named peers (three already known) and many unrelated results. New Tarotgram indexed MAU was not exposed by current direct t.me proof, so it cannot enter initial testing. Statiko tarot search returned zero. The benchmark/review files record failed routes and paid API exclusions.
+
+- Runtime proof verification: 122 Ads tests and five Tarot tests passed. 120 repository checks passed locally; the unchanged Linux /proc sealed-query check cannot pass three process-environment assertions on macOS. Require exact-head Ubuntu CI, never run its process-wide orphan-query cleanup on the shared VPS. No unrelated production restart or heavy build was performed.

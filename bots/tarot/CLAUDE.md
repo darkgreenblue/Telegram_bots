@@ -5,6 +5,13 @@
 > ⚠️ **دو «۳.۱۲۲.۰» در این فایل:** بخشِ «🔁 هیچ تپِ غیرناوبری…» (#412) همان ۳.۱۲۲.۰ِ **منتشرشده** است. شماره‌های ۳.۱۲۲ تا ۳.۱۳۰ِ
 > بخش‌های PAYMENT-V2 فقط مراحلِ داخلیِ یک برنچ بودند که یک‌جا با **۳.۱۳۱.۰** منتشر شد؛ روی هیچ کاربری ثبت نشده‌اند.
 
+## Runtime version evidence for advertising automation (2026-10-07)
+
+- After the existing successful launch hook, the bot publishes private atomic `data/runtime-<locale>.json` metadata every 20 seconds: actual loaded PRODUCT_VERSION, getMe username, configured languages, launch/pulse times and Linux process-start/kernel-boot fingerprint. No users, messages, tokens or payments are included.
+- Metadata failures are deduplicated and fail-safe; they cannot interrupt readings, payments or polling. This is operational measurement only, so PRODUCT_VERSION remains 3.154.0. The existing heartbeat retains its original format and behavior.
+- Ads accepts only fresh, private, matching bot/language metadata whose process fingerprint is still live. A file from an older process or merely updated checkout is not proof. This signal confirms the launched process/event loop, not successful delivery of every update.
+- Rollback: revert runtime publication; readers safely classify evidence as unavailable. No database or product-user state changes. CI runs runtime-proof.test.mjs alongside scoped administrator tests.
+
 ---
 
 ## دسترسی پشتیبانی و معرفی چندزبانه (تأیید مالک، ۱۴۰۵/۰۷/۱۵)

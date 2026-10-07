@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './db.js';
 import { refreshInsights } from './learning.js';
-import { captureExperimentContext,readExperimentContext,usableInsights } from './learning-context.js';
+import { captureExperimentContext,readExperimentContext,usableInsights,assertExperimentContextCurrent } from './learning-context.js';
 
 function seed(){
   const store=openStore(':memory:'),db=store.db;
@@ -22,15 +22,15 @@ function experiment(store,id,{candidate=id,angle='love',hypothesis='direct tarot
     db.prepare('INSERT OR IGNORE INTO hypotheses(project_id,claim) VALUES (1,?)').run(hypothesis);
     const hypothesisId=db.prepare('SELECT id FROM hypotheses WHERE project_id=1 AND claim=?').get(hypothesis).id;
     db.prepare('INSERT INTO experiment_contexts(experiment_id,context_json) VALUES (?,?)').run(id,JSON.stringify({
-      schema:1,hypothesisId,hypothesis,market:'English global',language:'en',targetCpa:0.05,
+      schema:2,hypothesisId,hypothesis,market:'English global',language:'en',targetCpa:0.05,
       productScope:'tarot-intl',destination:'https://t.me/examplebot',
       surface:'bots',candidate:`@peer_${candidate}_bot`,target:{},angle,productVersion:version,
-      productVersionEvidence:version?{verified:true,source:'isolated test fixture'}:null}));
+      productVersionEvidence:version?{verified:true,version,username:'examplebot',fingerprint:'fixture-process',source:'isolated test fixture'}:null}));
   }
 }
 function round(store,id,number,{spent=0.05,actions=3,views=300}={}){
-  store.db.prepare(`INSERT INTO rounds(experiment_id,number,spent,actions,views,reason)
-    VALUES (?,?,?,?,?,'fixture')`).run(id,number,spent,actions,views);
+  store.db.prepare(`INSERT INTO rounds(experiment_id,number,spent,actions,views,reason,product_runtime_json)
+    VALUES (?,?,?,?,?,'fixture',?)`).run(id,number,spent,actions,views,JSON.stringify(readExperimentContext(store.db,id)?.productVersionEvidence||{}));
 }
 const validated=store=>store.db.prepare("SELECT * FROM insights WHERE status='validated' ORDER BY id").all();
 
@@ -164,4 +164,42 @@ test('historical context cannot be invented after a campaign was created',()=>{
   assert.throws(()=>captureExperimentContext(store,1),/historical experiment/);
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM experiment_contexts').get().n,0);
   store.close();
+});
+
+
+test('new unfunded context freezes actual runtime; a restart or missing proof blocks stale approval',()=>{
+  const s=seed();try{
+    experiment(s,1,{legacy:true});s.db.prepare('UPDATE experiments SET ad_id=NULL').run();
+    const proof={verified:true,source:'isolated runtime fixture',version:'3.154.0',username:'examplebot',fingerprint:'process-one'};
+    captureExperimentContext(s,1,{runtime:()=>proof});
+    const context=readExperimentContext(s.db,1);assert.equal(context.productVersion,'3.154.0');
+    const ex=s.db.prepare('SELECT * FROM experiments').get();
+    assert.doesNotThrow(()=>assertExperimentContextCurrent(s.db,ex,{runtime:()=>proof}));
+    assert.throws(()=>assertExperimentContextCurrent(s.db,ex,{runtime:()=>({...proof,fingerprint:'restarted'})}),/runtime changed/);
+    assert.throws(()=>assertExperimentContextCurrent(s.db,ex,{runtime:()=>({verified:false})}),/runtime changed/);
+    assert.equal(readExperimentContext(s.db,1).productVersionEvidence.fingerprint,'process-one');
+  }finally{s.close();}
+});
+
+test('missing or changed round runtime cannot become gold despite repeated good CPA',()=>{
+  const s=seed();try{
+    experiment(s,1);round(s,1,1);round(s,1,2);refreshInsights(s,1);assert.equal(validated(s).length,1);
+    s.db.prepare("UPDATE rounds SET product_runtime_json='{}' WHERE number=2").run();
+    refreshInsights(s,1);assert.equal(validated(s).length,0);
+    assert.equal(JSON.parse(s.db.prepare("SELECT evidence_json FROM insights WHERE status='observed'").get().evidence_json).contextStatus,'runtime_changed_or_unknown');
+    const proof=readExperimentContext(s.db,1).productVersionEvidence;
+    s.db.prepare('UPDATE rounds SET product_runtime_json=? WHERE number=2').run(JSON.stringify({...proof,version:'different'}));
+    refreshInsights(s,1);assert.equal(validated(s).length,0);
+  }finally{s.close();}
+});
+
+test('brain receives completed insights only for the actually running matching product version',()=>{
+  const s=seed();try{
+    experiment(s,1);round(s,1,1);round(s,1,2);refreshInsights(s,1);
+    const proof=readExperimentContext(s.db,1).productVersionEvidence,project=s.db.prepare('SELECT * FROM projects').get();
+    assert.equal(usableInsights(s,project,{runtime:()=>({...proof,fingerprint:'same-version-new-boot'})}).length,1);
+    assert.equal(usableInsights(s,project,{runtime:()=>({...proof,version:'other'})}).length,0);
+    assert.equal(usableInsights(s,project,{runtime:()=>({verified:false})}).length,0);
+    assert.equal(validated(s).length,1); // Context mismatch removes reuse, not historical proof.
+  }finally{s.close();}
 });

@@ -55,3 +55,5 @@ Only a positively verified private-chat identity may be added through the privat
 ## Immutable learning boundaries
 
 Capture each new experiment's exact hypothesis identity, market, language, target CPA, product scope, destination, creative and target once. Rediscovery may update candidates but must not rewrite past evidence. Exact claim identity is not semantic similarity. Never infer a serving product version from repository HEAD or a single acquisition cohort; unknown version and legacy context remain observations, not validated insights. Keep cross-version/scope groups separate and exclude incompatible claims from brain input.
+
+Runtime evidence comes only from fresh private Tarot launch metadata bound to the exact bot, supported language, kernel boot and process-start fingerprint. Freeze it before a new experiment and persist evidence at every round end. Missing metadata or changed runtime prevents validation; never backfill old context. Reuse completed insights only for the currently verified matching product version. Publication is fail-safe and is not proof of every user-message delivery.

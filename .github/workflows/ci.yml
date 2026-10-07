@@ -87,9 +87,9 @@ jobs:
         if: matrix.bot == 'ads-automation'
         run: npm test --prefix bots/ads-automation
 
-      - name: Scoped support administrator safeguards
+      - name: Scoped support and runtime metadata safeguards
         if: matrix.bot == 'tarot'
-        run: node --test bots/tarot/extra-admins.test.mjs
+        run: node --test bots/tarot/extra-admins.test.mjs bots/tarot/runtime-proof.test.mjs
 
       - name: Metis Gemini routing check
         if: matrix.bot == 'voice2text'

@@ -970,3 +970,7 @@ tarot چنین است. اگر روزی به یکی از سه تای دیگر آ�
 ### Scoped support administrators (2026-10-07)
 
 The Ads controller and only the Persian/unified Tarot profiles may load additional administrators from their respective private `data/admin-access.json` files. Existing owners remain first and retain ownership. The Tarot CI matrix explicitly runs `extra-admins.test.mjs`; no shared env, other bot grants, or financial gates change. Admin replies are scoped by chat and message ID.
+
+### Product runtime metadata contract (2026-10-07)
+
+Tarot alone publishes private atomic runtime metadata from its successful launch hook without changing the shared heartbeat or customer behavior. Ads reads fresh exact-username/language metadata and verifies the Linux kernel/process-start fingerprint. The Tarot CI step runs the scoped administrator and runtime metadata tests. No other bot, environment secret or funding permission is added; metadata failure is fail-safe and rollback retains learning history.

@@ -161,6 +161,8 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
   const experimentColumns=new Set(db.pragma('table_info(experiments)').map(c=>c.name));
   if(!db.pragma('table_info(jobs)').some(c=>c.name==='not_before'))
     db.exec('ALTER TABLE jobs ADD COLUMN not_before INTEGER NOT NULL DEFAULT 0');
+  if(!db.pragma('table_info(rounds)').some(c=>c.name==='product_runtime_json'))
+    db.exec("ALTER TABLE rounds ADD COLUMN product_runtime_json TEXT NOT NULL DEFAULT '{}'");
   if(!db.pragma('table_info(projects)').some(c=>c.name==='initial_peer_policy'))
     db.exec("ALTER TABLE projects ADD COLUMN initial_peer_policy TEXT NOT NULL DEFAULT 'standard'");
   if(!experimentColumns.has('spend_authorized')){
