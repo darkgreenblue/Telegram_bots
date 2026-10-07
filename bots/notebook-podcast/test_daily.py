@@ -20,6 +20,30 @@ TEHRAN = ZoneInfo("Asia/Tehran")
 
 
 class DailyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_date_rollover_recovers_missed_lesson_even_when_today_is_done(self):
+        with tempfile.TemporaryDirectory() as directory:
+            local = Store(Path(directory) / "bot.db")
+            lesson = {"page_id": "page", "url": "https://notion.so/page", "title": "درس", "text": "محتوای درس" * 20}
+            for batch, date, state in [("missed", "2026-10-06", "error_upload"),
+                                       ("ready", "2026-10-05", "daily_ready"),
+                                       ("delivered", "2026-10-04", "done"),
+                                       ("today", "2026-10-07", "done")]:
+                session = make_session(123, batch, date, lesson, Path(directory))
+                session.update(state=state, daily_notified=True)
+                local.put(123, session)
+            local.put(123, {"batch_id": "manual", "state": "collecting", "daily_date": None, "inputs": [{"kind": "text"}]})
+            now = datetime(2026, 10, 7, 7, 0, tzinfo=TEHRAN)
+            app = SimpleNamespace(bot=SimpleNamespace(send_message=AsyncMock()))
+            with patch.object(bot, "store", local), patch.object(bot, "OWNER_IDS", {123}), \
+                 patch.object(bot, "DAILY_NOTION_TOKEN", "token"), patch.object(bot, "busy_slots", set()), \
+                 patch.object(bot, "tehran_now", return_value=now), patch.object(bot, "launch_job") as launch:
+                await bot.daily_tick(app)
+            self.assertEqual(local.get(123, "missed")["state"], "uploading")
+            self.assertEqual(local.get(123, "ready")["state"], "sending")
+            self.assertEqual({call.args[1] for call in launch.call_args_list}, {"missed", "ready"})
+            self.assertEqual(local.get(123, "delivered")["state"], "done")
+            self.assertEqual(local.get(123, "manual")["state"], "collecting")
+
     async def test_notion_reads_all_pages_and_nested_blocks_as_one_source(self):
         calls = []
 

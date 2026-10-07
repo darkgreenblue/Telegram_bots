@@ -16,6 +16,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from notebook import InputValidationError
 from audio import AudioConversionError, telegram_mp3
+from auth_keepalive import auth_loop
 from daily import NotionLessons, TEHRAN, dated_session, make_session, retry_due, retry_later, send_due, start_due, tehran_now
 from store import Store
 from studio import KIND_LABELS, KINDS, STEPS, output_path
@@ -486,6 +487,10 @@ async def daily_tick(app: Application) -> None:
         return
     owner = min(OWNER_IDS)
     date = now.date().isoformat()
+    # A date rollover must not discard an unfinished lesson already read from Notion.
+    for pending in reversed(store.list(owner)):
+        if pending.get("daily_date") and pending["daily_date"] < date and pending.get("inputs"):
+            await resume_daily(owner, pending, app, now)
     session = dated_session(store.list(owner), date)
     if session and session["state"] in {"done", "daily_missing_sent"}:
         return
@@ -517,6 +522,11 @@ async def daily_tick(app: Application) -> None:
             return
         session = make_session(owner, session["batch_id"] if session else uuid.uuid4().hex, date, lesson, DATA)
         save(owner, session)
+    await resume_daily(owner, session, app, now)
+
+
+async def resume_daily(owner: int, session: dict, app: Application, now: datetime) -> None:
+    date = session["daily_date"]
     if session["state"] in {"error_upload", "error_generate"}:
         output = output_path(session) if session.get("output_type") else None
         ready_file = output and output.is_file() and output.stat().st_size > 0
@@ -577,6 +587,8 @@ async def run_job(owner: int, batch_id: str, app: Application) -> None:
                 current = store.get(owner, batch_id) or session
                 raise InputValidationError(current.get("worker_error", "ورودی نامعتبر است"))
             if code != 0:
+                current = store.get(owner, batch_id) or session
+                LOG.error("worker_failed request=%s phase=%s exception=%s", batch_id[:8], phase, current.get("worker_error_type", "unknown"))
                 raise RuntimeError(f"Worker exited with code {code}")
 
         await worker(session["state"])
@@ -727,6 +739,7 @@ async def post_init(app: Application) -> None:
         app.create_task(daily_loop(app))
     else:
         LOG.warning("Daily Brief scheduler disabled: missing Notion token")
+    app.create_task(auth_loop(ROOT, PROFILE))
 
 
 def main() -> None:
@@ -734,6 +747,8 @@ def main() -> None:
         raise SystemExit("BOT_TOKEN یا ADMIN_IDS خالی است")
     # HTTP client INFO logs include the Bot API URL, which contains the bot token.
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    LOG.setLevel(logging.INFO)
+    logging.getLogger("notebook-podcast.auth").setLevel(logging.INFO)
     request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=300)
     updates_request = HTTPXRequest(connect_timeout=30, read_timeout=35, write_timeout=30)
     app = (Application.builder().token(TOKEN).request(request)
