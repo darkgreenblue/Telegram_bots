@@ -1,6 +1,7 @@
 import { shortlist } from './discovery.js';
 import { createExperiment,requestDecision } from './workflow.js';
 import { peerReadiness } from './peer-evidence.js';
+import { captureExperimentContext } from './learning-context.js';
 
 // Prepare each approved creative once, including new variants for a previously
 // tested candidate. Drafts still consume campaign slots; preparation never
@@ -71,6 +72,7 @@ export function reconcileInitialDrafts(store,project){
     if(occupied>=project.max_campaigns)break;
     const candidate=db.prepare('SELECT * FROM candidates WHERE id=?').get(ex.candidate_id);
     if(!peerReadiness(candidate,project.initial_peer_policy).ready)continue;
+    captureExperimentContext(store,ex.id);
     db.prepare("UPDATE experiments SET status='draft' WHERE id=?").run(ex.id);
     requestDecision(store,project.id,ex.id,'create',{reason:'Measured direct competitor passed initial discovery review'},
       {discovery:JSON.parse(candidate.features_json)});

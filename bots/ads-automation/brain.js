@@ -5,6 +5,7 @@ import { assertCurrentBannerQa } from './banner-state.js';
 import { paymentFeedback,paymentFingerprint } from './product.js';
 import { peerReadiness } from './peer-evidence.js';
 import { queueSourceDiscovery } from './discovery-sources.js';
+import { usableInsights } from './learning-context.js';
 
 export const SCHEMAS={
   peer_review:{type:'object',additionalProperties:false,required:['status','relevance','reason','marketEvidence'],properties:{
@@ -65,7 +66,7 @@ export function queueMarketResearch(store,projectId){
 }
 export function queueResearch(store,projectId,feedback={}){
   const p=row(store.db,'projects',projectId);if(!p)throw new Error('project absent');
-  const insights=store.db.prepare(`SELECT scope,claim,evidence_json FROM insights WHERE project_id=? AND status='validated' LIMIT 30`).all(p.id);
+  const insights=usableInsights(store,p);
   const quality=paymentFeedback(store,p.id);
   return addJob(store.db,p.id,'research',{name:p.name,context:p.context,market:p.market,language:p.language,
     brief:p.initial_peer_policy==='competitor-first'?
@@ -75,7 +76,7 @@ export function queueResearch(store,projectId,feedback={}){
 }
 export function queueStrategy(store,candidateId){
   const c=row(store.db,'candidates',candidateId);if(!c)throw new Error('candidate absent');
-  const p=row(store.db,'projects',c.project_id),insights=store.db.prepare(`SELECT scope,claim,evidence_json FROM insights WHERE project_id=? AND status='validated' LIMIT 30`).all(p.id);
+  const p=row(store.db,'projects',c.project_id),insights=usableInsights(store,p);
   return addJob(store.db,p.id,'strategy',{candidateId,project:{name:p.name,context:p.context,market:p.market,language:p.language},
     candidate:{surface:c.surface,value:c.value,hypothesis:c.hypothesis,features:JSON.parse(c.features_json)},
     paymentQuality:paymentFeedback(store,p.id),insights});

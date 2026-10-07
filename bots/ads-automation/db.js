@@ -56,6 +56,23 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE INDEX IF NOT EXISTS exp_due ON experiments(status,next_check_at);
+    CREATE TABLE IF NOT EXISTS hypotheses (
+      id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id),
+      claim TEXT NOT NULL,created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      UNIQUE(project_id,claim)
+    );
+    CREATE TABLE IF NOT EXISTS experiment_contexts (
+      experiment_id INTEGER PRIMARY KEY REFERENCES experiments(id),context_json TEXT NOT NULL,
+      captured_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE TRIGGER IF NOT EXISTS experiment_context_immutable_update
+      BEFORE UPDATE ON experiment_contexts BEGIN SELECT RAISE(ABORT,'experiment context is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS experiment_context_immutable_delete
+      BEFORE DELETE ON experiment_contexts BEGIN SELECT RAISE(ABORT,'experiment context is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS hypothesis_immutable_update
+      BEFORE UPDATE ON hypotheses BEGIN SELECT RAISE(ABORT,'hypothesis is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS hypothesis_immutable_delete
+      BEFORE DELETE ON hypotheses BEGIN SELECT RAISE(ABORT,'hypothesis is immutable'); END;
     CREATE TABLE IF NOT EXISTS observations (
       id INTEGER PRIMARY KEY, experiment_id INTEGER NOT NULL REFERENCES experiments(id),
       at INTEGER NOT NULL, views INTEGER NOT NULL, actions INTEGER NOT NULL,

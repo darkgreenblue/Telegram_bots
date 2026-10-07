@@ -1,6 +1,6 @@
 # Automation operating rules
 
-This file governs implementation, investigation and recovery of the Telegram Ads pilot. `STATE.md` records the current checkpoint.
+This file governs implementation, investigation and recovery of the Telegram Ads pilot. `STATE.md` records the current checkpoint; `ROADMAP.md` defines the owner-approved completion boundary and remaining acceptance gates.
 
 ## Execution loop
 
@@ -30,7 +30,7 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 - Treat directory audience/language/eligibility as provider claims, not Telegram facts. Exclude groups and synthetic/demo responses. Retain source URLs, observation times and graph parents; preserve previous evidence on rediscovery. Review responses must match the exact current peer observation.
 - Public source work runs separately from protective Ads polling. Persist provider/domain cooldowns and interrupted-run leases; fence completion by lease token. A provider outage is not a valid empty search result, and recovery must not replay financial actions.
 - The owner selected a separate discovery Telegram user account. Do not authenticate the personal account. Native search/recommendation adapters are not production-verified until the dedicated session is connected. Full-text public-post search must respect Telegram's free-slot and manual-initiation contract; never authorize paid Stars.
-- The selected account is the existing Support account, public username @Efficient_Support. Never send a message from it to another person without specific owner authorization. The native capability facade permits only public discovery, hides human/contact results and disables account updates; never hand the underlying SDK or its storage to model/discovery jobs. Runtime must verify the pinned self ID, require an existing private session and never initiate interactive authentication. Keys/session are ignored private files, not browser session exports. Adding it as a bot administrator is separate and awaits the owner's exact bot scope; do not transfer BotFather ownership or remove existing admins.
+- The selected account is the existing Support account, public username @Efficient_Support. Never send a message from it to another person without specific owner authorization. The native capability facade permits only public discovery, hides human/contact results and disables account updates; never hand the underlying SDK or its storage to model/discovery jobs. Runtime must verify the pinned self ID, require an existing private session and never initiate interactive authentication. Keys/session are ignored private files, not browser session exports. Its separately approved bot-administrator scope is Ads control plus Persian and unified multilingual Tarot, with Support as the primary Ads recipient; do not transfer BotFather ownership or remove existing admins.
 - Image input must match the current request/revision, pass visual QA and preserve essential text during resizing.
 
 ## Recovery and security
@@ -51,3 +51,7 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 ## Scoped administrator handover
 
 Only a positively verified private-chat identity may be added through the private administrator config. Preserve owner access. Decisions record the actual administrator; banner reply lookup must use chat ID plus message ID, with legacy fallback restricted to the owner. Configuration grants do not enable Ads spending or native account authorization.
+
+## Immutable learning boundaries
+
+Capture each new experiment's exact hypothesis identity, market, language, target CPA, product scope, destination, creative and target once. Rediscovery may update candidates but must not rewrite past evidence. Exact claim identity is not semantic similarity. Never infer a serving product version from repository HEAD or a single acquisition cohort; unknown version and legacy context remain observations, not validated insights. Keep cross-version/scope groups separate and exclude incompatible claims from brain input.

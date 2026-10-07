@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openStore } from './db.js';
 import { pollExperiment,executeDecision,projectCapacity,projectSpendCommitment,createApproved,pauseManaged } from './workflow.js';
 import { AdsApi } from './api.js';
+import { captureExperimentContext } from './learning-context.js';
 
 const safeResetMinute=()=>Math.floor(((Date.now()/1000)%86400)/60+180)%1440;
 
@@ -14,6 +15,9 @@ const seed=store=>{
   db.prepare(`INSERT INTO creatives(id,project_id,candidate_id,angle,ad_text,status) VALUES (1,1,1,'angle','Ad','approved')`).run();
   db.prepare(`INSERT INTO experiments(id,project_id,candidate_id,creative_id,title,cpm,placement,ad_id,status,first_view_at,spend_authorized)
     VALUES (1,1,1,1,'unique',0.13,'bot_banner',444,'testing',unixepoch()-1000,0.05)`).run();
+  db.prepare('UPDATE experiments SET ad_id=NULL,spend_authorized=0 WHERE id=1').run();
+  captureExperimentContext(store,1);
+  db.prepare('UPDATE experiments SET ad_id=444,spend_authorized=0.05 WHERE id=1').run();
 };
 
 test('a matching account title without local create history cannot claim an old campaign',async()=>{
@@ -26,6 +30,25 @@ test('a matching account title without local create history cannot claim an old 
       findByTitle:async()=>({ad_id:999,title:'unique'}),call:async()=>assert.fail('cannot mutate existing campaign')};
     await assert.rejects(createApproved(store,api,1,{resetMinute:safeResetMinute(),bridge:async()=>({username:'examplebot'})}),/unowned title collision/);
     assert.equal(store.db.prepare('SELECT ad_id FROM experiments WHERE id=1').get().ad_id,null);
+  }finally{
+    if(previousGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=previousGate;
+    store.close();
+  }
+});
+
+test('creative changes during an asynchronous account check cannot reserve or create a test',async()=>{
+  const store=openStore(':memory:');seed(store);
+  const previousGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';
+  try{
+    store.db.prepare("UPDATE experiments SET ad_id=NULL,status='draft',spend_authorized=0,tracking_code='FIXTURE' WHERE id=1").run();
+    store.db.prepare("INSERT INTO decisions(project_id,experiment_id,kind,payload_json,status) VALUES(1,1,'create','{}','approved')").run();
+    const api={live:true,getAccount:async()=>{
+      store.db.prepare("UPDATE creatives SET angle='changed while waiting' WHERE id=1").run();
+      return {currency:'TON',remaining_budget:20};
+    },findByTitle:async()=>assert.fail('cannot reach create reconciliation'),call:async()=>assert.fail('cannot create')};
+    await assert.rejects(createApproved(store,api,1,{resetMinute:safeResetMinute(),bridge:async()=>({username:'examplebot'})}),/context changed/);
+    assert.equal(projectSpendCommitment(store.db,1),0);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM operations').get().n,0);
   }finally{
     if(previousGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=previousGate;
     store.close();
@@ -54,7 +77,7 @@ test('uncertain create retries preserve the original provider deadline and finan
     assert.equal(writes,4);
     store.db.prepare("UPDATE operations SET request_json=? WHERE op_key='create-1'").run(JSON.stringify(original));
     store.db.prepare("UPDATE creatives SET ad_text='Changed after unknown outcome' WHERE id=1").run();
-    await assert.rejects(createApproved(store,api,1,options),/request changed/);
+    await assert.rejects(createApproved(store,api,1,options),/(request|context) changed/);
     assert.equal(writes,4);
     store.db.prepare("UPDATE creatives SET ad_text='Ad' WHERE id=1").run();
     // A later retry calculates a different deadline; persisted request remains authoritative.
