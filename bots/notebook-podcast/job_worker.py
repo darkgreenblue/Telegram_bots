@@ -86,7 +86,15 @@ def main() -> None:
             session["worker_error"] = str(exc)
             store.put(int(owner), session)
         code = 2
-    except Exception:
+    except Exception as exc:
+        store = Store(ROOT / "data/bot.db")
+        session = store.get(int(owner), batch_id)
+        if session:
+            # Exception type is sufficient for diagnosis and cannot expose
+            # cookie values or the token embedded in a Telegram URL.
+            session["worker_error_type"] = type(exc).__name__
+            session["worker_error_phase"] = phase
+            store.put(int(owner), session)
         code = 1
     raise SystemExit(code)
 
