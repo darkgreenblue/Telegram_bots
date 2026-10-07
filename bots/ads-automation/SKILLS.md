@@ -23,6 +23,7 @@ This file governs implementation, investigation and recovery of the Telegram Ads
 - Local Codex/Claude process consumes leased schema-validated jobs; it has no direct financial authority.
 - Server owns the admin bot poller, queue, monitoring and durable history.
 - Preserve candidates, decisions, tests and source evidence, including rejected or deleted campaigns.
+- Winner eligibility requires the last two complete 0.05 TON tests, finite nonnegative metrics, positive integral views/actions and at least five total actions under the target CPA. Partial or overspent rounds cannot authorize graduation, including after owner approval. Retain every learned-claim revision in audit; separate creative/experiment claims and mark obsolete generated validation as needs_review instead of erasing evidence or treating it as a negative category insight.
 - Separate Telegram CPA, new/returning product users, gross revenue and unknown refunds. Do not invent a currency conversion or net return.
 - Validate research peers and mark unavailable metrics as unknown. Never infer country from language alone.
 - Initial competitor baseline requires independently observed public peer identity/counts: at least 5,000 channel subscribers or 10,000 bot monthly users, fresh evidence within 24 hours, direct relevance and explicit market review. Channels also need recent sampled public content. Unknown-size, inactive, unrelated and lateral peers stay in reserve; a large count never proves profitability or Ads availability. Do not compare MAU with subscriber counts.

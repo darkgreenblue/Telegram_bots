@@ -145,6 +145,27 @@ test('project cap counts money already spent even after a campaign was deleted',
   store.close();
 });
 
+test('even an approved graduation cannot spend on two incomplete tests',async()=>{
+  const store=openStore(':memory:');seed(store);
+  store.db.prepare("UPDATE experiments SET status='paused' WHERE id=1").run();
+  store.db.prepare(`INSERT INTO rounds(experiment_id,number,spent,actions,views,reason)
+    VALUES (1,1,0.001,3,30,'provider stopped ad'),(1,2,0.001,3,30,'provider stopped ad')`).run();
+  const id=Number(store.db.prepare(`INSERT INTO decisions(project_id,experiment_id,kind,payload_json,status)
+    VALUES (1,1,'graduate','{}','approved')`).run().lastInsertRowid);
+  const oldGate=process.env.ADS_COST_GATE_VERIFIED;process.env.ADS_COST_GATE_VERIFIED='1';
+  const before=projectSpendCommitment(store.db,1);
+  try{
+    await assert.rejects(executeDecision(store,{live:true,call:async()=>assert.fail('no financial write')},
+      id,{resetMinute:safeResetMinute()}),/winner evidence insufficient/);
+    assert.equal(projectSpendCommitment(store.db,1),before);
+    assert.equal(store.db.prepare('SELECT status FROM decisions WHERE id=?').get(id).status,'approved');
+    assert.equal(store.db.prepare('SELECT status FROM experiments WHERE id=1').get().status,'paused');
+  }finally{
+    if(oldGate===undefined)delete process.env.ADS_COST_GATE_VERIFIED;else process.env.ADS_COST_GATE_VERIFIED=oldGate;
+    store.close();
+  }
+});
+
 test('twenty allocated campaigns remain distinct from a three TON spend ceiling',async()=>{
   const store=openStore(':memory:');seed(store);
   store.db.prepare(`UPDATE experiments SET status='paused',spend_authorized=0.05 WHERE id=1`).run();
