@@ -53,7 +53,7 @@ const { checkReading, modelText, ngrams, closingAnchor } = await import('./readi
 const { RUBRIC } = await import('./reading-lab/rubric.mjs');
 /* 🛟 همان طرحِ ایمنیِ ربات (بخشِ v3.154.0 در CLAUDE.mdِ tarot). بازوی `@nosafety` خاموشش
  * می‌کند تا مقایسه‌ی جفت‌شده «با گارد» و «بدونِ گارد» روی عینِ همان کارت و سؤال باشد. */
-const { readingSafetyPlan, memoryToStore } = await import('../bots/tarot/reading-safety.js');
+const { readingSafetyPlan, memoryToStore, SENSITIVE_LABEL } = await import('../bots/tarot/reading-safety.js');
 const LANG = (await import(`./reading-lab/lang/${LOCALE}.mjs`)).default;
 const { configureLocale } = await import('../bots/tarot/locale-boot.js');
 
@@ -267,10 +267,15 @@ const PROMPT_VARIANTS = {
     ),
 };
 const NO_SAFETY = 'nosafety';
+/* 🏷 ایده‌ی مالک (۱۴۰۵/۰۷/۱۵) به‌عنوانِ بازوی رقیب: سؤالِ حساس همان بلوکِ `readerSafety` را می‌گیرد،
+ * ولی حافظه **دست نمی‌خورد** (نه پاک‌سازی، نه حذفِ فالِ قبلیِ حساس)؛ فقط کاربری که یک بار سؤالِ
+ * حساس پرسیده از آن به بعد برچسبِ «موضوعِ حساس؛ با احتیاط» را در حافظه‌ی ورودیِ مدل می‌گیرد.
+ * جداسازیِ هویت مثلِ بازوی پیش‌فرض روشن می‌ماند تا تنها تفاوت، مدیریتِ حافظه باشد. */
+const TAG = 'tag';
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
 {
-  const bad = ARM_LIST.map(armVariant).filter(v => v && v !== NO_SAFETY && !PROMPT_VARIANTS[v]);
+  const bad = ARM_LIST.map(armVariant).filter(v => v && v !== NO_SAFETY && v !== TAG && !PROMPT_VARIANTS[v]);
   if (bad.length) {
     console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join(', ')}`);
     console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join(', ') || '(هیچ)'}`);
@@ -365,10 +370,22 @@ async function runStep(persona, step, i, state) {
   // 🛟 عیناً `readingCtxFor` ربات: حافظه و فال‌های قبلی از همان طرح می‌گذرند.
   const safetyOn = VARIANT !== NO_SAFETY;
   const prev4 = state.prev.slice(0, 4);
+  const tagOn = VARIANT === TAG;
   const plan = readingSafetyPlan({
     question: step.question, displayName: persona.name, memory: state.memory, prev: prev4,
     lang: LOCALE, safety: safetyOn, identity: safetyOn,
   });
+  if (tagOn) {
+    // حافظه و فال‌های قبلی خام (فقط جداسازیِ هویت)، به‌علاوه‌ی برچسب برای کاربرِ قبلاً حساس.
+    const raw = readingSafetyPlan({
+      question: step.question, displayName: persona.name, memory: state.memory, prev: prev4,
+      lang: LOCALE, safety: false, identity: true,
+    });
+    const label = SENSITIVE_LABEL[LOCALE] || SENSITIVE_LABEL.fa;
+    plan.memory = state.flagged && !raw.isolate ? `${raw.memory} ${label}`.trim() : raw.memory;
+    plan.prev = raw.prev;
+    plan.memoryCut = 0;
+  }
   const ctx = buildReadingCtx({
     user, spread, question: step.question, cards, focusKey: persona.focus, L,
     name: plan.isolate ? '' : persona.name,
@@ -384,7 +401,7 @@ async function runStep(persona, step, i, state) {
   const labels = L.prompts.cardLabels(cards.length);
   /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
   let system = L.prompts.readerSystemV4(locSpread(spread), labels);
-  if (VARIANT && VARIANT !== NO_SAFETY) {
+  if (VARIANT && VARIANT !== NO_SAFETY && VARIANT !== TAG) {
     const before = system;
     system = PROMPT_VARIANTS[VARIANT](system);
     /* ⚠️ اگر جایگزینی هیچ اثری نداشت یعنی الگو دیگر با متنِ locale نمی‌خواند و ما
@@ -469,8 +486,9 @@ async function runStep(persona, step, i, state) {
   // و مثلِ ربات، فالِ «آدمِ دیگر» حافظه‌ی صاحبِ حساب را بازنویسی نمی‌کند.
   const memNext = typeof parsed.memory === 'string' ? memoryToStore({
     newMemory: parsed.memory, oldMemory: state.memory, crisis: plan.crisis, isolate: plan.isolate,
-    lang: LOCALE, safety: safetyOn,
+    lang: LOCALE, safety: safetyOn && !tagOn,
   }) : null;
+  if (tagOn && plan.sensitive) state.flagged = true;
   if (memNext) state.memory = memNext.text.slice(0, 1200);
   state.prev.unshift({
     created_at: state.nowSec, type: spread.id, question: step.question,
@@ -866,6 +884,9 @@ function dumpTranscripts(rows) {
     console.log(`🃏 ${r.cards.map(c => cardName(c.key) + (c.reversed ? '↕' : '')).join('، ')}`);
     const sf = r.safety || {};
     console.log(`🛟 بحران:${sf.crisis ? 1 : 0} حساس:${sf.sensitive ? 1 : 0} آدمِ دیگر:${sf.isolate ? `«${sf.isolate}»` : '-'} حافظه‌ی بریده:${sf.memoryCut || 0}`);
+    // 📥 حافظه و تعدادِ فال‌های قبلی که **واقعاً** به مدل رسید؛ بدونِ این، مقایسه‌ی بازوهای مدیریتِ
+    // حافظه فقط از روی خروجی حدس زده می‌شد (و سنجه‌ی لنگر هم به همین ورودی وابسته است).
+    console.log(`📥 حافظه‌ی ورودی: ${r.ctx?.memory || '-'} | فالِ قبلی: ${(r.ctx?.previous || []).length}`);
     console.log([r.rendered.headline, r.rendered.body, r.rendered.closing, r.careLine].filter(Boolean).join('\n'));
     if (r.memoryAfter) console.log(`🧠 حافظه‌ی ذخیره‌شده: ${r.memoryAfter}`);
   }
