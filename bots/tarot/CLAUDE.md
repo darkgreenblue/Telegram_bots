@@ -1,3 +1,9 @@
+## October 8, 2026: approved Portuguese identity handover (v3.155.0)
+
+The owner selected @TAROT_PT_BOT as the final multilingual identity. `tarot-pt` retains its existing bot-pt.db, wallets, payments, readings, message IDs and media cache; presentation is LOCALE=en with LANGS=en,es,ru,pt and STORAGE_LOCALE=pt. The Russian/unified bot-en.db remains separate and archived; no balance/payment merge is authorized. Retire only tarot-ru, preserve its config/data and prevent future ecosystem/deploy resurrection. Native identity is verified before opening the retained database. Existing Portuguese users keep pt; new users see the same multilingual selector. Public profile is copied from the actual source snapshot, including localized fields/commands and avatar. The Portuguese description GIF was removed through authorized owner BotFather interaction.
+
+Normal safe-window deployment remains mandatory. Preflight checks drained operations and makes consistent private snapshots before source retirement. The handover is not live until actual destination runtime, source retirement, retained history and tracking bridge are verified. Keep all Ads gates/operations/allocation/spend authority at zero; historical Ads are outside this change. Future pilot scope becomes tarot-intl@pt only through the verified unfunded-project CLI, preserving historical experiment contexts. Rollback: revert the handover PR and restore the captured destination profile if required; data files and snapshots remain intact.
+
 # CLAUDE.md — tarot (فال تاروت فارسی 🔮 — 🟢 زنده از ۱۴۰۵/۰۴/۲۰)
 
 > **این ربات زنده است** (تبلیغات فعال؛ کاربر واقعی/پولی): «قوانین تغییر ربات زنده» بند ۲ج CLAUDE.md ریشه در هر PR اجباری است. این فایل باید با هر PR که رفتار ربات را عوض می‌کند به‌روز شود. از `shared/` (logger, errors) استفاده می‌کند.

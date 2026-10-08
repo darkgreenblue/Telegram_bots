@@ -5,8 +5,9 @@ import {extraAdmins} from './extra-admins.js';
 test('support grants apply only to the two approved bots, never other locale bots',()=>{
  let reads=0;
  const read=()=>{reads++;return JSON.stringify({schema:1,adminIds:[123,123,456]});};
- for(const profile of ['.env','.env.ru'])assert.deepEqual(extraAdmins(profile,{read}),[123,456]);
- for(const profile of ['.env.pt','.env.es','../.env','other'])assert.deepEqual(extraAdmins(profile,{read}),[]);
+ for(const profile of ['.env','.env.pt'])assert.deepEqual(extraAdmins(profile,{read,env:{LOCALE:'en',STORAGE_LOCALE:'pt'}}),[123,456]);
+ for(const profile of ['.env.ru','.env.es','../.env','other'])assert.deepEqual(extraAdmins(profile,{read}),[]);
+ assert.deepEqual(extraAdmins('.env.pt',{read,env:{LOCALE:'pt'}}),[]);
  assert.equal(reads,2);
 });
 test('invalid or absent additional grants cannot authorize anyone or log file contents',()=>{

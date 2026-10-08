@@ -76,6 +76,8 @@ const SECRETS = {
   OWNER_TELEGRAM_ID: '111,222',
   VOICE2TEXT_BOT_TOKEN: 'vtok', VOICE2TEXT_OPENROUTER_KEY: 'vkey', VOICE2TEXT_METIS_API_KEY: 'mkey', VOICE2TEXT_NOTION_TOKEN: '',
   TAROT_BOT_TOKEN: 'tok', TAROT_OPENROUTER_KEY: 'key',
+  TAROT_PT_BOT_TOKEN: 'pttok', TAROT_PT_OPENROUTER_KEY: 'ptkey',
+  TAROT_RU_BOT_TOKEN: 'rutok', TAROT_RU_OPENROUTER_KEY: 'rukey',
   // کلیدِ اختیاریِ ویدیو عمداً **ست‌شده** تست می‌شود: خطِ شرطی‌اش دقیقاً همان شکلی است
   // که اگر بیرونِ write_env بنشیند هر دیپلوی را به پینگ‌پنگِ ری‌استارت تبدیل می‌کند.
   TAROT_VIDEO_DISPATCH_TOKEN: 'vidtok',
@@ -105,6 +107,11 @@ console.log('چکِ «دیپلوی بی‌دلیل ری‌استارت نکند�
   chk('سرور تازه: دورِ سوم هم نه', round(d, SECRETS), '');
   const tarotEnv = readFileSync(join(d, 'bots/tarot/.env'), 'utf8');
   chk('ADMIN_IDS در .envِ tarot نوشته شده', /^ADMIN_IDS=111,222$/m.test(tarotEnv), true);
+  const ptEnv=readFileSync(join(d,'bots/tarot/.env.pt'),'utf8');
+  chk('Portuguese token remains assigned to unified destination',/^BOT_TOKEN=pttok$/m.test(ptEnv),true);
+  chk('Unified presentation stays English',/^LOCALE=en$/m.test(ptEnv),true);
+  chk('Portuguese wallet/history storage stays separate',/^STORAGE_LOCALE=pt$/m.test(ptEnv),true);
+  chk('Four languages remain supported',/^LANGS=en,es,ru,pt$/m.test(ptEnv),true);
   chk('tarot توکنِ dispatchِ ویدیو را می‌گیرد', /^VIDEO_DISPATCH_TOKEN=vidtok$/m.test(tarotEnv), true);
   const v2tEnv = readFileSync(join(d, 'bots/voice2text/.env'), 'utf8');
   chk('voice2text کلیدِ اختیاریِ Metis را می‌گیرد', /^METIS_API_KEY=mkey$/m.test(v2tEnv), true);

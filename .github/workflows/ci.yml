@@ -91,6 +91,10 @@ jobs:
         if: matrix.bot == 'tarot'
         run: node --test bots/tarot/extra-admins.test.mjs bots/tarot/runtime-proof.test.mjs
 
+      - name: Portuguese identity handover safeguards
+        if: matrix.bot == 'tarot'
+        run: node tools/check-storage-profile.mjs
+
       - name: Metis Gemini routing check
         if: matrix.bot == 'voice2text'
         run: node bots/voice2text/metis.test.mjs
