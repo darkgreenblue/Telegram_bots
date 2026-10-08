@@ -85,7 +85,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 // 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
 // 1.5.0: سوییچ فقط-مالکِ «برای کافه‌بازار»؛ هر فلو می‌تواند جداگانه از متیس (Gemini) برود.
-const PRODUCT_VERSION = '1.5.0';
+const PRODUCT_VERSION = '1.6.0';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -193,6 +193,21 @@ db.exec(`
 `);
 // Migration: مبلغِ رزروشده‌ی این فلو (کسر اتمیک در شروع پردازش؛ در شکست/ری‌استارت refund می‌شود)
 try { db.prepare('ALTER TABLE voice_flows ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0').run(); } catch {}
+// خروجیِ پولیِ هر ویس در DB می‌ماند (v1.6.0): دکمه‌های بعد از پردازش (پیام/فایل/نوشن) هرگز منقضی نمی‌شوند،
+// حتی بعد از ساعت‌ها یا ری‌استارت. قبلاً متن فقط در حافظه بود و بعد از ۱۵ دقیقه دور ریخته می‌شد.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS voice_results (
+    token         TEXT    PRIMARY KEY,
+    user_id       INTEGER NOT NULL,
+    text          TEXT    NOT NULL,
+    chat_id       INTEGER,
+    result_msg_id INTEGER,
+    voice_msg_id  INTEGER,
+    notion_msg_id INTEGER,
+    created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_voice_results_notion ON voice_results(chat_id, notion_msg_id);
+`);
 
 /* ===== آنالیتیکس کمینه — کپی محلی هم‌قرارداد shared/analytics.js (ANALYTICS_SCHEMA_VERSION = 3) =====
    این ربات عمداً از shared import نمی‌کند (قانون خودکفایی)؛ چک CI این بلوک را با shared سینک نگه می‌دارد.
@@ -289,6 +304,11 @@ const stmts = {
   setFlowReserved: db.prepare('UPDATE voice_flows SET reserved=?, updated_at=unixepoch() WHERE token=?'),
   setFlowStep:   db.prepare('UPDATE voice_flows SET step=?, type=?, model=?, updated_at=unixepoch() WHERE token=?'),
   setFlowModel:  db.prepare('UPDATE voice_flows SET model=?, updated_at=unixepoch() WHERE token=?'),
+  // voice_results (خروجیِ ماندگار)
+  saveResult:    db.prepare('INSERT OR REPLACE INTO voice_results (token, user_id, text, chat_id, result_msg_id, voice_msg_id) VALUES (?,?,?,?,?,?)'),
+  getResult:     db.prepare('SELECT * FROM voice_results WHERE token=?'),
+  setResultNotionMsg: db.prepare('UPDATE voice_results SET notion_msg_id=? WHERE token=?'),
+  resultByNotionMsg:  db.prepare('SELECT * FROM voice_results WHERE chat_id=? AND notion_msg_id=?'),
   // dashboard
   dailyRevenue:   db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-86400"),
   monthlyRevenue: db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE status='approved' AND created_at >= unixepoch()-2592000"),
@@ -906,7 +926,8 @@ bot.catch(async (err, ctx) => {
 const sessions    = new Map(); // token → voice session
 const userStates  = new Map(); // userId → { step, paymentId, ... }
 const adminStates = new Map(); // adminId → { step, partial, ... }
-const notionStates = new Map(); // userId → { text, chatId, promptMsgId, navPath }
+const notionStates = new Map(); // userId → { text, chatId, promptMsgId, navPath } (فقط سازگاری؛ منبعِ اصلی voice_results)
+const outputDelivering = new Set(); // token‌هایی که ارسالِ خروجی‌شان در جریان است (ضدِ دوبار-تپ)
 
 // پردازش هم‌زمان: حداکثر چند فایل صوتی به‌طور موازی برای هر کاربر
 // (هم‌راستا با MAX_ACTIVE_FLOWS تا ویسِ پذیرفته‌شده پشت سد «ظرفیت پر» نماند)
@@ -917,7 +938,8 @@ const incJob     = (uid) => activeJobs.set(uid, jobCount(uid) + 1);
 const decJob     = (uid) => { const n = jobCount(uid) - 1; if (n > 0) activeJobs.set(uid, n); else activeJobs.delete(uid); };
 
 // فلوی تبدیل ویس «ناتمام» تا وقتی به یکی از این مرحله‌ها نرسیده فعال محسوب می‌شود
-const FLOW_NONTERMINAL = new Set(['await_process_type', 'processing', 'await_output_format', 'processing_output']);
+// await_output_format عمداً نیست: خروجیِ پولی در DB ذخیره است و نباید ظرفیت را اشغال کند یا لغوشدنی باشد
+const FLOW_NONTERMINAL = new Set(['await_process_type', 'processing', 'processing_output']);
 const MAX_ACTIVE_FLOWS = 10;
 // ترتیب فارسی برای برچسب دکمه‌های «لغو پردازش …» (تا سقف MAX_ACTIVE_FLOWS)
 const FLOW_ORDINALS = ['اول','دوم','سوم','چهارم','پنجم','ششم','هفتم','هشتم','نهم','دهم'];
@@ -945,7 +967,8 @@ function makeToken() { return Math.random().toString(36).slice(2,10) + Date.now(
 // انقضای فلوهای بازِ ناتمام: ویس + پیام «یکی از حالت‌ها رو انتخاب کن» بعد از این مدت منقضی می‌شود
 // (تلگرام خودش دکمه‌ی پیام‌های قدیمی را منقضی نمی‌کند؛ پس خودمان مدیریتش می‌کنیم تا روی RAM/سشن انباشته نشود)
 const FLOW_TTL_MS = 15 * 60 * 1000; // ۱۵ دقیقه
-const FLOW_EXPIRABLE = new Set(['await_process_type', 'await_output_format']);
+// فقط ویسِ پردازش‌نشده (بدونِ هیچ هزینه) منقضی می‌شود؛ انتخابِ قالبِ خروجیِ پولی هرگز (v1.6.0)
+const FLOW_EXPIRABLE = new Set(['await_process_type']);
 const FLOW_EXPIRED_MSG = '⏱️ این درخواست منقضی شد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.';
 
 setInterval(async () => {
@@ -1290,7 +1313,7 @@ async function generateNotionTitle(text) {
   }
 }
 
-async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, text) {
+async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, text, token) {
   if (userId !== OWNER_ID || !NOTION_TOKEN) return;
   try {
     const sentMsg = await telegram.sendMessage(chatId, '📤 می‌خوای به نوشن بفرستم؟', {
@@ -1299,6 +1322,8 @@ async function maybeSendNotionPrompt(telegram, userId, chatId, replyToMsgId, tex
       reply_markup: { inline_keyboard: [[{ text: '✅ بله بفرست', callback_data: 'ntn:start' }]] },
     });
     notionStates.set(userId, { text, chatId, promptMsgId: sentMsg.message_id, navPath: [], createdAt: Date.now() });
+    // پیوندِ پیامِ پیشنهادِ نوشن به خروجیِ ماندگارِ همان ویس: هر دکمه به متنِ ویسِ خودش می‌رود، نه آخرین ویس
+    if (token) { try { stmts.setResultNotionMsg.run(sentMsg.message_id, token); } catch (e) { logErr('setResultNotionMsg:', e.message); } }
   } catch (e) {
     logErr('maybeSendNotionPrompt error:', e.message);
   }
@@ -1346,7 +1371,7 @@ bot.hears([RESET_TEST_BTN, '🔄 ریست ربات (تست)'], async (ctx) => {
   if (!isAdmin(uid)) return;
   // صف اکشن رسیدها به payment_id وصل است → قبل از حذف payments با subquery پاک شود (ضد ردیف یتیم)
   try { db.prepare('DELETE FROM admin_actions WHERE payment_id IN (SELECT id FROM payments WHERE user_id=?)').run(uid); } catch (e) { logErr('reset-test del admin_actions', e.message); }
-  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['events','user_id']]) {
+  for (const [t, col] of [['users','telegram_id'],['usage_log','user_id'],['payments','user_id'],['discount_uses','user_id'],['pro_whitelist','user_id'],['voice_flows','user_id'],['voice_results','user_id'],['events','user_id']]) {
     try { db.prepare(`DELETE FROM ${t} WHERE ${col}=?`).run(uid); } catch (e) { logErr('reset-test del', t, e.message); }
   }
   userStates.delete(uid); notionStates.delete(uid); activeJobs.delete(uid);
@@ -3121,18 +3146,21 @@ bot.on('callback_query', async (ctx) => {
 
           log(`✅ job done   uid=${sessUserId} model=${userModel} elapsed=${Date.now()-jobStart}ms chars=${text.length}`);
           track(sessUserId, 'product_delivered', { type, model: userModel, duration_sec: session.durationSec || 0 });
+          // متنِ پولی قبل از هر ارسال در DB ماندگار می‌شود (دکمه‌های بعدی هرگز منقضی نشوند)
+          try { stmts.saveResult.run(token, sessUserId, text, waiting.chat.id, waiting.message_id, session.voiceMsgId || null); } catch (e) { logErr('saveResult:', e.message); }
           const parts = splitForTelegram(text);
           if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
             try { await ctx.telegram.editMessageText(waiting.chat.id, waiting.message_id, undefined, parts[0] || 'متنی برنگشت.'); } catch {}
             session.step = 'ready';
             try { stmts.setFlowStatus.run('completed', token); } catch {}
             await maybeWarnLowBalance(ctx);
-            await maybeSendNotionPrompt(ctx.telegram, sessUserId, waiting.chat.id, waiting.message_id, text);
+            await maybeSendNotionPrompt(ctx.telegram, sessUserId, waiting.chat.id, waiting.message_id, text, token);
           } else {
             session.resultText      = text;
             session.resultMsgChatId = waiting.chat.id;
             session.resultMsgId     = waiting.message_id;
             session.step            = 'await_output_format';
+            try { stmts.setFlowStatus.run('completed', token); } catch {} // محصول تحویل شد؛ فقط قالب مانده
             try {
               await ctx.telegram.editMessageText(
                 waiting.chat.id, waiting.message_id, undefined,
@@ -3162,45 +3190,56 @@ bot.on('callback_query', async (ctx) => {
     if (o) {
       const [, format, token] = o;
       const session = sessions.get(token);
-      if (!session?.resultText) return ctx.answerCbQuery('منقضی شده یا نامعتبر است.');
-      if (session.userId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
-      if (session.step !== 'await_output_format') return ctx.answerCbQuery('قبلاً پردازش شده.', { show_alert: true });
+      // منبعِ ماندگار: DB (بعد از ساعت‌ها/ری‌استارت هم کار می‌کند)؛ حافظه فقط برای ویس‌های قبل از v1.6.0
+      let row = null;
+      try { row = stmts.getResult.get(token); } catch (e) { logErr('getResult:', e.message); }
+      const resultText = row?.text || session?.resultText;
+      const ownerId    = row ? row.user_id : session?.userId;
+      if (!resultText) return ctx.answerCbQuery('متن این ویس پیدا نشد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
+      if (ownerId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
+      // ضدِ دوبار-تپ (قفلِ سینکرون قبل از اولین await)
+      if (outputDelivering.has(token)) return ctx.answerCbQuery('در حال ارسال است...');
+      outputDelivering.add(token);
+      if (session) session.step = 'processing_output';
+      const resultMsgChatId = row?.chat_id ?? session?.resultMsgChatId;
+      const resultMsgId     = row?.result_msg_id ?? session?.resultMsgId;
+      const voiceMsgId      = row?.voice_msg_id ?? session?.voiceMsgId;
+      try {
 
-      session.step = 'processing_output';
-
-      const charCount  = session.resultText.length.toLocaleString('fa-IR');
+      const charCount  = resultText.length.toLocaleString('fa-IR');
       const methodName = format === 'messages' ? 'پیام‌های جداگانه' : 'فایل';
 
       try { await ctx.deleteMessage(); } catch {}
 
-      const rt = replyTo(session.voiceMsgId);
+      const rt = replyTo(voiceMsgId);
       let lastOutputMsg;
       if (format === 'messages') {
         await ctx.answerCbQuery('در حال ارسال پیام‌ها...');
-        lastOutputMsg = await sendLongTextAsMessages(ctx, session.resultText, rt);
+        lastOutputMsg = await sendLongTextAsMessages(ctx, resultText, rt);
       } else {
         await ctx.answerCbQuery('در حال آماده‌سازی فایل...');
         try {
-          lastOutputMsg = await sendTextAsFile(ctx, session.resultText, rt);
+          lastOutputMsg = await sendTextAsFile(ctx, resultText, rt);
         } catch (err) {
           console.error('❌ sendTextAsFile error:', err);
-          lastOutputMsg = await sendLongTextAsMessages(ctx, session.resultText, rt);
+          lastOutputMsg = await sendLongTextAsMessages(ctx, resultText, rt);
         }
       }
 
       try {
         await ctx.telegram.editMessageText(
-          session.resultMsgChatId, session.resultMsgId, undefined,
+          resultMsgChatId, resultMsgId, undefined,
           `${charCount} کاراکتر به روش ${methodName} تحویل داده شد.`
         );
       } catch {}
 
-      session.step = 'ready';
+      if (session) session.step = 'ready';
       try { stmts.setFlowStatus.run('completed', token); } catch {}
       await maybeWarnLowBalance(ctx);
       if (lastOutputMsg) {
-        await maybeSendNotionPrompt(ctx.telegram, ctx.from.id, ctx.chat.id, lastOutputMsg.message_id, session.resultText);
+        await maybeSendNotionPrompt(ctx.telegram, ctx.from.id, ctx.chat.id, lastOutputMsg.message_id, resultText, token);
       }
+      } finally { outputDelivering.delete(token); }
       return;
     }
 
@@ -3210,8 +3249,18 @@ bot.on('callback_query', async (ctx) => {
       if (uid !== OWNER_ID) return ctx.answerCbQuery('دسترسی ندارید');
       if (!NOTION_TOKEN) return ctx.answerCbQuery('⚠️ NOTION_TOKEN تنظیم نشده');
 
-      const state = notionStates.get(uid);
-      if (!state) return ctx.answerCbQuery('نشست منقضی شده — ویس جدید بفرست');
+      // state per پیام (نه per کاربر): هر دکمه‌ی نوشن به متنِ ویسِ خودش وصل است و هرگز منقضی نمی‌شود
+      const cbMsg = ctx.callbackQuery.message;
+      let state = null;
+      try {
+        const r = cbMsg && stmts.resultByNotionMsg.get(cbMsg.chat.id, cbMsg.message_id);
+        if (r && r.user_id === uid) state = { text: r.text, chatId: r.chat_id, promptMsgId: r.notion_msg_id };
+      } catch (e) { logErr('resultByNotionMsg:', e.message); }
+      if (!state) {
+        const mem = notionStates.get(uid); // ویس‌های قبل از v1.6.0
+        if (mem && (!cbMsg || mem.promptMsgId === cbMsg.message_id)) state = mem;
+      }
+      if (!state) return ctx.answerCbQuery('متن این ویس پیدا نشد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
 
       const editNotionMsg = async (text, keyboard) => {
         try {
