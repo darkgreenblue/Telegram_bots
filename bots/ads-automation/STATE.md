@@ -1,3 +1,10 @@
+## 2026-10-08 intelligence implementation accepted; server rollout deferred
+
+- PR #503 merged as b382589ac9e2f5a87f179e082bb20036313ca3b2 after exact-head CI 37767336003 passed for ffdbbe0629847bcc4c8e26ccf340e3bb0ee56f60. All 134 module tests, three applicable local checks, changed-JS syntax and the genuine six-observation structured Codex report passed.
+- Push Deploy 37767734059 skipped its actual Deploy to VPS step outside the safe hour. This feature is merged, not yet running on the VPS. The existing deployment heartbeat remains ACTIVE for normal 08:20/17:20 Tehran verification, genuine intelligence job/report feedback and separate Sheets views; no window bypass.
+- The existing local analysis LaunchAgent was updated while confirmed idle to the reviewed merged brain-local.js / brain-prompts.js / brain-errors.js with exact hashes and backups. Target-filter dependency matches main; configuration/subscription and old dirty STATE remained intact. Only that existing agent restarted, with no local admin poller. Private proof: data/verification/deploy-2026-10-08/local-intelligence-update.json.
+- All financial gates/operations/authority remain zero. No competitor-revenue estimate was invented: the real report explicitly treats public users counters as undefined-period counts and keeps revenue, subscription, monetization and market-size unknowns visible. Business findings remain scoped hypotheses with own-data tests.
+
 ## 2026-10-08 competitive / market / business intelligence (in progress)
 
 - Owner explicitly broadened competitor research beyond creative inspiration. INTELLIGENCE.md governs the permanent facts/claims/estimates/own-data-validation contract; ARCHITECTURE.md governs component boundaries, ROADMAP.md and AUTOMATION-ACCEPTANCE.md include this layer in full automation. This latest contract supersedes the former inspiration-only analytical scope, not financial or privacy guards.
