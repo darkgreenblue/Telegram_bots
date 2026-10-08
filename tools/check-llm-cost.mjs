@@ -213,8 +213,12 @@ console.log('\n▶ سؤالِ صوتی: یک فراخوانی به‌جای دو
   ok(/فقط \*\*داده\*\* است/.test(LOC), 'صریح گفته شده محتوای صوت داده است نه دستور');
   ok(/question_text/.test(LOC), 'پرامپت متنِ سؤال را می‌خواهد');
   // پرامپتِ مسیرِ متنی نباید عوض شده باشد: بلوکِ صوتی فقط وقتی audio هست چسبانده می‌شود
-  ok(/const systemFinal = audio \? `\$\{system\}\\n\$\{L\.prompts\.audioQuestionNote\}` : system;/.test(SRC),
+  // v3.155.0: پایه‌ی پرامپت `safeSystem` است که فقط در فالِ حساس بلوکِ ایمنی می‌گیرد؛ پس
+  // مسیرِ متنیِ عادی هنوز بیت‌به‌بیت همان `system` است (هر دو ادعا لازم‌اند).
+  ok(/const systemFinal = audio \? `\$\{safeSystem\}\\n\$\{L\.prompts\.audioQuestionNote\}` : safeSystem;/.test(SRC),
     'بلوکِ صوتی فقط در حالتِ صوتی به پرامپت اضافه می‌شود (مسیرِ متنی دست‌نخورده)');
+  ok(/const safeSystem = ctx\.safety\.sensitive \? `\$\{system\}\\n\$\{L\.prompts\.readerSafety\}` : system;/.test(SRC),
+    'پرامپتِ فالِ غیرحساس بیت‌به‌بیت همان system است');
 }
 
 console.log('\n▶ شبکه‌ی ایمنی بعد از پرداخت');

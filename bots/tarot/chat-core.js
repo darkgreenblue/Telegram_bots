@@ -366,6 +366,25 @@ const FA_CRISIS = [
   'نمیخوام زنده', 'دیگه نمی‌خوام باشم', 'رگم را', 'رگمو', 'قرص بخورم و بمیرم',
   'می‌خوام بمیرم', 'میخوام بمیرم', 'به خودم آسیب', 'به خودم صدمه', 'خودزنی',
 ];
+/* 🛟 شکل‌هایی که با «زیررشته» گرفتنی نیستند (بازبینیِ سؤال‌های واقعی، ۱۴۰۵/۰۷/۱۴): هشت سؤالِ
+ * صریح از تشخیص رد می‌شدند، چون فعلِ پیش از «بمیرم» یا فاصله‌ی بینِ واژه‌ها با فهرستِ بالا
+ * نمی‌خواند («میخام بمیرم»، «باید فقط بمیرم»، «بهتره بمیرم»، «چرا نمیمیرم»، «پایان دادن به
+ * زندگیم»، «به مردن فکر میکنم»، «قرص خواب بخورم… کما»). هر الگو روی متنِ **نرمال‌شده** است
+ * و فقط از ابتدای یک کلمه شروع می‌شود.
+ * ⚠️ عمداً تنگ: اصطلاح‌های روزمره («از استرس دارم میمیرم»، «میمیرم براش») و پرسیدنِ زمانِ
+ * مرگ («کی میمیرم؟») بحران نیستند؛ روی همه‌ی سؤال‌ها و حافظه‌های واقعی **صفر** هشدارِ کاذب
+ * داد. برچسب (نه متنِ کاربر) برگردانده می‌شود تا هیچ لاگی متنِ کاربر را نگیرد. */
+const CRISIS_W = '(?:^| )';
+const FA_CRISIS_RE = [
+  ['want_die', new RegExp(`${CRISIS_W}(?:میخوام|میخام|می خوام|می خام|میخواهم|می خواهم|دلم میخواد|دلم میخاد|دلم می خواد|بهتره|باید|کاش)(?: دیگه| فقط| واقعا| اصلا)* بمیرم(?= |$)`)],
+  ['why_not_die', new RegExp(`${CRISIS_W}چرا (?:نمیمیرم|نمی میرم)(?= |$)`)],
+  ['end_life', new RegExp(`${CRISIS_W}(?:پایان ?دادن|پایان بدم|پایان بدهم|خاتمه دادن|خاتمه بدم) به زندگیم`)],
+  ['end_life_2', new RegExp(`${CRISIS_W}(?:زندگیمو|زندگیم رو|زندگیم را) (?:تموم|تمام) (?:کنم|میکنم|می کنم)(?= |$)`)],
+  ['no_live', new RegExp(`${CRISIS_W}(?:نمیخوام|نمیخام|نمی خوام|نمی خام|نمیخواهم) (?:دیگه |اصلا |دیگر )?زنده (?:باشم|بمونم|بمانم)`)],
+  ['think_death', new RegExp(`${CRISIS_W}به (?:مردن|مرگ) فکر (?:میکنم|می کنم|کردم)(?= |$)`)],
+  ['pills', new RegExp(`${CRISIS_W}قرص[^ ]*(?: [^ ]+){0,6} (?:بخورم|میخورم|می خورم)(?: [^ ]+){0,5} (?:بمیرم|میمیرم|می میرم|کما)(?= |$)`)],
+  ['death_denied', new RegExp(`${CRISIS_W}مرگ ?(?:منو|مرا|من رو) (?:نداد|نمیده|نمی ده)(?= |$)`)],
+];
 /* 🛟 «حرفِ خطر» در **جوابِ مدل** (نه در پیامِ کاربر). تصمیمِ صریحِ مالک (۱۴۰۵/۰۷/۰۲):
  * به کسی که فقط کمی حالش بد است نباید جمله‌ی «اگه فکرِ آسیب‌زدن به خودت داری…» یا
  * ارجاع به اورژانس برسد؛ «به کسی که فقط یکم ناراحته حتماً حسِ بدتری می‌ده» و فکرِ آسیب
@@ -485,7 +504,7 @@ const FA_THANKS_EXTRA = [
 ];
 
 const FA_LANG = {
-  crisis: FA_CRISIS, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
+  crisis: FA_CRISIS, crisisRe: FA_CRISIS_RE, safetyTalk: FA_SAFETY_TALK, smallTalk: FA_SMALLTALK, chatbait: FA_CHATBAIT,
   followUpMeta: FA_FU_META, followUpAssent: FA_FU_ASSENT, followUpFirstPerson: FA_FU_FIRSTPERSON, offer: FA_OFFER,
   newReadingAsk: FA_NEW_ASK, latinFix: true, assent: FA_ASSENT,
   takeFix: true, needsDataFix: true, alienFix: true,
@@ -501,6 +520,9 @@ export function configureChatLang(d, lang = DEFAULT_LANG) {
   const arr = (x, fb) => (Array.isArray(x) && x.length ? x.map(String) : fb);
   LANG_T.set(lang, {
     crisis:    arr(d.crisis, base.crisis),
+    // الگوهای regex فارسی‌اند؛ زبانِ دیگر فقط اگر langdata خودش `[label, RegExp]` بدهد.
+    crisisRe: Array.isArray(d.crisisRe) && d.crisisRe.every((x) => x?.[1] instanceof RegExp) ? d.crisisRe
+      : (lang === 'fa' ? base.crisisRe : []),
     safetyTalk: arr(d.safetyTalk, base.safetyTalk),
     smallTalk: arr(d.smallTalk, base.smallTalk),
     chatbait:  arr(d.chatbait, base.chatbait),
@@ -534,11 +556,34 @@ export const norm = (s) => String(s || '').toLowerCase()
   .replace(/\s+/g, ' ')
   .trim();
 
+/* 🐛 دو قرمزِ کاذبِ واقعی (ممیزیِ ۲۲ فالِ واقعی، ۱۴۰۵/۰۷/۱۴):
+ *   ۱) الگو **وسطِ** یک کلمه می‌نشست: «پدربزرگمو» و «داماد بزرگمو» هر دو «رگمو» دارند.
+ *      حالا الگو فقط از **ابتدای یک کلمه** شروع می‌شود (پسوند آزاد است: «خودکشیه»).
+ *   ۲) «خودمو بکشم عقب/کنار» (فاصله گرفتن) با «خودمو بکشم» یکی گرفته می‌شد. هر الگویی که
+ *      به فعلِ «کشیدن» ختم می‌شود، اگر بلافاصله یک قیدِ جهت بیاید بحران نیست.
+ * هر دو در گفتگو هم پیامِ ثابتِ ۱۲۳ را به‌جای جواب می‌فرستادند. */
+const KESH_DIR = new Set(['عقب', 'کنار', 'بیرون', 'بالا', 'پایین', 'جلو', 'کنارش', 'عقبتر', 'کنارتر']);
+const endsWithKesh = (n) => /(?:بکشم|میکشم|می کشم)$/.test(n);
 /** الگوی بحران که شلیک کرده، یا `''`. روی **هر طولی** از پیام اجرا می‌شود. */
 export function crisisIn(text) {
   const t = norm(text);
   if (!t) return '';
-  for (const p of LANG.crisis) { const n = norm(p); if (n && t.includes(n)) return p; }
+  const padded = ` ${t} `;
+  for (const p of LANG.crisis) {
+    const n = norm(p);
+    if (!n) continue;
+    let i = padded.indexOf(` ${n}`);
+    while (i >= 0) {
+      const after = padded.slice(i + n.length + 1);
+      const next = after.trimStart().split(' ')[0];
+      /* «خود کشیده» (خود را کنار کشیده) خودکشی نیست: الگوی «…کشی» اگر بلافاصله «د» بگیرد
+       * فعلِ کشیدن است. قرمزِ کاذبِ واقعی روی یک حافظه‌ی کاربر (۱۴۰۵/۰۷/۱۴). */
+      const kashid = /کشی$/.test(n) && after[0] === 'د';
+      if (!kashid && !(endsWithKesh(n) && KESH_DIR.has(next))) return p;
+      i = padded.indexOf(` ${n}`, i + 1);
+    }
+  }
+  for (const [label, re] of LANG.crisisRe || []) if (re.test(padded)) return label;
   return '';
 }
 
