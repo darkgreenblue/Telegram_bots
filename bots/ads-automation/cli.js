@@ -1,3 +1,4 @@
+import { archiveIntelligenceEvidence,archiveIntelligenceEstimate,intelligenceContext,intelligenceArchive,queueIntelligenceResearch } from './intelligence.js';
 import 'dotenv/config';
 import { openStore,addCandidate,row } from './db.js';
 import { queueMarketResearch,queueResearch,queueStrategy } from './brain.js';
@@ -42,6 +43,11 @@ try{
   else if(cmd==='peer-interface')result={jobId:recordBotInterfaceEvidence(store,Number(arg.candidateId),arg.evidence)};
   else if(cmd==='competitor-observation')result=archiveCompetitorObservation(store,Number(arg.candidateId),arg.observation);
   else if(cmd==='competitor-benchmark')result=competitorBenchmark(store,Number(arg.candidateId),{limit:arg.limit??10});
+  else if(cmd==='intelligence-evidence')result=archiveIntelligenceEvidence(store,Number(arg.projectId),arg.evidence);
+  else if(cmd==='intelligence-estimate')result=archiveIntelligenceEstimate(store,Number(arg.projectId),arg.estimate);
+  else if(cmd==='intelligence-research')result={jobId:queueIntelligenceResearch(store,Number(arg.projectId))};
+  else if(cmd==='intelligence-archive')result=intelligenceArchive(store,Number(arg.projectId),arg);
+  else if(cmd==='intelligence')result=intelligenceContext(store,Number(arg.projectId));
   else if(cmd==='strategy')result={jobId:queueStrategy(store,Number(arg.candidateId))};
   else if(cmd==='shortlist')result=shortlist(db.prepare(`SELECT * FROM candidates WHERE project_id=?`).all(Number(arg.projectId)),Number(arg.limit)||20,
     {policy:row(db,'projects',Number(arg.projectId))?.initial_peer_policy});

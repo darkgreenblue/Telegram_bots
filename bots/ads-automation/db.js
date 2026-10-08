@@ -47,6 +47,28 @@ export function openStore(path = process.env.ADS_DB_PATH || './data/ads.db') {
       BEFORE UPDATE ON competitor_observations BEGIN SELECT RAISE(ABORT,'competitor observation is immutable'); END;
     CREATE TRIGGER IF NOT EXISTS competitor_observation_immutable_delete
       BEFORE DELETE ON competitor_observations BEGIN SELECT RAISE(ABORT,'competitor observation is immutable'); END;
+    CREATE TABLE IF NOT EXISTS intelligence_evidence (
+      id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id),
+      digest TEXT NOT NULL UNIQUE,evidence_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT(unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS intelligence_evidence_project ON intelligence_evidence(project_id,id);
+    CREATE TABLE IF NOT EXISTS intelligence_reports (
+      id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id),
+      job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(id),report_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT(unixepoch())
+    );
+    CREATE TABLE IF NOT EXISTS intelligence_estimates (
+      id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id),
+      digest TEXT NOT NULL UNIQUE,estimate_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT(unixepoch())
+    );
+    CREATE TRIGGER IF NOT EXISTS intelligence_evidence_immutable_update BEFORE UPDATE ON intelligence_evidence BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS intelligence_evidence_immutable_delete BEFORE DELETE ON intelligence_evidence BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS intelligence_reports_immutable_update BEFORE UPDATE ON intelligence_reports BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS intelligence_reports_immutable_delete BEFORE DELETE ON intelligence_reports BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS intelligence_estimates_immutable_update BEFORE UPDATE ON intelligence_estimates BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS intelligence_estimates_immutable_delete BEFORE DELETE ON intelligence_estimates BEGIN SELECT RAISE(ABORT,'intelligence record is immutable'); END;
     CREATE TABLE IF NOT EXISTS experiments (
       id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
       candidate_id INTEGER NOT NULL REFERENCES candidates(id),

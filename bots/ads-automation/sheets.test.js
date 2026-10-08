@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openStore } from './db.js';
 import { GoogleSheetsMirror } from './sheets.js';
 
-test('mirror replaces three tabs atomically and safely replays an ambiguous write',async()=>{
+test('mirror replaces six tabs atomically and safely replays an ambiguous write',async()=>{
   const store=openStore(':memory:');
   store.db.prepare(`INSERT INTO projects(id,slug,name,scope,destination,market,language,context)
     VALUES (1,'pilot','Pilot','tarot-intl@en','https://t.me/samplebot','global','en','test')`).run();
@@ -12,7 +12,7 @@ test('mirror replaces three tabs atomically and safely replays an ambiguous writ
   const calls=[],writes=[];
   const mirror=new GoogleSheetsMirror({spreadsheetId:'sheet',credentialsPath:'unused',sleep:async()=>{},fetcher:async(url,options)=>{
     calls.push(url);
-    if(options.method==='GET')return Response.json({sheets:['Candidates','Tests','Insights','Archive'].map((title,sheetId)=>
+    if(options.method==='GET')return Response.json({sheets:['Candidates','Tests','Insights','CompetitorEvidence','IntelligenceEstimates','MarketIntelligence','Archive'].map((title,sheetId)=>
       ({properties:{title,sheetId,gridProperties:{rowCount:1000}}}))});
     writes.push(JSON.parse(options.body));
     if(writes.length===1)throw new Error('response lost after commit');
@@ -22,7 +22,7 @@ test('mirror replaces three tabs atomically and safely replays an ambiguous writ
   assert.equal(await mirror.sync(store,1),true);
   assert.equal(calls.some(url=>url.includes('batchClear')),false);
   assert.deepEqual(writes[0],writes[1]);
-  assert.deepEqual(writes[0].requests.map(r=>r.updateCells.range.sheetId),[0,1,2]);
+  assert.deepEqual(writes[0].requests.map(r=>r.updateCells.range.sheetId),[0,1,2,3,4,5]);
   const cells=writes[0].requests[0].updateCells;
   assert.equal(cells.range.endRowIndex,1000);assert.equal(cells.fields,'userEnteredValue');
   assert.deepEqual(cells.rows[1].values[2].userEnteredValue,{stringValue:'=formula-looking text'});

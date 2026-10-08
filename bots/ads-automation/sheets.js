@@ -1,3 +1,4 @@
+import { intelligenceRows } from './intelligence.js';
 import { readFile } from 'node:fs/promises';
 import { createSign } from 'node:crypto';
 
@@ -47,7 +48,7 @@ export class GoogleSheetsMirror {
     const path='?fields=sheets.properties(sheetId,title,gridProperties.rowCount)';
     let meta=await this.api(path);
     const existing=new Set((meta.sheets||[]).map(s=>s.properties.title));
-    const missing=['Candidates','Tests','Insights'].filter(t=>!existing.has(t));
+    const missing=['Candidates','Tests','Insights','CompetitorEvidence','IntelligenceEstimates','MarketIntelligence'].filter(t=>!existing.has(t));
     // addSheet is not replayed after an ambiguous response. The next sync reads
     // the actual tab list again, rather than blindly creating it twice.
     if(missing.length){
@@ -64,6 +65,8 @@ export class GoogleSheetsMirror {
     const tests=db.prepare(`SELECT e.*,c.surface,c.value FROM experiments e JOIN candidates c ON c.id=e.candidate_id
       WHERE e.project_id=? ORDER BY e.id`).all(projectId);
     const insights=db.prepare('SELECT * FROM insights WHERE project_id=? ORDER BY id').all(projectId);
+    const intelligence=intelligenceRows(store,projectId);
+    const cellJson=v=>JSON.stringify(v).slice(0,45000);
     const tables={
       Candidates:[['شناسه','نوع','مقصد یا عبارت','وضعیت','امتیاز','فرضیه','منبع','ویژگی‌ها','شواهد'],
         ...candidates.map(c=>[c.id,c.surface,c.value,c.status,c.score,c.hypothesis,c.source,c.features_json,c.evidence_json])],
@@ -71,7 +74,16 @@ export class GoogleSheetsMirror {
         ...tests.map(e=>[e.id,e.surface,e.value,e.tracking_code||'',e.ad_id||'',e.status,e.cpm,e.last_spent,e.last_views,e.last_actions,
           e.last_actions?e.last_spent/e.last_actions:'',e.test_round])],
       Insights:[['شناسه','سطح','ادعا','وضعیت','فرضیه','شواهد'],
-        ...insights.map(i=>[i.id,i.scope,i.claim,i.status,i.hypothesis,i.evidence_json])]
+        ...insights.map(i=>[i.id,i.scope,i.claim,i.status,i.hypothesis,i.evidence_json])],
+      CompetitorEvidence:[['مرجع','طبقه','رقیب','میزبان','منبع','زمان مشاهده','زبان','متن دقیق (حداکثر ۴۵هزار کاراکتر)','متریک و تعریف','فایل و هش','محدودیت','مقصد','زمینه'],
+        ...intelligence.evidence.map(e=>[e.ref,e.classification,e.entityUrl,e.hostUrl,e.sourceUrl,e.checkedAt,e.language??'unknown',
+          e.visibleText.slice(0,45000),cellJson(e.facts),cellJson(e.artifacts),cellJson(e.limitations),e.destinationUrl??'',e.context])],
+      IntelligenceEstimates:[['شناسه','طبقه','عنوان','فرمول','نتیجه و واحد','دوره','تاریخ','ورودی و منبع','فرضیات','محدودیت','اطمینان','تفسیر'],
+        ...intelligence.estimates.map(e=>[e.id,e.classification,e.title,e.formula,cellJson(e.result),e.period,e.asOf,
+          cellJson(e.inputs),cellJson(e.assumptions),cellJson(e.caveats),e.confidence,e.interpretation])],
+      MarketIntelligence:[['گزارش','طبقه','حوزه','کاربرد','ادعا','محدوده','مرجع و نقل قول','فرضیه','شناسه فرضیه','آزمون با داده خودمان','محدودیت','وضعیت'],
+        ...intelligence.reports.flatMap(r=>r.findings.map(f=>[r.id,f.classification,f.domain,f.purpose,f.claim,cellJson(f.scope),
+          cellJson(f.evidence),f.hypothesis,f.hypothesisId,f.ownDataTest,cellJson(f.caveats),f.status]))]
     };
     const names=Object.keys(tables);
     const requests=[];

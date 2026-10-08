@@ -105,7 +105,7 @@ test('enrichment persists real evidence and queues one review; repeated cycle do
     assert.equal(await enrichPublicPeers(s,options),0);
     const job=s.db.prepare('SELECT * FROM jobs WHERE kind=?').get('peer_review');
     assert.equal(JSON.parse(job.input_json).peer.audience.value,24000);
-    assert.equal(s.db.prepare('SELECT count(*) n FROM jobs').get().n,1);
+    assert.equal(s.db.prepare("SELECT count(*) n FROM jobs WHERE kind='peer_review'").get().n,1);
     applyBrainResult(s,job,{status:'eligible',relevance:'direct',reason:'direct reader',marketEvidence:'English public description'});
     assert.equal(s.db.prepare('SELECT count(*) n FROM jobs WHERE kind=?').get('strategy').n,1);
   }finally{s.close();}
