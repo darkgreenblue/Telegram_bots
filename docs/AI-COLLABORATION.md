@@ -97,3 +97,7 @@ Branch codex/tarot-portuguese-handover. Owner selected existing Portuguese histo
 - آیا تست مرتبط اجرا و نتیجه در ردیف ثبت شده است؟
 - آیا تغییر روی بات زنده است؟ اگر بله، migration افزایشی، سازگاری callback/پرداخت، `PRODUCT_VERSION`، rollout و rollback را طبق `CLAUDE.md` بررسی کن.
 - آیا merge/deploy فقط بعد از CI سبز و طبق پنجره و workflow تعریف‌شده انجام می‌شود؟
+
+## 2026-10-08 Codex: Portuguese handover release checkpoint
+
+PR #506 is merged as f5e6b040d31daa5fe385c53ff56b4756caff1217 following all-green exact-head Ubuntu CI 37819037565. The push Deploy run 37820470452 skipped its actual VPS step outside the normal safe hour; no window override or restart was attempted. Actual English profile/commands/avatar and intro-media removal are already verified on the target, while Portuguese multilingual runtime, source retirement and guarded Ads retarget await actual deployment. The existing heartbeat now prioritizes these checks before the Ads roadmap. Fresh readonly server evidence shows no managed Ads/operations/actual allocation/spending authority and fresh completed Ads cycles; held draft budget fields are not allocated capital. No channel permission was granted without the owner's pending exact approval.
