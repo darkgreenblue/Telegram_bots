@@ -272,10 +272,12 @@ const NO_SAFETY = 'nosafety';
  * حساس پرسیده از آن به بعد برچسبِ «موضوعِ حساس؛ با احتیاط» را در حافظه‌ی ورودیِ مدل می‌گیرد.
  * جداسازیِ هویت مثلِ بازوی پیش‌فرض روشن می‌ماند تا تنها تفاوت، مدیریتِ حافظه باشد. */
 const TAG = 'tag';
+/* 🌿 همان ایده بدونِ برچسب: حافظه و فال‌های قبلی خام، فقط بلوکِ ایمنی برای سؤالِ حساس. */
+const NATURAL = 'natural';
 const armModel = (a) => String(a).split('@')[0];
 const armVariant = (a) => String(a).split('@')[1] || '';
 {
-  const bad = ARM_LIST.map(armVariant).filter(v => v && v !== NO_SAFETY && v !== TAG && !PROMPT_VARIANTS[v]);
+  const bad = ARM_LIST.map(armVariant).filter(v => v && v !== NO_SAFETY && v !== TAG && v !== NATURAL && !PROMPT_VARIANTS[v]);
   if (bad.length) {
     console.error(`❌ واریانتِ پرامپتِ ناشناخته: ${[...new Set(bad)].join(', ')}`);
     console.error(`   موجود: ${Object.keys(PROMPT_VARIANTS).join(', ') || '(هیچ)'}`);
@@ -370,7 +372,8 @@ async function runStep(persona, step, i, state) {
   // 🛟 عیناً `readingCtxFor` ربات: حافظه و فال‌های قبلی از همان طرح می‌گذرند.
   const safetyOn = VARIANT !== NO_SAFETY;
   const prev4 = state.prev.slice(0, 4);
-  const tagOn = VARIANT === TAG;
+  const tagOn = VARIANT === TAG || VARIANT === NATURAL;
+  const labelOn = VARIANT === TAG;
   const plan = readingSafetyPlan({
     question: step.question, displayName: persona.name, memory: state.memory, prev: prev4,
     lang: LOCALE, safety: safetyOn, identity: safetyOn,
@@ -382,7 +385,7 @@ async function runStep(persona, step, i, state) {
       lang: LOCALE, safety: false, identity: true,
     });
     const label = SENSITIVE_LABEL[LOCALE] || SENSITIVE_LABEL.fa;
-    plan.memory = state.flagged && !raw.isolate ? `${raw.memory} ${label}`.trim() : raw.memory;
+    plan.memory = labelOn && state.flagged && !raw.isolate ? `${raw.memory} ${label}`.trim() : raw.memory;
     plan.prev = raw.prev;
     plan.memoryCut = 0;
   }
@@ -401,7 +404,7 @@ async function runStep(persona, step, i, state) {
   const labels = L.prompts.cardLabels(cards.length);
   /* واریانتِ پرامپت فقط همین رشته را عوض می‌کند؛ locale محصول دست‌نخورده می‌ماند. */
   let system = L.prompts.readerSystemV4(locSpread(spread), labels);
-  if (VARIANT && VARIANT !== NO_SAFETY && VARIANT !== TAG) {
+  if (VARIANT && VARIANT !== NO_SAFETY && !tagOn) {
     const before = system;
     system = PROMPT_VARIANTS[VARIANT](system);
     /* ⚠️ اگر جایگزینی هیچ اثری نداشت یعنی الگو دیگر با متنِ locale نمی‌خواند و ما
