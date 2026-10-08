@@ -1,3 +1,4 @@
+import { queueIntelligenceResearch } from './intelligence.js';
 import { createHash } from 'node:crypto';
 
 const strings=(value,maxLength=300)=>Array.isArray(value)&&value.length<=100&&
@@ -43,6 +44,7 @@ export function archiveCompetitorObservation(store,candidateId,input,{at=Date.no
     const id=Number(store.db.prepare(`INSERT INTO competitor_observations(candidate_id,checked_at,digest,observation_json)
       VALUES(?,?,?,?)`).run(candidateId,input.checkedAt,digest,serialized).lastInsertRowid);
     store.audit('discovery','competitor.archived',candidateId,{observationId:id,digest,section:input.section});
+    queueIntelligenceResearch(store,candidate.project_id);
     return {observationId:id,created:true};
   })();
 }

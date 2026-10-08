@@ -1,3 +1,4 @@
+import { archivePublicPeerIntelligence } from './intelligence-collection.js';
 import { htmlToText,parseCount,collectChannel } from '../../tools/benchmark/tme.mjs';
 import { addJob } from './db.js';
 import { channelFeatures } from './channel-evidence.js';
@@ -139,6 +140,7 @@ export function recordPeerEvidence(store,candidateId,proof){
     delete features.publicPeerRetryAt;
     db.prepare('UPDATE candidates SET features_json=? WHERE id=?').run(JSON.stringify(features),candidateId);
     store.audit('discovery','peer.observed',candidateId,proof);
+    archivePublicPeerIntelligence(store,project.id,proof);
     if(project.initial_peer_policy!=='competitor-first')return null;
     return addJob(db,project.id,'peer_review',{candidateId,peer:proof,botInterface:features.botInterface??null,
       project:{name:project.name,market:project.market,language:project.language,context:project.context},
