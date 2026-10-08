@@ -363,7 +363,7 @@ const TEST_PHASE = false;
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
 // 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
 //         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
-const PRODUCT_VERSION = '3.155.0';
+const PRODUCT_VERSION = '3.156.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -543,6 +543,12 @@ const CHAT_PRICE       = 1;    // الماس per سؤال (throttleِ اصلی؛
  * جوابش را نداد ریفاند می‌شود و **دوباره رایگان** می‌ماند؛ کاربر بابتِ خرابیِ ما
  * سهمیه‌ی مهمانی‌اش را از دست نمی‌دهد. رول‌بک: `false` ⟵ هر سؤال از اول ۱ الماس. */
 const CHAT_FREE_FIRST  = true;
+/* 🎁 v3.156.0 (تصمیمِ صریحِ مالک، ۱۴۰۵/۰۷/۱۶): سؤالِ رایگان **یک بار برای هر کاربر** است،
+ * نه یک بار برای هر فال. کسی که یک بار گفتگو را چشیده، در فال‌های بعدی از سؤالِ اول یک
+ * الماس می‌دهد و پیامِ ورود هم دیگر وعده‌ی رایگان نمی‌دهد (همان `free` که از دیتا می‌آید).
+ * مبنای شمارش همان «سؤالِ ریفاندنشده» است، پس سؤالِ رایگانی که جواب نگرفت سهمیه را نمی‌سوزاند.
+ * رول‌بک: `false` ⟵ رفتارِ v3.155.0 (سؤالِ اولِ هر فال رایگان). */
+const CHAT_FREE_ONCE_PER_USER = true;
 /* 🅿️ سؤالی که به پی‌وال خورد **گم نمی‌شود**: با نقشِ `pending` پارک می‌شود و لحظه‌ای که
  * موجودی از صفر در بیاید، ۱ الماس کم می‌شود و جواب با ریپلای به **همان سؤال** می‌رود.
  * ⚠️ فقط از دو راه: **خرید** و **کارتِ شانس**. پاداشِ دعوت عمداً بیرون است، چون آن‌جا
@@ -824,6 +830,10 @@ const DECISIVE_VERDICT_ENABLED = true;
 // رول‌بک: false. سقفِ تلاشِ اضافه کوچک است چون نرخِ واقعی ۱ در ۸٬۷۶۱ بود.
 const CARD_INTEGRITY = true;
 const CARD_MISMATCH_EXTRA_TRIES = 2;
+// 🧾 v3.156.0: دلیلِ هر ردِ `validate`ِ خوانش در لاگ (`🧾 READING_REJECT`). فقط لاگ است و هیچ
+// رفتاری عوض نمی‌شود؛ خطِ بعدیِ لاگ (`LLM invalid output (attempt N, model)`) مدل و شماره‌ی
+// تلاش را می‌دهد. برای فهمیدنِ اینکه چرا خروجیِ دیپ‌سیک رد و فال به luna برگشت. رول‌بک: false.
+const READING_REJECT_LOG = true;
 const CARD_KEYS = CARDS.map((c) => c.key);
 
 // 💳 صفحه‌ی «اعتبارت کافیه» به‌جای صفحه‌ی قیمت‌دار، برای کاربری که موجودی‌اش هزینه‌ی فال را
@@ -2931,6 +2941,7 @@ const stmts = {
   /* شمارشِ سؤال‌های **ریفاندنشده‌ی** همین فال — تنها مبنای «سؤالِ اول رایگان است».
    * شرطِ `refunded=0` عمدی است: سؤالی که جوابی نگرفت و پولش برگشت، انگار پرسیده نشده. */
   chatAsked:     db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE reading_id=? AND role='user' AND refunded=0"),
+  chatAskedUser: db.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE user_id=? AND role='user' AND refunded=0"),
   /* 🅿️ سؤالِ پارک‌شده‌ی پشتِ پی‌وال. نقشِ `pending` عمداً از `user` جداست: تا وقتی
    * پولش کم نشده نه در تاریخچه‌ی مدل می‌آید، نه در شمارشِ «سؤالِ اول رایگان»، و نه
    * جاروی یتیم‌ها (که فقط `role='user'` را می‌بیند) سراغش می‌رود. */
@@ -4436,14 +4447,16 @@ const payForSpread = db.transaction((uid, spread, focusKey) => {
  *   ۲) **کسر قبل از هر فراخوانیِ پولی** — صداکننده موظف است خروجیِ صفر را به‌عنوان
  *      «کم‌موجودی» بخواند و همان‌جا برگردد، نه اینکه مدل را صدا بزند.
  * خروجی: شناسه‌ی ردیفِ سؤال (برای ریفاندِ احتمالی)، یا ۰ اگر موجودی کافی نبود. */
-const chatPriceFor = (readingId) =>
-  (CHAT_FREE_FIRST && (stmts.chatAsked.get(readingId)?.c || 0) === 0 ? 0 : CHAT_PRICE);
+const chatPriceFor = (readingId, uid) =>
+  (CHAT_FREE_FIRST && (CHAT_FREE_ONCE_PER_USER
+    ? (stmts.chatAskedUser.get(uid)?.c || 0)
+    : (stmts.chatAsked.get(readingId)?.c || 0)) === 0 ? 0 : CHAT_PRICE);
 
 /* خروجی `{ id, price }` است نه فقط شناسه، چون **قیمتِ همین نوبت** از این‌جا به بعد
  * همه‌جا لازم است (ریفاند، پیامِ شکست، رویداد). خواندنش دوباره از بیرون یعنی دو منبعِ
  * حقیقت برای یک عدد، و اولین سؤالِ بعدی بی‌صدا قیمتِ اشتباه می‌گرفت. */
 const payForChat = db.transaction((uid, readingId, text, tgMsgId = 0) => {
-  const price = chatPriceFor(readingId);
+  const price = chatPriceFor(readingId, uid);
   if (price > 0 && stmts.deduct.run(price, uid, price).changes === 0) return null;
   const id = Number(stmts.insertChatMsg
     .run(readingId, uid, 'user', String(text || '').slice(0, 2000), price, '', tgMsgId, 0, 0, '', 0).lastInsertRowid);
@@ -4465,7 +4478,7 @@ const parkChatQuestion = db.transaction((uid, readingId, text, tgMsgId = 0) => {
  * (`null` = ادعا نشد). دو مسیر نمی‌توانند یک سؤال را دو بار جواب بدهند، چون شرطِ
  * `role='pending'` در خودِ UPDATE است. */
 const claimPendingChat = db.transaction((uid, msgId, readingId) => {
-  const price = chatPriceFor(readingId);
+  const price = chatPriceFor(readingId, uid);
   if (stmts.claimChatPending.run(price, msgId).changes === 0) return null;
   if (price > 0 && stmts.deduct.run(price, uid, price).changes === 0) throw new Error('NO_BALANCE');
   return price;
@@ -4636,22 +4649,29 @@ async function callReadingLLM(readingId, armOpts = null) {
     ...(!audio && armOpts ? { plan: armOpts.plan } : {}),
     validate: (out) => {
       const obj = parseJsonLoose(out);
+      // فقط لاگ؛ هرگز پرتاب نمی‌کند و هیچ تصمیمی را عوض نمی‌کند. متنِ خروجی ثبت نمی‌شود، فقط طول.
+      const reject = (reason) => {
+        if (READING_REJECT_LOG) {
+          try { logErr(`🧾 READING_REJECT reading#${readingId} reason=${reason} len=${String(out || '').length}`); } catch { /* لاگ */ }
+        }
+        return false;
+      };
       if (v4) {
         // ساختارِ v4: تیزرِ هر کارت + سرخط + الگو + خوانشِ هر کارت + جمع‌بندی
-        if (!checkV4Shape(obj, cards.length)) return false;
+        if (!checkV4Shape(obj, cards.length)) return reject(obj ? 'shape' : 'no_json');
         // 🃏 متنی که کلاً درباره‌ی کارت‌های دیگری است رد می‌شود (نه fallback: محتوایش غلط است).
         // سقفِ تلاش دارد تا یک خطای بعید هرگز به ریفاند نرسد؛ بعد از آن پذیرفته و لاگ می‌شود.
         if (CARD_INTEGRITY) {
           const cm = cardMismatch(obj, cards.map((c) => c.key), CARD_KEYS, cardName, currentLang());
           if (cm.bad) {
             logErr(`🃏 CARD_MISMATCH reading#${readingId} try=${cardMismatchTries + 1} foreign=${cm.foreign.join(',')}`);
-            if (cardMismatchTries++ < CARD_MISMATCH_EXTRA_TRIES) return false;
+            if (cardMismatchTries++ < CARD_MISMATCH_EXTRA_TRIES) return reject('card_mismatch');
           }
         }
         // سرخطِ بی‌جهت یا بدونِ «ولی» پذیرفته نمی‌شود؛ ولی مثل verdict، شکستِ نهاییِ آن
         // هرگز به ریفاند نمی‌رسد — آخرین خروجیِ سالم بدونِ سرخط تحویل می‌شود.
         // فرمولِ سرخط «نرم» است: یک تلاشِ اضافه می‌دهیم، بعد همان را می‌پذیریم.
-        if (!headlineOk(obj.headline) && headlineTries++ < HEADLINE_EXTRA_TRIES) { fallback = obj; return false; }
+        if (!headlineOk(obj.headline) && headlineTries++ < HEADLINE_EXTRA_TRIES) { fallback = obj; return reject('headline'); }
         // طفره‌رفتن اینجا **رد نمی‌شود**: بازتولیدِ کلِ فال برای یک جمله هم گران است
         // هم کند هم بی‌تضمین (همان پرامپت، همان احتمالِ خطا). به‌جایش بعد از پذیرش،
         // یک تعمیرِ نقطه‌ای روی همان فیلد اجرا می‌شود (`repair.js`).
@@ -4659,8 +4679,8 @@ async function callReadingLLM(readingId, armOpts = null) {
         return true;
       }
       const usable = obj && Array.isArray(obj.cards) && obj.cards.length >= cards.length && obj.narrative;
-      if (!usable) return false;
-      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: choiceLabelsFor(spread) })) { fallback = obj; return false; }
+      if (!usable) return reject(obj ? 'unusable' : 'no_json');
+      if (wantVerdict && !normalizeVerdict(obj.verdict, wantVerdict, { choiceLabels: choiceLabelsFor(spread) })) { fallback = obj; return reject('verdict'); }
       parsed = obj;
       return true;
     },
@@ -8227,7 +8247,7 @@ async function openChat(ctx, readingId, { resumed = false } = {}) {
    * HTML رندر می‌شود. locale خودش در دنیای تومانی تگ نمی‌سازد (الگوی `purseQuote`). */
   const txt = resumed
     ? L.chat.resumed
-    : L.chat.intro(CHAT_PRICE, curOf(uid), getBalance(uid), chatPriceFor(readingId) === 0);
+    : L.chat.intro(CHAT_PRICE, curOf(uid), getBalance(uid), chatPriceFor(readingId, uid) === 0);
   await ctx.reply(txt, { parse_mode: 'HTML', ...chatTailExtra(el.r) });
 }
 

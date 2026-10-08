@@ -45,7 +45,7 @@ console.log('\n▶ سرخط: قانونِ «بله‌ی گران»');
   const V = fs.readFileSync(new URL('../bots/tarot/verdict.js', import.meta.url), 'utf8');
   ok(/export function headlineOk/.test(V), 'اعتبارسنجِ سرخط در ماژولِ خالصِ verdict.js است');
   ok(/headlineOk\(obj\.headline\)/.test(SRC), 'سرخط قبل از پذیرش اعتبارسنجی می‌شود');
-  ok(/if \(!headlineOk\(obj\.headline\) && headlineTries\+\+ < HEADLINE_EXTRA_TRIES\) \{ fallback = obj; return false; \}/.test(SRC),
+  ok(/if \(!headlineOk\(obj\.headline\) && headlineTries\+\+ < HEADLINE_EXTRA_TRIES\) \{ fallback = obj; return (?:false|reject\('headline'\)); \}/.test(SRC),
     'سرخطِ بد یک تلاشِ اضافه می‌گیرد، بعد پذیرفته می‌شود (ضدِ ریفاند و ضدِ اسراف)');
   ok(/const HEADLINE_EXTRA_TRIES = 1;/.test(SRC),
     'بودجه‌ی retryِ سرخط محدود است — قبلاً ۵ بار بازتولید می‌شد و آخرش همان سرخط نشان داده می‌شد');

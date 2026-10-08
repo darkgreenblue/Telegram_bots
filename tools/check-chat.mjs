@@ -329,8 +329,10 @@ console.log('\n▶ ۳) مسیرِ پول');
     const m = SRC.match(new RegExp(name + ":\\s*db\\.prepare\\((?:'([^']+)'|\"([^\"]+)\"|" + BT + '([\\s\\S]*?)' + BT + ')\\)'));
     return (m && (m[1] || m[2] || m[3])) || null;
   };
-  const NEEDED = ['credit', 'deduct', 'insertChatMsg', 'markChatRefunded', 'chatAsked'];
-  ok(NEEDED.every(n => sqlOf(n)), 'هر پنج statementِ مسیرِ پول از سورس برداشته شدند');
+  const NEEDED = ['credit', 'deduct', 'insertChatMsg', 'markChatRefunded', 'chatAsked', 'chatAskedUser'];
+  ok(NEEDED.every(n => sqlOf(n)), 'هر شش statementِ مسیرِ پول از سورس برداشته شدند');
+  ok(/WHERE user_id=\? AND role='user' AND refunded=0/.test(sqlOf('chatAskedUser') || ''),
+    '🎁 شمارشِ per کاربر هم فقط سؤال‌های واقعیِ ریفاندنشده را می‌شمارد');
   const st = Object.fromEntries(NEEDED.map(n => [n, d.prepare(sqlOf(n))]));
   ok(/AND refunded\s*=\s*0/.test(sqlOf('markChatRefunded')), 'ادعای ریفاند در خودِ SQL اتمیک است');
   ok(/balance >= \?/.test(sqlOf('deduct')), 'و کسر هم گاردِ موجودی را در خودِ SQL دارد');
@@ -344,10 +346,13 @@ console.log('\n▶ ۳) مسیرِ پول');
   /* 🎁 `CHAT_FREE_FIRST` **تزریقی** است تا هر دو حالت روی همان کدِ محصول اجرا شود:
    * روشن (رفتارِ امروز) و خاموش (مسیرِ رول‌بک). یک هارنسِ تک‌حالته یعنی نیمی از کدِ
    * زنده هرگز اجرا نمی‌شود. */
-  const mk = (freeFirst) => new Function('db', 'stmts', 'CHAT_PRICE', 'CHAT_FREE_FIRST',
-    `${priceSrc}\n${paySrc}\n${refSrc}\nreturn { payForChat, refundChat, chatPriceFor };`)(d, st, CHAT_PRICE, freeFirst);
-  const { payForChat, refundChat, chatPriceFor } = mk(bool('CHAT_FREE_FIRST'));
-  ok(bool('CHAT_FREE_FIRST') === true, '🎁 سؤالِ اولِ هر فال رایگان است (خواسته‌ی صریحِ مالک)');
+  const mk = (freeFirst, oncePerUser) => new Function('db', 'stmts', 'CHAT_PRICE', 'CHAT_FREE_FIRST', 'CHAT_FREE_ONCE_PER_USER',
+    `${priceSrc}\n${paySrc}\n${refSrc}\nreturn { payForChat, refundChat, chatPriceFor };`)(d, st, CHAT_PRICE, freeFirst, oncePerUser);
+  const { payForChat, refundChat, chatPriceFor } = mk(bool('CHAT_FREE_FIRST'), bool('CHAT_FREE_ONCE_PER_USER'));
+  ok(bool('CHAT_FREE_FIRST') === true, '🎁 سؤالِ اولِ رایگان روشن است (خواسته‌ی صریحِ مالک)');
+  ok(bool('CHAT_FREE_ONCE_PER_USER') === true, '🎁 v3.156.0: سؤالِ رایگان یک بار برای هر کاربر، نه هر فال');
+  ok(/chatPriceFor\(readingId, uid\)/.test(paySrc) && (SRC.match(/chatPriceFor\(readingId\)/g) || []).length === 0,
+    '🔑 همه‌ی فراخوانی‌های chatPriceFor کاربر را هم پاس می‌دهند (وگرنه شمارشِ per کاربر روی undefined می‌نشیند)');
 
   d.prepare('INSERT INTO users (telegram_id, balance) VALUES (5, 2)').run();
   const bal = () => d.prepare('SELECT balance b FROM users WHERE telegram_id=5').get().b;
@@ -368,11 +373,15 @@ console.log('\n▶ ۳) مسیرِ پول');
   ok(d.prepare('SELECT COUNT(*) c FROM chat_messages').get().c === 3,
     '🔑 و **هیچ ردیفی** ثبت نمی‌شود (تراکنش: یا هر دو یا هیچ‌کدام)');
   ok(bal() === 0, 'و موجودی منفی نمی‌شود');
-  /* 🔑 فالِ **دیگر** سهمیه‌ی رایگانِ خودش را دارد: شمارش per فال است نه per کاربر.
-   * و این با موجودیِ صفر اجرا می‌شود، یعنی ثابت می‌کند کاربرِ بی‌پول هم به دیوار
-   * نمی‌خورد (همان دلیلی که این فیچر برایش ساخته شد). */
-  const q1 = payForChat(5, 11, 'سؤالِ اولِ فالِ دیگر');
-  ok(q1?.price === 0 && bal() === 0, '🔑 هر فال سهمیه‌ی رایگانِ خودش را دارد، حتی با موجودیِ صفر');
+  /* 🔑 v3.156.0: فالِ **دیگرِ همین کاربر** دیگر سؤالِ رایگان ندارد (یک بار per کاربر).
+   * با موجودیِ صفر یعنی کسر ممکن نیست و هیچ ردیفی هم ساخته نمی‌شود. */
+  const q0 = payForChat(5, 11, 'سؤالِ اولِ فالِ دیگر');
+  ok(q0 === null && bal() === 0, '🔑 کسی که سؤالِ رایگانش را گرفته، در فالِ بعدی هم از سؤالِ اول پولی است');
+  ok(chatPriceFor(99, 5) === CHAT_PRICE, '🔑 و قیمتِ سؤالِ اول در هر فالِ تازه‌ی همین کاربر یک الماس است');
+  /* ولی کاربرِ **تازه** سؤالِ اولش را رایگان می‌گیرد، حتی با موجودیِ صفر. */
+  d.prepare('INSERT INTO users (telegram_id, balance) VALUES (6, 0)').run();
+  const q1 = payForChat(6, 12, 'سؤالِ اولِ کاربرِ تازه');
+  ok(q1?.price === 0, '🔑 کاربرِ تازه سؤالِ اولش را رایگان می‌گیرد، حتی با موجودیِ صفر');
 
   ok(!!p2 && refundChat(p2.id, 5, p2.price) === true && bal() === 1, 'ریفاند پول را برمی‌گرداند');
   ok(!!p2 && refundChat(p2.id, 5, p2.price) === false && bal() === 1,
@@ -382,13 +391,17 @@ console.log('\n▶ ۳) مسیرِ پول');
   /* ⚠️ سؤالِ رایگانی که جوابی نگرفت و ریفاند شد، **دوباره رایگان** می‌شود: کاربر
    * بابتِ خرابیِ ما سهمیه‌اش را از دست نمی‌دهد. این دقیقاً به شرطِ `refunded=0` در
    * `chatAsked` وابسته است، پس اگر آن شرط برداشته شود همین‌جا قرمز می‌شود. */
-  if (q1) refundChat(q1.id, 5, q1.price);
-  ok(chatPriceFor(11) === 0, '🔑 سؤالِ رایگانِ بی‌جواب سهمیه را نمی‌سوزاند');
-  ok(chatPriceFor(10) === CHAT_PRICE, '⚠️ ولی فالی که سؤالِ سالم دارد دیگر رایگان نیست');
+  if (q1) refundChat(q1.id, 6, q1.price);
+  ok(chatPriceFor(12, 6) === 0 && chatPriceFor(77, 6) === 0, '🔑 سؤالِ رایگانِ بی‌جواب سهمیه را نمی‌سوزاند');
+  ok(chatPriceFor(10, 5) === CHAT_PRICE, '⚠️ ولی کاربری که سؤالِ سالم دارد دیگر رایگان نیست');
+  /* کنترلِ رول‌بکِ per فال: با `CHAT_FREE_ONCE_PER_USER=false` همان کاربر در فالِ تازه دوباره رایگان می‌گیرد. */
+  const perReading = mk(true, false);
+  ok(perReading.chatPriceFor(11, 5) === 0 && perReading.chatPriceFor(10, 5) === CHAT_PRICE,
+    '🔁 رول‌بکِ `CHAT_FREE_ONCE_PER_USER=false` ⟵ سؤالِ اولِ هر فال رایگان (رفتارِ v3.155.0)');
   /* کنترلِ مثبت (بند ۶ب-۲): با پرچمِ خاموش، **همان کد** از اولین سؤال کسر می‌کند.
    * بدونِ این، یک `chatPriceFor`ِ همیشه-صفر هم همه‌ی ادعاهای بالا را پاس می‌کرد. */
-  const off = mk(false);
-  ok(off.chatPriceFor(999) === CHAT_PRICE, '🔁 و با رول‌بکِ `CHAT_FREE_FIRST=false` سؤالِ اول هم پولی است');
+  const off = mk(false, true);
+  ok(off.chatPriceFor(999, 777) === CHAT_PRICE, '🔁 و با رول‌بکِ `CHAT_FREE_FIRST=false` سؤالِ اول هم پولی است');
 
   // شکستِ مدل → ریفاندِ فوری، و ترتیبش در کد
   ok(before(turn, 'if (!res?.out)', 'refundChat(msgId') && /if \(!res\?\.out\)/.test(turn),
@@ -481,7 +494,7 @@ console.log('\n▶ ۶) پیامِ ورود');
   /* ⚠️ HTML و نه Markdown: `blockquote` تنها راهِ «باکس» در Bot API است و فقط با HTML
    * رندر می‌شود. اگر این برگردد به Markdown، کاربر تگِ خام می‌بیند. */
   ok(/parse_mode: 'HTML'/.test(reply), 'پیام HTML می‌رود (باکسِ نقل‌قول با Markdown رندر نمی‌شود)');
-  ok(/chatPriceFor\(readingId\) === 0/.test(oc),
+  ok(/chatPriceFor\(readingId, uid\) === 0/.test(oc),
     '🔑 و «رایگان بودن» از **دیتا** خوانده می‌شود، نه از ثابت (ادعا از دیتا جلو نمی‌زند، بند ۲و/۶ج)');
   const L = await import('../bots/tarot/locales/fa.js');
   // همان چیزی که `curOf` در دنیای الماس می‌سازد (`value: 1`، چون از v3.27.0 عددِ
@@ -1337,8 +1350,8 @@ console.log('\n▶ ۱۸) پی‌وال و سؤالِ معلق');
     const m = SRC.match(new RegExp(name + ":\\s*db\\.prepare\\((?:'([^']+)'|\"([^\"]+)\"|" + BT2 + '([\\s\\S]*?)' + BT2 + ')\\)'));
     return (m && (m[1] || m[2] || m[3])) || null;
   };
-  const NEED2 = ['insertChatPending', 'pendingChatMsg', 'dropChatPendings', 'claimChatPending', 'deduct', 'chatAsked'];
-  ok(NEED2.every(n => sqlOf2(n)), 'هر شش statementِ سؤالِ معلق از سورس برداشته شدند');
+  const NEED2 = ['insertChatPending', 'pendingChatMsg', 'dropChatPendings', 'claimChatPending', 'deduct', 'chatAsked', 'chatAskedUser'];
+  ok(NEED2.every(n => sqlOf2(n)), 'هر هفت statementِ سؤالِ معلق از سورس برداشته شدند');
   ok(/AND role='pending'/.test(sqlOf2('claimChatPending')),
     "🔑 ادعای سؤالِ معلق در خودِ SQL اتمیک است (شرطِ role='pending')");
   ok(/created_at=unixepoch\(\)/.test(sqlOf2('claimChatPending')),
@@ -1348,9 +1361,9 @@ console.log('\n▶ ۱۸) پی‌وال و سؤالِ معلق');
   const claimSrc = (SRC.match(/const claimPendingChat = db\.transaction\([\s\S]*?\n\}\);/) || [])[0];
   const priceSrc2 = (SRC.match(/const chatPriceFor = [\s\S]*?;\n/) || [])[0];
   ok(!!parkSrc && !!claimSrc, 'هر دو تراکنشِ سؤالِ معلق از سورس برداشته شدند');
-  const api = new Function('db', 'stmts', 'CHAT_PRICE', 'CHAT_FREE_FIRST', 'CHAT_PENDING_RESUME',
+  const api = new Function('db', 'stmts', 'CHAT_PRICE', 'CHAT_FREE_FIRST', 'CHAT_PENDING_RESUME', 'CHAT_FREE_ONCE_PER_USER',
     `${priceSrc2}\n${parkSrc}\n${claimSrc}\nreturn { parkChatQuestion, claimPendingChat, chatPriceFor };`)(
-    d, st2, num('CHAT_PRICE'), bool('CHAT_FREE_FIRST'), bool('CHAT_PENDING_RESUME'));
+    d, st2, num('CHAT_PRICE'), bool('CHAT_FREE_FIRST'), bool('CHAT_PENDING_RESUME'), bool('CHAT_FREE_ONCE_PER_USER'));
 
   d.prepare('INSERT INTO users (telegram_id, balance) VALUES (7, 0)').run();
   /* سناریوی واقعی: سؤالِ **اولِ رایگان** قبلاً پرسیده شده (وگرنه اصلاً پی‌والی در کار

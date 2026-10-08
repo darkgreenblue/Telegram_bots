@@ -87,7 +87,7 @@ ok('بعد از چکِ شکل', iShape > 0 && iCard > iShape);
 ok('قبل از چکِ سرخط', iHead > 0 && iCard < iHead);
 const block = src.slice(iCard, iHead);
 ok('پشتِ پرچم است', /if \(CARD_INTEGRITY\)/.test(src.slice(iShape, iHead)));
-ok('شمارنده سقف دارد (رد فقط زیرِ سقف)', /cardMismatchTries\+\+ < CARD_MISMATCH_EXTRA_TRIES\) return false/.test(block));
+ok('شمارنده سقف دارد (رد فقط زیرِ سقف)', /cardMismatchTries\+\+ < CARD_MISMATCH_EXTRA_TRIES\) return (?:false|reject\('card_mismatch'\))/.test(block));
 ok('خروجیِ بیگانه fallback نمی‌شود', !/fallback\s*=/.test(block));
 ok('مارکرِ greppable در لاگ', /CARD_MISMATCH/.test(block));
 
