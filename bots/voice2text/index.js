@@ -85,7 +85,7 @@ const cardCopyRow = () => [{ text: '📋 کپی شماره کارت', copy_text:
 // 1.2.0: دکمه‌ی «💬 پشتیبانی» در منوی اصلی (مشترکِ همه‌ی ربات‌ها) — لینکِ چتِ پشتیبانی با
 //        پیامِ آماده‌ی حاویِ کدِ پیگیریِ #V2T-<user_id>.
 // 1.5.0: سوییچ فقط-مالکِ «برای کافه‌بازار»؛ هر فلو می‌تواند جداگانه از متیس (Gemini) برود.
-const PRODUCT_VERSION = '1.6.0';
+const PRODUCT_VERSION = '1.6.1';
 
 /* ===== 1) Database ===== */
 mkdirSync('./data', { recursive: true });
@@ -994,6 +994,17 @@ setInterval(async () => {
     if (now - v.createdAt > 60*60*1000) notionStates.delete(k);
   }
 }, 60*1000);
+
+// نگه‌داریِ متنِ ویس‌ها: ۳۰ روز (تصمیمِ مالک ۱۴۰۵/۰۷/۱۶) — داده‌ی حساسِ کاربر بی‌دلیل نمی‌ماند
+const RESULT_RETENTION_DAYS = 30;
+function purgeOldResults() {
+  try {
+    const r = db.prepare("DELETE FROM voice_results WHERE created_at < unixepoch() - ?").run(RESULT_RETENTION_DAYS * 86400);
+    if (r.changes) log(`🧹 voice_results: ${r.changes} متنِ قدیمی‌تر از ${RESULT_RETENTION_DAYS} روز پاک شد`);
+  } catch (e) { logErr('purgeOldResults:', e.message); }
+}
+purgeOldResults();
+setInterval(purgeOldResults, 60*60*1000);
 
 /* ===== 7) Keyboards ===== */
 const MODE_SELECT_TEXT = 'یکی از حالت‌های زیر رو انتخاب کن:';
@@ -3195,7 +3206,7 @@ bot.on('callback_query', async (ctx) => {
       try { row = stmts.getResult.get(token); } catch (e) { logErr('getResult:', e.message); }
       const resultText = row?.text || session?.resultText;
       const ownerId    = row ? row.user_id : session?.userId;
-      if (!resultText) return ctx.answerCbQuery('متن این ویس پیدا نشد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
+      if (!resultText) return ctx.answerCbQuery('متن این ویس پیدا نشد (متن‌ها ۳۰ روز نگه داشته می‌شن). اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
       if (ownerId !== userId) return ctx.answerCbQuery('این پردازش مالِ کاربر دیگری است.', { show_alert: true });
       // ضدِ دوبار-تپ (قفلِ سینکرون قبل از اولین await)
       if (outputDelivering.has(token)) return ctx.answerCbQuery('در حال ارسال است...');
@@ -3260,7 +3271,7 @@ bot.on('callback_query', async (ctx) => {
         const mem = notionStates.get(uid); // ویس‌های قبل از v1.6.0
         if (mem && (!cbMsg || mem.promptMsgId === cbMsg.message_id)) state = mem;
       }
-      if (!state) return ctx.answerCbQuery('متن این ویس پیدا نشد. اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
+      if (!state) return ctx.answerCbQuery('متن این ویس پیدا نشد (متن‌ها ۳۰ روز نگه داشته می‌شن). اگه هنوز می‌خوای، ویس رو دوباره بفرست.', { show_alert: true });
 
       const editNotionMsg = async (text, keyboard) => {
         try {

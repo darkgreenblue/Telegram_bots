@@ -28,7 +28,7 @@
 | `pro_whitelist` | دسترسی مدل Pro |
 | `voice_flows` | چرخه‌ی حیات هر فلو: active/completed/cancelled/expired/failed + `reserved` (مبلغِ رزروشده برای refund در ری‌استارت) |
 | `admin_actions` | صف تأیید/رد رسید که **داشبورد** enqueue می‌کند؛ sweep ربات با منطق واقعی درین می‌کند (payment_id, action, source, done_at) |
-| `voice_results` | **متنِ خروجیِ هر ویسِ پردازش‌شده** (token، user_id، text، chat/result/voice/notion msg id) — منبعِ دکمه‌های بعد از پردازش؛ پاک نمی‌شود (v1.6.0) |
+| `voice_results` | **متنِ خروجیِ هر ویسِ پردازش‌شده** (token، user_id، text، chat/result/voice/notion msg id) — منبعِ دکمه‌های بعد از پردازش؛ ۳۰ روز نگه‌داری (v1.6.1) |
 | `events` | آنالیتیکس کمینه (کپی محلی هم‌قرارداد `shared/analytics.js` — پایین) |
 
 `payments.reminded_at`: آخرین یادآوریِ رسیدِ معطل به ادمین (برای throttle یادآوری دوره‌ای). `users.pay_distrust`: کاربرِ بی‌اعتماد بعد از برگشتِ رسیدِ فیک (ایجنت دیگر برایش خودکار تصمیم نمی‌گیرد).
@@ -189,5 +189,5 @@
   عوض نشدند. ضدِ دوبار-تپ: `outputDelivering`.
 - **قاعده:** فقط ویسِ **پردازش‌نشده** (بدونِ هزینه) منقضی می‌شود (`FLOW_EXPIRABLE = ['await_process_type']`).
   `await_output_format` دیگر ظرفیتِ `MAX_ACTIVE_FLOWS` را اشغال نمی‌کند و لغوشدنی نیست؛ فلو همان لحظه `completed` ثبت می‌شود.
-- ⚠️ داده‌ی حساس: متنِ ویس‌ها بی‌انقضا در DB می‌ماند (خواسته‌ی صریحِ مالک). ریستِ ادمین آن را هم پاک می‌کند.
+- ⚠️ داده‌ی حساس: متنِ ویس‌ها **۳۰ روز** نگه داشته می‌شود (`RESULT_RETENTION_DAYS`، تصمیمِ مالک ۱۴۰۵/۰۷/۱۶؛ v1.6.1) و `purgeOldResults` در بوت و هر ساعت قدیمی‌ترها را پاک می‌کند. ریستِ ادمین آن را هم پاک می‌کند.
 - رول‌بک: `git revert`؛ جدول افزایشی است و می‌ماند.
