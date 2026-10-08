@@ -1,3 +1,7 @@
+## October 8 destination handover
+
+Owner changed the final destination to @TAROT_PT_BOT. Portuguese history stays active; old unified/Russian history stays separate. Use tarot-intl@pt for NEW tracking/experiments only after fresh verified multilingual runtime. `retarget-portuguese` requires both gates 0, exact project slug, no managed financial history/authority and current destination runtime; audit and historical contexts remain immutable. Old drafts/proposals stay held and old campaigns are never retargeted. This identity change precedes the operational roadmap and does not authorize spending.
+
 # قرارداد اجرایی اتوماسیون تبلیغات
 
 این بات ادمین در فاز 🧪 تست شخصی است. به کاربر عمومی سرویس نمی‌دهد. اتصال به محصول و دسترسی ادمین با قراردادهای جدا کنترل می‌شوند.

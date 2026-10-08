@@ -1,3 +1,7 @@
+## Approved identity cutover — October 8
+
+Final multilingual bot is @TAROT_PT_BOT with Portuguese history active and old Russian/unified history separate; never merge balances. Preserve original public profile exactly, remove Portuguese intro GIF, retire source poller permanently in deployment configuration. New preparation must use verified target runtime and tarot-intl@pt tracking, not rewrite old experiment contexts/campaigns. Resolve actual language gate limitations separately; owner payments/human-messaging restrictions and financial gates remain unchanged.
+
 # Automation operating rules
 
 This file governs implementation, investigation and recovery of the Telegram Ads pilot. `STATE.md` records the current checkpoint; `ROADMAP.md` defines the owner-approved completion boundary and remaining acceptance gates.

@@ -1,3 +1,7 @@
+## 2026-10-08 — Codex: Portuguese multilingual identity handover in progress
+
+Branch codex/tarot-portuguese-handover. Owner selected existing Portuguese history as live; old unified history remains separate. No financial merge. Added pinned storage identity, consistent snapshots, one-time retained-language initialization, source retirement, Support scope and no-spend project retarget. BotFather actually removed Portuguese intro GIF. Source/profile snapshots remain private. Relevant storage tests and 136 Ads tests pass; 121 of 122 broad local checks pass, with the existing Linux /proc sealed-query check failing on macOS as previously documented. CI, normal safe-window runtime cutover and live tracking acceptance remain pending. Rollback is revert plus captured public profile restoration; original databases are not renamed/deleted. No Ads operation/funding or fabricated product data. STATE.md is the operational checkpoint; ROADMAP.md defines the destination prerequisite.
+
 # AI collaboration log
 
 این فایل handoff مشترک Claude Code و Codex است. هدفش حذف حدس، جلوگیری از تداخل، و باقی‌ماندنِ زمینه‌ی عملیاتی بین سشن‌هاست؛ جایگزین `CLAUDE.md` یا مستندات اختصاصی هر بات نیست.

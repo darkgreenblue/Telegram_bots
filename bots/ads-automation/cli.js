@@ -1,5 +1,6 @@
 import { archiveIntelligenceEvidence,archiveIntelligenceEstimate,intelligenceContext,intelligenceArchive,queueIntelligenceResearch } from './intelligence.js';
 import 'dotenv/config';
+import { retargetUnfundedProject } from './project-retarget.js';
 import { openStore,addCandidate,row } from './db.js';
 import { queueMarketResearch,queueResearch,queueStrategy } from './brain.js';
 import { shortlist,expandPublicChannels } from './discovery.js';
@@ -33,7 +34,8 @@ try{
     const p=row(db,'projects',Number(arg.projectId));if(!p||p.status!=='ready'||arg.confirm!==p.slug)throw new Error('ready project and exact slug confirmation required');
     db.prepare(`UPDATE projects SET mode='automatic' WHERE id=?`).run(p.id);
     store.audit('admin-cli','project.mode',p.id,{mode:'automatic'});result={projectId:p.id,mode:'automatic'};
-  }else if(cmd==='market')result={jobId:queueMarketResearch(store,Number(arg.projectId))};
+  }else if(cmd==='retarget-portuguese')result=retargetUnfundedProject(store,arg);
+  else if(cmd==='market')result={jobId:queueMarketResearch(store,Number(arg.projectId))};
   else if(cmd==='discovery-policy')result=useCompetitorFirst(store,Number(arg.projectId));
   else if(cmd==='discovery-queue')result={runId:queueSourceDiscovery(store,Number(arg.projectId),arg.query)};
   else if(cmd==='discover')result=await discoverFromSources(store,{projectId:Number(arg.projectId),query:arg.query,

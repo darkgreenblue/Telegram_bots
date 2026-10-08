@@ -50,7 +50,7 @@ export const LIVE_BOTS = ['voice2text', 'tarot'];
 // آن فایل **هرگز در ریپو نبوده** (نه در درخت، نه در تاریخچه، نه هیچ ارجاعی)، در
 // `ecosystem.config.cjs` هم نیست و هیچ کاربری را سرو نمی‌کند؛ فقط ثانیه‌ای چند بار
 // کرش می‌کرد و CPU می‌خورد. پس خواباندنش به هیچ‌کس آسیب نمی‌زند.
-export const SAFE_TARGETS = ['resume-tailor', 'voice2text-ops'];
+export const SAFE_TARGETS = ['resume-tailor', 'voice2text-ops', 'tarot-ru'];
 
 /** اسکریپت‌های یک‌باره‌ای که اجرا و مهر خورده‌اند و نباید از هیچ مسیرِ دیپلویی صدا شوند. */
 export const RETIRED_ONETIME = [

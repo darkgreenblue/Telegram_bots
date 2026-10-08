@@ -338,7 +338,7 @@ jobs:
             # می‌کند → ENV_CHANGED → upsert دوباره ADMIN_IDS را می‌گذارد → ENV_CHANGED. یعنی
             # **هر دیپلوی، حتی وقتی هیچ کدِ رباتی عوض نشده، ربات‌های زنده را ری‌استارت می‌کند**
             # (باگِ واقعی؛ در لاگ به‌شکلِ «دلیل: env» روی PRِ صرفاً مستنداتی دیده شد).
-            ADMIN_BOTS=" voice2text tarot tarot-ru tarot-pt tarot-es daily-brief "
+            ADMIN_BOTS=" voice2text tarot tarot-pt tarot-es daily-brief "
             # $1=نامِ اپِ pm2 ، $2=محتوای .env (بدونِ ADMIN_IDS) ، $3=مسیرِ فایل (اختیاری)
             # آرگومانِ سوم برای تاروتِ چندزبانه لازم شد: چند اپِ pm2 روی **یک** پوشه‌ی کد
             # می‌نشینند و هرکدام `.env.<locale>` خودش را دارد. بدونِ آن، هر زبان یک کپیِ
@@ -388,15 +388,14 @@ jobs:
             # ⚠️ `VIDEO_DISPATCH_TOKEN` عمداً **فقط** به فارسی داده می‌شود؛ دستورِ /reel
             # ابزارِ محتوای کانالِ فارسی است و هر کلیدِ اضافه در .env یعنی یک سطحِ حمله‌ی
             # بی‌دلیل روی سروری که ربات‌های زنده رویش‌اند (همان استدلالِ TAROT_NOTION_TOKEN).
-            for lang in ru pt es; do
+            for lang in pt es; do
               upper="$(echo "$lang" | tr '[:lower:]' '[:upper:]')"
               eval "tok=\${TAROT_${upper}_BOT_TOKEN:-}"
               eval "key=\${TAROT_${upper}_OPENROUTER_KEY:-}"
-              # 🌍 اپِ `tarot-ru` (همان رباتِ تلگرامیِ روسی، همان سکرت‌ها) از ۱۴۰۵/۰۶/۲۶
-              # **رباتِ واحدِ چندزبانه** است: انگلیسیِ پیش‌فرض + انتخابگرِ زبان. نامِ اپ و
-              # سکرت‌ها عمداً عوض نشدند (بی‌دلیل ری‌استارت و ساختِ سکرتِ تازه)، فقط محتوای env.
+              # Unified bot uses the Portuguese token and its existing database.
+              # Russian config/history remain archived; no secret is transferred.
               loc="$lang"; extra=""
-              if [ "$lang" = ru ]; then loc=en; extra="$(printf '\nLANGS=en,es,ru,pt')"; fi
+              if [ "$lang" = pt ]; then loc=en; extra="$(printf '\nLANGS=en,es,ru,pt\nSTORAGE_LOCALE=pt')"; fi
               if [ -n "$tok" ] && [ -n "$key" ]; then
                 write_env "tarot-$lang" \
                   "$(printf 'BOT_TOKEN=%s\nOPENROUTER_API_KEY=%s\nLOCALE=%s%s' "$tok" "$key" "$loc" "$extra")" \
@@ -562,7 +561,9 @@ jobs:
 
             # 🌍 هر زبان جدا؛ همان پوشه‌ی کد، `.env` خودش. زبانی که سکرت ندارد بی‌صدا رد
             # می‌شود، پس این حلقه تا قبل از ساختِ سکرت‌ها کاملاً بی‌اثر است.
-            for lang in ru pt es; do
+            [ -f bots/tarot/.env.pt ] || { echo "❌ destination config missing; source remains active"; exit 1; }
+            node tools/prepare-tarot-handover.mjs bots/tarot
+            for lang in pt es; do
               deploy_bot "tarot-$lang" bots/tarot "bots/tarot/.env.$lang"
             done
 
@@ -631,14 +632,15 @@ jobs:
             echo "---- گاردِ ضربان ----"
             HB_DEADLINE=$(( $(date +%s) + 90 ))
             HB_BAD=""
-            for loc in fa ru pt es; do
+            for loc in fa pt es; do
               envf=".env"; [ "$loc" = "fa" ] || envf=".env.$loc"
               # اپی که سکرتش ست نشده عمداً دیپلوی نمی‌شود، پس ضربان هم ندارد و
               # نبودنش خرابی نیست (درسِ ۱۱ شهریور: نامِ فایلِ env، نه `.env` ثابت).
               [ -f "bots/tarot/$envf" ] || { echo "⏭ tarot-$loc سکرت ندارد — از گارد معاف"; continue; }
-              # ضربان با `LOCALE`ِ **داخلِ خودِ فایلِ env** نام می‌گیرد، نه با نامِ اپ: اپِ
-              # `tarot-ru` رباتِ واحدِ انگلیسی است و `heartbeat-en.txt` می‌نویسد.
-              hbloc=$(sed -n 's/^LOCALE=//p' "bots/tarot/$envf" | head -n 1); [ -n "$hbloc" ] || hbloc="$loc"
+              # Storage owns heartbeat identity; presentation language stays independent.
+              hbloc=$(sed -n 's/^STORAGE_LOCALE=//p' "bots/tarot/$envf" | head -n 1)
+              [ -n "$hbloc" ] || hbloc=$(sed -n 's/^LOCALE=//p' "bots/tarot/$envf" | head -n 1)
+              [ -n "$hbloc" ] || hbloc="$loc"
               hb="bots/tarot/data/heartbeat-$hbloc.txt"
               while :; do
                 beat=$(cat "$hb" 2>/dev/null || echo 0)
@@ -656,6 +658,13 @@ jobs:
               echo "--- خطای تاروت ---"
               tail -n 30 ~/.pm2/logs/tarot-error.log 2>/dev/null || true
               exit 1
+            fi
+
+            # Retire the source only AFTER the pinned destination has a fresh heartbeat.
+            # A failed destination boot leaves the source available for rollback.
+            if pm2 describe tarot-ru >/dev/null 2>&1; then
+              pm2 delete tarot-ru
+              pm2 save
             fi
 
             deploy_bot daily-brief

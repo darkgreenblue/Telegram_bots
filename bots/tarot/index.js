@@ -49,6 +49,7 @@ import { loadingFrame, pace, LOADERS, ACTIVE } from './loading.js';
 import { registerJourney, logPush } from '../../shared/journey.js';
 import { startHeartbeat } from '../../shared/heartbeat.js';
 import { startRuntimeProof } from './runtime-proof.js';
+import { storageProfile, verifyStorageIdentity, retainStorageLanguage } from './storage-profile.js';
 import { analyzeReceipt, decideReceipt, shadowFields, parsePaidTime } from './cardpay.js';
 import { receiptTimeSuspicion, timeFlagLine } from './receipt-time.js';
 import { shadowLine, withShadowLine, TERR_BTN, terrAdminText } from './receipt-tags.js';
@@ -99,6 +100,9 @@ if (!OPENROUTER_API_KEY) { logErr('❌ OPENROUTER_API_KEY خالی است'); pro
 import { STARS_EXPERIMENT, ladderFor, starsFor, buildInvoice, registerStarsPay, refundStars } from './starspay.js';
 
 const LOCALE = process.env.LOCALE?.trim() || 'fa';
+const STORAGE_PROFILE = storageProfile();
+const STORAGE_LOCALE = STORAGE_PROFILE.storage;
+const STORAGE_BOT_INFO = await verifyStorageIdentity(STORAGE_PROFILE, BOT_TOKEN);
 /* 🌍 `L` دیگر یک آبجکتِ ثابتِ سرِ boot نیست: به زبانِ **همان آپدیتی** وصل است که در
  * حالِ پردازش است (`locale-ctx.js`). برای رباتِ تک‌زبانه (فارسی، پرتغالی) دقیقاً همان
  * یک بسته است و هیچ رفتاری عوض نمی‌شود؛ برای رباتِ چندزبانه هر کاربر زبانِ خودش را
@@ -359,7 +363,7 @@ const TEST_PHASE = false;
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
 // 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
 //         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
-const PRODUCT_VERSION = '3.154.0';
+const PRODUCT_VERSION = '3.155.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -2005,11 +2009,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ===== 2) Database ===== */
 mkdirSync('./data', { recursive: true });
-const db = new Database(`./data/bot-${LOCALE}.db`);
+const db = new Database(`./data/bot-${STORAGE_LOCALE}.db`);
 // مسیرِ ضربان per اپ است نه per پوشه: چهار اپِ زبانیِ تاروت `cwd` مشترک دارند و فقط
-// LOCALE فرقشان است، پس یک فایلِ مشترک باعث می‌شد یک اپِ سالم، مرگِ سه‌تای دیگر را
+// STORAGE_LOCALE فرقشان است، پس یک فایلِ مشترک باعث می‌شد یک اپِ سالم، مرگِ سه‌تای دیگر را
 // بپوشاند (هم‌خانواده‌ی باگِ ۱۱ شهریور: گاردی که `.env` فارسی را برای هر سه می‌دید).
-const HEARTBEAT_FILE = `./data/heartbeat-${LOCALE}.txt`;
+const HEARTBEAT_FILE = `./data/heartbeat-${STORAGE_LOCALE}.txt`;
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.exec(`
@@ -4908,7 +4912,9 @@ const SERIAL_DISPATCH   = true;
 const DISPATCH_MAX      = 128;
 
 /* ===== 8) Bot ===== */
+await retainStorageLanguage(db, STORAGE_PROFILE, { log });
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: OR_TIMEOUT_MS });
+if (STORAGE_BOT_INFO) bot.botInfo = STORAGE_BOT_INFO;
 let BOT_USERNAME = '';
 
 // گارد خطای سراسری: هیچ خطایی نباید بی‌صدا فلو را بکشد — لاگ کامل + پیام عذرخواهی به کاربر
@@ -13489,7 +13495,7 @@ function onLaunched() {
   // صدا زده می‌شود، پس اولین ضربان یعنی «پروسه بوت شد و به تلگرام وصل است». اگر روی
   // `.then()`ِ launch می‌نشست هیچ‌وقت تیک نمی‌زد (بند ۹ب/۷) و یک هشدارِ کاذبِ دائمی می‌شد.
   startHeartbeat(HEARTBEAT_FILE, { logErr });
-  startRuntimeProof(`./data/runtime-${LOCALE}.json`, {
+  startRuntimeProof(`./data/runtime-${STORAGE_LOCALE}.json`, {
     version: PRODUCT_VERSION, username: bot.botInfo?.username, languages: LANGS, logErr,
   });
   // ⏳ تأییدهای زمان‌بندی‌شده‌ای که ری‌استارت از حافظه برده: همین حالا + هر ۳۰ ثانیه (پشتیبانِ setTimeout).
