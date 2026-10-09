@@ -1,3 +1,7 @@
+## Accepted handover operational contract — October 9
+
+TAROT_PT_BOT is the actual multilingual runtime, using retained bot-pt.db; tarot-ru must stay absent from live and saved PM2. The product bridge requires scoped dashboard username:tarot-intl@pt = TAROT_PT_BOT, verified against actual native identity/runtime, with config writes audited. Never rewrite old username scopes or campaign codes. A held legacy experiment must pass current immutable-context validation before release; a fresh peer review alone cannot revive its retired destination or process. New identity requires fresh creative/proposal/tracking; archived histories and old contexts stay separate. English Start/selection are verified; ru/es channel permissions remain pending.
+
 ## Approved identity cutover — October 8
 
 Final multilingual bot is @TAROT_PT_BOT with Portuguese history active and old Russian/unified history separate; never merge balances. Preserve original public profile exactly, remove Portuguese intro GIF, retire source poller permanently in deployment configuration. New preparation must use verified target runtime and tarot-intl@pt tracking, not rewrite old experiment contexts/campaigns. Resolve actual language gate limitations separately; owner payments/human-messaging restrictions and financial gates remain unchanged.
