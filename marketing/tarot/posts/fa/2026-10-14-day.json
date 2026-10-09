@@ -1,0 +1,183 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "c08",
+      "cardFa": "هشت جام",
+      "cardEn": "Eight of Cups",
+      "file": "c08.jpg",
+      "orientation": "up",
+      "keywords": [
+        "عبور آگاهانه",
+        "ترک آنچه سیراب نمی‌کند",
+        "جست‌وجوی معنا"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "w07",
+      "cardFa": "هفت چوبدست",
+      "cardEn": "Seven of Wands",
+      "file": "w07.jpg",
+      "orientation": "up",
+      "keywords": [
+        "دفاع از موضع",
+        "ایستادگی",
+        "برتری با تلاش"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "c10",
+      "cardFa": "ده جام",
+      "cardEn": "Ten of Cups",
+      "file": "c10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "خوشبختی خانوادگی",
+        "هارمونی کامل",
+        "آرامش پایدار"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "m10",
+      "cardFa": "چرخ اقبال",
+      "cardEn": "Wheel of Fortune",
+      "file": "m10.jpg",
+      "orientation": "down",
+      "keywords": [
+        "مقاومت در برابر تغییر",
+        "چرخهٔ تکراری",
+        "حس بی‌کنترلی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "s05",
+      "cardFa": "پنج شمشیر",
+      "cardEn": "Five of Swords",
+      "file": "s05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "برد به هر قیمت",
+        "تعارض تلخ",
+        "میدانِ نابرابر"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "m19",
+      "cardFa": "خورشید",
+      "cardEn": "The Sun",
+      "file": "m19.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شادی",
+        "موفقیت روشن",
+        "انرژی حیات",
+        "صداقت کودکانه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "p10",
+      "cardFa": "ده سکه",
+      "cardEn": "Ten of Pentacles",
+      "file": "p10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "ثروت پایدار",
+        "میراث خانوادگی",
+        "امنیت بلندمدت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "c04",
+      "cardFa": "چهار جام",
+      "cardEn": "Four of Cups",
+      "file": "c04.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بیداری از رخوت",
+        "پذیرش پیشنهاد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "c01",
+      "cardFa": "آس جام",
+      "cardEn": "Ace of Cups",
+      "file": "c01.jpg",
+      "orientation": "down",
+      "keywords": [
+        "احساس سرکوب‌شده",
+        "جام وارونه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "m01",
+      "cardFa": "شعبده‌باز",
+      "cardEn": "The Magician",
+      "file": "m01.jpg",
+      "orientation": "down",
+      "keywords": [
+        "استعداد بی‌استفاده",
+        "فریب",
+        "تردید در توانایی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "c13",
+      "cardFa": "ملکه جام",
+      "cardEn": "Queen of Cups",
+      "file": "c13.jpg",
+      "orientation": "up",
+      "keywords": [
+        "همدلی عمیق",
+        "شهود مادرانه",
+        "پناه امن عاطفی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "m20",
+      "cardFa": "رستاخیز",
+      "cardEn": "Judgement",
+      "file": "m20.jpg",
+      "orientation": "down",
+      "keywords": [
+        "خودسرزنشی",
+        "نشنیدن ندای درون",
+        "تردید در قدم بزرگ"
+      ],
+      "relaxed": false
+    }
+  ]
+}

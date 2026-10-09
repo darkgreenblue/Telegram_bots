@@ -1,0 +1,186 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "m02",
+      "cardFa": "کاهنهٔ اعظم",
+      "cardEn": "The High Priestess",
+      "file": "m02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شهود",
+        "دانش درونی",
+        "رازداری",
+        "صبر و سکوت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "m19",
+      "cardFa": "خورشید",
+      "cardEn": "The Sun",
+      "file": "m19.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شادی",
+        "موفقیت روشن",
+        "انرژی حیات",
+        "صداقت کودکانه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "m21",
+      "cardFa": "جهان",
+      "cardEn": "The World",
+      "file": "m21.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تکمیل چرخه",
+        "دستاورد",
+        "یکپارچگی",
+        "جشن پایان و آغاز"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "m12",
+      "cardFa": "مرد آویخته",
+      "cardEn": "The Hanged Man",
+      "file": "m12.jpg",
+      "orientation": "down",
+      "keywords": [
+        "درجازدن",
+        "قربانی‌نمایی",
+        "تعویق بی‌پایان"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "w08",
+      "cardFa": "هشت چوبدست",
+      "cardEn": "Eight of Wands",
+      "file": "w08.jpg",
+      "orientation": "down",
+      "keywords": [
+        "شتاب‌زدگی",
+        "تعلیق و انتظار"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "s11",
+      "cardFa": "پیک شمشیر",
+      "cardEn": "Page of Swords",
+      "file": "s11.jpg",
+      "orientation": "up",
+      "keywords": [
+        "ذهن کنجکاو",
+        "خبرِ چالشی",
+        "هوشیاری تازه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "s10",
+      "cardFa": "ده شمشیر",
+      "cardEn": "Ten of Swords",
+      "file": "s10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پایان دردناک اما کامل",
+        "کف زمین",
+        "اتمام چرخهٔ سخت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "s05",
+      "cardFa": "پنج شمشیر",
+      "cardEn": "Five of Swords",
+      "file": "s05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "برد به هر قیمت",
+        "تعارض تلخ",
+        "میدانِ نابرابر"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "m13",
+      "cardFa": "مرگ",
+      "cardEn": "Death",
+      "file": "m13.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پایان یک دوره",
+        "دگرگونی عمیق",
+        "رهاکردن کهنه",
+        "تولد دوباره"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "c04",
+      "cardFa": "چهار جام",
+      "cardEn": "Four of Cups",
+      "file": "c04.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بیداری از رخوت",
+        "پذیرش پیشنهاد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "m18",
+      "cardFa": "ماه",
+      "cardEn": "The Moon",
+      "file": "m18.jpg",
+      "orientation": "up",
+      "keywords": [
+        "ابهام",
+        "رؤیا و ناخودآگاه",
+        "ترس‌های پنهان",
+        "مسیر مه‌آلود"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "w05",
+      "cardFa": "پنج چوبدست",
+      "cardEn": "Five of Wands",
+      "file": "w05.jpg",
+      "orientation": "down",
+      "keywords": [
+        "پرهیز از درگیری",
+        "رقابت فرسایشی"
+      ],
+      "relaxed": false
+    }
+  ]
+}

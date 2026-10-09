@@ -1,0 +1,185 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "w13",
+      "cardFa": "ملکه چوبدست",
+      "cardEn": "Queen of Wands",
+      "file": "w13.jpg",
+      "orientation": "up",
+      "keywords": [
+        "اعتمادبه‌نفس گرم",
+        "جذبهٔ رهبری",
+        "استقلال"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "m12",
+      "cardFa": "مرد آویخته",
+      "cardEn": "The Hanged Man",
+      "file": "m12.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تغییر زاویهٔ دید",
+        "تسلیم آگاهانه",
+        "مکث روشنگر",
+        "رهاکردن کنترل"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "s12",
+      "cardFa": "شوالیه شمشیر",
+      "cardEn": "Knight of Swords",
+      "file": "s12.jpg",
+      "orientation": "up",
+      "keywords": [
+        "هجوم فکری",
+        "اقدام برق‌آسا",
+        "صراحت بی‌پروا"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "w05",
+      "cardFa": "پنج چوبدست",
+      "cardEn": "Five of Wands",
+      "file": "w05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "رقابت",
+        "اصطکاک نظرها",
+        "چالش پرانرژی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "c12",
+      "cardFa": "شوالیه جام",
+      "cardEn": "Knight of Cups",
+      "file": "c12.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پیشنهاد رمانتیک",
+        "دنبال‌کردن رؤیا",
+        "جذبهٔ لطیف"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "c05",
+      "cardFa": "پنج جام",
+      "cardEn": "Five of Cups",
+      "file": "c05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "سوگ ناتمام",
+        "تمرکز بر از‌دست‌رفته",
+        "اندوه گذرا"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "s14",
+      "cardFa": "شاه شمشیر",
+      "cardEn": "King of Swords",
+      "file": "s14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "اقتدار فکری",
+        "قضاوت عادلانه",
+        "کلام برنده"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "m10",
+      "cardFa": "چرخ اقبال",
+      "cardEn": "Wheel of Fortune",
+      "file": "m10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "چرخش سرنوشت",
+        "فرصت تازه",
+        "تغییر چرخه",
+        "شانس در راه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "c04",
+      "cardFa": "چهار جام",
+      "cardEn": "Four of Cups",
+      "file": "c04.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بیداری از رخوت",
+        "پذیرش پیشنهاد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "w09",
+      "cardFa": "نه چوبدست",
+      "cardEn": "Nine of Wands",
+      "file": "w09.jpg",
+      "orientation": "down",
+      "keywords": [
+        "فرسودگی",
+        "گارد بستهٔ بی‌دلیل"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "m20",
+      "cardFa": "رستاخیز",
+      "cardEn": "Judgement",
+      "file": "m20.jpg",
+      "orientation": "up",
+      "keywords": [
+        "بیداری",
+        "فراخوان درونی",
+        "بخشش گذشته",
+        "تصمیم سرنوشت‌ساز"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "c02",
+      "cardFa": "دو جام",
+      "cardEn": "Two of Cups",
+      "file": "c02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پیوند دونفره",
+        "جذب متقابل",
+        "آشتی"
+      ],
+      "relaxed": false
+    }
+  ]
+}

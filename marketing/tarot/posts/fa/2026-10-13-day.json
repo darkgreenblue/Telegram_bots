@@ -1,0 +1,185 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "c03",
+      "cardFa": "سه جام",
+      "cardEn": "Three of Cups",
+      "file": "c03.jpg",
+      "orientation": "up",
+      "keywords": [
+        "جشن دوستانه",
+        "حمایت جمع",
+        "شادی مشترک"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "p13",
+      "cardFa": "ملکه سکه",
+      "cardEn": "Queen of Pentacles",
+      "file": "p13.jpg",
+      "orientation": "down",
+      "keywords": [
+        "عدم تعادل کار و خانه",
+        "وابستگی به آسایش"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "p06",
+      "cardFa": "شش سکه",
+      "cardEn": "Six of Pentacles",
+      "file": "p06.jpg",
+      "orientation": "up",
+      "keywords": [
+        "بده‌بستان منصفانه",
+        "سخاوت",
+        "حمایت مالی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "p03",
+      "cardFa": "سه سکه",
+      "cardEn": "Three of Pentacles",
+      "file": "p03.jpg",
+      "orientation": "up",
+      "keywords": [
+        "هم‌آفرینی",
+        "مهارتِ دیده‌شده",
+        "کار تیمی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "s07",
+      "cardFa": "هفت شمشیر",
+      "cardEn": "Seven of Swords",
+      "file": "s07.jpg",
+      "orientation": "up",
+      "keywords": [
+        "زیرکی",
+        "حرکت پنهان",
+        "استراتژی فردی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "m15",
+      "cardFa": "شیطان",
+      "cardEn": "The Devil",
+      "file": "m15.jpg",
+      "orientation": "up",
+      "keywords": [
+        "وابستگی",
+        "الگوی تکراری اسارت‌بار",
+        "وسوسه",
+        "زنجیرهای خودساخته"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "m14",
+      "cardFa": "اعتدال",
+      "cardEn": "Temperance",
+      "file": "m14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تعادل",
+        "صبر و ترکیب درست",
+        "میانه‌روی",
+        "شفای تدریجی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "m02",
+      "cardFa": "کاهنهٔ اعظم",
+      "cardEn": "The High Priestess",
+      "file": "m02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شهود",
+        "دانش درونی",
+        "رازداری",
+        "صبر و سکوت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "c05",
+      "cardFa": "پنج جام",
+      "cardEn": "Five of Cups",
+      "file": "c05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "سوگ ناتمام",
+        "تمرکز بر از‌دست‌رفته",
+        "اندوه گذرا"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "p08",
+      "cardFa": "هشت سکه",
+      "cardEn": "Eight of Pentacles",
+      "file": "p08.jpg",
+      "orientation": "up",
+      "keywords": [
+        "استادکاری",
+        "تمرین مداوم",
+        "تمرکز بر مهارت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "w11",
+      "cardFa": "پیک چوبدست",
+      "cardEn": "Page of Wands",
+      "file": "w11.jpg",
+      "orientation": "down",
+      "keywords": [
+        "خبر ناقص",
+        "شور بی‌جهت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "p05",
+      "cardFa": "پنج سکه",
+      "cardEn": "Five of Pentacles",
+      "file": "p05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تنگنای مالی",
+        "حس بیرون‌ماندگی",
+        "سرمای سخت"
+      ],
+      "relaxed": false
+    }
+  ]
+}

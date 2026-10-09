@@ -1,0 +1,187 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "m18",
+      "cardFa": "ماه",
+      "cardEn": "The Moon",
+      "file": "m18.jpg",
+      "orientation": "up",
+      "keywords": [
+        "ابهام",
+        "رؤیا و ناخودآگاه",
+        "ترس‌های پنهان",
+        "مسیر مه‌آلود"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "m15",
+      "cardFa": "شیطان",
+      "cardEn": "The Devil",
+      "file": "m15.jpg",
+      "orientation": "up",
+      "keywords": [
+        "وابستگی",
+        "الگوی تکراری اسارت‌بار",
+        "وسوسه",
+        "زنجیرهای خودساخته"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "m16",
+      "cardFa": "برج",
+      "cardEn": "The Tower",
+      "file": "m16.jpg",
+      "orientation": "up",
+      "keywords": [
+        "فروریختن ناگهانی بنای ناپایدار",
+        "حقیقت تکان‌دهنده",
+        "آزادسازی ناگهانی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "p05",
+      "cardFa": "پنج سکه",
+      "cardEn": "Five of Pentacles",
+      "file": "p05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تنگنای مالی",
+        "حس بیرون‌ماندگی",
+        "سرمای سخت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "m10",
+      "cardFa": "چرخ اقبال",
+      "cardEn": "Wheel of Fortune",
+      "file": "m10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "چرخش سرنوشت",
+        "فرصت تازه",
+        "تغییر چرخه",
+        "شانس در راه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "p07",
+      "cardFa": "هفت سکه",
+      "cardEn": "Seven of Pentacles",
+      "file": "p07.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بی‌صبری در برداشت",
+        "تلاش کم‌ثمر"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "m11",
+      "cardFa": "عدالت",
+      "cardEn": "Justice",
+      "file": "m11.jpg",
+      "orientation": "up",
+      "keywords": [
+        "انصاف",
+        "نتیجهٔ عمل",
+        "شفافیت",
+        "تصمیم متعادل"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "s03",
+      "cardFa": "سه شمشیر",
+      "cardEn": "Three of Swords",
+      "file": "s03.jpg",
+      "orientation": "up",
+      "keywords": [
+        "دل‌شکستگی",
+        "حقیقت دردناک",
+        "اندوه شفاف"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "m14",
+      "cardFa": "اعتدال",
+      "cardEn": "Temperance",
+      "file": "m14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تعادل",
+        "صبر و ترکیب درست",
+        "میانه‌روی",
+        "شفای تدریجی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "s02",
+      "cardFa": "دو شمشیر",
+      "cardEn": "Two of Swords",
+      "file": "s02.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بازشدن گره تصمیم",
+        "دیدن واقعیت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "c01",
+      "cardFa": "آس جام",
+      "cardEn": "Ace of Cups",
+      "file": "c01.jpg",
+      "orientation": "down",
+      "keywords": [
+        "احساس سرکوب‌شده",
+        "جام وارونه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "m09",
+      "cardFa": "گوشه‌نشین",
+      "cardEn": "The Hermit",
+      "file": "m09.jpg",
+      "orientation": "up",
+      "keywords": [
+        "درون‌نگری",
+        "جست‌وجوی حقیقت",
+        "خلوت سازنده",
+        "خرد درونی"
+      ],
+      "relaxed": false
+    }
+  ]
+}

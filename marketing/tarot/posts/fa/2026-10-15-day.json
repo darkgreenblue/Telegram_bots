@@ -1,0 +1,181 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "s01",
+      "cardFa": "آس شمشیر",
+      "cardEn": "Ace of Swords",
+      "file": "s01.jpg",
+      "orientation": "up",
+      "keywords": [
+        "وضوح ذهنی",
+        "حقیقت برنده",
+        "تصمیم قاطع"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "s10",
+      "cardFa": "ده شمشیر",
+      "cardEn": "Ten of Swords",
+      "file": "s10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پایان دردناک اما کامل",
+        "کف زمین",
+        "اتمام چرخهٔ سخت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "w08",
+      "cardFa": "هشت چوبدست",
+      "cardEn": "Eight of Wands",
+      "file": "w08.jpg",
+      "orientation": "up",
+      "keywords": [
+        "حرکت سریع",
+        "خبرهای در راه",
+        "پیشرفت ناگهانی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "c04",
+      "cardFa": "چهار جام",
+      "cardEn": "Four of Cups",
+      "file": "c04.jpg",
+      "orientation": "down",
+      "keywords": [
+        "بیداری از رخوت",
+        "پذیرش پیشنهاد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "w03",
+      "cardFa": "سه چوبدست",
+      "cardEn": "Three of Wands",
+      "file": "w03.jpg",
+      "orientation": "up",
+      "keywords": [
+        "گسترش",
+        "ثمرِ در راه",
+        "همکاری رو به رشد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "c03",
+      "cardFa": "سه جام",
+      "cardEn": "Three of Cups",
+      "file": "c03.jpg",
+      "orientation": "down",
+      "keywords": [
+        "حاشیه در جمع",
+        "شادیِ سطحی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "m08",
+      "cardFa": "قدرت",
+      "cardEn": "Strength",
+      "file": "m08.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شجاعت آرام",
+        "مهار نرمِ غریزه",
+        "صبوری",
+        "اعتماد به درون"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "c10",
+      "cardFa": "ده جام",
+      "cardEn": "Ten of Cups",
+      "file": "c10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "خوشبختی خانوادگی",
+        "هارمونی کامل",
+        "آرامش پایدار"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "w02",
+      "cardFa": "دو چوبدست",
+      "cardEn": "Two of Wands",
+      "file": "w02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "برنامه‌ریزی آینده",
+        "نگاه به افق",
+        "تصمیم برای گسترش"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "w13",
+      "cardFa": "ملکه چوبدست",
+      "cardEn": "Queen of Wands",
+      "file": "w13.jpg",
+      "orientation": "up",
+      "keywords": [
+        "اعتمادبه‌نفس گرم",
+        "جذبهٔ رهبری",
+        "استقلال"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "s03",
+      "cardFa": "سه شمشیر",
+      "cardEn": "Three of Swords",
+      "file": "s03.jpg",
+      "orientation": "down",
+      "keywords": [
+        "آغاز التیام",
+        "بخشش و عبور"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "s13",
+      "cardFa": "ملکه شمشیر",
+      "cardEn": "Queen of Swords",
+      "file": "s13.jpg",
+      "orientation": "down",
+      "keywords": [
+        "تلخیِ تجربه",
+        "قضاوت سرد"
+      ],
+      "relaxed": false
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "m00",
+      "cardFa": "دیوانه",
+      "cardEn": "The Fool",
+      "file": "m00.jpg",
+      "orientation": "up",
+      "keywords": [
+        "آغاز تازه",
+        "خودانگیختگی",
+        "ایمان به مسیر",
+        "آزادی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "m21",
+      "cardFa": "جهان",
+      "cardEn": "The World",
+      "file": "m21.jpg",
+      "orientation": "down",
+      "keywords": [
+        "ناتمامی",
+        "حلقهٔ گمشدهٔ آخر",
+        "تعویق جشن"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "c06",
+      "cardFa": "شش جام",
+      "cardEn": "Six of Cups",
+      "file": "c06.jpg",
+      "orientation": "down",
+      "keywords": [
+        "گیرکردن در گذشته",
+        "نوستالژی فلج‌کننده"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "m17",
+      "cardFa": "ستاره",
+      "cardEn": "The Star",
+      "file": "m17.jpg",
+      "orientation": "up",
+      "keywords": [
+        "امید",
+        "شفا و آرامش",
+        "الهام",
+        "ایمان به آینده"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "w12",
+      "cardFa": "شوالیه چوبدست",
+      "cardEn": "Knight of Wands",
+      "file": "w12.jpg",
+      "orientation": "up",
+      "keywords": [
+        "اقدام پرشور",
+        "ماجراجویی",
+        "حرکت جسورانه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "s12",
+      "cardFa": "شوالیه شمشیر",
+      "cardEn": "Knight of Swords",
+      "file": "s12.jpg",
+      "orientation": "down",
+      "keywords": [
+        "عجلهٔ ویرانگر",
+        "کلامِ زخم‌زننده"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "w03",
+      "cardFa": "سه چوبدست",
+      "cardEn": "Three of Wands",
+      "file": "w03.jpg",
+      "orientation": "down",
+      "keywords": [
+        "موانع در مسیر رشد",
+        "انتظار بی‌ثمر"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "s09",
+      "cardFa": "نه شمشیر",
+      "cardEn": "Nine of Swords",
+      "file": "s09.jpg",
+      "orientation": "up",
+      "keywords": [
+        "اضطراب شبانه",
+        "ذهنِ شلوغ",
+        "نگرانی تصاعدی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "c13",
+      "cardFa": "ملکه جام",
+      "cardEn": "Queen of Cups",
+      "file": "c13.jpg",
+      "orientation": "down",
+      "keywords": [
+        "حساسیت مفرط",
+        "فراموش‌کردن خود"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "m02",
+      "cardFa": "کاهنهٔ اعظم",
+      "cardEn": "The High Priestess",
+      "file": "m02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "شهود",
+        "دانش درونی",
+        "رازداری",
+        "صبر و سکوت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "m15",
+      "cardFa": "شیطان",
+      "cardEn": "The Devil",
+      "file": "m15.jpg",
+      "orientation": "up",
+      "keywords": [
+        "وابستگی",
+        "الگوی تکراری اسارت‌بار",
+        "وسوسه",
+        "زنجیرهای خودساخته"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "c05",
+      "cardFa": "پنج جام",
+      "cardEn": "Five of Cups",
+      "file": "c05.jpg",
+      "orientation": "up",
+      "keywords": [
+        "سوگ ناتمام",
+        "تمرکز بر از‌دست‌رفته",
+        "اندوه گذرا"
+      ],
+      "relaxed": false
+    }
+  ]
+}

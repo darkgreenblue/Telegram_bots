@@ -1,0 +1,182 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "p02",
+      "cardFa": "دو سکه",
+      "cardEn": "Two of Pentacles",
+      "file": "p02.jpg",
+      "orientation": "down",
+      "keywords": [
+        "قطع تعادل",
+        "فشار چندوظیفه"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "m03",
+      "cardFa": "امپراتریس",
+      "cardEn": "The Empress",
+      "file": "m03.jpg",
+      "orientation": "down",
+      "keywords": [
+        "وابستگی",
+        "خفگی عاطفی",
+        "بی‌توجهی به خود"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "p10",
+      "cardFa": "ده سکه",
+      "cardEn": "Ten of Pentacles",
+      "file": "p10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "ثروت پایدار",
+        "میراث خانوادگی",
+        "امنیت بلندمدت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "c03",
+      "cardFa": "سه جام",
+      "cardEn": "Three of Cups",
+      "file": "c03.jpg",
+      "orientation": "up",
+      "keywords": [
+        "جشن دوستانه",
+        "حمایت جمع",
+        "شادی مشترک"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "m07",
+      "cardFa": "ارابه",
+      "cardEn": "The Chariot",
+      "file": "m07.jpg",
+      "orientation": "down",
+      "keywords": [
+        "پراکندگی نیروها",
+        "از دست دادن کنترل",
+        "توقف حرکت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "w10",
+      "cardFa": "ده چوبدست",
+      "cardEn": "Ten of Wands",
+      "file": "w10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "بار مسئولیت",
+        "تلاش نزدیک به مقصد",
+        "تعهد سنگین"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "w06",
+      "cardFa": "شش چوبدست",
+      "cardEn": "Six of Wands",
+      "file": "w06.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پیروزی و قدردانی",
+        "اعتبار عمومی",
+        "خبر خوش"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "m04",
+      "cardFa": "امپراتور",
+      "cardEn": "The Emperor",
+      "file": "m04.jpg",
+      "orientation": "down",
+      "keywords": [
+        "سلطه‌گری",
+        "انعطاف‌ناپذیری",
+        "سوءاستفاده از قدرت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "c12",
+      "cardFa": "شوالیه جام",
+      "cardEn": "Knight of Cups",
+      "file": "c12.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پیشنهاد رمانتیک",
+        "دنبال‌کردن رؤیا",
+        "جذبهٔ لطیف"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "c08",
+      "cardFa": "هشت جام",
+      "cardEn": "Eight of Cups",
+      "file": "c08.jpg",
+      "orientation": "down",
+      "keywords": [
+        "ترس از رفتن",
+        "بازگشت ناتمام"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "w14",
+      "cardFa": "شاه چوبدست",
+      "cardEn": "King of Wands",
+      "file": "w14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "رهبری الهام‌بخش",
+        "چشم‌انداز بزرگ",
+        "کارآفرینی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "w07",
+      "cardFa": "هفت چوبدست",
+      "cardEn": "Seven of Wands",
+      "file": "w07.jpg",
+      "orientation": "up",
+      "keywords": [
+        "دفاع از موضع",
+        "ایستادگی",
+        "برتری با تلاش"
+      ],
+      "relaxed": false
+    }
+  ]
+}

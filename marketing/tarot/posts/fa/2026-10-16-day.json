@@ -1,0 +1,185 @@
+{
+  "posts": [
+    {
+      "month": "فروردین",
+      "monthIndex": 1,
+      "key": "p13",
+      "cardFa": "ملکه سکه",
+      "cardEn": "Queen of Pentacles",
+      "file": "p13.jpg",
+      "orientation": "up",
+      "keywords": [
+        "فراوانی زمینی",
+        "مراقبت عملی",
+        "گرمای خانه و کار"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اردیبهشت",
+      "monthIndex": 2,
+      "key": "s08",
+      "cardFa": "هشت شمشیر",
+      "cardEn": "Eight of Swords",
+      "file": "s08.jpg",
+      "orientation": "up",
+      "keywords": [
+        "محدودیت ذهنی خودساخته",
+        "حس گیرافتادن",
+        "ترسِ فلج‌کننده"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "خرداد",
+      "monthIndex": 3,
+      "key": "s13",
+      "cardFa": "ملکه شمشیر",
+      "cardEn": "Queen of Swords",
+      "file": "s13.jpg",
+      "orientation": "down",
+      "keywords": [
+        "تلخیِ تجربه",
+        "قضاوت سرد"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "تیر",
+      "monthIndex": 4,
+      "key": "w11",
+      "cardFa": "پیک چوبدست",
+      "cardEn": "Page of Wands",
+      "file": "w11.jpg",
+      "orientation": "down",
+      "keywords": [
+        "خبر ناقص",
+        "شور بی‌جهت"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مرداد",
+      "monthIndex": 5,
+      "key": "c06",
+      "cardFa": "شش جام",
+      "cardEn": "Six of Cups",
+      "file": "c06.jpg",
+      "orientation": "up",
+      "keywords": [
+        "خاطرات شیرین",
+        "کودک درون",
+        "مهربانی گذشته"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "شهریور",
+      "monthIndex": 6,
+      "key": "c02",
+      "cardFa": "دو جام",
+      "cardEn": "Two of Cups",
+      "file": "c02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "پیوند دونفره",
+        "جذب متقابل",
+        "آشتی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "مهر",
+      "monthIndex": 7,
+      "key": "w02",
+      "cardFa": "دو چوبدست",
+      "cardEn": "Two of Wands",
+      "file": "w02.jpg",
+      "orientation": "up",
+      "keywords": [
+        "برنامه‌ریزی آینده",
+        "نگاه به افق",
+        "تصمیم برای گسترش"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آبان",
+      "monthIndex": 8,
+      "key": "m14",
+      "cardFa": "اعتدال",
+      "cardEn": "Temperance",
+      "file": "m14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تعادل",
+        "صبر و ترکیب درست",
+        "میانه‌روی",
+        "شفای تدریجی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "آذر",
+      "monthIndex": 9,
+      "key": "m21",
+      "cardFa": "جهان",
+      "cardEn": "The World",
+      "file": "m21.jpg",
+      "orientation": "up",
+      "keywords": [
+        "تکمیل چرخه",
+        "دستاورد",
+        "یکپارچگی",
+        "جشن پایان و آغاز"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "دی",
+      "monthIndex": 10,
+      "key": "w14",
+      "cardFa": "شاه چوبدست",
+      "cardEn": "King of Wands",
+      "file": "w14.jpg",
+      "orientation": "up",
+      "keywords": [
+        "رهبری الهام‌بخش",
+        "چشم‌انداز بزرگ",
+        "کارآفرینی"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "بهمن",
+      "monthIndex": 11,
+      "key": "m06",
+      "cardFa": "عاشقان",
+      "cardEn": "The Lovers",
+      "file": "m06.jpg",
+      "orientation": "down",
+      "keywords": [
+        "دودلی",
+        "ناهماهنگی ارزش‌ها",
+        "انتخاب از سر ترس"
+      ],
+      "relaxed": false
+    },
+    {
+      "month": "اسفند",
+      "monthIndex": 12,
+      "key": "m10",
+      "cardFa": "چرخ اقبال",
+      "cardEn": "Wheel of Fortune",
+      "file": "m10.jpg",
+      "orientation": "up",
+      "keywords": [
+        "چرخش سرنوشت",
+        "فرصت تازه",
+        "تغییر چرخه",
+        "شانس در راه"
+      ],
+      "relaxed": false
+    }
+  ]
+}
