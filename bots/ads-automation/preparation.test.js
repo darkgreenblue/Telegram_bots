@@ -74,3 +74,29 @@ test('withheld peers and failed image QA never become drafts',()=>{
     assert.equal(store.db.prepare('SELECT count(*) n FROM decisions').get().n,0);
   }finally{store.close();}
 });
+
+test('fresh competitor review cannot revive a held proposal after identity handover',()=>{
+  const store=fixture(),db=store.db;
+  try{
+    const first=createExperiment(store,{projectId:1,candidateId:1,creativeId:1,cpm:0.13,placement:'bot_banner'});
+    const saved=db.prepare('SELECT context_json FROM experiment_contexts WHERE experiment_id=?').get(first).context_json;
+    db.prepare("UPDATE experiments SET status='discovery_held' WHERE id=?").run(first);
+    db.prepare("UPDATE decisions SET status='rejected' WHERE experiment_id=?").run(first);
+    db.prepare("UPDATE projects SET scope='tarot-intl@pt',destination='https://t.me/TAROT_PT_BOT',initial_peer_policy='competitor-first' WHERE id=1").run();
+    const checkedAt=new Date().toISOString();
+    db.prepare('UPDATE candidates SET features_json=? WHERE id=1').run(JSON.stringify({
+      publicPeer:{kind:'bots',url:'https://t.me/samplebot',checkedAt,audience:{value:20000,unit:'monthly_users'}},
+      initialReview:{status:'eligible',relevance:'direct',reason:'Measured test peer',marketEvidence:'English test interface',peerCheckedAt:checkedAt}
+    }));
+    const [fresh]=prepareCandidates(store);
+    assert.ok(fresh>first);
+    assert.equal(db.prepare('SELECT status FROM experiments WHERE id=?').get(first).status,'discovery_held');
+    assert.equal(db.prepare('SELECT context_json FROM experiment_contexts WHERE experiment_id=?').get(first).context_json,saved);
+    assert.equal(JSON.parse(db.prepare('SELECT context_json FROM experiment_contexts WHERE experiment_id=?').get(fresh).context_json).destination,'https://t.me/TAROT_PT_BOT');
+    assert.deepEqual(prepareCandidates(store),[]);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM audit WHERE action='draft.release_held'").get().n,1);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM decisions WHERE experiment_id=? AND status='pending'").get(first).n,0);
+    assert.equal(db.prepare('SELECT count(*) n FROM operations').get().n,0);
+    assert.equal(db.prepare('SELECT SUM(spend_authorized) n FROM experiments').get().n,0);
+  }finally{store.close();}
+});

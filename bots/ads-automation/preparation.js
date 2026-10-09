@@ -1,7 +1,7 @@
 import { shortlist } from './discovery.js';
 import { createExperiment,requestDecision } from './workflow.js';
 import { peerReadiness } from './peer-evidence.js';
-import { captureExperimentContext } from './learning-context.js';
+import { captureExperimentContext,assertExperimentContextCurrent } from './learning-context.js';
 
 // Prepare each approved creative once, including new variants for a previously
 // tested candidate. Drafts still consume campaign slots; preparation never
@@ -73,6 +73,15 @@ export function reconcileInitialDrafts(store,project){
     const candidate=db.prepare('SELECT * FROM candidates WHERE id=?').get(ex.candidate_id);
     if(!peerReadiness(candidate,project.initial_peer_policy).ready)continue;
     captureExperimentContext(store,ex.id);
+    try{assertExperimentContextCurrent(db,ex);}
+    catch(error){
+      if(!/experiment context changed|product runtime changed or unavailable/.test(error.message))throw error;
+      // A new suitability review cannot revive a proposal for a retired bot or
+      // process. Keep its immutable context; prepare a fresh creative instead.
+      if(!db.prepare("SELECT 1 FROM audit WHERE action='draft.release_held' AND subject=? LIMIT 1").get(String(ex.id)))
+        store.audit('discovery','draft.release_held',ex.id,{reason:error.message});
+      continue;
+    }
     db.prepare("UPDATE experiments SET status='draft' WHERE id=?").run(ex.id);
     requestDecision(store,project.id,ex.id,'create',{reason:'Measured direct competitor passed initial discovery review'},
       {discovery:JSON.parse(candidate.features_json)});
