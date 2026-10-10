@@ -23,6 +23,7 @@ import {
 } from './locale-ctx.js';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash, randomInt } from 'crypto';
+import { execFile } from 'child_process';
 import { Telegraf, Markup } from 'telegraf';
 import Database from 'better-sqlite3';
 import CARDS, { CARD_BY_KEY } from './cards.js';
@@ -363,7 +364,7 @@ const TEST_PHASE = false;
 //         همان گاردِ `blockDuringOnboarding` سؤالِ ماه را دوباره می‌فرستد (هشدارِ گیرافتادن `d815db9d`).
 // 3.153.0: 💰 بازوی `gold25` برای آزمایشِ `price_ladder_p6_gold_25` (بسته ویژه ۳۰ ⟵ ۲۵ الماس با همان
 //         ۶۰k)؛ تا از Ops/داشبورد running نشود رفتار دقیقاً همان control است.
-const PRODUCT_VERSION = '3.156.0';
+const PRODUCT_VERSION = '3.157.0';
 // ⚙️ منوی تنظیماتِ کاربر (v3.38.0). `false` → دکمه از کیبورد محو و هیچ هندلری ثبت
 // نمی‌شود؛ رفتار دقیقاً مثل قبل (بند ۲ج/۸).
 const SETTINGS_ENABLED = true;
@@ -12675,6 +12676,31 @@ bot.action(/^set:rt:(daily|lucky)$/, async (ctx) => {
 });
 
 bot.command('reset', doReset);
+
+// 🔗 /panel — آدرسِ فعلیِ داشبوردِ ادمین (v3.157.0، فقط OWNER_ID). quick tunnel بعد از هر
+// ری‌استارتِ `dash-tunnel` آدرسش عوض می‌شود؛ همان کاری که `Ops → tunnel-url` می‌کند این‌جا
+// روی خودِ سرور اجرا می‌شود تا مالک لازم نباشد هر بار بپرسد. execFile (بدونِ شل، بدونِ ورودیِ
+// کاربر) + `sudo -n` (هرگز منتظرِ رمز نمی‌ماند) + سقفِ زمان. هیچ وضعیت/کیبوردی عوض نمی‌شود.
+const DASH_URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/g;
+const runQuiet = (cmd, args) => new Promise((res) => {
+  execFile(cmd, args, { timeout: 90000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => res(err ? '' : String(out || '')));
+});
+async function currentDashUrl() {
+  const since = (await runQuiet('systemctl', ['show', '-p', 'ActiveEnterTimestamp', '--value', 'dash-tunnel'])).trim();
+  const args = ['-n', 'journalctl', '-u', 'dash-tunnel', '--no-pager', '-o', 'cat'];
+  args.push(...(since ? ['--since', since] : ['-n', '1000']));
+  const urls = (await runQuiet('sudo', args)).match(DASH_URL_RE);
+  return urls ? urls[urls.length - 1] : null;
+}
+bot.command('panel', async (ctx) => {
+  if (Number(ctx.from?.id) !== OWNER_ID) return;
+  // journalctl روی دیسکِ کندِ سرور تا ~۴۵ ثانیه طول می‌کشد (اندازه‌گیریِ Ops)، پس اول خبر بده
+  await ctx.reply('⏳ دارم آدرس پنل رو پیدا می‌کنم…').catch(() => {});
+  const url = await currentDashUrl();
+  if (url) return ctx.reply(`🔗 پنل ادمین:\n${url}`, { link_preview_options: { is_disabled: true } });
+  console.log('⚠️ DASH_URL: آدرسِ تونل در لاگ پیدا نشد');
+  return ctx.reply('آدرس پنل پیدا نشد. اگه تونل تازه ری‌استارت شده یه دقیقه دیگه دوباره /panel بزن.');
+});
 
 // 💬 پشتیبانی: عمداً هیچ گاردی جلویش نیست (راهِ فرارِ کاربرِ گیرکرده باید همیشه باز باشد و
 // چون فقط یک پیامِ اطلاعاتی است، هیچ فلو/فاکتوری را یتیم نمی‌کند). ولی چون قبل از bot.on('text')
