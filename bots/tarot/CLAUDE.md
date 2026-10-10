@@ -9970,3 +9970,6 @@ await** از `pending` خارج کند. با صفِ per کاربر هیچ‌کد
   چون گرفتنش یعنی پیچیدنِ `callApi` رباتِ زنده.
 - هیچ رفتارِ رو-به-کاربری عوض نشد، پس `PRODUCT_VERSION` بامپ نشد.
 - گارد: `tools/check-heartbeat.mjs`.
+
+## 🔗 `/panel` — لینکِ پنلِ ادمین (v3.157.0)
+فقط `OWNER_ID`. آدرسِ فعلیِ quick tunnel داشبورد را مثلِ `Ops → tunnel-url` از `journalctl -u dash-tunnel` (با `sudo -n`، `execFile` بدونِ شل، سقف ۹۰ ثانیه) می‌خواند و می‌فرستد. هیچ کیبورد/استیتی عوض نمی‌شود (`KB_REV` دست نخورد). برای کاربرِ دیگر کاملاً بی‌صداست. رول‌بک: revert. آدرسِ ثابتِ دائمی فقط با Secretِ `CLOUDFLARE_TUNNEL_TOKEN`.
